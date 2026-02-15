@@ -14,7 +14,8 @@
   import { xlnEnvironment } from '$lib/stores/xlnStore';
   import { POPULAR_NETWORKS, BROWSERVM_CHAIN_START, type NetworkConfig } from '$lib/config/networks';
   import { THEME_DEFINITIONS } from '$lib/utils/themes';
-  import type { ThemeName } from '$lib/types/ui';
+  import { getBarColors } from '$lib/utils/bar-colors';
+  import type { ThemeName, BarColorMode } from '$lib/types/ui';
   import { X, Eye, EyeOff, Copy, Check, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-svelte';
 
   const dispatch = createEventDispatcher();
@@ -98,6 +99,9 @@
   $: processLivenessLabel = processEnteredAt > 0
     ? `${new Date(processEnteredAt).toLocaleTimeString()} (${Math.round((processLagMs || 0) / 1000)}s ago)`
     : 'never';
+
+  // Bar color legend (uses USDC blue as representative token)
+  $: barLegendColors = getBarColors($settings.barColorMode, '#2775ca');
 
   // Wallet functions
   function copySeed() {
@@ -449,6 +453,20 @@
             {/each}
           </select>
         </label>
+
+        <label class="setting-row">
+          <span>Bar Colors</span>
+          <select value={$settings.barColorMode} on:change={(e) => settingsOperations.setBarColorMode(e.currentTarget.value)}>
+            <option value="rgy">Traffic Light (RGY)</option>
+            <option value="theme">Match Theme</option>
+            <option value="token">Per-Token Color</option>
+          </select>
+        </label>
+        <div class="bar-legend-mini">
+          <span class="legend-swatch" style="background: {barLegendColors.credit}; opacity: 0.5"></span> Credit
+          <span class="legend-swatch" style="background: {barLegendColors.collateral}"></span> Collateral
+          <span class="legend-swatch" style="background: {barLegendColors.debt}"></span> Debt
+        </div>
 
         <label class="setting-row">
           <span>Portfolio Scale</span>
@@ -1132,5 +1150,22 @@
     text-align: center;
     color: rgba(255, 255, 255, 0.4);
     font-size: 13px;
+  }
+
+  /* Bar color legend */
+  .bar-legend-mini {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 2px 0 4px 0;
+  }
+
+  .legend-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
   }
 </style>

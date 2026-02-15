@@ -64,8 +64,11 @@ export interface ThemeColors {
   glassBorder: string;
 }
 
+export type BarColorMode = 'rgy' | 'theme' | 'token';
+
 export interface Settings {
   theme: ThemeName;
+  barColorMode: BarColorMode;
   dropdownMode: 'signer-first' | 'entity-first';
   runtimeDelay: number;
   balanceRefreshMs: number;

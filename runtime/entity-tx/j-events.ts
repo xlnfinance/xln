@@ -429,6 +429,61 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
+ * Merge observations with same (jHeight, jBlockHash) into a single observation.
+ * This batches multiple AccountSettled events from the same settlement tx so
+ * tryFinalizeAccountJEvents can process all token updates atomically.
+ */
+function mergeAccountJObservations(observations: any[]): void {
+  if (observations.length <= 1) return;
+  const groups = new Map<string, number>(); // key → index in observations[]
+  let i = 0;
+  while (i < observations.length) {
+    const obs = observations[i];
+    const key = `${obs.jHeight}:${obs.jBlockHash}`;
+    const existing = groups.get(key);
+    if (existing !== undefined) {
+      // Merge events into existing observation (dedup by type+data)
+      const target = observations[existing];
+      for (const ev of obs.events) {
+        const evKey = `${ev.type}:${JSON.stringify(ev.data)}`;
+        const alreadyHas = target.events.some((e: any) => `${e.type}:${JSON.stringify(e.data)}` === evKey);
+        if (!alreadyHas) target.events.push(ev);
+      }
+      observations.splice(i, 1); // Remove merged obs
+    } else {
+      groups.set(key, i);
+      i++;
+    }
+  }
+}
+
+/**
+ * Merge j_event_claim mempoolOps targeting the same (accountId, jHeight, jBlockHash)
+ * into a single op with all events batched.
+ */
+function mergeJEventClaimOps(ops: Array<{ accountId: string; tx: any }>): void {
+  const groups = new Map<string, number>(); // key → index in ops[]
+  let i = 0;
+  while (i < ops.length) {
+    const op = ops[i];
+    if (op.tx.type !== 'j_event_claim') { i++; continue; }
+    const key = `${op.accountId}:${op.tx.data.jHeight}:${op.tx.data.jBlockHash}`;
+    const existing = groups.get(key);
+    if (existing !== undefined) {
+      // Merge events into existing op
+      const target = ops[existing];
+      for (const ev of op.tx.data.events) {
+        target.tx.data.events.push(ev);
+      }
+      ops.splice(i, 1);
+    } else {
+      groups.set(key, i);
+      i++;
+    }
+  }
+}
+
+/**
  * Check for j-block finalization and apply finalized events.
  *
  * Groups pending observations by (height, hash), checks threshold,
@@ -536,6 +591,18 @@ async function tryFinalizeJBlocks(
       }
 
       console.log(`   📦 Applied ${events.length} events from j-block ${jHeight}`);
+
+      // ─────────────────────────────────────────────────────────────────────────
+      // Step 5b: Merge AccountSettled observations + j_event_claims per account
+      // ─────────────────────────────────────────────────────────────────────────
+      // Multiple AccountSettled events from the same batch create separate observations
+      // and j_event_claims per token. Merge them so tryFinalizeAccountJEvents processes
+      // all token updates atomically in one bilateral consensus round.
+      for (const [_cpId, account] of state.accounts) {
+        mergeAccountJObservations(account.leftJObservations);
+        mergeAccountJObservations(account.rightJObservations);
+      }
+      mergeJEventClaimOps(allMempoolOps);
     }
   }
 

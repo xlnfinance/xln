@@ -111,11 +111,10 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       send(ws, safeStringify(pendingMsg));
     }
 
-    send(ws, safeStringify({ type: 'ack', inReplyTo: 'hello', status: 'delivered' }));
     return;
   }
 
-  // ----- gossip_announce: store + ack (NO broadcast) -----
+  // ----- gossip_announce: store (NO broadcast) -----
   if (type === 'gossip_announce') {
     const profiles = (payload?.profiles || []) as any[];
     let stored = 0;
@@ -139,7 +138,6 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       details: { received: profiles.length, stored, traceId },
     });
 
-    send(ws, safeStringify({ type: 'ack', inReplyTo: id, status: 'stored', count: stored }));
     return;
   }
 
@@ -174,7 +172,6 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       msgType: type,
       details: { traceId, payload },
     });
-    send(ws, safeStringify({ type: 'ack', inReplyTo: id, status: 'stored' }));
     return;
   }
 
@@ -218,7 +215,6 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
         status: 'delivered',
         details: { traceId },
       });
-      send(ws, safeStringify({ type: 'ack', inReplyTo: id, status: 'delivered' }));
       return;
     }
 
@@ -226,7 +222,6 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
     if (type === 'entity_input' && payload && isLocalTarget) {
       try {
         await config.localDeliver(from, msg);
-        send(ws, safeStringify({ type: 'ack', inReplyTo: id, status: 'delivered' }));
         return;
       } catch (error) {
         console.warn(`[RELAY] Local delivery failed: ${(error as Error).message}`);
@@ -256,7 +251,6 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       queueSize,
       details: { traceId },
     });
-    send(ws, safeStringify({ type: 'ack', inReplyTo: id, status: 'queued' }));
     return;
   }
 

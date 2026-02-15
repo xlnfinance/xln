@@ -127,6 +127,42 @@ export const replicas = derived(
   ($env) => $env?.eReplicas || new Map()
 );
 
+// P2P connection state (polled from runtime)
+export type P2PState = {
+  connected: boolean;
+  reconnect: { attempt: number; nextAt: number } | null;
+  queue: { targetCount: number; totalMessages: number; oldestEntryAge: number; perTarget: Record<string, number> };
+};
+export const p2pState = writable<P2PState>({
+  connected: false,
+  reconnect: null,
+  queue: { targetCount: 0, totalMessages: 0, oldestEntryAge: 0, perTarget: {} },
+});
+
+let p2pPollTimer: ReturnType<typeof setInterval> | null = null;
+
+function startP2PPoll() {
+  if (p2pPollTimer) return;
+  const poll = () => {
+    if (!XLN) return;
+    const env = get(xlnEnvironment);
+    if (!env) return;
+    try {
+      const state = (XLN as any).getP2PState(env);
+      if (state) p2pState.set(state);
+    } catch { /* ignore if not available */ }
+  };
+  poll();
+  p2pPollTimer = setInterval(poll, 1000);
+}
+
+function stopP2PPoll() {
+  if (p2pPollTimer) {
+    clearInterval(p2pPollTimer);
+    p2pPollTimer = null;
+  }
+}
+
 // Direct stores for immediate updates (no derived timing races)
 export const history = writable<EnvSnapshot[]>([]);
 export const currentHeight = writable<number>(0);
@@ -258,6 +294,7 @@ export async function initializeXLN(): Promise<Env> {
 
     console.log('✅ XLN Environment initialized');
     isInitialized = true;
+    startP2PPoll();
 
     clearTimeout(loadingTimeout);
     return env;

@@ -834,18 +834,25 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     } else {
       console.error(`❌ Frame consensus failed: ${result.error}`);
       addMessage(newState, `❌ ${result.error}`);
-      env.emit('PaymentFailed', {
-        entityId: state.entityId,
-        fromEntityId: input.fromEntityId,
-        toEntityId: input.toEntityId,
-        reason: result.error || 'unknown',
-      });
-      env.error('consensus', 'FRAME_CONSENSUS_FAILED', {
-        reason: result.error || 'unknown',
-        fromEntityId: input.fromEntityId,
-        toEntityId: input.toEntityId,
-      }, state.entityId);
-      throw new Error(`FRAME_CONSENSUS_FAILED: ${result.error || 'unknown'}`);
+      if (replayMode) {
+        // During replay, stale/duplicate frames are expected (e.g. cross-entity frame
+        // stored in a runtime frame that was already applied from another entity's
+        // perspective). Skip gracefully instead of crashing the entire restore.
+        console.warn(`[REPLAY] Skipping failed frame consensus: ${result.error}`);
+      } else {
+        env.emit('PaymentFailed', {
+          entityId: state.entityId,
+          fromEntityId: input.fromEntityId,
+          toEntityId: input.toEntityId,
+          reason: result.error || 'unknown',
+        });
+        env.error('consensus', 'FRAME_CONSENSUS_FAILED', {
+          reason: result.error || 'unknown',
+          fromEntityId: input.fromEntityId,
+          toEntityId: input.toEntityId,
+        }, state.entityId);
+        throw new Error(`FRAME_CONSENSUS_FAILED: ${result.error || 'unknown'}`);
+      }
     }
   } else if (!input.settleAction) {
     // Only error if there was no settleAction either

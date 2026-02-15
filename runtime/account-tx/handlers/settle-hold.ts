@@ -12,8 +12,9 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-import type { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx, SettlementDiff } from '../../types';
 import { isLeftEntity } from '../../entity-id-utils';
+import { compileOps } from '../../settlement-ops';
 
 type SettleHoldTx = Extract<AccountTx, { type: 'settle_hold' }>;
 type SettleReleaseTx = Extract<AccountTx, { type: 'settle_release' }>;
@@ -63,15 +64,21 @@ export async function handleSettleHold(
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // SECURITY: Validate tx.diffs matches workspace.diffs
+  // SECURITY: Validate tx.diffs matches workspace compiled diffs
   // ═══════════════════════════════════════════════════════════════════════════
   // Prevents attackers from proposing different holds than agreed workspace
   //
   // NOTE: settle_hold.diffs uses leftWithdrawing/rightWithdrawing
-  // while workspace.diffs uses leftDiff/rightDiff (negative = withdrawing)
+  // while compiled diffs use leftDiff/rightDiff (negative = withdrawing)
   // We need to convert and compare
 
-  const workspaceDiffs = workspace.diffs || [];
+  let workspaceDiffs: SettlementDiff[] = [];
+  try {
+    workspaceDiffs = compileOps(workspace.ops, workspace.lastModifiedByLeft).diffs;
+  } catch {
+    // If compile fails, use cached compiled diffs
+    workspaceDiffs = workspace.compiledDiffs || [];
+  }
 
   if (diffs.length !== workspaceDiffs.length) {
     console.error(`❌ SECURITY: settle_hold diff count mismatch: tx=${diffs.length}, workspace=${workspaceDiffs.length}`);

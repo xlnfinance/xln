@@ -40,6 +40,8 @@ export interface XLNFunctions {
   generateSignerAvatar: (signerId: string) => string;
   classifyBilateralState?: (myAccount: unknown, peerCurrentHeight: number | undefined, isLeft: boolean) => { state: string; isLeftEntity: boolean; shouldRollback: boolean; pendingHeight: number | null; mempoolCount: number };
   getAccountBarVisual?: (leftState: unknown, rightState: unknown) => { glowColor: string | null; glowSide: string | null; glowIntensity: number; isDashed: boolean; pulseSpeed: number };
+  resolveEntityProposerId?: (env: unknown, entityId: string, context: string) => string;
+  sendEntityInput?: (env: unknown, input: unknown) => { sent: boolean; deferred: boolean; queuedLocal: boolean };
 }
 
 /**
@@ -58,6 +60,9 @@ export interface TokenDelta {
  */
 export interface DerivedDelta {
   delta: bigint;
+  collateral: bigint;
+  inCollateral: bigint;
+  outCollateral: bigint;
   totalCapacity: bigint;
   inCapacity: bigint;
   outCapacity: bigint;
@@ -67,6 +72,10 @@ export interface DerivedDelta {
   outOwnCredit: bigint;
   inPeerCredit: bigint;
   outPeerCredit: bigint;
+  outSettleHold: bigint;
+  inSettleHold: bigint;
+  outHtlcHold: bigint;
+  inHtlcHold: bigint;
   ascii?: string;
 }
 

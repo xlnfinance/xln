@@ -1124,6 +1124,24 @@ export const stopP2P = (env: Env): void => {
 
 export const getP2P = (env: Env): RuntimeP2P | null => ensureRuntimeState(env).p2p ?? null;
 
+export type P2PConnectionState = {
+  connected: boolean;
+  reconnect: { attempt: number; nextAt: number } | null;
+  queue: { targetCount: number; totalMessages: number; oldestEntryAge: number; perTarget: Record<string, number> };
+};
+
+export const getP2PState = (env: Env): P2PConnectionState => {
+  const p2p = getP2P(env);
+  if (!p2p) {
+    return { connected: false, reconnect: null, queue: { targetCount: 0, totalMessages: 0, oldestEntryAge: 0, perTarget: {} } };
+  }
+  return {
+    connected: p2p.isConnected(),
+    reconnect: p2p.getReconnectState(),
+    queue: p2p.getQueueState(),
+  };
+};
+
 export const refreshGossip = (env: Env): void => {
   const state = ensureRuntimeState(env);
   if (state.p2p) {

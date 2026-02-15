@@ -717,8 +717,13 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   if (account.settlementWorkspace) {
     result.settlementWorkspace = {
       ...account.settlementWorkspace,
-      diffs: account.settlementWorkspace.diffs.map(diff => ({ ...diff })),
-      forgiveTokenIds: [...account.settlementWorkspace.forgiveTokenIds],
+      ops: account.settlementWorkspace.ops.map(op => ({ ...op })),
+      ...(account.settlementWorkspace.compiledDiffs && {
+        compiledDiffs: account.settlementWorkspace.compiledDiffs.map(d => ({ ...d })),
+      }),
+      ...(account.settlementWorkspace.compiledForgiveTokenIds && {
+        compiledForgiveTokenIds: [...account.settlementWorkspace.compiledForgiveTokenIds],
+      }),
     };
   }
   if (account.pendingForward) {

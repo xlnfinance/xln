@@ -1,10 +1,13 @@
 import { writable, get } from 'svelte/store';
-import type { Settings, ThemeName } from '$lib/types/ui';
+import type { Settings, ThemeName, BarColorMode } from '$lib/types/ui';
 import { applyThemeToDocument } from '../utils/themes';
+
+const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token'] as const;
 
 // Default settings
 const defaultSettings: Settings = {
   theme: 'dark',
+  barColorMode: 'rgy',
   dropdownMode: 'signer-first',
   runtimeDelay: 250, // 250ms = 4 frames/second (visible lightning effects)
   balanceRefreshMs: 15000, // Default to 15s to avoid RPC pressure
@@ -33,6 +36,10 @@ const settingsOperations = {
       const savedSettings = localStorage.getItem(SETTINGS_KEY);
       if (savedSettings) {
         const parsed = JSON.parse(savedSettings);
+        // Validate barColorMode against allowed values
+        if (parsed.barColorMode && !VALID_BAR_COLOR_MODES.includes(parsed.barColorMode)) {
+          parsed.barColorMode = 'rgy';
+        }
         settings.update(current => ({ ...current, ...parsed }));
       }
       
@@ -77,6 +84,15 @@ const settingsOperations = {
     settings.update(current => ({ ...current, theme }));
     this.saveToStorage();
     applyThemeToDocument(theme);
+  },
+
+  // Update bar color mode
+  setBarColorMode(mode: string) {
+    const safe: BarColorMode = VALID_BAR_COLOR_MODES.includes(mode as BarColorMode)
+      ? (mode as BarColorMode)
+      : 'rgy';
+    settings.update(current => ({ ...current, barColorMode: safe }));
+    this.saveToStorage();
   },
 
   // Update dropdown mode

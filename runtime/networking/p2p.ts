@@ -136,8 +136,9 @@ export class RuntimeP2P {
   private onEntityInput: (from: string, input: RoutedEntityInput) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
   private clients: RuntimeWsClient[] = [];
-  private pendingByRuntime = new Map<string, RoutedEntityInput[]>();
+  private pendingByRuntime = new Map<string, { input: RoutedEntityInput, enqueuedAt: number }[]>();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
+  private retryInterval: ReturnType<typeof setInterval> | null = null;
   private encryptionKeyPair: P2PKeyPair;
   private announceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingAnnounceEntities = new Set<string>();
@@ -212,6 +213,7 @@ export class RuntimeP2P {
     console.log(`[P2P] RuntimeP2P.connect() called, connecting to ${this.relayUrls.length} relays: ${this.relayUrls.join(', ')}`);
     this.closeClients();
     this.startPolling();
+    this.startRetryLoop();
     for (const url of this.relayUrls) {
       const runtimeSeed = this.env.runtimeSeed;
       const isBrowserRuntime = typeof window !== 'undefined';
@@ -293,6 +295,7 @@ export class RuntimeP2P {
 
   close() {
     this.stopPolling();
+    this.stopRetryLoop();
     if (this.announceTimer) {
       clearTimeout(this.announceTimer);
       this.announceTimer = null;
@@ -324,6 +327,52 @@ export class RuntimeP2P {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
+  }
+
+  private startRetryLoop() {
+    if (this.retryInterval) return;
+    this.retryInterval = setInterval(() => {
+      if (this.pendingByRuntime.size > 0) {
+        this.flushPending();
+      }
+    }, 10_000);
+  }
+
+  private stopRetryLoop() {
+    if (this.retryInterval) {
+      clearInterval(this.retryInterval);
+      this.retryInterval = null;
+    }
+  }
+
+  getQueueState(): { targetCount: number; totalMessages: number; oldestEntryAge: number; perTarget: Record<string, number> } {
+    let totalMessages = 0;
+    let oldestAt = Infinity;
+    const perTarget: Record<string, number> = {};
+    for (const [targetId, queue] of this.pendingByRuntime.entries()) {
+      totalMessages += queue.length;
+      if (queue.length > 0) perTarget[targetId] = queue.length;
+      for (const entry of queue) {
+        if (entry.enqueuedAt < oldestAt) oldestAt = entry.enqueuedAt;
+      }
+    }
+    return {
+      targetCount: this.pendingByRuntime.size,
+      totalMessages,
+      oldestEntryAge: totalMessages > 0 ? Date.now() - oldestAt : 0,
+      perTarget,
+    };
+  }
+
+  getReconnectState(): { attempt: number; nextAt: number } | null {
+    const client = this.getActiveClient();
+    if (client) return null; // Connected, no reconnect pending
+    // Check first client's reconnect state
+    for (const c of this.clients) {
+      const state = c.getReconnectState();
+      if (state) return state;
+    }
+    return null;
   }
 
   reconnect() {
@@ -383,7 +432,7 @@ export class RuntimeP2P {
     }
 
     const queue = this.pendingByRuntime.get(normalizedTargetRuntimeId) || [];
-    queue.push(input);
+    queue.push({ input, enqueuedAt: Date.now() });
     // Enforce queue size limit to prevent memory exhaustion
     while (queue.length > MAX_QUEUE_PER_RUNTIME) queue.shift();
     if (queue.length >= MAX_QUEUE_PER_RUNTIME) {
@@ -429,13 +478,13 @@ export class RuntimeP2P {
     const client = this.getActiveClient();
     if (!client || !client.isOpen()) return;
     for (const [targetRuntimeId, queue] of this.pendingByRuntime.entries()) {
-      const remaining: RoutedEntityInput[] = [];
-      for (const input of queue) {
+      const remaining: { input: RoutedEntityInput, enqueuedAt: number }[] = [];
+      for (const entry of queue) {
         try {
-          const sent = client.sendEntityInput(targetRuntimeId, input);
-          if (!sent) remaining.push(input);
+          const sent = client.sendEntityInput(targetRuntimeId, entry.input);
+          if (!sent) remaining.push(entry);
         } catch {
-          remaining.push(input);
+          remaining.push(entry);
         }
       }
       if (remaining.length > 0) {

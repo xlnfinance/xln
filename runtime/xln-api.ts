@@ -314,6 +314,7 @@ export interface XLNModule {
   startP2P: (env: Env, config?: P2PConfig) => unknown;
   stopP2P: (env: Env) => void;
   getP2P: (env: Env) => unknown;
+  getP2PState: (env: Env) => { connected: boolean; reconnect: { attempt: number; nextAt: number } | null; queue: { targetCount: number; totalMessages: number; oldestEntryAge: number; perTarget: Record<string, number> } };
   refreshGossip?: (env: Env) => void;
   clearGossip?: (env: Env) => void;
   // runDemo: REMOVED - use scenarios.ahb(env) or scenarios.grid(env) instead

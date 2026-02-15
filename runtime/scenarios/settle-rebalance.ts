@@ -13,7 +13,8 @@
  *   Phase 8: Final verification (nonces, workspaces, collateral)
  */
 
-import type { Env, EntityReplica, SettlementDiff } from '../types';
+import type { Env, EntityReplica, SettlementDiff, SettlementOp } from '../types';
+import { compileOps } from '../settlement-ops';
 import {
   getProcess, advanceScenarioTime, enableStrictScenario, converge, syncChain,
   processJEvents, assert, findReplica, usd, snap,
@@ -180,60 +181,36 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   console.log = quietLog;
 
   // 3a: Propose — Alice deposits $100 into collateral
-  const depositDiff: SettlementDiff = {
-    tokenId: USDC, leftDiff: -usd(100), rightDiff: 0n,
-    collateralDiff: usd(100), ondeltaDiff: usd(100),
-  };
+  // NOTE: Hub is LEFT (0002 < 0003), Alice is RIGHT. Alice's r2c has ondeltaDiff=0
+  // → Hub auto-approves (ondelta neutral for LEFT). Test verifies auto-approve + execute flow.
+  const depositOps: SettlementOp[] = [{ type: 'r2c', tokenId: USDC, amount: usd(100) }];
+  const aliceIsLeft = isLeftEntity(alice.id, hub.id);
 
   await process(env, [{
     entityId: alice.id, signerId: alice.signer,
-    entityTxs: [{ type: 'settle_propose', data: { counterpartyEntityId: hub.id, diffs: [depositDiff], memo: 'deposit' } }]
+    entityTxs: [{ type: 'settle_propose', data: { counterpartyEntityId: hub.id, ops: depositOps, memo: 'deposit' } }]
   }]);
   for (let i = 0; i < 5; i++) { advanceScenarioTime(env); await process(env); }
 
   const aliceWs1 = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
   assert(aliceWs1?.version === 1, 'Workspace should be version 1', env);
-  const aliceIsLeft = isLeftEntity(alice.id, hub.id);
-  assert(aliceWs1?.initiatedBy === (aliceIsLeft ? 'left' : 'right'), 'Alice should have initiated', env);
+  assert(aliceWs1?.lastModifiedByLeft === aliceIsLeft, 'Alice should be lastModifier', env);
 
-  // 3b: Update — Hub counter-proposes $50
-  const counterDiff: SettlementDiff = {
-    tokenId: USDC, leftDiff: -usd(50), rightDiff: 0n,
-    collateralDiff: usd(50), ondeltaDiff: usd(50),
-  };
-  await process(env, [{
-    entityId: hub.id, signerId: hub.signer,
-    entityTxs: [{ type: 'settle_update', data: { counterpartyEntityId: alice.id, diffs: [counterDiff], memo: 'counter: 50' } }]
-  }]);
-  for (let i = 0; i < 5; i++) { advanceScenarioTime(env); await process(env); }
+  // 3b: Verify Hub auto-approved (ondelta-neutral r2c from RIGHT proposer)
+  const hubWs1 = findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.settlementWorkspace;
+  assert(hubWs1, 'Hub should have workspace', env);
+  const hubIsLeft = !aliceIsLeft;
+  const hubHankoField = hubIsLeft ? 'leftHanko' : 'rightHanko';
+  assert(hubWs1?.[hubHankoField], 'Hub should have auto-approved (signed)', env);
 
-  const aliceWs2 = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
-  assert(aliceWs2?.version === 2, 'Version should be 2 after update', env);
-
-  // 3c: Approve — Alice signs, then Hub signs
-  await process(env, [{
-    entityId: alice.id, signerId: alice.signer,
-    entityTxs: [{ type: 'settle_approve', data: { counterpartyEntityId: hub.id } }]
-  }]);
-  for (let i = 0; i < 5; i++) { advanceScenarioTime(env); await process(env); }
-
-  const aliceWs3 = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
+  // Alice should have received Hub's auto-approve hanko
   const aliceHankoField = aliceIsLeft ? 'leftHanko' : 'rightHanko';
-  const hubHankoField = aliceIsLeft ? 'rightHanko' : 'leftHanko';
-  assert(aliceWs3?.[aliceHankoField], 'Alice should have signed', env);
-  assert(!aliceWs3?.[hubHankoField], 'Hub not signed yet', env);
+  const aliceReceivedHubHanko = aliceWs1?.[hubHankoField];
+  assert(aliceReceivedHubHanko, 'Alice should have received Hub auto-approve hanko', env);
 
-  await process(env, [{
-    entityId: hub.id, signerId: hub.signer,
-    entityTxs: [{ type: 'settle_approve', data: { counterpartyEntityId: alice.id } }]
-  }]);
-  for (let i = 0; i < 5; i++) { advanceScenarioTime(env); await process(env); }
-
-  const aliceWs4 = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
-  assert(aliceWs4?.leftHanko && aliceWs4.rightHanko, 'Both should have signed', env);
-  assert(aliceWs4.status === 'ready_to_submit', 'Should be ready_to_submit', env);
-
-  // 3d: Execute + broadcast
+  // 3c: Alice executes directly (Hub already auto-approved, Alice has counterparty hanko)
+  // NOTE: Alice can't approve her own proposal (gate blocks proposer).
+  // Execute only requires counterparty's hanko — no need for proposer to explicitly approve.
   await process(env, [{
     entityId: alice.id, signerId: alice.signer,
     entityTxs: [{ type: 'settle_execute', data: { counterpartyEntityId: hub.id } }]
@@ -254,7 +231,7 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   assert(aliceNonce1 >= 1, `Alice nonce should be >= 1 after settlement, got ${aliceNonce1}`, env);
 
   console.log = originalLog;
-  console.log('--- TEST 3 PASSED: propose → update → approve → execute → on-chain ---');
+  console.log('--- TEST 3 PASSED: propose → auto-approve → execute → on-chain ---');
   console.log = quietLog;
 
   snap(env, 'Settlement Complete', { phase: 'settle' });
@@ -266,15 +243,22 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   console.log('\n--- TEST 4: Settle Reject ---');
   console.log = quietLog;
 
+  // Hub proposes r2c (Hub=LEFT proposer → ondelta shifts → Alice WON'T auto-approve)
+  const hubDepositOps: SettlementOp[] = [{ type: 'r2c', tokenId: USDC, amount: usd(50) }];
   await process(env, [{
-    entityId: alice.id, signerId: alice.signer,
-    entityTxs: [{ type: 'settle_propose', data: { counterpartyEntityId: hub.id, diffs: [depositDiff], memo: 'reject me' } }]
+    entityId: hub.id, signerId: hub.signer,
+    entityTxs: [{ type: 'settle_propose', data: { counterpartyEntityId: alice.id, ops: hubDepositOps, memo: 'reject me' } }]
   }]);
   for (let i = 0; i < 5; i++) { advanceScenarioTime(env); await process(env); }
 
+  // Verify Alice did NOT auto-approve (ondelta > 0 from RIGHT perspective → fails auto-approve)
+  const aliceWsReject = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
+  assert(aliceWsReject, 'Alice should have workspace from Hub propose', env);
+  assert(!aliceWsReject?.[aliceHankoField], 'Alice should NOT have auto-approved', env);
+
   await process(env, [{
-    entityId: hub.id, signerId: hub.signer,
-    entityTxs: [{ type: 'settle_reject', data: { counterpartyEntityId: alice.id, reason: 'nope' } }]
+    entityId: alice.id, signerId: alice.signer,
+    entityTxs: [{ type: 'settle_reject', data: { counterpartyEntityId: hub.id, reason: 'nope' } }]
   }]);
   for (let i = 0; i < 5; i++) { advanceScenarioTime(env); await process(env); }
 

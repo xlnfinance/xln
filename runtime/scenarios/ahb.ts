@@ -1541,18 +1541,8 @@ export async function ahb(env: Env): Promise<void> {
       }]
     }]);
 
-    // Step 2: Alice approves (signs with entity hanko)
-    await process(env, [{
-      entityId: alice.id,
-      signerId: alice.signer,
-      entityTxs: [{
-        type: 'settle_approve',
-        data: { counterpartyEntityId: hub.id }
-      }]
-    }]);
-
-    // Step 3: Hub receives proposal + approval, then approves
-    await process(env); // Hub processes Alice's messages
+    // Step 2: Hub receives proposal, then approves (counterparty of proposer)
+    await process(env); // Hub processes Alice's proposal
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
@@ -1562,8 +1552,8 @@ export async function ahb(env: Env): Promise<void> {
       }]
     }]);
 
-    // Step 4: Alice executes (both signed now)
-    await process(env); // Alice receives Hub's approval
+    // Step 3: Alice receives Hub's approval, then executes
+    await process(env); // Alice processes Hub's approval
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -1686,18 +1676,8 @@ export async function ahb(env: Env): Promise<void> {
       }]
     }]);
 
-    // Step 2: Hub approves (signs with entity hanko)
-    await process(env, [{
-      entityId: hub.id,
-      signerId: hub.signer,
-      entityTxs: [{
-        type: 'settle_approve',
-        data: { counterpartyEntityId: bob.id }
-      }]
-    }]);
-
-    // Step 3: Bob receives proposal + approval, then approves
-    await process(env); // Bob processes Hub's messages
+    // Step 2: Bob receives proposal, then approves (counterparty of proposer)
+    await process(env); // Bob processes Hub's proposal
     await process(env, [{
       entityId: bob.id,
       signerId: bob.signer,
@@ -1707,8 +1687,8 @@ export async function ahb(env: Env): Promise<void> {
       }]
     }]);
 
-    // Step 4: Hub executes (both signed now)
-    await process(env); // Hub receives Bob's approval
+    // Step 3: Hub receives Bob's approval, then executes
+    await process(env); // Hub processes Bob's approval
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
@@ -2074,17 +2054,7 @@ export async function ahb(env: Env): Promise<void> {
       }]
     }]);
 
-    // Step 2: Hub approves
-    await process(env, [{
-      entityId: hub.id,
-      signerId: hub.signer,
-      entityTxs: [{
-        type: 'settle_approve',
-        data: { counterpartyEntityId: bob.id }
-      }]
-    }]);
-
-    // Step 3: Bob receives and approves
+    // Step 2: Bob receives and approves (counterparty of proposer)
     await process(env);
     await process(env, [{
       entityId: bob.id,
@@ -2095,7 +2065,7 @@ export async function ahb(env: Env): Promise<void> {
       }]
     }]);
 
-    // Step 4: Hub executes
+    // Step 3: Hub receives Bob's approval, then executes
     await process(env);
     await process(env, [{
       entityId: hub.id,
@@ -3053,17 +3023,7 @@ export async function ahb(env: Env): Promise<void> {
       }]
     }]);
 
-    // Step 2: Carol approves (signs)
-    await process(env, [{
-      entityId: carol.id,
-      signerId: carol.signer,
-      entityTxs: [{
-        type: 'settle_approve',
-        data: { counterpartyEntityId: hub.id }
-      }]
-    }]);
-
-    // Step 3: Hub receives and approves
+    // Step 2: Hub receives proposal, then approves (counterparty of proposer)
     await process(env);
     await process(env, [{
       entityId: hub.id,
@@ -3074,7 +3034,7 @@ export async function ahb(env: Env): Promise<void> {
       }]
     }]);
 
-    // Step 4: Carol executes
+    // Step 3: Carol receives Hub's approval, then executes
     await process(env);
     await process(env, [{
       entityId: carol.id,
