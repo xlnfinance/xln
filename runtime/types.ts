@@ -756,30 +756,22 @@ export type EntityTx =
       type: 'settle_propose';
       data: {
         counterpartyEntityId: string;
-        diffs: Array<{
-          tokenId: number;
-          leftDiff: bigint;
-          rightDiff: bigint;
-          collateralDiff: bigint;
-          ondeltaDiff: bigint;
-        }>;
-        forgiveTokenIds?: number[];
+        ops?: SettlementOp[];
+        diffs?: SettlementDiff[];           // V1 compat: auto-converted to rawDiff ops
+        forgiveTokenIds?: number[];          // V1 compat: auto-converted to forgive ops
+        executorIsLeft?: boolean;
         memo?: string;
       };
     }
   | {
-      // Update existing settlement workspace (replaces diffs)
+      // Update existing settlement workspace (replaces ops)
       type: 'settle_update';
       data: {
         counterpartyEntityId: string;
-        diffs: Array<{
-          tokenId: number;
-          leftDiff: bigint;
-          rightDiff: bigint;
-          collateralDiff: bigint;
-          ondeltaDiff: bigint;
-        }>;
-        forgiveTokenIds?: number[];
+        ops?: SettlementOp[];
+        diffs?: SettlementDiff[];           // V1 compat: auto-converted to rawDiff ops
+        forgiveTokenIds?: number[];          // V1 compat: auto-converted to forgive ops
+        executorIsLeft?: boolean;
         memo?: string;
       };
     }
@@ -1132,8 +1124,8 @@ export interface AccountInput {
   // SETTLEMENT WORKSPACE ACTIONS (bilateral negotiation)
   settleAction?: {
     type: 'propose' | 'update' | 'approve' | 'execute' | 'reject';
-    diffs?: SettlementDiff[];            // For propose/update
-    forgiveTokenIds?: number[];          // For propose/update
+    ops?: SettlementOp[];                // For propose/update
+    executorIsLeft?: boolean;            // For propose/update
     hanko?: HankoString;                 // For approve (signer's hanko)
     memo?: string;                       // For propose/update/reject
     version?: number;                    // Version being approved/executed
@@ -1190,35 +1182,51 @@ export interface SettlementDiff {
 }
 
 /**
+ * Typed settlement operation (V1 — 4 ops)
+ * Compiled to SettlementDiff[] at approve time via compileOps()
+ *
+ * All ops are from the PROPOSER's perspective:
+ * - r2c: proposer's reserve → collateral
+ * - c2r: collateral → proposer's reserve
+ * - r2r: proposer's reserve → counterparty's reserve
+ * - forgive: forgive debt in this token
+ */
+export type SettlementOp =
+  | { type: 'r2c';     tokenId: number; amount: bigint }  // Proposer reserve → collateral
+  | { type: 'c2r';     tokenId: number; amount: bigint }  // Collateral → proposer reserve
+  | { type: 'r2r';     tokenId: number; amount: bigint }  // Proposer reserve → counterparty reserve
+  | { type: 'forgive'; tokenId: number }                   // Forgive debt in this token
+  | { type: 'rawDiff'; tokenId: number; leftDiff: bigint; rightDiff: bigint; collateralDiff: bigint; ondeltaDiff: bigint };  // V1 escape hatch for complex settlements
+
+/**
  * Settlement workspace - shared editing area per bilateral account
  *
  * Flow:
- * 1. Either party creates workspace via settle_propose
- * 2. Both parties can update via settle_update (replaces diffs)
- * 3. Either party can approve via settle_approve (signs + bumps coopNonce)
- * 4. Initiator or counterparty executes via settle_execute (adds to jBatch)
+ * 1. Either party creates workspace via settle_propose (ops + lastModifiedByLeft)
+ * 2. Both parties can update via settle_update (replaces ops)
+ * 3. Counterparty approves via settle_approve (compiles ops, signs, caches diffs)
+ * 4. Executor submits via settle_execute (uses cached compiled diffs)
  * 5. Execute or reject clears workspace
  */
 export interface SettlementWorkspace {
-  diffs: SettlementDiff[];                    // The settlement operations
-  forgiveTokenIds: number[];                  // Debts to forgive (optional)
+  ops: SettlementOp[];                        // Typed operations (compiled to diffs at approve)
+  compiledDiffs?: SettlementDiff[];           // Cached at approve time
+  compiledForgiveTokenIds?: number[];         // Cached at approve time
 
   // Hanko signatures
   leftHanko?: HankoString;                    // Left's signature on settlement
   rightHanko?: HankoString;                   // Right's signature on settlement
 
   // Metadata
-  initiatedBy: 'left' | 'right';              // Who created the workspace
+  lastModifiedByLeft: boolean;                // Who last proposed/updated
   status: 'draft' | 'awaiting_counterparty' | 'ready_to_submit' | 'submitted';
   memo?: string;                              // Human-readable description
   version: number;                            // Increments on each update
   createdAt: number;                          // Timestamp when created
   lastUpdatedAt: number;                      // Timestamp of last update
 
-  // Broadcast responsibility: true = left broadcasts, false = right broadcasts
-  // When cross-signed, this determines whose responsibility it is to submit on-chain.
-  // Generally hub (larger batches = cheaper gas) should broadcast.
-  broadcastByLeft: boolean;
+  // Executor: who submits batch (locked after any hanko)
+  executorIsLeft: boolean;
 
   // Nonce tracking (for invalidating old dispute proofs)
   nonceAtSign?: number;                       // nonce when signing
@@ -1255,6 +1263,10 @@ export interface DerivedDelta {
   inPeerCredit: bigint;
   peerCreditUsed: bigint;  // Credit peer lent that we're using
   ownCreditUsed: bigint;   // Credit we lent that peer is using
+  outSettleHold: bigint;   // Settlement hold deducted from out capacity
+  inSettleHold: bigint;    // Settlement hold deducted from in capacity
+  outHtlcHold: bigint;     // HTLC hold deducted from out capacity
+  inHtlcHold: bigint;      // HTLC hold deducted from in capacity
   ascii: string; // ASCII visualization from deriveDelta (like old_src)
 }
 

@@ -10,13 +10,15 @@
  * Also tests auto-approve logic and conservation law validation.
  */
 
-import type { Env, EntityInput, EntityReplica, SettlementDiff } from '../types';
+import type { Env, EntityInput, EntityReplica, SettlementDiff, SettlementOp } from '../types';
+import { compileOps } from '../settlement-ops';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, getProcess, getApplyRuntimeInput, processJEvents as processJEventsHelper, converge as convergeHelper, syncChain as syncChainHelper } from './helpers';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../runtime-ascii';
 import { createGossipLayer } from '../networking/gossip';
 import { userAutoApprove, canAutoApproveWorkspace } from '../entity-tx/handlers/settle';
+import { isLeftEntity } from '../entity-id-utils';
 
 const USDC_TOKEN_ID = 1;
 const DECIMALS = 18n;
@@ -297,13 +299,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log('\n📋 TEST 3: Settlement Workspace Propose');
 
   // Alice proposes settlement: deposit 100 USDC into collateral
-  const depositDiff: SettlementDiff = {
-    tokenId: USDC_TOKEN_ID,
-    leftDiff: -usd(100),       // Alice sends from reserve
-    rightDiff: 0n,
-    collateralDiff: usd(100),  // Into collateral
-    ondeltaDiff: usd(100)      // ondelta tracks Alice's attribution
-  };
+  const depositOps: SettlementOp[] = [{ type: 'r2c', tokenId: USDC_TOKEN_ID, amount: usd(100) }];
 
   await process(env, [{
     entityId: ALICE_ID,
@@ -312,7 +308,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
       type: 'settle_propose',
       data: {
         counterpartyEntityId: HUB_ID,
-        diffs: [depositDiff],
+        ops: depositOps,
         memo: 'Alice deposits collateral'
       }
     }]
@@ -334,15 +330,18 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   assert(aliceAccount?.settlementWorkspace, 'Alice should have settlement workspace', env);
   assert(hubAccount?.settlementWorkspace, 'Hub should have settlement workspace', env);
   assert(aliceAccount.settlementWorkspace.version === 1, 'Workspace should be version 1');
-  assert(aliceAccount.settlementWorkspace.initiatedBy === 'left', 'Alice (left) initiated');
+  assert(aliceAccount.settlementWorkspace.lastModifiedByLeft === true, 'Alice (left) should be lastModifier');
 
   // TEST: Verify settlement holds are set via frame consensus
-  // depositDiff has leftDiff: -usd(100), so leftSettleHold should be usd(100)
+  // Alice proposes r2c (proposer=Alice) — compiled diff takes from Alice's reserve side
   const usdcDelta = aliceAccount.deltas.get(USDC_TOKEN_ID);
   assert(usdcDelta, 'USDC delta should exist', env);
+  const aliceIsLeft = aliceAccount.leftEntity === ALICE_ID;
+  const holdField = aliceIsLeft ? 'leftSettleHold' : 'rightSettleHold';
+  const actualHold = aliceIsLeft ? (usdcDelta.leftSettleHold || 0n) : (usdcDelta.rightSettleHold || 0n);
   const expectedHold = usd(100);
-  console.log(`   HOLD CHECK: leftSettleHold=${usdcDelta.leftSettleHold || 0n}, expected=${expectedHold}`);
-  assert(usdcDelta.leftSettleHold === expectedHold, `Settlement hold not set: expected ${expectedHold}, got ${usdcDelta.leftSettleHold || 0n}`, env);
+  console.log(`   HOLD CHECK: ${holdField}=${actualHold}, expected=${expectedHold}`);
+  assert(actualHold === expectedHold, `Settlement hold not set: expected ${expectedHold}, got ${actualHold}`, env);
 
   console.log(`✅ Settlement proposed: Alice → Hub`);
   console.log(`   Workspace version: ${aliceAccount.settlementWorkspace.version}`);
@@ -360,13 +359,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log('\n📋 TEST 4: Settlement Workspace Update');
 
   // Hub counter-proposes: different amount
-  const counterDiff: SettlementDiff = {
-    tokenId: USDC_TOKEN_ID,
-    leftDiff: -usd(50),        // Less from Alice
-    rightDiff: 0n,
-    collateralDiff: usd(50),   // Less to collateral
-    ondeltaDiff: usd(50)
-  };
+  const counterOps: SettlementOp[] = [{ type: 'r2c', tokenId: USDC_TOKEN_ID, amount: usd(50) }];
 
   await process(env, [{
     entityId: HUB_ID,
@@ -375,7 +368,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
       type: 'settle_update',
       data: {
         counterpartyEntityId: ALICE_ID,
-        diffs: [counterDiff],
+        ops: counterOps,
         memo: 'Hub counter: 50 instead of 100'
       }
     }]
@@ -390,7 +383,10 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Verify update
   const aliceAccount2 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
   assert(aliceAccount2?.settlementWorkspace?.version === 2, 'Version should be 2 after update', env);
-  assert(aliceAccount2.settlementWorkspace.diffs[0].leftDiff === -usd(50), 'Diff should be updated');
+  // Verify compiled ops match expected values
+  const { diffs: compiledDiffs } = compileOps(aliceAccount2.settlementWorkspace.ops, aliceAccount2.settlementWorkspace.lastModifiedByLeft);
+  // Hub is RIGHT, so r2c compiles to rightDiff = -amount
+  assert(compiledDiffs[0].rightDiff === -usd(50), 'Compiled diff should reflect update (Hub rightDiff)');
 
   console.log(`✅ Settlement updated by Hub`);
   console.log(`   New version: ${aliceAccount2.settlementWorkspace.version}`);
@@ -405,7 +401,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // ══════════════════════════════════════════════════════════════════════════════
   console.log('\n📋 TEST 5: Settlement Approve');
 
-  // Alice approves first
+  // Alice approves (counterparty of Hub's update — only counterparty of lastModifier can approve)
   await process(env, [{
     entityId: ALICE_ID,
     signerId: '2',
@@ -420,36 +416,17 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     await process(env);
   }
 
+  // Verify Alice's hanko is set on both sides (via bilateral frame consensus)
   const aliceAccount3 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
-  assert(aliceAccount3?.settlementWorkspace?.leftHanko, 'Alice should have signed', env);
-  assert(!aliceAccount3.settlementWorkspace.rightHanko, 'Hub should not have signed yet', env);
+  const aliceHankoField3 = aliceIsLeft ? 'leftHanko' : 'rightHanko';
+  assert(aliceAccount3?.settlementWorkspace?.[aliceHankoField3], 'Alice should have signed', env);
+
+  // Hub receives Alice's hanko
+  const hubAccount3 = findReplica(env, HUB_ID)[1].state.accounts.get(ALICE_ID);
+  assert(hubAccount3?.settlementWorkspace?.[aliceHankoField3], 'Hub should have received Alice hanko', env);
 
   console.log(`✅ Alice approved settlement`);
-  console.log(`   leftHanko: ${aliceAccount3.settlementWorkspace.leftHanko?.slice(0, 20)}...`);
-
-  // Hub approves
-  await process(env, [{
-    entityId: HUB_ID,
-    signerId: '3',
-    entityTxs: [{
-      type: 'settle_approve',
-      data: { counterpartyEntityId: ALICE_ID }
-    }]
-  }]);
-
-  for (let i = 0; i < 5; i++) {
-    advanceScenarioTime(env);
-    await process(env);
-  }
-
-  const aliceAccount4 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
-  assert(aliceAccount4?.settlementWorkspace?.leftHanko, 'Alice hanko still present', env);
-  assert(aliceAccount4.settlementWorkspace.rightHanko, 'Hub should have signed', env);
-  assert(aliceAccount4.settlementWorkspace.status === 'ready_to_submit', 'Should be ready to submit', env);
-
-  console.log(`✅ Hub approved settlement`);
-  console.log(`   rightHanko: ${aliceAccount4.settlementWorkspace.rightHanko?.slice(0, 20)}...`);
-  console.log(`   Status: ${aliceAccount4.settlementWorkspace.status}`);
+  console.log(`   Alice hanko (${aliceHankoField3}): ${aliceAccount3.settlementWorkspace[aliceHankoField3]?.slice(0, 20)}...`);
 
   snap(env, 'Settlement Approved', {
     description: 'Both parties signed - ready to submit',
@@ -461,13 +438,13 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // ══════════════════════════════════════════════════════════════════════════════
   console.log('\n📋 TEST 6: Settlement Execute');
 
-  // Alice executes (adds to jBatch)
+  // Hub executes (lastModifier has counterparty's hanko → can submit to jBatch)
   await process(env, [{
-    entityId: ALICE_ID,
-    signerId: '2',
+    entityId: HUB_ID,
+    signerId: '3',
     entityTxs: [{
       type: 'settle_execute',
-      data: { counterpartyEntityId: HUB_ID }
+      data: { counterpartyEntityId: ALICE_ID }
     }]
   }]);
 
@@ -478,8 +455,8 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   // Broadcast the jBatch to chain
   await process(env, [{
-    entityId: ALICE_ID,
-    signerId: '2',
+    entityId: HUB_ID,
+    signerId: '3',
     entityTxs: [{ type: 'j_broadcast', data: {} }]
   }]);
 
@@ -509,7 +486,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
       type: 'settle_propose',
       data: {
         counterpartyEntityId: HUB_ID,
-        diffs: [depositDiff],
+        ops: depositOps,
         memo: 'Another proposal'
       }
     }]

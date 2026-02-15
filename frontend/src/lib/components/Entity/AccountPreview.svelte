@@ -2,7 +2,10 @@
   import type { AccountMachine, Delta } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
   import { xlnFunctions } from '../../stores/xlnStore';
+  import { settings } from '../../stores/settingsStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+  import { getBarColors } from '$lib/utils/bar-colors';
+  import { p2pState } from '../../stores/xlnStore';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
 
   export let account: AccountMachine;
@@ -30,6 +33,28 @@
   }
 
   $: counterpartyName = getEntityName(counterpartyId);
+
+  // P2P connection indicator for counterparty
+  function getCounterpartyRuntimeId(id: string): string | null {
+    const envData = entityEnv?.env ? (entityEnv.env as any) : null;
+    if (envData?.gossip) {
+      const profiles = typeof envData.gossip.getProfiles === 'function' ? envData.gossip.getProfiles() : (envData.gossip.profiles || []);
+      const profile = profiles.find((p: any) => p.entityId === id);
+      if (profile?.runtimeId) return profile.runtimeId;
+    }
+    return null;
+  }
+
+  $: counterpartyRuntimeId = getCounterpartyRuntimeId(counterpartyId);
+
+  // Connection state: unknown (no runtimeId), disconnected, queued, connected
+  $: connState = (() => {
+    if (!counterpartyRuntimeId) return 'unknown';
+    if (!$p2pState.connected) return 'disconnected';
+    const peerQueued = $p2pState.queue.perTarget[counterpartyRuntimeId.toLowerCase()] ?? 0;
+    if (peerQueued > 0) return 'queued';
+    return 'connected';
+  })();
 
   // Validate xlnFunctions availability - fail fast if not ready
 
@@ -97,7 +122,11 @@
         theirCollateralLocked: 0n,
         ourUsedCredit: 0n,
         peerDebtToUs: 0n,
-        totalCapacity: 0n
+        totalCapacity: 0n,
+        outSettleHoldPct: 0,
+        inSettleHoldPct: 0,
+        outHtlcHoldPct: 0,
+        inHtlcHoldPct: 0,
       };
     }
 
@@ -105,8 +134,16 @@
     const derived = activeXlnFunctions.deriveDelta(delta, isLeftEntity);
     const tokenInfo = activeXlnFunctions.getTokenInfo(tokenId);
 
-    // deriveDelta is single source of truth - use derived.* directly everywhere
-    return { tokenId, tokenInfo, delta, derived };
+    // Hold % relative to collateral segment, clamped to 0..100
+    const clampPct = (hold: bigint, total: bigint) =>
+      total > 0n ? Math.min(100, Math.max(0, Number((hold * 100n) / total))) : 0;
+
+    const outSettleHoldPct = clampPct(derived.outSettleHold, derived.outCollateral);
+    const inSettleHoldPct = clampPct(derived.inSettleHold, derived.inCollateral);
+    const outHtlcHoldPct = clampPct(derived.outHtlcHold, derived.outCollateral);
+    const inHtlcHoldPct = clampPct(derived.inHtlcHold, derived.inCollateral);
+
+    return { tokenId, tokenInfo, delta, derived, outSettleHoldPct, inSettleHoldPct, outHtlcHoldPct, inHtlcHoldPct };
   });
 </script>
 
@@ -124,6 +161,7 @@
       <EntityIdentity entityId={counterpartyId} name={counterpartyName} size={28} clickable={false} compact={false} copyable={false} showAddress={true} />
     </div>
     <div class="account-status">
+      <span class="conn-dot {connState}" title="{connState === 'connected' ? 'Relay connected' : connState === 'queued' ? 'Messages queued' : connState === 'disconnected' ? 'Relay disconnected' : 'Unknown peer'}"></span>
       {#if account.mempool.length > 0 || (account as any).pendingFrame}
         <span class="status-badge pending">
           {#if (account as any).pendingFrame}
@@ -143,7 +181,8 @@
       <div class="no-deltas">No deltas yet</div>
     {/if}
     {#each tokenDeltas as td (td.tokenId)}
-      <div class="token-row">
+      {@const colors = getBarColors($settings.barColorMode, td.tokenInfo?.color || '#888888')}
+      <div class="token-row" style="--bar-credit: {colors.credit}; --bar-collateral: {colors.collateral}; --bar-debt: {colors.debt}">
         <span class="token-label" style="color: {td.tokenInfo.color}">
           {td.tokenInfo.symbol}
         </span>
@@ -162,27 +201,37 @@
               <div
                 class="bar-segment unused-credit"
                 style="width: {Number((td.derived.outOwnCredit * 100n) / td.derived.totalCapacity)}%"
-                title="Our credit (we allow peer to owe us): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outOwnCredit)}"
+                title="YOUR credit line (your risk — peer can take this): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outOwnCredit)}"
               ></div>
             {/if}
             {#if td.derived.outCollateral > 0n}
               <div
                 class="bar-segment collateral"
                 style="width: {Number((td.derived.outCollateral * 100n) / td.derived.totalCapacity)}%"
-                title="Collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCollateral)}"
-              ></div>
+                title="Collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCollateral)}{td.outSettleHoldPct > 0 ? ` (${td.outSettleHoldPct}% held for settlement)` : ''}"
+              >
+                {#if td.outSettleHoldPct > 0}
+                  <div class="settle-hold-stripe out" style="width: {td.outSettleHoldPct}%"></div>
+                {/if}
+                {#if td.outHtlcHoldPct > 0}
+                  <div class="htlc-hold-stripe out" style="width: {td.outHtlcHoldPct}%"></div>
+                {/if}
+              </div>
             {/if}
             {#if td.derived.outPeerCredit > 0n}
               <div
                 class="bar-segment used-credit"
                 style="width: {Number((td.derived.outPeerCredit * 100n) / td.derived.totalCapacity)}%"
-                title="Peer owes us (their credit to us): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outPeerCredit)}"
+                title="Peer OWES you (debt — their credit used): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outPeerCredit)}"
               ></div>
             {/if}
           </div>
 
-          <!-- Visual separator -->
-          <div class="bar-separator">|</div>
+          <!-- Visual separator / zero-point marker -->
+          <div class="bar-separator" class:zero-point={td.derived.collateral === 0n}
+               title={td.derived.collateral === 0n ? 'No collateral — pure credit channel' : 'Delta position'}>
+            {td.derived.collateral === 0n ? '0' : '|'}
+          </div>
 
           <!-- RIGHT (IN): inOwnCredit -> inCollateral -> inPeerCredit -->
           <div class="bar-section right-side">
@@ -190,21 +239,28 @@
               <div
                 class="bar-segment used-credit"
                 style="width: {Number((td.derived.inOwnCredit * 100n) / td.derived.totalCapacity)}%"
-                title="We owe peer (our credit used): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inOwnCredit)}"
+                title="You OWE peer (debt — your credit used): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inOwnCredit)}"
               ></div>
             {/if}
             {#if td.derived.inCollateral > 0n}
               <div
                 class="bar-segment collateral"
                 style="width: {Number((td.derived.inCollateral * 100n) / td.derived.totalCapacity)}%"
-                title="Collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCollateral)}"
-              ></div>
+                title="Collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCollateral)}{td.inSettleHoldPct > 0 ? ` (${td.inSettleHoldPct}% held for settlement)` : ''}"
+              >
+                {#if td.inSettleHoldPct > 0}
+                  <div class="settle-hold-stripe in" style="width: {td.inSettleHoldPct}%"></div>
+                {/if}
+                {#if td.inHtlcHoldPct > 0}
+                  <div class="htlc-hold-stripe in" style="width: {td.inHtlcHoldPct}%"></div>
+                {/if}
+              </div>
             {/if}
             {#if td.derived.inPeerCredit > 0n}
               <div
                 class="bar-segment unused-credit"
                 style="width: {Number((td.derived.inPeerCredit * 100n) / td.derived.totalCapacity)}%"
-                title="Peer credit to us (unused): {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.inPeerCredit)}"
+                title="PEER's credit line (their risk — you can take this): {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.inPeerCredit)}"
               ></div>
             {/if}
           </div>
@@ -241,6 +297,13 @@
             {/if}
           </div>
         </div>
+        {#if account.settlementWorkspace}
+          <div class="settle-badge-row">
+            <span class="settle-badge {account.settlementWorkspace.status}">
+              Settlement: {account.settlementWorkspace.status.replace(/_/g, ' ')}
+            </span>
+          </div>
+        {/if}
       </div>
     {/each}
   </div>
@@ -285,6 +348,38 @@
   .account-status {
     display: flex;
     align-items: center;
+    gap: 6px;
+  }
+
+  .conn-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .conn-dot.connected {
+    background: #4ade80;
+    box-shadow: 0 0 4px rgba(74, 222, 128, 0.5);
+  }
+
+  .conn-dot.queued {
+    background: #fbbf24;
+    animation: conn-pulse 2s infinite;
+  }
+
+  .conn-dot.disconnected {
+    background: #57534e;
+  }
+
+  .conn-dot.unknown {
+    background: transparent;
+    border: 1px solid #57534e;
+  }
+
+  @keyframes conn-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
   }
 
   .status-badge {
@@ -397,26 +492,34 @@
     font-size: 0.8em;
   }
 
+  .bar-separator.zero-point {
+    width: 6px;
+    background: rgba(16, 185, 129, 0.3);
+    color: #10b981;
+    font-size: 0.6em;
+    font-weight: 700;
+  }
+
   .bar-segment {
     height: 100%;
     position: relative;
     transition: width 0.3s ease;
   }
 
-  /* Unused credit - Red (credit = potential liability) */
+  /* Unused credit - credit line exposure (dimmed via element opacity, not color alpha) */
   .bar-segment.unused-credit {
-    background: #ef4444;
-    opacity: 0.7;
+    background: var(--bar-credit, #eab308);
+    opacity: 0.5;
   }
 
-  /* Collateral - Green (safe, backed) */
+  /* Collateral - on-chain backed (color from barColorMode) */
   .bar-segment.collateral {
-    background: #10b981;
+    background: var(--bar-collateral, #10b981);
   }
 
-  /* Used credit - Dark Red (actual debt) */
+  /* Used credit - active debt (color from barColorMode) */
   .bar-segment.used-credit {
-    background: #dc2626;
+    background: var(--bar-debt, #ef4444);
   }
 
   .bar-segment:hover {
@@ -465,15 +568,98 @@
   }
 
   .breakdown-item.debt {
-    color: #dc2626;
+    color: var(--bar-debt, #ef4444);
   }
 
   .breakdown-item.coll {
-    color: #10b981;
+    color: var(--bar-collateral, #10b981);
   }
 
   .breakdown-item.credit {
-    color: #ef4444;
-    opacity: 0.6;
+    color: var(--bar-credit, #eab308);
+  }
+
+  /* Settlement hold stripe overlay */
+  .settle-hold-stripe {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 2px,
+      rgba(255, 255, 255, 0.15) 2px,
+      rgba(255, 255, 255, 0.15) 4px
+    );
+    pointer-events: none;
+  }
+
+  .settle-hold-stripe.out {
+    right: 0;
+  }
+
+  .settle-hold-stripe.in {
+    left: 0;
+  }
+
+  /* HTLC hold stripe — horizontal dashes (distinct from diagonal settlement) */
+  .htlc-hold-stripe {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 3px,
+      rgba(251, 191, 36, 0.25) 3px,
+      rgba(251, 191, 36, 0.25) 5px
+    );
+    pointer-events: none;
+  }
+
+  .htlc-hold-stripe.out {
+    right: 0;
+  }
+
+  .htlc-hold-stripe.in {
+    left: 0;
+  }
+
+  /* Settlement status badge */
+  .settle-badge-row {
+    padding: 2px 0 0;
+  }
+
+  .settle-badge {
+    font-size: 0.6em;
+    padding: 2px 6px;
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+  }
+
+  .settle-badge.draft {
+    color: #a8a29e;
+    background: rgba(168, 162, 158, 0.1);
+    border: 1px solid rgba(168, 162, 158, 0.15);
+  }
+
+  .settle-badge.awaiting_counterparty {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.15);
+  }
+
+  .settle-badge.ready_to_submit {
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.1);
+    border: 1px solid rgba(74, 222, 128, 0.15);
+  }
+
+  .settle-badge.submitted {
+    color: #60a5fa;
+    background: rgba(96, 165, 250, 0.1);
+    border: 1px solid rgba(96, 165, 250, 0.15);
   }
 </style>

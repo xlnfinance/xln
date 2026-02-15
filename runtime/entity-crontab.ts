@@ -47,7 +47,7 @@
  * Lost on page reload — periodic task polling serves as safety-net fallback.
  */
 
-import type { Env, EntityReplica, EntityInput, AccountMachine, SettlementDiff } from './types';
+import type { Env, EntityReplica, EntityInput, AccountMachine, SettlementOp } from './types';
 import { QUOTE_EXPIRY_MS, REFERENCE_TOKEN_ID } from './types';
 import { isLeftEntity } from './entity-id-utils';
 import { resolveEntityProposerId } from './state-helpers';
@@ -580,15 +580,8 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
   for (const target of c2rTargets) {
     const hubIsLeft = isLeftEntity(hubId, target.counterpartyId);
 
-    // Build settlement diffs: Hub withdraws collateral to reserve
-    // Conservation: leftDiff + rightDiff + collateralDiff = 0
-    const diffs: SettlementDiff[] = [{
-      tokenId: target.tokenId,
-      leftDiff: hubIsLeft ? target.amount : 0n,      // Hub LEFT: reserve increases
-      rightDiff: hubIsLeft ? 0n : target.amount,      // Hub RIGHT: reserve increases
-      collateralDiff: -target.amount,                 // Collateral decreases
-      ondeltaDiff: hubIsLeft ? -target.amount : 0n,   // Hub LEFT: ondelta tracks collateral
-    }];
+    // Build settlement ops: Hub withdraws collateral to reserve
+    const ops: SettlementOp[] = [{ type: 'c2r', tokenId: target.tokenId, amount: target.amount }];
 
     outputs.push({
       entityId: hubId,
@@ -597,7 +590,7 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
         type: 'settle_propose',
         data: {
           counterpartyEntityId: target.counterpartyId,
-          diffs,
+          ops,
           memo: `Hub C→R: withdraw ${target.amount} token ${target.tokenId}`,
         },
       }],
@@ -703,9 +696,19 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     // Phase 2b: Check absolute policy triggers (uncollateralized credit > softLimit)
     // 2019 ref: "finding who has uninsured balances AND gone beyond soft limit"
     // uncollateralizedCredit = max(0, hubDebtToUser - collateral)
+    //
+    // If no explicit rebalancePolicy is set, use default: softLimit=0 (any debt triggers).
+    // This ensures hubs auto-rebalance even before users set explicit policies.
     const hubIsLeftP2 = isLeftEntity(hubId, counterpartyId);
-    for (const [tokenId, policy] of accountMachine.rebalancePolicy.entries()) {
-      if (policy.softLimit === policy.hardLimit) continue;
+    // Default: softLimit=0 (trigger on any debt), hardLimit=max (auto mode, not manual)
+    const defaultPolicy = { softLimit: 0n, hardLimit: 2n ** 128n, maxAcceptableFee: 0n };
+    const policyEntries: [number, { softLimit: bigint; hardLimit: bigint }][] =
+      accountMachine.rebalancePolicy.size > 0
+        ? Array.from(accountMachine.rebalancePolicy.entries())
+        : Array.from(accountMachine.deltas.keys()).map(tokenId => [tokenId, defaultPolicy]);
+
+    for (const [tokenId, policy] of policyEntries) {
+      if (policy.softLimit === policy.hardLimit && accountMachine.rebalancePolicy.size > 0) continue;
 
       const delta = accountMachine.deltas.get(tokenId);
       if (!delta) continue;

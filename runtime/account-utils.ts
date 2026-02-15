@@ -94,6 +94,12 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   outCapacity = nonNegative(outCapacity - leftHold);
   inCapacity = nonNegative(inCapacity - rightHold);
 
+  // Hold fields for UI (LEFT's perspective: out = left, in = right)
+  let outSettleHold = leftSettleHold;
+  let inSettleHold = rightSettleHold;
+  let outHtlcHold = leftHtlcHold;
+  let inHtlcHold = rightHtlcHold;
+
   if (!isLeft) {
     // Flip for RIGHT entity perspective
     [inCollateral, inAllowance, inCapacity,
@@ -104,6 +110,9 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
     [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] =
     [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
+
+    [outSettleHold, inSettleHold] = [inSettleHold, outSettleHold];
+    [outHtlcHold, inHtlcHold] = [inHtlcHold, outHtlcHold];
   }
 
   // ASCII visualization
@@ -151,6 +160,10 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     inPeerCredit,
     peerCreditUsed,  // HYBRID: credit peer lent that we're using
     ownCreditUsed,   // HYBRID: credit we lent that peer is using
+    outSettleHold,
+    inSettleHold,
+    outHtlcHold,
+    inHtlcHold,
     ascii,
   };
 }

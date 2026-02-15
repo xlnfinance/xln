@@ -451,12 +451,15 @@
     const runtime = get(allVaults).find(v => v.id === runtimeId);
     const runtimeLabel = runtime?.label || runtimeId;
 
-    if (!confirm(`Delete "${runtimeLabel}"? This will remove all entities and data.`)) {
-      return;
-    }
+    const isLast = get(runtimes).size <= 1;
+    const msg = isLast
+      ? `Delete "${runtimeLabel}"? This is the last runtime — all data will be wiped and you'll return to the setup screen.`
+      : `Delete "${runtimeLabel}"? This will remove all entities and data.`;
 
-    // Delete runtime
-    vaultOperations.deleteRuntime(runtimeId);
+    if (!confirm(msg)) return;
+
+    // Full cleanup: P2P, loop, stores
+    await vaultOperations.deleteRuntime(runtimeId);
 
     // Delete runtime from runtimeStore
     runtimes.update(r => {
@@ -465,6 +468,11 @@
     });
 
     console.log('[UserModePanel] ✅ Runtime deleted:', runtimeId);
+
+    // If last runtime, open creation screen
+    if (isLast) {
+      vaultUiOperations.requestDeriveNewVault();
+    }
   }
 
   function focusDockPanel(panelId: string) {
@@ -550,7 +558,7 @@
         <RuntimeDropdown
           allowAdd={true}
           addLabel="+ Add Runtime"
-          allowDelete={$runtimes.size > 1}
+          allowDelete={true}
           on:addRuntime={handleAddRuntime}
           on:deleteRuntime={handleRemoveRuntime}
         />

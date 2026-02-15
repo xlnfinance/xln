@@ -77,7 +77,9 @@ const createWs = async (url: string): Promise<WebSocketLike> => {
 };
 
 export class RuntimeWsClient {
-  private static readonly RECONNECT_DELAY_MS = 5000;
+  private static readonly BACKOFF_BASE_MS = 1000;
+  private static readonly BACKOFF_MAX_MS = 30000;
+  private static readonly BACKOFF_MIN_MS = 250;
   private static readonly DEFAULT_MAX_RECONNECT_ATTEMPTS = 0;
   private ws: WebSocketLike | null = null;
   private closed = false;
@@ -85,6 +87,7 @@ export class RuntimeWsClient {
   private options: RuntimeWsClientOptions;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
+  private nextReconnectAt: number = 0;
   private suppressNextClose = false;
   private readonly maxReconnectAttempts: number;
 
@@ -140,7 +143,7 @@ export class RuntimeWsClient {
           return;
         }
         if (!this.closed) {
-          console.error(`[WS] Connection lost to ${this.options.url} — reconnect in ${RuntimeWsClient.RECONNECT_DELAY_MS}ms`);
+          console.error(`[WS] Connection lost to ${this.options.url} — scheduling reconnect`);
           this.options.onError?.(new Error(`WS_DISCONNECTED: Connection lost to ${this.options.url}`));
           this.scheduleReconnect();
         }
@@ -151,7 +154,7 @@ export class RuntimeWsClient {
         // Some WS handshake failures emit only "error" without a "close" callback.
         // Keep reconnect ownership idempotent via scheduleReconnect() guards.
         if (!this.closed && !this.isOpen()) {
-          console.error(`[WS] Error on ${this.options.url} — reconnect in ${RuntimeWsClient.RECONNECT_DELAY_MS}ms`);
+          console.error(`[WS] Error on ${this.options.url} — scheduling reconnect`);
           this.scheduleReconnect();
         }
       });
@@ -171,7 +174,7 @@ export class RuntimeWsClient {
           return;
         }
         if (!this.closed) {
-          console.error(`[WS] Connection lost to ${this.options.url} — reconnect in ${RuntimeWsClient.RECONNECT_DELAY_MS}ms`);
+          console.error(`[WS] Connection lost to ${this.options.url} — scheduling reconnect`);
           this.options.onError?.(new Error(`WS_DISCONNECTED: Connection lost to ${this.options.url}`));
           this.scheduleReconnect();
         }
@@ -181,11 +184,18 @@ export class RuntimeWsClient {
         this.options.onError?.(new Error(`WebSocket error: ${event.type}`));
         // Browser can also surface error before close in transient network failures.
         if (!this.closed && !this.isOpen()) {
-          console.error(`[WS] Error on ${this.options.url} — reconnect in ${RuntimeWsClient.RECONNECT_DELAY_MS}ms`);
+          console.error(`[WS] Error on ${this.options.url} — scheduling reconnect`);
           this.scheduleReconnect();
         }
       };
     }
+  }
+
+  private computeBackoffMs(): number {
+    const base = RuntimeWsClient.BACKOFF_BASE_MS * Math.pow(2, this.reconnectAttempts - 1);
+    const clamped = Math.min(base, RuntimeWsClient.BACKOFF_MAX_MS);
+    const jitter = 0.7 + Math.random() * 0.6; // 0.7..1.3
+    return Math.max(RuntimeWsClient.BACKOFF_MIN_MS, Math.round(clamped * jitter));
   }
 
   private scheduleReconnect() {
@@ -201,11 +211,22 @@ export class RuntimeWsClient {
       this.options.onError?.(err);
       return;
     }
+    const delayMs = this.computeBackoffMs();
+    this.nextReconnectAt = Date.now() + delayMs;
+    console.log(`[WS] Reconnecting to ${this.options.url} in ${delayMs}ms (attempt ${this.reconnectAttempts})`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      this.nextReconnectAt = 0;
       if (this.closed) return;
       this.connect().catch(error => this.options.onError?.(error as Error));
-    }, RuntimeWsClient.RECONNECT_DELAY_MS);
+    }, delayMs);
+  }
+
+  getReconnectState(): { attempt: number; nextAt: number } | null {
+    if (this.reconnectTimer && this.nextReconnectAt > 0) {
+      return { attempt: this.reconnectAttempts, nextAt: this.nextReconnectAt };
+    }
+    return null;
   }
 
   private sendHello() {
@@ -321,17 +342,6 @@ export class RuntimeWsClient {
       await this.options.onGossipAnnounce?.(msg.from, msg.payload);
       return;
     }
-  }
-
-  sendRuntimeInput(to: string, input: RuntimeInput): boolean {
-    return this.sendRaw({
-      type: 'runtime_input',
-      id: makeMessageId(),
-      from: this.options.runtimeId,
-      to,
-      timestamp: nextTimestamp(),
-      payload: input,
-    });
   }
 
   sendEntityInput(to: string, input: RoutedEntityInput): boolean {
@@ -450,6 +460,8 @@ export class RuntimeWsClient {
     this.closed = true;
     this.connecting = false;
     this.suppressNextClose = true;
+    this.reconnectAttempts = 0;
+    this.nextReconnectAt = 0;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

@@ -211,7 +211,6 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     // DEBUG EVENT: best-effort sink for client-side diagnostics.
     // Local dev relay does not persist these; acknowledge and drop.
     if (msg.type === 'debug_event') {
-      send(ws, { type: 'ack', inReplyTo: msg.id, status: 'stored', count: 1 });
       return;
     }
 
@@ -223,7 +222,6 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       for (const profile of profiles) {
         if (storeGossipProfile(profile, msg.from || 'unknown')) stored++;
       }
-      send(ws, { type: 'ack', inReplyTo: msg.id, status: 'stored', count: stored });
       return;
     }
 
@@ -287,7 +285,6 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     const targetClient = clients.get(normalizedTarget);
     if (targetClient && !useLocalDelivery) {
       send(targetClient.ws, msg);
-      send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
       return;
     }
 
@@ -296,7 +293,6 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       const payload = msg.payload as RoutedEntityInput;
       try {
         await options.onEntityInput(msg.from, payload);
-        send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
         return;
       } catch (error) {
         // Fall through to queueing
@@ -307,7 +303,6 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       const payload = msg.payload as RuntimeInput;
       try {
         await options.onRuntimeInput(msg.from, payload);
-        send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
         return;
       } catch (error) {
         // Fall through to queueing
@@ -315,7 +310,6 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     }
 
     enqueue(normalizedTarget, msg);
-    send(ws, { type: 'ack', inReplyTo: msg.id, status: 'queued' });
   };
 
   wss.on('connection', (ws, req) => {
@@ -338,7 +332,6 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       }
       clients.set(normalized, { ws, runtimeId: normalized, lastSeen: now() });
       flushQueue(normalized, ws);
-      send(ws, { type: 'ack', inReplyTo: 'hello', status: 'delivered' });
     };
 
     const heartbeat = setInterval(() => {
@@ -414,7 +407,6 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       // Some clients still send hello after query-param auto-registration.
       // Treat as harmless keepalive/re-auth and acknowledge.
       if (msg.type === 'hello') {
-        send(ws, { type: 'ack', inReplyTo: msg.id || 'hello', status: 'delivered' });
         return;
       }
 

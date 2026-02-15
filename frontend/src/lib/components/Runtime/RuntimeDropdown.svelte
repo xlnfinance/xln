@@ -68,7 +68,7 @@
         >
           <span class="menu-label" title={signerAddr}>{displayName}</span>
           <span class="menu-meta">{runtime.signers.length} signers</span>
-          {#if allowDelete && runtimeEntries.length > 1}
+          {#if allowDelete}
             <button
               class="delete-btn"
               on:click={(e) => handleDeleteRuntime(e, runtime.id)}

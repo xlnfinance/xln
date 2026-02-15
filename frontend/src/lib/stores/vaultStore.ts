@@ -252,6 +252,23 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
       env.runtimeState.loopActive = false;
       env.runtimeState.stopLoop = null;
     }
+
+    // Clear database and close DB handle for full wipe
+    const xlnAny = xln as any;
+    if (xlnAny.clearDatabase && xlnAny.getRuntimeDb) {
+      try {
+        const db = xlnAny.getRuntimeDb(env);
+        if (db) {
+          await xlnAny.clearDatabase(db);
+          console.log(`[VaultStore] 🗑️ Database cleared for runtime ${runtimeId.slice(0, 12)}`);
+        }
+      } catch (dbErr) {
+        console.warn(`[VaultStore] DB clear failed:`, dbErr);
+      }
+    }
+    if (xlnAny.closeRuntimeDb) {
+      await xlnAny.closeRuntimeDb(env);
+    }
   } catch (err) {
     console.warn(`[VaultStore] Failed to cleanup runtime ${runtimeId.slice(0, 12)}:`, err);
   }

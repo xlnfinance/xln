@@ -31,7 +31,6 @@ export type RuntimeWsMessageType =
   | 'gossip_subscribed'
   | 'gossip_subscribe'
   | 'gossip_update'
-  | 'ack'
   | 'error'
   | 'ping'
   | 'pong';
@@ -52,8 +51,6 @@ export type RuntimeWsMessage = {
   payload?: unknown;
   encrypted?: boolean;        // If true, payload is encrypted base64 string
   auth?: RuntimeWsAuth;
-  status?: 'delivered' | 'queued' | 'failed' | 'stored';
-  count?: number;
   inReplyTo?: string;
   error?: string;
 };
