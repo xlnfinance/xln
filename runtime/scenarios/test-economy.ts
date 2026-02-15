@@ -1,6 +1,6 @@
 /**
  * Procedural Test Economy Helpers
- * Simplifies creating N hubs + M users with channels for testing
+ * Simplifies creating N hubs + M users with accounts for testing
  */
 
 import type { Env, EntityInput } from '../types';
@@ -115,10 +115,10 @@ export async function createEconomy(
 }
 
 /**
- * Open bilateral channels between entities with credit
+ * Open bilateral account between entities with credit
  * Pattern: Creates account + extends credit both ways
  */
-export async function openChannel(
+export async function openAccount(
   env: Env,
   entityA: EconomyEntity,
   entityB: EconomyEntity,
@@ -173,8 +173,8 @@ export async function openChannel(
 }
 
 /**
- * Connect economy - open channels between hubs and their users
- * Creates hub-hub channels + hub-user channels
+ * Connect economy - open accounts between hubs and their users
+ * Creates hub-hub accounts + hub-user accounts
  */
 export async function connectEconomy(
   env: Env,
@@ -183,13 +183,13 @@ export async function connectEconomy(
   creditLimit: bigint,
   tokenId: number
 ): Promise<void> {
-  console.log(`🔗 Connecting economy channels...\n`);
+  console.log(`🔗 Connecting economy accounts...\n`);
 
   // Connect hubs to each other (full mesh)
   console.log(`   Connecting ${hubs.length} hubs (mesh)...`);
   for (let i = 0; i < hubs.length; i++) {
     for (let j = i + 1; j < hubs.length; j++) {
-      await openChannel(env, hubs[i], hubs[j], creditLimit, tokenId);
+      await openAccount(env, hubs[i], hubs[j], creditLimit, tokenId);
       console.log(`   ✅ ${hubs[i].name} ↔ ${hubs[j].name}`);
     }
   }
@@ -198,7 +198,7 @@ export async function connectEconomy(
   console.log(`\n   Connecting users to hubs...`);
   for (let h = 0; h < hubs.length; h++) {
     for (const user of users[h]) {
-      await openChannel(env, hubs[h], user, creditLimit, tokenId);
+      await openAccount(env, hubs[h], user, creditLimit, tokenId);
       console.log(`   ✅ ${hubs[h].name} ↔ ${user.name}`);
     }
   }

@@ -308,35 +308,50 @@ export async function createBrowserVMAdapter(
         }
 
         const entityProviderAddr = browserVM.getEntityProviderAddress();
-        const depositoryAddr = browserVM.getDepositoryAddress();
-        const chainId = (browserVM as any).getChainId?.() ?? BigInt(config.chainId);
-        const sid = signerId ?? jTx.data.signerId;
+        const normalizedId = normalizeEntityId(jTx.entityId);
 
-        if (!sid) {
-          return { success: false, error: `Missing signerId for batch from ${jTx.entityId.slice(-4)}` };
-        }
-
-        // Validate settlements have signatures
+        // Validate settlements have signatures + entityProvider
         for (const settlement of jTx.data.batch.settlements ?? []) {
-          settlement.entityProvider = entityProviderAddr;
+          if (!settlement.entityProvider || settlement.entityProvider === '0x0000000000000000000000000000000000000000') {
+            settlement.entityProvider = entityProviderAddr;
+          }
           if (settlement.diffs?.length > 0 && (!settlement.sig || settlement.sig === '0x')) {
             return { success: false, error: `Settlement missing hanko sig: ${settlement.leftEntity?.slice(-4)}↔${settlement.rightEntity?.slice(-4)}` };
           }
         }
 
-        const encodedBatch = encodeJBatch(jTx.data.batch);
-        const normalizedId = normalizeEntityId(jTx.entityId);
-        const currentNonce = await browserVM.getEntityNonce(normalizedId);
-        const nextNonce = currentNonce + 1n;
-        const batchHash = computeBatchHankoHash(chainId, depositoryAddr, encodedBatch, nextNonce);
+        // Use pre-provided encoded batch + hanko (from entity consensus) or sign locally
+        let encodedBatch: string;
+        let hankoData: string;
+        let nextNonce: bigint;
 
-        console.log(`🔐 [JAdapter:browservm] Signing hanko: entity=${normalizedId.slice(-4)} nonce=${nextNonce} chainId=${chainId}`);
+        if (jTx.data.hankoSignature && jTx.data.encodedBatch && jTx.data.entityNonce) {
+          // Entity consensus already signed — use pre-provided hanko
+          encodedBatch = jTx.data.encodedBatch;
+          hankoData = jTx.data.hankoSignature;
+          nextNonce = BigInt(jTx.data.entityNonce);
+          console.log(`🔐 [JAdapter:browservm] Using consensus hanko: nonce=${nextNonce}`);
+        } else {
+          // Fallback: single-signer sign locally (for scenarios / backward compat)
+          const sid = signerId ?? jTx.data.signerId;
+          if (!sid) {
+            return { success: false, error: `Missing signerId for batch from ${jTx.entityId.slice(-4)}` };
+          }
 
-        const { signHashesAsSingleEntity } = await import('../hanko-signing');
-        const hankos = await signHashesAsSingleEntity(env, normalizedId, sid, [batchHash]);
-        const hankoData = hankos[0];
-        if (!hankoData) {
-          return { success: false, error: 'Failed to build batch hanko signature' };
+          const depositoryAddr = browserVM.getDepositoryAddress();
+          const chainId = (browserVM as any).getChainId?.() ?? BigInt(config.chainId);
+          encodedBatch = encodeJBatch(jTx.data.batch);
+          const currentNonce = await browserVM.getEntityNonce(normalizedId);
+          nextNonce = currentNonce + 1n;
+          const batchHash = computeBatchHankoHash(chainId, depositoryAddr, encodedBatch, nextNonce);
+
+          console.log(`🔐 [JAdapter:browservm] Local signing: entity=${normalizedId.slice(-4)} signer=${sid} nonce=${nextNonce} chainId=${chainId}`);
+          const { signHashesAsSingleEntity } = await import('../hanko-signing');
+          const hankos = await signHashesAsSingleEntity(env, normalizedId, sid, [batchHash]);
+          hankoData = hankos[0]!;
+          if (!hankoData) {
+            return { success: false, error: 'Failed to build batch hanko signature' };
+          }
         }
 
         // Preflight check

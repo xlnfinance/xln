@@ -4,7 +4,7 @@ import { formatEntityId } from '../utils';
 import { processProfileUpdate } from '../name-resolution';
 import { createOrderbookExtState } from '../orderbook';
 import { getRuntimeDb, tryOpenDb } from '../runtime';
-import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput } from '../types';
+import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput, HashType } from '../types';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { buildEntityProfile, mergeProfileWithExisting } from '../networking/gossip-helper';
@@ -22,7 +22,7 @@ export interface ApplyEntityTxResult {
   swapOffersCreated?: SwapOfferEvent[];
   swapOffersCancelled?: SwapCancelEvent[];
   // Multi-signer: Hashes that need entity-quorum signing
-  hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute' | 'settlement'; context: string }>;
+  hashesToSign?: Array<{ hash: string; type: HashType; context: string }>;
 }
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
@@ -339,8 +339,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           proofHeader: {
             fromEntity: entityState.entityId,  // Perspective-dependent for signing
             toEntity: counterpartyId,
-            cooperativeNonce: 0,
-            disputeNonce: 0,
+            nonce: 0,  // Unified on-chain nonce
           },
           proofBody: { tokenIds: [], deltas: [] },
           // Dispute configuration (default: 20 blocks = 2 * 10)

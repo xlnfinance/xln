@@ -23,9 +23,7 @@ import type {
   TypedContractMethod,
 } from "./common";
 
-export type SettledStruct = {
-  left: BytesLike;
-  right: BytesLike;
+export type TokenSettlementStruct = {
   tokenId: BigNumberish;
   leftReserve: BigNumberish;
   rightReserve: BigNumberish;
@@ -33,22 +31,37 @@ export type SettledStruct = {
   ondelta: BigNumberish;
 };
 
-export type SettledStructOutput = [
-  left: string,
-  right: string,
+export type TokenSettlementStructOutput = [
   tokenId: bigint,
   leftReserve: bigint,
   rightReserve: bigint,
   collateral: bigint,
   ondelta: bigint
 ] & {
-  left: string;
-  right: string;
   tokenId: bigint;
   leftReserve: bigint;
   rightReserve: bigint;
   collateral: bigint;
   ondelta: bigint;
+};
+
+export type AccountSettlementStruct = {
+  left: BytesLike;
+  right: BytesLike;
+  tokens: TokenSettlementStruct[];
+  nonce: BigNumberish;
+};
+
+export type AccountSettlementStructOutput = [
+  left: string,
+  right: string,
+  tokens: TokenSettlementStructOutput[],
+  nonce: bigint
+] & {
+  left: string;
+  right: string;
+  tokens: TokenSettlementStructOutput[];
+  nonce: bigint;
 };
 
 export interface AccountInterface extends Interface {
@@ -57,8 +70,6 @@ export interface AccountInterface extends Interface {
       | "accountKey"
       | "computeBatchHankoHash"
       | "encodeDisputeHash"
-      | "packTokenReference"
-      | "unpackTokenReference"
   ): FunctionFragment;
 
   getEvent(
@@ -66,12 +77,7 @@ export interface AccountInterface extends Interface {
       | "AccountSettled"
       | "DebtCreated"
       | "DebtForgiven"
-      | "DebugHankoResult"
-      | "DebugHankoStep"
-      | "DebugSettleEntry"
-      | "DebugSettlementHash"
       | "DisputeStarted"
-      | "InsuranceRegistered"
       | "ReserveUpdated"
   ): EventFragment;
 
@@ -85,22 +91,7 @@ export interface AccountInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "encodeDisputeHash",
-    values: [
-      BigNumberish,
-      BigNumberish,
-      boolean,
-      BigNumberish,
-      BytesLike,
-      BytesLike
-    ]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "packTokenReference",
-    values: [BigNumberish, AddressLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "unpackTokenReference",
-    values: [BytesLike]
+    values: [BigNumberish, boolean, BigNumberish, BytesLike, BytesLike]
   ): string;
 
   decodeFunctionResult(functionFragment: "accountKey", data: BytesLike): Result;
@@ -112,21 +103,13 @@ export interface AccountInterface extends Interface {
     functionFragment: "encodeDisputeHash",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(
-    functionFragment: "packTokenReference",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "unpackTokenReference",
-    data: BytesLike
-  ): Result;
 }
 
 export namespace AccountSettledEvent {
-  export type InputTuple = [settled: SettledStruct[]];
-  export type OutputTuple = [settled: SettledStructOutput[]];
+  export type InputTuple = [settled: AccountSettlementStruct[]];
+  export type OutputTuple = [settled: AccountSettlementStructOutput[]];
   export interface OutputObject {
-    settled: SettledStructOutput[];
+    settled: AccountSettlementStructOutput[];
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -190,146 +173,27 @@ export namespace DebtForgivenEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace DebugHankoResultEvent {
-  export type InputTuple = [recoveredEntity: BytesLike, valid: boolean];
-  export type OutputTuple = [recoveredEntity: string, valid: boolean];
-  export interface OutputObject {
-    recoveredEntity: string;
-    valid: boolean;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace DebugHankoStepEvent {
-  export type InputTuple = [
-    step: BigNumberish,
-    val1: BytesLike,
-    val2: BytesLike,
-    boolVal: boolean
-  ];
-  export type OutputTuple = [
-    step: bigint,
-    val1: string,
-    val2: string,
-    boolVal: boolean
-  ];
-  export interface OutputObject {
-    step: bigint;
-    val1: string;
-    val2: string;
-    boolVal: boolean;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace DebugSettleEntryEvent {
-  export type InputTuple = [
-    leftEntity: BytesLike,
-    rightEntity: BytesLike,
-    initiator: BytesLike,
-    sigLen: BigNumberish
-  ];
-  export type OutputTuple = [
-    leftEntity: string,
-    rightEntity: string,
-    initiator: string,
-    sigLen: bigint
-  ];
-  export interface OutputObject {
-    leftEntity: string;
-    rightEntity: string;
-    initiator: string;
-    sigLen: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace DebugSettlementHashEvent {
-  export type InputTuple = [
-    computedHash: BytesLike,
-    counterparty: BytesLike,
-    cooperativeNonce: BigNumberish,
-    diffsLength: BigNumberish,
-    encodedMsgLength: BigNumberish
-  ];
-  export type OutputTuple = [
-    computedHash: string,
-    counterparty: string,
-    cooperativeNonce: bigint,
-    diffsLength: bigint,
-    encodedMsgLength: bigint
-  ];
-  export interface OutputObject {
-    computedHash: string;
-    counterparty: string;
-    cooperativeNonce: bigint;
-    diffsLength: bigint;
-    encodedMsgLength: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
 export namespace DisputeStartedEvent {
   export type InputTuple = [
     sender: BytesLike,
     counterentity: BytesLike,
-    disputeNonce: BigNumberish,
+    nonce: BigNumberish,
     proofbodyHash: BytesLike,
     initialArguments: BytesLike
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
-    disputeNonce: bigint,
+    nonce: bigint,
     proofbodyHash: string,
     initialArguments: string
   ];
   export interface OutputObject {
     sender: string;
     counterentity: string;
-    disputeNonce: bigint;
+    nonce: bigint;
     proofbodyHash: string;
     initialArguments: string;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace InsuranceRegisteredEvent {
-  export type InputTuple = [
-    insured: BytesLike,
-    insurer: BytesLike,
-    tokenId: BigNumberish,
-    limit: BigNumberish,
-    expiresAt: BigNumberish
-  ];
-  export type OutputTuple = [
-    insured: string,
-    insurer: string,
-    tokenId: bigint,
-    limit: bigint,
-    expiresAt: bigint
-  ];
-  export interface OutputObject {
-    insured: string;
-    insurer: string;
-    tokenId: bigint;
-    limit: bigint;
-    expiresAt: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -422,30 +286,13 @@ export interface Account extends BaseContract {
 
   encodeDisputeHash: TypedContractMethod<
     [
-      cooperativeNonce: BigNumberish,
-      disputeNonce: BigNumberish,
+      nonce: BigNumberish,
       startedByLeft: boolean,
       timeout: BigNumberish,
       proofbodyHash: BytesLike,
       initialArguments: BytesLike
     ],
     [string],
-    "view"
-  >;
-
-  packTokenReference: TypedContractMethod<
-    [
-      tokenType: BigNumberish,
-      contractAddress: AddressLike,
-      externalTokenId: BigNumberish
-    ],
-    [string],
-    "view"
-  >;
-
-  unpackTokenReference: TypedContractMethod<
-    [arg0: BytesLike],
-    [[string, bigint, bigint]],
     "view"
   >;
 
@@ -473,8 +320,7 @@ export interface Account extends BaseContract {
     nameOrSignature: "encodeDisputeHash"
   ): TypedContractMethod<
     [
-      cooperativeNonce: BigNumberish,
-      disputeNonce: BigNumberish,
+      nonce: BigNumberish,
       startedByLeft: boolean,
       timeout: BigNumberish,
       proofbodyHash: BytesLike,
@@ -483,20 +329,6 @@ export interface Account extends BaseContract {
     [string],
     "view"
   >;
-  getFunction(
-    nameOrSignature: "packTokenReference"
-  ): TypedContractMethod<
-    [
-      tokenType: BigNumberish,
-      contractAddress: AddressLike,
-      externalTokenId: BigNumberish
-    ],
-    [string],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "unpackTokenReference"
-  ): TypedContractMethod<[arg0: BytesLike], [[string, bigint, bigint]], "view">;
 
   getEvent(
     key: "AccountSettled"
@@ -520,46 +352,11 @@ export interface Account extends BaseContract {
     DebtForgivenEvent.OutputObject
   >;
   getEvent(
-    key: "DebugHankoResult"
-  ): TypedContractEvent<
-    DebugHankoResultEvent.InputTuple,
-    DebugHankoResultEvent.OutputTuple,
-    DebugHankoResultEvent.OutputObject
-  >;
-  getEvent(
-    key: "DebugHankoStep"
-  ): TypedContractEvent<
-    DebugHankoStepEvent.InputTuple,
-    DebugHankoStepEvent.OutputTuple,
-    DebugHankoStepEvent.OutputObject
-  >;
-  getEvent(
-    key: "DebugSettleEntry"
-  ): TypedContractEvent<
-    DebugSettleEntryEvent.InputTuple,
-    DebugSettleEntryEvent.OutputTuple,
-    DebugSettleEntryEvent.OutputObject
-  >;
-  getEvent(
-    key: "DebugSettlementHash"
-  ): TypedContractEvent<
-    DebugSettlementHashEvent.InputTuple,
-    DebugSettlementHashEvent.OutputTuple,
-    DebugSettlementHashEvent.OutputObject
-  >;
-  getEvent(
     key: "DisputeStarted"
   ): TypedContractEvent<
     DisputeStartedEvent.InputTuple,
     DisputeStartedEvent.OutputTuple,
     DisputeStartedEvent.OutputObject
-  >;
-  getEvent(
-    key: "InsuranceRegistered"
-  ): TypedContractEvent<
-    InsuranceRegisteredEvent.InputTuple,
-    InsuranceRegisteredEvent.OutputTuple,
-    InsuranceRegisteredEvent.OutputObject
   >;
   getEvent(
     key: "ReserveUpdated"
@@ -603,50 +400,6 @@ export interface Account extends BaseContract {
       DebtForgivenEvent.OutputObject
     >;
 
-    "DebugHankoResult(bytes32,bool)": TypedContractEvent<
-      DebugHankoResultEvent.InputTuple,
-      DebugHankoResultEvent.OutputTuple,
-      DebugHankoResultEvent.OutputObject
-    >;
-    DebugHankoResult: TypedContractEvent<
-      DebugHankoResultEvent.InputTuple,
-      DebugHankoResultEvent.OutputTuple,
-      DebugHankoResultEvent.OutputObject
-    >;
-
-    "DebugHankoStep(uint256,bytes32,bytes32,bool)": TypedContractEvent<
-      DebugHankoStepEvent.InputTuple,
-      DebugHankoStepEvent.OutputTuple,
-      DebugHankoStepEvent.OutputObject
-    >;
-    DebugHankoStep: TypedContractEvent<
-      DebugHankoStepEvent.InputTuple,
-      DebugHankoStepEvent.OutputTuple,
-      DebugHankoStepEvent.OutputObject
-    >;
-
-    "DebugSettleEntry(bytes32,bytes32,bytes32,uint256)": TypedContractEvent<
-      DebugSettleEntryEvent.InputTuple,
-      DebugSettleEntryEvent.OutputTuple,
-      DebugSettleEntryEvent.OutputObject
-    >;
-    DebugSettleEntry: TypedContractEvent<
-      DebugSettleEntryEvent.InputTuple,
-      DebugSettleEntryEvent.OutputTuple,
-      DebugSettleEntryEvent.OutputObject
-    >;
-
-    "DebugSettlementHash(bytes32,bytes32,uint256,uint256,uint256)": TypedContractEvent<
-      DebugSettlementHashEvent.InputTuple,
-      DebugSettlementHashEvent.OutputTuple,
-      DebugSettlementHashEvent.OutputObject
-    >;
-    DebugSettlementHash: TypedContractEvent<
-      DebugSettlementHashEvent.InputTuple,
-      DebugSettlementHashEvent.OutputTuple,
-      DebugSettlementHashEvent.OutputObject
-    >;
-
     "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes)": TypedContractEvent<
       DisputeStartedEvent.InputTuple,
       DisputeStartedEvent.OutputTuple,
@@ -656,17 +409,6 @@ export interface Account extends BaseContract {
       DisputeStartedEvent.InputTuple,
       DisputeStartedEvent.OutputTuple,
       DisputeStartedEvent.OutputObject
-    >;
-
-    "InsuranceRegistered(bytes32,bytes32,uint256,uint256,uint256)": TypedContractEvent<
-      InsuranceRegisteredEvent.InputTuple,
-      InsuranceRegisteredEvent.OutputTuple,
-      InsuranceRegisteredEvent.OutputObject
-    >;
-    InsuranceRegistered: TypedContractEvent<
-      InsuranceRegisteredEvent.InputTuple,
-      InsuranceRegisteredEvent.OutputTuple,
-      InsuranceRegisteredEvent.OutputObject
     >;
 
     "ReserveUpdated(bytes32,uint256,uint256)": TypedContractEvent<

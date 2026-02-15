@@ -7,7 +7,8 @@
 import type { Env } from '../types';
 import { createEconomy, connectEconomy, testHtlcRoute, type EconomyEntity } from './test-economy';
 import { usd, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
-import { ensureBrowserVM, createJReplica } from './boot';
+import { ensureJAdapter, createJReplica, getScenarioJAdapter } from './boot';
+import type { JAdapter } from '../jadapter/types';
 import { createRngFromEnv } from './seeded-rng';
 
 const USDC_TOKEN_ID = 1;
@@ -37,10 +38,18 @@ export async function htlc4hop(env: Env): Promise<void> {
   console.log('          HTLC 4-HOP ONION ROUTING TEST                    ');
   console.log('═══════════════════════════════════════════════════════════\n');
 
-  // Setup BrowserVM
-  const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
-  createJReplica(env, '4-Hop Demo', depositoryAddress);
+  // Setup JAdapter (browservm or rpc, depending on JADAPTER_MODE)
+  let jadapter: JAdapter;
+  try {
+    jadapter = getScenarioJAdapter(env);
+  } catch {
+    jadapter = await ensureJAdapter(env);
+    const jReplica = createJReplica(env, '4-Hop Demo', jadapter.addresses.depository);
+    (jReplica as any).jadapter = jadapter;
+    (jReplica as any).depositoryAddress = jadapter.addresses.depository;
+    (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+    jadapter.startWatching(env);
+  }
 
   // Create economy: 3 hubs + 2 users
   const { hubs, users, all } = await createEconomy(env, {
@@ -63,7 +72,7 @@ export async function htlc4hop(env: Env): Promise<void> {
   console.log(`   ${hub3.name}: ${hub3.id.slice(-4)}`);
   console.log(`   Bob: ${bob.id.slice(-4)} (user, connected to ${hub3.name})\n`);
 
-  // Connect channels
+  // Connect accounts
   await connectEconomy(env, hubs, users, usd(200_000), USDC_TOKEN_ID);
 
   // Test 4-hop route with CONCURRENT PAYMENTS: Alice → Hub1 → Hub2 → Hub3 → Bob

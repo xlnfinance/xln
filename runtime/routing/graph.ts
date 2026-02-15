@@ -7,7 +7,7 @@ import type { Profile } from '../networking/gossip';
 import { getTokenCapacity } from './capacity';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from './fees';
 
-export interface ChannelEdge {
+export interface AccountEdge {
   from: string;
   to: string;
   tokenId: number;
@@ -19,10 +19,10 @@ export interface ChannelEdge {
 
 export interface NetworkGraph {
   nodes: Set<string>; // Entity IDs
-  edges: Map<string, ChannelEdge[]>; // from -> edges[]
+  edges: Map<string, AccountEdge[]>; // from -> edges[]
 
-  // Quick lookup for channel capacities
-  channelCapacities: Map<string, {
+  // Quick lookup for account capacities
+  accountCapacities: Map<string, {
     outbound: bigint;
     inbound: bigint;
   }>;
@@ -36,8 +36,8 @@ export function buildNetworkGraph(
   tokenId: number
 ): NetworkGraph {
   const nodes = new Set<string>();
-  const edges = new Map<string, ChannelEdge[]>();
-  const channelCapacities = new Map<string, {
+  const edges = new Map<string, AccountEdge[]>();
+  const accountCapacities = new Map<string, {
     outbound: bigint;
     inbound: bigint;
   }>();
@@ -50,7 +50,7 @@ export function buildNetworkGraph(
   // Build edges from account relationships
   for (const profile of profiles.values()) {
     const fromEntity = profile.entityId;
-    const fromEdges: ChannelEdge[] = [];
+    const fromEdges: AccountEdge[] = [];
 
     if (profile.accounts) {
       for (const account of profile.accounts) {
@@ -77,7 +77,7 @@ export function buildNetworkGraph(
         );
 
         // Create edge
-        const edge: ChannelEdge = {
+        const edge: AccountEdge = {
           from: fromEntity,
           to: toEntity,
           tokenId,
@@ -89,9 +89,9 @@ export function buildNetworkGraph(
 
         fromEdges.push(edge);
 
-        // Store channel capacities
-        const channelKey = `${fromEntity}:${toEntity}:${tokenId}`;
-        channelCapacities.set(channelKey, {
+        // Store account capacities
+        const accountKey = `${fromEntity}:${toEntity}:${tokenId}`;
+        accountCapacities.set(accountKey, {
           outbound: tokenCapacity.outCapacity,
           inbound: tokenCapacity.inCapacity,
         });
@@ -106,7 +106,7 @@ export function buildNetworkGraph(
   return {
     nodes,
     edges,
-    channelCapacities,
+    accountCapacities,
   };
 }
 
@@ -118,7 +118,7 @@ export function getEdge(
   from: string,
   to: string,
   tokenId: number
-): ChannelEdge | undefined {
+): AccountEdge | undefined {
   const edges = graph.edges.get(from) ?? [];  // Explicit undefined handling
   return edges.find(e => e.to === to && e.tokenId === tokenId);
 }

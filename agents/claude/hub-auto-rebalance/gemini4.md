@@ -1,37 +1,40 @@
 ---
 agent: gemini-tester
 reviewing: hub-auto-rebalance
-reviewed_commit: 026b99c9 (HEAD)
+reviewed_commit: HEAD
 status: changes-requested
 confidence: 0/1000
-created: 2026-02-13T11:15:00Z
+created: 2026-02-14T05:00:00Z
 ---
 
-# Gemini Review #4: Audit
+# Gemini Review #4: Verification of Claude's Plan
 
 ## 📋 Review Scope
-Verified actual code changes in `runtime/` against the approved V1 plan.
+Verified actual files vs. Claude's "Plan" description in your prompt.
 
-## ❌ CRITICAL FAILURE: Code Committed to Main, but Branch Logic Broken
-**Observation:**
-- The feature seems to have been **squashed and merged directly to main** (or `claude/hub-auto-rebalance` is just pointing to the same commit as `main`).
-- `runtime/account-tx/handlers/` contains the new files (`rebalance-accept.ts`, `rebalance-quote.ts`, etc.).
-- `runtime/entity-crontab.ts` shows rebalance logic in `grep` output.
-- `runtime/rebalance-matcher.ts` is **MISSING** (Plan said "Files to create", but it's not there).
+## ❌ Discrepancy Found: Missing Scenario Registration
+**Issue:** Claude's plan states:
+> `runtime/scenarios/run.ts` | Update: replace settle and rebalance entries with settle-rebalance
+
+**Reality:**
+`runtime/scenarios/run.ts` **DOES NOT** contain `settle-rebalance` or even `rebalance`. It still lists `settle` pointing to `fn: 'runSettleScenario'`.
+
+**Impact:**
+You cannot run the scenario with `bun runtime/scenarios/run.ts settle-rebalance` because it's not registered.
+
+## ⚠️ Warning on File Existence
+- `runtime/scenarios/settle-rebalance.ts` does **NOT exist**.
+- `runtime/scenarios/rebalance.ts` **EXISTS** (and is 27KB, likely the implementation).
+- `runtime/scenarios/settle.ts` **EXISTS**.
 
 **Diagnosis:**
-The code *exists* in `main`, but the branching strategy failed. `git diff main...claude/hub-auto-rebalance` is empty because they are identical.
-
-**Missing Implementation:**
-- The plan called for `runtime/rebalance-matcher.ts`.
-- `ls` confirms it does not exist.
-- It's possible the logic was inlined into `entity-crontab.ts` (violating separation of concerns) or just forgotten.
+Claude implemented the logic in `rebalance.ts` but failed to update `run.ts` to expose it, or failed to merge it into a combined `settle-rebalance.ts` as planned.
 
 ## 🎯 Verdict
 **Status:** 🛑 **FAILED**
 
 **Required Actions:**
 1. Switch to Agent mode.
-2. Verify where the "matching logic" went.
-3. If it's missing, implement it.
-4. If it's inlined, extract it to `rebalance-matcher.ts` as planned.
+2. Verify which file actually contains the "Merged Scenario" logic (`rebalance.ts` looks suspiciously large).
+3. If `rebalance.ts` is the new merged scenario, rename it to `settle-rebalance.ts` (as per plan) or update `run.ts` to point to it.
+4. Update `run.ts` to register the scenario so it can be executed.

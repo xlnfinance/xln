@@ -93,10 +93,10 @@ async function main() {
       console.log(`     threshold: ${claim[3]}`);
     }
 
-    // Verify channel key matches between TS and Solidity
-    console.log('\n🔍 Channel key verification...');
+    // Verify account key matches between TS and Solidity
+    console.log('\n🔍 Account key verification...');
     {
-      // Get channelKey from contract
+      // Get accountKey from contract
       const depInterface = new ethers.Interface([
         'function accountKey(bytes32 e1, bytes32 e2) pure returns (bytes)'
       ]);
@@ -108,17 +108,17 @@ async function main() {
         value: 0n
       });
       // Note: executeTx might not return the result properly for view calls
-      // Let's use my getChannelKey and compare
+      // Let's use my getAccountKey and compare
 
-      // My TypeScript channelKey
+      // My TypeScript accountKey
       const isLeft = isLeftEntity(leftEntity, rightEntity);
       const tsLeft = isLeft ? leftEntity : rightEntity;
       const tsRight = isLeft ? rightEntity : leftEntity;
-      const tsChannelKey = ethers.solidityPacked(['bytes32', 'bytes32'], [tsLeft, tsRight]);
+      const tsAccountKey = ethers.solidityPacked(['bytes32', 'bytes32'], [tsLeft, tsRight]);
 
       console.log(`   leftEntity:  ${leftEntity}`);
       console.log(`   rightEntity: ${rightEntity}`);
-      console.log(`   TS channelKey: ${tsChannelKey.slice(0, 50)}... (${(tsChannelKey.length - 2) / 2} bytes)`);
+      console.log(`   TS accountKey: ${tsAccountKey.slice(0, 50)}... (${(tsAccountKey.length - 2) / 2} bytes)`);
     }
 
     // Verify board hash computation matches
@@ -273,11 +273,11 @@ async function main() {
       const abiCoder2 = ethers.AbiCoder.defaultAbiCoder();
 
       // Compute the same hash that signSettlement computed
-      const channelKey2 = ethers.solidityPacked(['bytes32', 'bytes32'], [leftEntity, rightEntity]);
+      const accountKey2 = ethers.solidityPacked(['bytes32', 'bytes32'], [leftEntity, rightEntity]);
       const accountInfo2 = await browserVM.getAccountInfo(leftEntity, rightEntity);
       const encodedMsg2 = abiCoder2.encode(
         ['uint256', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]', 'tuple(bytes32,bytes32,uint256,uint256,uint256)[]'],
-        [0, channelKey2, accountInfo2.cooperativeNonce, diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]), [], []]
+        [0, accountKey2, accountInfo2.nonce, diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]), [], []]
       );
       const settlementHash = ethers.keccak256(encodedMsg2);
       console.log(`   Settlement hash: ${settlementHash}`);

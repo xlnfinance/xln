@@ -20,7 +20,8 @@
 import type { Env, EntityInput, JurisdictionConfig } from '../types';
 import { ethers } from 'ethers';
 import { getBestAsk } from '../orderbook/core';
-import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
+import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
+import type { JAdapter } from '../jadapter/types';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime, formatEntity } from '../runtime-ascii';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
@@ -250,55 +251,42 @@ export async function swap(env: Env): Promise<void> {
   env.frameLogs = [];
   env.gossip = createGossipLayer();
 
-  const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
-  createJReplica(env, 'Swap Demo', depositoryAddress, J_MACHINE_POSITION);
-  const jurisdiction = createJurisdictionConfig('Swap Demo', depositoryAddress);
-  const { attachBrowserVMAdapter } = await import('./boot');
-  await attachBrowserVMAdapter(env, 'Swap Demo', browserVM);
-  console.log('✅ BrowserVM J-Machine created\n');
+  // Setup JAdapter (browservm or rpc, depending on JADAPTER_MODE)
+  let jadapter: JAdapter;
+  try {
+    jadapter = getScenarioJAdapter(env);
+  } catch {
+    jadapter = await ensureJAdapter(env);
+    const jReplica = createJReplica(env, 'Swap Demo', jadapter.addresses.depository, J_MACHINE_POSITION);
+    (jReplica as any).jadapter = jadapter;
+    (jReplica as any).depositoryAddress = jadapter.addresses.depository;
+    (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+    jadapter.startWatching(env);
+  }
+  const jurisdiction = createJurisdictionConfig('Swap Demo', jadapter.addresses.depository, jadapter.addresses.entityProvider);
+  console.log('✅ JAdapter J-Machine created\n');
 
   // ============================================================================
-  // SETUP: Create Alice and Hub entities
+  // SETUP: Create Alice and Hub entities (on-chain registration + eReplicas)
   // ============================================================================
-  console.log('📦 Creating entities: Alice, Hub...');
+  console.log('📦 Creating entities: Alice, Hub, Bob, Carol, Dave...');
 
-  const entityNumbers = await browserVM.registerEntitiesWithSigners(['1', '2', '3', '4', '5']);
-  assert(entityNumbers.length >= 5, 'Registered 5 numbered entities');
-  const toEntityId = (num: number) => '0x' + num.toString(16).padStart(64, '0');
-  const signerIds = ['1', '2', '3', '4', '5'];
-  signerIds.forEach((signerId, index) => {
-    const num = entityNumbers[index];
-    if (num !== undefined) {
-      registeredEntityIds[signerId] = toEntityId(num);
-    }
-  });
+  const { registerEntities: bootRegisterEntities } = await import('./boot');
+  const registered = await bootRegisterEntities(env, jadapter, [
+    { name: 'Alice', signer: '1', position: SWAP_POSITIONS['Alice'] || { x: 0, y: 0, z: 0 } },
+    { name: 'Hub',   signer: '2', position: SWAP_POSITIONS['Hub'] || { x: 0, y: 0, z: 0 } },
+    { name: 'Bob',   signer: '3', position: SWAP_POSITIONS['Bob'] || { x: 0, y: 0, z: 0 } },
+    { name: 'Carol', signer: '4', position: SWAP_POSITIONS['Carol'] || { x: 0, y: 0, z: 0 } },
+    { name: 'Dave',  signer: '5', position: SWAP_POSITIONS['Dave'] || { x: 0, y: 0, z: 0 } },
+  ], jurisdiction);
+  // Populate module-level registeredEntityIds for cross-phase access
+  for (const r of registered) {
+    registeredEntityIds[r.signer] = r.id;
+  }
 
-  const entities = [
-    { name: 'Alice', id: getRegisteredEntityId('1'), signer: '1' },
-    { name: 'Hub', id: getRegisteredEntityId('2'), signer: '2' },
-  ];
-
-  const createEntityTxs = entities.map(e => ({
-    type: 'importReplica' as const,
-    entityId: e.id,
-    signerId: e.signer,
-    data: {
-      isProposer: true,
-      position: SWAP_POSITIONS[e.name],
-      config: {
-        mode: 'proposer-based' as const,
-        threshold: 1n,
-        validators: [e.signer],
-        shares: { [e.signer]: 1n },
-        jurisdiction,
-      },
-    },
-  }));
-
-  await applyRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
-
-  const [alice, hub] = entities;
+  // registerEntities already created eReplicas — just build local aliases
+  const alice = { name: 'Alice', id: getRegisteredEntityId('1'), signer: '1' };
+  const hub = { name: 'Hub', id: getRegisteredEntityId('2'), signer: '2' };
   console.log(`  ✅ Created: ${alice.name}, ${hub.name}\n`);
 
   // ============================================================================
@@ -672,9 +660,6 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   }
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
-  const browserVM = env.browserVM || await ensureBrowserVM(env);
-
-
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('             PHASE 2: ORDERBOOK MATCHING (RJEA FLOW)            ');
   console.log('═══════════════════════════════════════════════════════════════\n');
@@ -1109,13 +1094,17 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const { createEmptyBatch, encodeJBatch, computeBatchHankoHash } = await import('../j-batch');
   const { signHashesAsSingleEntity } = await import('../hanko-signing');
 
-  while (browserVM.getBlockNumber() < targetBlock) {
+  while (true) {
+    const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
+    if (currentBlock >= targetBlock) {
+      console.log(`✅ Timeout reached at block ${currentBlock}`);
+      break;
+    }
     const emptyBatch = createEmptyBatch();
     const encodedBatch = encodeJBatch(emptyBatch);
-    const chainId = browserVM.getChainId();
-    const depositoryAddress = browserVM.getDepositoryAddress();
-    const entityProviderAddress = browserVM.getEntityProviderAddress();
-    const currentNonce = await browserVM.getEntityNonce(hub.id);
+    const chainId = BigInt(jadapter.chainId);
+    const depositoryAddress = jadapter.addresses.depository;
+    const currentNonce = await jadapter.getEntityNonce(hub.id);
     const nextNonce = currentNonce + 1n;
     const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
     const hankos = await signHashesAsSingleEntity(env, hub.id, hub.signer, [batchHash]);
@@ -1123,10 +1112,9 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
     if (!hankoData) {
       throw new Error('Failed to build empty batch hanko (swap dispute)');
     }
-    await browserVM.processBatch(encodedBatch, entityProviderAddress, hankoData, nextNonce);
+    await jadapter.processBatch(encodedBatch, hankoData, nextNonce);
     await process(env);
   }
-  console.log(`✅ Timeout reached at block ${browserVM.getBlockNumber()}`);
 
   console.log('⚖️ Hub disputeFinalize (unilateral)');
   await process(env, [{
@@ -1199,11 +1187,11 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
       throw new Error(`Dispute cleanup missing account for counter sync (${label})`);
     }
     const synced = Math.max(
-      leftAccount.proofHeader.cooperativeNonce,
-      rightAccount.proofHeader.cooperativeNonce
+      leftAccount.proofHeader.nonce,
+      rightAccount.proofHeader.nonce
     );
-    leftAccount.proofHeader.cooperativeNonce = synced;
-    rightAccount.proofHeader.cooperativeNonce = synced;
+    leftAccount.proofHeader.nonce = synced;
+    rightAccount.proofHeader.nonce = synced;
   };
   syncCounters(hub.id, alice.id, 'hub↔alice');
 
@@ -1261,8 +1249,6 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   }
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
-  const browserVM = env.browserVM || await ensureBrowserVM(env);
-
 
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('         PHASE 3: MULTI-PARTY TRADING (Carol & Dave)           ');
@@ -1289,35 +1275,10 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
     }
   }
 
-  // Add Carol and Dave with horizontal layout
-  console.log('📦 Adding Carol and Dave...');
+  // Carol and Dave already registered in Phase 1 (registerEntities created all 5 eReplicas)
   const carol = { id: getRegisteredEntityId('4'), signer: '4', name: 'Carol' };
   const dave = { id: getRegisteredEntityId('5'), signer: '5', name: 'Dave' };
-
-  for (const entity of [carol, dave]) {
-    await applyRuntimeInput(env, { runtimeTxs: [{
-      type: 'importReplica' as const,
-      entityId: entity.id,
-      signerId: entity.signer,
-      data: {
-        isProposer: true,
-        position: SWAP_POSITIONS[entity.name],
-        config: {
-          mode: 'proposer-based' as const,
-          threshold: 1n,
-          validators: [entity.signer],
-          shares: { [entity.signer]: 1n },
-          jurisdiction,
-        },
-      },
-    }], entityInputs: [] });
-    await process(env);
-
-    if (entity === carol) {
-      assertSnapshotCounts(env, 1, 4, 'After Carol import');
-    }
-  }
-  console.log('  ✅ Carol and Dave created\n');
+  console.log(`📦 Using Carol(${carol.id.slice(-4)}) and Dave(${dave.id.slice(-4)}) from Phase 1\n`);
 
   // Open accounts with Hub
   console.log('🔗 Opening accounts with Hub...');

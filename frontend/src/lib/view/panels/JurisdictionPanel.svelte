@@ -1498,7 +1498,7 @@
     font-size: 12px;
   }
 
-  .channel-key {
+  .account-key {
     color: #d29922;
     font-size: 9px;
     min-width: 80px;

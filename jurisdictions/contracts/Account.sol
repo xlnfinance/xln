@@ -8,26 +8,25 @@ import "./IEntityProvider.sol";
 /**
  * Account.sol - Library for bilateral account operations
  * EXTERNAL functions execute via DELEGATECALL - bytecode doesn't count toward Depository limit
- * Single entry point: processBatchAccount() for gas efficiency
+ *
+ * NONCE MODEL (unified, non-sequential):
+ *   All state-authorizing signatures include a nonce.
+ *   Contract checks: signedNonce > storedNonce (strictly greater).
+ *   On success: storedNonce = signedNonce (not +1).
+ *   Jumps like 10 → 15 → 234 are valid. Replays fail automatically.
  */
 library Account {
 
   // ═══════════════════════════════════════════════════════════════════════════
   // CANONICAL J-EVENTS (Single Source of Truth - must match j-event-watcher.ts)
   // ═══════════════════════════════════════════════════════════════════════════
-  //
-  // AccountSettled  - Bilateral account state changed (reserves, collateral, ondelta)
-  // ReserveUpdated  - Entity reserve balance changed (also in Depository.sol)
-  //
-  // Design: One event = One state change. No redundant events.
-  // ═══════════════════════════════════════════════════════════════════════════
 
   /**
    * @notice Emitted when bilateral account state changes via settlement.
-   * @dev THE canonical event for account state. Contains full state for both entities.
-   *      j-watcher uses: entity.accounts[counterparty] = { reserves, collateral, ondelta }
+   * @dev Unionified: one entry per account pair, multiple tokens inside.
+   *      Includes post-update nonce for watcher correlation.
    */
-  event AccountSettled(Settled[] settled);
+  event AccountSettled(AccountSettlement[] settled);
 
   /**
    * @notice Emitted when reserves change during settlement.
@@ -36,21 +35,15 @@ library Account {
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
 
   // ========== OTHER EVENTS ==========
-  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments);
+  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed nonce, bytes32 proofbodyHash, bytes initialArguments);
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
 
-  // Debug events (remove in production)
-  event DebugSettleEntry(bytes32 leftEntity, bytes32 rightEntity, bytes32 initiator, uint256 sigLen);
-  event DebugSettlementHash(bytes32 computedHash, bytes32 counterparty, uint256 cooperativeNonce, uint256 diffsLength, uint256 encodedMsgLength);
-  event DebugHankoResult(bytes32 recoveredEntity, bool valid);
-  event DebugHankoStep(uint256 step, bytes32 val1, bytes32 val2, bool boolVal);  // step=100 sigcheck, 200 try success, 201 try mismatch, 300-399 catch
-
   // ========== ERRORS ==========
-  error E2(); // Unauthorized
+  error E2(); // Unauthorized / StaleNonce
   error E3(); // InsufficientBalance
   error E4(); // InvalidSigner
-  error E5(); // NoActiveDispute
+  error E5(); // NoActiveDispute / VirginAccount
   error E6(); // DisputeInProgress
   error E7(); // InvalidParty
   error E8(); // LengthMismatch
@@ -67,17 +60,17 @@ library Account {
   }
 
   function encodeDisputeHash(
-    uint cooperativeNonce, uint disputeNonce, bool startedByLeft,
+    uint nonce, bool startedByLeft,
     uint256 timeout, bytes32 proofbodyHash, bytes memory initialArguments
   ) external pure returns (bytes32) {
-    return keccak256(abi.encodePacked(cooperativeNonce, disputeNonce, startedByLeft, timeout, proofbodyHash, keccak256(abi.encodePacked(initialArguments))));
+    return keccak256(abi.encodePacked(nonce, startedByLeft, timeout, proofbodyHash, keccak256(abi.encodePacked(initialArguments))));
   }
 
   function _encodeDisputeHash(
-    uint cooperativeNonce, uint disputeNonce, bool startedByLeft,
+    uint nonce, bool startedByLeft,
     uint256 timeout, bytes32 proofbodyHash, bytes memory initialArguments
   ) internal pure returns (bytes32) {
-    return keccak256(abi.encodePacked(cooperativeNonce, disputeNonce, startedByLeft, timeout, proofbodyHash, keccak256(abi.encodePacked(initialArguments))));
+    return keccak256(abi.encodePacked(nonce, startedByLeft, timeout, proofbodyHash, keccak256(abi.encodePacked(initialArguments))));
   }
 
   function computeBatchHankoHash(bytes32 domainSep, uint256 chainId, address depository, bytes memory encodedBatch, uint256 nonce) external pure returns (bytes32) {
@@ -87,44 +80,32 @@ library Account {
   // ========== HANKO VERIFICATION ==========
 
   /// @notice Verify dispute proof with hanko (entity-level signature)
-  /// @param entityProvider EP contract for hanko verification
-  /// @param depository Depository address for replay protection binding
-  /// @param hanko Hanko signature bytes
-  /// @param expectedEntity Expected entity that should have signed
-  /// @return success Whether hanko is valid for this entity
   function verifyDisputeProofHanko(
     address entityProvider,
     address depository,
     bytes memory ch_key,
-    uint cooperativeNonce,
-    uint disputeNonce,
+    uint nonce,
     bytes32 proofbodyHash,
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    // Include depository address in hash for chain+depository binding (replay protection)
-    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, depository, ch_key, cooperativeNonce, disputeNonce, proofbodyHash);
-    bytes32 hash = keccak256(encoded_msg);  // NO toEthSignedMessageHash for hanko
-
+    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, depository, ch_key, nonce, proofbodyHash);
+    bytes32 hash = keccak256(encoded_msg);
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
   }
 
-  /// @notice Verify final dispute proof with hanko
+  /// @notice Verify final dispute proof with hanko (counter-dispute)
   function verifyFinalDisputeProofHanko(
     address entityProvider,
     address depository,
     bytes memory ch_key,
-    uint finalCooperativeNonce,
-    uint initialDisputeNonce,
-    uint finalDisputeNonce,
+    uint finalNonce,
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    // Include depository address for chain+depository binding (replay protection)
-    bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, depository, ch_key, finalCooperativeNonce, initialDisputeNonce, finalDisputeNonce);
+    bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, depository, ch_key, finalNonce);
     bytes32 hash = keccak256(encoded_msg);
-
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
   }
@@ -134,24 +115,19 @@ library Account {
     address entityProvider,
     address depository,
     bytes memory ch_key,
-    uint cooperativeNonce,
+    uint nonce,
     bytes32 proofbodyHash,
     bytes32 initialArgumentsHash,
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    // Include depository address for chain+depository binding (replay protection)
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, depository, ch_key, cooperativeNonce, proofbodyHash, initialArgumentsHash);
+    bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, depository, ch_key, nonce, proofbodyHash, initialArgumentsHash);
     bytes32 hash = keccak256(encoded_msg);
-
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
   }
 
-  // ========== STORAGE STRUCT (groups mappings to reduce param count) ==========
-  // Note: Can't use struct with storage refs in Solidity, so we pass individually
-
-  // ========== ENTRY POINTS (split to avoid stack too deep) ==========
+  // ========== ENTRY POINTS ==========
 
   /// @notice Process settlements - diffs only (debt handled by Depository)
   function processSettlements(
@@ -170,8 +146,6 @@ library Account {
   }
 
   /// @notice Process C2R shortcut directly (skip Settlement[] allocation)
-  /// @dev More gas efficient than creating Settlement[1] and calling processSettlements
-  ///      Uses SAME signature format as settlement (reconstructs diffs for verification)
   function processC2R(
     mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
     mapping(bytes => AccountInfo) storage _accounts,
@@ -180,77 +154,77 @@ library Account {
     CollateralToReserve memory c2r,
     address entityProvider
   ) external returns (bool) {
-    // Determine canonical left/right
     bool isLeft = entityId < c2r.counterparty;
     bytes32 leftEntity = isLeft ? entityId : c2r.counterparty;
     bytes32 rightEntity = isLeft ? c2r.counterparty : entityId;
     bytes memory ch_key = _accountKey(leftEntity, rightEntity);
 
-    // Reconstruct the expected diffs for signature verification
-    // C2R is just a calldata shortcut - signature is over the same format as settlement
+    // NONCE CHECK: signedNonce > storedNonce (strictly greater)
+    if (c2r.nonce <= _accounts[ch_key].nonce) revert E2();
+
+    // Reconstruct diffs for signature verification (C2R is a calldata shortcut)
     SettlementDiff[] memory diffs = new SettlementDiff[](1);
     diffs[0] = SettlementDiff({
       tokenId: c2r.tokenId,
       leftDiff: isLeft ? int(c2r.amount) : int(0),
       rightDiff: isLeft ? int(0) : int(c2r.amount),
       collateralDiff: -int(c2r.amount),
-      ondeltaDiff: isLeft ? -int(c2r.amount) : int(0)  // only left affects ondelta
+      ondeltaDiff: isLeft ? -int(c2r.amount) : int(0)
     });
 
-    // Verify counterparty signature using SAME format as settlement
-    // Include address(this) (depository via DELEGATECALL) for chain+depository binding (replay protection)
+    // Verify counterparty signature (hash includes signedNonce, not storedNonce)
     bytes memory encoded_msg = abi.encode(
       MessageType.CooperativeUpdate,
       address(this),
       ch_key,
-      _accounts[ch_key].cooperativeNonce,
+      c2r.nonce,
       diffs,
-      new uint[](0)  // forgiveDebtsInTokenIds
+      new uint[](0)
     );
     bytes32 hash = keccak256(encoded_msg);
 
-    // Verify counterparty hanko
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(c2r.sig, hash);
     if (!valid || recoveredEntity != c2r.counterparty) {
       return false;
     }
 
-    // Apply diffs directly (no need to loop - single diff)
+    // Apply diffs
     uint tokenId = c2r.tokenId;
     uint amount = c2r.amount;
     AccountCollateral storage col = _collaterals[ch_key][tokenId];
-
-    // Check collateral sufficient
     if (col.collateral < amount) revert E3();
 
-    // Apply diffs
     _reserves[entityId][tokenId] += amount;
     col.collateral -= amount;
-
-    // ondelta: only left withdrawals affect ondelta
     if (isLeft) {
       col.ondelta -= int(amount);
     }
 
-    // Emit settled event
-    Settled[] memory settledEvents = new Settled[](1);
-    settledEvents[0] = Settled({
-      left: leftEntity,
-      right: rightEntity,
+    // SET nonce (not increment)
+    _accounts[ch_key].nonce = c2r.nonce;
+
+    // Emit unionified AccountSettled
+    TokenSettlement[] memory tokens = new TokenSettlement[](1);
+    tokens[0] = TokenSettlement({
       tokenId: tokenId,
       leftReserve: _reserves[leftEntity][tokenId],
       rightReserve: _reserves[rightEntity][tokenId],
       collateral: col.collateral,
       ondelta: col.ondelta
     });
-    emit AccountSettled(settledEvents);
+    AccountSettlement[] memory settled = new AccountSettlement[](1);
+    settled[0] = AccountSettlement({
+      left: leftEntity,
+      right: rightEntity,
+      tokens: tokens,
+      nonce: _accounts[ch_key].nonce
+    });
+    emit AccountSettled(settled);
 
-    _accounts[ch_key].cooperativeNonce++;
     return true;
   }
 
   /// @notice Process dispute starts only
-  /// @dev Counterparty signature is REQUIRED for all dispute starts
   function processDisputeStarts(
     mapping(bytes => AccountInfo) storage _accounts,
     bytes32 entityId,
@@ -266,8 +240,6 @@ library Account {
     }
   }
 
-  // processDisputeFinalizations removed - stays in Depository due to storage complexity
-
   // ========== SETTLEMENT (diffs only - debt handled by Depository) ==========
 
   function _settleDiffs(
@@ -277,7 +249,6 @@ library Account {
     bytes32 initiator,
     Settlement memory s
   ) internal returns (bool) {
-    emit DebugSettleEntry(s.leftEntity, s.rightEntity, initiator, s.sig.length);
     bytes32 leftEntity = s.leftEntity;
     bytes32 rightEntity = s.rightEntity;
     if (leftEntity == rightEntity || leftEntity >= rightEntity) revert E2();
@@ -286,55 +257,24 @@ library Account {
     bytes memory ch_key = _accountKey(leftEntity, rightEntity);
     bytes32 counterparty = (initiator == leftEntity) ? rightEntity : leftEntity;
 
-    // Counterparty signature REQUIRED for any state changes (cooperative proof)
+    // NONCE CHECK: signedNonce > storedNonce (strictly greater)
+    if (s.nonce <= _accounts[ch_key].nonce) revert E2();
+
+    // Counterparty signature REQUIRED for any state changes
     if (s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0) {
       require(s.sig.length > 0, "Signature required for settlement");
-      // Include address(this) (depository via DELEGATECALL) for chain+depository binding (replay protection)
-      bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), ch_key, _accounts[ch_key].cooperativeNonce, s.diffs, s.forgiveDebtsInTokenIds);
-
-      // Debug: emit hash details
-      emit DebugSettlementHash(keccak256(encoded_msg), counterparty, _accounts[ch_key].cooperativeNonce, s.diffs.length, encoded_msg.length);
-
-      // Hanko verification
-      // DEBUG: Emit BEFORE any computation to verify we reach this point
-      emit DebugSettleEntry(s.leftEntity, s.rightEntity, bytes32(uint256(uint160(s.entityProvider))), s.sig.length);
-
-      // Full hanko verification via settlement's EP address
+      // Hash includes signedNonce (from settlement struct), not storedNonce
+      bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), ch_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds);
       bytes32 hash = keccak256(encoded_msg);
-      // DEBUG: Log all params before external call
-      emit DebugSettlementHash(hash, bytes32(uint256(uint160(s.entityProvider))), s.sig.length, uint256(uint160(s.entityProvider)), gasleft());
 
-      // Try the external call with a low-level check first
       address ep = s.entityProvider;
       require(ep != address(0), "EP_ZERO");
-      require(s.sig.length > 0, "SIG_EMPTY");
 
-      // DEBUG: Log first 32 bytes of sig (step 100)
-      bytes memory sigBytes = s.sig;
-      bytes32 sigFirst32;
-      assembly { sigFirst32 := mload(add(sigBytes, 32)) }
-      emit DebugHankoStep(100, sigFirst32, bytes32(sigBytes.length), sigBytes.length == 608);
-
-      // Wrap in try-catch to prevent revert from abi.decode
       try IEntityProvider(ep).verifyHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
-        emit DebugHankoStep(200, recoveredEntity, counterparty, valid);  // step 200: try returned
         if (!valid || recoveredEntity != counterparty) {
-          emit DebugHankoStep(201, recoveredEntity, counterparty, false);  // step 201: mismatch
-          return false;  // Verification failed
+          return false;
         }
-        emit DebugHankoStep(202, recoveredEntity, counterparty, true);  // step 202: success
-      } catch Error(string memory reason) {
-        emit DebugHankoStep(300, bytes32(bytes(reason)), bytes32(0), false);  // step 300: Error(string)
-        return false;
-      } catch Panic(uint errorCode) {
-        emit DebugHankoStep(310, bytes32(errorCode), bytes32(0), false);  // step 310: Panic
-        return false;
-      } catch (bytes memory lowLevelData) {
-        bytes32 errData;
-        if (lowLevelData.length >= 32) {
-          assembly { errData := mload(add(lowLevelData, 32)) }
-        }
-        emit DebugHankoStep(320, errData, bytes32(lowLevelData.length), false);  // step 320: low-level
+      } catch {
         return false;
       }
     }
@@ -369,23 +309,33 @@ library Account {
       col.ondelta += diff.ondeltaDiff;
     }
 
-    // Emit settled event
+    // SET nonce = signedNonce (not +1)
+    _accounts[ch_key].nonce = s.nonce;
+
+    // Emit unionified AccountSettled (one entry per account, all tokens grouped)
     if (s.diffs.length > 0) {
-      Settled[] memory settledEvents = new Settled[](s.diffs.length);
+      TokenSettlement[] memory tokens = new TokenSettlement[](s.diffs.length);
       for (uint i = 0; i < s.diffs.length; i++) {
         uint tokenId = s.diffs[i].tokenId;
         AccountCollateral storage col = _collaterals[ch_key][tokenId];
-        settledEvents[i] = Settled({
-          left: leftEntity, right: rightEntity, tokenId: tokenId,
+        tokens[i] = TokenSettlement({
+          tokenId: tokenId,
           leftReserve: _reserves[leftEntity][tokenId],
           rightReserve: _reserves[rightEntity][tokenId],
-          collateral: col.collateral, ondelta: col.ondelta
+          collateral: col.collateral,
+          ondelta: col.ondelta
         });
       }
-      emit AccountSettled(settledEvents);
+      AccountSettlement[] memory settled = new AccountSettlement[](1);
+      settled[0] = AccountSettlement({
+        left: leftEntity,
+        right: rightEntity,
+        tokens: tokens,
+        nonce: _accounts[ch_key].nonce
+      });
+      emit AccountSettled(settled);
     }
 
-    _accounts[ch_key].cooperativeNonce++;
     return true;
   }
 
@@ -400,13 +350,12 @@ library Account {
   ) internal returns (bool) {
     bytes memory ch_key = _accountKey(entityId, params.counterentity);
 
-    if (_accounts[ch_key].cooperativeNonce > params.cooperativeNonce) revert E2();
+    // NONCE CHECK: signedNonce > storedNonce (strictly greater)
+    if (params.nonce <= _accounts[ch_key].nonce) revert E2();
 
-    // Counterparty signature REQUIRED
     require(params.sig.length > 0, "Signature required for dispute");
 
-    // Include address(this) (depository via DELEGATECALL) for chain+depository binding (replay protection)
-    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, address(this), ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
+    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, address(this), ch_key, params.nonce, params.proofbodyHash);
     bytes32 hash = keccak256(encoded_msg);
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
     if (!valid || recoveredEntity != params.counterentity) revert E4();
@@ -415,22 +364,20 @@ library Account {
 
     uint256 timeout = block.number + defaultDelay;
     _accounts[ch_key].disputeHash = _encodeDisputeHash(
-      params.cooperativeNonce, params.disputeNonce, entityId < params.counterentity,
+      params.nonce, entityId < params.counterentity,
       timeout, params.proofbodyHash, params.initialArguments
     );
     _accounts[ch_key].disputeTimeout = timeout;
 
-    emit DisputeStarted(entityId, params.counterentity, params.disputeNonce, params.proofbodyHash, params.initialArguments);
+    // SET nonce = signedNonce (any settlement signed at ≤ this nonce is now dead)
+    _accounts[ch_key].nonce = params.nonce;
+
+    emit DisputeStarted(entityId, params.counterentity, params.nonce, params.proofbodyHash, params.initialArguments);
     return true;
   }
 
   /**
    * DESIGN DECISION: Dispute finalization stays in Depository.sol
-   *
-   * Reason: _disputeFinalizeInternal requires deep storage access:
-   * - Complex debt/reserve interactions across multiple mappings
-   *
-   * Passing all these via library params causes "stack too deep" compiler errors.
-   * Settlement diffs CAN be delegated because they only need _reserves, _accounts, _collaterals.
+   * Reason: requires deep storage access (debt/reserve interactions)
    */
 }

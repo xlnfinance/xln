@@ -59,7 +59,7 @@ export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> 
   if (config.mode === 'browservm') {
     const { BrowserVMProvider } = await import('./browservm-provider');
     const browserVM = new BrowserVMProvider();
-    await browserVM.init();
+    await browserVM.init({ chainId: config.chainId });
 
     if (config.browserVMState) {
       await browserVM.restoreState(config.browserVMState);

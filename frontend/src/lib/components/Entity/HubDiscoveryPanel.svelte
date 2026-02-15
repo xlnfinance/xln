@@ -461,7 +461,7 @@
 
       const opened = await waitForAccountReady(currentEnv, entityId, hub.entityId, 20_000);
       if (!opened) {
-        throw new Error('Channel opening is still pending consensus. Wait for ACK and retry.');
+        throw new Error('Account opening is still pending consensus. Wait for ACK and retry.');
       }
 
       // Update hub status

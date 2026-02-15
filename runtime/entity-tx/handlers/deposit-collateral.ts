@@ -2,7 +2,7 @@
  * Deposit Collateral Handler
  *
  * Entity moves own reserve → account collateral (unilateral on-chain action)
- * Reference: 2019src.txt lines 233-239 (reserveToChannel batchAdd)
+ * Reference: 2019src.txt lines 233-239 (reserveToCollateral batchAdd)
  * Reference: Depository.sol reserveToCollateral() (line 1035)
  *
  * Enhanced: optional rebalance fee collection (atomic with deposit)

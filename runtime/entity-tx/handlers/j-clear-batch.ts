@@ -31,9 +31,14 @@ export async function handleJClearBatch(
   const oldBatchSize = getBatchSize(newState.jBatchState.batch);
   const wasPending = newState.jBatchState.pendingBroadcast;
 
-  // Clear the batch and unlock for new operations
+  // Clear the batch and reset lifecycle
   newState.jBatchState.batch = createEmptyBatch();
   newState.jBatchState.pendingBroadcast = false;
+  newState.jBatchState.status = 'empty';
+  newState.jBatchState.batchHash = undefined;
+  newState.jBatchState.encodedBatch = undefined;
+  newState.jBatchState.broadcastedAt = undefined;
+  newState.jBatchState.txHash = undefined;
 
   const reasonMsg = reason ? ` (${reason})` : '';
   const pendingMsg = wasPending ? ' [was pending]' : '';

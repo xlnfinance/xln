@@ -16,10 +16,9 @@
  */
 
 import type { Env, EntityInput, EntityReplica, Delta } from '../types';
-import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
-import { BrowserVMProvider } from '../jadapter';
-import { getProcess, getApplyRuntimeInput, usd, snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
-import { canonicalAccountKey } from '../state-helpers';
+import type { JAdapter } from '../jadapter/types';
+import { getProcess, getApplyRuntimeInput, usd, snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge } from './helpers';
+import { ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter } from './boot';
 import { formatRuntime } from '../runtime-ascii';
 import { isLeft } from '../account-utils';
 import { ethers } from 'ethers';
@@ -62,70 +61,7 @@ async function pushSnapshot(
   await process(env, inputs);
 }
 
-function assert(condition: unknown, message: string, env?: Env): asserts condition {
-  if (!condition) {
-    if (env) {
-      console.log('\n' + '='.repeat(80));
-      console.log('ASSERTION FAILED - FULL RUNTIME STATE:');
-      console.log('='.repeat(80));
-      console.log(formatRuntime(env, { maxAccounts: 5, maxLocks: 20 }));
-      console.log('='.repeat(80) + '\n');
-    }
-    throw new Error(`ASSERT: ${message}`);
-  }
-}
-
 type ReplicaEntry = [string, EntityReplica];
-
-function findReplica(env: Env, entityId: string): ReplicaEntry {
-  const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
-  if (!entry) {
-    throw new Error(`AHB: Replica for entity ${entityId} not found`);
-  }
-  return entry as ReplicaEntry;
-}
-
-// Helper: Process until no outputs generated (convergence)
-async function converge(env: Env, maxCycles = 10): Promise<void> {
-  const process = await getProcess();
-  for (let i = 0; i < maxCycles; i++) {
-    await process(env);
-    // Check if all mempools are empty and no pending frames
-    let hasWork = false;
-    for (const [, replica] of env.eReplicas) {
-      for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame) {
-          hasWork = true;
-          break;
-        }
-      }
-      if (hasWork) break;
-    }
-    if (!hasWork) return;
-  }
-}
-
-
-/**
- * Process any pending j_events from BrowserVM operations
- * This is the proper R→E→A flow: BrowserVM emits → j-watcher queues → processJEvents runs
- */
-async function processJEvents(env: Env): Promise<void> {
-  const process = await getProcess();
-  // Check if j-watcher queued any events
-  const pendingInputs = env.runtimeInput?.entityInputs || [];
-  console.log(`🔄 processJEvents CALLED: ${pendingInputs.length} pending in queue`);
-  console.log(`   pending:`, pendingInputs.map(i => `${i.entityId.slice(-4)}/${i.entityTxs?.length || 0}tx`));
-  if (pendingInputs.length > 0) {
-    console.log(`   routing ${pendingInputs.length} to entities...`);
-    const toProcess = [...pendingInputs];
-    env.runtimeInput.entityInputs = [];
-    await process(env, toProcess);
-    console.log(`   ✓ ${toProcess.length} j-events processed`);
-  } else {
-    console.log(`   ⚠️ EMPTY queue - no j-events to process`);
-  }
-}
 
 
 
@@ -221,87 +157,6 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
 }
 
 
-// Get offdelta for a bilateral account (uses entityA's perspective)
-function getOffdelta(env: Env, entityA: string, entityB: string, tokenId: number): bigint {
-  // Use entityA's perspective: lookup account by counterparty (entityB)
-  const [, replicaA] = findReplica(env, entityA);
-  const account = replicaA?.state?.accounts?.get(entityB); // counterparty ID is key
-  const delta = account?.deltas?.get(tokenId);
-
-  return delta?.offdelta ?? 0n;
-}
-
-// Verify bilateral account sync - CRITICAL for consensus correctness
-function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId: number, label: string): void {
-  const [, replicaA] = findReplica(env, entityA);
-  const [, replicaB] = findReplica(env, entityB);
-
-  // Each entity stores account keyed by counterparty ID
-  const accountAB = replicaA?.state?.accounts?.get(entityB); // A's view: key=B
-  const accountBA = replicaB?.state?.accounts?.get(entityA); // B's view: key=A
-
-  console.log(`\n[BILATERAL-SYNC ${label}] Checking ${entityA.slice(-4)}←→${entityB.slice(-4)} for token ${tokenId}...`);
-
-  // Both sides must have the account
-  if (!accountAB) {
-    console.error(`❌ Entity ${entityA.slice(-4)} has NO account with ${entityB.slice(-4)}`);
-    throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityA.slice(-4)} missing account with ${entityB.slice(-4)}`);
-  }
-  if (!accountBA) {
-    console.error(`❌ Entity ${entityB.slice(-4)} has NO account with ${entityA.slice(-4)}`);
-    throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityB.slice(-4)} missing account with ${entityA.slice(-4)}`);
-  }
-
-  const deltaAB = accountAB.deltas?.get(tokenId);
-  const deltaBA = accountBA.deltas?.get(tokenId);
-
-  // Both sides must have the delta for this token
-  if (!deltaAB) {
-    console.error(`❌ Entity ${entityA.slice(-4)} account has NO delta for token ${tokenId}`);
-    throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityA.slice(-4)} missing delta for token ${tokenId}`);
-  }
-  if (!deltaBA) {
-    console.error(`❌ Entity ${entityB.slice(-4)} account has NO delta for token ${tokenId}`);
-    throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityB.slice(-4)} missing delta for token ${tokenId}`);
-  }
-
-  // CRITICAL: Both sides MUST have IDENTICAL delta objects (canonical storage)
-  const fieldsToCheck: Array<keyof Delta> = [
-    'collateral',
-    'ondelta',
-    'offdelta',
-    'leftCreditLimit',
-    'rightCreditLimit',
-    'leftAllowance',
-    'rightAllowance',
-  ];
-
-  const errors: string[] = [];
-  for (const field of fieldsToCheck) {
-    const valueAB = deltaAB[field];
-    const valueBA = deltaBA[field];
-
-    if (valueAB !== valueBA) {
-      const msg = `  ${field}: ${entityA.slice(-4)} has ${valueAB}, ${entityB.slice(-4)} has ${valueBA}`;
-      console.error(`❌ ${msg}`);
-      errors.push(msg);
-    }
-  }
-
-  if (errors.length > 0) {
-    console.error(`\n❌ BILATERAL-SYNC FAILED at "${label}":`);
-    console.error(`   Account: ${entityA.slice(-4)}←→${entityB.slice(-4)}, token ${tokenId}`);
-    console.error(`   Mismatched fields:\n${errors.join('\n')}`);
-
-    // Dump full state for debugging
-    console.error(`\n   Full deltaAB (${entityA.slice(-4)} view):`, deltaAB);
-    console.error(`   Full deltaBA (${entityB.slice(-4)} view):`, deltaBA);
-
-    throw new Error(`BILATERAL-SYNC VIOLATION: ${errors.length} field(s) differ between ${entityA.slice(-4)} and ${entityB.slice(-4)}`);
-  }
-
-  console.log(`✅ [${label}] Bilateral sync OK: ${entityA.slice(-4)}←→${entityB.slice(-4)} token ${tokenId} - all ${fieldsToCheck.length} fields match`);
-}
 
 
 // Alias for runtime.ts compatibility
@@ -314,106 +169,47 @@ export async function lockAhb(env: Env): Promise<void> {
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6'], 'HTLC AHB');
   lockRuntimeSeedUpdates(true);
   const process = await getProcess();
+  const applyRuntimeInput = await getApplyRuntimeInput();
   env.scenarioMode = true; // Deterministic time control
   const rng = createRngFromEnv(env); // Deterministic RNG for HTLC secrets
 
   try {
     console.log('[AHB] ========================================');
-    console.log('[AHB] Starting Alice-Hub-Bob Demo (REAL BrowserVM transactions)');
+    console.log('[AHB] Starting Alice-Hub-Bob Demo (JAdapter)');
     console.log('[AHB] BEFORE: eReplicas =', env.eReplicas.size, 'history =', env.history?.length || 0);
     console.log('[AHB] ========================================');
 
-    // Get or create BrowserVM instance for real transactions
-    let browserVM = getBrowserVMInstance(env);
-    if (!browserVM) {
-      console.log('[AHB] No BrowserVM found - creating one...');
-      const newVM = new BrowserVMProvider();
-      await newVM.init();
-      browserVM = newVM as any; // Type coercion for interface compatibility
-      env.browserVM = browserVM; // Store in env for isolation
-      const depositoryAddress = newVM.getDepositoryAddress();
-      // Register with runtime so other code can access it
-      setBrowserVMJurisdiction(env, depositoryAddress, browserVM);
-      console.log('[AHB] ✅ BrowserVM created, depository:', depositoryAddress);
-    } else {
-      console.log('[AHB] ✅ BrowserVM instance available');
-    }
-    // Type-safe access after null check
-    const vm = browserVM!;
-
-    // CRITICAL: Reset BrowserVM to fresh state EVERY time AHB runs
-    // This prevents reserve accumulation on re-runs (button clicks, HMR, etc.)
-    if (vm.reset) {
-      console.log('[AHB] Calling vm.reset()...');
-      await vm.reset();
-      // Verify reset worked by checking Hub's reserves (should be 0)
-      // Hub entityId = 0x0003 (entity #3, since #1 is foundation)
-      const HUB_ENTITY_ID = '0x' + '3'.padStart(64, '0');
-      const hubReservesAfterReset = await vm.getReserves(HUB_ENTITY_ID, USDC_TOKEN_ID);
-      console.log(`[AHB] ✅ BrowserVM reset complete. Hub reserves after reset: ${hubReservesAfterReset}`);
-      if (hubReservesAfterReset !== 0n) {
-        throw new Error(`BrowserVM reset FAILED: Hub still has ${hubReservesAfterReset} reserves`);
-      }
-    }
-
-    // Register entities with EntityProvider for Hanko signature verification
-    // This creates boards with each signer as sole validator
-    // 2..6 → entity numbers 2..6 (entity 1 is foundation)
-    if (browserVM.registerEntitiesWithSigners) {
-      console.log('[AHB] Registering entities with EntityProvider...');
-      const entityNumbers = await browserVM.registerEntitiesWithSigners(['2', '3', '4', '5', '6']);
-      console.log(`[AHB] ✅ Registered entities: [${entityNumbers.join(', ')}]`);
-    }
-
-    const jurisdictions = await getAvailableJurisdictions();
-    let arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
-
-    // FALLBACK: Create mock jurisdiction if none exist (for isolated /view mode)
-    if (!arrakis) {
-      console.log('[AHB] No jurisdiction found - using BrowserVM jurisdiction');
-      arrakis = {
-        name: 'AHB Demo', // Must match jReplica name for routing
-        chainId: 31337,
-        entityProviderAddress: browserVM.getEntityProviderAddress(),
-        depositoryAddress: browserVM.getDepositoryAddress(),
-        rpc: 'browservm://'
-      };
-    }
-
-    console.log(`📋 Jurisdiction: ${arrakis.name}`);
-
     // ============================================================================
-    // STEP 0a: Create Xlnomy (J-Machine) for visualization
+    // SETUP: JAdapter + jReplica + jurisdiction (self-boot if needed)
     // ============================================================================
-    console.log('\n🏛️ Creating AHB Xlnomy (J-Machine at center)...');
-
-    if (!env.jReplicas) {
-      env.jReplicas = new Map();
+    let jadapter: JAdapter;
+    let jurisdiction: ReturnType<typeof createJurisdictionConfig>;
+    try {
+      jadapter = getScenarioJAdapter(env);
+      jurisdiction = createJurisdictionConfig(
+        env.activeJurisdiction || 'AHB Demo',
+        jadapter.addresses.depository,
+        jadapter.addresses.entityProvider,
+      );
+    } catch {
+      // No jadapter attached — self-boot (browser path or direct CLI)
+      jadapter = await ensureJAdapter(env);
+      const jReplicaName = 'AHB Demo';
+      const jReplica = createJReplica(env, jReplicaName, jadapter.addresses.depository);
+      (jReplica as any).jadapter = jadapter;
+      (jReplica as any).depositoryAddress = jadapter.addresses.depository;
+      (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+      jadapter.startWatching(env);
+      jurisdiction = createJurisdictionConfig(
+        jReplicaName,
+        jadapter.addresses.depository,
+        jadapter.addresses.entityProvider,
+      );
     }
 
-    const ahbJReplica = {
-      name: 'AHB Demo',
-      blockNumber: 0n,
-      stateRoot: new Uint8Array(32), // Will be captured from BrowserVM
-      mempool: [] as any[],
-      blockDelayMs: 300,             // 300ms delay before processing mempool (visual delay)
-      lastBlockTimestamp: env.timestamp,  // Use env.timestamp for determinism
-      position: { x: 0, y: 600, z: 0 }, // Match EVM jMachine.position for consistent entity placement
-      contracts: {
-        depository: arrakis.depositoryAddress,
-        entityProvider: arrakis.entityProviderAddress,
-      },
-    };
+    // BrowserVM handle (for real ERC20 flow — null in RPC mode)
+    const browserVM = jadapter.getBrowserVM();
 
-    env.jReplicas.set('AHB Demo', ahbJReplica);
-    env.activeJurisdiction = 'AHB Demo';
-
-    // Attach JAdapter so BrowserVM events flow into runtime
-    const { attachBrowserVMAdapter } = await import('./boot');
-    await attachBrowserVMAdapter(env, 'AHB Demo', browserVM);
-    console.log('✅ AHB Xlnomy created (J-Machine visible in 3D)');
-
-    // Push Frame 0: Clean slate with J-Machine only (no entities yet)
     // Define total system solvency - $10M minted to Hub
     const TOTAL_SOLVENCY = usd(10_000_000);
 
@@ -428,94 +224,55 @@ export async function lockAhb(env: Env): Promise<void> {
     await process(env); // Frame 0: No tokens yet
 
     // ============================================================================
-    // STEP 0b: Create entities
+    // STEP 0b: Register entities on-chain + create eReplicas
     // ============================================================================
-    console.log('\n📦 Creating entities: Alice, Hub, Bob...');
+    console.log('\n📦 Registering entities: Alice, Hub, Bob...');
 
-    // AHB Triangle Layout - entities positioned relative to J-Machine
-    // Layout: J-machine at y=0, entities in compact triangle below
     const AHB_POSITIONS = {
-      Alice: { x: -20, y: -40, z: 0 },  // Bottom-left (closer to hub)
-      Hub:   { x: 0, y: -20, z: 0 },     // Middle layer
-      Bob:   { x: 20, y: -40, z: 0 },   // Bottom-right (closer to hub)
+      Alice: { x: -20, y: -40, z: 0 },
+      Hub:   { x: 0, y: -20, z: 0 },
+      Bob:   { x: 20, y: -40, z: 0 },
     };
 
-    const entityNames = ['Alice', 'Hub', 'Bob'] as const;
-    const entities: Array<{id: string, signer: string, name: string}> = [];
-    const createEntityTxs = [];
-
-    for (let i = 0; i < 3; i++) {
-      const name = entityNames[i];
-      const signer = String(i + 2); // 2, 3, 4 (skip 1 for foundation)
-      const position = AHB_POSITIONS[name];
-
-      // SIMPLE FALLBACK ONLY (no blockchain calls in demos)
-      // Entity numbers start at 2 (1 is foundation in EntityProvider)
-      const entityNumber = i + 2;
-      const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
-      entities.push({ id: entityId, signer, name });
-
-      createEntityTxs.push({
-        type: 'importReplica' as const,
-        entityId,
-        signerId: signer,
-        data: {
-          isProposer: true,
-          position, // Explicit position for proper AHB triangle layout
-          config: {
-            mode: 'proposer-based' as const,
-            threshold: 1n,
-            validators: [signer],
-            shares: { [signer]: 1n },
-            jurisdiction: arrakis
-          }
-        }
-      });
-      console.log(`${name}: Entity #${entityNumber} @ (${position.x}, ${position.y}, ${position.z})`);
-    }
-
-    const applyRuntimeInput = await getApplyRuntimeInput();
-    await applyRuntimeInput(env, {
-      runtimeTxs: createEntityTxs,
-      entityInputs: []
-    });
+    const entities = await registerEntities(env, jadapter, [
+      { name: 'Alice', signer: '2', position: AHB_POSITIONS.Alice },
+      { name: 'Hub',   signer: '3', position: AHB_POSITIONS.Hub },
+      { name: 'Bob',   signer: '4', position: AHB_POSITIONS.Bob },
+    ], jurisdiction);
 
     const [alice, hub, bob] = entities;
     if (!alice || !hub || !bob) {
       throw new Error('Failed to create all entities');
     }
 
-    console.log(`\n  ✅ Created: ${alice.name}, ${hub.name}, ${bob.name}`);
-
+    // Signer wallet helper (for real ERC20 deposit flow)
     const { getCachedSignerPrivateKey } = await import('../account-crypto');
     const signerWallets = new Map<string, { privateKey: Uint8Array; wallet: ethers.Wallet }>();
     const ensureSignerWallet = (signerId: string) => {
       const cached = signerWallets.get(signerId);
       if (cached) return cached;
       const privateKey = getCachedSignerPrivateKey(signerId);
-      if (!privateKey) {
-        throw new Error(`Missing private key for signer ${signerId}`);
-      }
+      if (!privateKey) throw new Error(`Missing private key for signer ${signerId}`);
       const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
       const entry = { privateKey, wallet };
       signerWallets.set(signerId, entry);
       return entry;
     };
 
-    console.log('\n💳 Prefunding signer wallets (1M each token)...');
-    for (const entity of entities) {
-      const { wallet } = ensureSignerWallet(entity.signer);
-      await browserVM.fundSignerWallet(wallet.address, SIGNER_PREFUND);
-      console.log(`✅ Prefunded ${entity.name} signer ${entity.signer} (${wallet.address.slice(0, 10)}...)`);
+    // Prefund signer wallets (BrowserVM only — Anvil wallets are pre-funded)
+    if (browserVM) {
+      console.log('\n💳 Prefunding signer wallets...');
+      for (const entity of entities) {
+        const { wallet } = ensureSignerWallet(entity.signer);
+        await browserVM.fundSignerWallet(wallet.address, SIGNER_PREFUND);
+      }
+      const hubWalletInfo = ensureSignerWallet(hub.signer);
+      if (HUB_INITIAL_RESERVE > SIGNER_PREFUND) {
+        await browserVM.fundSignerWallet(hubWalletInfo.wallet.address, HUB_INITIAL_RESERVE);
+      }
+      console.log('✅ Signer wallets prefunded');
     }
 
-    const hubWalletInfo = ensureSignerWallet(hub.signer);
-    if (HUB_INITIAL_RESERVE > SIGNER_PREFUND) {
-      await browserVM.fundSignerWallet(hubWalletInfo.wallet.address, HUB_INITIAL_RESERVE);
-      console.log(`✅ Hub signer topped up to ${HUB_INITIAL_RESERVE / 10n ** 18n} tokens`);
-    }
-
-    // Frame 0.5: Entities created but not yet funded
     snap(env, 'Three Entities Deployed', {
       description: 'Entities Created: Alice, Hub, Bob',
       what: 'Alice, Hub, and Bob entities are now registered in the J-Machine.',
@@ -527,30 +284,32 @@ export async function lockAhb(env: Env): Promise<void> {
     await process(env);
 
     // ============================================================================
-    // STEP 1: Initial State - Hub funded with $10M USDC via REAL BrowserVM tx
+    // STEP 1: Hub funded with $10M USDC via REAL ERC20 deposit
     // ============================================================================
-    console.log('\n💰 FRAME 1: Initial State - Hub Reserve Funding (REAL BrowserVM TX)');
+    console.log('\n💰 FRAME 1: Hub Reserve Funding (real ERC20 deposit via JAdapter)');
 
-    // NOTE: BrowserVM is reset in View.svelte at runtime creation time
-    // This ensures fresh state on every page load/HMR
+    const hubWalletInfo = ensureSignerWallet(hub.signer);
 
-    // REAL deposit flow: ERC20 approve + externalTokenToReserve
-    const usdcTokenAddress = browserVM.getTokenAddress('USDC');
-    if (!usdcTokenAddress) {
-      throw new Error('USDC token not found in BrowserVM registry');
+    if (browserVM) {
+      // BrowserVM: Real ERC20 approve + externalTokenToReserve
+      const usdcTokenAddress = browserVM.getTokenAddress('USDC');
+      if (!usdcTokenAddress) throw new Error('USDC token not found');
+      await browserVM.approveErc20(
+        hubWalletInfo.privateKey,
+        usdcTokenAddress,
+        jadapter.addresses.depository,
+        HUB_INITIAL_RESERVE,
+      );
+      await jadapter.externalTokenToReserve(
+        hubWalletInfo.privateKey,
+        hub.id,
+        usdcTokenAddress,
+        HUB_INITIAL_RESERVE,
+      );
+    } else {
+      // RPC: Use debugFundReserves for simplicity
+      await jadapter.debugFundReserves(hub.id, USDC_TOKEN_ID, HUB_INITIAL_RESERVE);
     }
-    await browserVM.approveErc20(
-      hubWalletInfo.privateKey,
-      usdcTokenAddress,
-      browserVM.getDepositoryAddress(),
-      HUB_INITIAL_RESERVE
-    );
-    await browserVM.externalTokenToReserve(
-      hubWalletInfo.privateKey,
-      hub.id,
-      usdcTokenAddress,
-      HUB_INITIAL_RESERVE
-    );
     await processJEvents(env);
     await process(env);
 
@@ -790,7 +549,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     await pushSnapshot(env, 'Alice ↔ Hub: Account Created', {
       title: 'Bilateral Account: Alice ↔ Hub (A-H)',
-      what: 'Alice opens bilateral account with Hub. Creates off-chain channel for instant payments.',
+      what: 'Alice opens bilateral account with Hub for instant off-chain payments.',
       why: 'Bilateral accounts enable unlimited off-chain transactions with final on-chain settlement.',
       tradfiParallel: 'Like opening a margin account: enables trading before settlement.',
       keyMetrics: [
@@ -1842,7 +1601,7 @@ export async function lockAhb(env: Env): Promise<void> {
       }]
     }]);
 
-    // Open Hub-Hub2 channel
+    // Open Hub-Hub2 account
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
@@ -1853,7 +1612,7 @@ export async function lockAhb(env: Env): Promise<void> {
     }]);
     await converge(env);
 
-    // Hub2-Bob channel
+    // Hub2-Bob account
     await process(env, [{
       entityId: hub2.id,
       signerId: hub2.signer,
@@ -1864,7 +1623,7 @@ export async function lockAhb(env: Env): Promise<void> {
     }]);
     await converge(env);
 
-    // Extend credit for both new channels
+    // Extend credit for both new accounts
     await process(env, [
       {
         entityId: hub.id,
@@ -2039,6 +1798,7 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`🔒 HOSTAGE: Hub goes offline - Bob cannot reveal bilaterally`);
     console.log(`   Bob's only option: Dispute and reveal on-chain\n`);
 
+
     // Bob starts dispute on Hub-Bob account
     console.log(`⚔️  STEP 1: Bob calls disputeStart on Hub-Bob account...`);
     await process(env, [{
@@ -2080,7 +1840,7 @@ export async function lockAhb(env: Env): Promise<void> {
     const [, bobRepAfterStart] = findReplica(env, bob.id);
     const bobHubAccountAfterStart = bobRepAfterStart.state.accounts.get(hub.id);
     assert(!!bobHubAccountAfterStart?.activeDispute, 'Dispute started on Bob-Hub account');
-    console.log(`✅ Dispute started (initialNonce: ${bobHubAccountAfterStart?.activeDispute?.initialDisputeNonce})\n`);
+    console.log(`✅ Dispute started (initialNonce: ${bobHubAccountAfterStart?.activeDispute?.initialNonce})\n`);
 
     // STEP 4: Wait for dispute timeout (fast-forward blocks)
     const targetBlock = bobHubAccountAfterStart.activeDispute!.disputeTimeout;
@@ -2088,7 +1848,8 @@ export async function lockAhb(env: Env): Promise<void> {
     const { createEmptyBatch, encodeJBatch, computeBatchHankoHash } = await import('../j-batch');
     const { signHashesAsSingleEntity } = await import('../hanko-signing');
     while (true) {
-      const currentBlock = browserVM.getBlockNumber();
+      // Get current block from provider (works for both BrowserVM and RPC)
+      const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
       if (currentBlock >= targetBlock) {
         console.log(`✅ Timeout reached at block ${currentBlock}`);
         break;
@@ -2096,16 +1857,15 @@ export async function lockAhb(env: Env): Promise<void> {
       // Mine empty blocks (requires hanko-signed batch)
       const emptyBatch = createEmptyBatch();
       const encodedBatch = encodeJBatch(emptyBatch);
-      const chainId = browserVM.getChainId();
-      const depositoryAddress = browserVM.getDepositoryAddress();
-      const entityProviderAddress = browserVM.getEntityProviderAddress();
-      const currentNonce = await browserVM.getEntityNonce(bob.id);
+      const chainId = BigInt(jadapter.chainId);
+      const depositoryAddress = jadapter.addresses.depository;
+      const currentNonce = await jadapter.getEntityNonce(bob.id);
       const nextNonce = currentNonce + 1n;
       const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
       const hankos = await signHashesAsSingleEntity(env, bob.id, bob.signer, [batchHash]);
       const hankoData = hankos[0];
       if (!hankoData) throw new Error('Failed to build empty batch hanko');
-      await browserVM.processBatch(encodedBatch, entityProviderAddress, hankoData, nextNonce);
+      await jadapter.processBatch(encodedBatch, hankoData, nextNonce);
       await process(env); // Let runtime process any events
     }
 

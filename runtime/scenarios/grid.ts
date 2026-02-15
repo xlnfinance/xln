@@ -17,8 +17,10 @@
  */
 
 import type { Env } from '../types';
+import type { JAdapter } from '../jadapter/types';
 import {
-  ensureBrowserVM,
+  ensureJAdapter,
+  getScenarioJAdapter,
   createJReplica,
   createJurisdictionConfig,
   createGridEntities,
@@ -71,16 +73,22 @@ export async function grid(env: Env): Promise<void> {
   env.scenarioMode = true; // Deterministic time control
 
   // ============================================================================
-  // SETUP: BrowserVM + J-Machine + Jurisdiction
+  // SETUP: JAdapter + J-Machine + Jurisdiction
   // ============================================================================
 
-  const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
+  let jadapter: JAdapter;
+  try {
+    jadapter = getScenarioJAdapter(env);
+  } catch {
+    jadapter = await ensureJAdapter(env);
+    const jReplica = createJReplica(env, 'Grid Demo', jadapter.addresses.depository, { x: 0, y: 600, z: 0 });
+    (jReplica as any).jadapter = jadapter;
+    (jReplica as any).depositoryAddress = jadapter.addresses.depository;
+    (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+    jadapter.startWatching(env);
+  }
 
-  // J-Machine at center (0, 600, 0) - elevated above grid
-  createJReplica(env, 'Grid Demo', depositoryAddress, { x: 0, y: 600, z: 0 });
-
-  const jurisdiction = createJurisdictionConfig('Grid Demo', depositoryAddress);
+  const jurisdiction = createJurisdictionConfig('Grid Demo', jadapter.addresses.depository);
 
   await pushSnapshot(env, 'INIT', 'J-Machine initialized');
 
@@ -122,11 +130,11 @@ export async function grid(env: Env): Promise<void> {
   const jReplica = env.jReplicas?.get('Grid Demo');
   if (!jReplica) throw new Error('J-Machine not found');
 
-  // Fund all nodes with initial reserves (direct BrowserVM call)
+  // Fund all nodes with initial reserves via JAdapter
   console.log('💰 Funding nodes with initial reserves...');
   for (let i = 0; i < gridEntities.length; i++) {
     const nodeId = gridEntities[i];
-    await browserVM.debugFundReserves(nodeId, USDC_TOKEN_ID, usd(100_000));
+    await jadapter.debugFundReserves(nodeId, USDC_TOKEN_ID, usd(100_000));
   }
 
   // Process j_events from BrowserVM
@@ -177,10 +185,10 @@ export async function grid(env: Env): Promise<void> {
   // Phase 1c: Execute the batch (J-Block clears mempool)
   console.log('\n⚡ J-Block #1: Processing batch...');
 
-  // Execute all R2R txs from mempool
+  // Execute all R2R txs from mempool via JAdapter
   for (const tx of jReplica.mempool) {
     if (tx.type === 'r2r' && tx.from && tx.to && tx.amount) {
-      await browserVM.reserveToReserve(tx.from, tx.to, USDC_TOKEN_ID, tx.amount);
+      await jadapter.reserveToReserve(tx.from, tx.to, USDC_TOKEN_ID, tx.amount);
     }
   }
 
@@ -295,7 +303,7 @@ export async function grid(env: Env): Promise<void> {
   console.log('  • Block capacity: ~10-20 txs/block');
   console.log(`  • Queue buildup: ${gridEntities.length - 20} pending txs`);
   console.log('');
-  console.log('HUB-SPOKE MODEL (Payment Channel Network):');
+  console.log('HUB-SPOKE MODEL (Payment Account Network):');
   console.log(`  • Nodes: ${gridEntities.length}`);
   console.log(`  • Routing hubs: ${hubs.length}`);
   console.log(`  • Node→Hub connections: ${accountsOpened}`);
@@ -319,7 +327,7 @@ export async function grid(env: Env): Promise<void> {
       queueBuildup: gridEntities.length - 20
     },
     hubSpoke: {
-      model: 'Payment Channel Network',
+      model: 'Payment Account Network',
       nodes: gridEntities.length,
       hubs: hubs.length,
       connections: accountsOpened + hubConnections,

@@ -133,8 +133,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       proofHeader: {
         fromEntity: state.entityId,
         toEntity: counterpartyId,
-        cooperativeNonce: 0,
-        disputeNonce: 0,
+        nonce: 0,  // Unified on-chain nonce
       },
       proofBody: {
         tokenIds: [],

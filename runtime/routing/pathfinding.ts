@@ -3,7 +3,7 @@
  * Finds optimal payment routes through the network
  */
 
-import type { NetworkGraph, ChannelEdge } from './graph';
+import type { NetworkGraph, AccountEdge } from './graph';
 import { getEdge } from './graph';
 
 export interface PaymentRoute {
@@ -128,7 +128,7 @@ export class PathFinder {
   /**
    * Calculate fee for an edge
    */
-  private calculateFee(edge: ChannelEdge, amount: bigint): bigint {
+  private calculateFee(edge: AccountEdge, amount: bigint): bigint {
     // Fee = baseFee + (amount * feePPM / 1,000,000)
     const proportionalFee = (amount * BigInt(edge.feePPM)) / 1_000_000n;
     return edge.baseFee + proportionalFee;
@@ -227,7 +227,7 @@ export class PathFinder {
   }
 
   /**
-   * Calculate success probability based on channel utilization
+   * Calculate success probability based on account utilization
    */
   private calculateProbability(
     path: string[],

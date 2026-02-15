@@ -118,7 +118,7 @@ export type BrowserVMInstance = {
   ) => Promise<BrowserVMEvent[]>;
   registerEntityWallet?: (entityId: string, privateKey: string) => void;
   // Account queries
-  getAccountInfo?: (entityId: string, counterpartyId: string) => Promise<{ cooperativeNonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
+  getAccountInfo?: (entityId: string, counterpartyId: string) => Promise<{ nonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
   setDefaultDisputeDelay?: (delayBlocks: number) => Promise<void>;
   // Block management
   setBlockTimestamp?: (timestamp: number) => void;

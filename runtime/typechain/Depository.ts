@@ -23,9 +23,7 @@ import type {
   TypedContractMethod,
 } from "./common";
 
-export type SettledStruct = {
-  left: BytesLike;
-  right: BytesLike;
+export type TokenSettlementStruct = {
   tokenId: BigNumberish;
   leftReserve: BigNumberish;
   rightReserve: BigNumberish;
@@ -33,22 +31,37 @@ export type SettledStruct = {
   ondelta: BigNumberish;
 };
 
-export type SettledStructOutput = [
-  left: string,
-  right: string,
+export type TokenSettlementStructOutput = [
   tokenId: bigint,
   leftReserve: bigint,
   rightReserve: bigint,
   collateral: bigint,
   ondelta: bigint
 ] & {
-  left: string;
-  right: string;
   tokenId: bigint;
   leftReserve: bigint;
   rightReserve: bigint;
   collateral: bigint;
   ondelta: bigint;
+};
+
+export type AccountSettlementStruct = {
+  left: BytesLike;
+  right: BytesLike;
+  tokens: TokenSettlementStruct[];
+  nonce: BigNumberish;
+};
+
+export type AccountSettlementStructOutput = [
+  left: string,
+  right: string,
+  tokens: TokenSettlementStructOutput[],
+  nonce: bigint
+] & {
+  left: string;
+  right: string;
+  tokens: TokenSettlementStructOutput[];
+  nonce: bigint;
 };
 
 export type SettlementDiffStruct = {
@@ -71,28 +84,6 @@ export type SettlementDiffStructOutput = [
   rightDiff: bigint;
   collateralDiff: bigint;
   ondeltaDiff: bigint;
-};
-
-export type InsuranceRegistrationStruct = {
-  insured: BytesLike;
-  insurer: BytesLike;
-  tokenId: BigNumberish;
-  limit: BigNumberish;
-  expiresAt: BigNumberish;
-};
-
-export type InsuranceRegistrationStructOutput = [
-  insured: string,
-  insurer: string,
-  tokenId: bigint,
-  limit: bigint,
-  expiresAt: bigint
-] & {
-  insured: string;
-  insurer: string;
-  tokenId: bigint;
-  limit: bigint;
-  expiresAt: bigint;
 };
 
 export type AllowanceStruct = {
@@ -141,10 +132,8 @@ export type ProofBodyStructOutput = [
 
 export type FinalDisputeProofStruct = {
   counterentity: BytesLike;
-  initialCooperativeNonce: BigNumberish;
-  finalCooperativeNonce: BigNumberish;
-  initialDisputeNonce: BigNumberish;
-  finalDisputeNonce: BigNumberish;
+  initialNonce: BigNumberish;
+  finalNonce: BigNumberish;
   initialProofbodyHash: BytesLike;
   finalProofbody: ProofBodyStruct;
   finalArguments: BytesLike;
@@ -157,10 +146,8 @@ export type FinalDisputeProofStruct = {
 
 export type FinalDisputeProofStructOutput = [
   counterentity: string,
-  initialCooperativeNonce: bigint,
-  finalCooperativeNonce: bigint,
-  initialDisputeNonce: bigint,
-  finalDisputeNonce: bigint,
+  initialNonce: bigint,
+  finalNonce: bigint,
   initialProofbodyHash: string,
   finalProofbody: ProofBodyStructOutput,
   finalArguments: string,
@@ -171,10 +158,8 @@ export type FinalDisputeProofStructOutput = [
   cooperative: boolean
 ] & {
   counterentity: string;
-  initialCooperativeNonce: bigint;
-  finalCooperativeNonce: bigint;
-  initialDisputeNonce: bigint;
-  finalDisputeNonce: bigint;
+  initialNonce: bigint;
+  finalNonce: bigint;
   initialProofbodyHash: string;
   finalProofbody: ProofBodyStructOutput;
   finalArguments: string;
@@ -187,8 +172,7 @@ export type FinalDisputeProofStructOutput = [
 
 export type InitialDisputeProofStruct = {
   counterentity: BytesLike;
-  cooperativeNonce: BigNumberish;
-  disputeNonce: BigNumberish;
+  nonce: BigNumberish;
   proofbodyHash: BytesLike;
   sig: BytesLike;
   initialArguments: BytesLike;
@@ -196,15 +180,13 @@ export type InitialDisputeProofStruct = {
 
 export type InitialDisputeProofStructOutput = [
   counterentity: string,
-  cooperativeNonce: bigint,
-  disputeNonce: bigint,
+  nonce: bigint,
   proofbodyHash: string,
   sig: string,
   initialArguments: string
 ] & {
   counterentity: string;
-  cooperativeNonce: bigint;
-  disputeNonce: bigint;
+  nonce: bigint;
   proofbodyHash: string;
   sig: string;
   initialArguments: string;
@@ -281,6 +263,7 @@ export type CollateralToReserveStruct = {
   counterparty: BytesLike;
   tokenId: BigNumberish;
   amount: BigNumberish;
+  nonce: BigNumberish;
   sig: BytesLike;
 };
 
@@ -288,15 +271,21 @@ export type CollateralToReserveStructOutput = [
   counterparty: string,
   tokenId: bigint,
   amount: bigint,
+  nonce: bigint,
   sig: string
-] & { counterparty: string; tokenId: bigint; amount: bigint; sig: string };
+] & {
+  counterparty: string;
+  tokenId: bigint;
+  amount: bigint;
+  nonce: bigint;
+  sig: string;
+};
 
 export type SettlementStruct = {
   leftEntity: BytesLike;
   rightEntity: BytesLike;
   diffs: SettlementDiffStruct[];
   forgiveDebtsInTokenIds: BigNumberish[];
-  insuranceRegs: InsuranceRegistrationStruct[];
   sig: BytesLike;
   entityProvider: AddressLike;
   hankoData: BytesLike;
@@ -308,7 +297,6 @@ export type SettlementStructOutput = [
   rightEntity: string,
   diffs: SettlementDiffStructOutput[],
   forgiveDebtsInTokenIds: bigint[],
-  insuranceRegs: InsuranceRegistrationStructOutput[],
   sig: string,
   entityProvider: string,
   hankoData: string,
@@ -318,7 +306,6 @@ export type SettlementStructOutput = [
   rightEntity: string;
   diffs: SettlementDiffStructOutput[];
   forgiveDebtsInTokenIds: bigint[];
-  insuranceRegs: InsuranceRegistrationStructOutput[];
   sig: string;
   entityProvider: string;
   hankoData: string;
@@ -417,8 +404,6 @@ export interface DepositoryInterface extends Interface {
       | "getApprovedProviders"
       | "getTokenMetadata"
       | "getTokensLength"
-      | "insuranceCursor"
-      | "insuranceLines"
       | "mintToReserve"
       | "onERC1155BatchReceived"
       | "onERC1155Received"
@@ -449,8 +434,6 @@ export interface DepositoryInterface extends Interface {
       | "EntityProviderAdded"
       | "EntityProviderRemoved"
       | "HankoBatchProcessed"
-      | "InsuranceClaimed"
-      | "InsuranceRegistered"
       | "ReserveUpdated"
       | "SecretRevealed"
   ): EventFragment;
@@ -502,13 +485,7 @@ export interface DepositoryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "computeSettlementHash",
-    values: [
-      BytesLike,
-      BytesLike,
-      SettlementDiffStruct[],
-      BigNumberish[],
-      InsuranceRegistrationStruct[]
-    ]
+    values: [BytesLike, BytesLike, SettlementDiffStruct[], BigNumberish[]]
   ): string;
   encodeFunctionData(
     functionFragment: "defaultDisputeDelay",
@@ -567,14 +544,6 @@ export interface DepositoryInterface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "insuranceCursor",
-    values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "insuranceLines",
-    values: [BytesLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "mintToReserve",
     values: [BytesLike, BigNumberish, BigNumberish]
   ): string;
@@ -627,7 +596,6 @@ export interface DepositoryInterface extends Interface {
       BytesLike,
       SettlementDiffStruct[],
       BigNumberish[],
-      InsuranceRegistrationStruct[],
       BytesLike
     ]
   ): string;
@@ -732,14 +700,6 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "insuranceCursor",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "insuranceLines",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "mintToReserve",
     data: BytesLike
   ): Result;
@@ -792,10 +752,10 @@ export interface DepositoryInterface extends Interface {
 }
 
 export namespace AccountSettledEvent {
-  export type InputTuple = [settled: SettledStruct[]];
-  export type OutputTuple = [settled: SettledStructOutput[]];
+  export type InputTuple = [settled: AccountSettlementStruct[]];
+  export type OutputTuple = [settled: AccountSettlementStructOutput[]];
   export interface OutputObject {
-    settled: SettledStructOutput[];
+    settled: AccountSettlementStructOutput[];
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -807,17 +767,17 @@ export namespace CooperativeCloseEvent {
   export type InputTuple = [
     sender: BytesLike,
     counterentity: BytesLike,
-    cooperativeNonce: BigNumberish
+    nonce: BigNumberish
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
-    cooperativeNonce: bigint
+    nonce: bigint
   ];
   export interface OutputObject {
     sender: string;
     counterentity: string;
-    cooperativeNonce: bigint;
+    nonce: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -941,21 +901,21 @@ export namespace DisputeFinalizedEvent {
   export type InputTuple = [
     sender: BytesLike,
     counterentity: BytesLike,
-    initialDisputeNonce: BigNumberish,
+    nonce: BigNumberish,
     initialProofbodyHash: BytesLike,
     finalProofbodyHash: BytesLike
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
-    initialDisputeNonce: bigint,
+    nonce: bigint,
     initialProofbodyHash: string,
     finalProofbodyHash: string
   ];
   export interface OutputObject {
     sender: string;
     counterentity: string;
-    initialDisputeNonce: bigint;
+    nonce: bigint;
     initialProofbodyHash: string;
     finalProofbodyHash: string;
   }
@@ -969,21 +929,21 @@ export namespace DisputeStartedEvent {
   export type InputTuple = [
     sender: BytesLike,
     counterentity: BytesLike,
-    disputeNonce: BigNumberish,
+    nonce: BigNumberish,
     proofbodyHash: BytesLike,
     initialArguments: BytesLike
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
-    disputeNonce: bigint,
+    nonce: bigint,
     proofbodyHash: string,
     initialArguments: string
   ];
   export interface OutputObject {
     sender: string;
     counterentity: string;
-    disputeNonce: bigint;
+    nonce: bigint;
     proofbodyHash: string;
     initialArguments: string;
   }
@@ -1047,62 +1007,6 @@ export namespace HankoBatchProcessedEvent {
     hankoHash: string;
     nonce: bigint;
     success: boolean;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace InsuranceClaimedEvent {
-  export type InputTuple = [
-    insured: BytesLike,
-    insurer: BytesLike,
-    creditor: BytesLike,
-    tokenId: BigNumberish,
-    amount: BigNumberish
-  ];
-  export type OutputTuple = [
-    insured: string,
-    insurer: string,
-    creditor: string,
-    tokenId: bigint,
-    amount: bigint
-  ];
-  export interface OutputObject {
-    insured: string;
-    insurer: string;
-    creditor: string;
-    tokenId: bigint;
-    amount: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace InsuranceRegisteredEvent {
-  export type InputTuple = [
-    insured: BytesLike,
-    insurer: BytesLike,
-    tokenId: BigNumberish,
-    limit: BigNumberish,
-    expiresAt: BigNumberish
-  ];
-  export type OutputTuple = [
-    insured: string,
-    insurer: string,
-    tokenId: bigint,
-    limit: bigint,
-    expiresAt: bigint
-  ];
-  export interface OutputObject {
-    insured: string;
-    insurer: string;
-    tokenId: bigint;
-    limit: bigint;
-    expiresAt: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -1203,7 +1107,7 @@ export interface Depository extends BaseContract {
     [arg0: BytesLike],
     [
       [bigint, string, bigint] & {
-        cooperativeNonce: bigint;
+        nonce: bigint;
         disputeHash: string;
         disputeTimeout: bigint;
       }
@@ -1274,8 +1178,7 @@ export interface Depository extends BaseContract {
       leftEntity: BytesLike,
       rightEntity: BytesLike,
       diffs: SettlementDiffStruct[],
-      forgiveDebtsInTokenIds: BigNumberish[],
-      insuranceRegs: InsuranceRegistrationStruct[]
+      forgiveDebtsInTokenIds: BigNumberish[]
     ],
     [
       [string, bigint, bigint] & {
@@ -1348,21 +1251,6 @@ export interface Depository extends BaseContract {
   >;
 
   getTokensLength: TypedContractMethod<[], [bigint], "view">;
-
-  insuranceCursor: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
-
-  insuranceLines: TypedContractMethod<
-    [arg0: BytesLike, arg1: BigNumberish],
-    [
-      [string, bigint, bigint, bigint] & {
-        insurer: string;
-        tokenId: bigint;
-        remaining: bigint;
-        expiresAt: bigint;
-      }
-    ],
-    "view"
-  >;
 
   mintToReserve: TypedContractMethod<
     [entity: BytesLike, tokenId: BigNumberish, amount: BigNumberish],
@@ -1456,7 +1344,6 @@ export interface Depository extends BaseContract {
       rightEntity: BytesLike,
       diffs: SettlementDiffStruct[],
       forgiveDebtsInTokenIds: BigNumberish[],
-      insuranceRegs: InsuranceRegistrationStruct[],
       sig: BytesLike
     ],
     [boolean],
@@ -1496,7 +1383,7 @@ export interface Depository extends BaseContract {
     [arg0: BytesLike],
     [
       [bigint, string, bigint] & {
-        cooperativeNonce: bigint;
+        nonce: bigint;
         disputeHash: string;
         disputeTimeout: bigint;
       }
@@ -1566,8 +1453,7 @@ export interface Depository extends BaseContract {
       leftEntity: BytesLike,
       rightEntity: BytesLike,
       diffs: SettlementDiffStruct[],
-      forgiveDebtsInTokenIds: BigNumberish[],
-      insuranceRegs: InsuranceRegistrationStruct[]
+      forgiveDebtsInTokenIds: BigNumberish[]
     ],
     [
       [string, bigint, bigint] & {
@@ -1650,23 +1536,6 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "getTokensLength"
   ): TypedContractMethod<[], [bigint], "view">;
-  getFunction(
-    nameOrSignature: "insuranceCursor"
-  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
-  getFunction(
-    nameOrSignature: "insuranceLines"
-  ): TypedContractMethod<
-    [arg0: BytesLike, arg1: BigNumberish],
-    [
-      [string, bigint, bigint, bigint] & {
-        insurer: string;
-        tokenId: bigint;
-        remaining: bigint;
-        expiresAt: bigint;
-      }
-    ],
-    "view"
-  >;
   getFunction(
     nameOrSignature: "mintToReserve"
   ): TypedContractMethod<
@@ -1759,7 +1628,6 @@ export interface Depository extends BaseContract {
       rightEntity: BytesLike,
       diffs: SettlementDiffStruct[],
       forgiveDebtsInTokenIds: BigNumberish[],
-      insuranceRegs: InsuranceRegistrationStruct[],
       sig: BytesLike
     ],
     [boolean],
@@ -1872,20 +1740,6 @@ export interface Depository extends BaseContract {
     HankoBatchProcessedEvent.InputTuple,
     HankoBatchProcessedEvent.OutputTuple,
     HankoBatchProcessedEvent.OutputObject
-  >;
-  getEvent(
-    key: "InsuranceClaimed"
-  ): TypedContractEvent<
-    InsuranceClaimedEvent.InputTuple,
-    InsuranceClaimedEvent.OutputTuple,
-    InsuranceClaimedEvent.OutputObject
-  >;
-  getEvent(
-    key: "InsuranceRegistered"
-  ): TypedContractEvent<
-    InsuranceRegisteredEvent.InputTuple,
-    InsuranceRegisteredEvent.OutputTuple,
-    InsuranceRegisteredEvent.OutputObject
   >;
   getEvent(
     key: "ReserveUpdated"
@@ -2033,28 +1887,6 @@ export interface Depository extends BaseContract {
       HankoBatchProcessedEvent.InputTuple,
       HankoBatchProcessedEvent.OutputTuple,
       HankoBatchProcessedEvent.OutputObject
-    >;
-
-    "InsuranceClaimed(bytes32,bytes32,bytes32,uint256,uint256)": TypedContractEvent<
-      InsuranceClaimedEvent.InputTuple,
-      InsuranceClaimedEvent.OutputTuple,
-      InsuranceClaimedEvent.OutputObject
-    >;
-    InsuranceClaimed: TypedContractEvent<
-      InsuranceClaimedEvent.InputTuple,
-      InsuranceClaimedEvent.OutputTuple,
-      InsuranceClaimedEvent.OutputObject
-    >;
-
-    "InsuranceRegistered(bytes32,bytes32,uint256,uint256,uint256)": TypedContractEvent<
-      InsuranceRegisteredEvent.InputTuple,
-      InsuranceRegisteredEvent.OutputTuple,
-      InsuranceRegisteredEvent.OutputObject
-    >;
-    InsuranceRegistered: TypedContractEvent<
-      InsuranceRegisteredEvent.InputTuple,
-      InsuranceRegisteredEvent.OutputTuple,
-      InsuranceRegisteredEvent.OutputObject
     >;
 
     "ReserveUpdated(bytes32,uint256,uint256)": TypedContractEvent<

@@ -213,7 +213,7 @@ export async function handleHtlcPayment(
   const nextHopDelta = newState.accounts.get(nextHop)?.deltas?.get(tokenId);
   if (!nextHopDelta) {
     logError("HTLC_PAYMENT", `❌ No delta state for next hop ${formatEntityId(nextHop)} token ${tokenId}`);
-    addMessage(newState, `❌ HTLC payment failed: missing channel state`);
+    addMessage(newState, `❌ HTLC payment failed: missing account state`);
     return { newState, outputs: [], mempoolOps: [] };
   }
   const senderIsLeftOnNextAccount = newState.accounts.get(nextHop)?.leftEntity === entityState.entityId;

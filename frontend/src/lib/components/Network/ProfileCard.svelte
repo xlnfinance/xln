@@ -18,8 +18,8 @@
   $: currentEntityId = activeTab?.entityId;
   $: currentSignerId = activeTab?.signerId;
 
-  // Check if already joined this hub (has channel)
-  $: hasExistingChannel = (() => {
+  // Check if already joined this hub (has account)
+  $: hasExistingAccount = (() => {
     if (!currentEntityId || !$xlnEnvironment) return false;
     
     // Find current entity's replica
@@ -156,7 +156,7 @@
     {#if profile.entityId === currentEntityId}
       <span class="text-muted your-hub">Your Hub</span>
     {:else if isHub}
-      {#if hasExistingChannel}
+      {#if hasExistingAccount}
         <span class="text-muted already-joined">✅ Already joined this hub</span>
       {:else}
         <button
