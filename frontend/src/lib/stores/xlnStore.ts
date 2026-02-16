@@ -15,12 +15,12 @@ async function getXLN(): Promise<XLNModule> {
 
   // Always cache-bust runtime module per page load; stale runtime.js caused prod-debug desync.
   const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
-  XLN = await import(/* @vite-ignore */ runtimeUrl) as XLNModule;
+  XLN = (await import(/* @vite-ignore */ runtimeUrl)) as XLNModule;
   const runtimeAny = XLN as unknown as Record<string, unknown>;
   const loadedSchema = Number(runtimeAny.RUNTIME_SCHEMA_VERSION ?? NaN);
   if (!Number.isFinite(loadedSchema) || loadedSchema !== REQUIRED_RUNTIME_SCHEMA_VERSION) {
     throw new Error(
-      `RUNTIME_VERSION_MISMATCH: expected schema=${REQUIRED_RUNTIME_SCHEMA_VERSION} got=${String(runtimeAny.RUNTIME_SCHEMA_VERSION ?? 'undefined')}`
+      `RUNTIME_VERSION_MISMATCH: expected schema=${REQUIRED_RUNTIME_SCHEMA_VERSION} got=${String(runtimeAny.RUNTIME_SCHEMA_VERSION ?? 'undefined')}`,
     );
   }
   xlnInstance.set(XLN);
@@ -56,14 +56,16 @@ function exposeGlobalDebugObjects() {
 
     // Ensure vault controls are reachable in production E2E/debug sessions
     // even before RuntimeCreation panel imports vaultStore.
-    import('./vaultStore').then(({ vaultOperations, runtimesState }) => {
-      // @ts-ignore - intentional debug/test surface
-      window.vaultOperations = vaultOperations;
-      // @ts-ignore - intentional debug/test surface
-      window.runtimesState = runtimesState;
-    }).catch((err) => {
-      console.warn('[xlnStore] Failed to expose vaultStore globals:', err);
-    });
+    import('./vaultStore')
+      .then(({ vaultOperations, runtimesState }) => {
+        // @ts-ignore - intentional debug/test surface
+        window.vaultOperations = vaultOperations;
+        // @ts-ignore - intentional debug/test surface
+        window.runtimesState = runtimesState;
+      })
+      .catch(err => {
+        console.warn('[xlnStore] Failed to expose vaultStore globals:', err);
+      });
   }
 }
 
@@ -99,6 +101,15 @@ function isLocalBrowserHost(): boolean {
 export function resolveRelayUrls(): string[] {
   if (typeof window === 'undefined') return ['wss://xln.finance/relay'];
 
+  // When running locally, auto-detect local relay from page origin.
+  // This prevents CORS issues where settings still point to production relay
+  // but the server is running on localhost.
+  if (isLocalBrowserHost()) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const localRelay = `${protocol}//${window.location.host}/relay`;
+    return [localRelay];
+  }
+
   // Priority: 1) localStorage (direct read for reliability), 2) store, 3) env var, 4) default
   let localStorageRelay: string | undefined;
   try {
@@ -107,7 +118,9 @@ export function resolveRelayUrls(): string[] {
       const parsed = JSON.parse(saved);
       localStorageRelay = parsed.relayUrl;
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   const settingsRelay = get(settings)?.relayUrl;
   const envRelay = (import.meta as any)?.env?.VITE_RELAY_URL as string | undefined;
@@ -122,10 +135,7 @@ export function resolveRelayUrls(): string[] {
 }
 
 // Derived stores for convenience
-export const replicas = derived(
-  xlnEnvironment,
-  ($env) => $env?.eReplicas || new Map()
-);
+export const replicas = derived(xlnEnvironment, $env => $env?.eReplicas || new Map());
 
 // P2P connection state (polled from runtime)
 export type P2PState = {
@@ -150,7 +160,9 @@ function startP2PPoll() {
     try {
       const state = (XLN as any).getP2PState(env);
       if (state) p2pState.set(state);
-    } catch { /* ignore if not available */ }
+    } catch {
+      /* ignore if not available */
+    }
   };
   poll();
   p2pPollTimer = setInterval(poll, 1000);
@@ -171,10 +183,10 @@ export const currentHeight = writable<number>(0);
 // Stores RELATIVE positions + jurisdiction reference for proper multi-jurisdiction support
 // Frontend computes: worldPos = jMachine.position + relativePosition
 export interface RelativeEntityPosition {
-  x: number;        // Relative X offset from j-machine center
-  y: number;        // Relative Y offset from j-machine center
-  z: number;        // Relative Z offset from j-machine center
-  jurisdiction: string;   // Which j-machine this entity belongs to
+  x: number; // Relative X offset from j-machine center
+  y: number; // Relative Y offset from j-machine center
+  z: number; // Relative Z offset from j-machine center
+  jurisdiction: string; // Which j-machine this entity belongs to
 }
 export const entityPositions = writable<Map<string, RelativeEntityPosition>>(new Map());
 
@@ -232,7 +244,9 @@ export async function initializeXLN(): Promise<Env> {
               const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
               currentPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
               hasChanges = true;
-              console.log(`[xlnStore] 📍 Captured relative position for ${entityId.slice(0,10)}: (${pos.x}, ${pos.y}, ${pos.z}) in jurisdiction=${jurisdiction}`);
+              console.log(
+                `[xlnStore] 📍 Captured relative position for ${entityId.slice(0, 10)}: (${pos.x}, ${pos.y}, ${pos.z}) in jurisdiction=${jurisdiction}`,
+              );
             }
           }
           return hasChanges ? new Map(currentPositions) : currentPositions;
@@ -274,7 +288,9 @@ export async function initializeXLN(): Promise<Env> {
           // Store relative position + jReplica reference (defaults to activeJurisdiction)
           const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
           initialPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
-          console.log(`[xlnStore] 📍 Initial relative position for ${entityId.slice(0,10)}: (${pos.x}, ${pos.y}, ${pos.z}) in jurisdiction=${jurisdiction}`);
+          console.log(
+            `[xlnStore] 📍 Initial relative position for ${entityId.slice(0, 10)}: (${pos.x}, ${pos.y}, ${pos.z}) in jurisdiction=${jurisdiction}`,
+          );
         }
       }
       if (initialPositions.size > 0) {
@@ -327,7 +343,7 @@ export async function enqueueEntityInputs(env: Env, inputs?: unknown[]): Promise
   const xln = await getXLN();
   xln.enqueueRuntimeInput(env, {
     runtimeTxs: [],
-    entityInputs: (inputs as any[]) ?? []
+    entityInputs: (inputs as any[]) ?? [],
   });
   return env;
 }
@@ -351,10 +367,12 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
       console.warn('XLN not initialized yet - showing safe fallbacks until runtime loads');
     };
 
-    const safe = <T>(fn: (...args: any[]) => T) => (...args: any[]) => {
-      warnMissingXLN();
-      return fn(...args);
-    };
+    const safe =
+      <T>(fn: (...args: any[]) => T) =>
+      (...args: any[]) => {
+        warnMissingXLN();
+        return fn(...args);
+      };
 
     // Match runtime getEntityShortId: numbered entities = decimal, hash entities = first 4 chars
     const fallbackShortId = (id: string | undefined) => {
@@ -366,11 +384,13 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
         if (value >= 0n && value < NUMERIC_THRESHOLD) {
           return value.toString();
         }
-      } catch { /* Fall through to hash mode */ }
+      } catch {
+        /* Fall through to hash mode */
+      }
       return hex.slice(0, 4).toUpperCase();
     };
     const fallbackFormatEntityId = (id: string | undefined) =>
-      id && id.length > 10 ? `${id.slice(0, 6)}...${id.slice(-4)}` : (id || 'N/A');
+      id && id.length > 10 ? `${id.slice(0, 6)}...${id.slice(-4)}` : id || 'N/A';
     const fallbackTokenInfo = (tokenId: number) => ({ symbol: `T${tokenId}`, decimals: 18 });
     const fallbackDerived = {
       delta: 0,
@@ -463,7 +483,7 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
       sendEntityInput: safe(() => ({ sent: false, deferred: true, queuedLocal: false })) as any,
       resolveEntityProposerId: safe(() => '') as any,
 
-      isReady: false
+      isReady: false,
     };
   }
 
@@ -499,7 +519,7 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
           shortId,
           display,
           avatar: $xlnInstance.generateEntityAvatar?.(entityId) || '',
-          info: $xlnInstance.getEntityDisplayInfo?.(entityId) || { name: entityId, avatar: '', type: 'numbered' }
+          info: $xlnInstance.getEntityDisplayInfo?.(entityId) || { name: entityId, avatar: '', type: 'numbered' },
         };
       } catch (error) {
         console.error('FINTECH-SAFETY: Entity access failed:', error);
@@ -580,6 +600,6 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
     resolveEntityProposerId: $xlnInstance.resolveEntityProposerId,
 
     // State management - indicates functions are fully loaded
-    isReady: true
+    isReady: true,
   };
 });

@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store';
-import type { Settings, ThemeName, BarColorMode } from '$lib/types/ui';
+import type { Settings, ThemeName, BarColorMode, BarLayoutMode } from '$lib/types/ui';
 import { applyThemeToDocument } from '../utils/themes';
 
 const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token'] as const;
@@ -8,6 +8,7 @@ const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token']
 const defaultSettings: Settings = {
   theme: 'dark',
   barColorMode: 'rgy',
+  barLayout: 'center',
   dropdownMode: 'signer-first',
   runtimeDelay: 250, // 250ms = 4 frames/second (visible lightning effects)
   balanceRefreshMs: 15000, // Default to 15s to avoid RPC pressure
@@ -180,6 +181,12 @@ const settingsOperations = {
       localStorage.removeItem(SETTINGS_KEY);
       localStorage.removeItem(COMPONENT_STATES_KEY);
     }
+  },
+
+  // Generic partial update + persist
+  update(partial: Partial<Settings>) {
+    settings.update(current => ({ ...current, ...partial }));
+    this.saveToStorage();
   },
 
   // Initialize settings

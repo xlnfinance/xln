@@ -11,7 +11,7 @@ import { QUOTE_EXPIRY_MS } from '../../types';
 export function handleRebalanceQuote(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'rebalance_quote' }>,
-  currentTimestamp: number
+  currentTimestamp: number,
 ): { success: boolean; events: string[]; error?: string } {
   const { tokenId, amount, feeTokenId, feeAmount } = accountTx.data;
 
@@ -26,8 +26,9 @@ export function handleRebalanceQuote(
   const quoteId = currentTimestamp;
 
   // Auto-accept check: fee <= user's maxAcceptableFee
+  // If no explicit policy set, auto-accept all quotes (default = trust hub, "just works" UX)
   const policy = accountMachine.rebalancePolicy.get(tokenId);
-  const accepted = !!(policy && feeAmount <= policy.maxAcceptableFee);
+  const accepted = policy ? feeAmount <= policy.maxAcceptableFee : true;
 
   const quote: RebalanceQuote = {
     quoteId,

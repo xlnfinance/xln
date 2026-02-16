@@ -13,6 +13,8 @@
   import { history, xlnEnvironment } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
+  import { getAvailableThemes, THEME_DEFINITIONS } from '../../utils/themes';
+  import type { ThemeName } from '$lib/types/ui';
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { xlnFunctions, entityPositions, enqueueEntityInputs } from '../../stores/xlnStore';
@@ -73,14 +75,16 @@
 
   function resolveApiBaseFromRelay(relayUrl: string | undefined | null): string {
     if (typeof window === 'undefined') return 'https://xln.finance';
+    const pageHost = window.location.hostname;
+    // When running locally, ALWAYS use page origin for API calls.
+    // This prevents CORS issues where relay URL points to production
+    // but the page is served from localhost.
+    if (isLocalHost(pageHost)) {
+      return window.location.origin;
+    }
     if (!relayUrl) return 'https://xln.finance';
     try {
       const relay = new URL(relayUrl);
-      const pageHost = window.location.hostname;
-      // Local dev split-port setup: relay on :9000, API/UI on :8080.
-      if (isLocalHost(relay.hostname) && isLocalHost(pageHost)) {
-        return window.location.origin;
-      }
       const protocol =
         relay.protocol === 'wss:' ? 'https:' :
         relay.protocol === 'ws:' ? 'http:' :
@@ -146,6 +150,18 @@
 
   // Get avatar URL
   $: avatarUrl = activeXlnFunctions?.generateEntityAvatar?.(tab.entityId) || '';
+
+  // Resolve entity name from gossip profiles
+  $: gossipName = (() => {
+    const entityId = (replica?.state?.entityId || tab.entityId || '').toLowerCase();
+    if (!entityId) return '';
+    const profiles = (activeEnv?.gossip?.getProfiles?.() || []) as Array<{
+      entityId?: string;
+      metadata?: { name?: string };
+    }>;
+    const profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === entityId);
+    return profile?.metadata?.name || '';
+  })();
 
   // Format short address for display
   function formatAddress(addr: string): string {
@@ -315,7 +331,7 @@
     }
   }
 
-  async function faucetOffchain() {
+  async function faucetOffchain(hubEntityId?: string, tokenId: number = 1) {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
     try {
@@ -325,15 +341,17 @@
         throw new Error('Runtime is not ready yet (missing runtimeId). Re-open runtime and retry.');
       }
 
-      const profiles = (activeEnv as any)?.gossip?.getProfiles?.() || [];
-      const isHubEntity = (candidate: string): boolean => {
-        const profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === String(candidate).toLowerCase());
-        return !!(profile?.metadata?.isHub === true || (Array.isArray(profile?.capabilities) && profile.capabilities.includes('hub')));
-      };
-      const accountIds = replica?.state?.accounts ? Array.from(replica.state.accounts.keys()) : [];
-      const preferredHubEntityId = accountIds.find((id) => isHubEntity(String(id)));
+      // Auto-detect hub if not specified
+      if (!hubEntityId) {
+        const profiles = (activeEnv as any)?.gossip?.getProfiles?.() || [];
+        const isHubEntity = (candidate: string): boolean => {
+          const profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === String(candidate).toLowerCase());
+          return !!(profile?.metadata?.isHub === true || (Array.isArray(profile?.capabilities) && profile.capabilities.includes('hub')));
+        };
+        const accountIds = replica?.state?.accounts ? Array.from(replica.state.accounts.keys()) : [];
+        hubEntityId = accountIds.find((id) => isHubEntity(String(id))) || undefined;
+      }
 
-      // Faucet C: offchain payment (single request, no client-side retry loops).
       const requestTimeoutMs = 12000;
       let response: Response | null = null;
       let result: any = null;
@@ -341,7 +359,7 @@
       try {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
-        console.log(`[EntityPanel] Offchain faucet request apiBase=${requestApiBase} runtime=${runtimeId.slice(0, 10)} entity=${String(entityId).slice(0, 10)}`);
+        console.log(`[EntityPanel] Offchain faucet request hub=${hubEntityId?.slice(0, 10)} token=${tokenId}`);
         response = await fetch(`${requestApiBase}/api/faucet/offchain`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -349,9 +367,9 @@
           body: JSON.stringify({
             userEntityId: entityId,
             userRuntimeId: runtimeId,
-            tokenId: 1, // USDC
+            tokenId,
             amount: '100',
-            ...(preferredHubEntityId ? { hubEntityId: preferredHubEntityId } : {}),
+            ...(hubEntityId ? { hubEntityId } : {}),
           })
         });
         result = await readJsonResponse(response);
@@ -376,6 +394,10 @@
       console.error('[EntityPanel] Offchain faucet failed:', err);
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
     }
+  }
+
+  function handleAccountFaucet(event: CustomEvent<{ counterpartyId: string; tokenId: number }>) {
+    faucetOffchain(event.detail.counterpartyId, event.detail.tokenId);
   }
 
   const TOKEN_CACHE_TTL_MS = 60_000;
@@ -1093,6 +1115,7 @@
           counterpartyId={selectedAccountId}
           entityId={tab.entityId}
           on:back={handleBackToAccounts}
+          on:faucet={handleAccountFaucet}
         />
       </div>
 
@@ -1108,8 +1131,8 @@
             </div>
           {/if}
           <div class="hero-identity">
-            <span class="hero-name">Entity {replica?.state?.entityId || tab.entityId}</span>
-            <button class="hero-address" on:click={copyAddress} title="Copy address">
+            <span class="hero-name">{gossipName || formatAddress(replica?.state?.entityId || tab.entityId)}</span>
+            <button class="hero-address" on:click={copyAddress} title="Copy full address">
               <span>{formatAddress(replica?.state?.entityId || tab.entityId)}</span>
               {#if addressCopied}
                 <Check size={10} />
@@ -1128,36 +1151,45 @@
       <!-- Breakdown Cards -->
       <section class="breakdown">
         <button class="breakdown-card" class:active={activeTab === 'external'} on:click={() => activeTab = 'external'}>
-          <div class="card-value">{formatCompact(externalTotal)}</div>
-          <div class="card-label">External</div>
-          <div class="card-sub">{externalTokens.filter(t => t.balance > 0n).length} tokens</div>
+          <div class="card-icon">💳</div>
+          <div class="card-body">
+            <div class="card-value">{formatCompact(externalTotal)}</div>
+            <div class="card-label">External</div>
+            <div class="card-sub">{externalTokens.filter(t => t.balance > 0n).length} token{externalTokens.filter(t => t.balance > 0n).length !== 1 ? 's' : ''}</div>
+          </div>
         </button>
         <button class="breakdown-card" class:active={activeTab === 'reserves'} on:click={() => activeTab = 'reserves'}>
-          <div class="card-value">{formatCompact(reservesTotal)}</div>
-          <div class="card-label">Reserves</div>
-          <div class="card-sub">{Array.from(onchainReserves.values()).filter(v => v > 0n).length} tokens</div>
+          <div class="card-icon">🏦</div>
+          <div class="card-body">
+            <div class="card-value">{formatCompact(reservesTotal)}</div>
+            <div class="card-label">Reserves</div>
+            <div class="card-sub">{Array.from(onchainReserves.values()).filter(v => v > 0n).length} token{Array.from(onchainReserves.values()).filter(v => v > 0n).length !== 1 ? 's' : ''}</div>
+          </div>
         </button>
         <button class="breakdown-card wide" class:active={activeTab === 'accounts'} on:click={() => activeTab = 'accounts'}>
-          <div class="card-value">{formatCompact(accountsData.total)}</div>
-          <div class="card-label">Accounts</div>
-          <div class="card-sub">
-            {#if accountsData.count > 0}
-              {accountsData.count} ch
-              {#if accountsData.outPeerDebt > 0}
-                <span class="accounts-breakdown">owed {formatCompact(accountsData.outPeerDebt)}</span>
+          <div class="card-icon">⚡</div>
+          <div class="card-body">
+            <div class="card-value">{formatCompact(accountsData.total)}</div>
+            <div class="card-label">Accounts</div>
+            <div class="card-sub">
+              {#if accountsData.count > 0}
+                {accountsData.count} channel{accountsData.count !== 1 ? 's' : ''}
+                {#if accountsData.outPeerDebt > 0}
+                  <span class="accounts-breakdown debt">owed {formatCompact(accountsData.outPeerDebt)}</span>
+                {/if}
+                {#if accountsData.outCollateral > 0}
+                  <span class="accounts-breakdown coll">coll {formatCompact(accountsData.outCollateral)}</span>
+                {/if}
+                {#if accountsData.outOurCredit > 0}
+                  <span class="accounts-breakdown credit">credit {formatCompact(accountsData.outOurCredit)}</span>
+                {/if}
+                {#if accountsData.inbound > 0}
+                  <span class="accounts-breakdown in-capacity">in {formatCompact(accountsData.inbound)}</span>
+                {/if}
+              {:else}
+                No accounts yet
               {/if}
-              {#if accountsData.outCollateral > 0}
-                <span class="accounts-breakdown">coll {formatCompact(accountsData.outCollateral)}</span>
-              {/if}
-              {#if accountsData.outOurCredit > 0}
-                <span class="accounts-breakdown">credit {formatCompact(accountsData.outOurCredit)}</span>
-              {/if}
-              {#if accountsData.inbound > 0}
-                <span class="accounts-breakdown in-capacity">in {formatCompact(accountsData.inbound)}</span>
-              {/if}
-            {:else}
-              No accounts
-            {/if}
+            </div>
           </div>
         </button>
       </section>
@@ -1171,7 +1203,7 @@
             data-testid={`tab-${t.id}`}
             on:click={() => activeTab = t.id}
           >
-            <svelte:component this={t.icon} size={15} />
+            <svelte:component this={t.icon} size={14} />
             <span>{t.label}</span>
             {#if t.showBadge && t.badgeType === 'activity' && activityCount > 0}
               <span class="badge">{activityCount}</span>
@@ -1368,10 +1400,7 @@
           {/if}
 
         {:else if activeTab === 'accounts'}
-          <button class="btn-faucet" on:click={faucetOffchain}>
-            💧 Get Test Funds (Offchain)
-          </button>
-          <AccountList {replica} on:select={handleAccountSelect} />
+          <AccountList {replica} on:select={handleAccountSelect} on:faucet={handleAccountFaucet} />
           <div class="account-open-sections">
             <div class="open-section">
               <h4 class="section-head">Open with Public Hub</h4>
@@ -1476,6 +1505,28 @@
           </button>
 
         {:else if activeTab === 'settings'}
+          <h4 class="section-head">Appearance</h4>
+          <div class="theme-grid">
+            {#each getAvailableThemes() as theme}
+              {@const colors = THEME_DEFINITIONS[theme.id]}
+              <button
+                class="theme-swatch"
+                class:active={$settings.theme === theme.id}
+                on:click={() => settingsOperations.setTheme(theme.id)}
+                title={theme.name}
+              >
+                <div class="swatch-preview" style="background: {colors.background}; border-color: {colors.surfaceBorder};">
+                  <div class="swatch-bar" style="background: {colors.barCollateral}; width: 60%;"></div>
+                  <div class="swatch-bar" style="background: {colors.barDebt}; width: 30%;"></div>
+                  <div class="swatch-text" style="color: {colors.textPrimary};">Aa</div>
+                  <div class="swatch-accent" style="background: {colors.accentColor};"></div>
+                </div>
+                <span class="swatch-label" class:active={$settings.theme === theme.id}>{theme.name}</span>
+              </button>
+            {/each}
+          </div>
+
+          <h4 class="section-head">Display</h4>
           <div class="setting-row">
             <span>Compact Numbers</span>
             <button class="toggle" class:on={$settings.compactNumbers}
@@ -1490,6 +1541,8 @@
               {$settings.verboseLogging ? 'On' : 'Off'}
             </button>
           </div>
+
+          <h4 class="section-head">Identity</h4>
           <div class="setting-block">
             <label>Entity ID</label>
             <code>{tab.entityId}</code>
@@ -1569,7 +1622,7 @@
   }
 
   .main-scroll::-webkit-scrollbar {
-    width: 6px;
+    width: 5px;
   }
 
   .main-scroll::-webkit-scrollbar-track {
@@ -1577,7 +1630,7 @@
   }
 
   .main-scroll::-webkit-scrollbar-thumb {
-    background: #44403c;
+    background: #27272a;
     border-radius: 3px;
   }
 
@@ -1613,23 +1666,24 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 16px 20px;
-    background: linear-gradient(180deg, #1c1917 0%, #0c0a09 100%);
-    border-bottom: 1px solid #292524;
+    padding: 20px 20px 18px;
+    background: linear-gradient(180deg, #18181b 0%, #09090b 100%);
+    border-bottom: 1px solid #27272a;
   }
 
   .hero-left {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
   }
 
   .hero-avatar {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
     background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
     flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(251, 191, 36, 0.2);
   }
 
   .hero-avatar.placeholder {
@@ -1637,41 +1691,43 @@
     align-items: center;
     justify-content: center;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 700;
     color: #0c0a09;
   }
 
   .hero-identity {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
   }
 
   .hero-name {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     color: #fafaf9;
+    letter-spacing: -0.01em;
   }
 
   .hero-address {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 2px 6px;
+    gap: 5px;
+    padding: 3px 8px;
+    margin-left: -8px;
     background: transparent;
     border: none;
-    border-radius: 4px;
+    border-radius: 6px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
-    color: #78716c;
+    color: #71717a;
     cursor: pointer;
     transition: all 0.15s;
   }
 
   .hero-address:hover {
-    background: #292524;
-    color: #a8a29e;
+    background: #27272a;
+    color: #a1a1aa;
   }
 
   .hero-right {
@@ -1680,69 +1736,93 @@
 
   .hero-networth {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 28px;
-    font-weight: 600;
+    font-size: 30px;
+    font-weight: 700;
     color: #fafaf9;
     letter-spacing: -0.5px;
+    line-height: 1;
   }
 
   .hero-label {
-    font-size: 11px;
-    color: #78716c;
+    font-size: 10px;
+    color: #71717a;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
+    margin-top: 4px;
+    font-weight: 500;
   }
 
   /* Breakdown Cards */
   .breakdown {
     display: flex;
-    gap: 8px;
-    padding: 12px 16px;
-    border-bottom: 1px solid #1c1917;
+    gap: 10px;
+    padding: 14px 16px;
+    border-bottom: 1px solid #18181b;
   }
 
   .breakdown-card {
     flex: 1;
-    padding: 12px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 8px;
+    padding: 14px;
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 10px;
     text-align: left;
     cursor: pointer;
     transition: all 0.15s;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
   }
 
   .breakdown-card:hover {
-    border-color: #44403c;
-    background: #292524;
+    border-color: #3f3f46;
+    background: #1c1c20;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   }
 
   .breakdown-card.active {
     border-color: #fbbf24;
-    background: linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, transparent 100%);
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.08) 0%, rgba(251, 191, 36, 0.02) 100%);
+    box-shadow: 0 0 12px rgba(251, 191, 36, 0.06);
   }
 
   .breakdown-card.wide {
-    flex: 1.2;
+    flex: 1.3;
+  }
+
+  .card-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+    margin-top: 1px;
+    filter: grayscale(0.3);
+  }
+
+  .card-body {
+    min-width: 0;
+    flex: 1;
   }
 
   .card-value {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 16px;
-    font-weight: 600;
+    font-size: 17px;
+    font-weight: 700;
     color: #fafaf9;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
   }
 
   .card-label {
-    font-size: 11px;
-    font-weight: 500;
-    color: #a8a29e;
-    margin-top: 2px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #a1a1aa;
+    margin-top: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
   .card-sub {
     font-size: 10px;
-    color: #57534e;
+    color: #52525b;
     margin-top: 4px;
     display: flex;
     flex-direction: column;
@@ -1750,13 +1830,22 @@
   }
 
   .accounts-breakdown {
-    color: #78716c;
+    color: #71717a;
     text-transform: none;
   }
+  .accounts-breakdown.debt {
+    color: #f87171;
+  }
+  .accounts-breakdown.coll {
+    color: #34d399;
+  }
+  .accounts-breakdown.credit {
+    color: #a1a1aa;
+  }
   .accounts-breakdown.in-capacity {
-    color: #57534e;
-    opacity: 0.7;
-    border-left: 1px solid #292524;
+    color: #52525b;
+    opacity: 0.8;
+    border-left: 1px solid #27272a;
     padding-left: 6px;
     margin-left: 2px;
   }
@@ -2149,14 +2238,92 @@
     border-radius: 8px;
   }
 
+  /* Theme picker */
+  .theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .theme-swatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    background: none;
+    border: 2px solid transparent;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .theme-swatch:hover {
+    transform: translateY(-1px);
+  }
+
+  .theme-swatch.active {
+    border-color: var(--theme-accent, #fbbf24);
+  }
+
+  .swatch-preview {
+    width: 100%;
+    aspect-ratio: 1.4;
+    border-radius: 8px;
+    border: 1px solid;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .swatch-bar {
+    height: 3px;
+    border-radius: 2px;
+    opacity: 0.9;
+  }
+
+  .swatch-text {
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
+  }
+
+  .swatch-accent {
+    position: absolute;
+    bottom: 6px;
+    right: 6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .swatch-label {
+    font-size: 9px;
+    color: var(--theme-text-secondary, #a1a1aa);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .swatch-label.active {
+    color: var(--theme-accent, #fbbf24);
+    font-weight: 600;
+  }
+
   /* Tabs */
   .tabs {
     display: flex;
-    padding: 0 8px;
-    background: #0f0d0c;
-    border-bottom: 1px solid #1c1917;
+    padding: 0 12px;
+    background: #09090b;
+    border-bottom: 1px solid #18181b;
     overflow-x: auto;
     flex-shrink: 0;
+    gap: 2px;
   }
 
   .tabs::-webkit-scrollbar {
@@ -2166,73 +2333,82 @@
   .tab {
     display: flex;
     align-items: center;
-    gap: 5px;
-    padding: 10px 10px;
+    gap: 6px;
+    padding: 10px 12px;
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
-    color: #78716c;
+    color: #52525b;
     font-size: 11px;
     font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
     transition: all 0.15s;
+    border-radius: 6px 6px 0 0;
   }
 
   .tab:hover {
-    color: #a8a29e;
+    color: #a1a1aa;
   }
 
   .tab.active {
     color: #fbbf24;
     border-bottom-color: #fbbf24;
+    background: rgba(251, 191, 36, 0.04);
   }
 
   .tab-clear {
     margin-left: auto;
-    color: #78716c;
+    color: #52525b;
     border-bottom-color: transparent;
   }
   .tab-clear:hover {
     color: #fca5a5;
-    background: #7f1d1d33;
+    background: rgba(127, 29, 29, 0.15);
   }
 
   .badge {
     background: #dc2626;
     color: white;
     font-size: 9px;
-    padding: 1px 5px;
-    border-radius: 8px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+    min-width: 16px;
+    text-align: center;
+    line-height: 1;
+    box-shadow: 0 1px 3px rgba(220, 38, 38, 0.3);
   }
 
   .badge.pending {
     background: #ca8a04;
     color: #fef3c7;
+    box-shadow: 0 1px 3px rgba(202, 138, 4, 0.3);
   }
 
   /* Content */
   .content {
-    padding: 16px;
+    padding: 14px;
   }
 
   .section-head {
     font-size: 10px;
     font-weight: 600;
-    color: #57534e;
+    color: #71717a;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin: 16px 0 8px;
+    letter-spacing: 0.08em;
+    margin: 18px 0 10px;
   }
 
   .section-head:first-child {
-    margin-top: 0;
+    margin-top: 2px;
   }
 
   .muted {
-    color: #57534e;
-    font-size: 12px;
-    font-style: italic;
+    font-size: 11px;
+    color: #52525b;
+    line-height: 1.5;
+    margin: 0 0 12px;
   }
 
   /* Activity */
@@ -2500,46 +2676,48 @@
 
   .tab-header-row {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
+    justify-content: space-between;
+    margin-bottom: 10px;
   }
 
   .header-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
   }
 
   .auto-refresh-select {
-    padding: 4px 8px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 4px;
-    color: #a8a29e;
-    font-size: 11px;
+    padding: 5px 8px;
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 6px;
+    color: #71717a;
+    font-size: 10px;
     cursor: pointer;
+    transition: border-color 0.15s;
   }
 
   .auto-refresh-select:focus {
+    border-color: #fbbf24;
     outline: none;
-    border-color: #44403c;
   }
 
   .btn-refresh-small {
-    padding: 4px 10px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 4px;
-    color: #78716c;
+    padding: 5px 10px;
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 6px;
+    color: #71717a;
     font-size: 11px;
     cursor: pointer;
     transition: all 0.15s;
   }
 
   .btn-refresh-small:hover:not(:disabled) {
-    border-color: #44403c;
-    color: #a8a29e;
+    border-color: #3f3f46;
+    color: #a1a1aa;
+    background: #1c1c20;
   }
 
   .btn-refresh-small:disabled {
@@ -2618,17 +2796,18 @@
   .col-token {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+    min-width: 0;
   }
 
   .col-balance {
-    font-family: 'JetBrains Mono', monospace;
+    text-align: right;
   }
 
   .col-value {
+    text-align: right;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #57534e;
   }
 
   .col-actions {
