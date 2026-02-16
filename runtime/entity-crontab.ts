@@ -483,9 +483,12 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
   console.log(`📤 CRONTAB: jBatch ready for broadcast (entity ${replica.entityId.slice(-4)})`);
 
   // Get jurisdiction from entity config — resolve to full JReplica (with rpcUrl, contracts, etc.)
-  const jurisdictionName = replica.state.config.jurisdiction;
+  // Fallback to env.activeJurisdiction (hub entities created during bootstrap may not have config.jurisdiction)
+  const jurisdictionName = replica.state.config.jurisdiction || _env.activeJurisdiction;
   if (!jurisdictionName) {
-    console.warn(`⚠️ No jurisdiction configured for entity ${replica.entityId.slice(-4)} - skipping batch broadcast`);
+    console.warn(
+      `⚠️ No jurisdiction configured for entity ${replica.entityId.slice(-4)} and no activeJurisdiction - skipping batch broadcast`,
+    );
     return outputs;
   }
   // Resolve full jurisdiction config from env.jReplicas (has depositoryAddress, entityProviderAddress, chainId, rpcs)
