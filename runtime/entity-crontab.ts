@@ -567,7 +567,7 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
 
       // Collect all entity IDs that exist in this runtime
       const allEntityIds: string[] = [];
-      for (const [, r] of _env.eReplicas) {
+      for (const [, r] of env.eReplicas) {
         if (r?.entityId) allEntityIds.push(String(r.entityId).toLowerCase());
       }
 
