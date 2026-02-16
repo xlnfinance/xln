@@ -85,13 +85,15 @@
     const inTotal = inDebt + inColl + inCredit;
 
     // Compute uncollateralized debt for rebalance-pending detection
+    // total = ondelta + offdelta: positive = LEFT is owed, negative = RIGHT is owed
     let totalDebt = 0n;
     let totalCollateral = 0n;
     for (const [, delta] of account.deltas.entries()) {
       const total = delta.ondelta + delta.offdelta;
-      // Our debt = positive total (we're owed), their debt = negative
-      // From our perspective: if we receive, counterparty has debt to us
-      const theirDebt = isLeft ? (total < 0n ? -total : 0n) : (total > 0n ? total : 0n);
+      // Hub's debt to us (counterparty owes us):
+      // We are LEFT:  total > 0 means RIGHT owes us (hub debt)
+      // We are RIGHT: total < 0 means LEFT owes us (hub debt)
+      const theirDebt = isLeft ? (total > 0n ? total : 0n) : (total < 0n ? -total : 0n);
       totalDebt += theirDebt;
       totalCollateral += delta.collateral;
     }

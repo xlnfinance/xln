@@ -501,12 +501,17 @@ const hasDueEntityHooks = (env: Env): boolean => {
         if ((hook as any).triggerAt <= nowMs) return true;
       }
     }
-    // Periodic tasks (setInterval-like) — hubRebalance, broadcastBatch, etc.
-    const tasks = crontab.tasks;
-    if (tasks && tasks.size > 0) {
-      for (const task of tasks.values()) {
-        const t = task as any;
-        if (nowMs - (t.lastRun || 0) >= (t.intervalMs || Infinity)) return true;
+    // Periodic tasks (setInterval-like) — only for hub entities (has hubRebalanceConfig)
+    // Regular user entities don't need crontab pings — they react to inbound P2P messages.
+    // Without this guard, ALL entities get pinged every second → wasted frames + battery.
+    const isHub = !!(replica as any).state?.hubRebalanceConfig;
+    if (isHub) {
+      const tasks = crontab.tasks;
+      if (tasks && tasks.size > 0) {
+        for (const task of tasks.values()) {
+          const t = task as any;
+          if (nowMs - (t.lastRun || 0) >= (t.intervalMs || Infinity)) return true;
+        }
       }
     }
   }
@@ -540,8 +545,9 @@ const generateHookPings = (env: Env): void => {
         }
       }
     }
-    // Periodic tasks
-    if (!hasDue) {
+    // Periodic tasks — only for hub entities
+    const isHub = !!(replica as any).state?.hubRebalanceConfig;
+    if (!hasDue && isHub) {
       const tasks = crontab.tasks;
       if (tasks && tasks.size > 0) {
         for (const task of tasks.values()) {
