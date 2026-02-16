@@ -2632,11 +2632,32 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     );
   }
 
-  // Auto-set hubRebalanceConfig for all hub entities (direct state mutation at boot)
+  // Auto-set hubRebalanceConfig + jurisdiction for all hub entities (direct state mutation at boot)
+  // ROOT CAUSE FIX: bootstrap runs BEFORE J-adapter setup, so config.jurisdiction is never set.
+  // We set it here, AFTER jReplicas are registered, so broadcastBatch can resolve addresses.
+  const activeJurisdictionName =
+    env.activeJurisdiction || (env.jReplicas ? Array.from(env.jReplicas.keys())[0] : undefined);
+  const activeJReplica = activeJurisdictionName ? env.jReplicas?.get(activeJurisdictionName) : undefined;
+  const jurisdictionConfig = activeJReplica
+    ? {
+        name: activeJurisdictionName,
+        chainId: Number(activeJReplica.jadapter?.chainId ?? activeJReplica.chainId ?? 0),
+        address: activeJReplica.rpcs?.[0] ?? '',
+        entityProviderAddress: activeJReplica.entityProviderAddress ?? activeJReplica.contracts?.entityProvider ?? '',
+        depositoryAddress: activeJReplica.depositoryAddress ?? activeJReplica.contracts?.depository ?? '',
+      }
+    : undefined;
+
   for (const hubEntityId of hubEntityIds) {
     const replica = getEntityReplicaById(env, hubEntityId);
     if (replica?.state) {
       replica.state.hubRebalanceConfig = { matchingStrategy: 'hnw', routingFeePPM: 1000, baseFee: 5n * 10n ** 18n };
+      if (jurisdictionConfig && !replica.state.config?.jurisdiction) {
+        replica.state.config.jurisdiction = jurisdictionConfig;
+        console.log(
+          `[XLN] Hub ${hubEntityId.slice(-8)} jurisdiction set: ${activeJurisdictionName} (depository=${jurisdictionConfig.depositoryAddress.slice(0, 10)}...)`,
+        );
+      }
       console.log(`[XLN] Hub ${hubEntityId.slice(-8)} rebalance config set (hnw, 1000ppm)`);
     }
   }
