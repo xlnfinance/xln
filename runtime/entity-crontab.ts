@@ -517,6 +517,21 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
   if (result.success) {
     console.log(`✅ jBatch broadcasted successfully: ${result.txHash}`);
 
+    // CRITICAL: Clear pendingBroadcast immediately after successful broadcast.
+    // In RPC mode, HankoBatchProcessed j-event should also clear it, but if the
+    // j-watcher is slow or events don't propagate, pendingBroadcast stays true
+    // forever → blocks ALL future R2C/settlement operations.
+    // Safe to clear here: the batch was submitted, worst case it gets re-submitted.
+    if (replica.state.jBatchState) {
+      replica.state.jBatchState.pendingBroadcast = false;
+      // Also reset the batch to empty so new operations can be queued
+      const { createEmptyBatch } = await import('./j-batch');
+      if (typeof createEmptyBatch === 'function') {
+        replica.state.jBatchState.batch = createEmptyBatch();
+      }
+      console.log(`✅ jBatch cleared: pendingBroadcast=false, batch reset`);
+    }
+
     // CRITICAL: In BrowserVM mode, processBatch returns events directly.
     // There is no j-watcher to pick them up. We must inject them as j_event
     // entityTxs so the bilateral state (collateral, reserves) gets updated.
