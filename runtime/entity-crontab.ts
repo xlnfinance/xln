@@ -484,7 +484,7 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
 
   // Get jurisdiction from entity config — resolve to full JReplica (with rpcUrl, contracts, etc.)
   // Fallback to env.activeJurisdiction (hub entities created during bootstrap may not have config.jurisdiction)
-  const jurisdictionName = replica.state.config.jurisdiction || _env.activeJurisdiction;
+  const jurisdictionName = replica.state.config.jurisdiction || env.activeJurisdiction;
   if (!jurisdictionName) {
     console.warn(
       `⚠️ No jurisdiction configured for entity ${replica.entityId.slice(-4)} and no activeJurisdiction - skipping batch broadcast`,
@@ -492,7 +492,7 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
     return outputs;
   }
   // Resolve full jurisdiction config from env.jReplicas (has depositoryAddress, entityProviderAddress, chainId, rpcs)
-  const jReplica = _env.jReplicas?.get(jurisdictionName);
+  const jReplica = env.jReplicas?.get(jurisdictionName);
   if (!jReplica) {
     console.warn(
       `⚠️ Jurisdiction "${jurisdictionName}" not found in env.jReplicas for entity ${replica.entityId.slice(-4)} - skipping batch broadcast`,
@@ -521,7 +521,7 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
 
   // Get BrowserVM instance from runtime (proper architecture - not window global)
   const { getBrowserVMInstance } = await import('./evm');
-  const browserVM = getBrowserVMInstance(_env);
+  const browserVM = getBrowserVMInstance(env);
   if (browserVM) {
     console.log(`📤 CRONTAB: Using BrowserVM for batch broadcast`);
   }
@@ -529,7 +529,7 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
   // Broadcast batch to Depository contract (or BrowserVM in browser mode)
   const { broadcastBatch } = await import('./j-batch');
   const result = await broadcastBatch(
-    _env,
+    env,
     replica.entityId,
     replica.state.jBatchState,
     jurisdictionConfig,
