@@ -482,12 +482,34 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
 
   console.log(`📤 CRONTAB: jBatch ready for broadcast (entity ${replica.entityId.slice(-4)})`);
 
-  // Get jurisdiction from entity config
-  const jurisdiction = replica.state.config.jurisdiction;
-  if (!jurisdiction) {
+  // Get jurisdiction from entity config — resolve to full JReplica (with rpcUrl, contracts, etc.)
+  const jurisdictionName = replica.state.config.jurisdiction;
+  if (!jurisdictionName) {
     console.warn(`⚠️ No jurisdiction configured for entity ${replica.entityId.slice(-4)} - skipping batch broadcast`);
     return outputs;
   }
+  // Resolve full jurisdiction config from env.jReplicas (has depositoryAddress, entityProviderAddress, chainId, rpcs)
+  const jReplica = _env.jReplicas?.get(jurisdictionName);
+  if (!jReplica) {
+    console.warn(
+      `⚠️ Jurisdiction "${jurisdictionName}" not found in env.jReplicas for entity ${replica.entityId.slice(-4)} - skipping batch broadcast`,
+    );
+    return outputs;
+  }
+  // Build jurisdiction config object that broadcastBatch expects
+  const jurisdictionConfig = {
+    name: jurisdictionName,
+    depositoryAddress: jReplica.depositoryAddress || jReplica.contracts?.depository,
+    entityProviderAddress: jReplica.entityProviderAddress || jReplica.contracts?.entityProvider,
+    chainId: jReplica.chainId,
+    rpcUrl: Array.isArray(jReplica.rpcs) ? jReplica.rpcs[0] : undefined,
+    contracts: jReplica.contracts,
+    jadapter: jReplica.jadapter,
+  };
+  console.log(
+    `📤 CRONTAB: jurisdiction="${jurisdictionName}" depository=${String(jurisdictionConfig.depositoryAddress).slice(0, 10)}... chainId=${jurisdictionConfig.chainId}`,
+  );
+
   const signerId = replica.state.config.validators[0];
   if (!signerId) {
     console.warn(`⚠️ No signerId for entity ${replica.entityId.slice(-4)} - cannot sign batch`);
@@ -496,7 +518,7 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
 
   // Get BrowserVM instance from runtime (proper architecture - not window global)
   const { getBrowserVMInstance } = await import('./evm');
-  const browserVM = getBrowserVMInstance(env);
+  const browserVM = getBrowserVMInstance(_env);
   if (browserVM) {
     console.log(`📤 CRONTAB: Using BrowserVM for batch broadcast`);
   }
@@ -504,10 +526,10 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
   // Broadcast batch to Depository contract (or BrowserVM in browser mode)
   const { broadcastBatch } = await import('./j-batch');
   const result = await broadcastBatch(
-    env,
+    _env,
     replica.entityId,
     replica.state.jBatchState,
-    jurisdiction,
+    jurisdictionConfig,
     // BrowserVMInstance has processBatch at runtime, types are slightly mismatched
     (browserVM || undefined) as any,
     replica.state.timestamp,
