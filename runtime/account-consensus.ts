@@ -12,7 +12,16 @@
  * - Event Bubbling: Account events bubble up to E-Machine for entity messages
  */
 
-import type { AccountMachine, AccountFrame, AccountTx, AccountInput, Env, EntityState, Delta, EntityReplica } from './types';
+import type {
+  AccountMachine,
+  AccountFrame,
+  AccountTx,
+  AccountInput,
+  Env,
+  EntityState,
+  Delta,
+  EntityReplica,
+} from './types';
 import { cloneAccountMachine, getAccountPerspective } from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
@@ -29,10 +38,8 @@ import { processAccountTx } from './account-tx/apply';
 const MEMPOOL_LIMIT = 1000;
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS_HEX_20_RE = /^0x[0-9a-fA-F]{40}$/;
-const isEntityId32 = (value: unknown): value is string =>
-  typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
-const isAddress20 = (value: unknown): value is string =>
-  typeof value === 'string' && ADDRESS_HEX_20_RE.test(value);
+const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
+const isAddress20 = (value: unknown): value is string => typeof value === 'string' && ADDRESS_HEX_20_RE.test(value);
 
 /**
  * Get depositoryAddress from environment (BrowserVM or active J-replica)
@@ -81,17 +88,15 @@ const MAX_FRAME_TIMESTAMP_DRIFT_MS = 300000; // 5 minutes
 const MAX_FRAME_SIZE_BYTES = 1048576; // 1MB frame size limit (Bitcoin block size standard)
 
 function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
-  const hasHolds = (delta.leftHtlcHold || 0n) !== 0n ||
-                   (delta.rightHtlcHold || 0n) !== 0n ||
-                   (delta.leftSwapHold || 0n) !== 0n ||
-                   (delta.rightSwapHold || 0n) !== 0n ||
-                   (delta.leftSettleHold || 0n) !== 0n ||
-                   (delta.rightSettleHold || 0n) !== 0n;
+  const hasHolds =
+    (delta.leftHtlcHold || 0n) !== 0n ||
+    (delta.rightHtlcHold || 0n) !== 0n ||
+    (delta.leftSwapHold || 0n) !== 0n ||
+    (delta.rightSwapHold || 0n) !== 0n ||
+    (delta.leftSettleHold || 0n) !== 0n ||
+    (delta.rightSettleHold || 0n) !== 0n;
 
-  return !(totalDelta === 0n &&
-           delta.leftCreditLimit === 0n &&
-           delta.rightCreditLimit === 0n &&
-           !hasHolds);
+  return !(totalDelta === 0n && delta.leftCreditLimit === 0n && delta.rightCreditLimit === 0n && !hasHolds);
 }
 
 // === VALIDATION ===
@@ -102,7 +107,7 @@ function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
 export function validateAccountFrame(
   frame: AccountFrame,
   currentTimestamp?: number,
-  previousFrameTimestamp?: number
+  previousFrameTimestamp?: number,
 ): boolean {
   if (frame.height < 0) return false;
   if (typeof frame.jHeight !== 'number' || frame.jHeight < 0) return false;
@@ -120,7 +125,9 @@ export function validateAccountFrame(
     // Ensure non-decreasing timestamps (prevent time-travel attacks on HTLCs)
     // Allow equal timestamps (batched frames), but reject backwards movement
     if (previousFrameTimestamp !== undefined && frame.timestamp < previousFrameTimestamp - 1000) {
-      console.log(`❌ Frame timestamp went backwards significantly: ${frame.timestamp} < ${previousFrameTimestamp} (delta: ${previousFrameTimestamp - frame.timestamp}ms)`);
+      console.log(
+        `❌ Frame timestamp went backwards significantly: ${frame.timestamp} < ${previousFrameTimestamp} (delta: ${previousFrameTimestamp - frame.timestamp}ms)`,
+      );
       return false;
     }
   }
@@ -146,7 +153,7 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
     prevFrameHash: frame.prevFrameHash, // Chain linkage
     accountTxs: frame.accountTxs.map(tx => ({
       type: tx.type,
-      data: tx.data
+      data: tx.data,
     })),
     tokenIds: frame.tokenIds,
     deltas: frame.deltas.map(d => d.toString()), // Quick access sums
@@ -160,13 +167,13 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
       rightCreditLimit: delta.rightCreditLimit.toString(),
       leftAllowance: delta.leftAllowance.toString(),
       rightAllowance: delta.rightAllowance.toString(),
-      leftHtlcHold: (delta.leftHtlcHold || 0n).toString(),   // HTLC holds
+      leftHtlcHold: (delta.leftHtlcHold || 0n).toString(), // HTLC holds
       rightHtlcHold: (delta.rightHtlcHold || 0n).toString(), // HTLC holds
-      leftSwapHold: (delta.leftSwapHold || 0n).toString(),   // Swap holds
+      leftSwapHold: (delta.leftSwapHold || 0n).toString(), // Swap holds
       rightSwapHold: (delta.rightSwapHold || 0n).toString(), // Swap holds
-      leftSettleHold: (delta.leftSettleHold || 0n).toString(),   // Settlement holds
+      leftSettleHold: (delta.leftSettleHold || 0n).toString(), // Settlement holds
       rightSettleHold: (delta.rightSettleHold || 0n).toString(), // Settlement holds
-    }))
+    })),
   };
 
   // Use keccak256 like 2024 Channel.ts (not truncated hash20)
@@ -192,7 +199,7 @@ export async function proposeAccountFrame(
   env: Env,
   accountMachine: AccountMachine,
   skipNonceIncrement: boolean = false,
-  entityJHeight?: number // Optional: J-height from entity state for HTLC consensus
+  entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
 ): Promise<{
   success: boolean;
   accountInput?: AccountInput;
@@ -223,7 +230,9 @@ export async function proposeAccountFrame(
   const quiet = env.quietRuntimeLogs === true;
   if (!quiet) {
     console.log(`🚀 E-MACHINE: Proposing account frame for ${counterparty.slice(-4)}`);
-    console.log(`🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, currentHeight=${accountMachine.currentHeight}`);
+    console.log(
+      `🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, currentHeight=${accountMachine.currentHeight}`,
+    );
   }
 
   const events: string[] = [];
@@ -241,12 +250,16 @@ export async function proposeAccountFrame(
 
   // Check if we have a pending frame waiting for ACK
   if (accountMachine.pendingFrame) {
-    if (!quiet) console.log(`⏳ E-MACHINE: Still waiting for ACK on pending frame #${accountMachine.pendingFrame.height}`);
+    if (!quiet)
+      console.log(`⏳ E-MACHINE: Still waiting for ACK on pending frame #${accountMachine.pendingFrame.height}`);
     return { success: false, error: 'Waiting for ACK on pending frame', events };
   }
 
   if (!quiet) console.log(`✅ E-MACHINE: Creating frame with ${accountMachine.mempool.length} transactions...`);
-  if (HEAVY_LOGS) console.log(`🔍 PROOF-HEADER: from=${formatEntityId(accountMachine.proofHeader.fromEntity)}, to=${formatEntityId(accountMachine.proofHeader.toEntity)}`);
+  if (HEAVY_LOGS)
+    console.log(
+      `🔍 PROOF-HEADER: from=${formatEntityId(accountMachine.proofHeader.fromEntity)}, to=${formatEntityId(accountMachine.proofHeader.toEntity)}`,
+    );
 
   // Clone account machine for validation
   const clonedMachine = cloneAccountMachine(accountMachine);
@@ -267,7 +280,7 @@ export async function proposeAccountFrame(
     makerIsLeft: boolean;
     fromEntity: string;
     toEntity: string;
-    accountId?: string;  // Enriched by entity handler
+    accountId?: string; // Enriched by entity handler
     giveTokenId: number;
     giveAmount: bigint;
     wantTokenId: number;
@@ -276,7 +289,11 @@ export async function proposeAccountFrame(
   }> = [];
   const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
-  if (HEAVY_LOGS) console.log(`🔍 MEMPOOL-BEFORE-PROCESS: ${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
+  if (HEAVY_LOGS)
+    console.log(
+      `🔍 MEMPOOL-BEFORE-PROCESS: ${accountMachine.mempool.length} txs:`,
+      accountMachine.mempool.map(tx => tx.type),
+    );
 
   const validTxs: typeof accountMachine.mempool = [];
   const failedHtlcLocks: Array<{ hashlock: string; reason: string }> = [];
@@ -287,17 +304,14 @@ export async function proposeAccountFrame(
     // Channel.ts: byLeft = proposer is left entity (frame-level, same on both sides).
     // Use normalized ordering helper (not raw string equality) to avoid casing-induced
     // divergence during WAL replay.
-    const proposerByLeft = isLeft(
-      accountMachine.proofHeader.fromEntity,
-      accountMachine.proofHeader.toEntity
-    );
+    const proposerByLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
     const result = await processAccountTx(
       clonedMachine,
       accountTx,
       proposerByLeft,
       env.timestamp, // Will be replaced by frame.timestamp during commit
-      frameJHeight,  // Entity's synced J-height
-      true // isValidation = true (on clone, skip persistent state updates)
+      frameJHeight, // Entity's synced J-height
+      true, // isValidation = true (on clone, skip persistent state updates)
     );
 
     if (!result.success) {
@@ -311,7 +325,7 @@ export async function proposeAccountFrame(
           hashlock: accountTx.data.hashlock,
           reason: result.error || 'validation_failed',
         });
-        console.log(`⬅️ Failed htlc_lock queued for cancel: hashlock=${accountTx.data.hashlock.slice(0,12)}...`);
+        console.log(`⬅️ Failed htlc_lock queued for cancel: hashlock=${accountTx.data.hashlock.slice(0, 12)}...`);
       }
       continue; // Skip to next tx
     }
@@ -320,7 +334,10 @@ export async function proposeAccountFrame(
     allEvents.push(...result.events);
 
     // Collect revealed secrets for backward propagation
-    if (HEAVY_LOGS) console.log(`🔍 TX-RESULT: type=${accountTx.type}, hasSecret=${!!result.secret}, hasHashlock=${!!result.hashlock}`);
+    if (HEAVY_LOGS)
+      console.log(
+        `🔍 TX-RESULT: type=${accountTx.type}, hasSecret=${!!result.secret}, hasHashlock=${!!result.hashlock}`,
+      );
     if (result.secret && result.hashlock) {
       if (!quiet) console.log(`✅ Collected secret from ${accountTx.type}`);
       revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
@@ -347,7 +364,12 @@ export async function proposeAccountFrame(
 
   // If no valid txs remain after filtering, return early
   if (validTxs.length === 0) {
-    const earlyResult: { success: false; error: string; events: string[]; failedHtlcLocks?: Array<{ hashlock: string; reason: string }> } = {
+    const earlyResult: {
+      success: false;
+      error: string;
+      events: string[];
+      failedHtlcLocks?: Array<{ hashlock: string; reason: string }>;
+    } = {
       success: false,
       error: 'All transactions failed validation',
       events: allEvents,
@@ -394,12 +416,15 @@ export async function proposeAccountFrame(
     if (HEAVY_LOGS) {
       console.log(`📊 TokenIds: [${finalTokenIds.join(', ')}]`);
       console.log(`📊 Deltas: [${finalDeltas.map(d => d.toString()).join(', ')}]`);
-      console.log(`📊 FullDeltaStates:`, fullDeltaStates.map(d => ({
-        tokenId: d.tokenId,
-        collateral: d.collateral?.toString(),
-        leftCreditLimit: d.leftCreditLimit?.toString(),
-        rightCreditLimit: d.rightCreditLimit?.toString(),
-      })));
+      console.log(
+        `📊 FullDeltaStates:`,
+        fullDeltaStates.map(d => ({
+          tokenId: d.tokenId,
+          collateral: d.collateral?.toString(),
+          leftCreditLimit: d.leftCreditLimit?.toString(),
+          rightCreditLimit: d.rightCreditLimit?.toString(),
+        })),
+      );
     }
   }
 
@@ -412,7 +437,9 @@ export async function proposeAccountFrame(
   const previousTimestamp = accountMachine.currentFrame?.timestamp ?? 0;
   const frameTimestamp = Math.max(env.timestamp, previousTimestamp + 1);
   if (frameTimestamp > env.timestamp && HEAVY_LOGS) {
-    console.log(`⚡ TIMESTAMP-SYNC: Using monotonic timestamp ${frameTimestamp} (prev=${previousTimestamp}, env=${env.timestamp})`);
+    console.log(
+      `⚡ TIMESTAMP-SYNC: Using monotonic timestamp ${frameTimestamp} (prev=${previousTimestamp}, env=${env.timestamp})`,
+    );
   }
 
   // Create account frame matching the real AccountFrame interface
@@ -426,14 +453,12 @@ export async function proposeAccountFrame(
     jHeight: frameJHeight, // CRITICAL: J-height for HTLC consensus
     accountTxs: accountTxsCopy,
     // CRITICAL: Use stored stateHash from currentFrame (set during commit)
-    prevFrameHash: accountMachine.currentHeight === 0
-      ? 'genesis'
-      : accountMachine.currentFrame.stateHash || '',
+    prevFrameHash: accountMachine.currentHeight === 0 ? 'genesis' : accountMachine.currentFrame.stateHash || '',
     stateHash: '', // Will be filled after hash calculation
     byLeft: weAreLeft, // Who proposed this frame
     tokenIds: finalTokenIds, // Use computed state from clonedMachine.deltas
-    deltas: finalDeltas,      // Quick access: ondelta+offdelta sums
-    fullDeltaStates          // AUDIT FIX: Full Delta objects for dispute proofs
+    deltas: finalDeltas, // Quick access: ondelta+offdelta sums
+    fullDeltaStates, // AUDIT FIX: Full Delta objects for dispute proofs
   };
 
   // Calculate state hash (frameData is properly typed AccountFrame)
@@ -445,7 +470,7 @@ export async function proposeAccountFrame(
     console.log(`  height: ${frameData.height}`);
     console.log(`  timestamp: ${frameData.timestamp}`);
     console.log(`  jHeight: ${frameData.jHeight}`);
-    console.log(`  prevFrameHash: ${frameData.prevFrameHash?.slice(0,20)}...`);
+    console.log(`  prevFrameHash: ${frameData.prevFrameHash?.slice(0, 20)}...`);
     console.log(`  accountTxs count: ${frameData.accountTxs.length}`);
     console.log(`  accountTxs types: [${frameData.accountTxs.map(tx => tx.type).join(', ')}]`);
     console.log(`  tokenIds: [${frameData.tokenIds.join(', ')}]`);
@@ -478,7 +503,9 @@ export async function proposeAccountFrame(
       events,
     };
   }
-  console.log(`✅ Frame size: ${frameSize} bytes (${(frameSize / MAX_FRAME_SIZE_BYTES * 100).toFixed(2)}% of 1MB limit)`);
+  console.log(
+    `✅ Frame size: ${frameSize} bytes (${((frameSize / MAX_FRAME_SIZE_BYTES) * 100).toFixed(2)}% of 1MB limit)`,
+  );
 
   // Generate HANKO signature - CRITICAL: Use signerId, not entityId
   // For single-signer entities, build hanko with single EOA signature
@@ -529,10 +556,14 @@ export async function proposeAccountFrame(
   let proofResult: ReturnType<typeof buildAccountProofBody>;
   let disputeHash: string;
   try {
-    console.log(`🔐 DISPUTE-SIGN: depositoryAddress=${depositoryAddress}, counterparty=${accountMachine.proofHeader.toEntity.slice(-4)}`);
+    console.log(
+      `🔐 DISPUTE-SIGN: depositoryAddress=${depositoryAddress}, counterparty=${accountMachine.proofHeader.toEntity.slice(-4)}`,
+    );
     proofResult = buildAccountProofBody(clonedMachine);
     disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash, depositoryAddress);
-    console.log(`🔐 DISPUTE-SIGN: disputeHash=${disputeHash.slice(0, 18)}..., proofBodyHash=${proofResult.proofBodyHash.slice(0, 18)}...`);
+    console.log(
+      `🔐 DISPUTE-SIGN: disputeHash=${disputeHash.slice(0, 18)}..., proofBodyHash=${proofResult.proofBodyHash.slice(0, 18)}...`,
+    );
   } catch (error) {
     accountMachine.mempool = [];
     delete accountMachine.pendingFrame;
@@ -568,7 +599,9 @@ export async function proposeAccountFrame(
 
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
-  console.log(`🔒 PROPOSE: Account ${accountMachine.proofHeader.fromEntity.slice(-4)}:${accountMachine.proofHeader.toEntity.slice(-4)} pendingFrame=${newFrame.height}, txs=${newFrame.accountTxs.length}`);
+  console.log(
+    `🔒 PROPOSE: Account ${accountMachine.proofHeader.fromEntity.slice(-4)}:${accountMachine.proofHeader.toEntity.slice(-4)} pendingFrame=${newFrame.height}, txs=${newFrame.accountTxs.length}`,
+  );
 
   // Clear mempool (failed txs already removed above)
   accountMachine.mempool = [];
@@ -580,9 +613,9 @@ export async function proposeAccountFrame(
     toEntityId: accountMachine.proofHeader.toEntity,
     height: newFrame.height,
     newAccountFrame: newFrame,
-    newHanko: frameHanko,         // Hanko on frame stateHash
+    newHanko: frameHanko, // Hanko on frame stateHash
     newDisputeHanko: disputeHanko, // Hanko on dispute proof hash
-    newDisputeHash: disputeHash,   // Full dispute hash (key in hankoWitness for quorum lookup)
+    newDisputeHash: disputeHash, // Full dispute hash (key in hankoWitness for quorum lookup)
     newDisputeProofBodyHash: proofResult.proofBodyHash, // ProofBodyHash that disputeHanko signs
     // NOTE: Settlement hankos now handled via SettlementWorkspace (entity-tx/handlers/settle.ts)
     disputeProofNonce: accountMachine.proofHeader.nonce, // nonce at which dispute proof was signed (before increment)
@@ -592,12 +625,22 @@ export async function proposeAccountFrame(
 
   // Collect hashes for entity-quorum signing (multi-signer support)
   const hashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [
-    { hash: newFrame.stateHash, type: 'accountFrame', context: `account:${counterparty.slice(-8)}:frame:${newFrame.height}` },
+    {
+      hash: newFrame.stateHash,
+      type: 'accountFrame',
+      context: `account:${counterparty.slice(-8)}:frame:${newFrame.height}`,
+    },
     { hash: disputeHash, type: 'dispute', context: `account:${counterparty.slice(-8)}:dispute` },
   ];
 
   const finalResult: Awaited<ReturnType<typeof proposeAccountFrame>> = {
-    success: true, accountInput, events, revealedSecrets, swapOffersCreated, swapOffersCancelled, hashesToSign,
+    success: true,
+    accountInput,
+    events,
+    revealedSecrets,
+    swapOffersCreated,
+    swapOffersCancelled,
+    hashesToSign,
   };
   if (failedHtlcLocks.length > 0) finalResult.failedHtlcLocks = failedHtlcLocks;
   return finalResult;
@@ -609,7 +652,7 @@ export async function proposeAccountFrame(
 export async function handleAccountInput(
   env: Env,
   accountMachine: AccountMachine,
-  input: AccountInput
+  input: AccountInput,
 ): Promise<{
   success: boolean;
   response?: AccountInput;
@@ -635,15 +678,17 @@ export async function handleAccountInput(
   hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
 }> {
   const normalizedInputHeight =
-    input.height === undefined || input.height === null
-      ? undefined
-      : Number(input.height as number | string);
+    input.height === undefined || input.height === null ? undefined : Number(input.height as number | string);
   if (normalizedInputHeight !== undefined && !Number.isFinite(normalizedInputHeight)) {
     return { success: false, error: `Invalid account input height: ${String(input.height)}`, events: [] };
   }
   const replayMode = (env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true;
-  console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
-  console.log(`📨 A-MACHINE INPUT: height=${normalizedInputHeight ?? 'none'}, hasACK=${!!input.prevHanko}, hasNewFrame=${!!input.newAccountFrame}`);
+  console.log(
+    `📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`,
+  );
+  console.log(
+    `📨 A-MACHINE INPUT: height=${normalizedInputHeight ?? 'none'}, hasACK=${!!input.prevHanko}, hasNewFrame=${!!input.newAccountFrame}`,
+  );
 
   const events: string[] = [];
   const timedOutHashlocks: string[] = [];
@@ -651,8 +696,8 @@ export async function handleAccountInput(
   if (replayMode) {
     console.log(
       `[REPLAY][A-MACHINE] from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)} ` +
-      `height=${String(normalizedInputHeight ?? 'none')} hasACK=${Boolean(input.prevHanko)} hasNewFrame=${Boolean(input.newAccountFrame)} ` +
-      `currentHeight=${accountMachine.currentHeight} pending=${accountMachine.pendingFrame?.height ?? 0}`
+        `height=${String(normalizedInputHeight ?? 'none')} hasACK=${Boolean(input.prevHanko)} hasNewFrame=${Boolean(input.newAccountFrame)} ` +
+        `currentHeight=${accountMachine.currentHeight} pending=${accountMachine.pendingFrame?.height ?? 0}`,
     );
   }
 
@@ -681,12 +726,10 @@ export async function handleAccountInput(
   const ackTargetsPendingFrame =
     Boolean(input.prevHanko) &&
     Boolean(accountMachine.pendingFrame) &&
-    (
-      // Normal ACK-only message.
-      normalizedInputHeight === pendingHeight ||
+    // Normal ACK-only message.
+    (normalizedInputHeight === pendingHeight ||
       // BATCHED message: ACK for pending frame + next proposed frame.
-      (bundledNewFrameHeight !== undefined && bundledNewFrameHeight === pendingHeight + 1)
-    );
+      (bundledNewFrameHeight !== undefined && bundledNewFrameHeight === pendingHeight + 1));
   const ackHeight = ackTargetsPendingFrame ? pendingHeight : normalizedInputHeight;
 
   // Handle pending frame confirmation
@@ -713,7 +756,11 @@ export async function handleAccountInput(
     }
 
     if (!recoveredEntityId || recoveredEntityId.toLowerCase() !== expectedAckEntity.toLowerCase()) {
-      return { success: false, error: `ACK hanko entityId mismatch: got ${recoveredEntityId?.slice(-4)}, expected ${expectedAckEntity.slice(-4)}`, events };
+      return {
+        success: false,
+        error: `ACK hanko entityId mismatch: got ${recoveredEntityId?.slice(-4)}, expected ${expectedAckEntity.slice(-4)}`,
+        events,
+      };
     }
     console.log(`✅ HANKO-ACK-VERIFIED: ACK from ${(recoveredEntityId ?? expectedAckEntity).slice(-4)}`);
 
@@ -726,29 +773,41 @@ export async function handleAccountInput(
       console.log(`  Transactions detail:`, accountMachine.pendingFrame.accountTxs);
       console.log(`  TokenIds: ${accountMachine.pendingFrame.tokenIds.join(',')}`);
       console.log(`  Deltas: ${accountMachine.pendingFrame.deltas.map(d => `${d}`).join(',')}`);
-      console.log(`  StateHash: ${frameHash.slice(0,16)}...`);
+      console.log(`  StateHash: ${frameHash.slice(0, 16)}...`);
 
       // PROPOSER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
       // This eliminates fragile manual field copying
       {
         const { counterparty: cpForLog } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
-        console.log(`🔓 PROPOSER-COMMIT: Re-executing ${accountMachine.pendingFrame.accountTxs.length} txs for ${cpForLog.slice(-4)}`);
+        console.log(
+          `🔓 PROPOSER-COMMIT: Re-executing ${accountMachine.pendingFrame.accountTxs.length} txs for ${cpForLog.slice(-4)}`,
+        );
 
         // Re-execute all frame txs on REAL accountMachine (deterministic)
         // CRITICAL: Use frame.timestamp for determinism (HTLC validation must use agreed consensus time)
         const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.currentHeight;
         for (const tx of accountMachine.pendingFrame.accountTxs) {
-          const commitResult = await processAccountTx(accountMachine, tx, accountMachine.pendingFrame.byLeft!, accountMachine.pendingFrame.timestamp, pendingJHeight, false);
+          const commitResult = await processAccountTx(
+            accountMachine,
+            tx,
+            accountMachine.pendingFrame.byLeft!,
+            accountMachine.pendingFrame.timestamp,
+            pendingJHeight,
+            false,
+          );
           if (!commitResult.success) {
             console.error(`❌ PROPOSER-COMMIT FAILED for tx type=${tx.type}: ${commitResult.error}`);
-            throw new Error(`Frame ${accountMachine.pendingFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);
+            throw new Error(
+              `Frame ${accountMachine.pendingFrame.height} commit failed: ${tx.type} - ${commitResult.error}`,
+            );
           }
           if (commitResult.timedOutHashlock) {
             timedOutHashlocks.push(commitResult.timedOutHashlock);
           }
         }
 
-        console.log(`💳 PROPOSER-COMMIT COMPLETE: Deltas after re-execution for ${cpForLog.slice(-4)}:`,
+        console.log(
+          `💳 PROPOSER-COMMIT COMPLETE: Deltas after re-execution for ${cpForLog.slice(-4)}:`,
           Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
             tokenId,
             collateral: delta.collateral?.toString(),
@@ -756,7 +815,8 @@ export async function handleAccountInput(
             offdelta: delta.offdelta?.toString(),
             leftCreditLimit: delta.leftCreditLimit?.toString(),
             rightCreditLimit: delta.rightCreditLimit?.toString(),
-          })));
+          })),
+        );
 
         // Clean up clone (no longer needed with re-execution)
         delete accountMachine.clonedForValidation;
@@ -766,11 +826,18 @@ export async function handleAccountInput(
         accountMachine.currentHeight = accountMachine.pendingFrame.height;
         if (input.newDisputeHanko) {
           if (input.disputeProofNonce === undefined || !input.newDisputeHash) {
-            console.warn(`⚠️ ACK has newDisputeHanko but missing disputeProofNonce or newDisputeHash — skipping dispute metadata`);
+            console.warn(
+              `⚠️ ACK has newDisputeHanko but missing disputeProofNonce or newDisputeHash — skipping dispute metadata`,
+            );
           } else {
             // Cryptographic binding: verify hanko actually signs the claimed dispute hash
             const { verifyHankoForHash } = await import('./hanko-signing');
-            const { valid: disputeValid } = await verifyHankoForHash(input.newDisputeHanko, input.newDisputeHash, input.fromEntityId, env);
+            const { valid: disputeValid } = await verifyHankoForHash(
+              input.newDisputeHanko,
+              input.newDisputeHash,
+              input.fromEntityId,
+              env,
+            );
             if (!disputeValid) {
               console.warn(`⚠️ ACK dispute hanko fails verification — skipping dispute metadata`);
             } else {
@@ -796,12 +863,14 @@ export async function handleAccountInput(
         }
 
         // Add confirmed frame to history
-        accountMachine.frameHistory.push({...accountMachine.pendingFrame});
+        accountMachine.frameHistory.push({ ...accountMachine.pendingFrame });
         // Cap history at 10 frames to prevent snapshot bloat
         if (accountMachine.frameHistory.length > 10) {
           accountMachine.frameHistory.shift();
         }
-        console.log(`📚 Frame ${accountMachine.pendingFrame.height} added to history (total: ${accountMachine.frameHistory.length})`);
+        console.log(
+          `📚 Frame ${accountMachine.pendingFrame.height} added to history (total: ${accountMachine.frameHistory.length})`,
+        );
       }
 
       // Clear pending state
@@ -813,13 +882,17 @@ export async function handleAccountInput(
         delete accountMachine.lastRollbackFrameHash; // Reset deduplication on full resolution
       }
 
-      console.log(`✅ PENDING-CLEARED: Frame ${ackHeight} confirmed, mempool now has ${accountMachine.mempool.length} txs: [${accountMachine.mempool.map(tx => tx.type).join(',')}]`);
+      console.log(
+        `✅ PENDING-CLEARED: Frame ${ackHeight} confirmed, mempool now has ${accountMachine.mempool.length} txs: [${accountMachine.mempool.map(tx => tx.type).join(',')}]`,
+      );
       events.push(`✅ Frame ${ackHeight} confirmed and committed`);
 
       // CRITICAL FIX: Chained Proposal - if mempool has items (e.g. j_event_claim), propose immediately
       if (!input.newAccountFrame) {
         if (accountMachine.mempool.length > 0) {
-          console.log(`🚀 CHAINED-PROPOSAL: ACK received, mempool has ${accountMachine.mempool.length} txs - proposing next frame immediately`);
+          console.log(
+            `🚀 CHAINED-PROPOSAL: ACK received, mempool has ${accountMachine.mempool.length} txs - proposing next frame immediately`,
+          );
           const proposeResult = await proposeAccountFrame(env, accountMachine);
           if (proposeResult.success && proposeResult.accountInput) {
             return {
@@ -830,7 +903,8 @@ export async function handleAccountInput(
               ...(proposeResult.revealedSecrets && { revealedSecrets: proposeResult.revealedSecrets }),
               ...(proposeResult.swapOffersCreated && { swapOffersCreated: proposeResult.swapOffersCreated }),
               ...(proposeResult.swapOffersCancelled && { swapOffersCancelled: proposeResult.swapOffersCancelled }),
-              ...(proposeResult.hashesToSign && proposeResult.hashesToSign.length > 0 && { hashesToSign: proposeResult.hashesToSign }),
+              ...(proposeResult.hashesToSign &&
+                proposeResult.hashesToSign.length > 0 && { hashesToSign: proposeResult.hashesToSign }),
             };
           }
         }
@@ -861,7 +935,7 @@ export async function handleAccountInput(
     if (replayMode) {
       console.log(
         `[REPLAY][A-MACHINE] new frame path: receivedHeight=${input.newAccountFrame.height} ` +
-        `current=${accountMachine.currentHeight} prev=${String(input.newAccountFrame.prevFrameHash).slice(0, 12)}`
+          `current=${accountMachine.currentHeight} prev=${String(input.newAccountFrame.prevFrameHash).slice(0, 12)}`,
       );
     }
     const receivedFrame = input.newAccountFrame;
@@ -877,11 +951,9 @@ export async function handleAccountInput(
     ) {
       console.warn(
         `[loadEnvFromDB][A-MACHINE] replay precommit pending frame ` +
-        `pending=${accountMachine.pendingFrame.height} current=${accountMachine.currentHeight} incoming=${receivedFrame.height}`
+          `pending=${accountMachine.pendingFrame.height} current=${accountMachine.currentHeight} incoming=${receivedFrame.height}`,
       );
-      const pendingJHeight = accountMachine.pendingFrame.jHeight
-        ?? accountMachine.currentFrame?.jHeight
-        ?? 0;
+      const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.currentFrame?.jHeight ?? 0;
       for (const tx of accountMachine.pendingFrame.accountTxs) {
         const commitResult = await processAccountTx(
           accountMachine,
@@ -889,13 +961,13 @@ export async function handleAccountInput(
           accountMachine.pendingFrame.byLeft!,
           accountMachine.pendingFrame.timestamp,
           pendingJHeight,
-          false
+          false,
         );
         if (!commitResult.success) {
           return {
             success: false,
             error: `Replay pending commit failed: ${tx.type} - ${commitResult.error}`,
-            events
+            events,
           };
         }
       }
@@ -908,7 +980,7 @@ export async function handleAccountInput(
       delete accountMachine.clonedForValidation;
       console.warn(
         `[loadEnvFromDB][A-MACHINE] replay precommit done ` +
-        `current=${accountMachine.currentHeight} pending=${accountMachine.pendingFrame?.height ?? 0}`
+          `current=${accountMachine.currentHeight} pending=${accountMachine.pendingFrame?.height ?? 0}`,
       );
     }
 
@@ -919,16 +991,15 @@ export async function handleAccountInput(
     }
 
     // CRITICAL: Verify prevFrameHash links to our current frame (prevent state fork)
-    const expectedPrevFrameHash = accountMachine.currentHeight === 0
-      ? 'genesis'
-      : accountMachine.currentFrame.stateHash || '';
+    const expectedPrevFrameHash =
+      accountMachine.currentHeight === 0 ? 'genesis' : accountMachine.currentFrame.stateHash || '';
 
     if (receivedFrame.prevFrameHash !== expectedPrevFrameHash) {
       console.warn(`⚠️ FRAME-CHAIN: prevHash mismatch at height ${accountMachine.currentHeight}`);
       return {
         success: false,
         error: `Frame chain broken: prevFrameHash mismatch (expected ${expectedPrevFrameHash.slice(0, 16)}...)`,
-        events
+        events,
       };
     }
 
@@ -941,7 +1012,10 @@ export async function handleAccountInput(
 
       // Deterministic tiebreaker: Left always wins (CHANNEL.TS REFERENCE: Line 140-157)
       const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-      if (HEAVY_LOGS) console.log(`🔍 TIEBREAKER: fromEntity=${accountMachine.proofHeader.fromEntity.slice(-4)}, toEntity=${accountMachine.proofHeader.toEntity.slice(-4)}, isLeft=${isLeftEntity}`);
+      if (HEAVY_LOGS)
+        console.log(
+          `🔍 TIEBREAKER: fromEntity=${accountMachine.proofHeader.fromEntity.slice(-4)}, toEntity=${accountMachine.proofHeader.toEntity.slice(-4)}, isLeft=${isLeftEntity}`,
+        );
 
       if (isLeftEntity) {
         // We are LEFT - ignore their frame, keep ours (deterministic tiebreaker)
@@ -949,16 +1023,23 @@ export async function handleAccountInput(
 
         // EMIT EVENT: Track LEFT wins tiebreaker
         events.push(`📤 LEFT-WINS: Ignored RIGHT's frame ${receivedFrame.height} (waiting for their ACK)`);
-        env.info('consensus', 'LEFT-WINS', {
-          fromEntity: accountMachine.proofHeader.fromEntity,
-          toEntity: accountMachine.proofHeader.toEntity,
-          height: receivedFrame.height,
-        }, accountMachine.proofHeader.fromEntity);
+        env.info(
+          'consensus',
+          'LEFT-WINS',
+          {
+            fromEntity: accountMachine.proofHeader.fromEntity,
+            toEntity: accountMachine.proofHeader.toEntity,
+            height: receivedFrame.height,
+          },
+          accountMachine.proofHeader.fromEntity,
+        );
 
         // CRITICAL FIX: Even though we ignore their frame, check mempool and send update if we have new txs
         // This prevents j_event_claims from getting stuck when both sides propose simultaneously
         if (accountMachine.mempool.length > 0) {
-          console.log(`📤 LEFT-WINS-BUT-HAS-MEMPOOL: ${accountMachine.mempool.length} txs waiting - notifying counterparty`);
+          console.log(
+            `📤 LEFT-WINS-BUT-HAS-MEMPOOL: ${accountMachine.mempool.length} txs waiting - notifying counterparty`,
+          );
           events.push(`⚠️ LEFT has ${accountMachine.mempool.length} pending txs while waiting for RIGHT's ACK`);
           // Send a message with just mempool status so they know we have pending work
           // TODO: Determine if we should send frames or just signal
@@ -970,7 +1051,9 @@ export async function handleAccountInput(
         // DEDUPLICATION: Check if we already rolled back this exact frame
         const receivedHash = receivedFrame.stateHash;
         if (accountMachine.lastRollbackFrameHash === receivedHash) {
-          console.log(`⚠️ ROLLBACK-DEDUPE: Already rolled back for frame ${receivedHash.slice(0, 16)}... - ignoring duplicate`);
+          console.log(
+            `⚠️ ROLLBACK-DEDUPE: Already rolled back for frame ${receivedHash.slice(0, 16)}... - ignoring duplicate`,
+          );
           // Don't increment rollbackCount again, just process their frame
         } else if (accountMachine.rollbackCount === 0) {
           // First rollback - restore transactions to mempool before discarding frame
@@ -983,13 +1066,20 @@ export async function handleAccountInput(
             console.log(`📥 Mempool now has ${accountMachine.mempool.length} txs after rollback restore`);
 
             // EMIT EVENT: Track rollback for debugging
-            events.push(`🔄 ROLLBACK: Discarded our frame ${accountMachine.pendingFrame.height}, restored ${restoredTxCount} txs to mempool`);
-            env.info('consensus', 'ROLLBACK', {
-              fromEntity: accountMachine.proofHeader.fromEntity,
-              toEntity: accountMachine.proofHeader.toEntity,
-              height: accountMachine.pendingFrame.height,
-              restoredTxCount,
-            }, accountMachine.proofHeader.fromEntity);
+            events.push(
+              `🔄 ROLLBACK: Discarded our frame ${accountMachine.pendingFrame.height}, restored ${restoredTxCount} txs to mempool`,
+            );
+            env.info(
+              'consensus',
+              'ROLLBACK',
+              {
+                fromEntity: accountMachine.proofHeader.fromEntity,
+                toEntity: accountMachine.proofHeader.toEntity,
+                height: accountMachine.pendingFrame.height,
+                restoredTxCount,
+              },
+              accountMachine.proofHeader.fromEntity,
+            );
           }
 
           delete accountMachine.pendingFrame;
@@ -1015,10 +1105,19 @@ export async function handleAccountInput(
     // This ensures we only decrement once per rollback resolution (no double-decrement)
 
     // Verify frame sequence
-    if (HEAVY_LOGS) console.log(`🔍 SEQUENCE-CHECK: receivedFrame.height=${receivedFrame.height}, currentHeight=${accountMachine.currentHeight}, expected=${accountMachine.currentHeight + 1}`);
+    if (HEAVY_LOGS)
+      console.log(
+        `🔍 SEQUENCE-CHECK: receivedFrame.height=${receivedFrame.height}, currentHeight=${accountMachine.currentHeight}, expected=${accountMachine.currentHeight + 1}`,
+      );
     if (receivedFrame.height !== accountMachine.currentHeight + 1) {
-      console.log(`❌ Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`);
-      return { success: false, error: `Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`, events };
+      console.log(
+        `❌ Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`,
+      );
+      return {
+        success: false,
+        error: `Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`,
+        events,
+      };
     }
 
     // SECURITY: Verify signatures (REQUIRED for all frames)
@@ -1028,11 +1127,18 @@ export async function handleAccountInput(
       return { success: false, error: 'SECURITY: Frame must have hanko signature', events };
     }
 
-    console.log(`🔐 HANKO-VERIFY: Verifying hanko for frame ${receivedFrame.height} from ${input.fromEntityId.slice(-4)}`);
+    console.log(
+      `🔐 HANKO-VERIFY: Verifying hanko for frame ${receivedFrame.height} from ${input.fromEntityId.slice(-4)}`,
+    );
 
     // Verify hanko - CRITICAL: Must verify fromEntityId is the signer with board validation
     const { verifyHankoForHash } = await import('./hanko-signing');
-    const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(hankoToVerify, receivedFrame.stateHash, input.fromEntityId, env);
+    const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(
+      hankoToVerify,
+      receivedFrame.stateHash,
+      input.fromEntityId,
+      env,
+    );
 
     if (!valid || !recoveredEntityId) {
       return { success: false, error: `Invalid hanko signature from ${input.fromEntityId.slice(-4)}`, events };
@@ -1057,9 +1163,13 @@ export async function handleAccountInput(
 
     // DEBUG: Log initial state and txs
     console.log(`🔍 FRAME-${receivedFrame.height} RECEIVER DEBUG:`);
-    console.log(`   TXs to process: ${receivedFrame.accountTxs.length} - [${receivedFrame.accountTxs.map(tx => tx.type).join(', ')}]`);
+    console.log(
+      `   TXs to process: ${receivedFrame.accountTxs.length} - [${receivedFrame.accountTxs.map(tx => tx.type).join(', ')}]`,
+    );
     for (const [tokenId, delta] of clonedMachine.deltas.entries()) {
-      console.log(`   Initial delta[${tokenId}]: ondelta=${delta.ondelta}, offdelta=${delta.offdelta}, collateral=${delta.collateral}`);
+      console.log(
+        `   Initial delta[${tokenId}]: ondelta=${delta.ondelta}, offdelta=${delta.offdelta}, collateral=${delta.collateral}`,
+      );
     }
     const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
     // AUDIT FIX (CRITICAL-1): SwapOfferEvent carries makerIsLeft + fromEntity/toEntity
@@ -1085,8 +1195,8 @@ export async function handleAccountInput(
         accountTx,
         receivedFrame.byLeft!, // Channel.ts: frame-level byLeft (same on both sides)
         receivedFrame.timestamp, // DETERMINISTIC: Use frame's consensus timestamp
-        frameJHeight,  // Frame's consensus J-height
-        true // isValidation = true (on clone, skip bilateral finalization)
+        frameJHeight, // Frame's consensus J-height
+        true, // isValidation = true (on clone, skip bilateral finalization)
       );
       if (!result.success) {
         return { success: false, error: `Frame application failed: ${result.error}`, events };
@@ -1134,7 +1244,10 @@ export async function handleAccountInput(
       ourFinalDeltas.push(totalDelta);
     }
 
-    if (HEAVY_LOGS) console.log(`🔍 RECEIVER: Computed ${ourFinalTokenIds.length} tokens after filtering: [${ourFinalTokenIds.join(', ')}]`);
+    if (HEAVY_LOGS)
+      console.log(
+        `🔍 RECEIVER: Computed ${ourFinalTokenIds.length} tokens after filtering: [${ourFinalTokenIds.join(', ')}]`,
+      );
 
     // CRITICAL: Extract FULL delta states for hash verification (same as proposer does)
     // This ensures hash verification includes credit limits, collateral, allowances
@@ -1154,14 +1267,20 @@ export async function handleAccountInput(
 
     // DEBUG: Show actual delta values
     console.log(`🔍 STATE-VERIFY Frame ${receivedFrame.height}:`);
-    console.log(`   Our tokenIds: [${ourFinalTokenIds.join(', ')}], deltas: [${ourFinalDeltas.map(d => d.toString()).join(', ')}]`);
-    console.log(`   Their tokenIds: [${receivedFrame.tokenIds.join(', ')}], deltas: [${receivedFrame.deltas.map(d => d.toString()).join(', ')}]`);
+    console.log(
+      `   Our tokenIds: [${ourFinalTokenIds.join(', ')}], deltas: [${ourFinalDeltas.map(d => d.toString()).join(', ')}]`,
+    );
+    console.log(
+      `   Their tokenIds: [${receivedFrame.tokenIds.join(', ')}], deltas: [${receivedFrame.deltas.map(d => d.toString()).join(', ')}]`,
+    );
     console.log(`  Our computed:  ${ourComputedState.slice(0, 32)}...`);
     console.log(`  Their claimed: ${theirClaimedState.slice(0, 32)}...`);
 
     if (ourComputedState !== theirClaimedState) {
       // Compact error - full dump only if DEBUG enabled
-      console.warn(`⚠️ CONSENSUS: Frame ${receivedFrame.height} - state mismatch (our: ${ourComputedState.slice(0,16)}... vs their: ${theirClaimedState.slice(0,16)}...)`);
+      console.warn(
+        `⚠️ CONSENSUS: Frame ${receivedFrame.height} - state mismatch (our: ${ourComputedState.slice(0, 16)}... vs their: ${theirClaimedState.slice(0, 16)}...)`,
+      );
       return { success: false, error: `Bilateral consensus failure - states don't match`, events };
     }
 
@@ -1172,7 +1291,9 @@ export async function handleAccountInput(
     // - allowance: Set by bilateral transactions
     const theirFullDeltaStates = receivedFrame.fullDeltaStates || [];
     if (ourFullDeltaStates.length !== theirFullDeltaStates.length) {
-      console.warn(`⚠️ SECURITY: fullDeltaStates count mismatch (our: ${ourFullDeltaStates.length}, their: ${theirFullDeltaStates.length})`);
+      console.warn(
+        `⚠️ SECURITY: fullDeltaStates count mismatch (our: ${ourFullDeltaStates.length}, their: ${theirFullDeltaStates.length})`,
+      );
       return { success: false, error: `Bilateral state injection detected - delta count mismatch`, events };
     }
 
@@ -1223,8 +1344,8 @@ export async function handleAccountInput(
 
     if (recomputedHash !== receivedFrame.stateHash) {
       console.warn(`⚠️ SECURITY: Frame hash mismatch after validation`);
-      console.warn(`   Recomputed: ${recomputedHash.slice(0,16)}...`);
-      console.warn(`   Claimed:    ${receivedFrame.stateHash.slice(0,16)}...`);
+      console.warn(`   Recomputed: ${recomputedHash.slice(0, 16)}...`);
+      console.warn(`   Claimed:    ${receivedFrame.stateHash.slice(0, 16)}...`);
       return { success: false, error: `Frame hash verification failed - dispute proof mismatch`, events };
     }
 
@@ -1252,21 +1373,31 @@ export async function handleAccountInput(
       toEntity: accountMachine.proofHeader.fromEntity,
       height: receivedFrame.height,
       txCount: receivedFrame.accountTxs.length,
-      tokenIds: ourFinalTokenIds,  // OUR computed tokenIds
-      stateHash: recomputedHash,   // OUR computed hash
+      tokenIds: ourFinalTokenIds, // OUR computed tokenIds
+      stateHash: recomputedHash, // OUR computed hash
     });
 
     // RECEIVER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
     // This eliminates fragile manual field copying
     const { counterparty: cpForCommitLog } = getAccountPerspective(accountMachine, ourEntityId);
-    if (HEAVY_LOGS) console.log(`🔍 RECEIVER-COMMIT: Re-executing ${receivedFrame.accountTxs.length} txs for ${cpForCommitLog.slice(-4)}`);
+    if (HEAVY_LOGS)
+      console.log(
+        `🔍 RECEIVER-COMMIT: Re-executing ${receivedFrame.accountTxs.length} txs for ${cpForCommitLog.slice(-4)}`,
+      );
 
     // Re-execute all frame txs on REAL accountMachine (deterministic)
     // CRITICAL: Use receivedFrame.timestamp for determinism (HTLC validation must use agreed consensus time)
     for (const tx of receivedFrame.accountTxs) {
       // CRITICAL: Use frame.jHeight for HTLC checks (consensus-aligned height)
       const jHeightForCommit = receivedFrame.jHeight || accountMachine.currentHeight;
-      const commitResult = await processAccountTx(accountMachine, tx, receivedFrame.byLeft!, receivedFrame.timestamp, jHeightForCommit, false);
+      const commitResult = await processAccountTx(
+        accountMachine,
+        tx,
+        receivedFrame.byLeft!,
+        receivedFrame.timestamp,
+        jHeightForCommit,
+        false,
+      );
 
       // CRITICAL: Verify commit succeeded (Codex: prevent silent divergence)
       if (!commitResult.success) {
@@ -1275,7 +1406,8 @@ export async function handleAccountInput(
       }
     }
 
-    console.log(`💳 RECEIVER-COMMIT COMPLETE: Deltas after re-execution for ${cpForCommitLog.slice(-4)}:`,
+    console.log(
+      `💳 RECEIVER-COMMIT COMPLETE: Deltas after re-execution for ${cpForCommitLog.slice(-4)}:`,
       Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
         tokenId,
         collateral: delta.collateral?.toString(),
@@ -1283,12 +1415,15 @@ export async function handleAccountInput(
         rightCreditLimit: delta.rightCreditLimit?.toString(),
         ondelta: delta.ondelta?.toString(),
         offdelta: delta.offdelta?.toString(),
-      })));
+      })),
+    );
 
     // CRITICAL: Copy pendingForward for multi-hop routing
     if (clonedMachine.pendingForward) {
       accountMachine.pendingForward = clonedMachine.pendingForward;
-      console.log(`🔀 Copied pendingForward for multi-hop: route=[${clonedMachine.pendingForward.route.map(r => r.slice(-4)).join(',')}]`);
+      console.log(
+        `🔀 Copied pendingForward for multi-hop: route=[${clonedMachine.pendingForward.route.map(r => r.slice(-4)).join(',')}]`,
+      );
     }
 
     // SECURITY FIX: Use OUR computed state (verified to match bilateral fields)
@@ -1311,13 +1446,18 @@ export async function handleAccountInput(
     if (replayMode) {
       console.log(
         `[REPLAY][A-MACHINE] committed frame=${receivedFrame.height} ` +
-        `newCurrentHeight=${accountMachine.currentHeight} accountTxs=${receivedFrame.accountTxs.length}`
+          `newCurrentHeight=${accountMachine.currentHeight} accountTxs=${receivedFrame.accountTxs.length}`,
       );
     }
     // Store counterparty dispute metadata on COMMIT (verified, frame accepted)
     if (input.newDisputeHanko && !ackProcessed && input.disputeProofNonce !== undefined && input.newDisputeHash) {
       const { verifyHankoForHash } = await import('./hanko-signing');
-      const { valid: disputeValid } = await verifyHankoForHash(input.newDisputeHanko, input.newDisputeHash, input.fromEntityId, env);
+      const { valid: disputeValid } = await verifyHankoForHash(
+        input.newDisputeHanko,
+        input.newDisputeHash,
+        input.fromEntityId,
+        env,
+      );
       if (disputeValid) {
         accountMachine.counterpartyDisputeProofHanko = input.newDisputeHanko;
         accountMachine.counterpartyDisputeProofNonce = input.disputeProofNonce;
@@ -1333,15 +1473,39 @@ export async function handleAccountInput(
     }
 
     // Add accepted frame to history
-    accountMachine.frameHistory.push({...receivedFrame});
+    accountMachine.frameHistory.push({ ...receivedFrame });
     // Cap history at 10 frames to prevent snapshot bloat
     if (accountMachine.frameHistory.length > 10) {
       accountMachine.frameHistory.shift();
     }
-    console.log(`📚 Frame ${receivedFrame.height} accepted and added to history (total: ${accountMachine.frameHistory.length})`);
+    console.log(
+      `📚 Frame ${receivedFrame.height} accepted and added to history (total: ${accountMachine.frameHistory.length})`,
+    );
 
     events.push(...processEvents);
     events.push(`🤝 Accepted frame ${receivedFrame.height} from Entity ${input.fromEntityId.slice(-4)}`);
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // POST-FRAME AUTO-REBALANCE CHECK
+    // After frame commit, check if uncollateralized debt exceeds softLimit.
+    // If yes, auto-queue request_collateral + fee into mempool.
+    // User is ALWAYS online here (just processed an inbound frame).
+    // ═══════════════════════════════════════════════════════════════════════════
+    try {
+      const { checkAutoRebalance } = await import('./account-tx/handlers/request-collateral');
+      const rebalanceTxs = checkAutoRebalance(accountMachine, ourEntityId, input.fromEntityId);
+      if (rebalanceTxs.length > 0) {
+        for (const tx of rebalanceTxs) {
+          accountMachine.mempool.push(tx);
+        }
+        console.log(
+          `🔄 AUTO-REBALANCE: Queued ${rebalanceTxs.length} request_collateral txs after frame ${receivedFrame.height}`,
+        );
+      }
+    } catch (rebalanceErr) {
+      // Non-fatal: rebalance check failure shouldn't break frame processing
+      console.warn(`⚠️ Auto-rebalance check failed (non-fatal):`, (rebalanceErr as Error).message);
+    }
 
     // Send confirmation (ACK) using HANKO
     const ackEntityId = accountMachine.proofHeader.fromEntity;
@@ -1361,7 +1525,9 @@ export async function handleAccountInput(
       return { success: false, error: 'Failed to build ACK hanko', events };
     }
 
-    console.log(`📤 ACK-SEND: Preparing ACK for frame ${receivedFrame.height} from ${accountMachine.proofHeader.fromEntity.slice(-4)} to ${input.fromEntityId.slice(-4)}`);
+    console.log(
+      `📤 ACK-SEND: Preparing ACK for frame ${receivedFrame.height} from ${accountMachine.proofHeader.fromEntity.slice(-4)} to ${input.fromEntityId.slice(-4)}`,
+    );
 
     // CHANNEL.TS PATTERN (Lines 576-612): Batch ACK + new frame in same message!
     // Check if we should batch BEFORE incrementing nonce
@@ -1388,14 +1554,17 @@ export async function handleAccountInput(
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
       height: receivedFrame.height,
-      prevHanko: confirmationHanko,       // Hanko ACK on their frame
-      ...(ackDisputeHanko && { newDisputeHanko: ackDisputeHanko }),   // My dispute proof hanko (current state)
-      newDisputeHash: ackDisputeHash,     // Full dispute hash (key in hankoWitness for quorum lookup)
+      prevHanko: confirmationHanko, // Hanko ACK on their frame
+      ...(ackDisputeHanko && { newDisputeHanko: ackDisputeHanko }), // My dispute proof hanko (current state)
+      newDisputeHash: ackDisputeHash, // Full dispute hash (key in hankoWitness for quorum lookup)
       newDisputeProofBodyHash: ackProofResult.proofBodyHash, // ProofBodyHash that ackDisputeHanko signs
       disputeProofNonce: ackSignedNonce, // nonce at which ACK's dispute proof was signed
     };
 
-    if (HEAVY_LOGS) console.log(`🔍 BATCH-CHECK for account ${input.fromEntityId.slice(-4)}: mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map(tx => tx.type).join(',')}]`);
+    if (HEAVY_LOGS)
+      console.log(
+        `🔍 BATCH-CHECK for account ${input.fromEntityId.slice(-4)}: mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map(tx => tx.type).join(',')}]`,
+      );
     if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
       console.log(`📦 BATCH-OPTIMIZATION: Sending ACK + new frame in single message (Channel.ts pattern)`);
 
@@ -1434,29 +1603,32 @@ export async function handleAccountInput(
     // Merge revealed secrets from BOTH incoming frame AND proposed frame
     const allRevealedSecrets = [
       ...revealedSecrets, // From incoming frame (line 493)
-      ...(proposeResult?.revealedSecrets || []) // From our proposed frame (if batched)
+      ...(proposeResult?.revealedSecrets || []), // From our proposed frame (if batched)
     ];
 
     // Merge swap offers from BOTH incoming frame AND proposed frame
-    const allSwapOffersCreated = [
-      ...swapOffersCreated,
-      ...(proposeResult?.swapOffersCreated || [])
-    ];
-    const allSwapOffersCancelled = [
-      ...swapOffersCancelled,
-      ...(proposeResult?.swapOffersCancelled || [])
-    ];
+    const allSwapOffersCreated = [...swapOffersCreated, ...(proposeResult?.swapOffersCreated || [])];
+    const allSwapOffersCancelled = [...swapOffersCancelled, ...(proposeResult?.swapOffersCancelled || [])];
 
     // Collect hashes that need entity-quorum signing (multi-signer support)
     const hashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [
-      { hash: receivedFrame.stateHash, type: 'accountFrame', context: `account:${input.fromEntityId.slice(-8)}:ack:${receivedFrame.height}` },
+      {
+        hash: receivedFrame.stateHash,
+        type: 'accountFrame',
+        context: `account:${input.fromEntityId.slice(-8)}:ack:${receivedFrame.height}`,
+      },
       { hash: ackDisputeHash, type: 'dispute', context: `account:${input.fromEntityId.slice(-8)}:ack-dispute` },
-      ...(proposeResult?.hashesToSign || []) // From batched proposal
+      ...(proposeResult?.hashesToSign || []), // From batched proposal
     ];
 
-    if (HEAVY_LOGS) console.log(`🔍 RETURN-RESPONSE: h=${response.height} prevHanko=${!!response.prevHanko} newFrame=${!!response.newAccountFrame}`);
+    if (HEAVY_LOGS)
+      console.log(
+        `🔍 RETURN-RESPONSE: h=${response.height} prevHanko=${!!response.prevHanko} newFrame=${!!response.newAccountFrame}`,
+      );
     return {
-      success: true, response, events,
+      success: true,
+      response,
+      events,
       revealedSecrets: allRevealedSecrets,
       swapOffersCreated: allSwapOffersCreated,
       swapOffersCancelled: allSwapOffersCancelled,
@@ -1503,7 +1675,9 @@ export function shouldProposeFrame(accountMachine: AccountMachine): boolean {
   // 1. Has transactions in mempool
   // 2. No pending frame waiting for confirmation
   const should = accountMachine.mempool.length > 0 && !accountMachine.pendingFrame;
-  console.error(`   shouldProposeFrame: mempool=${accountMachine.mempool.length}, pending=${!!accountMachine.pendingFrame}, result=${should}`);
+  console.error(
+    `   shouldProposeFrame: mempool=${accountMachine.mempool.length}, pending=${!!accountMachine.pendingFrame}, result=${should}`,
+  );
   return should;
 }
 
@@ -1539,7 +1713,10 @@ export function getAccountsToProposeFrames(entityState: EntityState): string[] {
  * - proofBody: Simple internal representation (tokenIds + deltas)
  * - abiProofBody: ABI-encoded for on-chain disputes (includes transformers)
  */
-export async function generateAccountProof(env: Env, accountMachine: AccountMachine): Promise<{
+export async function generateAccountProof(
+  env: Env,
+  accountMachine: AccountMachine,
+): Promise<{
   proofHash: string;
   signature: string;
   abiEncodedProofBody?: string;
@@ -1587,7 +1764,9 @@ export async function generateAccountProof(env: Env, accountMachine: AccountMach
 
   // Generate hanko signature - CRITICAL: Use signerId, not entityId
   const proofEntityId = accountMachine.proofHeader.fromEntity;
-  const proofReplica = Array.from(env.eReplicas.values()).find((r: EntityReplica) => r.state.entityId === proofEntityId);
+  const proofReplica = Array.from(env.eReplicas.values()).find(
+    (r: EntityReplica) => r.state.entityId === proofEntityId,
+  );
   const proofSignerId = proofReplica?.state.config.validators[0];
   if (!proofSignerId) {
     throw new Error(`Cannot find signerId for proof from ${proofEntityId.slice(-4)}`);

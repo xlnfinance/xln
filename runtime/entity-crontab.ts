@@ -669,14 +669,41 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     effectiveReserves.set(tokenKey, amount);
   }
 
-  // Collect R→C targets: accounts with uncollateralized debt
+  // Collect R→C targets from TWO sources:
+  // 1. User's explicit request_collateral (requestedRebalance map)
+  // 2. Hub's own detection of uncollateralized debt > softLimit (fallback)
   type R2CTarget = { counterpartyId: string; tokenId: number; amount: bigint };
   const targets: R2CTarget[] = [];
+  const handledTokens = new Set<string>(); // "counterpartyId:tokenId" → avoid duplicates
 
   for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
     const hubIsLeft = isLeftEntity(hubId, counterpartyId);
 
+    // SOURCE 1: User-initiated request_collateral (highest priority)
+    // User already paid the fee inline — hub just needs to fulfill the R→C.
+    if (accountMachine.requestedRebalance && accountMachine.requestedRebalance.size > 0) {
+      for (const [tokenId, requestedAmount] of accountMachine.requestedRebalance.entries()) {
+        if (requestedAmount <= 0n) continue;
+        const reserve = effectiveReserves.get(String(tokenId)) || 0n;
+        const depositAmount = requestedAmount > reserve ? reserve : requestedAmount;
+        if (depositAmount > 0n) {
+          targets.push({ counterpartyId, tokenId, amount: depositAmount });
+          effectiveReserves.set(String(tokenId), reserve - depositAmount);
+          handledTokens.add(`${counterpartyId}:${tokenId}`);
+          console.log(
+            `🔄 R→C from user request: ${depositAmount} token ${tokenId} → ${counterpartyId.slice(-4)} (requested=${requestedAmount})`,
+          );
+        }
+        // Clear the request (fulfilled or best-effort)
+        accountMachine.requestedRebalance.delete(tokenId);
+      }
+    }
+
+    // SOURCE 2: Hub auto-detection (fallback for accounts without explicit request)
     for (const [tokenId, delta] of accountMachine.deltas.entries()) {
+      const key = `${counterpartyId}:${tokenId}`;
+      if (handledTokens.has(key)) continue; // Already handled by user request
+
       const totalDelta = delta.ondelta + delta.offdelta;
       // Hub's debt to user: LEFT with negative total, or RIGHT with positive total
       const hubDebt = hubIsLeft ? (totalDelta < 0n ? -totalDelta : 0n) : totalDelta > 0n ? totalDelta : 0n;
@@ -691,7 +718,6 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
         const depositAmount = uncollateralized > reserve ? reserve : uncollateralized;
         if (depositAmount > 0n) {
           targets.push({ counterpartyId, tokenId, amount: depositAmount });
-          // Deduct from effective reserve (prevent double-spend)
           effectiveReserves.set(String(tokenId), reserve - depositAmount);
         }
       }
