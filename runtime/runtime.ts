@@ -51,7 +51,14 @@ import {
 } from './evm';
 import { createGossipLayer } from './networking/gossip';
 import { attachEventEmitters } from './env-events';
-import { deriveSignerAddressSync, getCachedSignerPrivateKey, getSignerPrivateKey, getSignerPublicKey, prewarmSignerKeyCache, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
+import {
+  deriveSignerAddressSync,
+  getCachedSignerPrivateKey,
+  getSignerPrivateKey,
+  getSignerPublicKey,
+  prewarmSignerKeyCache,
+  setRuntimeSeed as setCryptoRuntimeSeed,
+} from './account-crypto';
 import { buildEntityProfile, mergeProfileWithExisting } from './networking/gossip-helper';
 import { RuntimeP2P, type P2PConfig } from './networking/p2p';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './networking/p2p-crypto';
@@ -117,7 +124,14 @@ import {
 } from './name-resolution';
 // import { runDemo } from './rundemo'; // REMOVED: Legacy demo replaced by scenarios/ahb
 import { decode, encode } from './snapshot-coder'; // encode used in exports
-import { deriveDelta, isLeft, getTokenInfo, formatTokenAmount, createDemoDelta, getDefaultCreditLimit } from './account-utils';
+import {
+  deriveDelta,
+  isLeft,
+  getTokenInfo,
+  formatTokenAmount,
+  createDemoDelta,
+  getDefaultCreditLimit,
+} from './account-utils';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import {
   formatTokenAmount as formatTokenAmountEthers,
@@ -126,12 +140,19 @@ import {
   calculatePercentage as calculatePercentageEthers,
   formatAssetAmount as formatAssetAmountEthers,
   BigIntMath,
-  FINANCIAL_CONSTANTS
+  FINANCIAL_CONSTANTS,
 } from './financial-utils';
 import { captureSnapshot, cloneEntityReplica, resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
 import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
-import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
+import {
+  validateDelta,
+  validateAccountDeltas,
+  createDefaultDelta,
+  isDelta,
+  validateEntityInput,
+  validateEntityOutput,
+} from './validation-utils';
 import type { EntityInput, EntityReplica, Env, JInput, JReplica, RoutedEntityInput, RuntimeInput } from './types';
 import {
   clearDatabase,
@@ -184,10 +205,7 @@ if (isBrowser && typeof globalThis.process === 'undefined') {
 
 // --- Database Setup ---
 // Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
-const nodeProcess =
-  !isBrowser && typeof globalThis.process !== 'undefined'
-    ? globalThis.process
-    : undefined;
+const nodeProcess = !isBrowser && typeof globalThis.process !== 'undefined' ? globalThis.process : undefined;
 const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
 const dbRootPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
 
@@ -206,7 +224,9 @@ const deriveRuntimeIdFromSeed = (seed?: string | null): string | null => {
   }
 };
 
-const resolveDbNamespace = (options: { env?: Env | null; runtimeId?: string | null; runtimeSeed?: string | null } = {}): string => {
+const resolveDbNamespace = (
+  options: { env?: Env | null; runtimeId?: string | null; runtimeSeed?: string | null } = {},
+): string => {
   const explicit = options.env?.dbNamespace;
   if (explicit) return normalizeDbNamespace(explicit);
   const runtimeId = options.runtimeId ?? options.env?.runtimeId;
@@ -217,8 +237,7 @@ const resolveDbNamespace = (options: { env?: Env | null; runtimeId?: string | nu
   return DEFAULT_DB_NAMESPACE;
 };
 
-const makeDbKey = (namespace: string, key: string): Buffer =>
-  Buffer.from(`${namespace}:${key}`);
+const makeDbKey = (namespace: string, key: string): Buffer => Buffer.from(`${namespace}:${key}`);
 
 const captureEntityJHeights = (env: Env): Record<string, number> => {
   const result: Record<string, number> = {};
@@ -232,12 +251,7 @@ const captureEntityJHeights = (env: Env): Record<string, number> => {
 
 // Helper: Race promise with timeout
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error('TIMEOUT')), ms)
-    )
-  ]);
+  return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms))]);
 }
 
 const resolveDbPath = (env: Env): string => {
@@ -280,10 +294,9 @@ export async function tryOpenDb(env: Env): Promise<boolean> {
         console.log('✅ Database opened');
         return true;
       } catch (error) {
-        const isBlocked = error instanceof Error &&
-          (error.message?.includes('blocked') ||
-           error.name === 'SecurityError' ||
-           error.name === 'InvalidStateError');
+        const isBlocked =
+          error instanceof Error &&
+          (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
         if (isBlocked) {
           console.log('⚠️ IndexedDB blocked (incognito/private mode) - running in-memory');
           return false;
@@ -432,15 +445,19 @@ export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void 
 
 const buildRouteOutputKey = (output: RoutedEntityInput): string => {
   const txPart = (output.entityTxs || [])
-    .map((tx) => {
+    .map(tx => {
       const data = tx.data as Record<string, unknown> | undefined;
       const height = typeof data?.height === 'number' ? data.height : '';
       const from = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
       const to = typeof data?.toEntityId === 'string' ? data.toEntityId : '';
       // Handles both field names: settle_propose uses counterpartyEntityId,
       // deposit_collateral uses counterpartyId — both must produce unique keys.
-      const cp = typeof data?.counterpartyEntityId === 'string' ? data.counterpartyEntityId
-        : typeof data?.counterpartyId === 'string' ? data.counterpartyId : '';
+      const cp =
+        typeof data?.counterpartyEntityId === 'string'
+          ? data.counterpartyEntityId
+          : typeof data?.counterpartyId === 'string'
+            ? data.counterpartyId
+            : '';
       return `${tx.type}:${height}:${from}:${to}:${cp}`;
     })
     .join('|');
@@ -466,17 +483,30 @@ const hasRuntimeWork = (env: Env): boolean => {
 };
 
 /**
- * Check if any entity has scheduled hooks that are due to fire.
+ * Check if any entity has scheduled hooks or due periodic tasks.
  * Used by the runtime loop to wake up idle entities at the right time.
+ * Checks both one-shot hooks (setTimeout-like) AND periodic tasks (setInterval-like)
+ * so that hub rebalance crontab fires even when no external inputs arrive.
  */
 const hasDueEntityHooks = (env: Env): boolean => {
   if (!env.eReplicas || env.eReplicas.size === 0) return false;
   const nowMs = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
   for (const [, replica] of env.eReplicas) {
-    const hooks = (replica as any).state?.crontabState?.hooks;
+    const crontab = (replica as any).state?.crontabState;
+    if (!crontab) continue;
+    // One-shot hooks (setTimeout-like)
+    const hooks = crontab.hooks;
     if (hooks && hooks.size > 0) {
       for (const hook of hooks.values()) {
         if ((hook as any).triggerAt <= nowMs) return true;
+      }
+    }
+    // Periodic tasks (setInterval-like) — hubRebalance, broadcastBatch, etc.
+    const tasks = crontab.tasks;
+    if (tasks && tasks.size > 0) {
+      for (const task of tasks.values()) {
+        const t = task as any;
+        if (nowMs - (t.lastRun || 0) >= (t.intervalMs || Infinity)) return true;
       }
     }
   }
@@ -484,8 +514,11 @@ const hasDueEntityHooks = (env: Env): boolean => {
 };
 
 /**
- * Generate entity input pings for entities with due hooks.
- * Injects empty entityInputs so applyEntityInput runs → crontab fires → hooks execute.
+ * Generate entity input pings for entities with due hooks OR periodic tasks.
+ * Injects empty entityInputs so applyEntityInput runs → crontab fires → hooks/tasks execute.
+ *
+ * Critical for hub rebalance: after faucet payment creates uncollateralized debt,
+ * hubRebalanceHandler (periodic) needs to fire even with no external inputs.
  */
 const generateHookPings = (env: Env): void => {
   if (!env.eReplicas || env.eReplicas.size === 0) return;
@@ -493,12 +526,32 @@ const generateHookPings = (env: Env): void => {
   const mempool = ensureRuntimeMempool(env);
 
   for (const [key, replica] of env.eReplicas) {
-    const hooks = (replica as any).state?.crontabState?.hooks;
-    if (!hooks || hooks.size === 0) continue;
+    const crontab = (replica as any).state?.crontabState;
+    if (!crontab) continue;
 
     let hasDue = false;
-    for (const hook of hooks.values()) {
-      if ((hook as any).triggerAt <= nowMs) { hasDue = true; break; }
+    // One-shot hooks
+    const hooks = crontab.hooks;
+    if (hooks && hooks.size > 0) {
+      for (const hook of hooks.values()) {
+        if ((hook as any).triggerAt <= nowMs) {
+          hasDue = true;
+          break;
+        }
+      }
+    }
+    // Periodic tasks
+    if (!hasDue) {
+      const tasks = crontab.tasks;
+      if (tasks && tasks.size > 0) {
+        for (const task of tasks.values()) {
+          const t = task as any;
+          if (nowMs - (t.lastRun || 0) >= (t.intervalMs || Infinity)) {
+            hasDue = true;
+            break;
+          }
+        }
+      }
     }
     if (!hasDue) continue;
 
@@ -508,14 +561,11 @@ const generateHookPings = (env: Env): void => {
     if (!entityId || !signerId) continue;
 
     // Check if there's already a pending entityInput for this entity
-    const alreadyQueued = mempool.entityInputs.some(
-      ei => ei.entityId === entityId
-    );
+    const alreadyQueued = mempool.entityInputs.some(ei => ei.entityId === entityId);
     if (alreadyQueued) continue;
 
     // Inject empty entityInput ping — just enough to trigger crontab
     mempool.entityInputs.push({ entityId, signerId, entityTxs: [] });
-    console.log(`⏰ HOOK-PING: Waking entity ${entityId.slice(-4)} (due hooks)`);
   }
 };
 
@@ -579,7 +629,9 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
   };
 
   loop(); // fire-and-forget — single async chain, never overlaps
-  state.stopLoop = () => { running = false; };
+  state.stopLoop = () => {
+    running = false;
+  };
   return state.stopLoop;
 }
 
@@ -649,7 +701,9 @@ const outputDeferKey = (output: RoutedEntityInput): string => buildRouteOutputKe
 
 const normalizeEntityKey = (value: string): string => value.toLowerCase();
 const bytesToHex = (bytes: Uint8Array): string =>
-  `0x${Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+  `0x${Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')}`;
 
 const deriveEntityCryptoKeyPairHex = (material: Uint8Array | string): { publicKey: string; privateKey: string } => {
   const pair = deriveEncryptionKeyPair(material);
@@ -668,7 +722,11 @@ const hasLocalSignerKey = (env: Env, signerId: string): boolean => {
   }
 };
 
-const deriveLocalEntityCryptoKeys = (env: Env, entityId: string, signerId: string): { publicKey: string; privateKey: string } | null => {
+const deriveLocalEntityCryptoKeys = (
+  env: Env,
+  entityId: string,
+  signerId: string,
+): { publicKey: string; privateKey: string } | null => {
   try {
     const signerPriv = getSignerPrivateKey(env, signerId);
     const signerMaterial = `${bytesToHex(signerPriv)}:${entityId}:htlc-v1`;
@@ -694,9 +752,7 @@ const ensureLocalEntityCryptoKeys = (env: Env): void => {
 
 const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | null => {
   if (!profile) return null;
-  const direct = typeof profile.runtimeId === 'string' && profile.runtimeId.length > 0
-    ? profile.runtimeId
-    : null;
+  const direct = typeof profile.runtimeId === 'string' && profile.runtimeId.length > 0 ? profile.runtimeId : null;
   if (direct) return direct;
 
   const metaRuntimeId = (profile.metadata as Record<string, unknown> | undefined)?.runtimeId;
@@ -778,9 +834,7 @@ type PlannedRemoteOutput = {
 const DEFER_RETRY_DELAY_MS = 5_000;
 const DEFER_MAX_ATTEMPTS = 3;
 
-const getDeferredNetworkMeta = (
-  env: Env,
-): Map<string, { attempts: number; nextRetryAt: number }> => {
+const getDeferredNetworkMeta = (env: Env): Map<string, { attempts: number; nextRetryAt: number }> => {
   const state = ensureRuntimeState(env);
   if (!state.deferredNetworkMeta) {
     state.deferredNetworkMeta = new Map();
@@ -788,8 +842,7 @@ const getDeferredNetworkMeta = (
   return state.deferredNetworkMeta;
 };
 
-const getRuntimeNowMs = (env: Env): number =>
-  env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+const getRuntimeNowMs = (env: Env): number => (env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs());
 
 const splitPendingOutputsByRetryWindow = (
   env: Env,
@@ -828,7 +881,7 @@ const rescheduleDeferredOutputs = (
     next.set(outputDeferKey(output), output);
   }
 
-  const failedKeys = new Set(failed.map((output) => outputDeferKey(output)));
+  const failedKeys = new Set(failed.map(output => outputDeferKey(output)));
 
   // Pending outputs that were retried and delivered can clear retry metadata.
   for (const output of attemptedPending) {
@@ -870,7 +923,10 @@ const rescheduleDeferredOutputs = (
   return [...next.values()];
 };
 
-const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
+const planEntityOutputs = (
+  env: Env,
+  outputs: RoutedEntityInput[],
+): {
   localOutputs: RoutedEntityInput[];
   remoteOutputs: PlannedRemoteOutput[];
   deferredOutputs: RoutedEntityInput[];
@@ -899,7 +955,9 @@ const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
       continue;
     }
     const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
-    console.log(`🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId?.slice(0,10) || 'UNKNOWN'}`);
+    console.log(
+      `🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId?.slice(0, 10) || 'UNKNOWN'}`,
+    );
     if (!targetRuntimeId) {
       deferredOutputs.push(output);
       continue;
@@ -983,7 +1041,9 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
       deferredOutputs.push(output);
       continue;
     }
-    console.log(`📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`);
+    console.log(
+      `📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`,
+    );
     try {
       p2p.enqueueEntityInput(targetRuntimeId, output);
     } catch (error) {
@@ -998,10 +1058,15 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
   return deferredOutputs;
 };
 
-export const sendEntityInput = (env: Env, input: RoutedEntityInput): { sent: boolean; deferred: boolean; queuedLocal: boolean } => {
+export const sendEntityInput = (
+  env: Env,
+  input: RoutedEntityInput,
+): { sent: boolean; deferred: boolean; queuedLocal: boolean } => {
   const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
-  const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } =
-    splitPendingOutputsByRetryWindow(env, pendingBeforePlan);
+  const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
+    env,
+    pendingBeforePlan,
+  );
   const outputsToPlan = [...readyPendingOutputs, input];
   const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan);
   env.pendingNetworkOutputs = [];
@@ -1025,7 +1090,9 @@ export const sendEntityInput = (env: Env, input: RoutedEntityInput): { sent: boo
 };
 
 export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null => {
-  console.log(`[P2P] startP2P called, relayUrls=${config.relayUrls?.join(',')}, env.runtimeId=${env.runtimeId?.slice(0,10) || 'NONE'}`);
+  console.log(
+    `[P2P] startP2P called, relayUrls=${config.relayUrls?.join(',')}, env.runtimeId=${env.runtimeId?.slice(0, 10) || 'NONE'}`,
+  );
   const state = ensureRuntimeState(env);
   state.lastP2PConfig = config;
   ensureLocalEntityCryptoKeys(env);
@@ -1042,7 +1109,9 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
       typeof existingGlobalP2P.matchesIdentity === 'function' &&
       existingGlobalP2P.matchesIdentity(resolvedRuntimeId, config.signerId);
     if (!canReuse) {
-      throw new Error(`P2P_SINGLETON_VIOLATION: attempted second p2p attachment for env runtimeId=${resolvedRuntimeId}`);
+      throw new Error(
+        `P2P_SINGLETON_VIOLATION: attempted second p2p attachment for env runtimeId=${resolvedRuntimeId}`,
+      );
     }
     if (typeof existingGlobalP2P.updateConfig === 'function') {
       existingGlobalP2P.updateConfig(config);
@@ -1071,20 +1140,25 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     gossipPollMs: config.gossipPollMs,
     onEntityInput: (from, input) => {
       const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
-      console.log(`📨 P2P-RECEIVE: from=${from.slice(0,10)} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
+      console.log(`📨 P2P-RECEIVE: from=${from.slice(0, 10)} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
       const targetEntityId = String(input.entityId || '').toLowerCase();
-      const localReplicaExists = Array.from(env.eReplicas.keys()).some((key) => {
+      const localReplicaExists = Array.from(env.eReplicas.keys()).some(key => {
         const [entityKey] = String(key).split(':');
         return String(entityKey || '').toLowerCase() === targetEntityId;
       });
       if (!localReplicaExists) {
         // Drop poison ingress early: this runtime has no local replica for target entity.
         // Enqueuing would trigger failfast in applyRuntimeInput and loop forever.
-        env.warn('network', 'INBOUND_ENTITY_UNKNOWN_TARGET', {
-          fromRuntimeId: from,
-          entityId: input.entityId,
-          txTypes,
-        }, input.entityId);
+        env.warn(
+          'network',
+          'INBOUND_ENTITY_UNKNOWN_TARGET',
+          {
+            fromRuntimeId: from,
+            entityId: input.entityId,
+            txTypes,
+          },
+          input.entityId,
+        );
         return;
       }
       for (const hintedEntityId of collectSenderEntityHints(input)) {
@@ -1093,7 +1167,6 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
       enqueueRuntimeInputs(env, [input]);
       console.log(`📥 RUNTIME-MEMPOOL: Added inbound, size=${ensureRuntimeMempool(env).entityInputs.length}`);
       env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
-    
     },
     onGossipProfiles: (_from, profiles) => {
       if (!env.gossip?.announce) return;
@@ -1133,7 +1206,11 @@ export type P2PConnectionState = {
 export const getP2PState = (env: Env): P2PConnectionState => {
   const p2p = getP2P(env);
   if (!p2p) {
-    return { connected: false, reconnect: null, queue: { targetCount: 0, totalMessages: 0, oldestEntryAge: 0, perTarget: {} } };
+    return {
+      connected: false,
+      reconnect: null,
+      queue: { targetCount: 0, totalMessages: 0, oldestEntryAge: 0, perTarget: {} },
+    };
   }
   return {
     connected: p2p.isConnected(),
@@ -1199,7 +1276,6 @@ export const processJBlockEvents = async (env: Env): Promise<void> => {
   console.log(`🔗 J-BLOCK: ${pending} j-events queued in mempool (runtime loop will process)`);
 };
 
-
 // Note: History is now stored in env.history (no global variable needed)
 
 // === SNAPSHOT UTILITIES ===
@@ -1222,7 +1298,7 @@ const applyRuntimeInput = async (
     env.scenarioMode === true || (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] === true,
     'RUNTIME_APPLY_DIRECT_CALL',
     'applyRuntimeInput must be invoked via process()/WAL replay (non-scenario)',
-    { runtimeId: env.runtimeId, height: env.height }
+    { runtimeId: env.runtimeId, height: env.height },
   );
   const startTime = getPerfMs();
 
@@ -1234,21 +1310,36 @@ const applyRuntimeInput = async (
   try {
     if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
       console.log(
-        `[REPLAY] applyRuntimeInput runtimeTxs=${runtimeInput.runtimeTxs.length} entityInputs=${runtimeInput.entityInputs.length}`
+        `[REPLAY] applyRuntimeInput runtimeTxs=${runtimeInput.runtimeTxs.length} entityInputs=${runtimeInput.entityInputs.length}`,
       );
     }
     // SECURITY: Validate runtime input
     if (!runtimeInput) {
       log.error('❌ Null runtime input provided');
-      return { entityOutbox: [], mergedInputs: [], jOutbox: [], appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] } };
+      return {
+        entityOutbox: [],
+        mergedInputs: [],
+        jOutbox: [],
+        appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] },
+      };
     }
     if (!Array.isArray(runtimeInput.runtimeTxs)) {
       log.error(`❌ Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`);
-      return { entityOutbox: [], mergedInputs: [], jOutbox: [], appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] } };
+      return {
+        entityOutbox: [],
+        mergedInputs: [],
+        jOutbox: [],
+        appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] },
+      };
     }
     if (!Array.isArray(runtimeInput.entityInputs)) {
       log.error(`❌ Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
-      return { entityOutbox: [], mergedInputs: [], jOutbox: [], appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] } };
+      return {
+        entityOutbox: [],
+        mergedInputs: [],
+        jOutbox: [],
+        appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] },
+      };
     }
 
     // Collect incoming J-inputs into early jOutbox (will be merged with handler jOutputs later)
@@ -1259,10 +1350,14 @@ const applyRuntimeInput = async (
       for (const jInput of runtimeInput.jInputs) {
         const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
         if (!jReplica) {
-          console.error(`❌ [J-OUTBOX] Jurisdiction "${jInput.jurisdictionName}" not found — dropping ${jInput.jTxs.length} jTxs`);
+          console.error(
+            `❌ [J-OUTBOX] Jurisdiction "${jInput.jurisdictionName}" not found — dropping ${jInput.jTxs.length} jTxs`,
+          );
           continue;
         }
-        console.log(`📥 [J-OUTBOX] Collecting ${jInput.jTxs.length} jTxs for ${jInput.jurisdictionName} (types: ${jInput.jTxs.map(t => t.type).join(',')})`);
+        console.log(
+          `📥 [J-OUTBOX] Collecting ${jInput.jTxs.length} jTxs for ${jInput.jurisdictionName} (types: ${jInput.jTxs.map(t => t.type).join(',')})`,
+        );
         earlyJOutbox.push(jInput);
       }
     }
@@ -1270,7 +1365,12 @@ const applyRuntimeInput = async (
     // SECURITY: Resource limits
     if (runtimeInput.runtimeTxs.length > 1000) {
       log.error(`❌ Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
-      return { entityOutbox: [], mergedInputs: [], jOutbox: [], appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] } };
+      return {
+        entityOutbox: [],
+        mergedInputs: [],
+        jOutbox: [],
+        appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] },
+      };
     }
     if (runtimeInput.entityInputs.length > 10000) {
       log.error(`❌ Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
@@ -1281,15 +1381,15 @@ const applyRuntimeInput = async (
     // Clone inputs to avoid mutating caller's data
     const validatedRuntimeTxs = [...runtimeInput.runtimeTxs];
     const validatedEntityInputs = [...runtimeInput.entityInputs];
-    
+
     // Validate entity inputs before merging
     validatedEntityInputs.forEach((input, i) => {
       try {
         validateEntityInput(input);
       } catch (error) {
-        logError("RUNTIME_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput[${i}] before merge!`, {
+        logError('RUNTIME_TICK', `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput[${i}] before merge!`, {
           error: (error as Error).message,
-          input
+          input,
         });
         throw error; // Fail fast
       }
@@ -1316,12 +1416,14 @@ const applyRuntimeInput = async (
 
           // Create jurisdiction via unified JAdapter interface
           // If contracts provided, use fromReplica (connect-only mode, no deploy)
-          const fromReplica = runtimeTx.data.contracts ? {
-            depositoryAddress: runtimeTx.data.contracts.depository,
-            entityProviderAddress: runtimeTx.data.contracts.entityProvider,
-            contracts: runtimeTx.data.contracts, // Pass all contract addresses
-            chainId: runtimeTx.data.chainId,
-          } as JReplica : undefined;
+          const fromReplica = runtimeTx.data.contracts
+            ? ({
+                depositoryAddress: runtimeTx.data.contracts.depository,
+                entityProviderAddress: runtimeTx.data.contracts.entityProvider,
+                contracts: runtimeTx.data.contracts, // Pass all contract addresses
+                chainId: runtimeTx.data.chainId,
+              } as JReplica)
+            : undefined;
 
           const jadapter = await createJAdapter({
             mode: isBrowserVM ? 'browservm' : 'rpc',
@@ -1394,7 +1496,7 @@ const applyRuntimeInput = async (
           env.eReplicas.set(replicaKey, existingReplica);
           if (DEBUG) {
             console.log(
-              `Skipping fresh replica init for restored entity #${formatEntityDisplay(runtimeTx.entityId)}:${formatSignerDisplay(runtimeTx.signerId)}`
+              `Skipping fresh replica init for restored entity #${formatEntityDisplay(runtimeTx.entityId)}:${formatSignerDisplay(runtimeTx.signerId)}`,
             );
           }
           continue;
@@ -1451,7 +1553,11 @@ const applyRuntimeInput = async (
         if (runtimeTx.data.position) {
           replica.position = {
             ...runtimeTx.data.position,
-            jurisdiction: runtimeTx.data.position.jurisdiction || runtimeTx.data.position.xlnomy || env.activeJurisdiction || 'default',
+            jurisdiction:
+              runtimeTx.data.position.jurisdiction ||
+              runtimeTx.data.position.xlnomy ||
+              env.activeJurisdiction ||
+              'default',
           };
         }
 
@@ -1465,14 +1571,20 @@ const applyRuntimeInput = async (
             const signerId = validators[0];
             try {
               const privateKey = getSignerPrivateKey(env, signerId);
-              const privateKeyHex = `0x${Array.from(privateKey).map(b => b.toString(16).padStart(2, '0')).join('')}`;
+              const privateKeyHex = `0x${Array.from(privateKey)
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('')}`;
               if (typeof browserVM.registerEntityWallet === 'function') {
                 browserVM.registerEntityWallet(runtimeTx.entityId, privateKeyHex);
               } else {
-                console.warn(`⚠️ BrowserVM missing registerEntityWallet - skipping wallet registration for ${runtimeTx.entityId.slice(0, 10)}...`);
+                console.warn(
+                  `⚠️ BrowserVM missing registerEntityWallet - skipping wallet registration for ${runtimeTx.entityId.slice(0, 10)}...`,
+                );
               }
             } catch (error) {
-              console.warn(`⚠️ Cannot derive private key for signer ${signerId} (no env.runtimeSeed), skipping BrowserVM wallet registration`);
+              console.warn(
+                `⚠️ Cannot derive private key for signer ${signerId} (no env.runtimeSeed), skipping BrowserVM wallet registration`,
+              );
             }
           }
         }
@@ -1499,8 +1611,8 @@ const applyRuntimeInput = async (
         }
 
         if (typeof actualJBlock !== 'number') {
-          logError("RUNTIME_TICK", `💥 ENTITY-CREATION-BUG: Just created entity with invalid jBlock!`);
-          logError("RUNTIME_TICK", `💥   Expected: 0 (number), Got: ${typeof actualJBlock}, Value: ${actualJBlock}`);
+          logError('RUNTIME_TICK', `💥 ENTITY-CREATION-BUG: Just created entity with invalid jBlock!`);
+          logError('RUNTIME_TICK', `💥   Expected: 0 (number), Got: ${typeof actualJBlock}, Value: ${actualJBlock}`);
           // Force fix immediately
           if (createdReplica) {
             createdReplica.state.lastFinalizedJHeight = 0;
@@ -1526,8 +1638,8 @@ const applyRuntimeInput = async (
       if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
         console.log(
           `[REPLAY][RUNTIME] merged input entity=${String(entityInput.entityId).slice(-8)} ` +
-          `signer=${String(entityInput.signerId ?? '')} txs=${entityInput.entityTxs?.length ?? 0} ` +
-          `types=${(entityInput.entityTxs ?? []).map((tx) => tx.type).join(',')}`
+            `signer=${String(entityInput.signerId ?? '')} txs=${entityInput.entityTxs?.length ?? 0} ` +
+            `types=${(entityInput.entityTxs ?? []).map(tx => tx.type).join(',')}`,
         );
       }
       // Track j-events in this input - entityInput.entityTxs guaranteed by validateEntityInput above
@@ -1549,7 +1661,7 @@ const applyRuntimeInput = async (
         typeof actualSignerId === 'string' && actualSignerId.length > 0,
         'RUNTIME_SIGNER_RESOLUTION_FAILED',
         'Unable to resolve signerId for entity input',
-        { entityId: entityInput.entityId, providedSignerId: entityInput.signerId }
+        { entityId: entityInput.entityId, providedSignerId: entityInput.signerId },
       );
 
       let replicaKey = `${entityInput.entityId}:${actualSignerId}`;
@@ -1607,10 +1719,14 @@ const applyRuntimeInput = async (
         if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
           console.log(
             `[REPLAY][RUNTIME] applyEntityInput replica=${replicaKey.slice(0, 20)} ` +
-            `txs=${normalizedInput.entityTxs?.length ?? 0}`
+              `txs=${normalizedInput.entityTxs?.length ?? 0}`,
           );
         }
-        const { newState, outputs, jOutputs, workingReplica } = await applyEntityInput(env, entityReplica, normalizedInputWithSigner);
+        const { newState, outputs, jOutputs, workingReplica } = await applyEntityInput(
+          env,
+          entityReplica,
+          normalizedInputWithSigner,
+        );
         // APPLY-ENTITY-INPUT-RESULT removed - too noisy
 
         // IMMUTABILITY: Update replica with new state from applyEntityInput
@@ -1632,10 +1748,14 @@ const applyRuntimeInput = async (
           try {
             validateEntityOutput(output);
           } catch (error) {
-            logError("RUNTIME_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`, {
-              error: (error as Error).message,
-              output
-            });
+            logError(
+              'RUNTIME_TICK',
+              `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`,
+              {
+                error: (error as Error).message,
+                output,
+              },
+            );
             throw error; // Fail fast to prevent financial routing corruption
           }
         });
@@ -1657,10 +1777,12 @@ const applyRuntimeInput = async (
             entityId: entityInput.entityId,
             resolvedSignerId: actualSignerId,
             inputSignerId: entityInput.signerId,
-            knownReplicas: Array.from(env.eReplicas.keys()).filter((k) =>
-              String(k).toLowerCase().startsWith(`${String(entityInput.entityId).toLowerCase()}:`)
+            knownReplicas: Array.from(env.eReplicas.keys()).filter(k =>
+              String(k)
+                .toLowerCase()
+                .startsWith(`${String(entityInput.entityId).toLowerCase()}:`),
             ),
-          }
+          },
         );
       }
     }
@@ -1668,10 +1790,14 @@ const applyRuntimeInput = async (
     // Log J-outputs — they stay in jOutbox and are returned to process() for post-save execution
     if (jOutbox.length > 0) {
       const totalJTxs = jOutbox.reduce((n, ji) => n + ji.jTxs.length, 0);
-      console.log(`📤 [J-OUTBOX] ${jOutbox.length} JInputs (${totalJTxs} JTxs) collected — will broadcast to JAdapter post-save`);
+      console.log(
+        `📤 [J-OUTBOX] ${jOutbox.length} JInputs (${totalJTxs} JTxs) collected — will broadcast to JAdapter post-save`,
+      );
       for (const jInput of jOutbox) {
         for (const jTx of jInput.jTxs) {
-          console.log(`  📋 [J-OUTBOX] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName} (batchSize=${jTx.data?.batchSize ?? '?'})`);
+          console.log(
+            `  📋 [J-OUTBOX] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName} (batchSize=${jTx.data?.batchSize ?? '?'})`,
+          );
           env.emit('JBatchQueued', {
             entityId: jTx.entityId,
             batchSize: jTx.data?.batchSize,
@@ -1786,7 +1912,7 @@ const applyRuntimeInput = async (
 
     // Notify Svelte about environment changes
     // REPLICA-DEBUG and GOSSIP-DEBUG removed
-    
+
     // CRITICAL FIX: Initialize gossip layer if missing
     if (!env.gossip) {
       console.log(`🚨 CRITICAL: gossip layer missing from environment, creating new one`);
@@ -1813,10 +1939,10 @@ const applyRuntimeInput = async (
       const oldReplicaKey = oldEntityKeys[0];
       const newReplicaKey = newEntityKeys[0];
       if (!oldReplicaKey || !newReplicaKey) {
-        logError("RUNTIME_TICK", `❌ Invalid replica keys: old=${oldReplicaKey}, new=${newReplicaKey}`);
+        logError('RUNTIME_TICK', `❌ Invalid replica keys: old=${oldReplicaKey}, new=${newReplicaKey}`);
         // Continue with empty outbox instead of crashing
       } else {
-      // REPLICA-STRUCTURE logs removed - not consensus-critical
+        // REPLICA-STRUCTURE logs removed - not consensus-critical
       }
     }
 
@@ -2013,7 +2139,6 @@ const clearDatabaseAndHistory = async (env: Env): Promise<Env> => {
   return freshEnv;
 };
 
-
 /**
  * Queue an entity transaction for processing (helper for UI components)
  * Wraps applyRuntimeInput with a single entity tx
@@ -2022,14 +2147,15 @@ export const queueEntityInput = async (
   env: Env,
   entityId: string,
   signerId: string,
-  txData: { type: string; [key: string]: any }
+  txData: { type: string; [key: string]: any },
 ): Promise<void> => {
-  enqueueRuntimeInputs(env, [{
-    entityId,
-    signerId,
-    entityTxs: [{ type: txData.type, data: txData }]
-  }]);
-
+  enqueueRuntimeInputs(env, [
+    {
+      entityId,
+      signerId,
+      entityTxs: [{ type: txData.type, data: txData }],
+    },
+  ]);
 };
 
 export {
@@ -2205,7 +2331,7 @@ const demoCompleteHanko = async (): Promise<void> => {
     // await runCompleteHankoTests();
     console.log('✅ Complete Hanko tests skipped!');
   } catch (error) {
-    logError("RUNTIME_TICK", '❌ Complete Hanko tests failed:', error);
+    logError('RUNTIME_TICK', '❌ Complete Hanko tests failed:', error);
     throw error;
   }
 };
@@ -2265,10 +2391,10 @@ const normalizeContractAddress = (value: unknown): string | undefined => {
 const normalizeJReplica = (jr: JReplica): JReplica => {
   if (!jr?.contracts) return jr;
   const depository = normalizeContractAddress(
-    jr.contracts.depository || (jr.contracts as { depositoryAddress?: unknown }).depositoryAddress
+    jr.contracts.depository || (jr.contracts as { depositoryAddress?: unknown }).depositoryAddress,
   );
   const entityProvider = normalizeContractAddress(
-    jr.contracts.entityProvider || (jr.contracts as { entityProviderAddress?: unknown }).entityProviderAddress
+    jr.contracts.entityProvider || (jr.contracts as { entityProviderAddress?: unknown }).entityProviderAddress,
   );
   return {
     ...jr,
@@ -2322,9 +2448,12 @@ const normalizeSnapshotInPlace = (snapshot: any): void => {
 
 export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   const normalizedSeed = Array.isArray(seed) ? new Uint8Array(seed) : seed;
-  const seedText = normalizedSeed !== undefined && normalizedSeed !== null
-    ? (typeof normalizedSeed === 'string' ? normalizedSeed : new TextDecoder().decode(normalizedSeed))
-    : '';
+  const seedText =
+    normalizedSeed !== undefined && normalizedSeed !== null
+      ? typeof normalizedSeed === 'string'
+        ? normalizedSeed
+        : new TextDecoder().decode(normalizedSeed)
+      : '';
   const derivedRuntimeId = seedText ? deriveRuntimeIdFromSeed(seedText) : null;
   const resolvedRuntimeId = derivedRuntimeId ? derivedRuntimeId.toLowerCase() : null;
   const resolvedDbNamespace = resolvedRuntimeId ? normalizeDbNamespace(resolvedRuntimeId) : undefined;
@@ -2378,7 +2507,7 @@ const buildRuntimeHistorySnapshot = (env: Env, title?: string): any => {
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     eReplicas: new Map(env.eReplicas),
     jReplicas: env.jReplicas
-      ? Array.from(env.jReplicas.values()).map((jr) => ({
+      ? Array.from(env.jReplicas.values()).map(jr => ({
           ...jr,
           mempool: [...jr.mempool],
           stateRoot: new Uint8Array(jr.stateRoot),
@@ -2394,17 +2523,13 @@ const buildRuntimeHistorySnapshot = (env: Env, title?: string): any => {
 // === CONSENSUS PROCESSING ===
 // ONE TICK = ONE ITERATION. No cascade. E→E communication always requires new tick.
 
-export const process = async (
-  env: Env,
-  inputs?: RoutedEntityInput[],
-  runtimeDelay = 0
-) => {
+export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDelay = 0) => {
   const processState = ensureRuntimeState(env);
   while (processState.processingPromise) {
     await processState.processingPromise;
   }
   let releaseProcessLock: (() => void) | null = null;
-  processState.processingPromise = new Promise<void>((resolve) => {
+  processState.processingPromise = new Promise<void>(resolve => {
     releaseProcessLock = resolve;
   });
 
@@ -2445,7 +2570,6 @@ export const process = async (
 
     const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
     if (!isRuntimeFrameReady(env, now, runtimeDelay)) {
-    
       return env;
     }
 
@@ -2479,7 +2603,7 @@ export const process = async (
       try {
         validateEntityInput(o);
       } catch (error) {
-        logError("RUNTIME_TICK", `🚨 CRITICAL: Invalid EntityInput!`, {
+        logError('RUNTIME_TICK', `🚨 CRITICAL: Invalid EntityInput!`, {
           error: (error as Error).message,
           entityId: o.entityId.slice(0, 10),
           signerId: o.signerId,
@@ -2499,17 +2623,20 @@ export const process = async (
     const changedEntityIds = new Set<string>();
     const shouldAnnounceEntityProfile = (input: RoutedEntityInput): boolean => {
       if (!input?.entityTxs?.length) return false;
-      return input.entityTxs.some((tx) =>
-        tx.type === 'openAccount' ||
-        tx.type === 'closeAccount' ||
-        tx.type === 'governance_profile_update' ||
-        tx.type === 'governanceUpdateProfile' ||
-        tx.type === 'updateProfile'
+      return input.entityTxs.some(
+        tx =>
+          tx.type === 'openAccount' ||
+          tx.type === 'closeAccount' ||
+          tx.type === 'governance_profile_update' ||
+          tx.type === 'governanceUpdateProfile' ||
+          tx.type === 'updateProfile',
       );
     };
     if (hasRuntimeInput) {
       if (!quietRuntimeLogs) {
-        console.log(`📥 TICK: Processing ${runtimeInput.entityInputs.length} inputs for [${runtimeInput.entityInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
+        console.log(
+          `📥 TICK: Processing ${runtimeInput.entityInputs.length} inputs for [${runtimeInput.entityInputs.map(o => o.entityId.slice(-4)).join(',')}]`,
+        );
         if (runtimeInput.runtimeTxs.length > 0) {
           console.log(`📥 TICK: Processing ${runtimeInput.runtimeTxs.length} queued runtimeTxs`);
         }
@@ -2517,10 +2644,13 @@ export const process = async (
       try {
         (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = true;
         const result = await applyRuntimeInput(env, runtimeInput);
-        console.log(`🔍 PROCESS: applyRuntimeInput returned entityOutbox=${result.entityOutbox.length}, jOutbox=${result.jOutbox.length}`);
+        console.log(
+          `🔍 PROCESS: applyRuntimeInput returned entityOutbox=${result.entityOutbox.length}, jOutbox=${result.jOutbox.length}`,
+        );
         entityOutbox = result.entityOutbox;
         jOutbox = result.jOutbox;
-        (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput = result.appliedRuntimeInput;
+        (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput =
+          result.appliedRuntimeInput;
         for (const runtimeTx of runtimeInput.runtimeTxs) {
           if (runtimeTx.type === 'importReplica') {
             changedEntityIds.add(runtimeTx.entityId.toLowerCase());
@@ -2549,17 +2679,19 @@ export const process = async (
 
     // Retry deferred network outputs only when their retry window is due.
     const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
-    const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } =
-      splitPendingOutputsByRetryWindow(env, pendingBeforePlan);
-    const outputsToPlan = readyPendingOutputs.length > 0
-      ? [...readyPendingOutputs, ...entityOutbox]
-      : entityOutbox;
+    const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
+      env,
+      pendingBeforePlan,
+    );
+    const outputsToPlan = readyPendingOutputs.length > 0 ? [...readyPendingOutputs, ...entityOutbox] : entityOutbox;
     const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan);
     env.pendingNetworkOutputs = [];
     if (localOutputs.length > 0) {
       enqueueRuntimeInputs(env, localOutputs);
       if (!quietRuntimeLogs) {
-        console.log(`📤 TICK: ${localOutputs.length} local outputs queued for next tick → [${localOutputs.map(o => o.entityId.slice(-4)).join(',')}]`);
+        console.log(
+          `📤 TICK: ${localOutputs.length} local outputs queued for next tick → [${localOutputs.map(o => o.entityId.slice(-4)).join(',')}]`,
+        );
       }
     }
     // BrowserVM trie is NOT serialized per-frame — it's J-layer state.
@@ -2607,12 +2739,7 @@ export const process = async (
     const dispatchDeferred = dispatchEntityOutputs(env, remoteOutputs);
 
     const allDeferred = [...deferredOutputs, ...dispatchDeferred];
-    env.pendingNetworkOutputs = rescheduleDeferredOutputs(
-      env,
-      readyPendingOutputs,
-      allDeferred,
-      waitingPendingOutputs,
-    );
+    env.pendingNetworkOutputs = rescheduleDeferredOutputs(env, readyPendingOutputs, allDeferred, waitingPendingOutputs);
 
     // 1b. Re-announce gossip profiles after account state changes (new accounts, capacity shifts)
     // Broadcast changed local entities so relay routing metadata stays fresh.
@@ -2662,7 +2789,9 @@ export const process = async (
             });
 
             if (result.success) {
-              console.log(`✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`);
+              console.log(
+                `✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`,
+              );
             } else {
               console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
               if (env.scenarioMode) {
@@ -2720,39 +2849,29 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       runtimeInput: currentFrameInput ?? { runtimeTxs: [], entityInputs: [] },
       // Replay can deterministically require routing/encryption metadata
       // (e.g. HTLC onion key lookup), so persist gossip snapshot per frame.
-      persistedGossipProfiles:
-        typeof env.gossip?.getProfiles === 'function'
-          ? env.gossip.getProfiles()
-          : [],
+      persistedGossipProfiles: typeof env.gossip?.getProfiles === 'function' ? env.gossip.getProfiles() : [],
     });
     const ops: Array<{ key: Buffer; value: Buffer }> = [
-      { key: makeDbKey(dbNamespace, 'persistence_schema_version'), value: Buffer.from(String(PERSISTENCE_SCHEMA_VERSION)) },
+      {
+        key: makeDbKey(dbNamespace, 'persistence_schema_version'),
+        value: Buffer.from(String(PERSISTENCE_SCHEMA_VERSION)),
+      },
       { key: makeDbKey(dbNamespace, `frame_input:${env.height}`), value: Buffer.from(frameJournal) },
     ];
 
-    const persistedGossipProfiles =
-      typeof env.gossip?.getProfiles === 'function'
-        ? env.gossip.getProfiles()
-        : [];
+    const persistedGossipProfiles = typeof env.gossip?.getProfiles === 'function' ? env.gossip.getProfiles() : [];
     const snapshotPayload = {
       ...env,
       persistedGossipProfiles,
     };
-    const snapshot = serializeTaggedJson(snapshotPayload, new Set([
-      'history',
-      'browserVM',
-      'gossip',
-      'log',
-      'info',
-      'warn',
-      'error',
-      'emit',
-    ]));
+    const snapshot = serializeTaggedJson(
+      snapshotPayload,
+      new Set(['history', 'browserVM', 'gossip', 'log', 'info', 'warn', 'error', 'emit']),
+    );
     // Persist a durable checkpoint snapshot every N runtime frames.
     // Restore is always: checkpoint snapshot + contiguous WAL replay on top.
     const CHECKPOINT_INTERVAL = ensureRuntimeConfig(env).snapshotIntervalFrames ?? 100;
-    const shouldCheckpoint =
-      env.height <= 1 || (env.height % CHECKPOINT_INTERVAL === 0);
+    const shouldCheckpoint = env.height <= 1 || env.height % CHECKPOINT_INTERVAL === 0;
     if (shouldCheckpoint) {
       ops.push(
         { key: makeDbKey(dbNamespace, `snapshot:${env.height}`), value: Buffer.from(snapshot) },
@@ -2788,7 +2907,9 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
       const latestHeight = Number.parseInt(latestHeightBuffer.toString(), 10);
       if (!Number.isFinite(latestHeight) || latestHeight !== env.height) {
-        throw new Error(`latest_height mismatch: expected=${env.height} actual=${String(latestHeightBuffer.toString())}`);
+        throw new Error(
+          `latest_height mismatch: expected=${env.height} actual=${String(latestHeightBuffer.toString())}`,
+        );
       }
     } catch (verifyError) {
       throw new Error(`PERSISTENCE_FATAL: write verification failed at frame ${env.height}: ${String(verifyError)}`);
@@ -2824,7 +2945,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       const schemaVersion = Number.parseInt(schemaVersionBuffer.toString(), 10);
       if (!Number.isFinite(schemaVersion) || schemaVersion !== PERSISTENCE_SCHEMA_VERSION) {
         throw new Error(
-          `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=n/a latest=n/a restored=n/a reason=Unsupported persistence schema (${schemaVersion})`
+          `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=n/a latest=n/a restored=n/a reason=Unsupported persistence schema (${schemaVersion})`,
         );
       }
       latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
@@ -2843,17 +2964,17 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
     } catch (error) {
       const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       throw new Error(
-        `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=n/a latest=${latestHeight} restored=n/a reason=Missing latest_checkpoint_height pointer (${message})`
+        `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=n/a latest=${latestHeight} restored=n/a reason=Missing latest_checkpoint_height pointer (${message})`,
       );
     }
     if (!Number.isFinite(checkpointHeight) || checkpointHeight < 0 || checkpointHeight > latestHeight) {
       throw new Error(
-        `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=${String(checkpointHeight)} latest=${latestHeight} restored=n/a reason=Invalid checkpoint pointer`
+        `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=${String(checkpointHeight)} latest=${latestHeight} restored=n/a reason=Invalid checkpoint pointer`,
       );
     }
     if (latestHeight > 0 && checkpointHeight < 1) {
       throw new Error(
-        `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=${String(checkpointHeight)} latest=${latestHeight} restored=n/a reason=Missing durable checkpoint`
+        `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=${String(checkpointHeight)} latest=${latestHeight} restored=n/a reason=Missing durable checkpoint`,
       );
     }
     console.log(`[loadEnvFromDB] namespace=${dbNamespace} latest=${latestHeight} checkpoint=${checkpointHeight}`);
@@ -2862,7 +2983,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
     } catch (error) {
       const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       throw new Error(
-        `REPLAY_INVARIANT_FAILED: frame=${checkpointHeight} checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing checkpoint snapshot (${message})`
+        `REPLAY_INVARIANT_FAILED: frame=${checkpointHeight} checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing checkpoint snapshot (${message})`,
       );
     }
 
@@ -2880,64 +3001,62 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       } catch (error) {
         const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
         throw new Error(
-          `REPLAY_INVARIANT_FAILED: frame=1 checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing genesis checkpoint snapshot (${message})`
+          `REPLAY_INVARIANT_FAILED: frame=1 checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing genesis checkpoint snapshot (${message})`,
         );
       }
     }
     console.log(
-      `[loadEnvFromDB] snapshot selection checkpoint=${checkpointHeight} selected=${selectedSnapshotHeight} source=${selectedSnapshotLabel}`
+      `[loadEnvFromDB] snapshot selection checkpoint=${checkpointHeight} selected=${selectedSnapshotHeight} source=${selectedSnapshotLabel}`,
     );
 
     const data = deserializeTaggedJson<any>(snapshotBufferToUse.toString());
 
-      // Hydrate Maps/BigInts
-      const runtimeSeedRaw = Array.isArray(data.runtimeSeed)
-        ? new TextDecoder().decode(new Uint8Array(data.runtimeSeed))
-        : data.runtimeSeed;
-      const env = createEmptyEnv(runtimeSeedRaw ?? null);
-      env.height = Number(data.height || 0);
-      env.timestamp = Number(data.timestamp || 0);
-      env.dbNamespace = data.dbNamespace ?? dbNamespace;
-      env.activeJurisdiction = typeof data.activeJurisdiction === 'string' ? data.activeJurisdiction : undefined;
-      if (data.browserVMState) {
-        env.browserVMState = data.browserVMState;
+    // Hydrate Maps/BigInts
+    const runtimeSeedRaw = Array.isArray(data.runtimeSeed)
+      ? new TextDecoder().decode(new Uint8Array(data.runtimeSeed))
+      : data.runtimeSeed;
+    const env = createEmptyEnv(runtimeSeedRaw ?? null);
+    env.height = Number(data.height || 0);
+    env.timestamp = Number(data.timestamp || 0);
+    env.dbNamespace = data.dbNamespace ?? dbNamespace;
+    env.activeJurisdiction = typeof data.activeJurisdiction === 'string' ? data.activeJurisdiction : undefined;
+    if (data.browserVMState) {
+      env.browserVMState = data.browserVMState;
+    }
+    if (data.runtimeId) {
+      env.runtimeId = data.runtimeId;
+    } else if (runtimeSeedRaw !== undefined && runtimeSeedRaw !== null) {
+      try {
+        env.runtimeId = deriveSignerAddressSync(runtimeSeedRaw, '1');
+      } catch (error) {
+        console.warn('⚠️ Failed to derive runtimeId from DB snapshot:', error);
       }
-      if (data.runtimeId) {
-        env.runtimeId = data.runtimeId;
-      } else if (runtimeSeedRaw !== undefined && runtimeSeedRaw !== null) {
-        try {
-          env.runtimeId = deriveSignerAddressSync(runtimeSeedRaw, '1');
-        } catch (error) {
-          console.warn('⚠️ Failed to derive runtimeId from DB snapshot:', error);
+    }
+    // Support both old (replicas) and new (eReplicas) format
+    env.eReplicas = normalizeReplicaMap(data.eReplicas || data.replicas || []);
+    env.jReplicas = normalizeJReplicaMap(data.jReplicas || []);
+    env.history = [];
+    if (selectedSnapshotHeight > 0) {
+      env.history.push(buildRuntimeHistorySnapshot(env, `Frame ${selectedSnapshotHeight}`));
+    }
+    if (env.jReplicas.size > 0) {
+      for (const [name, jr] of env.jReplicas.entries()) {
+        if ((jr as any).stateRoot) {
+          env.jReplicas.set(name, {
+            ...jr,
+            stateRoot: new Uint8Array((jr as any).stateRoot),
+          });
         }
       }
-      // Support both old (replicas) and new (eReplicas) format
-      env.eReplicas = normalizeReplicaMap(data.eReplicas || data.replicas || []);
-      env.jReplicas = normalizeJReplicaMap(data.jReplicas || []);
-      env.history = [];
-      if (selectedSnapshotHeight > 0) {
-        env.history.push(buildRuntimeHistorySnapshot(env, `Frame ${selectedSnapshotHeight}`));
+    }
+    const snapshotProfiles = Array.isArray(data.persistedGossipProfiles) ? data.persistedGossipProfiles : [];
+    if (snapshotProfiles.length > 0) {
+      if (typeof env.gossip?.setProfiles === 'function') {
+        env.gossip.setProfiles(snapshotProfiles);
+      } else if (typeof env.gossip?.announce === 'function') {
+        for (const profile of snapshotProfiles) env.gossip.announce(profile);
       }
-      if (env.jReplicas.size > 0) {
-        for (const [name, jr] of env.jReplicas.entries()) {
-          if ((jr as any).stateRoot) {
-            env.jReplicas.set(name, {
-              ...jr,
-              stateRoot: new Uint8Array((jr as any).stateRoot),
-            });
-          }
-        }
-      }
-      const snapshotProfiles = Array.isArray(data.persistedGossipProfiles)
-        ? data.persistedGossipProfiles
-        : [];
-      if (snapshotProfiles.length > 0) {
-        if (typeof env.gossip?.setProfiles === 'function') {
-          env.gossip.setProfiles(snapshotProfiles);
-        } else if (typeof env.gossip?.announce === 'function') {
-          for (const profile of snapshotProfiles) env.gossip.announce(profile);
-        }
-      }
+    }
     const envState = ensureRuntimeState(env);
     const tempState = ensureRuntimeState(tempEnv);
     envState.db = tempState.db;
@@ -2961,7 +3080,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       if (missingFrames.length > 0) {
         const sample = missingFrames.slice(0, 8).join(',');
         throw new Error(
-          `REPLAY_INVARIANT_FAILED: frame=${missingFrames[0]} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${checkpointHeight} reason=Missing WAL frames (${sample}${missingFrames.length > 8 ? ',…' : ''})`
+          `REPLAY_INVARIANT_FAILED: frame=${missingFrames[0]} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${checkpointHeight} reason=Missing WAL frames (${sample}${missingFrames.length > 8 ? ',…' : ''})`,
         );
       }
     }
@@ -2979,7 +3098,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       const networkInbox = env.networkInbox?.length ?? 0;
       if (pendingOutputs > 0 || pendingNetworkOutputs > 0 || networkInbox > 0) {
         throw new Error(
-          `REPLAY_SIDE_EFFECT_DETECTED: frame=${frame} pendingOutputs=${pendingOutputs} pendingNetworkOutputs=${pendingNetworkOutputs} networkInbox=${networkInbox}`
+          `REPLAY_SIDE_EFFECT_DETECTED: frame=${frame} pendingOutputs=${pendingOutputs} pendingNetworkOutputs=${pendingNetworkOutputs} networkInbox=${networkInbox}`,
         );
       }
     };
@@ -2993,53 +3112,51 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
     try {
       for (let h = selectedSnapshotHeight + 1; h <= latestHeight; h++) {
         try {
-        const frameBuffer = await db.get(makeDbKey(dbNamespace, `frame_input:${h}`));
-        const frame = deserializeTaggedJson<{
-          height: number;
-          timestamp: number;
-          runtimeInput: RuntimeInput;
-          persistedGossipProfiles?: unknown[];
-        }>(
-          frameBuffer.toString()
-        );
-        if (Array.isArray(frame?.persistedGossipProfiles) && frame.persistedGossipProfiles.length > 0) {
-          if (typeof env.gossip?.setProfiles === 'function') {
-            env.gossip.setProfiles(frame.persistedGossipProfiles);
-          } else if (typeof env.gossip?.announce === 'function') {
-            for (const profile of frame.persistedGossipProfiles) env.gossip.announce(profile);
+          const frameBuffer = await db.get(makeDbKey(dbNamespace, `frame_input:${h}`));
+          const frame = deserializeTaggedJson<{
+            height: number;
+            timestamp: number;
+            runtimeInput: RuntimeInput;
+            persistedGossipProfiles?: unknown[];
+          }>(frameBuffer.toString());
+          if (Array.isArray(frame?.persistedGossipProfiles) && frame.persistedGossipProfiles.length > 0) {
+            if (typeof env.gossip?.setProfiles === 'function') {
+              env.gossip.setProfiles(frame.persistedGossipProfiles);
+            } else if (typeof env.gossip?.announce === 'function') {
+              for (const profile of frame.persistedGossipProfiles) env.gossip.announce(profile);
+            }
           }
-        }
-        const replayRuntimeTxs = frame?.runtimeInput?.runtimeTxs?.length ?? 0;
-        const replayEntityInputs = frame?.runtimeInput?.entityInputs?.length ?? 0;
-        const replayJInputs = frame?.runtimeInput?.jInputs?.length ?? 0;
-        console.log(
-          `[loadEnvFromDB] replay frame=${h} runtimeTxs=${replayRuntimeTxs} entityInputs=${replayEntityInputs} jInputs=${replayJInputs}`
-        );
-        if (Number(frame?.height) !== h) {
-          throw new Error(`Frame height mismatch: key=${h} payload=${String(frame?.height)}`);
-        }
-        if (!frame?.runtimeInput) {
-          throw new Error(`Missing runtimeInput at frame ${h}`);
-        }
-        for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
-          for (const tx of entityInput.entityTxs ?? []) {
-            if (tx.type !== 'accountInput') continue;
-            const data = tx.data as Record<string, unknown> | undefined;
-            const inputHeight = Number(data?.height ?? 0);
-            const newFrameHeight = Number((data?.newAccountFrame as { height?: number } | undefined)?.height ?? 0);
-            const hasPrev = Boolean(data?.prevHanko);
-            const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-            console.log(
-              `[loadEnvFromDB] frame=${h} accountInput from=${fromEntityId.slice(-8)} ` +
-              `height=${inputHeight} hasPrev=${hasPrev} newFrame=${newFrameHeight || 'none'}`
-            );
+          const replayRuntimeTxs = frame?.runtimeInput?.runtimeTxs?.length ?? 0;
+          const replayEntityInputs = frame?.runtimeInput?.entityInputs?.length ?? 0;
+          const replayJInputs = frame?.runtimeInput?.jInputs?.length ?? 0;
+          console.log(
+            `[loadEnvFromDB] replay frame=${h} runtimeTxs=${replayRuntimeTxs} entityInputs=${replayEntityInputs} jInputs=${replayJInputs}`,
+          );
+          if (Number(frame?.height) !== h) {
+            throw new Error(`Frame height mismatch: key=${h} payload=${String(frame?.height)}`);
           }
-        }
-        // Keep replay semantics identical to process():
-        // applyRuntimeInput increments env.height once per applied frame.
-        // Therefore env.height must be h-1 before applying frame h.
-        env.height = h - 1;
-        env.timestamp = Number(frame.timestamp ?? env.timestamp);
+          if (!frame?.runtimeInput) {
+            throw new Error(`Missing runtimeInput at frame ${h}`);
+          }
+          for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
+            for (const tx of entityInput.entityTxs ?? []) {
+              if (tx.type !== 'accountInput') continue;
+              const data = tx.data as Record<string, unknown> | undefined;
+              const inputHeight = Number(data?.height ?? 0);
+              const newFrameHeight = Number((data?.newAccountFrame as { height?: number } | undefined)?.height ?? 0);
+              const hasPrev = Boolean(data?.prevHanko);
+              const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
+              console.log(
+                `[loadEnvFromDB] frame=${h} accountInput from=${fromEntityId.slice(-8)} ` +
+                  `height=${inputHeight} hasPrev=${hasPrev} newFrame=${newFrameHeight || 'none'}`,
+              );
+            }
+          }
+          // Keep replay semantics identical to process():
+          // applyRuntimeInput increments env.height once per applied frame.
+          // Therefore env.height must be h-1 before applying frame h.
+          env.height = h - 1;
+          env.timestamp = Number(frame.timestamp ?? env.timestamp);
           runtimeEnv[ENV_APPLY_ALLOWED_KEY] = true;
           await applyRuntimeInput(env, frame.runtimeInput);
           runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
@@ -3058,89 +3175,89 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
                 const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
                 console.log(
                   `[loadEnvFromDB] frame=${h} POST-APPLY entity=${String(entityInput.entityId).slice(-8)} ` +
-                  `from=${fromEntityId.slice(-8)} current=${Number(accountMachine?.currentHeight ?? 0)} ` +
-                  `pending=${Number(accountMachine?.pendingFrame?.height ?? 0)} mempool=${Number(accountMachine?.mempool?.length ?? 0)}`
+                    `from=${fromEntityId.slice(-8)} current=${Number(accountMachine?.currentHeight ?? 0)} ` +
+                    `pending=${Number(accountMachine?.pendingFrame?.height ?? 0)} mempool=${Number(accountMachine?.mempool?.length ?? 0)}`,
                 );
               }
             }
           }
-        if (env.height !== h) {
-          throw new Error(`Replay height mismatch after apply: expected=${h} actual=${env.height}`);
-        }
-        // Fail-fast replay invariant: if frame carries accountInput(newAccountFrame),
-        // replay MUST materialize that account frame in restored state.
-        for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
-          for (const tx of entityInput.entityTxs ?? []) {
-            if (tx.type !== 'accountInput') continue;
-            const data = tx.data as Record<string, unknown> | undefined;
-            const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-            const newAccountFrame = data?.newAccountFrame as Record<string, unknown> | undefined;
-            const hasPrevHanko = Boolean(data?.prevHanko);
-            const inputHeightRaw = data?.height;
-            const inputHeight = Number(inputHeightRaw ?? 0);
-            if (hasPrevHanko && !newAccountFrame && fromEntityId && Number.isFinite(inputHeight) && inputHeight > 0) {
+          if (env.height !== h) {
+            throw new Error(`Replay height mismatch after apply: expected=${h} actual=${env.height}`);
+          }
+          // Fail-fast replay invariant: if frame carries accountInput(newAccountFrame),
+          // replay MUST materialize that account frame in restored state.
+          for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
+            for (const tx of entityInput.entityTxs ?? []) {
+              if (tx.type !== 'accountInput') continue;
+              const data = tx.data as Record<string, unknown> | undefined;
+              const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
+              const newAccountFrame = data?.newAccountFrame as Record<string, unknown> | undefined;
+              const hasPrevHanko = Boolean(data?.prevHanko);
+              const inputHeightRaw = data?.height;
+              const inputHeight = Number(inputHeightRaw ?? 0);
+              if (hasPrevHanko && !newAccountFrame && fromEntityId && Number.isFinite(inputHeight) && inputHeight > 0) {
+                const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
+                for (const replica of env.eReplicas.values()) {
+                  if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
+                  const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
+                  const currentHeight = Number(accountMachine?.currentHeight ?? 0);
+                  const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
+                  console.log(
+                    `[loadEnvFromDB] frame=${h} ACK-check entity=${String(entityInput.entityId).slice(-8)} ` +
+                      `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} inputHeight=${inputHeight}`,
+                  );
+                  if (currentHeight < inputHeight || pendingHeight === inputHeight) {
+                    throw new Error(
+                      `REPLAY_ACK_NOT_APPLIED: frame=${h} ackHeight=${inputHeight} currentHeight=${currentHeight} pendingHeight=${pendingHeight} ` +
+                        `entity=${String(entityInput.entityId).slice(0, 12)} from=${fromEntityId.slice(0, 12)}`,
+                    );
+                  }
+                }
+              }
+              const expectedHeight = Number(newAccountFrame?.height ?? 0);
+              if (!fromEntityId || !Number.isFinite(expectedHeight) || expectedHeight <= 0) continue;
               const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
+              let applied = false;
               for (const replica of env.eReplicas.values()) {
                 if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
                 const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
                 const currentHeight = Number(accountMachine?.currentHeight ?? 0);
                 const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
                 console.log(
-                  `[loadEnvFromDB] frame=${h} ACK-check entity=${String(entityInput.entityId).slice(-8)} ` +
-                  `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} inputHeight=${inputHeight}`
+                  `[loadEnvFromDB] frame=${h} NEWFRAME-check entity=${String(entityInput.entityId).slice(-8)} ` +
+                    `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} expected=${expectedHeight}`,
                 );
-                if (currentHeight < inputHeight || pendingHeight === inputHeight) {
-                  throw new Error(
-                    `REPLAY_ACK_NOT_APPLIED: frame=${h} ackHeight=${inputHeight} currentHeight=${currentHeight} pendingHeight=${pendingHeight} ` +
-                    `entity=${String(entityInput.entityId).slice(0, 12)} from=${fromEntityId.slice(0, 12)}`
-                  );
+                if (currentHeight >= expectedHeight) {
+                  applied = true;
+                  break;
                 }
               }
-            }
-            const expectedHeight = Number(newAccountFrame?.height ?? 0);
-            if (!fromEntityId || !Number.isFinite(expectedHeight) || expectedHeight <= 0) continue;
-            const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
-            let applied = false;
-            for (const replica of env.eReplicas.values()) {
-              if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
-              const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
-              const currentHeight = Number(accountMachine?.currentHeight ?? 0);
-              const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
-              console.log(
-                `[loadEnvFromDB] frame=${h} NEWFRAME-check entity=${String(entityInput.entityId).slice(-8)} ` +
-                `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} expected=${expectedHeight}`
-              );
-              if (currentHeight >= expectedHeight) {
-                applied = true;
-                break;
+              if (!applied) {
+                const replayDebug = Array.from(env.eReplicas.values())
+                  .filter(replica => String(replica?.entityId || '').toLowerCase() === entityIdNorm)
+                  .map(replica => {
+                    const am = replica?.state?.accounts?.get?.(fromEntityId);
+                    return {
+                      replicaKey: `${String(replica.entityId).slice(0, 10)}...:${String(replica.signerId).slice(0, 10)}...`,
+                      currentHeight: Number(am?.currentHeight ?? 0),
+                      pendingFrame: Number(am?.pendingFrame?.height ?? 0),
+                      mempoolSize: Number(am?.mempool?.length ?? 0),
+                      frameHistorySize: Number(am?.frameHistory?.length ?? 0),
+                    };
+                  });
+                throw new Error(
+                  `REPLAY_ACCOUNT_FRAME_NOT_APPLIED: frame=${h} expected=${expectedHeight} actual=${JSON.stringify(replayDebug)}`,
+                );
               }
             }
-            if (!applied) {
-              const replayDebug = Array.from(env.eReplicas.values())
-                .filter((replica) => String(replica?.entityId || '').toLowerCase() === entityIdNorm)
-                .map((replica) => {
-                  const am = replica?.state?.accounts?.get?.(fromEntityId);
-                  return {
-                    replicaKey: `${String(replica.entityId).slice(0, 10)}...:${String(replica.signerId).slice(0, 10)}...`,
-                    currentHeight: Number(am?.currentHeight ?? 0),
-                    pendingFrame: Number(am?.pendingFrame?.height ?? 0),
-                    mempoolSize: Number(am?.mempool?.length ?? 0),
-                    frameHistorySize: Number(am?.frameHistory?.length ?? 0),
-                  };
-                });
-              throw new Error(
-                `REPLAY_ACCOUNT_FRAME_NOT_APPLIED: frame=${h} expected=${expectedHeight} actual=${JSON.stringify(replayDebug)}`
-              );
-            }
           }
-        }
-        env.history.push(buildRuntimeHistorySnapshot(env, `Frame ${h}`));
-        lastGoodHeight = h;
+          env.history.push(buildRuntimeHistorySnapshot(env, `Frame ${h}`));
+          lastGoodHeight = h;
         } catch (error) {
           runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
           const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
           throw new Error(
-            `REPLAY_INVARIANT_FAILED: frame=${h} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${lastGoodHeight} reason=${message}`
+            `REPLAY_INVARIANT_FAILED: frame=${h} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${lastGoodHeight} reason=${message}`,
           );
         }
       }
@@ -3156,11 +3273,11 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
     env.height = lastGoodHeight;
     if (lastGoodHeight !== latestHeight) {
       throw new Error(
-        `REPLAY_INVARIANT_FAILED: replay completed at ${lastGoodHeight}, expected latest ${latestHeight}`
+        `REPLAY_INVARIANT_FAILED: replay completed at ${lastGoodHeight}, expected latest ${latestHeight}`,
       );
     }
     console.log(
-      `[loadEnvFromDB] replay complete latest=${latestHeight} restored=${lastGoodHeight} history=${env.history?.length ?? 0}`
+      `[loadEnvFromDB] replay complete latest=${latestHeight} restored=${lastGoodHeight} history=${env.history?.length ?? 0}`,
     );
 
     const latestEnv = env;
@@ -3297,7 +3414,7 @@ export const scenarios = {
   swap: async (env: Env): Promise<Env> => {
     const { swap, swapWithOrderbook, multiPartyTrading } = await import('./scenarios/swap');
     // Run all 3 phases for complete swap demo (Alice, Hub, Bob, Carol, Dave)
-    await swap(env);             // Phase 1: Alice + Hub basic bilateral swaps
+    await swap(env); // Phase 1: Alice + Hub basic bilateral swaps
     await swapWithOrderbook(env); // Phase 2: Add Bob, orderbook matching
     await multiPartyTrading(env); // Phase 3: Add Carol + Dave, multi-party
     return env;
@@ -3339,7 +3456,17 @@ export { executeScenario } from './scenarios/executor.js';
 export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from './scenarios/index.js';
 
 // === CRYPTOGRAPHIC SIGNATURES ===
-export { deriveSignerKey, deriveSignerKeySync, registerSignerKey, registerSignerPublicKey, registerTestKeys, clearSignerKeys, signAccountFrame, verifyAccountSignature, getSignerPublicKey } from './account-crypto.js';
+export {
+  deriveSignerKey,
+  deriveSignerKeySync,
+  registerSignerKey,
+  registerSignerPublicKey,
+  registerTestKeys,
+  clearSignerKeys,
+  signAccountFrame,
+  verifyAccountSignature,
+  getSignerPublicKey,
+} from './account-crypto.js';
 
 // === NAME RESOLUTION WRAPPERS (override imports) ===
 const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(db, query, limit);

@@ -4,7 +4,6 @@
   import { getXLN, xlnEnvironment, xlnFunctions, error, p2pState } from '../../stores/xlnStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import BigIntInput from '../Common/BigIntInput.svelte';
-  import AccountPreview from './AccountPreview.svelte';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
 
   // Get environment from context (for /view route) or use global stores (for / route)
@@ -158,6 +157,19 @@
   }
 
   $: counterpartyName = getEntityName(counterpartyId);
+
+  // Hub detection for faucet button
+  $: isHub = (() => {
+    const envData = contextEnv ? $contextEnv : $xlnEnvironment;
+    if (!envData?.gossip) return false;
+    const profiles = typeof envData.gossip.getProfiles === 'function' ? envData.gossip.getProfiles() : (envData.gossip.profiles || []);
+    const profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === String(counterpartyId).toLowerCase());
+    return !!(profile?.metadata?.isHub === true || (Array.isArray(profile?.capabilities) && profile.capabilities.includes('hub')));
+  })();
+
+  function handleFaucet(tokenId: number) {
+    dispatch('faucet', { counterpartyId, tokenId });
+  }
 
   // P2P connection state for header display
   $: reconnectCountdown = (() => {
@@ -512,22 +524,24 @@
 
 <div class="account-panel">
   <div class="panel-header">
-    <button class="back-button" on:click={handleBackToEntity}>
-      ←
-    </button>
-    <div class="header-identity">
-      <EntityIdentity entityId={counterpartyId} name={counterpartyName} size={32} clickable={false} compact={false} copyable={true} showAddress={true} />
+    <div class="header-row-top">
+      <button class="back-button" on:click={handleBackToEntity}>
+        ←
+      </button>
+      <div class="header-identity">
+        <EntityIdentity entityId={counterpartyId} name={counterpartyName} size={28} clickable={false} compact={false} copyable={true} showAddress={true} />
+      </div>
+      <div class="relay-status">
+        <span class="conn-dot {relayStatus}" title="{relayStatus}"></span>
+        {#if relayStatus === 'reconnecting' && reconnectCountdown}
+          <span class="reconnect-label">Retry in {reconnectCountdown.seconds}s (#{reconnectCountdown.attempt})</span>
+        {/if}
+        {#if $p2pState.queue.totalMessages > 0}
+          <span class="queue-badge">{$p2pState.queue.totalMessages} queued</span>
+        {/if}
+      </div>
     </div>
-    <div class="relay-status">
-      <span class="conn-dot {relayStatus}" title="{relayStatus}"></span>
-      {#if relayStatus === 'reconnecting' && reconnectCountdown}
-        <span class="reconnect-label">Retry in {reconnectCountdown.seconds}s (#{reconnectCountdown.attempt})</span>
-      {/if}
-      {#if $p2pState.queue.totalMessages > 0}
-        <span class="queue-badge">{$p2pState.queue.totalMessages} queued</span>
-      {/if}
-    </div>
-    <div class="consensus-status">
+    <div class="header-row-bottom">
       <span class="frame-badge">Frame #{account.currentFrame.height}</span>
       {#if account.mempool.length > 0 || account.pendingFrame}
         <span class="status-badge pending">
@@ -549,153 +563,86 @@
   </div>
 
   <div class="panel-content">
-    <!-- Canonical State (Raw Data) -->
-    <div class="section">
-      <h3>📊 Canonical State</h3>
-      <div class="canonical-data">
-        <div class="canonical-note">Raw bilateral state (identical on both sides):</div>
-        {#each tokenDetails as td (td.tokenId)}
-          <div class="canonical-token">
-            <div class="token-id-label">{td.tokenInfo.symbol} (Token #{td.tokenId}):</div>
-            <div class="canonical-values">
-              <div class="canonical-item">
-                <span class="canonical-key">collateral:</span>
-                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.collateral)}</span>
-              </div>
-              <div class="canonical-item">
-                <span class="canonical-key">ondelta:</span>
-                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.ondelta)}</span>
-              </div>
-              <div class="canonical-item">
-                <span class="canonical-key">offdelta:</span>
-                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.offdelta)}</span>
-              </div>
-              <div class="canonical-item">
-                <span class="canonical-key">leftCreditLimit:</span>
-                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.leftCreditLimit)} ({isLeftEntity ? 'you' : counterpartyName || counterpartyId})</span>
-              </div>
-              <div class="canonical-item">
-                <span class="canonical-key">rightCreditLimit:</span>
-                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.rightCreditLimit)} ({isLeftEntity ? counterpartyName || counterpartyId : 'you'})</span>
-              </div>
+    <!-- Per-delta cards (same style as AccountPreview) -->
+    {#each tokenDetails as td (td.tokenId)}
+      {@const outTotal = td.derived.outOwnCredit + td.derived.outCollateral + td.derived.outPeerCredit}
+      {@const inTotal = td.derived.inOwnCredit + td.derived.inCollateral + td.derived.inPeerCredit}
+      {@const halfMax = outTotal > inTotal ? outTotal : inTotal}
+      {@const pctOf = (v: bigint, base: bigint) => base > 0n ? Number((v * 10000n) / base) / 100 : 0}
+      <div class="delta-card">
+        <!-- Header: token + net + faucet -->
+        <div class="delta-card-header">
+          <span class="delta-token">{td.tokenInfo.symbol}</span>
+          <span class="delta-net" class:positive={td.derived.delta > 0n} class:negative={td.derived.delta < 0n}>
+            Net: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.delta)}
+          </span>
+          <button class="delta-faucet" on:click={() => handleFaucet(td.tokenId)}>Faucet</button>
+        </div>
+
+        <!-- Bar (same as AccountPreview) -->
+        <div class="delta-bar-row">
+          <span class="delta-label">OUT {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity)}</span>
+          <span class="delta-label">IN {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity)}</span>
+        </div>
+        {#if halfMax > 0n}
+          <div class="delta-bar center">
+            <div class="delta-half out">
+              {#if td.derived.outOwnCredit > 0n}<div class="dseg credit" style="width:{pctOf(td.derived.outOwnCredit, halfMax)}%"></div>{/if}
+              {#if td.derived.outCollateral > 0n}<div class="dseg coll" style="width:{pctOf(td.derived.outCollateral, halfMax)}%"></div>{/if}
+              {#if td.derived.outPeerCredit > 0n}<div class="dseg debt" style="width:{pctOf(td.derived.outPeerCredit, halfMax)}%"></div>{/if}
+            </div>
+            <div class="delta-mid"></div>
+            <div class="delta-half in">
+              {#if td.derived.inOwnCredit > 0n}<div class="dseg debt" style="width:{pctOf(td.derived.inOwnCredit, halfMax)}%"></div>{/if}
+              {#if td.derived.inCollateral > 0n}<div class="dseg coll" style="width:{pctOf(td.derived.inCollateral, halfMax)}%"></div>{/if}
+              {#if td.derived.inPeerCredit > 0n}<div class="dseg credit" style="width:{pctOf(td.derived.inPeerCredit, halfMax)}%"></div>{/if}
             </div>
           </div>
-        {/each}
-      </div>
-    </div>
+        {/if}
 
-    <!-- Personal View (Perspective-based) -->
-    <div class="section">
-      <h3>👤 My View</h3>
-      {#each tokenDetails as td (td.tokenId)}
-        <div class="token-detail-card">
-          <div class="token-header">
-            <span class="token-name" style="color: {td.tokenInfo.color}">
-              {td.tokenInfo.symbol} (Token #{td.tokenId})
-            </span>
-            <span class="net-position" class:positive={td.derived.delta > 0n} class:negative={td.derived.delta < 0n}>
-              Net: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.delta)}
-            </span>
+        <!-- Credit details grid -->
+        <div class="delta-details">
+          <div class="detail-grid">
+            <span class="detail-header"></span>
+            <span class="detail-header">Line</span>
+            <span class="detail-header">Used</span>
+            <span class="detail-header">Avail</span>
           </div>
-
-          <!-- Reuse AccountPreview for bar visualization (DRY) -->
-          <div style="margin: 12px 0;">
-            <AccountPreview
-              {account}
-              {counterpartyId}
-              {entityId}
-              isSelected={false}
-            />
+          <div class="detail-grid">
+            <span class="detail-label-cell">Our credit</span>
+            <span class="detail-value-cell">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.ourCreditLimit)}</span>
+            <span class="detail-value-cell used">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inOwnCredit)}</span>
+            <span class="detail-value-cell avail">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outOwnCredit)}</span>
           </div>
-
-          <div class="capacity-summary">
-            <div class="capacity-item">
-              <span class="capacity-label">Available to Send:</span>
-              <span class="capacity-value outbound">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity)}</span>
-            </div>
-            <div class="capacity-item">
-              <span class="capacity-label">Available to Receive:</span>
-              <span class="capacity-value inbound">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity)}</span>
-            </div>
-            <div class="capacity-item">
-              <span class="capacity-label">Total Capacity:</span>
-              <span class="capacity-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.totalCapacity)}</span>
-            </div>
+          <div class="detail-grid">
+            <span class="detail-label-cell">Their credit</span>
+            <span class="detail-value-cell">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.theirCreditLimit)}</span>
+            <span class="detail-value-cell used">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outPeerCredit)}</span>
+            <span class="detail-value-cell avail">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inPeerCredit)}</span>
           </div>
-
-          <div class="credit-details">
-            <div class="credit-row">
-              <span>Our Credit Line:</span>
-              <span>{safeFixed(td.ourCreditLimit)} {td.tokenInfo.symbol}</span>
-            </div>
-            <div class="credit-row">
-              <span>Our Credit Used:</span>
-              <span>{safeFixed(td.derived.inOwnCredit)} {td.tokenInfo.symbol}</span>
-            </div>
-            <div class="credit-row">
-              <span>Our Credit Available:</span>
-              <span>{safeFixed(td.derived.outOwnCredit)} {td.tokenInfo.symbol}</span>
-            </div>
-            <div class="credit-row">
-              <span>Their Credit Line:</span>
-              <span>{safeFixed(td.theirCreditLimit)} {td.tokenInfo.symbol}</span>
-            </div>
-            <div class="credit-row">
-              <span>Their Credit Used:</span>
-              <span>{safeFixed(td.derived.outPeerCredit)} {td.tokenInfo.symbol}</span>
-            </div>
-            <div class="credit-row">
-              <span>Their Credit Available:</span>
-              <span>{safeFixed(td.derived.inPeerCredit)} {td.tokenInfo.symbol}</span>
-            </div>
-            <div class="credit-row">
-              <span>Our Collateral:</span>
-              <span>{safeFixed(td.ourCollateral)} {td.tokenInfo.symbol}</span>
-            </div>
-          </div>
-
-          <!-- 🔐 Hanko Signature Proof -->
-          <div class="signature-proof-section">
-            <div class="signature-header">
-              <span class="proof-icon">🔐</span>
-              <span class="proof-title">Cryptographic Proof</span>
-              <span class="frame-info">Frame #{account.currentFrame.height}</span>
-            </div>
-
-            <div class="signature-details">
-              {#if account.currentFrame.stateHash}
-                <div class="signature-row">
-                  <span class="sig-label">State Hash:</span>
-                  <code class="sig-value" title="{account.currentFrame.stateHash}">
-                    {account.currentFrame.stateHash.slice(0, 16)}...
-                  </code>
-                  <span class="sig-status verified">✓</span>
-                </div>
-              {/if}
-
-              {#if account.hankoSignature}
-                <div class="signature-row">
-                  <span class="sig-label">Their Hanko:</span>
-                  <code class="sig-value" title="{account.hankoSignature}">
-                    hanko_{account.hankoSignature.slice(0, 12)}...
-                  </code>
-                  <span class="sig-status verified">✓</span>
-                </div>
-              {:else}
-                <div class="signature-row">
-                  <span class="sig-label">Their Hanko:</span>
-                  <span class="sig-value pending">⏳ Pending signature</span>
-                </div>
-              {/if}
-
-              <div class="timestamp-row">
-                <span class="timestamp-label">Last Updated:</span>
-                <span class="timestamp-value">{formatTimestamp(account.currentFrame.timestamp)}</span>
-              </div>
-            </div>
+          <div class="detail-grid collateral-row">
+            <span class="detail-label-cell">Collateral</span>
+            <span class="detail-value-cell coll" style="grid-column: 2 / -1">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.ourCollateral)}</span>
           </div>
         </div>
-      {/each}
+      </div>
+    {/each}
+
+    <!-- Cryptographic proof (once, not per-delta) -->
+    <div class="proof-card">
+      <div class="proof-header">
+        <span>Frame #{account.currentFrame.height}</span>
+        <span>{formatTimestamp(account.currentFrame.timestamp)}</span>
+        {#if account.currentFrame.stateHash}
+          <code title="{account.currentFrame.stateHash}">{account.currentFrame.stateHash.slice(0, 16)}...</code>
+          <span class="proof-ok">✓</span>
+        {/if}
+        {#if account.hankoSignature}
+          <span class="proof-ok">Signed</span>
+        {:else}
+          <span class="proof-pending">Pending</span>
+        {/if}
+      </div>
     </div>
 
     <!-- Actions Section -->
@@ -704,49 +651,68 @@
 
       <!-- Send Payment -->
       <div class="action-card">
-        <h4>Send Payment</h4>
-        <div class="action-form">
-          <select bind:value={selectedTokenId} class="form-select">
-            {#each tokenDetails as td}
-              <option value={td.tokenId}>{td.tokenInfo.symbol}</option>
-            {/each}
-          </select>
-          <BigIntInput
-            bind:value={paymentAmountBigInt}
-            decimals={18}
-            placeholder="Amount"
-          />
-          <input
-            type="text"
-            placeholder="Description (optional)"
-            bind:value={paymentDescription}
-            class="form-input"
-          />
-          <button class="action-button primary" on:click={sendPayment}>
-            Send Payment
-          </button>
+        <h4>💸 Send Payment</h4>
+        <div class="action-form-grid">
+          <div class="form-row">
+            <span class="form-label">Token</span>
+            <select bind:value={selectedTokenId} class="form-select">
+              {#each tokenDetails as td}
+                <option value={td.tokenId}>{td.tokenInfo.symbol}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="form-row">
+            <span class="form-label">Amount</span>
+            <BigIntInput
+              bind:value={paymentAmountBigInt}
+              decimals={18}
+              placeholder="0.00"
+            />
+          </div>
+          <div class="form-row wide">
+            <span class="form-label">Description</span>
+            <input
+              type="text"
+              placeholder="optional"
+              bind:value={paymentDescription}
+              class="form-input"
+            />
+          </div>
+          <div class="form-row action-row">
+            <button class="action-button primary" on:click={sendPayment}>
+              Send Payment
+            </button>
+          </div>
         </div>
       </div>
 
       <!-- Adjust Credit -->
       <div class="action-card">
-        <h4>Adjust Credit Limit</h4>
-        <div class="action-form">
-          <select bind:value={selectedTokenId} class="form-select">
-            {#each tokenDetails as td}
-              <option value={td.tokenId}>{td.tokenInfo.symbol}</option>
-            {/each}
-          </select>
-          <input
-            type="number"
-            step="0.1"
-            placeholder="New credit limit"
-            bind:value={creditAdjustment}
-            class="form-input"
-          />
-          <button class="action-button secondary" on:click={adjustCredit}>
-            Update Credit
-          </button>
+        <h4>📊 Adjust Credit Limit</h4>
+        <div class="action-form-grid">
+          <div class="form-row">
+            <span class="form-label">Token</span>
+            <select bind:value={selectedTokenId} class="form-select">
+              {#each tokenDetails as td}
+                <option value={td.tokenId}>{td.tokenInfo.symbol}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="form-row">
+            <span class="form-label">New Limit</span>
+            <input
+              type="number"
+              step="0.1"
+              placeholder="0.00"
+              bind:value={creditAdjustment}
+              class="form-input"
+            />
+          </div>
+          <div class="form-row action-row">
+            <button class="action-button secondary" on:click={adjustCredit}>
+              Update Credit
+            </button>
+          </div>
         </div>
       </div>
 
@@ -965,11 +931,11 @@
       </div>
 
       <!-- Other Management Actions -->
-      <div class="action-card">
-        <h4>Account Management</h4>
+      <div class="action-card management-card">
+        <h4>⚙️ Account Management</h4>
         <div class="management-buttons">
           <button class="action-button dispute" on:click={initiateDispute}>
-            Initiate Dispute
+            ⚠ Initiate Dispute
           </button>
           <button class="action-button close" on:click={closeAccount}>
             Close Account
@@ -1174,19 +1140,34 @@
 
   .panel-header {
     display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
     border-bottom: 1px solid #292524;
-    background: #1c1917;
+    background: linear-gradient(180deg, #1c1917 0%, #151310 100%);
+  }
+
+  .header-row-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px 8px;
+  }
+
+  .header-row-bottom {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px 10px;
+    padding-left: 52px; /* align with identity (back button width + gap) */
   }
 
   .back-button {
     padding: 6px 10px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    color: #fbbf24;
-    border-radius: 6px;
+    background: transparent;
+    border: 1px solid #3f3f46;
+    color: #a1a1aa;
+    border-radius: 8px;
     cursor: pointer;
     font-size: 14px;
     flex-shrink: 0;
@@ -1194,8 +1175,9 @@
   }
 
   .back-button:hover {
-    background: #292524;
-    border-color: #44403c;
+    background: #27272a;
+    border-color: #52525b;
+    color: #fbbf24;
   }
 
   .header-identity {
@@ -1251,37 +1233,36 @@
     font-family: monospace;
   }
 
-  .consensus-status {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    flex-shrink: 0;
-  }
-
   .frame-badge {
-    padding: 3px 8px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 4px;
-    font-size: 0.8em;
-    color: #a8a29e;
+    padding: 3px 10px;
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 6px;
+    font-size: 0.75em;
+    color: #a1a1aa;
     font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
   }
 
   .status-badge {
-    font-size: 0.8em;
-    padding: 3px 8px;
-    border-radius: 4px;
+    font-size: 0.72em;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
   }
 
   .status-badge.synced {
     color: #4ade80;
     background: rgba(74, 222, 128, 0.1);
+    border: 1px solid rgba(74, 222, 128, 0.15);
   }
 
   .status-badge.pending {
     color: #fbbf24;
     background: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.15);
   }
 
   .trust-indicator {
@@ -1299,18 +1280,23 @@
   .panel-content {
     flex: 1;
     overflow-y: auto;
-    padding: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
   .section {
-    margin-bottom: 24px;
+    margin-bottom: 8px;
   }
 
   .section h3 {
-    margin: 0 0 12px 0;
-    color: #d6d3d1;
-    font-size: 0.95em;
+    margin: 12px 0 10px 0;
+    color: #a1a1aa;
+    font-size: 0.8em;
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
   .token-detail-card {
@@ -1452,6 +1438,138 @@
     align-items: center;
   }
 
+  /* ── Delta cards (per-token, AccountPreview-style) ── */
+  .delta-card {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 8px;
+    transition: border-color 0.15s;
+  }
+  .delta-card:hover {
+    border-color: #3f3f46;
+  }
+  .delta-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .delta-token {
+    font-weight: 700;
+    color: #e4e4e7;
+    font-size: 0.95em;
+    letter-spacing: 0.02em;
+  }
+  .delta-net {
+    flex: 1;
+    text-align: right;
+    font-family: 'JetBrains Mono','SF Mono','Monaco','Menlo',monospace;
+    font-size: 0.85em;
+    color: #71717a;
+    font-weight: 500;
+  }
+  .delta-net.positive { color: #4ade80; }
+  .delta-net.negative { color: #f43f5e; }
+  .delta-faucet {
+    font-size: 0.65em;
+    padding: 3px 10px;
+    border-radius: 5px;
+    border: 1px solid #3f3f46;
+    background: transparent;
+    color: #71717a;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 500;
+    transition: all 0.15s;
+  }
+  .delta-faucet:hover { border-color: #0ea5e9; color: #0ea5e9; background: rgba(14, 165, 233, 0.05); }
+
+  .delta-bar-row {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono','SF Mono','Monaco','Menlo',monospace;
+    font-size: 0.68em;
+    color: #52525b;
+    margin-bottom: 4px;
+  }
+  .delta-label { color: #71717a; font-weight: 500; }
+
+  .delta-bar {
+    display: flex;
+    align-items: stretch;
+    height: 10px;
+    background: #27272a;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .delta-bar.center { flex-direction: row; }
+  .delta-half { flex:1; display:flex; align-items:stretch; overflow:hidden; }
+  .delta-half.out { justify-content: flex-end; }
+  .delta-half.in { justify-content: flex-start; }
+  .delta-mid { width:2px; background:#52525b; flex-shrink:0; border-radius: 1px; }
+  .dseg { min-width: 2px; transition: width 0.3s ease; }
+  .dseg.credit { background: #52525b; }
+  .dseg.coll { background: linear-gradient(180deg, #34d399, #10b981); }
+  .dseg.debt { background: linear-gradient(180deg, #fb7185, #f43f5e); }
+
+  .delta-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 90px 1fr 1fr 1fr;
+    gap: 0 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid #1f1f23;
+    font-family: 'JetBrains Mono','SF Mono','Monaco','Menlo',monospace;
+    font-size: 0.72em;
+  }
+  .detail-grid:last-child { border-bottom: none; }
+  .detail-grid.collateral-row { border-bottom: none; }
+  .detail-header {
+    color: #52525b;
+    font-size: 0.9em;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+  }
+  .detail-label-cell {
+    color: #a1a1aa;
+    font-weight: 500;
+  }
+  .detail-value-cell {
+    color: #71717a;
+    text-align: right;
+  }
+  .detail-value-cell.used { color: #f97316; }
+  .detail-value-cell.avail { color: #4ade80; }
+  .detail-value-cell.coll { color: #2dd4bf; }
+
+  .proof-card {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-top: 8px;
+  }
+  .proof-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.72em;
+    font-family: 'JetBrains Mono','SF Mono','Monaco','Menlo',monospace;
+    color: #52525b;
+  }
+  .proof-header code { color: #71717a; }
+  .proof-ok { color: #4ade80; }
+  .proof-pending { color: #fbbf24; }
+
   .capacity-label {
     font-size: 0.75em;
     color: #888;
@@ -1496,17 +1614,24 @@
   }
 
   .action-card {
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 6px;
-    padding: 16px;
-    margin-bottom: 12px;
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 10px;
+    transition: border-color 0.15s;
+  }
+
+  .action-card:hover {
+    border-color: #3f3f46;
   }
 
   .action-card h4 {
-    margin: 0 0 12px 0;
-    color: #d4d4d4;
-    font-size: 0.95em;
+    margin: 0 0 14px 0;
+    color: #e4e4e7;
+    font-size: 0.88em;
+    font-weight: 600;
+    letter-spacing: 0.01em;
   }
 
   .action-form {
@@ -1515,14 +1640,44 @@
     align-items: center;
   }
 
+  .action-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .form-row.wide {
+    grid-column: 1 / -1;
+  }
+
+  .form-row.action-row {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+
+  .form-label {
+    font-size: 0.68em;
+    color: #71717a;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+  }
+
   .form-select,
   .form-input {
-    padding: 8px;
-    background: #0c0a09;
-    border: 1px solid #292524;
-    border-radius: 4px;
-    color: #d6d3d1;
-    font-size: 0.9em;
+    padding: 9px 10px;
+    background: #09090b;
+    border: 1px solid #27272a;
+    border-radius: 8px;
+    color: #e4e4e7;
+    font-size: 0.88em;
+    transition: border-color 0.15s;
   }
 
   .form-select {
@@ -1537,65 +1692,81 @@
   .form-select:focus {
     border-color: #fbbf24;
     outline: none;
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.1);
   }
 
   .action-button {
-    padding: 8px 16px;
+    padding: 9px 18px;
     border: none;
-    border-radius: 4px;
-    font-weight: 500;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.82em;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
+    letter-spacing: 0.02em;
   }
 
   .action-button.primary {
-    background: #007acc;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
     color: white;
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
   }
 
   .action-button.primary:hover {
-    background: #0086e6;
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.4);
   }
 
   .action-button.secondary {
-    background: #0e639c;
+    background: linear-gradient(135deg, #1e40af, #1e3a8a);
     color: white;
+    box-shadow: 0 1px 3px rgba(30, 64, 175, 0.3);
   }
 
   .action-button.secondary:hover {
-    background: #1177bb;
+    background: linear-gradient(135deg, #2563eb, #1e40af);
+    box-shadow: 0 2px 6px rgba(30, 64, 175, 0.4);
+  }
+
+  .management-card {
+    background: #1a1a1e;
+    border-color: #2a2a30;
+    margin-top: 8px;
   }
 
   .management-buttons {
     display: flex;
-    gap: 8px;
+    gap: 10px;
   }
 
   .action-button.settle {
-    background: #0d7377;
+    background: linear-gradient(135deg, #0d9488, #0f766e);
     color: white;
   }
 
   .action-button.settle:hover {
-    background: #0a5d61;
+    background: linear-gradient(135deg, #14b8a6, #0d9488);
   }
 
   .action-button.dispute {
-    background: #d73a49;
-    color: white;
+    background: transparent;
+    border: 1px solid #f43f5e;
+    color: #f43f5e;
   }
 
   .action-button.dispute:hover {
-    background: #cb2431;
+    background: rgba(244, 63, 94, 0.1);
   }
 
   .action-button.close {
-    background: #6c757d;
-    color: white;
+    background: transparent;
+    border: 1px solid #52525b;
+    color: #a1a1aa;
   }
 
   .action-button.close:hover {
-    background: #5a6268;
+    background: rgba(82, 82, 91, 0.2);
+    border-color: #71717a;
   }
 
   .mempool-list {
@@ -1679,31 +1850,32 @@
   }
 
   .frame-item {
-    background: #1c1917;
-    border-radius: 6px;
-    border: 1px solid #292524;
+    background: #18181b;
+    border-radius: 10px;
+    border: 1px solid #27272a;
     overflow: hidden;
+    transition: border-color 0.15s;
   }
 
   .frame-item.current {
-    border-color: #10b981;
+    border-color: rgba(16, 185, 129, 0.4);
   }
 
   .frame-item.pending {
-    border-color: #f59e0b;
+    border-color: rgba(245, 158, 11, 0.4);
   }
 
   .frame-item.mempool {
-    border-color: #6366f1;
+    border-color: rgba(99, 102, 241, 0.4);
   }
 
   .frame-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 12px;
-    background: #1c1917;
-    border-bottom: 1px solid #292524;
+    padding: 10px 14px;
+    background: #18181b;
+    border-bottom: 1px solid #1f1f23;
   }
 
   .frame-id {
@@ -1996,7 +2168,7 @@
 
   /* Settlement Workspace Styles */
   .settle-workspace {
-    border-left: 3px solid #0d7377;
+    border-left: 3px solid #0d9488;
   }
 
   .ws-status-row {

@@ -44,31 +44,18 @@ export interface ComponentState {
 }
 
 // Theme system
-export type ThemeName = 'dark' | 'light' | 'gold-luxe' | 'matrix' | 'arctic';
+export type ThemeName = 'dark' | 'editor' | 'light' | 'merchant' | 'gold-luxe' | 'matrix' | 'arctic';
 
-export interface ThemeColors {
-  name: string;
-  background: string;
-  backgroundGradient: string;
-  entityColor: string;
-  entityEmissive: string;
-  connectionColor: string;
-  creditColor: string;
-  debitColor: string;
-  collateralColor: string;
-  textPrimary: string;
-  textSecondary: string;
-  accentColor: string;
-  borderColor: string;
-  glassBackground: string;
-  glassBorder: string;
-}
+// ThemeColors interface is defined in utils/themes.ts (single source of truth)
+export type { ThemeColors } from '$lib/utils/themes';
 
 export type BarColorMode = 'rgy' | 'theme' | 'token';
+export type BarLayoutMode = 'center' | 'sides';
 
 export interface Settings {
   theme: ThemeName;
   barColorMode: BarColorMode;
+  barLayout: BarLayoutMode;
   dropdownMode: 'signer-first' | 'entity-first';
   runtimeDelay: number;
   balanceRefreshMs: number;
@@ -129,8 +116,8 @@ export interface EntityInfo {
 export interface LogFilter {
   levels: Set<LogLevel>;
   categories: Set<LogCategory>;
-  entityId?: string;        // Filter to specific entity
-  searchText?: string;      // Free-text search
+  entityId?: string; // Filter to specific entity
+  searchText?: string; // Free-text search
 }
 
 // Server frame wrapper for transaction history UI
@@ -143,7 +130,7 @@ export interface RuntimeFrame {
   runtimeTxs: RuntimeTx[];
   timestamp: number;
   hasActivity: boolean;
-  logs: FrameLogEntry[];   // Frame-specific structured logs
+  logs: FrameLogEntry[]; // Frame-specific structured logs
 }
 
 // Banking transaction display

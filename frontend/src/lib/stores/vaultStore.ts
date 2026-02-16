@@ -820,7 +820,13 @@ export const vaultOperations = {
       let env = runtimeEntry?.env;
       if (!env) {
         await registerRuntimeSignerKeys(runtime, xln);
-        env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+        try {
+          env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+        } catch (restoreErr) {
+          console.warn(`[VaultStore.selectRuntime] ⚠️ Strict restore failed, starting fresh:`, restoreErr);
+          try { await (xln as any).clearDB?.(); } catch { /* best effort */ }
+          env = await buildOrRestoreRuntimeEnv(runtime, xln, false);
+        }
         runtimes.update(r => {
           r.set(resolvedRuntimeId, runtimeToEntry(runtime, env));
           return r;
@@ -1089,7 +1095,21 @@ export const vaultOperations = {
           await registerRuntimeSignerKeys(runtime, xln);
           console.log(`[VaultStore.initialize] ✅ Registered ${runtime.signers.length} HD-derived keys for ${runtimeId.slice(0, 12)}`);
 
-          const env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+          let env: any;
+          try {
+            env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+          } catch (restoreErr) {
+            console.warn(`[VaultStore.initialize] ⚠️ Strict restore failed for ${runtimeId.slice(0, 12)}, wiping DB and starting fresh:`, restoreErr);
+            try {
+              await (xln as any).clearDB?.();
+              // Also try deleting the IndexedDB for this namespace
+              if (typeof indexedDB !== 'undefined') {
+                indexedDB.deleteDatabase(runtimeId);
+                indexedDB.deleteDatabase(`xln-${runtimeId}`);
+              }
+            } catch { /* best effort */ }
+            env = await buildOrRestoreRuntimeEnv(runtime, xln, false);
+          }
           if (normalizeRuntimeId(env?.runtimeId || '') !== runtimeId) {
             throw new Error(
               `[VaultStore.initialize] Runtime isolation mismatch: slot=${runtimeId} env.runtimeId=${String(env?.runtimeId || 'none')}`

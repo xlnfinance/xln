@@ -66,10 +66,10 @@ export interface CrontabTask {
 
 /** A one-shot hook that fires at a specific wall-clock time */
 export interface ScheduledHook {
-  id: string;                    // Unique ID (e.g., "htlc-timeout:0xabc...")
-  triggerAt: number;             // Wall-clock ms — when this should fire
-  type: string;                  // Hook type for routing (e.g., 'htlc_timeout')
-  data: Record<string, any>;    // Payload passed to handler
+  id: string; // Unique ID (e.g., "htlc-timeout:0xabc...")
+  triggerAt: number; // Wall-clock ms — when this should fire
+  type: string; // Hook type for routing (e.g., 'htlc_timeout')
+  data: Record<string, any>; // Payload passed to handler
 }
 
 export interface CrontabState {
@@ -104,7 +104,7 @@ export function initCrontab(): CrontabState {
 
   tasks.set('hubRebalance', {
     name: 'hubRebalance',
-    intervalMs: 30000, // Check rebalance opportunities every 30 seconds
+    intervalMs: 1000, // Stress-test: check rebalance every 1s for instant collateral after faucet
     lastRun: 0,
     handler: hubRebalanceHandler,
   });
@@ -120,14 +120,14 @@ export function initCrontab(): CrontabState {
 export function scheduleHook(state: CrontabState, hook: ScheduledHook): void {
   if (!state.hooks) state.hooks = new Map();
   state.hooks.set(hook.id, hook);
-  console.log(`⏰ HOOK scheduled: ${hook.type} id=${hook.id.slice(0,24)}... triggerAt=${hook.triggerAt}`);
+  console.log(`⏰ HOOK scheduled: ${hook.type} id=${hook.id.slice(0, 24)}... triggerAt=${hook.triggerAt}`);
 }
 
 /** Cancel a previously scheduled hook (e.g., lock resolved before timeout) */
 export function cancelHook(state: CrontabState, hookId: string): void {
   if (!state.hooks) return;
   if (state.hooks.delete(hookId)) {
-    console.log(`⏰ HOOK cancelled: ${hookId.slice(0,24)}...`);
+    console.log(`⏰ HOOK cancelled: ${hookId.slice(0, 24)}...`);
   }
 }
 
@@ -153,7 +153,7 @@ export function getEarliestHookTime(state: CrontabState): number {
 export async function executeCrontab(
   env: Env,
   replica: EntityReplica,
-  crontabState: CrontabState
+  crontabState: CrontabState,
 ): Promise<EntityInput[]> {
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
   const allOutputs: EntityInput[] = [];
@@ -209,7 +209,7 @@ function processDueHooks(hooks: ScheduledHook[], replica: EntityReplica): Entity
   const htlcTimeoutLocks: Array<{ accountId: string; lockId: string }> = [];
 
   for (const hook of hooks) {
-    console.log(`⏰ HOOK FIRED: type=${hook.type} id=${hook.id.slice(0,24)}...`);
+    console.log(`⏰ HOOK FIRED: type=${hook.type} id=${hook.id.slice(0, 24)}...`);
 
     switch (hook.type) {
       case 'htlc_timeout':
@@ -251,10 +251,12 @@ function processDueHooks(hooks: ScheduledHook[], replica: EntityReplica): Entity
     outputs.push({
       entityId: replica.entityId,
       signerId: firstValidator,
-      entityTxs: [{
-        type: 'processHtlcTimeouts',
-        data: { expiredLocks: htlcTimeoutLocks }
-      }]
+      entityTxs: [
+        {
+          type: 'processHtlcTimeouts',
+          data: { expiredLocks: htlcTimeoutLocks },
+        },
+      ],
     });
     console.log(`⏰ HOOKS: Generated processHtlcTimeouts for ${htlcTimeoutLocks.length} expired locks`);
   }
@@ -289,7 +291,9 @@ async function checkAccountTimeoutsHandler(_env: Env, replica: EntityReplica): P
         const heightExpired = currentHeight > 0 && currentHeight > tx.data.revealBeforeHeight;
         const timestampExpired = now > Number(tx.data.timelock);
         if (heightExpired || timestampExpired) {
-          console.warn(`⏰ HTLC-IN-PENDING-EXPIRED: Account ${counterpartyId.slice(-4)} frame h${accountMachine.pendingFrame.height}, lock ${tx.data.lockId.slice(0,12)}... expired`);
+          console.warn(
+            `⏰ HTLC-IN-PENDING-EXPIRED: Account ${counterpartyId.slice(-4)} frame h${accountMachine.pendingFrame.height}, lock ${tx.data.lockId.slice(0, 12)}... expired`,
+          );
           hasExpiredHtlc = true;
           break;
         }
@@ -305,7 +309,9 @@ async function checkAccountTimeoutsHandler(_env: Env, replica: EntityReplica): P
       // Non-HTLC pending frames: dispute suggestion after 30s
       const frameAge = now - accountMachine.pendingFrame.timestamp;
       if (frameAge > ACCOUNT_TIMEOUT_MS) {
-        console.warn(`⏰ PENDING-FRAME-STALE: Account with ${counterpartyId.slice(-4)} h${accountMachine.pendingFrame.height} for ${Math.floor(frameAge / 1000)}s — consider dispute`);
+        console.warn(
+          `⏰ PENDING-FRAME-STALE: Account with ${counterpartyId.slice(-4)} h${accountMachine.pendingFrame.height} for ${Math.floor(frameAge / 1000)}s — consider dispute`,
+        );
       }
     }
   }
@@ -317,18 +323,21 @@ async function checkAccountTimeoutsHandler(_env: Env, replica: EntityReplica): P
       outputs.push({
         entityId: replica.entityId,
         signerId: firstValidator,
-        entityTxs: [{
-          type: 'rollbackTimedOutFrames',
-          data: { timedOutAccounts }
-        }]
+        entityTxs: [
+          {
+            type: 'rollbackTimedOutFrames',
+            data: { timedOutAccounts },
+          },
+        ],
       });
-      console.warn(`⏰ ROLLBACK: Generated rollbackTimedOutFrames for ${timedOutAccounts.length} accounts (HTLC expired in pendingFrame)`);
+      console.warn(
+        `⏰ ROLLBACK: Generated rollbackTimedOutFrames for ${timedOutAccounts.length} accounts (HTLC expired in pendingFrame)`,
+      );
     }
   }
 
   return outputs;
 }
-
 
 /**
  * Check all HTLC locks for expiration and auto-timeout
@@ -344,7 +353,9 @@ async function checkHtlcTimeoutsHandler(_env: Env, replica: EntityReplica): Prom
   const currentHeight = replica.state.lastFinalizedJHeight || 0;
   const currentTimestamp = replica.state.timestamp; // Entity's deterministic clock
 
-  console.log(`⏰ HTLC-TIMEOUT-CRON: Checking locks (entity ${replica.entityId.slice(-4)}, height=${currentHeight}, timestamp=${currentTimestamp})`);
+  console.log(
+    `⏰ HTLC-TIMEOUT-CRON: Checking locks (entity ${replica.entityId.slice(-4)}, height=${currentHeight}, timestamp=${currentTimestamp})`,
+  );
 
   // Collect expired locks per account
   const expiredLocksByAccount: Array<{ accountId: string; lockId: string; lock: any }> = [];
@@ -358,7 +369,9 @@ async function checkHtlcTimeoutsHandler(_env: Env, replica: EntityReplica): Prom
 
     // Check each lock for expiration
     for (const [lockId, lock] of accountMachine.locks.entries()) {
-      console.log(`⏰   Checking lock ${lockId.slice(0,16)}... (heightDeadline=${lock.revealBeforeHeight}, timeDeadline=${lock.timelock})`);
+      console.log(
+        `⏰   Checking lock ${lockId.slice(0, 16)}... (heightDeadline=${lock.revealBeforeHeight}, timeDeadline=${lock.timelock})`,
+      );
 
       // Check if lock expired - BOTH conditions (height OR timestamp)
       // Height: Used when J-blocks are active (on-chain settlement)
@@ -368,7 +381,7 @@ async function checkHtlcTimeoutsHandler(_env: Env, replica: EntityReplica): Prom
       const expired = heightExpired || timestampExpired;
 
       if (expired) {
-        console.log(`⏰ HTLC-TIMEOUT: Lock ${lockId.slice(0,16)}... EXPIRED`);
+        console.log(`⏰ HTLC-TIMEOUT: Lock ${lockId.slice(0, 16)}... EXPIRED`);
         console.log(`   Height: ${currentHeight} > ${lock.revealBeforeHeight} = ${heightExpired}`);
         console.log(`   Timestamp: ${currentTimestamp} > ${lock.timelock} = ${timestampExpired}`);
         console.log(`   Account: ${counterpartyId.slice(-4)}, Amount: ${lock.amount}`);
@@ -376,7 +389,7 @@ async function checkHtlcTimeoutsHandler(_env: Env, replica: EntityReplica): Prom
         expiredLocksByAccount.push({
           accountId: counterpartyId,
           lockId,
-          lock
+          lock,
         });
       }
     }
@@ -393,10 +406,12 @@ async function checkHtlcTimeoutsHandler(_env: Env, replica: EntityReplica): Prom
       outputs.push({
         entityId: replica.entityId,
         signerId: firstValidator,
-        entityTxs: [{
-          type: 'processHtlcTimeouts',
-          data: { expiredLocks: expiredLocksByAccount }
-        }]
+        entityTxs: [
+          {
+            type: 'processHtlcTimeouts',
+            data: { expiredLocks: expiredLocksByAccount },
+          },
+        ],
       });
     }
   }
@@ -496,27 +511,94 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
     // BrowserVMInstance has processBatch at runtime, types are slightly mismatched
     (browserVM || undefined) as any,
     replica.state.timestamp,
-    signerId
+    signerId,
   );
 
   if (result.success) {
     console.log(`✅ jBatch broadcasted successfully: ${result.txHash}`);
 
+    // CRITICAL: In BrowserVM mode, processBatch returns events directly.
+    // There is no j-watcher to pick them up. We must inject them as j_event
+    // entityTxs so the bilateral state (collateral, reserves) gets updated.
+    // AccountSettled events must reach BOTH left and right entities for 2-of-2 consensus.
+    if (result.events && result.events.length > 0) {
+      const { isEventRelevantToEntity, rawEventToJEvents } = await import('./jadapter/helpers');
+      console.log(`📥 BATCH-EVENTS: ${result.events.length} raw events from processBatch`);
+
+      // Collect all entity IDs that exist in this runtime
+      const allEntityIds: string[] = [];
+      for (const [, r] of _env.eReplicas) {
+        if (r?.entityId) allEntityIds.push(String(r.entityId).toLowerCase());
+      }
+
+      const observedAt = replica.state.timestamp || 0;
+      // For each entity, check which events are relevant and convert to j-event format
+      for (const targetEntityId of allEntityIds) {
+        const jEvents: Array<{ type: string; data: Record<string, any> }> = [];
+        for (const rawEvent of result.events) {
+          const eventName = rawEvent.event || rawEvent.eventName || rawEvent.name || 'unknown';
+          const args = rawEvent.args || {};
+          const blockNumber = Number(rawEvent.blockNumber ?? 0);
+          // Check if this entity should see this event
+          const relevant = isEventRelevantToEntity(
+            { name: eventName, args, blockNumber, blockHash: '', transactionHash: '' },
+            targetEntityId,
+          );
+          if (!relevant) continue;
+          // Convert raw event to parsed j-event(s) for this entity
+          const parsed = rawEventToJEvents(
+            {
+              name: eventName,
+              args,
+              blockNumber,
+              blockHash: rawEvent.blockHash || '0x',
+              transactionHash: rawEvent.transactionHash || result.txHash || '0x',
+            },
+            targetEntityId,
+          );
+          jEvents.push(...parsed);
+        }
+        if (jEvents.length === 0) continue;
+
+        console.log(`📥 BATCH-EVENTS: ${jEvents.length} j-events for entity ${targetEntityId.slice(-4)}`);
+        outputs.push({
+          entityId: targetEntityId,
+          signerId: 'j-event',
+          entityTxs: [
+            {
+              type: 'j_event',
+              data: {
+                from: 'j-event',
+                events: jEvents,
+                observedAt,
+                blockNumber: Number(result.events[0]?.blockNumber ?? 0),
+                blockHash: result.events[0]?.blockHash || '0x',
+                transactionHash: result.txHash || '0x',
+              },
+            },
+          ],
+        });
+      }
+    }
+
     // Generate success message
     outputs.push({
       entityId: replica.entityId,
       signerId: 'system',
-      entityTxs: [{
-        type: 'chatMessage',
-        data: {
-          message: `📤 Batch broadcasted: ${result.txHash?.slice(0, 16)}...`,
-          timestamp: replica.state.timestamp,
-          metadata: {
-            type: 'BATCH_BROADCAST',
-            txHash: result.txHash,
+      entityTxs: [
+        {
+          type: 'chatMessage',
+          data: {
+            message: `📤 Batch broadcasted: ${result.txHash?.slice(0, 16)}...`,
+            timestamp: replica.state.timestamp,
+            metadata: {
+              type: 'BATCH_BROADCAST',
+              txHash: result.txHash,
+              eventsApplied: result.events?.length ?? 0,
+            },
           },
         },
-      }],
+      ],
     });
   } else {
     console.error(`❌ jBatch broadcast failed: ${result.error}`);
@@ -545,9 +627,9 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
   const strategy = replica.state.hubRebalanceConfig.matchingStrategy || 'hnw';
   const hubId = replica.entityId;
 
-  // Static fee: hub computes from config. V1 = flat $5 USDC.
-  // TODO: server-side gas-aware fee computation
-  const computeFee = (_amount: bigint): bigint => 5n * 10n ** 18n; // $5 USDC (18 decimals, matches TOKEN_REGISTRY)
+  // Static fee: V1 = free rebalance (removes fee as blocker for auto-accept UX)
+  // TODO: server-side gas-aware fee computation for production
+  const computeFee = (_amount: bigint): bigint => 0n; // Free rebalance in test mode
 
   // ═══════════════════════════════════════════════════════════════════
   // PROCESS 1: Detect C→R targets (Hub withdraws excess collateral)
@@ -586,16 +668,20 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     outputs.push({
       entityId: hubId,
       signerId,
-      entityTxs: [{
-        type: 'settle_propose',
-        data: {
-          counterpartyEntityId: target.counterpartyId,
-          ops,
-          memo: `Hub C→R: withdraw ${target.amount} token ${target.tokenId}`,
+      entityTxs: [
+        {
+          type: 'settle_propose',
+          data: {
+            counterpartyEntityId: target.counterpartyId,
+            ops,
+            memo: `Hub C→R: withdraw ${target.amount} token ${target.tokenId}`,
+          },
         },
-      }],
+      ],
     });
-    console.log(`🔄 C→R propose: withdraw ${target.amount} from ${target.counterpartyId.slice(-4)} (token ${target.tokenId})`);
+    console.log(
+      `🔄 C→R propose: withdraw ${target.amount} from ${target.counterpartyId.slice(-4)} (token ${target.tokenId})`,
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -615,10 +701,12 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     outputs.push({
       entityId: hubId,
       signerId,
-      entityTxs: [{
-        type: 'settle_execute',
-        data: { counterpartyEntityId: counterpartyId },
-      }],
+      entityTxs: [
+        {
+          type: 'settle_execute',
+          data: { counterpartyEntityId: counterpartyId },
+        },
+      ],
     });
     console.log(`✅ C→R execute: counterparty signed, executing with ${counterpartyId.slice(-4)}`);
   }
@@ -671,7 +759,9 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
         // Deduct from effective reserve (prevent double-spend in same cycle)
         effectiveReserves.set(String(quote.tokenId), reserve - quote.amount);
       } else {
-        console.log(`⚠️  Insufficient effective reserve for ${counterpartyId.slice(-4)}: need ${quote.amount}, have ${reserve}`);
+        console.log(
+          `⚠️  Insufficient effective reserve for ${counterpartyId.slice(-4)}: need ${quote.amount}, have ${reserve}`,
+        );
       }
       continue;
     }
@@ -715,7 +805,7 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
 
       const totalDelta = delta.ondelta + delta.offdelta;
       // Hub's debt to user: when Hub LEFT and totalDelta < 0, or Hub RIGHT and totalDelta > 0
-      const hubDebt = hubIsLeftP2 ? (totalDelta < 0n ? -totalDelta : 0n) : (totalDelta > 0n ? totalDelta : 0n);
+      const hubDebt = hubIsLeftP2 ? (totalDelta < 0n ? -totalDelta : 0n) : totalDelta > 0n ? totalDelta : 0n;
       const uncollateralized = hubDebt > delta.collateral ? hubDebt - delta.collateral : 0n;
 
       if (uncollateralized > policy.softLimit) {
@@ -744,19 +834,23 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     outputs.push({
       entityId: hubId,
       signerId,
-      entityTxs: [{
-        type: 'deposit_collateral',
-        data: {
-          counterpartyId: item.counterpartyId,
-          tokenId: item.tokenId,
-          amount: item.amount,
-          rebalanceQuoteId: item.quote!.quoteId,
-          rebalanceFeeTokenId: item.quote!.feeTokenId,
-          rebalanceFeeAmount: item.quote!.feeAmount,
+      entityTxs: [
+        {
+          type: 'deposit_collateral',
+          data: {
+            counterpartyId: item.counterpartyId,
+            tokenId: item.tokenId,
+            amount: item.amount,
+            rebalanceQuoteId: item.quote!.quoteId,
+            rebalanceFeeTokenId: item.quote!.feeTokenId,
+            rebalanceFeeAmount: item.quote!.feeAmount,
+          },
         },
-      }],
+      ],
     });
-    console.log(`✅ R→C execute: ${item.amount} token ${item.tokenId} → ${item.counterpartyId.slice(-4)} (fee: ${item.quote!.feeAmount})`);
+    console.log(
+      `✅ R→C execute: ${item.amount} token ${item.tokenId} → ${item.counterpartyId.slice(-4)} (fee: ${item.quote!.feeAmount})`,
+    );
   }
 
   // Send new quotes for accounts that need R→C
@@ -765,16 +859,18 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     outputs.push({
       entityId: hubId,
       signerId,
-      entityTxs: [{
-        type: 'sendRebalanceQuote',
-        data: {
-          counterpartyEntityId: item.counterpartyId,
-          tokenId: item.tokenId,
-          amount: item.amount,
-          feeTokenId: REFERENCE_TOKEN_ID,
-          feeAmount: fee,
+      entityTxs: [
+        {
+          type: 'sendRebalanceQuote',
+          data: {
+            counterpartyEntityId: item.counterpartyId,
+            tokenId: item.tokenId,
+            amount: item.amount,
+            feeTokenId: REFERENCE_TOKEN_ID,
+            feeAmount: fee,
+          },
         },
-      }],
+      ],
     });
     console.log(`💰 R→C quote: ${item.amount} token ${item.tokenId} → ${item.counterpartyId.slice(-4)} (fee: ${fee})`);
   }

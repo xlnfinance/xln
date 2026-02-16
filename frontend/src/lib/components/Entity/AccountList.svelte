@@ -2,6 +2,7 @@
   import type { EntityReplica } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
   import { replicas, xlnFunctions } from '../../stores/xlnStore';
+  import { settings, settingsOperations } from '../../stores/settingsStore';
   import AccountPreview from './AccountPreview.svelte';
 
   export let replica: EntityReplica | null;
@@ -49,8 +50,11 @@
   }
 
   function selectAccount(event: CustomEvent) {
-    // Forward the selection to parent (EntityPanel) for focused navigation
     dispatch('select', event.detail);
+  }
+
+  function forwardFaucet(event: CustomEvent) {
+    dispatch('faucet', event.detail);
   }
 
 
@@ -68,6 +72,12 @@
           <small>Select an entity below to open an account</small>
         </div>
       {:else}
+        <div class="list-header">
+          <span class="list-count">{accounts.length} account{accounts.length !== 1 ? 's' : ''}</span>
+          <button class="layout-toggle" on:click={() => settingsOperations.update({ barLayout: $settings.barLayout === 'center' ? 'sides' : 'center' })} title="{$settings.barLayout === 'center' ? 'Switch to sides view' : 'Switch to center view'}">
+            {$settings.barLayout === 'center' ? '⊞' : '⊟'}
+          </button>
+        </div>
         <div class="scrollable-component accounts-list">
           {#each accounts as [counterpartyId, account] (counterpartyId)}
             <AccountPreview
@@ -76,6 +86,7 @@
               entityId={replica?.entityId || ''}
               isSelected={false}
               on:select={selectAccount}
+              on:faucet={forwardFaucet}
             />
           {/each}
         </div>
@@ -127,9 +138,36 @@
   .accounts-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 6px;
   }
 
+  .list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 8px;
+  }
 
+  .list-count {
+    font-size: 0.75em;
+    color: #78716c;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
 
+  .layout-toggle {
+    background: none;
+    border: 1px solid #292524;
+    border-radius: 3px;
+    color: #78716c;
+    font-size: 1em;
+    cursor: pointer;
+    padding: 2px 6px;
+    line-height: 1;
+  }
+
+  .layout-toggle:hover {
+    color: #a8a29e;
+    border-color: #44403c;
+  }
 </style>
