@@ -1119,6 +1119,7 @@ const serveStatic = async (pathname: string, staticDir: string): Promise<Respons
 // In dev, Vite serves frontend/static. In server mode, frontend/public/build
 // may be used depending on deploy workflow.
 const serveRuntimeBundle = async (): Promise<Response | null> => {
+  const path = await import('path');
   const candidates = [
     path.join(process.cwd(), 'frontend', 'static', 'runtime.js'),
     path.join(process.cwd(), 'frontend', 'public', 'runtime.js'),
