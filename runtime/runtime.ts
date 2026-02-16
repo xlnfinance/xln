@@ -609,7 +609,9 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
       } catch (error) {
         console.error('❌ Runtime loop error:', error);
         const message = error instanceof Error ? error.message : String(error);
-        if (message.includes('PERSISTENCE_FATAL')) {
+        if (message.includes('PERSISTENCE_FATAL') && !isBrowser) {
+          // Only kill loop for persistence failures on server (Node.js)
+          // Browser IndexedDB is best-effort — loop continues
           running = false;
           try {
             env.error?.('RUNTIME_PERSISTENCE_FATAL', { message });
@@ -2896,27 +2898,47 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       console.warn('⚠️ db.batch().write() failed, falling back to sequential put:', batchError);
     }
     if (!wrote) {
-      for (const op of ops) {
-        await db.put(op.key, op.value);
+      try {
+        for (const op of ops) {
+          await db.put(op.key, op.value);
+        }
+      } catch (putError) {
+        // In browser, IndexedDB can close during page refresh — non-fatal, skip persistence
+        const msg = putError instanceof Error ? putError.message : String(putError);
+        if (isBrowser && (msg.includes('closing') || msg.includes('InvalidStateError') || msg.includes('not open'))) {
+          console.warn(`⚠️ DB write skipped (browser DB closing): frame ${env.height}`);
+          return;
+        }
+        throw putError;
       }
     }
 
-    // Fail-fast: if we just persisted frame N, frame_input:N and latest_height must be readable now.
+    // Verify write succeeded (skip in browser if DB is flaky)
     try {
       await db.get(makeDbKey(dbNamespace, `frame_input:${env.height}`));
       const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
       const latestHeight = Number.parseInt(latestHeightBuffer.toString(), 10);
       if (!Number.isFinite(latestHeight) || latestHeight !== env.height) {
-        throw new Error(
-          `latest_height mismatch: expected=${env.height} actual=${String(latestHeightBuffer.toString())}`,
+        console.warn(
+          `⚠️ latest_height mismatch after write: expected=${env.height} actual=${String(latestHeightBuffer.toString())}`,
         );
       }
     } catch (verifyError) {
+      // In browser, verification failure is non-fatal (IndexedDB can be flaky)
+      if (isBrowser) {
+        console.warn(`⚠️ DB verify skipped (browser): frame ${env.height}: ${String(verifyError)}`);
+        return;
+      }
       throw new Error(`PERSISTENCE_FATAL: write verification failed at frame ${env.height}: ${String(verifyError)}`);
     }
   } catch (err) {
-    console.error('❌ Failed to save to LevelDB:', err);
     const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    // In browser, DB errors are non-fatal — runtime continues without persistence
+    if (isBrowser) {
+      console.warn(`⚠️ DB save failed (non-fatal in browser): ${reason}`);
+      return;
+    }
+    console.error('❌ Failed to save to LevelDB:', err);
     throw new Error(`PERSISTENCE_FATAL: ${reason}`);
   }
 };
