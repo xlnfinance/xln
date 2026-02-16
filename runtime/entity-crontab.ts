@@ -482,36 +482,12 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
 
   console.log(`📤 CRONTAB: jBatch ready for broadcast (entity ${replica.entityId.slice(-4)})`);
 
-  // Get jurisdiction from entity config — resolve to full JReplica (with rpcUrl, contracts, etc.)
-  // Fallback to env.activeJurisdiction (hub entities created during bootstrap may not have config.jurisdiction)
-  const jurisdictionName = replica.state.config.jurisdiction || env.activeJurisdiction;
-  if (!jurisdictionName) {
-    console.warn(
-      `⚠️ No jurisdiction configured for entity ${replica.entityId.slice(-4)} and no activeJurisdiction - skipping batch broadcast`,
-    );
+  // Get jurisdiction config from entity (set by server.ts after J-adapter init)
+  const jurisdiction = replica.state.config.jurisdiction;
+  if (!jurisdiction) {
+    console.warn(`⚠️ No jurisdiction for entity ${replica.entityId.slice(-4)} - skipping batch broadcast`);
     return outputs;
   }
-  // Resolve full jurisdiction config from env.jReplicas (has depositoryAddress, entityProviderAddress, chainId, rpcs)
-  const jReplica = env.jReplicas?.get(jurisdictionName);
-  if (!jReplica) {
-    console.warn(
-      `⚠️ Jurisdiction "${jurisdictionName}" not found in env.jReplicas for entity ${replica.entityId.slice(-4)} - skipping batch broadcast`,
-    );
-    return outputs;
-  }
-  // Build jurisdiction config object that broadcastBatch expects
-  const jurisdictionConfig = {
-    name: jurisdictionName,
-    depositoryAddress: jReplica.depositoryAddress || jReplica.contracts?.depository,
-    entityProviderAddress: jReplica.entityProviderAddress || jReplica.contracts?.entityProvider,
-    chainId: jReplica.chainId,
-    rpcUrl: Array.isArray(jReplica.rpcs) ? jReplica.rpcs[0] : undefined,
-    contracts: jReplica.contracts,
-    jadapter: jReplica.jadapter,
-  };
-  console.log(
-    `📤 CRONTAB: jurisdiction="${jurisdictionName}" depository=${String(jurisdictionConfig.depositoryAddress).slice(0, 10)}... chainId=${jurisdictionConfig.chainId}`,
-  );
 
   const signerId = replica.state.config.validators[0];
   if (!signerId) {
@@ -532,8 +508,7 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
     env,
     replica.entityId,
     replica.state.jBatchState,
-    jurisdictionConfig,
-    // BrowserVMInstance has processBatch at runtime, types are slightly mismatched
+    jurisdiction,
     (browserVM || undefined) as any,
     replica.state.timestamp,
     signerId,
