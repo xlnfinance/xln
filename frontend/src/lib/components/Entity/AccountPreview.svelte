@@ -84,15 +84,51 @@
     const outTotal = outCredit + outColl + outDebt;
     const inTotal = inDebt + inColl + inCredit;
 
+    // Compute uncollateralized debt for rebalance-pending detection
+    let totalDebt = 0n;
+    let totalCollateral = 0n;
+    for (const [, delta] of account.deltas.entries()) {
+      const total = delta.ondelta + delta.offdelta;
+      // Our debt = positive total (we're owed), their debt = negative
+      // From our perspective: if we receive, counterparty has debt to us
+      const theirDebt = isLeft ? (total < 0n ? -total : 0n) : (total > 0n ? total : 0n);
+      totalDebt += theirDebt;
+      totalCollateral += delta.collateral;
+    }
+    const uncollateralized = totalDebt > totalCollateral ? totalDebt - totalCollateral : 0n;
+
     return { outCap, inCap, outCredit, outColl, outDebt,
              inCredit, inColl, inDebt, outTotal, inTotal,
-             tokenCount: account.deltas.size, primaryTokenId, primarySymbol };
+             tokenCount: account.deltas.size, primaryTokenId, primarySymbol,
+             uncollateralized, totalCollateral, totalDebt };
   })();
 
   $: halfMax = agg.outTotal > agg.inTotal ? agg.outTotal : agg.inTotal;
   $: pctOf = (v: bigint, base: bigint) => base > 0n ? Number((v * 10000n) / base) / 100 : 0;
 
   $: isPending = account.mempool.length > 0 || (account as any).pendingFrame;
+
+  // Rebalance state: detect if we're waiting for collateralization
+  $: rebalanceState = (() => {
+    const SOFT_LIMIT = 500n * 10n ** 18n; // $500 default — matches autopilot
+    const hasQuote = !!(account as any).activeRebalanceQuote;
+    const quoteAccepted = hasQuote && (account as any).activeRebalanceQuote?.accepted;
+    const hasPendingBatch = !!(account as any).jBatchState?.pendingBroadcast;
+
+    if (agg.totalCollateral > 0n && agg.uncollateralized === 0n) {
+      return 'secured'; // All green — fully collateralized
+    }
+    if (agg.uncollateralized > SOFT_LIMIT) {
+      if (hasPendingBatch) return 'settling'; // On-chain tx in flight
+      if (quoteAccepted) return 'depositing'; // Quote accepted, deposit pending
+      if (hasQuote) return 'quoted'; // Quote received, awaiting accept
+      return 'pending'; // Over soft limit, awaiting hub quote
+    }
+    if (agg.totalCollateral > 0n && agg.uncollateralized > 0n) {
+      return 'partial'; // Some collateral, but not fully covered
+    }
+    return 'none'; // Below soft limit, no rebalance needed
+  })();
 
   function handleClick() {
     dispatch('select', { accountId: counterpartyId });
@@ -135,32 +171,57 @@
     </div>
 
     {#if $settings.barLayout === 'center'}
-      <div class="bar center">
+      <div class="bar center" class:rebalance-pending={rebalanceState === 'pending' || rebalanceState === 'quoted'} class:rebalance-active={rebalanceState === 'depositing' || rebalanceState === 'settling'} class:rebalance-secured={rebalanceState === 'secured'}>
         <div class="half out">
           {#if agg.outCredit > 0n}<div class="seg credit" style="width:{pctOf(agg.outCredit, halfMax)}%"></div>{/if}
           {#if agg.outColl > 0n}<div class="seg coll" style="width:{pctOf(agg.outColl, halfMax)}%"></div>{/if}
-          {#if agg.outDebt > 0n}<div class="seg debt" style="width:{pctOf(agg.outDebt, halfMax)}%"></div>{/if}
+          {#if agg.outDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending' || rebalanceState === 'quoted'} class:pulsing={rebalanceState === 'depositing' || rebalanceState === 'settling'} style="width:{pctOf(agg.outDebt, halfMax)}%"></div>{/if}
         </div>
         <div class="mid"></div>
         <div class="half in">
-          {#if agg.inDebt > 0n}<div class="seg debt" style="width:{pctOf(agg.inDebt, halfMax)}%"></div>{/if}
+          {#if agg.inDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending' || rebalanceState === 'quoted'} class:pulsing={rebalanceState === 'depositing' || rebalanceState === 'settling'} style="width:{pctOf(agg.inDebt, halfMax)}%"></div>{/if}
           {#if agg.inColl > 0n}<div class="seg coll" style="width:{pctOf(agg.inColl, halfMax)}%"></div>{/if}
           {#if agg.inCredit > 0n}<div class="seg credit" style="width:{pctOf(agg.inCredit, halfMax)}%"></div>{/if}
         </div>
       </div>
     {:else}
-      <div class="bar sides">
+      <div class="bar sides" class:rebalance-pending={rebalanceState === 'pending' || rebalanceState === 'quoted'} class:rebalance-active={rebalanceState === 'depositing' || rebalanceState === 'settling'} class:rebalance-secured={rebalanceState === 'secured'}>
         <div class="side out">
-          {#if agg.outDebt > 0n}<div class="seg debt" style="flex:{Number(agg.outDebt)}"></div>{/if}
+          {#if agg.outDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending' || rebalanceState === 'quoted'} class:pulsing={rebalanceState === 'depositing' || rebalanceState === 'settling'} style="flex:{Number(agg.outDebt)}"></div>{/if}
           {#if agg.outColl > 0n}<div class="seg coll" style="flex:{Number(agg.outColl)}"></div>{/if}
           {#if agg.outCredit > 0n}<div class="seg credit" style="flex:{Number(agg.outCredit)}"></div>{/if}
         </div>
         <div class="gap"></div>
         <div class="side in">
-          {#if agg.inDebt > 0n}<div class="seg debt" style="flex:{Number(agg.inDebt)}"></div>{/if}
+          {#if agg.inDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending' || rebalanceState === 'quoted'} class:pulsing={rebalanceState === 'depositing' || rebalanceState === 'settling'} style="flex:{Number(agg.inDebt)}"></div>{/if}
           {#if agg.inColl > 0n}<div class="seg coll" style="flex:{Number(agg.inColl)}"></div>{/if}
           {#if agg.inCredit > 0n}<div class="seg credit" style="flex:{Number(agg.inCredit)}"></div>{/if}
         </div>
+      </div>
+    {/if}
+
+    <!-- Rebalance status indicator -->
+    {#if rebalanceState !== 'none'}
+      <div class="rebalance-indicator {rebalanceState}">
+        {#if rebalanceState === 'pending'}
+          <span class="rb-dot pending-dot"></span>
+          <span>Awaiting collateral ({activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.uncollateralized) || '?'} unsecured)</span>
+        {:else if rebalanceState === 'quoted'}
+          <span class="rb-dot quoted-dot"></span>
+          <span>Quote received</span>
+        {:else if rebalanceState === 'depositing'}
+          <span class="rb-dot depositing-dot"></span>
+          <span>Collateralizing...</span>
+        {:else if rebalanceState === 'settling'}
+          <span class="rb-dot settling-dot"></span>
+          <span>On-chain settlement</span>
+        {:else if rebalanceState === 'secured'}
+          <span class="rb-dot secured-dot"></span>
+          <span>Secured</span>
+        {:else if rebalanceState === 'partial'}
+          <span class="rb-dot partial-dot"></span>
+          <span>Partially secured</span>
+        {/if}
       </div>
     {/if}
   {:else}
@@ -268,10 +329,53 @@
     border-radius: 4px;
     overflow: hidden;
   }
-  .seg { min-width: 2px; transition: width 0.3s ease, flex 0.3s ease; }
+  .seg { min-width: 2px; transition: width 0.3s ease, flex 0.3s ease; position: relative; overflow: hidden; }
   .seg.credit { background: #52525b; }
   .seg.coll { background: linear-gradient(180deg, #34d399, #10b981); }
   .seg.debt { background: linear-gradient(180deg, #fb7185, #f43f5e); }
+
+  /* Striped = awaiting rebalance (over soft limit, hub hasn't collateralized yet) */
+  .seg.debt.striped {
+    background: repeating-linear-gradient(
+      -45deg,
+      #f43f5e 0px,
+      #f43f5e 3px,
+      #fbbf24 3px,
+      #fbbf24 6px
+    );
+    background-size: 8.5px 8.5px;
+    animation: stripe-scroll 0.8s linear infinite;
+  }
+
+  /* Pulsing = deposit/settlement in progress */
+  .seg.debt.pulsing {
+    background: linear-gradient(180deg, #fbbf24, #f59e0b);
+    animation: rebalance-pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes stripe-scroll {
+    0% { background-position: 0 0; }
+    100% { background-position: 8.5px 8.5px; }
+  }
+
+  @keyframes rebalance-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* Secured bar glow */
+  .bar.rebalance-secured {
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+  }
+
+  /* Pending bar subtle glow */
+  .bar.rebalance-pending {
+    box-shadow: 0 0 6px rgba(251, 191, 36, 0.2);
+  }
+
+  .bar.rebalance-active {
+    box-shadow: 0 0 8px rgba(251, 191, 36, 0.3);
+  }
 
   /* Center mode */
   .bar.center { flex-direction: row; }
@@ -289,6 +393,36 @@
 
   /* ── Misc ──────────────────────────────────────── */
   .empty { font-size:0.65em; color:#52525b; padding:4px 0; font-style: italic; }
+
+  /* ── Rebalance indicator ───────────────────────── */
+  .rebalance-indicator {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.55em;
+    padding: 3px 0;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .rebalance-indicator.pending { color: #fbbf24; }
+  .rebalance-indicator.quoted { color: #fb923c; }
+  .rebalance-indicator.depositing { color: #f59e0b; }
+  .rebalance-indicator.settling { color: #a78bfa; }
+  .rebalance-indicator.secured { color: #4ade80; }
+  .rebalance-indicator.partial { color: #34d399; }
+
+  .rb-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .pending-dot { background: #fbbf24; animation: rebalance-pulse 1.5s ease-in-out infinite; }
+  .quoted-dot { background: #fb923c; animation: rebalance-pulse 1s ease-in-out infinite; }
+  .depositing-dot { background: #f59e0b; animation: rebalance-pulse 0.6s ease-in-out infinite; }
+  .settling-dot { background: #a78bfa; animation: rebalance-pulse 0.4s ease-in-out infinite; }
+  .secured-dot { background: #4ade80; box-shadow: 0 0 4px rgba(74, 222, 128, 0.5); }
+  .partial-dot { background: #34d399; }
 
   .settle {
     display: inline-block;
