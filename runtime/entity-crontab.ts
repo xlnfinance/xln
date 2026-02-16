@@ -642,263 +642,87 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
   const strategy = replica.state.hubRebalanceConfig.matchingStrategy || 'hnw';
   const hubId = replica.entityId;
 
-  // Static fee: V1 = free rebalance (removes fee as blocker for auto-accept UX)
-  // TODO: server-side gas-aware fee computation for production
-  const computeFee = (_amount: bigint): bigint => 0n; // Free rebalance in test mode
-
-  // Cooldown: don't re-quote an account if a quote was sent within last 60s
-  const QUOTE_COOLDOWN_MS = 60_000;
-
   // ═══════════════════════════════════════════════════════════════════
-  // PROCESS 1: Detect C→R targets (Hub withdraws excess collateral)
-  // Uses deriveDelta to find accounts where Hub has outCollateral > 0
+  // DIRECT R→C: Hub deposits collateral for users with uncollateralized debt.
+  //
+  // NO quotes. NO bilateral frames. Hub just adds R→C to jBatch.
+  // R→C is UNILATERAL — hub is adding security, user always benefits.
+  // broadcastBatchHandler will submit the jBatch on-chain.
+  //
+  // Reference: 2019src.txt lines 2973-3114 (rebalance_channels.ts)
   // ═══════════════════════════════════════════════════════════════════
-  type C2RTarget = { counterpartyId: string; tokenId: number; amount: bigint };
-  const c2rTargets: C2RTarget[] = [];
 
-  for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
-    // Skip if workspace already exists (C→R or other settlement in progress)
-    if (accountMachine.settlementWorkspace) continue;
-
-    const hubIsLeft = isLeftEntity(hubId, counterpartyId);
-
-    for (const [tokenId, delta] of accountMachine.deltas.entries()) {
-      const derived = deriveDelta(delta, hubIsLeft);
-      // Hub's outCollateral = Hub's share of collateral pool (withdrawable)
-      if (derived.outCollateral > 0n) {
-        c2rTargets.push({ counterpartyId, tokenId, amount: derived.outCollateral });
-      }
-    }
+  // Initialize jBatch if needed
+  if (!replica.state.jBatchState) {
+    const { initJBatch } = await import('./j-batch');
+    replica.state.jBatchState = initJBatch();
   }
 
-  // Sort C→R by strategy (biggest first for HNW)
-  if (strategy === 'hnw') {
-    c2rTargets.sort((a, b) => Number(b.amount - a.amount));
+  // Skip if batch is pending broadcast (don't pile up operations)
+  if (replica.state.jBatchState.pendingBroadcast) {
+    return outputs;
   }
 
-  // Generate settle_propose for C→R targets
-  for (const target of c2rTargets) {
-    const hubIsLeft = isLeftEntity(hubId, target.counterpartyId);
-
-    // Build settlement ops: Hub withdraws collateral to reserve
-    const ops: SettlementOp[] = [{ type: 'c2r', tokenId: target.tokenId, amount: target.amount }];
-
-    outputs.push({
-      entityId: hubId,
-      signerId,
-      entityTxs: [
-        {
-          type: 'settle_propose',
-          data: {
-            counterpartyEntityId: target.counterpartyId,
-            ops,
-            memo: `Hub C→R: withdraw ${target.amount} token ${target.tokenId}`,
-          },
-        },
-      ],
-    });
-    console.log(
-      `🔄 C→R propose: withdraw ${target.amount} from ${target.counterpartyId.slice(-4)} (token ${target.tokenId})`,
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════
-  // PROCESS 2: Execute ready settlements (counterparty signed → jBatch)
-  // Detect workspaces where counterparty hanko is present → settle_execute
-  // ═══════════════════════════════════════════════════════════════════
-  for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
-    const ws = accountMachine.settlementWorkspace;
-    if (!ws) continue;
-
-    // Hub only needs counterparty's hanko — batch-level hanko covers Hub's auth.
-    // Check for counterparty hanko directly (not workspace status).
-    const hubIsLeftHere = isLeftEntity(hubId, counterpartyId);
-    const counterpartyHanko = hubIsLeftHere ? ws.rightHanko : ws.leftHanko;
-    if (!counterpartyHanko) continue;
-
-    outputs.push({
-      entityId: hubId,
-      signerId,
-      entityTxs: [
-        {
-          type: 'settle_execute',
-          data: { counterpartyEntityId: counterpartyId },
-        },
-      ],
-    });
-    console.log(`✅ C→R execute: counterparty signed, executing with ${counterpartyId.slice(-4)}`);
-  }
-
-  // ═══════════════════════════════════════════════════════════════════
-  // PROCESS 3: R→C with effective reserve (Hub deposits for users)
-  // Effective reserve = actual reserve + sum(signed C→R amounts in jBatch)
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Calculate effective reserve: actual + pending C→R amounts
+  // Effective reserves: actual + pending C→R amounts in batch
   const effectiveReserves = new Map<string, bigint>();
   for (const [tokenKey, amount] of replica.state.reserves.entries()) {
     effectiveReserves.set(tokenKey, amount);
   }
-  // Add pending C→R from jBatch (signed settlements that will release collateral → reserve)
-  if (replica.state.jBatchState?.batch) {
-    const batch = replica.state.jBatchState.batch;
-    if (batch.collateralToReserve) {
-      for (const c2r of batch.collateralToReserve) {
-        const tokenKey = String(c2r.tokenId);
-        const current = effectiveReserves.get(tokenKey) || 0n;
-        effectiveReserves.set(tokenKey, current + c2r.amount);
-      }
-    }
-  }
 
-  // Collect R→C actions (existing quote-based flow)
-  type R2CItem = {
-    counterpartyId: string;
-    tokenId: number;
-    amount: bigint;
-    quote?: { quoteId: number; feeAmount: bigint; feeTokenId: number };
-  };
-  const toExecute: R2CItem[] = [];
-  const toQuote: R2CItem[] = [];
+  // Collect R→C targets: accounts with uncollateralized debt
+  type R2CTarget = { counterpartyId: string; tokenId: number; amount: bigint };
+  const targets: R2CTarget[] = [];
 
   for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
-    // Phase 1: Check for accepted, non-expired quotes → ready to execute
-    const quote = accountMachine.activeRebalanceQuote;
-    if (quote && quote.accepted && now <= quote.quoteId + QUOTE_EXPIRY_MS) {
-      // Cooldown: skip if quote was recently created (prevents rapid re-quoting cycle)
-      // Check hub has enough effective reserve
-      const reserve = effectiveReserves.get(String(quote.tokenId)) || 0n;
-      if (reserve >= quote.amount) {
-        toExecute.push({
-          counterpartyId,
-          tokenId: quote.tokenId,
-          amount: quote.amount,
-          quote: { quoteId: quote.quoteId, feeAmount: quote.feeAmount, feeTokenId: quote.feeTokenId },
-        });
-        // Deduct from effective reserve (prevent double-spend in same cycle)
-        effectiveReserves.set(String(quote.tokenId), reserve - quote.amount);
-      } else {
-        console.log(
-          `⚠️  Insufficient effective reserve for ${counterpartyId.slice(-4)}: need ${quote.amount}, have ${reserve}`,
-        );
-      }
-      continue;
-    }
+    const hubIsLeft = isLeftEntity(hubId, counterpartyId);
 
-    // Expired quotes: fall through to Phase 2b so account can get a new quote.
-    // Quote clearing happens via deposit_collateral handler or new quote replacing old.
-
-    // Phase 2a: Check pending manual requests → need quote
-    const pendingReq = accountMachine.pendingRebalanceRequest;
-    if (pendingReq) {
-      const reserve = effectiveReserves.get(String(pendingReq.tokenId)) || 0n;
-      if (reserve >= pendingReq.targetAmount) {
-        toQuote.push({
-          counterpartyId,
-          tokenId: pendingReq.tokenId,
-          amount: pendingReq.targetAmount,
-        });
-      }
-      continue;
-    }
-
-    // Cooldown: skip account if a quote was sent recently (prevents quote spam)
-    // The quote gets consumed by deposit_collateral, then hub detects debt again → new quote.
-    // Without cooldown: 1 quote/sec × 3 hubs = 3 frames/sec spam.
-    if (quote && now - quote.quoteId < QUOTE_COOLDOWN_MS) {
-      continue; // Recent quote exists (accepted or not) — wait before re-quoting
-    }
-
-    // Phase 2b: Check absolute policy triggers (uncollateralized credit > softLimit)
-    // 2019 ref: "finding who has uninsured balances AND gone beyond soft limit"
-    // uncollateralizedCredit = max(0, hubDebtToUser - collateral)
-    //
-    // If no explicit rebalancePolicy is set, use default: softLimit=0 (any debt triggers).
-    // This ensures hubs auto-rebalance even before users set explicit policies.
-    const hubIsLeftP2 = isLeftEntity(hubId, counterpartyId);
-    // Default: softLimit=0 (trigger on any debt), hardLimit=max (auto mode, not manual)
-    const defaultPolicy = { softLimit: 0n, hardLimit: 2n ** 128n, maxAcceptableFee: 0n };
-    const policyEntries: [number, { softLimit: bigint; hardLimit: bigint }][] =
-      accountMachine.rebalancePolicy.size > 0
-        ? Array.from(accountMachine.rebalancePolicy.entries())
-        : Array.from(accountMachine.deltas.keys()).map(tokenId => [tokenId, defaultPolicy]);
-
-    for (const [tokenId, policy] of policyEntries) {
-      if (policy.softLimit === policy.hardLimit && accountMachine.rebalancePolicy.size > 0) continue;
-
-      const delta = accountMachine.deltas.get(tokenId);
-      if (!delta) continue;
-
+    for (const [tokenId, delta] of accountMachine.deltas.entries()) {
       const totalDelta = delta.ondelta + delta.offdelta;
-      // Hub's debt to user: when Hub LEFT and totalDelta < 0, or Hub RIGHT and totalDelta > 0
-      const hubDebt = hubIsLeftP2 ? (totalDelta < 0n ? -totalDelta : 0n) : totalDelta > 0n ? totalDelta : 0n;
+      // Hub's debt to user: LEFT with negative total, or RIGHT with positive total
+      const hubDebt = hubIsLeft ? (totalDelta < 0n ? -totalDelta : 0n) : totalDelta > 0n ? totalDelta : 0n;
       const uncollateralized = hubDebt > delta.collateral ? hubDebt - delta.collateral : 0n;
 
-      if (uncollateralized > policy.softLimit) {
-        // Deposit enough to fully collateralize (capped at reserve)
-        const needed = uncollateralized;
+      // Default softLimit=0 (any debt triggers), or use explicit policy
+      const policy = accountMachine.rebalancePolicy.get(tokenId);
+      const softLimit = policy?.softLimit ?? 0n;
+
+      if (uncollateralized > softLimit) {
         const reserve = effectiveReserves.get(String(tokenId)) || 0n;
-        if (reserve >= needed) {
-          // Skip if non-expired quote already exists for this token
-          if (quote && quote.tokenId === tokenId && now <= quote.quoteId + QUOTE_EXPIRY_MS) continue;
-          toQuote.push({ counterpartyId, tokenId, amount: needed });
+        const depositAmount = uncollateralized > reserve ? reserve : uncollateralized;
+        if (depositAmount > 0n) {
+          targets.push({ counterpartyId, tokenId, amount: depositAmount });
+          // Deduct from effective reserve (prevent double-spend)
+          effectiveReserves.set(String(tokenId), reserve - depositAmount);
         }
       }
     }
   }
 
-  // Sort by strategy
+  // Sort by strategy (biggest first for HNW)
   if (strategy === 'hnw') {
-    toExecute.sort((a, b) => Number(b.amount - a.amount));
-    toQuote.sort((a, b) => Number(b.amount - a.amount));
-  } else {
-    toExecute.sort((a, b) => (a.quote?.quoteId || 0) - (b.quote?.quoteId || 0));
+    targets.sort((a, b) => Number(b.amount - a.amount));
   }
 
-  // Execute accepted quotes: deposit_collateral + fee (no j_broadcast per-item)
-  for (const item of toExecute) {
-    outputs.push({
-      entityId: hubId,
-      signerId,
-      entityTxs: [
-        {
-          type: 'deposit_collateral',
-          data: {
-            counterpartyId: item.counterpartyId,
-            tokenId: item.tokenId,
-            amount: item.amount,
-            rebalanceQuoteId: item.quote!.quoteId,
-            rebalanceFeeTokenId: item.quote!.feeTokenId,
-            rebalanceFeeAmount: item.quote!.feeAmount,
-          },
-        },
-      ],
-    });
-    console.log(
-      `✅ R→C execute: ${item.amount} token ${item.tokenId} → ${item.counterpartyId.slice(-4)} (fee: ${item.quote!.feeAmount})`,
-    );
-  }
-
-  // Send new quotes for accounts that need R→C
-  for (const item of toQuote) {
-    const fee = computeFee(item.amount);
-    outputs.push({
-      entityId: hubId,
-      signerId,
-      entityTxs: [
-        {
-          type: 'sendRebalanceQuote',
-          data: {
-            counterpartyEntityId: item.counterpartyId,
-            tokenId: item.tokenId,
-            amount: item.amount,
-            feeTokenId: REFERENCE_TOKEN_ID,
-            feeAmount: fee,
-          },
-        },
-      ],
-    });
-    console.log(`💰 R→C quote: ${item.amount} token ${item.tokenId} → ${item.counterpartyId.slice(-4)} (fee: ${fee})`);
+  // Add R→C directly to jBatch — no quotes, no bilateral frames
+  if (targets.length > 0) {
+    const { batchAddReserveToCollateral } = await import('./j-batch');
+    for (const target of targets) {
+      try {
+        batchAddReserveToCollateral(
+          replica.state.jBatchState,
+          hubId,
+          target.counterpartyId,
+          target.tokenId,
+          target.amount,
+        );
+        console.log(
+          `✅ R→C queued: ${target.amount} token ${target.tokenId} → ${target.counterpartyId.slice(-4)} (direct jBatch, no quotes)`,
+        );
+      } catch (err) {
+        console.warn(`⚠️ R→C batch add failed for ${target.counterpartyId.slice(-4)}: ${(err as Error).message}`);
+      }
+    }
+    console.log(`🔄 Hub rebalance: ${targets.length} R→C ops added to jBatch (awaiting broadcastBatch)`);
   }
 
   return outputs;
