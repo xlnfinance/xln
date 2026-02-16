@@ -104,7 +104,7 @@ export function initCrontab(): CrontabState {
 
   tasks.set('hubRebalance', {
     name: 'hubRebalance',
-    intervalMs: 1000, // Stress-test: check rebalance every 1s for instant collateral after faucet
+    intervalMs: 30000, // Check rebalance every 30s (production interval)
     lastRun: 0,
     handler: hubRebalanceHandler,
   });
@@ -646,6 +646,9 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
   // TODO: server-side gas-aware fee computation for production
   const computeFee = (_amount: bigint): bigint => 0n; // Free rebalance in test mode
 
+  // Cooldown: don't re-quote an account if a quote was sent within last 60s
+  const QUOTE_COOLDOWN_MS = 60_000;
+
   // ═══════════════════════════════════════════════════════════════════
   // PROCESS 1: Detect C→R targets (Hub withdraws excess collateral)
   // Uses deriveDelta to find accounts where Hub has outCollateral > 0
@@ -762,6 +765,7 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     // Phase 1: Check for accepted, non-expired quotes → ready to execute
     const quote = accountMachine.activeRebalanceQuote;
     if (quote && quote.accepted && now <= quote.quoteId + QUOTE_EXPIRY_MS) {
+      // Cooldown: skip if quote was recently created (prevents rapid re-quoting cycle)
       // Check hub has enough effective reserve
       const reserve = effectiveReserves.get(String(quote.tokenId)) || 0n;
       if (reserve >= quote.amount) {
@@ -796,6 +800,13 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
         });
       }
       continue;
+    }
+
+    // Cooldown: skip account if a quote was sent recently (prevents quote spam)
+    // The quote gets consumed by deposit_collateral, then hub detects debt again → new quote.
+    // Without cooldown: 1 quote/sec × 3 hubs = 3 frames/sec spam.
+    if (quote && now - quote.quoteId < QUOTE_COOLDOWN_MS) {
+      continue; // Recent quote exists (accepted or not) — wait before re-quoting
     }
 
     // Phase 2b: Check absolute policy triggers (uncollateralized credit > softLimit)
