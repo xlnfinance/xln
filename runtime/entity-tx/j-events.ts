@@ -350,6 +350,82 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
         delta.collateral = BigInt(collateral);
         delta.ondelta = BigInt(ondelta);
 
+        // requestedRebalance lifecycle:
+        // Clear/reduce only after bilateral on-chain collateral update is finalized.
+        // Deferred fee is charged here (on fulfillment), not at request time.
+        const pendingRequest = account.requestedRebalance?.get(tokenIdNum) ?? 0n;
+        if (pendingRequest > 0n) {
+          const collateralIncrease = delta.collateral > oldColl ? delta.collateral - oldColl : 0n;
+          if (collateralIncrease > 0n) {
+            const fulfilledAmount = pendingRequest > collateralIncrease ? collateralIncrease : pendingRequest;
+            const feeState = account.requestedRebalanceFeeState?.get(tokenIdNum);
+            let remainingFee = feeState?.remainingFee ?? 0n;
+            let chargedFee = 0n;
+
+            if (feeState && remainingFee > 0n && fulfilledAmount > 0n) {
+              if (fulfilledAmount >= pendingRequest) {
+                chargedFee = remainingFee;
+              } else {
+                chargedFee = (remainingFee * fulfilledAmount) / pendingRequest;
+              }
+              if (chargedFee > remainingFee) chargedFee = remainingFee;
+
+              if (chargedFee > 0n) {
+                const feeTokenId = feeState.feeTokenId;
+                let feeDelta = account.deltas.get(feeTokenId);
+                if (!feeDelta) {
+                  const defaultCreditLimit = getDefaultCreditLimit(feeTokenId);
+                  feeDelta = {
+                    tokenId: feeTokenId,
+                    collateral: 0n,
+                    ondelta: 0n,
+                    offdelta: 0n,
+                    leftCreditLimit: defaultCreditLimit,
+                    rightCreditLimit: defaultCreditLimit,
+                    leftAllowance: 0n,
+                    rightAllowance: 0n,
+                  };
+                  account.deltas.set(feeTokenId, feeDelta);
+                }
+
+                // Convention: positive offdelta = LEFT has more.
+                // requester pays hub on fulfillment.
+                if (feeState.requestedByLeft) {
+                  feeDelta.offdelta -= chargedFee;
+                } else {
+                  feeDelta.offdelta += chargedFee;
+                }
+                remainingFee -= chargedFee;
+                console.log(
+                  `   💰 REBALANCE-FEE-CHARGED: token=${feeTokenId} fee=${chargedFee} ` +
+                  `(fulfilled=${fulfilledAmount}, requestedByLeft=${feeState.requestedByLeft})`,
+                );
+              }
+            }
+
+            const remaining = pendingRequest - fulfilledAmount;
+            if (remaining > 0n) {
+              account.requestedRebalance.set(tokenIdNum, remaining);
+              if (feeState && remainingFee > 0n) {
+                account.requestedRebalanceFeeState.set(tokenIdNum, { ...feeState, remainingFee });
+              } else {
+                account.requestedRebalanceFeeState?.delete(tokenIdNum);
+              }
+              console.log(
+                `   🔄 REBALANCE-REQUEST-PARTIAL: token=${tokenIdNum} request ${pendingRequest}→${remaining} ` +
+                `(credited=${fulfilledAmount}, feeCharged=${chargedFee})`,
+              );
+            } else {
+              account.requestedRebalance.delete(tokenIdNum);
+              account.requestedRebalanceFeeState?.delete(tokenIdNum);
+              console.log(
+                `   ✅ REBALANCE-REQUEST-CLEARED: token=${tokenIdNum} request ${pendingRequest} fulfilled ` +
+                `(credited=${fulfilledAmount}, feeCharged=${chargedFee})`,
+              );
+            }
+          }
+        }
+
         // NOTE: Do NOT increment nonce here!
         // R2C also emits AccountSettled but doesn't increment on-chain nonce.
         // Nonce is incremented in tryFinalizeAccountJEvents when workspace status is 'ready_to_submit'.

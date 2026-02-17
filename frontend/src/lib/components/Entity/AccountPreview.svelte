@@ -160,6 +160,9 @@
       <span class="badge" class:synced={!isPending} class:pending={isPending}>
         {isPending ? 'Pending' : 'Synced'}
       </span>
+      <span class="j-sync" title="Last finalized bilateral J-event height">
+        J#{account.lastFinalizedJHeight ?? 0}
+      </span>
       <button class="btn-faucet" on:click={handleFaucet}>Faucet</button>
     </div>
   </div>
@@ -289,6 +292,17 @@
   }
   .badge.synced { color: #4ade80; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.12); }
   .badge.pending { color: #fbbf24; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.12); }
+
+  .j-sync {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #93c5fd;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+  }
 
   .btn-faucet {
     font-size: 0.6em;

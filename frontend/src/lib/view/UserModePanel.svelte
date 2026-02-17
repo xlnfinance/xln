@@ -27,6 +27,7 @@
   import AccountDropdown from '$lib/components/Entity/AccountDropdown.svelte';
   import EntityPanelTabs from '$lib/components/Entity/EntityPanelTabs.svelte';
   import AccountPanel from '$lib/components/Entity/AccountPanel.svelte';
+  import OnboardingPanel from '$lib/components/Entity/OnboardingPanel.svelte';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
   import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
   // Removed WalletView - using EntityPanelTabs for everything (Entity = Wallet)
@@ -62,6 +63,9 @@
 
   onMount(async () => {
     await vaultOperations.initialize();
+    if (typeof localStorage !== 'undefined') {
+      onboardingComplete = localStorage.getItem('xln-onboarding-complete') === 'true';
+    }
   });
 
   // Selection state
@@ -78,6 +82,7 @@
   const selfEntityChecked = new Set<string>();
   const selfEntityInFlight = new Set<string>();
   let ensureSelfEntitiesEpoch = 0;
+  let onboardingComplete = $state(false);
 
   // Reactive: signer info from vault
   const signer = $derived($activeVault?.signers?.[0] || null);
@@ -429,6 +434,10 @@
     selectedAccountId = event.detail.accountId;
   }
 
+  function handleOnboardingComplete() {
+    onboardingComplete = true;
+  }
+
   function handleJurisdictionSelect(event: CustomEvent<{ name: string }>) {
     viewMode = 'jurisdiction';
     selectedJurisdictionName = event.detail.name;
@@ -629,6 +638,12 @@
       </div>
     {:else if showVaultPanelVisible}
       <RuntimeCreation embedded={true} />
+    {:else if viewMode === 'entity' && selectedEntityId && selectedSignerId && !onboardingComplete}
+      <OnboardingPanel
+        entityId={selectedEntityId}
+        signerId={selectedSignerId}
+        on:complete={handleOnboardingComplete}
+      />
     {:else if viewMode === 'entity' && selectedEntityId && selectedReplica}
       {#if selectedAccountId && selectedAccount}
         <AccountPanel

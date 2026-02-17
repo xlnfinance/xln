@@ -80,6 +80,7 @@ export interface CrontabState {
 // Configuration constants
 export const ACCOUNT_TIMEOUT_MS = 30000; // 30 seconds (configurable)
 export const ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS = 10000; // Check every 10 seconds
+export const HUB_PENDING_BROADCAST_STALE_MS = 120000; // 2 minutes without finalize = stale
 
 /**
  * Initialize crontab state for an entity
@@ -516,21 +517,9 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
 
   if (result.success) {
     console.log(`✅ jBatch broadcasted successfully: ${result.txHash}`);
-
-    // CRITICAL: Clear pendingBroadcast immediately after successful broadcast.
-    // In RPC mode, HankoBatchProcessed j-event should also clear it, but if the
-    // j-watcher is slow or events don't propagate, pendingBroadcast stays true
-    // forever → blocks ALL future R2C/settlement operations.
-    // Safe to clear here: the batch was submitted, worst case it gets re-submitted.
-    if (replica.state.jBatchState) {
-      replica.state.jBatchState.pendingBroadcast = false;
-      // Also reset the batch to empty so new operations can be queued
-      const { createEmptyBatch } = await import('./j-batch');
-      if (typeof createEmptyBatch === 'function') {
-        replica.state.jBatchState.batch = createEmptyBatch();
-      }
-      console.log(`✅ jBatch cleared: pendingBroadcast=false, batch reset`);
-    }
+    // Keep pendingBroadcast latched until on-chain confirmation (HankoBatchProcessed).
+    // This prevents duplicate consumption of requestedRebalance before the batch finalizes.
+    // Recovery from a stuck latch is handled by HUB_PENDING_BROADCAST_STALE_MS guard.
 
     // CRITICAL: In BrowserVM mode, processBatch returns events directly.
     // There is no j-watcher to pick them up. We must inject them as j_event
@@ -658,9 +647,20 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     replica.state.jBatchState = initJBatch();
   }
 
-  // Skip if batch is pending broadcast (don't pile up operations)
+  // Skip if batch is pending broadcast (don't pile up operations).
+  // If the latch is stale, clear it so rebalance can recover.
   if (replica.state.jBatchState.pendingBroadcast) {
-    return outputs;
+    const ageMs = now - (replica.state.jBatchState.lastBroadcast || 0);
+    if (ageMs <= HUB_PENDING_BROADCAST_STALE_MS) {
+      console.warn(
+        `⏳ Hub rebalance blocked: pendingBroadcast=true age=${ageMs}ms (entity=${hubId.slice(-4)})`,
+      );
+      return outputs;
+    }
+    console.warn(
+      `⚠️ Hub rebalance stale pendingBroadcast (${ageMs}ms) - clearing latch to unblock new R→C`,
+    );
+    replica.state.jBatchState.pendingBroadcast = false;
   }
 
   // Effective reserves: actual + pending C→R amounts in batch
@@ -680,10 +680,21 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     const hubIsLeft = isLeftEntity(hubId, counterpartyId);
 
     // SOURCE 1: User-initiated request_collateral (highest priority)
-    // User already paid the fee inline — hub just needs to fulfill the R→C.
+    // Fee is deferred and charged on AccountSettled fulfillment.
     if (accountMachine.requestedRebalance && accountMachine.requestedRebalance.size > 0) {
       for (const [tokenId, requestedAmount] of accountMachine.requestedRebalance.entries()) {
         if (requestedAmount <= 0n) continue;
+        const feeState = accountMachine.requestedRebalanceFeeState?.get(tokenId);
+        const minFeeBps = replica.state.hubRebalanceConfig?.minFeeBps ?? 10n;
+        const minFee = (requestedAmount * minFeeBps) / 10000n;
+        if (!feeState || feeState.remainingFee < minFee) {
+          console.warn(
+            `⚠️ R→C request rejected (fee too low): token=${tokenId} cp=${counterpartyId.slice(-4)} ` +
+            `remainingFee=${feeState?.remainingFee ?? 0n} < minFee=${minFee} (minFeeBps=${minFeeBps})`,
+          );
+          continue;
+        }
+
         const reserve = effectiveReserves.get(String(tokenId)) || 0n;
         const depositAmount = requestedAmount > reserve ? reserve : requestedAmount;
         if (depositAmount > 0n) {
@@ -693,9 +704,11 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
           console.log(
             `🔄 R→C from user request: ${depositAmount} token ${tokenId} → ${counterpartyId.slice(-4)} (requested=${requestedAmount})`,
           );
+        } else {
+          console.warn(
+            `⚠️ R→C request pending but skipped (zero reserve): token=${tokenId} cp=${counterpartyId.slice(-4)} requested=${requestedAmount}`,
+          );
         }
-        // Clear the request (fulfilled or best-effort)
-        accountMachine.requestedRebalance.delete(tokenId);
       }
     }
 
@@ -709,9 +722,9 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
       const hubDebt = hubIsLeft ? (totalDelta < 0n ? -totalDelta : 0n) : totalDelta > 0n ? totalDelta : 0n;
       const uncollateralized = hubDebt > delta.collateral ? hubDebt - delta.collateral : 0n;
 
-      // Default softLimit=0 (any debt triggers), or use explicit policy
-      const policy = accountMachine.rebalancePolicy.get(tokenId);
-      const softLimit = policy?.softLimit ?? 0n;
+      // Hub-side trigger threshold (independent of bilateral user policy).
+      // User policy gates user-initiated requests; hub policy gates proactive collateralization.
+      const softLimit = replica.state.hubRebalanceConfig?.minCollateralThreshold ?? 0n;
 
       if (uncollateralized > softLimit) {
         const reserve = effectiveReserves.get(String(tokenId)) || 0n;
@@ -719,6 +732,10 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
         if (depositAmount > 0n) {
           targets.push({ counterpartyId, tokenId, amount: depositAmount });
           effectiveReserves.set(String(tokenId), reserve - depositAmount);
+        } else {
+          console.warn(
+            `⚠️ R→C auto-detect skipped (zero reserve): token=${tokenId} cp=${counterpartyId.slice(-4)} uncollateralized=${uncollateralized}`,
+          );
         }
       }
     }
