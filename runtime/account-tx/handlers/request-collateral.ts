@@ -1,18 +1,18 @@
 /**
  * Request Collateral Handler
  *
- * User requests hub to deposit collateral (R→C) and pays fee inline.
+ * User requests hub to deposit collateral (R→C).
  * This is the V1 rebalance mechanism — no quotes, no custody, no bilateral negotiation.
  *
  * Flow:
  * 1. Post-frame hook detects: uncollateralized > softLimit
  * 2. Auto-queues request_collateral into account mempool
- * 3. Hub processes the frame → sees request + fee payment
+ * 3. Hub processes the frame → sees request + deferred fee budget
  * 4. Hub crontab picks up pendingRebalanceRequest → adds R→C to jBatch
  * 5. broadcastBatch → on-chain → collateral updated
  *
- * The fee is paid as an offdelta shift (user→hub) bundled in the same accountTx.
- * Both sides process deterministically — no unilateral hub action needed.
+ * Fee is charged ONLY when collateral is actually fulfilled (AccountSettled finalize),
+ * so users never pay fee for unfulfilled requests.
  *
  * Reference: 2019src.txt line 2976 (they_requested_deposit)
  */
@@ -40,42 +40,60 @@ export function handleRequestCollateral(
     return { success: false, events: [], error: `request_collateral: no delta for token ${tokenId}` };
   }
 
-  // ── Fee payment via offdelta shift ────────────────────────────
-  // Fee is paid by the REQUESTER (user) to the COUNTERPARTY (hub).
-  // byLeft=true means left entity is paying. byLeft=false means right is paying.
-  // Shift offdelta so that payer loses and receiver gains.
-  //
-  // Convention: positive offdelta = LEFT has more.
-  //   If left pays: offdelta decreases (left loses)
-  //   If right pays: offdelta increases (right loses, left gains)
-  if (feeAmount > 0n) {
-    const feeDelta = accountMachine.deltas.get(feeTokenId ?? tokenId);
-    if (!feeDelta) {
-      return { success: false, events: [], error: `request_collateral: no delta for fee token ${feeTokenId ?? tokenId}` };
-    }
+  // Clamp requested amount to CURRENT uncollateralized debt at commit time.
+  // This prevents stale queued requests (computed earlier) from over-requesting
+  // after hub already topped up collateral.
+  const requesterIsLeft = !!byLeft;
+  const totalDelta = delta.ondelta + delta.offdelta;
+  const requesterClaim = requesterIsLeft
+    ? (totalDelta > 0n ? totalDelta : 0n)
+    : (totalDelta < 0n ? -totalDelta : 0n);
+  const uncollateralizedNow = requesterClaim > delta.collateral
+    ? requesterClaim - delta.collateral
+    : 0n;
+  const effectiveAmount = amount > uncollateralizedNow ? uncollateralizedNow : amount;
 
-    // Apply fee: requester pays hub
-    if (byLeft) {
-      // Left (requester) pays → offdelta decreases
-      feeDelta.offdelta -= feeAmount;
-    } else {
-      // Right (requester) pays → offdelta increases (left = hub gains)
-      feeDelta.offdelta += feeAmount;
-    }
+  if (effectiveAmount <= 0n) {
+    // Stale request: already collateralized by the time this frame commits.
+    // Keep state clean and don't charge fee.
+    accountMachine.requestedRebalance.delete(tokenId);
+    accountMachine.requestedRebalanceFeeState?.delete(tokenId);
+    console.log(
+      `ℹ️ request_collateral stale/no-op: token=${tokenId} requested=${amount} uncollateralizedNow=${uncollateralizedNow} byLeft=${byLeft}`,
+    );
+    return {
+      success: true,
+      events: [
+        `ℹ️ Collateral request skipped (already collateralized): requested=${amount}, currentNeed=${uncollateralizedNow}`,
+      ],
+    };
+  }
 
-    console.log(`💰 Rebalance fee: ${feeAmount} token ${feeTokenId ?? tokenId} (paid by ${byLeft ? 'left' : 'right'})`);
+  // Fee is deferred and charged only on fulfilled collateral.
+  // Keep fee proportional to effective request after clamping.
+  const effectiveFee = amount > 0n ? (feeAmount * effectiveAmount) / amount : 0n;
+  if (!accountMachine.requestedRebalanceFeeState) {
+    accountMachine.requestedRebalanceFeeState = new Map();
   }
 
   // ── Store request for hub crontab ─────────────────────────────
   // Hub's hubRebalanceHandler will pick this up and add R→C to jBatch.
-  accountMachine.requestedRebalance.set(tokenId, amount);
+  accountMachine.requestedRebalance.set(tokenId, effectiveAmount);
+  accountMachine.requestedRebalanceFeeState.set(tokenId, {
+    feeTokenId: feeTokenId ?? tokenId,
+    remainingFee: effectiveFee,
+    requestedByLeft: !!byLeft,
+  });
 
-  const feeDisplay = feeAmount > 0n ? `, fee=${feeAmount}` : '';
+  const feeDisplay = effectiveFee > 0n ? `, deferredFee=${effectiveFee}` : '';
   const events = [
-    `🔄 Collateral requested: ${amount} token ${tokenId}${feeDisplay} (hub will deposit R→C)`,
+    `🔄 Collateral requested: ${effectiveAmount} token ${tokenId}${feeDisplay} (hub will deposit R→C; fee on fulfillment)`,
   ];
 
-  console.log(`🔄 request_collateral: token=${tokenId} amount=${amount} fee=${feeAmount} byLeft=${byLeft}`);
+  console.log(
+    `🔄 request_collateral: token=${tokenId} requested=${amount} effective=${effectiveAmount} ` +
+    `deferredFee=${effectiveFee} byLeft=${byLeft} uncollateralizedNow=${uncollateralizedNow}`,
+  );
 
   return { success: true, events };
 }
@@ -101,6 +119,9 @@ export function checkAutoRebalance(
   // Load policy from account (set during openAccount or by user in settings)
   // If no explicit policy, don't auto-rebalance (user hasn't opted in)
   if (accountMachine.rebalancePolicy.size === 0) {
+    console.log(
+      `⏭️ Auto-rebalance skipped: no rebalancePolicy (our=${ourEntityId.slice(-4)}, cp=${counterpartyId.slice(-4)})`,
+    );
     return result;
   }
 
@@ -126,14 +147,20 @@ export function checkAutoRebalance(
       ? theirDebt - delta.collateral
       : 0n;
 
-    // Check if we already have a pending request for this token
+    // Check if we already have a pending request for this token.
     const existingRequest = accountMachine.requestedRebalance.get(tokenId);
     if (existingRequest && existingRequest > 0n) {
+      console.log(
+        `⏭️ Auto-rebalance skipped: existing request token=${tokenId} amount=${existingRequest}`,
+      );
       continue; // Already requested, don't spam
     }
 
     // Check if there's already a pending frame (don't pile up)
     if (accountMachine.pendingFrame) {
+      console.log(
+        `⏭️ Auto-rebalance skipped: pendingFrame exists (token=${tokenId}, h=${accountMachine.pendingFrame.height})`,
+      );
       continue;
     }
 
@@ -144,6 +171,14 @@ export function checkAutoRebalance(
       const LIQUIDITY_FEE_BPS = 10n; // 0.1%
       const liquidityFee = (uncollateralized * LIQUIDITY_FEE_BPS) / 10000n;
       const feeAmount = BASE_FEE > liquidityFee ? BASE_FEE : liquidityFee;
+
+      // Respect user policy ceiling for automated requests.
+      if (feeAmount > policy.maxAcceptableFee) {
+        console.log(
+          `⏭️ Auto-rebalance skipped: token=${tokenId} fee=${feeAmount} > maxAcceptableFee=${policy.maxAcceptableFee}`,
+        );
+        continue;
+      }
 
       // Check we can afford the fee (don't overdraft)
       // Our available balance: depends on our side
@@ -160,7 +195,7 @@ export function checkAutoRebalance(
           feeTokenId: tokenId, // Pay fee in same token
           feeAmount,
         },
-      } as AccountTx);
+      });
 
       console.log(
         `🔄 Auto-rebalance triggered: token=${tokenId} uncollateralized=${uncollateralized} ` +

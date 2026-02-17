@@ -365,6 +365,7 @@ export const applyEntityTx = async (
           frameHistory: [],
           pendingWithdrawals: new Map(),
           requestedRebalance: new Map(),
+          requestedRebalanceFeeState: new Map(),
           rebalancePolicy: new Map(),
           locks: new Map(), // HTLC: Initialize empty locks
           swapOffers: new Map(), // Swap: Initialize empty offers
@@ -902,11 +903,17 @@ export const applyEntityTx = async (
     // === HUB CONFIG (declare entity as hub, enable rebalance crontab) ===
     if (entityTx.type === 'setHubConfig') {
       const newState = cloneEntityState(entityState);
-      const { matchingStrategy = 'hnw', routingFeePPM = 100, baseFee = 0n } = entityTx.data;
+      const {
+        matchingStrategy = 'hnw',
+        routingFeePPM = 100,
+        baseFee = 0n,
+        minCollateralThreshold = 0n,
+        minFeeBps = 10n,
+      } = entityTx.data;
 
-      newState.hubRebalanceConfig = { matchingStrategy, routingFeePPM, baseFee };
+      newState.hubRebalanceConfig = { matchingStrategy, routingFeePPM, baseFee, minCollateralThreshold, minFeeBps };
       console.log(
-        `🏦 Hub config set: strategy=${matchingStrategy}, routingFee=${routingFeePPM}ppm, baseFee=${baseFee}`,
+        `🏦 Hub config set: strategy=${matchingStrategy}, routingFee=${routingFeePPM}ppm, baseFee=${baseFee}, minCollateralThreshold=${minCollateralThreshold}, minFeeBps=${minFeeBps}`,
       );
 
       // Announce updated profile with isHub: true
@@ -923,7 +930,10 @@ export const applyEntityTx = async (
         console.log(`📡 Hub profile announced: ${newState.entityId.slice(-4)} isHub=true`);
       }
 
-      addMessage(newState, `🏦 Hub config activated: ${matchingStrategy} strategy, ${routingFeePPM}ppm routing fee`);
+      addMessage(
+        newState,
+        `🏦 Hub config activated: ${matchingStrategy} strategy, ${routingFeePPM}ppm routing fee, minThreshold=${minCollateralThreshold}, minFeeBps=${minFeeBps}`,
+      );
       return { newState, outputs: [] };
     }
 

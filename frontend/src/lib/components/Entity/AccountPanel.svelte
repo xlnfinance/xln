@@ -543,6 +543,9 @@
     </div>
     <div class="header-row-bottom">
       <span class="frame-badge">Frame #{account.currentFrame.height}</span>
+      <span class="jheight-badge" title="Last finalized bilateral J-event height">
+        J#{account.lastFinalizedJHeight ?? 0}
+      </span>
       {#if account.mempool.length > 0 || account.pendingFrame}
         <span class="status-badge pending">
           {#if account.pendingFrame}
@@ -1240,6 +1243,17 @@
     border-radius: 6px;
     font-size: 0.75em;
     color: #a1a1aa;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
+  }
+
+  .jheight-badge {
+    padding: 3px 10px;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    border-radius: 6px;
+    font-size: 0.75em;
+    color: #93c5fd;
     font-family: 'JetBrains Mono', monospace;
     letter-spacing: 0.02em;
   }

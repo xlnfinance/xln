@@ -813,6 +813,17 @@ export async function createRpcAdapter(
       const depositoryIface = new ethers.Interface(depositoryABI);
       const depositoryForQuery = new ethers.Contract(addresses.depository, depositoryABI, provider);
 
+      const emitWatcherDebug = (payload: Record<string, unknown>) => {
+        const p2p = (watcherEnv as any)?.runtimeState?.p2p;
+        if (p2p && typeof p2p.sendDebugEvent === 'function') {
+          p2p.sendDebugEvent({
+            level: 'info',
+            code: 'J_WATCH_RPC',
+            ...payload,
+          });
+        }
+      };
+
       const doPoll = async () => {
         if (!watcherEnv) return;
         try {
@@ -854,6 +865,11 @@ export async function createRpcAdapter(
             }
 
             if (rawEvents.length > 0) {
+              const eventCounts: Record<string, number> = {};
+              for (const e of rawEvents) {
+                eventCounts[e.name] = (eventCounts[e.name] || 0) + 1;
+              }
+
               const byBlock = new Map<number, RawJEvent[]>();
               for (const e of rawEvents) {
                 const bn = e.blockNumber ?? 0;
@@ -864,11 +880,25 @@ export async function createRpcAdapter(
                 const blockHash = events[0]?.blockHash ?? '0x0';
                 processEventBatch(events, watcherEnv, blockNum, blockHash, txCounter, 'rpc');
               }
+
+              emitWatcherDebug({
+                event: 'j_watch_batch',
+                fromBlock,
+                toBlock: currentBlock,
+                blockCount: byBlock.size,
+                rawEventCount: rawEvents.length,
+                eventCounts,
+              });
             }
           }
 
           lastSyncedBlock = currentBlock;
         } catch (error) {
+          emitWatcherDebug({
+            event: 'j_watch_error',
+            message: error instanceof Error ? error.message : String(error),
+            lastSyncedBlock,
+          });
           if (!(error instanceof Error && error.message.includes('ECONNREFUSED'))) {
             console.error(`🔭❌ [JAdapter:rpc] Sync error:`, error instanceof Error ? error.message : String(error));
           }

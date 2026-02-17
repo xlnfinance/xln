@@ -142,6 +142,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       frameHistory: [],
       pendingWithdrawals: new Map(),
       requestedRebalance: new Map(), // Phase 2: C→R withdrawal tracking
+      requestedRebalanceFeeState: new Map(), // Deferred fee charged on fulfilled R→C only
       rebalancePolicy: new Map(), // Rebalance: per-token soft/hard/maxFee
       locks: new Map(), // HTLC: Empty locks map
       swapOffers: new Map(), // Swap: Empty offers map

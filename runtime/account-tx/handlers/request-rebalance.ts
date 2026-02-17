@@ -13,6 +13,7 @@ export function handleRequestRebalance(
   const { tokenId, amount } = accountTx.data;
 
   accountMachine.requestedRebalance.set(tokenId, amount);
+  accountMachine.requestedRebalanceFeeState?.delete(tokenId); // Legacy path has no deferred fee budget
 
   console.log(`🔄 Rebalance requested: ${amount} token ${tokenId} (hub will coordinate)`);
 

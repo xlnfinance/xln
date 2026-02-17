@@ -387,15 +387,26 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
     (hubBatch?.collateralToReserve?.length || 0) +
     (hubBatch?.settlements?.length || 0);
 
+  const useManualBroadcast = jadapter.mode === 'browservm';
+
   if (totalOps > 0) {
-    // Broadcast
-    await process(env, [{
-      entityId: hub.id, signerId: hub.signer,
-      entityTxs: [{ type: 'j_broadcast', data: {} }]
-    }]);
-    advanceTime(150);
-    await process(env);
-    await syncChain(env, 5);
+    if (useManualBroadcast) {
+      // BrowserVM path: submit directly
+      await process(env, [{
+        entityId: hub.id, signerId: hub.signer,
+        entityTxs: [{ type: 'j_broadcast', data: {} }]
+      }]);
+      advanceTime(150);
+      await process(env);
+      await syncChain(env, 5);
+    } else {
+      // RPC path: avoid duplicate submissions; let crontab side-effects broadcast.
+      for (let i = 0; i < 6; i++) {
+        advanceTime(350);
+        await process(env);
+        await syncChain(env, 1);
+      }
+    }
   } else {
     // Extra cycle
     advanceTime(31000);
@@ -409,13 +420,21 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
       (hubBatch2?.settlements?.length || 0);
 
     if (totalOps2 > 0) {
-      await process(env, [{
-        entityId: hub.id, signerId: hub.signer,
-        entityTxs: [{ type: 'j_broadcast', data: {} }]
-      }]);
-      advanceTime(150);
-      await process(env);
-      await syncChain(env, 5);
+      if (useManualBroadcast) {
+        await process(env, [{
+          entityId: hub.id, signerId: hub.signer,
+          entityTxs: [{ type: 'j_broadcast', data: {} }]
+        }]);
+        advanceTime(150);
+        await process(env);
+        await syncChain(env, 5);
+      } else {
+        for (let i = 0; i < 6; i++) {
+          advanceTime(350);
+          await process(env);
+          await syncChain(env, 1);
+        }
+      }
     }
   }
 
@@ -429,15 +448,15 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
 
   const hubFinal = findReplica(env, hub.id)[1].state;
 
-  // Nonces: C→R settlements (Alice, Charlie) should have nonce >= 2 (manual + auto)
-  // Actually manual settle was Alice only, so:
-  //   Alice nonce >= 2 (manual settle + crontab C→R)
-  //   Charlie nonce >= 1 (crontab C→R)
-  //   Bob, Dave: R→C deposit only, no settlement nonce change expected
-  for (const user of [alice, charlie]) {
-    const acc = hubFinal.accounts.get(user.id);
-    const nonce = acc?.onChainSettlementNonce || 0;
-    assert(nonce >= 1, `Hub<>${user.name} nonce should be >= 1 after C→R (got ${nonce})`, env);
+  // Nonces in direct R→C flow:
+  // - Alice had manual settlement in Phase 3 => nonce >= 1
+  // - Rebalance path is direct R→C (no settlement workspace) => no extra nonce increments
+  const aliceNonce = hubFinal.accounts.get(alice.id)?.onChainSettlementNonce || 0;
+  assert(aliceNonce >= 1, `Hub<>Alice nonce should be >= 1 after manual settlement (got ${aliceNonce})`, env);
+  console.log(`  Hub<>Alice nonce=${aliceNonce}`);
+  for (const user of [bob, charlie, dave]) {
+    const nonce = hubFinal.accounts.get(user.id)?.onChainSettlementNonce || 0;
+    assert(nonce === 0, `Hub<>${user.name} nonce should stay 0 in direct R→C flow (got ${nonce})`, env);
     console.log(`  Hub<>${user.name} nonce=${nonce}`);
   }
 
@@ -447,12 +466,16 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
     assert(!acc?.settlementWorkspace, `Hub<>${user.name} workspace should be cleared (got ${acc?.settlementWorkspace?.status})`, env);
   }
 
-  // Counterparty nonce check
-  for (const user of [alice, charlie]) {
+  // Counterparty nonce check mirrors hub side.
+  const [, aliceReplica] = findReplica(env, alice.id);
+  const aliceAcc = aliceReplica.state.accounts.get(hub.id);
+  assert((aliceAcc?.onChainSettlementNonce || 0) >= 1, `Alice<>Hub nonce should be >= 1 after manual settlement`, env);
+  assert(!aliceAcc?.settlementWorkspace, `Alice<>Hub workspace should be cleared`, env);
+  for (const user of [bob, charlie, dave]) {
     const [, userReplica] = findReplica(env, user.id);
     const userAcc = userReplica.state.accounts.get(hub.id);
     const userNonce = userAcc?.onChainSettlementNonce || 0;
-    assert(userNonce >= 1, `${user.name}<>Hub counterparty nonce should be >= 1 (got ${userNonce})`, env);
+    assert(userNonce === 0, `${user.name}<>Hub counterparty nonce should stay 0 in direct R→C flow (got ${userNonce})`, env);
     assert(!userAcc?.settlementWorkspace, `${user.name}<>Hub workspace should be cleared`, env);
   }
 

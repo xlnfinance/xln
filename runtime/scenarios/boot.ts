@@ -111,6 +111,7 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
 
   // 3. Create JAdapter (creates BrowserVM or connects to RPC)
   const jadapter = await ensureJAdapter(env, config.mode);
+  await jadapter.deployStack();
 
   // 4. Create jReplica
   const jReplicaName = config.jurisdictionName ?? `${config.name} Demo`;
@@ -132,10 +133,14 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
   jadapter.startWatching(env);
 
   // 7. Create jurisdiction config
+  const jurisdictionRpcUrl = jadapter.mode === 'browservm'
+    ? 'browservm://'
+    : (config.rpcUrl ?? process.env.ANVIL_RPC ?? 'http://localhost:8545');
   const jurisdiction = createJurisdictionConfig(
     jReplicaName,
     jadapter.addresses.depository,
     jadapter.addresses.entityProvider,
+    jurisdictionRpcUrl,
   );
 
   console.log(`[Boot] ${config.name}: env + jadapter + jReplica "${jReplicaName}" ready`);
@@ -357,13 +362,14 @@ export function createJurisdictionConfig(
   name: string,
   depositoryAddress: string,
   entityProviderAddress: string = '0x0000000000000000000000000000000000000000',
+  address: string = 'browservm://',
 ): JurisdictionConfig {
   return {
+    address,
     name,
     chainId: 31337,
     entityProviderAddress,
     depositoryAddress,
-    rpc: 'browservm://'
   };
 }
 

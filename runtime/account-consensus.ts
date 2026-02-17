@@ -1494,6 +1494,18 @@ export async function handleAccountInput(
     try {
       const { checkAutoRebalance } = await import('./account-tx/handlers/request-collateral');
       const rebalanceTxs = checkAutoRebalance(accountMachine, ourEntityId, input.fromEntityId);
+      const p2p = (env as any)?.runtimeState?.p2p;
+      const emitRebalanceDebug = (payload: Record<string, unknown>) => {
+        if (p2p && typeof p2p.sendDebugEvent === 'function') {
+          p2p.sendDebugEvent({
+            level: 'info',
+            code: 'AUTO_REBALANCE',
+            accountId: input.fromEntityId,
+            frameHeight: receivedFrame.height,
+            ...payload,
+          });
+        }
+      };
       if (rebalanceTxs.length > 0) {
         for (const tx of rebalanceTxs) {
           accountMachine.mempool.push(tx);
@@ -1501,6 +1513,23 @@ export async function handleAccountInput(
         console.log(
           `🔄 AUTO-REBALANCE: Queued ${rebalanceTxs.length} request_collateral txs after frame ${receivedFrame.height}`,
         );
+        emitRebalanceDebug({
+          event: 'queued',
+          txCount: rebalanceTxs.length,
+          tokenIds: rebalanceTxs
+            .map((tx: any) => tx?.data?.tokenId)
+            .filter((v: unknown) => typeof v === 'number'),
+        });
+      } else {
+        console.log(
+          `ℹ️ AUTO-REBALANCE: No request queued after frame ${receivedFrame.height} ` +
+          `(policyCount=${accountMachine.rebalancePolicy?.size || 0})`,
+        );
+        emitRebalanceDebug({
+          event: 'skipped',
+          policyCount: accountMachine.rebalancePolicy?.size || 0,
+          hasPendingFrame: !!accountMachine.pendingFrame,
+        });
       }
     } catch (rebalanceErr) {
       // Non-fatal: rebalance check failure shouldn't break frame processing

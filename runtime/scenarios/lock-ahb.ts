@@ -984,6 +984,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // Verify total shift with recipient-exact HTLC:
     // A-H includes sender gross for payment1 + direct payment2; H-B tracks recipient net.
+    // Deferred rebalance fee is charged on fulfillment (AccountSettled), not at request time.
     const htlcFee = payment1SenderGross - payment1;
 
     const ahDeltaFinal = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);

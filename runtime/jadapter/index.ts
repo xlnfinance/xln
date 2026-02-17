@@ -39,7 +39,7 @@ class NonceTrackingWallet extends ethers.Wallet {
     // Manually track nonce to avoid race conditions with pending txs
     if (this._managedNonce === -1) {
       const address = await this.getAddress();
-      this._managedNonce = await this.provider!.getTransactionCount(address, 'latest');
+      this._managedNonce = await this.provider!.getTransactionCount(address, 'pending');
     }
     const nonce = this._managedNonce++;
     return super.populateTransaction({ ...tx, nonce });

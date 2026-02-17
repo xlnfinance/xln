@@ -4,7 +4,7 @@
  */
 
 import { startRuntimeWsServer } from '../networking/ws-server';
-import { main, startP2P, process as runtimeProcess, applyRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime';
+import { main, startP2P, process as runtimeProcess, enqueueRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime';
 import { processUntil, converge } from './helpers';
 import { isLeft, deriveDelta } from '../account-utils';
 import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account-crypto';
@@ -161,20 +161,26 @@ const waitForReserveBalance = async (
   label: string,
   maxRounds = 300
 ) => {
-  await processUntil(
-    env,
-    () => getReserveBalance(env, entityId, signerId, tokenId) >= minAmount,
-    maxRounds,
-    label,
-    round => {
-      if (round % 10 === 0) {
-        console.log(`[P2P_DEBUG] wait-reserve ${label} round=${round} reserve=${getReserveBalance(env, entityId, signerId, tokenId)}`);
-      }
-    },
-    () => {
-      console.log(`[P2P_DEBUG] wait-reserve ${label} timeout reserve=${getReserveBalance(env, entityId, signerId, tokenId)}`);
+  const jadapter = getActiveJAdapter(env);
+  for (let round = 1; round <= maxRounds; round++) {
+    if (getReserveBalance(env, entityId, signerId, tokenId) >= minAmount) return;
+
+    await runtimeProcess(env);
+    if (typeof (jadapter as any)?.pollNow === 'function') {
+      await (jadapter as any).pollNow();
+      await runtimeProcess(env);
     }
-  );
+
+    if (getReserveBalance(env, entityId, signerId, tokenId) >= minAmount) return;
+
+    if (round % 10 === 0) {
+      console.log(`[P2P_DEBUG] wait-reserve ${label} round=${round} reserve=${getReserveBalance(env, entityId, signerId, tokenId)}`);
+    }
+    await sleep(10);
+  }
+
+  console.log(`[P2P_DEBUG] wait-reserve ${label} timeout reserve=${getReserveBalance(env, entityId, signerId, tokenId)}`);
+  throw new Error(`processUntil: ${label} not satisfied after ${maxRounds} rounds`);
 };
 
 const fundWalletAndDeposit = async (
@@ -638,7 +644,7 @@ const run = async () => {
     rpcUrl = resolved.rpcUrl;
     contracts = resolved.contracts;
 
-    await applyRuntimeInput(env, {
+    enqueueRuntimeInput(env, {
       runtimeTxs: [
         {
           type: 'importJ',
@@ -648,17 +654,19 @@ const run = async () => {
             ticker: 'XLN',
             rpcs: [rpcUrl],
             contracts: {
+              account: contracts.account,
               depository: contracts.depository,
               entityProvider: contracts.entityProvider,
+              deltaTransformer: contracts.deltaTransformer,
             },
           },
         },
       ],
       entityInputs: [],
     });
+    await runtimeProcess(env);
 
     // J-event watching is handled by JAdapter.startWatching() per-jReplica
-    startJWatcherProcessingLoop(env);
     console.log(`P2P_JADAPTER_READY role=${role} rpc=${rpcUrl}`);
   }
 
@@ -697,7 +705,6 @@ const run = async () => {
   } else if (isHub) {
     throw new Error(`RELAY_PORT_MISSING: ${relayPort}`);
   }
-  env.scenarioMode = true;
   if (!env.runtimeId) {
     throw new Error(`RUNTIME_ID_MISSING: ${role}`);
   }
@@ -713,7 +720,7 @@ const run = async () => {
   const { config } = createLazyEntity(role, [signerId], 1n, jurisdiction ?? undefined);
   const entityId = generateLazyEntityId([signerId], 1n);
 
-  await applyRuntimeInput(env, {
+  enqueueRuntimeInput(env, {
     runtimeTxs: [
       {
         type: 'importReplica',
@@ -728,6 +735,7 @@ const run = async () => {
     ],
     entityInputs: [],
   });
+  await runtimeProcess(env);
 
   console.log(`🔧 P2P_CONFIG: role=${role} profileName=${role} entityId=${entityId.slice(-4)}`);
 
@@ -761,6 +769,12 @@ const run = async () => {
       USDC = usdcToken.tokenId;
     }
     await fundWalletAndDeposit(env, jadapter, usdcToken, entityId, signerId, FAUCET_DEPOSIT_AMOUNT);
+    // RPC watcher default poll is 15s; force immediate fetch so reserve sync is not timing-sensitive.
+    if (typeof (jadapter as any).pollNow === 'function') {
+      await (jadapter as any).pollNow();
+      await runtimeProcess(env);
+      await runtimeProcess(env);
+    }
     await waitForReserveBalance(env, entityId, signerId, USDC, FAUCET_DEPOSIT_AMOUNT, `${role}-faucet`);
     console.log(`P2P_FAUCET_READY role=${role} token=${usdcToken.symbol} reserve=${getReserveBalance(env, entityId, signerId, USDC)}`);
   }
@@ -791,6 +805,18 @@ const run = async () => {
     await waitForAccount(env, entityId, signerId, bobProfile.entityId, 300);
     logAccountState(env, entityId, signerId, aliceProfile.entityId, 'hub account after open');
     logAccountState(env, entityId, signerId, bobProfile.entityId, 'hub account after open');
+
+    // Ensure both freshly opened hub-side accounts are stable before proposing credit-limit frames.
+    await processUntil(
+      env,
+      () => {
+        const aliceAcc = getAccount(env, entityId, signerId, aliceProfile.entityId);
+        const bobAcc = getAccount(env, entityId, signerId, bobProfile.entityId);
+        return !!aliceAcc && !!bobAcc && !aliceAcc.pendingFrame && !bobAcc.pendingFrame;
+      },
+      120,
+      'hub-open-accounts-stable',
+    );
 
     // Mutual credit: Hub extends to Alice, Alice extends to Hub
     await runtimeProcess(env, [
@@ -875,7 +901,7 @@ const run = async () => {
 
   // STEP 1: Wait for HUB to extend credit to us (hub gives first)
   console.log(`${role.toUpperCase()}: Waiting for hub to extend credit...`);
-  await waitForCreditLimit(env, entityId, signerId, hubProfile.entityId, usd(500_000), 60);
+  await waitForCreditLimit(env, entityId, signerId, hubProfile.entityId, usd(500_000), 300);
   console.log(`${role.toUpperCase()}: ✅ Hub extended credit to us`);
 
   // STEP 2: CLIENT extends credit to HUB (mutual credit)
@@ -891,7 +917,7 @@ const run = async () => {
   ]);
 
   await converge(env, 30);
-  await waitForOwnCreditLimit(env, entityId, signerId, hubProfile.entityId, usd(500_000), 60);
+  await waitForOwnCreditLimit(env, entityId, signerId, hubProfile.entityId, usd(500_000), 300);
 
   // ASSERT: Verify bidirectional capacity exists
   const accountAfterCredit = getAccount(env, entityId, signerId, hubProfile.entityId);
@@ -922,7 +948,11 @@ const run = async () => {
     await waitForHubAccount(env, bobProfile.entityId, refreshGossip);
 
     if (useRpc) {
-      const reserveBefore = getReserveBalance(env, entityId, signerId, USDC);
+      const jadapter = getActiveJAdapter(env);
+      if (!jadapter) {
+        throw new Error('JADAPTER_MISSING_FOR_R2R');
+      }
+      const reserveBefore = await jadapter.getReserves(entityId, USDC);
       if (reserveBefore < R2R_AMOUNT) {
         throw new Error(`R2R_INSUFFICIENT_RESERVE: have=${reserveBefore} need=${R2R_AMOUNT}`);
       }
@@ -945,20 +975,32 @@ const run = async () => {
         },
       ]);
 
-      await processUntil(
-        env,
-        () => getReserveBalance(env, entityId, signerId, USDC) <= reserveBefore - R2R_AMOUNT,
-        300,
-        'alice-r2r',
-        round => {
-          if (round % 10 === 0) {
-            console.log(`[P2P_DEBUG] alice-r2r round=${round} reserve=${getReserveBalance(env, entityId, signerId, USDC)}`);
-          }
-        },
-        () => {
-          console.log(`[P2P_DEBUG] alice-r2r timeout reserve=${getReserveBalance(env, entityId, signerId, USDC)}`);
+      let settled = false;
+      for (let round = 1; round <= 300; round++) {
+        const chainReserve = await jadapter.getReserves(entityId, USDC);
+        if (chainReserve <= reserveBefore - R2R_AMOUNT) {
+          settled = true;
+          break;
         }
-      );
+        await runtimeProcess(env);
+        if (typeof (jadapter as any).pollNow === 'function') {
+          await (jadapter as any).pollNow();
+          await runtimeProcess(env);
+        }
+        if (round % 10 === 0) {
+          console.log(
+            `[P2P_DEBUG] alice-r2r round=${round} local=${getReserveBalance(env, entityId, signerId, USDC)} chain=${chainReserve}`,
+          );
+        }
+        await sleep(10);
+      }
+      if (!settled) {
+        const finalChain = await jadapter.getReserves(entityId, USDC);
+        const finalLocal = getReserveBalance(env, entityId, signerId, USDC);
+        throw new Error(
+          `alice-r2r not satisfied after 300 rounds (chain=${finalChain}, local=${finalLocal}, expected<=${reserveBefore - R2R_AMOUNT})`,
+        );
+      }
 
       console.log('P2P_R2R_SENT');
     }

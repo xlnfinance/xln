@@ -653,6 +653,8 @@ export type EntityTx =
         matchingStrategy?: 'hnw' | 'fifo'; // Default: 'hnw'
         routingFeePPM?: number;             // Default: 100 (0.01%)
         baseFee?: bigint;                   // Default: 0n
+        minCollateralThreshold?: bigint;    // Hub-owned proactive R→C threshold (default: 0n)
+        minFeeBps?: bigint;                 // Minimum fee for request_collateral fulfillment (default: 10 = 0.1%)
       };
     }
   | {
@@ -1079,6 +1081,7 @@ export interface AccountMachine {
 
   // Rebalancing hints (Phase 3: Hub coordination)
   requestedRebalance: Map<number, bigint>; // tokenId → amount entity wants rebalanced (credit→collateral)
+  requestedRebalanceFeeState: Map<number, RebalanceRequestFeeState>; // tokenId → deferred fee state
 
   // Rebalance policy (per-token soft/hard limits + max acceptable fee)
   rebalancePolicy: Map<number, RebalancePolicy>; // tokenId → policy
@@ -1336,6 +1339,15 @@ export type AccountTx =
       };
     }
   | {
+      type: 'request_collateral';
+      data: {
+        tokenId: number;
+        amount: bigint;       // Requested collateral deposit amount (R→C)
+        feeTokenId?: number;  // Optional fee token (defaults to tokenId)
+        feeAmount: bigint;    // Deferred fee budget (charged only when collateral is fulfilled)
+      };
+    }
+  | {
       type: 'set_rebalance_policy';
       data: {
         tokenId: number;
@@ -1569,6 +1581,8 @@ export interface HubRebalanceConfig {
   matchingStrategy: 'hnw' | 'fifo'; // hnw = biggest first, fifo = oldest quote first
   routingFeePPM: number;             // Routing fee in parts per million (0-10000 = 0%-1%)
   baseFee: bigint;                   // Fixed fee per routed payment (smallest unit)
+  minCollateralThreshold?: bigint;   // Hub-owned proactive R→C threshold (default: 0n)
+  minFeeBps?: bigint;                // Min fee gate for explicit request_collateral (default: 10 = 0.1%)
 }
 
 /** Per-token rebalance policy (stored per-token in AccountMachine) */
@@ -1587,6 +1601,13 @@ export interface RebalanceQuote {
   feeTokenId: number;
   feeAmount: bigint;
   accepted: boolean;    // true if auto-accepted or manually accepted
+}
+
+/** Deferred fee state for request_collateral (fee charged only on fulfilled R→C). */
+export interface RebalanceRequestFeeState {
+  feeTokenId: number;
+  remainingFee: bigint;
+  requestedByLeft: boolean;
 }
 
 // Rebalance constants (all amounts in 18-decimal base, matching TOKEN_REGISTRY)
