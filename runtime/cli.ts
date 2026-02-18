@@ -14,7 +14,7 @@ import { createProviderScopedEntityId, normalizeEntityId } from './entity-id-uti
 
 const REMOTE_RPC = 'https://xln.finance/rpc/arrakis';
 const LOCAL_RPC = 'http://127.0.0.1:8545';
-const CHAIN_ID = 1337;
+const CHAIN_ID = 31337;
 
 // Contract addresses from jurisdictions.json (deployed 2025-01-29)
 const CONTRACTS = {

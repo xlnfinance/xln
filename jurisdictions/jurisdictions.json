@@ -1,0 +1,49 @@
+{
+  "version": "2.0.0",
+  "lastUpdated": "2026-02-18T19:38:04.113Z",
+  "jurisdictions": {
+    "arrakis": {
+      "name": "Arrakis (Shared Anvil)",
+      "chainId": 31337,
+      "rpc": "http://localhost:8545",
+      "contracts": {
+        "account": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "depository": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+        "entityProvider": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "deltaTransformer": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+      },
+      "explorer": "http://localhost:8545",
+      "currency": "SPICE",
+      "status": "active",
+      "description": "The desert planet - strategic resource hub, high-value trade",
+      "rebalancePolicyUsd": {
+        "softLimit": 500,
+        "hardLimit": 10000,
+        "maxFee": 15
+      }
+    },
+    "wakanda": {
+      "name": "Wakanda",
+      "chainId": 31337,
+      "rpc": "/rpc",
+      "contracts": {
+        "entityProvider": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
+        "depository": "0x0165878A594ca255338adfa4d48449f69242Eb8F"
+      },
+      "explorer": "http://localhost:8545",
+      "currency": "VIBRANIUM",
+      "status": "pending",
+      "description": "Alias on shared local anvil (single-chain demo mode)"
+    }
+  },
+  "defaults": {
+    "timeout": 30000,
+    "retryAttempts": 3,
+    "gasLimit": 1000000,
+    "rebalancePolicyUsd": {
+      "softLimit": 500,
+      "hardLimit": 10000,
+      "maxFee": 15
+    }
+  }
+}

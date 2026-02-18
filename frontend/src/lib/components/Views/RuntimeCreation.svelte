@@ -187,6 +187,7 @@
 
   let inputMode: InputMode = 'brainvault';
   let phase: Phase = 'input';
+  let createLoginType: 'manual' | 'demo' = 'manual';
   let showSuccessHeader = true;
   let successHeaderTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -420,7 +421,10 @@
       return;
     }
 
-    await vaultOperations.createRuntime(label, mnemonic24);
+    await vaultOperations.createRuntime(label, mnemonic24, {
+      loginType: 'manual',
+      requiresOnboarding: true,
+    });
     showSaveVaultModal = false;
     vaultNameInput = '';
   }
@@ -572,7 +576,10 @@
       const label = `Mnemonic ${ethereumAddress.slice(0, 6)}`;
 
       if (!vaultOperations.runtimeExists(runtimeId)) {
-        await vaultOperations.createRuntime(label, mnemonic24);
+        await vaultOperations.createRuntime(label, mnemonic24, {
+          loginType: 'manual',
+          requiresOnboarding: true,
+        });
         // entityId is set by createRuntime internally
         console.log('🔐 Mnemonic runtime created:', runtimeId.slice(0, 10));
       } else {
@@ -785,7 +792,10 @@
       const label = name.trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
 
       if (!vaultOperations.runtimeExists(runtimeId)) {
-        await vaultOperations.createRuntime(label, mnemonic24);
+        await vaultOperations.createRuntime(label, mnemonic24, {
+          loginType: createLoginType,
+          requiresOnboarding: createLoginType !== 'demo',
+        });
         // Auto-create entity for first signer
         vaultOperations.setSignerEntity(0, entityId);
         console.log('🔐 Runtime auto-saved:', runtimeId.slice(0, 10) + '...', `(${label})`);
@@ -794,6 +804,7 @@
         vaultOperations.selectRuntime(runtimeId);
         console.log('🔐 Existing runtime selected:', runtimeId.slice(0, 10) + '...');
       }
+      createLoginType = 'manual';
     }
   }
 
@@ -960,6 +971,7 @@
                     passphrase = account.password;
                     shardInput = account.factor;
                     inputMode = 'brainvault';
+                    createLoginType = 'demo';
                     setTimeout(() => startDerivation(), 100);
                   }}
                 >

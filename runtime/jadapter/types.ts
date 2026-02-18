@@ -14,7 +14,11 @@ export interface JAdapterConfig {
   chainId: number;
   rpcUrl?: string;                    // Required for anvil/rpc
   stateFile?: string;                 // Anvil: --load-state, BrowserVM: import path
-  privateKey?: string;                // Signer key (default: hardhat #0)
+  privateKey?: string;                // Signer key (required for non-dev RPC chains)
+  watchPollMs?: number;               // Optional watcher polling interval override
+  confirmationDepth?: number;         // Optional event finality depth override
+  txWaitTimeoutMs?: number;           // Optional tx wait timeout override
+  txWaitConfirms?: number;            // Optional tx.wait confirmations override
   fromReplica?: JReplica;             // Sync addresses from existing replica
   browserVMState?: BrowserVMState;    // Import BrowserVM state directly
 }
@@ -73,6 +77,11 @@ export interface JAdapter {
   // Reads
   getReserves(entityId: string, tokenId: number): Promise<bigint>;
   getCollateral(entity1: string, entity2: string, tokenId: number): Promise<bigint>;
+  getAccountInfo(entityId: string, counterpartyId: string): Promise<{
+    nonce: bigint;
+    disputeHash: string;
+    disputeTimeout: bigint;
+  }>;
   getEntityNonce(entityId: string): Promise<bigint>;
   isEntityRegistered(entityId: string): Promise<boolean>;
   getTokenRegistry(): Promise<JTokenInfo[]>;
@@ -182,6 +191,10 @@ export interface BrowserVMProvider {
   onAny(callback: (events: any[]) => void): () => void;
   getCollateral(entityId: string, counterpartyId: string, tokenId: number): Promise<{ collateral: bigint; ondelta: bigint }>;
   getReserves(entityId: string, tokenId: number): Promise<bigint>;
+  getAccountInfo?(
+    entityId: string,
+    counterpartyId: string,
+  ): Promise<{ nonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
   getEntityNonce(entityId: string): Promise<bigint>;
   signSettlement(
     initiatorEntityId: string,

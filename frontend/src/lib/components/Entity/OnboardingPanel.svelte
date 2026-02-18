@@ -4,15 +4,25 @@
   Shown once after first runtime creation. User must:
   1. Accept terms & conditions
   2. Set a public display name (gossip-visible, searchable)
-  3. Choose collateral policy: Autopilot (default) or Manual
+  3. Configure autopilot policy + optional auto-join hubs
 
-  After completion, profile is broadcast via gossip and the flag
-  `onboardingComplete` is persisted in localStorage.
+  After completion, profile is broadcast via gossip and onboarding completion
+  is persisted per-entity in localStorage.
 -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
-  import { settings, settingsOperations } from '../../stores/settingsStore';
-  import { xlnFunctions } from '../../stores/xlnStore';
+  import { enqueueEntityInputs, getEnv } from '../../stores/xlnStore';
+  import {
+    type HubJoinPreference,
+    hydrateJurisdictionPolicyDefaults,
+    readHubJoinPreference,
+    readSavedCollateralPolicy,
+    writeHubJoinPreference,
+    writeSavedCollateralPolicy,
+    getOpenAccountRebalancePolicyData,
+  } from '../../utils/onboardingPreferences';
+  import { readOnboardingComplete, writeOnboardingComplete } from '../../utils/onboardingState';
 
   export let entityId: string = '';
   export let signerId: string = '';
@@ -23,23 +33,158 @@
   let step = 1; // 1=terms, 2=profile, 3=policy
   let termsAccepted = false;
   let displayName = '';
-  let policyMode: 'autopilot' | 'manual' = 'autopilot';
   let softLimitUsd = 500;
+  let hardLimitUsd = 10_000;
+  let maxFeeUsd = 15;
+  let defaultSoftLimitUsd = 500;
+  let defaultHardLimitUsd = 10_000;
+  let defaultMaxFeeUsd = 15;
+  let autoJoinHubs: HubJoinPreference = 'manual';
   let submitting = false;
   let error = '';
+  let hasPersistedPolicy = false;
 
-  const SOFT_LIMIT_OPTIONS = [
-    { label: '$100', value: 100 },
-    { label: '$500', value: 500 },
-    { label: '$1,000', value: 1000 },
-    { label: '$5,000', value: 5000 },
-    { label: '$10,000', value: 10000 },
+  const HUB_JOIN_OPTIONS: Array<{ value: HubJoinPreference; label: string }> = [
+    { value: 'manual', label: 'Join hubs manually' },
+    { value: '1', label: 'Auto-join 1 random hub' },
+    { value: '2', label: 'Auto-join 2 random hubs' },
+    { value: '3', label: 'Auto-join 3 random hubs' },
   ];
+
+  const toUsdInt = (value: number, fallback: number): number => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(0, Math.floor(parsed));
+  };
+
+  const parseJoinCount = (pref: HubJoinPreference): number =>
+    pref === 'manual' ? 0 : Number(pref);
+
+  const shuffle = <T,>(items: T[]): T[] => {
+    const out = [...items];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const a = out[i];
+      const b = out[j];
+      out[i] = b as T;
+      out[j] = a as T;
+    }
+    return out;
+  };
 
   // ── Validation ───────────────────────────────────
   $: canProceedStep1 = termsAccepted;
   $: canProceedStep2 = displayName.trim().length >= 2;
-  $: canFinish = termsAccepted && displayName.trim().length >= 2;
+  $: canFinish =
+    termsAccepted &&
+    displayName.trim().length >= 2 &&
+    softLimitUsd > 0 &&
+    hardLimitUsd >= softLimitUsd &&
+    maxFeeUsd >= 0;
+
+  {
+    const savedPolicy = readSavedCollateralPolicy();
+    softLimitUsd = savedPolicy.softLimitUsd;
+    hardLimitUsd = savedPolicy.hardLimitUsd;
+    maxFeeUsd = savedPolicy.maxFeeUsd;
+    hasPersistedPolicy = savedPolicy.timestamp > 0;
+    autoJoinHubs = readHubJoinPreference();
+  }
+
+  onMount(async () => {
+    try {
+      const env = getEnv();
+      const activeJurisdiction = String(env?.activeJurisdiction || '').trim().toLowerCase();
+      const defaults = await hydrateJurisdictionPolicyDefaults(activeJurisdiction);
+      defaultSoftLimitUsd = defaults.softLimitUsd;
+      defaultHardLimitUsd = defaults.hardLimitUsd;
+      defaultMaxFeeUsd = defaults.maxFeeUsd;
+
+      if (!hasPersistedPolicy) {
+        softLimitUsd = defaults.softLimitUsd;
+        hardLimitUsd = defaults.hardLimitUsd;
+        maxFeeUsd = defaults.maxFeeUsd;
+      }
+    } catch {
+      // Keep static fallback defaults if jurisdictions.json isn't available.
+    }
+  });
+
+  function hasAccountEntry(currentEnv: any, ownerEntityId: string, counterpartyEntityId: string): boolean {
+    if (!currentEnv?.eReplicas || !(currentEnv.eReplicas instanceof Map)) return false;
+    const owner = String(ownerEntityId).toLowerCase();
+    const counterparty = String(counterpartyEntityId).toLowerCase();
+    for (const [key, replica] of currentEnv.eReplicas.entries()) {
+      const [entityKey] = String(key).split(':');
+      if (String(entityKey || '').toLowerCase() !== owner) continue;
+      const accounts = replica?.state?.accounts;
+      if (!(accounts instanceof Map)) return false;
+      for (const accountKey of accounts.keys()) {
+        if (String(accountKey).toLowerCase() === counterparty) return true;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  function getHubEntityIds(currentEnv: any): string[] {
+    const discovered: string[] = [];
+    const add = (value: unknown) => {
+      const id = String(value || '').trim();
+      if (!id) return;
+      if (id.toLowerCase() === entityId.toLowerCase()) return;
+      if (!discovered.some(existing => existing.toLowerCase() === id.toLowerCase())) {
+        discovered.push(id);
+      }
+    };
+
+    if (currentEnv?.gossip?.getHubs) {
+      const hubs = currentEnv.gossip.getHubs();
+      for (const profile of hubs || []) add(profile?.entityId);
+    } else if (currentEnv?.gossip?.getProfiles) {
+      const profiles = currentEnv.gossip.getProfiles();
+      for (const profile of profiles || []) {
+        const isHub = profile?.metadata?.isHub === true ||
+          (Array.isArray(profile?.capabilities) &&
+            (profile.capabilities.includes('hub') || profile.capabilities.includes('routing')));
+        if (isHub) add(profile?.entityId);
+      }
+    }
+
+    return discovered;
+  }
+
+  async function queueAutoHubJoins(joinCount: number): Promise<number> {
+    if (joinCount <= 0 || !entityId || !signerId) return 0;
+    const env = getEnv();
+    if (!env) return 0;
+    const rebalancePolicy = getOpenAccountRebalancePolicyData();
+    if (!rebalancePolicy) return 0;
+
+    const candidates = shuffle(getHubEntityIds(env))
+      .filter(hubId => !hasAccountEntry(env, entityId, hubId))
+      .slice(0, joinCount);
+    if (candidates.length === 0) return 0;
+
+    const creditAmount = 10_000n * 10n ** 18n;
+    const entityTxs = candidates.map((hubId) => ({
+      type: 'openAccount' as const,
+      data: {
+        targetEntityId: hubId,
+        creditAmount,
+        tokenId: 1,
+        rebalancePolicy,
+      },
+    }));
+
+    await enqueueEntityInputs(env as any, [{
+      entityId,
+      signerId,
+      entityTxs,
+    }]);
+
+    return candidates.length;
+  }
 
   // ── Actions ──────────────────────────────────────
   function nextStep() {
@@ -57,59 +202,54 @@
     error = '';
 
     try {
-      // Persist onboarding flag
-      localStorage.setItem('xln-onboarding-complete', 'true');
+      // Persist onboarding flag for this entity only.
+      writeOnboardingComplete(entityId, true);
 
       // Persist display name
       localStorage.setItem('xln-display-name', displayName.trim());
 
-      // Persist policy preference
-      const policyData = {
-        mode: policyMode,
-        softLimitUsd: policyMode === 'autopilot' ? softLimitUsd : 0,
-        softLimitWei: policyMode === 'autopilot' ? String(BigInt(softLimitUsd) * 10n ** 18n) : '0',
-        timestamp: Date.now(),
-      };
-      localStorage.setItem('xln-collateral-policy', JSON.stringify(policyData));
+      // Persist autopilot + hub-join preferences
+      const policyData = writeSavedCollateralPolicy({
+        mode: 'autopilot',
+        softLimitUsd: toUsdInt(softLimitUsd, defaultSoftLimitUsd),
+        hardLimitUsd: toUsdInt(hardLimitUsd, defaultHardLimitUsd),
+        maxFeeUsd: toUsdInt(maxFeeUsd, defaultMaxFeeUsd),
+      });
+      const savedJoinPreference = writeHubJoinPreference(autoJoinHubs);
 
-      // Broadcast profile via gossip (name update)
-      if ($xlnFunctions?.isReady && entityId && signerId) {
-        try {
-          const xln = $xlnFunctions;
-          if (xln.enqueueRuntimeInput) {
-            // Queue governance profile update
-            const env = xln.getEnv?.();
-            if (env) {
-              xln.enqueueRuntimeInput(env, {
-                runtimeTxs: [],
-                entityInputs: [{
+      // Submit profile update via REA (valid EntityTx path)
+      if (entityId && signerId) {
+        const env = getEnv();
+        if (env) {
+          await enqueueEntityInputs(env as any, [{
+            entityId,
+            signerId,
+            entityTxs: [{
+              type: 'profile-update' as const,
+              data: {
+                profile: {
                   entityId,
-                  signerId,
-                  entityTxs: [{
-                    type: 'governance_profile_update',
-                    data: {
-                      profile: {
-                        entityId,
-                        name: displayName.trim(),
-                        bio: '',
-                        website: '',
-                      },
-                    },
-                  }],
-                }],
-              });
-            }
-          }
-        } catch (err) {
-          console.warn('[Onboarding] Profile broadcast failed (non-fatal):', err);
+                  name: displayName.trim(),
+                  bio: '',
+                  website: '',
+                  hankoSignature: '',
+                },
+              },
+            }],
+          }]);
         }
       }
 
+      const autoJoinCount = parseJoinCount(savedJoinPreference);
+      const autoJoinedCount = await queueAutoHubJoins(autoJoinCount);
+
       dispatch('complete', {
         displayName: displayName.trim(),
-        policyMode,
-        softLimitUsd,
-        softLimitWei: policyMode === 'autopilot' ? BigInt(softLimitUsd) * 10n ** 18n : 0n,
+        softLimitUsd: policyData.softLimitUsd,
+        hardLimitUsd: policyData.hardLimitUsd,
+        maxFeeUsd: policyData.maxFeeUsd,
+        autoJoinHubs: savedJoinPreference,
+        autoJoinedCount,
       });
     } catch (err) {
       error = (err as Error).message || 'Setup failed';
@@ -123,20 +263,17 @@
     return `${id.slice(0, 8)}...${id.slice(-4)}`;
   }
 
-  export function isOnboardingComplete(): boolean {
-    if (typeof localStorage === 'undefined') return false;
-    return localStorage.getItem('xln-onboarding-complete') === 'true';
+  export function isOnboardingComplete(checkEntityId: string): boolean {
+    return readOnboardingComplete(checkEntityId);
   }
 
-  export function getSavedPolicy(): { mode: string; softLimitUsd: number; softLimitWei: string } | null {
-    if (typeof localStorage === 'undefined') return null;
-    try {
-      const raw = localStorage.getItem('xln-collateral-policy');
-      if (!raw) return null;
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
+  export function getSavedPolicy(): {
+    mode: string;
+    softLimitUsd: number;
+    hardLimitUsd: number;
+    maxFeeUsd: number;
+  } | null {
+    return readSavedCollateralPolicy();
   }
 
   export function getSavedDisplayName(): string {
@@ -227,68 +364,70 @@
       </div>
     </div>
 
-  <!-- Step 3: Collateral Policy -->
+  <!-- Step 3: Autopilot + Hub Join -->
   {:else if step === 3}
     <div class="step">
-      <h2>Collateral Policy</h2>
-      <p class="subtitle">How should hubs secure your funds?</p>
+      <h2>Autopilot Settings</h2>
+      <p class="subtitle">Set your default collateral thresholds and initial hub connectivity.</p>
 
-      <div class="policy-cards">
-        <button
-          class="policy-card"
-          class:selected={policyMode === 'autopilot'}
-          on:click={() => policyMode = 'autopilot'}
-        >
-          <div class="policy-icon">🤖</div>
-          <div class="policy-body">
-            <h4>Autopilot</h4>
-            <p>Hub automatically secures funds on-chain when your unsecured balance exceeds a threshold</p>
-          </div>
-          <div class="policy-check" class:checked={policyMode === 'autopilot'}>✓</div>
-        </button>
+      <div class="autopilot-config">
+        <div class="policy-grid">
+          <label class="policy-field">
+            <span class="form-label">Soft Limit (USD)</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              class="form-input policy-input"
+              bind:value={softLimitUsd}
+              on:input={() => softLimitUsd = toUsdInt(softLimitUsd, defaultSoftLimitUsd)}
+            />
+          </label>
 
-        <button
-          class="policy-card"
-          class:selected={policyMode === 'manual'}
-          on:click={() => policyMode = 'manual'}
-        >
-          <div class="policy-icon">🎛️</div>
-          <div class="policy-body">
-            <h4>Manual</h4>
-            <p>You decide when to request collateral. Full control, requires more attention.</p>
-          </div>
-          <div class="policy-check" class:checked={policyMode === 'manual'}>✓</div>
-        </button>
+          <label class="policy-field">
+            <span class="form-label">Hard Limit (USD)</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              class="form-input policy-input"
+              bind:value={hardLimitUsd}
+              on:input={() => hardLimitUsd = toUsdInt(hardLimitUsd, defaultHardLimitUsd)}
+            />
+          </label>
+
+          <label class="policy-field">
+            <span class="form-label">Max Fee (USD)</span>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              class="form-input policy-input"
+              bind:value={maxFeeUsd}
+              on:input={() => maxFeeUsd = toUsdInt(maxFeeUsd, defaultMaxFeeUsd)}
+            />
+          </label>
+        </div>
+
+        <p class="form-hint">
+          Default for this jurisdiction: soft=<strong>{defaultSoftLimitUsd.toLocaleString()}</strong>,
+          hard=<strong>{defaultHardLimitUsd.toLocaleString()}</strong>,
+          fee=<strong>{defaultMaxFeeUsd.toLocaleString()}</strong>.
+          These values are used when new hub accounts are opened.
+        </p>
       </div>
 
-      {#if policyMode === 'autopilot'}
-        <div class="autopilot-config">
-          <label class="form-label">Risk tolerance (max unsecured per hub)</label>
-          <div class="limit-options">
-            {#each SOFT_LIMIT_OPTIONS as opt}
-              <button
-                class="limit-btn"
-                class:active={softLimitUsd === opt.value}
-                on:click={() => softLimitUsd = opt.value}
-              >
-                {opt.label}
-              </button>
-            {/each}
-          </div>
-          <p class="form-hint">
-            When unsecured balance exceeds <strong>${softLimitUsd.toLocaleString()}</strong>,
-            the hub will automatically move funds to on-chain collateral.
-            A small fee applies per rebalance (paid from your custody balance).
-          </p>
-        </div>
-      {:else}
-        <div class="manual-info">
-          <p class="form-hint">
-            In manual mode, you'll see a <strong>"Request Collateral"</strong> button
-            in each account. Use it whenever you want to secure funds on-chain.
-          </p>
-        </div>
-      {/if}
+      <div class="manual-info">
+        <label class="form-label">Initial Hub Join</label>
+        <select class="hub-join-select" bind:value={autoJoinHubs}>
+          {#each HUB_JOIN_OPTIONS as option}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+        <p class="form-hint">
+          Auto-join uses random discovered hubs and immediately opens bilateral accounts.
+        </p>
+      </div>
 
       <div class="summary">
         <h4>Summary</h4>
@@ -297,8 +436,12 @@
           <span class="summary-value">{displayName.trim()}</span>
         </div>
         <div class="summary-row">
-          <span>Policy</span>
-          <span class="summary-value">{policyMode === 'autopilot' ? `Autopilot ($${softLimitUsd.toLocaleString()} limit)` : 'Manual'}</span>
+          <span>Autopilot</span>
+          <span class="summary-value">soft ${softLimitUsd.toLocaleString()} / hard ${hardLimitUsd.toLocaleString()} / fee ${maxFeeUsd.toLocaleString()}</span>
+        </div>
+        <div class="summary-row">
+          <span>Hub Join</span>
+          <span class="summary-value">{HUB_JOIN_OPTIONS.find(option => option.value === autoJoinHubs)?.label || 'Join hubs manually'}</span>
         </div>
         <div class="summary-row">
           <span>Entity</span>
@@ -529,73 +672,6 @@
     color: var(--theme-text-muted, #71717a);
   }
 
-  /* ── Policy cards ──────────────────────── */
-  .policy-cards {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-bottom: 20px;
-  }
-  .policy-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 14px;
-    padding: 16px;
-    background: var(--theme-surface, #18181b);
-    border: 2px solid var(--theme-surface-border, #27272a);
-    border-radius: 10px;
-    cursor: pointer;
-    transition: all 0.15s;
-    text-align: left;
-    color: var(--theme-text-primary, #e4e4e7);
-  }
-  .policy-card:hover {
-    border-color: var(--theme-card-hover-border, #3f3f46);
-  }
-  .policy-card.selected {
-    border-color: var(--theme-accent, #fbbf24);
-    background: linear-gradient(135deg, rgba(251, 191, 36, 0.05) 0%, transparent 100%);
-  }
-  .policy-icon {
-    font-size: 24px;
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-  .policy-body {
-    flex: 1;
-    min-width: 0;
-  }
-  .policy-body h4 {
-    margin: 0 0 4px 0;
-    font-size: 14px;
-    font-weight: 600;
-  }
-  .policy-body p {
-    margin: 0;
-    font-size: 12px;
-    color: var(--theme-text-secondary, #a1a1aa);
-    line-height: 1.5;
-  }
-  .policy-check {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    border: 2px solid var(--theme-surface-border, #27272a);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    color: transparent;
-    flex-shrink: 0;
-    transition: all 0.15s;
-    margin-top: 2px;
-  }
-  .policy-check.checked {
-    background: var(--theme-accent, #fbbf24);
-    border-color: var(--theme-accent, #fbbf24);
-    color: #000;
-  }
-
   /* ── Autopilot config ──────────────────── */
   .autopilot-config {
     padding: 16px;
@@ -604,31 +680,29 @@
     border-radius: 10px;
     margin-bottom: 20px;
   }
-  .limit-options {
-    display: flex;
-    gap: 8px;
-    margin: 8px 0 12px;
-    flex-wrap: wrap;
+  .policy-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 10px;
   }
-  .limit-btn {
-    padding: 8px 16px;
+  .policy-field {
+    min-width: 0;
+  }
+  .policy-input {
+    margin-top: 4px;
+    font-size: 14px;
+    padding: 10px 12px;
+  }
+  .hub-join-select {
+    width: 100%;
+    margin-top: 6px;
     background: var(--theme-input-bg, #09090b);
     border: 1px solid var(--theme-input-border, #27272a);
     border-radius: 8px;
-    color: var(--theme-text-secondary, #a1a1aa);
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .limit-btn:hover {
-    border-color: var(--theme-card-hover-border, #3f3f46);
     color: var(--theme-text-primary, #e4e4e7);
-  }
-  .limit-btn.active {
-    border-color: var(--theme-accent, #fbbf24);
-    color: var(--theme-accent, #fbbf24);
-    background: rgba(251, 191, 36, 0.06);
+    font-size: 14px;
+    padding: 10px 12px;
   }
 
   .manual-info {
@@ -637,6 +711,11 @@
     border: 1px solid var(--theme-surface-border, #27272a);
     border-radius: 10px;
     margin-bottom: 20px;
+  }
+  @media (max-width: 720px) {
+    .policy-grid {
+      grid-template-columns: 1fr;
+    }
   }
 
   /* ── Summary ───────────────────────────── */

@@ -50,11 +50,7 @@ export const XLN_COORDINATOR = 'xln.finance';
 
 /** Well-known EVM chain IDs */
 export const CHAIN_IDS = {
-  mainnet: '1',
-  sepolia: '11155111',
-  polygon: '137',
-  arbitrum: '42161',
-  local: 'local', // For local dev/testing
+  local: '31337',
 } as const;
 
 // =============================================================================

@@ -23,6 +23,7 @@ fi
 if [ -f "$ANVIL_STATE" ]; then
     echo "📂 Loading state from $ANVIL_STATE"
     anvil --host 0.0.0.0 --port 8545 \
+          --chain-id 31337 \
           --block-gas-limit 60000000 \
           --code-size-limit 65536 \
           --load-state "$ANVIL_STATE" \
@@ -31,6 +32,7 @@ if [ -f "$ANVIL_STATE" ]; then
 else
     echo "🆕 Starting fresh anvil (no state file)"
     anvil --host 0.0.0.0 --port 8545 \
+          --chain-id 31337 \
           --block-gas-limit 60000000 \
           --code-size-limit 65536 \
           --dump-state "$ANVIL_STATE" \

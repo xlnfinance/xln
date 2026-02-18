@@ -3,8 +3,13 @@
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { getXLN, xlnEnvironment, xlnFunctions, error, p2pState } from '../../stores/xlnStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+  import type { EntityReplica, Tab } from '$lib/types/ui';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
+  import PaymentForm from './PaymentForm.svelte';
+  import CreditForm from './CreditForm.svelte';
+  import CollateralForm from './CollateralForm.svelte';
+  import SwapPanel from './SwapPanel.svelte';
 
   // Get environment from context (for /view route) or use global stores (for / route)
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
@@ -42,6 +47,16 @@
   export let account: AccountMachine;
   export let counterpartyId: string;
   export let entityId: string;
+  export let replica: EntityReplica | null = null;
+  export let tab: Tab | null = null;
+  $: formSignerId = tab?.signerId || replica?.state?.config?.validators?.[0] || entityId;
+
+  // Tab state
+  type AccountTab = 'activity' | 'actions' | 'settle';
+  let activeAccountTab: AccountTab = 'activity';
+
+  // Pending count for Activity badge
+  $: pendingCount = (account.mempool?.length || 0) + (account.pendingFrame ? 1 : 0);
 
   const dispatch = createEventDispatcher();
 
@@ -50,11 +65,8 @@
     dispatch('back');
   }
 
-  // Form states - BigInt native!
+  // Settlement form state
   let selectedTokenId = 1;
-  let creditAdjustment = 0;
-  let paymentAmountBigInt = 0n; // BigInt for precision
-  let paymentDescription = '';
 
   // Settlement workspace state
   let settleOpType: 'r2c' | 'c2r' | 'r2r' | 'forgive' = 'r2c';
@@ -102,7 +114,7 @@
           // r2r/forgive: no collateral/ondelta change in preview
         }
         const previewDelta = { ...d, collateral, ondelta };
-        const previewDerived = activeXlnFunctions!.deriveDelta(previewDelta, isLeftEntity);
+        const previewDerived = activeXlnFunctions!.deriveDelta(previewDelta, iAmLeft);
         return {
           tokenId: td.tokenId,
           tokenInfo: td.tokenInfo,
@@ -113,7 +125,6 @@
         };
       });
   })();
-  const RESEND_AFTER_MS = 10_000;
   let nowMs = Date.now();
   let nowTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -129,19 +140,8 @@
 
   // Auto-set defaults for faster testing
   $: {
-    // Set default token to first available
     if (tokenDetails.length > 0 && selectedTokenId === 1 && !tokenDetails.find(td => td.tokenId === 1)) {
-      selectedTokenId = tokenDetails[0]!.tokenId; // Safe: length > 0 guarantees element exists
-    }
-
-    // Set default amount to 10% of available to send - BigInt native!
-    const selectedTokenDetail = tokenDetails.find(td => td.tokenId === selectedTokenId);
-    if (selectedTokenDetail && paymentAmountBigInt === 0n) {
-      const outCapacityBigInt = selectedTokenDetail.derived.outCapacity;
-      if (outCapacityBigInt > 0n) {
-        // Calculate 10% directly with BigInt (no precision loss)
-        paymentAmountBigInt = (outCapacityBigInt * 10n) / 100n; // Exact 10% in wei
-      }
+      selectedTokenId = tokenDetails[0]!.tokenId;
     }
   }
 
@@ -180,10 +180,6 @@
 
   $: relayStatus = $p2pState.connected ? 'connected' : reconnectCountdown ? 'reconnecting' : 'disconnected';
 
-  // Determine if we are the "left" entity in the canonical bilateral ordering
-  // Use lexicographic comparison for deterministic left/right assignment
-  $: isLeftEntity = entityId < counterpartyId;
-
   // XLN functions accessed through $xlnEnvironment.xln (attached in xlnStore)
 
   $: tokenDetails = Array.from(account.deltas?.entries() || []).map(([tokenId, delta]) => {
@@ -199,18 +195,13 @@
           ascii: '[loading...]'
         },
         tokenInfo: { symbol: `TKN${tokenId}`, color: '#999', name: `Token ${tokenId}`, decimals: 18 },
-        theirCreditLimit: 0,
-        theirUsedCredit: 0,
-        theirUnusedCredit: 0,
-        ourCreditLimit: 0,
-        ourUsedCredit: 0,
-        ourUnusedCredit: 0,
-        ourCollateral: 0,
-        theirCollateral: 0
+        ourCreditLimit: 0n,
+        theirCreditLimit: 0n,
+        ourCollateral: 0n
       };
     }
 
-    const derived = activeXlnFunctions.deriveDelta(delta, isLeftEntity);
+    const derived = activeXlnFunctions.deriveDelta(delta, iAmLeft);
     const tokenInfo = activeXlnFunctions?.getTokenInfo?.(tokenId) || {
       symbol: `TKN${tokenId}`,
       color: '#999',
@@ -218,134 +209,20 @@
       decimals: 18
     };
 
-    // Calculate detailed segments
-    // FINTECH-SAFETY: Convert BigInt to Number BEFORE arithmetic operations
-    const theirCreditLimit = delta.rightCreditLimit;
-    const theirUsedCredit = theirCreditLimit > 0n ?
-      Math.max(0, Number(theirCreditLimit) - (Number(derived.inCapacity) - Number(delta.collateral))) : 0;
-    const theirUnusedCredit = Number(theirCreditLimit) - theirUsedCredit;
+    // Credit limits: orientation depends on which side we are
+    const ourCreditLimit = iAmLeft ? delta.leftCreditLimit : delta.rightCreditLimit;
+    const theirCreditLimit = iAmLeft ? delta.rightCreditLimit : delta.leftCreditLimit;
 
-    const ourCreditLimit = delta.leftCreditLimit;
-    const ourUsedCredit = ourCreditLimit > 0n ?
-      Math.max(0, Number(ourCreditLimit) - Number(derived.outCapacity)) : 0;
-    const ourUnusedCredit = Number(ourCreditLimit) - ourUsedCredit;
-
-    // Calculate credit limits with proper BigInt handling
-
-    const result = {
+    return {
       tokenId,
       tokenInfo,
       delta,
       derived,
-      theirCreditLimit: Number(theirCreditLimit) / 1e18,
-      theirUsedCredit: theirUsedCredit / 1e18,
-      theirUnusedCredit: theirUnusedCredit / 1e18,
-      ourCreditLimit: Number(ourCreditLimit) / 1e18,
-      ourUsedCredit: ourUsedCredit / 1e18,
-      ourUnusedCredit: ourUnusedCredit / 1e18,
-      ourCollateral: Number(delta.collateral) / 1e18,
-      theirCollateral: 0, // Would come from their side's delta
+      ourCreditLimit,
+      theirCreditLimit,
+      ourCollateral: delta.collateral,
     };
-
-    // Result calculated successfully
-
-    return result;
   });
-
-  $: pendingFrameAgeMs = account.pendingFrame?.timestamp ? (nowMs - account.pendingFrame.timestamp) : 0;
-  $: canResendPendingFrame = !!account.pendingFrame && !!account.pendingAccountInput && pendingFrameAgeMs > RESEND_AFTER_MS;
-
-  async function resendPendingFrame() {
-    try {
-      if (!canResendPendingFrame || !account.pendingAccountInput) return;
-      const env = activeEnv;
-      if (!env || !('history' in env)) throw new Error('XLN environment not ready or in historical mode');
-      if (!activeXlnFunctions?.resolveEntityProposerId || !activeXlnFunctions?.sendEntityInput) {
-        throw new Error('Resend helpers not available');
-      }
-
-      const accountInput = account.pendingAccountInput;
-      const proposerId = activeXlnFunctions.resolveEntityProposerId(env, accountInput.toEntityId, 'resend-account-frame');
-      const result = activeXlnFunctions.sendEntityInput(env, {
-        entityId: accountInput.toEntityId,
-        signerId: proposerId,
-        entityTxs: [{ type: 'accountInput', data: accountInput }],
-      });
-
-      if (result.deferred) {
-        console.warn('Resend deferred - counterparty runtimeId unknown');
-      } else {
-        console.log('✅ Resent pending account frame');
-      }
-    } catch (err: any) {
-      console.error('Failed to resend pending frame:', err);
-      error.set(`Resend failed: ${err?.message || 'Unknown error'}`);
-    }
-  }
-
-  async function sendPayment() {
-    try {
-      const xln = await getXLN();
-      const env = activeEnv;
-      if (!env || !('history' in env)) throw new Error('XLN environment not ready or in historical mode');
-
-      // Create direct payment EntityTx
-      const paymentInput = {
-        entityId,
-        signerId: entityId, // Simplified for now
-        entityTxs: [{
-          type: 'direct-payment' as const,
-          data: {
-            recipientEntityId: counterpartyId,
-            tokenId: selectedTokenId,
-            amount: paymentAmountBigInt,
-            description: paymentDescription || undefined
-          }
-        }]
-      };
-
-      xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [paymentInput] });
-      console.log(`✅ Payment sent: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, paymentAmountBigInt)}`);
-
-      // Reset form
-      paymentAmountBigInt = 0n;
-      paymentDescription = '';
-
-    } catch (err: any) {
-      console.error('Failed to send payment:', err);
-      error.set(`Payment failed: ${err?.message || 'Unknown error'}`);
-    }
-  }
-
-  async function adjustCredit() {
-    try {
-      const xln = await getXLN();
-      const env = activeEnv;
-      if (!env || !('history' in env)) throw new Error('XLN environment not ready or in historical mode');
-
-      // Create credit adjustment EntityTx
-      const adjustmentInput = {
-        entityId,
-        signerId: entityId,
-        entityTxs: [{
-          type: 'adjust-credit' as const,
-          data: {
-            counterpartyEntityId: counterpartyId,
-            tokenId: selectedTokenId,
-            newCreditLimit: BigInt(Math.floor(creditAdjustment * 1e18))
-          }
-        }]
-      };
-
-      xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [adjustmentInput] });
-      console.log(`✅ Credit adjusted to: ${creditAdjustment}`);
-
-      creditAdjustment = 0;
-    } catch (err: any) {
-      console.error('Failed to adjust credit:', err);
-      error.set(`Credit adjustment failed: ${err?.message || 'Unknown error'}`);
-    }
-  }
 
   function addSettleOp() {
     if (settleOpType === 'forgive') {
@@ -566,14 +443,13 @@
   </div>
 
   <div class="panel-content">
-    <!-- Per-delta cards (same style as AccountPreview) -->
+    <!-- Always visible: Delta Cards -->
     {#each tokenDetails as td (td.tokenId)}
       {@const outTotal = td.derived.outOwnCredit + td.derived.outCollateral + td.derived.outPeerCredit}
       {@const inTotal = td.derived.inOwnCredit + td.derived.inCollateral + td.derived.inPeerCredit}
       {@const halfMax = outTotal > inTotal ? outTotal : inTotal}
       {@const pctOf = (v: bigint, base: bigint) => base > 0n ? Number((v * 10000n) / base) / 100 : 0}
       <div class="delta-card">
-        <!-- Header: token + net + faucet -->
         <div class="delta-card-header">
           <span class="delta-token">{td.tokenInfo.symbol}</span>
           <span class="delta-net" class:positive={td.derived.delta > 0n} class:negative={td.derived.delta < 0n}>
@@ -581,8 +457,6 @@
           </span>
           <button class="delta-faucet" on:click={() => handleFaucet(td.tokenId)}>Faucet</button>
         </div>
-
-        <!-- Bar (same as AccountPreview) -->
         <div class="delta-bar-row">
           <span class="delta-label">OUT {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity)}</span>
           <span class="delta-label">IN {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity)}</span>
@@ -602,20 +476,18 @@
             </div>
           </div>
         {/if}
-
-        <!-- Credit details grid -->
         <div class="delta-details">
           <div class="detail-grid">
             <span class="detail-header"></span>
-            <span class="detail-header">Line</span>
-            <span class="detail-header">Used</span>
-            <span class="detail-header">Avail</span>
+            <span class="detail-header">Limit</span>
+            <span class="detail-header">OUT</span>
+            <span class="detail-header">IN</span>
           </div>
           <div class="detail-grid">
             <span class="detail-label-cell">Our credit</span>
             <span class="detail-value-cell">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.ourCreditLimit)}</span>
-            <span class="detail-value-cell used">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inOwnCredit)}</span>
             <span class="detail-value-cell avail">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outOwnCredit)}</span>
+            <span class="detail-value-cell used">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inOwnCredit)}</span>
           </div>
           <div class="detail-grid">
             <span class="detail-label-cell">Their credit</span>
@@ -631,7 +503,7 @@
       </div>
     {/each}
 
-    <!-- Cryptographic proof (once, not per-delta) -->
+    <!-- Always visible: Proof Card -->
     <div class="proof-card">
       <div class="proof-header">
         <span>Frame #{account.currentFrame.height}</span>
@@ -648,78 +520,208 @@
       </div>
     </div>
 
-    <!-- Actions Section -->
-    <div class="section">
-      <h3>Quick Actions</h3>
+    <!-- Tab Navigation -->
+    <div class="account-tabs">
+      <button class="account-tab" class:active={activeAccountTab === 'activity'} on:click={() => activeAccountTab = 'activity'}>
+        Activity
+        {#if pendingCount > 0}
+          <span class="tab-badge">{pendingCount}</span>
+        {/if}
+      </button>
+      <button class="account-tab" class:active={activeAccountTab === 'actions'} on:click={() => activeAccountTab = 'actions'}>
+        Actions
+      </button>
+      <button class="account-tab" class:active={activeAccountTab === 'settle'} on:click={() => activeAccountTab = 'settle'}>
+        Settle
+      </button>
+    </div>
 
-      <!-- Send Payment -->
-      <div class="action-card">
-        <h4>💸 Send Payment</h4>
-        <div class="action-form-grid">
-          <div class="form-row">
-            <span class="form-label">Token</span>
-            <select bind:value={selectedTokenId} class="form-select">
-              {#each tokenDetails as td}
-                <option value={td.tokenId}>{td.tokenInfo.symbol}</option>
+    <!-- Tab: Activity -->
+    {#if activeAccountTab === 'activity'}
+      <!-- Pending Txs -->
+      {#if account.mempool.length > 0}
+        <div class="section">
+          <h3>Pending Transactions</h3>
+          <div class="mempool-list">
+            {#each account.mempool as tx, i}
+              <div class="mempool-item">
+                <span class="tx-index">#{i + 1}</span>
+                <span class="tx-type">{tx.type}</span>
+                {#if 'amount' in tx.data && tx.data.amount}
+                  <span class="tx-amount">{safeFixed((Number(tx.data.amount) / 1e18), 4)}</span>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      <!-- Frame History -->
+      <div class="section">
+        <h3>Account Frame History ({account.frameHistory?.length || 0} confirmed frames)</h3>
+        <div class="frame-history">
+          {#if account.pendingFrame}
+            <div class="frame-item pending">
+              <div class="frame-header">
+                <span class="frame-id">Pending Frame #{account.pendingFrame.height}</span>
+                <span class="frame-status pending">Awaiting Consensus</span>
+                <span class="frame-timestamp">{formatTimestamp(account.pendingFrame.timestamp)}</span>
+              </div>
+              <div class="frame-details">
+                <div class="frame-detail">
+                  <span class="detail-label">Transactions:</span>
+                  <span class="detail-value">{account.pendingFrame.accountTxs.length}</span>
+                </div>
+                <div class="frame-detail">
+                  <span class="detail-label">Signatures:</span>
+                  <span class="detail-value">{account.pendingSignatures?.length || 0}/2</span>
+                </div>
+                <div class="pending-transactions">
+                  {#each account.pendingFrame.accountTxs as tx, i}
+                    <div class="pending-tx">
+                      <span class="tx-index">{i+1}.</span>
+                      <span class="tx-type">{tx.type}</span>
+                      {#if tx.type === 'direct_payment'}
+                        <span class="tx-amount">{activeXlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
+                        <span class="tx-desc">{tx.data.description || ''}</span>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            </div>
+          {/if}
+
+          {#if account.mempool.length > 0}
+            <div class="frame-item mempool">
+              <div class="frame-header">
+                <span class="frame-id">Mempool Queue</span>
+                <span class="frame-status mempool">{account.mempool.length} Queued</span>
+              </div>
+              <div class="frame-details">
+                <div class="mempool-transactions">
+                  {#each account.mempool as tx, i}
+                    <div class="mempool-tx">
+                      <span class="tx-index">{i+1}.</span>
+                      <span class="tx-type">{tx.type}</span>
+                      {#if tx.type === 'direct_payment'}
+                        <span class="tx-amount">{activeXlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
+                        <span class="tx-desc">"{tx.data.description || 'no description'}"</span>
+                        <span class="tx-token">Token #{tx.data.tokenId}</span>
+                      {:else if tx.type === 'set_credit_limit'}
+                        <span class="tx-amount">{activeXlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
+                        <span class="tx-desc">Credit extension</span>
+                      {:else}
+                        <span class="tx-desc">{activeXlnFunctions?.safeStringify(tx.data)}</span>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            </div>
+          {/if}
+
+          {#if account.currentFrame}
+            <div class="frame-item current">
+              <div class="frame-header">
+                <span class="frame-id">Current Frame #{account.currentFrame.height || account.currentHeight}</span>
+                <span class="frame-status current">Active</span>
+                <span class="frame-timestamp">{formatTimestamp(account.currentFrame.timestamp || Date.now())}</span>
+              </div>
+              <div class="frame-details">
+                <div class="frame-detail">
+                  <span class="detail-label">Transactions:</span>
+                  <span class="detail-value">{account.currentFrame?.accountTxs?.length || 0}</span>
+                </div>
+                <div class="frame-detail">
+                  <span class="detail-label">State Hash:</span>
+                  <span class="detail-value hash">
+                    {#if account.currentFrame}
+                      frame#{account.currentFrame.height}_{account.currentFrame.timestamp.toString().slice(-6)}
+                    {:else}
+                      <span style="color: #ff4444; font-weight: bold;">NO FRAME</span>
+                    {/if}
+                  </span>
+                </div>
+              </div>
+            </div>
+          {/if}
+
+          {#if account.frameHistory && account.frameHistory.length > 0}
+            <div class="historical-frames">
+              <h4>Historical Frames (last {Math.min(10, account.frameHistory.length)}):</h4>
+              {#each account.frameHistory.slice(-10).reverse() as frame}
+                <div class="frame-item historical">
+                  <div class="frame-header">
+                    <span class="frame-id">Frame #{frame.height}</span>
+                    <span class="frame-status historical">Confirmed</span>
+                    <span class="frame-timestamp">{formatTimestamp(frame.timestamp)}</span>
+                  </div>
+                  <div class="frame-details">
+                    <div class="frame-detail">
+                      <span class="detail-label">Transactions:</span>
+                      <span class="detail-value">{frame.accountTxs.length}</span>
+                    </div>
+                    <div class="frame-detail">
+                      <span class="detail-label">Proposer:</span>
+                      <span class="detail-value">{frame.byLeft === true ? (iAmLeft ? 'Left (you)' : 'Left') : frame.byLeft === false ? (iAmLeft ? 'Right' : 'Right (you)') : '—'}</span>
+                    </div>
+                    <div class="frame-detail">
+                      <span class="detail-label">Tokens:</span>
+                      <span class="detail-value">{frame.tokenIds?.join(', ') || 'None'}</span>
+                    </div>
+                    <div class="frame-detail">
+                      <span class="detail-label">Hash:</span>
+                      <span class="detail-value hash">
+                        {#if frame.stateHash}
+                          {frame.stateHash.slice(0,8)}...
+                        {:else}
+                          <span style="color: #ff4444; font-weight: bold;">MISSING HASH</span>
+                        {/if}
+                      </span>
+                    </div>
+                  </div>
+                  {#if frame.accountTxs && frame.accountTxs.length > 0}
+                    <div class="frame-txs-list">
+                      {#each frame.accountTxs as tx, idx}
+                        <div class="frame-tx-item">
+                          <span class="tx-index">{idx + 1}.</span>
+                          <span class="tx-type">{tx.type}</span>
+                          <span class="tx-data">{JSON.stringify(tx.data, (_k, v) => typeof v === 'bigint' ? v.toString() : v)}</span>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
               {/each}
-            </select>
-          </div>
-          <div class="form-row">
-            <span class="form-label">Amount</span>
-            <BigIntInput
-              bind:value={paymentAmountBigInt}
-              decimals={18}
-              placeholder="0.00"
-            />
-          </div>
-          <div class="form-row wide">
-            <span class="form-label">Description</span>
-            <input
-              type="text"
-              placeholder="optional"
-              bind:value={paymentDescription}
-              class="form-input"
-            />
-          </div>
-          <div class="form-row action-row">
-            <button class="action-button primary" on:click={sendPayment}>
-              Send Payment
-            </button>
-          </div>
+            </div>
+          {/if}
+
+          {#if !account.currentFrame && !account.pendingFrame && account.mempool.length === 0 && (!account.frameHistory || account.frameHistory.length === 0)}
+            <div class="no-frames">
+              No account activity yet. Send a payment to start bilateral consensus.
+            </div>
+          {/if}
         </div>
       </div>
 
-      <!-- Adjust Credit -->
-      <div class="action-card">
-        <h4>📊 Adjust Credit Limit</h4>
-        <div class="action-form-grid">
-          <div class="form-row">
-            <span class="form-label">Token</span>
-            <select bind:value={selectedTokenId} class="form-select">
-              {#each tokenDetails as td}
-                <option value={td.tokenId}>{td.tokenInfo.symbol}</option>
-              {/each}
-            </select>
-          </div>
-          <div class="form-row">
-            <span class="form-label">New Limit</span>
-            <input
-              type="number"
-              step="0.1"
-              placeholder="0.00"
-              bind:value={creditAdjustment}
-              class="form-input"
-            />
-          </div>
-          <div class="form-row action-row">
-            <button class="action-button secondary" on:click={adjustCredit}>
-              Update Credit
-            </button>
-          </div>
-        </div>
+    <!-- Tab: Actions -->
+    {:else if activeAccountTab === 'actions'}
+      <div class="section">
+        <PaymentForm {entityId} signerId={formSignerId} counterpartyId={counterpartyId} />
+        {#if replica && tab}
+          <SwapPanel {replica} {tab} counterpartyId={counterpartyId} prefilledCounterparty={true} />
+        {/if}
+        <CreditForm {entityId} signerId={formSignerId} counterpartyId={counterpartyId} />
       </div>
 
-      <!-- Settlement Workspace -->
+    <!-- Tab: Settle -->
+    {:else if activeAccountTab === 'settle'}
+      <div class="section">
+        <CollateralForm {entityId} signerId={formSignerId} counterpartyId={counterpartyId} />
+      </div>
+
+      <!-- Settlement Workspace (kept inline) -->
       <div class="action-card settle-workspace">
         <h4>Settlement</h4>
 
@@ -933,203 +935,19 @@
         {/if}
       </div>
 
-      <!-- Other Management Actions -->
+      <!-- Dispute / Close buttons -->
       <div class="action-card management-card">
-        <h4>⚙️ Account Management</h4>
+        <h4>Account Management</h4>
         <div class="management-buttons">
           <button class="action-button dispute" on:click={initiateDispute}>
-            ⚠ Initiate Dispute
+            Initiate Dispute
           </button>
           <button class="action-button close" on:click={closeAccount}>
             Close Account
           </button>
         </div>
       </div>
-    </div>
-
-    <!-- Mempool Preview -->
-    {#if account.mempool.length > 0}
-      <div class="section">
-        <h3>Pending Transactions</h3>
-        <div class="mempool-list">
-          {#each account.mempool as tx, i}
-            <div class="mempool-item">
-              <span class="tx-index">#{i + 1}</span>
-              <span class="tx-type">{tx.type}</span>
-              {#if 'amount' in tx.data && tx.data.amount}
-                <span class="tx-amount">{safeFixed((Number(tx.data.amount) / 1e18), 4)}</span>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      </div>
     {/if}
-
-    <!-- Account Frame History Section -->
-    <div class="section">
-      <h3>💾 Account Frame History ({account.frameHistory?.length || 0} confirmed frames)</h3>
-      <div class="frame-history">
-
-        <!-- Pending Frame (TOP PRIORITY) -->
-        {#if account.pendingFrame}
-          <div class="frame-item pending">
-            <div class="frame-header">
-              <span class="frame-id">⏳ Pending Frame #{account.pendingFrame.height}</span>
-              <span class="frame-status pending">Awaiting Consensus</span>
-              <span class="frame-timestamp">
-                {formatTimestamp(account.pendingFrame.timestamp)}
-              </span>
-              {#if canResendPendingFrame}
-                <button class="resend-button" on:click|preventDefault={resendPendingFrame}>Resend Frame</button>
-              {/if}
-            </div>
-            <div class="frame-details">
-              <div class="frame-detail">
-                <span class="detail-label">Transactions:</span>
-                <span class="detail-value">{account.pendingFrame.accountTxs.length}</span>
-              </div>
-              <div class="frame-detail">
-                <span class="detail-label">Signatures:</span>
-                <span class="detail-value">{account.pendingSignatures?.length || 0}/2</span>
-              </div>
-              <div class="pending-transactions">
-                {#each account.pendingFrame.accountTxs as tx, i}
-                  <div class="pending-tx">
-                    <span class="tx-index">{i+1}.</span>
-                    <span class="tx-type">{tx.type}</span>
-                    {#if tx.type === 'direct_payment'}
-                      <span class="tx-amount">{activeXlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
-                      <span class="tx-desc">{tx.data.description || ''}</span>
-                    {/if}
-                  </div>
-                {/each}
-              </div>
-            </div>
-          </div>
-        {/if}
-
-        <!-- Mempool Queue (Enhanced) -->
-        {#if account.mempool.length > 0}
-          <div class="frame-item mempool">
-            <div class="frame-header">
-              <span class="frame-id">📝 Mempool Queue</span>
-              <span class="frame-status mempool">{account.mempool.length} Queued</span>
-            </div>
-            <div class="frame-details">
-              <div class="mempool-transactions">
-                {#each account.mempool as tx, i}
-                  <div class="mempool-tx">
-                    <span class="tx-index">{i+1}.</span>
-                    <span class="tx-type">{tx.type}</span>
-                    {#if tx.type === 'direct_payment'}
-                      <span class="tx-amount">{activeXlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
-                      <span class="tx-desc">"{tx.data.description || 'no description'}"</span>
-                      <span class="tx-token">Token #{tx.data.tokenId}</span>
-                    {:else if tx.type === 'set_credit_limit'}
-                      <span class="tx-amount">{activeXlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
-                      <span class="tx-desc">Credit extension</span>
-                    {:else}
-                      <span class="tx-desc">{activeXlnFunctions?.safeStringify(tx.data)}</span>
-                    {/if}
-                  </div>
-                {/each}
-              </div>
-            </div>
-          </div>
-        {/if}
-
-        <!-- Current Active Frame -->
-        {#if account.currentFrame}
-          <div class="frame-item current">
-            <div class="frame-header">
-              <span class="frame-id">✅ Current Frame #{account.currentFrame.height || account.currentHeight}</span>
-              <span class="frame-status current">Active</span>
-              <span class="frame-timestamp">
-                {formatTimestamp(account.currentFrame.timestamp || Date.now())}
-              </span>
-            </div>
-            <div class="frame-details">
-              <div class="frame-detail">
-                <span class="detail-label">Transactions:</span>
-                <span class="detail-value">{account.currentFrame?.accountTxs?.length || 0}</span>
-              </div>
-              <div class="frame-detail">
-                <span class="detail-label">State Hash:</span>
-                <span class="detail-value hash">
-                  <!-- AccountSnapshot doesn't have stateHash - generate one from frame data -->
-                  {#if account.currentFrame}
-                    frame#{account.currentFrame.height}_{account.currentFrame.timestamp.toString().slice(-6)}
-                  {:else}
-                    <span style="color: #ff4444; font-weight: bold;">NO FRAME</span>
-                  {/if}
-                </span>
-              </div>
-            </div>
-          </div>
-        {/if}
-
-        <!-- Historical Frames (from frameHistory array) -->
-        {#if account.frameHistory && account.frameHistory.length > 0}
-          <div class="historical-frames">
-            <h4>📚 Historical Frames (last {Math.min(10, account.frameHistory.length)}):</h4>
-            {#each account.frameHistory.slice(-10).reverse() as frame}
-              <div class="frame-item historical">
-                <div class="frame-header">
-                  <span class="frame-id">📜 Frame #{frame.height}</span>
-                  <span class="frame-status historical">Confirmed</span>
-                  <span class="frame-timestamp">
-                    {formatTimestamp(frame.timestamp)}
-                  </span>
-                </div>
-                <div class="frame-details">
-                  <div class="frame-detail">
-                    <span class="detail-label">Transactions:</span>
-                    <span class="detail-value">{frame.accountTxs.length}</span>
-                  </div>
-                  <div class="frame-detail">
-                    <span class="detail-label">Proposer:</span>
-                    <span class="detail-value">{frame.byLeft === true ? (isLeftEntity ? 'Left (you)' : 'Left') : frame.byLeft === false ? (isLeftEntity ? 'Right' : 'Right (you)') : '—'}</span>
-                  </div>
-                  <div class="frame-detail">
-                    <span class="detail-label">Tokens:</span>
-                    <span class="detail-value">{frame.tokenIds?.join(', ') || 'None'}</span>
-                  </div>
-                  <div class="frame-detail">
-                    <span class="detail-label">Hash:</span>
-                    <span class="detail-value hash">
-                      {#if frame.stateHash}
-                        {frame.stateHash.slice(0,8)}...
-                      {:else}
-                        <span style="color: #ff4444; font-weight: bold;">MISSING HASH</span>
-                      {/if}
-                    </span>
-                  </div>
-                </div>
-
-                <!-- Show full transaction list -->
-                {#if frame.accountTxs && frame.accountTxs.length > 0}
-                  <div class="frame-txs-list">
-                    {#each frame.accountTxs as tx, idx}
-                      <div class="frame-tx-item">
-                        <span class="tx-index">{idx + 1}.</span>
-                        <span class="tx-type">{tx.type}</span>
-                        <span class="tx-data">{JSON.stringify(tx.data, (_k, v) => typeof v === 'bigint' ? v.toString() : v)}</span>
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-            {/each}
-          </div>
-        {/if}
-
-        {#if !account.currentFrame && !account.pendingFrame && account.mempool.length === 0 && (!account.frameHistory || account.frameHistory.length === 0)}
-          <div class="no-frames">
-            No account activity yet. Send a payment to start bilateral consensus.
-          </div>
-        {/if}
-      </div>
-    </div>
   </div>
 </div>
 
@@ -1564,6 +1382,52 @@
   .detail-value-cell.used { color: #f97316; }
   .detail-value-cell.avail { color: #4ade80; }
   .detail-value-cell.coll { color: #2dd4bf; }
+
+  /* ── Account Tabs ── */
+  .account-tabs {
+    display: flex;
+    gap: 2px;
+    margin: 12px 0 8px;
+    border-bottom: 1px solid #27272a;
+  }
+
+  .account-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #71717a;
+    font-size: 0.82em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.02em;
+  }
+
+  .account-tab:hover {
+    color: #a1a1aa;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .account-tab.active {
+    color: #fbbf24;
+    border-bottom-color: #fbbf24;
+    background: rgba(251, 191, 36, 0.04);
+  }
+
+  .tab-badge {
+    background: #f59e0b;
+    color: #000;
+    font-size: 0.75em;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    min-width: 18px;
+    text-align: center;
+  }
 
   .proof-card {
     background: #18181b;

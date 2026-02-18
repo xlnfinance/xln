@@ -18,7 +18,7 @@ import { safeStringify } from './serialization-utils';
 import type { Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
 import { encodeBoard, hashBoard } from './entity-factory';
 import { deriveSignerKeySync } from './account-crypto';
-import { createJAdapter, type JAdapter } from './jadapter';
+import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
 import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
@@ -46,6 +46,10 @@ import { ERC20Mock__factory } from '../jurisdictions/typechain-types/factories/E
 let globalJAdapter: JAdapter | null = null;
 // Server encryption keypair now managed by relay-local-delivery.ts
 const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
+let coldResetRebuildInFlight: Promise<void> | null = null;
+let coldResetRebuildError: string | null = null;
+let coldResetStartedAt = 0;
+let coldResetCompletedAt = 0;
 
 let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
@@ -177,6 +181,10 @@ const hubSignerAddresses = new Map<string, string>();
 const HUB_MESH_TOKEN_ID = 1;
 const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
 const HUB_MESH_REQUIRED_HUBS = 3;
+const HUB_REQUIRED_TOKEN_COUNT = 2;
+const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
+const HUB_RESERVE_ASSERT_TIMEOUT_MS = 30_000;
+const HUB_MESH_ASSERT_TIMEOUT_MS = 20_000;
 
 const getHubWallet = async (
   env: Env,
@@ -496,10 +504,118 @@ const bootstrapHubMeshCredit = async (env: Env, requiredHubEntityIds: string[]):
   }
 };
 
+const assertHubBootstrapReadiness = async (
+  env: Env,
+  hubEntityIds: string[],
+  tokenCatalog: JTokenInfo[],
+): Promise<void> => {
+  if (hubEntityIds.length < HUB_MESH_REQUIRED_HUBS) {
+    const message =
+      `HUB_BOOTSTRAP_FAILED: expected >=${HUB_MESH_REQUIRED_HUBS} hubs, got ${hubEntityIds.length}`;
+    pushDebugEvent(relayStore, {
+      event: 'error',
+      status: 'failed',
+      reason: 'HUB_BOOTSTRAP_HUB_COUNT',
+      details: { expected: HUB_MESH_REQUIRED_HUBS, actual: hubEntityIds.length, hubEntityIds },
+    });
+    throw new Error(message);
+  }
+
+  const requiredTokens = tokenCatalog
+    .map(token => ({
+      tokenId: Number(token.tokenId),
+      symbol: String(token.symbol || `token-${token.tokenId}`),
+      decimals: Number.isFinite(token.decimals) ? Number(token.decimals) : 18,
+    }))
+    .filter(token => Number.isFinite(token.tokenId) && token.tokenId > 0)
+    .slice(0, HUB_REQUIRED_TOKEN_COUNT);
+
+  if (requiredTokens.length < HUB_REQUIRED_TOKEN_COUNT) {
+    const message =
+      `HUB_BOOTSTRAP_FAILED: expected >=${HUB_REQUIRED_TOKEN_COUNT} tokens, got ${requiredTokens.length}`;
+    pushDebugEvent(relayStore, {
+      event: 'error',
+      status: 'failed',
+      reason: 'HUB_BOOTSTRAP_TOKEN_COUNT',
+      details: {
+        expected: HUB_REQUIRED_TOKEN_COUNT,
+        actual: requiredTokens.length,
+        tokenCatalog: tokenCatalog.map(t => ({
+          tokenId: Number(t.tokenId),
+          symbol: t.symbol,
+          decimals: t.decimals,
+        })),
+      },
+    });
+    throw new Error(message);
+  }
+
+  const expectedTargets = requiredTokens.map(token => ({
+    ...token,
+    target: HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(token.decimals),
+  }));
+
+  const reserveReady = await waitUntil(
+    () => {
+      for (const hubEntityId of hubEntityIds) {
+        const replica = getEntityReplicaById(env, hubEntityId);
+        if (!replica?.state) return false;
+        for (const token of expectedTargets) {
+          const current = replica.state.reserves.get(String(token.tokenId)) ?? 0n;
+          if (current < token.target) return false;
+        }
+      }
+      return true;
+    },
+    Math.ceil(HUB_RESERVE_ASSERT_TIMEOUT_MS / 200),
+    200,
+  );
+
+  if (!reserveReady) {
+    const reserveState = hubEntityIds.map(hubEntityId => {
+      const replica = getEntityReplicaById(env, hubEntityId);
+      const reserves = expectedTargets.map(token => ({
+        tokenId: token.tokenId,
+        symbol: token.symbol,
+        expectedMin: token.target.toString(),
+        actual: (replica?.state?.reserves?.get(String(token.tokenId)) ?? 0n).toString(),
+      }));
+      return { hubEntityId, reserves };
+    });
+    pushDebugEvent(relayStore, {
+      event: 'error',
+      status: 'failed',
+      reason: 'HUB_BOOTSTRAP_RESERVES',
+      details: { reserveState },
+    });
+    throw new Error(`HUB_BOOTSTRAP_FAILED: reserves not funded for all hubs/tokens ${safeStringify(reserveState)}`);
+  }
+
+  const meshReady = await waitUntil(
+    () => getHubMeshHealth(env).ok === true,
+    Math.ceil(HUB_MESH_ASSERT_TIMEOUT_MS / 200),
+    200,
+  );
+  if (!meshReady) {
+    const mesh = getHubMeshHealth(env);
+    pushDebugEvent(relayStore, {
+      event: 'error',
+      status: 'failed',
+      reason: 'HUB_BOOTSTRAP_MESH',
+      details: mesh,
+    });
+    throw new Error(`HUB_BOOTSTRAP_FAILED: hub mesh credit not ready ${safeStringify(mesh)}`);
+  }
+};
+
 const deployDefaultTokensOnRpc = async (): Promise<void> => {
   if (!globalJAdapter || globalJAdapter.mode === 'browservm') return;
   const existing = await globalJAdapter.getTokenRegistry().catch(() => []);
-  if (existing.length > 0) return;
+  const existingSymbols = new Set(
+    existing
+      .map(token => String(token.symbol || '').trim().toUpperCase())
+      .filter(symbol => symbol.length > 0),
+  );
 
   const signer = globalJAdapter.signer;
   const depository = globalJAdapter.depository;
@@ -512,6 +628,9 @@ const deployDefaultTokensOnRpc = async (): Promise<void> => {
   const erc20Factory = new ERC20Mock__factory(signer as any);
 
   for (const token of DEFAULT_TOKEN_CATALOG) {
+    if (existingSymbols.has(String(token.symbol || '').trim().toUpperCase())) {
+      continue;
+    }
     const tokenContract = await erc20Factory.deploy(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
     await tokenContract.waitForDeployment();
     const tokenAddress = await tokenContract.getAddress();
@@ -595,6 +714,7 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
 
   tokenCatalogPromise = (async () => {
     const current = await safeGetRegistry();
+    const needsMoreDefaultTokens = globalJAdapter.mode !== 'browservm' && current.length < HUB_REQUIRED_TOKEN_COUNT;
 
     // Verify tokens have actual code on-chain (not stale addresses)
     if (current.length > 0 && globalJAdapter.mode !== 'browservm') {
@@ -614,6 +734,16 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
           const refreshed = await safeGetRegistry();
           return refreshed;
         }
+      }
+      if (needsMoreDefaultTokens) {
+        try {
+          await withTimeout(deployDefaultTokensOnRpc(), TOKEN_CATALOG_TIMEOUT_MS * 2, 'deployMissingDefaultTokensOnRpc');
+        } catch (error) {
+          console.warn(`[ensureTokenCatalog] Missing-token deploy fallback failed: ${(error as Error).message}`);
+          return current;
+        }
+        const refreshed = await safeGetRegistry();
+        return refreshed;
       }
       return current;
     }
@@ -646,49 +776,99 @@ const updateJurisdictionsJson = async (
   try {
     const fs = await import('fs/promises');
     const path = await import('path');
-    const candidates = [
+    const canonicalPath = path.join(process.cwd(), 'jurisdictions', 'jurisdictions.json');
+    const symlinkMirrors = [
       path.join(process.cwd(), 'jurisdictions.json'),
       path.join(process.cwd(), 'frontend', 'static', 'jurisdictions.json'),
+    ];
+    const copyMirrors = [
       path.join(process.cwd(), 'frontend', 'build', 'jurisdictions.json'),
       '/var/www/html/jurisdictions.json',
     ];
-
     const publicRpc = process.env.PUBLIC_RPC ?? rpcUrl ?? '/rpc';
+    await fs.mkdir(path.dirname(canonicalPath), { recursive: true });
 
-    for (const filePath of candidates) {
+    let data: any = {};
+    try {
+      data = JSON.parse(await fs.readFile(canonicalPath, 'utf-8'));
+    } catch {
+      data = {};
+    }
+    data.version = data.version ?? '1.0.0';
+    data.lastUpdated = new Date().toISOString();
+    data.defaults = data.defaults ?? {
+      timeout: 30000,
+      retryAttempts: 3,
+      gasLimit: 1_000_000,
+      rebalancePolicyUsd: {
+        softLimit: 500,
+        hardLimit: 10_000,
+        maxFee: 15,
+      },
+    };
+    data.defaults.rebalancePolicyUsd = data.defaults.rebalancePolicyUsd ?? {
+      softLimit: 500,
+      hardLimit: 10_000,
+      maxFee: 15,
+    };
+    if (data.testnet) delete data.testnet;
+    data.jurisdictions = data.jurisdictions ?? {};
+    const existingArrakis = data.jurisdictions.arrakis ?? {};
+    data.jurisdictions.arrakis = {
+      ...existingArrakis,
+      name: 'Arrakis (Shared Anvil)',
+      chainId: chainIdOverride ?? 31337,
+      rpc: publicRpc,
+      rebalancePolicyUsd: existingArrakis.rebalancePolicyUsd ?? data.defaults.rebalancePolicyUsd,
+      contracts: {
+        account: contracts.account,
+        depository: contracts.depository,
+        entityProvider: contracts.entityProvider,
+        deltaTransformer: contracts.deltaTransformer,
+      },
+    };
+
+    const payload = JSON.stringify(data, null, 2);
+    await fs.writeFile(canonicalPath, payload);
+    console.log(`[XLN] Updated jurisdictions.json: ${canonicalPath}`);
+
+    for (const mirrorPath of symlinkMirrors) {
       try {
-        await fs.access(path.dirname(filePath));
+        await fs.mkdir(path.dirname(mirrorPath), { recursive: true });
       } catch {
         continue;
       }
-      let data: any = {};
+      const linkTarget = path.relative(path.dirname(mirrorPath), canonicalPath) || path.basename(canonicalPath);
+      let recreate = true;
       try {
-        data = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+        const stat = await fs.lstat(mirrorPath);
+        if (stat.isSymbolicLink()) {
+          const currentTarget = await fs.readlink(mirrorPath);
+          const currentResolved = path.resolve(path.dirname(mirrorPath), currentTarget);
+          if (currentResolved === canonicalPath) recreate = false;
+        }
+        if (recreate) await fs.unlink(mirrorPath);
       } catch {
-        data = {};
+        // Mirror doesn't exist yet; create below.
       }
-      data.version = data.version ?? '1.0.0';
-      data.lastUpdated = new Date().toISOString();
-      data.defaults = data.defaults ?? {
-        timeout: 30000,
-        retryAttempts: 3,
-        gasLimit: 1_000_000,
-      };
-      if (data.testnet) delete data.testnet;
-      data.jurisdictions = data.jurisdictions ?? {};
-      data.jurisdictions.arrakis = {
-        name: 'Arrakis (Shared Anvil)',
-        chainId: chainIdOverride ?? 31337,
-        rpc: publicRpc,
-        contracts: {
-          account: contracts.account,
-          depository: contracts.depository,
-          entityProvider: contracts.entityProvider,
-          deltaTransformer: contracts.deltaTransformer,
-        },
-      };
-      await fs.writeFile(filePath, JSON.stringify(data, null, 2));
-      console.log(`[XLN] Updated jurisdictions.json: ${filePath}`);
+      if (!recreate) continue;
+      try {
+        await fs.symlink(linkTarget, mirrorPath);
+        console.log(`[XLN] Symlinked jurisdictions mirror: ${mirrorPath} -> ${linkTarget}`);
+      } catch {
+        await fs.writeFile(mirrorPath, payload);
+        console.log(`[XLN] Mirrored jurisdictions via copy (symlink unavailable): ${mirrorPath}`);
+      }
+    }
+
+    for (const mirrorPath of copyMirrors) {
+      try {
+        await fs.mkdir(path.dirname(mirrorPath), { recursive: true });
+        await fs.writeFile(mirrorPath, payload);
+        console.log(`[XLN] Mirrored jurisdictions copy: ${mirrorPath}`);
+      } catch {
+        // Optional mirror target; ignore when unavailable.
+      }
     }
   } catch (err) {
     console.warn('[XLN] Failed to update jurisdictions.json:', (err as Error).message);
@@ -714,7 +894,28 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
   relaySeeds: [],
   serverId: 'xln-server',
 };
+let activeServerOptions: XlnServerOptions = { ...DEFAULT_OPTIONS };
 const DEFAULT_TOKEN_CATALOG = DEFAULT_TOKENS.map(token => ({ ...token }));
+const getDefaultLocalRelayUrl = (port?: number): string => `ws://localhost:${port ?? DEFAULT_OPTIONS.port}/relay`;
+const resolveUnifiedRelayUrl = (port?: number): string => {
+  const fallback = getDefaultLocalRelayUrl(port);
+  const candidates = [
+    process.env.INTERNAL_RELAY_URL,
+    process.env.RELAY_URL,
+    process.env.PUBLIC_RELAY_URL,
+  ]
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+  const unique = Array.from(new Set(candidates));
+  if (unique.length > 1) {
+    throw new Error(
+      `RELAY_URL_MISMATCH: expected single relay URL, got INTERNAL/RELAY/PUBLIC=${unique.join(', ')}`,
+    );
+  }
+  return unique[0] || fallback;
+};
+const resolveConfiguredRelayUrl = (port?: number): string => resolveUnifiedRelayUrl(port);
+const resolveAdvertisedRelayUrl = (port?: number): string => resolveUnifiedRelayUrl(port);
 
 // ============================================================================
 // RELAY STATE (single store for all relay concerns)
@@ -725,6 +926,11 @@ let relayStore = createRelayStore(DEFAULT_OPTIONS.serverId ?? 'xln-server');
 const normalizeHubProfileForRelay = (profile: any): any => {
   if (!profile || !profile.entityId) return profile;
   const capabilities = Array.isArray(profile.capabilities) ? profile.capabilities : [];
+  const rawBaseFee = profile.metadata?.rebalanceBaseFee;
+  const rawLiquidityFeeBps = profile.metadata?.rebalanceLiquidityFeeBps;
+  const rawGasFee = profile.metadata?.rebalanceGasFee;
+  const rawPolicyVersion = Number(profile.metadata?.policyVersion ?? 1);
+  const rawTimeoutMs = Number(profile.metadata?.rebalanceTimeoutMs ?? 10 * 60 * 1000);
   return {
     ...profile,
     capabilities: Array.from(new Set([...capabilities, 'hub', 'routing', 'faucet'])),
@@ -733,6 +939,21 @@ const normalizeHubProfileForRelay = (profile: any): any => {
       isHub: true,
       name: profile.metadata?.name || String(profile.entityId).slice(0, 10),
       region: profile.metadata?.region || 'global',
+      policyVersion: Number.isFinite(rawPolicyVersion) && rawPolicyVersion > 0 ? rawPolicyVersion : 1,
+      rebalanceBaseFee:
+        rawBaseFee !== undefined && rawBaseFee !== null
+          ? String(rawBaseFee)
+          : String(10n ** 17n),
+      rebalanceLiquidityFeeBps:
+        rawLiquidityFeeBps !== undefined && rawLiquidityFeeBps !== null
+          ? String(rawLiquidityFeeBps)
+          : '1',
+      rebalanceGasFee:
+        rawGasFee !== undefined && rawGasFee !== null
+          ? String(rawGasFee)
+          : '0',
+      rebalanceTimeoutMs:
+        Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0 ? Math.floor(rawTimeoutMs) : 10 * 60 * 1000,
       lastUpdated: profile.metadata?.lastUpdated || Date.now(),
     },
   };
@@ -805,6 +1026,306 @@ const sendEntityInputDirectViaRelaySocket = (env: Env, targetRuntimeId: string, 
     );
     return false;
   }
+};
+
+const bootstrapServerHubsAndReserves = async (
+  env: Env,
+  options: XlnServerOptions,
+  relayUrl: string,
+  anvilRpc: string,
+): Promise<string[]> => {
+  const { bootstrapHubs } = await import('../scripts/bootstrap-hub');
+  const publicRpc = process.env.PUBLIC_RPC ?? anvilRpc;
+  const publicHttp = process.env.PUBLIC_HTTP ?? '';
+  let relayHost = '';
+  try {
+    relayHost = new URL(relayUrl).hostname.toLowerCase();
+  } catch {
+    relayHost = '';
+  }
+
+  const explicitBootstrap = process.env.BOOTSTRAP_LOCAL_HUBS;
+  const bootstrapLocalHubs = explicitBootstrap === '0' ? false : true;
+  if (!bootstrapLocalHubs) {
+    console.log(`[XLN] Hub bootstrap disabled by BOOTSTRAP_LOCAL_HUBS=0 (relayHost="${relayHost || 'unknown'}")`);
+  }
+
+  const hubConfigs = bootstrapLocalHubs
+    ? [
+        {
+          name: 'H1',
+          region: 'global',
+          signerId: 'hub-1',
+          seed: HUB_SEED,
+          routingFeePPM: 100,
+          relayUrl,
+          rpcUrl: publicRpc,
+          httpUrl: publicHttp,
+          port: options.port,
+          serverId: options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server',
+          capabilities: ['hub', 'routing', 'faucet'],
+          position: { x: -80, y: 0, z: 0 },
+        },
+        {
+          name: 'H2',
+          region: 'global',
+          signerId: 'hub-2',
+          seed: HUB_SEED,
+          routingFeePPM: 100,
+          relayUrl,
+          rpcUrl: publicRpc,
+          httpUrl: publicHttp,
+          port: options.port,
+          serverId: options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server',
+          capabilities: ['hub', 'routing', 'faucet'],
+          position: { x: 0, y: 0, z: 0 },
+        },
+        {
+          name: 'H3',
+          region: 'global',
+          signerId: 'hub-3',
+          seed: HUB_SEED,
+          routingFeePPM: 100,
+          relayUrl,
+          rpcUrl: publicRpc,
+          httpUrl: publicHttp,
+          port: options.port,
+          serverId: options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server',
+          capabilities: ['hub', 'routing', 'faucet'],
+          position: { x: 80, y: 0, z: 0 },
+        },
+      ]
+    : [];
+
+  const hubBootstraps = await bootstrapHubs(env, hubConfigs);
+  const hubEntityIds = hubBootstraps.map(h => h.entityId);
+  relayStore.activeHubEntityIds = [...hubEntityIds];
+  hubSignerLabels.clear();
+  hubSignerAddresses.clear();
+  for (const hub of hubBootstraps) {
+    hubSignerLabels.set(hub.entityId, hub.signerLabel);
+    hubSignerAddresses.set(hub.entityId, hub.signerId);
+  }
+
+  if (hubEntityIds.length > 0) {
+    seedHubProfilesInRelayCache(
+      env,
+      hubConfigs.map((cfg, idx) => ({
+        entityId: hubEntityIds[idx],
+        name: cfg.name,
+        region: cfg.region,
+        routingFeePPM: cfg.routingFeePPM,
+        capabilities: cfg.capabilities,
+      })),
+      relayUrl,
+    );
+  }
+
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true) || [];
+  console.log(`[XLN] Found ${hubs.length} hubs in gossip`);
+
+  if (hubs.length > 0 && globalJAdapter) {
+    console.log('[XLN] Funding hub reserves...');
+    const tokenCatalog = await ensureTokenCatalog();
+
+    try {
+      if (DEV_CHAIN_IDS.has(globalJAdapter.chainId) && 'send' in globalJAdapter.provider) {
+        const provider = globalJAdapter.provider as ethers.JsonRpcProvider;
+        const deployerAddress = await globalJAdapter.signer.getAddress();
+        const targetDeployerEth = ethers.parseEther('10000');
+        await provider.send('anvil_setBalance', [deployerAddress, ethers.toBeHex(targetDeployerEth)]);
+        console.log('[XLN] Anvil deployer balance topped up');
+      }
+    } catch (err) {
+      console.warn('[XLN] Failed to top up anvil deployer:', (err as Error).message);
+    }
+
+    for (const hubProfile of hubs) {
+      const hub = await getHubWallet(env, hubProfile.entityId);
+      if (!hub) {
+        console.warn('[XLN] Hub wallet not available (gossip missing)');
+        continue;
+      }
+      const hubEntityId = hub.hubEntityId;
+      const hubWallet = hub.wallet;
+      const hubWalletAddress = await hubWallet.getAddress();
+      console.log(`[XLN] Hub wallet address (${hubEntityId.slice(0, 10)}...): ${hubWalletAddress}`);
+
+      if (globalJAdapter.mode === 'browservm') {
+        const browserVM = globalJAdapter.getBrowserVM();
+        if (browserVM) {
+          await (browserVM as any).fundSignerWallet(hubWalletAddress, 1_000_000_000n * 10n ** 18n);
+          console.log('[XLN] Hub wallet funded with ERC20 + ETH');
+        }
+      } else {
+        const deployer = globalJAdapter.signer;
+        const ERC20_ABI = [
+          'function transfer(address to, uint256 amount) returns (bool)',
+          'function balanceOf(address) view returns (uint256)',
+        ];
+
+        for (const token of tokenCatalog) {
+          if (!token?.address) continue;
+          try {
+            const erc20 = new ethers.Contract(token.address, ERC20_ABI, deployer);
+            const hubBalance = await erc20.balanceOf(hubWalletAddress);
+            const targetBalance = 1_000_000_000n * 10n ** BigInt(token.decimals ?? 18);
+            if (hubBalance < targetBalance) {
+              const transferAmount = targetBalance - hubBalance;
+              const tx = await erc20.transfer(hubWalletAddress, transferAmount);
+              await tx.wait();
+              console.log(
+                `[XLN] Hub wallet funded with ${token.symbol}: ${ethers.formatUnits(transferAmount, token.decimals ?? 18)}`,
+              );
+            }
+          } catch (err) {
+            console.warn(`[XLN] Hub wallet funding failed (${token.symbol}):`, (err as Error).message);
+          }
+        }
+
+        try {
+          const currentEth = await globalJAdapter.provider.getBalance(hubWalletAddress);
+          const targetEth = ethers.parseEther('1000');
+          if (currentEth < targetEth) {
+            const topup = targetEth - currentEth;
+            const ethTx = await deployer.sendTransaction({ to: hubWalletAddress, value: topup });
+            await ethTx.wait();
+            console.log(`[XLN] Hub wallet funded with ${ethers.formatEther(topup)} ETH for gas`);
+          } else {
+            console.log('[XLN] Hub wallet already has sufficient ETH');
+          }
+        } catch (err) {
+          console.error('[XLN] Hub wallet ETH funding failed:', (err as Error).message);
+        }
+      }
+
+      const reserveTokens =
+        tokenCatalog.length > 0 ? tokenCatalog : await globalJAdapter.getTokenRegistry().catch(() => []);
+      for (const token of reserveTokens) {
+        const tokenId = typeof token.tokenId === 'number' ? token.tokenId : undefined;
+        if (!tokenId) continue;
+        const decimals = typeof token.decimals === 'number' ? token.decimals : 18;
+        const amount = 1_000_000_000n * 10n ** BigInt(decimals);
+        try {
+          const events = await globalJAdapter.debugFundReserves(hubEntityId, tokenId, amount);
+          console.log(
+            `[XLN] Hub reserves funded: tokenId=${tokenId} amount=${ethers.formatUnits(amount, decimals)} for ${hubEntityId.slice(0, 10)}...`,
+          );
+          await applyJEventsToEnv(env, events, 'HUB-FUND');
+        } catch (err) {
+          console.warn(`[XLN] Hub reserve funding failed (tokenId=${tokenId}):`, (err as Error).message);
+        }
+      }
+    }
+  }
+
+  if (hubEntityIds.length >= 3) {
+    await bootstrapHubMeshCredit(env, hubEntityIds.slice(0, 3));
+    seedHubProfilesInRelayCache(
+      env,
+      hubConfigs.map((cfg, idx) => ({
+        entityId: hubEntityIds[idx],
+        name: cfg.name,
+        region: cfg.region,
+        routingFeePPM: cfg.routingFeePPM,
+        capabilities: cfg.capabilities,
+      })),
+      relayUrl,
+    );
+  }
+
+  const activeJurisdictionName =
+    env.activeJurisdiction || (env.jReplicas ? Array.from(env.jReplicas.keys())[0] : undefined);
+  const activeJReplica = activeJurisdictionName ? env.jReplicas?.get(activeJurisdictionName) : undefined;
+  const jurisdictionConfig = activeJReplica
+    ? {
+        name: activeJurisdictionName,
+        chainId: Number(activeJReplica.jadapter?.chainId ?? activeJReplica.chainId ?? 0),
+        address: activeJReplica.rpcs?.[0] ?? '',
+        entityProviderAddress: activeJReplica.entityProviderAddress ?? activeJReplica.contracts?.entityProvider ?? '',
+        depositoryAddress: activeJReplica.depositoryAddress ?? activeJReplica.contracts?.depository ?? '',
+      }
+    : undefined;
+
+  for (const hubEntityId of hubEntityIds) {
+    const replica = getEntityReplicaById(env, hubEntityId);
+    if (!replica?.state) continue;
+    replica.state.hubRebalanceConfig = {
+      matchingStrategy: 'amount',
+      policyVersion: 1,
+      routingFeePPM: 1000,
+      baseFee: 5n * 10n ** 18n,
+      rebalanceBaseFee: 10n ** 17n,
+      rebalanceLiquidityFeeBps: 1n,
+      rebalanceGasFee: 0n,
+      rebalanceTimeoutMs: 10 * 60 * 1000,
+    };
+    if (jurisdictionConfig && !replica.state.config?.jurisdiction) {
+      replica.state.config.jurisdiction = jurisdictionConfig;
+      console.log(
+        `[XLN] Hub ${hubEntityId.slice(-8)} jurisdiction set: ${activeJurisdictionName} (depository=${jurisdictionConfig.depositoryAddress.slice(0, 10)}...)`,
+      );
+    }
+    console.log(`[XLN] Hub ${hubEntityId.slice(-8)} rebalance config set (amount, 1000ppm, rebalance policy triplet)`);
+  }
+
+  if (globalJAdapter && hubEntityIds.length > 0) {
+    console.log(`[XLN] Funding hub reserves (${hubEntityIds.length} hubs)...`);
+    const tokenCatalog = await ensureTokenCatalog();
+    for (const hubEntityId of hubEntityIds) {
+      const hub = await getHubWallet(env, hubEntityId);
+      if (!hub) {
+        console.warn(`[XLN] Hub wallet not available for ${hubEntityId.slice(-8)}, skipping reserve funding`);
+        continue;
+      }
+      const hubWalletAddress = await hub.wallet.getAddress();
+
+      if (globalJAdapter.mode === 'browservm') {
+        const browserVM = globalJAdapter.getBrowserVM();
+        if (browserVM) {
+          await (browserVM as any).fundSignerWallet(hubWalletAddress, 1_000_000_000n * 10n ** 18n);
+        }
+      }
+
+      const reserveTokens =
+        tokenCatalog.length > 0 ? tokenCatalog : await globalJAdapter.getTokenRegistry().catch(() => []);
+      for (const token of reserveTokens) {
+        const tokenId = typeof token.tokenId === 'number' ? token.tokenId : undefined;
+        if (!tokenId) continue;
+        const decimals = typeof token.decimals === 'number' ? token.decimals : 18;
+        const amount = 1_000_000_000n * 10n ** BigInt(decimals);
+        try {
+          const events = await globalJAdapter.debugFundReserves(hubEntityId, tokenId, amount);
+          await applyJEventsToEnv(env, events, 'HUB-RESERVE-FUND');
+          const replica = getEntityReplicaById(env, hubEntityId);
+          if (replica?.state) {
+            replica.state.reserves.set(String(tokenId), amount);
+          }
+          console.log(
+            `[XLN] Hub ${hubEntityId.slice(-8)} reserves funded: tokenId=${tokenId} amount=${ethers.formatUnits(amount, decimals)}`,
+          );
+        } catch (err) {
+          console.warn(
+            `[XLN] Hub ${hubEntityId.slice(-8)} reserve funding failed (tokenId=${tokenId}):`,
+            (err as Error).message,
+          );
+        }
+      }
+    }
+    console.log('[XLN] Hub reserve funding complete');
+  } else {
+    console.warn(`[XLN] Skipping hub reserve funding: globalJAdapter=${!!globalJAdapter} hubs=${hubEntityIds.length}`);
+  }
+
+  const assertTokens = await ensureTokenCatalog();
+  await assertHubBootstrapReadiness(env, hubEntityIds, assertTokens);
+  console.log(
+    `[XLN] ✅ Hub bootstrap assertions passed: hubs=${hubEntityIds.length}, tokens=${Math.min(assertTokens.length, HUB_REQUIRED_TOKEN_COUNT)}, mesh=ok`,
+  );
+
+  return hubEntityIds;
 };
 
 const resetServerDebugState = (
@@ -915,11 +1436,18 @@ const resetServerDebugState = (
 
 const triggerColdReset = async (
   env: Env,
-  opts: { resetRpc?: boolean; clearDb?: boolean; preserveHubs?: boolean } = {},
-): Promise<{ resetRpc: boolean; clearDb: boolean; activeClientsClosed: number; preserveHubs: boolean }> => {
+  opts: { resetRpc?: boolean; clearDb?: boolean; preserveHubs?: boolean; syncRebuild?: boolean } = {},
+): Promise<{
+  resetRpc: boolean;
+  clearDb: boolean;
+  activeClientsClosed: number;
+  preserveHubs: boolean;
+  rebuilding: boolean;
+}> => {
   const resetRpc = opts.resetRpc !== false;
   const clearDbState = opts.clearDb !== false;
   const preserveHubs = opts.preserveHubs === true;
+  const syncRebuild = opts.syncRebuild === true;
 
   const localRuntimeKey = normalizeRuntimeKey(env.runtimeId);
   const preservedRuntimeIds = new Set<string>();
@@ -963,7 +1491,7 @@ const triggerColdReset = async (
   if (resetRpc && globalJAdapter?.mode === 'rpc') {
     try {
       const provider = globalJAdapter.provider as ethers.JsonRpcProvider;
-      // Works on anvil/hardhat nodes and gives a real cold chain reset.
+      // Works on anvil nodes and gives a real cold chain reset.
       await provider.send('anvil_reset', []);
       console.log('[RESET] RPC reset via anvil_reset completed');
     } catch (error) {
@@ -971,7 +1499,93 @@ const triggerColdReset = async (
     }
   }
 
-  return { resetRpc, clearDb: clearDbState, activeClientsClosed, preserveHubs };
+  const anvilRpc = process.env.ANVIL_RPC || 'http://localhost:8545';
+  const advertisedRelayUrl = resolveAdvertisedRelayUrl(activeServerOptions.port);
+
+  tokenCatalogCache = null;
+  tokenCatalogPromise = null;
+
+  const rebuildWork = async (): Promise<void> => {
+    const internalRelayUrl = resolveConfiguredRelayUrl(activeServerOptions.port);
+    if (globalJAdapter) {
+      try {
+        globalJAdapter.stopWatching();
+      } catch (error) {
+        console.warn('[RESET] Failed to stop J-event watcher before rebootstrap:', (error as Error).message);
+      }
+
+      if (resetRpc) {
+        if (globalJAdapter.mode === 'rpc') {
+          const freshChainId = Number(globalJAdapter.chainId);
+          globalJAdapter = await createJAdapter({
+            mode: 'rpc',
+            chainId: freshChainId,
+            rpcUrl: anvilRpc,
+          });
+          await globalJAdapter.deployStack();
+          await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, freshChainId);
+        } else {
+          await globalJAdapter.deployStack();
+          await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, Number(globalJAdapter.chainId));
+        }
+      }
+
+      const jName = globalJAdapter.mode === 'rpc' ? 'arrakis' : 'local';
+      if (!env.jReplicas) env.jReplicas = new Map();
+      env.jReplicas.set(jName, {
+        name: jName,
+        blockNumber: 0n,
+        stateRoot: new Uint8Array(32),
+        mempool: [],
+        blockDelayMs: 300,
+        lastBlockTimestamp: env.timestamp,
+        position: { x: 0, y: 50, z: 0 },
+        depositoryAddress: globalJAdapter.addresses.depository,
+        entityProviderAddress: globalJAdapter.addresses.entityProvider,
+        contracts: globalJAdapter.addresses,
+        rpcs: globalJAdapter.mode === 'rpc' ? [anvilRpc] : [],
+        chainId: globalJAdapter.chainId,
+        jadapter: globalJAdapter,
+      });
+      env.activeJurisdiction = jName;
+      globalJAdapter.startWatching(env);
+      console.log(`[RESET] J-event watcher restarted (${jName})`);
+    }
+
+    try {
+      startP2P(env, {
+        relayUrls: [internalRelayUrl],
+        gossipPollMs: 0,
+        serverId: activeServerOptions.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server',
+      });
+      console.log(`[RESET] P2P reconnected: ${internalRelayUrl}`);
+    } catch (error) {
+      console.warn('[RESET] Failed to reconnect P2P:', (error as Error).message);
+    }
+
+    await bootstrapServerHubsAndReserves(env, activeServerOptions, advertisedRelayUrl, anvilRpc);
+    console.log('[RESET] Rebuild complete');
+  };
+
+  coldResetStartedAt = Date.now();
+  coldResetCompletedAt = 0;
+  coldResetRebuildError = null;
+  coldResetRebuildInFlight = rebuildWork()
+    .catch(error => {
+      coldResetRebuildError = (error as Error).message;
+      console.error('[RESET] Rebuild failed:', coldResetRebuildError);
+    })
+    .finally(() => {
+      coldResetCompletedAt = Date.now();
+      coldResetRebuildInFlight = null;
+    });
+
+  if (syncRebuild) {
+    await coldResetRebuildInFlight;
+    return { resetRpc, clearDb: clearDbState, activeClientsClosed, preserveHubs, rebuilding: false };
+  }
+
+  return { resetRpc, clearDb: clearDbState, activeClientsClosed, preserveHubs, rebuilding: true };
 };
 
 const installProcessSafetyGuards = (): void => {
@@ -1025,6 +1639,7 @@ const seedHubProfilesInRelayCache = (
     profile.capabilities = Array.from(
       new Set([...(profile.capabilities || []), ...(hub.capabilities || ['hub', 'routing', 'faucet'])]),
     );
+    const hubPolicy = hubState.hubRebalanceConfig;
     profile.metadata = {
       ...(profile.metadata || {}),
       isHub: true,
@@ -1032,6 +1647,11 @@ const seedHubProfilesInRelayCache = (
       region: hub.region || 'global',
       relayUrl,
       routingFeePPM: hub.routingFeePPM ?? profile.metadata?.routingFeePPM ?? 100,
+      policyVersion: hubPolicy?.policyVersion ?? 1,
+      rebalanceBaseFee: String(hubPolicy?.rebalanceBaseFee ?? 10n ** 17n),
+      rebalanceLiquidityFeeBps: String(hubPolicy?.rebalanceLiquidityFeeBps ?? hubPolicy?.minFeeBps ?? 1n),
+      rebalanceGasFee: String(hubPolicy?.rebalanceGasFee ?? 0n),
+      rebalanceTimeoutMs: hubPolicy?.rebalanceTimeoutMs ?? 10 * 60 * 1000,
       ...(encryptionPubKey ? { encryptionPubKey } : {}),
       lastUpdated: seededAt,
     };
@@ -1197,11 +1817,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     return new Response(null, { headers });
   }
 
-  // JSON-RPC proxy endpoint.
-  // Accept both /api/rpc and /rpc so frontend does not depend on external rewrite rules.
-  // Production guard: refuse localhost/anvil upstreams unless explicitly allowed.
+  // JSON-RPC proxy endpoint (single canonical path: /rpc).
+  // Keep /api/rpc for compatibility with older clients.
   if ((pathname === '/api/rpc' || pathname === '/rpc') && req.method === 'POST') {
-    const allowLocal = process.env.ALLOW_LOCAL_RPC_PROXY === 'true';
+    const blockLocal = process.env.BLOCK_LOCAL_RPC_PROXY === 'true';
     const explicitUpstream = process.env.RPC_UPSTREAM_URL || process.env.PUBLIC_RPC_URL || process.env.ANVIL_RPC;
     const jMachineRpc = env?.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction)?.rpcUrl : undefined;
     const upstream = explicitUpstream || jMachineRpc || '';
@@ -1215,11 +1834,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       });
       return new Response(JSON.stringify({ error: 'RPC upstream not configured' }), { status: 503, headers });
     }
-    if (isLocal && !allowLocal) {
+    if (isLocal && blockLocal) {
       pushDebugEvent(relayStore, {
         event: 'error',
         reason: 'RPC_PROXY_LOCAL_BLOCKED',
-        details: { upstream },
+        details: { upstream, path: pathname },
       });
       return new Response(
         JSON.stringify({
@@ -1251,7 +1870,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       pushDebugEvent(relayStore, {
         event: 'error',
         reason: 'RPC_PROXY_FETCH_FAILED',
-        details: { upstream, error: error?.message || String(error) },
+        details: { upstream, path: pathname, error: error?.message || String(error) },
       });
       return new Response(JSON.stringify({ error: error?.message || 'RPC proxy failed' }), { status: 502, headers });
     }
@@ -1315,6 +1934,12 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       JSON.stringify({
         ...health,
         hubMesh: getHubMeshHealth(env),
+        reset: {
+          inProgress: !!coldResetRebuildInFlight,
+          lastError: coldResetRebuildError,
+          startedAt: coldResetStartedAt || null,
+          completedAt: coldResetCompletedAt || null,
+        },
         relay: {
           activeClients: activeClientRuntimeIds,
           activeClientCount: activeClientRuntimeIds.length,
@@ -1439,9 +2064,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     // Full clean-room reset by default. Use preserveHubs=1 to keep hub entities/profiles.
     const preserveParam = url.searchParams.get('preserveHubs');
     const preserveHubs = preserveParam === '1';
-    const shouldExit = url.searchParams.get('exit') !== '0';
+    const syncRebuild = url.searchParams.get('sync') === '1';
+    // Keep server alive by default (local dev/e2e). Supervisor restart is opt-in via exit=1.
+    const shouldExit = url.searchParams.get('exit') === '1';
 
-    const result = await triggerColdReset(env, { resetRpc, clearDb: clearDbState, preserveHubs });
+    const result = await triggerColdReset(env, { resetRpc, clearDb: clearDbState, preserveHubs, syncRebuild });
     pushDebugEvent(relayStore, {
       event: 'reset',
       status: 'ok',
@@ -2078,6 +2705,17 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           ? requestedHubEntityId.toLowerCase()
           : '';
       const requestedHub = requestedHubId ? hubs.find(hub => hub.entityId.toLowerCase() === requestedHubId) : undefined;
+      if (requestedHubId && !requestedHub) {
+        return new Response(
+          JSON.stringify({
+            error: `Requested hub not found: ${requestedHubId}`,
+            code: 'FAUCET_REQUESTED_HUB_NOT_FOUND',
+            requestedHubEntityId: requestedHubId,
+            knownHubEntityIds: hubs.map(h => h.entityId),
+          }),
+          { status: 404, headers },
+        );
+      }
       const accountInfoByHub = hubs.map(hub => {
         const machine = getAccountMachine(env, hub.entityId, normalizedUserEntityId);
         const accountExists = hasAccount(env, hub.entityId, normalizedUserEntityId) || !!machine;
@@ -2089,23 +2727,16 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       });
       const existingReadyHubAccount = accountInfoByHub.find(entry => entry.hasAccount && !entry.pending)?.hub;
       const existingHubAccount = accountInfoByHub.find(entry => entry.hasAccount)?.hub;
-      const requestedHubState = requestedHub
-        ? accountInfoByHub.find(entry => entry.hub.entityId.toLowerCase() === requestedHub.entityId.toLowerCase())
-        : undefined;
-      const requestedHubHasReadyAccount = !!requestedHubState?.hasAccount && !requestedHubState?.pending;
-      const requestedHubHasAccount = !!requestedHubState?.hasAccount;
-      // Prefer ready account > any account > requested > first hub.
-      const selectedHub = requestedHubHasReadyAccount
-        ? requestedHub
-        : (existingReadyHubAccount ??
-          (requestedHubHasAccount ? requestedHub : (existingHubAccount ?? requestedHub ?? hubs[0])));
+      // If caller requested a hub explicitly, always honor it.
+      // Auto-open path will create account on that exact hub if needed.
+      const selectedHub = requestedHub ?? existingReadyHubAccount ?? existingHubAccount ?? hubs[0];
       if (!selectedHub) {
         return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
       }
       const hubEntityId = selectedHub.entityId;
       console.log(
         `[FAUCET/OFFCHAIN] selectedHub=${hubEntityId.slice(-8)} requested=${requestedHubId ? requestedHubId.slice(-8) : 'none'} ` +
-          `requestedHasAccount=${requestedHubHasAccount} existingHubAccount=${existingHubAccount?.entityId?.slice(-8) ?? 'none'}`,
+          `existingHubAccount=${existingHubAccount?.entityId?.slice(-8) ?? 'none'}`,
       );
       if (!getEntityReplicaById(env, hubEntityId)) {
         return new Response(
@@ -2135,6 +2766,19 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       console.log(
         `[FAUCET/OFFCHAIN] hub=${hubEntityId.slice(-8)} signer=${hubSignerId.slice(-8)} amount=${amount} token=${tokenId}`,
       );
+      pushDebugEvent(relayStore, {
+        event: 'debug_event',
+        status: 'info',
+        reason: 'REB_STEP0_FAUCET_REQUEST',
+        details: {
+          requestId,
+          hubEntityId,
+          userEntityId: normalizedUserEntityId,
+          userRuntimeId: normalizedUserRuntimeId,
+          tokenId,
+          amount,
+        },
+      });
 
       const amountWei = ethers.parseUnits(amount, 18);
       const accountMachine = getAccountMachine(env, hubEntityId, normalizedUserEntityId);
@@ -2259,11 +2903,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   console.log('═══ startXlnServer() CALLED ═══');
   console.log('Options:', opts);
   const options = { ...DEFAULT_OPTIONS, ...opts };
+  activeServerOptions = { ...options };
   relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server');
-  const advertisedRelayUrl = process.env.PUBLIC_RELAY_URL ?? process.env.RELAY_URL ?? 'wss://xln.finance/relay';
-  // Keep server runtime on the same public relay as clients.
-  // INTERNAL_RELAY_URL can override only when explicitly set.
-  const internalRelayUrl = process.env.INTERNAL_RELAY_URL ?? advertisedRelayUrl;
+  const advertisedRelayUrl = resolveAdvertisedRelayUrl(options.port);
+  const internalRelayUrl = resolveConfiguredRelayUrl(options.port);
 
   // Always initialize runtime - every node needs it
   console.log('[XLN] Initializing runtime...');
@@ -2283,37 +2926,57 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   console.log('  USE_ANVIL =', useAnvil);
   console.log('  ANVIL_RPC =', anvilRpc);
 
+  let activeJName: string | null = null;
+
   if (useAnvil) {
     console.log('[XLN] Connecting to Anvil testnet...');
+    const usePredeployedAddresses = process.env.XLN_USE_PREDEPLOYED_ADDRESSES === 'true';
 
-    // Fetch deployed contract addresses from jurisdictions.json
+    // Optional: reuse addresses from jurisdictions.json (disabled by default).
     const fs = await import('fs/promises');
     const path = await import('path');
     let fromReplica = undefined;
-    try {
-      // Try cwd first, then fallback to /root/xln (prod)
-      const cwdPath = path.join(process.cwd(), 'jurisdictions.json');
-      const prodPath = '/root/xln/jurisdictions.json';
-      const jurisdictionsPath = await fs
-        .access(cwdPath)
-        .then(() => cwdPath)
-        .catch(() => prodPath);
-      console.log(`[XLN] Loading jurisdictions from: ${jurisdictionsPath}`);
-      const jurisdictionsData = await fs.readFile(jurisdictionsPath, 'utf-8');
-      const jurisdictions = JSON.parse(jurisdictionsData);
-      const arrakisConfig = jurisdictions?.jurisdictions?.arrakis;
+    if (usePredeployedAddresses) {
+      try {
+        // Canonical source first, then legacy/root fallbacks.
+        const candidates = [
+          path.join(process.cwd(), 'jurisdictions', 'jurisdictions.json'),
+          path.join(process.cwd(), 'jurisdictions.json'),
+          '/root/xln/jurisdictions/jurisdictions.json',
+          '/root/xln/jurisdictions.json',
+        ];
+        const jurisdictionsPath = await candidates.reduce<Promise<string>>(async (foundPromise, candidate) => {
+          const found = await foundPromise;
+          if (found) return found;
+          try {
+            await fs.access(candidate);
+            return candidate;
+          } catch {
+            return '';
+          }
+        }, Promise.resolve(''));
+        if (!jurisdictionsPath) {
+          throw new Error('No jurisdictions.json found in canonical or legacy locations');
+        }
+        console.log(`[XLN] Loading predeployed addresses from: ${jurisdictionsPath}`);
+        const jurisdictionsData = await fs.readFile(jurisdictionsPath, 'utf-8');
+        const jurisdictions = JSON.parse(jurisdictionsData);
+        const arrakisConfig = jurisdictions?.jurisdictions?.arrakis;
 
-      if (arrakisConfig?.contracts) {
-        fromReplica = {
-          depositoryAddress: arrakisConfig.contracts.depository,
-          entityProviderAddress: arrakisConfig.contracts.entityProvider,
-          contracts: arrakisConfig.contracts,
-          chainId: arrakisConfig.chainId ?? 31337,
-        } as any;
-        console.log('[XLN] Loaded contract addresses from jurisdictions.json');
+        if (arrakisConfig?.contracts) {
+          fromReplica = {
+            depositoryAddress: arrakisConfig.contracts.depository,
+            entityProviderAddress: arrakisConfig.contracts.entityProvider,
+            contracts: arrakisConfig.contracts,
+            chainId: arrakisConfig.chainId ?? 31337,
+          } as any;
+          console.log('[XLN] Loaded predeployed contract addresses from jurisdictions.json');
+        }
+      } catch (err) {
+        console.warn('[XLN] Could not load predeployed addresses, will deploy fresh:', (err as Error).message);
       }
-    } catch (err) {
-      console.warn('[XLN] Could not load jurisdictions.json, will deploy fresh:', (err as Error).message);
+    } else {
+      console.log('[XLN] Fresh deploy mode enabled (XLN_USE_PREDEPLOYED_ADDRESSES!=true)');
     }
 
     // Wait for ANVIL to be ready (retry up to 30s)
@@ -2335,8 +2998,11 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     }
     if (!anvilReady) {
       throw new Error(
-        `❌ FAIL-FAST: ANVIL not reachable at ${anvilRpc} after ${maxRetries}s. Is hardhat node running?`,
+        `❌ FAIL-FAST: ANVIL not reachable at ${anvilRpc} after ${maxRetries}s. Is anvil running?`,
       );
+    }
+    if (detectedChainId !== 31337) {
+      throw new Error(`❌ FAIL-FAST: expected ANVIL chainId=31337, got ${detectedChainId} at ${anvilRpc}`);
     }
 
     // Ensure fromReplica carries correct chainId (override if stale)
@@ -2364,21 +3030,16 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
     const hasAddresses = !!globalJAdapter.addresses?.depository && !!globalJAdapter.addresses?.entityProvider;
 
-    // Deploy if addresses missing (fromReplica invalid or fresh chain)
+    // Deploy if addresses missing (fresh anvil path).
     if (!hasAddresses) {
       console.log('[XLN] Deploying contracts to anvil (missing addresses)...');
-      await globalJAdapter.deployStack();
-      await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId);
-      console.log('[XLN] Contracts deployed');
-    } else if (!fromReplica && block === 0) {
-      console.log('[XLN] Deploying contracts to anvil (fresh chain)...');
       await globalJAdapter.deployStack();
       await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId);
       console.log('[XLN] Contracts deployed');
     } else if (fromReplica) {
       console.log('[XLN] Using pre-deployed contracts from jurisdictions.json');
     } else {
-      console.log('[XLN] Using existing contracts on anvil (block > 0)');
+      console.log('[XLN] Using existing contracts on anvil');
     }
 
     // Ensure env has a J-replica for this RPC jurisdiction (required for j_broadcast → j-mempool)
@@ -2404,316 +3065,53 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         console.log(`[XLN] J-replica "${jName}" registered in env`);
       }
       if (!env.activeJurisdiction) env.activeJurisdiction = jName;
+      activeJName = jName;
     }
   } else {
     console.log('[XLN] Using BrowserVM (local mode)');
     globalJAdapter = await createJAdapter({
       mode: 'browservm',
-      chainId: 1337,
+      chainId: 31337,
     });
     await globalJAdapter.deployStack();
+    if (globalJAdapter && env) {
+      if (!env.jReplicas) env.jReplicas = new Map();
+      const jName = 'local';
+      if (!env.jReplicas.has(jName)) {
+        env.jReplicas.set(jName, {
+          name: jName,
+          blockNumber: 0n,
+          stateRoot: new Uint8Array(32),
+          mempool: [],
+          blockDelayMs: 300,
+          lastBlockTimestamp: env.timestamp,
+          position: { x: 0, y: 50, z: 0 },
+          depositoryAddress: globalJAdapter.addresses.depository,
+          entityProviderAddress: globalJAdapter.addresses.entityProvider,
+          contracts: globalJAdapter.addresses,
+          rpcs: [],
+          chainId: globalJAdapter.chainId,
+          jadapter: globalJAdapter,
+        });
+        console.log(`[XLN] J-replica "${jName}" registered in env`);
+      }
+      if (!env.activeJurisdiction) env.activeJurisdiction = jName;
+      activeJName = jName;
+    }
   }
 
-  // J-event watching is handled by JAdapter.startWatching() per-jReplica.
-  // J-events enter through enqueueRuntimeInput and are consumed by the single runtime loop.
-
-  // Bootstrap hub entities (idempotent - normal entity + gossip tag)
-  const { bootstrapHubs } = await import('../scripts/bootstrap-hub');
-  const relayUrl = advertisedRelayUrl;
-  const publicRpc = process.env.PUBLIC_RPC ?? anvilRpc;
-  const publicHttp = process.env.PUBLIC_HTTP ?? '';
-  let relayHost = '';
-  try {
-    relayHost = new URL(relayUrl).hostname.toLowerCase();
-  } catch {
-    relayHost = '';
-  }
-  const explicitBootstrap = process.env.BOOTSTRAP_LOCAL_HUBS;
-  const bootstrapLocalHubs = explicitBootstrap === '0' ? false : true;
-  if (!bootstrapLocalHubs) {
-    console.log(`[XLN] Hub bootstrap disabled by BOOTSTRAP_LOCAL_HUBS=0 (relayHost="${relayHost || 'unknown'}")`);
-  }
-
-  const hubConfigs = bootstrapLocalHubs
-    ? [
-        {
-          name: 'H1',
-          region: 'global',
-          signerId: 'hub-1',
-          seed: HUB_SEED,
-          routingFeePPM: 100,
-          relayUrl,
-          rpcUrl: publicRpc,
-          httpUrl: publicHttp,
-          port: options.port,
-          serverId: options.serverId,
-          capabilities: ['hub', 'routing', 'faucet'],
-          position: { x: -80, y: 0, z: 0 },
-        },
-        {
-          name: 'H2',
-          region: 'global',
-          signerId: 'hub-2',
-          seed: HUB_SEED,
-          routingFeePPM: 100,
-          relayUrl,
-          rpcUrl: publicRpc,
-          httpUrl: publicHttp,
-          port: options.port,
-          serverId: options.serverId,
-          capabilities: ['hub', 'routing', 'faucet'],
-          position: { x: 0, y: 0, z: 0 },
-        },
-        {
-          name: 'H3',
-          region: 'global',
-          signerId: 'hub-3',
-          seed: HUB_SEED,
-          routingFeePPM: 100,
-          relayUrl,
-          rpcUrl: publicRpc,
-          httpUrl: publicHttp,
-          port: options.port,
-          serverId: options.serverId,
-          capabilities: ['hub', 'routing', 'faucet'],
-          position: { x: 80, y: 0, z: 0 },
-        },
-      ]
-    : [];
-
-  const hubBootstraps = await bootstrapHubs(env, hubConfigs);
-  const hubEntityIds = hubBootstraps.map(h => h.entityId);
-  relayStore.activeHubEntityIds = [...hubEntityIds];
-  for (const hub of hubBootstraps) {
-    hubSignerLabels.set(hub.entityId, hub.signerLabel);
-    hubSignerAddresses.set(hub.entityId, hub.signerId);
-  }
-
-  // Seed relay gossip cache immediately with full hub metadata so first client
-  // message routing does not fail waiting for async relay round-trips.
-  if (hubEntityIds.length > 0) {
-    seedHubProfilesInRelayCache(
-      env,
-      hubConfigs.map((cfg, idx) => ({
-        entityId: hubEntityIds[idx],
-        name: cfg.name,
-        region: cfg.region,
-        routingFeePPM: cfg.routingFeePPM,
-        capabilities: cfg.capabilities,
-      })),
-      relayUrl,
-    );
-  }
-
-  // Wait for gossip to update (gossip.announce() might be async)
-  await new Promise(resolve => setTimeout(resolve, 100));
-
-  // Get hubs from gossip for funding
-  const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true) || [];
-  console.log(`[XLN] Found ${hubs.length} hubs in gossip`);
-
-  if (hubs.length > 0 && globalJAdapter) {
-    console.log('[XLN] Funding hub reserves...');
-
-    // Ensure tokens exist on RPC/anvil before funding
-    const tokenCatalog = await ensureTokenCatalog();
-
-    // Ensure deployer has ETH on anvil (avoids faucet/deploy gas failures)
+  // Start J-event watcher now that env + jReplica are wired.
+  // Without this, AccountSettled/ReserveUpdated never enter runtimeInput.
+  if (globalJAdapter && env) {
     try {
-      if (globalJAdapter.chainId === 31337 && 'send' in globalJAdapter.provider) {
-        const provider = globalJAdapter.provider as ethers.JsonRpcProvider;
-        const deployerAddress = await globalJAdapter.signer.getAddress();
-        const targetDeployerEth = ethers.parseEther('10000');
-        await provider.send('anvil_setBalance', [deployerAddress, ethers.toBeHex(targetDeployerEth)]);
-        console.log('[XLN] Anvil deployer balance topped up');
-      }
+      globalJAdapter.startWatching(env);
+      console.log(`[XLN] J-event watcher started (${activeJName || env.activeJurisdiction || 'unknown'})`);
     } catch (err) {
-      console.warn('[XLN] Failed to top up anvil deployer:', (err as Error).message);
-    }
-
-    for (const hubProfile of hubs) {
-      const hub = await getHubWallet(env, hubProfile.entityId);
-      if (!hub) {
-        console.warn('[XLN] Hub wallet not available (gossip missing)');
-        continue;
-      }
-      const hubEntityId = hub.hubEntityId;
-      const hubWallet = hub.wallet;
-      const hubWalletAddress = await hubWallet.getAddress();
-
-      console.log(`[XLN] Hub wallet address (${hubEntityId.slice(0, 10)}...): ${hubWalletAddress}`);
-
-      // Fund hub wallet if using BrowserVM
-      if (globalJAdapter.mode === 'browservm') {
-        const browserVM = globalJAdapter.getBrowserVM();
-        if (browserVM) {
-          await (browserVM as any).fundSignerWallet(hubWalletAddress, 1_000_000_000n * 10n ** 18n); // 1B tokens
-          console.log('[XLN] Hub wallet funded with ERC20 + ETH');
-        }
-      } else {
-        // RPC/anvil: Fund hub wallet with ERC20 tokens + ETH from deployer
-        const deployer = globalJAdapter.signer;
-        const ERC20_ABI = [
-          'function transfer(address to, uint256 amount) returns (bool)',
-          'function balanceOf(address) view returns (uint256)',
-        ];
-
-        for (const token of tokenCatalog) {
-          if (!token?.address) continue;
-          try {
-            const erc20 = new ethers.Contract(token.address, ERC20_ABI, deployer);
-            const hubBalance = await erc20.balanceOf(hubWalletAddress);
-            const targetBalance = 1_000_000_000n * 10n ** BigInt(token.decimals ?? 18);
-            if (hubBalance < targetBalance) {
-              const transferAmount = targetBalance - hubBalance;
-              const tx = await erc20.transfer(hubWalletAddress, transferAmount);
-              await tx.wait();
-              console.log(
-                `[XLN] Hub wallet funded with ${token.symbol}: ${ethers.formatUnits(transferAmount, token.decimals ?? 18)}`,
-              );
-            }
-          } catch (err) {
-            console.warn(`[XLN] Hub wallet funding failed (${token.symbol}):`, (err as Error).message);
-          }
-        }
-
-        // Fund hub wallet with ETH for gas (huge amount for faucet operations)
-        try {
-          const currentEth = await globalJAdapter.provider.getBalance(hubWalletAddress);
-          const targetEth = ethers.parseEther('1000'); // 1000 ETH for faucet operations
-          if (currentEth < targetEth) {
-            const topup = targetEth - currentEth;
-            const ethTx = await deployer.sendTransaction({ to: hubWalletAddress, value: topup });
-            await ethTx.wait();
-            console.log(`[XLN] Hub wallet funded with ${ethers.formatEther(topup)} ETH for gas`);
-          } else {
-            console.log('[XLN] Hub wallet already has sufficient ETH');
-          }
-        } catch (err) {
-          console.error('[XLN] Hub wallet ETH funding failed:', (err as Error).message);
-        }
-      }
-
-      // Fund hub entity reserves in Depository (all registered tokens)
-      const reserveTokens =
-        tokenCatalog.length > 0 ? tokenCatalog : await globalJAdapter.getTokenRegistry().catch(() => []);
-      for (const token of reserveTokens) {
-        const tokenId = typeof token.tokenId === 'number' ? token.tokenId : undefined;
-        if (!tokenId) continue;
-        const decimals = typeof token.decimals === 'number' ? token.decimals : 18;
-        const amount = 1_000_000_000n * 10n ** BigInt(decimals);
-        try {
-          const events = await globalJAdapter.debugFundReserves(hubEntityId, tokenId, amount);
-          console.log(
-            `[XLN] Hub reserves funded: tokenId=${tokenId} amount=${ethers.formatUnits(amount, decimals)} for ${hubEntityId.slice(0, 10)}...`,
-          );
-          await applyJEventsToEnv(env, events, 'HUB-FUND');
-        } catch (err) {
-          console.warn(`[XLN] Hub reserve funding failed (tokenId=${tokenId}):`, (err as Error).message);
-        }
-      }
+      console.error('[XLN] Failed to start J-event watcher:', err);
     }
   }
 
-  if (hubEntityIds.length >= 3) {
-    await bootstrapHubMeshCredit(env, hubEntityIds.slice(0, 3));
-    // Reseed gossip cache with post-bootstrap hub state so hub↔hub account edges
-    // are visible to clients for multi-hop route discovery.
-    seedHubProfilesInRelayCache(
-      env,
-      hubConfigs.map((cfg, idx) => ({
-        entityId: hubEntityIds[idx],
-        name: cfg.name,
-        region: cfg.region,
-        routingFeePPM: cfg.routingFeePPM,
-        capabilities: cfg.capabilities,
-      })),
-      relayUrl,
-    );
-  }
-
-  // Auto-set hubRebalanceConfig + jurisdiction for all hub entities (direct state mutation at boot)
-  // ROOT CAUSE FIX: bootstrap runs BEFORE J-adapter setup, so config.jurisdiction is never set.
-  // We set it here, AFTER jReplicas are registered, so broadcastBatch can resolve addresses.
-  const activeJurisdictionName =
-    env.activeJurisdiction || (env.jReplicas ? Array.from(env.jReplicas.keys())[0] : undefined);
-  const activeJReplica = activeJurisdictionName ? env.jReplicas?.get(activeJurisdictionName) : undefined;
-  const jurisdictionConfig = activeJReplica
-    ? {
-        name: activeJurisdictionName,
-        chainId: Number(activeJReplica.jadapter?.chainId ?? activeJReplica.chainId ?? 0),
-        address: activeJReplica.rpcs?.[0] ?? '',
-        entityProviderAddress: activeJReplica.entityProviderAddress ?? activeJReplica.contracts?.entityProvider ?? '',
-        depositoryAddress: activeJReplica.depositoryAddress ?? activeJReplica.contracts?.depository ?? '',
-      }
-    : undefined;
-
-  for (const hubEntityId of hubEntityIds) {
-    const replica = getEntityReplicaById(env, hubEntityId);
-    if (replica?.state) {
-      replica.state.hubRebalanceConfig = { matchingStrategy: 'hnw', routingFeePPM: 1000, baseFee: 5n * 10n ** 18n };
-      if (jurisdictionConfig && !replica.state.config?.jurisdiction) {
-        replica.state.config.jurisdiction = jurisdictionConfig;
-        console.log(
-          `[XLN] Hub ${hubEntityId.slice(-8)} jurisdiction set: ${activeJurisdictionName} (depository=${jurisdictionConfig.depositoryAddress.slice(0, 10)}...)`,
-        );
-      }
-      console.log(`[XLN] Hub ${hubEntityId.slice(-8)} rebalance config set (hnw, 1000ppm)`);
-    }
-  }
-
-  // ALWAYS fund hub reserves at startup (even after DB restore).
-  // Without reserves, hub cannot deposit collateral (R→C rebalance fails silently).
-  if (globalJAdapter && hubEntityIds.length > 0) {
-    console.log(`[XLN] Funding hub reserves (${hubEntityIds.length} hubs)...`);
-    const tokenCatalog = await ensureTokenCatalog();
-    for (const hubEntityId of hubEntityIds) {
-      // Fund hub wallet (needed for on-chain gas)
-      const hub = await getHubWallet(env, hubEntityId);
-      if (!hub) {
-        console.warn(`[XLN] Hub wallet not available for ${hubEntityId.slice(-8)}, skipping reserve funding`);
-        continue;
-      }
-      const hubWalletAddress = await hub.wallet.getAddress();
-
-      if (globalJAdapter.mode === 'browservm') {
-        const browserVM = globalJAdapter.getBrowserVM();
-        if (browserVM) {
-          await (browserVM as any).fundSignerWallet(hubWalletAddress, 1_000_000_000n * 10n ** 18n);
-        }
-      }
-
-      // Fund reserves in Depository for each token
-      const reserveTokens =
-        tokenCatalog.length > 0 ? tokenCatalog : await globalJAdapter.getTokenRegistry().catch(() => []);
-      for (const token of reserveTokens) {
-        const tokenId = typeof token.tokenId === 'number' ? token.tokenId : undefined;
-        if (!tokenId) continue;
-        const decimals = typeof token.decimals === 'number' ? token.decimals : 18;
-        const amount = 1_000_000_000n * 10n ** BigInt(decimals);
-        try {
-          const events = await globalJAdapter.debugFundReserves(hubEntityId, tokenId, amount);
-          await applyJEventsToEnv(env, events, 'HUB-RESERVE-FUND');
-          // Also set directly on replica state (in case j-events don't propagate immediately)
-          const replica = getEntityReplicaById(env, hubEntityId);
-          if (replica?.state) {
-            replica.state.reserves.set(String(tokenId), amount);
-          }
-          console.log(
-            `[XLN] Hub ${hubEntityId.slice(-8)} reserves funded: tokenId=${tokenId} amount=${ethers.formatUnits(amount, decimals)}`,
-          );
-        } catch (err) {
-          console.warn(
-            `[XLN] Hub ${hubEntityId.slice(-8)} reserve funding failed (tokenId=${tokenId}):`,
-            (err as Error).message,
-          );
-        }
-      }
-    }
-    console.log(`[XLN] Hub reserve funding complete`);
-  } else {
-    console.warn(`[XLN] Skipping hub reserve funding: globalJAdapter=${!!globalJAdapter} hubs=${hubEntityIds.length}`);
-  }
+  const hubEntityIds = await bootstrapServerHubsAndReserves(env, options, advertisedRelayUrl, anvilRpc);
 
   // Wire relay-router + local delivery
   const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
@@ -2749,9 +3147,27 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         return new Response('WebSocket upgrade failed', { status: 400 });
       }
 
-      // REST API (+ hard reset shortcut at /reset)
-      if (pathname.startsWith('/api/') || pathname === '/reset') {
-        return handleApi(req, pathname, env);
+      // REST API (+ hard reset shortcut at /reset + JSON-RPC /rpc endpoint)
+      if (
+        pathname.startsWith('/api/') ||
+        pathname === '/reset' ||
+        pathname === '/rpc'
+      ) {
+        try {
+          return await handleApi(req, pathname, env);
+        } catch (error) {
+          const message = (error as Error)?.message || 'API handler failed';
+          console.error(`[API] Unhandled route error (${pathname}): ${message}`);
+          pushDebugEvent(relayStore, {
+            event: 'error',
+            reason: 'API_HANDLER_EXCEPTION',
+            details: { pathname, message },
+          });
+          return new Response(safeStringify({ error: message, code: 'API_HANDLER_EXCEPTION' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
       }
 
       // Static files

@@ -2,6 +2,8 @@ import { writable, get, derived } from 'svelte/store';
 import { HDNodeWallet, Mnemonic } from 'ethers';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
 import { xlnEnvironment } from './xlnStore';
+import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
+import { writeOnboardingComplete } from '$lib/utils/onboardingState';
 
 // Types
 export interface Signer {
@@ -17,8 +19,15 @@ export interface Runtime {
   seed: string; // raw 12-word mnemonic
   signers: Signer[];
   activeSignerIndex: number;
+  loginType?: 'manual' | 'demo';
+  requiresOnboarding?: boolean;
   createdAt: number;
 }
+
+type CreateRuntimeOptions = {
+  loginType?: 'manual' | 'demo';
+  requiresOnboarding?: boolean;
+};
 
 export interface RuntimesState {
   runtimes: Record<string, Runtime>;
@@ -143,14 +152,19 @@ const resolveJurisdictionConfig = (jurisdictions: any): JurisdictionConfig => {
 
 const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
   if (!rpc) throw new Error('Missing RPC URL in jurisdictions.json');
+  if (typeof window !== 'undefined' && rpc.startsWith('/rpc/')) {
+    const origin = baseOrigin ?? window.location.origin;
+    return new URL('/rpc', origin).toString();
+  }
   if (typeof window !== 'undefined' && rpc.startsWith('http')) {
     try {
       const parsed = new URL(rpc);
+      if (parsed.pathname.startsWith('/rpc/')) {
+        return `${parsed.origin}/rpc`;
+      }
       const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '0.0.0.0';
       if (isLocal) {
-        // Default localhost UX: use stable prod RPC unless explicitly forced local.
-        const forceLocalRpc = localStorage.getItem('xln-force-local-rpc') === '1';
-        if (!forceLocalRpc) return 'https://xln.finance/rpc';
+        // Route localhost RPC through same-origin RPC bridge.
         const origin = baseOrigin ?? window.location.origin;
         return new URL('/rpc', origin).toString();
       }
@@ -164,6 +178,60 @@ const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
     return new URL(rpc, origin).toString();
   }
   return rpc;
+};
+
+const RPC_FATAL_STYLE = 'background:#3b0000;color:#ff4d4f;font-weight:800;padding:2px 6px;border-radius:4px;';
+
+const logRpcFatal = (reason: string, details: Record<string, unknown>): void => {
+  console.error('%c[RPC FAIL-FAST]', RPC_FATAL_STYLE, reason, details);
+};
+
+const detectRpcChainId = async (rpcUrl: string): Promise<number> => {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), 5000) : null;
+  try {
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_chainId',
+        params: [],
+      }),
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    if (!response.ok) {
+      logRpcFatal('RPC_CHAINID_HTTP_ERROR', { rpcUrl, status: response.status });
+      throw new Error(`RPC_CHAINID_HTTP_${response.status}`);
+    }
+    const payload = await response.json();
+    const hex = typeof payload?.result === 'string' ? payload.result : '';
+    if (!hex || !hex.startsWith('0x')) {
+      logRpcFatal('RPC_CHAINID_MALFORMED_RESPONSE', { rpcUrl, payload });
+      throw new Error(`RPC_CHAINID_MALFORMED_RESPONSE:${JSON.stringify(payload)}`);
+    }
+    const parsed = Number.parseInt(hex, 16);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      logRpcFatal('RPC_CHAINID_PARSE_FAILED', { rpcUrl, hex });
+      throw new Error(`RPC_CHAINID_PARSE_FAILED:${hex}`);
+    }
+    return parsed;
+  } catch (error) {
+    logRpcFatal('RPC_CHAINID_REQUEST_FAILED', {
+      rpcUrl,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+};
+
+const assertAnvilChain = (chainId: number, rpcUrl: string, context: string): void => {
+  if (chainId !== 31337) {
+    throw new Error(`[${context}] CHAIN_ID_MISMATCH: expected=31337 actual=${chainId} rpc=${rpcUrl}`);
+  }
 };
 
 const fetchJurisdictions = async (baseOrigin?: string): Promise<any> => {
@@ -328,6 +396,14 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
     env = null;
   }
 
+  const hasLiveJAdapter = (targetEnv: any): boolean => {
+    if (!targetEnv?.jReplicas || targetEnv.jReplicas.size === 0) return false;
+    for (const [, jReplica] of targetEnv.jReplicas.entries()) {
+      if ((jReplica as any)?.jadapter) return true;
+    }
+    return false;
+  };
+
   const hasEntityReplica = (targetEntityId: string): boolean => {
     if (!env?.eReplicas) return false;
     const target = String(targetEntityId).toLowerCase();
@@ -349,6 +425,26 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
     }
   }
 
+  const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+  const jurisdictions = await fetchJurisdictions(baseOrigin);
+  const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
+  const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
+  let chainId: number;
+  try {
+    chainId = await detectRpcChainId(rpcUrl);
+    assertAnvilChain(chainId, rpcUrl, 'VaultStore.restore');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logRpcFatal('VAULT_RPC_CHAIN_VALIDATION_FAILED', { context: 'restore', rpcUrl, message });
+    env?.error?.(
+      'network',
+      'VAULT_RPC_CHAIN_VALIDATION_FAILED',
+      { rpcUrl, message },
+      env?.runtimeId,
+    );
+    throw error;
+  }
+
   if (!env) {
     env = xln.createEmptyEnv(runtimeSeed);
     env.runtimeId = runtimeIdLower;
@@ -356,11 +452,6 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
     if (xln.startRuntimeLoop) {
       xln.startRuntimeLoop(env);
     }
-
-    const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
-    const jurisdictions = await fetchJurisdictions(baseOrigin);
-    const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
-    const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
 
     console.log('[VaultStore] Importing testnet anvil...');
     await enqueueAndAwait(
@@ -371,7 +462,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
           type: 'importJ',
           data: {
             name: 'Testnet',
-            chainId: arrakisConfig.chainId,
+            chainId,
             ticker: 'USDC',
             rpcs: [rpcUrl],
             contracts: arrakisConfig.contracts,
@@ -379,7 +470,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
         }],
         entityInputs: []
       },
-      () => !!env?.jReplicas?.get?.('Testnet'),
+      () => !!env?.jReplicas?.get?.('Testnet') && !!(env?.jReplicas?.get?.('Testnet') as any)?.jadapter,
       'importJ(Testnet)',
       45_000,
     );
@@ -401,6 +492,31 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
       accounts: restoredAccounts,
       replayMeta: (env as any).__replayMeta || null,
     }));
+  }
+
+  if (!hasLiveJAdapter(env)) {
+    console.warn('[VaultStore] ⚠️ Restored env has no live J-adapter; re-importing Testnet jurisdiction');
+    await enqueueAndAwait(
+      xln,
+      env,
+      {
+        runtimeTxs: [{
+          type: 'importJ',
+          data: {
+            name: 'Testnet',
+            chainId,
+            ticker: 'USDC',
+            rpcs: [rpcUrl],
+            contracts: arrakisConfig.contracts,
+          }
+        }],
+        entityInputs: []
+      },
+      () => !!env?.jReplicas?.get?.('Testnet') && !!(env?.jReplicas?.get?.('Testnet') as any)?.jadapter,
+      'repairImportJ(Testnet)',
+      45_000,
+    );
+    console.log('[VaultStore] ✅ Testnet repaired');
   }
 
   if (xln.startRuntimeLoop) {
@@ -437,7 +553,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
         jurisdiction: {
           address: jReplica.depositoryAddress,
           name: 'Testnet',
-          chainId: 31337,
+          chainId: Number(jReplica.chainId ?? chainId ?? 31337),
           entityProviderAddress: jReplica.entityProviderAddress,
           depositoryAddress: jReplica.depositoryAddress,
         }
@@ -545,13 +661,19 @@ export const vaultOperations = {
   },
 
   // Create new runtime from seed
-  async createRuntime(name: string, seed: string): Promise<Runtime> {
+  async createRuntime(name: string, seed: string, options: CreateRuntimeOptions = {}): Promise<Runtime> {
     // Derive first signer (index 0)
     const firstAddress = deriveAddress(seed, 0);
 
     // Use signer EOA as ID (deterministic, unique)
     const id = normalizeRuntimeId(firstAddress);
     const label = name;
+
+    const loginType = options.loginType === 'demo' ? 'demo' : 'manual';
+    const requiresOnboarding =
+      typeof options.requiresOnboarding === 'boolean'
+        ? options.requiresOnboarding
+        : loginType !== 'demo';
 
     const runtime: Runtime = {
       id,
@@ -563,6 +685,8 @@ export const vaultOperations = {
         name: 'Signer 1'
       }],
       activeSignerIndex: 0,
+      loginType,
+      requiresOnboarding,
       createdAt: Date.now()
     };
 
@@ -600,6 +724,21 @@ export const vaultOperations = {
     const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
     console.log('[VaultStore.createRuntime] Loaded contracts:', arrakisConfig.contracts);
     const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
+    let chainId: number;
+    try {
+      chainId = await detectRpcChainId(rpcUrl);
+      assertAnvilChain(chainId, rpcUrl, 'VaultStore.createRuntime');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logRpcFatal('VAULT_RPC_CHAIN_VALIDATION_FAILED', { context: 'createRuntime', rpcUrl, message });
+      newEnv.error?.(
+        'network',
+        'VAULT_RPC_CHAIN_VALIDATION_FAILED',
+        { rpcUrl, message },
+        newEnv.runtimeId,
+      );
+      throw error;
+    }
 
     // Import testnet J-machine (shared anvil on xln.finance)
     console.log('[VaultStore.createRuntime] Importing testnet anvil...');
@@ -614,7 +753,7 @@ export const vaultOperations = {
           type: 'importJ',
           data: {
             name: 'Testnet',
-            chainId: arrakisConfig.chainId,
+            chainId,
             ticker: 'USDC',
             rpcs: [rpcUrl],
             contracts: arrakisConfig.contracts, // Use pre-deployed addresses
@@ -622,7 +761,7 @@ export const vaultOperations = {
         }],
         entityInputs: []
       },
-      () => !!newEnv?.jReplicas?.get?.('Testnet'),
+      () => !!newEnv?.jReplicas?.get?.('Testnet') && !!(newEnv?.jReplicas?.get?.('Testnet') as any)?.jadapter,
       'createRuntime.importJ(Testnet)',
       45_000,
     );
@@ -676,7 +815,7 @@ export const vaultOperations = {
       jurisdiction: {
         address: depositoryAddress,
         name: 'Testnet',
-        chainId: 31337,
+        chainId: Number(jReplica.chainId ?? chainId ?? 31337),
         entityProviderAddress: entityProviderAddress,
         depositoryAddress: depositoryAddress,
       }
@@ -727,6 +866,16 @@ export const vaultOperations = {
 
     // Store entityId in signer
     runtime.signers[0]!.entityId = entityId;
+    if (!requiresOnboarding) {
+      writeSavedCollateralPolicy({
+        mode: 'autopilot',
+        softLimitUsd: 500,
+        hardLimitUsd: 10_000,
+        maxFeeUsd: 15,
+      });
+      writeHubJoinPreference('manual');
+      writeOnboardingComplete(entityId, true);
+    }
     runtimesState.update(state => ({
       ...state,
       runtimes: { ...state.runtimes, [id]: runtime }
@@ -820,13 +969,7 @@ export const vaultOperations = {
       let env = runtimeEntry?.env;
       if (!env) {
         await registerRuntimeSignerKeys(runtime, xln);
-        try {
-          env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
-        } catch (restoreErr) {
-          console.warn(`[VaultStore.selectRuntime] ⚠️ Strict restore failed, starting fresh:`, restoreErr);
-          try { await (xln as any).clearDB?.(); } catch { /* best effort */ }
-          env = await buildOrRestoreRuntimeEnv(runtime, xln, false);
-        }
+        env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
         runtimes.update(r => {
           r.set(resolvedRuntimeId, runtimeToEntry(runtime, env));
           return r;
@@ -1096,20 +1239,7 @@ export const vaultOperations = {
           console.log(`[VaultStore.initialize] ✅ Registered ${runtime.signers.length} HD-derived keys for ${runtimeId.slice(0, 12)}`);
 
           let env: any;
-          try {
-            env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
-          } catch (restoreErr) {
-            console.warn(`[VaultStore.initialize] ⚠️ Strict restore failed for ${runtimeId.slice(0, 12)}, wiping DB and starting fresh:`, restoreErr);
-            try {
-              await (xln as any).clearDB?.();
-              // Also try deleting the IndexedDB for this namespace
-              if (typeof indexedDB !== 'undefined') {
-                indexedDB.deleteDatabase(runtimeId);
-                indexedDB.deleteDatabase(`xln-${runtimeId}`);
-              }
-            } catch { /* best effort */ }
-            env = await buildOrRestoreRuntimeEnv(runtime, xln, false);
-          }
+          env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
           if (normalizeRuntimeId(env?.runtimeId || '') !== runtimeId) {
             throw new Error(
               `[VaultStore.initialize] Runtime isolation mismatch: slot=${runtimeId} env.runtimeId=${String(env?.runtimeId || 'none')}`

@@ -70,6 +70,13 @@ export const SCENARIOS: ScenarioMetadata[] = [
     tags: ['stress', 'bilateral'],
     run: async (env: Env) => (await import('./rapid-fire')).rapidFire(env),
   },
+  {
+    id: 'processbatch',
+    name: 'ProcessBatch Smoke',
+    description: 'Isolated hub R→C batch build + j_broadcast + on-chain event finalization',
+    tags: ['j-batch', 'rebalance', 'rpc'],
+    run: async (env: Env) => (await import('./processbatch')).runProcessBatchScenario(env),
+  },
 ];
 
 export function getScenario(id: string): ScenarioMetadata | undefined {
@@ -108,5 +115,10 @@ export const scenarioRegistry: ScenarioEntry[] = [
     name: 'Rapid Fire',
     requiresStress: true,
     load: async () => (await import('./rapid-fire')).rapidFire,
+  },
+  {
+    key: 'processbatch',
+    name: 'ProcessBatch Smoke',
+    load: async () => (await import('./processbatch')).runProcessBatchScenario,
   },
 ];

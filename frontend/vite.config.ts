@@ -42,9 +42,7 @@ if (!hasCerts) {
 
 const DEV_HOST = '0.0.0.0';
 const DEV_PORT = 8080;
-const API_PROXY_TARGET = process.env.VITE_API_PROXY_TARGET || 'https://xln.finance';
-const RPC_PROXY_TARGET = process.env.VITE_RPC_PROXY_TARGET || 'http://localhost:8545';
-const RELAY_PROXY_TARGET = process.env.VITE_RELAY_PROXY_TARGET || 'ws://localhost:9000';
+const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
 
 async function assertPortAvailable(port: number, host: string): Promise<void> {
 	return new Promise((resolve, reject) => {
@@ -119,14 +117,15 @@ export default defineConfig(async ({ command }) => {
 				changeOrigin: true,
 				secure: false,
 			},
-			// RPC Proxy - Forward JSON-RPC to local anvil for dev
+			// RPC Proxy - Forward JSON-RPC to runtime server (/rpc endpoint)
 			'/rpc': {
-				target: RPC_PROXY_TARGET,
+				target: API_PROXY_TARGET,
 				changeOrigin: true,
+				secure: false,
 			},
 			// Relay Proxy - Forward WebSocket to relay server for P2P
 			'/relay': {
-				target: RELAY_PROXY_TARGET,
+				target: API_PROXY_TARGET,
 				ws: true,
 				changeOrigin: true,
 			},

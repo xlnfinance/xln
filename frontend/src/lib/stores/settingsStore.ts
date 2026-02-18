@@ -3,6 +3,11 @@ import type { Settings, ThemeName, BarColorMode, BarLayoutMode } from '$lib/type
 import { applyThemeToDocument } from '../utils/themes';
 
 const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token'] as const;
+const resolveDefaultRelayUrl = (): string => {
+  if (typeof window === 'undefined') return 'wss://xln.finance/relay';
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/relay`;
+};
 
 // Default settings
 const defaultSettings: Settings = {
@@ -12,7 +17,7 @@ const defaultSettings: Settings = {
   dropdownMode: 'signer-first',
   runtimeDelay: 250, // 250ms = 4 frames/second (visible lightning effects)
   balanceRefreshMs: 15000, // Default to 15s to avoid RPC pressure
-  relayUrl: 'wss://xln.finance/relay',
+  relayUrl: resolveDefaultRelayUrl(),
   portfolioScale: 5000, // Default scale: $5000 max for portfolio bars
   componentStates: {},
   compactNumbers: true, // Display 1.2K instead of 1,234
@@ -120,7 +125,11 @@ const settingsOperations = {
   },
 
   setRelayUrl(relayUrl: string) {
-    settings.update(current => ({ ...current, relayUrl }));
+    const canonical = resolveDefaultRelayUrl();
+    if (relayUrl !== canonical) {
+      console.error(`[settings] RELAY_OVERRIDE_BLOCKED: one-relay mode forced (${canonical}), requested=${relayUrl}`);
+    }
+    settings.update(current => ({ ...current, relayUrl: canonical }));
     this.saveToStorage();
   },
 

@@ -134,6 +134,22 @@ export async function createBrowserVMAdapter(
       return result.collateral;
     },
 
+    async getAccountInfo(
+      entityId: string,
+      counterpartyId: string,
+    ): Promise<{ nonce: bigint; disputeHash: string; disputeTimeout: bigint }> {
+      if ((browserVM as any).getAccountInfo) {
+        return (browserVM as any).getAccountInfo(entityId, counterpartyId);
+      }
+      const key = computeAccountKey(entityId, counterpartyId);
+      const result = await depository._accounts(key);
+      return {
+        nonce: result.nonce,
+        disputeHash: result.disputeHash,
+        disputeTimeout: result.disputeTimeout,
+      };
+    },
+
     async getEntityNonce(entityId: string): Promise<bigint> {
       return depository.entityNonces(entityIdToAddress(entityId));
     },
@@ -421,6 +437,8 @@ export async function createBrowserVMAdapter(
         return;
       }
       watcherEnv = env;
+      txCounter.value = 0;
+      (txCounter as any)._seenLogs = { set: new Set<string>(), order: [] as string[] };
       console.log(`🔭 [JAdapter:browservm] Starting event watcher (eReplicas=${env.eReplicas?.size ?? 0})...`);
 
       watcherUnsubscribe = browserVM.onAny((rawEvents: any[]) => {
@@ -433,6 +451,7 @@ export async function createBrowserVMAdapter(
           blockNumber: e.blockNumber,
           blockHash: e.blockHash,
           transactionHash: e.transactionHash,
+          logIndex: e.logIndex,
         }));
 
         const blockNumber = normalized[0]?.blockNumber ?? Number((browserVM as any).getBlockNumber?.() ?? 0n);

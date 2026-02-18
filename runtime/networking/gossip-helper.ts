@@ -47,6 +47,7 @@ const buildBoardMetadata = (entityState: EntityState): BoardMetadata => {
 export function buildEntityProfile(entityState: EntityState, name?: string, timestamp: number = 0): Profile {
   const accounts: Profile['accounts'] = [];
   const publicAccounts: string[] = [];
+  const hubConfig = entityState.hubRebalanceConfig;
 
   // Build account capacities from all accounts
   for (const [counterpartyId, accountMachine] of entityState.accounts.entries()) {
@@ -101,9 +102,18 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
     hubs: [...publicAccounts], // Legacy alias for compatibility
     metadata: {
       lastUpdated: timestamp,
-      isHub: false, // Future: Determine from entity capabilities or manual config
-      routingFeePPM: 100, // Default 100 PPM (0.01%)
-      baseFee: 0n,
+      isHub: !!hubConfig,
+      routingFeePPM: hubConfig?.routingFeePPM ?? 100, // Default 100 PPM (0.01%)
+      baseFee: hubConfig?.baseFee ?? 0n,
+      ...(hubConfig
+        ? {
+            policyVersion: hubConfig.policyVersion,
+            rebalanceBaseFee: String(hubConfig.rebalanceBaseFee ?? 10n ** 17n),
+            rebalanceLiquidityFeeBps: String(hubConfig.rebalanceLiquidityFeeBps ?? hubConfig.minFeeBps ?? 1n),
+            rebalanceGasFee: String(hubConfig.rebalanceGasFee ?? 0n),
+            rebalanceTimeoutMs: hubConfig.rebalanceTimeoutMs ?? 10 * 60 * 1000,
+          }
+        : {}),
       board,
       threshold: toUint16(entityState.config.threshold, 1),
       ...(entityPublicKey ? { entityPublicKey } : {}),

@@ -7,7 +7,7 @@
     "test": "bunx hardhat test",
     "deploy": "bunx hardhat ignition deploy ignition/modules/Depository.cjs --network ethereum",
     "console": "bunx hardhat console",
-    "node": "bunx hardhat node"
+    "node": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-gas-limit 60000000 --code-size-limit 65536"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ignition": "^0.15.5",

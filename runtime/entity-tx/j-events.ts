@@ -2,11 +2,16 @@ import type { EntityState, Delta, JBlockObservation, JBlockFinalized, Jurisdicti
 import { ethers } from 'ethers';
 import { DEBUG } from '../utils';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
-import { getTokenInfo, getDefaultCreditLimit } from '../account-utils';
-import { isLeftEntity } from '../entity-id-utils';
+import { getTokenInfo } from '../account-utils';
 import { safeStringify } from '../serialization-utils';
 import { CANONICAL_J_EVENTS } from '../jadapter/helpers';
 import { hashHtlcSecret } from '../htlc-utils';
+import type { JAdapter } from '../jadapter/types';
+import {
+  canonicalJurisdictionEventKey,
+  normalizeJurisdictionEvent,
+  normalizeJurisdictionEvents,
+} from '../j-event-normalization';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -51,6 +56,16 @@ const getTokenSymbol = (tokenId: number): string => {
 const getTokenDecimals = (tokenId: number): number => {
   return getTokenInfo(tokenId).decimals;
 };
+
+function getEnvJAdapter(env: Env): JAdapter | null {
+  if (!env.jReplicas || env.jReplicas.size === 0) return null;
+  const active = env.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction) : undefined;
+  if (active?.jadapter) return active.jadapter;
+  for (const jr of env.jReplicas.values()) {
+    if (jr.jadapter) return jr.jadapter;
+  }
+  return null;
+}
 
 function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
   const initialArguments = String(initialArgumentsRaw || '0x');
@@ -243,13 +258,25 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
     return { newState: entityState, mempoolOps: [] };
   }
 
-  // Convert raw events to JurisdictionEvent format
-  const jEvents: JurisdictionEvent[] = rawEvents.map((e: any) => ({
-    type: e.type as any,
-    data: e.data as any,
-    blockNumber,
-    blockHash,
-  }));
+  // Convert raw events to canonical JurisdictionEvent format
+  const jEvents: JurisdictionEvent[] = [];
+  for (const raw of rawEvents) {
+    const normalized = normalizeJurisdictionEvent({
+      ...(raw || {}),
+      blockNumber,
+      blockHash,
+      transactionHash: (raw as any)?.transactionHash ?? entityTxData.transactionHash,
+    });
+    if (!normalized) {
+      console.warn(`⚠️ Dropping malformed j-event payload at block ${blockNumber}: ${safeStringify(raw)}`);
+      continue;
+    }
+    jEvents.push(normalized);
+  }
+  if (jEvents.length === 0) {
+    console.warn(`⚠️ No valid j-events after normalization for block ${blockNumber}; skipping observation`);
+    return { newState: entityState, mempoolOps: [] };
+  }
 
   // Clone state and create observation with ALL events from this batch
   let newEntityState = cloneEntityState(entityState);
@@ -294,6 +321,31 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
  * Called after receiving j_event_claim from counterparty.
  */
 export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, opts: { timestamp: number }): void {
+  const normalizeObsEvents = (obs: any): JurisdictionEvent[] => {
+    const raw = obs?.events;
+    if (!Array.isArray(raw)) return [];
+    return normalizeJurisdictionEvents(raw);
+  };
+
+  const sameEventMultiset = (a: JurisdictionEvent[], b: JurisdictionEvent[]): boolean => {
+    if (a.length !== b.length) return false;
+    const counts = new Map<string, number>();
+    for (const event of a) {
+      const key = canonicalJurisdictionEventKey(event);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    for (const event of b) {
+      const key = canonicalJurisdictionEventKey(event);
+      const current = counts.get(key) || 0;
+      if (current <= 0) return false;
+      counts.set(key, current - 1);
+    }
+    for (const [, remaining] of counts) {
+      if (remaining !== 0) return false;
+    }
+    return true;
+  };
+
   // Find matching (jHeight, jBlockHash) in left + right observations
   const leftMap = new Map();
   const rightMap = new Map();
@@ -313,19 +365,51 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
   }
 
   console.log(`   🤝 BILATERAL-MATCH: ${matches.length} j-blocks agreed!`);
+  const finalizedKeys = new Set<string>();
 
   for (const key of matches) {
     const leftObs = leftMap.get(key)!;
+    const rightObs = rightMap.get(key)!;
     const jHeight = leftObs.jHeight;
 
     // Skip already finalized
     if (account.lastFinalizedJHeight >= jHeight) continue;
     if (account.jEventChain.some((b: any) => b.jHeight === jHeight)) continue;
 
+    // Require both sides to agree on canonical settlement payload.
+    const leftRawLen = Array.isArray(leftObs?.events) ? leftObs.events.length : 0;
+    const rightRawLen = Array.isArray(rightObs?.events) ? rightObs.events.length : 0;
+    const leftEvents = normalizeObsEvents(leftObs);
+    const rightEvents = normalizeObsEvents(rightObs);
+    if (leftEvents.length === 0 || rightEvents.length === 0) {
+      console.warn(
+        `   ⚠️ BILATERAL-MISMATCH: empty/non-array events at jHeight=${jHeight} hash=${leftObs.jBlockHash.slice(0, 10)}...`,
+      );
+      continue;
+    }
+    if (leftEvents.length !== leftRawLen || rightEvents.length !== rightRawLen) {
+      console.warn(
+        `   ⚠️ BILATERAL-MISMATCH: malformed events dropped jHeight=${jHeight} hash=${leftObs.jBlockHash.slice(0, 10)}... ` +
+          `leftRawLen=${leftRawLen} leftNormLen=${leftEvents.length} rightRawLen=${rightRawLen} rightNormLen=${rightEvents.length}`,
+      );
+      continue;
+    }
+
+    if (!sameEventMultiset(leftEvents, rightEvents)) {
+      const leftKeys = leftEvents.map(canonicalJurisdictionEventKey);
+      const rightKeys = rightEvents.map(canonicalJurisdictionEventKey);
+      console.warn(
+        `   ⚠️ BILATERAL-MISMATCH: jHeight=${jHeight} hash=${leftObs.jBlockHash.slice(0, 10)}... ` +
+        `leftKeys=${JSON.stringify(leftKeys)} rightKeys=${JSON.stringify(rightKeys)} ` +
+        `leftRaw=${safeStringify(leftObs.events)} rightRaw=${safeStringify(rightObs.events)}`,
+      );
+      continue;
+    }
+
     console.log(`   ✅ BILATERAL-FINALIZE: jHeight=${jHeight}`);
 
     // Apply events (from left observation - both should be identical)
-    for (const event of leftObs.events) {
+    for (const event of leftEvents) {
       if (event.type === 'AccountSettled') {
         const { tokenId, collateral, ondelta } = event.data;
         const tokenIdNum = Number(tokenId);
@@ -352,75 +436,30 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
 
         // requestedRebalance lifecycle:
         // Clear/reduce only after bilateral on-chain collateral update is finalized.
-        // Deferred fee is charged here (on fulfillment), not at request time.
+        // Fee is prepaid in request_collateral (never charged here).
         const pendingRequest = account.requestedRebalance?.get(tokenIdNum) ?? 0n;
         if (pendingRequest > 0n) {
           const collateralIncrease = delta.collateral > oldColl ? delta.collateral - oldColl : 0n;
           if (collateralIncrease > 0n) {
             const fulfilledAmount = pendingRequest > collateralIncrease ? collateralIncrease : pendingRequest;
-            const feeState = account.requestedRebalanceFeeState?.get(tokenIdNum);
-            let remainingFee = feeState?.remainingFee ?? 0n;
-            let chargedFee = 0n;
-
-            if (feeState && remainingFee > 0n && fulfilledAmount > 0n) {
-              if (fulfilledAmount >= pendingRequest) {
-                chargedFee = remainingFee;
-              } else {
-                chargedFee = (remainingFee * fulfilledAmount) / pendingRequest;
-              }
-              if (chargedFee > remainingFee) chargedFee = remainingFee;
-
-              if (chargedFee > 0n) {
-                const feeTokenId = feeState.feeTokenId;
-                let feeDelta = account.deltas.get(feeTokenId);
-                if (!feeDelta) {
-                  const defaultCreditLimit = getDefaultCreditLimit(feeTokenId);
-                  feeDelta = {
-                    tokenId: feeTokenId,
-                    collateral: 0n,
-                    ondelta: 0n,
-                    offdelta: 0n,
-                    leftCreditLimit: defaultCreditLimit,
-                    rightCreditLimit: defaultCreditLimit,
-                    leftAllowance: 0n,
-                    rightAllowance: 0n,
-                  };
-                  account.deltas.set(feeTokenId, feeDelta);
-                }
-
-                // Convention: positive offdelta = LEFT has more.
-                // requester pays hub on fulfillment.
-                if (feeState.requestedByLeft) {
-                  feeDelta.offdelta -= chargedFee;
-                } else {
-                  feeDelta.offdelta += chargedFee;
-                }
-                remainingFee -= chargedFee;
-                console.log(
-                  `   💰 REBALANCE-FEE-CHARGED: token=${feeTokenId} fee=${chargedFee} ` +
-                  `(fulfilled=${fulfilledAmount}, requestedByLeft=${feeState.requestedByLeft})`,
-                );
-              }
-            }
-
             const remaining = pendingRequest - fulfilledAmount;
             if (remaining > 0n) {
               account.requestedRebalance.set(tokenIdNum, remaining);
-              if (feeState && remainingFee > 0n) {
-                account.requestedRebalanceFeeState.set(tokenIdNum, { ...feeState, remainingFee });
-              } else {
-                account.requestedRebalanceFeeState?.delete(tokenIdNum);
+              const feeState = account.requestedRebalanceFeeState?.get(tokenIdNum);
+              if (feeState) {
+                feeState.jBatchSubmittedAt = 0;
               }
+              // Keep fee metadata for audit/scheduling; fee is already prepaid.
               console.log(
                 `   🔄 REBALANCE-REQUEST-PARTIAL: token=${tokenIdNum} request ${pendingRequest}→${remaining} ` +
-                `(credited=${fulfilledAmount}, feeCharged=${chargedFee})`,
+                `(credited=${fulfilledAmount})`,
               );
             } else {
               account.requestedRebalance.delete(tokenIdNum);
               account.requestedRebalanceFeeState?.delete(tokenIdNum);
               console.log(
                 `   ✅ REBALANCE-REQUEST-CLEARED: token=${tokenIdNum} request ${pendingRequest} fulfilled ` +
-                `(credited=${fulfilledAmount}, feeCharged=${chargedFee})`,
+                `(credited=${fulfilledAmount})`,
               );
             }
           }
@@ -430,12 +469,16 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
         // R2C also emits AccountSettled but doesn't increment on-chain nonce.
         // Nonce is incremented in tryFinalizeAccountJEvents when workspace status is 'ready_to_submit'.
         console.log(`   💰 BILATERAL-APPLIED for ${counterpartyId.slice(-4)}: coll ${oldColl}→${delta.collateral}, ondelta=${delta.ondelta}`);
+        console.log(
+          `[REB][5][FINALIZED_IN_ACCOUNT] cp=${counterpartyId.slice(-8)} token=${tokenIdNum} collateral=${delta.collateral} ondelta=${delta.ondelta} jHeight=${jHeight}`,
+        );
       }
     }
 
     // Add to jEventChain (replay prevention) - DETERMINISTIC timestamp
-    account.jEventChain.push({ jHeight, jBlockHash: leftObs.jBlockHash, events: leftObs.events, finalizedAt: opts.timestamp });
+    account.jEventChain.push({ jHeight, jBlockHash: leftObs.jBlockHash, events: leftEvents, finalizedAt: opts.timestamp });
     account.lastFinalizedJHeight = Math.max(account.lastFinalizedJHeight, jHeight);
+    finalizedKeys.add(key);
 
     // SYMMETRIC NONCE TRACKING: Both sides increment when workspace has signed hankos.
     // Covers all settlement types: C2R (counterparty hanko only), full settle (both hankos).
@@ -457,9 +500,10 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
       }
 
       // Set on-chain nonce from event data (not +1 — handles nonce jumps from disputes)
-      const eventNonce = leftObs.events[0]?.data?.nonce;
-      if (eventNonce !== undefined) {
-        account.onChainSettlementNonce = Number(eventNonce);
+      const firstSettled = leftEvents.find(e => e.type === 'AccountSettled');
+      const eventNonce = firstSettled?.data?.nonce;
+      if (typeof eventNonce === 'number') {
+        account.onChainSettlementNonce = eventNonce;
       } else {
         // Fallback: use workspace's signed nonce (should match on-chain after settlement)
         account.onChainSettlementNonce = ws.nonceAtSign ?? ((account.onChainSettlementNonce || 0) + 1);
@@ -472,10 +516,15 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
   }
 
   // Prune finalized
-  const finalizedHeights = new Set(matches.map(k => leftMap.get(k)!.jHeight));
-  account.leftJObservations = account.leftJObservations.filter((o: any) => !finalizedHeights.has(o.jHeight));
-  account.rightJObservations = account.rightJObservations.filter((o: any) => !finalizedHeights.has(o.jHeight));
-  console.log(`   🧹 Pruned ${finalizedHeights.size} finalized (left=${account.leftJObservations.length}, right=${account.rightJObservations.length} pending)`);
+  account.leftJObservations = account.leftJObservations.filter(
+    (o: any) => !finalizedKeys.has(`${o.jHeight}:${o.jBlockHash}`),
+  );
+  account.rightJObservations = account.rightJObservations.filter(
+    (o: any) => !finalizedKeys.has(`${o.jHeight}:${o.jBlockHash}`),
+  );
+  console.log(
+    `   🧹 Pruned ${finalizedKeys.size} finalized (left=${account.leftJObservations.length}, right=${account.rightJObservations.length} pending)`,
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -509,7 +558,7 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
  * This batches multiple AccountSettled events from the same settlement tx so
  * tryFinalizeAccountJEvents can process all token updates atomically.
  */
-function mergeAccountJObservations(observations: any[]): void {
+function mergeAccountJObservations(observations: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[] }>): void {
   if (observations.length <= 1) return;
   const groups = new Map<string, number>(); // key → index in observations[]
   let i = 0;
@@ -520,9 +569,10 @@ function mergeAccountJObservations(observations: any[]): void {
     if (existing !== undefined) {
       // Merge events into existing observation (dedup by type+data)
       const target = observations[existing];
-      for (const ev of obs.events) {
-        const evKey = `${ev.type}:${JSON.stringify(ev.data)}`;
-        const alreadyHas = target.events.some((e: any) => `${e.type}:${JSON.stringify(e.data)}` === evKey);
+      const normalizedEvents = normalizeJurisdictionEvents(obs.events);
+      for (const ev of normalizedEvents) {
+        const evKey = canonicalJurisdictionEventKey(ev);
+        const alreadyHas = target.events.some((e: JurisdictionEvent) => canonicalJurisdictionEventKey(e) === evKey);
         if (!alreadyHas) target.events.push(ev);
       }
       observations.splice(i, 1); // Remove merged obs
@@ -548,7 +598,8 @@ function mergeJEventClaimOps(ops: Array<{ accountId: string; tx: any }>): void {
     if (existing !== undefined) {
       // Merge events into existing op
       const target = ops[existing];
-      for (const ev of op.tx.data.events) {
+      const normalizedEvents = normalizeJurisdictionEvents(op.tx.data.events);
+      for (const ev of normalizedEvents) {
         target.tx.data.events.push(ev);
       }
       ops.splice(i, 1);
@@ -715,9 +766,10 @@ function mergeSignerObservations(observations: JBlockObservation[]): Jurisdictio
   const eventMap = new Map<string, JurisdictionEvent>();
 
   for (const obs of observations) {
-    for (const event of obs.events) {
+    const normalized = normalizeJurisdictionEvents(obs.events);
+    for (const event of normalized) {
       // Create unique key from event type and data
-    const key = `${event.type}:${safeStringify(event.data)}`;
+      const key = canonicalJurisdictionEventKey(event);
       if (!eventMap.has(key)) {
         eventMap.set(key, event);
       }
@@ -818,35 +870,45 @@ async function applyFinalizedJEvent(
       return { newState, mempoolOps };
     }
 
-    // Initialize consensus fields
+    // Initialize consensus fields (claims are stored ONLY via bilateral account frames).
+    // IMPORTANT: Do NOT mutate left/right observations here.
+    // This function runs on unilateral entity-level J-observation and must not
+    // advance shared account state inputs before 2-of-2 account consensus.
     if (!account.leftJObservations) account.leftJObservations = [];
     if (!account.rightJObservations) account.rightJObservations = [];
     if (!account.jEventChain) account.jEventChain = [];
     if (account.lastFinalizedJHeight === undefined) account.lastFinalizedJHeight = 0;
 
-    const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId as string);
     const jHeight = event.blockNumber ?? blockNumber;
     const jBlockHash = event.blockHash || '';
-
-    // Store OWN observation
-    const obs = { jHeight, jBlockHash, events: [event], observedAt: entityState.timestamp || 0 };
-    if (isLeft) {
-      account.leftJObservations.push(obs);
-      console.log(`   📝 LEFT obs: jHeight=${jHeight}`);
-    } else {
-      account.rightJObservations.push(obs);
-      console.log(`   📝 RIGHT obs: jHeight=${jHeight}`);
-    }
 
     // Add j_event_claim via mempoolOps (auto-triggers proposableAccounts + account frame)
     // Account keyed by counterparty ID
     // CRITICAL: Deep-copy event to prevent mutation issues (frame fullDeltaStates added later)
-    const eventCopy = JSON.parse(safeStringify(event));
+    const eventCopy = structuredClone(event);
+    const observedAt = entityState.timestamp || 0;
     mempoolOps.push({
       accountId: counterpartyEntityId as string,
-      tx: { type: 'j_event_claim', data: { jHeight, jBlockHash, events: [eventCopy], observedAt: obs.observedAt } },
+      tx: { type: 'j_event_claim', data: { jHeight, jBlockHash, events: [eventCopy], observedAt } },
     });
     console.log(`   📮 j_event_claim → mempoolOps[${mempoolOps.length}] (will auto-propose frame)`);
+    console.log(
+      `[REB][4][J_EVENT_CLAIM_QUEUED] entity=${entityState.entityId.slice(-8)} cp=${String(counterpartyEntityId).slice(-8)} token=${tokenIdNum} jHeight=${jHeight}`,
+    );
+    const p2p = (env as any)?.runtimeState?.p2p;
+    if (p2p && typeof p2p.sendDebugEvent === 'function') {
+      p2p.sendDebugEvent({
+        level: 'info',
+        code: 'REB_STEP',
+        step: 4,
+        status: 'ok',
+        event: 'j_event_claim_queued',
+        entityId: entityState.entityId,
+        counterpartyId: String(counterpartyEntityId),
+        tokenId: tokenIdNum,
+        jHeight,
+      });
+    }
 
     const collDisplay = (Number(collateral) / (10 ** decimals)).toFixed(4);
     addMessage(newState, `⚖️ OBSERVED: ${tokenSymbol} ${cpShort} | coll=${collDisplay} | j-block ${blockNumber} (awaiting 2-of-2)`);
@@ -919,14 +981,14 @@ async function applyFinalizedJEvent(
     }
 
     if (account) {
-      // Query on-chain for timeout
-      const browserVM = (await import('../evm')).getBrowserVMInstance(env);
-      if (!browserVM || !browserVM.getAccountInfo) {
-        console.warn(`⚠️ DisputeStarted: No browserVM to query timeout`);
+      account.status = 'disputed';
+      // Query on-chain account state via adapter (works for both RPC and BrowserVM backends).
+      const jadapter = getEnvJAdapter(env);
+      if (!jadapter || typeof jadapter.getAccountInfo !== 'function') {
+        console.warn(`⚠️ DisputeStarted: No JAdapter account-info reader available`);
         return { newState, mempoolOps };
       }
-
-      const accountInfo = await browserVM.getAccountInfo(newState.entityId, counterpartyId);
+      const accountInfo = await jadapter.getAccountInfo(newState.entityId, counterpartyId);
 
       const weAreStarter = senderStr === entityIdNorm;
       const hasCounterpartySig = Boolean(account.counterpartyDisputeProofHanko);
@@ -942,6 +1004,7 @@ async function applyFinalizedJEvent(
         onChainNonce: Number(accountInfo.nonce),
         initialArguments: event.data.initialArguments || '0x',
       };
+      account.onChainSettlementNonce = Number(accountInfo.nonce);
 
       // ASSERTION: Our local proof hash should match on-chain committed hash
       const { buildAccountProofBody } = await import('../proof-builder');
@@ -994,12 +1057,47 @@ async function applyFinalizedJEvent(
     }
 
     if (account) {
+      const jadapter = getEnvJAdapter(env);
+      if (jadapter && typeof jadapter.getAccountInfo === 'function') {
+        try {
+          const accountInfo = await jadapter.getAccountInfo(newState.entityId, counterpartyId);
+          account.onChainSettlementNonce = Number(accountInfo.nonce);
+        } catch (error) {
+          console.warn(
+            `⚠️ DisputeFinalized nonce sync failed for ${counterpartyId.slice(-4)}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
       if (account.activeDispute) {
         delete account.activeDispute;
         addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialNonce)})`);
         console.log(`✅ activeDispute cleared for ${counterpartyId.slice(-4)} (proof=${String(initialProofbodyHash).slice(0, 10)}...)`);
       } else {
         console.warn(`⚠️ DisputeFinalized: No activeDispute for ${counterpartyId.slice(-4)}`);
+      }
+      account.status = 'disputed';
+
+      // IMPORTANT: Do not mutate shared account deltas from unilateral entity-layer events.
+      // Dispute flow can be reflected via status/nonce; collateral/ondelta must move only
+      // through bilateral account consensus.
+      if (jadapter) {
+        for (const [tokenId, delta] of account.deltas.entries()) {
+          try {
+            const onChainCollateral = await jadapter.getCollateral(account.leftEntity, account.rightEntity, tokenId);
+            if (delta.collateral !== onChainCollateral) {
+              console.warn(
+                `⚠️ DisputeFinalized observed collateral drift (no local apply): ${counterpartyId.slice(-4)} token=${tokenId} ` +
+                `local=${delta.collateral} chain=${onChainCollateral}`,
+              );
+            }
+          } catch (error) {
+            console.warn(
+              `⚠️ DisputeFinalized collateral check failed token=${tokenId} ` +
+              `for ${counterpartyId.slice(-4)}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
       }
     } else {
       console.warn(`⚠️ DisputeFinalized: account ${candidateCounterpartyId.slice(-4)} not found for entity ${entityIdNorm.slice(-4)}`);

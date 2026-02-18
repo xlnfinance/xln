@@ -417,7 +417,7 @@
               <div class="form-row">
                 <label>
                   Chain ID
-                  <input type="number" bind:value={customForm.chainId} placeholder="e.g. 1337" />
+                  <input type="number" bind:value={customForm.chainId} placeholder="e.g. 31337" />
                 </label>
                 <label>
                   Ticker

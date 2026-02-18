@@ -17,20 +17,18 @@ jurisdictions/bun.lock
 
 # Frontend generated files
 frontend/static/runtime.js
-frontend/static/jurisdictions.json
 frontend/build/
 frontend/src/lib/generated/version.ts
 .svelte-kit/
 
 # Backend generated files
 dist/
-jurisdictions.json
 
 # Contract artifacts (jurisdictions/)
 jurisdictions/artifacts/
 jurisdictions/cache/
 # typechain-types now tracked for consistency across commits
-jurisdictions/ignition/deployments/chain-1337/
+jurisdictions/ignition/deployments/chain-31337/
 
 # Process management
 pids/
@@ -91,3 +89,12 @@ ai/*.txt
 ai/mlx_models/
 ai/.venv/
 db-*/
+runtime/runtime-check.js
+runtime/runtime-check.js.map
+runtime/server-bundle.js
+runtime/server-bundle.js.map
+runtime/dist/
+frontend/static/runtime.js
+frontend/static/runtime-bundle.js
+frontend/public/runtime.js
+frontend/build/runtime.js

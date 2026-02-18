@@ -1440,11 +1440,11 @@ export class BrowserVMProvider {
 
   /** Get chainId for batch hanko hashing */
   getChainId(): bigint {
-    if (!this.common) return 1337n;
+    if (!this.common) return 31337n;
     const id = (this.common as any).chainId?.();
     if (typeof id === 'bigint') return id;
     if (typeof id === 'number') return BigInt(id);
-    return 1337n;
+    return 31337n;
   }
 
   /** Get current entity batch nonce (Depository.entityNonces) */

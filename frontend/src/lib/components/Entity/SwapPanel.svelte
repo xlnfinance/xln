@@ -6,8 +6,9 @@
   export let replica: EntityReplica | null;
   export let tab: Tab;
 
-  // Form state
-  let counterpartyId = '';
+  // Props
+  export let counterpartyId: string = '';
+  export let prefilledCounterparty = false;
   let giveTokenId = '1';
   let giveAmount: bigint = 0n;
   let wantTokenId = '2';
@@ -125,6 +126,7 @@
   <div class="section">
     <h4>Place Limit Order</h4>
 
+    {#if !prefilledCounterparty}
     <div class="form-row">
       <label>
         Counterparty (Hub)
@@ -136,6 +138,7 @@
         </select>
       </label>
     </div>
+    {/if}
 
     <div class="form-row">
       <label>

@@ -11,6 +11,7 @@
 
 import type { JurisdictionConfig } from './types';
 import { loadJurisdictions } from './jurisdiction-loader';
+import { parseRebalancePolicyUsd } from './rebalance-policy-usd';
 import { isBrowser } from './utils';
 
 /**
@@ -67,6 +68,9 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
     }
 
     const jurisdictionData = (config as { jurisdictions?: Record<string, unknown> }).jurisdictions;
+    const globalRebalancePolicyUsd = parseRebalancePolicyUsd(
+      (config as { defaults?: { rebalancePolicyUsd?: unknown } }).defaults?.rebalancePolicyUsd,
+    );
     if (!jurisdictionData) return jurisdictions;
 
     for (const [key, data] of Object.entries(jurisdictionData)) {
@@ -89,12 +93,14 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
         rpcUrl = `http://localhost${rpcUrl}`;
       }
 
+      const rebalancePolicyUsd = parseRebalancePolicyUsd(jData['rebalancePolicyUsd']) ?? globalRebalancePolicyUsd;
       jurisdictions.set(key, {
         name: jData['name'] as string,
         chainId: jData['chainId'] as number,
         address: rpcUrl,
         entityProviderAddress: contracts?.['entityProvider'] ?? '',
         depositoryAddress: contracts?.['depository'] ?? '',
+        ...(rebalancePolicyUsd ? { rebalancePolicyUsd } : {}),
       });
     }
   } catch (error) {

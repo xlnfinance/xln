@@ -26,19 +26,12 @@ export default defineConfig({
 			port: 8081,
 			clientPort: 8081
 		},
-		// RPC Proxy - same as main config
+		// RPC Proxy - same single-path design as main config
 		proxy: {
-			'/rpc/arrakis': {
-				target: 'http://localhost:8545',
+			'/rpc': {
+				target: process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082',
 				changeOrigin: true,
-				rewrite: (path) => path.replace(/^\/rpc\/arrakis/, ''),
-				ws: true,
-			},
-			'/rpc/wakanda': {
-				target: 'http://localhost:8546',
-				changeOrigin: true,
-				rewrite: (path) => path.replace(/^\/rpc\/wakanda/, ''),
-				ws: true,
+				secure: false,
 			}
 		},
 		headers: {

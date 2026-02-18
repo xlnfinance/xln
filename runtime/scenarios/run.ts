@@ -2,12 +2,13 @@
  * CLI runner for scenarios — configurable backend (browservm | rpc)
  *
  * Usage:
- *   bun runtime/scenarios/run.ts lock-ahb                    # BrowserVM (default)
+ *   bun runtime/scenarios/run.ts lock-ahb                    # RPC (default)
  *   bun runtime/scenarios/run.ts lock-ahb --mode=rpc         # Local Anvil
- *   bun runtime/scenarios/run.ts lock-ahb --mode=rpc --rpc=http://localhost:8545
+ *   bun runtime/scenarios/run.ts lock-ahb --mode=rpc --rpc=http://127.0.0.1:8545
  */
 
 const SCENARIOS: Record<string, { file: string; fn: string }> = {
+  'rebalance': { file: './rebalance', fn: 'runRebalanceScenario' },
   'lock-ahb':  { file: './lock-ahb',  fn: 'lockAhb' },
   'ahb':       { file: './ahb',       fn: 'ahb' },
   'swap':      { file: './swap',      fn: 'swap' },
@@ -15,6 +16,8 @@ const SCENARIOS: Record<string, { file: string; fn: string }> = {
   'htlc-4hop': { file: './htlc-4hop', fn: 'htlc4hop' },
   'grid':              { file: './grid',              fn: 'grid' },
   'settle-rebalance':  { file: './settle-rebalance',  fn: 'runSettleRebalance' },
+  'processbatch':      { file: './processbatch',      fn: 'runProcessBatchScenario' },
+  'process-batch':     { file: './processbatch',      fn: 'runProcessBatchScenario' },
 };
 
 function parseArgs(): { scenario: string; mode?: string; rpc?: string } {
@@ -27,8 +30,14 @@ function parseArgs(): { scenario: string; mode?: string; rpc?: string } {
   }
 
   const getFlag = (name: string): string | undefined => {
-    const arg = args.find(a => a.startsWith(`--${name}=`));
-    return arg?.split('=')[1];
+    const eqArg = args.find(a => a.startsWith(`--${name}=`));
+    if (eqArg) return eqArg.split('=')[1];
+    const idx = args.findIndex(a => a === `--${name}`);
+    if (idx >= 0 && idx + 1 < args.length) {
+      const value = args[idx + 1];
+      if (value && !value.startsWith('--')) return value;
+    }
+    return undefined;
   };
 
   return { scenario, mode: getFlag('mode'), rpc: getFlag('rpc') };
@@ -49,7 +58,7 @@ async function main() {
 
   console.log(`\n${'='.repeat(60)}`);
   console.log(`  Scenario: ${scenario}`);
-  console.log(`  Mode: ${mode || process.env.JADAPTER_MODE || 'browservm'}`);
+  console.log(`  Mode: ${mode || process.env.JADAPTER_MODE || 'rpc'}`);
   if (rpc) console.log(`  RPC: ${rpc}`);
   console.log(`${'='.repeat(60)}\n`);
 
@@ -71,6 +80,7 @@ async function main() {
   console.log(`  ${scenario} COMPLETE`);
   console.log(`  Frames: ${env.history?.length || 0}`);
   console.log(`${'='.repeat(60)}\n`);
+  process.exit(0);
 }
 
 main().catch(err => {

@@ -250,6 +250,45 @@ All three must pass in the same run window:
 
 If any one of the 3 fails, treat the build as failed. Do not deploy partial fixes.
 
+### JAdapter Boundary Guard
+
+Prevent new direct RPC/BrowserVM calls outside adapter internals:
+
+```bash
+bun run check:jadapter-boundary
+```
+
+## Parallel Scenario Runs (Isolated Anvil Per Worker)
+
+For faster system validation, run scenarios in parallel with one Anvil process per worker.
+This avoids nonce/deploy collisions from sharing a single RPC node.
+
+Command:
+
+```bash
+bun run test:system:parallel
+```
+
+Useful flags:
+
+```bash
+# Run only selected scenarios
+bun run test:system:parallel -- --scenarios=processbatch,rebalance,settle-rebalance
+
+# Control concurrency and port range (worker i => base-port+i)
+bun run test:system:parallel -- --workers=6 --base-port=18545
+
+# Stream prefixed logs live
+bun run test:system:parallel -- --stream
+```
+
+Notes:
+
+1. Each worker enforces `chainId=31337`.
+2. Logs are written under `.logs/system-tests/<timestamp>/`.
+3. A scenario timeout is enforced (`--timeout-ms`, default 15 minutes).
+4. Runner exits non-zero if any scenario fails, and prints failing log tails.
+
 ---
 
-Last updated: 2026-02-07
+Last updated: 2026-02-18

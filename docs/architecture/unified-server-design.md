@@ -165,7 +165,7 @@ if (isScenario) {
       type: 'importJ',
       data: {
         mode: 'browservm',
-        chainId: 1337,
+        chainId: 31337,
         name: 'Local',
       },
     }],

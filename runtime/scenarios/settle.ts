@@ -55,6 +55,11 @@ function assert(condition: unknown, message: string, env?: Env): asserts conditi
 
 
 async function processJEvents(env: Env): Promise<void> {
+  for (const [, jReplica] of env.jReplicas) {
+    const ja = (jReplica as any).jadapter;
+    if (ja?.pollNow) await ja.pollNow();
+  }
+
   const process = await getProcess();
   const pendingInputs = env.runtimeInput?.entityInputs || [];
   if (pendingInputs.length > 0) {

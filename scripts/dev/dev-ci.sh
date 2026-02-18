@@ -21,7 +21,7 @@ cleanup() {
             rm -f "$f" || true
         done
     fi
-    pkill -f "hardhat node" 2>/dev/null || true
+    pkill -f "anvil" 2>/dev/null || true
     pkill -f "bun.*server" 2>/dev/null || true
     pkill -f "bunx serve" 2>/dev/null || true
 }
@@ -60,37 +60,30 @@ mkdir -p pids
 # bunx hardhat compile --quiet
 # cd ..
 
-echo "🚀 Starting networks..."
+echo "🚀 Starting anvil..."
 # Start networks in background with logging
-(cd jurisdictions && bunx hardhat node --port 8545 --hostname 0.0.0.0) > logs/ethereum-8545.log 2>&1 &
+(anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-gas-limit 60000000 --code-size-limit 65536) > logs/ethereum-8545.log 2>&1 &
 ETHEREUM_PID=$!
 echo $ETHEREUM_PID > pids/ethereum.pid
 
-# Polygon and Arbitrum removed
-
-echo "⏳ Waiting for networks to initialize..."
+echo "⏳ Waiting for anvil to initialize..."
 # give processes a head start then actively wait per-port
 sleep 4
 
-# Check if networks are responding (retry up to 60s per port)
-for port in 8545 8546 8547; do
-    timeout=60
-    echo "Checking RPC on port $port..."
-    until curl -s -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' "http://localhost:$port" > /dev/null 2>&1; do
-        timeout=$((timeout-3))
-        if [ $timeout -le 0 ]; then
-            echo "❌ Network on port $port failed to start"
-            echo "--- Last 200 lines of logs for port $port ---"
-            case $port in
-                8545) tail -n 200 logs/ethereum-8545.log || true ;;
-            esac
-            cleanup
-            exit 1
-        fi
-        sleep 3
-    done
-    echo "✅ RPC responding on port $port"
+timeout=60
+echo "Checking RPC on port 8545..."
+until curl -s -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' "http://localhost:8545" | grep -q '"0x7a69"'; do
+    timeout=$((timeout-3))
+    if [ $timeout -le 0 ]; then
+        echo "❌ Anvil on port 8545 failed to start with chainId=31337"
+        echo "--- Last 200 lines of logs ---"
+        tail -n 200 logs/ethereum-8545.log || true
+        cleanup
+        exit 1
+    fi
+    sleep 3
 done
+echo "✅ RPC responding on 8545 with chainId=31337"
 echo "📦 Deploying contracts..."
 if [ ! -x ./deploy-contracts.sh ]; then
     echo "❌ ./deploy-contracts.sh not found or not executable"
@@ -144,7 +137,7 @@ fi
 echo ""
 echo "✅ CI Development Environment Ready!"
 echo "🌐 Frontend: http://localhost:8080"
-echo "🔗 Networks: 8545 (Ethereum), 8546 (Polygon), 8547 (Arbitrum)"
+echo "🔗 Network: 8545 (Anvil, chainId=31337)"
 echo ""
 
 # In CI mode, don't wait - let the script exit successfully

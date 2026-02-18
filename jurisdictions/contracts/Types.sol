@@ -86,7 +86,7 @@ struct InitialDisputeProof {
 struct FinalDisputeProof {
   bytes32 counterentity;
   uint initialNonce;       // Nonce when dispute was started
-  uint finalNonce;         // Nonce of the counter-proof (must be > initialNonce)
+  uint finalNonce;         // Used for signed finalize paths; unilateral timeout path may keep this equal to initialNonce
   bytes32 initialProofbodyHash;
   ProofBody finalProofbody;
   bytes finalArguments;

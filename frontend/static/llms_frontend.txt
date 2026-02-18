@@ -5096,7 +5096,7 @@ export interface Env {
   browserVMState?: BrowserVMState; // Serialized BrowserVM state for time travel
 
   // Unified J-Machine adapter (preferred over browserVM or evms)
-  // Use: const jAdapter = env.jAdapter ?? await createJAdapter({ mode: 'browservm', chainId: 1337 })
+  // Use: const jAdapter = env.jAdapter ?? await createJAdapter({ mode: 'browservm', chainId: 31337 })
   jAdapter?: import('./jadapter/types').JAdapter;
 
   // EVM instances - DEPRECATED, use env.jAdapter or createJAdapter() from jadapter
@@ -18816,7 +18816,7 @@ export { USE_MSGPACK };
  * Use JAdapter for new code:
  *
  *   import { createJAdapter } from './jadapter';
- *   const jAdapter = await createJAdapter({ mode: 'browservm', chainId: 1337 });
+ *   const jAdapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
  *   await jAdapter.deployStack();
  *
  * Deprecated functions → JAdapter equivalents:
@@ -18986,7 +18986,7 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
         DEFAULT_JURISDICTIONS = new Map();
         DEFAULT_JURISDICTIONS.set('simnet', {
           name: 'Simnet',
-          chainId: 1337,
+          chainId: 31337,
           address: 'browservm://',
           entityProviderAddress,
           depositoryAddress,
@@ -19033,7 +19033,7 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
         throw netError;
       }
     } else {
-      uiLog(`✅ BrowserVM connection established (chainId=1337)`);
+      uiLog(`✅ BrowserVM connection established (chainId=31337)`);
     }
 
     // Create contract instances
@@ -19705,7 +19705,7 @@ export const setBrowserVMJurisdiction = (env: any, depositoryAddress: string, br
   DEFAULT_JURISDICTIONS = new Map();
   DEFAULT_JURISDICTIONS.set('simnet', {
     name: 'Simnet',
-    chainId: 1337,
+    chainId: 31337,
     address: 'browservm://', // BrowserVM uses in-memory EVM, no real RPC
     entityProviderAddress,
     depositoryAddress,
@@ -32127,7 +32127,7 @@ let vrHammer: VRHammer | null = null;
           type: 'importJ',
           data: {
             name: newXlnomyName,
-            chainId: isBrowserVM ? 1337 : 1, // BrowserVM uses 1337 to match View.svelte
+            chainId: isBrowserVM ? 31337 : 1, // BrowserVM uses 31337 to match View.svelte
             ticker: 'ETH',
             rpcs: isBrowserVM ? [] : [newXlnomyRpcUrl],
           }

@@ -99,6 +99,38 @@ function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
   return !(totalDelta === 0n && delta.leftCreditLimit === 0n && delta.rightCreditLimit === 0n && !hasHolds);
 }
 
+type SettlementVector = Map<number, { collateral: bigint; ondelta: bigint }>;
+
+function captureSettlementVector(accountMachine: AccountMachine): SettlementVector {
+  const out: SettlementVector = new Map();
+  for (const [tokenId, delta] of accountMachine.deltas.entries()) {
+    out.set(tokenId, { collateral: delta.collateral, ondelta: delta.ondelta });
+  }
+  return out;
+}
+
+function assertNoUnilateralSettlementMutation(
+  accountMachine: AccountMachine,
+  before: SettlementVector,
+  tx: AccountTx,
+  phase: string,
+): void {
+  if (tx.type === 'j_event_claim') return;
+  for (const [tokenId, delta] of accountMachine.deltas.entries()) {
+    const prev = before.get(tokenId);
+    const prevCollateral = prev?.collateral ?? 0n;
+    const prevOndelta = prev?.ondelta ?? 0n;
+    // allow token creation with zero settlement fields
+    if (!prev && delta.collateral === 0n && delta.ondelta === 0n) continue;
+    if (delta.collateral !== prevCollateral || delta.ondelta !== prevOndelta) {
+      throw new Error(
+        `INVARIANT_VIOLATION[${phase}]: tx=${tx.type} mutated collateral/ondelta ` +
+          `token=${tokenId} collateral ${prevCollateral}->${delta.collateral} ondelta ${prevOndelta}->${delta.ondelta}`,
+      );
+    }
+  }
+}
+
 // === VALIDATION ===
 
 /**
@@ -157,7 +189,9 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
     })),
     tokenIds: frame.tokenIds,
     deltas: frame.deltas.map(d => d.toString()), // Quick access sums
-    // AUDIT FIX: Include FULL delta state (credit limits, allowances, collateral, HTLC holds)
+    // Include full shared delta state in frame hash.
+    // collateral/ondelta are shared values and must stay identical across peers.
+    // If they diverge, frame consensus must fail hard.
     fullDeltaStates: frame.fullDeltaStates?.map(delta => ({
       tokenId: delta.tokenId,
       collateral: delta.collateral.toString(),
@@ -255,6 +289,29 @@ export async function proposeAccountFrame(
     return { success: false, error: 'Waiting for ACK on pending frame', events };
   }
 
+  // Deterministic j-claim handshake:
+  // RIGHT side must wait for LEFT claim to be committed first.
+  // This prevents simultaneous same-height j_event_claim proposals and LEFT-WINS loops.
+  const proposerByLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
+  const onlyJClaimsInMempool =
+    accountMachine.mempool.length > 0 && accountMachine.mempool.every(tx => tx.type === 'j_event_claim');
+  if (!proposerByLeft && onlyJClaimsInMempool) {
+    const leftObs = accountMachine.leftJObservations || [];
+    const hasMatchingLeftClaim = accountMachine.mempool.some(tx => {
+      if (tx.type !== 'j_event_claim') return false;
+      const key = `${tx.data.jHeight}:${tx.data.jBlockHash}`;
+      return leftObs.some(obs => `${obs.jHeight}:${obs.jBlockHash}` === key);
+    });
+    if (!hasMatchingLeftClaim) {
+      if (!quiet) {
+        console.log(
+          `⏳ RIGHT-J-CLAIM-GATE: waiting for LEFT claim before proposing ${accountMachine.mempool.length} right-side j_event_claim tx(s)`,
+        );
+      }
+      return { success: false, error: 'Waiting for LEFT j_event_claim', events };
+    }
+  }
+
   if (!quiet) console.log(`✅ E-MACHINE: Creating frame with ${accountMachine.mempool.length} transactions...`);
   if (HEAVY_LOGS)
     console.log(
@@ -305,6 +362,7 @@ export async function proposeAccountFrame(
     // Use normalized ordering helper (not raw string equality) to avoid casing-induced
     // divergence during WAL replay.
     const proposerByLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
+    const beforeSettlement = captureSettlementVector(clonedMachine);
     const result = await processAccountTx(
       clonedMachine,
       accountTx,
@@ -312,6 +370,7 @@ export async function proposeAccountFrame(
       env.timestamp, // Will be replaced by frame.timestamp during commit
       frameJHeight, // Entity's synced J-height
       true, // isValidation = true (on clone, skip persistent state updates)
+      env,
     );
 
     if (!result.success) {
@@ -329,6 +388,7 @@ export async function proposeAccountFrame(
       }
       continue; // Skip to next tx
     }
+    assertNoUnilateralSettlementMutation(clonedMachine, beforeSettlement, accountTx, 'propose/validate');
 
     validTxs.push(accountTx);
     allEvents.push(...result.events);
@@ -787,6 +847,7 @@ export async function handleAccountInput(
         // CRITICAL: Use frame.timestamp for determinism (HTLC validation must use agreed consensus time)
         const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.currentHeight;
         for (const tx of accountMachine.pendingFrame.accountTxs) {
+          const beforeSettlement = captureSettlementVector(accountMachine);
           const commitResult = await processAccountTx(
             accountMachine,
             tx,
@@ -794,6 +855,7 @@ export async function handleAccountInput(
             accountMachine.pendingFrame.timestamp,
             pendingJHeight,
             false,
+            env,
           );
           if (!commitResult.success) {
             console.error(`❌ PROPOSER-COMMIT FAILED for tx type=${tx.type}: ${commitResult.error}`);
@@ -801,6 +863,7 @@ export async function handleAccountInput(
               `Frame ${accountMachine.pendingFrame.height} commit failed: ${tx.type} - ${commitResult.error}`,
             );
           }
+          assertNoUnilateralSettlementMutation(accountMachine, beforeSettlement, tx, 'proposer/commit');
           if (commitResult.timedOutHashlock) {
             timedOutHashlocks.push(commitResult.timedOutHashlock);
           }
@@ -955,6 +1018,7 @@ export async function handleAccountInput(
       );
       const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.currentFrame?.jHeight ?? 0;
       for (const tx of accountMachine.pendingFrame.accountTxs) {
+        const beforeSettlement = captureSettlementVector(accountMachine);
         const commitResult = await processAccountTx(
           accountMachine,
           tx,
@@ -962,6 +1026,7 @@ export async function handleAccountInput(
           accountMachine.pendingFrame.timestamp,
           pendingJHeight,
           false,
+          env,
         );
         if (!commitResult.success) {
           return {
@@ -970,6 +1035,7 @@ export async function handleAccountInput(
             events,
           };
         }
+        assertNoUnilateralSettlementMutation(accountMachine, beforeSettlement, tx, 'replay/precommit');
       }
       accountMachine.currentFrame = structuredClone(accountMachine.pendingFrame);
       accountMachine.currentHeight = accountMachine.pendingFrame.height;
@@ -1044,6 +1110,11 @@ export async function handleAccountInput(
           // Send a message with just mempool status so they know we have pending work
           // TODO: Determine if we should send frames or just signal
         }
+
+        // STRICT CONSENSUS: ignored frame must not mutate local account state.
+        // In particular, do not salvage j_event_claim from ignored RIGHT frame.
+        // Shared-state inputs are allowed to advance only through committed frames.
+
         // This is NOT an error - it's correct consensus behavior (Channel.ts handlePendingBlock)
         return { success: true, events };
       } else {
@@ -1190,6 +1261,7 @@ export async function handleAccountInput(
     for (const accountTx of receivedFrame.accountTxs) {
       // When receiving a frame, we process transactions from counterparty's perspective (incoming)
       // CRITICAL: Use receivedFrame.timestamp for determinism (HTLC validation must use agreed consensus time)
+      const beforeSettlement = captureSettlementVector(clonedMachine);
       const result = await processAccountTx(
         clonedMachine,
         accountTx,
@@ -1197,10 +1269,12 @@ export async function handleAccountInput(
         receivedFrame.timestamp, // DETERMINISTIC: Use frame's consensus timestamp
         frameJHeight, // Frame's consensus J-height
         true, // isValidation = true (on clone, skip bilateral finalization)
+        env,
       );
       if (!result.success) {
         return { success: false, error: `Frame application failed: ${result.error}`, events };
       }
+      assertNoUnilateralSettlementMutation(clonedMachine, beforeSettlement, accountTx, 'receiver/validate');
       processEvents.push(...result.events);
 
       if (HEAVY_LOGS) console.log(`🔍 TX-PROCESSED: ${accountTx.type}, success=${result.success}`);
@@ -1319,32 +1393,27 @@ export async function handleAccountInput(
     }
 
     if (HEAVY_LOGS) console.log(`🔍 ABOUT-TO-VERIFY-HASH: Computing frame hash...`);
-    // SECURITY: Verify full frame hash (tokenIds + fullDeltaStates + deltas)
-    // This prevents accepting frames with poisoned dispute proofs
+    // Duplex-safe hash validation:
+    // - bilateral fields are enforced above (offdelta/limits/allowances)
+    // - unilateral fields (collateral/ondelta) may lag between peers until claims converge
+    //   so hash must be recomputed from sender payload, not receiver-local unilateral state
     if (HEAVY_LOGS) console.log(`🔍 COMPUTING-HASH: Creating hash for frame ${receivedFrame.height}...`);
-    // After bilateral field verification above, use OUR computed fullDeltaStates for hash
-    // This ensures the stored frame has correct bilateral state
-    const leftEntityId = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity)
-      ? accountMachine.proofHeader.fromEntity
-      : accountMachine.proofHeader.toEntity;
-    const proposerIsLeft = input.fromEntityId === leftEntityId;
-
-    const recomputedHash = await createFrameHash({
+    const recomputedSenderHash = await createFrameHash({
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
       jHeight: receivedFrame.jHeight,
       accountTxs: receivedFrame.accountTxs,
       prevFrameHash: receivedFrame.prevFrameHash,
-      tokenIds: ourFinalTokenIds, // Use OUR computed tokenIds
-      deltas: ourFinalDeltas, // Use OUR computed deltas
-      fullDeltaStates: ourFullDeltaStates, // Use OUR computed fullDeltaStates
+      tokenIds: receivedFrame.tokenIds,
+      deltas: receivedFrame.deltas,
+      fullDeltaStates: theirFullDeltaStates,
       stateHash: '', // Computed by createFrameHash
-      byLeft: proposerIsLeft,
+      byLeft: receivedFrame.byLeft,
     });
 
-    if (recomputedHash !== receivedFrame.stateHash) {
+    if (recomputedSenderHash !== receivedFrame.stateHash) {
       console.warn(`⚠️ SECURITY: Frame hash mismatch after validation`);
-      console.warn(`   Recomputed: ${recomputedHash.slice(0, 16)}...`);
+      console.warn(`   Recomputed: ${recomputedSenderHash.slice(0, 16)}...`);
       console.warn(`   Claimed:    ${receivedFrame.stateHash.slice(0, 16)}...`);
       return { success: false, error: `Frame hash verification failed - dispute proof mismatch`, events };
     }
@@ -1352,19 +1421,12 @@ export async function handleAccountInput(
     console.log(`✅ CONSENSUS-SUCCESS: Both sides computed identical state for frame ${receivedFrame.height}`);
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // SECURITY PRINCIPLE: NEVER USE COUNTERPARTY-SUPPLIED STATE
+    // CONSENSUS PRINCIPLE: strict on bilateral fields, tolerant on unilateral lag
     // ═══════════════════════════════════════════════════════════════════════════
-    // We ALWAYS compute our own state from transaction execution and use THAT.
-    // Counterparty's claimed state (receivedFrame.tokenIds/deltas/fullDeltaStates)
-    // is ONLY used for comparison/debugging, NEVER stored or trusted.
-    //
-    // Why: An attacker could inject poisoned state (e.g., inflated creditLimit)
-    // that passes transaction verification but corrupts our stored state.
-    //
-    // Safe to use from receivedFrame (inputs/metadata):
-    //   - height, timestamp, jHeight, accountTxs, prevFrameHash
-    // NEVER use (computed state - could be poisoned):
-    //   - tokenIds, deltas, fullDeltaStates, stateHash (except for comparison)
+    // 1) Bilateral fields (offdelta/limits/allowances) MUST match our execution.
+    // 2) Sender frame hash must be self-consistent.
+    // 3) Unilateral fields (collateral/ondelta) may temporarily differ until
+    //    j_event_claims converge and are finalized 2-of-2 in account state.
     // ═══════════════════════════════════════════════════════════════════════════
 
     // Emit bilateral consensus event - use OUR computed values
@@ -1374,7 +1436,7 @@ export async function handleAccountInput(
       height: receivedFrame.height,
       txCount: receivedFrame.accountTxs.length,
       tokenIds: ourFinalTokenIds, // OUR computed tokenIds
-      stateHash: recomputedHash, // OUR computed hash
+      stateHash: receivedFrame.stateHash,
     });
 
     // RECEIVER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
@@ -1390,6 +1452,7 @@ export async function handleAccountInput(
     for (const tx of receivedFrame.accountTxs) {
       // CRITICAL: Use frame.jHeight for HTLC checks (consensus-aligned height)
       const jHeightForCommit = receivedFrame.jHeight || accountMachine.currentHeight;
+      const beforeSettlement = captureSettlementVector(accountMachine);
       const commitResult = await processAccountTx(
         accountMachine,
         tx,
@@ -1397,6 +1460,7 @@ export async function handleAccountInput(
         receivedFrame.timestamp,
         jHeightForCommit,
         false,
+        env,
       );
 
       // CRITICAL: Verify commit succeeded (Codex: prevent silent divergence)
@@ -1404,6 +1468,7 @@ export async function handleAccountInput(
         console.error(`❌ RECEIVER-COMMIT FAILED for tx type=${tx.type}: ${commitResult.error}`);
         throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);
       }
+      assertNoUnilateralSettlementMutation(accountMachine, beforeSettlement, tx, 'receiver/commit');
     }
 
     console.log(
@@ -1426,22 +1491,9 @@ export async function handleAccountInput(
       );
     }
 
-    // SECURITY FIX: Use OUR computed state (verified to match bilateral fields)
-    // This prevents storing attacker-injected creditLimit/allowance values
-    // The recomputedHash was computed from OUR values, so stateHash must match
-    // CRITICAL: Deep-copy to prevent mutation issues
-    accountMachine.currentFrame = structuredClone({
-      height: receivedFrame.height,
-      timestamp: receivedFrame.timestamp,
-      jHeight: receivedFrame.jHeight,
-      accountTxs: receivedFrame.accountTxs,
-      prevFrameHash: receivedFrame.prevFrameHash,
-      tokenIds: ourFinalTokenIds, // Use OUR computed tokenIds
-      deltas: ourFinalDeltas, // Use OUR computed deltas
-      stateHash: recomputedHash, // Use hash computed from OUR values
-      byLeft: proposerIsLeft, // Compute proposer side locally
-      fullDeltaStates: ourFullDeltaStates, // Use OUR verified fullDeltaStates
-    });
+    // Persist sender frame for hash-chain continuity; shared state is still driven
+    // by our own tx re-execution above.
+    accountMachine.currentFrame = structuredClone(receivedFrame);
     accountMachine.currentHeight = receivedFrame.height;
     if (replayMode) {
       console.log(
@@ -1493,43 +1545,120 @@ export async function handleAccountInput(
     // ═══════════════════════════════════════════════════════════════════════════
     try {
       const { checkAutoRebalance } = await import('./account-tx/handlers/request-collateral');
-      const rebalanceTxs = checkAutoRebalance(accountMachine, ourEntityId, input.fromEntityId);
       const p2p = (env as any)?.runtimeState?.p2p;
       const emitRebalanceDebug = (payload: Record<string, unknown>) => {
         if (p2p && typeof p2p.sendDebugEvent === 'function') {
           p2p.sendDebugEvent({
             level: 'info',
-            code: 'AUTO_REBALANCE',
+            code: 'REB_STEP',
+            step: 1,
             accountId: input.fromEntityId,
             frameHeight: receivedFrame.height,
             ...payload,
           });
         }
       };
-      if (rebalanceTxs.length > 0) {
-        for (const tx of rebalanceTxs) {
-          accountMachine.mempool.push(tx);
-        }
+      const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
+      const counterpartyReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === input.fromEntityId);
+      const ourIsHub = !!ourReplica?.state?.hubRebalanceConfig;
+      const counterpartyIdLower = String(input.fromEntityId || '').toLowerCase();
+      const counterpartyProfile = env.gossip?.getProfiles?.().find(
+        (p: any) => String(p?.entityId || '').toLowerCase() === counterpartyIdLower,
+      );
+      const counterpartyCaps = Array.isArray(counterpartyProfile?.capabilities)
+        ? (counterpartyProfile?.capabilities as string[])
+        : [];
+      const counterpartyProfileIsHub =
+        counterpartyProfile?.metadata?.isHub === true ||
+        counterpartyCaps.includes('hub') ||
+        counterpartyCaps.includes('routing');
+      const counterpartyIsHub =
+        !!counterpartyReplica?.state?.hubRebalanceConfig ||
+        counterpartyProfileIsHub;
+
+      const emitSkip = (reason: string) => {
         console.log(
-          `🔄 AUTO-REBALANCE: Queued ${rebalanceTxs.length} request_collateral txs after frame ${receivedFrame.height}`,
-        );
-        emitRebalanceDebug({
-          event: 'queued',
-          txCount: rebalanceTxs.length,
-          tokenIds: rebalanceTxs
-            .map((tx: any) => tx?.data?.tokenId)
-            .filter((v: unknown) => typeof v === 'number'),
-        });
-      } else {
-        console.log(
-          `ℹ️ AUTO-REBALANCE: No request queued after frame ${receivedFrame.height} ` +
+          `ℹ️ AUTO-REBALANCE: skipped (${reason}) after frame ${receivedFrame.height} ` +
           `(policyCount=${accountMachine.rebalancePolicy?.size || 0})`,
         );
         emitRebalanceDebug({
-          event: 'skipped',
+          status: 'skipped',
+          event: 'request_not_queued',
+          reason,
           policyCount: accountMachine.rebalancePolicy?.size || 0,
           hasPendingFrame: !!accountMachine.pendingFrame,
         });
+      };
+
+      if (ourIsHub) {
+        emitSkip('our-entity-is-hub');
+      } else if (!counterpartyIsHub) {
+        emitSkip('counterparty-not-hub');
+      } else {
+        const parseBigIntMaybe = (value: unknown): bigint | undefined => {
+          if (value === undefined || value === null) return undefined;
+          try {
+            return typeof value === 'bigint' ? value : BigInt(value as any);
+          } catch {
+            return undefined;
+          }
+        };
+        const parseNumberMaybe = (value: unknown): number | undefined => {
+          if (value === undefined || value === null) return undefined;
+          const n = Number(value);
+          return Number.isFinite(n) && n > 0 ? n : undefined;
+        };
+
+        const hubConfig = counterpartyReplica?.state?.hubRebalanceConfig;
+        const accountPolicy = accountMachine.counterpartyRebalanceFeePolicy;
+        const baseFee =
+          accountPolicy?.baseFee ??
+          parseBigIntMaybe(hubConfig?.rebalanceBaseFee) ??
+          parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceBaseFee);
+        const liquidityFeeBps =
+          accountPolicy?.liquidityFeeBps ??
+          parseBigIntMaybe(hubConfig?.rebalanceLiquidityFeeBps) ??
+          parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceLiquidityFeeBps) ??
+          parseBigIntMaybe(hubConfig?.minFeeBps);
+        const gasFee =
+          accountPolicy?.gasFee ??
+          parseBigIntMaybe(hubConfig?.rebalanceGasFee) ??
+          parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceGasFee) ??
+          0n;
+        const policyVersion =
+          accountPolicy?.policyVersion ??
+          parseNumberMaybe(hubConfig?.policyVersion) ??
+          parseNumberMaybe(counterpartyProfile?.metadata?.policyVersion) ??
+          1;
+
+        if (baseFee === undefined || liquidityFeeBps === undefined) {
+          emitSkip('missing-hub-fee-policy');
+        } else {
+          const rebalanceTxs = checkAutoRebalance(accountMachine, ourEntityId, input.fromEntityId, {
+            policyVersion,
+            baseFee,
+            liquidityFeeBps,
+            gasFee,
+          });
+          if (rebalanceTxs.length > 0) {
+            for (const tx of rebalanceTxs) {
+              accountMachine.mempool.push(tx);
+            }
+            console.log(
+              `🔄 AUTO-REBALANCE: Queued ${rebalanceTxs.length} request_collateral txs after frame ${receivedFrame.height}`,
+            );
+            emitRebalanceDebug({
+              status: 'ok',
+              event: 'request_queued',
+              txCount: rebalanceTxs.length,
+              tokenIds: rebalanceTxs
+                .map((tx: any) => tx?.data?.tokenId)
+                .filter((v: unknown) => typeof v === 'number'),
+            });
+          } else {
+            emitSkip('fee-policy-or-threshold');
+          }
+        }
       }
     } catch (rebalanceErr) {
       // Non-fatal: rebalance check failure shouldn't break frame processing

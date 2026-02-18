@@ -100,7 +100,7 @@
 
       if (selectedJurisdiction) {
         depositoryAddress = selectedJurisdiction.contracts.depository;
-        isBrowserVM = selectedJurisdiction.rpc?.startsWith('browservm://') || selectedJurisdiction.chainId === 1337;
+        isBrowserVM = selectedJurisdiction.rpc?.startsWith('browservm://') || selectedJurisdiction.chainId === 31337;
         if (isBrowserVM) {
           await loadBrowserVMTokens();
         } else {
@@ -245,7 +245,7 @@
   async function onJurisdictionChange() {
     if (selectedJurisdiction) {
       depositoryAddress = selectedJurisdiction.contracts.depository;
-      isBrowserVM = selectedJurisdiction.rpc?.startsWith('browservm://') || selectedJurisdiction.chainId === 1337;
+      isBrowserVM = selectedJurisdiction.rpc?.startsWith('browservm://') || selectedJurisdiction.chainId === 31337;
       if (isBrowserVM) {
         await loadBrowserVMTokens();
       } else {

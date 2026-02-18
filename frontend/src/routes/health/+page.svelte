@@ -220,6 +220,11 @@
       if (!resp.ok) {
         rpcOk = false;
         rpcError = `HTTP ${resp.status}`;
+        console.error(
+          '%c[RPC FAIL-FAST] /rpc health check failed',
+          'background:#3b0000;color:#ff4d4f;font-weight:800;padding:2px 6px;border-radius:4px;',
+          { status: resp.status }
+        );
         return;
       }
 
@@ -227,6 +232,11 @@
       if (!body.result) {
         rpcOk = false;
         rpcError = body.error ? JSON.stringify(body.error) : 'No chainId result';
+        console.error(
+          '%c[RPC FAIL-FAST] /rpc malformed health response',
+          'background:#3b0000;color:#ff4d4f;font-weight:800;padding:2px 6px;border-radius:4px;',
+          { body }
+        );
         return;
       }
       rpcOk = true;
@@ -235,6 +245,11 @@
       rpcOk = false;
       rpcLatencyMs = null;
       rpcError = err instanceof Error ? err.message : String(err);
+      console.error(
+        '%c[RPC FAIL-FAST] /rpc health request threw',
+        'background:#3b0000;color:#ff4d4f;font-weight:800;padding:2px 6px;border-radius:4px;',
+        { error: rpcError }
+      );
     }
   }
 

@@ -233,9 +233,8 @@ async function ensureJMachine(env: Env): Promise<string | null> {
 
 /**
  * Create self-entity for signer (lazy, no blockchain registration)
- * Wrapper for backward compatibility
  */
-export async function createNumberedSelfEntity(
+export async function createSelfEntity(
   env: Env,
   signerAddress: string,
   jurisdictionName?: string
@@ -282,7 +281,7 @@ export async function autoCreateEntityForSigner(
           ? jurisdiction
           : (env.activeJurisdiction || names[0] || null);
 
-      return await createNumberedSelfEntity(env, signerAddress, targetJurisdiction || undefined);
+      return await createSelfEntity(env, signerAddress, targetJurisdiction || undefined);
     } catch (error) {
       console.error('[EntityFactory] Failed to auto-create entity:', error);
       return null;

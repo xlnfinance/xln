@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { tabs } from '../../stores/tabStore';
+  import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
 
   export let profile: any;
 
@@ -68,7 +69,8 @@
         throw new Error('XLN environment not ready');
       }
 
-      // Send accountInput transaction through runtime ingress queue
+      // Open bilateral account via EntityTx (never craft raw accountInput from UI)
+      const rebalancePolicy = getOpenAccountRebalancePolicyData();
       xln.enqueueRuntimeInput(env, {
         runtimeTxs: [],
         entityInputs: [
@@ -77,14 +79,10 @@
             signerId: currentSignerId,
             entityTxs: [
               {
-                type: 'accountInput',
+                type: 'openAccount',
                 data: {
-                  fromEntityId: currentEntityId,
-                  toEntityId: targetEntityId,
-                  metadata: {
-                    purpose: 'hub_connection',
-                    description: `Joining hub ${targetEntityId}`,
-                  },
+                  targetEntityId,
+                  ...(rebalancePolicy ? { rebalancePolicy } : {}),
                 },
               },
             ],

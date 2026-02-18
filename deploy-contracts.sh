@@ -65,31 +65,59 @@ deploy_to_network() {
     rm -rf cache/ 2>/dev/null || true
     rm -rf artifacts/ 2>/dev/null || true
     rm -rf typechain-types/ 2>/dev/null || true
-    rm -rf ignition/deployments/chain-1337/ 2>/dev/null || true
+    rm -rf ignition/deployments/chain-31337/ 2>/dev/null || true
     echo "   ✅ All caches cleared"
     
-    # Force fresh compilation with typechain
-    echo "   🔧 Compiling contracts and generating TypeChain types..."
+    # Force fresh compilation.
+    echo "   🔧 Compiling contracts..."
     if ! npx hardhat compile --force 2>&1; then
         echo "   ❌ Contract compilation failed"
         cd ..
         return 1
     fi
 
-    # TypeChain types are automatically generated during compilation with hardhat-toolbox
-    echo "   🔧 TypeChain types generated automatically during compilation"
-
-    # Verify TypeChain types were generated
-    if [ -d "typechain-types" ]; then
-        echo "   ✅ TypeChain types directory exists"
-        # Check if index file exists and create it if missing
-        if [ ! -f "typechain-types/index.ts" ]; then
-            echo "   🔧 Creating missing TypeChain index.ts..."
-            echo 'export * from "./contracts";' > typechain-types/index.ts
-        fi
-    else
-        echo "   ⚠️ TypeChain types directory missing, but continuing..."
+    # HARD FAIL: always regenerate typechain from fresh artifacts.
+    echo "   🔧 Regenerating TypeChain types from artifacts..."
+    if ! find artifacts/contracts -name '*.json' ! -name '*.dbg.json' -print0 | \
+        xargs -0 npx typechain --target ethers-v6 --out-dir typechain-types; then
+        echo "   ❌ TypeChain generation failed"
+        cd ..
+        return 1
     fi
+
+    # HARD FAIL: critical factories must exist and include required methods.
+    depository_factory_file=$(find typechain-types/factories -name 'Depository__factory.ts' | head -n 1 || true)
+    if [ -z "$depository_factory_file" ]; then
+      echo "   ❌ Missing TypeChain Depository factory (Depository__factory.ts)"
+      cd ..
+      return 1
+    fi
+    required_typechain_files=(
+      "typechain-types/index.ts"
+      "typechain-types/factories/index.ts"
+      "typechain-types/factories/EntityProvider__factory.ts"
+      "typechain-types/factories/DeltaTransformer__factory.ts"
+      "typechain-types/factories/Account__factory.ts"
+      "typechain-types/factories/ERC20Mock__factory.ts"
+    )
+    for file in "${required_typechain_files[@]}"; do
+      if [ ! -f "$file" ]; then
+        echo "   ❌ Missing TypeChain file: $file"
+        cd ..
+        return 1
+      fi
+    done
+    if ! grep -q "processBatch" "$depository_factory_file"; then
+      echo "   ❌ TypeChain stale/broken: Depository__factory missing processBatch"
+      cd ..
+      return 1
+    fi
+    if ! grep -q "settle" "$depository_factory_file"; then
+      echo "   ❌ TypeChain stale/broken: Depository__factory missing settle"
+      cd ..
+      return 1
+    fi
+    echo "   ✅ TypeChain regenerated and verified"
 
     # Run tests before deployment
     echo "   🧪 Running contract tests before deployment..."
@@ -170,7 +198,7 @@ deploy_to_network() {
     echo "$depository_output" > "../logs/deploy-depository-$port.log" 2>/dev/null || true
     
     # Wait for ignition to create deployment artifacts
-    local deployment_file="ignition/deployments/chain-1337/deployed_addresses.json"
+    local deployment_file="ignition/deployments/chain-31337/deployed_addresses.json"
     echo "   🔍 Waiting for deployment file: $deployment_file"
     local tries=0
     while [ ! -f "$deployment_file" ] && [ $tries -lt 10 ]; do
@@ -334,8 +362,8 @@ if [ $success_count -gt 0 ]; then
     echo "   CONTRACT_8545_DEP='$CONTRACT_8545_DEP'"
     echo ""
 
-    # Create fresh jurisdictions.json with Arrakis and Wakanda
-    # Use /rpc/* proxy paths for HTTPS → HTTP proxying (eliminates SSL errors)
+    # Create fresh jurisdictions.json with Arrakis and Wakanda aliases.
+    # Canonical RPC endpoint is a single path: /rpc.
     cat > jurisdictions.json << EOF
 {
   "version": "2.0.0",
@@ -343,8 +371,8 @@ if [ $success_count -gt 0 ]; then
   "jurisdictions": {
     "arrakis": {
       "name": "Arrakis",
-      "chainId": 1337,
-      "rpc": "/rpc/arrakis",
+      "chainId": 31337,
+      "rpc": "/rpc",
       "contracts": {
         "entityProvider": "$CONTRACT_8545_EP",
         "depository": "$CONTRACT_8545_DEP"
@@ -356,16 +384,16 @@ if [ $success_count -gt 0 ]; then
     },
     "wakanda": {
       "name": "Wakanda",
-      "chainId": 1338,
-      "rpc": "/rpc/wakanda",
+      "chainId": 31337,
+      "rpc": "/rpc",
       "contracts": {
         "entityProvider": "$CONTRACT_8545_EP",
         "depository": "$CONTRACT_8545_DEP"
       },
-      "explorer": "http://localhost:8546",
+      "explorer": "http://localhost:8545",
       "currency": "VIBRANIUM",
       "status": "pending",
-      "description": "Advanced technology, sovereign nation, vibranium-backed reserves (Coming Soon)"
+      "description": "Alias on shared local anvil (single-chain demo mode)"
     }
   },
   "defaults": {

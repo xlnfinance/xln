@@ -2,7 +2,7 @@
  * JAdapter - Unified interface to J-Machine (Jurisdiction L1)
  *
  * Usage:
- *   const j = await createJAdapter({ mode: 'browservm', chainId: 1337 });
+ *   const j = await createJAdapter({ mode: 'browservm', chainId: 31337 });
  *   await j.deployStack();
  *   const balance = await j.depository._reserves(entityId, tokenId);
  *
@@ -22,6 +22,12 @@ export * from './types';
 export { DEFAULT_PRIVATE_KEY } from './helpers';
 export { BrowserVMProvider } from './browservm-provider';
 export { BrowserVMEthersProvider } from './browservm-ethers-provider';
+
+/**
+ * Set of chain IDs treated as local dev chains.
+ * Used to gate mint/debugFundReserves and disable confirmation depth.
+ */
+export const DEV_CHAIN_IDS = new Set<number>([31337]);
 
 import type { JAdapter, JAdapterConfig } from './types';
 import { DEFAULT_PRIVATE_KEY } from './helpers';
@@ -54,7 +60,15 @@ class NonceTrackingWallet extends ethers.Wallet {
  * Create a JAdapter for interacting with J-Machine
  */
 export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> {
-  const privateKey = config.privateKey ?? DEFAULT_PRIVATE_KEY;
+  const privateKey = (() => {
+    if (config.privateKey) return config.privateKey;
+    if (DEV_CHAIN_IDS.has(config.chainId)) {
+      return process.env.JADAPTER_DEV_PRIVATE_KEY ?? DEFAULT_PRIVATE_KEY;
+    }
+    throw new Error(
+      `[JAdapter] privateKey is required for chainId=${config.chainId}. Refusing unsafe default key on non-dev chain.`,
+    );
+  })();
 
   if (config.mode === 'browservm') {
     const { BrowserVMProvider } = await import('./browservm-provider');

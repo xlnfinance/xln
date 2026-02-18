@@ -7,7 +7,7 @@
  * Use JAdapter for new code:
  *
  *   import { createJAdapter } from './jadapter';
- *   const jAdapter = await createJAdapter({ mode: 'browservm', chainId: 1337 });
+ *   const jAdapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
  *   await jAdapter.deployStack();
  *
  * Deprecated functions → JAdapter equivalents:
@@ -34,6 +34,7 @@ import type { ConsensusConfig, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
 import { logError } from './logger';
 import { BrowserVMEthersProvider } from './jadapter/browservm-ethers-provider';
+import { parseRebalancePolicyUsd } from './rebalance-policy-usd';
 // BrowserVMProvider is also available via jadapter/browservm-provider
 import type { BrowserVMInstance } from './xln-api';
 
@@ -169,7 +170,7 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
         DEFAULT_JURISDICTIONS = new Map();
         DEFAULT_JURISDICTIONS.set('simnet', {
           name: 'Simnet',
-          chainId: 1337,
+          chainId: 31337,
           address: 'browservm://',
           entityProviderAddress,
           depositoryAddress,
@@ -216,7 +217,7 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
         throw netError;
       }
     } else {
-      uiLog(`✅ BrowserVM connection established (chainId=1337)`);
+      uiLog(`✅ BrowserVM connection established (chainId=31337)`);
     }
 
     // Create contract instances
@@ -684,6 +685,7 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
     }
 
     const jurisdictionData = config.jurisdictions;
+    const globalRebalancePolicyUsd = parseRebalancePolicyUsd(config?.defaults?.rebalancePolicyUsd);
 
     // Build jurisdictions from loaded config with type safety
     for (const [key, data] of Object.entries(jurisdictionData)) {
@@ -765,12 +767,14 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
         depository: jData['contracts']['depository']
       });
 
+      const rebalancePolicyUsd = parseRebalancePolicyUsd(jData['rebalancePolicyUsd']) ?? globalRebalancePolicyUsd;
       jurisdictions.set(key, {
         address: rpcUrl,
         name: jData['name'],
         entityProviderAddress: jData['contracts']['entityProvider'],
         depositoryAddress: jData['contracts']['depository'],
         chainId: jData['chainId'],
+        ...(rebalancePolicyUsd ? { rebalancePolicyUsd } : {}),
       });
     }
   } catch (error) {
@@ -845,7 +849,7 @@ export const setBrowserVMJurisdiction = (env: any, depositoryAddress: string, br
   DEFAULT_JURISDICTIONS = new Map();
   DEFAULT_JURISDICTIONS.set('simnet', {
     name: 'Simnet',
-    chainId: 1337,
+    chainId: 31337,
     address: 'browservm://', // BrowserVM uses in-memory EVM, no real RPC
     entityProviderAddress,
     depositoryAddress,

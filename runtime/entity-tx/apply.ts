@@ -5,6 +5,7 @@ import { processProfileUpdate } from '../name-resolution';
 import { createOrderbookExtState } from '../orderbook';
 import { getRuntimeDb, tryOpenDb } from '../runtime';
 import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput, HashType } from '../types';
+import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../types';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { buildEntityProfile, mergeProfileWithExisting } from '../networking/gossip-helper';
@@ -27,13 +28,39 @@ export interface ApplyEntityTxResult {
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
-import { submitSettle } from '../evm';
 import { logError } from '../logger';
 import { FINANCIAL } from '../constants';
+import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
+const USD_SCALE = 10n ** 18n;
+const toUsdWei = (value: number): bigint => BigInt(Math.max(0, Math.floor(value))) * USD_SCALE;
+const resolveJurisdictionRebalanceDefaults = (
+  entityState: EntityState,
+): { softLimit: bigint; hardLimit: bigint; maxAcceptableFee: bigint } => {
+  const raw = entityState.config?.jurisdiction?.rebalancePolicyUsd;
+  if (!raw) {
+    return {
+      softLimit: DEFAULT_SOFT_LIMIT,
+      hardLimit: DEFAULT_HARD_LIMIT,
+      maxAcceptableFee: DEFAULT_MAX_FEE,
+    };
+  }
+  const softLimit = toUsdWei(raw.softLimit);
+  const hardLimit = toUsdWei(raw.hardLimit);
+  const maxAcceptableFee = toUsdWei(raw.maxFee);
+  if (softLimit <= 0n || hardLimit < softLimit) {
+    return {
+      softLimit: DEFAULT_SOFT_LIMIT,
+      hardLimit: DEFAULT_HARD_LIMIT,
+      maxAcceptableFee: DEFAULT_MAX_FEE,
+    };
+  }
+  return { softLimit, hardLimit, maxAcceptableFee };
+};
+
 const findAccountKey = (state: EntityState, counterpartyId: string): string | null => {
   const target = normalizeEntityRef(counterpartyId);
   for (const key of state.accounts.keys()) {
@@ -326,6 +353,7 @@ export const applyEntityTx = async (
         newState.accounts.set(accountKey, {
           leftEntity,
           rightEntity,
+          status: 'active',
           mempool: [],
           currentFrame: {
             height: 0,
@@ -404,29 +432,34 @@ export const applyEntityTx = async (
           console.log(`📝 Initiator queued [add_delta] (no initial credit)`);
         }
 
-        // AUTOPILOT: Set default rebalance policy so hub auto-collateralizes.
-        // softLimit=$500 — trigger rebalance when uncollateralized debt exceeds this
-        // hardLimit=$10K — target collateral amount after rebalance
-        // maxAcceptableFee=$100 — auto-accept hub quotes up to this fee
-        // Users can adjust later in Settings → Rebalance Policy.
-        const AUTOPILOT_SOFT_LIMIT = 500n * 10n ** 18n; // $500
-        const AUTOPILOT_HARD_LIMIT = 10_000n * 10n ** 18n; // $10K
-        const AUTOPILOT_MAX_FEE = 100n * 10n ** 18n; // $100
+        // Seed per-account rebalance policy from openAccount payload when provided.
+        // Falls back to runtime defaults for compatibility.
+        const requestedPolicy = entityTx.data.rebalancePolicy;
+        const jurisdictionPolicyDefaults = resolveJurisdictionRebalanceDefaults(newState);
+        let autopilotSoftLimit = requestedPolicy?.softLimit ?? jurisdictionPolicyDefaults.softLimit;
+        let autopilotHardLimit = requestedPolicy?.hardLimit ?? jurisdictionPolicyDefaults.hardLimit;
+        let autopilotMaxFee = requestedPolicy?.maxAcceptableFee ?? jurisdictionPolicyDefaults.maxAcceptableFee;
+        if (autopilotSoftLimit <= 0n) autopilotSoftLimit = jurisdictionPolicyDefaults.softLimit;
+        if (autopilotHardLimit < autopilotSoftLimit) autopilotHardLimit = autopilotSoftLimit;
+        if (autopilotMaxFee < 0n) autopilotMaxFee = jurisdictionPolicyDefaults.maxAcceptableFee;
         localAccount.rebalancePolicy.set(tokenId, {
-          softLimit: AUTOPILOT_SOFT_LIMIT,
-          hardLimit: AUTOPILOT_HARD_LIMIT,
-          maxAcceptableFee: AUTOPILOT_MAX_FEE,
+          softLimit: autopilotSoftLimit,
+          hardLimit: autopilotHardLimit,
+          maxAcceptableFee: autopilotMaxFee,
         });
         localAccount.mempool.push({
           type: 'set_rebalance_policy',
           data: {
             tokenId,
-            softLimit: AUTOPILOT_SOFT_LIMIT,
-            hardLimit: AUTOPILOT_HARD_LIMIT,
-            maxAcceptableFee: AUTOPILOT_MAX_FEE,
+            softLimit: autopilotSoftLimit,
+            hardLimit: autopilotHardLimit,
+            maxAcceptableFee: autopilotMaxFee,
           },
         });
-        console.log(`🔄 Autopilot: rebalance policy set (soft=$500, hard=$10K, maxFee=$100) for token ${tokenId}`);
+        console.log(
+          `🔄 Autopilot: rebalance policy set for token ${tokenId} ` +
+          `(soft=${autopilotSoftLimit}, hard=${autopilotHardLimit}, maxFee=${autopilotMaxFee})`,
+        );
       } else {
         // COUNTERPARTY (mirror): Just create account machine, don't queue txs
         // Counterparty waits for initiator's frame and ACKs it
@@ -904,16 +937,59 @@ export const applyEntityTx = async (
     if (entityTx.type === 'setHubConfig') {
       const newState = cloneEntityState(entityState);
       const {
-        matchingStrategy = 'hnw',
+        matchingStrategy: matchingStrategyRaw = 'amount',
+        policyVersion: policyVersionRaw,
         routingFeePPM = 100,
         baseFee = 0n,
         minCollateralThreshold = 0n,
-        minFeeBps = 10n,
+        minFeeBps = 1n,
+        rebalanceBaseFee = 10n ** 17n, // $0.10
+        rebalanceLiquidityFeeBps = 1n, // 0.01%
+        rebalanceGasFee = 0n,
+        rebalanceTimeoutMs = 10 * 60 * 1000,
       } = entityTx.data;
+      const matchingStrategy = normalizeRebalanceMatchingStrategy(matchingStrategyRaw);
+      const previousConfig = entityState.hubRebalanceConfig;
+      const previousVersion = previousConfig?.policyVersion ?? 0;
+      const feePolicyChanged = !previousConfig ||
+        (previousConfig.rebalanceBaseFee ?? 10n ** 17n) !== rebalanceBaseFee ||
+        (previousConfig.rebalanceLiquidityFeeBps ?? previousConfig.minFeeBps ?? 1n) !== rebalanceLiquidityFeeBps ||
+        (previousConfig.rebalanceGasFee ?? 0n) !== rebalanceGasFee;
+      const requestedPolicyVersion = Number.isFinite(policyVersionRaw as number) && Number(policyVersionRaw) > 0
+        ? Number(policyVersionRaw)
+        : undefined;
+      let policyVersion: number;
+      if (requestedPolicyVersion !== undefined) {
+        if (requestedPolicyVersion < previousVersion) {
+          console.warn(
+            `⚠️ setHubConfig policyVersion downgrade blocked: requested=${requestedPolicyVersion} < current=${previousVersion}`,
+          );
+          policyVersion = previousVersion;
+        } else {
+          policyVersion = requestedPolicyVersion;
+        }
+      } else if (previousVersion <= 0) {
+        policyVersion = 1;
+      } else {
+        policyVersion = feePolicyChanged ? previousVersion + 1 : previousVersion;
+      }
 
-      newState.hubRebalanceConfig = { matchingStrategy, routingFeePPM, baseFee, minCollateralThreshold, minFeeBps };
+      newState.hubRebalanceConfig = {
+        matchingStrategy,
+        policyVersion,
+        routingFeePPM,
+        baseFee,
+        minCollateralThreshold,
+        minFeeBps,
+        rebalanceBaseFee,
+        rebalanceLiquidityFeeBps,
+        rebalanceGasFee,
+        rebalanceTimeoutMs,
+      };
       console.log(
-        `🏦 Hub config set: strategy=${matchingStrategy}, routingFee=${routingFeePPM}ppm, baseFee=${baseFee}, minCollateralThreshold=${minCollateralThreshold}, minFeeBps=${minFeeBps}`,
+        `🏦 Hub config set: strategy=${matchingStrategy}, policyVersion=${policyVersion}, routingFee=${routingFeePPM}ppm, ` +
+        `rebalance(base=${rebalanceBaseFee},liqBps=${rebalanceLiquidityFeeBps},gas=${rebalanceGasFee},timeoutMs=${rebalanceTimeoutMs})` +
+        `${feePolicyChanged ? ' [fee-policy-updated]' : ''}`,
       );
 
       // Announce updated profile with isHub: true
@@ -924,7 +1000,17 @@ export const applyEntityTx = async (
         const existingName = existingProfile?.metadata?.name;
         const profile = buildEntityProfile(newState, existingName, monotonicTimestamp);
         const merged = mergeProfileWithExisting(profile, existingProfile);
-        merged.metadata = { ...(merged.metadata || {}), isHub: true, routingFeePPM, baseFee };
+        merged.metadata = {
+          ...(merged.metadata || {}),
+          isHub: true,
+          policyVersion,
+          routingFeePPM,
+          baseFee,
+          rebalanceBaseFee: rebalanceBaseFee.toString(),
+          rebalanceLiquidityFeeBps: rebalanceLiquidityFeeBps.toString(),
+          rebalanceGasFee: rebalanceGasFee.toString(),
+          rebalanceTimeoutMs,
+        };
         if (env.runtimeId) merged.runtimeId = env.runtimeId;
         env.gossip.announce(merged);
         console.log(`📡 Hub profile announced: ${newState.entityId.slice(-4)} isHub=true`);
@@ -932,37 +1018,10 @@ export const applyEntityTx = async (
 
       addMessage(
         newState,
-        `🏦 Hub config activated: ${matchingStrategy} strategy, ${routingFeePPM}ppm routing fee, minThreshold=${minCollateralThreshold}, minFeeBps=${minFeeBps}`,
+        `🏦 Hub config activated: ${matchingStrategy} strategy v${policyVersion}, ${routingFeePPM}ppm routing fee, ` +
+        `rebalance(base=${rebalanceBaseFee}, liqBps=${rebalanceLiquidityFeeBps}, gas=${rebalanceGasFee})`,
       );
       return { newState, outputs: [] };
-    }
-
-    // === REBALANCE QUOTE (Hub → bilateral account) ===
-    if (entityTx.type === 'sendRebalanceQuote') {
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, tokenId, amount, feeTokenId, feeAmount } = entityTx.data;
-
-      const accountMachine = newState.accounts.get(counterpartyEntityId);
-      if (!accountMachine) {
-        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for rebalance quote`);
-        return { newState: entityState, outputs: [] };
-      }
-
-      const accountTx: AccountTx = {
-        type: 'rebalance_quote',
-        data: { tokenId, amount, feeTokenId, feeAmount },
-      };
-      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
-
-      // Trigger processing
-      const firstValidator = entityState.config.validators[0];
-      if (firstValidator) {
-        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
-      }
-
-      return { newState, outputs, mempoolOps };
     }
 
     if (entityTx.type === 'setRebalancePolicy') {
@@ -987,6 +1046,75 @@ export const applyEntityTx = async (
       if (firstValidator) {
         outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
       }
+
+      return { newState, outputs, mempoolOps };
+    }
+
+    if (entityTx.type === 'requestCollateral') {
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
+      const { counterpartyEntityId, tokenId, amount, feeTokenId, feeAmount, policyVersion } = entityTx.data;
+
+      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      if (!accountMachine) {
+        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for collateral request`);
+        return { newState: entityState, outputs: [] };
+      }
+
+      const accountTx: AccountTx = {
+        type: 'request_collateral',
+        data: { tokenId, amount, feeTokenId, feeAmount, policyVersion },
+      };
+      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) {
+        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
+      }
+
+      return { newState, outputs, mempoolOps };
+    }
+
+    if (entityTx.type === 'reopenDisputedAccount') {
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
+      const { counterpartyEntityId } = entityTx.data;
+
+      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      if (!accountMachine) {
+        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for reopen`);
+        return { newState: entityState, outputs: [] };
+      }
+
+      let onChainNonce = Number(entityTx.data.onChainNonce ?? accountMachine.onChainSettlementNonce ?? 0);
+      const jurisdictionName = newState.config.jurisdiction?.name || env.activeJurisdiction;
+      const jadapter = jurisdictionName ? env.jReplicas?.get(jurisdictionName)?.jadapter : undefined;
+      if (jadapter && typeof jadapter.getAccountInfo === 'function') {
+        try {
+          const info = await jadapter.getAccountInfo(newState.entityId, counterpartyEntityId);
+          onChainNonce = Math.max(onChainNonce, Number(info.nonce));
+          accountMachine.onChainSettlementNonce = Number(info.nonce);
+        } catch (error) {
+          console.warn(
+            `⚠️ reopenDisputedAccount: failed to read on-chain nonce for ${counterpartyEntityId.slice(-4)}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+
+      const accountTx: AccountTx = {
+        type: 'reopen_disputed',
+        data: { onChainNonce },
+      };
+      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) {
+        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
+      }
+      addMessage(newState, `🔓 Reopen requested with ${counterpartyEntityId.slice(-4)} at nonce=${onChainNonce}`);
 
       return { newState, outputs, mempoolOps };
     }
@@ -1156,6 +1284,7 @@ export const applyEntityTx = async (
       console.log(`🏦 SETTLE-DIFFS: Processing settlement with ${entityTx.data.counterpartyEntityId}`);
 
       const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
       const { counterpartyEntityId, diffs, description, sig } = entityTx.data;
 
       // Step 1: Validate invariant for all diffs
@@ -1196,31 +1325,51 @@ export const applyEntityTx = async (
         ondeltaDiff: d.ondeltaDiff || 0n,
       }));
 
-      console.log(`🏦 Calling submitSettle with diffs:`, safeStringify(contractDiffs, 2));
+      console.log(`🏦 Queueing settlement diff batch:`, safeStringify(contractDiffs, 2));
 
-      // Step 6: Call Depository.settle() - fire and forget (j-watcher handles result)
+      // Step 6: Add settlement to jBatch and trigger j_broadcast.
       if (!sig || sig === '0x') {
         throw new Error(
           `Settlement ${entityState.entityId.slice(-4)}↔${counterpartyEntityId.slice(-4)} missing hanko signature`,
         );
       }
 
-      try {
-        const result = await submitSettle(jurisdiction, leftEntity, rightEntity, contractDiffs, [], [], sig);
-        console.log(`✅ Settlement transaction sent: ${result.txHash}`);
+      const { initJBatch, batchAddSettlement } = await import('../j-batch');
+      if (!newState.jBatchState) {
+        newState.jBatchState = initJBatch();
+      }
+      batchAddSettlement(
+        newState.jBatchState,
+        leftEntity,
+        rightEntity,
+        contractDiffs,
+        [],
+        [],
+        sig,
+        jurisdiction.entityProviderAddress ?? '0x0000000000000000000000000000000000000000',
+        '0x',
+        0,
+        entityState.entityId,
+      );
 
-        // Add message to chat
-        addMessage(
-          newState,
-          `🏦 ${description || 'Settlement'} tx: ${result.txHash.slice(0, 10)}... (block ${result.blockNumber})`,
-        );
-      } catch (error) {
-        logError('ENTITY_TX', `❌ Settlement transaction failed:`, error);
-        addMessage(newState, `❌ Settlement failed: ${(error as Error).message}`);
-        throw error; // Re-throw to trigger outer catch
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) {
+        outputs.push({
+          entityId: entityState.entityId,
+          signerId: firstValidator,
+          entityTxs: [{
+            type: 'j_broadcast',
+            data: {},
+          }],
+        });
       }
 
-      return { newState, outputs: [] };
+      addMessage(
+        newState,
+        `🏦 ${description || 'Settlement'} queued to jBatch`,
+      );
+
+      return { newState, outputs };
     }
 
     // === DISPUTES ===

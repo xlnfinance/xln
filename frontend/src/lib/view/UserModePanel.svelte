@@ -21,7 +21,8 @@
   import { showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { setEntityEnvContext } from './components/entity/shared/EntityEnvContext';
   import type { Tab } from '$lib/types/ui';
-  import { createNumberedSelfEntity } from '$lib/utils/entityFactory';
+  import { createSelfEntity } from '$lib/utils/entityFactory';
+  import { readOnboardingComplete, writeOnboardingComplete } from '$lib/utils/onboardingState';
 
   import EntityDropdown from '$lib/components/Entity/EntityDropdown.svelte';
   import AccountDropdown from '$lib/components/Entity/AccountDropdown.svelte';
@@ -63,9 +64,6 @@
 
   onMount(async () => {
     await vaultOperations.initialize();
-    if (typeof localStorage !== 'undefined') {
-      onboardingComplete = localStorage.getItem('xln-onboarding-complete') === 'true';
-    }
   });
 
   // Selection state
@@ -269,7 +267,7 @@
           type: 'importJ',
           data: {
             name,
-            chainId: 1337,
+            chainId: 31337,
             ticker: 'SIM',
             rpcs: [],
           }
@@ -358,7 +356,7 @@
           continue;
         }
 
-        const entityId = await createNumberedSelfEntity(env, signerAddress, jurisdiction || undefined);
+        const entityId = await createSelfEntity(env, signerAddress, jurisdiction || undefined);
         if (runEpoch !== ensureSelfEntitiesEpoch) return;
         if (entityId) {
           // Resolve canonical entity by signer after create to prevent duplicate/late-selection drift.
@@ -399,8 +397,22 @@
   });
 
   const hasSigner = $derived(!!signer?.address);
+  const onboardingRequiredForRuntime = $derived($activeVault?.requiresOnboarding !== false);
   const showVaultGate = $derived(!hasSigner);
   const showVaultPanelVisible = $derived(showVaultGate || $showVaultPanel);
+
+  $effect(() => {
+    const entityId = selectedEntityId;
+    if (!onboardingRequiredForRuntime) {
+      onboardingComplete = true;
+      return;
+    }
+    if (!entityId) {
+      onboardingComplete = false;
+      return;
+    }
+    onboardingComplete = readOnboardingComplete(entityId);
+  });
 
   // Tab for EntityPanel
   const entityTab: Tab = $derived({
@@ -435,7 +447,13 @@
   }
 
   function handleOnboardingComplete() {
+    if (selectedEntityId) {
+      writeOnboardingComplete(selectedEntityId, true);
+    }
     onboardingComplete = true;
+    viewMode = 'entity';
+    selectedAccountId = null;
+    activeInlinePanel = 'none';
   }
 
   function handleJurisdictionSelect(event: CustomEvent<{ name: string }>) {
