@@ -2489,7 +2489,7 @@
           type: 'importJ',
           data: {
             name: newXlnomyName,
-            chainId: isBrowserVM ? 1337 : 1, // BrowserVM uses 1337 to match View.svelte
+            chainId: isBrowserVM ? 31337 : 1, // BrowserVM uses 31337 to match View.svelte
             ticker: 'ETH',
             rpcs: isBrowserVM ? [] : [newXlnomyRpcUrl],
           }

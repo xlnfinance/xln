@@ -81,55 +81,13 @@ export const error = writable<string | null>(null);
 
 // xlnFunctions is now defined at the end of the file
 
-function isLocalRelayUrl(url: string): boolean {
-  return (
-    url.startsWith('ws://localhost') ||
-    url.startsWith('wss://localhost') ||
-    url.startsWith('ws://127.0.0.1') ||
-    url.startsWith('wss://127.0.0.1') ||
-    url.startsWith('ws://0.0.0.0') ||
-    url.startsWith('wss://0.0.0.0')
-  );
-}
-
-function isLocalBrowserHost(): boolean {
-  if (typeof window === 'undefined') return false;
-  const host = window.location.hostname;
-  return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
-}
-
 export function resolveRelayUrls(): string[] {
   if (typeof window === 'undefined') return ['wss://xln.finance/relay'];
-
-  // When running locally, auto-detect local relay from page origin.
-  // This prevents CORS issues where settings still point to production relay
-  // but the server is running on localhost.
-  if (isLocalBrowserHost()) {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const localRelay = `${protocol}//${window.location.host}/relay`;
-    return [localRelay];
-  }
-
-  // Priority: 1) localStorage (direct read for reliability), 2) store, 3) env var, 4) default
-  let localStorageRelay: string | undefined;
-  try {
-    const saved = localStorage.getItem('xln-settings');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      localStorageRelay = parsed.relayUrl;
-    }
-  } catch {
-    /* ignore */
-  }
-
-  const settingsRelay = get(settings)?.relayUrl;
-  const envRelay = (import.meta as any)?.env?.VITE_RELAY_URL as string | undefined;
-  // Always default to prod relay unless user explicitly overrides settings.
-  const fallbackRelay = 'wss://xln.finance/relay';
-  const relay = localStorageRelay || settingsRelay || envRelay || fallbackRelay;
-  if (!isLocalBrowserHost() && isLocalRelayUrl(relay)) {
-    console.warn(`[relay] Ignoring local relay URL on non-local host: ${relay} -> ${fallbackRelay}`);
-    return [fallbackRelay];
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const relay = `${protocol}//${window.location.host}/relay`;
+  const configured = get(settings)?.relayUrl;
+  if (configured && configured !== relay) {
+    console.error(`[relay] SETTINGS_MISMATCH: forcing single relay ${relay}, ignoring ${configured}`);
   }
   return [relay];
 }

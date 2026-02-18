@@ -7,6 +7,7 @@
   import { xlnFunctions, xlnEnvironment, getXLN, enqueueEntityInputs } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '$lib/stores/settingsStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+  import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle, ArrowUpDown } from 'lucide-svelte';
 
   export let entityId: string = '';
@@ -440,6 +441,7 @@
 
       // Default credit amount: 10,000 tokens (with 18 decimals)
       const creditAmount = 10_000n * 10n ** 18n;
+      const rebalancePolicy = getOpenAccountRebalancePolicyData();
 
       // Open account WITH credit extension (both in same frame)
       // Frame #1 will have: [add_delta, set_credit_limit] - order matters!
@@ -450,14 +452,15 @@
         entityTxs: [
           {
             type: 'openAccount' as const,
-            data: {
-              targetEntityId: hub.entityId,
-              creditAmount,    // Both txs go in same frame
-              tokenId: 1,      // USDC
+              data: {
+                targetEntityId: hub.entityId,
+                creditAmount,    // Both txs go in same frame
+                tokenId: 1,      // USDC
+                ...(rebalancePolicy ? { rebalancePolicy } : {}),
+              }
             }
-          }
-        ]
-      }]);
+          ]
+        }]);
 
       const opened = await waitForAccountReady(currentEnv, entityId, hub.entityId, 20_000);
       if (!opened) {

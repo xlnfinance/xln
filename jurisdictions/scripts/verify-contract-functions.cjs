@@ -5,7 +5,7 @@ async function main() {
     console.log("🔍 Verifying deployed contract functions...");
 
     // Read deployment file
-    const deploymentFile = "ignition/deployments/chain-1337/deployed_addresses.json";
+    const deploymentFile = "ignition/deployments/chain-31337/deployed_addresses.json";
     if (!fs.existsSync(deploymentFile)) {
         console.log("❌ Deployment file not found:", deploymentFile);
         process.exit(1);

@@ -19,7 +19,7 @@
 
 import type { Env, EntityInput } from '../types';
 import { getPerfMs } from '../utils';
-import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
+import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
 import { findReplica, getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -67,13 +67,22 @@ export async function rapidFire(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   // ============================================================================
-  // SETUP: BrowserVM + Entities
+  // SETUP: JAdapter + Entities
   // ============================================================================
   console.log('🏛️  Setting up test environment...');
 
-  const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
-  createJReplica(env, 'RapidFire', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
+  const jMode = getJAdapterMode();
+  const jadapter = await ensureJAdapter(env, jMode);
+  const jReplica = createJReplica(env, 'RapidFire', jadapter.addresses.depository, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
+  (jReplica as any).jadapter = jadapter;
+  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
+  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+  (jReplica as any).contracts = {
+    depository: jadapter.addresses.depository,
+    entityProvider: jadapter.addresses.entityProvider,
+    account: jadapter.addresses.account,
+    deltaTransformer: jadapter.addresses.deltaTransformer,
+  };
 
   const entities = [
     { name: 'Alice', id: '0x' + '1'.padStart(64, '0'), signer: '1' },

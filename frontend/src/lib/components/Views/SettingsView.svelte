@@ -443,7 +443,7 @@
             id="custom-rpc"
             type="text"
             bind:value={customRpcInput}
-            placeholder="e.g., /rpc/ethereum or :8545"
+            placeholder="e.g., /rpc or :8545"
           />
           <button class="action-btn" on:click={handleCustomRpcSubmit}>
             Apply & Reload

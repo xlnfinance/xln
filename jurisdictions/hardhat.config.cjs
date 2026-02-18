@@ -22,7 +22,7 @@ module.exports = {
       allowUnlimitedContractSize: true
     },
     hardhat: {
-      chainId: 1337,
+      chainId: 31337,
       allowUnlimitedContractSize: true,
       blockGasLimit: 300000000,
       mining: {
@@ -48,17 +48,17 @@ module.exports = {
     // ═══════════════════════════════════════════════════════════════════
     ethereum: {
       url: "http://127.0.0.1:8545",
-      chainId: 1337,
+      chainId: 31337,
       allowUnlimitedContractSize: true
     },
     polygon: {
       url: "http://0.0.0.0:8546",
-      chainId: 1337,
+      chainId: 31337,
       allowUnlimitedContractSize: true
     },
     arbitrum: {
       url: "http://0.0.0.0:8547",
-      chainId: 1337,
+      chainId: 31337,
       allowUnlimitedContractSize: true
     },
   }

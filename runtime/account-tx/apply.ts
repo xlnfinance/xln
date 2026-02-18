@@ -3,7 +3,7 @@
  * Routes AccountTx to appropriate handlers (like entity-tx/apply.ts pattern)
  */
 
-import type { AccountMachine, AccountTx } from '../types';
+import type { AccountMachine, AccountTx, Env } from '../types';
 import { getAccountPerspective } from '../state-helpers';
 import { handleAddDelta } from './handlers/add-delta';
 import { handleSetCreditLimit } from './handlers/set-credit-limit';
@@ -11,19 +11,16 @@ import { handleDirectPayment } from './handlers/direct-payment';
 import { handleReserveToCollateral } from './handlers/reserve-to-collateral';
 import { handleRequestWithdrawal } from './handlers/request-withdrawal';
 import { handleApproveWithdrawal } from './handlers/approve-withdrawal';
-import { handleRequestRebalance } from './handlers/request-rebalance';
 import { handleSetRebalancePolicy } from './handlers/set-rebalance-policy';
-import { handleRebalanceRequest } from './handlers/rebalance-request';
-import { handleRebalanceQuote } from './handlers/rebalance-quote';
-import { handleRebalanceAccept } from './handlers/rebalance-accept';
 import { handleRequestCollateral } from './handlers/request-collateral';
-import { handleJSync } from './handlers/j-sync';
+import { handleReopenDisputed } from './handlers/reopen-disputed';
 import { handleHtlcLock } from './handlers/htlc-lock';
 // htlc_resolve: unified handler imported dynamically in switch case
 import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
 import { handleSwapCancel } from './handlers/swap-cancel';
 import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
+import { normalizeJurisdictionEvents } from '../j-event-normalization';
 
 /**
  * Process single AccountTx through bilateral consensus
@@ -41,6 +38,7 @@ export async function processAccountTx(
   currentTimestamp: number = 0,
   currentHeight: number = 0,
   isValidation: boolean = false,
+  env?: Env,
 ): Promise<{
   success: boolean;
   events: string[];
@@ -65,6 +63,27 @@ export async function processAccountTx(
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
   console.log(`🔄 Processing ${accountTx.type} for ${counterparty.slice(-4)} (byLeft: ${byLeft})`);
+
+  const emitRebalanceDebug = (payload: Record<string, unknown>) => {
+    const p2p = (env as any)?.runtimeState?.p2p;
+    if (p2p && typeof p2p.sendDebugEvent === 'function') {
+      p2p.sendDebugEvent({
+        level: 'info',
+        code: 'REB_STEP',
+        accountId: counterparty,
+        ...payload,
+      });
+    }
+  };
+
+  if (
+    (accountMachine.status ?? 'active') === 'disputed' &&
+    accountTx.type !== 'j_event_claim' &&
+    accountTx.type !== 'reopen_disputed'
+  ) {
+    const error = `Account is disputed; tx ${accountTx.type} rejected until reopen_disputed`;
+    return { success: false, events: [error], error };
+  }
 
   // Route to appropriate handler based on transaction type
   switch (accountTx.type) {
@@ -103,15 +122,38 @@ export async function processAccountTx(
     case 'approve_withdrawal':
       return handleApproveWithdrawal(accountMachine, accountTx as Extract<AccountTx, { type: 'approve_withdrawal' }>);
 
-    case 'request_rebalance':
-      return handleRequestRebalance(accountMachine, accountTx as Extract<AccountTx, { type: 'request_rebalance' }>);
-
     case 'request_collateral':
-      return handleRequestCollateral(
+      {
+      const result = handleRequestCollateral(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'request_collateral' }>,
         byLeft,
+        currentTimestamp,
       );
+      if (result.success) {
+        const tokenId = Number((accountTx as any)?.data?.tokenId ?? 0);
+        const requested = accountMachine.requestedRebalance.get(tokenId) ?? 0n;
+        const feeState = accountMachine.requestedRebalanceFeeState?.get(tokenId);
+        emitRebalanceDebug({
+          step: 1,
+          status: 'ok',
+          event: 'request_collateral_committed',
+          tokenId,
+          requestedAmount: requested.toString(),
+          prepaidFee: String(feeState?.feePaidUpfront ?? 0n),
+          requestedAt: Number(feeState?.requestedAt ?? currentTimestamp),
+        });
+      } else {
+        emitRebalanceDebug({
+          step: 1,
+          status: 'error',
+          event: 'request_collateral_rejected',
+          reason: result.error || 'unknown',
+          tokenId: Number((accountTx as any)?.data?.tokenId ?? 0),
+        });
+      }
+      return result;
+      }
 
     case 'set_rebalance_policy':
       return handleSetRebalancePolicy(
@@ -120,25 +162,8 @@ export async function processAccountTx(
         byLeft,
       );
 
-    case 'rebalance_request':
-      return handleRebalanceRequest(accountMachine, accountTx as Extract<AccountTx, { type: 'rebalance_request' }>);
-
-    case 'rebalance_quote':
-      return handleRebalanceQuote(
-        accountMachine,
-        accountTx as Extract<AccountTx, { type: 'rebalance_quote' }>,
-        currentTimestamp,
-      );
-
-    case 'rebalance_accept':
-      return handleRebalanceAccept(
-        accountMachine,
-        accountTx as Extract<AccountTx, { type: 'rebalance_accept' }>,
-        currentTimestamp,
-      );
-
-    case 'j_sync':
-      return handleJSync(accountMachine, accountTx as Extract<AccountTx, { type: 'j_sync' }>);
+    case 'reopen_disputed':
+      return handleReopenDisputed(accountMachine, accountTx as Extract<AccountTx, { type: 'reopen_disputed' }>);
 
     case 'j_event_claim': {
       // Bilateral J-event consensus: Store observation with correct left/right attribution
@@ -176,7 +201,34 @@ export async function processAccountTx(
 
       console.log(`   🔍 AUTH: byLeft=${byLeft}, claimIsFromLeft=${claimIsFromLeft}`);
 
-      const obs = { jHeight, jBlockHash, events, observedAt };
+      let normalizedEvents = normalizeJurisdictionEvents(events);
+      const looksMalformed = normalizedEvents.length === 0;
+
+      if (looksMalformed) {
+        const myEntityIdForRecovery = accountMachine.proofHeader.fromEntity;
+        const myReplica = env
+          ? Array.from(env.eReplicas.values()).find(r => r.state.entityId === myEntityIdForRecovery)
+          : undefined;
+        const recovered = myReplica?.state?.jBlockChain?.find(
+          (b: any) => Number(b?.jHeight) === Number(jHeight) && String(b?.jBlockHash || '') === String(jBlockHash || ''),
+        );
+        if (recovered?.events && Array.isArray(recovered.events) && recovered.events.length > 0) {
+          normalizedEvents = normalizeJurisdictionEvents(recovered.events);
+        }
+        if (normalizedEvents.length > 0) {
+          console.warn(
+            `⚠️ j_event_claim malformed payload recovered from local jBlockChain: jHeight=${jHeight} hash=${String(jBlockHash).slice(0, 10)}`,
+          );
+        } else {
+          return {
+            success: false,
+            events: [`❌ j_event_claim malformed events payload`],
+            error: `j_event_claim malformed events and no local recovery for ${jHeight}:${String(jBlockHash).slice(0, 10)}`,
+          };
+        }
+      }
+
+      const obs = { jHeight, jBlockHash, events: normalizedEvents, observedAt };
 
       // Store observation with correct left/right attribution
       if (claimIsFromLeft) {
@@ -191,14 +243,29 @@ export async function processAccountTx(
       // Validation happens on clonedMachine which gets discarded - finalization would be lost!
       // Frame delta comparison now uses offdelta only, which isn't affected by bilateral finalization.
       if (!isValidation) {
+        const beforeFinalizedHeight = accountMachine.lastFinalizedJHeight || 0;
         const { tryFinalizeAccountJEvents } = await import('../entity-tx/j-events');
         tryFinalizeAccountJEvents(accountMachine, cpId, { timestamp: currentTimestamp });
+        const afterFinalizedHeight = accountMachine.lastFinalizedJHeight || 0;
 
         // DEBUG: Check if bilateral finalization persisted
-        const delta = accountMachine.deltas.get(1); // USDC token
+        const settledTokenId = Number(normalizedEvents.find(e => e.type === 'AccountSettled')?.data?.tokenId ?? 1);
+        const delta = accountMachine.deltas.get(settledTokenId);
         console.log(
           `🔍 AFTER-BILATERAL-FINALIZE (isValidation=${isValidation}): collateral=${delta?.collateral || 0n}`,
         );
+        if (afterFinalizedHeight > beforeFinalizedHeight) {
+          emitRebalanceDebug({
+            step: 5,
+            status: 'ok',
+            event: 'account_settled_finalized_bilateral',
+            jHeight: afterFinalizedHeight,
+            accountId: cpId,
+            tokenId: settledTokenId,
+            collateral: String(delta?.collateral ?? 0n),
+            ondelta: String(delta?.ondelta ?? 0n),
+          });
+        }
       } else {
         console.log(`⏭️ SKIP-BILATERAL-FINALIZE: On validation clone, will finalize during commit`);
       }

@@ -74,32 +74,6 @@ const toHex = (bytes: Uint8Array): string =>
 
 const unique = (items: string[]): string[] => Array.from(new Set(items.filter(Boolean)));
 
-const isLoopbackHost = (host: string): boolean => {
-  const normalized = String(host || '').toLowerCase();
-  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
-};
-
-const isRelayUrlUsable = (relayUrl: string): boolean => {
-  try {
-    const parsed = new URL(relayUrl);
-    if (typeof window === 'undefined') return true;
-    const pageProtocol = window.location.protocol;
-    const pageHost = window.location.hostname.toLowerCase();
-    const relayHost = parsed.hostname.toLowerCase();
-    const isLoopbackRelay = isLoopbackHost(relayHost);
-    if (isLoopbackRelay && relayHost !== pageHost) {
-      return false;
-    }
-    // Browser on HTTPS cannot open insecure WS endpoints.
-    if (pageProtocol === 'https:' && parsed.protocol === 'ws:') {
-      return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const isSameList = (a: string[], b: string[]): boolean => {
   if (a.length !== b.length) return false;
   const aSorted = [...a].sort();
@@ -504,34 +478,9 @@ export class RuntimeP2P {
   }
 
   private ensureRelayConnectionsForEntity(entityId: string): void {
-    const profiles = this.env.gossip?.getProfiles?.() || [];
-    const targetEntityId = normalizeId(entityId);
-    const profile = profiles.find((p: Profile) => normalizeId(String(p.entityId || '')) === targetEntityId);
-    if (!profile) return;
-
-    const hintedRelays = unique([
-      ...(profile.relays || []),
-      ...(profile.endpoints || []),
-    ]).filter(isRelayUrlUsable);
-    const missingRelayUrls = hintedRelays.filter((relayUrl) => {
-      if (this.relayUrls.includes(relayUrl)) return false;
-      if (typeof window !== 'undefined') {
-        // Never auto-discover/add loopback relays in browser mode.
-        // Keep relay selection explicit from settings/hub selector.
-        try {
-          const relayHost = new URL(relayUrl).hostname.toLowerCase();
-          if (isLoopbackHost(relayHost)) return false;
-        } catch {
-          return false;
-        }
-      }
-      return true;
-    });
-    if (missingRelayUrls.length === 0) return;
-
-    this.relayUrls = unique([...this.relayUrls, ...missingRelayUrls]);
-    console.log(`P2P_RELAY_DISCOVERY: adding ${missingRelayUrls.length} relays from profile ${entityId.slice(-6)}`);
-    this.reconnect();
+    // Single-relay mode: never auto-discover/switch relays from gossip profiles.
+    // This prevents split-brain routing where different entities publish different relay hints.
+    void entityId;
   }
 
   // Call this to refresh profiles from relay

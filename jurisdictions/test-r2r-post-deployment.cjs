@@ -5,7 +5,7 @@ async function main() {
   console.log("\n🧪 Testing Reserve-to-Reserve functionality (Post-Deployment)...");
 
   // Read deployed contract address from ignition
-  const deployedAddressesPath = "ignition/deployments/chain-1337/deployed_addresses.json";
+  const deployedAddressesPath = "ignition/deployments/chain-31337/deployed_addresses.json";
   
   if (!fs.existsSync(deployedAddressesPath)) {
     throw new Error(`❌ Deployed addresses file not found: ${deployedAddressesPath}`);

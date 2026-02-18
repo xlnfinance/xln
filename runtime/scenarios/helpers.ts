@@ -471,6 +471,12 @@ export function assertBilateralSync(
  * Call after any JAdapter write operation (debugFundReserves, processBatch, etc.)
  */
 export async function processJEvents(env: Env): Promise<void> {
+  // Poll all JAdapters first (required for RPC mode where events are fetched, not pushed).
+  for (const [, jReplica] of env.jReplicas) {
+    const ja = (jReplica as any).jadapter;
+    if (ja?.pollNow) await ja.pollNow();
+  }
+
   const process = await getProcess();
   const pendingInputs = env.runtimeInput?.entityInputs || [];
   if (pendingInputs.length > 0) {

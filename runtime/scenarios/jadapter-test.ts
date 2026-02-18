@@ -21,7 +21,7 @@ async function main() {
   // Create JAdapter
   const config = mode === 'anvil'
     ? { mode: 'anvil' as const, chainId: 31337, rpcUrl: 'http://127.0.0.1:8545' }
-    : { mode: 'browservm' as const, chainId: 1337 };
+    : { mode: 'browservm' as const, chainId: 31337 };
 
   console.log('1️⃣  Creating JAdapter...');
   const j = await createJAdapter(config);

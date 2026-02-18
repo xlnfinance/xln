@@ -412,7 +412,7 @@ When no J-Machine exists (e.g., `/view` isolated mode), tutorials auto-create a 
 if (!demoJurisdiction) {
   demoJurisdiction = {
     name: 'Demo (BrowserVM)',
-    chainId: 1337,
+    chainId: 31337,
     entityProviderAddress: '0x5FbDB...',
     depositoryAddress: '0xe7f17...',
     // For production: use Base L2

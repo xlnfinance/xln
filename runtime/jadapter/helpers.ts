@@ -13,11 +13,11 @@ import type { JEvent, JEventCallback } from './types';
 // ═══════════════════════════════════════════════════════════════════════════
 export const CANONICAL_J_EVENTS = [
   'ReserveUpdated', 'SecretRevealed', 'AccountSettled',
-  'DisputeStarted', 'DisputeFinalized', 'DebtCreated', 'HankoBatchProcessed',
+  'DisputeStarted', 'DisputeFinalized', 'DebtCreated', 'DebtEnforced', 'HankoBatchProcessed',
 ] as const;
 export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
 
-// Hardhat account #0 (publicly known test key)
+// TEST-ONLY fallback signer (Hardhat account #0, publicly known key)
 export const DEFAULT_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
 export function computeAccountKey(entity1: string, entity2: string): string {
@@ -38,15 +38,7 @@ export function setupContractEventListeners(
   eventCallbacks: Map<string, Set<JEventCallback>>,
   anyCallbacks: Set<JEventCallback>
 ) {
-  const depositoryEvents = [
-    'ReserveUpdated',
-    'SecretRevealed',
-    'DisputeStarted',
-    'DisputeFinalized',
-    'DebtCreated',
-    'DebtEnforced',
-    'CooperativeClose',
-  ];
+  const depositoryEvents = [...CANONICAL_J_EVENTS];
 
   for (const eventName of depositoryEvents) {
     // Use any cast to bypass strict typechain event typing
@@ -106,6 +98,7 @@ export interface RawJEvent {
   blockNumber?: number;
   blockHash?: string;
   transactionHash?: string;
+  logIndex?: number;
 }
 
 /**
@@ -148,6 +141,9 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
       return normalize(args.sender) === normalizedEntity || normalize(args.counterentity) === normalizedEntity;
 
     case 'DebtCreated':
+      return normalize(args.debtor) === normalizedEntity || normalize(args.creditor) === normalizedEntity;
+
+    case 'DebtEnforced':
       return normalize(args.debtor) === normalizedEntity || normalize(args.creditor) === normalizedEntity;
 
     case 'HankoBatchProcessed':
@@ -265,6 +261,19 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
         },
       }];
 
+    case 'DebtEnforced':
+      return [{
+        type: 'DebtEnforced',
+        data: {
+          debtor: args.debtor,
+          creditor: args.creditor,
+          tokenId: Number(args.tokenId),
+          amountPaid: (args.amountPaid ?? 0).toString(),
+          remainingAmount: (args.remainingAmount ?? 0).toString(),
+          newDebtIndex: Number(args.newDebtIndex ?? 0),
+        },
+      }];
+
     case 'HankoBatchProcessed':
       return [{
         type: 'HankoBatchProcessed',
@@ -297,10 +306,40 @@ export function processEventBatch(
   const canonical = rawEvents.filter(isCanonicalEvent);
   if (canonical.length === 0) return;
 
+  // De-duplicate watcher re-scans using canonical log identity.
+  const dedup = (() => {
+    const state = txCounter as any;
+    if (!state._seenLogs) {
+      state._seenLogs = {
+        set: new Set<string>(),
+        order: [] as string[],
+      };
+    }
+    return state._seenLogs as { set: Set<string>; order: string[] };
+  })();
+  const MAX_DEDUP_LOGS = 50_000;
+  const deduped: RawJEvent[] = [];
+  for (let idx = 0; idx < canonical.length; idx++) {
+    const event = canonical[idx]!;
+    const txHash = event.transactionHash || '';
+    const key = txHash && event.logIndex !== undefined
+      ? `${txHash.toLowerCase()}:${event.logIndex}`
+      : `${event.blockHash ?? blockHash}:${event.name}:${idx}`;
+    if (dedup.set.has(key)) continue;
+    dedup.set.add(key);
+    dedup.order.push(key);
+    deduped.push(event);
+  }
+  while (dedup.order.length > MAX_DEDUP_LOGS) {
+    const oldest = dedup.order.shift();
+    if (oldest) dedup.set.delete(oldest);
+  }
+  if (deduped.length === 0) return;
+
   // Keep runtime console readable: disable noisy per-block watcher logs unless explicitly enabled.
   const shouldLogBatch = !!env?.debugJWatcherBatches;
   if (shouldLogBatch) {
-    console.log(`📡 [JAdapter:${adapterLabel}] ${canonical.length} canonical events from block ${blockNumber}`);
+    console.log(`📡 [JAdapter:${adapterLabel}] ${deduped.length} canonical events from block ${blockNumber}`);
   }
 
   // Group events by relevant entity
@@ -311,7 +350,7 @@ export function processEventBatch(
     const [entityId, sid] = replicaKey.split(':');
     if (!entityId || !sid) continue;
 
-    const relevant = canonical.filter(e => isEventRelevantToEntity(e, entityId));
+    const relevant = deduped.filter(e => isEventRelevantToEntity(e, entityId));
     if (relevant.length === 0) continue;
 
     if (!eventsByEntity.has(entityId)) {
@@ -326,6 +365,26 @@ export function processEventBatch(
   for (const [entityId, { signerId, events }] of eventsByEntity) {
     const jEvents = events.flatMap(e => rawEventToJEvents(e, entityId));
     if (jEvents.length === 0) continue;
+    const settledCount = jEvents.filter(e => e.type === 'AccountSettled').length;
+    if (settledCount > 0) {
+      console.log(
+        `[REB][4][J_EVENT_DELIVER] entity=${entityId.slice(-8)} signer=${signerId.slice(-8)} block=${blockNumber} accountSettled=${settledCount}`,
+      );
+      const p2p = env?.runtimeState?.p2p;
+      if (p2p && typeof p2p.sendDebugEvent === 'function') {
+        p2p.sendDebugEvent({
+          level: 'info',
+          code: 'REB_STEP',
+          step: 4,
+          status: 'ok',
+          event: 'j_event_delivered',
+          entityId,
+          signerId,
+          blockNumber,
+          accountSettled: settledCount,
+        });
+      }
+    }
 
     const entityTx = {
       type: 'j_event' as const,
@@ -334,7 +393,7 @@ export function processEventBatch(
         observedAt: env.timestamp ?? 0,
         blockNumber,
         blockHash,
-        transactionHash: `${adapterLabel}-${blockNumber}-${txCounter.value++}`,
+        transactionHash: events[0]?.transactionHash ?? `${adapterLabel}-${blockNumber}-${txCounter.value++}`,
         events: jEvents,
         event: jEvents[0],
       },

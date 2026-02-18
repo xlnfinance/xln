@@ -1126,26 +1126,21 @@ export async function lockAhb(env: Env): Promise<void> {
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================
-    // PHASE 5: REBALANCING via Quote Flow (Reserve → Collateral)
+    // PHASE 5: REBALANCING via Prepaid Request Model (Reserve → Collateral)
     // ============================================================================
     // Current state after $250K A→H→B minus $50K B→H→A = $200K net shift:
     // - A-H: offdelta = -$200K (Alice owes Hub), collateral = $500K
     // - H-B: offdelta = -$200K (Hub owes Bob), collateral = $0
     // - TR = $200K (Hub's uninsured liability to Bob)
     //
-    // Rebalance flow (mainnet-grade bilateral quote negotiation):
+    // Rebalance flow (prepaid request model):
     // 1. Bob sets rebalance policy (softLimit=$100K, maxFee=$10)
-    // 2. Hub detects H-B collateral ($0) < softLimit → sends quote
-    // 3. Quote auto-accepted (fee $5 < maxFee $10)
-    // 4. Hub deposits $200K from reserve → H-B collateral (R→C)
-    // 5. Fee collected via direct_payment (Bob pays Hub $5)
+    // 2. Hub deposits $200K from reserve → H-B collateral (R→C)
     // ============================================================================
 
-    console.log('\n\n🔄🔄🔄 REBALANCING SECTION START (Quote Flow) 🔄🔄🔄\n');
+    console.log('\n\n🔄🔄🔄 REBALANCING SECTION START (Prepaid Model) 🔄🔄🔄\n');
 
     const rebalanceAmount = usd(200_000);
-    const rebalanceFee = usd(5);
-
     // STEP 21.5: Hub declares itself as hub (enables rebalance crontab)
     console.log('\n🏦 Hub declares hub config');
     await process(env, [{
@@ -1153,7 +1148,7 @@ export async function lockAhb(env: Env): Promise<void> {
       signerId: hub.signer,
       entityTxs: [{
         type: 'setHubConfig',
-        data: { matchingStrategy: 'hnw', routingFeePPM: 100, baseFee: 0n },
+        data: { matchingStrategy: 'amount', routingFeePPM: 100, baseFee: 0n },
       }]
     }]);
     await converge(env);
@@ -1213,50 +1208,8 @@ export async function lockAhb(env: Env): Promise<void> {
       ]
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
-    // STEP 23: Hub sends rebalance quote to Bob (mimics crontab detection)
-    console.log('\n🏦 FRAME 23: Hub sends rebalance quote');
-
-    await process(env, [{
-      entityId: hub.id,
-      signerId: hub.signer,
-      entityTxs: [{
-        type: 'sendRebalanceQuote',
-        data: {
-          counterpartyEntityId: bob.id,
-          tokenId: USDC_TOKEN_ID,
-          amount: rebalanceAmount,
-          feeTokenId: USDC_TOKEN_ID,
-          feeAmount: rebalanceFee,
-        }
-      }]
-    }]);
-    await converge(env);
-
-    // Verify quote was auto-accepted (fee $5 <= maxAcceptableFee $10)
-    const [, hubAfterQuote] = findReplica(env, hub.id);
-    const bobAccAfterQuote = hubAfterQuote.state.accounts.get(bob.id);
-    const activeQuote = bobAccAfterQuote?.activeRebalanceQuote;
-    if (!activeQuote || !activeQuote.accepted) {
-      const { safeStringify } = await import('../serialization-utils');
-      throw new Error(`❌ ASSERT FAIL: Quote not auto-accepted. Quote: ${safeStringify(activeQuote)}, Policy: ${safeStringify(bobAccAfterQuote?.rebalancePolicy)}`);
-    }
-    const actualQuoteId = activeQuote.quoteId;
-    console.log(`✅ Quote auto-accepted: $${Number(rebalanceAmount) / 1e18}K deposit, $${Number(rebalanceFee) / 1e18} fee, quoteId=${actualQuoteId}`);
-
-    await pushSnapshot(env, 'Frame 23: Quote auto-accepted', {
-      title: 'Rebalance Quote: Auto-Accepted',
-      what: 'Hub quoted $200K deposit with $5 fee. Bob auto-accepted (fee < $10 limit).',
-      why: 'Bilateral negotiation — both sides agree on price before on-chain execution.',
-      tradfiParallel: 'Like requesting a wire transfer quote — bank quotes fee, client approves.',
-      keyMetrics: [
-        `quoteId: ${actualQuoteId}`,
-        'Amount: $200K',
-        'Fee: $5 (auto-accepted)',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
-
-    // STEP 24: Hub executes deposit_collateral with accepted quote
-    console.log('\n🏦 FRAME 24: Hub deposits collateral (R→C with fee)');
+    // STEP 23: Hub executes deposit_collateral
+    console.log('\n🏦 FRAME 23: Hub deposits collateral (R→C)');
 
     await process(env, [{
       entityId: hub.id,
@@ -1267,17 +1220,14 @@ export async function lockAhb(env: Env): Promise<void> {
           counterpartyId: bob.id,
           tokenId: USDC_TOKEN_ID,
           amount: rebalanceAmount,
-          rebalanceQuoteId: actualQuoteId,
-          rebalanceFeeTokenId: USDC_TOKEN_ID,
-          rebalanceFeeAmount: rebalanceFee,
         }
       }]
     }]);
     await converge(env);
-    console.log(`✅ deposit_collateral queued in jBatch (R→C $200K + fee $5)`);
+    console.log(`✅ deposit_collateral queued in jBatch (R→C $200K)`);
 
-    // STEP 25: Hub broadcasts jBatch via j_broadcast
-    console.log('\n🏦 FRAME 25: Hub broadcasts jBatch to J-Machine');
+    // STEP 24: Hub broadcasts jBatch via j_broadcast
+    console.log('\n🏦 FRAME 24: Hub broadcasts jBatch to J-Machine');
 
     await process(env, [{
       entityId: hub.id,
@@ -1290,7 +1240,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     console.log(`✅ j_broadcast sent`);
 
-    await pushSnapshot(env, 'Frame 25: R→C batch in J-mempool', {
+    await pushSnapshot(env, 'Frame 24: R→C batch in J-mempool', {
       title: 'J-Mempool: R→C Deposit',
       what: 'Hub deposits $200K reserve → H-B collateral. In J-mempool, awaiting block.',
       why: 'R→C is unilateral (Hub giving) — no settlement signature needed.',
@@ -1301,8 +1251,8 @@ export async function lockAhb(env: Env): Promise<void> {
       ]
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
-    // STEP 26: Advance time and process J-mempool
-    console.log('\n🏦 FRAME 26: Processing J-block...');
+    // STEP 25: Advance time and process J-mempool
+    console.log('\n🏦 FRAME 25: Processing J-block...');
 
     env.timestamp += 350;
     console.log(`   Time advanced: +350ms (> 300ms blockDelayMs)`);
@@ -1334,22 +1284,14 @@ export async function lockAhb(env: Env): Promise<void> {
     }
     console.log(`✅ ASSERT: Hub reserve ${hubPreReserve} → ${hubPostReserve} (-$200K) ✓`);
 
-    // ✅ ASSERT: Quote cleared after execution
-    const bobAccFinal = hubRepRebal.state.accounts.get(bob.id);
-    if (bobAccFinal?.activeRebalanceQuote) {
-      throw new Error(`❌ ASSERT FAIL: activeRebalanceQuote should be cleared after deposit`);
-    }
-    console.log(`✅ ASSERT: Quote cleared after deposit ✓`);
-
-    await pushSnapshot(env, 'Frame 26: Rebalancing complete (quote flow)', {
-      title: 'Rebalancing Complete (Quote Flow)',
-      what: 'Hub deposited $200K from reserve to H-B collateral. Fee: $5.',
-      why: 'Quote-based rebalancing: user sets policy, hub quotes, auto-accept, R→C deposit.',
-      tradfiParallel: 'Like prime brokerage margin top-up with pre-agreed fee schedule.',
+    await pushSnapshot(env, 'Frame 25: Rebalancing complete', {
+      title: 'Rebalancing Complete',
+      what: 'Hub deposited $200K from reserve to H-B collateral.',
+      why: 'Prepaid model rebalancing: user policy gates requests, hub executes R→C.',
+      tradfiParallel: 'Like a margin top-up execution after policy trigger.',
       keyMetrics: [
         `H-B collateral: $0 → $${Number(expectedHBCollateral) / 1e18}K`,
         `Hub reserve: -$200K`,
-        'Fee: $5 (bilateral, not on-chain)',
         'Total Risk: reduced',
       ]
     }, { expectedSolvency: TOTAL_SOLVENCY });

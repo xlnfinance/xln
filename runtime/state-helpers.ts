@@ -621,6 +621,7 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   const result: AccountMachine = {
     leftEntity: account.leftEntity,
     rightEntity: account.rightEntity,
+    status: account.status ?? 'active',
     mempool: [...account.mempool],
     currentFrame: {
       ...account.currentFrame,

@@ -17,7 +17,7 @@
 import type { Env, EntityInput, EntityReplica, Delta } from '../types';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
 import type { JAdapter } from '../jadapter/types';
-import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD } from './helpers';
+import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain } from './helpers';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta, isLeft } from '../account-utils';
@@ -126,6 +126,14 @@ function assert(condition: unknown, message: string, env?: Env): asserts conditi
  */
 async function processJEvents(env: Env): Promise<void> {
   const process = await getProcess();
+  try {
+    const jadapter = getScenarioJAdapter(env);
+    if (typeof jadapter.pollNow === 'function') {
+      await jadapter.pollNow();
+    }
+  } catch {
+    // Scenario may call this before adapter is attached.
+  }
   // Check if j-watcher queued any events
   const pendingInputs = env.runtimeInput?.entityInputs || [];
   if (!env.quietRuntimeLogs) {
@@ -146,6 +154,35 @@ async function processJEvents(env: Env): Promise<void> {
       console.log(`   ⚠️ EMPTY queue - no j-events to process`);
     }
   }
+}
+
+async function maybeApproveSettlement(
+  env: Env,
+  approver: { id: string; signer: string; name: string },
+  counterpartyId: string,
+): Promise<boolean> {
+  const [, approverRep] = findReplica(env, approver.id);
+  const account = approverRep.state.accounts.get(counterpartyId);
+  const workspace = account?.settlementWorkspace;
+  if (workspace) {
+    const approverIsLeft = isLeft(approver.id, counterpartyId);
+    const myHanko = approverIsLeft ? workspace.leftHanko : workspace.rightHanko;
+    if (myHanko) {
+      console.log(`ℹ️ ${approver.name} already signed settlement with ${counterpartyId.slice(-4)} (skip duplicate settle_approve)`);
+      return false;
+    }
+  }
+
+  const process = await getProcess();
+  await process(env, [{
+    entityId: approver.id,
+    signerId: approver.signer,
+    entityTxs: [{
+      type: 'settle_approve',
+      data: { counterpartyEntityId: counterpartyId },
+    }],
+  }]);
+  return true;
 }
 
 async function processUntil(
@@ -431,7 +468,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // BrowserVM handle (for mode-specific calls — null in RPC mode)
     const browserVM = jadapter.getBrowserVM();
-    const vm = browserVM as unknown as RequiredBrowserVM;
+    const vm = browserVM as unknown as (RequiredBrowserVM | null);
 
     const arrakis = {
       name: 'AHB Demo',
@@ -578,12 +615,14 @@ export async function ahb(env: Env): Promise<void> {
     console.log('\n💳 Prefunding signer wallets (1M each token)...');
     for (const entity of entities) {
       const { wallet } = ensureSignerWallet(entity.signer);
-      await vm.fundSignerWallet(wallet.address, SIGNER_PREFUND);
+      if (vm?.fundSignerWallet) {
+        await vm.fundSignerWallet(wallet.address, SIGNER_PREFUND);
+      }
       console.log(`✅ Prefunded ${entity.name} signer ${entity.signer} (${wallet.address.slice(0, 10)}...)`);
     }
 
     const hubWalletInfo = ensureSignerWallet(hub.signer);
-    if (HUB_INITIAL_RESERVE > SIGNER_PREFUND) {
+    if (HUB_INITIAL_RESERVE > SIGNER_PREFUND && vm?.fundSignerWallet) {
       await vm.fundSignerWallet(hubWalletInfo.wallet.address, HUB_INITIAL_RESERVE);
       console.log(`✅ Hub signer topped up to ${HUB_INITIAL_RESERVE / ONE_TOKEN} tokens`);
     }
@@ -616,23 +655,28 @@ export async function ahb(env: Env): Promise<void> {
     // This ensures fresh state on every page load/HMR
 
     // REAL deposit flow: ERC20 approve + externalTokenToReserve
-    usdcTokenAddress = vm.getTokenAddress('USDC');
-    if (!usdcTokenAddress) {
-      throw new Error('USDC token not found in BrowserVM registry');
+    if (vm) {
+      usdcTokenAddress = vm.getTokenAddress('USDC');
+      if (!usdcTokenAddress) {
+        throw new Error('USDC token not found in BrowserVM registry');
+      }
+      await vm.approveErc20(
+        hubWalletInfo.privateKey,
+        usdcTokenAddress,
+        vm.getDepositoryAddress(),
+        HUB_INITIAL_RESERVE
+      );
+      const mintEvents = await vm.externalTokenToReserve(
+        hubWalletInfo.privateKey,
+        hub.id,
+        usdcTokenAddress,
+        HUB_INITIAL_RESERVE
+      );
+      console.log(`✅ Deposited $10M USDC to Hub via ERC20 (events: ${mintEvents.length})`);
+    } else {
+      await jadapter.debugFundReserves(hub.id, USDC_TOKEN_ID, HUB_INITIAL_RESERVE);
+      console.log('✅ Deposited $10M USDC to Hub via debugFundReserves (RPC mode)');
     }
-    await vm.approveErc20(
-      hubWalletInfo.privateKey,
-      usdcTokenAddress,
-      vm.getDepositoryAddress(),
-      HUB_INITIAL_RESERVE
-    );
-    const mintEvents = await vm.externalTokenToReserve(
-      hubWalletInfo.privateKey,
-      hub.id,
-      usdcTokenAddress,
-      HUB_INITIAL_RESERVE
-    );
-    console.log(`✅ Deposited $10M USDC to Hub via ERC20 (events: ${mintEvents.length})`);
 
     // Feed mint events back to entity (ReserveUpdated)
     await processJEvents(env);
@@ -1543,14 +1587,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // Step 2: Hub receives proposal, then approves (counterparty of proposer)
     await process(env); // Hub processes Alice's proposal
-    await process(env, [{
-      entityId: hub.id,
-      signerId: hub.signer,
-      entityTxs: [{
-        type: 'settle_approve',
-        data: { counterpartyEntityId: alice.id }
-      }]
-    }]);
+    await maybeApproveSettlement(env, hub, alice.id);
 
     // Step 3: Alice receives Hub's approval, then executes
     await process(env); // Alice processes Hub's approval
@@ -1594,11 +1631,8 @@ export async function ahb(env: Env): Promise<void> {
       }]
     }]);
 
-    // Wait for J-Machine to execute settlement batch
-    await process(env);
-
-    // Process j_events from BrowserVM (AccountSettled events)
-    await processJEvents(env);
+    // Wait for batch mining + watcher delivery + bilateral apply (RPC/BVM parity)
+    await syncChain(env, 5);
 
     // Frame 23: Process any pending outputs
     console.log('\n🏦 FRAME 23: Alice-Hub Settlement completes');
@@ -1678,14 +1712,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // Step 2: Bob receives proposal, then approves (counterparty of proposer)
     await process(env); // Bob processes Hub's proposal
-    await process(env, [{
-      entityId: bob.id,
-      signerId: bob.signer,
-      entityTxs: [{
-        type: 'settle_approve',
-        data: { counterpartyEntityId: hub.id }
-      }]
-    }]);
+    await maybeApproveSettlement(env, bob, hub.id);
 
     // Step 3: Hub receives Bob's approval, then executes
     await process(env); // Hub processes Bob's approval
@@ -1729,11 +1756,8 @@ export async function ahb(env: Env): Promise<void> {
       }]
     }]);
 
-    // Wait for J-Machine to execute settlement batch
-    await process(env);
-
-    // Process j_events from BrowserVM (AccountSettled events)
-    await processJEvents(env);
+    // Wait for batch mining + watcher delivery + bilateral apply (RPC/BVM parity)
+    await syncChain(env, 5);
 
     // Frame 25: Process any pending outputs
     console.log('\n🏦 FRAME 25: Hub-Bob Settlement completes');
@@ -2056,14 +2080,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // Step 2: Bob receives and approves (counterparty of proposer)
     await process(env);
-    await process(env, [{
-      entityId: bob.id,
-      signerId: bob.signer,
-      entityTxs: [{
-        type: 'settle_approve',
-        data: { counterpartyEntityId: hub.id }
-      }]
-    }]);
+    await maybeApproveSettlement(env, bob, hub.id);
 
     // Step 3: Hub receives Bob's approval, then executes
     await process(env);
@@ -2199,7 +2216,7 @@ export async function ahb(env: Env): Promise<void> {
     assert(hubReserveAfterDrain === 0n, `PHASE 7: Hub reserve not fully drained (${hubReserveAfterDrain})`);
   }
 
-  if (vm.setDefaultDisputeDelay) {
+  if (vm?.setDefaultDisputeDelay) {
     await vm.setDefaultDisputeDelay(3);
   }
 
@@ -2362,10 +2379,14 @@ export async function ahb(env: Env): Promise<void> {
   // 7) Verify dispute cleared on-chain and results correct
   console.log('✅ STEP 7: Verify dispute finalized on-chain...');
   const zeroHash = '0x' + '0'.repeat(64);
-  const disputeFinalInfo = await vm.getAccountInfo(bob.id, hub.id);
-  assert(disputeFinalInfo.disputeHash === zeroHash, 'PHASE 7: Dispute hash not cleared after finalize');
-  assert(disputeFinalInfo.disputeTimeout === 0n, 'PHASE 7: Dispute timeout not cleared');
-  console.log(`   Dispute cleared on-chain ✅`);
+  if (vm?.getAccountInfo) {
+    const disputeFinalInfo = await vm.getAccountInfo(bob.id, hub.id);
+    assert(disputeFinalInfo.disputeHash === zeroHash, 'PHASE 7: Dispute hash not cleared after finalize');
+    assert(disputeFinalInfo.disputeTimeout === 0n, 'PHASE 7: Dispute timeout not cleared');
+    console.log(`   Dispute cleared on-chain ✅`);
+  } else {
+    console.log('   ℹ️ Skipped BrowserVM-only on-chain dispute hash assertions (RPC mode)');
+  }
 
   const [, bobFinalCheck] = findReplica(env, bob.id);
   const bobAccountFinal = bobFinalCheck.state.accounts.get(hub.id);
@@ -2427,18 +2448,50 @@ export async function ahb(env: Env): Promise<void> {
   // PHASE 8: DISPUTE EDGE CASES (counter-dispute + early finalize failure)
   // ============================================================================
   console.log('\n⚖️ PHASE 8: Dispute edge cases (counter-dispute + early finalize)');
+  const reopenBobHub = async (label: string) => {
+    await process(env, [{
+      entityId: bob.id,
+      signerId: bob.signer,
+      entityTxs: [{
+        type: 'reopenDisputedAccount',
+        data: { counterpartyEntityId: hub.id },
+      }],
+    }]);
+    await processUntil(env, () => {
+      const [, bobRep] = findReplica(env, bob.id);
+      const [, hubRep] = findReplica(env, hub.id);
+      const bobAcc = bobRep.state.accounts.get(hub.id);
+      const hubAcc = hubRep.state.accounts.get(bob.id);
+      return Boolean(
+        bobAcc &&
+        hubAcc &&
+        bobAcc.status === 'active' &&
+        hubAcc.status === 'active' &&
+        !bobAcc.pendingFrame &&
+        !hubAcc.pendingFrame,
+      );
+    }, 20, `reopen Bob-Hub (${label})`);
+  };
+
+  await reopenBobHub('phase8');
+  const edgeDisputeStartTx = {
+    type: 'disputeStart' as const,
+    data: {
+      counterpartyEntityId: hub.id,
+      description: 'Edge-case dispute start',
+    },
+  };
+
   // Start a fresh dispute (Bob starts again)
   await process(env, [{
     entityId: bob.id,
     signerId: bob.signer,
-    entityTxs: [{
-      type: 'disputeStart',
-      data: {
-        counterpartyEntityId: hub.id,
-        description: 'Edge-case dispute start'
-      }
-    }]
+    entityTxs: [edgeDisputeStartTx]
   }]);
+
+  let [, bobAfterEdgeStartAttempt] = findReplica(env, bob.id);
+  let edgeDisputeStarts = bobAfterEdgeStartAttempt.state.jBatchState?.batch.disputeStarts.length ?? 0;
+  assert(edgeDisputeStarts > 0, 'PHASE 8: disputeStart not enqueued after reopen');
 
   await process(env, [{
     entityId: bob.id,
@@ -2462,7 +2515,7 @@ export async function ahb(env: Env): Promise<void> {
 
   // Starter tries to finalize before timeout (should fail)
   console.log('🧪 STEP 8a: Bob attempts early finalize (should fail)...');
-  const edgeInfoBeforeFail = await vm.getAccountInfo(bob.id, hub.id);
+  const edgeInfoBeforeFail = vm?.getAccountInfo ? await vm.getAccountInfo(bob.id, hub.id) : null;
   const jRepEarly = env.jReplicas?.get('AHB Demo');
   if (!jRepEarly) {
     throw new Error('PHASE 8: J-Machine not found for early finalize check');
@@ -2476,18 +2529,22 @@ export async function ahb(env: Env): Promise<void> {
   if (senderIsCounterparty) {
     throw new Error('PHASE 8: early finalize test expects starter (not counterparty)');
   }
-  if (edgeInfoBeforeFail.disputeTimeout === 0n) {
-    throw new Error('PHASE 8: disputeTimeout missing on-chain (early finalize check)');
-  }
-  if (currentBlock >= edgeInfoBeforeFail.disputeTimeout) {
-    throw new Error(`PHASE 8: expected pre-timeout (block=${currentBlock}, timeout=${edgeInfoBeforeFail.disputeTimeout})`);
+  if (edgeInfoBeforeFail) {
+    if (edgeInfoBeforeFail.disputeTimeout === 0n) {
+      throw new Error('PHASE 8: disputeTimeout missing on-chain (early finalize check)');
+    }
+    if (currentBlock >= edgeInfoBeforeFail.disputeTimeout) {
+      throw new Error(`PHASE 8: expected pre-timeout (block=${currentBlock}, timeout=${edgeInfoBeforeFail.disputeTimeout})`);
+    }
   }
   console.log('✅ Early finalize blocked by preflight (pre-timeout, starter) — skipping broadcast');
 
   await processJEvents(env);
 
-  const edgeInfoAfterFail = await vm.getAccountInfo(bob.id, hub.id);
-  assert(edgeInfoAfterFail.disputeHash !== zeroHash, 'PHASE 8: dispute cleared by early finalize (expected fail)');
+  const edgeInfoAfterFail = vm?.getAccountInfo ? await vm.getAccountInfo(bob.id, hub.id) : null;
+  if (edgeInfoAfterFail) {
+    assert(edgeInfoAfterFail.disputeHash !== zeroHash, 'PHASE 8: dispute cleared by early finalize (expected fail)');
+  }
   const [, bobEdgeAfterFail] = findReplica(env, bob.id);
   assert(bobEdgeAfterFail.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute cleared after early finalize');
   console.log('✅ Early finalize failed as expected (dispute still active)');
@@ -2555,8 +2612,36 @@ export async function ahb(env: Env): Promise<void> {
   // NOTE: Optional because we inherit the sync gap from PHASE 7 dispute (collateral not synced)
   checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 COUNTER-DISPUTE-BUMP', true /* optional - inherited sync gap */);
 
-  // Non-starter finalizes with counter-dispute signature (no timeout)
-  console.log('⚖️ STEP 8b: Hub counter-dispute finalize (pre-timeout)...');
+  // Non-starter finalizes unilaterally only AFTER timeout (protocol invariant).
+  const [, hubReplicaAfterBump] = findReplica(env, hub.id);
+  const hubAccountAfterBump = hubReplicaAfterBump.state.accounts.get(bob.id);
+  assert(hubAccountAfterBump?.activeDispute, 'PHASE 8: hub activeDispute missing before timeout wait');
+  const targetCounterTimeout = hubAccountAfterBump.activeDispute.disputeTimeout;
+  console.log(`⏳ STEP 8b: Waiting counter-dispute timeout (target block ${targetCounterTimeout})...`);
+  const { createEmptyBatch: createEmptyBatchPhase8 } = await import('../j-batch');
+  while (true) {
+    const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
+    if (currentBlock >= targetCounterTimeout) {
+      console.log(`✅ Counter-dispute timeout reached at block ${currentBlock}`);
+      break;
+    }
+    const emptyBatch = createEmptyBatchPhase8();
+    const { encodeJBatch, computeBatchHankoHash } = await import('../j-batch');
+    const encodedBatch = encodeJBatch(emptyBatch);
+    const chainId = BigInt(jadapter.chainId);
+    const depositoryAddress = jadapter.addresses.depository;
+    const currentNonce = await jadapter.getEntityNonce(hub.id);
+    const nextNonce = currentNonce + 1n;
+    const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
+    const { signHashesAsSingleEntity } = await import('../hanko-signing');
+    const hankos = await signHashesAsSingleEntity(env, hub.id, hub.signer, [batchHash]);
+    const hankoData = hankos[0];
+    if (!hankoData) throw new Error('PHASE 8: failed to build empty batch hanko');
+    await jadapter.processBatch(encodedBatch, hankoData, nextNonce);
+    await process(env);
+  }
+
+  console.log('⚖️ STEP 8c: Hub counter-dispute finalize (post-timeout)...');
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,
@@ -2586,139 +2671,19 @@ export async function ahb(env: Env): Promise<void> {
 
   await processJEvents(env);
 
-  const edgeInfoAfterCounter = await vm.getAccountInfo(bob.id, hub.id);
-  assert(edgeInfoAfterCounter.disputeHash === zeroHash, 'PHASE 8: dispute not cleared after counter-dispute');
+  const edgeInfoAfterCounter = vm?.getAccountInfo ? await vm.getAccountInfo(bob.id, hub.id) : null;
+  if (edgeInfoAfterCounter) {
+    assert(edgeInfoAfterCounter.disputeHash === zeroHash, 'PHASE 8: dispute not cleared after counter-dispute');
+  }
   const [, bobEdgeFinal] = findReplica(env, bob.id);
   assert(!bobEdgeFinal.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute not cleared after counter-dispute');
-  console.log('✅ Counter-dispute finalized before timeout (non-starter path)');
+  console.log('✅ Counter-dispute finalized after timeout (non-starter path)');
 
   // H10 AUDIT FIX: Verify solvency AFTER counter-dispute finalized
   // NOTE: Optional because we inherit the sync gap from PHASE 7 dispute (collateral not synced)
   checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 POST-COUNTER-DISPUTE', true /* optional - inherited sync gap */);
 
-  // ============================================================================
-  // H5 AUDIT FIX: Test cooperative dispute (both parties agree to close immediately)
-  // ============================================================================
-  console.log('\n🤝 PHASE 8c: Cooperative dispute test (immediate close without timeout)');
-
-  // Start a fresh dispute for cooperative close test
-  await process(env, [{
-    entityId: bob.id,
-    signerId: bob.signer,
-    entityTxs: [{
-      type: 'disputeStart',
-      data: {
-        counterpartyEntityId: hub.id,
-        description: 'H5 audit test: cooperative dispute'
-      }
-    }]
-  }]);
-
-  await process(env, [{
-    entityId: bob.id,
-    signerId: bob.signer,
-    entityTxs: [{ type: 'j_broadcast', data: {} }]
-  }]);
-
-  await processUntil(env, () => {
-    const jRep = env.jReplicas?.get('AHB Demo');
-    return jRep ? jRep.mempool.length === 0 : false;
-  }, 40, 'J-machine cooperative dispute start');
-
-  await processJEvents(env);
-
-  const [, bobCoopCheck] = findReplica(env, bob.id);
-  const bobCoopAccount = bobCoopCheck.state.accounts.get(hub.id);
-  assert(bobCoopAccount?.activeDispute, 'H5: activeDispute not set for cooperative test');
-  console.log(`   Dispute started for cooperative close test (timeout block: ${bobCoopAccount.activeDispute.disputeTimeout})`);
-
-  // Bob calls disputeFinalize with cooperative: true
-  // NOTE: This exercises the cooperative code path at the entity layer
-  // Cooperative disputes require BOTH parties to sign, so j_broadcast will fail preflight
-  console.log('   Bob finalizes with cooperative: true...');
-  await process(env, [{
-    entityId: bob.id,
-    signerId: bob.signer,
-    entityTxs: [{
-      type: 'disputeFinalize',
-      data: {
-        counterpartyEntityId: hub.id,
-        cooperative: true, // H5 AUDIT FIX: Test the cooperative flag!
-        description: 'Cooperative dispute finalize'
-      }
-    }]
-  }]);
-
-  // Verify the cooperative flag was set in the batch
-  const [, bobAfterCoopFinalize] = findReplica(env, bob.id);
-  const coopFinal = bobAfterCoopFinalize.state.jBatchState?.batch.disputeFinalizations[0];
-  assert(coopFinal?.cooperative === true, 'H5: cooperative flag not set in batch');
-  console.log('   ✅ Cooperative flag correctly set in disputeFinalization batch');
-
-  // NOTE: We intentionally skip j_broadcast because cooperative disputes require
-  // both parties to sign, which isn't implemented yet. The batch preflight would
-  // correctly reject with "cooperative dispute finalize missing sig".
-  // This test verifies the entity-layer cooperative code path is exercised.
-  console.log('   ⚠️  Skipping j_broadcast: cooperative disputes require dual-sig (not implemented)');
-  console.log('   H5: Cooperative dispute code path exercised (entity layer verified)');
-
-  // Clean up: use unilateral finalize to clear the dispute
-  console.log('   Cleaning up with unilateral finalize...');
-  // First clear the cooperative finalization from batch
-  bobAfterCoopFinalize.state.jBatchState!.batch.disputeFinalizations = [];
-
-  // Wait for timeout and finalize unilaterally
-  const [, bobCoopTimeout] = findReplica(env, bob.id);
-  const coopTimeoutBlock = bobCoopTimeout.state.accounts.get(hub.id)?.activeDispute?.disputeTimeout || 100n;
-  while (true) {
-    const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
-    if (currentBlock >= coopTimeoutBlock) break;
-    const { encodeJBatch, computeBatchHankoHash } = await import('../j-batch');
-    const { signHashesAsSingleEntity } = await import('../hanko-signing');
-    const emptyBatch = createEmptyBatch();
-    const encodedBatch = encodeJBatch(emptyBatch);
-    const chainId = BigInt(jadapter.chainId);
-    const depositoryAddress = jadapter.addresses.depository;
-    const currentNonce = await jadapter.getEntityNonce(bob.id);
-    const nextNonce = currentNonce + 1n;
-    const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
-    const hankos = await signHashesAsSingleEntity(env, bob.id, bob.signer, [batchHash]);
-    if (hankos[0]) {
-      await jadapter.processBatch(encodedBatch, hankos[0], nextNonce);
-    }
-    await process(env);
-  }
-
-  await process(env, [{
-    entityId: bob.id,
-    signerId: bob.signer,
-    entityTxs: [{
-      type: 'disputeFinalize',
-      data: {
-        counterpartyEntityId: hub.id,
-        cooperative: false, // Unilateral to clean up
-        description: 'Cleanup after cooperative test'
-      }
-    }]
-  }]);
-
-  await process(env, [{
-    entityId: bob.id,
-    signerId: bob.signer,
-    entityTxs: [{ type: 'j_broadcast', data: {} }]
-  }]);
-
-  await processUntil(env, () => {
-    const jRep = env.jReplicas?.get('AHB Demo');
-    return jRep ? jRep.mempool.length === 0 : false;
-  }, 40, 'J-machine cleanup dispute finalize');
-
-  await processJEvents(env);
-
-  const [, bobCoopFinal] = findReplica(env, bob.id);
-  const bobCoopAccountFinal = bobCoopFinal.state.accounts.get(hub.id);
-  assert(!bobCoopAccountFinal?.activeDispute, 'H5: cleanup failed - activeDispute not cleared');
-  console.log('✅ H5: Cooperative dispute test complete (code path verified, cleanup done)');
+  console.log('ℹ️ PHASE 8d skipped: no cooperative disputeFinalize path in unilateral-only protocol.');
 
   if (AHB_STRESS) {
     const stressIters = Number.isFinite(AHB_STRESS_ITERS) && AHB_STRESS_ITERS > 0 ? AHB_STRESS_ITERS : 100;
@@ -2840,7 +2805,9 @@ export async function ahb(env: Env): Promise<void> {
     }
 
     const { wallet: carolWallet } = ensureSignerWallet(carol.signer);
-    await vm.fundSignerWallet(carolWallet.address, SIGNER_PREFUND);
+    if (vm?.fundSignerWallet) {
+      await vm.fundSignerWallet(carolWallet.address, SIGNER_PREFUND);
+    }
     console.log(`✅ Prefunded ${carol.name} signer ${carol.signer} (${carolWallet.address.slice(0, 10)}...)`);
 
     snap(env, 'Carol Joins (Cooperative Close Demo)', {
@@ -3025,14 +2992,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // Step 2: Hub receives proposal, then approves (counterparty of proposer)
     await process(env);
-    await process(env, [{
-      entityId: hub.id,
-      signerId: hub.signer,
-      entityTxs: [{
-        type: 'settle_approve',
-        data: { counterpartyEntityId: carol.id }
-      }]
-    }]);
+    await maybeApproveSettlement(env, hub, carol.id);
 
     // Step 3: Carol receives Hub's approval, then executes
     await process(env);

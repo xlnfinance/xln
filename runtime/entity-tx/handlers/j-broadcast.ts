@@ -83,6 +83,9 @@ export async function handleJBroadcast(
   const jurisdictionName = jurisdiction.name || env.activeJurisdiction || 'default';
 
   console.log(`📤 j_broadcast: ${entityState.entityId.slice(-4)} | ${batchSize} ops | nonce=${nextNonce} | hash=${batchHash.slice(0, 10)}...`);
+  console.log(
+    `[REB][3][J_BROADCAST_SUBMIT] entity=${entityState.entityId.slice(-8)} nonce=${nextNonce} ops=${opCount} hash=${batchHash}`,
+  );
 
   // ── Create JTx WITHOUT hanko (attached post-commit by entity-consensus) ──
   const jTx: JTx = {

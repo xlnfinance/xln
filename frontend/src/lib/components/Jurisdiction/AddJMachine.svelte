@@ -2,7 +2,7 @@
   AddJMachine.svelte - Configure and create a new J-Machine (Jurisdiction)
 
   Supports:
-  - BrowserVM mode (local simulation, chainId 1337)
+  - BrowserVM mode (local simulation, chainId 31337)
   - RPC mode (real chain via RPC URLs)
   - Network presets from networks.ts
   - Custom RPC URLs (textarea, one per line)
@@ -20,7 +20,7 @@
   // Form state
   let mode: 'browservm' | 'rpc' = 'browservm';
   let selectedNetworkId: number | 'custom' = 'custom';
-  let customChainId = 1337;
+  let customChainId = 31337;
   let rpcTextarea = '';
   let name = '';
   let isCreating = false;

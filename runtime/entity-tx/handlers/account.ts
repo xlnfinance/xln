@@ -108,6 +108,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     accountMachine = {
       leftEntity,
       rightEntity,
+      status: 'active',
       mempool: [],
       currentFrame: {
         height: 0,
@@ -141,8 +142,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       },
       frameHistory: [],
       pendingWithdrawals: new Map(),
-      requestedRebalance: new Map(), // Phase 2: C→R withdrawal tracking
-      requestedRebalanceFeeState: new Map(), // Deferred fee charged on fulfilled R→C only
+      requestedRebalance: new Map(), // request_collateral target amounts (prepaid by requester)
+      requestedRebalanceFeeState: new Map(), // Prepaid fee metadata + scheduling hints
       rebalancePolicy: new Map(), // Rebalance: per-token soft/hard/maxFee
       locks: new Map(), // HTLC: Empty locks map
       swapOffers: new Map(), // Swap: Empty offers map
@@ -270,31 +271,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             }
           }
 
-          // === J-EVENT BILATERAL CONSENSUS ===
+          // j_event_claim is fully handled in account-consensus/processAccountTx on commit.
+          // Re-processing here duplicates observations and creates stale leftovers.
           if (accountTx.type === 'j_event_claim') {
-            const { jHeight, jBlockHash, events, observedAt } = accountTx.data;
-            console.log(`📥 j_event_claim: Counterparty claims jHeight=${jHeight}`);
-
-            // Determine which side counterparty is
-            const { iAmLeft: weAreLeft, counterparty } = getAccountPerspective(accountMachine, newState.entityId);
-            const theyAreLeft = !weAreLeft;
-
-            const obs = { jHeight, jBlockHash, events, observedAt };
-
-            // Store THEIR observation in appropriate array
-            if (theyAreLeft) {
-              accountMachine.leftJObservations.push(obs);
-              console.log(`   📝 Stored LEFT obs from counterparty (${accountMachine.leftJObservations.length} total)`);
-            } else {
-              accountMachine.rightJObservations.push(obs);
-              console.log(`   📝 Stored RIGHT obs from counterparty (${accountMachine.rightJObservations.length} total)`);
-            }
-
-            // Try finalize now that we have counterparty's observation
-            const { tryFinalizeAccountJEvents } = await import('../j-events');
-            tryFinalizeAccountJEvents(accountMachine, counterparty, { timestamp: newState.timestamp });
-
-            continue; // Move to next tx
+            continue;
           }
 
           if (accountTx.type === 'swap_resolve' || accountTx.type === 'swap_cancel') {

@@ -16,7 +16,7 @@
  */
 
 import type { Env, EntityInput } from '../types';
-import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
+import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
 import { findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
 
@@ -146,16 +146,24 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   // ============================================================================
-  // SETUP: BrowserVM + J-Machine
+  // SETUP: JAdapter + J-Machine
   // ============================================================================
-  console.log('🏛️  Setting up BrowserVM J-Machine...');
+  console.log('🏛️  Setting up JAdapter J-Machine...');
 
-  const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
+  const jMode = getJAdapterMode();
+  const jadapter = await ensureJAdapter(env, jMode);
   const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
-  createJReplica(env, 'Market', depositoryAddress, J_MACHINE_POSITION); // Match ahb.ts positioning
-  const jurisdiction = createJurisdictionConfig('Market', depositoryAddress);
-  console.log('✅ BrowserVM J-Machine created\n');
+  const jReplica = createJReplica(env, 'Market', jadapter.addresses.depository, J_MACHINE_POSITION); // Match ahb.ts positioning
+  (jReplica as any).jadapter = jadapter;
+  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
+  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+  (jReplica as any).contracts = {
+    depository: jadapter.addresses.depository,
+    entityProvider: jadapter.addresses.entityProvider,
+    account: jadapter.addresses.account,
+    deltaTransformer: jadapter.addresses.deltaTransformer,
+  };
+  console.log('✅ JAdapter J-Machine created\n');
 
   // ============================================================================
   // SETUP: Create 10 entities (3 hubs + 7 traders)
@@ -814,16 +822,24 @@ export async function swapMarketStress(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   // ============================================================================
-  // SETUP: BrowserVM + J-Machine + Hub
+  // SETUP: JAdapter + J-Machine + Hub
   // ============================================================================
   console.log('🏛️  Setting up stress test environment...');
 
-  const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
+  const jMode = getJAdapterMode();
+  const jadapter = await ensureJAdapter(env, jMode);
   const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
-  createJReplica(env, 'StressTest', depositoryAddress, J_MACHINE_POSITION);
-  const jurisdiction = createJurisdictionConfig('StressTest', depositoryAddress);
-  console.log('✅ BrowserVM J-Machine created\n');
+  const jReplica = createJReplica(env, 'StressTest', jadapter.addresses.depository, J_MACHINE_POSITION);
+  (jReplica as any).jadapter = jadapter;
+  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
+  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+  (jReplica as any).contracts = {
+    depository: jadapter.addresses.depository,
+    entityProvider: jadapter.addresses.entityProvider,
+    account: jadapter.addresses.account,
+    deltaTransformer: jadapter.addresses.deltaTransformer,
+  };
+  console.log('✅ JAdapter J-Machine created\n');
 
   // Create 1 hub + 10 traders
   const hub = { name: 'Hub', id: '0x' + '1'.padStart(64, '0'), signer: '1' };

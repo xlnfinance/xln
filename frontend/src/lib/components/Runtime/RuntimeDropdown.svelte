@@ -6,6 +6,8 @@
   import { createEventDispatcher } from 'svelte';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import { activeRuntime, allRuntimes, vaultOperations } from '$lib/stores/vaultStore';
+  import { p2pState } from '$lib/stores/xlnStore';
+  import { settings } from '$lib/stores/settingsStore';
 
   export let allowAdd = false;
   export let allowDelete = false;
@@ -16,6 +18,8 @@
 
   $: runtimeEntries = $allRuntimes;
   $: currentRuntime = $activeRuntime;
+  $: connStatus = $p2pState.connected ? 'connected' : $p2pState.reconnect ? 'reconnecting' : 'disconnected';
+  $: relayUrl = $settings.relayUrl;
 
   function selectRuntime(id: string) {
     vaultOperations.selectRuntime(id);
@@ -47,6 +51,7 @@
 
 <Dropdown bind:open={isOpen} minWidth={180} maxWidth={260}>
   <span slot="trigger" class="trigger-content">
+    <span class="conn-dot {connStatus}"></span>
     <span class="trigger-icon">🧭</span>
     <span class="trigger-text">{runtimeLabel(currentRuntime)}</span>
     <span class="trigger-arrow" class:open={isOpen}>▼</span>
@@ -66,6 +71,7 @@
           class:selected={runtime.id === currentRuntime?.id}
           on:click={() => selectRuntime(runtime.id)}
         >
+          <span class="conn-dot {runtime.id === currentRuntime?.id ? connStatus : 'inactive'}"></span>
           <span class="menu-label" title={signerAddr}>{displayName}</span>
           <span class="menu-meta">{runtime.signers.length} signers</span>
           {#if allowDelete}
@@ -87,6 +93,26 @@
         <span class="menu-label">{addLabel}</span>
       </button>
     {/if}
+
+    <!-- Relay Status -->
+    <div class="menu-divider"></div>
+    <div class="status-section">
+      <div class="status-row">
+        <span class="conn-dot {connStatus}"></span>
+        <span class="status-label">Relay</span>
+        <span class="status-value">{connStatus}</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">URL</span>
+        <span class="status-value url" title={relayUrl}>{relayUrl}</span>
+      </div>
+      {#if $p2pState.queue.totalMessages > 0}
+        <div class="status-row">
+          <span class="status-label">Queue</span>
+          <span class="status-value">{$p2pState.queue.totalMessages} msgs</span>
+        </div>
+      {/if}
+    </div>
   </div>
 </Dropdown>
 
@@ -173,23 +199,18 @@
     width: 20px;
     height: 20px;
     padding: 0;
-    background: rgba(255, 59, 48, 0.1);
-    border: 1px solid rgba(255, 59, 48, 0.3);
+    background: rgba(255, 59, 48, 0.08);
+    border: 1px solid rgba(255, 59, 48, 0.2);
     border-radius: 3px;
-    color: rgba(255, 59, 48, 0.8);
+    color: rgba(255, 59, 48, 0.5);
     font-size: 16px;
     line-height: 1;
     cursor: pointer;
-    opacity: 0;
     transition: all 0.15s;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-  }
-
-  .menu-item:hover .delete-btn {
-    opacity: 1;
   }
 
   .delete-btn:hover {
@@ -214,5 +235,68 @@
     text-align: center;
     color: #666;
     font-size: 12px;
+  }
+
+  .conn-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .conn-dot.connected {
+    background: #4ade80;
+    box-shadow: 0 0 4px rgba(74, 222, 128, 0.5);
+  }
+
+  .conn-dot.reconnecting {
+    background: #fbbf24;
+    animation: conn-pulse 2s infinite;
+  }
+
+  .conn-dot.disconnected {
+    background: #ef4444;
+    box-shadow: 0 0 4px rgba(239, 68, 68, 0.3);
+  }
+
+  .conn-dot.inactive {
+    background: #3f3f46;
+  }
+
+  @keyframes conn-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .status-section {
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .status-label {
+    color: #666;
+    min-width: 36px;
+  }
+
+  .status-value {
+    color: #a1a1aa;
+    font-family: 'SF Mono', monospace;
+    font-size: 10px;
+  }
+
+  .status-value.url {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 160px;
   }
 </style>

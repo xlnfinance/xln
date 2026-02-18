@@ -16,7 +16,7 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
   constructor(browserVM: any) {
     super();
     this.browserVM = browserVM;
-    const chainId = browserVM.getChainId?.() ?? 1337;
+    const chainId = browserVM.getChainId?.() ?? 31337;
     this._network = new ethers.Network('browservm', chainId);
   }
 
@@ -27,7 +27,7 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
   override async _perform(req: ethers.PerformActionRequest): Promise<any> {
     switch (req.method) {
       case 'chainId':
-        return this.browserVM.getChainId?.() ?? 1337;
+        return this.browserVM.getChainId?.() ?? 31337;
 
       case 'getBlockNumber':
         return Number(this.browserVM.getBlockNumber?.() ?? 0);

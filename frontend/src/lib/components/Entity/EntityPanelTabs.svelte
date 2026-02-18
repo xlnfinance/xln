@@ -19,6 +19,7 @@
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { xlnFunctions, entityPositions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
+  import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
 
   // Icons
   import {
@@ -43,6 +44,8 @@
   import QRPanel from './QRPanel.svelte';
   import HubDiscoveryPanel from './HubDiscoveryPanel.svelte';
   import GossipPanel from './GossipPanel.svelte';
+  import PaymentForm from './PaymentForm.svelte';
+  import CreditForm from './CreditForm.svelte';
 
   export let tab: Tab;
   export let isLast: boolean = false;
@@ -235,6 +238,19 @@
   let governanceWebsite = '';
   let governanceSaving = false;
   let governanceLoadedForEntity = '';
+
+  // Hub config settings (setHubConfig entityTx)
+  let hubConfigLoadedForEntity = '';
+  let hubConfigSaving = false;
+  let hubMatchingStrategy: 'amount' | 'time' | 'fee' = 'amount';
+  let hubRoutingFeePPM = '100';
+  let hubBaseFee = '0';
+  let hubMinCollateralThreshold = '0';
+  let hubRebalanceBaseFee = '0.1';
+  let hubRebalanceLiquidityFeeBps = '1';
+  let hubRebalanceGasFee = '0';
+  let hubRebalanceTimeoutSeconds = '600';
+  let hubPolicyVersion = '';
 
   // On-chain reserves (from entityState; no RPC reads)
   let onchainReserves: Map<number, bigint> = new Map();
@@ -526,7 +542,7 @@
       const tokenList = await getTokenList(jadapter);
       let nativeToken: ExternalToken | null = null;
       // Include native ETH balance (external funds) when possible
-      if (jadapter?.provider && isAddress(signerId)) {
+      if (jadapter?.provider && typeof jadapter.provider.getBalance === 'function' && isAddress(signerId)) {
         try {
           const nativeBalance = await jadapter.provider.getBalance(signerId);
           nativeToken = {
@@ -733,12 +749,16 @@
     try {
       const env = activeEnv;
       if (!env) throw new Error('Environment not ready');
+      const rebalancePolicy = getOpenAccountRebalancePolicyData();
       await enqueueEntityInputs(env as any, [{
         entityId,
         signerId,
         entityTxs: [{
           type: 'openAccount' as const,
-          data: { targetEntityId: trimmed },
+          data: {
+            targetEntityId: trimmed,
+            ...(rebalancePolicy ? { rebalancePolicy } : {}),
+          },
         }],
       }]);
       openAccountEntityId = '';
@@ -821,6 +841,9 @@
   $: if (activeTab === 'governance') {
     loadGovernanceProfileFromGossip();
   }
+  $: if (activeTab === 'settings') {
+    loadHubConfigFromState();
+  }
 
   function saveContact() {
     if (!newContactName.trim() || !newContactId.trim()) return;
@@ -889,6 +912,134 @@
       toasts.error(`Governance profile update failed: ${(err as Error).message}`);
     } finally {
       governanceSaving = false;
+    }
+  }
+
+  function formatFixed18(value: bigint): string {
+    const base = 10n ** 18n;
+    const whole = value / base;
+    const frac = value % base;
+    if (frac === 0n) return whole.toString();
+    const fracRaw = frac.toString().padStart(18, '0').replace(/0+$/, '');
+    return `${whole.toString()}.${fracRaw}`;
+  }
+
+  function parseFixed18(raw: string): bigint | null {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    if (!/^\d+(\.\d{0,18})?$/.test(trimmed)) return null;
+    const [wholePart, fracPartRaw = ''] = trimmed.split('.');
+    const whole = BigInt(wholePart || '0');
+    const frac = BigInt((fracPartRaw + '0'.repeat(18)).slice(0, 18));
+    return whole * (10n ** 18n) + frac;
+  }
+
+  function loadHubConfigFromState() {
+    const currentEntityId = (replica?.state?.entityId || tab.entityId || '').toLowerCase();
+    if (!currentEntityId || hubConfigLoadedForEntity === currentEntityId) return;
+    hubConfigLoadedForEntity = currentEntityId;
+
+    const config = replica?.state?.hubRebalanceConfig;
+    hubMatchingStrategy = (config?.matchingStrategy === 'time' || config?.matchingStrategy === 'fee')
+      ? config.matchingStrategy
+      : 'amount';
+    hubRoutingFeePPM = String(config?.routingFeePPM ?? 100);
+    hubBaseFee = formatFixed18(config?.baseFee ?? 0n);
+    hubMinCollateralThreshold = formatFixed18(config?.minCollateralThreshold ?? 0n);
+    hubRebalanceBaseFee = formatFixed18(config?.rebalanceBaseFee ?? (10n ** 17n));
+    hubRebalanceLiquidityFeeBps = String(config?.rebalanceLiquidityFeeBps ?? config?.minFeeBps ?? 1n);
+    hubRebalanceGasFee = formatFixed18(config?.rebalanceGasFee ?? 0n);
+    hubRebalanceTimeoutSeconds = String(Math.floor((config?.rebalanceTimeoutMs ?? (10 * 60 * 1000)) / 1000));
+    hubPolicyVersion = config?.policyVersion ? String(config.policyVersion) : '';
+  }
+
+  async function saveHubConfig() {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const signerId = tab.signerId;
+    const env = activeEnv;
+    if (!entityId || !signerId) {
+      toasts.error('Entity/signer is required for hub config update');
+      return;
+    }
+    if (!isRuntimeEnv(env) || !activeIsLive) {
+      toasts.error('Hub config updates require LIVE mode');
+      return;
+    }
+
+    const routingFeePPM = Number(hubRoutingFeePPM);
+    if (!Number.isFinite(routingFeePPM) || routingFeePPM < 0) {
+      toasts.error('Routing fee PPM must be a non-negative number');
+      return;
+    }
+    const rebalanceTimeoutSeconds = Number(hubRebalanceTimeoutSeconds);
+    if (!Number.isFinite(rebalanceTimeoutSeconds) || rebalanceTimeoutSeconds < 1) {
+      toasts.error('Timeout must be at least 1 second');
+      return;
+    }
+
+    const baseFee = parseFixed18(hubBaseFee);
+    const minCollateralThreshold = parseFixed18(hubMinCollateralThreshold);
+    const rebalanceBaseFee = parseFixed18(hubRebalanceBaseFee);
+    const rebalanceGasFee = parseFixed18(hubRebalanceGasFee);
+    let rebalanceLiquidityFeeBps: bigint;
+    try {
+      rebalanceLiquidityFeeBps = BigInt(hubRebalanceLiquidityFeeBps.trim());
+    } catch {
+      toasts.error('Liquidity fee bps must be an integer');
+      return;
+    }
+    if (
+      baseFee === null ||
+      minCollateralThreshold === null ||
+      rebalanceBaseFee === null ||
+      rebalanceGasFee === null
+    ) {
+      toasts.error('Fee/threshold fields must be valid decimal numbers');
+      return;
+    }
+
+    let explicitPolicyVersion: number | undefined;
+    if (hubPolicyVersion.trim()) {
+      const n = Number(hubPolicyVersion.trim());
+      if (!Number.isFinite(n) || n < 1) {
+        toasts.error('Policy version must be a positive integer');
+        return;
+      }
+      explicitPolicyVersion = Math.floor(n);
+    }
+
+    hubConfigSaving = true;
+    try {
+      const txData: any = {
+        matchingStrategy: hubMatchingStrategy,
+        routingFeePPM: Math.floor(routingFeePPM),
+        baseFee,
+        minCollateralThreshold,
+        rebalanceBaseFee,
+        rebalanceLiquidityFeeBps,
+        rebalanceGasFee,
+        rebalanceTimeoutMs: Math.floor(rebalanceTimeoutSeconds * 1000),
+      };
+      if (explicitPolicyVersion !== undefined) {
+        txData.policyVersion = explicitPolicyVersion;
+      }
+
+      await enqueueEntityInputs(env, [{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'setHubConfig' as const,
+          data: txData,
+        }],
+      }]);
+
+      toasts.success('Hub config update submitted');
+      hubConfigLoadedForEntity = '';
+      loadHubConfigFromState();
+    } catch (err) {
+      toasts.error(`Hub config update failed: ${(err as Error).message}`);
+    } finally {
+      hubConfigSaving = false;
     }
   }
 
@@ -1110,13 +1261,17 @@
 
     {:else if isAccountFocused && selectedAccount && selectedAccountId}
       <div class="focused-view">
+        {#key selectedAccountId}
         <AccountPanel
           account={selectedAccount}
           counterpartyId={selectedAccountId}
           entityId={tab.entityId}
+          {replica}
+          {tab}
           on:back={handleBackToAccounts}
           on:faucet={handleAccountFaucet}
         />
+        {/key}
       </div>
 
     {:else if replica}
@@ -1400,6 +1555,25 @@
           {/if}
 
         {:else if activeTab === 'accounts'}
+          <!-- Quick Actions -->
+          {@const qaAccountIds = replica?.state?.accounts ? Array.from(replica.state.accounts.keys()).map(String) : []}
+          {#if qaAccountIds.length > 0}
+            <div class="quick-actions-section">
+              <h4 class="section-head">Quick Actions</h4>
+              <PaymentForm
+                entityId={replica.state?.entityId || tab.entityId}
+                signerId={tab.signerId}
+                counterpartyId={null}
+                accountIds={qaAccountIds}
+              />
+              <CreditForm
+                entityId={replica.state?.entityId || tab.entityId}
+                signerId={tab.signerId}
+                counterpartyId={null}
+                accountIds={qaAccountIds}
+              />
+            </div>
+          {/if}
           <AccountList {replica} on:select={handleAccountSelect} on:faucet={handleAccountFaucet} />
           <div class="account-open-sections">
             <div class="open-section">
@@ -1541,6 +1715,57 @@
               {$settings.verboseLogging ? 'On' : 'Off'}
             </button>
           </div>
+
+          <h4 class="section-head">Hub Rebalance</h4>
+          <div class="setting-block">
+            <label>Policy Version (optional override)</label>
+            <input type="number" min="1" bind:value={hubPolicyVersion} placeholder="Auto if empty" />
+            <div class="muted" style="margin-top: 4px;">
+              Leave empty to auto-bump only when rebalance fee policy changes.
+            </div>
+          </div>
+          <div class="setting-block">
+            <label>Matching Strategy</label>
+            <select bind:value={hubMatchingStrategy}>
+              <option value="amount">amount</option>
+              <option value="time">time</option>
+              <option value="fee">fee</option>
+            </select>
+          </div>
+          <div class="setting-block">
+            <label>Routing Fee (PPM)</label>
+            <input type="number" min="0" bind:value={hubRoutingFeePPM} />
+          </div>
+          <div class="setting-block">
+            <label>Base Fee (token units)</label>
+            <input type="text" bind:value={hubBaseFee} placeholder="e.g. 0.0" />
+          </div>
+          <div class="setting-block">
+            <label>Min Collateral Threshold (token units)</label>
+            <input type="text" bind:value={hubMinCollateralThreshold} placeholder="e.g. 0" />
+          </div>
+          <div class="setting-block">
+            <label>Rebalance Base Fee (token units)</label>
+            <input type="text" bind:value={hubRebalanceBaseFee} placeholder="e.g. 0.1" />
+          </div>
+          <div class="setting-block">
+            <label>Rebalance Liquidity Fee (bps)</label>
+            <input type="number" min="0" bind:value={hubRebalanceLiquidityFeeBps} />
+          </div>
+          <div class="setting-block">
+            <label>Rebalance Gas Fee (token units)</label>
+            <input type="text" bind:value={hubRebalanceGasFee} placeholder="e.g. 0.0" />
+          </div>
+          <div class="setting-block">
+            <label>Rebalance Timeout (seconds)</label>
+            <input type="number" min="1" bind:value={hubRebalanceTimeoutSeconds} />
+          </div>
+          <button class="btn-add" on:click={saveHubConfig} disabled={hubConfigSaving || !activeIsLive}>
+            {hubConfigSaving ? 'Submitting...' : 'Save Hub Config'}
+          </button>
+          {#if !activeIsLive}
+            <div class="muted" style="margin-top: 6px;">Hub config updates require LIVE mode.</div>
+          {/if}
 
           <h4 class="section-head">Identity</h4>
           <div class="setting-block">
@@ -2905,6 +3130,14 @@
   .btn-table-action:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .quick-actions-section {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: rgba(251, 191, 36, 0.02);
+    border: 1px solid rgba(251, 191, 36, 0.1);
+    border-radius: 10px;
   }
 
   .account-open-sections {

@@ -53,7 +53,7 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
         const jadapter = jReplica.jadapter;
         const status: JMachineHealth = {
           name,
-          chainId: jReplica.chainId || 0,
+          chainId: jReplica.chainId || 31337,
           rpc: jReplica.rpcs || [],
           status: 'healthy',
         };
@@ -75,7 +75,7 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
       } catch (err) {
         jMachines.push({
           name,
-          chainId: 0,
+          chainId: 31337,
           rpc: [],
           status: 'down',
           error: err instanceof Error ? err.message : String(err),

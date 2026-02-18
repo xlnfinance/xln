@@ -10,6 +10,7 @@ import { FINANCIAL } from '../../constants';
 import { isLeftEntity } from '../../entity-id-utils';
 import { safeStringify } from '../../serialization-utils';
 import { getAccountPerspective } from '../../state-helpers';
+import { decodeRebalancePolicyMemo } from '../../rebalance-policy';
 
 export function handleDirectPayment(
   accountMachine: AccountMachine,
@@ -163,6 +164,55 @@ export function handleDirectPayment(
   delta.offdelta += canonicalDelta;
   console.log(`🔍 OFFDELTA-UPDATE: ${oldOffdelta} + ${canonicalDelta} = ${delta.offdelta}`);
   console.log(`🔍 NEW-TOTAL: ondelta=${delta.ondelta} + offdelta=${delta.offdelta} = ${delta.ondelta + delta.offdelta}`);
+
+  const memoPolicy = decodeRebalancePolicyMemo(description);
+  if (memoPolicy) {
+    const existingPolicy = accountMachine.counterpartyRebalanceFeePolicy;
+    if (!existingPolicy || memoPolicy.policyVersion >= existingPolicy.policyVersion) {
+      accountMachine.counterpartyRebalanceFeePolicy = {
+        policyVersion: memoPolicy.policyVersion,
+        baseFee: memoPolicy.baseFee,
+        liquidityFeeBps: memoPolicy.liquidityFeeBps,
+        gasFee: memoPolicy.gasFee,
+        updatedAt: accountMachine.currentFrame.timestamp || 0,
+      };
+      events.push(
+        `📣 Hub policy update observed: v${memoPolicy.policyVersion} ` +
+        `(base=${memoPolicy.baseFee},liqBps=${memoPolicy.liquidityFeeBps},gas=${memoPolicy.gasFee},reason=${memoPolicy.reason})`,
+      );
+    }
+
+    // Clear local pending request when hub refunds prepaid fee.
+    // Refund path is unilateral on hub side; requester must clear after refund payment commits.
+    if (memoPolicy.reason === 'policy_mismatch' || memoPolicy.reason === 'timeout' || memoPolicy.reason === 'fee_too_low') {
+      const candidates: Array<{
+        requestTokenId: number;
+        requestedAt: number;
+        feePaidUpfront: bigint;
+      }> = [];
+      for (const [requestTokenId, feeState] of accountMachine.requestedRebalanceFeeState?.entries() || []) {
+        const pendingRequestedAmount = accountMachine.requestedRebalance.get(requestTokenId) ?? 0n;
+        if (pendingRequestedAmount <= 0n) continue;
+        if (feeState.feeTokenId !== tokenId) continue;
+        // Refund must come from counterparty to requester.
+        if (senderIsLeft === feeState.requestedByLeft) continue;
+        candidates.push({
+          requestTokenId,
+          requestedAt: feeState.requestedAt || 0,
+          feePaidUpfront: feeState.feePaidUpfront || 0n,
+        });
+      }
+      candidates.sort((a, b) => (a.requestedAt === b.requestedAt ? a.requestTokenId - b.requestTokenId : a.requestedAt - b.requestedAt));
+      const match = candidates.find(c => c.feePaidUpfront <= 0n || amount <= c.feePaidUpfront) ?? candidates[0];
+      if (match) {
+        accountMachine.requestedRebalance.delete(match.requestTokenId);
+        accountMachine.requestedRebalanceFeeState?.delete(match.requestTokenId);
+        events.push(
+          `↩️ Rebalance request cleared after hub refund (${memoPolicy.reason}, token=${match.requestTokenId}, amount=${amount})`,
+        );
+      }
+    }
+  }
 
   // Events differ by perspective but state is identical (derive from byLeft)
   const { counterparty: cpForEvent } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);

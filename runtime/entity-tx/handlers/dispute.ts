@@ -122,6 +122,16 @@ function collectHtlcSecrets(entityState: EntityState, counterpartyEntityId: stri
   return secrets;
 }
 
+function getEnvJAdapter(env: Env) {
+  if (!env.jReplicas || env.jReplicas.size === 0) return null;
+  const active = env.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction) : undefined;
+  if (active?.jadapter) return active.jadapter;
+  for (const replica of env.jReplicas.values()) {
+    if (replica.jadapter) return replica.jadapter;
+  }
+  return null;
+}
+
 /**
  * Handle disputeStart - Entity initiates dispute with signed proof
  */
@@ -148,6 +158,11 @@ export async function handleDisputeStart(
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) {
     addMessage(newState, `❌ No account with ${counterpartyEntityId.slice(-4)} - cannot start dispute`);
+    return { newState, outputs };
+  }
+
+  if ((account.status ?? 'active') !== 'active') {
+    addMessage(newState, `❌ Account with ${counterpartyEntityId.slice(-4)} is disputed - reopen required`);
     return { newState, outputs };
   }
 
@@ -181,17 +196,13 @@ export async function handleDisputeStart(
   console.log(`   First 66 chars: ${counterpartyDisputeHanko.slice(0, 66)}`);
   console.log(`   Sig bytes: ${(counterpartyDisputeHanko.length - 2) / 2}`);
 
-  // Use stored proofBodyHash if available, otherwise build fresh (fallback for legacy)
-  let proofBodyHashToUse: string;
-  if (storedProofBodyHash) {
-    proofBodyHashToUse = storedProofBodyHash;
-    console.log(`✅ Using stored counterparty proofBodyHash: ${storedProofBodyHash.slice(0, 10)}...`);
-  } else {
-    // Fallback: build fresh (may not match hanko if state changed!)
-    const proofResult = buildAccountProofBody(account);
-    proofBodyHashToUse = proofResult.proofBodyHash;
-    console.warn(`⚠️ No stored proofBodyHash - using fresh (may mismatch hanko!)`);
+  if (!storedProofBodyHash) {
+    addMessage(newState, `❌ Missing stored counterparty proofBodyHash - cannot start dispute safely`);
+    console.error(`❌ disputeStart blocked: missing stored counterpartyDisputeProofBodyHash`);
+    return { newState, outputs };
   }
+  const proofBodyHashToUse = storedProofBodyHash;
+  console.log(`✅ Using stored counterparty proofBodyHash: ${storedProofBodyHash.slice(0, 10)}...`);
 
   // Resolve the offchain nonce that matches the stored counterparty dispute signature.
   // This is the bilateral nonce at which the counterparty signed the dispute proof.
@@ -208,6 +219,14 @@ export async function handleDisputeStart(
     nonceSource = 'counterpartySig';
   }
 
+  if (
+    account.counterpartyDisputeProofNonce !== undefined &&
+    account.counterpartyDisputeProofNonce > signedNonce
+  ) {
+    signedNonce = account.counterpartyDisputeProofNonce;
+    nonceSource = 'counterpartySig(fresher)';
+  }
+
   // ASSERT: signedNonce must be positive (bilateral frames start nonces at 1)
   if (signedNonce <= 0) {
     addMessage(newState, `❌ Invalid dispute signedNonce=${signedNonce} — must be > 0`);
@@ -215,12 +234,36 @@ export async function handleDisputeStart(
     return { newState, outputs };
   }
 
-  console.log(`   signedNonce=${signedNonce} (source=${nonceSource})`);
+  let onChainNonce = Number(account.onChainSettlementNonce ?? 0);
+  const jadapter = getEnvJAdapter(env);
+  if (jadapter && typeof jadapter.getAccountInfo === 'function') {
+    try {
+      const accountInfo = await jadapter.getAccountInfo(entityState.entityId, counterpartyEntityId);
+      onChainNonce = Number(accountInfo.nonce);
+      account.onChainSettlementNonce = onChainNonce;
+    } catch (error) {
+      console.warn(
+        `⚠️ disputeStart: failed to read on-chain nonce for ${counterpartyEntityId.slice(-4)}: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  console.log(`   signedNonce=${signedNonce} (source=${nonceSource}), onChainNonce=${onChainNonce}`);
+
+  // On-chain requires nonce > stored nonce for disputeStart.
+  // If stale, caller must execute manual reopen flow first.
+  if (signedNonce <= onChainNonce) {
+    const msg = `❌ Stale dispute proof nonce ${signedNonce} (on-chain=${onChainNonce}) - reopen required`;
+    addMessage(newState, msg);
+    console.warn(`⚠️ disputeStart blocked: ${msg}`);
+    return { newState, outputs };
+  }
 
   // The signed nonce is passed directly to the contract. Solidity requires:
   //   nonce > _accounts[ch_key].nonce  (Account.sol:354)
-  // On-chain nonce starts at 0 and only increments via settlements/disputes.
-  // signedNonce >= 1 (from bilateral consensus) satisfies this.
+  // On-chain nonce starts at 0 and increments via settlements/disputes.
+  // signedNonce must be strictly greater than latest on-chain nonce.
   // CRITICAL: Do NOT add +1 — the hanko was signed over this exact nonce.
   newState.jBatchState.batch.disputeStarts.push({
     counterentity: counterpartyEntityId,
@@ -244,19 +287,21 @@ export async function handleDisputeStart(
 }
 
 /**
- * Handle disputeFinalize - Entity finalizes dispute after timeout or with cooperation
+ * Handle disputeFinalize - Entity finalizes dispute unilaterally after timeout.
+ * Cooperative finalize is intentionally disabled.
  */
 export async function handleDisputeFinalize(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'disputeFinalize' }>,
   env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
-  const { counterpartyEntityId, cooperative, description } = entityTx.data;
+  const { counterpartyEntityId, description } = entityTx.data;
+  const cooperativeRequested = entityTx.data.cooperative === true;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
   console.log(`⚖️ disputeFinalize: ${entityState.entityId.slice(-4)} vs ${counterpartyEntityId.slice(-4)}`);
-  console.log(`   Cooperative: ${cooperative || false}`);
+  console.log(`   Cooperative requested: ${cooperativeRequested}`);
 
   // Initialize jBatch if needed
   if (!newState.jBatchState) {
@@ -279,39 +324,21 @@ export async function handleDisputeFinalize(
     return { newState, outputs };
   }
 
+  if (cooperativeRequested) {
+    addMessage(
+      newState,
+      `❌ disputeFinalize cooperative=true rejected for ${counterpartyEntityId.slice(-4)} (unilateral-only protocol)`,
+    );
+    console.warn(
+      `⚠️ disputeFinalize rejected: cooperative=true for ${counterpartyEntityId.slice(-4)} (unilateral-only)`,
+    );
+    return { newState, outputs };
+  }
+
   // Build current proof (for finalization reveal)
   const currentProofResult = buildAccountProofBody(account);
-  const counterpartyProofBodyHash = account.counterpartyDisputeProofBodyHash;
-  const counterpartyProofBody = counterpartyProofBodyHash
-    ? account.disputeProofBodiesByHash?.[counterpartyProofBodyHash]
-    : undefined;
-
-  // Determine finalization mode
-  // Counter-dispute: our nonce is higher than the dispute's initial nonce (we have newer state)
-  let isCounterDispute = account.proofHeader.nonce > account.activeDispute.initialNonce;
-
-  // Resolve finalNonce — the offchain bilateral nonce for the finalization proof.
-  // Counter-dispute: newer nonce from counterparty's signed proof (must be > initialNonce).
-  // Unilateral: same as initialNonce (no sig needed, timeout enforces, contract does nonce++).
-  // Priority: exact hash→nonce map > stored counterparty sig nonce > proofHeader fallback.
-  const mappedFinalNonce = account.counterpartyDisputeProofBodyHash
-    ? account.disputeProofNoncesByHash?.[account.counterpartyDisputeProofBodyHash]
-    : undefined;
-  let finalNonce: number;
-  let finalNonceSource: string;
-  if (!isCounterDispute) {
-    finalNonce = account.activeDispute.initialNonce;
-    finalNonceSource = 'initialNonce (unilateral)';
-  } else if (mappedFinalNonce !== undefined) {
-    finalNonce = mappedFinalNonce;
-    finalNonceSource = 'hashMap';
-  } else if (account.counterpartyDisputeProofNonce !== undefined) {
-    finalNonce = account.counterpartyDisputeProofNonce;
-    finalNonceSource = 'counterpartySig';
-  } else {
-    finalNonce = account.proofHeader.nonce;
-    finalNonceSource = 'proofHeader (fallback)';
-  }
+  const finalNonce = account.activeDispute.initialNonce;
+  const finalNonceSource = 'initialNonce (unilateral-only)';
 
   // ASSERT: finalNonce must be positive
   if (finalNonce <= 0) {
@@ -319,20 +346,8 @@ export async function handleDisputeFinalize(
     console.error(`❌ disputeFinalize: finalNonce=${finalNonce} is invalid (source=${finalNonceSource})`);
     return { newState, outputs };
   }
-  // Downgrade counter-dispute to unilateral if counterparty's signed nonce isn't actually newer
-  if (isCounterDispute && finalNonce <= account.activeDispute.initialNonce) {
-    console.warn(`⚠️ disputeFinalize: counter-dispute finalNonce=${finalNonce} <= initialNonce=${account.activeDispute.initialNonce} (source=${finalNonceSource}), downgrading to unilateral`);
-    isCounterDispute = false;
-    finalNonce = account.activeDispute.initialNonce;
-    finalNonceSource = 'initialNonce (downgraded to unilateral)';
-  }
-
-  // Counter-dispute: use counterparty's DisputeProof hanko (proves they signed newer state)
-  // Unilateral: no signature (timeout enforces)
-  // Cooperative: use cooperative settlement sig (not implemented yet)
-  const finalizeSig = isCounterDispute && account.counterpartyDisputeProofHanko
-    ? account.counterpartyDisputeProofHanko
-    : '0x';
+  // Unilateral-only protocol: no counterparty signature on finalize.
+  const finalizeSig = '0x';
 
   const callerIsLeft = account.leftEntity === newState.entityId;
   const fillRatiosByOfferId = buildPendingSwapFillRatios(newState, counterpartyEntityId, account);
@@ -349,33 +364,30 @@ export async function handleDisputeFinalize(
   const storedProofBody = account.activeDispute.initialProofbodyHash
     ? account.disputeProofBodiesByHash?.[account.activeDispute.initialProofbodyHash]
     : undefined;
-  if (isCounterDispute && !counterpartyProofBody) {
-    throw new Error('disputeFinalize: missing counterparty proof body for counter-dispute');
-  }
-  const shouldUseStoredProof = !isCounterDispute && !cooperative && storedProofBody;
-  if (!isCounterDispute && !cooperative && currentProofResult.proofBodyHash !== account.activeDispute.initialProofbodyHash) {
+  const shouldUseStoredProof = !!storedProofBody;
+  if (currentProofResult.proofBodyHash !== account.activeDispute.initialProofbodyHash) {
     console.warn(`⚠️ disputeFinalize: current proofBodyHash != initial (current=${currentProofResult.proofBodyHash.slice(0, 10)}..., initial=${account.activeDispute.initialProofbodyHash.slice(0, 10)}...)`);
     if (!storedProofBody) {
       throw new Error('disputeFinalize: missing stored proofBody for unilateral finalize');
     }
   }
 
-  const finalProofbody = isCounterDispute
-    ? (counterpartyProofBody || currentProofResult.proofBodyStruct)
-    : (shouldUseStoredProof ? storedProofBody : currentProofResult.proofBodyStruct);
+  const finalProofbody = shouldUseStoredProof
+    ? storedProofBody
+    : currentProofResult.proofBodyStruct;
 
   const finalProof = {
     counterentity: counterpartyEntityId,
     initialNonce: account.activeDispute.initialNonce,  // Nonce when dispute was started
-    finalNonce,  // Counter-dispute: newer nonce (> initial). Unilateral: same as initial.
+    finalNonce,  // Unilateral-only: same as initial.
     initialProofbodyHash: account.activeDispute.initialProofbodyHash,  // From disputeStart (commit)
     finalProofbody,  // REVEAL
     finalArguments,
     initialArguments,
-    sig: finalizeSig,  // Empty for unilateral, counterparty DisputeProof hanko for counter
+    sig: finalizeSig,  // Always empty for unilateral finalize
     startedByLeft: account.activeDispute.startedByLeft,  // From on-chain
     disputeUntilBlock: account.activeDispute.disputeTimeout,  // From on-chain
-    cooperative: cooperative || false,
+    cooperative: false,
   };
 
   // Optional fallback: on-chain HTLC registry (Sprites-style)
@@ -390,14 +402,31 @@ export async function handleDisputeFinalize(
     }
   }
 
-  console.log(`   Mode: ${isCounterDispute ? 'counter-dispute' : 'unilateral'}, timeout=${account.activeDispute.disputeTimeout}`);
+  console.log(`   Mode: unilateral, timeout=${account.activeDispute.disputeTimeout}`);
   console.log(`   initialNonce=${finalProof.initialNonce}, finalNonce=${finalProof.finalNonce} (source=${finalNonceSource})`);
+
+  // Enforce challenge-period expiry before enqueueing finalize.
+  // disputeTimeout is tracked as J-layer block height from on-chain account state.
+  const jadapter = getEnvJAdapter(env);
+  if (jadapter?.provider) {
+    const currentJBlock = Number(await jadapter.provider.getBlockNumber());
+    if (currentJBlock < account.activeDispute.disputeTimeout) {
+      addMessage(
+        newState,
+        `❌ disputeFinalize too early: currentBlock=${currentJBlock}, timeout=${account.activeDispute.disputeTimeout}`,
+      );
+      console.warn(
+        `⚠️ disputeFinalize blocked (too early): currentBlock=${currentJBlock}, timeout=${account.activeDispute.disputeTimeout}`,
+      );
+      return { newState, outputs };
+    }
+  }
 
   // Add to jBatch
   newState.jBatchState.batch.disputeFinalizations.push(finalProof);
 
   console.log(`✅ disputeFinalize: Added to jBatch for ${entityState.entityId.slice(-4)}`);
-  console.log(`   Mode: ${cooperative ? 'cooperative' : 'unilateral'}`);
+  console.log(`   Mode: unilateral`);
 
   addMessage(newState, `⚖️ Dispute finalized vs ${counterpartyEntityId.slice(-4)} ${description ? `(${description})` : ''} - use jBroadcast to commit`);
 

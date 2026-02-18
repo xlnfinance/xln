@@ -2,29 +2,25 @@
 
 echo "🔄 Resetting XLN Network (Ethereum only) and Redeploying Contracts..."
 
-# Stop existing networks
-echo "1️⃣ Stopping existing networks..."
-./scripts/dev/stop-networks.sh
+echo "1️⃣ Full clean slate..."
+./scripts/dev/clean-slate.sh
 
-# Clean up old data
 echo ""
-echo "2️⃣ Cleaning up old data..."
+echo "2️⃣ Cleaning contract build/deploy artifacts..."
 rm -rf jurisdictions/ignition/deployments/* 2>/dev/null || true
 rm -rf jurisdictions/cache/ 2>/dev/null || true
 rm -rf jurisdictions/artifacts/ 2>/dev/null || true
 rm -rf jurisdictions/typechain-types/ 2>/dev/null || true
-rm -rf logs/*.log 2>/dev/null || true
-rm -rf db 2>/dev/null || true
-echo "✅ Cleanup complete (cleared ignition, hardhat cache, artifacts)"
+echo "✅ Contract artifacts cleaned"
 
 # Start fresh networks
 echo ""
-echo "3️⃣ Starting fresh networks..."
+echo "3️⃣ Starting fresh network..."
 ./scripts/dev/start-networks.sh
 
 # Wait for networks to stabilize
 echo ""
-echo "4️⃣ Waiting for networks to stabilize..."
+echo "4️⃣ Waiting for network to stabilize..."
 sleep 5
 
 # Deploy contracts using dedicated script

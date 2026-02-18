@@ -90,7 +90,7 @@ export interface JBatch {
   disputeFinalizations: Array<{
     counterentity: string;
     initialNonce: number; // nonce when dispute was started
-    finalNonce: number; // nonce of the counter-proof (must be > initialNonce)
+    finalNonce: number; // signed finalize nonce; unilateral timeout path may keep equal to initialNonce
     initialProofbodyHash: string;
     finalProofbody: any;  // ProofBody struct
     finalArguments: string;

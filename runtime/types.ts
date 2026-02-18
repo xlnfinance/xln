@@ -220,6 +220,12 @@ export interface JurisdictionConfig {
   entityProviderAddress: string;
   depositoryAddress: string;
   chainId?: number;
+  // Optional per-jurisdiction onboarding defaults (USD whole units).
+  rebalancePolicyUsd?: {
+    softLimit: number;
+    hardLimit: number;
+    maxFee: number;
+  };
 }
 
 export interface ConsensusConfig {
@@ -367,16 +373,8 @@ export type JurisdictionEvent =
         counterpartyReserve: string;
         collateral: string;
         ondelta: string;
+        nonce: number;
         side: 'left' | 'right';
-      };
-    })
-  | (JEventMetadata & {
-      data: {
-        insured: string;
-        insurer: string;
-        creditor: string;
-        tokenId: number;
-        amount: string;
       };
     })
   | (JEventMetadata & {
@@ -393,22 +391,6 @@ export type JurisdictionEvent =
         hankoHash: string;     // Hash of hanko data for verification
         nonce: number;         // Batch nonce (incrementing per entity)
         success: boolean;      // Whether batch processing succeeded
-      };
-    })
-  | (JEventMetadata & {
-      data: {
-        insured: string;
-        insurer: string;
-        tokenId: number;
-        limit: string;
-        expiresAt: string;
-      };
-    })
-  | (JEventMetadata & {
-      data: {
-        insured: string;
-        insurer: string;
-        tokenId: number;
       };
     })
   | (JEventMetadata & {
@@ -524,6 +506,11 @@ export type EntityTx =
         targetEntityId: string;
         creditAmount?: bigint;  // Optional: extend credit in same frame as add_delta
         tokenId?: number;       // Token for credit (default: 1 = USDC)
+        rebalancePolicy?: {
+          softLimit: bigint;
+          hardLimit: bigint;
+          maxAcceptableFee: bigint;
+        };
       };
     }
   | {
@@ -571,6 +558,26 @@ export type EntityTx =
       };
     }
   | {
+      // Request hub collateralization on a bilateral account (prepaid fee model)
+      type: 'requestCollateral';
+      data: {
+        counterpartyEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        feeTokenId?: number;
+        feeAmount: bigint;
+        policyVersion: number;
+      };
+    }
+  | {
+      // Manual reopen for disputed account (reactivates business txs after dispute cycle)
+      type: 'reopenDisputedAccount';
+      data: {
+        counterpartyEntityId: string;
+        onChainNonce?: number;
+      };
+    }
+  | {
       type: 'settleDiffs';
       data: {
         counterpartyEntityId: string;
@@ -596,7 +603,7 @@ export type EntityTx =
       type: 'disputeFinalize';
       data: {
         counterpartyEntityId: string;
-        cooperative?: boolean;  // If true, use cooperative finalization
+        cooperative?: boolean;  // Legacy flag (ignored). disputeFinalize is unilateral-only.
         useOnchainRegistry?: boolean; // Optional HTLC reveal via on-chain registry
         description?: string;
       };
@@ -650,22 +657,16 @@ export type EntityTx =
       // Declare entity as hub: sets rebalance config + routing fees, announces to gossip
       type: 'setHubConfig';
       data: {
-        matchingStrategy?: 'hnw' | 'fifo'; // Default: 'hnw'
+        matchingStrategy?: 'amount' | 'time' | 'fee'; // Default: 'amount'
+        policyVersion?: number;             // Fee-policy version (auto-incremented if omitted)
         routingFeePPM?: number;             // Default: 100 (0.01%)
         baseFee?: bigint;                   // Default: 0n
-        minCollateralThreshold?: bigint;    // Hub-owned proactive R→C threshold (default: 0n)
-        minFeeBps?: bigint;                 // Minimum fee for request_collateral fulfillment (default: 10 = 0.1%)
-      };
-    }
-  | {
-      // Hub sends rebalance quote to bilateral account (pushes rebalance_quote AccountTx)
-      type: 'sendRebalanceQuote';
-      data: {
-        counterpartyEntityId: string;
-        tokenId: number;
-        amount: bigint;
-        feeTokenId: number;
-        feeAmount: bigint;
+        minCollateralThreshold?: bigint;    // Reserved for future policy gates
+        minFeeBps?: bigint;                 // Legacy fallback min-fee bps gate (if policy triplet missing)
+        rebalanceBaseFee?: bigint;          // Fixed rebalance fee component
+        rebalanceLiquidityFeeBps?: bigint;  // Rebalance liquidity fee in bps (volume-based)
+        rebalanceGasFee?: bigint;           // Flat gas recovery component
+        rebalanceTimeoutMs?: number;        // Auto-refund timeout for unfulfilled prepaid requests
       };
     }
   | {
@@ -950,10 +951,13 @@ export interface HtlcRoute {
   createdTimestamp: number;
 }
 
+export type AccountStatus = 'active' | 'disputed';
+
 export interface AccountMachine {
   // CANONICAL REPRESENTATION (like Channel.ts - both entities store IDENTICAL structure)
   leftEntity: string;   // Lower entity ID (canonical left)
   rightEntity: string;  // Higher entity ID (canonical right)
+  status: AccountStatus; // Manual lifecycle gate for dispute freeze/reopen
 
   mempool: AccountTx[]; // Unprocessed account transactions
   currentFrame: AccountFrame; // Current agreed state (includes full transaction history for replay/audit)
@@ -984,9 +988,9 @@ export interface AccountMachine {
   lastRollbackFrameHash?: string; // Track last rollback to prevent duplicate increments
 
   // Bilateral J-event consensus (2-of-2 agreement on jurisdiction events)
-  leftJObservations: Array<{ jHeight: number; jBlockHash: string; events: any[]; observedAt: number }>;
-  rightJObservations: Array<{ jHeight: number; jBlockHash: string; events: any[]; observedAt: number }>;
-  jEventChain: Array<{ jHeight: number; jBlockHash: string; events: any[]; finalizedAt: number }>;
+  leftJObservations: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[]; observedAt: number }>;
+  rightJObservations: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[]; observedAt: number }>;
+  jEventChain: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[]; finalizedAt: number }>;
   lastFinalizedJHeight: number;
 
   // Removed isProposer - use isLeft() function like old_src Channel.ts instead
@@ -1081,7 +1085,14 @@ export interface AccountMachine {
 
   // Rebalancing hints (Phase 3: Hub coordination)
   requestedRebalance: Map<number, bigint>; // tokenId → amount entity wants rebalanced (credit→collateral)
-  requestedRebalanceFeeState: Map<number, RebalanceRequestFeeState>; // tokenId → deferred fee state
+  requestedRebalanceFeeState: Map<number, RebalanceRequestFeeState>; // tokenId → prepaid fee metadata
+  counterpartyRebalanceFeePolicy?: {
+    policyVersion: number;
+    baseFee: bigint;
+    liquidityFeeBps: bigint;
+    gasFee: bigint;
+    updatedAt: number;
+  };
 
   // Rebalance policy (per-token soft/hard limits + max acceptable fee)
   rebalancePolicy: Map<number, RebalancePolicy>; // tokenId → policy
@@ -1332,19 +1343,13 @@ export type AccountTx =
       };
     }
   | {
-      type: 'request_rebalance';
-      data: {
-        tokenId: number;
-        amount: bigint; // Requested collateral rebalance amount
-      };
-    }
-  | {
       type: 'request_collateral';
       data: {
         tokenId: number;
         amount: bigint;       // Requested collateral deposit amount (R→C)
         feeTokenId?: number;  // Optional fee token (defaults to tokenId)
-        feeAmount: bigint;    // Deferred fee budget (charged only when collateral is fulfilled)
+        feeAmount: bigint;    // Prepaid fee debited immediately in the request_collateral frame
+        policyVersion: number; // Hub fee-policy version used to compute feeAmount
       };
     }
   | {
@@ -1354,28 +1359,6 @@ export type AccountTx =
         softLimit: bigint;         // Auto-trigger below this
         hardLimit: bigint;         // Never exceed
         maxAcceptableFee: bigint;  // Auto-accept quotes with fee ≤ this (USDT)
-      };
-    }
-  | {
-      type: 'rebalance_request';
-      data: {
-        tokenId: number;
-        targetAmount: bigint;      // Desired collateral amount (manual rebalance)
-      };
-    }
-  | {
-      type: 'rebalance_quote';
-      data: {
-        tokenId: number;
-        amount: bigint;            // Collateral to deposit
-        feeTokenId: number;        // Fee denomination (1 = USDT)
-        feeAmount: bigint;         // Computed fee
-      };
-    }
-  | {
-      type: 'rebalance_accept';
-      data: {
-        quoteId: number;           // = timestamp of quote frame
       };
     }
   // === HTLC TRANSACTION TYPES ===
@@ -1450,12 +1433,9 @@ export type AccountTx =
       };
     }
   | {
-      type: 'j_sync';
+      type: 'reopen_disputed';
       data: {
-        jBlockNumber: number;  // Block number from j-machine (both sides must match)
-        tokenId: number;
-        collateral: bigint;    // Absolute collateral from j-event
-        ondelta: bigint;       // Absolute ondelta from j-event
+        onChainNonce: number;
       };
     }
   | {
@@ -1578,11 +1558,16 @@ export interface EntityState {
 
 /** Hub-level config: rebalance strategy + routing fees. Set via setHubConfig EntityTx. */
 export interface HubRebalanceConfig {
-  matchingStrategy: 'hnw' | 'fifo'; // hnw = biggest first, fifo = oldest quote first
+  matchingStrategy: 'amount' | 'time' | 'fee';
+  policyVersion: number;            // Monotonic version for rebalance fee policy
   routingFeePPM: number;             // Routing fee in parts per million (0-10000 = 0%-1%)
   baseFee: bigint;                   // Fixed fee per routed payment (smallest unit)
-  minCollateralThreshold?: bigint;   // Hub-owned proactive R→C threshold (default: 0n)
-  minFeeBps?: bigint;                // Min fee gate for explicit request_collateral (default: 10 = 0.1%)
+  minCollateralThreshold?: bigint;   // Reserved for future policy gates
+  minFeeBps?: bigint;                // Legacy fallback min-fee bps gate
+  rebalanceBaseFee?: bigint;         // Fixed rebalance fee component
+  rebalanceLiquidityFeeBps?: bigint; // Volume-based rebalance fee component (bps)
+  rebalanceGasFee?: bigint;          // Flat gas fee component
+  rebalanceTimeoutMs?: number;       // Auto-refund timeout for unfulfilled prepaid requests
 }
 
 /** Per-token rebalance policy (stored per-token in AccountMachine) */
@@ -1603,11 +1588,15 @@ export interface RebalanceQuote {
   accepted: boolean;    // true if auto-accepted or manually accepted
 }
 
-/** Deferred fee state for request_collateral (fee charged only on fulfilled R→C). */
+/** Fee state for request_collateral (fee is prepaid in requester frame). */
 export interface RebalanceRequestFeeState {
   feeTokenId: number;
-  remainingFee: bigint;
+  feePaidUpfront: bigint; // Actual prepaid fee already debited from requester
+  requestedAmount: bigint; // Original request amount used for pro-rata timeout refunds
+  policyVersion: number; // Hub fee-policy version used by requester
+  requestedAt: number;    // Timestamp for FIFO/time-priority scheduling
   requestedByLeft: boolean;
+  jBatchSubmittedAt: number; // 0 = not submitted, >0 = handed to J-batch (suppress timeout refund race)
 }
 
 // Rebalance constants (all amounts in 18-decimal base, matching TOKEN_REGISTRY)
@@ -1799,7 +1788,7 @@ export interface Env {
   browserVMState?: BrowserVMState; // Serialized BrowserVM state for time travel
 
   // Unified J-Machine adapter (preferred over browserVM or evms)
-  // Use: const jAdapter = env.jAdapter ?? await createJAdapter({ mode: 'browservm', chainId: 1337 })
+  // Use: const jAdapter = env.jAdapter ?? await createJAdapter({ mode: 'browservm', chainId: 31337 })
   jAdapter?: import('./jadapter/types').JAdapter;
 
   // EVM instances - DEPRECATED, use env.jAdapter or createJAdapter() from jadapter

@@ -107,6 +107,17 @@ export function attachEventEmitters(env: Env): void {
     };
     env.frameLogs.push(entry);
     addCleanLog(env, 'INFO', message);
+    if (message.startsWith('REB_')) {
+      forwardDebugEvent(env, {
+        level: 'info',
+        category,
+        message,
+        entityId,
+        data,
+        runtimeId: env.runtimeId,
+        at: getTimestamp(),
+      });
+    }
   };
 
   // Structured warning log

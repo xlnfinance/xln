@@ -344,7 +344,7 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   // Hub declares as hub
   await process(env, [{
     entityId: hub.id, signerId: hub.signer,
-    entityTxs: [{ type: 'setHubConfig', data: { matchingStrategy: 'hnw', routingFeePPM: 100, baseFee: 0n } }]
+    entityTxs: [{ type: 'setHubConfig', data: { matchingStrategy: 'amount', routingFeePPM: 100, baseFee: 0n } }]
   }]);
   await converge(env);
 

@@ -11,6 +11,11 @@ interface JurisdictionConfig {
   name: string;
   chainId: number;
   rpc: string;
+  rebalancePolicyUsd?: {
+    softLimit: number;
+    hardLimit: number;
+    maxFee: number;
+  };
   contracts: {
     entityProvider: string;
     depository: string;
@@ -28,6 +33,11 @@ interface JurisdictionsData {
     timeout: number;
     retryAttempts: number;
     gasLimit: number;
+    rebalancePolicyUsd?: {
+      softLimit: number;
+      hardLimit: number;
+      maxFee: number;
+    };
   };
 }
 
@@ -56,6 +66,11 @@ export function loadJurisdictions(): JurisdictionsData {
       timeout: 30000,
       retryAttempts: 3,
       gasLimit: 1000000,
+      rebalancePolicyUsd: {
+        softLimit: 500,
+        hardLimit: 10_000,
+        maxFee: 15,
+      },
     },
   };
 

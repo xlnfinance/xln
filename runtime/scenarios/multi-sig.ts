@@ -16,7 +16,7 @@
  */
 
 import type { Env } from '../types';
-import { ensureBrowserVM, createJReplica } from './boot';
+import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
 import { findReplica, assert, processWithOffline, convergeWithOffline, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 
 const USDC = 1;
@@ -46,13 +46,22 @@ export async function multiSig(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   // ============================================================================
-  // SETUP: BrowserVM
+  // SETUP: JAdapter
   // ============================================================================
-  console.log('🏛️  Setting up BrowserVM...');
-  const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
-  createJReplica(env, 'MultiSig', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
-  console.log('✅ BrowserVM ready\n');
+  console.log('🏛️  Setting up JAdapter...');
+  const jMode = getJAdapterMode();
+  const jadapter = await ensureJAdapter(env, jMode);
+  const jReplica = createJReplica(env, 'MultiSig', jadapter.addresses.depository, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
+  (jReplica as any).jadapter = jadapter;
+  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
+  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+  (jReplica as any).contracts = {
+    depository: jadapter.addresses.depository,
+    entityProvider: jadapter.addresses.entityProvider,
+    account: jadapter.addresses.account,
+    deltaTransformer: jadapter.addresses.deltaTransformer,
+  };
+  console.log('✅ JAdapter ready\n');
 
   // ============================================================================
   // SETUP: Create Alice (2-of-3) and Hub (single signer)

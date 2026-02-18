@@ -48,10 +48,9 @@
  */
 
 import type { Env, EntityReplica, EntityInput, AccountMachine, SettlementOp } from './types';
-import { QUOTE_EXPIRY_MS, REFERENCE_TOKEN_ID } from './types';
 import { isLeftEntity } from './entity-id-utils';
 import { resolveEntityProposerId } from './state-helpers';
-import { deriveDelta } from './account-utils';
+import { normalizeRebalanceMatchingStrategy } from './rebalance-policy';
 
 // ═══════════════════════════════════════════════════════════════════════
 // Types
@@ -80,7 +79,9 @@ export interface CrontabState {
 // Configuration constants
 export const ACCOUNT_TIMEOUT_MS = 30000; // 30 seconds (configurable)
 export const ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS = 10000; // Check every 10 seconds
+export const HUB_REBALANCE_INTERVAL_MS = 3000; // Default production poll cadence (override via hub config if needed)
 export const HUB_PENDING_BROADCAST_STALE_MS = 120000; // 2 minutes without finalize = stale
+export const HUB_SUBMITTED_REQUEST_STALE_MS = 5 * 60 * 1000; // 5 minutes since jBatch handoff => mark as stale/manual
 
 /**
  * Initialize crontab state for an entity
@@ -96,16 +97,9 @@ export function initCrontab(): CrontabState {
     handler: checkAccountTimeoutsHandler,
   });
 
-  tasks.set('broadcastBatch', {
-    name: 'broadcastBatch',
-    intervalMs: 5000, // Broadcast every 5 seconds (2019src.txt pattern)
-    lastRun: 0,
-    handler: broadcastBatchHandler,
-  });
-
   tasks.set('hubRebalance', {
     name: 'hubRebalance',
-    intervalMs: 30000, // Check rebalance every 30s (production interval)
+    intervalMs: HUB_REBALANCE_INTERVAL_MS,
     lastRun: 0,
     handler: hubRebalanceHandler,
   });
@@ -458,168 +452,12 @@ export function getAccountTimeoutStats(replica: EntityReplica): {
 }
 
 /**
- * Broadcast jBatch to Depository contract
- * Reference: 2019src.txt lines 3384-3399
- */
-async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<EntityInput[]> {
-  const outputs: EntityInput[] = [];
-
-  // Initialize jBatch on first use
-  if (!replica.state.jBatchState) {
-    const { initJBatch } = await import('./j-batch');
-    replica.state.jBatchState = initJBatch();
-  }
-
-  const { shouldBroadcastBatch, isBatchEmpty } = await import('./j-batch');
-
-  // Check if we should broadcast
-  if (!shouldBroadcastBatch(replica.state.jBatchState, replica.state.timestamp)) {
-    return outputs; // Nothing to broadcast yet
-  }
-
-  if (isBatchEmpty(replica.state.jBatchState.batch)) {
-    return outputs;
-  }
-
-  console.log(`📤 CRONTAB: jBatch ready for broadcast (entity ${replica.entityId.slice(-4)})`);
-
-  // Get jurisdiction config from entity (set by server.ts after J-adapter init)
-  const jurisdiction = replica.state.config.jurisdiction;
-  if (!jurisdiction) {
-    console.warn(`⚠️ No jurisdiction for entity ${replica.entityId.slice(-4)} - skipping batch broadcast`);
-    return outputs;
-  }
-
-  const signerId = replica.state.config.validators[0];
-  if (!signerId) {
-    console.warn(`⚠️ No signerId for entity ${replica.entityId.slice(-4)} - cannot sign batch`);
-    return outputs;
-  }
-
-  // Get BrowserVM instance from runtime (proper architecture - not window global)
-  const { getBrowserVMInstance } = await import('./evm');
-  const browserVM = getBrowserVMInstance(env);
-  if (browserVM) {
-    console.log(`📤 CRONTAB: Using BrowserVM for batch broadcast`);
-  }
-
-  // Broadcast batch to Depository contract (or BrowserVM in browser mode)
-  const { broadcastBatch } = await import('./j-batch');
-  const result = await broadcastBatch(
-    env,
-    replica.entityId,
-    replica.state.jBatchState,
-    jurisdiction,
-    (browserVM || undefined) as any,
-    replica.state.timestamp,
-    signerId,
-  );
-
-  if (result.success) {
-    console.log(`✅ jBatch broadcasted successfully: ${result.txHash}`);
-    // Keep pendingBroadcast latched until on-chain confirmation (HankoBatchProcessed).
-    // This prevents duplicate consumption of requestedRebalance before the batch finalizes.
-    // Recovery from a stuck latch is handled by HUB_PENDING_BROADCAST_STALE_MS guard.
-
-    // CRITICAL: In BrowserVM mode, processBatch returns events directly.
-    // There is no j-watcher to pick them up. We must inject them as j_event
-    // entityTxs so the bilateral state (collateral, reserves) gets updated.
-    // AccountSettled events must reach BOTH left and right entities for 2-of-2 consensus.
-    if (result.events && result.events.length > 0) {
-      const { isEventRelevantToEntity, rawEventToJEvents } = await import('./jadapter/helpers');
-      console.log(`📥 BATCH-EVENTS: ${result.events.length} raw events from processBatch`);
-
-      // Collect all entity IDs that exist in this runtime
-      const allEntityIds: string[] = [];
-      for (const [, r] of env.eReplicas) {
-        if (r?.entityId) allEntityIds.push(String(r.entityId).toLowerCase());
-      }
-
-      const observedAt = replica.state.timestamp || 0;
-      // For each entity, check which events are relevant and convert to j-event format
-      for (const targetEntityId of allEntityIds) {
-        const jEvents: Array<{ type: string; data: Record<string, any> }> = [];
-        for (const rawEvent of result.events) {
-          const eventName = rawEvent.event || rawEvent.eventName || rawEvent.name || 'unknown';
-          const args = rawEvent.args || {};
-          const blockNumber = Number(rawEvent.blockNumber ?? 0);
-          // Check if this entity should see this event
-          const relevant = isEventRelevantToEntity(
-            { name: eventName, args, blockNumber, blockHash: '', transactionHash: '' },
-            targetEntityId,
-          );
-          if (!relevant) continue;
-          // Convert raw event to parsed j-event(s) for this entity
-          const parsed = rawEventToJEvents(
-            {
-              name: eventName,
-              args,
-              blockNumber,
-              blockHash: rawEvent.blockHash || '0x',
-              transactionHash: rawEvent.transactionHash || result.txHash || '0x',
-            },
-            targetEntityId,
-          );
-          jEvents.push(...parsed);
-        }
-        if (jEvents.length === 0) continue;
-
-        console.log(`📥 BATCH-EVENTS: ${jEvents.length} j-events for entity ${targetEntityId.slice(-4)}`);
-        outputs.push({
-          entityId: targetEntityId,
-          signerId: 'j-event',
-          entityTxs: [
-            {
-              type: 'j_event',
-              data: {
-                from: 'j-event',
-                events: jEvents,
-                observedAt,
-                blockNumber: Number(result.events[0]?.blockNumber ?? 0),
-                blockHash: result.events[0]?.blockHash || '0x',
-                transactionHash: result.txHash || '0x',
-              },
-            },
-          ],
-        });
-      }
-    }
-
-    // Generate success message
-    outputs.push({
-      entityId: replica.entityId,
-      signerId: 'system',
-      entityTxs: [
-        {
-          type: 'chatMessage',
-          data: {
-            message: `📤 Batch broadcasted: ${result.txHash?.slice(0, 16)}...`,
-            timestamp: replica.state.timestamp,
-            metadata: {
-              type: 'BATCH_BROADCAST',
-              txHash: result.txHash,
-              eventsApplied: result.events?.length ?? 0,
-            },
-          },
-        },
-      ],
-    });
-  } else {
-    console.error(`❌ jBatch broadcast failed: ${result.error}`);
-  }
-
-  return outputs;
-}
-
-/**
  * Hub Rebalance Handler
- * Bilateral quote-based rebalance flow. See docs/rebalance.md for full spec.
+ * Prepaid request_collateral flow (no quotes).
  *
- * Phase 1: Execute accepted quotes (deposit_collateral + fee collection)
- * Phase 2: Send new quotes for accounts below softLimit or with pending requests
- *
- * Matching: configurable HNW (biggest first) or FIFO (oldest quote first)
- * Reference: 2019src.txt lines 2973-3114
+ * Users enqueue request_collateral and prepay fee in bilateral frame.
+ * Hub consumes pending requests, adds direct R→C ops to jBatch, and broadcasts.
+ * Hub never auto-refunds in crontab; any refund must be explicit/manual.
  */
 async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<EntityInput[]> {
   // Only hubs should run the rebalance handler
@@ -628,17 +466,34 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
   const outputs: EntityInput[] = [];
   const signerId = resolveEntityProposerId(_env, replica.entityId, 'hub-rebalance');
   const now = replica.state.timestamp; // DETERMINISTIC: use entity's own timestamp
-  const strategy = replica.state.hubRebalanceConfig.matchingStrategy || 'hnw';
+  const strategy = normalizeRebalanceMatchingStrategy(replica.state.hubRebalanceConfig.matchingStrategy);
+  const rebalanceBaseFee = replica.state.hubRebalanceConfig.rebalanceBaseFee ?? 10n ** 17n;
+  const rebalanceLiquidityFeeBps =
+    replica.state.hubRebalanceConfig.rebalanceLiquidityFeeBps ??
+    replica.state.hubRebalanceConfig.minFeeBps ??
+    1n;
+  const rebalanceGasFee = replica.state.hubRebalanceConfig.rebalanceGasFee ?? 0n;
+  const currentPolicyVersion = Number.isFinite(replica.state.hubRebalanceConfig.policyVersion)
+    && replica.state.hubRebalanceConfig.policyVersion > 0
+    ? replica.state.hubRebalanceConfig.policyVersion
+    : 1;
   const hubId = replica.entityId;
+  const emitRebalanceDebug = (payload: Record<string, unknown>) => {
+    const p2p = (_env as any)?.runtimeState?.p2p;
+    if (p2p && typeof p2p.sendDebugEvent === 'function') {
+      p2p.sendDebugEvent({
+        level: 'info',
+        code: 'REB_STEP',
+        hubId,
+        ...payload,
+      });
+    }
+  };
 
   // ═══════════════════════════════════════════════════════════════════
-  // DIRECT R→C: Hub deposits collateral for users with uncollateralized debt.
-  //
-  // NO quotes. NO bilateral frames. Hub just adds R→C to jBatch.
-  // R→C is UNILATERAL — hub is adding security, user always benefits.
-  // broadcastBatchHandler will submit the jBatch on-chain.
-  //
-  // Reference: 2019src.txt lines 2973-3114 (rebalance_channels.ts)
+  // DIRECT R→C: process explicit prepaid request_collateral only.
+  // No proactive hub risk: if user did not prepay, hub does nothing.
+  // Hub builds jBatch and broadcasts immediately in this same task tick.
   // ═══════════════════════════════════════════════════════════════════
 
   // Initialize jBatch if needed
@@ -669,84 +524,181 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     effectiveReserves.set(tokenKey, amount);
   }
 
-  // Collect R→C targets from TWO sources:
-  // 1. User's explicit request_collateral (requestedRebalance map)
-  // 2. Hub's own detection of uncollateralized debt > softLimit (fallback)
-  type R2CTarget = { counterpartyId: string; tokenId: number; amount: bigint };
+  type R2CTarget = {
+    counterpartyId: string;
+    tokenId: number;
+    amount: bigint;
+    requestedAt: number;
+    feePaidUpfront: bigint;
+  };
   const targets: R2CTarget[] = [];
-  const handledTokens = new Set<string>(); // "counterpartyId:tokenId" → avoid duplicates
 
   for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
     const hubIsLeft = isLeftEntity(hubId, counterpartyId);
+    if (!accountMachine.requestedRebalance || accountMachine.requestedRebalance.size === 0) continue;
 
-    // SOURCE 1: User-initiated request_collateral (highest priority)
-    // Fee is deferred and charged on AccountSettled fulfillment.
-    if (accountMachine.requestedRebalance && accountMachine.requestedRebalance.size > 0) {
-      for (const [tokenId, requestedAmount] of accountMachine.requestedRebalance.entries()) {
-        if (requestedAmount <= 0n) continue;
-        const feeState = accountMachine.requestedRebalanceFeeState?.get(tokenId);
-        const minFeeBps = replica.state.hubRebalanceConfig?.minFeeBps ?? 10n;
-        const minFee = (requestedAmount * minFeeBps) / 10000n;
-        if (!feeState || feeState.remainingFee < minFee) {
-          console.warn(
-            `⚠️ R→C request rejected (fee too low): token=${tokenId} cp=${counterpartyId.slice(-4)} ` +
-            `remainingFee=${feeState?.remainingFee ?? 0n} < minFee=${minFee} (minFeeBps=${minFeeBps})`,
-          );
-          continue;
-        }
+    for (const [tokenId, requestedAmountRaw] of accountMachine.requestedRebalance.entries()) {
+      if (requestedAmountRaw <= 0n) continue;
 
-        const reserve = effectiveReserves.get(String(tokenId)) || 0n;
-        const depositAmount = requestedAmount > reserve ? reserve : requestedAmount;
-        if (depositAmount > 0n) {
-          targets.push({ counterpartyId, tokenId, amount: depositAmount });
-          effectiveReserves.set(String(tokenId), reserve - depositAmount);
-          handledTokens.add(`${counterpartyId}:${tokenId}`);
-          console.log(
-            `🔄 R→C from user request: ${depositAmount} token ${tokenId} → ${counterpartyId.slice(-4)} (requested=${requestedAmount})`,
-          );
-        } else {
-          console.warn(
-            `⚠️ R→C request pending but skipped (zero reserve): token=${tokenId} cp=${counterpartyId.slice(-4)} requested=${requestedAmount}`,
-          );
-        }
+      const feeState = accountMachine.requestedRebalanceFeeState?.get(tokenId);
+      if (!feeState) {
+        console.warn(
+          `⚠️ R→C request dropped (missing fee state): token=${tokenId} cp=${counterpartyId.slice(-4)}`,
+        );
+        emitRebalanceDebug({
+          step: 2,
+          status: 'error',
+          event: 'request_dropped_missing_fee_state',
+          counterpartyId,
+          tokenId,
+        });
+        accountMachine.requestedRebalance.delete(tokenId);
+        continue;
       }
-    }
+      const prepaidFee = feeState.feePaidUpfront;
+      const requestedAt = feeState.requestedAt;
+      const jBatchSubmittedAt = feeState.jBatchSubmittedAt || 0;
+      const submittedAgeMs = jBatchSubmittedAt > 0 ? now - jBatchSubmittedAt : 0;
+      const submittedBatchStale = jBatchSubmittedAt > 0 && submittedAgeMs >= HUB_SUBMITTED_REQUEST_STALE_MS;
 
-    // SOURCE 2: Hub auto-detection (fallback for accounts without explicit request)
-    for (const [tokenId, delta] of accountMachine.deltas.entries()) {
-      const key = `${counterpartyId}:${tokenId}`;
-      if (handledTokens.has(key)) continue; // Already handled by user request
+      // Once a request is handed to J-batch, keep refund gates blocked while the
+      // submission is fresh. If submission marker goes stale, re-enable refund gates
+      // (policy/timeout/fee) but still block duplicate R→C enqueue below.
+      // Partial fills reset this marker in j-events.
+      if (jBatchSubmittedAt > 0 && !submittedBatchStale) {
+        // In-flight request already handed to J-batch: skip duplicate enqueue silently.
+        continue;
+      }
+
+      // Policy mismatch is not auto-refunded; leave request pending for explicit manual action.
+      if (jBatchSubmittedAt <= 0 && (feeState.policyVersion || 0) !== currentPolicyVersion) {
+        console.warn(
+          `⏸️ R→C request pending (policy mismatch, manual action required): token=${tokenId} cp=${counterpartyId.slice(-4)} ` +
+          `reqPolicy=${feeState.policyVersion} hubPolicy=${currentPolicyVersion}`,
+        );
+        emitRebalanceDebug({
+          step: 2,
+          status: 'blocked',
+          event: 'policy_mismatch_manual',
+          counterpartyId,
+          tokenId,
+          requestPolicyVersion: feeState.policyVersion || 0,
+          hubPolicyVersion: currentPolicyVersion,
+        });
+        continue;
+      }
+
+      // Stale already-submitted requests remain frozen for manual handling.
+      if (jBatchSubmittedAt > 0) {
+        // Stale in-flight requests are also skipped to avoid duplicate submissions.
+        continue;
+      }
+
+      const minFee =
+        rebalanceBaseFee +
+        rebalanceGasFee +
+        (requestedAmountRaw * rebalanceLiquidityFeeBps) / 10000n;
+      if (prepaidFee < minFee) {
+        console.warn(
+          `⏸️ R→C request pending (prepaid fee too low, manual action required): token=${tokenId} cp=${counterpartyId.slice(-4)} ` +
+          `prepaid=${prepaidFee} < requiredFee=${minFee} (base=${rebalanceBaseFee},liqBps=${rebalanceLiquidityFeeBps},gas=${rebalanceGasFee})`,
+        );
+        emitRebalanceDebug({
+          step: 2,
+          status: 'blocked',
+          event: 'prepaid_fee_too_low_manual',
+          counterpartyId,
+          tokenId,
+          prepaidFee: String(prepaidFee),
+          requiredFee: String(minFee),
+        });
+        continue;
+      }
+
+      // If handoff to J-batch went stale, keep request frozen until one of the
+      // refund gates above applies (typically timeout). Avoid duplicate R→C enqueue.
+      if (submittedBatchStale) {
+        emitRebalanceDebug({
+          step: 2,
+          status: 'blocked',
+          event: 'request_submitted_stale_manual',
+          counterpartyId,
+          tokenId,
+          submittedAgeMs,
+        });
+        continue;
+      }
+
+      const delta = accountMachine.deltas.get(tokenId);
+      if (!delta) {
+        console.warn(`⚠️ R→C request ignored (missing delta): token=${tokenId} cp=${counterpartyId.slice(-4)}`);
+        emitRebalanceDebug({
+          step: 2,
+          status: 'error',
+          event: 'request_missing_delta',
+          counterpartyId,
+          tokenId,
+        });
+        continue;
+      }
 
       const totalDelta = delta.ondelta + delta.offdelta;
-      // Hub's debt to user: LEFT with negative total, or RIGHT with positive total
       const hubDebt = hubIsLeft ? (totalDelta < 0n ? -totalDelta : 0n) : totalDelta > 0n ? totalDelta : 0n;
       const uncollateralized = hubDebt > delta.collateral ? hubDebt - delta.collateral : 0n;
+      if (uncollateralized <= 0n) {
+        emitRebalanceDebug({
+          step: 2,
+          status: 'ok',
+          event: 'request_cleared_already_collateralized',
+          counterpartyId,
+          tokenId,
+        });
+        accountMachine.requestedRebalance.delete(tokenId);
+        accountMachine.requestedRebalanceFeeState?.delete(tokenId);
+        continue;
+      }
 
-      // Hub-side trigger threshold (independent of bilateral user policy).
-      // User policy gates user-initiated requests; hub policy gates proactive collateralization.
-      const softLimit = replica.state.hubRebalanceConfig?.minCollateralThreshold ?? 0n;
-
-      if (uncollateralized > softLimit) {
-        const reserve = effectiveReserves.get(String(tokenId)) || 0n;
-        const depositAmount = uncollateralized > reserve ? reserve : uncollateralized;
-        if (depositAmount > 0n) {
-          targets.push({ counterpartyId, tokenId, amount: depositAmount });
-          effectiveReserves.set(String(tokenId), reserve - depositAmount);
-        } else {
-          console.warn(
-            `⚠️ R→C auto-detect skipped (zero reserve): token=${tokenId} cp=${counterpartyId.slice(-4)} uncollateralized=${uncollateralized}`,
-          );
-        }
+      const requestedAmount = requestedAmountRaw > uncollateralized ? uncollateralized : requestedAmountRaw;
+      const reserve = effectiveReserves.get(String(tokenId)) || 0n;
+      const depositAmount = requestedAmount > reserve ? reserve : requestedAmount;
+      if (depositAmount > 0n) {
+        targets.push({
+          counterpartyId,
+          tokenId,
+          amount: depositAmount,
+          requestedAt: feeState.requestedAt || 0,
+          feePaidUpfront: prepaidFee,
+        });
+        effectiveReserves.set(String(tokenId), reserve - depositAmount);
+      } else {
+        console.warn(
+          `⚠️ R→C request pending but skipped (zero reserve): token=${tokenId} cp=${counterpartyId.slice(-4)} requested=${requestedAmount}`,
+        );
+        emitRebalanceDebug({
+          step: 2,
+          status: 'blocked',
+          event: 'hub_reserve_zero',
+          counterpartyId,
+          tokenId,
+          requestedAmount: String(requestedAmount),
+        });
       }
     }
   }
 
-  // Sort by strategy (biggest first for HNW)
-  if (strategy === 'hnw') {
-    targets.sort((a, b) => Number(b.amount - a.amount));
+  const compareBigDesc = (a: bigint, b: bigint): number => (a === b ? 0 : a > b ? -1 : 1);
+  const compareBigAsc = (a: bigint, b: bigint): number => (a === b ? 0 : a < b ? -1 : 1);
+
+  if (strategy === 'amount') {
+    targets.sort((a, b) => compareBigDesc(a.amount, b.amount) || compareBigAsc(BigInt(a.requestedAt), BigInt(b.requestedAt)));
+  } else if (strategy === 'fee') {
+    targets.sort((a, b) => compareBigDesc(a.feePaidUpfront, b.feePaidUpfront) || compareBigDesc(a.amount, b.amount));
+  } else {
+    targets.sort((a, b) => compareBigAsc(BigInt(a.requestedAt), BigInt(b.requestedAt)) || compareBigDesc(a.amount, b.amount));
   }
 
-  // Add R→C directly to jBatch — no quotes, no bilateral frames
+  // Add R→C directly to jBatch — no quotes, no bilateral frames.
+  let queuedCount = 0;
   if (targets.length > 0) {
     const { batchAddReserveToCollateral } = await import('./j-batch');
     for (const target of targets) {
@@ -758,14 +710,66 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
           target.tokenId,
           target.amount,
         );
+        const targetAccount = replica.state.accounts.get(target.counterpartyId);
+        const targetFeeState = targetAccount?.requestedRebalanceFeeState?.get(target.tokenId);
+        if (targetFeeState && (targetFeeState.jBatchSubmittedAt || 0) <= 0) {
+          targetFeeState.jBatchSubmittedAt = now;
+        }
+        queuedCount += 1;
         console.log(
           `✅ R→C queued: ${target.amount} token ${target.tokenId} → ${target.counterpartyId.slice(-4)} (direct jBatch, no quotes)`,
         );
+        console.log(
+          `[REB][2][BATCH_ADD] hub=${hubId.slice(-8)} cp=${target.counterpartyId.slice(-8)} token=${target.tokenId} amount=${target.amount} requestedAt=${target.requestedAt}`,
+        );
+        emitRebalanceDebug({
+          step: 2,
+          status: 'ok',
+          event: 'batch_add',
+          counterpartyId: target.counterpartyId,
+          tokenId: target.tokenId,
+          amount: String(target.amount),
+          requestedAt: target.requestedAt,
+        });
       } catch (err) {
         console.warn(`⚠️ R→C batch add failed for ${target.counterpartyId.slice(-4)}: ${(err as Error).message}`);
+        emitRebalanceDebug({
+          step: 2,
+          status: 'error',
+          event: 'batch_add_failed',
+          counterpartyId: target.counterpartyId,
+          tokenId: target.tokenId,
+          reason: (err as Error).message || 'unknown',
+        });
       }
     }
-    console.log(`🔄 Hub rebalance: ${targets.length} R→C ops added to jBatch (awaiting broadcastBatch)`);
+    if (queuedCount > 0) {
+      console.log(`🔄 Hub rebalance: ${queuedCount} R→C ops queued, forcing immediate j_broadcast`);
+      outputs.push({
+        entityId: replica.entityId,
+        signerId,
+        entityTxs: [{ type: 'j_broadcast', data: {} }],
+      });
+      console.log(
+        `[REB][3][BROADCAST_ENTITY_TX_QUEUED] hub=${hubId.slice(-8)} outputs=1 pendingBroadcast=${replica.state.jBatchState.pendingBroadcast}`,
+      );
+      emitRebalanceDebug({
+        step: 3,
+        status: 'ok',
+        event: 'j_broadcast_queued',
+        queuedCount,
+        pendingBroadcast: !!replica.state.jBatchState.pendingBroadcast,
+      });
+      if (outputs.length === 0) {
+        emitRebalanceDebug({
+          step: 3,
+          status: 'error',
+          event: 'j_broadcast_not_queued',
+          queuedCount,
+        });
+        throw new Error(`REB_STEP3_ASSERT_FAILED: queuedCount=${queuedCount} but no j_broadcast output`);
+      }
+    }
   }
 
   return outputs;

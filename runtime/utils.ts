@@ -472,7 +472,7 @@ export { extractNumberFromEntityId };
 
 /**
  * Get short display ID for entity (always returns string)
- * Numbered entities (< 256**6): "2", "42", "1337"
+ * Numbered entities (< 256**6): "2", "42", "31337"
  * Hash-based entities (>= 256**6): "07FF", "A3B2"
  */
 export function getEntityShortId(entityId: string): string {

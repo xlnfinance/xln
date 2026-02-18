@@ -108,23 +108,54 @@
   $: halfMax = agg.outTotal > agg.inTotal ? agg.outTotal : agg.inTotal;
   $: pctOf = (v: bigint, base: bigint) => base > 0n ? Number((v * 10000n) / base) / 100 : 0;
 
+  // Normalize BigInt to safe Number for CSS flex values (avoids MAX_SAFE_INTEGER overflow)
+  $: toFlex = (v: bigint) => {
+    const n = Number(v / (10n ** 14n));
+    return n > 0 ? n : (v > 0n ? 1 : 0);
+  };
+
+  // Absolute bar width: proportional to totalCapacity relative to portfolioScale
+  $: barWidthPct = (() => {
+    const scale = BigInt($settings.portfolioScale || 5000) * (10n ** 18n);
+    const total = agg.outTotal + agg.inTotal;
+    if (scale === 0n || total === 0n) return 100;
+    return Math.min(100, Math.max(5, Number(total * 100n / scale)));
+  })();
+
+  // Net balance: positive = net inflow (they owe us more than we owe them)
+  $: netBalance = (agg.inColl + agg.inDebt) - (agg.outColl + agg.outDebt);
+  $: netPositive = netBalance >= 0n;
+  $: absNetBalance = netBalance >= 0n ? netBalance : -netBalance;
+
   $: isPending = account.mempool.length > 0 || (account as any).pendingFrame;
 
-  // Rebalance state: detect if we're waiting for collateralization
-  $: rebalanceState = (() => {
-    const SOFT_LIMIT = 500n * 10n ** 18n; // $500 default — matches autopilot
-    const hasQuote = !!(account as any).activeRebalanceQuote;
-    const quoteAccepted = hasQuote && (account as any).activeRebalanceQuote?.accepted;
-    const hasPendingBatch = !!(account as any).jBatchState?.pendingBroadcast;
+  // Pending prepaid requests (actual request_collateral state)
+  $: pendingRequested = (() => {
+    const map = (account as any).requestedRebalance;
+    if (!map || typeof map.values !== 'function') return 0n;
+    let total = 0n;
+    for (const amount of map.values()) {
+      try {
+        const n = typeof amount === 'bigint' ? amount : BigInt(amount);
+        if (n > 0n) total += n;
+      } catch {
+        // ignore malformed value
+      }
+    }
+    return total;
+  })();
 
+  // Rebalance state: show pending only when there is an actual prepaid request.
+  $: rebalanceState = (() => {
+    const hasPendingBatch = !!(account as any).jBatchState?.pendingBroadcast;
+    const hasPendingRequest = pendingRequested > 0n;
+
+    if (hasPendingRequest) {
+      if (hasPendingBatch) return 'settling'; // On-chain tx in flight
+      return 'pending'; // request_collateral exists and fee was prepaid
+    }
     if (agg.totalCollateral > 0n && agg.uncollateralized === 0n) {
       return 'secured'; // All green — fully collateralized
-    }
-    if (agg.uncollateralized > SOFT_LIMIT) {
-      if (hasPendingBatch) return 'settling'; // On-chain tx in flight
-      if (quoteAccepted) return 'depositing'; // Quote accepted, deposit pending
-      if (hasQuote) return 'quoted'; // Quote received, awaiting accept
-      return 'pending'; // Over soft limit, awaiting hub quote
     }
     if (agg.totalCollateral > 0n && agg.uncollateralized > 0n) {
       return 'partial'; // Some collateral, but not fully covered
@@ -171,36 +202,38 @@
   {#if agg.outTotal > 0n || agg.inTotal > 0n}
     <div class="row-bar">
       <span class="cap-label">OUT {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCap) || '0'}</span>
-      <span class="cap-token">{agg.primarySymbol}{agg.tokenCount > 1 ? ` +${agg.tokenCount - 1}` : ''}</span>
+      <span class="net-balance" class:positive={netPositive} class:negative={!netPositive}>
+        {netPositive ? '+' : '-'}{activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, absNetBalance) || '0'} {agg.primarySymbol}
+      </span>
       <span class="cap-label">IN {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}</span>
     </div>
 
     {#if $settings.barLayout === 'center'}
-      <div class="bar center" class:rebalance-pending={rebalanceState === 'pending' || rebalanceState === 'quoted'} class:rebalance-active={rebalanceState === 'depositing' || rebalanceState === 'settling'} class:rebalance-secured={rebalanceState === 'secured'}>
+      <div class="bar center" style="width:{barWidthPct}%" class:rebalance-pending={rebalanceState === 'pending'} class:rebalance-active={rebalanceState === 'settling'} class:rebalance-secured={rebalanceState === 'secured'}>
         <div class="half out">
-          {#if agg.outCredit > 0n}<div class="seg credit" style="width:{pctOf(agg.outCredit, halfMax)}%"></div>{/if}
-          {#if agg.outColl > 0n}<div class="seg coll" style="width:{pctOf(agg.outColl, halfMax)}%"></div>{/if}
-          {#if agg.outDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending' || rebalanceState === 'quoted'} class:pulsing={rebalanceState === 'depositing' || rebalanceState === 'settling'} style="width:{pctOf(agg.outDebt, halfMax)}%"></div>{/if}
+          {#if agg.outCredit > 0n}<div class="seg credit" style="width:{pctOf(agg.outCredit, halfMax)}%" title="Available: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCredit) || '?'}"></div>{/if}
+          {#if agg.outColl > 0n}<div class="seg coll" style="width:{pctOf(agg.outColl, halfMax)}%" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outColl) || '?'}"></div>{/if}
+          {#if agg.outDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending'} class:pulsing={rebalanceState === 'settling'} style="width:{pctOf(agg.outDebt, halfMax)}%" title="Unsecured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outDebt) || '?'}"></div>{/if}
         </div>
         <div class="mid"></div>
         <div class="half in">
-          {#if agg.inDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending' || rebalanceState === 'quoted'} class:pulsing={rebalanceState === 'depositing' || rebalanceState === 'settling'} style="width:{pctOf(agg.inDebt, halfMax)}%"></div>{/if}
-          {#if agg.inColl > 0n}<div class="seg coll" style="width:{pctOf(agg.inColl, halfMax)}%"></div>{/if}
-          {#if agg.inCredit > 0n}<div class="seg credit" style="width:{pctOf(agg.inCredit, halfMax)}%"></div>{/if}
+          {#if agg.inDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending'} class:pulsing={rebalanceState === 'settling'} style="width:{pctOf(agg.inDebt, halfMax)}%" title="Unsecured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inDebt) || '?'}"></div>{/if}
+          {#if agg.inColl > 0n}<div class="seg coll" style="width:{pctOf(agg.inColl, halfMax)}%" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inColl) || '?'}"></div>{/if}
+          {#if agg.inCredit > 0n}<div class="seg credit" style="width:{pctOf(agg.inCredit, halfMax)}%" title="Available: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCredit) || '?'}"></div>{/if}
         </div>
       </div>
     {:else}
-      <div class="bar sides" class:rebalance-pending={rebalanceState === 'pending' || rebalanceState === 'quoted'} class:rebalance-active={rebalanceState === 'depositing' || rebalanceState === 'settling'} class:rebalance-secured={rebalanceState === 'secured'}>
-        <div class="side out">
-          {#if agg.outDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending' || rebalanceState === 'quoted'} class:pulsing={rebalanceState === 'depositing' || rebalanceState === 'settling'} style="flex:{Number(agg.outDebt)}"></div>{/if}
-          {#if agg.outColl > 0n}<div class="seg coll" style="flex:{Number(agg.outColl)}"></div>{/if}
-          {#if agg.outCredit > 0n}<div class="seg credit" style="flex:{Number(agg.outCredit)}"></div>{/if}
+      <div class="bar sides" style="width:{barWidthPct}%" class:rebalance-pending={rebalanceState === 'pending'} class:rebalance-active={rebalanceState === 'settling'} class:rebalance-secured={rebalanceState === 'secured'}>
+        <div class="side out" style="flex:{toFlex(agg.outTotal || 1n)}">
+          {#if agg.outCredit > 0n}<div class="seg credit" style="flex:{toFlex(agg.outCredit)}" title="Available: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCredit) || '?'}"></div>{/if}
+          {#if agg.outColl > 0n}<div class="seg coll" style="flex:{toFlex(agg.outColl)}" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outColl) || '?'}"></div>{/if}
+          {#if agg.outDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending'} class:pulsing={rebalanceState === 'settling'} style="flex:{toFlex(agg.outDebt)}" title="Unsecured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outDebt) || '?'}"></div>{/if}
         </div>
         <div class="gap"></div>
-        <div class="side in">
-          {#if agg.inDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending' || rebalanceState === 'quoted'} class:pulsing={rebalanceState === 'depositing' || rebalanceState === 'settling'} style="flex:{Number(agg.inDebt)}"></div>{/if}
-          {#if agg.inColl > 0n}<div class="seg coll" style="flex:{Number(agg.inColl)}"></div>{/if}
-          {#if agg.inCredit > 0n}<div class="seg credit" style="flex:{Number(agg.inCredit)}"></div>{/if}
+        <div class="side in" style="flex:{toFlex(agg.inTotal || 1n)}">
+          {#if agg.inDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending'} class:pulsing={rebalanceState === 'settling'} style="flex:{toFlex(agg.inDebt)}" title="Unsecured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inDebt) || '?'}"></div>{/if}
+          {#if agg.inColl > 0n}<div class="seg coll" style="flex:{toFlex(agg.inColl)}" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inColl) || '?'}"></div>{/if}
+          {#if agg.inCredit > 0n}<div class="seg credit" style="flex:{toFlex(agg.inCredit)}" title="Available: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCredit) || '?'}"></div>{/if}
         </div>
       </div>
     {/if}
@@ -210,13 +243,7 @@
       <div class="rebalance-indicator {rebalanceState}">
         {#if rebalanceState === 'pending'}
           <span class="rb-dot pending-dot"></span>
-          <span>Awaiting collateral ({activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.uncollateralized) || '?'} unsecured)</span>
-        {:else if rebalanceState === 'quoted'}
-          <span class="rb-dot quoted-dot"></span>
-          <span>Quote received</span>
-        {:else if rebalanceState === 'depositing'}
-          <span class="rb-dot depositing-dot"></span>
-          <span>Collateralizing...</span>
+          <span>Awaiting collateral ({activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, pendingRequested) || '?'} requested)</span>
         {:else if rebalanceState === 'settling'}
           <span class="rb-dot settling-dot"></span>
           <span>On-chain settlement</span>
@@ -333,8 +360,10 @@
     letter-spacing: 0.02em;
     margin-bottom: 4px;
   }
-  .cap-label { color: #71717a; font-weight: 500; }
-  .cap-token { color: #a1a1aa; font-weight: 600; }
+  .cap-label { color: #a1a1aa; font-weight: 500; }
+  .net-balance { font-weight: 700; }
+  .net-balance.positive { color: #4ade80; }
+  .net-balance.negative { color: #f87171; }
 
   /* ── Bar core ─────────────────────────────────── */
   .bar {
@@ -346,7 +375,8 @@
     overflow: hidden;
   }
   .seg { min-width: 2px; transition: width 0.3s ease, flex 0.3s ease; position: relative; overflow: hidden; }
-  .seg.credit { background: #52525b; }
+  .seg.credit { background: #a1a1aa; }
+  .half.in .seg.credit, .side.in .seg.credit { background: rgba(34, 211, 238, 0.5); }
   .seg.coll { background: linear-gradient(180deg, #34d399, #10b981); }
   .seg.debt { background: linear-gradient(180deg, #fb7185, #f43f5e); }
 
@@ -402,7 +432,7 @@
 
   /* Sides mode */
   .bar.sides { gap:3px; background:transparent; }
-  .side { flex:1; display:flex; align-items:stretch; height:8px; background:#27272a; border-radius:4px; overflow:hidden; }
+  .side { display:flex; align-items:stretch; height:8px; background:#27272a; border-radius:4px; overflow:hidden; }
   .side.out { justify-content: flex-end; }
   .side.in { justify-content: flex-start; }
   .gap { width:2px; flex-shrink:0; }
