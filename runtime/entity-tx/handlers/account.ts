@@ -8,7 +8,7 @@ import { isLeftEntity } from '../../entity-id-utils';
 import { batchAddRevealSecret, initJBatch } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
 import { sanitizeBaseFee } from '../../routing/fees';
-import { cancelHook as cancelScheduledHook } from '../../entity-crontab';
+import { cancelHook as cancelScheduledHook, scheduleHook as scheduleCrontabHook } from '../../entity-crontab';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counterpartyId: string): string | null => {
@@ -179,6 +179,39 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     throw new Error(`CRITICAL: AccountMachine creation failed for ${input.fromEntityId}`);
   }
 
+  // Dispute freeze: once account is disputed, do not accept new bilateral inputs
+  // until dispute lifecycle is completed and account is reopened/activated.
+  if ((accountMachine.status ?? 'active') === 'disputed') {
+    const frameTxTypes = input.newAccountFrame?.accountTxs?.map((tx) => tx.type) || [];
+    const dropMsg =
+      `🛑 Disputed account input dropped for ${counterpartyId.slice(-4)} ` +
+      `(height=${input.height ?? input.newAccountFrame?.height ?? 'n/a'}, txs=[${frameTxTypes.join(',')}], ack=${!!input.prevHanko})`;
+    console.error(dropMsg);
+    addMessage(newState, dropMsg);
+    if (!replayMode) {
+      env.error(
+        'consensus',
+        'DISPUTED_ACCOUNT_INPUT_DROPPED',
+        {
+          fromEntityId: input.fromEntityId,
+          toEntityId: input.toEntityId,
+          height: input.height ?? input.newAccountFrame?.height ?? null,
+          txTypes: frameTxTypes,
+          hasAck: !!input.prevHanko,
+        },
+        state.entityId,
+      );
+    }
+    return {
+      newState,
+      outputs,
+      mempoolOps,
+      swapOffersCreated: allSwapOffersCreated,
+      swapOffersCancelled: allSwapOffersCancelled,
+      ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
+    };
+  }
+
   // NOTE: Credit limits start at 0 - no auto-credit on account opening
   // Credit must be explicitly extended via set_credit_limit transaction
 
@@ -243,6 +276,21 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         },
         newState.entityId,
       );
+
+      // Hub rebalance must remain global (all accounts matched together), but we
+      // still want it to react quickly after any committed account frame.
+      // Schedule a one-shot global rebalance kick for the next crontab wake-up.
+      if (newState.hubRebalanceConfig && newState.crontabState) {
+        scheduleCrontabHook(newState.crontabState, {
+          id: 'hub-rebalance-kick',
+          triggerAt: newState.timestamp,
+          type: 'hub_rebalance_kick',
+          data: {
+            reason: 'account_frame_committed',
+            counterpartyId,
+          },
+        });
+      }
 
       // Multi-signer: Collect hashes from result during processing
       if (result.hashesToSign) {

@@ -17,7 +17,7 @@
 
 import type { Env, EntityInput, EntityReplica, Delta } from '../types';
 import type { JAdapter } from '../jadapter/types';
-import { getProcess, getApplyRuntimeInput, usd, snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge } from './helpers';
+import { getProcess, getApplyRuntimeInput, usd, snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain } from './helpers';
 import { ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter } from './boot';
 import { formatRuntime } from '../runtime-ascii';
 import { isLeft } from '../account-utils';
@@ -671,6 +671,7 @@ export async function lockAhb(env: Env): Promise<void> {
     // CRITICAL: Process bilateral j_event_claim frame ACKs (same as ahb.ts)
     await process(env); // Process j_event_claim frame proposals
     await process(env); // Process ACK responses and commit frames
+    await syncChain(env, 5); // Drain residual ACK/claim traffic before bilateral assertions
 
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K
     const [, aliceRep9] = findReplica(env, alice.id);

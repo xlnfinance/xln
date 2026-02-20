@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { routePreview } from '../../stores/routePreviewStore';
@@ -38,27 +38,37 @@
     totalFee: bigint;
     senderAmount: bigint;
     recipientAmount: bigint;
-    probability: number;
-    obfuscationScore: number;
   };
   let routes: RouteOption[] = [];
   let selectedRouteIndex = -1;
   let preflightError: string | null = null;
   let repeatIntervalMs = 0;
   let repeatTimer: ReturnType<typeof setInterval> | null = null;
+  let routeSortMode: 'fee' | 'hops' = 'fee';
+  let showFullEntityId = false;
   let profileExpanded = false;
+  let serverEntityNames = new Map<string, string>();
   const REPEAT_OPTIONS = [
     { value: 0, label: 'No repeat' },
     { value: 1_000, label: 'Repeat 1s' },
     { value: 10_000, label: 'Repeat 10s' },
     { value: 60_000, label: 'Repeat 1m' },
   ];
+  const ROUTE_SORT_OPTIONS: Array<{ value: 'fee' | 'hops'; label: string }> = [
+    { value: 'fee', label: 'Fee (lowest first)' },
+    { value: 'hops', label: 'Hops (fewest first)' },
+  ];
+  // If a hop does not publish fee metadata, use a conservative default so
+  // unknown peers cannot appear artificially cheaper than known hubs.
+  const DEFAULT_UNKNOWN_HOP_FEE_PPM = 10_000;
   const MAX_ROUTES = 100;
+  const MAX_CANDIDATE_PATHS = 500;
   const MAX_PATH_HOPS = 6;
-  const MIN_SELF_INTERMEDIATES = 2;
+  const MIN_SELF_CYCLE_INTERMEDIATES = 2;
 
   type GossipAccount = {
     counterpartyId: string;
+    tokenCapacities?: unknown;
   };
 
   type GossipProfileView = {
@@ -78,53 +88,68 @@
   $: currentEnv = contextEnv ? $contextEnv : (isolatedEnv ? $isolatedEnv : $xlnEnvironment);
   $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
 
+  const normalizeEntityId = (id: string | null | undefined): string => String(id || '').trim().toLowerCase();
+
   // All entities for dropdown (local + gossip network)
   $: allEntities = (() => {
-    const ids = new Set<string>();
-    if (entityId) ids.add(entityId);
+    const ids = new Map<string, string>();
+    const add = (raw: string | null | undefined) => {
+      const canonical = String(raw || '').trim();
+      const norm = normalizeEntityId(canonical);
+      if (!norm) return;
+      if (!ids.has(norm)) ids.set(norm, canonical);
+    };
+    add(entityId);
     if (currentReplicas) {
       for (const key of currentReplicas.keys() as IterableIterator<string>) {
         const localEntityId = key.split(':')[0];
-        if (localEntityId) ids.add(localEntityId);
+        add(localEntityId);
       }
     }
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
-      if (profile?.entityId) ids.add(String(profile.entityId));
+      add(profile?.entityId);
     }
-    return Array.from(ids).sort();
+    return Array.from(ids.values()).sort();
   })();
 
   // Contacts for selector: self first, then known names from gossip, then parent-provided contacts.
   $: selectorContacts = (() => {
     const byEntity = new Map<string, { name: string; entityId: string }>();
-    if (entityId) byEntity.set(entityId, { name: 'Self', entityId });
+    const put = (rawEntityId: string, name: string) => {
+      const canonical = String(rawEntityId || '').trim();
+      const norm = normalizeEntityId(canonical);
+      if (!norm || byEntity.has(norm)) return;
+      byEntity.set(norm, { name, entityId: canonical });
+    };
+    if (entityId) put(entityId, 'Self');
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
-      const id = profile?.entityId;
-      if (!id || byEntity.has(id)) continue;
+      const id = String(profile?.entityId || '').trim();
+      if (!id) continue;
       const name = profile?.metadata?.name?.trim?.();
-      if (name) byEntity.set(id, { name, entityId: id });
+      if (name) put(id, name);
     }
     for (const contact of contacts) {
-      if (!contact?.entityId || byEntity.has(contact.entityId)) continue;
-      byEntity.set(contact.entityId, contact);
+      if (!contact?.entityId) continue;
+      put(contact.entityId, contact.name);
     }
-    const self = entityId ? byEntity.get(entityId) : null;
+    const self = entityId ? byEntity.get(normalizeEntityId(entityId)) : null;
     const rest = Array.from(byEntity.values())
-      .filter((c) => c.entityId !== entityId)
+      .filter((c) => normalizeEntityId(c.entityId) !== normalizeEntityId(entityId))
       .sort((a, b) => a.name.localeCompare(b.name));
     return self ? [self, ...rest] : rest;
   })();
 
-  // Default recipient to self for obfuscated self-route flows.
+  // Default recipient to self for loopback routing flows.
   $: if (!targetEntityId && entityId) {
     targetEntityId = entityId;
   }
 
   $: selectedTargetProfile = (() => {
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
-    return profiles.find((profile: GossipProfileView) => profile?.entityId === targetEntityId) as GossipProfileView | undefined;
+    const targetNorm = normalizeEntityId(targetEntityId);
+    return profiles.find((profile: GossipProfileView) => normalizeEntityId(profile?.entityId) === targetNorm) as GossipProfileView | undefined;
   })();
 
   $: selectedTargetProfileJson = selectedTargetProfile
@@ -156,13 +181,40 @@
 
   function getEntityName(id: string): string {
     if (!id) return 'Unknown';
-    if (id === entityId) return 'Self';
-    const contact = selectorContacts.find((c) => c.entityId === id);
+    const norm = normalizeEntityId(id);
+    if (norm === normalizeEntityId(entityId)) return 'Self';
+    const contact = selectorContacts.find((c) => normalizeEntityId(c.entityId) === norm);
     if (contact?.name) return contact.name;
+    const serverName = serverEntityNames.get(norm);
+    if (serverName) return serverName;
     const profile = (currentEnv?.gossip?.getProfiles?.() || [])
-      .find((p: GossipProfileView) => p?.entityId === id);
+      .find((p: GossipProfileView) => normalizeEntityId(p?.entityId) === norm);
     const metaName = profile?.metadata?.name;
     return typeof metaName === 'string' && metaName.trim() ? metaName.trim() : id;
+  }
+
+  function getGossipProfileByEntityId(id: string): GossipProfileView | undefined {
+    const norm = normalizeEntityId(id);
+    if (!norm) return undefined;
+    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
+    return profiles.find((p: GossipProfileView) => normalizeEntityId(p?.entityId) === norm) as GossipProfileView | undefined;
+  }
+
+  function isRouteableIntermediary(entity: string): boolean {
+    const profile = getGossipProfileByEntityId(entity);
+    if (!profile) return false;
+    const metadata = (profile.metadata || {}) as Record<string, unknown>;
+    const capabilities = Array.isArray((profile as any).capabilities) ? ((profile as any).capabilities as string[]) : [];
+    const isHub = metadata['isHub'] === true || capabilities.includes('hub') || capabilities.includes('routing');
+    if (!isHub) return false;
+
+    const name = typeof metadata['name'] === 'string' ? metadata['name'].trim() : '';
+    if (!name) return false;
+
+    const routingFeePPM = Number(metadata['routingFeePPM']);
+    if (!Number.isFinite(routingFeePPM) || routingFeePPM < 0) return false;
+
+    return true;
   }
 
   function formatToken(value: bigint): string {
@@ -184,15 +236,34 @@
     return { secret, hashlock };
   }
 
+  type AdjacencyBuildResult = {
+    adjacency: Map<string, Set<string>>;
+    canonicalIds: Map<string, string>;
+  };
+
   // Build bidirectional adjacency from all available sources
-  function buildNetworkAdjacency(env: any, replicas: Map<string, any>): Map<string, Set<string>> {
+  function buildNetworkAdjacency(env: any, replicas: Map<string, any>): AdjacencyBuildResult {
     const adjacency = new Map<string, Set<string>>();
+    const canonicalIds = new Map<string, string>();
+
+    const toNorm = (raw: string | null | undefined): string => normalizeEntityId(raw);
+    const rememberCanonical = (raw: string | null | undefined) => {
+      const canonical = String(raw || '').trim();
+      const norm = toNorm(canonical);
+      if (!norm) return;
+      if (!canonicalIds.has(norm)) canonicalIds.set(norm, canonical);
+    };
 
     const addEdge = (a: string, b: string) => {
-      if (!adjacency.has(a)) adjacency.set(a, new Set());
-      if (!adjacency.has(b)) adjacency.set(b, new Set());
-      adjacency.get(a)!.add(b);
-      adjacency.get(b)!.add(a); // Bidirectional: if A↔B exists, both can route through it
+      const na = toNorm(a);
+      const nb = toNorm(b);
+      if (!na || !nb || na === nb) return;
+      rememberCanonical(a);
+      rememberCanonical(b);
+      if (!adjacency.has(na)) adjacency.set(na, new Set());
+      if (!adjacency.has(nb)) adjacency.set(nb, new Set());
+      adjacency.get(na)!.add(nb);
+      adjacency.get(nb)!.add(na); // Bidirectional: if A↔B exists, both can route through it
     };
 
     // Source 1: Local replicas (our own entities' accounts)
@@ -207,13 +278,14 @@
     // Source 2: Gossip profiles (network-wide account graph)
     const profiles = env?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
+      rememberCanonical(profile?.entityId);
       if (!profile.entityId || !profile.accounts) continue;
       for (const account of profile.accounts) {
         addEdge(profile.entityId, account.counterpartyId);
       }
     }
 
-    return adjacency;
+    return { adjacency, canonicalIds };
   }
 
   function parseAmountToWei(input: string, decimals = 18): bigint {
@@ -258,38 +330,116 @@
     return 0n;
   }
 
-  function directionalFeePPM(basePPM: number, outCapacity: bigint, inCapacity: bigint): number {
-    const PPM_DENOM = 1_000_000n;
-    const UTIL_STEP = 50_000n; // 5%
-    const UTIL_CAP = 500_000n; // +50%
-    const total = outCapacity + inCapacity;
-    if (total <= 0n) return sanitizeFeePPM(basePPM, 10);
-    let util = ((total - outCapacity) * PPM_DENOM) / total;
-    if (util > UTIL_CAP) util = UTIL_CAP;
-    util = (util / UTIL_STEP) * UTIL_STEP;
-    const base = BigInt(sanitizeFeePPM(basePPM, 10));
-    return Number(base + (base * util) / PPM_DENOM);
+  function getTokenCapacitySnapshot(tokenCapacities: unknown, token: number): { outCapacity: bigint; inCapacity: bigint } | null {
+    if (!tokenCapacities) return null;
+    const mapLike = tokenCapacities as { get?: (key: number | string) => any; [key: string]: any };
+    const tokenCap = mapLike.get?.(token)
+      ?? mapLike.get?.(String(token))
+      ?? mapLike[String(token)]
+      ?? mapLike[token];
+    if (!tokenCap) return null;
+    const outCapacity = sanitizeBigInt(tokenCap?.outCapacity ?? 0n);
+    const inCapacity = sanitizeBigInt(tokenCap?.inCapacity ?? 0n);
+    if (outCapacity <= 0n) return null;
+    return { outCapacity, inCapacity };
   }
 
-  function quoteHopFee(from: string, to: string, token: number, amountIn: bigint): { fee: bigint; feePPM: number } {
+  function getGossipAccountCapacity(owner: string, counterparty: string, token: number): { outCapacity: bigint; inCapacity: bigint } | null {
+    const ownerNorm = normalizeEntityId(owner);
+    const cpNorm = normalizeEntityId(counterparty);
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
-    const profile = profiles.find((p: any) => p?.entityId === from);
-    const basePpm = sanitizeFeePPM(profile?.metadata?.routingFeePPM ?? 10, 10);
+    const profile = profiles.find((p: any) => normalizeEntityId(p?.entityId) === ownerNorm);
+    if (!profile || !Array.isArray(profile.accounts)) return null;
+    const account = profile.accounts.find((a: any) => normalizeEntityId(String(a?.counterpartyId || '')) === cpNorm);
+    return getTokenCapacitySnapshot(account?.tokenCapacities, token);
+  }
+
+  function getDirectionalEdgeCapacity(from: string, to: string, token: number): bigint {
+    // A -> B is valid if sender side can send (A.out) and receiver side can accept (B.in).
+    // Use both local+gossip, then take conservative min when both sides are known.
+    const fromLocal = getLocalAccountCapacity(from, to, token);
+    const toLocal = getLocalAccountCapacity(to, from, token);
+    const fromGossip = getGossipAccountCapacity(from, to, token);
+    const toGossip = getGossipAccountCapacity(to, from, token);
+
+    const fromOut = [
+      fromLocal?.outCapacity ?? 0n,
+      fromGossip?.outCapacity ?? 0n,
+    ].reduce((m, v) => (v > m ? v : m), 0n);
+
+    const toIn = [
+      toLocal?.inCapacity ?? 0n,
+      toGossip?.inCapacity ?? 0n,
+    ].reduce((m, v) => (v > m ? v : m), 0n);
+
+    if (fromOut > 0n && toIn > 0n) return fromOut < toIn ? fromOut : toIn;
+    return fromOut > toIn ? fromOut : toIn;
+  }
+
+  function hasOutboundCapacity(from: string, to: string, token: number): boolean {
+    return getDirectionalEdgeCapacity(from, to, token) > 0n;
+  }
+
+  function getLocalAccountCapacity(from: string, to: string, token: number): { outCapacity: bigint; inCapacity: bigint } | null {
+    if (!currentReplicas || !activeXlnFunctions?.deriveDelta) return null;
+    const fromNorm = normalizeEntityId(from);
+    const toNorm = normalizeEntityId(to);
+    for (const [key, replica] of currentReplicas.entries()) {
+      const [replicaEntityId] = key.split(':');
+      if (normalizeEntityId(replicaEntityId) !== fromNorm) continue;
+      const accounts: Map<string, any> | undefined = replica?.state?.accounts;
+      if (!accounts || typeof accounts.entries !== 'function') continue;
+      for (const [counterpartyId, account] of accounts.entries()) {
+        if (normalizeEntityId(counterpartyId) !== toNorm) continue;
+        const deltas = account?.deltas;
+        const delta = deltas?.get?.(token) ?? deltas?.get?.(String(token));
+        if (!delta) return null;
+        const leftEntity = String(account?.leftEntity || '');
+        const rightEntity = String(account?.rightEntity || '');
+        const isLeft = leftEntity
+          ? normalizeEntityId(leftEntity) === fromNorm
+          : (rightEntity ? normalizeEntityId(rightEntity) !== fromNorm : fromNorm < toNorm);
+        const derived = activeXlnFunctions.deriveDelta(delta, isLeft);
+        const outCapacity = sanitizeBigInt((derived as any)?.outCapacity ?? 0n);
+        const inCapacity = sanitizeBigInt((derived as any)?.inCapacity ?? 0n);
+        if (outCapacity <= 0n && inCapacity <= 0n) return null;
+        return { outCapacity, inCapacity };
+      }
+    }
+    return null;
+  }
+
+  function quoteHop(
+    from: string,
+    to: string,
+    token: number,
+    amountIn: bigint
+  ): { fee: bigint; feePPM: number; baseFee: bigint; outCap: bigint; inCap: bigint } | null {
+    const fromNorm = normalizeEntityId(from);
+    const toNorm = normalizeEntityId(to);
+    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
+    const profile = profiles.find((p: any) => normalizeEntityId(p?.entityId) === fromNorm);
+    const basePpm = sanitizeFeePPM(
+      profile?.metadata?.routingFeePPM ?? DEFAULT_UNKNOWN_HOP_FEE_PPM,
+      DEFAULT_UNKNOWN_HOP_FEE_PPM
+    );
     const baseFee = sanitizeBigInt(profile?.metadata?.baseFee ?? 0n);
     const account = Array.isArray(profile?.accounts)
-      ? profile.accounts.find((a: any) => String(a?.counterpartyId || '') === String(to))
+      ? profile.accounts.find((a: any) => normalizeEntityId(String(a?.counterpartyId || '')) === toNorm)
       : null;
-    const caps = account?.tokenCapacities;
-    const tokenCap = caps
-      ? (caps.get?.(token)
-        ?? caps[String(token)]
-        ?? caps[token])
-      : null;
-    const outCap = sanitizeBigInt(tokenCap?.outCapacity ?? 0n);
-    const inCap = sanitizeBigInt(tokenCap?.inCapacity ?? 0n);
-    const feePPM = directionalFeePPM(basePpm, outCap, inCap);
+    const tokenCapacity =
+      getTokenCapacitySnapshot(account?.tokenCapacities, token)
+      ?? getLocalAccountCapacity(from, to, token);
+    const directionalOutCap = getDirectionalEdgeCapacity(from, to, token);
+    if (directionalOutCap <= 0n) return null;
+    const pricingOut = sanitizeBigInt(tokenCapacity?.outCapacity ?? directionalOutCap);
+    const pricingIn = sanitizeBigInt(tokenCapacity?.inCapacity ?? 0n);
+    const outCap = directionalOutCap;
+    const inCap = pricingIn;
+    // Keep routing quotes deterministic: use advertised per-hop fee directly.
+    const feePPM = sanitizeFeePPM(basePpm, 10);
     const ppmFee = (amountIn * BigInt(feePPM)) / 1_000_000n;
-    return { fee: baseFee + ppmFee, feePPM };
+    return { fee: baseFee + ppmFee, feePPM, baseFee, outCap, inCap };
   }
 
   function quoteRequiredInboundForForward(desiredForward: bigint, feePPM: number, baseFee: bigint): bigint {
@@ -315,10 +465,11 @@
 
   function extractEntityCryptoKey(entity: string): string | null {
     if (!entity) return null;
+    const entityNorm = normalizeEntityId(entity);
     if (currentReplicas) {
       for (const [replicaKey, replica] of currentReplicas.entries()) {
         const [replicaEntityId] = replicaKey.split(':');
-        if (replicaEntityId !== entity) continue;
+        if (normalizeEntityId(replicaEntityId) !== entityNorm) continue;
         const localKey = replica?.state?.cryptoPublicKey;
         if (typeof localKey === 'string' && localKey.length > 0) {
           return localKey;
@@ -326,7 +477,7 @@
       }
     }
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
-    const profile = profiles.find((p: GossipProfileView) => p?.entityId === entity) as GossipProfileView | undefined;
+    const profile = profiles.find((p: GossipProfileView) => normalizeEntityId(p?.entityId) === entityNorm) as GossipProfileView | undefined;
     if (!profile?.metadata) return null;
     const gossipKey = profile.metadata.cryptoPublicKey || profile.metadata.encryptionPubKey;
     return typeof gossipKey === 'string' && gossipKey.length > 0 ? gossipKey : null;
@@ -350,9 +501,10 @@
   }
 
   function assertRecipientProfileReady() {
-    if (!targetEntityId || targetEntityId === entityId) return;
+    if (!targetEntityId || normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) return;
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
-    const targetProfile = profiles.find((p: GossipProfileView) => p?.entityId === targetEntityId) as GossipProfileView | undefined;
+    const targetNorm = normalizeEntityId(targetEntityId);
+    const targetProfile = profiles.find((p: GossipProfileView) => normalizeEntityId(p?.entityId) === targetNorm) as GossipProfileView | undefined;
     if (!targetProfile) {
       const msg = `Recipient ${targetEntityId} has no downloaded gossip profile`;
       emitUiDebugEvent('PAYMENT_PREFLIGHT_PROFILE_MISSING', msg);
@@ -383,19 +535,39 @@
     }
   }
 
+  async function refreshServerEntityNames() {
+    if (typeof fetch === 'undefined') return;
+    try {
+      const response = await fetch('/api/health');
+      if (!response.ok) return;
+      const payload = await response.json();
+      const hubs = Array.isArray(payload?.hubs) ? payload.hubs : [];
+      const next = new Map<string, string>();
+      for (const hub of hubs) {
+        const id = String(hub?.entityId || '').trim();
+        const name = String(hub?.name || '').trim();
+        if (!id || !name) continue;
+        next.set(normalizeEntityId(id), name);
+      }
+      if (next.size > 0) {
+        serverEntityNames = next;
+      }
+    } catch {
+      // best effort only
+    }
+  }
+
   // Enumerate simple paths up to a hop cap; for self-pay enumerate cycles back to self.
-  function findPathsFromGraph(adjacency: Map<string, Set<string>>, startId: string, targetId: string): string[][] {
+  function findPathsFromGraph(
+    adjacency: Map<string, Set<string>>,
+    startId: string,
+    targetId: string,
+    token: number,
+    maxCandidates: number = MAX_CANDIDATE_PATHS
+  ): string[][] {
     const results: string[][] = [];
     const seen = new Set<string>();
     const isSelfTarget = startId === targetId;
-
-    const scorePath = (path: string[]) => {
-      const hops = path.length - 1;
-      const intermediates = Math.max(0, path.length - 2);
-      const distinct = new Set(path).size;
-      // Prefer more obfuscation but keep deterministic ordering.
-      return (intermediates * 1000) + (distinct * 10) - hops;
-    };
 
     const pushPath = (path: string[]) => {
       const key = path.join('>');
@@ -405,22 +577,26 @@
     };
 
     const dfs = (current: string, path: string[], used: Set<string>) => {
-      if (results.length >= MAX_ROUTES) return;
+      if (results.length >= maxCandidates) return;
       const hops = path.length - 1;
       if (hops > MAX_PATH_HOPS) return;
 
       const neighbors = adjacency.get(current);
       if (!neighbors || neighbors.size === 0) return;
 
+      if (current !== targetId && !used.has(targetId) && hasOutboundCapacity(current, targetId, token)) {
+        pushPath([...path, targetId]);
+      }
+
       for (const next of neighbors) {
-        if (results.length >= MAX_ROUTES) break;
+        if (results.length >= maxCandidates) break;
         const nextHops = hops + 1;
         if (nextHops > MAX_PATH_HOPS) continue;
-
+        if (!hasOutboundCapacity(current, next, token)) continue;
         if (isSelfTarget) {
           if (next === startId) {
             const intermediateCount = path.length - 1;
-            if (nextHops >= MIN_SELF_INTERMEDIATES + 1 && intermediateCount >= MIN_SELF_INTERMEDIATES) {
+            if (nextHops >= MIN_SELF_CYCLE_INTERMEDIATES + 1 && intermediateCount >= MIN_SELF_CYCLE_INTERMEDIATES) {
               pushPath([...path, startId]);
             }
             continue;
@@ -434,10 +610,7 @@
           continue;
         }
 
-        if (next === targetId) {
-          pushPath([...path, targetId]);
-          continue;
-        }
+        if (next === targetId) continue;
         if (used.has(next) || next === startId) continue;
         used.add(next);
         path.push(next);
@@ -449,9 +622,25 @@
 
     dfs(startId, [startId], new Set([startId]));
 
-    return results
-      .sort((a, b) => scorePath(b) - scorePath(a))
-      .slice(0, MAX_ROUTES);
+    return results.sort((a, b) => {
+      if (a.length !== b.length) return a.length - b.length;
+      return a.join('>').localeCompare(b.join('>'));
+    });
+  }
+
+  function sortRoutesList(input: RouteOption[]): RouteOption[] {
+    return [...input].sort((a, b) => {
+      if (routeSortMode === 'hops') {
+        if (a.hops.length !== b.hops.length) return a.hops.length - b.hops.length;
+        if (a.totalFee !== b.totalFee) return a.totalFee < b.totalFee ? -1 : 1;
+        if (a.senderAmount !== b.senderAmount) return a.senderAmount < b.senderAmount ? -1 : 1;
+        return a.path.length - b.path.length;
+      }
+      if (a.totalFee !== b.totalFee) return a.totalFee < b.totalFee ? -1 : 1;
+      if (a.hops.length !== b.hops.length) return a.hops.length - b.hops.length;
+      if (a.senderAmount !== b.senderAmount) return a.senderAmount < b.senderAmount ? -1 : 1;
+      return a.path.length - b.path.length;
+    });
   }
 
   function isValidRoutePath(path: string[], startId: string, targetId: string): boolean {
@@ -464,10 +653,10 @@
     if (interior.some((hop) => hop === startId)) return false;
     if (new Set(interior).size !== interior.length) return false;
 
-    // Self routes must include enough obfuscating intermediaries.
+    // Self routes must include enough intermediaries to make a valid cycle.
     if (startId === targetId) {
-      if (interior.length < MIN_SELF_INTERMEDIATES) return false;
-      if (new Set(interior).size < MIN_SELF_INTERMEDIATES) return false;
+      if (interior.length < MIN_SELF_CYCLE_INTERMEDIATES) return false;
+      if (new Set(interior).size < MIN_SELF_CYCLE_INTERMEDIATES) return false;
     }
 
     return true;
@@ -477,6 +666,7 @@
     if (!targetEntityId || !amount) return;
 
     findingRoutes = true;
+    routeSortMode = 'fee';
     routes = [];
     selectedRouteIndex = -1;
     preflightError = null;
@@ -494,33 +684,76 @@
       }
 
       if (!currentReplicas) throw new Error('Replicas not available');
-      const adjacency = buildNetworkAdjacency(env, currentReplicas);
-      const foundPaths = findPathsFromGraph(adjacency, entityId, targetEntityId)
-        .filter((path) => isValidRoutePath(path, entityId, targetEntityId));
+      const sourceNorm = normalizeEntityId(entityId);
+      const targetNorm = normalizeEntityId(targetEntityId);
+      const network = buildNetworkAdjacency(env, currentReplicas);
+      const isSelfTarget = sourceNorm === targetNorm;
+      const pathSet = new Set<string>();
+      const foundPaths: string[][] = [];
+      const pushPath = (rawPath: unknown) => {
+        if (!Array.isArray(rawPath)) return;
+        const normalizedPath = rawPath
+          .map((id) => normalizeEntityId(String(id || '')))
+          .filter(Boolean);
+        if (!isValidRoutePath(normalizedPath, sourceNorm, targetNorm)) return;
+        const intermediaries = normalizedPath.slice(1, -1);
+        if (intermediaries.some((hop) => !isRouteableIntermediary(hop))) return;
+        const key = normalizedPath.join('>');
+        if (pathSet.has(key)) return;
+        pathSet.add(key);
+        foundPaths.push(normalizedPath);
+      };
+
+      if (!isSelfTarget) {
+        const runtimeGraph = env?.gossip?.getNetworkGraph?.();
+        const runtimeRoutes = await runtimeGraph?.findPaths?.(entityId, targetEntityId, amountInSmallestUnit, tokenId) || [];
+        for (const route of runtimeRoutes) {
+          pushPath((route as any)?.path);
+        }
+      }
+
+      // Always include local graph candidates (best-effort with real local capacities).
+      const localPaths = findPathsFromGraph(network.adjacency, sourceNorm, targetNorm, tokenId);
+      for (const path of localPaths) pushPath(path);
 
       if (foundPaths.length === 0) {
-        if (targetEntityId === entityId) {
+        if (isSelfTarget) {
           throw new Error('No self-route found with at least 2 different intermediates');
         }
         throw new Error(`No route found to ${targetEntityId}`);
       }
 
-      routes = foundPaths.map((path) => {
+      const quotedRoutes: RouteOption[] = [];
+      for (const normalizedPath of foundPaths) {
+        const path = normalizedPath.map((id) => network.canonicalIds.get(id) || id);
         const intermediaries = path.slice(1, -1);
         let downstreamAmount = amountInSmallestUnit;
         const intermediaryFeeByEntity = new Map<string, { fee: bigint; feePPM: number }>();
+        let hasCapacity = true;
         for (let i = intermediaries.length - 1; i >= 0; i -= 1) {
           const intermediary = intermediaries[i]!;
           const nextHop = path[i + 2]!;
-          const { fee, feePPM } = quoteHopFee(intermediary, nextHop, tokenId, downstreamAmount);
-          const baseFee = fee - ((downstreamAmount * BigInt(feePPM)) / 1_000_000n);
-          const requiredInbound = quoteRequiredInboundForForward(downstreamAmount, feePPM, baseFee);
+          const quote = quoteHop(intermediary, nextHop, tokenId, downstreamAmount);
+          if (!quote || quote.outCap < downstreamAmount) {
+            hasCapacity = false;
+            break;
+          }
+          const requiredInbound = quoteRequiredInboundForForward(downstreamAmount, quote.feePPM, quote.baseFee);
           intermediaryFeeByEntity.set(intermediary, {
             fee: requiredInbound - downstreamAmount,
-            feePPM,
+            feePPM: quote.feePPM,
           });
           downstreamAmount = requiredInbound;
         }
+        if (!hasCapacity) continue;
+
+        if (path.length > 1) {
+          const senderQuote = quoteHop(path[0]!, path[1]!, tokenId, downstreamAmount);
+          if (!senderQuote || senderQuote.outCap < downstreamAmount) {
+            continue;
+          }
+        }
+
         const senderAmount = downstreamAmount;
         const hops = path.slice(0, -1).map((from, i) => {
           const feeInfo = intermediaryFeeByEntity.get(from) || { fee: 0n, feePPM: 0 };
@@ -531,25 +764,21 @@
             feePPM: feeInfo.feePPM,
           };
         });
-        const hopCount = hops.length;
         const totalFee = senderAmount - amountInSmallestUnit;
-        const obfuscationScore = Math.max(0, path.length - 2);
-        const probability = Math.max(0.01, 1 / (hopCount + 1));
-
-        return {
+        quotedRoutes.push({
           path,
           hops,
           totalFee,
           senderAmount,
           recipientAmount: amountInSmallestUnit,
-          probability,
-          obfuscationScore,
-        };
-      }).sort((a, b) => {
-        if (a.totalFee !== b.totalFee) return a.totalFee < b.totalFee ? -1 : 1;
-        if (a.hops.length !== b.hops.length) return a.hops.length - b.hops.length;
-        return b.probability - a.probability;
-      });
+        });
+      }
+
+      routes = sortRoutesList(quotedRoutes).slice(0, MAX_ROUTES);
+
+      if (routes.length === 0) {
+        throw new Error('No route has enough real capacity for this amount');
+      }
 
       for (const route of routes) {
         assertRouteKeyCoverage(route.path);
@@ -580,6 +809,7 @@
       const route = routes[selectedRouteIndex];
       if (!route) throw new Error('Selected route is no longer available');
       assertRouteKeyCoverage(route.path);
+      const routeTargetEntityId = route.path[route.path.length - 1] || targetEntityId;
 
       // Find signer
       let signerId = '1';
@@ -603,7 +833,8 @@
           entityTxs: [{
             type: 'htlcPayment' as const,
             data: {
-              targetEntityId, tokenId,
+              targetEntityId: routeTargetEntityId,
+              tokenId,
               amount: route.recipientAmount,
               route: route.path,
               description: description || undefined,
@@ -619,7 +850,7 @@
           entityTxs: [{
             type: 'directPayment' as const,
             data: {
-              targetEntityId, tokenId,
+              targetEntityId: routeTargetEntityId, tokenId,
               amount: route.recipientAmount,
               route: route.path,
               description: description || undefined,
@@ -664,6 +895,22 @@
     repeatIntervalMs = target ? Number(target.value) : 0;
     restartRepeatTimer();
   }
+
+  function handleRouteSortChange(event: Event) {
+    const target = event.target as HTMLSelectElement | null;
+    if (!target) return;
+    if (target.value === 'hops' || target.value === 'fee') {
+      routeSortMode = target.value;
+      if (routes.length > 1) {
+        routes = sortRoutesList(routes);
+        selectedRouteIndex = routes.length > 0 ? 0 : -1;
+      }
+    }
+  }
+
+  onMount(() => {
+    void refreshServerEntityNames();
+  });
 </script>
 
 <div class="payment-panel">
@@ -687,7 +934,7 @@
       <button class="profile-preview-header" on:click={() => profileExpanded = !profileExpanded}>
         <span class="profile-toggle">{profileExpanded ? '▾' : '▸'} Recipient Gossip Profile</span>
         <div class="profile-header-right">
-          {#if targetEntityId === entityId}
+          {#if normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)}
             <span class="profile-status ok">self</span>
           {:else if selectedTargetProfile}
             {#if extractEntityCryptoKey(targetEntityId)}
@@ -703,7 +950,7 @@
       {#if profileExpanded}
         {#if selectedTargetProfileJson}
           <pre>{selectedTargetProfileJson}</pre>
-        {:else if targetEntityId === entityId}
+        {:else if normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)}
           <pre>{safeStringify({ entityId, note: 'Self recipient uses local entity state' }, 2)}</pre>
         {:else}
           <pre>{safeStringify({ entityId: targetEntityId, error: 'No gossip profile in local cache' }, 2)}</pre>
@@ -757,7 +1004,23 @@
 
   {#if routes.length > 0}
     <div class="routes">
-      <h4>Routes ({routes.length})</h4>
+      <div class="routes-header">
+        <h4>Routes ({routes.length})</h4>
+        <div class="route-controls">
+          <label class="route-sort-control">
+            <span>Sort</span>
+            <select value={routeSortMode} on:change={handleRouteSortChange} disabled={sendingPayment || findingRoutes}>
+              {#each ROUTE_SORT_OPTIONS as option}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </label>
+          <label class="route-id-toggle">
+            <input type="checkbox" bind:checked={showFullEntityId} />
+            <span>Show full entity id</span>
+          </label>
+        </div>
+      </div>
       <div class="routes-scroll">
         {#each routes as route, index}
           <label class="route-option" class:selected={selectedRouteIndex === index}>
@@ -777,20 +1040,23 @@
                       compact={true}
                       clickable={false}
                       copyable={false}
-                      showAddress={true}
+                      showAddress={showFullEntityId}
                       size={24}
                     />
                   </div>
                   {#if hopIndex < route.path.length - 1}
                     <span class="hop-arrow">→</span>
+                    {#if route.hops[hopIndex] && route.hops[hopIndex].fee > 0n}
+                      <span class="hop-fee">({formatToken(route.hops[hopIndex].fee)})</span>
+                    {/if}
                   {/if}
                 {/each}
               </div>
               <span class="route-meta">
-                {route.hops.length} hop{route.hops.length !== 1 ? 's' : ''} | obfuscation {route.obfuscationScore} | {(route.probability * 100).toFixed(0)}% success
+                {route.hops.length} hop{route.hops.length !== 1 ? 's' : ''}
               </span>
               <span class="route-meta">
-                fee {formatToken(route.totalFee)}
+                Total fee: {formatToken(route.totalFee)}
               </span>
             </div>
           </label>
@@ -961,11 +1227,66 @@
     overflow-y: auto;
   }
 
+  .routes-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
   .routes h4 {
     font-size: 12px;
     font-weight: 500;
     color: #78716c;
-    margin: 0 0 12px 0;
+    margin: 0;
+  }
+
+  .route-sort-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-size: 10px;
+    color: #78716c;
+  }
+
+  .route-sort-control select {
+    height: 30px;
+    border-radius: 6px;
+    border: 1px solid #292524;
+    background: #1c1917;
+    color: #e7e5e4;
+    font-size: 11px;
+    padding: 0 8px;
+    font-family: inherit;
+  }
+
+  .route-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .route-id-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 12px;
+    color: #a8a29e;
+    font-weight: 400;
+  }
+
+  .route-id-toggle input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: #fbbf24;
   }
 
   .route-option {
@@ -1026,6 +1347,12 @@
   .hop-arrow {
     color: #7c7168;
     font-size: 13px;
+  }
+
+  .hop-fee {
+    color: #d6d3d1;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
   }
 
   .route-meta {

@@ -62,8 +62,9 @@ export async function handleJBroadcast(
     return { newState, outputs, jOutputs };
   }
 
-  // ── Compute batch hash (deterministic: uses tracked entity nonce) ──
-  // Entity nonce tracks on-chain nonce. Contract expects currentNonce + 1.
+  // ── Compute batch hash (deterministic: uses tracked confirmed nonce) ──
+  // Entity nonce must only advance from finalized HankoBatchProcessed events.
+  // Contract expects currentNonce + 1 for a new submission.
   const currentEntityNonce = BigInt(newState.jBatchState.entityNonce ?? 0);
   const nextNonce = currentEntityNonce + 1n;
 
@@ -114,7 +115,9 @@ export async function handleJBroadcast(
   newState.jBatchState.status = 'broadcasting';
   newState.jBatchState.batchHash = batchHash;
   newState.jBatchState.encodedBatch = encodedBatch;
-  newState.jBatchState.entityNonce = Number(nextNonce);
+  // IMPORTANT: do not advance entityNonce optimistically here.
+  // If network submission fails, optimistic increment causes permanent nonce desync.
+  // entityNonce is advanced only when HankoBatchProcessed is observed.
 
   addMessage(newState, `📤 Batch (${opCount} ops) → hashesToSign [nonce=${nextNonce}]`);
 

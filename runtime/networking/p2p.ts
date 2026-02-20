@@ -113,6 +113,7 @@ export class RuntimeP2P {
   private pendingByRuntime = new Map<string, { input: RoutedEntityInput, enqueuedAt: number }[]>();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private retryInterval: ReturnType<typeof setInterval> | null = null;
+  private visibilityHandler: (() => void) | null = null;
   private encryptionKeyPair: P2PKeyPair;
   private announceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingAnnounceEntities = new Set<string>();
@@ -186,6 +187,7 @@ export class RuntimeP2P {
   connect() {
     console.log(`[P2P] RuntimeP2P.connect() called, connecting to ${this.relayUrls.length} relays: ${this.relayUrls.join(', ')}`);
     this.closeClients();
+    this.registerVisibilityReconnect();
     this.startPolling();
     this.startRetryLoop();
     for (const url of this.relayUrls) {
@@ -270,6 +272,7 @@ export class RuntimeP2P {
   close() {
     this.stopPolling();
     this.stopRetryLoop();
+    this.unregisterVisibilityReconnect();
     if (this.announceTimer) {
       clearTimeout(this.announceTimer);
       this.announceTimer = null;
@@ -301,6 +304,29 @@ export class RuntimeP2P {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
+  }
+
+  private registerVisibilityReconnect() {
+    if (typeof document === 'undefined') return;
+    if (this.visibilityHandler) return;
+    this.visibilityHandler = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!this.getActiveClient()) {
+        console.warn('[P2P] Tab resumed with no active WS client — forcing reconnect');
+        this.reconnect();
+        return;
+      }
+      this.requestSeedGossip();
+      this.flushPending();
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
+  }
+
+  private unregisterVisibilityReconnect() {
+    if (typeof document === 'undefined') return;
+    if (!this.visibilityHandler) return;
+    document.removeEventListener('visibilitychange', this.visibilityHandler);
+    this.visibilityHandler = null;
   }
 
   private startRetryLoop() {

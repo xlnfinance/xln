@@ -1110,6 +1110,8 @@ export async function ahb(env: Env): Promise<void> {
     await process(env); // Process j_event_claim frame proposals
     console.log('[Frame 9 DEBUG] Round 2 - process ACKs and commit');
     await process(env); // Process ACK responses and commit frames
+    // Ensure both sides fully drain queued ACK/claims before bilateral assertion.
+    await syncChain(env, 5);
     console.log('[Frame 9 DEBUG] Bilateral consensus rounds complete');
 
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K

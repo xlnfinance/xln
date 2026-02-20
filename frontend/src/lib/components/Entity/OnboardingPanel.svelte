@@ -71,6 +71,7 @@
     }
     return out;
   };
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   // ── Validation ───────────────────────────────────
   $: canProceedStep1 = termsAccepted;
@@ -156,14 +157,32 @@
 
   async function queueAutoHubJoins(joinCount: number): Promise<number> {
     if (joinCount <= 0 || !entityId || !signerId) return 0;
+    const waitForCandidates = async (): Promise<string[]> => {
+      const timeoutMs = 12_000;
+      const pollMs = 300;
+      const startedAt = Date.now();
+      let best: string[] = [];
+
+      while (Date.now() - startedAt < timeoutMs) {
+        const currentEnv = getEnv();
+        if (currentEnv) {
+          const currentCandidates = shuffle(getHubEntityIds(currentEnv))
+            .filter(hubId => !hasAccountEntry(currentEnv, entityId, hubId));
+          if (currentCandidates.length > best.length) best = currentCandidates;
+          if (currentCandidates.length >= joinCount) return currentCandidates.slice(0, joinCount);
+        }
+        await sleep(pollMs);
+      }
+
+      return best.slice(0, joinCount);
+    };
+
     const env = getEnv();
     if (!env) return 0;
     const rebalancePolicy = getOpenAccountRebalancePolicyData();
     if (!rebalancePolicy) return 0;
 
-    const candidates = shuffle(getHubEntityIds(env))
-      .filter(hubId => !hasAccountEntry(env, entityId, hubId))
-      .slice(0, joinCount);
+    const candidates = await waitForCandidates();
     if (candidates.length === 0) return 0;
 
     const creditAmount = 10_000n * 10n ** 18n;

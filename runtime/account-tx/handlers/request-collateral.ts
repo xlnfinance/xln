@@ -118,7 +118,8 @@ export function handleRequestCollateral(
     feeDelta.offdelta += effectiveFee;
   }
 
-  // Fee can reduce the same-token claim; request only what remains uncollateralized.
+  // Align requested amount with post-fee debt when fee is prepaid in-frame.
+  // Otherwise R→C may fulfill less than requested and leave tiny "pending" tails.
   const postFeeDelta = accountMachine.deltas.get(tokenId)!;
   const postFeeTotal = postFeeDelta.ondelta + postFeeDelta.offdelta;
   const requesterClaimAfterFee = requesterIsLeft

@@ -14,6 +14,8 @@ const defaultSettings: Settings = {
   theme: 'dark',
   barColorMode: 'rgy',
   barLayout: 'center',
+  tokenPrecision: 6, // 0..18 digits after decimal for token amounts (18 = full)
+  showTokenIcons: true,
   dropdownMode: 'signer-first',
   runtimeDelay: 250, // 250ms = 4 frames/second (visible lightning effects)
   balanceRefreshMs: 15000, // Default to 15s to avoid RPC pressure
@@ -45,6 +47,14 @@ const settingsOperations = {
         // Validate barColorMode against allowed values
         if (parsed.barColorMode && !VALID_BAR_COLOR_MODES.includes(parsed.barColorMode)) {
           parsed.barColorMode = 'rgy';
+        }
+        if (!Number.isFinite(parsed.tokenPrecision)) {
+          parsed.tokenPrecision = defaultSettings.tokenPrecision;
+        } else {
+          parsed.tokenPrecision = Math.max(0, Math.min(18, Math.floor(parsed.tokenPrecision)));
+        }
+        if (typeof parsed.showTokenIcons !== 'boolean') {
+          parsed.showTokenIcons = defaultSettings.showTokenIcons;
         }
         settings.update(current => ({ ...current, ...parsed }));
       }
@@ -148,6 +158,18 @@ const settingsOperations = {
   // Update verbose logging
   setVerboseLogging(verbose: boolean) {
     settings.update(current => ({ ...current, verboseLogging: verbose }));
+    this.saveToStorage();
+  },
+
+  // Update token amount precision (0..18)
+  setTokenPrecision(precision: number) {
+    const clamped = Math.max(0, Math.min(18, Math.floor(Number(precision) || 0)));
+    settings.update(current => ({ ...current, tokenPrecision: clamped }));
+    this.saveToStorage();
+  },
+
+  setShowTokenIcons(show: boolean) {
+    settings.update(current => ({ ...current, showTokenIcons: !!show }));
     this.saveToStorage();
   },
 

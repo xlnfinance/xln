@@ -1,10 +1,11 @@
 /**
- * Multi-Edge Rebalance Scenario (Direct R→C)
+ * Multi-Edge Rebalance Scenario (R→C + C→R)
  *
  * Hub + Alice + Bob + Charlie + Dave
  * After payments create imbalances, users auto-queue request_collateral.
- * Hub crontab picks requestedRebalance and performs direct R→C deposits.
- * No settlement workspace, no C→R, no settlement nonce increments.
+ * Hub crontab can perform:
+ * - direct R→C deposits for net receivers
+ * - C→R settlement pullbacks for excess collateral
  */
 
 import type { Env, EntityInput, EntityReplica, Delta, AccountMachine } from '../types';
@@ -718,18 +719,41 @@ export async function runRebalanceScenario(): Promise<void> {
     console.log(`  Hub↔${user.name}: collateral=${delta?.collateral}, outCol=${derived?.outCollateral}, uncollateralized=${uncollateralized}, nonce=${nonce}, ws=${acc?.settlementWorkspace?.status || 'none'}`);
   }
 
-  // ── EXPLICIT NONCE ASSERTIONS ──
-  // Direct R→C does not use settlement workspace => nonce remains unchanged.
+  // ── NONCE ASSERTIONS ──
+  // Mixed rebalance may include C→R settlements, so nonce can increase.
+  // Invariant: nonce is bilateral-equal for each account.
   for (const user of [alice, bob, charlie, dave]) {
-    const acc = hubFinal.accounts.get(user.id);
-    const nonce = acc?.onChainSettlementNonce || 0;
-    assert(nonce === 0, `Hub↔${user.name} nonce should stay 0 in direct R→C flow (got ${nonce})`, env);
+    const hubAcc = hubFinal.accounts.get(user.id);
+    const hubNonce = hubAcc?.onChainSettlementNonce || 0;
+    assert(hubNonce >= 0, `Hub↔${user.name} nonce must be non-negative (got ${hubNonce})`, env);
+    const [, userReplica] = findReplica(env, user.id);
+    const userAcc = userReplica.state.accounts.get(hub.id);
+    const userNonce = userAcc?.onChainSettlementNonce || 0;
+    assert(
+      hubNonce === userNonce,
+      `Hub↔${user.name} nonce must match counterparty view (hub=${hubNonce}, user=${userNonce})`,
+      env,
+    );
   }
 
-  // ── WORKSPACE CLEANUP ASSERTIONS ──
+  // ── WORKSPACE ASSERTIONS ──
+  // For C→R path, workspace can legitimately remain at awaiting_counterparty
+  // if user signature was not provided during this scenario.
   for (const user of [alice, bob, charlie, dave]) {
     const acc = hubFinal.accounts.get(user.id);
-    assert(!acc?.settlementWorkspace, `Hub↔${user.name} workspace should be cleared (got status=${acc?.settlementWorkspace?.status})`, env);
+    const ws = acc?.settlementWorkspace;
+    if (ws) {
+      assert(
+        ws.status === 'awaiting_counterparty',
+        `Hub↔${user.name} workspace should be awaiting_counterparty when present (got status=${ws.status})`,
+        env,
+      );
+      assert(
+        ws.ops.every(op => op.type === 'c2r'),
+        `Hub↔${user.name} workspace should contain only c2r ops`,
+        env,
+      );
+    }
   }
 
   // ── COLLATERAL + REQUEST LIFECYCLE ASSERTIONS ──
@@ -740,7 +764,6 @@ export async function runRebalanceScenario(): Promise<void> {
     const before = collateralBeforeRebalance.get(user.id) ?? 0n;
     const after = delta?.collateral ?? 0n;
     if (after > before) accountsWithTopUp++;
-    assert(after >= before, `Hub↔${user.name} collateral should not decrease in direct R→C flow (before=${before}, after=${after})`, env);
     const pendingHub = acc?.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
     const initialRequest = requestedByUser.get(user.id) ?? 0n;
     if (initialRequest > 0n) {
@@ -753,14 +776,23 @@ export async function runRebalanceScenario(): Promise<void> {
   }
   assert(accountsWithTopUp > 0, `Expected at least one account to receive hub R→C top-up, got ${accountsWithTopUp}`, env);
 
-  // Counterparty side: nonce unchanged, workspace empty, requestedRebalance cleared.
+  // Counterparty side: workspace cleared, requestedRebalance converges.
   for (const user of [alice, bob, charlie, dave]) {
     const [, userReplica] = findReplica(env, user.id);
     const userAcc = userReplica.state.accounts.get(hub.id);
-    const userNonce = userAcc?.onChainSettlementNonce || 0;
-    assert(userNonce === 0, `${user.name}↔Hub counterparty nonce should stay 0 in direct R→C flow (got ${userNonce})`, env);
     const userWs = userAcc?.settlementWorkspace;
-    assert(!userWs, `${user.name}↔Hub counterparty workspace should be cleared (got status=${userWs?.status})`, env);
+    if (userWs) {
+      assert(
+        userWs.status === 'awaiting_counterparty',
+        `${user.name}↔Hub workspace should be awaiting_counterparty when present (got status=${userWs?.status})`,
+        env,
+      );
+      assert(
+        userWs.ops.every(op => op.type === 'c2r'),
+        `${user.name}↔Hub workspace should contain only c2r ops`,
+        env,
+      );
+    }
     const pendingUser = userAcc?.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
     const initialRequest = requestedByUser.get(user.id) ?? 0n;
     if (initialRequest > 0n) {

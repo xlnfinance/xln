@@ -10,6 +10,7 @@
   import { panelBridge } from '../utils/panelBridge';
   import type { BrowserVMTokenInfo } from '@xln/runtime/xln-api';
   import { activeVault, allVaults } from '$lib/stores/vaultStore';
+  import { settings } from '$lib/stores/settingsStore';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
 
   // Props
@@ -693,16 +694,23 @@
   }
 
   function formatTokenAmountFor(amount: bigint, tokenId: number): string {
-    const info = getTokenInfoFor(tokenId);
-    const absAmount = amount < 0n ? -amount : amount;
-    const formatted = $xlnFunctions.formatTokenAmount(absAmount, info.decimals);
-    return `${amount < 0n ? '-' : ''}${formatted} ${info.symbol}`;
+    return $xlnFunctions.formatTokenAmount(tokenId, amount);
   }
 
   function formatEthAmount(amount: bigint): string {
-    const absAmount = amount < 0n ? -amount : amount;
-    const formatted = $xlnFunctions.formatTokenAmount(absAmount, 18);
-    return `${amount < 0n ? '-' : ''}${formatted} ETH`;
+    const precision = Math.max(0, Math.min(18, Math.floor(Number($settings?.tokenPrecision ?? 6))));
+    const negative = amount < 0n;
+    const abs = negative ? -amount : amount;
+    const divisor = 10n ** 18n;
+    const whole = abs / divisor;
+    const frac = abs % divisor;
+    let body = whole.toLocaleString('en-US');
+    if (precision > 0 && frac > 0n) {
+      const fullFrac = frac.toString().padStart(18, '0');
+      const sliced = fullFrac.slice(0, precision).replace(/0+$/, '');
+      if (sliced.length > 0) body = `${body}.${sliced}`;
+    }
+    return `${negative ? '-' : ''}${body} ETH`;
   }
 
   function formatChannelKey(key: string): string {

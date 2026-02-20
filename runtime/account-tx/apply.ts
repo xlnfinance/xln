@@ -20,7 +20,7 @@ import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
 import { handleSwapCancel } from './handlers/swap-cancel';
 import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
-import { normalizeJurisdictionEvents } from '../j-event-normalization';
+import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../j-event-normalization';
 
 /**
  * Process single AccountTx through bilateral consensus
@@ -201,42 +201,55 @@ export async function processAccountTx(
 
       console.log(`   🔍 AUTH: byLeft=${byLeft}, claimIsFromLeft=${claimIsFromLeft}`);
 
-      let normalizedEvents = normalizeJurisdictionEvents(events);
-      const looksMalformed = normalizedEvents.length === 0;
-
-      if (looksMalformed) {
-        const myEntityIdForRecovery = accountMachine.proofHeader.fromEntity;
-        const myReplica = env
-          ? Array.from(env.eReplicas.values()).find(r => r.state.entityId === myEntityIdForRecovery)
-          : undefined;
-        const recovered = myReplica?.state?.jBlockChain?.find(
-          (b: any) => Number(b?.jHeight) === Number(jHeight) && String(b?.jBlockHash || '') === String(jBlockHash || ''),
-        );
-        if (recovered?.events && Array.isArray(recovered.events) && recovered.events.length > 0) {
-          normalizedEvents = normalizeJurisdictionEvents(recovered.events);
-        }
-        if (normalizedEvents.length > 0) {
-          console.warn(
-            `⚠️ j_event_claim malformed payload recovered from local jBlockChain: jHeight=${jHeight} hash=${String(jBlockHash).slice(0, 10)}`,
-          );
-        } else {
-          return {
-            success: false,
-            events: [`❌ j_event_claim malformed events payload`],
-            error: `j_event_claim malformed events and no local recovery for ${jHeight}:${String(jBlockHash).slice(0, 10)}`,
-          };
-        }
+      const normalizedEvents = normalizeJurisdictionEvents(events);
+      if (normalizedEvents.length === 0) {
+        return {
+          success: false,
+          events: [`❌ j_event_claim non-canonical events payload`],
+          error: `j_event_claim rejected: non-canonical events for ${jHeight}:${String(jBlockHash).slice(0, 10)}`,
+        };
       }
 
       const obs = { jHeight, jBlockHash, events: normalizedEvents, observedAt };
 
-      // Store observation with correct left/right attribution
-      if (claimIsFromLeft) {
-        accountMachine.leftJObservations.push(obs);
-        console.log(`   📝 Stored LEFT obs (${accountMachine.leftJObservations.length} total)`);
+      // Store observation with side-aware idempotent merge.
+      // Replayed/duplicate claims for the same (height,hash) must not create extra rows;
+      // they should merge deterministically by canonical event key.
+      const sideObservations = claimIsFromLeft ? accountMachine.leftJObservations : accountMachine.rightJObservations;
+      const existingObs = sideObservations.find(
+        (o: any) => Number(o?.jHeight) === Number(jHeight) && String(o?.jBlockHash || '') === String(jBlockHash || ''),
+      );
+
+      if (existingObs) {
+        const existingNormalized = normalizeJurisdictionEvents(existingObs.events);
+        const existingKeys = new Set(existingNormalized.map(canonicalJurisdictionEventKey));
+        let merged = 0;
+        for (const ev of normalizedEvents) {
+          const key = canonicalJurisdictionEventKey(ev);
+          if (existingKeys.has(key)) continue;
+          existingObs.events.push(ev);
+          existingKeys.add(key);
+          merged += 1;
+        }
+        if (observedAt > (existingObs.observedAt || 0)) {
+          existingObs.observedAt = observedAt;
+        }
+        if (merged > 0) {
+          console.log(
+            `   🔁 j_event_claim MERGED: side=${claimIsFromLeft ? 'left' : 'right'} jHeight=${jHeight} ` +
+            `added=${merged} total=${existingObs.events.length}`,
+          );
+        } else {
+          console.log(
+            `   ℹ️ j_event_claim duplicate ignored: side=${claimIsFromLeft ? 'left' : 'right'} jHeight=${jHeight} ` +
+            `hash=${String(jBlockHash).slice(0, 10)}`,
+          );
+        }
       } else {
-        accountMachine.rightJObservations.push(obs);
-        console.log(`   📝 Stored RIGHT obs (${accountMachine.rightJObservations.length} total)`);
+        sideObservations.push(obs);
+        console.log(
+          `   📝 Stored ${claimIsFromLeft ? 'LEFT' : 'RIGHT'} obs (${sideObservations.length} total)`,
+        );
       }
 
       // CRITICAL: Only finalize during COMMIT (on real accountMachine), not VALIDATION (on clone)

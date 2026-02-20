@@ -268,7 +268,7 @@ export interface XLNModule {
   // Account utilities
   deriveDelta: (delta: Delta, isLeft: boolean) => DerivedDelta;
   isLeft: (entityId: string, counterpartyId: string) => boolean;
-  formatTokenAmount: (amount: bigint, decimals?: number) => string;
+  formatTokenAmount: (tokenId: number, amount: bigint | null | undefined) => string;
   getTokenInfo: (tokenId: number) => { symbol: string; name: string; decimals: number; color: string };
   createDemoDelta: () => Delta;
   getDefaultCreditLimit: (tokenId: number) => bigint;

@@ -11,6 +11,17 @@
   export let counterpartyId: string;
   export let entityId: string;
   export let isSelected: boolean = false;
+  export let lockSummary: {
+    incomingCount: number;
+    incomingAmount: bigint;
+    outgoingCount: number;
+    outgoingAmount: bigint;
+  } = {
+    incomingCount: 0,
+    incomingAmount: 0n,
+    outgoingCount: 0,
+    outgoingAmount: 0n,
+  };
 
   const dispatch = createEventDispatcher();
 
@@ -57,7 +68,8 @@
     if (!account.deltas || account.deltas.size === 0 || !activeXlnFunctions) {
       return { outCap: 0n, inCap: 0n, outCredit: 0n, outColl: 0n, outDebt: 0n,
                inCredit: 0n, inColl: 0n, inDebt: 0n, outTotal: 0n, inTotal: 0n,
-               tokenCount: 0, primaryTokenId: 1, primarySymbol: '?' };
+               tokenCount: 0, primaryTokenId: 1, primarySymbol: '?',
+               uncollateralized: 0n, totalCollateral: 0n, totalDebt: 0n };
     }
 
     const isLeft = entityId < counterpartyId;
@@ -107,6 +119,15 @@
 
   $: halfMax = agg.outTotal > agg.inTotal ? agg.outTotal : agg.inTotal;
   $: pctOf = (v: bigint, base: bigint) => base > 0n ? Number((v * 10000n) / base) / 100 : 0;
+  $: tokenSymbol = String(agg.primarySymbol || '').toUpperCase();
+  $: tokenIconText = tokenSymbol === 'USDC' || tokenSymbol === 'USDT' ? '$' : tokenSymbol === 'WETH' || tokenSymbol === 'ETH' ? 'E' : (tokenSymbol.slice(0, 1) || 'T');
+  $: tokenIconClass = tokenSymbol === 'USDC'
+    ? 'usdc'
+    : tokenSymbol === 'USDT'
+      ? 'usdt'
+      : tokenSymbol === 'WETH' || tokenSymbol === 'ETH'
+        ? 'weth'
+        : 'other';
 
   // Normalize BigInt to safe Number for CSS flex values (avoids MAX_SAFE_INTEGER overflow)
   $: toFlex = (v: bigint) => {
@@ -121,11 +142,6 @@
     if (scale === 0n || total === 0n) return 100;
     return Math.min(100, Math.max(5, Number(total * 100n / scale)));
   })();
-
-  // Net balance: positive = net inflow (they owe us more than we owe them)
-  $: netBalance = (agg.inColl + agg.inDebt) - (agg.outColl + agg.outDebt);
-  $: netPositive = netBalance >= 0n;
-  $: absNetBalance = netBalance >= 0n ? netBalance : -netBalance;
 
   $: isPending = account.mempool.length > 0 || (account as any).pendingFrame;
 
@@ -145,6 +161,45 @@
     return total;
   })();
 
+  $: pendingC2R = (() => {
+    const ws = (account as any).settlementWorkspace;
+    if (!ws || !Array.isArray(ws.ops)) return { active: false, submitted: false, amount: 0n };
+    let amount = 0n;
+    let hasC2R = false;
+    for (const op of ws.ops) {
+      if (op?.type !== 'c2r') continue;
+      hasC2R = true;
+      try {
+        const n = typeof op.amount === 'bigint' ? op.amount : BigInt(op.amount ?? 0);
+        if (n > 0n) amount += n;
+      } catch {
+        // ignore malformed op
+      }
+    }
+    if (!hasC2R) return { active: false, submitted: false, amount: 0n };
+    const submitted = ws.status === 'submitted';
+    return { active: true, submitted, amount };
+  })();
+
+  $: workspace = (account as any).settlementWorkspace;
+  $: iAmLeft = entityId < counterpartyId;
+  $: iAmProposer = workspace ? workspace.lastModifiedByLeft === iAmLeft : false;
+  $: myHanko = workspace ? (iAmLeft ? workspace.leftHanko : workspace.rightHanko) : null;
+  $: canQuickApproveSettle = !!(workspace && workspace.status === 'awaiting_counterparty' && !iAmProposer && !myHanko);
+  $: settleStatusLabel = (() => {
+    if (!workspace) return '';
+    const status = String(workspace.status || '');
+    if (status === 'awaiting_counterparty') {
+      if (canQuickApproveSettle) return 'Awaiting your signature';
+      if (iAmProposer) return 'Awaiting counterparty signature';
+      return 'Awaiting signature';
+    }
+    if (status === 'ready_to_submit') return 'Ready to submit';
+    if (status === 'submitted') return 'Submitted on-chain';
+    if (status === 'draft') return 'Draft';
+    return status.replace(/_/g, ' ');
+  })();
+
   // Rebalance state: show pending only when there is an actual prepaid request.
   $: rebalanceState = (() => {
     const hasPendingBatch = !!(account as any).jBatchState?.pendingBroadcast;
@@ -153,6 +208,10 @@
     if (hasPendingRequest) {
       if (hasPendingBatch) return 'settling'; // On-chain tx in flight
       return 'pending'; // request_collateral exists and fee was prepaid
+    }
+    if (pendingC2R.active) {
+      if (pendingC2R.submitted || hasPendingBatch) return 'settling'; // C→R on-chain tx in flight
+      return 'pending'; // awaiting/ready settlement signature path
     }
     if (agg.totalCollateral > 0n && agg.uncollateralized === 0n) {
       return 'secured'; // All green — fully collateralized
@@ -170,6 +229,11 @@
   function handleFaucet(e: MouseEvent) {
     e.stopPropagation();
     dispatch('faucet', { counterpartyId, tokenId: agg.primaryTokenId });
+  }
+
+  function handleSettleApprove(e: MouseEvent) {
+    e.stopPropagation();
+    dispatch('settleApprove', { counterpartyId });
   }
 </script>
 
@@ -198,27 +262,57 @@
     </div>
   </div>
 
+  {#if lockSummary.incomingCount > 0 || lockSummary.outgoingCount > 0}
+    <div class="locks-row">
+      <div class="lock-badge incoming" class:empty={lockSummary.incomingCount === 0}>
+        {#if lockSummary.incomingCount > 0}
+          <span class="lock-dir">←</span>
+          <span class="lock-count">{lockSummary.incomingCount} lock{lockSummary.incomingCount !== 1 ? 's' : ''}</span>
+          <span class="lock-amount">{activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, lockSummary.incomingAmount)}</span>
+        {:else}
+          <span>← 0 locks</span>
+        {/if}
+      </div>
+      <div class="lock-badge outgoing" class:empty={lockSummary.outgoingCount === 0}>
+        {#if lockSummary.outgoingCount > 0}
+          <span class="lock-dir">→</span>
+          <span class="lock-count">{lockSummary.outgoingCount} lock{lockSummary.outgoingCount !== 1 ? 's' : ''}</span>
+          <span class="lock-amount">{activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, lockSummary.outgoingAmount)}</span>
+        {:else}
+          <span>→ 0 locks</span>
+        {/if}
+      </div>
+    </div>
+  {/if}
+
   <!-- Row 2: Aggregate bar -->
   {#if agg.outTotal > 0n || agg.inTotal > 0n}
     <div class="row-bar">
-      <span class="cap-label">OUT {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCap) || '0'}</span>
-      <span class="net-balance" class:positive={netPositive} class:negative={!netPositive}>
-        {netPositive ? '+' : '-'}{activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, absNetBalance) || '0'} {agg.primarySymbol}
+      <span class="cap-label">
+        {#if $settings.showTokenIcons}
+          <span class="token-icon-small {tokenIconClass}">{tokenIconText}</span>
+        {/if}
+        OUT {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCap) || '0'}
       </span>
-      <span class="cap-label">IN {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}</span>
+      <span class="cap-label">
+        {#if $settings.showTokenIcons}
+          <span class="token-icon-small {tokenIconClass}">{tokenIconText}</span>
+        {/if}
+        IN {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}
+      </span>
     </div>
 
     {#if $settings.barLayout === 'center'}
       <div class="bar center" style="width:{barWidthPct}%" class:rebalance-pending={rebalanceState === 'pending'} class:rebalance-active={rebalanceState === 'settling'} class:rebalance-secured={rebalanceState === 'secured'}>
         <div class="half out">
           {#if agg.outCredit > 0n}<div class="seg credit" style="width:{pctOf(agg.outCredit, halfMax)}%" title="Available: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCredit) || '?'}"></div>{/if}
-          {#if agg.outColl > 0n}<div class="seg coll" style="width:{pctOf(agg.outColl, halfMax)}%" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outColl) || '?'}"></div>{/if}
+          {#if agg.outColl > 0n}<div class="seg coll" class:striped={pendingC2R.active && !pendingC2R.submitted} class:pulsing={pendingC2R.submitted} style="width:{pctOf(agg.outColl, halfMax)}%" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outColl) || '?'}"></div>{/if}
           {#if agg.outDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending'} class:pulsing={rebalanceState === 'settling'} style="width:{pctOf(agg.outDebt, halfMax)}%" title="Unsecured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outDebt) || '?'}"></div>{/if}
         </div>
         <div class="mid"></div>
         <div class="half in">
           {#if agg.inDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending'} class:pulsing={rebalanceState === 'settling'} style="width:{pctOf(agg.inDebt, halfMax)}%" title="Unsecured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inDebt) || '?'}"></div>{/if}
-          {#if agg.inColl > 0n}<div class="seg coll" style="width:{pctOf(agg.inColl, halfMax)}%" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inColl) || '?'}"></div>{/if}
+          {#if agg.inColl > 0n}<div class="seg coll" class:striped={pendingC2R.active && !pendingC2R.submitted} class:pulsing={pendingC2R.submitted} style="width:{pctOf(agg.inColl, halfMax)}%" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inColl) || '?'}"></div>{/if}
           {#if agg.inCredit > 0n}<div class="seg credit" style="width:{pctOf(agg.inCredit, halfMax)}%" title="Available: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCredit) || '?'}"></div>{/if}
         </div>
       </div>
@@ -226,13 +320,13 @@
       <div class="bar sides" style="width:{barWidthPct}%" class:rebalance-pending={rebalanceState === 'pending'} class:rebalance-active={rebalanceState === 'settling'} class:rebalance-secured={rebalanceState === 'secured'}>
         <div class="side out" style="flex:{toFlex(agg.outTotal || 1n)}">
           {#if agg.outCredit > 0n}<div class="seg credit" style="flex:{toFlex(agg.outCredit)}" title="Available: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCredit) || '?'}"></div>{/if}
-          {#if agg.outColl > 0n}<div class="seg coll" style="flex:{toFlex(agg.outColl)}" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outColl) || '?'}"></div>{/if}
+          {#if agg.outColl > 0n}<div class="seg coll" class:striped={pendingC2R.active && !pendingC2R.submitted} class:pulsing={pendingC2R.submitted} style="flex:{toFlex(agg.outColl)}" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outColl) || '?'}"></div>{/if}
           {#if agg.outDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending'} class:pulsing={rebalanceState === 'settling'} style="flex:{toFlex(agg.outDebt)}" title="Unsecured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outDebt) || '?'}"></div>{/if}
         </div>
         <div class="gap"></div>
         <div class="side in" style="flex:{toFlex(agg.inTotal || 1n)}">
           {#if agg.inDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending'} class:pulsing={rebalanceState === 'settling'} style="flex:{toFlex(agg.inDebt)}" title="Unsecured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inDebt) || '?'}"></div>{/if}
-          {#if agg.inColl > 0n}<div class="seg coll" style="flex:{toFlex(agg.inColl)}" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inColl) || '?'}"></div>{/if}
+          {#if agg.inColl > 0n}<div class="seg coll" class:striped={pendingC2R.active && !pendingC2R.submitted} class:pulsing={pendingC2R.submitted} style="flex:{toFlex(agg.inColl)}" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inColl) || '?'}"></div>{/if}
           {#if agg.inCredit > 0n}<div class="seg credit" style="flex:{toFlex(agg.inCredit)}" title="Available: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCredit) || '?'}"></div>{/if}
         </div>
       </div>
@@ -243,10 +337,26 @@
       <div class="rebalance-indicator {rebalanceState}">
         {#if rebalanceState === 'pending'}
           <span class="rb-dot pending-dot"></span>
-          <span>Awaiting collateral ({activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, pendingRequested) || '?'} requested)</span>
+          {#if pendingRequested > 0n}
+            <span>Awaiting collateral ({activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, pendingRequested) || '?'} requested)</span>
+          {:else if pendingC2R.active}
+            {#if canQuickApproveSettle}
+              <span>Awaiting your withdrawal signature ({activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, pendingC2R.amount) || '?'} pending)</span>
+            {:else}
+              <span>Awaiting withdrawal signature ({activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, pendingC2R.amount) || '?'} pending)</span>
+            {/if}
+          {:else}
+            <span>Rebalance pending</span>
+          {/if}
         {:else if rebalanceState === 'settling'}
           <span class="rb-dot settling-dot"></span>
-          <span>On-chain settlement</span>
+          {#if pendingRequested > 0n}
+            <span>On-chain collateral settlement</span>
+          {:else if pendingC2R.active}
+            <span>On-chain collateral withdrawal</span>
+          {:else}
+            <span>On-chain settlement</span>
+          {/if}
         {:else if rebalanceState === 'secured'}
           <span class="rb-dot secured-dot"></span>
           <span>Secured</span>
@@ -260,10 +370,15 @@
     <div class="empty">No capacity</div>
   {/if}
 
-  {#if account.settlementWorkspace}
-    <span class="settle {account.settlementWorkspace.status}">
-      {account.settlementWorkspace.status.replace(/_/g, ' ')}
-    </span>
+  {#if workspace}
+    <div class="settle-row">
+      <span class="settle {workspace.status}">
+        {settleStatusLabel}
+      </span>
+      {#if canQuickApproveSettle}
+        <button class="btn-sign-settle" on:click={handleSettleApprove}>Sign</button>
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -320,6 +435,55 @@
   .badge.synced { color: #4ade80; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.12); }
   .badge.pending { color: #fbbf24; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.12); }
 
+  .locks-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .lock-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.56em;
+    padding: 3px 7px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-family: 'JetBrains Mono','SF Mono','Monaco','Menlo',monospace;
+    letter-spacing: 0.01em;
+    min-width: 0;
+  }
+
+  .lock-badge.incoming {
+    color: #67e8f9;
+    background: rgba(34, 211, 238, 0.12);
+    border-color: rgba(34, 211, 238, 0.25);
+  }
+
+  .lock-badge.outgoing {
+    color: #fda4af;
+    background: rgba(244, 63, 94, 0.1);
+    border-color: rgba(244, 63, 94, 0.22);
+  }
+
+  .lock-badge.empty {
+    opacity: 0.45;
+  }
+
+  .lock-dir {
+    font-weight: 700;
+  }
+
+  .lock-count {
+    white-space: nowrap;
+  }
+
+  .lock-amount {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
   .j-sync {
     font-size: 10px;
     font-family: 'JetBrains Mono', monospace;
@@ -361,9 +525,35 @@
     margin-bottom: 4px;
   }
   .cap-label { color: #a1a1aa; font-weight: 500; }
-  .net-balance { font-weight: 700; }
-  .net-balance.positive { color: #4ade80; }
-  .net-balance.negative { color: #f87171; }
+  .token-icon-small {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    font-size: 0.62rem;
+    font-weight: 700;
+    margin-right: 5px;
+    vertical-align: middle;
+    color: #0f172a;
+  }
+  .token-icon-small.usdc {
+    background: #2775ca;
+    color: #fff;
+  }
+  .token-icon-small.usdt {
+    background: #26a17b;
+    color: #fff;
+  }
+  .token-icon-small.weth {
+    background: #627eea;
+    color: #fff;
+  }
+  .token-icon-small.other {
+    background: #a1a1aa;
+    color: #111827;
+  }
 
   /* ── Bar core ─────────────────────────────────── */
   .bar {
@@ -486,4 +676,30 @@
   .settle.awaiting_counterparty { color:#fbbf24; background:rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.12); }
   .settle.ready_to_submit { color:#4ade80; background:rgba(74,222,128,0.08); border-color: rgba(74,222,128,0.12); }
   .settle.submitted { color:#60a5fa; background:rgba(96,165,250,0.08); border-color: rgba(96,165,250,0.12); }
+
+  .settle-row {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .btn-sign-settle {
+    background: rgba(251, 191, 36, 0.18);
+    color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    border-radius: 7px;
+    font-size: 0.72em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 4px 9px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-sign-settle:hover {
+    background: rgba(251, 191, 36, 0.26);
+    border-color: rgba(251, 191, 36, 0.55);
+  }
 </style>

@@ -30,6 +30,7 @@ export async function handleJClearBatch(
 
   const oldBatchSize = getBatchSize(newState.jBatchState.batch);
   const wasPending = newState.jBatchState.pendingBroadcast;
+  let resetSubmittedMarkers = 0;
 
   // Clear the batch and reset lifecycle
   newState.jBatchState.batch = createEmptyBatch();
@@ -40,10 +41,22 @@ export async function handleJClearBatch(
   newState.jBatchState.broadcastedAt = undefined;
   newState.jBatchState.txHash = undefined;
 
+  // Manual recovery: release stale "submitted" latches so hub can retry requests.
+  for (const account of newState.accounts.values()) {
+    if (!account.requestedRebalanceFeeState) continue;
+    for (const feeState of account.requestedRebalanceFeeState.values()) {
+      if ((feeState.jBatchSubmittedAt || 0) > 0) {
+        feeState.jBatchSubmittedAt = 0;
+        resetSubmittedMarkers++;
+      }
+    }
+  }
+
   const reasonMsg = reason ? ` (${reason})` : '';
   const pendingMsg = wasPending ? ' [was pending]' : '';
-  console.log(`🗑️ j_clear_batch: Cleared ${oldBatchSize} operations${reasonMsg}${pendingMsg}`);
-  addMessage(newState, `🗑️ Cleared jBatch (${oldBatchSize} ops)${reasonMsg}${pendingMsg}`);
+  const resetMsg = resetSubmittedMarkers > 0 ? `; reset ${resetSubmittedMarkers} submitted rebalance marker(s)` : '';
+  console.log(`🗑️ j_clear_batch: Cleared ${oldBatchSize} operations${reasonMsg}${pendingMsg}${resetMsg}`);
+  addMessage(newState, `🗑️ Cleared jBatch (${oldBatchSize} ops)${reasonMsg}${pendingMsg}${resetMsg}`);
 
   return { newState, outputs, jOutputs };
 }

@@ -18,7 +18,7 @@ import { isLeftEntity } from '../../entity-id-utils';
 import type { Env, HankoString } from '../../types';
 import { createSettlementHashWithNonce, createDisputeProofHashWithNonce, buildAccountProofBody } from '../../proof-builder';
 import { signHashesAsSingleEntity } from '../../hanko-signing';
-import { compileOps } from '../../settlement-ops';
+import { compileOps, userAutoApprove as userAutoApproveByDiff } from '../../settlement-ops';
 
 import type { AccountMachine } from '../../types';
 
@@ -128,7 +128,14 @@ export async function handleSettlePropose(
 
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
-  if (account.settlementWorkspace) throw new Error(`Settlement workspace already exists. Use settle_update or settle_reject first.`);
+  if (account.settlementWorkspace) {
+    const version = account.settlementWorkspace.version;
+    addMessage(newState, `⏭️ Settlement propose skipped: workspace already exists (v${version})`);
+    console.warn(
+      `⚠️ settle_propose skipped: workspace already exists for ${counterpartyEntityId.slice(-4)} (v${version})`,
+    );
+    return { newState, outputs, mempoolOps };
+  }
 
   const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
 
@@ -403,8 +410,16 @@ export async function handleSettleExecute(
   console.log(`⚖️ settle_execute: ${entityState.entityId.slice(-4)} executing settlement with ${counterpartyEntityId.slice(-4)}`);
 
   const account = newState.accounts.get(counterpartyEntityId);
-  if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
-  if (!account.settlementWorkspace) throw new Error(`No settlement workspace to execute.`);
+  if (!account) {
+    addMessage(newState, `⏭️ settle_execute skipped: no account with ${counterpartyEntityId.slice(-4)}`);
+    console.warn(`⚠️ settle_execute skipped: no account with ${counterpartyEntityId.slice(-4)}`);
+    return { newState, outputs, mempoolOps };
+  }
+  if (!account.settlementWorkspace) {
+    addMessage(newState, `⏭️ settle_execute skipped: no workspace with ${counterpartyEntityId.slice(-4)}`);
+    console.warn(`⚠️ settle_execute skipped: no workspace for ${counterpartyEntityId.slice(-4)}`);
+    return { newState, outputs, mempoolOps };
+  }
 
   const workspace = account.settlementWorkspace;
 
@@ -412,7 +427,11 @@ export async function handleSettleExecute(
   const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
   const counterpartyHanko = iAmLeft ? workspace.rightHanko : workspace.leftHanko;
   if (!counterpartyHanko) {
-    throw new Error(`Missing counterparty hanko for settlement execution (iAmLeft=${iAmLeft})`);
+    addMessage(newState, `⏭️ settle_execute skipped: missing counterparty signature`);
+    console.warn(
+      `⚠️ settle_execute skipped: missing counterparty hanko for ${counterpartyEntityId.slice(-4)} (iAmLeft=${iAmLeft})`,
+    );
+    return { newState, outputs, mempoolOps };
   }
 
   // Guard 4: Recompile from ops and assert match against cached
@@ -443,7 +462,11 @@ export async function handleSettleExecute(
   const rightEntity = isLeft ? counterpartyEntityId : entityState.entityId;
 
   const jurisdiction = entityState.config.jurisdiction;
-  if (!jurisdiction?.entityProviderAddress) throw new Error('No entityProvider configured in jurisdiction');
+  if (!jurisdiction?.entityProviderAddress) {
+    addMessage(newState, '⏭️ settle_execute skipped: no entityProvider configured');
+    console.warn('⚠️ settle_execute skipped: no entityProvider configured in jurisdiction');
+    return { newState, outputs, mempoolOps };
+  }
 
   batchAddSettlement(
     newState.jBatchState,
@@ -726,11 +749,7 @@ export async function processSettleAction(
  * Auto-approve logic for end users (operates on compiled diffs)
  */
 export function userAutoApprove(diff: SettlementDiff, iAmLeft: boolean): boolean {
-  const myReserveDiff = iAmLeft ? diff.leftDiff : diff.rightDiff;
-  if (myReserveDiff < 0n) return false;
-  if (myReserveDiff > 0n) return true;
-  if (iAmLeft) return diff.ondeltaDiff >= 0n;
-  return diff.ondeltaDiff <= 0n;
+  return userAutoApproveByDiff(diff, iAmLeft);
 }
 
 /**

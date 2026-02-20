@@ -41,7 +41,8 @@ if (!hasCerts) {
 }
 
 const DEV_HOST = '0.0.0.0';
-const DEV_PORT = 8080;
+const DEV_PORT_RAW = Number(process.env['VITE_DEV_PORT'] || '8080');
+const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(DEV_PORT_RAW) : 8080;
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
 
 async function assertPortAvailable(port: number, host: string): Promise<void> {
