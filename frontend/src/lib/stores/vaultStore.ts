@@ -1,8 +1,8 @@
 import { writable, get, derived } from 'svelte/store';
-import { HDNodeWallet, Mnemonic } from 'ethers';
+import { HDNodeWallet, Mnemonic, getAddress } from 'ethers';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
 import { xlnEnvironment } from './xlnStore';
-import { writeSavedCollateralPolicy, writeHubJoinPreference, getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
+import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
 import { writeOnboardingComplete } from '$lib/utils/onboardingState';
 
 // Types
@@ -45,8 +45,15 @@ const defaultState: RuntimesState = {
 
 // Storage key
 const VAULT_STORAGE_KEY = 'xln-vaults';
-const normalizeRuntimeId = (value: string | null | undefined): string =>
-  String(value || '').trim().toLowerCase();
+const normalizeRuntimeId = (value: string | null | undefined): string => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    return getAddress(raw).toLowerCase();
+  } catch {
+    return '';
+  }
+};
 
 // Main store
 export const runtimesState = writable<RuntimesState>(defaultState);
@@ -114,121 +121,6 @@ async function waitForCondition(
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   throw new Error(`[VaultStore] Timeout waiting for condition: ${label}`);
-}
-
-function shuffle<T>(items: T[]): T[] {
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const a = out[i];
-    const b = out[j];
-    out[i] = b as T;
-    out[j] = a as T;
-  }
-  return out;
-}
-
-function hasOpenAccount(env: any, ownerEntityId: string, counterpartyEntityId: string): boolean {
-  if (!env?.eReplicas || !(env.eReplicas instanceof Map)) return false;
-  const owner = String(ownerEntityId).toLowerCase();
-  const counterparty = String(counterpartyEntityId).toLowerCase();
-  for (const [key, replica] of env.eReplicas.entries()) {
-    const [entityKey] = String(key).split(':');
-    if (String(entityKey || '').toLowerCase() !== owner) continue;
-    const accounts = replica?.state?.accounts;
-    if (!(accounts instanceof Map)) return false;
-    for (const accountKey of accounts.keys()) {
-      if (String(accountKey).toLowerCase() === counterparty) return true;
-    }
-    return false;
-  }
-  return false;
-}
-
-function discoverHubEntityIds(env: any, ownerEntityId: string): string[] {
-  const discovered: string[] = [];
-  const owner = String(ownerEntityId || '').toLowerCase();
-  const add = (value: unknown) => {
-    const id = String(value || '').trim();
-    if (!id) return;
-    if (id.toLowerCase() === owner) return;
-    if (!discovered.some(existing => existing.toLowerCase() === id.toLowerCase())) {
-      discovered.push(id);
-    }
-  };
-
-  if (env?.gossip?.getHubs) {
-    const hubs = env.gossip.getHubs();
-    for (const profile of hubs || []) add(profile?.entityId);
-  } else if (env?.gossip?.getProfiles) {
-    const profiles = env.gossip.getProfiles();
-    for (const profile of profiles || []) {
-      const isHub = profile?.metadata?.isHub === true ||
-        (Array.isArray(profile?.capabilities) &&
-          (profile.capabilities.includes('hub') || profile.capabilities.includes('routing')));
-      if (isHub) add(profile?.entityId);
-    }
-  }
-
-  return discovered;
-}
-
-async function autoCreateDemoHubAccount(
-  xln: any,
-  env: any,
-  entityId: string,
-  signerId: string,
-): Promise<string> {
-  const rebalancePolicy = getOpenAccountRebalancePolicyData();
-  if (!rebalancePolicy) {
-    throw new Error('DEMO_AUTO_OPEN_FAILED: missing rebalance policy');
-  }
-
-  const timeoutMs = 12_000;
-  const pollMs = 300;
-  const startedAt = Date.now();
-  let targetHubId = '';
-
-  while (Date.now() - startedAt < timeoutMs) {
-    const candidates = shuffle(discoverHubEntityIds(env, entityId))
-      .filter((hubId) => !hasOpenAccount(env, entityId, hubId));
-    if (candidates.length > 0) {
-      targetHubId = candidates[0]!;
-      break;
-    }
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
-  }
-
-  if (!targetHubId) {
-    throw new Error('DEMO_AUTO_OPEN_FAILED: no hubs discovered');
-  }
-
-  const creditAmount = 10_000n * 10n ** 18n;
-  xln.enqueueRuntimeInput(env, {
-    runtimeTxs: [],
-    entityInputs: [{
-      entityId,
-      signerId,
-      entityTxs: [{
-        type: 'openAccount',
-        data: {
-          targetEntityId: targetHubId,
-          creditAmount,
-          tokenId: 1,
-          rebalancePolicy,
-        },
-      }],
-    }],
-  });
-
-  await waitForCondition(
-    () => hasOpenAccount(env, entityId, targetHubId),
-    `createRuntime.demoAutoOpenAccount(${targetHubId.slice(0, 10)})`,
-    15_000,
-    100,
-  );
-
-  return targetHubId;
 }
 
 async function enqueueAndAwait(
@@ -301,7 +193,53 @@ const logRpcFatal = (reason: string, details: Record<string, unknown>): void => 
   console.error('%c[RPC FAIL-FAST]', RPC_FATAL_STYLE, reason, details);
 };
 
-const detectRpcChainId = async (rpcUrl: string): Promise<number> => {
+const summarizeHealth = (payload: any): Record<string, unknown> => {
+  if (!payload || typeof payload !== 'object') return {};
+  return {
+    timestamp: payload.timestamp,
+    resetInProgress: payload?.reset?.inProgress ?? null,
+    resetError: payload?.reset?.lastError ?? null,
+    system: payload?.system ?? null,
+    jMachines: Array.isArray(payload?.jMachines)
+      ? payload.jMachines.map((j: any) => ({
+          name: j?.name,
+          status: j?.status,
+          chainId: j?.chainId,
+          lastBlock: j?.lastBlock,
+        }))
+      : [],
+  };
+};
+
+const waitForServerRuntimeReady = async (baseOrigin: string, timeoutMs = 30_000): Promise<void> => {
+  const healthUrl = new URL('/api/health', baseOrigin).toString();
+  const started = Date.now();
+  let lastHealth: Record<string, unknown> | null = null;
+  let lastStatus = 0;
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const response = await fetch(healthUrl);
+      lastStatus = response.status;
+      if (response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        lastHealth = summarizeHealth(payload);
+        const ready =
+          typeof payload?.timestamp === 'number'
+          && payload?.reset?.inProgress !== true
+          && payload?.system?.runtime === true;
+        if (ready) return;
+      }
+    } catch {
+      // retry
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(
+    `SERVER_RUNTIME_NOT_READY: status=${lastStatus} health=${JSON.stringify(lastHealth ?? {})}`,
+  );
+};
+
+const detectRpcChainId = async (rpcUrl: string, baseOrigin?: string): Promise<number> => {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timeout = controller ? setTimeout(() => controller.abort(), 5000) : null;
   try {
@@ -317,8 +255,19 @@ const detectRpcChainId = async (rpcUrl: string): Promise<number> => {
       ...(controller ? { signal: controller.signal } : {}),
     });
     if (!response.ok) {
-      logRpcFatal('RPC_CHAINID_HTTP_ERROR', { rpcUrl, status: response.status });
-      throw new Error(`RPC_CHAINID_HTTP_${response.status}`);
+      const body = (await response.text().catch(() => '')).slice(0, 300);
+      let health: Record<string, unknown> | null = null;
+      if (baseOrigin) {
+        try {
+          const healthRes = await fetch(new URL('/api/health', baseOrigin).toString());
+          const healthPayload = healthRes.ok ? await healthRes.json().catch(() => ({})) : { status: healthRes.status };
+          health = summarizeHealth(healthPayload);
+        } catch {
+          health = null;
+        }
+      }
+      logRpcFatal('RPC_CHAINID_HTTP_ERROR', { rpcUrl, status: response.status, body, health });
+      throw new Error(`RPC_CHAINID_HTTP_${response.status}:${body || 'empty'}`);
     }
     const payload = await response.json();
     const hex = typeof payload?.result === 'string' ? payload.result : '';
@@ -459,6 +408,9 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
 
 function runtimeToEntry(runtime: Runtime, env: any) {
   const runtimeId = normalizeRuntimeId(runtime.id);
+  if (!runtimeId) {
+    throw new Error(`[VaultStore] Invalid runtime.id: ${String(runtime.id)}`);
+  }
   return {
     id: runtimeId,
     type: 'local' as const,
@@ -483,6 +435,9 @@ async function registerRuntimeSignerKeys(runtime: Runtime, xln: any): Promise<vo
 
 async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestore = false): Promise<any> {
   const runtimeIdLower = normalizeRuntimeId(runtime.id);
+  if (!runtimeIdLower) {
+    throw new Error(`[VaultStore] Invalid runtime.id for env restore: ${String(runtime.id)}`);
+  }
   const runtimeSeed = runtime.seed;
   let env: any = null;
 
@@ -541,12 +496,13 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
   }
 
   const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+  await waitForServerRuntimeReady(baseOrigin);
   const jurisdictions = await fetchJurisdictions(baseOrigin);
   const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
   const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
   let chainId: number;
   try {
-    chainId = await detectRpcChainId(rpcUrl);
+    chainId = await detectRpcChainId(rpcUrl, baseOrigin);
     assertAnvilChain(chainId, rpcUrl, 'VaultStore.restore');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -741,6 +697,7 @@ export const vaultOperations = {
         for (const [rawKey, rawRuntime] of Object.entries(parsed?.runtimes || {})) {
           const runtime = rawRuntime as Runtime;
           const normalizedId = normalizeRuntimeId(runtime?.id || rawKey);
+          if (!normalizedId) continue;
           normalizedRuntimes[normalizedId] = {
             ...runtime,
             id: normalizedId,
@@ -782,7 +739,21 @@ export const vaultOperations = {
 
     // Use signer EOA as ID (deterministic, unique)
     const id = normalizeRuntimeId(firstAddress);
+    if (!id) throw new Error('Invalid runtimeId derived from seed');
     const label = name;
+
+    // Single-runtime invariant per signer EOA.
+    // Creating a second runtime with the same id causes local/server chain divergence
+    // (same entity ids, different local genesis) and leads to pending/mismatch loops.
+    const currentState = get(runtimesState);
+    const existing = findRuntimeByIdCaseInsensitive(currentState.runtimes, id);
+    if (existing) {
+      if (existing.runtime.seed !== seed) {
+        throw new Error(`Runtime id collision for ${id}: existing runtime has different seed`);
+      }
+      await this.selectRuntime(existing.key);
+      return existing.runtime;
+    }
 
     const loginType = options.loginType === 'demo' ? 'demo' : 'manual';
     const requiresOnboarding =
@@ -835,13 +806,14 @@ export const vaultOperations = {
     // Fetch pre-deployed contract addresses from prod
     console.log('[VaultStore.createRuntime] Fetching jurisdictions.json...');
     const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+    await waitForServerRuntimeReady(baseOrigin);
     const jurisdictions = await fetchJurisdictions(baseOrigin);
     const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
     console.log('[VaultStore.createRuntime] Loaded contracts:', arrakisConfig.contracts);
     const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
     let chainId: number;
     try {
-      chainId = await detectRpcChainId(rpcUrl);
+      chainId = await detectRpcChainId(rpcUrl, baseOrigin);
       assertAnvilChain(chainId, rpcUrl, 'VaultStore.createRuntime');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1020,16 +992,6 @@ export const vaultOperations = {
       xln.startP2P(newEnv, { relayUrls, gossipPollMs: 0 });
     }
 
-    if (loginType === 'demo' && !requiresOnboarding) {
-      const hubId = await autoCreateDemoHubAccount(
-        xln,
-        newEnv,
-        entityId,
-        signerAddress,
-      );
-      console.log(`[VaultStore.createRuntime] ✅ Demo auto-opened hub account: ${hubId.slice(0, 12)}...`);
-    }
-
     // Switch to new runtime
     activeRuntimeId.set(runtimeId);
     console.log('[VaultStore.createRuntime] ✅ Runtime created with entity:', entityId.slice(0, 18));
@@ -1054,12 +1016,14 @@ export const vaultOperations = {
     }
 
     const requestedRuntimeId = normalizeRuntimeId(runtimeId);
+    if (!requestedRuntimeId) throw new Error('Invalid runtimeId');
     const currentState = get(runtimesState);
     const resolved = findRuntimeByIdCaseInsensitive(currentState.runtimes, requestedRuntimeId);
     if (!resolved) {
       throw new Error(`Runtime not found: ${requestedRuntimeId}`);
     }
     const resolvedRuntimeId = normalizeRuntimeId(resolved.key);
+    if (!resolvedRuntimeId) throw new Error('Invalid resolved runtimeId');
 
     runtimesState.update(state => ({
       ...state,
@@ -1330,7 +1294,9 @@ export const vaultOperations = {
   runtimeExists(id: string): boolean {
     const current = get(runtimesState);
     if (!current?.runtimes) return false;
-    return normalizeRuntimeId(id) in current.runtimes;
+    const normalized = normalizeRuntimeId(id);
+    if (!normalized) return false;
+    return normalized in current.runtimes;
   },
 
   // Alias for backward compatibility
@@ -1354,6 +1320,7 @@ export const vaultOperations = {
 
         for (const runtime of all) {
           const runtimeId = normalizeRuntimeId(runtime.id);
+          if (!runtimeId) continue;
           const existing = get(runtimes).get(runtimeId);
           if (existing?.env) {
             continue;
