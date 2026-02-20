@@ -462,6 +462,29 @@
             <option value="token">Per-Token Color</option>
           </select>
         </label>
+        <label class="setting-row">
+          <span>Token Precision</span>
+          <div class="slider-row">
+            <input
+              type="range"
+              min="0"
+              max="18"
+              step="1"
+              value={$settings.tokenPrecision}
+              on:input={(e) => settingsOperations.setTokenPrecision(Number(e.currentTarget.value))}
+            />
+            <span class="slider-value">{$settings.tokenPrecision === 18 ? 'full' : `${$settings.tokenPrecision}d`}</span>
+          </div>
+        </label>
+
+        <label class="setting-row">
+          <span>Show Token Icons</span>
+          <input
+            type="checkbox"
+            checked={$settings.showTokenIcons}
+            on:change={(e) => settingsOperations.setShowTokenIcons((e.currentTarget as HTMLInputElement).checked)}
+          />
+        </label>
         <div class="bar-legend-mini">
           <span class="legend-swatch" style="background: {barLegendColors.credit}; opacity: 0.5"></span> Credit
           <span class="legend-swatch" style="background: {barLegendColors.collateral}"></span> Collateral

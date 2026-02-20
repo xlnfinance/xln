@@ -1,10 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 test('BrowserEVM - Deploy and call Depository.sol', async ({ page }) => {
-  // Start local server if needed
-  // For now, assume we're running `bun run serve` or similar
-
-  await page.goto('http://localhost:3000/test-browser-evm.html');
+  // Use Playwright baseURL (isolated per shard in parallel runner).
+  await page.goto('/test-browser-evm.html');
 
   // Wait for status to show success (max 30s for large contract deployment)
   const status = page.locator('#status');

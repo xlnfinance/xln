@@ -81,12 +81,9 @@ export async function createRpcAdapter(
           : feeData.maxPriorityFeePerGas,
       };
     }
-    if (feeData.gasPrice) {
-      return {
-        gasPrice: feeData.gasPrice > MAX_FEE_PER_GAS_WEI ? MAX_FEE_PER_GAS_WEI : feeData.gasPrice,
-      };
-    }
-    return {};
+    throw new Error(
+      `[JAdapter:rpc] EIP-1559 fee data unavailable for chainId=${config.chainId}. Refusing legacy gasPrice mode.`,
+    );
   };
 
   const waitForReceipt = async (tx: { wait: (confirms?: number, timeout?: number) => Promise<any>; hash: string }, label: string) => {

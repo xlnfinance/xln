@@ -28,6 +28,18 @@ export interface NetworkGraph {
   }>;
 }
 
+const isHubLikeProfile = (profile: Profile): boolean => {
+  const capabilities = Array.isArray(profile.capabilities) ? profile.capabilities : [];
+  return profile.metadata?.isHub === true || capabilities.includes('hub') || capabilities.includes('routing');
+};
+
+const hasRequiredRoutingMetadata = (profile: Profile): boolean => {
+  const name = typeof profile.metadata?.name === 'string' ? profile.metadata.name.trim() : '';
+  if (!name) return false;
+  const routingFeePPM = Number(profile.metadata?.routingFeePPM);
+  return Number.isFinite(routingFeePPM) && routingFeePPM >= 0;
+};
+
 /**
  * Build network graph from gossip profiles
  */
@@ -51,6 +63,14 @@ export function buildNetworkGraph(
   for (const profile of profiles.values()) {
     const fromEntity = profile.entityId;
     const fromEdges: AccountEdge[] = [];
+    const fromIsHubLike = isHubLikeProfile(profile);
+
+    if (fromIsHubLike && !hasRequiredRoutingMetadata(profile)) {
+      console.error(
+        `[ROUTING][DROP_HUB_PROFILE_MISSING_METADATA] entity=${fromEntity} missing metadata.name or metadata.routingFeePPM`
+      );
+      continue;
+    }
 
     if (profile.accounts) {
       for (const account of profile.accounts) {
@@ -58,6 +78,10 @@ export function buildNetworkGraph(
 
         // Only add if counterparty exists in network
         if (!nodes.has(toEntity)) continue;
+        const toProfile = profiles.get(toEntity);
+        if (toProfile && isHubLikeProfile(toProfile) && !hasRequiredRoutingMetadata(toProfile)) {
+          continue;
+        }
 
         // Get capacities for this token
         const tokenCapacity = getTokenCapacity(account.tokenCapacities, tokenId);

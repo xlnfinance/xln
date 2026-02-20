@@ -43,11 +43,6 @@ const normalizeInt = (value: unknown): number | null => {
   return n;
 };
 
-const normalizeSide = (value: unknown): 'left' | 'right' | null => {
-  if (value === 'left' || value === 'right') return value;
-  return null;
-};
-
 const normalizeMetadata = (raw: Record<string, unknown>) => {
   const out: Pick<JurisdictionEvent, 'blockNumber' | 'blockHash' | 'transactionHash'> = {};
   if (raw.blockNumber !== undefined) {
@@ -93,25 +88,21 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
   if (type === 'AccountSettled') {
     const leftEntity = normalizeEntity(data.leftEntity);
     const rightEntity = normalizeEntity(data.rightEntity);
-    const counterpartyEntityId = normalizeEntity(data.counterpartyEntityId);
     const tokenId = normalizeInt(data.tokenId);
-    const ownReserve = normalizeBigNumberish(data.ownReserve);
-    const counterpartyReserve = normalizeBigNumberish(data.counterpartyReserve);
+    const leftReserve = normalizeBigNumberish(data.leftReserve);
+    const rightReserve = normalizeBigNumberish(data.rightReserve);
     const collateral = normalizeBigNumberish(data.collateral);
     const ondelta = normalizeBigNumberish(data.ondelta);
     const nonce = normalizeInt(data.nonce);
-    const side = normalizeSide(data.side);
     if (
       !leftEntity ||
       !rightEntity ||
-      !counterpartyEntityId ||
       tokenId === null ||
-      ownReserve === null ||
-      counterpartyReserve === null ||
+      leftReserve === null ||
+      rightReserve === null ||
       collateral === null ||
       ondelta === null ||
-      nonce === null ||
-      !side
+      nonce === null
     ) {
       return null;
     }
@@ -121,25 +112,21 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
       data: {
         leftEntity,
         rightEntity,
-        counterpartyEntityId,
         tokenId,
-        ownReserve,
-        counterpartyReserve,
+        leftReserve,
+        rightReserve,
         collateral,
         ondelta,
         nonce,
-        side,
       },
     };
   }
 
   if (type === 'DisputeStarted') {
-    if (
-      typeof data.sender !== 'string' ||
-      typeof data.counterentity !== 'string' ||
-      typeof data.nonce !== 'string' ||
-      typeof data.proofbodyHash !== 'string'
-    ) {
+    const sender = normalizeEntity(data.sender);
+    const counterentity = normalizeEntity(data.counterentity);
+    const nonce = normalizeBigNumberish(data.nonce);
+    if (!sender || !counterentity || nonce === null || typeof data.proofbodyHash !== 'string') {
       return null;
     }
     const initialArguments = typeof data.initialArguments === 'string' ? data.initialArguments : '0x';
@@ -147,9 +134,9 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
       ...meta,
       type,
       data: {
-        sender: data.sender.toLowerCase(),
-        counterentity: data.counterentity.toLowerCase(),
-        nonce: data.nonce,
+        sender,
+        counterentity,
+        nonce,
         proofbodyHash: data.proofbodyHash,
         initialArguments,
       },
@@ -157,10 +144,13 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
   }
 
   if (type === 'DisputeFinalized') {
+    const sender = normalizeEntity(data.sender);
+    const counterentity = normalizeEntity(data.counterentity);
+    const initialNonce = normalizeBigNumberish(data.initialNonce);
     if (
-      typeof data.sender !== 'string' ||
-      typeof data.counterentity !== 'string' ||
-      typeof data.initialNonce !== 'string' ||
+      !sender ||
+      !counterentity ||
+      initialNonce === null ||
       typeof data.initialProofbodyHash !== 'string' ||
       typeof data.finalProofbodyHash !== 'string'
     ) {
@@ -170,9 +160,9 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
       ...meta,
       type,
       data: {
-        sender: data.sender.toLowerCase(),
-        counterentity: data.counterentity.toLowerCase(),
-        initialNonce: data.initialNonce,
+        sender,
+        counterentity,
+        initialNonce,
         initialProofbodyHash: data.initialProofbodyHash,
         finalProofbodyHash: data.finalProofbodyHash,
       },
@@ -235,8 +225,8 @@ export function canonicalJurisdictionEventKey(event: JurisdictionEvent): string 
     const collateral = String(d.collateral);
     const ondelta = String(d.ondelta);
     const nonce = Number(d.nonce);
-    const leftReserve = d.side === 'left' ? String(d.ownReserve) : String(d.counterpartyReserve);
-    const rightReserve = d.side === 'left' ? String(d.counterpartyReserve) : String(d.ownReserve);
+    const leftReserve = String(d.leftReserve);
+    const rightReserve = String(d.rightReserve);
     return `AccountSettled:${leftEntity}:${rightEntity}:${tokenId}:${leftReserve}:${rightReserve}:${collateral}:${ondelta}:${nonce}`;
   }
   return `${event.type}:${safeStringify(event.data)}`;

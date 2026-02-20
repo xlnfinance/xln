@@ -314,7 +314,25 @@ export async function enqueueAndProcess(env: Env, input: { runtimeTxs: any[]; en
 
 // === FRONTEND UTILITY FUNCTIONS ===
 // Derived store that provides utility functions for components
-export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInstance]) => {
+export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([, $xlnInstance, $settings]) => {
+  const clampPrecision = (value: number): number => Math.max(0, Math.min(18, Math.floor(Number(value) || 0)));
+  const settingPrecision = clampPrecision(Number($settings?.tokenPrecision ?? 6));
+  const formatRawAmount = (rawAmount: bigint, decimals: number, precisionLimit: number): string => {
+    const safeDecimals = Math.max(0, Math.floor(Number(decimals) || 18));
+    const negative = rawAmount < 0n;
+    const abs = negative ? -rawAmount : rawAmount;
+    const divisor = 10n ** BigInt(safeDecimals);
+    const whole = abs / divisor;
+    const frac = abs % divisor;
+    let body = whole.toLocaleString('en-US');
+    if (precisionLimit > 0 && frac > 0n) {
+      const fullFrac = frac.toString().padStart(safeDecimals, '0');
+      const sliced = fullFrac.slice(0, Math.min(safeDecimals, precisionLimit)).replace(/0+$/, '');
+      if (sliced.length > 0) body = `${body}.${sliced}`;
+    }
+    return `${negative ? '-' : ''}${body}`;
+  };
+
   // XLN is full in-memory snapshots - NO LOADING STATE NEEDED
 
   // If xlnInstance is missing, return empty functions that throw clear errors
@@ -366,14 +384,17 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
       inPeerCredit: 0,
     };
 
+    const fallbackTokenAmount = (tokenId: number, amount: bigint | null | undefined): string => {
+      const tokenInfo = fallbackTokenInfo(tokenId);
+      const raw = amount ?? 0n;
+      const numeric = formatRawAmount(raw, tokenInfo.decimals ?? 18, settingPrecision);
+      return `${numeric} ${tokenInfo.symbol}`;
+    };
+
     return {
       // Account utilities
       deriveDelta: safe(() => fallbackDerived) as any,
-      formatTokenAmount: safe((amount: bigint, decimals: number = 18) => {
-        const divisor = 10n ** BigInt(decimals);
-        const whole = amount / divisor;
-        return `${whole}`;
-      }) as any,
+      formatTokenAmount: safe((tokenId: number, amount: bigint | null | undefined) => fallbackTokenAmount(tokenId, amount)) as any,
       getTokenInfo: safe((tokenId: number) => fallbackTokenInfo(tokenId)) as any,
       isLeft: safe((entityId: string, counterpartyId: string) => entityId < counterpartyId) as any,
       createDemoDelta: safe(() => ({})) as any,
@@ -445,10 +466,19 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
     };
   }
 
+  const formatTokenAmountUi = (tokenId: number, amount: bigint | null | undefined): string => {
+    const tokenInfo = $xlnInstance.getTokenInfo(tokenId) ?? { symbol: `T${tokenId}`, decimals: 18 };
+    const decimals = Number.isFinite(tokenInfo.decimals) ? tokenInfo.decimals : 18;
+    const numeric = formatRawAmount(amount ?? 0n, decimals, settingPrecision);
+    return `${numeric} ${tokenInfo.symbol}`;
+  };
+
   return {
     // Account utilities
     deriveDelta: $xlnInstance.deriveDelta,
-    formatTokenAmount: $xlnInstance.formatTokenAmount,
+    // Frontend display formatter with configurable precision from Settings.
+    // Signature used across UI: formatTokenAmount(tokenId, amount).
+    formatTokenAmount: formatTokenAmountUi as any,
     getTokenInfo: $xlnInstance.getTokenInfo,
     isLeft: $xlnInstance.isLeft,
     createDemoDelta: $xlnInstance.createDemoDelta,

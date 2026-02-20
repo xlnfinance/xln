@@ -452,8 +452,13 @@
       <div class="delta-card">
         <div class="delta-card-header">
           <span class="delta-token">{td.tokenInfo.symbol}</span>
-          <span class="delta-net" class:positive={td.derived.delta > 0n} class:negative={td.derived.delta < 0n}>
-            Net: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.delta)}
+          <span
+            class="delta-net"
+            class:positive={td.derived.delta > 0n}
+            class:negative={td.derived.delta < 0n}
+            title="Signed delta (off-chain net balance), not total OUT/IN volume"
+          >
+            Delta: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.delta)}
           </span>
           <button class="delta-faucet" on:click={() => handleFaucet(td.tokenId)}>Faucet</button>
         </div>

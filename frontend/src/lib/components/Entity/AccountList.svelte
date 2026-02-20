@@ -8,12 +8,43 @@
   export let replica: EntityReplica | null;
 
   const dispatch = createEventDispatcher();
+  let showAllAccounts = false;
 
   // Get accounts from entity state - DIRECT references (no shallow copy!)
   // CRITICAL: Don't spread account object - it creates stale snapshot
   $: accounts = (replica?.state?.accounts && replica.state.accounts instanceof Map)
     ? Array.from(replica.state.accounts.entries())
     : [];
+
+  function absBigInt(v: bigint): bigint {
+    return v >= 0n ? v : -v;
+  }
+
+  function getAccountDeltaMagnitude(account: any): bigint {
+    const deltas = account?.deltas;
+    if (!deltas || typeof deltas.values !== 'function') return 0n;
+    let sum = 0n;
+    for (const delta of deltas.values()) {
+      const on = typeof delta?.ondelta === 'bigint' ? delta.ondelta : 0n;
+      const off = typeof delta?.offdelta === 'bigint' ? delta.offdelta : 0n;
+      sum += absBigInt(on + off);
+    }
+    return sum;
+  }
+
+  $: rankedAccounts = accounts
+    .map(([counterpartyId, account]) => ({
+      counterpartyId,
+      account,
+      score: getAccountDeltaMagnitude(account),
+    }))
+    .sort((a, b) => {
+      if (a.score === b.score) return a.counterpartyId.localeCompare(b.counterpartyId);
+      return a.score > b.score ? -1 : 1;
+    });
+
+  $: visibleAccounts = showAllAccounts ? rankedAccounts : rankedAccounts.slice(0, 3);
+  $: hiddenAccountsCount = Math.max(0, rankedAccounts.length - visibleAccounts.length);
 
   // Safety guard for XLN functions
 
@@ -57,6 +88,46 @@
     dispatch('faucet', event.detail);
   }
 
+  function forwardSettleApprove(event: CustomEvent) {
+    dispatch('settleApprove', event.detail);
+  }
+
+  function normalizeId(id: string): string {
+    return String(id || '').toLowerCase();
+  }
+
+  function getLockSummary(counterpartyId: string): {
+    incomingCount: number;
+    incomingAmount: bigint;
+    outgoingCount: number;
+    outgoingAmount: bigint;
+  } {
+    const summary = {
+      incomingCount: 0,
+      incomingAmount: 0n,
+      outgoingCount: 0,
+      outgoingAmount: 0n,
+    };
+
+    const lockBook = replica?.state?.lockBook;
+    if (!lockBook || typeof lockBook.values !== 'function') return summary;
+
+    const cpNorm = normalizeId(counterpartyId);
+    for (const lock of lockBook.values()) {
+      if (normalizeId(String((lock as any)?.accountId || '')) !== cpNorm) continue;
+      const amount = typeof (lock as any)?.amount === 'bigint' ? (lock as any).amount : 0n;
+      if ((lock as any)?.direction === 'incoming') {
+        summary.incomingCount += 1;
+        summary.incomingAmount += amount;
+      } else if ((lock as any)?.direction === 'outgoing') {
+        summary.outgoingCount += 1;
+        summary.outgoingAmount += amount;
+      }
+    }
+
+    return summary;
+  }
+
 
 
 </script>
@@ -73,20 +144,39 @@
         </div>
       {:else}
         <div class="list-header">
-          <span class="list-count">{accounts.length} account{accounts.length !== 1 ? 's' : ''}</span>
-          <button class="layout-toggle" on:click={() => settingsOperations.update({ barLayout: $settings.barLayout === 'center' ? 'sides' : 'center' })} title="{$settings.barLayout === 'center' ? 'Switch to sides view' : 'Switch to center view'}">
-            {$settings.barLayout === 'center' ? '⊞' : '⊟'}
-          </button>
+          <span class="list-count">
+            {#if hiddenAccountsCount > 0}
+              Top {visibleAccounts.length} of {accounts.length} accounts
+            {:else}
+              {accounts.length} account{accounts.length !== 1 ? 's' : ''}
+            {/if}
+          </span>
+          <div class="list-controls">
+            {#if accounts.length > 3}
+              <button
+                class="list-toggle"
+                on:click={() => showAllAccounts = !showAllAccounts}
+                title={showAllAccounts ? 'Show top 3 only' : 'Show all accounts'}
+              >
+                {showAllAccounts ? 'Top 3' : `All (${accounts.length})`}
+              </button>
+            {/if}
+            <button class="layout-toggle" on:click={() => settingsOperations.update({ barLayout: $settings.barLayout === 'center' ? 'sides' : 'center' })} title="{$settings.barLayout === 'center' ? 'Switch to sides view' : 'Switch to center view'}">
+              {$settings.barLayout === 'center' ? '⊞' : '⊟'}
+            </button>
+          </div>
         </div>
         <div class="scrollable-component accounts-list">
-          {#each accounts as [counterpartyId, account] (counterpartyId)}
+          {#each visibleAccounts as entry (entry.counterpartyId)}
             <AccountPreview
-              {account}
-              {counterpartyId}
+              account={entry.account}
+              counterpartyId={entry.counterpartyId}
               entityId={replica?.entityId || ''}
+              lockSummary={getLockSummary(entry.counterpartyId)}
               isSelected={false}
               on:select={selectAccount}
               on:faucet={forwardFaucet}
+              on:settleApprove={forwardSettleApprove}
             />
           {/each}
         </div>
@@ -169,5 +259,27 @@
   .layout-toggle:hover {
     color: #a8a29e;
     border-color: #44403c;
+  }
+
+  .list-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .list-toggle {
+    background: transparent;
+    border: 1px solid #292524;
+    border-radius: 3px;
+    color: #a8a29e;
+    font-size: 0.72em;
+    cursor: pointer;
+    padding: 3px 8px;
+    line-height: 1.2;
+  }
+
+  .list-toggle:hover {
+    border-color: #57534e;
+    color: #e7e5e4;
   }
 </style>

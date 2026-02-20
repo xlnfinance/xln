@@ -844,9 +844,20 @@ async function applyFinalizedJEvent(
 
   } else if (event.type === 'AccountSettled') {
     // Universal settlement event (covers R2C, C2R, settle, rebalance)
-    const { counterpartyEntityId, tokenId, ownReserve, collateral, ondelta } = event.data;
+    const { leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral, ondelta } = event.data;
     const tokenIdNum = Number(tokenId);
-    const cpShort = (counterpartyEntityId as string).slice(-4);
+    const myEntityId = String(entityState.entityId).toLowerCase();
+    const leftId = String(leftEntity).toLowerCase();
+    const rightId = String(rightEntity).toLowerCase();
+    const myIsLeft = myEntityId === leftId;
+    const myIsRight = myEntityId === rightId;
+    if (!myIsLeft && !myIsRight) {
+      console.warn(`   ⚠️ AccountSettled not for this entity: me=${entityState.entityId.slice(-4)} left=${leftId.slice(-4)} right=${rightId.slice(-4)}`);
+      return { newState, mempoolOps };
+    }
+    const counterpartyEntityId = myIsLeft ? rightEntity : leftEntity;
+    const cpShort = String(counterpartyEntityId).slice(-4);
+    const ownReserve = myIsLeft ? leftReserve : rightReserve;
     const tokenSymbol = getTokenSymbol(tokenIdNum);
     const decimals = getTokenDecimals(tokenIdNum);
 
@@ -883,9 +894,16 @@ async function applyFinalizedJEvent(
     const jBlockHash = event.blockHash || '';
 
     // Add j_event_claim via mempoolOps (auto-triggers proposableAccounts + account frame)
-    // Account keyed by counterparty ID
-    // CRITICAL: Deep-copy event to prevent mutation issues (frame fullDeltaStates added later)
-    const eventCopy = structuredClone(event);
+    // Account keyed by counterparty ID.
+    // Use canonical normalized event payload so both sides hash the same data.
+    const normalizedClaimEvents = normalizeJurisdictionEvents([event]);
+    if (normalizedClaimEvents.length !== 1) {
+      console.warn(
+        `⚠️ AccountSettled normalization failed for claim enqueue: token=${tokenIdNum} cp=${cpShort} block=${blockNumber}`,
+      );
+      return { newState, mempoolOps };
+    }
+    const eventCopy = structuredClone(normalizedClaimEvents[0]);
     const observedAt = entityState.timestamp || 0;
     mempoolOps.push({
       accountId: counterpartyEntityId as string,
@@ -1076,7 +1094,25 @@ async function applyFinalizedJEvent(
       } else {
         console.warn(`⚠️ DisputeFinalized: No activeDispute for ${counterpartyId.slice(-4)}`);
       }
-      account.status = 'disputed';
+      // Dispute completed on-chain: unfreeze account and move proof nonce cursor forward.
+      const finalizedOnChainNonce = Number(account.onChainSettlementNonce ?? 0);
+      if (account.proofHeader.nonce <= finalizedOnChainNonce) {
+        account.proofHeader.nonce = finalizedOnChainNonce + 1;
+      }
+      account.status = 'active';
+      delete account.pendingFrame;
+      delete account.pendingAccountInput;
+      delete account.clonedForValidation;
+      account.rollbackCount = 0;
+      delete account.lastRollbackFrameHash;
+      // Drop stale dispute snapshots from pre-finalization epoch.
+      delete account.counterpartyDisputeProofHanko;
+      delete account.counterpartyDisputeProofNonce;
+      delete account.counterpartyDisputeProofBodyHash;
+      console.log(
+        `✅ DisputeFinalized: account re-activated for ${counterpartyId.slice(-4)} ` +
+        `(onChainNonce=${finalizedOnChainNonce}, nextProofNonce=${account.proofHeader.nonce})`,
+      );
 
       // IMPORTANT: Do not mutate shared account deltas from unilateral entity-layer events.
       // Dispute flow can be reflected via status/nonce; collateral/ondelta must move only
@@ -1119,6 +1155,19 @@ async function applyFinalizedJEvent(
       if (newState.jBatchState) {
         const { createEmptyBatch, batchOpCount: countOps } = await import('../j-batch');
         const opCount = countOps(newState.jBatchState.batch);
+        const wasPending = !!newState.jBatchState.pendingBroadcast;
+
+        // Duplicate/replayed HankoBatchProcessed can arrive after we already cleared the
+        // batch on the first finalized event. Ignore zero-op confirmations in that case.
+        if (!wasPending && opCount === 0) {
+          const currentNonce = Number(newState.jBatchState.entityNonce || 0);
+          const eventNonceNum = Number(nonce || 0);
+          newState.jBatchState.entityNonce = eventNonceNum > currentNonce ? eventNonceNum : currentNonce;
+          console.warn(
+            `⚠️ HankoBatchProcessed duplicate ignored (nonce ${nonce}, opCount=0, pending=false)`,
+          );
+          return { newState, mempoolOps };
+        }
 
         // Record completed batch in history (keep last 20)
         if (!newState.batchHistory) newState.batchHistory = [];
@@ -1143,15 +1192,25 @@ async function applyFinalizedJEvent(
         newState.jBatchState.encodedBatch = undefined;
         newState.jBatchState.broadcastedAt = undefined;
         newState.jBatchState.txHash = undefined;
-        // entityNonce stays (tracks on-chain nonce for next batch)
+        // Authoritative nonce sync from on-chain finalized event.
+        // Never trust optimistic local increments from submission path.
+        const currentNonce = Number(newState.jBatchState.entityNonce || 0);
+        const eventNonceNum = Number(nonce || 0);
+        newState.jBatchState.entityNonce = eventNonceNum > currentNonce ? eventNonceNum : currentNonce;
         console.log(`   ✅ jBatch confirmed (nonce ${nonce}, ${opCount} ops)`);
       }
       addMessage(newState, `✅ jBatch finalized (nonce ${nonce}) | Block ${blockNumber}`);
     } else {
       // Batch failed — update status, keep batch for retry
       if (newState.jBatchState) {
+        // Failure is finalized on-chain, so release pending latch immediately.
+        newState.jBatchState.pendingBroadcast = false;
         newState.jBatchState.status = 'failed';
         newState.jBatchState.failedAttempts++;
+        // Keep nonce synchronized to finalized event nonce.
+        const currentNonce = Number(newState.jBatchState.entityNonce || 0);
+        const eventNonceNum = Number(nonce || 0);
+        newState.jBatchState.entityNonce = eventNonceNum > currentNonce ? eventNonceNum : currentNonce;
 
         if (!newState.batchHistory) newState.batchHistory = [];
         newState.batchHistory.push({
@@ -1165,6 +1224,16 @@ async function applyFinalizedJEvent(
         });
         if (newState.batchHistory.length > 20) {
           newState.batchHistory = newState.batchHistory.slice(-20);
+        }
+      }
+      // Batch is atomic on-chain; success=false means none of its ops applied.
+      // Unfreeze submitted rebalance requests so hub can retry in next crontab tick.
+      for (const account of newState.accounts.values()) {
+        if (!account.requestedRebalanceFeeState) continue;
+        for (const feeState of account.requestedRebalanceFeeState.values()) {
+          if ((feeState.jBatchSubmittedAt || 0) > 0) {
+            feeState.jBatchSubmittedAt = 0;
+          }
         }
       }
       console.warn(`   ⚠️ jBatch FAILED on-chain (nonce ${nonce}) - not clearing`);

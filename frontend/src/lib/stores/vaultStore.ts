@@ -2,7 +2,7 @@ import { writable, get, derived } from 'svelte/store';
 import { HDNodeWallet, Mnemonic } from 'ethers';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
 import { xlnEnvironment } from './xlnStore';
-import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
+import { writeSavedCollateralPolicy, writeHubJoinPreference, getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
 import { writeOnboardingComplete } from '$lib/utils/onboardingState';
 
 // Types
@@ -114,6 +114,121 @@ async function waitForCondition(
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   throw new Error(`[VaultStore] Timeout waiting for condition: ${label}`);
+}
+
+function shuffle<T>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const a = out[i];
+    const b = out[j];
+    out[i] = b as T;
+    out[j] = a as T;
+  }
+  return out;
+}
+
+function hasOpenAccount(env: any, ownerEntityId: string, counterpartyEntityId: string): boolean {
+  if (!env?.eReplicas || !(env.eReplicas instanceof Map)) return false;
+  const owner = String(ownerEntityId).toLowerCase();
+  const counterparty = String(counterpartyEntityId).toLowerCase();
+  for (const [key, replica] of env.eReplicas.entries()) {
+    const [entityKey] = String(key).split(':');
+    if (String(entityKey || '').toLowerCase() !== owner) continue;
+    const accounts = replica?.state?.accounts;
+    if (!(accounts instanceof Map)) return false;
+    for (const accountKey of accounts.keys()) {
+      if (String(accountKey).toLowerCase() === counterparty) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+function discoverHubEntityIds(env: any, ownerEntityId: string): string[] {
+  const discovered: string[] = [];
+  const owner = String(ownerEntityId || '').toLowerCase();
+  const add = (value: unknown) => {
+    const id = String(value || '').trim();
+    if (!id) return;
+    if (id.toLowerCase() === owner) return;
+    if (!discovered.some(existing => existing.toLowerCase() === id.toLowerCase())) {
+      discovered.push(id);
+    }
+  };
+
+  if (env?.gossip?.getHubs) {
+    const hubs = env.gossip.getHubs();
+    for (const profile of hubs || []) add(profile?.entityId);
+  } else if (env?.gossip?.getProfiles) {
+    const profiles = env.gossip.getProfiles();
+    for (const profile of profiles || []) {
+      const isHub = profile?.metadata?.isHub === true ||
+        (Array.isArray(profile?.capabilities) &&
+          (profile.capabilities.includes('hub') || profile.capabilities.includes('routing')));
+      if (isHub) add(profile?.entityId);
+    }
+  }
+
+  return discovered;
+}
+
+async function autoCreateDemoHubAccount(
+  xln: any,
+  env: any,
+  entityId: string,
+  signerId: string,
+): Promise<string> {
+  const rebalancePolicy = getOpenAccountRebalancePolicyData();
+  if (!rebalancePolicy) {
+    throw new Error('DEMO_AUTO_OPEN_FAILED: missing rebalance policy');
+  }
+
+  const timeoutMs = 12_000;
+  const pollMs = 300;
+  const startedAt = Date.now();
+  let targetHubId = '';
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const candidates = shuffle(discoverHubEntityIds(env, entityId))
+      .filter((hubId) => !hasOpenAccount(env, entityId, hubId));
+    if (candidates.length > 0) {
+      targetHubId = candidates[0]!;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+
+  if (!targetHubId) {
+    throw new Error('DEMO_AUTO_OPEN_FAILED: no hubs discovered');
+  }
+
+  const creditAmount = 10_000n * 10n ** 18n;
+  xln.enqueueRuntimeInput(env, {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'openAccount',
+        data: {
+          targetEntityId: targetHubId,
+          creditAmount,
+          tokenId: 1,
+          rebalancePolicy,
+        },
+      }],
+    }],
+  });
+
+  await waitForCondition(
+    () => hasOpenAccount(env, entityId, targetHubId),
+    `createRuntime.demoAutoOpenAccount(${targetHubId.slice(0, 10)})`,
+    15_000,
+    100,
+  );
+
+  return targetHubId;
 }
 
 async function enqueueAndAwait(
@@ -873,7 +988,7 @@ export const vaultOperations = {
         hardLimitUsd: 10_000,
         maxFeeUsd: 15,
       });
-      writeHubJoinPreference('manual');
+      writeHubJoinPreference(loginType === 'demo' ? '1' : 'manual');
       writeOnboardingComplete(entityId, true);
     }
     runtimesState.update(state => ({
@@ -903,6 +1018,16 @@ export const vaultOperations = {
       const relayUrls = resolveRelayUrls();
       console.log(`[VaultStore.createRuntime] P2P: Starting on env runtimeId=${newEnv.runtimeId?.slice(0,12)}, relay=${relayUrls[0]}`);
       xln.startP2P(newEnv, { relayUrls, gossipPollMs: 0 });
+    }
+
+    if (loginType === 'demo' && !requiresOnboarding) {
+      const hubId = await autoCreateDemoHubAccount(
+        xln,
+        newEnv,
+        entityId,
+        signerAddress,
+      );
+      console.log(`[VaultStore.createRuntime] ✅ Demo auto-opened hub account: ${hubId.slice(0, 12)}...`);
     }
 
     // Switch to new runtime

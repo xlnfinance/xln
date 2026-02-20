@@ -131,6 +131,138 @@ function assertNoUnilateralSettlementMutation(
   }
 }
 
+async function runPostFrameAutoRebalanceCheck(
+  env: Env,
+  accountMachine: AccountMachine,
+  ourEntityId: string,
+  counterpartyEntityId: string,
+  frameHeight: number,
+): Promise<AccountTx[]> {
+  try {
+    const { checkAutoRebalance } = await import('./account-tx/handlers/request-collateral');
+    const p2p = (env as any)?.runtimeState?.p2p;
+    const emitRebalanceDebug = (payload: Record<string, unknown>) => {
+      if (p2p && typeof p2p.sendDebugEvent === 'function') {
+        p2p.sendDebugEvent({
+          level: 'info',
+          code: 'REB_STEP',
+          step: 1,
+          accountId: counterpartyEntityId,
+          frameHeight,
+          ...payload,
+        });
+      }
+    };
+    const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
+    const counterpartyReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === counterpartyEntityId);
+    const ourIsHub = !!ourReplica?.state?.hubRebalanceConfig;
+    const counterpartyIdLower = String(counterpartyEntityId || '').toLowerCase();
+    const counterpartyProfile = env.gossip?.getProfiles?.().find(
+      (p: any) => String(p?.entityId || '').toLowerCase() === counterpartyIdLower,
+    );
+    const counterpartyCaps = Array.isArray(counterpartyProfile?.capabilities)
+      ? (counterpartyProfile?.capabilities as string[])
+      : [];
+    const counterpartyProfileIsHub =
+      counterpartyProfile?.metadata?.isHub === true ||
+      counterpartyCaps.includes('hub') ||
+      counterpartyCaps.includes('routing');
+    const counterpartyIsHub =
+      !!counterpartyReplica?.state?.hubRebalanceConfig ||
+      counterpartyProfileIsHub;
+
+    const emitSkip = (reason: string) => {
+      console.log(
+        `ℹ️ AUTO-REBALANCE: skipped (${reason}) after frame ${frameHeight} ` +
+        `(policyCount=${accountMachine.rebalancePolicy?.size || 0})`,
+      );
+      emitRebalanceDebug({
+        status: 'skipped',
+        event: 'request_not_queued',
+        reason,
+        policyCount: accountMachine.rebalancePolicy?.size || 0,
+        hasPendingFrame: !!accountMachine.pendingFrame,
+      });
+    };
+
+    if (ourIsHub) {
+      emitSkip('our-entity-is-hub');
+      return [];
+    }
+    if (!counterpartyIsHub) {
+      emitSkip('counterparty-not-hub');
+      return [];
+    }
+
+    const parseBigIntMaybe = (value: unknown): bigint | undefined => {
+      if (value === undefined || value === null) return undefined;
+      try {
+        return typeof value === 'bigint' ? value : BigInt(value as any);
+      } catch {
+        return undefined;
+      }
+    };
+    const parseNumberMaybe = (value: unknown): number | undefined => {
+      if (value === undefined || value === null) return undefined;
+      const n = Number(value);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    };
+
+    const hubConfig = counterpartyReplica?.state?.hubRebalanceConfig;
+    const accountPolicy = accountMachine.counterpartyRebalanceFeePolicy;
+    const baseFee =
+      accountPolicy?.baseFee ??
+      parseBigIntMaybe(hubConfig?.rebalanceBaseFee) ??
+      parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceBaseFee);
+    const liquidityFeeBps =
+      accountPolicy?.liquidityFeeBps ??
+      parseBigIntMaybe(hubConfig?.rebalanceLiquidityFeeBps) ??
+      parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceLiquidityFeeBps) ??
+      parseBigIntMaybe(hubConfig?.minFeeBps);
+    const gasFee =
+      accountPolicy?.gasFee ??
+      parseBigIntMaybe(hubConfig?.rebalanceGasFee) ??
+      parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceGasFee) ??
+      0n;
+    const policyVersion =
+      accountPolicy?.policyVersion ??
+      parseNumberMaybe(hubConfig?.policyVersion) ??
+      parseNumberMaybe(counterpartyProfile?.metadata?.policyVersion) ??
+      1;
+
+    if (baseFee === undefined || liquidityFeeBps === undefined) {
+      emitSkip('missing-hub-fee-policy');
+      return [];
+    }
+
+    const rebalanceTxs = checkAutoRebalance(accountMachine, ourEntityId, counterpartyEntityId, {
+      policyVersion,
+      baseFee,
+      liquidityFeeBps,
+      gasFee,
+    });
+    if (rebalanceTxs.length > 0) {
+      console.log(
+        `🔄 AUTO-REBALANCE: Queued ${rebalanceTxs.length} request_collateral txs after frame ${frameHeight}`,
+      );
+      emitRebalanceDebug({
+        status: 'ok',
+        event: 'request_queued',
+        txCount: rebalanceTxs.length,
+        tokenIds: rebalanceTxs
+          .map((tx: any) => tx?.data?.tokenId)
+          .filter((v: unknown) => typeof v === 'number'),
+      });
+      return rebalanceTxs;
+    }
+    emitSkip('fee-policy-or-threshold');
+    return [];
+  } catch (rebalanceErr) {
+    console.warn(`⚠️ Auto-rebalance check failed (non-fatal):`, (rebalanceErr as Error).message);
+    return [];
+  }
+}
+
 // === VALIDATION ===
 
 /**
@@ -934,9 +1066,11 @@ export async function handleAccountInput(
         console.log(
           `📚 Frame ${accountMachine.pendingFrame.height} added to history (total: ${accountMachine.frameHistory.length})`,
         );
+
       }
 
       // Clear pending state
+      const committedHeight = accountMachine.pendingFrame.height;
       delete accountMachine.pendingFrame;
       delete accountMachine.pendingAccountInput;
       delete accountMachine.clonedForValidation;
@@ -949,6 +1083,22 @@ export async function handleAccountInput(
         `✅ PENDING-CLEARED: Frame ${ackHeight} confirmed, mempool now has ${accountMachine.mempool.length} txs: [${accountMachine.mempool.map(tx => tx.type).join(',')}]`,
       );
       events.push(`✅ Frame ${ackHeight} confirmed and committed`);
+
+      // Run auto-rebalance only after pending frame is cleared.
+      // Otherwise checkAutoRebalance self-skips with "pendingFrame exists".
+      const ackAutoRebalanceTxs = await runPostFrameAutoRebalanceCheck(
+        env,
+        accountMachine,
+        accountMachine.proofHeader.fromEntity,
+        input.fromEntityId,
+        committedHeight,
+      );
+      if (ackAutoRebalanceTxs.length > 0) {
+        for (const tx of ackAutoRebalanceTxs) {
+          accountMachine.mempool.push(tx);
+        }
+        events.push(`🔄 Auto-rebalance queued ${ackAutoRebalanceTxs.length} tx(s) after ACK commit`);
+      }
 
       // CRITICAL FIX: Chained Proposal - if mempool has items (e.g. j_event_claim), propose immediately
       if (!input.newAccountFrame) {
@@ -1543,126 +1693,18 @@ export async function handleAccountInput(
     // If yes, auto-queue request_collateral + fee into mempool.
     // User is ALWAYS online here (just processed an inbound frame).
     // ═══════════════════════════════════════════════════════════════════════════
-    try {
-      const { checkAutoRebalance } = await import('./account-tx/handlers/request-collateral');
-      const p2p = (env as any)?.runtimeState?.p2p;
-      const emitRebalanceDebug = (payload: Record<string, unknown>) => {
-        if (p2p && typeof p2p.sendDebugEvent === 'function') {
-          p2p.sendDebugEvent({
-            level: 'info',
-            code: 'REB_STEP',
-            step: 1,
-            accountId: input.fromEntityId,
-            frameHeight: receivedFrame.height,
-            ...payload,
-          });
-        }
-      };
-      const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
-      const counterpartyReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === input.fromEntityId);
-      const ourIsHub = !!ourReplica?.state?.hubRebalanceConfig;
-      const counterpartyIdLower = String(input.fromEntityId || '').toLowerCase();
-      const counterpartyProfile = env.gossip?.getProfiles?.().find(
-        (p: any) => String(p?.entityId || '').toLowerCase() === counterpartyIdLower,
-      );
-      const counterpartyCaps = Array.isArray(counterpartyProfile?.capabilities)
-        ? (counterpartyProfile?.capabilities as string[])
-        : [];
-      const counterpartyProfileIsHub =
-        counterpartyProfile?.metadata?.isHub === true ||
-        counterpartyCaps.includes('hub') ||
-        counterpartyCaps.includes('routing');
-      const counterpartyIsHub =
-        !!counterpartyReplica?.state?.hubRebalanceConfig ||
-        counterpartyProfileIsHub;
-
-      const emitSkip = (reason: string) => {
-        console.log(
-          `ℹ️ AUTO-REBALANCE: skipped (${reason}) after frame ${receivedFrame.height} ` +
-          `(policyCount=${accountMachine.rebalancePolicy?.size || 0})`,
-        );
-        emitRebalanceDebug({
-          status: 'skipped',
-          event: 'request_not_queued',
-          reason,
-          policyCount: accountMachine.rebalancePolicy?.size || 0,
-          hasPendingFrame: !!accountMachine.pendingFrame,
-        });
-      };
-
-      if (ourIsHub) {
-        emitSkip('our-entity-is-hub');
-      } else if (!counterpartyIsHub) {
-        emitSkip('counterparty-not-hub');
-      } else {
-        const parseBigIntMaybe = (value: unknown): bigint | undefined => {
-          if (value === undefined || value === null) return undefined;
-          try {
-            return typeof value === 'bigint' ? value : BigInt(value as any);
-          } catch {
-            return undefined;
-          }
-        };
-        const parseNumberMaybe = (value: unknown): number | undefined => {
-          if (value === undefined || value === null) return undefined;
-          const n = Number(value);
-          return Number.isFinite(n) && n > 0 ? n : undefined;
-        };
-
-        const hubConfig = counterpartyReplica?.state?.hubRebalanceConfig;
-        const accountPolicy = accountMachine.counterpartyRebalanceFeePolicy;
-        const baseFee =
-          accountPolicy?.baseFee ??
-          parseBigIntMaybe(hubConfig?.rebalanceBaseFee) ??
-          parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceBaseFee);
-        const liquidityFeeBps =
-          accountPolicy?.liquidityFeeBps ??
-          parseBigIntMaybe(hubConfig?.rebalanceLiquidityFeeBps) ??
-          parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceLiquidityFeeBps) ??
-          parseBigIntMaybe(hubConfig?.minFeeBps);
-        const gasFee =
-          accountPolicy?.gasFee ??
-          parseBigIntMaybe(hubConfig?.rebalanceGasFee) ??
-          parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceGasFee) ??
-          0n;
-        const policyVersion =
-          accountPolicy?.policyVersion ??
-          parseNumberMaybe(hubConfig?.policyVersion) ??
-          parseNumberMaybe(counterpartyProfile?.metadata?.policyVersion) ??
-          1;
-
-        if (baseFee === undefined || liquidityFeeBps === undefined) {
-          emitSkip('missing-hub-fee-policy');
-        } else {
-          const rebalanceTxs = checkAutoRebalance(accountMachine, ourEntityId, input.fromEntityId, {
-            policyVersion,
-            baseFee,
-            liquidityFeeBps,
-            gasFee,
-          });
-          if (rebalanceTxs.length > 0) {
-            for (const tx of rebalanceTxs) {
-              accountMachine.mempool.push(tx);
-            }
-            console.log(
-              `🔄 AUTO-REBALANCE: Queued ${rebalanceTxs.length} request_collateral txs after frame ${receivedFrame.height}`,
-            );
-            emitRebalanceDebug({
-              status: 'ok',
-              event: 'request_queued',
-              txCount: rebalanceTxs.length,
-              tokenIds: rebalanceTxs
-                .map((tx: any) => tx?.data?.tokenId)
-                .filter((v: unknown) => typeof v === 'number'),
-            });
-          } else {
-            emitSkip('fee-policy-or-threshold');
-          }
-        }
+    const postCommitAutoRebalanceTxs = await runPostFrameAutoRebalanceCheck(
+      env,
+      accountMachine,
+      ourEntityId,
+      input.fromEntityId,
+      receivedFrame.height,
+    );
+    if (postCommitAutoRebalanceTxs.length > 0) {
+      for (const tx of postCommitAutoRebalanceTxs) {
+        accountMachine.mempool.push(tx);
       }
-    } catch (rebalanceErr) {
-      // Non-fatal: rebalance check failure shouldn't break frame processing
-      console.warn(`⚠️ Auto-rebalance check failed (non-fatal):`, (rebalanceErr as Error).message);
+      events.push(`🔄 Auto-rebalance queued ${postCommitAutoRebalanceTxs.length} tx(s) after frame commit`);
     }
 
     // Send confirmation (ACK) using HANKO

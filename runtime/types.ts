@@ -367,14 +367,12 @@ export type JurisdictionEvent =
       data: {
         leftEntity: string;
         rightEntity: string;
-        counterpartyEntityId: string;
         tokenId: number;
-        ownReserve: string;
-        counterpartyReserve: string;
+        leftReserve: string;
+        rightReserve: string;
         collateral: string;
         ondelta: string;
         nonce: number;
-        side: 'left' | 'right';
       };
     })
   | (JEventMetadata & {
@@ -662,6 +660,7 @@ export type EntityTx =
         routingFeePPM?: number;             // Default: 100 (0.01%)
         baseFee?: bigint;                   // Default: 0n
         minCollateralThreshold?: bigint;    // Reserved for future policy gates
+        c2rSoftLimit?: bigint;              // Hub-owned collateral keep-buffer before C→R pullback
         minFeeBps?: bigint;                 // Legacy fallback min-fee bps gate (if policy triplet missing)
         rebalanceBaseFee?: bigint;          // Fixed rebalance fee component
         rebalanceLiquidityFeeBps?: bigint;  // Rebalance liquidity fee in bps (volume-based)
@@ -1563,6 +1562,7 @@ export interface HubRebalanceConfig {
   routingFeePPM: number;             // Routing fee in parts per million (0-10000 = 0%-1%)
   baseFee: bigint;                   // Fixed fee per routed payment (smallest unit)
   minCollateralThreshold?: bigint;   // Reserved for future policy gates
+  c2rSoftLimit?: bigint;             // Keep-buffer of hub-owned collateral before C→R pullback
   minFeeBps?: bigint;                // Legacy fallback min-fee bps gate
   rebalanceBaseFee?: bigint;         // Fixed rebalance fee component
   rebalanceLiquidityFeeBps?: bigint; // Volume-based rebalance fee component (bps)

@@ -23,7 +23,7 @@
 
   // Icons
   import {
-    ArrowUpRight, ArrowDownLeft, Repeat, Landmark, Users, Activity,
+    ArrowUpRight, Repeat, Landmark, Users, Activity,
     MessageCircle, Settings as SettingsIcon, BookUser,
     ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check, Scale, Globe, Trash2
   } from 'lucide-svelte';
@@ -41,11 +41,8 @@
   import ProposalsList from './ProposalsList.svelte';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
   import FormationPanel from './FormationPanel.svelte';
-  import QRPanel from './QRPanel.svelte';
   import HubDiscoveryPanel from './HubDiscoveryPanel.svelte';
   import GossipPanel from './GossipPanel.svelte';
-  import PaymentForm from './PaymentForm.svelte';
-  import CreditForm from './CreditForm.svelte';
 
   export let tab: Tab;
   export let isLast: boolean = false;
@@ -54,22 +51,26 @@
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
 
   // Tab types
-  type ViewTab = 'external' | 'reserves' | 'accounts' | 'send' | 'swap' | 'onj' | 'activity' | 'chat' | 'contacts' | 'receive' | 'create' | 'gossip' | 'governance' | 'settings';
+  type ViewTab = 'external' | 'reserves' | 'accounts' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance' | 'settings';
+  type AccountWorkspaceTab = 'send' | 'swap' | 'open' | 'activity' | 'settle';
 
   // Set initial tab based on action
   function getInitialTab(): ViewTab {
-    if (initialAction === 'r2r') return 'send';
-    if (initialAction === 'r2c') return 'onj'; // On-chain jurisdiction for R2C
     return 'accounts';
   }
+  function getInitialAccountWorkspaceTab(): AccountWorkspaceTab {
+    if (initialAction === 'r2r') return 'send';
+    if (initialAction === 'r2c') return 'settle';
+    return 'open';
+  }
   let activeTab: ViewTab = getInitialTab();
+  let accountWorkspaceTab: AccountWorkspaceTab = getInitialAccountWorkspaceTab();
 
   // State
   let replica: EntityReplica | null = null;
   let selectedAccountId: string | null = null;
   let onchainPrefill: { tokenId?: number; id: number } | null = null;
   let selectedJurisdictionName: string | null = null;
-  let activityCount = 0;
   let addressCopied = false;
   let openAccountEntityId = '';
   function isLocalHost(hostname: string): boolean {
@@ -218,13 +219,6 @@
     if (showJurisdiction && availableJurisdictions.length > 0 && !selectedJurisdictionName) {
       selectedJurisdictionName = (activeEnv as any)?.activeJurisdiction || availableJurisdictions[0]?.name;
     }
-  }
-
-  // Activity count
-  $: {
-    let activity = 0;
-    if (replica?.state?.lockBook) activity += replica.state.lockBook.size;
-    activityCount = activity;
   }
 
   // Contacts (persisted in localStorage)
@@ -414,6 +408,35 @@
 
   function handleAccountFaucet(event: CustomEvent<{ counterpartyId: string; tokenId: number }>) {
     faucetOffchain(event.detail.counterpartyId, event.detail.tokenId);
+  }
+
+  async function handleQuickSettleApprove(event: CustomEvent<{ counterpartyId: string }>) {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    if (!entityId) return;
+    if (!activeIsLive) {
+      toasts.error('Settlement signature requires LIVE mode');
+      return;
+    }
+
+    try {
+      const env = activeEnv;
+      if (!env) throw new Error('Environment not ready');
+      const signerId = activeXlnFunctions?.resolveEntityProposerId?.(env as any, entityId, 'quick-settle-approve') || tab.signerId;
+      if (!signerId) throw new Error('No signer available');
+
+      await enqueueEntityInputs(env as any, [{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'settle_approve',
+          data: { counterpartyEntityId: event.detail.counterpartyId },
+        }],
+      }]);
+      toasts.info('Withdrawal signature sent');
+    } catch (err) {
+      console.error('[EntityPanel] Quick settle approve failed:', err);
+      toasts.error(`Settlement signature failed: ${(err as Error).message}`);
+    }
   }
 
   const TOKEN_CACHE_TTL_MS = 60_000;
@@ -1049,12 +1072,22 @@
   }
 
   function formatAmount(amount: bigint, decimals: number): string {
+    const precision = Math.max(0, Math.min(18, Math.floor(Number($settings?.tokenPrecision ?? 6))));
+    const negative = amount < 0n;
+    const abs = negative ? -amount : amount;
     const divisor = BigInt(10) ** BigInt(decimals);
-    const whole = amount / divisor;
-    const frac = amount % divisor;
-    if (frac === 0n) return whole.toLocaleString();
-    const fracStr = frac.toString().padStart(decimals, '0').slice(0, 2);
-    return `${whole.toLocaleString()}.${fracStr}`;
+    const whole = abs / divisor;
+    const frac = abs % divisor;
+    let text = whole.toLocaleString('en-US');
+    if (precision > 0 && frac > 0n) {
+      const fracStr = frac
+        .toString()
+        .padStart(decimals, '0')
+        .slice(0, Math.min(decimals, precision))
+        .replace(/0+$/, '');
+      if (fracStr.length > 0) text = `${text}.${fracStr}`;
+    }
+    return `${negative ? '-' : ''}${text}`;
   }
 
   function formatCompact(value: number): string {
@@ -1176,11 +1209,13 @@
   function handleBackToAccounts() {
     selectedAccountId = null;
     activeTab = 'accounts';
+    accountWorkspaceTab = 'activity';
   }
 
   function openOnchainDeposit(tokenId: number) {
     onchainPrefill = { tokenId, id: Date.now() };
-    activeTab = 'onj';
+    activeTab = 'accounts';
+    accountWorkspaceTab = 'settle';
   }
 
   function goToLive() {
@@ -1189,7 +1224,7 @@
   }
 
   // Tab config
-  // Pending batch count for On-Chain tab badge
+  // Pending batch count for Accounts tab badge
   $: pendingBatchCount = (() => {
     if (!replica?.state) return 0;
     const batch = (replica.state as any)?.jBatchState?.batch;
@@ -1200,21 +1235,24 @@
            (batch.reserveToReserve?.length || 0);
   })();
 
-  const tabs: Array<{ id: ViewTab; icon: any; label: string; showBadge?: boolean; badgeType?: 'activity' | 'pending' }> = [
+  const tabs: Array<{ id: ViewTab; icon: any; label: string; showBadge?: boolean; badgeType?: 'pending' }> = [
     { id: 'external', icon: Wallet, label: 'External' },
     { id: 'reserves', icon: Landmark, label: 'Reserves' },
-    { id: 'accounts', icon: Users, label: 'Accounts' },
-    { id: 'send', icon: ArrowUpRight, label: 'Send' },
-    { id: 'swap', icon: Repeat, label: 'Swap' },
-    { id: 'onj', icon: Landmark, label: 'On-Chain', showBadge: true, badgeType: 'pending' },
-    { id: 'activity', icon: Activity, label: 'Activity', showBadge: true, badgeType: 'activity' },
+    { id: 'accounts', icon: Users, label: 'Accounts', showBadge: true, badgeType: 'pending' },
     { id: 'chat', icon: MessageCircle, label: 'Chat' },
     { id: 'contacts', icon: BookUser, label: 'Contacts' },
-    { id: 'receive', icon: ArrowDownLeft, label: 'Receive' },
     { id: 'create', icon: PlusCircle, label: 'Create' },
     { id: 'gossip', icon: Globe, label: 'Gossip' },
     { id: 'governance', icon: Scale, label: 'Governance' },
     { id: 'settings', icon: SettingsIcon, label: 'Settings' },
+  ];
+
+  const accountWorkspaceTabs: Array<{ id: AccountWorkspaceTab; icon: any; label: string }> = [
+    { id: 'open', icon: PlusCircle, label: 'Open Account' },
+    { id: 'send', icon: ArrowUpRight, label: 'Send' },
+    { id: 'swap', icon: Repeat, label: 'Swap' },
+    { id: 'activity', icon: Activity, label: 'Activity' },
+    { id: 'settle', icon: Landmark, label: 'Settle' },
   ];
 </script>
 
@@ -1360,9 +1398,7 @@
           >
             <svelte:component this={t.icon} size={14} />
             <span>{t.label}</span>
-            {#if t.showBadge && t.badgeType === 'activity' && activityCount > 0}
-              <span class="badge">{activityCount}</span>
-            {:else if t.showBadge && t.badgeType === 'pending' && pendingBatchCount > 0}
+            {#if t.showBadge && t.badgeType === 'pending' && pendingBatchCount > 0}
               <span class="badge pending">{pendingBatchCount}</span>
             {/if}
           </button>
@@ -1530,84 +1566,81 @@
             </div>
           {/if}
 
-        {:else if activeTab === 'send'}
-          <PaymentPanel entityId={replica.state?.entityId || tab.entityId} {contacts} />
-
-        {:else if activeTab === 'swap'}
-          <SwapPanel {replica} {tab} />
-
-        {:else if activeTab === 'onj'}
-          {#if !activeIsLive}
-            <div class="live-required">
-              <AlertTriangle size={20} />
-              <p>On-chain actions require LIVE mode</p>
-              <button class="btn-live" on:click={goToLive}>Go to LIVE</button>
-            </div>
-          {:else}
-            {#if !replica?.state?.accounts || replica.state.accounts.size === 0}
-              <div class="live-required" style="margin-bottom: 12px;">
-                <AlertTriangle size={20} />
-                <p>No accounts yet. Open one in Accounts (hubs or private).</p>
-                <button class="btn-live" on:click={() => activeTab = 'accounts'}>Open Accounts</button>
-              </div>
-            {/if}
-            <SettlementPanel entityId={replica.state?.entityId || tab.entityId} {contacts} prefill={onchainPrefill} />
-          {/if}
-
         {:else if activeTab === 'accounts'}
-          <!-- Quick Actions -->
-          {@const qaAccountIds = replica?.state?.accounts ? Array.from(replica.state.accounts.keys()).map(String) : []}
-          {#if qaAccountIds.length > 0}
-            <div class="quick-actions-section">
-              <h4 class="section-head">Quick Actions</h4>
-              <PaymentForm
-                entityId={replica.state?.entityId || tab.entityId}
-                signerId={tab.signerId}
-                counterpartyId={null}
-                accountIds={qaAccountIds}
-              />
-              <CreditForm
-                entityId={replica.state?.entityId || tab.entityId}
-                signerId={tab.signerId}
-                counterpartyId={null}
-                accountIds={qaAccountIds}
-              />
-            </div>
-          {/if}
-          <AccountList {replica} on:select={handleAccountSelect} on:faucet={handleAccountFaucet} />
-          <div class="account-open-sections">
-            <div class="open-section">
-              <h4 class="section-head">Open with Public Hub</h4>
-              <HubDiscoveryPanel entityId={replica?.state?.entityId || tab.entityId} />
-            </div>
-            <div class="open-section">
-              <h4 class="section-head">Open Private Account</h4>
-              <div class="add-contact">
-                <input type="text" placeholder="Full Entity ID (0x...)" bind:value={openAccountEntityId} />
-                <button class="btn-add" on:click={() => openAccountWithFullId(openAccountEntityId)}>Open</button>
-              </div>
-              <div class="muted" style="margin-top: 6px;">Only full entity IDs are accepted.</div>
-            </div>
-          </div>
+          <AccountList
+            {replica}
+            on:select={handleAccountSelect}
+            on:faucet={handleAccountFaucet}
+            on:settleApprove={handleQuickSettleApprove}
+          />
 
-        {:else if activeTab === 'activity'}
-          {#if replica.state?.lockBook && replica.state.lockBook.size > 0}
-            <h4 class="section-head">Pending HTLCs</h4>
-            {#each Array.from(replica.state.lockBook.entries()) as [lockId, lock]}
-              <div class="activity-row">
-                <span class="a-icon">lock</span>
-                <div class="a-info">
-                  <span class="a-title">#{lockId.slice(0, 8)}</span>
-                  <span class="a-sub">{lock.direction}</span>
-                </div>
-                <span class="a-amt">{formatAmount(lock.amount, 6)}</span>
-              </div>
+          <nav class="account-workspace-tabs" aria-label="Account workspace">
+            {#each accountWorkspaceTabs as t}
+              <button
+                class="account-workspace-tab"
+                class:active={accountWorkspaceTab === t.id}
+                on:click={() => accountWorkspaceTab = t.id}
+              >
+                <svelte:component this={t.icon} size={14} />
+                <span>{t.label}</span>
+              </button>
             {/each}
-          {/if}
-          <h4 class="section-head">Consensus</h4>
-          <ConsensusState {replica} />
-          <h4 class="section-head">Proposals</h4>
-          <ProposalsList {replica} {tab} />
+          </nav>
+
+          <section class="account-workspace-content">
+            {#if accountWorkspaceTab === 'send'}
+              <PaymentPanel entityId={replica.state?.entityId || tab.entityId} {contacts} />
+
+            {:else if accountWorkspaceTab === 'swap'}
+              <SwapPanel {replica} {tab} />
+
+            {:else if accountWorkspaceTab === 'open'}
+              <div class="account-open-sections">
+                <div class="open-section">
+                  <h4 class="section-head">Open with Public Hub</h4>
+                  <HubDiscoveryPanel entityId={replica?.state?.entityId || tab.entityId} />
+                </div>
+                <div class="open-section">
+                  <h4 class="section-head">Open Private Account</h4>
+                  <div class="add-contact">
+                    <input type="text" placeholder="Full Entity ID (0x...)" bind:value={openAccountEntityId} />
+                    <button class="btn-add" on:click={() => openAccountWithFullId(openAccountEntityId)}>Open</button>
+                  </div>
+                  <div class="muted" style="margin-top: 6px;">Only full entity IDs are accepted.</div>
+                </div>
+              </div>
+
+            {:else if accountWorkspaceTab === 'activity'}
+              <h4 class="section-head">Consensus</h4>
+              <ConsensusState {replica} />
+              <h4 class="section-head">Proposals</h4>
+              <ProposalsList {replica} {tab} />
+
+            {:else if accountWorkspaceTab === 'settle'}
+              {#if !activeIsLive}
+                <div class="live-required">
+                  <AlertTriangle size={20} />
+                  <p>On-chain actions require LIVE mode</p>
+                  <button class="btn-live" on:click={goToLive}>Go to LIVE</button>
+                </div>
+              {:else}
+                {#if !replica?.state?.accounts || replica.state.accounts.size === 0}
+                  <div class="live-required" style="margin-bottom: 12px;">
+                    <AlertTriangle size={20} />
+                    <p>No accounts yet. Open one in Accounts.</p>
+                    <button class="btn-live" on:click={() => accountWorkspaceTab = 'open'}>Open Accounts</button>
+                  </div>
+                {/if}
+                <SettlementPanel entityId={replica.state?.entityId || tab.entityId} {contacts} prefill={onchainPrefill} />
+                <div class="dispute-note">
+                  <h4 class="section-head">Disputes</h4>
+                  <p class="muted">
+                    Dispute workflow is part of Settle. Use the <code>Dispute</code> action in this panel to start on-chain dispute and freeze the account safely.
+                  </p>
+                </div>
+              {/if}
+            {/if}
+          </section>
 
         {:else if activeTab === 'chat'}
           <ChatMessages {replica} {tab} currentTimeIndex={activeTimeIndex ?? -1} />
@@ -1634,9 +1667,6 @@
             <input type="text" placeholder="Full Entity ID (0x...)" bind:value={newContactId} />
             <button class="btn-add" on:click={saveContact}>Add</button>
           </div>
-
-        {:else if activeTab === 'receive'}
-          <QRPanel entityId={replica?.state?.entityId || tab.entityId} />
 
         {:else if activeTab === 'create'}
           <FormationPanel />
@@ -2616,6 +2646,61 @@
     padding: 14px;
   }
 
+  .account-workspace-tabs {
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+    padding: 8px;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    background: #111114;
+    overflow-x: auto;
+  }
+
+  .account-workspace-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .account-workspace-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 12px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: #71717a;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .account-workspace-tab:hover {
+    color: #d4d4d8;
+    border-color: #3f3f46;
+    background: #18181b;
+  }
+
+  .account-workspace-tab.active {
+    color: #fbbf24;
+    border-color: #fbbf24;
+    background: rgba(251, 191, 36, 0.08);
+  }
+
+  .account-workspace-content {
+    margin-top: 12px;
+  }
+
+  .dispute-note {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border: 1px solid rgba(251, 191, 36, 0.18);
+    border-radius: 8px;
+    background: rgba(251, 191, 36, 0.04);
+  }
+
   .section-head {
     font-size: 10px;
     font-weight: 600;
@@ -2879,7 +2964,7 @@
     color: #57534e !important;
   }
 
-  .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete)) {
+  .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete):not(.account-workspace-tab)) {
     background: #1c1917 !important;
     border: 1px solid #292524 !important;
     border-radius: 6px !important;
@@ -3152,5 +3237,25 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.02);
+  }
+
+  @media (max-width: 900px) {
+    .breakdown {
+      flex-direction: column;
+    }
+
+    .breakdown-card.wide {
+      flex: 1;
+    }
+
+    .account-workspace-tabs {
+      padding: 6px;
+      gap: 4px;
+    }
+
+    .account-workspace-tab {
+      padding: 8px 10px;
+      font-size: 10px;
+    }
   }
 </style>

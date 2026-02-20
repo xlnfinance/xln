@@ -185,7 +185,6 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
             String(right).toLowerCase() === entityId.toLowerCase()) {
           const tokens = s[2] ?? s.tokens ?? [];
           const nonce = Number(s[3] ?? s.nonce ?? 0);
-          const isLeft = String(left).toLowerCase() === entityId.toLowerCase();
 
           // Emit one j-event per token in the settlement
           for (const tok of tokens) {
@@ -199,14 +198,12 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
               data: {
                 leftEntity: left,
                 rightEntity: right,
-                counterpartyEntityId: isLeft ? right : left,
                 tokenId,
-                ownReserve: isLeft ? leftReserve : rightReserve,
-                counterpartyReserve: isLeft ? rightReserve : leftReserve,
+                leftReserve,
+                rightReserve,
                 collateral,
                 ondelta,
                 nonce,
-                side: isLeft ? 'left' : 'right',
               },
             });
           }

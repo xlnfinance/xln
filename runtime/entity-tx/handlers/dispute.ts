@@ -273,6 +273,33 @@ export async function handleDisputeStart(
     initialArguments,
   });
 
+  // Freeze account immediately once disputeStart is queued.
+  // This is unilateral safety state on the local entity: no further business
+  // frames should progress on this account while dispute is in-flight.
+  account.status = 'disputed';
+  const beforeMempool = account.mempool?.length || 0;
+  if (beforeMempool > 0) {
+    account.mempool = (account.mempool || []).filter(
+      (tx) => tx.type === 'j_event_claim' || tx.type === 'reopen_disputed',
+    );
+    const dropped = beforeMempool - account.mempool.length;
+    if (dropped > 0) {
+      console.warn(
+        `⚠️ disputeStart: dropped ${dropped} pending account tx(s) for ${counterpartyEntityId.slice(-4)} while freezing`,
+      );
+    }
+  }
+  if (account.pendingFrame || account.pendingAccountInput) {
+    console.warn(
+      `⚠️ disputeStart: clearing pending frame/input for ${counterpartyEntityId.slice(-4)} while freezing account`,
+    );
+  }
+  delete account.pendingFrame;
+  delete account.pendingAccountInput;
+  delete account.clonedForValidation;
+  account.rollbackCount = 0;
+  delete account.lastRollbackFrameHash;
+
   console.log(`✅ disputeStart: Added to jBatch for ${entityState.entityId.slice(-4)}`);
   console.log(`   proofBodyHash: ${proofBodyHashToUse.slice(0, 18)}...`);
   console.log(`   hankoLen: ${counterpartyDisputeHanko.length}, signedNonce: ${signedNonce}`);
@@ -281,7 +308,10 @@ export async function handleDisputeStart(
   // Event handler will query on-chain state and populate:
   // - startedByLeft, disputeTimeout, onChainNonce
 
-  addMessage(newState, `⚔️ Dispute started vs ${counterpartyEntityId.slice(-4)} ${description ? `(${description})` : ''} - use jBroadcast to commit`);
+  addMessage(
+    newState,
+    `⚔️ Dispute started vs ${counterpartyEntityId.slice(-4)} ${description ? `(${description})` : ''} - account frozen, use jBroadcast to commit`,
+  );
 
   return { newState, outputs };
 }

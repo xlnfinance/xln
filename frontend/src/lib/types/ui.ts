@@ -56,6 +56,8 @@ export interface Settings {
   theme: ThemeName;
   barColorMode: BarColorMode;
   barLayout: BarLayoutMode;
+  tokenPrecision: number;
+  showTokenIcons: boolean;
   dropdownMode: 'signer-first' | 'entity-first';
   runtimeDelay: number;
   balanceRefreshMs: number;

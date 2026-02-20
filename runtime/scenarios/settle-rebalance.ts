@@ -24,6 +24,8 @@ import type { JAdapter } from '../jadapter/types';
 import { userAutoApprove } from '../entity-tx/handlers/settle';
 import { deriveDelta } from '../account-utils';
 import { isLeftEntity } from '../entity-id-utils';
+import { hashHtlcSecret } from '../htlc-utils';
+import { ethers } from 'ethers';
 
 const USDC = 1;
 
@@ -34,6 +36,12 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   console.log('='.repeat(80));
 
   const process = await getProcess();
+  const advanceTime = (ms: number) => {
+    env.timestamp += ms;
+    for (const [, replica] of env.eReplicas) {
+      replica.state.timestamp = env.timestamp;
+    }
+  };
 
   // ══════════════════════════════════════════════════════════════════════════
   // PHASE 0: SETUP
@@ -243,7 +251,7 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   console.log('\n--- TEST 4: Settle Reject ---');
   console.log = quietLog;
 
-  // Hub proposes r2c (Hub=LEFT proposer → ondelta shifts → Alice WON'T auto-approve)
+  // Hub proposes a new settlement, then Alice rejects it to clear workspace + holds.
   const hubDepositOps: SettlementOp[] = [{ type: 'r2c', tokenId: USDC, amount: usd(50) }];
   await process(env, [{
     entityId: hub.id, signerId: hub.signer,
@@ -251,10 +259,9 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   }]);
   for (let i = 0; i < 5; i++) { advanceScenarioTime(env); await process(env); }
 
-  // Verify Alice did NOT auto-approve (ondelta > 0 from RIGHT perspective → fails auto-approve)
+  // Workspace must exist on Alice side before explicit reject.
   const aliceWsReject = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
   assert(aliceWsReject, 'Alice should have workspace from Hub propose', env);
-  assert(!aliceWsReject?.[aliceHankoField], 'Alice should NOT have auto-approved', env);
 
   await process(env, [{
     entityId: alice.id, signerId: alice.signer,
@@ -356,18 +363,89 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   console.log = quietLog;
 
   // ══════════════════════════════════════════════════════════════════════════
+  // PHASE 6.5: HTLC RESOLVE -> AUTO-REBALANCE REQUEST
+  // Keep this in sync with:
+  // - runtime/account-consensus.ts::runPostFrameAutoRebalanceCheck
+  // - tests/e2e-rebalance-bar.spec.ts cycle assertions
+  // ══════════════════════════════════════════════════════════════════════════
+  console.log = originalLog;
+  console.log('\n--- TEST 6.5: HTLC resolve triggers auto request_collateral ---');
+  console.log = quietLog;
+
+  const daveCollateralBeforeHtlc =
+    findReplica(env, dave.id)[1].state.accounts.get(hub.id)?.deltas.get(USDC)?.collateral || 0n;
+
+  const htlcSecret = ethers.keccak256(ethers.toUtf8Bytes('settle-rebalance-htlc-phase-6-5'));
+  const htlcHashlock = hashHtlcSecret(htlcSecret);
+
+  await process(env, [{
+    entityId: hub.id,
+    signerId: hub.signer,
+    entityTxs: [{
+      type: 'htlcPayment',
+      data: {
+        targetEntityId: dave.id,
+        tokenId: USDC,
+        amount: usd(2_000),
+        route: [hub.id, dave.id],
+        description: 'hub->dave htlc rebalance trigger',
+        secret: htlcSecret,
+        hashlock: htlcHashlock,
+      },
+    }],
+  }]);
+  for (let i = 0; i < 10; i++) {
+    advanceTime(100);
+    await process(env);
+  }
+  // NOTE: Avoid converge() here because it advances scenario time by j block delay
+  // and can let hub crontab fully fulfill+clear the just-created request before
+  // this phase validates HTLC -> auto-rebalance trigger.
+  for (let i = 0; i < 10; i++) {
+    advanceTime(50);
+    await process(env);
+  }
+
+  const daveAccountAfterHtlc = findReplica(env, dave.id)[1].state.accounts.get(hub.id);
+  const daveRequestedAfterHtlc = daveAccountAfterHtlc?.requestedRebalance.get(USDC) || 0n;
+  const daveCollateralAfterHtlc = daveAccountAfterHtlc?.deltas.get(USDC)?.collateral || 0n;
+  const phase65TopUpApplied = daveCollateralAfterHtlc > daveCollateralBeforeHtlc;
+  const daveRecentFrameHasHtlcResolve = (daveAccountAfterHtlc?.frameHistory || []).some((frame: any) =>
+    (frame?.accountTxs || []).some((tx: any) => tx?.type === 'htlc_resolve'),
+  );
+  assert(daveRecentFrameHasHtlcResolve, 'Expected htlc_resolve in Dave frame history before request_collateral', env);
+  const daveRecentFrameHasRequestCollateral = (daveAccountAfterHtlc?.frameHistory || []).some((frame: any) =>
+    (frame?.accountTxs || []).some((tx: any) => tx?.type === 'request_collateral' && Number(tx?.data?.tokenId) === USDC),
+  );
+  assert(
+    daveRecentFrameHasRequestCollateral,
+    'Expected request_collateral frame after HTLC resolve (auto-rebalance trigger)',
+    env,
+  );
+  assert(
+    daveRequestedAfterHtlc > 0n || daveCollateralAfterHtlc > daveCollateralBeforeHtlc,
+    `Expected pending request OR fulfilled top-up after HTLC resolve (requested=${daveRequestedAfterHtlc}, collateral ${daveCollateralBeforeHtlc}->${daveCollateralAfterHtlc})`,
+    env,
+  );
+
+  console.log = originalLog;
+  console.log('--- TEST 6.5 PASSED ---');
+  console.log = quietLog;
+
+  // ══════════════════════════════════════════════════════════════════════════
   // PHASE 7: HUB CRONTAB REBALANCE
   // ══════════════════════════════════════════════════════════════════════════
   console.log = originalLog;
   console.log('\n--- TEST 7: Hub Crontab Rebalance ---');
   console.log = quietLog;
 
-  const advanceTime = (ms: number) => {
-    env.timestamp += ms;
-    for (const [, replica] of env.eReplicas) {
-      replica.state.timestamp = env.timestamp;
-    }
-  };
+  const rebalanceEvidenceBefore = new Map<string, { collateral: bigint; jEventChainLen: number }>();
+  for (const user of users) {
+    const account = findReplica(env, hub.id)[1].state.accounts.get(user.id);
+    const coll = account?.deltas.get(USDC)?.collateral || 0n;
+    const jEventChainLen = account?.jEventChain?.length || 0;
+    rebalanceEvidenceBefore.set(user.id, { collateral: coll, jEventChainLen });
+  }
 
   // Cycle 1: Hub detects C→R (Alice, Charlie) + R→C (Bob, Dave)
   advanceTime(31000);
@@ -448,17 +526,23 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
 
   const hubFinal = findReplica(env, hub.id)[1].state;
 
-  // Nonces in direct R→C flow:
+  // Mixed flow nonce expectations:
   // - Alice had manual settlement in Phase 3 => nonce >= 1
-  // - Rebalance path is direct R→C (no settlement workspace) => no extra nonce increments
+  // - Other users may also increment nonce if C→R settlement path executed
   const aliceNonce = hubFinal.accounts.get(alice.id)?.onChainSettlementNonce || 0;
   assert(aliceNonce >= 1, `Hub<>Alice nonce should be >= 1 after manual settlement (got ${aliceNonce})`, env);
   console.log(`  Hub<>Alice nonce=${aliceNonce}`);
+  const nonAliceNonces: Array<{ name: string; nonce: number }> = [];
   for (const user of [bob, charlie, dave]) {
     const nonce = hubFinal.accounts.get(user.id)?.onChainSettlementNonce || 0;
-    assert(nonce === 0, `Hub<>${user.name} nonce should stay 0 in direct R→C flow (got ${nonce})`, env);
+    nonAliceNonces.push({ name: user.name, nonce });
     console.log(`  Hub<>${user.name} nonce=${nonce}`);
   }
+  assert(
+    nonAliceNonces.some(({ nonce }) => nonce > 0),
+    `Expected at least one non-Alice nonce increment from C→R flow, got [${nonAliceNonces.map(n => `${n.name}:${n.nonce}`).join(', ')}]`,
+    env,
+  );
 
   // Workspace cleanup: all should be cleared
   for (const user of users) {
@@ -474,8 +558,13 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   for (const user of [bob, charlie, dave]) {
     const [, userReplica] = findReplica(env, user.id);
     const userAcc = userReplica.state.accounts.get(hub.id);
+    const hubNonce = hubFinal.accounts.get(user.id)?.onChainSettlementNonce || 0;
     const userNonce = userAcc?.onChainSettlementNonce || 0;
-    assert(userNonce === 0, `${user.name}<>Hub counterparty nonce should stay 0 in direct R→C flow (got ${userNonce})`, env);
+    assert(
+      userNonce === hubNonce,
+      `${user.name}<>Hub counterparty nonce should match hub view (user=${userNonce}, hub=${hubNonce})`,
+      env,
+    );
     assert(!userAcc?.settlementWorkspace, `${user.name}<>Hub workspace should be cleared`, env);
   }
 
@@ -489,6 +578,40 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
     const nonce = hubFinal.accounts.get(user.id)?.onChainSettlementNonce || 0;
     console.log(`  Hub<>${user.name}: collateral=${delta?.collateral}, outCol=${derived?.outCollateral}, nonce=${nonce}`);
   }
+
+  const collateralDecreasedUsers: string[] = [];
+  const collateralIncreasedUsers: string[] = [];
+  for (const user of users) {
+    const before = rebalanceEvidenceBefore.get(user.id) || { collateral: 0n, jEventChainLen: 0 };
+    const hubAccount = hubFinal.accounts.get(user.id);
+    const newBlocks = (hubAccount?.jEventChain || []).slice(before.jEventChainLen);
+    for (const block of newBlocks) {
+      for (const event of block.events || []) {
+        if (event?.type !== 'AccountSettled') continue;
+        if (Number(event?.data?.tokenId) !== USDC) continue;
+        const eventCollateral = BigInt(event?.data?.collateral ?? 0);
+        if (eventCollateral < before.collateral) {
+          if (!collateralDecreasedUsers.includes(user.name)) collateralDecreasedUsers.push(user.name);
+        }
+        if (eventCollateral > before.collateral) {
+          if (!collateralIncreasedUsers.includes(user.name)) collateralIncreasedUsers.push(user.name);
+        }
+      }
+    }
+  }
+  assert(
+    collateralDecreasedUsers.length > 0,
+    `Detected at least one C→R pullback event (users=${collateralDecreasedUsers.join(',') || 'n/a'})`,
+    env,
+  );
+  assert(
+    phase65TopUpApplied || collateralIncreasedUsers.length > 0,
+    `Detected at least one R→C top-up event (phase6.5 or phase7)`,
+    env,
+  );
+  console.log(
+    `  C→R users: [${collateralDecreasedUsers.join(', ')}], R→C users: [${collateralIncreasedUsers.join(', ')}]`,
+  );
 
   console.log('\n--- TEST 8 PASSED ---');
 

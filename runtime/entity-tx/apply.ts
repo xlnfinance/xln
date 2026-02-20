@@ -942,6 +942,7 @@ export const applyEntityTx = async (
         routingFeePPM = 100,
         baseFee = 0n,
         minCollateralThreshold = 0n,
+        c2rSoftLimit = DEFAULT_SOFT_LIMIT,
         minFeeBps = 1n,
         rebalanceBaseFee = 10n ** 17n, // $0.10
         rebalanceLiquidityFeeBps = 1n, // 0.01%
@@ -980,6 +981,7 @@ export const applyEntityTx = async (
         routingFeePPM,
         baseFee,
         minCollateralThreshold,
+        c2rSoftLimit,
         minFeeBps,
         rebalanceBaseFee,
         rebalanceLiquidityFeeBps,
@@ -988,7 +990,7 @@ export const applyEntityTx = async (
       };
       console.log(
         `🏦 Hub config set: strategy=${matchingStrategy}, policyVersion=${policyVersion}, routingFee=${routingFeePPM}ppm, ` +
-        `rebalance(base=${rebalanceBaseFee},liqBps=${rebalanceLiquidityFeeBps},gas=${rebalanceGasFee},timeoutMs=${rebalanceTimeoutMs})` +
+        `rebalance(base=${rebalanceBaseFee},liqBps=${rebalanceLiquidityFeeBps},gas=${rebalanceGasFee},timeoutMs=${rebalanceTimeoutMs},c2rSoftLimit=${c2rSoftLimit})` +
         `${feePolicyChanged ? ' [fee-policy-updated]' : ''}`,
       );
 
@@ -1006,6 +1008,7 @@ export const applyEntityTx = async (
           policyVersion,
           routingFeePPM,
           baseFee,
+          c2rSoftLimit: c2rSoftLimit.toString(),
           rebalanceBaseFee: rebalanceBaseFee.toString(),
           rebalanceLiquidityFeeBps: rebalanceLiquidityFeeBps.toString(),
           rebalanceGasFee: rebalanceGasFee.toString(),
@@ -1019,7 +1022,7 @@ export const applyEntityTx = async (
       addMessage(
         newState,
         `🏦 Hub config activated: ${matchingStrategy} strategy v${policyVersion}, ${routingFeePPM}ppm routing fee, ` +
-        `rebalance(base=${rebalanceBaseFee}, liqBps=${rebalanceLiquidityFeeBps}, gas=${rebalanceGasFee})`,
+        `rebalance(base=${rebalanceBaseFee}, liqBps=${rebalanceLiquidityFeeBps}, gas=${rebalanceGasFee}, c2rSoftLimit=${c2rSoftLimit})`,
       );
       return { newState, outputs: [] };
     }
