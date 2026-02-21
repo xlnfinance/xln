@@ -44,6 +44,32 @@ const DEV_HOST = '0.0.0.0';
 const DEV_PORT_RAW = Number(process.env['VITE_DEV_PORT'] || '8080');
 const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(DEV_PORT_RAW) : 8080;
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
+const VITE_CACHE_DIR = process.env['VITE_CACHE_DIR'] || 'node_modules/.vite';
+
+const proxyConfig = {
+	'/reset': {
+		target: API_PROXY_TARGET,
+		changeOrigin: true,
+		secure: false,
+	},
+	'/api': {
+		target: API_PROXY_TARGET,
+		changeOrigin: true,
+		secure: false,
+	},
+	// RPC Proxy - Forward JSON-RPC to runtime server (/rpc endpoint)
+	'/rpc': {
+		target: API_PROXY_TARGET,
+		changeOrigin: true,
+		secure: false,
+	},
+	// Relay Proxy - Forward WebSocket to relay server for P2P
+	'/relay': {
+		target: API_PROXY_TARGET,
+		ws: true,
+		changeOrigin: true,
+	},
+};
 
 async function assertPortAvailable(port: number, host: string): Promise<void> {
 	return new Promise((resolve, reject) => {
@@ -76,6 +102,7 @@ export default defineConfig(async ({ command }) => {
 	return {
 	plugins: [sveltekit()],
 	publicDir: 'static',
+	cacheDir: VITE_CACHE_DIR,
 	server: {
 		host: DEV_HOST,
 		port: DEV_PORT,
@@ -106,32 +133,26 @@ export default defineConfig(async ({ command }) => {
 				clientPort: DEV_PORT
 			})
 		},
-		// API Proxy - Forward to server.ts faucet endpoints
-		proxy: {
-			'/reset': {
-				target: API_PROXY_TARGET,
-				changeOrigin: true,
-				secure: false,
-			},
-			'/api': {
-				target: API_PROXY_TARGET,
-				changeOrigin: true,
-				secure: false,
-			},
-			// RPC Proxy - Forward JSON-RPC to runtime server (/rpc endpoint)
-			'/rpc': {
-				target: API_PROXY_TARGET,
-				changeOrigin: true,
-				secure: false,
-			},
-			// Relay Proxy - Forward WebSocket to relay server for P2P
-			'/relay': {
-				target: API_PROXY_TARGET,
-				ws: true,
-				changeOrigin: true,
-			},
-		},
+		// API/Relay proxy
+		proxy: proxyConfig,
 		// Force no-cache headers for static files
+		headers: {
+			'Cache-Control': 'no-cache, no-store, must-revalidate',
+			'Pragma': 'no-cache',
+			'Expires': '0'
+		}
+	},
+	preview: {
+		host: DEV_HOST,
+		port: DEV_PORT,
+		strictPort: true,
+		...(hasCerts && {
+			https: {
+				key: fs.readFileSync(keyPath),
+				cert: fs.readFileSync(certPath),
+			}
+		}),
+		proxy: proxyConfig,
 		headers: {
 			'Cache-Control': 'no-cache, no-store, must-revalidate',
 			'Pragma': 'no-cache',

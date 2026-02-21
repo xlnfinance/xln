@@ -12,14 +12,16 @@
  * 6. Verify HTLC was used (console log proof)
  *
  * Prerequisites:
- * - Production hub running at xln.finance with fresh DB
- * - Frontend dev server at https://localhost:8080
+ * - XLN stack (relay/api/frontend) running
+ * - For isolated runner, URLs come from E2E_BASE_URL / E2E_API_BASE_URL
  */
 
 import { test, expect, type Page } from '@playwright/test';
 
 const HUB_H1_ENTITY_ID = '0x8164c386f3a0e528e43fe8352aca11c0334f9263b601639a0eefd827a317aafe';
 const CONSENSUS_TIMEOUT = 30_000;
+const APP_BASE_URL = process.env.E2E_BASE_URL || process.env.PW_BASE_URL || 'https://localhost:8080';
+const API_BASE_URL = process.env.E2E_API_BASE_URL || APP_BASE_URL;
 
 // Collect console messages matching patterns
 class ConsoleCollector {
@@ -70,7 +72,9 @@ class ConsoleCollector {
 }
 
 test.describe('E2E HTLC Payment Flow', () => {
-  test('full HTLC bilateral payment through production hub', async ({ page }) => {
+  test.skip(!process.env.RUN_PROD_SMOKE, 'Manual production smoke test only (set RUN_PROD_SMOKE=1)');
+
+  test('full HTLC bilateral payment through hub', async ({ page }) => {
     test.setTimeout(180_000); // 3 min total
     const console = new ConsoleCollector();
     console.attach(page);
@@ -80,11 +84,11 @@ test.describe('E2E HTLC Payment Flow', () => {
       if (msg.type() === 'error') process.stdout.write(`[Browser ERROR] ${msg.text()}\n`);
     });
 
-    // ── Step 0: Wait for production server ──
+    // ── Step 0: Wait for server ──
     process.stdout.write('Step 0: Waiting for server health...\n');
     for (let i = 0; i < 10; i++) {
       try {
-        const resp = await page.request.get('https://xln.finance/api/health');
+        const resp = await page.request.get(`${API_BASE_URL}/api/health`);
         if (resp.ok()) { process.stdout.write('  Server healthy!\n'); break; }
       } catch {}
       await page.waitForTimeout(3000);
@@ -92,7 +96,7 @@ test.describe('E2E HTLC Payment Flow', () => {
 
     // ── Step 1: Clear state and load ──
     process.stdout.write('Step 1: Loading app with fresh state...\n');
-    await page.goto('https://localhost:8080/app');
+    await page.goto(`${APP_BASE_URL}/app`);
     await page.evaluate(() => localStorage.clear());
     // WebSocket + polling keep network active; networkidle can hang indefinitely.
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -105,10 +109,15 @@ test.describe('E2E HTLC Payment Flow', () => {
       await page.waitForURL('**/app**', { timeout: 10_000 });
     }
 
-    // Wait for runtime to initialize
+    // Wait for runtime/UI boot (UI structure changed over time, keep this probe broad)
     await page.waitForFunction(() => {
-      const el = document.querySelector('[class*="entity"]');
-      return el?.textContent?.includes('0x');
+      const w = window as any;
+      const hasRuntime = Boolean(w?.XLN || w?.xlnEnv);
+      const text = document.body?.textContent || '';
+      const hasEntityId = /0x[a-fA-F0-9]{8,}/.test(text);
+      const hasAccountsUi = Array.from(document.querySelectorAll('button,[role="tab"]'))
+        .some((el) => /accounts/i.test(el.textContent || ''));
+      return hasRuntime && (hasEntityId || hasAccountsUi);
     }, { timeout: 30_000 });
     process.stdout.write('  Runtime initialized.\n');
 

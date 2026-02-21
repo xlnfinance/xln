@@ -62,6 +62,7 @@ import {
 import { buildEntityProfile, mergeProfileWithExisting } from './networking/gossip-helper';
 import { RuntimeP2P, type P2PConfig } from './networking/p2p';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './networking/p2p-crypto';
+import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
 import {
   parseReplicaKey,
   extractEntityId,
@@ -676,7 +677,7 @@ export const setRuntimeSeed = (env: Env, seed: string | null): void => {
   env.runtimeSeed = normalized;
   if (normalized) {
     try {
-      env.runtimeId = deriveSignerAddressSync(normalized, '1');
+      env.runtimeId = normalizeRuntimeId(deriveSignerAddressSync(normalized, '1')) || undefined;
     } catch (error) {
       console.warn('⚠️ Failed to derive runtimeId from seed:', error);
       env.runtimeId = undefined;
@@ -697,7 +698,8 @@ export const setRuntimeSeed = (env: Env, seed: string | null): void => {
 };
 
 export const setRuntimeId = (env: Env, id: string | null): void => {
-  env.runtimeId = id && id.length > 0 ? id : undefined;
+  const normalizedRuntimeId = normalizeRuntimeId(id);
+  env.runtimeId = normalizedRuntimeId || undefined;
   if (env.runtimeId) {
     env.dbNamespace = normalizeDbNamespace(env.runtimeId);
   }
@@ -712,7 +714,7 @@ export const setRuntimeId = (env: Env, id: string | null): void => {
 
 // Derive runtimeId from seed (for isolated envs that need to set their own runtimeId)
 export const deriveRuntimeId = (seed: string): string => {
-  return deriveSignerAddressSync(seed, '1');
+  return normalizeRuntimeId(deriveSignerAddressSync(seed, '1'));
 };
 
 // scheduleNetworkProcess removed — loop is always-on via startRuntimeLoop()
@@ -772,20 +774,19 @@ const ensureLocalEntityCryptoKeys = (env: Env): void => {
 
 const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | null => {
   if (!profile) return null;
-  const direct = typeof profile.runtimeId === 'string' && profile.runtimeId.length > 0 ? profile.runtimeId : null;
+  const direct = normalizeRuntimeId(profile.runtimeId);
   if (direct) return direct;
 
-  const metaRuntimeId = (profile.metadata as Record<string, unknown> | undefined)?.runtimeId;
-  if (typeof metaRuntimeId === 'string' && metaRuntimeId.length > 0) {
+  const metaRuntimeId = normalizeRuntimeId((profile.metadata as Record<string, unknown> | undefined)?.runtimeId);
+  if (metaRuntimeId) {
     return metaRuntimeId;
   }
 
   const board = profile.metadata?.board;
   if (board && typeof board === 'object' && 'validators' in board && Array.isArray(board.validators)) {
     const firstSigner = board.validators[0]?.signer;
-    if (typeof firstSigner === 'string' && firstSigner.startsWith('0x') && firstSigner.length === 42) {
-      return firstSigner;
-    }
+    const signerRuntimeId = normalizeRuntimeId(firstSigner);
+    if (signerRuntimeId) return signerRuntimeId;
   }
 
   return null;
@@ -807,7 +808,8 @@ const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null =>
     Number.isFinite(hinted.seenAt) &&
     now - hinted.seenAt <= RUNTIME_HINT_TTL_MS
   ) {
-    return hinted.runtimeId;
+    const normalizedHint = normalizeRuntimeId(hinted.runtimeId);
+    if (normalizedHint) return normalizedHint;
   }
 
   // Fallback to gossip profile runtimeId when we don't have a fresh inbound hint.
@@ -816,8 +818,8 @@ const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null =>
     const profile = profiles.find((p: Profile) => normalizeEntityKey(String(p.entityId || '')) === target);
     const resolved = resolveRuntimeIdFromProfile(profile);
     if (resolved && hints) {
-      hints.set(target, { runtimeId: resolved.toLowerCase(), seenAt: now });
-      return resolved.toLowerCase();
+      hints.set(target, { runtimeId: resolved, seenAt: now });
+      return resolved;
     }
   }
   return null;
@@ -825,10 +827,12 @@ const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null =>
 
 export const registerEntityRuntimeHint = (env: Env, entityId: string, runtimeId: string): void => {
   if (!entityId || !runtimeId) return;
+  const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+  if (!normalizedRuntimeId) return;
   const state = ensureRuntimeState(env);
   const hints = state.entityRuntimeHints!;
   hints.set(normalizeEntityKey(entityId), {
-    runtimeId: runtimeId.toLowerCase(),
+    runtimeId: normalizedRuntimeId,
     seenAt: Date.now(),
   });
 };
@@ -976,7 +980,7 @@ const planEntityOutputs = (
     }
     const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
     console.log(
-      `🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId?.slice(0, 10) || 'UNKNOWN'}`,
+      `🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId || 'UNKNOWN'}`,
     );
     if (!targetRuntimeId) {
       deferredOutputs.push(output);
@@ -1062,7 +1066,7 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
       continue;
     }
     console.log(
-      `📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`,
+      `📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`,
     );
     try {
       p2p.enqueueEntityInput(targetRuntimeId, output);
@@ -1111,13 +1115,13 @@ export const sendEntityInput = (
 
 export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null => {
   console.log(
-    `[P2P] startP2P called, relayUrls=${config.relayUrls?.join(',')}, env.runtimeId=${env.runtimeId?.slice(0, 10) || 'NONE'}`,
+    `[P2P] startP2P called, relayUrls=${config.relayUrls?.join(',')}, env.runtimeId=${env.runtimeId || 'NONE'}`,
   );
   const state = ensureRuntimeState(env);
   state.lastP2PConfig = config;
   ensureLocalEntityCryptoKeys(env);
   const resolvedRuntimeId = config.runtimeId || env.runtimeId;
-  if (!resolvedRuntimeId) {
+  if (!resolvedRuntimeId || !isRuntimeId(resolvedRuntimeId)) {
     console.log(`[P2P] No runtimeId, storing as pendingP2PConfig`);
     state.pendingP2PConfig = config;
     return null;
@@ -1160,7 +1164,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     gossipPollMs: config.gossipPollMs,
     onEntityInput: (from, input) => {
       const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
-      console.log(`📨 P2P-RECEIVE: from=${from.slice(0, 10)} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
+      console.log(`📨 P2P-RECEIVE: from=${from} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
       const targetEntityId = String(input.entityId || '').toLowerCase();
       const localReplicaExists = Array.from(env.eReplicas.keys()).some(key => {
         const [entityKey] = String(key).split(':');
@@ -2936,6 +2940,10 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
 export const saveEnvToDB = async (env: Env): Promise<void> => {
   if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
+  }
+  const state = ensureRuntimeState(env);
+  if (state.persistencePaused) {
+    return;
   }
   try {
     const dbReady = await tryOpenDb(env);

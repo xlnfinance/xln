@@ -2,6 +2,7 @@
   import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { tabs } from '../../stores/tabStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
+  import { hasCounterpartyAccount, normalizeEntityId } from '$lib/utils/entityReplica';
 
   export let profile: any;
 
@@ -22,15 +23,7 @@
   // Check if already joined this hub (has account)
   $: hasExistingAccount = (() => {
     if (!currentEntityId || !$xlnEnvironment) return false;
-    
-    // Find current entity's replica
-    const replicaKey = `${currentEntityId}:${currentSignerId}`;
-    const replica = $xlnEnvironment.eReplicas?.get(replicaKey);
-    
-    if (!replica?.state?.accounts) return false;
-
-    // Check if there's an account with this hub
-    return replica.state.accounts.has(profile.entityId);
+    return hasCounterpartyAccount($xlnEnvironment, currentEntityId, profile.entityId);
   })();
 
   async function joinHub(targetEntityId: string = profile.entityId) {
@@ -45,7 +38,7 @@
     }
 
     // Prevent self-joins
-    if (currentEntityId === targetEntityId) {
+    if (normalizeEntityId(currentEntityId) === normalizeEntityId(targetEntityId)) {
       joinError = 'Cannot join own hub';
       return;
     }

@@ -135,8 +135,8 @@
  *    ├─ offdelta: bigint               // Off-chain balance delta (instant)
  *    ├─ leftCreditLimit: bigint        // Credit extended by left entity
  *    ├─ rightCreditLimit: bigint       // Credit extended by right entity
- *    ├─ leftAllowance: bigint          // Left entity's remaining credit
- *    └─ rightAllowance: bigint         // Right entity's remaining credit
+ *    ├─ leftAllowance: bigint          // Directional capacity lock/override for left side
+ *    └─ rightAllowance: bigint         // Directional capacity lock/override for right side
  *
  * ═══════════════════════════════════════════════════════════════════════
  * CONSENSUS GUARANTEES (Byzantine Fault Tolerance)
@@ -632,6 +632,21 @@ export type EntityTx =
       type: 'j_broadcast';
       data: {
         hankoSignature?: string; // Optional hanko seal for the batch
+      };
+    }
+  | {
+      // J-Rebroadcast: resend current sentBatch with same nonce/hash and optional fee bump.
+      type: 'j_rebroadcast';
+      data: {
+        gasBumpBps?: number; // Optional EIP-1559 bump in basis points (e.g. 1250 = +12.5%)
+      };
+    }
+  | {
+      // J-Abort-Sent-Batch: clear or requeue in-flight sentBatch.
+      type: 'j_abort_sent_batch';
+      data: {
+        reason?: string;
+        requeueToCurrent?: boolean; // true => move sentBatch ops back into current batch
       };
     }
   | {
@@ -1751,6 +1766,7 @@ export interface Env {
   runtimeState?: {
     loopActive?: boolean;
     stopLoop?: (() => void) | null;
+    persistencePaused?: boolean;
     lastFrameAt?: number;
     processingPromise?: Promise<void> | null;
     p2p?: any;
@@ -1904,6 +1920,11 @@ export type JTx =
         batchHash?: string; // Hash of encoded batch (for hanko signing)
         encodedBatch?: string; // ABI-encoded batch (for on-chain submission)
         entityNonce?: number; // Entity nonce used for this batch
+        feeOverrides?: {
+          gasBumpBps?: number;
+          maxFeePerGasWei?: string;
+          maxPriorityFeePerGasWei?: string;
+        };
         batchSize: number;
         signerId?: string;
       };

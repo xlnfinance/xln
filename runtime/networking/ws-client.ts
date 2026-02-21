@@ -3,6 +3,7 @@ import { deserializeWsMessage, makeHelloNonce, hashHelloMessage, makeMessageId, 
 import { signDigest } from '../account-crypto';
 import { encryptJSON, decryptJSON, pubKeyToHex } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
+import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 
 // Separate interfaces for browser and Node.js WebSocket implementations
 interface BrowserWebSocket {
@@ -94,7 +95,13 @@ export class RuntimeWsClient {
   constructor(options: RuntimeWsClientOptions) {
     failfastAssert(!!options.url, 'WS_INIT_URL_MISSING', 'RuntimeWsClient url is required');
     failfastAssert(!!options.runtimeId, 'WS_INIT_RUNTIME_MISSING', 'RuntimeWsClient runtimeId is required');
-    this.options = options;
+    failfastAssert(
+      isRuntimeId(options.runtimeId),
+      'WS_INIT_RUNTIME_INVALID',
+      'RuntimeWsClient runtimeId must be canonical 0x-prefixed 20-byte address',
+      { runtimeId: options.runtimeId },
+    );
+    this.options = { ...options, runtimeId: normalizeRuntimeId(options.runtimeId) };
     this.maxReconnectAttempts = Number.isFinite(options.maxReconnectAttempts as number)
       ? Number(options.maxReconnectAttempts)
       : RuntimeWsClient.DEFAULT_MAX_RECONNECT_ATTEMPTS;

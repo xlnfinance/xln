@@ -31,6 +31,7 @@ import { getCachedSignerPrivateKey, getCachedSignerPublicKey, registerSignerPubl
 import { signProfile, verifyProfileSignature } from './profile-signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
+import { normalizeRuntimeId, isRuntimeId } from './runtime-id';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion (DoS protection)
@@ -88,8 +89,51 @@ const isHexPublicKey = (value: string): boolean => {
   return hex.length === 66 || hex.length === 130;
 };
 
+const normalizeX25519PubKey = (raw: unknown): string | null => {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const prefixed = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
+  return /^0x[0-9a-fA-F]{64}$/.test(prefixed) ? prefixed.toLowerCase() : null;
+};
+
+const sanitizeIncomingProfile = (profile: Profile): Profile | null => {
+  const entityId = String(profile?.entityId || '').trim();
+  if (!entityId) return null;
+  const metadata = (profile?.metadata || {}) as Record<string, unknown>;
+  const normalizedRuntimeId = normalizeRuntimeId(profile?.runtimeId ?? metadata.runtimeId);
+  if (!normalizedRuntimeId) return null;
+  const normalizedName = typeof metadata.name === 'string' && metadata.name.trim().length > 0
+    ? metadata.name.trim()
+    : `Entity ${entityId.slice(-4)}`;
+  // Keep entity-level HTLC key and runtime transport key distinct.
+  // `cryptoPublicKey` is used for HTLC envelope encryption (entity scoped).
+  // `encryptionPublicKey` is used for relay transport encryption (runtime scoped).
+  const normalizedCryptoKey = normalizeX25519PubKey(metadata.cryptoPublicKey);
+  const normalizedEncryptionKey =
+    normalizeX25519PubKey(metadata.encryptionPublicKey)
+    ?? normalizedCryptoKey;
+  const capabilities = Array.isArray(profile.capabilities) ? profile.capabilities : [];
+  const claimsHub =
+    metadata.isHub === true || capabilities.includes('hub') || capabilities.includes('routing');
+  if (claimsHub && !normalizedEncryptionKey) {
+    return null;
+  }
+  return {
+    ...profile,
+    runtimeId: normalizedRuntimeId,
+    capabilities,
+    metadata: {
+      ...metadata,
+      runtimeId: normalizedRuntimeId,
+      name: normalizedName,
+      ...(normalizedCryptoKey ? { cryptoPublicKey: normalizedCryptoKey } : {}),
+      ...(normalizedEncryptionKey ? { encryptionPublicKey: normalizedEncryptionKey } : {}),
+    } as any,
+  };
+};
+
 const normalizeId = (value: string): string => value.toLowerCase();
-const normalizeRuntimeId = (value: string): string => value.toLowerCase();
 const getReplicaSignerId = (replicaKey: string): string => {
   const idx = replicaKey.lastIndexOf(':');
   return idx === -1 ? '' : replicaKey.slice(idx + 1);
@@ -120,7 +164,8 @@ export class RuntimeP2P {
 
   constructor(options: RuntimeP2POptions) {
     this.env = options.env;
-    this.runtimeId = options.runtimeId;
+    failfastAssert(isRuntimeId(options.runtimeId), 'P2P_RUNTIME_ID_INVALID', 'RuntimeP2P runtimeId must be signer EOA');
+    this.runtimeId = normalizeRuntimeId(options.runtimeId);
     this.signerId = options.signerId || '1';
     this.relayUrls = unique(options.relayUrls || [DEFAULT_RELAY_URL]);
     this.seedRuntimeIds = unique(options.seedRuntimeIds || []);
@@ -139,7 +184,7 @@ export class RuntimeP2P {
   }
 
   /** Get encryption public key as hex for profile sharing */
-  getEncryptionPubKeyHex(): string {
+  getEncryptionPublicKeyHex(): string {
     return pubKeyToHex(this.encryptionKeyPair.publicKey);
   }
 
@@ -203,13 +248,44 @@ export class RuntimeP2P {
           // Lookup target's public key from gossip
           const profiles = this.env.gossip?.getProfiles?.() || [];
           const targetRuntimeIdNorm = normalizeRuntimeId(targetRuntimeId);
-          const targetProfile = profiles.find((p: any) => normalizeRuntimeId(String(p.runtimeId || '')) === targetRuntimeIdNorm);
-          const pubKeyHex =
-            targetProfile?.metadata?.encryptionPubKey ||
-            targetProfile?.metadata?.cryptoPublicKey;
-          if (!pubKeyHex) return null;
+          if (!targetRuntimeIdNorm) return null;
+          const targetProfiles = profiles.filter((p: any) =>
+            normalizeRuntimeId(String(p.runtimeId || '')) === targetRuntimeIdNorm,
+          );
+          if (targetProfiles.length === 0) return null;
+          // Pick the most common valid key among profiles for this runtimeId; break ties by latest lastUpdated.
+          const keyStats = new Map<string, { count: number; latestTs: number }>();
+          for (const profile of targetProfiles) {
+            const rawKey = profile?.metadata?.encryptionPublicKey;
+            if (typeof rawKey !== 'string' || rawKey.length === 0) continue;
+            const normalizedKey = rawKey.startsWith('0x') ? rawKey.toLowerCase() : `0x${rawKey.toLowerCase()}`;
+            if (!/^0x[0-9a-f]{64}$/.test(normalizedKey)) continue;
+            const ts = Number(profile?.metadata?.lastUpdated || 0);
+            const prev = keyStats.get(normalizedKey);
+            if (!prev) {
+              keyStats.set(normalizedKey, { count: 1, latestTs: ts });
+            } else {
+              prev.count += 1;
+              if (ts > prev.latestTs) prev.latestTs = ts;
+            }
+          }
+          if (keyStats.size === 0) return null;
+          let selectedKey: string | null = null;
+          let selectedCount = -1;
+          let selectedTs = -1;
+          for (const [key, stat] of keyStats.entries()) {
+            if (
+              stat.count > selectedCount ||
+              (stat.count === selectedCount && stat.latestTs > selectedTs)
+            ) {
+              selectedKey = key;
+              selectedCount = stat.count;
+              selectedTs = stat.latestTs;
+            }
+          }
+          if (!selectedKey) return null;
           try {
-            return hexToPubKey(pubKeyHex);
+            return hexToPubKey(selectedKey);
           } catch {
             return null;
           }
@@ -400,12 +476,18 @@ export class RuntimeP2P {
     this.ensureRelayConnectionsForEntity(input.entityId);
 
     const normalizedTargetRuntimeId = normalizeRuntimeId(targetRuntimeId);
+    failfastAssert(
+      !!normalizedTargetRuntimeId,
+      'P2P_TARGET_RUNTIME_INVALID',
+      'targetRuntimeId must be signer EOA',
+      { targetRuntimeId },
+    );
     const client = this.getActiveClient();
     if (client && client.isOpen()) {
       try {
         const sent = client.sendEntityInput(normalizedTargetRuntimeId, input);
         if (sent) return;
-        console.warn(`P2P-SEND-FAILED: Client.send returned false for ${normalizedTargetRuntimeId.slice(0,10)}`);
+            console.warn(`P2P-SEND-FAILED: Client.send returned false for ${normalizedTargetRuntimeId}`);
       } catch (error) {
         const message = (error as Error).message || String(error);
         if (message.includes('P2P_NO_PUBKEY')) {
@@ -428,7 +510,7 @@ export class RuntimeP2P {
         }
       }
     } else {
-      console.warn(`P2P-NO-CLIENT: No active relay connection, queueing for ${targetRuntimeId.slice(0,10)}`);
+      console.warn(`P2P-NO-CLIENT: No active relay connection, queueing for ${normalizedTargetRuntimeId}`);
     }
 
     const queue = this.pendingByRuntime.get(normalizedTargetRuntimeId) || [];
@@ -445,19 +527,23 @@ export class RuntimeP2P {
       });
     }
     this.pendingByRuntime.set(normalizedTargetRuntimeId, queue);
-    console.log(`P2P-QUEUED: ${normalizedTargetRuntimeId.slice(0,10)}, queue size: ${queue.length}`);
+    console.log(`P2P-QUEUED: ${normalizedTargetRuntimeId}, queue size: ${queue.length}`);
   }
 
   requestGossip(runtimeId: string) {
+    const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+    if (!normalizedRuntimeId) return;
     const client = this.getActiveClient();
     if (!client) return;
-    client.sendGossipRequest(runtimeId, { scope: 'all' } satisfies GossipRequestPayload);
+    client.sendGossipRequest(normalizedRuntimeId, { scope: 'all' } satisfies GossipRequestPayload);
   }
 
   announceProfilesTo(runtimeId: string, profiles: Profile[]) {
+    const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+    if (!normalizedRuntimeId) return;
     const client = this.getActiveClient();
     if (!client) return;
-    client.sendGossipAnnounce(runtimeId, { profiles } satisfies GossipResponsePayload);
+    client.sendGossipAnnounce(normalizedRuntimeId, { profiles } satisfies GossipResponsePayload);
   }
 
   isConnected(): boolean {
@@ -666,7 +752,7 @@ export class RuntimeP2P {
       // Add X25519 encryption public key for E2E messaging
       profile.metadata = {
         ...(profile.metadata || {}),
-        encryptionPubKey: this.getEncryptionPubKeyHex(),
+        encryptionPublicKey: this.getEncryptionPublicKeyHex(),
       };
 
       // Preserve existing hub metadata + custom fields
@@ -726,21 +812,27 @@ export class RuntimeP2P {
     let skipped = 0;
     let accepted = 0;
     for (const profile of profiles) {
+      const sanitized = sanitizeIncomingProfile(profile);
+      if (!sanitized) {
+        skipped++;
+        console.warn(`P2P_PROFILE_DROPPED_MALFORMED: from=${from} entity=${String(profile?.entityId || 'unknown')}`);
+        continue;
+      }
       // Skip profiles we already have at the same or newer timestamp (avoids re-verification)
       const existingProfiles = this.env.gossip?.getProfiles?.() || [];
-      const existing = existingProfiles.find((p: any) => p.entityId === profile.entityId);
-      if (existing && existing.metadata?.lastUpdated >= (profile.metadata?.lastUpdated || 0)) {
+      const existing = existingProfiles.find((p: any) => p.entityId === sanitized.entityId);
+      if (existing && existing.metadata?.lastUpdated >= (sanitized.metadata?.lastUpdated || 0)) {
         skipped++;
         continue;
       }
 
       // Verify profile signature if present (anti-spoofing)
       // Hanko is self-contained: claims embed the board, signatures prove identity
-      const hasHanko = profile.metadata?.['profileHanko'];
+      const hasHanko = sanitized.metadata?.['profileHanko'];
       if (hasHanko) {
-        const result = await verifyProfileSignature(profile, this.env);
+        const result = await verifyProfileSignature(sanitized, this.env);
         if (!result.valid) {
-          const board = profile.metadata?.board;
+          const board = sanitized.metadata?.board;
           const boardValidators = board && typeof board === 'object' && 'validators' in board ? board.validators : undefined;
           const hasBoardKey = Array.isArray(boardValidators) && boardValidators.some(v => typeof v?.publicKey === 'string');
           const hasEntityKey = typeof profile.metadata?.entityPublicKey === 'string';
@@ -754,8 +846,8 @@ export class RuntimeP2P {
               entityPublicKey: hasEntityKey ? (profile.metadata?.entityPublicKey as string).slice(0, 20) + '...' : 'none',
               boardPublicKey: hasBoardKey ? 'yes' : 'no',
               validators: Array.isArray(boardValidators) ? boardValidators.length : 0,
-              runtimeId: profile.runtimeId?.slice(-8),
-              name: profile.metadata?.name,
+              runtimeId: sanitized.runtimeId,
+              name: sanitized.metadata?.name,
             }
           );
           continue; // Skip invalid profiles
@@ -767,11 +859,11 @@ export class RuntimeP2P {
       }
 
       // Store in local gossip cache
-      this.env.gossip?.announce?.(profile);
+      this.env.gossip?.announce?.(sanitized);
       accepted++;
 
       // Register validator public keys from profile board (for account signature verification)
-      const board2 = profile.metadata?.board;
+      const board2 = sanitized.metadata?.board;
       const boardValidators = board2 && typeof board2 === 'object' && 'validators' in board2 ? board2.validators : undefined;
       if (Array.isArray(boardValidators)) {
         for (const validator of boardValidators) {
@@ -784,12 +876,12 @@ export class RuntimeP2P {
       }
 
       // Register public key for signature verification
-      const publicKey = profile.metadata?.entityPublicKey;
+      const publicKey = sanitized.metadata?.entityPublicKey;
       if (publicKey && typeof publicKey === 'string' && isHexPublicKey(publicKey)) {
-        registerSignerPublicKey(profile.entityId, publicKey);
+        registerSignerPublicKey(sanitized.entityId, publicKey);
       }
     }
-    if (verified > 0 || unsigned > 0) console.log(`P2P_PROFILE_NEW from=${from.slice(0, 10)} verified=${verified} unsigned=${unsigned} skipped=${skipped}`);
+    if (verified > 0 || unsigned > 0) console.log(`P2P_PROFILE_NEW from=${from} verified=${verified} unsigned=${unsigned} skipped=${skipped}`);
     if (accepted > 0 && this.pendingByRuntime.size > 0) {
       this.flushPending();
     }

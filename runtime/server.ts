@@ -22,7 +22,7 @@ import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
 import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
-import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
+import { deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from './networking/p2p-crypto';
 import { buildEntityProfile } from './networking/gossip-helper';
 import {
   type RelayStore,
@@ -34,7 +34,7 @@ import {
   getAllGossipProfiles,
   removeClient,
   resetStore as resetRelayStore,
-  resolveEncryptionPubKeyHex,
+  resolveEncryptionPublicKeyHex,
   cacheEncryptionKey,
 } from './relay-store';
 import { relayRoute, type RelayRouterConfig } from './relay-router';
@@ -186,21 +186,43 @@ const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
 const HUB_RESERVE_ASSERT_TIMEOUT_MS = 30_000;
 const HUB_MESH_ASSERT_TIMEOUT_MS = 20_000;
 
+const getMapValueCaseInsensitive = <T>(map: Map<string, T>, key: string | undefined): T | undefined => {
+  if (!key) return undefined;
+  const needle = key.toLowerCase();
+  for (const [mapKey, value] of map.entries()) {
+    if (String(mapKey).toLowerCase() === needle) return value;
+  }
+  return undefined;
+};
+
 const getHubWallet = async (
   env: Env,
   hubEntityId?: string,
 ): Promise<{ hubEntityId: string; hubSignerId: string; wallet: ethers.Wallet } | null> => {
   if (!globalJAdapter) return null;
-  const hubs = getFaucetHubProfiles(env);
-  if (hubs.length === 0) return null;
-  const selectedHub = hubEntityId ? hubs.find(h => h.entityId === hubEntityId) || hubs[0] : hubs[0];
-  const targetEntityId = selectedHub.entityId;
-  const signerLabel = hubSignerLabels.get(targetEntityId);
+  const activeHubIds = relayStore.activeHubEntityIds;
+  let targetEntityId = String(hubEntityId || '').toLowerCase();
+
+  if (!targetEntityId) {
+    const firstActiveWithSigner = activeHubIds.find(id => !!getMapValueCaseInsensitive(hubSignerLabels, id));
+    if (firstActiveWithSigner) {
+      targetEntityId = String(firstActiveWithSigner).toLowerCase();
+    } else {
+      const hubs = getFaucetHubProfiles(env);
+      const firstFaucetWithSigner = hubs.find(h => !!getMapValueCaseInsensitive(hubSignerLabels, h?.entityId));
+      if (!firstFaucetWithSigner?.entityId) return null;
+      targetEntityId = String(firstFaucetWithSigner.entityId).toLowerCase();
+    }
+  }
+
+  const signerLabel = getMapValueCaseInsensitive(hubSignerLabels, targetEntityId);
   if (!signerLabel) {
-    console.warn(`[XLN] Hub signer label missing for ${targetEntityId.slice(0, 12)}...`);
+    console.warn(
+      `[XLN] Hub signer label missing for ${targetEntityId.slice(0, 12)}... active=${activeHubIds.map(id => id.slice(-8)).join(',')}`,
+    );
     return null;
   }
-  const hubSignerAddress = hubSignerAddresses.get(targetEntityId);
+  const hubSignerAddress = getMapValueCaseInsensitive(hubSignerAddresses, targetEntityId);
   const hubPrivateKeyBytes = deriveSignerKeySync(HUB_SEED, signerLabel);
   const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
   const wallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
@@ -265,10 +287,31 @@ const getEntityReplicaById = (env: Env, entityId: string): any | null => {
   return null;
 };
 
+const accountMatchesCounterparty = (
+  account: any,
+  ownerEntityId: string,
+  counterpartyId: string,
+): boolean => {
+  const needle = String(counterpartyId || '').toLowerCase();
+  if (!needle) return false;
+
+  const cp = typeof account?.counterpartyEntityId === 'string' ? account.counterpartyEntityId.toLowerCase() : '';
+  if (cp === needle) return true;
+
+  const me = String(ownerEntityId || '').toLowerCase();
+  const left = typeof account?.leftEntity === 'string' ? account.leftEntity.toLowerCase() : '';
+  const right = typeof account?.rightEntity === 'string' ? account.rightEntity.toLowerCase() : '';
+
+  if (left && right) {
+    if (left === me && right === needle) return true;
+    if (right === me && left === needle) return true;
+  }
+
+  return false;
+};
+
 const getAccountDelta = (env: Env, entityId: string, counterpartyId: string, tokenId: number): any | null => {
-  const replica = getEntityReplicaById(env, entityId);
-  if (!replica?.state?.accounts) return null;
-  const account = replica.state.accounts.get(counterpartyId);
+  const account = getAccountMachine(env, entityId, counterpartyId);
   if (!account?.deltas) return null;
   return account.deltas.get(tokenId) ?? null;
 };
@@ -289,10 +332,11 @@ const hasAccount = (env: Env, entityId: string, counterpartyId: string): boolean
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return false;
   const needle = counterpartyId.toLowerCase();
-  for (const key of replica.state.accounts.keys()) {
+  for (const [key, account] of replica.state.accounts.entries()) {
     if (typeof key === 'string' && key.toLowerCase() === needle) {
       return true;
     }
+    if (accountMatchesCounterparty(account, entityId, counterpartyId)) return true;
   }
   return false;
 };
@@ -303,6 +347,9 @@ const getAccountMachine = (env: Env, entityId: string, counterpartyId: string): 
   const needle = counterpartyId.toLowerCase();
   for (const [key, account] of replica.state.accounts.entries()) {
     if (typeof key === 'string' && key.toLowerCase() === needle) {
+      return account ?? null;
+    }
+    if (accountMatchesCounterparty(account, entityId, counterpartyId)) {
       return account ?? null;
     }
   }
@@ -963,7 +1010,7 @@ const sendEntityInputDirectViaRelaySocket = (env: Env, targetRuntimeId: string, 
   const fromRuntimeId = String(env.runtimeId || '');
   if (!fromRuntimeId) return false;
   const targetKey = normalizeRuntimeKey(targetRuntimeId);
-  const targetPubKeyHex = resolveEncryptionPubKeyHex(relayStore, targetKey);
+  const targetPubKeyHex = resolveEncryptionPublicKeyHex(relayStore, targetKey);
   if (!targetPubKeyHex) {
     logOneShot(
       `direct-dispatch-missing-key:${targetRuntimeId}`,
@@ -1098,13 +1145,14 @@ const bootstrapServerHubsAndReserves = async (
     : [];
 
   const hubBootstraps = await bootstrapHubs(env, hubConfigs);
-  const hubEntityIds = hubBootstraps.map(h => h.entityId);
+  const hubEntityIds = hubBootstraps.map(h => String(h.entityId).toLowerCase());
   relayStore.activeHubEntityIds = [...hubEntityIds];
   hubSignerLabels.clear();
   hubSignerAddresses.clear();
   for (const hub of hubBootstraps) {
-    hubSignerLabels.set(hub.entityId, hub.signerLabel);
-    hubSignerAddresses.set(hub.entityId, hub.signerId);
+    const hubEntityId = String(hub.entityId).toLowerCase();
+    hubSignerLabels.set(hubEntityId, hub.signerLabel);
+    hubSignerAddresses.set(hubEntityId, hub.signerId);
   }
 
   if (hubEntityIds.length > 0) {
@@ -1125,101 +1173,6 @@ const bootstrapServerHubsAndReserves = async (
 
   const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true) || [];
   console.log(`[XLN] Found ${hubs.length} hubs in gossip`);
-
-  if (hubs.length > 0 && globalJAdapter) {
-    console.log('[XLN] Funding hub reserves...');
-    const tokenCatalog = await ensureTokenCatalog();
-
-    try {
-      if (DEV_CHAIN_IDS.has(globalJAdapter.chainId) && 'send' in globalJAdapter.provider) {
-        const provider = globalJAdapter.provider as ethers.JsonRpcProvider;
-        const deployerAddress = await globalJAdapter.signer.getAddress();
-        const targetDeployerEth = ethers.parseEther('10000');
-        await provider.send('anvil_setBalance', [deployerAddress, ethers.toBeHex(targetDeployerEth)]);
-        console.log('[XLN] Anvil deployer balance topped up');
-      }
-    } catch (err) {
-      console.warn('[XLN] Failed to top up anvil deployer:', (err as Error).message);
-    }
-
-    for (const hubProfile of hubs) {
-      const hub = await getHubWallet(env, hubProfile.entityId);
-      if (!hub) {
-        console.warn('[XLN] Hub wallet not available (gossip missing)');
-        continue;
-      }
-      const hubEntityId = hub.hubEntityId;
-      const hubWallet = hub.wallet;
-      const hubWalletAddress = await hubWallet.getAddress();
-      console.log(`[XLN] Hub wallet address (${hubEntityId.slice(0, 10)}...): ${hubWalletAddress}`);
-
-      if (globalJAdapter.mode === 'browservm') {
-        const browserVM = globalJAdapter.getBrowserVM();
-        if (browserVM) {
-          await (browserVM as any).fundSignerWallet(hubWalletAddress, 1_000_000_000n * 10n ** 18n);
-          console.log('[XLN] Hub wallet funded with ERC20 + ETH');
-        }
-      } else {
-        const deployer = globalJAdapter.signer;
-        const ERC20_ABI = [
-          'function transfer(address to, uint256 amount) returns (bool)',
-          'function balanceOf(address) view returns (uint256)',
-        ];
-
-        for (const token of tokenCatalog) {
-          if (!token?.address) continue;
-          try {
-            const erc20 = new ethers.Contract(token.address, ERC20_ABI, deployer);
-            const hubBalance = await erc20.balanceOf(hubWalletAddress);
-            const targetBalance = 1_000_000_000n * 10n ** BigInt(token.decimals ?? 18);
-            if (hubBalance < targetBalance) {
-              const transferAmount = targetBalance - hubBalance;
-              const tx = await erc20.transfer(hubWalletAddress, transferAmount);
-              await tx.wait();
-              console.log(
-                `[XLN] Hub wallet funded with ${token.symbol}: ${ethers.formatUnits(transferAmount, token.decimals ?? 18)}`,
-              );
-            }
-          } catch (err) {
-            console.warn(`[XLN] Hub wallet funding failed (${token.symbol}):`, (err as Error).message);
-          }
-        }
-
-        try {
-          const currentEth = await globalJAdapter.provider.getBalance(hubWalletAddress);
-          const targetEth = ethers.parseEther('1000');
-          if (currentEth < targetEth) {
-            const topup = targetEth - currentEth;
-            const ethTx = await deployer.sendTransaction({ to: hubWalletAddress, value: topup });
-            await ethTx.wait();
-            console.log(`[XLN] Hub wallet funded with ${ethers.formatEther(topup)} ETH for gas`);
-          } else {
-            console.log('[XLN] Hub wallet already has sufficient ETH');
-          }
-        } catch (err) {
-          console.error('[XLN] Hub wallet ETH funding failed:', (err as Error).message);
-        }
-      }
-
-      const reserveTokens =
-        tokenCatalog.length > 0 ? tokenCatalog : await globalJAdapter.getTokenRegistry().catch(() => []);
-      for (const token of reserveTokens) {
-        const tokenId = typeof token.tokenId === 'number' ? token.tokenId : undefined;
-        if (!tokenId) continue;
-        const decimals = typeof token.decimals === 'number' ? token.decimals : 18;
-        const amount = 1_000_000_000n * 10n ** BigInt(decimals);
-        try {
-          const events = await globalJAdapter.debugFundReserves(hubEntityId, tokenId, amount);
-          console.log(
-            `[XLN] Hub reserves funded: tokenId=${tokenId} amount=${ethers.formatUnits(amount, decimals)} for ${hubEntityId.slice(0, 10)}...`,
-          );
-          await applyJEventsToEnv(env, events, 'HUB-FUND');
-        } catch (err) {
-          console.warn(`[XLN] Hub reserve funding failed (tokenId=${tokenId}):`, (err as Error).message);
-        }
-      }
-    }
-  }
 
   if (hubEntityIds.length >= 3) {
     await bootstrapHubMeshCredit(env, hubEntityIds.slice(0, 3));
@@ -1274,11 +1227,32 @@ const bootstrapServerHubsAndReserves = async (
   if (globalJAdapter && hubEntityIds.length > 0) {
     console.log(`[XLN] Funding hub reserves (${hubEntityIds.length} hubs)...`);
     const tokenCatalog = await ensureTokenCatalog();
+    const reserveTokens =
+      tokenCatalog.length > 0 ? tokenCatalog : await globalJAdapter.getTokenRegistry().catch(() => []);
+
+    try {
+      if (DEV_CHAIN_IDS.has(globalJAdapter.chainId) && 'send' in globalJAdapter.provider) {
+        const provider = globalJAdapter.provider as ethers.JsonRpcProvider;
+        const deployerAddress = await globalJAdapter.signer.getAddress();
+        const targetDeployerEth = ethers.parseEther('10000');
+        await provider.send('anvil_setBalance', [deployerAddress, ethers.toBeHex(targetDeployerEth)]);
+        console.log('[XLN] Anvil deployer balance topped up');
+      }
+    } catch (err) {
+      console.warn('[XLN] Failed to top up anvil deployer:', (err as Error).message);
+    }
+
     for (const hubEntityId of hubEntityIds) {
       const hub = await getHubWallet(env, hubEntityId);
       if (!hub) {
-        console.warn(`[XLN] Hub wallet not available for ${hubEntityId.slice(-8)}, skipping reserve funding`);
-        continue;
+        const message = `HUB_BOOTSTRAP_FAILED: hub wallet unavailable for ${hubEntityId}`;
+        pushDebugEvent(relayStore, {
+          event: 'error',
+          status: 'failed',
+          reason: 'HUB_BOOTSTRAP_WALLET',
+          details: { hubEntityId },
+        });
+        throw new Error(message);
       }
       const hubWalletAddress = await hub.wallet.getAddress();
 
@@ -1287,10 +1261,45 @@ const bootstrapServerHubsAndReserves = async (
         if (browserVM) {
           await (browserVM as any).fundSignerWallet(hubWalletAddress, 1_000_000_000n * 10n ** 18n);
         }
+      } else {
+        const deployer = globalJAdapter.signer;
+        const erc20Abi = [
+          'function transfer(address to, uint256 amount) returns (bool)',
+          'function balanceOf(address) view returns (uint256)',
+        ];
+
+        for (const token of reserveTokens) {
+          if (!token?.address) continue;
+          try {
+            const erc20 = new ethers.Contract(token.address, erc20Abi, deployer);
+            const hubBalance = await erc20.balanceOf(hubWalletAddress);
+            const targetBalance = 1_000_000_000n * 10n ** BigInt(token.decimals ?? 18);
+            if (hubBalance < targetBalance) {
+              const transferAmount = targetBalance - hubBalance;
+              const tx = await erc20.transfer(hubWalletAddress, transferAmount);
+              await tx.wait();
+            }
+          } catch (err) {
+            console.warn(
+              `[XLN] Hub ${hubEntityId.slice(-8)} wallet token topup failed (${token.symbol}):`,
+              (err as Error).message,
+            );
+          }
+        }
+
+        try {
+          const currentEth = await globalJAdapter.provider.getBalance(hubWalletAddress);
+          const targetEth = ethers.parseEther('1000');
+          if (currentEth < targetEth) {
+            const topup = targetEth - currentEth;
+            const ethTx = await deployer.sendTransaction({ to: hubWalletAddress, value: topup });
+            await ethTx.wait();
+          }
+        } catch (err) {
+          console.warn(`[XLN] Hub ${hubEntityId.slice(-8)} wallet ETH topup failed:`, (err as Error).message);
+        }
       }
 
-      const reserveTokens =
-        tokenCatalog.length > 0 ? tokenCatalog : await globalJAdapter.getTokenRegistry().catch(() => []);
       for (const token of reserveTokens) {
         const tokenId = typeof token.tokenId === 'number' ? token.tokenId : undefined;
         if (!tokenId) continue;
@@ -1299,18 +1308,36 @@ const bootstrapServerHubsAndReserves = async (
         try {
           const events = await globalJAdapter.debugFundReserves(hubEntityId, tokenId, amount);
           await applyJEventsToEnv(env, events, 'HUB-RESERVE-FUND');
+          await settleRuntimeFor(env, 30);
+          const onChainReserve = await waitForReserveUpdate(hubEntityId, tokenId, amount, 15_000);
+          if (onChainReserve === null) {
+            pushDebugEvent(relayStore, {
+              event: 'error',
+              status: 'failed',
+              reason: 'HUB_BOOTSTRAP_RESERVE_TIMEOUT',
+              details: {
+                hubEntityId,
+                tokenId,
+                expectedMin: amount.toString(),
+              },
+            });
+            throw new Error(
+              `HUB_BOOTSTRAP_FAILED: reserve not visible on-chain for hub=${hubEntityId} token=${tokenId}`,
+            );
+          }
           const replica = getEntityReplicaById(env, hubEntityId);
           if (replica?.state) {
-            replica.state.reserves.set(String(tokenId), amount);
+            replica.state.reserves.set(String(tokenId), onChainReserve);
           }
           console.log(
-            `[XLN] Hub ${hubEntityId.slice(-8)} reserves funded: tokenId=${tokenId} amount=${ethers.formatUnits(amount, decimals)}`,
+            `[XLN] Hub ${hubEntityId.slice(-8)} reserves funded: tokenId=${tokenId} amount=${ethers.formatUnits(onChainReserve, decimals)}`,
           );
         } catch (err) {
           console.warn(
             `[XLN] Hub ${hubEntityId.slice(-8)} reserve funding failed (tokenId=${tokenId}):`,
             (err as Error).message,
           );
+          throw err;
         }
       }
     }
@@ -1448,6 +1475,10 @@ const triggerColdReset = async (
   const clearDbState = opts.clearDb !== false;
   const preserveHubs = opts.preserveHubs === true;
   const syncRebuild = opts.syncRebuild === true;
+  const runtimeState = env.runtimeState;
+  if (runtimeState) {
+    runtimeState.persistencePaused = true;
+  }
 
   const localRuntimeKey = normalizeRuntimeKey(env.runtimeId);
   const preservedRuntimeIds = new Set<string>();
@@ -1576,6 +1607,9 @@ const triggerColdReset = async (
       console.error('[RESET] Rebuild failed:', coldResetRebuildError);
     })
     .finally(() => {
+      if (runtimeState) {
+        runtimeState.persistencePaused = false;
+      }
       coldResetCompletedAt = Date.now();
       coldResetRebuildInFlight = null;
     });
@@ -1619,8 +1653,9 @@ const seedHubProfilesInRelayCache = (
   hubs: Array<{ entityId: string; name?: string; region?: string; routingFeePPM?: number; capabilities?: string[] }>,
   relayUrl: string,
 ): void => {
-  const p2p = env.runtimeState?.p2p as { getEncryptionPubKeyHex?: () => string } | undefined;
-  const encryptionPubKey = p2p?.getEncryptionPubKeyHex?.();
+  const p2p = env.runtimeState?.p2p as { getEncryptionPublicKeyHex?: () => string } | undefined;
+  const encryptionPublicKey = p2p?.getEncryptionPublicKeyHex?.()
+    ?? (env.runtimeSeed ? pubKeyToHex(deriveEncryptionKeyPair(env.runtimeSeed).publicKey) : undefined);
   const seededAt = Date.now();
 
   for (const hub of hubs) {
@@ -1652,7 +1687,7 @@ const seedHubProfilesInRelayCache = (
       rebalanceLiquidityFeeBps: String(hubPolicy?.rebalanceLiquidityFeeBps ?? hubPolicy?.minFeeBps ?? 1n),
       rebalanceGasFee: String(hubPolicy?.rebalanceGasFee ?? 0n),
       rebalanceTimeoutMs: hubPolicy?.rebalanceTimeoutMs ?? 10 * 60 * 1000,
-      ...(encryptionPubKey ? { encryptionPubKey } : {}),
+      ...(encryptionPublicKey ? { encryptionPublicKey } : {}),
       lastUpdated: seededAt,
     };
 
@@ -2517,7 +2552,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       if (hubReplica?.state?.jBatchState?.batch) {
         const batch = hubReplica.state.jBatchState.batch as any;
         console.log(
-          `[${logPrefix}] Hub jBatch: r2r=${batch.reserveToReserve?.length || 0}, r2c=${batch.reserveToCollateral?.length || 0}, c2r=${batch.collateralToReserve?.length || 0}, settlements=${batch.settlements?.length || 0}, pending=${hubReplica.state.jBatchState.pendingBroadcast ? 'yes' : 'no'}`,
+          `[${logPrefix}] Hub jBatch: r2r=${batch.reserveToReserve?.length || 0}, r2c=${batch.reserveToCollateral?.length || 0}, c2r=${batch.collateralToReserve?.length || 0}, settlements=${batch.settlements?.length || 0}, sentPending=${hubReplica.state.jBatchState.sentBatch ? 'yes' : 'no'}`,
         );
       }
       if (env.jReplicas) {
@@ -2585,7 +2620,14 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }
 
       const body = await req.json();
-      const { userEntityId, userRuntimeId, tokenId = 1, amount = '100', hubEntityId: requestedHubEntityId } = body;
+      const {
+        userEntityId,
+        userRuntimeId,
+        tokenId = 1,
+        amount = '100',
+        hubEntityId: requestedHubEntityId,
+        knownAccount,
+      } = body;
       const requestId = `offchain_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
       if (!userEntityId) {
@@ -2616,13 +2658,12 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }
       const normalizedUserEntityId = String(userEntityId).toLowerCase();
       const allProfiles = env.gossip?.getProfiles() || [];
-      let normalizedUserRuntimeId = typeof userRuntimeId === 'string' ? userRuntimeId.trim().toLowerCase() : '';
+      let normalizedUserRuntimeId = normalizeRuntimeKey(userRuntimeId);
       if (!normalizedUserRuntimeId) {
         const userProfile = allProfiles.find(
           (p: any) => String(p?.entityId || '').toLowerCase() === normalizedUserEntityId,
         );
-        const profileRuntimeId =
-          typeof userProfile?.runtimeId === 'string' ? userProfile.runtimeId.trim().toLowerCase() : '';
+        const profileRuntimeId = normalizeRuntimeKey(userProfile?.runtimeId);
         if (profileRuntimeId) {
           normalizedUserRuntimeId = profileRuntimeId;
         }
@@ -2784,56 +2825,168 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const accountMachine = getAccountMachine(env, hubEntityId, normalizedUserEntityId);
       const hasHubAccount = hasAccount(env, hubEntityId, normalizedUserEntityId) || !!accountMachine;
       const accountPending = hasHubAccount ? !!accountMachine?.pendingFrame : false;
+      const serverCurrentHeight = Number(accountMachine?.currentHeight ?? 0);
+      const serverPendingHeight = accountMachine?.pendingFrame?.height ?? null;
+      const knownCurrentHeightRaw = (knownAccount as any)?.currentHeight;
+      const knownCurrentHeight =
+        knownCurrentHeightRaw !== undefined && Number.isFinite(Number(knownCurrentHeightRaw))
+          ? Number(knownCurrentHeightRaw)
+          : null;
+      const knownPending = Boolean((knownAccount as any)?.hasPending);
+      const knownPendingHeightRaw = (knownAccount as any)?.pendingHeight;
+      const knownPendingHeight =
+        knownPendingHeightRaw !== undefined && knownPendingHeightRaw !== null && Number.isFinite(Number(knownPendingHeightRaw))
+          ? Number(knownPendingHeightRaw)
+          : null;
+      const knownAnchorHeight = Math.max(knownCurrentHeight ?? 0, knownPendingHeight ?? 0);
       const accountPresence = hubs.map(hub => ({
         hubEntityId: hub.entityId,
         hasAccount: hasAccount(env, hub.entityId, normalizedUserEntityId),
       }));
-      const faucetCreditAmount = 10_000n * 10n ** 18n;
-      const autoOpenAccount = !hasHubAccount;
+      const autoOpenAccount = false;
 
-      if (autoOpenAccount) {
+      // Fail-fast: client already has unresolved pending frame for this account.
+      // Never enqueue new faucet payment in this state (prevents conflict loops).
+      if (knownPending) {
         pushDebugEvent(relayStore, {
-          event: 'debug_event',
-          status: 'warning',
-          reason: 'FAUCET_ACCOUNT_AUTO_OPEN',
+          event: 'error',
+          status: 'rejected',
+          reason: 'FAUCET_CLIENT_PENDING_FRAME',
           details: {
-            endpoint: '/api/faucet/offchain',
             requestId,
+            hubEntityId,
             userEntityId: normalizedUserEntityId,
-            selectedHubEntityId: hubEntityId,
+            knownCurrentHeight,
+            knownPendingHeight,
+            serverCurrentHeight,
+            serverPendingHeight,
+          },
+        });
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: `Client reports pending frame (${knownPendingHeight ?? 'unknown'}). Wait for ACK/dispute before faucet.`,
+            code: 'FAUCET_CLIENT_PENDING_FRAME',
+            requestId,
+            hubEntityId,
+            userEntityId: normalizedUserEntityId,
+            knownCurrentHeight,
+            knownPendingHeight,
+            serverCurrentHeight,
+            serverPendingHeight,
+          }),
+          { status: 409, headers },
+        );
+      }
+
+      // Fail-fast: never queue faucet tx while bilateral account has pending frame.
+      // This avoids piling up directPayment/openAccount txs during stalled consensus.
+      if (hasHubAccount && accountPending) {
+        pushDebugEvent(relayStore, {
+          event: 'error',
+          status: 'rejected',
+          reason: 'FAUCET_ACCOUNT_PENDING_FRAME',
+          details: {
+            requestId,
+            hubEntityId,
+            userEntityId: normalizedUserEntityId,
+            pendingHeight: serverPendingHeight,
+            currentHeight: serverCurrentHeight,
+          },
+        });
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: `Account with hub is pending at frame ${serverPendingHeight ?? 'unknown'}. Wait for ACK/dispute before new faucet.`,
+            code: 'FAUCET_ACCOUNT_PENDING_FRAME',
+            requestId,
+            hubEntityId,
+            userEntityId: normalizedUserEntityId,
+            pendingHeight: serverPendingHeight,
+            currentHeight: serverCurrentHeight,
+          }),
+          { status: 409, headers },
+        );
+      }
+
+      // Explicit invariant: faucet never opens accounts on behalf of user.
+      // User must create/open account first via regular bilateral flow.
+      if (!hasHubAccount) {
+        pushDebugEvent(relayStore, {
+          event: 'error',
+          status: 'rejected',
+          reason: 'FAUCET_ACCOUNT_NOT_OPEN',
+          details: {
+            requestId,
+            hubEntityId,
+            userEntityId: normalizedUserEntityId,
             requestedHubEntityId: requestedHubId || null,
             accountPresence,
           },
         });
-      } else if (accountPending) {
-        pushDebugEvent(relayStore, {
-          event: 'debug_event',
-          status: 'warning',
-          reason: 'FAUCET_ACCOUNT_PENDING_BUT_ALLOWED',
-          details: {
-            endpoint: '/api/faucet/offchain',
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'No bilateral account with selected hub. Open account first, then retry faucet.',
+            code: 'FAUCET_ACCOUNT_NOT_OPEN',
             requestId,
+            hubEntityId,
             userEntityId: normalizedUserEntityId,
-            selectedHubEntityId: hubEntityId,
-            pendingHeight: accountMachine?.pendingFrame?.height ?? null,
-          },
-        });
+            requestedHubEntityId: requestedHubId || null,
+            accountPresence,
+          }),
+          { status: 409, headers },
+        );
+      }
+
+      // Fail-fast: detect client/server account chain mismatch and refuse auto-open.
+      // Typical case: server reset while browser kept old bilateral chain.
+      if (knownAnchorHeight > 0 || knownPending) {
+        const serverMissingOrFresh = !hasHubAccount || serverCurrentHeight === 0;
+        const serverFarBehind = hasHubAccount && serverCurrentHeight + 3 < knownAnchorHeight;
+        if (serverMissingOrFresh || serverFarBehind) {
+          pushDebugEvent(relayStore, {
+            event: 'error',
+            status: 'rejected',
+            reason: 'FAUCET_ACCOUNT_STATE_MISMATCH',
+            details: {
+              requestId,
+              hubEntityId,
+              userEntityId: normalizedUserEntityId,
+              knownCurrentHeight,
+              knownPending,
+              knownPendingHeight,
+              knownAnchorHeight,
+              serverHasAccount: hasHubAccount,
+              serverCurrentHeight,
+              serverPendingHeight,
+            },
+          });
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error:
+                'Account state mismatch (client has older/newer chain than server). Reset runtime network or re-open runtime before faucet.',
+              code: 'FAUCET_ACCOUNT_STATE_MISMATCH',
+              requestId,
+              hubEntityId,
+              userEntityId: normalizedUserEntityId,
+              knownCurrentHeight,
+              knownPending,
+              knownPendingHeight,
+              knownAnchorHeight,
+              serverHasAccount: hasHubAccount,
+              serverCurrentHeight,
+              serverPendingHeight,
+            }),
+            { status: 409, headers },
+          );
+        }
       }
 
       // Single-writer invariant: enqueue only; runtime loop applies.
       try {
-        const entityTxs: Array<{ type: string; data: Record<string, unknown> }> = [];
-        if (autoOpenAccount) {
-          entityTxs.push({
-            type: 'openAccount',
-            data: {
-              targetEntityId: normalizedUserEntityId,
-              tokenId,
-              creditAmount: faucetCreditAmount,
-            },
-          });
-        }
-        entityTxs.push({
+        const entityTxs: Array<{ type: string; data: Record<string, unknown> }> = [{
           type: 'directPayment',
           data: {
             targetEntityId: normalizedUserEntityId,
@@ -2842,7 +2995,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             route: [hubEntityId, normalizedUserEntityId],
             description: 'faucet-offchain',
           },
-        });
+        }];
         enqueueRuntimeInput(env, {
           runtimeTxs: [],
           entityInputs: [
@@ -2869,7 +3022,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         JSON.stringify({
           success: true,
           type: 'offchain',
-          status: autoOpenAccount ? 'account_opening_and_faucet_queued' : 'queued',
+          status: 'queued',
           requestId,
           amount,
           tokenId,
@@ -2877,7 +3030,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           to: normalizedUserEntityId.slice(0, 16) + '...',
           accountReady: hasHubAccount,
           accountPending,
-          autoOpenAccount,
+          autoOpenAccount: false,
           accountPresence,
         }),
         { headers },

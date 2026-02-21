@@ -991,7 +991,13 @@ export async function lockAhb(env: Env): Promise<void> {
     const ahDeltaFinal = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const hbDeltaFinal = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
     const expectedAHShift = -(payment1SenderGross + payment2);
-    const expectedHBShift = -(payment1 + payment2);
+    // H-B leg can already include prepaid request_collateral fee debits committed
+    // in the same bilateral account while payments are flowing.
+    // That fee is paid by Bob to Hub, so it offsets (reduces magnitude of) Hub->Bob debt.
+    const [, hubRepForHB] = findReplica(env, hub.id);
+    const hbAccAtShift = hubRepForHB.state.accounts.get(bob.id);
+    const hbPrepaidFee = hbAccAtShift?.requestedRebalanceFeeState?.get(USDC_TOKEN_ID)?.feePaidUpfront ?? 0n;
+    const expectedHBShift = -(payment1 + payment2) + hbPrepaidFee;
 
     if (ahDeltaFinal !== expectedAHShift) {
       throw new Error(`❌ ASSERTION FAILED: A-H shift=${ahDeltaFinal}, expected ${expectedAHShift}`);
@@ -999,7 +1005,7 @@ export async function lockAhb(env: Env): Promise<void> {
     if (hbDeltaFinal !== expectedHBShift) {
       throw new Error(`❌ ASSERTION FAILED: H-B shift=${hbDeltaFinal}, expected ${expectedHBShift}`);
     }
-    console.log(`✅ Total shift verified: A-H=${ahDeltaFinal}, H-B=${hbDeltaFinal} (fee=${htlcFee})`);
+    console.log(`✅ Total shift verified: A-H=${ahDeltaFinal}, H-B=${hbDeltaFinal} (htlcFee=${htlcFee}, hbPrepaidFee=${hbPrepaidFee})`);
 
     // Verify Bob's view (recipient-exact amount for HTLC + direct payment2)
     const expectedBobReceived = payment1 + payment2;
@@ -1079,7 +1085,10 @@ export async function lockAhb(env: Env): Promise<void> {
     // B-H should have shifted +$50K (Bob paid Hub, reducing Hub's debt)
     // Account for the HTLC fee already retained on payment1.
     // A-H should NOT have changed yet (Hub forwarding is in next frame)
-    const expectedBH19 = -(payment1 + payment2) + reversePayment;
+    const [, hubRepBH19] = findReplica(env, hub.id);
+    const hbAcc19 = hubRepBH19.state.accounts.get(bob.id);
+    const hbPrepaidFee19 = hbAcc19?.requestedRebalanceFeeState?.get(USDC_TOKEN_ID)?.feePaidUpfront ?? 0n;
+    const expectedBH19 = -(payment1 + payment2) + reversePayment + hbPrepaidFee19;
     if (bhDelta19 !== expectedBH19) {
       throw new Error(`B-H shift unexpected: got ${bhDelta19}, expected ${expectedBH19}`);
     }
@@ -1106,7 +1115,10 @@ export async function lockAhb(env: Env): Promise<void> {
     // After recipient-exact HTLC + direct + reverse:
     // A-H includes initial sender gross fee burden.
     const expectedAH = -(payment1SenderGross + payment2) + reversePayment;
-    const expectedBH = -(payment1 + payment2) + reversePayment;
+    const [, hubRepBHFinal] = findReplica(env, hub.id);
+    const hbAccFinal = hubRepBHFinal.state.accounts.get(bob.id);
+    const hbPrepaidFeeFinal = hbAccFinal?.requestedRebalanceFeeState?.get(USDC_TOKEN_ID)?.feePaidUpfront ?? 0n;
+    const expectedBH = -(payment1 + payment2) + reversePayment + hbPrepaidFeeFinal;
 
     if (ahDeltaRev !== expectedAH) {
       throw new Error(`❌ REVERSE PAYMENT FAIL: A-H offdelta=${ahDeltaRev}, expected ${expectedAH}`);
@@ -1114,7 +1126,7 @@ export async function lockAhb(env: Env): Promise<void> {
     if (bhDeltaRev !== expectedBH) {
       throw new Error(`❌ REVERSE PAYMENT FAIL: B-H offdelta=${bhDeltaRev}, expected ${expectedBH}`);
     }
-    console.log(`✅ Reverse payment B→H→A verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (fee=${htlcFee})`);
+    console.log(`✅ Reverse payment B→H→A verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (htlcFee=${htlcFee}, hbPrepaidFee=${hbPrepaidFeeFinal})`);
 
     await pushSnapshot(env, 'Frame 21: Reverse payment complete', {
       title: '✅ Reverse Payment: $50K B→A',
@@ -1142,23 +1154,9 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log('\n\n🔄🔄🔄 REBALANCING SECTION START (Prepaid Model) 🔄🔄🔄\n');
 
     const rebalanceAmount = usd(200_000);
-    // STEP 21.5: Hub declares itself as hub (enables rebalance crontab)
-    console.log('\n🏦 Hub declares hub config');
-    await process(env, [{
-      entityId: hub.id,
-      signerId: hub.signer,
-      entityTxs: [{
-        type: 'setHubConfig',
-        data: { matchingStrategy: 'amount', routingFeePPM: 100, baseFee: 0n },
-      }]
-    }]);
-    await converge(env);
-
-    const [, hubAfterConfig] = findReplica(env, hub.id);
-    if (!hubAfterConfig.state.hubRebalanceConfig) {
-      throw new Error('❌ ASSERT FAIL: Hub config not set after setHubConfig');
-    }
-    console.log(`✅ Hub config active: strategy=${hubAfterConfig.state.hubRebalanceConfig.matchingStrategy}`);
+    // NOTE:
+    // Keep this phase manual on purpose (deposit_collateral + j_broadcast) to isolate
+    // lock/HTLC settlement behavior from hub crontab auto-rebalance side effects.
 
     // ✅ Store pre-rebalance state for assertions
     const [, hubPreRebal] = findReplica(env, hub.id);

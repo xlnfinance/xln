@@ -18,6 +18,14 @@ const toUint16 = (value: bigint | number | undefined, fallback = 0): number => {
 const bytesToHex = (bytes: Uint8Array): string =>
   `0x${Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')}`;
 
+const normalizeX25519Hex = (raw: unknown): string | null => {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const prefixed = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
+  return /^0x[0-9a-fA-F]{64}$/.test(prefixed) ? prefixed.toLowerCase() : null;
+};
+
 const buildBoardMetadata = (entityState: EntityState): BoardMetadata => {
   const validators = entityState.config.validators.map(validatorId => {
     const weight = toUint16(entityState.config.shares[validatorId] ?? 1n, 1);
@@ -92,7 +100,13 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
   const board = buildBoardMetadata(entityState);
   const entityPublicKey = board.validators[0]?.publicKey;
   // Include X25519 crypto key for HTLC envelope encryption (if available)
-  const cryptoPublicKey = entityState.cryptoPublicKey;
+  const cryptoPublicKey = normalizeX25519Hex(entityState.cryptoPublicKey);
+  if (!cryptoPublicKey) {
+    throw new Error(`GOSSIP_PROFILE_MISSING_ENCRYPTION_KEY: entity=${entityState.entityId}`);
+  }
+  const profileName = typeof name === 'string' && name.trim().length > 0
+    ? name.trim()
+    : `Entity ${entityState.entityId.slice(-4)}`;
 
   // Build profile
   const profile: Profile = {
@@ -117,8 +131,9 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
       board,
       threshold: toUint16(entityState.config.threshold, 1),
       ...(entityPublicKey ? { entityPublicKey } : {}),
-      ...(cryptoPublicKey ? { cryptoPublicKey } : {}), // X25519 key for HTLC encryption
-      ...(name ? { name } : {}), // Include name if provided
+      cryptoPublicKey, // X25519 key for HTLC encryption
+      encryptionPublicKey: cryptoPublicKey, // transport key (runtime-level)
+      name: profileName,
     },
     accounts,
   };

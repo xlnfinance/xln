@@ -270,6 +270,7 @@
   let externalTokensLoading = true;
   let depositingToken: string | null = null; // symbol of token being deposited
   let collateralFundingToken: string | null = null; // symbol of token being moved to collateral
+  const offchainFaucetInflight = new Set<string>();
 
   // Faucet: fund entity reserves with test tokens
   function resolveReserveTokenMeta(tokenId: number, symbolHint?: string): { tokenId: number; symbol: string; decimals: number } {
@@ -344,6 +345,9 @@
   async function faucetOffchain(hubEntityId?: string, tokenId: number = 1) {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
+    const faucetKey = `${String(hubEntityId || '').toLowerCase()}:${Number(tokenId)}`;
+    if (offchainFaucetInflight.has(faucetKey)) return;
+    offchainFaucetInflight.add(faucetKey);
     try {
       const requestApiBase = resolveApiBaseForEnv(activeEnv);
       const runtimeId = (activeEnv as any)?.runtimeId;
@@ -362,6 +366,50 @@
         hubEntityId = accountIds.find((id) => isHubEntity(String(id))) || undefined;
       }
 
+      const findLocalAccountByCounterparty = (counterpartyId: string | undefined) => {
+        if (!counterpartyId || !replica?.state?.accounts) return null;
+        const needle = String(counterpartyId).toLowerCase();
+        const me = String(entityId || '').toLowerCase();
+        for (const [key, account] of replica.state.accounts.entries()) {
+          if (String(key).toLowerCase() === needle) return account;
+          const cp = typeof (account as any)?.counterpartyEntityId === 'string'
+            ? String((account as any).counterpartyEntityId).toLowerCase()
+            : '';
+          if (cp === needle) return account;
+          const left = typeof (account as any)?.leftEntity === 'string'
+            ? String((account as any).leftEntity).toLowerCase()
+            : '';
+          const right = typeof (account as any)?.rightEntity === 'string'
+            ? String((account as any).rightEntity).toLowerCase()
+            : '';
+          if (left && right && ((left === me && right === needle) || (right === me && left === needle))) {
+            return account;
+          }
+        }
+        return null;
+      };
+      const localAccount = findLocalAccountByCounterparty(hubEntityId);
+      const localDelta = localAccount?.deltas?.get?.(tokenId);
+      const localHeight = Number(localAccount?.currentHeight || 0);
+      const localPending = !!localAccount?.pendingFrame;
+      if (!localAccount) {
+        throw new Error('No bilateral account with selected hub. Open account first.');
+      }
+      if (!localDelta || localHeight <= 0) {
+        throw new Error('Account is not finalized yet. Wait for first ACK and retry faucet.');
+      }
+      if (localPending) {
+        throw new Error('Account pending frame is not finalized yet. Wait a moment and retry.');
+      }
+      const knownAccount = localAccount
+        ? {
+            currentHeight: Number(localAccount.currentHeight || 0),
+            hasPending: !!localAccount.pendingFrame,
+            pendingHeight: localAccount.pendingFrame?.height ?? null,
+            currentFrameHash: localAccount.currentFrame?.stateHash || null,
+          }
+        : null;
+
       const requestTimeoutMs = 12000;
       let response: Response | null = null;
       let result: any = null;
@@ -379,6 +427,7 @@
             userRuntimeId: runtimeId,
             tokenId,
             amount: '100',
+            ...(knownAccount ? { knownAccount } : {}),
             ...(hubEntityId ? { hubEntityId } : {}),
           })
         });
@@ -395,6 +444,19 @@
 
       if (!response?.ok || !result?.success) {
         const status = response ? response.status : 'fetch-error';
+        const code = typeof result?.code === 'string' ? result.code : '';
+        if (code === 'FAUCET_ACCOUNT_STATE_MISMATCH') {
+          throw new Error('Account state mismatch with server. Reset network/runtime and retry.');
+        }
+        if (code === 'FAUCET_ACCOUNT_PENDING_FRAME') {
+          throw new Error('Account pending frame is not finalized yet. Wait a moment and retry.');
+        }
+        if (code === 'FAUCET_CLIENT_PENDING_FRAME') {
+          throw new Error('Local account has pending frame. Wait for ACK/dispute before faucet retry.');
+        }
+        if (code === 'FAUCET_ACCOUNT_NOT_OPEN') {
+          throw new Error('Open account with this hub first, then retry faucet.');
+        }
         throw new Error(result?.error || `Faucet failed (${status})`);
       }
 
@@ -403,6 +465,8 @@
     } catch (err) {
       console.error('[EntityPanel] Offchain faucet failed:', err);
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
+    } finally {
+      offchainFaucetInflight.delete(faucetKey);
     }
   }
 

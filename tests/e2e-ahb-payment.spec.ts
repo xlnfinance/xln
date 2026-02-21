@@ -1,7 +1,7 @@
 /**
  * E2E: Alice → Hub → Bob HTLC Payment Flow (and reverse)
  *
- * Uses random BIP39 mnemonics → fresh entities each run → no server state conflicts.
+ * Uses deterministic BIP39 mnemonics by default (override via env) so IDs are reproducible.
  * Exercises: runtime creation, hub discovery, account opening, faucet, htlcPayment.
  *
  * Prereqs: localhost:8080 dev server, xln.finance for relay/faucet
@@ -78,12 +78,32 @@ async function gotoApp(page: Page) {
   }
   // Wait for XLN module to load
   await page.waitForFunction(() => (window as any).XLN, { timeout: INIT_TIMEOUT });
+  await dismissOnboardingIfVisible(page);
   await page.waitForTimeout(2000);
 }
 
-/** Generate random BIP39 mnemonic (Node.js side — no browser import needed) */
-function randomMnemonic(): string {
-  return Wallet.createRandom().mnemonic!.phrase;
+async function dismissOnboardingIfVisible(page: Page) {
+  const checkbox = page.locator('text=I understand and accept the risks of using this software').first();
+  if (await checkbox.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await checkbox.click();
+    const continueBtn = page.locator('button:has-text("Continue")').first();
+    if (await continueBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await continueBtn.click();
+      await page.waitForTimeout(300);
+    }
+  }
+}
+
+const DEFAULT_ALICE_MNEMONIC = 'test test test test test test test test test test test junk';
+const DEFAULT_BOB_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+
+function selectMnemonic(envKey: string, fallback: string): string {
+  const override = process.env[envKey];
+  if (typeof override === 'string' && override.trim().length > 0) return override.trim();
+  if (process.env.E2E_RANDOM_MNEMONICS === '1') {
+    return Wallet.createRandom().mnemonic!.phrase;
+  }
+  return fallback;
 }
 
 /** Create a runtime via vaultStore (Vite dev dynamic import) */
@@ -94,7 +114,10 @@ async function createRuntime(page: Page, label: string, mnemonic: string) {
       if (!vaultOperations) {
         return { ok: false, error: 'window.vaultOperations missing' };
       }
-      await vaultOperations.createRuntime(label, mnemonic);
+      await vaultOperations.createRuntime(label, mnemonic, {
+        loginType: 'demo',
+        requiresOnboarding: false,
+      });
       // Tag env with debug ID for tracking identity
       const env = (window as any).isolatedEnv;
       if (env && !env._debugId) env._debugId = label + '-' + Date.now();
@@ -361,6 +384,7 @@ async function switchTo(page: Page, label: string) {
   }, label);
   console.log(`[E2E] Switched to ${label} (${r.id}), envId=${envInfo.debugId}, eReplicas=${envInfo.eReplicaCount}: [${envInfo.keys.join(', ')}]`);
   await ensureRuntimeOnline(page, `switch-${label}`);
+  await dismissOnboardingIfVisible(page);
   await page.waitForTimeout(2000);
 }
 
@@ -371,7 +395,7 @@ async function discoverHub(page: Page): Promise<string> {
     p?.metadata?.isHub === true || Array.isArray(p?.capabilities) && p.capabilities.includes('hub');
 
   for (let i = 0; i < 45; i++) {
-    const fromGossip = await page.evaluate(() => {
+    const fromGossip = await page.evaluate<string | null>(() => {
       try {
         const env = (window as any).isolatedEnv;
         const XLN = (window as any).XLN;
@@ -432,7 +456,7 @@ async function getHubFeeConfig(page: Page, hubId: string): Promise<{ feePPM: big
 async function discoverHubs(page: Page): Promise<string[]> {
   const apiBaseUrl = await getActiveApiBase(page);
   for (let i = 0; i < 45; i++) {
-    const fromGossip = await page.evaluate(() => {
+    const fromGossip = await page.evaluate<string[]>(() => {
       try {
         const env = (window as any).isolatedEnv;
         const XLN = (window as any).XLN;
@@ -442,7 +466,7 @@ async function discoverHubs(page: Page): Promise<string[]> {
           .filter((p: any) => p?.metadata?.isHub === true || Array.isArray(p?.capabilities) && p.capabilities.includes('hub'))
           .map((p: any) => p.entityId)
           .filter((id: any): id is string => typeof id === 'string');
-        return [...new Set(ids)];
+        return Array.from(new Set(ids));
       } catch {
         return [] as string[];
       }
@@ -457,7 +481,7 @@ async function discoverHubs(page: Page): Promise<string[]> {
           .filter((e: any) => e?.isHub === true)
           .map((h: any) => h?.entityId)
           .filter((id: any): id is string => typeof id === 'string');
-        const unique = [...new Set(ids)];
+        const unique: string[] = Array.from(new Set(ids));
         if (unique.length > 0) return unique;
       }
     } catch {}
@@ -740,6 +764,173 @@ async function waitForOutCapIncrease(
   );
 }
 
+async function getAccountSyncState(
+  page: Page,
+  entityId: string,
+  counterpartyId: string
+): Promise<{ hasAccount: boolean; height: number; pendingHeight: number | null; mempoolLen: number }> {
+  return page.evaluate(({ entityId, counterpartyId }) => {
+    const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) {
+      return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
+    }
+    for (const [key, rep] of env.eReplicas.entries()) {
+      if (!String(key).startsWith(entityId + ':')) continue;
+      const account = rep?.state?.accounts?.get?.(counterpartyId);
+      if (!account) return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
+      return {
+        hasAccount: true,
+        height: Number(account.currentHeight || 0),
+        pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
+        mempoolLen: Number(account.mempool?.length || 0),
+      };
+    }
+    return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
+  }, { entityId, counterpartyId });
+}
+
+async function waitForAccountIdle(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+  timeoutMs = 12_000
+): Promise<void> {
+  const started = Date.now();
+  let last = { hasAccount: false, height: 0, pendingHeight: null as number | null, mempoolLen: 0 };
+  while (Date.now() - started < timeoutMs) {
+    last = await getAccountSyncState(page, entityId, counterpartyId);
+    if (last.hasAccount && last.pendingHeight === null) return;
+    await page.waitForTimeout(250);
+  }
+  throw new Error(
+    `Account not idle for ${entityId.slice(0, 10)}↔${counterpartyId.slice(0, 10)}; ` +
+    `hasAccount=${last.hasAccount} height=${last.height} pending=${last.pendingHeight} mempool=${last.mempoolLen}`
+  );
+}
+
+async function getRuntimeId(page: Page): Promise<string> {
+  const runtimeId = await page.evaluate(() => String((window as any).isolatedEnv?.runtimeId || ''));
+  expect(runtimeId.length > 0, 'Active runtimeId missing').toBe(true);
+  return runtimeId;
+}
+
+async function fetchRelayEvents(page: Page, query: Record<string, string | number>): Promise<any[]> {
+  const apiBaseUrl = await getActiveApiBase(page);
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) params.set(k, String(v));
+  const res = await page.request.get(`${apiBaseUrl}/api/debug/events?${params.toString()}`);
+  if (!res.ok()) return [];
+  const body = await res.json().catch(() => ({}));
+  return Array.isArray((body as any)?.events) ? (body as any).events : [];
+}
+
+async function getDebugEntities(page: Page): Promise<any[]> {
+  const apiBaseUrl = await getActiveApiBase(page);
+  const res = await page.request.get(`${apiBaseUrl}/api/debug/entities`);
+  if (!res.ok()) return [];
+  const body = await res.json().catch(() => ({}));
+  return Array.isArray((body as any)?.entities) ? (body as any).entities : [];
+}
+
+async function getEntityRuntimeId(page: Page, entityId: string): Promise<string> {
+  const entities = await getDebugEntities(page);
+  const match = entities.find((e: any) =>
+    String(e?.entityId || '').toLowerCase() === String(entityId).toLowerCase()
+  );
+  const runtimeId = String(match?.runtimeId || '');
+  expect(runtimeId.length > 0, `Missing runtime hint for entity ${entityId.slice(0, 12)}`).toBe(true);
+  return runtimeId;
+}
+
+async function dumpRelaySlice(page: Page, tag: string, last = 120): Promise<void> {
+  const events = await fetchRelayEvents(page, { last });
+  const rows = events.map((ev: any) => ({
+    id: ev?.id,
+    ts: ev?.ts,
+    event: ev?.event,
+    msgType: ev?.msgType,
+    from: ev?.from,
+    to: ev?.to,
+    status: ev?.status,
+    entityId: ev?.details?.entityId,
+    txs: ev?.details?.txs,
+  }));
+  console.log(`[E2E][${tag}] relay events (last ${last}): ${JSON.stringify(rows)}`);
+}
+
+async function dumpRelayErrorSlice(page: Page, tag: string, since: number): Promise<void> {
+  const events = await fetchRelayEvents(page, {
+    last: 800,
+    event: 'debug_event',
+    since,
+  });
+  const rows = events
+    .map((ev: any) => ev?.details?.payload)
+    .filter((p: any) => p && (p.level === 'error' || p.level === 'warn'))
+    .map((p: any) => ({
+      level: p.level,
+      category: p.category,
+      message: p.message || p.eventName,
+      entityId: p.entityId,
+      runtimeId: p.runtimeId,
+      data: p.data,
+    }));
+  console.log(`[E2E][${tag}] relay debug errors/warns since=${since}: ${JSON.stringify(rows)}`);
+}
+
+async function waitForRelayHtlcPipeline(
+  page: Page,
+  opts: {
+    since: number;
+    senderRuntimeId: string;
+    hubRuntimeId: string;
+    recipientRuntimeId: string;
+    hubEntityId: string;
+    recipientEntityId: string;
+    timeoutMs?: number;
+  }
+): Promise<void> {
+  const timeoutMs = opts.timeoutMs ?? 12_000;
+  const start = Date.now();
+  let sawSenderToHub = false;
+  while (Date.now() - start < timeoutMs) {
+    const events = await fetchRelayEvents(page, {
+      last: 1000,
+      event: 'delivery',
+      msgType: 'entity_input',
+      since: opts.since,
+    });
+
+    sawSenderToHub = events.some((ev: any) =>
+      String(ev?.from || '').toLowerCase() === String(opts.senderRuntimeId).toLowerCase() &&
+      String(ev?.to || '').toLowerCase() === String(opts.hubRuntimeId).toLowerCase() &&
+      String(ev?.details?.entityId || '').toLowerCase() === String(opts.hubEntityId).toLowerCase() &&
+      String(ev?.status || '').startsWith('delivered')
+    );
+
+    const sawHubToRecipient = events.some((ev: any) =>
+      String(ev?.from || '').toLowerCase() === String(opts.hubRuntimeId).toLowerCase() &&
+      String(ev?.to || '').toLowerCase() === String(opts.recipientRuntimeId).toLowerCase() &&
+      String(ev?.details?.entityId || '').toLowerCase() === String(opts.recipientEntityId).toLowerCase() &&
+      (String(ev?.status || '').startsWith('delivered') || String(ev?.status || '').startsWith('queued'))
+    );
+
+    if (sawSenderToHub && sawHubToRecipient) return;
+    await page.waitForTimeout(250);
+  }
+
+  await dumpRelaySlice(page, 'htlc-pipeline-timeout', 250);
+  await dumpRelayErrorSlice(page, 'htlc-pipeline-timeout', opts.since);
+  if (!sawSenderToHub) {
+    throw new Error(
+      `Relay pipeline break: sender(${opts.senderRuntimeId.slice(0, 12)}) -> hub(${opts.hubRuntimeId.slice(0, 12)}) not delivered`
+    );
+  }
+  throw new Error(
+    `Relay pipeline break: hub(${opts.hubRuntimeId.slice(0, 12)}) did not emit entity_input to recipient runtime=${opts.recipientRuntimeId.slice(0, 12)} entity=${opts.recipientEntityId.slice(0, 12)}`
+  );
+}
+
 /** Faucet 100 USDC (with 30s timeout) */
 async function faucet(page: Page, entityId: string) {
   let r: { ok: boolean; status: number; data: any } = { ok: false, status: 0, data: { error: 'not-run' } };
@@ -975,8 +1166,8 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // ── 2. Create Alice + Bob with random mnemonics ──────────────
     console.log('[E2E] 2. Create runtimes');
-    const aliceMnemonic = randomMnemonic();
-    const bobMnemonic = randomMnemonic();
+    const aliceMnemonic = selectMnemonic('E2E_ALICE_MNEMONIC', DEFAULT_ALICE_MNEMONIC);
+    const bobMnemonic = selectMnemonic('E2E_BOB_MNEMONIC', DEFAULT_BOB_MNEMONIC);
     console.log(`[E2E] Alice mnemonic: ${aliceMnemonic.split(' ').slice(0, 3).join(' ')}...`);
     console.log(`[E2E] Bob mnemonic: ${bobMnemonic.split(' ').slice(0, 3).join(' ')}...`);
 
@@ -985,6 +1176,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const alice = await getEntity(page);
     expect(alice, 'Alice entity missing').not.toBeNull();
     await waitForEntityAdvertised(page, alice!.entityId);
+    const aliceRuntimeId = await getRuntimeId(page);
     console.log(`[E2E] Alice: entity=${alice!.entityId.slice(0, 16)}  signer=${alice!.signerId.slice(0, 12)}`);
     await dumpState(page, 'alice-after-create');
 
@@ -994,6 +1186,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     expect(bob, 'Bob entity missing').not.toBeNull();
     expect(bob!.entityId).not.toBe(alice!.entityId);
     await waitForEntityAdvertised(page, bob!.entityId);
+    const bobRuntimeId = await getRuntimeId(page);
     console.log(`[E2E] Bob: entity=${bob!.entityId.slice(0, 16)}  signer=${bob!.signerId.slice(0, 12)}`);
     await dumpState(page, 'bob-after-create');
 
@@ -1042,12 +1235,25 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     await switchTo(page, 'bob');
     await assertP2PSingletonAndWsHealth(page, 'switch-bob-forward-recv');
+    await waitForAccountIdle(page, bob!.entityId, hubId);
     const b0 = await outCap(page, bob!.entityId, hubId);
 
     await switchTo(page, 'alice');
     await assertP2PSingletonAndWsHealth(page, 'switch-alice-reverse-recv');
+    await waitForAccountIdle(page, alice!.entityId, hubId);
+    const paySince = Date.now() - 1000;
+    const hubRuntimeId = await getEntityRuntimeId(page, hubId);
     await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
       [alice!.entityId, hubId, bob!.entityId], payAmount);
+    await waitForRelayHtlcPipeline(page, {
+      since: paySince,
+      senderRuntimeId: aliceRuntimeId,
+      hubRuntimeId,
+      recipientRuntimeId: bobRuntimeId,
+      hubEntityId: hubId,
+      recipientEntityId: bob!.entityId,
+      timeoutMs: 12_000,
+    });
 
     // Alice: sender pays full amount (capacity decreases by payAmount)
     const a2 = await outCap(page, alice!.entityId, hubId);

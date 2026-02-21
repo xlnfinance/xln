@@ -901,6 +901,25 @@ export async function createRpcAdapter(
               () => depository['processBatch']!.estimateGas(encodedBatch, entityProviderAddr, hankoData, nextNonce),
               DEFAULT_PROCESS_BATCH_GAS,
             );
+            const resolvedFeeOverrides = await buildFeeOverrides();
+            const requestedFeeOverrides = jTx.data.feeOverrides;
+            if (requestedFeeOverrides?.maxFeePerGasWei) {
+              resolvedFeeOverrides.maxFeePerGas = BigInt(requestedFeeOverrides.maxFeePerGasWei);
+            }
+            if (requestedFeeOverrides?.maxPriorityFeePerGasWei) {
+              resolvedFeeOverrides.maxPriorityFeePerGas = BigInt(requestedFeeOverrides.maxPriorityFeePerGasWei);
+            }
+            if (requestedFeeOverrides?.gasBumpBps && requestedFeeOverrides.gasBumpBps > 0) {
+              const bumpBps = BigInt(Math.floor(requestedFeeOverrides.gasBumpBps));
+              const factor = 10_000n + bumpBps;
+              if (resolvedFeeOverrides.maxFeePerGas) {
+                resolvedFeeOverrides.maxFeePerGas = (resolvedFeeOverrides.maxFeePerGas * factor + 9_999n) / 10_000n;
+              }
+              if (resolvedFeeOverrides.maxPriorityFeePerGas) {
+                resolvedFeeOverrides.maxPriorityFeePerGas =
+                  (resolvedFeeOverrides.maxPriorityFeePerGas * factor + 9_999n) / 10_000n;
+              }
+            }
 
             // Pre-flight: staticCall to decode revert reason before sending real tx
             try {
@@ -952,7 +971,7 @@ export async function createRpcAdapter(
 
             const tx = await depository['processBatch']!(encodedBatch, entityProviderAddr, hankoData, nextNonce, {
               gasLimit,
-              ...(await buildFeeOverrides()),
+              ...resolvedFeeOverrides,
             });
             const receipt = await waitForReceipt(tx as any, 'submitTx:processBatch');
             const txHash = receipt.hash ?? tx.hash;

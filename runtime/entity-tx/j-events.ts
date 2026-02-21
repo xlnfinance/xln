@@ -1153,9 +1153,10 @@ async function applyFinalizedJEvent(
 
     if (success) {
       if (newState.jBatchState) {
-        const { createEmptyBatch, batchOpCount: countOps } = await import('../j-batch');
-        const opCount = countOps(newState.jBatchState.batch);
-        const wasPending = !!newState.jBatchState.pendingBroadcast;
+        const { batchOpCount: countOps, isBatchEmpty, mergeBatchOps } = await import('../j-batch');
+        const sentBatch = newState.jBatchState.sentBatch;
+        const opCount = sentBatch ? countOps(sentBatch.batch) : 0;
+        const wasPending = !!sentBatch;
 
         // Duplicate/replayed HankoBatchProcessed can arrive after we already cleared the
         // batch on the first finalized event. Ignore zero-op confirmations in that case.
@@ -1172,10 +1173,10 @@ async function applyFinalizedJEvent(
         // Record completed batch in history (keep last 20)
         if (!newState.batchHistory) newState.batchHistory = [];
         newState.batchHistory.push({
-          batchHash: newState.jBatchState.batchHash || '',
-          txHash: newState.jBatchState.txHash || '',
+          batchHash: sentBatch?.batchHash || '',
+          txHash: sentBatch?.txHash || transactionHash || '',
           status: 'confirmed' as const,
-          broadcastedAt: newState.jBatchState.broadcastedAt || newState.jBatchState.lastBroadcast || 0,
+          broadcastedAt: sentBatch?.lastSubmittedAt || newState.jBatchState.lastBroadcast || 0,
           confirmedAt: newState.timestamp,
           opCount,
           entityNonce: Number(nonce),
@@ -1184,14 +1185,9 @@ async function applyFinalizedJEvent(
           newState.batchHistory = newState.batchHistory.slice(-20);
         }
 
-        // Clear batch for next cycle
-        newState.jBatchState.batch = createEmptyBatch();
-        newState.jBatchState.pendingBroadcast = false;
-        newState.jBatchState.status = 'empty';
-        newState.jBatchState.batchHash = undefined;
-        newState.jBatchState.encodedBatch = undefined;
-        newState.jBatchState.broadcastedAt = undefined;
-        newState.jBatchState.txHash = undefined;
+        // Clear sent batch for next cycle.
+        newState.jBatchState.sentBatch = undefined;
+        newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'empty' : 'accumulating';
         // Authoritative nonce sync from on-chain finalized event.
         // Never trust optimistic local increments from submission path.
         const currentNonce = Number(newState.jBatchState.entityNonce || 0);
@@ -1203,8 +1199,7 @@ async function applyFinalizedJEvent(
     } else {
       // Batch failed — update status, keep batch for retry
       if (newState.jBatchState) {
-        // Failure is finalized on-chain, so release pending latch immediately.
-        newState.jBatchState.pendingBroadcast = false;
+        const sentBatch = newState.jBatchState.sentBatch;
         newState.jBatchState.status = 'failed';
         newState.jBatchState.failedAttempts++;
         // Keep nonce synchronized to finalized event nonce.
@@ -1214,10 +1209,10 @@ async function applyFinalizedJEvent(
 
         if (!newState.batchHistory) newState.batchHistory = [];
         newState.batchHistory.push({
-          batchHash: newState.jBatchState.batchHash || '',
-          txHash: newState.jBatchState.txHash || '',
+          batchHash: sentBatch?.batchHash || '',
+          txHash: sentBatch?.txHash || transactionHash || '',
           status: 'failed' as const,
-          broadcastedAt: newState.jBatchState.broadcastedAt || newState.jBatchState.lastBroadcast || 0,
+          broadcastedAt: sentBatch?.lastSubmittedAt || newState.jBatchState.lastBroadcast || 0,
           confirmedAt: newState.timestamp,
           opCount: 0,
           entityNonce: Number(nonce),
@@ -1225,6 +1220,14 @@ async function applyFinalizedJEvent(
         if (newState.batchHistory.length > 20) {
           newState.batchHistory = newState.batchHistory.slice(-20);
         }
+
+        // Requeue failed sentBatch ops back to current batch so operator can rebroadcast
+        // with fresh nonce in the next cycle.
+        if (sentBatch) {
+          mergeBatchOps(newState.jBatchState.batch, sentBatch.batch);
+        }
+        newState.jBatchState.sentBatch = undefined;
+        newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'failed' : 'accumulating';
       }
       // Batch is atomic on-chain; success=false means none of its ops applied.
       // Unfreeze submitted rebalance requests so hub can retry in next crontab tick.

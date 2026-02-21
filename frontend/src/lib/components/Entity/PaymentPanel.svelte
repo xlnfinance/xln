@@ -76,7 +76,7 @@
     metadata?: {
       name?: string;
       cryptoPublicKey?: string;
-      encryptionPubKey?: string;
+      encryptionPublicKey?: string;
       [key: string]: unknown;
     };
     accounts?: GossipAccount[];
@@ -201,20 +201,14 @@
   }
 
   function isRouteableIntermediary(entity: string): boolean {
+    // Routeability is a transport/security property, not a display-metadata property.
+    // A hop is routeable iff we can encrypt for it and it is hub-like when profile exists.
+    if (!extractEntityCryptoKey(entity)) return false;
     const profile = getGossipProfileByEntityId(entity);
-    if (!profile) return false;
+    if (!profile) return true; // allow local+gossip mixed discovery; key coverage is enforced above
     const metadata = (profile.metadata || {}) as Record<string, unknown>;
     const capabilities = Array.isArray((profile as any).capabilities) ? ((profile as any).capabilities as string[]) : [];
-    const isHub = metadata['isHub'] === true || capabilities.includes('hub') || capabilities.includes('routing');
-    if (!isHub) return false;
-
-    const name = typeof metadata['name'] === 'string' ? metadata['name'].trim() : '';
-    if (!name) return false;
-
-    const routingFeePPM = Number(metadata['routingFeePPM']);
-    if (!Number.isFinite(routingFeePPM) || routingFeePPM < 0) return false;
-
-    return true;
+    return metadata['isHub'] === true || capabilities.includes('hub') || capabilities.includes('routing');
   }
 
   function formatToken(value: bigint): string {
@@ -340,7 +334,7 @@
     if (!tokenCap) return null;
     const outCapacity = sanitizeBigInt(tokenCap?.outCapacity ?? 0n);
     const inCapacity = sanitizeBigInt(tokenCap?.inCapacity ?? 0n);
-    if (outCapacity <= 0n) return null;
+    if (outCapacity <= 0n && inCapacity <= 0n) return null;
     return { outCapacity, inCapacity };
   }
 
@@ -463,6 +457,16 @@
     return low;
   }
 
+  function normalizeEnvelopeKey(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const prefixed = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
+    if (/^0x[0-9a-fA-F]{64}$/.test(prefixed)) return prefixed.toLowerCase();
+    if (trimmed.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(trimmed)) return trimmed;
+    return null;
+  }
+
   function extractEntityCryptoKey(entity: string): string | null {
     if (!entity) return null;
     const entityNorm = normalizeEntityId(entity);
@@ -470,17 +474,30 @@
       for (const [replicaKey, replica] of currentReplicas.entries()) {
         const [replicaEntityId] = replicaKey.split(':');
         if (normalizeEntityId(replicaEntityId) !== entityNorm) continue;
-        const localKey = replica?.state?.cryptoPublicKey;
-        if (typeof localKey === 'string' && localKey.length > 0) {
-          return localKey;
+        const localCandidates = [
+          replica?.state?.cryptoPublicKey,
+          replica?.state?.encryptionPublicKey,
+        ];
+        for (const candidate of localCandidates) {
+          const normalized = normalizeEnvelopeKey(candidate);
+          if (normalized) return normalized;
         }
       }
     }
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
     const profile = profiles.find((p: GossipProfileView) => normalizeEntityId(p?.entityId) === entityNorm) as GossipProfileView | undefined;
-    if (!profile?.metadata) return null;
-    const gossipKey = profile.metadata.cryptoPublicKey || profile.metadata.encryptionPubKey;
-    return typeof gossipKey === 'string' && gossipKey.length > 0 ? gossipKey : null;
+    if (!profile) return null;
+    const gossipCandidates = [
+      profile?.metadata?.cryptoPublicKey,
+      profile?.metadata?.encryptionPublicKey,
+      (profile as any)?.cryptoPublicKey,
+      (profile as any)?.encryptionPublicKey,
+    ];
+    for (const candidate of gossipCandidates) {
+      const normalized = normalizeEnvelopeKey(candidate);
+      if (normalized) return normalized;
+    }
+    return null;
   }
 
   function emitUiDebugEvent(code: string, message: string, details: Record<string, unknown> = {}) {
@@ -562,7 +579,7 @@
     adjacency: Map<string, Set<string>>,
     startId: string,
     targetId: string,
-    token: number,
+    _token: number,
     maxCandidates: number = MAX_CANDIDATE_PATHS
   ): string[][] {
     const results: string[][] = [];
@@ -580,19 +597,17 @@
       if (results.length >= maxCandidates) return;
       const hops = path.length - 1;
       if (hops > MAX_PATH_HOPS) return;
-
+      if (!isSelfTarget && current === targetId) {
+        pushPath([...path]);
+        return;
+      }
       const neighbors = adjacency.get(current);
       if (!neighbors || neighbors.size === 0) return;
-
-      if (current !== targetId && !used.has(targetId) && hasOutboundCapacity(current, targetId, token)) {
-        pushPath([...path, targetId]);
-      }
 
       for (const next of neighbors) {
         if (results.length >= maxCandidates) break;
         const nextHops = hops + 1;
         if (nextHops > MAX_PATH_HOPS) continue;
-        if (!hasOutboundCapacity(current, next, token)) continue;
         if (isSelfTarget) {
           if (next === startId) {
             const intermediateCount = path.length - 1;
@@ -610,7 +625,10 @@
           continue;
         }
 
-        if (next === targetId) continue;
+        if (next === targetId) {
+          pushPath([...path, targetId]);
+          continue;
+        }
         if (used.has(next) || next === startId) continue;
         used.add(next);
         path.push(next);
@@ -704,12 +722,14 @@
         foundPaths.push(normalizedPath);
       };
 
-      if (!isSelfTarget) {
-        const runtimeGraph = env?.gossip?.getNetworkGraph?.();
+      const runtimeGraph = env?.gossip?.getNetworkGraph?.();
+      try {
         const runtimeRoutes = await runtimeGraph?.findPaths?.(entityId, targetEntityId, amountInSmallestUnit, tokenId) || [];
         for (const route of runtimeRoutes) {
           pushPath((route as any)?.path);
         }
+      } catch {
+        // Local graph fallback remains authoritative when runtime graph cannot resolve cycles.
       }
 
       // Always include local graph candidates (best-effort with real local capacities).

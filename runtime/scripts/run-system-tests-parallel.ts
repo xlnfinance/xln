@@ -43,6 +43,7 @@ type CliArgs = {
   anvilStartupTimeoutMs: number;
   anvilBin: string;
   stream: boolean;
+  failFast: boolean;
 };
 
 function parseArgs(): CliArgs {
@@ -86,6 +87,7 @@ function parseArgs(): CliArgs {
     anvilStartupTimeoutMs,
     anvilBin: getFlag('anvil-bin') || 'anvil',
     stream: hasFlag('stream'),
+    failFast: !hasFlag('no-fail-fast'),
   };
 }
 
@@ -300,15 +302,18 @@ async function main(): Promise<void> {
   console.log(`Workers   : ${workers}`);
   console.log(`Base port : ${args.basePort} (worker i => ${args.basePort}+i)`);
   console.log(`Chain ID  : 31337 (per-worker Anvil)`);
+  console.log(`Fail-fast : ${args.failFast ? 'on' : 'off'}`);
   console.log(`Logs dir  : ${logsDir}`);
   console.log('='.repeat(72) + '\n');
 
   let nextIndex = 0;
+  let abortScheduling = false;
   const results: RunResult[] = [];
 
   async function workerLoop(workerId: number): Promise<void> {
     const port = args.basePort + workerId;
     while (true) {
+      if (abortScheduling) return;
       const idx = nextIndex++;
       if (idx >= scenarios.length) return;
       const scenario = scenarios[idx]!;
@@ -321,6 +326,10 @@ async function main(): Promise<void> {
         console.log(`✅ [worker ${workerId}] ${scenario} passed in ${seconds}s`);
       } else {
         console.log(`❌ [worker ${workerId}] ${scenario} failed in ${seconds}s (${result.error || 'unknown error'})`);
+        if (args.failFast) {
+          abortScheduling = true;
+          console.log(`🛑 [worker ${workerId}] fail-fast triggered; no new scenarios will be scheduled`);
+        }
       }
     }
   }

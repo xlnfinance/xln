@@ -353,6 +353,7 @@ export const applyEntityInput = async (
   }
 
   const hasManualBroadcast = Boolean(entityInput.entityTxs?.some(tx => tx.type === 'j_broadcast'));
+  workingReplica.state.crontabState.inputHasManualBroadcast = hasManualBroadcast;
   if (hasManualBroadcast) {
     const broadcastTask = workingReplica.state.crontabState.tasks.get('broadcastBatch');
     if (broadcastTask) {
@@ -362,6 +363,8 @@ export const applyEntityInput = async (
   }
 
   const crontabOutputs = await executeCrontab(env, workingReplica, workingReplica.state.crontabState);
+  // Input-scoped hint: only relevant for current apply call.
+  workingReplica.state.crontabState.inputHasManualBroadcast = false;
   if (crontabOutputs.length > 0) {
     console.log(`⏰ CRONTAB: Generated ${crontabOutputs.length} outputs from periodic tasks`);
     entityOutbox.push(...crontabOutputs);

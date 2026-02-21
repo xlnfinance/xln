@@ -226,10 +226,10 @@ export async function runProcessBatchScenario(_existingEnv?: Env): Promise<Env> 
   await converge(env, 6);
 
   const hubAfterBroadcast = findReplica(env, hub.id)[1];
-  const batchHashBeforeFinalize = hubAfterBroadcast.state.jBatchState?.batchHash;
+  const batchHashBeforeFinalize = hubAfterBroadcast.state.jBatchState?.sentBatch?.batchHash;
   if (jadapter.mode === 'rpc') {
     assert(!!batchHashBeforeFinalize, 'batch hash computed for j_broadcast', env);
-    assert((hubAfterBroadcast.state.jBatchState?.pendingBroadcast || false) === true, 'pendingBroadcast latched after submit', env);
+    assert(!!hubAfterBroadcast.state.jBatchState?.sentBatch, 'sentBatch latched after submit', env);
   }
 
   await syncChain(env, 6);
@@ -248,7 +248,7 @@ export async function runProcessBatchScenario(_existingEnv?: Env): Promise<Env> 
   assert((lastBatch?.opCount || 0) >= 3, `last batch opCount >= 3 (got ${lastBatch?.opCount || 0})`, env);
   assert((lastBatch?.entityNonce || 0) >= 1, `last batch entityNonce >= 1 (got ${lastBatch?.entityNonce || 0})`, env);
 
-  assert((hubFinal.state.jBatchState?.pendingBroadcast || false) === false, 'pendingBroadcast cleared after confirmation', env);
+  assert(!hubFinal.state.jBatchState?.sentBatch, 'sentBatch cleared after confirmation', env);
   assert(hubFinal.state.jBatchState?.status === 'empty', `jBatchState.status=empty (got ${hubFinal.state.jBatchState?.status})`, env);
   assert(hasSuccessfulHankoBatch(hubFinal), 'hub finalized HankoBatchProcessed(success=true)', env);
 

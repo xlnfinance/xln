@@ -96,18 +96,14 @@
     const outTotal = outCredit + outColl + outDebt;
     const inTotal = inDebt + inColl + inCredit;
 
-    // Compute uncollateralized debt for rebalance-pending detection
-    // total = ondelta + offdelta: positive = LEFT is owed, negative = RIGHT is owed
+    // Compute rebalance risk strictly from derived perspective fields.
+    // Do not recalculate from raw ondelta/offdelta here.
     let totalDebt = 0n;
     let totalCollateral = 0n;
     for (const [, delta] of account.deltas.entries()) {
-      const total = delta.ondelta + delta.offdelta;
-      // Hub's debt to us (counterparty owes us):
-      // We are LEFT:  total > 0 means RIGHT owes us (hub debt)
-      // We are RIGHT: total < 0 means LEFT owes us (hub debt)
-      const theirDebt = isLeft ? (total > 0n ? total : 0n) : (total < 0n ? -total : 0n);
-      totalDebt += theirDebt;
-      totalCollateral += delta.collateral;
+      const d = activeXlnFunctions.deriveDelta(delta, isLeft);
+      totalDebt += d.outPeerCredit;
+      totalCollateral += d.outCollateral;
     }
     const uncollateralized = totalDebt > totalCollateral ? totalDebt - totalCollateral : 0n;
 
@@ -144,6 +140,11 @@
   })();
 
   $: isPending = account.mempool.length > 0 || (account as any).pendingFrame;
+  $: canFaucet =
+    !isPending &&
+    Number(account.currentHeight || 0) > 0 &&
+    agg.inTotal > 0n &&
+    String((account as any).status || 'active') !== 'disputed';
 
   // Pending prepaid requests (actual request_collateral state)
   $: pendingRequested = (() => {
@@ -202,7 +203,7 @@
 
   // Rebalance state: show pending only when there is an actual prepaid request.
   $: rebalanceState = (() => {
-    const hasPendingBatch = !!(account as any).jBatchState?.pendingBroadcast;
+    const hasPendingBatch = !!(account as any).jBatchState?.sentBatch;
     const hasPendingRequest = pendingRequested > 0n;
 
     if (hasPendingRequest) {
@@ -228,6 +229,7 @@
 
   function handleFaucet(e: MouseEvent) {
     e.stopPropagation();
+    if (!canFaucet) return;
     dispatch('faucet', { counterpartyId, tokenId: agg.primaryTokenId });
   }
 
@@ -258,7 +260,14 @@
       <span class="j-sync" title="Last finalized bilateral J-event height">
         J#{account.lastFinalizedJHeight ?? 0}
       </span>
-      <button class="btn-faucet" on:click={handleFaucet}>Faucet</button>
+      <button
+        class="btn-faucet"
+        on:click={handleFaucet}
+        disabled={!canFaucet}
+        title={canFaucet ? 'Request offchain faucet payment' : 'Account not ready for faucet yet'}
+      >
+        Faucet
+      </button>
     </div>
   </div>
 
@@ -512,6 +521,13 @@
     border-color: #0ea5e9;
     color: #0ea5e9;
     background: rgba(14, 165, 233, 0.05);
+  }
+  .btn-faucet:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    border-color: #3f3f46;
+    color: #71717a;
+    background: transparent;
   }
 
   /* ── Bar labels ───────────────────────────────── */
