@@ -359,8 +359,9 @@ export const getSignerAddress = (signerId: string): string => {
  */
 export const generateEntityAvatar = (entityId: string): string => {
   try {
-    // Use entity ID as seed for deterministic avatar
-    const svg = toSvg(entityId, 40); // 40px size
+    // Canonicalize seed so the same entity always maps to the same identicon.
+    const canonicalSeed = String(entityId || '').trim().toLowerCase();
+    const svg = toSvg(canonicalSeed, 40); // 40px size
     // Convert SVG to data URL (browser-compatible)
     return `data:image/svg+xml,${encodeURIComponent(svg)}`;
   } catch (error) {
@@ -377,7 +378,7 @@ export const generateEntityAvatar = (entityId: string): string => {
 export const generateSignerAvatar = (signerId: string): string => {
   try {
     // Use signer address for avatar generation
-    const address = getSignerAddress(signerId);
+    const address = String(getSignerAddress(signerId) || '').trim().toLowerCase();
     const svg = toSvg(address, 32); // 32px size for signers
     // Convert SVG to data URL (browser-compatible)
     return `data:image/svg+xml,${encodeURIComponent(svg)}`;

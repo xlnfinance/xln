@@ -56,6 +56,7 @@ export interface Settings {
   theme: ThemeName;
   barColorMode: BarColorMode;
   barLayout: BarLayoutMode;
+  accountBarUsdPerPx: 1 | 10 | 100 | 1000;
   tokenPrecision: number;
   showTokenIcons: boolean;
   dropdownMode: 'signer-first' | 'entity-first';

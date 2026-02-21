@@ -6,6 +6,11 @@
  * Hub crontab can perform:
  * - direct R→C deposits for net receivers
  * - C→R settlement pullbacks for excess collateral
+ *
+ * Critical trigger invariant:
+ * request_collateral is triggered by outPeerCredit > softLimit (deriveDelta),
+ * NOT by (outCollateral + outPeerCredit).
+ * outCollateral is already secured value and must not inflate trigger metric.
  */
 
 import type { Env, EntityInput, EntityReplica, Delta, AccountMachine } from '../types';
@@ -485,10 +490,12 @@ export async function runRebalanceScenario(): Promise<void> {
     collateralBeforeRebalance.set(user.id, delta.collateral);
     const hubIsLeft = isLeftEntity(hub.id, user.id);
     const derived = deriveDelta(delta, hubIsLeft);
-    const totalDelta = delta.ondelta + delta.offdelta;
-    const hubDebt = hubIsLeft ? (totalDelta < 0n ? -totalDelta : 0n) : (totalDelta > 0n ? totalDelta : 0n);
-    const uncollateralized = hubDebt > delta.collateral ? hubDebt - delta.collateral : 0n;
-    console.log(`  Hub↔${user.name}: totalDelta=${totalDelta}, collateral=${delta.collateral}, hubDebt=${hubDebt}, uncollateralized=${uncollateralized}`);
+    const hubExposure = derived.outPeerCredit;
+    const hubOutCollateral = derived.outCollateral;
+    const uncollateralized = hubExposure > hubOutCollateral ? hubExposure - hubOutCollateral : 0n;
+    console.log(
+      `  Hub↔${user.name}: delta=${derived.delta}, outCollateral=${hubOutCollateral}, hubExposure=${hubExposure}, uncollateralized=${uncollateralized}`,
+    );
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -610,14 +617,15 @@ export async function runRebalanceScenario(): Promise<void> {
   assert(lastBatch?.status === 'confirmed', `Expected last batch status=confirmed, got ${lastBatch?.status}`, env);
   assert((lastBatch?.opCount || 0) > 0, `Expected confirmed batch opCount > 0, got ${lastBatch?.opCount || 0}`, env);
   assert(
-    (hubAfterBroadcast.jBatchState?.pendingBroadcast || false) === false,
-    'Expected hub jBatch pendingBroadcast=false after confirmed broadcast processing',
+    !hubAfterBroadcast.jBatchState?.sentBatch,
+    'Expected hub sentBatch cleared after confirmed broadcast processing',
     env,
   );
 
   const rebalanceTargetUserIds = [alice.id, bob.id, charlie.id, dave.id].filter(userId => {
     const after = hubAfterBroadcast.accounts.get(userId)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
-    return after > INITIAL_COLLATERAL;
+    const before = collateralBeforeRebalance.get(userId) ?? INITIAL_COLLATERAL;
+    return after > before;
   });
   assert(rebalanceTargetUserIds.length > 0, 'Expected at least one account collateralized by hub rebalance', env);
 
@@ -712,11 +720,13 @@ export async function runRebalanceScenario(): Promise<void> {
     const delta = acc?.deltas.get(USDC_TOKEN_ID);
     const hubIsLeft = isLeftEntity(hub.id, user.id);
     const derived = delta ? deriveDelta(delta, hubIsLeft) : null;
-    const totalDelta = delta ? delta.ondelta + delta.offdelta : 0n;
-    const hubDebt = delta ? (hubIsLeft ? (totalDelta < 0n ? -totalDelta : 0n) : (totalDelta > 0n ? totalDelta : 0n)) : 0n;
-    const uncollateralized = delta ? (hubDebt > delta.collateral ? hubDebt - delta.collateral : 0n) : 0n;
+    const hubExposure = derived?.outPeerCredit ?? 0n;
+    const hubOutCollateral = derived?.outCollateral ?? 0n;
+    const uncollateralized = hubExposure > hubOutCollateral ? hubExposure - hubOutCollateral : 0n;
     const nonce = acc?.onChainSettlementNonce || 0;
-    console.log(`  Hub↔${user.name}: collateral=${delta?.collateral}, outCol=${derived?.outCollateral}, uncollateralized=${uncollateralized}, nonce=${nonce}, ws=${acc?.settlementWorkspace?.status || 'none'}`);
+    console.log(
+      `  Hub↔${user.name}: delta=${derived?.delta ?? 0n}, outCollateral=${hubOutCollateral}, hubExposure=${hubExposure}, uncollateralized=${uncollateralized}, nonce=${nonce}, ws=${acc?.settlementWorkspace?.status || 'none'}`,
+    );
   }
 
   // ── NONCE ASSERTIONS ──

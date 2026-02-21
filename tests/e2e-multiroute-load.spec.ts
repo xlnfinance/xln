@@ -160,9 +160,12 @@ async function switchTo(page: Page, label: string) {
 async function getEntity(page: Page): Promise<{ entityId: string; signerId: string } | null> {
   return page.evaluate(() => {
     const env = (window as any).isolatedEnv;
+    const runtimeSigner = String(env?.runtimeId || '').toLowerCase();
     for (const [key] of (env?.eReplicas ?? new Map()).entries()) {
       const [eid, sid] = String(key).split(':');
-      if (eid?.startsWith('0x') && eid.length === 66 && sid) return { entityId: eid, signerId: sid };
+      if (!eid?.startsWith('0x') || eid.length !== 66 || !sid) continue;
+      if (runtimeSigner && String(sid).toLowerCase() !== runtimeSigner) continue;
+      return { entityId: eid, signerId: sid };
     }
     return null;
   });
@@ -230,6 +233,23 @@ async function getHubFeeConfig(page: Page, hubId: string): Promise<{ feePPM: big
 
 async function connectHub(page: Page, entityId: string, signerId: string, hubId: string) {
   const r = await page.evaluate(async ({ entityId, signerId, hubId }) => {
+    const findAccount = (accounts: any, ownerId: string, counterpartyId: string) => {
+      if (!(accounts instanceof Map)) return null;
+      const owner = String(ownerId || '').toLowerCase();
+      const cp = String(counterpartyId || '').toLowerCase();
+      for (const [accountKey, account] of accounts.entries()) {
+        if (String(accountKey || '').toLowerCase() === cp) return account;
+        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
+          ? String(account.counterpartyEntityId).toLowerCase()
+          : '';
+        if (canonicalCp === cp) return account;
+        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
+        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+      }
+      return null;
+    };
+
     try {
       const XLN = (window as any).XLN;
       const env = (window as any).isolatedEnv;
@@ -261,12 +281,29 @@ async function connectHub(page: Page, entityId: string, signerId: string, hubId:
   expect(r.ok, `connectHub(${entityId.slice(0, 8)}→${hubId.slice(0, 8)}): ${(r as any).error}`).toBe(true);
 
   const ready = await page.evaluate(async ({ entityId, hubId }) => {
+    const findAccount = (accounts: any, ownerId: string, counterpartyId: string) => {
+      if (!(accounts instanceof Map)) return null;
+      const owner = String(ownerId || '').toLowerCase();
+      const cp = String(counterpartyId || '').toLowerCase();
+      for (const [accountKey, account] of accounts.entries()) {
+        if (String(accountKey || '').toLowerCase() === cp) return account;
+        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
+          ? String(account.counterpartyEntityId).toLowerCase()
+          : '';
+        if (canonicalCp === cp) return account;
+        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
+        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+      }
+      return null;
+    };
+
     const start = Date.now();
     while (Date.now() - start < 45_000) {
       const env = (window as any).isolatedEnv;
       for (const [k, rep] of (env?.eReplicas ?? new Map()).entries()) {
         if (!String(k).startsWith(entityId + ':')) continue;
-        const acc = (rep as any).state?.accounts?.get(hubId);
+        const acc = findAccount((rep as any)?.state?.accounts, entityId, hubId);
         if (acc?.deltas?.get?.(1) && !acc.pendingFrame && Number(acc.currentHeight || 0) > 0) return true;
       }
       await new Promise(r => setTimeout(r, 500));
@@ -309,17 +346,35 @@ async function faucet(page: Page, entityId: string, hubEntityId?: string) {
 
 async function outCap(page: Page, entityId: string, hubId: string): Promise<bigint> {
   const raw = await page.evaluate(({ entityId, hubId }) => {
+    const findAccount = (accounts: any, ownerId: string, counterpartyId: string) => {
+      if (!(accounts instanceof Map)) return null;
+      const owner = String(ownerId || '').toLowerCase();
+      const cp = String(counterpartyId || '').toLowerCase();
+      for (const [accountKey, account] of accounts.entries()) {
+        if (String(accountKey || '').toLowerCase() === cp) return account;
+        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
+          ? String(account.counterpartyEntityId).toLowerCase()
+          : '';
+        if (canonicalCp === cp) return account;
+        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
+        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+      }
+      return null;
+    };
+
     const env = (window as any).isolatedEnv;
+    const XLN = (window as any).XLN;
     for (const [k, rep] of (env?.eReplicas ?? new Map()).entries()) {
       if (!String(k).startsWith(entityId + ':')) continue;
-      const delta = (rep as any).state?.accounts?.get(hubId)?.deltas?.get?.(1);
+      const delta = findAccount((rep as any)?.state?.accounts, entityId, hubId)?.deltas?.get?.(1);
       if (!delta) continue;
-      const offdelta = BigInt(delta.offdelta ?? 0n);
-      const leftCredit = BigInt(delta.leftCreditLimit ?? 0n);
-      const rightCredit = BigInt(delta.rightCreditLimit ?? 0n);
-      const collateral = BigInt(delta.collateral ?? 0n);
       const iAmLeft = entityId.toLowerCase() < hubId.toLowerCase();
-      return iAmLeft ? String(offdelta + leftCredit) : String(collateral + rightCredit - offdelta);
+      const derived = typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, iAmLeft) : null;
+      if (derived && typeof derived.outCapacity !== 'undefined') {
+        return String(derived.outCapacity);
+      }
+      return '0';
     }
     return '0';
   }, { entityId, hubId });
@@ -386,10 +441,27 @@ async function getLockCount(page: Page, entityId: string): Promise<number> {
 /** Get lock count from a specific bilateral account */
 async function getAccountLockCount(page: Page, entityId: string, counterpartyId: string): Promise<number> {
   return page.evaluate(({ entityId, counterpartyId }) => {
+    const findAccount = (accounts: any, ownerId: string, cpId: string) => {
+      if (!(accounts instanceof Map)) return null;
+      const owner = String(ownerId || '').toLowerCase();
+      const cp = String(cpId || '').toLowerCase();
+      for (const [accountKey, account] of accounts.entries()) {
+        if (String(accountKey || '').toLowerCase() === cp) return account;
+        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
+          ? String(account.counterpartyEntityId).toLowerCase()
+          : '';
+        if (canonicalCp === cp) return account;
+        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
+        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+      }
+      return null;
+    };
+
     const env = (window as any).isolatedEnv;
     for (const [k, rep] of (env?.eReplicas ?? new Map()).entries()) {
       if (!String(k).startsWith(entityId + ':')) continue;
-      const account = (rep as any).state?.accounts?.get(counterpartyId);
+      const account = findAccount((rep as any)?.state?.accounts, entityId, counterpartyId);
       return account?.locks?.size || 0;
     }
     return -1;

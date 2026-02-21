@@ -8,6 +8,13 @@
   import { settings, settingsOperations } from '$lib/stores/settingsStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
+  import {
+    normalizeEntityId,
+    getSignerIdForEntity,
+    hasCounterpartyAccount,
+    getCounterpartyAccount,
+    getConnectedCounterpartyIds,
+  } from '$lib/utils/entityReplica';
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle, ArrowUpDown } from 'lucide-svelte';
 
   export let entityId: string = '';
@@ -94,57 +101,20 @@
     }
   }
 
-  // Generate identicon SVG for entity address
-  function generateIdenticon(address: string, size = 8): string {
-    const seed = address.toLowerCase().replace('0x', '');
-    let seedInt = 0;
-    for (let i = 0; i < seed.length; i++) {
-      seedInt = ((seedInt << 5) - seedInt + seed.charCodeAt(i)) | 0;
-    }
-
-    const rand = () => {
-      const x = Math.sin(seedInt++) * 10000;
-      return x - Math.floor(x);
-    };
-
-    const hue = Math.floor(rand() * 360);
-    const sat = 50 + Math.floor(rand() * 30);
-    const colors = [
-      `hsl(${hue}, ${sat}%, 65%)`,
-      `hsl(${(hue + 120) % 360}, ${sat}%, 35%)`,
-      `hsl(${(hue + 240) % 360}, ${sat}%, 50%)`
-    ];
-
-    const pattern: number[][] = [];
-    for (let y = 0; y < size; y++) {
-      const row: number[] = [];
-      pattern[y] = row;
-      for (let x = 0; x < Math.ceil(size / 2); x++) {
-        const v = Math.floor(rand() * 3);
-        row[x] = v;
-        row[size - 1 - x] = v;
-      }
-    }
-
-    const cellSize = 10;
-    let svg = `<svg width="${size * cellSize}" height="${size * cellSize}" viewBox="0 0 ${size * cellSize} ${size * cellSize}" xmlns="http://www.w3.org/2000/svg">`;
-    svg += `<rect width="100%" height="100%" fill="${colors[0]}"/>`;
-    for (let y = 0; y < size; y++) {
-      const row = pattern[y];
-      if (!row) continue;
-      for (let x = 0; x < size; x++) {
-        const val = row[x] ?? 0;
-        if (val > 0) {
-          svg += `<rect x="${x * cellSize}" y="${y * cellSize}" width="${cellSize}" height="${cellSize}" fill="${colors[val]}"/>`;
-        }
-      }
-    }
-    svg += '</svg>';
-    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  function generateIdenticon(entityId: string): string {
+    const canonicalId = String(entityId || '').trim().toLowerCase();
+    return activeFunctions?.generateEntityAvatar?.(canonicalId) || '';
   }
 
-  // Sorted hubs
-  $: sortedHubs = [...hubs].sort((a, b) => {
+  $: connectedHubIds = getConnectedCounterpartyIds(env, entityId);
+
+  // Sorted hubs (with live connection status from current account state)
+  $: sortedHubs = hubs
+    .map((hub) => ({
+      ...hub,
+      isConnected: connectedHubIds.has(normalizeEntityId(hub.entityId)),
+    }))
+    .sort((a, b) => {
     let cmp = 0;
     switch (sortKey) {
       case 'name':
@@ -267,14 +237,10 @@
         const gossipHubs = currentEnv.gossip.getHubs();
 
         for (const profile of gossipHubs) {
-          if (profile.entityId === entityId) continue; // Skip self
+          if (normalizeEntityId(profile.entityId) === normalizeEntityId(entityId)) continue; // Skip self
 
           // Check if we're already connected
-          let isConnected = false;
-          if (currentEnv.eReplicas instanceof Map) {
-            const myReplica = (currentEnv.eReplicas as Map<string, any>).get(`${entityId}:1`);
-            isConnected = myReplica?.state?.accounts?.has(profile.entityId) || false;
-          }
+          const isConnected = hasCounterpartyAccount(currentEnv, entityId, profile.entityId);
 
           const capacity = parseCapacity(profile.metadata?.capacity);
           const fullEntityId = profile.entityId.startsWith('0x') ? profile.entityId : `0x${profile.entityId}`;
@@ -319,12 +285,11 @@
             }> };
             const fromRelay = Array.isArray(body.entities) ? body.entities : [];
             for (const entry of fromRelay) {
-              if (!entry.entityId || entry.entityId === entityId) continue;
+              if (!entry.entityId || normalizeEntityId(entry.entityId) === normalizeEntityId(entityId)) continue;
               if (!entry.isHub) continue;
-              if (discovered.some((h) => h.entityId === entry.entityId)) continue;
+              if (discovered.some((h) => normalizeEntityId(h.entityId) === normalizeEntityId(entry.entityId))) continue;
 
-              const myReplica = (currentEnv.eReplicas as Map<string, any>)?.get?.(`${entityId}:1`);
-              const isConnected = myReplica?.state?.accounts?.has(entry.entityId) || false;
+              const isConnected = hasCounterpartyAccount(currentEnv, entityId, entry.entityId);
               const fullEntityId = entry.entityId.startsWith('0x') ? entry.entityId : `0x${entry.entityId}`;
               const metadata = (entry.metadata || {}) as Record<string, unknown>;
               const capacity = parseCapacity(metadata.capacity);
@@ -360,15 +325,14 @@
       if (discovered.length === 0 && currentEnv.eReplicas instanceof Map) {
         for (const [key, replica] of currentEnv.eReplicas.entries()) {
           const [hubEntityId] = key.split(':');
-          if (!hubEntityId || hubEntityId === entityId) continue;
+          if (!hubEntityId || normalizeEntityId(hubEntityId) === normalizeEntityId(entityId)) continue;
 
           const state = replica?.state as any;
           if (!state) continue;
 
           const hubMeta = state.hubAnnouncement || state.profile?.hub;
           if (hubMeta || state.accounts?.size > 2) {
-            const myReplica = (currentEnv.eReplicas as Map<string, any>).get(`${entityId}:1`);
-            const isConnected = myReplica?.state?.accounts?.has(hubEntityId) || false;
+            const isConnected = hasCounterpartyAccount(currentEnv, entityId, hubEntityId);
             const fullEntityId = hubEntityId.startsWith('0x') ? hubEntityId : `0x${hubEntityId}`;
 
             const profile = {
@@ -429,15 +393,7 @@
       await ensureRuntimeRelay(currentEnv, relaySelection || $settings?.relayUrl || FALLBACK_RELAY);
 
       // Find signer for our entity
-      let signerId = '1';
-      if (currentEnv.eReplicas instanceof Map) {
-        for (const key of currentEnv.eReplicas.keys()) {
-          if (key.startsWith(entityId + ':')) {
-            signerId = key.split(':')[1] || '1';
-            break;
-          }
-        }
-      }
+      const signerId = getSignerIdForEntity(currentEnv, entityId, '1');
 
       // Default credit amount: 10,000 tokens (with 18 decimals)
       const creditAmount = 10_000n * 10n ** 18n;
@@ -469,7 +425,9 @@
 
       // Update hub status
       hubs = hubs.map(h =>
-        h.entityId === hub.entityId ? { ...h, isConnected: true } : h
+        normalizeEntityId(h.entityId) === normalizeEntityId(hub.entityId)
+          ? { ...h, isConnected: true }
+          : h
       );
 
     } catch (err) {
@@ -498,45 +456,11 @@
     }
   }
 
-  function hasAccountEntry(currentEnv: any, ownerEntityId: string, counterpartyEntityId: string): boolean {
-    if (!currentEnv?.eReplicas || !(currentEnv.eReplicas instanceof Map)) return false;
-    const owner = String(ownerEntityId).toLowerCase();
-    const counterparty = String(counterpartyEntityId).toLowerCase();
-    for (const [key, replica] of currentEnv.eReplicas.entries()) {
-      const [entityKey] = String(key).split(':');
-      if (String(entityKey || '').toLowerCase() !== owner) continue;
-      const accounts = replica?.state?.accounts;
-      if (!(accounts instanceof Map)) return false;
-      for (const accountKey of accounts.keys()) {
-        if (String(accountKey).toLowerCase() === counterparty) return true;
-      }
-      return false;
-    }
-    return false;
-  }
-
-  function accountPending(currentEnv: any, ownerEntityId: string, counterpartyEntityId: string): boolean {
-    if (!currentEnv?.eReplicas || !(currentEnv.eReplicas instanceof Map)) return false;
-    const owner = String(ownerEntityId).toLowerCase();
-    const counterparty = String(counterpartyEntityId).toLowerCase();
-    for (const [key, replica] of currentEnv.eReplicas.entries()) {
-      const [entityKey] = String(key).split(':');
-      if (String(entityKey || '').toLowerCase() !== owner) continue;
-      const accounts = replica?.state?.accounts;
-      if (!(accounts instanceof Map)) return false;
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey).toLowerCase() !== counterparty) continue;
-        return !!account?.pendingFrame;
-      }
-      return false;
-    }
-    return false;
-  }
-
   async function waitForAccountReady(currentEnv: any, ownerEntityId: string, counterpartyEntityId: string, timeoutMs = 20_000): Promise<boolean> {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
-      if (hasAccountEntry(currentEnv, ownerEntityId, counterpartyEntityId) && !accountPending(currentEnv, ownerEntityId, counterpartyEntityId)) {
+      const accountEntry = getCounterpartyAccount(currentEnv, ownerEntityId, counterpartyEntityId);
+      if (accountEntry && !accountEntry.account?.pendingFrame) {
         return true;
       }
       await new Promise((resolve) => setTimeout(resolve, 200));

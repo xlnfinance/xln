@@ -117,8 +117,20 @@ export interface JBatch {
   hub_id: number;
 }
 
-/** Batch lifecycle: empty → accumulating → broadcasting → sent → confirmed/failed */
-export type JBatchStatus = 'empty' | 'accumulating' | 'broadcasting' | 'sent' | 'confirmed' | 'failed';
+/** Batch lifecycle: current accumulates, sentBatch tracks one in-flight submission */
+export type JBatchStatus = 'empty' | 'accumulating' | 'sent' | 'failed';
+
+/** In-flight batch snapshot (authoritative until HankoBatchProcessed arrives). */
+export interface SentJBatch {
+  batch: JBatch;
+  batchHash: string;
+  encodedBatch: string;
+  entityNonce: number;
+  firstSubmittedAt: number;
+  lastSubmittedAt: number;
+  submitAttempts: number;
+  txHash?: string;
+}
 
 /**
  * JBatch state for an entity
@@ -129,14 +141,10 @@ export interface JBatchState {
   lastBroadcast: number;
   broadcastCount: number;
   failedAttempts: number;
-  pendingBroadcast: boolean;
 
   // Lifecycle tracking
   status: JBatchStatus;
-  batchHash?: string; // Hash of encoded batch (for hanko signing / retry)
-  encodedBatch?: string; // ABI-encoded batch (for retry with different gas)
-  broadcastedAt?: number; // Timestamp when batch was sent to chain
-  txHash?: string; // On-chain transaction hash (set when submitted)
+  sentBatch?: SentJBatch;
   entityNonce?: number; // Entity nonce used for this batch (for replay prevention)
 }
 
@@ -342,8 +350,8 @@ export function initJBatch(): JBatchState {
     lastBroadcast: 0,
     broadcastCount: 0,
     failedAttempts: 0,
-    pendingBroadcast: false,
     status: 'empty',
+    sentBatch: undefined,
   };
 }
 
@@ -352,10 +360,10 @@ export function initJBatch(): JBatchState {
  * @throws Error if batch is pending broadcast
  */
 export function assertBatchNotPending(jBatchState: JBatchState, operation: string): void {
-  if (jBatchState.pendingBroadcast) {
+  if (jBatchState.sentBatch) {
     throw new Error(
       `❌ Cannot add ${operation}: jBatch has pending broadcast. ` +
-      `Wait for HankoBatchProcessed or use j_clear_batch to abort.`
+      `Wait for HankoBatchProcessed or use j_abort_sent_batch / j_clear_batch.`
     );
   }
 }
@@ -392,6 +400,23 @@ export function batchOpCount(batch: JBatch): number {
     batch.reserveToExternalToken.length +
     batch.revealSecrets.length
   );
+}
+
+/**
+ * Merge all operations from source batch into target batch (append semantics).
+ * Used by failure/abort recovery flows when moving sentBatch ops back to current.
+ */
+export function mergeBatchOps(target: JBatch, source: JBatch): void {
+  target.flashloans.push(...source.flashloans);
+  target.reserveToReserve.push(...source.reserveToReserve);
+  target.reserveToCollateral.push(...source.reserveToCollateral);
+  target.collateralToReserve.push(...source.collateralToReserve);
+  target.settlements.push(...source.settlements);
+  target.disputeStarts.push(...source.disputeStarts);
+  target.disputeFinalizations.push(...source.disputeFinalizations);
+  target.externalTokenToReserve.push(...source.externalTokenToReserve);
+  target.reserveToExternalToken.push(...source.reserveToExternalToken);
+  target.revealSecrets.push(...source.revealSecrets);
 }
 
 /**
@@ -794,12 +819,21 @@ export async function broadcastBatch(
       // NOTE: j-events are queued in env.runtimeInput.entityInputs by j-watcher
       // Caller must process them (prepopulate calls processJEvents, browser needs interval)
 
-      // DO NOT clear batch - wait for HankoBatchProcessed event to confirm
-      // Set pendingBroadcast to block new operations until finalized
-      jBatchState.pendingBroadcast = true;
+      // Move current batch into sentBatch and clear current.
+      jBatchState.sentBatch = {
+        batch: cloneJBatch(jBatchState.batch),
+        batchHash,
+        encodedBatch,
+        entityNonce: Number(nextNonce),
+        firstSubmittedAt: timestamp,
+        lastSubmittedAt: timestamp,
+        submitAttempts: 1,
+      };
+      jBatchState.batch = createEmptyBatch();
       jBatchState.lastBroadcast = timestamp;
       jBatchState.broadcastCount++;
       jBatchState.failedAttempts = 0;
+      jBatchState.status = 'sent';
 
       return { success: true, events };
     }
@@ -853,12 +887,22 @@ export async function broadcastBatch(
     const receipt = await tx.wait();
     console.log(`   ✅ Ethers: block=${receipt.blockNumber} gas=${receipt.gasUsed}`);
 
-    // DO NOT clear batch - wait for HankoBatchProcessed event to confirm
-    // Set pendingBroadcast to block new operations until finalized
-    jBatchState.pendingBroadcast = true;
+    // Move current batch into sentBatch and clear current.
+    jBatchState.sentBatch = {
+      batch: cloneJBatch(jBatchState.batch),
+      batchHash,
+      encodedBatch,
+      entityNonce: Number(nextNonce),
+      firstSubmittedAt: timestamp,
+      lastSubmittedAt: timestamp,
+      submitAttempts: 1,
+      txHash: receipt.transactionHash,
+    };
+    jBatchState.batch = createEmptyBatch();
     jBatchState.lastBroadcast = timestamp;
     jBatchState.broadcastCount++;
     jBatchState.failedAttempts = 0;
+    jBatchState.status = 'sent';
 
     return {
       success: true,
@@ -887,6 +931,10 @@ export function shouldBroadcastBatch(
   jBatchState: JBatchState,
   currentTimestamp: number
 ): boolean {
+  if (jBatchState.sentBatch) {
+    return false;
+  }
+
   if (isBatchEmpty(jBatchState.batch)) {
     return false;
   }

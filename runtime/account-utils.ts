@@ -23,6 +23,31 @@ const BASE_CREDIT_LIMIT = 0n;
 
 /**
  * Derive account balance information for a specific token
+ *
+ * [---.*∆--][FOUNDATIONAL-MEMORY]
+ * deriveDelta() is the single source of truth for bilateral account math.
+ * All runtime/business logic (rebalance, routing, UI, tests) must interpret
+ * balances through this function instead of ad-hoc formulas.
+ *
+ * [---.*∆--][CORE-IDENTITY]
+ * delta == ondelta + offdelta
+ *
+ * [---.*∆--][PERSPECTIVE-RULE]
+ * This function computes values in LEFT perspective first, then flips to RIGHT
+ * perspective when isLeft=false.
+ *
+ * [---.*∆--][CAPACITY-DECOMPOSITION]
+ * outCapacity == outOwnCredit + outCollateral + outPeerCredit - outAllowance - outHolds
+ * inCapacity  == inOwnCredit  + inCollateral  + inPeerCredit  - inAllowance  - inHolds
+ *
+ * [---.*∆--][INTUITION]
+ * out* => what "we" can send now from current perspective
+ * in*  => what "we" can receive now from current perspective
+ *
+ * [---.*∆--][NO-ALTERNATE-MATH]
+ * If you need new semantics, add a helper that wraps deriveDelta fields.
+ * Do not introduce parallel balance models.
+ *
  * @param delta - The delta structure for this token
  * @param isLeft - Whether we are the left party in this account
  * @returns Derived balance information including capacities and credits
@@ -33,6 +58,8 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
 
   const nonNegative = (x: bigint): bigint => x < 0n ? 0n : x;
 
+  // [---.*∆--][INVARIANT-1]
+  // Canonical net state for this token pair.
   const totalDelta = delta.ondelta + delta.offdelta;
 
   const collateral = nonNegative(delta.collateral);
@@ -40,32 +67,45 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   let ownCreditLimit = delta.leftCreditLimit;
   let peerCreditLimit = delta.rightCreditLimit;
 
+  // [---.*∆--][INVARIANT-2][LEFT-PERSPECTIVE]
+  // When totalDelta > 0, peer owes left side; collateral is split into:
+  // - outCollateral: collateral we can use to send out (already secured for us)
+  // - inCollateral: residual collateral still counted on inbound side
   let inCollateral = totalDelta > 0n ? nonNegative(collateral - totalDelta) : collateral;
   let outCollateral = totalDelta > 0n ? (totalDelta > collateral ? collateral : totalDelta) : 0n;
 
   // When delta > 0: peer owes us (peer is using OUR credit or we hold their collateral)
   // When delta < 0: we owe peer (we're using PEER's credit or they hold our collateral)
 
-  // inOwnCredit = how much we owe using OUR OWN credit (when delta < 0 beyond collateral)
+  // [---.*∆--][INVARIANT-3]
+  // inOwnCredit = how much we currently owe, bounded by the credit line peer granted us
   let inOwnCredit = nonNegative(-totalDelta);
   if (inOwnCredit > ownCreditLimit) inOwnCredit = ownCreditLimit;
 
-  // outPeerCredit = how much peer owes us (backed by THEIR credit to us, i.e. peerCreditLimit)
+  // [---.*∆--][INVARIANT-4]
+  // outPeerCredit = how much peer owes us (bounded by peerCreditLimit)
   let outPeerCredit = nonNegative(totalDelta - collateral);
   if (outPeerCredit > peerCreditLimit) outPeerCredit = peerCreditLimit;
 
-  // outOwnCredit = unused portion of credit WE set (ownCreditLimit), allowing peer to owe us more
+  // [---.*∆--][INVARIANT-5][MIRROR]
+  // outOwnCredit = unused portion of our credit window
   let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
 
-  // inPeerCredit = unused portion of credit PEER opened to us (peerCreditLimit)
+  // inPeerCredit = unused portion of peer credit window
   let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
 
-  // Track used credit for reporting (not used in capacity calculation)
-  const peerCreditUsed = totalDelta < 0n ? nonNegative(-totalDelta - collateral) : 0n;
-  const ownCreditUsed = totalDelta > 0n ? nonNegative(totalDelta - collateral) : 0n;
+  // Track used credit for reporting (not used in capacity calculation).
+  // LEFT perspective initialization:
+  // - peerCreditUsed: credit peer lent to left that left is currently using
+  // - ownCreditUsed:  credit left lent to peer that peer is currently using
+  let peerCreditUsed = totalDelta < 0n ? nonNegative(-totalDelta - collateral) : 0n;
+  let ownCreditUsed = totalDelta > 0n ? nonNegative(totalDelta - collateral) : 0n;
 
   let inAllowance = delta.rightAllowance;
   let outAllowance = delta.leftAllowance;
+  // Allowances are directional capacity locks/overrides used by transformer/final-proof
+  // settlement paths. They reduce immediate capacity, but do not change
+  // delta/collateral ownership semantics.
 
   const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
 
@@ -85,11 +125,14 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   const leftHold = leftHtlcHold + leftSwapHold + leftSettleHold;
   const rightHold = rightHtlcHold + rightSwapHold + rightSettleHold;
 
-  // Original formula: in* components for inCapacity, out* components for outCapacity
+  // [---.*∆--][INVARIANT-6][CAPACITY]
+  // Capacity is composition of credit+collateral slices minus allowances.
+  // Holds are subtracted after this base decomposition.
   let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowance);
   let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowance);
 
-  // CRITICAL: Deduct holds from capacity in LEFT's perspective (prevents double-spend)
+  // [---.*∆--][INVARIANT-7][HOLD-SAFETY]
+  // Deduct holds from capacity in LEFT perspective (prevents double-spend).
   // Always deduct leftHold from out, rightHold from in — the flip at line 101 handles RIGHT perspective
   outCapacity = nonNegative(outCapacity - leftHold);
   inCapacity = nonNegative(inCapacity - rightHold);
@@ -101,7 +144,10 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   let inHtlcHold = rightHtlcHold;
 
   if (!isLeft) {
-    // Flip for RIGHT entity perspective
+    // [---.*∆--][INVARIANT-8][PERSPECTIVE-FLIP]
+    // Flip all directional fields for RIGHT perspective.
+    // This preserves semantic meaning:
+    // out* always means "my outbound capacity", in* means "my inbound capacity".
     [inCollateral, inAllowance, inCapacity,
      outCollateral, outAllowance, outCapacity] =
     [outCollateral, outAllowance, outCapacity,
@@ -110,12 +156,14 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
     [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] =
     [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
+    [peerCreditUsed, ownCreditUsed] = [ownCreditUsed, peerCreditUsed];
 
     [outSettleHold, inSettleHold] = [inSettleHold, outSettleHold];
     [outHtlcHold, inHtlcHold] = [inHtlcHold, outHtlcHold];
   }
 
-  // ASCII visualization
+  // [---.*∆--][DEBUG-VISUAL]
+  // ASCII visualization for deterministic debugging and quick human inspection.
   const totalWidth = Number(totalCapacity);
   const leftCreditWidth = Math.floor((Number(ownCreditLimit) / totalWidth) * 50);
   const collateralWidth = Math.floor((Number(collateral) / totalWidth) * 50);

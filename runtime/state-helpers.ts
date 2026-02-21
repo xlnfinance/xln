@@ -161,6 +161,12 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
       cloned.jBatchState = {
         ...entityState.jBatchState,
         batch: cloneJBatch(entityState.jBatchState.batch),
+        sentBatch: entityState.jBatchState.sentBatch
+          ? {
+              ...entityState.jBatchState.sentBatch,
+              batch: cloneJBatch(entityState.jBatchState.sentBatch.batch),
+            }
+          : undefined,
       };
     }
 
@@ -203,6 +209,12 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     jBatchState: entityState.jBatchState ? {
       ...entityState.jBatchState,
       batch: cloneJBatch(entityState.jBatchState.batch),
+      sentBatch: entityState.jBatchState.sentBatch
+        ? {
+            ...entityState.jBatchState.sentBatch,
+            batch: cloneJBatch(entityState.jBatchState.sentBatch.batch),
+          }
+        : undefined,
     } : undefined,
     // JBlock consensus state
     lastFinalizedJHeight: entityState.lastFinalizedJHeight ?? 0,

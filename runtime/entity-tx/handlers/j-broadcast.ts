@@ -17,7 +17,7 @@ import type { EntityState, EntityTx, EntityInput, Env, JTx, JInput, HashType } f
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import {
   isBatchEmpty, getBatchSize, cloneJBatch, encodeJBatch,
-  computeBatchHankoHash, batchOpCount,
+  computeBatchHankoHash, batchOpCount, createEmptyBatch,
 } from '../../j-batch';
 import type { ApplyEntityTxResult } from '../apply';
 
@@ -30,8 +30,21 @@ export async function handleJBroadcast(
   const outputs: EntityInput[] = [];
   const jOutputs: JInput[] = [];
 
+  if (!newState.jBatchState) {
+    const msg = '❌ No jBatchState found for j_broadcast';
+    addMessage(newState, msg);
+    throw new Error(msg);
+  }
+
+  if (newState.jBatchState.sentBatch) {
+    const sent = newState.jBatchState.sentBatch;
+    const msg = `❌ Cannot broadcast: sentBatch pending nonce=${sent.entityNonce} attempts=${sent.submitAttempts}`;
+    addMessage(newState, msg);
+    throw new Error(msg);
+  }
+
   // ── Validate: jBatch exists and is non-empty ──
-  if (!newState.jBatchState || isBatchEmpty(newState.jBatchState.batch)) {
+  if (isBatchEmpty(newState.jBatchState.batch)) {
     const msg = '❌ No operations to broadcast - jBatch is empty';
     addMessage(newState, msg);
     throw new Error(msg);
@@ -108,13 +121,23 @@ export async function handleJBroadcast(
     jTxs: [jTx],
   });
 
-  // ── Update batch state ──
+  // ── Move current batch → sentBatch, clear current ──
+  const firstSubmittedAt = newState.timestamp;
+  newState.jBatchState.sentBatch = {
+    batch: cloneJBatch(newState.jBatchState.batch),
+    batchHash,
+    encodedBatch,
+    entityNonce: Number(nextNonce),
+    firstSubmittedAt,
+    lastSubmittedAt: firstSubmittedAt,
+    submitAttempts: 1,
+  };
+  newState.jBatchState.batch = createEmptyBatch();
+
+  // ── Update batch state metadata ──
   newState.jBatchState.broadcastCount++;
   newState.jBatchState.lastBroadcast = newState.timestamp;
-  newState.jBatchState.pendingBroadcast = true;
-  newState.jBatchState.status = 'broadcasting';
-  newState.jBatchState.batchHash = batchHash;
-  newState.jBatchState.encodedBatch = encodedBatch;
+  newState.jBatchState.status = 'sent';
   // IMPORTANT: do not advance entityNonce optimistically here.
   // If network submission fails, optimistic increment causes permanent nonce desync.
   // entityNonce is advanced only when HankoBatchProcessed is observed.

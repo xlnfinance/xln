@@ -23,6 +23,7 @@
     getOpenAccountRebalancePolicyData,
   } from '../../utils/onboardingPreferences';
   import { readOnboardingComplete, writeOnboardingComplete } from '../../utils/onboardingState';
+  import { normalizeEntityId, hasCounterpartyAccount } from '../../utils/entityReplica';
 
   export let entityId: string = '';
   export let signerId: string = '';
@@ -111,30 +112,13 @@
     }
   });
 
-  function hasAccountEntry(currentEnv: any, ownerEntityId: string, counterpartyEntityId: string): boolean {
-    if (!currentEnv?.eReplicas || !(currentEnv.eReplicas instanceof Map)) return false;
-    const owner = String(ownerEntityId).toLowerCase();
-    const counterparty = String(counterpartyEntityId).toLowerCase();
-    for (const [key, replica] of currentEnv.eReplicas.entries()) {
-      const [entityKey] = String(key).split(':');
-      if (String(entityKey || '').toLowerCase() !== owner) continue;
-      const accounts = replica?.state?.accounts;
-      if (!(accounts instanceof Map)) return false;
-      for (const accountKey of accounts.keys()) {
-        if (String(accountKey).toLowerCase() === counterparty) return true;
-      }
-      return false;
-    }
-    return false;
-  }
-
   function getHubEntityIds(currentEnv: any): string[] {
     const discovered: string[] = [];
     const add = (value: unknown) => {
       const id = String(value || '').trim();
       if (!id) return;
-      if (id.toLowerCase() === entityId.toLowerCase()) return;
-      if (!discovered.some(existing => existing.toLowerCase() === id.toLowerCase())) {
+      if (normalizeEntityId(id) === normalizeEntityId(entityId)) return;
+      if (!discovered.some(existing => normalizeEntityId(existing) === normalizeEntityId(id))) {
         discovered.push(id);
       }
     };
@@ -167,7 +151,7 @@
         const currentEnv = getEnv();
         if (currentEnv) {
           const currentCandidates = shuffle(getHubEntityIds(currentEnv))
-            .filter(hubId => !hasAccountEntry(currentEnv, entityId, hubId));
+            .filter(hubId => !hasCounterpartyAccount(currentEnv, entityId, hubId));
           if (currentCandidates.length > best.length) best = currentCandidates;
           if (currentCandidates.length >= joinCount) return currentCandidates.slice(0, joinCount);
         }

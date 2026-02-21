@@ -109,6 +109,26 @@ function captureSettlementVector(accountMachine: AccountMachine): SettlementVect
   return out;
 }
 
+function accountTxFingerprint(tx: AccountTx): string {
+  return `${tx.type}:${safeStringify(tx.data)}`;
+}
+
+function prependUniqueMempoolTxs(accountMachine: AccountMachine, txs: AccountTx[]): number {
+  if (txs.length === 0) return 0;
+  const existing = new Set(accountMachine.mempool.map(accountTxFingerprint));
+  const missing: AccountTx[] = [];
+  for (const tx of txs) {
+    const fp = accountTxFingerprint(tx);
+    if (existing.has(fp)) continue;
+    existing.add(fp);
+    missing.push(tx);
+  }
+  if (missing.length > 0) {
+    accountMachine.mempool.unshift(...missing);
+  }
+  return missing.length;
+}
+
 function assertNoUnilateralSettlementMutation(
   accountMachine: AccountMachine,
   before: SettlementVector,
@@ -160,16 +180,6 @@ async function runPostFrameAutoRebalanceCheck(
     const counterpartyProfile = env.gossip?.getProfiles?.().find(
       (p: any) => String(p?.entityId || '').toLowerCase() === counterpartyIdLower,
     );
-    const counterpartyCaps = Array.isArray(counterpartyProfile?.capabilities)
-      ? (counterpartyProfile?.capabilities as string[])
-      : [];
-    const counterpartyProfileIsHub =
-      counterpartyProfile?.metadata?.isHub === true ||
-      counterpartyCaps.includes('hub') ||
-      counterpartyCaps.includes('routing');
-    const counterpartyIsHub =
-      !!counterpartyReplica?.state?.hubRebalanceConfig ||
-      counterpartyProfileIsHub;
 
     const emitSkip = (reason: string) => {
       console.log(
@@ -185,12 +195,10 @@ async function runPostFrameAutoRebalanceCheck(
       });
     };
 
+    // Hub-side liquidity management runs through hub crontab (R→C consume + C→R settle),
+    // while account auto-rebalance hook is requester-side only.
     if (ourIsHub) {
       emitSkip('our-entity-is-hub');
-      return [];
-    }
-    if (!counterpartyIsHub) {
-      emitSkip('counterparty-not-hub');
       return [];
     }
 
@@ -210,30 +218,31 @@ async function runPostFrameAutoRebalanceCheck(
 
     const hubConfig = counterpartyReplica?.state?.hubRebalanceConfig;
     const accountPolicy = accountMachine.counterpartyRebalanceFeePolicy;
+    const DEFAULT_REBALANCE_BASE_FEE = 10n ** 17n; // 0.1 token (18 decimals)
+    const DEFAULT_REBALANCE_LIQUIDITY_FEE_BPS = 1n; // 0.01%
+    const DEFAULT_REBALANCE_GAS_FEE = 0n;
+    const DEFAULT_REBALANCE_POLICY_VERSION = 1;
     const baseFee =
       accountPolicy?.baseFee ??
       parseBigIntMaybe(hubConfig?.rebalanceBaseFee) ??
-      parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceBaseFee);
+      parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceBaseFee) ??
+      DEFAULT_REBALANCE_BASE_FEE;
     const liquidityFeeBps =
       accountPolicy?.liquidityFeeBps ??
       parseBigIntMaybe(hubConfig?.rebalanceLiquidityFeeBps) ??
       parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceLiquidityFeeBps) ??
-      parseBigIntMaybe(hubConfig?.minFeeBps);
+      parseBigIntMaybe(hubConfig?.minFeeBps) ??
+      DEFAULT_REBALANCE_LIQUIDITY_FEE_BPS;
     const gasFee =
       accountPolicy?.gasFee ??
       parseBigIntMaybe(hubConfig?.rebalanceGasFee) ??
       parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceGasFee) ??
-      0n;
+      DEFAULT_REBALANCE_GAS_FEE;
     const policyVersion =
       accountPolicy?.policyVersion ??
       parseNumberMaybe(hubConfig?.policyVersion) ??
       parseNumberMaybe(counterpartyProfile?.metadata?.policyVersion) ??
-      1;
-
-    if (baseFee === undefined || liquidityFeeBps === undefined) {
-      emitSkip('missing-hub-fee-policy');
-      return [];
-    }
+      DEFAULT_REBALANCE_POLICY_VERSION;
 
     const rebalanceTxs = checkAutoRebalance(accountMachine, ourEntityId, counterpartyEntityId, {
       policyVersion,
@@ -1276,19 +1285,22 @@ export async function handleAccountInput(
             `⚠️ ROLLBACK-DEDUPE: Already rolled back for frame ${receivedHash.slice(0, 16)}... - ignoring duplicate`,
           );
           // Don't increment rollbackCount again, just process their frame
-        } else if (accountMachine.rollbackCount === 0) {
-          // First rollback - restore transactions to mempool before discarding frame
+        } else {
+          // Restore transactions to mempool before discarding frame.
+          // IMPORTANT: allow repeated RIGHT rollbacks (same-height races can happen
+          // under burst traffic); dedupe mempool to avoid tx duplication.
           let restoredTxCount = 0;
           if (accountMachine.pendingFrame) {
             restoredTxCount = accountMachine.pendingFrame.accountTxs.length;
-            console.log(`📥 RIGHT-ROLLBACK: Restoring ${restoredTxCount} txs to mempool`);
-            // CRITICAL: Re-add transactions to mempool (Channel.ts pattern)
-            accountMachine.mempool.unshift(...accountMachine.pendingFrame.accountTxs);
-            console.log(`📥 Mempool now has ${accountMachine.mempool.length} txs after rollback restore`);
+            console.log(`📥 RIGHT-ROLLBACK: Restoring up to ${restoredTxCount} txs to mempool`);
+            const uniqueRestored = prependUniqueMempoolTxs(accountMachine, accountMachine.pendingFrame.accountTxs);
+            console.log(
+              `📥 Mempool now has ${accountMachine.mempool.length} txs after rollback restore (unique added=${uniqueRestored})`,
+            );
 
             // EMIT EVENT: Track rollback for debugging
             events.push(
-              `🔄 ROLLBACK: Discarded our frame ${accountMachine.pendingFrame.height}, restored ${restoredTxCount} txs to mempool`,
+              `🔄 ROLLBACK: Discarded our frame ${accountMachine.pendingFrame.height}, restored ${uniqueRestored}/${restoredTxCount} txs to mempool`,
             );
             env.info(
               'consensus',
@@ -1297,7 +1309,7 @@ export async function handleAccountInput(
                 fromEntity: accountMachine.proofHeader.fromEntity,
                 toEntity: accountMachine.proofHeader.toEntity,
                 height: accountMachine.pendingFrame.height,
-                restoredTxCount,
+                restoredTxCount: uniqueRestored,
               },
               accountMachine.proofHeader.fromEntity,
             );
@@ -1306,18 +1318,19 @@ export async function handleAccountInput(
           delete accountMachine.pendingFrame;
           delete accountMachine.pendingAccountInput;
           delete accountMachine.clonedForValidation;
-          accountMachine.rollbackCount++;
+          accountMachine.rollbackCount = Math.max(1, accountMachine.rollbackCount + 1);
           accountMachine.lastRollbackFrameHash = receivedHash; // Track this rollback
           console.log(`📥 RIGHT-ROLLBACK: Accepting left's frame (rollbacks: ${accountMachine.rollbackCount})`);
+          if (accountMachine.rollbackCount > 1) {
+            console.warn(
+              `⚠️ ROLLBACK-RETRY: repeated RIGHT rollback count=${accountMachine.rollbackCount} (continuing deterministically)`,
+            );
+          }
 
           // EMIT EVENT: Track that we accepted LEFT's frame
           events.push(`📥 Accepted LEFT's frame ${receivedFrame.height} (we are RIGHT, deterministic tiebreaker)`);
 
           // Continue to process their frame below
-        } else {
-          // Should never rollback twice (unless duplicate messages)
-          console.warn(`⚠️ ROLLBACK-LIMIT: ${accountMachine.rollbackCount}x - consensus stalled`);
-          return { success: false, error: 'Multiple rollbacks detected - consensus failure', events };
         }
       }
     }

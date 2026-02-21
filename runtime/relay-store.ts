@@ -5,6 +5,8 @@
  * and debug events. No WebSocket API, no crypto, no Env.
  */
 
+import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -67,8 +69,9 @@ export const createRelayStore = (serverId: string): RelayStore => ({
 // Utilities
 // ---------------------------------------------------------------------------
 
-export const normalizeRuntimeKey = (runtimeId: unknown): string =>
-  String(runtimeId || '').toLowerCase();
+export const isCanonicalRuntimeId = isRuntimeId;
+
+export const normalizeRuntimeKey = (runtimeId: unknown): string => normalizeRuntimeId(runtimeId);
 
 export const nextWsTimestamp = (store: RelayStore): number => ++store.wsCounter;
 
@@ -111,11 +114,12 @@ export const getAllGossipProfiles = (store: RelayStore): any[] =>
 
 export const registerClient = (store: RelayStore, runtimeId: string, ws: any): void => {
   const key = normalizeRuntimeKey(runtimeId);
+  if (!key) return;
   const existing = store.clients.get(key);
   if (existing && existing.ws !== ws) {
     try { existing.ws.close(); } catch { /* best effort */ }
   }
-  store.clients.set(key, { ws, runtimeId, lastSeen: nextWsTimestamp(store), topics: new Set() });
+  store.clients.set(key, { ws, runtimeId: key, lastSeen: nextWsTimestamp(store), topics: new Set() });
 };
 
 export const removeClient = (store: RelayStore, ws: any): string | null => {
@@ -135,6 +139,7 @@ export const removeClient = (store: RelayStore, ws: any): string | null => {
 
 export const cacheEncryptionKey = (store: RelayStore, runtimeId: string, pubKeyHex: string): void => {
   const normalized = normalizeRuntimeKey(runtimeId);
+  if (!normalized) return;
   const normalizedKey = pubKeyHex.startsWith('0x')
     ? pubKeyHex.toLowerCase()
     : `0x${pubKeyHex.toLowerCase()}`;
@@ -143,7 +148,7 @@ export const cacheEncryptionKey = (store: RelayStore, runtimeId: string, pubKeyH
   }
 };
 
-export const resolveEncryptionPubKeyHex = (store: RelayStore, targetRuntimeId: string): string | null => {
+export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId: string): string | null => {
   const normalizedTarget = normalizeRuntimeKey(targetRuntimeId);
   if (!normalizedTarget) return null;
 
@@ -152,10 +157,10 @@ export const resolveEncryptionPubKeyHex = (store: RelayStore, targetRuntimeId: s
 
   for (const { profile } of store.gossipProfiles.values()) {
     if (!profile || typeof profile !== 'object') continue;
-    const profileRuntimeId = String(profile.runtimeId || profile.metadata?.runtimeId || '').toLowerCase();
+    const profileRuntimeId = normalizeRuntimeKey(profile.runtimeId || profile.metadata?.runtimeId || '');
     if (!profileRuntimeId || profileRuntimeId !== normalizedTarget) continue;
     const candidateKeys = [
-      profile.metadata?.encryptionPubKey,
+      profile.metadata?.encryptionPublicKey,
       profile.metadata?.cryptoPublicKey,
     ];
     for (const key of candidateKeys) {

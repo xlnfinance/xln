@@ -840,6 +840,16 @@ export const applyEntityTx = async (
       return result;
     }
 
+    if (entityTx.type === 'j_rebroadcast') {
+      const { handleJRebroadcast } = await import('./handlers/j-rebroadcast');
+      return await handleJRebroadcast(entityState, entityTx, env);
+    }
+
+    if (entityTx.type === 'j_abort_sent_batch') {
+      const { handleJAbortSentBatch } = await import('./handlers/j-abort-sent-batch');
+      return await handleJAbortSentBatch(entityState, entityTx, env);
+    }
+
     if (entityTx.type === 'j_clear_batch') {
       const { handleJClearBatch } = await import('./handlers/j-clear-batch');
       return await handleJClearBatch(entityState, entityTx, env);

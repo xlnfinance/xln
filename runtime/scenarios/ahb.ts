@@ -2038,7 +2038,7 @@ export async function ahb(env: Env): Promise<void> {
   const disputeCollateralTarget = usd(100_000);
   const hubIsLeft = isLeft(hub.id, bob.id);
   // To trigger debt: delta must exceed collateral
-  // delta = ondelta + offdelta = 0 + $150K = $150K > $100K collateral
+  // derived.delta = +$150K (collateral only $100K), so position is undercollateralized
   // → Bob gets all $100K collateral, Hub owes $50K extra (becomes debt when Hub has $0 reserves)
   const disputeOffdeltaTarget = hubIsLeft ? -usd(150_000) : usd(150_000);
   const disputeOndeltaTarget = 0n;

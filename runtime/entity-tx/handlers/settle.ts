@@ -300,6 +300,11 @@ export async function handleSettleApprove(
   if (!account.settlementWorkspace) throw new Error(`No settlement workspace to approve.`);
 
   const workspace = account.settlementWorkspace;
+  if (workspace.status === 'submitted') {
+    addMessage(newState, `⏭️ settle_execute skipped: workspace already submitted`);
+    console.log(`⚠️ settle_execute skipped: workspace already submitted for ${counterpartyEntityId.slice(-4)}`);
+    return { newState, outputs, mempoolOps };
+  }
   const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
 
   // Gate: Cannot approve your own proposal
@@ -468,18 +473,30 @@ export async function handleSettleExecute(
     return { newState, outputs, mempoolOps };
   }
 
-  batchAddSettlement(
-    newState.jBatchState,
-    leftEntity,
-    rightEntity,
-    diffs,
-    forgiveTokenIds,
-    counterpartyHanko!,
-    jurisdiction.entityProviderAddress,
-    '0x',
-    workspace.nonceAtSign ?? account.proofHeader.nonce,
-    entityState.entityId
-  );
+  try {
+    batchAddSettlement(
+      newState.jBatchState,
+      leftEntity,
+      rightEntity,
+      diffs,
+      forgiveTokenIds,
+      counterpartyHanko!,
+      jurisdiction.entityProviderAddress,
+      '0x',
+      workspace.nonceAtSign ?? account.proofHeader.nonce,
+      entityState.entityId,
+    );
+  } catch (error) {
+    const msg = (error as Error)?.message || '';
+    if (msg.includes('pending broadcast')) {
+      addMessage(newState, `⏭️ settle_execute skipped: jBatch sentBatch pending`);
+      console.warn(
+        `⚠️ settle_execute skipped: sentBatch pending for ${counterpartyEntityId.slice(-4)} (retry next tick)`,
+      );
+      return { newState, outputs, mempoolOps };
+    }
+    throw error;
+  }
 
   console.log(`✅ settle_execute: Added to jBatch (${diffs.length} diffs)`);
 

@@ -5,7 +5,7 @@
  * This is the V1 rebalance mechanism — no quotes, no custody, no bilateral negotiation.
  *
  * Flow:
- * 1. Post-frame hook detects: uncollateralized > softLimit
+ * 1. Post-frame hook detects: outPeerCredit > softLimit
  * 2. Auto-queues request_collateral into account mempool
  * 3. Request frame debits prepaid fee immediately (user pays hub upfront)
  * 4. Hub crontab picks up pendingRebalanceRequest → adds R→C to jBatch
@@ -20,6 +20,7 @@
 import type { AccountMachine, AccountTx, RebalancePolicy } from '../../types';
 import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../../types';
 import { isLeftEntity } from '../../entity-id-utils';
+import { deriveDelta } from '../../account-utils';
 
 export function handleRequestCollateral(
   accountMachine: AccountMachine,
@@ -45,50 +46,30 @@ export function handleRequestCollateral(
     return { success: false, events: [], error: `request_collateral: no delta for token ${tokenId}` };
   }
 
-  // Prevent accidental overwrite of an in-flight prepaid request on the same token.
-  // Replacing state here can lose auditability of the original fee/request tuple.
   const existingRequest = accountMachine.requestedRebalance.get(tokenId) ?? 0n;
-  if (existingRequest > 0n) {
-    return {
-      success: false,
-      events: [],
-      error: `request_collateral: existing pending request for token ${tokenId} (${existingRequest})`,
-    };
-  }
+  const existingFeeState = accountMachine.requestedRebalanceFeeState?.get(tokenId);
 
-  // Clamp requested amount to CURRENT uncollateralized debt at commit time.
-  // This prevents stale queued requests (computed earlier) from over-requesting
-  // after hub already topped up collateral.
+  // Deterministic request amount comes from frame payload.
+  // Do not recompute from live outPeerCredit at commit time, otherwise the same tx
+  // can produce different request sizes between propose/commit during races.
   const requesterIsLeft = !!byLeft;
-  const totalDelta = delta.ondelta + delta.offdelta;
-  const requesterClaim = requesterIsLeft
-    ? (totalDelta > 0n ? totalDelta : 0n)
-    : (totalDelta < 0n ? -totalDelta : 0n);
-  const uncollateralizedNow = requesterClaim > delta.collateral
-    ? requesterClaim - delta.collateral
-    : 0n;
-  const effectiveAmount = amount > uncollateralizedNow ? uncollateralizedNow : amount;
+  const effectiveAmount = amount;
 
-  if (effectiveAmount <= 0n) {
-    // Stale request: already collateralized by the time this frame commits.
-    // Keep state clean and don't charge fee.
-    accountMachine.requestedRebalance.delete(tokenId);
-    accountMachine.requestedRebalanceFeeState?.delete(tokenId);
-    console.log(
-      `ℹ️ request_collateral stale/no-op: token=${tokenId} requested=${amount} uncollateralizedNow=${uncollateralizedNow} byLeft=${byLeft}`,
-    );
+  // One pending request per token until finalized/cleared.
+  // Do not upsize in-frame; let hub fulfill current request first, then re-evaluate.
+  if (existingRequest > 0n) {
     return {
       success: true,
       events: [
-        `ℹ️ Collateral request skipped (already collateralized): requested=${amount}, currentNeed=${uncollateralizedNow}`,
+        `ℹ️ request_collateral skipped: pending request exists token=${tokenId} amount=${existingRequest}`,
       ],
     };
   }
 
   // Fee is prepaid in this same account frame.
   // Keep fee proportional to effective request after clamping.
-  const effectiveFee = amount > 0n ? (feeAmount * effectiveAmount) / amount : 0n;
-  if (effectiveFee <= 0n) {
+  const effectiveFeeTarget = amount > 0n ? (feeAmount * effectiveAmount) / amount : 0n;
+  if (effectiveFeeTarget <= 0n) {
     return { success: false, events: [], error: 'request_collateral: feeAmount must produce effectiveFee > 0' };
   }
 
@@ -102,48 +83,50 @@ export function handleRequestCollateral(
   const requesterFeeClaim = requesterIsLeft
     ? (feeTotal > 0n ? feeTotal : 0n)
     : (feeTotal < 0n ? -feeTotal : 0n);
-  if (effectiveFee > requesterFeeClaim) {
+  // No in-place upsize path: each request starts with fresh upfront fee debit.
+  const existingFeePaid = existingRequest > 0n ? (existingFeeState?.feePaidUpfront ?? 0n) : 0n;
+  const feeTopup = effectiveFeeTarget > existingFeePaid ? effectiveFeeTarget - existingFeePaid : 0n;
+  if (feeTopup > requesterFeeClaim) {
     return {
       success: false,
       events: [],
-      error: `request_collateral: insufficient fee balance in token ${feeToken} (${requesterFeeClaim} < ${effectiveFee})`,
+      error: `request_collateral: insufficient fee balance in token ${feeToken} (${requesterFeeClaim} < ${feeTopup})`,
     };
   }
 
   // Convention: positive offdelta means LEFT has more.
   // requester pays hub upfront here.
-  if (requesterIsLeft) {
-    feeDelta.offdelta -= effectiveFee;
-  } else {
-    feeDelta.offdelta += effectiveFee;
+  if (feeTopup > 0n) {
+    if (requesterIsLeft) {
+      feeDelta.offdelta -= feeTopup;
+    } else {
+      feeDelta.offdelta += feeTopup;
+    }
   }
 
-  // Align requested amount with post-fee debt when fee is prepaid in-frame.
-  // Otherwise R→C may fulfill less than requested and leave tiny "pending" tails.
-  const postFeeDelta = accountMachine.deltas.get(tokenId)!;
-  const postFeeTotal = postFeeDelta.ondelta + postFeeDelta.offdelta;
-  const requesterClaimAfterFee = requesterIsLeft
-    ? (postFeeTotal > 0n ? postFeeTotal : 0n)
-    : (postFeeTotal < 0n ? -postFeeTotal : 0n);
-  const uncollateralizedAfterFee = requesterClaimAfterFee > postFeeDelta.collateral
-    ? requesterClaimAfterFee - postFeeDelta.collateral
-    : 0n;
-  const effectiveRequest = effectiveAmount > uncollateralizedAfterFee ? uncollateralizedAfterFee : effectiveAmount;
+  // Request size is deterministic from payload; when fee is paid in the SAME token,
+  // request collateral for net amount after prepaid fee to avoid tiny pending tails.
+  let effectiveRequest = effectiveAmount;
+  if (feeToken === tokenId) {
+    effectiveRequest = effectiveAmount > effectiveFeeTarget ? effectiveAmount - effectiveFeeTarget : 0n;
+  }
   if (effectiveRequest <= 0n) {
     // Roll back prepaid debit because no request remains after recompute.
-    if (requesterIsLeft) {
-      feeDelta.offdelta += effectiveFee;
-    } else {
-      feeDelta.offdelta -= effectiveFee;
+    if (feeTopup > 0n) {
+      if (requesterIsLeft) {
+        feeDelta.offdelta += feeTopup;
+      } else {
+        feeDelta.offdelta -= feeTopup;
+      }
     }
     accountMachine.requestedRebalance.delete(tokenId);
     accountMachine.requestedRebalanceFeeState?.delete(tokenId);
-    return {
-      success: true,
-      events: [
-        `ℹ️ Collateral request became zero after prepaid fee charge (fee=${effectiveFee}, token=${feeToken})`,
-      ],
-    };
+      return {
+        success: true,
+        events: [
+          `ℹ️ Collateral request became zero after prepaid fee charge (fee=${effectiveFeeTarget}, token=${feeToken})`,
+        ],
+      };
   }
 
   if (!accountMachine.requestedRebalanceFeeState) {
@@ -155,25 +138,26 @@ export function handleRequestCollateral(
   accountMachine.requestedRebalance.set(tokenId, effectiveRequest);
   accountMachine.requestedRebalanceFeeState.set(tokenId, {
     feeTokenId: feeToken,
-    feePaidUpfront: effectiveFee,
+    feePaidUpfront: effectiveFeeTarget,
     requestedAmount: effectiveRequest,
     policyVersion,
     requestedAt: currentTimestamp,
     requestedByLeft: !!byLeft,
+    // Any refreshed amount must be treated as a fresh request for hub crontab routing.
     jBatchSubmittedAt: 0,
   });
 
-  const feeDisplay = effectiveFee > 0n ? `, prepaidFee=${effectiveFee}` : '';
+  const feeDisplay = effectiveFeeTarget > 0n ? `, prepaidFee=${effectiveFeeTarget}` : '';
   const events = [
-    `🔄 Collateral requested: ${effectiveRequest} token ${tokenId}${feeDisplay} (hub will deposit R→C)`,
+    `🔄 Collateral requested: ${effectiveRequest} token ${tokenId}${feeDisplay}, feeTopup=${feeTopup} (hub will deposit R→C)`,
   ];
 
   console.log(
     `🔄 request_collateral: token=${tokenId} requested=${amount} effective=${effectiveRequest} ` +
-    `prepaidFee=${effectiveFee} byLeft=${byLeft} uncollateralizedNow=${uncollateralizedNow}`,
+    `prepaidFee=${effectiveFeeTarget} feeTopup=${feeTopup} byLeft=${byLeft}`,
   );
   console.log(
-    `[REB][1][REQUEST_COLLATERAL_COMMITTED] token=${tokenId} requested=${effectiveRequest} fee=${effectiveFee} byLeft=${byLeft} requestedAt=${currentTimestamp}`,
+    `[REB][1][REQUEST_COLLATERAL_COMMITTED] token=${tokenId} requested=${effectiveRequest} fee=${effectiveFeeTarget} feeTopup=${feeTopup} byLeft=${byLeft} requestedAt=${currentTimestamp}`,
   );
 
   return { success: true, events };
@@ -205,6 +189,13 @@ export function checkAutoRebalance(
   feePolicy?: RebalanceFeePolicy,
 ): AccountTx[] {
   const result: AccountTx[] = [];
+
+  // Settlement negotiations/execution and auto-rebalance should not run concurrently
+  // on the same bilateral account state, otherwise one side may evaluate against a
+  // different pre-settlement surface and propose divergent frames.
+  if (accountMachine.settlementWorkspace) {
+    return result;
+  }
 
   // Bootstrap legacy accounts that were created before rebalancePolicy existed.
   // This keeps faucet/offchain auto-collateralization working without manual setup.
@@ -252,26 +243,26 @@ export function checkAutoRebalance(
     const delta = accountMachine.deltas.get(tokenId);
     if (!delta) continue;
 
-    const totalDelta = delta.ondelta + delta.offdelta;
+    const derived = deriveDelta(delta, isLeft);
+    const outPeerCredit = derived.outPeerCredit;
+    // Rebalance trigger must be based ONLY on uncollateralized peer credit usage.
+    //
+    // deriveDelta semantics:
+    // - outPeerCredit: how much of peer credit we currently use (risk surface)
+    // - outCollateral: how much collateral currently secures our side
+    //
+    // Using (outCollateral + outPeerCredit) here would over-trigger after a successful
+    // top-up because outCollateral remains high even when risk is already covered.
+    const rebalanceTrigger = outPeerCredit;
 
-    // "Their debt to us" = counterparty owes us
-    // We are LEFT:  total > 0 → counterparty (RIGHT/hub) owes us
-    // We are RIGHT: total < 0 → counterparty (LEFT/hub) owes us
-    const theirDebt = isLeft
-      ? (totalDelta > 0n ? totalDelta : 0n)
-      : (totalDelta < 0n ? -totalDelta : 0n);
-
-    const uncollateralized = theirDebt > delta.collateral
-      ? theirDebt - delta.collateral
-      : 0n;
-
-    // Check if we already have a pending request for this token.
-    const existingRequest = accountMachine.requestedRebalance.get(tokenId);
-    if (existingRequest && existingRequest > 0n) {
-      console.log(
-        `⏭️ Auto-rebalance skipped: existing request token=${tokenId} amount=${existingRequest}`,
-      );
-      continue; // Already requested, don't spam
+    // Also dedupe pre-commit queue: if request_collateral is already in account mempool
+    // for this token, do not enqueue another copy in the same consensus window.
+    const hasQueuedRequest = accountMachine.mempool.some(
+      (tx) => tx.type === 'request_collateral' && Number(tx.data?.tokenId) === Number(tokenId),
+    );
+    if (hasQueuedRequest) {
+      console.log(`⏭️ Auto-rebalance skipped: request already queued in mempool token=${tokenId}`);
+      continue;
     }
 
     // Check if there's already a pending frame (don't pile up)
@@ -282,8 +273,8 @@ export function checkAutoRebalance(
       continue;
     }
 
-    if (uncollateralized > policy.softLimit) {
-      const liquidityFee = (uncollateralized * feePolicy.liquidityFeeBps) / 10000n;
+    if (rebalanceTrigger > policy.softLimit) {
+      const liquidityFee = (outPeerCredit * feePolicy.liquidityFeeBps) / 10000n;
       const feeAmount = feePolicy.baseFee + feePolicy.gasFee + liquidityFee;
 
       // Respect user policy ceiling for automated requests.
@@ -294,11 +285,29 @@ export function checkAutoRebalance(
         continue;
       }
 
+      // Keep dedupe semantics aligned with committed request state:
+      // handleRequestCollateral stores requestedRebalance as net amount
+      // when fee token equals request token.
+      const netRequestedTarget = outPeerCredit > feeAmount ? outPeerCredit - feeAmount : 0n;
+      if (netRequestedTarget <= 0n) {
+        console.log(
+          `⏭️ Auto-rebalance skipped: token=${tokenId} netRequestedTarget<=0 (outPeerCredit=${outPeerCredit}, fee=${feeAmount})`,
+        );
+        continue;
+      }
+      const existingRequest = accountMachine.requestedRebalance.get(tokenId);
+      if (existingRequest && existingRequest > 0n) {
+        console.log(
+          `⏭️ Auto-rebalance skipped: existing pending request token=${tokenId} amount=${existingRequest} (netTarget=${netRequestedTarget})`,
+        );
+        continue; // Already requested, don't spam
+      }
+
       result.push({
         type: 'request_collateral',
         data: {
           tokenId,
-          amount: uncollateralized,
+          amount: outPeerCredit,
           feeTokenId: tokenId, // Pay fee in same token
           feeAmount,
           policyVersion: feePolicy.policyVersion,
@@ -306,8 +315,8 @@ export function checkAutoRebalance(
       });
 
       console.log(
-        `🔄 Auto-rebalance triggered: token=${tokenId} uncollateralized=${uncollateralized} ` +
-        `> softLimit=${policy.softLimit}, requesting ${uncollateralized} with fee ${feeAmount} ` +
+        `🔄 Auto-rebalance triggered: token=${tokenId} outPeerCredit=${rebalanceTrigger} ` +
+        `> softLimit=${policy.softLimit}, requesting outPeerCredit=${outPeerCredit} with fee ${feeAmount} ` +
         `(base=${feePolicy.baseFee}, gas=${feePolicy.gasFee}, liqBps=${feePolicy.liquidityFeeBps})`
       );
     }

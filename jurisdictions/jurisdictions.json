@@ -1,11 +1,11 @@
 {
   "version": "2.0.0",
-  "lastUpdated": "2026-02-20T00:52:22.142Z",
+  "lastUpdated": "2026-02-21T00:12:05.814Z",
   "jurisdictions": {
     "arrakis": {
       "name": "Arrakis (Shared Anvil)",
       "chainId": 31337,
-      "rpc": "http://127.0.0.1:20020",
+      "rpc": "http://localhost:8545",
       "contracts": {
         "account": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
         "depository": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",

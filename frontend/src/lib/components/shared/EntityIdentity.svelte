@@ -1,5 +1,6 @@
 <script lang="ts">
-  import * as jdenticon from 'jdenticon';
+  import { xlnFunctions } from '$lib/stores/xlnStore';
+  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
 
   export let entityId: string;
   export let name: string = '';
@@ -10,13 +11,16 @@
   export let compact: boolean = false;
 
   let copied = false;
+  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
+  const contextXlnFunctions = entityEnv?.xlnFunctions;
+  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
 
   $: safeEntityId = (entityId || '').trim();
   $: hasRealName = (name || '').trim().length > 0;
   $: displayName = hasRealName ? (name || '').trim() : (safeEntityId || 'Unknown');
   $: detailAddress = safeEntityId;
   $: identiconSvg = safeEntityId
-    ? `data:image/svg+xml;utf8,${encodeURIComponent(jdenticon.toSvg(safeEntityId.toLowerCase(), size))}`
+    ? (activeXlnFunctions?.generateEntityAvatar?.(safeEntityId) || '')
     : '';
   $: href = safeEntityId ? `/address/${encodeURIComponent(safeEntityId)}` : '#';
 

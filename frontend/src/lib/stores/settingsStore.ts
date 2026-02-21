@@ -14,6 +14,7 @@ const defaultSettings: Settings = {
   theme: 'dark',
   barColorMode: 'rgy',
   barLayout: 'center',
+  accountBarUsdPerPx: 100,
   tokenPrecision: 6, // 0..18 digits after decimal for token amounts (18 = full)
   showTokenIcons: true,
   dropdownMode: 'signer-first',
@@ -55,6 +56,10 @@ const settingsOperations = {
         }
         if (typeof parsed.showTokenIcons !== 'boolean') {
           parsed.showTokenIcons = defaultSettings.showTokenIcons;
+        }
+        const allowedUsdPerPx = [1, 10, 100, 1000];
+        if (!allowedUsdPerPx.includes(Number(parsed.accountBarUsdPerPx))) {
+          parsed.accountBarUsdPerPx = defaultSettings.accountBarUsdPerPx;
         }
         settings.update(current => ({ ...current, ...parsed }));
       }
@@ -170,6 +175,13 @@ const settingsOperations = {
 
   setShowTokenIcons(show: boolean) {
     settings.update(current => ({ ...current, showTokenIcons: !!show }));
+    this.saveToStorage();
+  },
+
+  setAccountBarUsdPerPx(value: number) {
+    const allowed = new Set([1, 10, 100, 1000]);
+    const next = allowed.has(Number(value)) ? Number(value) as 1 | 10 | 100 | 1000 : defaultSettings.accountBarUsdPerPx;
+    settings.update(current => ({ ...current, accountBarUsdPerPx: next }));
     this.saveToStorage();
   },
 

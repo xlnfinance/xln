@@ -51,7 +51,7 @@ export type Profile = {
     position?: { x: number; y: number; z: number };
     // Additional fields
     entityPublicKey?: string; // hex public key for signature verification
-    encryptionPubKey?: string; // X25519 public key for E2E encryption (hex)
+    encryptionPublicKey?: string; // X25519 public key for E2E encryption (hex)
     [key: string]: unknown;
   };
   // Account capacities for routing
@@ -82,6 +82,19 @@ export interface GossipLayer {
 }
 
 const PROFILE_TTL_MS = 5 * 60 * 1000;
+
+const normalizeEntityName = (raw: unknown, entityId: string): string => {
+  if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim();
+  return `Entity ${entityId.slice(-4)}`;
+};
+
+const normalizeX25519Key = (raw: unknown): string | null => {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const prefixed = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
+  return /^0x[0-9a-fA-F]{64}$/.test(prefixed) ? prefixed.toLowerCase() : null;
+};
 
 export function createGossipLayer(): GossipLayer {
   const profiles = new Map<string, Profile>();
@@ -135,9 +148,45 @@ export function createGossipLayer(): GossipLayer {
       },
     };
 
+    const normalizedCryptoKey = normalizeX25519Key(normalizedProfile.metadata?.cryptoPublicKey);
+    const normalizedEncryptionKey = normalizeX25519Key(normalizedProfile.metadata?.encryptionPublicKey);
+    const existingProfile = profiles.get(profile.entityId);
+    const existingCryptoKey = normalizeX25519Key(existingProfile?.metadata?.cryptoPublicKey);
+    const existingEncryptionKey = normalizeX25519Key(existingProfile?.metadata?.encryptionPublicKey);
+    const finalCryptoKey =
+      normalizedCryptoKey
+      ?? existingCryptoKey
+      ?? normalizedEncryptionKey
+      ?? existingEncryptionKey
+      ?? null;
+    const finalEncryptionKey =
+      normalizedEncryptionKey
+      ?? existingEncryptionKey
+      ?? normalizedCryptoKey
+      ?? existingCryptoKey
+      ?? null;
+
+    normalizedProfile.metadata = {
+      ...(normalizedProfile.metadata || {}),
+      name: normalizeEntityName(normalizedProfile.metadata?.name, profile.entityId),
+      ...(finalCryptoKey ? { cryptoPublicKey: finalCryptoKey } : {}),
+      ...(finalEncryptionKey ? { encryptionPublicKey: finalEncryptionKey } : {}),
+    };
+
+    const capabilities = Array.isArray(normalizedProfile.capabilities) ? normalizedProfile.capabilities : [];
+    const claimsHubCapability = capabilities.includes('hub') || capabilities.includes('routing');
+    if (!finalEncryptionKey && (normalizedProfile.metadata?.isHub === true || claimsHubCapability)) {
+      logDebug(
+        'GOSSIP',
+        `⚠️ gossip.announce sanitized: ${profile.entityId.slice(-4)} missing transport key -> removing hub/routing capability`
+      );
+      normalizedProfile.capabilities = capabilities.filter((cap) => cap !== 'hub' && cap !== 'routing');
+      normalizedProfile.metadata = { ...(normalizedProfile.metadata || {}), isHub: false };
+    }
+
     logDebug('GOSSIP', `📢 After normalize: ${profile.entityId.slice(-4)} accounts=${normalizedProfile.accounts?.length || 0}`);
     // Only update if newer timestamp or no existing profile
-    const existing = profiles.get(profile.entityId);
+    const existing = existingProfile;
     const newTimestamp = normalizedProfile.metadata?.lastUpdated || 0;
     const existingTimestamp = existing?.metadata?.lastUpdated || 0;
 
@@ -257,16 +306,26 @@ export async function loadPersistedProfiles(db: any, gossip: { announce: (p: Pro
           hubs: profile.hubs || profile.publicAccounts || [],
           endpoints: profile.endpoints || [],
           relays: profile.relays || [],
-          metadata: {
-            name: profile.name,
-            avatar: profile.avatar,
-            bio: profile.bio,
-            website: profile.website,
-            lastUpdated: profile.lastUpdated,
-            hankoSignature: profile.hankoSignature,
-            entityPublicKey: profile.entityPublicKey,
-          },
-        });
+            metadata: {
+              name: profile.name,
+              avatar: profile.avatar,
+              bio: profile.bio,
+              website: profile.website,
+              lastUpdated: profile.lastUpdated,
+              hankoSignature: profile.hankoSignature,
+              entityPublicKey: profile.entityPublicKey,
+              cryptoPublicKey:
+                profile.cryptoPublicKey
+                ?? profile?.metadata?.cryptoPublicKey
+                ?? profile.encryptionPublicKey
+                ?? profile?.metadata?.encryptionPublicKey,
+              encryptionPublicKey:
+                profile.encryptionPublicKey
+                ?? profile?.metadata?.encryptionPublicKey
+                ?? profile.cryptoPublicKey
+                ?? profile?.metadata?.cryptoPublicKey,
+            },
+          });
         profileCount++;
       } catch (parseError) {
         console.warn(`⚠️ Failed to parse profile from key ${key}:`, parseError);

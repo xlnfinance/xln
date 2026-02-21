@@ -23,6 +23,7 @@ import { keccak256 } from 'ethers';
 import type { RuntimeInput, RoutedEntityInput } from '../types';
 import { deserializeWsMessage, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage, type RuntimeWsAuth } from './ws-protocol';
 import { asFailFastPayload, failfastAssert } from './failfast';
+import { normalizeRuntimeId as normalizeCanonicalRuntimeId } from './runtime-id';
 
 type ClientEntry = {
   ws: WebSocket;
@@ -83,10 +84,8 @@ const parseRuntimeIdFromReq = (req: { headers?: Record<string, string | string[]
 };
 
 const normalizeRuntimeId = (runtimeId: string | null | undefined): string | null => {
-  if (!runtimeId || typeof runtimeId !== 'string') return null;
-  const trimmed = runtimeId.trim();
-  if (!trimmed) return null;
-  return trimmed.toLowerCase();
+  const normalized = normalizeCanonicalRuntimeId(runtimeId);
+  return normalized || null;
 };
 
 const recoverAddressFromSignature = (digestHex: string, signatureHex: string): string => {

@@ -25,20 +25,40 @@ export const createLocalDeliveryHandler = (
   getEntityReplicaById: (env: Env, entityId: string) => any | null,
 ): ((from: string | undefined, msg: any) => Promise<void>) => {
   let serverKeyPair: P2PKeyPair | null = null;
+  let serverKeySeedFingerprint: string | null = null;
+
+  const runtimeSeedFingerprint = (): string | null => {
+    const seed = env.runtimeSeed;
+    if (!seed) return null;
+    if (typeof seed === 'string') return seed;
+    return Array.from(seed).map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  const getServerKeyPair = (): P2PKeyPair => {
+    const fingerprint = runtimeSeedFingerprint();
+    if (!fingerprint) {
+      throw new Error('No server encryption key for local decrypt');
+    }
+    if (!serverKeyPair || serverKeySeedFingerprint !== fingerprint) {
+      serverKeyPair = deriveEncryptionKeyPair(env.runtimeSeed as Uint8Array | string);
+      serverKeySeedFingerprint = fingerprint;
+      console.log(`[RELAY] Derived server decryption key`);
+    }
+    return serverKeyPair;
+  };
 
   return async (from: string | undefined, msg: any): Promise<void> => {
     const { payload, to } = msg;
     const toKey = normalizeRuntimeKey(to);
+    if (!toKey) {
+      throw new Error('Invalid target runtimeId for local delivery');
+    }
 
     // Decrypt or parse plaintext
     let input: EntityInput;
     if (msg.encrypted && typeof payload === 'string') {
-      if (!serverKeyPair && env.runtimeSeed) {
-        serverKeyPair = deriveEncryptionKeyPair(env.runtimeSeed);
-        console.log(`[RELAY] Derived server decryption key`);
-      }
-      if (!serverKeyPair) throw new Error('No server encryption key for local decrypt');
-      input = decryptJSON<EntityInput>(payload, serverKeyPair.privateKey);
+      const activeKeyPair = getServerKeyPair();
+      input = decryptJSON<EntityInput>(payload, activeKeyPair.privateKey);
       console.log(`[RELAY] → decrypted entity_input: entityId=${input.entityId?.slice(-8)} txs=${input.entityTxs?.length ?? 0}`);
     } else {
       input = payload as EntityInput;

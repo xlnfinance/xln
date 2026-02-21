@@ -9,6 +9,7 @@ import { safeStringify } from './serialization-utils';
 import { asFailFastPayload, failfastAssert } from './networking/failfast';
 import {
   type RelayStore,
+  isCanonicalRuntimeId,
   normalizeRuntimeKey,
   nextWsTimestamp,
   pushDebugEvent,
@@ -80,7 +81,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
 
   // Log non-gossip messages
   if (type !== 'gossip_request' && type !== 'gossip_response' && type !== 'gossip_announce') {
-    console.log(`[RELAY-MSG] type=${type} from=${from?.slice?.(0, 10) || 'none'} to=${to?.slice?.(0, 10) || 'none'}`);
+    console.log(`[RELAY-MSG] type=${type} from=${from || 'none'} to=${to || 'none'}`);
   }
 
   pushDebugEvent(store, {
@@ -95,6 +96,18 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
 
   // ----- hello -----
   if (type === 'hello' && from) {
+    if (!isCanonicalRuntimeId(from)) {
+      pushDebugEvent(store, {
+        event: 'error',
+        from,
+        msgType: type,
+        status: 'rejected',
+        reason: 'Invalid runtimeId in hello',
+        details: { traceId },
+      });
+      send(ws, safeStringify({ type: 'error', error: 'Invalid runtimeId in hello' }));
+      return;
+    }
     registerClient(store, from, ws);
     pushDebugEvent(store, {
       event: 'hello',
@@ -196,7 +209,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       return;
     }
 
-    console.log(`[RELAY] ${type} from=${from?.slice(0, 10)} to=${to?.slice(0, 10)} encrypted=${msg.encrypted ?? false}`);
+    console.log(`[RELAY] ${type} from=${from || 'none'} to=${to || 'none'} encrypted=${msg.encrypted ?? false}`);
 
     const localRuntimeKey = normalizeRuntimeKey(config.localRuntimeId);
     const isLocalTarget = !!localRuntimeKey && toKey === localRuntimeKey;
@@ -224,16 +237,23 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
         await config.localDeliver(from, msg);
         return;
       } catch (error) {
-        console.warn(`[RELAY] Local delivery failed: ${(error as Error).message}`);
+        const reason = (error as Error).message;
+        console.warn(`[RELAY] Local delivery failed: ${reason}`);
         pushDebugEvent(store, {
           event: 'error',
           from,
           to,
           msgType: type,
           status: 'local-delivery-failed',
-          reason: (error as Error).message,
+          reason,
           details: { traceId },
         });
+        // Non-recoverable decrypt/auth errors should be dropped immediately.
+        // Re-queuing poisoned ciphertext for the same local runtime just causes
+        // endless pending loops and hides the true root cause.
+        if (reason.includes('invalid tag') || reason.includes('P2P_DECRYPT_ERROR')) {
+          return;
+        }
         // Fall through to queue
       }
     }

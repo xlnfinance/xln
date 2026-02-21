@@ -67,6 +67,7 @@
 
   // Settlement form state
   let selectedTokenId = 1;
+  let expandedTokenIds = new Set<number>();
 
   // Settlement workspace state
   let settleOpType: 'r2c' | 'c2r' | 'r2r' | 'forgive' = 'r2c';
@@ -197,11 +198,25 @@
         tokenInfo: { symbol: `TKN${tokenId}`, color: '#999', name: `Token ${tokenId}`, decimals: 18 },
         ourCreditLimit: 0n,
         theirCreditLimit: 0n,
-        ourCollateral: 0n
+        ourCollateral: 0n,
+        peerDerived: {
+          delta: 0n,
+          totalCapacity: 0n,
+          inCapacity: 0n,
+          outCapacity: 0n,
+          inOwnCredit: 0n,
+          inCollateral: 0n,
+          inPeerCredit: 0n,
+          outOwnCredit: 0n,
+          outCollateral: 0n,
+          outPeerCredit: 0n,
+          ascii: '[loading...]',
+        },
       };
     }
 
     const derived = activeXlnFunctions.deriveDelta(delta, iAmLeft);
+    const peerDerived = activeXlnFunctions.deriveDelta(delta, !iAmLeft);
     const tokenInfo = activeXlnFunctions?.getTokenInfo?.(tokenId) || {
       symbol: `TKN${tokenId}`,
       color: '#999',
@@ -218,11 +233,25 @@
       tokenInfo,
       delta,
       derived,
+      peerDerived,
       ourCreditLimit,
       theirCreditLimit,
       ourCollateral: delta.collateral,
     };
   });
+
+  function toggleTokenDetails(tokenId: number): void {
+    const next = new Set(expandedTokenIds);
+    if (next.has(tokenId)) next.delete(tokenId);
+    else next.add(tokenId);
+    expandedTokenIds = next;
+  }
+
+  function formatTokenAmountSafe(tokenId: number, value: bigint): string {
+    return activeXlnFunctions?.formatTokenAmount
+      ? activeXlnFunctions.formatTokenAmount(tokenId, value)
+      : value.toString();
+  }
 
   function addSettleOp() {
     if (settleOpType === 'forgive') {
@@ -369,6 +398,39 @@
 
   // Preload existing workspace ops into pendingOps for update mode
   $: hasRawDiffOps = workspace?.ops?.some((op: any) => op.type === 'rawDiff') ?? false;
+  $: hasPendingBatch = !!(account as any).jBatchState?.sentBatch;
+  $: c2rWorkspaceSubmitted = workspace?.status === 'submitted';
+  $: pendingRequestedByToken = (() => {
+    const out = new Map<number, bigint>();
+    const map = (account as any).requestedRebalance;
+    if (!map || typeof map.entries !== 'function') return out;
+    for (const [tokenIdRaw, amountRaw] of map.entries()) {
+      try {
+        const tokenId = Number(tokenIdRaw);
+        const amount = typeof amountRaw === 'bigint' ? amountRaw : BigInt(amountRaw ?? 0);
+        if (amount > 0n && Number.isFinite(tokenId)) out.set(tokenId, amount);
+      } catch {
+        // Ignore malformed entry
+      }
+    }
+    return out;
+  })();
+  $: pendingC2RByToken = (() => {
+    const out = new Map<number, bigint>();
+    if (!workspace?.ops || !Array.isArray(workspace.ops)) return out;
+    for (const op of workspace.ops) {
+      if (op?.type !== 'c2r') continue;
+      try {
+        const tokenId = Number(op.tokenId);
+        const amount = typeof op.amount === 'bigint' ? op.amount : BigInt(op.amount ?? 0);
+        if (amount <= 0n || !Number.isFinite(tokenId)) continue;
+        out.set(tokenId, (out.get(tokenId) ?? 0n) + amount);
+      } catch {
+        // Ignore malformed entry
+      }
+    }
+    return out;
+  })();
 
   function preloadOpsForUpdate() {
     if (!workspace) return;
@@ -449,17 +511,23 @@
       {@const inTotal = td.derived.inOwnCredit + td.derived.inCollateral + td.derived.inPeerCredit}
       {@const halfMax = outTotal > inTotal ? outTotal : inTotal}
       {@const pctOf = (v: bigint, base: bigint) => base > 0n ? Number((v * 10000n) / base) / 100 : 0}
+      {@const isExpanded = expandedTokenIds.has(td.tokenId)}
+      {@const pendingR2CAmount = pendingRequestedByToken.get(td.tokenId) ?? 0n}
+      {@const pendingC2RAmount = pendingC2RByToken.get(td.tokenId) ?? 0n}
+      {@const r2cPending = pendingR2CAmount > 0n}
+      {@const c2rPending = pendingC2RAmount > 0n}
+      {@const r2cSettling = r2cPending && hasPendingBatch}
+      {@const c2rSettling = c2rPending && (c2rWorkspaceSubmitted || hasPendingBatch)}
       <div class="delta-card">
         <div class="delta-card-header">
           <span class="delta-token">{td.tokenInfo.symbol}</span>
-          <span
-            class="delta-net"
-            class:positive={td.derived.delta > 0n}
-            class:negative={td.derived.delta < 0n}
-            title="Signed delta (off-chain net balance), not total OUT/IN volume"
-          >
-            Delta: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.delta)}
+          <span class="delta-brief">
+            OUT {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity)}
+            · IN {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity)}
           </span>
+          <button class="delta-expand" on:click={() => toggleTokenDetails(td.tokenId)}>
+            {isExpanded ? 'Hide' : 'Details'}
+          </button>
           <button class="delta-faucet" on:click={() => handleFaucet(td.tokenId)}>Faucet</button>
         </div>
         <div class="delta-bar-row">
@@ -470,41 +538,95 @@
           <div class="delta-bar center">
             <div class="delta-half out">
               {#if td.derived.outOwnCredit > 0n}<div class="dseg credit" style="width:{pctOf(td.derived.outOwnCredit, halfMax)}%"></div>{/if}
-              {#if td.derived.outCollateral > 0n}<div class="dseg coll" style="width:{pctOf(td.derived.outCollateral, halfMax)}%"></div>{/if}
-              {#if td.derived.outPeerCredit > 0n}<div class="dseg debt" style="width:{pctOf(td.derived.outPeerCredit, halfMax)}%"></div>{/if}
+              {#if td.derived.outCollateral > 0n}<div class="dseg coll" class:striped={c2rPending && !c2rSettling} class:pulsing={c2rSettling} style="width:{pctOf(td.derived.outCollateral, halfMax)}%"></div>{/if}
+              {#if td.derived.outPeerCredit > 0n}<div class="dseg debt" class:striped={r2cPending && !r2cSettling} class:pulsing={r2cSettling} style="width:{pctOf(td.derived.outPeerCredit, halfMax)}%"></div>{/if}
             </div>
             <div class="delta-mid"></div>
             <div class="delta-half in">
-              {#if td.derived.inOwnCredit > 0n}<div class="dseg debt" style="width:{pctOf(td.derived.inOwnCredit, halfMax)}%"></div>{/if}
-              {#if td.derived.inCollateral > 0n}<div class="dseg coll" style="width:{pctOf(td.derived.inCollateral, halfMax)}%"></div>{/if}
+              {#if td.derived.inOwnCredit > 0n}<div class="dseg debt" class:striped={r2cPending && !r2cSettling} class:pulsing={r2cSettling} style="width:{pctOf(td.derived.inOwnCredit, halfMax)}%"></div>{/if}
+              {#if td.derived.inCollateral > 0n}<div class="dseg coll" class:striped={c2rPending && !c2rSettling} class:pulsing={c2rSettling} style="width:{pctOf(td.derived.inCollateral, halfMax)}%"></div>{/if}
               {#if td.derived.inPeerCredit > 0n}<div class="dseg credit" style="width:{pctOf(td.derived.inPeerCredit, halfMax)}%"></div>{/if}
             </div>
           </div>
         {/if}
-        <div class="delta-details">
-          <div class="detail-grid">
-            <span class="detail-header"></span>
-            <span class="detail-header">Limit</span>
-            <span class="detail-header">OUT</span>
-            <span class="detail-header">IN</span>
+        {#if r2cPending || c2rPending}
+          <div class="delta-rebalance-indicator">
+            {#if r2cPending}
+              <span class="rebalance-chip {r2cSettling ? 'settling' : 'pending'}">
+                {#if r2cSettling}Settling R→C{:else}Awaiting R→C{/if}
+              </span>
+            {/if}
+            {#if c2rPending}
+              <span class="rebalance-chip {c2rSettling ? 'settling' : 'pending'}">
+                {#if c2rSettling}Settling C→R{:else}Awaiting C→R{/if}
+              </span>
+            {/if}
           </div>
-          <div class="detail-grid">
-            <span class="detail-label-cell">Our credit</span>
-            <span class="detail-value-cell">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.ourCreditLimit)}</span>
-            <span class="detail-value-cell avail">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outOwnCredit)}</span>
-            <span class="detail-value-cell used">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inOwnCredit)}</span>
+        {/if}
+        {#if isExpanded}
+          <div class="delta-details">
+            <div class="detail-grid-three detail-head">
+              <span class="detail-header">Parameter</span>
+              <span class="detail-header">You</span>
+              <span class="detail-header">Peer</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">Delta</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.delta)}</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.delta)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">Out capacity</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.outCapacity)}</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outCapacity)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">In capacity</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.inCapacity)}</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inCapacity)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">Out collateral</span>
+              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.derived.outCollateral)}</span>
+              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outCollateral)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">In collateral</span>
+              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.derived.inCollateral)}</span>
+              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inCollateral)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">Out own credit</span>
+              <span class="detail-value-cell avail">{formatTokenAmountSafe(td.tokenId, td.derived.outOwnCredit)}</span>
+              <span class="detail-value-cell avail">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outOwnCredit)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">In own credit</span>
+              <span class="detail-value-cell used">{formatTokenAmountSafe(td.tokenId, td.derived.inOwnCredit)}</span>
+              <span class="detail-value-cell used">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inOwnCredit)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">Out peer credit</span>
+              <span class="detail-value-cell used">{formatTokenAmountSafe(td.tokenId, td.derived.outPeerCredit)}</span>
+              <span class="detail-value-cell used">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outPeerCredit)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">In peer credit</span>
+              <span class="detail-value-cell avail">{formatTokenAmountSafe(td.tokenId, td.derived.inPeerCredit)}</span>
+              <span class="detail-value-cell avail">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inPeerCredit)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">Credit limit</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.ourCreditLimit)}</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.theirCreditLimit)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">Raw collateral</span>
+              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.ourCollateral)}</span>
+              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.ourCollateral)}</span>
+            </div>
           </div>
-          <div class="detail-grid">
-            <span class="detail-label-cell">Their credit</span>
-            <span class="detail-value-cell">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.theirCreditLimit)}</span>
-            <span class="detail-value-cell used">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outPeerCredit)}</span>
-            <span class="detail-value-cell avail">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inPeerCredit)}</span>
-          </div>
-          <div class="detail-grid collateral-row">
-            <span class="detail-label-cell">Collateral</span>
-            <span class="detail-value-cell coll" style="grid-column: 2 / -1">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.ourCollateral)}</span>
-          </div>
-        </div>
+        {/if}
       </div>
     {/each}
 
@@ -1293,6 +1415,26 @@
     gap: 10px;
     margin-bottom: 10px;
   }
+  .delta-brief {
+    flex: 1;
+    color: #a1a1aa;
+    font-size: 0.78em;
+    font-family: 'JetBrains Mono','SF Mono','Monaco','Menlo',monospace;
+  }
+  .delta-expand {
+    font-size: 0.68em;
+    padding: 3px 9px;
+    border-radius: 5px;
+    border: 1px solid #3f3f46;
+    background: transparent;
+    color: #a1a1aa;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+    transition: all 0.15s;
+  }
+  .delta-expand:hover { border-color: #fbbf24; color: #fbbf24; background: rgba(251, 191, 36, 0.06); }
   .delta-token {
     font-weight: 700;
     color: #e4e4e7;
@@ -1352,6 +1494,74 @@
   .dseg.credit { background: #52525b; }
   .dseg.coll { background: linear-gradient(180deg, #34d399, #10b981); }
   .dseg.debt { background: linear-gradient(180deg, #fb7185, #f43f5e); }
+  .dseg.striped {
+    background: repeating-linear-gradient(
+      -45deg,
+      #f43f5e 0px,
+      #f43f5e 3px,
+      #fbbf24 3px,
+      #fbbf24 6px
+    );
+    background-size: 8.5px 8.5px;
+    animation: stripe-scroll 0.8s linear infinite;
+  }
+  .dseg.coll.striped {
+    background: repeating-linear-gradient(
+      -45deg,
+      #10b981 0px,
+      #10b981 3px,
+      #fbbf24 3px,
+      #fbbf24 6px
+    );
+    background-size: 8.5px 8.5px;
+  }
+  .dseg.pulsing {
+    animation: rebalance-pulse 1s ease-in-out infinite;
+  }
+  .dseg.debt.pulsing {
+    background: linear-gradient(180deg, #fbbf24, #f59e0b);
+  }
+  .dseg.coll.pulsing {
+    background: linear-gradient(180deg, #34d399, #22d3ee);
+  }
+
+  .delta-rebalance-indicator {
+    margin-top: -6px;
+    margin-bottom: 8px;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .rebalance-chip {
+    font-size: 0.62em;
+    line-height: 1;
+    padding: 3px 7px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-weight: 600;
+  }
+  .rebalance-chip.pending {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.1);
+    border-color: rgba(251, 191, 36, 0.25);
+  }
+  .rebalance-chip.settling {
+    color: #a78bfa;
+    background: rgba(167, 139, 250, 0.1);
+    border-color: rgba(167, 139, 250, 0.25);
+  }
+
+  @keyframes stripe-scroll {
+    0% { background-position: 0 0; }
+    100% { background-position: 8.5px 8.5px; }
+  }
+
+  @keyframes rebalance-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
 
   .delta-details {
     display: flex;
@@ -1387,6 +1597,19 @@
   .detail-value-cell.used { color: #f97316; }
   .detail-value-cell.avail { color: #4ade80; }
   .detail-value-cell.coll { color: #2dd4bf; }
+  .detail-grid-three {
+    display: grid;
+    grid-template-columns: 140px 1fr 1fr;
+    gap: 0 10px;
+    padding: 4px 0;
+    border-bottom: 1px solid #1f1f23;
+    font-family: 'JetBrains Mono','SF Mono','Monaco','Menlo',monospace;
+    font-size: 0.72em;
+  }
+  .detail-grid-three:last-child { border-bottom: none; }
+  .detail-head {
+    padding-top: 0;
+  }
 
   /* ── Account Tabs ── */
   .account-tabs {
