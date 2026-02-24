@@ -42,6 +42,8 @@ tests/screenshots/
 playwright-report/
 test-results/
 .playwright-mcp/
+.logs/
+**/.playwright-artifacts-*/
 
 # Archive (old implementations)
 # .archive/ - NOW PUBLIC (was private, going open source)
