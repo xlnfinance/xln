@@ -298,6 +298,7 @@ export async function loadPersistedProfiles(db: any, gossip: { announce: (p: Pro
     for await (const [key, value] of iterator) {
       try {
         const profile = JSON.parse(value);
+        const persistedMetadata = (profile?.metadata || {}) as Record<string, unknown>;
         gossip.announce({
           entityId: profile.entityId,
           runtimeId: profile.runtimeId,
@@ -306,26 +307,27 @@ export async function loadPersistedProfiles(db: any, gossip: { announce: (p: Pro
           hubs: profile.hubs || profile.publicAccounts || [],
           endpoints: profile.endpoints || [],
           relays: profile.relays || [],
-            metadata: {
-              name: profile.name,
-              avatar: profile.avatar,
-              bio: profile.bio,
-              website: profile.website,
-              lastUpdated: profile.lastUpdated,
-              hankoSignature: profile.hankoSignature,
-              entityPublicKey: profile.entityPublicKey,
-              cryptoPublicKey:
-                profile.cryptoPublicKey
-                ?? profile?.metadata?.cryptoPublicKey
-                ?? profile.encryptionPublicKey
-                ?? profile?.metadata?.encryptionPublicKey,
-              encryptionPublicKey:
-                profile.encryptionPublicKey
-                ?? profile?.metadata?.encryptionPublicKey
-                ?? profile.cryptoPublicKey
-                ?? profile?.metadata?.cryptoPublicKey,
-            },
-          });
+          metadata: {
+            ...persistedMetadata,
+            name: profile.name ?? persistedMetadata.name,
+            avatar: profile.avatar ?? persistedMetadata.avatar,
+            bio: profile.bio ?? persistedMetadata.bio,
+            website: profile.website ?? persistedMetadata.website,
+            lastUpdated: profile.lastUpdated ?? persistedMetadata.lastUpdated,
+            hankoSignature: profile.hankoSignature ?? persistedMetadata.hankoSignature,
+            entityPublicKey: profile.entityPublicKey ?? persistedMetadata.entityPublicKey,
+            cryptoPublicKey:
+              profile.cryptoPublicKey
+              ?? persistedMetadata.cryptoPublicKey
+              ?? profile.encryptionPublicKey
+              ?? persistedMetadata.encryptionPublicKey,
+            encryptionPublicKey:
+              profile.encryptionPublicKey
+              ?? persistedMetadata.encryptionPublicKey
+              ?? profile.cryptoPublicKey
+              ?? persistedMetadata.cryptoPublicKey,
+          },
+        });
         profileCount++;
       } catch (parseError) {
         console.warn(`⚠️ Failed to parse profile from key ${key}:`, parseError);

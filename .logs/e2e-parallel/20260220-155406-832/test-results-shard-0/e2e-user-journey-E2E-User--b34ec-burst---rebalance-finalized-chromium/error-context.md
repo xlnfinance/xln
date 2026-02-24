@@ -1,0 +1,240 @@
+# Page snapshot
+
+```yaml
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e8]:
+          - button "🧭 0x3f5a...175c (journey-rt1) ▼" [ref=e11] [cursor=pointer]:
+            - generic [ref=e12]:
+              - generic [ref=e14]: 🧭
+              - generic [ref=e15]: 0x3f5a...175c (journey-rt1)
+              - generic [ref=e16]: ▼
+          - button "🏛️ Entity 0x22446cd033c2a6a3365094e264e30d5579e996246912f88cc36056d50b5e3cbc ▼" [ref=e19] [cursor=pointer]:
+            - generic [ref=e20]:
+              - generic [ref=e21]: 🏛️
+              - generic [ref=e22]: Entity 0x22446cd033c2a6a3365094e264e30d5579e996246912f88cc36056d50b5e3cbc
+              - generic [ref=e23]: ▼
+          - button "1 Account ▼" [ref=e26] [cursor=pointer]:
+            - generic [ref=e27]:
+              - generic [ref=e28]: 1 Account
+              - generic [ref=e29]: ▼
+        - button "Settings" [ref=e30] [cursor=pointer]:
+          - img [ref=e31]
+      - main [ref=e32]:
+        - main [ref=e34]:
+          - generic [ref=e36]:
+            - generic [ref=e37]:
+              - generic [ref=e38]:
+                - button "←" [ref=e39] [cursor=pointer]
+                - generic "0x8164c386f3a0e528e43fe8352aca11c0334f9263b601639a0eefd827a317aafe" [ref=e41]:
+                  - generic [ref=e42]:
+                    - generic [ref=e43]: 🧭H1
+                    - generic [ref=e44]:
+                      - code [ref=e45]: "0x8164c386f3a0e528e43fe8352aca11c0334f9263b601639a0eefd827a317aafe"
+                      - button "copy" [ref=e46] [cursor=pointer]
+                - generic "disconnected" [ref=e48]
+              - generic [ref=e49]:
+                - generic [ref=e50]: "Frame #6"
+                - generic "Last finalized bilateral J-event height" [ref=e51]: J#0
+                - generic [ref=e52]: Synced
+                - generic "Cryptographically verified account state" [ref=e53]: 🔒
+            - generic [ref=e54]:
+              - generic [ref=e55]:
+                - generic [ref=e56]:
+                  - generic [ref=e57]: USDC
+                  - generic [ref=e58]: OUT 500 USDC · IN 9,500 USDC
+                  - button "Details" [ref=e59] [cursor=pointer]
+                  - button "Faucet" [active] [ref=e60] [cursor=pointer]
+                - generic [ref=e61]:
+                  - generic [ref=e62]: OUT 500 USDC
+                  - generic [ref=e63]: IN 9,500 USDC
+              - generic [ref=e71]:
+                - generic [ref=e72]: "Frame #6"
+                - generic [ref=e73]: 3:54:20 PM
+                - code [ref=e74]: 0x0234a097c81a1e...
+                - generic [ref=e75]: ✓
+                - generic [ref=e76]: Pending
+              - generic [ref=e77]:
+                - button "Activity" [ref=e78] [cursor=pointer]
+                - button "Actions" [ref=e79] [cursor=pointer]
+                - button "Settle" [ref=e80] [cursor=pointer]
+              - generic [ref=e81]:
+                - heading "Account Frame History (6 confirmed frames)" [level=3] [ref=e82]
+                - generic [ref=e83]:
+                  - generic [ref=e84]:
+                    - generic [ref=e85]:
+                      - generic [ref=e86]: "Current Frame #6"
+                      - generic [ref=e87]: Active
+                      - generic [ref=e88]: 3:54:20 PM
+                    - generic [ref=e89]:
+                      - generic [ref=e90]:
+                        - generic [ref=e91]: "Transactions:"
+                        - generic [ref=e92]: "1"
+                      - generic [ref=e93]:
+                        - generic [ref=e94]: "State Hash:"
+                        - generic [ref=e95]: frame#6_060216
+                  - generic [ref=e96]:
+                    - heading "Historical Frames (last 6):" [level=4] [ref=e97]
+                    - generic [ref=e98]:
+                      - generic [ref=e99]:
+                        - generic [ref=e100]: "Frame #6"
+                        - generic [ref=e101]: Confirmed
+                        - generic [ref=e102]: 3:54:20 PM
+                      - generic [ref=e103]:
+                        - generic [ref=e104]:
+                          - generic [ref=e105]: "Transactions:"
+                          - generic [ref=e106]: "1"
+                        - generic [ref=e107]:
+                          - generic [ref=e108]: "Proposer:"
+                          - generic [ref=e109]: Right
+                        - generic [ref=e110]:
+                          - generic [ref=e111]: "Tokens:"
+                          - generic [ref=e112]: "1"
+                        - generic [ref=e113]:
+                          - generic [ref=e114]: "Hash:"
+                          - generic [ref=e115]: 0x0234a0...
+                      - generic [ref=e117]:
+                        - generic [ref=e118]: "1."
+                        - generic [ref=e119]: direct_payment
+                        - generic [ref=e120]: "{\"tokenId\":1,\"amount\":\"100000000000000000000\",\"route\":[\"0x22446cd033c2a6a3365094e264e30d5579e996246912f88cc36056d50b5e3cbc\"],\"description\":\"faucet-offchain\",\"fromEntityId\":\"0x8164c386f3a0e528e43fe8352aca11c0334f9263b601639a0eefd827a317aafe\",\"toEntityId\":\"0x22446cd033c2a6a3365094e264e30d5579e996246912f88cc36056d50b5e3cbc\"}"
+                    - generic [ref=e121]:
+                      - generic [ref=e122]:
+                        - generic [ref=e123]: "Frame #5"
+                        - generic [ref=e124]: Confirmed
+                        - generic [ref=e125]: 3:54:20 PM
+                      - generic [ref=e126]:
+                        - generic [ref=e127]:
+                          - generic [ref=e128]: "Transactions:"
+                          - generic [ref=e129]: "1"
+                        - generic [ref=e130]:
+                          - generic [ref=e131]: "Proposer:"
+                          - generic [ref=e132]: Right
+                        - generic [ref=e133]:
+                          - generic [ref=e134]: "Tokens:"
+                          - generic [ref=e135]: "1"
+                        - generic [ref=e136]:
+                          - generic [ref=e137]: "Hash:"
+                          - generic [ref=e138]: 0x9e2074...
+                      - generic [ref=e140]:
+                        - generic [ref=e141]: "1."
+                        - generic [ref=e142]: direct_payment
+                        - generic [ref=e143]: "{\"tokenId\":1,\"amount\":\"100000000000000000000\",\"route\":[\"0x22446cd033c2a6a3365094e264e30d5579e996246912f88cc36056d50b5e3cbc\"],\"description\":\"faucet-offchain\",\"fromEntityId\":\"0x8164c386f3a0e528e43fe8352aca11c0334f9263b601639a0eefd827a317aafe\",\"toEntityId\":\"0x22446cd033c2a6a3365094e264e30d5579e996246912f88cc36056d50b5e3cbc\"}"
+                    - generic [ref=e144]:
+                      - generic [ref=e145]:
+                        - generic [ref=e146]: "Frame #4"
+                        - generic [ref=e147]: Confirmed
+                        - generic [ref=e148]: 3:54:19 PM
+                      - generic [ref=e149]:
+                        - generic [ref=e150]:
+                          - generic [ref=e151]: "Transactions:"
+                          - generic [ref=e152]: "1"
+                        - generic [ref=e153]:
+                          - generic [ref=e154]: "Proposer:"
+                          - generic [ref=e155]: Right
+                        - generic [ref=e156]:
+                          - generic [ref=e157]: "Tokens:"
+                          - generic [ref=e158]: "1"
+                        - generic [ref=e159]:
+                          - generic [ref=e160]: "Hash:"
+                          - generic [ref=e161]: 0x6921f3...
+                      - generic [ref=e163]:
+                        - generic [ref=e164]: "1."
+                        - generic [ref=e165]: direct_payment
+                        - generic [ref=e166]: "{\"tokenId\":1,\"amount\":\"100000000000000000000\",\"route\":[\"0x22446cd033c2a6a3365094e264e30d5579e996246912f88cc36056d50b5e3cbc\"],\"description\":\"faucet-offchain\",\"fromEntityId\":\"0x8164c386f3a0e528e43fe8352aca11c0334f9263b601639a0eefd827a317aafe\",\"toEntityId\":\"0x22446cd033c2a6a3365094e264e30d5579e996246912f88cc36056d50b5e3cbc\"}"
+                    - generic [ref=e167]:
+                      - generic [ref=e168]:
+                        - generic [ref=e169]: "Frame #3"
+                        - generic [ref=e170]: Confirmed
+                        - generic [ref=e171]: 3:54:19 PM
+                      - generic [ref=e172]:
+                        - generic [ref=e173]:
+                          - generic [ref=e174]: "Transactions:"
+                          - generic [ref=e175]: "1"
+                        - generic [ref=e176]:
+                          - generic [ref=e177]: "Proposer:"
+                          - generic [ref=e178]: Right
+                        - generic [ref=e179]:
+                          - generic [ref=e180]: "Tokens:"
+                          - generic [ref=e181]: "1"
+                        - generic [ref=e182]:
+                          - generic [ref=e183]: "Hash:"
+                          - generic [ref=e184]: 0x9fb480...
+                      - generic [ref=e186]:
+                        - generic [ref=e187]: "1."
+                        - generic [ref=e188]: direct_payment
+                        - generic [ref=e189]: "{\"tokenId\":1,\"amount\":\"100000000000000000000\",\"route\":[\"0x22446cd033c2a6a3365094e264e30d5579e996246912f88cc36056d50b5e3cbc\"],\"description\":\"faucet-offchain\",\"fromEntityId\":\"0x8164c386f3a0e528e43fe8352aca11c0334f9263b601639a0eefd827a317aafe\",\"toEntityId\":\"0x22446cd033c2a6a3365094e264e30d5579e996246912f88cc36056d50b5e3cbc\"}"
+                    - generic [ref=e190]:
+                      - generic [ref=e191]:
+                        - generic [ref=e192]: "Frame #2"
+                        - generic [ref=e193]: Confirmed
+                        - generic [ref=e194]: 3:54:19 PM
+                      - generic [ref=e195]:
+                        - generic [ref=e196]:
+                          - generic [ref=e197]: "Transactions:"
+                          - generic [ref=e198]: "1"
+                        - generic [ref=e199]:
+                          - generic [ref=e200]: "Proposer:"
+                          - generic [ref=e201]: Right
+                        - generic [ref=e202]:
+                          - generic [ref=e203]: "Tokens:"
+                          - generic [ref=e204]: "1"
+                        - generic [ref=e205]:
+                          - generic [ref=e206]: "Hash:"
+                          - generic [ref=e207]: 0xfdf8b1...
+                      - generic [ref=e209]:
+                        - generic [ref=e210]: "1."
+                        - generic [ref=e211]: direct_payment
+                        - generic [ref=e212]: "{\"tokenId\":1,\"amount\":\"100000000000000000000\",\"route\":[\"0x22446cd033c2a6a3365094e264e30d5579e996246912f88cc36056d50b5e3cbc\"],\"description\":\"faucet-offchain\",\"fromEntityId\":\"0x8164c386f3a0e528e43fe8352aca11c0334f9263b601639a0eefd827a317aafe\",\"toEntityId\":\"0x22446cd033c2a6a3365094e264e30d5579e996246912f88cc36056d50b5e3cbc\"}"
+                    - generic [ref=e213]:
+                      - generic [ref=e214]:
+                        - generic [ref=e215]: "Frame #1"
+                        - generic [ref=e216]: Confirmed
+                        - generic [ref=e217]: 3:54:19 PM
+                      - generic [ref=e218]:
+                        - generic [ref=e219]:
+                          - generic [ref=e220]: "Transactions:"
+                          - generic [ref=e221]: "3"
+                        - generic [ref=e222]:
+                          - generic [ref=e223]: "Proposer:"
+                          - generic [ref=e224]: Left (you)
+                        - generic [ref=e225]:
+                          - generic [ref=e226]: "Tokens:"
+                          - generic [ref=e227]: "1"
+                        - generic [ref=e228]:
+                          - generic [ref=e229]: "Hash:"
+                          - generic [ref=e230]: 0x99430a...
+                      - generic [ref=e231]:
+                        - generic [ref=e232]:
+                          - generic [ref=e233]: "1."
+                          - generic [ref=e234]: add_delta
+                          - generic [ref=e235]: "{\"tokenId\":1}"
+                        - generic [ref=e236]:
+                          - generic [ref=e237]: "2."
+                          - generic [ref=e238]: set_credit_limit
+                          - generic [ref=e239]: "{\"tokenId\":1,\"amount\":\"10000000000000000000000\"}"
+                        - generic [ref=e240]:
+                          - generic [ref=e241]: "3."
+                          - generic [ref=e242]: set_rebalance_policy
+                          - generic [ref=e243]: "{\"tokenId\":1,\"softLimit\":\"500000000000000000000\",\"hardLimit\":\"10000000000000000000000\",\"maxAcceptableFee\":\"15000000000000000000\"}"
+    - generic [ref=e245]:
+      - generic [ref=e246]:
+        - button "Go to start (Home)" [ref=e247] [cursor=pointer]:
+          - img [ref=e248]
+        - button "Step back (←)" [ref=e249] [cursor=pointer]:
+          - img [ref=e250]
+        - button "Step forward (→)" [ref=e251] [cursor=pointer]:
+          - img [ref=e252]
+        - button "Go to live (End)" [ref=e253] [cursor=pointer]:
+          - img [ref=e254]
+      - button "Play/Pause (Space)" [ref=e255] [cursor=pointer]:
+        - img [ref=e256]
+      - generic [ref=e257]:
+        - generic [ref=e258]:
+          - button "LIVE/9" [ref=e260] [cursor=pointer]
+          - generic [ref=e261]: 0:01.462
+        - slider [ref=e262] [cursor=pointer]: "8"
+        - generic [ref=e263]: 0:01.462
+        - button "Dock" [ref=e264] [cursor=pointer]
+```

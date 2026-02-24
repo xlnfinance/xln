@@ -1,0 +1,67 @@
+# Page snapshot
+
+```yaml
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e8]:
+          - button "🧭 0x9174...0587 (bob) ▼" [ref=e11] [cursor=pointer]:
+            - generic [ref=e12]:
+              - generic [ref=e14]: 🧭
+              - generic [ref=e15]: 0x9174...0587 (bob)
+              - generic [ref=e16]: ▼
+          - button "🏛️ Entity ecde (0x285b81e6689c74c4cf9e0d676ff763a021275f5b0eac8a61ffa83d3ded31ecde) ▼" [ref=e19] [cursor=pointer]:
+            - generic [ref=e20]:
+              - generic [ref=e21]: 🏛️
+              - generic [ref=e22]: Entity ecde (0x285b81e6689c74c4cf9e0d676ff763a021275f5b0eac8a61ffa83d3ded31ecde)
+              - generic [ref=e23]: ▼
+          - button "1 Account ▼" [ref=e26] [cursor=pointer]:
+            - generic [ref=e27]:
+              - generic [ref=e28]: 1 Account
+              - generic [ref=e29]: ▼
+        - button "Settings" [ref=e30] [cursor=pointer]:
+          - img [ref=e31]
+      - main [ref=e32]:
+        - generic [ref=e33]:
+          - generic [ref=e37]:
+            - generic [ref=e38]: "1"
+            - generic [ref=e39]: "2"
+            - generic [ref=e40]: "3"
+          - generic [ref=e41]:
+            - heading "Welcome to xln" [level=2] [ref=e42]
+            - paragraph [ref=e43]: Peer-to-peer payment network with on-chain settlement
+            - generic [ref=e44]:
+              - heading "Before you continue" [level=4] [ref=e45]
+              - list [ref=e46]:
+                - listitem [ref=e47]:
+                  - text: Your keys are derived from your BrainVault seed —
+                  - strong [ref=e48]: never share it
+                - listitem [ref=e49]: Bilateral accounts use cryptographic consensus — both sides sign every state change
+                - listitem [ref=e50]: Collateral is secured on-chain via smart contracts
+                - listitem [ref=e51]: Unsecured credit carries counterparty risk — manage your limits
+                - listitem [ref=e52]: This is testnet software — use at your own risk
+            - generic [ref=e53] [cursor=pointer]:
+              - checkbox "I understand and accept the risks of using this software" [ref=e54]
+              - generic [ref=e55]: I understand and accept the risks of using this software
+            - button "Continue →" [disabled] [ref=e57]
+    - generic [ref=e59]:
+      - generic [ref=e60]:
+        - button "Go to start (Home)" [ref=e61] [cursor=pointer]:
+          - img [ref=e62]
+        - button "Step back (←)" [ref=e63] [cursor=pointer]:
+          - img [ref=e64]
+        - button "Step forward (→)" [ref=e65] [cursor=pointer]:
+          - img [ref=e66]
+        - button "Go to live (End)" [ref=e67] [cursor=pointer]:
+          - img [ref=e68]
+      - button "Play/Pause (Space)" [ref=e69] [cursor=pointer]:
+        - img [ref=e70]
+      - generic [ref=e71]:
+        - generic [ref=e72]:
+          - button "LIVE/5" [ref=e74] [cursor=pointer]
+          - generic [ref=e75]: 1:39.571
+        - slider [ref=e76] [cursor=pointer]: "4"
+        - generic [ref=e77]: 1:39.571
+        - button "Dock" [ref=e78] [cursor=pointer]
+```

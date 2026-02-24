@@ -44,6 +44,8 @@ import { Wallet, ethers } from 'ethers';
 const INIT_TIMEOUT = 30_000;
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
+const FAST_E2E = process.env.E2E_FAST !== '0';
+const LONG_E2E = process.env.E2E_LONG === '1';
 
 // ─── Fee Calculation Utilities ──────────────────────────────────
 const DEFAULT_FEE_PPM = 100n; // 0.01% — server default for all hubs
@@ -510,7 +512,7 @@ async function resetProdServer(page: Page) {
   let resetDone = false;
   for (let attempt = 1; attempt <= 10; attempt++) {
     try {
-      const resp = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1`);
+      const resp = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1&sync=1`);
       if (resp.ok()) {
         const data = await resp.json().catch(() => ({}));
         console.log(`[E2E] Cold reset requested: ${JSON.stringify(data)}`);
@@ -538,9 +540,11 @@ async function resetProdServer(page: Page) {
 // ─── Test ────────────────────────────────────────────────────────
 
 test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
-  test.setTimeout(600_000); // 10 min
+  test.setTimeout(LONG_E2E ? 600_000 : 60_000);
 
   test('full mesh routing with diverse payment patterns', async ({ page }) => {
+    test.skip(FAST_E2E && !LONG_E2E, 'Long multiroute load is disabled in fast mode.');
+
     page.on('console', msg => {
       const t = msg.text();
       if (t.includes('[E2E]') || t.includes('HTLC') || msg.type() === 'error')

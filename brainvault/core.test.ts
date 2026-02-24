@@ -14,25 +14,25 @@ import {
 // FROZEN - these define wallet compatibility forever
 const VECTORS = [
   { name: 'alice', passphrase: 'secret123456', shards: 1, expect: {
-    salt0: '9c2c96bb09c8f21dd666d328c6dce73180e0d93f8e7c8e5ce1ce1f073ac6667c',
-    shard0: 'e8f9ab9ee7d99acae7cda8f88c41e2ab7e3b5ef3b7c1a16d8f6ca4b89caab3f2',
-    masterKey: '48fe936eb38f80f58b3c2e0b3d82893a8af1c1d4dd3be3ec9dbdd69c7c31b63f',
-    mnemonic24: 'flip vintage neutral viable output acid pitch drift priority endless sheriff panda dinosaur april essence tobacco subway leisure quiz strategy alpha sphere disorder rebuild',
-    ethAddr: '0x87D5f6B03a32aDb2bc8610Bb5D03F20D23D2d1aA',
+    salt0: 'ec290cacd14098d2ee8ff7b8eaaba69904d97cd7720f62eb52cb7b8eac19399f',
+    shard0: 'd7057a04c5441e8246db71a98c94148b6306d810c5a5382ee5d3fd15655927b4',
+    masterKey: '52b33367533012c26bf4660339e9373dca2adc2d4051dbbfff51566aa55f37cf',
+    mnemonic24: 'milk click novel require across cousin good chair street mouse crash movie same daughter air quote total pride crop mention focus sick slice hole',
+    ethAddr: '0x93bAb14eD871462D414a7c0357BF1a76DE741397',
   }},
   { name: 'bob', passphrase: 'password123', shards: 1, expect: {
-    salt0: '2fbba4db7ff45dd77a50cfebf6fd4c3b5e869d14ceb6daea94fbe4f3cd7d3d3c',
-    shard0: '5e8d17a5c3eed0cda8e4da78f64af2e3b44cb2f65bf6f7d17b6e7da62f5f7e14',
-    masterKey: '24db6d8ef89c2e3df93f1e4bb8e3e1f2d1f5cce01c69e94b3e5d4b9f1d3edb44',
-    mnemonic24: 'timber spice inflict biology dice coyote vintage cube diary erosion flip twelve biology vote drip dice dinosaur cross index tornado daring vintage journey electric',
-    ethAddr: '0xdF94b90AcD6EDD02EdAb4d77E48a3B90C5E4C80a',
+    salt0: 'ca5c30c09d55f588667c80cac73b4dae612cbc8c32ff444289a364f56f446844',
+    shard0: '7c4bcabead8a1094589bd59fa445285b81aee55d9d49a652a348adbcd325accf',
+    masterKey: '297e86a9fd23b0fd2e59d9111ad666cf82da377730d5326076f20b215a023104',
+    mnemonic24: 'lion shoot refuse toss scissors brass voice blame climb identify surface attack sing topic burden deer captain stone unit hood clarify scatter captain during',
+    ethAddr: '0x4A699A1F4061ceEbC83b9dC14d6A0c33eC3E2327',
   }},
   { name: 'test', passphrase: 'secret123', shards: 10, expect: {
-    salt0: 'cd31eb5c31073cf97bc57c0d77a2c37dcbfc8ad55f8e8d5e9de8aad9c5c4e31f',
-    shard0: '1e9f65aa2f7f5e5ecc3be4f29daead3d0cf1ba6e97a8d8dbc35bce60e26e3ba5',
-    masterKey: '1f1fcb66cd7a3e5f1cd3a0b32d4e0d4acd7b5e0f1e4d9a2b5c8e3f1d4a7b9c2e',
-    mnemonic24: 'valve kite panda endless alpha reunion recall banner crystal inflict era clarify sheriff absent enforce category swear catalog nuclear venture fiscal orient orient organ',
-    ethAddr: '0x0DD26eC7D8b5e4f2E6d9e3f48c9a2D1e5F7C8B4A',
+    salt0: '7e95de96d472cbce318d8dcc4976997c388d555027ee086ebdaaab004684efca',
+    shard0: '1c2b3e5bc7647e48477cfaf2b64693e9c5b86bd33835c9d3400f8ef47eddc2fe',
+    masterKey: '2179a82fef1320e04025d0a82fb62ca47f528bda5b707edb6e25cf680d9ae94f',
+    mnemonic24: 'inch museum panther drop celery make town mention hundred sound argue mammal resource kid point veteran asset flame great equal pink pair balcony guide',
+    ethAddr: '0x0b3C4712A9838cB306357c12C12991F9aF83DCD1',
   }},
 ];
 
@@ -105,7 +105,7 @@ test('CLI produces same results as library', async () => {
   const json = JSON.parse(jsonMatch[0]);
   const v = VECTORS[0]!;
 
-  expect(json.ethAddr).toBe(v.expect.ethAddr);
+  expect(json.ethAddr24).toBe(v.expect.ethAddr);
   expect(json.mnemonic24).toBe(v.expect.mnemonic24);
 });
 

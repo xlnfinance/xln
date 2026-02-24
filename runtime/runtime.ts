@@ -1502,6 +1502,7 @@ const applyRuntimeInput = async (
           console.log(`[Runtime] ✅ JReplica "${runtimeTx.data.name}" ready (watching)`);
         } catch (error) {
           console.error(`[Runtime] ❌ Failed to import J-machine:`, error);
+          throw error;
         }
       } else if (runtimeTx.type === 'importReplica') {
         if (DEBUG)

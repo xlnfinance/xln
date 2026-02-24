@@ -1,0 +1,160 @@
+# Page snapshot
+
+```yaml
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e8]:
+          - button "🧭 0xf886...0417 (journey-rt1) ▼" [ref=e11] [cursor=pointer]:
+            - generic [ref=e12]:
+              - generic [ref=e14]: 🧭
+              - generic [ref=e15]: 0xf886...0417 (journey-rt1)
+              - generic [ref=e16]: ▼
+          - button "🏛️ Entity b4b9 (0x64a10de85357a4f26cd2d4a775f7c295af54433a7a36809dd1d2c02a82a0b4b9) ▼" [ref=e19] [cursor=pointer]:
+            - generic [ref=e20]:
+              - generic [ref=e21]: 🏛️
+              - generic [ref=e22]: Entity b4b9 (0x64a10de85357a4f26cd2d4a775f7c295af54433a7a36809dd1d2c02a82a0b4b9)
+              - generic [ref=e23]: ▼
+          - button "1 Account ▼" [ref=e26] [cursor=pointer]:
+            - generic [ref=e27]:
+              - generic [ref=e28]: 1 Account
+              - generic [ref=e29]: ▼
+        - button "Settings" [ref=e30] [cursor=pointer]:
+          - img [ref=e31]
+      - main [ref=e32]:
+        - main [ref=e34]:
+          - generic [ref=e35]:
+            - generic [ref=e36]:
+              - img "Entity avatar" [ref=e37]
+              - generic [ref=e38]:
+                - generic [ref=e39]: Entity b4b9
+                - button "0x64a10de8...a0b4b9" [ref=e40] [cursor=pointer]:
+                  - generic [ref=e41]: 0x64a10de8...a0b4b9
+                  - img [ref=e42]
+            - generic [ref=e43]:
+              - generic [ref=e44]: $0.00
+              - generic [ref=e45]: Net Worth
+          - generic [ref=e46]:
+            - button "💳 $0.00 External 0 tokens" [ref=e47] [cursor=pointer]:
+              - generic [ref=e48]: 💳
+              - generic [ref=e49]:
+                - generic [ref=e50]: $0.00
+                - generic [ref=e51]: External
+                - generic [ref=e52]: 0 tokens
+            - button "🏦 $0.00 Reserves 0 tokens" [ref=e53] [cursor=pointer]:
+              - generic [ref=e54]: 🏦
+              - generic [ref=e55]:
+                - generic [ref=e56]: $0.00
+                - generic [ref=e57]: Reserves
+                - generic [ref=e58]: 0 tokens
+            - button "⚡ $0.00 Accounts 1 channel" [ref=e59] [cursor=pointer]:
+              - generic [ref=e60]: ⚡
+              - generic [ref=e61]:
+                - generic [ref=e62]: $0.00
+                - generic [ref=e63]: Accounts
+                - generic [ref=e64]: 1 channel
+          - navigation [ref=e65]:
+            - button "External" [ref=e66] [cursor=pointer]:
+              - img [ref=e67]
+              - generic [ref=e68]: External
+            - button "Reserves" [ref=e69] [cursor=pointer]:
+              - img [ref=e70]
+              - generic [ref=e71]: Reserves
+            - button "Accounts" [ref=e72] [cursor=pointer]:
+              - img [ref=e73]
+              - generic [ref=e74]: Accounts
+            - button "Chat" [ref=e75] [cursor=pointer]:
+              - img [ref=e76]
+              - generic [ref=e77]: Chat
+            - button "Contacts" [ref=e78] [cursor=pointer]:
+              - img [ref=e79]
+              - generic [ref=e80]: Contacts
+            - button "Create" [ref=e81] [cursor=pointer]:
+              - img [ref=e82]
+              - generic [ref=e83]: Create
+            - button "Gossip" [ref=e84] [cursor=pointer]:
+              - img [ref=e85]
+              - generic [ref=e86]: Gossip
+            - button "Governance" [ref=e87] [cursor=pointer]:
+              - img [ref=e88]
+              - generic [ref=e89]: Governance
+            - button "Settings" [ref=e90] [cursor=pointer]:
+              - img [ref=e91]
+              - generic [ref=e92]: Settings
+            - button "Reset" [ref=e93] [cursor=pointer]:
+              - img [ref=e94]
+              - generic [ref=e95]: Reset
+          - generic [ref=e96]:
+            - generic [ref=e98]:
+              - generic [ref=e99]:
+                - generic [ref=e100]: 1 account
+                - button "⊞" [ref=e102] [cursor=pointer]
+              - button "0x8f61556b029b3bbcc54f761b6d340496f21e3b6b480d5d689154fb7e9456b3c0 Pending J#0 Faucet No capacity" [ref=e104] [cursor=pointer]:
+                - generic [ref=e105]:
+                  - generic "0x8f61556b029b3bbcc54f761b6d340496f21e3b6b480d5d689154fb7e9456b3c0" [ref=e107]:
+                    - code [ref=e110]: "0x8f61556b029b3bbcc54f761b6d340496f21e3b6b480d5d689154fb7e9456b3c0"
+                  - generic [ref=e111]:
+                    - generic [ref=e113]: Pending
+                    - generic "Last finalized bilateral J-event height" [ref=e114]: J#0
+                    - button "Faucet" [ref=e115]
+                - generic [ref=e116]: No capacity
+            - navigation "Account workspace" [ref=e117]:
+              - button "Open Account" [ref=e118] [cursor=pointer]:
+                - img [ref=e119]
+                - generic [ref=e120]: Open Account
+              - button "Send" [ref=e121] [cursor=pointer]:
+                - img [ref=e122]
+                - generic [ref=e123]: Send
+              - button "Swap" [ref=e124] [cursor=pointer]:
+                - img [ref=e125]
+                - generic [ref=e126]: Swap
+              - button "Activity" [ref=e127] [cursor=pointer]:
+                - img [ref=e128]
+                - generic [ref=e129]: Activity
+              - button "Settle" [ref=e130] [cursor=pointer]:
+                - img [ref=e131]
+                - generic [ref=e132]: Settle
+            - generic [ref=e134]:
+              - generic [ref=e135]:
+                - heading "Open with Public Hub" [level=4] [ref=e136]
+                - generic [ref=e137]:
+                  - generic [ref=e138]:
+                    - heading "Hubs" [level=3] [ref=e139]
+                    - generic [ref=e140]:
+                      - combobox [ref=e141]:
+                        - option "Prod (xln.finance)"
+                        - option "Local (localhost:9000)"
+                        - option "Custom" [selected]
+                      - button "Refresh" [disabled] [ref=e142] [cursor=pointer]:
+                        - img [ref=e144]
+                        - text: Refresh
+                  - generic [ref=e145]:
+                    - img [ref=e147]
+                    - generic [ref=e148]: Scanning network...
+              - generic [ref=e149]:
+                - heading "Open Private Account" [level=4] [ref=e150]
+                - generic [ref=e151]:
+                  - textbox "Full Entity ID (0x...)" [ref=e152]
+                  - button "Open" [ref=e153] [cursor=pointer]
+                - generic [ref=e154]: Only full entity IDs are accepted.
+    - generic [ref=e156]:
+      - generic [ref=e157]:
+        - button "Go to start (Home)" [ref=e158] [cursor=pointer]:
+          - img [ref=e159]
+        - button "Step back (←)" [ref=e160] [cursor=pointer]:
+          - img [ref=e161]
+        - button "Step forward (→)" [ref=e162] [cursor=pointer]:
+          - img [ref=e163]
+        - button "Go to live (End)" [ref=e164] [cursor=pointer]:
+          - img [ref=e165]
+      - button "Play/Pause (Space)" [ref=e166] [cursor=pointer]:
+        - img [ref=e167]
+      - generic [ref=e168]:
+        - generic [ref=e169]:
+          - button "LIVE/3" [ref=e171] [cursor=pointer]
+          - generic [ref=e172]: 0:00.416
+        - slider [ref=e173] [cursor=pointer]: "2"
+        - generic [ref=e174]: 0:00.416
+        - button "Dock" [ref=e175] [cursor=pointer]
+```

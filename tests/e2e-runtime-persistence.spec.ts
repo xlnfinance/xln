@@ -5,6 +5,7 @@ const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
 const RESET_BASE_URL = process.env.E2E_RESET_BASE_URL ?? 'http://localhost:8082';
 const INIT_TIMEOUT = 20_000;
+const LONG_E2E = process.env.E2E_LONG === '1';
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
@@ -68,7 +69,7 @@ async function resetProdServer(page: Page) {
   let resetDone = false;
   for (let attempt = 1; attempt <= 10; attempt++) {
     try {
-      const coldResponse = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1`);
+      const coldResponse = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1&sync=1`);
       const coldBody = await coldResponse.json().catch(() => ({}));
       if (coldResponse.ok()) {
         resetDone = true;
@@ -573,7 +574,7 @@ async function setSnapshotInterval(page: Page, frames: number) {
 }
 
 test.describe('E2E: Multi-runtime persistence reload', () => {
-  test.setTimeout(120_000);
+  test.setTimeout(LONG_E2E ? 120_000 : 60_000);
 
   test.beforeEach(async ({ page }) => {
     await resetProdServer(page);

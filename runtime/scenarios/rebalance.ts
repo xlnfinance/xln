@@ -622,11 +622,21 @@ export async function runRebalanceScenario(): Promise<void> {
     env,
   );
 
-  const rebalanceTargetUserIds = [alice.id, bob.id, charlie.id, dave.id].filter(userId => {
-    const after = hubAfterBroadcast.accounts.get(userId)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
-    const before = collateralBeforeRebalance.get(userId) ?? INITIAL_COLLATERAL;
-    return after > before;
-  });
+  const getRebalanceTargets = (state: typeof hubAfterBroadcast) =>
+    [alice.id, bob.id, charlie.id, dave.id].filter(userId => {
+      const after = state.accounts.get(userId)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+      const before = collateralBeforeRebalance.get(userId) ?? INITIAL_COLLATERAL;
+      return after > before;
+    });
+
+  let rebalanceTargetUserIds = getRebalanceTargets(hubAfterBroadcast);
+  if (rebalanceTargetUserIds.length === 0) {
+    // Race guard: confirmed batch can precede local bilateral j-event apply by one tick.
+    await syncChain();
+    await converge(env);
+    const hubAfterOneMoreSync = findReplica(env, hub.id)[1].state;
+    rebalanceTargetUserIds = getRebalanceTargets(hubAfterOneMoreSync);
+  }
   assert(rebalanceTargetUserIds.length > 0, 'Expected at least one account collateralized by hub rebalance', env);
 
   // Assert both sides finalized j-events for each targeted rebalance account.

@@ -1,0 +1,45 @@
+# Page snapshot
+
+```yaml
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e8]:
+          - button "🧭 0x745e...249B (rebalance-1771896442593) ▼" [ref=e11] [cursor=pointer]:
+            - generic [ref=e12]:
+              - generic [ref=e14]: 🧭
+              - generic [ref=e15]: 0x745e...249B (rebalance-1771896442593)
+              - generic [ref=e16]: ▼
+          - button "🏛️ Select Entity ▼" [ref=e19] [cursor=pointer]:
+            - generic [ref=e20]:
+              - generic [ref=e21]: 🏛️
+              - generic [ref=e22]: Select Entity
+              - generic [ref=e23]: ▼
+          - button "Select Account... ▼" [ref=e26] [cursor=pointer]:
+            - generic [ref=e27]:
+              - generic [ref=e28]: Select Account...
+              - generic [ref=e29]: ▼
+        - button "Settings" [ref=e30] [cursor=pointer]:
+          - img [ref=e31]
+      - main [ref=e32]
+    - generic [ref=e34]:
+      - generic [ref=e35]:
+        - button "Go to start (Home)" [ref=e36] [cursor=pointer]:
+          - img [ref=e37]
+        - button "Step back (←)" [ref=e38] [cursor=pointer]:
+          - img [ref=e39]
+        - button "Step forward (→)" [ref=e40] [cursor=pointer]:
+          - img [ref=e41]
+        - button "Go to live (End)" [ref=e42] [cursor=pointer]:
+          - img [ref=e43]
+      - button "Play/Pause (Space)" [ref=e44] [cursor=pointer]:
+        - img [ref=e45]
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - button "LIVE/0" [ref=e49] [cursor=pointer]
+          - generic [ref=e50]: 0:00.000
+        - slider [disabled] [ref=e51]: "0"
+        - generic [ref=e52]: 0:00.000
+        - button "Dock" [ref=e53] [cursor=pointer]
+```

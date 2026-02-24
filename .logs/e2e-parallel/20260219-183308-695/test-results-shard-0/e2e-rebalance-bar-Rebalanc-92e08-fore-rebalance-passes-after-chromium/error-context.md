@@ -1,0 +1,252 @@
+# Page snapshot
+
+```yaml
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e8]:
+          - button "🧭 0xd475...ccc3 (rt2-1771515205065) ▼" [ref=e11] [cursor=pointer]:
+            - generic [ref=e12]:
+              - generic [ref=e14]: 🧭
+              - generic [ref=e15]: 0xd475...ccc3 (rt2-1771515205065)
+              - generic [ref=e16]: ▼
+          - button "🏛️ Entity 0xe5dc33ad87d5b4d4ae5227fda33ac9aa47211bac609046bf9158f4d28f6f3038 ▼" [ref=e19] [cursor=pointer]:
+            - generic [ref=e20]:
+              - generic [ref=e21]: 🏛️
+              - generic [ref=e22]: Entity 0xe5dc33ad87d5b4d4ae5227fda33ac9aa47211bac609046bf9158f4d28f6f3038
+              - generic [ref=e23]: ▼
+          - button "2 Accounts ▼" [ref=e26] [cursor=pointer]:
+            - generic [ref=e27]:
+              - generic [ref=e28]: 2 Accounts
+              - generic [ref=e29]: ▼
+        - button "Settings" [ref=e30] [cursor=pointer]:
+          - img [ref=e31]
+      - main [ref=e32]:
+        - main [ref=e34]:
+          - generic [ref=e35]:
+            - generic [ref=e36]:
+              - img "Entity avatar" [ref=e37]
+              - generic [ref=e38]:
+                - generic [ref=e39]: 0xe5dc33ad...6f3038
+                - button "0xe5dc33ad...6f3038" [ref=e40] [cursor=pointer]:
+                  - generic [ref=e41]: 0xe5dc33ad...6f3038
+                  - img [ref=e42]
+            - generic [ref=e43]:
+              - generic [ref=e44]: $549.84
+              - generic [ref=e45]: Net Worth
+          - generic [ref=e46]:
+            - button "💳 $0.00 External 0 tokens" [ref=e47] [cursor=pointer]:
+              - generic [ref=e48]: 💳
+              - generic [ref=e49]:
+                - generic [ref=e50]: $0.00
+                - generic [ref=e51]: External
+                - generic [ref=e52]: 0 tokens
+            - button "🏦 $0.00 Reserves 0 tokens" [ref=e53] [cursor=pointer]:
+              - generic [ref=e54]: 🏦
+              - generic [ref=e55]:
+                - generic [ref=e56]: $0.00
+                - generic [ref=e57]: Reserves
+                - generic [ref=e58]: 0 tokens
+            - button "⚡ $549.84 Accounts 2 channels owed $49.84 coll $500.00 in $10.95K" [ref=e59] [cursor=pointer]:
+              - generic [ref=e60]: ⚡
+              - generic [ref=e61]:
+                - generic [ref=e62]: $549.84
+                - generic [ref=e63]: Accounts
+                - generic [ref=e64]:
+                  - text: 2 channels
+                  - generic [ref=e65]: owed $49.84
+                  - generic [ref=e66]: coll $500.00
+                  - generic [ref=e67]: in $10.95K
+          - navigation [ref=e68]:
+            - button "External" [ref=e69] [cursor=pointer]:
+              - img [ref=e70]
+              - generic [ref=e71]: External
+            - button "Reserves" [ref=e72] [cursor=pointer]:
+              - img [ref=e73]
+              - generic [ref=e74]: Reserves
+            - button "Accounts" [ref=e75] [cursor=pointer]:
+              - img [ref=e76]
+              - generic [ref=e77]: Accounts
+            - button "Send" [ref=e78] [cursor=pointer]:
+              - img [ref=e79]
+              - generic [ref=e80]: Send
+            - button "Swap" [ref=e81] [cursor=pointer]:
+              - img [ref=e82]
+              - generic [ref=e83]: Swap
+            - button "On-Chain" [ref=e84] [cursor=pointer]:
+              - img [ref=e85]
+              - generic [ref=e86]: On-Chain
+            - button "Activity" [ref=e87] [cursor=pointer]:
+              - img [ref=e88]
+              - generic [ref=e89]: Activity
+            - button "Chat" [ref=e90] [cursor=pointer]:
+              - img [ref=e91]
+              - generic [ref=e92]: Chat
+            - button "Contacts" [ref=e93] [cursor=pointer]:
+              - img [ref=e94]
+              - generic [ref=e95]: Contacts
+            - button "Receive" [ref=e96] [cursor=pointer]:
+              - img [ref=e97]
+              - generic [ref=e98]: Receive
+            - button "Create" [ref=e99] [cursor=pointer]:
+              - img [ref=e100]
+              - generic [ref=e101]: Create
+            - button "Gossip" [ref=e102] [cursor=pointer]:
+              - img [ref=e103]
+              - generic [ref=e104]: Gossip
+            - button "Governance" [ref=e105] [cursor=pointer]:
+              - img [ref=e106]
+              - generic [ref=e107]: Governance
+            - button "Settings" [ref=e108] [cursor=pointer]:
+              - img [ref=e109]
+              - generic [ref=e110]: Settings
+            - button "Reset" [ref=e111] [cursor=pointer]:
+              - img [ref=e112]
+              - generic [ref=e113]: Reset
+          - generic [ref=e114]:
+            - generic [ref=e115]:
+              - heading "Quick Actions" [level=4] [ref=e116]
+              - generic [ref=e117]:
+                - heading "Send Payment" [level=4] [ref=e118]
+                - generic [ref=e119]:
+                  - button "Select account ▼" [ref=e121] [cursor=pointer]:
+                    - generic [ref=e122]: Select account
+                    - generic [ref=e123]: ▼
+                  - combobox [ref=e124]:
+                    - option "USDC" [selected]
+                    - option "WETH"
+                    - option "USDT"
+                  - textbox "Amount" [ref=e125]: "0"
+                  - textbox "Description (optional)" [ref=e126]
+                  - button "Send Payment" [disabled] [ref=e127] [cursor=pointer]
+              - generic [ref=e128]:
+                - heading "Extend Credit" [level=4] [ref=e129]
+                - generic [ref=e130]:
+                  - button "Select account ▼" [ref=e132] [cursor=pointer]:
+                    - generic [ref=e133]: Select account
+                    - generic [ref=e134]: ▼
+                  - combobox [ref=e135]:
+                    - option "USDC" [selected]
+                    - option "WETH"
+                    - option "USDT"
+                  - textbox "Credit amount" [ref=e136]: "0"
+                  - button "Extend Credit" [disabled] [ref=e137] [cursor=pointer]
+            - generic [ref=e139]:
+              - generic [ref=e140]:
+                - generic [ref=e141]: 2 accounts
+                - button "⊞" [ref=e142] [cursor=pointer]
+              - generic [ref=e143]:
+                - 'button "0x8164c386f3a0e528e43fe8352aca11c0334f9263b601639a0eefd827a317aafe Synced J#0 Faucet OUT 0.0 USDC +0.0 USDC USDC IN 10000.0 USDC Available: 10000.0 USDC" [ref=e144] [cursor=pointer]':
+                  - generic [ref=e145]:
+                    - generic "0x8164c386f3a0e528e43fe8352aca11c0334f9263b601639a0eefd827a317aafe" [ref=e147]:
+                      - code [ref=e150]: "0x8164c386f3a0e528e43fe8352aca11c0334f9263b601639a0eefd827a317aafe"
+                    - generic [ref=e151]:
+                      - generic [ref=e153]: Synced
+                      - generic "Last finalized bilateral J-event height" [ref=e154]: J#0
+                      - button "Faucet" [ref=e155]
+                  - generic [ref=e156]:
+                    - generic [ref=e157]: OUT 0.0 USDC
+                    - generic [ref=e158]: +0.0 USDC USDC
+                    - generic [ref=e159]: IN 10000.0 USDC
+                  - 'generic "Available: 10000.0 USDC" [ref=e164]'
+                - 'button "0x8f61556b029b3bbcc54f761b6d340496f21e3b6b480d5d689154fb7e9456b3c0 Synced J#45 Faucet OUT 549.845 USDC -549.845 USDC USDC IN 950.155 USDC Secured: 500.0 USDC Unsecured: 49.845 USDC Available: 950.155 USDC Secured" [ref=e165] [cursor=pointer]':
+                  - generic [ref=e166]:
+                    - generic "0x8f61556b029b3bbcc54f761b6d340496f21e3b6b480d5d689154fb7e9456b3c0" [ref=e168]:
+                      - code [ref=e171]: "0x8f61556b029b3bbcc54f761b6d340496f21e3b6b480d5d689154fb7e9456b3c0"
+                    - generic [ref=e172]:
+                      - generic [ref=e174]: Synced
+                      - generic "Last finalized bilateral J-event height" [ref=e175]: J#45
+                      - button "Faucet" [ref=e176]
+                  - generic [ref=e177]:
+                    - generic [ref=e178]: OUT 549.845 USDC
+                    - generic [ref=e179]: "-549.845 USDC USDC"
+                    - generic [ref=e180]: IN 950.155 USDC
+                  - generic [ref=e181]:
+                    - generic [ref=e182]:
+                      - 'generic "Secured: 500.0 USDC" [ref=e183]'
+                      - 'generic "Unsecured: 49.845 USDC" [ref=e184]'
+                    - 'generic "Available: 950.155 USDC" [ref=e187]'
+                  - generic [ref=e190]: Secured
+            - generic [ref=e191]:
+              - generic [ref=e192]:
+                - heading "Open with Public Hub" [level=4] [ref=e193]
+                - generic [ref=e194]:
+                  - generic [ref=e195]:
+                    - heading "Hubs" [level=3] [ref=e196]
+                    - generic [ref=e197]:
+                      - combobox [ref=e198]:
+                        - option "Prod (xln.finance)"
+                        - option "Local (localhost:9000)"
+                        - option "Custom" [selected]
+                      - button "Refresh" [ref=e199] [cursor=pointer]:
+                        - img [ref=e201]
+                        - text: Refresh
+                  - generic [ref=e202]:
+                    - generic [ref=e203]:
+                      - button "Name" [ref=e204] [cursor=pointer]
+                      - button "Fee" [ref=e205] [cursor=pointer]:
+                        - text: Fee
+                        - img [ref=e206]
+                      - button "Capacity" [ref=e207] [cursor=pointer]
+                      - button "Uptime" [ref=e208] [cursor=pointer]
+                      - button "Region" [ref=e209] [cursor=pointer]
+                    - generic [ref=e212] [cursor=pointer]:
+                      - generic [ref=e213]:
+                        - img [ref=e215]
+                        - generic [ref=e216]: H1
+                      - generic [ref=e217]: 1.00 bps
+                      - generic [ref=e218]: "-"
+                      - generic [ref=e219]: 99.9%
+                      - generic [ref=e220]: global
+                      - button "Connect" [ref=e222]:
+                        - img [ref=e223]
+                        - text: Connect
+                    - generic [ref=e225] [cursor=pointer]:
+                      - generic [ref=e226]:
+                        - img [ref=e228]
+                        - generic [ref=e229]: H2
+                      - generic [ref=e230]: 1.00 bps
+                      - generic [ref=e231]: "-"
+                      - generic [ref=e232]: 99.9%
+                      - generic [ref=e233]: global
+                      - button "Connect" [ref=e235]:
+                        - img [ref=e236]
+                        - text: Connect
+                    - generic [ref=e238] [cursor=pointer]:
+                      - generic [ref=e239]:
+                        - img [ref=e241]
+                        - generic [ref=e242]: H3
+                      - generic [ref=e243]: 1.00 bps
+                      - generic [ref=e244]: "-"
+                      - generic [ref=e245]: 99.9%
+                      - generic [ref=e246]: global
+                      - button "Connect" [ref=e248]:
+                        - img [ref=e249]
+                        - text: Connect
+              - generic [ref=e250]:
+                - heading "Open Private Account" [level=4] [ref=e251]
+                - generic [ref=e252]:
+                  - textbox "Full Entity ID (0x...)" [ref=e253]
+                  - button "Open" [ref=e254] [cursor=pointer]
+                - generic [ref=e255]: Only full entity IDs are accepted.
+    - generic [ref=e257]:
+      - generic [ref=e258]:
+        - button "Go to start (Home)" [ref=e259] [cursor=pointer]:
+          - img [ref=e260]
+        - button "Step back (←)" [ref=e261] [cursor=pointer]:
+          - img [ref=e262]
+        - button "Step forward (→)" [ref=e263] [cursor=pointer]:
+          - img [ref=e264]
+        - button "Go to live (End)" [ref=e265] [cursor=pointer]:
+          - img [ref=e266]
+      - button "Play/Pause (Space)" [ref=e267] [cursor=pointer]:
+        - img [ref=e268]
+      - generic [ref=e269]:
+        - generic [ref=e270]:
+          - button "LIVE/15" [ref=e272] [cursor=pointer]
+          - generic [ref=e273]: 0:14.646
+        - slider [ref=e274] [cursor=pointer]: "14"
+        - generic [ref=e275]: 0:14.646
+        - button "Dock" [ref=e276] [cursor=pointer]
+```
