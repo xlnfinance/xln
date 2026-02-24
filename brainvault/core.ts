@@ -175,6 +175,24 @@ export interface DerivationResult {
   masterKeyHex: string;      // For password manager derivation
 }
 
+export interface BrainvaultKdfParams {
+  algId?: string;
+  shardMemoryKb?: number;
+  argonTimeCost?: number;
+  argonParallelism?: number;
+  shardOutputBytes?: number;
+}
+
+function resolveKdfParams(params: BrainvaultKdfParams = {}) {
+  return {
+    algId: params.algId ?? BRAINVAULT_V1.ALG_ID,
+    shardMemoryKb: params.shardMemoryKb ?? BRAINVAULT_V1.SHARD_MEMORY_KB,
+    argonTimeCost: params.argonTimeCost ?? BRAINVAULT_V1.ARGON_TIME_COST,
+    argonParallelism: params.argonParallelism ?? BRAINVAULT_V1.ARGON_PARALLELISM,
+    shardOutputBytes: params.shardOutputBytes ?? BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+  };
+}
+
 
 /**
  * Create salt for a specific shard
@@ -183,11 +201,12 @@ export interface DerivationResult {
 export async function createShardSalt(
   name: string,
   shardIndex: number,
-  shardCount: number
+  shardCount: number,
+  algId: string = BRAINVAULT_V1.ALG_ID
 ): Promise<Uint8Array> {
   const normalized = name.normalize('NFKD');
   const nameBytes = new TextEncoder().encode(normalized);
-  const algIdBytes = new TextEncoder().encode(BRAINVAULT_V1.ALG_ID);
+  const algIdBytes = new TextEncoder().encode(algId);
   const countBytes = new Uint8Array(4);
   new DataView(countBytes.buffer).setUint32(0, shardCount, false);
   const indexBytes = new Uint8Array(4);
@@ -209,16 +228,28 @@ export async function deriveShard(
   passphrase: string,
   shardSalt: Uint8Array
 ): Promise<Uint8Array> {
+  return deriveShardWithParams(passphrase, shardSalt);
+}
+
+/**
+ * Derive a single shard with explicit KDF parameters
+ */
+export async function deriveShardWithParams(
+  passphrase: string,
+  shardSalt: Uint8Array,
+  params: BrainvaultKdfParams = {}
+): Promise<Uint8Array> {
   const { argon2id } = await import('hash-wasm');
   const normalized = passphrase.normalize('NFKD');
+  const kdf = resolveKdfParams(params);
 
   const result = await argon2id({
     password: normalized,
     salt: shardSalt,
-    parallelism: BRAINVAULT_V1.ARGON_PARALLELISM,
-    iterations: BRAINVAULT_V1.ARGON_TIME_COST,
-    memorySize: BRAINVAULT_V1.SHARD_MEMORY_KB,
-    hashLength: BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+    parallelism: kdf.argonParallelism,
+    iterations: kdf.argonTimeCost,
+    memorySize: kdf.shardMemoryKb,
+    hashLength: kdf.shardOutputBytes,
     outputType: 'binary',
   });
 
@@ -232,6 +263,20 @@ export async function combineShards(
   shardResults: Uint8Array[],
   factor: number
 ): Promise<Uint8Array> {
+  return combineShardsWithParams(shardResults, factor);
+}
+
+/**
+ * Combine all shards into master key with explicit KDF parameters.
+ * These parameters are domain-separated into the final BLAKE3 hash.
+ */
+export async function combineShardsWithParams(
+  shardResults: Uint8Array[],
+  factor: number,
+  params: BrainvaultKdfParams = {}
+): Promise<Uint8Array> {
+  const kdf = resolveKdfParams(params);
+
   // Concatenate all shards in order
   const totalLength = shardResults.reduce((sum, s) => sum + s.length, 0);
   const combined = new Uint8Array(totalLength);
@@ -243,7 +288,7 @@ export async function combineShards(
 
   // Domain-separated final hash (binds factor and KDF params)
   const shardCount = shardResults.length;
-  const domainTag = `${BRAINVAULT_V1.ALG_ID}|mem=${BRAINVAULT_V1.SHARD_MEMORY_KB}|t=${BRAINVAULT_V1.ARGON_TIME_COST}|p=${BRAINVAULT_V1.ARGON_PARALLELISM}|out=${BRAINVAULT_V1.SHARD_OUTPUT_BYTES}|shards=${shardCount}|factor=${factor}`;
+  const domainTag = `${kdf.algId}|mem=${kdf.shardMemoryKb}|t=${kdf.argonTimeCost}|p=${kdf.argonParallelism}|out=${kdf.shardOutputBytes}|shards=${shardCount}|factor=${factor}`;
   const domainBytes = new TextEncoder().encode(domainTag);
   const withDomain = new Uint8Array(combined.length + domainBytes.length);
   withDomain.set(combined, 0);
@@ -302,9 +347,62 @@ export async function deriveEthereumAddress(
   mnemonic: string,
   passphrase: string = ''
 ): Promise<string> {
+  return deriveEthereumAddressAtPath(mnemonic, "m/44'/60'/0'/0/0", passphrase);
+}
+
+/**
+ * Derive Ethereum address at a specific derivation path
+ */
+export async function deriveEthereumAddressAtPath(
+  mnemonic: string,
+  path: string,
+  passphrase: string = ''
+): Promise<string> {
   const { HDNodeWallet } = await import('ethers');
-  const wallet = HDNodeWallet.fromPhrase(mnemonic, passphrase, "m/44'/60'/0'/0/0");
+  const wallet = HDNodeWallet.fromPhrase(mnemonic, passphrase, path);
   return wallet.address;
+}
+
+/**
+ * Derive raw private key at a specific path (hex, 0x-prefixed).
+ * Use carefully: exposing raw keys increases operational risk.
+ */
+export async function deriveEthereumPrivateKeyAtPath(
+  mnemonic: string,
+  path: string,
+  passphrase: string = ''
+): Promise<string> {
+  const { HDNodeWallet } = await import('ethers');
+  const wallet = HDNodeWallet.fromPhrase(mnemonic, passphrase, path);
+  return wallet.privateKey;
+}
+
+/**
+ * Derive address matrix for wallet discovery UX.
+ * - standard: m/44'/60'/0'/0/i
+ * - ledgerLive: m/44'/60'/i'/0/0
+ */
+export async function deriveEthereumAddressMatrix(
+  mnemonic: string,
+  passphrase: string = '',
+  count: number = 5
+): Promise<{ standard: string[]; ledgerLive: string[] }> {
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error('Address matrix count must be a positive integer');
+  }
+
+  const { HDNodeWallet } = await import('ethers');
+  const standard: string[] = [];
+  const ledgerLive: string[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const standardPath = `m/44'/60'/0'/0/${i}`;
+    const ledgerLivePath = `m/44'/60'/${i}'/0/0`;
+    standard.push(HDNodeWallet.fromPhrase(mnemonic, passphrase, standardPath).address);
+    ledgerLive.push(HDNodeWallet.fromPhrase(mnemonic, passphrase, ledgerLivePath).address);
+  }
+
+  return { standard, ledgerLive };
 }
 
 /**
@@ -366,10 +464,6 @@ export function bytesToHex(bytes: Uint8Array): string {
 
 function bytesToBits(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(2).padStart(8, '0')).join('');
-}
-
-function hexToBits(hex: string): string {
-  return hex.split('').map(c => parseInt(c, 16).toString(2).padStart(4, '0')).join('');
 }
 
 // BIP39 English wordlist (lazy loaded)

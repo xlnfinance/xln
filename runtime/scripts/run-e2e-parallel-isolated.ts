@@ -45,6 +45,7 @@ type RunResult = {
 
 const parseArgs = (): CliArgs => {
   const args = process.argv.slice(2);
+  const longMode = process.env.E2E_LONG === '1';
   const cpu = (() => {
     try {
       return Math.max(1, availableParallelism());
@@ -67,7 +68,7 @@ const parseArgs = (): CliArgs => {
   const shardsRaw = Number(getFlag('shards') || String(defaultShards));
   const basePortRaw = Number(getFlag('base-port') || '20000');
   const stackTimeoutRaw = Number(getFlag('stack-timeout-ms') || '90000');
-  const testTimeoutRaw = Number(getFlag('test-timeout-ms') || '1200000');
+  const testTimeoutRaw = Number(getFlag('test-timeout-ms') || (longMode ? '1200000' : '360000'));
   const maxFailuresRaw = Number(getFlag('max-failures') || '1');
   const workersPerShardRaw = Number(getFlag('workers-per-shard') || '1');
   const videoRaw = String(getFlag('video') || 'on').toLowerCase();
@@ -92,7 +93,9 @@ const parseArgs = (): CliArgs => {
     shards: Number.isFinite(shardsRaw) && shardsRaw > 0 ? Math.floor(shardsRaw) : 2,
     basePort: Number.isFinite(basePortRaw) && basePortRaw > 0 ? Math.floor(basePortRaw) : 20000,
     stackTimeoutMs: Number.isFinite(stackTimeoutRaw) && stackTimeoutRaw > 0 ? Math.floor(stackTimeoutRaw) : 90000,
-    testTimeoutMs: Number.isFinite(testTimeoutRaw) && testTimeoutRaw > 0 ? Math.floor(testTimeoutRaw) : 1200000,
+    testTimeoutMs: Number.isFinite(testTimeoutRaw) && testTimeoutRaw > 0
+      ? Math.floor(testTimeoutRaw)
+      : (longMode ? 1200000 : 360000),
     anvilBin: getFlag('anvil-bin') || 'anvil',
     maxFailures: Number.isFinite(maxFailuresRaw) && maxFailuresRaw >= 0 ? Math.floor(maxFailuresRaw) : 1,
     workersPerShard: Number.isFinite(workersPerShardRaw) && workersPerShardRaw > 0 ? Math.floor(workersPerShardRaw) : 1,
@@ -403,6 +406,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
           E2E_BASE_URL: webUrl,
           E2E_API_BASE_URL: apiUrl,
           E2E_RESET_BASE_URL: apiUrl,
+          E2E_FAST: process.env.E2E_FAST ?? '1',
         },
         log,
         timeoutMs: args.testTimeoutMs,

@@ -16,6 +16,8 @@ const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
 const RESET_BASE_URL = process.env.E2E_RESET_BASE_URL ?? APP_BASE_URL;
 const INIT_TIMEOUT = 30_000;
+const FAST_E2E = process.env.E2E_FAST !== '0';
+const LONG_E2E = process.env.E2E_LONG === '1';
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
@@ -499,7 +501,7 @@ async function readPairState(page: Page, counterpartyId: string) {
       const XLN = (window as any).XLN;
       const isLeft = String(rep.entityId || '').toLowerCase() < String(counterpartyId).toLowerCase();
       const derived = typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, isLeft) : null;
-      const hubDebt = BigInt(derived?.outPeerCredit ?? 0n);
+      const hubDebt = BigInt(derived?.inOwnCredit ?? 0n);
       const collateral = BigInt(derived?.outCollateral ?? 0n);
       const uncollateralized = hubDebt > collateral ? hubDebt - collateral : 0n;
       const requested = acc.requestedRebalance?.get?.(1) || 0n;
@@ -758,7 +760,7 @@ async function readRebalanceState(page: Page, hubId: string) {
       const XLN = (window as any).XLN;
       const isLeft = String(rep.entityId || '').toLowerCase() < String(hubId).toLowerCase();
       const derived = typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, isLeft) : null;
-      const hubDebt = BigInt(derived?.outPeerCredit ?? 0n);
+      const hubDebt = BigInt(derived?.inOwnCredit ?? 0n);
       const collateral = BigInt(derived?.outCollateral ?? 0n);
       const uncollateralized = hubDebt > collateral ? hubDebt - collateral : 0n;
       const requested = acc.requestedRebalance?.get?.(1) || 0n;
@@ -838,12 +840,18 @@ function buildRebalanceFailureDump(input: {
   stateTimeline: any[];
   rebalanceConsole: string[];
 }) {
+  const stringifySafe = (value: unknown) =>
+    JSON.stringify(
+      value,
+      (_key, v) => (typeof v === 'bigint' ? v.toString() : v),
+      2,
+    );
   const stepCounts = input.rebalanceSteps.reduce((acc: Record<string, number>, step: any) => {
     const key = String(step?.event || 'unknown');
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
-  return JSON.stringify(
+  return stringifySafe(
     {
       entityId: input.entityId,
       hubId: input.hubId,
@@ -883,7 +891,7 @@ async function resetProdServer(page: Page) {
   let lastError = '';
   for (let attempt = 1; attempt <= 10; attempt++) {
     try {
-      const coldResponse = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1`);
+      const coldResponse = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1&sync=1`);
       if (coldResponse.ok()) {
         resetDone = true;
         break;
@@ -909,7 +917,7 @@ async function resetProdServer(page: Page) {
 }
 
 test.describe('Rebalance E2E', () => {
-  test.setTimeout(300_000);
+  test.setTimeout(LONG_E2E ? 300_000 : 60_000);
 
   test('faucet -> request_collateral -> secured bar', async ({ page }) => {
     const scenarioStartedAt = Date.now();
@@ -941,6 +949,7 @@ test.describe('Rebalance E2E', () => {
 
     const { entityId, signerId } = await getLocalEntity(page);
     const hubId = await discoverHub(page);
+    const hubIsLeft = hubId.toLowerCase() < entityId.toLowerCase();
     await waitForHubProfile(page, hubId);
     await connectHub(page, entityId, signerId, hubId);
 
@@ -1037,6 +1046,11 @@ test.describe('Rebalance E2E', () => {
     await accountCard.screenshot({ path: 'test-results/rebalance-green-final.png' });
     await page.screenshot({ path: 'test-results/rebalance-green-fullpage.png', fullPage: true });
 
+    if (FAST_E2E && !LONG_E2E) {
+      console.log('[E2E] FAST mode: first secured cycle verified, skipping long stress phases.');
+      return;
+    }
+
     // Regression guard + stronger invariant:
     // after first successful collateralization, faucet must still work and must
     // be able to trigger a second independent collateralization cycle.
@@ -1110,6 +1124,7 @@ test.describe('Rebalance E2E', () => {
   });
 
   test('edge: pending request_collateral must not duplicate before first settlement finalize', async ({ page }) => {
+    test.skip(FAST_E2E && !LONG_E2E, 'Long rebalance edge coverage disabled in fast mode.');
     const scenarioStartedAt = Date.now();
     await resetProdServer(page);
     await page.addInitScript(() => {
@@ -1127,6 +1142,7 @@ test.describe('Rebalance E2E', () => {
 
     const { entityId, signerId } = await getLocalEntity(page);
     const hubId = await discoverHub(page);
+    const hubIsLeft = hubId.toLowerCase() < entityId.toLowerCase();
     await waitForHubProfile(page, hubId);
     await connectHub(page, entityId, signerId, hubId);
 
@@ -1175,6 +1191,7 @@ test.describe('Rebalance E2E', () => {
   });
 
   test('cycle R2C -> C2R -> R2C (100ms action cadence)', async ({ page }) => {
+    test.skip(FAST_E2E && !LONG_E2E, 'Long rebalance edge coverage disabled in fast mode.');
     const scenarioStartedAt = Date.now();
     await resetProdServer(page);
     await page.addInitScript(() => {
@@ -1192,6 +1209,7 @@ test.describe('Rebalance E2E', () => {
 
     const { entityId, signerId } = await getLocalEntity(page);
     const hubId = await discoverHub(page);
+    const hubIsLeft = hubId.toLowerCase() < entityId.toLowerCase();
     await waitForHubProfile(page, hubId);
     await connectHub(page, entityId, signerId, hubId);
 
@@ -1231,15 +1249,17 @@ test.describe('Rebalance E2E', () => {
     const collateralAfterFirstR2C = BigInt(r2cSnapshot1.collateral);
 
     // Phase 2: C2R (user repays enough so collateral becomes excess and hub withdraws to reserve)
-    const c2rDebtTarget = collateralAfterFirstR2C > 500n * 10n ** 18n
-      ? collateralAfterFirstR2C - 500n * 10n ** 18n - 1n * 10n ** 18n
-      : 0n;
+    const hubOwesUser = (snapshot: any): bigint => {
+      const d = BigInt(snapshot?.totalDelta || '0');
+      return hubIsLeft ? (d < 0n ? -d : 0n) : (d > 0n ? d : 0n);
+    };
+    const c2rDebtTarget = 1n * 10n ** 18n; // ~1 USD residual tolerance
     for (let i = 0; i < 25; i++) {
       const before = await readRebalanceState(page, hubId);
-      const debtWei = before ? BigInt(before.hubDebt || '0') : 0n;
+      const debtWei = before ? hubOwesUser(before) : 0n;
+      if (debtWei <= c2rDebtTarget) break;
       const paymentUsd = debtWei / 10n ** 18n;
       const payAmount = paymentUsd > 0n && paymentUsd < 100n ? paymentUsd : 100n;
-      if (payAmount <= 0n) break;
       await sendDirectPaymentToHub(page, entityId, signerId, hubId, payAmount);
       await page.waitForTimeout(100);
       if (before) {
@@ -1250,7 +1270,7 @@ test.describe('Rebalance E2E', () => {
         );
       }
       const after = await readRebalanceState(page, hubId);
-      if (after && BigInt(after.hubDebt) <= c2rDebtTarget) {
+      if (after && hubOwesUser(after) <= c2rDebtTarget) {
         break;
       }
     }
@@ -1297,6 +1317,7 @@ test.describe('Rebalance E2E', () => {
   });
 
   test('rt1->h1->h2->rt2: second 550 fails before rebalance, passes after H2 R2C', async ({ page }) => {
+    test.skip(FAST_E2E && !LONG_E2E, 'Long rebalance edge coverage disabled in fast mode.');
     const scenarioStartedAt = Date.now();
     await resetProdServer(page);
     await page.addInitScript(() => {
@@ -1466,6 +1487,7 @@ test.describe('Rebalance E2E', () => {
   });
 
   test('runtime2: H1=10k, H3=1k; second 550 via H3 fails before rebalance, passes after', async ({ page }) => {
+    test.skip(FAST_E2E && !LONG_E2E, 'Long rebalance edge coverage disabled in fast mode.');
     const scenarioStartedAt = Date.now();
     await resetProdServer(page);
     await page.addInitScript(() => {

@@ -20,6 +20,7 @@ import {
   usd,
   enableStrictScenario,
 } from './helpers';
+import { cancelHook as cancelCrontabHook } from '../entity-crontab';
 
 const USDC = 1;
 
@@ -69,6 +70,13 @@ export async function runDisputeE2E(_existingEnv?: Env): Promise<Env> {
   const restoreStrict = enableStrictScenario(env, 'dispute-e2e');
 
   try {
+    const syncEntityTimestamps = (nextTs: number) => {
+      env.timestamp = nextTs;
+      for (const [, replica] of env.eReplicas) {
+        replica.state.timestamp = nextTs;
+      }
+    };
+
     const [alice, hub] = await registerEntities(
       env,
       jadapter,
@@ -204,28 +212,102 @@ export async function runDisputeE2E(_existingEnv?: Env): Promise<Env> {
       env,
     );
 
-    // Mine to challenge timeout and finalize dispute
-    const timeoutBlock = Number(aliceAfterStart?.activeDispute?.disputeTimeout || 0);
-    const currentBlock = Number(await jadapter.provider.getBlockNumber());
-    assert(timeoutBlock > currentBlock, `Expected future timeout block, got timeout=${timeoutBlock}, current=${currentBlock}`, env);
-    await mineUntilHeight(jadapter, timeoutBlock);
+    // Keep dispute finalize deterministic in this test:
+    // allow starter-side auto-finalize only, disable counterparty auto hook.
+    const hubReplicaState = findReplica(env, hub.id)[1].state;
+    if (hubReplicaState.crontabState) {
+      cancelCrontabHook(hubReplicaState.crontabState, `dispute-deadline:${alice.id.toLowerCase()}`);
+    }
+
+    // Both sides must reject business traffic while disputed.
+    const hubFrameBeforeBlockedTraffic = Number(hubAfterStart?.currentHeight || 0);
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'directPayment',
+        data: {
+          targetEntityId: alice.id,
+          tokenId: USDC,
+          amount: usd(7),
+          route: [hub.id, alice.id],
+          description: 'must-fail-on-hub-while-disputed',
+        },
+      }],
+    }]);
+    for (let i = 0; i < 4; i++) await process(env);
+    await converge(env, 6);
+    const hubFrameAfterBlockedTraffic = Number(findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.currentHeight || 0);
+    assert(
+      hubFrameAfterBlockedTraffic === hubFrameBeforeBlockedTraffic,
+      `Disputed hub-side account accepted business tx unexpectedly (${hubFrameBeforeBlockedTraffic} -> ${hubFrameAfterBlockedTraffic})`,
+      env,
+    );
+
+    // Finalize must not enqueue before timeout (unilateral-only path).
+    const finalizeBatchCountBefore = Number(findReplica(env, alice.id)[1].state.jBatchState?.batch?.disputeFinalizations?.length || 0);
+    await process(env, [{
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [{
+        type: 'disputeFinalize',
+        data: {
+          counterpartyEntityId: hub.id,
+          cooperative: true,
+          description: 'must-reject-cooperative',
+        },
+      }],
+    }]);
+    await process(env);
+    const finalizeBatchAfterCoop = Number(findReplica(env, alice.id)[1].state.jBatchState?.batch?.disputeFinalizations?.length || 0);
+    assert(
+      finalizeBatchAfterCoop === finalizeBatchCountBefore,
+      `cooperative disputeFinalize must not enqueue before timeout (${finalizeBatchCountBefore} -> ${finalizeBatchAfterCoop})`,
+      env,
+    );
 
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [{
         type: 'disputeFinalize',
-        data: { counterpartyEntityId: hub.id, description: 'timeout-finalize' },
+        data: {
+          counterpartyEntityId: hub.id,
+          cooperative: false,
+          description: 'must-reject-early-timeout',
+        },
       }],
     }]);
-    await process(env, [{
-      entityId: alice.id,
-      signerId: alice.signer,
-      entityTxs: [{ type: 'j_broadcast', data: {} }],
-    }]);
-    await syncChain(env, 5);
-    await processJEvents(env);
-    await converge(env, 12);
+    await process(env);
+    const finalizeBatchAfterEarly = Number(findReplica(env, alice.id)[1].state.jBatchState?.batch?.disputeFinalizations?.length || 0);
+    assert(
+      finalizeBatchAfterEarly === finalizeBatchCountBefore,
+      `early disputeFinalize must not enqueue before timeout (${finalizeBatchCountBefore} -> ${finalizeBatchAfterEarly})`,
+      env,
+    );
+
+    // Mine to challenge timeout and finalize dispute
+    const timeoutBlock = Number(aliceAfterStart?.activeDispute?.disputeTimeout || 0);
+    const currentBlock = Number(await jadapter.provider.getBlockNumber());
+    assert(timeoutBlock > currentBlock, `Expected future timeout block, got timeout=${timeoutBlock}, current=${currentBlock}`, env);
+    const reserveBeforeFinalize = await jadapter.getReserves(alice.id, USDC);
+
+    await mineUntilHeight(jadapter, timeoutBlock);
+
+    let autoFinalizeObserved = false;
+    for (let i = 0; i < 40; i++) {
+      syncEntityTimestamps((env.timestamp || 0) + 1000);
+      await process(env);
+      await syncChain(env, 3);
+      await processJEvents(env);
+      await converge(env, 6);
+      const acc = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
+      if (!acc?.activeDispute) {
+        autoFinalizeObserved = true;
+        break;
+      }
+    }
+    assert(autoFinalizeObserved, 'Auto dispute finalize did not complete after timeout', env);
 
     const aliceAfterFinalize = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
     const hubAfterFinalize = findReplica(env, hub.id)[1].state.accounts.get(alice.id);
@@ -257,6 +339,13 @@ export async function runDisputeE2E(_existingEnv?: Env): Promise<Env> {
     assert(
       hubClaimCountAfterFinalize === hubClaimCountBefore,
       `Unexpected j_event_claim growth on Hub during disputeFinalize (${hubClaimCountBefore} -> ${hubClaimCountAfterFinalize})`,
+      env,
+    );
+
+    const reserveAfterFinalize = await jadapter.getReserves(alice.id, USDC);
+    assert(
+      reserveAfterFinalize > reserveBeforeFinalize,
+      `Alice reserve did not increase after dispute finalize: before=${reserveBeforeFinalize}, after=${reserveAfterFinalize}`,
       env,
     );
 

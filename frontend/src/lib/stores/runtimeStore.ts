@@ -156,7 +156,7 @@ export const runtimeOperations = {
       if (activeId && r.has(activeId)) {
         const runtime = r.get(activeId)!;
         const activeEnvRuntimeId = String((runtime.env as any)?.runtimeId || '').toLowerCase();
-        if (!activeEnvRuntimeId || activeEnvRuntimeId === envRuntimeId || !envRuntimeId) {
+        if (!activeEnvRuntimeId || (envRuntimeId && activeEnvRuntimeId === envRuntimeId)) {
           runtime.env = env;
           runtime.lastSynced = Date.now();
         } else {

@@ -22,6 +22,7 @@ const HUB_H1_ENTITY_ID = '0x8164c386f3a0e528e43fe8352aca11c0334f9263b601639a0eef
 const CONSENSUS_TIMEOUT = 30_000;
 const APP_BASE_URL = process.env.E2E_BASE_URL || process.env.PW_BASE_URL || 'https://localhost:8080';
 const API_BASE_URL = process.env.E2E_API_BASE_URL || APP_BASE_URL;
+const LONG_E2E = process.env.E2E_LONG === '1';
 
 // Collect console messages matching patterns
 class ConsoleCollector {
@@ -75,7 +76,7 @@ test.describe('E2E HTLC Payment Flow', () => {
   test.skip(!process.env.RUN_PROD_SMOKE, 'Manual production smoke test only (set RUN_PROD_SMOKE=1)');
 
   test('full HTLC bilateral payment through hub', async ({ page }) => {
-    test.setTimeout(180_000); // 3 min total
+    test.setTimeout(LONG_E2E ? 180_000 : 60_000);
     const console = new ConsoleCollector();
     console.attach(page);
 

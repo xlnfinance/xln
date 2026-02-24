@@ -1,6 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
+import { activeRuntimeId, runtimes } from './runtimeStore';
 import type { XLNModule, Env, EnvSnapshot, EntityId, ReplicaKey } from '@xln/runtime/xln-api';
 
 // Direct import of XLN runtime module (no wrapper boilerplate needed)
@@ -74,8 +75,42 @@ if (typeof window !== 'undefined') {
   getXLN().catch(e => console.warn('XLN eager load failed:', e));
 }
 
-// Simple reactive store for XLN environment - just like legacy index.html
-export const xlnEnvironment = writable<Env | null>(null);
+// Bootstrap env (used before runtime selection or when no runtime env exists)
+const bootstrapEnvironment = writable<Env | null>(null);
+
+// Active env is derived from selected runtime in dropdown, with bootstrap fallback.
+export const xlnEnvironment = derived(
+  [bootstrapEnvironment, runtimes, activeRuntimeId],
+  ([$bootstrapEnvironment, $runtimes, $activeRuntimeId]) => {
+    const selectedRuntimeId = String($activeRuntimeId || '').toLowerCase();
+    if (selectedRuntimeId) {
+      const runtimeEntry = $runtimes.get(selectedRuntimeId);
+      if (runtimeEntry?.env) {
+        return runtimeEntry.env;
+      }
+    }
+    return $bootstrapEnvironment;
+  },
+);
+
+export function setXlnEnvironment(env: Env | null): void {
+  bootstrapEnvironment.set(env);
+  if (!env) return;
+
+  const selectedRuntimeId = String(get(activeRuntimeId) || '').toLowerCase();
+  const envRuntimeId = String((env as any)?.runtimeId || '').toLowerCase();
+  const targetRuntimeId = envRuntimeId || selectedRuntimeId;
+  if (!targetRuntimeId) return;
+
+  runtimes.update((map) => {
+    const runtimeEntry = map.get(targetRuntimeId);
+    if (!runtimeEntry) return map;
+    runtimeEntry.env = env;
+    runtimeEntry.lastSynced = Date.now();
+    return map;
+  });
+}
+
 export const isLoading = writable<boolean>(true);
 export const error = writable<string | null>(null);
 
@@ -180,7 +215,17 @@ export async function initializeXLN(): Promise<Env> {
 
     // Shared callback for automatic reactivity (fires on every process())
     const onEnvChange = (env: Env) => {
-      xlnEnvironment.set(env);
+      const selectedRuntimeId = String(get(activeRuntimeId) || '').toLowerCase();
+      const envRuntimeId = String((env as any)?.runtimeId || '').toLowerCase();
+      if (selectedRuntimeId && selectedRuntimeId !== envRuntimeId) {
+        const selected = get(runtimes).get(selectedRuntimeId);
+        if (selected?.env) {
+          // Keep UI pinned to selected runtime env; ignore unrelated env callbacks.
+          return;
+        }
+      }
+
+      setXlnEnvironment(env);
       history.set(env?.history || []);
       currentHeight.set(env?.height || 0);
 

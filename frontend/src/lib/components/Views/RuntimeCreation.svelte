@@ -11,6 +11,8 @@
     bytesToHex,
     combineShards,
     deriveEthereumAddress,
+    deriveEthereumAddressMatrix,
+    deriveEthereumPrivateKeyAtPath,
     deriveKey,
     deriveSitePassword as deriveSitePasswordFromRuntime,
     entropyToMnemonic,
@@ -40,6 +42,7 @@
     { factor: 4, shards: 1000, time: '50min', tier: 'Strong' },
     { factor: 5, shards: 10000, time: '8hr', tier: 'Maximum' },
   ];
+  const SETTINGS_ADDRESS_COUNT = 5;
 
   // ============================================================================
   // IDENTICON GENERATOR (Ethereum Blockies-style)
@@ -204,11 +207,11 @@
   let mnemonicInput = ''; // For mnemonic mode
   let showPassphrase = false;
   let shardInput = 3; // Can be 1-5 (factor) or 6+ (custom shards)
-  let factor = 3; // Computed from shardInput
 
-  // Compute actual shard count from input
+  // Compute actual shard count and factor from input (must match cli.ts derive() logic)
   $: isPreset = shardInput >= 1 && shardInput <= 5;
   $: actualShardCount = isPreset ? getShardCount(shardInput) : shardInput;
+  $: factor = isPreset ? shardInput : Math.ceil(Math.log10(actualShardCount)) + 1;
 
   // Dynamic color: red(1) → yellow(3) → green(5+)
   $: factorColor = (() => {
@@ -290,8 +293,15 @@
   let ethereumAddress = '';
   let masterKeyHex = '';
   let entityId = ''; // bytes32 entity ID derived from address
-  let showMnemonic = false;
-  let showDevicePassphrase = false;
+  let settingsMnemonic = '';
+  let settingsPrimaryPrivateKey = '';
+  let settingsStandardAddresses: string[] = [];
+  let settingsLedgerLiveAddresses: string[] = [];
+  let settingsSensitiveLoading = false;
+  let settingsSensitiveError = '';
+  let settingsSensitiveRequestId = 0;
+  let settingsSensitiveSeedKey = '';
+  let settingsDevicePassphrase = '';
   let copiedField: string | null = null;
 
   // Password manager state
@@ -315,7 +325,9 @@
     if (vault && !$showVaultPanel) {
       // Restore state from saved vault
       name = vault.id;
-      mnemonic12 = vault.seed;
+      mnemonic24 = vault.seed;
+      mnemonic12 = '';
+      devicePassphrase = vault.devicePassphrase || '';
 
       // Get active signer's address
       const signer = $activeSigner;
@@ -392,13 +404,53 @@
   // Current signer's private key (derived from active vault)
   $: currentSignerPrivateKey = currentVault && currentSigner
     ? vaultOperations.getSignerPrivateKey(currentSigner.index)
-    : masterKeyHex;
+    : null;
 
   // Current signer's address
   $: currentSignerAddress = currentSigner?.address || ethereumAddress;
 
   // Identicon for current signer
   $: currentSignerIdenticon = currentSignerAddress ? generateIdenticon(currentSignerAddress) : identiconSrc;
+  $: settingsDevicePassphrase = devicePassphrase || currentVault?.devicePassphrase || '';
+  $: settingsMnemonic = (mnemonic24 || currentVault?.seed || '').trim().split(/\s+/).join(' ');
+  $: if (phase === 'complete' && settingsMnemonic && settingsSensitiveSeedKey !== settingsMnemonic) {
+    settingsSensitiveSeedKey = settingsMnemonic;
+    void deriveSettingsSensitiveData(settingsMnemonic);
+  }
+  $: if ((phase !== 'complete' || !settingsMnemonic) && settingsSensitiveSeedKey) {
+    settingsSensitiveSeedKey = '';
+    settingsPrimaryPrivateKey = '';
+    settingsStandardAddresses = [];
+    settingsLedgerLiveAddresses = [];
+    settingsSensitiveLoading = false;
+    settingsSensitiveError = '';
+  }
+
+  async function deriveSettingsSensitiveData(seedMnemonic: string): Promise<void> {
+    const requestId = ++settingsSensitiveRequestId;
+    settingsSensitiveLoading = true;
+    settingsSensitiveError = '';
+    try {
+      const [matrix, primaryKey] = await Promise.all([
+        deriveEthereumAddressMatrix(seedMnemonic, '', SETTINGS_ADDRESS_COUNT),
+        deriveEthereumPrivateKeyAtPath(seedMnemonic, "m/44'/60'/0'/0/0"),
+      ]);
+      if (requestId !== settingsSensitiveRequestId) return;
+      settingsStandardAddresses = matrix.standard;
+      settingsLedgerLiveAddresses = matrix.ledgerLive;
+      settingsPrimaryPrivateKey = primaryKey;
+    } catch (err) {
+      if (requestId !== settingsSensitiveRequestId) return;
+      settingsStandardAddresses = [];
+      settingsLedgerLiveAddresses = [];
+      settingsPrimaryPrivateKey = '';
+      settingsSensitiveError = err instanceof Error ? err.message : String(err);
+    } finally {
+      if (requestId === settingsSensitiveRequestId) {
+        settingsSensitiveLoading = false;
+      }
+    }
+  }
 
   // Helper to add a new signer
   function handleAddSigner() {
@@ -424,6 +476,7 @@
     await vaultOperations.createRuntime(label, mnemonic24, {
       loginType: 'manual',
       requiresOnboarding: true,
+      devicePassphrase: settingsDevicePassphrase || undefined,
     });
     showSaveVaultModal = false;
     vaultNameInput = '';
@@ -795,6 +848,7 @@
         await vaultOperations.createRuntime(label, mnemonic24, {
           loginType: createLoginType,
           requiresOnboarding: createLoginType !== 'demo',
+          devicePassphrase: devicePassphrase || undefined,
         });
         // Auto-create entity for first signer
         vaultOperations.setSignerEntity(0, entityId);
@@ -892,6 +946,14 @@
     devicePassphrase = '';
     ethereumAddress = '';
     masterKeyHex = '';
+    settingsMnemonic = '';
+    settingsPrimaryPrivateKey = '';
+    settingsStandardAddresses = [];
+    settingsLedgerLiveAddresses = [];
+    settingsSensitiveError = '';
+    settingsSensitiveLoading = false;
+    settingsSensitiveSeedKey = '';
+    settingsSensitiveRequestId++;
     siteDomain = '';
     sitePassword = '';
     shardsCompleted = 0;
@@ -1400,52 +1462,49 @@
                   <div class="result-section">
                     <label>Ethereum Address</label>
                     <div class="result-box address with-identicon">
-                      <img src={identiconSrc} alt="Address identicon" class="identicon" />
-                      <code>{ethereumAddress}</code>
-                      <button class="copy-btn" on:click={() => copyToClipboard(ethereumAddress, 'address')}>
+                      <img src={currentSignerIdenticon} alt="Address identicon" class="identicon" />
+                      <code>{currentSignerAddress || ethereumAddress}</code>
+                      <button class="copy-btn" on:click={() => copyToClipboard(currentSignerAddress || ethereumAddress, 'address')}>
                         {copiedField === 'address' ? '✓' : '📋'}
                       </button>
                     </div>
                   </div>
 
-                  <!-- 12-word Mnemonic (Standard BIP39) -->
+                  <div class="danger-zone-note">
+                    <strong>Danger Zone:</strong> sensitive values are visible immediately in this build.
+                  </div>
+
+                  <!-- 24-word Mnemonic -->
                   <div class="result-section">
                     <label>
                       Recovery Phrase
-                      <span class="label-hint">(12 words)</span>
+                      <span class="label-hint">(24 words)</span>
                     </label>
                     <div class="result-box mnemonic">
-                      {#if !showMnemonic}
-                        <div class="mnemonic-blurred-preview">
-                          <div class="blur-overlay">
-                            <span class="blur-icon">🔒</span>
-                            <span class="blur-text">Click to Reveal</span>
-                          </div>
-                          <div class="mnemonic-words blurred" aria-hidden="true">
-                            {#each Array(12) as _, i}
-                              <span class="word"><span class="word-num">{i + 1}.</span> ••••••</span>
-                            {/each}
-                          </div>
-                        </div>
-                        <button class="mnemonic-reveal-btn" on:click={() => showMnemonic = true}>
-                          <span class="reveal-icon">👁️</span>
-                          Reveal Recovery Phrase
-                        </button>
-                      {:else}
-                        <div class="mnemonic-words">
-                          {#each mnemonic12.split(' ') as word, i}
+                      <div class="mnemonic-words">
+                        {#each settingsMnemonic.split(' ') as word, i}
+                          {#if word}
                             <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
-                          {/each}
-                        </div>
-                        <div class="mnemonic-actions">
-                          <button class="copy-btn full" on:click={() => copyToClipboard(mnemonic12, 'mnemonic12')}>
-                            {copiedField === 'mnemonic12' ? '✓ Copied!' : '📋 Copy all 12 words'}
-                          </button>
-                          <button class="hide-btn" on:click={() => showMnemonic = false}>
-                            🔒 Hide
-                          </button>
-                        </div>
-                      {/if}
+                          {/if}
+                        {/each}
+                      </div>
+                      <button class="copy-btn full" on:click={() => copyToClipboard(settingsMnemonic, 'mnemonic24')}>
+                        {copiedField === 'mnemonic24' ? '✓ Copied!' : '📋 Copy all 24 words'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Primary Private Key -->
+                  <div class="result-section">
+                    <label>
+                      Primary Private Key
+                      <span class="label-hint">(m/44&apos;/60&apos;/0&apos;/0/0)</span>
+                    </label>
+                    <div class="result-box passphrase">
+                      <code>{settingsPrimaryPrivateKey || currentSignerPrivateKey || '-'}</code>
+                      <button class="copy-btn" on:click={() => copyToClipboard(settingsPrimaryPrivateKey || currentSignerPrivateKey || '', 'primaryPriv')}>
+                        {copiedField === 'primaryPriv' ? '✓' : '📋'}
+                      </button>
                     </div>
                   </div>
 
@@ -1456,16 +1515,69 @@
                       <span class="label-hint">(Ledger/Trezor)</span>
                     </label>
                     <div class="result-box passphrase">
-                      <code class:blurred={!showDevicePassphrase}>
-                        {showDevicePassphrase ? devicePassphrase : '••••••••••••••••••••••••••••••••'}
-                      </code>
-                      <button class="toggle-btn" on:click={() => showDevicePassphrase = !showDevicePassphrase}>
-                        {showDevicePassphrase ? '🙈' : '👁️'}
+                      <code>{settingsDevicePassphrase || '-'}</code>
+                      <button class="copy-btn" on:click={() => copyToClipboard(settingsDevicePassphrase, 'devicePass')}>
+                        {copiedField === 'devicePass' ? '✓' : '📋'}
                       </button>
-                      {#if showDevicePassphrase}
-                        <button class="copy-btn" on:click={() => copyToClipboard(devicePassphrase, 'devicePass')}>
-                          {copiedField === 'devicePass' ? '✓' : '📋'}
-                        </button>
+                    </div>
+                  </div>
+
+                  <!-- Standard Address Matrix -->
+                  <div class="result-section">
+                    <label>
+                      Standard Addresses
+                      <span class="label-hint">(MetaMask / Rabby)</span>
+                    </label>
+                    <div class="result-box matrix">
+                      {#if settingsSensitiveLoading}
+                        <div class="matrix-status">Deriving address matrix...</div>
+                      {:else if settingsSensitiveError}
+                        <div class="matrix-status error">{settingsSensitiveError}</div>
+                      {:else}
+                        {#each settingsStandardAddresses as address, i}
+                          <div class="matrix-row">
+                            <div class="matrix-row-header">
+                              <span class="matrix-row-label">{i === 0 ? 'Address 1 (Primary)' : `Address ${i + 1} (Secondary)`}</span>
+                              <code class="matrix-path">m/44&apos;/60&apos;/0&apos;/0/{i}</code>
+                            </div>
+                            <div class="matrix-row-value">
+                              <code>{address}</code>
+                              <button class="copy-btn" on:click={() => copyToClipboard(address, `stdAddr${i}`)}>
+                                {copiedField === `stdAddr${i}` ? '✓' : '📋'}
+                              </button>
+                            </div>
+                          </div>
+                        {/each}
+                      {/if}
+                    </div>
+                  </div>
+
+                  <!-- Ledger Live Address Matrix -->
+                  <div class="result-section">
+                    <label>
+                      Ledger Live Addresses
+                      <span class="label-hint">(m/44&apos;/60&apos;/i&apos;/0/0)</span>
+                    </label>
+                    <div class="result-box matrix">
+                      {#if settingsSensitiveLoading}
+                        <div class="matrix-status">Deriving address matrix...</div>
+                      {:else if settingsSensitiveError}
+                        <div class="matrix-status error">{settingsSensitiveError}</div>
+                      {:else}
+                        {#each settingsLedgerLiveAddresses as address, i}
+                          <div class="matrix-row">
+                            <div class="matrix-row-header">
+                              <span class="matrix-row-label">Address {i + 1}</span>
+                              <code class="matrix-path">m/44&apos;/60&apos;/{i}&apos;/0/0</code>
+                            </div>
+                            <div class="matrix-row-value">
+                              <code>{address}</code>
+                              <button class="copy-btn" on:click={() => copyToClipboard(address, `ledgerAddr${i}`)}>
+                                {copiedField === `ledgerAddr${i}` ? '✓' : '📋'}
+                              </button>
+                            </div>
+                          </div>
+                        {/each}
                       {/if}
                     </div>
                   </div>
@@ -4366,6 +4478,25 @@
     letter-spacing: 0.08em;
   }
 
+  .label-hint {
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.45);
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .danger-zone-note {
+    margin: 0 0 18px 0;
+    padding: 12px 14px;
+    border: 1px solid rgba(220, 100, 60, 0.35);
+    border-radius: 10px;
+    background: rgba(220, 100, 60, 0.08);
+    color: rgba(255, 170, 140, 0.95);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
   .result-box {
     background: rgba(0, 0, 0, 0.4);
     border: 1px solid rgba(180, 140, 80, 0.2);
@@ -4382,11 +4513,6 @@
     font-size: 14px;
     color: rgba(255, 255, 255, 0.9);
     word-break: break-all;
-  }
-
-  .result-box code.blurred {
-    filter: blur(4px);
-    user-select: none;
   }
 
   .result-box.address code {
@@ -4409,7 +4535,7 @@
     box-shadow: 0 0 12px rgba(180, 140, 80, 0.2);
   }
 
-  .copy-btn, .toggle-btn {
+  .copy-btn {
     background: rgba(180, 140, 80, 0.15);
     border: 1px solid rgba(180, 140, 80, 0.2);
     border-radius: 8px;
@@ -4421,7 +4547,7 @@
     color: rgba(180, 140, 80, 0.8);
   }
 
-  .copy-btn:hover, .toggle-btn:hover {
+  .copy-btn:hover {
     background: rgba(180, 140, 80, 0.3);
     border-color: rgba(220, 180, 100, 0.5);
     color: rgba(255, 220, 120, 1);
@@ -4429,7 +4555,7 @@
     box-shadow: 0 2px 8px rgba(180, 140, 80, 0.2);
   }
 
-  .copy-btn:active, .toggle-btn:active {
+  .copy-btn:active {
     transform: translateY(0);
     box-shadow: none;
   }
@@ -4455,131 +4581,68 @@
     background: rgba(220, 100, 60, 0.03);
   }
 
-  /* Password Manager - Derived password styling (blue accent) */
-  .result-box.site-password {
+  .result-box.matrix {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
     border-left: 3px solid rgba(100, 160, 220, 0.6);
     background: rgba(100, 160, 220, 0.03);
   }
 
-  .mnemonic-toggle button {
-    width: 100%;
-    padding: 14px;
-    background: linear-gradient(135deg, rgba(180, 140, 80, 0.2), rgba(120, 90, 50, 0.15));
-    border: 1px solid rgba(180, 140, 80, 0.3);
+  .matrix-status {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.65);
+    padding: 8px 10px;
     border-radius: 8px;
-    color: #fbbf24;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    background: rgba(0, 0, 0, 0.25);
   }
 
-  .mnemonic-toggle button:hover {
-    background: linear-gradient(135deg, rgba(180, 140, 80, 0.3), rgba(120, 90, 50, 0.25));
-    border-color: rgba(180, 140, 80, 0.5);
+  .matrix-status.error {
+    color: rgba(255, 145, 120, 0.95);
+    border: 1px solid rgba(220, 100, 60, 0.35);
+    background: rgba(220, 100, 60, 0.08);
   }
 
-  /* Blur-until-reveal for mnemonics */
-  .mnemonic-blurred-preview {
-    position: relative;
-    overflow: hidden;
-    border-radius: 12px;
-  }
-
-  .blur-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    background: rgba(0, 0, 0, 0.3);
-    z-index: 10;
-    backdrop-filter: blur(2px);
-  }
-
-  .blur-icon {
-    font-size: 32px;
-    opacity: 0.8;
-  }
-
-  .blur-text {
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(220, 100, 60, 0.9);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-  }
-
-  .mnemonic-words.blurred {
-    filter: blur(8px);
-    opacity: 0.4;
-    user-select: none;
-    pointer-events: none;
-    margin-top: 0;
-  }
-
-  .mnemonic-reveal-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    width: 100%;
-    padding: 16px;
-    margin-top: 16px;
-    background: transparent;
-    border: 1px dashed rgba(220, 100, 60, 0.4);
+  .matrix-row {
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 10px;
-    color: rgba(220, 100, 60, 0.9);
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.22);
   }
 
-  .mnemonic-reveal-btn:hover {
-    background: rgba(220, 100, 60, 0.1);
-    border-color: rgba(220, 100, 60, 0.6);
-    color: rgba(255, 140, 80, 1);
-  }
-
-  .reveal-icon {
-    font-size: 18px;
-  }
-
-  .mnemonic-actions {
+  .matrix-row-header {
     display: flex;
-    gap: 12px;
-    margin-top: 16px;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
   }
 
-  .mnemonic-actions .copy-btn.full {
-    flex: 1;
-    margin-top: 0;
+  .matrix-row-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(220, 180, 100, 0.95);
   }
 
-  .hide-btn {
-    padding: 12px 20px;
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    color: rgba(255, 255, 255, 0.6);
-    font-size: 14px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
+  .matrix-path {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
   }
 
-  .hide-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.25);
-    color: rgba(255, 255, 255, 0.9);
+  .matrix-row-value {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .matrix-row-value code {
+    font-size: 12px;
+  }
+
+  /* Password Manager - Derived password styling (blue accent) */
+  .result-box.site-password {
+    border-left: 3px solid rgba(100, 160, 220, 0.6);
+    background: rgba(100, 160, 220, 0.03);
   }
 
   .mnemonic-words {

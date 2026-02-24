@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment, isLoading, error } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment, setXlnEnvironment, isLoading, error } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { tabOperations } from '../../stores/tabStore';
   import { THEME_DEFINITIONS } from '../../utils/themes';
@@ -258,7 +258,7 @@
       const env = $xlnEnvironment || await xln.main();
       // runDemo removed - use scenarios.ahb instead
       await xln.scenarios.ahb(env);
-      xlnEnvironment.set(env);
+      setXlnEnvironment(env);
     } catch (error) {
       console.error('❌ Demo failed:', error);
       alert(`Demo failed: ${(error as Error)?.message || 'Unknown error'}`);
@@ -322,7 +322,7 @@
           }
         }
         // Reset stores instead of reload
-        xlnEnvironment.set(freshEnv);
+        setXlnEnvironment(freshEnv);
         alert('Database cleared. Please reinitialize or navigate to /vault.');
       } catch (error) {
         console.error('❌ Clear database failed:', error);

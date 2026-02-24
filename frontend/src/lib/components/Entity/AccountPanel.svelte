@@ -444,11 +444,39 @@
   }
 
   async function initiateDispute() {
+    if ((account as any).activeDispute || account.status === 'disputed') {
+      alert('Dispute already active for this account.');
+      return;
+    }
     if (!confirm('Are you sure you want to initiate a dispute? This will freeze the account.')) return;
-
-    // TODO: Implement dispute initiation
-    console.log('🚨 Dispute initiated');
-    alert('Dispute functionality coming soon');
+    if (settleInFlight) return;
+    settleInFlight = true;
+    try {
+      const xln = await getXLN();
+      const env = activeEnv;
+      if (!env) throw new Error('Environment not ready');
+      const proposerId = activeXlnFunctions!.resolveEntityProposerId(env, entityId, 'dispute-start');
+      xln.enqueueRuntimeInput(env, {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId,
+          signerId: proposerId,
+          entityTxs: [{
+            type: 'disputeStart',
+            data: {
+              counterpartyEntityId: counterpartyId,
+              description: 'wallet-one-click-dispute',
+            },
+          }],
+        }],
+      });
+      console.log('⚔️ Dispute started (auto-finalize will trigger after timeout block)');
+    } catch (err: any) {
+      console.error('Failed to start dispute:', err);
+      error.set(`Dispute start failed: ${err?.message || 'Unknown error'}`);
+    } finally {
+      settleInFlight = false;
+    }
   }
 
   async function closeAccount() {
@@ -1066,8 +1094,12 @@
       <div class="action-card management-card">
         <h4>Account Management</h4>
         <div class="management-buttons">
-          <button class="action-button dispute" on:click={initiateDispute}>
-            Initiate Dispute
+          <button
+            class="action-button dispute"
+            on:click={initiateDispute}
+            disabled={!!(account as any).activeDispute || account.status === 'disputed' || settleInFlight}
+          >
+            {(account as any).activeDispute || account.status === 'disputed' ? 'Dispute Active' : 'Initiate Dispute'}
           </button>
           <button class="action-button close" on:click={closeAccount}>
             Close Account

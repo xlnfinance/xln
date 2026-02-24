@@ -6,6 +6,7 @@ import { getTokenInfo } from '../account-utils';
 import { safeStringify } from '../serialization-utils';
 import { CANONICAL_J_EVENTS } from '../jadapter/helpers';
 import { hashHtlcSecret } from '../htlc-utils';
+import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from '../entity-crontab';
 import type { JAdapter } from '../jadapter/types';
 import {
   canonicalJurisdictionEventKey,
@@ -1048,6 +1049,16 @@ async function applyFinalizedJEvent(
 
       addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);
       console.log(`⚔️ activeDispute stored: hash=${account.activeDispute.initialProofbodyHash.slice(0,10)}..., timeout=${account.activeDispute.disputeTimeout}`);
+
+      if (newState.crontabState) {
+        const kickoffDelayMs = weAreStarter ? 1 : 5000;
+        scheduleCrontabHook(newState.crontabState, {
+          id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
+          triggerAt: Number(newState.timestamp || Date.now()) + kickoffDelayMs,
+          type: 'dispute_deadline',
+          data: { accountId: counterpartyId },
+        });
+      }
     } else {
       console.warn(`⚠️ DisputeStarted: account ${candidateCounterpartyId.slice(-4)} not found for entity ${entityIdNorm.slice(-4)}`);
     }
@@ -1091,6 +1102,9 @@ async function applyFinalizedJEvent(
         delete account.activeDispute;
         addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialNonce)})`);
         console.log(`✅ activeDispute cleared for ${counterpartyId.slice(-4)} (proof=${String(initialProofbodyHash).slice(0, 10)}...)`);
+        if (newState.crontabState) {
+          cancelCrontabHook(newState.crontabState, `dispute-deadline:${counterpartyId.toLowerCase()}`);
+        }
       } else {
         console.warn(`⚠️ DisputeFinalized: No activeDispute for ${counterpartyId.slice(-4)}`);
       }

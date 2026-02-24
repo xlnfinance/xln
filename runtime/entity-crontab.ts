@@ -90,6 +90,16 @@ export const HUB_SUBMITTED_REQUEST_STALE_MS = 5 * 60 * 1000; // 5 minutes since 
 export const HUB_MAX_R2C_PER_TICK = 10;
 export const HUB_MAX_C2R_PER_TICK = 10;
 
+function getEnvJAdapter(env: Env) {
+  if (!env.jReplicas || env.jReplicas.size === 0) return null;
+  const active = env.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction) : undefined;
+  if (active?.jadapter) return active.jadapter;
+  for (const replica of env.jReplicas.values()) {
+    if (replica.jadapter) return replica.jadapter;
+  }
+  return null;
+}
+
 /**
  * Initialize crontab state for an entity
  */
@@ -172,7 +182,7 @@ export async function executeCrontab(
 
     if (dueHooks.length > 0) {
       console.log(`⏰ HOOKS: ${dueHooks.length} hooks fired (entity ${replica.entityId.slice(-4)}, timestamp=${now})`);
-      const hookOutputs = processDueHooks(dueHooks, replica);
+      const hookOutputs = await processDueHooks(dueHooks, env, replica);
       allOutputs.push(...hookOutputs);
     }
   }
@@ -202,13 +212,24 @@ export async function executeCrontab(
  * Process fired hooks → generate entityTxs by hook type.
  * Each hook type maps to a specific security/protocol action.
  */
-function processDueHooks(hooks: ScheduledHook[], replica: EntityReplica): EntityInput[] {
+async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: EntityReplica): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
   const firstValidator = replica.state.config.validators?.[0];
   if (!firstValidator) return outputs;
 
   // Group expired locks by type for batch processing
   const htlcTimeoutLocks: Array<{ accountId: string; lockId: string }> = [];
+  const disputeFinalizeCounterparties = new Set<string>();
+
+  let currentJBlock = Number(replica.state.lastFinalizedJHeight || 0);
+  try {
+    const jadapter = getEnvJAdapter(env);
+    if (jadapter?.provider && typeof jadapter.provider.getBlockNumber === 'function') {
+      currentJBlock = Math.max(currentJBlock, Number(await jadapter.provider.getBlockNumber()));
+    }
+  } catch {
+    // Fallback to lastFinalizedJHeight if provider read fails.
+  }
 
   for (const hook of hooks) {
     console.log(`⏰ HOOK FIRED: type=${hook.type} id=${hook.id.slice(0, 24)}...`);
@@ -229,8 +250,39 @@ function processDueHooks(hooks: ScheduledHook[], replica: EntityReplica): Entity
         break;
 
       case 'dispute_deadline':
-        // Future: auto-finalize dispute after challenge period
-        console.log(`⏰ HOOK: dispute_deadline — not yet implemented`);
+        {
+          const accountId = String(hook.data['accountId'] || '');
+          const account = replica.state.accounts.get(accountId);
+          if (!account?.activeDispute) break;
+
+          const timeoutBlock = Number(account.activeDispute.disputeTimeout || 0);
+          if (!timeoutBlock || currentJBlock < timeoutBlock) {
+            const retryMs = 1000;
+            if (replica.state.crontabState) {
+              scheduleHook(replica.state.crontabState, {
+                id: hook.id,
+                triggerAt: replica.state.timestamp + retryMs,
+                type: 'dispute_deadline',
+                data: { accountId },
+              });
+            }
+            console.log(
+              `⏰ HOOK: dispute_deadline retry for ${accountId.slice(-4)} ` +
+              `(current=${currentJBlock}, timeout=${timeoutBlock}, retryMs=${retryMs})`,
+            );
+            break;
+          }
+
+          const batch = replica.state.jBatchState?.batch;
+          const sent = replica.state.jBatchState?.sentBatch?.batch;
+          const hasInCurrent = !!batch?.disputeFinalizations?.some((op) => String(op.counterentity).toLowerCase() === accountId.toLowerCase());
+          const hasInSent = !!sent?.disputeFinalizations?.some((op) => String(op.counterentity).toLowerCase() === accountId.toLowerCase());
+          if (hasInCurrent || hasInSent || replica.state.jBatchState?.sentBatch) {
+            break;
+          }
+
+          disputeFinalizeCounterparties.add(accountId);
+        }
         break;
 
       case 'settlement_window':
@@ -273,6 +325,27 @@ function processDueHooks(hooks: ScheduledHook[], replica: EntityReplica): Entity
       ],
     });
     console.log(`⏰ HOOKS: Generated processHtlcTimeouts for ${htlcTimeoutLocks.length} expired locks`);
+  }
+
+  if (disputeFinalizeCounterparties.size > 0) {
+    const finalizeTxs = Array.from(disputeFinalizeCounterparties).map((counterpartyEntityId) => ({
+      type: 'disputeFinalize' as const,
+      data: {
+        counterpartyEntityId,
+        description: 'auto-finalize-after-timeout',
+      },
+    }));
+    outputs.push({
+      entityId: replica.entityId,
+      signerId: firstValidator,
+      entityTxs: [
+        ...finalizeTxs,
+        { type: 'j_broadcast', data: {} },
+      ],
+    });
+    console.log(
+      `⏰ HOOKS: auto disputeFinalize+j_broadcast queued for ${disputeFinalizeCounterparties.size} account(s)`,
+    );
   }
 
   return outputs;
@@ -890,14 +963,6 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
 
       // C→R MUST only use hub-owned collateral (outCollateral in hub perspective),
       // never shared collateral directly.
-      const counterpartyDerived = deriveDelta(delta, !hubIsLeft);
-      const counterpartySecured = counterpartyDerived.outCollateral;
-      const counterpartyUnsecured = counterpartyDerived.outPeerCredit;
-      const counterpartyTotalClaim = counterpartySecured + counterpartyUnsecured;
-      // Pullbacks are valid only when account collateral exceeds counterparty total claim.
-      // If claim is still >= collateral, keep collateral in-channel (no immediate clawback).
-      if (counterpartyTotalClaim >= delta.collateral) continue;
-
       const hubDerived = deriveDelta(delta, hubIsLeft);
       const hubOwnedCollateral = hubDerived.outCollateral;
       const excessCollateral = hubOwnedCollateral;
@@ -911,8 +976,6 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
         counterpartyId,
         tokenId,
         outCollateral: String(hubOwnedCollateral),
-        counterpartyTotalClaim: String(counterpartyTotalClaim),
-        collateral: String(delta.collateral),
         withdrawAmount: String(withdrawAmount),
       });
 

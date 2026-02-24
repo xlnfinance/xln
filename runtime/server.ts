@@ -24,6 +24,7 @@ import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from 
 import { resolveEntityProposerId } from './state-helpers';
 import { deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from './networking/p2p-crypto';
 import { buildEntityProfile } from './networking/gossip-helper';
+import { encodeRebalancePolicyMemo } from './rebalance-policy';
 import {
   type RelayStore,
   createRelayStore,
@@ -1229,6 +1230,9 @@ const bootstrapServerHubsAndReserves = async (
     const tokenCatalog = await ensureTokenCatalog();
     const reserveTokens =
       tokenCatalog.length > 0 ? tokenCatalog : await globalJAdapter.getTokenRegistry().catch(() => []);
+    // Keep bootstrap deterministic and aligned with readiness checks:
+    // we only require/fund the first HUB_REQUIRED_TOKEN_COUNT tokens.
+    const bootstrapTokens = reserveTokens.slice(0, HUB_REQUIRED_TOKEN_COUNT);
 
     try {
       if (DEV_CHAIN_IDS.has(globalJAdapter.chainId) && 'send' in globalJAdapter.provider) {
@@ -1268,7 +1272,7 @@ const bootstrapServerHubsAndReserves = async (
           'function balanceOf(address) view returns (uint256)',
         ];
 
-        for (const token of reserveTokens) {
+        for (const token of bootstrapTokens) {
           if (!token?.address) continue;
           try {
             const erc20 = new ethers.Contract(token.address, erc20Abi, deployer);
@@ -1300,7 +1304,7 @@ const bootstrapServerHubsAndReserves = async (
         }
       }
 
-      for (const token of reserveTokens) {
+      for (const token of bootstrapTokens) {
         const tokenId = typeof token.tokenId === 'number' ? token.tokenId : undefined;
         if (!tokenId) continue;
         const decimals = typeof token.decimals === 'number' ? token.decimals : 18;
@@ -2986,6 +2990,16 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
       // Single-writer invariant: enqueue only; runtime loop applies.
       try {
+        const hubPolicy = getEntityReplicaById(env, hubEntityId)?.state?.hubRebalanceConfig;
+        const faucetDescription = encodeRebalancePolicyMemo('faucet-offchain', {
+          policyVersion:
+            Number.isFinite(Number(hubPolicy?.policyVersion)) && Number(hubPolicy?.policyVersion) > 0
+              ? Number(hubPolicy?.policyVersion)
+              : 1,
+          baseFee: hubPolicy?.rebalanceBaseFee ?? 10n ** 17n,
+          liquidityFeeBps: hubPolicy?.rebalanceLiquidityFeeBps ?? hubPolicy?.minFeeBps ?? 1n,
+          gasFee: hubPolicy?.rebalanceGasFee ?? 0n,
+        });
         const entityTxs: Array<{ type: string; data: Record<string, unknown> }> = [{
           type: 'directPayment',
           data: {
@@ -2993,7 +3007,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             tokenId,
             amount: amountWei,
             route: [hubEntityId, normalizedUserEntityId],
-            description: 'faucet-offchain',
+            description: faucetDescription,
           },
         }];
         enqueueRuntimeInput(env, {

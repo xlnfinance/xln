@@ -1599,10 +1599,10 @@ var BRAINVAULT_V1 = {
 };
 
 // brainvault/worker-browser.ts
-function createShardSalt(name, shardIndex, shardCount) {
+function createShardSalt(name, shardIndex, shardCount, algId = BRAINVAULT_V1.ALG_ID) {
   const normalized = name.normalize("NFKD");
   const nameBytes = new TextEncoder().encode(normalized);
-  const algIdBytes = new TextEncoder().encode(BRAINVAULT_V1.ALG_ID);
+  const algIdBytes = new TextEncoder().encode(algId);
   const countBytes = new Uint8Array(4);
   new DataView(countBytes.buffer).setUint32(0, shardCount, false);
   const indexBytes = new Uint8Array(4);
@@ -1614,14 +1614,14 @@ function createShardSalt(name, shardIndex, shardCount) {
   combined.set(indexBytes, nameBytes.length + algIdBytes.length + 4);
   return blake3(combined);
 }
-async function deriveShard(passphrase, shardSalt) {
+async function deriveShard(passphrase, shardSalt, memorySizeKb = BRAINVAULT_V1.SHARD_MEMORY_KB) {
   const normalized = passphrase.normalize("NFKD");
   const result = await argon2id({
     password: normalized,
     salt: shardSalt,
     parallelism: BRAINVAULT_V1.ARGON_PARALLELISM,
     iterations: BRAINVAULT_V1.ARGON_TIME_COST,
-    memorySize: BRAINVAULT_V1.SHARD_MEMORY_KB,
+    memorySize: memorySizeKb,
     hashLength: BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
     outputType: "binary"
   });
@@ -1655,12 +1655,14 @@ self.onmessage = async function(e) {
         break;
       }
       case "derive_shard": {
-        const { name, passphrase, shardIndex, shardCount } = data;
+        const { name, passphrase, shardIndex, shardCount, shardMemoryKb, algId } = data;
         if (!name || !passphrase)
           throw new Error("Missing name or passphrase");
+        const memorySizeKb = typeof shardMemoryKb === "number" ? shardMemoryKb : BRAINVAULT_V1.SHARD_MEMORY_KB;
+        const effectiveAlgId = typeof algId === "string" && algId.length > 0 ? algId : BRAINVAULT_V1.ALG_ID;
         const startTime = performance.now();
-        const salt = createShardSalt(name, shardIndex, shardCount);
-        const result = await deriveShard(passphrase, salt);
+        const salt = createShardSalt(name, shardIndex, shardCount, effectiveAlgId);
+        const result = await deriveShard(passphrase, salt, memorySizeKb);
         const elapsed = performance.now() - startTime;
         self.postMessage({
           type: "shard_complete",

@@ -1,7 +1,7 @@
 import { writable, get, derived } from 'svelte/store';
 import { HDNodeWallet, Mnemonic, getAddress } from 'ethers';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
-import { xlnEnvironment } from './xlnStore';
+import { xlnEnvironment, setXlnEnvironment } from './xlnStore';
 import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
 import { writeOnboardingComplete } from '$lib/utils/onboardingState';
 
@@ -17,6 +17,7 @@ export interface Runtime {
   id: string; // signer EOA (0xABCD...)
   label: string; // user-chosen name ("MyWallet")
   seed: string; // raw 12-word mnemonic
+  devicePassphrase?: string; // optional BrainVault device passphrase (if available)
   signers: Signer[];
   activeSignerIndex: number;
   loginType?: 'manual' | 'demo';
@@ -27,6 +28,7 @@ export interface Runtime {
 type CreateRuntimeOptions = {
   loginType?: 'manual' | 'demo';
   requiresOnboarding?: boolean;
+  devicePassphrase?: string;
 };
 
 export interface RuntimesState {
@@ -679,7 +681,7 @@ export const vaultOperations = {
 
     runtimeOperations.setLocalRuntimeMetadata(meta);
     if (runtime?.env) {
-      xlnEnvironment.set(runtime.env);
+      setXlnEnvironment(runtime.env);
     }
     // P2P is started per-env in createRuntime() and initialize() — no need to restart here
     // Restarting on every selectRuntime caused WS connection leak (15+ connections with 4 runtimes)
@@ -765,6 +767,7 @@ export const vaultOperations = {
       id,
       label,
       seed,
+      ...(options.devicePassphrase ? { devicePassphrase: options.devicePassphrase } : {}),
       signers: [{
         index: 0,
         address: firstAddress,
@@ -784,8 +787,6 @@ export const vaultOperations = {
       },
       activeRuntimeId: id
     }));
-
-    this.saveToStorage();
 
     // CRITICAL: Create NEW isolated runtime for this runtime (AWAIT to avoid race)
     const runtimeId = normalizeRuntimeId(id); // Use normalized runtime ID key
@@ -848,7 +849,14 @@ export const vaultOperations = {
         }],
         entityInputs: []
       },
-      () => !!newEnv?.jReplicas?.get?.('Testnet') && !!(newEnv?.jReplicas?.get?.('Testnet') as any)?.jadapter,
+      () => {
+        const replica = newEnv?.jReplicas?.get?.('Testnet') as any;
+        if (replica?.jadapter) return true;
+        if (newEnv?.runtimeState?.loopActive === false) {
+          throw new Error('createRuntime.importJ(Testnet) failed: runtime loop halted');
+        }
+        return false;
+      },
       'createRuntime.importJ(Testnet)',
       45_000,
     );
@@ -1096,7 +1104,7 @@ export const vaultOperations = {
 
     activeRuntimeId.set(resolvedRuntimeId);
     if (runtime?.env) {
-      xlnEnvironment.set(runtime.env);
+      setXlnEnvironment(runtime.env);
     }
     this.syncRuntime(runtime || null);
   },
