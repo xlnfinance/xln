@@ -10,7 +10,7 @@
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import {
     normalizeEntityId,
-    getSignerIdForEntity,
+    requireSignerIdForEntity,
     hasCounterpartyAccount,
     getCounterpartyAccount,
     getConnectedCounterpartyIds,
@@ -393,7 +393,7 @@
       await ensureRuntimeRelay(currentEnv, relaySelection || $settings?.relayUrl || FALLBACK_RELAY);
 
       // Find signer for our entity
-      const signerId = getSignerIdForEntity(currentEnv, entityId, '1');
+      const signerId = requireSignerIdForEntity(currentEnv, entityId, 'hub-connect');
 
       // Default credit amount: 10,000 tokens (with 18 decimals)
       const creditAmount = 10_000n * 10n ** 18n;

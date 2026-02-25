@@ -1,24 +1,37 @@
-<script lang="ts">
-  import type { EntityReplica, Tab } from '$lib/types/ui';
-  import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
-  import BigIntInput from '../Common/BigIntInput.svelte';
+  <script lang="ts">
+    import type { EntityReplica, Tab } from '$lib/types/ui';
+    import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+    import { isLive as globalIsLive } from '../../stores/timeStore';
+    import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+    import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
+    import BigIntInput from '../Common/BigIntInput.svelte';
+    import EntitySelect from './EntitySelect.svelte';
 
   export let replica: EntityReplica | null;
   export let tab: Tab;
 
   // Props
-  export let counterpartyId: string = '';
-  export let prefilledCounterparty = false;
+    export let counterpartyId: string = '';
+    export let prefilledCounterparty = false;
   let giveTokenId = '1';
   let giveAmount: bigint = 0n;
   let wantTokenId = '2';
   let wantAmount: bigint = 0n;
   let minFillPercent = '50'; // Min fill ratio as percentage (0-100)
 
-  // Get available accounts (counterparties)
+    const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
+    const contextXlnFunctions = entityEnv?.xlnFunctions;
+    const contextEnv = entityEnv?.env;
+    const contextIsLive = entityEnv?.isLive;
+    $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
+    $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
+    $: activeIsLive = contextIsLive ? $contextIsLive : $globalIsLive;
+
+    // Get available accounts (counterparties)
   $: accounts = replica?.state?.accounts
     ? Array.from(replica.state.accounts.keys())
     : [];
+  $: accountIds = accounts.map((id) => String(id));
 
   // Get available tokens from reserves
   $: availableTokens = (replica?.state?.reserves && replica.state.reserves instanceof Map)
@@ -39,31 +52,95 @@
     return Math.floor((percent / 100) * 65535);
   }
 
+  function resolveSignerId(entityId: string): string {
+    return activeXlnFunctions?.resolveEntityProposerId?.(activeEnv as any, entityId, 'swap-panel')
+      || requireSignerIdForEntity(activeEnv, entityId, 'swap-panel');
+  }
+
+  function getTokenDecimals(tokenIdValue: number): number {
+    const info = activeXlnFunctions?.getTokenInfo?.(tokenIdValue);
+    const decimals = Number(info?.decimals);
+    return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
+  }
+
+  $: giveTokenDecimals = getTokenDecimals(Number.parseInt(giveTokenId, 10));
+  $: wantTokenDecimals = getTokenDecimals(Number.parseInt(wantTokenId, 10));
+
+  function isRuntimeEnv(value: unknown): value is { eReplicas: Map<string, unknown>; jReplicas: Map<string, unknown> } {
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
+    return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
+  }
+
+  function toBigIntSafe(value: unknown): bigint | null {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return BigInt(value);
+    if (typeof value === 'string' && /^\d+$/.test(value.trim())) return BigInt(value.trim());
+    return null;
+  }
+
+  function formatPriceRatio(want: unknown, give: unknown, precision = 6): string {
+    const wantBig = toBigIntSafe(want);
+    const giveBig = toBigIntSafe(give);
+    if (wantBig === null || giveBig === null || giveBig <= 0n) return 'n/a';
+    const scale = 10n ** BigInt(precision);
+    const scaled = (wantBig * scale) / giveBig;
+    const whole = scaled / scale;
+    const frac = (scaled % scale).toString().padStart(precision, '0').replace(/0+$/, '');
+    return frac.length > 0 ? `${whole.toString()}.${frac}` : whole.toString();
+  }
+
   async function placeSwapOffer() {
-    if (!tab.entityId || !tab.signerId || !counterpartyId || giveAmount === 0n || wantAmount === 0n) {
+    if (!tab.entityId || !counterpartyId || giveAmount <= 0n || wantAmount <= 0n) {
       alert('Please fill all fields');
       return;
     }
 
     try {
       const xln = await getXLN();
-      const env = $xlnEnvironment;
+      const env = activeEnv;
       if (!env) throw new Error('XLN environment not ready');
+      if (!isRuntimeEnv(env)) throw new Error('Runtime environment not available');
+      if (!activeIsLive) throw new Error('Swap actions are only available in LIVE mode');
+      const signerId = resolveSignerId(tab.entityId);
+      if (!signerId) throw new Error('No signer available for selected entity');
+
+      if (!accountIds.includes(counterpartyId)) {
+        throw new Error('Select counterparty from your account list');
+      }
+
+      const giveToken = Number.parseInt(giveTokenId, 10);
+      const wantToken = Number.parseInt(wantTokenId, 10);
+      const allowedTokenIds = new Set(availableTokens.map((token) => Number.parseInt(String(token.id), 10)));
+      if (!Number.isFinite(giveToken) || !allowedTokenIds.has(giveToken)) {
+        throw new Error('Invalid give token');
+      }
+      if (!Number.isFinite(wantToken) || !allowedTokenIds.has(wantToken)) {
+        throw new Error('Invalid want token');
+      }
+      if (giveToken === wantToken) {
+        throw new Error('Give token and want token must be different');
+      }
+
+      const minFillPercentValue = Number.parseFloat(minFillPercent);
+      if (!Number.isFinite(minFillPercentValue) || minFillPercentValue < 1 || minFillPercentValue > 100) {
+        throw new Error('Min Fill % must be between 1 and 100');
+      }
 
       const offerId = `swap-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      const minFillRatio = percentToFillRatio(parseFloat(minFillPercent));
+      const minFillRatio = percentToFillRatio(minFillPercentValue);
 
       xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{
         entityId: tab.entityId,
-        signerId: tab.signerId,
+        signerId,
         entityTxs: [{
           type: 'placeSwapOffer',
           data: {
             offerId,
-            counterpartyId,
-            giveTokenId: parseInt(giveTokenId),
+            counterpartyEntityId: counterpartyId,
+            giveTokenId: giveToken,
             giveAmount: giveAmount,
-            wantTokenId: parseInt(wantTokenId),
+            wantTokenId: wantToken,
             wantAmount: wantAmount,
             minFillRatio,
           }
@@ -82,21 +159,25 @@
   }
 
   async function cancelSwapOffer(offerId: string, accountId: string) {
-    if (!tab.entityId || !tab.signerId) return;
+    if (!tab.entityId) return;
 
     try {
       const xln = await getXLN();
-      const env = $xlnEnvironment;
+      const env = activeEnv;
       if (!env) throw new Error('XLN environment not ready');
+      if (!isRuntimeEnv(env)) throw new Error('Runtime environment not available');
+      if (!activeIsLive) throw new Error('Swap actions are only available in LIVE mode');
+      const signerId = resolveSignerId(tab.entityId);
+      if (!signerId) throw new Error('No signer available for selected entity');
 
       xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{
         entityId: tab.entityId,
-        signerId: tab.signerId,
+        signerId,
         entityTxs: [{
-          type: 'cancelSwapOffer',
+          type: 'cancelSwap',
           data: {
             offerId,
-            counterpartyId: accountId, // accountId is the counterparty entity ID
+            counterpartyEntityId: accountId, // accountId is the counterparty entity ID
           }
         }]
       }] });
@@ -109,8 +190,8 @@
   }
 
   // Format BigInt for display
-  function formatAmount(amount: bigint): string {
-    const decimals = 18n;
+  function formatAmount(amount: bigint, tokenIdValue: number): string {
+    const decimals = BigInt(getTokenDecimals(tokenIdValue));
     const ONE = 10n ** decimals;
     const whole = amount / ONE;
     const frac = amount % ONE;
@@ -130,12 +211,7 @@
     <div class="form-row">
       <label>
         Counterparty (Hub)
-        <select bind:value={counterpartyId}>
-          <option value="">Select counterparty</option>
-          {#each accounts as accountId}
-            <option value={accountId}>{accountId.slice(0, 12)}...</option>
-          {/each}
-        </select>
+        <EntitySelect bind:value={counterpartyId} options={accountIds} placeholder="Select account" />
       </label>
     </div>
     {/if}
@@ -151,7 +227,7 @@
       </label>
       <label>
         Give Amount (wei)
-        <BigIntInput bind:value={giveAmount} placeholder="Amount to sell" />
+        <BigIntInput bind:value={giveAmount} decimals={giveTokenDecimals} placeholder="Amount to sell" />
       </label>
     </div>
 
@@ -166,7 +242,7 @@
       </label>
       <label>
         Want Amount (wei)
-        <BigIntInput bind:value={wantAmount} placeholder="Amount to receive" />
+        <BigIntInput bind:value={wantAmount} decimals={wantTokenDecimals} placeholder="Amount to receive" />
       </label>
     </div>
 
@@ -198,18 +274,18 @@
             <div class="offer-details">
               <div class="offer-row">
                 <span class="label">Give:</span>
-                <span class="value">{formatAmount(offer.giveAmount)} (Token #{offer.giveTokenId})</span>
+                <span class="value">{formatAmount(offer.giveAmount, offer.giveTokenId)} (Token #{offer.giveTokenId})</span>
               </div>
               <div class="offer-row">
                 <span class="label">Want:</span>
-                <span class="value">{formatAmount(offer.wantAmount)} (Token #{offer.wantTokenId})</span>
+                <span class="value">{formatAmount(offer.wantAmount, offer.wantTokenId)} (Token #{offer.wantTokenId})</span>
               </div>
               <div class="offer-row">
-                <span class="label">Price:</span>
-                <span class="value">
-                  {(Number(offer.wantAmount) / Number(offer.giveAmount)).toFixed(6)}
-                </span>
-              </div>
+                  <span class="label">Price:</span>
+                  <span class="value">
+                  {formatPriceRatio(offer.wantAmount, offer.giveAmount)}
+                  </span>
+                </div>
               <div class="offer-row">
                 <span class="label">Account:</span>
                 <span class="value">{offer.accountId.slice(0, 12)}...</span>

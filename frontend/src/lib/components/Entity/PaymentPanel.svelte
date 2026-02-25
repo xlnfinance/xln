@@ -2,8 +2,10 @@
   import { onDestroy, onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, enqueueEntityInputs } from '../../stores/xlnStore';
+  import { isLive as globalIsLive } from '../../stores/timeStore';
   import { routePreview } from '../../stores/routePreviewStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { toasts } from '$lib/stores/toastStore';
   import { safeStringify } from '$lib/utils/safeStringify';
   import { keccak256, AbiCoder, hexlify } from 'ethers';
@@ -23,6 +25,7 @@
   const contextReplicas = entityEnv?.eReplicas;
   const contextXlnFunctions = entityEnv?.xlnFunctions;
   const contextEnv = entityEnv?.env;
+  const contextIsLive = entityEnv?.isLive;
 
   // Form state
   let targetEntityId = '';
@@ -65,6 +68,8 @@
   const MAX_CANDIDATE_PATHS = 500;
   const MAX_PATH_HOPS = 6;
   const MIN_SELF_CYCLE_INTERMEDIATES = 2;
+  const GOSSIP_REFRESH_ATTEMPTS = 4;
+  const GOSSIP_REFRESH_WAIT_MS = 250;
 
   type GossipAccount = {
     counterpartyId: string;
@@ -87,6 +92,7 @@
   $: currentReplicas = contextReplicas ? $contextReplicas : (isolatedReplicas ? $isolatedReplicas : $replicas);
   $: currentEnv = contextEnv ? $contextEnv : (isolatedEnv ? $isolatedEnv : $xlnEnvironment);
   $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
+  $: activeIsLive = contextIsLive ? $contextIsLive : $globalIsLive;
 
   const normalizeEntityId = (id: string | null | undefined): string => String(id || '').trim().toLowerCase();
 
@@ -292,6 +298,12 @@
     const frac = fracRaw.slice(0, decimals).padEnd(decimals, '0');
     const fracValue = frac.length > 0 ? BigInt(frac) : 0n;
     return whole * (10n ** BigInt(decimals)) + fracValue;
+  }
+
+  function getTokenDecimals(tokenIdValue: number): number {
+    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(tokenIdValue);
+    const decimals = Number(tokenInfo?.decimals);
+    return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
   }
 
   function sanitizeFeePPM(raw: unknown, fallback = 10): number {
@@ -517,30 +529,75 @@
     }
   }
 
-  function assertRecipientProfileReady() {
-    if (!targetEntityId || normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) return;
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function getRecipientProfileIssue(): { code: string; message: string; details?: Record<string, unknown> } | null {
+    if (!targetEntityId || normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) return null;
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
     const targetNorm = normalizeEntityId(targetEntityId);
     const targetProfile = profiles.find((p: GossipProfileView) => normalizeEntityId(p?.entityId) === targetNorm) as GossipProfileView | undefined;
     if (!targetProfile) {
       const msg = `Recipient ${targetEntityId} has no downloaded gossip profile`;
-      emitUiDebugEvent('PAYMENT_PREFLIGHT_PROFILE_MISSING', msg);
-      throw new Error(`${msg}. Refresh gossip/hubs and retry.`);
+      return { code: 'PAYMENT_PREFLIGHT_PROFILE_MISSING', message: msg };
     }
     if (!extractEntityCryptoKey(targetEntityId)) {
       const msg = `Recipient ${targetEntityId} profile has no encryption key`;
-      emitUiDebugEvent('PAYMENT_PREFLIGHT_KEY_MISSING', msg, { targetProfile });
-      throw new Error(`${msg}. Cannot build encrypted HTLC route.`);
+      return { code: 'PAYMENT_PREFLIGHT_KEY_MISSING', message: msg, details: { targetProfile } };
+    }
+    return null;
+  }
+
+  function getMissingRouteKeys(path: string[]): string[] {
+    const missingSet = new Set<string>();
+    for (const hopEntity of path.slice(1)) {
+      if (!extractEntityCryptoKey(hopEntity)) {
+        missingSet.add(hopEntity);
+      }
+    }
+    return Array.from(missingSet);
+  }
+
+  async function refreshGossipOnDemand(reason: string, targetEntities: string[]): Promise<void> {
+    const env = currentEnv;
+    if (!env) return;
+    const xln = await getXLN();
+    for (let attempt = 1; attempt <= GOSSIP_REFRESH_ATTEMPTS; attempt += 1) {
+      emitUiDebugEvent('PAYMENT_PREFLIGHT_GOSSIP_REFRESH', `Refreshing gossip (${reason})`, {
+        attempt,
+        targetEntities,
+      });
+      try {
+        xln.refreshGossip?.(env);
+      } catch {
+        // best effort only
+      }
+      try {
+        env.runtimeState?.p2p?.refreshGossip?.();
+      } catch {
+        // best effort only
+      }
+      await sleep(GOSSIP_REFRESH_WAIT_MS * attempt);
     }
   }
 
-  function assertRouteKeyCoverage(path: string[]) {
-    const missing: string[] = [];
-    for (const hopEntity of path.slice(1)) {
-      if (!extractEntityCryptoKey(hopEntity)) {
-        missing.push(hopEntity);
-      }
+  async function ensureRecipientProfileReady() {
+    let issue = getRecipientProfileIssue();
+    if (!issue) return;
+    await refreshGossipOnDemand('recipient-profile', [targetEntityId]);
+    issue = getRecipientProfileIssue();
+    if (!issue) return;
+    emitUiDebugEvent(issue.code, issue.message, issue.details || {});
+    if (issue.code === 'PAYMENT_PREFLIGHT_KEY_MISSING') {
+      throw new Error(`${issue.message}. Cannot build encrypted HTLC route.`);
     }
+    throw new Error(`${issue.message}. Refresh gossip/hubs and retry.`);
+  }
+
+  async function ensureRouteKeyCoverage(path: string[]) {
+    let missing = getMissingRouteKeys(path);
+    if (missing.length === 0) return;
+    await refreshGossipOnDemand('route-hop-keys', missing);
+    missing = getMissingRouteKeys(path);
     if (missing.length > 0) {
       const missingShort = missing;
       const msg = `Missing encryption keys for route hops: ${missingShort.join(', ')}`;
@@ -680,7 +737,7 @@
     return true;
   }
 
-  async function findRoutes() {
+  async function computeRoutes(preserveRepeatTimer = false) {
     if (!targetEntityId || !amount) return;
 
     findingRoutes = true;
@@ -688,15 +745,17 @@
     routes = [];
     selectedRouteIndex = -1;
     preflightError = null;
-    clearRepeatTimer();
+    if (!preserveRepeatTimer) {
+      clearRepeatTimer();
+    }
 
     try {
       await getXLN();
       const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
-      assertRecipientProfileReady();
+      await ensureRecipientProfileReady();
 
-      const amountInSmallestUnit = parseAmountToWei(amount, 18);
+      const amountInSmallestUnit = parseAmountToWei(amount, getTokenDecimals(tokenId));
       if (amountInSmallestUnit <= 0n) {
         throw new Error('Amount must be greater than zero');
       }
@@ -801,7 +860,7 @@
       }
 
       for (const route of routes) {
-        assertRouteKeyCoverage(route.path);
+        await ensureRouteKeyCoverage(route.path);
       }
 
       if (routes.length > 0) selectedRouteIndex = 0;
@@ -814,6 +873,10 @@
     }
   }
 
+  async function findRoutes() {
+    await computeRoutes(false);
+  }
+
   async function sendPayment(manual = true) {
     if (selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
     if (sendingPayment) return;
@@ -823,23 +886,22 @@
       await getXLN();
       const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
+      if (!activeIsLive) throw new Error('Payments are only available in LIVE mode');
       preflightError = null;
-      assertRecipientProfileReady();
+      await ensureRecipientProfileReady();
+
+      // Timer-driven sends must refresh route quotes to avoid reusing stale capacities.
+      if (!manual) {
+        await computeRoutes(true);
+      }
 
       const route = routes[selectedRouteIndex];
       if (!route) throw new Error('Selected route is no longer available');
-      assertRouteKeyCoverage(route.path);
+      await ensureRouteKeyCoverage(route.path);
       const routeTargetEntityId = route.path[route.path.length - 1] || targetEntityId;
 
-      // Find signer
-      let signerId = '1';
-      if (!currentReplicas) throw new Error('Replicas not available');
-      for (const key of currentReplicas.keys()) {
-        if (key.startsWith(entityId + ':')) {
-          signerId = key.split(':')[1]!;
-          break;
-        }
-      }
+      const signerId = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'payment-panel')
+        || requireSignerIdForEntity(env, entityId, 'payment-panel');
 
       let paymentInput: any;
 
@@ -881,11 +943,6 @@
 
       await enqueueEntityInputs(env, [paymentInput]);
       console.log(`[Send] ${useHtlc ? 'HTLC' : 'Direct'} payment sent via:`, route.path.join(' -> '));
-
-      if (repeatIntervalMs <= 0) {
-        routes = [];
-        selectedRouteIndex = -1;
-      }
     } catch (error) {
       console.error('[Send] Payment failed:', error);
       preflightError = (error as Error)?.message || 'Unknown send error';

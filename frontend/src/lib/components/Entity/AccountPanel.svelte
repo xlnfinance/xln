@@ -76,6 +76,11 @@
   let pendingOps: Array<{ type: 'r2c' | 'c2r' | 'r2r' | 'forgive'; tokenId: number; amount?: bigint }> = [];
   let proposeMemo = '';
   let settleInFlight = false;
+  $: settleTokenDecimals = (() => {
+    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(settleTokenId);
+    const decimals = Number(tokenInfo?.decimals);
+    return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
+  })();
 
   // Reactive workspace state
   $: workspace = account.settlementWorkspace;
@@ -804,8 +809,8 @@
 
           {#if account.frameHistory && account.frameHistory.length > 0}
             <div class="historical-frames">
-              <h4>Historical Frames (last {Math.min(10, account.frameHistory.length)}):</h4>
-              {#each account.frameHistory.slice(-10).reverse() as frame}
+              <h4>Historical Frames (last {Math.min(20, account.frameHistory.length)}):</h4>
+              {#each account.frameHistory.slice(-20).reverse() as frame}
                 <div class="frame-item historical">
                   <div class="frame-header">
                     <span class="frame-id">Frame #{frame.height}</span>
@@ -961,7 +966,7 @@
                     <option value="forgive">forgive</option>
                   </select>
                   {#if settleOpType !== 'forgive'}
-                    <BigIntInput bind:value={settleAmountBigInt} decimals={18} placeholder="Amount" />
+                    <BigIntInput bind:value={settleAmountBigInt} decimals={settleTokenDecimals} placeholder="Amount" />
                   {/if}
                   <button class="action-button secondary" on:click={addSettleOp}>Add</button>
                 </div>
@@ -1020,7 +1025,7 @@
                 <option value="forgive">forgive</option>
               </select>
               {#if settleOpType !== 'forgive'}
-                <BigIntInput bind:value={settleAmountBigInt} decimals={18} placeholder="Amount" />
+                <BigIntInput bind:value={settleAmountBigInt} decimals={settleTokenDecimals} placeholder="Amount" />
               {/if}
               <button class="action-button secondary" on:click={addSettleOp}>Add</button>
             </div>

@@ -4,7 +4,7 @@
    * Uses unified Dropdown base component
    */
   import { createEventDispatcher } from 'svelte';
-  import { xlnFunctions, xlnInstance } from '../../stores/xlnStore';
+  import { xlnEnvironment, xlnFunctions, xlnInstance } from '../../stores/xlnStore';
   import type { EntityReplica, AccountMachine } from '$lib/types/ui';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
 
@@ -19,6 +19,7 @@
   // Build account list reactively
   interface AccountItem {
     id: string;
+    name: string;
     shortId: string;
     avatarUrl: string;
     status: 'synced' | 'pending';
@@ -26,9 +27,10 @@
   }
 
   $: xlnReady = !!$xlnInstance;
-  $: accounts = buildAccountList(replica, xlnReady ? $xlnFunctions : null);
+  $: gossipProfiles = $xlnEnvironment?.gossip?.getProfiles?.() || [];
+  $: accounts = buildAccountList(replica, xlnReady ? $xlnFunctions : null, gossipProfiles as any[]);
 
-  function buildAccountList(replica: EntityReplica | null, xlnFuncs: any): AccountItem[] {
+  function buildAccountList(replica: EntityReplica | null, xlnFuncs: any, profiles: any[]): AccountItem[] {
     if (!replica?.state?.accounts) return [];
 
     const items: AccountItem[] = [];
@@ -36,8 +38,11 @@
 
     for (const [counterpartyId, account] of accountsMap.entries()) {
       const acc = account as AccountMachine;
+      const profile = profiles.find((p) => String(p?.entityId || '').toLowerCase() === String(counterpartyId).toLowerCase());
+      const profileName = String(profile?.metadata?.name || '').trim();
       items.push({
         id: counterpartyId,
+        name: profileName || counterpartyId,
         shortId: counterpartyId,
         avatarUrl: xlnFuncs?.generateEntityAvatar?.(counterpartyId) || '',
         status: acc.mempool?.length > 0 ? 'pending' : 'synced',
@@ -51,7 +56,7 @@
   $: selectedAccount = accounts.find(acc => acc.id === selectedAccountId);
 
   $: displayText = selectedAccount
-    ? `Account ${selectedAccount.id}`
+    ? `${selectedAccount.name}`
     : accounts.length > 0
       ? `${accounts.length} Account${accounts.length !== 1 ? 's' : ''}`
       : 'Select Account...';
@@ -106,7 +111,10 @@
           {#if account.avatarUrl}
             <img src={account.avatarUrl} alt="" class="account-avatar" />
           {/if}
-          <span class="account-name">Account {account.id}</span>
+          <span class="account-meta">
+            <span class="account-name">{account.name}</span>
+            <span class="account-id">{account.id}</span>
+          </span>
           <span class="account-status" class:pending={account.status === 'pending'}>
             {account.status === 'pending' ? `${account.pendingCount} pending` : 'Synced'}
           </span>
@@ -231,7 +239,31 @@
     border-radius: 4px;
   }
 
+  .account-meta {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
+  }
+
   .account-name {
+    color: #e1e1e1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .account-id {
+    color: #8a8f98;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .add-item .account-name {
     flex: 1;
   }
 

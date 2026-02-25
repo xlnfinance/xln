@@ -1,14 +1,18 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
+  import { isLive as globalIsLive } from '../../stores/timeStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
 
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
   const contextXlnFunctions = entityEnv?.xlnFunctions;
   const contextEnv = entityEnv?.env;
+  const contextIsLive = entityEnv?.isLive;
   $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
   $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
+  $: activeIsLive = contextIsLive ? $contextIsLive : $globalIsLive;
 
   export let entityId: string;
   export let signerId: string | null = null;
@@ -24,16 +28,29 @@
     const info = activeXlnFunctions?.getTokenInfo?.(id);
     return { id, symbol: info?.symbol || `TKN${id}` };
   });
+  $: selectedTokenDecimals = (() => {
+    const info = activeXlnFunctions?.getTokenInfo?.(selectedTokenId);
+    const decimals = Number(info?.decimals);
+    return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
+  })();
+
+  function isRuntimeEnv(value: unknown): value is { eReplicas: Map<string, unknown>; jReplicas: Map<string, unknown> } {
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
+    return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
+  }
 
   async function extendCredit() {
     if (!effectiveCounterparty) return;
     try {
       const xln = await getXLN();
       const env = activeEnv;
-      if (!env || !('history' in env)) throw new Error('XLN environment not ready or in historical mode');
+      if (!env) throw new Error('XLN environment not ready');
+      if (!isRuntimeEnv(env)) throw new Error('Runtime environment not available');
+      if (!activeIsLive) throw new Error('Credit updates are only available in LIVE mode');
       const resolvedSigner = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'credit-form')
         || signerId
-        || entityId;
+        || requireSignerIdForEntity(env, entityId, 'credit-form');
 
       const adjustmentInput = {
         entityId,
@@ -72,7 +89,7 @@
     </select>
     <BigIntInput
       bind:value={creditAmountBigInt}
-      decimals={18}
+      decimals={selectedTokenDecimals}
       placeholder="Credit amount"
     />
     <button class="action-button secondary" on:click={extendCredit} disabled={!effectiveCounterparty || creditAmountBigInt <= 0n}>

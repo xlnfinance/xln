@@ -166,11 +166,9 @@
 
   function suggestPassphrase(): void {
     // Generate 10 Base58 chars = ~58.5 bits of entropy (log2(58^10))
-    const chars: string[] = [];
-    for (let i = 0; i < 10; i++) {
-      chars.push(BASE58[Math.floor(Math.random() * BASE58.length)]!);
-    }
-    passphrase = chars.join('');
+    const buf = new Uint8Array(10);
+    crypto.getRandomValues(buf);
+    passphrase = Array.from(buf, b => BASE58[b % BASE58.length]!).join('');
     showPassphrase = true; // Auto-show since it's random/public anyway
   }
 

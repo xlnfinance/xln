@@ -20,6 +20,7 @@
   import { xlnFunctions, entityPositions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
+  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
 
   // Icons
   import {
@@ -36,6 +37,8 @@
   import PaymentPanel from './PaymentPanel.svelte';
   import SwapPanel from './SwapPanel.svelte';
   import SettlementPanel from './SettlementPanel.svelte';
+  import CreditForm from './CreditForm.svelte';
+  import CollateralForm from './CollateralForm.svelte';
   import ChatMessages from './ChatMessages.svelte';
   import ConsensusState from './ConsensusState.svelte';
   import ProposalsList from './ProposalsList.svelte';
@@ -43,6 +46,7 @@
   import FormationPanel from './FormationPanel.svelte';
   import HubDiscoveryPanel from './HubDiscoveryPanel.svelte';
   import GossipPanel from './GossipPanel.svelte';
+  import EntityInput from '../shared/EntityInput.svelte';
 
   export let tab: Tab;
   export let isLast: boolean = false;
@@ -52,7 +56,7 @@
 
   // Tab types
   type ViewTab = 'external' | 'reserves' | 'accounts' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance' | 'settings';
-  type AccountWorkspaceTab = 'send' | 'swap' | 'open' | 'activity' | 'settle';
+  type AccountWorkspaceTab = 'send' | 'credit' | 'collateral' | 'swap' | 'open' | 'activity' | 'settle';
 
   // Set initial tab based on action
   function getInitialTab(): ViewTab {
@@ -191,6 +195,12 @@
   $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
   $: activeIsLive = contextIsLive !== undefined ? $contextIsLive : $isLive;
 
+  function resolveEntitySigner(entityId: string, reason: string): string {
+    const env = activeEnv;
+    return activeXlnFunctions?.resolveEntityProposerId?.(env as any, entityId, reason)
+      || requireSignerIdForEntity(env, entityId, reason);
+  }
+
   // Get replica
   $: {
     if (tab.entityId && tab.signerId) {
@@ -205,6 +215,9 @@
   $: isAccountFocused = selectedAccountId !== null;
   $: selectedAccount = isAccountFocused && replica?.state?.accounts && selectedAccountId
     ? replica.state.accounts.get(selectedAccountId) : null;
+  $: accountWorkspaceAccountIds = replica?.state?.accounts
+    ? Array.from(replica.state.accounts.keys()).map((id) => String(id)).sort()
+    : [];
 
   // Jurisdictions
   $: availableJurisdictions = (() => {
@@ -225,6 +238,33 @@
   let contacts: Array<{ name: string; entityId: string }> = [];
   let newContactName = '';
   let newContactId = '';
+  let openAccountEntityOptions: string[] = [];
+
+  function isFullEntityId(value: string): boolean {
+    return /^0x[0-9a-fA-F]{64}$/.test(String(value || '').trim());
+  }
+
+  function handleOpenAccountTargetChange(event: CustomEvent<{ value?: string }>) {
+    openAccountEntityId = String(event.detail?.value || '').trim();
+  }
+
+  $: openAccountEntityOptions = (() => {
+    const ids = new Map<string, string>();
+    const selfId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    const existingAccountIds = new Set(accountWorkspaceAccountIds.map((id) => String(id || '').trim().toLowerCase()));
+    const add = (candidate: unknown) => {
+      const raw = String(candidate || '').trim();
+      if (!isFullEntityId(raw)) return;
+      const normalized = raw.toLowerCase();
+      if (!normalized || normalized === selfId || existingAccountIds.has(normalized)) return;
+      if (!ids.has(normalized)) ids.set(normalized, normalized);
+    };
+
+    for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
+    for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add((profile as any)?.entityId);
+    for (const contact of contacts) add(contact.entityId);
+    return Array.from(ids.values()).sort();
+  })();
 
   // Governance/Profile settings (REA flow: profile-update entityTx)
   let governanceName = '';
@@ -485,7 +525,7 @@
     try {
       const env = activeEnv;
       if (!env) throw new Error('Environment not ready');
-      const signerId = activeXlnFunctions?.resolveEntityProposerId?.(env as any, entityId, 'quick-settle-approve') || tab.signerId;
+      const signerId = resolveEntitySigner(entityId, 'quick-settle-approve');
       if (!signerId) throw new Error('No signer available');
 
       await enqueueEntityInputs(env as any, [{
@@ -761,7 +801,7 @@
   // Reserve → Collateral (deposit reserves into selected bilateral account)
   async function reserveToCollateral(tokenId: number) {
     const entityId = replica?.state?.entityId || tab.entityId;
-    const signerId = tab.signerId;
+    const signerId = resolveEntitySigner(entityId, 'reserve-to-collateral');
     if (!entityId || !signerId) return;
 
     if (!selectedAccountId) {
@@ -822,11 +862,20 @@
 
   async function openAccountWithFullId(targetEntityId: string) {
     const entityId = replica?.state?.entityId || tab.entityId;
-    const signerId = tab.signerId;
-    const trimmed = targetEntityId.trim();
+    const env = activeEnv;
+    const signerId = resolveEntitySigner(entityId, 'open-account');
+    const trimmed = targetEntityId.trim().toLowerCase();
     if (!entityId || !signerId) return;
-    if (!trimmed.startsWith('0x') || trimmed.length !== 66) {
+    if (!isFullEntityId(trimmed)) {
       toasts.error('Full entity ID required (0x + 64 hex chars)');
+      return;
+    }
+    if (trimmed === String(entityId).toLowerCase()) {
+      toasts.error('Cannot open account with yourself');
+      return;
+    }
+    if (accountWorkspaceAccountIds.some((id) => String(id).toLowerCase() === trimmed)) {
+      toasts.info('Account with this entity already exists');
       return;
     }
     if (!activeIsLive) {
@@ -834,7 +883,6 @@
       return;
     }
     try {
-      const env = activeEnv;
       if (!env) throw new Error('Environment not ready');
       const rebalancePolicy = getOpenAccountRebalancePolicyData();
       await enqueueEntityInputs(env as any, [{
@@ -962,7 +1010,7 @@
 
   async function saveGovernanceProfile() {
     const entityId = replica?.state?.entityId || tab.entityId;
-    const signerId = tab.signerId;
+    const signerId = resolveEntitySigner(entityId, 'governance-profile-update');
     const env = activeEnv;
     if (!entityId || !signerId) {
       toasts.error('Entity/signer is required for governance profile update');
@@ -1042,7 +1090,7 @@
 
   async function saveHubConfig() {
     const entityId = replica?.state?.entityId || tab.entityId;
-    const signerId = tab.signerId;
+    const signerId = resolveEntitySigner(entityId, 'hub-config-update');
     const env = activeEnv;
     if (!entityId || !signerId) {
       toasts.error('Entity/signer is required for hub config update');
@@ -1314,6 +1362,8 @@
   const accountWorkspaceTabs: Array<{ id: AccountWorkspaceTab; icon: any; label: string }> = [
     { id: 'open', icon: PlusCircle, label: 'Open Account' },
     { id: 'send', icon: ArrowUpRight, label: 'Send' },
+    { id: 'credit', icon: Scale, label: 'Extend Credit' },
+    { id: 'collateral', icon: Wallet, label: 'Request Collateral' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
     { id: 'activity', icon: Activity, label: 'Activity' },
     { id: 'settle', icon: Landmark, label: 'Settle' },
@@ -1388,9 +1438,9 @@
             </div>
           {/if}
           <div class="hero-identity">
-            <span class="hero-name">{gossipName || formatAddress(replica?.state?.entityId || tab.entityId)}</span>
+            <span class="hero-name">{gossipName || (replica?.state?.entityId || tab.entityId)}</span>
             <button class="hero-address" on:click={copyAddress} title="Copy full address">
-              <span>{formatAddress(replica?.state?.entityId || tab.entityId)}</span>
+              <span>{replica?.state?.entityId || tab.entityId}</span>
               {#if addressCopied}
                 <Check size={10} />
               {:else}
@@ -1655,6 +1705,22 @@
             {#if accountWorkspaceTab === 'send'}
               <PaymentPanel entityId={replica.state?.entityId || tab.entityId} {contacts} />
 
+            {:else if accountWorkspaceTab === 'credit'}
+              <CreditForm
+                entityId={replica.state?.entityId || tab.entityId}
+                signerId={tab.signerId || null}
+                counterpartyId={null}
+                accountIds={accountWorkspaceAccountIds}
+              />
+
+            {:else if accountWorkspaceTab === 'collateral'}
+              <CollateralForm
+                entityId={replica.state?.entityId || tab.entityId}
+                signerId={tab.signerId || null}
+                counterpartyId={null}
+                accountIds={accountWorkspaceAccountIds}
+              />
+
             {:else if accountWorkspaceTab === 'swap'}
               <SwapPanel {replica} {tab} />
 
@@ -1666,11 +1732,22 @@
                 </div>
                 <div class="open-section">
                   <h4 class="section-head">Open Private Account</h4>
-                  <div class="add-contact">
-                    <input type="text" placeholder="Full Entity ID (0x...)" bind:value={openAccountEntityId} />
-                    <button class="btn-add" on:click={() => openAccountWithFullId(openAccountEntityId)}>Open</button>
+                  <div class="open-private-form">
+                    <EntityInput
+                      label="Counterparty"
+                      value={openAccountEntityId}
+                      entities={openAccountEntityOptions}
+                      {contacts}
+                      excludeId={replica?.state?.entityId || tab.entityId}
+                      placeholder="Select entity or paste full ID..."
+                      disabled={!activeIsLive}
+                      on:change={handleOpenAccountTargetChange}
+                    />
+                    <button class="btn-add" on:click={() => openAccountWithFullId(openAccountEntityId)} disabled={!activeIsLive || !openAccountEntityId.trim()}>
+                      Open
+                    </button>
                   </div>
-                  <div class="muted" style="margin-top: 6px;">Only full entity IDs are accepted.</div>
+                  <div class="muted" style="margin-top: 6px;">Works with selector or manual full ID entry (0x...).</div>
                 </div>
               </div>
 
@@ -2026,6 +2103,7 @@
     font-weight: 600;
     color: #fafaf9;
     letter-spacing: -0.01em;
+    word-break: break-all;
   }
 
   .hero-address {
@@ -2042,6 +2120,11 @@
     color: #71717a;
     cursor: pointer;
     transition: all 0.15s;
+    text-align: left;
+  }
+
+  .hero-address span {
+    word-break: break-all;
   }
 
   .hero-address:hover {
@@ -3301,6 +3384,12 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.02);
+  }
+
+  .open-private-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
   @media (max-width: 900px) {

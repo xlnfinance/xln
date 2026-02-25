@@ -1068,8 +1068,8 @@ export async function handleAccountInput(
 
         // Add confirmed frame to history
         accountMachine.frameHistory.push({ ...accountMachine.pendingFrame });
-        // Cap history at 10 frames to prevent snapshot bloat
-        if (accountMachine.frameHistory.length > 10) {
+        // Cap history at 20 frames to prevent snapshot bloat
+        if (accountMachine.frameHistory.length > 20) {
           accountMachine.frameHistory.shift();
         }
         console.log(
@@ -1199,7 +1199,7 @@ export async function handleAccountInput(
       accountMachine.currentFrame = structuredClone(accountMachine.pendingFrame);
       accountMachine.currentHeight = accountMachine.pendingFrame.height;
       accountMachine.frameHistory.push({ ...accountMachine.pendingFrame });
-      if (accountMachine.frameHistory.length > 10) accountMachine.frameHistory.shift();
+      if (accountMachine.frameHistory.length > 20) accountMachine.frameHistory.shift();
       delete accountMachine.pendingFrame;
       delete accountMachine.pendingAccountInput;
       delete accountMachine.clonedForValidation;
@@ -1689,8 +1689,8 @@ export async function handleAccountInput(
 
     // Add accepted frame to history
     accountMachine.frameHistory.push({ ...receivedFrame });
-    // Cap history at 10 frames to prevent snapshot bloat
-    if (accountMachine.frameHistory.length > 10) {
+    // Cap history at 20 frames to prevent snapshot bloat
+    if (accountMachine.frameHistory.length > 20) {
       accountMachine.frameHistory.shift();
     }
     console.log(
