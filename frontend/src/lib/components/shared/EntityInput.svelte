@@ -30,11 +30,32 @@
   $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
 
   // Gossip profile lookup
-  function lookupEntityFromGossip(query: string): string | null {
-    const env = activeEnv;
-    if (!env?.gossip?.getProfiles) return null;
+  type GossipProfile = {
+    entityId?: string;
+    metadata?: { name?: string };
+  };
 
-    const profiles = env.gossip.getProfiles();
+  function normalizeEntityId(id: string | null | undefined): string {
+    return String(id || '').trim().toLowerCase();
+  }
+
+  function getGossipProfiles(): GossipProfile[] {
+    const env = activeEnv;
+    if (!env?.gossip?.getProfiles) return [];
+    return env.gossip.getProfiles() as GossipProfile[];
+  }
+
+  function getKnownEntityName(id: string): string {
+    const norm = normalizeEntityId(id);
+    if (!norm) return '';
+    const contact = contacts.find((c) => normalizeEntityId(c.entityId) === norm);
+    if (contact?.name?.trim()) return contact.name.trim();
+    const profile = getGossipProfiles().find((p) => normalizeEntityId(p?.entityId) === norm);
+    return String(profile?.metadata?.name || '').trim();
+  }
+
+  function lookupEntityFromGossip(query: string): string | null {
+    const profiles = getGossipProfiles();
     const queryLower = query.toLowerCase();
 
     // Search by short ID (first 4 hex chars)
@@ -151,9 +172,10 @@
 
   // Get display name for entity (contact name or short ID)
   function getDisplayName(id: string): string {
-    const contact = contacts.find(c => c.entityId === id || c.entityId.toLowerCase() === id.toLowerCase());
-    if (contact) return `${contact.name} (${id})`;
-    return formatShortId(id);
+    const canonical = String(id || '').trim();
+    if (!canonical) return '';
+    const knownName = getKnownEntityName(canonical);
+    return knownName ? `${knownName} (${canonical})` : canonical;
   }
 
   // Filtered options
@@ -161,8 +183,9 @@
     .filter(id => id !== excludeId)
     .map(id => ({
       id,
-      display: getDisplayName(id),
-      isContact: contacts.some(c => c.entityId === id)
+      displayName: getKnownEntityName(id) || formatShortId(id),
+      isContact: contacts.some(c => normalizeEntityId(c.entityId) === normalizeEntityId(id)),
+      avatarUrl: activeFunctions?.generateEntityAvatar?.(id) || ''
     }));
 
   // Contact-only options (for entities not in the network)
@@ -170,8 +193,9 @@
     .filter(c => !entities.includes(c.entityId) && c.entityId !== excludeId)
     .map(c => ({
       id: c.entityId,
-      display: c.name,
-      isContact: true
+      displayName: c.name,
+      isContact: true,
+      avatarUrl: activeFunctions?.generateEntityAvatar?.(c.entityId) || ''
     }));
 
   // All options
@@ -180,7 +204,7 @@
   // Filter by search
   $: visibleOptions = inputValue
     ? allOptions.filter(opt =>
-        opt.display.toLowerCase().includes(inputValue.toLowerCase()) ||
+        opt.displayName.toLowerCase().includes(inputValue.toLowerCase()) ||
         opt.id.toLowerCase().includes(inputValue.toLowerCase())
       )
     : allOptions;
@@ -284,10 +308,20 @@
             class:selected={opt.id === value}
             on:mousedown|preventDefault={() => selectEntity(opt.id)}
           >
-            <span class="item-name">{opt.display}</span>
-            {#if opt.isContact}
-              <span class="contact-badge">Contact</span>
+            {#if opt.avatarUrl}
+              <img class="item-avatar" src={opt.avatarUrl} alt="" />
+            {:else}
+              <span class="item-avatar placeholder">?</span>
             {/if}
+            <span class="item-meta">
+              <span class="item-name">{opt.displayName}</span>
+              <span class="item-id">{opt.id}</span>
+            </span>
+            <span class="item-right">
+              {#if opt.isContact}
+                <span class="contact-badge">Contact</span>
+              {/if}
+            </span>
           </button>
         {/each}
       {/if}
@@ -439,14 +473,48 @@
   }
 
   .item-name {
-    flex: 1;
-    font-family: 'JetBrains Mono', monospace;
+    color: #e7e5e4;
     font-size: 12px;
     font-weight: 500;
+    line-height: 1.2;
+  }
+
+  .item-id {
+    color: #78716c;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .item-avatar {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 1px solid #292524;
+    flex-shrink: 0;
+  }
+
+  .item-avatar.placeholder {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #292524;
+    color: #a8a29e;
+    font-size: 10px;
+  }
+
+  .item-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
     min-width: 0;
+    flex: 1;
+  }
+
+  .item-right {
+    flex-shrink: 0;
   }
 
   .contact-badge {

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, replicas, enqueueEntityInputs, xlnFunctions } from '../../stores/xlnStore';
+  import { isLive as globalIsLive } from '../../stores/timeStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
 
@@ -13,11 +15,13 @@
   const contextReplicas = entityEnv?.eReplicas;
   const contextXlnFunctions = entityEnv?.xlnFunctions;
   const contextEnv = entityEnv?.env;
+  const contextIsLive = entityEnv?.isLive;
 
   // Stores
   $: activeReplicas = contextReplicas ? $contextReplicas : $replicas;
   $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
   $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
+  $: activeIsLive = contextIsLive ? $contextIsLive : $globalIsLive;
 
   // Form state
   let counterpartyEntityId = '';
@@ -32,15 +36,85 @@
   // Self-transfer check
   $: isSelfTransfer = recipientEntityId && recipientEntityId.toLowerCase() === entityId.toLowerCase();
 
-  // All entities
-  $: allEntities = activeReplicas ? Array.from(activeReplicas.keys() as IterableIterator<string>)
-    .map(key => key.split(':')[0]!)
-    .filter((id, index, self) => self.indexOf(id) === index)
-    .sort() : [];
+  function normalizeEntityId(id: string | null | undefined): string {
+    return String(id || '').trim().toLowerCase();
+  }
+
+  // Resolve selected entity replica, then derive account list from bilateral accounts.
+  $: currentEntityReplica = (() => {
+    if (!activeReplicas || !entityId) return null;
+    const targetNorm = normalizeEntityId(entityId);
+    for (const [key, replica] of activeReplicas.entries() as IterableIterator<[string, any]>) {
+      const [replicaEntityId] = String(key || '').split(':');
+      if (normalizeEntityId(replicaEntityId) === targetNorm) return replica;
+    }
+    return null;
+  })();
+
+  $: accountEntityIds = (() => {
+    const accounts = currentEntityReplica?.state?.accounts;
+    if (!accounts || typeof accounts.keys !== 'function') return [];
+    return Array.from(accounts.keys()).map((id) => String(id)).sort();
+  })();
+
+  // Transfer can target broader network; account-bound actions must use accountEntityIds only.
+  $: transferEntityOptions = (() => {
+    const ids = new Map<string, string>();
+    const add = (raw: string | null | undefined) => {
+      const canonical = String(raw || '').trim();
+      const norm = normalizeEntityId(canonical);
+      if (!norm || norm === normalizeEntityId(entityId)) return;
+      if (!ids.has(norm)) ids.set(norm, canonical);
+    };
+
+    for (const accountId of accountEntityIds) add(accountId);
+    for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
+    for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add((profile as any)?.entityId);
+
+    return Array.from(ids.values()).sort();
+  })();
 
   // Format short ID
   function formatShortId(id: string): string {
     return id || '';
+  }
+
+  function resolveSignerId(env: any): string {
+    return activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'settlement-panel')
+      || requireSignerIdForEntity(env, entityId, 'settlement-panel');
+  }
+
+  function isRuntimeEnv(value: unknown): value is { eReplicas: Map<string, unknown>; jReplicas: Map<string, unknown> } {
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
+    return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
+  }
+
+  function parseDecimalToUnits(input: string, decimals: number): bigint {
+    const trimmed = input.trim();
+    if (!/^\d+(\.\d+)?$/.test(trimmed)) throw new Error('Invalid amount format');
+    const [wholeRaw, fracRaw = ''] = trimmed.split('.');
+    const whole = BigInt(wholeRaw || '0');
+    const fracPadded = (fracRaw + '0'.repeat(decimals)).slice(0, decimals);
+    const frac = fracPadded ? BigInt(fracPadded) : 0n;
+    return whole * (10n ** BigInt(decimals)) + frac;
+  }
+
+  function parsePositiveAmount(raw: string, token: number): bigint {
+    const trimmed = raw.trim();
+    if (!trimmed) throw new Error('Amount is required');
+    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(token);
+    const decimals = Number.isFinite(tokenInfo?.decimals) ? Number(tokenInfo.decimals) : 18;
+    const parsed = parseDecimalToUnits(trimmed, decimals);
+    if (parsed <= 0n) throw new Error('Amount must be greater than zero');
+    return parsed;
+  }
+
+  function toChainAmountString(amountUnits: bigint): string {
+    if (amountUnits <= 0n) throw new Error('Amount must be greater than zero');
+    const value = amountUnits.toString(10);
+    if (!/^\d+$/.test(value)) throw new Error('Amount encoding failed');
+    return value;
   }
 
   // Get pending batch
@@ -79,13 +153,7 @@
       // Find signer
       const env = activeEnv;
       if (!env) throw new Error('Environment not ready');
-      let signerId = '1';
-      for (const key of env.eReplicas.keys()) {
-        if (key.startsWith(entityId + ':')) {
-          signerId = key.split(':')[1]!;
-          break;
-        }
-      }
+      const signerId = resolveSignerId(env);
 
       console.log('[On-J] Broadcasting batch:', jBatch);
       const result = await xln.submitProcessBatch(jurisdictionConfig, entityId, jBatch, signerId);
@@ -104,39 +172,36 @@
     try {
       await getXLN();
       const env = activeEnv;
-      if (!env || !('history' in env)) throw new Error('Environment not ready');
+      if (!env) throw new Error('Environment not ready');
+      if (!isRuntimeEnv(env)) throw new Error('Runtime environment not available');
+      if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');
 
-      // Find signer
-      let signerId = '1';
-      for (const key of env.eReplicas.keys()) {
-        if (key.startsWith(entityId + ':')) {
-          signerId = key.split(':')[1]!;
-          break;
-        }
-      }
+      const signerId = resolveSignerId(env);
 
       let entityTx: any;
 
       if (action === 'fund') {
         if (!counterpartyEntityId) throw new Error('Select an account to fund');
+        const parsedAmount = parsePositiveAmount(amount, tokenId);
         entityTx = {
           type: 'deposit_collateral' as const,
           data: {
             counterpartyId: counterpartyEntityId,
             tokenId,
-            amount: BigInt(amount),
+            amount: parsedAmount,
           },
         };
         console.log('[On-J] Fund:', amount, 'to', formatShortId(counterpartyEntityId));
 
       } else if (action === 'withdraw') {
         if (!counterpartyEntityId) throw new Error('Select account to withdraw from');
+        const parsedAmount = parsePositiveAmount(amount, tokenId);
         entityTx = {
           type: 'requestWithdrawal' as const,
           data: {
             counterpartyEntityId,
             tokenId,
-            amount: BigInt(amount),
+            amount: parsedAmount,
           },
         };
         console.log('[On-J] Withdraw:', amount, 'from', formatShortId(counterpartyEntityId));
@@ -153,8 +218,7 @@
         const jurisdictionConfig = jurisdictions[0];
         if (!jurisdictionConfig) throw new Error('No jurisdiction available');
 
-        // Convert amount to wei (18 decimals)
-        const amountWei = BigInt(Math.floor(parseFloat(amount) * 1e18)).toString();
+        const amountWei = toChainAmountString(parsePositiveAmount(amount, tokenId));
         console.log('[On-J] Transfer:', amount, '(', amountWei, 'wei) to', formatShortId(recipient));
         const result = await xln.submitReserveToReserve(jurisdictionConfig, entityId, recipient, tokenId, amountWei);
         console.log('[On-J] Confirmed:', result.txHash);
@@ -165,6 +229,7 @@
 
       } else if (action === 'dispute') {
         if (!counterpartyEntityId) throw new Error('Select account to dispute');
+        if (!confirm('Start dispute now? This will freeze the bilateral account until finalized.')) return;
         entityTx = {
           type: 'startDispute' as const,
           data: {
@@ -301,7 +366,7 @@
     <EntityInput
       label="Recipient"
       value={recipientEntityId}
-      entities={allEntities}
+      entities={transferEntityOptions}
       {contacts}
       excludeId={entityId}
       placeholder="Select recipient..."
@@ -315,13 +380,16 @@
     <EntityInput
       label={action === 'dispute' ? 'Counterparty' : 'Account'}
       value={counterpartyEntityId}
-      entities={allEntities.filter(id => id !== entityId)}
+      entities={accountEntityIds}
       {contacts}
       excludeId={entityId}
-      placeholder="Select {action === 'dispute' ? 'counterparty' : 'account'}..."
+      placeholder={action === 'dispute' ? 'Select counterparty...' : 'Select account...'}
       disabled={sending}
       on:change={handleAccountChange}
     />
+    {#if accountEntityIds.length === 0}
+      <p class="error-hint">No accounts found. Open one in Accounts first.</p>
+    {/if}
   {/if}
 
   <!-- Dispute Reason -->
@@ -361,7 +429,9 @@
     class="btn-submit"
     class:dispute={action === 'dispute'}
     on:click={submit}
-    disabled={sending || (action === 'dispute' ? !counterpartyEntityId : (!amount || (action === 'transfer' ? (!recipientEntityId || isSelfTransfer) : !counterpartyEntityId)))}
+    disabled={sending || Boolean(action === 'dispute'
+      ? !counterpartyEntityId
+      : (!amount || (action === 'transfer' ? (!recipientEntityId || isSelfTransfer) : !counterpartyEntityId)))}
   >
     {#if sending}
       Processing...

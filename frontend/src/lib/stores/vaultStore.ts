@@ -440,6 +440,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
   if (!runtimeIdLower) {
     throw new Error(`[VaultStore] Invalid runtime.id for env restore: ${String(runtime.id)}`);
   }
+  console.log('[VaultStore] 🔎 buildOrRestoreRuntimeEnv called for:', runtimeIdLower?.slice(0, 12), new Error('stack').stack?.split('\n').slice(1, 5).join(' ← '));
   const runtimeSeed = runtime.seed;
   let env: any = null;
 
@@ -665,7 +666,11 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
 
   if (xln.startP2P) {
     const { resolveRelayUrls } = await import('./xlnStore');
-    xln.startP2P(env, { relayUrls: resolveRelayUrls(), gossipPollMs: 0 });
+    xln.startP2P(env, {
+      relayUrls: resolveRelayUrls(),
+      gossipPollMs: 0,
+      profileName: runtime.label || `Runtime ${runtime.id.slice(0, 6)}`,
+    });
   }
 
   return env;
@@ -997,7 +1002,11 @@ export const vaultOperations = {
       const { resolveRelayUrls } = await import('./xlnStore');
       const relayUrls = resolveRelayUrls();
       console.log(`[VaultStore.createRuntime] P2P: Starting on env runtimeId=${newEnv.runtimeId?.slice(0,12)}, relay=${relayUrls[0]}`);
-      xln.startP2P(newEnv, { relayUrls, gossipPollMs: 0 });
+      xln.startP2P(newEnv, {
+        relayUrls,
+        gossipPollMs: 0,
+        profileName: label || `Runtime ${runtimeId.slice(0, 6)}`,
+      });
     }
 
     // Switch to new runtime
@@ -1086,7 +1095,11 @@ export const vaultOperations = {
 
         let p2p: any = xln.getP2P ? xln.getP2P(env) : null;
         if (!p2p && xln.startP2P) {
-          xln.startP2P(env, { relayUrls: resolveRelayUrls(), gossipPollMs: 0 });
+          xln.startP2P(env, {
+            relayUrls: resolveRelayUrls(),
+            gossipPollMs: 0,
+            profileName: runtime.label || `Runtime ${resolvedRuntimeId.slice(0, 6)}`,
+          });
           p2p = xln.getP2P ? xln.getP2P(env) : null;
           console.log(`[VaultStore.selectRuntime] ♻️ Started P2P for ${resolvedRuntimeId.slice(0, 12)}`);
         } else if (p2p && typeof p2p.isConnected === 'function' && !p2p.isConnected()) {
@@ -1094,6 +1107,12 @@ export const vaultOperations = {
             p2p.connect();
             console.log(`[VaultStore.selectRuntime] ♻️ Reconnected P2P for ${resolvedRuntimeId.slice(0, 12)}`);
           }
+        }
+
+        if (p2p && typeof p2p.updateConfig === 'function') {
+          p2p.updateConfig({
+            profileName: runtime.label || `Runtime ${resolvedRuntimeId.slice(0, 6)}`,
+          });
         }
 
         if (p2p && typeof p2p.refreshGossip === 'function') {

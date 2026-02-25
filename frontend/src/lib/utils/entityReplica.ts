@@ -65,6 +65,13 @@ export function getSignerIdForEntity(envLike: any, entityId: string, fallback = 
   return String(key).split(':')[1] || fallback;
 }
 
+export function requireSignerIdForEntity(envLike: any, entityId: string, context = 'entity-action'): string {
+  const signerId = getSignerIdForEntity(envLike, entityId, '');
+  if (signerId) return signerId;
+  const normalized = normalizeEntityId(entityId) || String(entityId || 'unknown');
+  throw new Error(`No local signer replica found for entity ${normalized} (${context})`);
+}
+
 export function getCounterpartyAccount(
   envLike: any,
   ownerEntityId: string,
