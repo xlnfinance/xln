@@ -2,7 +2,7 @@
  * CLI runner for scenarios — configurable backend (browservm | rpc)
  *
  * Usage:
- *   bun runtime/scenarios/run.ts                             # PARALLEL: run full scenario/e2e set
+ *   bun runtime/scenarios/run.ts                             # PARALLEL: run full scenario set
  *   bun runtime/scenarios/run.ts all                         # PARALLEL: same as above
  *   bun runtime/scenarios/run.ts lock-ahb                    # SINGLE: one scenario
  *   bun runtime/scenarios/run.ts lock-ahb --mode=rpc         # SINGLE: explicit mode
@@ -25,7 +25,7 @@ const SCENARIOS: Record<string, { file: string; fn: string }> = {
   'settle-rebalance':  { file: './settle-rebalance',  fn: 'runSettleRebalance' },
   'processbatch':      { file: './processbatch',      fn: 'runProcessBatchScenario' },
   'process-batch':     { file: './processbatch',      fn: 'runProcessBatchScenario' },
-  'dispute-e2e':       { file: './dispute-e2e',       fn: 'runDisputeE2E' },
+  'dispute-lifecycle': { file: './dispute-lifecycle', fn: 'runDisputeLifecycle' },
 };
 
 const DEFAULT_PARALLEL_SET = [
@@ -33,12 +33,12 @@ const DEFAULT_PARALLEL_SET = [
   'rebalance',
   'settle-rebalance',
   'lock-ahb',
-  'dispute-e2e',
+  'dispute-lifecycle',
 ];
 
 const SMOKE_PARALLEL_SET = [
   'rebalance',
-  'dispute-e2e',
+  'dispute-lifecycle',
 ];
 
 async function reserveFreeLocalPort(): Promise<number> {

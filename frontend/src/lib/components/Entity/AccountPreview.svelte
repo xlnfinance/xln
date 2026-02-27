@@ -140,6 +140,11 @@
   })();
 
   $: isPending = account.mempool.length > 0 || (account as any).pendingFrame;
+  $: hasActiveDispute = !!(account as any).activeDispute;
+  $: disputeTimeoutBlock = Number((account as any).activeDispute?.disputeTimeout || 0);
+  $: disputeBlocksLeft = hasActiveDispute
+    ? Math.max(0, disputeTimeoutBlock - Number(account.lastFinalizedJHeight || 0))
+    : 0;
   $: canFaucet =
     !isPending &&
     Number(account.currentHeight || 0) > 0 &&
@@ -254,12 +259,21 @@
     </div>
     <div class="status-col">
       <span class="conn-dot {connState}"></span>
-      <span class="badge" class:synced={!isPending} class:pending={isPending}>
-        {isPending ? 'Pending' : 'Synced'}
+      <span class="badge" class:synced={!isPending && !hasActiveDispute} class:pending={isPending && !hasActiveDispute} class:danger={hasActiveDispute}>
+        {#if hasActiveDispute}
+          Dispute
+        {:else}
+          {isPending ? 'Pending' : 'Synced'}
+        {/if}
       </span>
       <span class="j-sync" title="Last finalized bilateral J-event height">
         J#{account.lastFinalizedJHeight ?? 0}
       </span>
+      {#if hasActiveDispute}
+        <span class="dispute-counter" title={`Until J#${disputeTimeoutBlock}`}>
+          ⚠ {disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'}
+        </span>
+      {/if}
       <button
         class="btn-faucet"
         on:click={handleFaucet}
@@ -443,6 +457,7 @@
   }
   .badge.synced { color: #4ade80; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.12); }
   .badge.pending { color: #fbbf24; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.12); }
+  .badge.danger { color: #fecdd3; background: rgba(244,63,94,0.2); border: 1px solid rgba(244,63,94,0.35); }
 
   .locks-row {
     display: flex;
@@ -465,9 +480,9 @@
   }
 
   .lock-badge.incoming {
-    color: #67e8f9;
-    background: rgba(34, 211, 238, 0.12);
-    border-color: rgba(34, 211, 238, 0.25);
+    color: #d6d3d1;
+    background: rgba(113, 113, 122, 0.16);
+    border-color: rgba(113, 113, 122, 0.28);
   }
 
   .lock-badge.outgoing {
@@ -496,12 +511,24 @@
   .j-sync {
     font-size: 10px;
     font-family: 'JetBrains Mono', monospace;
-    color: #93c5fd;
-    background: rgba(59, 130, 246, 0.1);
-    border: 1px solid rgba(59, 130, 246, 0.2);
+    color: #d6d3d1;
+    background: #18181b;
+    border: 1px solid #292524;
     padding: 2px 6px;
     border-radius: 4px;
     line-height: 1;
+  }
+
+  .dispute-counter {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #fda4af;
+    background: rgba(127, 29, 29, 0.35);
+    border: 1px solid rgba(251, 113, 133, 0.35);
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+    white-space: nowrap;
   }
 
   .btn-faucet {
@@ -518,9 +545,9 @@
     transition: all 0.15s;
   }
   .btn-faucet:hover {
-    border-color: #0ea5e9;
-    color: #0ea5e9;
-    background: rgba(14, 165, 233, 0.05);
+    border-color: #fbbf24;
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.08);
   }
   .btn-faucet:disabled {
     opacity: 0.45;
@@ -552,10 +579,10 @@
     font-weight: 700;
     margin-right: 5px;
     vertical-align: middle;
-    color: #0f172a;
+    color: #0c0a09;
   }
   .token-icon-small.usdc {
-    background: #2775ca;
+    background: #52525b;
     color: #fff;
   }
   .token-icon-small.usdt {
@@ -563,12 +590,12 @@
     color: #fff;
   }
   .token-icon-small.weth {
-    background: #627eea;
+    background: #71717a;
     color: #fff;
   }
   .token-icon-small.other {
     background: #a1a1aa;
-    color: #111827;
+    color: #0c0a09;
   }
 
   /* ── Bar core ─────────────────────────────────── */
@@ -582,7 +609,7 @@
   }
   .seg { min-width: 2px; transition: width 0.3s ease, flex 0.3s ease; position: relative; overflow: hidden; }
   .seg.credit { background: #a1a1aa; }
-  .half.in .seg.credit, .side.in .seg.credit { background: rgba(34, 211, 238, 0.5); }
+  .half.in .seg.credit, .side.in .seg.credit { background: rgba(161, 161, 170, 0.65); }
   .seg.coll { background: linear-gradient(180deg, #34d399, #10b981); }
   .seg.debt { background: linear-gradient(180deg, #fb7185, #f43f5e); }
 
@@ -691,7 +718,7 @@
   }
   .settle.awaiting_counterparty { color:#fbbf24; background:rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.12); }
   .settle.ready_to_submit { color:#4ade80; background:rgba(74,222,128,0.08); border-color: rgba(74,222,128,0.12); }
-  .settle.submitted { color:#60a5fa; background:rgba(96,165,250,0.08); border-color: rgba(96,165,250,0.12); }
+  .settle.submitted { color:#fbbf24; background:rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.12); }
 
   .settle-row {
     margin-top: 6px;

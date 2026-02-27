@@ -354,7 +354,7 @@ export interface XLNModule {
     sig?: string
   ) => Promise<{ txHash: string }>;
   submitReserveToReserve: (jurisdiction: JurisdictionConfig, fromEntity: string, toEntity: string, tokenId: number, amount: string) => Promise<{ txHash: string }>;
-  submitProcessBatch: (jurisdiction: JurisdictionConfig, entityId: string, batch: unknown, signerId?: string) => Promise<{ transaction: unknown; receipt: unknown }>;
+  submitProcessBatch: (env: Env, jurisdiction: JurisdictionConfig, entityId: string, batch: unknown, signerId?: string) => Promise<{ transaction: unknown; receipt: unknown }>;
   submitPrefundAccount: (env: Env, entityId: string, tokenAddress: string, amount: bigint) => Promise<Env>;
   debugFundReserves: (env: Env, entityId: string, tokenAddress: string, amount: bigint) => Promise<Env>;
 

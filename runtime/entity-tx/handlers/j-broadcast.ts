@@ -110,6 +110,7 @@ export async function handleJBroadcast(
       batchHash,
       encodedBatch,
       entityNonce: Number(nextNonce),
+      ...(entityTx.data?.feeOverrides ? { feeOverrides: { ...entityTx.data.feeOverrides } } : {}),
       batchSize,
       signerId,
     },

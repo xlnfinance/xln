@@ -632,6 +632,11 @@ export type EntityTx =
       type: 'j_broadcast';
       data: {
         hankoSignature?: string; // Optional hanko seal for the batch
+        feeOverrides?: {
+          gasBumpBps?: number;
+          maxFeePerGasWei?: string;
+          maxPriorityFeePerGasWei?: string;
+        };
       };
     }
   | {

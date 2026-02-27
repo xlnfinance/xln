@@ -4,7 +4,7 @@ import { DEBUG } from '../utils';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
 import { getTokenInfo } from '../account-utils';
 import { safeStringify } from '../serialization-utils';
-import { CANONICAL_J_EVENTS } from '../jadapter/helpers';
+import { CANONICAL_J_EVENTS, computeAccountKey } from '../jadapter/helpers';
 import { hashHtlcSecret } from '../htlc-utils';
 import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from '../entity-crontab';
 import type { JAdapter } from '../jadapter/types';
@@ -1108,12 +1108,12 @@ async function applyFinalizedJEvent(
       } else {
         console.warn(`⚠️ DisputeFinalized: No activeDispute for ${counterpartyId.slice(-4)}`);
       }
-      // Dispute completed on-chain: unfreeze account and move proof nonce cursor forward.
+      // Dispute completed on-chain: keep finalized-disputed until explicit reopen.
       const finalizedOnChainNonce = Number(account.onChainSettlementNonce ?? 0);
       if (account.proofHeader.nonce <= finalizedOnChainNonce) {
         account.proofHeader.nonce = finalizedOnChainNonce + 1;
       }
-      account.status = 'active';
+      account.status = 'disputed';
       delete account.pendingFrame;
       delete account.pendingAccountInput;
       delete account.clonedForValidation;
@@ -1124,26 +1124,40 @@ async function applyFinalizedJEvent(
       delete account.counterpartyDisputeProofNonce;
       delete account.counterpartyDisputeProofBodyHash;
       console.log(
-        `✅ DisputeFinalized: account re-activated for ${counterpartyId.slice(-4)} ` +
+        `✅ DisputeFinalized: account moved to finalized-disputed for ${counterpartyId.slice(-4)} ` +
         `(onChainNonce=${finalizedOnChainNonce}, nextProofNonce=${account.proofHeader.nonce})`,
       );
 
-      // IMPORTANT: Do not mutate shared account deltas from unilateral entity-layer events.
-      // Dispute flow can be reflected via status/nonce; collateral/ondelta must move only
-      // through bilateral account consensus.
-      if (jadapter) {
+      // DisputeFinalized is authoritative on-chain settlement.
+      // Sync local deltas from Depository storage and clear consumed off-chain component.
+      if (jadapter?.depository) {
+        const accountKey = computeAccountKey(account.leftEntity, account.rightEntity);
         for (const [tokenId, delta] of account.deltas.entries()) {
           try {
-            const onChainCollateral = await jadapter.getCollateral(account.leftEntity, account.rightEntity, tokenId);
-            if (delta.collateral !== onChainCollateral) {
-              console.warn(
-                `⚠️ DisputeFinalized observed collateral drift (no local apply): ${counterpartyId.slice(-4)} token=${tokenId} ` +
-                `local=${delta.collateral} chain=${onChainCollateral}`,
+            const chain = await jadapter.depository._collaterals(accountKey, Number(tokenId));
+            const nextCollateral = BigInt(chain?.collateral ?? 0n);
+            const nextOndelta = BigInt(chain?.ondelta ?? 0n);
+            const prevCollateral = delta.collateral;
+            const prevOndelta = delta.ondelta;
+            const prevOffdelta = delta.offdelta;
+
+            delta.collateral = nextCollateral;
+            delta.ondelta = nextOndelta;
+            delta.offdelta = 0n;
+
+            if (
+              prevCollateral !== nextCollateral ||
+              prevOndelta !== nextOndelta ||
+              prevOffdelta !== 0n
+            ) {
+              console.log(
+                `💰 DisputeFinalized sync: ${counterpartyId.slice(-4)} token=${tokenId} ` +
+                `coll ${prevCollateral}→${nextCollateral}, ondelta ${prevOndelta}→${nextOndelta}, offdelta ${prevOffdelta}→0`,
               );
             }
           } catch (error) {
             console.warn(
-              `⚠️ DisputeFinalized collateral check failed token=${tokenId} ` +
+              `⚠️ DisputeFinalized delta sync failed token=${tokenId} ` +
               `for ${counterpartyId.slice(-4)}: ${error instanceof Error ? error.message : String(error)}`,
             );
           }
@@ -1157,8 +1171,8 @@ async function applyFinalizedJEvent(
     // jBatch finalization event - confirms our batch was processed on-chain
     const { entityId: batchEntityId, hankoHash, nonce, success } = event.data as { entityId: string; hankoHash: string; nonce: number; success: boolean };
 
-    // Only process if this is our batch
-    if (batchEntityId !== newState.entityId) {
+    // Only process if this is our batch (case-insensitive: adapters may normalize differently).
+    if (String(batchEntityId || '').toLowerCase() !== String(newState.entityId || '').toLowerCase()) {
       console.log(`   ⏭️ HankoBatchProcessed: Not our batch (${String(batchEntityId).slice(-4)} != ${entityShort})`);
       return { newState, mempoolOps };
     }

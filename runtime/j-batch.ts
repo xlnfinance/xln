@@ -356,14 +356,19 @@ export function initJBatch(): JBatchState {
 }
 
 /**
- * Check if batch has pending broadcast (block new operations until finalized)
- * @throws Error if batch is pending broadcast
+ * Check if batch has pending broadcast.
+ *
+ * Lifecycle model:
+ * - `sentBatch` tracks the in-flight on-chain submission.
+ * - `batch` remains editable as a draft for next broadcast cycle.
+ *
+ * We intentionally DO NOT throw when `sentBatch` exists; operators can keep
+ * preparing the next batch while waiting for on-chain finalization.
  */
 export function assertBatchNotPending(jBatchState: JBatchState, operation: string): void {
   if (jBatchState.sentBatch) {
-    throw new Error(
-      `❌ Cannot add ${operation}: jBatch has pending broadcast. ` +
-      `Wait for HankoBatchProcessed or use j_abort_sent_batch / j_clear_batch.`
+    console.warn(
+      `ℹ️ jBatch sentBatch pending (nonce=${jBatchState.sentBatch.entityNonce}) while queueing ${operation} into draft batch`,
     );
   }
 }

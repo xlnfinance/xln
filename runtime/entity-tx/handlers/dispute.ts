@@ -16,7 +16,7 @@
 import { ethers } from 'ethers';
 import type { EntityState, EntityTx, EntityInput, Env, AccountMachine } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { initJBatch, batchAddRevealSecret, assertBatchNotPending } from '../../j-batch';
+import { initJBatch, batchAddRevealSecret } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
 import { buildAccountProofBody, createDisputeProofHash, buildInitialDisputeProof } from '../../proof-builder';
 
@@ -151,8 +151,14 @@ export async function handleDisputeStart(
     newState.jBatchState = initJBatch();
   }
 
-  // Block if batch has pending broadcast
-  assertBatchNotPending(newState.jBatchState, 'disputeStart');
+  // Do not block dispute queueing when a previous batch is still in-flight.
+  // New dispute ops are appended to CURRENT batch and can be broadcast after sentBatch finalizes.
+  if (newState.jBatchState.sentBatch) {
+    addMessage(
+      newState,
+      `ℹ️ disputeStart queued to current batch while sentBatch nonce=${newState.jBatchState.sentBatch.entityNonce} is still pending`,
+    );
+  }
 
   // Get bilateral account
   const account = newState.accounts.get(counterpartyEntityId);
@@ -235,6 +241,8 @@ export async function handleDisputeStart(
   }
 
   let onChainNonce = Number(account.onChainSettlementNonce ?? 0);
+  let currentJBlock = Number(newState.lastFinalizedJHeight ?? 0);
+  let defaultDisputeDelayBlocks = 5;
   const jadapter = getEnvJAdapter(env);
   if (jadapter && typeof jadapter.getAccountInfo === 'function') {
     try {
@@ -246,6 +254,23 @@ export async function handleDisputeStart(
         `⚠️ disputeStart: failed to read on-chain nonce for ${counterpartyEntityId.slice(-4)}: ` +
         `${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+  }
+  if (jadapter?.provider && typeof jadapter.provider.getBlockNumber === 'function') {
+    try {
+      currentJBlock = Math.max(currentJBlock, Number(await jadapter.provider.getBlockNumber()));
+    } catch {
+      // Non-fatal fallback.
+    }
+  }
+  if (jadapter?.depository && typeof (jadapter.depository as any).defaultDisputeDelay === 'function') {
+    try {
+      const delay = Number(await (jadapter.depository as any).defaultDisputeDelay());
+      if (Number.isFinite(delay) && delay > 0) {
+        defaultDisputeDelayBlocks = Math.floor(delay);
+      }
+    } catch {
+      // Keep default fallback.
     }
   }
 
@@ -299,6 +324,19 @@ export async function handleDisputeStart(
   delete account.clonedForValidation;
   account.rollbackCount = 0;
   delete account.lastRollbackFrameHash;
+  // Local placeholder for UX continuity: account stays visible as "active dispute"
+  // immediately after queueing disputeStart, before on-chain DisputeStarted event arrives.
+  // On-chain event will overwrite this with authoritative timeout/nonce data.
+  if (!account.activeDispute) {
+    account.activeDispute = {
+      startedByLeft: account.leftEntity === entityState.entityId,
+      initialProofbodyHash: proofBodyHashToUse,
+      initialNonce: signedNonce,
+      disputeTimeout: currentJBlock + defaultDisputeDelayBlocks,
+      onChainNonce,
+      initialArguments,
+    };
+  }
 
   console.log(`✅ disputeStart: Added to jBatch for ${entityState.entityId.slice(-4)}`);
   console.log(`   proofBodyHash: ${proofBodyHashToUse.slice(0, 18)}...`);
@@ -338,8 +376,13 @@ export async function handleDisputeFinalize(
     newState.jBatchState = initJBatch();
   }
 
-  // Block if batch has pending broadcast
-  assertBatchNotPending(newState.jBatchState, 'disputeFinalize');
+  // Do not block dispute finalize queueing when previous batch is still pending.
+  if (newState.jBatchState.sentBatch) {
+    addMessage(
+      newState,
+      `ℹ️ disputeFinalize queued to current batch while sentBatch nonce=${newState.jBatchState.sentBatch.entityNonce} is still pending`,
+    );
+  }
 
   // Get bilateral account
   const account = newState.accounts.get(counterpartyEntityId);

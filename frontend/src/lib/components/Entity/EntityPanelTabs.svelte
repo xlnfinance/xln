@@ -215,7 +215,7 @@
   $: isAccountFocused = selectedAccountId !== null;
   $: selectedAccount = isAccountFocused && replica?.state?.accounts && selectedAccountId
     ? replica.state.accounts.get(selectedAccountId) : null;
-  $: accountWorkspaceAccountIds = replica?.state?.accounts
+  $: accountIds = replica?.state?.accounts
     ? Array.from(replica.state.accounts.keys()).map((id) => String(id)).sort()
     : [];
 
@@ -251,7 +251,7 @@
   $: openAccountEntityOptions = (() => {
     const ids = new Map<string, string>();
     const selfId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
-    const existingAccountIds = new Set(accountWorkspaceAccountIds.map((id) => String(id || '').trim().toLowerCase()));
+    const existingAccountIds = new Set(accountIds.map((id) => String(id || '').trim().toLowerCase()));
     const add = (candidate: unknown) => {
       const raw = String(candidate || '').trim();
       if (!isFullEntityId(raw)) return;
@@ -286,9 +286,8 @@
   let hubRebalanceTimeoutSeconds = '600';
   let hubPolicyVersion = '';
 
-  // On-chain reserves (from entityState; no RPC reads)
+  // On-chain reserves are derived directly from replica.state.reserves.
   let onchainReserves: Map<number, bigint> = new Map();
-  let reservesLoading = true;
   let pendingReserveFaucets: Array<{
     tokenId: number;
     amount: bigint;
@@ -582,53 +581,45 @@
     return cloneTokenList(tokens);
   }
 
-  async function fetchOnchainReserves() {
-    try {
-      const newReserves = new Map<number, bigint>();
-      const catalogTokenIds = externalTokens
-        .map(t => t.tokenId)
-        .filter((id): id is number => typeof id === 'number' && id > 0);
-      const defaultTokenIds = catalogTokenIds.length > 0 ? catalogTokenIds : [1, 2, 3];
-      for (const tokenId of defaultTokenIds) {
-        newReserves.set(tokenId, 0n);
-      }
+  function buildOnchainReserves(
+    reserves: Map<number | string, bigint> | undefined,
+    tokens: ExternalToken[],
+  ): Map<number, bigint> {
+    const next = new Map<number, bigint>();
+    const catalogTokenIds = tokens
+      .map(t => t.tokenId)
+      .filter((id): id is number => typeof id === 'number' && id > 0);
+    const defaultTokenIds = catalogTokenIds.length > 0 ? catalogTokenIds : [1, 2, 3];
+    for (const tokenId of defaultTokenIds) {
+      next.set(tokenId, 0n);
+    }
 
-      const reserves = replica?.state?.reserves;
-      if (reserves) {
-        for (const [tokenId, amount] of reserves.entries()) {
-          const numericId = Number(tokenId);
-          if (!Number.isNaN(numericId)) {
-            newReserves.set(numericId, amount);
-          }
-        }
+    if (reserves && typeof reserves.entries === 'function') {
+      for (const [tokenId, amount] of reserves.entries()) {
+        const numericId = Number(tokenId);
+        if (!Number.isNaN(numericId)) next.set(numericId, amount);
       }
-      if (pendingReserveFaucets.length > 0) {
-        console.log(`[EntityPanel] fetchOnchainReserves: replica=${replica?.state?.entityId?.slice(-4) || 'none'}`);
-        console.log(`[EntityPanel]   reserves Map size: ${reserves?.size ?? 'null'}`);
-        for (const [tid, amt] of reserves?.entries?.() ?? []) {
-          console.log(`[EntityPanel]   token ${tid}: ${amt}`);
-        }
+    }
+    return next;
+  }
+
+  $: onchainReserves = buildOnchainReserves(replica?.state?.reserves, externalTokens);
+
+  $: if (pendingReserveFaucets.length > 0) {
+    const now = Date.now();
+    const remaining: typeof pendingReserveFaucets = [];
+    for (const req of pendingReserveFaucets) {
+      const current = onchainReserves.get(req.tokenId) ?? 0n;
+      if (current >= req.expectedBalance) {
+        toasts.success(`Received ${formatAmount(req.amount, getTokenInfo(req.tokenId).decimals)} ${req.symbol} in reserves!`);
+      } else if (now - req.startedAt > RESERVE_FAUCET_TIMEOUT_MS) {
+        toasts.error(`Reserve faucet timed out for ${req.symbol}. Check server logs.`);
+      } else {
+        remaining.push(req);
       }
-      onchainReserves = newReserves;
-      if (pendingReserveFaucets.length > 0) {
-        const now = Date.now();
-        const remaining: typeof pendingReserveFaucets = [];
-        for (const req of pendingReserveFaucets) {
-          const current = newReserves.get(req.tokenId) ?? 0n;
-          if (current >= req.expectedBalance) {
-            toasts.success(`Received ${formatAmount(req.amount, getTokenInfo(req.tokenId).decimals)} ${req.symbol} in reserves!`);
-          } else if (now - req.startedAt > RESERVE_FAUCET_TIMEOUT_MS) {
-            toasts.error(`Reserve faucet timed out for ${req.symbol}. Check server logs.`);
-          } else {
-            remaining.push(req);
-          }
-        }
-        pendingReserveFaucets = remaining;
-      }
-      reservesLoading = false;
-    } catch (err) {
-      console.error('[EntityPanel] Failed to fetch reserves:', err);
-      reservesLoading = false;
+    }
+    if (remaining.length !== pendingReserveFaucets.length) {
+      pendingReserveFaucets = remaining;
     }
   }
 
@@ -788,8 +779,8 @@
 
       console.log(`[EntityPanel] Deposited ${token.symbol} to entity reserves`);
 
-      // Refresh both balances
-      await Promise.all([fetchOnchainReserves(), fetchExternalTokens()]);
+      // Reserves are event-driven via replica.state.reserves; only external balances need polling.
+      await fetchExternalTokens();
     } catch (err) {
       console.error('[EntityPanel] Deposit failed:', err);
       toasts.error(`Deposit failed: ${(err as Error).message}`);
@@ -874,7 +865,7 @@
       toasts.error('Cannot open account with yourself');
       return;
     }
-    if (accountWorkspaceAccountIds.some((id) => String(id).toLowerCase() === trimmed)) {
+    if (accountIds.some((id) => String(id).toLowerCase() === trimmed)) {
       toasts.info('Account with this entity already exists');
       return;
     }
@@ -901,6 +892,32 @@
     } catch (err) {
       console.error('[EntityPanel] Open account failed:', err);
       toasts.error(`Open account failed: ${(err as Error).message}`);
+    }
+  }
+
+  async function reopenDisputedAccount(counterpartyEntityId: string) {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const env = activeEnv;
+    const signerId = resolveEntitySigner(entityId, 'reopen-disputed-account');
+    if (!entityId || !signerId) return;
+    if (!activeIsLive) {
+      toasts.error('Reopen account requires LIVE mode');
+      return;
+    }
+    try {
+      if (!env) throw new Error('Environment not ready');
+      await enqueueEntityInputs(env as any, [{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'reopenDisputedAccount' as const,
+          data: { counterpartyEntityId },
+        }],
+      }]);
+      toasts.success('Reopen disputed account queued');
+    } catch (err) {
+      console.error('[EntityPanel] Reopen disputed account failed:', err);
+      toasts.error(`Reopen failed: ${(err as Error).message}`);
     }
   }
 
@@ -940,7 +957,6 @@
   }
 
   function refreshBalances() {
-    fetchOnchainReserves();
     fetchExternalTokens();
   }
 
@@ -1275,7 +1291,7 @@
             const divisor = BigInt(10) ** BigInt(info.decimals);
             const price = getAssetPrice(info.symbol ?? 'UNK');
             const valueOf = (amount: bigint) => (Number(amount) / Number(divisor)) * price;
-            const isLeftEntity = activeXlnFunctions?.isLeft?.(tab.entityId, String(counterpartyId)) ?? true;
+            const isLeftEntity = String(tab.entityId || '').toLowerCase() < String(counterpartyId || '').toLowerCase();
             const derived = activeXlnFunctions?.deriveDelta?.(delta, isLeftEntity);
             if (!derived) continue;
 
@@ -1298,6 +1314,20 @@
       count,
       total: outbound,
     };
+  })();
+
+  $: disputedAccounts = (() => {
+    const out: Array<{ counterpartyId: string; status: string }> = [];
+    const accounts = replica?.state?.accounts;
+    if (!(accounts instanceof Map)) return out;
+    for (const [counterpartyId, account] of accounts.entries()) {
+      const activeDispute = (account as any)?.activeDispute;
+      const status = String(account?.status || '');
+      const isFinalizedDisputed = status === 'disputed' && !activeDispute;
+      if (!isFinalizedDisputed) continue;
+      out.push({ counterpartyId: String(counterpartyId), status: 'disputed' });
+    }
+    return out.sort((a, b) => a.counterpartyId.localeCompare(b.counterpartyId));
   })();
 
   $: netWorth = externalTotal + reservesTotal + accountsData.total;
@@ -1324,6 +1354,18 @@
     accountWorkspaceTab = 'activity';
   }
 
+  function handleAccountPanelGoToSettle() {
+    selectedAccountId = null;
+    activeTab = 'accounts';
+    accountWorkspaceTab = 'settle';
+  }
+
+  function handleAccountPanelGoToOpenAccounts() {
+    selectedAccountId = null;
+    activeTab = 'accounts';
+    accountWorkspaceTab = 'open';
+  }
+
   function openOnchainDeposit(tokenId: number) {
     onchainPrefill = { tokenId, id: Date.now() };
     activeTab = 'accounts';
@@ -1344,7 +1386,12 @@
     return (batch.reserveToCollateral?.length || 0) +
            (batch.collateralToReserve?.length || 0) +
            (batch.settlements?.length || 0) +
-           (batch.reserveToReserve?.length || 0);
+           (batch.reserveToReserve?.length || 0) +
+           (batch.disputeStarts?.length || 0) +
+           (batch.disputeFinalizations?.length || 0) +
+           (batch.externalTokenToReserve?.length || 0) +
+           (batch.reserveToExternalToken?.length || 0) +
+           (batch.revealSecrets?.length || 0);
   })();
 
   const tabs: Array<{ id: ViewTab; icon: any; label: string; showBadge?: boolean; badgeType?: 'pending' }> = [
@@ -1359,14 +1406,14 @@
     { id: 'settings', icon: SettingsIcon, label: 'Settings' },
   ];
 
-  const accountWorkspaceTabs: Array<{ id: AccountWorkspaceTab; icon: any; label: string }> = [
+  const accountWorkspaceTabs: Array<{ id: AccountWorkspaceTab; icon: any; label: string; showPendingBatch?: boolean }> = [
     { id: 'open', icon: PlusCircle, label: 'Open Account' },
     { id: 'send', icon: ArrowUpRight, label: 'Send' },
     { id: 'credit', icon: Scale, label: 'Extend Credit' },
     { id: 'collateral', icon: Wallet, label: 'Request Collateral' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
     { id: 'activity', icon: Activity, label: 'Activity' },
-    { id: 'settle', icon: Landmark, label: 'Settle' },
+    { id: 'settle', icon: Landmark, label: 'Settle', showPendingBatch: true },
   ];
 </script>
 
@@ -1422,6 +1469,8 @@
           {tab}
           on:back={handleBackToAccounts}
           on:faucet={handleAccountFaucet}
+          on:goToSettle={handleAccountPanelGoToSettle}
+          on:goToOpenAccounts={handleAccountPanelGoToOpenAccounts}
         />
         {/key}
       </div>
@@ -1468,21 +1517,24 @@
         <button class="breakdown-card" class:active={activeTab === 'reserves'} on:click={() => activeTab = 'reserves'}>
           <div class="card-icon">🏦</div>
           <div class="card-body">
-            <div class="card-value">{formatCompact(reservesTotal)}</div>
+            <div class="card-value" data-testid="reserves-card-value">{formatCompact(reservesTotal)}</div>
             <div class="card-label">Reserves</div>
-            <div class="card-sub">{Array.from(onchainReserves.values()).filter(v => v > 0n).length} token{Array.from(onchainReserves.values()).filter(v => v > 0n).length !== 1 ? 's' : ''}</div>
+            <div class="card-sub">
+              {Array.from(onchainReserves.values()).filter(v => v > 0n).length}
+              token{Array.from(onchainReserves.values()).filter(v => v > 0n).length !== 1 ? 's' : ''}
+            </div>
           </div>
         </button>
         <button class="breakdown-card wide" class:active={activeTab === 'accounts'} on:click={() => activeTab = 'accounts'}>
           <div class="card-icon">⚡</div>
           <div class="card-body">
-            <div class="card-value">{formatCompact(accountsData.total)}</div>
+            <div class="card-value" data-testid="accounts-card-value">{formatCompact(accountsData.total)}</div>
             <div class="card-label">Accounts</div>
             <div class="card-sub">
               {#if accountsData.count > 0}
                 {accountsData.count} channel{accountsData.count !== 1 ? 's' : ''}
                 {#if accountsData.outPeerDebt > 0}
-                  <span class="accounts-breakdown debt">owed {formatCompact(accountsData.outPeerDebt)}</span>
+                  <span class="accounts-breakdown debt" data-testid="accounts-card-owed">owed {formatCompact(accountsData.outPeerDebt)}</span>
                 {/if}
                 {#if accountsData.outCollateral > 0}
                   <span class="accounts-breakdown coll">coll {formatCompact(accountsData.outCollateral)}</span>
@@ -1618,67 +1670,60 @@
                   <option value={opt.value}>{opt.label}</option>
                 {/each}
               </select>
-              <button class="btn-refresh-small" on:click={() => fetchOnchainReserves()} disabled={reservesLoading}>
-                {reservesLoading ? '...' : 'Refresh'}
+              <button class="btn-refresh-small" on:click={() => refreshBalances()}>
+                Refresh
               </button>
             </div>
           </div>
           <p class="muted wallet-label">Entity: {replica?.state?.entityId || tab.entityId}</p>
 
-          {#if reservesLoading}
-            <div class="loading-row">
-              <div class="loading-spinner"></div>
-              <span>Loading...</span>
-            </div>
-          {:else}
-            <!-- Table Header -->
-            <div class="token-table-header">
-              <span class="col-token">Token</span>
-              <span class="col-balance">Balance</span>
-              <span class="col-value">Value</span>
-              <span class="col-actions">Actions</span>
-            </div>
-            <!-- Table Rows -->
-            <div class="token-table">
-              {#each Array.from(onchainReserves.entries()) as [tokenId, amount]}
-                {@const info = resolveReserveTokenMeta(Number(tokenId))}
-                {@const value = getAssetValue(Number(tokenId), amount)}
-                <div class="token-table-row" class:has-balance={amount > 0n} data-testid={`reserve-row-${info.symbol}`}>
-                  <div class="col-token">
-                    <span class="token-icon-small" class:usdc={info.symbol === 'USDC'} class:weth={info.symbol === 'WETH' || info.symbol === 'ETH'} class:usdt={info.symbol === 'USDT'}>
-                      {info.symbol.slice(0, 1)}
-                    </span>
-                    <span class="token-name">{info.symbol}</span>
-                  </div>
-                  <div class="col-balance">
-                    <span class="balance-text" class:zero={amount === 0n} data-testid={`reserve-balance-${info.symbol}`}>
-                      {formatAmount(amount, info.decimals)}
-                    </span>
-                  </div>
-                  <div class="col-value">
-                    <span class="value-text">{formatCompact(value)}</span>
-                  </div>
-                  <div class="col-actions">
-                    <button
-                      class="btn-table-action faucet"
-                      data-testid={`reserve-faucet-${info.symbol}`}
-                      on:click={() => faucetReserves(Number(tokenId), info.symbol)}
-                    >
-                      Faucet
-                    </button>
-                    <button
-                      class="btn-table-action collateral"
-                      on:click={() => openOnchainDeposit(Number(tokenId))}
-                      disabled={collateralFundingToken === info.symbol}
-                      title="Deposit reserve to account"
-                    >
-                      {collateralFundingToken === info.symbol ? '...' : 'Deposit to Account'}
-                    </button>
-                  </div>
+          <!-- Table Header -->
+          <div class="token-table-header">
+            <span class="col-token">Token</span>
+            <span class="col-balance">Balance</span>
+            <span class="col-value">Value</span>
+            <span class="col-actions">Actions</span>
+          </div>
+          <!-- Table Rows -->
+          <div class="token-table">
+            {#each Array.from(onchainReserves.entries()) as [tokenId, amount]}
+              {@const info = resolveReserveTokenMeta(Number(tokenId))}
+              {@const value = getAssetValue(Number(tokenId), amount)}
+              <div class="token-table-row" class:has-balance={amount > 0n} data-testid={`reserve-row-${info.symbol}`}>
+                <div class="col-token">
+                  <span class="token-icon-small" class:usdc={info.symbol === 'USDC'} class:weth={info.symbol === 'WETH' || info.symbol === 'ETH'} class:usdt={info.symbol === 'USDT'}>
+                    {info.symbol.slice(0, 1)}
+                  </span>
+                  <span class="token-name">{info.symbol}</span>
                 </div>
-              {/each}
-            </div>
-          {/if}
+                <div class="col-balance">
+                  <span class="balance-text" class:zero={amount === 0n} data-testid={`reserve-balance-${info.symbol}`}>
+                    {formatAmount(amount, info.decimals)}
+                  </span>
+                </div>
+                <div class="col-value">
+                  <span class="value-text">{formatCompact(value)}</span>
+                </div>
+                <div class="col-actions">
+                  <button
+                    class="btn-table-action faucet"
+                    data-testid={`reserve-faucet-${info.symbol}`}
+                    on:click={() => faucetReserves(Number(tokenId), info.symbol)}
+                  >
+                    Faucet
+                  </button>
+                  <button
+                    class="btn-table-action collateral"
+                    on:click={() => openOnchainDeposit(Number(tokenId))}
+                    disabled={collateralFundingToken === info.symbol}
+                    title="Deposit reserve to account"
+                  >
+                    {collateralFundingToken === info.symbol ? '...' : 'Deposit to Account'}
+                  </button>
+                </div>
+              </div>
+            {/each}
+          </div>
 
         {:else if activeTab === 'accounts'}
           <AccountList
@@ -1697,6 +1742,9 @@
               >
                 <svelte:component this={t.icon} size={14} />
                 <span>{t.label}</span>
+                {#if t.showPendingBatch && pendingBatchCount > 0}
+                  <span class="workspace-badge pending">{pendingBatchCount}</span>
+                {/if}
               </button>
             {/each}
           </nav>
@@ -1710,7 +1758,7 @@
                 entityId={replica.state?.entityId || tab.entityId}
                 signerId={tab.signerId || null}
                 counterpartyId={null}
-                accountIds={accountWorkspaceAccountIds}
+                accountIds={accountIds}
               />
 
             {:else if accountWorkspaceTab === 'collateral'}
@@ -1718,7 +1766,7 @@
                 entityId={replica.state?.entityId || tab.entityId}
                 signerId={tab.signerId || null}
                 counterpartyId={null}
-                accountIds={accountWorkspaceAccountIds}
+                accountIds={accountIds}
               />
 
             {:else if accountWorkspaceTab === 'swap'}
@@ -1749,6 +1797,32 @@
                   </div>
                   <div class="muted" style="margin-top: 6px;">Works with selector or manual full ID entry (0x...).</div>
                 </div>
+
+                {#if disputedAccounts.length > 0}
+                  <div class="open-section disputed-section">
+                    <h4 class="section-head">Disputed Accounts</h4>
+                    <p class="muted" style="margin-top: 0;">Disputed accounts are hidden from the main list. Reopen here after finalize.</p>
+                    <div class="disputed-list">
+                      {#each disputedAccounts as item (item.counterpartyId)}
+                        <div class="disputed-row">
+                          <div class="disputed-meta">
+                            <div class="disputed-id">{item.counterpartyId}</div>
+                            <div class="disputed-state">
+                              Finalized disputed account (hidden from main list)
+                            </div>
+                          </div>
+                          <button
+                            class="btn-reopen-disputed"
+                            on:click={() => reopenDisputedAccount(item.counterpartyId)}
+                            disabled={!activeIsLive}
+                          >
+                            Reopen
+                          </button>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
               </div>
 
             {:else if accountWorkspaceTab === 'activity'}
@@ -1772,13 +1846,12 @@
                     <button class="btn-live" on:click={() => accountWorkspaceTab = 'open'}>Open Accounts</button>
                   </div>
                 {/if}
-                <SettlementPanel entityId={replica.state?.entityId || tab.entityId} {contacts} prefill={onchainPrefill} />
-                <div class="dispute-note">
-                  <h4 class="section-head">Disputes</h4>
-                  <p class="muted">
-                    Dispute workflow is part of Settle. Use the <code>Dispute</code> action in this panel to start on-chain dispute and freeze the account safely.
-                  </p>
-                </div>
+                <SettlementPanel
+                  entityId={replica.state?.entityId || tab.entityId}
+                  {replica}
+                  {contacts}
+                  prefill={onchainPrefill}
+                />
               {/if}
             {/if}
           </section>
@@ -2783,9 +2856,9 @@
   }
 
   .badge.pending {
-    background: #ca8a04;
-    color: #fef3c7;
-    box-shadow: 0 1px 3px rgba(202, 138, 4, 0.3);
+    background: #b91c1c;
+    color: #fee2e2;
+    box-shadow: 0 1px 3px rgba(185, 28, 28, 0.35);
   }
 
   /* Content */
@@ -2836,16 +2909,22 @@
     background: rgba(251, 191, 36, 0.08);
   }
 
-  .account-workspace-content {
-    margin-top: 12px;
+  .workspace-badge {
+    margin-left: 4px;
+    min-width: 18px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.4;
+    text-align: center;
+    color: #fee2e2;
+    background: #b91c1c;
+    box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.4) inset;
   }
 
-  .dispute-note {
-    margin-top: 14px;
-    padding: 10px 12px;
-    border: 1px solid rgba(251, 191, 36, 0.18);
-    border-radius: 8px;
-    background: rgba(251, 191, 36, 0.04);
+  .account-workspace-content {
+    margin-top: 12px;
   }
 
   .section-head {
@@ -3390,6 +3469,64 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+
+  .disputed-section {
+    border-color: rgba(244, 63, 94, 0.25);
+    background: rgba(244, 63, 94, 0.06);
+  }
+
+  .disputed-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .disputed-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid rgba(244, 63, 94, 0.2);
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.5);
+  }
+
+  .disputed-meta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .disputed-id {
+    color: #e2e8f0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    word-break: break-all;
+  }
+
+  .disputed-state {
+    color: #fda4af;
+    font-size: 11px;
+  }
+
+  .btn-reopen-disputed {
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    background: rgba(251, 191, 36, 0.12);
+    color: #fde68a;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .btn-reopen-disputed:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   @media (max-width: 900px) {

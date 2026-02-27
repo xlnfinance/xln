@@ -12,6 +12,21 @@ const RUNTIME_BUILD_ID = '2026-02-09-22:10Z';
 // Bump this only on breaking persistence/replay format or invariants.
 export const RUNTIME_SCHEMA_VERSION = 2;
 export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
+const LOCAL_DEV_CHAIN_ID = 31337;
+const readRuntimeEnv = (name: string): string | undefined => {
+  try {
+    const proc = (globalThis as any)?.process;
+    const value = proc?.env?.[name];
+    return typeof value === 'string' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+};
+const LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS = (() => {
+  const parsed = Number(readRuntimeEnv('XLN_LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS') ?? '5');
+  if (!Number.isFinite(parsed) || parsed < 1) return 5;
+  return Math.floor(parsed);
+})();
 console.log(`🚀 RUNTIME.JS BUILD: ${RUNTIME_BUILD_ID}`);
 
 import { getPerfMs, getWallClockMs } from './utils';
@@ -1309,6 +1324,52 @@ export const processJBlockEvents = async (env: Env): Promise<void> => {
 
 // === UTILITY FUNCTIONS ===
 
+const readDefaultDisputeDelay = async (jadapter: JAdapter): Promise<number | null> => {
+  try {
+    const delay = await jadapter.depository.defaultDisputeDelay();
+    const asNumber = Number(delay);
+    return Number.isFinite(asNumber) ? asNumber : null;
+  } catch {
+    return null;
+  }
+};
+
+const maybeConfigureLocalDisputeDelay = async (
+  jadapter: JAdapter,
+  jurisdictionName: string,
+): Promise<void> => {
+  if (Number(jadapter.chainId) !== LOCAL_DEV_CHAIN_ID) return;
+
+  const currentDelay = await readDefaultDisputeDelay(jadapter);
+  if (!Number.isFinite(currentDelay) || currentDelay === null) {
+    console.warn(
+      `[Runtime] ${jurisdictionName}: unable to read Depository.defaultDisputeDelay (keeping chain value)`,
+    );
+    return;
+  }
+
+  if (currentDelay === LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS) {
+    console.log(
+      `[Runtime] ${jurisdictionName}: defaultDisputeDelay=${currentDelay} (source: contract)`,
+    );
+    return;
+  }
+
+  try {
+    const tx = await jadapter.depository.setDefaultDisputeDelay(LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS);
+    await tx.wait();
+    const updatedDelay = await readDefaultDisputeDelay(jadapter);
+    console.log(
+      `[Runtime] ${jurisdictionName}: defaultDisputeDelay ${currentDelay} -> ${updatedDelay ?? LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS}`,
+    );
+  } catch (error) {
+    console.warn(
+      `[Runtime] ${jurisdictionName}: failed to set defaultDisputeDelay=${LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS} ` +
+      `(current=${currentDelay}): ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+};
+
 const applyRuntimeInput = async (
   env: Env,
   runtimeInput: RuntimeInput,
@@ -1461,6 +1522,7 @@ const applyRuntimeInput = async (
           if (!fromReplica) {
             await jadapter.deployStack();
           }
+          await maybeConfigureLocalDisputeDelay(jadapter, runtimeTx.data.name);
 
           // For BrowserVM, set as default jurisdiction in env
           if (isBrowserVM) {
@@ -1935,7 +1997,13 @@ const applyRuntimeInput = async (
 
     // Only create runtime frame if there's actual work to do
     const hasRuntimeTxs = mergedRuntimeTxs.length > 0;
-    const hasEntityInputs = appliedEntityInputs.length > 0;
+    const meaningfulEntityInputCount = appliedEntityInputs.reduce((count, input) => {
+      const hasEntityTxs = (input.entityTxs?.length || 0) > 0;
+      const hasProposal = !!input.proposedFrame;
+      const hasHashPrecommits = !!input.hashPrecommits && input.hashPrecommits.size > 0;
+      return count + (hasEntityTxs || hasProposal || hasHashPrecommits ? 1 : 0);
+    }, 0);
+    const hasEntityInputs = meaningfulEntityInputCount > 0;
     const hasOutputs = entityOutbox.length > 0;
     const hasJOutputs = jOutbox.length > 0;
 
@@ -1944,7 +2012,7 @@ const applyRuntimeInput = async (
       env.emit('RuntimeTick', {
         height: env.height + 1,
         runtimeTxs: mergedRuntimeTxs.length,
-        entityInputs: appliedEntityInputs.length,
+        entityInputs: meaningfulEntityInputCount,
         outputs: entityOutbox.length,
       });
 
@@ -2828,15 +2896,15 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     env.extra = undefined;
 
     // === COMMIT POINT: persist finalized R-frame ===
-    console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
     // Persist only when a new runtime frame was actually applied.
     // Side-effect-only ticks (e.g. deferred network retries) must never
     // overwrite WAL entries for the current height.
     if (frameAdvanced) {
+      console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
       await saveEnvToDB(env);
       (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput = undefined;
+      console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
     }
-    console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
 
     // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
 

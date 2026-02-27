@@ -216,6 +216,13 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
   const outputs: EntityInput[] = [];
   const firstValidator = replica.state.config.validators?.[0];
   if (!firstValidator) return outputs;
+  const jadapter = getEnvJAdapter(env);
+  const canAutoAdvanceLocalJBlock =
+    !!jadapter &&
+    jadapter.mode === 'rpc' &&
+    Number(jadapter.chainId) === 31337 &&
+    typeof jadapter.processBlock === 'function';
+  let triedAutoAdvanceThisTick = false;
 
   // Group expired locks by type for batch processing
   const htlcTimeoutLocks: Array<{ accountId: string; lockId: string }> = [];
@@ -223,7 +230,6 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
 
   let currentJBlock = Number(replica.state.lastFinalizedJHeight || 0);
   try {
-    const jadapter = getEnvJAdapter(env);
     if (jadapter?.provider && typeof jadapter.provider.getBlockNumber === 'function') {
       currentJBlock = Math.max(currentJBlock, Number(await jadapter.provider.getBlockNumber()));
     }
@@ -256,6 +262,24 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
           if (!account?.activeDispute) break;
 
           const timeoutBlock = Number(account.activeDispute.disputeTimeout || 0);
+          if (
+            jadapter &&
+            timeoutBlock &&
+            currentJBlock < timeoutBlock &&
+            canAutoAdvanceLocalJBlock &&
+            !triedAutoAdvanceThisTick
+          ) {
+            triedAutoAdvanceThisTick = true;
+            try {
+              await jadapter.processBlock();
+              if (jadapter.provider && typeof jadapter.provider.getBlockNumber === 'function') {
+                currentJBlock = Math.max(currentJBlock, Number(await jadapter.provider.getBlockNumber()));
+              }
+            } catch {
+              // Keep retry path below.
+            }
+          }
+
           if (!timeoutBlock || currentJBlock < timeoutBlock) {
             const retryMs = 1000;
             if (replica.state.crontabState) {
