@@ -41,6 +41,9 @@ tests/playwright-report/
 tests/screenshots/
 playwright-report/
 test-results/
+tests/**/*.webm
+playwright-report/**/*.webm
+test-results/**/*.webm
 .playwright-mcp/
 .logs/
 **/.playwright-artifacts-*/

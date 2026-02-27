@@ -32,12 +32,19 @@
     return sum;
   }
 
+  function isFinalizedDisputed(account: any): boolean {
+    const status = String(account?.status || '');
+    const activeDispute = !!account?.activeDispute;
+    return status === 'disputed' && !activeDispute;
+  }
+
   $: rankedAccounts = accounts
     .map(([counterpartyId, account]) => ({
       counterpartyId,
       account,
       score: getAccountDeltaMagnitude(account),
     }))
+    .filter((entry) => !isFinalizedDisputed(entry.account))
     .sort((a, b) => {
       if (a.score === b.score) return a.counterpartyId.localeCompare(b.counterpartyId);
       return a.score > b.score ? -1 : 1;
@@ -45,6 +52,7 @@
 
   $: visibleAccounts = showAllAccounts ? rankedAccounts : rankedAccounts.slice(0, 3);
   $: hiddenAccountsCount = Math.max(0, rankedAccounts.length - visibleAccounts.length);
+  $: activeAccountsCount = rankedAccounts.length;
 
   // Safety guard for XLN functions
 
@@ -137,7 +145,7 @@
   <div class="accounts-list-view">
 
 
-      {#if accounts.length === 0}
+      {#if activeAccountsCount === 0}
         <div class="no-accounts">
           <p>No accounts established</p>
           <small>Select an entity below to open an account</small>
@@ -146,19 +154,19 @@
         <div class="list-header">
           <span class="list-count">
             {#if hiddenAccountsCount > 0}
-              Top {visibleAccounts.length} of {accounts.length} accounts
+              Top {visibleAccounts.length} of {activeAccountsCount} accounts
             {:else}
-              {accounts.length} account{accounts.length !== 1 ? 's' : ''}
+              {activeAccountsCount} account{activeAccountsCount !== 1 ? 's' : ''}
             {/if}
           </span>
           <div class="list-controls">
-            {#if accounts.length > 3}
+            {#if activeAccountsCount > 3}
               <button
                 class="list-toggle"
                 on:click={() => showAllAccounts = !showAllAccounts}
                 title={showAllAccounts ? 'Show top 3 only' : 'Show all accounts'}
               >
-                {showAllAccounts ? 'Top 3' : `All (${accounts.length})`}
+                {showAllAccounts ? 'Top 3' : `All (${activeAccountsCount})`}
               </button>
             {/if}
             <button class="layout-toggle" on:click={() => settingsOperations.update({ barLayout: $settings.barLayout === 'center' ? 'sides' : 'center' })} title="{$settings.barLayout === 'center' ? 'Switch to sides view' : 'Switch to center view'}">

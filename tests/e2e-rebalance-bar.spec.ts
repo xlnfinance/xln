@@ -917,7 +917,8 @@ async function resetProdServer(page: Page) {
 }
 
 test.describe('Rebalance E2E', () => {
-  test.setTimeout(LONG_E2E ? 300_000 : 60_000);
+  // Rebalance involves async j-event bilateral finalization and can exceed 60s on local runs.
+  test.setTimeout(LONG_E2E ? 300_000 : 180_000);
 
   test('faucet -> request_collateral -> secured bar', async ({ page }) => {
     const scenarioStartedAt = Date.now();

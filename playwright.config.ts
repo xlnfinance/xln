@@ -10,7 +10,7 @@ const PW_OUTPUT_DIR = process.env['PW_OUTPUT_DIR'] || './tests/test-results';
 const PW_FAST = process.env['PW_FAST'] === '1';
 const PW_TRACE = process.env['PW_TRACE'] || (PW_FAST ? 'off' : 'on-first-retry');
 const PW_SCREENSHOT = process.env['PW_SCREENSHOT'] || (PW_FAST ? 'off' : 'only-on-failure');
-const PW_VIDEO = process.env['PW_VIDEO'] || (PW_FAST ? 'off' : 'retain-on-failure');
+const PW_VIDEO = process.env['PW_VIDEO'] || 'on';
 const PW_REPORTER = process.env['PW_REPORTER'];
 
 export default defineConfig({

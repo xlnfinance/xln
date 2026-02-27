@@ -78,11 +78,11 @@ export const SCENARIOS: ScenarioMetadata[] = [
     run: async (env: Env) => (await import('./processbatch')).runProcessBatchScenario(env),
   },
   {
-    id: 'dispute-e2e',
-    name: 'Dispute E2E',
+    id: 'dispute-lifecycle',
+    name: 'Dispute Lifecycle',
     description: 'Unilateral dispute lifecycle: start -> finalize -> resume, without bilateral j_event_claim flow',
     tags: ['dispute', 'safety', 'rpc'],
-    run: async (env: Env) => (await import('./dispute-e2e')).runDisputeE2E(env),
+    run: async (env: Env) => (await import('./dispute-lifecycle')).runDisputeLifecycle(env),
   },
 ];
 
@@ -129,8 +129,8 @@ export const scenarioRegistry: ScenarioEntry[] = [
     load: async () => (await import('./processbatch')).runProcessBatchScenario,
   },
   {
-    key: 'dispute-e2e',
-    name: 'Dispute E2E',
-    load: async () => (await import('./dispute-e2e')).runDisputeE2E,
+    key: 'dispute-lifecycle',
+    name: 'Dispute Lifecycle',
+    load: async () => (await import('./dispute-lifecycle')).runDisputeLifecycle,
   },
 ];
