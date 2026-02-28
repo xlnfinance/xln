@@ -171,6 +171,7 @@ export interface CompletedBatch {
   opCount: number; // Total operations in batch
   entityNonce: number;
   jBlockNumber?: number; // Finalized J-block that emitted HankoBatchProcessed
+  batch?: JBatch; // Optional full batch snapshot for rich UI history
   operations?: BatchOpBreakdown; // Optional per-op breakdown for UI history
   source?: 'self-batch' | 'counterparty-event';
   eventType?: 'DisputeStarted' | 'DisputeFinalized';

@@ -1203,7 +1203,9 @@ const bootstrapServerHubsAndReserves = async (
       }
     : undefined;
 
-  for (const hubEntityId of hubEntityIds) {
+  for (const [index, hubEntityId] of hubEntityIds.entries()) {
+    const hubConfig = hubConfigs[index];
+    const disputeAutoFinalizeMode: 'auto' | 'ignore' = hubConfig?.name === 'H2' ? 'ignore' : 'auto';
     const replica = getEntityReplicaById(env, hubEntityId);
     if (!replica?.state) continue;
     replica.state.hubRebalanceConfig = {
@@ -1211,6 +1213,7 @@ const bootstrapServerHubsAndReserves = async (
       policyVersion: 1,
       routingFeePPM: 1000,
       baseFee: 5n * 10n ** 18n,
+      disputeAutoFinalizeMode,
       rebalanceBaseFee: 10n ** 17n,
       rebalanceLiquidityFeeBps: 1n,
       rebalanceGasFee: 0n,
@@ -1222,7 +1225,10 @@ const bootstrapServerHubsAndReserves = async (
         `[XLN] Hub ${hubEntityId.slice(-8)} jurisdiction set: ${activeJurisdictionName} (depository=${jurisdictionConfig.depositoryAddress.slice(0, 10)}...)`,
       );
     }
-    console.log(`[XLN] Hub ${hubEntityId.slice(-8)} rebalance config set (amount, 1000ppm, rebalance policy triplet)`);
+    console.log(
+      `[XLN] Hub ${hubEntityId.slice(-8)} rebalance config set ` +
+      `(amount, 1000ppm, disputeAutoFinalize=${disputeAutoFinalizeMode}, rebalance policy triplet)`,
+    );
   }
 
   if (globalJAdapter && hubEntityIds.length > 0) {
