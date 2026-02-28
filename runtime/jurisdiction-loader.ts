@@ -12,7 +12,7 @@ interface JurisdictionConfig {
   chainId: number;
   rpc: string;
   rebalancePolicyUsd?: {
-    softLimit: number;
+    r2cRequestSoftLimit: number;
     hardLimit: number;
     maxFee: number;
   };
@@ -34,7 +34,7 @@ interface JurisdictionsData {
     retryAttempts: number;
     gasLimit: number;
     rebalancePolicyUsd?: {
-      softLimit: number;
+      r2cRequestSoftLimit: number;
       hardLimit: number;
       maxFee: number;
     };
@@ -67,7 +67,7 @@ export function loadJurisdictions(): JurisdictionsData {
       retryAttempts: 3,
       gasLimit: 1000000,
       rebalancePolicyUsd: {
-        softLimit: 500,
+        r2cRequestSoftLimit: 500,
         hardLimit: 10_000,
         maxFee: 15,
       },

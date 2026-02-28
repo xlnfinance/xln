@@ -138,24 +138,43 @@ async function createRuntime(page: Page, label: string, mnemonic: string) {
 }
 
 async function switchTo(page: Page, label: string) {
-  const r = await page.evaluate(async (label) => {
+  const deadline = Date.now() + 30_000;
+  let r: { ok: boolean; error?: string } = { ok: false, error: 'not-started' };
+
+  while (Date.now() < deadline) {
     try {
-      const runtimesState = (window as any).runtimesState;
-      const vo = (window as any).vaultOperations;
-      if (!runtimesState || !vo) return { ok: false, error: 'window.runtimesState/vaultOperations missing' };
-      let state: any;
-      const unsub = runtimesState.subscribe((s: any) => { state = s; });
-      unsub();
-      for (const [id, runtime] of Object.entries(state.runtimes) as any[]) {
-        if (runtime.label?.toLowerCase() === label.toLowerCase()) {
-          await vo.selectRuntime(id);
-          return { ok: true };
+      r = await page.evaluate(async (runtimeLabel) => {
+        try {
+          const runtimesState = (window as any).runtimesState;
+          const vo = (window as any).vaultOperations;
+          if (!runtimesState || !vo) return { ok: false, error: 'window.runtimesState/vaultOperations missing' };
+          let state: any;
+          const unsub = runtimesState.subscribe((s: any) => { state = s; });
+          unsub();
+          for (const [id, runtime] of Object.entries(state.runtimes) as any[]) {
+            if (runtime.label?.toLowerCase() === runtimeLabel.toLowerCase()) {
+              await vo.selectRuntime(id);
+              return { ok: true };
+            }
+          }
+          return {
+            ok: false,
+            error: `"${runtimeLabel}" not found in: ${Object.values(state.runtimes).map((x: any) => x.label).join(',')}`,
+          };
+        } catch (e: any) {
+          return { ok: false, error: e.message };
         }
-      }
-      return { ok: false, error: `"${label}" not found in: ${Object.values(state.runtimes).map((r: any) => r.label).join(',')}` };
-    } catch (e: any) { return { ok: false, error: e.message }; }
-  }, label);
-  expect(r.ok, `switchTo(${label}): ${(r as any).error}`).toBe(true);
+      }, label);
+      if (r.ok) break;
+    } catch (e: any) {
+      r = { ok: false, error: e?.message || String(e) };
+    }
+
+    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
+    await page.waitForTimeout(400);
+  }
+
+  expect(r.ok, `switchTo(${label}): ${r.error}`).toBe(true);
   await page.waitForTimeout(1500);
 }
 
@@ -234,85 +253,82 @@ async function getHubFeeConfig(page: Page, hubId: string): Promise<{ feePPM: big
 }
 
 async function connectHub(page: Page, entityId: string, signerId: string, hubId: string) {
-  const r = await page.evaluate(async ({ entityId, signerId, hubId }) => {
-    const findAccount = (accounts: any, ownerId: string, counterpartyId: string) => {
-      if (!(accounts instanceof Map)) return null;
-      const owner = String(ownerId || '').toLowerCase();
-      const cp = String(counterpartyId || '').toLowerCase();
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey || '').toLowerCase() === cp) return account;
-        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
-          ? String(account.counterpartyEntityId).toLowerCase()
-          : '';
-        if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
-        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+  let ready = false;
+  let lastError = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const r = await page.evaluate(async ({ entityId, signerId, hubId }) => {
+      try {
+        const XLN = (window as any).XLN;
+        const env = (window as any).isolatedEnv;
+        const p2p = env?.runtimeState?.p2p;
+        const start = Date.now();
+        let hubRuntimeId: string | null = null;
+        while (Date.now() - start < 12_000) {
+          const profiles = env?.gossip?.getProfiles?.() ?? [];
+          const hub = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === hubId.toLowerCase());
+          hubRuntimeId = hub?.runtimeId ?? hub?.metadata?.runtimeId ?? null;
+          if (hubRuntimeId) break;
+          if (typeof p2p?.refreshGossip === 'function') try { await p2p.refreshGossip(); } catch {}
+          await new Promise(r => setTimeout(r, 500));
+        }
+        if (!hubRuntimeId) return { ok: false, error: 'hub runtimeId unresolved' };
+        let liveSignerId = signerId;
+        for (const key of env?.eReplicas?.keys?.() ?? []) {
+          const [eid, sid] = String(key).split(':');
+          if (String(eid).toLowerCase() === entityId.toLowerCase() && sid) { liveSignerId = sid; break; }
+        }
+        XLN.enqueueRuntimeInput(env, {
+          runtimeTxs: [],
+          entityInputs: [{ entityId, signerId: liveSignerId,
+            entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubId, creditAmount: 10_000n * 10n ** 18n, tokenId: 1 } }] }],
+        });
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message };
       }
-      return null;
-    };
+    }, { entityId, signerId, hubId });
+    if (!r.ok) {
+      lastError = String((r as any).error || 'openAccount enqueue failed');
+      continue;
+    }
 
-    try {
-      const XLN = (window as any).XLN;
-      const env = (window as any).isolatedEnv;
-      const p2p = env?.runtimeState?.p2p;
+    ready = await page.evaluate(async ({ entityId, hubId }) => {
+      const findAccount = (accounts: any, ownerId: string, counterpartyId: string) => {
+        if (!(accounts instanceof Map)) return null;
+        const owner = String(ownerId || '').toLowerCase();
+        const cp = String(counterpartyId || '').toLowerCase();
+        for (const [accountKey, account] of accounts.entries()) {
+          if (String(accountKey || '').toLowerCase() === cp) return account;
+          const canonicalCp = typeof account?.counterpartyEntityId === 'string'
+            ? String(account.counterpartyEntityId).toLowerCase()
+            : '';
+          if (canonicalCp === cp) return account;
+          const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
+          const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+          if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+        }
+        return null;
+      };
+
       const start = Date.now();
-      let hubRuntimeId: string | null = null;
-      while (Date.now() - start < 12_000) {
-        const profiles = env?.gossip?.getProfiles?.() ?? [];
-        const hub = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === hubId.toLowerCase());
-        hubRuntimeId = hub?.runtimeId ?? hub?.metadata?.runtimeId ?? null;
-        if (hubRuntimeId) break;
-        if (typeof p2p?.refreshGossip === 'function') try { await p2p.refreshGossip(); } catch {}
+      while (Date.now() - start < 45_000) {
+        const env = (window as any).isolatedEnv;
+        for (const [k, rep] of (env?.eReplicas ?? new Map()).entries()) {
+          if (!String(k).startsWith(entityId + ':')) continue;
+          const acc = findAccount((rep as any)?.state?.accounts, entityId, hubId);
+          if (acc?.deltas?.get?.(1) && !acc.pendingFrame && Number(acc.currentHeight || 0) > 0) return true;
+        }
         await new Promise(r => setTimeout(r, 500));
       }
-      if (!hubRuntimeId) return { ok: false, error: 'hub runtimeId unresolved' };
-      let liveSignerId = signerId;
-      for (const key of env?.eReplicas?.keys?.() ?? []) {
-        const [eid, sid] = String(key).split(':');
-        if (String(eid).toLowerCase() === entityId.toLowerCase() && sid) { liveSignerId = sid; break; }
-      }
-      XLN.enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [{ entityId, signerId: liveSignerId,
-          entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubId, creditAmount: 10_000n * 10n ** 18n, tokenId: 1 } }] }],
-      });
-      return { ok: true };
-    } catch (e: any) { return { ok: false, error: e.message }; }
-  }, { entityId, signerId, hubId });
-  expect(r.ok, `connectHub(${entityId.slice(0, 8)}→${hubId.slice(0, 8)}): ${(r as any).error}`).toBe(true);
+      return false;
+    }, { entityId, hubId });
 
-  const ready = await page.evaluate(async ({ entityId, hubId }) => {
-    const findAccount = (accounts: any, ownerId: string, counterpartyId: string) => {
-      if (!(accounts instanceof Map)) return null;
-      const owner = String(ownerId || '').toLowerCase();
-      const cp = String(counterpartyId || '').toLowerCase();
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey || '').toLowerCase() === cp) return account;
-        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
-          ? String(account.counterpartyEntityId).toLowerCase()
-          : '';
-        if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
-        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
-      }
-      return null;
-    };
+    if (ready) break;
+    lastError = `account not ready after attempt ${attempt}`;
+    await page.waitForTimeout(500);
+  }
 
-    const start = Date.now();
-    while (Date.now() - start < 45_000) {
-      const env = (window as any).isolatedEnv;
-      for (const [k, rep] of (env?.eReplicas ?? new Map()).entries()) {
-        if (!String(k).startsWith(entityId + ':')) continue;
-        const acc = findAccount((rep as any)?.state?.accounts, entityId, hubId);
-        if (acc?.deltas?.get?.(1) && !acc.pendingFrame && Number(acc.currentHeight || 0) > 0) return true;
-      }
-      await new Promise(r => setTimeout(r, 500));
-    }
-    return false;
-  }, { entityId, hubId });
-  expect(ready, `Account ${entityId.slice(0, 8)}↔${hubId.slice(0, 8)} not ready in 45s`).toBe(true);
+  expect(ready, `Account ${entityId.slice(0, 8)}↔${hubId.slice(0, 8)} not ready: ${lastError || 'unknown'}`).toBe(true);
 }
 
 async function faucet(page: Page, entityId: string, hubEntityId?: string) {

@@ -1,6 +1,6 @@
 {
   "version": "2.0.0",
-  "lastUpdated": "2026-02-27T21:30:01.775Z",
+  "lastUpdated": "2026-02-28T21:09:33.585Z",
   "jurisdictions": {
     "arrakis": {
       "name": "Arrakis (Shared Anvil)",
@@ -17,7 +17,7 @@
       "status": "active",
       "description": "The desert planet - strategic resource hub, high-value trade",
       "rebalancePolicyUsd": {
-        "softLimit": 500,
+        "r2cRequestSoftLimit": 500,
         "hardLimit": 10000,
         "maxFee": 15
       }
@@ -41,7 +41,7 @@
     "retryAttempts": 3,
     "gasLimit": 1000000,
     "rebalancePolicyUsd": {
-      "softLimit": 500,
+      "r2cRequestSoftLimit": 500,
       "hardLimit": 10000,
       "maxFee": 15
     }

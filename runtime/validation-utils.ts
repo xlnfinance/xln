@@ -138,10 +138,8 @@ export function createDefaultDelta(tokenId: number): Delta {
     rightCreditLimit: 0n,
     leftAllowance: 0n,
     rightAllowance: 0n,
-    leftHtlcHold: 0n,
-    rightHtlcHold: 0n,
-    leftSwapHold: 0n,
-    rightSwapHold: 0n,
+    leftHold: 0n,
+    rightHold: 0n,
   };
 }
 

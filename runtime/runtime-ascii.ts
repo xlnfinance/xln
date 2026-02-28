@@ -407,16 +407,15 @@ export function formatAccount(account: AccountMachine, myEntityId: string, optio
       if (opts.tokenFilter && !opts.tokenFilter.includes(tokenId)) continue;
 
       const symbol = tokenId === 1 ? 'USDC' : 'ETH';
-      const htlcHold = (isLeft ? delta.leftHtlcHold : delta.rightHtlcHold) || 0n;
-      const swapHold = (isLeft ? delta.leftSwapHold : delta.rightSwapHold) || 0n;
+      const totalHold = (isLeft ? delta.leftHold : delta.rightHold) || 0n;
 
       output.push(' '.repeat(indent) + `  Token ${tokenId} (${symbol}):`);
 
       // Most important: amounts (offdelta, collateral, holds)
       output.push(' '.repeat(indent) + `    offdelta: ${formatBigInt(delta.offdelta, 18, symbol)} | collateral: ${formatBigInt(delta.collateral, 18, symbol)}`);
 
-      if (htlcHold > 0n || swapHold > 0n) {
-        output.push(' '.repeat(indent) + `    Holds: HTLC=${formatBigInt(htlcHold, 18, symbol)} | Swap=${formatBigInt(swapHold, 18, symbol)}`);
+      if (totalHold > 0n) {
+        output.push(' '.repeat(indent) + `    Hold: ${formatBigInt(totalHold, 18, symbol)}`);
       }
 
       // Secondary: ondelta (less important for most debugging)

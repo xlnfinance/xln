@@ -68,6 +68,37 @@ function getEnvJAdapter(env: Env): JAdapter | null {
   return null;
 }
 
+function emptyOpBreakdown() {
+  return {
+    flashloans: 0,
+    reserveToReserve: 0,
+    reserveToCollateral: 0,
+    collateralToReserve: 0,
+    settlements: 0,
+    disputeStarts: 0,
+    disputeFinalizations: 0,
+    externalTokenToReserve: 0,
+    reserveToExternalToken: 0,
+    revealSecrets: 0,
+  };
+}
+
+function appendBatchHistory(state: EntityState, entry: Record<string, any>): void {
+  if (!state.batchHistory) state.batchHistory = [];
+  const last = state.batchHistory[state.batchHistory.length - 1];
+  const sameAsLast =
+    !!last &&
+    String(last.txHash || '') === String(entry.txHash || '') &&
+    String(last.eventType || '') === String(entry.eventType || '') &&
+    Number(last.jBlockNumber || 0) === Number(entry.jBlockNumber || 0) &&
+    Number(last.entityNonce || 0) === Number(entry.entityNonce || 0);
+  if (sameAsLast) return;
+  state.batchHistory.push(entry);
+  if (state.batchHistory.length > 40) {
+    state.batchHistory = state.batchHistory.slice(-40);
+  }
+}
+
 function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
   const initialArguments = String(initialArgumentsRaw || '0x');
   if (initialArguments === '0x') return [];
@@ -1022,6 +1053,7 @@ async function applyFinalizedJEvent(
         disputeTimeout: Number(accountInfo.disputeTimeout),  // From on-chain
         onChainNonce: Number(accountInfo.nonce),
         initialArguments: event.data.initialArguments || '0x',
+        finalizeQueued: false,
       };
       account.onChainSettlementNonce = Number(accountInfo.nonce);
 
@@ -1049,6 +1081,24 @@ async function applyFinalizedJEvent(
 
       addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);
       console.log(`⚔️ activeDispute stored: hash=${account.activeDispute.initialProofbodyHash.slice(0,10)}..., timeout=${account.activeDispute.disputeTimeout}`);
+      if (!weAreStarter) {
+        const ops = emptyOpBreakdown();
+        ops.disputeStarts = 1;
+        appendBatchHistory(newState, {
+          batchHash: `event:dispute-start:${String(proofbodyHash).slice(0, 12)}`,
+          txHash: transactionHash || '',
+          status: 'confirmed' as const,
+          broadcastedAt: newState.timestamp,
+          confirmedAt: newState.timestamp,
+          opCount: 1,
+          entityNonce: Number(nonce || 0),
+          jBlockNumber: Number(blockNumber || 0),
+          operations: ops,
+          source: 'counterparty-event' as const,
+          eventType: 'DisputeStarted' as const,
+          note: `Counterparty ${senderStr.slice(-4)} started dispute`,
+        });
+      }
 
       if (newState.crontabState) {
         const kickoffDelayMs = weAreStarter ? 1 : 5000;
@@ -1086,6 +1136,7 @@ async function applyFinalizedJEvent(
     }
 
     if (account) {
+      const weAreFinalizer = senderStr === entityIdNorm;
       const jadapter = getEnvJAdapter(env);
       if (jadapter && typeof jadapter.getAccountInfo === 'function') {
         try {
@@ -1127,6 +1178,41 @@ async function applyFinalizedJEvent(
         `✅ DisputeFinalized: account moved to finalized-disputed for ${counterpartyId.slice(-4)} ` +
         `(onChainNonce=${finalizedOnChainNonce}, nextProofNonce=${account.proofHeader.nonce})`,
       );
+      if (!weAreFinalizer) {
+        const ops = emptyOpBreakdown();
+        ops.disputeFinalizations = 1;
+        appendBatchHistory(newState, {
+          batchHash: `event:dispute-finalize:${String(initialProofbodyHash).slice(0, 12)}`,
+          txHash: transactionHash || '',
+          status: 'confirmed' as const,
+          broadcastedAt: newState.timestamp,
+          confirmedAt: newState.timestamp,
+          opCount: 1,
+          entityNonce: Number(initialNonce || 0),
+          jBlockNumber: Number(blockNumber || 0),
+          operations: ops,
+          source: 'counterparty-event' as const,
+          eventType: 'DisputeFinalized' as const,
+          note: `Counterparty ${senderStr.slice(-4)} finalized dispute`,
+        });
+      }
+
+      // Drop stale local draft dispute-finalize ops for this account.
+      // If the dispute is already finalized on-chain, re-broadcasting the same finalize
+      // in a future mixed batch can revert the whole batch.
+      const draftFinalizations = newState.jBatchState?.batch?.disputeFinalizations;
+      if (Array.isArray(draftFinalizations) && draftFinalizations.length > 0) {
+        const normalizeDisputeId = (value: unknown) => String(value || '').toLowerCase();
+        const before = draftFinalizations.length;
+        newState.jBatchState!.batch.disputeFinalizations = draftFinalizations.filter(
+          (entry: any) => normalizeDisputeId(entry?.counterentity) !== candidateCounterpartyId,
+        );
+        const removed = before - newState.jBatchState!.batch.disputeFinalizations.length;
+        if (removed > 0) {
+          addMessage(newState, `🧹 Removed ${removed} stale draft dispute-finalize op(s) for ${counterpartyId.slice(-4)}`);
+          console.log(`🧹 Cleared ${removed} stale draft disputeFinalizations for ${counterpartyId.slice(-4)}`);
+        }
+      }
 
       // DisputeFinalized is authoritative on-chain settlement.
       // Sync local deltas from Depository storage and clear consumed off-chain component.
@@ -1181,9 +1267,10 @@ async function applyFinalizedJEvent(
 
     if (success) {
       if (newState.jBatchState) {
-        const { batchOpCount: countOps, isBatchEmpty, mergeBatchOps } = await import('../j-batch');
+        const { batchOpCount: countOps, batchOpBreakdown, isBatchEmpty } = await import('../j-batch');
         const sentBatch = newState.jBatchState.sentBatch;
         const opCount = sentBatch ? countOps(sentBatch.batch) : 0;
+        const opBreakdown = sentBatch ? batchOpBreakdown(sentBatch.batch) : undefined;
         const wasPending = !!sentBatch;
 
         // Duplicate/replayed HankoBatchProcessed can arrive after we already cleared the
@@ -1199,8 +1286,7 @@ async function applyFinalizedJEvent(
         }
 
         // Record completed batch in history (keep last 20)
-        if (!newState.batchHistory) newState.batchHistory = [];
-        newState.batchHistory.push({
+        appendBatchHistory(newState, {
           batchHash: sentBatch?.batchHash || '',
           txHash: sentBatch?.txHash || transactionHash || '',
           status: 'confirmed' as const,
@@ -1208,10 +1294,10 @@ async function applyFinalizedJEvent(
           confirmedAt: newState.timestamp,
           opCount,
           entityNonce: Number(nonce),
+          jBlockNumber: Number(blockNumber || 0),
+          operations: opBreakdown,
+          source: 'self-batch' as const,
         });
-        if (newState.batchHistory.length > 20) {
-          newState.batchHistory = newState.batchHistory.slice(-20);
-        }
 
         // Clear sent batch for next cycle.
         newState.jBatchState.sentBatch = undefined;
@@ -1227,7 +1313,10 @@ async function applyFinalizedJEvent(
     } else {
       // Batch failed — update status, keep batch for retry
       if (newState.jBatchState) {
+        const { batchOpCount: countOps, batchOpBreakdown, isBatchEmpty, mergeBatchOps } = await import('../j-batch');
         const sentBatch = newState.jBatchState.sentBatch;
+        const opCount = sentBatch ? countOps(sentBatch.batch) : 0;
+        const opBreakdown = sentBatch ? batchOpBreakdown(sentBatch.batch) : undefined;
         newState.jBatchState.status = 'failed';
         newState.jBatchState.failedAttempts++;
         // Keep nonce synchronized to finalized event nonce.
@@ -1235,19 +1324,18 @@ async function applyFinalizedJEvent(
         const eventNonceNum = Number(nonce || 0);
         newState.jBatchState.entityNonce = eventNonceNum > currentNonce ? eventNonceNum : currentNonce;
 
-        if (!newState.batchHistory) newState.batchHistory = [];
-        newState.batchHistory.push({
+        appendBatchHistory(newState, {
           batchHash: sentBatch?.batchHash || '',
           txHash: sentBatch?.txHash || transactionHash || '',
           status: 'failed' as const,
           broadcastedAt: sentBatch?.lastSubmittedAt || newState.jBatchState.lastBroadcast || 0,
           confirmedAt: newState.timestamp,
-          opCount: 0,
+          opCount,
           entityNonce: Number(nonce),
+          jBlockNumber: Number(blockNumber || 0),
+          operations: opBreakdown,
+          source: 'self-batch' as const,
         });
-        if (newState.batchHistory.length > 20) {
-          newState.batchHistory = newState.batchHistory.slice(-20);
-        }
 
         // Requeue failed sentBatch ops back to current batch so operator can rebroadcast
         // with fresh nonce in the next cycle.

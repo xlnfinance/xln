@@ -13,7 +13,7 @@
   export let replica: EntityReplica | null = null;
   export let prefill: { tokenId?: number; id: number } | null = null;
 
-  type Action = 'fund' | 'withdraw' | 'transfer' | 'dispute';
+  type Action = 'fund' | 'withdraw' | 'transfer' | 'dispute' | 'history';
   type GasPreset = 'standard' | 'fast' | 'urgent' | 'custom';
 
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
@@ -96,6 +96,11 @@
   function formatClock(ms: number | undefined): string {
     if (!ms || !Number.isFinite(ms)) return '—';
     return new Date(ms).toLocaleTimeString();
+  }
+
+  function formatDateTime(ms: number | undefined): string {
+    if (!ms || !Number.isFinite(ms)) return '—';
+    return new Date(ms).toLocaleString();
   }
 
   function scaleWei(value: bigint, bps: number): bigint {
@@ -235,6 +240,35 @@
   $: canBroadcastDraft = hasDraftBatch && !hasSentBatch;
   $: pendingSummary = batchSummary(jBatch);
   $: sentSummary = batchSummary(sentBatch?.batch);
+  $: batchHistory = (() => {
+    const history = (replica?.state as any)?.batchHistory;
+    if (!Array.isArray(history)) return [];
+    return [...history].reverse();
+  })();
+
+  function historySummary(entry: any): Array<{ label: string; count: number }> {
+    const operations = entry?.operations;
+    if (operations && typeof operations === 'object') {
+      return [
+        { label: 'R2C', count: Number(operations.reserveToCollateral || 0) },
+        { label: 'C2R', count: Number(operations.collateralToReserve || 0) },
+        { label: 'Settle', count: Number(operations.settlements || 0) },
+        { label: 'R2R', count: Number(operations.reserveToReserve || 0) },
+        { label: 'Dispute Start', count: Number(operations.disputeStarts || 0) },
+        { label: 'Dispute Finalize', count: Number(operations.disputeFinalizations || 0) },
+        { label: 'Ext→Reserve', count: Number(operations.externalTokenToReserve || 0) },
+        { label: 'Reserve→Ext', count: Number(operations.reserveToExternalToken || 0) },
+        { label: 'Reveal', count: Number(operations.revealSecrets || 0) },
+      ].filter((entry) => entry.count > 0);
+    }
+    const fallback = Number(entry?.opCount || 0);
+    return fallback > 0 ? [{ label: 'Ops', count: fallback }] : [];
+  }
+
+  function historyOriginLabel(entry: any): string {
+    if (entry?.source === 'counterparty-event') return 'Counterparty Event';
+    return 'Self Batch';
+  }
 
   $: selectedAccount = counterpartyEntityId ? replica?.state?.accounts?.get?.(counterpartyEntityId) : null;
   $: selectedAccountActiveDispute = (selectedAccount as any)?.activeDispute ?? null;
@@ -652,6 +686,7 @@
     {#if hasSentBatch && hasDraftBatch}
       <p class="batch-empty">Draft queued. Broadcast unlocks automatically once sent batch finalizes.</p>
     {/if}
+
   </div>
 
   <div class="action-tabs">
@@ -659,6 +694,7 @@
     <button class="tab" class:active={action === 'withdraw'} on:click={() => action = 'withdraw'} disabled={sending}>Withdraw</button>
     <button class="tab" class:active={action === 'transfer'} on:click={() => action = 'transfer'} disabled={sending}>Transfer</button>
     <button class="tab" class:active={action === 'dispute'} on:click={() => action = 'dispute'} disabled={sending}>Dispute</button>
+    <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History</button>
   </div>
 
   <p class="action-desc">
@@ -668,12 +704,66 @@
       Queue collateral withdrawal request for selected account.
     {:else if action === 'dispute'}
       Queue dispute start/finalize for selected account.
+    {:else if action === 'history'}
+      Review finalized on-chain batches for this entity.
     {:else}
       Queue reserve-to-reserve transfer to another entity.
     {/if}
   </p>
 
-  {#if action === 'dispute'}
+  {#if action === 'history'}
+    <div class="history-card">
+      <div class="history-header">
+        <div class="history-title">On-Chain Batch History</div>
+        <div class="history-subtitle">{batchHistory.length} record{batchHistory.length === 1 ? '' : 's'}</div>
+      </div>
+
+      {#if batchHistory.length === 0}
+        <div class="batch-empty">No finalized batches yet.</div>
+      {:else}
+        <div class="history-list">
+          {#each batchHistory as entry, index (entry.txHash || `${entry.batchHash}-${index}`)}
+            <details class="history-item" data-testid="settle-history-item" open={index === 0}>
+              <summary>
+                <span class="history-status {entry.status === 'failed' ? 'failed' : 'confirmed'}">
+                  {entry.status === 'failed' ? 'Failed' : 'Confirmed'}
+                </span>
+                <span class="history-origin {entry.source === 'counterparty-event' ? 'counterparty' : ''}">
+                  {historyOriginLabel(entry)}
+                </span>
+                <span>Nonce #{Number(entry.entityNonce || 0)}</span>
+                <span>J#{Number(entry.jBlockNumber || 0)}</span>
+                <span>{Number(entry.opCount || 0)} ops</span>
+                {#if entry.txHash}
+                  <code>{String(entry.txHash || '').slice(0, 12)}...</code>
+                {/if}
+              </summary>
+              <div class="history-body">
+                <div class="history-meta">
+                  <span>Broadcast: {formatDateTime(Number(entry.broadcastedAt || 0))}</span>
+                  <span>Finalized: {formatDateTime(Number(entry.confirmedAt || 0))}</span>
+                  <span>Batch: {String(entry.batchHash || '').slice(0, 16)}...</span>
+                  {#if entry.eventType}
+                    <span>Event: {entry.eventType}</span>
+                  {/if}
+                </div>
+                {#if entry.note}
+                  <div class="history-note">{entry.note}</div>
+                {/if}
+                {#if historySummary(entry).length > 0}
+                  <div class="batch-summary">
+                    {#each historySummary(entry) as item}
+                      <span class="summary-chip">{item.label}: {item.count}</span>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            </details>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {:else if action === 'dispute'}
     <div class="dispute-inline">
       <EntityInput
         label="Account"
@@ -742,7 +832,7 @@
     {/if}
   {/if}
 
-  {#if action !== 'dispute'}
+  {#if action === 'fund' || action === 'withdraw' || action === 'transfer'}
     <div class="row">
       <div class="amount-field">
         <label>Amount</label>
@@ -769,7 +859,9 @@
     </button>
   {/if}
 
-  <p class="two-step-note">All on-chain actions queue in batch. Review above, then Sign & Broadcast.</p>
+  {#if action !== 'history'}
+    <p class="two-step-note">All on-chain actions queue in batch. Review above, then Sign & Broadcast.</p>
+  {/if}
 </div>
 
 <style>
@@ -1034,6 +1126,121 @@
     color: #a8a29e;
     padding: 10px;
     font-size: 12px;
+  }
+
+  .history-card {
+    margin-top: 12px;
+    border: 1px solid #292524;
+    border-radius: 10px;
+    background: #151310;
+    padding: 10px;
+  }
+
+  .history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .history-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #f3f4f6;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .history-subtitle {
+    font-size: 11px;
+    color: #9ca3af;
+  }
+
+  .history-list {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .history-item {
+    border: 1px solid #292524;
+    border-radius: 8px;
+    background: #0c0a09;
+    overflow: hidden;
+  }
+
+  .history-item summary {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    cursor: pointer;
+    padding: 8px 10px;
+    font-size: 11px;
+    color: #d6d3d1;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .history-item summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .history-status {
+    border-radius: 999px;
+    border: 1px solid rgba(74, 222, 128, 0.45);
+    color: #86efac;
+    background: rgba(20, 83, 45, 0.22);
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .history-status.failed {
+    border-color: rgba(248, 113, 113, 0.45);
+    color: #fecaca;
+    background: rgba(127, 29, 29, 0.24);
+  }
+
+  .history-origin {
+    border-radius: 999px;
+    border: 1px solid rgba(234, 179, 8, 0.35);
+    color: #fde68a;
+    background: rgba(120, 53, 15, 0.2);
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .history-origin.counterparty {
+    border-color: rgba(248, 113, 113, 0.45);
+    color: #fecaca;
+    background: rgba(127, 29, 29, 0.24);
+  }
+
+  .history-body {
+    border-top: 1px solid #292524;
+    padding: 8px 10px 10px;
+  }
+
+  .history-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 11px;
+    color: #a8a29e;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .history-note {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #fca5a5;
   }
 
   .dispute-inline {

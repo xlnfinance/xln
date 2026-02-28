@@ -31,6 +31,13 @@ export async function handleJClearBatch(
   const oldBatchSize = getBatchSize(newState.jBatchState.batch);
   const sentBatchSize = newState.jBatchState.sentBatch ? getBatchSize(newState.jBatchState.sentBatch.batch) : 0;
   const hadSentBatch = !!newState.jBatchState.sentBatch;
+  const droppedFinalizeCounterparties = new Set<string>();
+  for (const op of newState.jBatchState.batch.disputeFinalizations || []) {
+    droppedFinalizeCounterparties.add(String(op.counterentity).toLowerCase());
+  }
+  for (const op of newState.jBatchState.sentBatch?.batch.disputeFinalizations || []) {
+    droppedFinalizeCounterparties.add(String(op.counterentity).toLowerCase());
+  }
   let resetSubmittedMarkers = 0;
 
   // Clear current + sent batch and reset lifecycle
@@ -46,6 +53,13 @@ export async function handleJClearBatch(
         feeState.jBatchSubmittedAt = 0;
         resetSubmittedMarkers++;
       }
+    }
+  }
+  if (droppedFinalizeCounterparties.size > 0) {
+    for (const [counterpartyId, account] of newState.accounts.entries()) {
+      if (!account.activeDispute) continue;
+      if (!droppedFinalizeCounterparties.has(counterpartyId.toLowerCase())) continue;
+      account.activeDispute.finalizeQueued = false;
     }
   }
 

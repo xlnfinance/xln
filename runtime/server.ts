@@ -849,13 +849,13 @@ const updateJurisdictionsJson = async (
       retryAttempts: 3,
       gasLimit: 1_000_000,
       rebalancePolicyUsd: {
-        softLimit: 500,
+        r2cRequestSoftLimit: 500,
         hardLimit: 10_000,
         maxFee: 15,
       },
     };
     data.defaults.rebalancePolicyUsd = data.defaults.rebalancePolicyUsd ?? {
-      softLimit: 500,
+      r2cRequestSoftLimit: 500,
       hardLimit: 10_000,
       maxFee: 15,
     };

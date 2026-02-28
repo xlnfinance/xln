@@ -132,6 +132,12 @@ function getEnvJAdapter(env: Env) {
   return null;
 }
 
+const ZERO_HASH_32 = `0x${'0'.repeat(64)}`;
+const hasActiveDisputeHash = (hash: unknown): boolean => {
+  const normalized = String(hash ?? '').toLowerCase();
+  return normalized !== '' && normalized !== '0x' && normalized !== '0x0' && normalized !== ZERO_HASH_32;
+};
+
 /**
  * Handle disputeStart - Entity initiates dispute with signed proof
  */
@@ -335,6 +341,7 @@ export async function handleDisputeStart(
       disputeTimeout: currentJBlock + defaultDisputeDelayBlocks,
       onChainNonce,
       initialArguments,
+      finalizeQueued: false,
     };
   }
 
@@ -395,6 +402,46 @@ export async function handleDisputeFinalize(
   if (!account.activeDispute) {
     addMessage(newState, `❌ No active dispute with ${counterpartyEntityId.slice(-4)} - must call disputeStart first`);
     return { newState, outputs };
+  }
+  if (account.activeDispute.finalizeQueued) {
+    addMessage(
+      newState,
+      `ℹ️ disputeFinalize already queued for ${counterpartyEntityId.slice(-4)} (awaiting batch lifecycle)`,
+    );
+    return { newState, outputs };
+  }
+
+  const jadapter = getEnvJAdapter(env);
+  if (jadapter?.getAccountInfo) {
+    try {
+      const onchain = await jadapter.getAccountInfo(newState.entityId, counterpartyEntityId);
+      if (!hasActiveDisputeHash(onchain.disputeHash)) {
+        account.activeDispute = undefined;
+        if (account.status === 'disputed') account.status = 'active';
+        addMessage(
+          newState,
+          `ℹ️ disputeFinalize skipped: no on-chain active dispute with ${counterpartyEntityId.slice(-4)} (stale local state cleared)`,
+        );
+        console.warn(
+          `⚠️ disputeFinalize skipped: on-chain dispute missing for ${newState.entityId.slice(-4)}↔${counterpartyEntityId.slice(-4)}`,
+        );
+        return { newState, outputs };
+      }
+      const onchainTimeout = Number(onchain.disputeTimeout ?? 0n);
+      if (Number.isFinite(onchainTimeout) && onchainTimeout > 0) {
+        account.activeDispute.disputeTimeout = onchainTimeout;
+      }
+    } catch (error) {
+      addMessage(
+        newState,
+        `⚠️ disputeFinalize skipped: failed to read on-chain account state for ${counterpartyEntityId.slice(-4)} (will retry)`,
+      );
+      console.warn(
+        `⚠️ disputeFinalize: failed to read on-chain account info for ${counterpartyEntityId.slice(-4)}:`,
+        error,
+      );
+      return { newState, outputs };
+    }
   }
 
   if (cooperativeRequested) {
@@ -478,18 +525,19 @@ export async function handleDisputeFinalize(
   console.log(`   Mode: unilateral, timeout=${account.activeDispute.disputeTimeout}`);
   console.log(`   initialNonce=${finalProof.initialNonce}, finalNonce=${finalProof.finalNonce} (source=${finalNonceSource})`);
 
-  // Enforce challenge-period expiry before enqueueing finalize.
-  // disputeTimeout is tracked as J-layer block height from on-chain account state.
-  const jadapter = getEnvJAdapter(env);
-  if (jadapter?.provider) {
+  // Protocol rule (matches Depository.sol):
+  // - dispute starter must wait until timeout for unilateral finalize
+  // - counterparty may finalize immediately (same-proof path) without waiting
+  const callerIsStarter = callerIsLeft === account.activeDispute.startedByLeft;
+  if (callerIsStarter && jadapter?.provider) {
     const currentJBlock = Number(await jadapter.provider.getBlockNumber());
     if (currentJBlock < account.activeDispute.disputeTimeout) {
       addMessage(
         newState,
-        `❌ disputeFinalize too early: currentBlock=${currentJBlock}, timeout=${account.activeDispute.disputeTimeout}`,
+        `❌ disputeFinalize too early for starter: currentBlock=${currentJBlock}, timeout=${account.activeDispute.disputeTimeout}`,
       );
       console.warn(
-        `⚠️ disputeFinalize blocked (too early): currentBlock=${currentJBlock}, timeout=${account.activeDispute.disputeTimeout}`,
+        `⚠️ disputeFinalize blocked (starter before timeout): currentBlock=${currentJBlock}, timeout=${account.activeDispute.disputeTimeout}`,
       );
       return { newState, outputs };
     }
@@ -497,6 +545,7 @@ export async function handleDisputeFinalize(
 
   // Add to jBatch
   newState.jBatchState.batch.disputeFinalizations.push(finalProof);
+  account.activeDispute.finalizeQueued = true;
 
   console.log(`✅ disputeFinalize: Added to jBatch for ${entityState.entityId.slice(-4)}`);
   console.log(`   Mode: unilateral`);

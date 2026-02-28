@@ -8,7 +8,7 @@
  * - C→R settlement pullbacks for excess collateral
  *
  * Critical trigger invariant:
- * request_collateral is triggered by outPeerCredit > softLimit (deriveDelta),
+ * request_collateral is triggered by outPeerCredit > r2cRequestSoftLimit (deriveDelta),
  * NOT by (outCollateral + outPeerCredit).
  * outCollateral is already secured value and must not inflate trigger metric.
  */
@@ -450,9 +450,9 @@ export async function runRebalanceScenario(): Promise<void> {
 
   // ══════════════════════════════════════════════════════════════
   // REBALANCE POLICIES: Users set their own (CRITICAL-3: auth)
-  // softLimit = trigger when uncollateralized credit > this
+  // r2cRequestSoftLimit = trigger when uncollateralized credit > this
   // After payments: Hub↔Bob uncollateralized = $3K, Hub↔Dave = $7K
-  // softLimit=$1K → both trigger (uncollateralized > softLimit)
+  // r2cRequestSoftLimit=$1K → both trigger (uncollateralized > r2cRequestSoftLimit)
   // ══════════════════════════════════════════════════════════════
   console.log('\n📋 Users setting rebalance policies...');
   for (const user of [bob, dave]) {
@@ -464,7 +464,7 @@ export async function runRebalanceScenario(): Promise<void> {
         data: {
           counterpartyEntityId: hub.id,
           tokenId: USDC_TOKEN_ID,
-          softLimit: usd(1_000),       // Trigger when uncollateralized credit > $1K
+          r2cRequestSoftLimit: usd(1_000),       // Trigger when uncollateralized credit > $1K
           hardLimit: usd(20_000),      // Max threshold
           maxAcceptableFee: usd(100),  // Auto-accept fees up to $100
         }

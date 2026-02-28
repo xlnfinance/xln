@@ -389,7 +389,7 @@ export async function swap(env: Env): Promise<void> {
 
   // Check hold was applied
   const ethDelta1 = aliceHubAccount1?.deltas.get(ETH_TOKEN_ID);
-  assert(ethDelta1?.leftSwapHold === eth(TRADE_ETH), `ETH hold = ${TRADE_ETH} (Alice is LEFT)`);
+  assert(ethDelta1?.leftHold === eth(TRADE_ETH), `ETH hold = ${TRADE_ETH} (Alice is LEFT)`);
   console.log(`  ✅ Swap offer created, ${TRADE_ETH} ETH locked\n`);
 
   // ============================================================================
@@ -473,7 +473,7 @@ export async function swap(env: Env): Promise<void> {
 
   // Verify holds released
   const ethDelta3 = aliceHubAccount3?.deltas.get(ETH_TOKEN_ID);
-  assert(ethDelta3?.leftSwapHold === 0n, 'ETH hold released');
+  assert(ethDelta3?.leftHold === 0n, 'ETH hold released');
 
   // Verify final deltas (deterministic)
   assert(ethDelta3?.offdelta === -eth(TRADE_ETH), `Final ETH delta = -${TRADE_ETH} (Alice gave ${TRADE_ETH} ETH total)`);
@@ -543,7 +543,7 @@ export async function swap(env: Env): Promise<void> {
 
   // Verify hold released
   const ethDelta5 = account5?.deltas.get(ETH_TOKEN_ID);
-  assert(ethDelta5?.leftSwapHold === 0n, 'Hold released after cancel');
+  assert(ethDelta5?.leftHold === 0n, 'Hold released after cancel');
 
   console.log('  ✅ Order cancelled, swapBook cleaned, hold released\n');
 
@@ -1270,8 +1270,8 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
       account.swapOffers.clear();
     }
     for (const delta of account.deltas.values()) {
-      if (delta.leftSwapHold) delta.leftSwapHold = 0n;
-      if (delta.rightSwapHold) delta.rightSwapHold = 0n;
+      if (delta.leftHold) delta.leftHold = 0n;
+      if (delta.rightHold) delta.rightHold = 0n;
     }
   }
 

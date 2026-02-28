@@ -121,13 +121,31 @@ async function createRuntime(page: Page, label: string, mnemonic: string) {
 }
 
 async function switchRuntime(page: Page, runtimeId: string) {
-  const ok = await page.evaluate(async (runtimeId) => {
-    const v = (window as any).vaultOperations;
-    if (!v?.selectRuntime) return false;
-    await v.selectRuntime(runtimeId);
-    return true;
-  }, runtimeId);
-  expect(ok, `selectRuntime(${runtimeId.slice(0, 10)}) failed`).toBe(true);
+  const deadline = Date.now() + 30_000;
+  let ok = false;
+  let lastError = '';
+
+  while (Date.now() < deadline) {
+    try {
+      ok = await page.evaluate(async (nextRuntimeId) => {
+        const v = (window as any).vaultOperations;
+        if (!v?.selectRuntime) return false;
+        await v.selectRuntime(nextRuntimeId);
+        return true;
+      }, runtimeId);
+      if (ok) break;
+      lastError = 'vaultOperations.selectRuntime returned false';
+    } catch (e: any) {
+      lastError = e?.message || String(e);
+      if (!/Execution context was destroyed|Cannot find context|Target closed/i.test(lastError)) {
+        throw e;
+      }
+    }
+    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+
+  expect(ok, `selectRuntime(${runtimeId.slice(0, 10)}) failed: ${lastError || 'unknown'}`).toBe(true);
   await page.waitForTimeout(400);
 }
 
@@ -323,8 +341,8 @@ async function runtimeSnapshot(page: Page) {
                   offdelta: String((deltaToken1 as any).offdelta ?? ''),
                   leftCreditLimit: String((deltaToken1 as any).leftCreditLimit ?? ''),
                   rightCreditLimit: String((deltaToken1 as any).rightCreditLimit ?? ''),
-                  leftHtlcHold: String((deltaToken1 as any).leftHtlcHold ?? ''),
-                  rightHtlcHold: String((deltaToken1 as any).rightHtlcHold ?? ''),
+                  leftHold: String((deltaToken1 as any).leftHold ?? ''),
+                  rightHold: String((deltaToken1 as any).rightHold ?? ''),
                 } : null,
               });
           }

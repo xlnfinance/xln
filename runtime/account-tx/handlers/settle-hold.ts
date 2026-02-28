@@ -151,8 +151,8 @@ export async function handleSettleHold(
     const rightCapacity = delta.collateral + delta.leftCreditLimit + (totalDelta < 0n ? 0n : totalDelta);
 
     // Current holds already placed
-    const existingLeftHold = delta.leftSettleHold ?? 0n;
-    const existingRightHold = delta.rightSettleHold ?? 0n;
+    const existingLeftHold = delta.leftHold ?? 0n;
+    const existingRightHold = delta.rightHold ?? 0n;
 
     // Check left capacity (skip for deposits — L1 validates reserves)
     if (!isLeftDeposit && existingLeftHold + diff.leftWithdrawing > leftCapacity) {
@@ -179,14 +179,14 @@ export async function handleSettleHold(
     }
 
     // Initialize holds if not present
-    delta.leftSettleHold ??= 0n;
-    delta.rightSettleHold ??= 0n;
+    delta.leftHold ??= 0n;
+    delta.rightHold ??= 0n;
 
     // Add holds (tracked even for deposits to prevent concurrent double-spend)
-    delta.leftSettleHold += diff.leftWithdrawing;
-    delta.rightSettleHold += diff.rightWithdrawing;
+    delta.leftHold += diff.leftWithdrawing;
+    delta.rightHold += diff.rightWithdrawing;
 
-    console.log(`   Token ${diff.tokenId}: leftHold=${delta.leftSettleHold}, rightHold=${delta.rightSettleHold}${isLeftDeposit ? ' (L-deposit)' : ''}${isRightDeposit ? ' (R-deposit)' : ''}`);
+    console.log(`   Token ${diff.tokenId}: leftHold=${delta.leftHold}, rightHold=${delta.rightHold}${isLeftDeposit ? ' (L-deposit)' : ''}${isRightDeposit ? ' (R-deposit)' : ''}`);
   }
 
   return {
@@ -221,28 +221,28 @@ export async function handleSettleRelease(
     }
 
     // Initialize holds if not present (safety)
-    delta.leftSettleHold ??= 0n;
-    delta.rightSettleHold ??= 0n;
+    delta.leftHold ??= 0n;
+    delta.rightHold ??= 0n;
 
     // Release holds with underflow guard (check BEFORE subtracting)
-    const currentLeftHold = delta.leftSettleHold;
-    const currentRightHold = delta.rightSettleHold;
+    const currentLeftHold = delta.leftHold;
+    const currentRightHold = delta.rightHold;
 
     if (currentLeftHold < diff.leftWithdrawing) {
-      console.warn(`⚠️ SETTLE-RELEASE: leftSettleHold underflow! ${currentLeftHold} < ${diff.leftWithdrawing}, clamping to 0`);
-      delta.leftSettleHold = 0n;
+      console.warn(`⚠️ SETTLE-RELEASE: leftHold underflow! ${currentLeftHold} < ${diff.leftWithdrawing}, clamping to 0`);
+      delta.leftHold = 0n;
     } else {
-      delta.leftSettleHold = currentLeftHold - diff.leftWithdrawing;
+      delta.leftHold = currentLeftHold - diff.leftWithdrawing;
     }
 
     if (currentRightHold < diff.rightWithdrawing) {
-      console.warn(`⚠️ SETTLE-RELEASE: rightSettleHold underflow! ${currentRightHold} < ${diff.rightWithdrawing}, clamping to 0`);
-      delta.rightSettleHold = 0n;
+      console.warn(`⚠️ SETTLE-RELEASE: rightHold underflow! ${currentRightHold} < ${diff.rightWithdrawing}, clamping to 0`);
+      delta.rightHold = 0n;
     } else {
-      delta.rightSettleHold = currentRightHold - diff.rightWithdrawing;
+      delta.rightHold = currentRightHold - diff.rightWithdrawing;
     }
 
-    console.log(`   Token ${diff.tokenId}: leftHold=${delta.leftSettleHold}, rightHold=${delta.rightSettleHold}`);
+    console.log(`   Token ${diff.tokenId}: leftHold=${delta.leftHold}, rightHold=${delta.rightHold}`);
   }
 
   return {

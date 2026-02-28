@@ -353,34 +353,51 @@ async function dumpState(page: Page, label: string) {
 
 /** Switch runtime via programmatic call (more reliable than UI click) */
 async function switchTo(page: Page, label: string) {
-  const r = await page.evaluate(async (label) => {
+  const deadline = Date.now() + 30_000;
+  let r: { ok: boolean; id?: string; error?: string } = { ok: false, error: 'not-started' };
+
+  while (Date.now() < deadline) {
     try {
-      const runtimesState = (window as any).runtimesState;
-      const vaultOperations = (window as any).vaultOperations;
-      if (!runtimesState || !vaultOperations) {
-        return { ok: false, error: 'window.runtimesState/window.vaultOperations missing' };
-      }
-      // Read store value without importing svelte/store — subscribe fires synchronously
-      let state: any;
-      const unsub = runtimesState.subscribe((s: any) => { state = s; });
-      unsub();
-      // Find runtime by label
-      for (const [id, runtime] of Object.entries(state.runtimes) as any[]) {
-        if (runtime.label?.toLowerCase() === label.toLowerCase()) {
-          await vaultOperations.selectRuntime(id);
-          return { ok: true, id: id.slice(0, 12) };
+      r = await page.evaluate(async (runtimeLabel) => {
+        try {
+          const runtimesState = (window as any).runtimesState;
+          const vaultOperations = (window as any).vaultOperations;
+          if (!runtimesState || !vaultOperations) {
+            return { ok: false, error: 'window.runtimesState/window.vaultOperations missing' };
+          }
+          // Read store value without importing svelte/store — subscribe fires synchronously
+          let state: any;
+          const unsub = runtimesState.subscribe((s: any) => { state = s; });
+          unsub();
+          // Find runtime by label
+          for (const [id, runtime] of Object.entries(state.runtimes) as any[]) {
+            if (runtime.label?.toLowerCase() === runtimeLabel.toLowerCase()) {
+              await vaultOperations.selectRuntime(id);
+              return { ok: true, id: id.slice(0, 12) };
+            }
+          }
+          return {
+            ok: false,
+            error: `Runtime "${runtimeLabel}" not found in runtimes: ${Object.values(state.runtimes).map((x: any) => x.label).join(',')}`,
+          };
+        } catch (e: any) {
+          return { ok: false, error: e.message };
         }
-      }
-      return { ok: false, error: `Runtime "${label}" not found in runtimes: ${Object.values(state.runtimes).map((r: any) => r.label).join(',')}` };
+      }, label);
+      if (r.ok) break;
     } catch (e: any) {
-      return { ok: false, error: e.message };
+      r = { ok: false, error: e?.message || String(e) };
     }
-  }, label);
+
+    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
+    await page.waitForTimeout(400);
+  }
+
   expect(r.ok, `switchTo(${label}) failed: ${r.error}`).toBe(true);
   // Check and tag env after switch
-  const envInfo = await page.evaluate((label) => {
+  const envInfo = await page.evaluate((runtimeLabel) => {
     const env = (window as any).isolatedEnv;
-    if (env && !env._debugId) env._debugId = label + '-switch-' + Date.now();
+    if (env && !env._debugId) env._debugId = runtimeLabel + '-switch-' + Date.now();
     const keys = env?.eReplicas ? [...env.eReplicas.keys()] : [];
     return { debugId: env?._debugId, eReplicaCount: keys.length, keys: keys.map((k: string) => k.slice(0, 20)) };
   }, label);

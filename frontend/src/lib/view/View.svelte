@@ -182,28 +182,19 @@
   // @ts-ignore
   const BUILD_TIME: string = typeof globalThis.__BUILD_TIME__ !== 'undefined' ? globalThis.__BUILD_TIME__ : (typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : 'unknown');
 
-  console.log('[View.svelte] 🎬 MODULE LOADED - scenarioId prop:', scenarioId);
-
   let envChangeRegisteredFor: string | null = null;
   let unregisterEnvChange: (() => void) | null = null;
 
   onMount(async () => {
-    console.log('[View] ============ onMount ENTRY ============');
-    console.log('[View] scenarioId:', scenarioId);
-    console.log('[View] embedMode:', embedMode);
-
-    // Version check - ALWAYS log build hash for stale detection
-    console.log(`%c[XLN View] Build: ${BUILD_HASH} @ ${BUILD_TIME}`, 'color: #00ff88; font-weight: bold; font-size: 14px;');
-    console.log('[View] onMount started - initializing isolated XLN');
-    console.log('[View] 🎬 scenarioId prop:', scenarioId || '(empty)');
+    // Build metadata remains available for diagnostics without startup console noise.
+    void BUILD_HASH;
+    void BUILD_TIME;
 
     // Initialize isolated XLN runtime
     try {
       // Load XLN runtime module (single instance shared via xlnStore)
       const { getXLN } = await import('$lib/stores/xlnStore');
       const XLN = await getXLN();
-
-      console.log('[View] Runtime module loaded, creating env...');
 
       // CRITICAL: Initialize global xlnInstance for utility functions (deriveDelta, etc)
       // Graph3DPanel needs xlnFunctions even when using isolated stores
@@ -240,15 +231,7 @@
           const runtime = get(runtimes).get(runtimeId);
           if (runtime?.env) {
             env = runtime.env;
-            console.log('[View] ✅ Using env from VaultStore runtime:', {
-              jReplicas: env.jReplicas?.size || 0,
-              entities: env.eReplicas?.size || 0
-            });
-          } else {
-            console.warn('[View] Runtime exists but env not ready yet - waiting for VaultStore to finish init');
           }
-        } else {
-          console.warn('[View] No active runtime yet - waiting for VaultStore');
         }
       }
 
@@ -296,14 +279,6 @@
           console.error(`[View] RUNTIME ENV NULL: activeRuntimeId="${runtimeId}" has no env`);
           return;
         }
-
-        const prevEnv = get(localEnvStore);
-        console.log('[View] Runtime switch:', {
-          from: prevEnv?.runtimeId?.slice(0, 12) || 'none',
-          to: runtime.env.runtimeId?.slice(0, 12) || '?',
-          runtimeId: runtimeId.slice(0, 12),
-          entities: runtime.env.eReplicas?.size || 0
-        });
 
         localEnvStore.set(runtime.env);
         localHistoryStore.set(runtime.env.history || []);

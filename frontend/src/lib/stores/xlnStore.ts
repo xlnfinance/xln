@@ -6,30 +6,40 @@ import type { XLNModule, Env, EnvSnapshot, EntityId, ReplicaKey } from '@xln/run
 
 // Direct import of XLN runtime module (no wrapper boilerplate needed)
 let XLN: XLNModule | null = null;
+let xlnLoadPromise: Promise<XLNModule> | null = null;
 export const xlnInstance = writable<XLNModule | null>(null);
 let warnedMissingXLN = false;
 let unregisterEnvChange: (() => void) | null = null;
+let globalDebugExposed = false;
 const REQUIRED_RUNTIME_SCHEMA_VERSION = 2;
 
 async function getXLN(): Promise<XLNModule> {
   if (XLN) return XLN;
+  if (xlnLoadPromise) return xlnLoadPromise;
 
-  // Always cache-bust runtime module per page load; stale runtime.js caused prod-debug desync.
-  const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
-  XLN = (await import(/* @vite-ignore */ runtimeUrl)) as XLNModule;
-  const runtimeAny = XLN as unknown as Record<string, unknown>;
-  const loadedSchema = Number(runtimeAny.RUNTIME_SCHEMA_VERSION ?? NaN);
-  if (!Number.isFinite(loadedSchema) || loadedSchema !== REQUIRED_RUNTIME_SCHEMA_VERSION) {
-    throw new Error(
-      `RUNTIME_VERSION_MISMATCH: expected schema=${REQUIRED_RUNTIME_SCHEMA_VERSION} got=${String(runtimeAny.RUNTIME_SCHEMA_VERSION ?? 'undefined')}`,
-    );
+  xlnLoadPromise = (async () => {
+    // Always cache-bust runtime module per page load; stale runtime.js caused prod-debug desync.
+    const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
+    const loaded = (await import(/* @vite-ignore */ runtimeUrl)) as XLNModule;
+    const runtimeAny = loaded as unknown as Record<string, unknown>;
+    const loadedSchema = Number(runtimeAny.RUNTIME_SCHEMA_VERSION ?? NaN);
+    if (!Number.isFinite(loadedSchema) || loadedSchema !== REQUIRED_RUNTIME_SCHEMA_VERSION) {
+      throw new Error(
+        `RUNTIME_VERSION_MISMATCH: expected schema=${REQUIRED_RUNTIME_SCHEMA_VERSION} got=${String(runtimeAny.RUNTIME_SCHEMA_VERSION ?? 'undefined')}`,
+      );
+    }
+    XLN = loaded;
+    xlnInstance.set(XLN);
+    exposeGlobalDebugObjects();
+    return XLN;
+  })();
+
+  try {
+    return await xlnLoadPromise;
+  } catch (err) {
+    xlnLoadPromise = null;
+    throw err;
   }
-  xlnInstance.set(XLN);
-
-  // Expose globally for console debugging
-  exposeGlobalDebugObjects();
-
-  return XLN;
 }
 
 /**
@@ -48,12 +58,15 @@ function exposeGlobalDebugObjects() {
       errorLog.log(message, source, details);
     };
 
-    console.log('🌍 GLOBAL DEBUG: XLN objects exposed');
-    console.log('  window.XLN - All runtime functions (deriveDelta, isLeft, etc.)');
-    console.log('  window.xlnEnv - Reactive environment store');
-    console.log('  window.xlnErrorLog - Logs to Settings error panel');
-    console.log('  Usage: window.XLN.deriveDelta(delta, true).ascii');
-    console.log('  Usage: Get current env value with xlnEnv subscribe pattern');
+    if (!globalDebugExposed) {
+      globalDebugExposed = true;
+      console.log('🌍 GLOBAL DEBUG: XLN objects exposed');
+      console.log('  window.XLN - All runtime functions (deriveDelta, isLeft, etc.)');
+      console.log('  window.xlnEnv - Reactive environment store');
+      console.log('  window.xlnErrorLog - Logs to Settings error panel');
+      console.log('  Usage: window.XLN.deriveDelta(delta, true).ascii');
+      console.log('  Usage: Get current env value with xlnEnv subscribe pattern');
+    }
 
     // Ensure vault controls are reachable in production E2E/debug sessions
     // even before RuntimeCreation panel imports vaultStore.
@@ -193,15 +206,15 @@ export async function initializeXLN(): Promise<Env> {
     const currentEnv = get(xlnEnvironment);
     if (currentEnv && currentEnv.eReplicas?.size > 0) {
       console.log('🛑 PREVENTED RE-INITIALIZATION: XLN already has data, keeping existing state');
+      error.set(null);
+      isLoading.set(false);
       return currentEnv;
     }
   }
 
-  // FAILSAFE: Auto-disable loading after 10s to prevent stuck UI
-  const loadingTimeout = setTimeout(() => {
-    console.error('⚠️ Loading timeout (10s) - forcing isLoading=false to prevent stuck UI');
-    isLoading.set(false);
-    error.set('Loading timed out. UI may be incomplete. Check Settings for details.');
+  // Slow-start warning only; do not force error-screen while initialization is still progressing.
+  const loadingWarningTimeout = setTimeout(() => {
+    console.warn('⚠️ XLN initialization still running after 10s...');
   }, 10000);
 
   try {
@@ -301,6 +314,7 @@ export async function initializeXLN(): Promise<Env> {
       }
     }
 
+    error.set(null);
     isLoading.set(false);
 
     // P2P is started per-runtime in vaultStore.createRuntime() and initialize()
@@ -315,10 +329,10 @@ export async function initializeXLN(): Promise<Env> {
     isInitialized = true;
     startP2PPoll();
 
-    clearTimeout(loadingTimeout);
+    clearTimeout(loadingWarningTimeout);
     return env;
   } catch (err) {
-    clearTimeout(loadingTimeout);
+    clearTimeout(loadingWarningTimeout);
     console.error('🚨 XLN initialization failed:', err);
 
     // Log to persistent error store

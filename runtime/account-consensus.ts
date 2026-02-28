@@ -46,12 +46,10 @@ const isAddress20 = (value: unknown): value is string => typeof value === 'strin
  * CRITICAL for replay protection - domain separator for signatures
  */
 function getDepositoryAddress(env: Env): string {
-  console.log(`🔍 GET-DEPOSITORY-ADDRESS CALLED`);
   // Try BrowserVM first (most common)
   if (env.browserVM) {
     const browserVM = env.browserVM;
     const getAddress = browserVM.getDepositoryAddress?.() || browserVM.browserVM?.getDepositoryAddress?.();
-    console.log(`🔍 getDepositoryAddress: browserVM.getDepositoryAddress=${getAddress}`);
     if (getAddress && getAddress !== '0x0000000000000000000000000000000000000000') {
       return getAddress;
     }
@@ -89,12 +87,8 @@ const MAX_FRAME_SIZE_BYTES = 1048576; // 1MB frame size limit (Bitcoin block siz
 
 function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
   const hasHolds =
-    (delta.leftHtlcHold || 0n) !== 0n ||
-    (delta.rightHtlcHold || 0n) !== 0n ||
-    (delta.leftSwapHold || 0n) !== 0n ||
-    (delta.rightSwapHold || 0n) !== 0n ||
-    (delta.leftSettleHold || 0n) !== 0n ||
-    (delta.rightSettleHold || 0n) !== 0n;
+    (delta.leftHold || 0n) !== 0n ||
+    (delta.rightHold || 0n) !== 0n;
 
   return !(totalDelta === 0n && delta.leftCreditLimit === 0n && delta.rightCreditLimit === 0n && !hasHolds);
 }
@@ -272,6 +266,15 @@ async function runPostFrameAutoRebalanceCheck(
   }
 }
 
+function kickHubRebalanceAfterFrameFinalize(env: Env, hubEntityId: string): void {
+  for (const replica of env.eReplicas.values()) {
+    if (String(replica?.state?.entityId || '').toLowerCase() !== String(hubEntityId || '').toLowerCase()) continue;
+    const task = replica.state?.crontabState?.tasks?.get?.('hubRebalance');
+    if (!task) continue;
+    task.lastRun = 0;
+  }
+}
+
 // === VALIDATION ===
 
 /**
@@ -342,12 +345,8 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
       rightCreditLimit: delta.rightCreditLimit.toString(),
       leftAllowance: delta.leftAllowance.toString(),
       rightAllowance: delta.rightAllowance.toString(),
-      leftHtlcHold: (delta.leftHtlcHold || 0n).toString(), // HTLC holds
-      rightHtlcHold: (delta.rightHtlcHold || 0n).toString(), // HTLC holds
-      leftSwapHold: (delta.leftSwapHold || 0n).toString(), // Swap holds
-      rightSwapHold: (delta.rightSwapHold || 0n).toString(), // Swap holds
-      leftSettleHold: (delta.leftSettleHold || 0n).toString(), // Settlement holds
-      rightSettleHold: (delta.rightSettleHold || 0n).toString(), // Settlement holds
+      leftHold: (delta.leftHold || 0n).toString(),
+      rightHold: (delta.rightHold || 0n).toString(),
     })),
   };
 
@@ -1108,6 +1107,7 @@ export async function handleAccountInput(
         }
         events.push(`🔄 Auto-rebalance queued ${ackAutoRebalanceTxs.length} tx(s) after ACK commit`);
       }
+      kickHubRebalanceAfterFrameFinalize(env, accountMachine.proofHeader.fromEntity);
 
       // CRITICAL FIX: Chained Proposal - if mempool has items (e.g. j_event_claim), propose immediately
       if (!input.newAccountFrame) {
@@ -1702,7 +1702,7 @@ export async function handleAccountInput(
 
     // ═══════════════════════════════════════════════════════════════════════════
     // POST-FRAME AUTO-REBALANCE CHECK
-    // After frame commit, check if uncollateralized debt exceeds softLimit.
+    // After frame commit, check if uncollateralized debt exceeds r2cRequestSoftLimit.
     // If yes, auto-queue request_collateral + fee into mempool.
     // User is ALWAYS online here (just processed an inbound frame).
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1719,6 +1719,7 @@ export async function handleAccountInput(
       }
       events.push(`🔄 Auto-rebalance queued ${postCommitAutoRebalanceTxs.length} tx(s) after frame commit`);
     }
+    kickHubRebalanceAfterFrameFinalize(env, ourEntityId);
 
     // Send confirmation (ACK) using HANKO
     const ackEntityId = accountMachine.proofHeader.fromEntity;

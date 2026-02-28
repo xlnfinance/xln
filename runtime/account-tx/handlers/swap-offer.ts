@@ -6,7 +6,7 @@
  * 1. Validate offerId uniqueness
  * 2. Validate amounts > 0
  * 3. Check capacity (including existing holds)
- * 4. Lock capacity via leftSwapHold or rightSwapHold
+ * 4. Lock capacity via leftHold or rightHold
  * 5. Store in swapOffers Map
  */
 
@@ -75,9 +75,9 @@ export async function handleSwapOffer(
     accountMachine.deltas.set(giveTokenId, delta);
   }
 
-  // Initialize swap holds if not present
-  delta.leftSwapHold ??= 0n;
-  delta.rightSwapHold ??= 0n;
+  // Initialize holds if not present
+  delta.leftHold ??= 0n;
+  delta.rightHold ??= 0n;
 
   // 5. Check capacity (deriveDelta should account for all holds)
   const derived = deriveDelta(delta, makerIsLeft);
@@ -129,9 +129,9 @@ export async function handleSwapOffer(
   // Holds ARE consensus-critical - included in fullDeltaStates hash
   // Must be in BOTH validation (for hash) and commit (for real state) to match
   if (makerIsLeft) {
-    delta.leftSwapHold += giveAmount;
+    delta.leftHold += giveAmount;
   } else {
-    delta.rightSwapHold += giveAmount;
+    delta.rightHold += giveAmount;
   }
 
   // 8. Store offer (proofBody includes swapOffers, so keep validation+commit aligned)

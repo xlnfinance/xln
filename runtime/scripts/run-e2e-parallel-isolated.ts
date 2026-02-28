@@ -22,6 +22,7 @@ type CliArgs = {
   basePort: number;
   stackTimeoutMs: number;
   testTimeoutMs: number;
+  phaseWarnMs: number;
   anvilBin: string;
   maxFailures: number;
   workersPerShard: number;
@@ -40,6 +41,14 @@ type RunResult = {
   status: 'passed' | 'failed';
   durationMs: number;
   logPath: string;
+  phaseMs: {
+    preflight: number;
+    anvilBoot: number;
+    apiBoot: number;
+    apiHealthy: number;
+    viteBoot: number;
+    playwright: number;
+  };
   error?: string;
 };
 
@@ -69,6 +78,7 @@ const parseArgs = (): CliArgs => {
   const basePortRaw = Number(getFlag('base-port') || '20000');
   const stackTimeoutRaw = Number(getFlag('stack-timeout-ms') || '90000');
   const testTimeoutRaw = Number(getFlag('test-timeout-ms') || (longMode ? '1200000' : '360000'));
+  const phaseWarnRaw = Number(getFlag('phase-warn-ms') || '30000');
   const maxFailuresRaw = Number(getFlag('max-failures') || '1');
   const workersPerShardRaw = Number(getFlag('workers-per-shard') || '1');
   const videoRaw = String(getFlag('video') || 'on').toLowerCase();
@@ -96,6 +106,7 @@ const parseArgs = (): CliArgs => {
     testTimeoutMs: Number.isFinite(testTimeoutRaw) && testTimeoutRaw > 0
       ? Math.floor(testTimeoutRaw)
       : (longMode ? 1200000 : 360000),
+    phaseWarnMs: Number.isFinite(phaseWarnRaw) && phaseWarnRaw > 0 ? Math.floor(phaseWarnRaw) : 30000,
     anvilBin: getFlag('anvil-bin') || 'anvil',
     maxFailures: Number.isFinite(maxFailuresRaw) && maxFailuresRaw >= 0 ? Math.floor(maxFailuresRaw) : 1,
     workersPerShard: Number.isFinite(workersPerShardRaw) && workersPerShardRaw > 0 ? Math.floor(workersPerShardRaw) : 1,
@@ -123,6 +134,26 @@ const tail = (path: string, lines = 60): string => {
     return text.split('\n').slice(-lines).join('\n');
   } catch {
     return '(unable to read log tail)';
+  }
+};
+
+type StepTiming = { label: string; ms: number };
+
+const parseStepTimings = (path: string): StepTiming[] => {
+  try {
+    const text = readFileSync(path, 'utf8');
+    const out: StepTiming[] = [];
+    const re = /\[E2E-TIMING\]\s+(.+?)\s+(\d+)ms/g;
+    let match: RegExpExecArray | null = null;
+    while ((match = re.exec(text)) !== null) {
+      const label = String(match[1] || '').trim();
+      const ms = Number(match[2] || '0');
+      if (!label || !Number.isFinite(ms)) continue;
+      out.push({ label, ms });
+    }
+    return out;
+  } catch {
+    return [];
   }
 };
 
@@ -312,6 +343,20 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
   const webUrl = `https://localhost:${webPort}`;
   const dbPath = join(logsDir, `db-e2e-shard-${shard}`);
   mkdirSync(dbPath, { recursive: true });
+  const phaseMs: RunResult['phaseMs'] = {
+    preflight: 0,
+    anvilBoot: 0,
+    apiBoot: 0,
+    apiHealthy: 0,
+    viteBoot: 0,
+    playwright: 0,
+  };
+  const markPhase = (phase: keyof RunResult['phaseMs'], started: number): void => {
+    const ms = Date.now() - started;
+    phaseMs[phase] = ms;
+    const warn = ms > args.phaseWarnMs;
+    log.write(`[timing] ${phase}=${ms}ms${warn ? ` (>${args.phaseWarnMs}ms)` : ''}\n`);
+  };
 
   try {
     log.write(`shard=${shard}/${totalShards}\nrpc=${rpcUrl}\napi=${apiUrl}\nweb=${webUrl}\ndb=${dbPath}\n\n`);
@@ -323,11 +368,14 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
     // - api: runtime server
     // - web: vite preview
     // - relay: runtime ws relay (api+20, from runtime/server.ts)
+    const preflightStart = Date.now();
     await freePort(rpcPort, log);
     await freePort(apiPort, log);
     await freePort(webPort, log);
     await freePort(apiPort + 20, log);
+    markPhase('preflight', preflightStart);
 
+    const anvilStart = Date.now();
     anvil = spawn(args.anvilBin, [
       '--host', '127.0.0.1',
       '--port', String(rpcPort),
@@ -337,7 +385,9 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
     anvil.stdout.on('data', c => log.write(`[anvil] ${c.toString()}`));
     anvil.stderr.on('data', c => log.write(`[anvil:err] ${c.toString()}`));
     await waitForRpcReady(rpcUrl, args.stackTimeoutMs);
+    markPhase('anvilBoot', anvilStart);
 
+    const apiStart = Date.now();
     api = spawn('bun', ['runtime/server.ts', '--port', String(apiPort)], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
@@ -350,9 +400,13 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
     api.stdout.on('data', c => log.write(`[api] ${c.toString()}`));
     api.stderr.on('data', c => log.write(`[api:err] ${c.toString()}`));
     await waitForHttpReady(`${apiUrl}/api`, args.stackTimeoutMs);
+    markPhase('apiBoot', apiStart);
+    const healthStart = Date.now();
     await waitForServerHealthy(apiUrl, args.stackTimeoutMs);
+    markPhase('apiHealthy', healthStart);
 
     const shardViteCacheDir = join(logsDir, `vite-cache-shard-${shard}`);
+    const viteStart = Date.now();
     vite = spawn('bun', ['run', 'preview', '--', '--host', '0.0.0.0', '--port', String(webPort), '--strictPort'], {
       cwd: resolve(process.cwd(), 'frontend'),
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -366,6 +420,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
     vite.stdout.on('data', c => log.write(`[vite] ${c.toString()}`));
     vite.stderr.on('data', c => log.write(`[vite:err] ${c.toString()}`));
     await waitForHttpsReady(webUrl, args.stackTimeoutMs);
+    markPhase('viteBoot', viteStart);
 
     const shardArg = `${shard + 1}/${totalShards}`;
     const playwrightArgs = [
@@ -388,6 +443,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
     for (const file of args.pwFiles) playwrightArgs.push(file);
     log.write(`[runner] playwright args: ${JSON.stringify(playwrightArgs)}\n`);
 
+    const playwrightStart = Date.now();
     const code = await runCmd(
       'bunx',
       playwrightArgs,
@@ -412,6 +468,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
         timeoutMs: args.testTimeoutMs,
       },
     );
+    markPhase('playwright', playwrightStart);
 
     if (code !== 0) {
       return {
@@ -419,6 +476,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
         status: 'failed',
         durationMs: Date.now() - startedAt,
         logPath,
+        phaseMs,
         error: `playwright_exit_${code}`,
       };
     }
@@ -428,6 +486,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
       status: 'passed',
       durationMs: Date.now() - startedAt,
       logPath,
+      phaseMs,
     };
   } catch (error) {
     return {
@@ -435,6 +494,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
       status: 'failed',
       durationMs: Date.now() - startedAt,
       logPath,
+      phaseMs,
       error: (error as Error).message,
     };
   } finally {
@@ -457,6 +517,7 @@ async function main(): Promise<void> {
   console.log(`BasePort : ${args.basePort}`);
   console.log(`Workers/shard: ${args.workersPerShard}`);
   console.log(`Max failures : ${args.maxFailures}`);
+  console.log(`Phase warn ms: ${args.phaseWarnMs}`);
   console.log(`Artifacts    : video=${args.videoMode}, trace=${args.traceMode}, screenshot=${args.screenshotMode}`);
   console.log(`Logs     : ${logsDir}`);
   console.log('='.repeat(72) + '\n');
@@ -500,7 +561,16 @@ async function main(): Promise<void> {
   console.log('='.repeat(72));
   for (const r of results.sort((a, b) => a.shard - b.shard)) {
     const sec = (r.durationMs / 1000).toFixed(1);
-    console.log(`${r.status === 'passed' ? 'PASS' : 'FAIL'}  shard=${r.shard}  ${sec.padStart(8)}s  log=${r.logPath}`);
+    const p = r.phaseMs;
+    console.log(
+      `${r.status === 'passed' ? 'PASS' : 'FAIL'}  shard=${r.shard}  ${sec.padStart(8)}s  ` +
+      `phases[pre=${p.preflight} anvil=${p.anvilBoot} api=${p.apiBoot} health=${p.apiHealthy} vite=${p.viteBoot} pw=${p.playwright}]  ` +
+      `log=${r.logPath}`,
+    );
+    const steps = parseStepTimings(r.logPath).sort((a, b) => b.ms - a.ms).slice(0, 8);
+    if (steps.length > 0) {
+      console.log(`      slow-steps: ${steps.map((s) => `${s.label}=${s.ms}ms`).join(' | ')}`);
+    }
   }
   console.log('-'.repeat(72));
   console.log(`Total wall time: ${(totalMs / 1000).toFixed(1)}s`);

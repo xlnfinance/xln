@@ -45,9 +45,9 @@ export async function handleJBroadcast(
 
   // ── Validate: jBatch exists and is non-empty ──
   if (isBatchEmpty(newState.jBatchState.batch)) {
-    const msg = '❌ No operations to broadcast - jBatch is empty';
+    const msg = 'ℹ️ j_broadcast skipped: jBatch is empty';
     addMessage(newState, msg);
-    throw new Error(msg);
+    return { newState, outputs, jOutputs };
   }
 
   // ── Validate: jurisdiction configured ──

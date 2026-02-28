@@ -121,22 +121,41 @@ export async function createRpcAdapter(
     return 2;
   };
 
-  const batchSubmitQueues = new Map<string, Promise<unknown>>();
-  const runSerializedBatch = async <T>(entityId: string, work: () => Promise<T>): Promise<T> => {
-    const key = entityId.toLowerCase();
-    const previous = batchSubmitQueues.get(key) ?? Promise.resolve();
+  // One signer submits all on-chain txs for this adapter, so queue must be global,
+  // not per-entity, to avoid EOA nonce races across concurrent entity batches.
+  let batchSubmitQueue: Promise<unknown> = Promise.resolve();
+  const runSerializedBatch = async <T>(work: () => Promise<T>): Promise<T> => {
+    const previous = batchSubmitQueue;
     const next = previous
       .catch(() => undefined)
       .then(work);
-    batchSubmitQueues.set(
-      key,
-      next.finally(() => {
-        if (batchSubmitQueues.get(key) === next) {
-          batchSubmitQueues.delete(key);
-        }
-      }),
-    );
+    batchSubmitQueue = next.finally(() => {
+      if (batchSubmitQueue === next) {
+        batchSubmitQueue = Promise.resolve();
+      }
+    });
     return next;
+  };
+
+  const maybeResetSignerNonce = (): void => {
+    const signerAny = signer as any;
+    if (typeof signerAny?.resetNonce === 'function') {
+      try {
+        signerAny.resetNonce();
+      } catch {
+        // Best-effort only.
+      }
+    }
+  };
+
+  const isNonceSyncError = (error: unknown): boolean => {
+    const msg = String((error as any)?.message || error || '').toLowerCase();
+    return (
+      msg.includes('nonce too low') ||
+      msg.includes('nonce has already been used') ||
+      msg.includes('nonce expired') ||
+      msg.includes('code=nonce_expired')
+    );
   };
 
   const addresses: JAdapterAddresses = {
@@ -520,6 +539,7 @@ export async function createRpcAdapter(
         DEFAULT_PROCESS_BATCH_GAS,
       );
       const feeOverrides = await buildFeeOverrides();
+      maybeResetSignerNonce();
       const tx = await depository.processBatch(encodedBatch, addresses.entityProvider, hankoData, nonce, {
         gasLimit,
         ...feeOverrides,
@@ -860,7 +880,7 @@ export async function createRpcAdapter(
           }
         }
 
-        return runSerializedBatch(normalizedId, async () => {
+        return runSerializedBatch(async () => {
           // Use pre-provided encoded batch + hanko (from entity consensus) or sign locally
           let encodedBatch: string;
           let hankoData: string;
@@ -969,15 +989,31 @@ export async function createRpcAdapter(
               return { success: false, error: `staticCall revert: ${errDetail}` };
             }
 
-            const tx = await depository['processBatch']!(encodedBatch, entityProviderAddr, hankoData, nextNonce, {
-              gasLimit,
-              ...resolvedFeeOverrides,
-            });
-            const receipt = await waitForReceipt(tx as any, 'submitTx:processBatch');
-            const txHash = receipt.hash ?? tx.hash;
-            const blockNum = receipt.blockNumber ?? 0;
-            console.log(`✅ [JAdapter:rpc] Batch executed: block=${blockNum} gas=${receipt.gasUsed}`);
-            return { success: true, txHash, blockNumber: blockNum };
+            for (let attempt = 1; attempt <= 2; attempt++) {
+              try {
+                if (attempt > 1) {
+                  maybeResetSignerNonce();
+                  console.warn(`⚠️ [JAdapter:rpc] retrying processBatch after nonce sync (attempt ${attempt}/2)`);
+                }
+                const tx = await depository['processBatch']!(encodedBatch, entityProviderAddr, hankoData, nextNonce, {
+                  gasLimit,
+                  ...resolvedFeeOverrides,
+                });
+                const receipt = await waitForReceipt(tx as any, 'submitTx:processBatch');
+                const txHash = receipt.hash ?? tx.hash;
+                const blockNum = receipt.blockNumber ?? 0;
+                console.log(`✅ [JAdapter:rpc] Batch executed: block=${blockNum} gas=${receipt.gasUsed}`);
+                return { success: true, txHash, blockNumber: blockNum };
+              } catch (error) {
+                if (attempt < 2 && isNonceSyncError(error)) {
+                  continue;
+                }
+                const msg = error instanceof Error ? error.message : String(error);
+                console.error(`❌ [JAdapter:rpc] processBatch failed: ${msg}`);
+                return { success: false, error: msg };
+              }
+            }
+            return { success: false, error: 'processBatch failed after nonce retry' };
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             console.error(`❌ [JAdapter:rpc] processBatch failed: ${msg}`);

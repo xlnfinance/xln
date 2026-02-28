@@ -90,11 +90,11 @@ export async function handleHtlcResolve(
 
   // 3. Release hold (common to both paths)
   if (lock.senderIsLeft) {
-    const currentHold = delta.leftHtlcHold || 0n;
-    delta.leftHtlcHold = currentHold < lock.amount ? 0n : currentHold - lock.amount;
+    const currentHold = delta.leftHold || 0n;
+    delta.leftHold = currentHold < lock.amount ? 0n : currentHold - lock.amount;
   } else {
-    const currentHold = delta.rightHtlcHold || 0n;
-    delta.rightHtlcHold = currentHold < lock.amount ? 0n : currentHold - lock.amount;
+    const currentHold = delta.rightHold || 0n;
+    delta.rightHold = currentHold < lock.amount ? 0n : currentHold - lock.amount;
   }
 
   // 4. Remove lock

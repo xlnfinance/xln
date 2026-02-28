@@ -72,10 +72,8 @@ export interface DerivedDelta {
   outOwnCredit: bigint;
   inPeerCredit: bigint;
   outPeerCredit: bigint;
-  outSettleHold: bigint;
-  inSettleHold: bigint;
-  outHtlcHold: bigint;
-  inHtlcHold: bigint;
+  outTotalHold: bigint;
+  inTotalHold: bigint;
   ascii?: string;
 }
 
