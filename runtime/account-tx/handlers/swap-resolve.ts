@@ -117,15 +117,11 @@ export async function handleSwapResolve(
     accountMachine.deltas.set(offer.wantTokenId, wantDelta);
   }
 
-  // Initialize all holds if needed (both HTLC and Swap)
-  giveDelta.leftHtlcHold ??= 0n;
-  giveDelta.rightHtlcHold ??= 0n;
-  giveDelta.leftSwapHold ??= 0n;
-  giveDelta.rightSwapHold ??= 0n;
-  wantDelta.leftHtlcHold ??= 0n;
-  wantDelta.rightHtlcHold ??= 0n;
-  wantDelta.leftSwapHold ??= 0n;
-  wantDelta.rightSwapHold ??= 0n;
+  // Initialize holds if needed.
+  giveDelta.leftHold ??= 0n;
+  giveDelta.rightHold ??= 0n;
+  wantDelta.leftHold ??= 0n;
+  wantDelta.rightHold ??= 0n;
 
   // 5b. AUDIT FIX: Check taker has capacity to give wantToken
   // Use deriveDelta for consistency (accounts for collateral, allowances, ondelta)
@@ -166,20 +162,20 @@ export async function handleSwapResolve(
   // 7. Release hold proportionally (with underflow guard)
   const holdRelease = filledGive;
   if (offer.makerIsLeft) {
-    const currentHold = giveDelta.leftSwapHold || 0n;
+    const currentHold = giveDelta.leftHold || 0n;
     if (currentHold < holdRelease) {
-      console.error(`⚠️ Swap resolve hold underflow! leftSwapHold=${currentHold} < holdRelease=${holdRelease}`);
-      giveDelta.leftSwapHold = 0n;
+      console.error(`⚠️ Swap resolve hold underflow! leftHold=${currentHold} < holdRelease=${holdRelease}`);
+      giveDelta.leftHold = 0n;
     } else {
-      giveDelta.leftSwapHold = currentHold - holdRelease;
+      giveDelta.leftHold = currentHold - holdRelease;
     }
   } else {
-    const currentHold = giveDelta.rightSwapHold || 0n;
+    const currentHold = giveDelta.rightHold || 0n;
     if (currentHold < holdRelease) {
-      console.error(`⚠️ Swap resolve hold underflow! rightSwapHold=${currentHold} < holdRelease=${holdRelease}`);
-      giveDelta.rightSwapHold = 0n;
+      console.error(`⚠️ Swap resolve hold underflow! rightHold=${currentHold} < holdRelease=${holdRelease}`);
+      giveDelta.rightHold = 0n;
     } else {
-      giveDelta.rightSwapHold = currentHold - holdRelease;
+      giveDelta.rightHold = currentHold - holdRelease;
     }
   }
 
@@ -196,20 +192,20 @@ export async function handleSwapResolve(
     if (remainingHold > 0n) {
       // Release remaining hold (with underflow guard)
       if (offer.makerIsLeft) {
-        const currentHold = giveDelta.leftSwapHold || 0n;
+        const currentHold = giveDelta.leftHold || 0n;
         if (currentHold < remainingHold) {
-          console.error(`⚠️ Swap remainder hold underflow! leftSwapHold=${currentHold} < remainingHold=${remainingHold}`);
-          giveDelta.leftSwapHold = 0n;
+          console.error(`⚠️ Swap remainder hold underflow! leftHold=${currentHold} < remainingHold=${remainingHold}`);
+          giveDelta.leftHold = 0n;
         } else {
-          giveDelta.leftSwapHold = currentHold - remainingHold;
+          giveDelta.leftHold = currentHold - remainingHold;
         }
       } else {
-        const currentHold = giveDelta.rightSwapHold || 0n;
+        const currentHold = giveDelta.rightHold || 0n;
         if (currentHold < remainingHold) {
-          console.error(`⚠️ Swap remainder hold underflow! rightSwapHold=${currentHold} < remainingHold=${remainingHold}`);
-          giveDelta.rightSwapHold = 0n;
+          console.error(`⚠️ Swap remainder hold underflow! rightHold=${currentHold} < remainingHold=${remainingHold}`);
+          giveDelta.rightHold = 0n;
         } else {
-          giveDelta.rightSwapHold = currentHold - remainingHold;
+          giveDelta.rightHold = currentHold - remainingHold;
         }
       }
     }

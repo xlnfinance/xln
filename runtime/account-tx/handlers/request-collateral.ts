@@ -5,7 +5,7 @@
  * This is the V1 rebalance mechanism — no quotes, no custody, no bilateral negotiation.
  *
  * Flow:
- * 1. Post-frame hook detects: outPeerCredit > softLimit
+ * 1. Post-frame hook detects: outPeerCredit > r2cRequestSoftLimit
  * 2. Auto-queues request_collateral into account mempool
  * 3. Request frame debits prepaid fee immediately (user pays hub upfront)
  * 4. Hub crontab picks up pendingRebalanceRequest → adds R→C to jBatch
@@ -202,7 +202,7 @@ export function checkAutoRebalance(
   if (accountMachine.rebalancePolicy.size === 0) {
     for (const [tokenId] of accountMachine.deltas.entries()) {
       const defaultPolicy: RebalancePolicy = {
-        softLimit: DEFAULT_SOFT_LIMIT,
+        r2cRequestSoftLimit: DEFAULT_SOFT_LIMIT,
         hardLimit: DEFAULT_HARD_LIMIT,
         maxAcceptableFee: DEFAULT_MAX_FEE,
       };
@@ -211,13 +211,13 @@ export function checkAutoRebalance(
         type: 'set_rebalance_policy',
         data: {
           tokenId,
-          softLimit: defaultPolicy.softLimit,
+          r2cRequestSoftLimit: defaultPolicy.r2cRequestSoftLimit,
           hardLimit: defaultPolicy.hardLimit,
           maxAcceptableFee: defaultPolicy.maxAcceptableFee,
         },
       });
       console.log(
-        `🔄 Auto-rebalance policy bootstrapped: token=${tokenId} soft=${defaultPolicy.softLimit} hard=${defaultPolicy.hardLimit} maxFee=${defaultPolicy.maxAcceptableFee}`,
+        `🔄 Auto-rebalance policy bootstrapped: token=${tokenId} soft=${defaultPolicy.r2cRequestSoftLimit} hard=${defaultPolicy.hardLimit} maxFee=${defaultPolicy.maxAcceptableFee}`,
       );
     }
     if (accountMachine.rebalancePolicy.size === 0) {
@@ -237,8 +237,8 @@ export function checkAutoRebalance(
   }
 
   for (const [tokenId, policy] of accountMachine.rebalancePolicy.entries()) {
-    // Skip manual mode (softLimit === hardLimit convention)
-    if (policy.softLimit === policy.hardLimit) continue;
+    // Skip manual mode (r2cRequestSoftLimit === hardLimit convention)
+    if (policy.r2cRequestSoftLimit === policy.hardLimit) continue;
 
     const delta = accountMachine.deltas.get(tokenId);
     if (!delta) continue;
@@ -273,7 +273,7 @@ export function checkAutoRebalance(
       continue;
     }
 
-    if (rebalanceTrigger > policy.softLimit) {
+    if (rebalanceTrigger > policy.r2cRequestSoftLimit) {
       const liquidityFee = (outPeerCredit * feePolicy.liquidityFeeBps) / 10000n;
       const feeAmount = feePolicy.baseFee + feePolicy.gasFee + liquidityFee;
 
@@ -316,7 +316,7 @@ export function checkAutoRebalance(
 
       console.log(
         `🔄 Auto-rebalance triggered: token=${tokenId} outPeerCredit=${rebalanceTrigger} ` +
-        `> softLimit=${policy.softLimit}, requesting outPeerCredit=${outPeerCredit} with fee ${feeAmount} ` +
+        `> r2cRequestSoftLimit=${policy.r2cRequestSoftLimit}, requesting outPeerCredit=${outPeerCredit} with fee ${feeAmount} ` +
         `(base=${feePolicy.baseFee}, gas=${feePolicy.gasFee}, liqBps=${feePolicy.liquidityFeeBps})`
       );
     }

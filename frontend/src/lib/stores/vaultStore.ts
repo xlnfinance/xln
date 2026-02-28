@@ -2,6 +2,7 @@ import { writable, get, derived } from 'svelte/store';
 import { HDNodeWallet, Mnemonic, getAddress } from 'ethers';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
 import { xlnEnvironment, setXlnEnvironment } from './xlnStore';
+import { settings } from './settingsStore';
 import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
 import { writeOnboardingComplete } from '$lib/utils/onboardingState';
 
@@ -435,6 +436,12 @@ async function registerRuntimeSignerKeys(runtime: Runtime, xln: any): Promise<vo
   }
 }
 
+function applyRuntimeLogPreference(env: any): void {
+  if (!env) return;
+  const verbose = !!get(settings).verboseLogging;
+  env.quietRuntimeLogs = !verbose;
+}
+
 async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestore = false): Promise<any> {
   const runtimeIdLower = normalizeRuntimeId(runtime.id);
   if (!runtimeIdLower) {
@@ -521,6 +528,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
 
   if (!env) {
     env = xln.createEmptyEnv(runtimeSeed);
+    applyRuntimeLogPreference(env);
     env.runtimeId = runtimeIdLower;
     env.dbNamespace = runtimeIdLower;
     if (xln.startRuntimeLoop) {
@@ -550,6 +558,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
     );
     console.log('[VaultStore] ✅ Testnet imported');
   } else {
+    applyRuntimeLogPreference(env);
     env.runtimeSeed = runtimeSeed;
     env.runtimeId = runtimeIdLower;
     env.dbNamespace = runtimeIdLower;
@@ -741,8 +750,26 @@ export const vaultOperations = {
 
   // Create new runtime from seed
   async createRuntime(name: string, seed: string, options: CreateRuntimeOptions = {}): Promise<Runtime> {
+    const perfStartedAt = Date.now();
+    const perfMarks: Array<{ step: string; at: number }> = [{ step: 'start', at: perfStartedAt }];
+    const markPerf = (step: string): void => {
+      perfMarks.push({ step, at: Date.now() });
+    };
+    const flushPerf = (status: 'ok' | 'existing'): void => {
+      let prev = perfStartedAt;
+      const parts: string[] = [];
+      for (const mark of perfMarks) {
+        const delta = mark.at - prev;
+        parts.push(`${mark.step}:${delta}ms`);
+        prev = mark.at;
+      }
+      const totalMs = Date.now() - perfStartedAt;
+      console.log(`[VaultStore.createRuntime][timing] status=${status} total=${totalMs}ms ${parts.join(' | ')}`);
+    };
+
     // Derive first signer (index 0)
     const firstAddress = deriveAddress(seed, 0);
+    markPerf('derive_first_address');
 
     // Use signer EOA as ID (deterministic, unique)
     const id = normalizeRuntimeId(firstAddress);
@@ -759,6 +786,8 @@ export const vaultOperations = {
         throw new Error(`Runtime id collision for ${id}: existing runtime has different seed`);
       }
       await this.selectRuntime(existing.key);
+      markPerf('select_existing_runtime');
+      flushPerf('existing');
       return existing.runtime;
     }
 
@@ -792,6 +821,7 @@ export const vaultOperations = {
       },
       activeRuntimeId: id
     }));
+    markPerf('persist_runtime_state');
 
     // CRITICAL: Create NEW isolated runtime for this runtime (AWAIT to avoid race)
     const runtimeId = normalizeRuntimeId(id); // Use normalized runtime ID key
@@ -800,7 +830,9 @@ export const vaultOperations = {
     // Import XLN and create env BEFORE returning
     const { getXLN } = await import('./xlnStore');
     const xln = await getXLN();
+    markPerf('load_xln_runtime');
     const newEnv = xln.createEmptyEnv(seed);
+    applyRuntimeLogPreference(newEnv);
     const runtimeIdLower = runtimeId.toLowerCase();
     newEnv.runtimeId = runtimeIdLower;
     newEnv.dbNamespace = runtimeIdLower;
@@ -813,13 +845,16 @@ export const vaultOperations = {
     console.log('[VaultStore.createRuntime] Fetching jurisdictions.json...');
     const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
     await waitForServerRuntimeReady(baseOrigin);
+    markPerf('wait_server_runtime_ready');
     const jurisdictions = await fetchJurisdictions(baseOrigin);
+    markPerf('fetch_jurisdictions');
     const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
     console.log('[VaultStore.createRuntime] Loaded contracts:', arrakisConfig.contracts);
     const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
     let chainId: number;
     try {
       chainId = await detectRpcChainId(rpcUrl, baseOrigin);
+      markPerf('detect_rpc_chain_id');
       assertAnvilChain(chainId, rpcUrl, 'VaultStore.createRuntime');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -865,9 +900,11 @@ export const vaultOperations = {
       'createRuntime.importJ(Testnet)',
       45_000,
     );
+    markPerf('import_j_testnet');
     if (xln.startJEventWatcher) {
       await xln.startJEventWatcher(newEnv);
     }
+    markPerf('start_j_event_watcher');
     console.log('[VaultStore.createRuntime] ✅ Testnet imported');
 
     // === MVP: Create entity ===
@@ -930,6 +967,7 @@ export const vaultOperations = {
       signerPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
     );
     xln.registerSignerKey(signerAddress, privateKeyBytes);
+    markPerf('register_signer_key');
     console.log('[VaultStore.createRuntime] ✅ Registered HD-derived private key for signer');
 
     // Import entity replica into runtime
@@ -960,6 +998,7 @@ export const vaultOperations = {
       },
       `createRuntime.importReplica(${entityId.slice(0, 12)})`,
     );
+    markPerf('import_entity_replica');
 
     // Skip auto-funding (use faucet API)
     console.log('[VaultStore.createRuntime] ✅ Entity ready (use /api/faucet to fund)');
@@ -981,6 +1020,7 @@ export const vaultOperations = {
       runtimes: { ...state.runtimes, [id]: runtime }
     }));
     this.saveToStorage();
+    markPerf('save_runtime_metadata');
 
     // Add to runtimes store
     runtimes.update(r => {
@@ -996,6 +1036,7 @@ export const vaultOperations = {
       });
       return r;
     });
+    markPerf('attach_runtime_to_store');
 
     // Start P2P for this runtime's env (one WS per runtime, stays alive across switches)
     if (xln.startP2P) {
@@ -1008,13 +1049,17 @@ export const vaultOperations = {
         profileName: label || `Runtime ${runtimeId.slice(0, 6)}`,
       });
     }
+    markPerf('start_p2p');
 
     // Switch to new runtime
     activeRuntimeId.set(runtimeId);
+    markPerf('activate_runtime');
     console.log('[VaultStore.createRuntime] ✅ Runtime created with entity:', entityId.slice(0, 18));
 
     // Sync metadata (no P2P — already started above)
     this.syncRuntime(runtime);
+    markPerf('sync_runtime');
+    flushPerf('ok');
 
     return runtime;
   },

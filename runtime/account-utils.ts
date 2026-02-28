@@ -109,21 +109,9 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
 
   const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
 
-  // HTLC holds (capacity locked in pending HTLCs)
-  const leftHtlcHold = delta.leftHtlcHold || 0n;
-  const rightHtlcHold = delta.rightHtlcHold || 0n;
-
-  // Swap holds (capacity locked in pending swap offers)
-  const leftSwapHold = delta.leftSwapHold || 0n;
-  const rightSwapHold = delta.rightSwapHold || 0n;
-
-  // Settlement holds (ring-fenced during settlement negotiation)
-  const leftSettleHold = delta.leftSettleHold || 0n;
-  const rightSettleHold = delta.rightSettleHold || 0n;
-
-  // Total holds = HTLC + Swap + Settlement
-  const leftHold = leftHtlcHold + leftSwapHold + leftSettleHold;
-  const rightHold = rightHtlcHold + rightSwapHold + rightSettleHold;
+  // Unified per-side holds (single source of truth).
+  const leftHold = delta.leftHold || 0n;
+  const rightHold = delta.rightHold || 0n;
 
   // [---.*∆--][INVARIANT-6][CAPACITY]
   // Capacity is composition of credit+collateral slices minus allowances.
@@ -138,10 +126,8 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   inCapacity = nonNegative(inCapacity - rightHold);
 
   // Hold fields for UI (LEFT's perspective: out = left, in = right)
-  let outSettleHold = leftSettleHold;
-  let inSettleHold = rightSettleHold;
-  let outHtlcHold = leftHtlcHold;
-  let inHtlcHold = rightHtlcHold;
+  let outTotalHold = leftHold;
+  let inTotalHold = rightHold;
 
   if (!isLeft) {
     // [---.*∆--][INVARIANT-8][PERSPECTIVE-FLIP]
@@ -158,8 +144,7 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
     [peerCreditUsed, ownCreditUsed] = [ownCreditUsed, peerCreditUsed];
 
-    [outSettleHold, inSettleHold] = [inSettleHold, outSettleHold];
-    [outHtlcHold, inHtlcHold] = [inHtlcHold, outHtlcHold];
+    [outTotalHold, inTotalHold] = [inTotalHold, outTotalHold];
   }
 
   // [---.*∆--][DEBUG-VISUAL]
@@ -208,10 +193,8 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     inPeerCredit,
     peerCreditUsed,  // HYBRID: credit peer lent that we're using
     ownCreditUsed,   // HYBRID: credit we lent that peer is using
-    outSettleHold,
-    inSettleHold,
-    outHtlcHold,
-    inHtlcHold,
+    outTotalHold,
+    inTotalHold,
     ascii,
   };
 }

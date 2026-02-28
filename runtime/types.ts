@@ -222,7 +222,7 @@ export interface JurisdictionConfig {
   chainId?: number;
   // Optional per-jurisdiction onboarding defaults (USD whole units).
   rebalancePolicyUsd?: {
-    softLimit: number;
+    r2cRequestSoftLimit: number;
     hardLimit: number;
     maxFee: number;
   };
@@ -505,7 +505,7 @@ export type EntityTx =
         creditAmount?: bigint;  // Optional: extend credit in same frame as add_delta
         tokenId?: number;       // Token for credit (default: 1 = USDC)
         rebalancePolicy?: {
-          softLimit: bigint;
+          r2cRequestSoftLimit: bigint;
           hardLimit: bigint;
           maxAcceptableFee: bigint;
         };
@@ -680,7 +680,7 @@ export type EntityTx =
         routingFeePPM?: number;             // Default: 100 (0.01%)
         baseFee?: bigint;                   // Default: 0n
         minCollateralThreshold?: bigint;    // Reserved for future policy gates
-        c2rSoftLimit?: bigint;              // Hub-owned collateral keep-buffer before C→R pullback
+        c2rWithdrawSoftLimit?: bigint;              // Hub-owned collateral keep-buffer before C→R pullback
         minFeeBps?: bigint;                 // Legacy fallback min-fee bps gate (if policy triplet missing)
         rebalanceBaseFee?: bigint;          // Fixed rebalance fee component
         rebalanceLiquidityFeeBps?: bigint;  // Rebalance liquidity fee in bps (volume-based)
@@ -694,7 +694,7 @@ export type EntityTx =
       data: {
         counterpartyEntityId: string;
         tokenId: number;
-        softLimit: bigint;
+        r2cRequestSoftLimit: bigint;
         hardLimit: bigint;
         maxAcceptableFee: bigint;
       };
@@ -1076,6 +1076,7 @@ export interface AccountMachine {
     disputeTimeout: number;           // Block number when timeout expires
     onChainNonce: number;             // On-chain nonce at dispute start (replaces initialCooperativeNonce + onChainCooperativeNonce)
     initialArguments?: string;        // On-chain initialArguments from disputeStart
+    finalizeQueued?: boolean;         // Finalize op already queued locally (single-source lifecycle guard)
   };
 
   hankoSignature?: string; // LEGACY - will be removed
@@ -1183,19 +1184,10 @@ export interface Delta {
   leftAllowance: bigint;
   rightAllowance: bigint;
 
-  // HTLC holds (capacity locked in pending HTLCs)
-  leftHtlcHold?: bigint;  // Left's outgoing HTLC holds
-  rightHtlcHold?: bigint; // Right's outgoing HTLC holds
-
-  // Swap holds (capacity locked in pending swap offers)
-  leftSwapHold?: bigint;  // Left's locked swap offer amounts
-  rightSwapHold?: bigint; // Right's locked swap offer amounts
-
-  // Settlement holds (ring-fenced during settlement negotiation)
-  // Set on workspace propose, cleared on finalize or reject
-  // Prevents double-spend: entity can't withdraw what's promised in settlement
-  leftSettleHold?: bigint;   // Left's pending settlement withdrawal
-  rightSettleHold?: bigint;  // Right's pending settlement withdrawal
+  // Unified per-side holds across all transformers (HTLC/swap/settlement).
+  // This is the only hold model in Delta state.
+  leftHold?: bigint;
+  rightHold?: bigint;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1296,10 +1288,8 @@ export interface DerivedDelta {
   inPeerCredit: bigint;
   peerCreditUsed: bigint;  // Credit peer lent that we're using
   ownCreditUsed: bigint;   // Credit we lent that peer is using
-  outSettleHold: bigint;   // Settlement hold deducted from out capacity
-  inSettleHold: bigint;    // Settlement hold deducted from in capacity
-  outHtlcHold: bigint;     // HTLC hold deducted from out capacity
-  inHtlcHold: bigint;      // HTLC hold deducted from in capacity
+  outTotalHold: bigint;    // Unified hold deducted from out capacity
+  inTotalHold: bigint;     // Unified hold deducted from in capacity
   ascii: string; // ASCII visualization from deriveDelta (like old_src)
 }
 
@@ -1375,7 +1365,7 @@ export type AccountTx =
       type: 'set_rebalance_policy';
       data: {
         tokenId: number;
-        softLimit: bigint;         // Auto-trigger below this
+        r2cRequestSoftLimit: bigint;         // Auto-trigger below this
         hardLimit: bigint;         // Never exceed
         maxAcceptableFee: bigint;  // Auto-accept quotes with fee ≤ this (USDT)
       };
@@ -1581,8 +1571,9 @@ export interface HubRebalanceConfig {
   policyVersion: number;            // Monotonic version for rebalance fee policy
   routingFeePPM: number;             // Routing fee in parts per million (0-10000 = 0%-1%)
   baseFee: bigint;                   // Fixed fee per routed payment (smallest unit)
+  disputeAutoFinalizeMode?: 'auto' | 'ignore'; // Hub auto-dispute-finalize policy
   minCollateralThreshold?: bigint;   // Reserved for future policy gates
-  c2rSoftLimit?: bigint;             // Keep-buffer of hub-owned collateral before C→R pullback
+  c2rWithdrawSoftLimit?: bigint;             // Keep-buffer of hub-owned collateral before C→R pullback
   minFeeBps?: bigint;                // Legacy fallback min-fee bps gate
   rebalanceBaseFee?: bigint;         // Fixed rebalance fee component
   rebalanceLiquidityFeeBps?: bigint; // Volume-based rebalance fee component (bps)
@@ -1592,7 +1583,7 @@ export interface HubRebalanceConfig {
 
 /** Per-token rebalance policy (stored per-token in AccountMachine) */
 export interface RebalancePolicy {
-  softLimit: bigint;         // Trigger when uncollateralized credit > this
+  r2cRequestSoftLimit: bigint;         // Trigger when uncollateralized credit > this
   hardLimit: bigint;         // Max uncollateralized credit (emergency threshold)
   maxAcceptableFee: bigint;  // Auto-accept quotes with fee ≤ this
   setByLeft?: boolean;       // Who set the policy (for auth: fee-payer should set maxAcceptableFee)

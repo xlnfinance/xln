@@ -542,20 +542,7 @@
     }
   }
 
-  const TOKEN_CACHE_TTL_MS = 60_000;
-  const tokenCatalogCache = new Map<string, { tokens: ExternalToken[]; expiresAt: number }>();
-
-  function cloneTokenList(tokens: ExternalToken[]): ExternalToken[] {
-    return tokens.map(t => ({ ...t, balance: 0n }));
-  }
-
   async function getTokenList(jadapter: any): Promise<ExternalToken[]> {
-    const cacheKey = String(jadapter?.chainId ?? 'unknown');
-    const cached = tokenCatalogCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      return cloneTokenList(cached.tokens);
-    }
-
     let tokens: ExternalToken[] = [];
     if (jadapter?.getTokenRegistry) {
       const registry = await jadapter.getTokenRegistry();
@@ -577,8 +564,7 @@
         : [];
     }
 
-    tokenCatalogCache.set(cacheKey, { tokens: cloneTokenList(tokens), expiresAt: Date.now() + TOKEN_CACHE_TTL_MS });
-    return cloneTokenList(tokens);
+    return tokens.map(t => ({ ...t, balance: 0n }));
   }
 
   function buildOnchainReserves(
@@ -1377,11 +1363,7 @@
     timeOperations.goToLive();
   }
 
-  // Tab config
-  // Pending batch count for Accounts tab badge
-  $: pendingBatchCount = (() => {
-    if (!replica?.state) return 0;
-    const batch = (replica.state as any)?.jBatchState?.batch;
+  function countBatchOps(batch: any): number {
     if (!batch) return 0;
     return (batch.reserveToCollateral?.length || 0) +
            (batch.collateralToReserve?.length || 0) +
@@ -1392,6 +1374,16 @@
            (batch.externalTokenToReserve?.length || 0) +
            (batch.reserveToExternalToken?.length || 0) +
            (batch.revealSecrets?.length || 0);
+  }
+
+  // Tab config
+  // Pending batch count for Accounts tab badge
+  $: pendingBatchCount = (() => {
+    if (!replica?.state) return 0;
+    const jBatchState = (replica.state as any)?.jBatchState;
+    const draft = countBatchOps(jBatchState?.batch);
+    const sent = countBatchOps(jBatchState?.sentBatch?.batch);
+    return draft > 0 ? draft : sent;
   })();
 
   const tabs: Array<{ id: ViewTab; icon: any; label: string; showBadge?: boolean; badgeType?: 'pending' }> = [

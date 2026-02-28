@@ -74,15 +74,15 @@ export async function handleHtlcLock(
       rightCreditLimit: defaultCreditLimit,
       leftAllowance: 0n,
       rightAllowance: 0n,
-      leftHtlcHold: 0n,
-      rightHtlcHold: 0n,
+      leftHold: 0n,
+      rightHold: 0n,
     };
     accountMachine.deltas.set(tokenId, delta);
   }
 
-  // Initialize HTLC holds if not present
-  if (delta.leftHtlcHold === undefined) delta.leftHtlcHold = 0n;
-  if (delta.rightHtlcHold === undefined) delta.rightHtlcHold = 0n;
+  // Initialize holds if not present
+  if (delta.leftHold === undefined) delta.leftHold = 0n;
+  if (delta.rightHold === undefined) delta.rightHold = 0n;
 
   // 5. Determine sender perspective (Channel.ts: byLeft = frame proposer = sender)
   const senderIsLeft = byLeft;
@@ -116,11 +116,11 @@ export async function handleHtlcLock(
   // CRITICAL CONSENSUS FIX: Apply holds during BOTH validation and commit
   // Holds must be in frame hash to prevent same-frame over-commit attacks
   if (senderIsLeft) {
-    delta.leftHtlcHold += amount;
-    if (!isValidation) console.log(`✅ Updated leftHtlcHold: ${delta.leftHtlcHold}`);
+    delta.leftHold += amount;
+    if (!isValidation) console.log(`✅ Updated leftHold: ${delta.leftHold}`);
   } else {
-    delta.rightHtlcHold += amount;
-    if (!isValidation) console.log(`✅ Updated rightHtlcHold: ${delta.rightHtlcHold}`);
+    delta.rightHold += amount;
+    if (!isValidation) console.log(`✅ Updated rightHold: ${delta.rightHold}`);
   }
 
   // 9. Add lock to locks Map

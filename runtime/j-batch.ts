@@ -148,6 +148,19 @@ export interface JBatchState {
   entityNonce?: number; // Entity nonce used for this batch (for replay prevention)
 }
 
+export interface BatchOpBreakdown {
+  flashloans: number;
+  reserveToReserve: number;
+  reserveToCollateral: number;
+  collateralToReserve: number;
+  settlements: number;
+  disputeStarts: number;
+  disputeFinalizations: number;
+  externalTokenToReserve: number;
+  reserveToExternalToken: number;
+  revealSecrets: number;
+}
+
 /** Completed batch record (stored in entity state history) */
 export interface CompletedBatch {
   batchHash: string;
@@ -157,6 +170,11 @@ export interface CompletedBatch {
   confirmedAt: number;
   opCount: number; // Total operations in batch
   entityNonce: number;
+  jBlockNumber?: number; // Finalized J-block that emitted HankoBatchProcessed
+  operations?: BatchOpBreakdown; // Optional per-op breakdown for UI history
+  source?: 'self-batch' | 'counterparty-event';
+  eventType?: 'DisputeStarted' | 'DisputeFinalized';
+  note?: string;
 }
 
 /**
@@ -351,7 +369,6 @@ export function initJBatch(): JBatchState {
     broadcastCount: 0,
     failedAttempts: 0,
     status: 'empty',
-    sentBatch: undefined,
   };
 }
 
@@ -405,6 +422,22 @@ export function batchOpCount(batch: JBatch): number {
     batch.reserveToExternalToken.length +
     batch.revealSecrets.length
   );
+}
+
+/** Per-operation counters for history/debug UI. */
+export function batchOpBreakdown(batch: JBatch): BatchOpBreakdown {
+  return {
+    flashloans: batch.flashloans.length,
+    reserveToReserve: batch.reserveToReserve.length,
+    reserveToCollateral: batch.reserveToCollateral.length,
+    collateralToReserve: batch.collateralToReserve.length,
+    settlements: batch.settlements.length,
+    disputeStarts: batch.disputeStarts.length,
+    disputeFinalizations: batch.disputeFinalizations.length,
+    externalTokenToReserve: batch.externalTokenToReserve.length,
+    reserveToExternalToken: batch.reserveToExternalToken.length,
+    revealSecrets: batch.revealSecrets.length,
+  };
 }
 
 /**

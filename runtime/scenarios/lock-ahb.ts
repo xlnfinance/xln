@@ -1147,7 +1147,7 @@ export async function lockAhb(env: Env): Promise<void> {
     // - TR = $200K (Hub's uninsured liability to Bob)
     //
     // Rebalance flow (prepaid request model):
-    // 1. Bob sets rebalance policy (softLimit=$100K, maxFee=$10)
+    // 1. Bob sets rebalance policy (r2cRequestSoftLimit=$100K, maxFee=$10)
     // 2. Hub deposits $200K from reserve → H-B collateral (R→C)
     // ============================================================================
 
@@ -1179,7 +1179,7 @@ export async function lockAhb(env: Env): Promise<void> {
         data: {
           counterpartyEntityId: hub.id,
           tokenId: USDC_TOKEN_ID,
-          softLimit: usd(100_000),   // Request rebalance when collateral < $100K
+          r2cRequestSoftLimit: usd(100_000),   // Request rebalance when collateral < $100K
           hardLimit: usd(200_000),   // Target collateral after rebalance
           maxAcceptableFee: usd(10), // Auto-accept fees up to $10
         }
@@ -1193,7 +1193,7 @@ export async function lockAhb(env: Env): Promise<void> {
     if (!bobAccount?.rebalancePolicy) {
       throw new Error('❌ ASSERT FAIL: Rebalance policy not set on H-B account');
     }
-    console.log(`✅ Rebalance policy set: softLimit=$100K, maxFee=$10`);
+    console.log(`✅ Rebalance policy set: r2cRequestSoftLimit=$100K, maxFee=$10`);
 
     await pushSnapshot(env, 'Frame 22: Bob sets rebalance policy', {
       title: 'Rebalance Policy Set',
@@ -1201,7 +1201,7 @@ export async function lockAhb(env: Env): Promise<void> {
       why: 'User-driven policy — Bob decides his risk tolerance, Hub executes.',
       tradfiParallel: 'Like setting a margin maintenance requirement.',
       keyMetrics: [
-        'softLimit: $100K',
+        'r2cRequestSoftLimit: $100K',
         'maxAcceptableFee: $10',
         'H-B collateral: $0 (needs rebalancing)',
       ]
@@ -1478,9 +1478,8 @@ export async function lockAhb(env: Env): Promise<void> {
 
           // H4: Verify offdelta was restored (Hub got refund)
           // When lock expires, Hub's hold is released, offdelta should return to pre-lock value
-          const hubHtlcHold = hubCharlieAccountAfter?.deltas.get(USDC_TOKEN_ID)?.leftHtlcHold || 0n;
           const hubIsLeft = hub.id < charlie.id;
-          const holdField = hubIsLeft ? 'leftHtlcHold' : 'rightHtlcHold';
+          const holdField = hubIsLeft ? 'leftHold' : 'rightHold';
           const currentHold = hubCharlieAccountAfter?.deltas.get(USDC_TOKEN_ID)?.[holdField] || 0n;
           if (currentHold === 0n) {
             console.log(`✅ H4: HTLC hold released (${holdField} = 0)`);

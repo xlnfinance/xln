@@ -39,26 +39,26 @@ const USD_SCALE = 10n ** 18n;
 const toUsdWei = (value: number): bigint => BigInt(Math.max(0, Math.floor(value))) * USD_SCALE;
 const resolveJurisdictionRebalanceDefaults = (
   entityState: EntityState,
-): { softLimit: bigint; hardLimit: bigint; maxAcceptableFee: bigint } => {
+): { r2cRequestSoftLimit: bigint; hardLimit: bigint; maxAcceptableFee: bigint } => {
   const raw = entityState.config?.jurisdiction?.rebalancePolicyUsd;
   if (!raw) {
     return {
-      softLimit: DEFAULT_SOFT_LIMIT,
+      r2cRequestSoftLimit: DEFAULT_SOFT_LIMIT,
       hardLimit: DEFAULT_HARD_LIMIT,
       maxAcceptableFee: DEFAULT_MAX_FEE,
     };
   }
-  const softLimit = toUsdWei(raw.softLimit);
+  const r2cRequestSoftLimit = toUsdWei(raw.r2cRequestSoftLimit);
   const hardLimit = toUsdWei(raw.hardLimit);
   const maxAcceptableFee = toUsdWei(raw.maxFee);
-  if (softLimit <= 0n || hardLimit < softLimit) {
+  if (r2cRequestSoftLimit <= 0n || hardLimit < r2cRequestSoftLimit) {
     return {
-      softLimit: DEFAULT_SOFT_LIMIT,
+      r2cRequestSoftLimit: DEFAULT_SOFT_LIMIT,
       hardLimit: DEFAULT_HARD_LIMIT,
       maxAcceptableFee: DEFAULT_MAX_FEE,
     };
   }
-  return { softLimit, hardLimit, maxAcceptableFee };
+  return { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
 };
 
 const findAccountKey = (state: EntityState, counterpartyId: string): string | null => {
@@ -436,14 +436,14 @@ export const applyEntityTx = async (
         // Falls back to runtime defaults for compatibility.
         const requestedPolicy = entityTx.data.rebalancePolicy;
         const jurisdictionPolicyDefaults = resolveJurisdictionRebalanceDefaults(newState);
-        let autopilotSoftLimit = requestedPolicy?.softLimit ?? jurisdictionPolicyDefaults.softLimit;
+        let autopilotSoftLimit = requestedPolicy?.r2cRequestSoftLimit ?? jurisdictionPolicyDefaults.r2cRequestSoftLimit;
         let autopilotHardLimit = requestedPolicy?.hardLimit ?? jurisdictionPolicyDefaults.hardLimit;
         let autopilotMaxFee = requestedPolicy?.maxAcceptableFee ?? jurisdictionPolicyDefaults.maxAcceptableFee;
-        if (autopilotSoftLimit <= 0n) autopilotSoftLimit = jurisdictionPolicyDefaults.softLimit;
+        if (autopilotSoftLimit <= 0n) autopilotSoftLimit = jurisdictionPolicyDefaults.r2cRequestSoftLimit;
         if (autopilotHardLimit < autopilotSoftLimit) autopilotHardLimit = autopilotSoftLimit;
         if (autopilotMaxFee < 0n) autopilotMaxFee = jurisdictionPolicyDefaults.maxAcceptableFee;
         localAccount.rebalancePolicy.set(tokenId, {
-          softLimit: autopilotSoftLimit,
+          r2cRequestSoftLimit: autopilotSoftLimit,
           hardLimit: autopilotHardLimit,
           maxAcceptableFee: autopilotMaxFee,
         });
@@ -451,7 +451,7 @@ export const applyEntityTx = async (
           type: 'set_rebalance_policy',
           data: {
             tokenId,
-            softLimit: autopilotSoftLimit,
+            r2cRequestSoftLimit: autopilotSoftLimit,
             hardLimit: autopilotHardLimit,
             maxAcceptableFee: autopilotMaxFee,
           },
@@ -952,7 +952,7 @@ export const applyEntityTx = async (
         routingFeePPM = 100,
         baseFee = 0n,
         minCollateralThreshold = 0n,
-        c2rSoftLimit = DEFAULT_SOFT_LIMIT,
+        c2rWithdrawSoftLimit = DEFAULT_SOFT_LIMIT,
         minFeeBps = 1n,
         rebalanceBaseFee = 10n ** 17n, // $0.10
         rebalanceLiquidityFeeBps = 1n, // 0.01%
@@ -991,7 +991,7 @@ export const applyEntityTx = async (
         routingFeePPM,
         baseFee,
         minCollateralThreshold,
-        c2rSoftLimit,
+        c2rWithdrawSoftLimit,
         minFeeBps,
         rebalanceBaseFee,
         rebalanceLiquidityFeeBps,
@@ -1000,7 +1000,7 @@ export const applyEntityTx = async (
       };
       console.log(
         `🏦 Hub config set: strategy=${matchingStrategy}, policyVersion=${policyVersion}, routingFee=${routingFeePPM}ppm, ` +
-        `rebalance(base=${rebalanceBaseFee},liqBps=${rebalanceLiquidityFeeBps},gas=${rebalanceGasFee},timeoutMs=${rebalanceTimeoutMs},c2rSoftLimit=${c2rSoftLimit})` +
+        `rebalance(base=${rebalanceBaseFee},liqBps=${rebalanceLiquidityFeeBps},gas=${rebalanceGasFee},timeoutMs=${rebalanceTimeoutMs},c2rWithdrawSoftLimit=${c2rWithdrawSoftLimit})` +
         `${feePolicyChanged ? ' [fee-policy-updated]' : ''}`,
       );
 
@@ -1018,7 +1018,7 @@ export const applyEntityTx = async (
           policyVersion,
           routingFeePPM,
           baseFee,
-          c2rSoftLimit: c2rSoftLimit.toString(),
+          c2rWithdrawSoftLimit: c2rWithdrawSoftLimit.toString(),
           rebalanceBaseFee: rebalanceBaseFee.toString(),
           rebalanceLiquidityFeeBps: rebalanceLiquidityFeeBps.toString(),
           rebalanceGasFee: rebalanceGasFee.toString(),
@@ -1032,7 +1032,7 @@ export const applyEntityTx = async (
       addMessage(
         newState,
         `🏦 Hub config activated: ${matchingStrategy} strategy v${policyVersion}, ${routingFeePPM}ppm routing fee, ` +
-        `rebalance(base=${rebalanceBaseFee}, liqBps=${rebalanceLiquidityFeeBps}, gas=${rebalanceGasFee}, c2rSoftLimit=${c2rSoftLimit})`,
+        `rebalance(base=${rebalanceBaseFee}, liqBps=${rebalanceLiquidityFeeBps}, gas=${rebalanceGasFee}, c2rWithdrawSoftLimit=${c2rWithdrawSoftLimit})`,
       );
       return { newState, outputs: [] };
     }
@@ -1041,7 +1041,7 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, tokenId, softLimit, hardLimit, maxAcceptableFee } = entityTx.data;
+      const { counterpartyEntityId, tokenId, r2cRequestSoftLimit, hardLimit, maxAcceptableFee } = entityTx.data;
 
       const accountMachine = newState.accounts.get(counterpartyEntityId);
       if (!accountMachine) {
@@ -1051,7 +1051,7 @@ export const applyEntityTx = async (
 
       const accountTx: AccountTx = {
         type: 'set_rebalance_policy',
-        data: { tokenId, softLimit, hardLimit, maxAcceptableFee },
+        data: { tokenId, r2cRequestSoftLimit, hardLimit, maxAcceptableFee },
       };
       mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
 

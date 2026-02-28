@@ -2820,9 +2820,11 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       try {
         (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = true;
         const result = await applyRuntimeInput(env, runtimeInput);
-        console.log(
-          `🔍 PROCESS: applyRuntimeInput returned entityOutbox=${result.entityOutbox.length}, jOutbox=${result.jOutbox.length}`,
-        );
+        if (!quietRuntimeLogs && (result.entityOutbox.length > 0 || result.jOutbox.length > 0)) {
+          console.log(
+            `🔍 PROCESS: applyRuntimeInput returned entityOutbox=${result.entityOutbox.length}, jOutbox=${result.jOutbox.length}`,
+          );
+        }
         entityOutbox = result.entityOutbox;
         jOutbox = result.jOutbox;
         (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput =
@@ -2900,10 +2902,14 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     // Side-effect-only ticks (e.g. deferred network retries) must never
     // overwrite WAL entries for the current height.
     if (frameAdvanced) {
-      console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
+      if (!quietRuntimeLogs) {
+        console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
+      }
       await saveEnvToDB(env);
       (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput = undefined;
-      console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
+      if (!quietRuntimeLogs) {
+        console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
+      }
     }
 
     // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
@@ -2957,6 +2963,29 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
 
         for (const jTx of jInput.jTxs) {
           console.log(`📤 [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName}`);
+          const queueAbortSentBatch = (reason: string) => {
+            if (jTx.type !== 'batch') return;
+            const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId : undefined;
+            const compactReason = String(reason || 'unknown').slice(0, 240);
+            enqueueRuntimeInputs(env, [
+              {
+                entityId: jTx.entityId,
+                ...(signerId ? { signerId } : {}),
+                entityTxs: [
+                  {
+                    type: 'j_abort_sent_batch',
+                    data: {
+                      requeueToCurrent: true,
+                      reason: `submit_failed:${compactReason}`,
+                    },
+                  },
+                ],
+              },
+            ]);
+            console.warn(
+              `⚠️ [J-SUBMIT] queued j_abort_sent_batch for ${jTx.entityId.slice(-4)} after failed batch submission`,
+            );
+          };
           try {
             const result = await jAdapter.submitTx(jTx, {
               env,
@@ -2970,12 +2999,19 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
               );
             } else {
               console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
+              if (!env.scenarioMode) {
+                queueAbortSentBatch(result.error || 'unknown');
+              }
               if (env.scenarioMode) {
                 throw new Error(`J-SUBMIT FAILED: ${result.error || 'unknown'}`);
               }
             }
           } catch (error) {
             console.error(`❌ [J-SUBMIT] submitTx threw for ${jTx.entityId.slice(-4)}:`, error);
+            if (!env.scenarioMode) {
+              const msg = error instanceof Error ? error.message : String(error);
+              queueAbortSentBatch(msg);
+            }
             if (env.scenarioMode) throw error;
           }
         }

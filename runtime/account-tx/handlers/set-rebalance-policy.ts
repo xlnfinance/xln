@@ -5,7 +5,7 @@
  *
  * AUTH: maxAcceptableFee can only be set by the fee-payer (non-Hub side).
  *       If the opposite side (Hub) tries to change maxAcceptableFee,
- *       the existing value is preserved. softLimit/hardLimit can be set
+ *       the existing value is preserved. r2cRequestSoftLimit/hardLimit can be set
  *       by either side (both benefit from collateral).
  */
 
@@ -16,10 +16,10 @@ export function handleSetRebalancePolicy(
   accountTx: Extract<AccountTx, { type: 'set_rebalance_policy' }>,
   byLeft?: boolean
 ): { success: boolean; events: string[]; error?: string } {
-  const { tokenId, softLimit, hardLimit, maxAcceptableFee } = accountTx.data;
+  const { tokenId, r2cRequestSoftLimit, hardLimit, maxAcceptableFee } = accountTx.data;
 
-  if (softLimit > hardLimit) {
-    return { success: false, events: [], error: 'softLimit must be <= hardLimit' };
+  if (r2cRequestSoftLimit > hardLimit) {
+    return { success: false, events: [], error: 'r2cRequestSoftLimit must be <= hardLimit' };
   }
   if (maxAcceptableFee < 0n) {
     return { success: false, events: [], error: 'maxAcceptableFee must be >= 0' };
@@ -36,17 +36,17 @@ export function handleSetRebalancePolicy(
     console.log(`🔒 POLICY-AUTH: maxAcceptableFee preserved (set by ${existing.setByLeft ? 'LEFT' : 'RIGHT'}, caller is ${byLeft ? 'LEFT' : 'RIGHT'})`);
   }
 
-  const policy: { softLimit: bigint; hardLimit: bigint; maxAcceptableFee: bigint; setByLeft?: boolean } = {
-    softLimit,
+  const policy: { r2cRequestSoftLimit: bigint; hardLimit: bigint; maxAcceptableFee: bigint; setByLeft?: boolean } = {
+    r2cRequestSoftLimit,
     hardLimit,
     maxAcceptableFee: effectiveFee,
   };
   if (byLeft !== undefined) policy.setByLeft = byLeft;
   accountMachine.rebalancePolicy.set(tokenId, policy);
 
-  const mode = softLimit === hardLimit ? 'manual' : 'absolute';
+  const mode = r2cRequestSoftLimit === hardLimit ? 'manual' : 'absolute';
   return {
     success: true,
-    events: [`🔄 Rebalance policy set for token ${tokenId}: ${mode} mode, soft=${softLimit}, hard=${hardLimit}, maxFee=${effectiveFee}`],
+    events: [`🔄 Rebalance policy set for token ${tokenId}: ${mode} mode, soft=${r2cRequestSoftLimit}, hard=${hardLimit}, maxFee=${effectiveFee}`],
   };
 }

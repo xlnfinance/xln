@@ -45,7 +45,7 @@ const normalizeHubJoinPreference = (value: unknown): HubJoinPreference => {
 const normalizePolicyDefaults = (value: unknown): PolicyDefaults | null => {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
-  const softLimitUsd = toUsdInt(raw['softLimit'], DEFAULT_POLICY.softLimitUsd);
+  const softLimitUsd = toUsdInt(raw['r2cRequestSoftLimit'], DEFAULT_POLICY.softLimitUsd);
   const hardLimitUsd = toUsdInt(raw['hardLimit'], DEFAULT_POLICY.hardLimitUsd);
   const maxFeeUsd = toUsdInt(raw['maxFee'], DEFAULT_POLICY.maxFeeUsd);
   if (softLimitUsd <= 0 || hardLimitUsd < softLimitUsd) return null;
@@ -170,15 +170,15 @@ export const writeHubJoinPreference = (value: HubJoinPreference): HubJoinPrefere
 };
 
 export const getOpenAccountRebalancePolicyData = (): {
-  softLimit: bigint;
+  r2cRequestSoftLimit: bigint;
   hardLimit: bigint;
   maxAcceptableFee: bigint;
 } | null => {
   const policy = readSavedCollateralPolicy();
   if (policy.mode === 'manual') return null;
-  const softLimit = usdToWei(policy.softLimitUsd);
+  const r2cRequestSoftLimit = usdToWei(policy.softLimitUsd);
   const hardLimit = usdToWei(policy.hardLimitUsd);
   const maxAcceptableFee = usdToWei(policy.maxFeeUsd);
-  if (softLimit <= 0n || hardLimit < softLimit || maxAcceptableFee < 0n) return null;
-  return { softLimit, hardLimit, maxAcceptableFee };
+  if (r2cRequestSoftLimit <= 0n || hardLimit < r2cRequestSoftLimit || maxAcceptableFee < 0n) return null;
+  return { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
 };

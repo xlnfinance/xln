@@ -20,6 +20,12 @@ export async function handleJAbortSentBatch(
   const requeue = entityTx.data.requeueToCurrent !== false;
   const reason = entityTx.data.reason ? ` (${entityTx.data.reason})` : '';
   const sentSize = getBatchSize(sent.batch);
+  const droppedFinalizeCounterparties = new Set<string>();
+  if (!requeue) {
+    for (const op of sent.batch.disputeFinalizations || []) {
+      droppedFinalizeCounterparties.add(String(op.counterentity).toLowerCase());
+    }
+  }
 
   if (requeue) {
     if (!newState.jBatchState.batch) {
@@ -38,6 +44,13 @@ export async function handleJAbortSentBatch(
       if ((feeState.jBatchSubmittedAt || 0) > 0) {
         feeState.jBatchSubmittedAt = 0;
       }
+    }
+  }
+  if (droppedFinalizeCounterparties.size > 0) {
+    for (const [counterpartyId, account] of newState.accounts.entries()) {
+      if (!account.activeDispute) continue;
+      if (!droppedFinalizeCounterparties.has(counterpartyId.toLowerCase())) continue;
+      account.activeDispute.finalizeQueued = false;
     }
   }
 

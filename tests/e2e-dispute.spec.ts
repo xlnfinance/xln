@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
+import { timedStep } from './utils/e2e-timing';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const INIT_TIMEOUT = 30_000;
@@ -248,7 +249,7 @@ async function readAccountTokenState(
   signerId: string,
   counterpartyId: string,
   tokenId: number,
-): Promise<{ exists: boolean; currentHeight: number; pendingFrame: boolean; collateral: bigint }> {
+): Promise<{ exists: boolean; currentHeight: number; pendingFrame: boolean; outCollateral: bigint; freeOutCollateral: bigint }> {
   const result = await page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
     const findAccount = (accounts: any, ownerId: string, cpId: string) => {
       if (!(accounts instanceof Map)) return null;
@@ -280,12 +281,19 @@ async function readAccountTokenState(
     const rep = key ? env.eReplicas.get(key) : null;
     const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
     const delta = account?.deltas?.get?.(tokenId);
+    const XLN = (window as any).XLN;
+    const isLeft = String(entityId || '').toLowerCase() < String(counterpartyId || '').toLowerCase();
+    const derived = delta && typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, isLeft) : null;
+    const outCollateral = BigInt(derived?.outCollateral ?? 0n);
+    const outHold = BigInt(derived?.outTotalHold ?? 0n);
+    const freeOutCollateral = outCollateral > outHold ? outCollateral - outHold : 0n;
 
     return {
       exists: !!account,
       currentHeight: Number(account?.currentHeight || 0),
       pendingFrame: !!account?.pendingFrame,
-      collateral: String(delta?.collateral ?? 0n),
+      outCollateral: String(outCollateral),
+      freeOutCollateral: String(freeOutCollateral),
     };
   }, { entityId, signerId, counterpartyId, tokenId });
 
@@ -293,8 +301,37 @@ async function readAccountTokenState(
     exists: !!result.exists,
     currentHeight: Number(result.currentHeight || 0),
     pendingFrame: !!result.pendingFrame,
-    collateral: BigInt(result.collateral || '0'),
+    outCollateral: BigInt(result.outCollateral || '0'),
+    freeOutCollateral: BigInt(result.freeOutCollateral || '0'),
   };
+}
+
+async function readAccountTxTypePresence(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+  txType: string,
+): Promise<{ mempool: boolean; pending: boolean; history: boolean }> {
+  return await page.evaluate(({ entityId, signerId, counterpartyId, txType }) => {
+    const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) return { mempool: false, pending: false, history: false };
+    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+      const [eid, sid] = String(k).split(':');
+      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+    });
+    const rep = key ? env.eReplicas.get(key) : null;
+    const account = rep?.state?.accounts?.get?.(counterpartyId);
+    const hasMempool = Array.isArray(account?.mempool) && account.mempool.some((tx: any) => String(tx?.type || '') === txType);
+    const hasPending = Array.isArray(account?.pendingFrame?.accountTxs)
+      && account.pendingFrame.accountTxs.some((tx: any) => String(tx?.type || '') === txType);
+    const hasHistory = Array.isArray(account?.frameHistory)
+      && account.frameHistory.some((frame: any) =>
+        Array.isArray(frame?.accountTxs) && frame.accountTxs.some((tx: any) => String(tx?.type || '') === txType),
+      );
+    return { mempool: !!hasMempool, pending: !!hasPending, history: !!hasHistory };
+  }, { entityId, signerId, counterpartyId, txType });
 }
 
 function parseUiAmount(text: string): number {
@@ -445,6 +482,56 @@ async function queueFundR2CViaUi(
   await fundButton.click();
 }
 
+async function queueWithdrawC2RViaUi(
+  page: Page,
+  counterpartyId: string,
+  amount: string,
+): Promise<void> {
+  await openEntitySettleWorkspace(page);
+
+  const withdrawTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Withdraw$/ }).first();
+  await expect(withdrawTab).toBeVisible({ timeout: 20_000 });
+  await withdrawTab.click();
+
+  const accountInput = page.locator('.settlement-panel .entity-input input').first();
+  await expect(accountInput).toBeVisible({ timeout: 20_000 });
+  await accountInput.fill(counterpartyId);
+  await accountInput.press('Tab');
+
+  const amountInput = page.locator('.settlement-panel .amount-field input').first();
+  await expect(amountInput).toBeVisible({ timeout: 20_000 });
+  await amountInput.fill(amount);
+
+  const withdrawButton = page.getByTestId('settle-queue-action').first();
+  await expect(withdrawButton).toBeEnabled({ timeout: 20_000 });
+  await withdrawButton.click();
+}
+
+async function queueTransferR2RViaUi(
+  page: Page,
+  recipientEntityId: string,
+  amount: string,
+): Promise<void> {
+  await openEntitySettleWorkspace(page);
+
+  const transferTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Transfer$/ }).first();
+  await expect(transferTab).toBeVisible({ timeout: 20_000 });
+  await transferTab.click();
+
+  const recipientInput = page.locator('.settlement-panel .entity-input input').first();
+  await expect(recipientInput).toBeVisible({ timeout: 20_000 });
+  await recipientInput.fill(recipientEntityId);
+  await recipientInput.press('Tab');
+
+  const amountInput = page.locator('.settlement-panel .amount-field input').first();
+  await expect(amountInput).toBeVisible({ timeout: 20_000 });
+  await amountInput.fill(amount);
+
+  const transferButton = page.getByTestId('settle-queue-action').first();
+  await expect(transferButton).toBeEnabled({ timeout: 20_000 });
+  await transferButton.click();
+}
+
 async function seedDisputePreconditions(
   page: Page,
   entityId: string,
@@ -515,8 +602,37 @@ async function seedDisputePreconditions(
 async function broadcastPendingBatchViaUi(page: Page): Promise<void> {
   const signButton = page.getByTestId('settle-sign-broadcast').first();
   await expect(signButton).toBeVisible({ timeout: 30_000 });
+  await expect(signButton).toBeEnabled({ timeout: 120_000 });
   await signButton.click();
   await page.waitForTimeout(500);
+}
+
+async function clearBatchViaUi(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.confirm = () => true;
+    window.alert = () => {};
+  });
+  const clearButton = page.getByTestId('settle-clear-batch').first();
+  await expect(clearButton).toBeVisible({ timeout: 30_000 });
+  await expect(clearButton).toBeEnabled({ timeout: 30_000 });
+  await clearButton.click();
+  await page.waitForTimeout(400);
+}
+
+async function ensureNoSentBatchLatch(
+  page: Page,
+  entityId: string,
+  signerId: string,
+): Promise<void> {
+  await openEntitySettleWorkspace(page);
+  const initial = await readJBatchSnapshot(page, entityId, signerId);
+  if (!initial.sentExists) return;
+
+  await clearBatchViaUi(page);
+  await expect.poll(async () => {
+    const snap = await readJBatchSnapshot(page, entityId, signerId);
+    return snap.sentExists;
+  }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(false);
 }
 
 async function openEntitySettleWorkspace(page: Page): Promise<void> {
@@ -532,6 +648,15 @@ async function openEntitySettleWorkspace(page: Page): Promise<void> {
   const settleWorkspaceButton = page.locator('.account-workspace-tab').filter({ hasText: /Settle/i }).first();
   await expect(settleWorkspaceButton).toBeVisible({ timeout: 15_000 });
   await settleWorkspaceButton.click();
+}
+
+async function assertBatchHistoryVisible(page: Page): Promise<void> {
+  const historyTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^History$/ }).first();
+  await expect(historyTab).toBeVisible({ timeout: 20_000 });
+  await historyTab.click();
+  const historyTitle = page.locator('.settlement-panel .history-title').first();
+  await expect(historyTitle).toBeVisible({ timeout: 20_000 });
+  await expect(historyTitle).toHaveText(/On-Chain Batch History/i);
 }
 
 async function startDisputeFromEntitySettle(
@@ -617,13 +742,19 @@ async function readJBatchSnapshot(
 ): Promise<{
   pendingDisputeStarts: number;
   pendingReserveToCollateral: number;
+  pendingCollateralToReserve: number;
+  pendingReserveToReserve: number;
   sentExists: boolean;
   sentDisputeStarts: number;
   sentReserveToCollateral: number;
+  sentCollateralToReserve: number;
+  sentReserveToReserve: number;
   batchHistoryCount: number;
   lastBatchTxHash: string;
   lastBatchStatus: string;
   lastBatchOpCount: number;
+  lastBatchJBlock: number;
+  lastBatchOps: Record<string, number>;
 }> {
   return await page.evaluate(({ entityId, signerId }) => {
     const env = (window as any).isolatedEnv;
@@ -631,13 +762,19 @@ async function readJBatchSnapshot(
       return {
         pendingDisputeStarts: 0,
         pendingReserveToCollateral: 0,
+        pendingCollateralToReserve: 0,
+        pendingReserveToReserve: 0,
         sentExists: false,
         sentDisputeStarts: 0,
         sentReserveToCollateral: 0,
+        sentCollateralToReserve: 0,
+        sentReserveToReserve: 0,
         batchHistoryCount: 0,
         lastBatchTxHash: '',
         lastBatchStatus: '',
         lastBatchOpCount: 0,
+        lastBatchJBlock: 0,
+        lastBatchOps: {},
       };
     }
 
@@ -651,17 +788,31 @@ async function readJBatchSnapshot(
     const sent = rep?.state?.jBatchState?.sentBatch?.batch;
     const history = Array.isArray(rep?.state?.batchHistory) ? rep.state.batchHistory : [];
     const last = history.length > 0 ? history[history.length - 1] : null;
+    const lastOps = (last?.operations && typeof last.operations === 'object') ? last.operations : {};
 
     return {
       pendingDisputeStarts: Number(pending?.disputeStarts?.length || 0),
       pendingReserveToCollateral: Number(pending?.reserveToCollateral?.length || 0),
+      pendingCollateralToReserve: Number(pending?.collateralToReserve?.length || 0),
+      pendingReserveToReserve: Number(pending?.reserveToReserve?.length || 0),
       sentExists: !!rep?.state?.jBatchState?.sentBatch,
       sentDisputeStarts: Number(sent?.disputeStarts?.length || 0),
       sentReserveToCollateral: Number(sent?.reserveToCollateral?.length || 0),
+      sentCollateralToReserve: Number(sent?.collateralToReserve?.length || 0),
+      sentReserveToReserve: Number(sent?.reserveToReserve?.length || 0),
       batchHistoryCount: Number(history.length || 0),
       lastBatchTxHash: String(last?.txHash || ''),
       lastBatchStatus: String(last?.status || ''),
       lastBatchOpCount: Number(last?.opCount || 0),
+      lastBatchJBlock: Number(last?.jBlockNumber || 0),
+      lastBatchOps: {
+        reserveToCollateral: Number(lastOps?.reserveToCollateral || 0),
+        collateralToReserve: Number(lastOps?.collateralToReserve || 0),
+        reserveToReserve: Number(lastOps?.reserveToReserve || 0),
+        disputeStarts: Number(lastOps?.disputeStarts || 0),
+        disputeFinalizations: Number(lastOps?.disputeFinalizations || 0),
+        settlements: Number(lastOps?.settlements || 0),
+      },
     };
   }, { entityId, signerId });
 }
@@ -675,11 +826,11 @@ test.describe('E2E Dispute Flow', () => {
       }
     });
 
-    await gotoApp(page);
-    await dismissOnboardingIfVisible(page);
-    await createDemoRuntime(page, `dispute-rt-${Date.now()}`, randomMnemonic());
-    const accountRef = await ensureAnyHubAccountOpen(page);
-    await seedDisputePreconditions(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+    await timedStep('dispute.goto_app', () => gotoApp(page));
+    await timedStep('dispute.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('dispute.create_runtime', () => createDemoRuntime(page, `dispute-rt-${Date.now()}`, randomMnemonic()));
+    const accountRef = await timedStep('dispute.ensure_hub_account', () => ensureAnyHubAccountOpen(page));
+    await timedStep('dispute.seed_preconditions', () => seedDisputePreconditions(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId));
 
     const reserveBefore = await readReserve(page, accountRef.entityId);
     const reserveBeforeUi = await readReserveBalanceUi(page, 'USDC');
@@ -687,29 +838,38 @@ test.describe('E2E Dispute Flow', () => {
     const batchBeforeDispute = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
 
     try {
-      await startDisputeFromEntitySettle(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+      await timedStep(
+        'dispute.ui_start_dispute',
+        () => startDisputeFromEntitySettle(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
+      );
     } catch {
       const debug = await readDisputeDebug(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
       throw new Error(`disputeStart not observed via UI click. debug=${JSON.stringify(debug)}`);
     }
-    await expect.poll(async () => {
-      const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-      return snap.pendingDisputeStarts;
-    }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(batchBeforeDispute.pendingDisputeStarts);
+    await timedStep('dispute.wait_batch_queue_dispute_start', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.pendingDisputeStarts;
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(batchBeforeDispute.pendingDisputeStarts);
+    });
     const disputeQueued = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
     const disputeHistoryBeforeBroadcast = disputeQueued.batchHistoryCount;
 
-    await openEntitySettleWorkspace(page);
-    await broadcastPendingBatchViaUi(page);
-    await expect.poll(async () => {
-      const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-      return snap.sentDisputeStarts > 0 || snap.batchHistoryCount > disputeHistoryBeforeBroadcast;
-    }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+    await timedStep('dispute.open_settle_workspace', () => openEntitySettleWorkspace(page));
+    await timedStep('dispute.broadcast_start_batch', () => broadcastPendingBatchViaUi(page));
+    await timedStep('dispute.wait_batch_sent_or_history', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.sentDisputeStarts > 0 || snap.batchHistoryCount > disputeHistoryBeforeBroadcast;
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+    });
 
-    await expect.poll(async () => {
-      const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-      return state.activeDispute;
-    }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+    await timedStep('dispute.wait_account_active_dispute', async () => {
+      await expect.poll(async () => {
+        const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+        return state.activeDispute;
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+    });
 
     const disputedAccountPreview = page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId }).first();
     await expect(disputedAccountPreview).toBeVisible({ timeout: 20_000 });
@@ -731,34 +891,84 @@ test.describe('E2E Dispute Flow', () => {
       `expected local dispute delay around 5 blocks, got ${disputeWindowBlocks}`
     ).toBe(true);
 
-    await expect.poll(async () => {
-      const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-      return !state.activeDispute && state.status === 'disputed';
-    }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe(true);
+    await timedStep('dispute.wait_auto_finalize', async () => {
+      await expect.poll(async () => {
+        const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+        return !state.activeDispute && state.status === 'disputed';
+      }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe(true);
+    });
 
     const reserveAfter = await readReserve(page, accountRef.entityId);
     expect(
       reserveAfter > reserveBefore,
       `reserve must increase after dispute finalize (before=${reserveBefore}, after=${reserveAfter})`
     ).toBe(true);
-    await expect.poll(async () => {
-      return await readReserveBalanceUi(page, 'USDC');
-    }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(reserveBeforeUi);
-    await expect.poll(async () => {
-      return await readReservesCardValueUi(page);
-    }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(reserveCardBeforeUi);
-    await expect.poll(async () => {
-      return await readAccountsCardOwedUi(page);
-    }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeLessThanOrEqual(0);
+    await timedStep('dispute.wait_ui_reserve_balance', async () => {
+      await expect.poll(async () => {
+        return await readReserveBalanceUi(page, 'USDC');
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(reserveBeforeUi);
+    });
+    await timedStep('dispute.wait_ui_reserve_card', async () => {
+      await expect.poll(async () => {
+        return await readReservesCardValueUi(page);
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(reserveCardBeforeUi);
+    });
+    await timedStep('dispute.wait_ui_accounts_owed_zero', async () => {
+      await expect.poll(async () => {
+        return await readAccountsCardOwedUi(page);
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeLessThanOrEqual(0);
+    });
     await page.waitForTimeout(1200);
 
+    // Finalized disputed account is hidden from main list and moved to "Disputed Accounts".
+    await timedStep('dispute.open_settle_workspace_post_finalize', () => openEntitySettleWorkspace(page));
+    await timedStep('dispute.wait_hidden_from_main_list', async () => {
+      await expect.poll(async () => {
+        return await page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId }).count();
+      }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe(0);
+    });
+
+    // If dispute finalize submit got stuck as sentBatch (no finalized event), clear latch for next flow.
+    await timedStep('dispute.ensure_no_sent_batch_latch', () => ensureNoSentBatchLatch(page, accountRef.entityId, accountRef.signerId));
+
+    // Prepare a second working account for post-dispute R2R/R2C/C2R coverage.
+    const secondHubId = await timedStep('post_dispute.pick_secondary_hub', () => pickSecondaryHubEntityId(page, accountRef.counterpartyId));
+    await timedStep('post_dispute.open_secondary_account', () => ensurePrivateAccountOpenViaUi(page, accountRef.entityId, accountRef.signerId, secondHubId));
+
+    // R2R direct transfer coverage (from reserve returned by dispute finalize).
+    const reserveBeforeR2R = await readReserve(page, accountRef.entityId);
+    const secondHubReserveBeforeR2R = await readReserve(page, secondHubId);
+    const r2rBatchBefore = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+    const r2rHistoryBefore = r2rBatchBefore.batchHistoryCount;
+
+    await timedStep('post_dispute.queue_r2r', () => queueTransferR2RViaUi(page, secondHubId, '1'));
+    await timedStep('post_dispute.wait_r2r_queued', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.pendingReserveToReserve;
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(r2rBatchBefore.pendingReserveToReserve);
+    });
+    await timedStep('post_dispute.broadcast_r2r', () => broadcastPendingBatchViaUi(page));
+
+    await timedStep('post_dispute.wait_r2r_sent', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.sentReserveToReserve > 0 || snap.batchHistoryCount > r2rHistoryBefore;
+      }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBe(true);
+    });
+
+    await expect.poll(async () => {
+      return await readReserve(page, accountRef.entityId);
+    }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBeLessThan(reserveBeforeR2R);
+
+    await expect.poll(async () => {
+      return await readReserve(page, secondHubId);
+    }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(secondHubReserveBeforeR2R);
+
     // Full-cycle continuation:
-    // 1) Open account with second hub (UI)
-    // 2) Queue R2C fund into that account (UI)
-    // 3) Sign & Broadcast (UI)
-    // 4) Verify collateral increased on second hub account (state)
-    const secondHubId = await pickSecondaryHubEntityId(page, accountRef.counterpartyId);
-    await ensurePrivateAccountOpenViaUi(page, accountRef.entityId, accountRef.signerId, secondHubId);
+    // 1) Queue R2C fund into second hub account (UI)
+    // 2) Sign & Broadcast (UI)
+    // 3) Verify collateral increased on second hub account (state)
     await openAccountPanelByCounterparty(page, secondHubId);
     const collateralBeforeUi = await readRawCollateralUiFromOpenAccount(page);
     const secondHubPanelBackBefore = page.locator('.account-panel .back-button').first();
@@ -767,37 +977,76 @@ test.describe('E2E Dispute Flow', () => {
     }
 
     const beforeR2C = await readAccountTokenState(page, accountRef.entityId, accountRef.signerId, secondHubId, 1);
-    const collateralBefore = beforeR2C.collateral;
+    const outCollateralBefore = beforeR2C.outCollateral;
     const batchBeforeR2C = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
     const lastTxHashBeforeR2C = batchBeforeR2C.lastBatchTxHash;
 
-    await queueFundR2CViaUi(page, secondHubId, '100');
-    await expect.poll(async () => {
-      const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-      return snap.pendingReserveToCollateral;
-    }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(batchBeforeR2C.pendingReserveToCollateral);
+    await timedStep('post_dispute.queue_r2c', () => queueFundR2CViaUi(page, secondHubId, '1'));
+    await timedStep('post_dispute.wait_r2c_queued', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.pendingReserveToCollateral;
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(batchBeforeR2C.pendingReserveToCollateral);
+    });
     const r2cQueued = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
     const r2cHistoryBeforeBroadcast = r2cQueued.batchHistoryCount;
-    await broadcastPendingBatchViaUi(page);
-    await expect.poll(async () => {
-      const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-      return snap.sentReserveToCollateral > 0 || snap.batchHistoryCount > r2cHistoryBeforeBroadcast;
-    }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
-    await expect.poll(async () => {
-      const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-      return snap.lastBatchTxHash;
-    }, { timeout: 60_000, intervals: [500, 1000, 2000] }).not.toEqual(lastTxHashBeforeR2C);
+    await timedStep('post_dispute.broadcast_r2c', () => broadcastPendingBatchViaUi(page));
+    await timedStep('post_dispute.wait_r2c_sent', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.sentReserveToCollateral > 0 || snap.batchHistoryCount > r2cHistoryBeforeBroadcast;
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+    });
+    await timedStep('post_dispute.wait_new_txhash', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.lastBatchTxHash;
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).not.toEqual(lastTxHashBeforeR2C);
+    });
 
     await expect.poll(async () => {
       const current = await readAccountTokenState(page, accountRef.entityId, accountRef.signerId, secondHubId, 1);
-      return current.collateral > collateralBefore;
+      return current.outCollateral > outCollateralBefore;
     }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe(true);
 
     await openAccountPanelByCounterparty(page, secondHubId);
     await expect.poll(async () => {
       return await readRawCollateralUiFromOpenAccount(page);
     }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(collateralBeforeUi);
-    await page.waitForTimeout(1500);
+    const secondHubPanelBackAfterFund = page.locator('.account-panel .back-button').first();
+    if (await secondHubPanelBackAfterFund.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await secondHubPanelBackAfterFund.click();
+    }
+
+    // C2R handling: queue withdrawal request and verify state-machine records request_withdrawal.
+    // (for this account, on-chain C2R execution may happen on counterparty side).
+    await timedStep('post_dispute.queue_c2r_withdraw', () => queueWithdrawC2RViaUi(page, secondHubId, '25'));
+    await timedStep('post_dispute.open_settle_workspace_c2r', () => openEntitySettleWorkspace(page));
+    const signButtonDuringC2R = page.getByTestId('settle-sign-broadcast').first();
+    await expect(signButtonDuringC2R).toBeDisabled({ timeout: 30_000 });
+    await timedStep('post_dispute.wait_c2r_request_withdrawal', async () => {
+      await expect.poll(async () => {
+        const txs = await readAccountTxTypePresence(page, accountRef.entityId, accountRef.signerId, secondHubId, 'request_withdrawal');
+        return txs.mempool || txs.pending || txs.history;
+      }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBe(true);
+    });
+
+    await openEntitySettleWorkspace(page);
+    await assertBatchHistoryVisible(page);
+    const settleHistoryRows = page.getByTestId('settle-history-item');
+    await expect(settleHistoryRows.first()).toBeVisible({ timeout: 20_000 });
+
+    const finalSnapshot = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+    expect(finalSnapshot.batchHistoryCount).toBeGreaterThanOrEqual(3);
+    expect(finalSnapshot.lastBatchStatus).toBe('confirmed');
+    expect(finalSnapshot.lastBatchJBlock).toBeGreaterThan(0);
+    expect(finalSnapshot.lastBatchOpCount).toBeGreaterThan(0);
+    expect(
+      finalSnapshot.lastBatchOps.reserveToCollateral > 0
+        || finalSnapshot.lastBatchOps.disputeStarts > 0
+        || finalSnapshot.lastBatchOps.disputeFinalizations > 0,
+      `expected dispute/R2C footprint in history, got ${JSON.stringify(finalSnapshot.lastBatchOps)}`,
+    ).toBe(true);
   });
 
   test('entity settle workspace Sign & Broadcast submits dispute batch', async ({ page }) => {
@@ -808,19 +1057,27 @@ test.describe('E2E Dispute Flow', () => {
       }
     });
 
-    await gotoApp(page);
-    await dismissOnboardingIfVisible(page);
-    await createDemoRuntime(page, `dispute-ui-broadcast-rt-${Date.now()}`, randomMnemonic());
-    const accountRef = await ensureAnyHubAccountOpen(page);
-    await seedDisputePreconditions(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+    await timedStep('dispute_broadcast.goto_app', () => gotoApp(page));
+    await timedStep('dispute_broadcast.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('dispute_broadcast.create_runtime', () => createDemoRuntime(page, `dispute-ui-broadcast-rt-${Date.now()}`, randomMnemonic()));
+    const accountRef = await timedStep('dispute_broadcast.ensure_hub_account', () => ensureAnyHubAccountOpen(page));
+    await timedStep(
+      'dispute_broadcast.seed_preconditions',
+      () => seedDisputePreconditions(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
+    );
 
-    await startDisputeFromEntitySettle(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-    await openEntitySettleWorkspace(page);
-    await broadcastPendingBatchViaUi(page);
+    await timedStep(
+      'dispute_broadcast.start_dispute',
+      () => startDisputeFromEntitySettle(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
+    );
+    await timedStep('dispute_broadcast.open_settle_workspace', () => openEntitySettleWorkspace(page));
+    await timedStep('dispute_broadcast.broadcast', () => broadcastPendingBatchViaUi(page));
 
-    await expect.poll(async () => {
-      const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-      return state.activeDispute && state.status === 'disputed';
-    }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+    await timedStep('dispute_broadcast.wait_active_dispute', async () => {
+      await expect.poll(async () => {
+        const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+        return state.activeDispute && state.status === 'disputed';
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+    });
   });
 });

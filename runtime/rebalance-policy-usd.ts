@@ -1,5 +1,5 @@
 export interface RebalancePolicyUsd {
-  softLimit: number;
+  r2cRequestSoftLimit: number;
   hardLimit: number;
   maxFee: number;
 }
@@ -13,10 +13,10 @@ const sanitizeUsdInt = (value: unknown): number | null => {
 export const parseRebalancePolicyUsd = (value: unknown): RebalancePolicyUsd | undefined => {
   if (!value || typeof value !== 'object') return undefined;
   const raw = value as Record<string, unknown>;
-  const softLimit = sanitizeUsdInt(raw['softLimit']);
+  const r2cRequestSoftLimit = sanitizeUsdInt(raw['r2cRequestSoftLimit']);
   const hardLimit = sanitizeUsdInt(raw['hardLimit']);
   const maxFee = sanitizeUsdInt(raw['maxFee']);
-  if (softLimit === null || hardLimit === null || maxFee === null) return undefined;
-  if (softLimit <= 0 || hardLimit < softLimit) return undefined;
-  return { softLimit, hardLimit, maxFee };
+  if (r2cRequestSoftLimit === null || hardLimit === null || maxFee === null) return undefined;
+  if (r2cRequestSoftLimit <= 0 || hardLimit < r2cRequestSoftLimit) return undefined;
+  return { r2cRequestSoftLimit, hardLimit, maxFee };
 };

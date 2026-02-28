@@ -93,20 +93,20 @@ export async function handleHtlcReveal(
 
   // 6. Release hold (with underflow guard)
   if (lock.senderIsLeft) {
-    const currentHold = delta.leftHtlcHold || 0n;
+    const currentHold = delta.leftHold || 0n;
     if (currentHold < lock.amount) {
-      console.error(`⚠️ HTLC hold underflow! leftHtlcHold=${currentHold} < amount=${lock.amount}`);
-      delta.leftHtlcHold = 0n;
+      console.error(`⚠️ HTLC hold underflow! leftHold=${currentHold} < amount=${lock.amount}`);
+      delta.leftHold = 0n;
     } else {
-      delta.leftHtlcHold = currentHold - lock.amount;
+      delta.leftHold = currentHold - lock.amount;
     }
   } else {
-    const currentHold = delta.rightHtlcHold || 0n;
+    const currentHold = delta.rightHold || 0n;
     if (currentHold < lock.amount) {
-      console.error(`⚠️ HTLC hold underflow! rightHtlcHold=${currentHold} < amount=${lock.amount}`);
-      delta.rightHtlcHold = 0n;
+      console.error(`⚠️ HTLC hold underflow! rightHold=${currentHold} < amount=${lock.amount}`);
+      delta.rightHold = 0n;
     } else {
-      delta.rightHtlcHold = currentHold - lock.amount;
+      delta.rightHold = currentHold - lock.amount;
     }
   }
 

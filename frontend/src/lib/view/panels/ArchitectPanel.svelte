@@ -73,9 +73,6 @@
 
   // Check if env is ready
   $: envReady = $isolatedEnv !== null && $isolatedEnv !== undefined;
-  $: if (envReady) {
-    console.log('[ArchitectPanel] Env ready with', $isolatedEnv.eReplicas?.size || 0, 'entities');
-  }
 
   // CRITICAL: Check if viewing history (timeIndex >= 0 means historical frame, -1 means LIVE)
   $: isHistoryMode = $isolatedTimeIndex >= 0;

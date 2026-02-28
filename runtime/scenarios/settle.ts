@@ -342,8 +342,8 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   const usdcDelta = aliceAccount.deltas.get(USDC_TOKEN_ID);
   assert(usdcDelta, 'USDC delta should exist', env);
   const aliceIsLeft = aliceAccount.leftEntity === ALICE_ID;
-  const holdField = aliceIsLeft ? 'leftSettleHold' : 'rightSettleHold';
-  const actualHold = aliceIsLeft ? (usdcDelta.leftSettleHold || 0n) : (usdcDelta.rightSettleHold || 0n);
+  const holdField = aliceIsLeft ? 'leftHold' : 'rightHold';
+  const actualHold = aliceIsLeft ? (usdcDelta.leftHold || 0n) : (usdcDelta.rightHold || 0n);
   const expectedHold = usd(100);
   console.log(`   HOLD CHECK: ${holdField}=${actualHold}, expected=${expectedHold}`);
   assert(actualHold === expectedHold, `Settlement hold not set: expected ${expectedHold}, got ${actualHold}`, env);

@@ -100,6 +100,12 @@ function getEnvJAdapter(env: Env) {
   return null;
 }
 
+const ZERO_HASH_32 = `0x${'0'.repeat(64)}`;
+const hasActiveDisputeHash = (hash: unknown): boolean => {
+  const normalized = String(hash ?? '').toLowerCase();
+  return normalized !== '' && normalized !== '0x' && normalized !== '0x0' && normalized !== ZERO_HASH_32;
+};
+
 /**
  * Initialize crontab state for an entity
  */
@@ -260,10 +266,16 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
           const accountId = String(hook.data['accountId'] || '');
           const account = replica.state.accounts.get(accountId);
           if (!account?.activeDispute) break;
+          if (replica.state.hubRebalanceConfig?.disputeAutoFinalizeMode === 'ignore') {
+            break;
+          }
+          const weAreLeft = account.leftEntity === replica.state.entityId;
+          const weAreStarter = weAreLeft === account.activeDispute.startedByLeft;
 
-          const timeoutBlock = Number(account.activeDispute.disputeTimeout || 0);
+          let timeoutBlock = Number(account.activeDispute.disputeTimeout || 0);
           if (
             jadapter &&
+            weAreStarter &&
             timeoutBlock &&
             currentJBlock < timeoutBlock &&
             canAutoAdvanceLocalJBlock &&
@@ -280,7 +292,7 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
             }
           }
 
-          if (!timeoutBlock || currentJBlock < timeoutBlock) {
+          if (weAreStarter && (!timeoutBlock || currentJBlock < timeoutBlock)) {
             const retryMs = 1000;
             if (replica.state.crontabState) {
               scheduleHook(replica.state.crontabState, {
@@ -297,11 +309,41 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
             break;
           }
 
-          const batch = replica.state.jBatchState?.batch;
-          const sent = replica.state.jBatchState?.sentBatch?.batch;
-          const hasInCurrent = !!batch?.disputeFinalizations?.some((op) => String(op.counterentity).toLowerCase() === accountId.toLowerCase());
-          const hasInSent = !!sent?.disputeFinalizations?.some((op) => String(op.counterentity).toLowerCase() === accountId.toLowerCase());
-          if (hasInCurrent || hasInSent || replica.state.jBatchState?.sentBatch) {
+          if (jadapter?.getAccountInfo) {
+            try {
+              const onchain = await jadapter.getAccountInfo(replica.state.entityId, accountId);
+              if (!hasActiveDisputeHash(onchain.disputeHash)) {
+                account.activeDispute = undefined;
+                if (account.status === 'disputed') account.status = 'active';
+                console.warn(
+                  `⏰ HOOK: dispute_deadline stale local dispute cleared for ${accountId.slice(-4)} (no on-chain active dispute)`,
+                );
+                break;
+              }
+              const onchainTimeout = Number(onchain.disputeTimeout ?? 0n);
+              if (Number.isFinite(onchainTimeout) && onchainTimeout > 0) {
+                timeoutBlock = onchainTimeout;
+                account.activeDispute.disputeTimeout = onchainTimeout;
+              }
+            } catch (error) {
+              const retryMs = 1000;
+              if (replica.state.crontabState) {
+                scheduleHook(replica.state.crontabState, {
+                  id: hook.id,
+                  triggerAt: replica.state.timestamp + retryMs,
+                  type: 'dispute_deadline',
+                  data: { accountId },
+                });
+              }
+              console.warn(
+                `⏰ HOOK: dispute_deadline on-chain check failed for ${accountId.slice(-4)}; retry in ${retryMs}ms`,
+                error
+              );
+              break;
+            }
+          }
+
+          if (account.activeDispute.finalizeQueued || replica.state.jBatchState?.sentBatch) {
             break;
           }
 
@@ -615,6 +657,7 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     replica.state.hubRebalanceConfig.minFeeBps ??
     1n;
   const rebalanceGasFee = replica.state.hubRebalanceConfig.rebalanceGasFee ?? 0n;
+  const c2rWithdrawSoftLimit = replica.state.hubRebalanceConfig.c2rWithdrawSoftLimit ?? DEFAULT_SOFT_LIMIT;
   const currentPolicyVersion = Number.isFinite(replica.state.hubRebalanceConfig.policyVersion)
     && replica.state.hubRebalanceConfig.policyVersion > 0
     ? replica.state.hubRebalanceConfig.policyVersion
@@ -985,14 +1028,15 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     for (const [tokenId, delta] of accountMachine.deltas.entries()) {
       if ((accountMachine.requestedRebalance.get(tokenId) ?? 0n) > 0n) continue;
 
-      // C→R MUST only use hub-owned collateral (outCollateral in hub perspective),
-      // never shared collateral directly.
+      // C→R uses canonical deriveDelta outCollateral in hub perspective.
+      // Trigger threshold is c2rWithdrawSoftLimit, withdrawal amount is full freeOutCollateral.
       const hubDerived = deriveDelta(delta, hubIsLeft);
       const hubOwnedCollateral = hubDerived.outCollateral;
-      const excessCollateral = hubOwnedCollateral;
-      if (excessCollateral <= 0n) continue;
+      const outHold = hubDerived.outTotalHold || 0n;
+      const freeOutCollateral = hubOwnedCollateral > outHold ? hubOwnedCollateral - outHold : 0n;
+      if (freeOutCollateral <= c2rWithdrawSoftLimit) continue;
 
-      const withdrawAmount = hubOwnedCollateral;
+      const withdrawAmount = freeOutCollateral;
       emitRebalanceDebug({
         step: 2,
         status: 'ok',
@@ -1000,14 +1044,17 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
         counterpartyId,
         tokenId,
         outCollateral: String(hubOwnedCollateral),
+        outHold: String(outHold),
+        freeOutCollateral: String(freeOutCollateral),
+        c2rWithdrawSoftLimit: String(c2rWithdrawSoftLimit),
         withdrawAmount: String(withdrawAmount),
       });
 
       if (withdrawAmount <= 0n) continue;
-      // Invariant: withdrawAmount = hubOwnedCollateral - threshold, threshold>=0 => withdrawAmount<=hubOwnedCollateral
+      // Invariant: withdrawAmount cannot exceed free collateral.
       console.assert(
-        withdrawAmount <= hubOwnedCollateral,
-        `C2R invariant violated: withdraw(${withdrawAmount}) > hubOwned(${hubOwnedCollateral}) cp=${counterpartyId} token=${tokenId}`,
+        withdrawAmount <= freeOutCollateral,
+        `C2R invariant violated: withdraw(${withdrawAmount}) > freeOutCollateral(${freeOutCollateral}) cp=${counterpartyId} token=${tokenId}`,
       );
       ops.push({ type: 'c2r', tokenId, amount: withdrawAmount });
       totalAmount += withdrawAmount;

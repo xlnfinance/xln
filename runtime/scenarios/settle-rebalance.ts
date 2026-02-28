@@ -13,7 +13,7 @@
  *   Phase 8: Final verification (nonces, workspaces, collateral)
  *
  * Rebalance trigger invariant:
- * - Trigger request_collateral only when deriveDelta(...).outPeerCredit > softLimit.
+ * - Trigger request_collateral only when deriveDelta(...).outPeerCredit > r2cRequestSoftLimit.
  * - Never trigger from (outCollateral + outPeerCredit), otherwise post-topup spam appears.
  */
 
@@ -364,7 +364,7 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
       entityTxs: [{
         type: 'setRebalancePolicy', data: {
           counterpartyEntityId: hub.id, tokenId: USDC,
-          softLimit: usd(1_000), hardLimit: usd(20_000), maxAcceptableFee: usd(100),
+          r2cRequestSoftLimit: usd(1_000), hardLimit: usd(20_000), maxAcceptableFee: usd(100),
         }
       }]
     }]);
