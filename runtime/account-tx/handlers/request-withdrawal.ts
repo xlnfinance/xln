@@ -5,7 +5,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
-// deriveDelta used for withdrawable calculation
+import { deriveDelta } from '../../account-utils';
 
 export function handleRequestWithdrawal(
   accountMachine: AccountMachine,
@@ -20,16 +20,18 @@ export function handleRequestWithdrawal(
     return { success: false, error: `No delta for token ${tokenId}`, events };
   }
 
-  // CRITICAL: Calculate withdrawable amount (2019src.txt line 945)
-  // withdrawable = collateral - abs(offdelta) [uninsured balance]
-  const totalDelta = delta.ondelta + delta.offdelta;
-  const uninsuredBalance = totalDelta > 0n ? totalDelta : -totalDelta;
-  const withdrawable = delta.collateral > uninsuredBalance ? delta.collateral - uninsuredBalance : 0n;
+  // Canonical capacity view: signer of this tx withdraws from its out-collateral side.
+  const signerDerived = deriveDelta(delta, byLeft);
+  const outHold = signerDerived.outTotalHold || 0n;
+  const withdrawable =
+    signerDerived.outCollateral > outHold
+      ? signerDerived.outCollateral - outHold
+      : 0n;
 
   if (amount > withdrawable) {
     return {
       success: false,
-      error: `Insufficient withdrawable: ${amount} > ${withdrawable} (collateral ${delta.collateral}, uninsured ${uninsuredBalance})`,
+      error: `Insufficient withdrawable: ${amount} > ${withdrawable} (outCollateral ${signerDerived.outCollateral}, outHold ${outHold})`,
       events
     };
   }

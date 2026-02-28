@@ -138,6 +138,28 @@ const hasActiveDisputeHash = (hash: unknown): boolean => {
   return normalized !== '' && normalized !== '0x' && normalized !== '0x0' && normalized !== ZERO_HASH_32;
 };
 
+function hasQueuedDisputeStart(state: EntityState, counterpartyEntityId: string): boolean {
+  const target = String(counterpartyEntityId || '').toLowerCase();
+  if (!target) return false;
+  const draft = state.jBatchState?.batch?.disputeStarts || [];
+  const sent = state.jBatchState?.sentBatch?.batch?.disputeStarts || [];
+  return (
+    draft.some((op) => String(op?.counterentity || '').toLowerCase() === target) ||
+    sent.some((op) => String(op?.counterentity || '').toLowerCase() === target)
+  );
+}
+
+function hasQueuedDisputeFinalize(state: EntityState, counterpartyEntityId: string): boolean {
+  const target = String(counterpartyEntityId || '').toLowerCase();
+  if (!target) return false;
+  const draft = state.jBatchState?.batch?.disputeFinalizations || [];
+  const sent = state.jBatchState?.sentBatch?.batch?.disputeFinalizations || [];
+  return (
+    draft.some((op) => String(op?.counterentity || '').toLowerCase() === target) ||
+    sent.some((op) => String(op?.counterentity || '').toLowerCase() === target)
+  );
+}
+
 /**
  * Handle disputeStart - Entity initiates dispute with signed proof
  */
@@ -175,6 +197,13 @@ export async function handleDisputeStart(
 
   if ((account.status ?? 'active') !== 'active') {
     addMessage(newState, `❌ Account with ${counterpartyEntityId.slice(-4)} is disputed - reopen required`);
+    return { newState, outputs };
+  }
+  if (hasQueuedDisputeStart(newState, counterpartyEntityId)) {
+    addMessage(
+      newState,
+      `ℹ️ disputeStart already queued for ${counterpartyEntityId.slice(-4)} (awaiting batch lifecycle)`,
+    );
     return { newState, outputs };
   }
 
@@ -407,6 +436,14 @@ export async function handleDisputeFinalize(
     addMessage(
       newState,
       `ℹ️ disputeFinalize already queued for ${counterpartyEntityId.slice(-4)} (awaiting batch lifecycle)`,
+    );
+    return { newState, outputs };
+  }
+  if (hasQueuedDisputeFinalize(newState, counterpartyEntityId)) {
+    account.activeDispute.finalizeQueued = true;
+    addMessage(
+      newState,
+      `ℹ️ disputeFinalize already present in batch lifecycle for ${counterpartyEntityId.slice(-4)}`,
     );
     return { newState, outputs };
   }

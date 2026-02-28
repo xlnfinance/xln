@@ -233,6 +233,7 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
   // Group expired locks by type for batch processing
   const htlcTimeoutLocks: Array<{ accountId: string; lockId: string }> = [];
   const disputeFinalizeCounterparties = new Set<string>();
+  let shouldBroadcastQueuedDisputeFinalizations = false;
 
   let currentJBlock = Number(replica.state.lastFinalizedJHeight || 0);
   try {
@@ -343,8 +344,43 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
             }
           }
 
-          if (account.activeDispute.finalizeQueued || replica.state.jBatchState?.sentBatch) {
+          const accountIdNorm = accountId.toLowerCase();
+          const draftFinalizations = replica.state.jBatchState?.batch?.disputeFinalizations || [];
+          const sentFinalizations = replica.state.jBatchState?.sentBatch?.batch?.disputeFinalizations || [];
+          const draftHasFinalize = draftFinalizations.some(
+            (entry) => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
+          );
+          const sentHasFinalize = sentFinalizations.some(
+            (entry) => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
+          );
+
+          if (sentHasFinalize || replica.state.jBatchState?.sentBatch) {
+            account.activeDispute.finalizeQueued = sentHasFinalize || account.activeDispute.finalizeQueued;
+            const retryMs = 1000;
+            if (replica.state.crontabState) {
+              scheduleHook(replica.state.crontabState, {
+                id: hook.id,
+                triggerAt: replica.state.timestamp + retryMs,
+                type: 'dispute_deadline',
+                data: { accountId },
+              });
+            }
+            console.log(
+              `⏰ HOOK: dispute_deadline deferred for ${accountId.slice(-4)} ` +
+              `(sentBatch pending, retryMs=${retryMs})`,
+            );
             break;
+          }
+
+          if (draftHasFinalize) {
+            account.activeDispute.finalizeQueued = true;
+            shouldBroadcastQueuedDisputeFinalizations = true;
+            break;
+          }
+
+          if (account.activeDispute.finalizeQueued) {
+            // Recover from stale local latch (e.g. after abort/drop of previous finalize batch).
+            account.activeDispute.finalizeQueued = false;
           }
 
           disputeFinalizeCounterparties.add(accountId);
@@ -412,6 +448,16 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
     console.log(
       `⏰ HOOKS: auto disputeFinalize+j_broadcast queued for ${disputeFinalizeCounterparties.size} account(s)`,
     );
+  } else if (shouldBroadcastQueuedDisputeFinalizations) {
+    const inputHasManualBroadcast = Boolean(replica.state.crontabState?.inputHasManualBroadcast);
+    if (!inputHasManualBroadcast) {
+      outputs.push({
+        entityId: replica.entityId,
+        signerId: firstValidator,
+        entityTxs: [{ type: 'j_broadcast', data: {} }],
+      });
+      console.log('⏰ HOOKS: auto j_broadcast queued for already-drafted disputeFinalize');
+    }
   }
 
   return outputs;

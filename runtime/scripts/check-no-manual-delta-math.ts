@@ -24,6 +24,8 @@ const SCAN_ROOTS = [
   'tests',
   'runtime/scenarios',
   'frontend/src/lib/components/Entity',
+  'runtime/account-tx/handlers/request-withdrawal.ts',
+  'runtime/account-tx/handlers/settle-hold.ts',
 ];
 
 const EXCLUDE_PATH_PARTS = [
@@ -54,11 +56,15 @@ function isCodeFile(rel: string): boolean {
   return /\.(ts|tsx|js|jsx|svelte)$/.test(rel) && !rel.endsWith('.d.ts');
 }
 
-async function walk(absDir: string): Promise<string[]> {
-  const entries = await fs.readdir(absDir, { withFileTypes: true });
+async function walk(absPath: string): Promise<string[]> {
+  const stat = await fs.stat(absPath);
+  if (stat.isFile()) {
+    return [absPath];
+  }
+  const entries = await fs.readdir(absPath, { withFileTypes: true });
   const out: string[] = [];
   for (const entry of entries) {
-    const abs = path.join(absDir, entry.name);
+    const abs = path.join(absPath, entry.name);
     if (entry.isDirectory()) {
       out.push(...await walk(abs));
       continue;
@@ -127,4 +133,3 @@ main().catch((err) => {
   console.error('❌ check-no-manual-delta-math failed:', err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
-
