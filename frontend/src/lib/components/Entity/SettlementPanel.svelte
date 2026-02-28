@@ -15,6 +15,13 @@
 
   type Action = 'fund' | 'withdraw' | 'transfer' | 'dispute' | 'history';
   type GasPreset = 'standard' | 'fast' | 'urgent' | 'custom';
+  type BatchDetailField = { label: string; value: string };
+  type BatchDetailOp = {
+    key: string;
+    operation: string;
+    entities: string[];
+    details: BatchDetailField[];
+  };
 
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
   const contextReplicas = entityEnv?.eReplicas;
@@ -84,6 +91,292 @@
     if (!id) return '';
     if (id.length < 22) return id;
     return `${id.slice(0, 10)}...${id.slice(-6)}`;
+  }
+
+  function shortHex(hex: unknown, head = 10, tail = 6): string {
+    const value = String(hex || '');
+    if (!value) return '—';
+    if (value.length <= head + tail + 3) return value;
+    return `${value.slice(0, head)}...${value.slice(-tail)}`;
+  }
+
+  function toBigInt(value: unknown): bigint {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number') return BigInt(Math.trunc(value));
+    if (typeof value === 'string' && value.trim()) {
+      try {
+        return BigInt(value);
+      } catch {
+        return 0n;
+      }
+    }
+    return 0n;
+  }
+
+  function tokenLabel(token: unknown): string {
+    const tokenIdNum = Number(token || 0);
+    if (!Number.isFinite(tokenIdNum) || tokenIdNum <= 0) return `Token #${String(token || 0)}`;
+    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(tokenIdNum);
+    return tokenInfo?.symbol ? `${tokenInfo.symbol} (#${tokenIdNum})` : `Token #${tokenIdNum}`;
+  }
+
+  function tokenAmountLabel(token: unknown, amount: unknown): string {
+    const tokenIdNum = Number(token || 0);
+    const amountBig = toBigInt(amount);
+    if (tokenIdNum > 0 && activeXlnFunctions?.formatTokenAmount) {
+      return activeXlnFunctions.formatTokenAmount(tokenIdNum, amountBig);
+    }
+    return `${amountBig.toString()} ${tokenLabel(token)}`;
+  }
+
+  function entityName(entity: string): string {
+    const canonical = String(entity || '').trim();
+    if (!canonical) return 'Unknown';
+    const normalized = normalizeEntityId(canonical);
+    if (normalized === normalizeEntityId(entityId)) return 'You';
+    for (const contact of contacts || []) {
+      if (normalizeEntityId(contact.entityId) === normalized && String(contact.name || '').trim()) {
+        return String(contact.name).trim();
+      }
+    }
+    const profiles = activeEnv?.gossip?.getProfiles?.() || [];
+    for (const profile of profiles) {
+      if (normalizeEntityId((profile as any)?.entityId) !== normalized) continue;
+      const metadataName = String((profile as any)?.metadata?.name || '').trim();
+      if (metadataName) return metadataName;
+    }
+    const fallback = activeXlnFunctions?.formatEntityId?.(canonical);
+    return String(fallback || formatShortId(canonical));
+  }
+
+  function entityAvatar(entity: string): string {
+    const canonical = String(entity || '').trim();
+    if (!canonical) return '';
+    return activeXlnFunctions?.generateEntityAvatar?.(canonical) || '';
+  }
+
+  function uniqueEntities(values: Array<unknown>): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of values) {
+      const value = String(raw || '').trim();
+      const normalized = normalizeEntityId(value);
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push(value);
+    }
+    return out;
+  }
+
+  function makeBatchDetailOp(
+    key: string,
+    operation: string,
+    entities: Array<unknown>,
+    details: Array<BatchDetailField | null | undefined>,
+  ): BatchDetailOp {
+    return {
+      key,
+      operation,
+      entities: uniqueEntities(entities),
+      details: details.filter(Boolean) as BatchDetailField[],
+    };
+  }
+
+  function buildBatchDetailOps(batch: any): BatchDetailOp[] {
+    if (!batch || typeof batch !== 'object') return [];
+    const ops: BatchDetailOp[] = [];
+
+    for (const [index, op] of (Array.isArray(batch.reserveToCollateral) ? batch.reserveToCollateral : []).entries()) {
+      const token = Number(op?.tokenId || 0);
+      const pairs = Array.isArray(op?.pairs) ? op.pairs : [];
+      if (pairs.length === 0) {
+        ops.push(
+          makeBatchDetailOp(
+            `reserveToCollateral-${index}-empty`,
+            'ReserveToCollateral',
+            [op?.receivingEntity],
+            [
+              { label: 'Token', value: tokenLabel(token) },
+              { label: 'Receiving Entity', value: entityName(String(op?.receivingEntity || '')) },
+              { label: 'Pairs', value: 'None' },
+            ],
+          ),
+        );
+      } else {
+        for (const [pairIndex, pair] of pairs.entries()) {
+          ops.push(
+            makeBatchDetailOp(
+              `reserveToCollateral-${index}-${pairIndex}`,
+              'ReserveToCollateral',
+              [op?.receivingEntity, pair?.entity],
+              [
+                { label: 'Token', value: tokenLabel(token) },
+                { label: 'Amount', value: tokenAmountLabel(token, pair?.amount) },
+                { label: 'Receiving Entity', value: entityName(String(op?.receivingEntity || '')) },
+                { label: 'Counterparty', value: entityName(String(pair?.entity || '')) },
+              ],
+            ),
+          );
+        }
+      }
+    }
+
+    for (const [index, op] of (Array.isArray(batch.collateralToReserve) ? batch.collateralToReserve : []).entries()) {
+      const token = Number(op?.tokenId || 0);
+      ops.push(
+        makeBatchDetailOp(
+          `collateralToReserve-${index}`,
+          'CollateralToReserve',
+          [entityId, op?.counterparty],
+          [
+            { label: 'Token', value: tokenLabel(token) },
+            { label: 'Amount', value: tokenAmountLabel(token, op?.amount) },
+            { label: 'Counterparty', value: entityName(String(op?.counterparty || '')) },
+            { label: 'Nonce', value: String(Number(op?.nonce || 0)) },
+            { label: 'Signature', value: shortHex(op?.sig) },
+          ],
+        ),
+      );
+    }
+
+    for (const [index, op] of (Array.isArray(batch.reserveToReserve) ? batch.reserveToReserve : []).entries()) {
+      const token = Number(op?.tokenId || 0);
+      ops.push(
+        makeBatchDetailOp(
+          `reserveToReserve-${index}`,
+          'ReserveToReserve',
+          [entityId, op?.receivingEntity],
+          [
+            { label: 'Token', value: tokenLabel(token) },
+            { label: 'Amount', value: tokenAmountLabel(token, op?.amount) },
+            { label: 'Receiving Entity', value: entityName(String(op?.receivingEntity || '')) },
+          ],
+        ),
+      );
+    }
+
+    for (const [index, op] of (Array.isArray(batch.settlements) ? batch.settlements : []).entries()) {
+      const diffs = Array.isArray(op?.diffs) ? op.diffs : [];
+      const diffSummary = diffs
+        .map((diff: any) => {
+          const token = Number(diff?.tokenId || 0);
+          const left = toBigInt(diff?.leftDiff);
+          const right = toBigInt(diff?.rightDiff);
+          const collateral = toBigInt(diff?.collateralDiff);
+          const ondelta = toBigInt(diff?.ondeltaDiff);
+          return `${tokenLabel(token)} left=${left} right=${right} collateral=${collateral} ondelta=${ondelta}`;
+        })
+        .join(' | ');
+      ops.push(
+        makeBatchDetailOp(
+          `settlements-${index}`,
+          'Settlement',
+          [op?.leftEntity, op?.rightEntity],
+          [
+            { label: 'Left Entity', value: entityName(String(op?.leftEntity || '')) },
+            { label: 'Right Entity', value: entityName(String(op?.rightEntity || '')) },
+            { label: 'Diffs', value: diffSummary || 'None' },
+            { label: 'Nonce', value: String(Number(op?.nonce || 0)) },
+            { label: 'Signature', value: shortHex(op?.sig) },
+          ],
+        ),
+      );
+    }
+
+    for (const [index, op] of (Array.isArray(batch.disputeStarts) ? batch.disputeStarts : []).entries()) {
+      ops.push(
+        makeBatchDetailOp(
+          `disputeStarts-${index}`,
+          'DisputeStart',
+          [entityId, op?.counterentity],
+          [
+            { label: 'Counterparty', value: entityName(String(op?.counterentity || '')) },
+            { label: 'Nonce', value: String(Number(op?.nonce || 0)) },
+            { label: 'Proof Body Hash', value: shortHex(op?.proofbodyHash) },
+            { label: 'Initial Arguments', value: shortHex(op?.initialArguments) },
+          ],
+        ),
+      );
+    }
+
+    for (const [index, op] of (Array.isArray(batch.disputeFinalizations) ? batch.disputeFinalizations : []).entries()) {
+      ops.push(
+        makeBatchDetailOp(
+          `disputeFinalizations-${index}`,
+          'DisputeFinalize',
+          [entityId, op?.counterentity],
+          [
+            { label: 'Counterparty', value: entityName(String(op?.counterentity || '')) },
+            { label: 'Initial Nonce', value: String(Number(op?.initialNonce || 0)) },
+            { label: 'Final Nonce', value: String(Number(op?.finalNonce || 0)) },
+            { label: 'Dispute Until Block', value: String(Number(op?.disputeUntilBlock || 0)) },
+            { label: 'Initial Proof Hash', value: shortHex(op?.initialProofbodyHash) },
+            { label: 'Cooperative', value: op?.cooperative ? 'Yes' : 'No' },
+          ],
+        ),
+      );
+    }
+
+    for (const [index, op] of (Array.isArray(batch.externalTokenToReserve) ? batch.externalTokenToReserve : []).entries()) {
+      ops.push(
+        makeBatchDetailOp(
+          `externalTokenToReserve-${index}`,
+          'ExternalTokenToReserve',
+          [op?.entity],
+          [
+            { label: 'Entity', value: entityName(String(op?.entity || '')) },
+            { label: 'Contract', value: shortHex(op?.contractAddress) },
+            { label: 'Internal Token', value: tokenLabel(op?.internalTokenId) },
+            { label: 'Amount', value: tokenAmountLabel(op?.internalTokenId, op?.amount) },
+          ],
+        ),
+      );
+    }
+
+    for (const [index, op] of (Array.isArray(batch.reserveToExternalToken) ? batch.reserveToExternalToken : []).entries()) {
+      ops.push(
+        makeBatchDetailOp(
+          `reserveToExternalToken-${index}`,
+          'ReserveToExternalToken',
+          [entityId, op?.receivingEntity],
+          [
+            { label: 'Receiving Entity', value: entityName(String(op?.receivingEntity || '')) },
+            { label: 'Token', value: tokenLabel(op?.tokenId) },
+            { label: 'Amount', value: tokenAmountLabel(op?.tokenId, op?.amount) },
+          ],
+        ),
+      );
+    }
+
+    for (const [index, op] of (Array.isArray(batch.revealSecrets) ? batch.revealSecrets : []).entries()) {
+      ops.push(
+        makeBatchDetailOp(
+          `revealSecrets-${index}`,
+          'RevealSecret',
+          [],
+          [
+            { label: 'Transformer', value: shortHex(op?.transformer) },
+            { label: 'Secret', value: shortHex(op?.secret) },
+          ],
+        ),
+      );
+    }
+
+    for (const [index, op] of (Array.isArray(batch.flashloans) ? batch.flashloans : []).entries()) {
+      ops.push(
+        makeBatchDetailOp(
+          `flashloans-${index}`,
+          'Flashloan',
+          [entityId],
+          [
+            { label: 'Token', value: tokenLabel(op?.tokenId) },
+            { label: 'Amount', value: tokenAmountLabel(op?.tokenId, op?.amount) },
+          ],
+        ),
+      );
+    }
+
+    return ops;
   }
 
   function formatWeiToGwei(wei: bigint): string {
@@ -203,6 +496,7 @@
   function countBatchOps(batch: any): number {
     if (!batch) return 0;
     return (
+      (batch.flashloans?.length || 0) +
       (batch.reserveToCollateral?.length || 0) +
       (batch.collateralToReserve?.length || 0) +
       (batch.settlements?.length || 0) +
@@ -217,15 +511,16 @@
 
   function batchSummary(batch: any): Array<{ label: string; count: number }> {
     return [
-      { label: 'R2C', count: Number(batch?.reserveToCollateral?.length || 0) },
-      { label: 'C2R', count: Number(batch?.collateralToReserve?.length || 0) },
-      { label: 'Settle', count: Number(batch?.settlements?.length || 0) },
-      { label: 'R2R', count: Number(batch?.reserveToReserve?.length || 0) },
-      { label: 'Dispute Start', count: Number(batch?.disputeStarts?.length || 0) },
-      { label: 'Dispute Finalize', count: Number(batch?.disputeFinalizations?.length || 0) },
-      { label: 'Ext→Reserve', count: Number(batch?.externalTokenToReserve?.length || 0) },
-      { label: 'Reserve→Ext', count: Number(batch?.reserveToExternalToken?.length || 0) },
-      { label: 'Reveal', count: Number(batch?.revealSecrets?.length || 0) },
+      { label: 'Flashloan', count: Number(batch?.flashloans?.length || 0) },
+      { label: 'ReserveToCollateral', count: Number(batch?.reserveToCollateral?.length || 0) },
+      { label: 'CollateralToReserve', count: Number(batch?.collateralToReserve?.length || 0) },
+      { label: 'Settlement', count: Number(batch?.settlements?.length || 0) },
+      { label: 'ReserveToReserve', count: Number(batch?.reserveToReserve?.length || 0) },
+      { label: 'DisputeStart', count: Number(batch?.disputeStarts?.length || 0) },
+      { label: 'DisputeFinalize', count: Number(batch?.disputeFinalizations?.length || 0) },
+      { label: 'ExternalTokenToReserve', count: Number(batch?.externalTokenToReserve?.length || 0) },
+      { label: 'ReserveToExternalToken', count: Number(batch?.reserveToExternalToken?.length || 0) },
+      { label: 'RevealSecret', count: Number(batch?.revealSecrets?.length || 0) },
     ].filter((entry) => entry.count > 0);
   }
 
@@ -240,25 +535,33 @@
   $: canBroadcastDraft = hasDraftBatch && !hasSentBatch;
   $: pendingSummary = batchSummary(jBatch);
   $: sentSummary = batchSummary(sentBatch?.batch);
+  $: draftDetailOps = buildBatchDetailOps(jBatch);
+  $: sentDetailOps = buildBatchDetailOps(sentBatch?.batch);
   $: batchHistory = (() => {
     const history = (replica?.state as any)?.batchHistory;
     if (!Array.isArray(history)) return [];
     return [...history].reverse();
   })();
+  $: batchHistoryRows = batchHistory.map((entry: any, index: number) => ({
+    entry,
+    details: buildBatchDetailOps(entry?.batch),
+    key: String(entry?.txHash || `${entry?.batchHash || 'batch'}-${index}`),
+  }));
 
   function historySummary(entry: any): Array<{ label: string; count: number }> {
     const operations = entry?.operations;
     if (operations && typeof operations === 'object') {
       return [
-        { label: 'R2C', count: Number(operations.reserveToCollateral || 0) },
-        { label: 'C2R', count: Number(operations.collateralToReserve || 0) },
-        { label: 'Settle', count: Number(operations.settlements || 0) },
-        { label: 'R2R', count: Number(operations.reserveToReserve || 0) },
-        { label: 'Dispute Start', count: Number(operations.disputeStarts || 0) },
-        { label: 'Dispute Finalize', count: Number(operations.disputeFinalizations || 0) },
-        { label: 'Ext→Reserve', count: Number(operations.externalTokenToReserve || 0) },
-        { label: 'Reserve→Ext', count: Number(operations.reserveToExternalToken || 0) },
-        { label: 'Reveal', count: Number(operations.revealSecrets || 0) },
+        { label: 'Flashloan', count: Number(operations.flashloans || 0) },
+        { label: 'ReserveToCollateral', count: Number(operations.reserveToCollateral || 0) },
+        { label: 'CollateralToReserve', count: Number(operations.collateralToReserve || 0) },
+        { label: 'Settlement', count: Number(operations.settlements || 0) },
+        { label: 'ReserveToReserve', count: Number(operations.reserveToReserve || 0) },
+        { label: 'DisputeStart', count: Number(operations.disputeStarts || 0) },
+        { label: 'DisputeFinalize', count: Number(operations.disputeFinalizations || 0) },
+        { label: 'ExternalTokenToReserve', count: Number(operations.externalTokenToReserve || 0) },
+        { label: 'ReserveToExternalToken', count: Number(operations.reserveToExternalToken || 0) },
+        { label: 'RevealSecret', count: Number(operations.revealSecrets || 0) },
       ].filter((entry) => entry.count > 0);
     }
     const fallback = Number(entry?.opCount || 0);
@@ -575,6 +878,44 @@
             {/each}
           </div>
         {/if}
+        {#if sentDetailOps.length > 0}
+          <div class="batch-ops-grid">
+            {#each sentDetailOps as op (op.key)}
+              <article class="batch-op-card">
+                <div class="batch-op-title">{op.operation}</div>
+                {#if op.entities.length > 0}
+                  <div class="batch-op-entities">
+                    {#each op.entities as opEntityId}
+                      {@const identity = {
+                        id: String(opEntityId || ''),
+                        short: formatShortId(String(opEntityId || '')),
+                        name: entityName(String(opEntityId || '')),
+                        avatarUrl: entityAvatar(String(opEntityId || '')),
+                      }}
+                      <div class="entity-chip" title={identity.id}>
+                        {#if identity.avatarUrl}
+                          <img class="entity-chip-avatar" src={identity.avatarUrl} alt="" />
+                        {:else}
+                          <span class="entity-chip-avatar placeholder">{identity.name.slice(0, 1).toUpperCase()}</span>
+                        {/if}
+                        <span class="entity-chip-name">{identity.name}</span>
+                        <code class="entity-chip-id">{identity.short}</code>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+                <div class="batch-op-details">
+                  {#each op.details as field}
+                    <div class="batch-op-field">
+                      <span class="batch-op-field-label">{field.label}</span>
+                      <span class="batch-op-field-value">{field.value}</span>
+                    </div>
+                  {/each}
+                </div>
+              </article>
+            {/each}
+          </div>
+        {/if}
       </div>
     {/if}
 
@@ -586,48 +927,44 @@
           <span class="summary-chip">{item.label}: {item.count}</span>
         {/each}
       </div>
-      <div class="batch-preview">
-        {#if jBatch.disputeStarts?.length > 0}
-          <div class="preview-group">
-            <span class="preview-label">Dispute Starts</span>
-            {#each jBatch.disputeStarts as start}
-              <div class="preview-item">⚔ {formatShortId(start.counterentity)}</div>
-            {/each}
-          </div>
-        {/if}
-        {#if jBatch.disputeFinalizations?.length > 0}
-          <div class="preview-group">
-            <span class="preview-label">Dispute Finalizations</span>
-            {#each jBatch.disputeFinalizations as fin}
-              <div class="preview-item">⚖ {formatShortId(fin.counterentity)}</div>
-            {/each}
-          </div>
-        {/if}
-        {#if jBatch.reserveToCollateral?.length > 0}
-          <div class="preview-group">
-            <span class="preview-label">R2C Deposits</span>
-            {#each jBatch.reserveToCollateral as r2c}
-              <div class="preview-item">↓ {formatShortId(r2c.receivingEntity)}</div>
-            {/each}
-          </div>
-        {/if}
-        {#if jBatch.collateralToReserve?.length > 0}
-          <div class="preview-group">
-            <span class="preview-label">C2R Withdrawals</span>
-            {#each jBatch.collateralToReserve as c2r}
-              <div class="preview-item">↑ {formatShortId(c2r.counterparty)}</div>
-            {/each}
-          </div>
-        {/if}
-        {#if jBatch.reserveToReserve?.length > 0}
-          <div class="preview-group">
-            <span class="preview-label">R2R Transfers</span>
-            {#each jBatch.reserveToReserve as r2r}
-              <div class="preview-item">→ {formatShortId(r2r.receivingEntity)}: {r2r.amount.toString()}</div>
-            {/each}
-          </div>
-        {/if}
-      </div>
+      {#if draftDetailOps.length > 0}
+        <div class="batch-ops-grid">
+          {#each draftDetailOps as op (op.key)}
+            <article class="batch-op-card">
+              <div class="batch-op-title">{op.operation}</div>
+              {#if op.entities.length > 0}
+                <div class="batch-op-entities">
+                  {#each op.entities as opEntityId}
+                    {@const identity = {
+                      id: String(opEntityId || ''),
+                      short: formatShortId(String(opEntityId || '')),
+                      name: entityName(String(opEntityId || '')),
+                      avatarUrl: entityAvatar(String(opEntityId || '')),
+                    }}
+                    <div class="entity-chip" title={identity.id}>
+                      {#if identity.avatarUrl}
+                        <img class="entity-chip-avatar" src={identity.avatarUrl} alt="" />
+                      {:else}
+                        <span class="entity-chip-avatar placeholder">{identity.name.slice(0, 1).toUpperCase()}</span>
+                      {/if}
+                      <span class="entity-chip-name">{identity.name}</span>
+                      <code class="entity-chip-id">{identity.short}</code>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+              <div class="batch-op-details">
+                {#each op.details as field}
+                  <div class="batch-op-field">
+                    <span class="batch-op-field-label">{field.label}</span>
+                    <span class="batch-op-field-value">{field.value}</span>
+                  </div>
+                {/each}
+              </div>
+            </article>
+          {/each}
+        </div>
+      {/if}
     {:else}
       <div class="batch-empty">
         {#if hasSentBatch}
@@ -722,7 +1059,8 @@
         <div class="batch-empty">No finalized batches yet.</div>
       {:else}
         <div class="history-list">
-          {#each batchHistory as entry, index (entry.txHash || `${entry.batchHash}-${index}`)}
+          {#each batchHistoryRows as row, index (row.key)}
+            {@const entry = row.entry}
             <details class="history-item" data-testid="settle-history-item" open={index === 0}>
               <summary>
                 <span class="history-status {entry.status === 'failed' ? 'failed' : 'confirmed'}">
@@ -750,7 +1088,44 @@
                 {#if entry.note}
                   <div class="history-note">{entry.note}</div>
                 {/if}
-                {#if historySummary(entry).length > 0}
+                {#if row.details.length > 0}
+                  <div class="batch-ops-grid history-ops-grid">
+                    {#each row.details as op (op.key)}
+                      <article class="batch-op-card history-op-card">
+                        <div class="batch-op-title">{op.operation}</div>
+                        {#if op.entities.length > 0}
+                          <div class="batch-op-entities">
+                            {#each op.entities as opEntityId}
+                              {@const identity = {
+                                id: String(opEntityId || ''),
+                                short: formatShortId(String(opEntityId || '')),
+                                name: entityName(String(opEntityId || '')),
+                                avatarUrl: entityAvatar(String(opEntityId || '')),
+                              }}
+                              <div class="entity-chip" title={identity.id}>
+                                {#if identity.avatarUrl}
+                                  <img class="entity-chip-avatar" src={identity.avatarUrl} alt="" />
+                                {:else}
+                                  <span class="entity-chip-avatar placeholder">{identity.name.slice(0, 1).toUpperCase()}</span>
+                                {/if}
+                                <span class="entity-chip-name">{identity.name}</span>
+                                <code class="entity-chip-id">{identity.short}</code>
+                              </div>
+                            {/each}
+                          </div>
+                        {/if}
+                        <div class="batch-op-details">
+                          {#each op.details as field}
+                            <div class="batch-op-field">
+                              <span class="batch-op-field-label">{field.label}</span>
+                              <span class="batch-op-field-value">{field.value}</span>
+                            </div>
+                          {/each}
+                        </div>
+                      </article>
+                    {/each}
+                  </div>
+                {:else if historySummary(entry).length > 0}
                   <div class="batch-summary">
                     {#each historySummary(entry) as item}
                       <span class="summary-chip">{item.label}: {item.count}</span>
@@ -952,12 +1327,123 @@
 
   .summary-chip {
     border-radius: 999px;
-    padding: 3px 8px;
+    padding: 4px 10px;
     font-size: 10px;
     font-weight: 600;
     color: #e7e5e4;
-    background: #1c1917;
+    background: #111111;
     border: 1px solid #292524;
+    letter-spacing: 0.02em;
+  }
+
+  .batch-ops-grid {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+  }
+
+  .batch-op-card {
+    border: 1px solid #302d2a;
+    background: linear-gradient(180deg, #141414 0%, #101010 100%);
+    border-radius: 10px;
+    padding: 10px;
+  }
+
+  .batch-op-title {
+    color: #f3f4f6;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .batch-op-entities {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .entity-chip {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid #2f2f2f;
+    border-radius: 8px;
+    background: #0d0d0d;
+    padding: 5px 7px;
+  }
+
+  .entity-chip-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    border: 1px solid #3f3f46;
+    object-fit: cover;
+  }
+
+  .entity-chip-avatar.placeholder {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #d6d3d1;
+    font-size: 11px;
+    font-weight: 700;
+    background: #1f1f22;
+  }
+
+  .entity-chip-name {
+    min-width: 0;
+    color: #e7e5e4;
+    font-size: 11px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .entity-chip-id {
+    color: #9ca3af;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .batch-op-details {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .batch-op-field {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr);
+    gap: 8px;
+    align-items: baseline;
+  }
+
+  .batch-op-field-label {
+    color: #a1a1aa;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .batch-op-field-value {
+    color: #f5f5f5;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    word-break: break-word;
+  }
+
+  .history-ops-grid {
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  }
+
+  .history-op-card {
+    background: #111111;
+    border-color: #2e2e2e;
   }
 
   .batch-preview {

@@ -1093,6 +1093,25 @@ async function applyFinalizedJEvent(
           opCount: 1,
           entityNonce: Number(nonce || 0),
           jBlockNumber: Number(blockNumber || 0),
+          batch: {
+            flashloans: [],
+            reserveToReserve: [],
+            reserveToCollateral: [],
+            collateralToReserve: [],
+            settlements: [],
+            disputeStarts: [{
+              counterentity: counterpartyId,
+              nonce: Number(nonce || 0),
+              proofbodyHash: String(proofbodyHash || '0x'),
+              sig: '0x',
+              initialArguments: String(event.data.initialArguments || '0x'),
+            }],
+            disputeFinalizations: [],
+            externalTokenToReserve: [],
+            reserveToExternalToken: [],
+            revealSecrets: [],
+            hub_id: 0,
+          },
           operations: ops,
           source: 'counterparty-event' as const,
           eventType: 'DisputeStarted' as const,
@@ -1190,6 +1209,35 @@ async function applyFinalizedJEvent(
           opCount: 1,
           entityNonce: Number(initialNonce || 0),
           jBlockNumber: Number(blockNumber || 0),
+          batch: {
+            flashloans: [],
+            reserveToReserve: [],
+            reserveToCollateral: [],
+            collateralToReserve: [],
+            settlements: [],
+            disputeStarts: [],
+            disputeFinalizations: [{
+              counterentity: counterpartyId,
+              initialNonce: Number(initialNonce || 0),
+              finalNonce: Number(initialNonce || 0),
+              initialProofbodyHash: String(initialProofbodyHash || '0x'),
+              finalProofbody: {
+                offdeltas: [],
+                tokenIds: [],
+                transformers: [],
+              },
+              finalArguments: '0x',
+              initialArguments: '0x',
+              sig: '0x',
+              startedByLeft: false,
+              disputeUntilBlock: Number(blockNumber || 0),
+              cooperative: false,
+            }],
+            externalTokenToReserve: [],
+            reserveToExternalToken: [],
+            revealSecrets: [],
+            hub_id: 0,
+          },
           operations: ops,
           source: 'counterparty-event' as const,
           eventType: 'DisputeFinalized' as const,
@@ -1267,7 +1315,7 @@ async function applyFinalizedJEvent(
 
     if (success) {
       if (newState.jBatchState) {
-        const { batchOpCount: countOps, batchOpBreakdown, isBatchEmpty } = await import('../j-batch');
+        const { batchOpCount: countOps, batchOpBreakdown, isBatchEmpty, cloneJBatch } = await import('../j-batch');
         const sentBatch = newState.jBatchState.sentBatch;
         const opCount = sentBatch ? countOps(sentBatch.batch) : 0;
         const opBreakdown = sentBatch ? batchOpBreakdown(sentBatch.batch) : undefined;
@@ -1295,6 +1343,7 @@ async function applyFinalizedJEvent(
           opCount,
           entityNonce: Number(nonce),
           jBlockNumber: Number(blockNumber || 0),
+          batch: sentBatch?.batch ? cloneJBatch(sentBatch.batch) : undefined,
           operations: opBreakdown,
           source: 'self-batch' as const,
         });
@@ -1313,7 +1362,7 @@ async function applyFinalizedJEvent(
     } else {
       // Batch failed — update status, keep batch for retry
       if (newState.jBatchState) {
-        const { batchOpCount: countOps, batchOpBreakdown, isBatchEmpty, mergeBatchOps } = await import('../j-batch');
+        const { batchOpCount: countOps, batchOpBreakdown, isBatchEmpty, mergeBatchOps, cloneJBatch } = await import('../j-batch');
         const sentBatch = newState.jBatchState.sentBatch;
         const opCount = sentBatch ? countOps(sentBatch.batch) : 0;
         const opBreakdown = sentBatch ? batchOpBreakdown(sentBatch.batch) : undefined;
@@ -1333,6 +1382,7 @@ async function applyFinalizedJEvent(
           opCount,
           entityNonce: Number(nonce),
           jBlockNumber: Number(blockNumber || 0),
+          batch: sentBatch?.batch ? cloneJBatch(sentBatch.batch) : undefined,
           operations: opBreakdown,
           source: 'self-batch' as const,
         });
