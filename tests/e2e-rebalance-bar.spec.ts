@@ -1,10 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet, ethers } from 'ethers';
+import { timedStep } from './utils/e2e-timing';
 
 /**
  * REBALANCE INVARIANT (do not "simplify" this in future edits):
  *
- * Auto request_collateral MUST trigger ONLY from deriveDelta(...).outPeerCredit > softLimit.
+ * Auto request_collateral MUST trigger ONLY from deriveDelta(...).outPeerCredit > r2cRequestSoftLimit.
  * - outPeerCredit = currently used peer credit (actual risk surface).
  * - outCollateral = already posted collateral; it must NOT be added to trigger metric.
  *
@@ -259,26 +260,44 @@ async function connectHubWithCredit(
 }
 
 async function switchRuntime(page: Page, label: string) {
-  const result = await page.evaluate(async (label) => {
+  const deadline = Date.now() + 30_000;
+  let result: { ok: boolean; runtimeId?: string; error?: string } = { ok: false, error: 'not-started' };
+
+  while (Date.now() < deadline) {
     try {
-      const runtimesState = (window as any).runtimesState;
-      const vaultOperations = (window as any).vaultOperations;
-      if (!runtimesState || !vaultOperations) {
-        return { ok: false, error: 'window.runtimesState/window.vaultOperations missing' };
-      }
-      let state: any;
-      const unsub = runtimesState.subscribe((s: any) => { state = s; });
-      unsub();
-      for (const [id, runtime] of Object.entries(state.runtimes) as any[]) {
-        if (String(runtime?.label || '').toLowerCase() !== String(label).toLowerCase()) continue;
-        await vaultOperations.selectRuntime(id);
-        return { ok: true, runtimeId: String(id) };
-      }
-      return { ok: false, error: `Runtime ${label} not found` };
+      result = await page.evaluate(async (runtimeLabel) => {
+        try {
+          const runtimesState = (window as any).runtimesState;
+          const vaultOperations = (window as any).vaultOperations;
+          if (!runtimesState || !vaultOperations) {
+            return { ok: false, error: 'window.runtimesState/window.vaultOperations missing' };
+          }
+          let state: any;
+          const unsub = runtimesState.subscribe((s: any) => { state = s; });
+          unsub();
+          for (const [id, runtime] of Object.entries(state.runtimes) as any[]) {
+            if (String(runtime?.label || '').toLowerCase() !== String(runtimeLabel).toLowerCase()) continue;
+            await vaultOperations.selectRuntime(id);
+            return { ok: true, runtimeId: String(id) };
+          }
+          return { ok: false, error: `Runtime ${runtimeLabel} not found` };
+        } catch (e: any) {
+          return { ok: false, error: e?.message || String(e) };
+        }
+      }, label);
+      if (result.ok) break;
     } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) };
+      const message = String(e?.message || e || '');
+      if (/Execution context was destroyed|Cannot find context|Target closed/i.test(message)) {
+        result = { ok: false, error: message };
+      } else {
+        throw e;
+      }
     }
-  }, label);
+    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
+    await page.waitForTimeout(400);
+  }
+
   expect(result.ok, `switchRuntime(${label}) failed: ${result.error || 'unknown'}`).toBe(true);
   await ensureRuntimeOnline(page, `switch-${label}`);
 }
@@ -357,7 +376,7 @@ async function setRebalancePolicy(
               data: {
                 counterpartyEntityId: hubId,
                 tokenId: 1,
-                softLimit: BigInt(softUsd) * 10n ** 18n,
+                r2cRequestSoftLimit: BigInt(softUsd) * 10n ** 18n,
                 hardLimit: BigInt(hardUsd) * 10n ** 18n,
                 maxAcceptableFee: BigInt(maxFeeUsd) * 10n ** 18n,
               },
@@ -501,9 +520,10 @@ async function readPairState(page: Page, counterpartyId: string) {
       const XLN = (window as any).XLN;
       const isLeft = String(rep.entityId || '').toLowerCase() < String(counterpartyId).toLowerCase();
       const derived = typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, isLeft) : null;
-      const hubDebt = BigInt(derived?.inOwnCredit ?? 0n);
-      const collateral = BigInt(derived?.outCollateral ?? 0n);
-      const uncollateralized = hubDebt > collateral ? hubDebt - collateral : 0n;
+      const outPeerCredit = BigInt(derived?.outPeerCredit ?? 0n);
+      const outCollateral = BigInt(derived?.outCollateral ?? 0n);
+      const hubExposure = outPeerCredit + outCollateral;
+      const uncollateralized = outPeerCredit > outCollateral ? outPeerCredit - outCollateral : 0n;
       const requested = acc.requestedRebalance?.get?.(1) || 0n;
       const history = Array.isArray(acc.frameHistory) ? acc.frameHistory : [];
       const recentDirectPaymentDescriptions = history
@@ -530,14 +550,14 @@ async function readPairState(page: Page, counterpartyId: string) {
       return {
         currentHeight: Number(acc.currentHeight || 0),
         requested: requested.toString(),
-        hubExposure: hubDebt.toString(),
-        hubDebt: hubDebt.toString(),
+        hubExposure: hubExposure.toString(),
+        hubDebt: outPeerCredit.toString(),
         totalDelta: String(derived?.delta ?? 0n),
         inCollateral: String(derived?.inCollateral ?? 0n),
         outCollateral: String(derived?.outCollateral ?? 0n),
         inCapacity: String(derived?.inCapacity ?? 0n),
         outCapacity: String(derived?.outCapacity ?? 0n),
-        collateral: collateral.toString(),
+        collateral: outCollateral.toString(),
         uncollateralized: uncollateralized.toString(),
         lastFinalizedJHeight: Number(acc.lastFinalizedJHeight || 0),
         recentDirectPaymentDescriptions,
@@ -758,27 +778,39 @@ async function readRebalanceState(page: Page, hubId: string) {
       const delta = acc.deltas?.get?.(1);
       if (!delta) continue;
       const XLN = (window as any).XLN;
-      const isLeft = String(rep.entityId || '').toLowerCase() < String(hubId).toLowerCase();
-      const derived = typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, isLeft) : null;
-      const hubDebt = BigInt(derived?.inOwnCredit ?? 0n);
-      const collateral = BigInt(derived?.outCollateral ?? 0n);
-      const uncollateralized = hubDebt > collateral ? hubDebt - collateral : 0n;
+      const localIsLeft = String(rep.entityId || '').toLowerCase() < String(hubId).toLowerCase();
+      const hubIsLeft = String(hubId || '').toLowerCase() < String(rep.entityId || '').toLowerCase();
+      const localDerived = typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, localIsLeft) : null;
+      const hubDerived = typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, hubIsLeft) : null;
+      const outPeerCredit = BigInt(localDerived?.outPeerCredit ?? 0n);
+      const outCollateral = BigInt(localDerived?.outCollateral ?? 0n);
+      const outTotalHold = BigInt(localDerived?.outTotalHold ?? 0n);
+      const hubOutCollateral = BigInt(hubDerived?.outCollateral ?? 0n);
+      const hubOutTotalHold = BigInt(hubDerived?.outTotalHold ?? 0n);
+      const hubFreeOutCollateral = hubOutCollateral > hubOutTotalHold ? hubOutCollateral - hubOutTotalHold : 0n;
+      const hubExposure = outPeerCredit + outCollateral;
+      const uncollateralized = outPeerCredit > outCollateral ? outPeerCredit - outCollateral : 0n;
       const requested = acc.requestedRebalance?.get?.(1) || 0n;
       const policy = acc.rebalancePolicy?.get?.(1) || null;
       return {
         entityId: String(rep.entityId || ''),
         requested: requested.toString(),
-        collateral: collateral.toString(),
+        collateral: outCollateral.toString(),
         ondelta: String(delta.ondelta || 0n),
         offdelta: String(delta.offdelta || 0n),
-        hubExposure: hubDebt.toString(),
-        hubDebt: hubDebt.toString(),
-        totalDelta: String(derived?.delta ?? 0n),
-        inCollateral: String(derived?.inCollateral ?? 0n),
-        outCollateral: String(derived?.outCollateral ?? 0n),
-        inCapacity: String(derived?.inCapacity ?? 0n),
-        outCapacity: String(derived?.outCapacity ?? 0n),
+        hubExposure: hubExposure.toString(),
+        hubDebt: outPeerCredit.toString(),
+        totalDelta: String(localDerived?.delta ?? 0n),
+        inCollateral: String(localDerived?.inCollateral ?? 0n),
+        outCollateral: String(localDerived?.outCollateral ?? 0n),
+        outTotalHold: String(localDerived?.outTotalHold ?? 0n),
+        freeOutCollateral: String(outCollateral > outTotalHold ? outCollateral - outTotalHold : 0n),
+        inCapacity: String(localDerived?.inCapacity ?? 0n),
+        outCapacity: String(localDerived?.outCapacity ?? 0n),
         uncollateralized: uncollateralized.toString(),
+        hubOutCollateral: hubOutCollateral.toString(),
+        hubOutTotalHold: hubOutTotalHold.toString(),
+        hubFreeOutCollateral: hubFreeOutCollateral.toString(),
         lastFinalizedJHeight: Number(acc.lastFinalizedJHeight || 0),
         currentHeight: Number(acc.currentHeight || 0),
         hasPolicy: !!policy,
@@ -921,7 +953,7 @@ test.describe('Rebalance E2E', () => {
   test.setTimeout(LONG_E2E ? 300_000 : 180_000);
 
   test('faucet -> request_collateral -> secured bar', async ({ page }) => {
-    const scenarioStartedAt = Date.now();
+    let scenarioStartedAt = 0;
     const rebalanceConsole: string[] = [];
     const criticalConsole: string[] = [];
     page.on('console', (msg) => {
@@ -934,7 +966,7 @@ test.describe('Rebalance E2E', () => {
       }
     });
 
-    await resetProdServer(page);
+    await timedStep('rebalance.reset_server', () => resetProdServer(page));
     await page.addInitScript(() => {
       try {
         localStorage.clear();
@@ -944,51 +976,57 @@ test.describe('Rebalance E2E', () => {
         // no-op
       }
     });
-    await gotoApp(page);
-    await createRuntime(page, `rebalance-${Date.now()}`, randomMnemonic());
-    await ensureRuntimeOnline(page, 'post-create');
+    await timedStep('rebalance.goto_app', () => gotoApp(page));
+    await timedStep('rebalance.create_runtime', () => createRuntime(page, `rebalance-${Date.now()}`, randomMnemonic()));
+    await timedStep('rebalance.ensure_runtime_online', () => ensureRuntimeOnline(page, 'post-create'));
 
-    const { entityId, signerId } = await getLocalEntity(page);
-    const hubId = await discoverHub(page);
+    const { entityId, signerId } = await timedStep('rebalance.get_local_entity', () => getLocalEntity(page));
+    const hubId = await timedStep('rebalance.discover_hub', () => discoverHub(page));
     const hubIsLeft = hubId.toLowerCase() < entityId.toLowerCase();
-    await waitForHubProfile(page, hubId);
-    await connectHub(page, entityId, signerId, hubId);
+    await timedStep('rebalance.wait_hub_profile', () => waitForHubProfile(page, hubId));
+    await timedStep('rebalance.connect_hub', () => connectHub(page, entityId, signerId, hubId));
+    // Start collection window after reset/bootstrap to avoid cross-test bleed.
+    scenarioStartedAt = Date.now();
 
     // 6x faucet => cross soft limit ($500) deterministically without adding
     // post-request debt that can make final collateral assertions flaky.
-    for (let i = 0; i < 6; i++) {
-      await faucet(page, entityId, hubId);
-      await page.waitForTimeout(300);
-    }
+    await timedStep('rebalance.faucet_burst_6x', async () => {
+      for (let i = 0; i < 6; i++) {
+        await faucet(page, entityId, hubId);
+        await page.waitForTimeout(300);
+      }
+    });
 
     // Wait until bilateral j-event finalized and account becomes secured.
     const start = Date.now();
     let snapshot: any = null;
     const stateTimeline: any[] = [];
-    while (Date.now() - start < 180_000) {
-      snapshot = await readRebalanceState(page, hubId);
-      if (snapshot) {
-        stateTimeline.push({
-          atMs: Date.now() - start,
-          requested: snapshot.requested,
-          uncollateralized: snapshot.uncollateralized,
-          collateral: snapshot.collateral,
-          hubDebt: snapshot.hubDebt,
-          jHeight: snapshot.lastFinalizedJHeight,
-          frame: snapshot.currentHeight,
-        });
+    await timedStep('rebalance.wait_first_secured_cycle', async () => {
+      while (Date.now() - start < 180_000) {
+        snapshot = await readRebalanceState(page, hubId);
+        if (snapshot) {
+          stateTimeline.push({
+            atMs: Date.now() - start,
+            requested: snapshot.requested,
+            uncollateralized: snapshot.uncollateralized,
+            collateral: snapshot.collateral,
+            hubDebt: snapshot.hubDebt,
+            jHeight: snapshot.lastFinalizedJHeight,
+            frame: snapshot.currentHeight,
+          });
+        }
+        if (
+          snapshot &&
+          BigInt(snapshot.requested) === 0n &&
+          BigInt(snapshot.uncollateralized) === 0n &&
+          BigInt(snapshot.collateral) > 0n &&
+          snapshot.lastFinalizedJHeight > 0
+        ) {
+          break;
+        }
+        await page.waitForTimeout(700);
       }
-      if (
-        snapshot &&
-        BigInt(snapshot.requested) === 0n &&
-        BigInt(snapshot.uncollateralized) === 0n &&
-        BigInt(snapshot.collateral) > 0n &&
-        snapshot.lastFinalizedJHeight > 0
-      ) {
-        break;
-      }
-      await page.waitForTimeout(700);
-    }
+    });
 
     const diagnostics = await readRebalanceDiagnostics(page, hubId);
     const rebalanceSteps = await readRebalanceStepEvents(page, scenarioStartedAt);
@@ -1040,7 +1078,9 @@ test.describe('Rebalance E2E', () => {
 
     // UI assertion + final screenshot artifact
     const securedIndicator = page.locator('.rebalance-indicator.secured', { hasText: 'Secured' }).first();
-    await expect(securedIndicator).toBeVisible({ timeout: 30_000 });
+    await timedStep('rebalance.wait_secured_indicator', async () => {
+      await expect(securedIndicator).toBeVisible({ timeout: 30_000 });
+    });
 
     const accountCard = page.locator('.account-preview').first();
     await expect(accountCard).toBeVisible();
@@ -1062,31 +1102,35 @@ test.describe('Rebalance E2E', () => {
     const currentHeightBefore = Number(snapshot.currentHeight || 0);
 
     // Push debt enough to cross soft-limit again after first finalize.
-    for (let i = 0; i < 8; i++) {
-      await faucet(page, entityId, hubId);
-      await page.waitForTimeout(150);
-    }
+    await timedStep('rebalance.second_faucet_burst_8x', async () => {
+      for (let i = 0; i < 8; i++) {
+        await faucet(page, entityId, hubId);
+        await page.waitForTimeout(150);
+      }
+    });
 
     let postSnapshot: any = null;
     const postStart = Date.now();
-    while (Date.now() - postStart < 120_000) {
-      postSnapshot = await readRebalanceState(page, hubId);
-      const claimSnapshotNow = await readAccountJEventClaims(page, hubId);
-      const uniqueSettleKeysNow = new Set(
-        (claimSnapshotNow?.claims || []).map((c) => `${c.txHash}:${c.nonce}:${c.jHeight}`),
-      );
-      const hasSecondSettlement = uniqueSettleKeysNow.size >= uniqueSettleKeysBefore.size + 1;
-      if (
-        postSnapshot &&
-        Number(postSnapshot.currentHeight || 0) > currentHeightBefore &&
-        BigInt(postSnapshot.requested || '0') === 0n &&
-        BigInt(postSnapshot.uncollateralized || '0') === 0n &&
-        hasSecondSettlement
-      ) {
-        break;
+    await timedStep('rebalance.wait_second_secured_cycle', async () => {
+      while (Date.now() - postStart < 120_000) {
+        postSnapshot = await readRebalanceState(page, hubId);
+        const claimSnapshotNow = await readAccountJEventClaims(page, hubId);
+        const uniqueSettleKeysNow = new Set(
+          (claimSnapshotNow?.claims || []).map((c) => `${c.txHash}:${c.nonce}:${c.jHeight}`),
+        );
+        const hasSecondSettlement = uniqueSettleKeysNow.size >= uniqueSettleKeysBefore.size + 1;
+        if (
+          postSnapshot &&
+          Number(postSnapshot.currentHeight || 0) > currentHeightBefore &&
+          BigInt(postSnapshot.requested || '0') === 0n &&
+          BigInt(postSnapshot.uncollateralized || '0') === 0n &&
+          hasSecondSettlement
+        ) {
+          break;
+        }
+        await page.waitForTimeout(400);
       }
-      await page.waitForTimeout(400);
-    }
+    });
     expect(postSnapshot, `post-secured faucet snapshot missing\n${debugDump}`).toBeTruthy();
     expect(
       Number(postSnapshot.currentHeight || 0) > currentHeightBefore,
@@ -1126,8 +1170,8 @@ test.describe('Rebalance E2E', () => {
 
   test('edge: pending request_collateral must not duplicate before first settlement finalize', async ({ page }) => {
     test.skip(FAST_E2E && !LONG_E2E, 'Long rebalance edge coverage disabled in fast mode.');
-    const scenarioStartedAt = Date.now();
-    await resetProdServer(page);
+    let scenarioStartedAt = 0;
+    await timedStep('rebalance_edge.reset_server', () => resetProdServer(page));
     await page.addInitScript(() => {
       try {
         localStorage.clear();
@@ -1137,15 +1181,17 @@ test.describe('Rebalance E2E', () => {
         // no-op
       }
     });
-    await gotoApp(page);
-    await createRuntime(page, `rebalance-edge-pending-${Date.now()}`, randomMnemonic());
-    await ensureRuntimeOnline(page, 'edge-pending-post-create');
+    await timedStep('rebalance_edge.goto_app', () => gotoApp(page));
+    await timedStep('rebalance_edge.create_runtime', () => createRuntime(page, `rebalance-edge-pending-${Date.now()}`, randomMnemonic()));
+    await timedStep('rebalance_edge.ensure_runtime_online', () => ensureRuntimeOnline(page, 'edge-pending-post-create'));
 
-    const { entityId, signerId } = await getLocalEntity(page);
-    const hubId = await discoverHub(page);
+    const { entityId, signerId } = await timedStep('rebalance_edge.get_local_entity', () => getLocalEntity(page));
+    const hubId = await timedStep('rebalance_edge.discover_hub', () => discoverHub(page));
     const hubIsLeft = hubId.toLowerCase() < entityId.toLowerCase();
-    await waitForHubProfile(page, hubId);
-    await connectHub(page, entityId, signerId, hubId);
+    await timedStep('rebalance_edge.wait_hub_profile', () => waitForHubProfile(page, hubId));
+    await timedStep('rebalance_edge.connect_hub', () => connectHub(page, entityId, signerId, hubId));
+    // Start collection window after reset/bootstrap to avoid cross-test bleed.
+    scenarioStartedAt = Date.now();
 
     // Trigger first request.
     for (let i = 0; i < 6; i++) {
@@ -1193,8 +1239,8 @@ test.describe('Rebalance E2E', () => {
 
   test('cycle R2C -> C2R -> R2C (100ms action cadence)', async ({ page }) => {
     test.skip(FAST_E2E && !LONG_E2E, 'Long rebalance edge coverage disabled in fast mode.');
-    const scenarioStartedAt = Date.now();
-    await resetProdServer(page);
+    let scenarioStartedAt = 0;
+    await timedStep('rebalance_cycle.reset_server', () => resetProdServer(page));
     await page.addInitScript(() => {
       try {
         localStorage.clear();
@@ -1204,15 +1250,17 @@ test.describe('Rebalance E2E', () => {
         // no-op
       }
     });
-    await gotoApp(page);
-    await createRuntime(page, `rebalance-cycle-${Date.now()}`, randomMnemonic());
-    await ensureRuntimeOnline(page, 'cycle-post-create');
+    await timedStep('rebalance_cycle.goto_app', () => gotoApp(page));
+    await timedStep('rebalance_cycle.create_runtime', () => createRuntime(page, `rebalance-cycle-${Date.now()}`, randomMnemonic()));
+    await timedStep('rebalance_cycle.ensure_runtime_online', () => ensureRuntimeOnline(page, 'cycle-post-create'));
 
-    const { entityId, signerId } = await getLocalEntity(page);
-    const hubId = await discoverHub(page);
+    const { entityId, signerId } = await timedStep('rebalance_cycle.get_local_entity', () => getLocalEntity(page));
+    const hubId = await timedStep('rebalance_cycle.discover_hub', () => discoverHub(page));
     const hubIsLeft = hubId.toLowerCase() < entityId.toLowerCase();
-    await waitForHubProfile(page, hubId);
-    await connectHub(page, entityId, signerId, hubId);
+    await timedStep('rebalance_cycle.wait_hub_profile', () => waitForHubProfile(page, hubId));
+    await timedStep('rebalance_cycle.connect_hub', () => connectHub(page, entityId, signerId, hubId));
+    // Start collection window after reset/bootstrap to avoid cross-test bleed.
+    scenarioStartedAt = Date.now();
 
     // Keep cycle test focused on rebalance transitions only.
     // HTLC E2E is validated by dedicated routed-payment coverage below.
@@ -1248,46 +1296,75 @@ test.describe('Rebalance E2E', () => {
       'phase1-r2c',
     );
     const collateralAfterFirstR2C = BigInt(r2cSnapshot1.collateral);
+    const hubFreeOutAfterFirstR2C = BigInt(r2cSnapshot1.hubFreeOutCollateral || '0');
+    const c2rSoftLimitWei = 500n * 10n ** 18n;
+    const c2rShouldTrigger = hubFreeOutAfterFirstR2C > c2rSoftLimitWei;
 
     // Phase 2: C2R (user repays enough so collateral becomes excess and hub withdraws to reserve)
     const hubOwesUser = (snapshot: any): bigint => {
       const d = BigInt(snapshot?.totalDelta || '0');
       return hubIsLeft ? (d < 0n ? -d : 0n) : (d > 0n ? d : 0n);
     };
-    const c2rDebtTarget = 1n * 10n ** 18n; // ~1 USD residual tolerance
-    for (let i = 0; i < 25; i++) {
-      const before = await readRebalanceState(page, hubId);
-      const debtWei = before ? hubOwesUser(before) : 0n;
-      if (debtWei <= c2rDebtTarget) break;
-      const paymentUsd = debtWei / 10n ** 18n;
-      const payAmount = paymentUsd > 0n && paymentUsd < 100n ? paymentUsd : 100n;
-      await sendDirectPaymentToHub(page, entityId, signerId, hubId, payAmount);
-      await page.waitForTimeout(100);
-      if (before) {
-        await waitForState(
-          (s) => Number(s.currentHeight || 0) > Number(before.currentHeight || 0),
-          25_000,
-          `phase2-payment-commit-${i + 1}`,
-        );
-      }
-      const after = await readRebalanceState(page, hubId);
-      if (after && hubOwesUser(after) <= c2rDebtTarget) {
-        break;
+    if (!hubIsLeft) {
+      // When hub is on the right side, paying hub can free right-side outCollateral for C2R.
+      const c2rDebtTarget = 1n * 10n ** 18n; // ~1 USD residual tolerance
+      for (let i = 0; i < 25; i++) {
+        const before = await readRebalanceState(page, hubId);
+        const debtWei = before ? hubOwesUser(before) : 0n;
+        if (debtWei <= c2rDebtTarget) break;
+        const paymentUsd = debtWei / 10n ** 18n;
+        const payAmount = paymentUsd > 0n && paymentUsd < 100n ? paymentUsd : 100n;
+        await sendDirectPaymentToHub(page, entityId, signerId, hubId, payAmount);
+        await page.waitForTimeout(100);
+        if (before) {
+          await waitForState(
+            (s) => Number(s.currentHeight || 0) > Number(before.currentHeight || 0),
+            25_000,
+            `phase2-payment-commit-${i + 1}`,
+          );
+        }
+        const after = await readRebalanceState(page, hubId);
+        if (after && hubOwesUser(after) <= c2rDebtTarget) {
+          break;
+        }
       }
     }
 
-    const c2rSnapshot = await waitForState(
-      (s) =>
-        BigInt(s.requested) === 0n &&
-        BigInt(s.collateral) < collateralAfterFirstR2C,
-      220_000,
-      'phase2-c2r',
+    // Hold-aware C2R: hub must not withdraw ring-fenced collateral.
+    // Wait until outbound holds clear (or become negligible) before expecting collateral pullback.
+    await waitForState(
+      (s) => BigInt(s.outTotalHold || '0') <= 1n * 10n ** 18n,
+      120_000,
+      'phase2-hold-clear',
     );
-    const collateralAfterC2R = BigInt(c2rSnapshot.collateral);
-    expect(
-      collateralAfterC2R < collateralAfterFirstR2C,
-      `expected C2R to decrease collateral (${collateralAfterFirstR2C} -> ${collateralAfterC2R})`,
-    ).toBe(true);
+
+    let c2rSnapshot: any;
+    if (c2rShouldTrigger) {
+      c2rSnapshot = await waitForState(
+        (s) =>
+          BigInt(s.hubFreeOutCollateral || '0') < hubFreeOutAfterFirstR2C &&
+          Number(s.lastFinalizedJHeight || 0) >= Number(r2cSnapshot1.lastFinalizedJHeight || 0),
+        220_000,
+        'phase2-c2r',
+      );
+    } else {
+      await page.waitForTimeout(4_000);
+      c2rSnapshot = await readRebalanceState(page, hubId);
+    }
+    expect(c2rSnapshot, 'phase2 snapshot must exist').toBeTruthy();
+    const collateralAfterC2R = BigInt(c2rSnapshot?.collateral || '0');
+    const hubFreeOutAfterC2R = BigInt(c2rSnapshot?.hubFreeOutCollateral || '0');
+    if (c2rShouldTrigger) {
+      expect(
+        hubFreeOutAfterC2R < hubFreeOutAfterFirstR2C,
+        `expected C2R to decrease hub freeOutCollateral (${hubFreeOutAfterFirstR2C} -> ${hubFreeOutAfterC2R})`,
+      ).toBe(true);
+    } else {
+      expect(
+        hubFreeOutAfterC2R <= c2rSoftLimitWei,
+        `C2R must not trigger when hub freeOutCollateral <= soft limit (freeOut=${hubFreeOutAfterC2R}, soft=${c2rSoftLimitWei})`,
+      ).toBe(true);
+    }
 
     // Phase 3: R2C again (hub owes user again and tops collateral back up)
     for (let i = 0; i < 24; i++) {
@@ -1297,7 +1374,7 @@ test.describe('Rebalance E2E', () => {
     const r2cSnapshot2 = await waitForState(
       (s) =>
         BigInt(s.requested) === 0n &&
-        BigInt(s.collateral) > collateralAfterC2R,
+        Number(s.lastFinalizedJHeight || 0) > Number(c2rSnapshot?.lastFinalizedJHeight || r2cSnapshot1.lastFinalizedJHeight || 0),
       180_000,
       'phase3-r2c-again',
     );
@@ -1306,20 +1383,26 @@ test.describe('Rebalance E2E', () => {
     const c2rPropose = steps.some((s) => s?.event === 'c2r_settle_propose_queued');
     const c2rExecute = steps.some((s) => s?.event === 'c2r_settle_execute_queued');
     const finalizedCount = steps.filter((s) => s?.event === 'account_settled_finalized_bilateral').length;
-    expect(
-      c2rPropose || c2rExecute || collateralAfterC2R < collateralAfterFirstR2C,
-      `c2r evidence missing (events + collateral delta)`,
-    ).toBe(true);
+    if (c2rShouldTrigger) {
+      expect(
+        c2rPropose || c2rExecute || hubFreeOutAfterC2R < hubFreeOutAfterFirstR2C,
+        `c2r evidence missing (events + hub freeOutCollateral delta)`,
+      ).toBe(true);
+    }
     expect(finalizedCount >= 2, `expected >=2 account_settled_finalized_bilateral, got ${finalizedCount}`).toBe(true);
 
     await page.screenshot({ path: 'test-results/rebalance-cycle-r2c-c2r-r2c.png', fullPage: true });
 
-    expect(BigInt(r2cSnapshot2.collateral) > collateralAfterC2R, 'second R2C should increase collateral').toBe(true);
+    if (c2rShouldTrigger) {
+      expect(BigInt(r2cSnapshot2.collateral) > collateralAfterC2R, 'second R2C should increase collateral').toBe(true);
+    } else {
+      expect(BigInt(r2cSnapshot2.collateral) >= collateralAfterFirstR2C, 'R2C must keep collateral non-decreasing').toBe(true);
+    }
   });
 
   test('rt1->h1->h2->rt2: second 550 fails before rebalance, passes after H2 R2C', async ({ page }) => {
     test.skip(FAST_E2E && !LONG_E2E, 'Long rebalance edge coverage disabled in fast mode.');
-    const scenarioStartedAt = Date.now();
+    let scenarioStartedAt = 0;
     await resetProdServer(page);
     await page.addInitScript(() => {
       try {
@@ -1362,6 +1445,8 @@ test.describe('Rebalance E2E', () => {
     expect(baseline, 'rt2-h2 baseline must exist').toBeTruthy();
     const baselineDebt = BigInt(baseline?.hubExposure || baseline?.hubDebt || '0');
     const baselineResolveCount = Number(baseline?.recentHtlcResolveCount || 0);
+    // Start collection window after reset/bootstrap to avoid cross-test bleed.
+    scenarioStartedAt = Date.now();
 
     // Payment #1 succeeds.
     await switchRuntime(page, rt1Label);
@@ -1489,7 +1574,7 @@ test.describe('Rebalance E2E', () => {
 
   test('runtime2: H1=10k, H3=1k; second 550 via H3 fails before rebalance, passes after', async ({ page }) => {
     test.skip(FAST_E2E && !LONG_E2E, 'Long rebalance edge coverage disabled in fast mode.');
-    const scenarioStartedAt = Date.now();
+    let scenarioStartedAt = 0;
     await resetProdServer(page);
     await page.addInitScript(() => {
       try {
@@ -1536,6 +1621,8 @@ test.describe('Rebalance E2E', () => {
     expect(baseline, 'runtime2-h3 baseline must exist').toBeTruthy();
     const baselineDebt = BigInt(baseline?.hubDebt || baseline?.hubExposure || '0');
     const baselineResolveCount = Number(baseline?.recentHtlcResolveCount || 0);
+    // Start collection window after reset/bootstrap to avoid cross-test bleed.
+    scenarioStartedAt = Date.now();
 
     // Step 6: HTLC #1 (550) from runtime1 -> runtime2 via H3 should pass.
     await switchRuntime(page, rt1Label);
