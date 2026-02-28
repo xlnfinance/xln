@@ -15,6 +15,7 @@
 import type { AccountMachine, AccountTx, SettlementDiff } from '../../types';
 import { isLeftEntity } from '../../entity-id-utils';
 import { compileOps } from '../../settlement-ops';
+import { deriveDelta } from '../../account-utils';
 
 type SettleHoldTx = Extract<AccountTx, { type: 'settle_hold' }>;
 type SettleReleaseTx = Extract<AccountTx, { type: 'settle_release' }>;
@@ -145,20 +146,18 @@ export async function handleSettleHold(
     const isLeftDeposit = (wsDiff?.leftDiff ?? 0n) < 0n && (wsDiff?.collateralDiff ?? 0n) > 0n;
     const isRightDeposit = (wsDiff?.rightDiff ?? 0n) < 0n && (wsDiff?.collateralDiff ?? 0n) > 0n;
 
-    // Calculate bilateral account capacity (for withdrawal operations)
-    const totalDelta = delta.ondelta + delta.offdelta;
-    const leftCapacity = delta.collateral + delta.rightCreditLimit + (totalDelta > 0n ? 0n : -totalDelta);
-    const rightCapacity = delta.collateral + delta.leftCreditLimit + (totalDelta < 0n ? 0n : totalDelta);
+    // Canonical bilateral capacity view from deriveDelta().
+    // Additional hold for each side must not exceed that side's current outbound capacity.
+    const leftDerived = deriveDelta(delta, true);
+    const rightDerived = deriveDelta(delta, false);
+    const leftAvailable = leftDerived.outCapacity;
+    const rightAvailable = rightDerived.outCapacity;
 
-    // Current holds already placed
-    const existingLeftHold = delta.leftHold ?? 0n;
-    const existingRightHold = delta.rightHold ?? 0n;
-
-    // Check left capacity (skip for deposits — L1 validates reserves)
-    if (!isLeftDeposit && existingLeftHold + diff.leftWithdrawing > leftCapacity) {
+    // Check left capacity (skip for reserve-sourced deposits — L1 validates reserves)
+    if (!isLeftDeposit && diff.leftWithdrawing > leftAvailable) {
       console.error(`❌ SECURITY: settle_hold exceeds left capacity for token ${diff.tokenId}`);
-      console.error(`   requested: ${existingLeftHold} + ${diff.leftWithdrawing} = ${existingLeftHold + diff.leftWithdrawing}`);
-      console.error(`   capacity: ${leftCapacity}`);
+      console.error(`   requested: ${diff.leftWithdrawing}`);
+      console.error(`   capacity: ${leftAvailable}`);
       return {
         success: false,
         events: [],
@@ -166,11 +165,11 @@ export async function handleSettleHold(
       };
     }
 
-    // Check right capacity (skip for deposits — L1 validates reserves)
-    if (!isRightDeposit && existingRightHold + diff.rightWithdrawing > rightCapacity) {
+    // Check right capacity (skip for reserve-sourced deposits — L1 validates reserves)
+    if (!isRightDeposit && diff.rightWithdrawing > rightAvailable) {
       console.error(`❌ SECURITY: settle_hold exceeds right capacity for token ${diff.tokenId}`);
-      console.error(`   requested: ${existingRightHold} + ${diff.rightWithdrawing} = ${existingRightHold + diff.rightWithdrawing}`);
-      console.error(`   capacity: ${rightCapacity}`);
+      console.error(`   requested: ${diff.rightWithdrawing}`);
+      console.error(`   capacity: ${rightAvailable}`);
       return {
         success: false,
         events: [],
