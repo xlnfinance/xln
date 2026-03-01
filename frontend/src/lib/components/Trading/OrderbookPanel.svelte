@@ -6,6 +6,7 @@
 
   Usage:
     <OrderbookPanel hubId="0x..." pairId="1/2" />
+    <OrderbookPanel hubIds={["0x...", "0x..."]} pairId="1/2" />
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
@@ -14,6 +15,7 @@
   import { formatEntityId } from '$lib/utils/format';
 
   export let hubId: string = '';
+  export let hubIds: string[] = [];
   export let pairId: string = '1/2';  // e.g., "1/2" for ETH/USDC
   export let depth: number = 10;
   export let showOwners: boolean = false;
@@ -31,119 +33,142 @@
   let spread: number | null = null;
   let spreadPercent: string = '-';
   let lastUpdate: number = 0;
+  let sourceCount = 0;
+  let sourceLabel = 'None';
 
   // Polling interval for orderbook updates
   let pollInterval: number | null = null;
   const POLL_MS = 200;  // 5 updates/sec
 
-  function extractOrderbook() {
-    const env = $envStore;
-    if (!env || !hubId) return;
+  function uniqueSourceHubIds(): string[] {
+    const raw = hubIds.length > 0 ? hubIds : (hubId ? [hubId] : []);
+    const normalized = raw
+      .map((id) => String(id || '').trim().toLowerCase())
+      .filter(Boolean);
+    return Array.from(new Set(normalized));
+  }
 
-    // Find hub replica
-    let hubReplica: any = null;
-    for (const [key, replica] of env.eReplicas) {
-      if (key.startsWith(hubId + ':')) {
-        hubReplica = replica;
-        break;
+  function findHubReplica(env: any, sourceHubId: string): any | null {
+    for (const [key, replica] of env.eReplicas || []) {
+      if (String(key || '').toLowerCase().startsWith(sourceHubId + ':')) {
+        return replica;
       }
     }
+    return null;
+  }
 
-    if (!hubReplica?.state?.orderbookExt?.books) return;
+  function accumulateBookSide(
+    book: any,
+    side: 'bid' | 'ask',
+    sideSizes: Map<number, number>,
+    sideOwners: Map<number, Set<string>>
+  ) {
+    const { orderQtyLots, orderOwnerIdx, orderNext, orderActive, owners, params } = book;
+    const { pmin, tick } = params || { pmin: 0, tick: 1 };
+    const levelHead = side === 'bid' ? (book.levelHeadBid || []) : (book.levelHeadAsk || []);
+    const bitmap = side === 'bid' ? (book.bitmapBid || []) : (book.bitmapAsk || []);
+    const levels = Number(book.levels || 0);
 
-    const book = hubReplica.state.orderbookExt.books.get(pairId);
-    if (!book) {
+    let idx = side === 'bid' ? Number(book.bestBidIdx ?? -1) : Number(book.bestAskIdx ?? -1);
+    let visitedLevels = 0;
+    const maxLevelsPerBook = Math.max(depth * 6, depth);
+
+    while (idx !== -1 && visitedLevels < maxLevelsPerBook) {
+      visitedLevels += 1;
+      let headIdx = levelHead[idx];
+      let levelSize = 0;
+      const levelOwnerSet = new Set<string>();
+
+      while (headIdx !== -1) {
+        if (orderActive[headIdx]) {
+          levelSize += Number(orderQtyLots[headIdx] || 0);
+          if (showOwners) {
+            levelOwnerSet.add(String(owners[orderOwnerIdx[headIdx]] || '?').slice(-4));
+          }
+        }
+        headIdx = orderNext[headIdx];
+      }
+
+      if (levelSize > 0) {
+        const price = Number(pmin) + idx * Number(tick);
+        sideSizes.set(price, (sideSizes.get(price) || 0) + levelSize);
+        if (showOwners) {
+          const ownersSet = sideOwners.get(price) || new Set<string>();
+          for (const owner of levelOwnerSet) ownersSet.add(owner);
+          sideOwners.set(price, ownersSet);
+        }
+      }
+
+      idx = side === 'bid'
+        ? findPrevLevel(bitmap, idx - 1)
+        : findNextLevel(bitmap, levels, idx + 1);
+    }
+  }
+
+  function buildOrderLevels(
+    sideSizes: Map<number, number>,
+    sideOwners: Map<number, Set<string>>,
+    side: 'bid' | 'ask'
+  ): OrderLevel[] {
+    const sorted = Array.from(sideSizes.entries())
+      .sort((a, b) => side === 'bid' ? b[0] - a[0] : a[0] - b[0])
+      .slice(0, depth);
+
+    let cumulative = 0;
+    return sorted.map(([price, size]) => {
+      cumulative += size;
+      const entry: OrderLevel = { price, size, total: cumulative };
+      if (showOwners) {
+        entry.owners = Array.from(sideOwners.get(price) || []);
+      }
+      return entry;
+    });
+  }
+
+  function extractOrderbook() {
+    const env = $envStore;
+    if (!env) return;
+
+    const sources = uniqueSourceHubIds();
+    sourceCount = sources.length;
+    sourceLabel = sourceCount === 1
+      ? `Hub: ${formatEntityId(sources[0] || '')}`
+      : sourceCount > 1
+        ? `Sources: ${sourceCount}`
+        : 'Sources: 0';
+
+    if (sources.length === 0) {
       bids = [];
       asks = [];
       spread = null;
+      spreadPercent = '-';
+      lastUpdate = Date.now();
       return;
     }
 
-    // Extract bids (descending by price)
-    const newBids: OrderLevel[] = [];
-    let bidTotal = 0;
+    const bidSizes = new Map<number, number>();
+    const askSizes = new Map<number, number>();
+    const bidOwners = new Map<number, Set<string>>();
+    const askOwners = new Map<number, Set<string>>();
 
-    // Use book's bitmap/levels to find non-empty price levels
-    const { levelHeadBid, orderQtyLots, orderOwnerIdx, orderNext, orderActive, owners, bestBidIdx, params } = book;
-    const { pmin, tick } = params;
-
-    let bidIdx = bestBidIdx;
-    while (bidIdx !== -1 && newBids.length < depth) {
-      let headIdx = levelHeadBid[bidIdx];
-      let levelSize = 0;
-      const levelOwners: string[] = [];
-
-      while (headIdx !== -1) {
-        if (orderActive[headIdx]) {
-          levelSize += orderQtyLots[headIdx];
-          if (showOwners) {
-            levelOwners.push(owners[orderOwnerIdx[headIdx]]?.slice(-4) || '?');
-          }
-        }
-        headIdx = orderNext[headIdx];
-      }
-
-      if (levelSize > 0) {
-        bidTotal += levelSize;
-        const entry: OrderLevel = {
-          price: pmin + bidIdx * tick,
-          size: levelSize,
-          total: bidTotal,
-        };
-        if (showOwners) entry.owners = levelOwners;
-        newBids.push(entry);
-      }
-
-      // Find previous non-empty bid level
-      bidIdx = findPrevLevel(book.bitmapBid, bidIdx - 1);
+    for (const sourceHubId of sources) {
+      const hubReplica = findHubReplica(env, sourceHubId);
+      const books = hubReplica?.state?.orderbookExt?.books;
+      if (!(books instanceof Map)) continue;
+      const book = books.get(pairId);
+      if (!book) continue;
+      accumulateBookSide(book, 'bid', bidSizes, bidOwners);
+      accumulateBookSide(book, 'ask', askSizes, askOwners);
     }
 
-    // Extract asks (ascending by price)
-    const newAsks: OrderLevel[] = [];
-    let askTotal = 0;
+    bids = buildOrderLevels(bidSizes, bidOwners, 'bid');
+    asks = buildOrderLevels(askSizes, askOwners, 'ask');
 
-    const { levelHeadAsk, bestAskIdx, levels } = book;
-
-    let askIdx = bestAskIdx;
-    while (askIdx !== -1 && newAsks.length < depth) {
-      let headIdx = levelHeadAsk[askIdx];
-      let levelSize = 0;
-      const levelOwners: string[] = [];
-
-      while (headIdx !== -1) {
-        if (orderActive[headIdx]) {
-          levelSize += orderQtyLots[headIdx];
-          if (showOwners) {
-            levelOwners.push(owners[orderOwnerIdx[headIdx]]?.slice(-4) || '?');
-          }
-        }
-        headIdx = orderNext[headIdx];
-      }
-
-      if (levelSize > 0) {
-        askTotal += levelSize;
-        const entry: OrderLevel = {
-          price: pmin + askIdx * tick,
-          size: levelSize,
-          total: askTotal,
-        };
-        if (showOwners) entry.owners = levelOwners;
-        newAsks.push(entry);
-      }
-
-      // Find next non-empty ask level
-      askIdx = findNextLevel(book.bitmapAsk, levels, askIdx + 1);
-    }
-
-    bids = newBids;
-    asks = newAsks;
-
-    // Calculate spread
-    const firstAsk = newAsks[0];
-    const firstBid = newBids[0];
-    if (firstBid && firstAsk) {
-      spread = firstAsk.price - firstBid.price;
-      spreadPercent = ((spread / firstAsk.price) * 100).toFixed(3);
+    const bestBid = bids[0];
+    const bestAsk = asks[0];
+    if (bestBid && bestAsk) {
+      spread = bestAsk.price - bestBid.price;
+      spreadPercent = ((spread / bestAsk.price) * 100).toFixed(3);
     } else {
       spread = null;
       spreadPercent = '-';
@@ -195,7 +220,7 @@
   });
 
   // React to hubId/pairId changes
-  $: if (hubId || pairId) extractOrderbook();
+  $: if (hubId || hubIds.length || pairId) extractOrderbook();
 </script>
 
 <div class="orderbook-panel">
@@ -254,7 +279,7 @@
   </div>
 
   <div class="footer">
-    <span class="hub-label">Hub: {hubId ? formatEntityId(hubId) : 'None'}</span>
+    <span class="hub-label">{sourceLabel}</span>
     <span class="update-time">Updated: {new Date(lastUpdate).toLocaleTimeString()}</span>
   </div>
 </div>

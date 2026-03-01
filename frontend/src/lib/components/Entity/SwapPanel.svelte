@@ -14,6 +14,7 @@
   // Props
     export let counterpartyId: string = '';
     export let prefilledCounterparty = false;
+  let orderbookScope: 'all' | 'selected' = 'all';
   let giveTokenId = '1';
   let giveAmount: bigint = 0n;
   let wantTokenId = '2';
@@ -37,6 +38,26 @@
     const selected = String(counterpartyId || '');
     if (!selected || !baseAccountIds.includes(selected)) return baseAccountIds;
     return [selected, ...baseAccountIds.filter((id) => id !== selected)];
+  })();
+  $: cappedAccountIds = accountIds.slice(0, 10);
+  $: hiddenAccountCount = Math.max(0, accountIds.length - cappedAccountIds.length);
+  $: if (orderbookScope === 'selected' && !counterpartyId) {
+    orderbookScope = 'all';
+  }
+  $: orderbookHubIds = orderbookScope === 'selected'
+    ? (counterpartyId ? [counterpartyId] : [])
+    : cappedAccountIds;
+  $: orderbookHint = (() => {
+    if (orderbookScope === 'selected') {
+      return counterpartyId
+        ? 'Showing selected account orderbook.'
+        : 'Select account to view selected orderbook.';
+    }
+    if (orderbookHubIds.length === 0) {
+      return 'Select account to trade. No orderbook sources yet.';
+    }
+    const hidden = hiddenAccountCount > 0 ? ` (+${hiddenAccountCount} hidden)` : '';
+    return `Showing aggregate orderbook across ${orderbookHubIds.length} account(s)${hidden}. Select account to place orders.`;
   })();
 
   const DEFAULT_SWAP_TOKEN_IDS = [1, 2, 3];
@@ -274,7 +295,38 @@
 </script>
 
 <div class="swap-panel">
-  <h3>💱 Swap Trading</h3>
+  <h3>Swap Trading</h3>
+
+  <div class="section">
+    <div class="orderbook-header">
+      <h4>Orderbook</h4>
+      <div class="scope-toggle">
+        <button
+          class="scope-btn"
+          class:active={orderbookScope === 'all'}
+          on:click={() => (orderbookScope = 'all')}
+        >
+          All Accounts
+        </button>
+        <button
+          class="scope-btn"
+          class:active={orderbookScope === 'selected'}
+          disabled={!counterpartyId}
+          on:click={() => (orderbookScope = 'selected')}
+        >
+          Selected Account
+        </button>
+      </div>
+    </div>
+    <p class="orderbook-hint">{orderbookHint}</p>
+    {#if orderbookHubIds.length > 0}
+      <div class="orderbook-wrap">
+        <OrderbookPanel hubIds={orderbookHubIds} hubId={counterpartyId} pairId={orderbookPairId} depth={12} />
+      </div>
+    {:else}
+      <div class="orderbook-empty">No connected account orderbooks yet.</div>
+    {/if}
+  </div>
 
   <!-- Place Swap Offer Form -->
   <div class="section">
@@ -327,18 +379,9 @@
     </div>
 
     <button class="primary-btn" on:click={placeSwapOffer}>
-      📊 Place Swap Offer
+      Place Swap Offer
     </button>
   </div>
-
-  {#if counterpartyId}
-    <div class="section">
-      <h4>Live Orderbook ({orderbookPairId})</h4>
-      <div class="orderbook-wrap">
-        <OrderbookPanel hubId={counterpartyId} pairId={orderbookPairId} depth={12} />
-      </div>
-    </div>
-  {/if}
 
   <!-- Active Swap Offers -->
   {#if activeOffers.length > 0}
@@ -350,7 +393,7 @@
             <div class="offer-header">
               <span class="offer-id">{offer.offerId.slice(0, 16)}...</span>
               <button class="cancel-btn" on:click={() => cancelSwapOffer(offer.offerId, offer.accountId)}>
-                📨 Request Cancel
+                Request Cancel
               </button>
             </div>
             <div class="offer-details">
@@ -382,29 +425,81 @@
 
 <style>
   .swap-panel {
-    padding: 16px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 8px;
+    padding: 0;
+    border-radius: 10px;
   }
 
   h3 {
     margin: 0 0 16px 0;
-    color: #00ff88;
+    color: #f3f4f6;
     font-size: 16px;
+    font-weight: 700;
   }
 
   h4 {
     margin: 0 0 12px 0;
-    color: rgba(255, 255, 255, 0.9);
+    color: #e5e7eb;
     font-size: 14px;
+    font-weight: 600;
   }
 
   .section {
     margin-bottom: 24px;
-    padding: 12px;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 14px;
+    background: #131419;
+    border-radius: 10px;
+    border: 1px solid #2b2f39;
+  }
+
+  .orderbook-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .scope-toggle {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .scope-btn {
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid #353942;
+    background: #111217;
+    color: #9ca3af;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .scope-btn.active {
+    color: #fbbf24;
+    border-color: #fbbf24;
+    background: rgba(251, 191, 36, 0.08);
+  }
+
+  .scope-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .orderbook-hint {
+    margin: 6px 0 10px;
+    color: #9ca3af;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .orderbook-empty {
+    border: 1px dashed #3f434d;
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #9ca3af;
+    font-size: 12px;
   }
 
   .form-row {
@@ -419,31 +514,31 @@
     flex-direction: column;
     gap: 4px;
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.7);
+    color: #9ca3af;
   }
 
   select, input {
     padding: 8px;
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    color: white;
+    background: #0c0d11;
+    border: 1px solid #303442;
+    border-radius: 8px;
+    color: #f3f4f6;
     font-size: 13px;
-    font-family: 'SF Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
   }
 
   select:focus, input:focus {
     outline: none;
-    border-color: rgba(0, 255, 136, 0.5);
+    border-color: rgba(251, 191, 36, 0.65);
   }
 
   .primary-btn {
     width: 100%;
     padding: 10px;
-    background: linear-gradient(135deg, rgba(0, 255, 136, 0.2), rgba(0, 122, 204, 0.2));
-    border: 1px solid rgba(0, 255, 136, 0.3);
-    border-radius: 6px;
-    color: #00ff88;
+    background: linear-gradient(180deg, rgba(251, 191, 36, 0.18), rgba(217, 119, 6, 0.12));
+    border: 1px solid rgba(251, 191, 36, 0.55);
+    border-radius: 8px;
+    color: #fde68a;
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
@@ -451,9 +546,8 @@
   }
 
   .primary-btn:hover {
-    background: linear-gradient(135deg, rgba(0, 255, 136, 0.3), rgba(0, 122, 204, 0.3));
-    border-color: rgba(0, 255, 136, 0.5);
-    transform: translateY(-1px);
+    background: linear-gradient(180deg, rgba(251, 191, 36, 0.28), rgba(217, 119, 6, 0.2));
+    border-color: rgba(251, 191, 36, 0.75);
   }
 
   .offers-list {
@@ -469,9 +563,9 @@
 
   .offer-card {
     padding: 12px;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
+    background: #111218;
+    border: 1px solid #313644;
+    border-radius: 8px;
   }
 
   .offer-header {
@@ -480,29 +574,29 @@
     align-items: center;
     margin-bottom: 8px;
     padding-bottom: 8px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .offer-id {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.5);
+    color: #9ca3af;
     font-family: 'SF Mono', monospace;
   }
 
   .cancel-btn {
     padding: 4px 8px;
-    background: rgba(255, 68, 68, 0.1);
-    border: 1px solid rgba(255, 68, 68, 0.3);
-    border-radius: 3px;
-    color: #ff4444;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 6px;
+    color: #fca5a5;
     font-size: 11px;
     cursor: pointer;
     transition: all 0.2s;
   }
 
   .cancel-btn:hover {
-    background: rgba(255, 68, 68, 0.2);
-    border-color: rgba(255, 68, 68, 0.5);
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.6);
   }
 
   .offer-details {
@@ -519,10 +613,10 @@
   }
 
   .offer-row .label {
-    color: rgba(255, 255, 255, 0.5);
+    color: #9ca3af;
   }
 
   .offer-row .value {
-    color: rgba(255, 255, 255, 0.9);
+    color: #f3f4f6;
   }
 </style>
