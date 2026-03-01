@@ -1203,9 +1203,18 @@ const bootstrapServerHubsAndReserves = async (
       }
     : undefined;
 
-  for (const [index, hubEntityId] of hubEntityIds.entries()) {
-    const hubConfig = hubConfigs[index];
-    const disputeAutoFinalizeMode: 'auto' | 'ignore' = hubConfig?.name === 'H2' ? 'ignore' : 'auto';
+  const hubConfigBySignerLabel = new Map<string, (typeof hubConfigs)[number]>();
+  for (const cfg of hubConfigs) {
+    hubConfigBySignerLabel.set(String(cfg.signerId || '').toLowerCase(), cfg);
+  }
+
+  for (const hub of hubBootstraps) {
+    const hubEntityId = String(hub.entityId || '').toLowerCase();
+    const signerLabel = String(hub.signerLabel || '').toLowerCase();
+    const hubConfig = hubConfigBySignerLabel.get(signerLabel);
+    const hubName = String(hubConfig?.name || '').toLowerCase();
+    const disputeAutoFinalizeMode: 'auto' | 'ignore' =
+      hubName === 'h2' || signerLabel === 'hub-2' ? 'ignore' : 'auto';
     const replica = getEntityReplicaById(env, hubEntityId);
     if (!replica?.state) continue;
     replica.state.hubRebalanceConfig = {
@@ -1226,7 +1235,7 @@ const bootstrapServerHubsAndReserves = async (
       );
     }
     console.log(
-      `[XLN] Hub ${hubEntityId.slice(-8)} rebalance config set ` +
+      `[XLN] Hub ${hubEntityId.slice(-8)} (${hubConfig?.name || hub.signerLabel || 'unknown'}) rebalance config set ` +
       `(amount, 1000ppm, disputeAutoFinalize=${disputeAutoFinalizeMode}, rebalance policy triplet)`,
     );
   }
