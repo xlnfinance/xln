@@ -321,4 +321,41 @@ test.describe('E2E Swap Flow', () => {
     expect(result.ok, `scenario swap failed: ${result.error || 'unknown'}`).toBe(true);
     expect(Number(result.partialFillCount || 0), 'expected at least one partial fill in scenario swap').toBeGreaterThan(0);
   });
+
+  test('browser e2e scenario swapMarket includes partial fills', async ({ page }) => {
+    test.setTimeout(480_000);
+
+    await timedStep('swap_market.goto_app', () => gotoApp(page));
+    await timedStep('swap_market.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('swap_market.create_runtime', () => createDemoRuntime(page, `swap-market-${Date.now()}`, randomMnemonic()));
+
+    const result = await timedStep('swap_market.run_scenario', async () => {
+      return await page.evaluate(async () => {
+        const XLN = (window as any).XLN;
+        const env = (window as any).isolatedEnv;
+        if (!XLN?.scenarios?.swapMarket || !env) return { ok: false, error: 'XLN.scenarios.swapMarket or isolatedEnv missing' };
+        try {
+          await XLN.scenarios.swapMarket(env);
+          let partialFillCount = 0;
+          for (const rep of env.eReplicas.values()) {
+            for (const account of rep?.state?.accounts?.values?.() || []) {
+              for (const frame of account?.frameHistory || []) {
+                for (const tx of frame?.accountTxs || []) {
+                  if (tx?.type !== 'swap_resolve') continue;
+                  const ratio = Number(tx?.data?.fillRatio ?? 0);
+                  if (ratio > 0 && ratio < 65535) partialFillCount += 1;
+                }
+              }
+            }
+          }
+          return { ok: true, partialFillCount };
+        } catch (error: any) {
+          return { ok: false, error: error?.message || String(error) };
+        }
+      });
+    });
+
+    expect(result.ok, `scenario swapMarket failed: ${result.error || 'unknown'}`).toBe(true);
+    expect(Number(result.partialFillCount || 0), 'expected at least one partial fill in scenario swapMarket').toBeGreaterThan(0);
+  });
 });
