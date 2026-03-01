@@ -45,6 +45,11 @@ export interface SwapCancelEvent {
   accountId: string;
 }
 
+export interface SwapCancelRequestEvent {
+  offerId: string;
+  accountId: string;
+}
+
 export interface MatchResult {
   mempoolOps: MempoolOp[];       // swap_resolve txs to push
   bookUpdates: {                 // orderbook state mutations
@@ -59,6 +64,7 @@ export interface AccountHandlerResult {
   // Pure events for entity-level orchestration:
   mempoolOps: MempoolOp[];
   swapOffersCreated: SwapOfferEvent[];
+  swapCancelRequests: SwapCancelRequestEvent[];
   swapOffersCancelled: SwapCancelEvent[];
   // Multi-signer: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute' | 'settlement'; context: string }>;
@@ -75,6 +81,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   // Collect events for entity-level orchestration (pure - no direct mempool mutation)
   const mempoolOps: MempoolOp[] = [];
   const allSwapOffersCreated: SwapOfferEvent[] = [];
+  const allSwapCancelRequests: SwapCancelRequestEvent[] = [];
   const allSwapOffersCancelled: SwapCancelEvent[] = [];
   // Multi-signer: Collect hashes during processing (not scanning)
   const allHashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [];
@@ -325,7 +332,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             continue;
           }
 
-          if (accountTx.type === 'swap_resolve' || accountTx.type === 'swap_cancel') {
+          if (accountTx.type === 'swap_resolve') {
             const key = `${counterpartyId}:${accountTx.data.offerId}`;
             if (newState.pendingSwapFillRatios?.delete(key)) {
               console.log(`📉 Cleared pending fillRatio for ${key.slice(-12)}`);
@@ -831,13 +838,22 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         allSwapOffersCreated.push(...swapOffersCreated);
       }
 
+      const swapCancelRequests = result.swapCancelRequests || [];
+      if (swapCancelRequests.length > 0) {
+        console.log(`📊 SWAP-EVENTS: Collected ${swapCancelRequests.length} swap cancel requests`);
+        allSwapCancelRequests.push(...swapCancelRequests);
+      }
+
       const swapOffersCancelled = result.swapOffersCancelled || [];
       if (swapOffersCancelled.length > 0) {
         console.log(`📊 SWAP-EVENTS: Collected ${swapOffersCancelled.length} swap cancels`);
-        allSwapOffersCancelled.push(...swapOffersCancelled);
+        // Normalize to local counterparty key for this account machine.
+        // swapBook keys are always `${counterpartyId}:${offerId}` in local entity perspective.
+        const normalizedCancels = swapOffersCancelled.map(({ offerId }) => ({ offerId, accountId: counterpartyId }));
+        allSwapOffersCancelled.push(...normalizedCancels);
         // Update E-Machine swapBook immediately (this is entity state, not mempool)
         // AUDIT FIX (CRITICAL-6): Use namespaced key for swapBook delete
-        for (const { offerId, accountId } of swapOffersCancelled) {
+        for (const { offerId, accountId } of normalizedCancels) {
           const swapBookKey = `${accountId}:${offerId}`;
           newState.swapBook.delete(swapBookKey);
         }
@@ -895,6 +911,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     outputs,
     mempoolOps,
     swapOffersCreated: allSwapOffersCreated,
+    swapCancelRequests: allSwapCancelRequests,
     swapOffersCancelled: allSwapOffersCancelled,
     ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
   };
@@ -1096,14 +1113,20 @@ export function processOrderbookSwaps(
  */
 export function processOrderbookCancels(
   hubState: EntityState,
-  cancels: SwapCancelEvent[]
-): { pairId: string; book: BookState }[] {
+  cancels: SwapCancelRequestEvent[]
+): MatchResult {
+  const mempoolOps: MempoolOp[] = [];
   const bookUpdates: { pairId: string; book: BookState }[] = [];
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) return bookUpdates;
+  if (!ext) return { mempoolOps, bookUpdates };
 
   for (const { offerId, accountId } of cancels) {
+    const accountMachine = hubState.accounts.get(accountId);
+    const hasOffer = Boolean(accountMachine?.swapOffers?.has(offerId));
+    if (!hasOffer) continue;
+
     const namespacedOrderId = `${accountId}:${offerId}`;
+    let orderbookCancelled = false;
 
     for (const [bookKey, book] of ext.books) {
       const maybeOrderIdx = book.orderIdToIdx.get(namespacedOrderId);
@@ -1122,9 +1145,29 @@ export function processOrderbookCancels(
 
       bookUpdates.push({ pairId: bookKey, book: result.state });
       console.log(`📊 ORDERBOOK: Cancelled order ${offerId.slice(-8)}`);
+      orderbookCancelled = true;
       break;
+    }
+
+    // Finalize cancellation at account level (releases hold + removes offer) via hub decision.
+    // If order already gone from book but offer still exists in account, we still force cancelRemainder.
+    mempoolOps.push({
+      accountId,
+      tx: {
+        type: 'swap_resolve',
+        data: {
+          offerId,
+          fillRatio: 0,
+          cancelRemainder: true,
+        },
+      },
+    });
+    if (!orderbookCancelled) {
+      console.log(`📊 ORDERBOOK: Offer ${offerId.slice(-8)} not active in book, forcing account-level cancel`);
+    } else {
+      console.log(`📤 ORDERBOOK: Queued swap_resolve(cancelRemainder) for ${offerId.slice(-8)}`);
     }
   }
 
-  return bookUpdates;
+  return { mempoolOps, bookUpdates };
 }

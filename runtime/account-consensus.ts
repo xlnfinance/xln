@@ -392,6 +392,7 @@ export async function proposeAccountFrame(
     wantAmount: bigint;
     minFillRatio: number;
   }>;
+  swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
   swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
   // MULTI-SIGNER: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
@@ -484,6 +485,7 @@ export async function proposeAccountFrame(
     wantAmount: bigint;
     minFillRatio: number;
   }> = [];
+  const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
   const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
   if (HEAVY_LOGS)
@@ -549,7 +551,13 @@ export async function proposeAccountFrame(
       swapOffersCreated.push(result.swapOfferCreated);
     }
 
-    // Collect cancelled offers for orderbook cleanup
+    // Collect cancel requests for hub orderbook cancellation flow
+    if (result.swapOfferCancelRequested) {
+      if (!quiet) console.log(`📊 Collected swap cancel request: ${result.swapOfferCancelRequested.offerId}`);
+      swapCancelRequests.push(result.swapOfferCancelRequested);
+    }
+
+    // Collect finalized cancellations for swapBook/orderbook cleanup
     if (result.swapOfferCancelled) {
       if (!quiet) console.log(`📊 Collected swap cancel: ${result.swapOfferCancelled.offerId}`);
       swapOffersCancelled.push(result.swapOfferCancelled);
@@ -839,6 +847,7 @@ export async function proposeAccountFrame(
     events,
     revealedSecrets,
     swapOffersCreated,
+    swapCancelRequests,
     swapOffersCancelled,
     hashesToSign,
   };
@@ -872,6 +881,7 @@ export async function handleAccountInput(
     wantAmount: bigint;
     minFillRatio: number;
   }>;
+  swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
   swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
   timedOutHashlocks?: string[];
   // MULTI-SIGNER: Hashes that need entity-quorum signing
@@ -1124,6 +1134,7 @@ export async function handleAccountInput(
               timedOutHashlocks,
               ...(proposeResult.revealedSecrets && { revealedSecrets: proposeResult.revealedSecrets }),
               ...(proposeResult.swapOffersCreated && { swapOffersCreated: proposeResult.swapOffersCreated }),
+              ...(proposeResult.swapCancelRequests && { swapCancelRequests: proposeResult.swapCancelRequests }),
               ...(proposeResult.swapOffersCancelled && { swapOffersCancelled: proposeResult.swapOffersCancelled }),
               ...(proposeResult.hashesToSign &&
                 proposeResult.hashesToSign.length > 0 && { hashesToSign: proposeResult.hashesToSign }),
@@ -1419,6 +1430,7 @@ export async function handleAccountInput(
       wantAmount: bigint;
       minFillRatio: number;
     }> = [];
+    const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
     const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
     for (const accountTx of receivedFrame.accountTxs) {
@@ -1452,6 +1464,9 @@ export async function handleAccountInput(
       // Collect swap offers for orderbook integration
       if (result.swapOfferCreated) {
         swapOffersCreated.push(result.swapOfferCreated);
+      }
+      if (result.swapOfferCancelRequested) {
+        swapCancelRequests.push(result.swapOfferCancelRequested);
       }
       if (result.swapOfferCancelled) {
         swapOffersCancelled.push(result.swapOfferCancelled);
@@ -1822,6 +1837,7 @@ export async function handleAccountInput(
 
     // Merge swap offers from BOTH incoming frame AND proposed frame
     const allSwapOffersCreated = [...swapOffersCreated, ...(proposeResult?.swapOffersCreated || [])];
+    const allSwapCancelRequests = [...swapCancelRequests, ...(proposeResult?.swapCancelRequests || [])];
     const allSwapOffersCancelled = [...swapOffersCancelled, ...(proposeResult?.swapOffersCancelled || [])];
 
     // Collect hashes that need entity-quorum signing (multi-signer support)
@@ -1845,6 +1861,7 @@ export async function handleAccountInput(
       events,
       revealedSecrets: allRevealedSecrets,
       swapOffersCreated: allSwapOffersCreated,
+      swapCancelRequests: allSwapCancelRequests,
       swapOffersCancelled: allSwapOffersCancelled,
       timedOutHashlocks,
       ...(hashesToSign.length > 0 && { hashesToSign }),
@@ -1862,7 +1879,7 @@ export async function handleAccountInput(
   }
 
   if (HEAVY_LOGS) console.log(`🔍 RETURN-NO-RESPONSE: No response object`);
-  return { success: true, events, swapOffersCreated: [], swapOffersCancelled: [], timedOutHashlocks };
+  return { success: true, events, swapOffersCreated: [], swapCancelRequests: [], swapOffersCancelled: [], timedOutHashlocks };
 }
 
 // === E-MACHINE INTEGRATION ===

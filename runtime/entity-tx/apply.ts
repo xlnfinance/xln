@@ -10,7 +10,13 @@ import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { buildEntityProfile, mergeProfileWithExisting } from '../networking/gossip-helper';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
-import { handleAccountInput, type MempoolOp, type SwapOfferEvent, type SwapCancelEvent } from './handlers/account';
+import {
+  handleAccountInput,
+  type MempoolOp,
+  type SwapOfferEvent,
+  type SwapCancelEvent,
+  type SwapCancelRequestEvent,
+} from './handlers/account';
 import { handleJEvent } from './j-events';
 
 // Extended return type including pure events from handlers
@@ -21,6 +27,7 @@ export interface ApplyEntityTxResult {
   // Pure events for entity-level orchestration
   mempoolOps?: MempoolOp[];
   swapOffersCreated?: SwapOfferEvent[];
+  swapCancelRequests?: SwapCancelRequestEvent[];
   swapOffersCancelled?: SwapCancelEvent[];
   // Multi-signer: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: HashType; context: string }>;
@@ -296,6 +303,7 @@ export const applyEntityTx = async (
         outputs: result.outputs,
         mempoolOps: result.mempoolOps,
         swapOffersCreated: result.swapOffersCreated,
+        swapCancelRequests: result.swapCancelRequests,
         swapOffersCancelled: result.swapOffersCancelled,
         ...(result.hashesToSign && result.hashesToSign.length > 0 && { hashesToSign: result.hashesToSign }),
       };
@@ -1249,9 +1257,9 @@ export const applyEntityTx = async (
       return { newState, outputs, mempoolOps };
     }
 
-    if (entityTx.type === 'cancelSwapOffer' || entityTx.type === 'cancelSwap') {
+    if (entityTx.type === 'cancelSwapOffer' || entityTx.type === 'cancelSwap' || entityTx.type === 'proposeCancelSwap') {
       console.log(
-        `📊 CANCEL-SWAP: ${entityState.entityId.slice(-4)} cancelling offer with ${entityTx.data.counterpartyEntityId.slice(-4)}`,
+        `📊 CANCEL-SWAP-REQUEST: ${entityState.entityId.slice(-4)} requesting cancel with ${entityTx.data.counterpartyEntityId.slice(-4)}`,
       );
 
       const newState = cloneEntityState(entityState);
@@ -1268,17 +1276,13 @@ export const applyEntityTx = async (
       }
 
       const accountTx: AccountTx = {
-        type: 'swap_cancel',
+        type: 'swap_cancel_request',
         data: { offerId },
       };
 
       // Pure: return mempoolOp instead of mutating directly
       mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
-      console.log(`📊 Added swap_cancel to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
-
-      // AUDIT FIX (CRITICAL-6): Use namespaced key for swapBook delete
-      const swapBookKey = `${counterpartyEntityId}:${offerId}`;
-      newState.swapBook.delete(swapBookKey);
+      console.log(`📊 Added swap_cancel_request to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
       const firstValidator = entityState.config.validators[0];
       if (firstValidator) {

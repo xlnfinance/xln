@@ -642,20 +642,34 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('         PHASE 3: Market Volatility (Cancel & Replace)         ');
   console.log('═══════════════════════════════════════════════════════════════\n');
 
-  // Alice cancels her ETH ask (price too high, no fills)
-  console.log('🚫 Alice: Cancel ETH ask @ $3100 (no fills, repricing)');
+  // Alice requests cancel for her ETH ask (price too high, no fills)
+  console.log('🚫 Alice: Request cancel ETH ask @ $3100 (no fills, repricing)');
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
     entityTxs: [{
-      type: 'cancelSwapOffer',
+      type: 'proposeCancelSwap',
       data: {
         offerId: 'alice-eth-ask',
         counterpartyEntityId: hubEth.id,
       },
     }],
   }]);
-  console.log('  ✅ Order cancelled\n');
+  await converge(env);
+  await process(env, [{
+    entityId: hubEth.id,
+    signerId: hubEth.signer,
+    entityTxs: [{
+      type: 'resolveSwap',
+      data: {
+        counterpartyEntityId: alice.id,
+        offerId: 'alice-eth-ask',
+        fillRatio: 0,
+        cancelRemainder: true,
+      },
+    }],
+  }]);
+  console.log('  ✅ Cancel request resolved by hub\n');
 
   // Alice replaces with better price
   console.log('📊 Alice: New ETH ask @ $3020 (tighter spread)');

@@ -1762,7 +1762,12 @@
               />
 
             {:else if accountWorkspaceTab === 'swap'}
-              <SwapPanel {replica} {tab} />
+              <SwapPanel
+                {replica}
+                {tab}
+                counterpartyId={selectedAccountId || ''}
+                prefilledCounterparty={!!selectedAccountId}
+              />
 
             {:else if accountWorkspaceTab === 'open'}
               <div class="account-open-sections">

@@ -22,6 +22,7 @@ import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
 import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
+import { DEFAULT_SPREAD_DISTRIBUTION } from './orderbook';
 import { deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from './networking/p2p-crypto';
 import { buildEntityProfile } from './networking/gossip-helper';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -182,10 +183,11 @@ const hubSignerAddresses = new Map<string, string>();
 const HUB_MESH_TOKEN_ID = 1;
 const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
 const HUB_MESH_REQUIRED_HUBS = 3;
-const HUB_REQUIRED_TOKEN_COUNT = 2;
+const HUB_REQUIRED_TOKEN_COUNT = 3;
 const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
 const HUB_RESERVE_ASSERT_TIMEOUT_MS = 30_000;
 const HUB_MESH_ASSERT_TIMEOUT_MS = 20_000;
+const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
 
 const getMapValueCaseInsensitive = <T>(map: Map<string, T>, key: string | undefined): T | undefined => {
   if (!key) return undefined;
@@ -1238,6 +1240,34 @@ const bootstrapServerHubsAndReserves = async (
       `[XLN] Hub ${hubEntityId.slice(-8)} (${hubConfig?.name || hub.signerLabel || 'unknown'}) rebalance config set ` +
       `(amount, 1000ppm, disputeAutoFinalize=${disputeAutoFinalizeMode}, rebalance policy triplet)`,
     );
+  }
+
+  const orderbookInitInputs: EntityInput[] = [];
+  for (const hub of hubBootstraps) {
+    const hubEntityId = String(hub.entityId || '').toLowerCase();
+    const signerLabel = String(hub.signerLabel || '').toLowerCase();
+    const hubConfig = hubConfigBySignerLabel.get(signerLabel);
+    const replica = getEntityReplicaById(env, hubEntityId);
+    if (!replica?.state || replica.state.orderbookExt) continue;
+    orderbookInitInputs.push({
+      entityId: hubEntityId,
+      signerId: hub.signerId,
+      entityTxs: [{
+        type: 'initOrderbookExt',
+        data: {
+          name: hubConfig?.name || String(hub.signerLabel || 'Hub'),
+          spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+          referenceTokenId: 1,
+          minTradeSize: 0n,
+          supportedPairs: [...HUB_DEFAULT_SUPPORTED_PAIRS],
+        },
+      }],
+    });
+  }
+  if (orderbookInitInputs.length > 0) {
+    console.log(`[XLN] Initializing orderbookExt for ${orderbookInitInputs.length} hub(s)`);
+    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: orderbookInitInputs });
+    await settleRuntimeFor(env, 45);
   }
 
   if (globalJAdapter && hubEntityIds.length > 0) {

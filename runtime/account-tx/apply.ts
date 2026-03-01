@@ -18,7 +18,7 @@ import { handleHtlcLock } from './handlers/htlc-lock';
 // htlc_resolve: unified handler imported dynamically in switch case
 import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
-import { handleSwapCancel } from './handlers/swap-cancel';
+import { handleSwapCancelRequest } from './handlers/swap-cancel';
 import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../j-event-normalization';
 
@@ -57,6 +57,7 @@ export async function processAccountTx(
     wantAmount: bigint;
     minFillRatio: number;
   };
+  swapOfferCancelRequested?: { offerId: string; accountId: string };
   swapOfferCancelled?: { offerId: string; accountId: string; makerId?: string };
 }> {
   // Derive counterparty from canonical left/right using proofHeader's fromEntity as "me"
@@ -335,10 +336,11 @@ export async function processAccountTx(
         isValidation,
       );
 
-    case 'swap_cancel':
-      return await handleSwapCancel(
+    case 'swap_cancel_request':
+    case 'swap_cancel': // legacy alias
+      return await handleSwapCancelRequest(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'swap_cancel' }>,
+        accountTx as Extract<AccountTx, { type: 'swap_cancel_request' }> | Extract<AccountTx, { type: 'swap_cancel' }>,
         byLeft,
         currentHeight,
         isValidation,

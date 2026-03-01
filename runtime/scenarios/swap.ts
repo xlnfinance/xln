@@ -79,6 +79,13 @@ async function converge(env: Env, maxCycles = 10): Promise<void> {
 }
 
 async function processJEvents(env: Env): Promise<void> {
+  // RPC watcher is polling-based; force immediate poll in scenarios to avoid
+  // relying on wall-clock interval timing between submit and assertions.
+  for (const [, jReplica] of env.jReplicas) {
+    const ja = (jReplica as any).jadapter;
+    if (ja?.pollNow) await ja.pollNow();
+  }
+
   const pending = env.runtimeInput.entityInputs.length;
   if (pending === 0) return;
   const inputs = [...env.runtimeInput.entityInputs];
@@ -519,16 +526,33 @@ export async function swap(env: Env): Promise<void> {
   const swapBookKey2 = `${hub.id}:${offerId2}`;
   assert(aliceRep4.state.swapBook.has(swapBookKey2), 'Order 2 in E-Machine swapBook');
 
-  // Alice cancels
-  console.log('📊 Alice: swap_cancel');
+  // Alice requests cancel (maker cannot self-cancel directly)
+  console.log('📊 Alice: proposeCancelSwap');
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
     entityTxs: [{
-      type: 'cancelSwap',
+      type: 'proposeCancelSwap',
       data: {
         counterpartyEntityId: hub.id,
         offerId: offerId2,
+      },
+    }],
+  }]);
+  await converge(env);
+
+  // Hub resolves cancel request (explicit counterparty decision).
+  console.log('💱 Hub: resolveSwap(fill=0, cancelRemainder=true)');
+  await process(env, [{
+    entityId: hub.id,
+    signerId: hub.signer,
+    entityTxs: [{
+      type: 'resolveSwap',
+      data: {
+        counterpartyEntityId: alice.id,
+        offerId: offerId2,
+        fillRatio: 0,
+        cancelRemainder: true,
       },
     }],
   }]);
@@ -538,14 +562,14 @@ export async function swap(env: Env): Promise<void> {
   // Verify cancelled in A-Machine and E-Machine (using namespaced key)
   const [, aliceRep5] = findReplica(env, alice.id);
   const account5 = aliceRep5.state.accounts.get(hub.id);
-  assert(!account5?.swapOffers?.has(offerId2), 'Order 2 cancelled in A-Machine');
-  assert(!aliceRep5.state.swapBook.has(swapBookKey2), 'Order 2 removed from E-Machine swapBook');
+  assert(!account5?.swapOffers?.has(offerId2), 'Order 2 cancelled in A-Machine by hub resolve');
+  assert(!aliceRep5.state.swapBook.has(swapBookKey2), 'Order 2 removed from E-Machine swapBook after hub resolve');
 
   // Verify hold released
   const ethDelta5 = account5?.deltas.get(ETH_TOKEN_ID);
   assert(ethDelta5?.leftHold === 0n, 'Hold released after cancel');
 
-  console.log('  ✅ Order cancelled, swapBook cleaned, hold released\n');
+  console.log('  ✅ Cancel request resolved by hub, swapBook cleaned, hold released\n');
 
   // ============================================================================
   // TEST 5: minFillRatio enforcement
@@ -638,7 +662,7 @@ export async function swap(env: Env): Promise<void> {
   console.log('  1. ✅ swap_offer creates offer, locks capacity');
   console.log('  2. ✅ swap_resolve fills partially (50%), keeps remainder');
   console.log('  3. ✅ swap_resolve fills fully, removes offer');
-  console.log('  4. ✅ swap_cancel removes offer, releases hold');
+  console.log('  4. ✅ proposeCancelSwap + hub resolve removes offer, releases hold');
   console.log('  5. ✅ minFillRatio rejects underfills');
   console.log('\n');
   } finally {
@@ -660,6 +684,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   }
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
+  const jadapter = getScenarioJAdapter(env);
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('             PHASE 2: ORDERBOOK MATCHING (RJEA FLOW)            ');
   console.log('═══════════════════════════════════════════════════════════════\n');
@@ -933,8 +958,17 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [{
-        type: 'cancelSwapOffer',
+        type: 'proposeCancelSwap',
         data: { counterpartyEntityId: hub.id, offerId: 'alice-sell-001' },
+      }],
+    }]);
+    await converge(env);
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'resolveSwap',
+        data: { counterpartyEntityId: alice.id, offerId: 'alice-sell-001', fillRatio: 0, cancelRemainder: true },
       }],
     }]);
     await converge(env);
@@ -1091,28 +1125,13 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
 
   const targetBlock = hubAccountAfterStart.activeDispute!.disputeTimeout;
   console.log(`⏳ Waiting for dispute timeout (block ${targetBlock})...`);
-  const { createEmptyBatch, encodeJBatch, computeBatchHankoHash } = await import('../j-batch');
-  const { signHashesAsSingleEntity } = await import('../hanko-signing');
-
   while (true) {
     const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
     if (currentBlock >= targetBlock) {
       console.log(`✅ Timeout reached at block ${currentBlock}`);
       break;
     }
-    const emptyBatch = createEmptyBatch();
-    const encodedBatch = encodeJBatch(emptyBatch);
-    const chainId = BigInt(jadapter.chainId);
-    const depositoryAddress = jadapter.addresses.depository;
-    const currentNonce = await jadapter.getEntityNonce(hub.id);
-    const nextNonce = currentNonce + 1n;
-    const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
-    const hankos = await signHashesAsSingleEntity(env, hub.id, hub.signer, [batchHash]);
-    const hankoData = hankos[0];
-    if (!hankoData) {
-      throw new Error('Failed to build empty batch hanko (swap dispute)');
-    }
-    await jadapter.processBatch(encodedBatch, hankoData, nextNonce);
+    await jadapter.processBlock();
     await process(env);
   }
 
