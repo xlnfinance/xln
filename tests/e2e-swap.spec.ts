@@ -244,7 +244,7 @@ async function selectCounterpartyInSwap(page: Page): Promise<void> {
 
 test.describe('E2E Swap Flow', () => {
   test('swap place and cancel from UI updates state machine', async ({ page }) => {
-    test.setTimeout(150_000);
+    test.setTimeout(240_000);
 
     await timedStep('swap.goto_app', () => gotoApp(page));
     await timedStep('swap.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
@@ -253,6 +253,10 @@ test.describe('E2E Swap Flow', () => {
 
     await timedStep('swap.open_workspace', () => openSwapWorkspace(page));
     await timedStep('swap.select_counterparty', () => selectCounterpartyInSwap(page));
+
+    await expect(page.getByTestId('swap-best-strip')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('swap-depth-chart')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('swap-execution-preview')).toBeVisible({ timeout: 20_000 });
 
     const giveInput = page.locator('.swap-panel input[placeholder="Amount to sell"]').first();
     const wantInput = page.locator('.swap-panel input[placeholder="Amount to receive"]').first();
@@ -265,10 +269,11 @@ test.describe('E2E Swap Flow', () => {
     await expect(placeButton).toBeEnabled({ timeout: 20_000 });
     await timedStep('swap.place_offer', async () => {
       await placeButton.click();
-      await expect(page.locator('.swap-panel .offer-card').first()).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByTestId('swap-open-orders')).toBeVisible({ timeout: 60_000 });
+      await expect(page.locator('.swap-panel .orders-table tbody tr').first()).toBeVisible({ timeout: 60_000 });
     });
 
-    const cancelButton = page.locator('.swap-panel .cancel-btn').first();
+    const cancelButton = page.locator('.swap-panel .orders-table tbody .cancel-btn').first();
     await expect(cancelButton).toBeVisible({ timeout: 20_000 });
     await timedStep('swap.cancel_offer', async () => {
       await cancelButton.click();
@@ -313,12 +318,20 @@ test.describe('E2E Swap Flow', () => {
           }
           return { ok: true, partialFillCount };
         } catch (error: any) {
-          return { ok: false, error: error?.message || String(error) };
+          return {
+            ok: false,
+            error: error?.message || String(error),
+            stack: error?.stack || null,
+            name: error?.name || null,
+          };
         }
       });
     });
 
-    expect(result.ok, `scenario swap failed: ${result.error || 'unknown'}`).toBe(true);
+    expect(
+      result.ok,
+      `scenario swap failed: ${result.error || 'unknown'}\n${result.name || ''}\n${result.stack || ''}`,
+    ).toBe(true);
     expect(Number(result.partialFillCount || 0), 'expected at least one partial fill in scenario swap').toBeGreaterThan(0);
   });
 
@@ -350,12 +363,20 @@ test.describe('E2E Swap Flow', () => {
           }
           return { ok: true, partialFillCount };
         } catch (error: any) {
-          return { ok: false, error: error?.message || String(error) };
+          return {
+            ok: false,
+            error: error?.message || String(error),
+            stack: error?.stack || null,
+            name: error?.name || null,
+          };
         }
       });
     });
 
-    expect(result.ok, `scenario swapMarket failed: ${result.error || 'unknown'}`).toBe(true);
+    expect(
+      result.ok,
+      `scenario swapMarket failed: ${result.error || 'unknown'}\n${result.name || ''}\n${result.stack || ''}`,
+    ).toBe(true);
     expect(Number(result.partialFillCount || 0), 'expected at least one partial fill in scenario swapMarket').toBeGreaterThan(0);
   });
 });

@@ -17,7 +17,7 @@ import { main, enqueueRuntimeInput, startP2P, startRuntimeLoop, registerEntityRu
 import { safeStringify } from './serialization-utils';
 import type { Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
 import { encodeBoard, hashBoard } from './entity-factory';
-import { deriveSignerKeySync } from './account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from './account-crypto';
 import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
 import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
@@ -49,6 +49,7 @@ let globalJAdapter: JAdapter | null = null;
 // Server encryption keypair now managed by relay-local-delivery.ts
 const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
 let coldResetRebuildInFlight: Promise<void> | null = null;
+let coldResetGate: Promise<void> = Promise.resolve();
 let coldResetRebuildError: string | null = null;
 let coldResetStartedAt = 0;
 let coldResetCompletedAt = 0;
@@ -188,6 +189,37 @@ const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
 const HUB_RESERVE_ASSERT_TIMEOUT_MS = 30_000;
 const HUB_MESH_ASSERT_TIMEOUT_MS = 20_000;
 const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
+const MARKET_MAKER_SIGNER_LABEL = process.env.MARKET_MAKER_SIGNER_LABEL ?? 'mm-1';
+const MARKET_MAKER_SEED = process.env.MARKET_MAKER_SEED ?? `${HUB_SEED}:market-maker`;
+const MARKET_MAKER_NAME = process.env.MARKET_MAKER_NAME ?? 'MM';
+const MARKET_MAKER_CREDIT_AMOUNT = 10_000_000n * 10n ** 18n;
+const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env.MARKET_MAKER_QUOTE_LOOP_MS || '2500'));
+const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
+  4,
+  Number(process.env.MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK || '10'),
+);
+const MARKET_MAKER_LEVEL_OFFSETS_BPS = [60, 140, 240, 360, 520] as const;
+const MARKET_MAKER_LEVEL_BASE_SIZES = [
+  30n * 10n ** 18n,
+  45n * 10n ** 18n,
+  60n * 10n ** 18n,
+  75n * 10n ** 18n,
+  90n * 10n ** 18n,
+] as const;
+const MARKET_MAKER_MID_PRICES_BPS = [25_000_000n, 17_500_000n, 11_500n] as const;
+
+let marketMakerLoopTimer: ReturnType<typeof setInterval> | null = null;
+let marketMakerLoopInFlight = false;
+
+type MarketMakerOfferSpec = {
+  offerId: string;
+  hubEntityId: string;
+  giveTokenId: number;
+  giveAmount: bigint;
+  wantTokenId: number;
+  wantAmount: bigint;
+  minFillRatio: number;
+};
 
 const getMapValueCaseInsensitive = <T>(map: Map<string, T>, key: string | undefined): T | undefined => {
   if (!key) return undefined;
@@ -434,95 +466,452 @@ const settleRuntimeFor = async (env: Env, rounds = 30): Promise<void> => {
   }
 };
 
+const stopMarketMakerLoop = (): void => {
+  if (marketMakerLoopTimer) {
+    clearInterval(marketMakerLoopTimer);
+    marketMakerLoopTimer = null;
+  }
+  marketMakerLoopInFlight = false;
+};
+
+const normalizeTokenIdsForMm = (tokenCatalog: JTokenInfo[]): number[] => {
+  const ids = tokenCatalog
+    .map(token => Number(token.tokenId))
+    .filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
+    .sort((a, b) => a - b);
+  return Array.from(new Set(ids)).slice(0, 3);
+};
+
+const buildMarketMakerPairs = (tokenIds: number[]): Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> => {
+  if (tokenIds.length < 3) return [];
+  const [a, b, c] = tokenIds;
+  const pairs = [
+    { baseTokenId: Math.min(a, b), quoteTokenId: Math.max(a, b) },
+    { baseTokenId: Math.min(a, c), quoteTokenId: Math.max(a, c) },
+    { baseTokenId: Math.min(b, c), quoteTokenId: Math.max(b, c) },
+  ];
+  return pairs.map(pair => ({
+    ...pair,
+    pairId: `${pair.baseTokenId}/${pair.quoteTokenId}`,
+  }));
+};
+
+const ensureMarketMakerEntity = async (
+  env: Env,
+  relayUrl: string,
+): Promise<{ entityId: string; signerId: string } | null> => {
+  const mmSignerPrivateKey = deriveSignerKeySync(MARKET_MAKER_SEED, MARKET_MAKER_SIGNER_LABEL);
+  const mmSignerId = deriveSignerAddressSync(MARKET_MAKER_SEED, MARKET_MAKER_SIGNER_LABEL);
+  registerSignerKey(mmSignerId, mmSignerPrivateKey);
+
+  const activeJurisdictionName =
+    env.activeJurisdiction || (env.jReplicas ? Array.from(env.jReplicas.keys())[0] : undefined);
+  const activeJReplica = activeJurisdictionName ? env.jReplicas?.get(activeJurisdictionName) : undefined;
+  const jurisdictionConfig = activeJReplica
+    ? {
+        name: activeJurisdictionName,
+        chainId: Number(activeJReplica.jadapter?.chainId ?? activeJReplica.chainId ?? 0),
+        address: activeJReplica.rpcs?.[0] ?? '',
+        entityProviderAddress: activeJReplica.entityProviderAddress ?? activeJReplica.contracts?.entityProvider ?? '',
+        depositoryAddress: activeJReplica.depositoryAddress ?? activeJReplica.contracts?.depository ?? '',
+      }
+    : undefined;
+
+  const consensusConfig = {
+    mode: 'proposer-based' as const,
+    threshold: 1n,
+    validators: [mmSignerId],
+    shares: { [mmSignerId]: 1n },
+    ...(jurisdictionConfig ? { jurisdiction: jurisdictionConfig } : {}),
+  };
+
+  const entityId = hashBoard(encodeBoard(consensusConfig)).toLowerCase();
+  const existingReplica = getEntityReplicaById(env, entityId);
+  if (!existingReplica) {
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [
+        {
+          type: 'importReplica',
+          entityId,
+          signerId: mmSignerId,
+          data: {
+            config: consensusConfig,
+            isProposer: true,
+            position: { x: 0, y: -40, z: 120 },
+          },
+        },
+      ],
+      entityInputs: [],
+    });
+    await settleRuntimeFor(env, 35);
+  }
+
+  try {
+    env.gossip?.announce?.({
+      entityId,
+      runtimeId: env.runtimeId,
+      capabilities: ['market-maker', 'liquidity-provider'],
+      accounts: [],
+      relays: relayUrl ? [relayUrl] : [],
+      endpoints: relayUrl ? [relayUrl] : [],
+      metadata: {
+        name: MARKET_MAKER_NAME,
+        role: 'market-maker',
+        isHub: false,
+        lastUpdated: Date.now(),
+      },
+    });
+  } catch {
+    // best-effort profile announcement
+  }
+
+  return { entityId, signerId: mmSignerId };
+};
+
+const collectOfferIdsForAccount = (account: any): Set<string> => {
+  const ids = new Set<string>();
+  if (account?.swapOffers instanceof Map) {
+    for (const offerId of account.swapOffers.keys()) {
+      ids.add(String(offerId));
+    }
+  }
+  for (const tx of account?.mempool || []) {
+    if (tx?.type !== 'swap_offer') continue;
+    const offerId = String(tx?.data?.offerId || '');
+    if (offerId) ids.add(offerId);
+  }
+  for (const tx of account?.pendingFrame?.accountTxs || []) {
+    if (tx?.type !== 'swap_offer') continue;
+    const offerId = String(tx?.data?.offerId || '');
+    if (offerId) ids.add(offerId);
+  }
+  return ids;
+};
+
+const buildMarketMakerOfferSpecs = (
+  hubEntityIds: string[],
+  tokenIds: number[],
+): MarketMakerOfferSpec[] => {
+  const specs: MarketMakerOfferSpec[] = [];
+  const pairs = buildMarketMakerPairs(tokenIds);
+  for (const hubEntityId of hubEntityIds) {
+    const hubSuffix = hubEntityId.slice(-6).toLowerCase();
+    for (let pairIndex = 0; pairIndex < pairs.length; pairIndex++) {
+      const pair = pairs[pairIndex]!;
+      const midPriceBps = MARKET_MAKER_MID_PRICES_BPS[pairIndex] ?? MARKET_MAKER_MID_PRICES_BPS[0];
+      for (let level = 0; level < MARKET_MAKER_LEVEL_OFFSETS_BPS.length; level++) {
+        const offsetBps = MARKET_MAKER_LEVEL_OFFSETS_BPS[level]!;
+        const baseSize = MARKET_MAKER_LEVEL_BASE_SIZES[level]!;
+        const askPriceBps = (midPriceBps * BigInt(10_000 + offsetBps)) / 10_000n;
+        const bidPriceBps = (midPriceBps * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
+        const askWantAmount = (baseSize * askPriceBps) / 10_000n;
+        const bidGiveAmount = (baseSize * bidPriceBps) / 10_000n;
+        const levelId = level + 1;
+
+        if (askWantAmount > 0n) {
+          specs.push({
+            offerId: `mm-${hubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-ask-${levelId}`,
+            hubEntityId,
+            giveTokenId: pair.baseTokenId,
+            giveAmount: baseSize,
+            wantTokenId: pair.quoteTokenId,
+            wantAmount: askWantAmount,
+            minFillRatio: 1,
+          });
+        }
+
+        if (bidGiveAmount > 0n) {
+          specs.push({
+            offerId: `mm-${hubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-bid-${levelId}`,
+            hubEntityId,
+            giveTokenId: pair.quoteTokenId,
+            giveAmount: bidGiveAmount,
+            wantTokenId: pair.baseTokenId,
+            wantAmount: baseSize,
+            minFillRatio: 1,
+          });
+        }
+      }
+    }
+  }
+  return specs;
+};
+
+const ensureMarketMakerHubConnectivity = async (
+  env: Env,
+  mmEntityId: string,
+  mmSignerId: string,
+  hubEntityIds: string[],
+  tokenIds: number[],
+): Promise<void> => {
+  const accountOpenInputs: EntityInput[] = [];
+  const creditInputs: EntityInput[] = [];
+
+  for (const hubEntityId of hubEntityIds) {
+    const hubSignerId = getHubSignerForEntity(env, hubEntityId);
+    const mmAccount = getAccountMachine(env, mmEntityId, hubEntityId);
+    const hubAccount = getAccountMachine(env, hubEntityId, mmEntityId);
+    const hasMmToHub = hasAccount(env, mmEntityId, hubEntityId);
+    const hasHubToMm = hasAccount(env, hubEntityId, mmEntityId);
+    const hasPendingConsensus =
+      Boolean(mmAccount?.pendingFrame) ||
+      Boolean(hubAccount?.pendingFrame) ||
+      Number(mmAccount?.mempool?.length || 0) > 0 ||
+      Number(hubAccount?.mempool?.length || 0) > 0;
+
+    if (!hasMmToHub && !hasPendingConsensus) {
+      accountOpenInputs.push({
+        entityId: mmEntityId,
+        signerId: mmSignerId,
+        entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubEntityId, tokenId: tokenIds[0] ?? 1 } }],
+      });
+    }
+    if (!hasHubToMm && !hasPendingConsensus) {
+      accountOpenInputs.push({
+        entityId: hubEntityId,
+        signerId: hubSignerId,
+        entityTxs: [{ type: 'openAccount', data: { targetEntityId: mmEntityId, tokenId: tokenIds[0] ?? 1 } }],
+      });
+    }
+  }
+
+  if (accountOpenInputs.length > 0) {
+    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: accountOpenInputs });
+    await settleRuntimeFor(env, 35);
+  }
+
+  for (const hubEntityId of hubEntityIds) {
+    const hubSignerId = getHubSignerForEntity(env, hubEntityId);
+    const mmAccount = getAccountMachine(env, mmEntityId, hubEntityId);
+    const hubAccount = getAccountMachine(env, hubEntityId, mmEntityId);
+    const hasPendingConsensus =
+      Boolean(mmAccount?.pendingFrame) ||
+      Boolean(hubAccount?.pendingFrame) ||
+      Number(mmAccount?.mempool?.length || 0) > 0 ||
+      Number(hubAccount?.mempool?.length || 0) > 0;
+    if (hasPendingConsensus) continue;
+
+    for (const tokenId of tokenIds) {
+      if (hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)) continue;
+      creditInputs.push({
+        entityId: mmEntityId,
+        signerId: mmSignerId,
+        entityTxs: [
+          {
+            type: 'extendCredit',
+            data: {
+              counterpartyEntityId: hubEntityId,
+              tokenId,
+              amount: MARKET_MAKER_CREDIT_AMOUNT,
+            },
+          },
+        ],
+      });
+      creditInputs.push({
+        entityId: hubEntityId,
+        signerId: hubSignerId,
+        entityTxs: [
+          {
+            type: 'extendCredit',
+            data: {
+              counterpartyEntityId: mmEntityId,
+              tokenId,
+              amount: MARKET_MAKER_CREDIT_AMOUNT,
+            },
+          },
+        ],
+      });
+    }
+  }
+
+  if (creditInputs.length > 0) {
+    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: creditInputs });
+    await settleRuntimeFor(env, 45);
+  }
+};
+
+const maintainMarketMakerQuotes = async (
+  env: Env,
+  mmEntityId: string,
+  mmSignerId: string,
+  hubEntityIds: string[],
+  tokenIds: number[],
+): Promise<void> => {
+  if (hubEntityIds.length === 0 || tokenIds.length < 3) return;
+  await ensureMarketMakerHubConnectivity(env, mmEntityId, mmSignerId, hubEntityIds, tokenIds);
+  const desiredOffers = buildMarketMakerOfferSpecs(hubEntityIds, tokenIds);
+  const grouped = new Map<string, MarketMakerOfferSpec[]>();
+  for (const spec of desiredOffers) {
+    const arr = grouped.get(spec.hubEntityId) ?? [];
+    arr.push(spec);
+    grouped.set(spec.hubEntityId, arr);
+  }
+
+  const offerInputs: EntityInput[] = [];
+  for (const [hubEntityId, specs] of grouped.entries()) {
+    const account = getAccountMachine(env, mmEntityId, hubEntityId);
+    if (!account) continue;
+    if (String(account.status || 'active') !== 'active') continue;
+    if (Number(account.mempool?.length || 0) > 0 || account.pendingFrame) continue;
+
+    const existingOfferIds = collectOfferIdsForAccount(account);
+    const missing = specs
+      .filter(spec => !existingOfferIds.has(spec.offerId))
+      .slice(0, MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK);
+    if (missing.length === 0) continue;
+
+    offerInputs.push({
+      entityId: mmEntityId,
+      signerId: mmSignerId,
+      entityTxs: missing.map(spec => ({
+        type: 'placeSwapOffer',
+        data: {
+          counterpartyEntityId: spec.hubEntityId,
+          offerId: spec.offerId,
+          giveTokenId: spec.giveTokenId,
+          giveAmount: spec.giveAmount,
+          wantTokenId: spec.wantTokenId,
+          wantAmount: spec.wantAmount,
+          minFillRatio: spec.minFillRatio,
+        },
+      })),
+    });
+  }
+
+  if (offerInputs.length > 0) {
+    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: offerInputs });
+  }
+};
+
+const bootstrapMarketMakerLiquidity = async (
+  env: Env,
+  hubEntityIds: string[],
+  relayUrl: string,
+  tokenCatalog: JTokenInfo[],
+): Promise<void> => {
+  stopMarketMakerLoop();
+  const mm = await ensureMarketMakerEntity(env, relayUrl);
+  if (!mm) return;
+  const tokenIds = normalizeTokenIdsForMm(tokenCatalog);
+  if (tokenIds.length < 3) {
+    console.warn('[XLN] MM bootstrap skipped: less than 3 tokens in catalog');
+    return;
+  }
+
+  const targetHubs = hubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS);
+  await maintainMarketMakerQuotes(env, mm.entityId, mm.signerId, targetHubs, tokenIds);
+  await settleRuntimeFor(env, 40);
+
+  marketMakerLoopTimer = setInterval(() => {
+    if (marketMakerLoopInFlight) return;
+    marketMakerLoopInFlight = true;
+    void maintainMarketMakerQuotes(env, mm.entityId, mm.signerId, targetHubs, tokenIds)
+      .catch(error => console.warn('[XLN] MM quote loop tick failed:', (error as Error).message))
+      .finally(() => {
+        marketMakerLoopInFlight = false;
+      });
+  }, MARKET_MAKER_QUOTE_LOOP_MS);
+
+  const expectedOffersPerHub =
+    buildMarketMakerPairs(tokenIds).length * MARKET_MAKER_LEVEL_OFFSETS_BPS.length * 2;
+  console.log(
+    `[XLN] MM bootstrap queued: ${targetHubs.length} hubs, target=${expectedOffersPerHub} resting offers/hub (5 levels x both sides x 3 pairs)`,
+  );
+};
+
 const ensureHubPairMeshCredit = async (env: Env, leftEntityId: string, rightEntityId: string): Promise<void> => {
   const leftSignerId = getHubSignerForEntity(env, leftEntityId);
   const rightSignerId = getHubSignerForEntity(env, rightEntityId);
-  const alreadyReady = hasPairMutualCredit(env, leftEntityId, rightEntityId, HUB_MESH_TOKEN_ID, HUB_MESH_CREDIT_AMOUNT);
-  if (alreadyReady) {
+  if (hasPairMutualCredit(env, leftEntityId, rightEntityId, HUB_MESH_TOKEN_ID, HUB_MESH_CREDIT_AMOUNT)) {
     console.log(`[XLN] Hub pair already funded: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
     return;
   }
 
-  const entityInputs: EntityInput[] = [];
-  const leftHasAccount = hasAccount(env, leftEntityId, rightEntityId);
-  const rightHasAccount = hasAccount(env, rightEntityId, leftEntityId);
+  const MAX_ATTEMPTS = 4;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    if (hasPairMutualCredit(env, leftEntityId, rightEntityId, HUB_MESH_TOKEN_ID, HUB_MESH_CREDIT_AMOUNT)) {
+      console.log(`[XLN] Hub pair credit ready: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
+      return;
+    }
 
-  if (!leftHasAccount) {
-    entityInputs.push({
-      entityId: leftEntityId,
-      signerId: leftSignerId,
-      entityTxs: [{ type: 'openAccount', data: { targetEntityId: rightEntityId, tokenId: HUB_MESH_TOKEN_ID } }],
-    });
-  }
-  if (!rightHasAccount) {
-    entityInputs.push({
-      entityId: rightEntityId,
-      signerId: rightSignerId,
-      entityTxs: [{ type: 'openAccount', data: { targetEntityId: leftEntityId, tokenId: HUB_MESH_TOKEN_ID } }],
-    });
-  }
-  if (entityInputs.length > 0) {
-    console.log(`[XLN] Opening hub account pair ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
-    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs });
-    await settleRuntimeFor(env, 35);
-  }
+    const entityInputs: EntityInput[] = [];
+    if (!hasAccount(env, leftEntityId, rightEntityId)) {
+      entityInputs.push({
+        entityId: leftEntityId,
+        signerId: leftSignerId,
+        entityTxs: [{ type: 'openAccount', data: { targetEntityId: rightEntityId, tokenId: HUB_MESH_TOKEN_ID } }],
+      });
+    }
+    if (!hasAccount(env, rightEntityId, leftEntityId)) {
+      entityInputs.push({
+        entityId: rightEntityId,
+        signerId: rightSignerId,
+        entityTxs: [{ type: 'openAccount', data: { targetEntityId: leftEntityId, tokenId: HUB_MESH_TOKEN_ID } }],
+      });
+    }
 
-  const hasBothAccounts = await waitUntil(
-    () => hasAccount(env, leftEntityId, rightEntityId) && hasAccount(env, rightEntityId, leftEntityId),
-    120,
-    120,
-  );
-  if (!hasBothAccounts) {
-    console.warn(
-      `[XLN] Hub mesh account open timed out: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`,
+    if (entityInputs.length > 0) {
+      console.log(
+        `[XLN] Opening hub account pair ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}.. (attempt ${attempt}/${MAX_ATTEMPTS})`,
+      );
+      enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs });
+      await settleRuntimeFor(env, 35);
+    }
+
+    const hasBothAccounts = await waitUntil(
+      () => hasAccount(env, leftEntityId, rightEntityId) && hasAccount(env, rightEntityId, leftEntityId),
+      120,
+      120,
     );
-  }
+    if (!hasBothAccounts) {
+      console.warn(
+        `[XLN] Hub mesh account open timed out: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}.. (attempt ${attempt}/${MAX_ATTEMPTS})`,
+      );
+      continue;
+    }
 
-  const creditInputs: EntityInput[] = [
-    {
-      entityId: leftEntityId,
-      signerId: leftSignerId,
-      entityTxs: [
+    console.log(
+      `[XLN] Extending $1M bidirectional credit for ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}.. (attempt ${attempt}/${MAX_ATTEMPTS})`,
+    );
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [
         {
-          type: 'extendCredit',
-          data: {
-            counterpartyEntityId: rightEntityId,
-            tokenId: HUB_MESH_TOKEN_ID,
-            amount: HUB_MESH_CREDIT_AMOUNT,
-          },
+          entityId: leftEntityId,
+          signerId: leftSignerId,
+          entityTxs: [
+            {
+              type: 'extendCredit',
+              data: {
+                counterpartyEntityId: rightEntityId,
+                tokenId: HUB_MESH_TOKEN_ID,
+                amount: HUB_MESH_CREDIT_AMOUNT,
+              },
+            },
+          ],
+        },
+        {
+          entityId: rightEntityId,
+          signerId: rightSignerId,
+          entityTxs: [
+            {
+              type: 'extendCredit',
+              data: {
+                counterpartyEntityId: leftEntityId,
+                tokenId: HUB_MESH_TOKEN_ID,
+                amount: HUB_MESH_CREDIT_AMOUNT,
+              },
+            },
+          ],
         },
       ],
-    },
-    {
-      entityId: rightEntityId,
-      signerId: rightSignerId,
-      entityTxs: [
-        {
-          type: 'extendCredit',
-          data: {
-            counterpartyEntityId: leftEntityId,
-            tokenId: HUB_MESH_TOKEN_ID,
-            amount: HUB_MESH_CREDIT_AMOUNT,
-          },
-        },
-      ],
-    },
-  ];
-
-  console.log(
-    `[XLN] Extending $1M bidirectional credit for ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`,
-  );
-  enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: creditInputs });
-  await settleRuntimeFor(env, 45);
-
-  const ready = hasPairMutualCredit(env, leftEntityId, rightEntityId, HUB_MESH_TOKEN_ID, HUB_MESH_CREDIT_AMOUNT);
-  if (!ready) {
-    console.warn(
-      `[XLN] Hub pair credit still below target: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`,
-    );
-  } else {
-    console.log(`[XLN] Hub pair credit ready: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
+    });
+    await settleRuntimeFor(env, 45);
   }
+
+  console.warn(
+    `[XLN] Hub pair credit still below target: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`,
+  );
 };
 
 const bootstrapHubMeshCredit = async (env: Env, requiredHubEntityIds: string[]): Promise<void> => {
@@ -973,6 +1362,34 @@ const resolveAdvertisedRelayUrl = (port?: number): string => resolveUnifiedRelay
 
 let relayStore = createRelayStore(DEFAULT_OPTIONS.serverId ?? 'xln-server');
 
+type MarketSideLevel = { price: number; size: number; total: number };
+type MarketSnapshotPayload = {
+  hubEntityId: string;
+  pairId: string;
+  depth: number;
+  bids: MarketSideLevel[];
+  asks: MarketSideLevel[];
+  spread: number | null;
+  spreadPercent: string;
+  source: 'orderbookExt';
+  entityHeight: number;
+  entityStateHash: string | null;
+  updatedAt: number;
+};
+
+type RpcMarketSubscription = {
+  hubIds: Set<string>;
+  pairIds: Set<string>;
+  depth: number;
+  seq: number;
+};
+
+const rpcMarketSubscriptions = new Map<any, RpcMarketSubscription>();
+let rpcMarketPublisherTimer: ReturnType<typeof setInterval> | null = null;
+const RPC_MARKET_PUBLISH_MS = 1000;
+const RPC_MARKET_MAX_DEPTH = 100;
+const RPC_MARKET_DEFAULT_DEPTH = 20;
+
 const normalizeHubProfileForRelay = (profile: any): any => {
   if (!profile || !profile.entityId) return profile;
   const capabilities = Array.isArray(profile.capabilities) ? profile.capabilities : [];
@@ -1083,7 +1500,10 @@ const bootstrapServerHubsAndReserves = async (
   options: XlnServerOptions,
   relayUrl: string,
   anvilRpc: string,
+  bootstrapOptions: { includeMarketMaker?: boolean } = {},
 ): Promise<string[]> => {
+  const includeMarketMaker = bootstrapOptions.includeMarketMaker !== false;
+  stopMarketMakerLoop();
   const { bootstrapHubs } = await import('../scripts/bootstrap-hub');
   const publicRpc = process.env.PUBLIC_RPC ?? anvilRpc;
   const publicHttp = process.env.PUBLIC_HTTP ?? '';
@@ -1401,6 +1821,10 @@ const bootstrapServerHubsAndReserves = async (
     `[XLN] ✅ Hub bootstrap assertions passed: hubs=${hubEntityIds.length}, tokens=${Math.min(assertTokens.length, HUB_REQUIRED_TOKEN_COUNT)}, mesh=ok`,
   );
 
+  if (includeMarketMaker && hubEntityIds.length >= HUB_MESH_REQUIRED_HUBS) {
+    await bootstrapMarketMakerLiquidity(env, hubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS), relayUrl, assertTokens);
+  }
+
   return hubEntityIds;
 };
 
@@ -1524,6 +1948,35 @@ const triggerColdReset = async (
   const clearDbState = opts.clearDb !== false;
   const preserveHubs = opts.preserveHubs === true;
   const syncRebuild = opts.syncRebuild === true;
+  const inFlightAtEntry = coldResetRebuildInFlight;
+  if (inFlightAtEntry) {
+    if (syncRebuild) {
+      await inFlightAtEntry;
+      if (coldResetRebuildError) {
+        throw new Error(`RESET_REBUILD_FAILED: ${coldResetRebuildError}`);
+      }
+      return { resetRpc, clearDb: clearDbState, activeClientsClosed: 0, preserveHubs, rebuilding: false };
+    }
+    return { resetRpc, clearDb: clearDbState, activeClientsClosed: 0, preserveHubs, rebuilding: true };
+  }
+  const previousGate = coldResetGate;
+  let releaseGate: (() => void) | null = null;
+  coldResetGate = new Promise<void>(resolve => {
+    releaseGate = resolve;
+  });
+  await previousGate;
+  try {
+    if (coldResetRebuildInFlight) {
+      if (syncRebuild) {
+        await coldResetRebuildInFlight;
+        if (coldResetRebuildError) {
+          throw new Error(`RESET_REBUILD_FAILED: ${coldResetRebuildError}`);
+        }
+        return { resetRpc, clearDb: clearDbState, activeClientsClosed: 0, preserveHubs, rebuilding: false };
+      }
+      return { resetRpc, clearDb: clearDbState, activeClientsClosed: 0, preserveHubs, rebuilding: true };
+    }
+  stopMarketMakerLoop();
   const runtimeState = env.runtimeState;
   if (runtimeState) {
     runtimeState.persistencePaused = true;
@@ -1643,7 +2096,10 @@ const triggerColdReset = async (
       console.warn('[RESET] Failed to reconnect P2P:', (error as Error).message);
     }
 
-    await bootstrapServerHubsAndReserves(env, activeServerOptions, advertisedRelayUrl, anvilRpc);
+    const includeMarketMakerOnReset = process.env.RESET_BOOTSTRAP_MARKET_MAKER === '1';
+    await bootstrapServerHubsAndReserves(env, activeServerOptions, advertisedRelayUrl, anvilRpc, {
+      includeMarketMaker: includeMarketMakerOnReset,
+    });
     console.log('[RESET] Rebuild complete');
   };
 
@@ -1665,10 +2121,16 @@ const triggerColdReset = async (
 
   if (syncRebuild) {
     await coldResetRebuildInFlight;
+    if (coldResetRebuildError) {
+      throw new Error(`RESET_REBUILD_FAILED: ${coldResetRebuildError}`);
+    }
     return { resetRpc, clearDb: clearDbState, activeClientsClosed, preserveHubs, rebuilding: false };
   }
 
   return { resetRpc, clearDb: clearDbState, activeClientsClosed, preserveHubs, rebuilding: true };
+  } finally {
+    releaseGate?.();
+  }
 };
 
 const installProcessSafetyGuards = (): void => {
@@ -1850,8 +2312,320 @@ const serveRuntimeBundle = async (): Promise<Response | null> => {
 // RPC PROTOCOL (for remote UI)
 // ============================================================================
 
+const normalizeMarketEntityId = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return /^0x[0-9a-f]{64}$/.test(normalized) ? normalized : null;
+};
+
+const normalizeMarketPairId = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(\d+)\/(\d+)$/);
+  if (!match) return null;
+  const a = Number(match[1]);
+  const b = Number(match[2]);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0 || a === b) return null;
+  const left = Math.min(a, b);
+  const right = Math.max(a, b);
+  return `${left}/${right}`;
+};
+
+const findPrevBookLevel = (bitmap: Uint32Array | number[], start: number): number => {
+  for (let i = start; i >= 0; i--) {
+    const w = Math.floor(i / 32);
+    const b = i & 31;
+    if (bitmap[w] && (bitmap[w] & (1 << b))) return i;
+  }
+  return -1;
+};
+
+const findNextBookLevel = (bitmap: Uint32Array | number[], levels: number, start: number): number => {
+  for (let i = start; i < levels; i++) {
+    const w = Math.floor(i / 32);
+    const b = i & 31;
+    if (bitmap[w] && (bitmap[w] & (1 << b))) return i;
+  }
+  return -1;
+};
+
+const extractMarketSideLevels = (
+  book: any,
+  side: 'bid' | 'ask',
+  depth: number,
+): MarketSideLevel[] => {
+  const { orderQtyLots, orderNext, orderActive, params } = book || {};
+  const pmin = Number(params?.pmin || 0);
+  const tick = Number(params?.tick || 1);
+  const levelHead = side === 'bid' ? (book?.levelHeadBid || []) : (book?.levelHeadAsk || []);
+  const bitmap = side === 'bid' ? (book?.bitmapBid || []) : (book?.bitmapAsk || []);
+  const levels = Number(book?.levels || 0);
+  const capDepth = Math.max(1, Math.min(depth, RPC_MARKET_MAX_DEPTH));
+  const maxLevelsPerBook = Math.max(capDepth * 6, capDepth);
+
+  let idx = side === 'bid' ? Number(book?.bestBidIdx ?? -1) : Number(book?.bestAskIdx ?? -1);
+  let visitedLevels = 0;
+  const out: Array<{ price: number; size: number }> = [];
+
+  while (idx !== -1 && visitedLevels < maxLevelsPerBook && out.length < capDepth) {
+    visitedLevels += 1;
+    let headIdx = levelHead[idx];
+    let levelSize = 0;
+    while (headIdx !== -1) {
+      if (orderActive?.[headIdx]) {
+        levelSize += Number(orderQtyLots?.[headIdx] || 0);
+      }
+      headIdx = orderNext?.[headIdx];
+    }
+    if (levelSize > 0) {
+      out.push({
+        price: pmin + idx * tick,
+        size: levelSize,
+      });
+    }
+    idx = side === 'bid'
+      ? findPrevBookLevel(bitmap, idx - 1)
+      : findNextBookLevel(bitmap, levels, idx + 1);
+  }
+
+  let running = 0;
+  return out.map(level => {
+    running += level.size;
+    return {
+      price: level.price,
+      size: level.size,
+      total: running,
+    };
+  });
+};
+
+const buildMarketSnapshot = (
+  env: Env,
+  hubEntityId: string,
+  pairId: string,
+  depth: number,
+): MarketSnapshotPayload => {
+  const hubReplica = getEntityReplicaById(env, hubEntityId);
+  const books = hubReplica?.state?.orderbookExt?.books;
+  const book = books instanceof Map ? books.get(pairId) : null;
+  const bids = book ? extractMarketSideLevels(book, 'bid', depth) : [];
+  const asks = book ? extractMarketSideLevels(book, 'ask', depth) : [];
+  const bestBid = bids[0];
+  const bestAsk = asks[0];
+  const spread = bestBid && bestAsk ? bestAsk.price - bestBid.price : null;
+  const spreadPercent = bestBid && bestAsk && bestAsk.price > 0
+    ? ((spread! / bestAsk.price) * 100).toFixed(3)
+    : '-';
+  const entityHeight =
+    Number(hubReplica?.state?.height || 0)
+    || Number(hubReplica?.state?.currentHeight || 0)
+    || 0;
+  const entityStateHash = typeof hubReplica?.state?.stateHash === 'string'
+    ? hubReplica.state.stateHash
+    : null;
+  return {
+    hubEntityId,
+    pairId,
+    depth,
+    bids,
+    asks,
+    spread,
+    spreadPercent,
+    source: 'orderbookExt',
+    entityHeight,
+    entityStateHash,
+    updatedAt: Date.now(),
+  };
+};
+
+const sendRpcMarketSnapshot = (
+  ws: any,
+  subscription: RpcMarketSubscription,
+  env: Env,
+): boolean => {
+  let sentAny = false;
+  const hubs = Array.from(subscription.hubIds);
+  const pairs = Array.from(subscription.pairIds);
+  for (const hubEntityId of hubs) {
+    for (const pairId of pairs) {
+      const payload = buildMarketSnapshot(env, hubEntityId, pairId, subscription.depth);
+      subscription.seq += 1;
+      ws.send(
+        safeStringify({
+          type: 'market_snapshot',
+          id: `market_${Date.now()}_${subscription.seq}`,
+          timestamp: Date.now(),
+          payload,
+        }),
+      );
+      sentAny = true;
+    }
+  }
+  return sentAny;
+};
+
+const publishRpcMarketSnapshots = (env: Env): void => {
+  if (rpcMarketSubscriptions.size === 0) return;
+  for (const [ws, subscription] of rpcMarketSubscriptions.entries()) {
+    try {
+      sendRpcMarketSnapshot(ws, subscription, env);
+    } catch {
+      rpcMarketSubscriptions.delete(ws);
+    }
+  }
+};
+
+const ensureRpcMarketPublisher = (env: Env): void => {
+  if (rpcMarketPublisherTimer) return;
+  rpcMarketPublisherTimer = setInterval(() => {
+    publishRpcMarketSnapshots(env);
+  }, RPC_MARKET_PUBLISH_MS);
+};
+
+const stopRpcMarketPublisherIfIdle = (): void => {
+  if (rpcMarketSubscriptions.size > 0) return;
+  if (!rpcMarketPublisherTimer) return;
+  clearInterval(rpcMarketPublisherTimer);
+  rpcMarketPublisherTimer = null;
+};
+
+const cleanupRpcMarketSubscription = (ws: any): void => {
+  rpcMarketSubscriptions.delete(ws);
+  stopRpcMarketPublisherIfIdle();
+};
+
+const isMarketMessageType = (type: unknown): type is 'market_subscribe' | 'market_unsubscribe' | 'market_snapshot_request' =>
+  type === 'market_subscribe' || type === 'market_unsubscribe' || type === 'market_snapshot_request';
+
+const handleMarketMessage = (ws: any, msg: any, env: Env | null): void => {
+  const { type, id } = msg;
+  if (!isMarketMessageType(type)) return;
+
+  if (type === 'market_subscribe') {
+    if (!env) {
+      ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'Runtime not ready' }));
+      return;
+    }
+    const hubValues = Array.isArray(msg?.hubEntityIds)
+      ? msg.hubEntityIds
+      : msg?.hubEntityId
+        ? [msg.hubEntityId]
+        : [];
+    const pairValues = Array.isArray(msg?.pairs)
+      ? msg.pairs
+      : msg?.pairId
+        ? [msg.pairId]
+        : [];
+    const hubIds = Array.from(new Set(hubValues.map(normalizeMarketEntityId).filter(Boolean))) as string[];
+    const pairIds = Array.from(new Set(pairValues.map(normalizeMarketPairId).filter(Boolean))) as string[];
+    if (hubIds.length === 0 || pairIds.length === 0) {
+      ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'market_subscribe requires valid hubEntityId(s) and pair(s)' }));
+      return;
+    }
+
+    const replace = msg?.replace === true;
+    const depthRaw = Number(msg?.depth);
+    const depth = Number.isFinite(depthRaw)
+      ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
+      : RPC_MARKET_DEFAULT_DEPTH;
+    const subscription = rpcMarketSubscriptions.get(ws) || {
+      hubIds: new Set<string>(),
+      pairIds: new Set<string>(),
+      depth,
+      seq: 0,
+    };
+    if (replace) {
+      subscription.hubIds.clear();
+      subscription.pairIds.clear();
+    }
+    for (const hubEntityId of hubIds) subscription.hubIds.add(hubEntityId);
+    for (const pairId of pairIds) subscription.pairIds.add(pairId);
+    subscription.depth = depth;
+    rpcMarketSubscriptions.set(ws, subscription);
+    ensureRpcMarketPublisher(env);
+
+    ws.send(
+      safeStringify({
+        type: 'ack',
+        inReplyTo: id,
+        status: 'market_subscribed',
+        data: {
+          hubEntityIds: Array.from(subscription.hubIds),
+          pairs: Array.from(subscription.pairIds),
+          depth: subscription.depth,
+          intervalMs: RPC_MARKET_PUBLISH_MS,
+        },
+      }),
+    );
+
+    try {
+      sendRpcMarketSnapshot(ws, subscription, env);
+    } catch {
+      cleanupRpcMarketSubscription(ws);
+    }
+    return;
+  }
+
+  if (type === 'market_unsubscribe') {
+    const existing = rpcMarketSubscriptions.get(ws);
+    if (!existing) {
+      ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
+      return;
+    }
+
+    const hubValues = Array.isArray(msg?.hubEntityIds)
+      ? msg.hubEntityIds
+      : msg?.hubEntityId
+        ? [msg.hubEntityId]
+        : [];
+    const pairValues = Array.isArray(msg?.pairs)
+      ? msg.pairs
+      : msg?.pairId
+        ? [msg.pairId]
+        : [];
+    const hubIds = Array.from(new Set(hubValues.map(normalizeMarketEntityId).filter(Boolean))) as string[];
+    const pairIds = Array.from(new Set(pairValues.map(normalizeMarketPairId).filter(Boolean))) as string[];
+
+    if (hubIds.length === 0 && pairIds.length === 0) {
+      cleanupRpcMarketSubscription(ws);
+      ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
+      return;
+    }
+
+    for (const hubEntityId of hubIds) existing.hubIds.delete(hubEntityId);
+    for (const pairId of pairIds) existing.pairIds.delete(pairId);
+    if (existing.hubIds.size === 0 || existing.pairIds.size === 0) {
+      cleanupRpcMarketSubscription(ws);
+    }
+    ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
+    return;
+  }
+
+  if (!env) {
+    ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'Runtime not ready' }));
+    return;
+  }
+  const existing = rpcMarketSubscriptions.get(ws);
+  if (!existing) {
+    ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'No active market subscription' }));
+    return;
+  }
+  try {
+    sendRpcMarketSnapshot(ws, existing, env);
+    ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_snapshot_sent' }));
+  } catch {
+    cleanupRpcMarketSubscription(ws);
+    ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'Failed to send market snapshot' }));
+  }
+};
+
 const handleRpcMessage = (ws: any, msg: any, env: Env | null) => {
   const { type, id } = msg;
+
+  if (isMarketMessageType(type)) {
+    ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'market_* messages are supported on /relay websocket' }));
+    return;
+  }
 
   if (type === 'subscribe') {
     const client = Array.from(relayStore.clients.values()).find(c => c.ws === ws);
@@ -3117,6 +3891,11 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   const options = { ...DEFAULT_OPTIONS, ...opts };
   activeServerOptions = { ...options };
   relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server');
+  rpcMarketSubscriptions.clear();
+  if (rpcMarketPublisherTimer) {
+    clearInterval(rpcMarketPublisherTimer);
+    rpcMarketPublisherTimer = null;
+  }
   const advertisedRelayUrl = resolveAdvertisedRelayUrl(options.port);
   const internalRelayUrl = resolveConfiguredRelayUrl(options.port);
 
@@ -3424,6 +4203,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         try {
           const msg = JSON.parse(msgStr);
           if (data.type === 'relay') {
+            if (isMarketMessageType(msg?.type)) {
+              handleMarketMessage(ws, msg, data.env);
+              return;
+            }
             Promise.resolve(relayRoute(routerConfig, ws, msg)).catch(error => {
               const reason = (error as Error).message || 'relay handler error';
               console.error(`[WS] Relay handler error: ${reason}`);
@@ -3471,6 +4254,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       },
 
       close(ws) {
+        cleanupRpcMarketSubscription(ws);
         const removedId = removeClient(relayStore, ws);
         if (removedId) {
           pushDebugEvent(relayStore, {
