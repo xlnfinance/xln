@@ -1117,6 +1117,7 @@ export const applyEntityFrame = async (
   // === AGGREGATE PURE EVENTS FROM ALL HANDLERS ===
   const allMempoolOps: Array<{ accountId: string; tx: any }> = [];
   const allSwapOffersCreated: Array<any> = [];
+  const allSwapCancelRequests: Array<any> = [];
   const allSwapOffersCancelled: Array<any> = [];
 
   // Preserve WAL transaction order exactly during live processing and replay.
@@ -1128,7 +1129,15 @@ export const applyEntityFrame = async (
         `[REPLAY][E-FRAME] entity=${currentEntityState.entityId.slice(-8)} txType=${entityTx.type}`
       );
     }
-    const { newState, outputs, jOutputs, mempoolOps, swapOffersCreated, swapOffersCancelled } = await applyEntityTx(env, currentEntityState, entityTx);
+    const {
+      newState,
+      outputs,
+      jOutputs,
+      mempoolOps,
+      swapOffersCreated,
+      swapCancelRequests,
+      swapOffersCancelled,
+    } = await applyEntityTx(env, currentEntityState, entityTx);
     currentEntityState = newState;
 
     // DEBUG: Check account mempools IMMEDIATELY after entityTx
@@ -1181,6 +1190,7 @@ export const applyEntityFrame = async (
     }
 
     if (swapOffersCreated) allSwapOffersCreated.push(...swapOffersCreated);
+    if (swapCancelRequests) allSwapCancelRequests.push(...swapCancelRequests);
     if (swapOffersCancelled) allSwapOffersCancelled.push(...swapOffersCancelled);
 
     // Debug: Log all account mempools after each tx
@@ -1327,15 +1337,38 @@ export const applyEntityFrame = async (
     }
   }
 
-  // 3. Process swap cancellations
-  if (allSwapOffersCancelled.length > 0 && currentEntityState.orderbookExt) {
-    console.log(`📊 ENTITY-ORCHESTRATOR: Processing ${allSwapOffersCancelled.length} swap cancels`);
-    const { processOrderbookCancels } = await import('./entity-tx/handlers/account');
-    const bookUpdates = processOrderbookCancels(currentEntityState, allSwapOffersCancelled);
+  // 3. Process swap cancel requests through hub orderbook
+  if (allSwapCancelRequests.length > 0) {
+    console.log(`📊 ENTITY-ORCHESTRATOR: Processing ${allSwapCancelRequests.length} swap cancel requests`);
 
-    const ext = currentEntityState.orderbookExt as any;
-    for (const { pairId, book } of bookUpdates) {
-      ext.books.set(pairId, book);
+    if (currentEntityState.orderbookExt) {
+      const { processOrderbookCancels } = await import('./entity-tx/handlers/account');
+      const cancelResult = processOrderbookCancels(currentEntityState, allSwapCancelRequests);
+
+      for (const { accountId, tx } of cancelResult.mempoolOps) {
+        const account = currentEntityState.accounts.get(accountId);
+        if (!account) continue;
+        account.mempool.push(tx);
+        proposableAccounts.add(accountId);
+        console.log(`📊   → ${accountId.slice(-8)}: ${tx.type} (cancel-request resolution)`);
+      }
+
+      const ext = currentEntityState.orderbookExt as any;
+      for (const { pairId, book } of cancelResult.bookUpdates) {
+        ext.books.set(pairId, book);
+      }
+    } else {
+      // Fallback: counterparty resolves cancel directly when no orderbook extension is configured.
+      for (const { accountId, offerId } of allSwapCancelRequests) {
+        const account = currentEntityState.accounts.get(accountId);
+        if (!account?.swapOffers?.has(offerId)) continue;
+        account.mempool.push({
+          type: 'swap_resolve',
+          data: { offerId, fillRatio: 0, cancelRemainder: true },
+        });
+        proposableAccounts.add(accountId);
+        console.log(`📊   → ${accountId.slice(-8)}: swap_resolve (fallback cancel-request resolution)`);
+      }
     }
   }
 

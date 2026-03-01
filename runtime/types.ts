@@ -731,6 +731,14 @@ export type EntityTx =
       };
     }
   | {
+      // Request hub/counterparty to cancel maker's open swap offer (no direct self-cancel)
+      type: 'proposeCancelSwap';
+      data: {
+        counterpartyEntityId: string;
+        offerId: string;
+      };
+    }
+  | {
       // Initialize orderbook extension (hub only)
       type: 'initOrderbookExt';
       data: {
@@ -1405,6 +1413,14 @@ export type AccountTx =
       };
     }
   | {
+      // Maker proposes cancellation; counterparty/hub resolves via swap_resolve.
+      type: 'swap_cancel_request';
+      data: {
+        offerId: string;
+      };
+    }
+  | {
+      // Legacy alias for swap_cancel_request.
       type: 'swap_cancel';
       data: {
         offerId: string;

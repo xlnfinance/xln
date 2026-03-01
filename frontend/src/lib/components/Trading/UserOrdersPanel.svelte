@@ -161,7 +161,7 @@
         entityId,
         signerId,
         entityTxs: [{
-          type: 'cancelSwap',
+          type: 'proposeCancelSwap',
           data: {
             counterpartyEntityId: order.counterpartyId,
             offerId: order.offerId,
@@ -224,7 +224,7 @@
             {order.counterpartyName}
           </span>
           <span class="col-actions">
-            <button class="cancel-btn" on:click={() => cancelOrder(order)} title="Cancel order">
+            <button class="cancel-btn" on:click={() => cancelOrder(order)} title="Request cancellation">
               ×
             </button>
           </span>

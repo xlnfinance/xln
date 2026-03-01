@@ -1,30 +1,25 @@
 /**
- * Swap Cancel Handler
- * User requests cancellation of their offer
- *
- * Note: This is a REQUEST to cancel. The counterparty (hub) can either:
- * - Accept the cancellation (do nothing, let the offer be removed)
- * - Or use swap_resolve with fillRatio=0, cancelRemainder=true
- *
- * In practice, for same-J swaps within trusted hub relationship,
- * the hub typically honors cancellation requests immediately.
+ * Swap Cancel Request Handler
+ * Maker can only REQUEST cancellation. Counterparty/hub decides final cancel via swap_resolve.
  *
  * Flow:
  * 1. Find offer by offerId
  * 2. Validate caller IS the maker
- * 3. Release hold
- * 4. Remove offer
+ * 3. Emit cancel-request event for orderbook/counterparty orchestration
+ *
+ * IMPORTANT: No hold release and no swapOffers mutation here.
+ * Final state transition happens only in swap_resolve (counterparty side).
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
 
-export async function handleSwapCancel(
+export async function handleSwapCancelRequest(
   accountMachine: AccountMachine,
-  accountTx: Extract<AccountTx, { type: 'swap_cancel' }>,
+  accountTx: Extract<AccountTx, { type: 'swap_cancel_request' }> | Extract<AccountTx, { type: 'swap_cancel' }>,
   byLeft: boolean,
-  currentHeight: number,
+  _currentHeight: number,
   isValidation: boolean = false
-): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelled?: { offerId: string; accountId: string; makerId: string } }> {
+): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelRequested?: { offerId: string; accountId: string } }> {
   const { offerId } = accountTx.data;
   const events: string[] = [];
 
@@ -44,49 +39,17 @@ export async function handleSwapCancel(
     return { success: false, error: `Only maker can cancel swap offer`, events };
   }
 
-  // 3. Release hold (CRITICAL: Apply during BOTH validation and commit!)
-  // Holds are consensus-critical - must be in state hash
-  const giveDelta = accountMachine.deltas.get(offer.giveTokenId);
-  if (giveDelta) {
-    if (giveDelta.leftHold === undefined) giveDelta.leftHold = 0n;
-    if (giveDelta.rightHold === undefined) giveDelta.rightHold = 0n;
-
-    // Release with underflow guard
-    if (offer.makerIsLeft) {
-      const currentHold = giveDelta.leftHold || 0n;
-      if (currentHold < offer.giveAmount) {
-        console.error(`⚠️ Swap cancel hold underflow! leftHold=${currentHold} < giveAmount=${offer.giveAmount}`);
-        giveDelta.leftHold = 0n;
-      } else {
-        giveDelta.leftHold = currentHold - offer.giveAmount;
-      }
-    } else {
-      const currentHold = giveDelta.rightHold || 0n;
-      if (currentHold < offer.giveAmount) {
-        console.error(`⚠️ Swap cancel hold underflow! rightHold=${currentHold} < giveAmount=${offer.giveAmount}`);
-        giveDelta.rightHold = 0n;
-      } else {
-        giveDelta.rightHold = currentHold - offer.giveAmount;
-      }
-    }
-    console.log(`📊 ${isValidation ? 'VALIDATION' : 'COMMIT'}: Released hold ${offer.giveAmount} for token${offer.giveTokenId}`);
-  }
-
-  // 4. Remove offer (proofBody includes swapOffers, so keep validation+commit aligned)
-  accountMachine.swapOffers.delete(offerId);
-  if (isValidation) {
-    console.log(`📊 VALIDATION: Swap offer removed, offerId=${offerId.slice(0,8)}`);
-  } else {
-    console.log(`📊 COMMIT: Swap offer removed, offerId=${offerId.slice(0,8)}`);
-  }
-
-  // AUDIT FIX (CRITICAL-3): Use counterparty ID format, not canonical pair format
-  // The maker is who created this offer (makerIsLeft determines left vs right)
+  // 3. Emit request event (used by hub orderbook cancel flow)
   const makerId = offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity;
-  // accountId for orderbook lookup = counterparty ID (Hub's Map key)
   const accountId = makerId;
-
-  events.push(`📊 Swap offer cancelled: ${offerId.slice(0,8)}... (released ${offer.giveAmount} token${offer.giveTokenId})`);
-
-  return { success: true, events, swapOfferCancelled: { offerId, accountId, makerId } };
+  events.push(`📨 Swap cancel requested: ${offerId.slice(0, 8)}...`);
+  if (isValidation) {
+    console.log(`📊 VALIDATION: swap_cancel_request accepted, offerId=${offerId.slice(0, 8)}`);
+  } else {
+    console.log(`📊 COMMIT: swap_cancel_request accepted, offerId=${offerId.slice(0, 8)}`);
+  }
+  return { success: true, events, swapOfferCancelRequested: { offerId, accountId } };
 }
+
+// Legacy export for older imports.
+export const handleSwapCancel = handleSwapCancelRequest;

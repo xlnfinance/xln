@@ -6,6 +6,7 @@
     import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
     import BigIntInput from '../Common/BigIntInput.svelte';
     import EntitySelect from './EntitySelect.svelte';
+    import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
 
   export let replica: EntityReplica | null;
   export let tab: Tab;
@@ -31,16 +32,88 @@
   $: accounts = replica?.state?.accounts
     ? Array.from(replica.state.accounts.keys())
     : [];
-  $: accountIds = accounts.map((id) => String(id));
+  $: baseAccountIds = accounts.map((id) => String(id)).sort();
+  $: accountIds = (() => {
+    const selected = String(counterpartyId || '');
+    if (!selected || !baseAccountIds.includes(selected)) return baseAccountIds;
+    return [selected, ...baseAccountIds.filter((id) => id !== selected)];
+  })();
 
-  // Get available tokens from reserves
-  $: availableTokens = (replica?.state?.reserves && replica.state.reserves instanceof Map)
-    ? Array.from(replica.state.reserves.entries()).map(([id, reserve]) => ({
-        id: id.toString(),
-        name: `Token #${id}`,
-        amount: reserve
-      }))
-    : [];
+  const DEFAULT_SWAP_TOKEN_IDS = [1, 2, 3];
+
+  function parseTokenId(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value > 0) return value;
+    if (typeof value === 'bigint' && value > 0n) return Number(value);
+    if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number.parseInt(value.trim(), 10);
+    return null;
+  }
+
+  function buildAvailableTokenIds(): number[] {
+    const accountTokenIds = new Set<number>();
+    const account = counterpartyId ? replica?.state?.accounts?.get?.(counterpartyId) : null;
+    const deltas = account?.deltas;
+    if (deltas instanceof Map) {
+      for (const [id] of deltas.entries()) {
+        const parsed = parseTokenId(id);
+        if (parsed) accountTokenIds.add(parsed);
+      }
+    }
+
+    // Use account token universe first (swap is account-scoped). If too small, augment.
+    if (accountTokenIds.size >= 2) {
+      return Array.from(accountTokenIds.values()).sort((a, b) => a - b);
+    }
+
+    const tokenIds = new Set<number>(Array.from(accountTokenIds.values()));
+    const reserves = replica?.state?.reserves;
+    if (reserves instanceof Map) {
+      for (const [id] of reserves.entries()) {
+        const parsed = parseTokenId(id);
+        if (parsed) tokenIds.add(parsed);
+      }
+    }
+    for (const id of DEFAULT_SWAP_TOKEN_IDS) tokenIds.add(id);
+    return Array.from(tokenIds.values()).sort((a, b) => a - b);
+  }
+
+  // Get available tokens from canonical entity/account state (no UI cache).
+  $: availableTokenIds = buildAvailableTokenIds();
+  $: availableTokens = availableTokenIds.map((id) => {
+    const reserve = (replica?.state?.reserves instanceof Map)
+      ? replica.state.reserves.get(id) ?? replica.state.reserves.get(String(id))
+      : 0n;
+    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(id);
+    const symbol = String(tokenInfo?.symbol || '').trim();
+    return {
+      id: id.toString(),
+      name: symbol ? `${symbol} (Token #${id})` : `Token #${id}`,
+      amount: typeof reserve === 'bigint' ? reserve : 0n,
+    };
+  });
+
+  $: {
+    const giveToken = Number.parseInt(giveTokenId, 10);
+    if (!Number.isFinite(giveToken) || !availableTokenIds.includes(giveToken)) {
+      const first = availableTokenIds[0];
+      if (first) giveTokenId = String(first);
+    }
+    const wantToken = Number.parseInt(wantTokenId, 10);
+    if (!Number.isFinite(wantToken) || !availableTokenIds.includes(wantToken) || wantTokenId === giveTokenId) {
+      const alternative = availableTokenIds.find((id) => String(id) !== giveTokenId) ?? availableTokenIds[0];
+      if (alternative) wantTokenId = String(alternative);
+    }
+  }
+
+  $: giveToken = Number.parseInt(giveTokenId, 10);
+  $: wantToken = Number.parseInt(wantTokenId, 10);
+  $: orderbookPairId =
+    Number.isFinite(giveToken) &&
+    Number.isFinite(wantToken) &&
+    giveToken > 0 &&
+    wantToken > 0 &&
+    giveToken !== wantToken
+      ? `${Math.min(giveToken, wantToken)}/${Math.max(giveToken, wantToken)}`
+      : '1/2';
 
   // Get active swap offers for this entity
   $: activeOffers = replica?.state?.swapBook
@@ -174,7 +247,7 @@
         entityId: tab.entityId,
         signerId,
         entityTxs: [{
-          type: 'cancelSwap',
+          type: 'proposeCancelSwap',
           data: {
             offerId,
             counterpartyEntityId: accountId, // accountId is the counterparty entity ID
@@ -182,7 +255,7 @@
         }]
       }] });
 
-      console.log('🚫 Swap offer cancelled:', offerId);
+      console.log('📨 Swap cancel requested:', offerId);
     } catch (error) {
       console.error('Failed to cancel swap:', error);
       alert(`Failed to cancel: ${(error as Error)?.message || 'Unknown error'}`);
@@ -258,6 +331,15 @@
     </button>
   </div>
 
+  {#if counterpartyId}
+    <div class="section">
+      <h4>Live Orderbook ({orderbookPairId})</h4>
+      <div class="orderbook-wrap">
+        <OrderbookPanel hubId={counterpartyId} pairId={orderbookPairId} depth={12} />
+      </div>
+    </div>
+  {/if}
+
   <!-- Active Swap Offers -->
   {#if activeOffers.length > 0}
     <div class="section">
@@ -268,7 +350,7 @@
             <div class="offer-header">
               <span class="offer-id">{offer.offerId.slice(0, 16)}...</span>
               <button class="cancel-btn" on:click={() => cancelSwapOffer(offer.offerId, offer.accountId)}>
-                🚫 Cancel
+                📨 Request Cancel
               </button>
             </div>
             <div class="offer-details">
@@ -378,6 +460,11 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+
+  .orderbook-wrap :global(.orderbook-panel) {
+    width: 100%;
+    min-width: 0;
   }
 
   .offer-card {
