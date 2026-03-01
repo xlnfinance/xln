@@ -56,7 +56,8 @@
 
   // Tab types
   type ViewTab = 'external' | 'reserves' | 'accounts' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance' | 'settings';
-  type AccountWorkspaceTab = 'send' | 'credit' | 'collateral' | 'swap' | 'open' | 'activity' | 'settle';
+  type AccountWorkspaceTab = 'send' | 'swap' | 'open' | 'activity' | 'settle' | 'configure';
+  type ConfigureWorkspaceTab = 'credit' | 'collateral' | 'token';
 
   // Set initial tab based on action
   function getInitialTab(): ViewTab {
@@ -69,6 +70,9 @@
   }
   let activeTab: ViewTab = getInitialTab();
   let accountWorkspaceTab: AccountWorkspaceTab = getInitialAccountWorkspaceTab();
+  let configureWorkspaceTab: ConfigureWorkspaceTab = 'credit';
+  let workspaceAccountId = '';
+  let configureTokenId = 1;
 
   // State
   let replica: EntityReplica | null = null;
@@ -218,6 +222,31 @@
   $: accountIds = replica?.state?.accounts
     ? Array.from(replica.state.accounts.keys()).map((id) => String(id)).sort()
     : [];
+  $: workspaceAccountIds = accountIds.filter((id) => {
+    const account = replica?.state?.accounts?.get?.(id);
+    if (!account) return false;
+    const isFinalizedDisputed = String(account.status || '') === 'disputed' && !(account as any)?.activeDispute;
+    return !isFinalizedDisputed;
+  });
+  $: if (!workspaceAccountId || !workspaceAccountIds.includes(workspaceAccountId)) {
+    workspaceAccountId = workspaceAccountIds[0] || '';
+  }
+  $: configureTokenOptions = (() => {
+    const ids = new Set<number>([1, 2, 3]);
+    for (const tokenId of replica?.state?.reserves?.keys?.() || []) {
+      const numericId = Number(tokenId);
+      if (Number.isFinite(numericId) && numericId > 0) ids.add(numericId);
+    }
+    return Array.from(ids).sort((a, b) => a - b).map((id) => {
+      const info = getTokenInfo(id);
+      return { id, symbol: info.symbol || `TKN${id}` };
+    });
+  })();
+  $: {
+    if (!configureTokenOptions.some((opt) => opt.id === configureTokenId)) {
+      configureTokenId = configureTokenOptions[0]?.id ?? 1;
+    }
+  }
 
   // Jurisdictions
   $: availableJurisdictions = (() => {
@@ -246,6 +275,12 @@
 
   function handleOpenAccountTargetChange(event: CustomEvent<{ value?: string }>) {
     openAccountEntityId = String(event.detail?.value || '').trim();
+  }
+
+  function handleWorkspaceAccountChange(event: CustomEvent<{ value?: string }>) {
+    const nextRaw = String(event.detail?.value || '').trim();
+    const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextRaw.toLowerCase());
+    workspaceAccountId = matched || nextRaw;
   }
 
   $: openAccountEntityOptions = (() => {
@@ -907,6 +942,46 @@
     }
   }
 
+  async function addTokenToAccount() {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const env = activeEnv;
+    const signerId = resolveEntitySigner(entityId, 'add-token-to-account');
+    const counterpartyEntityId = String(workspaceAccountId || '').trim();
+    if (!entityId || !signerId) return;
+    if (!counterpartyEntityId) {
+      toasts.error('Select account first');
+      return;
+    }
+    if (!Number.isFinite(configureTokenId) || configureTokenId <= 0) {
+      toasts.error('Select valid token');
+      return;
+    }
+    if (!activeIsLive) {
+      toasts.error('Add token requires LIVE mode');
+      return;
+    }
+    try {
+      if (!env) throw new Error('Environment not ready');
+      await enqueueEntityInputs(env as any, [{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'extendCredit' as const,
+          data: {
+            counterpartyEntityId,
+            tokenId: configureTokenId,
+            amount: 0n,
+          },
+        }],
+      }]);
+      const symbol = getTokenInfo(configureTokenId).symbol || `TKN${configureTokenId}`;
+      toasts.success(`Token ${symbol} added to account`);
+    } catch (err) {
+      console.error('[EntityPanel] Add token failed:', err);
+      toasts.error(`Add token failed: ${(err as Error).message}`);
+    }
+  }
+
   // Faucet external tokens (ERC20 to signer EOA)
   async function faucetExternalTokens(tokenSymbol: string = 'USDC') {
     const signerId = tab.signerId;
@@ -1401,9 +1476,8 @@
   const accountWorkspaceTabs: Array<{ id: AccountWorkspaceTab; icon: any; label: string; showPendingBatch?: boolean }> = [
     { id: 'open', icon: PlusCircle, label: 'Open Account' },
     { id: 'send', icon: ArrowUpRight, label: 'Send' },
-    { id: 'credit', icon: Scale, label: 'Extend Credit' },
-    { id: 'collateral', icon: Wallet, label: 'Request Collateral' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
+    { id: 'configure', icon: SettingsIcon, label: 'Configure' },
     { id: 'activity', icon: Activity, label: 'Activity' },
     { id: 'settle', icon: Landmark, label: 'Settle', showPendingBatch: true },
   ];
@@ -1725,6 +1799,26 @@
             on:settleApprove={handleQuickSettleApprove}
           />
 
+          <div class="workspace-account-bar">
+            <EntityInput
+              label="Workspace Account"
+              value={workspaceAccountId}
+              entities={workspaceAccountIds}
+              {contacts}
+              excludeId={replica?.state?.entityId || tab.entityId}
+              placeholder="Select account for actions..."
+              disabled={!activeIsLive || workspaceAccountIds.length === 0}
+              on:change={handleWorkspaceAccountChange}
+            />
+            <div class="workspace-account-help">
+              {#if workspaceAccountIds.length === 0}
+                Open an account first to enable actions.
+              {:else}
+                One selector for `Swap` and `Configure`.
+              {/if}
+            </div>
+          </div>
+
           <nav class="account-workspace-tabs" aria-label="Account workspace">
             {#each accountWorkspaceTabs as t}
               <button
@@ -1745,29 +1839,78 @@
             {#if accountWorkspaceTab === 'send'}
               <PaymentPanel entityId={replica.state?.entityId || tab.entityId} {contacts} />
 
-            {:else if accountWorkspaceTab === 'credit'}
-              <CreditForm
-                entityId={replica.state?.entityId || tab.entityId}
-                signerId={tab.signerId || null}
-                counterpartyId={null}
-                accountIds={accountIds}
-              />
-
-            {:else if accountWorkspaceTab === 'collateral'}
-              <CollateralForm
-                entityId={replica.state?.entityId || tab.entityId}
-                signerId={tab.signerId || null}
-                counterpartyId={null}
-                accountIds={accountIds}
-              />
-
             {:else if accountWorkspaceTab === 'swap'}
               <SwapPanel
                 {replica}
                 {tab}
-                counterpartyId={selectedAccountId || ''}
-                prefilledCounterparty={!!selectedAccountId}
+                counterpartyId={workspaceAccountId}
+                prefilledCounterparty={true}
               />
+
+            {:else if accountWorkspaceTab === 'configure'}
+              <div class="configure-panel">
+                <nav class="configure-tabs" aria-label="Account configure workspace">
+                  <button
+                    class="configure-tab"
+                    class:active={configureWorkspaceTab === 'credit'}
+                    on:click={() => configureWorkspaceTab = 'credit'}
+                  >
+                    Extend Credit
+                  </button>
+                  <button
+                    class="configure-tab"
+                    class:active={configureWorkspaceTab === 'collateral'}
+                    on:click={() => configureWorkspaceTab = 'collateral'}
+                  >
+                    Request Collateral
+                  </button>
+                  <button
+                    class="configure-tab"
+                    class:active={configureWorkspaceTab === 'token'}
+                    on:click={() => configureWorkspaceTab = 'token'}
+                  >
+                    Add Token
+                  </button>
+                </nav>
+
+                {#if !workspaceAccountId}
+                  <div class="live-required configure-empty">
+                    <AlertTriangle size={18} />
+                    <p>Select workspace account above first.</p>
+                  </div>
+                {:else if configureWorkspaceTab === 'credit'}
+                  <CreditForm
+                    entityId={replica.state?.entityId || tab.entityId}
+                    signerId={tab.signerId || null}
+                    counterpartyId={workspaceAccountId}
+                    accountIds={workspaceAccountIds}
+                  />
+                {:else if configureWorkspaceTab === 'collateral'}
+                  <CollateralForm
+                    entityId={replica.state?.entityId || tab.entityId}
+                    signerId={tab.signerId || null}
+                    counterpartyId={workspaceAccountId}
+                    accountIds={workspaceAccountIds}
+                  />
+                {:else}
+                  <div class="configure-token-card">
+                    <h4 class="section-head">Add Token To Account</h4>
+                    <p class="muted">
+                      Adds token delta to selected account (zero credit). Use Extend Credit next to set limit.
+                    </p>
+                    <div class="configure-token-row">
+                      <select class="configure-token-select" bind:value={configureTokenId}>
+                        {#each configureTokenOptions as token}
+                          <option value={token.id}>{token.symbol}</option>
+                        {/each}
+                      </select>
+                      <button class="btn-add-token" on:click={addTokenToAccount} disabled={!activeIsLive || !workspaceAccountId}>
+                        Add Token
+                      </button>
+                    </div>
+                  </div>
+                {/if}
+              </div>
 
             {:else if accountWorkspaceTab === 'open'}
               <div class="account-open-sections">
@@ -2924,6 +3067,107 @@
     margin-top: 12px;
   }
 
+  .workspace-account-bar {
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    background: #0f1014;
+  }
+
+  .workspace-account-help {
+    margin-top: 8px;
+    font-size: 11px;
+    color: #6b7280;
+  }
+
+  .configure-panel {
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    background: #101114;
+    padding: 10px;
+  }
+
+  .configure-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+
+  .configure-tab {
+    padding: 8px 12px;
+    border: 1px solid #2f3138;
+    border-radius: 8px;
+    background: #111216;
+    color: #9ca3af;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .configure-tab:hover {
+    color: #d1d5db;
+    border-color: #4b5563;
+  }
+
+  .configure-tab.active {
+    color: #fbbf24;
+    border-color: #fbbf24;
+    background: rgba(251, 191, 36, 0.08);
+  }
+
+  .configure-empty {
+    margin: 0;
+  }
+
+  .configure-token-card {
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    padding: 14px;
+    background: #16171c;
+  }
+
+  .configure-token-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .configure-token-select {
+    min-width: 140px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid #2f3138;
+    background: #0d0e11;
+    color: #e5e7eb;
+    font-size: 12px;
+  }
+
+  .btn-add-token {
+    padding: 9px 14px;
+    border-radius: 8px;
+    border: 1px solid #3b82f6;
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.24), rgba(37, 99, 235, 0.16));
+    color: #dbeafe;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-add-token:hover:not(:disabled) {
+    border-color: #60a5fa;
+    color: #eff6ff;
+  }
+
+  .btn-add-token:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .section-head {
     font-size: 10px;
     font-weight: 600;
@@ -3187,7 +3431,7 @@
     color: #57534e !important;
   }
 
-  .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete):not(.account-workspace-tab)) {
+  .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete):not(.account-workspace-tab):not(.configure-tab):not(.btn-add-token):not(.scope-btn):not(.primary-btn):not(.cancel-btn)) {
     background: #1c1917 !important;
     border: 1px solid #292524 !important;
     border-radius: 6px !important;
