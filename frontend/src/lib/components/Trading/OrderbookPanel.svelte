@@ -23,26 +23,73 @@
 
   type BookSide = 'bid' | 'ask';
   type LevelClickDetail = { side: BookSide; price: number; size: number };
-  const dispatch = createEventDispatcher<{ levelclick: LevelClickDetail }>();
+  type SnapshotDetail = {
+    pairId: string;
+    bids: Array<{ price: number; size: number; total: number }>;
+    asks: Array<{ price: number; size: number; total: number }>;
+    spread: number | null;
+    spreadPercent: string;
+    sourceCount: number;
+    updatedAt: number;
+  };
+  type MarketSnapshotPayload = {
+    hubEntityId: string;
+    pairId: string;
+    depth: number;
+    bids: Array<{ price: number; size: number; total: number }>;
+    asks: Array<{ price: number; size: number; total: number }>;
+    spread: number | null;
+    spreadPercent: string;
+    updatedAt: number;
+  };
+  type MarketWsMessage = {
+    type?: string;
+    payload?: MarketSnapshotPayload;
+  };
+  const dispatch = createEventDispatcher<{ levelclick: LevelClickDetail; snapshot: SnapshotDetail }>();
 
-  // Derived state
   interface OrderLevel {
     price: number;
     size: number;
     total: number;
     owners?: string[];
   }
+
   let bids: OrderLevel[] = [];
   let asks: OrderLevel[] = [];
   let spread: number | null = null;
   let spreadPercent: string = '-';
-  let lastUpdate: number = 0;
+  let lastUpdate = 0;
   let sourceCount = 0;
   let sourceLabel = 'None';
 
-  // Polling interval for orderbook updates
   let pollInterval: number | null = null;
   const POLL_MS = 200;  // 5 updates/sec
+
+  let marketWs: WebSocket | null = null;
+  let marketRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let marketWsClosing = false;
+  let marketSubKey = '';
+  let streamFreshUntil = 0;
+  const STREAM_STALE_MS = 3000;
+  const STREAM_RETRY_MS = 2000;
+  const streamSnapshots = new Map<string, MarketSnapshotPayload>();
+
+  function normalizePairId(value: string): string | null {
+    const trimmed = String(value || '').trim();
+    const match = trimmed.match(/^(\d+)\/(\d+)$/);
+    if (!match) return null;
+    const a = Number(match[1]);
+    const b = Number(match[2]);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0 || a === b) return null;
+    const left = Math.min(a, b);
+    const right = Math.max(a, b);
+    return `${left}/${right}`;
+  }
+
+  function canonicalPairId(): string {
+    return normalizePairId(pairId) || pairId;
+  }
 
   function uniqueSourceHubIds(): string[] {
     const raw = hubIds.length > 0 ? hubIds : (hubId ? [hubId] : []);
@@ -50,6 +97,26 @@
       .map((id) => String(id || '').trim().toLowerCase())
       .filter(Boolean);
     return Array.from(new Set(normalized));
+  }
+
+  function sourceLabelFor(sources: string[]): string {
+    if (sources.length === 1) return `Hub: ${formatEntityId(sources[0] || '')}`;
+    if (sources.length > 1) return `Sources: ${sources.length}`;
+    return 'Sources: 0';
+  }
+
+  function relayWsUrl(): string | null {
+    if (typeof window === 'undefined') return null;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/relay`;
+  }
+
+  function wsMessageId(prefix: string): string {
+    return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  }
+
+  function streamKey(hubEntityId: string, streamPairId: string): string {
+    return `${hubEntityId}:${streamPairId}`;
   }
 
   function findHubReplica(env: any, sourceHubId: string): any | null {
@@ -129,45 +196,11 @@
     });
   }
 
-  function extractOrderbook() {
-    const env = $envStore;
-    if (!env) return;
-
-    const sources = uniqueSourceHubIds();
+  function updateView(nextBids: OrderLevel[], nextAsks: OrderLevel[], pair: string, sources: string[]) {
+    bids = nextBids;
+    asks = nextAsks;
     sourceCount = sources.length;
-    sourceLabel = sourceCount === 1
-      ? `Hub: ${formatEntityId(sources[0] || '')}`
-      : sourceCount > 1
-        ? `Sources: ${sourceCount}`
-        : 'Sources: 0';
-
-    if (sources.length === 0) {
-      bids = [];
-      asks = [];
-      spread = null;
-      spreadPercent = '-';
-      lastUpdate = Date.now();
-      return;
-    }
-
-    const bidSizes = new Map<number, number>();
-    const askSizes = new Map<number, number>();
-    const bidOwners = new Map<number, Set<string>>();
-    const askOwners = new Map<number, Set<string>>();
-
-    for (const sourceHubId of sources) {
-      const hubReplica = findHubReplica(env, sourceHubId);
-      const books = hubReplica?.state?.orderbookExt?.books;
-      if (!(books instanceof Map)) continue;
-      const book = books.get(pairId);
-      if (!book) continue;
-      accumulateBookSide(book, 'bid', bidSizes, bidOwners);
-      accumulateBookSide(book, 'ask', askSizes, askOwners);
-    }
-
-    bids = buildOrderLevels(bidSizes, bidOwners, 'bid');
-    asks = buildOrderLevels(askSizes, askOwners, 'ask');
-
+    sourceLabel = sourceLabelFor(sources);
     const bestBid = bids[0];
     const bestAsk = asks[0];
     if (bestBid && bestAsk) {
@@ -177,8 +210,84 @@
       spread = null;
       spreadPercent = '-';
     }
-
     lastUpdate = Date.now();
+    dispatch('snapshot', {
+      pairId: pair,
+      bids: bids.map(level => ({ price: level.price, size: level.size, total: level.total })),
+      asks: asks.map(level => ({ price: level.price, size: level.size, total: level.total })),
+      spread,
+      spreadPercent,
+      sourceCount,
+      updatedAt: lastUpdate,
+    });
+  }
+
+  function applyStreamOrderbookIfFresh(sources: string[], pair: string): boolean {
+    if (Date.now() > streamFreshUntil) return false;
+    const bidSizes = new Map<number, number>();
+    const askSizes = new Map<number, number>();
+    const bidOwners = new Map<number, Set<string>>();
+    const askOwners = new Map<number, Set<string>>();
+    let found = 0;
+
+    for (const sourceHubId of sources) {
+      const snapshot = streamSnapshots.get(streamKey(sourceHubId, pair));
+      if (!snapshot) continue;
+      found += 1;
+      for (const level of snapshot.bids || []) {
+        const price = Number(level.price || 0);
+        const size = Number(level.size || 0);
+        if (!Number.isFinite(price) || !Number.isFinite(size) || size <= 0) continue;
+        bidSizes.set(price, (bidSizes.get(price) || 0) + size);
+      }
+      for (const level of snapshot.asks || []) {
+        const price = Number(level.price || 0);
+        const size = Number(level.size || 0);
+        if (!Number.isFinite(price) || !Number.isFinite(size) || size <= 0) continue;
+        askSizes.set(price, (askSizes.get(price) || 0) + size);
+      }
+    }
+
+    if (found === 0) return false;
+    const nextBids = buildOrderLevels(bidSizes, bidOwners, 'bid');
+    const nextAsks = buildOrderLevels(askSizes, askOwners, 'ask');
+    updateView(nextBids, nextAsks, pair, sources);
+    return true;
+  }
+
+  function extractOrderbook() {
+    const sources = uniqueSourceHubIds();
+    const pair = canonicalPairId();
+
+    if (sources.length === 0) {
+      updateView([], [], pair, []);
+      return;
+    }
+
+    if (applyStreamOrderbookIfFresh(sources, pair)) {
+      return;
+    }
+
+    const env = $envStore;
+    if (!env) return;
+    const bidSizes = new Map<number, number>();
+    const askSizes = new Map<number, number>();
+    const bidOwners = new Map<number, Set<string>>();
+    const askOwners = new Map<number, Set<string>>();
+
+    for (const sourceHubId of sources) {
+      const hubReplica = findHubReplica(env, sourceHubId);
+      const books = hubReplica?.state?.orderbookExt?.books;
+      if (!(books instanceof Map)) continue;
+      const book = books.get(pair);
+      if (!book) continue;
+      accumulateBookSide(book, 'bid', bidSizes, bidOwners);
+      accumulateBookSide(book, 'ask', askSizes, askOwners);
+    }
+
+    const nextBids = buildOrderLevels(bidSizes, bidOwners, 'bid');
+    const nextAsks = buildOrderLevels(askSizes, askOwners, 'ask');
+    updateView(nextBids, nextAsks, pair, sources);
   }
 
   function findPrevLevel(bitmap: Uint32Array | number[], start: number): number {
@@ -218,6 +327,96 @@
     });
   }
 
+  function sendMarketSubscribe(replace: boolean) {
+    if (!marketWs || marketWs.readyState !== 1) return;
+    const sources = uniqueSourceHubIds();
+    const pair = canonicalPairId();
+    if (sources.length === 0 || !normalizePairId(pair)) return;
+    marketWs.send(JSON.stringify({
+      type: 'market_subscribe',
+      id: wsMessageId('market_sub'),
+      replace,
+      hubEntityIds: sources,
+      pairs: [pair],
+      depth,
+    }));
+    marketSubKey = `${pair}|${depth}|${sources.join(',')}`;
+  }
+
+  function connectMarketStream() {
+    const url = relayWsUrl();
+    if (!url) return;
+    if (marketWs && (marketWs.readyState === 0 || marketWs.readyState === 1)) return;
+
+    marketWsClosing = false;
+    marketWs = new WebSocket(url);
+    marketWs.onopen = () => {
+      sendMarketSubscribe(true);
+      marketWs?.send(JSON.stringify({ type: 'market_snapshot_request', id: wsMessageId('market_req') }));
+    };
+    marketWs.onmessage = (event: MessageEvent) => {
+      let msg: MarketWsMessage;
+      try {
+        msg = JSON.parse(String(event.data || '{}')) as MarketWsMessage;
+      } catch {
+        return;
+      }
+      if (msg?.type !== 'market_snapshot') return;
+      const payload = msg?.payload as MarketSnapshotPayload | undefined;
+      const hubEntityId = payload?.hubEntityId ? String(payload.hubEntityId).toLowerCase() : '';
+      const streamPairId = normalizePairId(String(payload?.pairId || ''));
+      if (!hubEntityId || !streamPairId || !payload) return;
+      streamSnapshots.set(streamKey(hubEntityId, streamPairId), {
+        ...payload,
+        hubEntityId,
+        pairId: streamPairId,
+      });
+      streamFreshUntil = Date.now() + STREAM_STALE_MS;
+      extractOrderbook();
+    };
+    marketWs.onclose = () => {
+      marketWs = null;
+      marketSubKey = '';
+      streamFreshUntil = 0;
+      if (marketWsClosing) return;
+      if (marketRetryTimer) clearTimeout(marketRetryTimer);
+      marketRetryTimer = setTimeout(() => {
+        marketRetryTimer = null;
+        connectMarketStream();
+      }, STREAM_RETRY_MS);
+    };
+  }
+
+  function disconnectMarketStream() {
+    if (marketRetryTimer) {
+      clearTimeout(marketRetryTimer);
+      marketRetryTimer = null;
+    }
+    streamFreshUntil = 0;
+    marketSubKey = '';
+    streamSnapshots.clear();
+    if (!marketWs) return;
+    marketWsClosing = true;
+    try {
+      if (marketWs.readyState === 1) {
+        marketWs.send(JSON.stringify({ type: 'market_unsubscribe', id: wsMessageId('market_unsub') }));
+      }
+      marketWs.close();
+    } catch {
+      // ignore
+    }
+    marketWs = null;
+  }
+
+  $: {
+    const sources = uniqueSourceHubIds();
+    const pair = canonicalPairId();
+    const nextKey = `${pair}|${depth}|${sources.join(',')}`;
+    if (typeof window !== 'undefined' && marketWs && marketWs.readyState === 1 && nextKey !== marketSubKey) {
+      sendMarketSubscribe(true);
+    }
+  }
+
   // Max size for bar scaling
   $: maxBidSize = Math.max(...bids.map(b => b.size), 1);
   $: maxAskSize = Math.max(...asks.map(a => a.size), 1);
@@ -225,11 +424,13 @@
 
   onMount(() => {
     extractOrderbook();
+    connectMarketStream();
     pollInterval = setInterval(extractOrderbook, POLL_MS) as unknown as number;
   });
 
   onDestroy(() => {
     if (pollInterval) clearInterval(pollInterval);
+    disconnectMarketStream();
   });
 
   // React to hubId/pairId changes

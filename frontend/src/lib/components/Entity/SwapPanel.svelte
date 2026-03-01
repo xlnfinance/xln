@@ -15,9 +15,37 @@
   export let counterpartyId: string = '';
   export let prefilledCounterparty = false;
   let orderbookScope: 'all' | 'selected' = 'all';
+  const ORDERBOOK_PRICE_SCALE = 100n;
+  const ORDERBOOK_LOT_SCALE = 10n ** 12n;
   type BookSide = 'bid' | 'ask';
-  type ClickedOrderLevel = { side: BookSide; price: bigint; sizeBase: bigint; baseTokenId: number; quoteTokenId: number; accountId: string };
+  type ClickedOrderLevel = {
+    side: BookSide;
+    priceTicks: bigint;
+    sizeBaseWei: bigint;
+    baseTokenId: number;
+    quoteTokenId: number;
+    accountId: string;
+  };
+  type SnapshotLevel = { price: number; size: number; total: number };
+  type OrderbookSnapshot = {
+    pairId: string;
+    bids: SnapshotLevel[];
+    asks: SnapshotLevel[];
+    spread: number | null;
+    spreadPercent: string;
+    sourceCount: number;
+    updatedAt: number;
+  };
   let selectedOrderLevel: ClickedOrderLevel | null = null;
+  let orderbookSnapshot: OrderbookSnapshot = {
+    pairId: '1/2',
+    bids: [],
+    asks: [],
+    spread: null,
+    spreadPercent: '-',
+    sourceCount: 0,
+    updatedAt: 0,
+  };
   let orderPercent = 100;
   let submitError = '';
   let giveTokenId = '1';
@@ -71,6 +99,10 @@
     const hidden = hiddenAccountCount > 0 ? ` (+${hiddenAccountCount} hidden)` : '';
     return `Showing aggregate orderbook across ${orderbookHubIds.length} account(s)${hidden}. Select account to place orders.`;
   })();
+  $: bestBidLevel = orderbookSnapshot.bids[0] || null;
+  $: bestAskLevel = orderbookSnapshot.asks[0] || null;
+  $: bestBidTicks = bestBidLevel ? BigInt(Math.max(0, Math.floor(bestBidLevel.price))) : null;
+  $: bestAskTicks = bestAskLevel ? BigInt(Math.max(0, Math.floor(bestAskLevel.price))) : null;
 
   const DEFAULT_SWAP_TOKEN_IDS = [1, 2, 3];
   type TokenKeyedMap<V> = Map<number, V> | Map<string, V>;
@@ -163,6 +195,17 @@
       return null;
     }
     return { baseTokenId, quoteTokenId };
+  }
+
+  function formatPriceTicks(ticks: bigint): string {
+    const whole = ticks / ORDERBOOK_PRICE_SCALE;
+    const frac = (ticks % ORDERBOOK_PRICE_SCALE).toString().padStart(2, '0').replace(/0+$/, '');
+    return frac.length > 0 ? `${whole.toString()}.${frac}` : whole.toString();
+  }
+
+  function lotsToBaseWei(sizeLots: number): bigint {
+    const lots = Math.max(0, Math.floor(Number(sizeLots) || 0));
+    return BigInt(lots) * ORDERBOOK_LOT_SCALE;
   }
 
   function tokenSymbol(tokenIdValue: number): string {
@@ -266,17 +309,21 @@
     orderPercent = clamped;
 
     const availableBase = selectedOrderLevel.side === 'ask'
-      ? (selectedOrderLevel.price > 0n ? readOutCapacity(selectedOrderLevel.accountId, selectedOrderLevel.quoteTokenId) / selectedOrderLevel.price : 0n)
+      ? (
+          selectedOrderLevel.priceTicks > 0n
+            ? (readOutCapacity(selectedOrderLevel.accountId, selectedOrderLevel.quoteTokenId) * ORDERBOOK_PRICE_SCALE) / selectedOrderLevel.priceTicks
+            : 0n
+        )
       : readOutCapacity(selectedOrderLevel.accountId, selectedOrderLevel.baseTokenId);
-    const maxFillBase = availableBase < selectedOrderLevel.sizeBase ? availableBase : selectedOrderLevel.sizeBase;
+    const maxFillBase = availableBase < selectedOrderLevel.sizeBaseWei ? availableBase : selectedOrderLevel.sizeBaseWei;
     const fillBase = (maxFillBase * BigInt(clamped)) / 100n;
 
     if (selectedOrderLevel.side === 'ask') {
-      giveAmount = fillBase * selectedOrderLevel.price;
+      giveAmount = (fillBase * selectedOrderLevel.priceTicks) / ORDERBOOK_PRICE_SCALE;
       wantAmount = fillBase;
     } else {
       giveAmount = fillBase;
-      wantAmount = fillBase * selectedOrderLevel.price;
+      wantAmount = (fillBase * selectedOrderLevel.priceTicks) / ORDERBOOK_PRICE_SCALE;
     }
   }
 
@@ -300,6 +347,20 @@
     }
   }
 
+  function setOrderPercentPreset(percent: number) {
+    applyOrderPercent(percent);
+  }
+
+  function handleOrderbookSnapshot(event: CustomEvent<OrderbookSnapshot>) {
+    orderbookSnapshot = event.detail;
+  }
+
+  function prefillFromBestLevel(side: BookSide) {
+    const level = side === 'bid' ? bestBidLevel : bestAskLevel;
+    if (!level) return;
+    handleOrderbookLevelClick(new CustomEvent('levelclick', { detail: { side, price: level.price, size: level.size } }));
+  }
+
   function handleOrderbookLevelClick(event: CustomEvent<{ side: BookSide; price: number; size: number }>) {
     submitError = '';
     if (!counterpartyId) {
@@ -320,12 +381,12 @@
       return;
     }
 
-    const price = BigInt(Math.max(1, Math.floor(rawPrice)));
-    const sizeBase = BigInt(Math.max(0, Math.floor(rawSize)));
+    const priceTicks = BigInt(Math.max(1, Math.floor(rawPrice)));
+    const sizeBaseWei = lotsToBaseWei(rawSize);
     selectedOrderLevel = {
       side,
-      price,
-      sizeBase,
+      priceTicks,
+      sizeBaseWei,
       baseTokenId: pair.baseTokenId,
       quoteTokenId: pair.quoteTokenId,
       accountId: counterpartyId,
@@ -385,6 +446,119 @@
     const frac = (scaled % scale).toString().padStart(precision, '0').replace(/0+$/, '');
     return frac.length > 0 ? `${whole.toString()}.${frac}` : whole.toString();
   }
+
+  function resolveOrderMode(
+    pair: { baseTokenId: number; quoteTokenId: number } | null,
+    giveTokenValue: number,
+    wantTokenValue: number,
+  ): 'buy-base' | 'sell-base' | 'none' {
+    if (!pair) return 'none';
+    if (giveTokenValue === pair.quoteTokenId && wantTokenValue === pair.baseTokenId) return 'buy-base';
+    if (giveTokenValue === pair.baseTokenId && wantTokenValue === pair.quoteTokenId) return 'sell-base';
+    return 'none';
+  }
+
+  $: parsedOrderbookPair = parsePairTokens(orderbookPairId);
+  $: orderMode = resolveOrderMode(parsedOrderbookPair, giveToken, wantToken);
+  $: limitPriceTicks = (() => {
+    if (giveAmount <= 0n || wantAmount <= 0n) return null;
+    if (orderMode === 'buy-base') return (giveAmount * ORDERBOOK_PRICE_SCALE) / wantAmount;
+    if (orderMode === 'sell-base') return (wantAmount * ORDERBOOK_PRICE_SCALE) / giveAmount;
+    return null;
+  })();
+  $: immediateFillPreview = (() => {
+    if (!parsedOrderbookPair || !limitPriceTicks) {
+      return {
+        marketable: false,
+        baseFill: 0n,
+        counterFill: 0n,
+        summary: 'Enter a valid pair and amounts to preview execution.',
+      };
+    }
+    if (orderMode === 'buy-base') {
+      if (!bestAskLevel || !bestAskTicks) {
+        return { marketable: false, baseFill: 0n, counterFill: 0n, summary: 'No ask liquidity visible.' };
+      }
+      const marketable = limitPriceTicks >= bestAskTicks;
+      const baseWanted = wantAmount;
+      const topAskBase = lotsToBaseWei(bestAskLevel.size);
+      const baseFill = marketable ? (baseWanted < topAskBase ? baseWanted : topAskBase) : 0n;
+      const counterFill = marketable ? (baseFill * bestAskTicks) / ORDERBOOK_PRICE_SCALE : 0n;
+      const summary = marketable
+        ? `Marketable on top ask. Immediate fill preview uses first level only.`
+        : `Not marketable at current best ask.`;
+      return { marketable, baseFill, counterFill, summary };
+    }
+    if (orderMode === 'sell-base') {
+      if (!bestBidLevel || !bestBidTicks) {
+        return { marketable: false, baseFill: 0n, counterFill: 0n, summary: 'No bid liquidity visible.' };
+      }
+      const marketable = limitPriceTicks <= bestBidTicks;
+      const baseOffered = giveAmount;
+      const topBidBase = lotsToBaseWei(bestBidLevel.size);
+      const baseFill = marketable ? (baseOffered < topBidBase ? baseOffered : topBidBase) : 0n;
+      const counterFill = marketable ? (baseFill * bestBidTicks) / ORDERBOOK_PRICE_SCALE : 0n;
+      const summary = marketable
+        ? `Marketable on top bid. Immediate fill preview uses first level only.`
+        : `Not marketable at current best bid.`;
+      return { marketable, baseFill, counterFill, summary };
+    }
+    return {
+      marketable: false,
+      baseFill: 0n,
+      counterFill: 0n,
+      summary: 'Pair side is not aligned with orderbook.',
+    };
+  })();
+
+  $: depthLevels = (() => {
+    const bids = orderbookSnapshot.bids.slice(0, 12);
+    const asks = orderbookSnapshot.asks.slice(0, 12);
+    return { bids, asks };
+  })();
+
+  function buildDepthPolyline(levels: SnapshotLevel[], side: 'bid' | 'ask'): string {
+    if (levels.length === 0) return '';
+    const ordered = side === 'bid' ? [...levels].reverse() : [...levels];
+    const allPrices = [...depthLevels.bids.map(l => l.price), ...depthLevels.asks.map(l => l.price)];
+    const minPrice = Math.min(...allPrices);
+    const maxPrice = Math.max(...allPrices);
+    const priceRange = Math.max(1, maxPrice - minPrice);
+    const maxTotal = Math.max(
+      1,
+      ...depthLevels.bids.map(l => l.total),
+      ...depthLevels.asks.map(l => l.total),
+    );
+    return ordered
+      .map(level => {
+        const x = ((level.price - minPrice) / priceRange) * 100;
+        const y = 100 - (level.total / maxTotal) * 100;
+        return `${x.toFixed(2)},${y.toFixed(2)}`;
+      })
+      .join(' ');
+  }
+
+  $: bidDepthPolyline = buildDepthPolyline(depthLevels.bids, 'bid');
+  $: askDepthPolyline = buildDepthPolyline(depthLevels.asks, 'ask');
+
+  function offerSideLabel(offer: any): 'Ask' | 'Bid' {
+    return Number(offer?.giveTokenId || 0) < Number(offer?.wantTokenId || 0) ? 'Ask' : 'Bid';
+  }
+
+  function offerPriceTicks(offer: any): bigint {
+    const give = toBigIntSafe(offer?.giveAmount) ?? 0n;
+    const want = toBigIntSafe(offer?.wantAmount) ?? 0n;
+    if (give <= 0n || want <= 0n) return 0n;
+    const isAsk = offerSideLabel(offer) === 'Ask';
+    return isAsk ? (want * ORDERBOOK_PRICE_SCALE) / give : (give * ORDERBOOK_PRICE_SCALE) / want;
+  }
+
+  $: openOrders = [...activeOffers].sort((a: any, b: any) => {
+    const aCreated = toBigIntSafe((a as any)?.createdAt) ?? 0n;
+    const bCreated = toBigIntSafe((b as any)?.createdAt) ?? 0n;
+    if (aCreated === bCreated) return String(a?.offerId || '').localeCompare(String(b?.offerId || ''));
+    return aCreated > bCreated ? -1 : 1;
+  });
 
   async function placeSwapOffer() {
     submitError = '';
@@ -531,6 +705,24 @@
     </div>
     <p class="orderbook-hint">{orderbookHint}</p>
     {#if orderbookHubIds.length > 0}
+      <div class="best-strip" data-testid="swap-best-strip">
+        <div class="best-card bid">
+          <div class="best-label">Best Bid</div>
+          <div class="best-value">{bestBidTicks ? formatPriceTicks(bestBidTicks) : '-'}</div>
+          <div class="best-size">{bestBidLevel ? `${bestBidLevel.size} lots` : 'No depth'}</div>
+          <button class="best-action" type="button" on:click={() => prefillFromBestLevel('bid')} disabled={!bestBidLevel || !counterpartyId}>
+            Hit Bid
+          </button>
+        </div>
+        <div class="best-card ask">
+          <div class="best-label">Best Ask</div>
+          <div class="best-value">{bestAskTicks ? formatPriceTicks(bestAskTicks) : '-'}</div>
+          <div class="best-size">{bestAskLevel ? `${bestAskLevel.size} lots` : 'No depth'}</div>
+          <button class="best-action" type="button" on:click={() => prefillFromBestLevel('ask')} disabled={!bestAskLevel || !counterpartyId}>
+            Take Ask
+          </button>
+        </div>
+      </div>
       <div class="orderbook-wrap">
         <OrderbookPanel
           hubIds={orderbookHubIds}
@@ -538,7 +730,26 @@
           pairId={orderbookPairId}
           depth={12}
           on:levelclick={handleOrderbookLevelClick}
+          on:snapshot={handleOrderbookSnapshot}
         />
+      </div>
+      <div class="depth-chart" data-testid="swap-depth-chart">
+        <div class="depth-header">
+          <span>Depth Chart</span>
+          <span>{orderbookPairId}</span>
+        </div>
+        {#if bidDepthPolyline || askDepthPolyline}
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Orderbook depth chart">
+            {#if bidDepthPolyline}
+              <polyline points={bidDepthPolyline} class="depth-line bid" />
+            {/if}
+            {#if askDepthPolyline}
+              <polyline points={askDepthPolyline} class="depth-line ask" />
+            {/if}
+          </svg>
+        {:else}
+          <div class="depth-empty">No depth available yet.</div>
+        {/if}
       </div>
     {:else}
       <div class="orderbook-empty">No connected account orderbooks yet.</div>
@@ -617,10 +828,16 @@
         />
         <span class="slider-value">{orderPercent}%</span>
       </div>
+      <div class="size-presets">
+        <button type="button" on:click={() => setOrderPercentPreset(25)} disabled={!selectedOrderLevel}>25%</button>
+        <button type="button" on:click={() => setOrderPercentPreset(50)} disabled={!selectedOrderLevel}>50%</button>
+        <button type="button" on:click={() => setOrderPercentPreset(75)} disabled={!selectedOrderLevel}>75%</button>
+        <button type="button" on:click={() => setOrderPercentPreset(100)} disabled={!selectedOrderLevel}>100%</button>
+      </div>
       {#if selectedOrderLevel}
         <p class="size-hint">
-          Level selected: {selectedOrderLevel.side.toUpperCase()} @ {selectedOrderLevel.price.toString()} (max
-          {selectedOrderLevel.sizeBase.toString()} base lots)
+          Level selected: {selectedOrderLevel.side.toUpperCase()} @ {formatPriceTicks(selectedOrderLevel.priceTicks)}
+          (max {formatAmount(selectedOrderLevel.sizeBaseWei, selectedOrderLevel.baseTokenId)} {tokenSymbol(selectedOrderLevel.baseTokenId)})
         </p>
       {:else}
         <p class="size-hint">Tip: click an orderbook level to prefill this form with max executable size.</p>
@@ -628,6 +845,36 @@
       {#if capacityWarning}
         <p class="size-warning">{capacityWarning}</p>
       {/if}
+    </div>
+
+    <div class="execution-preview" data-testid="swap-execution-preview">
+      <div class="preview-title">Execution Preview</div>
+      <div class="preview-grid">
+        <div>
+          <span class="p-label">Side</span>
+          <span class="p-value">{orderMode === 'buy-base' ? 'Buy Base' : orderMode === 'sell-base' ? 'Sell Base' : 'n/a'}</span>
+        </div>
+        <div>
+          <span class="p-label">Limit Price</span>
+          <span class="p-value">{limitPriceTicks ? formatPriceTicks(limitPriceTicks) : '-'}</span>
+        </div>
+        <div>
+          <span class="p-label">Best Bid / Ask</span>
+          <span class="p-value">
+            {bestBidTicks ? formatPriceTicks(bestBidTicks) : '-'} / {bestAskTicks ? formatPriceTicks(bestAskTicks) : '-'}
+          </span>
+        </div>
+        <div>
+          <span class="p-label">Immediate Top Fill</span>
+          <span class="p-value">
+            {formatAmount(immediateFillPreview.baseFill, parsedOrderbookPair?.baseTokenId || giveToken)}
+            {' '}{tokenSymbol(parsedOrderbookPair?.baseTokenId || giveToken)}
+          </span>
+        </div>
+      </div>
+      <div class:preview-status-positive={immediateFillPreview.marketable} class:preview-status-neutral={!immediateFillPreview.marketable}>
+        {immediateFillPreview.summary}
+      </div>
     </div>
 
     <button class="primary-btn" on:click={placeSwapOffer} disabled={Boolean(swapDisabledReason)}>
@@ -638,44 +885,52 @@
     {/if}
   </div>
 
-  <!-- Active Swap Offers -->
-  {#if activeOffers.length > 0}
-    <div class="section">
-      <h4>Active Orders ({activeOffers.length})</h4>
-      <div class="offers-list">
-        {#each activeOffers as offer}
-          <div class="offer-card">
-            <div class="offer-header">
-              <span class="offer-id">{offer.offerId.slice(0, 16)}...</span>
-              <button class="cancel-btn" on:click={() => cancelSwapOffer(offer.offerId, offer.accountId)}>
-                Request Cancel
-              </button>
-            </div>
-            <div class="offer-details">
-              <div class="offer-row">
-                <span class="label">Give:</span>
-                <span class="value">{formatAmount(offer.giveAmount, offer.giveTokenId)} (Token #{offer.giveTokenId})</span>
-              </div>
-              <div class="offer-row">
-                <span class="label">Want:</span>
-                <span class="value">{formatAmount(offer.wantAmount, offer.wantTokenId)} (Token #{offer.wantTokenId})</span>
-              </div>
-              <div class="offer-row">
-                  <span class="label">Price:</span>
-                  <span class="value">
-                  {formatPriceRatio(offer.wantAmount, offer.giveAmount)}
-                  </span>
-                </div>
-              <div class="offer-row">
-                <span class="label">Account:</span>
-                <span class="value">{offer.accountId.slice(0, 12)}...</span>
-              </div>
-            </div>
-          </div>
-        {/each}
-      </div>
+  <div class="section">
+    <div class="orders-title">
+      <h4>Open Orders</h4>
+      <span>{openOrders.length}</span>
     </div>
-  {/if}
+    {#if openOrders.length === 0}
+      <div class="orders-empty">No open orders yet.</div>
+    {:else}
+      <div class="orders-table-wrap">
+        <table class="orders-table" data-testid="swap-open-orders">
+          <thead>
+            <tr>
+              <th>Side</th>
+              <th>Pair</th>
+              <th>Price</th>
+              <th>Remaining</th>
+              <th>Hub</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each openOrders as offer}
+              {@const side = offerSideLabel(offer)}
+              {@const pair = `${Math.min(offer.giveTokenId, offer.wantTokenId)}/${Math.max(offer.giveTokenId, offer.wantTokenId)}`}
+              <tr>
+                <td>
+                  <span class:side-ask={side === 'Ask'} class:side-bid={side === 'Bid'} class="side-badge">{side}</span>
+                </td>
+                <td>{pair}</td>
+                <td>{formatPriceTicks(offerPriceTicks(offer))}</td>
+                <td>
+                  {formatAmount(offer.giveAmount, offer.giveTokenId)} {tokenSymbol(offer.giveTokenId)}
+                </td>
+                <td>{offer.accountId.slice(0, 10)}...</td>
+                <td>
+                  <button class="cancel-btn" on:click={() => cancelSwapOffer(offer.offerId, offer.accountId)}>
+                    Request Cancel
+                  </button>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -755,6 +1010,119 @@
     padding: 10px 12px;
     color: #9ca3af;
     font-size: 12px;
+  }
+
+  .best-strip {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 8px 0 12px;
+  }
+
+  .best-card {
+    border: 1px solid #2f343f;
+    border-radius: 10px;
+    background: #0f1015;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .best-card.bid {
+    border-color: rgba(34, 197, 94, 0.35);
+  }
+
+  .best-card.ask {
+    border-color: rgba(239, 68, 68, 0.35);
+  }
+
+  .best-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #9ca3af;
+  }
+
+  .best-value {
+    font-family: 'JetBrains Mono', monospace;
+    color: #f3f4f6;
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .best-size {
+    color: #9ca3af;
+    font-size: 12px;
+  }
+
+  .best-action {
+    margin-top: 2px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid #394151;
+    background: #171922;
+    color: #e5e7eb;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .best-action:hover:not(:disabled) {
+    border-color: #fbbf24;
+    color: #fbbf24;
+  }
+
+  .best-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .depth-chart {
+    margin-top: 12px;
+    border: 1px solid #2f343f;
+    border-radius: 10px;
+    background: #0f1015;
+    padding: 10px;
+  }
+
+  .depth-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: #9ca3af;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+
+  .depth-chart svg {
+    width: 100%;
+    height: 160px;
+    display: block;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+    border-radius: 8px;
+  }
+
+  .depth-line {
+    fill: none;
+    stroke-width: 1.6;
+  }
+
+  .depth-line.bid {
+    stroke: #22c55e;
+  }
+
+  .depth-line.ask {
+    stroke: #ef4444;
+  }
+
+  .depth-empty {
+    color: #9ca3af;
+    font-size: 12px;
+    padding: 12px;
+    text-align: center;
   }
 
   .form-row {
@@ -876,6 +1244,34 @@
     align-items: center;
   }
 
+  .size-presets {
+    margin-top: 8px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .size-presets button {
+    border: 1px solid #3b3f48;
+    background: #151821;
+    color: #d1d5db;
+    border-radius: 8px;
+    padding: 6px 0;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .size-presets button:hover:not(:disabled) {
+    border-color: #fbbf24;
+    color: #fbbf24;
+  }
+
+  .size-presets button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
   .size-slider {
     width: 100%;
     accent-color: #f59e0b;
@@ -911,37 +1307,122 @@
     line-height: 1.4;
   }
 
-  .offers-list {
+  .execution-preview {
+    margin: 10px 0 14px;
+    border: 1px solid #2f343f;
+    border-radius: 10px;
+    background: #0f1015;
+    padding: 10px;
+  }
+
+  .preview-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #9ca3af;
+    margin-bottom: 8px;
+  }
+
+  .preview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .p-label {
+    display: block;
+    color: #9ca3af;
+    font-size: 11px;
+    margin-bottom: 2px;
+  }
+
+  .p-value {
+    color: #f3f4f6;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .preview-status-positive {
+    color: #86efac;
+    font-size: 11px;
+  }
+
+  .preview-status-neutral {
+    color: #9ca3af;
+    font-size: 11px;
+  }
+
+  .orders-title {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .orders-title span {
+    color: #9ca3af;
+    font-size: 12px;
+  }
+
+  .orders-empty {
+    border: 1px dashed #3f434d;
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #9ca3af;
+    font-size: 12px;
+  }
+
+  .orders-table-wrap {
+    overflow: auto;
+  }
+
+  .orders-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 680px;
+  }
+
+  .orders-table th {
+    text-align: left;
+    font-size: 11px;
+    color: #9ca3af;
+    font-weight: 600;
+    padding: 8px;
+    border-bottom: 1px solid #2b2f39;
+  }
+
+  .orders-table td {
+    padding: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    color: #e5e7eb;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .side-badge {
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+
+  .side-ask {
+    background: rgba(239, 68, 68, 0.16);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+  }
+
+  .side-bid {
+    background: rgba(34, 197, 94, 0.16);
+    color: #86efac;
+    border: 1px solid rgba(34, 197, 94, 0.35);
   }
 
   .orderbook-wrap :global(.orderbook-panel) {
     width: 100%;
     min-width: 0;
-  }
-
-  .offer-card {
-    padding: 12px;
-    background: #111218;
-    border: 1px solid #313644;
-    border-radius: 8px;
-  }
-
-  .offer-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .offer-id {
-    font-size: 11px;
-    color: #9ca3af;
-    font-family: 'SF Mono', monospace;
   }
 
   .cancel-btn {
@@ -960,24 +1441,12 @@
     border-color: rgba(239, 68, 68, 0.6);
   }
 
-  .offer-details {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .offer-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    font-family: 'SF Mono', monospace;
-  }
-
-  .offer-row .label {
-    color: #9ca3af;
-  }
-
-  .offer-row .value {
-    color: #f3f4f6;
+  @media (max-width: 900px) {
+    .best-strip {
+      grid-template-columns: 1fr;
+    }
+    .form-row {
+      flex-direction: column;
+    }
   }
 </style>

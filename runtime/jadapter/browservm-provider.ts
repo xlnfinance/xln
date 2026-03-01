@@ -17,6 +17,11 @@ import { createAddressFromPrivateKey, createAddressFromString, hexToBytes, creat
 import type { Address } from '@ethereumjs/util';
 import { createCustomCommon, Mainnet } from '@ethereumjs/common';
 import { ethers } from 'ethers';
+import { Account__factory } from '../../jurisdictions/typechain-types/factories/Account__factory';
+import { EntityProvider__factory } from '../../jurisdictions/typechain-types/factories/EntityProvider__factory';
+import { DeltaTransformer__factory } from '../../jurisdictions/typechain-types/factories/DeltaTransformer__factory';
+import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/factories/ERC20Mock__factory';
+import { Depository__factory } from '../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory';
 import { safeStringify } from '../serialization-utils.js';
 import { deriveSignerKeySync, getCachedSignerPrivateKey } from '../account-crypto.js';
 import { isLeftEntity, normalizeEntityId } from '../entity-id-utils';
@@ -120,41 +125,13 @@ export class BrowserVMProvider {
       return;
     }
 
-    // Load artifacts - browser uses fetch, CLI uses file read
-    if (typeof window !== 'undefined') {
-      // Browser: fetch from static/
-      const [accountResp, depositoryResp, entityProviderResp, deltaTransformerResp, erc20Resp] = await Promise.all([
-        fetch('/contracts/Account.json'),
-        fetch('/contracts/Depository.json'),
-        fetch('/contracts/EntityProvider.json'),
-        fetch('/contracts/DeltaTransformer.json'),
-        fetch('/contracts/ERC20Mock.json'),
-      ]);
-
-      if (!accountResp.ok) throw new Error(`Failed to load Account artifact: ${accountResp.status}`);
-      if (!depositoryResp.ok) throw new Error(`Failed to load Depository artifact: ${depositoryResp.status}`);
-      if (!entityProviderResp.ok) throw new Error(`Failed to load EntityProvider artifact: ${entityProviderResp.status}`);
-      if (!deltaTransformerResp.ok) throw new Error(`Failed to load DeltaTransformer artifact: ${deltaTransformerResp.status}`);
-      if (!erc20Resp.ok) throw new Error(`Failed to load ERC20Mock artifact: ${erc20Resp.status}`);
-
-      this.accountArtifact = await accountResp.json();
-      this.depositoryArtifact = await depositoryResp.json();
-      this.entityProviderArtifact = await entityProviderResp.json();
-      this.deltaTransformerArtifact = await deltaTransformerResp.json();
-      this.erc20Artifact = await erc20Resp.json();
-    } else {
-      // CLI: read from jurisdictions/artifacts/
-      const fs = await import('fs');
-      const path = await import('path');
-      const basePath = path.join(process.cwd(), 'jurisdictions/artifacts/contracts');
-
-      this.accountArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'Account.sol/Account.json'), 'utf-8'));
-      this.depositoryArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'Depository.sol/Depository.json'), 'utf-8'));
-      this.entityProviderArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'EntityProvider.sol/EntityProvider.json'), 'utf-8'));
-      this.deltaTransformerArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'DeltaTransformer.sol/DeltaTransformer.json'), 'utf-8'));
-      this.erc20Artifact = JSON.parse(fs.readFileSync(path.join(basePath, 'ERC20Mock.sol/ERC20Mock.json'), 'utf-8'));
-      console.log('[BrowserVM] Loaded artifacts from filesystem (CLI mode)');
-    }
+    // Canonical ABI/bytecode source: typechain factories (keeps BrowserVM in sync with RPC adapter).
+    this.accountArtifact = { abi: Account__factory.abi, bytecode: Account__factory.bytecode };
+    this.depositoryArtifact = { abi: Depository__factory.abi, bytecode: Depository__factory.bytecode };
+    this.entityProviderArtifact = { abi: EntityProvider__factory.abi, bytecode: EntityProvider__factory.bytecode };
+    this.deltaTransformerArtifact = { abi: DeltaTransformer__factory.abi, bytecode: DeltaTransformer__factory.bytecode };
+    this.erc20Artifact = { abi: ERC20Mock__factory.abi, bytecode: ERC20Mock__factory.bytecode };
+    console.log('[BrowserVM] Loaded artifacts from typechain factories');
 
     // Create ethers Interfaces for ABI encoding
     this.depositoryInterface = new ethers.Interface(this.depositoryArtifact.abi);

@@ -6,14 +6,27 @@
 import type { Env, JurisdictionConfig } from '../types';
 import type { JAdapter, JAdapterMode } from '../jadapter/types';
 import { ethers } from 'ethers';
-import { spawn, type ChildProcess } from 'node:child_process';
 import { getCachedSignerPrivateKey } from '../account-crypto';
 import { ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge } from './helpers';
 
 export type { JAdapterMode };
 
-const DEFAULT_ANVIL_RPC = 'http://127.0.0.1:8545';
-let managedAnvil: ChildProcess | null = null;
+const IS_BROWSER_RUNTIME = typeof window !== 'undefined' && typeof document !== 'undefined';
+const IS_NODE_RUNTIME = !IS_BROWSER_RUNTIME;
+
+const getDefaultAnvilRpcUrl = (): string => {
+  if (!IS_BROWSER_RUNTIME) return 'http://127.0.0.1:8545';
+  const protocol = window.location.protocol || 'http:';
+  const host = window.location.host || 'localhost:8080';
+  return `${protocol}//${host}/rpc`;
+};
+
+type ManagedAnvilProcess = {
+  exitCode: number | null;
+  kill: (signal?: NodeJS.Signals | number) => boolean;
+};
+
+let managedAnvil: ManagedAnvilProcess | null = null;
 let managedAnvilRpc: string | null = null;
 let managedAnvilCleanupRegistered = false;
 
@@ -48,6 +61,7 @@ const killManagedAnvil = (): void => {
 };
 
 const ensureAnvilCleanupHooks = (): void => {
+  if (!IS_NODE_RUNTIME) return;
   if (managedAnvilCleanupRegistered) return;
   managedAnvilCleanupRegistered = true;
   process.on('exit', killManagedAnvil);
@@ -62,6 +76,10 @@ const ensureAnvilCleanupHooks = (): void => {
 };
 
 const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void> => {
+  if (!IS_NODE_RUNTIME) {
+    throw new Error(`RPC_UNAVAILABLE_IN_BROWSER: ${rpcUrl}`);
+  }
+
   const parsed = new URL(rpcUrl);
   const port = parsed.port ? Number(parsed.port) : 8545;
   if (!Number.isFinite(port) || port <= 0) {
@@ -74,6 +92,7 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
 
   killManagedAnvil();
   console.warn(`[Boot] RPC ${rpcUrl} unavailable, auto-starting local anvil (chainId=${chainId}, port=${port})`);
+  const { spawn } = await import('node:child_process');
   managedAnvil = spawn('anvil', ['--host', '127.0.0.1', '--port', String(port), '--chain-id', String(chainId)], {
     stdio: 'ignore',
   });
@@ -95,6 +114,10 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
 const ensureScenarioRpcReady = async (rpcUrl: string, expectedChainId: number): Promise<number> => {
   const existingChainId = await readRpcChainId(rpcUrl);
   if (existingChainId !== null) return existingChainId;
+
+  if (!IS_NODE_RUNTIME) {
+    throw new Error(`RPC_UNAVAILABLE_IN_BROWSER: ${rpcUrl}`);
+  }
 
   if (!isLocalRpcUrl(rpcUrl)) {
     throw new Error(`RPC_UNAVAILABLE_NONLOCAL: ${rpcUrl}`);
@@ -147,6 +170,9 @@ export interface RegisteredEntity {
  * Set via: JADAPTER_MODE=browservm|rpc (default: rpc)
  */
 export function getJAdapterMode(): JAdapterMode {
+  // Browser scenarios run in BrowserVM mode by default.
+  // Ignore env var leakage from build/test runners (process.env.* polyfills).
+  if (IS_BROWSER_RUNTIME) return 'browservm';
   const mode = process.env.JADAPTER_MODE?.toLowerCase();
   if (mode === 'rpc' || mode === 'anvil') return mode as JAdapterMode;
   if (mode === 'browservm') return 'browservm';
@@ -165,7 +191,7 @@ export async function ensureJAdapter(
   const { setBrowserVMJurisdiction } = await import('../evm');
 
   const actualMode = mode ?? getJAdapterMode();
-  const rpcUrl = process.env.ANVIL_RPC || DEFAULT_ANVIL_RPC;
+  const rpcUrl = process.env.ANVIL_RPC || getDefaultAnvilRpcUrl();
   const chainId = actualMode === 'browservm'
     ? 31337
     : await ensureScenarioRpcReady(rpcUrl, 31337);
@@ -241,7 +267,7 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
   // 7. Create jurisdiction config
   const jurisdictionRpcUrl = jadapter.mode === 'browservm'
     ? 'browservm://'
-    : (config.rpcUrl ?? process.env.ANVIL_RPC ?? DEFAULT_ANVIL_RPC);
+    : (config.rpcUrl ?? process.env.ANVIL_RPC ?? getDefaultAnvilRpcUrl());
   const jurisdiction = createJurisdictionConfig(
     jReplicaName,
     jadapter.addresses.depository,
