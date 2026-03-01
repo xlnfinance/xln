@@ -189,6 +189,8 @@
 
   $: workspace = (account as any).settlementWorkspace;
   $: iAmLeft = entityId < counterpartyId;
+  $: disputeStartedByLeft = Boolean((account as any).activeDispute?.startedByLeft);
+  $: disputeRole = hasActiveDispute ? (disputeStartedByLeft === iAmLeft ? 'starter' : 'counterparty') : '';
   $: iAmProposer = workspace ? workspace.lastModifiedByLeft === iAmLeft : false;
   $: myHanko = workspace ? (iAmLeft ? workspace.leftHanko : workspace.rightHanko) : null;
   $: canQuickApproveSettle = !!(workspace && workspace.status === 'awaiting_counterparty' && !iAmProposer && !myHanko);
@@ -271,7 +273,7 @@
       </span>
       {#if hasActiveDispute}
         <span class="dispute-counter" title={`Until J#${disputeTimeoutBlock}`}>
-          ⚠ {disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'}
+          ⚠ {disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left · {disputeRole}
         </span>
       {/if}
       <button

@@ -9,7 +9,7 @@
     <OrderbookPanel hubIds={["0x...", "0x..."]} pairId="1/2" />
 -->
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import type { Readable } from 'svelte/store';
   import { xlnEnvironment } from '$lib/stores/xlnStore';
   import { formatEntityId } from '$lib/utils/format';
@@ -20,6 +20,10 @@
   export let depth: number = 10;
   export let showOwners: boolean = false;
   export let envStore: Readable<any> = xlnEnvironment;
+
+  type BookSide = 'bid' | 'ask';
+  type LevelClickDetail = { side: BookSide; price: number; size: number };
+  const dispatch = createEventDispatcher<{ levelclick: LevelClickDetail }>();
 
   // Derived state
   interface OrderLevel {
@@ -205,6 +209,15 @@
     return size.toString();
   }
 
+  function emitLevelClick(side: BookSide, level: OrderLevel) {
+    if (!Number.isFinite(level.price) || !Number.isFinite(level.size)) return;
+    dispatch('levelclick', {
+      side,
+      price: level.price,
+      size: level.size,
+    });
+  }
+
   // Max size for bar scaling
   $: maxBidSize = Math.max(...bids.map(b => b.size), 1);
   $: maxAskSize = Math.max(...asks.map(a => a.size), 1);
@@ -239,7 +252,18 @@
     <!-- Asks (sells) - shown in reverse order, lowest ask at bottom -->
     <div class="asks-section">
       {#each [...asks].reverse() as ask, i}
-        <div class="row ask-row">
+        <div
+          class="row ask-row clickable"
+          role="button"
+          tabindex="0"
+          on:click={() => emitLevelClick('ask', ask)}
+          on:keydown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              emitLevelClick('ask', ask);
+            }
+          }}
+        >
           <div class="bar ask-bar" style="width: {(ask.size / maxSize) * 100}%"></div>
           <span class="price ask-price">{formatPrice(ask.price)}</span>
           <span class="size">{formatSize(ask.size)}</span>
@@ -263,7 +287,18 @@
     <!-- Bids (buys) -->
     <div class="bids-section">
       {#each bids as bid, i}
-        <div class="row bid-row">
+        <div
+          class="row bid-row clickable"
+          role="button"
+          tabindex="0"
+          on:click={() => emitLevelClick('bid', bid)}
+          on:keydown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              emitLevelClick('bid', bid);
+            }
+          }}
+        >
           <div class="bar bid-bar" style="width: {(bid.size / maxSize) * 100}%"></div>
           <span class="price bid-price">{formatPrice(bid.price)}</span>
           <span class="size">{formatSize(bid.size)}</span>
@@ -360,6 +395,21 @@
     padding: 3px 6px;
     position: relative;
     align-items: center;
+  }
+
+  .row.clickable {
+    cursor: pointer;
+    border-radius: 4px;
+  }
+
+  .row.clickable:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .row.clickable:focus-visible {
+    outline: 1px solid rgba(251, 191, 36, 0.85);
+    outline-offset: 1px;
+    background: rgba(251, 191, 36, 0.08);
   }
 
   .bar {

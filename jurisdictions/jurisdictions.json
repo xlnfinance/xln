@@ -1,16 +1,16 @@
 {
   "version": "2.0.0",
-  "lastUpdated": "2026-03-01T14:54:33.621Z",
+  "lastUpdated": "2026-03-01T15:59:30.359Z",
   "jurisdictions": {
     "arrakis": {
       "name": "Arrakis (Shared Anvil)",
       "chainId": 31337,
-      "rpc": "http://localhost:8545",
+      "rpc": "http://127.0.0.1:20000",
       "contracts": {
-        "account": "0x2625760C4A8e8101801D3a48eE64B2bEA42f1E96",
-        "depository": "0xD6b040736e948621c5b6E0a494473c47a6113eA8",
-        "entityProvider": "0xFE5f411481565fbF70D8D33D992C78196E014b90",
-        "deltaTransformer": "0x139e1D41943ee15dDe4DF876f9d0E7F85e26660A"
+        "account": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "depository": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+        "entityProvider": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "deltaTransformer": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
       },
       "explorer": "http://localhost:8545",
       "currency": "SPICE",

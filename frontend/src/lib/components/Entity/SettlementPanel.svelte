@@ -531,6 +531,10 @@
   $: sentOps = countBatchOps(sentBatch?.batch);
   $: hasSentBatch = !!sentBatch;
   $: hasDraftBatch = pendingOps > 0;
+  $: latestFinalizedBatch = Array.isArray(batchHistory)
+    ? (batchHistory.find((entry: any) => entry?.status !== 'failed') ?? null)
+    : null;
+  $: hasFinalizedBatch = !!latestFinalizedBatch;
   $: hasAnyBatch = hasSentBatch || hasDraftBatch;
   $: canBroadcastDraft = hasDraftBatch && !hasSentBatch;
   $: pendingSummary = batchSummary(jBatch);
@@ -547,6 +551,13 @@
     details: buildBatchDetailOps(entry?.batch),
     key: String(entry?.txHash || `${entry?.batchHash || 'batch'}-${index}`),
   }));
+  $: lifecycleHint = hasSentBatch
+    ? `Sent batch nonce #${Number(sentBatch?.entityNonce || 0)} waiting for finalization`
+    : hasDraftBatch
+      ? `Draft contains ${pendingOps} operation${pendingOps === 1 ? '' : 's'}`
+      : hasFinalizedBatch
+        ? `Last finalized batch: J#${Number(latestFinalizedBatch?.jBlockNumber || 0)}`
+        : 'No draft or sent batch';
 
   function historySummary(entry: any): Array<{ label: string; count: number }> {
     const operations = entry?.operations;
@@ -862,6 +873,32 @@
         <span class="batch-pill">Needs Signature</span>
       {/if}
     </div>
+
+    <div class="lifecycle-rail" data-testid="settle-lifecycle-rail">
+      <div
+        class="rail-step"
+        class:active={hasDraftBatch && !hasSentBatch}
+        class:done={hasSentBatch || (!hasDraftBatch && hasFinalizedBatch)}
+      >
+        <span class="rail-dot"></span>
+        <span class="rail-label">Draft</span>
+      </div>
+      <div class="rail-line" class:active={hasSentBatch || hasFinalizedBatch}></div>
+      <div
+        class="rail-step"
+        class:active={hasSentBatch}
+        class:done={!hasSentBatch && hasFinalizedBatch}
+      >
+        <span class="rail-dot"></span>
+        <span class="rail-label">Sent</span>
+      </div>
+      <div class="rail-line" class:active={!hasSentBatch && hasFinalizedBatch}></div>
+      <div class="rail-step" class:active={!hasSentBatch && !hasDraftBatch && hasFinalizedBatch}>
+        <span class="rail-dot"></span>
+        <span class="rail-label">Finalized</span>
+      </div>
+    </div>
+    <div class="lifecycle-hint">{lifecycleHint}</div>
 
     {#if hasSentBatch}
       <div class="sent-batch">
@@ -1286,6 +1323,67 @@
     padding: 3px 8px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+
+  .lifecycle-rail {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: auto minmax(16px, 1fr) auto minmax(16px, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .rail-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #6b7280;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .rail-step.active {
+    color: #fbbf24;
+  }
+
+  .rail-step.done {
+    color: #86efac;
+  }
+
+  .rail-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    border: 1px solid #3f3f46;
+    background: #18181b;
+    flex: 0 0 auto;
+  }
+
+  .rail-step.active .rail-dot {
+    border-color: rgba(251, 191, 36, 0.85);
+    background: rgba(251, 191, 36, 0.8);
+  }
+
+  .rail-step.done .rail-dot {
+    border-color: rgba(34, 197, 94, 0.8);
+    background: rgba(34, 197, 94, 0.75);
+  }
+
+  .rail-line {
+    height: 1px;
+    background: #2f2f2f;
+  }
+
+  .rail-line.active {
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.9), rgba(251, 191, 36, 0.9));
+  }
+
+  .lifecycle-hint {
+    margin-top: 6px;
+    color: #9ca3af;
+    font-size: 11px;
   }
 
   .sent-batch {
@@ -1891,6 +1989,15 @@
   }
 
   @media (max-width: 900px) {
+    .lifecycle-rail {
+      grid-template-columns: 1fr;
+      gap: 4px;
+    }
+
+    .rail-line {
+      display: none;
+    }
+
     .batch-preview {
       grid-template-columns: 1fr;
     }
