@@ -685,6 +685,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
   const jadapter = getScenarioJAdapter(env);
+  const runDisputePhase = Boolean((env as any).scenarioSwapRunDisputePhase);
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('             PHASE 2: ORDERBOOK MATCHING (RJEA FLOW)            ');
   console.log('═══════════════════════════════════════════════════════════════\n');
@@ -972,6 +973,14 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
       }],
     }]);
     await converge(env);
+  }
+
+  if (!runDisputePhase) {
+    console.log('⏭️ Phase 2B dispute branch skipped (scenarioSwapRunDisputePhase=false)');
+    console.log('\n═══════════════════════════════════════════════════════════════');
+    console.log('              PHASE 2: ORDERBOOK TEST COMPLETE                  ');
+    console.log('═══════════════════════════════════════════════════════════════\n');
+    return env;
   }
 
   // ============================================================================
