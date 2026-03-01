@@ -1278,6 +1278,10 @@ async function applyFinalizedJEvent(
             delta.collateral = nextCollateral;
             delta.ondelta = nextOndelta;
             delta.offdelta = 0n;
+            delta.leftHold = 0n;
+            delta.rightHold = 0n;
+            delta.leftAllowance = 0n;
+            delta.rightAllowance = 0n;
 
             if (
               prevCollateral !== nextCollateral ||
@@ -1296,6 +1300,18 @@ async function applyFinalizedJEvent(
             );
           }
         }
+      }
+
+      // Drop off-chain intents from pre-dispute epoch.
+      if (account.swapOffers.size > 0) {
+        const staleOffers = account.swapOffers.size;
+        account.swapOffers.clear();
+        console.log(`🧹 DisputeFinalized cleanup: cleared ${staleOffers} stale swap offer(s) for ${counterpartyId.slice(-4)}`);
+      }
+      if (account.locks.size > 0) {
+        const staleLocks = account.locks.size;
+        account.locks.clear();
+        console.log(`🧹 DisputeFinalized cleanup: cleared ${staleLocks} stale lock(s) for ${counterpartyId.slice(-4)}`);
       }
     } else {
       console.warn(`⚠️ DisputeFinalized: account ${candidateCounterpartyId.slice(-4)} not found for entity ${entityIdNorm.slice(-4)}`);

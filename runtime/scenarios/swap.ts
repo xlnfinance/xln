@@ -999,8 +999,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const [, hubDisputeBaseline] = findReplica(env, hub.id);
   const aliceDisputeAccount = hubDisputeBaseline.state.accounts.get(alice.id);
   const bobDisputeAccount = hubDisputeBaseline.state.accounts.get(bob.id);
-  const aliceDisputeBaselineEth = aliceDisputeAccount?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
-  const aliceDisputeBaselineUsdc = aliceDisputeAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
+  assert(!!aliceDisputeAccount, 'Dispute Alice account exists before dispute');
   const bobDisputeBaselineEth = bobDisputeAccount?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
   const bobDisputeBaselineUsdc = bobDisputeAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
 
@@ -1189,68 +1188,16 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const [, aliceAfterFinalize] = findReplica(env, alice.id);
   const aliceAccountAfterFinalize = aliceAfterFinalize.state.accounts.get(hub.id);
   assert(!aliceAccountAfterFinalize?.activeDispute, 'Dispute cleared on counterparty after finalize');
+  assert(hubAccountAfterFinalize?.status === 'disputed', 'Hub account stays disputed after finalize until explicit reopen');
+  assert(aliceAccountAfterFinalize?.status === 'disputed', 'Counterparty account stays disputed after finalize until explicit reopen');
 
-  const clearPending = (ownerId: string, counterpartyId: string, label: string) => {
-    const [, replica] = findReplica(env, ownerId);
-    const account = replica.state.accounts.get(counterpartyId);
-    if (!account) {
-      throw new Error(`Dispute cleanup missing account ${label}`);
-    }
-    if (account.pendingFrame) {
-      account.pendingFrame = undefined;
-    }
-    if (account.mempool.length > 0) {
-      account.mempool = [];
-    }
-  };
-  clearPending(hub.id, alice.id, 'hub↔alice');
-  clearPending(alice.id, hub.id, 'alice↔hub');
-
-  const syncCounters = (leftId: string, rightId: string, label: string) => {
-    const [, leftRep] = findReplica(env, leftId);
-    const [, rightRep] = findReplica(env, rightId);
-    const leftAccount = leftRep.state.accounts.get(rightId);
-    const rightAccount = rightRep.state.accounts.get(leftId);
-    if (!leftAccount || !rightAccount) {
-      throw new Error(`Dispute cleanup missing account for counter sync (${label})`);
-    }
-    const synced = Math.max(
-      leftAccount.proofHeader.nonce,
-      rightAccount.proofHeader.nonce
-    );
-    leftAccount.proofHeader.nonce = synced;
-    rightAccount.proofHeader.nonce = synced;
-  };
-  syncCounters(hub.id, alice.id, 'hub↔alice');
-
-  console.log('⚖️ Applying dispute-enforced fill ratios locally');
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'resolveSwap',
-      data: { counterpartyEntityId: alice.id, offerId: disputeOfferId, fillRatio: pendingRatio, cancelRemainder: true },
-    }],
-  }]);
-  await converge(env);
-
-  const [, hubAfterResolve] = findReplica(env, hub.id);
-  const aliceResolved = hubAfterResolve.state.accounts.get(alice.id);
-
-  const aliceResolvedEth = aliceResolved?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
-  const aliceResolvedUsdc = aliceResolved?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
-
-  const aliceDisputeFilled = computeFilledAmounts(eth(disputeEth), usdc(disputeUsdc), pendingRatio);
-
-  assert(
-    aliceResolvedEth - aliceDisputeBaselineEth === -aliceDisputeFilled.filledGive,
-    `Dispute Alice ETH delta = -${aliceDisputeFilled.filledGive} (got ${aliceResolvedEth - aliceDisputeBaselineEth})`
-  );
-  assert(
-    aliceResolvedUsdc - aliceDisputeBaselineUsdc === aliceDisputeFilled.filledWant,
-    `Dispute Alice USDC delta = +${aliceDisputeFilled.filledWant} (got ${aliceResolvedUsdc - aliceDisputeBaselineUsdc})`
-  );
-  assert(!aliceResolved?.swapOffers?.has(disputeOfferId), 'Dispute offer removed after resolution');
+  const hubFinalEthDelta = hubAccountAfterFinalize?.deltas.get(ETH_TOKEN_ID);
+  const hubFinalUsdcDelta = hubAccountAfterFinalize?.deltas.get(USDC_TOKEN_ID);
+  assert((hubFinalEthDelta?.offdelta ?? 0n) === 0n, 'DisputeFinalized sync clears ETH offdelta');
+  assert((hubFinalUsdcDelta?.offdelta ?? 0n) === 0n, 'DisputeFinalized sync clears USDC offdelta');
+  assert((hubFinalEthDelta?.leftHold ?? 0n) === 0n, 'DisputeFinalized sync clears ETH leftHold');
+  assert((hubFinalEthDelta?.rightHold ?? 0n) === 0n, 'DisputeFinalized sync clears ETH rightHold');
+  assert(!hubAccountAfterFinalize?.swapOffers?.has(disputeOfferId), 'DisputeFinalized clears stale dispute swap offer');
 
   console.log('\n═══════════════════════════════════════════════════════════════');
   console.log('              PHASE 2: ORDERBOOK TEST COMPLETE                  ');
