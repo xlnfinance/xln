@@ -12,9 +12,14 @@
   export let tab: Tab;
 
   // Props
-    export let counterpartyId: string = '';
-    export let prefilledCounterparty = false;
+  export let counterpartyId: string = '';
+  export let prefilledCounterparty = false;
   let orderbookScope: 'all' | 'selected' = 'all';
+  type BookSide = 'bid' | 'ask';
+  type ClickedOrderLevel = { side: BookSide; price: bigint; sizeBase: bigint; baseTokenId: number; quoteTokenId: number; accountId: string };
+  let selectedOrderLevel: ClickedOrderLevel | null = null;
+  let orderPercent = 100;
+  let submitError = '';
   let giveTokenId = '1';
   let giveAmount: bigint = 0n;
   let wantTokenId = '2';
@@ -47,6 +52,13 @@
   $: orderbookHubIds = orderbookScope === 'selected'
     ? (counterpartyId ? [counterpartyId] : [])
     : cappedAccountIds;
+
+  function resolveCounterpartyId(input: string): string {
+    const normalized = String(input || '').trim().toLowerCase();
+    if (!normalized) return '';
+    const match = accountIds.find((id) => String(id || '').toLowerCase() === normalized);
+    return match || String(input || '').trim();
+  }
   $: orderbookHint = (() => {
     if (orderbookScope === 'selected') {
       return counterpartyId
@@ -61,12 +73,20 @@
   })();
 
   const DEFAULT_SWAP_TOKEN_IDS = [1, 2, 3];
+  type TokenKeyedMap<V> = Map<number, V> | Map<string, V>;
 
   function parseTokenId(value: unknown): number | null {
     if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value > 0) return value;
     if (typeof value === 'bigint' && value > 0n) return Number(value);
     if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number.parseInt(value.trim(), 10);
     return null;
+  }
+
+  function getTokenMapValue<V>(map: TokenKeyedMap<V> | undefined, tokenIdValue: number): V | undefined {
+    if (!(map instanceof Map) || !Number.isFinite(tokenIdValue)) return undefined;
+    const byNumber = (map as Map<number, V>).get(tokenIdValue);
+    if (byNumber !== undefined) return byNumber;
+    return (map as Map<string, V>).get(String(tokenIdValue));
   }
 
   function buildAvailableTokenIds(): number[] {
@@ -100,9 +120,8 @@
   // Get available tokens from canonical entity/account state (no UI cache).
   $: availableTokenIds = buildAvailableTokenIds();
   $: availableTokens = availableTokenIds.map((id) => {
-    const reserve = (replica?.state?.reserves instanceof Map)
-      ? replica.state.reserves.get(id) ?? replica.state.reserves.get(String(id))
-      : 0n;
+    const reserves = replica?.state?.reserves as TokenKeyedMap<bigint> | undefined;
+    const reserve = getTokenMapValue(reserves, id) ?? 0n;
     const tokenInfo = activeXlnFunctions?.getTokenInfo?.(id);
     const symbol = String(tokenInfo?.symbol || '').trim();
     return {
@@ -136,10 +155,193 @@
       ? `${Math.min(giveToken, wantToken)}/${Math.max(giveToken, wantToken)}`
       : '1/2';
 
+  function parsePairTokens(pairId: string): { baseTokenId: number; quoteTokenId: number } | null {
+    const [baseRaw, quoteRaw] = String(pairId || '').split('/');
+    const baseTokenId = Number.parseInt(baseRaw || '', 10);
+    const quoteTokenId = Number.parseInt(quoteRaw || '', 10);
+    if (!Number.isFinite(baseTokenId) || !Number.isFinite(quoteTokenId) || baseTokenId <= 0 || quoteTokenId <= 0) {
+      return null;
+    }
+    return { baseTokenId, quoteTokenId };
+  }
+
+  function tokenSymbol(tokenIdValue: number): string {
+    if (!Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return 'Token';
+    const info = activeXlnFunctions?.getTokenInfo?.(tokenIdValue);
+    return String(info?.symbol || `Token #${tokenIdValue}`).trim();
+  }
+
+  function parseDecimalAmountToBigInt(raw: string, decimals: number): bigint {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed) return 0n;
+    if (!/^\d+(\.\d+)?$/.test(trimmed)) return 0n;
+    const [wholeRaw, fracRaw = ''] = trimmed.split('.');
+    const whole = BigInt(wholeRaw || '0');
+    const scale = 10n ** BigInt(Math.max(0, Math.floor(decimals || 0)));
+    const fracPadded = (fracRaw + '0'.repeat(Math.max(0, decimals))).slice(0, Math.max(0, decimals));
+    const frac = fracPadded ? BigInt(fracPadded) : 0n;
+    return whole * scale + frac;
+  }
+
+  function resolveEnteredAmount(boundValue: bigint, placeholder: string, decimals: number): bigint {
+    if (boundValue > 0n) return boundValue;
+    if (typeof document === 'undefined') return boundValue;
+    const input = document.querySelector(`.swap-panel input[placeholder="${placeholder}"]`) as HTMLInputElement | null;
+    if (!input) return boundValue;
+    return parseDecimalAmountToBigInt(input.value, decimals);
+  }
+
   // Get active swap offers for this entity
   $: activeOffers = replica?.state?.swapBook
     ? Array.from(replica.state.swapBook.values())
     : [];
+
+  function readOutCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
+    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return 0n;
+    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
+    const account = replica?.state?.accounts?.get?.(resolvedCounterparty);
+    const deltas = account?.deltas as TokenKeyedMap<unknown> | undefined;
+    if (!(deltas instanceof Map) || !activeXlnFunctions?.deriveDelta || !tab.entityId) return 0n;
+    const delta = getTokenMapValue(deltas, tokenIdValue);
+    if (!delta) return 0n;
+    const isLeft = String(tab.entityId).toLowerCase() < String(resolvedCounterparty).toLowerCase();
+    try {
+      const derived = activeXlnFunctions.deriveDelta(delta, isLeft);
+      const outCapacityRaw = (derived as { outCapacity?: unknown })?.outCapacity;
+      if (typeof outCapacityRaw === 'bigint') return outCapacityRaw;
+      return toBigIntSafe(outCapacityRaw) ?? 0n;
+    } catch {
+      return 0n;
+    }
+  }
+
+  $: giveTokenSymbol = tokenSymbol(giveToken);
+  $: wantTokenSymbol = tokenSymbol(wantToken);
+  $: availableGiveCapacity = readOutCapacity(counterpartyId, giveToken);
+  $: formattedAvailableGive = Number.isFinite(giveToken) && giveToken > 0
+    ? `${formatAmount(availableGiveCapacity, giveToken)} ${giveTokenSymbol}`
+    : availableGiveCapacity.toString();
+  $: estimatedPrice = formatPriceRatio(wantAmount, giveAmount);
+  $: estimatedReceiveLabel = Number.isFinite(wantToken) && wantToken > 0
+    ? `${formatAmount(wantAmount, wantToken)} ${wantTokenSymbol}`
+    : wantAmount.toString();
+  $: estimatedSpendLabel = Number.isFinite(giveToken) && giveToken > 0
+    ? `${formatAmount(giveAmount, giveToken)} ${giveTokenSymbol}`
+    : giveAmount.toString();
+
+  function validateSwapForm(): string {
+    if (!activeIsLive) return 'Switch to LIVE mode to place swap orders.';
+    if (!tab.entityId) return 'Entity is not selected.';
+    if (!counterpartyId) return 'Select account (hub) first.';
+    const hasCounterparty = accountIds.some((id) => String(id || '').toLowerCase() === String(counterpartyId || '').toLowerCase());
+    if (!hasCounterparty) return 'Selected account is not active.';
+    if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0) {
+      return 'Select valid Give and Want tokens.';
+    }
+    if (giveToken === wantToken) return 'Give token and Want token must be different.';
+    const minFillPercentValue = Number.parseFloat(minFillPercent);
+    if (!Number.isFinite(minFillPercentValue) || minFillPercentValue < 1 || minFillPercentValue > 100) {
+      return 'Min Fill % must be between 1 and 100.';
+    }
+    return '';
+  }
+
+  $: swapDisabledReason = validateSwapForm();
+  $: capacityWarning = (() => {
+    if (!counterpartyId || !Number.isFinite(giveToken) || giveToken <= 0) return '';
+    if (availableGiveCapacity <= 0n) return `Observed available ${giveTokenSymbol}: 0 (may update after next frame).`;
+    if (giveAmount > 0n && giveAmount > availableGiveCapacity) {
+      return `Give amount is above observed available capacity (${formattedAvailableGive}).`;
+    }
+    return '';
+  })();
+  $: if (selectedOrderLevel && selectedOrderLevel.accountId !== counterpartyId) {
+    selectedOrderLevel = null;
+    orderPercent = 100;
+  }
+
+  function applyOrderPercent(percent: number) {
+    if (!selectedOrderLevel) return;
+    const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+    orderPercent = clamped;
+
+    const availableBase = selectedOrderLevel.side === 'ask'
+      ? (selectedOrderLevel.price > 0n ? readOutCapacity(selectedOrderLevel.accountId, selectedOrderLevel.quoteTokenId) / selectedOrderLevel.price : 0n)
+      : readOutCapacity(selectedOrderLevel.accountId, selectedOrderLevel.baseTokenId);
+    const maxFillBase = availableBase < selectedOrderLevel.sizeBase ? availableBase : selectedOrderLevel.sizeBase;
+    const fillBase = (maxFillBase * BigInt(clamped)) / 100n;
+
+    if (selectedOrderLevel.side === 'ask') {
+      giveAmount = fillBase * selectedOrderLevel.price;
+      wantAmount = fillBase;
+    } else {
+      giveAmount = fillBase;
+      wantAmount = fillBase * selectedOrderLevel.price;
+    }
+  }
+
+  function handleOrderPercentInput(event: Event) {
+    const target = event.currentTarget as HTMLInputElement | null;
+    const value = Number.parseInt(String(target?.value || ''), 10);
+    applyOrderPercent(Number.isFinite(value) ? value : 0);
+  }
+
+  function setMaxOrderPercent() {
+    if (selectedOrderLevel) {
+      applyOrderPercent(100);
+      return;
+    }
+    if (availableGiveCapacity <= 0n) return;
+    const currentGive = giveAmount;
+    const currentWant = wantAmount;
+    giveAmount = availableGiveCapacity;
+    if (currentGive > 0n && currentWant > 0n) {
+      wantAmount = (availableGiveCapacity * currentWant) / currentGive;
+    }
+  }
+
+  function handleOrderbookLevelClick(event: CustomEvent<{ side: BookSide; price: number; size: number }>) {
+    submitError = '';
+    if (!counterpartyId) {
+      submitError = 'Select account first, then click an orderbook level.';
+      return;
+    }
+
+    const pair = parsePairTokens(orderbookPairId);
+    if (!pair) {
+      submitError = 'Select valid token pair first.';
+      return;
+    }
+
+    const side = event.detail?.side;
+    const rawPrice = Number(event.detail?.price || 0);
+    const rawSize = Number(event.detail?.size || 0);
+    if ((side !== 'ask' && side !== 'bid') || !Number.isFinite(rawPrice) || rawPrice <= 0 || !Number.isFinite(rawSize) || rawSize <= 0) {
+      return;
+    }
+
+    const price = BigInt(Math.max(1, Math.floor(rawPrice)));
+    const sizeBase = BigInt(Math.max(0, Math.floor(rawSize)));
+    selectedOrderLevel = {
+      side,
+      price,
+      sizeBase,
+      baseTokenId: pair.baseTokenId,
+      quoteTokenId: pair.quoteTokenId,
+      accountId: counterpartyId,
+    };
+
+    if (side === 'ask') {
+      // Take ask: spend quote to receive base.
+      giveTokenId = String(pair.quoteTokenId);
+      wantTokenId = String(pair.baseTokenId);
+    } else {
+      // Take bid: spend base to receive quote.
+      giveTokenId = String(pair.baseTokenId);
+      wantTokenId = String(pair.quoteTokenId);
+    }
+    applyOrderPercent(100);
+  }
 
   // Convert percentage to fill ratio (0-65535)
   function percentToFillRatio(percent: number): number {
@@ -185,8 +387,9 @@
   }
 
   async function placeSwapOffer() {
-    if (!tab.entityId || !counterpartyId || giveAmount <= 0n || wantAmount <= 0n) {
-      alert('Please fill all fields');
+    submitError = '';
+    if (swapDisabledReason) {
+      submitError = swapDisabledReason;
       return;
     }
 
@@ -199,12 +402,18 @@
       const signerId = resolveSignerId(tab.entityId);
       if (!signerId) throw new Error('No signer available for selected entity');
 
-      if (!accountIds.includes(counterpartyId)) {
+      const resolvedCounterparty = resolveCounterpartyId(counterpartyId);
+      if (!resolvedCounterparty) {
         throw new Error('Select counterparty from your account list');
       }
 
       const giveToken = Number.parseInt(giveTokenId, 10);
       const wantToken = Number.parseInt(wantTokenId, 10);
+      const effectiveGiveAmount = resolveEnteredAmount(giveAmount, 'Amount to sell', giveTokenDecimals);
+      const effectiveWantAmount = resolveEnteredAmount(wantAmount, 'Amount to receive', wantTokenDecimals);
+      if (effectiveGiveAmount <= 0n || effectiveWantAmount <= 0n) {
+        throw new Error('Enter Give and Want amounts');
+      }
       const allowedTokenIds = new Set(availableTokens.map((token) => Number.parseInt(String(token.id), 10)));
       if (!Number.isFinite(giveToken) || !allowedTokenIds.has(giveToken)) {
         throw new Error('Invalid give token');
@@ -231,11 +440,11 @@
           type: 'placeSwapOffer',
           data: {
             offerId,
-            counterpartyEntityId: counterpartyId,
+            counterpartyEntityId: resolvedCounterparty,
             giveTokenId: giveToken,
-            giveAmount: giveAmount,
+            giveAmount: effectiveGiveAmount,
             wantTokenId: wantToken,
-            wantAmount: wantAmount,
+            wantAmount: effectiveWantAmount,
             minFillRatio,
           }
         }]
@@ -244,11 +453,13 @@
       console.log('📊 Swap offer placed:', offerId);
 
       // Reset form
+      orderPercent = 100;
+      selectedOrderLevel = null;
       giveAmount = 0n;
       wantAmount = 0n;
     } catch (error) {
       console.error('Failed to place swap offer:', error);
-      alert(`Failed to place swap: ${(error as Error)?.message || 'Unknown error'}`);
+      submitError = `Failed to place swap: ${(error as Error)?.message || 'Unknown error'}`;
     }
   }
 
@@ -321,7 +532,13 @@
     <p class="orderbook-hint">{orderbookHint}</p>
     {#if orderbookHubIds.length > 0}
       <div class="orderbook-wrap">
-        <OrderbookPanel hubIds={orderbookHubIds} hubId={counterpartyId} pairId={orderbookPairId} depth={12} />
+        <OrderbookPanel
+          hubIds={orderbookHubIds}
+          hubId={counterpartyId}
+          pairId={orderbookPairId}
+          depth={12}
+          on:levelclick={handleOrderbookLevelClick}
+        />
       </div>
     {:else}
       <div class="orderbook-empty">No connected account orderbooks yet.</div>
@@ -378,9 +595,47 @@
       </label>
     </div>
 
-    <button class="primary-btn" on:click={placeSwapOffer}>
+    <div class="size-tools">
+      <div class="size-top">
+        <span class="size-title">Order Sizing</span>
+        <button class="max-btn" type="button" on:click={setMaxOrderPercent} disabled={availableGiveCapacity <= 0n}>Max</button>
+      </div>
+      <div class="size-stats">
+        <span>Available: <strong>{formattedAvailableGive}</strong></span>
+        <span>Estimate: <strong>{estimatedSpendLabel} → {estimatedReceiveLabel}</strong></span>
+        <span>Price: <strong>{estimatedPrice}</strong></span>
+      </div>
+      <div class="slider-row">
+        <input
+          class="size-slider"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value={orderPercent}
+          on:input={handleOrderPercentInput}
+        />
+        <span class="slider-value">{orderPercent}%</span>
+      </div>
+      {#if selectedOrderLevel}
+        <p class="size-hint">
+          Level selected: {selectedOrderLevel.side.toUpperCase()} @ {selectedOrderLevel.price.toString()} (max
+          {selectedOrderLevel.sizeBase.toString()} base lots)
+        </p>
+      {:else}
+        <p class="size-hint">Tip: click an orderbook level to prefill this form with max executable size.</p>
+      {/if}
+      {#if capacityWarning}
+        <p class="size-warning">{capacityWarning}</p>
+      {/if}
+    </div>
+
+    <button class="primary-btn" on:click={placeSwapOffer} disabled={Boolean(swapDisabledReason)}>
       Place Swap Offer
     </button>
+    {#if swapDisabledReason || submitError}
+      <p class="form-error">{submitError || swapDisabledReason}</p>
+    {/if}
   </div>
 
   <!-- Active Swap Offers -->
@@ -548,6 +803,112 @@
   .primary-btn:hover {
     background: linear-gradient(180deg, rgba(251, 191, 36, 0.28), rgba(217, 119, 6, 0.2));
     border-color: rgba(251, 191, 36, 0.75);
+  }
+
+  .primary-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .size-tools {
+    margin: 8px 0 14px;
+    padding: 10px;
+    border: 1px solid #2f343f;
+    border-radius: 8px;
+    background: #101116;
+  }
+
+  .size-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .size-title {
+    color: #d1d5db;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .max-btn {
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid #4b5563;
+    background: #161922;
+    color: #d1d5db;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .max-btn:hover:not(:disabled) {
+    border-color: #fbbf24;
+    color: #fbbf24;
+  }
+
+  .max-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .size-stats {
+    margin-top: 8px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 6px 12px;
+    font-size: 12px;
+    color: #9ca3af;
+  }
+
+  .size-stats strong {
+    color: #f3f4f6;
+    font-weight: 600;
+  }
+
+  .slider-row {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .size-slider {
+    width: 100%;
+    accent-color: #f59e0b;
+  }
+
+  .slider-value {
+    min-width: 44px;
+    text-align: right;
+    color: #fbbf24;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .size-hint {
+    margin: 8px 0 0;
+    color: #9ca3af;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .size-warning {
+    margin: 6px 0 0;
+    color: #fca5a5;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .form-error {
+    margin: 8px 0 0;
+    color: #fda4af;
+    font-size: 12px;
+    line-height: 1.4;
   }
 
   .offers-list {
