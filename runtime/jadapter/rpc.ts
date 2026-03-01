@@ -22,6 +22,7 @@ import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallbac
 import { computeAccountKey, entityIdToAddress, setupContractEventListeners, processEventBatch, type RawJEvent } from './helpers';
 import { CANONICAL_J_EVENTS } from './helpers';
 import { DEV_CHAIN_IDS } from './index';
+import { setDeltaTransformerAddress } from '../proof-builder';
 
 /**
  * Create RPC adapter - works with any JSON-RPC provider
@@ -214,6 +215,7 @@ export async function createRpcAdapter(
       entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer as any);
       deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer as any);
       deployed = true;
+      setDeltaTransformerAddress(addresses.deltaTransformer);
       console.log('[JAdapter:rpc] Connected to existing contracts ✓');
     }
   }
@@ -247,6 +249,7 @@ export async function createRpcAdapter(
     async deployStack() {
       if (deployed) {
         console.log('[JAdapter:rpc] Using existing contracts');
+        setDeltaTransformerAddress(addresses.deltaTransformer);
         setupContractEventListeners(depository, entityProvider, eventCallbacks, anyCallbacks);
         return;
       }
@@ -300,6 +303,7 @@ export async function createRpcAdapter(
       await deltaTransformerContract.waitForDeployment();
       addresses.deltaTransformer = await deltaTransformerContract.getAddress();
       deltaTransformer = deltaTransformerContract;
+      setDeltaTransformerAddress(addresses.deltaTransformer);
       console.log(`  DeltaTransformer: ${addresses.deltaTransformer}`);
 
       // Deploy bootstrap ERC20 test token (5th contract in local anvil stack)
