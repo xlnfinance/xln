@@ -1,11 +1,12 @@
 <script lang="ts">
   import type { AccountMachine } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
-  import { xlnFunctions } from '../../stores/xlnStore';
+  import { xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
-  import { settings } from '../../stores/settingsStore';
   import { p2pState } from '../../stores/xlnStore';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
+  import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
+  import { getGossipProfile, resolveEntityName } from '$lib/utils/entityNaming';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
@@ -27,27 +28,19 @@
 
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
   const contextXlnFunctions = entityEnv?.xlnFunctions;
+  const contextEnv = entityEnv?.env;
   $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
-
-  // Gossip helpers
-  function getGossipProfiles(): any[] {
-    const envData = entityEnv?.env ? (entityEnv.env as any) : null;
-    if (!envData?.gossip) return [];
-    return typeof envData.gossip.getProfiles === 'function'
-      ? envData.gossip.getProfiles()
-      : (envData.gossip.profiles || []);
-  }
+  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
 
   function getProfile(id: string): any {
-    return getGossipProfiles().find((p: any) =>
-      String(p?.entityId || '').toLowerCase() === String(id).toLowerCase()
-    );
+    return getGossipProfile(id, activeEnv);
   }
 
-  $: counterpartyName = getProfile(counterpartyId)?.metadata?.name || '';
+  $: counterpartyProfile = getProfile(counterpartyId);
+  $: counterpartyName = resolveEntityName(counterpartyId, activeEnv);
 
   $: isHub = (() => {
-    const profile = getProfile(counterpartyId);
+    const profile = counterpartyProfile;
     if (!profile) return false;
     return !!(profile.metadata?.isHub === true ||
       (Array.isArray(profile.capabilities) && profile.capabilities.includes('hub')));
@@ -55,7 +48,7 @@
 
   // P2P connection state
   $: connState = (() => {
-    const profile = getProfile(counterpartyId);
+    const profile = counterpartyProfile;
     const runtimeId = profile?.runtimeId;
     if (!runtimeId) return 'unknown';
     if (!$p2pState.connected) return 'disconnected';
@@ -113,31 +106,19 @@
              uncollateralized, totalCollateral, totalDebt };
   })();
 
-  $: halfMax = agg.outTotal > agg.inTotal ? agg.outTotal : agg.inTotal;
-  $: pctOf = (v: bigint, base: bigint) => base > 0n ? Number((v * 10000n) / base) / 100 : 0;
-  $: tokenSymbol = String(agg.primarySymbol || '').toUpperCase();
-  $: tokenIconText = tokenSymbol === 'USDC' || tokenSymbol === 'USDT' ? '$' : tokenSymbol === 'WETH' || tokenSymbol === 'ETH' ? 'E' : (tokenSymbol.slice(0, 1) || 'T');
-  $: tokenIconClass = tokenSymbol === 'USDC'
-    ? 'usdc'
-    : tokenSymbol === 'USDT'
-      ? 'usdt'
-      : tokenSymbol === 'WETH' || tokenSymbol === 'ETH'
-        ? 'weth'
-        : 'other';
-
-  // Normalize BigInt to safe Number for CSS flex values (avoids MAX_SAFE_INTEGER overflow)
-  $: toFlex = (v: bigint) => {
-    const n = Number(v / (10n ** 14n));
-    return n > 0 ? n : (v > 0n ? 1 : 0);
+  $: primaryTokenInfo = activeXlnFunctions?.getTokenInfo?.(agg.primaryTokenId) || {
+    symbol: String(agg.primarySymbol || '?'),
+    name: String(agg.primarySymbol || 'Token'),
+    decimals: 18,
   };
-
-  // Absolute bar width: proportional to totalCapacity relative to portfolioScale
-  $: barWidthPct = (() => {
-    const scale = BigInt($settings.portfolioScale || 5000) * (10n ** 18n);
-    const total = agg.outTotal + agg.inTotal;
-    if (scale === 0n || total === 0n) return 100;
-    return Math.min(100, Math.max(5, Number(total * 100n / scale)));
-  })();
+  $: aggDerived = {
+    outOwnCredit: agg.outCredit,
+    outCollateral: agg.outColl,
+    outPeerCredit: agg.outDebt,
+    inOwnCredit: agg.inDebt,
+    inCollateral: agg.inColl,
+    inPeerCredit: agg.inCredit,
+  };
 
   $: isPending = account.mempool.length > 0 || (account as any).pendingFrame;
   $: hasActiveDispute = !!(account as any).activeDispute;
@@ -312,50 +293,16 @@
 
   <!-- Row 2: Aggregate bar -->
   {#if agg.outTotal > 0n || agg.inTotal > 0n}
-    <div class="row-bar">
-      <span class="cap-label">
-        {#if $settings.showTokenIcons}
-          <span class="token-icon-small {tokenIconClass}">{tokenIconText}</span>
-        {/if}
-        OUT {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCap) || '0'}
-      </span>
-      <span class="cap-label">
-        {#if $settings.showTokenIcons}
-          <span class="token-icon-small {tokenIconClass}">{tokenIconText}</span>
-        {/if}
-        IN {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}
-      </span>
-    </div>
-
-    {#if $settings.barLayout === 'center'}
-      <div class="bar center" style="width:{barWidthPct}%" class:rebalance-pending={rebalanceState === 'pending'} class:rebalance-active={rebalanceState === 'settling'} class:rebalance-secured={rebalanceState === 'secured'}>
-        <div class="half out">
-          {#if agg.outCredit > 0n}<div class="seg credit" style="width:{pctOf(agg.outCredit, halfMax)}%" title="Available: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCredit) || '?'}"></div>{/if}
-          {#if agg.outColl > 0n}<div class="seg coll" class:striped={pendingC2R.active && !pendingC2R.submitted} class:pulsing={pendingC2R.submitted} style="width:{pctOf(agg.outColl, halfMax)}%" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outColl) || '?'}"></div>{/if}
-          {#if agg.outDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending'} class:pulsing={rebalanceState === 'settling'} style="width:{pctOf(agg.outDebt, halfMax)}%" title="Unsecured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outDebt) || '?'}"></div>{/if}
-        </div>
-        <div class="mid"></div>
-        <div class="half in">
-          {#if agg.inDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending'} class:pulsing={rebalanceState === 'settling'} style="width:{pctOf(agg.inDebt, halfMax)}%" title="Unsecured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inDebt) || '?'}"></div>{/if}
-          {#if agg.inColl > 0n}<div class="seg coll" class:striped={pendingC2R.active && !pendingC2R.submitted} class:pulsing={pendingC2R.submitted} style="width:{pctOf(agg.inColl, halfMax)}%" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inColl) || '?'}"></div>{/if}
-          {#if agg.inCredit > 0n}<div class="seg credit" style="width:{pctOf(agg.inCredit, halfMax)}%" title="Available: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCredit) || '?'}"></div>{/if}
-        </div>
-      </div>
-    {:else}
-      <div class="bar sides" style="width:{barWidthPct}%" class:rebalance-pending={rebalanceState === 'pending'} class:rebalance-active={rebalanceState === 'settling'} class:rebalance-secured={rebalanceState === 'secured'}>
-        <div class="side out" style="flex:{toFlex(agg.outTotal || 1n)}">
-          {#if agg.outCredit > 0n}<div class="seg credit" style="flex:{toFlex(agg.outCredit)}" title="Available: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCredit) || '?'}"></div>{/if}
-          {#if agg.outColl > 0n}<div class="seg coll" class:striped={pendingC2R.active && !pendingC2R.submitted} class:pulsing={pendingC2R.submitted} style="flex:{toFlex(agg.outColl)}" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outColl) || '?'}"></div>{/if}
-          {#if agg.outDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending'} class:pulsing={rebalanceState === 'settling'} style="flex:{toFlex(agg.outDebt)}" title="Unsecured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outDebt) || '?'}"></div>{/if}
-        </div>
-        <div class="gap"></div>
-        <div class="side in" style="flex:{toFlex(agg.inTotal || 1n)}">
-          {#if agg.inDebt > 0n}<div class="seg debt" class:striped={rebalanceState === 'pending'} class:pulsing={rebalanceState === 'settling'} style="flex:{toFlex(agg.inDebt)}" title="Unsecured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inDebt) || '?'}"></div>{/if}
-          {#if agg.inColl > 0n}<div class="seg coll" class:striped={pendingC2R.active && !pendingC2R.submitted} class:pulsing={pendingC2R.submitted} style="flex:{toFlex(agg.inColl)}" title="Secured: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inColl) || '?'}"></div>{/if}
-          {#if agg.inCredit > 0n}<div class="seg credit" style="flex:{toFlex(agg.inCredit)}" title="Available: {activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCredit) || '?'}"></div>{/if}
-        </div>
-      </div>
-    {/if}
+    <DeltaTokenSummary
+      compact={true}
+      symbol={primaryTokenInfo.symbol}
+      name={primaryTokenInfo.name}
+      outAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCap) || '0'}
+      inAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}
+      derived={aggDerived}
+      decimals={Number(primaryTokenInfo.decimals ?? 18)}
+      barHeight={9}
+    />
 
     <!-- Rebalance status indicator -->
     {#if rebalanceState !== 'none'}
@@ -438,8 +385,9 @@
   .status-col {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     flex-shrink: 0;
+    flex-wrap: wrap;
   }
 
   .conn-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
@@ -450,12 +398,17 @@
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
   .badge {
-    font-size: 0.6em;
-    padding: 3px 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    font-size: 10px;
+    padding: 0 10px;
     border-radius: 5px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 600;
+    line-height: 1;
   }
   .badge.synced { color: #4ade80; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.12); }
   .badge.pending { color: #fbbf24; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.12); }
@@ -511,31 +464,42 @@
   }
 
   .j-sync {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
     font-size: 10px;
     font-family: 'JetBrains Mono', monospace;
     color: #d6d3d1;
     background: #18181b;
     border: 1px solid #292524;
-    padding: 2px 6px;
+    padding: 0 9px;
     border-radius: 4px;
     line-height: 1;
   }
 
   .dispute-counter {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
     font-size: 10px;
     font-family: 'JetBrains Mono', monospace;
     color: #fda4af;
     background: rgba(127, 29, 29, 0.35);
     border: 1px solid rgba(251, 113, 133, 0.35);
-    padding: 2px 6px;
+    padding: 0 9px;
     border-radius: 4px;
     line-height: 1;
     white-space: nowrap;
   }
 
   .btn-faucet {
-    font-size: 0.6em;
-    padding: 3px 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    font-size: 10px;
+    padding: 0 10px;
     border-radius: 5px;
     border: 1px solid #3f3f46;
     background: transparent;

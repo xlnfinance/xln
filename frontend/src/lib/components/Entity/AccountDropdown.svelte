@@ -7,6 +7,7 @@
   import { xlnEnvironment, xlnFunctions, xlnInstance } from '../../stores/xlnStore';
   import type { EntityReplica, AccountMachine } from '$lib/types/ui';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
+  import { resolveEntityName } from '$lib/utils/entityNaming';
 
   export let replica: EntityReplica | null = null;
   export let selectedAccountId: string | null = null;
@@ -38,8 +39,7 @@
 
     for (const [counterpartyId, account] of accountsMap.entries()) {
       const acc = account as AccountMachine;
-      const profile = profiles.find((p) => String(p?.entityId || '').toLowerCase() === String(counterpartyId).toLowerCase());
-      const profileName = String(profile?.metadata?.name || '').trim();
+      const profileName = resolveEntityName(counterpartyId, profiles);
       items.push({
         id: counterpartyId,
         name: profileName || counterpartyId,
