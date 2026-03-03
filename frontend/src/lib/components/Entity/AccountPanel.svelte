@@ -675,14 +675,6 @@
     cursor: pointer;
   }
 
-  .delta-bar-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: 11px;
-    color: #9ca3af;
-    margin-bottom: 6px;
-  }
-
   .delta-details {
     margin-top: 10px;
     border-top: 1px solid #292524;

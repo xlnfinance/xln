@@ -44,7 +44,7 @@
     <img class="avatar" src={identiconSvg} alt="" width={size} height={size} />
     <div class="text">
       {#if hasRealName}
-        <div class="name"><span class="explore">🧭</span>{displayName}</div>
+        <div class="name">{displayName}</div>
       {/if}
       {#if showAddress}
         <div class="address-wrap">
@@ -65,7 +65,7 @@
     <img class="avatar" src={identiconSvg} alt="" width={size} height={size} />
     <div class="text">
       {#if hasRealName}
-        <div class="name"><span class="explore">🧭</span>{displayName}</div>
+        <div class="name">{displayName}</div>
       {/if}
       {#if showAddress}
         <div class="address-wrap">
@@ -114,12 +114,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .explore {
-    margin-right: 6px;
-    font-size: 12px;
-    opacity: 0.9;
   }
 
   .address-wrap {
