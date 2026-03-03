@@ -1,8 +1,8 @@
 /**
  * EntityEnvContext - Pierce store boundary once
  *
- * Provides a unified API for entity panels to access environment state,
- * regardless of whether using global stores (/ route) or isolated stores (/view route).
+ * Provides a unified API for entity panels to access the selected runtime env.
+ * Isolated stores can be provided by parent, otherwise it reads active runtime env.
  *
  * Usage:
  *   // In parent component (View.svelte or legacy layout):
@@ -19,10 +19,8 @@ import { getContext, setContext } from 'svelte';
 import { derived, get, type Readable, type Writable } from 'svelte/store';
 import type { EntityReplica } from '$lib/types/ui';
 
-// Import global stores as fallback
+// Runtime-scoped stores (active runtime from RuntimeDropdown)
 import { xlnEnvironment, xlnFunctions as globalXlnFunctions } from '$lib/stores/xlnStore';
-import { visibleReplicas, currentTimeIndex, isLive as globalIsLive } from '$lib/stores/timeStore';
-import { history as globalHistory } from '$lib/stores/xlnStore';
 
 const ENTITY_ENV_CONTEXT_KEY = Symbol('entity-env-context');
 
@@ -144,7 +142,7 @@ export interface EntityEnvContextOptions {
 
 /**
  * Set up entity environment context in a parent component.
- * If isolated stores are provided, uses those; otherwise falls back to global stores.
+ * If isolated stores are provided, uses them; otherwise uses selected runtime env.
  *
  * Call this in onMount or at component initialization in View.svelte or layout.
  */
@@ -156,26 +154,31 @@ export function setEntityEnvContext(options: EntityEnvContextOptions = {}): void
     isolatedIsLive,
   } = options;
 
-  // Use isolated stores if provided, otherwise global
-  const useIsolated = isolatedEnv !== undefined;
+  const useIsolatedEnv = isolatedEnv !== undefined;
+  const hasIsolatedTimeline = isolatedHistory !== undefined && isolatedTimeIndex !== undefined;
 
-  // Time index store
-  const timeIndex: Readable<number> = isolatedTimeIndex ?? currentTimeIndex;
-
-  // History store
-  const history: Readable<HistoryFrame[]> = isolatedHistory ?? globalHistory as Readable<HistoryFrame[]>;
-
-  // Is live store — explicit boolean, not derived from timeIndex
-  const isLive: Readable<boolean> = isolatedIsLive ?? derived(globalIsLive, ($v) => $v);
-
-  // Environment: raw env for off-runtime infra (gossip, signers, jadapter, P2P)
-  const env: Readable<HistoryFrame | null> = useIsolated
-    ? (isolatedEnv! as Readable<HistoryFrame | null>)
+  // Environment: always selected runtime env (isolated if provided by parent).
+  const env: Readable<HistoryFrame | null> = useIsolatedEnv
+    ? (isolatedEnv as Readable<HistoryFrame | null>)
     : (xlnEnvironment as Readable<HistoryFrame | null>);
 
-  // Replicas: ALWAYS from history[timeIndex] (consistent snapshots), fallback to raw env
-  const replicas: Readable<Map<string, EntityReplica>> = useIsolated
-    ? derived([isolatedHistory!, isolatedTimeIndex!, isolatedEnv!], ([$hist, $idx, $env]) => {
+  // History/time: derived from selected runtime env unless isolated timeline is provided.
+  const history: Readable<HistoryFrame[]> = isolatedHistory
+    ? isolatedHistory
+    : derived(env, ($env) => (($env?.history as HistoryFrame[] | undefined) || []));
+
+  const timeIndex: Readable<number> = isolatedTimeIndex
+    ? isolatedTimeIndex
+    : derived(history, ($hist) => Math.max(0, $hist.length - 1));
+
+  // No implicit global time-machine fallback: live=true unless parent explicitly provides isolatedIsLive.
+  const isLive: Readable<boolean> = isolatedIsLive
+    ? isolatedIsLive
+    : derived(timeIndex, () => true);
+
+  // Replicas: if isolated timeline provided, read frame snapshot; otherwise read current env replicas.
+  const replicas: Readable<Map<string, EntityReplica>> = hasIsolatedTimeline
+    ? derived([isolatedHistory as Readable<HistoryFrame[]>, isolatedTimeIndex as Readable<number>, env], ([$hist, $idx, $env]) => {
         if ($hist && $hist.length > 0) {
           const idx = Math.max(0, Math.min($idx, $hist.length - 1));
           const frame = $hist[idx];
@@ -183,7 +186,7 @@ export function setEntityEnvContext(options: EntityEnvContextOptions = {}): void
         }
         return $env?.eReplicas ? new Map($env.eReplicas) : new Map();
       })
-    : visibleReplicas as Readable<Map<string, EntityReplica>>;
+    : derived(env, ($env) => ($env?.eReplicas ? new Map($env.eReplicas) : new Map()));
 
   // XLN functions (always from global - loaded once)
   const xlnFunctions: Readable<XLNFunctions | null> = globalXlnFunctions as Readable<XLNFunctions | null>;
@@ -210,8 +213,8 @@ export function getEntityEnv(): EntityEnvState {
   const ctx = getContext<EntityEnvState | undefined>(ENTITY_ENV_CONTEXT_KEY);
 
   if (!ctx) {
-    // Fallback to global stores if context not set (legacy mode)
-    console.warn('[EntityEnvContext] Context not found, using global stores fallback');
+    // Components should be wrapped by context, but keep a runtime-scoped fallback.
+    console.warn('[EntityEnvContext] Context not found, using active runtime fallback');
     return createGlobalFallback();
   }
 
@@ -226,27 +229,17 @@ export function hasEntityEnvContext(): boolean {
 }
 
 /**
- * Create fallback using only global stores (for components used outside context)
+ * Create fallback from currently selected runtime env (for components used outside context)
  */
 function createGlobalFallback(): EntityEnvState {
-  const timeIndex = currentTimeIndex;
-  const history = globalHistory as Readable<HistoryFrame[]>;
-  const isLive = derived(timeIndex, ($idx) => $idx < 0);
-
-  const env = derived(
-    [globalHistory as Readable<HistoryFrame[]>, currentTimeIndex, xlnEnvironment],
-    ([$hist, $idx, $xlnEnv]) => {
-      if ($idx >= 0 && $hist && $hist.length > 0) {
-        const idx = Math.min($idx, $hist.length - 1);
-        return $hist[idx] ?? null;
-      }
-      return $xlnEnv as HistoryFrame | null;
-    }
-  );
+  const env = xlnEnvironment as Readable<HistoryFrame | null>;
+  const history = derived(env, ($env) => (($env?.history as HistoryFrame[] | undefined) || []));
+  const timeIndex = derived(history, ($hist) => Math.max(0, $hist.length - 1));
+  const isLive = derived(timeIndex, () => true);
 
   return {
     env,
-    eReplicas: visibleReplicas as Readable<Map<string, EntityReplica>>,
+    eReplicas: derived(env, ($env) => ($env?.eReplicas ? new Map($env.eReplicas) : new Map())),
     timeIndex,
     isLive,
     history,
