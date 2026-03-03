@@ -7,6 +7,7 @@
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
   import { getGossipProfile, resolveEntityName } from '$lib/utils/entityNaming';
+  import { getAccountUiStatus, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
@@ -61,7 +62,7 @@
     if (!account.deltas || account.deltas.size === 0 || !activeXlnFunctions) {
       return { outCap: 0n, inCap: 0n, outCredit: 0n, outColl: 0n, outDebt: 0n,
                inCredit: 0n, inColl: 0n, inDebt: 0n, outTotal: 0n, inTotal: 0n,
-               tokenCount: 0, primaryTokenId: 1, primarySymbol: '?',
+               outHold: 0n, inHold: 0n, tokenCount: 0, primaryTokenId: 1, primarySymbol: '?',
                uncollateralized: 0n, totalCollateral: 0n, totalDebt: 0n };
     }
 
@@ -69,6 +70,7 @@
     let outCap = 0n, inCap = 0n;
     let outCredit = 0n, outColl = 0n, outDebt = 0n;
     let inCredit = 0n, inColl = 0n, inDebt = 0n;
+    let outHold = 0n, inHold = 0n;
     let primaryTokenId = 1;
     let primarySymbol = '?';
 
@@ -82,6 +84,8 @@
       inDebt += d.inOwnCredit;
       inColl += d.inCollateral;
       inCredit += d.inPeerCredit;
+      outHold += (typeof d.outTotalHold === 'bigint' ? d.outTotalHold : 0n);
+      inHold += (typeof d.inTotalHold === 'bigint' ? d.inTotalHold : 0n);
       const info = activeXlnFunctions.getTokenInfo(tokenId);
       if (info?.symbol) { primaryTokenId = tokenId; primarySymbol = info.symbol; }
     }
@@ -101,7 +105,7 @@
     const uncollateralized = totalDebt > totalCollateral ? totalDebt - totalCollateral : 0n;
 
     return { outCap, inCap, outCredit, outColl, outDebt,
-             inCredit, inColl, inDebt, outTotal, inTotal,
+             inCredit, inColl, inDebt, outTotal, inTotal, outHold, inHold,
              tokenCount: account.deltas.size, primaryTokenId, primarySymbol,
              uncollateralized, totalCollateral, totalDebt };
   })();
@@ -118,10 +122,15 @@
     inOwnCredit: agg.inDebt,
     inCollateral: agg.inColl,
     inPeerCredit: agg.inCredit,
+    outTotalHold: agg.outHold,
+    inTotalHold: agg.inHold,
   };
 
-  $: isPending = account.mempool.length > 0 || (account as any).pendingFrame;
-  $: hasActiveDispute = !!(account as any).activeDispute;
+  $: uiStatus = getAccountUiStatus(account);
+  $: isPending = uiStatus === 'sent';
+  $: hasActiveDispute = uiStatus === 'disputed';
+  $: isFinalizedDisputed = uiStatus === 'finalized_disputed';
+  $: statusLabel = getAccountUiStatusLabel(uiStatus);
   $: disputeTimeoutBlock = Number((account as any).activeDispute?.disputeTimeout || 0);
   $: disputeBlocksLeft = hasActiveDispute
     ? Math.max(0, disputeTimeoutBlock - Number(account.lastFinalizedJHeight || 0))
@@ -130,7 +139,8 @@
     !isPending &&
     Number(account.currentHeight || 0) > 0 &&
     agg.inTotal > 0n &&
-    String((account as any).status || 'active') !== 'disputed';
+    !hasActiveDispute &&
+    !isFinalizedDisputed;
 
   // Pending prepaid requests (actual request_collateral state)
   $: pendingRequested = (() => {
@@ -242,12 +252,14 @@
     </div>
     <div class="status-col">
       <span class="conn-dot {connState}"></span>
-      <span class="badge" class:synced={!isPending && !hasActiveDispute} class:pending={isPending && !hasActiveDispute} class:danger={hasActiveDispute}>
-        {#if hasActiveDispute}
-          Dispute
-        {:else}
-          {isPending ? 'Pending' : 'Synced'}
-        {/if}
+      <span
+        class="badge"
+        class:ready={uiStatus === 'ready'}
+        class:sent={uiStatus === 'sent'}
+        class:disputed={uiStatus === 'disputed'}
+        class:finalized_disputed={uiStatus === 'finalized_disputed'}
+      >
+        {statusLabel}
       </span>
       <span class="j-sync" title="Last finalized bilateral J-event height">
         J#{account.lastFinalizedJHeight ?? 0}
@@ -410,9 +422,10 @@
     font-weight: 600;
     line-height: 1;
   }
-  .badge.synced { color: #4ade80; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.12); }
-  .badge.pending { color: #fbbf24; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.12); }
-  .badge.danger { color: #fecdd3; background: rgba(244,63,94,0.2); border: 1px solid rgba(244,63,94,0.35); }
+  .badge.ready { color: #4ade80; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.12); }
+  .badge.sent { color: #fbbf24; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.12); }
+  .badge.disputed { color: #fecdd3; background: rgba(244,63,94,0.2); border: 1px solid rgba(244,63,94,0.35); }
+  .badge.finalized_disputed { color: #fca5a5; background: rgba(153, 27, 27, 0.26); border: 1px solid rgba(248, 113, 113, 0.38); }
 
   .locks-row {
     display: flex;

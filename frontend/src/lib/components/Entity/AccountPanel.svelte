@@ -6,6 +6,7 @@
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
   import { resolveEntityName } from '$lib/utils/entityNaming';
+  import { getAccountUiStatus, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
@@ -34,6 +35,8 @@
   $: hasPendingConsensus = Boolean(account.pendingFrame);
   $: hasQueuedMempool = mempoolCount > 0;
   $: activeDispute = (account as any).activeDispute ?? null;
+  $: uiStatus = getAccountUiStatus(account);
+  $: uiStatusLabel = getAccountUiStatusLabel(uiStatus);
   $: disputeTimeoutBlock = Number(activeDispute?.disputeTimeout ?? 0);
   $: currentJHeight = Math.max(
     Number(account.lastFinalizedJHeight ?? 0),
@@ -247,15 +250,13 @@
     <div class="header-row-bottom">
       <span class="frame-badge">Frame #{account.currentFrame?.height ?? account.currentHeight ?? 0}</span>
       <span class="jheight-badge">J#{currentJHeight}</span>
-      <span class="status-badge {activeDispute ? 'dispute' : hasPendingConsensus ? 'pending' : hasQueuedMempool ? 'queued' : 'synced'}">
-        {#if activeDispute}
-          Dispute · {disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left
-        {:else if hasPendingConsensus}
-          Awaiting Consensus
-        {:else if hasQueuedMempool}
-          Mempool · {mempoolCount}
+      <span class="status-badge {uiStatus}">
+        {#if uiStatus === 'disputed'}
+          {uiStatusLabel} · {disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left
+        {:else if uiStatus === 'sent'}
+          {uiStatusLabel}{hasQueuedMempool ? ` · ${mempoolCount}` : ''}
         {:else}
-          Synced
+          {uiStatusLabel}
         {/if}
       </span>
       {#if account.hankoSignature}
@@ -591,28 +592,28 @@
     text-transform: uppercase;
   }
 
-  .status-badge.synced {
+  .status-badge.ready {
     color: #4ade80;
     background: rgba(74, 222, 128, 0.1);
     border: 1px solid rgba(74, 222, 128, 0.15);
   }
 
-  .status-badge.pending {
+  .status-badge.sent {
     color: #fbbf24;
     background: rgba(251, 191, 36, 0.1);
     border: 1px solid rgba(251, 191, 36, 0.15);
   }
 
-  .status-badge.queued {
-    color: #f59e0b;
-    background: rgba(245, 158, 11, 0.1);
-    border: 1px solid rgba(245, 158, 11, 0.18);
-  }
-
-  .status-badge.dispute {
+  .status-badge.disputed {
     color: #fb7185;
     background: rgba(244, 63, 94, 0.12);
     border: 1px solid rgba(244, 63, 94, 0.3);
+  }
+
+  .status-badge.finalized_disputed {
+    color: #fca5a5;
+    background: rgba(153, 27, 27, 0.24);
+    border: 1px solid rgba(248, 113, 113, 0.32);
   }
 
   .trust-indicator {

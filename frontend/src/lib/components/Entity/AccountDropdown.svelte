@@ -8,6 +8,7 @@
   import type { EntityReplica, AccountMachine } from '$lib/types/ui';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import { resolveEntityName } from '$lib/utils/entityNaming';
+  import { getAccountUiStatus, getAccountUiStatusLabel, type AccountUiStatus } from '$lib/utils/accountStatus';
 
   export let replica: EntityReplica | null = null;
   export let selectedAccountId: string | null = null;
@@ -23,7 +24,8 @@
     name: string;
     shortId: string;
     avatarUrl: string;
-    status: 'synced' | 'pending';
+    status: AccountUiStatus;
+    statusLabel: string;
     pendingCount: number;
   }
 
@@ -40,12 +42,14 @@
     for (const [counterpartyId, account] of accountsMap.entries()) {
       const acc = account as AccountMachine;
       const profileName = resolveEntityName(counterpartyId, profiles);
+      const status = getAccountUiStatus(acc);
       items.push({
         id: counterpartyId,
         name: profileName || counterpartyId,
         shortId: counterpartyId,
         avatarUrl: xlnFuncs?.generateEntityAvatar?.(counterpartyId) || '',
-        status: acc.mempool?.length > 0 ? 'pending' : 'synced',
+        status,
+        statusLabel: getAccountUiStatusLabel(status),
         pendingCount: acc.mempool?.length || 0
       });
     }
@@ -115,8 +119,10 @@
             <span class="account-name">{account.name}</span>
             <span class="account-id">{account.id}</span>
           </span>
-          <span class="account-status" class:pending={account.status === 'pending'}>
-            {account.status === 'pending' ? `${account.pendingCount} pending` : 'Synced'}
+          <span class="account-status {account.status}">
+            {account.status === 'sent' && account.pendingCount > 0
+              ? `${account.statusLabel} · ${account.pendingCount}`
+              : account.statusLabel}
           </span>
         </button>
       {/each}
@@ -269,13 +275,13 @@
 
   .account-status {
     font-size: 11px;
-    color: #0f8;
     font-weight: 500;
   }
 
-  .account-status.pending {
-    color: #fa4;
-  }
+  .account-status.ready { color: #4ade80; }
+  .account-status.sent { color: #fbbf24; }
+  .account-status.disputed { color: #fb7185; }
+  .account-status.finalized_disputed { color: #fca5a5; }
 
   .add-item {
     color: #7aa8ff;
