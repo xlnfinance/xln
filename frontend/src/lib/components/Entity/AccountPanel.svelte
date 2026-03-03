@@ -4,6 +4,8 @@
   import { p2pState, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
+  import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
+  import { resolveEntityName } from '$lib/utils/entityNaming';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
@@ -47,19 +49,7 @@
   })();
   $: relayStatus = $p2pState.connected ? 'connected' : reconnectCountdown ? 'reconnecting' : 'disconnected';
 
-  function getEntityName(id: string): string {
-    const envData = contextEnv ? $contextEnv : $xlnEnvironment;
-    if (envData?.gossip) {
-      const profiles = typeof envData.gossip.getProfiles === 'function'
-        ? envData.gossip.getProfiles()
-        : (envData.gossip.profiles || []);
-      const profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === String(id).toLowerCase());
-      if (profile?.metadata?.name) return profile.metadata.name;
-    }
-    return '';
-  }
-
-  $: counterpartyName = getEntityName(counterpartyId);
+  $: counterpartyName = resolveEntityName(counterpartyId, activeEnv);
 
   $: tokenDetails = Array.from(account.deltas?.entries() || []).map(([tokenId, delta]) => {
     if (!activeXlnFunctions?.deriveDelta) {
@@ -280,42 +270,24 @@
     {#each tokenDetails as td (td.tokenId)}
       {@const outTotal = td.derived.outOwnCredit + td.derived.outCollateral + td.derived.outPeerCredit}
       {@const inTotal = td.derived.inOwnCredit + td.derived.inCollateral + td.derived.inPeerCredit}
-      {@const halfMax = outTotal > inTotal ? outTotal : inTotal}
-      {@const pctOf = (v: bigint, base: bigint) => base > 0n ? Number((v * 10000n) / base) / 100 : 0}
       {@const isExpanded = expandedTokenIds.has(td.tokenId)}
       <div class="delta-card">
-        <div class="delta-card-header">
-          <span class="delta-token">{td.tokenInfo.symbol}</span>
-          <span class="delta-brief">
-            OUT {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity)}
-            · IN {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity)}
-          </span>
-          <button class="delta-expand" on:click={() => toggleTokenDetails(td.tokenId)}>
-            {isExpanded ? 'Hide' : 'Details'}
-          </button>
-          <button class="delta-faucet" on:click={() => handleFaucet(td.tokenId)}>Faucet</button>
-        </div>
-
-        <div class="delta-bar-row">
-          <span class="delta-label">OUT {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity)}</span>
-          <span class="delta-label">IN {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity)}</span>
-        </div>
-
-        {#if halfMax > 0n}
-          <div class="delta-bar center">
-            <div class="delta-half out">
-              {#if td.derived.outOwnCredit > 0n}<div class="dseg credit" style="width:{pctOf(td.derived.outOwnCredit, halfMax)}%"></div>{/if}
-              {#if td.derived.outCollateral > 0n}<div class="dseg coll" style="width:{pctOf(td.derived.outCollateral, halfMax)}%"></div>{/if}
-              {#if td.derived.outPeerCredit > 0n}<div class="dseg debt" style="width:{pctOf(td.derived.outPeerCredit, halfMax)}%"></div>{/if}
-            </div>
-            <div class="delta-mid"></div>
-            <div class="delta-half in">
-              {#if td.derived.inOwnCredit > 0n}<div class="dseg debt" style="width:{pctOf(td.derived.inOwnCredit, halfMax)}%"></div>{/if}
-              {#if td.derived.inCollateral > 0n}<div class="dseg coll" style="width:{pctOf(td.derived.inCollateral, halfMax)}%"></div>{/if}
-              {#if td.derived.inPeerCredit > 0n}<div class="dseg credit" style="width:{pctOf(td.derived.inPeerCredit, halfMax)}%"></div>{/if}
-            </div>
-          </div>
-        {/if}
+        <DeltaTokenSummary
+          symbol={td.tokenInfo.symbol}
+          name={td.tokenInfo.name || ''}
+          outAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity) || '0'}
+          inAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity) || '0'}
+          derived={td.derived}
+          decimals={Number(td.tokenInfo.decimals ?? 18)}
+          barHeight={12}
+        >
+          <svelte:fragment slot="actions">
+            <button class="delta-expand" on:click={() => toggleTokenDetails(td.tokenId)}>
+              {isExpanded ? 'Hide' : 'Details'}
+            </button>
+            <button class="delta-faucet" on:click={() => handleFaucet(td.tokenId)}>Faucet</button>
+          </svelte:fragment>
+        </DeltaTokenSummary>
 
         {#if isExpanded}
           <div class="delta-details">
@@ -338,6 +310,46 @@
               <span class="detail-label-cell">In capacity</span>
               <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.inCapacity)}</span>
               <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inCapacity)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">Out own credit (grey)</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.outOwnCredit)}</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outOwnCredit)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">Out collateral (green)</span>
+              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.derived.outCollateral)}</span>
+              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outCollateral)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">Out peer credit (red)</span>
+              <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.derived.outPeerCredit)}</span>
+              <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outPeerCredit)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">In own credit (red)</span>
+              <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.derived.inOwnCredit)}</span>
+              <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inOwnCredit)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">In collateral (green)</span>
+              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.derived.inCollateral)}</span>
+              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inCollateral)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">In peer credit (grey)</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.inPeerCredit)}</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inPeerCredit)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">Bar OUT total</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, outTotal)}</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outOwnCredit + td.peerDerived.outCollateral + td.peerDerived.outPeerCredit)}</span>
+            </div>
+            <div class="detail-grid-three">
+              <span class="detail-label-cell">Bar IN total</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, inTotal)}</span>
+              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inOwnCredit + td.peerDerived.inCollateral + td.peerDerived.inPeerCredit)}</span>
             </div>
             <div class="detail-grid-three">
               <span class="detail-label-cell">Raw collateral</span>
@@ -669,52 +681,6 @@
     font-size: 11px;
     color: #9ca3af;
     margin-bottom: 6px;
-  }
-
-  .delta-bar.center {
-    display: grid;
-    grid-template-columns: 1fr 12px 1fr;
-    align-items: center;
-    gap: 0;
-    height: 12px;
-    background: #27272a;
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .delta-half {
-    height: 100%;
-    display: flex;
-  }
-
-  .delta-half.out {
-    justify-content: flex-end;
-  }
-
-  .delta-half.in {
-    justify-content: flex-start;
-  }
-
-  .delta-mid {
-    width: 12px;
-    height: 100%;
-    background: #52525b;
-  }
-
-  .dseg {
-    height: 100%;
-  }
-
-  .dseg.credit {
-    background: #52525b;
-  }
-
-  .dseg.coll {
-    background: #22c55e;
-  }
-
-  .dseg.debt {
-    background: #f43f5e;
   }
 
   .delta-details {

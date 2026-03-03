@@ -10,6 +10,7 @@
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import type { Tab } from '$lib/types/ui';
+  import { resolveEntityName } from '$lib/utils/entityNaming';
 
   export let tab: Tab;
   export let jurisdictionFilter: string | null = null;
@@ -141,15 +142,8 @@
   }
 
   function getEntityName(replica: any): string {
-    const envData = activeEnv as any;
-    if (envData?.gossip) {
-      const profiles = typeof envData.gossip.getProfiles === 'function'
-        ? envData.gossip.getProfiles()
-        : (envData.gossip.profiles || []);
-      const profile = profiles.find((p: any) => p.entityId === replica.entityId);
-      if (profile?.metadata?.name) return profile.metadata.name;
-    }
-    return replica.state?.name || '';
+    const name = resolveEntityName(replica?.entityId || '', activeEnv);
+    return name || replica.state?.name || '';
   }
 
   function getReplicaJurisdiction(
