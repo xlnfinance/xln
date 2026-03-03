@@ -244,6 +244,9 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
         { ...entry }
       ])
     ),
+    swapTradingPairs: Array.isArray(entityState.swapTradingPairs)
+      ? entityState.swapTradingPairs.map((pair) => ({ ...pair }))
+      : undefined,
     pendingSwapFillRatios: new Map(
       Array.from((entityState.pendingSwapFillRatios || new Map()).entries())
     ),

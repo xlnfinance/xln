@@ -939,7 +939,7 @@ export function processOrderbookSwaps(
     const accountId = offer.accountId!;
     console.log(`📊 ORDERBOOK-PROCESS: offerId=${offer.offerId}, accountId=${accountId.slice(-8)}`);
 
-    const { pairId } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
+    const { pairId, base, quote } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
     const bookKey = pairId;
 
     const side = deriveSide(offer.giveTokenId, offer.wantTokenId);
@@ -956,24 +956,34 @@ export function processOrderbookSwaps(
     let quantizedGive: bigint;
     let quantizedWant: bigint;
 
-    if (side === 1) {
-      const baseAmount = offer.giveAmount;
-      if (baseAmount % LOT_SCALE !== 0n) {
-        console.warn(`⚠️ ORDERBOOK: giveAmount not aligned to LOT_SCALE — skipping offer=${offer.offerId}, amount=${baseAmount}`);
-        continue;
-      }
-      priceTicks = (offer.wantAmount * 100n) / offer.giveAmount;
-      qtyLots = baseAmount / LOT_SCALE;
+    const isSellBase = offer.giveTokenId === base && offer.wantTokenId === quote;
+    const isBuyBase = offer.giveTokenId === quote && offer.wantTokenId === base;
+    if (!isSellBase && !isBuyBase) {
+      console.warn(
+        `⚠️ ORDERBOOK: Invalid token direction for offer=${offer.offerId} give=${offer.giveTokenId} want=${offer.wantTokenId} base=${base} quote=${quote}`,
+      );
+      continue;
+    }
+
+    const baseAmount = isSellBase ? offer.giveAmount : offer.wantAmount;
+    const quoteAmount = isSellBase ? offer.wantAmount : offer.giveAmount;
+    if (baseAmount <= 0n || quoteAmount <= 0n) {
+      console.warn(`⚠️ ORDERBOOK: Zero amount in offer=${offer.offerId}, base=${baseAmount}, quote=${quoteAmount}`);
+      continue;
+    }
+    if (baseAmount % LOT_SCALE !== 0n) {
+      console.warn(
+        `⚠️ ORDERBOOK: base amount not aligned to LOT_SCALE — skipping offer=${offer.offerId}, amount=${baseAmount}`,
+      );
+      continue;
+    }
+
+    priceTicks = (quoteAmount * 100n) / baseAmount;
+    qtyLots = baseAmount / LOT_SCALE;
+    if (isSellBase) {
       quantizedGive = baseAmount;
       quantizedWant = (quantizedGive * priceTicks) / 100n;
     } else {
-      const baseAmount = offer.wantAmount;
-      if (baseAmount % LOT_SCALE !== 0n) {
-        console.warn(`⚠️ ORDERBOOK: wantAmount not aligned to LOT_SCALE — skipping offer=${offer.offerId}, amount=${baseAmount}`);
-        continue;
-      }
-      priceTicks = (offer.giveAmount * 100n) / offer.wantAmount;
-      qtyLots = baseAmount / LOT_SCALE;
       quantizedWant = baseAmount;
       quantizedGive = (quantizedWant * priceTicks) / 100n;
     }

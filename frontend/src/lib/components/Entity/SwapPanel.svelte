@@ -4,7 +4,6 @@
     import { isLive as globalIsLive } from '../../stores/timeStore';
     import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
     import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
-    import BigIntInput from '../Common/BigIntInput.svelte';
     import EntitySelect from './EntitySelect.svelte';
     import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
 
@@ -17,6 +16,8 @@
   let orderbookScope: 'all' | 'selected' = 'all';
   const ORDERBOOK_PRICE_SCALE = 100n;
   const ORDERBOOK_LOT_SCALE = 10n ** 12n;
+  const PRICE_RATIO_DECIMALS = 6;
+  const PRICE_RATIO_SCALE = 10n ** BigInt(PRICE_RATIO_DECIMALS);
   type BookSide = 'bid' | 'ask';
   type ClickedOrderLevel = {
     side: BookSide;
@@ -48,11 +49,22 @@
   };
   let orderPercent = 100;
   let submitError = '';
+  let selectedPairValue = '';
+  let pairSearchInput = '';
+  let tradeSide: 'buy-base' | 'sell-base' = 'buy-base';
+  let selectedPair: PairOption | null = null;
   let giveTokenId = '1';
-  let giveAmount: bigint = 0n;
   let wantTokenId = '2';
+  let orderAmountInput = '';
+  let priceRatioInput = '';
+  let giveAmount: bigint = 0n;
   let wantAmount: bigint = 0n;
+  let parsedOrderbookPair: { baseTokenId: number; quoteTokenId: number } | null = null;
+  let orderMode: 'buy-base' | 'sell-base' | 'none' = 'none';
+  let limitPriceTicks: bigint | null = null;
+  let priceRatioScaled = 0n;
   let minFillPercent = '50'; // Min fill ratio as percentage (0-100)
+  let showDepthChart = false;
 
     const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
     const contextXlnFunctions = entityEnv?.xlnFunctions;
@@ -99,20 +111,15 @@
     const hidden = hiddenAccountCount > 0 ? ` (+${hiddenAccountCount} hidden)` : '';
     return `Showing aggregate orderbook across ${orderbookHubIds.length} account(s)${hidden}. Select account to place orders.`;
   })();
-  $: bestBidLevel = orderbookSnapshot.bids[0] || null;
-  $: bestAskLevel = orderbookSnapshot.asks[0] || null;
-  $: bestBidTicks = bestBidLevel ? BigInt(Math.max(0, Math.floor(bestBidLevel.price))) : null;
-  $: bestAskTicks = bestAskLevel ? BigInt(Math.max(0, Math.floor(bestAskLevel.price))) : null;
 
-  const DEFAULT_SWAP_TOKEN_IDS = [1, 2, 3];
   type TokenKeyedMap<V> = Map<number, V> | Map<string, V>;
-
-  function parseTokenId(value: unknown): number | null {
-    if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value > 0) return value;
-    if (typeof value === 'bigint' && value > 0n) return Number(value);
-    if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number.parseInt(value.trim(), 10);
-    return null;
-  }
+  type DeltaLike = {
+    collateral?: unknown;
+    ondelta?: unknown;
+    offdelta?: unknown;
+    leftCreditLimit?: unknown;
+    rightCreditLimit?: unknown;
+  };
 
   function getTokenMapValue<V>(map: TokenKeyedMap<V> | undefined, tokenIdValue: number): V | undefined {
     if (!(map instanceof Map) || !Number.isFinite(tokenIdValue)) return undefined;
@@ -121,81 +128,167 @@
     return (map as Map<string, V>).get(String(tokenIdValue));
   }
 
-  function buildAvailableTokenIds(): number[] {
-    const accountTokenIds = new Set<number>();
-    const account = counterpartyId ? replica?.state?.accounts?.get?.(counterpartyId) : null;
-    const deltas = account?.deltas;
-    if (deltas instanceof Map) {
-      for (const [id] of deltas.entries()) {
-        const parsed = parseTokenId(id);
-        if (parsed) accountTokenIds.add(parsed);
-      }
-    }
-
-    // Use account token universe first (swap is account-scoped). If too small, augment.
-    if (accountTokenIds.size >= 2) {
-      return Array.from(accountTokenIds.values()).sort((a, b) => a - b);
-    }
-
-    const tokenIds = new Set<number>(Array.from(accountTokenIds.values()));
-    const reserves = replica?.state?.reserves;
-    if (reserves instanceof Map) {
-      for (const [id] of reserves.entries()) {
-        const parsed = parseTokenId(id);
-        if (parsed) tokenIds.add(parsed);
-      }
-    }
-    for (const id of DEFAULT_SWAP_TOKEN_IDS) tokenIds.add(id);
-    return Array.from(tokenIds.values()).sort((a, b) => a - b);
+  function nonNegative(value: bigint): bigint {
+    return value < 0n ? 0n : value;
   }
 
-  // Get available tokens from canonical entity/account state (no UI cache).
-  $: availableTokenIds = buildAvailableTokenIds();
-  $: availableTokens = availableTokenIds.map((id) => {
-    const reserves = replica?.state?.reserves as TokenKeyedMap<bigint> | undefined;
-    const reserve = getTokenMapValue(reserves, id) ?? 0n;
-    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(id);
-    const symbol = String(tokenInfo?.symbol || '').trim();
-    return {
-      id: id.toString(),
-      name: symbol ? `${symbol} (Token #${id})` : `Token #${id}`,
-      amount: typeof reserve === 'bigint' ? reserve : 0n,
-    };
-  });
+  type PairOption = {
+    value: string;
+    label: string;
+    pairId: string;
+    baseTokenId: number;
+    quoteTokenId: number;
+    liquidScore: number;
+  };
 
-  $: {
-    const giveToken = Number.parseInt(giveTokenId, 10);
-    if (!Number.isFinite(giveToken) || !availableTokenIds.includes(giveToken)) {
-      const first = availableTokenIds[0];
-      if (first) giveTokenId = String(first);
+  function resolvePairOrientation(tokenA: number, tokenB: number): { baseTokenId: number; quoteTokenId: number; pairId: string } {
+    const runtimeResolver = activeXlnFunctions?.getSwapPairOrientation;
+    if (runtimeResolver) return runtimeResolver(tokenA, tokenB);
+    const left = Math.min(tokenA, tokenB);
+    const right = Math.max(tokenA, tokenB);
+    const pairId = `${left}/${right}`;
+    const isLiquid = (id: number) => id === 1 || id === 3;
+    if (isLiquid(tokenA) && !isLiquid(tokenB)) return { baseTokenId: tokenB, quoteTokenId: tokenA, pairId };
+    if (!isLiquid(tokenA) && isLiquid(tokenB)) return { baseTokenId: tokenA, quoteTokenId: tokenB, pairId };
+    return { baseTokenId: left, quoteTokenId: right, pairId };
+  }
+
+  function isLiquidToken(tokenIdValue: number): boolean {
+    const runtimeChecker = activeXlnFunctions?.isLiquidSwapToken;
+    if (runtimeChecker) return runtimeChecker(tokenIdValue);
+    return tokenIdValue === 1 || tokenIdValue === 3;
+  }
+
+  function buildPairOptions(): PairOption[] {
+    const runtimeRequiredPairs = activeXlnFunctions?.getDefaultSwapTradingPairs?.() || [];
+    const requiredPairs = runtimeRequiredPairs.length > 0
+      ? runtimeRequiredPairs.map((pair) => resolvePairOrientation(Number(pair.baseTokenId), Number(pair.quoteTokenId)))
+      : [
+          resolvePairOrientation(1, 2), // WETH/USDC
+          resolvePairOrientation(2, 3), // WETH/USDT
+          resolvePairOrientation(1, 3), // USDC/USDT
+        ];
+    const allowedPairKeys = new Set(requiredPairs.map((pair) => `${pair.baseTokenId}/${pair.quoteTokenId}`));
+    const configuredPairs = Array.isArray(replica?.state?.swapTradingPairs)
+      ? replica.state.swapTradingPairs
+      : [];
+    const out: PairOption[] = [];
+    const seen = new Set<string>();
+    for (const pair of configuredPairs) {
+      const rawBase = Number(pair?.baseTokenId);
+      const rawQuote = Number(pair?.quoteTokenId);
+      if (!Number.isFinite(rawBase) || !Number.isFinite(rawQuote) || rawBase <= 0 || rawQuote <= 0 || rawBase === rawQuote) {
+        continue;
+      }
+      const oriented = resolvePairOrientation(rawBase, rawQuote);
+      const value = `${oriented.baseTokenId}/${oriented.quoteTokenId}`;
+      if (!allowedPairKeys.has(value)) continue;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      const baseSymbol = tokenSymbol(oriented.baseTokenId);
+      const quoteSymbol = tokenSymbol(oriented.quoteTokenId);
+      const liquidScore = isLiquidToken(oriented.quoteTokenId) ? 1 : 0;
+      out.push({
+        value,
+        label: `${baseSymbol}/${quoteSymbol}`,
+        pairId: oriented.pairId,
+        baseTokenId: oriented.baseTokenId,
+        quoteTokenId: oriented.quoteTokenId,
+        liquidScore,
+      });
     }
-    const wantToken = Number.parseInt(wantTokenId, 10);
-    if (!Number.isFinite(wantToken) || !availableTokenIds.includes(wantToken) || wantTokenId === giveTokenId) {
-      const alternative = availableTokenIds.find((id) => String(id) !== giveTokenId) ?? availableTokenIds[0];
-      if (alternative) wantTokenId = String(alternative);
+    for (const pair of requiredPairs) {
+      const value = `${pair.baseTokenId}/${pair.quoteTokenId}`;
+      if (seen.has(value)) continue;
+      const baseSymbol = tokenSymbol(pair.baseTokenId);
+      const quoteSymbol = tokenSymbol(pair.quoteTokenId);
+      const liquidScore = isLiquidToken(pair.quoteTokenId) ? 1 : 0;
+      out.push({
+        value,
+        label: `${baseSymbol}/${quoteSymbol}`,
+        pairId: pair.pairId,
+        baseTokenId: pair.baseTokenId,
+        quoteTokenId: pair.quoteTokenId,
+        liquidScore,
+      });
+    }
+
+    const primary = resolvePairOrientation(1, 2); // WETH/USDC
+    const primaryKey = `${primary.baseTokenId}/${primary.quoteTokenId}`;
+
+    return out.sort((a, b) => {
+      const aKey = `${a.baseTokenId}/${a.quoteTokenId}`;
+      const bKey = `${b.baseTokenId}/${b.quoteTokenId}`;
+      if (aKey === primaryKey && bKey !== primaryKey) return -1;
+      if (bKey === primaryKey && aKey !== primaryKey) return 1;
+      if (a.liquidScore !== b.liquidScore) return b.liquidScore - a.liquidScore;
+      return a.label.localeCompare(b.label);
+    });
+  }
+
+  $: pairOptions = buildPairOptions();
+  $: allowedSwapTokenIds = (() => {
+    const tokenIds = new Set<number>();
+    for (const pair of pairOptions) {
+      tokenIds.add(pair.baseTokenId);
+      tokenIds.add(pair.quoteTokenId);
+    }
+    return tokenIds;
+  })();
+  $: if (pairOptions.length > 0) {
+    const hasSelected = pairOptions.some((option) => option.value === selectedPairValue);
+    if (!hasSelected) {
+      selectedPairValue = pairOptions[0]!.value;
+      pairSearchInput = pairOptions[0]!.label;
+    } else {
+      const current = pairOptions.find((option) => option.value === selectedPairValue);
+      if (current) pairSearchInput = current.label;
+    }
+  }
+  $: selectedPair = pairOptions.find((option) => option.value === selectedPairValue) || null;
+
+  function setPairBySearch(raw: string): void {
+    const normalized = String(raw || '').trim().toLowerCase();
+    if (!normalized) return;
+    const exact = pairOptions.find((option) => option.label.toLowerCase() === normalized);
+    if (exact) {
+      selectedPairValue = exact.value;
+      pairSearchInput = exact.label;
+      return;
+    }
+    const partial = pairOptions.find((option) => option.label.toLowerCase().includes(normalized));
+    if (partial) {
+      selectedPairValue = partial.value;
+      pairSearchInput = partial.label;
+    }
+  }
+
+  function handlePairSearchInput(event: Event): void {
+    const target = event.currentTarget as HTMLInputElement | null;
+    const next = String(target?.value || '');
+    pairSearchInput = next;
+    setPairBySearch(next);
+  }
+
+  function setTradeSide(next: 'buy-base' | 'sell-base'): void {
+    tradeSide = next;
+    selectedOrderLevel = null;
+    orderPercent = 100;
+  }
+
+  $: if (selectedPair) {
+    if (tradeSide === 'buy-base') {
+      giveTokenId = String(selectedPair.quoteTokenId);
+      wantTokenId = String(selectedPair.baseTokenId);
+    } else {
+      giveTokenId = String(selectedPair.baseTokenId);
+      wantTokenId = String(selectedPair.quoteTokenId);
     }
   }
 
   $: giveToken = Number.parseInt(giveTokenId, 10);
   $: wantToken = Number.parseInt(wantTokenId, 10);
-  $: orderbookPairId =
-    Number.isFinite(giveToken) &&
-    Number.isFinite(wantToken) &&
-    giveToken > 0 &&
-    wantToken > 0 &&
-    giveToken !== wantToken
-      ? `${Math.min(giveToken, wantToken)}/${Math.max(giveToken, wantToken)}`
-      : '1/2';
-
-  function parsePairTokens(pairId: string): { baseTokenId: number; quoteTokenId: number } | null {
-    const [baseRaw, quoteRaw] = String(pairId || '').split('/');
-    const baseTokenId = Number.parseInt(baseRaw || '', 10);
-    const quoteTokenId = Number.parseInt(quoteRaw || '', 10);
-    if (!Number.isFinite(baseTokenId) || !Number.isFinite(quoteTokenId) || baseTokenId <= 0 || quoteTokenId <= 0) {
-      return null;
-    }
-    return { baseTokenId, quoteTokenId };
-  }
+  $: orderbookPairId = selectedPair?.pairId || '1/2';
 
   function formatPriceTicks(ticks: bigint): string {
     const whole = ticks / ORDERBOOK_PRICE_SCALE;
@@ -226,12 +319,31 @@
     return whole * scale + frac;
   }
 
-  function resolveEnteredAmount(boundValue: bigint, placeholder: string, decimals: number): bigint {
-    if (boundValue > 0n) return boundValue;
-    if (typeof document === 'undefined') return boundValue;
-    const input = document.querySelector(`.swap-panel input[placeholder="${placeholder}"]`) as HTMLInputElement | null;
-    if (!input) return boundValue;
-    return parseDecimalAmountToBigInt(input.value, decimals);
+  function formatScaled(value: bigint, decimals: number): string {
+    if (value <= 0n) return '0';
+    const scale = 10n ** BigInt(Math.max(0, decimals));
+    const whole = value / scale;
+    const frac = value % scale;
+    if (frac === 0n) return whole.toString();
+    return `${whole.toString()}.${frac.toString().padStart(Math.max(0, decimals), '0').replace(/0+$/, '')}`;
+  }
+
+  function normalizeDecimalInput(raw: string, maxDecimals: number): string {
+    const prepared = String(raw || '').replace(',', '.').replace(/[^\d.]/g, '');
+    if (!prepared) return '';
+    const dotIndex = prepared.indexOf('.');
+    const hasDot = dotIndex >= 0;
+    const wholeRaw = hasDot ? prepared.slice(0, dotIndex) : prepared;
+    const fracRaw = hasDot ? prepared.slice(dotIndex + 1).replace(/\./g, '') : '';
+    const whole = wholeRaw === '' ? '0' : wholeRaw.replace(/^0+(?=\d)/, '');
+    const frac = fracRaw.slice(0, Math.max(0, maxDecimals));
+    if (hasDot) return `${whole}.${frac}`;
+    return whole;
+  }
+
+  function handlePriceRatioInput(event: Event): void {
+    const target = event.currentTarget as HTMLInputElement | null;
+    priceRatioInput = normalizeDecimalInput(target?.value || '', PRICE_RATIO_DECIMALS);
   }
 
   // Get active swap offers for this entity
@@ -258,38 +370,203 @@
     }
   }
 
+  function hasTokenInAccount(counterpartyEntityId: string, tokenIdValue: number): boolean {
+    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return false;
+    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
+    const account = replica?.state?.accounts?.get?.(resolvedCounterparty);
+    const deltas = account?.deltas as TokenKeyedMap<unknown> | undefined;
+    if (!(deltas instanceof Map)) return false;
+    return getTokenMapValue(deltas, tokenIdValue) !== undefined;
+  }
+
+  function readInCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
+    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return 0n;
+    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
+    const account = replica?.state?.accounts?.get?.(resolvedCounterparty);
+    const deltas = account?.deltas as TokenKeyedMap<unknown> | undefined;
+    if (!(deltas instanceof Map) || !activeXlnFunctions?.deriveDelta || !tab.entityId) return 0n;
+    const delta = getTokenMapValue(deltas, tokenIdValue);
+    if (!delta) return 0n;
+    const isLeft = String(tab.entityId).toLowerCase() < String(resolvedCounterparty).toLowerCase();
+    try {
+      const derived = activeXlnFunctions.deriveDelta(delta, isLeft);
+      const inCapacityRaw = (derived as { inCapacity?: unknown })?.inCapacity;
+      if (typeof inCapacityRaw === 'bigint') return inCapacityRaw;
+      return toBigIntSafe(inCapacityRaw) ?? 0n;
+    } catch {
+      return 0n;
+    }
+  }
+
+  function readAccountDelta(counterpartyEntityId: string, tokenIdValue: number): DeltaLike | null {
+    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return null;
+    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
+    const account = replica?.state?.accounts?.get?.(resolvedCounterparty);
+    const deltas = account?.deltas as TokenKeyedMap<unknown> | undefined;
+    if (!(deltas instanceof Map)) return null;
+    const delta = getTokenMapValue(deltas, tokenIdValue) as DeltaLike | undefined;
+    return delta || null;
+  }
+
+  function readPeerCreditLimit(counterpartyEntityId: string, tokenIdValue: number): bigint {
+    const delta = readAccountDelta(counterpartyEntityId, tokenIdValue);
+    if (!delta || !tab.entityId) return 0n;
+    const isLeft = String(tab.entityId).toLowerCase() < String(resolveCounterpartyId(counterpartyEntityId)).toLowerCase();
+    const raw = isLeft ? delta.rightCreditLimit : delta.leftCreditLimit;
+    return nonNegative(toBigIntSafe(raw) ?? 0n);
+  }
+
+  function computeRawOutPeerDebt(delta: DeltaLike, isLeft: boolean): bigint {
+    const totalDelta = (toBigIntSafe(delta.ondelta) ?? 0n) + (toBigIntSafe(delta.offdelta) ?? 0n);
+    const collateral = nonNegative(toBigIntSafe(delta.collateral) ?? 0n);
+    if (isLeft) return nonNegative(totalDelta - collateral);
+    return nonNegative(-totalDelta - collateral);
+  }
+
+  function computeAutoInboundCreditTarget(
+    counterpartyEntityId: string,
+    tokenIdValue: number,
+    desiredInboundAmount: bigint,
+  ): bigint | null {
+    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || desiredInboundAmount <= 0n) return null;
+    if (!activeXlnFunctions?.deriveDelta || !tab.entityId) return desiredInboundAmount;
+    const delta = readAccountDelta(counterpartyEntityId, tokenIdValue);
+    if (!delta) return desiredInboundAmount;
+
+    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
+    const isLeft = String(tab.entityId).toLowerCase() < String(resolvedCounterparty).toLowerCase();
+    try {
+      const derived = activeXlnFunctions.deriveDelta(delta, isLeft) as { inCapacity?: unknown; inPeerCredit?: unknown };
+      const inCapacity = nonNegative(toBigIntSafe(derived.inCapacity) ?? 0n);
+      if (inCapacity >= desiredInboundAmount) return null;
+
+      const inPeerCredit = nonNegative(toBigIntSafe(derived.inPeerCredit) ?? 0n);
+      const inWithoutPeerCredit = inCapacity > inPeerCredit ? inCapacity - inPeerCredit : 0n;
+      const neededPeerCredit = desiredInboundAmount > inWithoutPeerCredit ? desiredInboundAmount - inWithoutPeerCredit : 0n;
+
+      const currentPeerLimit = readPeerCreditLimit(resolvedCounterparty, tokenIdValue);
+      const rawOutPeerDebt = computeRawOutPeerDebt(delta, isLeft);
+      const targetPeerLimit = rawOutPeerDebt + neededPeerCredit;
+      if (targetPeerLimit > currentPeerLimit) return targetPeerLimit;
+
+      // Conservative fallback: ensure forward progress even if derived decomposition is stale between frames.
+      return currentPeerLimit + (desiredInboundAmount - inCapacity);
+    } catch {
+      return desiredInboundAmount;
+    }
+  }
+
+  function isInboundCapacityValidationError(reason: string): boolean {
+    if (!reason) return false;
+    return reason.startsWith('Inbound token is not active in this account.')
+      || reason.startsWith('Insufficient inbound capacity');
+  }
+
   $: giveTokenSymbol = tokenSymbol(giveToken);
   $: wantTokenSymbol = tokenSymbol(wantToken);
+  $: wantTokenPresentInAccount = hasTokenInAccount(counterpartyId, wantToken);
   $: availableGiveCapacity = readOutCapacity(counterpartyId, giveToken);
+  $: availableWantInCapacity = readInCapacity(counterpartyId, wantToken);
   $: formattedAvailableGive = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(availableGiveCapacity, giveToken)} ${giveTokenSymbol}`
     : availableGiveCapacity.toString();
-  $: estimatedPrice = formatPriceRatio(wantAmount, giveAmount);
+  $: formattedAvailableWantIn = Number.isFinite(wantToken) && wantToken > 0
+    ? `${formatAmount(availableWantInCapacity, wantToken)} ${wantTokenSymbol}`
+    : availableWantInCapacity.toString();
+  $: estimatedPrice = priceRatioScaled > 0n ? formatScaled(priceRatioScaled, PRICE_RATIO_DECIMALS) : 'n/a';
   $: estimatedReceiveLabel = Number.isFinite(wantToken) && wantToken > 0
     ? `${formatAmount(wantAmount, wantToken)} ${wantTokenSymbol}`
     : wantAmount.toString();
   $: estimatedSpendLabel = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(giveAmount, giveToken)} ${giveTokenSymbol}`
     : giveAmount.toString();
+  $: autoInboundCreditTarget = computeAutoInboundCreditTarget(counterpartyId, wantToken, wantAmount);
+  $: currentPeerCreditLimit = readPeerCreditLimit(counterpartyId, wantToken);
+  $: autoInboundCreditIncrease = autoInboundCreditTarget && autoInboundCreditTarget > currentPeerCreditLimit
+    ? autoInboundCreditTarget - currentPeerCreditLimit
+    : 0n;
+  $: canAutoPrepareInboundCapacity = autoInboundCreditTarget !== null && autoInboundCreditIncrease > 0n;
 
-  function validateSwapForm(): string {
-    if (!activeIsLive) return 'Switch to LIVE mode to place swap orders.';
-    if (!tab.entityId) return 'Entity is not selected.';
-    if (!counterpartyId) return 'Select account (hub) first.';
-    const hasCounterparty = accountIds.some((id) => String(id || '').toLowerCase() === String(counterpartyId || '').toLowerCase());
+  type SwapFormValidationInput = {
+    isLive: boolean;
+    entityId: string;
+    counterpartyId: string;
+    accountIds: string[];
+    giveToken: number;
+    wantToken: number;
+    giveAmount: bigint;
+    priceRatioScaled: bigint;
+    limitPriceTicks: bigint | null;
+    wantAmount: bigint;
+    wantTokenPresentInAccount: boolean;
+    availableGiveCapacity: bigint;
+    availableWantInCapacity: bigint;
+    formattedAvailableGive: string;
+    formattedAvailableWantIn: string;
+    minFillPercent: string;
+  };
+
+  function validateSwapForm(input: SwapFormValidationInput): string {
+    if (!input.isLive) return 'Switch to LIVE mode to place swap orders.';
+    if (!input.entityId) return 'Entity is not selected.';
+    if (!input.counterpartyId) return 'Select account (hub) first.';
+    const hasCounterparty = input.accountIds.some(
+      (id) => String(id || '').toLowerCase() === String(input.counterpartyId || '').toLowerCase(),
+    );
     if (!hasCounterparty) return 'Selected account is not active.';
-    if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0) {
-      return 'Select valid Give and Want tokens.';
+    if (!Number.isFinite(input.giveToken) || !Number.isFinite(input.wantToken) || input.giveToken <= 0 || input.wantToken <= 0) {
+      return 'Select valid Sell and Buy tokens.';
     }
-    if (giveToken === wantToken) return 'Give token and Want token must be different.';
-    const minFillPercentValue = Number.parseFloat(minFillPercent);
+    if (input.giveToken === input.wantToken) return 'Sell token and Buy token must be different.';
+    if (input.giveAmount <= 0n) return 'Enter amount to sell.';
+    if (input.priceRatioScaled <= 0n) return 'Enter valid price.';
+    if (!input.limitPriceTicks || input.limitPriceTicks <= 0n) return 'Price is too small.';
+    if (input.wantAmount <= 0n) return 'Amount to receive is too small for selected price.';
+    if (!input.wantTokenPresentInAccount) {
+      return 'Inbound token is not active in this account. Add token capacity first.';
+    }
+    if (input.giveAmount > input.availableGiveCapacity) {
+      return `Insufficient outbound capacity (${input.formattedAvailableGive}).`;
+    }
+    if (input.wantAmount > input.availableWantInCapacity) {
+      return `Insufficient inbound capacity (${input.formattedAvailableWantIn}).`;
+    }
+    const minFillPercentValue = Number.parseFloat(input.minFillPercent);
     if (!Number.isFinite(minFillPercentValue) || minFillPercentValue < 1 || minFillPercentValue > 100) {
       return 'Min Fill % must be between 1 and 100.';
     }
     return '';
   }
 
-  $: swapDisabledReason = validateSwapForm();
+  $: swapDisabledReason = validateSwapForm({
+    isLive: activeIsLive,
+    entityId: String(tab.entityId || ''),
+    counterpartyId: String(counterpartyId || ''),
+    accountIds,
+    giveToken,
+    wantToken,
+    giveAmount,
+    priceRatioScaled,
+    limitPriceTicks,
+    wantAmount,
+    wantTokenPresentInAccount,
+    availableGiveCapacity,
+    availableWantInCapacity,
+    formattedAvailableGive,
+    formattedAvailableWantIn,
+    minFillPercent,
+  });
+  $: swapActionDisabledReason = (
+    isInboundCapacityValidationError(swapDisabledReason) && canAutoPrepareInboundCapacity
+      ? ''
+      : swapDisabledReason
+  );
+  $: autoCapacityNote = (() => {
+    if (!canAutoPrepareInboundCapacity) return '';
+    const targetLabel = formatAmount(autoInboundCreditTarget ?? 0n, wantToken);
+    const increaseLabel = formatAmount(autoInboundCreditIncrease, wantToken);
+    return `Placing this swap will auto-activate ${wantTokenSymbol} and set inbound capacity to ${targetLabel} ${wantTokenSymbol} (+${increaseLabel}).`;
+  })();
   $: capacityWarning = (() => {
     if (!counterpartyId || !Number.isFinite(giveToken) || giveToken <= 0) return '';
     if (availableGiveCapacity <= 0n) return `Observed available ${giveTokenSymbol}: 0 (may update after next frame).`;
@@ -308,6 +585,9 @@
     const clamped = Math.max(0, Math.min(100, Math.round(percent)));
     orderPercent = clamped;
 
+    const priceScaled = (selectedOrderLevel.priceTicks * PRICE_RATIO_SCALE) / ORDERBOOK_PRICE_SCALE;
+    const levelBaseDecimals = getTokenDecimals(selectedOrderLevel.baseTokenId);
+    const levelQuoteDecimals = getTokenDecimals(selectedOrderLevel.quoteTokenId);
     const availableBase = selectedOrderLevel.side === 'ask'
       ? (
           selectedOrderLevel.priceTicks > 0n
@@ -317,14 +597,12 @@
       : readOutCapacity(selectedOrderLevel.accountId, selectedOrderLevel.baseTokenId);
     const maxFillBase = availableBase < selectedOrderLevel.sizeBaseWei ? availableBase : selectedOrderLevel.sizeBaseWei;
     const fillBase = (maxFillBase * BigInt(clamped)) / 100n;
+    const fillGive = selectedOrderLevel.side === 'ask'
+      ? quoteFromBase(fillBase, priceScaled, levelBaseDecimals, levelQuoteDecimals)
+      : fillBase;
 
-    if (selectedOrderLevel.side === 'ask') {
-      giveAmount = (fillBase * selectedOrderLevel.priceTicks) / ORDERBOOK_PRICE_SCALE;
-      wantAmount = fillBase;
-    } else {
-      giveAmount = fillBase;
-      wantAmount = (fillBase * selectedOrderLevel.priceTicks) / ORDERBOOK_PRICE_SCALE;
-    }
+    orderAmountInput = formatAmount(fillGive, Number.parseInt(giveTokenId, 10));
+    priceRatioInput = formatPriceTicks(selectedOrderLevel.priceTicks);
   }
 
   function handleOrderPercentInput(event: Event) {
@@ -339,26 +617,11 @@
       return;
     }
     if (availableGiveCapacity <= 0n) return;
-    const currentGive = giveAmount;
-    const currentWant = wantAmount;
-    giveAmount = availableGiveCapacity;
-    if (currentGive > 0n && currentWant > 0n) {
-      wantAmount = (availableGiveCapacity * currentWant) / currentGive;
-    }
-  }
-
-  function setOrderPercentPreset(percent: number) {
-    applyOrderPercent(percent);
+    orderAmountInput = formatAmount(availableGiveCapacity, giveToken);
   }
 
   function handleOrderbookSnapshot(event: CustomEvent<OrderbookSnapshot>) {
     orderbookSnapshot = event.detail;
-  }
-
-  function prefillFromBestLevel(side: BookSide) {
-    const level = side === 'bid' ? bestBidLevel : bestAskLevel;
-    if (!level) return;
-    handleOrderbookLevelClick(new CustomEvent('levelclick', { detail: { side, price: level.price, size: level.size } }));
   }
 
   function handleOrderbookLevelClick(event: CustomEvent<{ side: BookSide; price: number; size: number }>) {
@@ -368,7 +631,7 @@
       return;
     }
 
-    const pair = parsePairTokens(orderbookPairId);
+    const pair = selectedPair;
     if (!pair) {
       submitError = 'Select valid token pair first.';
       return;
@@ -392,15 +655,7 @@
       accountId: counterpartyId,
     };
 
-    if (side === 'ask') {
-      // Take ask: spend quote to receive base.
-      giveTokenId = String(pair.quoteTokenId);
-      wantTokenId = String(pair.baseTokenId);
-    } else {
-      // Take bid: spend base to receive quote.
-      giveTokenId = String(pair.baseTokenId);
-      wantTokenId = String(pair.quoteTokenId);
-    }
+    tradeSide = side === 'ask' ? 'buy-base' : 'sell-base';
     applyOrderPercent(100);
   }
 
@@ -420,8 +675,19 @@
     return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
   }
 
-  $: giveTokenDecimals = getTokenDecimals(Number.parseInt(giveTokenId, 10));
-  $: wantTokenDecimals = getTokenDecimals(Number.parseInt(wantTokenId, 10));
+  function quoteFromBase(baseAmount: bigint, priceScaled: bigint, baseDecimals: number, quoteDecimals: number): bigint {
+    if (baseAmount <= 0n || priceScaled <= 0n) return 0n;
+    const baseScale = 10n ** BigInt(Math.max(0, baseDecimals));
+    const quoteScale = 10n ** BigInt(Math.max(0, quoteDecimals));
+    return (baseAmount * priceScaled * quoteScale) / (PRICE_RATIO_SCALE * baseScale);
+  }
+
+  function baseFromQuote(quoteAmount: bigint, priceScaled: bigint, baseDecimals: number, quoteDecimals: number): bigint {
+    if (quoteAmount <= 0n || priceScaled <= 0n) return 0n;
+    const baseScale = 10n ** BigInt(Math.max(0, baseDecimals));
+    const quoteScale = 10n ** BigInt(Math.max(0, quoteDecimals));
+    return (quoteAmount * PRICE_RATIO_SCALE * baseScale) / (priceScaled * quoteScale);
+  }
 
   function isRuntimeEnv(value: unknown): value is { eReplicas: Map<string, unknown>; jReplicas: Map<string, unknown> } {
     if (!value || typeof value !== 'object') return false;
@@ -436,81 +702,31 @@
     return null;
   }
 
-  function formatPriceRatio(want: unknown, give: unknown, precision = 6): string {
-    const wantBig = toBigIntSafe(want);
-    const giveBig = toBigIntSafe(give);
-    if (wantBig === null || giveBig === null || giveBig <= 0n) return 'n/a';
-    const scale = 10n ** BigInt(precision);
-    const scaled = (wantBig * scale) / giveBig;
-    const whole = scaled / scale;
-    const frac = (scaled % scale).toString().padStart(precision, '0').replace(/0+$/, '');
-    return frac.length > 0 ? `${whole.toString()}.${frac}` : whole.toString();
-  }
-
-  function resolveOrderMode(
-    pair: { baseTokenId: number; quoteTokenId: number } | null,
-    giveTokenValue: number,
-    wantTokenValue: number,
-  ): 'buy-base' | 'sell-base' | 'none' {
-    if (!pair) return 'none';
-    if (giveTokenValue === pair.quoteTokenId && wantTokenValue === pair.baseTokenId) return 'buy-base';
-    if (giveTokenValue === pair.baseTokenId && wantTokenValue === pair.quoteTokenId) return 'sell-base';
-    return 'none';
-  }
-
-  $: parsedOrderbookPair = parsePairTokens(orderbookPairId);
-  $: orderMode = resolveOrderMode(parsedOrderbookPair, giveToken, wantToken);
-  $: limitPriceTicks = (() => {
-    if (giveAmount <= 0n || wantAmount <= 0n) return null;
-    if (orderMode === 'buy-base') return (giveAmount * ORDERBOOK_PRICE_SCALE) / wantAmount;
-    if (orderMode === 'sell-base') return (wantAmount * ORDERBOOK_PRICE_SCALE) / giveAmount;
-    return null;
-  })();
-  $: immediateFillPreview = (() => {
-    if (!parsedOrderbookPair || !limitPriceTicks) {
-      return {
-        marketable: false,
-        baseFill: 0n,
-        counterFill: 0n,
-        summary: 'Enter a valid pair and amounts to preview execution.',
-      };
+  $: parsedOrderbookPair = selectedPair
+    ? { baseTokenId: selectedPair.baseTokenId, quoteTokenId: selectedPair.quoteTokenId }
+    : null;
+  $: orderMode = parsedOrderbookPair ? tradeSide : 'none';
+  $: baseTokenId = parsedOrderbookPair?.baseTokenId ?? giveToken;
+  $: quoteTokenId = parsedOrderbookPair?.quoteTokenId ?? wantToken;
+  $: baseTokenSymbol = tokenSymbol(baseTokenId);
+  $: quoteTokenSymbol = tokenSymbol(quoteTokenId);
+  $: baseTokenDecimals = getTokenDecimals(baseTokenId);
+  $: quoteTokenDecimals = getTokenDecimals(quoteTokenId);
+  $: orderbookSizeDisplayScale = baseTokenDecimals > 12 ? 10 ** Math.max(0, baseTokenDecimals - 12) : 1;
+  $: giveTokenDecimals = getTokenDecimals(giveToken);
+  $: priceRatioScaled = parseDecimalAmountToBigInt(priceRatioInput, PRICE_RATIO_DECIMALS);
+  $: limitPriceTicks = priceRatioScaled > 0n ? (priceRatioScaled * ORDERBOOK_PRICE_SCALE) / PRICE_RATIO_SCALE : null;
+  $: giveAmount = parseDecimalAmountToBigInt(orderAmountInput, giveTokenDecimals);
+  $: wantAmount = (() => {
+    if (giveAmount <= 0n || priceRatioScaled <= 0n || !parsedOrderbookPair) return 0n;
+    if (orderMode === 'sell-base') {
+      return quoteFromBase(giveAmount, priceRatioScaled, baseTokenDecimals, quoteTokenDecimals);
     }
     if (orderMode === 'buy-base') {
-      if (!bestAskLevel || !bestAskTicks) {
-        return { marketable: false, baseFill: 0n, counterFill: 0n, summary: 'No ask liquidity visible.' };
-      }
-      const marketable = limitPriceTicks >= bestAskTicks;
-      const baseWanted = wantAmount;
-      const topAskBase = lotsToBaseWei(bestAskLevel.size);
-      const baseFill = marketable ? (baseWanted < topAskBase ? baseWanted : topAskBase) : 0n;
-      const counterFill = marketable ? (baseFill * bestAskTicks) / ORDERBOOK_PRICE_SCALE : 0n;
-      const summary = marketable
-        ? `Marketable on top ask. Immediate fill preview uses first level only.`
-        : `Not marketable at current best ask.`;
-      return { marketable, baseFill, counterFill, summary };
+      return baseFromQuote(giveAmount, priceRatioScaled, baseTokenDecimals, quoteTokenDecimals);
     }
-    if (orderMode === 'sell-base') {
-      if (!bestBidLevel || !bestBidTicks) {
-        return { marketable: false, baseFill: 0n, counterFill: 0n, summary: 'No bid liquidity visible.' };
-      }
-      const marketable = limitPriceTicks <= bestBidTicks;
-      const baseOffered = giveAmount;
-      const topBidBase = lotsToBaseWei(bestBidLevel.size);
-      const baseFill = marketable ? (baseOffered < topBidBase ? baseOffered : topBidBase) : 0n;
-      const counterFill = marketable ? (baseFill * bestBidTicks) / ORDERBOOK_PRICE_SCALE : 0n;
-      const summary = marketable
-        ? `Marketable on top bid. Immediate fill preview uses first level only.`
-        : `Not marketable at current best bid.`;
-      return { marketable, baseFill, counterFill, summary };
-    }
-    return {
-      marketable: false,
-      baseFill: 0n,
-      counterFill: 0n,
-      summary: 'Pair side is not aligned with orderbook.',
-    };
+    return 0n;
   })();
-
   $: depthLevels = (() => {
     const bids = orderbookSnapshot.bids.slice(0, 12);
     const asks = orderbookSnapshot.asks.slice(0, 12);
@@ -542,7 +758,10 @@
   $: askDepthPolyline = buildDepthPolyline(depthLevels.asks, 'ask');
 
   function offerSideLabel(offer: any): 'Ask' | 'Bid' {
-    return Number(offer?.giveTokenId || 0) < Number(offer?.wantTokenId || 0) ? 'Ask' : 'Bid';
+    const give = Number(offer?.giveTokenId || 0);
+    const want = Number(offer?.wantTokenId || 0);
+    const pair = resolvePairOrientation(give, want);
+    return give === pair.baseTokenId ? 'Ask' : 'Bid';
   }
 
   function offerPriceTicks(offer: any): bigint {
@@ -562,8 +781,8 @@
 
   async function placeSwapOffer() {
     submitError = '';
-    if (swapDisabledReason) {
-      submitError = swapDisabledReason;
+    if (swapActionDisabledReason) {
+      submitError = swapActionDisabledReason;
       return;
     }
 
@@ -583,16 +802,15 @@
 
       const giveToken = Number.parseInt(giveTokenId, 10);
       const wantToken = Number.parseInt(wantTokenId, 10);
-      const effectiveGiveAmount = resolveEnteredAmount(giveAmount, 'Amount to sell', giveTokenDecimals);
-      const effectiveWantAmount = resolveEnteredAmount(wantAmount, 'Amount to receive', wantTokenDecimals);
+      const effectiveGiveAmount = giveAmount;
+      const effectiveWantAmount = wantAmount;
       if (effectiveGiveAmount <= 0n || effectiveWantAmount <= 0n) {
-        throw new Error('Enter Give and Want amounts');
+        throw new Error('Enter amount and limit price');
       }
-      const allowedTokenIds = new Set(availableTokens.map((token) => Number.parseInt(String(token.id), 10)));
-      if (!Number.isFinite(giveToken) || !allowedTokenIds.has(giveToken)) {
+      if (!Number.isFinite(giveToken) || !allowedSwapTokenIds.has(giveToken)) {
         throw new Error('Invalid give token');
       }
-      if (!Number.isFinite(wantToken) || !allowedTokenIds.has(wantToken)) {
+      if (!Number.isFinite(wantToken) || !allowedSwapTokenIds.has(wantToken)) {
         throw new Error('Invalid want token');
       }
       if (giveToken === wantToken) {
@@ -606,31 +824,59 @@
 
       const offerId = `swap-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const minFillRatio = percentToFillRatio(minFillPercentValue);
+      const requiredInboundCreditLimit = computeAutoInboundCreditTarget(
+        resolvedCounterparty,
+        wantToken,
+        effectiveWantAmount,
+      );
+      const currentInboundCreditLimit = readPeerCreditLimit(resolvedCounterparty, wantToken);
+      const shouldAutoPrepareInbound = (
+        requiredInboundCreditLimit !== null
+        && requiredInboundCreditLimit > currentInboundCreditLimit
+        && isInboundCapacityValidationError(swapDisabledReason)
+      );
+      const entityTxs = [];
+      if (shouldAutoPrepareInbound) {
+        entityTxs.push({
+          type: 'extendCredit' as const,
+          data: {
+            counterpartyEntityId: resolvedCounterparty,
+            tokenId: wantToken,
+            amount: requiredInboundCreditLimit,
+          },
+        });
+      }
+      entityTxs.push({
+        type: 'placeSwapOffer' as const,
+        data: {
+          offerId,
+          counterpartyEntityId: resolvedCounterparty,
+          giveTokenId: giveToken,
+          giveAmount: effectiveGiveAmount,
+          wantTokenId: wantToken,
+          wantAmount: effectiveWantAmount,
+          minFillRatio,
+        },
+      });
 
       xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{
         entityId: tab.entityId,
         signerId,
-        entityTxs: [{
-          type: 'placeSwapOffer',
-          data: {
-            offerId,
-            counterpartyEntityId: resolvedCounterparty,
-            giveTokenId: giveToken,
-            giveAmount: effectiveGiveAmount,
-            wantTokenId: wantToken,
-            wantAmount: effectiveWantAmount,
-            minFillRatio,
-          }
-        }]
+        entityTxs,
       }] });
 
       console.log('📊 Swap offer placed:', offerId);
+      if (shouldAutoPrepareInbound) {
+        console.log(
+          `🛠️ Auto-prepared inbound capacity: token=${wantToken} creditLimit=${requiredInboundCreditLimit?.toString() || '0'}`,
+        );
+      }
 
       // Reset form
       orderPercent = 100;
       selectedOrderLevel = null;
-      giveAmount = 0n;
-      wantAmount = 0n;
+      orderAmountInput = '';
+      priceRatioInput = '';
     } catch (error) {
       console.error('Failed to place swap offer:', error);
       submitError = `Failed to place swap: ${(error as Error)?.message || 'Unknown error'}`;
@@ -703,106 +949,132 @@
         </button>
       </div>
     </div>
-    <p class="orderbook-hint">{orderbookHint}</p>
-    {#if orderbookHubIds.length > 0}
-      <div class="best-strip" data-testid="swap-best-strip">
-        <div class="best-card bid">
-          <div class="best-label">Best Bid</div>
-          <div class="best-value">{bestBidTicks ? formatPriceTicks(bestBidTicks) : '-'}</div>
-          <div class="best-size">{bestBidLevel ? `${bestBidLevel.size} lots` : 'No depth'}</div>
-          <button class="best-action" type="button" on:click={() => prefillFromBestLevel('bid')} disabled={!bestBidLevel || !counterpartyId}>
-            Hit Bid
-          </button>
-        </div>
-        <div class="best-card ask">
-          <div class="best-label">Best Ask</div>
-          <div class="best-value">{bestAskTicks ? formatPriceTicks(bestAskTicks) : '-'}</div>
-          <div class="best-size">{bestAskLevel ? `${bestAskLevel.size} lots` : 'No depth'}</div>
-          <button class="best-action" type="button" on:click={() => prefillFromBestLevel('ask')} disabled={!bestAskLevel || !counterpartyId}>
-            Take Ask
-          </button>
-        </div>
+    {#if !prefilledCounterparty}
+      <div class="form-row compact">
+        <label>
+          Account (Hub)
+          <EntitySelect bind:value={counterpartyId} options={accountIds} placeholder="Select account" />
+        </label>
       </div>
-      <div class="orderbook-wrap">
+    {/if}
+
+    <div class="form-row compact">
+      <label>
+        Pair
+        <input
+          list="swap-pair-options"
+          bind:value={pairSearchInput}
+          inputmode="search"
+          placeholder="Search pair (e.g. WETH/USDC)"
+          data-testid="swap-pair-search"
+          on:input={handlePairSearchInput}
+        />
+        <datalist id="swap-pair-options">
+          {#each pairOptions as pair (pair.value)}
+            <option value={pair.label}>{pair.label}</option>
+          {/each}
+        </datalist>
+      </label>
+      <div class="side-toggle-group">
+        <button
+          type="button"
+          class="scope-btn"
+          class:active={tradeSide === 'buy-base'}
+          data-testid="swap-side-buy"
+          on:click={() => setTradeSide('buy-base')}
+        >
+          Buy {baseTokenSymbol}
+        </button>
+        <button
+          type="button"
+          class="scope-btn"
+          class:active={tradeSide === 'sell-base'}
+          data-testid="swap-side-sell"
+          on:click={() => setTradeSide('sell-base')}
+        >
+          Sell {baseTokenSymbol}
+        </button>
+      </div>
+      <button
+        type="button"
+        class="scope-btn"
+        class:active={showDepthChart}
+        data-testid="swap-depth-chart-toggle"
+        on:click={() => (showDepthChart = !showDepthChart)}
+      >
+        {showDepthChart ? 'Hide Depth' : 'Show Depth'}
+      </button>
+    </div>
+
+    <p class="orderbook-hint">
+      Pair: {baseTokenSymbol}/{quoteTokenSymbol}. Price is quoted in {quoteTokenSymbol} per {baseTokenSymbol}.
+      {orderbookHint}
+    </p>
+    {#if orderbookHubIds.length > 0}
+      <div class="orderbook-wrap" data-testid="swap-orderbook">
         <OrderbookPanel
           hubIds={orderbookHubIds}
           hubId={counterpartyId}
           pairId={orderbookPairId}
+          pairLabel={selectedPair?.label || `${baseTokenSymbol}/${quoteTokenSymbol}`}
           depth={12}
+          priceScale={Number(ORDERBOOK_PRICE_SCALE)}
+          sizeDisplayScale={orderbookSizeDisplayScale}
           on:levelclick={handleOrderbookLevelClick}
           on:snapshot={handleOrderbookSnapshot}
         />
       </div>
-      <div class="depth-chart" data-testid="swap-depth-chart">
-        <div class="depth-header">
-          <span>Depth Chart</span>
-          <span>{orderbookPairId}</span>
+      {#if showDepthChart}
+        <div class="depth-chart" data-testid="swap-depth-chart">
+          <div class="depth-header">
+            <span>Depth Chart</span>
+            <span>{orderbookPairId}</span>
+          </div>
+          {#if bidDepthPolyline || askDepthPolyline}
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Orderbook depth chart">
+              {#if bidDepthPolyline}
+                <polyline points={bidDepthPolyline} class="depth-line bid" />
+              {/if}
+              {#if askDepthPolyline}
+                <polyline points={askDepthPolyline} class="depth-line ask" />
+              {/if}
+            </svg>
+          {:else}
+            <div class="depth-empty">No depth available yet.</div>
+          {/if}
         </div>
-        {#if bidDepthPolyline || askDepthPolyline}
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Orderbook depth chart">
-            {#if bidDepthPolyline}
-              <polyline points={bidDepthPolyline} class="depth-line bid" />
-            {/if}
-            {#if askDepthPolyline}
-              <polyline points={askDepthPolyline} class="depth-line ask" />
-            {/if}
-          </svg>
-        {:else}
-          <div class="depth-empty">No depth available yet.</div>
-        {/if}
-      </div>
+      {/if}
     {:else}
       <div class="orderbook-empty">No connected account orderbooks yet.</div>
     {/if}
   </div>
 
-  <!-- Place Swap Offer Form -->
   <div class="section">
     <h4>Place Limit Order</h4>
 
-    {#if !prefilledCounterparty}
     <div class="form-row">
       <label>
-        Counterparty (Hub)
-        <EntitySelect bind:value={counterpartyId} options={accountIds} placeholder="Select account" />
-      </label>
-    </div>
-    {/if}
-
-    <div class="form-row">
-      <label>
-        Give Token
-        <select bind:value={giveTokenId}>
-          {#each availableTokens as token}
-            <option value={token.id}>{token.name}</option>
-          {/each}
-        </select>
+        {tradeSide === 'buy-base' ? 'Amount to Spend' : 'Amount to Sell'} ({giveTokenSymbol})
+        <input type="text" bind:value={orderAmountInput} inputmode="decimal" placeholder="Amount to sell" />
       </label>
       <label>
-        Give Amount (wei)
-        <BigIntInput bind:value={giveAmount} decimals={giveTokenDecimals} placeholder="Amount to sell" />
-      </label>
-    </div>
-
-    <div class="form-row">
-      <label>
-        Want Token
-        <select bind:value={wantTokenId}>
-          {#each availableTokens as token}
-            <option value={token.id}>{token.name}</option>
-          {/each}
-        </select>
+        Price ({quoteTokenSymbol} per {baseTokenSymbol})
+        <input
+          type="text"
+          bind:value={priceRatioInput}
+          inputmode="decimal"
+          placeholder="Price"
+          on:input={handlePriceRatioInput}
+        />
       </label>
       <label>
-        Want Amount (wei)
-        <BigIntInput bind:value={wantAmount} decimals={wantTokenDecimals} placeholder="Amount to receive" />
-      </label>
-    </div>
-
-    <div class="form-row">
-      <label>
-        Min Fill %
-        <input type="number" bind:value={minFillPercent} min="1" max="100" placeholder="50" />
+        Amount to Receive ({wantTokenSymbol})
+        <input
+          type="text"
+          readonly
+          value={`${formatAmount(wantAmount, wantToken)} ${wantTokenSymbol}`}
+          class="readonly-input"
+        />
       </label>
     </div>
 
@@ -813,8 +1085,9 @@
       </div>
       <div class="size-stats">
         <span>Available: <strong>{formattedAvailableGive}</strong></span>
+        <span>Inbound Capacity: <strong>{formattedAvailableWantIn}</strong></span>
         <span>Estimate: <strong>{estimatedSpendLabel} → {estimatedReceiveLabel}</strong></span>
-        <span>Price: <strong>{estimatedPrice}</strong></span>
+        <span>Pair Price: <strong>{estimatedPrice}</strong></span>
       </div>
       <div class="slider-row">
         <input
@@ -828,60 +1101,35 @@
         />
         <span class="slider-value">{orderPercent}%</span>
       </div>
-      <div class="size-presets">
-        <button type="button" on:click={() => setOrderPercentPreset(25)} disabled={!selectedOrderLevel}>25%</button>
-        <button type="button" on:click={() => setOrderPercentPreset(50)} disabled={!selectedOrderLevel}>50%</button>
-        <button type="button" on:click={() => setOrderPercentPreset(75)} disabled={!selectedOrderLevel}>75%</button>
-        <button type="button" on:click={() => setOrderPercentPreset(100)} disabled={!selectedOrderLevel}>100%</button>
-      </div>
       {#if selectedOrderLevel}
         <p class="size-hint">
-          Level selected: {selectedOrderLevel.side.toUpperCase()} @ {formatPriceTicks(selectedOrderLevel.priceTicks)}
+          Filled from book level: {selectedOrderLevel.side.toUpperCase()} @ {formatPriceTicks(selectedOrderLevel.priceTicks)}
           (max {formatAmount(selectedOrderLevel.sizeBaseWei, selectedOrderLevel.baseTokenId)} {tokenSymbol(selectedOrderLevel.baseTokenId)})
         </p>
       {:else}
-        <p class="size-hint">Tip: click an orderbook level to prefill this form with max executable size.</p>
+        <p class="size-hint">Click any orderbook row to prefill price and max executable size.</p>
       {/if}
       {#if capacityWarning}
         <p class="size-warning">{capacityWarning}</p>
       {/if}
     </div>
 
-    <div class="execution-preview" data-testid="swap-execution-preview">
-      <div class="preview-title">Execution Preview</div>
-      <div class="preview-grid">
-        <div>
-          <span class="p-label">Side</span>
-          <span class="p-value">{orderMode === 'buy-base' ? 'Buy Base' : orderMode === 'sell-base' ? 'Sell Base' : 'n/a'}</span>
-        </div>
-        <div>
-          <span class="p-label">Limit Price</span>
-          <span class="p-value">{limitPriceTicks ? formatPriceTicks(limitPriceTicks) : '-'}</span>
-        </div>
-        <div>
-          <span class="p-label">Best Bid / Ask</span>
-          <span class="p-value">
-            {bestBidTicks ? formatPriceTicks(bestBidTicks) : '-'} / {bestAskTicks ? formatPriceTicks(bestAskTicks) : '-'}
-          </span>
-        </div>
-        <div>
-          <span class="p-label">Immediate Top Fill</span>
-          <span class="p-value">
-            {formatAmount(immediateFillPreview.baseFill, parsedOrderbookPair?.baseTokenId || giveToken)}
-            {' '}{tokenSymbol(parsedOrderbookPair?.baseTokenId || giveToken)}
-          </span>
-        </div>
-      </div>
-      <div class:preview-status-positive={immediateFillPreview.marketable} class:preview-status-neutral={!immediateFillPreview.marketable}>
-        {immediateFillPreview.summary}
-      </div>
+    <div class="form-row compact">
+      <label>
+        Min Fill %
+        <input type="number" bind:value={minFillPercent} min="1" max="100" placeholder="50" />
+      </label>
     </div>
 
-    <button class="primary-btn" on:click={placeSwapOffer} disabled={Boolean(swapDisabledReason)}>
+    {#if autoCapacityNote}
+      <p class="auto-capacity-note" data-testid="swap-auto-capacity-note">{autoCapacityNote}</p>
+    {/if}
+
+    <button class="primary-btn" on:click={placeSwapOffer} disabled={Boolean(swapActionDisabledReason)}>
       Place Swap Offer
     </button>
-    {#if swapDisabledReason || submitError}
-      <p class="form-error">{submitError || swapDisabledReason}</p>
+    {#if swapActionDisabledReason || submitError}
+      <p class="form-error">{submitError || swapActionDisabledReason}</p>
     {/if}
   </div>
 
@@ -908,12 +1156,12 @@
           <tbody>
             {#each openOrders as offer}
               {@const side = offerSideLabel(offer)}
-              {@const pair = `${Math.min(offer.giveTokenId, offer.wantTokenId)}/${Math.max(offer.giveTokenId, offer.wantTokenId)}`}
+              {@const pairView = resolvePairOrientation(offer.giveTokenId, offer.wantTokenId)}
               <tr>
                 <td>
                   <span class:side-ask={side === 'Ask'} class:side-bid={side === 'Bid'} class="side-badge">{side}</span>
                 </td>
-                <td>{pair}</td>
+                <td>{tokenSymbol(pairView.baseTokenId)}/{tokenSymbol(pairView.quoteTokenId)}</td>
                 <td>{formatPriceTicks(offerPriceTicks(offer))}</td>
                 <td>
                   {formatAmount(offer.giveAmount, offer.giveTokenId)} {tokenSymbol(offer.giveTokenId)}
@@ -975,6 +1223,13 @@
     flex-wrap: wrap;
   }
 
+  .side-toggle-group {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
   .scope-btn {
     padding: 6px 10px;
     border-radius: 8px;
@@ -1010,72 +1265,6 @@
     padding: 10px 12px;
     color: #9ca3af;
     font-size: 12px;
-  }
-
-  .best-strip {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-    margin: 8px 0 12px;
-  }
-
-  .best-card {
-    border: 1px solid #2f343f;
-    border-radius: 10px;
-    background: #0f1015;
-    padding: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .best-card.bid {
-    border-color: rgba(34, 197, 94, 0.35);
-  }
-
-  .best-card.ask {
-    border-color: rgba(239, 68, 68, 0.35);
-  }
-
-  .best-label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #9ca3af;
-  }
-
-  .best-value {
-    font-family: 'JetBrains Mono', monospace;
-    color: #f3f4f6;
-    font-size: 16px;
-    font-weight: 700;
-  }
-
-  .best-size {
-    color: #9ca3af;
-    font-size: 12px;
-  }
-
-  .best-action {
-    margin-top: 2px;
-    padding: 7px 10px;
-    border-radius: 8px;
-    border: 1px solid #394151;
-    background: #171922;
-    color: #e5e7eb;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .best-action:hover:not(:disabled) {
-    border-color: #fbbf24;
-    color: #fbbf24;
-  }
-
-  .best-action:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 
   .depth-chart {
@@ -1131,6 +1320,16 @@
     margin-bottom: 12px;
   }
 
+  .form-row.compact {
+    align-items: flex-end;
+  }
+
+  .form-row.compact .scope-btn {
+    height: 36px;
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
+
   .form-row label {
     flex: 1;
     display: flex;
@@ -1153,6 +1352,13 @@
   select:focus, input:focus {
     outline: none;
     border-color: rgba(251, 191, 36, 0.65);
+  }
+
+  .readonly-input {
+    background: #0a0b0f;
+    border-style: dashed;
+    color: #cbd5e1;
+    cursor: not-allowed;
   }
 
   .primary-btn {
@@ -1244,34 +1450,6 @@
     align-items: center;
   }
 
-  .size-presets {
-    margin-top: 8px;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .size-presets button {
-    border: 1px solid #3b3f48;
-    background: #151821;
-    color: #d1d5db;
-    border-radius: 8px;
-    padding: 6px 0;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .size-presets button:hover:not(:disabled) {
-    border-color: #fbbf24;
-    color: #fbbf24;
-  }
-
-  .size-presets button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
   .size-slider {
     width: 100%;
     accent-color: #f59e0b;
@@ -1307,50 +1485,11 @@
     line-height: 1.4;
   }
 
-  .execution-preview {
-    margin: 10px 0 14px;
-    border: 1px solid #2f343f;
-    border-radius: 10px;
-    background: #0f1015;
-    padding: 10px;
-  }
-
-  .preview-title {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #9ca3af;
-    margin-bottom: 8px;
-  }
-
-  .preview-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    gap: 10px;
-    margin-bottom: 8px;
-  }
-
-  .p-label {
-    display: block;
-    color: #9ca3af;
-    font-size: 11px;
-    margin-bottom: 2px;
-  }
-
-  .p-value {
-    color: #f3f4f6;
-    font-size: 12px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .preview-status-positive {
+  .auto-capacity-note {
+    margin: 10px 0 8px;
     color: #86efac;
-    font-size: 11px;
-  }
-
-  .preview-status-neutral {
-    color: #9ca3af;
-    font-size: 11px;
+    font-size: 12px;
+    line-height: 1.4;
   }
 
   .orders-title {
@@ -1442,9 +1581,6 @@
   }
 
   @media (max-width: 900px) {
-    .best-strip {
-      grid-template-columns: 1fr;
-    }
     .form-row {
       flex-direction: column;
     }

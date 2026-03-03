@@ -270,6 +270,9 @@ export interface XLNModule {
   isLeft: (entityId: string, counterpartyId: string) => boolean;
   formatTokenAmount: (tokenId: number, amount: bigint | null | undefined) => string;
   getTokenInfo: (tokenId: number) => { symbol: string; name: string; decimals: number; color: string };
+  isLiquidSwapToken: (tokenId: number) => boolean;
+  getSwapPairOrientation: (tokenA: number, tokenB: number) => { baseTokenId: number; quoteTokenId: number; pairId: string };
+  getDefaultSwapTradingPairs: () => Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }>;
   createDemoDelta: () => Delta;
   getDefaultCreditLimit: (tokenId: number) => bigint;
 

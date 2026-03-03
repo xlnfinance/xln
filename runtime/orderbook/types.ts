@@ -10,19 +10,22 @@ export { createBook, applyCommand, getBestBid, getBestAsk, getSpread, computeBoo
 
 // Import for local use
 import { MAX_FILL_RATIO } from './core';
+import { getSwapPairOrientation } from '../account-utils';
 
 /** Canonical pair normalization */
 export function canonicalPair(tokenA: number, tokenB: number): { base: number; quote: number; pairId: string } {
-  const base = Math.min(tokenA, tokenB);
-  const quote = Math.max(tokenA, tokenB);
-  return { base, quote, pairId: `${base}/${quote}` };
+  const { baseTokenId, quoteTokenId, pairId } = getSwapPairOrientation(tokenA, tokenB);
+  return { base: baseTokenId, quote: quoteTokenId, pairId };
 }
 
 /** Derive side from token direction */
 export function deriveSide(giveTokenId: number, wantTokenId: number): 0 | 1 {
-  // If giving base token (lower id), you're SELLING base
-  // If giving quote token (higher id), you're BUYING base
-  return giveTokenId < wantTokenId ? 1 : 0;  // 1 = SELL, 0 = BUY
+  const { base, quote } = canonicalPair(giveTokenId, wantTokenId);
+  // 1 = SELL base, 0 = BUY base
+  if (giveTokenId === base && wantTokenId === quote) return 1;
+  if (giveTokenId === quote && wantTokenId === base) return 0;
+  // Fallback for malformed directions (should not happen in valid swaps)
+  return giveTokenId < wantTokenId ? 1 : 0;
 }
 
 /** Calculate fill amount from ratio (uint16) */

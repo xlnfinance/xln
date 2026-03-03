@@ -6,7 +6,7 @@
  * Uses REAL BrowserVM for J-Machine (same as ahb.ts).
  *
  * Test flow:
- * 1. Setup: Alice-Hub account with ETH (token 1) and USDC (token 2)
+ * 1. Setup: Alice-Hub account with WETH (token 2) and USDC (token 1)
  * 2. Alice places limit order: Sell 20% capacity ETH for USDC
  * 3. Hub fills 50%: Partial fill
  * 4. Hub fills remaining 50%: Swap complete
@@ -94,9 +94,9 @@ async function processJEvents(env: Env): Promise<void> {
   await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: inputs });
 }
 
-// Token IDs
-const ETH_TOKEN_ID = 1;
-const USDC_TOKEN_ID = 2;
+// Token IDs (aligned with runtime TOKEN_REGISTRY)
+const USDC_TOKEN_ID = 1;
+const ETH_TOKEN_ID = 2;
 
 // Precision
 const DECIMALS = 18n;

@@ -27,6 +27,7 @@ export async function handleSwapOffer(
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: { offerId: string; makerIsLeft: boolean; fromEntity: string; toEntity: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; minFillRatio: number } }> {
   const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio } = accountTx.data;
   const events: string[] = [];
+  const LOT_SCALE = 10n ** 12n;
 
   // Initialize swapOffers Map if not present
   if (!accountMachine.swapOffers) {
@@ -68,7 +69,44 @@ export async function handleSwapOffer(
   const { leftEntity, rightEntity } = accountMachine;
   const makerIsLeft = byLeft;
 
-  // 4. Get or create delta for giveToken (the token being locked)
+  // 4. Quantize order to orderbook lot granularity at source.
+  // This keeps account holds, swap state, and orderbook matching deterministic.
+  const side = deriveSide(giveTokenId, wantTokenId);
+  const rawBaseAmount = side === 1 ? giveAmount : wantAmount;
+  const rawQuoteAmount = side === 1 ? wantAmount : giveAmount;
+  if (rawBaseAmount < LOT_SCALE) {
+    return { success: false, error: `Order too small for lot size (${LOT_SCALE.toString()} base wei)`, events };
+  }
+  const priceTicks = (rawQuoteAmount * 100n) / rawBaseAmount;
+  if (priceTicks <= 0n) {
+    return { success: false, error: `Invalid price ratio for swap offer`, events };
+  }
+  const quantizedBase = (rawBaseAmount / LOT_SCALE) * LOT_SCALE;
+  if (quantizedBase <= 0n) {
+    return { success: false, error: `Quantized base amount became zero`, events };
+  }
+  const quantizedQuote = (quantizedBase * priceTicks) / 100n;
+  if (quantizedQuote <= 0n) {
+    return { success: false, error: `Quantized quote amount became zero`, events };
+  }
+  const effectiveGiveAmount = side === 1 ? quantizedBase : quantizedQuote;
+  const effectiveWantAmount = side === 1 ? quantizedQuote : quantizedBase;
+  if (effectiveGiveAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || effectiveGiveAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+    return {
+      success: false,
+      error: `Quantized giveAmount out of bounds: ${effectiveGiveAmount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
+      events,
+    };
+  }
+  if (effectiveWantAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || effectiveWantAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+    return {
+      success: false,
+      error: `Quantized wantAmount out of bounds: ${effectiveWantAmount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
+      events,
+    };
+  }
+
+  // 5. Get or create delta for giveToken (the token being locked)
   let delta = accountMachine.deltas.get(giveTokenId);
   if (!delta) {
     delta = createDefaultDelta(giveTokenId);
@@ -79,62 +117,40 @@ export async function handleSwapOffer(
   delta.leftHold ??= 0n;
   delta.rightHold ??= 0n;
 
-  // 5. Check capacity (deriveDelta should account for all holds)
+  // 6. Check capacity (deriveDelta should account for all holds)
   const derived = deriveDelta(delta, makerIsLeft);
-  if (giveAmount > derived.outCapacity) {
+  if (effectiveGiveAmount > derived.outCapacity) {
     return {
       success: false,
-      error: `Insufficient capacity: need ${giveAmount}, available ${derived.outCapacity}`,
+      error: `Insufficient capacity: need ${effectiveGiveAmount}, available ${derived.outCapacity}`,
       events,
     };
   }
 
-  // 6. Create offer (also compute quantized amounts for orderbook determinism)
-  const LOT_SCALE = 10n ** 12n;
-  let quantizedGive: bigint | undefined;
-  let quantizedWant: bigint | undefined;
-  const side = deriveSide(giveTokenId, wantTokenId);
-  if (side === 1) {
-    if (giveAmount % LOT_SCALE === 0n) {
-      const priceTicks = (wantAmount * 100n) / giveAmount;
-      if (priceTicks > 0n) {
-        quantizedGive = giveAmount;
-        quantizedWant = (quantizedGive * priceTicks) / 100n;
-      }
-    }
-  } else {
-    if (wantAmount % LOT_SCALE === 0n) {
-      const priceTicks = (giveAmount * 100n) / wantAmount;
-      if (priceTicks > 0n) {
-        quantizedWant = wantAmount;
-        quantizedGive = (quantizedWant * priceTicks) / 100n;
-      }
-    }
-  }
-
+  // 7. Create offer (stored amounts are already quantized for deterministic matching)
   const offer: SwapOffer = {
     offerId,
     giveTokenId,
-    giveAmount,
+    giveAmount: effectiveGiveAmount,
     wantTokenId,
-    wantAmount,
+    wantAmount: effectiveWantAmount,
     minFillRatio,
     makerIsLeft,
     createdHeight: currentHeight,
-    ...(quantizedGive !== undefined ? { quantizedGive } : {}),
-    ...(quantizedWant !== undefined ? { quantizedWant } : {}),
+    quantizedGive: effectiveGiveAmount,
+    quantizedWant: effectiveWantAmount,
   };
 
-  // 7. Lock capacity (CRITICAL PER CODEX: Apply during BOTH validation and commit!)
+  // 8. Lock capacity (CRITICAL PER CODEX: Apply during BOTH validation and commit!)
   // Holds ARE consensus-critical - included in fullDeltaStates hash
   // Must be in BOTH validation (for hash) and commit (for real state) to match
   if (makerIsLeft) {
-    delta.leftHold += giveAmount;
+    delta.leftHold += effectiveGiveAmount;
   } else {
-    delta.rightHold += giveAmount;
+    delta.rightHold += effectiveGiveAmount;
   }
 
-  // 8. Store offer (proofBody includes swapOffers, so keep validation+commit aligned)
+  // 9. Store offer (proofBody includes swapOffers, so keep validation+commit aligned)
   accountMachine.swapOffers.set(offerId, offer);
   if (isValidation) {
     console.log(`📊 VALIDATION: Swap offer stored (for dispute proof)`);
@@ -142,7 +158,7 @@ export async function handleSwapOffer(
     console.log(`📊 COMMIT: Swap offer stored`);
   }
 
-  events.push(`📊 Swap offer created: ${offerId.slice(0,8)}... give ${giveAmount} token${giveTokenId} for ${wantAmount} token${wantTokenId}`);
+  events.push(`📊 Swap offer created: ${offerId.slice(0,8)}... give ${effectiveGiveAmount} token${giveTokenId} for ${effectiveWantAmount} token${wantTokenId}`);
 
   // Return event with canonical entities for deterministic attribution
   return {
@@ -154,9 +170,9 @@ export async function handleSwapOffer(
       fromEntity: leftEntity,   // Canonical entities (same on both sides)
       toEntity: rightEntity,
       giveTokenId,
-      giveAmount,
+      giveAmount: effectiveGiveAmount,
       wantTokenId,
-      wantAmount,
+      wantAmount: effectiveWantAmount,
       minFillRatio,
     },
   };

@@ -128,6 +128,19 @@ export async function createEntityFrameHash(
     orderbookHash: newState.orderbookExt
       ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(newState.orderbookExt)))
       : null,
+    swapTradingPairs: Array.isArray(newState.swapTradingPairs)
+      ? [...newState.swapTradingPairs]
+          .map((pair) => ({
+            baseTokenId: Number(pair.baseTokenId),
+            quoteTokenId: Number(pair.quoteTokenId),
+            pairId: String(pair.pairId || ''),
+          }))
+          .sort((a, b) => {
+            if (a.quoteTokenId !== b.quoteTokenId) return a.quoteTokenId - b.quoteTokenId;
+            if (a.baseTokenId !== b.baseTokenId) return a.baseTokenId - b.baseTokenId;
+            return a.pairId.localeCompare(b.pairId);
+          })
+      : [],
   };
 
   // keccak256 for EVM compatibility
