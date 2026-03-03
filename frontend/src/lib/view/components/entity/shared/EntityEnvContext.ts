@@ -32,6 +32,9 @@ const ENTITY_ENV_CONTEXT_KEY = Symbol('entity-env-context');
 export interface XLNFunctions {
   deriveDelta: (delta: TokenDelta, isLeft: boolean) => DerivedDelta;
   getTokenInfo: (tokenId: number) => TokenInfo;
+  isLiquidSwapToken: (tokenId: number) => boolean;
+  getSwapPairOrientation: (tokenA: number, tokenB: number) => { baseTokenId: number; quoteTokenId: number; pairId: string };
+  getDefaultSwapTradingPairs: () => Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }>;
   formatTokenAmount: (tokenId: number, amount: bigint) => string;
   getEntityShortId: (entityId: string) => string;
   formatEntityId: (entityId: string) => string;

@@ -234,6 +234,15 @@ export const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; deci
   3: { symbol: 'USDT', name: 'Tether USD', decimals: 18, color: '#26a17b' },
 };
 
+// Canonical liquid tokens used for quote-side orientation in swap pairs.
+export const LIQUID_SWAP_TOKEN_IDS = new Set<number>([1, 3]); // USDC, USDT
+export const DEFAULT_ENTITY_SWAP_PAIR_TOKENS = [1, 2, 3] as const;
+export type EntitySwapPairConfig = {
+  baseTokenId: number;
+  quoteTokenId: number;
+  pairId: string;
+};
+
 export function getTokenInfo(tokenId: number) {
   return TOKEN_REGISTRY[tokenId] || { 
     symbol: `TKN${tokenId}`, 
@@ -241,6 +250,72 @@ export function getTokenInfo(tokenId: number) {
     decimals: 18, 
     color: '#999' 
   };
+}
+
+export function isLiquidSwapToken(tokenId: number): boolean {
+  return LIQUID_SWAP_TOKEN_IDS.has(tokenId);
+}
+
+export function getSwapPairOrientation(
+  tokenA: number,
+  tokenB: number,
+): { baseTokenId: number; quoteTokenId: number; pairId: string } {
+  const left = Math.min(tokenA, tokenB);
+  const right = Math.max(tokenA, tokenB);
+  const pairId = `${left}/${right}`;
+
+  const aLiquid = isLiquidSwapToken(tokenA);
+  const bLiquid = isLiquidSwapToken(tokenB);
+
+  if (aLiquid && !bLiquid) {
+    return { baseTokenId: tokenB, quoteTokenId: tokenA, pairId };
+  }
+  if (!aLiquid && bLiquid) {
+    return { baseTokenId: tokenA, quoteTokenId: tokenB, pairId };
+  }
+
+  return { baseTokenId: left, quoteTokenId: right, pairId };
+}
+
+export function buildDefaultEntitySwapPairs(
+  tokenIds: readonly number[] = DEFAULT_ENTITY_SWAP_PAIR_TOKENS,
+): EntitySwapPairConfig[] {
+  const pairs: EntitySwapPairConfig[] = [];
+  const seen = new Set<string>();
+  const uniqueTokenIds = Array.from(new Set(tokenIds.filter((id) => Number.isFinite(id) && id > 0)));
+
+  for (let i = 0; i < uniqueTokenIds.length; i++) {
+    for (let j = i + 1; j < uniqueTokenIds.length; j++) {
+      const left = uniqueTokenIds[i]!;
+      const right = uniqueTokenIds[j]!;
+      if (left === right) continue;
+      const oriented = getSwapPairOrientation(left, right);
+      const key = `${oriented.baseTokenId}/${oriented.quoteTokenId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pairs.push({
+        baseTokenId: oriented.baseTokenId,
+        quoteTokenId: oriented.quoteTokenId,
+        pairId: oriented.pairId,
+      });
+    }
+  }
+
+  const primaryPair = getSwapPairOrientation(1, 2); // WETH/USDC orientation key
+  const primaryKey = `${primaryPair.baseTokenId}/${primaryPair.quoteTokenId}`;
+
+  return pairs.sort((a, b) => {
+    const aKey = `${a.baseTokenId}/${a.quoteTokenId}`;
+    const bKey = `${b.baseTokenId}/${b.quoteTokenId}`;
+    if (aKey === primaryKey && bKey !== primaryKey) return -1;
+    if (bKey === primaryKey && aKey !== primaryKey) return 1;
+    if (a.quoteTokenId !== b.quoteTokenId) return a.quoteTokenId - b.quoteTokenId;
+    return a.baseTokenId - b.baseTokenId;
+  });
+}
+
+export function getDefaultSwapTradingPairs(): EntitySwapPairConfig[] {
+  return buildDefaultEntitySwapPairs(DEFAULT_ENTITY_SWAP_PAIR_TOKENS);
 }
 
 /**

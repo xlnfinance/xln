@@ -1513,6 +1513,12 @@ export interface JBlockFinalized {
   signerCount: number;           // How many signers agreed (for audit)
 }
 
+export interface EntitySwapPair {
+  baseTokenId: number;
+  quoteTokenId: number;
+  pairId: string; // canonical sorted token key used by orderbook books map
+}
+
 /**
  * Liveness sync - empty block observation to prove chain is alive.
  * Required every JBLOCK_LIVENESS_INTERVAL blocks even if no events.
@@ -1573,6 +1579,10 @@ export interface EntityState {
   // Mirrors A-Machine state for easy UI access, updated on frame commits
   swapBook: Map<string, SwapBookEntry>;  // offerId → entry
   lockBook: Map<string, LockBookEntry>;  // lockId → entry
+
+  // 💱 Swap market config
+  // Kept in entity state so UI and runtime use one source of truth.
+  swapTradingPairs?: EntitySwapPair[];
 
   // 📈 Pending swap fill ratios (orderbook → dispute arguments)
   pendingSwapFillRatios?: Map<string, number>; // key = "accountId:offerId"

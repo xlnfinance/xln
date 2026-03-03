@@ -23,6 +23,7 @@ import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
 import { DEFAULT_SPREAD_DISTRIBUTION } from './orderbook';
+import { getSwapPairOrientation } from './account-utils';
 import { deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from './networking/p2p-crypto';
 import { buildEntityProfile } from './networking/gossip-helper';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -485,15 +486,11 @@ const normalizeTokenIdsForMm = (tokenCatalog: JTokenInfo[]): number[] => {
 const buildMarketMakerPairs = (tokenIds: number[]): Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> => {
   if (tokenIds.length < 3) return [];
   const [a, b, c] = tokenIds;
-  const pairs = [
-    { baseTokenId: Math.min(a, b), quoteTokenId: Math.max(a, b) },
-    { baseTokenId: Math.min(a, c), quoteTokenId: Math.max(a, c) },
-    { baseTokenId: Math.min(b, c), quoteTokenId: Math.max(b, c) },
+  return [
+    getSwapPairOrientation(a, b),
+    getSwapPairOrientation(a, c),
+    getSwapPairOrientation(b, c),
   ];
-  return pairs.map(pair => ({
-    ...pair,
-    pairId: `${pair.baseTokenId}/${pair.quoteTokenId}`,
-  }));
 };
 
 const ensureMarketMakerEntity = async (

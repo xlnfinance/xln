@@ -17,8 +17,11 @@
   export let hubId: string = '';
   export let hubIds: string[] = [];
   export let pairId: string = '1/2';  // e.g., "1/2" for ETH/USDC
+  export let pairLabel: string = '';
   export let depth: number = 10;
   export let showOwners: boolean = false;
+  export let priceScale: number = 1;
+  export let sizeDisplayScale: number = 1;
   export let envStore: Readable<any> = xlnEnvironment;
 
   type BookSide = 'bid' | 'ask';
@@ -308,14 +311,25 @@
     return -1;
   }
 
+  function scaledPrice(price: number): number {
+    const scale = Number.isFinite(priceScale) && priceScale > 0 ? priceScale : 1;
+    return price / scale;
+  }
+
   function formatPrice(price: number): string {
-    return price.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    return scaledPrice(price).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 6 });
+  }
+
+  function scaledSize(size: number): number {
+    const scale = Number.isFinite(sizeDisplayScale) && sizeDisplayScale > 0 ? sizeDisplayScale : 1;
+    return size / scale;
   }
 
   function formatSize(size: number): string {
-    if (size >= 1_000_000) return (size / 1_000_000).toFixed(2) + 'M';
-    if (size >= 1_000) return (size / 1_000).toFixed(2) + 'K';
-    return size.toString();
+    const displaySize = scaledSize(size);
+    if (displaySize >= 1_000_000) return (displaySize / 1_000_000).toFixed(2) + 'M';
+    if (displaySize >= 1_000) return (displaySize / 1_000).toFixed(2) + 'K';
+    return displaySize.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 6 });
   }
 
   function emitLevelClick(side: BookSide, level: OrderLevel) {
@@ -440,7 +454,7 @@
 <div class="orderbook-panel">
   <div class="header">
     <span class="title">Order Book</span>
-    <span class="pair">{pairId.replace('/', ' / ')}</span>
+    <span class="pair">{pairLabel || pairId.replace('/', ' / ')}</span>
   </div>
 
   <div class="spread-row">

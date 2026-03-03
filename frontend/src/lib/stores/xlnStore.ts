@@ -455,6 +455,22 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([,
       deriveDelta: safe(() => fallbackDerived) as any,
       formatTokenAmount: safe((tokenId: number, amount: bigint | null | undefined) => fallbackTokenAmount(tokenId, amount)) as any,
       getTokenInfo: safe((tokenId: number) => fallbackTokenInfo(tokenId)) as any,
+      isLiquidSwapToken: safe((tokenId: number) => tokenId === 1 || tokenId === 3) as any,
+      getSwapPairOrientation: safe((tokenA: number, tokenB: number) => {
+        const left = Math.min(tokenA, tokenB);
+        const right = Math.max(tokenA, tokenB);
+        const isLiquid = (id: number) => id === 1 || id === 3;
+        if (isLiquid(tokenA) && !isLiquid(tokenB)) return { baseTokenId: tokenB, quoteTokenId: tokenA, pairId: `${left}/${right}` };
+        if (!isLiquid(tokenA) && isLiquid(tokenB)) return { baseTokenId: tokenA, quoteTokenId: tokenB, pairId: `${left}/${right}` };
+        return { baseTokenId: left, quoteTokenId: right, pairId: `${left}/${right}` };
+      }) as any,
+      getDefaultSwapTradingPairs: safe(() => {
+        return [
+          { baseTokenId: 2, quoteTokenId: 1, pairId: '1/2' }, // WETH/USDC
+          { baseTokenId: 2, quoteTokenId: 3, pairId: '2/3' }, // WETH/USDT
+          { baseTokenId: 1, quoteTokenId: 3, pairId: '1/3' }, // USDC/USDT
+        ];
+      }) as any,
       isLeft: safe((entityId: string, counterpartyId: string) => entityId < counterpartyId) as any,
       createDemoDelta: safe(() => ({})) as any,
       getDefaultCreditLimit: safe(() => 0n) as any,
@@ -539,6 +555,9 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([,
     // Signature used across UI: formatTokenAmount(tokenId, amount).
     formatTokenAmount: formatTokenAmountUi as any,
     getTokenInfo: $xlnInstance.getTokenInfo,
+    isLiquidSwapToken: $xlnInstance.isLiquidSwapToken,
+    getSwapPairOrientation: $xlnInstance.getSwapPairOrientation,
+    getDefaultSwapTradingPairs: $xlnInstance.getDefaultSwapTradingPairs,
     isLeft: $xlnInstance.isLeft,
     createDemoDelta: $xlnInstance.createDemoDelta,
     getDefaultCreditLimit: $xlnInstance.getDefaultCreditLimit,
