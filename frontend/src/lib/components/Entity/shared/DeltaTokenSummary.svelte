@@ -8,6 +8,8 @@
     inOwnCredit: bigint;
     inCollateral: bigint;
     inPeerCredit: bigint;
+    outTotalHold?: bigint;
+    inTotalHold?: bigint;
   };
 
   export let symbol: string;
