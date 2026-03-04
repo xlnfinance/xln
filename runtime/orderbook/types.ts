@@ -10,7 +10,7 @@ export { createBook, applyCommand, getBestBid, getBestAsk, getSpread, computeBoo
 
 // Import for local use
 import { MAX_FILL_RATIO } from './core';
-import { getSwapPairOrientation } from '../account-utils';
+import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote } from '../account-utils';
 
 // Price tick precision used for ratio encoding in orderbook flows.
 // 10000 = 4 decimals (e.g. 1.2345)
@@ -30,6 +30,41 @@ export function deriveSide(giveTokenId: number, wantTokenId: number): 0 | 1 {
   if (giveTokenId === quote && wantTokenId === base) return 0;
   // Fallback for malformed directions (should not happen in valid swaps)
   return giveTokenId < wantTokenId ? 1 : 0;
+}
+
+/**
+ * Deterministic swap price calculation in ORDERBOOK_PRICE_SCALE ticks.
+ * This is the canonical function for frontend and runtime.
+ *
+ * Rules:
+ * - side=SELL_BASE rounds UP to not sell cheaper than requested
+ * - side=BUY_BASE rounds DOWN to not pay more than requested
+ * - pair policy step is always enforced
+ */
+export function computeSwapPriceTicks(
+  giveTokenId: number,
+  wantTokenId: number,
+  giveAmount: bigint,
+  wantAmount: bigint,
+): bigint {
+  if (giveAmount <= 0n || wantAmount <= 0n) return 0n;
+
+  const side = deriveSide(giveTokenId, wantTokenId);
+  const rawBaseAmount = side === 1 ? giveAmount : wantAmount;
+  const rawQuoteAmount = side === 1 ? wantAmount : giveAmount;
+  if (rawBaseAmount <= 0n || rawQuoteAmount <= 0n) return 0n;
+
+  const { base, quote } = canonicalPair(giveTokenId, wantTokenId);
+  const pairPolicy = getSwapPairPolicyByBaseQuote(base, quote);
+  const stepTicks = BigInt(Math.max(1, pairPolicy.priceStepTicks));
+
+  let priceTicks = (rawQuoteAmount * ORDERBOOK_PRICE_SCALE) / rawBaseAmount;
+  if (side === 1) {
+    priceTicks = ((priceTicks + stepTicks - 1n) / stepTicks) * stepTicks;
+  } else {
+    priceTicks = (priceTicks / stepTicks) * stepTicks;
+  }
+  return priceTicks > 0n ? priceTicks : 0n;
 }
 
 /** Calculate fill amount from ratio (uint16) */

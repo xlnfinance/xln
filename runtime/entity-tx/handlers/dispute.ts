@@ -298,9 +298,9 @@ export async function handleDisputeStart(
       // Non-fatal fallback.
     }
   }
-  if (jadapter?.depository && typeof (jadapter.depository as any).defaultDisputeDelay === 'function') {
+  if (jadapter?.depository && typeof jadapter.depository.defaultDisputeDelay === 'function') {
     try {
-      const delay = Number(await (jadapter.depository as any).defaultDisputeDelay());
+      const delay = Number(await jadapter.depository.defaultDisputeDelay());
       if (Number.isFinite(delay) && delay > 0) {
         defaultDisputeDelayBlocks = Math.floor(delay);
       }

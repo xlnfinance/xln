@@ -136,6 +136,9 @@
       inAmount: string;
       outTotal: bigint;
       inTotal: bigint;
+      tokenRebalanceState: TokenRebalanceState;
+      tokenRebalanceLabel: string;
+      pendingOutDebtMode: 'none' | 'pending' | 'settling';
     }> = [];
     for (const [tokenId, delta] of account.deltas.entries()) {
       const derived = activeXlnFunctions.deriveDelta(delta, isLeft);
@@ -146,6 +149,34 @@
       };
       const outTotal = derived.outOwnCredit + derived.outCollateral + derived.outPeerCredit;
       const inTotal = derived.inOwnCredit + derived.inCollateral + derived.inPeerCredit;
+      const tokenRequested = pendingRequestedByToken.get(tokenId) || 0n;
+      const tokenC2R = pendingC2RByToken.get(tokenId) || 0n;
+      let tokenRebalanceState: TokenRebalanceState = 'none';
+      let tokenRebalanceAmount = 0n;
+      if (tokenRequested > 0n) {
+        tokenRebalanceState = hasPendingBatch ? 'settling' : 'pending';
+        tokenRebalanceAmount = tokenRequested;
+      } else if (tokenC2R > 0n) {
+        tokenRebalanceState = hasPendingBatch ? 'settling' : 'pending';
+        tokenRebalanceAmount = tokenC2R;
+      } else if (derived.outCollateral > 0n && derived.outPeerCredit === 0n) {
+        tokenRebalanceState = 'secured';
+      } else if (derived.outCollateral > 0n && derived.outPeerCredit > 0n) {
+        tokenRebalanceState = 'partial';
+      }
+      const tokenRebalanceLabel = (() => {
+        if (tokenRebalanceState === 'pending') {
+          if (tokenRequested > 0n) return `Awaiting collateral ${activeXlnFunctions.formatTokenAmount(tokenId, tokenRebalanceAmount)}`;
+          return `Awaiting withdrawal ${activeXlnFunctions.formatTokenAmount(tokenId, tokenRebalanceAmount)}`;
+        }
+        if (tokenRebalanceState === 'settling') {
+          if (tokenRequested > 0n) return `Collateral settling ${activeXlnFunctions.formatTokenAmount(tokenId, tokenRebalanceAmount)}`;
+          return `Withdrawal settling ${activeXlnFunctions.formatTokenAmount(tokenId, tokenRebalanceAmount)}`;
+        }
+        if (tokenRebalanceState === 'secured') return 'Secured';
+        if (tokenRebalanceState === 'partial') return 'Partially secured';
+        return '';
+      })();
       rows.push({
         tokenId,
         symbol: String(info.symbol || `T${tokenId}`),
@@ -156,6 +187,13 @@
         inAmount: activeXlnFunctions.formatTokenAmount(tokenId, derived.inCapacity),
         outTotal,
         inTotal,
+        tokenRebalanceState,
+        tokenRebalanceLabel,
+        pendingOutDebtMode: tokenRebalanceState === 'settling'
+          ? 'settling'
+          : tokenRebalanceState === 'pending'
+            ? 'pending'
+            : 'none',
       });
     }
     return rows.sort((a, b) => {
@@ -185,41 +223,48 @@
     !hasActiveDispute &&
     !isFinalizedDisputed;
 
-  // Pending prepaid requests (actual request_collateral state)
-  $: pendingRequested = (() => {
+  function toBigIntSafe(value: unknown): bigint | null {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return BigInt(value);
+    if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return BigInt(value.trim());
+    return null;
+  }
+
+  function toTokenIdSafe(value: unknown): number | null {
+    const asNumber = Number(value);
+    if (!Number.isFinite(asNumber) || asNumber <= 0) return null;
+    return Math.floor(asNumber);
+  }
+
+  type TokenRebalanceState = 'none' | 'pending' | 'settling' | 'secured' | 'partial';
+
+  $: pendingRequestedByToken = (() => {
+    const out = new Map<number, bigint>();
     const map = account.requestedRebalance;
-    if (!map || typeof map.values !== 'function') return 0n;
-    let total = 0n;
-    for (const amount of map.values()) {
-      try {
-        const n = typeof amount === 'bigint' ? amount : BigInt(amount);
-        if (n > 0n) total += n;
-      } catch {
-        // ignore malformed value
-      }
+    if (!(map instanceof Map)) return out;
+    for (const [rawTokenId, rawAmount] of map.entries()) {
+      const tokenId = toTokenIdSafe(rawTokenId);
+      const amount = toBigIntSafe(rawAmount);
+      if (!tokenId || amount === null || amount <= 0n) continue;
+      out.set(tokenId, (out.get(tokenId) || 0n) + amount);
     }
-    return total;
+    return out;
   })();
 
-  $: pendingC2R = (() => {
+  $: pendingC2RByToken = (() => {
+    const out = new Map<number, bigint>();
     const ws = account.settlementWorkspace;
-    if (!ws || !Array.isArray(ws.ops)) return { active: false, submitted: false, amount: 0n };
-    let amount = 0n;
-    let hasC2R = false;
+    if (!ws || !Array.isArray(ws.ops)) return out;
     for (const op of ws.ops) {
       if (op?.type !== 'c2r') continue;
-      hasC2R = true;
-      try {
-        const n = typeof op.amount === 'bigint' ? op.amount : BigInt(op.amount ?? 0);
-        if (n > 0n) amount += n;
-      } catch {
-        // ignore malformed op
-      }
+      const tokenId = toTokenIdSafe(op?.tokenId);
+      const amount = toBigIntSafe(op?.amount);
+      if (!tokenId || amount === null || amount <= 0n) continue;
+      out.set(tokenId, (out.get(tokenId) || 0n) + amount);
     }
-    if (!hasC2R) return { active: false, submitted: false, amount: 0n };
-    const submitted = ws.status === 'submitted';
-    return { active: true, submitted, amount };
+    return out;
   })();
+  $: hasPendingBatch = account.settlementWorkspace?.status === 'submitted';
 
   $: workspace = account.settlementWorkspace;
   $: iAmLeft = entityId < counterpartyId;
@@ -240,28 +285,6 @@
     if (status === 'submitted') return 'Submitted on-chain';
     if (status === 'draft') return 'Draft';
     return status.replace(/_/g, ' ');
-  })();
-
-  // Rebalance state: show pending only when there is an actual prepaid request.
-  $: rebalanceState = (() => {
-    const hasPendingBatch = account.settlementWorkspace?.status === 'submitted';
-    const hasPendingRequest = pendingRequested > 0n;
-
-    if (hasPendingRequest) {
-      if (hasPendingBatch) return 'settling'; // On-chain tx in flight
-      return 'pending'; // request_collateral exists and fee was prepaid
-    }
-    if (pendingC2R.active) {
-      if (pendingC2R.submitted || hasPendingBatch) return 'settling'; // C→R on-chain tx in flight
-      return 'pending'; // awaiting/ready settlement signature path
-    }
-    if (agg.totalCollateral > 0n && agg.uncollateralized === 0n) {
-      return 'secured'; // All green — fully collateralized
-    }
-    if (agg.totalCollateral > 0n && agg.uncollateralized > 0n) {
-      return 'partial'; // Some collateral, but not fully covered
-    }
-    return 'none'; // Below soft limit, no rebalance needed
   })();
 
   function handleClick() {
@@ -351,6 +374,7 @@
     {#if accountDeltaViewMode === 'aggregated'}
       <DeltaTokenSummary
         compact={true}
+        barLayout={$settings.barLayout ?? 'center'}
         symbol={primaryTokenInfo.symbol}
         name={primaryTokenInfo.name}
         outAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCap) || '0'}
@@ -364,6 +388,7 @@
         {#each tokenSummaries as td (td.tokenId)}
           <DeltaTokenSummary
             compact={true}
+            barLayout={$settings.barLayout ?? 'center'}
             symbol={td.symbol}
             name={td.name}
             outAmount={td.outAmount}
@@ -371,43 +396,15 @@
             derived={td.derived}
             decimals={td.decimals}
             barHeight={9}
-          />
+            pendingOutDebtMode={td.pendingOutDebtMode}
+          >
+            <svelte:fragment slot="actions">
+              {#if td.tokenRebalanceState !== 'none'}
+                <span class="delta-rb {td.tokenRebalanceState}">{td.tokenRebalanceLabel}</span>
+              {/if}
+            </svelte:fragment>
+          </DeltaTokenSummary>
         {/each}
-      </div>
-    {/if}
-
-    <!-- Rebalance status indicator -->
-    {#if rebalanceState !== 'none'}
-      <div class="rebalance-indicator {rebalanceState}">
-        {#if rebalanceState === 'pending'}
-          <span class="rb-dot pending-dot"></span>
-          {#if pendingRequested > 0n}
-            <span>Awaiting collateral ({activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, pendingRequested) || '?'} requested)</span>
-          {:else if pendingC2R.active}
-            {#if canQuickApproveSettle}
-              <span>Awaiting your withdrawal signature ({activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, pendingC2R.amount) || '?'} pending)</span>
-            {:else}
-              <span>Awaiting withdrawal signature ({activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, pendingC2R.amount) || '?'} pending)</span>
-            {/if}
-          {:else}
-            <span>Rebalance pending</span>
-          {/if}
-        {:else if rebalanceState === 'settling'}
-          <span class="rb-dot settling-dot"></span>
-          {#if pendingRequested > 0n}
-            <span>On-chain collateral settlement</span>
-          {:else if pendingC2R.active}
-            <span>On-chain collateral withdrawal</span>
-          {:else}
-            <span>On-chain settlement</span>
-          {/if}
-        {:else if rebalanceState === 'secured'}
-          <span class="rb-dot secured-dot"></span>
-          <span>Secured</span>
-        {:else if rebalanceState === 'partial'}
-          <span class="rb-dot partial-dot"></span>
-          <span>Partially secured</span>
-        {/if}
       </div>
     {/if}
   {:else}
@@ -602,151 +599,42 @@
     background: transparent;
   }
 
-  /* ── Bar labels ───────────────────────────────── */
-  .row-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    font-family: 'JetBrains Mono','SF Mono','Monaco','Menlo',monospace;
-    font-size: 0.65em;
-    letter-spacing: 0.02em;
-    margin-bottom: 4px;
-  }
-  .cap-label { color: #a1a1aa; font-weight: 500; }
-  .token-icon-small {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    font-size: 0.62rem;
-    font-weight: 700;
-    margin-right: 5px;
-    vertical-align: middle;
-    color: #0c0a09;
-  }
-  .token-icon-small.usdc {
-    background: #52525b;
-    color: #fff;
-  }
-  .token-icon-small.usdt {
-    background: #26a17b;
-    color: #fff;
-  }
-  .token-icon-small.weth {
-    background: #71717a;
-    color: #fff;
-  }
-  .token-icon-small.other {
-    background: #a1a1aa;
-    color: #0c0a09;
-  }
-
-  /* ── Bar core ─────────────────────────────────── */
-  .bar {
-    display: flex;
-    align-items: stretch;
-    height: 8px;
-    background: #27272a;
-    border-radius: 4px;
-    overflow: hidden;
-  }
-  .seg { min-width: 2px; transition: width 0.3s ease, flex 0.3s ease; position: relative; overflow: hidden; }
-  .seg.credit { background: #a1a1aa; }
-  .half.in .seg.credit, .side.in .seg.credit { background: rgba(161, 161, 170, 0.65); }
-  .seg.coll { background: linear-gradient(180deg, #34d399, #10b981); }
-  .seg.debt { background: linear-gradient(180deg, #fb7185, #f43f5e); }
-
-  /* Striped = awaiting rebalance (over soft limit, hub hasn't collateralized yet) */
-  .seg.debt.striped {
-    background: repeating-linear-gradient(
-      -45deg,
-      #f43f5e 0px,
-      #f43f5e 3px,
-      #fbbf24 3px,
-      #fbbf24 6px
-    );
-    background-size: 8.5px 8.5px;
-    animation: stripe-scroll 0.8s linear infinite;
-  }
-
-  /* Pulsing = deposit/settlement in progress */
-  .seg.debt.pulsing {
-    background: linear-gradient(180deg, #fbbf24, #f59e0b);
-    animation: rebalance-pulse 1s ease-in-out infinite;
-  }
-
-  @keyframes stripe-scroll {
-    0% { background-position: 0 0; }
-    100% { background-position: 8.5px 8.5px; }
-  }
-
-  @keyframes rebalance-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
-
-  /* Secured bar glow */
-  .bar.rebalance-secured {
-    box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
-  }
-
-  /* Pending bar subtle glow */
-  .bar.rebalance-pending {
-    box-shadow: 0 0 6px rgba(251, 191, 36, 0.2);
-  }
-
-  .bar.rebalance-active {
-    box-shadow: 0 0 8px rgba(251, 191, 36, 0.3);
-  }
-
-  /* Center mode */
-  .bar.center { flex-direction: row; }
-  .half { flex:1; display:flex; align-items:stretch; overflow:hidden; }
-  .half.out { justify-content: flex-end; }
-  .half.in { justify-content: flex-start; }
-  .mid { width:2px; background:#52525b; flex-shrink:0; border-radius:1px; }
-
-  /* Sides mode */
-  .bar.sides { gap:3px; background:transparent; }
-  .side { display:flex; align-items:stretch; height:8px; background:#27272a; border-radius:4px; overflow:hidden; }
-  .side.out { justify-content: flex-end; }
-  .side.in { justify-content: flex-start; }
-  .gap { width:2px; flex-shrink:0; }
-
   /* ── Misc ──────────────────────────────────────── */
   .empty { font-size:0.65em; color:#52525b; padding:4px 0; font-style: italic; }
 
-  /* ── Rebalance indicator ───────────────────────── */
-  .rebalance-indicator {
-    display: flex;
+  .delta-rb {
+    display: inline-flex;
     align-items: center;
-    gap: 5px;
-    font-size: 0.55em;
-    padding: 3px 0;
-    font-weight: 500;
+    border-radius: 999px;
+    border: 1px solid #3f3f46;
+    background: rgba(24, 24, 27, 0.8);
+    color: #d6d3d1;
+    font-size: 10px;
+    font-weight: 600;
     letter-spacing: 0.02em;
+    padding: 3px 8px;
+    white-space: nowrap;
   }
-  .rebalance-indicator.pending { color: #fbbf24; }
-  .rebalance-indicator.quoted { color: #fb923c; }
-  .rebalance-indicator.depositing { color: #f59e0b; }
-  .rebalance-indicator.settling { color: #a78bfa; }
-  .rebalance-indicator.secured { color: #4ade80; }
-  .rebalance-indicator.partial { color: #34d399; }
-
-  .rb-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    flex-shrink: 0;
+  .delta-rb.pending {
+    color: #fbbf24;
+    border-color: rgba(251, 191, 36, 0.45);
+    background: rgba(251, 191, 36, 0.12);
   }
-  .pending-dot { background: #fbbf24; animation: rebalance-pulse 1.5s ease-in-out infinite; }
-  .quoted-dot { background: #fb923c; animation: rebalance-pulse 1s ease-in-out infinite; }
-  .depositing-dot { background: #f59e0b; animation: rebalance-pulse 0.6s ease-in-out infinite; }
-  .settling-dot { background: #a78bfa; animation: rebalance-pulse 0.4s ease-in-out infinite; }
-  .secured-dot { background: #4ade80; box-shadow: 0 0 4px rgba(74, 222, 128, 0.5); }
-  .partial-dot { background: #34d399; }
+  .delta-rb.settling {
+    color: #f59e0b;
+    border-color: rgba(245, 158, 11, 0.45);
+    background: rgba(245, 158, 11, 0.11);
+  }
+  .delta-rb.secured {
+    color: #4ade80;
+    border-color: rgba(74, 222, 128, 0.4);
+    background: rgba(16, 185, 129, 0.1);
+  }
+  .delta-rb.partial {
+    color: #34d399;
+    border-color: rgba(52, 211, 153, 0.4);
+    background: rgba(52, 211, 153, 0.1);
+  }
 
   .settle {
     display: inline-block;

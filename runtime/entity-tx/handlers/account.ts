@@ -5,6 +5,7 @@ import {
   applyCommand,
   createBook,
   canonicalPair,
+  computeSwapPriceTicks,
   deriveSide,
   ORDERBOOK_PRICE_SCALE,
   type BookState,
@@ -1006,15 +1007,12 @@ export function processOrderbookSwaps(
       continue;
     }
 
-    priceTicks = (quoteAmount * ORDERBOOK_PRICE_SCALE) / baseAmount;
-    const policyTickBig = BigInt(policyTick);
-    // Pair policy enforces deterministic step per market.
-    // Sell-base rounds up (never sell cheaper), buy-base rounds down (never pay more).
-    if (isSellBase) {
-      priceTicks = ((priceTicks + policyTickBig - 1n) / policyTickBig) * policyTickBig;
-    } else {
-      priceTicks = (priceTicks / policyTickBig) * policyTickBig;
-    }
+    priceTicks = computeSwapPriceTicks(
+      offer.giveTokenId,
+      offer.wantTokenId,
+      offer.giveAmount,
+      offer.wantAmount,
+    );
     if (priceTicks <= 0n) {
       console.warn(`⚠️ ORDERBOOK: price rounded to zero — skipping offer=${offer.offerId}`);
       continue;

@@ -1,7 +1,8 @@
 <script lang="ts">
-  import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
+  import type { AccountMachine, AccountTx, EntityReplica, Tab } from '$lib/types/ui';
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { p2pState, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+  import { settings } from '../../stores/settingsStore';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
   import { resolveEntityName } from '$lib/utils/entityNaming';
@@ -23,9 +24,25 @@
   let nowTimer: ReturnType<typeof setInterval> | null = null;
   let liveJHeightTimer: ReturnType<typeof setInterval> | null = null;
   let liveJHeight = 0;
+  let activityStatusFilter: 'all' | 'pending' | 'mempool' | 'confirmed' = 'all';
+  let activityTypeFilter = 'all';
+
+  type ActivityRow = {
+    id: string;
+    kind: 'pending' | 'mempool' | 'confirmed';
+    frameLabel: string;
+    timestamp: number;
+    statusLabel: string;
+    txs: AccountTx[];
+  };
+
+  type ActionParam = {
+    label: string;
+    value: string;
+    tone?: 'default' | 'good' | 'warn' | 'danger';
+  };
 
   $: iAmLeft = entityId < counterpartyId;
-  $: pendingCount = (account.mempool?.length || 0) + (account.pendingFrame ? 1 : 0);
   $: mempoolCount = Number(account.mempool?.length || 0);
   $: hasPendingConsensus = Boolean(account.pendingFrame);
   $: hasQueuedMempool = mempoolCount > 0;
@@ -73,20 +90,61 @@
   })();
   $: hasCommittedFrame = Number(account.currentHeight || 0) > 0;
   $: showTokenDetails = hasCommittedFrame && tokenDetails.length > 0;
+  $: currentFrameTxs = Array.isArray(account.currentFrame?.accountTxs) ? account.currentFrame.accountTxs : [];
+  $: activityRows = (() => {
+    const rows: ActivityRow[] = [];
+    if (account.pendingFrame) {
+      rows.push({
+        id: `pending-${account.pendingFrame.height}`,
+        kind: 'pending',
+        frameLabel: `Pending Frame #${account.pendingFrame.height}`,
+        timestamp: Number(account.pendingFrame.timestamp || 0),
+        statusLabel: 'Awaiting Consensus',
+        txs: Array.isArray(account.pendingFrame.accountTxs) ? account.pendingFrame.accountTxs : [],
+      });
+    }
+    if (Array.isArray(account.mempool) && account.mempool.length > 0) {
+      rows.push({
+        id: `mempool-${account.currentHeight}`,
+        kind: 'mempool',
+        frameLabel: 'Mempool Queue',
+        timestamp: Number(account.currentFrame?.timestamp || 0),
+        statusLabel: `${account.mempool.length} queued`,
+        txs: account.mempool,
+      });
+    }
+    const historicalFrames = Array.isArray(account.frameHistory) ? account.frameHistory.slice(-12).reverse() : [];
+    for (const frame of historicalFrames) {
+      rows.push({
+        id: `confirmed-${frame.height}`,
+        kind: 'confirmed',
+        frameLabel: `Frame #${frame.height}`,
+        timestamp: Number(frame.timestamp || 0),
+        statusLabel: 'Confirmed',
+        txs: Array.isArray(frame.accountTxs) ? frame.accountTxs : [],
+      });
+    }
+    return rows;
+  })();
+  $: allActivityTypes = (() => {
+    const typeSet = new Set<string>();
+    for (const row of activityRows) {
+      for (const tx of row.txs) typeSet.add(String(tx?.type || 'unknown'));
+    }
+    return Array.from(typeSet.values()).sort((a, b) => txTypeLabel(a).localeCompare(txTypeLabel(b)));
+  })();
+  $: filteredActivityRows = activityRows
+    .filter((row) => activityStatusFilter === 'all' || row.kind === activityStatusFilter)
+    .map((row) => ({
+      ...row,
+      filteredTxs: activityTypeFilter === 'all'
+        ? row.txs
+        : row.txs.filter((tx) => String(tx?.type || 'unknown') === activityTypeFilter),
+    }))
+    .filter((row) => row.filteredTxs.length > 0);
 
   function formatTimestamp(ms: number): string {
     return new Date(ms).toLocaleTimeString();
-  }
-
-  function summarizeTxTypes(
-    txs: Array<{ type?: string } | null | undefined> | null | undefined,
-  ): Array<{ type: string; count: number }> {
-    const counts = new Map<string, number>();
-    for (const tx of txs || []) {
-      const type = String(tx?.type || 'unknown');
-      counts.set(type, (counts.get(type) || 0) + 1);
-    }
-    return Array.from(counts.entries()).map(([type, count]) => ({ type, count }));
   }
 
   function txTypeLabel(type: string): string {
@@ -104,25 +162,190 @@
       set_credit_limit: 'Set Credit Limit',
     };
     if (known[type]) return known[type];
-    return type.replace(/_/g, ' ');
+    return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   }
 
-  function toPrettyJson(value: unknown): string {
-    try {
-      return JSON.stringify(
-        value,
-        (_key, v) => {
-          if (typeof v === 'bigint') return v.toString();
-          if (v instanceof Map) return Object.fromEntries(v.entries());
-          if (v instanceof Set) return Array.from(v.values());
-          if (v instanceof Uint8Array) return Array.from(v);
-          return v;
-        },
-        2,
-      );
-    } catch {
-      return String(value);
+  function formatKeyLabel(raw: string): string {
+    const known: Record<string, string> = {
+      offerId: 'Offer',
+      tokenId: 'Token',
+      giveTokenId: 'Sell Token',
+      wantTokenId: 'Buy Token',
+      amount: 'Amount',
+      giveAmount: 'Sell Amount',
+      wantAmount: 'Buy Amount',
+      priceTicks: 'Limit Price',
+      minFillRatio: 'Min Fill',
+      fillRatio: 'Fill',
+      cancelRemainder: 'Cancel Remainder',
+      requestId: 'Request ID',
+      approved: 'Approved',
+      counterpartyEntityId: 'Counterparty',
+      jHeight: 'J Height',
+      blockNumber: 'J Block',
+      transactionHash: 'Tx Hash',
+      workspaceVersion: 'Workspace',
+      onChainNonce: 'Nonce',
+      feeTokenId: 'Fee Token',
+      feeAmount: 'Fee',
+      events: 'Events',
+      observedAt: 'Observed',
+      revealBeforeHeight: 'Reveal Before',
+      hashlock: 'Hashlock',
+      lockId: 'Lock ID',
+      timelock: 'Timelock',
+      policyVersion: 'Policy Version',
+      r2cRequestSoftLimit: 'R2C Request Soft Limit',
+      hardLimit: 'Hard Limit',
+      maxAcceptableFee: 'Max Acceptable Fee',
+    };
+    if (known[raw]) return known[raw];
+    return raw.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+  }
+
+  function toBigIntSafe(value: unknown): bigint | null {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return BigInt(value);
+    if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return BigInt(value.trim());
+    return null;
+  }
+
+  function toNumberSafe(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'bigint') return Number(value);
+    if (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value))) return Number(value);
+    return null;
+  }
+
+  function toTokenIdSafe(value: unknown): number | null {
+    const num = toNumberSafe(value);
+    if (num === null || !Number.isFinite(num) || num <= 0) return null;
+    return Math.floor(num);
+  }
+
+  function tokenLabel(tokenId: number): string {
+    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(tokenId);
+    return tokenInfo?.symbol ? `${tokenInfo.symbol} (#${tokenId})` : `Token #${tokenId}`;
+  }
+
+  function entityLabel(entityRaw: unknown): string {
+    const entity = String(entityRaw || '');
+    if (!entity) return '-';
+    const resolvedName = resolveEntityName(entity, activeEnv);
+    const short = entity.length > 18 ? `${entity.slice(0, 10)}...${entity.slice(-4)}` : entity;
+    if (resolvedName && resolvedName.toLowerCase() !== entity.toLowerCase()) return `${resolvedName} (${short})`;
+    return short;
+  }
+
+  function fillRatioToPercent(ratioRaw: unknown): string {
+    const ratio = toNumberSafe(ratioRaw);
+    if (ratio === null) return '-';
+    const clamped = Math.max(0, Math.min(65535, ratio));
+    return `${((clamped / 65535) * 100).toFixed(2)}%`;
+  }
+
+  function tokenIdForAmountKey(data: Record<string, unknown>, key: string): number | null {
+    if (key === 'giveAmount') return toTokenIdSafe(data.giveTokenId);
+    if (key === 'wantAmount') return toTokenIdSafe(data.wantTokenId);
+    if (key === 'feeAmount') return toTokenIdSafe(data.feeTokenId) ?? toTokenIdSafe(data.tokenId);
+    return toTokenIdSafe(data.tokenId);
+  }
+
+  function formatDataValue(key: string, value: unknown, data: Record<string, unknown>): ActionParam {
+    const label = formatKeyLabel(key);
+    if (key === 'counterpartyEntityId') {
+      return { label, value: entityLabel(value) };
     }
+    if (key === 'transactionHash') {
+      const hash = String(value || '');
+      return { label, value: hash.length > 18 ? `${hash.slice(0, 12)}...${hash.slice(-6)}` : hash || '-' };
+    }
+    if (key === 'offerId' || key === 'requestId' || key === 'lockId') {
+      return { label, value: String(value || '-') };
+    }
+    if (key === 'events' && Array.isArray(value)) {
+      const preview = value.slice(0, 2).map((ev) => String((ev as { type?: unknown })?.type || 'event')).join(', ');
+      const suffix = value.length > 2 ? ', ...' : '';
+      return { label, value: `${value.length} (${preview}${suffix})` };
+    }
+    if (key.endsWith('TokenId') || key === 'tokenId' || key === 'feeTokenId') {
+      const tokenId = toTokenIdSafe(value);
+      return { label, value: tokenId ? tokenLabel(tokenId) : '-' };
+    }
+    if (key === 'minFillRatio' || key === 'fillRatio') {
+      return { label, value: fillRatioToPercent(value) };
+    }
+    if (key === 'priceTicks') {
+      const ticks = toBigIntSafe(value);
+      if (ticks === null) return { label, value: String(value || '-') };
+      const whole = ticks / 10_000n;
+      const frac = (ticks % 10_000n).toString().padStart(4, '0').replace(/0+$/, '');
+      return { label, value: frac ? `${whole}.${frac}` : whole.toString() };
+    }
+    if (key === 'approved' || key === 'cancelRemainder') {
+      const boolVal = Boolean(value);
+      return { label, value: boolVal ? 'Yes' : 'No', tone: boolVal ? 'good' : 'warn' };
+    }
+    const big = toBigIntSafe(value);
+    if (big !== null) {
+      const tokenId = tokenIdForAmountKey(data, key);
+      if (tokenId) return { label, value: formatTokenAmountSafe(tokenId, big) };
+      return { label, value: big.toString() };
+    }
+    if (Array.isArray(value)) return { label, value: `${value.length} item(s)` };
+    if (value && typeof value === 'object') return { label, value: `${Object.keys(value as Record<string, unknown>).length} field(s)` };
+    return { label, value: String(value ?? '-') };
+  }
+
+  function buildActionParams(tx: AccountTx): ActionParam[] {
+    const data = (tx?.data && typeof tx.data === 'object') ? (tx.data as Record<string, unknown>) : {};
+    const orderedKeys = [
+      'offerId',
+      'counterpartyEntityId',
+      'tokenId',
+      'giveTokenId',
+      'wantTokenId',
+      'amount',
+      'giveAmount',
+      'wantAmount',
+      'priceTicks',
+      'minFillRatio',
+      'fillRatio',
+      'cancelRemainder',
+      'requestId',
+      'approved',
+      'feeTokenId',
+      'feeAmount',
+      'r2cRequestSoftLimit',
+      'hardLimit',
+      'maxAcceptableFee',
+      'workspaceVersion',
+      'jHeight',
+      'events',
+      'blockNumber',
+      'transactionHash',
+      'onChainNonce',
+    ];
+    const keys = Object.keys(data);
+    const seen = new Set<string>();
+    const out: ActionParam[] = [];
+    for (const key of orderedKeys) {
+      if (!(key in data)) continue;
+      seen.add(key);
+      out.push(formatDataValue(key, data[key], data));
+    }
+    for (const key of keys) {
+      if (seen.has(key)) continue;
+      out.push(formatDataValue(key, data[key], data));
+    }
+    return out;
+  }
+
+  function txKindTone(type: string): 'neutral' | 'good' | 'warn' | 'danger' {
+    if (type === 'swap_resolve' || type === 'approve_withdrawal' || type === 'account_settle') return 'good';
+    if (type === 'swap_cancel_request' || type === 'request_withdrawal' || type === 'request_collateral') return 'warn';
+    if (type === 'reopen_disputed') return 'danger';
+    return 'neutral';
   }
 
   function toggleTokenDetails(tokenId: number): void {
@@ -236,6 +459,7 @@
         {@const isExpanded = expandedTokenIds.has(td.tokenId)}
         <div class="delta-card">
           <DeltaTokenSummary
+            barLayout={$settings.barLayout ?? 'center'}
             symbol={td.tokenInfo.symbol}
             name={td.tokenInfo.name || ''}
             outAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity) || '0'}
@@ -355,10 +579,28 @@
           <span class="proof-pending">Mempool: {mempoolCount} op{mempoolCount === 1 ? '' : 's'}</span>
         {/if}
       </div>
-      <details class="frame-json-details">
-        <summary>Frame data (JSON)</summary>
-        <pre class="frame-json">{toPrettyJson(account.currentFrame)}</pre>
-      </details>
+      {#if currentFrameTxs.length > 0}
+        <div class="tx-cards">
+          {#each currentFrameTxs as tx, txIndex (`latest-${txIndex}-${tx.type}`)}
+            <article class="tx-action-card">
+              <div class="tx-action-head">
+                <span class="tx-type tone-{txKindTone(tx.type)}">{txTypeLabel(tx.type)}</span>
+                <span class="tx-idx">#{txIndex + 1}</span>
+              </div>
+              <div class="tx-params">
+                {#each buildActionParams(tx) as param (`${param.label}-${param.value}`)}
+                  <div class="tx-param">
+                    <span class="tx-param-label">{param.label}</span>
+                    <span class="tx-param-value tone-{param.tone || 'default'}">{param.value}</span>
+                  </div>
+                {/each}
+              </div>
+            </article>
+          {/each}
+        </div>
+      {:else}
+        <div class="frame-empty">No account txs in current frame.</div>
+      {/if}
     </div>
 
     <div class="action-card management-card">
@@ -383,68 +625,56 @@
 
     <div class="section">
       <h3>Activity</h3>
+      <div class="activity-filters">
+        <label>
+          Status
+          <select bind:value={activityStatusFilter}>
+            <option value="all">All</option>
+            <option value="pending">Pending</option>
+            <option value="mempool">Mempool</option>
+            <option value="confirmed">Confirmed</option>
+          </select>
+        </label>
+        <label>
+          Action
+          <select bind:value={activityTypeFilter}>
+            <option value="all">All</option>
+            {#each allActivityTypes as type}
+              <option value={type}>{txTypeLabel(type)}</option>
+            {/each}
+          </select>
+        </label>
+      </div>
       <div class="frame-history">
-        {#if account.pendingFrame}
-          <div class="frame-item pending">
-            <div class="frame-header">
-              <span class="frame-id">Pending Frame #{account.pendingFrame.height}</span>
-              <span class="frame-status pending">Awaiting Consensus (not finalized)</span>
-              <span class="frame-timestamp">{formatTimestamp(account.pendingFrame.timestamp)}</span>
-            </div>
-            {#if summarizeTxTypes(account.pendingFrame.accountTxs).length > 0}
-              <div class="frame-body">
-                {#each summarizeTxTypes(account.pendingFrame.accountTxs) as tx}
-                  <span class="tx-chip">{txTypeLabel(tx.type)}{#if tx.count > 1} ×{tx.count}{/if}</span>
+        {#if filteredActivityRows.length > 0}
+          {#each filteredActivityRows as row (row.id)}
+            <div class="frame-item {row.kind}">
+              <div class="frame-header">
+                <span class="frame-id">{row.frameLabel}</span>
+                <span class="frame-status {row.kind}">{row.statusLabel}</span>
+                <span class="frame-timestamp">{formatTimestamp(row.timestamp)}</span>
+              </div>
+              <div class="tx-cards">
+                {#each row.filteredTxs as tx, txIndex (`${row.id}-${txIndex}-${tx.type}`)}
+                  <article class="tx-action-card">
+                    <div class="tx-action-head">
+                      <span class="tx-type tone-{txKindTone(tx.type)}">{txTypeLabel(tx.type)}</span>
+                      <span class="tx-idx">#{txIndex + 1}</span>
+                    </div>
+                    <div class="tx-params">
+                      {#each buildActionParams(tx) as param (`${param.label}-${param.value}`)}
+                        <div class="tx-param">
+                          <span class="tx-param-label">{param.label}</span>
+                          <span class="tx-param-value tone-{param.tone || 'default'}">{param.value}</span>
+                        </div>
+                      {/each}
+                    </div>
+                  </article>
                 {/each}
               </div>
-            {/if}
-            <details class="frame-json-details">
-              <summary>Frame data (JSON)</summary>
-              <pre class="frame-json">{toPrettyJson(account.pendingFrame)}</pre>
-            </details>
-          </div>
-        {/if}
-
-        {#if account.mempool.length > 0}
-          <div class="frame-item mempool">
-            <div class="frame-header">
-              <span class="frame-id">Mempool Queue</span>
-              <span class="frame-status mempool">{account.mempool.length} queued (not finalized)</span>
             </div>
-            <div class="frame-body">
-              {#each summarizeTxTypes(account.mempool) as tx}
-                <span class="tx-chip">{txTypeLabel(tx.type)}{#if tx.count > 1} ×{tx.count}{/if}</span>
-              {/each}
-            </div>
-          </div>
-        {/if}
-
-        {#if account.frameHistory && account.frameHistory.length > 0}
-          <div class="historical-frames">
-            {#each account.frameHistory.slice(-10).reverse() as frame}
-              <div class="frame-item historical">
-                <div class="frame-header">
-                  <span class="frame-id">Frame #{frame.height}</span>
-                  <span class="frame-status historical">Confirmed</span>
-                  <span class="frame-timestamp">{formatTimestamp(frame.timestamp)}</span>
-                </div>
-                {#if summarizeTxTypes(frame.accountTxs).length > 0}
-                  <div class="frame-body">
-                    {#each summarizeTxTypes(frame.accountTxs) as tx}
-                      <span class="tx-chip">{txTypeLabel(tx.type)}{#if tx.count > 1} ×{tx.count}{/if}</span>
-                    {/each}
-                  </div>
-                {:else}
-                  <div class="frame-empty">No account txs in this frame.</div>
-                {/if}
-                <details class="frame-json-details">
-                  <summary>Frame data (JSON)</summary>
-                  <pre class="frame-json">{toPrettyJson(frame)}</pre>
-                </details>
-              </div>
-            {/each}
-          </div>
-        {:else if !account.pendingFrame && account.mempool.length === 0}
+          {/each}
+        {:else}
           <div class="no-frames">No account activity yet.</div>
         {/if}
       </div>
@@ -722,32 +952,115 @@
     color: #f59e0b;
   }
 
-  .frame-json-details {
+  .tx-cards {
     margin-top: 8px;
-    border-top: 1px solid #292524;
-    padding-top: 6px;
+    display: grid;
+    gap: 8px;
   }
 
-  .frame-json-details summary {
-    cursor: pointer;
-    color: #fbbf24;
-    font-size: 11px;
-    user-select: none;
-  }
-
-  .frame-json {
-    margin: 8px 0 0;
-    max-height: 260px;
-    overflow: auto;
-    border: 1px solid #292524;
-    border-radius: 8px;
-    background: #0c0a09;
-    color: #d6d3d1;
+  .tx-action-card {
+    background: rgba(24, 24, 27, 0.85);
+    border: 1px solid #34302c;
+    border-radius: 10px;
     padding: 10px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  }
+
+  .tx-action-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .tx-type {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    border: 1px solid #3f3f46;
+    padding: 3px 9px;
     font-size: 11px;
-    line-height: 1.4;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #e7e5e4;
+  }
+
+  .tx-type.tone-neutral {
+    border-color: #44403c;
+    color: #e7e5e4;
+    background: rgba(68, 64, 60, 0.2);
+  }
+
+  .tx-type.tone-good {
+    border-color: rgba(16, 185, 129, 0.4);
+    color: #86efac;
+    background: rgba(16, 185, 129, 0.12);
+  }
+
+  .tx-type.tone-warn {
+    border-color: rgba(245, 158, 11, 0.45);
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.13);
+  }
+
+  .tx-type.tone-danger {
+    border-color: rgba(244, 63, 94, 0.5);
+    color: #fda4af;
+    background: rgba(244, 63, 94, 0.16);
+  }
+
+  .tx-idx {
+    color: #78716c;
+    font-size: 11px;
     font-family: 'JetBrains Mono', monospace;
-    white-space: pre;
+  }
+
+  .tx-params {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 8px;
+  }
+
+  .tx-param {
+    border: 1px solid #312d2a;
+    border-radius: 8px;
+    padding: 6px 8px;
+    background: rgba(12, 10, 9, 0.65);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .tx-param-label {
+    color: #9ca3af;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    line-height: 1;
+  }
+
+  .tx-param-value {
+    color: #e7e5e4;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tx-param-value.tone-good {
+    color: #86efac;
+  }
+
+  .tx-param-value.tone-warn {
+    color: #fbbf24;
+  }
+
+  .tx-param-value.tone-danger {
+    color: #fda4af;
   }
 
   .management-card h4 {
@@ -804,6 +1117,37 @@
     letter-spacing: 0.08em;
   }
 
+  .activity-filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .activity-filters label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: #a8a29e;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .activity-filters select {
+    border: 1px solid #3f3f46;
+    border-radius: 8px;
+    background: #111113;
+    color: #e7e5e4;
+    font-size: 12px;
+    padding: 7px 8px;
+  }
+
+  .activity-filters select:focus-visible {
+    outline: 1px solid rgba(251, 191, 36, 0.7);
+    outline-offset: 1px;
+  }
+
   .frame-history {
     display: flex;
     flex-direction: column;
@@ -830,28 +1174,13 @@
     color: #34d399;
   }
 
+  .frame-status.confirmed {
+    color: #34d399;
+  }
+
   .frame-id,
   .frame-timestamp {
     color: #9ca3af;
-  }
-
-  .frame-body {
-    margin-top: 8px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .tx-chip {
-    display: inline-flex;
-    align-items: center;
-    padding: 3px 8px;
-    border-radius: 999px;
-    border: 1px solid #3f3f46;
-    background: #0c0a09;
-    color: #d6d3d1;
-    font-size: 11px;
-    line-height: 1;
   }
 
   .frame-empty {
@@ -887,6 +1216,10 @@
 
     .detail-head {
       display: none;
+    }
+
+    .tx-params {
+      grid-template-columns: 1fr;
     }
   }
 </style>

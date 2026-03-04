@@ -20,6 +20,8 @@
   export let decimals: number = 18;
   export let barHeight: number = 9;
   export let compact: boolean = false;
+  export let barLayout: 'center' | 'sides' = 'center';
+  export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
 
   function iconForSymbol(rawSymbol: string): { text: string; cls: string } {
     const s = String(rawSymbol || '').toUpperCase();
@@ -30,30 +32,65 @@
   }
 
   $: icon = iconForSymbol(symbol);
+
+  function normalizeAmount(raw: string): string {
+    return String(raw || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function stripTrailingSymbol(rawAmount: string, rawSymbol: string): string {
+    const amount = normalizeAmount(rawAmount);
+    const symbolText = String(rawSymbol || '').trim();
+    if (!amount || !symbolText) return amount;
+    const escaped = symbolText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return amount.replace(new RegExp(`\\s+${escaped}\\s*$`, 'i'), '').trim();
+  }
+
+  $: outAmountDisplay = normalizeAmount(outAmount);
+  $: inAmountDisplay = normalizeAmount(inAmount);
+  $: outAmountCompact = stripTrailingSymbol(outAmountDisplay, symbol);
+  $: inAmountCompact = stripTrailingSymbol(inAmountDisplay, symbol);
+  $: compactName = name || symbol;
 </script>
 
 <div class="delta-summary" class:compact>
-  <div class="summary-head">
-    <div class="token-meta">
-      <span class="token-icon {icon.cls}">{icon.text}</span>
-      <div class="token-text">
-        <span class="token-symbol">{symbol}</span>
-        {#if name}
-          <span class="token-name">{name}</span>
-        {/if}
+  <div class="summary-head" class:compact-head={compact}>
+    {#if compact}
+      <div class="token-meta compact-meta">
+        <span class="token-icon {icon.cls}">{icon.text}</span>
+        <div class="token-text">
+          <span class="token-symbol">{symbol}</span>
+          <span class="token-name">{compactName}</span>
+        </div>
       </div>
-    </div>
-
-    <div class="caps">
-      <span class="cap out">
-        <span class="cap-label">Outbound</span>
-        <span class="cap-value">{outAmount}</span>
-      </span>
-      <span class="cap in">
-        <span class="cap-label">Inbound</span>
-        <span class="cap-value">{inAmount}</span>
-      </span>
-    </div>
+      <div class="compact-metric compact-out" aria-label="Outbound capacity">
+        <span class="metric-label">Outbound</span>
+        <span class="compact-out-value">{outAmountCompact}</span>
+      </div>
+      <div class="compact-metric compact-in" aria-label="Inbound capacity">
+        <span class="metric-label">Inbound</span>
+        <span class="compact-in-value">{inAmountCompact}</span>
+      </div>
+    {:else}
+      <div class="token-meta">
+        <span class="token-icon {icon.cls}">{icon.text}</span>
+        <div class="token-text">
+          <span class="token-symbol">{symbol}</span>
+          {#if name}
+            <span class="token-name">{name}</span>
+          {/if}
+        </div>
+      </div>
+      <div class="caps">
+        <span class="cap out">
+          <span class="cap-label">Outbound</span>
+          <span class="cap-value">{outAmountDisplay}</span>
+        </span>
+        <span class="cap in">
+          <span class="cap-label">Inbound</span>
+          <span class="cap-value">{inAmountDisplay}</span>
+        </span>
+      </div>
+    {/if}
 
     {#if $$slots.actions}
       <div class="actions">
@@ -65,6 +102,8 @@
   <DeltaCapacityBar
     {derived}
     {decimals}
+    layout={barLayout}
+    {pendingOutDebtMode}
     heightPx={barHeight}
   />
 </div>
@@ -197,33 +236,83 @@
   }
 
   .delta-summary.compact .summary-head {
-    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 28px;
   }
 
-  .delta-summary.compact .token-symbol {
-    font-size: 20px;
+  .compact-head {
+    grid-template-columns: max-content max-content minmax(0, 1fr) max-content auto;
+    align-items: center;
+    gap: 14px;
   }
 
-  .delta-summary.compact .token-name {
-    font-size: 11px;
-  }
-
-  .delta-summary.compact .token-icon {
-    width: 18px;
-    height: 18px;
-    font-size: 10px;
-  }
-
-  .delta-summary.compact .caps {
+  .delta-summary.compact .token-meta.compact-meta {
+    min-width: 0;
+    flex: 0 0 auto;
     gap: 10px;
   }
 
-  .delta-summary.compact .cap-label {
-    font-size: 9px;
+  .delta-summary.compact .token-symbol {
+    font-size: clamp(22px, 1.2vw, 25px);
+    line-height: 1;
+    letter-spacing: -0.025em;
   }
 
-  .delta-summary.compact .cap-value {
-    font-size: 22px;
+  .delta-summary.compact .token-name {
+    font-size: 13px;
+    color: #9ca3af;
+    line-height: 1.05;
+  }
+
+  .delta-summary.compact .token-icon {
+    width: 28px;
+    height: 28px;
+    font-size: 13px;
+  }
+
+  .compact-metric {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #d1d5db;
+    white-space: nowrap;
+  }
+
+  .metric-label {
+    font-size: 10px;
+    letter-spacing: 0.07em;
+    line-height: 1;
+    text-transform: uppercase;
+    color: #9ca3af;
+    font-weight: 700;
+  }
+
+  .compact-out-value {
+    font-size: clamp(18px, 1.1vw, 22px);
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: #f3f4f6;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .compact-in {
+    align-items: flex-end;
+    justify-self: end;
+    text-align: right;
+    padding-left: 12px;
+    min-width: 120px;
+    border-left: 1px solid rgba(148, 163, 184, 0.35);
+  }
+
+  .compact-in-value {
+    font-size: clamp(18px, 1.1vw, 22px);
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: #e5e7eb;
+    font-variant-numeric: tabular-nums;
   }
 
   @media (max-width: 1100px) {
@@ -235,6 +324,60 @@
 
     .actions {
       justify-self: start;
+    }
+
+    .compact-head {
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 8px 10px;
+    }
+
+    .delta-summary.compact .compact-meta {
+      grid-column: 1;
+    }
+
+    .delta-summary.compact .compact-out {
+      grid-column: 2;
+    }
+
+    .delta-summary.compact .compact-in {
+      grid-column: 3;
+      min-width: 0;
+      padding-left: 10px;
+    }
+
+    .delta-summary.compact .actions {
+      grid-column: 1 / -1;
+      justify-self: start;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .compact-head {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+    }
+
+    .delta-summary.compact .compact-meta {
+      grid-column: 1 / -1;
+    }
+
+    .delta-summary.compact .compact-out {
+      grid-column: 1;
+    }
+
+    .delta-summary.compact .compact-in {
+      grid-column: 2;
+      justify-self: end;
+      text-align: right;
+      align-items: flex-end;
+      padding-left: 8px;
+      min-width: 0;
+    }
+
+    .compact-out-value,
+    .compact-in-value {
+      font-size: 19px;
     }
   }
 </style>

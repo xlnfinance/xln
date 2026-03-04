@@ -152,6 +152,7 @@ import {
   createDemoDelta,
   getDefaultCreditLimit,
 } from './account-utils';
+import { computeSwapPriceTicks } from './orderbook';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import {
   formatTokenAmount as formatTokenAmountEthers,
@@ -2448,6 +2449,7 @@ export {
   isLiquidSwapToken,
   getSwapPairOrientation,
   getDefaultSwapTradingPairs,
+  computeSwapPriceTicks,
   formatTokenAmount,
   createDemoDelta,
   getDefaultCreditLimit,

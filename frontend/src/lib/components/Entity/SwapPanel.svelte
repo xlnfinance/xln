@@ -1,5 +1,5 @@
   <script lang="ts">
-    import type { EntityReplica, Tab } from '$lib/types/ui';
+    import type { AccountMachine, AccountTx, EntityReplica, Tab } from '$lib/types/ui';
     import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
     import { isLive as globalIsLive } from '../../stores/timeStore';
     import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
@@ -18,6 +18,16 @@
   const PRICE_RATIO_DECIMALS = 6;
   const PRICE_RATIO_SCALE = 10n ** BigInt(PRICE_RATIO_DECIMALS);
   type BookSide = 'bid' | 'ask';
+  type SwapOfferLike = {
+    offerId?: string;
+    accountId?: string;
+    giveTokenId?: unknown;
+    wantTokenId?: unknown;
+    giveAmount?: unknown;
+    wantAmount?: unknown;
+    priceTicks?: unknown;
+    createdAt?: unknown;
+  };
   type ClickedOrderLevel = {
     side: BookSide;
     priceTicks: bigint;
@@ -35,6 +45,37 @@
     spreadPercent: string;
     sourceCount: number;
     updatedAt: number;
+  };
+  type ClosedOrderStatus = 'filled' | 'partial' | 'canceled' | 'closed';
+  type ResolveRecord = { fillRatio: number; cancelRemainder: boolean; timestamp: number };
+  type OfferLifecycle = {
+    offerId: string;
+    accountId: string;
+    giveTokenId: number;
+    wantTokenId: number;
+    giveAmount: bigint;
+    wantAmount: bigint;
+    priceTicks: bigint;
+    createdAt: number;
+    resolves: ResolveRecord[];
+    cancelRequested: boolean;
+  };
+  type ClosedOrderView = {
+    offerId: string;
+    accountId: string;
+    side: 'Ask' | 'Bid';
+    pairLabel: string;
+    priceTicks: bigint;
+    giveTokenId: number;
+    wantTokenId: number;
+    giveAmount: bigint;
+    wantAmount: bigint;
+    filledGiveAmount: bigint;
+    filledWantAmount: bigint;
+    filledPercent: number;
+    status: ClosedOrderStatus;
+    createdAt: number;
+    closedAt: number;
   };
   let selectedOrderLevel: ClickedOrderLevel | null = null;
   let orderbookSnapshot: OrderbookSnapshot = {
@@ -64,6 +105,8 @@
   let priceRatioScaled = 0n;
   let minFillPercent = '50'; // Min fill ratio as percentage (0-100)
   let showDepthChart = false;
+  let orderListTab: 'open' | 'closed' = 'open';
+  let closedOrderStatusFilter: 'all' | ClosedOrderStatus = 'all';
 
     $: activeXlnFunctions = $xlnFunctions;
     $: activeEnv = $xlnEnvironment;
@@ -343,7 +386,7 @@
 
   // Get active swap offers for this entity
   $: activeOffers = replica?.state?.swapBook
-    ? Array.from(replica.state.swapBook.values())
+    ? Array.from(replica.state.swapBook.values()) as SwapOfferLike[]
     : [];
 
   function readOutCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
@@ -619,7 +662,7 @@
     orderbookSnapshot = event.detail;
   }
 
-  function handleOrderbookLevelClick(event: CustomEvent<{ side: BookSide; price: number; size: number }>) {
+  function handleOrderbookLevelClick(event: CustomEvent<{ side: BookSide; priceTicks: string; size: number }>) {
     submitError = '';
     if (!counterpartyId) {
       submitError = 'Select account first, then click an orderbook level.';
@@ -633,13 +676,19 @@
     }
 
     const side = event.detail?.side;
-    const rawPrice = Number(event.detail?.price || 0);
     const rawSize = Number(event.detail?.size || 0);
-    if ((side !== 'ask' && side !== 'bid') || !Number.isFinite(rawPrice) || rawPrice <= 0 || !Number.isFinite(rawSize) || rawSize <= 0) {
+    const parsedPriceTicks = toBigIntSafe(event.detail?.priceTicks);
+    if (
+      (side !== 'ask' && side !== 'bid')
+      || parsedPriceTicks === null
+      || parsedPriceTicks <= 0n
+      || !Number.isFinite(rawSize)
+      || rawSize <= 0
+    ) {
       return;
     }
 
-    const priceTicks = BigInt(Math.max(1, Math.floor(rawPrice)));
+    const priceTicks = parsedPriceTicks;
     const sizeBaseWei = lotsToBaseWei(rawSize);
     selectedOrderLevel = {
       side,
@@ -660,8 +709,11 @@
   }
 
   function resolveSignerId(entityId: string): string {
-    return activeXlnFunctions?.resolveEntityProposerId?.(activeEnv as any, entityId, 'swap-panel')
-      || requireSignerIdForEntity(activeEnv, entityId, 'swap-panel');
+    if (activeEnv && activeXlnFunctions?.resolveEntityProposerId) {
+      const proposerId = activeXlnFunctions.resolveEntityProposerId(activeEnv, entityId, 'swap-panel');
+      if (proposerId) return proposerId;
+    }
+    return requireSignerIdForEntity(activeEnv, entityId, 'swap-panel');
   }
 
   function getTokenDecimals(tokenIdValue: number): number {
@@ -752,27 +804,187 @@
   $: bidDepthPolyline = buildDepthPolyline(depthLevels.bids, 'bid');
   $: askDepthPolyline = buildDepthPolyline(depthLevels.asks, 'ask');
 
-  function offerSideLabel(offer: any): 'Ask' | 'Bid' {
+  function offerSideLabel(offer: SwapOfferLike): 'Ask' | 'Bid' {
     const give = Number(offer?.giveTokenId || 0);
     const want = Number(offer?.wantTokenId || 0);
     const pair = resolvePairOrientation(give, want);
     return give === pair.baseTokenId ? 'Ask' : 'Bid';
   }
 
-  function offerPriceTicks(offer: any): bigint {
+  function offerPriceTicks(offer: SwapOfferLike): bigint {
+    const explicitPriceTicks = toBigIntSafe(offer?.priceTicks);
+    if (explicitPriceTicks && explicitPriceTicks > 0n) return explicitPriceTicks;
+    const giveToken = Number(offer?.giveTokenId || 0);
+    const wantToken = Number(offer?.wantTokenId || 0);
     const give = toBigIntSafe(offer?.giveAmount) ?? 0n;
     const want = toBigIntSafe(offer?.wantAmount) ?? 0n;
+    if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken)) return 0n;
+    if (giveToken <= 0 || wantToken <= 0) return 0n;
     if (give <= 0n || want <= 0n) return 0n;
-    const isAsk = offerSideLabel(offer) === 'Ask';
-    return isAsk ? (want * ORDERBOOK_PRICE_SCALE) / give : (give * ORDERBOOK_PRICE_SCALE) / want;
+    return activeXlnFunctions.computeSwapPriceTicks(giveToken, wantToken, give, want);
   }
 
-  $: openOrders = [...activeOffers].sort((a: any, b: any) => {
-    const aCreated = toBigIntSafe((a as any)?.createdAt) ?? 0n;
-    const bCreated = toBigIntSafe((b as any)?.createdAt) ?? 0n;
+  $: openOrders = [...activeOffers].sort((a: SwapOfferLike, b: SwapOfferLike) => {
+    const aCreated = toBigIntSafe(a?.createdAt) ?? 0n;
+    const bCreated = toBigIntSafe(b?.createdAt) ?? 0n;
     if (aCreated === bCreated) return String(a?.offerId || '').localeCompare(String(b?.offerId || ''));
     return aCreated > bCreated ? -1 : 1;
   });
+
+  function accountMachines(): Array<{ accountId: string; account: AccountMachine }> {
+    if (!(replica?.state?.accounts instanceof Map)) return [];
+    return Array.from(replica.state.accounts.entries()).map(([accountId, account]) => ({
+      accountId: String(accountId),
+      account,
+    }));
+  }
+
+  function txDataAsRecord(tx: AccountTx): Record<string, unknown> {
+    if (!tx || typeof tx !== 'object') return {};
+    const data = (tx as { data?: unknown }).data;
+    return data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+  }
+
+  function collectOfferLifecycles(): OfferLifecycle[] {
+    const lifecycles = new Map<string, OfferLifecycle>();
+    for (const { accountId, account } of accountMachines()) {
+      const frames = Array.isArray(account.frameHistory) ? account.frameHistory : [];
+      for (const frame of frames) {
+        const frameTs = Number(frame.timestamp || 0);
+        const frameTxs = Array.isArray(frame.accountTxs) ? frame.accountTxs : [];
+        for (const tx of frameTxs) {
+          if (tx.type === 'swap_offer') {
+            const data = txDataAsRecord(tx);
+            const offerId = String(data.offerId || '');
+            if (!offerId) continue;
+            const giveToken = Number(data.giveTokenId || 0);
+            const wantToken = Number(data.wantTokenId || 0);
+            if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0) continue;
+            const give = toBigIntSafe(data.giveAmount) ?? 0n;
+            const want = toBigIntSafe(data.wantAmount) ?? 0n;
+            const priceTicks = toBigIntSafe(data.priceTicks)
+              ?? (activeXlnFunctions?.computeSwapPriceTicks
+                ? activeXlnFunctions.computeSwapPriceTicks(giveToken, wantToken, give, want)
+                : 0n);
+            lifecycles.set(offerId, {
+              offerId,
+              accountId,
+              giveTokenId: giveToken,
+              wantTokenId: wantToken,
+              giveAmount: give,
+              wantAmount: want,
+              priceTicks,
+              createdAt: frameTs,
+              resolves: [],
+              cancelRequested: false,
+            });
+            continue;
+          }
+          if (tx.type === 'swap_resolve') {
+            const data = txDataAsRecord(tx);
+            const offerId = String(data.offerId || '');
+            if (!offerId) continue;
+            const fillRatio = Number(data.fillRatio || 0);
+            const cancelRemainder = Boolean(data.cancelRemainder);
+            const prev = lifecycles.get(offerId);
+            if (!prev) continue;
+            prev.resolves.push({
+              fillRatio: Number.isFinite(fillRatio) ? fillRatio : 0,
+              cancelRemainder,
+              timestamp: frameTs,
+            });
+            continue;
+          }
+          if (tx.type === 'swap_cancel_request' || tx.type === 'swap_cancel') {
+            const data = txDataAsRecord(tx);
+            const offerId = String(data.offerId || '');
+            if (!offerId) continue;
+            const prev = lifecycles.get(offerId);
+            if (!prev) continue;
+            prev.cancelRequested = true;
+          }
+        }
+      }
+    }
+    return Array.from(lifecycles.values());
+  }
+
+  function computeFilledPpm(resolves: ResolveRecord[]): bigint {
+    let remainingPpm = 1_000_000n;
+    for (const resolve of resolves) {
+      const ratio = BigInt(Math.max(0, Math.min(65535, Math.round(resolve.fillRatio || 0))));
+      const filledThisStep = (remainingPpm * ratio) / 65535n;
+      remainingPpm = remainingPpm - filledThisStep;
+      if (remainingPpm < 0n) remainingPpm = 0n;
+      if (resolve.cancelRemainder) break;
+    }
+    return 1_000_000n - remainingPpm;
+  }
+
+  function classifyClosedStatus(lifecycle: OfferLifecycle): ClosedOrderStatus {
+    const hasFill = lifecycle.resolves.some((resolve) => resolve.fillRatio > 0);
+    const hasCancelResolve = lifecycle.resolves.some((resolve) => resolve.cancelRemainder);
+    if (hasCancelResolve && hasFill) return 'partial';
+    if (hasCancelResolve || lifecycle.cancelRequested) return 'canceled';
+    if (hasFill) return 'filled';
+    return 'closed';
+  }
+
+  function formatOrderTime(ms: number): string {
+    if (!Number.isFinite(ms) || ms <= 0) return '-';
+    return new Date(ms).toLocaleTimeString();
+  }
+
+  function closedOrderStatusLabel(status: ClosedOrderStatus): string {
+    if (status === 'filled') return 'Filled';
+    if (status === 'partial') return 'Partial';
+    if (status === 'canceled') return 'Canceled';
+    return 'Closed';
+  }
+
+  function closedOrderStatusTone(status: ClosedOrderStatus): 'bid' | 'ask' | 'neutral' {
+    if (status === 'filled') return 'bid';
+    if (status === 'partial') return 'ask';
+    return 'neutral';
+  }
+
+  $: openOfferIdSet = new Set(
+    openOrders
+      .map((offer) => String(offer.offerId || '').trim())
+      .filter(Boolean),
+  );
+  $: closedOrderViews = collectOfferLifecycles()
+    .filter((offer) => !openOfferIdSet.has(offer.offerId))
+    .map((offer) => {
+      const side = offerSideLabel(offer);
+      const pair = resolvePairOrientation(offer.giveTokenId, offer.wantTokenId);
+      const pairLabel = `${tokenSymbol(pair.baseTokenId)}/${tokenSymbol(pair.quoteTokenId)}`;
+      const filledPpm = computeFilledPpm(offer.resolves);
+      const filledGiveAmount = (offer.giveAmount * filledPpm) / 1_000_000n;
+      const filledWantAmount = (offer.wantAmount * filledPpm) / 1_000_000n;
+      const latestResolveTs = offer.resolves.length > 0 ? offer.resolves[offer.resolves.length - 1]!.timestamp : offer.createdAt;
+      return {
+        offerId: offer.offerId,
+        accountId: offer.accountId,
+        side,
+        pairLabel,
+        priceTicks: offer.priceTicks,
+        giveTokenId: offer.giveTokenId,
+        wantTokenId: offer.wantTokenId,
+        giveAmount: offer.giveAmount,
+        wantAmount: offer.wantAmount,
+        filledGiveAmount,
+        filledWantAmount,
+        filledPercent: Number((filledPpm * 10_000n) / 1_000_000n) / 100,
+        status: classifyClosedStatus(offer),
+        createdAt: offer.createdAt,
+        closedAt: latestResolveTs,
+      } satisfies ClosedOrderView;
+    })
+    .sort((a, b) => b.closedAt - a.closedAt);
+  $: filteredClosedOrderViews = closedOrderStatusFilter === 'all'
+    ? closedOrderViews
+    : closedOrderViews.filter((order) => order.status === closedOrderStatusFilter);
 
   async function placeSwapOffer() {
     submitError = '';
@@ -924,255 +1136,331 @@
 <div class="swap-panel">
   <h3>Swap Trading</h3>
 
-  <div class="section">
-    <div class="orderbook-header">
-      <h4>Orderbook</h4>
-      <div class="scope-toggle">
-        <button
-          class="scope-btn"
-          class:active={orderbookScope === 'all'}
-          on:click={() => (orderbookScope = 'all')}
-        >
-          All Accounts
-        </button>
-        <button
-          class="scope-btn"
-          class:active={orderbookScope === 'selected'}
-          disabled={!counterpartyId}
-          on:click={() => (orderbookScope = 'selected')}
-        >
-          Selected Account
-        </button>
+  <div class="trade-grid" class:with-depth={showDepthChart}>
+    <div class="section section-market">
+      <div class="orderbook-header">
+        <h4>Orderbook</h4>
+        <div class="scope-toggle">
+          <button
+            class="scope-btn"
+            class:active={orderbookScope === 'all'}
+            on:click={() => (orderbookScope = 'all')}
+          >
+            All Accounts
+          </button>
+          <button
+            class="scope-btn"
+            class:active={orderbookScope === 'selected'}
+            disabled={!counterpartyId}
+            on:click={() => (orderbookScope = 'selected')}
+          >
+            Selected Account
+          </button>
+        </div>
       </div>
-    </div>
-    {#if !prefilledCounterparty}
+      {#if !prefilledCounterparty}
+        <div class="form-row compact">
+          <label>
+            Account (Hub)
+            <EntitySelect bind:value={counterpartyId} options={accountIds} placeholder="Select account" />
+          </label>
+        </div>
+      {/if}
+
       <div class="form-row compact">
         <label>
-          Account (Hub)
-          <EntitySelect bind:value={counterpartyId} options={accountIds} placeholder="Select account" />
+          Pair
+          <input
+            list="swap-pair-options"
+            bind:value={pairSearchInput}
+            inputmode="search"
+            placeholder="Search pair (e.g. WETH/USDC)"
+            data-testid="swap-pair-search"
+            on:input={handlePairSearchInput}
+          />
+          <datalist id="swap-pair-options">
+            {#each pairOptions as pair (pair.value)}
+              <option value={pair.label}>{pair.label}</option>
+            {/each}
+          </datalist>
         </label>
+        <div class="side-toggle-group">
+          <button
+            type="button"
+            class="scope-btn"
+            class:active={tradeSide === 'buy-base'}
+            data-testid="swap-side-buy"
+            on:click={() => setTradeSide('buy-base')}
+          >
+            Buy {baseTokenSymbol}
+          </button>
+          <button
+            type="button"
+            class="scope-btn"
+            class:active={tradeSide === 'sell-base'}
+            data-testid="swap-side-sell"
+            on:click={() => setTradeSide('sell-base')}
+          >
+            Sell {baseTokenSymbol}
+          </button>
+        </div>
+        <button
+          type="button"
+          class="scope-btn"
+          class:active={showDepthChart}
+          data-testid="swap-depth-chart-toggle"
+          on:click={() => (showDepthChart = !showDepthChart)}
+        >
+          {showDepthChart ? 'Hide Depth' : 'Show Depth'}
+        </button>
+      </div>
+
+      <p class="orderbook-hint">
+        Pair: {baseTokenSymbol}/{quoteTokenSymbol}. Price is quoted in {quoteTokenSymbol} per {baseTokenSymbol}.
+        {orderbookHint}
+      </p>
+      {#if orderbookHubIds.length > 0}
+        <div class="orderbook-wrap" data-testid="swap-orderbook">
+          <OrderbookPanel
+            hubIds={orderbookHubIds}
+            hubId={counterpartyId}
+            pairId={orderbookPairId}
+            pairLabel={selectedPair?.label || `${baseTokenSymbol}/${quoteTokenSymbol}`}
+            depth={12}
+            priceScale={Number(ORDERBOOK_PRICE_SCALE)}
+            sizeDisplayScale={orderbookSizeDisplayScale}
+            on:levelclick={handleOrderbookLevelClick}
+            on:snapshot={handleOrderbookSnapshot}
+          />
+        </div>
+      {:else}
+        <div class="orderbook-empty">No connected account orderbooks yet.</div>
+      {/if}
+    </div>
+
+    {#if showDepthChart}
+      <div class="section section-depth" data-testid="swap-depth-chart">
+        <div class="depth-header">
+          <span>Depth Chart</span>
+          <span>{orderbookPairId}</span>
+        </div>
+        {#if orderbookHubIds.length === 0}
+          <div class="depth-empty">No connected account orderbooks yet.</div>
+        {:else if bidDepthPolyline || askDepthPolyline}
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Orderbook depth chart">
+            {#if bidDepthPolyline}
+              <polyline points={bidDepthPolyline} class="depth-line bid" />
+            {/if}
+            {#if askDepthPolyline}
+              <polyline points={askDepthPolyline} class="depth-line ask" />
+            {/if}
+          </svg>
+        {:else}
+          <div class="depth-empty">No depth available yet.</div>
+        {/if}
       </div>
     {/if}
 
-    <div class="form-row compact">
-      <label>
-        Pair
-        <input
-          list="swap-pair-options"
-          bind:value={pairSearchInput}
-          inputmode="search"
-          placeholder="Search pair (e.g. WETH/USDC)"
-          data-testid="swap-pair-search"
-          on:input={handlePairSearchInput}
-        />
-        <datalist id="swap-pair-options">
-          {#each pairOptions as pair (pair.value)}
-            <option value={pair.label}>{pair.label}</option>
-          {/each}
-        </datalist>
-      </label>
-      <div class="side-toggle-group">
+    <div class="section section-order">
+      <h4>Place Limit Order</h4>
+
+      <div class="form-row">
+        <label>
+          {tradeSide === 'buy-base' ? 'Amount to Spend' : 'Amount to Sell'} ({giveTokenSymbol})
+          <input type="text" bind:value={orderAmountInput} inputmode="decimal" placeholder="Amount to sell" />
+        </label>
+        <label>
+          Price ({quoteTokenSymbol} per {baseTokenSymbol})
+          <input
+            type="text"
+            bind:value={priceRatioInput}
+            inputmode="decimal"
+            placeholder="Price"
+            on:input={handlePriceRatioInput}
+          />
+        </label>
+        <label>
+          Amount to Receive ({wantTokenSymbol})
+          <input
+            type="text"
+            readonly
+            value={`${formatAmount(wantAmount, wantToken)} ${wantTokenSymbol}`}
+            class="readonly-input"
+          />
+        </label>
+      </div>
+
+      <div class="size-tools">
+        <div class="size-top">
+          <span class="size-title">Order Sizing</span>
+          <button class="max-btn" type="button" on:click={setMaxOrderPercent} disabled={availableGiveCapacity <= 0n}>Max</button>
+        </div>
+        <div class="size-stats">
+          <span>Available: <strong>{formattedAvailableGive}</strong></span>
+          <span>Inbound Capacity: <strong>{formattedAvailableWantIn}</strong></span>
+          <span>Estimate: <strong>{estimatedSpendLabel} → {estimatedReceiveLabel}</strong></span>
+          <span>Pair Price: <strong>{estimatedPrice}</strong></span>
+        </div>
+        <div class="slider-row">
+          <input
+            class="size-slider"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={orderPercent}
+            on:input={handleOrderPercentInput}
+          />
+          <span class="slider-value">{orderPercent}%</span>
+        </div>
+        {#if selectedOrderLevel}
+          <p class="size-hint">
+            Filled from book level: {selectedOrderLevel.side.toUpperCase()} @ {formatPriceTicks(selectedOrderLevel.priceTicks)}
+            (max {formatAmount(selectedOrderLevel.sizeBaseWei, selectedOrderLevel.baseTokenId)} {tokenSymbol(selectedOrderLevel.baseTokenId)})
+          </p>
+        {:else}
+          <p class="size-hint">Click any orderbook row to prefill price and max executable size.</p>
+        {/if}
+        {#if capacityWarning}
+          <p class="size-warning">{capacityWarning}</p>
+        {/if}
+      </div>
+
+      <div class="form-row compact">
+        <label>
+          Min Fill %
+          <input type="number" bind:value={minFillPercent} min="1" max="100" placeholder="50" />
+        </label>
+      </div>
+
+      {#if autoCapacityNote}
+        <p class="auto-capacity-note" data-testid="swap-auto-capacity-note">{autoCapacityNote}</p>
+      {/if}
+
+      <button class="primary-btn" on:click={placeSwapOffer} disabled={Boolean(swapActionDisabledReason)}>
+        Place Swap Offer
+      </button>
+      {#if swapActionDisabledReason || submitError}
+        <p class="form-error">{submitError || swapActionDisabledReason}</p>
+      {/if}
+    </div>
+  </div>
+
+  <div class="section section-orders">
+    <div class="orders-title">
+      <h4>Orders</h4>
+      <span>{orderListTab === 'open' ? openOrders.length : filteredClosedOrderViews.length}</span>
+    </div>
+    <div class="orders-toolbar">
+      <div class="orders-tabs">
         <button
-          type="button"
           class="scope-btn"
-          class:active={tradeSide === 'buy-base'}
-          data-testid="swap-side-buy"
-          on:click={() => setTradeSide('buy-base')}
+          class:active={orderListTab === 'open'}
+          on:click={() => (orderListTab = 'open')}
         >
-          Buy {baseTokenSymbol}
+          Open
         </button>
         <button
-          type="button"
           class="scope-btn"
-          class:active={tradeSide === 'sell-base'}
-          data-testid="swap-side-sell"
-          on:click={() => setTradeSide('sell-base')}
+          class:active={orderListTab === 'closed'}
+          on:click={() => (orderListTab = 'closed')}
         >
-          Sell {baseTokenSymbol}
+          Closed
         </button>
       </div>
-      <button
-        type="button"
-        class="scope-btn"
-        class:active={showDepthChart}
-        data-testid="swap-depth-chart-toggle"
-        on:click={() => (showDepthChart = !showDepthChart)}
-      >
-        {showDepthChart ? 'Hide Depth' : 'Show Depth'}
-      </button>
+      {#if orderListTab === 'closed'}
+        <label class="closed-status-filter">
+          Status
+          <select bind:value={closedOrderStatusFilter}>
+            <option value="all">All</option>
+            <option value="filled">Filled</option>
+            <option value="partial">Partial</option>
+            <option value="canceled">Canceled</option>
+            <option value="closed">Closed</option>
+          </select>
+        </label>
+      {/if}
     </div>
 
-    <p class="orderbook-hint">
-      Pair: {baseTokenSymbol}/{quoteTokenSymbol}. Price is quoted in {quoteTokenSymbol} per {baseTokenSymbol}.
-      {orderbookHint}
-    </p>
-    {#if orderbookHubIds.length > 0}
-      <div class="orderbook-wrap" data-testid="swap-orderbook">
-        <OrderbookPanel
-          hubIds={orderbookHubIds}
-          hubId={counterpartyId}
-          pairId={orderbookPairId}
-          pairLabel={selectedPair?.label || `${baseTokenSymbol}/${quoteTokenSymbol}`}
-          depth={12}
-          priceScale={Number(ORDERBOOK_PRICE_SCALE)}
-          sizeDisplayScale={orderbookSizeDisplayScale}
-          on:levelclick={handleOrderbookLevelClick}
-          on:snapshot={handleOrderbookSnapshot}
-        />
-      </div>
-      {#if showDepthChart}
-        <div class="depth-chart" data-testid="swap-depth-chart">
-          <div class="depth-header">
-            <span>Depth Chart</span>
-            <span>{orderbookPairId}</span>
-          </div>
-          {#if bidDepthPolyline || askDepthPolyline}
-            <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Orderbook depth chart">
-              {#if bidDepthPolyline}
-                <polyline points={bidDepthPolyline} class="depth-line bid" />
-              {/if}
-              {#if askDepthPolyline}
-                <polyline points={askDepthPolyline} class="depth-line ask" />
-              {/if}
-            </svg>
-          {:else}
-            <div class="depth-empty">No depth available yet.</div>
-          {/if}
+    {#if orderListTab === 'open'}
+      {#if openOrders.length === 0}
+        <div class="orders-empty">No open orders yet.</div>
+      {:else}
+        <div class="orders-table-wrap">
+          <table class="orders-table" data-testid="swap-open-orders">
+            <thead>
+              <tr>
+                <th>Side</th>
+                <th>Pair</th>
+                <th>Price</th>
+                <th>Remaining</th>
+                <th>Hub</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each openOrders as offer}
+                {@const side = offerSideLabel(offer)}
+                {@const pairView = resolvePairOrientation(offer.giveTokenId, offer.wantTokenId)}
+                <tr>
+                  <td>
+                    <span class:side-ask={side === 'Ask'} class:side-bid={side === 'Bid'} class="side-badge">{side}</span>
+                  </td>
+                  <td>{tokenSymbol(pairView.baseTokenId)}/{tokenSymbol(pairView.quoteTokenId)}</td>
+                  <td>{formatPriceTicks(offerPriceTicks(offer))}</td>
+                  <td>
+                    {formatAmount(toBigIntSafe(offer.giveAmount) ?? 0n, Number(offer.giveTokenId || 0))} {tokenSymbol(Number(offer.giveTokenId || 0))}
+                  </td>
+                  <td>{String(offer.accountId || '').slice(0, 10)}...</td>
+                  <td>
+                    <button class="cancel-btn" on:click={() => cancelSwapOffer(String(offer.offerId || ''), String(offer.accountId || ''))}>
+                      Request Cancel
+                    </button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         </div>
       {/if}
     {:else}
-      <div class="orderbook-empty">No connected account orderbooks yet.</div>
-    {/if}
-  </div>
-
-  <div class="section">
-    <h4>Place Limit Order</h4>
-
-    <div class="form-row">
-      <label>
-        {tradeSide === 'buy-base' ? 'Amount to Spend' : 'Amount to Sell'} ({giveTokenSymbol})
-        <input type="text" bind:value={orderAmountInput} inputmode="decimal" placeholder="Amount to sell" />
-      </label>
-      <label>
-        Price ({quoteTokenSymbol} per {baseTokenSymbol})
-        <input
-          type="text"
-          bind:value={priceRatioInput}
-          inputmode="decimal"
-          placeholder="Price"
-          on:input={handlePriceRatioInput}
-        />
-      </label>
-      <label>
-        Amount to Receive ({wantTokenSymbol})
-        <input
-          type="text"
-          readonly
-          value={`${formatAmount(wantAmount, wantToken)} ${wantTokenSymbol}`}
-          class="readonly-input"
-        />
-      </label>
-    </div>
-
-    <div class="size-tools">
-      <div class="size-top">
-        <span class="size-title">Order Sizing</span>
-        <button class="max-btn" type="button" on:click={setMaxOrderPercent} disabled={availableGiveCapacity <= 0n}>Max</button>
-      </div>
-      <div class="size-stats">
-        <span>Available: <strong>{formattedAvailableGive}</strong></span>
-        <span>Inbound Capacity: <strong>{formattedAvailableWantIn}</strong></span>
-        <span>Estimate: <strong>{estimatedSpendLabel} → {estimatedReceiveLabel}</strong></span>
-        <span>Pair Price: <strong>{estimatedPrice}</strong></span>
-      </div>
-      <div class="slider-row">
-        <input
-          class="size-slider"
-          type="range"
-          min="0"
-          max="100"
-          step="1"
-          value={orderPercent}
-          on:input={handleOrderPercentInput}
-        />
-        <span class="slider-value">{orderPercent}%</span>
-      </div>
-      {#if selectedOrderLevel}
-        <p class="size-hint">
-          Filled from book level: {selectedOrderLevel.side.toUpperCase()} @ {formatPriceTicks(selectedOrderLevel.priceTicks)}
-          (max {formatAmount(selectedOrderLevel.sizeBaseWei, selectedOrderLevel.baseTokenId)} {tokenSymbol(selectedOrderLevel.baseTokenId)})
-        </p>
+      {#if filteredClosedOrderViews.length === 0}
+        <div class="orders-empty">No closed orders for selected filter.</div>
       {:else}
-        <p class="size-hint">Click any orderbook row to prefill price and max executable size.</p>
-      {/if}
-      {#if capacityWarning}
-        <p class="size-warning">{capacityWarning}</p>
-      {/if}
-    </div>
-
-    <div class="form-row compact">
-      <label>
-        Min Fill %
-        <input type="number" bind:value={minFillPercent} min="1" max="100" placeholder="50" />
-      </label>
-    </div>
-
-    {#if autoCapacityNote}
-      <p class="auto-capacity-note" data-testid="swap-auto-capacity-note">{autoCapacityNote}</p>
-    {/if}
-
-    <button class="primary-btn" on:click={placeSwapOffer} disabled={Boolean(swapActionDisabledReason)}>
-      Place Swap Offer
-    </button>
-    {#if swapActionDisabledReason || submitError}
-      <p class="form-error">{submitError || swapActionDisabledReason}</p>
-    {/if}
-  </div>
-
-  <div class="section">
-    <div class="orders-title">
-      <h4>Open Orders</h4>
-      <span>{openOrders.length}</span>
-    </div>
-    {#if openOrders.length === 0}
-      <div class="orders-empty">No open orders yet.</div>
-    {:else}
-      <div class="orders-table-wrap">
-        <table class="orders-table" data-testid="swap-open-orders">
-          <thead>
-            <tr>
-              <th>Side</th>
-              <th>Pair</th>
-              <th>Price</th>
-              <th>Remaining</th>
-              <th>Hub</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each openOrders as offer}
-              {@const side = offerSideLabel(offer)}
-              {@const pairView = resolvePairOrientation(offer.giveTokenId, offer.wantTokenId)}
+        <div class="orders-table-wrap">
+          <table class="orders-table" data-testid="swap-closed-orders">
+            <thead>
               <tr>
-                <td>
-                  <span class:side-ask={side === 'Ask'} class:side-bid={side === 'Bid'} class="side-badge">{side}</span>
-                </td>
-                <td>{tokenSymbol(pairView.baseTokenId)}/{tokenSymbol(pairView.quoteTokenId)}</td>
-                <td>{formatPriceTicks(offerPriceTicks(offer))}</td>
-                <td>
-                  {formatAmount(offer.giveAmount, offer.giveTokenId)} {tokenSymbol(offer.giveTokenId)}
-                </td>
-                <td>{offer.accountId.slice(0, 10)}...</td>
-                <td>
-                  <button class="cancel-btn" on:click={() => cancelSwapOffer(offer.offerId, offer.accountId)}>
-                    Request Cancel
-                  </button>
-                </td>
+                <th>Status</th>
+                <th>Pair</th>
+                <th>Price</th>
+                <th>Filled</th>
+                <th>Closed At</th>
+                <th>Hub</th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {#each filteredClosedOrderViews as order}
+                <tr>
+                  <td>
+                    <span class:side-ask={closedOrderStatusTone(order.status) === 'ask'} class:side-bid={closedOrderStatusTone(order.status) === 'bid'} class="side-badge">
+                      {closedOrderStatusLabel(order.status)}
+                    </span>
+                  </td>
+                  <td>{order.pairLabel}</td>
+                  <td>{formatPriceTicks(order.priceTicks)}</td>
+                  <td>
+                    {order.filledPercent.toFixed(2)}%
+                    ({formatAmount(order.filledGiveAmount, order.giveTokenId)} {tokenSymbol(order.giveTokenId)})
+                  </td>
+                  <td>{formatOrderTime(order.closedAt)}</td>
+                  <td>{order.accountId.slice(0, 10)}...</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
     {/if}
   </div>
 </div>
@@ -1203,6 +1491,32 @@
     background: #131419;
     border-radius: 10px;
     border: 1px solid #2b2f39;
+  }
+
+  .trade-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(340px, 1fr);
+    gap: 14px;
+    align-items: start;
+  }
+
+  .trade-grid.with-depth {
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.9fr) minmax(340px, 1fr);
+  }
+
+  .trade-grid > .section {
+    margin-bottom: 0;
+    min-width: 0;
+  }
+
+  .section-market,
+  .section-depth,
+  .section-order {
+    height: 100%;
+  }
+
+  .section-orders {
+    margin-top: 14px;
   }
 
   .orderbook-header {
@@ -1264,7 +1578,6 @@
   }
 
   .depth-chart {
-    margin-top: 12px;
     border: 1px solid #2f343f;
     border-radius: 10px;
     background: #0f1015;
@@ -1500,6 +1813,41 @@
     font-size: 12px;
   }
 
+  .orders-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+
+  .orders-tabs {
+    display: inline-flex;
+    gap: 8px;
+  }
+
+  .closed-status-filter {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 4px;
+    color: #9ca3af;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .closed-status-filter select {
+    min-width: 130px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid #353942;
+    background: #111217;
+    color: #f3f4f6;
+    font-size: 12px;
+    padding: 0 8px;
+  }
+
   .orders-empty {
     border: 1px dashed #3f434d;
     border-radius: 8px;
@@ -1541,6 +1889,9 @@
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.03em;
+    border: 1px solid #4b5563;
+    color: #d1d5db;
+    background: rgba(75, 85, 99, 0.12);
   }
 
   .side-ask {
@@ -1574,6 +1925,28 @@
   .cancel-btn:hover {
     background: rgba(239, 68, 68, 0.18);
     border-color: rgba(239, 68, 68, 0.6);
+  }
+
+  @media (max-width: 1480px) {
+    .trade-grid.with-depth {
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    }
+
+    .section-depth {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 1100px) {
+    .trade-grid,
+    .trade-grid.with-depth {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .section-orders {
+      margin-top: 12px;
+    }
   }
 
   @media (max-width: 900px) {

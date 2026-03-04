@@ -99,6 +99,20 @@ function appendBatchHistory(state: EntityState, entry: Record<string, any>): voi
   }
 }
 
+function findAccountByCounterparty(state: EntityState, counterpartyEntityId: string) {
+  const normalized = String(counterpartyEntityId || '').toLowerCase();
+  if (!normalized) return null;
+  for (const [accountId, account] of state.accounts.entries()) {
+    const accountIdNorm = String(accountId || '').toLowerCase();
+    const leftNorm = String(account.leftEntity || '').toLowerCase();
+    const rightNorm = String(account.rightEntity || '').toLowerCase();
+    if (accountIdNorm === normalized || leftNorm === normalized || rightNorm === normalized) {
+      return account;
+    }
+  }
+  return null;
+}
+
 function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
   const initialArguments = String(initialArgumentsRaw || '0x');
   if (initialArguments === '0x') return [];
@@ -945,8 +959,8 @@ async function applyFinalizedJEvent(
     console.log(
       `[REB][4][J_EVENT_CLAIM_QUEUED] entity=${entityState.entityId.slice(-8)} cp=${String(counterpartyEntityId).slice(-8)} token=${tokenIdNum} jHeight=${jHeight}`,
     );
-    const p2p = (env as any)?.runtimeState?.p2p;
-    if (p2p && typeof p2p.sendDebugEvent === 'function') {
+    const p2p = env.runtimeState?.p2p as { sendDebugEvent?: (payload: unknown) => boolean } | undefined;
+    if (typeof p2p?.sendDebugEvent === 'function') {
       p2p.sendDebugEvent({
         level: 'info',
         code: 'REB_STEP',
@@ -1407,6 +1421,12 @@ async function applyFinalizedJEvent(
         // with fresh nonce in the next cycle.
         if (sentBatch) {
           mergeBatchOps(newState.jBatchState.batch, sentBatch.batch);
+          for (const fin of sentBatch.batch.disputeFinalizations || []) {
+            const account = findAccountByCounterparty(newState, String(fin.counterentity || ''));
+            if (account?.activeDispute) {
+              account.activeDispute.finalizeQueued = false;
+            }
+          }
         }
         newState.jBatchState.sentBatch = undefined;
         newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'failed' : 'accumulating';

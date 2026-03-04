@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { settings } from '$lib/stores/settingsStore';
-
   type DeltaParts = {
     outOwnCredit: bigint;
     outCollateral: bigint;
@@ -15,64 +13,65 @@
   export let derived: DeltaParts;
   export let decimals: number = 18;
   export let heightPx: number = 8;
+  export let layout: 'center' | 'sides' = 'center';
+  export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
 
   $: outTotal = derived.outOwnCredit + derived.outCollateral + derived.outPeerCredit;
   $: inTotal = derived.inOwnCredit + derived.inCollateral + derived.inPeerCredit;
+  $: combinedTotal = outTotal + inTotal;
   $: halfMax = outTotal > inTotal ? outTotal : inTotal;
 
-  $: precision = Math.max(2, Math.min(18, Math.floor(Number($settings?.tokenPrecision ?? 6))));
-  $: safeDecimals = Math.max(0, Math.floor(Number(decimals) || 18));
-  $: visualZeroThreshold = (() => {
-    if (precision >= safeDecimals) return 1n;
-    const shift = safeDecimals - precision;
-    return 10n ** BigInt(Math.max(0, shift));
-  })();
-
-  $: outOnly = outTotal > visualZeroThreshold && inTotal <= visualZeroThreshold;
-  $: inOnly = inTotal > visualZeroThreshold && outTotal <= visualZeroThreshold;
   $: outHoldRaw = typeof derived.outTotalHold === 'bigint' ? derived.outTotalHold : 0n;
   $: inHoldRaw = typeof derived.inTotalHold === 'bigint' ? derived.inTotalHold : 0n;
   $: outHold = outHoldRaw > outTotal ? outTotal : outHoldRaw;
   $: inHold = inHoldRaw > inTotal ? inTotal : inHoldRaw;
   $: hasHoldOverlay = outHold > 0n || inHold > 0n;
+  $: outStart = outTotal > outHold ? outTotal - outHold : 0n;
+  $: inStart = outTotal;
 
   function pctOf(v: bigint, base: bigint): number {
     return base > 0n ? Number((v * 10000n) / base) / 100 : 0;
   }
 
-  function toFlex(v: bigint): number {
-    const n = Number(v / (10n ** 14n));
-    return n > 0 ? n : (v > 0n ? 1 : 0);
-  }
 </script>
 
 <div class="delta-capacity-bar" style="--bar-h: {heightPx}px;">
   {#if halfMax === 0n}
     <div class="bar empty"></div>
-  {:else if outOnly || inOnly}
+  {:else if layout === 'sides'}
     <div class="bar one-sided">
-      {#if outOnly}
-        {#if derived.outOwnCredit > 0n}<div class="seg credit" style="flex:{toFlex(derived.outOwnCredit)}"></div>{/if}
-        {#if derived.outCollateral > 0n}<div class="seg coll" style="flex:{toFlex(derived.outCollateral)}"></div>{/if}
-        {#if derived.outPeerCredit > 0n}<div class="seg debt" style="flex:{toFlex(derived.outPeerCredit)}"></div>{/if}
-      {:else}
-        {#if derived.inOwnCredit > 0n}<div class="seg debt" style="flex:{toFlex(derived.inOwnCredit)}"></div>{/if}
-        {#if derived.inCollateral > 0n}<div class="seg coll" style="flex:{toFlex(derived.inCollateral)}"></div>{/if}
-        {#if derived.inPeerCredit > 0n}<div class="seg credit" style="flex:{toFlex(derived.inPeerCredit)}"></div>{/if}
+      {#if derived.outOwnCredit > 0n}<div class="seg credit" style="width:{pctOf(derived.outOwnCredit, combinedTotal)}%"></div>{/if}
+      {#if derived.outCollateral > 0n}<div class="seg coll" style="width:{pctOf(derived.outCollateral, combinedTotal)}%"></div>{/if}
+      {#if derived.outPeerCredit > 0n}
+        <div
+          class="seg debt"
+          class:striped={pendingOutDebtMode === 'pending'}
+          class:settling={pendingOutDebtMode === 'settling'}
+          style="width:{pctOf(derived.outPeerCredit, combinedTotal)}%"
+        ></div>
       {/if}
+
+      {#if derived.inOwnCredit > 0n}<div class="seg debt" style="width:{pctOf(derived.inOwnCredit, combinedTotal)}%"></div>{/if}
+      {#if derived.inCollateral > 0n}<div class="seg coll" style="width:{pctOf(derived.inCollateral, combinedTotal)}%"></div>{/if}
+      {#if derived.inPeerCredit > 0n}<div class="seg credit" style="width:{pctOf(derived.inPeerCredit, combinedTotal)}%"></div>{/if}
+
+      {#if outTotal > 0n && inTotal > 0n}
+        <div class="mid one-sided-sep" style="left:{pctOf(outTotal, combinedTotal)}%"></div>
+      {/if}
+
       {#if hasHoldOverlay}
-        {#if outOnly && outHold > 0n}
+        {#if outHold > 0n}
           <div
             class="hold-overlay one-sided out"
             title="Outbound hold"
-            style="width:{pctOf(outHold, outTotal)}%"
+            style="left:{pctOf(outStart, combinedTotal)}%; width:{pctOf(outHold, combinedTotal)}%"
           ></div>
         {/if}
-        {#if inOnly && inHold > 0n}
+        {#if inHold > 0n}
           <div
             class="hold-overlay one-sided in"
             title="Inbound hold"
-            style="width:{pctOf(inHold, inTotal)}%"
+            style="left:{pctOf(inStart, combinedTotal)}%; width:{pctOf(inHold, combinedTotal)}%"
           ></div>
         {/if}
       {/if}
@@ -82,7 +81,14 @@
       <div class="half out">
         {#if derived.outOwnCredit > 0n}<div class="seg credit" style="width:{pctOf(derived.outOwnCredit, halfMax)}%"></div>{/if}
         {#if derived.outCollateral > 0n}<div class="seg coll" style="width:{pctOf(derived.outCollateral, halfMax)}%"></div>{/if}
-        {#if derived.outPeerCredit > 0n}<div class="seg debt" style="width:{pctOf(derived.outPeerCredit, halfMax)}%"></div>{/if}
+        {#if derived.outPeerCredit > 0n}
+          <div
+            class="seg debt"
+            class:striped={pendingOutDebtMode === 'pending'}
+            class:settling={pendingOutDebtMode === 'settling'}
+            style="width:{pctOf(derived.outPeerCredit, halfMax)}%"
+          ></div>
+        {/if}
       </div>
       <div class="mid"></div>
       <div class="half in">
@@ -133,6 +139,8 @@
 
   .bar.one-sided {
     display: flex;
+    align-items: stretch;
+    position: relative;
   }
 
   .bar.empty {
@@ -160,6 +168,15 @@
     background: #52525b;
   }
 
+  .mid.one-sided-sep {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    transform: translateX(-1px);
+    z-index: 4;
+  }
+
   .seg {
     min-width: 1px;
     height: 100%;
@@ -177,6 +194,23 @@
     background: #f43f5e;
   }
 
+  .seg.debt.striped {
+    background: repeating-linear-gradient(
+      -45deg,
+      #f43f5e 0px,
+      #f43f5e 3px,
+      #fbbf24 3px,
+      #fbbf24 6px
+    );
+    background-size: 8px 8px;
+    animation: stripe-scroll 0.8s linear infinite;
+  }
+
+  .seg.debt.settling {
+    background: linear-gradient(180deg, #fbbf24, #f59e0b);
+    animation: settling-pulse 1s ease-in-out infinite;
+  }
+
   .hold-overlay {
     position: absolute;
     top: 0;
@@ -189,7 +223,7 @@
   }
 
   .hold-overlay.one-sided.out {
-    right: 0;
+    right: auto;
   }
 
   .hold-overlay.one-sided.in {
@@ -202,5 +236,15 @@
 
   .hold-overlay.center-in {
     left: 50%;
+  }
+
+  @keyframes stripe-scroll {
+    0% { background-position: 0 0; }
+    100% { background-position: 8px 8px; }
+  }
+
+  @keyframes settling-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
   }
 </style>
