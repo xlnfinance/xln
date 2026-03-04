@@ -29,11 +29,17 @@
 
     let inAllowance: bigint = delta.rightAllowance ?? 0n;
     let outAllowance: bigint = delta.leftAllowance ?? 0n;
+    const leftHold: bigint = delta.leftHold ?? 0n;
+    const rightHold: bigint = delta.rightHold ?? 0n;
+    let outTotalHold: bigint = leftHold;
+    let inTotalHold: bigint = rightHold;
 
     const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
 
-    let inCapacity = nonNegative((outCollateral + inOwnCredit + outPeerCredit) - inAllowance);
-    let outCapacity = nonNegative((inCollateral + outOwnCredit + inPeerCredit) - outAllowance);
+    let inCapacity = nonNegative((inOwnCredit + inCollateral + inPeerCredit) - inAllowance);
+    let outCapacity = nonNegative((outPeerCredit + outCollateral + outOwnCredit) - outAllowance);
+    outCapacity = nonNegative(outCapacity - outTotalHold);
+    inCapacity = nonNegative(inCapacity - inTotalHold);
 
     if (!isLeftPerspective) {
       [inCollateral, inAllowance, inCapacity, outCollateral, outAllowance, outCapacity] =
@@ -42,6 +48,7 @@
       [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
       [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] =
       [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
+      [outTotalHold, inTotalHold] = [inTotalHold, outTotalHold];
     }
 
     const totalWidth = Number(totalCapacity) || 1;
@@ -72,6 +79,8 @@
       outCapacity,
       outOwnCredit,
       inPeerCredit,
+      outTotalHold,
+      inTotalHold,
       ascii,
     };
   }
@@ -84,6 +93,8 @@
   let rightCreditLimit = $state(500000n * 10n**18n);
   let leftAllowance = $state(0n);
   let rightAllowance = $state(0n);
+  let leftHold = $state(0n);
+  let rightHold = $state(0n);
   let perspective = $state<'left' | 'right'>('left');
 
   // Build delta object
@@ -96,6 +107,8 @@
     rightCreditLimit,
     leftAllowance,
     rightAllowance,
+    leftHold,
+    rightHold,
   });
 
   // Calculate derived values

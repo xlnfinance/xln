@@ -25,7 +25,7 @@
   export let envStore: Readable<any> = xlnEnvironment;
 
   type BookSide = 'bid' | 'ask';
-  type LevelClickDetail = { side: BookSide; price: number; size: number };
+  type LevelClickDetail = { side: BookSide; priceTicks: string; size: number };
   type SnapshotDetail = {
     pairId: string;
     bids: Array<{ price: number; size: number; total: number }>;
@@ -43,6 +43,7 @@
     asks: Array<{ price: number; size: number; total: number }>;
     spread: number | null;
     spreadPercent: string;
+    hubUpdatedAt?: number;
     updatedAt: number;
   };
   type MarketWsMessage = {
@@ -77,6 +78,10 @@
   const STREAM_STALE_MS = 3000;
   const STREAM_RETRY_MS = 2000;
   const streamSnapshots = new Map<string, MarketSnapshotPayload>();
+  const PRICE_STEP_OPTIONS = ['0.01', '0.1', '1', '10', '50', '100'] as const;
+  const PRICE_STEP_STORAGE_KEY = 'xln.orderbook.price-step-overrides.v1';
+  let selectedPriceStep = '1';
+  let priceStepOverrides: Record<string, string> = {};
 
   function normalizePairId(value: string): string | null {
     const trimmed = String(value || '').trim();
@@ -92,6 +97,36 @@
 
   function canonicalPairId(): string {
     return normalizePairId(pairId) || pairId;
+  }
+
+  function loadPriceStepOverrides(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(PRICE_STEP_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== 'object') return;
+      const next: Record<string, string> = {};
+      for (const [pair, step] of Object.entries(parsed)) {
+        if (!normalizePairId(pair)) continue;
+        const stepStr = String(step || '');
+        if (PRICE_STEP_OPTIONS.includes(stepStr as (typeof PRICE_STEP_OPTIONS)[number])) {
+          next[pair] = stepStr;
+        }
+      }
+      priceStepOverrides = next;
+    } catch {
+      priceStepOverrides = {};
+    }
+  }
+
+  function savePriceStepOverrides(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(PRICE_STEP_STORAGE_KEY, JSON.stringify(priceStepOverrides));
+    } catch {
+      // ignore storage errors
+    }
   }
 
   function uniqueSourceHubIds(): string[] {
@@ -116,6 +151,16 @@
 
   function wsMessageId(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  }
+
+  function formatUpdatedAt(timestampMs: number): string {
+    if (!Number.isFinite(timestampMs) || timestampMs <= 0) return '--:--:--.---';
+    const d = new Date(timestampMs);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    const mss = String(d.getMilliseconds()).padStart(3, '0');
+    return `${hh}:${mm}:${ss}.${mss}`;
   }
 
   function streamKey(hubEntityId: string, streamPairId: string): string {
@@ -199,7 +244,104 @@
     });
   }
 
-  function updateView(nextBids: OrderLevel[], nextAsks: OrderLevel[], pair: string, sources: string[]) {
+  function getSelectedPriceStepTicks(): number {
+    const scale = Number.isFinite(priceScale) && priceScale > 0 ? priceScale : 1;
+    const selected = Number(selectedPriceStep);
+    const stepDisplay = Number.isFinite(selected) && selected > 0 ? selected : 1;
+    return Math.max(1, Math.round(stepDisplay * scale));
+  }
+
+  function getBestPrice(sideSizes: Map<number, number>, side: 'bid' | 'ask'): number | null {
+    let best: number | null = null;
+    for (const [price, size] of sideSizes.entries()) {
+      if (!Number.isFinite(price) || !Number.isFinite(size) || size <= 0) continue;
+      if (best === null) best = price;
+      else if (side === 'bid') best = Math.max(best, price);
+      else best = Math.min(best, price);
+    }
+    return best;
+  }
+
+  function computeSmartStep(rawBestBid: number | null, rawBestAsk: number | null): string {
+    const numericSteps = PRICE_STEP_OPTIONS.map(Number);
+    if (!Number.isFinite(rawBestBid || NaN) || !Number.isFinite(rawBestAsk || NaN) || !rawBestBid || !rawBestAsk || rawBestAsk <= rawBestBid) {
+      return '1';
+    }
+    const scale = Number.isFinite(priceScale) && priceScale > 0 ? priceScale : 1;
+    const spreadDisplay = (rawBestAsk - rawBestBid) / scale;
+    const midDisplay = ((rawBestAsk + rawBestBid) / 2) / scale;
+
+    let smart = midDisplay >= 1000 ? 1 : midDisplay >= 100 ? 0.1 : 0.01;
+    smart = Math.max(numericSteps[0] || 0.01, smart);
+
+    // Keep visible spread density roughly in a readable range.
+    let ratio = spreadDisplay / smart;
+    while (ratio < 3) {
+      const lower = numericSteps.filter(v => v < smart).pop();
+      if (!lower) break;
+      smart = lower;
+      ratio = spreadDisplay / smart;
+    }
+    while (ratio > 100) {
+      const higher = numericSteps.find(v => v > smart);
+      if (!higher) break;
+      smart = higher;
+      ratio = spreadDisplay / smart;
+    }
+
+    const fallback = String(smart);
+    return PRICE_STEP_OPTIONS.includes(fallback as (typeof PRICE_STEP_OPTIONS)[number]) ? fallback : '1';
+  }
+
+  function applySmartOrSavedStep(rawBestBid: number | null, rawBestAsk: number | null): void {
+    const pair = canonicalPairId();
+    const saved = priceStepOverrides[pair];
+    const next = saved && PRICE_STEP_OPTIONS.includes(saved as (typeof PRICE_STEP_OPTIONS)[number])
+      ? saved
+      : computeSmartStep(rawBestBid, rawBestAsk);
+    if (selectedPriceStep !== next) {
+      selectedPriceStep = next;
+    }
+  }
+
+  function aggregateSideLevels(
+    sideSizes: Map<number, number>,
+    sideOwners: Map<number, Set<string>>,
+    side: 'bid' | 'ask',
+  ): { sizes: Map<number, number>; owners: Map<number, Set<string>> } {
+    const stepTicks = getSelectedPriceStepTicks();
+    if (stepTicks <= 1) {
+      return { sizes: sideSizes, owners: sideOwners };
+    }
+
+    const aggregatedSizes = new Map<number, number>();
+    const aggregatedOwners = new Map<number, Set<string>>();
+
+    for (const [price, size] of sideSizes.entries()) {
+      const bucketPrice = side === 'bid'
+        ? Math.floor(price / stepTicks) * stepTicks
+        : Math.ceil(price / stepTicks) * stepTicks;
+      aggregatedSizes.set(bucketPrice, (aggregatedSizes.get(bucketPrice) || 0) + size);
+      if (showOwners) {
+        const srcOwners = sideOwners.get(price);
+        if (srcOwners && srcOwners.size > 0) {
+          const dstOwners = aggregatedOwners.get(bucketPrice) || new Set<string>();
+          for (const owner of srcOwners) dstOwners.add(owner);
+          aggregatedOwners.set(bucketPrice, dstOwners);
+        }
+      }
+    }
+
+    return { sizes: aggregatedSizes, owners: aggregatedOwners };
+  }
+
+  function updateView(
+    nextBids: OrderLevel[],
+    nextAsks: OrderLevel[],
+    pair: string,
+    sources: string[],
+    updatedAtOverride?: number,
+  ) {
     bids = nextBids;
     asks = nextAsks;
     sourceCount = sources.length;
@@ -213,7 +355,10 @@
       spread = null;
       spreadPercent = '-';
     }
-    lastUpdate = Date.now();
+    const preferredTimestamp = Number(updatedAtOverride || 0);
+    lastUpdate = Number.isFinite(preferredTimestamp) && preferredTimestamp > 0
+      ? preferredTimestamp
+      : Date.now();
     dispatch('snapshot', {
       pairId: pair,
       bids: bids.map(level => ({ price: level.price, size: level.size, total: level.total })),
@@ -232,11 +377,16 @@
     const bidOwners = new Map<number, Set<string>>();
     const askOwners = new Map<number, Set<string>>();
     let found = 0;
+    let newestHubUpdate = 0;
 
     for (const sourceHubId of sources) {
       const snapshot = streamSnapshots.get(streamKey(sourceHubId, pair));
       if (!snapshot) continue;
       found += 1;
+      const hubUpdatedAt = Number(snapshot.hubUpdatedAt || snapshot.updatedAt || 0);
+      if (Number.isFinite(hubUpdatedAt) && hubUpdatedAt > newestHubUpdate) {
+        newestHubUpdate = hubUpdatedAt;
+      }
       for (const level of snapshot.bids || []) {
         const price = Number(level.price || 0);
         const size = Number(level.size || 0);
@@ -252,9 +402,12 @@
     }
 
     if (found === 0) return false;
-    const nextBids = buildOrderLevels(bidSizes, bidOwners, 'bid');
-    const nextAsks = buildOrderLevels(askSizes, askOwners, 'ask');
-    updateView(nextBids, nextAsks, pair, sources);
+    applySmartOrSavedStep(getBestPrice(bidSizes, 'bid'), getBestPrice(askSizes, 'ask'));
+    const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, 'bid');
+    const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, 'ask');
+    const nextBids = buildOrderLevels(aggregatedBids.sizes, aggregatedBids.owners, 'bid');
+    const nextAsks = buildOrderLevels(aggregatedAsks.sizes, aggregatedAsks.owners, 'ask');
+    updateView(nextBids, nextAsks, pair, sources, newestHubUpdate);
     return true;
   }
 
@@ -277,6 +430,7 @@
     const askSizes = new Map<number, number>();
     const bidOwners = new Map<number, Set<string>>();
     const askOwners = new Map<number, Set<string>>();
+    let newestHubUpdate = 0;
 
     for (const sourceHubId of sources) {
       const hubReplica = findHubReplica(env, sourceHubId);
@@ -284,13 +438,20 @@
       if (!(books instanceof Map)) continue;
       const book = books.get(pair);
       if (!book) continue;
+      const hubUpdatedAt = Number(hubReplica?.state?.timestamp || 0);
+      if (Number.isFinite(hubUpdatedAt) && hubUpdatedAt > newestHubUpdate) {
+        newestHubUpdate = hubUpdatedAt;
+      }
       accumulateBookSide(book, 'bid', bidSizes, bidOwners);
       accumulateBookSide(book, 'ask', askSizes, askOwners);
     }
 
-    const nextBids = buildOrderLevels(bidSizes, bidOwners, 'bid');
-    const nextAsks = buildOrderLevels(askSizes, askOwners, 'ask');
-    updateView(nextBids, nextAsks, pair, sources);
+    applySmartOrSavedStep(getBestPrice(bidSizes, 'bid'), getBestPrice(askSizes, 'ask'));
+    const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, 'bid');
+    const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, 'ask');
+    const nextBids = buildOrderLevels(aggregatedBids.sizes, aggregatedBids.owners, 'bid');
+    const nextAsks = buildOrderLevels(aggregatedAsks.sizes, aggregatedAsks.owners, 'ask');
+    updateView(nextBids, nextAsks, pair, sources, newestHubUpdate);
   }
 
   function findPrevLevel(bitmap: Uint32Array | number[], start: number): number {
@@ -345,7 +506,7 @@
     if (!Number.isFinite(level.price) || !Number.isFinite(level.size)) return;
     dispatch('levelclick', {
       side,
-      price: level.price,
+      priceTicks: String(level.price),
       size: level.size,
     });
   }
@@ -364,6 +525,36 @@
       depth,
     }));
     marketSubKey = `${pair}|${depth}|${sources.join(',')}`;
+  }
+
+  function requestMarketSnapshot(): void {
+    if (!marketWs || marketWs.readyState !== 1) return;
+    marketWs.send(JSON.stringify({ type: 'market_snapshot_request', id: wsMessageId('market_req_manual') }));
+  }
+
+  function refreshOrderbookNow(): void {
+    // Force bypass stale stream cache and refresh from current hub state/snapshot.
+    streamFreshUntil = 0;
+    requestMarketSnapshot();
+    extractOrderbook();
+  }
+
+  function handlePriceStepChange(): void {
+    const pair = canonicalPairId();
+    if (normalizePairId(pair)) {
+      priceStepOverrides[pair] = selectedPriceStep;
+      savePriceStepOverrides();
+    }
+    extractOrderbook();
+  }
+
+  function resetPriceStepAuto(): void {
+    const pair = canonicalPairId();
+    if (priceStepOverrides[pair]) {
+      delete priceStepOverrides[pair];
+      savePriceStepOverrides();
+    }
+    extractOrderbook();
   }
 
   function connectMarketStream() {
@@ -451,6 +642,7 @@
   $: sellRatioPct = visibleSizeTotal > 0 ? 100 - buyRatioPct : 0;
 
   onMount(() => {
+    loadPriceStepOverrides();
     extractOrderbook();
     connectMarketStream();
     pollInterval = setInterval(extractOrderbook, POLL_MS) as unknown as number;
@@ -468,7 +660,26 @@
 <div class="orderbook-panel">
   <div class="header">
     <span class="title">Order Book</span>
-    <span class="pair">{pairLabel || pairId.replace('/', ' / ')}</span>
+    <div class="header-controls">
+      <span class="pair">{pairLabel || pairId.replace('/', ' / ')}</span>
+      <label class="price-step">
+        <span class="price-step-label">Step</span>
+        <select bind:value={selectedPriceStep} on:change={handlePriceStepChange}>
+          {#each PRICE_STEP_OPTIONS as step}
+            <option value={step}>{step}</option>
+          {/each}
+        </select>
+        <button
+          type="button"
+          class="step-auto-btn"
+          class:active={!priceStepOverrides[canonicalPairId()]}
+          on:click={resetPriceStepAuto}
+          title="Use smart auto step for current pair"
+        >
+          Auto
+        </button>
+      </label>
+    </div>
   </div>
 
   <div class="spread-row">
@@ -559,7 +770,15 @@
 
   <div class="footer">
     <span class="hub-label">{sourceLabel}</span>
-    <span class="update-time">Updated: {new Date(lastUpdate).toLocaleTimeString()}</span>
+    <button
+      class="update-time refresh-link"
+      type="button"
+      on:click={refreshOrderbookNow}
+      title="Updated from hub timestamp. Click to request fresh orderbook now."
+      aria-label="Click to refresh orderbook from hub"
+    >
+      Updated (hub): {formatUpdatedAt(lastUpdate)}
+    </button>
   </div>
 </div>
 
@@ -591,6 +810,68 @@
   .pair {
     color: var(--text-secondary, #888);
     font-size: 11px;
+  }
+
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .price-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary, #888);
+    font-size: 10px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .price-step-label {
+    color: var(--text-tertiary, #666);
+  }
+
+  .price-step select {
+    min-width: 72px;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    background: rgba(15, 15, 21, 0.92);
+    color: var(--text-primary, #fff);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 0 8px;
+    outline: none;
+  }
+
+  .price-step select:focus-visible {
+    border-color: rgba(251, 191, 36, 0.85);
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.15);
+  }
+
+  .step-auto-btn {
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(15, 15, 21, 0.92);
+    color: #a1a1aa;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 0 8px;
+    cursor: pointer;
+  }
+
+  .step-auto-btn.active {
+    border-color: rgba(251, 191, 36, 0.75);
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.1);
+  }
+
+  .step-auto-btn:focus-visible {
+    outline: 1px solid rgba(251, 191, 36, 0.8);
+    outline-offset: 2px;
   }
 
   .spread-row {
@@ -733,6 +1014,28 @@
     color: var(--text-tertiary, #555);
   }
 
+  .refresh-link {
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .refresh-link:hover {
+    color: var(--text-secondary, #aaa);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .refresh-link:focus-visible {
+    outline: 1px solid rgba(251, 191, 36, 0.8);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
   .ratio-row {
     display: grid;
     grid-template-columns: auto 1fr auto;
@@ -768,5 +1071,26 @@
   .ratio-sell-label {
     color: #fb7185;
     font-weight: 600;
+  }
+
+  @media (max-width: 640px) {
+    .header {
+      align-items: flex-start;
+    }
+
+    .header-controls {
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+
+    .price-step select {
+      min-width: 64px;
+      height: 26px;
+    }
+
+    .step-auto-btn {
+      height: 26px;
+    }
   }
 </style>

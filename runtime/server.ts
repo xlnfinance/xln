@@ -1468,6 +1468,7 @@ type MarketSnapshotPayload = {
   source: 'orderbookExt';
   entityHeight: number;
   entityStateHash: string | null;
+  hubUpdatedAt: number;
   updatedAt: number;
 };
 
@@ -2520,6 +2521,7 @@ const buildMarketSnapshot = (
   const entityStateHash = typeof hubReplica?.state?.stateHash === 'string'
     ? hubReplica.state.stateHash
     : null;
+  const hubUpdatedAt = Number(hubReplica?.state?.timestamp || 0);
   return {
     hubEntityId,
     pairId,
@@ -2531,6 +2533,7 @@ const buildMarketSnapshot = (
     source: 'orderbookExt',
     entityHeight,
     entityStateHash,
+    hubUpdatedAt,
     updatedAt: Date.now(),
   };
 };

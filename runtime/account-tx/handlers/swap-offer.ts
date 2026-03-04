@@ -15,7 +15,7 @@ import { deriveDelta, getSwapPairPolicyByBaseQuote } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { formatEntityId } from '../../utils';
 import { canonicalAccountKey } from '../../state-helpers';
-import { deriveSide, ORDERBOOK_PRICE_SCALE } from '../../orderbook';
+import { computeSwapPriceTicks, deriveSide, ORDERBOOK_PRICE_SCALE } from '../../orderbook';
 import { FINANCIAL } from '../../constants';
 
 export async function handleSwapOffer(
@@ -79,16 +79,9 @@ export async function handleSwapOffer(
   if (rawBaseAmount < LOT_SCALE) {
     return { success: false, error: `Order too small for lot size (${LOT_SCALE.toString()} base wei)`, events };
   }
-  let priceTicks = (rawQuoteAmount * ORDERBOOK_PRICE_SCALE) / rawBaseAmount;
   const pairPolicy = getSwapPairPolicyByBaseQuote(baseTokenId, quoteTokenId);
   const stepTicks = BigInt(Math.max(1, pairPolicy.priceStepTicks));
-  if (side === 1) {
-    // SELL base: round up to avoid offering below stated limit.
-    priceTicks = ((priceTicks + stepTicks - 1n) / stepTicks) * stepTicks;
-  } else {
-    // BUY base: round down to avoid paying above stated limit.
-    priceTicks = (priceTicks / stepTicks) * stepTicks;
-  }
+  const priceTicks = computeSwapPriceTicks(giveTokenId, wantTokenId, giveAmount, wantAmount);
   if (priceTicks <= 0n) {
     return { success: false, error: `Invalid price ratio for swap offer`, events };
   }
