@@ -8,7 +8,6 @@ import type { XLNModule, Env, EnvSnapshot, EntityId, ReplicaKey } from '@xln/run
 let XLN: XLNModule | null = null;
 let xlnLoadPromise: Promise<XLNModule> | null = null;
 export const xlnInstance = writable<XLNModule | null>(null);
-let warnedMissingXLN = false;
 let unregisterEnvChange: (() => void) | null = null;
 let globalDebugExposed = false;
 const REQUIRED_RUNTIME_SCHEMA_VERSION = 2;
@@ -81,11 +80,6 @@ function exposeGlobalDebugObjects() {
         console.warn('[xlnStore] Failed to expose vaultStore globals:', err);
       });
   }
-}
-
-// Eager load XLN for console debugging (non-blocking)
-if (typeof window !== 'undefined') {
-  getXLN().catch(e => console.warn('XLN eager load failed:', e));
 }
 
 // Bootstrap env (used before runtime selection or when no runtime env exists)
@@ -374,7 +368,7 @@ export async function enqueueAndProcess(env: Env, input: { runtimeTxs: any[]; en
 // === FRONTEND UTILITY FUNCTIONS ===
 // Derived store that provides utility functions for components
 export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([, $xlnInstance, $settings]) => {
-  const clampPrecision = (value: number): number => Math.max(0, Math.min(18, Math.floor(Number(value) || 0)));
+  const clampPrecision = (value: number): number => Math.max(2, Math.min(18, Math.floor(Number(value) || 2)));
   const settingPrecision = clampPrecision(Number($settings?.tokenPrecision ?? 6));
   const formatRawAmount = (rawAmount: bigint, decimals: number, precisionLimit: number): string => {
     const safeDecimals = Math.max(0, Math.floor(Number(decimals) || 18));
@@ -394,148 +388,60 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([,
 
   // XLN is full in-memory snapshots - NO LOADING STATE NEEDED
 
-  // If xlnInstance is missing, return empty functions that throw clear errors
+  // Strict mode: if runtime is not ready, expose only fail-fast guards.
+  // No mock math, no fake token/entity formatting, no fallback data.
   if (!$xlnInstance) {
-    const warnMissingXLN = () => {
-      if (warnedMissingXLN) return;
-      warnedMissingXLN = true;
-      console.warn('XLN not initialized yet - showing safe fallbacks until runtime loads');
+    const fail = (fnName: string): never => {
+      throw new Error(`XLN_NOT_READY:${fnName}`);
     };
-
-    const safe =
-      <T>(fn: (...args: any[]) => T) =>
-      (...args: any[]) => {
-        warnMissingXLN();
-        return fn(...args);
-      };
-
-    // Match runtime getEntityShortId: numbered entities = decimal, hash entities = first 4 chars
-    const fallbackShortId = (id: string | undefined) => {
-      if (!id || id === '0x' || id === '0x0') return '0';
-      const hex = id.startsWith('0x') ? id.slice(2) : id;
-      try {
-        const value = BigInt('0x' + hex);
-        const NUMERIC_THRESHOLD = BigInt(256 ** 6); // 281474976710656
-        if (value >= 0n && value < NUMERIC_THRESHOLD) {
-          return value.toString();
-        }
-      } catch {
-        /* Fall through to hash mode */
-      }
-      return hex.slice(0, 4).toUpperCase();
-    };
-    const fallbackFormatEntityId = (id: string | undefined) =>
-      id && id.length > 10 ? `${id.slice(0, 6)}...${id.slice(-4)}` : id || 'N/A';
-    const fallbackTokenInfo = (tokenId: number) => ({ symbol: `T${tokenId}`, decimals: 18 });
-    const fallbackDerived = {
-      delta: 0,
-      totalCapacity: 0,
-      ownCreditLimit: 0,
-      peerCreditLimit: 0,
-      inCapacity: 0,
-      outCapacity: 0,
-      collateral: 0,
-      outOwnCredit: 0,
-      inCollateral: 0,
-      outPeerCredit: 0,
-      inOwnCredit: 0,
-      outCollateral: 0,
-      inPeerCredit: 0,
-    };
-
-    const fallbackTokenAmount = (tokenId: number, amount: bigint | null | undefined): string => {
-      const tokenInfo = fallbackTokenInfo(tokenId);
-      const raw = amount ?? 0n;
-      const numeric = formatRawAmount(raw, tokenInfo.decimals ?? 18, settingPrecision);
-      return `${numeric} ${tokenInfo.symbol}`;
-    };
+    const failFn = <T extends (...args: any[]) => any>(fnName: string): T =>
+      ((..._args: any[]) => fail(fnName)) as T;
 
     return {
       // Account utilities
-      deriveDelta: safe(() => fallbackDerived) as any,
-      formatTokenAmount: safe((tokenId: number, amount: bigint | null | undefined) => fallbackTokenAmount(tokenId, amount)) as any,
-      getTokenInfo: safe((tokenId: number) => fallbackTokenInfo(tokenId)) as any,
-      isLiquidSwapToken: safe((tokenId: number) => tokenId === 1 || tokenId === 3) as any,
-      getSwapPairOrientation: safe((tokenA: number, tokenB: number) => {
-        const left = Math.min(tokenA, tokenB);
-        const right = Math.max(tokenA, tokenB);
-        const isLiquid = (id: number) => id === 1 || id === 3;
-        if (isLiquid(tokenA) && !isLiquid(tokenB)) return { baseTokenId: tokenB, quoteTokenId: tokenA, pairId: `${left}/${right}` };
-        if (!isLiquid(tokenA) && isLiquid(tokenB)) return { baseTokenId: tokenA, quoteTokenId: tokenB, pairId: `${left}/${right}` };
-        return { baseTokenId: left, quoteTokenId: right, pairId: `${left}/${right}` };
-      }) as any,
-      getDefaultSwapTradingPairs: safe(() => {
-        return [
-          { baseTokenId: 2, quoteTokenId: 1, pairId: '1/2' }, // WETH/USDC
-          { baseTokenId: 2, quoteTokenId: 3, pairId: '2/3' }, // WETH/USDT
-          { baseTokenId: 1, quoteTokenId: 3, pairId: '1/3' }, // USDC/USDT
-        ];
-      }) as any,
-      isLeft: safe((entityId: string, counterpartyId: string) => entityId < counterpartyId) as any,
-      createDemoDelta: safe(() => ({})) as any,
-      getDefaultCreditLimit: safe(() => 0n) as any,
-      safeStringify: safe((value: any) => {
-        try {
-          return JSON.stringify(value);
-        } catch {
-          return '';
-        }
-      }) as any,
+      deriveDelta: failFn('deriveDelta') as any,
+      formatTokenAmount: failFn('formatTokenAmount') as any,
+      getTokenInfo: failFn('getTokenInfo') as any,
+      isLiquidSwapToken: failFn('isLiquidSwapToken') as any,
+      getSwapPairOrientation: failFn('getSwapPairOrientation') as any,
+      getDefaultSwapTradingPairs: failFn('getDefaultSwapTradingPairs') as any,
+      isLeft: failFn('isLeft') as any,
+      createDemoDelta: failFn('createDemoDelta') as any,
+      getDefaultCreditLimit: failFn('getDefaultCreditLimit') as any,
+      safeStringify: failFn('safeStringify') as any,
 
       // Financial utilities
-      formatTokenAmountEthers: safe((amount: bigint) => amount.toString()) as any,
-      parseTokenAmount: safe((amount: string) => {
-        const parsed = Number(amount);
-        return Number.isFinite(parsed) ? BigInt(Math.floor(parsed)) : 0n;
-      }) as any,
-      convertTokenPrecision: safe((amount: bigint) => amount) as any,
-      calculatePercentageEthers: safe(() => '0') as any,
-      formatAssetAmountEthers: safe((amount: bigint) => amount.toString()) as any,
+      formatTokenAmountEthers: failFn('formatTokenAmountEthers') as any,
+      parseTokenAmount: failFn('parseTokenAmount') as any,
+      convertTokenPrecision: failFn('convertTokenPrecision') as any,
+      calculatePercentageEthers: failFn('calculatePercentageEthers') as any,
+      formatAssetAmountEthers: failFn('formatAssetAmountEthers') as any,
       BigIntMath: {} as any,
       FINANCIAL_CONSTANTS: {} as any,
 
       // Entity utilities
-      getEntity: safe(() => null) as any,
-      getEntityShortId: safe((entityId: string) => fallbackShortId(entityId)) as any,
-      formatEntityId: safe((entityId: string) => fallbackFormatEntityId(entityId)) as any,
-      getEntityNumber: safe((entityId: string) => fallbackShortId(entityId)) as any,
-      formatEntityDisplay: safe((entityId: string) => `Entity #${fallbackShortId(entityId)}`) as any,
-      formatShortEntityId: safe((entityId: string) => fallbackShortId(entityId)) as any,
+      getEntity: failFn('getEntity') as any,
+      getEntityShortId: failFn('getEntityShortId') as any,
+      formatEntityId: failFn('formatEntityId') as any,
+      getEntityNumber: failFn('getEntityNumber') as any,
+      formatEntityDisplay: failFn('formatEntityDisplay') as any,
+      formatShortEntityId: failFn('formatShortEntityId') as any,
 
       // Avatar generation
-      generateEntityAvatar: safe(() => '') as any,
-      generateSignerAvatar: safe(() => '') as any,
-      getEntityDisplayInfo: safe((entityId: string) => ({
-        id: entityId,
-        shortId: fallbackShortId(entityId),
-        label: `Entity #${fallbackShortId(entityId)}`,
-      })) as any,
+      generateEntityAvatar: failFn('generateEntityAvatar') as any,
+      generateSignerAvatar: failFn('generateSignerAvatar') as any,
+      getEntityDisplayInfo: failFn('getEntityDisplayInfo') as any,
 
       // Identity system (from ids.ts)
-      extractEntityId: safe((key: string) => key.split(':')[0] || '') as any,
-      extractSignerId: safe((key: string) => key.split(':')[1] || '') as any,
-      parseReplicaKey: safe((key: string) => {
-        const [entityId = '', signerId = ''] = key.split(':');
-        return { entityId, signerId };
-      }) as any,
-      formatReplicaKey: safe((entityId: string, signerId: string) => `${entityId}:${signerId}`) as any,
-      createReplicaKey: safe((entityId: string, signerId: string) => `${entityId}:${signerId}`) as any,
-      classifyBilateralState: safe((_account: any, _peerHeight: number | undefined, isLeftEntity: boolean) => ({
-        state: 'unknown',
-        isLeftEntity,
-        shouldRollback: false,
-        pendingHeight: null,
-        mempoolCount: 0,
-      })) as any,
-      getAccountBarVisual: safe(() => ({
-        glowColor: null,
-        glowSide: null,
-        glowIntensity: 0,
-        isDashed: false,
-        pulseSpeed: 1,
-      })) as any,
-      sendEntityInput: safe(() => ({ sent: false, deferred: true, queuedLocal: false })) as any,
-      resolveEntityProposerId: safe(() => '') as any,
+      extractEntityId: failFn('extractEntityId') as any,
+      extractSignerId: failFn('extractSignerId') as any,
+      parseReplicaKey: failFn('parseReplicaKey') as any,
+      formatReplicaKey: failFn('formatReplicaKey') as any,
+      createReplicaKey: failFn('createReplicaKey') as any,
+      classifyBilateralState: failFn('classifyBilateralState') as any,
+      getAccountBarVisual: failFn('getAccountBarVisual') as any,
+      sendEntityInput: failFn('sendEntityInput') as any,
+      resolveEntityProposerId: failFn('resolveEntityProposerId') as any,
 
       isReady: false,
     };
@@ -618,40 +524,33 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([,
 
     // Avatar generation (using XLN instance functions)
     generateEntityAvatar: (entityId: string): string => {
-      try {
-        return $xlnInstance.generateEntityAvatar?.(entityId) || '';
-      } catch (error) {
-        console.error('Error generating entity avatar:', error);
-        return '';
+      if (typeof $xlnInstance.generateEntityAvatar !== 'function') {
+        throw new Error('XLN_RUNTIME_MISSING_FN:generateEntityAvatar');
       }
+      return $xlnInstance.generateEntityAvatar(entityId);
     },
 
     generateSignerAvatar: (signerId: string): string => {
-      try {
-        const result = $xlnInstance.generateSignerAvatar?.(signerId) || '';
-        return result;
-      } catch (error) {
-        console.error('Error generating signer avatar:', error);
-        return '';
+      if (typeof $xlnInstance.generateSignerAvatar !== 'function') {
+        throw new Error('XLN_RUNTIME_MISSING_FN:generateSignerAvatar');
       }
+      return $xlnInstance.generateSignerAvatar(signerId);
     },
 
     // Entity display helpers
     getEntityDisplayInfo: (entityId: string) => {
-      try {
-        return $xlnInstance.getEntityDisplayInfo?.(entityId) || { name: entityId, avatar: '', type: 'lazy' };
-      } catch {
-        return { name: entityId, avatar: '', type: 'lazy' };
+      if (typeof $xlnInstance.getEntityDisplayInfo !== 'function') {
+        throw new Error('XLN_RUNTIME_MISSING_FN:getEntityDisplayInfo');
       }
+      return $xlnInstance.getEntityDisplayInfo(entityId);
     },
 
     // Signer display helpers
     getSignerDisplayInfo: (signerId: string) => {
-      try {
-        return $xlnInstance.getSignerDisplayInfo?.(signerId) || { name: signerId, address: signerId, avatar: '' };
-      } catch {
-        return { name: signerId, address: signerId, avatar: '' };
+      if (typeof $xlnInstance.getSignerDisplayInfo !== 'function') {
+        throw new Error('XLN_RUNTIME_MISSING_FN:getSignerDisplayInfo');
       }
+      return $xlnInstance.getSignerDisplayInfo(signerId);
     },
 
     // Identity system (from ids.ts) - replaces split(':') patterns

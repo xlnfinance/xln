@@ -9,21 +9,13 @@
   import { xlnFunctions, getXLN, xlnEnvironment, enqueueAndProcess } from '../../stores/xlnStore';
   import { activeVault, vaultOperations } from '../../stores/vaultStore';
   import { tabOperations } from '../../stores/tabStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { Plus, X, Copy, Download, Upload, Users, User, Shield, Hash, Tag, Zap } from 'lucide-svelte';
 
   export let onCreated: ((entityId: string) => void) | undefined = undefined;
 
   const dispatch = createEventDispatcher();
-
-  // Context
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextEnv = entityEnv?.env;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-
-  // Reactive stores
-  $: env = contextEnv ? $contextEnv : $xlnEnvironment;
-  $: activeFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
+  $: env = $xlnEnvironment;
+  $: activeFunctions = $xlnFunctions;
   $: vault = $activeVault;
 
   // Form state

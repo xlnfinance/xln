@@ -1,18 +1,13 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
 
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-  const contextEnv = entityEnv?.env;
-  const contextIsLive = entityEnv?.isLive;
-  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
-  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
-  $: activeIsLive = contextIsLive ? $contextIsLive : $globalIsLive;
+  $: activeXlnFunctions = $xlnFunctions;
+  $: activeEnv = $xlnEnvironment;
+  $: activeIsLive = $globalIsLive;
 
   export let entityId: string;
   export let signerId: string | null = null;
@@ -38,14 +33,14 @@
     return String(value || '').trim().toLowerCase();
   }
 
-  function parseBigIntSafe(value: unknown, fallback = 0n): bigint {
+  function parseBigIntSafe(value: unknown, defaultValue = 0n): bigint {
     try {
       if (typeof value === 'bigint') return value;
       if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
       if (typeof value === 'string' && value.trim()) return BigInt(value.trim());
-      return fallback;
+      return defaultValue;
     } catch {
-      return fallback;
+      return defaultValue;
     }
   }
 
@@ -104,7 +99,7 @@
       }
     }
 
-    // 3) Last fallback: gossip metadata.
+    // 3) Gossip metadata (when bilateral policy not yet learned from account state).
     const profiles = env?.gossip?.getProfiles?.() || [];
     const profile = profiles.find((p: any) => normalizeEntityId(p?.entityId) === cpNorm);
     const md = profile?.metadata || {};

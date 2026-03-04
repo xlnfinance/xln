@@ -317,7 +317,16 @@
   }
 
   function formatPrice(price: number): string {
-    return scaledPrice(price).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 6 });
+    const value = scaledPrice(price);
+    if (!Number.isFinite(value)) return '-';
+    const abs = Math.abs(value);
+    if (abs >= 100) {
+      return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    if (abs >= 1) {
+      return value.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+    }
+    return value.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 });
   }
 
   function scaledSize(size: number): number {
@@ -435,6 +444,11 @@
   $: maxBidSize = Math.max(...bids.map(b => b.size), 1);
   $: maxAskSize = Math.max(...asks.map(a => a.size), 1);
   $: maxSize = Math.max(maxBidSize, maxAskSize);
+  $: bidVisibleSize = bids.reduce((acc, level) => acc + level.size, 0);
+  $: askVisibleSize = asks.reduce((acc, level) => acc + level.size, 0);
+  $: visibleSizeTotal = bidVisibleSize + askVisibleSize;
+  $: buyRatioPct = visibleSizeTotal > 0 ? (bidVisibleSize / visibleSizeTotal) * 100 : 0;
+  $: sellRatioPct = visibleSizeTotal > 0 ? 100 - buyRatioPct : 0;
 
   onMount(() => {
     extractOrderbook();
@@ -464,6 +478,12 @@
   </div>
 
   <div class="book-container">
+    <div class="columns-row">
+      <span class="head-label">Price</span>
+      <span class="head-label">Amount</span>
+      <span class="head-label">Total</span>
+    </div>
+
     <!-- Asks (sells) - shown in reverse order, lowest ask at bottom -->
     <div class="asks-section">
       {#each [...asks].reverse() as ask, i}
@@ -528,6 +548,15 @@
     </div>
   </div>
 
+  <div class="ratio-row">
+    <span class="ratio-buy-label">B {buyRatioPct.toFixed(2)}%</span>
+    <div class="ratio-track">
+      <div class="ratio-buy" style="width: {buyRatioPct.toFixed(2)}%"></div>
+      <div class="ratio-sell" style="width: {sellRatioPct.toFixed(2)}%"></div>
+    </div>
+    <span class="ratio-sell-label">{sellRatioPct.toFixed(2)}% S</span>
+  </div>
+
   <div class="footer">
     <span class="hub-label">{sourceLabel}</span>
     <span class="update-time">Updated: {new Date(lastUpdate).toLocaleTimeString()}</span>
@@ -583,6 +612,24 @@
     gap: 2px;
   }
 
+  .columns-row {
+    display: grid;
+    grid-template-columns: 1fr 90px 110px;
+    gap: 8px;
+    padding: 2px 6px 6px;
+    color: var(--text-tertiary, #666);
+    font-size: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    margin-bottom: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .head-label:nth-child(2),
+  .head-label:nth-child(3) {
+    text-align: right;
+  }
+
   .asks-section, .bids-section {
     display: flex;
     flex-direction: column;
@@ -605,7 +652,7 @@
 
   .row {
     display: grid;
-    grid-template-columns: 1fr 60px 50px;
+    grid-template-columns: 1fr 90px 110px;
     gap: 8px;
     padding: 3px 6px;
     position: relative;
@@ -684,5 +731,42 @@
     border-top: 1px solid var(--border-color, #333);
     font-size: 10px;
     color: var(--text-tertiary, #555);
+  }
+
+  .ratio-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 11px;
+  }
+
+  .ratio-track {
+    display: flex;
+    height: 6px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .ratio-buy {
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.7), rgba(16, 185, 129, 1));
+  }
+
+  .ratio-sell {
+    background: linear-gradient(90deg, rgba(244, 63, 94, 1), rgba(244, 63, 94, 0.7));
+  }
+
+  .ratio-buy-label {
+    color: #34d399;
+    font-weight: 600;
+  }
+
+  .ratio-sell-label {
+    color: #fb7185;
+    font-weight: 600;
   }
 </style>

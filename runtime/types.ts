@@ -709,6 +709,9 @@ export type EntityTx =
         giveAmount: bigint;
         wantTokenId: number;
         wantAmount: bigint;
+        // Explicit limit price in ORDERBOOK_PRICE_SCALE ticks (quote per 1 base).
+        // Sent together with give/want for deterministic cross-checking.
+        priceTicks?: bigint;
         minFillRatio: number; // 0-65535
       };
     }
@@ -1409,6 +1412,9 @@ export type AccountTx =
         giveAmount: bigint;
         wantTokenId: number;
         wantAmount: bigint;       // at this ratio
+        // Explicit limit price in ORDERBOOK_PRICE_SCALE ticks (quote per 1 base).
+        // Kept optional for backwards compatibility with older scenarios.
+        priceTicks?: bigint;
         minFillRatio: number;     // 0-65535 (uint16), minimum partial fill
       };
     }

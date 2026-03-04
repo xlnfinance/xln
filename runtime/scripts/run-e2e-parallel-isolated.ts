@@ -255,8 +255,9 @@ const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<
         lastHealth = body;
         const resetDone = body?.reset?.inProgress !== true;
         const meshReady = body?.hubMesh?.ok === true;
+        const mmReady = body?.marketMaker?.ok === true;
         const hasTs = typeof body?.timestamp === 'number';
-        if (hasTs && resetDone && meshReady) return;
+        if (hasTs && resetDone && meshReady && mmReady) return;
       }
     } catch {
       // retry
@@ -268,6 +269,7 @@ const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<
         {
           reset: lastHealth?.reset || null,
           hubMesh: lastHealth?.hubMesh || null,
+          marketMaker: lastHealth?.marketMaker || null,
           hubs: Array.isArray(lastHealth?.hubs)
             ? lastHealth.hubs.map((h: any) => ({
                 entityId: h?.entityId,
@@ -394,6 +396,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
         ...process.env,
         USE_ANVIL: 'true',
         ANVIL_RPC: rpcUrl,
+        BOOTSTRAP_LOCAL_HUBS: '1',
         XLN_DB_PATH: dbPath,
       },
     });

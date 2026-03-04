@@ -4,9 +4,8 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { xlnFunctions, xlnEnvironment, getXLN, enqueueEntityInputs } from '../../stores/xlnStore';
+  import { xlnFunctions, xlnEnvironment, getXLN, enqueueEntityInputs, resolveRelayUrls } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '$lib/stores/settingsStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import {
     normalizeEntityId,
@@ -18,15 +17,8 @@
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle, ArrowUpDown } from 'lucide-svelte';
 
   export let entityId: string = '';
-
-  // Context
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextEnv = entityEnv?.env;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-
-  // Reactive stores
-  $: env = contextEnv ? $contextEnv : $xlnEnvironment;
-  $: activeFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
+  $: env = $xlnEnvironment;
+  $: activeFunctions = $xlnFunctions;
 
   // State
   let loading = false;
@@ -43,10 +35,10 @@
   const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
   const isLocalHost = typeof window !== 'undefined' && LOCAL_HOSTS.has(window.location.hostname);
   const RELAY_OPTIONS = isLocalHost ? RELAY_OPTIONS_ALL : RELAY_OPTIONS_ALL.filter((o) => !o.url.includes('localhost'));
-  const FALLBACK_RELAY = 'wss://xln.finance/relay';
+  const DEFAULT_RELAY = resolveRelayUrls()[0] || '';
 
   let relaySelection = $settings.relayUrl;
-  $: relaySelection = $settings.relayUrl || FALLBACK_RELAY;
+  $: relaySelection = $settings.relayUrl || DEFAULT_RELAY;
 
   // Hub data structure
   interface Hub {
@@ -72,34 +64,6 @@
 
   let hubs: Hub[] = [];
   const DISCOVERY_TIMEOUT_MS = 8000;
-
-  function resolveApiBaseFromRelay(relayUrl: string | undefined | null): string {
-    if (typeof window === 'undefined') return 'https://xln.finance';
-    if (!relayUrl) return 'https://xln.finance';
-    try {
-      const relay = new URL(relayUrl);
-      if (LOCAL_HOSTS.has(relay.hostname) && LOCAL_HOSTS.has(window.location.hostname)) {
-        return window.location.origin;
-      }
-      const protocol =
-        relay.protocol === 'wss:' ? 'https:' :
-        relay.protocol === 'ws:' ? 'http:' :
-        relay.protocol;
-      return `${protocol}//${relay.host}`;
-    } catch {
-      return 'https://xln.finance';
-    }
-  }
-
-  async function fetchJsonWithTimeout(url: string, init: RequestInit = {}, timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<Response> {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-      return await fetch(url, { ...init, signal: ctrl.signal });
-    } finally {
-      clearTimeout(timer);
-    }
-  }
 
   function generateIdenticon(entityId: string): string {
     const canonicalId = String(entityId || '').trim().toLowerCase();
@@ -228,140 +192,66 @@
 
       const currentEnv = env;
       if (!currentEnv) throw new Error('Environment not ready');
-      await ensureRuntimeRelay(currentEnv, relaySelection || $settings?.relayUrl || FALLBACK_RELAY);
+      await ensureRuntimeRelay(currentEnv, relaySelection);
 
       const discovered: Hub[] = [];
 
-      // Primary source: gossip layer getHubs()
-      if (currentEnv.gossip?.getHubs) {
-        const gossipHubs = currentEnv.gossip.getHubs();
+      type GossipHubProfile = {
+        entityId: string;
+        runtimeId?: string;
+        endpoints?: string[];
+        capabilities?: string[];
+        metadata?: {
+          name?: string;
+          bio?: string;
+          website?: string;
+          routingFeePPM?: number;
+          capacity?: unknown;
+          uptime?: string | number;
+          region?: string;
+          lastUpdated?: number;
+          isHub?: boolean;
+        };
+      };
 
-        for (const profile of gossipHubs) {
-          if (normalizeEntityId(profile.entityId) === normalizeEntityId(entityId)) continue; // Skip self
+      const gossipProfiles: GossipHubProfile[] = typeof currentEnv.gossip?.getHubs === 'function'
+        ? currentEnv.gossip.getHubs()
+        : (currentEnv.gossip?.getProfiles?.() || []).filter(
+            (profile: GossipHubProfile) =>
+              profile?.metadata?.isHub === true ||
+              (Array.isArray(profile?.capabilities) && profile.capabilities.includes('hub')),
+          );
 
-          // Check if we're already connected
-          const isConnected = hasCounterpartyAccount(currentEnv, entityId, profile.entityId);
+      for (const profile of gossipProfiles) {
+        if (!profile?.entityId) continue;
+        if (normalizeEntityId(profile.entityId) === normalizeEntityId(entityId)) continue;
 
-          const capacity = parseCapacity(profile.metadata?.capacity);
-          const fullEntityId = profile.entityId.startsWith('0x') ? profile.entityId : `0x${profile.entityId}`;
+        const isConnected = hasCounterpartyAccount(currentEnv, entityId, profile.entityId);
+        const capacity = parseCapacity(profile.metadata?.capacity);
+        const fullEntityId = profile.entityId.startsWith('0x') ? profile.entityId : `0x${profile.entityId}`;
 
-          discovered.push({
-            profile,
-            entityId: profile.entityId,
-            name: profile.metadata?.name || `Hub ${profile.entityId.slice(0, 8)}`,
-            metadata: {
-              description: profile.metadata?.bio || 'Payment hub',
-              website: profile.metadata?.website,
-              fee: profile.metadata?.routingFeePPM || 100,
-              capacity: capacity ?? 0n,
-              uptime: profile.metadata?.uptime ? parseFloat(profile.metadata.uptime) : 99.9,
-            },
-            runtimeId: profile.runtimeId,
-            endpoints: profile.endpoints || [],
-            capabilities: profile.capabilities || [],
-            jurisdiction: profile.metadata?.region || 'global',
-            isConnected,
-            lastSeen: profile.metadata?.lastUpdated || Date.now(),
-            raw: formatRawProfile(profile),
-            identicon: generateIdenticon(fullEntityId),
-          });
-        }
-      }
-
-      // Fallback 1: relay directory (single source from server gossip cache)
-      if (discovered.length === 0) {
-        try {
-          const directoryApiBase = resolveApiBaseFromRelay(relaySelection || $settings?.relayUrl);
-          const res = await fetchJsonWithTimeout(`${directoryApiBase}/api/debug/entities?limit=5000`);
-          if (res.ok) {
-            const body = await res.json() as { entities?: Array<{
-              entityId: string;
-              runtimeId?: string;
-              name?: string;
-              isHub?: boolean;
-              metadata?: Record<string, unknown>;
-              capabilities?: string[];
-              lastUpdated?: number;
-            }> };
-            const fromRelay = Array.isArray(body.entities) ? body.entities : [];
-            for (const entry of fromRelay) {
-              if (!entry.entityId || normalizeEntityId(entry.entityId) === normalizeEntityId(entityId)) continue;
-              if (!entry.isHub) continue;
-              if (discovered.some((h) => normalizeEntityId(h.entityId) === normalizeEntityId(entry.entityId))) continue;
-
-              const isConnected = hasCounterpartyAccount(currentEnv, entityId, entry.entityId);
-              const fullEntityId = entry.entityId.startsWith('0x') ? entry.entityId : `0x${entry.entityId}`;
-              const metadata = (entry.metadata || {}) as Record<string, unknown>;
-              const capacity = parseCapacity(metadata.capacity);
-
-              discovered.push({
-                profile: { entityId: entry.entityId, metadata, capabilities: entry.capabilities || [] },
-                entityId: entry.entityId,
-                name: entry.name || String(metadata.name || `Hub ${entry.entityId.slice(0, 8)}`),
-                metadata: {
-                  description: String(metadata.bio || 'Payment hub'),
-                  website: typeof metadata.website === 'string' ? metadata.website : undefined,
-                  fee: typeof metadata.routingFeePPM === 'number' ? metadata.routingFeePPM : 100,
-                  capacity: capacity ?? 0n,
-                  uptime: typeof metadata.uptime === 'number' ? metadata.uptime : 99.9,
-                },
-                runtimeId: entry.runtimeId,
-                endpoints: [],
-                capabilities: entry.capabilities || [],
-                jurisdiction: typeof metadata.region === 'string' ? metadata.region : 'global',
-                isConnected,
-                lastSeen: entry.lastUpdated || Date.now(),
-                raw: JSON.stringify(entry, null, 2),
-                identicon: generateIdenticon(fullEntityId),
-              });
-            }
-          }
-        } catch {
-          // Best effort fallback only
-        }
-      }
-
-      // Fallback 2: scan eReplicas for entities with hub metadata (legacy)
-      if (discovered.length === 0 && currentEnv.eReplicas instanceof Map) {
-        for (const [key, replica] of currentEnv.eReplicas.entries()) {
-          const [hubEntityId] = key.split(':');
-          if (!hubEntityId || normalizeEntityId(hubEntityId) === normalizeEntityId(entityId)) continue;
-
-          const state = replica?.state as any;
-          if (!state) continue;
-
-          const hubMeta = state.hubAnnouncement || state.profile?.hub;
-          if (hubMeta || state.accounts?.size > 2) {
-            const isConnected = hasCounterpartyAccount(currentEnv, entityId, hubEntityId);
-            const fullEntityId = hubEntityId.startsWith('0x') ? hubEntityId : `0x${hubEntityId}`;
-
-            const profile = {
-              entityId: hubEntityId,
-              metadata: hubMeta || {},
-              accounts: [],
-            };
-            discovered.push({
-              profile,
-              entityId: hubEntityId,
-              name: state.config?.name || hubMeta?.name || `Hub ${hubEntityId.slice(0, 8)}`,
-              metadata: {
-                description: hubMeta?.description || 'Payment hub',
-                website: hubMeta?.website,
-                fee: hubMeta?.feePPM || 100,
-                capacity: state.reserves?.get?.('1') || 0n,
-                uptime: hubMeta?.uptime || 99.9,
-              },
-              runtimeId: undefined,
-              endpoints: [],
-              capabilities: [],
-              jurisdiction: state.config?.jurisdiction?.name || 'Unknown',
-              isConnected,
-              lastSeen: Date.now(),
-              raw: formatRawProfile(profile),
-              identicon: generateIdenticon(fullEntityId),
-            });
-          }
-        }
+        discovered.push({
+          profile,
+          entityId: profile.entityId,
+          name: profile.metadata?.name || `Hub ${profile.entityId.slice(0, 8)}`,
+          metadata: {
+            description: profile.metadata?.bio || 'Payment hub',
+            website: profile.metadata?.website,
+            fee: profile.metadata?.routingFeePPM || 100,
+            capacity: capacity ?? 0n,
+            uptime: typeof profile.metadata?.uptime === 'number'
+              ? profile.metadata.uptime
+              : Number.parseFloat(String(profile.metadata?.uptime || '99.9')),
+          },
+          runtimeId: profile.runtimeId,
+          endpoints: profile.endpoints || [],
+          capabilities: profile.capabilities || [],
+          jurisdiction: profile.metadata?.region || 'global',
+          isConnected,
+          lastSeen: profile.metadata?.lastUpdated || Date.now(),
+          raw: formatRawProfile(profile),
+          identicon: generateIdenticon(fullEntityId),
+        });
       }
 
       hubs = discovered;
@@ -390,7 +280,7 @@
 
       const currentEnv = env;
       if (!currentEnv) throw new Error('Environment not ready');
-      await ensureRuntimeRelay(currentEnv, relaySelection || $settings?.relayUrl || FALLBACK_RELAY);
+      await ensureRuntimeRelay(currentEnv, relaySelection);
 
       // Find signer for our entity
       const signerId = requireSignerIdForEntity(currentEnv, entityId, 'hub-connect');
@@ -440,8 +330,8 @@
 
   async function updateRelay(url: string) {
     if (!isLocalHost && url.includes('localhost')) {
-      relaySelection = FALLBACK_RELAY;
-      settingsOperations.setRelayUrl(FALLBACK_RELAY);
+      relaySelection = DEFAULT_RELAY;
+      settingsOperations.setRelayUrl(DEFAULT_RELAY);
       error = 'Local relay is disabled on non-localhost environments.';
       return;
     }
@@ -497,8 +387,8 @@
   // Auto-load once on mount. No background retries; user can press Refresh.
   onMount(() => {
     if (!isLocalHost && relaySelection.includes('localhost')) {
-      relaySelection = FALLBACK_RELAY;
-      settingsOperations.setRelayUrl(FALLBACK_RELAY);
+      relaySelection = DEFAULT_RELAY;
+      settingsOperations.setRelayUrl(DEFAULT_RELAY);
     }
     if (env) {
       hasDiscoveredOnce = true;

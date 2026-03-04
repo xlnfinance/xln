@@ -37,7 +37,7 @@
   export let layout: string = 'default'; void layout;
   export let networkMode: 'simnet' | 'testnet' | 'mainnet' = 'simnet'; void networkMode;
   export let embedMode: boolean = false; // When true: hide panels, show only 3D + minimal controls
-  export let scenarioId: string = ''; // Auto-run scenario on load (e.g. 'ahb', 'fed-chair')
+  export let scenarioId: string = '';
   export let userMode: boolean = false; // When true: simple BrainVault UX (no graph, no time machine)
 
   let container: HTMLDivElement;
@@ -295,80 +295,9 @@
         }
       });
 
-      // Auto-run scenario if scenarioId is explicitly provided (no default for /app route)
-      if (scenarioId) {
-        console.log(`[View] 🎬 Autoplay: Running scenario "${scenarioId}"...`);
-
-        // Supported scenarios (others show error)
-        const supportedScenarios = ['ahb'];
-
-        if (!supportedScenarios.includes(scenarioId)) {
-          console.error(`[View] ❌ SCENARIO NOT IMPLEMENTED: "${scenarioId}"`);
-          console.error(`[View] 📋 Available scenarios: ${supportedScenarios.join(', ')}`);
-          console.error(`[View] 💡 To add "${scenarioId}", implement it in View.svelte autoplay section`);
-        }
-
-        if (scenarioId === 'ahb' && env) {
-          try {
-            // CRITICAL: Clear old state BEFORE running (Architect panel pattern)
-            console.log('[View] BEFORE clear: eReplicas =', env.eReplicas?.size || 0);
-            if (env.eReplicas) env.eReplicas.clear();
-            env.history = [];
-            console.log('[View] AFTER clear: eReplicas =', env.eReplicas?.size || 0);
-
-            console.log(`[View] 📦 Running XLN.scenarios.ahb...`);
-            await XLN.scenarios.ahb(env);
-            console.log(`[View] 📦 scenarios.ahb completed, history: ${env.history?.length || 0} frames`);
-
-            // Update stores AFTER prepopulate completes (EXACT Architect panel pattern)
-            const frames = env.history || [];
-            console.log('[View] Setting stores with frames:', frames.length);
-
-            // CRITICAL: Wait for Graph3DPanel to mount before updating stores
-            // Fix race condition: on first load, Graph3D subscriptions not yet set up
-            await new Promise(resolve => setTimeout(resolve, 500)); // Give panels time to mount (increased from 100ms)
-            console.log('[View] Graph3D mount delay complete (500ms)');
-
-            // CRITICAL: Set in EXACT order from ArchitectPanel lines 348-353
-            // 1. Exit live mode FIRST
-            localIsLive.set(false);
-            // 2. Set timeIndex to LAST frame
-            localTimeIndex.set(Math.max(0, frames.length - 1));
-            // 3. Set history (triggers Graph3D subscription)
-            localHistoryStore.set(frames);
-            // 4. Set env (triggers final update)
-            localEnvStore.set(env);
-
-            console.log('[View] ✅ Stores updated, Graph3D should re-render');
-
-            // CRITICAL: Manually trigger Graph3D render after scenario loads
-            // Store subscriptions may not fire if Graph3D already mounted
-            panelBridge.emit('scenario:loaded', { name: 'ahb', frames: frames.length });
-
-            console.log(`[View] ✅ AHB scenario loaded successfully!`);
-            console.log(`[View]    Frames: ${frames.length}`);
-            console.log(`[View]    Entities: ${env.eReplicas?.size || 0}`);
-
-            // Autoplay: Wait 200ms then press Play with loop
-            setTimeout(() => {
-              console.log('[View] 🎬 Starting autoplay...');
-              panelBridge.emit('timeMachine:play', { loop: true });
-            }, 200);
-          } catch (autoplayErr) {
-            console.error('[View] ❌ AHB AUTOPLAY FAILED:', autoplayErr);
-            console.error('[View] Stack:', (autoplayErr as Error).stack);
-            // CRITICAL: Still show frames created before error
-            const frames = env.history || [];
-            if (frames.length > 0) {
-              console.log('[View] Error but have', frames.length, 'frames - showing them');
-              localIsLive.set(false);
-              localTimeIndex.set(Math.max(0, frames.length - 1));
-              localHistoryStore.set(frames);
-              localEnvStore.set(env);
-            }
-          }
-        }
-      }
+      // Scenario execution is manual-only from Dock panels.
+      // Query params are intentionally ignored to keep startup deterministic.
+      void scenarioId;
 
     } catch (err) {
       console.error('[View] ❌ Failed to initialize XLN:', err);

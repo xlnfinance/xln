@@ -704,6 +704,8 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     1n;
   const rebalanceGasFee = replica.state.hubRebalanceConfig.rebalanceGasFee ?? 0n;
   const c2rWithdrawSoftLimit = replica.state.hubRebalanceConfig.c2rWithdrawSoftLimit ?? DEFAULT_SOFT_LIMIT;
+  const effectiveC2RWithdrawSoftLimit =
+    c2rWithdrawSoftLimit < DEFAULT_SOFT_LIMIT ? DEFAULT_SOFT_LIMIT : c2rWithdrawSoftLimit;
   const currentPolicyVersion = Number.isFinite(replica.state.hubRebalanceConfig.policyVersion)
     && replica.state.hubRebalanceConfig.policyVersion > 0
     ? replica.state.hubRebalanceConfig.policyVersion
@@ -1080,7 +1082,7 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
       const hubOwnedCollateral = hubDerived.outCollateral;
       const outHold = hubDerived.outTotalHold || 0n;
       const freeOutCollateral = hubOwnedCollateral > outHold ? hubOwnedCollateral - outHold : 0n;
-      if (freeOutCollateral <= c2rWithdrawSoftLimit) continue;
+      if (freeOutCollateral <= effectiveC2RWithdrawSoftLimit) continue;
 
       const withdrawAmount = freeOutCollateral;
       emitRebalanceDebug({
@@ -1092,7 +1094,7 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
         outCollateral: String(hubOwnedCollateral),
         outHold: String(outHold),
         freeOutCollateral: String(freeOutCollateral),
-        c2rWithdrawSoftLimit: String(c2rWithdrawSoftLimit),
+        c2rWithdrawSoftLimit: String(effectiveC2RWithdrawSoftLimit),
         withdrawAmount: String(withdrawAmount),
       });
 

@@ -10,12 +10,10 @@
 
   // Parse URL params
   let embedMode = false;
-  let scenarioId = '';
 
   if (browser) {
     const params = new URLSearchParams(window.location.search);
     embedMode = params.get('embed') === '1';
-    scenarioId = params.get('scenario') || '';
   }
 
   // Initialize runtime on mount
@@ -67,7 +65,6 @@
     layout="default"
     networkMode="simnet"
     {embedMode}
-    {scenarioId}
     userMode={$appState.mode === 'user'}
   />
 {/if}

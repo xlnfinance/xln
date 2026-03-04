@@ -16,7 +16,6 @@
   import { getAvailableThemes, THEME_DEFINITIONS } from '../../utils/themes';
   import type { ThemeName } from '$lib/types/ui';
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { xlnFunctions, entityPositions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
@@ -182,22 +181,12 @@
     return `${addr.slice(0, 10)}...${addr.slice(-6)}`;
   }
 
-  // Context
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextReplicas = entityEnv?.eReplicas;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-  const contextHistory = entityEnv?.history;
-  const contextTimeIndex = entityEnv?.timeIndex;
-  const contextEnv = entityEnv?.env;
-  const contextIsLive = entityEnv?.isLive;
-
-  // Reactive stores
-  $: activeReplicas = contextReplicas ? $contextReplicas : $visibleReplicas;
-  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
-  $: activeHistory = contextHistory ? $contextHistory : $history;
-  $: activeTimeIndex = contextTimeIndex !== undefined ? $contextTimeIndex : $currentTimeIndex;
-  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
-  $: activeIsLive = contextIsLive !== undefined ? $contextIsLive : $isLive;
+  $: activeReplicas = $visibleReplicas;
+  $: activeXlnFunctions = $xlnFunctions;
+  $: activeHistory = $history;
+  $: activeTimeIndex = $currentTimeIndex;
+  $: activeEnv = $xlnEnvironment;
+  $: activeIsLive = $isLive;
 
   function resolveEntitySigner(entityId: string, reason: string): string {
     const env = activeEnv;

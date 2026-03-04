@@ -2,7 +2,6 @@
     import type { EntityReplica, Tab } from '$lib/types/ui';
     import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
     import { isLive as globalIsLive } from '../../stores/timeStore';
-    import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
     import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
     import EntitySelect from './EntitySelect.svelte';
     import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
@@ -14,7 +13,7 @@
   export let counterpartyId: string = '';
   export let prefilledCounterparty = false;
   let orderbookScope: 'all' | 'selected' = 'all';
-  const ORDERBOOK_PRICE_SCALE = 100n;
+  const ORDERBOOK_PRICE_SCALE = 10_000n;
   const ORDERBOOK_LOT_SCALE = 10n ** 12n;
   const PRICE_RATIO_DECIMALS = 6;
   const PRICE_RATIO_SCALE = 10n ** BigInt(PRICE_RATIO_DECIMALS);
@@ -66,13 +65,9 @@
   let minFillPercent = '50'; // Min fill ratio as percentage (0-100)
   let showDepthChart = false;
 
-    const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-    const contextXlnFunctions = entityEnv?.xlnFunctions;
-    const contextEnv = entityEnv?.env;
-    const contextIsLive = entityEnv?.isLive;
-    $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
-    $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
-    $: activeIsLive = contextIsLive ? $contextIsLive : $globalIsLive;
+    $: activeXlnFunctions = $xlnFunctions;
+    $: activeEnv = $xlnEnvironment;
+    $: activeIsLive = $globalIsLive;
 
     // Get available accounts (counterparties)
   $: accounts = replica?.state?.accounts
@@ -292,7 +287,7 @@
 
   function formatPriceTicks(ticks: bigint): string {
     const whole = ticks / ORDERBOOK_PRICE_SCALE;
-    const frac = (ticks % ORDERBOOK_PRICE_SCALE).toString().padStart(2, '0').replace(/0+$/, '');
+    const frac = (ticks % ORDERBOOK_PRICE_SCALE).toString().padStart(4, '0').replace(/0+$/, '');
     return frac.length > 0 ? `${whole.toString()}.${frac}` : whole.toString();
   }
 
@@ -855,6 +850,7 @@
           giveAmount: effectiveGiveAmount,
           wantTokenId: wantToken,
           wantAmount: effectiveWantAmount,
+          priceTicks: limitPriceTicks ?? undefined,
           minFillRatio,
         },
       });

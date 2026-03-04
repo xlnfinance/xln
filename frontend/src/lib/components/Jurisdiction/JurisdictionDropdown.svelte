@@ -4,9 +4,8 @@
    * Uses unified Dropdown base component.
    */
   import { createEventDispatcher } from 'svelte';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+  import { xlnEnvironment } from '$lib/stores/xlnStore';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import { writable } from 'svelte/store';
 
   export let selected: string | null = null;
   export let allowAll: boolean = true;
@@ -15,12 +14,7 @@
 
   let isOpen = false;
   const dispatch = createEventDispatcher();
-
-  // Time-aware env from context (fallback to empty)
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextEnv = entityEnv?.env;
-  const fallbackEnv = writable<any>(null);
-  $: activeEnv = contextEnv ? $contextEnv : $fallbackEnv;
+  $: activeEnv = $xlnEnvironment;
 
   // Derive jurisdictions from current env
   $: jurisdictions = (() => {
