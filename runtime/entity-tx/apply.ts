@@ -992,6 +992,8 @@ export const applyEntityTx = async (
       } else {
         policyVersion = feePolicyChanged ? previousVersion + 1 : previousVersion;
       }
+      const effectiveC2RWithdrawSoftLimit =
+        c2rWithdrawSoftLimit < DEFAULT_SOFT_LIMIT ? DEFAULT_SOFT_LIMIT : c2rWithdrawSoftLimit;
 
       newState.hubRebalanceConfig = {
         matchingStrategy,
@@ -999,7 +1001,7 @@ export const applyEntityTx = async (
         routingFeePPM,
         baseFee,
         minCollateralThreshold,
-        c2rWithdrawSoftLimit,
+        c2rWithdrawSoftLimit: effectiveC2RWithdrawSoftLimit,
         minFeeBps,
         rebalanceBaseFee,
         rebalanceLiquidityFeeBps,
@@ -1008,7 +1010,7 @@ export const applyEntityTx = async (
       };
       console.log(
         `🏦 Hub config set: strategy=${matchingStrategy}, policyVersion=${policyVersion}, routingFee=${routingFeePPM}ppm, ` +
-        `rebalance(base=${rebalanceBaseFee},liqBps=${rebalanceLiquidityFeeBps},gas=${rebalanceGasFee},timeoutMs=${rebalanceTimeoutMs},c2rWithdrawSoftLimit=${c2rWithdrawSoftLimit})` +
+        `rebalance(base=${rebalanceBaseFee},liqBps=${rebalanceLiquidityFeeBps},gas=${rebalanceGasFee},timeoutMs=${rebalanceTimeoutMs},c2rWithdrawSoftLimit=${effectiveC2RWithdrawSoftLimit})` +
         `${feePolicyChanged ? ' [fee-policy-updated]' : ''}`,
       );
 
@@ -1026,7 +1028,7 @@ export const applyEntityTx = async (
           policyVersion,
           routingFeePPM,
           baseFee,
-          c2rWithdrawSoftLimit: c2rWithdrawSoftLimit.toString(),
+          c2rWithdrawSoftLimit: effectiveC2RWithdrawSoftLimit.toString(),
           rebalanceBaseFee: rebalanceBaseFee.toString(),
           rebalanceLiquidityFeeBps: rebalanceLiquidityFeeBps.toString(),
           rebalanceGasFee: rebalanceGasFee.toString(),
@@ -1040,7 +1042,7 @@ export const applyEntityTx = async (
       addMessage(
         newState,
         `🏦 Hub config activated: ${matchingStrategy} strategy v${policyVersion}, ${routingFeePPM}ppm routing fee, ` +
-        `rebalance(base=${rebalanceBaseFee}, liqBps=${rebalanceLiquidityFeeBps}, gas=${rebalanceGasFee}, c2rWithdrawSoftLimit=${c2rWithdrawSoftLimit})`,
+        `rebalance(base=${rebalanceBaseFee}, liqBps=${rebalanceLiquidityFeeBps}, gas=${rebalanceGasFee}, c2rWithdrawSoftLimit=${effectiveC2RWithdrawSoftLimit})`,
       );
       return { newState, outputs: [] };
     }
@@ -1149,7 +1151,7 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio } =
+      const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, minFillRatio } =
         entityTx.data;
 
       // Use canonical key for account lookup
@@ -1162,7 +1164,7 @@ export const applyEntityTx = async (
 
       const accountTx: AccountTx = {
         type: 'swap_offer',
-        data: { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio },
+        data: { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, minFillRatio },
       };
 
       // Pure: return mempoolOp instead of mutating directly

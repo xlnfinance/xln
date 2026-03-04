@@ -9,19 +9,14 @@
    * Copyright (C) 2025 XLN Finance
    */
 
-  import { getEntityEnv, hasEntityEnvContext } from '../components/entity/shared/EntityEnvContext';
-  import type { Writable } from 'svelte/store';
+  import { xlnEnvironment } from '$lib/stores/xlnStore';
 
   // Props (Svelte 5 runes mode)
-  let { isolatedEnv = null }: { isolatedEnv?: Writable<any> | null } = $props();
-
-  // Get environment from context (isolated stores for /view) or props
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const envStore = isolatedEnv || entityEnv?.env;
+  let {} = $props();
 
   // Real-time solvency calculation
   let solvencyData = $derived.by(() => {
-    const currentEnv = envStore ? $envStore : null;
+    const currentEnv = $xlnEnvironment;
     if (!currentEnv) return null;
 
     // M1: Total reserves (on-chain, immediately available)

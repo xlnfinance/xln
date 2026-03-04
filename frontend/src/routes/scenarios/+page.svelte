@@ -5,7 +5,6 @@
     id: string;
     title: string;
     description: string;
-    autoScript?: string; // JS to execute in iframe after load
   }
 
   const scenarios: Scenario[] = [
@@ -31,7 +30,6 @@
   // - scale-test: 100 entities stress test
 
   let fullscreenId: string | null = null;
-  let iframeRefs: Record<string, HTMLIFrameElement> = {};
 
   function toggleFullscreen(id: string) {
     if (fullscreenId === id) {
@@ -41,19 +39,6 @@
       fullscreenId = id;
       document.body.style.overflow = 'hidden';
     }
-  }
-
-  function handleIframeLoad(scenario: Scenario, iframe: HTMLIFrameElement | undefined) {
-    if (!iframe || !scenario.autoScript || !iframe.contentWindow) return;
-    // Execute auto-script in iframe context
-    setTimeout(() => {
-      try {
-        const win = iframe.contentWindow as Window & { eval: (code: string) => void };
-        win?.eval(scenario.autoScript!);
-      } catch (e) {
-        console.log(`Scenario ${scenario.id} script:`, e);
-      }
-    }, 1000);
   }
 
   onMount(() => {
@@ -94,10 +79,8 @@
 
         <div class="iframe-container">
           <iframe
-            bind:this={iframeRefs[scenario.id]}
-            src="/view?embed=1&scenario={scenario.id}&autoplay=1&autoload=true&loop=true"
+            src="/view?embed=1"
             title={scenario.title}
-            on:load={() => handleIframeLoad(scenario, iframeRefs[scenario.id])}
             allow="accelerometer; autoplay; encrypted-media; gyroscope"
           ></iframe>
 

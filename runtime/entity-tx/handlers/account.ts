@@ -1,8 +1,17 @@
 import type { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
-import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
+import {
+  applyCommand,
+  createBook,
+  canonicalPair,
+  deriveSide,
+  ORDERBOOK_PRICE_SCALE,
+  type BookState,
+  type OrderbookExtState,
+} from '../../orderbook';
 import { HTLC } from '../../constants';
+import { getSwapPairPolicyByBaseQuote } from '../../account-utils';
 import { formatEntityId, HEAVY_LOGS } from '../../utils';
 import { isLeftEntity } from '../../entity-id-utils';
 import { batchAddRevealSecret, initJBatch } from '../../j-batch';
@@ -929,10 +938,12 @@ export function processOrderbookSwaps(
   const bookUpdates: { pairId: string; book: BookState }[] = [];
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
   if (!ext) return { mempoolOps, bookUpdates };
+  const minTradeSize = ext.hubProfile?.minTradeSize ?? 0n;
 
   // AUDIT FIX (CRITICAL-5): Cache book updates within batch to avoid stale snapshots
   // Without this, same-tick offers don't see each other's fills
   const bookCache = new Map<string, BookState>();
+  const MAX_BOOK_LEVELS = 40_000;
 
   for (const offer of swapOffers) {
     // Use accountId enriched by entity handler (already has correct counterparty ID)
@@ -953,11 +964,11 @@ export function processOrderbookSwaps(
 
     let priceTicks: bigint;
     let qtyLots: bigint;
-    let quantizedGive: bigint;
-    let quantizedWant: bigint;
 
     const isSellBase = offer.giveTokenId === base && offer.wantTokenId === quote;
     const isBuyBase = offer.giveTokenId === quote && offer.wantTokenId === base;
+    const pairPolicy = getSwapPairPolicyByBaseQuote(base, quote);
+    const policyTick = Math.max(1, pairPolicy.priceStepTicks);
     if (!isSellBase && !isBuyBase) {
       console.warn(
         `⚠️ ORDERBOOK: Invalid token direction for offer=${offer.offerId} give=${offer.giveTokenId} want=${offer.wantTokenId} base=${base} quote=${quote}`,
@@ -971,6 +982,23 @@ export function processOrderbookSwaps(
       console.warn(`⚠️ ORDERBOOK: Zero amount in offer=${offer.offerId}, base=${baseAmount}, quote=${quoteAmount}`);
       continue;
     }
+    if (minTradeSize > 0n && quoteAmount < minTradeSize) {
+      console.warn(
+        `⚠️ ORDERBOOK: Offer below minTradeSize=${minTradeSize.toString()} quote=${quoteAmount.toString()} offer=${offer.offerId}; cancelling remainder`,
+      );
+      mempoolOps.push({
+        accountId,
+        tx: {
+          type: 'swap_resolve',
+          data: {
+            offerId: offer.offerId,
+            fillRatio: 0,
+            cancelRemainder: true,
+          },
+        },
+      });
+      continue;
+    }
     if (baseAmount % LOT_SCALE !== 0n) {
       console.warn(
         `⚠️ ORDERBOOK: base amount not aligned to LOT_SCALE — skipping offer=${offer.offerId}, amount=${baseAmount}`,
@@ -978,45 +1006,68 @@ export function processOrderbookSwaps(
       continue;
     }
 
-    priceTicks = (quoteAmount * 100n) / baseAmount;
-    qtyLots = baseAmount / LOT_SCALE;
+    priceTicks = (quoteAmount * ORDERBOOK_PRICE_SCALE) / baseAmount;
+    const policyTickBig = BigInt(policyTick);
+    // Pair policy enforces deterministic step per market.
+    // Sell-base rounds up (never sell cheaper), buy-base rounds down (never pay more).
     if (isSellBase) {
-      quantizedGive = baseAmount;
-      quantizedWant = (quantizedGive * priceTicks) / 100n;
+      priceTicks = ((priceTicks + policyTickBig - 1n) / policyTickBig) * policyTickBig;
     } else {
-      quantizedWant = baseAmount;
-      quantizedGive = (quantizedWant * priceTicks) / 100n;
+      priceTicks = (priceTicks / policyTickBig) * policyTickBig;
     }
+    if (priceTicks <= 0n) {
+      console.warn(`⚠️ ORDERBOOK: price rounded to zero — skipping offer=${offer.offerId}`);
+      continue;
+    }
+
+    qtyLots = baseAmount / LOT_SCALE;
 
     if (qtyLots === 0n || qtyLots > MAX_LOTS || priceTicks <= 0n || priceTicks > MAX_LOTS) {
       console.warn(`⚠️ ORDERBOOK: Invalid order — skipping offer=${offer.offerId}, qty=${qtyLots}, price=${priceTicks}`);
       continue;
     }
 
-    const account = hubState.accounts.get(accountId);
-    const accountOffer = account?.swapOffers?.get(offer.offerId);
-    if (accountOffer) {
-      accountOffer.quantizedGive = quantizedGive;
-      accountOffer.quantizedWant = quantizedWant;
-    }
-
     // AUDIT FIX (CRITICAL-5): Use cached book if available, otherwise load from ext.books
     let book = bookCache.get(bookKey) || ext.books.get(bookKey);
     if (!book) {
-      const BOOK_LEVELS = 100;
-      const PRICE_TICK = 1000;
       const center = Number(priceTicks);
-      const halfRange = PRICE_TICK * Math.floor(BOOK_LEVELS / 2);
-      const pmin = Math.max(1, center - halfRange);
-      const pmax = pmin + PRICE_TICK * (BOOK_LEVELS - 1);
+      const halfRange = Math.max(
+        policyTick * 50,
+        Math.floor((center * pairPolicy.bookRangeBps) / 10_000),
+      );
+      let priceTick = policyTick;
+      let pmin = Math.max(1, center - halfRange);
+      let pmax = center + halfRange;
+      let levels = Math.floor((pmax - pmin) / priceTick) + 1;
+      if (levels > MAX_BOOK_LEVELS) {
+        priceTick = Math.max(1, Math.ceil((pmax - pmin) / (MAX_BOOK_LEVELS - 1)));
+        levels = Math.floor((pmax - pmin) / priceTick) + 1;
+        pmax = pmin + priceTick * Math.max(1, levels - 1);
+      }
 
       book = createBook({
-        tick: PRICE_TICK,
+        tick: priceTick,
         pmin,
         pmax,
         maxOrders: 10000,
-        stpPolicy: 0,
+        stpPolicy: 1, // STP cancel taker: never execute self-trades
       });
+    }
+
+    const bookTick = Math.max(1, book.params.tick);
+    const bookTickBig = BigInt(bookTick);
+    if (isSellBase) {
+      priceTicks = ((priceTicks + bookTickBig - 1n) / bookTickBig) * bookTickBig;
+    } else {
+      priceTicks = (priceTicks / bookTickBig) * bookTickBig;
+    }
+    if (priceTicks <= 0n) {
+      console.warn(`⚠️ ORDERBOOK: book-tick rounding produced zero price — skipping offer=${offer.offerId}`);
+      continue;
+    }
+    if (priceTicks > MAX_LOTS) {
+      console.warn(`⚠️ ORDERBOOK: rounded price exceeds max tick range — skipping offer=${offer.offerId}`);
+      continue;
     }
 
     const makerId = offer.makerIsLeft ? offer.fromEntity : offer.toEntity;

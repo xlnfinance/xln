@@ -1,18 +1,13 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
 
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-  const contextEnv = entityEnv?.env;
-  const contextIsLive = entityEnv?.isLive;
-  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
-  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
-  $: activeIsLive = contextIsLive ? $contextIsLive : $globalIsLive;
+  $: activeXlnFunctions = $xlnFunctions;
+  $: activeEnv = $xlnEnvironment;
+  $: activeIsLive = $globalIsLive;
 
   export let entityId: string;
   export let signerId: string | null = null;

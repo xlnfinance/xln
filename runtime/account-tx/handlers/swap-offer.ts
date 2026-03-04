@@ -11,11 +11,11 @@
  */
 
 import type { AccountMachine, AccountTx, SwapOffer } from '../../types';
-import { deriveDelta } from '../../account-utils';
+import { deriveDelta, getSwapPairPolicyByBaseQuote } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { formatEntityId } from '../../utils';
 import { canonicalAccountKey } from '../../state-helpers';
-import { deriveSide } from '../../orderbook';
+import { deriveSide, ORDERBOOK_PRICE_SCALE } from '../../orderbook';
 import { FINANCIAL } from '../../constants';
 
 export async function handleSwapOffer(
@@ -25,7 +25,7 @@ export async function handleSwapOffer(
   currentHeight: number,
   isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: { offerId: string; makerIsLeft: boolean; fromEntity: string; toEntity: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; minFillRatio: number } }> {
-  const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio } = accountTx.data;
+  const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, minFillRatio } = accountTx.data;
   const events: string[] = [];
   const LOT_SCALE = 10n ** 12n;
 
@@ -74,18 +74,50 @@ export async function handleSwapOffer(
   const side = deriveSide(giveTokenId, wantTokenId);
   const rawBaseAmount = side === 1 ? giveAmount : wantAmount;
   const rawQuoteAmount = side === 1 ? wantAmount : giveAmount;
+  const baseTokenId = side === 1 ? giveTokenId : wantTokenId;
+  const quoteTokenId = side === 1 ? wantTokenId : giveTokenId;
   if (rawBaseAmount < LOT_SCALE) {
     return { success: false, error: `Order too small for lot size (${LOT_SCALE.toString()} base wei)`, events };
   }
-  const priceTicks = (rawQuoteAmount * 100n) / rawBaseAmount;
+  let priceTicks = (rawQuoteAmount * ORDERBOOK_PRICE_SCALE) / rawBaseAmount;
+  const pairPolicy = getSwapPairPolicyByBaseQuote(baseTokenId, quoteTokenId);
+  const stepTicks = BigInt(Math.max(1, pairPolicy.priceStepTicks));
+  if (side === 1) {
+    // SELL base: round up to avoid offering below stated limit.
+    priceTicks = ((priceTicks + stepTicks - 1n) / stepTicks) * stepTicks;
+  } else {
+    // BUY base: round down to avoid paying above stated limit.
+    priceTicks = (priceTicks / stepTicks) * stepTicks;
+  }
   if (priceTicks <= 0n) {
     return { success: false, error: `Invalid price ratio for swap offer`, events };
+  }
+  if (inputPriceTicks !== undefined) {
+    if (inputPriceTicks <= 0n) {
+      return { success: false, error: `Invalid explicit priceTicks: ${inputPriceTicks}`, events };
+    }
+    // Explicit price must already be step-aligned to keep signer intent exact.
+    const alignedInput = (inputPriceTicks / stepTicks) * stepTicks;
+    if (alignedInput !== inputPriceTicks) {
+      return {
+        success: false,
+        error: `Explicit priceTicks must align to step ${stepTicks.toString()} (got ${inputPriceTicks.toString()})`,
+        events,
+      };
+    }
+    if (inputPriceTicks !== priceTicks) {
+      return {
+        success: false,
+        error: `Price mismatch after deterministic quantization: expected ${priceTicks.toString()}, got ${inputPriceTicks.toString()}`,
+        events,
+      };
+    }
   }
   const quantizedBase = (rawBaseAmount / LOT_SCALE) * LOT_SCALE;
   if (quantizedBase <= 0n) {
     return { success: false, error: `Quantized base amount became zero`, events };
   }
-  const quantizedQuote = (quantizedBase * priceTicks) / 100n;
+  const quantizedQuote = (quantizedBase * priceTicks) / ORDERBOOK_PRICE_SCALE;
   if (quantizedQuote <= 0n) {
     return { success: false, error: `Quantized quote amount became zero`, events };
   }

@@ -5,8 +5,6 @@
 -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { xlnFunctions } from '../../stores/xlnStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
 
   export let value: number = 1;
   export let disabled: boolean = false;
@@ -14,11 +12,6 @@
   export let compact: boolean = false;
 
   const dispatch = createEventDispatcher();
-
-  // Context
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-  $: activeFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
 
   // Token definitions
   const tokens = [

@@ -51,12 +51,14 @@ export type { ThemeColors } from '$lib/utils/themes';
 
 export type BarColorMode = 'rgy' | 'theme' | 'token';
 export type BarLayoutMode = 'center' | 'sides';
+export type AccountDeltaViewMode = 'per-token' | 'aggregated';
 
 export interface Settings {
   theme: ThemeName;
   barColorMode: BarColorMode;
   barLayout: BarLayoutMode;
   accountBarUsdPerPx: 1 | 10 | 100 | 1000;
+  accountDeltaViewMode: AccountDeltaViewMode;
   tokenPrecision: number;
   showTokenIcons: boolean;
   dropdownMode: 'signer-first' | 'entity-first';

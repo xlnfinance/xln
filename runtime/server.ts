@@ -22,8 +22,8 @@ import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
 import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
-import { DEFAULT_SPREAD_DISTRIBUTION } from './orderbook';
-import { getSwapPairOrientation } from './account-utils';
+import { DEFAULT_SPREAD_DISTRIBUTION, ORDERBOOK_PRICE_SCALE } from './orderbook';
+import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote } from './account-utils';
 import { deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from './networking/p2p-crypto';
 import { buildEntityProfile } from './networking/gossip-helper';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -190,6 +190,7 @@ const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
 const HUB_RESERVE_ASSERT_TIMEOUT_MS = 30_000;
 const HUB_MESH_ASSERT_TIMEOUT_MS = 20_000;
 const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
+const HUB_DEFAULT_MIN_TRADE_SIZE = 50n * 10n ** 18n;
 const MARKET_MAKER_SIGNER_LABEL = process.env.MARKET_MAKER_SIGNER_LABEL ?? 'mm-1';
 const MARKET_MAKER_SEED = process.env.MARKET_MAKER_SEED ?? `${HUB_SEED}:market-maker`;
 const MARKET_MAKER_NAME = process.env.MARKET_MAKER_NAME ?? 'MM';
@@ -201,16 +202,18 @@ const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
 );
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [60, 140, 240, 360, 520] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
-  30n * 10n ** 18n,
-  45n * 10n ** 18n,
-  60n * 10n ** 18n,
-  75n * 10n ** 18n,
-  90n * 10n ** 18n,
+  120n * 10n ** 18n,
+  180n * 10n ** 18n,
+  240n * 10n ** 18n,
+  300n * 10n ** 18n,
+  360n * 10n ** 18n,
 ] as const;
-const MARKET_MAKER_MID_PRICES_BPS = [25_000_000n, 17_500_000n, 11_500n] as const;
 
 let marketMakerLoopTimer: ReturnType<typeof setInterval> | null = null;
 let marketMakerLoopInFlight = false;
+let marketMakerEntityId: string | null = null;
+let marketMakerTargetHubIds: string[] = [];
+let marketMakerTokenIds: number[] = [];
 
 type MarketMakerOfferSpec = {
   offerId: string;
@@ -473,6 +476,9 @@ const stopMarketMakerLoop = (): void => {
     marketMakerLoopTimer = null;
   }
   marketMakerLoopInFlight = false;
+  marketMakerEntityId = null;
+  marketMakerTargetHubIds = [];
+  marketMakerTokenIds = [];
 };
 
 const normalizeTokenIdsForMm = (tokenCatalog: JTokenInfo[]): number[] => {
@@ -585,6 +591,29 @@ const collectOfferIdsForAccount = (account: any): Set<string> => {
   return ids;
 };
 
+const countMarketMakerOffersForHub = (
+  env: Env,
+  mmEntityId: string,
+  hubEntityId: string,
+): number => {
+  const account = getAccountMachine(env, mmEntityId, hubEntityId);
+  if (!account) return 0;
+  const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
+  let count = 0;
+  for (const offerId of collectOfferIdsForAccount(account)) {
+    if (offerId.startsWith(prefix)) count += 1;
+  }
+  return count;
+};
+
+const snapPriceTicks = (ticks: bigint, stepTicks: number, mode: 'up' | 'down'): bigint => {
+  const step = BigInt(Math.max(1, stepTicks));
+  if (mode === 'up') {
+    return ((ticks + step - 1n) / step) * step;
+  }
+  return (ticks / step) * step;
+};
+
 const buildMarketMakerOfferSpecs = (
   hubEntityIds: string[],
   tokenIds: number[],
@@ -595,14 +624,22 @@ const buildMarketMakerOfferSpecs = (
     const hubSuffix = hubEntityId.slice(-6).toLowerCase();
     for (let pairIndex = 0; pairIndex < pairs.length; pairIndex++) {
       const pair = pairs[pairIndex]!;
-      const midPriceBps = MARKET_MAKER_MID_PRICES_BPS[pairIndex] ?? MARKET_MAKER_MID_PRICES_BPS[0];
+      const pairPolicy = getSwapPairPolicyByBaseQuote(pair.baseTokenId, pair.quoteTokenId);
+      const midPriceTicks = pairPolicy.mmMidPriceTicks;
+      const stepTicks = Math.max(1, pairPolicy.priceStepTicks);
+      const stepTicksBig = BigInt(stepTicks);
       for (let level = 0; level < MARKET_MAKER_LEVEL_OFFSETS_BPS.length; level++) {
         const offsetBps = MARKET_MAKER_LEVEL_OFFSETS_BPS[level]!;
         const baseSize = MARKET_MAKER_LEVEL_BASE_SIZES[level]!;
-        const askPriceBps = (midPriceBps * BigInt(10_000 + offsetBps)) / 10_000n;
-        const bidPriceBps = (midPriceBps * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
-        const askWantAmount = (baseSize * askPriceBps) / 10_000n;
-        const bidGiveAmount = (baseSize * bidPriceBps) / 10_000n;
+        const askRaw = (midPriceTicks * BigInt(10_000 + offsetBps)) / 10_000n;
+        const bidRaw = (midPriceTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
+        const askPriceTicks = snapPriceTicks(askRaw, stepTicks, 'up');
+        let bidPriceTicks = snapPriceTicks(bidRaw, stepTicks, 'down');
+        if (bidPriceTicks >= askPriceTicks) {
+          bidPriceTicks = askPriceTicks > stepTicksBig ? askPriceTicks - stepTicksBig : 1n;
+        }
+        const askWantAmount = (baseSize * askPriceTicks) / ORDERBOOK_PRICE_SCALE;
+        const bidGiveAmount = (baseSize * bidPriceTicks) / ORDERBOOK_PRICE_SCALE;
         const levelId = level + 1;
 
         if (askWantAmount > 0n) {
@@ -733,6 +770,7 @@ const maintainMarketMakerQuotes = async (
   mmSignerId: string,
   hubEntityIds: string[],
   tokenIds: number[],
+  maxOffersPerAccount = MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
 ): Promise<void> => {
   if (hubEntityIds.length === 0 || tokenIds.length < 3) return;
   await ensureMarketMakerHubConnectivity(env, mmEntityId, mmSignerId, hubEntityIds, tokenIds);
@@ -754,7 +792,7 @@ const maintainMarketMakerQuotes = async (
     const existingOfferIds = collectOfferIdsForAccount(account);
     const missing = specs
       .filter(spec => !existingOfferIds.has(spec.offerId))
-      .slice(0, MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK);
+      .slice(0, Math.max(1, Math.floor(maxOffersPerAccount)));
     if (missing.length === 0) continue;
 
     offerInputs.push({
@@ -780,6 +818,46 @@ const maintainMarketMakerQuotes = async (
   }
 };
 
+const getMarketMakerHealth = (env: Env): {
+  enabled: boolean;
+  ok: boolean;
+  entityId: string | null;
+  expectedOffersPerHub: number;
+  hubs: Array<{ hubEntityId: string; offers: number; ready: boolean }>;
+} => {
+  const entityId = marketMakerEntityId;
+  const hubs = [...marketMakerTargetHubIds];
+  const expectedOffersPerHub =
+    buildMarketMakerPairs(marketMakerTokenIds).length * MARKET_MAKER_LEVEL_OFFSETS_BPS.length * 2;
+
+  if (!entityId || hubs.length === 0 || expectedOffersPerHub <= 0) {
+    return {
+      enabled: false,
+      ok: false,
+      entityId: entityId || null,
+      expectedOffersPerHub: Math.max(0, expectedOffersPerHub),
+      hubs: [],
+    };
+  }
+
+  const perHub = hubs.map((hubEntityId) => {
+    const offers = countMarketMakerOffersForHub(env, entityId, hubEntityId);
+    return {
+      hubEntityId,
+      offers,
+      ready: offers >= expectedOffersPerHub,
+    };
+  });
+
+  return {
+    enabled: true,
+    ok: perHub.length > 0 && perHub.every((entry) => entry.ready),
+    entityId,
+    expectedOffersPerHub,
+    hubs: perHub,
+  };
+};
+
 const bootstrapMarketMakerLiquidity = async (
   env: Env,
   hubEntityIds: string[],
@@ -796,8 +874,29 @@ const bootstrapMarketMakerLiquidity = async (
   }
 
   const targetHubs = hubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS);
-  await maintainMarketMakerQuotes(env, mm.entityId, mm.signerId, targetHubs, tokenIds);
-  await settleRuntimeFor(env, 40);
+  marketMakerEntityId = mm.entityId;
+  marketMakerTargetHubIds = [...targetHubs];
+  marketMakerTokenIds = [...tokenIds];
+  const expectedOffersPerHub =
+    buildMarketMakerPairs(tokenIds).length * MARKET_MAKER_LEVEL_OFFSETS_BPS.length * 2;
+  const bootstrapOfferLimit = Math.max(expectedOffersPerHub, MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK);
+
+  const bootstrapDeadline = Date.now() + 45_000;
+  while (Date.now() < bootstrapDeadline) {
+    await maintainMarketMakerQuotes(env, mm.entityId, mm.signerId, targetHubs, tokenIds, bootstrapOfferLimit);
+    await settleRuntimeFor(env, 45);
+    const health = getMarketMakerHealth(env);
+    if (health.ok) break;
+    await sleep(150);
+  }
+
+  const mmHealth = getMarketMakerHealth(env);
+  if (!mmHealth.ok) {
+    throw new Error(
+      `HUB_BOOTSTRAP_FAILED: MM liquidity not ready (expected=${mmHealth.expectedOffersPerHub} ` +
+      `perHub=${safeStringify(mmHealth.hubs)})`,
+    );
+  }
 
   marketMakerLoopTimer = setInterval(() => {
     if (marketMakerLoopInFlight) return;
@@ -809,10 +908,8 @@ const bootstrapMarketMakerLiquidity = async (
       });
   }, MARKET_MAKER_QUOTE_LOOP_MS);
 
-  const expectedOffersPerHub =
-    buildMarketMakerPairs(tokenIds).length * MARKET_MAKER_LEVEL_OFFSETS_BPS.length * 2;
   console.log(
-    `[XLN] MM bootstrap queued: ${targetHubs.length} hubs, target=${expectedOffersPerHub} resting offers/hub (5 levels x both sides x 3 pairs)`,
+    `[XLN] MM bootstrap ready: ${targetHubs.length} hubs, target=${expectedOffersPerHub} resting offers/hub (5 levels x both sides x 3 pairs)`,
   );
 };
 
@@ -1675,7 +1772,7 @@ const bootstrapServerHubsAndReserves = async (
           name: hubConfig?.name || String(hub.signerLabel || 'Hub'),
           spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
           referenceTokenId: 1,
-          minTradeSize: 0n,
+          minTradeSize: HUB_DEFAULT_MIN_TRADE_SIZE,
           supportedPairs: [...HUB_DEFAULT_SUPPORTED_PAIRS],
         },
       }],
@@ -1813,13 +1910,16 @@ const bootstrapServerHubsAndReserves = async (
   }
 
   const assertTokens = await ensureTokenCatalog();
-  await assertHubBootstrapReadiness(env, hubEntityIds, assertTokens);
-  console.log(
-    `[XLN] ✅ Hub bootstrap assertions passed: hubs=${hubEntityIds.length}, tokens=${Math.min(assertTokens.length, HUB_REQUIRED_TOKEN_COUNT)}, mesh=ok`,
-  );
-
-  if (includeMarketMaker && hubEntityIds.length >= HUB_MESH_REQUIRED_HUBS) {
-    await bootstrapMarketMakerLiquidity(env, hubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS), relayUrl, assertTokens);
+  if (bootstrapLocalHubs) {
+    await assertHubBootstrapReadiness(env, hubEntityIds, assertTokens);
+    console.log(
+      `[XLN] ✅ Hub bootstrap assertions passed: hubs=${hubEntityIds.length}, tokens=${Math.min(assertTokens.length, HUB_REQUIRED_TOKEN_COUNT)}, mesh=ok`,
+    );
+    if (includeMarketMaker && hubEntityIds.length >= HUB_MESH_REQUIRED_HUBS) {
+      await bootstrapMarketMakerLiquidity(env, hubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS), relayUrl, assertTokens);
+    }
+  } else {
+    console.warn('[XLN] Skipping hub bootstrap assertions and MM liquidity (BOOTSTRAP_LOCAL_HUBS=0)');
   }
 
   return hubEntityIds;
@@ -2789,6 +2889,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       JSON.stringify({
         ...health,
         hubMesh: getHubMeshHealth(env),
+        marketMaker: getMarketMakerHealth(env),
         reset: {
           inProgress: !!coldResetRebuildInFlight,
           lastError: coldResetRebuildError,

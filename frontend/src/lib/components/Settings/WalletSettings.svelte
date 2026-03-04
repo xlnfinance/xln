@@ -467,7 +467,7 @@
           <div class="slider-row">
             <input
               type="range"
-              min="0"
+              min="2"
               max="18"
               step="1"
               value={$settings.tokenPrecision}
@@ -484,6 +484,14 @@
             checked={$settings.showTokenIcons}
             on:change={(e) => settingsOperations.setShowTokenIcons((e.currentTarget as HTMLInputElement).checked)}
           />
+        </label>
+
+        <label class="setting-row">
+          <span>Account Delta View</span>
+          <select value={$settings.accountDeltaViewMode} on:change={(e) => settingsOperations.setAccountDeltaViewMode(e.currentTarget.value as 'per-token' | 'aggregated')}>
+            <option value="per-token">Per token (default)</option>
+            <option value="aggregated">Aggregated</option>
+          </select>
         </label>
         <div class="bar-legend-mini">
           <span class="legend-swatch" style="background: {barLegendColors.credit}; opacity: 0.5"></span> Credit

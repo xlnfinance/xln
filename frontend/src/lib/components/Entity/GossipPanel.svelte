@@ -1,15 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getXLN, xlnEnvironment } from '$lib/stores/xlnStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
 
   export let entityId: string = '';
-
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextEnv = entityEnv?.env;
-
-  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
+  $: activeEnv = $xlnEnvironment;
 
   type GossipProfile = {
     entityId: string;

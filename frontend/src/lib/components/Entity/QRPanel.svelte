@@ -6,16 +6,9 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { xlnFunctions } from '../../stores/xlnStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { Copy, Check, QrCode, Camera, Download } from 'lucide-svelte';
 
   export let entityId: string = '';
-
-  // Context
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-  $: activeFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
 
   // State
   let qrCanvas: HTMLCanvasElement;

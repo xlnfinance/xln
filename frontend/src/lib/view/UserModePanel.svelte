@@ -19,7 +19,6 @@
   import { appStateOperations } from '$lib/stores/appStateStore';
   import { panelBridge } from '$lib/view/utils/panelBridge';
   import { showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
-  import { setEntityEnvContext } from './components/entity/shared/EntityEnvContext';
   import type { Tab } from '$lib/types/ui';
   import { createSelfEntity } from '$lib/utils/entityFactory';
   import { readOnboardingComplete, writeOnboardingComplete } from '$lib/utils/onboardingState';
@@ -51,17 +50,6 @@
     isolatedTimeIndex = writable(-1),
     isolatedIsLive = writable(true)
   }: Props = $props();
-
-
-
-  // Set context for EntityPanel/AccountPanel
-  setEntityEnvContext({
-    isolatedEnv,
-    isolatedHistory,
-    isolatedTimeIndex,
-    isolatedIsLive,
-  });
-
   onMount(async () => {
     await vaultOperations.initialize();
   });

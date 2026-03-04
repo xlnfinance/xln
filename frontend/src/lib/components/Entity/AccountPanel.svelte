@@ -2,7 +2,6 @@
   import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { p2pState, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
   import { resolveEntityName } from '$lib/utils/entityNaming';
@@ -16,12 +15,8 @@
 
   const dispatch = createEventDispatcher();
 
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-  const contextEnv = entityEnv?.env;
-
-  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
-  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
+  $: activeXlnFunctions = $xlnFunctions;
+  $: activeEnv = $xlnEnvironment;
 
   let expandedTokenIds = new Set<number>();
   let nowMs = Date.now();
@@ -34,7 +29,7 @@
   $: mempoolCount = Number(account.mempool?.length || 0);
   $: hasPendingConsensus = Boolean(account.pendingFrame);
   $: hasQueuedMempool = mempoolCount > 0;
-  $: activeDispute = (account as any).activeDispute ?? null;
+  $: activeDispute = account.activeDispute ?? null;
   $: uiStatus = getAccountUiStatus(account);
   $: uiStatusLabel = getAccountUiStatusLabel(uiStatus);
   $: disputeTimeoutBlock = Number(activeDispute?.disputeTimeout ?? 0);
@@ -54,62 +49,30 @@
 
   $: counterpartyName = resolveEntityName(counterpartyId, activeEnv);
 
-  $: tokenDetails = Array.from(account.deltas?.entries() || []).map(([tokenId, delta]) => {
-    if (!activeXlnFunctions?.deriveDelta) {
+  $: tokenDetails = (() => {
+    if (!activeXlnFunctions?.deriveDelta) return [];
+    return Array.from(account.deltas?.entries() || []).map(([tokenId, delta]) => {
+      const derived = activeXlnFunctions.deriveDelta(delta, iAmLeft);
+      const peerDerived = activeXlnFunctions.deriveDelta(delta, !iAmLeft);
+      const tokenInfo = activeXlnFunctions.getTokenInfo(tokenId) || {
+        symbol: `TKN${tokenId}`,
+        color: '#999',
+        name: `Token ${tokenId}`,
+        decimals: 18,
+      };
       return {
         tokenId,
-        tokenInfo: { symbol: `TKN${tokenId}`, color: '#999', name: `Token ${tokenId}`, decimals: 18 },
+        tokenInfo,
         delta,
-        derived: {
-          delta: 0n,
-          totalCapacity: 0n,
-          inCapacity: 0n,
-          outCapacity: 0n,
-          inOwnCredit: 0n,
-          outOwnCredit: 0n,
-          inPeerCredit: 0n,
-          outPeerCredit: 0n,
-          inCollateral: 0n,
-          outCollateral: 0n,
-          ascii: '[loading...]',
-        },
-        peerDerived: {
-          delta: 0n,
-          totalCapacity: 0n,
-          inCapacity: 0n,
-          outCapacity: 0n,
-          inOwnCredit: 0n,
-          outOwnCredit: 0n,
-          inPeerCredit: 0n,
-          outPeerCredit: 0n,
-          inCollateral: 0n,
-          outCollateral: 0n,
-          ascii: '[loading...]',
-        },
-        ourCreditLimit: 0n,
-        theirCreditLimit: 0n,
+        derived,
+        peerDerived,
+        ourCreditLimit: iAmLeft ? delta.leftCreditLimit : delta.rightCreditLimit,
+        theirCreditLimit: iAmLeft ? delta.rightCreditLimit : delta.leftCreditLimit,
       };
-    }
-
-    const derived = activeXlnFunctions.deriveDelta(delta, iAmLeft);
-    const peerDerived = activeXlnFunctions.deriveDelta(delta, !iAmLeft);
-    const tokenInfo = activeXlnFunctions.getTokenInfo(tokenId) || {
-      symbol: `TKN${tokenId}`,
-      color: '#999',
-      name: `Token ${tokenId}`,
-      decimals: 18,
-    };
-
-    return {
-      tokenId,
-      tokenInfo,
-      delta,
-      derived,
-      peerDerived,
-      ourCreditLimit: iAmLeft ? delta.leftCreditLimit : delta.rightCreditLimit,
-      theirCreditLimit: iAmLeft ? delta.rightCreditLimit : delta.leftCreditLimit,
-    };
-  });
+    });
+  })();
+  $: hasCommittedFrame = Number(account.currentHeight || 0) > 0;
+  $: showTokenDetails = hasCommittedFrame && tokenDetails.length > 0;
 
   function formatTimestamp(ms: number): string {
     return new Date(ms).toLocaleTimeString();
@@ -191,17 +154,15 @@
     if (!activeDispute) return;
     const jReplicas = activeEnv?.jReplicas;
     if (!(jReplicas instanceof Map) || jReplicas.size === 0) return;
-    const activeJKey = (activeEnv as any)?.activeJurisdiction;
+    const activeJKey = activeEnv?.activeJurisdiction;
     const activeJReplica = activeJKey ? jReplicas.get(activeJKey) : null;
     const anyJReplica = activeJReplica ?? Array.from(jReplicas.values())[0];
-    const provider = (anyJReplica as any)?.jadapter?.provider;
+    const provider = anyJReplica?.jadapter?.provider;
     if (!provider || typeof provider.getBlockNumber !== 'function') return;
     try {
       const blockNumber = Number(await provider.getBlockNumber());
       if (Number.isFinite(blockNumber)) liveJHeight = blockNumber;
-    } catch {
-      // Keep local fallback.
-    }
+    } catch {}
   }
 
   $: if (activeDispute) {
@@ -268,104 +229,114 @@
   </div>
 
   <div class="panel-content">
-    {#each tokenDetails as td (td.tokenId)}
-      {@const outTotal = td.derived.outOwnCredit + td.derived.outCollateral + td.derived.outPeerCredit}
-      {@const inTotal = td.derived.inOwnCredit + td.derived.inCollateral + td.derived.inPeerCredit}
-      {@const isExpanded = expandedTokenIds.has(td.tokenId)}
-      <div class="delta-card">
-        <DeltaTokenSummary
-          symbol={td.tokenInfo.symbol}
-          name={td.tokenInfo.name || ''}
-          outAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity) || '0'}
-          inAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity) || '0'}
-          derived={td.derived}
-          decimals={Number(td.tokenInfo.decimals ?? 18)}
-          barHeight={12}
-        >
-          <svelte:fragment slot="actions">
-            <button class="delta-expand" on:click={() => toggleTokenDetails(td.tokenId)}>
-              {isExpanded ? 'Hide' : 'Details'}
-            </button>
-            <button class="delta-faucet" on:click={() => handleFaucet(td.tokenId)}>Faucet</button>
-          </svelte:fragment>
-        </DeltaTokenSummary>
+    {#if showTokenDetails}
+      {#each tokenDetails as td (td.tokenId)}
+        {@const outTotal = td.derived.outOwnCredit + td.derived.outCollateral + td.derived.outPeerCredit}
+        {@const inTotal = td.derived.inOwnCredit + td.derived.inCollateral + td.derived.inPeerCredit}
+        {@const isExpanded = expandedTokenIds.has(td.tokenId)}
+        <div class="delta-card">
+          <DeltaTokenSummary
+            symbol={td.tokenInfo.symbol}
+            name={td.tokenInfo.name || ''}
+            outAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity) || '0'}
+            inAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity) || '0'}
+            derived={td.derived}
+            decimals={Number(td.tokenInfo.decimals ?? 18)}
+            barHeight={12}
+          >
+            <svelte:fragment slot="actions">
+              <button class="delta-expand" on:click={() => toggleTokenDetails(td.tokenId)}>
+                {isExpanded ? 'Hide' : 'Details'}
+              </button>
+              <button class="delta-faucet" on:click={() => handleFaucet(td.tokenId)}>Faucet</button>
+            </svelte:fragment>
+          </DeltaTokenSummary>
 
-        {#if isExpanded}
-          <div class="delta-details">
-            <div class="detail-grid-three detail-head">
-              <span class="detail-header">Parameter</span>
-              <span class="detail-header">You</span>
-              <span class="detail-header">Peer</span>
+          {#if isExpanded}
+            <div class="delta-details">
+              <div class="detail-grid-three detail-head">
+                <span class="detail-header">Parameter</span>
+                <span class="detail-header">You</span>
+                <span class="detail-header">Peer</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">Delta</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.delta)}</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.delta)}</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">Out capacity</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.outCapacity)}</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outCapacity)}</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">In capacity</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.inCapacity)}</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inCapacity)}</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">Out own credit (grey)</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.outOwnCredit)}</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outOwnCredit)}</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">Out collateral (green)</span>
+                <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.derived.outCollateral)}</span>
+                <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outCollateral)}</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">Out peer credit (red)</span>
+                <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.derived.outPeerCredit)}</span>
+                <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outPeerCredit)}</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">In own credit (red)</span>
+                <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.derived.inOwnCredit)}</span>
+                <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inOwnCredit)}</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">In collateral (green)</span>
+                <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.derived.inCollateral)}</span>
+                <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inCollateral)}</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">In peer credit (grey)</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.inPeerCredit)}</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inPeerCredit)}</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">Bar OUT total</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, outTotal)}</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outOwnCredit + td.peerDerived.outCollateral + td.peerDerived.outPeerCredit)}</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">Bar IN total</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, inTotal)}</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inOwnCredit + td.peerDerived.inCollateral + td.peerDerived.inPeerCredit)}</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">Raw collateral</span>
+                <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.delta.collateral)}</span>
+                <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.delta.collateral)}</span>
+              </div>
+              <div class="detail-grid-three">
+                <span class="detail-label-cell">Credit limit</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.ourCreditLimit)}</span>
+                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.theirCreditLimit)}</span>
+              </div>
             </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">Delta</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.delta)}</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.delta)}</span>
-            </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">Out capacity</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.outCapacity)}</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outCapacity)}</span>
-            </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">In capacity</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.inCapacity)}</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inCapacity)}</span>
-            </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">Out own credit (grey)</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.outOwnCredit)}</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outOwnCredit)}</span>
-            </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">Out collateral (green)</span>
-              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.derived.outCollateral)}</span>
-              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outCollateral)}</span>
-            </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">Out peer credit (red)</span>
-              <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.derived.outPeerCredit)}</span>
-              <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outPeerCredit)}</span>
-            </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">In own credit (red)</span>
-              <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.derived.inOwnCredit)}</span>
-              <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inOwnCredit)}</span>
-            </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">In collateral (green)</span>
-              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.derived.inCollateral)}</span>
-              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inCollateral)}</span>
-            </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">In peer credit (grey)</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.inPeerCredit)}</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inPeerCredit)}</span>
-            </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">Bar OUT total</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, outTotal)}</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outOwnCredit + td.peerDerived.outCollateral + td.peerDerived.outPeerCredit)}</span>
-            </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">Bar IN total</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, inTotal)}</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inOwnCredit + td.peerDerived.inCollateral + td.peerDerived.inPeerCredit)}</span>
-            </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">Raw collateral</span>
-              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.delta.collateral)}</span>
-              <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.delta.collateral)}</span>
-            </div>
-            <div class="detail-grid-three">
-              <span class="detail-label-cell">Credit limit</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.ourCreditLimit)}</span>
-              <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.theirCreditLimit)}</span>
-            </div>
-          </div>
+          {/if}
+        </div>
+      {/each}
+    {:else}
+      <div class="empty-token-state">
+        {#if hasCommittedFrame}
+          No active token deltas in this account.
+        {:else}
+          Account is opening. Deltas will appear after first committed frame.
         {/if}
       </div>
-    {/each}
+    {/if}
 
     <div class="proof-card">
       <div class="proof-header">
@@ -645,6 +616,16 @@
     border: 1px solid #292524;
     border-radius: 10px;
     padding: 12px;
+  }
+
+  .empty-token-state {
+    background: #18181b;
+    border: 1px solid #292524;
+    border-radius: 10px;
+    padding: 14px 12px;
+    color: #9ca3af;
+    font-size: 12px;
+    font-style: italic;
   }
 
   .delta-card-header {

@@ -10,7 +10,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { xlnFunctions, xlnEnvironment } from '../../stores/xlnStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
 
   export let value: string = '';
   export let placeholder: string = 'Select or enter entity...';
@@ -21,13 +20,8 @@
   export let label: string = '';
 
   const dispatch = createEventDispatcher();
-
-  // Context
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-  const contextEnv = entityEnv?.env;
-  $: activeFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
-  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
+  $: activeFunctions = $xlnFunctions;
+  $: activeEnv = $xlnEnvironment;
 
   // Gossip profile lookup
   type GossipProfile = {

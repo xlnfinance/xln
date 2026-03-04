@@ -3,8 +3,7 @@
    * EntityPanelWrapper - Dockview adapter for legacy EntityPanel
    *
    * Wraps the existing EntityPanel component for use in /view Dockview workspace.
-   * Sets up EntityEnvContext so all child components (AccountPanel, PaymentPanel, etc.)
-   * can access either isolated or global stores transparently.
+   * Child components read canonical state from xlnStore.
    *
    * Now includes TimeSlider for per-panel time-travel controls.
    *
@@ -13,7 +12,6 @@
    */
 
   import type { Writable } from 'svelte/store';
-  import { setEntityEnvContext, type HistoryFrame } from '../../components/entity/shared/EntityEnvContext';
   import EntityPanelTabs from '$lib/components/Entity/EntityPanelTabs.svelte';
   import type { Tab } from '$lib/types/ui';
 
@@ -31,21 +29,12 @@
     entityId?: string;
     entityName?: string;
     signerId?: string;
-    isolatedEnv?: Writable<HistoryFrame | null>;
-    isolatedHistory?: Writable<HistoryFrame[]>;
+    isolatedEnv?: Writable<unknown | null>;
+    isolatedHistory?: Writable<unknown[]>;
     isolatedTimeIndex?: Writable<number>;
     isolatedIsLive?: Writable<boolean>;
     initialAction?: 'r2r' | 'r2c';
   } = $props();
-
-  // CRITICAL: Set context during initialization (not in onMount)
-  // Svelte context must be set synchronously during component init
-  setEntityEnvContext({
-    isolatedEnv,
-    isolatedHistory,
-    isolatedTimeIndex,
-    isolatedIsLive,
-  });
 
   // Create a synthetic tab for EntityPanel
   let tabId = $derived(`entity-${entityId.slice(0, 8)}`);

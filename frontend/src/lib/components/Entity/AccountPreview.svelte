@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { AccountMachine } from '$lib/types/ui';
+  import type { AccountMachine, DerivedDelta } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
   import { xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+  import { settings } from '$lib/stores/settingsStore';
   import { p2pState } from '../../stores/xlnStore';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
@@ -27,13 +27,10 @@
 
   const dispatch = createEventDispatcher();
 
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-  const contextEnv = entityEnv?.env;
-  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
-  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
+  $: activeXlnFunctions = $xlnFunctions;
+  $: activeEnv = $xlnEnvironment;
 
-  function getProfile(id: string): any {
+  function getProfile(id: string): ReturnType<typeof getGossipProfile> {
     return getGossipProfile(id, activeEnv);
   }
 
@@ -125,13 +122,59 @@
     outTotalHold: agg.outHold,
     inTotalHold: agg.inHold,
   };
+  $: accountDeltaViewMode = $settings.accountDeltaViewMode ?? 'per-token';
+  $: tokenSummaries = (() => {
+    if (!account.deltas || account.deltas.size === 0 || !activeXlnFunctions) return [];
+    const isLeft = entityId < counterpartyId;
+    const rows: Array<{
+      tokenId: number;
+      symbol: string;
+      name: string;
+      decimals: number;
+      derived: DerivedDelta;
+      outAmount: string;
+      inAmount: string;
+      outTotal: bigint;
+      inTotal: bigint;
+    }> = [];
+    for (const [tokenId, delta] of account.deltas.entries()) {
+      const derived = activeXlnFunctions.deriveDelta(delta, isLeft);
+      const info = activeXlnFunctions.getTokenInfo(tokenId) || {
+        symbol: `T${tokenId}`,
+        name: `Token ${tokenId}`,
+        decimals: 18,
+      };
+      const outTotal = derived.outOwnCredit + derived.outCollateral + derived.outPeerCredit;
+      const inTotal = derived.inOwnCredit + derived.inCollateral + derived.inPeerCredit;
+      rows.push({
+        tokenId,
+        symbol: String(info.symbol || `T${tokenId}`),
+        name: String(info.name || ''),
+        decimals: Number(info.decimals ?? 18),
+        derived,
+        outAmount: activeXlnFunctions.formatTokenAmount(tokenId, derived.outCapacity),
+        inAmount: activeXlnFunctions.formatTokenAmount(tokenId, derived.inCapacity),
+        outTotal,
+        inTotal,
+      });
+    }
+    return rows.sort((a, b) => {
+      const aScore = a.outTotal + a.inTotal;
+      const bScore = b.outTotal + b.inTotal;
+      if (aScore === bScore) return a.tokenId - b.tokenId;
+      return aScore > bScore ? -1 : 1;
+    });
+  })();
+  $: hasAnyDeltas = tokenSummaries.length > 0;
+  $: hasCommittedFrame = Number(account.currentHeight || 0) > 0;
+  $: showDeltaRows = hasCommittedFrame && hasAnyDeltas;
 
   $: uiStatus = getAccountUiStatus(account);
   $: isPending = uiStatus === 'sent';
   $: hasActiveDispute = uiStatus === 'disputed';
   $: isFinalizedDisputed = uiStatus === 'finalized_disputed';
   $: statusLabel = getAccountUiStatusLabel(uiStatus);
-  $: disputeTimeoutBlock = Number((account as any).activeDispute?.disputeTimeout || 0);
+  $: disputeTimeoutBlock = Number(account.activeDispute?.disputeTimeout || 0);
   $: disputeBlocksLeft = hasActiveDispute
     ? Math.max(0, disputeTimeoutBlock - Number(account.lastFinalizedJHeight || 0))
     : 0;
@@ -144,7 +187,7 @@
 
   // Pending prepaid requests (actual request_collateral state)
   $: pendingRequested = (() => {
-    const map = (account as any).requestedRebalance;
+    const map = account.requestedRebalance;
     if (!map || typeof map.values !== 'function') return 0n;
     let total = 0n;
     for (const amount of map.values()) {
@@ -159,7 +202,7 @@
   })();
 
   $: pendingC2R = (() => {
-    const ws = (account as any).settlementWorkspace;
+    const ws = account.settlementWorkspace;
     if (!ws || !Array.isArray(ws.ops)) return { active: false, submitted: false, amount: 0n };
     let amount = 0n;
     let hasC2R = false;
@@ -178,9 +221,9 @@
     return { active: true, submitted, amount };
   })();
 
-  $: workspace = (account as any).settlementWorkspace;
+  $: workspace = account.settlementWorkspace;
   $: iAmLeft = entityId < counterpartyId;
-  $: disputeStartedByLeft = Boolean((account as any).activeDispute?.startedByLeft);
+  $: disputeStartedByLeft = Boolean(account.activeDispute?.startedByLeft);
   $: disputeRole = hasActiveDispute ? (disputeStartedByLeft === iAmLeft ? 'starter' : 'counterparty') : '';
   $: iAmProposer = workspace ? workspace.lastModifiedByLeft === iAmLeft : false;
   $: myHanko = workspace ? (iAmLeft ? workspace.leftHanko : workspace.rightHanko) : null;
@@ -201,7 +244,7 @@
 
   // Rebalance state: show pending only when there is an actual prepaid request.
   $: rebalanceState = (() => {
-    const hasPendingBatch = !!(account as any).jBatchState?.sentBatch;
+    const hasPendingBatch = account.settlementWorkspace?.status === 'submitted';
     const hasPendingRequest = pendingRequested > 0n;
 
     if (hasPendingRequest) {
@@ -304,17 +347,34 @@
   {/if}
 
   <!-- Row 2: Aggregate bar -->
-  {#if agg.outTotal > 0n || agg.inTotal > 0n}
-    <DeltaTokenSummary
-      compact={true}
-      symbol={primaryTokenInfo.symbol}
-      name={primaryTokenInfo.name}
-      outAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCap) || '0'}
-      inAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}
-      derived={aggDerived}
-      decimals={Number(primaryTokenInfo.decimals ?? 18)}
-      barHeight={9}
-    />
+  {#if showDeltaRows}
+    {#if accountDeltaViewMode === 'aggregated'}
+      <DeltaTokenSummary
+        compact={true}
+        symbol={primaryTokenInfo.symbol}
+        name={primaryTokenInfo.name}
+        outAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCap) || '0'}
+        inAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}
+        derived={aggDerived}
+        decimals={Number(primaryTokenInfo.decimals ?? 18)}
+        barHeight={9}
+      />
+    {:else}
+      <div class="token-delta-list">
+        {#each tokenSummaries as td (td.tokenId)}
+          <DeltaTokenSummary
+            compact={true}
+            symbol={td.symbol}
+            name={td.name}
+            outAmount={td.outAmount}
+            inAmount={td.inAmount}
+            derived={td.derived}
+            decimals={td.decimals}
+            barHeight={9}
+          />
+        {/each}
+      </div>
+    {/if}
 
     <!-- Rebalance status indicator -->
     {#if rebalanceState !== 'none'}
@@ -351,7 +411,7 @@
       </div>
     {/if}
   {:else}
-    <div class="empty">No capacity</div>
+    <div class="empty">{hasCommittedFrame ? 'No capacity' : 'Awaiting first frame'}</div>
   {/if}
 
   {#if workspace}
@@ -432,6 +492,12 @@
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 8px;
+  }
+
+  .token-delta-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
   .lock-badge {

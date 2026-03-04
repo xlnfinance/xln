@@ -1,18 +1,14 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
 
   export let value: string = '';
   export let options: string[] = [];
   export let placeholder: string = 'Select entity';
 
   const dispatch = createEventDispatcher();
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-  const contextEnv = entityEnv?.env;
-  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
-  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
+  $: activeXlnFunctions = $xlnFunctions;
+  $: activeEnv = $xlnEnvironment;
 
   let open = false;
   let copied = '';

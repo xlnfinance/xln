@@ -1,8 +1,9 @@
 import { writable, get } from 'svelte/store';
-import type { Settings, ThemeName, BarColorMode, BarLayoutMode } from '$lib/types/ui';
+import type { Settings, ThemeName, BarColorMode, BarLayoutMode, AccountDeltaViewMode } from '$lib/types/ui';
 import { applyThemeToDocument } from '../utils/themes';
 
 const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token'] as const;
+const VALID_ACCOUNT_DELTA_VIEW_MODES: readonly AccountDeltaViewMode[] = ['per-token', 'aggregated'] as const;
 const resolveDefaultRelayUrl = (): string => {
   if (typeof window === 'undefined') return 'wss://xln.finance/relay';
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -15,7 +16,8 @@ const defaultSettings: Settings = {
   barColorMode: 'rgy',
   barLayout: 'center',
   accountBarUsdPerPx: 100,
-  tokenPrecision: 6, // 0..18 digits after decimal for token amounts (18 = full)
+  accountDeltaViewMode: 'per-token',
+  tokenPrecision: 6, // 2..18 digits after decimal for token amounts (18 = full)
   showTokenIcons: true,
   dropdownMode: 'signer-first',
   runtimeDelay: 250, // 250ms = 4 frames/second (visible lightning effects)
@@ -52,7 +54,7 @@ const settingsOperations = {
         if (!Number.isFinite(parsed.tokenPrecision)) {
           parsed.tokenPrecision = defaultSettings.tokenPrecision;
         } else {
-          parsed.tokenPrecision = Math.max(0, Math.min(18, Math.floor(parsed.tokenPrecision)));
+          parsed.tokenPrecision = Math.max(2, Math.min(18, Math.floor(parsed.tokenPrecision)));
         }
         if (typeof parsed.showTokenIcons !== 'boolean') {
           parsed.showTokenIcons = defaultSettings.showTokenIcons;
@@ -60,6 +62,9 @@ const settingsOperations = {
         const allowedUsdPerPx = [1, 10, 100, 1000];
         if (!allowedUsdPerPx.includes(Number(parsed.accountBarUsdPerPx))) {
           parsed.accountBarUsdPerPx = defaultSettings.accountBarUsdPerPx;
+        }
+        if (!VALID_ACCOUNT_DELTA_VIEW_MODES.includes(parsed.accountDeltaViewMode)) {
+          parsed.accountDeltaViewMode = defaultSettings.accountDeltaViewMode;
         }
         settings.update(current => ({ ...current, ...parsed }));
       }
@@ -166,9 +171,9 @@ const settingsOperations = {
     this.saveToStorage();
   },
 
-  // Update token amount precision (0..18)
+  // Update token amount precision (2..18)
   setTokenPrecision(precision: number) {
-    const clamped = Math.max(0, Math.min(18, Math.floor(Number(precision) || 0)));
+    const clamped = Math.max(2, Math.min(18, Math.floor(Number(precision) || 2)));
     settings.update(current => ({ ...current, tokenPrecision: clamped }));
     this.saveToStorage();
   },
@@ -182,6 +187,12 @@ const settingsOperations = {
     const allowed = new Set([1, 10, 100, 1000]);
     const next = allowed.has(Number(value)) ? Number(value) as 1 | 10 | 100 | 1000 : defaultSettings.accountBarUsdPerPx;
     settings.update(current => ({ ...current, accountBarUsdPerPx: next }));
+    this.saveToStorage();
+  },
+
+  setAccountDeltaViewMode(mode: AccountDeltaViewMode) {
+    const safe: AccountDeltaViewMode = VALID_ACCOUNT_DELTA_VIEW_MODES.includes(mode) ? mode : defaultSettings.accountDeltaViewMode;
+    settings.update(current => ({ ...current, accountDeltaViewMode: safe }));
     this.saveToStorage();
   },
 

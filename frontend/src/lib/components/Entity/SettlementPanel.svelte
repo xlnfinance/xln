@@ -2,7 +2,6 @@
   import { onMount, onDestroy } from 'svelte';
   import { getXLN, xlnEnvironment, replicas, enqueueEntityInputs, xlnFunctions } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import type { EntityReplica } from '$lib/types/ui';
   import EntityInput from '../shared/EntityInput.svelte';
@@ -23,16 +22,10 @@
     details: BatchDetailField[];
   };
 
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextReplicas = entityEnv?.eReplicas;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-  const contextEnv = entityEnv?.env;
-  const contextIsLive = entityEnv?.isLive;
-
-  $: activeReplicas = contextReplicas ? $contextReplicas : $replicas;
-  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
-  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
-  $: activeIsLive = contextIsLive ? $contextIsLive : $globalIsLive;
+  $: activeReplicas = $replicas;
+  $: activeXlnFunctions = $xlnFunctions;
+  $: activeEnv = $xlnEnvironment;
+  $: activeIsLive = $globalIsLive;
 
   let counterpartyEntityId = '';
   let recipientEntityId = '';
@@ -145,8 +138,8 @@
       const metadataName = String((profile as any)?.metadata?.name || '').trim();
       if (metadataName) return metadataName;
     }
-    const fallback = activeXlnFunctions?.formatEntityId?.(canonical);
-    return String(fallback || formatShortId(canonical));
+    const formattedId = activeXlnFunctions?.formatEntityId?.(canonical);
+    return String(formattedId || formatShortId(canonical));
   }
 
   function entityAvatar(entity: string): string {
@@ -575,8 +568,8 @@
         { label: 'RevealSecret', count: Number(operations.revealSecrets || 0) },
       ].filter((entry) => entry.count > 0);
     }
-    const fallback = Number(entry?.opCount || 0);
-    return fallback > 0 ? [{ label: 'Ops', count: fallback }] : [];
+    const opCount = Number(entry?.opCount || 0);
+    return opCount > 0 ? [{ label: 'Ops', count: opCount }] : [];
   }
 
   function historyOriginLabel(entry: any): string {

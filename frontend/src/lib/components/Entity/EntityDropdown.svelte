@@ -4,12 +4,10 @@
    * Declarative Svelte (no innerHTML), uses base Dropdown component
    */
   import { createEventDispatcher } from 'svelte';
-  import { replicas, xlnFunctions, entityPositions, xlnInstance } from '../../stores/xlnStore';
+  import { replicas, xlnFunctions, xlnInstance, xlnEnvironment } from '../../stores/xlnStore';
   import { visibleReplicas } from '../../stores/timeStore';
-  import { activeVault } from '../../stores/vaultStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import type { Tab } from '$lib/types/ui';
+  import type { EntityReplica, Tab } from '$lib/types/ui';
   import { resolveEntityName } from '$lib/utils/entityNaming';
 
   export let tab: Tab;
@@ -23,18 +21,10 @@
   let isOpen = false;
   let searchTerm = '';
 
-  // Get environment from context (for /view route) or use global stores (for / route)
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextReplicas = entityEnv?.eReplicas;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-  const contextEnv = entityEnv?.env;
-
-  // Use context stores if available, otherwise fall back to global
   $: xlnReady = !!$xlnInstance;
-  $: activeReplicas = contextReplicas ? $contextReplicas : ($visibleReplicas || $replicas);
-  $: activeXlnFunctions = xlnReady ? (contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions) : null;
-  $: activeEnv = contextEnv ? $contextEnv : null;
-  $: positionsMap = $entityPositions;
+  $: activeReplicas = $visibleReplicas || $replicas;
+  $: activeXlnFunctions = xlnReady ? $xlnFunctions : null;
+  $: activeEnv = $xlnEnvironment;
 
   // Build tree structure reactively (grouped by signer, not entity)
   interface SignerNode {
@@ -60,12 +50,10 @@
   $: signerTree = buildSignerTree(
     activeReplicas,
     activeXlnFunctions,
-    searchTerm,
-    jurisdictionFilter,
-    positionsMap
+    searchTerm
   );
 
-  function buildJMachines(env: any): JMachineNode[] {
+  function buildJMachines(env: { jReplicas?: unknown } | null | undefined): JMachineNode[] {
     const jReplicas = env?.jReplicas;
     if (!jReplicas) return [];
 
@@ -76,20 +64,21 @@
         : Object.values(jReplicas);
 
     return list
-      .map((jr: any) => ({ name: jr?.name }))
+      .map((jr: { name?: string } | unknown) => ({ name: (jr as { name?: string })?.name }))
       .filter((jr: JMachineNode) => jr.name);
   }
 
   function buildSignerTree(
-    replicas: Map<string, any> | null | undefined,
-    xlnFuncs: any,
+    replicas: Map<string, EntityReplica> | null | undefined,
+    xlnFuncs: {
+      generateEntityAvatar?: (entityId: string) => string;
+      generateSignerAvatar?: (signerId: string) => string;
+    } | null,
     search: string,
-    _jurisdiction: string | null, // Unused - show all entities
-    _positions: Map<string, any>  // Unused
   ): SignerNode[] {
     if (!replicas || !xlnFuncs) return [];
 
-    const signerGroups = new Map<string, any[]>();
+    const signerGroups = new Map<string, EntityReplica[]>();
 
     // Group by signerId
     for (const replica of replicas.values()) {
@@ -141,28 +130,19 @@
     return nodes;
   }
 
-  function getEntityName(replica: any): string {
+  function getEntityName(replica: EntityReplica): string {
     const name = resolveEntityName(replica?.entityId || '', activeEnv);
     return name || replica.state?.name || '';
-  }
-
-  function getReplicaJurisdiction(
-    replica: any,
-    positions: Map<string, any>,
-    entityId: string
-  ): string | null {
-    const direct = replica?.position?.jurisdiction || replica?.position?.xlnomy;
-    if (direct) return direct;
-    const configName = replica?.state?.config?.jurisdiction?.name;
-    if (configName) return configName;
-    const stored = positions?.get?.(entityId);
-    return stored?.jurisdiction || null;
   }
 
   // Current selection display
   $: displayText = getDisplayText(tab, activeReplicas, activeXlnFunctions);
 
-  function getDisplayText(tab: Tab, replicas: any, xlnFuncs: any): string {
+  function getDisplayText(
+    tab: Tab,
+    replicas: Map<string, EntityReplica> | null | undefined,
+    xlnFuncs: { formatEntityId?: (id: string) => string } | null,
+  ): string {
     if (!tab.entityId || !xlnFuncs || !replicas) return 'Select Entity';
 
     const replicaKey = `${tab.entityId}:${tab.signerId}`;

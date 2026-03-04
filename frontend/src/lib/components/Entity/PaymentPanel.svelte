@@ -1,10 +1,8 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import type { Writable } from 'svelte/store';
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
   import { routePreview } from '../../stores/routePreviewStore';
-  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { toasts } from '$lib/stores/toastStore';
   import { safeStringify } from '$lib/utils/safeStringify';
@@ -15,17 +13,6 @@
 
   export let entityId: string;
   export let contacts: Array<{ name: string; entityId: string }> = [];
-
-  // Optional isolated mode props (legacy)
-  export let isolatedEnv: Writable<any> | undefined = undefined;
-  export let isolatedReplicas: Writable<Map<string, any>> | undefined = undefined;
-
-  // Context
-  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const contextReplicas = entityEnv?.eReplicas;
-  const contextXlnFunctions = entityEnv?.xlnFunctions;
-  const contextEnv = entityEnv?.env;
-  const contextIsLive = entityEnv?.isLive;
 
   // Form state
   let targetEntityId = '';
@@ -88,11 +75,10 @@
     [key: string]: unknown;
   };
 
-  // Reactive stores
-  $: currentReplicas = contextReplicas ? $contextReplicas : (isolatedReplicas ? $isolatedReplicas : $replicas);
-  $: currentEnv = contextEnv ? $contextEnv : (isolatedEnv ? $isolatedEnv : $xlnEnvironment);
-  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
-  $: activeIsLive = contextIsLive ? $contextIsLive : $globalIsLive;
+  $: currentReplicas = $replicas;
+  $: currentEnv = $xlnEnvironment;
+  $: activeXlnFunctions = $xlnFunctions;
+  $: activeIsLive = $globalIsLive;
 
   const normalizeEntityId = (id: string | null | undefined): string => String(id || '').trim().toLowerCase();
 
@@ -306,9 +292,9 @@
     return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
   }
 
-  function sanitizeFeePPM(raw: unknown, fallback = 10): number {
+  function sanitizeFeePPM(raw: unknown, defaultFeePPM = 10): number {
     const n = Number(raw);
-    if (!Number.isFinite(n)) return fallback;
+    if (!Number.isFinite(n)) return defaultFeePPM;
     const v = Math.floor(n);
     if (v < 0) return 0;
     if (v > 1_000_000) return 1_000_000;
@@ -787,9 +773,7 @@
         for (const route of runtimeRoutes) {
           pushPath((route as any)?.path);
         }
-      } catch {
-        // Local graph fallback remains authoritative when runtime graph cannot resolve cycles.
-      }
+      } catch {}
 
       // Always include local graph candidates (best-effort with real local capacities).
       const localPaths = findPathsFromGraph(network.adjacency, sourceNorm, targetNorm, tokenId);

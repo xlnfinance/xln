@@ -254,6 +254,9 @@ export function checkAutoRebalance(
     // Using (outCollateral + outPeerCredit) here would over-trigger after a successful
     // top-up because outCollateral remains high even when risk is already covered.
     const rebalanceTrigger = outPeerCredit;
+    // Global safety floor: tiny balances should not trigger auto-rebalance noise.
+    const effectiveSoftLimit =
+      policy.r2cRequestSoftLimit < DEFAULT_SOFT_LIMIT ? DEFAULT_SOFT_LIMIT : policy.r2cRequestSoftLimit;
 
     // Also dedupe pre-commit queue: if request_collateral is already in account mempool
     // for this token, do not enqueue another copy in the same consensus window.
@@ -273,7 +276,7 @@ export function checkAutoRebalance(
       continue;
     }
 
-    if (rebalanceTrigger > policy.r2cRequestSoftLimit) {
+    if (rebalanceTrigger > effectiveSoftLimit) {
       const liquidityFee = (outPeerCredit * feePolicy.liquidityFeeBps) / 10000n;
       const feeAmount = feePolicy.baseFee + feePolicy.gasFee + liquidityFee;
 
@@ -316,7 +319,7 @@ export function checkAutoRebalance(
 
       console.log(
         `🔄 Auto-rebalance triggered: token=${tokenId} outPeerCredit=${rebalanceTrigger} ` +
-        `> r2cRequestSoftLimit=${policy.r2cRequestSoftLimit}, requesting outPeerCredit=${outPeerCredit} with fee ${feeAmount} ` +
+        `> r2cRequestSoftLimit=${effectiveSoftLimit}, requesting outPeerCredit=${outPeerCredit} with fee ${feeAmount} ` +
         `(base=${feePolicy.baseFee}, gas=${feePolicy.gasFee}, liqBps=${feePolicy.liquidityFeeBps})`
       );
     }
