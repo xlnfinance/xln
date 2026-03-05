@@ -1,4 +1,4 @@
-import type { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine } from '../../types';
+import type { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
 import {
@@ -15,10 +15,12 @@ import { HTLC } from '../../constants';
 import { getSwapPairPolicyByBaseQuote } from '../../account-utils';
 import { formatEntityId, HEAVY_LOGS } from '../../utils';
 import { isLeftEntity } from '../../entity-id-utils';
-import { batchAddRevealSecret, initJBatch } from '../../j-batch';
-import { getDeltaTransformerAddress } from '../../proof-builder';
 import { sanitizeBaseFee } from '../../routing/fees';
-import { cancelHook as cancelScheduledHook, scheduleHook as scheduleCrontabHook } from '../../entity-crontab';
+import {
+  cancelHook as cancelScheduledHook,
+  scheduleHook as scheduleCrontabHook,
+  HTLC_SECRET_ACK_TIMEOUT_MS,
+} from '../../entity-crontab';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counterpartyId: string): string | null => {
@@ -334,6 +336,19 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             if (newState.crontabState) {
               cancelScheduledHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
             }
+            // Secret-return ACK received from inbound counterparty: clear pending ACK timer.
+            if (accountTx.data.outcome === 'secret') {
+              for (const route of newState.htlcRoutes.values()) {
+                if (route.inboundLockId !== accountTx.data.lockId) continue;
+                if (!route.secretAckPending) continue;
+                route.secretAckPending = false;
+                route.secretAckedAt = newState.timestamp;
+                if (newState.crontabState) {
+                  cancelScheduledHook(newState.crontabState, `htlc-secret-ack:${route.hashlock}`);
+                }
+                console.log(`✅ HTLC: secret ACK confirmed for hashlock ${route.hashlock.slice(0, 16)}...`);
+              }
+            }
           }
 
           // j_event_claim is fully handled in account-consensus/processAccountTx on commit.
@@ -505,6 +520,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               console.log(`🎯 HTLC-ROUTING: WE ARE FINAL RECIPIENT!`);
               // Final recipient - reveal immediately
               if (envelope.secret) {
+                const paymentDescription = typeof envelope.description === 'string' ? envelope.description.trim() : '';
+                if (paymentDescription) {
+                  if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map<HtlcNoteKey, string>();
+                  newState.htlcNotes.set(`hashlock:${lock.hashlock}`, paymentDescription);
+                  newState.htlcNotes.set(`lock:${lock.lockId}`, paymentDescription);
+                }
                 mempoolOps.push({
                   accountId: input.fromEntityId,
                   tx: {
@@ -776,19 +797,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       const revealedSecrets = result.revealedSecrets || [];
       if (HEAVY_LOGS) console.log(`🔍 HTLC-SECRET-CHECK: ${revealedSecrets.length} secrets revealed in frame`);
 
-      if (revealedSecrets.length > 0) {
-        if (!newState.jBatchState) {
-          newState.jBatchState = initJBatch();
-        }
-        const transformerAddress = getDeltaTransformerAddress();
-        if (transformerAddress === '0x0000000000000000000000000000000000000000') {
-          console.warn('⚠️ HTLC: DeltaTransformer address not set - skipping on-chain reveal');
-        } else {
-          for (const { secret } of revealedSecrets) {
-            batchAddRevealSecret(newState.jBatchState, transformerAddress, secret);
-          }
-        }
-      }
+      // IMPORTANT:
+      // Do NOT auto-queue on-chain RevealSecret on normal HTLC success path.
+      // On-chain reveal is only queued via dispute flow (disputeFinalize + useOnchainRegistry),
+      // not for default day-to-day payments.
 
       for (const { secret, hashlock } of revealedSecrets) {
         if (HEAVY_LOGS) console.log(`🔍 HTLC-SECRET: Processing revealed secret for hash ${hashlock.slice(0,16)}...`);
@@ -825,8 +837,25 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 }
               }
             });
+            route.secretAckPending = true;
+            route.secretAckStartedAt = newState.timestamp;
+            route.secretAckDeadlineAt = newState.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS;
+            if (newState.crontabState) {
+              scheduleCrontabHook(newState.crontabState, {
+                id: `htlc-secret-ack:${hashlock}`,
+                triggerAt: route.secretAckDeadlineAt,
+                type: 'htlc_secret_ack_timeout',
+                data: {
+                  hashlock,
+                  counterpartyEntityId: route.inboundEntity,
+                  inboundLockId: route.inboundLockId,
+                },
+              });
+            }
             console.log(`⬅️ HTLC: Propagating secret to ${route.inboundEntity.slice(-4)}`);
           } else {
+            route.secretAckPending = false;
+            route.secretAckedAt = newState.timestamp;
             console.log(`✅ HTLC: Payment complete (we initiated)`);
           }
           env.emit('PaymentFinalized', {

@@ -51,8 +51,11 @@
     payload?: MarketSnapshotPayload;
   };
   const dispatch = createEventDispatcher<{ levelclick: LevelClickDetail; snapshot: SnapshotDetail }>();
+  const MAX_SAFE_TICKS = Number.MAX_SAFE_INTEGER;
 
   interface OrderLevel {
+    // Price is in integer ticks and intentionally stored as JS number.
+    // Assumption: price ticks stay within MAX_SAFE_TICKS (2^53 - 1).
     price: number;
     size: number;
     total: number;
@@ -149,6 +152,14 @@
     return `${protocol}//${window.location.host}/relay`;
   }
 
+  function toSafePriceTicks(value: unknown): number | null {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    if (!Number.isInteger(n)) return null;
+    if (Math.abs(n) > MAX_SAFE_TICKS) return null;
+    return n;
+  }
+
   function wsMessageId(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   }
@@ -209,7 +220,10 @@
       }
 
       if (levelSize > 0) {
-        const price = Number(pmin) + idx * Number(tick);
+        const price = toSafePriceTicks(Number(pmin) + idx * Number(tick));
+        if (price === null) {
+          continue;
+        }
         sideSizes.set(price, (sideSizes.get(price) || 0) + levelSize);
         if (showOwners) {
           const ownersSet = sideOwners.get(price) || new Set<string>();
@@ -388,15 +402,15 @@
         newestHubUpdate = hubUpdatedAt;
       }
       for (const level of snapshot.bids || []) {
-        const price = Number(level.price || 0);
+        const price = toSafePriceTicks(level.price);
         const size = Number(level.size || 0);
-        if (!Number.isFinite(price) || !Number.isFinite(size) || size <= 0) continue;
+        if (price === null || !Number.isFinite(size) || size <= 0) continue;
         bidSizes.set(price, (bidSizes.get(price) || 0) + size);
       }
       for (const level of snapshot.asks || []) {
-        const price = Number(level.price || 0);
+        const price = toSafePriceTicks(level.price);
         const size = Number(level.size || 0);
-        if (!Number.isFinite(price) || !Number.isFinite(size) || size <= 0) continue;
+        if (price === null || !Number.isFinite(size) || size <= 0) continue;
         askSizes.set(price, (askSizes.get(price) || 0) + size);
       }
     }

@@ -24,7 +24,7 @@ interface NodeWebSocket {
   close(): void;
   on(event: 'open', cb: () => void): void;
   on(event: 'message', cb: (data: Buffer) => void): void;
-  on(event: 'close', cb: () => void): void;
+  on(event: 'close', cb: (code: number, reason: Buffer) => void): void;
   on(event: 'error', cb: (err: Error) => void): void;
 }
 
@@ -143,16 +143,24 @@ export class RuntimeWsClient {
         this.options.onOpen?.();
       });
       this.ws.on('message', (data: Buffer) => this.handleMessage(data));
-      this.ws.on('close', () => {
+      this.ws.on('close', (code: number, reasonBuf: Buffer) => {
         this.connecting = false;
         if (this.suppressNextClose) {
           this.suppressNextClose = false;
           return;
         }
-        if (!this.closed) {
-          console.error(`[WS] Connection lost to ${this.options.url} — scheduling reconnect`);
-          this.options.onError?.(new Error(`WS_DISCONNECTED: Connection lost to ${this.options.url}`));
+        if (this.closed) return;
+        const reason = Buffer.isBuffer(reasonBuf) ? reasonBuf.toString('utf8') : String(reasonBuf || '');
+        const summary =
+          `WS_CLOSE runtime=${this.options.runtimeId.slice(0, 10)} relay=${this.options.url} ` +
+          `code=${Number(code || 0)} reason="${reason || 'n/a'}"`;
+        const shouldReconnect = this.shouldReconnectAfterClose(Number(code || 0), reason);
+        if (shouldReconnect) {
+          console.error(`[WS] ${summary} — scheduling reconnect`);
+          this.options.onError?.(new Error(`WS_DISCONNECTED: ${summary}`));
           this.scheduleReconnect();
+        } else {
+          console.warn(`[WS] ${summary} — reconnect disabled`);
         }
       });
       this.ws.on('error', (err: Error) => {
@@ -174,16 +182,25 @@ export class RuntimeWsClient {
         this.options.onOpen?.();
       };
       this.ws.onmessage = (event: MessageEvent) => this.handleMessage(event.data);
-      this.ws.onclose = () => {
+      this.ws.onclose = (event: CloseEvent) => {
         this.connecting = false;
         if (this.suppressNextClose) {
           this.suppressNextClose = false;
           return;
         }
-        if (!this.closed) {
-          console.error(`[WS] Connection lost to ${this.options.url} — scheduling reconnect`);
-          this.options.onError?.(new Error(`WS_DISCONNECTED: Connection lost to ${this.options.url}`));
+        if (this.closed) return;
+        const code = Number(event.code || 0);
+        const reason = String(event.reason || '');
+        const summary =
+          `WS_CLOSE runtime=${this.options.runtimeId.slice(0, 10)} relay=${this.options.url} ` +
+          `code=${code} reason="${reason || 'n/a'}" clean=${event.wasClean ? 1 : 0}`;
+        const shouldReconnect = this.shouldReconnectAfterClose(code, reason);
+        if (shouldReconnect) {
+          console.error(`[WS] ${summary} — scheduling reconnect`);
+          this.options.onError?.(new Error(`WS_DISCONNECTED: ${summary}`));
           this.scheduleReconnect();
+        } else {
+          console.warn(`[WS] ${summary} — reconnect disabled`);
         }
       };
       this.ws.onerror = (event: Event) => {
@@ -227,6 +244,21 @@ export class RuntimeWsClient {
       if (this.closed) return;
       this.connect().catch(error => this.options.onError?.(error as Error));
     }, delayMs);
+  }
+
+  private shouldReconnectAfterClose(code: number, reason: string): boolean {
+    if (this.closed) return false;
+    const normalizedReason = String(reason || '').toLowerCase();
+    const isDuplicateRuntime = code === 4009 || normalizedReason.includes('duplicate-runtime');
+    if (isDuplicateRuntime) {
+      this.closed = true;
+      console.warn(
+        `[WS] Duplicate runtime session for ${this.options.runtimeId} on ${this.options.url}; ` +
+        'stopping auto-reconnect for this client',
+      );
+      return false;
+    }
+    return true;
   }
 
   getReconnectState(): { attempt: number; nextAt: number } | null {

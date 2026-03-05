@@ -327,7 +327,10 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       handshakeDone = true;
       const existing = clients.get(normalized);
       if (existing && existing.ws !== ws) {
-        existing.ws.close();
+        console.warn(`[WS] DUPLICATE_RUNTIME_REPLACE runtime=${normalized.slice(0, 10)} on ${serverId}`);
+        try { existing.ws.close(4009, 'duplicate-runtime'); } catch {
+          try { existing.ws.close(); } catch { /* best effort */ }
+        }
       }
       clients.set(normalized, { ws, runtimeId: normalized, lastSeen: now() });
       flushQueue(normalized, ws);
@@ -425,9 +428,14 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       send(ws, { type: 'error', error: `Unsupported message type: ${msg.type}` });
     });
 
-    ws.on('close', () => {
+    ws.on('close', (code, reasonBuf) => {
       closed = true;
       clearInterval(heartbeat);
+      const reason = Buffer.isBuffer(reasonBuf) ? reasonBuf.toString('utf8') : String(reasonBuf || '');
+      console.warn(
+        `[WS] CLOSE runtime=${runtimeId?.slice(0, 10) || 'unknown'} ` +
+        `code=${Number(code || 0)} reason="${reason || 'n/a'}"`,
+      );
       if (runtimeId) {
         const entry = clients.get(runtimeId);
         if (entry && entry.ws === ws) {

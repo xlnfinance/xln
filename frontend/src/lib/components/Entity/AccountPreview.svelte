@@ -5,6 +5,7 @@
   import { settings } from '$lib/stores/settingsStore';
   import { p2pState } from '../../stores/xlnStore';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
+  import DeltaTokenList from './shared/DeltaTokenList.svelte';
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
   import { getGossipProfile, resolveEntityName } from '$lib/utils/entityNaming';
   import { getAccountUiStatus, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
@@ -136,8 +137,6 @@
       inAmount: string;
       outTotal: bigint;
       inTotal: bigint;
-      tokenRebalanceState: TokenRebalanceState;
-      tokenRebalanceLabel: string;
       pendingOutDebtMode: 'none' | 'pending' | 'settling';
     }> = [];
     for (const [tokenId, delta] of account.deltas.entries()) {
@@ -151,32 +150,6 @@
       const inTotal = derived.inOwnCredit + derived.inCollateral + derived.inPeerCredit;
       const tokenRequested = pendingRequestedByToken.get(tokenId) || 0n;
       const tokenC2R = pendingC2RByToken.get(tokenId) || 0n;
-      let tokenRebalanceState: TokenRebalanceState = 'none';
-      let tokenRebalanceAmount = 0n;
-      if (tokenRequested > 0n) {
-        tokenRebalanceState = hasPendingBatch ? 'settling' : 'pending';
-        tokenRebalanceAmount = tokenRequested;
-      } else if (tokenC2R > 0n) {
-        tokenRebalanceState = hasPendingBatch ? 'settling' : 'pending';
-        tokenRebalanceAmount = tokenC2R;
-      } else if (derived.outCollateral > 0n && derived.outPeerCredit === 0n) {
-        tokenRebalanceState = 'secured';
-      } else if (derived.outCollateral > 0n && derived.outPeerCredit > 0n) {
-        tokenRebalanceState = 'partial';
-      }
-      const tokenRebalanceLabel = (() => {
-        if (tokenRebalanceState === 'pending') {
-          if (tokenRequested > 0n) return `Awaiting collateral ${activeXlnFunctions.formatTokenAmount(tokenId, tokenRebalanceAmount)}`;
-          return `Awaiting withdrawal ${activeXlnFunctions.formatTokenAmount(tokenId, tokenRebalanceAmount)}`;
-        }
-        if (tokenRebalanceState === 'settling') {
-          if (tokenRequested > 0n) return `Collateral settling ${activeXlnFunctions.formatTokenAmount(tokenId, tokenRebalanceAmount)}`;
-          return `Withdrawal settling ${activeXlnFunctions.formatTokenAmount(tokenId, tokenRebalanceAmount)}`;
-        }
-        if (tokenRebalanceState === 'secured') return 'Secured';
-        if (tokenRebalanceState === 'partial') return 'Partially secured';
-        return '';
-      })();
       rows.push({
         tokenId,
         symbol: String(info.symbol || `T${tokenId}`),
@@ -187,13 +160,9 @@
         inAmount: activeXlnFunctions.formatTokenAmount(tokenId, derived.inCapacity),
         outTotal,
         inTotal,
-        tokenRebalanceState,
-        tokenRebalanceLabel,
-        pendingOutDebtMode: tokenRebalanceState === 'settling'
-          ? 'settling'
-          : tokenRebalanceState === 'pending'
-            ? 'pending'
-            : 'none',
+        pendingOutDebtMode: (tokenRequested > 0n || tokenC2R > 0n)
+          ? (hasPendingBatch ? 'settling' : 'pending')
+          : 'none',
       });
     }
     return rows.sort((a, b) => {
@@ -204,7 +173,7 @@
     });
   })();
   $: hasAnyDeltas = tokenSummaries.length > 0;
-  $: hasCommittedFrame = Number(account.currentHeight || 0) > 0;
+  $: hasCommittedFrame = Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
   $: showDeltaRows = hasCommittedFrame && hasAnyDeltas;
 
   $: uiStatus = getAccountUiStatus(account);
@@ -218,7 +187,7 @@
     : 0;
   $: canFaucet =
     !isPending &&
-    Number(account.currentHeight || 0) > 0 &&
+    hasCommittedFrame &&
     agg.inTotal > 0n &&
     !hasActiveDispute &&
     !isFinalizedDisputed;
@@ -235,8 +204,6 @@
     if (!Number.isFinite(asNumber) || asNumber <= 0) return null;
     return Math.floor(asNumber);
   }
-
-  type TokenRebalanceState = 'none' | 'pending' | 'settling' | 'secured' | 'partial';
 
   $: pendingRequestedByToken = (() => {
     const out = new Map<number, bigint>();
@@ -314,12 +281,12 @@
   <!-- Row 1: Entity + status -->
   <div class="row-header">
     <div class="entity-col">
-      <EntityIdentity entityId={counterpartyId} name={counterpartyName} size={22} clickable={false} compact={false} copyable={false} showAddress={true} />
+      <EntityIdentity entityId={counterpartyId} name={counterpartyName} size={30} clickable={false} compact={false} copyable={false} showAddress={true} />
     </div>
     <div class="status-col">
       <span class="conn-dot {connState}"></span>
       <span
-        class="badge"
+        class="badge status-pill"
         class:ready={uiStatus === 'ready'}
         class:sent={uiStatus === 'sent'}
         class:disputed={uiStatus === 'disputed'}
@@ -327,16 +294,16 @@
       >
         {statusLabel}
       </span>
-      <span class="j-sync" title="Last finalized bilateral J-event height">
+      <span class="j-sync status-pill" title="Last finalized bilateral J-event height">
         J#{account.lastFinalizedJHeight ?? 0}
       </span>
       {#if hasActiveDispute}
-        <span class="dispute-counter" title={`Until J#${disputeTimeoutBlock}`}>
+        <span class="dispute-counter status-pill" title={`Until J#${disputeTimeoutBlock}`}>
           ⚠ {disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left · {disputeRole}
         </span>
       {/if}
       <button
-        class="btn-faucet"
+        class="btn-faucet status-pill"
         on:click={handleFaucet}
         disabled={!canFaucet}
         title={canFaucet ? 'Request offchain faucet payment' : 'Account not ready for faucet yet'}
@@ -384,28 +351,14 @@
         barHeight={9}
       />
     {:else}
-      <div class="token-delta-list">
-        {#each tokenSummaries as td (td.tokenId)}
-          <DeltaTokenSummary
-            compact={true}
-            barLayout={$settings.barLayout ?? 'center'}
-            symbol={td.symbol}
-            name={td.name}
-            outAmount={td.outAmount}
-            inAmount={td.inAmount}
-            derived={td.derived}
-            decimals={td.decimals}
-            barHeight={9}
-            pendingOutDebtMode={td.pendingOutDebtMode}
-          >
-            <svelte:fragment slot="actions">
-              {#if td.tokenRebalanceState !== 'none'}
-                <span class="delta-rb {td.tokenRebalanceState}">{td.tokenRebalanceLabel}</span>
-              {/if}
-            </svelte:fragment>
-          </DeltaTokenSummary>
-        {/each}
-      </div>
+      <DeltaTokenList
+        rows={tokenSummaries}
+        barLayout={$settings.barLayout ?? 'center'}
+        barHeight={9}
+        showMetricLabels={false}
+        showHeader={true}
+        mode="plain"
+      />
     {/if}
   {:else}
     <div class="empty">{hasCommittedFrame ? 'No capacity' : 'Awaiting first frame'}</div>
@@ -425,10 +378,12 @@
 
 <style>
   .account-preview {
+    --delta-col-w: clamp(136px, 14vw, 192px);
+    --delta-sep-w: 12px;
     background: #18181b;
     border: 1px solid #27272a;
-    border-radius: 10px;
-    padding: 12px 14px;
+    border-radius: 12px;
+    padding: 14px 16px;
     cursor: pointer;
     transition: all 0.15s ease;
   }
@@ -447,14 +402,28 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     gap: 10px;
   }
   .entity-col { min-width: 0; flex: 1; }
+  .entity-col :global(.entity-identity) {
+    gap: 12px;
+  }
+  .entity-col :global(.name) {
+    font-size: 18px;
+    font-weight: 700;
+    color: #f3f4f6;
+    line-height: 1.15;
+  }
+  .entity-col :global(.address) {
+    font-size: 12px;
+    color: #94a3b8;
+    line-height: 1.15;
+  }
   .status-col {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     flex-shrink: 0;
     flex-wrap: wrap;
   }
@@ -466,18 +435,23 @@
   .conn-dot.unknown { background: transparent; border: 1px solid #3f3f46; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
-  .badge {
+  .status-pill {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 24px;
-    font-size: 10px;
-    padding: 0 10px;
-    border-radius: 5px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 7px;
+    line-height: 1;
+    font-weight: 700;
+    box-sizing: border-box;
+  }
+
+  .badge {
+    font-size: 11px;
+    border-radius: 7px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    font-weight: 600;
-    line-height: 1;
   }
   .badge.ready { color: #4ade80; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.12); }
   .badge.sent { color: #fbbf24; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.12); }
@@ -489,12 +463,6 @@
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 8px;
-  }
-
-  .token-delta-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
   }
 
   .lock-badge {
@@ -540,50 +508,34 @@
   }
 
   .j-sync {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 24px;
-    font-size: 10px;
+    font-size: 11px;
     font-family: 'JetBrains Mono', monospace;
     color: #d6d3d1;
     background: #18181b;
     border: 1px solid #292524;
-    padding: 0 9px;
-    border-radius: 4px;
-    line-height: 1;
+    padding: 0 12px;
   }
 
   .dispute-counter {
-    display: inline-flex;
-    align-items: center;
-    height: 24px;
-    font-size: 10px;
+    font-size: 11px;
     font-family: 'JetBrains Mono', monospace;
     color: #fda4af;
     background: rgba(127, 29, 29, 0.35);
     border: 1px solid rgba(251, 113, 133, 0.35);
-    padding: 0 9px;
-    border-radius: 4px;
-    line-height: 1;
+    padding: 0 12px;
     white-space: nowrap;
   }
 
   .btn-faucet {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 24px;
-    font-size: 10px;
-    padding: 0 10px;
-    border-radius: 5px;
+    font-size: 11px;
+    padding: 0 12px;
+    border-radius: 7px;
     border: 1px solid #3f3f46;
     background: transparent;
     color: #71717a;
     cursor: pointer;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-weight: 600;
     transition: all 0.15s;
   }
   .btn-faucet:hover {
@@ -601,40 +553,6 @@
 
   /* ── Misc ──────────────────────────────────────── */
   .empty { font-size:0.65em; color:#52525b; padding:4px 0; font-style: italic; }
-
-  .delta-rb {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 999px;
-    border: 1px solid #3f3f46;
-    background: rgba(24, 24, 27, 0.8);
-    color: #d6d3d1;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    padding: 3px 8px;
-    white-space: nowrap;
-  }
-  .delta-rb.pending {
-    color: #fbbf24;
-    border-color: rgba(251, 191, 36, 0.45);
-    background: rgba(251, 191, 36, 0.12);
-  }
-  .delta-rb.settling {
-    color: #f59e0b;
-    border-color: rgba(245, 158, 11, 0.45);
-    background: rgba(245, 158, 11, 0.11);
-  }
-  .delta-rb.secured {
-    color: #4ade80;
-    border-color: rgba(74, 222, 128, 0.4);
-    background: rgba(16, 185, 129, 0.1);
-  }
-  .delta-rb.partial {
-    color: #34d399;
-    border-color: rgba(52, 211, 153, 0.4);
-    background: rgba(52, 211, 153, 0.1);
-  }
 
   .settle {
     display: inline-block;

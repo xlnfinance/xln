@@ -82,6 +82,7 @@ export interface CrontabState {
 
 // Configuration constants
 export const ACCOUNT_TIMEOUT_MS = 30000; // 30 seconds (configurable)
+export const HTLC_SECRET_ACK_TIMEOUT_MS = 30000; // auto-dispute if secret-return ACK missing
 export const ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS = 10000; // Check every 10 seconds
 export const ACCOUNT_PENDING_RESEND_AFTER_MS = 8000; // Resend pending frame input after 8s without ACK
 export const HUB_REBALANCE_INTERVAL_MS = 3000; // Default production poll cadence (override via hub config if needed)
@@ -232,6 +233,7 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
 
   // Group expired locks by type for batch processing
   const htlcTimeoutLocks: Array<{ accountId: string; lockId: string }> = [];
+  const disputeStartCounterparties = new Set<string>();
   const disputeFinalizeCounterparties = new Set<string>();
   let shouldBroadcastQueuedDisputeFinalizations = false;
 
@@ -387,6 +389,37 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
         }
         break;
 
+      case 'htlc_secret_ack_timeout':
+        {
+          const hashlock = String(hook.data['hashlock'] || '');
+          const counterpartyEntityId = String(hook.data['counterpartyEntityId'] || '');
+          const inboundLockId = String(hook.data['inboundLockId'] || '');
+          if (!hashlock || !counterpartyEntityId) break;
+
+          const route = replica.state.htlcRoutes.get(hashlock);
+          if (!route?.secretAckPending) break;
+
+          const account = replica.state.accounts.get(counterpartyEntityId);
+          if (!account) break;
+
+          // ACK already finalized (lock removed) — clear latch and skip.
+          if (inboundLockId && !account.locks?.has(inboundLockId)) {
+            route.secretAckPending = false;
+            route.secretAckedAt = replica.state.timestamp;
+            break;
+          }
+
+          // Dispute already active — nothing else to queue.
+          if (account.activeDispute) break;
+
+          disputeStartCounterparties.add(counterpartyEntityId);
+          console.warn(
+            `⏰ HOOK: htlc_secret_ack_timeout for ${counterpartyEntityId.slice(-4)} ` +
+            `(hashlock=${hashlock.slice(0, 12)}...) → queue disputeStart`,
+          );
+        }
+        break;
+
       case 'settlement_window':
         // Future: auto-execute settlement after approval window
         console.log(`⏰ HOOK: settlement_window — not yet implemented`);
@@ -427,6 +460,25 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
       ],
     });
     console.log(`⏰ HOOKS: Generated processHtlcTimeouts for ${htlcTimeoutLocks.length} expired locks`);
+  }
+
+  if (disputeStartCounterparties.size > 0) {
+    const startTxs = Array.from(disputeStartCounterparties).map((counterpartyEntityId) => ({
+      type: 'disputeStart' as const,
+      data: {
+        counterpartyEntityId,
+        description: 'auto-dispute-after-secret-ack-timeout',
+      },
+    }));
+    outputs.push({
+      entityId: replica.entityId,
+      signerId: firstValidator,
+      entityTxs: startTxs,
+    });
+    console.log(
+      `⏰ HOOKS: auto disputeStart queued for ${disputeStartCounterparties.size} account(s) ` +
+      `(missing secret-return ACK)`,
+    );
   }
 
   if (disputeFinalizeCounterparties.size > 0) {

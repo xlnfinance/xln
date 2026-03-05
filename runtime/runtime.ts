@@ -548,6 +548,25 @@ const hasRuntimeWork = (env: Env): boolean => {
 };
 
 /**
+ * True only when a hub has periodic/security work that actually needs wakeups.
+ * Prevents synthetic empty ticks for fully-idle hubs.
+ */
+const hubNeedsPeriodicWake = (replica: EntityReplica): boolean => {
+  const state = replica?.state;
+  if (!state?.hubRebalanceConfig) return false;
+  if (state.jBatchState?.sentBatch) return true;
+
+  for (const accountMachine of state.accounts.values()) {
+    if (accountMachine.activeDispute) return true;
+    if (accountMachine.pendingFrame || accountMachine.pendingAccountInput) return true;
+    if ((accountMachine.requestedRebalance?.size ?? 0) > 0) return true;
+    if ((accountMachine.requestedRebalanceFeeState?.size ?? 0) > 0) return true;
+  }
+
+  return false;
+};
+
+/**
  * Check if any entity has scheduled hooks or due periodic tasks.
  * Used by the runtime loop to wake up idle entities at the right time.
  * Checks both one-shot hooks (setTimeout-like) AND periodic tasks (setInterval-like)
@@ -566,11 +585,9 @@ const hasDueEntityHooks = (env: Env): boolean => {
         if ((hook as any).triggerAt <= nowMs) return true;
       }
     }
-    // Periodic tasks (setInterval-like) — only for hub entities (has hubRebalanceConfig)
-    // Regular user entities don't need crontab pings — they react to inbound P2P messages.
-    // Without this guard, ALL entities get pinged every second → wasted frames + battery.
-    const isHub = !!(replica as any).state?.hubRebalanceConfig;
-    if (isHub) {
+    // Periodic tasks (setInterval-like) — only when hub has actual pending work.
+    // Fully idle hubs should not receive synthetic empty pings.
+    if (hubNeedsPeriodicWake(replica as EntityReplica)) {
       const tasks = crontab.tasks;
       if (tasks && tasks.size > 0) {
         for (const task of tasks.values()) {
@@ -610,9 +627,8 @@ const generateHookPings = (env: Env): void => {
         }
       }
     }
-    // Periodic tasks — only for hub entities
-    const isHub = !!(replica as any).state?.hubRebalanceConfig;
-    if (!hasDue && isHub) {
+    // Periodic tasks — only when hub has actual pending work.
+    if (!hasDue && hubNeedsPeriodicWake(replica as EntityReplica)) {
       const tasks = crontab.tasks;
       if (tasks && tasks.size > 0) {
         for (const task of tasks.values()) {
@@ -1670,6 +1686,7 @@ const applyRuntimeInput = async (
             // 🔒 HTLC routing and fee tracking
             htlcRoutes: new Map(),
             htlcFeesEarned: 0n,
+            htlcNotes: new Map(),
 
             // 📖 Aggregated books (E-Machine view of A-Machine positions)
             swapBook: new Map(),
@@ -2133,7 +2150,9 @@ const applyRuntimeInput = async (
       // NOTE: Snapshot creation moved to process() - single entry point
       // applyRuntimeInput just processes inputs, process() handles snapshotting
     } else {
-      console.log(`⚪ SKIP-FRAME: No runtimeTxs, entityInputs, or outputs`);
+      if (env.quietRuntimeLogs !== true) {
+        console.log(`⚪ SKIP-FRAME: No runtimeTxs, entityInputs, or outputs`);
+      }
       // Clear env.extra even when skipping frame to prevent stale solvency expectations
       env.extra = undefined;
     }
@@ -3377,6 +3396,18 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       }
     }
     let lastGoodHeight = selectedSnapshotHeight;
+    const isLegacyNoopFrame = (input: RuntimeInput | undefined): boolean => {
+      if (!input) return false;
+      const hasRuntimeTxs = (input.runtimeTxs?.length ?? 0) > 0;
+      const hasJInputs = (input.jInputs?.length ?? 0) > 0;
+      const hasMeaningfulEntityInputs = (input.entityInputs ?? []).some((entityInput) => {
+        const hasEntityTxs = (entityInput.entityTxs?.length ?? 0) > 0;
+        const hasProposal = !!entityInput.proposedFrame;
+        const hasHashPrecommits = !!entityInput.hashPrecommits && entityInput.hashPrecommits.size > 0;
+        return hasEntityTxs || hasProposal || hasHashPrecommits;
+      });
+      return !hasRuntimeTxs && !hasJInputs && !hasMeaningfulEntityInputs;
+    };
     const runtimeEnv = env as Record<PropertyKey, unknown>;
     const originalLog = env.log;
     const originalInfo = env.info;
@@ -3474,7 +3505,16 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
             }
           }
           if (env.height !== h) {
-            throw new Error(`Replay height mismatch after apply: expected=${h} actual=${env.height}`);
+            const canAdvanceLegacyNoop =
+              env.height === h - 1 && isLegacyNoopFrame(frame.runtimeInput);
+            if (canAdvanceLegacyNoop) {
+              console.warn(
+                `[loadEnvFromDB] frame=${h} legacy no-op WAL frame detected; advancing replay height without state mutation`,
+              );
+              env.height = h;
+            } else {
+              throw new Error(`Replay height mismatch after apply: expected=${h} actual=${env.height}`);
+            }
           }
           // Fail-fast replay invariant: if frame carries accountInput(newAccountFrame),
           // replay MUST materialize that account frame in restored state.

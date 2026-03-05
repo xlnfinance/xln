@@ -977,9 +977,17 @@ export interface HtlcRoute {
 
   // Resolution
   secret?: string;
+  // Waiting for inbound counterparty to ACK secret-return (htlc_resolve(secret)).
+  secretAckPending?: boolean;
+  secretAckStartedAt?: number;
+  secretAckDeadlineAt?: number;
+  secretAckedAt?: number;
   pendingFee?: bigint; // Fee to accrue on successful reveal (not on forward)
   createdTimestamp: number;
 }
+
+/** End-to-end payment notes stored locally by hashlock/lockId for activity rendering. */
+export type HtlcNoteKey = `hashlock:${string}` | `lock:${string}`;
 
 export type AccountStatus = 'active' | 'disputed';
 
@@ -1569,6 +1577,7 @@ export interface EntityState {
   // 🔒 HTLC Routing - Multi-hop payment tracking (like 2024 hashlockMap)
   htlcRoutes: Map<string, HtlcRoute>; // hashlock → routing context
   htlcFeesEarned: bigint; // Running total of HTLC routing fees collected
+  htlcNotes?: Map<HtlcNoteKey, string>; // local UI notes; recipient note comes from final encrypted envelope only
 
   // 💳 Debts - amounts owed to creditors (from FIFO queue)
   debts?: Array<{

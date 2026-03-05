@@ -61,6 +61,7 @@ export interface Settings {
   accountDeltaViewMode: AccountDeltaViewMode;
   tokenPrecision: number;
   showTokenIcons: boolean;
+  showTimeMachine: boolean;
   dropdownMode: 'signer-first' | 'entity-first';
   runtimeDelay: number;
   balanceRefreshMs: number;

@@ -6,7 +6,7 @@
  * Reference: entity-tx/apply.ts:302-437 (directPayment handler)
  */
 
-import type { EntityState, EntityInput, AccountTx, Env } from '../../types';
+import type { EntityState, EntityInput, AccountTx, Env, HtlcNoteKey } from '../../types';
 import type { Profile } from '../../networking/gossip';
 import { cloneEntityState, canonicalAccountKey } from '../../state-helpers';
 import { generateHashlock, generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
@@ -251,6 +251,13 @@ export async function handleHtlcPayment(
     createdTimestamp: newState.timestamp
   });
 
+  const paymentDescription = typeof description === 'string' ? description.trim() : '';
+  if (paymentDescription) {
+    if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map<HtlcNoteKey, string>();
+    newState.htlcNotes.set(`hashlock:${hashlock}`, paymentDescription);
+    newState.htlcNotes.set(`lock:${lockId}`, paymentDescription);
+  }
+
   // Create encrypted onion envelope (privacy-preserving routing)
   let envelope;
   if (preparedEnvelopeRaw !== undefined) {
@@ -346,7 +353,7 @@ export async function handleHtlcPayment(
     console.log(`🧅 HTLC-KEYS: ${keyDebug}`);
     const crypto = new NobleCryptoProvider();
 
-    envelope = await createOnionEnvelopes(route, secret, entityPubKeys, crypto, hopForwardAmounts);
+    envelope = await createOnionEnvelopes(route, secret, entityPubKeys, crypto, hopForwardAmounts, paymentDescription || undefined);
     console.log(`🧅 ENVELOPE: ${crypto ? 'ENCRYPTED' : 'CLEARTEXT'} | hops=${hops.length} keys=${entityPubKeys.size} missing=[${missingKeys.map(e => formatEntityId(e))}]`);
 
     // Persist deterministic payload for WAL replay.

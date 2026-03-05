@@ -25,6 +25,7 @@ export interface HtlcEnvelope {
   nextHop?: string;           // Next entity to forward to (undefined if final)
   finalRecipient?: boolean;   // Is this the last hop?
   secret?: string;            // Only in final recipient's envelope
+  description?: string;       // Optional payment note (final recipient envelope only)
   innerEnvelope?: string;     // Encoded envelope for next hop (encrypted or JSON)
   forwardAmount?: string;     // Exact amount this hop must forward to next hop
 }
@@ -63,7 +64,8 @@ export async function createOnionEnvelopes(
   secret: string,
   entityPubKeys?: Map<string, string>,
   crypto?: CryptoProvider,
-  hopForwardAmounts?: Map<string, bigint>
+  hopForwardAmounts?: Map<string, bigint>,
+  description?: string
 ): Promise<HtlcEnvelope> {
   if (route.length < 2) {
     throw new Error('Route must have at least sender and recipient');
@@ -109,14 +111,22 @@ export async function createOnionEnvelopes(
   if (crypto && entityPubKeys) {
     const finalRecipientKey = entityPubKeys.get(finalRecipient);
     if (finalRecipientKey) {
-      const finalPayload = safeStringify({finalRecipient: true, secret});
+      const finalPayload = safeStringify({
+        finalRecipient: true,
+        secret,
+        ...(description ? { description } : {}),
+      });
       encryptedBlob = await crypto.encrypt(finalPayload, finalRecipientKey);
     }
   }
 
   if (!encryptedBlob) {
     // Fallback: no encryption available, use cleartext
-    encryptedBlob = safeStringify({finalRecipient: true, secret});
+    encryptedBlob = safeStringify({
+      finalRecipient: true,
+      secret,
+      ...(description ? { description } : {}),
+    });
   }
 
   // Step 2: Wrap each hop's layer (from final backwards to first)
@@ -188,10 +198,16 @@ export function validateEnvelope(envelope: HtlcEnvelope): boolean {
     if (!envelope.secret) {
       throw new Error('Final recipient envelope must have secret');
     }
+    if (envelope.description !== undefined && typeof envelope.description !== 'string') {
+      throw new Error('Final recipient envelope description must be string');
+    }
     if (envelope.nextHop || envelope.innerEnvelope) {
       throw new Error('Final recipient envelope must not have nextHop or innerEnvelope');
     }
   } else {
+    if (envelope.description !== undefined) {
+      throw new Error('Intermediary envelope must not contain description');
+    }
     if (!envelope.nextHop) {
       throw new Error('Intermediary envelope must have nextHop');
     }

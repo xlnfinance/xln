@@ -125,7 +125,8 @@ contract DeltaTransformer is Console {
 
   function applyPayment(int[] memory deltas, Payment memory payment, bytes32[] memory lSecrets, bytes32[] memory rSecrets) private {
     // Apply amount to delta if revealed on time.
-    // Primary: calldata secrets (no storage). Fallback: on-chain registry (hashToBlock).
+    // Runtime default: secrets are passed in `lSecrets/rSecrets` via dispute arguments (calldata path).
+    // Storage registry (`hashToBlock`) is kept as compatibility/debug fallback only.
     uint revealedAt = hashToBlock[payment.hash];
     bool revealed = false;
     if (revealedAt != 0 && revealedAt <= payment.revealedUntilBlock) {
@@ -164,6 +165,8 @@ contract DeltaTransformer is Console {
 
 
   function revealSecret(bytes32 secret) public {
+    // Compatibility/debug helper: writes hash reveal into on-chain registry.
+    // Current runtime payment/dispute flow does not require this for normal settlement.
     console.log("Revealing HTLC secret:");
     console.logBytes32(secret);
     console.logBytes32(keccak256(abi.encode(secret)));

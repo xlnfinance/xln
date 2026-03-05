@@ -1077,9 +1077,9 @@ test.describe('Rebalance E2E', () => {
     expect(snapshot.lastFinalizedJHeight, `jHeight must finalize (>0)\n${debugDump}`).toBeGreaterThan(0);
 
     // UI assertion + final screenshot artifact
-    const securedIndicator = page.locator('.rebalance-indicator.secured', { hasText: 'Secured' }).first();
-    await timedStep('rebalance.wait_secured_indicator', async () => {
-      await expect(securedIndicator).toBeVisible({ timeout: 30_000 });
+    const readyIndicator = page.locator('.account-preview .status-pill.ready').first();
+    await timedStep('rebalance.wait_ready_indicator', async () => {
+      await expect(readyIndicator).toBeVisible({ timeout: 30_000 });
     });
 
     const accountCard = page.locator('.account-preview').first();

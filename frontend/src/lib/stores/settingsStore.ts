@@ -17,8 +17,9 @@ const defaultSettings: Settings = {
   barLayout: 'center',
   accountBarUsdPerPx: 100,
   accountDeltaViewMode: 'per-token',
-  tokenPrecision: 6, // 2..18 digits after decimal for token amounts (18 = full)
+  tokenPrecision: 8, // 2..18 digits after decimal for token amounts (18 = full)
   showTokenIcons: true,
+  showTimeMachine: false, // Off by default to reduce visual noise in wallet mode
   dropdownMode: 'signer-first',
   runtimeDelay: 250, // 250ms = 4 frames/second (visible lightning effects)
   balanceRefreshMs: 15000, // Default to 15s to avoid RPC pressure
@@ -58,6 +59,9 @@ const settingsOperations = {
         }
         if (typeof parsed.showTokenIcons !== 'boolean') {
           parsed.showTokenIcons = defaultSettings.showTokenIcons;
+        }
+        if (typeof parsed.showTimeMachine !== 'boolean') {
+          parsed.showTimeMachine = defaultSettings.showTimeMachine;
         }
         const allowedUsdPerPx = [1, 10, 100, 1000];
         if (!allowedUsdPerPx.includes(Number(parsed.accountBarUsdPerPx))) {
@@ -180,6 +184,11 @@ const settingsOperations = {
 
   setShowTokenIcons(show: boolean) {
     settings.update(current => ({ ...current, showTokenIcons: !!show }));
+    this.saveToStorage();
+  },
+
+  setShowTimeMachine(show: boolean) {
+    settings.update(current => ({ ...current, showTimeMachine: !!show }));
     this.saveToStorage();
   },
 

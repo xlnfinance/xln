@@ -16,7 +16,7 @@
   import { getAvailableThemes, THEME_DEFINITIONS } from '../../utils/themes';
   import type { ThemeName } from '$lib/types/ui';
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
-  import { xlnFunctions, entityPositions, enqueueEntityInputs } from '../../stores/xlnStore';
+  import { xlnFunctions, entityPositions, enqueueEntityInputs, p2pState } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
@@ -25,7 +25,7 @@
   import {
     ArrowUpRight, Repeat, Landmark, Users, Activity,
     MessageCircle, Settings as SettingsIcon, BookUser,
-    ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check, Scale, Globe, Trash2
+    ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check, Scale, Globe, Trash2, MoreHorizontal
   } from 'lucide-svelte';
 
   // Child components
@@ -54,7 +54,8 @@
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
 
   // Tab types
-  type ViewTab = 'external' | 'reserves' | 'accounts' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance' | 'settings';
+  type ViewTab = 'external' | 'reserves' | 'accounts' | 'more' | 'settings';
+  type MoreTab = 'chat' | 'contacts' | 'create' | 'gossip' | 'governance';
   type AccountWorkspaceTab = 'send' | 'swap' | 'open' | 'activity' | 'settle' | 'configure';
   type ConfigureWorkspaceTab = 'credit' | 'collateral' | 'token';
 
@@ -68,6 +69,7 @@
     return 'open';
   }
   let activeTab: ViewTab = getInitialTab();
+  let moreTab: MoreTab = 'chat';
   let accountWorkspaceTab: AccountWorkspaceTab = getInitialAccountWorkspaceTab();
   let configureWorkspaceTab: ConfigureWorkspaceTab = 'credit';
   let workspaceAccountId = '';
@@ -172,6 +174,22 @@
     }>;
     const profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === entityId);
     return profile?.metadata?.name || '';
+  })();
+
+  function isPlaceholderName(value: string): boolean {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return true;
+    if (/^signer\s+\d+$/i.test(normalized)) return true;
+    if (/^entity\s+[0-9a-f]{4,}$/i.test(normalized)) return true;
+    return false;
+  }
+
+  $: heroDisplayName = (() => {
+    const fallbackId = replica?.state?.entityId || tab.entityId || '';
+    const entityProfileName = String((replica?.state as any)?.profile?.name || '').trim();
+    if (entityProfileName) return entityProfileName;
+    const gossip = (gossipName ?? '').trim();
+    return gossip && !isPlaceholderName(gossip) ? gossip : fallbackId;
   })();
 
   // Format short address for display
@@ -480,7 +498,24 @@
       try {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
-        console.log(`[EntityPanel] Offchain faucet request hub=${hubEntityId?.slice(0, 10)} token=${tokenId}`);
+        const p2p = get(p2pState);
+        const runtimeP2P = (activeEnv as any)?.runtimeState?.p2p;
+        const relayUrl = runtimeP2P?.relayUrls?.[0] || $settings?.relayUrl || 'n/a';
+        const visibility =
+          typeof document !== 'undefined' ? document.visibilityState : 'server';
+        console.log('[EntityPanel] Offchain faucet request:', {
+          hubEntityId,
+          tokenId,
+          runtimeId,
+          relayUrl,
+          visibility,
+          p2pConnected: !!p2p?.connected,
+          p2pReconnect: p2p?.reconnect || null,
+          p2pQueue: p2p?.queue || null,
+          localAccountHeight: knownAccount?.currentHeight ?? null,
+          localPending: knownAccount?.hasPending ?? null,
+          localPendingHeight: knownAccount?.pendingHeight ?? null,
+        });
         response = await fetch(`${requestApiBase}/api/faucet/offchain`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -508,6 +543,12 @@
       if (!response?.ok || !result?.success) {
         const status = response ? response.status : 'fetch-error';
         const code = typeof result?.code === 'string' ? result.code : '';
+        console.error('[EntityPanel] Offchain faucet rejected:', {
+          status,
+          code,
+          error: result?.error || null,
+          details: result?.details || null,
+        });
         if (code === 'FAUCET_ACCOUNT_STATE_MISMATCH') {
           throw new Error('Account state mismatch with server. Reset network/runtime and retry.');
         }
@@ -1039,7 +1080,7 @@
     refreshBalances();
   });
 
-  $: if (activeTab === 'governance') {
+  $: if (activeTab === 'more' && moreTab === 'governance') {
     loadGovernanceProfileFromGossip();
   }
   $: if (activeTab === 'settings') {
@@ -1390,7 +1431,11 @@
   }
 
   function handleAccountSelect(event: CustomEvent) {
-    selectedAccountId = event.detail.accountId;
+    const nextRaw = String(event.detail?.accountId || '').trim();
+    selectedAccountId = nextRaw || null;
+    if (!nextRaw) return;
+    const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextRaw.toLowerCase());
+    if (matched) workspaceAccountId = matched;
   }
 
   function handleJurisdictionSelect(event: CustomEvent<{ selected: string | null }>) {
@@ -1454,17 +1499,21 @@
     { id: 'external', icon: Wallet, label: 'External' },
     { id: 'reserves', icon: Landmark, label: 'Reserves' },
     { id: 'accounts', icon: Users, label: 'Accounts', showBadge: true, badgeType: 'pending' },
+    { id: 'more', icon: MoreHorizontal, label: 'More' },
+    { id: 'settings', icon: SettingsIcon, label: 'Settings' },
+  ];
+
+  const moreTabs: Array<{ id: MoreTab; icon: any; label: string }> = [
     { id: 'chat', icon: MessageCircle, label: 'Chat' },
     { id: 'contacts', icon: BookUser, label: 'Contacts' },
     { id: 'create', icon: PlusCircle, label: 'Create' },
     { id: 'gossip', icon: Globe, label: 'Gossip' },
     { id: 'governance', icon: Scale, label: 'Governance' },
-    { id: 'settings', icon: SettingsIcon, label: 'Settings' },
   ];
 
   const accountWorkspaceTabs: Array<{ id: AccountWorkspaceTab; icon: any; label: string; showPendingBatch?: boolean }> = [
     { id: 'open', icon: PlusCircle, label: 'Open Account' },
-    { id: 'send', icon: ArrowUpRight, label: 'Send' },
+    { id: 'send', icon: ArrowUpRight, label: 'Pay' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
     { id: 'configure', icon: SettingsIcon, label: 'Configure' },
     { id: 'activity', icon: Activity, label: 'Activity' },
@@ -1486,13 +1535,6 @@
         {tab}
         on:entitySelect={handleEntitySelect}
       />
-      {#if replica}
-        <AccountDropdown
-          {replica}
-          {selectedAccountId}
-          on:accountSelect={handleAccountSelect}
-        />
-      {/if}
     </header>
   {/if}
 
@@ -1542,7 +1584,7 @@
             </div>
           {/if}
           <div class="hero-identity">
-            <span class="hero-name">{gossipName || (replica?.state?.entityId || tab.entityId)}</span>
+            <span class="hero-name">{heroDisplayName}</span>
             <button class="hero-address" on:click={copyAddress} title="Copy full address">
               <span>{replica?.state?.entityId || tab.entityId}</span>
               {#if addressCopied}
@@ -1781,32 +1823,20 @@
           </div>
 
         {:else if activeTab === 'accounts'}
+          <div class="accounts-selector-row">
+            <AccountDropdown
+              {replica}
+              {selectedAccountId}
+              on:accountSelect={handleAccountSelect}
+            />
+          </div>
+
           <AccountList
             {replica}
             on:select={handleAccountSelect}
             on:faucet={handleAccountFaucet}
             on:settleApprove={handleQuickSettleApprove}
           />
-
-          <div class="workspace-account-bar">
-            <EntityInput
-              label="Workspace Account"
-              value={workspaceAccountId}
-              entities={workspaceAccountIds}
-              {contacts}
-              excludeId={replica?.state?.entityId || tab.entityId}
-              placeholder="Select account for actions..."
-              disabled={!activeIsLive || workspaceAccountIds.length === 0}
-              on:change={handleWorkspaceAccountChange}
-            />
-            <div class="workspace-account-help">
-              {#if workspaceAccountIds.length === 0}
-                Open an account first to enable actions.
-              {:else}
-                One selector for `Swap` and `Configure`.
-              {/if}
-            </div>
-          </div>
 
           <nav class="account-workspace-tabs" aria-label="Account workspace">
             {#each accountWorkspaceTabs as t}
@@ -1829,15 +1859,46 @@
               <PaymentPanel entityId={replica.state?.entityId || tab.entityId} {contacts} />
 
             {:else if accountWorkspaceTab === 'swap'}
-              <SwapPanel
-                {replica}
-                {tab}
-                counterpartyId={workspaceAccountId}
-                prefilledCounterparty={true}
-              />
+              <div class="workspace-inline-selector">
+                <EntityInput
+                  label="Swap Account"
+                  value={workspaceAccountId}
+                  entities={workspaceAccountIds}
+                  {contacts}
+                  excludeId={replica?.state?.entityId || tab.entityId}
+                  placeholder="Select account for swap..."
+                  disabled={!activeIsLive || workspaceAccountIds.length === 0}
+                  on:change={handleWorkspaceAccountChange}
+                />
+              </div>
+              {#if !workspaceAccountId}
+                <div class="live-required configure-empty">
+                  <AlertTriangle size={18} />
+                  <p>Select account first.</p>
+                </div>
+              {:else}
+                <SwapPanel
+                  {replica}
+                  {tab}
+                  counterpartyId={workspaceAccountId}
+                  prefilledCounterparty={true}
+                />
+              {/if}
 
             {:else if accountWorkspaceTab === 'configure'}
               <div class="configure-panel">
+                <div class="workspace-inline-selector">
+                  <EntityInput
+                    label="Configure Account"
+                    value={workspaceAccountId}
+                    entities={workspaceAccountIds}
+                    {contacts}
+                    excludeId={replica?.state?.entityId || tab.entityId}
+                    placeholder="Select account for configure..."
+                    disabled={!activeIsLive || workspaceAccountIds.length === 0}
+                    on:change={handleWorkspaceAccountChange}
+                  />
+                </div>
                 <nav class="configure-tabs" aria-label="Account configure workspace">
                   <button
                     class="configure-tab"
@@ -1985,71 +2046,86 @@
             {/if}
           </section>
 
-        {:else if activeTab === 'chat'}
-          <ChatMessages {replica} {tab} currentTimeIndex={activeTimeIndex ?? -1} />
-
-        {:else if activeTab === 'contacts'}
-          <h4 class="section-head">Saved Contacts</h4>
-          {#if contacts.length === 0}
-            <p class="muted">No contacts saved yet</p>
-          {:else}
-            {#each contacts as contact, idx}
-              <div class="contact-row">
-                <div class="c-info">
-                  <span class="c-name">{contact.name}</span>
-                  <span class="c-id">{contact.entityId}</span>
-                </div>
-                <button class="c-delete" on:click={() => deleteContact(idx)}>x</button>
-              </div>
+        {:else if activeTab === 'more'}
+          <nav class="more-tabs" aria-label="More tools">
+            {#each moreTabs as m}
+              <button
+                class="more-tab"
+                class:active={moreTab === m.id}
+                on:click={() => moreTab = m.id}
+              >
+                <svelte:component this={m.icon} size={14} />
+                <span>{m.label}</span>
+              </button>
             {/each}
+          </nav>
+
+          {#if moreTab === 'chat'}
+            <ChatMessages {replica} {tab} currentTimeIndex={activeTimeIndex ?? -1} />
+
+          {:else if moreTab === 'contacts'}
+            <h4 class="section-head">Saved Contacts</h4>
+            {#if contacts.length === 0}
+              <p class="muted">No contacts saved yet</p>
+            {:else}
+              {#each contacts as contact, idx}
+                <div class="contact-row">
+                  <div class="c-info">
+                    <span class="c-name">{contact.name}</span>
+                    <span class="c-id">{contact.entityId}</span>
+                  </div>
+                  <button class="c-delete" on:click={() => deleteContact(idx)}>x</button>
+                </div>
+              {/each}
+            {/if}
+
+            <h4 class="section-head">Add Contact</h4>
+            <div class="add-contact">
+              <input type="text" placeholder="Name" bind:value={newContactName} />
+              <input type="text" placeholder="Full Entity ID (0x...)" bind:value={newContactId} />
+              <button class="btn-add" on:click={saveContact}>Add</button>
+            </div>
+
+          {:else if moreTab === 'create'}
+            <FormationPanel />
+
+          {:else if moreTab === 'gossip'}
+            <GossipPanel entityId={replica?.state?.entityId || tab.entityId} />
+
+          {:else if moreTab === 'governance'}
+            <h4 class="section-head">Entity Governance Profile</h4>
+            <p class="muted">Updates are submitted through REA as `profile-update` entity transactions.</p>
+            <div class="setting-block">
+              <label>Display Name</label>
+              <input
+                type="text"
+                bind:value={governanceName}
+                placeholder="Entity name"
+                maxlength="64"
+              />
+            </div>
+            <div class="setting-block">
+              <label>Bio</label>
+              <input
+                type="text"
+                bind:value={governanceBio}
+                placeholder="Short description"
+                maxlength="180"
+              />
+            </div>
+            <div class="setting-block">
+              <label>Website</label>
+              <input
+                type="url"
+                bind:value={governanceWebsite}
+                placeholder="https://"
+                maxlength="160"
+              />
+            </div>
+            <button class="btn-add" on:click={saveGovernanceProfile} disabled={governanceSaving}>
+              {governanceSaving ? 'Submitting...' : 'Save Governance Profile'}
+            </button>
           {/if}
-
-          <h4 class="section-head">Add Contact</h4>
-          <div class="add-contact">
-            <input type="text" placeholder="Name" bind:value={newContactName} />
-            <input type="text" placeholder="Full Entity ID (0x...)" bind:value={newContactId} />
-            <button class="btn-add" on:click={saveContact}>Add</button>
-          </div>
-
-        {:else if activeTab === 'create'}
-          <FormationPanel />
-
-        {:else if activeTab === 'gossip'}
-          <GossipPanel entityId={replica?.state?.entityId || tab.entityId} />
-
-        {:else if activeTab === 'governance'}
-          <h4 class="section-head">Entity Governance Profile</h4>
-          <p class="muted">Updates are submitted through REA as `profile-update` entity transactions.</p>
-          <div class="setting-block">
-            <label>Display Name</label>
-            <input
-              type="text"
-              bind:value={governanceName}
-              placeholder="Entity name"
-              maxlength="64"
-            />
-          </div>
-          <div class="setting-block">
-            <label>Bio</label>
-            <input
-              type="text"
-              bind:value={governanceBio}
-              placeholder="Short description"
-              maxlength="180"
-            />
-          </div>
-          <div class="setting-block">
-            <label>Website</label>
-            <input
-              type="url"
-              bind:value={governanceWebsite}
-              placeholder="https://"
-              maxlength="160"
-            />
-          </div>
-          <button class="btn-add" on:click={saveGovernanceProfile} disabled={governanceSaving}>
-            {governanceSaving ? 'Submitting...' : 'Save Governance Profile'}
-          </button>
 
         {:else if activeTab === 'settings'}
           <h4 class="section-head">Appearance</h4>
@@ -2086,6 +2162,16 @@
             <button class="toggle" class:on={$settings.verboseLogging}
               on:click={() => settingsOperations.setVerboseLogging(!$settings.verboseLogging)}>
               {$settings.verboseLogging ? 'On' : 'Off'}
+            </button>
+          </div>
+          <div class="setting-row">
+            <span>Time Machine</span>
+            <button
+              class="toggle"
+              class:on={$settings.showTimeMachine}
+              on:click={() => settingsOperations.setShowTimeMachine(!$settings.showTimeMachine)}
+            >
+              {$settings.showTimeMachine ? 'On' : 'Off'}
             </button>
           </div>
 
@@ -2161,6 +2247,11 @@
 
 <style>
   .entity-panel {
+    --space-1: 8px;
+    --space-2: 12px;
+    --space-3: 16px;
+    --space-4: 20px;
+    --panel-gutter-x: 16px;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -2264,7 +2355,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 20px 18px;
+    padding: var(--space-3) var(--panel-gutter-x);
     background: linear-gradient(180deg, #18181b 0%, #09090b 100%);
     border-bottom: 1px solid #27272a;
   }
@@ -2359,8 +2450,8 @@
   /* Breakdown Cards */
   .breakdown {
     display: flex;
-    gap: 10px;
-    padding: 14px 16px;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--panel-gutter-x);
     border-bottom: 1px solid #18181b;
   }
 
@@ -2922,12 +3013,12 @@
   /* Tabs */
   .tabs {
     display: flex;
-    padding: 0 12px;
+    padding: 0 var(--panel-gutter-x);
     background: #09090b;
     border-bottom: 1px solid #18181b;
     overflow-x: auto;
     flex-shrink: 0;
-    gap: 2px;
+    gap: 4px;
   }
 
   .tabs::-webkit-scrollbar {
@@ -2938,7 +3029,8 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 10px 12px;
+    min-height: 40px;
+    padding: 10px 14px;
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
@@ -2992,14 +3084,79 @@
 
   /* Content */
   .content {
-    padding: 14px;
+    padding: var(--space-3) var(--panel-gutter-x);
+  }
+
+  .accounts-selector-row {
+    margin-bottom: 10px;
+    padding: 10px;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    background: #0f1014;
+  }
+
+  .accounts-selector-row :global(.dropdown-trigger) {
+    width: 100%;
+    min-height: 42px;
+    border: 1px solid #2f3138;
+    border-radius: 8px;
+    background: #111216;
+    color: #d4d4d8;
+  }
+
+  .accounts-selector-row :global(.trigger-text) {
+    font-size: 13px;
+  }
+
+  .more-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 8px;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    background: #101114;
+    overflow-x: auto;
+  }
+
+  .more-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .more-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 38px;
+    padding: 8px 12px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: #71717a;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .more-tab:hover {
+    color: #d4d4d8;
+    border-color: #3f3f46;
+    background: #18181b;
+  }
+
+  .more-tab.active {
+    color: #fbbf24;
+    border-color: #fbbf24;
+    background: rgba(251, 191, 36, 0.08);
   }
 
   .account-workspace-tabs {
     display: flex;
-    gap: 6px;
-    margin-top: 12px;
-    padding: 8px;
+    gap: 8px;
+    margin-top: var(--space-3);
+    padding: 10px;
     border: 1px solid #27272a;
     border-radius: 10px;
     background: #111114;
@@ -3013,17 +3170,20 @@
   .account-workspace-tab {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 9px 12px;
+    justify-content: center;
+    gap: 7px;
+    min-height: 44px;
+    padding: 10px 16px;
     border: 1px solid transparent;
     border-radius: 8px;
     background: transparent;
     color: #71717a;
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 650;
     white-space: nowrap;
     cursor: pointer;
     transition: all 0.15s ease;
+    touch-action: manipulation;
   }
 
   .account-workspace-tab:hover {
@@ -3053,21 +3213,15 @@
   }
 
   .account-workspace-content {
-    margin-top: 12px;
+    margin-top: var(--space-3);
   }
 
-  .workspace-account-bar {
-    margin-top: 12px;
+  .workspace-inline-selector {
+    margin-bottom: 10px;
     padding: 12px;
     border: 1px solid #27272a;
     border-radius: 10px;
     background: #0f1014;
-  }
-
-  .workspace-account-help {
-    margin-top: 8px;
-    font-size: 11px;
-    color: #6b7280;
   }
 
   .configure-panel {
@@ -3760,6 +3914,12 @@
   }
 
   @media (max-width: 900px) {
+    .entity-panel {
+      --panel-gutter-x: 10px;
+      --space-2: 10px;
+      --space-3: 12px;
+    }
+
     .breakdown {
       flex-direction: column;
     }
@@ -3769,13 +3929,14 @@
     }
 
     .account-workspace-tabs {
-      padding: 6px;
-      gap: 4px;
+      padding: 8px;
+      gap: 6px;
     }
 
     .account-workspace-tab {
-      padding: 8px 10px;
-      font-size: 10px;
+      min-height: 42px;
+      padding: 9px 12px;
+      font-size: 11px;
     }
   }
 </style>
