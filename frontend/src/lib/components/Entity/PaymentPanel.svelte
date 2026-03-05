@@ -19,7 +19,7 @@
   let amount = '';
   let tokenId = 1;
   let description = '';
-  let useHtlc = true; // HTLC by default (atomic), toggle for direct
+  let useHtlc = true; // Hashlock by default (atomic), optional direct (unsafe)
   let findingRoutes = false;
   let sendingPayment = false;
   type RouteOption = {
@@ -890,9 +890,9 @@
       let paymentInput: any;
 
       if (useHtlc) {
-        // HTLC: atomic multi-hop with hashlock
+        // Hashlock: atomic multi-hop with hashlock
         const { secret, hashlock } = generateSecretHashlock();
-        console.log(`[Send] HTLC secret=${secret.slice(0,16)}... hashlock=${hashlock.slice(0,16)}...`);
+        console.log(`[Send] Hashlock secret=${secret.slice(0,16)}... hashlock=${hashlock.slice(0,16)}...`);
         paymentInput = {
           entityId,
           signerId,
@@ -926,7 +926,7 @@
       }
 
       await enqueueEntityInputs(env, [paymentInput]);
-      console.log(`[Send] ${useHtlc ? 'HTLC' : 'Direct'} payment sent via:`, route.path.join(' -> '));
+      console.log(`[Send] ${useHtlc ? 'Hashlock' : 'Direct (unsafe)'} payment sent via:`, route.path.join(' -> '));
     } catch (error) {
       console.error('[Send] Payment failed:', error);
       preflightError = (error as Error)?.message || 'Unknown send error';
@@ -1049,10 +1049,27 @@
   </div>
 
   <div class="mode-toggle">
-    <label class="toggle-label">
-      <input type="checkbox" bind:checked={useHtlc} disabled={findingRoutes || sendingPayment} />
-      <span class="toggle-text">{useHtlc ? 'HTLC (atomic)' : 'Direct (simple)'}</span>
-    </label>
+    <span class="mode-label">Mode</span>
+    <div class="mode-switch" role="group" aria-label="Payment mode">
+      <button
+        type="button"
+        class="mode-btn"
+        class:active={useHtlc}
+        disabled={findingRoutes || sendingPayment}
+        on:click={() => (useHtlc = true)}
+      >
+        Hashlock
+      </button>
+      <button
+        type="button"
+        class="mode-btn unsafe"
+        class:active={!useHtlc}
+        disabled={findingRoutes || sendingPayment}
+        on:click={() => (useHtlc = false)}
+      >
+        Direct (unsafe)
+      </button>
+    </div>
   </div>
 
   <button
@@ -1130,7 +1147,7 @@
         on:click={() => sendPayment(true)}
         disabled={selectedRouteIndex < 0 || sendingPayment}
       >
-        {sendingPayment ? 'Sending...' : 'Send Payment'}
+        {sendingPayment ? 'Sending...' : (useHtlc ? 'Send Hashlock Payment' : 'Send Direct Payment')}
       </button>
       <label class="repeat-control">
         <span>Repeat</span>
@@ -1424,28 +1441,59 @@
   .mode-toggle {
     display: flex;
     align-items: center;
+    gap: 10px;
   }
 
-  .toggle-label {
+  .mode-label {
+    color: #78716c;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .mode-switch {
     display: flex;
     align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    font-size: 12px;
-    text-transform: none;
+    gap: 6px;
+    padding: 4px;
+    border: 1px solid #292524;
+    border-radius: 10px;
+    background: #171311;
+  }
+
+  .mode-btn {
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
     color: #a8a29e;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
   }
 
-  .toggle-label input[type="checkbox"] {
-    width: 16px;
-    padding: 0;
-    accent-color: #fbbf24;
+  .mode-btn:hover:not(:disabled) {
+    color: #e7e5e4;
   }
 
-  .toggle-text {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #d6d3d1;
+  .mode-btn.active {
+    background: #422006;
+    border-color: #fbbf24;
+    color: #fde68a;
+  }
+
+  .mode-btn.unsafe.active {
+    background: #3f1014;
+    border-color: #dc2626;
+    color: #fecaca;
+  }
+
+  .mode-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .profile-preview {

@@ -918,12 +918,30 @@ async function waitForServerHealthy(page: Page, timeoutMs = 180_000) {
   throw new Error('Server did not become healthy in time after reset');
 }
 
+async function waitForApiReachable(page: Page, timeoutMs = 120_000) {
+  const started = Date.now();
+  let lastError = '';
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const res = await page.request.get(`${API_BASE_URL}/api/health`);
+      if (res.ok()) return;
+      const body = await res.text().catch(() => '');
+      lastError = `status=${res.status()} body=${body.slice(0, 240)}`;
+    } catch (error: any) {
+      lastError = error?.message || String(error);
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error(`API did not become reachable in time: ${lastError}`);
+}
+
 async function resetProdServer(page: Page) {
+  await waitForApiReachable(page);
   let resetDone = false;
   let lastError = '';
-  for (let attempt = 1; attempt <= 10; attempt++) {
+  for (let attempt = 1; attempt <= 40; attempt++) {
     try {
-      const coldResponse = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1&sync=1`);
+      const coldResponse = await page.request.post(`${RESET_BASE_URL}/api/reset?rpc=1&db=1&sync=1`);
       if (coldResponse.ok()) {
         resetDone = true;
         break;
@@ -936,13 +954,14 @@ async function resetProdServer(page: Page) {
         resetDone = true;
         break;
       }
-      const coldData = await coldResponse.json().catch(() => ({}));
-      const softData = await softResponse.json().catch(() => ({}));
-      lastError = `cold=${JSON.stringify(coldData)} soft=${JSON.stringify(softData)}`;
+      const coldText = await coldResponse.text().catch(() => '');
+      const softText = await softResponse.text().catch(() => '');
+      lastError = `cold(status=${coldResponse.status()} body=${coldText.slice(0, 180)}) `
+        + `soft(status=${softResponse.status()} body=${softText.slice(0, 180)})`;
     } catch (error: any) {
       lastError = error?.message || String(error);
     }
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
   }
   expect(resetDone, `reset failed after retries: ${lastError}`).toBe(true);
   await waitForServerHealthy(page);

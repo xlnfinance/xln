@@ -1220,6 +1220,13 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     if (typeof existingGlobalP2P.updateConfig === 'function') {
       existingGlobalP2P.updateConfig(config);
     }
+    if (
+      typeof existingGlobalP2P.isConnected === 'function' &&
+      !existingGlobalP2P.isConnected() &&
+      typeof existingGlobalP2P.connect === 'function'
+    ) {
+      existingGlobalP2P.connect();
+    }
     state.p2p = existingGlobalP2P as RuntimeP2P;
     return state.p2p;
   }
@@ -1227,6 +1234,9 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
   if (state.p2p) {
     if (state.p2p.matchesIdentity(resolvedRuntimeId, config.signerId)) {
       state.p2p.updateConfig(config);
+      if (!state.p2p.isConnected()) {
+        state.p2p.connect();
+      }
       return state.p2p;
     }
     state.p2p.close();
