@@ -115,31 +115,27 @@ export function buffersEqual(buf1: Buffer, buf2: Buffer): boolean {
   return bufferCompare(buf1, buf2) === 0;
 }
 
-type TaggedValue =
+type TaggedJson =
   | { __xlnType: 'BigInt'; value: string }
   | { __xlnType: 'Map'; value: [unknown, unknown][] }
   | { __xlnType: 'Set'; value: unknown[] }
   | { __xlnType: 'Uint8Array'; value: number[] };
 
-const isTaggedValue = (value: unknown): value is TaggedValue =>
-  !!value &&
-  typeof value === 'object' &&
-  '__xlnType' in (value as Record<string, unknown>);
-
-const encodeTaggedValue = (value: unknown): unknown => {
-  if (typeof value === 'bigint') return { __xlnType: 'BigInt', value: value.toString() };
-  if (value instanceof Map) return { __xlnType: 'Map', value: Array.from(value.entries()) };
-  if (value instanceof Set) return { __xlnType: 'Set', value: Array.from(value.values()) };
-  if (value instanceof Uint8Array) return { __xlnType: 'Uint8Array', value: Array.from(value) };
+const encodeTaggedJson = (value: unknown): unknown => {
+  if (typeof value === 'bigint') return { __xlnType: 'BigInt', value: value.toString() } satisfies TaggedJson;
+  if (value instanceof Map) return { __xlnType: 'Map', value: Array.from(value.entries()) } satisfies TaggedJson;
+  if (value instanceof Set) return { __xlnType: 'Set', value: Array.from(value.values()) } satisfies TaggedJson;
+  if (value instanceof Uint8Array) return { __xlnType: 'Uint8Array', value: Array.from(value) } satisfies TaggedJson;
   return value;
 };
 
-const decodeTaggedValue = (value: unknown): unknown => {
-  if (!isTaggedValue(value)) return value;
-  if (value.__xlnType === 'BigInt') return BigInt(value.value);
-  if (value.__xlnType === 'Map') return new Map(value.value);
-  if (value.__xlnType === 'Set') return new Set(value.value);
-  if (value.__xlnType === 'Uint8Array') return new Uint8Array(value.value);
+const decodeTaggedJson = (value: unknown): unknown => {
+  if (!value || typeof value !== 'object') return value;
+  const tagged = value as Partial<TaggedJson>;
+  if (tagged.__xlnType === 'BigInt' && typeof tagged.value === 'string') return BigInt(tagged.value);
+  if (tagged.__xlnType === 'Map' && Array.isArray(tagged.value)) return new Map(tagged.value);
+  if (tagged.__xlnType === 'Set' && Array.isArray(tagged.value)) return new Set(tagged.value);
+  if (tagged.__xlnType === 'Uint8Array' && Array.isArray(tagged.value)) return new Uint8Array(tagged.value);
   return value;
 };
 
@@ -148,19 +144,66 @@ const decodeTaggedValue = (value: unknown): unknown => {
  * Preserves BigInt/Map/Set/Uint8Array across save/load.
  */
 export function serializeTaggedJson(input: unknown, excludeKeys?: Set<string>): string {
-  const seen = new WeakSet<object>();
-  return JSON.stringify(input, (key, raw) => {
-    if (excludeKeys?.has(key)) return undefined;
-    if (typeof raw === 'function') return undefined;
-    const value = encodeTaggedValue(raw);
-    if (value && typeof value === 'object') {
-      if (seen.has(value as object)) return '[Circular]';
-      seen.add(value as object);
+  const alwaysExcluded = new Set(['clonedForValidation', 'jurisdiction', 'provider', 'ethersProvider']);
+  const stack: object[] = [];
+
+  const pack = (value: unknown): unknown => {
+    if (typeof value === 'function') return undefined;
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'object') return encodeTaggedJson(value);
+
+    const objectRef = value as object;
+    if (stack.includes(objectRef)) return undefined;
+    stack.push(objectRef);
+    try {
+      if (value instanceof Map) {
+        const entries: [unknown, unknown][] = [];
+        for (const [k, v] of value.entries()) {
+          const packedKey = pack(k);
+          const packedValue = pack(v);
+          if (packedKey !== undefined && packedValue !== undefined) {
+            entries.push([packedKey, packedValue]);
+          }
+        }
+        return { __xlnType: 'Map', value: entries } satisfies TaggedJson;
+      }
+
+      if (value instanceof Set) {
+        const packedValues: unknown[] = [];
+        for (const item of value.values()) {
+          const packed = pack(item);
+          if (packed !== undefined) packedValues.push(packed);
+        }
+        return { __xlnType: 'Set', value: packedValues } satisfies TaggedJson;
+      }
+
+      if (value instanceof Uint8Array) {
+        return { __xlnType: 'Uint8Array', value: Array.from(value) } satisfies TaggedJson;
+      }
+
+      if (Array.isArray(value)) {
+        return value.map((item) => {
+          const packed = pack(item);
+          return packed === undefined ? null : packed;
+        });
+      }
+
+      const source = value as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(source)) {
+        if (excludeKeys?.has(key) || alwaysExcluded.has(key)) continue;
+        const packed = pack(source[key]);
+        if (packed !== undefined) out[key] = packed;
+      }
+      return out;
+    } finally {
+      stack.pop();
     }
-    return value;
-  });
+  };
+
+  return JSON.stringify(pack(input));
 }
 
 export function deserializeTaggedJson<T = unknown>(json: string): T {
-  return JSON.parse(json, (_key, value) => decodeTaggedValue(value)) as T;
+  return JSON.parse(json, (_key, value) => decodeTaggedJson(value)) as T;
 }

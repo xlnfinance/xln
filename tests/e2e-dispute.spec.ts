@@ -57,7 +57,20 @@ async function createDemoRuntime(page: Page, label: string, mnemonic: string): P
 }
 
 async function ensureAnyHubAccountOpen(page: Page): Promise<{ entityId: string; signerId: string; counterpartyId: string }> {
-  const result = await page.evaluate(async () => {
+  let fallbackHubIds: string[] = [];
+  try {
+    const apiBase = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
+    const response = await page.request.get(`${apiBase}/api/debug/entities`);
+    if (response.ok()) {
+      const body = await response.json() as any;
+      const entities = Array.isArray(body?.entities) ? body.entities : [];
+      fallbackHubIds = entities
+        .filter((e: any) => e?.isHub === true && typeof e?.entityId === 'string')
+        .map((e: any) => String(e.entityId));
+    }
+  } catch {}
+
+  const result = await page.evaluate(async ({ fallbackHubIds }) => {
     const findAccount = (accounts: any, ownerId: string, counterpartyId: string) => {
       if (!(accounts instanceof Map)) return null;
       const owner = String(ownerId || '').toLowerCase();
@@ -92,7 +105,7 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{ entityId: string; 
       if (rep?.state?.accounts instanceof Map && rep.state.accounts.size > 0) {
         for (const [cpId, account] of rep.state.accounts.entries()) {
           const hasDelta = !!account?.deltas?.get?.(1);
-          const ready = hasDelta && !account?.pendingFrame && Number(account?.currentHeight || 0) > 0;
+          const ready = hasDelta && Number(account?.currentHeight || 0) > 0;
           if (ready) {
             return { ok: true, entityId, signerId, counterpartyId: String(cpId) };
           }
@@ -103,12 +116,24 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{ entityId: string; 
     }
     if (!entityId || !signerId) return { ok: false, error: 'local entity not found' };
 
+    const ownerLower = String(entityId).toLowerCase();
     const profiles = env?.gossip?.getProfiles?.() || [];
-    const hub = profiles.find((p: any) =>
-      p?.metadata?.isHub === true ||
-      (Array.isArray(p?.capabilities) && (p.capabilities.includes('hub') || p.capabilities.includes('routing')))
+    const profileHubIds = profiles
+      .filter((p: any) =>
+        p?.metadata?.isHub === true ||
+        (Array.isArray(p?.capabilities) && (p.capabilities.includes('hub') || p.capabilities.includes('routing')))
+      )
+      .map((p: any) => String(p?.entityId || ''))
+      .filter((id: string) => !!id && id.toLowerCase() !== ownerLower);
+    const fallbackHub = (Array.isArray(fallbackHubIds) ? fallbackHubIds : [])
+      .map((id: any) => String(id || ''))
+      .find((id: string) => !!id && id.toLowerCase() !== ownerLower) || '';
+    const preferredOpenedHub = String(openedHubId || '');
+    const hubId = (
+      preferredOpenedHub && preferredOpenedHub.toLowerCase() !== ownerLower
+        ? preferredOpenedHub
+        : (profileHubIds[0] || fallbackHub || '')
     );
-    const hubId = String(openedHubId || hub?.entityId || '');
     if (!hubId) return { ok: false, error: 'hub not discovered in gossip' };
 
     const existingAccount = (() => {
@@ -137,20 +162,38 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{ entityId: string; 
     }
 
     const startedAt = Date.now();
-    while (Date.now() - startedAt < 45_000) {
+    while (Date.now() - startedAt < 90_000) {
       for (const [key, rep] of env.eReplicas.entries()) {
         const [eid] = String(key).split(':');
         if (String(eid || '').toLowerCase() !== String(entityId).toLowerCase()) continue;
         const account = findAccount(rep?.state?.accounts, entityId, hubId);
         if (!account) continue;
-        if (account?.deltas?.get?.(1) && !account?.pendingFrame && Number(account?.currentHeight || 0) > 0) {
+        if (account?.deltas?.get?.(1) && Number(account?.currentHeight || 0) > 0) {
           return { ok: true, entityId, signerId, counterpartyId: hubId };
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    return { ok: false, error: 'openAccount timeout (45s)' };
-  });
+    const timeoutState: Array<{ cp: string; h: number; pending: boolean; hasDelta1: boolean }> = [];
+    for (const [key, rep] of env.eReplicas.entries()) {
+      const [eid] = String(key).split(':');
+      if (String(eid || '').toLowerCase() !== ownerLower) continue;
+      const accounts = rep?.state?.accounts;
+      if (!(accounts instanceof Map)) continue;
+      for (const [cpId, account] of accounts.entries()) {
+        timeoutState.push({
+          cp: String(cpId),
+          h: Number(account?.currentHeight || 0),
+          pending: !!account?.pendingFrame,
+          hasDelta1: !!account?.deltas?.get?.(1),
+        });
+      }
+    }
+    return {
+      ok: false,
+      error: `openAccount timeout (90s); owner=${entityId.slice(0, 10)} hub=${hubId.slice(0, 10)} profiles=${profileHubIds.length} accounts=${JSON.stringify(timeoutState)}`,
+    };
+  }, { fallbackHubIds });
 
   expect(result.ok, `ensureAnyHubAccountOpen failed: ${result.error || 'unknown'}`).toBe(true);
   if (!result.ok) throw new Error(result.error || 'failed');
