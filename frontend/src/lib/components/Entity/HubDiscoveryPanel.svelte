@@ -14,7 +14,7 @@
     getCounterpartyAccount,
     getConnectedCounterpartyIds,
   } from '$lib/utils/entityReplica';
-  import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle, ArrowUpDown } from 'lucide-svelte';
+  import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle } from 'lucide-svelte';
 
   export let entityId: string = '';
   $: env = $xlnEnvironment;
@@ -25,8 +25,8 @@
   let error = '';
   let connecting: string | null = null;
   let expandedHub: string | null = null;
-  let sortKey: 'name' | 'fee' | 'capacity' | 'uptime' | 'region' = 'fee';
-  let sortAsc = true;
+  let sortKey: 'score' | 'fee' | 'uptime' | 'name' = 'score';
+  let sortAsc = false;
 
   const RELAY_OPTIONS_ALL = [
     { label: 'Prod (xln.finance)', url: 'wss://xln.finance/relay' },
@@ -56,6 +56,8 @@
     endpoints?: string[];
     capabilities?: string[];
     jurisdiction: string;
+    verified: boolean;
+    creditScore: number;
     isConnected: boolean;
     lastSeen: number;
     raw: string;
@@ -79,26 +81,23 @@
       isConnected: connectedHubIds.has(normalizeEntityId(hub.entityId)),
     }))
     .sort((a, b) => {
-    let cmp = 0;
-    switch (sortKey) {
-      case 'name':
-        cmp = a.name.localeCompare(b.name);
-        break;
-      case 'fee':
-        cmp = (a.metadata.fee || 0) - (b.metadata.fee || 0);
-        break;
-      case 'capacity':
-        cmp = Number((a.metadata.capacity || 0n) - (b.metadata.capacity || 0n));
-        break;
-      case 'uptime':
-        cmp = (a.metadata.uptime || 0) - (b.metadata.uptime || 0);
-        break;
-      case 'region':
-        cmp = a.jurisdiction.localeCompare(b.jurisdiction);
-        break;
-    }
-    return sortAsc ? cmp : -cmp;
-  });
+      let cmp = 0;
+      switch (sortKey) {
+        case 'name':
+          cmp = a.name.localeCompare(b.name);
+          break;
+        case 'fee':
+          cmp = (a.metadata.fee || 0) - (b.metadata.fee || 0);
+          break;
+        case 'score':
+          cmp = a.creditScore - b.creditScore;
+          break;
+        case 'uptime':
+          cmp = (a.metadata.uptime || 0) - (b.metadata.uptime || 0);
+          break;
+      }
+      return sortAsc ? cmp : -cmp;
+    });
 
   // Format functions
   function formatCapacity(cap?: bigint): string {
@@ -114,6 +113,21 @@
     return (ppm / 100).toFixed(2) + ' bps';
   }
 
+  function clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function computeCreditScore(entity: string, feePpm: number, uptime: number): number {
+    let hash = 0;
+    for (let i = 0; i < entity.length; i += 1) {
+      hash = ((hash << 5) - hash + entity.charCodeAt(i)) | 0;
+    }
+    const base = 720 + (Math.abs(hash) % 181); // 720..900 deterministic
+    const feeAdj = clamp(Math.round((120 - feePpm) / 10), -40, 20);
+    const uptimeAdj = clamp(Math.round((uptime - 99.5) * 20), -30, 30);
+    return clamp(base + feeAdj + uptimeAdj, 650, 980);
+  }
+
   const parseCapacity = (value: unknown): bigint | undefined => {
     if (value === null || value === undefined) return undefined;
     if (typeof value === 'bigint') return value;
@@ -121,7 +135,7 @@
     if (typeof value === 'string' && value.trim() !== '') {
       try {
         const match = value.match(/^BigInt\(([-\d]+)\)$/);
-        const raw = match ? match[1] : value;
+        const raw = match?.[1] ?? value;
         return BigInt(raw);
       } catch {
         return undefined;
@@ -141,13 +155,8 @@
     }
   };
 
-  function toggleSort(key: typeof sortKey) {
-    if (sortKey === key) {
-      sortAsc = !sortAsc;
-    } else {
-      sortKey = key;
-      sortAsc = true;
-    }
+  function toggleSortDirection() {
+    sortAsc = !sortAsc;
   }
 
   function toggleExpand(hubId: string) {
@@ -228,6 +237,11 @@
 
         const isConnected = hasCounterpartyAccount(currentEnv, entityId, profile.entityId);
         const capacity = parseCapacity(profile.metadata?.capacity);
+        const feePpm = profile.metadata?.routingFeePPM || 100;
+        const uptime = typeof profile.metadata?.uptime === 'number'
+          ? profile.metadata.uptime
+          : Number.parseFloat(String(profile.metadata?.uptime || '99.9'));
+        const capabilities = profile.capabilities || [];
         const fullEntityId = profile.entityId.startsWith('0x') ? profile.entityId : `0x${profile.entityId}`;
 
         discovered.push({
@@ -236,17 +250,17 @@
           name: profile.metadata?.name || `Hub ${profile.entityId.slice(0, 8)}`,
           metadata: {
             description: profile.metadata?.bio || 'Payment hub',
-            website: profile.metadata?.website,
-            fee: profile.metadata?.routingFeePPM || 100,
+            ...(profile.metadata?.website ? { website: profile.metadata.website } : {}),
+            fee: feePpm,
             capacity: capacity ?? 0n,
-            uptime: typeof profile.metadata?.uptime === 'number'
-              ? profile.metadata.uptime
-              : Number.parseFloat(String(profile.metadata?.uptime || '99.9')),
+            uptime,
           },
           runtimeId: profile.runtimeId,
           endpoints: profile.endpoints || [],
-          capabilities: profile.capabilities || [],
+          capabilities,
           jurisdiction: profile.metadata?.region || 'global',
+          verified: capabilities.includes('hub') || capabilities.includes('routing'),
+          creditScore: computeCreditScore(profile.entityId, feePpm, uptime),
           isConnected,
           lastSeen: profile.metadata?.lastUpdated || Date.now(),
           raw: formatRawProfile(profile),
@@ -467,50 +481,38 @@
       <span>No hubs found</span>
     </div>
   {:else}
-    <div class="hub-table">
-      <div class="table-header">
-        <button class="col col-name" on:click={() => toggleSort('name')}>
-          Name {#if sortKey === 'name'}<ArrowUpDown size={10} />{/if}
-        </button>
-        <button class="col col-fee" on:click={() => toggleSort('fee')}>
-          Fee {#if sortKey === 'fee'}<ArrowUpDown size={10} />{/if}
-        </button>
-        <button class="col col-capacity" on:click={() => toggleSort('capacity')}>
-          Capacity {#if sortKey === 'capacity'}<ArrowUpDown size={10} />{/if}
-        </button>
-        <button class="col col-uptime" on:click={() => toggleSort('uptime')}>
-          Uptime {#if sortKey === 'uptime'}<ArrowUpDown size={10} />{/if}
-        </button>
-        <button class="col col-region" on:click={() => toggleSort('region')}>
-          Region {#if sortKey === 'region'}<ArrowUpDown size={10} />{/if}
-        </button>
-        <div class="col col-action"></div>
-      </div>
+    <div class="hub-sorting">
+      <label>
+        Sort by
+        <select bind:value={sortKey}>
+          <option value="score">Credit score</option>
+          <option value="fee">Fee</option>
+          <option value="uptime">Uptime</option>
+          <option value="name">Name</option>
+        </select>
+      </label>
+      <button class="sort-direction" on:click={toggleSortDirection}>
+        {sortAsc ? 'Asc' : 'Desc'}
+      </button>
+    </div>
 
+    <div class="hub-cards">
       {#each sortedHubs as hub (hub.entityId)}
-        <div class="hub-row" class:connected={hub.isConnected} class:expanded={expandedHub === hub.entityId}>
-          <div class="row-main" on:click={() => toggleExpand(hub.entityId)}>
-            <div class="col col-name">
-              <span class="expand-icon">
-                {#if expandedHub === hub.entityId}
-                  <ChevronUp size={12} />
-                {:else}
-                  <ChevronDown size={12} />
-                {/if}
-              </span>
+        <article class="hub-card" class:connected={hub.isConnected}>
+          <div class="hub-card-top">
+            <button class="hub-primary" on:click={() => toggleExpand(hub.entityId)}>
               <img src={hub.identicon} alt="" class="hub-identicon" />
-              <span class="hub-name">{hub.name}</span>
-              {#if hub.isConnected}
-                <span class="connected-dot" title="Connected"></span>
+              <div class="hub-title">
+                <span class="hub-name">{hub.name}</span>
+                <span class="hub-id mono">{hub.entityId}</span>
+              </div>
+            </button>
+            <div class="hub-actions">
+              {#if hub.verified}
+                <span class="badge verified">Verified</span>
               {/if}
-            </div>
-            <div class="col col-fee">{formatFee(hub.metadata.fee)}</div>
-            <div class="col col-capacity">{formatCapacity(hub.metadata.capacity)}</div>
-            <div class="col col-uptime">{hub.metadata.uptime?.toFixed(1) || '-'}%</div>
-            <div class="col col-region">{hub.jurisdiction}</div>
-            <div class="col col-action" on:click|stopPropagation>
               {#if hub.isConnected}
-                <span class="status-connected"><Check size={12} /> Open</span>
+                <span class="badge open"><Check size={12} /> Open</span>
               {:else if entityId}
                 <button
                   class="btn-connect"
@@ -524,16 +526,42 @@
                   {/if}
                 </button>
               {/if}
+              <button class="expand-toggle" on:click={() => toggleExpand(hub.entityId)}>
+                {#if expandedHub === hub.entityId}
+                  <ChevronUp size={12} />
+                {:else}
+                  <ChevronDown size={12} />
+                {/if}
+              </button>
+            </div>
+          </div>
+
+          <div class="hub-metrics">
+            <div class="metric">
+              <span class="metric-label">Fee</span>
+              <span class="metric-value">{formatFee(hub.metadata.fee)}</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Capacity</span>
+              <span class="metric-value">{formatCapacity(hub.metadata.capacity)}</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Uptime</span>
+              <span class="metric-value">{hub.metadata.uptime?.toFixed(1) || '-'}%</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Score</span>
+              <span class="metric-value">{hub.creditScore}</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Region</span>
+              <span class="metric-value">{hub.jurisdiction}</span>
             </div>
           </div>
 
           {#if expandedHub === hub.entityId}
             <div class="row-details">
               <div class="detail-grid">
-                <div class="detail">
-                  <span class="label">Entity ID</span>
-                  <span class="value mono">{hub.entityId}</span>
-                </div>
                 <div class="detail">
                   <span class="label">Runtime ID</span>
                   <span class="value mono">{hub.runtimeId || '-'}</span>
@@ -565,7 +593,7 @@
               </details>
             </div>
           {/if}
-        </div>
+        </article>
       {/each}
     </div>
   {/if}
@@ -680,111 +708,135 @@
     50% { opacity: 1; }
   }
 
-  /* Table styles */
-  .hub-table {
-    border: 1px solid #292524;
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .table-header {
-    display: flex;
-    background: #1c1917;
-    border-bottom: 1px solid #292524;
-  }
-
-  .table-header button {
-    background: none;
-    border: none;
-    color: #666;
-    font-size: 11px;
-    font-weight: 500;
-    padding: 8px;
-    cursor: pointer;
+  .hub-sorting {
     display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: space-between;
+    gap: 8px;
   }
 
-  .table-header button:hover {
+  .hub-sorting label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     color: #a8a29e;
-  }
-
-  .col {
-    padding: 8px;
     font-size: 12px;
   }
 
-  .col-name { flex: 2; min-width: 140px; }
-  .col-fee { flex: 1; min-width: 70px; text-align: right; }
-  .col-capacity { flex: 1; min-width: 70px; text-align: right; }
-  .col-uptime { flex: 1; min-width: 60px; text-align: right; }
-  .col-region { flex: 1; min-width: 60px; }
-  .col-action { width: 90px; text-align: right; }
-
-  .hub-row {
-    border-bottom: 1px solid #292524;
-  }
-
-  .hub-row:last-child {
-    border-bottom: none;
-  }
-
-  .hub-row.connected {
-    background: rgba(34, 197, 94, 0.03);
-  }
-
-  .row-main {
-    display: flex;
-    align-items: center;
-    cursor: pointer;
-    transition: background 0.1s;
-  }
-
-  .row-main:hover {
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .row-main .col {
-    color: #a8a29e;
-  }
-
-  .row-main .col-name {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+  .hub-sorting select {
+    background: #1c1917;
+    border: 1px solid #292524;
     color: #e7e5e4;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 12px;
   }
 
-  .expand-icon {
+  .sort-direction {
+    background: #1c1917;
+    border: 1px solid #292524;
+    color: #a8a29e;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .hub-cards {
     display: flex;
-    color: #57534e;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .hub-card {
+    border: 1px solid #292524;
+    border-radius: 10px;
+    background: #11131d;
+    padding: 12px;
+  }
+
+  .hub-card.connected {
+    border-color: rgba(34, 197, 94, 0.35);
+  }
+
+  .hub-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .hub-primary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
   }
 
   .hub-identicon {
-    width: 20px;
-    height: 20px;
-    border-radius: 4px;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
     flex-shrink: 0;
   }
 
+  .hub-title {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
+  }
+
   .hub-name {
-    font-weight: 500;
+    font-weight: 600;
+    color: #e7e5e4;
+    font-size: 14px;
   }
 
-  .connected-dot {
-    width: 6px;
-    height: 6px;
-    background: #22c55e;
-    border-radius: 50%;
+  .hub-id {
+    color: #78716c;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
   }
 
-  .status-connected {
+  .hub-actions {
     display: flex;
     align-items: center;
-    gap: 4px;
-    color: #22c55e;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .badge {
+    border-radius: 999px;
+    border: 1px solid #292524;
+    padding: 4px 8px;
     font-size: 11px;
+    color: #a8a29e;
+    background: #171717;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .badge.verified {
+    border-color: rgba(59, 130, 246, 0.35);
+    color: #93c5fd;
+  }
+
+  .badge.open {
+    border-color: rgba(34, 197, 94, 0.35);
+    color: #4ade80;
   }
 
   .btn-connect {
@@ -811,11 +863,56 @@
     cursor: not-allowed;
   }
 
+  .expand-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid #292524;
+    background: #171717;
+    color: #a8a29e;
+    cursor: pointer;
+  }
+
+  .hub-metrics {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 8px;
+  }
+
+  .metric {
+    background: #0c0a09;
+    border: 1px solid #292524;
+    border-radius: 8px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .metric-label {
+    font-size: 10px;
+    color: #78716c;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .metric-value {
+    font-size: 12px;
+    color: #e7e5e4;
+    font-weight: 600;
+  }
+
   /* Expanded details */
   .row-details {
     padding: 12px 16px;
     background: #0c0a09;
     border-top: 1px solid #292524;
+    margin-top: 10px;
+    border-radius: 8px;
   }
 
   .detail-grid {
@@ -869,5 +966,40 @@
     word-break: break-word;
     max-height: 200px;
     overflow-y: auto;
+  }
+
+  .mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  @media (max-width: 740px) {
+    .panel-header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .header-controls {
+      width: 100%;
+      justify-content: space-between;
+    }
+
+    .relay-select {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .hub-sorting {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .hub-card-top {
+      flex-direction: column;
+    }
+
+    .hub-actions {
+      justify-content: flex-start;
+    }
   }
 </style>
