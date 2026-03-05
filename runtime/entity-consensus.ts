@@ -72,7 +72,9 @@ export async function createEntityFrameHash(
       mempoolSize: acct.mempool.length,
       pendingFrame: acct.pendingFrame?.height ?? null,
     }));
-  console.log(`🔢 FRAME-HASH-INPUT: h=${height}, prevHash=${prevFrameHash.slice(0, 12)}, accounts=${JSON.stringify(accountSnapshot)}`);
+  if (HEAVY_LOGS) {
+    console.log(`🔢 FRAME-HASH-INPUT: h=${height}, prevHash=${prevFrameHash.slice(0, 12)}, accounts=${JSON.stringify(accountSnapshot)}`);
+  }
 
   // Build hashable state object
   const frameData = {
@@ -312,18 +314,21 @@ export const applyEntityInput = async (
   // Debug: Log every input being processed with deterministic timestamp
   const entityDisplay = formatEntityDisplay(entityInput.entityId);
   const timestamp = env.timestamp; // Use deterministic env.timestamp, not Date.now()
+  const quietRuntimeLogs = env.quietRuntimeLogs === true;
   const currentProposalHash = workingReplica.proposal?.hash?.slice(0, 10) || 'none';
   const frameHash = entityInput.proposedFrame?.hash?.slice(0, 10) || 'none';
 
-  console.log(
-    `🔍 INPUT-RECEIVED: [${timestamp}] Processing input for Entity #${entityDisplay}`,
-  );
-  console.log(
-    `🔍 INPUT-STATE: Current proposal: ${currentProposalHash}, Mempool: ${workingReplica.mempool.length}, isProposer: ${workingReplica.isProposer}`,
-  );
-  console.log(
-    `🔍 INPUT-DETAILS: txs=${entityInput.entityTxs?.length || 0}, hashPrecommits=${entityInput.hashPrecommits?.size || 0}, frame=${frameHash}`,
-  );
+  if (!quietRuntimeLogs) {
+    console.log(
+      `🔍 INPUT-RECEIVED: [${timestamp}] Processing input for Entity #${entityDisplay}`,
+    );
+    console.log(
+      `🔍 INPUT-STATE: Current proposal: ${currentProposalHash}, Mempool: ${workingReplica.mempool.length}, isProposer: ${workingReplica.isProposer}`,
+    );
+    console.log(
+      `🔍 INPUT-DETAILS: txs=${entityInput.entityTxs?.length || 0}, hashPrecommits=${entityInput.hashPrecommits?.size || 0}, frame=${frameHash}`,
+    );
+  }
   if (entityInput.hashPrecommits?.size) {
     const precommitSigners = Array.from(entityInput.hashPrecommits.keys());
     if (HEAVY_LOGS) console.log(`🔍 INPUT-PRECOMMITS: Received hashPrecommits from: ${precommitSigners.join(', ')}`);
@@ -857,15 +862,17 @@ export const applyEntityInput = async (
   // Commit notifications are now handled at the top of the function
 
   // Debug consensus trigger conditions
-  console.log(`🎯 CONSENSUS-CHECK: Entity ${workingReplica.entityId}:${workingReplica.signerId}`);
-  console.log(`🎯   isProposer: ${workingReplica.isProposer}`);
-  console.log(`🎯   mempool.length: ${workingReplica.mempool.length}`);
-  console.log(`🎯   hasProposal: ${!!workingReplica.proposal}`);
-  if (workingReplica.mempool.length > 0) {
-    console.log(
-      `🎯   mempoolTypes:`,
-      workingReplica.mempool.map(tx => tx.type),
-    );
+  if (!quietRuntimeLogs) {
+    console.log(`🎯 CONSENSUS-CHECK: Entity ${workingReplica.entityId}:${workingReplica.signerId}`);
+    console.log(`🎯   isProposer: ${workingReplica.isProposer}`);
+    console.log(`🎯   mempool.length: ${workingReplica.mempool.length}`);
+    console.log(`🎯   hasProposal: ${!!workingReplica.proposal}`);
+    if (workingReplica.mempool.length > 0) {
+      console.log(
+        `🎯   mempoolTypes:`,
+        workingReplica.mempool.map(tx => tx.type),
+      );
+    }
   }
 
   // Auto-propose logic: ONLY proposer can propose (BFT requirement)
@@ -1043,20 +1050,24 @@ export const applyEntityInput = async (
   }
 
   // Debug: Log outputs being generated with detailed analysis
-  console.log(
-    `🔍 OUTPUT-GENERATED: [${timestamp}] Entity #${entityDisplay}:${formatSignerDisplay(workingReplica.signerId)} generating ${entityOutbox.length} outputs`,
-  );
-  console.log(
-    `🔍 OUTPUT-FINAL-STATE: proposal=${workingReplica.proposal?.hash?.slice(0, 10) || 'none'}, mempool=${workingReplica.mempool.length}, locked=${workingReplica.lockedFrame?.hash?.slice(0, 10) || 'none'}`,
-  );
+  if (!quietRuntimeLogs) {
+    console.log(
+      `🔍 OUTPUT-GENERATED: [${timestamp}] Entity #${entityDisplay}:${formatSignerDisplay(workingReplica.signerId)} generating ${entityOutbox.length} outputs`,
+    );
+    console.log(
+      `🔍 OUTPUT-FINAL-STATE: proposal=${workingReplica.proposal?.hash?.slice(0, 10) || 'none'}, mempool=${workingReplica.mempool.length}, locked=${workingReplica.lockedFrame?.hash?.slice(0, 10) || 'none'}`,
+    );
+  }
 
   entityOutbox.forEach((output, index) => {
     const targetDisplay = formatEntityDisplay(output.entityId);
     const outputFrameHash = output.proposedFrame?.hash?.slice(0, 10) || 'none';
     const hashPrecommitCount = output.hashPrecommits?.size || 0;
-    console.log(
-      `🔍 OUTPUT-${index + 1}: [${timestamp}] To Entity #${targetDisplay}:${formatSignerDisplay(output.signerId)} - txs=${output.entityTxs?.length || 0}, hashPrecommits=${hashPrecommitCount}, frame=${outputFrameHash}`,
-    );
+    if (!quietRuntimeLogs) {
+      console.log(
+        `🔍 OUTPUT-${index + 1}: [${timestamp}] To Entity #${targetDisplay}:${formatSignerDisplay(output.signerId)} - txs=${output.entityTxs?.length || 0}, hashPrecommits=${hashPrecommitCount}, frame=${outputFrameHash}`,
+      );
+    }
 
     if (output.hashPrecommits?.size) {
       const precommitSigners = Array.from(output.hashPrecommits.keys());

@@ -1,14 +1,5 @@
 <script lang="ts">
-  type DeltaParts = {
-    outOwnCredit: bigint;
-    outCollateral: bigint;
-    outPeerCredit: bigint;
-    inOwnCredit: bigint;
-    inCollateral: bigint;
-    inPeerCredit: bigint;
-    outTotalHold?: bigint;
-    inTotalHold?: bigint;
-  };
+  import type { DeltaParts } from './delta-types';
 
   export let derived: DeltaParts;
   export let decimals: number = 18;
@@ -134,7 +125,7 @@
 
   .bar.center {
     display: grid;
-    grid-template-columns: 1fr 2px 1fr;
+    grid-template-columns: 1fr 10px 1fr;
   }
 
   .bar.one-sided {
@@ -163,17 +154,27 @@
   }
 
   .mid {
-    width: 2px;
+    width: 10px;
     height: 100%;
-    background: #52525b;
+    background: linear-gradient(
+      180deg,
+      rgba(71, 85, 105, 0.38) 0%,
+      rgba(100, 116, 139, 0.5) 50%,
+      rgba(71, 85, 105, 0.38) 100%
+    );
+    border-left: 1px solid rgba(226, 232, 240, 0.78);
+    border-right: 1px solid rgba(148, 163, 184, 0.55);
+    position: relative;
+    z-index: 4;
+    box-shadow: 0 0 8px rgba(148, 163, 184, 0.2);
   }
 
   .mid.one-sided-sep {
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 2px;
-    transform: translateX(-1px);
+    width: 10px;
+    transform: translateX(-5px);
     z-index: 4;
   }
 

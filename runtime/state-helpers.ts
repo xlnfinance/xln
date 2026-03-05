@@ -227,6 +227,7 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
         { ...route } // Clone route object
       ])
     ),
+    htlcNotes: new Map(Array.from((entityState.htlcNotes || new Map()).entries())),
     htlcFeesEarned: entityState.htlcFeesEarned || 0n,
     // Orderbook extension (hub-only, contains TypedArrays)
     // Must manually clone since structuredClone failed (we're in fallback path)

@@ -56,6 +56,27 @@
     Number(liveJHeight || 0),
   );
   $: disputeBlocksLeft = activeDispute ? Math.max(0, disputeTimeoutBlock - currentJHeight) : 0;
+  $: pendingSecretAckInfo = (() => {
+    const routes = replica?.state?.htlcRoutes;
+    if (!(routes instanceof Map)) return null;
+    const counterpartyNorm = String(counterpartyId || '').toLowerCase();
+    let count = 0;
+    let deadline = Number.POSITIVE_INFINITY;
+    for (const route of routes.values()) {
+      if (!route?.secretAckPending) continue;
+      const inboundEntity = String(route.inboundEntity || '').toLowerCase();
+      if (!inboundEntity || inboundEntity !== counterpartyNorm) continue;
+      const routeDeadline = Number(route.secretAckDeadlineAt || 0);
+      if (!Number.isFinite(routeDeadline) || routeDeadline <= 0) continue;
+      count += 1;
+      if (routeDeadline < deadline) deadline = routeDeadline;
+    }
+    if (count === 0 || !Number.isFinite(deadline)) return null;
+    return {
+      count,
+      secondsLeft: Math.max(0, Math.ceil((deadline - nowMs) / 1000)),
+    };
+  })();
 
   $: reconnectCountdown = (() => {
     if (!$p2pState.reconnect) return null;
@@ -88,7 +109,7 @@
       };
     });
   })();
-  $: hasCommittedFrame = Number(account.currentHeight || 0) > 0;
+  $: hasCommittedFrame = Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
   $: showTokenDetails = hasCommittedFrame && tokenDetails.length > 0;
   $: currentFrameTxs = Array.isArray(account.currentFrame?.accountTxs) ? account.currentFrame.accountTxs : [];
   $: activityRows = (() => {
@@ -297,6 +318,22 @@
     return { label, value: String(value ?? '-') };
   }
 
+  function getHtlcNote(data: Record<string, unknown>): string | null {
+    const notes = replica?.state?.htlcNotes;
+    if (!(notes instanceof Map)) return null;
+    const lockId = typeof data.lockId === 'string' ? data.lockId : '';
+    if (lockId) {
+      const lockNote = notes.get(`lock:${lockId}`);
+      if (typeof lockNote === 'string' && lockNote.trim()) return lockNote.trim();
+    }
+    const hashlock = typeof data.hashlock === 'string' ? data.hashlock : '';
+    if (hashlock) {
+      const hashNote = notes.get(`hashlock:${hashlock}`);
+      if (typeof hashNote === 'string' && hashNote.trim()) return hashNote.trim();
+    }
+    return null;
+  }
+
   function buildActionParams(tx: AccountTx): ActionParam[] {
     const data = (tx?.data && typeof tx.data === 'object') ? (tx.data as Record<string, unknown>) : {};
     const orderedKeys = [
@@ -338,6 +375,10 @@
       if (seen.has(key)) continue;
       out.push(formatDataValue(key, data[key], data));
     }
+    if (!('description' in data)) {
+      const htlcNote = getHtlcNote(data);
+      if (htlcNote) out.push({ label: 'Comment', value: htlcNote });
+    }
     return out;
   }
 
@@ -359,6 +400,18 @@
     return activeXlnFunctions?.formatTokenAmount
       ? activeXlnFunctions.formatTokenAmount(tokenId, value)
       : value.toString();
+  }
+
+  function stripTrailingSymbol(rawAmount: string, rawSymbol: string): string {
+    const amount = String(rawAmount || '').replace(/\s+/g, ' ').trim();
+    const symbol = String(rawSymbol || '').trim();
+    if (!amount || !symbol) return amount;
+    const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return amount.replace(new RegExp(`\\s+${escaped}\\s*$`, 'i'), '').trim();
+  }
+
+  function formatTokenNumberOnly(tokenId: number, value: bigint, symbol: string): string {
+    return stripTrailingSymbol(formatTokenAmountSafe(tokenId, value), symbol);
   }
 
   function handleBackToEntity(): void {
@@ -454,11 +507,10 @@
   <div class="panel-content">
     {#if showTokenDetails}
       {#each tokenDetails as td (td.tokenId)}
-        {@const outTotal = td.derived.outOwnCredit + td.derived.outCollateral + td.derived.outPeerCredit}
-        {@const inTotal = td.derived.inOwnCredit + td.derived.inCollateral + td.derived.inPeerCredit}
         {@const isExpanded = expandedTokenIds.has(td.tokenId)}
         <div class="delta-card">
           <DeltaTokenSummary
+            compact={true}
             barLayout={$settings.barLayout ?? 'center'}
             symbol={td.tokenInfo.symbol}
             name={td.tokenInfo.name || ''}
@@ -467,6 +519,7 @@
             derived={td.derived}
             decimals={Number(td.tokenInfo.decimals ?? 18)}
             barHeight={12}
+            showMetricLabels={true}
           >
             <svelte:fragment slot="actions">
               <button class="delta-expand" on:click={() => toggleTokenDetails(td.tokenId)}>
@@ -478,75 +531,63 @@
 
           {#if isExpanded}
             <div class="delta-details">
-              <div class="detail-grid-three detail-head">
-                <span class="detail-header">Parameter</span>
-                <span class="detail-header">You</span>
-                <span class="detail-header">Peer</span>
+              <div class="detail-section">
+                <h5 class="detail-section-title">Perspective Parameters</h5>
+                <div class="detail-table">
+                  <div class="detail-grid-three detail-head">
+                    <span class="detail-header">Parameter</span>
+                    <span class="detail-header detail-header-right">Outbound</span>
+                    <span class="detail-header detail-header-right">Inbound</span>
+                  </div>
+                  <div class="detail-grid-three">
+                    <span class="detail-label-cell">Capacity</span>
+                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.outCapacity, td.tokenInfo.symbol)}</span>
+                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.inCapacity, td.tokenInfo.symbol)}</span>
+                  </div>
+                  <div class="detail-grid-three">
+                    <span class="detail-label-cell">Credit limit</span>
+                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.ownCreditLimit, td.tokenInfo.symbol)}</span>
+                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.peerCreditLimit, td.tokenInfo.symbol)}</span>
+                  </div>
+                  <div class="detail-grid-three">
+                    <span class="detail-label-cell">Own credit component</span>
+                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.outOwnCredit, td.tokenInfo.symbol)}</span>
+                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.inOwnCredit, td.tokenInfo.symbol)}</span>
+                  </div>
+                  <div class="detail-grid-three">
+                    <span class="detail-label-cell">Peer credit component</span>
+                    <span class="detail-value-cell debt">{formatTokenNumberOnly(td.tokenId, td.derived.outPeerCredit, td.tokenInfo.symbol)}</span>
+                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.inPeerCredit, td.tokenInfo.symbol)}</span>
+                  </div>
+                  <div class="detail-grid-three">
+                    <span class="detail-label-cell">Collateral component</span>
+                    <span class="detail-value-cell coll">{formatTokenNumberOnly(td.tokenId, td.derived.outCollateral, td.tokenInfo.symbol)}</span>
+                    <span class="detail-value-cell coll">{formatTokenNumberOnly(td.tokenId, td.derived.inCollateral, td.tokenInfo.symbol)}</span>
+                  </div>
+                  <div class="detail-grid-three">
+                    <span class="detail-label-cell">Hold deduction</span>
+                    <span class="detail-value-cell debt">{formatTokenNumberOnly(td.tokenId, td.derived.outTotalHold ?? 0n, td.tokenInfo.symbol)}</span>
+                    <span class="detail-value-cell debt">{formatTokenNumberOnly(td.tokenId, td.derived.inTotalHold ?? 0n, td.tokenInfo.symbol)}</span>
+                  </div>
+                </div>
               </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">Delta</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.delta)}</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.delta)}</span>
-              </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">Out capacity</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.outCapacity)}</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outCapacity)}</span>
-              </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">In capacity</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.inCapacity)}</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inCapacity)}</span>
-              </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">Out own credit (grey)</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.outOwnCredit)}</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outOwnCredit)}</span>
-              </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">Out collateral (green)</span>
-                <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.derived.outCollateral)}</span>
-                <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outCollateral)}</span>
-              </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">Out peer credit (red)</span>
-                <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.derived.outPeerCredit)}</span>
-                <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outPeerCredit)}</span>
-              </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">In own credit (red)</span>
-                <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.derived.inOwnCredit)}</span>
-                <span class="detail-value-cell debt">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inOwnCredit)}</span>
-              </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">In collateral (green)</span>
-                <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.derived.inCollateral)}</span>
-                <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inCollateral)}</span>
-              </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">In peer credit (grey)</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.derived.inPeerCredit)}</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inPeerCredit)}</span>
-              </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">Bar OUT total</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, outTotal)}</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.outOwnCredit + td.peerDerived.outCollateral + td.peerDerived.outPeerCredit)}</span>
-              </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">Bar IN total</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, inTotal)}</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.peerDerived.inOwnCredit + td.peerDerived.inCollateral + td.peerDerived.inPeerCredit)}</span>
-              </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">Raw collateral</span>
-                <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.delta.collateral)}</span>
-                <span class="detail-value-cell coll">{formatTokenAmountSafe(td.tokenId, td.delta.collateral)}</span>
-              </div>
-              <div class="detail-grid-three">
-                <span class="detail-label-cell">Credit limit</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.ourCreditLimit)}</span>
-                <span class="detail-value-cell">{formatTokenAmountSafe(td.tokenId, td.theirCreditLimit)}</span>
+
+              <div class="detail-section canonical">
+                <h5 class="detail-section-title">Canonical State (Side-Neutral)</h5>
+                <div class="detail-list">
+                  <div class="detail-line">
+                    <span class="detail-label">delta</span>
+                    <span class="detail-value">{formatTokenNumberOnly(td.tokenId, (td.delta?.offdelta ?? 0n) + (td.delta?.ondelta ?? 0n), td.tokenInfo.symbol)}</span>
+                  </div>
+                  <div class="detail-line">
+                    <span class="detail-label">offdelta</span>
+                    <span class="detail-value">{formatTokenNumberOnly(td.tokenId, td.delta?.offdelta ?? 0n, td.tokenInfo.symbol)}</span>
+                  </div>
+                  <div class="detail-line">
+                    <span class="detail-label">ondelta</span>
+                    <span class="detail-value">{formatTokenNumberOnly(td.tokenId, td.delta?.ondelta ?? 0n, td.tokenInfo.symbol)}</span>
+                  </div>
+                </div>
               </div>
             </div>
           {/if}
@@ -564,9 +605,9 @@
 
     <div class="proof-card">
       <div class="proof-header">
-        <span>Frame #{account.currentFrame.height}</span>
-        <span>{formatTimestamp(account.currentFrame.timestamp)}</span>
-        {#if account.currentFrame.stateHash}
+        <span>Frame #{account.currentFrame?.height ?? account.currentHeight ?? 0}</span>
+        <span>{formatTimestamp(Number(account.currentFrame?.timestamp || 0))}</span>
+        {#if account.currentFrame?.stateHash}
           <code title={account.currentFrame.stateHash}>{account.currentFrame.stateHash.slice(0, 16)}...</code>
           <span class="proof-ok">✓</span>
         {/if}
@@ -605,6 +646,11 @@
 
     <div class="action-card management-card">
       <h4>Dispute</h4>
+      {#if pendingSecretAckInfo}
+        <p class="dispute-status queued">
+          Awaiting secret ACK: {pendingSecretAckInfo.secondsLeft}s before auto-dispute start ({pendingSecretAckInfo.count} route{pendingSecretAckInfo.count === 1 ? '' : 's'}).
+        </p>
+      {/if}
       {#if activeDispute}
         <p class="dispute-status">
           Dispute active: {disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left (until J#{disputeTimeoutBlock}).
@@ -858,76 +904,139 @@
     font-style: italic;
   }
 
-  .delta-card-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-
-  .delta-token {
-    font-weight: 700;
-    color: #f3f4f6;
-  }
-
-  .delta-brief {
-    flex: 1;
-    color: #a1a1aa;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-  }
-
   .delta-expand,
   .delta-faucet {
     border: 1px solid #3f3f46;
     background: transparent;
     color: #d1d5db;
     border-radius: 8px;
-    padding: 4px 8px;
+    padding: 5px 10px;
     cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
   }
 
   .delta-details {
-    margin-top: 10px;
+    margin-top: 8px;
     border-top: 1px solid #292524;
-    padding-top: 8px;
+    padding-top: 10px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 10px;
+  }
+
+  .detail-section {
+    border: 1px solid rgba(63, 63, 70, 0.32);
+    border-radius: 10px;
+    background: rgba(24, 24, 27, 0.55);
+    padding: 10px;
+  }
+
+  .detail-section.canonical {
+    border-color: rgba(120, 113, 108, 0.45);
+    background: rgba(20, 20, 22, 0.72);
+  }
+
+  .detail-section-title {
+    margin: 0 0 8px;
+    color: #a1a1aa;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+  }
+
+  .detail-table {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .detail-grid-three {
     display: grid;
-    grid-template-columns: minmax(130px, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(180px, 240px) minmax(140px, 1fr) minmax(140px, 1fr);
     gap: 8px;
     align-items: center;
+    border: 1px solid rgba(63, 63, 70, 0.28);
+    border-radius: 8px;
+    background: rgba(12, 10, 9, 0.6);
+    padding: 7px 9px;
   }
 
   .detail-head {
+    margin-bottom: 4px;
+    border-style: dashed;
+    background: rgba(24, 24, 27, 0.9);
+  }
+
+  .detail-header {
     color: #9ca3af;
-    font-size: 11px;
+    font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    font-weight: 700;
   }
 
-  .detail-label-cell,
-  .detail-value-cell {
-    font-size: 12px;
-    color: #d1d5db;
-    font-family: 'JetBrains Mono', monospace;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .detail-header-right {
+    text-align: right;
   }
 
+  .detail-label,
   .detail-label-cell {
     color: #9ca3af;
-    font-family: inherit;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    line-height: 1;
+  }
+
+  .detail-value,
+  .detail-value-cell {
+    color: #e7e5e4;
+    font-size: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .detail-value-cell {
+    text-align: right;
+  }
+
+  .detail-value.coll {
+    color: #34d399;
   }
 
   .detail-value-cell.coll {
     color: #34d399;
+  }
+
+  .detail-value.debt {
+    color: #fb7185;
+  }
+
+  .detail-value-cell.debt {
+    color: #fb7185;
+  }
+
+  .detail-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .detail-line {
+    border: 1px solid rgba(63, 63, 70, 0.28);
+    border-radius: 8px;
+    background: rgba(12, 10, 9, 0.6);
+    padding: 7px 9px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
   }
 
   .proof-header {
@@ -1204,18 +1313,17 @@
       flex-wrap: wrap;
     }
 
-    .delta-card-header {
-      flex-wrap: wrap;
-    }
-
     .detail-grid-three {
       grid-template-columns: 1fr;
-      gap: 2px;
-      padding: 4px 0;
+      gap: 3px;
     }
 
     .detail-head {
       display: none;
+    }
+
+    .detail-value-cell {
+      text-align: left;
     }
 
     .tx-params {

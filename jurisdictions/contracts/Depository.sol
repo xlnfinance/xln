@@ -1028,6 +1028,10 @@ contract Depository is ReentrancyGuardLite {
 
     bytes[] memory decodedLeft = leftArgs.length > 0 ? abi.decode(leftArgs, (bytes[])) : new bytes[](0);
     bytes[] memory decodedRight = rightArgs.length > 0 ? abi.decode(rightArgs, (bytes[])) : new bytes[](0);
+    // IMPORTANT (runtime path):
+    // - Dispute finalize currently passes transformer arguments directly via `finalArguments`/`initialArguments`.
+    // - For HTLC this includes revealed secrets in calldata, so transformers can settle without reading storage.
+    // - `revealSecret` storage path remains available for compatibility/debug/manual workflows.
 
     // Apply transformers
     for (uint256 i = 0; i < proofbody.transformers.length; i++) {

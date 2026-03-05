@@ -117,7 +117,19 @@ export const registerClient = (store: RelayStore, runtimeId: string, ws: any): v
   if (!key) return;
   const existing = store.clients.get(key);
   if (existing && existing.ws !== ws) {
-    try { existing.ws.close(); } catch { /* best effort */ }
+    pushDebugEvent(store, {
+      event: 'ws_duplicate_runtime_replace',
+      runtimeId: key,
+      from: key,
+      status: 'warning',
+      reason: 'DUPLICATE_RUNTIME_CONNECTION',
+      details: {
+        runtimeId: key,
+      },
+    });
+    try { existing.ws.close(4009, 'duplicate-runtime'); } catch {
+      try { existing.ws.close(); } catch { /* best effort */ }
+    }
   }
   store.clients.set(key, { ws, runtimeId: key, lastSeen: nextWsTimestamp(store), topics: new Set() });
 };

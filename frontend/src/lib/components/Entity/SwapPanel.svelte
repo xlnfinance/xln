@@ -15,6 +15,11 @@
   let orderbookScope: 'all' | 'selected' = 'all';
   const ORDERBOOK_PRICE_SCALE = 10_000n;
   const ORDERBOOK_LOT_SCALE = 10n ** 12n;
+  function decimalPlacesFromScale(scale: bigint): number {
+    const s = scale.toString();
+    return /^10*$/.test(s) ? Math.max(0, s.length - 1) : 0;
+  }
+  const ORDERBOOK_PRICE_DECIMALS = decimalPlacesFromScale(ORDERBOOK_PRICE_SCALE);
   const PRICE_RATIO_DECIMALS = 6;
   const PRICE_RATIO_SCALE = 10n ** BigInt(PRICE_RATIO_DECIMALS);
   type BookSide = 'bid' | 'ask';
@@ -103,7 +108,6 @@
   let orderMode: 'buy-base' | 'sell-base' | 'none' = 'none';
   let limitPriceTicks: bigint | null = null;
   let priceRatioScaled = 0n;
-  let minFillPercent = '50'; // Min fill ratio as percentage (0-100)
   let showDepthChart = false;
   let orderListTab: 'open' | 'closed' = 'open';
   let closedOrderStatusFilter: 'all' | ClosedOrderStatus = 'all';
@@ -330,8 +334,12 @@
 
   function formatPriceTicks(ticks: bigint): string {
     const whole = ticks / ORDERBOOK_PRICE_SCALE;
-    const frac = (ticks % ORDERBOOK_PRICE_SCALE).toString().padStart(4, '0').replace(/0+$/, '');
-    return frac.length > 0 ? `${whole.toString()}.${frac}` : whole.toString();
+    if (ORDERBOOK_PRICE_DECIMALS <= 0) return whole.toString();
+    const frac = (ticks % ORDERBOOK_PRICE_SCALE)
+      .toString()
+      .padStart(ORDERBOOK_PRICE_DECIMALS, '0')
+      .replace(/0+$/, '');
+    return frac ? `${whole.toString()}.${frac}` : whole.toString();
   }
 
   function lotsToBaseWei(sizeLots: number): bigint {
@@ -454,13 +462,6 @@
     return nonNegative(toBigIntSafe(raw) ?? 0n);
   }
 
-  function computeRawOutPeerDebt(delta: DeltaLike, isLeft: boolean): bigint {
-    const totalDelta = (toBigIntSafe(delta.ondelta) ?? 0n) + (toBigIntSafe(delta.offdelta) ?? 0n);
-    const collateral = nonNegative(toBigIntSafe(delta.collateral) ?? 0n);
-    if (isLeft) return nonNegative(totalDelta - collateral);
-    return nonNegative(-totalDelta - collateral);
-  }
-
   function computeAutoInboundCreditTarget(
     counterpartyEntityId: string,
     tokenIdValue: number,
@@ -474,7 +475,11 @@
     const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
     const isLeft = String(tab.entityId).toLowerCase() < String(resolvedCounterparty).toLowerCase();
     try {
-      const derived = activeXlnFunctions.deriveDelta(delta, isLeft) as { inCapacity?: unknown; inPeerCredit?: unknown };
+      const derived = activeXlnFunctions.deriveDelta(delta, isLeft) as {
+        inCapacity?: unknown;
+        inPeerCredit?: unknown;
+        outPeerCredit?: unknown;
+      };
       const inCapacity = nonNegative(toBigIntSafe(derived.inCapacity) ?? 0n);
       if (inCapacity >= desiredInboundAmount) return null;
 
@@ -483,12 +488,10 @@
       const neededPeerCredit = desiredInboundAmount > inWithoutPeerCredit ? desiredInboundAmount - inWithoutPeerCredit : 0n;
 
       const currentPeerLimit = readPeerCreditLimit(resolvedCounterparty, tokenIdValue);
-      const rawOutPeerDebt = computeRawOutPeerDebt(delta, isLeft);
-      const targetPeerLimit = rawOutPeerDebt + neededPeerCredit;
+      const outPeerDebt = nonNegative(toBigIntSafe(derived.outPeerCredit) ?? 0n);
+      const targetPeerLimit = outPeerDebt + neededPeerCredit;
       if (targetPeerLimit > currentPeerLimit) return targetPeerLimit;
-
-      // Conservative fallback: ensure forward progress even if derived decomposition is stale between frames.
-      return currentPeerLimit + (desiredInboundAmount - inCapacity);
+      return null;
     } catch {
       return desiredInboundAmount;
     }
@@ -541,7 +544,6 @@
     availableWantInCapacity: bigint;
     formattedAvailableGive: string;
     formattedAvailableWantIn: string;
-    minFillPercent: string;
   };
 
   function validateSwapForm(input: SwapFormValidationInput): string {
@@ -569,10 +571,6 @@
     if (input.wantAmount > input.availableWantInCapacity) {
       return `Insufficient inbound capacity (${input.formattedAvailableWantIn}).`;
     }
-    const minFillPercentValue = Number.parseFloat(input.minFillPercent);
-    if (!Number.isFinite(minFillPercentValue) || minFillPercentValue < 1 || minFillPercentValue > 100) {
-      return 'Min Fill % must be between 1 and 100.';
-    }
     return '';
   }
 
@@ -592,7 +590,6 @@
     availableWantInCapacity,
     formattedAvailableGive,
     formattedAvailableWantIn,
-    minFillPercent,
   });
   $: swapActionDisabledReason = (
     isInboundCapacityValidationError(swapDisabledReason) && canAutoPrepareInboundCapacity
@@ -619,27 +616,28 @@
   }
 
   function applyOrderPercent(percent: number) {
-    if (!selectedOrderLevel) return;
     const clamped = Math.max(0, Math.min(100, Math.round(percent)));
     orderPercent = clamped;
+    if (!selectedOrderLevel) {
+      const fillGive = (availableGiveCapacity * BigInt(clamped)) / 100n;
+      orderAmountInput = formatAmountForInput(fillGive, giveToken);
+      return;
+    }
 
+    const levelGiveTokenId = selectedOrderLevel.side === 'ask'
+      ? selectedOrderLevel.quoteTokenId
+      : selectedOrderLevel.baseTokenId;
     const priceScaled = (selectedOrderLevel.priceTicks * PRICE_RATIO_SCALE) / ORDERBOOK_PRICE_SCALE;
     const levelBaseDecimals = getTokenDecimals(selectedOrderLevel.baseTokenId);
     const levelQuoteDecimals = getTokenDecimals(selectedOrderLevel.quoteTokenId);
-    const availableBase = selectedOrderLevel.side === 'ask'
-      ? (
-          selectedOrderLevel.priceTicks > 0n
-            ? (readOutCapacity(selectedOrderLevel.accountId, selectedOrderLevel.quoteTokenId) * ORDERBOOK_PRICE_SCALE) / selectedOrderLevel.priceTicks
-            : 0n
-        )
-      : readOutCapacity(selectedOrderLevel.accountId, selectedOrderLevel.baseTokenId);
-    const maxFillBase = availableBase < selectedOrderLevel.sizeBaseWei ? availableBase : selectedOrderLevel.sizeBaseWei;
-    const fillBase = (maxFillBase * BigInt(clamped)) / 100n;
-    const fillGive = selectedOrderLevel.side === 'ask'
-      ? quoteFromBase(fillBase, priceScaled, levelBaseDecimals, levelQuoteDecimals)
-      : fillBase;
+    const availableGiveCapacity = readOutCapacity(selectedOrderLevel.accountId, levelGiveTokenId);
+    const maxFillGiveByBook = selectedOrderLevel.side === 'ask'
+      ? quoteFromBase(selectedOrderLevel.sizeBaseWei, priceScaled, levelBaseDecimals, levelQuoteDecimals)
+      : selectedOrderLevel.sizeBaseWei;
+    const maxFillGive = availableGiveCapacity < maxFillGiveByBook ? availableGiveCapacity : maxFillGiveByBook;
+    const fillGive = (maxFillGive * BigInt(clamped)) / 100n;
 
-    orderAmountInput = formatAmount(fillGive, Number.parseInt(giveTokenId, 10));
+    orderAmountInput = formatAmountForInput(fillGive, levelGiveTokenId);
     priceRatioInput = formatPriceTicks(selectedOrderLevel.priceTicks);
   }
 
@@ -647,15 +645,6 @@
     const target = event.currentTarget as HTMLInputElement | null;
     const value = Number.parseInt(String(target?.value || ''), 10);
     applyOrderPercent(Number.isFinite(value) ? value : 0);
-  }
-
-  function setMaxOrderPercent() {
-    if (selectedOrderLevel) {
-      applyOrderPercent(100);
-      return;
-    }
-    if (availableGiveCapacity <= 0n) return;
-    orderAmountInput = formatAmount(availableGiveCapacity, giveToken);
   }
 
   function handleOrderbookSnapshot(event: CustomEvent<OrderbookSnapshot>) {
@@ -701,11 +690,6 @@
 
     tradeSide = side === 'ask' ? 'buy-base' : 'sell-base';
     applyOrderPercent(100);
-  }
-
-  // Convert percentage to fill ratio (0-65535)
-  function percentToFillRatio(percent: number): number {
-    return Math.floor((percent / 100) * 65535);
   }
 
   function resolveSignerId(entityId: string): string {
@@ -1024,13 +1008,8 @@
         throw new Error('Give token and want token must be different');
       }
 
-      const minFillPercentValue = Number.parseFloat(minFillPercent);
-      if (!Number.isFinite(minFillPercentValue) || minFillPercentValue < 1 || minFillPercentValue > 100) {
-        throw new Error('Min Fill % must be between 1 and 100');
-      }
-
       const offerId = `swap-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      const minFillRatio = percentToFillRatio(minFillPercentValue);
+      const minFillRatio = 0;
       const requiredInboundCreditLimit = computeAutoInboundCreditTarget(
         resolvedCounterparty,
         wantToken,
@@ -1130,6 +1109,17 @@
     const frac = amount % ONE;
     if (frac === 0n) return whole.toString();
     return `${whole}.${frac.toString().padStart(Number(decimals), '0').replace(/0+$/, '')}`;
+  }
+
+  function formatAmountForInput(amount: bigint, tokenIdValue: number): string {
+    const full = formatAmount(amount, tokenIdValue);
+    const dotIndex = full.indexOf('.');
+    if (dotIndex < 0) return full;
+    const maxDecimals = Math.min(6, Math.max(0, getTokenDecimals(tokenIdValue)));
+    if (maxDecimals <= 0) return full.slice(0, dotIndex);
+    const whole = full.slice(0, dotIndex);
+    const frac = full.slice(dotIndex + 1, dotIndex + 1 + maxDecimals).replace(/0+$/, '');
+    return frac.length > 0 ? `${whole}.${frac}` : whole;
   }
 </script>
 
@@ -1264,10 +1254,22 @@
     <div class="section section-order">
       <h4>Place Limit Order</h4>
 
-      <div class="form-row">
+      <div class="form-row order-entry-row">
         <label>
           {tradeSide === 'buy-base' ? 'Amount to Spend' : 'Amount to Sell'} ({giveTokenSymbol})
           <input type="text" bind:value={orderAmountInput} inputmode="decimal" placeholder="Amount to sell" />
+          <div class="slider-inline">
+            <input
+              class="size-slider"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={orderPercent}
+              on:input={handleOrderPercentInput}
+            />
+            <span class="slider-value">{orderPercent}%</span>
+          </div>
         </label>
         <label>
           Price ({quoteTokenSymbol} per {baseTokenSymbol})
@@ -1293,25 +1295,13 @@
       <div class="size-tools">
         <div class="size-top">
           <span class="size-title">Order Sizing</span>
-          <button class="max-btn" type="button" on:click={setMaxOrderPercent} disabled={availableGiveCapacity <= 0n}>Max</button>
+          <span class="size-min-fill">Min Fill: 0%</span>
         </div>
         <div class="size-stats">
           <span>Available: <strong>{formattedAvailableGive}</strong></span>
           <span>Inbound Capacity: <strong>{formattedAvailableWantIn}</strong></span>
           <span>Estimate: <strong>{estimatedSpendLabel} → {estimatedReceiveLabel}</strong></span>
           <span>Pair Price: <strong>{estimatedPrice}</strong></span>
-        </div>
-        <div class="slider-row">
-          <input
-            class="size-slider"
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            value={orderPercent}
-            on:input={handleOrderPercentInput}
-          />
-          <span class="slider-value">{orderPercent}%</span>
         </div>
         {#if selectedOrderLevel}
           <p class="size-hint">
@@ -1324,13 +1314,6 @@
         {#if capacityWarning}
           <p class="size-warning">{capacityWarning}</p>
         {/if}
-      </div>
-
-      <div class="form-row compact">
-        <label>
-          Min Fill %
-          <input type="number" bind:value={minFillPercent} min="1" max="100" placeholder="50" />
-        </label>
       </div>
 
       {#if autoCapacityNote}
@@ -1513,6 +1496,8 @@
   .section-depth,
   .section-order {
     height: 100%;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .section-orders {
@@ -1627,6 +1612,7 @@
     display: flex;
     gap: 12px;
     margin-bottom: 12px;
+    flex-wrap: wrap;
   }
 
   .form-row.compact {
@@ -1641,6 +1627,7 @@
 
   .form-row label {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -1650,6 +1637,9 @@
 
   select, input {
     padding: 8px;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     background: #0c0d11;
     border: 1px solid #303442;
     border-radius: 8px;
@@ -1661,6 +1651,25 @@
   select:focus, input:focus {
     outline: none;
     border-color: rgba(251, 191, 36, 0.65);
+  }
+
+  .order-entry-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    align-items: start;
+  }
+
+  .order-entry-row > label {
+    margin: 0;
+  }
+
+  .slider-inline {
+    margin-top: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
   }
 
   .readonly-input {
@@ -1716,25 +1725,11 @@
     text-transform: uppercase;
   }
 
-  .max-btn {
-    padding: 5px 10px;
-    border-radius: 6px;
-    border: 1px solid #4b5563;
-    background: #161922;
-    color: #d1d5db;
+  .size-min-fill {
+    color: #9ca3af;
     font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .max-btn:hover:not(:disabled) {
-    border-color: #fbbf24;
-    color: #fbbf24;
-  }
-
-  .max-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
 
   .size-stats {
@@ -1751,17 +1746,36 @@
     font-weight: 600;
   }
 
-  .slider-row {
-    margin-top: 10px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
-    align-items: center;
-  }
-
   .size-slider {
     width: 100%;
     accent-color: #f59e0b;
+    appearance: none;
+    -webkit-appearance: none;
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #fbbf24, #d97706);
+    outline: none;
+  }
+
+  .size-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    background: #fbbf24;
+    border: 2px solid #111217;
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.7);
+    cursor: pointer;
+  }
+
+  .size-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    background: #fbbf24;
+    border: 2px solid #111217;
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.7);
+    cursor: pointer;
   }
 
   .slider-value {
@@ -1953,5 +1967,10 @@
     .form-row {
       flex-direction: column;
     }
+
+    .order-entry-row {
+      grid-template-columns: 1fr;
+    }
+
   }
 </style>

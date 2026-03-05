@@ -1079,9 +1079,6 @@ test.describe('E2E Swap Flow', () => {
       readSwapResolveCount(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
     );
 
-    const minFillInput = page.locator('.swap-panel input[placeholder="50"]').first();
-    await expect(minFillInput).toBeVisible({ timeout: 20_000 });
-    await minFillInput.fill('1');
     const pairInput = page.getByTestId('swap-pair-search').first();
     await expect(pairInput).toBeVisible({ timeout: 20_000 });
     await pairInput.fill('WETH/USDC');

@@ -15,7 +15,7 @@
 
 import { main, enqueueRuntimeInput, startP2P, startRuntimeLoop, registerEntityRuntimeHint, clearDB } from './runtime';
 import { safeStringify } from './serialization-utils';
-import type { Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
+import type { AccountMachine, Delta, Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
 import { encodeBoard, hashBoard } from './entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from './account-crypto';
 import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
@@ -193,7 +193,7 @@ const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
 const HUB_DEFAULT_MIN_TRADE_SIZE = 50n * 10n ** 18n;
 const MARKET_MAKER_SIGNER_LABEL = process.env.MARKET_MAKER_SIGNER_LABEL ?? 'mm-1';
 const MARKET_MAKER_SEED = process.env.MARKET_MAKER_SEED ?? `${HUB_SEED}:market-maker`;
-const MARKET_MAKER_NAME = process.env.MARKET_MAKER_NAME ?? 'MM';
+const MARKET_MAKER_NAME = process.env.MARKET_MAKER_NAME ?? 'MM1';
 const MARKET_MAKER_CREDIT_AMOUNT = 10_000_000n * 10n ** 18n;
 const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env.MARKET_MAKER_QUOTE_LOOP_MS || '2500'));
 const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
@@ -349,7 +349,7 @@ const accountMatchesCounterparty = (
   return false;
 };
 
-const getAccountDelta = (env: Env, entityId: string, counterpartyId: string, tokenId: number): any | null => {
+const getAccountDelta = (env: Env, entityId: string, counterpartyId: string, tokenId: number): Delta | null => {
   const account = getAccountMachine(env, entityId, counterpartyId);
   if (!account?.deltas) return null;
   return account.deltas.get(tokenId) ?? null;
@@ -380,7 +380,7 @@ const hasAccount = (env: Env, entityId: string, counterpartyId: string): boolean
   return false;
 };
 
-const getAccountMachine = (env: Env, entityId: string, counterpartyId: string): any | null => {
+const getAccountMachine = (env: Env, entityId: string, counterpartyId: string): AccountMachine | null => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return null;
   const needle = counterpartyId.toLowerCase();
@@ -395,6 +395,19 @@ const getAccountMachine = (env: Env, entityId: string, counterpartyId: string): 
   return null;
 };
 
+const getCreditGrantedByEntity = (
+  account: AccountMachine,
+  ownerEntityId: string,
+  tokenId: number,
+): bigint => {
+  const delta = account.deltas.get(tokenId);
+  if (!delta) return 0n;
+  const owner = String(ownerEntityId || '').toLowerCase();
+  const left = String(account?.leftEntity || '').toLowerCase();
+  const isOwnerLeft = owner.length > 0 && owner === left;
+  return BigInt(isOwnerLeft ? (delta.rightCreditLimit ?? 0n) : (delta.leftCreditLimit ?? 0n));
+};
+
 const getHubMeshHealth = (env: Env) => {
   const hubIds = relayStore.activeHubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS);
   const pairStatuses: Array<{
@@ -404,8 +417,8 @@ const getHubMeshHealth = (env: Env) => {
     requiredCredit: string;
     leftHasAccount: boolean;
     rightHasAccount: boolean;
-    leftToRightCredit: string;
-    rightToLeftCredit: string;
+    leftCreditLimit: string;
+    rightCreditLimit: string;
     ok: boolean;
   }> = [];
 
@@ -417,13 +430,14 @@ const getHubMeshHealth = (env: Env) => {
       const rightDelta = getAccountDelta(env, right, left, HUB_MESH_TOKEN_ID);
       const leftHasAccount = hasAccount(env, left, right);
       const rightHasAccount = hasAccount(env, right, left);
-      const leftToRightCredit = BigInt(leftDelta?.leftCreditLimit ?? 0n);
-      const rightToLeftCredit = BigInt(rightDelta?.leftCreditLimit ?? 0n);
+      const delta = leftDelta ?? rightDelta;
+      const leftCreditLimit = BigInt(delta?.leftCreditLimit ?? 0n);
+      const rightCreditLimit = BigInt(delta?.rightCreditLimit ?? 0n);
       const ok =
         leftHasAccount &&
         rightHasAccount &&
-        leftToRightCredit >= HUB_MESH_CREDIT_AMOUNT &&
-        rightToLeftCredit >= HUB_MESH_CREDIT_AMOUNT;
+        leftCreditLimit >= HUB_MESH_CREDIT_AMOUNT &&
+        rightCreditLimit >= HUB_MESH_CREDIT_AMOUNT;
 
       pairStatuses.push({
         left,
@@ -432,8 +446,8 @@ const getHubMeshHealth = (env: Env) => {
         requiredCredit: HUB_MESH_CREDIT_AMOUNT.toString(),
         leftHasAccount,
         rightHasAccount,
-        leftToRightCredit: leftToRightCredit.toString(),
-        rightToLeftCredit: rightToLeftCredit.toString(),
+        leftCreditLimit: leftCreditLimit.toString(),
+        rightCreditLimit: rightCreditLimit.toString(),
         ok,
       });
     }
@@ -679,7 +693,7 @@ const ensureMarketMakerHubConnectivity = async (
   tokenIds: number[],
 ): Promise<void> => {
   const accountOpenInputs: EntityInput[] = [];
-  const creditInputs: EntityInput[] = [];
+  const creditInputsByEntity = new Map<string, EntityInput>();
 
   for (const hubEntityId of hubEntityIds) {
     const hubSignerId = getHubSignerForEntity(env, hubEntityId);
@@ -687,24 +701,30 @@ const ensureMarketMakerHubConnectivity = async (
     const hubAccount = getAccountMachine(env, hubEntityId, mmEntityId);
     const hasMmToHub = hasAccount(env, mmEntityId, hubEntityId);
     const hasHubToMm = hasAccount(env, hubEntityId, mmEntityId);
+    const hasEitherAccount = hasMmToHub || hasHubToMm;
     const hasPendingConsensus =
       Boolean(mmAccount?.pendingFrame) ||
       Boolean(hubAccount?.pendingFrame) ||
       Number(mmAccount?.mempool?.length || 0) > 0 ||
       Number(hubAccount?.mempool?.length || 0) > 0;
 
-    if (!hasMmToHub && !hasPendingConsensus) {
+    // Single-opener rule: only MM initiates account opening.
+    // Counterparty account materializes via inbound accountInput ACK path.
+    if (!hasEitherAccount && !hasPendingConsensus) {
       accountOpenInputs.push({
         entityId: mmEntityId,
         signerId: mmSignerId,
-        entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubEntityId, tokenId: tokenIds[0] ?? 1 } }],
-      });
-    }
-    if (!hasHubToMm && !hasPendingConsensus) {
-      accountOpenInputs.push({
-        entityId: hubEntityId,
-        signerId: hubSignerId,
-        entityTxs: [{ type: 'openAccount', data: { targetEntityId: mmEntityId, tokenId: tokenIds[0] ?? 1 } }],
+        entityTxs: [
+          {
+            type: 'openAccount',
+            data: {
+              targetEntityId: hubEntityId,
+              tokenId: tokenIds[0] ?? 1,
+              // Prime first token credit in the same account frame.
+              creditAmount: MARKET_MAKER_CREDIT_AMOUNT,
+            },
+          },
+        ],
       });
     }
   }
@@ -718,48 +738,60 @@ const ensureMarketMakerHubConnectivity = async (
     const hubSignerId = getHubSignerForEntity(env, hubEntityId);
     const mmAccount = getAccountMachine(env, mmEntityId, hubEntityId);
     const hubAccount = getAccountMachine(env, hubEntityId, mmEntityId);
+    const hasMmToHub = hasAccount(env, mmEntityId, hubEntityId);
+    const hasHubToMm = hasAccount(env, hubEntityId, mmEntityId);
     const hasPendingConsensus =
       Boolean(mmAccount?.pendingFrame) ||
       Boolean(hubAccount?.pendingFrame) ||
       Number(mmAccount?.mempool?.length || 0) > 0 ||
       Number(hubAccount?.mempool?.length || 0) > 0;
     if (hasPendingConsensus) continue;
+    if (!hasMmToHub || !hasHubToMm) continue;
+    if (!mmAccount || !hubAccount) continue;
 
     for (const tokenId of tokenIds) {
       if (hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)) continue;
-      creditInputs.push({
-        entityId: mmEntityId,
-        signerId: mmSignerId,
-        entityTxs: [
-          {
-            type: 'extendCredit',
-            data: {
-              counterpartyEntityId: hubEntityId,
-              tokenId,
-              amount: MARKET_MAKER_CREDIT_AMOUNT,
-            },
+      const mmGranted = getCreditGrantedByEntity(mmAccount, mmEntityId, tokenId);
+      const hubGranted = getCreditGrantedByEntity(hubAccount, hubEntityId, tokenId);
+
+      if (mmGranted < MARKET_MAKER_CREDIT_AMOUNT) {
+        const input = creditInputsByEntity.get(mmEntityId) ?? {
+          entityId: mmEntityId,
+          signerId: mmSignerId,
+          entityTxs: [],
+        };
+        input.entityTxs.push({
+          type: 'extendCredit',
+          data: {
+            counterpartyEntityId: hubEntityId,
+            tokenId,
+            amount: MARKET_MAKER_CREDIT_AMOUNT,
           },
-        ],
-      });
-      creditInputs.push({
-        entityId: hubEntityId,
-        signerId: hubSignerId,
-        entityTxs: [
-          {
-            type: 'extendCredit',
-            data: {
-              counterpartyEntityId: mmEntityId,
-              tokenId,
-              amount: MARKET_MAKER_CREDIT_AMOUNT,
-            },
+        });
+        creditInputsByEntity.set(mmEntityId, input);
+      }
+
+      if (hubGranted < MARKET_MAKER_CREDIT_AMOUNT) {
+        const input = creditInputsByEntity.get(hubEntityId) ?? {
+          entityId: hubEntityId,
+          signerId: hubSignerId,
+          entityTxs: [],
+        };
+        input.entityTxs.push({
+          type: 'extendCredit',
+          data: {
+            counterpartyEntityId: mmEntityId,
+            tokenId,
+            amount: MARKET_MAKER_CREDIT_AMOUNT,
           },
-        ],
-      });
+        });
+        creditInputsByEntity.set(hubEntityId, input);
+      }
     }
   }
 
-  if (creditInputs.length > 0) {
-    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: creditInputs });
+  if (creditInputsByEntity.size > 0) {
+    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: Array.from(creditInputsByEntity.values()) });
     await settleRuntimeFor(env, 45);
   }
 };
@@ -929,18 +961,27 @@ const ensureHubPairMeshCredit = async (env: Env, leftEntityId: string, rightEnti
     }
 
     const entityInputs: EntityInput[] = [];
-    if (!hasAccount(env, leftEntityId, rightEntityId)) {
+    const leftHasAccount = hasAccount(env, leftEntityId, rightEntityId);
+    const rightHasAccount = hasAccount(env, rightEntityId, leftEntityId);
+    const hasEitherAccount = leftHasAccount || rightHasAccount;
+
+    // Single-opener rule: only left side initiates openAccount.
+    // Right side must materialize via inbound accountInput/ACK flow.
+    if (!hasEitherAccount) {
       entityInputs.push({
         entityId: leftEntityId,
         signerId: leftSignerId,
-        entityTxs: [{ type: 'openAccount', data: { targetEntityId: rightEntityId, tokenId: HUB_MESH_TOKEN_ID } }],
-      });
-    }
-    if (!hasAccount(env, rightEntityId, leftEntityId)) {
-      entityInputs.push({
-        entityId: rightEntityId,
-        signerId: rightSignerId,
-        entityTxs: [{ type: 'openAccount', data: { targetEntityId: leftEntityId, tokenId: HUB_MESH_TOKEN_ID } }],
+        entityTxs: [
+          {
+            type: 'openAccount',
+            data: {
+              targetEntityId: rightEntityId,
+              tokenId: HUB_MESH_TOKEN_ID,
+              // Prime left->right credit inside the initial account frame.
+              creditAmount: HUB_MESH_CREDIT_AMOUNT,
+            },
+          },
+        ],
       });
     }
 
@@ -964,43 +1005,58 @@ const ensureHubPairMeshCredit = async (env: Env, leftEntityId: string, rightEnti
       continue;
     }
 
-    console.log(
-      `[XLN] Extending $1M bidirectional credit for ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}.. (attempt ${attempt}/${MAX_ATTEMPTS})`,
-    );
-    enqueueRuntimeInput(env, {
-      runtimeTxs: [],
-      entityInputs: [
-        {
-          entityId: leftEntityId,
-          signerId: leftSignerId,
-          entityTxs: [
-            {
-              type: 'extendCredit',
-              data: {
-                counterpartyEntityId: rightEntityId,
-                tokenId: HUB_MESH_TOKEN_ID,
-                amount: HUB_MESH_CREDIT_AMOUNT,
-              },
+    const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
+    const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
+    if (!leftAccount || !rightAccount) continue;
+
+    const queuedByEntity = new Map<string, EntityInput>();
+    const leftGranted = getCreditGrantedByEntity(leftAccount, leftEntityId, HUB_MESH_TOKEN_ID);
+    const rightGranted = getCreditGrantedByEntity(rightAccount, rightEntityId, HUB_MESH_TOKEN_ID);
+
+    if (leftGranted < HUB_MESH_CREDIT_AMOUNT) {
+      queuedByEntity.set(leftEntityId, {
+        entityId: leftEntityId,
+        signerId: leftSignerId,
+        entityTxs: [
+          {
+            type: 'extendCredit',
+            data: {
+              counterpartyEntityId: rightEntityId,
+              tokenId: HUB_MESH_TOKEN_ID,
+              amount: HUB_MESH_CREDIT_AMOUNT,
             },
-          ],
-        },
-        {
-          entityId: rightEntityId,
-          signerId: rightSignerId,
-          entityTxs: [
-            {
-              type: 'extendCredit',
-              data: {
-                counterpartyEntityId: leftEntityId,
-                tokenId: HUB_MESH_TOKEN_ID,
-                amount: HUB_MESH_CREDIT_AMOUNT,
-              },
+          },
+        ],
+      });
+    }
+
+    if (rightGranted < HUB_MESH_CREDIT_AMOUNT) {
+      queuedByEntity.set(rightEntityId, {
+        entityId: rightEntityId,
+        signerId: rightSignerId,
+        entityTxs: [
+          {
+            type: 'extendCredit',
+            data: {
+              counterpartyEntityId: leftEntityId,
+              tokenId: HUB_MESH_TOKEN_ID,
+              amount: HUB_MESH_CREDIT_AMOUNT,
             },
-          ],
-        },
-      ],
-    });
-    await settleRuntimeFor(env, 45);
+          },
+        ],
+      });
+    }
+
+    if (queuedByEntity.size > 0) {
+      console.log(
+        `[XLN] Queueing mesh extendCredit for ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}.. (attempt ${attempt}/${MAX_ATTEMPTS})`,
+      );
+      enqueueRuntimeInput(env, {
+        runtimeTxs: [],
+        entityInputs: Array.from(queuedByEntity.values()),
+      });
+      await settleRuntimeFor(env, 45);
+    }
   }
 
   console.warn(
@@ -1979,6 +2035,7 @@ const resetServerDebugState = (
         state.lockBook = new Map();
         state.swapBook = new Map();
         state.htlcRoutes = new Map();
+        state.htlcNotes = new Map();
         state.pendingSwapFillRatios = new Map();
         state.jBatchState = undefined;
 
@@ -3604,6 +3661,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         );
       }
       const normalizedRuntimeKey = normalizeRuntimeKey(normalizedUserRuntimeId);
+      const activeRelayClients = Array.from(relayStore.clients.keys());
+      console.log(
+        `[FAUCET/OFFCHAIN] req=${requestId} user=${normalizedUserEntityId.slice(-8)} runtime=${normalizedUserRuntimeId.slice(0, 10)} ` +
+          `clients=${activeRelayClients.length} activeHubs=${relayStore.activeHubEntityIds.length}`,
+      );
       // Important: local relay client registry is authoritative only when faucet API
       // and relay endpoint are the same node. With external relay (e.g. wss://xln.finance/relay),
       // this process may not see the runtime socket directly. Treat local visibility as diagnostic,
@@ -3611,6 +3673,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const runtimeSeenLocally = relayStore.clients.has(normalizedRuntimeKey);
       const runtimePubKey = relayStore.runtimeEncryptionKeys.get(normalizedRuntimeKey);
       if (!runtimeSeenLocally || !runtimePubKey) {
+        console.warn(
+          `[FAUCET/OFFCHAIN] runtime-local-miss req=${requestId} runtime=${normalizedUserRuntimeId.slice(0, 10)} ` +
+            `seen=${runtimeSeenLocally ? 1 : 0} pubKey=${runtimePubKey ? 1 : 0}`,
+        );
         pushDebugEvent(relayStore, {
           event: 'debug_event',
           status: 'warning',
@@ -3621,6 +3687,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             userRuntimeId: normalizedUserRuntimeId,
             runtimeSeenLocally,
             hasRuntimePubKey: !!runtimePubKey,
+            activeRelayClients,
           },
         });
       }
@@ -4004,6 +4071,11 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   console.log('[XLN] Initializing runtime...');
   const env = await main(HUB_SEED);
   console.log('[XLN] Runtime initialized ✓');
+  const verboseRuntimeLogs = /^(1|true)$/i.test(process.env.RUNTIME_VERBOSE_LOGS ?? '');
+  env.quietRuntimeLogs = !verboseRuntimeLogs;
+  console.log(
+    `[XLN] Runtime log mode: ${env.quietRuntimeLogs ? 'quiet' : 'verbose'} (set RUNTIME_VERBOSE_LOGS=1 for verbose)`,
+  );
   env.runtimeState = env.runtimeState ?? {};
   env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input) =>
     sendEntityInputDirectViaRelaySocket(env, targetRuntimeId, input);
@@ -4354,15 +4426,29 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         }
       },
 
-      close(ws) {
+      close(ws, code, reason) {
         cleanupRpcMarketSubscription(ws);
         const removedId = removeClient(relayStore, ws);
+        const reasonText =
+          typeof reason === 'string'
+            ? reason
+            : reason
+              ? String(reason)
+              : '';
+        console.warn(
+          `[WS] CLOSE wsType=${((ws as any).data || {}).type || 'unknown'} runtime=${removedId?.slice(0, 10) || 'unknown'} ` +
+          `code=${Number(code || 0)} reason="${reasonText || 'n/a'}"`,
+        );
         if (removedId) {
           pushDebugEvent(relayStore, {
             event: 'ws_close',
             runtimeId: removedId,
             from: removedId,
-            details: { wsType: ((ws as any).data || {}).type || 'unknown' },
+            details: {
+              wsType: ((ws as any).data || {}).type || 'unknown',
+              code: Number(code || 0),
+              reason: reasonText || null,
+            },
           });
         }
       },

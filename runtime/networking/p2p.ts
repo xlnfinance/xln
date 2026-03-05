@@ -386,8 +386,13 @@ export class RuntimeP2P {
     if (typeof document === 'undefined') return;
     if (this.visibilityHandler) return;
     this.visibilityHandler = () => {
+      const activeClient = !!this.getActiveClient();
+      console.log(
+        `[P2P] visibilitychange state=${document.visibilityState} activeClient=${activeClient ? 1 : 0} ` +
+          `pendingTargets=${this.pendingByRuntime.size}`,
+      );
       if (document.visibilityState !== 'visible') return;
-      if (!this.getActiveClient()) {
+      if (!activeClient) {
         console.warn('[P2P] Tab resumed with no active WS client — forcing reconnect');
         this.reconnect();
         return;

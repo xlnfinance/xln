@@ -98,20 +98,20 @@
     background: #18181b;
     border: 1px solid #27272a;
     border-radius: 10px;
-    padding: 16px 18px;
-    margin-bottom: 10px;
+    padding: 12px;
+    margin-bottom: 8px;
   }
 
   .action-card h4 {
-    margin: 0 0 12px 0;
+    margin: 0 0 8px 0;
     color: #e4e4e7;
-    font-size: 0.88em;
+    font-size: 0.8em;
     font-weight: 600;
   }
 
   .action-form {
     display: flex;
-    gap: 8px;
+    gap: 7px;
     align-items: center;
     flex-wrap: wrap;
   }
@@ -133,11 +133,11 @@
   }
 
   .action-button {
-    padding: 9px 18px;
+    padding: 8px 14px;
     border: none;
     border-radius: 8px;
     font-weight: 600;
-    font-size: 0.82em;
+    font-size: 0.78em;
     cursor: pointer;
     transition: all 0.15s ease;
   }

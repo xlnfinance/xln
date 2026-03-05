@@ -31,6 +31,7 @@
   import Tutorial from './components/Tutorial.svelte';
   import { panelBridge } from './utils/panelBridge';
   import { runtimeOperations } from '$lib/stores/runtimeStore';
+  import { settings } from '$lib/stores/settingsStore';
   import 'dockview/dist/styles/dockview.css';
 
   // Props for layout/mode switching
@@ -761,7 +762,7 @@
 
 <div class="view-wrapper" class:embed-mode={embedMode}>
   <!-- Always render both, toggle visibility via CSS -->
-  <div class="user-mode-container" class:hidden={!userMode}>
+  <div class="user-mode-container" class:hidden={!userMode} class:with-timemachine={$settings.showTimeMachine}>
     <UserModePanel
       isolatedEnv={localEnvStore}
       isolatedHistory={localHistoryStore}
@@ -770,9 +771,15 @@
     />
   </div>
 
-  <div class="view-container" class:hidden={userMode} class:with-timemachine={!collapsed} bind:this={container}></div>
+  <div
+    class="view-container"
+    class:hidden={userMode}
+    class:with-timemachine={$settings.showTimeMachine && !collapsed}
+    bind:this={container}
+  ></div>
 
   <!-- TimeMachine - Visible in both modes for time-travel debugging -->
+  {#if $settings.showTimeMachine}
     <div class="time-machine-bar" class:collapsed class:embed={embedMode} data-position={timeMachinePosition}>
       {#if !embedMode}
         <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
@@ -783,19 +790,20 @@
         isLive={localIsLive}
         env={localEnvStore}
       />
-    {#if !embedMode}
-      <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
-        {collapsed ? '▲' : '▼'}
-      </button>
-      <button
-        class="position-toggle-btn"
-        on:click={() => timeMachinePosition = timeMachinePosition === 'bottom' ? 'top' : 'bottom'}
-        title="Move to {timeMachinePosition === 'bottom' ? 'top' : 'bottom'}"
-      >
-        {timeMachinePosition === 'bottom' ? '⬆️' : '⬇️'}
-      </button>
-    {/if}
+      {#if !embedMode}
+        <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
+          {collapsed ? '▲' : '▼'}
+        </button>
+        <button
+          class="position-toggle-btn"
+          on:click={() => timeMachinePosition = timeMachinePosition === 'bottom' ? 'top' : 'bottom'}
+          title="Move to {timeMachinePosition === 'bottom' ? 'top' : 'bottom'}"
+        >
+          {timeMachinePosition === 'bottom' ? '⬆️' : '⬇️'}
+        </button>
+      {/if}
     </div>
+  {/if}
 
   {#if !embedMode && !userMode}
     <!-- Interactive Tutorial (first-time users, dev mode only) -->
@@ -829,8 +837,12 @@
     width: 100%;
     height: 100%;
     overflow: visible; /* Dropdowns must overlay - scroll is in panel-content */
-    padding-bottom: 52px; /* Space for TimeMachine bar */
+    padding-bottom: 0;
     background: #0a0a0a;
+  }
+
+  .user-mode-container.with-timemachine {
+    padding-bottom: 52px; /* Space for TimeMachine bar */
   }
 
   .user-mode-container.hidden {
@@ -857,6 +869,10 @@
   }
 
   .view-wrapper.embed-mode .view-container {
+    height: 100vh;
+  }
+
+  .view-wrapper.embed-mode .view-container.with-timemachine {
     height: calc(100vh - 48px);
   }
 

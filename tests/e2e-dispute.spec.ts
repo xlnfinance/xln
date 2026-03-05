@@ -396,9 +396,9 @@ async function readRawCollateralUiFromOpenAccount(page: Page): Promise<number> {
     await detailsToggle.click();
   }
 
-  const rawCollateralRow = page.locator('.account-panel .detail-grid-three').filter({ hasText: 'Raw collateral' }).first();
-  await expect(rawCollateralRow).toBeVisible({ timeout: 20_000 });
-  const yourCollateral = rawCollateralRow.locator('.detail-value-cell.coll').first();
+  const collateralRow = page.locator('.account-panel .detail-grid-three').filter({ hasText: 'Collateral component' }).first();
+  await expect(collateralRow).toBeVisible({ timeout: 20_000 });
+  const yourCollateral = collateralRow.locator('.detail-value-cell.coll').first();
   await expect(yourCollateral).toBeVisible({ timeout: 20_000 });
   const text = (await yourCollateral.textContent())?.trim() ?? '0';
   return parseUiAmount(text);

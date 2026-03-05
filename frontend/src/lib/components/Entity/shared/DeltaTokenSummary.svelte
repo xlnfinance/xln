@@ -1,16 +1,6 @@
 <script lang="ts">
   import DeltaCapacityBar from './DeltaCapacityBar.svelte';
-
-  type DeltaParts = {
-    outOwnCredit: bigint;
-    outCollateral: bigint;
-    outPeerCredit: bigint;
-    inOwnCredit: bigint;
-    inCollateral: bigint;
-    inPeerCredit: bigint;
-    outTotalHold?: bigint;
-    inTotalHold?: bigint;
-  };
+  import type { DeltaParts } from './delta-types';
 
   export let symbol: string;
   export let name: string = '';
@@ -22,6 +12,7 @@
   export let compact: boolean = false;
   export let barLayout: 'center' | 'sides' = 'center';
   export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
+  export let showMetricLabels: boolean = true;
 
   function iconForSymbol(rawSymbol: string): { text: string; cls: string } {
     const s = String(rawSymbol || '').toUpperCase();
@@ -63,11 +54,12 @@
         </div>
       </div>
       <div class="compact-metric compact-out" aria-label="Outbound capacity">
-        <span class="metric-label">Outbound</span>
+        {#if showMetricLabels}<span class="metric-label">Outbound</span>{/if}
         <span class="compact-out-value">{outAmountCompact}</span>
       </div>
+      <span class="metric-divider" aria-hidden="true"></span>
       <div class="compact-metric compact-in" aria-label="Inbound capacity">
-        <span class="metric-label">Inbound</span>
+        {#if showMetricLabels}<span class="metric-label">Inbound</span>{/if}
         <span class="compact-in-value">{inAmountCompact}</span>
       </div>
     {:else}
@@ -236,47 +228,55 @@
   }
 
   .delta-summary.compact .summary-head {
-    min-height: 28px;
+    min-height: 34px;
   }
 
   .compact-head {
-    grid-template-columns: max-content max-content minmax(0, 1fr) max-content auto;
+    display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
   }
 
   .delta-summary.compact .token-meta.compact-meta {
-    min-width: 0;
-    flex: 0 0 auto;
-    gap: 10px;
+    min-width: 180px;
+    flex: 1 1 auto;
+    gap: 9px;
   }
 
   .delta-summary.compact .token-symbol {
-    font-size: clamp(22px, 1.2vw, 25px);
+    font-size: clamp(17px, 1vw, 19px);
     line-height: 1;
-    letter-spacing: -0.025em;
+    letter-spacing: -0.018em;
   }
 
   .delta-summary.compact .token-name {
-    font-size: 13px;
+    font-size: 11px;
     color: #9ca3af;
     line-height: 1.05;
   }
 
   .delta-summary.compact .token-icon {
-    width: 28px;
-    height: 28px;
-    font-size: 13px;
+    width: 18px;
+    height: 18px;
+    font-size: 10px;
   }
 
   .compact-metric {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    font-family: 'JetBrains Mono', monospace;
+    align-items: flex-end;
+    gap: 1px;
     color: #d1d5db;
     white-space: nowrap;
+    min-width: 0;
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+    text-align: right;
+  }
+
+  .compact-out {
+    margin-left: auto;
   }
 
   .metric-label {
@@ -289,30 +289,48 @@
   }
 
   .compact-out-value {
-    font-size: clamp(18px, 1.1vw, 22px);
+    font-size: clamp(15px, 0.9vw, 17px);
     line-height: 1;
-    font-weight: 700;
-    letter-spacing: -0.03em;
+    font-weight: 650;
+    letter-spacing: -0.02em;
     color: #f3f4f6;
     font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+
+  .metric-divider {
+    width: 1px;
+    height: 22px;
+    background: linear-gradient(
+      180deg,
+      rgba(148, 163, 184, 0.05) 0%,
+      rgba(148, 163, 184, 0.34) 50%,
+      rgba(148, 163, 184, 0.05) 100%
+    );
+    border-radius: 999px;
+    flex: 0 0 1px;
   }
 
   .compact-in {
-    align-items: flex-end;
-    justify-self: end;
-    text-align: right;
-    padding-left: 12px;
-    min-width: 120px;
-    border-left: 1px solid rgba(148, 163, 184, 0.35);
+    flex: 0 0 auto;
+  }
+
+  .delta-summary.compact .actions {
+    flex: 0 0 auto;
+    margin-left: 4px;
+    margin-top: 0;
+    align-self: center;
+    white-space: nowrap;
   }
 
   .compact-in-value {
-    font-size: clamp(18px, 1.1vw, 22px);
+    font-size: clamp(15px, 0.9vw, 17px);
     line-height: 1;
-    font-weight: 700;
-    letter-spacing: -0.03em;
+    font-weight: 650;
+    letter-spacing: -0.02em;
     color: #e5e7eb;
     font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
   }
 
   @media (max-width: 1100px) {
@@ -327,52 +345,44 @@
     }
 
     .compact-head {
-      grid-template-columns: minmax(0, 1fr) auto auto;
+      display: flex;
       align-items: center;
-      gap: 8px 10px;
-    }
-
-    .delta-summary.compact .compact-meta {
-      grid-column: 1;
-    }
-
-    .delta-summary.compact .compact-out {
-      grid-column: 2;
-    }
-
-    .delta-summary.compact .compact-in {
-      grid-column: 3;
-      min-width: 0;
-      padding-left: 10px;
-    }
-
-    .delta-summary.compact .actions {
-      grid-column: 1 / -1;
-      justify-self: start;
+      gap: 8px;
     }
   }
 
   @media (max-width: 760px) {
     .compact-head {
-      grid-template-columns: minmax(0, 1fr) auto;
-      align-items: start;
+      flex-wrap: wrap;
+      align-items: flex-start;
     }
 
     .delta-summary.compact .compact-meta {
-      grid-column: 1 / -1;
+      min-width: 0;
+      flex: 1 1 100%;
     }
 
     .delta-summary.compact .compact-out {
-      grid-column: 1;
+      margin-left: 0;
+      min-width: 0;
+      text-align: left;
+      align-items: flex-start;
+    }
+
+    .delta-summary.compact .metric-divider {
+      display: none;
     }
 
     .delta-summary.compact .compact-in {
-      grid-column: 2;
-      justify-self: end;
+      margin-left: auto;
       text-align: right;
       align-items: flex-end;
-      padding-left: 8px;
       min-width: 0;
+    }
+
+    .delta-summary.compact .actions {
+      margin-left: auto;
+      margin-top: 4px;
     }
 
     .compact-out-value,
