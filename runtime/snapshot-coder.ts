@@ -6,38 +6,10 @@
 // Configuration flag - change this to test different encoders
 const USE_MSGPACK = false;
 
-// JSON encoder imports and setup - cycle-safe
-const createSafeJsonReplacer = () => {
-  const seen = new WeakSet();
-  return (key: string, value: any) => {
-    // Skip fields that may contain cycles (ethers providers, validation state)
-    if (key === 'clonedForValidation' || key === 'jurisdiction' || key === 'provider' || key === 'ethersProvider') {
-      return undefined;
-    }
-    // Handle Maps BEFORE cycle detection (Map entries need processing)
-    if (value instanceof Map) {
-      const entries = Array.from(value.entries());
-      return { _dataType: 'Map', value: entries };
-    }
-    // Handle BigInts
-    if (typeof value === 'bigint') {
-      return { _dataType: 'BigInt', value: value.toString() };
-    }
-    // Cycle detection for objects (skip arrays - they're rarely the cause of true cycles)
-    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-      if (seen.has(value)) {
-        return undefined; // Silent skip
-      }
-      seen.add(value);
-    }
-    return value;
-  };
-};
-
 /**
  * Remove cycles from an object by replacing cyclic references with undefined
  */
-const removeCycles = (obj: any, seen = new WeakSet()): any => {
+const removeCycles = (obj: any, stack: object[] = []): any => {
   if (obj === null || typeof obj !== 'object') {
     return obj;
   }
@@ -50,52 +22,83 @@ const removeCycles = (obj: any, seen = new WeakSet()): any => {
   // Skip known problematic keys
   if (obj.clonedForValidation !== undefined) {
     const { clonedForValidation, ...rest } = obj;
-    return removeCycles(rest, seen);
+    return removeCycles(rest, stack);
   }
   if (obj.jurisdiction !== undefined) {
     const { jurisdiction, ...rest } = obj;
-    return removeCycles(rest, seen);
+    return removeCycles(rest, stack);
   }
   if (obj.provider !== undefined) {
     const { provider, ...rest } = obj;
-    return removeCycles(rest, seen);
+    return removeCycles(rest, stack);
   }
 
-  // Check for cycles
-  if (seen.has(obj)) {
+  // Check for true cycles in current traversal path only.
+  // Shared references across sibling branches are allowed and must be preserved.
+  const objectRef = obj as object;
+  if (stack.includes(objectRef)) {
     return undefined;
   }
-  seen.add(obj);
+  stack.push(objectRef);
 
-  // Handle Map
-  if (obj instanceof Map) {
-    const entries = Array.from(obj.entries()).map(([k, v]) => [
-      removeCycles(k, seen),
-      removeCycles(v, seen)
-    ]);
-    return { _dataType: 'Map', value: entries };
-  }
-
-  // Handle Array
-  if (Array.isArray(obj)) {
-    return obj.map(item => removeCycles(item, seen));
-  }
-
-  // Handle plain object
-  const result: any = {};
-  for (const key of Object.keys(obj)) {
-    if (key === 'clonedForValidation' || key === 'jurisdiction' || key === 'provider' || key === 'ethersProvider') {
-      continue;
+  try {
+    // Handle Map
+    if (obj instanceof Map) {
+      const entries: Array<[any, any]> = [];
+      for (const [k, v] of obj.entries()) {
+        const packedKey = removeCycles(k, stack);
+        const packedValue = removeCycles(v, stack);
+        if (packedKey !== undefined && packedValue !== undefined) {
+          entries.push([packedKey, packedValue]);
+        }
+      }
+      return { _dataType: 'Map', value: entries };
     }
-    result[key] = removeCycles(obj[key], seen);
+
+    // Handle Set
+    if (obj instanceof Set) {
+      const values: any[] = [];
+      for (const value of obj.values()) {
+        const packed = removeCycles(value, stack);
+        if (packed !== undefined) values.push(packed);
+      }
+      return { _dataType: 'Set', value: values };
+    }
+
+    // Handle Uint8Array
+    if (obj instanceof Uint8Array) {
+      return { _dataType: 'Uint8Array', value: Array.from(obj) };
+    }
+
+    // Handle Array
+    if (Array.isArray(obj)) {
+      return obj.map(item => {
+        const packed = removeCycles(item, stack);
+        return packed === undefined ? null : packed;
+      });
+    }
+
+    // Handle plain object
+    const result: any = {};
+    for (const key of Object.keys(obj)) {
+      if (key === 'clonedForValidation' || key === 'jurisdiction' || key === 'provider' || key === 'ethersProvider') {
+        continue;
+      }
+      const packed = removeCycles(obj[key], stack);
+      if (packed !== undefined) result[key] = packed;
+    }
+    return result;
+  } finally {
+    stack.pop();
   }
-  return result;
 };
 
 const jsonReviver = (_key: string, value: any) => {
   if (typeof value === 'object' && value !== null) {
     if (value._dataType === 'Map') return new Map(value.value);
     if (value._dataType === 'BigInt') return BigInt(value.value);
+    if (value._dataType === 'Set') return new Set(value.value);
+    if (value._dataType === 'Uint8Array') return new Uint8Array(value.value);
   }
   return value;
 };
@@ -206,7 +209,7 @@ export const encode = (data: any): Buffer => {
   } else {
     // Simple JSON encoding with cycle-safe pre-processing
     const safeCopy = removeCycles(data);
-    return Buffer.from(JSON.stringify(safeCopy, createSafeJsonReplacer()));
+    return Buffer.from(JSON.stringify(safeCopy));
   }
 };
 
