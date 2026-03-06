@@ -12,6 +12,7 @@ import { logError } from './logger';
 import { addMessages, cloneEntityReplica, cloneEntityState, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from './state-helpers';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
+import { processOrderbookSwaps, processOrderbookCancels } from './entity-tx/handlers/account';
 import { ethers } from 'ethers';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1329,8 +1330,7 @@ export const applyEntityFrame = async (
     });
     console.log(`📊 ENTITY-ORCHESTRATOR: Enriched ${enrichedOffers.length} offers with accountId`);
 
-    const { processOrderbookSwaps } = await import('./entity-tx/handlers/account');
-    let matchResult: Awaited<ReturnType<typeof processOrderbookSwaps>>;
+    let matchResult: ReturnType<typeof processOrderbookSwaps>;
     try {
       matchResult = processOrderbookSwaps(currentEntityState, enrichedOffers);
     } catch (e) {
@@ -1366,7 +1366,7 @@ export const applyEntityFrame = async (
     console.log(`📊 ENTITY-ORCHESTRATOR: Processing ${allSwapCancelRequests.length} swap cancel requests`);
 
     if (currentEntityState.orderbookExt) {
-      const { processOrderbookCancels } = await import('./entity-tx/handlers/account');
+      // processOrderbookCancels imported at top level
       const cancelResult = processOrderbookCancels(currentEntityState, allSwapCancelRequests);
 
       for (const { accountId, tx } of cancelResult.mempoolOps) {

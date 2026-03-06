@@ -1987,8 +1987,8 @@ if (import.meta.main) {
 
   console.log('💾 Dumping full runtime (Env) to JSON...');
 
-  // Handle circular refs with WeakSet
-  const seen = new WeakSet();
+  // Handle circular refs
+  const seen = new Set<object>();
   const envJson = JSON.stringify(env, function(key, value) {
     if (value instanceof Map) return Array.from(value.entries());
     if (typeof value === 'bigint') return value.toString();
@@ -1996,8 +1996,9 @@ if (import.meta.main) {
 
     // Detect cycles
     if (typeof value === 'object' && value !== null) {
-      if (seen.has(value)) return '[Circular]';
-      seen.add(value);
+      const obj = value as object;
+      if (seen.has(obj)) return '[Circular]';
+      seen.add(obj);
     }
 
     return value;

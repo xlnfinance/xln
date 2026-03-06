@@ -14169,7 +14169,7 @@ const decodeTaggedValue = (value: unknown): unknown => {
  * Preserves BigInt/Map/Set/Uint8Array across save/load.
  */
 export function serializeTaggedJson(input: unknown, excludeKeys?: Set<string>): string {
-  const seen = new WeakSet<object>();
+  const seen = new Set<object>();
   return JSON.stringify(input, (key, raw) => {
     if (excludeKeys?.has(key)) return undefined;
     if (typeof raw === 'function') return undefined;
@@ -19866,7 +19866,7 @@ const USE_MSGPACK = false;
 
 // JSON encoder imports and setup - cycle-safe
 const createSafeJsonReplacer = () => {
-  const seen = new WeakSet();
+  const seen = new Set();
   return (key: string, value: any) => {
     // Skip fields that may contain cycles (ethers providers, validation state)
     if (key === 'clonedForValidation' || key === 'jurisdiction' || key === 'provider' || key === 'ethersProvider') {
@@ -19895,7 +19895,7 @@ const createSafeJsonReplacer = () => {
 /**
  * Remove cycles from an object by replacing cyclic references with undefined
  */
-const removeCycles = (obj: any, seen = new WeakSet()): any => {
+const removeCycles = (obj: any, seen = new Set()): any => {
   if (obj === null || typeof obj !== 'object') {
     return obj;
   }

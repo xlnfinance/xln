@@ -266,10 +266,10 @@
   }
 
   function tokenIdForAmountKey(data: Record<string, unknown>, key: string): number | null {
-    if (key === 'giveAmount') return toTokenIdSafe(data.giveTokenId);
-    if (key === 'wantAmount') return toTokenIdSafe(data.wantTokenId);
-    if (key === 'feeAmount') return toTokenIdSafe(data.feeTokenId) ?? toTokenIdSafe(data.tokenId);
-    return toTokenIdSafe(data.tokenId);
+    if (key === 'giveAmount') return toTokenIdSafe(data['giveTokenId']);
+    if (key === 'wantAmount') return toTokenIdSafe(data['wantTokenId']);
+    if (key === 'feeAmount') return toTokenIdSafe(data['feeTokenId']) ?? toTokenIdSafe(data['tokenId']);
+    return toTokenIdSafe(data['tokenId']);
   }
 
   function formatDataValue(key: string, value: unknown, data: Record<string, unknown>): ActionParam {
@@ -321,12 +321,12 @@
   function getHtlcNote(data: Record<string, unknown>): string | null {
     const notes = replica?.state?.htlcNotes;
     if (!(notes instanceof Map)) return null;
-    const lockId = typeof data.lockId === 'string' ? data.lockId : '';
+    const lockId = typeof data['lockId'] === 'string' ? data['lockId'] : '';
     if (lockId) {
       const lockNote = notes.get(`lock:${lockId}`);
       if (typeof lockNote === 'string' && lockNote.trim()) return lockNote.trim();
     }
-    const hashlock = typeof data.hashlock === 'string' ? data.hashlock : '';
+    const hashlock = typeof data['hashlock'] === 'string' ? data['hashlock'] : '';
     if (hashlock) {
       const hashNote = notes.get(`hashlock:${hashlock}`);
       if (typeof hashNote === 'string' && hashNote.trim()) return hashNote.trim();

@@ -181,6 +181,13 @@
   $: hasActiveDispute = uiStatus === 'disputed';
   $: isFinalizedDisputed = uiStatus === 'finalized_disputed';
   $: statusLabel = getAccountUiStatusLabel(uiStatus);
+  $: accountHeight = Number(account.currentFrame?.height ?? account.currentHeight ?? 0);
+  $: jFinalizedHeight = Number(account.lastFinalizedJHeight ?? 0);
+  $: pendingLeftJClaim = Array.isArray(account.leftJObservations)
+    && account.leftJObservations.some(obs => Number(obs?.jHeight ?? 0) > jFinalizedHeight);
+  $: pendingRightJClaim = Array.isArray(account.rightJObservations)
+    && account.rightJObservations.some(obs => Number(obs?.jHeight ?? 0) > jFinalizedHeight);
+  $: jPendingSideSuffix = `${pendingLeftJClaim ? '+L' : ''}${pendingRightJClaim ? '+R' : ''}`;
   $: disputeTimeoutBlock = Number(account.activeDispute?.disputeTimeout || 0);
   $: disputeBlocksLeft = hasActiveDispute
     ? Math.max(0, disputeTimeoutBlock - Number(account.lastFinalizedJHeight || 0))
@@ -294,8 +301,16 @@
       >
         {statusLabel}
       </span>
-      <span class="j-sync status-pill" title="Last finalized bilateral J-event height">
-        J#{account.lastFinalizedJHeight ?? 0}
+      <span class="a-sync status-pill" title="Last finalized bilateral account frame height">
+        A#{accountHeight}
+      </span>
+      <span
+        class="j-sync status-pill"
+        title={jPendingSideSuffix
+          ? `Last finalized bilateral J-event height (${jPendingSideSuffix.slice(1).split('+').join(', ')} side claim pending)`
+          : 'Last finalized bilateral J-event height'}
+      >
+        J#{jFinalizedHeight}{jPendingSideSuffix}
       </span>
       {#if hasActiveDispute}
         <span class="dispute-counter status-pill" title={`Until J#${disputeTimeoutBlock}`}>
@@ -513,6 +528,15 @@
     color: #d6d3d1;
     background: #18181b;
     border: 1px solid #292524;
+    padding: 0 12px;
+  }
+
+  .a-sync {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #e5e7eb;
+    background: #101014;
+    border: 1px solid #27272a;
     padding: 0 12px;
   }
 
