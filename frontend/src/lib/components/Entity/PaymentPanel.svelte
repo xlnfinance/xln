@@ -212,6 +212,14 @@
     return value.toString();
   }
 
+  function formatTokenNumberOnly(value: bigint): string {
+    const raw = formatToken(value);
+    const symbol = String(activeXlnFunctions?.getTokenInfo?.(tokenId)?.symbol || '').trim();
+    if (!symbol) return raw;
+    const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return raw.replace(new RegExp(`\\s+${escaped}\\s*$`, 'i'), '').trim();
+  }
+
   // Generate HTLC secret/hashlock pair (browser-side, outside consensus)
   function generateSecretHashlock(): { secret: string; hashlock: string } {
     const bytes = new Uint8Array(32);
@@ -509,7 +517,8 @@
       details,
     };
     try {
-      currentEnv?.p2p?.sendDebugEvent?.(payload);
+      const p2p = (currentEnv as any)?.p2p as { sendDebugEvent?: (data: unknown) => unknown } | undefined;
+      if (typeof p2p?.sendDebugEvent === 'function') p2p.sendDebugEvent(payload);
     } catch {
       // Best effort only; never block UI on debug forwarding.
     }
@@ -861,6 +870,14 @@
     await computeRoutes(false);
   }
 
+  async function payNowCheapest() {
+    if (sendingPayment || findingRoutes) return;
+    await computeRoutes(false);
+    if (routes.length === 0) return;
+    selectedRouteIndex = 0; // routes are sorted by cheapest fee by default
+    await sendPayment(true);
+  }
+
   async function sendPayment(manual = true) {
     if (selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
     if (sendingPayment) return;
@@ -1055,6 +1072,7 @@
         type="button"
         class="mode-btn"
         class:active={useHtlc}
+        aria-pressed={useHtlc}
         disabled={findingRoutes || sendingPayment}
         on:click={() => (useHtlc = true)}
       >
@@ -1064,21 +1082,34 @@
         type="button"
         class="mode-btn unsafe"
         class:active={!useHtlc}
+        aria-pressed={!useHtlc}
         disabled={findingRoutes || sendingPayment}
         on:click={() => (useHtlc = false)}
       >
         Direct (unsafe)
       </button>
     </div>
+    <span class="mode-state" class:safe={useHtlc} class:unsafe={!useHtlc}>
+      {useHtlc ? 'Hashlock active' : 'Direct active (unsafe)'}
+    </span>
   </div>
 
-  <button
-    class="btn-find"
-    on:click={findRoutes}
-    disabled={!targetEntityId || !amount || findingRoutes || sendingPayment}
-  >
-    {findingRoutes ? 'Finding Routes...' : 'Find Routes'}
-  </button>
+  <div class="payment-actions">
+    <button
+      class="btn-pay-now"
+      on:click={payNowCheapest}
+      disabled={!targetEntityId || !amount || findingRoutes || sendingPayment || !activeIsLive}
+    >
+      {sendingPayment ? 'Sending...' : (findingRoutes ? 'Finding Routes...' : 'Pay Now')}
+    </button>
+    <button
+      class="btn-find"
+      on:click={findRoutes}
+      disabled={!targetEntityId || !amount || findingRoutes || sendingPayment}
+    >
+      {findingRoutes ? 'Finding Routes...' : 'Find Routes'}
+    </button>
+  </div>
 
   {#if routes.length > 0}
     <div class="routes">
@@ -1125,7 +1156,7 @@
                   {#if hopIndex < route.path.length - 1}
                     <span class="hop-arrow">→</span>
                     {#if route.hops[hopIndex] && route.hops[hopIndex].fee > 0n}
-                      <span class="hop-fee">({formatToken(route.hops[hopIndex].fee)})</span>
+                      <span class="hop-fee">({formatTokenNumberOnly(route.hops[hopIndex].fee)})</span>
                     {/if}
                   {/if}
                 {/each}
@@ -1134,7 +1165,7 @@
                 {route.hops.length} hop{route.hops.length !== 1 ? 's' : ''}
               </span>
               <span class="route-meta">
-                Total fee: {formatToken(route.totalFee)}
+                Fee: {formatTokenNumberOnly(route.totalFee)}
               </span>
             </div>
           </label>
@@ -1180,6 +1211,14 @@
     align-items: end;
   }
 
+  .row :global(.token-select) {
+    width: 100%;
+  }
+
+  .row :global(.token-select .select-trigger) {
+    min-height: 44px;
+  }
+
   .field, .amount-field {
     display: flex;
     flex-direction: column;
@@ -1219,7 +1258,7 @@
     opacity: 0.5;
   }
 
-  .btn-find, .btn-send {
+  .btn-find, .btn-send, .btn-pay-now {
     padding: 14px;
     border: none;
     border-radius: 8px;
@@ -1227,6 +1266,29 @@
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s;
+  }
+
+  .payment-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .btn-pay-now {
+    background: linear-gradient(135deg, #15803d, #166534);
+    border: 1px solid #166534;
+    color: #dcfce7;
+    font-weight: 700;
+  }
+
+  .btn-pay-now:hover:not(:disabled) {
+    background: linear-gradient(135deg, #16a34a, #15803d);
+    border-color: #22c55e;
+  }
+
+  .btn-pay-now:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .btn-find {
@@ -1371,13 +1433,13 @@
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    padding: 12px;
+    padding: 10px;
     background: #1c1917;
     border: 1px solid #292524;
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.15s;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
   .route-option:hover {
@@ -1398,7 +1460,7 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
   }
 
   .route-path {
@@ -1411,11 +1473,11 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
   }
 
   .hop-card {
-    padding: 6px 8px;
+    padding: 4px 6px;
     border-radius: 8px;
     border: 1px solid #2a2623;
     background: #171311;
@@ -1428,20 +1490,21 @@
   }
 
   .hop-fee {
-    color: #d6d3d1;
-    font-size: 11px;
+    color: #a8a29e;
+    font-size: 10px;
     font-family: 'JetBrains Mono', monospace;
   }
 
   .route-meta {
-    font-size: 11px;
-    color: #78716c;
+    font-size: 10px;
+    color: #71717a;
   }
 
   .mode-toggle {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
+    flex-wrap: wrap;
   }
 
   .mode-label {
@@ -1455,45 +1518,79 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 4px;
-    border: 1px solid #292524;
-    border-radius: 10px;
-    background: #171311;
+    padding: 5px;
+    border: 1px solid #31343d;
+    border-radius: 11px;
+    background: #12141a;
   }
 
   .mode-btn {
-    border: 1px solid transparent;
+    border: 1px solid #2c2f38;
     border-radius: 8px;
-    background: transparent;
-    color: #a8a29e;
+    background: #161922;
+    color: #9ca3af;
     font-size: 12px;
     font-weight: 600;
     line-height: 1;
-    padding: 8px 10px;
+    padding: 9px 12px;
     cursor: pointer;
     transition: all 0.15s ease;
     white-space: nowrap;
+    opacity: 0.72;
   }
 
   .mode-btn:hover:not(:disabled) {
-    color: #e7e5e4;
+    color: #e5e7eb;
+    border-color: #4b5563;
   }
 
   .mode-btn.active {
-    background: #422006;
-    border-color: #fbbf24;
-    color: #fde68a;
+    background: linear-gradient(180deg, rgba(34, 197, 94, 0.9), rgba(22, 163, 74, 0.84));
+    border-color: #22c55e;
+    color: #04130a;
+    opacity: 1;
   }
 
   .mode-btn.unsafe.active {
-    background: #3f1014;
-    border-color: #dc2626;
-    color: #fecaca;
+    background: linear-gradient(180deg, rgba(239, 68, 68, 0.92), rgba(220, 38, 38, 0.84));
+    border-color: #ef4444;
+    color: #200706;
+    opacity: 1;
+  }
+
+  .mode-state {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid #353949;
+    background: #151924;
+    color: #94a3b8;
+  }
+
+  .mode-state.safe {
+    border-color: rgba(34, 197, 94, 0.42);
+    color: #86efac;
+    background: rgba(21, 128, 61, 0.15);
+  }
+
+  .mode-state.unsafe {
+    border-color: rgba(239, 68, 68, 0.45);
+    color: #fca5a5;
+    background: rgba(127, 29, 29, 0.14);
   }
 
   .mode-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  @media (max-width: 900px) {
+    .payment-actions {
+      grid-template-columns: 1fr;
+    }
   }
 
   .profile-preview {

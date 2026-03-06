@@ -618,8 +618,9 @@
   function applyOrderPercent(percent: number) {
     const clamped = Math.max(0, Math.min(100, Math.round(percent)));
     orderPercent = clamped;
+    const currentGiveCapacity = readOutCapacity(counterpartyId, giveToken);
     if (!selectedOrderLevel) {
-      const fillGive = (availableGiveCapacity * BigInt(clamped)) / 100n;
+      const fillGive = (currentGiveCapacity * BigInt(clamped)) / 100n;
       orderAmountInput = formatAmountForInput(fillGive, giveToken);
       return;
     }
@@ -630,11 +631,11 @@
     const priceScaled = (selectedOrderLevel.priceTicks * PRICE_RATIO_SCALE) / ORDERBOOK_PRICE_SCALE;
     const levelBaseDecimals = getTokenDecimals(selectedOrderLevel.baseTokenId);
     const levelQuoteDecimals = getTokenDecimals(selectedOrderLevel.quoteTokenId);
-    const availableGiveCapacity = readOutCapacity(selectedOrderLevel.accountId, levelGiveTokenId);
+    const levelGiveCapacity = readOutCapacity(selectedOrderLevel.accountId, levelGiveTokenId);
     const maxFillGiveByBook = selectedOrderLevel.side === 'ask'
       ? quoteFromBase(selectedOrderLevel.sizeBaseWei, priceScaled, levelBaseDecimals, levelQuoteDecimals)
       : selectedOrderLevel.sizeBaseWei;
-    const maxFillGive = availableGiveCapacity < maxFillGiveByBook ? availableGiveCapacity : maxFillGiveByBook;
+    const maxFillGive = levelGiveCapacity < maxFillGiveByBook ? levelGiveCapacity : maxFillGiveByBook;
     const fillGive = (maxFillGive * BigInt(clamped)) / 100n;
 
     orderAmountInput = formatAmountForInput(fillGive, levelGiveTokenId);

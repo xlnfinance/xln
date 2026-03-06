@@ -195,7 +195,7 @@ const MARKET_MAKER_SIGNER_LABEL = process.env.MARKET_MAKER_SIGNER_LABEL ?? 'mm-1
 const MARKET_MAKER_SEED = process.env.MARKET_MAKER_SEED ?? `${HUB_SEED}:market-maker`;
 const MARKET_MAKER_NAME = process.env.MARKET_MAKER_NAME ?? 'MM1';
 const MARKET_MAKER_CREDIT_AMOUNT = 10_000_000n * 10n ** 18n;
-const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env.MARKET_MAKER_QUOTE_LOOP_MS || '2500'));
+const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env.MARKET_MAKER_QUOTE_LOOP_MS || '30000'));
 const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   4,
   Number(process.env.MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK || '10'),
@@ -3836,69 +3836,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }));
       const autoOpenAccount = false;
 
-      // Fail-fast: client already has unresolved pending frame for this account.
-      // Never enqueue new faucet payment in this state (prevents conflict loops).
-      if (knownPending) {
-        pushDebugEvent(relayStore, {
-          event: 'error',
-          status: 'rejected',
-          reason: 'FAUCET_CLIENT_PENDING_FRAME',
-          details: {
-            requestId,
-            hubEntityId,
-            userEntityId: normalizedUserEntityId,
-            knownCurrentHeight,
-            knownPendingHeight,
-            serverCurrentHeight,
-            serverPendingHeight,
-          },
-        });
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: `Client reports pending frame (${knownPendingHeight ?? 'unknown'}). Wait for ACK/dispute before faucet.`,
-            code: 'FAUCET_CLIENT_PENDING_FRAME',
-            requestId,
-            hubEntityId,
-            userEntityId: normalizedUserEntityId,
-            knownCurrentHeight,
-            knownPendingHeight,
-            serverCurrentHeight,
-            serverPendingHeight,
-          }),
-          { status: 409, headers },
-        );
-      }
-
-      // Fail-fast: never queue faucet tx while bilateral account has pending frame.
-      // This avoids piling up directPayment/openAccount txs during stalled consensus.
-      if (hasHubAccount && accountPending) {
-        pushDebugEvent(relayStore, {
-          event: 'error',
-          status: 'rejected',
-          reason: 'FAUCET_ACCOUNT_PENDING_FRAME',
-          details: {
-            requestId,
-            hubEntityId,
-            userEntityId: normalizedUserEntityId,
-            pendingHeight: serverPendingHeight,
-            currentHeight: serverCurrentHeight,
-          },
-        });
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: `Account with hub is pending at frame ${serverPendingHeight ?? 'unknown'}. Wait for ACK/dispute before new faucet.`,
-            code: 'FAUCET_ACCOUNT_PENDING_FRAME',
-            requestId,
-            hubEntityId,
-            userEntityId: normalizedUserEntityId,
-            pendingHeight: serverPendingHeight,
-            currentHeight: serverCurrentHeight,
-          }),
-          { status: 409, headers },
-        );
-      }
+      // Pending bilateral state is non-blocking for faucet enqueue:
+      // directPayment is appended to account mempool and proposed after ACK resolves pending frame.
 
       // Explicit invariant: faucet never opens accounts on behalf of user.
       // User must create/open account first via regular bilateral flow.

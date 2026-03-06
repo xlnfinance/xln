@@ -27,6 +27,7 @@
   let expandedHub: string | null = null;
   let sortKey: 'score' | 'fee' | 'uptime' | 'name' = 'score';
   let sortAsc = false;
+  let sortMode: 'score_desc' | 'score_asc' | 'fee_asc' | 'fee_desc' | 'uptime_desc' | 'uptime_asc' | 'name_asc' | 'name_desc' = 'score_desc';
 
   const RELAY_OPTIONS_ALL = [
     { label: 'Prod (xln.finance)', url: 'wss://xln.finance/relay' },
@@ -155,8 +156,13 @@
     }
   };
 
-  function toggleSortDirection() {
-    sortAsc = !sortAsc;
+  function applySortMode(mode: string) {
+    const [key, dir] = mode.split('_');
+    if (key === 'score' || key === 'fee' || key === 'uptime' || key === 'name') {
+      sortKey = key;
+      sortAsc = dir === 'asc';
+      sortMode = `${key}_${sortAsc ? 'asc' : 'desc'}` as typeof sortMode;
+    }
   }
 
   function toggleExpand(hubId: string) {
@@ -484,16 +490,17 @@
     <div class="hub-sorting">
       <label>
         Sort by
-        <select bind:value={sortKey}>
-          <option value="score">Credit score</option>
-          <option value="fee">Fee</option>
-          <option value="uptime">Uptime</option>
-          <option value="name">Name</option>
+        <select bind:value={sortMode} on:change={(e) => applySortMode((e.currentTarget as HTMLSelectElement).value)}>
+          <option value="score_desc">Credit score ↓</option>
+          <option value="score_asc">Credit score ↑</option>
+          <option value="fee_asc">Fee ↑</option>
+          <option value="fee_desc">Fee ↓</option>
+          <option value="uptime_desc">Uptime ↓</option>
+          <option value="uptime_asc">Uptime ↑</option>
+          <option value="name_asc">Name A→Z</option>
+          <option value="name_desc">Name Z→A</option>
         </select>
       </label>
-      <button class="sort-direction" on:click={toggleSortDirection}>
-        {sortAsc ? 'Asc' : 'Desc'}
-      </button>
     </div>
 
     <div class="hub-cards">
@@ -511,6 +518,7 @@
               {#if hub.verified}
                 <span class="badge verified">Verified</span>
               {/if}
+              <span class="badge score">Score {hub.creditScore}</span>
               {#if hub.isConnected}
                 <span class="badge open"><Check size={12} /> Open</span>
               {:else if entityId}
@@ -527,6 +535,7 @@
                 </button>
               {/if}
               <button class="expand-toggle" on:click={() => toggleExpand(hub.entityId)}>
+                <span>{#if expandedHub === hub.entityId}Hide{:else}Details{/if}</span>
                 {#if expandedHub === hub.entityId}
                   <ChevronUp size={12} />
                 {:else}
@@ -536,26 +545,24 @@
             </div>
           </div>
 
-          <div class="hub-metrics">
-            <div class="metric">
-              <span class="metric-label">Fee</span>
-              <span class="metric-value">{formatFee(hub.metadata.fee)}</span>
+          <div class="hub-strip" aria-hidden="true"></div>
+
+          <div class="hub-metrics-inline">
+            <div class="metric-inline">
+              <span class="metric-inline-label">Fee</span>
+              <span class="metric-inline-value">{formatFee(hub.metadata.fee)}</span>
             </div>
-            <div class="metric">
-              <span class="metric-label">Capacity</span>
-              <span class="metric-value">{formatCapacity(hub.metadata.capacity)}</span>
+            <div class="metric-inline">
+              <span class="metric-inline-label">Capacity</span>
+              <span class="metric-inline-value">{formatCapacity(hub.metadata.capacity)}</span>
             </div>
-            <div class="metric">
-              <span class="metric-label">Uptime</span>
-              <span class="metric-value">{hub.metadata.uptime?.toFixed(1) || '-'}%</span>
+            <div class="metric-inline">
+              <span class="metric-inline-label">Uptime</span>
+              <span class="metric-inline-value">{hub.metadata.uptime?.toFixed(1) || '-'}%</span>
             </div>
-            <div class="metric">
-              <span class="metric-label">Score</span>
-              <span class="metric-value">{hub.creditScore}</span>
-            </div>
-            <div class="metric">
-              <span class="metric-label">Region</span>
-              <span class="metric-value">{hub.jurisdiction}</span>
+            <div class="metric-inline">
+              <span class="metric-inline-label">Region</span>
+              <span class="metric-inline-value">{hub.jurisdiction}</span>
             </div>
           </div>
 
@@ -649,8 +656,8 @@
   }
 
   .refresh-btn:hover:not(:disabled) {
-    border-color: #3b82f6;
-    color: #3b82f6;
+    border-color: #fbbf24;
+    color: #fbbf24;
   }
 
   .refresh-btn:disabled {
@@ -745,18 +752,23 @@
   .hub-cards {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    border: 1px solid #292524;
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(24, 24, 27, 0.96) 0%, rgba(15, 15, 17, 0.96) 100%);
+    overflow: hidden;
   }
 
   .hub-card {
-    border: 1px solid #292524;
-    border-radius: 10px;
-    background: #11131d;
-    padding: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .hub-card:last-child {
+    border-bottom: none;
   }
 
   .hub-card.connected {
-    border-color: rgba(34, 197, 94, 0.35);
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.04), transparent 38%);
   }
 
   .hub-card-top {
@@ -798,7 +810,8 @@
   .hub-name {
     font-weight: 600;
     color: #e7e5e4;
-    font-size: 14px;
+    font-size: 15px;
+    letter-spacing: 0.01em;
   }
 
   .hub-id {
@@ -819,19 +832,26 @@
 
   .badge {
     border-radius: 999px;
-    border: 1px solid #292524;
-    padding: 4px 8px;
-    font-size: 11px;
-    color: #a8a29e;
-    background: #171717;
+    border: 1px solid transparent;
+    padding: 4px 9px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #aeb5c4;
+    background: rgba(255, 255, 255, 0.02);
     display: inline-flex;
     align-items: center;
     gap: 4px;
   }
 
   .badge.verified {
-    border-color: rgba(59, 130, 246, 0.35);
-    color: #93c5fd;
+    border-color: rgba(251, 191, 36, 0.4);
+    color: #fbbf24;
+  }
+
+  .badge.score {
+    border-color: rgba(255, 255, 255, 0.14);
+    color: #d8dde8;
   }
 
   .badge.open {
@@ -843,19 +863,20 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 5px 12px;
-    background: #3b82f6;
-    border: none;
-    border-radius: 4px;
-    color: #fff;
+    padding: 6px 11px;
+    background: rgba(255, 196, 75, 0.08);
+    border: 1px solid rgba(255, 196, 75, 0.42);
+    border-radius: 999px;
+    color: #ffc24b;
     font-size: 11px;
-    font-weight: 500;
+    font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: all 0.15s ease;
   }
 
   .btn-connect:hover:not(:disabled) {
-    background: #2563eb;
+    background: rgba(255, 196, 75, 0.16);
+    border-color: rgba(255, 196, 75, 0.62);
   }
 
   .btn-connect:disabled {
@@ -867,49 +888,55 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 6px;
-    border: 1px solid #292524;
-    background: #171717;
-    color: #a8a29e;
+    gap: 4px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: transparent;
+    color: #aeb5c4;
     cursor: pointer;
-  }
-
-  .hub-metrics {
-    margin-top: 10px;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-    gap: 8px;
-  }
-
-  .metric {
-    background: #0c0a09;
-    border: 1px solid #292524;
-    border-radius: 8px;
-    padding: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .metric-label {
-    font-size: 10px;
-    color: #78716c;
+    font-size: 11px;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
   }
 
-  .metric-value {
-    font-size: 12px;
-    color: #e7e5e4;
-    font-weight: 600;
+  .hub-strip {
+    margin: 10px 0 12px;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03));
+  }
+
+  .hub-metrics-inline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .metric-inline {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .metric-inline-label {
+    font-size: 10px;
+    color: #838ca1;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .metric-inline-value {
+    font-size: 13px;
+    color: #e9ecf4;
+    font-weight: 500;
   }
 
   /* Expanded details */
   .row-details {
     padding: 12px 16px;
-    background: #0c0a09;
+    background: rgba(24, 24, 27, 0.9);
     border-top: 1px solid #292524;
     margin-top: 10px;
     border-radius: 8px;

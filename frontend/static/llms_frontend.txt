@@ -8479,7 +8479,7 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
 
     // Save environment snapshot (jReplicas with stateRoot are serializable)
     // CRITICAL: Exclude 'history' to prevent exponential growth (history contains all previous snapshots)
-    const seen = new WeakSet();
+    const seen = new Set();
     const snapshot = JSON.stringify(env, (k, v) => {
       if (k === 'history') return undefined; // Skip history - it's rebuilt from individual snapshots
       if (k === 'browserVM') return undefined; // BrowserVM is non-serializable (circular refs)
@@ -18499,7 +18499,7 @@ const USE_MSGPACK = false;
 
 // JSON encoder imports and setup - cycle-safe
 const createSafeJsonReplacer = () => {
-  const seen = new WeakSet();
+  const seen = new Set();
   return (key: string, value: any) => {
     // Skip fields that may contain cycles (ethers providers, validation state)
     if (key === 'clonedForValidation' || key === 'jurisdiction' || key === 'provider' || key === 'ethersProvider') {
@@ -18528,7 +18528,7 @@ const createSafeJsonReplacer = () => {
 /**
  * Remove cycles from an object by replacing cyclic references with undefined
  */
-const removeCycles = (obj: any, seen = new WeakSet()): any => {
+const removeCycles = (obj: any, seen = new Set()): any => {
   if (obj === null || typeof obj !== 'object') {
     return obj;
   }

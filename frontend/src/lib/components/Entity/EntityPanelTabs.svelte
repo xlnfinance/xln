@@ -55,7 +55,7 @@
 
   // Tab types
   type ViewTab = 'external' | 'reserves' | 'accounts' | 'more' | 'settings';
-  type MoreTab = 'chat' | 'contacts' | 'create' | 'gossip' | 'governance';
+  type MoreTab = 'consensus' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance';
   type AccountWorkspaceTab = 'send' | 'swap' | 'open' | 'activity' | 'settle' | 'configure';
   type ConfigureWorkspaceTab = 'credit' | 'collateral' | 'token';
 
@@ -69,7 +69,7 @@
     return 'open';
   }
   let activeTab: ViewTab = getInitialTab();
-  let moreTab: MoreTab = 'chat';
+  let moreTab: MoreTab = 'consensus';
   let accountWorkspaceTab: AccountWorkspaceTab = getInitialAccountWorkspaceTab();
   let configureWorkspaceTab: ConfigureWorkspaceTab = 'credit';
   let workspaceAccountId = '';
@@ -472,15 +472,11 @@
       const localAccount = findLocalAccountByCounterparty(hubEntityId);
       const localDelta = localAccount?.deltas?.get?.(tokenId);
       const localHeight = Number(localAccount?.currentHeight || 0);
-      const localPending = !!localAccount?.pendingFrame;
       if (!localAccount) {
         throw new Error('No bilateral account with selected hub. Open account first.');
       }
       if (!localDelta || localHeight <= 0) {
         throw new Error('Account is not finalized yet. Wait for first ACK and retry faucet.');
-      }
-      if (localPending) {
-        throw new Error('Account pending frame is not finalized yet. Wait a moment and retry.');
       }
       const knownAccount = localAccount
         ? {
@@ -551,12 +547,6 @@
         });
         if (code === 'FAUCET_ACCOUNT_STATE_MISMATCH') {
           throw new Error('Account state mismatch with server. Reset network/runtime and retry.');
-        }
-        if (code === 'FAUCET_ACCOUNT_PENDING_FRAME') {
-          throw new Error('Account pending frame is not finalized yet. Wait a moment and retry.');
-        }
-        if (code === 'FAUCET_CLIENT_PENDING_FRAME') {
-          throw new Error('Local account has pending frame. Wait for ACK/dispute before faucet retry.');
         }
         if (code === 'FAUCET_ACCOUNT_NOT_OPEN') {
           throw new Error('Open account with this hub first, then retry faucet.');
@@ -1423,6 +1413,94 @@
 
   $: netWorth = externalTotal + reservesTotal + accountsData.total;
 
+  type EntityFrameActivityRow = {
+    id: string;
+    height: number;
+    timestamp: number;
+    txCount: number;
+    types: Array<{ type: string; count: number }>;
+  };
+
+  function formatTime(ms: number): string {
+    if (!Number.isFinite(ms) || ms <= 0) return '-';
+    return new Date(ms).toLocaleTimeString();
+  }
+
+  function entityTxTypeLabel(type: string): string {
+    const known: Record<string, string> = {
+      htlcPayment: 'HTLC Payment',
+      directPayment: 'Direct Payment',
+      openAccount: 'Open Account',
+      extendCredit: 'Extend Credit',
+      requestCollateral: 'Request Collateral',
+      set_rebalance_policy: 'Set Rebalance Policy',
+      deposit_collateral: 'Deposit Collateral',
+      settle_approve: 'Settle Approve',
+      settle_finalize: 'Settle Finalize',
+      disputeStart: 'Dispute Start',
+      disputeFinalize: 'Dispute Finalize',
+      reopenDisputedAccount: 'Reopen Disputed',
+      placeSwapOffer: 'Swap Offer',
+      requestSwapCancel: 'Swap Cancel Request',
+      j_broadcast: 'J Broadcast',
+      j_rebroadcast: 'J Rebroadcast',
+      j_clear_batch: 'J Clear Batch',
+      j_abort_sent_batch: 'J Abort Sent Batch',
+      'profile-update': 'Profile Update',
+      setHubConfig: 'Hub Config',
+    };
+    if (known[type]) return known[type];
+    return String(type || 'unknown')
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .trim();
+  }
+
+  $: entityHeightBadge = Number(replica?.state?.height ?? 0);
+  $: finalizedJHeightBadge = Number(replica?.state?.lastFinalizedJHeight ?? 0);
+  $: entityActivityRows = (() => {
+    const rows: EntityFrameActivityRow[] = [];
+    const entityNorm = String(replica?.state?.entityId || tab.entityId || '').toLowerCase();
+    const signerNorm = String(tab.signerId || '').toLowerCase();
+    if (!entityNorm || !Array.isArray(activeHistory) || activeHistory.length === 0) return rows;
+
+    const recent = activeHistory.slice(-300);
+    for (let index = 0; index < recent.length; index += 1) {
+      const snapshot = recent[index] as any;
+      const entityInputs = Array.isArray(snapshot?.runtimeInput?.entityInputs)
+        ? snapshot.runtimeInput.entityInputs
+        : [];
+      const txs: Array<{ type?: string }> = [];
+      for (const input of entityInputs) {
+        const inputEntity = String(input?.entityId || '').toLowerCase();
+        if (inputEntity !== entityNorm) continue;
+        const inputSigner = String(input?.signerId || '').toLowerCase();
+        if (signerNorm && inputSigner && inputSigner !== signerNorm) continue;
+        const inputTxs = Array.isArray(input?.entityTxs) ? input.entityTxs : [];
+        txs.push(...inputTxs);
+      }
+      if (txs.length === 0) continue;
+
+      const grouped = new Map<string, number>();
+      for (const tx of txs) {
+        const type = String(tx?.type || 'unknown');
+        grouped.set(type, (grouped.get(type) || 0) + 1);
+      }
+      const snapshotHeight = Number(snapshot?.height);
+      const fallbackHeight = activeHistory.length - recent.length + index + 1;
+      const height = Number.isFinite(snapshotHeight) && snapshotHeight > 0 ? snapshotHeight : fallbackHeight;
+      rows.push({
+        id: `entity-frame-${height}-${index}`,
+        height,
+        timestamp: Number(snapshot?.timestamp || 0),
+        txCount: txs.length,
+        types: Array.from(grouped.entries()).map(([type, count]) => ({ type, count })),
+      });
+    }
+    return rows.reverse();
+  })();
+
   // Handlers
   function handleEntitySelect(event: CustomEvent) {
     const { jurisdiction, signerId, entityId } = event.detail;
@@ -1504,6 +1582,7 @@
   ];
 
   const moreTabs: Array<{ id: MoreTab; icon: any; label: string }> = [
+    { id: 'consensus', icon: Activity, label: 'Consensus' },
     { id: 'chat', icon: MessageCircle, label: 'Chat' },
     { id: 'contacts', icon: BookUser, label: 'Contacts' },
     { id: 'create', icon: PlusCircle, label: 'Create' },
@@ -2016,10 +2095,31 @@
               </div>
 
             {:else if accountWorkspaceTab === 'activity'}
-              <h4 class="section-head">Consensus</h4>
-              <ConsensusState {replica} />
-              <h4 class="section-head">Proposals</h4>
-              <ProposalsList {replica} {tab} />
+              <h4 class="section-head">Entity Activity</h4>
+              {#if entityActivityRows.length === 0}
+                <p class="muted">No entity frames with activity yet.</p>
+              {:else}
+                <div class="entity-activity-list">
+                  {#each entityActivityRows as row (row.id)}
+                    <article class="entity-frame-row">
+                      <div class="entity-frame-row-head">
+                        <div class="entity-frame-row-left">
+                          <span class="entity-height-badge">E#{row.height}</span>
+                          <span class="entity-frame-time">{formatTime(row.timestamp)}</span>
+                        </div>
+                        <span class="entity-frame-count">{row.txCount} tx</span>
+                      </div>
+                      <div class="entity-frame-types">
+                        {#each row.types as txType}
+                          <span class="entity-frame-chip">
+                            {entityTxTypeLabel(txType.type)}{#if txType.count > 1} ×{txType.count}{/if}
+                          </span>
+                        {/each}
+                      </div>
+                    </article>
+                  {/each}
+                </div>
+              {/if}
 
             {:else if accountWorkspaceTab === 'settle'}
               {#if !activeIsLive}
@@ -2060,7 +2160,19 @@
             {/each}
           </nav>
 
-          {#if moreTab === 'chat'}
+          {#if moreTab === 'consensus'}
+            <div class="consensus-summary">
+              <h4 class="section-head" style="margin-top: 0;">Consensus</h4>
+              <div class="consensus-height-badges">
+                <span class="consensus-height-badge">E#{entityHeightBadge}</span>
+                <span class="consensus-height-badge">J#{finalizedJHeightBadge}</span>
+              </div>
+            </div>
+            <ConsensusState {replica} />
+            <h4 class="section-head">Proposals</h4>
+            <ProposalsList {replica} {tab} />
+
+          {:else if moreTab === 'chat'}
             <ChatMessages {replica} {tab} currentTimeIndex={activeTimeIndex ?? -1} />
 
           {:else if moreTab === 'contacts'}
@@ -3216,6 +3328,36 @@
     margin-top: var(--space-3);
   }
 
+  .consensus-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .consensus-height-badges {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .consensus-height-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    padding: 0 9px;
+    border-radius: 999px;
+    border: 1px solid #2f3138;
+    background: #121318;
+    color: #d4d4d8;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
   .workspace-inline-selector {
     margin-bottom: 10px;
     padding: 12px;
@@ -3370,6 +3512,80 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     color: #a8a29e;
+  }
+
+  .entity-activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .entity-frame-row {
+    border: 1px solid #2a2d35;
+    border-radius: 10px;
+    background: #12141a;
+    padding: 10px;
+  }
+
+  .entity-frame-row-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .entity-frame-row-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .entity-height-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: #0f1116;
+    border: 1px solid #343742;
+    color: #e4e4e7;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .entity-frame-time {
+    font-size: 11px;
+    color: #9ca3af;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .entity-frame-count {
+    font-size: 11px;
+    color: #a1a1aa;
+  }
+
+  .entity-frame-types {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .entity-frame-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 9px;
+    border-radius: 999px;
+    border: 1px solid #353844;
+    background: #0f1116;
+    color: #d4d4d8;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
   }
 
   /* Contacts */
