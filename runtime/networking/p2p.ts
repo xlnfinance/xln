@@ -32,6 +32,11 @@ import { signProfile, verifyProfileSignature } from './profile-signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './runtime-id';
+import {
+  DEFAULT_GOSSIP_BATCH_LIMIT,
+  selectProfileBatch,
+  type GossipProfileBatchRequest,
+} from '../relay/profile-batch';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion (DoS protection)
@@ -59,11 +64,6 @@ type RuntimeP2POptions = {
   gossipPollMs?: number;
   onEntityInput: (from: string, input: RoutedEntityInput) => void;
   onGossipProfiles: (from: string, profiles: Profile[]) => void;
-};
-
-type GossipRequestPayload = {
-  scope?: 'all' | 'bundle';
-  entityId?: string;
 };
 
 type GossipResponsePayload = {
@@ -542,7 +542,10 @@ export class RuntimeP2P {
     if (!normalizedRuntimeId) return;
     const client = this.getActiveClient();
     if (!client) return;
-    client.sendGossipRequest(normalizedRuntimeId, { scope: 'all' } satisfies GossipRequestPayload);
+    client.sendGossipRequest(normalizedRuntimeId, {
+      set: 'default',
+      limit: DEFAULT_GOSSIP_BATCH_LIMIT,
+    } satisfies GossipProfileBatchRequest);
   }
 
   announceProfilesTo(runtimeId: string, profiles: Profile[]) {
@@ -591,9 +594,12 @@ export class RuntimeP2P {
   private requestSeedGossip() {
     const client = this.getActiveClient();
     if (!client) return;
-
-    // Request all profiles from relay (simple polling)
-    client.sendGossipRequest(this.runtimeId, { scope: 'all' } satisfies GossipRequestPayload);
+    const updatedSince = this.getLatestKnownRemoteProfileTimestamp();
+    client.sendGossipRequest(this.runtimeId, {
+      set: 'default',
+      limit: DEFAULT_GOSSIP_BATCH_LIMIT,
+      ...(updatedSince > 0 ? { updatedSince } : {}),
+    } satisfies GossipProfileBatchRequest);
   }
 
   private ensureRelayConnectionsForEntity(entityId: string): void {
@@ -631,6 +637,20 @@ export class RuntimeP2P {
     return profiles.some((p: any) => normalizeId(String(p.entityId || '')) === targetEntityId);
   }
 
+  private getLatestKnownRemoteProfileTimestamp(): number {
+    const profiles = this.env.gossip?.getProfiles?.() || [];
+    let latest = 0;
+    for (const profile of profiles) {
+      const profileRuntimeId = normalizeRuntimeId(profile?.runtimeId ?? profile?.metadata?.runtimeId ?? '');
+      if (profileRuntimeId && profileRuntimeId === this.runtimeId) {
+        continue;
+      }
+      const ts = Number(profile?.metadata?.lastUpdated || 0);
+      if (ts > latest) latest = ts;
+    }
+    return latest;
+  }
+
   // Fetch profiles from relay with bounded retry for cold or stale caches.
   private async fetchProfilesWithRetry(missingEntityIds: string[] = []): Promise<boolean> {
     if (missingEntityIds.length === 0) {
@@ -646,7 +666,15 @@ export class RuntimeP2P {
     const startCount = this.env.gossip?.getProfiles?.()?.length || 0;
     const startedAt = Date.now();
     for (const waitMs of GOSSIP_FETCH_RETRY_DELAYS_MS) {
-      this.requestSeedGossip();
+      const client = this.getActiveClient();
+      if (!client) return false;
+      if (missingEntityIds.length > 0) {
+        client.sendGossipRequest(this.runtimeId, {
+          ids: missingEntityIds,
+        } satisfies GossipProfileBatchRequest);
+      } else {
+        this.requestSeedGossip();
+      }
       await new Promise(resolve => setTimeout(resolve, waitMs));
       const profiles = this.env.gossip?.getProfiles?.() || [];
       const hasAllMissing = missingEntityIds.length === 0 || missingEntityIds.every((entityId) => this.hasProfileForEntity(entityId));
@@ -813,19 +841,17 @@ export class RuntimeP2P {
 
   private handleGossipRequest(from: string, payload: unknown) {
     if (!this.env.gossip?.getProfiles) return;
-    const request = payload as GossipRequestPayload;
-    let profiles: Profile[] = [];
-
-    if (request?.scope === 'bundle' && request.entityId && this.env.gossip.getProfileBundle) {
-      const bundle = this.env.gossip.getProfileBundle(request.entityId);
-      profiles = [...(bundle.profile ? [bundle.profile] : []), ...bundle.peers];
-    } else {
-      profiles = this.env.gossip.getProfiles();
-    }
+    const request = payload as GossipProfileBatchRequest;
+    const profiles = this.getLocalProfileBatch(request);
 
     const client = this.getActiveClient();
     if (!client) return;
     client.sendGossipResponse(from, { profiles } satisfies GossipResponsePayload);
+  }
+
+  private getLocalProfileBatch(request: GossipProfileBatchRequest = {}): Profile[] {
+    const allProfiles = this.env.gossip?.getProfiles?.() || [];
+    return selectProfileBatch(allProfiles, request, DEFAULT_GOSSIP_BATCH_LIMIT);
   }
 
   private handleGossipResponse(from: string, payload: unknown) {

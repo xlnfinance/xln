@@ -6,6 +6,8 @@ const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
 const RUNTIME_A = '0x1111111111111111111111111111111111111111';
 const RUNTIME_B = '0x2222222222222222222222222222222222222222';
 const ENTITY_A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const ENTITY_B = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const ENTITY_C = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 
 type FakeWs = { label: string };
 
@@ -60,5 +62,83 @@ describe('relay-router gossip fanout', () => {
     expect(gossipUpdate?.payload?.profiles?.[0]?.entityId).toBe(ENTITY_A);
     expect(sentBySocket.get(wsA)?.some((message) => (message as { type?: string }).type === 'gossip_update') ?? false).toBeFalse();
     expect(store.gossipProfiles.get(ENTITY_A)?.profile?.metadata?.name).toBe('alice');
+  });
+
+  test('serves batched gossip by ids and set filters', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'A' };
+
+    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A });
+
+    await relayRoute(config, wsA, {
+      type: 'gossip_announce',
+      id: 'announce-a',
+      from: RUNTIME_A,
+      to: SERVER_RUNTIME_ID,
+      payload: {
+        profiles: [
+          {
+            entityId: ENTITY_A,
+            runtimeId: RUNTIME_A,
+            capabilities: [],
+            metadata: {
+              name: 'leaf-a',
+              lastUpdated: 100,
+            },
+          },
+          {
+            entityId: ENTITY_B,
+            runtimeId: RUNTIME_B,
+            capabilities: ['hub', 'routing'],
+            metadata: {
+              name: 'hub-b',
+              isHub: true,
+              lastUpdated: 200,
+              encryptionPublicKey: '0x' + '22'.repeat(32),
+            },
+          },
+          {
+            entityId: ENTITY_C,
+            runtimeId: RUNTIME_B,
+            capabilities: [],
+            metadata: {
+              name: 'leaf-c',
+              lastUpdated: 300,
+            },
+          },
+        ],
+      },
+    });
+
+    await relayRoute(config, wsA, {
+      type: 'gossip_request',
+      id: 'request-1',
+      from: RUNTIME_A,
+      to: SERVER_RUNTIME_ID,
+      payload: {
+        ids: [ENTITY_A],
+        set: 'hubs',
+        updatedSince: 150,
+      },
+    });
+
+    const responses = (sentBySocket.get(wsA) ?? []).filter(
+      (message) => (message as { type?: string }).type === 'gossip_response',
+    ) as Array<{ payload?: { profiles?: Array<{ entityId?: string }> } }>;
+    const lastResponse = responses.at(-1);
+
+    expect(lastResponse).toBeDefined();
+    expect(lastResponse?.payload?.profiles?.map((profile) => profile.entityId)).toEqual([ENTITY_B]);
   });
 });

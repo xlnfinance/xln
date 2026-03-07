@@ -9,8 +9,10 @@
  */
 
 import { test, expect, type Page } from '@playwright/test';
-import { Wallet, ethers } from 'ethers';
+import { ethers } from 'ethers';
 import { resetProdServer } from './utils/e2e-baseline';
+import { connectHub as connectActiveRuntimeToHub } from './utils/e2e-connect';
+import { createDemoUsers, switchToRuntime } from './utils/e2e-demo-users';
 
 const INIT_TIMEOUT = 30_000;
 const SETTLE_MS = 10_000;
@@ -95,44 +97,6 @@ async function dismissOnboardingIfVisible(page: Page) {
       await page.waitForTimeout(300);
     }
   }
-}
-
-const DEFAULT_ALICE_MNEMONIC = 'test test test test test test test test test test test junk';
-const DEFAULT_BOB_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-
-function selectMnemonic(envKey: string, fallback: string): string {
-  const override = process.env[envKey];
-  if (typeof override === 'string' && override.trim().length > 0) return override.trim();
-  if (process.env.E2E_RANDOM_MNEMONICS === '1') {
-    return Wallet.createRandom().mnemonic!.phrase;
-  }
-  return fallback;
-}
-
-/** Create a runtime via vaultStore (Vite dev dynamic import) */
-async function createRuntime(page: Page, label: string, mnemonic: string) {
-  const r = await page.evaluate(async ({ label, mnemonic }) => {
-    try {
-      const vaultOperations = (window as any).vaultOperations;
-      if (!vaultOperations) {
-        return { ok: false, error: 'window.vaultOperations missing' };
-      }
-      await vaultOperations.createRuntime(label, mnemonic, {
-        loginType: 'demo',
-        requiresOnboarding: false,
-      });
-      // Tag env with debug ID for tracking identity
-      const env = (window as any).isolatedEnv;
-      if (env && !env._debugId) env._debugId = label + '-' + Date.now();
-      return { ok: true, debugId: env?._debugId };
-    } catch (e: any) {
-      return { ok: false, error: e.message };
-    }
-  }, { label, mnemonic });
-  expect(r.ok, `createRuntime(${label}) failed: ${r.error}`).toBe(true);
-  console.log(`[E2E] Created runtime ${label}, env debugId=${r.debugId}`);
-  // Wait for entity creation, P2P start, gossip
-  await page.waitForTimeout(5000);
 }
 
 async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
@@ -260,33 +224,6 @@ async function waitForEntityAdvertised(page: Page, entityId: string) {
   expect(advertised, `Entity ${entityId.slice(0, 12)} not advertised in relay debug or local gossip cache`).toBe(true);
 }
 
-/** Get first entity from active runtime's env */
-async function getEntity(page: Page) {
-  return page.evaluate(() => {
-    const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN;
-    if (!env?.eReplicas || !XLN) return null;
-    for (const [key, rep] of env.eReplicas.entries()) {
-      const [entityId, signerId] = key.split(':');
-      const accounts: Array<{ cpId: string; out: string; in_: string }> = [];
-      if (rep.state?.accounts) {
-        for (const [cpId, acc] of rep.state.accounts.entries()) {
-          const d = acc.deltas?.get(1);
-          if (d) {
-            const v = XLN.deriveDelta(
-              d,
-              String(entityId).toLowerCase() < String(cpId).toLowerCase(),
-            );
-            accounts.push({ cpId: String(cpId), out: v.outCapacity.toString(), in_: v.inCapacity.toString() });
-          }
-        }
-      }
-      return { entityId, signerId, accounts };
-    }
-    return null;
-  });
-}
-
 /** Dump full runtime state diagnostics */
 async function dumpState(page: Page, label: string) {
   const info = await page.evaluate((label) => {
@@ -350,101 +287,6 @@ async function dumpState(page: Page, label: string) {
   }, label);
   console.log(`[E2E] STATE(${label}):`, JSON.stringify(info, null, 2));
   return info;
-}
-
-/** Switch runtime via programmatic call (more reliable than UI click) */
-async function switchTo(page: Page, label: string) {
-  const deadline = Date.now() + 30_000;
-  let r: { ok: boolean; id?: string; error?: string } = { ok: false, error: 'not-started' };
-
-  while (Date.now() < deadline) {
-    try {
-      r = await page.evaluate(async (runtimeLabel) => {
-        try {
-          const runtimesState = (window as any).runtimesState;
-          const vaultOperations = (window as any).vaultOperations;
-          if (!runtimesState || !vaultOperations) {
-            return { ok: false, error: 'window.runtimesState/window.vaultOperations missing' };
-          }
-          // Read store value without importing svelte/store — subscribe fires synchronously
-          let state: any;
-          const unsub = runtimesState.subscribe((s: any) => { state = s; });
-          unsub();
-          // Find runtime by label
-          for (const [id, runtime] of Object.entries(state.runtimes) as any[]) {
-            if (runtime.label?.toLowerCase() === runtimeLabel.toLowerCase()) {
-              await vaultOperations.selectRuntime(id);
-              return { ok: true, id: id.slice(0, 12) };
-            }
-          }
-          return {
-            ok: false,
-            error: `Runtime "${runtimeLabel}" not found in runtimes: ${Object.values(state.runtimes).map((x: any) => x.label).join(',')}`,
-          };
-        } catch (e: any) {
-          return { ok: false, error: e.message };
-        }
-      }, label);
-      if (r.ok) break;
-    } catch (e: any) {
-      r = { ok: false, error: e?.message || String(e) };
-    }
-
-    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
-    await page.waitForTimeout(400);
-  }
-
-  expect(r.ok, `switchTo(${label}) failed: ${r.error}`).toBe(true);
-  // Check and tag env after switch
-  const envInfo = await page.evaluate((runtimeLabel) => {
-    const env = (window as any).isolatedEnv;
-    if (env && !env._debugId) env._debugId = runtimeLabel + '-switch-' + Date.now();
-    const keys = env?.eReplicas ? [...env.eReplicas.keys()] : [];
-    return { debugId: env?._debugId, eReplicaCount: keys.length, keys: keys.map((k: string) => k.slice(0, 20)) };
-  }, label);
-  console.log(`[E2E] Switched to ${label} (${r.id}), envId=${envInfo.debugId}, eReplicas=${envInfo.eReplicaCount}: [${envInfo.keys.join(', ')}]`);
-  await ensureRuntimeOnline(page, `switch-${label}`);
-  await dismissOnboardingIfVisible(page);
-  await page.waitForTimeout(2000);
-}
-
-/** Discover hub via gossip polling */
-async function discoverHub(page: Page): Promise<string> {
-  const apiBaseUrl = await getActiveApiBase(page);
-  const isHubProfile = (p: any): boolean =>
-    p?.metadata?.isHub === true || Array.isArray(p?.capabilities) && p.capabilities.includes('hub');
-
-  for (let i = 0; i < 45; i++) {
-    const fromGossip = await page.evaluate<string | null>(() => {
-      try {
-        const env = (window as any).isolatedEnv;
-        const XLN = (window as any).XLN;
-        XLN?.refreshGossip?.(env);
-        const profiles = env?.gossip?.getProfiles?.() || [];
-        const hub = profiles.find((p: any) =>
-          p?.metadata?.isHub === true || Array.isArray(p?.capabilities) && p.capabilities.includes('hub'));
-        return typeof hub?.entityId === 'string' ? hub.entityId : null;
-      } catch {
-        return null;
-      }
-    });
-    if (fromGossip) return fromGossip;
-
-    try {
-      const r = await page.request.get(`${apiBaseUrl}/api/debug/entities`);
-      if (r.ok()) {
-        const data = await r.json();
-        const entities = Array.isArray((data as any)?.entities) ? (data as any).entities : [];
-        const h = entities.find((x: any) => x?.isHub === true && typeof x?.entityId === 'string');
-        if (h?.entityId) return h.entityId as string;
-      }
-    } catch {}
-
-    await page.waitForTimeout(1000);
-  }
-
-  expect(null, 'Hub not found via gossip (45s)').not.toBeNull();
-  return '' as never;
 }
 
 async function getHubFeeConfig(page: Page, hubId: string): Promise<{ feePPM: bigint; baseFee: bigint }> {
@@ -616,101 +458,6 @@ async function findSelfCycleRoute(
   return route;
 }
 
-/** Open account + 10k USDC credit with hub */
-async function connectHub(page: Page, entityId: string, signerId: string, hubId: string) {
-  let opened = false;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    await ensureRuntimeOnline(page, `connectHub-attempt-${attempt}`);
-    const r = await page.evaluate(async ({ entityId, signerId, hubId }) => {
-      try {
-        const XLN = (window as any).XLN;
-        const env = (window as any).isolatedEnv;
-        console.log(`[E2E] connectHub: env.runtimeId=${env?.runtimeId?.slice(0,12)}, entityId=${entityId.slice(0,12)}, hubId=${hubId.slice(0,12)}`);
-        const p2p = env?.runtimeState?.p2p;
-        const start = Date.now();
-        let hubRuntimeId: string | null = null;
-        while (Date.now() - start < 12_000) {
-          const profiles = env?.gossip?.getProfiles?.() ?? [];
-          const hub = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === String(hubId).toLowerCase());
-          const candidate = hub?.runtimeId ?? hub?.metadata?.runtimeId ?? null;
-          if (typeof candidate === 'string' && candidate.length > 0) {
-            hubRuntimeId = candidate;
-            break;
-          }
-          if (typeof p2p?.refreshGossip === 'function') {
-            try { await p2p.refreshGossip(); } catch {}
-          }
-          await new Promise((r) => setTimeout(r, 600));
-        }
-        if (!hubRuntimeId) {
-          return { ok: false, error: 'hub runtimeId unresolved in gossip', hasAccount: false, accSize: 0 };
-        }
-        let liveSignerId = signerId;
-        for (const key of env?.eReplicas?.keys?.() ?? []) {
-          const [eid, sid] = String(key).split(':');
-          if (String(eid).toLowerCase() === String(entityId).toLowerCase() && sid) {
-            liveSignerId = sid;
-            break;
-          }
-        }
-        XLN.enqueueRuntimeInput(env, {
-          runtimeTxs: [],
-          entityInputs: [{
-            entityId,
-            signerId: liveSignerId,
-            entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubId, creditAmount: 10_000n * 10n ** 18n, tokenId: 1 } }],
-          }],
-        });
-        // Check if account was created locally
-        for (const [k, rep] of env.eReplicas.entries()) {
-          if (!k.startsWith(entityId + ':')) continue;
-          const hasAccount = rep.state?.accounts?.has(hubId);
-          const accSize = rep.state?.accounts?.size || 0;
-          return { ok: true, hasAccount, accSize };
-        }
-        return { ok: true, hasAccount: false, accSize: 0 };
-      } catch (e: any) { return { ok: false, error: e.message }; }
-    }, { entityId, signerId, hubId });
-    console.log(`[E2E] connectHub result (attempt ${attempt}):`, JSON.stringify(r));
-    expect(r.ok, `connectHub failed: ${r.error}`).toBe(true);
-
-    // Wait until bilateral account is actually usable (delta exists, no pending frame).
-    opened = await page.evaluate(async ({ entityId, hubId }) => {
-      const start = Date.now();
-      while (Date.now() - start < 45_000) {
-        const env = (window as any).isolatedEnv;
-        if (!env?.eReplicas) {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          continue;
-        }
-        let ready = false;
-        for (const [k, rep] of env.eReplicas.entries()) {
-          if (!String(k).startsWith(entityId + ':')) continue;
-          const acc = rep.state?.accounts?.get(hubId);
-          if (!acc) continue;
-          const hasDelta = !!acc.deltas?.get?.(1);
-          const noPending = !acc.pendingFrame;
-          const atLeastOneFrame = Number(acc.currentHeight || 0) > 0;
-          if (hasDelta && noPending && atLeastOneFrame) {
-            ready = true;
-            break;
-          }
-        }
-        if (ready) return true;
-        await new Promise((resolve) => setTimeout(resolve, 750));
-      }
-      return false;
-    }, { entityId, hubId });
-
-    console.log(`[E2E] account-open readiness ${entityId.slice(0, 10)}↔${hubId.slice(0, 10)} attempt=${attempt}: ${opened ? 'OPEN' : 'AWAITING'}`);
-    if (opened) break;
-    await page.waitForTimeout(2_000);
-  }
-
-  expect(opened, `Account open must reach OPEN for ${entityId.slice(0, 10)}↔${hubId.slice(0, 10)}`).toBe(true);
-  await page.waitForTimeout(SETTLE_MS);
-}
-
 /** Get USDC outCapacity */
 async function outCap(page: Page, entityId: string, cpId: string): Promise<bigint> {
   const s = await page.evaluate(({ entityId, cpId }) => {
@@ -743,6 +490,21 @@ async function outCap(page: Page, entityId: string, cpId: string): Promise<bigin
     return 0n;
   }
   return BigInt(s);
+}
+
+async function connectedCounterparties(page: Page, entityId: string): Promise<Set<string>> {
+  const counterparties = await page.evaluate((targetEntityId) => {
+    const env = (window as any).isolatedEnv;
+    const results = new Set<string>();
+    for (const [replicaKey, replica] of (env?.eReplicas || new Map()).entries()) {
+      if (!String(replicaKey).startsWith(`${targetEntityId}:`)) continue;
+      for (const counterpartyId of replica?.state?.accounts?.keys?.() || []) {
+        results.add(String(counterpartyId).toLowerCase());
+      }
+    }
+    return Array.from(results);
+  }, entityId);
+  return new Set(counterparties);
 }
 
 async function waitForOutCapDelta(
@@ -848,12 +610,6 @@ async function waitForAccountIdle(
     `Account not idle for ${entityId.slice(0, 10)}↔${counterpartyId.slice(0, 10)}; ` +
     `hasAccount=${last.hasAccount} height=${last.height} pending=${last.pendingHeight} mempool=${last.mempoolLen}`
   );
-}
-
-async function getRuntimeId(page: Page): Promise<string> {
-  const runtimeId = await page.evaluate(() => String((window as any).isolatedEnv?.runtimeId || ''));
-  expect(runtimeId.length > 0, 'Active runtimeId missing').toBe(true);
-  return runtimeId;
 }
 
 async function fetchRelayEvents(page: Page, query: Record<string, string | number>): Promise<any[]> {
@@ -973,8 +729,8 @@ async function waitForRelayHtlcPipeline(
   );
 }
 
-/** Faucet 100 USDC (with 30s timeout) */
-async function faucet(page: Page, entityId: string) {
+/** Faucet 100 USDC into a specific bilateral hub account (with 30s timeout). */
+async function faucet(page: Page, entityId: string, hubEntityId?: string) {
   let r: { ok: boolean; status: number; data: any } = { ok: false, status: 0, data: { error: 'not-run' } };
   for (let attempt = 1; attempt <= 6; attempt++) {
     const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
@@ -984,8 +740,15 @@ async function faucet(page: Page, entityId: string) {
       break;
     }
     try {
+      const payload: Record<string, string | number> = {
+        userEntityId: entityId,
+        userRuntimeId: runtimeId,
+        tokenId: 1,
+        amount: '100',
+      };
+      if (hubEntityId) payload.hubEntityId = hubEntityId;
       const resp = await page.request.post(`${apiBaseUrl}/api/faucet/offchain`, {
-        data: { userEntityId: entityId, userRuntimeId: runtimeId, tokenId: 1, amount: '100' },
+        data: payload,
       });
       const data = await resp.json().catch(() => ({}));
       r = { ok: resp.ok(), status: resp.status(), data };
@@ -1149,49 +912,56 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     // ── 1. Navigate ──────────────────────────────────────────────
     console.log('[E2E] 1. Navigate to app');
 
-    // ── 2. Create Alice + Bob with random mnemonics ──────────────
+    // ── 2. Create Alice + Bob from shared demo-user bootstrap ────
     console.log('[E2E] 2. Create runtimes');
-    const aliceMnemonic = selectMnemonic('E2E_ALICE_MNEMONIC', DEFAULT_ALICE_MNEMONIC);
-    const bobMnemonic = selectMnemonic('E2E_BOB_MNEMONIC', DEFAULT_BOB_MNEMONIC);
-    console.log(`[E2E] Alice mnemonic: ${aliceMnemonic.split(' ').slice(0, 3).join(' ')}...`);
-    console.log(`[E2E] Bob mnemonic: ${bobMnemonic.split(' ').slice(0, 3).join(' ')}...`);
+    const demoUsers = await createDemoUsers(page, ['alice', 'bob'] as const);
+    const alice = demoUsers.alice;
+    const bob = demoUsers.bob;
+    expect(alice, 'Alice entity missing').toBeDefined();
+    expect(bob, 'Bob entity missing').toBeDefined();
+    console.log(`[E2E] Alice mnemonic: ${alice!.mnemonic.split(' ').slice(0, 3).join(' ')}...`);
+    console.log(`[E2E] Bob mnemonic: ${bob!.mnemonic.split(' ').slice(0, 3).join(' ')}...`);
 
-    await createRuntime(page, 'alice', aliceMnemonic);
+    await switchToRuntime(page, 'alice');
     await assertP2PSingletonAndWsHealth(page, 'alice-create');
-    const alice = await getEntity(page);
-    expect(alice, 'Alice entity missing').not.toBeNull();
     await waitForEntityAdvertised(page, alice!.entityId);
-    const aliceRuntimeId = await getRuntimeId(page);
+    const aliceRuntimeId = alice!.runtimeId;
     console.log(`[E2E] Alice: entity=${alice!.entityId.slice(0, 16)}  signer=${alice!.signerId.slice(0, 12)}`);
     await dumpState(page, 'alice-after-create');
 
-    await createRuntime(page, 'bob', bobMnemonic);
+    await switchToRuntime(page, 'bob');
     await assertP2PSingletonAndWsHealth(page, 'bob-create');
-    const bob = await getEntity(page);
-    expect(bob, 'Bob entity missing').not.toBeNull();
     expect(bob!.entityId).not.toBe(alice!.entityId);
     await waitForEntityAdvertised(page, bob!.entityId);
-    const bobRuntimeId = await getRuntimeId(page);
+    const bobRuntimeId = bob!.runtimeId;
     console.log(`[E2E] Bob: entity=${bob!.entityId.slice(0, 16)}  signer=${bob!.signerId.slice(0, 12)}`);
     await dumpState(page, 'bob-after-create');
 
-    // ── 3. Discover Hub ──────────────────────────────────────────
-    console.log('[E2E] 3. Discover hub');
-    const hubId = await discoverHub(page);
-    console.log(`[E2E] Hub: ${hubId.slice(0, 16)}`);
+    // ── 3. Discover hubs ─────────────────────────────────────────
+    console.log('[E2E] 3. Discover hubs');
+    const hubs = await discoverHubs(page);
+    expect(hubs.length, 'Need at least one hub visible in gossip').toBeGreaterThan(0);
+    const hubId = hubs[0]!;
+    const preferredThreeHubs = hubs.slice(0, 3);
+    const aliceSetupHubs = preferredThreeHubs.length >= 3 ? preferredThreeHubs : [hubId];
+    console.log(`[E2E] Primary hub: ${hubId.slice(0, 16)}`);
+    console.log(`[E2E] Alice setup hubs: ${aliceSetupHubs.map((hub) => hub.slice(0, 10)).join(', ')}`);
 
-    // ── 4. Connect both to Hub ───────────────────────────────────
-    console.log('[E2E] 4a. Connect Bob to hub (active)');
-    await connectHub(page, bob!.entityId, bob!.signerId, hubId);
+    // ── 4. Connect accounts once during setup ────────────────────
+    console.log('[E2E] 4a. Connect Bob to primary hub');
+    await connectActiveRuntimeToHub(page, hubId);
     await dumpState(page, 'bob-after-connect');
 
     console.log('[E2E] 4b. Switch to Alice');
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     await assertP2PSingletonAndWsHealth(page, 'switch-alice');
     await dumpState(page, 'alice-after-switch');
 
-    console.log('[E2E] 4c. Connect Alice to hub');
-    await connectHub(page, alice!.entityId, alice!.signerId, hubId);
+    console.log('[E2E] 4c. Connect Alice to required hubs upfront');
+    for (const targetHubId of aliceSetupHubs) {
+      console.log(`[E2E] 4c.i Open Alice account to ${targetHubId.slice(0, 16)}`);
+      await connectActiveRuntimeToHub(page, targetHubId);
+    }
     await dumpState(page, 'alice-after-connect');
 
     await screenshot(page, '04-alice-connected');
@@ -1200,7 +970,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log('[E2E] 5. Faucet Alice');
     const a0 = await outCap(page, alice!.entityId, hubId);
     console.log(`[E2E] Alice OUT before faucet: ${a0}`);
-    await faucet(page, alice!.entityId);
+    await faucet(page, alice!.entityId, hubId);
     await dumpState(page, 'alice-after-faucet');
     const a1 = await waitForOutCapIncrease(page, alice!.entityId, hubId, a0);
     console.log(`[E2E] Alice OUT after faucet: ${a0} → ${a1}`);
@@ -1218,12 +988,12 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E]    Fee:    ${fee} (${ethers.formatUnits(fee, 18)} USDC)`);
     console.log(`[E2E]    Received: ${payAmount} (${ethers.formatUnits(payAmount, 18)} USDC)`);
 
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     await assertP2PSingletonAndWsHealth(page, 'switch-bob-forward-recv');
     await waitForAccountIdle(page, bob!.entityId, hubId);
     const b0 = await outCap(page, bob!.entityId, hubId);
 
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     await assertP2PSingletonAndWsHealth(page, 'switch-alice-reverse-recv');
     await waitForAccountIdle(page, alice!.entityId, hubId);
     const paySince = Date.now() - 1000;
@@ -1264,7 +1034,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await screenshot(page, '06a-alice-after-send');
 
     // Bob: receiver gets amount minus fee
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     const b1 = await waitForOutCapDelta(page, bob!.entityId, hubId, b0, payAmount);
     const bobReceived = b1 - b0;
     console.log(`[E2E] Bob received: ${bobReceived} (OUT ${b0} → ${b1})`);
@@ -1292,10 +1062,10 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     expect(b2, 'Bob must have enough OUT capacity for reverse payment').toBeGreaterThanOrEqual(reverseSenderSpend);
     console.log(`[E2E] Bob OUT available for reverse: ${b2}`);
 
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     const a3 = await outCap(page, alice!.entityId, hubId);
 
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     // Verify Bob still has account before paying
     const b2check = await outCap(page, bob!.entityId, hubId);
     console.log(`[E2E] Bob OUT pre-pay check: ${b2check}`);
@@ -1323,7 +1093,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await screenshot(page, '07a-bob-after-reverse-send');
 
     // Alice: receiver gets amount minus fee
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     const a4 = await waitForOutCapDelta(page, alice!.entityId, hubId, a3, reverseAmount);
     const aliceReceived = a4 - a3;
     console.log(`[E2E] Alice received: ${aliceReceived} (OUT ${a3} → ${a4})`);
@@ -1338,10 +1108,10 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] 8. Second forward: Alice → Hub → Bob (${ethers.formatUnits(pay2Amount, 18)} USDC)`);
 
     const a5 = await outCap(page, alice!.entityId, hubId);
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     const b4 = await outCap(page, bob!.entityId, hubId);
 
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     const pay2Since = Date.now() - 1000;
     await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
       [alice!.entityId, hubId, bob!.entityId], pay2Amount);
@@ -1364,7 +1134,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     );
     expect(pay2Spent, '2nd payment: Alice pays at least quoted sender amount').toBeGreaterThanOrEqual(pay2MinSpend);
 
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     const b5 = await waitForOutCapDelta(page, bob!.entityId, hubId, b4, pay2Amount);
     console.log(`[E2E] 2nd: Bob OUT ${b4} → ${b5}, diff=${b5 - b4}, expected=${pay2Amount}`);
     expect(b5 - b4, '2nd payment: Bob receives exact recipient amount').toBe(pay2Amount);
@@ -1373,7 +1143,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log('[E2E] ✅ Second payment accumulates correctly');
 
     // ── 9. Insufficient capacity (should fail gracefully) ─────────
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     console.log('[E2E] 9. Overspend: Alice tries to send more than capacity');
     const overAmount = a6 + toWei(1); // more than Alice has
     const { secret: overSecret, hashlock: overHash } = generateHtlc();
@@ -1412,16 +1182,15 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // ── Summary ───────────────────────────────────────────────────
     console.log('[E2E] 10. Self-pay obfuscated loop route');
-    const hubs = await discoverHubs(page);
     console.log(`[E2E] Hubs discovered: ${hubs.map(h => h.slice(0, 10)).join(', ')}`);
-    const preferredThreeHubs = hubs.slice(0, 3);
     const requireThreeHubs = preferredThreeHubs.length >= 3;
     if (requireThreeHubs) {
-      // Ensure the sender has direct bilateral links into the 3-hub cycle,
-      // otherwise A->H1->H2->H3->A cannot execute as a real HTLC path.
-      for (const hub of preferredThreeHubs) {
-        await connectHub(page, alice!.entityId, alice!.signerId, hub);
-      }
+      const existingCounterparties = await connectedCounterparties(page, alice!.entityId);
+      const hasAllCycleHubs = preferredThreeHubs.every((candidate) => existingCounterparties.has(candidate.toLowerCase()));
+      expect(
+        hasAllCycleHubs,
+        `Alice must already be connected to cycle hubs from setup: ${preferredThreeHubs.join(', ')}`,
+      ).toBe(true);
     }
     const selfRoute = await findSelfCycleRoute(
       page,
@@ -1472,7 +1241,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // Reload hard-assert: payment balances must survive runtime restore.
     const aliceBeforeReload = await outCap(page, alice!.entityId, hubId);
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     const bobBeforeReload = await outCap(page, bob!.entityId, hubId);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => {
@@ -1480,10 +1249,10 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
     }, { timeout: 60_000 });
 
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     const aliceAfterReload = await outCap(page, alice!.entityId, hubId);
     expect(aliceAfterReload, 'Alice OUT must survive reload').toBe(aliceBeforeReload);
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     const bobAfterReload = await outCap(page, bob!.entityId, hubId);
     expect(bobAfterReload, 'Bob OUT must survive reload').toBe(bobBeforeReload);
 
