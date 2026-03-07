@@ -1,6 +1,13 @@
+/**
+ * E2E swap coverage for the live UI and the built-in browser scenarios.
+ *
+ * These tests verify that swap offers can auto-prepare missing token capacity, place and cancel
+ * cleanly through the UI, and that the scenario runners still produce partial fills after reload-safe setup.
+ */
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
+import { ensureE2EBaseline } from './utils/e2e-baseline';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const INIT_TIMEOUT = 30_000;
@@ -985,6 +992,12 @@ async function readFirstOpenOrderRemaining(page: Page): Promise<number> {
 }
 
 test.describe('E2E Swap Flow', () => {
+  test.beforeEach(async ({ page }) => {
+    await timedStep('swap.ensure_baseline', () => ensureE2EBaseline(page));
+  });
+
+  // Scenario: the UI should auto-create the inbound token capacity required to place a WETH/USDC offer,
+  // and that prepared state must still be present after a reload.
   test('swap place auto-prepares inbound token capacity', async ({ page }) => {
     test.setTimeout(240_000);
 
@@ -1060,8 +1073,29 @@ test.describe('E2E Swap Flow', () => {
         )
         .toBe(true);
     });
+
+    await timedStep('swap_auto.reload_page', async () => {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => {
+        const env = (window as any).isolatedEnv;
+        return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
+      }, { timeout: 60_000 });
+    });
+    await timedStep('swap_auto.reload_assert_offer_persisted', async () => {
+      await expect.poll(async () => {
+        const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+        return (
+          state.accountSwapOffersSize > 0
+          || state.accountHasSwapOfferInMempool
+          || state.accountHasSwapOfferInPendingFrame
+          || state.swapBookSize > 0
+        );
+      }, { timeout: 60_000 }).toBe(true);
+    });
   });
 
+  // Scenario: place a non-marketable order, cancel it from the UI, and verify both state machine
+  // and rendered order table clear before and after reload.
   test('swap place and cancel from UI updates state machine', async ({ page }) => {
     test.setTimeout(240_000);
 
@@ -1124,13 +1158,15 @@ test.describe('E2E Swap Flow', () => {
     expect(Number.isFinite(placedOffer.wantTokenId) && placedOffer.wantTokenId > 0).toBe(true);
     expect(placedOffer.wantTokenId).not.toBe(placedOffer.giveTokenId);
 
-    await timedStep('swap.assert_swap_resolve_emitted', async () => {
+    await timedStep('swap.assert_non_marketable_order_stays_open', async () => {
+      const remaining = await readFirstOpenOrderRemaining(page);
+      expect(remaining, 'non-marketable order must remain open before cancel').toBeGreaterThan(0);
       await expect
         .poll(
           async () => await readSwapResolveCount(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
-          { timeout: 60_000 },
+          { timeout: 5_000, intervals: [250, 500, 1000] },
         )
-        .toBeGreaterThanOrEqual(swapResolveCountBefore);
+        .toBe(swapResolveCountBefore);
     });
 
     const cancelButton = page.locator('.swap-panel .orders-table tbody .cancel-btn').first();
@@ -1159,8 +1195,29 @@ test.describe('E2E Swap Flow', () => {
       const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
       expect(state.accountSwapOffersSize).toBe(0);
     });
+
+    await timedStep('swap.reload_page', async () => {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => {
+        const env = (window as any).isolatedEnv;
+        return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
+      }, { timeout: 60_000 });
+    });
+    await timedStep('swap.reload_assert_no_open_offer', async () => {
+      await expect.poll(async () => {
+        const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+        return state.accountSwapOffersSize;
+      }, { timeout: 60_000 }).toBe(0);
+    });
+    await timedStep('swap.reload_assert_ui_no_rows', async () => {
+      await expect.poll(async () => await page.locator('.swap-panel .orders-table tbody tr').count(), {
+        timeout: 60_000,
+      }).toBe(0);
+    });
   });
 
+  // Scenario: execute the built-in browser swap scenario and assert it still generates at least
+  // one partial fill in account history.
   test('browser e2e scenario swap includes partial fills', async ({ page }) => {
     test.setTimeout(240_000);
 
@@ -1206,6 +1263,8 @@ test.describe('E2E Swap Flow', () => {
     expect(Number(result.partialFillCount || 0), 'expected at least one partial fill in scenario swap').toBeGreaterThan(0);
   });
 
+  // Scenario: execute the larger swapMarket scenario and assert its multi-party order flow still
+  // produces partial fills instead of only full matches.
   test('browser e2e scenario swapMarket includes partial fills', async ({ page }) => {
     test.setTimeout(480_000);
 

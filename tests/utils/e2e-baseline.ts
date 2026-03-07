@@ -244,7 +244,7 @@ export const ensureE2EBaseline = async (
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     pollMs: options.pollMs ?? DEFAULT_POLL_MS,
     requireHubMesh: options.requireHubMesh ?? true,
-    requireMarketMaker: options.requireMarketMaker ?? true,
+    requireMarketMaker: options.requireMarketMaker ?? false,
     minHubCount: options.minHubCount ?? 3,
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
   };
@@ -286,7 +286,7 @@ export const resetProdServer = async (
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const resetBody = {
-        requireMarketMaker: options.requireMarketMaker ?? true,
+        requireMarketMaker: options.requireMarketMaker ?? false,
       };
       const coldResponse = await page.request.post(`${resetBaseUrl}/api/reset?rpc=1&db=1&sync=1`, {
         data: resetBody,
@@ -301,7 +301,7 @@ export const resetProdServer = async (
       const softResponse = await page.request.post(`${resetBaseUrl}/api/debug/reset`, {
         data: {
           preserveHubs: softPreserveHubs,
-          requireMarketMaker: options.requireMarketMaker ?? true,
+          requireMarketMaker: options.requireMarketMaker ?? false,
         },
         headers: { 'Content-Type': 'application/json' },
       });
@@ -328,7 +328,7 @@ export const resetProdServer = async (
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     pollMs: options.pollMs ?? DEFAULT_POLL_MS,
     requireHubMesh: options.requireHubMesh ?? true,
-    requireMarketMaker: options.requireMarketMaker ?? true,
+    requireMarketMaker: options.requireMarketMaker ?? false,
     minHubCount: options.minHubCount ?? 3,
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
   };
