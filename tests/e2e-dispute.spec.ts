@@ -1,6 +1,13 @@
+/**
+ * E2E dispute coverage for account UI, settlement batching, reserve return, and reload persistence.
+ *
+ * These tests prove that a disputed bilateral account can be started from the UI, finalized into reserve,
+ * extended with post-dispute settlement actions, and restored after reload without losing batch history.
+ */
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
+import { resetProdServer } from './utils/e2e-baseline';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const INIT_TIMEOUT = 30_000;
@@ -200,16 +207,44 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{ entityId: string; 
   return { entityId: result.entityId, signerId: result.signerId, counterpartyId: result.counterpartyId };
 }
 
-async function readReserve(page: Page, entityId: string): Promise<bigint> {
+async function readReserve(page: Page, entityId: string, opts?: { allowUnavailable?: boolean }): Promise<bigint> {
   const value = await page.evaluate(async ({ entityId }) => {
     const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) return null;
+    const entityLower = String(entityId || '').toLowerCase();
+    // 1) Prefer local state-machine reserve when this entity is loaded in runtime.
+    for (const [key, rep] of env.eReplicas.entries()) {
+      const [eid] = String(key).split(':');
+      if (String(eid || '').toLowerCase() !== entityLower) continue;
+      const reserves = rep?.state?.reserves;
+      let reserve: unknown = null;
+      if (reserves?.get) {
+        reserve = reserves.get(1);
+        if (reserve === undefined) reserve = reserves.get(1n);
+        if (reserve === undefined) reserve = reserves.get('1');
+      } else if (reserves && typeof reserves === 'object') {
+        reserve = (reserves as any)[1] ?? (reserves as any)['1'] ?? null;
+      }
+      return typeof reserve === 'bigint' ? reserve.toString() : String(reserve ?? '0');
+    }
+
+    // 2) For remote entities (e.g. second hub), read canonical on-chain reserve via active JAdapter.
     const XLN = (window as any).XLN;
     const jadapter = XLN?.getActiveJAdapter?.(env) ?? null;
     if (!jadapter?.getReserves) return null;
-    const reserve = await jadapter.getReserves(entityId, 1);
-    return typeof reserve === 'bigint' ? reserve.toString() : String(reserve ?? '0');
+    try {
+      const reserve = await jadapter.getReserves(entityId, 1);
+      return typeof reserve === 'bigint' ? reserve.toString() : String(reserve ?? '0');
+    } catch {
+      return null;
+    }
+
+    return null;
   }, { entityId });
-  if (!value) throw new Error('Unable to read reserve');
+  if (!value) {
+    if (opts?.allowUnavailable) return 0n;
+    throw new Error('Unable to read reserve');
+  }
   return BigInt(value);
 }
 
@@ -650,15 +685,25 @@ async function broadcastPendingBatchViaUi(page: Page): Promise<void> {
   await page.waitForTimeout(500);
 }
 
+async function clickWithDialogAccept(page: Page, action: () => Promise<void>): Promise<void> {
+  const onDialog = async (dialog: any) => {
+    await dialog.accept();
+  };
+  page.on('dialog', onDialog);
+  try {
+    await action();
+  } finally {
+    page.off('dialog', onDialog);
+  }
+}
+
 async function clearBatchViaUi(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    window.confirm = () => true;
-    window.alert = () => {};
-  });
   const clearButton = page.getByTestId('settle-clear-batch').first();
   await expect(clearButton).toBeVisible({ timeout: 30_000 });
   await expect(clearButton).toBeEnabled({ timeout: 30_000 });
-  await clearButton.click();
+  await clickWithDialogAccept(page, async () => {
+    await clearButton.click();
+  });
   await page.waitForTimeout(400);
 }
 
@@ -723,15 +768,13 @@ async function startDisputeFromEntitySettle(
   await expect(disputeButton).toBeVisible({ timeout: 15_000 });
   await expect(disputeButton).toBeEnabled({ timeout: 15_000 });
 
-  await page.evaluate(() => {
-    window.confirm = () => true;
-    window.alert = () => {};
+  await clickWithDialogAccept(page, async () => {
+    await disputeButton.click();
   });
-  await disputeButton.click();
 
   await expect.poll(async () => {
     const state = await readAccountState(page, entityId, signerId, counterpartyId);
-    return state.status === 'disputed' || state.jBatchDisputeStarts > 0;
+    return state.status === 'disputed' && state.jBatchDisputeStarts > 0;
   }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
 }
 
@@ -861,6 +904,12 @@ async function readJBatchSnapshot(
 }
 
 test.describe('E2E Dispute Flow', () => {
+  test.beforeEach(async ({ page }) => {
+    await timedStep('dispute.reset_server', () => resetProdServer(page));
+  });
+
+  // Scenario: trigger a dispute from the account panel, observe reserve returning after finalize,
+  // then continue with post-dispute R2R/R2C/C2R coverage and confirm reload restores the final state.
   test('account panel dispute lifecycle returns reserve', async ({ page }) => {
     test.setTimeout(LONG_E2E ? 360_000 : 210_000);
     page.on('console', (msg) => {
@@ -1090,8 +1139,36 @@ test.describe('E2E Dispute Flow', () => {
         || finalSnapshot.lastBatchOps.disputeFinalizations > 0,
       `expected dispute/R2C footprint in history, got ${JSON.stringify(finalSnapshot.lastBatchOps)}`,
     ).toBe(true);
+
+    // Reload hard-assert: WAL restore keeps finalized dispute + batch history.
+    await timedStep('dispute.reload_page', async () => {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => {
+        const env = (window as any).isolatedEnv;
+        return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
+      }, { timeout: 60_000 });
+    });
+    await timedStep('dispute.reload_assert_reserve', async () => {
+      await expect.poll(async () => await readReserve(page, accountRef.entityId, { allowUnavailable: true }), {
+        timeout: 60_000,
+        intervals: [500, 1000, 2000],
+      }).toBeGreaterThan(reserveBefore);
+    });
+    await timedStep('dispute.reload_assert_hidden_disputed_account', async () => {
+      await expect.poll(async () => {
+        return await page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId }).count();
+      }, { timeout: 45_000, intervals: [500, 1000, 2000] }).toBe(0);
+    });
+    await timedStep('dispute.reload_assert_batch_history', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.batchHistoryCount;
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThanOrEqual(finalSnapshot.batchHistoryCount);
+    });
   });
 
+  // Scenario: the entity settle workspace must be able to sign and broadcast the queued dispute batch,
+  // and the bilateral account should enter active dispute afterward.
   test('entity settle workspace Sign & Broadcast submits dispute batch', async ({ page }) => {
     test.setTimeout(LONG_E2E ? 240_000 : 120_000);
     page.on('console', (msg) => {
