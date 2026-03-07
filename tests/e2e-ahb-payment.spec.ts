@@ -729,8 +729,8 @@ async function waitForRelayHtlcPipeline(
   );
 }
 
-/** Faucet 100 USDC into a specific bilateral hub account (with 30s timeout). */
-async function faucet(page: Page, entityId: string, hubEntityId?: string) {
+/** Faucet 100 USDC into one exact bilateral hub account (with 30s timeout). */
+async function faucet(page: Page, entityId: string, hubEntityId: string) {
   let r: { ok: boolean; status: number; data: any } = { ok: false, status: 0, data: { error: 'not-run' } };
   for (let attempt = 1; attempt <= 6; attempt++) {
     const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
@@ -740,13 +740,13 @@ async function faucet(page: Page, entityId: string, hubEntityId?: string) {
       break;
     }
     try {
-      const payload: Record<string, string | number> = {
+      const payload = {
         userEntityId: entityId,
         userRuntimeId: runtimeId,
         tokenId: 1,
         amount: '100',
+        hubEntityId,
       };
-      if (hubEntityId) payload.hubEntityId = hubEntityId;
       const resp = await page.request.post(`${apiBaseUrl}/api/faucet/offchain`, {
         data: payload,
       });

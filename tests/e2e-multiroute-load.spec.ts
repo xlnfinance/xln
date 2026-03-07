@@ -331,18 +331,17 @@ async function connectHub(page: Page, entityId: string, signerId: string, hubId:
   expect(ready, `Account ${entityId.slice(0, 8)}↔${hubId.slice(0, 8)} not ready: ${lastError || 'unknown'}`).toBe(true);
 }
 
-async function faucet(page: Page, entityId: string, hubEntityId?: string) {
+async function faucet(page: Page, entityId: string, hubEntityId: string) {
   const apiBase = await getActiveApiBase(page);
   for (let attempt = 1; attempt <= 6; attempt++) {
     const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
     if (!runtimeId) { await page.waitForTimeout(2000); continue; }
     try {
-      const data: any = { userEntityId: entityId, userRuntimeId: runtimeId, tokenId: 1, amount: '100' };
-      if (hubEntityId) data.hubEntityId = hubEntityId;
+      const data = { userEntityId: entityId, userRuntimeId: runtimeId, tokenId: 1, amount: '100', hubEntityId };
       const resp = await page.request.post(`${apiBase}/api/faucet/offchain`, { data });
       const body = await resp.json().catch(() => ({}));
       if (resp.ok()) {
-        console.log(`[E2E] Faucet OK for ${entityId.slice(0, 10)}${hubEntityId ? ' via ' + hubEntityId.slice(0, 10) : ''} (attempt ${attempt})`);
+        console.log(`[E2E] Faucet OK for ${entityId.slice(0, 10)} via ${hubEntityId.slice(0, 10)} (attempt ${attempt})`);
         await page.waitForTimeout(3000);
         return;
       }

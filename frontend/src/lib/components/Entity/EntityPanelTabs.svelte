@@ -530,7 +530,7 @@
     }
   }
 
-  async function faucetOffchain(hubEntityId?: string, tokenId: number = 1) {
+  async function faucetOffchain(hubEntityId: string, tokenId: number = 1) {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
     try {
@@ -539,16 +539,8 @@
       if (!runtimeId) {
         throw new Error('Runtime is not ready yet (missing runtimeId). Re-open runtime and retry.');
       }
-
-      // Auto-detect hub if not specified
       if (!hubEntityId) {
-        const profiles = getGossipProfiles(activeEnv);
-        const isHubEntity = (candidate: string): boolean => {
-          const profile = profiles.find((p) => p.entityId.toLowerCase() === candidate.toLowerCase());
-          return isHubProfile(profile);
-        };
-        const accountIds = replica?.state?.accounts ? Array.from(replica.state.accounts.keys()) : [];
-        hubEntityId = accountIds.find((id) => isHubEntity(String(id))) || undefined;
+        throw new Error('Offchain faucet requires a target hub account.');
       }
 
       const localAccount = findLocalAccountByCounterparty(entityId, replica?.state?.accounts, hubEntityId);
@@ -592,10 +584,10 @@
           body: JSON.stringify({
             userEntityId: entityId,
             userRuntimeId: runtimeId,
+            hubEntityId,
             tokenId,
             amount: '100',
             ...(knownAccount ? { knownAccount } : {}),
-            ...(hubEntityId ? { hubEntityId } : {}),
           })
         });
         result = await readJsonResponse<ApiResult>(response);
