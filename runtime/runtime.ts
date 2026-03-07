@@ -603,6 +603,13 @@ const hubNeedsPeriodicWake = (replica: EntityReplica): boolean => {
   if (state.jBatchState?.sentBatch) return true;
 
   for (const accountMachine of state.accounts.values()) {
+    const settlementWorkspace = accountMachine.settlementWorkspace;
+    if (settlementWorkspace && settlementWorkspace.status !== 'submitted') {
+      const iAmLeft = state.entityId === accountMachine.leftEntity;
+      const counterpartyHanko = iAmLeft ? settlementWorkspace.rightHanko : settlementWorkspace.leftHanko;
+      if (counterpartyHanko) return true;
+    }
+
     if (accountMachine.activeDispute) return true;
     if (accountMachine.pendingFrame || accountMachine.pendingAccountInput) return true;
     if ((accountMachine.requestedRebalance?.size ?? 0) > 0) return true;
