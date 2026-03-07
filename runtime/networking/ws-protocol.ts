@@ -50,6 +50,8 @@ export type RuntimeWsMessage = {
   timestamp?: number;
   payload?: unknown;
   encrypted?: boolean;        // If true, payload is encrypted base64 string
+  entityId?: string;
+  txs?: number;
   auth?: RuntimeWsAuth;
   inReplyTo?: string;
   error?: string;

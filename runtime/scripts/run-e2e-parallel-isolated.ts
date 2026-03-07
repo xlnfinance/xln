@@ -143,11 +143,12 @@ const parseStepTimings = (path: string): StepTiming[] => {
   try {
     const text = readFileSync(path, 'utf8');
     const out: StepTiming[] = [];
-    const re = /\[E2E-TIMING\]\s+(.+?)\s+(\d+)ms/g;
+    const re = /\[(E2E-TIMING|MESH-TIMING)\]\s+(.+?)\s+(\d+)ms/g;
     let match: RegExpExecArray | null = null;
     while ((match = re.exec(text)) !== null) {
-      const label = String(match[1] || '').trim();
-      const ms = Number(match[2] || '0');
+      const prefix = String(match[1] || '').trim();
+      const label = `${prefix}:${String(match[2] || '').trim()}`;
+      const ms = Number(match[3] || '0');
       if (!label || !Number.isFinite(ms)) continue;
       out.push({ label, ms });
     }
@@ -255,7 +256,7 @@ const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<
         lastHealth = body;
         const resetDone = body?.reset?.inProgress !== true;
         const meshReady = body?.hubMesh?.ok === true;
-        const mmReady = body?.marketMaker?.ok === true;
+        const mmReady = body?.marketMaker?.enabled === true ? body?.marketMaker?.ok === true : true;
         const hasTs = typeof body?.timestamp === 'number';
         if (hasTs && resetDone && meshReady && mmReady) return;
       }
@@ -369,12 +370,14 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
     // - rpc: anvil
     // - api: runtime server
     // - web: vite preview
-    // - relay: runtime ws relay (api+20, from runtime/server.ts)
+    // - hub children: local APIs owned by mesh supervisor
     const preflightStart = Date.now();
     await freePort(rpcPort, log);
     await freePort(apiPort, log);
     await freePort(webPort, log);
-    await freePort(apiPort + 20, log);
+    await freePort(apiPort + 10, log);
+    await freePort(apiPort + 11, log);
+    await freePort(apiPort + 12, log);
     markPhase('preflight', preflightStart);
 
     const anvilStart = Date.now();
@@ -392,13 +395,12 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
     markPhase('anvilBoot', anvilStart);
 
     const apiStart = Date.now();
-    api = spawn('bun', ['runtime/server.ts', '--port', String(apiPort)], {
+    api = spawn('bun', ['runtime/scripts/e2e-mesh-control.ts', '--host', '127.0.0.1', '--port', String(apiPort), '--rpc-url', rpcUrl, '--db-root', dbPath], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
         USE_ANVIL: 'true',
         ANVIL_RPC: rpcUrl,
-        BOOTSTRAP_LOCAL_HUBS: '1',
         XLN_DB_PATH: dbPath,
       },
     });

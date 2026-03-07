@@ -285,7 +285,13 @@ export const resetProdServer = async (
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const coldResponse = await page.request.post(`${resetBaseUrl}/api/reset?rpc=1&db=1&sync=1`);
+      const resetBody = {
+        requireMarketMaker: options.requireMarketMaker ?? true,
+      };
+      const coldResponse = await page.request.post(`${resetBaseUrl}/api/reset?rpc=1&db=1&sync=1`, {
+        data: resetBody,
+        headers: { 'Content-Type': 'application/json' },
+      });
       if (coldResponse.ok()) {
         resetDone = true;
         break;
@@ -293,7 +299,10 @@ export const resetProdServer = async (
 
       const coldBody = await readText(coldResponse);
       const softResponse = await page.request.post(`${resetBaseUrl}/api/debug/reset`, {
-        data: { preserveHubs: softPreserveHubs },
+        data: {
+          preserveHubs: softPreserveHubs,
+          requireMarketMaker: options.requireMarketMaker ?? true,
+        },
         headers: { 'Content-Type': 'application/json' },
       });
       if (softResponse.ok()) {

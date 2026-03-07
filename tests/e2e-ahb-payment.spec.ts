@@ -297,9 +297,14 @@ async function getHubFeeConfig(page: Page, hubId: string): Promise<{ feePPM: big
     const rawPPM = Number(profile?.metadata?.routingFeePPM ?? 0);
     const safePPM = Number.isFinite(rawPPM) && rawPPM >= 0 ? Math.floor(rawPPM) : 0;
     const rawBase = profile?.metadata?.baseFee;
-    const base = typeof rawBase === 'string'
-      ? rawBase
-      : (typeof rawBase === 'number' && Number.isFinite(rawBase) ? String(Math.max(0, Math.floor(rawBase))) : '0');
+    let base = '0';
+    if (typeof rawBase === 'string') {
+      base = rawBase;
+    } else if (typeof rawBase === 'bigint') {
+      base = rawBase.toString();
+    } else if (typeof rawBase === 'number' && Number.isFinite(rawBase)) {
+      base = String(Math.max(0, Math.floor(rawBase)));
+    }
     return { feePPM: String(safePPM), baseFee: base };
   }, hubId);
 
@@ -890,7 +895,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await resetProdServer(page, {
       timeoutMs: LONG_E2E ? 240_000 : 120_000,
       requireHubMesh: true,
-      requireMarketMaker: true,
+      requireMarketMaker: false,
       minHubCount: 3,
     });
     await gotoApp(page);

@@ -406,6 +406,8 @@ export class RuntimeWsClient {
       timestamp: nextTimestamp(),
       payload,
       encrypted: true,
+      entityId: input.entityId,
+      txs: input.entityTxs?.length ?? 0,
     });
   }
 
