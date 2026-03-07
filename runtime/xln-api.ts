@@ -28,6 +28,7 @@ export type {
   EnvSnapshot,
   EntityReplica,
   EntityState,
+  EntityTx,
   AccountMachine,
   AccountFrame,
   AccountSnapshot,
@@ -38,9 +39,16 @@ export type {
   EntityProfile,
   JurisdictionConfig,
   ConsensusConfig,
+  HubRebalanceConfig,
   RuntimeInput,
   EntityInput,
+  RoutedEntityInput,
 } from './types';
+
+export type { Profile, GossipLayer } from './networking/gossip';
+export type { PaymentRoute } from './routing/pathfinding';
+export type { CompletedBatch, JBatch, JBatchState } from './j-batch';
+export type { JAdapter } from './jadapter/types';
 
 // Re-export identity functions types
 export {
@@ -73,8 +81,24 @@ export {
 } from './ids';
 
 import type { EntityId, SignerId, ReplicaKey } from './ids';
-import type { Env, Delta, DerivedDelta, EntityProfile, JurisdictionConfig, ConsensusConfig, RuntimeInput, EntityInput } from './types';
+import type {
+  Env,
+  Delta,
+  DerivedDelta,
+  EntityProfile,
+  JurisdictionConfig,
+  ConsensusConfig,
+  RuntimeInput,
+  EntityInput,
+  RoutedEntityInput,
+} from './types';
 import type { JAdapter } from './jadapter/types';
+
+export type QueueEntityInputPayload = {
+  type: string;
+} & Record<string, unknown>;
+
+export type BrowserVMOverride = BrowserVMInstance | { browserVM?: BrowserVMInstance | null } | null;
 
 export type BrowserVMTokenInfo = {
   symbol: string;
@@ -235,7 +259,7 @@ export interface XLNModule {
   getEnv: (env?: Env | null) => Env | null;
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
   processJBlockEvents?: (env: Env) => Promise<void>;
-  queueEntityInput?: (entityId: string, signerId: string, txData: { type: string; [key: string]: any }) => Promise<void>;
+  queueEntityInput?: (entityId: string, signerId: string, txData: QueueEntityInputPayload) => Promise<void>;
 
   // Identity system (from ids.ts)
   parseReplicaKey: (keyString: string) => ReplicaKey;
@@ -287,7 +311,7 @@ export interface XLNModule {
   FINANCIAL_CONSTANTS: FinancialConstants;
 
   // Serialization
-  safeStringify: (obj: unknown, replacer?: unknown, space?: number) => string;
+  safeStringify: (obj: unknown, space?: number) => string;
   encode: (data: unknown) => Uint8Array;
   decode: (data: Uint8Array) => unknown;
 
@@ -387,12 +411,13 @@ export interface XLNModule {
   // Blockchain registration
   registerNumberedEntityOnChain: (env: Env, entityId: string) => Promise<Env>;
   connectToEthereum: (jurisdiction: JurisdictionConfig) => Promise<unknown>;
-  setBrowserVMJurisdiction: (env: Env, depositoryAddress: string, browserVMInstance?: any) => void;
+  setBrowserVMJurisdiction: (env: Env, depositoryAddress: string, browserVMInstance?: BrowserVMOverride) => void;
   getBrowserVMInstance: (env?: Env) => BrowserVMInstance | null;
 
   // Networking helpers
   sendEntityInput: (env: Env, input: EntityInput) => { sent: boolean; deferred: boolean; queuedLocal: boolean };
   resolveEntityProposerId: (env: Env, entityId: string, context: string) => string;
+  ensureGossipProfiles?: (env: Env, entityIds: string[]) => Promise<boolean>;
 
   // Demo utilities
   demoCompleteHanko: (env: Env) => Promise<Env>;

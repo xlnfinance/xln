@@ -2,7 +2,19 @@ import { writable, derived, get } from 'svelte/store';
 import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
 import { activeRuntimeId, runtimes } from './runtimeStore';
-import type { XLNModule, Env, EnvSnapshot, EntityId, ReplicaKey } from '@xln/runtime/xln-api';
+import type {
+  XLNModule,
+  Env,
+  EnvSnapshot,
+  EntityId,
+  ReplicaKey,
+  RoutedEntityInput,
+  RuntimeInput,
+  EntityDisplayInfo,
+  SignerDisplayInfo,
+  BigIntMathUtils,
+  FinancialConstants,
+} from '@xln/runtime/xln-api';
 
 // Direct import of XLN runtime module (no wrapper boilerplate needed)
 let XLN: XLNModule | null = null;
@@ -12,6 +24,64 @@ let unregisterEnvChange: (() => void) | null = null;
 let globalDebugExposed = false;
 const REQUIRED_RUNTIME_SCHEMA_VERSION = 2;
 
+type DebugWindow = Window & typeof globalThis & {
+  XLN?: XLNModule;
+  xlnEnv?: typeof xlnEnvironment | Env;
+  xlnErrorLog?: (message: string, source: string, details?: unknown) => void;
+  vaultOperations?: typeof import('./vaultStore').vaultOperations;
+  runtimesState?: typeof import('./vaultStore').runtimesState;
+};
+
+type FrontendEntitySummary = {
+  id: string;
+  shortId: string;
+  display: string;
+  avatar: string;
+  info: EntityDisplayInfo;
+};
+
+export interface FrontendXlnFunctions {
+  deriveDelta: XLNModule['deriveDelta'];
+  formatTokenAmount: (tokenId: number, amount: bigint | null | undefined) => string;
+  getTokenInfo: XLNModule['getTokenInfo'];
+  isLiquidSwapToken: XLNModule['isLiquidSwapToken'];
+  getSwapPairOrientation: XLNModule['getSwapPairOrientation'];
+  getDefaultSwapTradingPairs: XLNModule['getDefaultSwapTradingPairs'];
+  computeSwapPriceTicks: XLNModule['computeSwapPriceTicks'];
+  isLeft: XLNModule['isLeft'];
+  createDemoDelta: XLNModule['createDemoDelta'];
+  getDefaultCreditLimit: XLNModule['getDefaultCreditLimit'];
+  safeStringify: XLNModule['safeStringify'];
+  formatTokenAmountEthers: XLNModule['formatTokenAmountEthers'];
+  parseTokenAmount: XLNModule['parseTokenAmount'];
+  convertTokenPrecision: XLNModule['convertTokenPrecision'];
+  calculatePercentageEthers: XLNModule['calculatePercentageEthers'];
+  formatAssetAmountEthers: XLNModule['formatAssetAmountEthers'];
+  BigIntMath: BigIntMathUtils;
+  FINANCIAL_CONSTANTS: FinancialConstants;
+  getEntity: (entityId: string) => FrontendEntitySummary;
+  getEntityShortId: XLNModule['getEntityShortId'];
+  formatEntityId: XLNModule['formatEntityId'];
+  getEntityNumber: (entityId: string) => string;
+  formatEntityDisplay: XLNModule['formatEntityDisplay'];
+  formatShortEntityId: XLNModule['formatShortEntityId'];
+  generateEntityAvatar: XLNModule['generateEntityAvatar'];
+  generateSignerAvatar: XLNModule['generateSignerAvatar'];
+  getEntityDisplayInfo: XLNModule['getEntityDisplayInfo'];
+  getSignerDisplayInfo: XLNModule['getSignerDisplayInfo'];
+  extractEntityId: XLNModule['extractEntityId'];
+  extractSignerId: XLNModule['extractSignerId'];
+  parseReplicaKey: XLNModule['parseReplicaKey'];
+  formatReplicaKey: XLNModule['formatReplicaKey'];
+  createReplicaKey: XLNModule['createReplicaKey'];
+  classifyBilateralState: XLNModule['classifyBilateralState'];
+  getAccountBarVisual: XLNModule['getAccountBarVisual'];
+  sendEntityInput: XLNModule['sendEntityInput'];
+  resolveEntityProposerId: XLNModule['resolveEntityProposerId'];
+  ensureGossipProfiles?: XLNModule['ensureGossipProfiles'];
+  isReady: boolean;
+}
+
 async function getXLN(): Promise<XLNModule> {
   if (XLN) return XLN;
   if (xlnLoadPromise) return xlnLoadPromise;
@@ -20,11 +90,11 @@ async function getXLN(): Promise<XLNModule> {
     // Always cache-bust runtime module per page load; stale runtime.js caused prod-debug desync.
     const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
     const loaded = (await import(/* @vite-ignore */ runtimeUrl)) as XLNModule;
-    const runtimeAny = loaded as unknown as Record<string, unknown>;
-    const loadedSchema = Number(runtimeAny.RUNTIME_SCHEMA_VERSION ?? NaN);
+    const runtimeMeta = loaded as XLNModule & { RUNTIME_SCHEMA_VERSION?: number };
+    const loadedSchema = Number(runtimeMeta.RUNTIME_SCHEMA_VERSION ?? NaN);
     if (!Number.isFinite(loadedSchema) || loadedSchema !== REQUIRED_RUNTIME_SCHEMA_VERSION) {
       throw new Error(
-        `RUNTIME_VERSION_MISMATCH: expected schema=${REQUIRED_RUNTIME_SCHEMA_VERSION} got=${String(runtimeAny.RUNTIME_SCHEMA_VERSION ?? 'undefined')}`,
+        `RUNTIME_VERSION_MISMATCH: expected schema=${REQUIRED_RUNTIME_SCHEMA_VERSION} got=${String(runtimeMeta.RUNTIME_SCHEMA_VERSION ?? 'undefined')}`,
       );
     }
     XLN = loaded;
@@ -46,14 +116,10 @@ async function getXLN(): Promise<XLNModule> {
  */
 function exposeGlobalDebugObjects() {
   if (typeof window !== 'undefined' && XLN) {
-    // @ts-ignore - Expose XLN runtime instance
-    window.XLN = XLN;
-
-    // @ts-ignore - Expose environment directly (avoid naming conflicts)
-    window.xlnEnv = xlnEnvironment;
-
-    // @ts-ignore - Expose error logger for runtime logging
-    window.xlnErrorLog = (message: string, source: string, details?: any) => {
+    const debugWindow = window as DebugWindow;
+    debugWindow.XLN = XLN;
+    debugWindow.xlnEnv = xlnEnvironment;
+    debugWindow.xlnErrorLog = (message: string, source: string, details?: unknown) => {
       errorLog.log(message, source, details);
     };
 
@@ -71,10 +137,8 @@ function exposeGlobalDebugObjects() {
     // even before RuntimeCreation panel imports vaultStore.
     import('./vaultStore')
       .then(({ vaultOperations, runtimesState }) => {
-        // @ts-ignore - intentional debug/test surface
-        window.vaultOperations = vaultOperations;
-        // @ts-ignore - intentional debug/test surface
-        window.runtimesState = runtimesState;
+        debugWindow.vaultOperations = vaultOperations;
+        debugWindow.runtimesState = runtimesState;
       })
       .catch(err => {
         console.warn('[xlnStore] Failed to expose vaultStore globals:', err);
@@ -105,7 +169,7 @@ export function setXlnEnvironment(env: Env | null): void {
   if (!env) return;
 
   const selectedRuntimeId = String(get(activeRuntimeId) || '').toLowerCase();
-  const envRuntimeId = String((env as any)?.runtimeId || '').toLowerCase();
+  const envRuntimeId = String(env.runtimeId || '').toLowerCase();
   const targetRuntimeId = envRuntimeId || selectedRuntimeId;
   if (!targetRuntimeId) return;
 
@@ -158,7 +222,7 @@ function startP2PPoll() {
     const env = get(xlnEnvironment);
     if (!env) return;
     try {
-      const state = (XLN as any).getP2PState(env);
+      const state = XLN.getP2PState(env);
       if (state) p2pState.set(state);
     } catch {
       /* ignore if not available */
@@ -223,7 +287,7 @@ export async function initializeXLN(): Promise<Env> {
     // Shared callback for automatic reactivity (fires on every process())
     const onEnvChange = (env: Env) => {
       const selectedRuntimeId = String(get(activeRuntimeId) || '').toLowerCase();
-      const envRuntimeId = String((env as any)?.runtimeId || '').toLowerCase();
+      const envRuntimeId = String(env.runtimeId || '').toLowerCase();
       if (selectedRuntimeId && selectedRuntimeId !== envRuntimeId) {
         const selected = get(runtimes).get(selectedRuntimeId);
         if (selected?.env) {
@@ -248,8 +312,8 @@ export async function initializeXLN(): Promise<Env> {
           let hasChanges = false;
           for (const [replicaKey, replica] of env.eReplicas.entries()) {
             const entityId = xln.extractEntityId(replicaKey); // Uses ids.ts - no split
-            if (entityId && (replica as any).position && !currentPositions.has(entityId)) {
-              const pos = (replica as any).position;
+            if (entityId && replica.position && !currentPositions.has(entityId)) {
+              const pos = replica.position;
               // Store relative position + jReplica reference (defaults to activeJurisdiction)
               const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
               currentPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
@@ -265,7 +329,7 @@ export async function initializeXLN(): Promise<Env> {
 
       // Update window for e2e testing
       if (typeof window !== 'undefined') {
-        (window as any).xlnEnv = env;
+        (window as DebugWindow).xlnEnv = env;
       }
     };
 
@@ -293,8 +357,8 @@ export async function initializeXLN(): Promise<Env> {
       const initialPositions = new Map<string, RelativeEntityPosition>();
       for (const [replicaKey, replica] of env.eReplicas.entries()) {
         const entityId = xln.extractEntityId(replicaKey); // Uses ids.ts - no split
-        if (entityId && (replica as any).position) {
-          const pos = (replica as any).position;
+        if (entityId && replica.position) {
+          const pos = replica.position;
           // Store relative position + jReplica reference (defaults to activeJurisdiction)
           const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
           initialPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
@@ -316,7 +380,7 @@ export async function initializeXLN(): Promise<Env> {
 
     // Expose to window for e2e testing
     if (typeof window !== 'undefined') {
-      (window as any).xlnEnv = env;
+      (window as DebugWindow).xlnEnv = env;
     }
 
     console.log('✅ XLN Environment initialized');
@@ -349,25 +413,25 @@ export function getEnv(): Env | null {
   return get(xlnEnvironment);
 }
 
-// Wrapper for process() that auto-injects runtimeDelay from settings
-export async function enqueueEntityInputs(env: Env, inputs?: unknown[]): Promise<Env> {
+// Enqueue entity inputs into runtime mempool (processed on next tick)
+export async function enqueueEntityInputs(env: Env, inputs: RoutedEntityInput[] = []): Promise<Env> {
   const xln = await getXLN();
   xln.enqueueRuntimeInput(env, {
     runtimeTxs: [],
-    entityInputs: (inputs as any[]) ?? [],
+    entityInputs: inputs,
   });
   return env;
 }
 
-export async function enqueueAndProcess(env: Env, input: { runtimeTxs: any[]; entityInputs: any[] }): Promise<Env> {
+export async function enqueueAndProcess(env: Env, input: RuntimeInput): Promise<Env> {
   const xln = await getXLN();
-  xln.enqueueRuntimeInput(env, input as any);
+  xln.enqueueRuntimeInput(env, input);
   return env;
 }
 
 // === FRONTEND UTILITY FUNCTIONS ===
 // Derived store that provides utility functions for components
-export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([, $xlnInstance, $settings]) => {
+export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([, $xlnInstance, $settings]): FrontendXlnFunctions => {
   const clampPrecision = (value: number): number => Math.max(2, Math.min(18, Math.floor(Number(value) || 2)));
   const settingPrecision = clampPrecision(Number($settings?.tokenPrecision ?? 6));
   const formatRawAmount = (rawAmount: bigint, decimals: number, precisionLimit: number): string => {
@@ -394,58 +458,21 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([,
     const fail = (fnName: string): never => {
       throw new Error(`XLN_NOT_READY:${fnName}`);
     };
-    const failFn = <T extends (...args: any[]) => any>(fnName: string): T =>
-      ((..._args: any[]) => fail(fnName)) as T;
+    const failValue = <T>(fnName: string): T =>
+      new Proxy(Object.create(null), {
+        get() {
+          return fail(fnName);
+        },
+      }) as T;
 
-    return {
-      // Account utilities
-      deriveDelta: failFn('deriveDelta') as any,
-      formatTokenAmount: failFn('formatTokenAmount') as any,
-      getTokenInfo: failFn('getTokenInfo') as any,
-      isLiquidSwapToken: failFn('isLiquidSwapToken') as any,
-      getSwapPairOrientation: failFn('getSwapPairOrientation') as any,
-      getDefaultSwapTradingPairs: failFn('getDefaultSwapTradingPairs') as any,
-      computeSwapPriceTicks: failFn<(giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => bigint>('computeSwapPriceTicks'),
-      isLeft: failFn('isLeft') as any,
-      createDemoDelta: failFn('createDemoDelta') as any,
-      getDefaultCreditLimit: failFn('getDefaultCreditLimit') as any,
-      safeStringify: failFn('safeStringify') as any,
-
-      // Financial utilities
-      formatTokenAmountEthers: failFn('formatTokenAmountEthers') as any,
-      parseTokenAmount: failFn('parseTokenAmount') as any,
-      convertTokenPrecision: failFn('convertTokenPrecision') as any,
-      calculatePercentageEthers: failFn('calculatePercentageEthers') as any,
-      formatAssetAmountEthers: failFn('formatAssetAmountEthers') as any,
-      BigIntMath: {} as any,
-      FINANCIAL_CONSTANTS: {} as any,
-
-      // Entity utilities
-      getEntity: failFn('getEntity') as any,
-      getEntityShortId: failFn('getEntityShortId') as any,
-      formatEntityId: failFn('formatEntityId') as any,
-      getEntityNumber: failFn('getEntityNumber') as any,
-      formatEntityDisplay: failFn('formatEntityDisplay') as any,
-      formatShortEntityId: failFn('formatShortEntityId') as any,
-
-      // Avatar generation
-      generateEntityAvatar: failFn('generateEntityAvatar') as any,
-      generateSignerAvatar: failFn('generateSignerAvatar') as any,
-      getEntityDisplayInfo: failFn('getEntityDisplayInfo') as any,
-
-      // Identity system (from ids.ts)
-      extractEntityId: failFn('extractEntityId') as any,
-      extractSignerId: failFn('extractSignerId') as any,
-      parseReplicaKey: failFn('parseReplicaKey') as any,
-      formatReplicaKey: failFn('formatReplicaKey') as any,
-      createReplicaKey: failFn('createReplicaKey') as any,
-      classifyBilateralState: failFn('classifyBilateralState') as any,
-      getAccountBarVisual: failFn('getAccountBarVisual') as any,
-      sendEntityInput: failFn('sendEntityInput') as any,
-      resolveEntityProposerId: failFn('resolveEntityProposerId') as any,
-
-      isReady: false,
-    };
+    return new Proxy({ isReady: false }, {
+      get(_target, prop) {
+        if (prop === 'isReady') return false;
+        if (prop === 'BigIntMath') return failValue<BigIntMathUtils>('BigIntMath');
+        if (prop === 'FINANCIAL_CONSTANTS') return failValue<FinancialConstants>('FINANCIAL_CONSTANTS');
+        return (..._args: unknown[]) => fail(String(prop));
+      },
+    }) as FrontendXlnFunctions;
   }
 
   const formatTokenAmountUi = (tokenId: number, amount: bigint | null | undefined): string => {
@@ -455,12 +482,12 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([,
     return `${numeric} ${tokenInfo.symbol}`;
   };
 
-  return {
+  const readyFunctions: FrontendXlnFunctions = {
     // Account utilities
     deriveDelta: $xlnInstance.deriveDelta,
     // Frontend display formatter with configurable precision from Settings.
     // Signature used across UI: formatTokenAmount(tokenId, amount).
-    formatTokenAmount: formatTokenAmountUi as any,
+    formatTokenAmount: formatTokenAmountUi,
     getTokenInfo: $xlnInstance.getTokenInfo,
     isLiquidSwapToken: $xlnInstance.isLiquidSwapToken,
     getSwapPairOrientation: $xlnInstance.getSwapPairOrientation,
@@ -492,8 +519,8 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([,
           id: entityId,
           shortId,
           display,
-          avatar: $xlnInstance.generateEntityAvatar?.(entityId) || '',
-          info: $xlnInstance.getEntityDisplayInfo?.(entityId) || { name: entityId, avatar: '', type: 'numbered' },
+          avatar: $xlnInstance.generateEntityAvatar(entityId),
+          info: $xlnInstance.getEntityDisplayInfo(entityId),
         };
       } catch (error) {
         console.error('FINTECH-SAFETY: Entity access failed:', error);
@@ -565,8 +592,11 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([,
     getAccountBarVisual: $xlnInstance.getAccountBarVisual,
     sendEntityInput: $xlnInstance.sendEntityInput,
     resolveEntityProposerId: $xlnInstance.resolveEntityProposerId,
+    ensureGossipProfiles: $xlnInstance.ensureGossipProfiles,
 
     // State management - indicates functions are fully loaded
     isReady: true,
   };
+
+  return readyFunctions;
 });

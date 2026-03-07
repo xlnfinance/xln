@@ -276,6 +276,36 @@ const dbRootPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
 
 const DEFAULT_DB_NAMESPACE = 'default';
 const PERSISTENCE_SCHEMA_VERSION = 2;
+const PERSISTENCE_SNAPSHOT_EXCLUDE_KEYS = new Set([
+  'history',
+  'browserVM',
+  'gossip',
+  'log',
+  'info',
+  'warn',
+  'error',
+  'emit',
+  'jadapter',
+  'jAdapter',
+  'evms',
+  'runtimeState',
+  'runtimeMempool',
+  'runtimeInput',
+  'runtimeConfig',
+  'frameLogs',
+  'pendingOutputs',
+  'pendingNetworkOutputs',
+  'networkInbox',
+  'lastProcessEnteredAt',
+  'extra',
+  'scenarioMode',
+  'quietRuntimeLogs',
+  'scenarioLogLevel',
+  'strictScenario',
+  'strictScenarioLabel',
+  'stopAtFrame',
+  'frameDisplayMs',
+]);
 
 const normalizeDbNamespace = (value: string): string => value.trim().toLowerCase();
 
@@ -303,6 +333,22 @@ const resolveDbNamespace = (
 };
 
 const makeDbKey = (namespace: string, key: string): Buffer => Buffer.from(`${namespace}:${key}`);
+
+const getPersistedGossipProfiles = (env: Env): Profile[] =>
+  typeof env.gossip?.getProfiles === 'function' ? (env.gossip.getProfiles() as Profile[]) : [];
+
+const formatPerfMs = (value: number): string => value.toFixed(2);
+
+const isDbUnavailableError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes('Database is not open') ||
+    message.includes('database is not open') ||
+    message.includes('InvalidStateError') ||
+    message.includes('not open') ||
+    message.includes('closing')
+  );
+};
 
 const captureEntityJHeights = (env: Env): Record<string, number> => {
   const result: Record<string, number> = {};
@@ -1283,10 +1329,17 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
       env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
     },
     onGossipProfiles: (_from, profiles) => {
-      if (!env.gossip?.announce) return;
-      // Store profiles in local gossip cache (silently)
-      for (const profile of profiles) {
-        env.gossip.announce(profile);
+      if (profiles.length === 0) return;
+      notifyEnvChange(env);
+      env.info('network', 'GOSSIP_PROFILE_UPDATE', {
+        count: profiles.length,
+        entityIds: profiles.map(profile => profile.entityId),
+      });
+      if (env.quietRuntimeLogs !== true) {
+        console.log(
+          `[P2P] gossip update accepted count=${profiles.length} ` +
+            `entities=${profiles.map(profile => profile.entityId.slice(-6)).join(',')}`,
+        );
       }
     },
   });
@@ -1338,6 +1391,12 @@ export const refreshGossip = (env: Env): void => {
   if (state.p2p) {
     state.p2p.refreshGossip();
   }
+};
+
+export const ensureGossipProfiles = async (env: Env, entityIds: string[]): Promise<boolean> => {
+  const state = ensureRuntimeState(env);
+  if (!state.p2p) return false;
+  return state.p2p.ensureProfiles(entityIds);
 };
 
 export const clearGossip = (env: Env): void => {
@@ -2649,8 +2708,24 @@ const normalizeContractAddress = (value: unknown): string | undefined => {
   return undefined;
 };
 
+const hasLiveJAdapter = (value: unknown): value is JAdapter => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<JAdapter>;
+  return (
+    typeof candidate.startWatching === 'function' &&
+    typeof candidate.stopWatching === 'function' &&
+    typeof candidate.submitTx === 'function'
+  );
+};
+
 const normalizeJReplica = (jr: JReplica): JReplica => {
-  if (!jr?.contracts) return jr;
+  const { jadapter: rawJAdapter, ...rest } = jr as JReplica & { jadapter?: unknown };
+  if (!jr?.contracts) {
+    return {
+      ...rest,
+      ...(hasLiveJAdapter(rawJAdapter) ? { jadapter: rawJAdapter } : {}),
+    };
+  }
   const depository = normalizeContractAddress(
     jr.contracts.depository || (jr.contracts as { depositoryAddress?: unknown }).depositoryAddress,
   );
@@ -2658,7 +2733,8 @@ const normalizeJReplica = (jr: JReplica): JReplica => {
     jr.contracts.entityProvider || (jr.contracts as { entityProviderAddress?: unknown }).entityProviderAddress,
   );
   return {
-    ...jr,
+    ...rest,
+    ...(hasLiveJAdapter(rawJAdapter) ? { jadapter: rawJAdapter } : {}),
     contracts: {
       ...jr.contracts,
       ...(depository ? { depository } : {}),
@@ -2768,11 +2844,14 @@ const buildRuntimeHistorySnapshot = (env: Env, title?: string): any => {
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     eReplicas: new Map(env.eReplicas),
     jReplicas: env.jReplicas
-      ? Array.from(env.jReplicas.values()).map(jr => ({
-          ...jr,
-          mempool: [...jr.mempool],
-          stateRoot: new Uint8Array(jr.stateRoot),
-        }))
+      ? Array.from(env.jReplicas.values()).map(jr => {
+          const { jadapter: _jadapter, ...jrSnapshot } = jr as JReplica & { jadapter?: unknown };
+          return {
+            ...jrSnapshot,
+            mempool: [...jr.mempool],
+            stateRoot: new Uint8Array(jr.stateRoot),
+          };
+        })
       : [],
     runtimeInput: env.runtimeInput,
     runtimeOutputs: env.pendingOutputs || [],
@@ -2859,19 +2938,6 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     mempool.entityInputs = [];
     if (mempool.jInputs) mempool.jInputs = [];
     mempool.queuedAt = undefined;
-
-    runtimeInput.entityInputs.forEach(o => {
-      try {
-        validateEntityInput(o);
-      } catch (error) {
-        logError('RUNTIME_TICK', `🚨 CRITICAL: Invalid EntityInput!`, {
-          error: (error as Error).message,
-          entityId: o.entityId.slice(0, 10),
-          signerId: o.signerId,
-        });
-        throw error;
-      }
-    });
 
     const hasRuntimeInput =
       runtimeInput.runtimeTxs.length > 0 ||
@@ -3082,6 +3148,17 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
               console.log(
                 `✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`,
               );
+              if (typeof jAdapter.pollNow === 'function') {
+                try {
+                  await jAdapter.pollNow();
+                  console.log(`🔄 [J-SUBMIT] pollNow synced ${jInput.jurisdictionName} after ${jTx.type}`);
+                } catch (pollError) {
+                  console.warn(
+                    `⚠️ [J-SUBMIT] pollNow failed after ${jTx.type} from ${jTx.entityId.slice(-4)}:`,
+                    pollError instanceof Error ? pollError.message : String(pollError),
+                  );
+                }
+              }
             } else {
               console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
               if (!env.scenarioMode) {
@@ -3136,13 +3213,26 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     return;
   }
   try {
+    const persistStartedAt = getPerfMs();
+    let openMs = 0;
+    let frameSerializeMs = 0;
+    let snapshotSerializeMs = 0;
+    let writeMs = 0;
+    let verifyMs = 0;
+    let frameJournalBytes = 0;
+    let snapshotBytes = 0;
+
+    const openStartedAt = getPerfMs();
     const dbReady = await tryOpenDb(env);
+    openMs = getPerfMs() - openStartedAt;
     if (!dbReady) return;
     const dbNamespace = resolveDbNamespace({ env });
     const db = getRuntimeDb(env);
+    const persistedGossipProfiles = getPersistedGossipProfiles(env);
 
     // Persist compact per-frame runtime input for replay from checkpoint.
     const currentFrameInput = (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput;
+    const frameSerializeStartedAt = getPerfMs();
     const frameJournal = serializeTaggedJson({
       height: env.height,
       timestamp: env.timestamp,
@@ -3150,8 +3240,10 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       runtimeInput: currentFrameInput ?? { runtimeTxs: [], entityInputs: [] },
       // Replay can deterministically require routing/encryption metadata
       // (e.g. HTLC onion key lookup), so persist gossip snapshot per frame.
-      persistedGossipProfiles: typeof env.gossip?.getProfiles === 'function' ? env.gossip.getProfiles() : [],
+      persistedGossipProfiles,
     });
+    frameSerializeMs = getPerfMs() - frameSerializeStartedAt;
+    frameJournalBytes = Buffer.byteLength(frameJournal);
     const ops: Array<{ key: Buffer; value: Buffer }> = [
       {
         key: makeDbKey(dbNamespace, 'persistence_schema_version'),
@@ -3160,20 +3252,19 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       { key: makeDbKey(dbNamespace, `frame_input:${env.height}`), value: Buffer.from(frameJournal) },
     ];
 
-    const persistedGossipProfiles = typeof env.gossip?.getProfiles === 'function' ? env.gossip.getProfiles() : [];
-    const snapshotPayload = {
-      ...env,
-      persistedGossipProfiles,
-    };
-    const snapshot = serializeTaggedJson(
-      snapshotPayload,
-      new Set(['history', 'browserVM', 'gossip', 'log', 'info', 'warn', 'error', 'emit']),
-    );
     // Persist a durable checkpoint snapshot every N runtime frames.
     // Restore is always: checkpoint snapshot + contiguous WAL replay on top.
     const CHECKPOINT_INTERVAL = ensureRuntimeConfig(env).snapshotIntervalFrames ?? 100;
     const shouldCheckpoint = env.height <= 1 || env.height % CHECKPOINT_INTERVAL === 0;
     if (shouldCheckpoint) {
+      const snapshotSerializeStartedAt = getPerfMs();
+      const snapshotPayload = {
+        ...env,
+        persistedGossipProfiles,
+      };
+      const snapshot = serializeTaggedJson(snapshotPayload, PERSISTENCE_SNAPSHOT_EXCLUDE_KEYS);
+      snapshotSerializeMs = getPerfMs() - snapshotSerializeStartedAt;
+      snapshotBytes = Buffer.byteLength(snapshot);
       ops.push(
         { key: makeDbKey(dbNamespace, `snapshot:${env.height}`), value: Buffer.from(snapshot) },
         { key: makeDbKey(dbNamespace, 'latest_checkpoint_height'), value: Buffer.from(String(env.height)) },
@@ -3185,6 +3276,8 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
 
     // NOTE: Browser Level polyfill has shown flaky behavior with db.batch(ops[]) on binary keys.
     // Use chained batch API first, then fail over to sequential puts if needed.
+    if (state.persistencePaused) return;
+    const writeStartedAt = getPerfMs();
     let wrote = false;
     try {
       const batch = db.batch();
@@ -3204,36 +3297,55 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       } catch (putError) {
         // In browser, IndexedDB can close during page refresh — non-fatal, skip persistence
         const msg = putError instanceof Error ? putError.message : String(putError);
-        if (isBrowser && (msg.includes('closing') || msg.includes('InvalidStateError') || msg.includes('not open'))) {
-          console.warn(`⚠️ DB write skipped (browser DB closing): frame ${env.height}`);
+        if ((isBrowser || state.persistencePaused || ensureRuntimeState(env).db !== db) && isDbUnavailableError(putError)) {
+          console.warn(`⚠️ DB write skipped (db unavailable): frame ${env.height}`);
           return;
         }
         throw putError;
       }
     }
+    writeMs = getPerfMs() - writeStartedAt;
 
     // Verify write succeeded (skip in browser if DB is flaky)
-    try {
-      await db.get(makeDbKey(dbNamespace, `frame_input:${env.height}`));
-      const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
-      const latestHeight = Number.parseInt(latestHeightBuffer.toString(), 10);
-      if (!Number.isFinite(latestHeight) || latestHeight !== env.height) {
-        console.warn(
-          `⚠️ latest_height mismatch after write: expected=${env.height} actual=${String(latestHeightBuffer.toString())}`,
-        );
+    let verifySkipped = isBrowser;
+    if (!isBrowser) {
+      if (state.persistencePaused || ensureRuntimeState(env).db !== db) {
+        verifySkipped = true;
       }
-    } catch (verifyError) {
-      // In browser, verification failure is non-fatal (IndexedDB can be flaky)
-      if (isBrowser) {
-        console.warn(`⚠️ DB verify skipped (browser): frame ${env.height}: ${String(verifyError)}`);
-        return;
-      }
-      throw new Error(`PERSISTENCE_FATAL: write verification failed at frame ${env.height}: ${String(verifyError)}`);
     }
+    if (!verifySkipped) {
+      const verifyStartedAt = getPerfMs();
+      try {
+        await db.get(makeDbKey(dbNamespace, `frame_input:${env.height}`));
+        const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
+        const latestHeight = Number.parseInt(latestHeightBuffer.toString(), 10);
+        if (!Number.isFinite(latestHeight) || latestHeight !== env.height) {
+          console.warn(
+            `⚠️ latest_height mismatch after write: expected=${env.height} actual=${String(latestHeightBuffer.toString())}`,
+          );
+        }
+      } catch (verifyError) {
+        if ((state.persistencePaused || ensureRuntimeState(env).db !== db) && isDbUnavailableError(verifyError)) {
+          console.warn(`⚠️ DB verify skipped (db unavailable): frame ${env.height}`);
+          return;
+        }
+        throw new Error(`PERSISTENCE_FATAL: write verification failed at frame ${env.height}: ${String(verifyError)}`);
+      }
+      verifyMs = getPerfMs() - verifyStartedAt;
+    }
+
+    const totalMs = getPerfMs() - persistStartedAt;
+    console.log(
+      `[PERSIST] frame=${env.height} checkpoint=${shouldCheckpoint ? 1 : 0} ` +
+        `gossipProfiles=${persistedGossipProfiles.length} ops=${ops.length} ` +
+        `bytes(frame=${frameJournalBytes},snapshot=${snapshotBytes}) ` +
+        `ms(open=${formatPerfMs(openMs)},frame=${formatPerfMs(frameSerializeMs)},snapshot=${formatPerfMs(snapshotSerializeMs)},` +
+        `write=${formatPerfMs(writeMs)},verify=${verifySkipped ? 'skip' : formatPerfMs(verifyMs)},total=${formatPerfMs(totalMs)})`,
+    );
   } catch (err) {
     const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     // In browser, DB errors are non-fatal — runtime continues without persistence
-    if (isBrowser) {
+    if (isBrowser || (state.persistencePaused && isDbUnavailableError(err))) {
       console.warn(`⚠️ DB save failed (non-fatal in browser): ${reason}`);
       return;
     }
@@ -3662,7 +3774,10 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
         const { createBrowserVMAdapter } = await import('./jadapter/browservm');
 
         for (const [name, jReplica] of latestEnv.jReplicas.entries()) {
-          if (jReplica.jadapter) continue; // Already has adapter (shouldn't happen on restore)
+          if (jReplica.jadapter && !hasLiveJAdapter(jReplica.jadapter)) {
+            delete (jReplica as JReplica & { jadapter?: unknown }).jadapter;
+          }
+          if (jReplica.jadapter) continue; // Already has a live adapter
 
           try {
             const hasRpcs = jReplica.rpcs && jReplica.rpcs.length > 0 && jReplica.rpcs[0] !== '';

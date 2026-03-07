@@ -32,9 +32,11 @@
     return blob.includes(q);
   });
 
-  async function loadDirectory(): Promise<void> {
-    loading = true;
-    error = null;
+  async function loadDirectory(silent: boolean = false): Promise<void> {
+    if (!silent) {
+      loading = true;
+      error = null;
+    }
     try {
       const res = await fetch('/api/debug/entities?limit=5000');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -43,12 +45,20 @@
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load address directory';
     } finally {
-      loading = false;
+      if (!silent) {
+        loading = false;
+      }
     }
   }
 
   onMount(() => {
-    loadDirectory();
+    void loadDirectory();
+    const refreshTimer = setInterval(() => {
+      void loadDirectory(true);
+    }, 1000);
+    return () => {
+      clearInterval(refreshTimer);
+    };
   });
 </script>
 

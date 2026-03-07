@@ -6,6 +6,7 @@
  */
 
 import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
+import type { Profile } from './networking/gossip';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,7 +39,7 @@ export type RelayStore = {
   serverId: string;
   clients: Map<string, RelayClient>;
   pendingMessages: Map<string, any[]>;
-  gossipProfiles: Map<string, { profile: any; timestamp: number }>;
+  gossipProfiles: Map<string, { profile: Profile; timestamp: number }>;
   runtimeEncryptionKeys: Map<string, string>;
   debugEvents: RelayDebugEvent[];
   debugId: number;
@@ -48,6 +49,7 @@ export type RelayStore = {
 
 const MAX_DEBUG_EVENTS = 5000;
 const MAX_PENDING_PER_CLIENT = 200;
+export const DEFAULT_GOSSIP_SYNC_LIMIT = 1000;
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -95,8 +97,23 @@ export const pushDebugEvent = (store: RelayStore, event: Omit<RelayDebugEvent, '
 // Gossip profiles
 // ---------------------------------------------------------------------------
 
-export const storeGossipProfile = (store: RelayStore, profile: any): boolean => {
-  const entityId = profile?.entityId;
+const isHubProfile = (profile: Profile): boolean =>
+  profile.metadata?.isHub === true ||
+  profile.capabilities.includes('hub') ||
+  profile.capabilities.includes('routing');
+
+const sortProfilesForDefaultSync = (left: Profile, right: Profile): number => {
+  const leftHub = isHubProfile(left);
+  const rightHub = isHubProfile(right);
+  if (leftHub !== rightHub) return leftHub ? -1 : 1;
+  const leftTs = Number(left.metadata?.lastUpdated || 0);
+  const rightTs = Number(right.metadata?.lastUpdated || 0);
+  if (leftTs !== rightTs) return rightTs - leftTs;
+  return String(left.entityId).localeCompare(String(right.entityId));
+};
+
+export const storeGossipProfile = (store: RelayStore, profile: Profile): boolean => {
+  const entityId = profile.entityId;
   if (!entityId) return false;
   const newTs = profile?.metadata?.lastUpdated || 0;
   const existing = store.gossipProfiles.get(entityId);
@@ -105,8 +122,43 @@ export const storeGossipProfile = (store: RelayStore, profile: any): boolean => 
   return true;
 };
 
-export const getAllGossipProfiles = (store: RelayStore): any[] =>
+export const getAllGossipProfiles = (store: RelayStore): Profile[] =>
   Array.from(store.gossipProfiles.values()).map(v => v.profile);
+
+export const getDefaultGossipProfiles = (
+  store: RelayStore,
+  limit: number = DEFAULT_GOSSIP_SYNC_LIMIT,
+): Profile[] => {
+  const boundedLimit = Math.max(1, Math.min(DEFAULT_GOSSIP_SYNC_LIMIT, Math.floor(Number(limit) || DEFAULT_GOSSIP_SYNC_LIMIT)));
+  return getAllGossipProfiles(store)
+    .sort(sortProfilesForDefaultSync)
+    .slice(0, boundedLimit);
+};
+
+export const getGossipProfileBundle = (store: RelayStore, entityIds: string[]): Profile[] => {
+  const requestedIds = Array.from(
+    new Set(
+      entityIds
+        .map(entityId => String(entityId || '').toLowerCase())
+        .filter(entityId => entityId.length > 0),
+    ),
+  );
+  const results = new Map<string, Profile>();
+  for (const entityId of requestedIds) {
+    const rootProfile = store.gossipProfiles.get(entityId)?.profile;
+    if (!rootProfile) continue;
+    results.set(entityId, rootProfile);
+    const peerIds = rootProfile.publicAccounts || rootProfile.hubs || [];
+    for (const peerId of peerIds) {
+      const normalizedPeerId = String(peerId || '').toLowerCase();
+      const peerProfile = store.gossipProfiles.get(normalizedPeerId)?.profile;
+      if (peerProfile) {
+        results.set(normalizedPeerId, peerProfile);
+      }
+    }
+  }
+  return Array.from(results.values()).sort(sortProfilesForDefaultSync);
+};
 
 // ---------------------------------------------------------------------------
 // Client registry
