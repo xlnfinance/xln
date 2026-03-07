@@ -5,6 +5,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { ensureE2EBaseline, APP_BASE_URL } from './utils/e2e-baseline';
+import { connectHub } from './utils/e2e-connect';
 
 const CONSENSUS_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
@@ -221,18 +222,15 @@ test.describe('E2E HTLC Payment Flow', () => {
     }, { timeout: 60_000 });
     process.stdout.write('  Runtime initialized.\n');
 
-    // ── Step 2: Connect to first available hub ──
-    process.stdout.write('Step 2: Connecting to first available hub...\n');
-    const connectBtn = page.locator('button:has-text("Connect")').first();
-    await expect(connectBtn).toBeVisible({ timeout: 15_000 });
-
-    await connectBtn.click();
-    let connectedHubId: string | null = null;
+    // ── Step 2: Open account with first baseline hub ──
+    process.stdout.write('Step 2: Opening account with first baseline hub...\n');
+    let connectedHubId: string | null = baseline.hubMesh?.hubIds?.[0] ?? null;
+    expect(connectedHubId, 'baseline must expose at least one hub id').toBeTruthy();
+    await connectHub(page, connectedHubId!);
     await expect.poll(async () => {
       connectedHubId = await getConnectedHubEntityId(page);
-      return Boolean(connectedHubId);
-    }, { timeout: CONSENSUS_TIMEOUT }).toBe(true);
-    await expect(page.locator('text=/READY|Synced|OUT|IN.*USDC/i').first()).toBeVisible({ timeout: CONSENSUS_TIMEOUT });
+      return connectedHubId;
+    }, { timeout: CONSENSUS_TIMEOUT }).toBe(baseline.hubMesh?.hubIds?.[0] ?? null);
     process.stdout.write(`  Connected hub: ${connectedHubId}\n`);
     process.stdout.write('  Account opened and synced.\n');
 

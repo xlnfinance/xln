@@ -14,9 +14,8 @@ import {
   nextWsTimestamp,
   pushDebugEvent,
   storeGossipProfile,
-  getAllGossipProfiles,
   getDefaultGossipProfiles,
-  getGossipProfileBundle,
+  getProfileBatch,
   DEFAULT_GOSSIP_SYNC_LIMIT,
   registerClient,
   flushPendingMessages,
@@ -200,18 +199,12 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
   // ----- gossip_request -----
   if (type === 'gossip_request') {
     const request = payload && typeof payload === 'object' ? payload as {
-      scope?: 'all' | 'bundle';
-      entityId?: string;
-      entityIds?: string[];
+      ids?: string[];
+      set?: 'default' | 'hubs';
+      updatedSince?: number;
       limit?: number;
     } : {};
-    const requestedEntityIds = Array.isArray(request.entityIds)
-      ? request.entityIds
-      : (request.entityId ? [request.entityId] : []);
-    const profiles =
-      request.scope === 'bundle'
-        ? getGossipProfileBundle(store, requestedEntityIds)
-        : getDefaultGossipProfiles(store, request.limit ?? DEFAULT_GOSSIP_SYNC_LIMIT);
+    const profiles = getProfileBatch(store, request);
     pushDebugEvent(store, {
       event: 'gossip_request',
       from,
@@ -219,8 +212,10 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       msgType: type,
       details: {
         returnedProfiles: profiles.length,
-        scope: request.scope ?? 'all',
-        requestedEntityIds,
+        ids: request.ids ?? [],
+        set: request.set ?? 'default',
+        updatedSince: request.updatedSince ?? null,
+        limit: request.limit ?? DEFAULT_GOSSIP_SYNC_LIMIT,
         traceId,
       },
     });
