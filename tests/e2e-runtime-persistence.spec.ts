@@ -506,7 +506,7 @@ async function outCap(page: Page, entityId: string, cpId: string): Promise<bigin
   return BigInt(s);
 }
 
-async function faucet(page: Page, entityId: string) {
+async function faucet(page: Page, entityId: string, hubEntityId: string) {
   let result: { ok: boolean; status: number; data: any } = { ok: false, status: 0, data: { error: 'not-run' } };
   for (let attempt = 1; attempt <= 15; attempt++) {
     const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
@@ -517,7 +517,7 @@ async function faucet(page: Page, entityId: string) {
     }
     try {
       const resp = await page.request.post(`${apiBaseUrl}/api/faucet/offchain`, {
-        data: { userEntityId: entityId, userRuntimeId: runtimeId, tokenId: 1, amount: '100' },
+        data: { userEntityId: entityId, userRuntimeId: runtimeId, hubEntityId, tokenId: 1, amount: '100' },
       });
       const data = await resp.json().catch(() => ({}));
       result = { ok: resp.ok(), status: resp.status(), data };
@@ -539,9 +539,9 @@ async function faucet(page: Page, entityId: string) {
   expect(result.ok, `faucet failed for ${entityId.slice(0, 10)}: ${JSON.stringify(result.data)}`).toBe(true);
 }
 
-async function faucetViaBrowserFetch(page: Page, entityId: string) {
+async function faucetViaBrowserFetch(page: Page, entityId: string, hubEntityId: string) {
   const apiBaseUrl = await getActiveApiBase(page);
-  const result = await page.evaluate(async ({ eid, apiBaseUrl }) => {
+  const result = await page.evaluate(async ({ eid, hubEntityId, apiBaseUrl }) => {
     try {
       const runtimeId = (window as any).isolatedEnv?.runtimeId;
       if (!runtimeId) {
@@ -550,14 +550,14 @@ async function faucetViaBrowserFetch(page: Page, entityId: string) {
       const resp = await fetch(`${apiBaseUrl}/api/faucet/offchain`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userEntityId: eid, userRuntimeId: runtimeId, tokenId: 1, amount: '100' }),
+        body: JSON.stringify({ userEntityId: eid, userRuntimeId: runtimeId, hubEntityId, tokenId: 1, amount: '100' }),
       });
       const data = await resp.json().catch(() => ({}));
       return { ok: resp.ok, status: resp.status, data };
     } catch (e: any) {
       return { ok: false, status: 0, data: { error: e?.message || String(e) } };
     }
-  }, { eid: entityId, apiBaseUrl });
+  }, { eid: entityId, hubEntityId, apiBaseUrl });
   expect(result.ok, `faucet failed for ${entityId.slice(0, 10)}: ${JSON.stringify(result.data)}`).toBe(true);
 }
 
@@ -628,7 +628,7 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     await connectHub(page, alice.entityId, alice.signerId, hubId);
     const aliceOutBeforeFaucet = await outCap(page, alice.entityId, hubId);
     for (let i = 0; i < 5; i++) {
-      await faucet(page, alice.entityId);
+      await faucet(page, alice.entityId, hubId);
     }
     await waitForOutCapAtLeast(page, alice.entityId, hubId, aliceOutBeforeFaucet + (500n * 10n ** 18n));
     const aliceOutAfterFaucet = await outCap(page, alice.entityId, hubId);
@@ -639,7 +639,7 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     await connectHub(page, bob.entityId, bob.signerId, hubId);
     const bobOutBeforeFaucet = await outCap(page, bob.entityId, hubId);
     for (let i = 0; i < 5; i++) {
-      await faucet(page, bob.entityId);
+      await faucet(page, bob.entityId, hubId);
     }
     await waitForOutCapAtLeast(page, bob.entityId, hubId, bobOutBeforeFaucet + (500n * 10n ** 18n));
     const bobOutAfterFaucet = await outCap(page, bob.entityId, hubId);

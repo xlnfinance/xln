@@ -4017,8 +4017,18 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         typeof requestedHubEntityId === 'string' && requestedHubEntityId.length > 0
           ? requestedHubEntityId.toLowerCase()
           : '';
-      const requestedHub = requestedHubId ? hubs.find(hub => hub.entityId.toLowerCase() === requestedHubId) : undefined;
-      if (requestedHubId && !requestedHub) {
+      if (!requestedHubId) {
+        return new Response(
+          JSON.stringify({
+            error: 'Missing hubEntityId for offchain faucet',
+            code: 'FAUCET_HUB_REQUIRED',
+            knownHubEntityIds: hubs.map(hub => hub.entityId),
+          }),
+          { status: 400, headers },
+        );
+      }
+      const requestedHub = hubs.find(hub => hub.entityId.toLowerCase() === requestedHubId);
+      if (!requestedHub) {
         return new Response(
           JSON.stringify({
             error: `Requested hub not found: ${requestedHubId}`,
@@ -4029,27 +4039,9 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           { status: 404, headers },
         );
       }
-      const accountInfoByHub = hubs.map(hub => {
-        const machine = getAccountMachine(env, hub.entityId, normalizedUserEntityId);
-        const accountExists = hasAccount(env, hub.entityId, normalizedUserEntityId) || !!machine;
-        return {
-          hub,
-          hasAccount: accountExists,
-          pending: accountExists ? !!machine?.pendingFrame : false,
-        };
-      });
-      const existingReadyHubAccount = accountInfoByHub.find(entry => entry.hasAccount && !entry.pending)?.hub;
-      const existingHubAccount = accountInfoByHub.find(entry => entry.hasAccount)?.hub;
-      // If caller requested a hub explicitly, always honor it.
-      // Auto-open path will create account on that exact hub if needed.
-      const selectedHub = requestedHub ?? existingReadyHubAccount ?? existingHubAccount ?? hubs[0];
-      if (!selectedHub) {
-        return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
-      }
-      const hubEntityId = selectedHub.entityId;
+      const hubEntityId = requestedHub.entityId;
       console.log(
-        `[FAUCET/OFFCHAIN] selectedHub=${hubEntityId.slice(-8)} requested=${requestedHubId ? requestedHubId.slice(-8) : 'none'} ` +
-          `existingHubAccount=${existingHubAccount?.entityId?.slice(-8) ?? 'none'}`,
+        `[FAUCET/OFFCHAIN] selectedHub=${hubEntityId.slice(-8)} requested=${requestedHubId.slice(-8)}`,
       );
       if (!getEntityReplicaById(env, hubEntityId)) {
         return new Response(
