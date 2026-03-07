@@ -78,6 +78,8 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
   const traceId = typeof id === 'string' && id.length > 0
     ? id
     : `relay-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const deliveryEntityId = typeof msg.entityId === 'string' && msg.entityId.length > 0 ? msg.entityId : undefined;
+  const deliveryTxCount = typeof msg.txs === 'number' && Number.isFinite(msg.txs) ? msg.txs : undefined;
 
   let size = 0;
   try { size = JSON.stringify(msg).length; } catch { size = 0; }
@@ -281,7 +283,11 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
         msgType: type,
         encrypted: msg.encrypted === true,
         status: 'delivered',
-        details: { traceId },
+        details: {
+          traceId,
+          ...(deliveryEntityId ? { entityId: deliveryEntityId } : {}),
+          ...(deliveryTxCount !== undefined ? { txs: deliveryTxCount } : {}),
+        },
       });
       return;
     }
@@ -324,7 +330,11 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       encrypted: msg.encrypted === true,
       status: 'queued',
       queueSize,
-      details: { traceId },
+      details: {
+        traceId,
+        ...(deliveryEntityId ? { entityId: deliveryEntityId } : {}),
+        ...(deliveryTxCount !== undefined ? { txs: deliveryTxCount } : {}),
+      },
     });
     return;
   }
