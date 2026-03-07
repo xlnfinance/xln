@@ -382,6 +382,8 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
       '--host', '127.0.0.1',
       '--port', String(rpcPort),
       '--chain-id', '31337',
+      '--block-gas-limit', '60000000',
+      '--code-size-limit', '65536',
       '--silent',
     ], { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
     anvil.stdout.on('data', c => log.write(`[anvil] ${c.toString()}`));

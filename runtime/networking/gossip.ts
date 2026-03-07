@@ -8,6 +8,8 @@
 import { logDebug } from '../logger';
 import { buildNetworkGraph } from '../routing/graph';
 import { PathFinder } from '../routing/pathfinding';
+import type { PaymentRoute } from '../routing/pathfinding';
+import { deserializeTaggedJson } from '../serialization-utils';
 export type BoardValidator = {
   signer: string; // canonical signer address (0x...) or signerId fallback
   weight: number; // uint16 voting power
@@ -35,6 +37,7 @@ export type Profile = {
     bio?: string;
     website?: string;
     lastUpdated?: number;
+    expiresAt?: number;
     hankoSignature?: string;
     // Network-specific fields
     region?: string;
@@ -51,6 +54,7 @@ export type Profile = {
     position?: { x: number; y: number; z: number };
     // Additional fields
     entityPublicKey?: string; // hex public key for signature verification
+    cryptoPublicKey?: string; // X25519 public key alias used by transport + HTLC flows
     encryptionPublicKey?: string; // X25519 public key for E2E encryption (hex)
     [key: string]: unknown;
   };
@@ -77,9 +81,13 @@ export interface GossipLayer {
   setProfiles?: (incoming: Iterable<Profile>) => void;
   getProfileBundle?: (entityId: string) => { profile?: Profile; peers: Profile[] };
   getNetworkGraph: () => {
-    findPaths: (source: string, target: string, amount?: bigint, tokenId?: number) => Promise<any[]>;
+    findPaths: (source: string, target: string, amount?: bigint, tokenId?: number) => Promise<PaymentRoute[]>;
   };
 }
+
+type GossipProfileDb = {
+  iterator: (options: { gte: string; lt: string }) => AsyncIterable<[string | Uint8Array, string | Uint8Array]>;
+};
 
 const PROFILE_TTL_MS = 5 * 60 * 1000;
 
@@ -290,44 +298,16 @@ export function createGossipLayer(): GossipLayer {
  * @param gossip - Gossip layer to announce profiles to
  * @returns Number of profiles loaded
  */
-export async function loadPersistedProfiles(db: any, gossip: { announce: (p: Profile) => void }): Promise<number> {
+export async function loadPersistedProfiles(db: GossipProfileDb, gossip: { announce: (p: Profile) => void }): Promise<number> {
   try {
     let profileCount = 0;
     const iterator = db.iterator({ gte: 'profile:', lt: 'profile:\xFF' });
 
     for await (const [key, value] of iterator) {
       try {
-        const profile = JSON.parse(value);
-        const persistedMetadata = (profile?.metadata || {}) as Record<string, unknown>;
-        gossip.announce({
-          entityId: profile.entityId,
-          runtimeId: profile.runtimeId,
-          capabilities: profile.capabilities || [],
-          publicAccounts: profile.publicAccounts || profile.hubs || [],
-          hubs: profile.hubs || profile.publicAccounts || [],
-          endpoints: profile.endpoints || [],
-          relays: profile.relays || [],
-          metadata: {
-            ...persistedMetadata,
-            name: profile.name ?? persistedMetadata.name,
-            avatar: profile.avatar ?? persistedMetadata.avatar,
-            bio: profile.bio ?? persistedMetadata.bio,
-            website: profile.website ?? persistedMetadata.website,
-            lastUpdated: profile.lastUpdated ?? persistedMetadata.lastUpdated,
-            hankoSignature: profile.hankoSignature ?? persistedMetadata.hankoSignature,
-            entityPublicKey: profile.entityPublicKey ?? persistedMetadata.entityPublicKey,
-            cryptoPublicKey:
-              profile.cryptoPublicKey
-              ?? persistedMetadata.cryptoPublicKey
-              ?? profile.encryptionPublicKey
-              ?? persistedMetadata.encryptionPublicKey,
-            encryptionPublicKey:
-              profile.encryptionPublicKey
-              ?? persistedMetadata.encryptionPublicKey
-              ?? profile.cryptoPublicKey
-              ?? persistedMetadata.cryptoPublicKey,
-          },
-        });
+        const serialized = typeof value === 'string' ? value : Buffer.from(value).toString();
+        const profile = deserializeTaggedJson<Profile>(serialized);
+        gossip.announce(profile);
         profileCount++;
       } catch (parseError) {
         console.warn(`⚠️ Failed to parse profile from key ${key}:`, parseError);

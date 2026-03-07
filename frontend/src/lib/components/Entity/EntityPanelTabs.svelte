@@ -6,9 +6,19 @@
 -->
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
+  import type { ComponentType } from 'svelte';
   import { get } from 'svelte/store';
   import { Wallet as EthersWallet, hexlify, isAddress, ZeroAddress } from 'ethers';
-  import type { Env } from '@xln/runtime/xln-api';
+  import type {
+    AccountMachine,
+    Env,
+    EnvSnapshot,
+    JAdapter,
+    JBatch,
+    Profile as GossipProfile,
+    RoutedEntityInput,
+    EntityTx,
+  } from '@xln/runtime/xln-api';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { history, xlnEnvironment } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
@@ -82,6 +92,14 @@
   let selectedJurisdictionName: string | null = null;
   let addressCopied = false;
   let openAccountEntityId = '';
+  type RelayAwareEnv = {
+    runtimeState?: {
+      p2p?: {
+        relayUrls?: string[];
+      };
+    };
+  };
+
   function isLocalHost(hostname: string): boolean {
     return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
   }
@@ -108,8 +126,8 @@
     }
   }
 
-  function resolveApiBaseForEnv(envLike: unknown): string {
-    const runtimeRelay = (envLike as any)?.runtimeState?.p2p?.relayUrls?.[0];
+  function resolveApiBaseForEnv(envLike: RelayAwareEnv | null | undefined): string {
+    const runtimeRelay = envLike?.runtimeState?.p2p?.relayUrls?.[0];
     const settingsRelay = $settings?.relayUrl;
     const relayUrl = typeof runtimeRelay === 'string' && runtimeRelay.length > 0
       ? runtimeRelay
@@ -138,14 +156,107 @@
     return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
   }
 
-  async function readJsonResponse(response: Response): Promise<any> {
+  async function readJsonResponse<T = unknown>(response: Response): Promise<T | null> {
     const raw = await response.text();
     if (!raw) return null;
     try {
-      return JSON.parse(raw);
+      return JSON.parse(raw) as T;
     } catch {
       return null;
     }
+  }
+
+  type ApiResult = {
+    success?: boolean;
+    error?: string;
+    code?: string;
+    details?: unknown;
+  };
+
+  type TokenCatalogItem = {
+    symbol: string;
+    address: string;
+    decimals?: number;
+    tokenId?: number;
+  };
+
+  type TokenCatalogResponse = {
+    tokens?: TokenCatalogItem[];
+  };
+
+  type LocalAccountSnapshot = {
+    currentHeight: number;
+    hasPending: boolean;
+    pendingHeight: number | null;
+    currentFrameHash: string | null;
+  };
+
+  type IconTabConfig<T extends string> = {
+    id: T;
+    icon: ComponentType;
+    label: string;
+  };
+
+  type IconBadgeTabConfig<T extends string> = IconTabConfig<T> & {
+    showBadge?: boolean;
+    badgeType?: 'pending';
+  };
+
+  type IconPendingTabConfig<T extends string> = IconTabConfig<T> & {
+    showPendingBatch?: boolean;
+  };
+
+  type IndexedDbWithDatabases = IDBFactory & {
+    databases?: () => Promise<IDBDatabaseInfo[]>;
+  };
+
+  type JTokenRegistryItem = Awaited<ReturnType<JAdapter['getTokenRegistry']>>[number];
+
+  function getRuntimeId(env: Env | null | undefined): string | null {
+    const runtimeId = env?.runtimeId;
+    return typeof runtimeId === 'string' && runtimeId.length > 0 ? runtimeId : null;
+  }
+
+  function getGossipProfiles(env: Env | null | undefined): GossipProfile[] {
+    return env?.gossip?.getProfiles?.() ?? [];
+  }
+
+  function isHubProfile(profile: GossipProfile | undefined): boolean {
+    return profile?.metadata?.isHub === true || profile?.capabilities?.includes('hub') === true;
+  }
+
+  function resolveAccountCounterparty(entityId: string, account: AccountMachine): string {
+    return account.leftEntity.toLowerCase() === entityId.toLowerCase()
+      ? account.rightEntity
+      : account.leftEntity;
+  }
+
+  function findLocalAccountByCounterparty(
+    entityId: string,
+    accounts: Map<string, AccountMachine> | undefined,
+    counterpartyId: string | undefined,
+  ): AccountMachine | null {
+    if (!counterpartyId || !accounts) return null;
+    const needle = counterpartyId.toLowerCase();
+    for (const [accountKey, account] of accounts.entries()) {
+      if (accountKey.toLowerCase() === needle) return account;
+      if (resolveAccountCounterparty(entityId, account).toLowerCase() === needle) return account;
+    }
+    return null;
+  }
+
+  function buildEntityInput(entityId: string, signerId: string, entityTxs: EntityTx[]): RoutedEntityInput {
+    return { entityId, signerId, entityTxs };
+  }
+
+  function getP2PRelayUrls(env: Env | null | undefined): string[] {
+    const relayUrls = env?.runtimeState?.p2p?.relayUrls;
+    return Array.isArray(relayUrls) ? relayUrls : [];
+  }
+
+  function toErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error && error.message) return error.message;
+    return fallback;
   }
 
   // Copy address to clipboard
@@ -168,11 +279,8 @@
   $: gossipName = (() => {
     const entityId = (replica?.state?.entityId || tab.entityId || '').toLowerCase();
     if (!entityId) return '';
-    const profiles = (activeEnv?.gossip?.getProfiles?.() || []) as Array<{
-      entityId?: string;
-      metadata?: { name?: string };
-    }>;
-    const profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === entityId);
+    const profiles = activeEnv?.gossip?.getProfiles?.() || [];
+    const profile = profiles.find((p: GossipProfile) => p.entityId.toLowerCase() === entityId);
     return profile?.metadata?.name || '';
   })();
 
@@ -186,8 +294,6 @@
 
   $: heroDisplayName = (() => {
     const fallbackId = replica?.state?.entityId || tab.entityId || '';
-    const entityProfileName = String((replica?.state as any)?.profile?.name || '').trim();
-    if (entityProfileName) return entityProfileName;
     const gossip = (gossipName ?? '').trim();
     return gossip && !isPlaceholderName(gossip) ? gossip : fallbackId;
   })();
@@ -208,8 +314,10 @@
 
   function resolveEntitySigner(entityId: string, reason: string): string {
     const env = activeEnv;
-    return activeXlnFunctions?.resolveEntityProposerId?.(env as any, entityId, reason)
-      || requireSignerIdForEntity(env, entityId, reason);
+    if (env && activeXlnFunctions?.resolveEntityProposerId) {
+      return activeXlnFunctions.resolveEntityProposerId(env, entityId, reason);
+    }
+    return requireSignerIdForEntity(env, entityId, reason);
   }
 
   // Get replica
@@ -230,9 +338,9 @@
     ? Array.from(replica.state.accounts.keys()).map((id) => String(id)).sort()
     : [];
   $: workspaceAccountIds = accountIds.filter((id) => {
-    const account = replica?.state?.accounts?.get?.(id);
+    const account = replica?.state?.accounts?.get?.(id) as AccountMachine | undefined;
     if (!account) return false;
-    const isFinalizedDisputed = String(account.status || '') === 'disputed' && !(account as any)?.activeDispute;
+    const isFinalizedDisputed = String(account.status || '') === 'disputed' && !account.activeDispute;
     return !isFinalizedDisputed;
   });
   $: if (!workspaceAccountId || !workspaceAccountIds.includes(workspaceAccountId)) {
@@ -266,7 +374,7 @@
 
   $: {
     if (showJurisdiction && availableJurisdictions.length > 0 && !selectedJurisdictionName) {
-      selectedJurisdictionName = (activeEnv as any)?.activeJurisdiction || availableJurisdictions[0]?.name;
+      selectedJurisdictionName = activeEnv?.activeJurisdiction ?? availableJurisdictions[0]?.name ?? null;
     }
   }
 
@@ -303,7 +411,7 @@
     };
 
     for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
-    for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add((profile as any)?.entityId);
+    for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add(profile.entityId);
     for (const contact of contacts) add(contact.entityId);
     return Array.from(ids.values()).sort();
   })();
@@ -345,13 +453,12 @@
     address: string;
     balance: bigint;
     decimals: number;
-    tokenId?: number;
+    tokenId: number | undefined;
   }
   let externalTokens: ExternalToken[] = [];
   let externalTokensLoading = true;
   let depositingToken: string | null = null; // symbol of token being deposited
   let collateralFundingToken: string | null = null; // symbol of token being moved to collateral
-  const offchainFaucetInflight = new Set<string>();
 
   // Faucet: fund entity reserves with test tokens
   function resolveReserveTokenMeta(tokenId: number, symbolHint?: string): { tokenId: number; symbol: string; decimals: number } {
@@ -403,7 +510,7 @@
         })
       });
 
-      const result = await readJsonResponse(response);
+      const result = await readJsonResponse<ApiResult>(response);
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
@@ -426,59 +533,26 @@
   async function faucetOffchain(hubEntityId?: string, tokenId: number = 1) {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
-    const faucetKey = `${String(hubEntityId || '').toLowerCase()}:${Number(tokenId)}`;
-    if (offchainFaucetInflight.has(faucetKey)) return;
-    offchainFaucetInflight.add(faucetKey);
     try {
       const requestApiBase = resolveApiBaseForEnv(activeEnv);
-      const runtimeId = (activeEnv as any)?.runtimeId;
-      if (typeof runtimeId !== 'string' || runtimeId.length === 0) {
+      const runtimeId = getRuntimeId(activeEnv);
+      if (!runtimeId) {
         throw new Error('Runtime is not ready yet (missing runtimeId). Re-open runtime and retry.');
       }
 
       // Auto-detect hub if not specified
       if (!hubEntityId) {
-        const profiles = (activeEnv as any)?.gossip?.getProfiles?.() || [];
+        const profiles = getGossipProfiles(activeEnv);
         const isHubEntity = (candidate: string): boolean => {
-          const profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === String(candidate).toLowerCase());
-          return !!(profile?.metadata?.isHub === true || (Array.isArray(profile?.capabilities) && profile.capabilities.includes('hub')));
+          const profile = profiles.find((p) => p.entityId.toLowerCase() === candidate.toLowerCase());
+          return isHubProfile(profile);
         };
         const accountIds = replica?.state?.accounts ? Array.from(replica.state.accounts.keys()) : [];
         hubEntityId = accountIds.find((id) => isHubEntity(String(id))) || undefined;
       }
 
-      const findLocalAccountByCounterparty = (counterpartyId: string | undefined) => {
-        if (!counterpartyId || !replica?.state?.accounts) return null;
-        const needle = String(counterpartyId).toLowerCase();
-        const me = String(entityId || '').toLowerCase();
-        for (const [key, account] of replica.state.accounts.entries()) {
-          if (String(key).toLowerCase() === needle) return account;
-          const cp = typeof (account as any)?.counterpartyEntityId === 'string'
-            ? String((account as any).counterpartyEntityId).toLowerCase()
-            : '';
-          if (cp === needle) return account;
-          const left = typeof (account as any)?.leftEntity === 'string'
-            ? String((account as any).leftEntity).toLowerCase()
-            : '';
-          const right = typeof (account as any)?.rightEntity === 'string'
-            ? String((account as any).rightEntity).toLowerCase()
-            : '';
-          if (left && right && ((left === me && right === needle) || (right === me && left === needle))) {
-            return account;
-          }
-        }
-        return null;
-      };
-      const localAccount = findLocalAccountByCounterparty(hubEntityId);
-      const localDelta = localAccount?.deltas?.get?.(tokenId);
-      const localHeight = Number(localAccount?.currentHeight || 0);
-      if (!localAccount) {
-        throw new Error('No bilateral account with selected hub. Open account first.');
-      }
-      if (!localDelta || localHeight <= 0) {
-        throw new Error('Account is not finalized yet. Wait for first ACK and retry faucet.');
-      }
-      const knownAccount = localAccount
+      const localAccount = findLocalAccountByCounterparty(entityId, replica?.state?.accounts, hubEntityId);
+      const knownAccount: LocalAccountSnapshot | null = localAccount
         ? {
             currentHeight: Number(localAccount.currentHeight || 0),
             hasPending: !!localAccount.pendingFrame,
@@ -489,14 +563,13 @@
 
       const requestTimeoutMs = 12000;
       let response: Response | null = null;
-      let result: any = null;
+      let result: ApiResult | null = null;
       let timeout: ReturnType<typeof setTimeout> | null = null;
       try {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
         const p2p = get(p2pState);
-        const runtimeP2P = (activeEnv as any)?.runtimeState?.p2p;
-        const relayUrl = runtimeP2P?.relayUrls?.[0] || $settings?.relayUrl || 'n/a';
+        const relayUrl = getP2PRelayUrls(activeEnv)[0] || $settings?.relayUrl || 'n/a';
         const visibility =
           typeof document !== 'undefined' ? document.visibilityState : 'server';
         console.log('[EntityPanel] Offchain faucet request:', {
@@ -525,12 +598,12 @@
             ...(hubEntityId ? { hubEntityId } : {}),
           })
         });
-        result = await readJsonResponse(response);
-      } catch (error: any) {
-        const aborted = error?.name === 'AbortError';
+        result = await readJsonResponse<ApiResult>(response);
+      } catch (error: unknown) {
+        const aborted = error instanceof DOMException && error.name === 'AbortError';
         const message = aborted
           ? `Faucet request timed out after ${requestTimeoutMs}ms`
-          : (error?.message || String(error));
+          : toErrorMessage(error, 'Faucet request failed');
         throw new Error(message);
       } finally {
         if (timeout) clearTimeout(timeout);
@@ -548,9 +621,6 @@
         if (code === 'FAUCET_ACCOUNT_STATE_MISMATCH') {
           throw new Error('Account state mismatch with server. Reset network/runtime and retry.');
         }
-        if (code === 'FAUCET_ACCOUNT_NOT_OPEN') {
-          throw new Error('Open account with this hub first, then retry faucet.');
-        }
         throw new Error(result?.error || `Faucet failed (${status})`);
       }
 
@@ -559,8 +629,6 @@
     } catch (err) {
       console.error('[EntityPanel] Offchain faucet failed:', err);
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
-    } finally {
-      offchainFaucetInflight.delete(faucetKey);
     }
   }
 
@@ -582,14 +650,10 @@
       const signerId = resolveEntitySigner(entityId, 'quick-settle-approve');
       if (!signerId) throw new Error('No signer available');
 
-      await enqueueEntityInputs(env as any, [{
-        entityId,
-        signerId,
-        entityTxs: [{
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
           type: 'settle_approve',
           data: { counterpartyEntityId: event.detail.counterpartyId },
-        }],
-      }]);
+        }])]);
       toasts.info('Withdrawal signature sent');
     } catch (err) {
       console.error('[EntityPanel] Quick settle approve failed:', err);
@@ -597,12 +661,12 @@
     }
   }
 
-  async function getTokenList(jadapter: any): Promise<ExternalToken[]> {
+  async function getTokenList(jadapter: JAdapter | null | undefined): Promise<ExternalToken[]> {
     let tokens: ExternalToken[] = [];
     if (jadapter?.getTokenRegistry) {
       const registry = await jadapter.getTokenRegistry();
       if (registry?.length) {
-        tokens = registry.map((t: any) => ({
+        tokens = registry.map((t: JTokenRegistryItem) => ({
           symbol: t.symbol,
           address: t.address,
           balance: 0n,
@@ -669,10 +733,10 @@
     try {
       const response = await fetch(`${apiBase}/api/tokens`);
       if (!response.ok) return [];
-      const data = await readJsonResponse(response);
+      const data = await readJsonResponse<TokenCatalogResponse>(response);
       const tokens = Array.isArray(data?.tokens) ? data.tokens : [];
       if (tokens.length === 0) return [];
-      return tokens.map((t: any) => ({
+      return tokens.map((t: TokenCatalogItem) => ({
         symbol: t.symbol,
         address: t.address,
         balance: 0n,
@@ -696,7 +760,7 @@
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
       // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
-      const jadapter = xln.getActiveJAdapter?.(activeEnv as any);
+      const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
 
       const tokenList = await getTokenList(jadapter);
       let nativeToken: ExternalToken | null = null;
@@ -770,7 +834,7 @@
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
       // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
-      const jadapter = xln.getActiveJAdapter?.(activeEnv as any);
+      const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
       if (!jadapter?.externalTokenToReserve) {
         throw new Error('J-adapter deposit not available');
       }
@@ -864,10 +928,7 @@
       const env = activeEnv;
       if (!env) throw new Error('Environment not ready');
 
-      await enqueueEntityInputs(env as any, [{
-        entityId,
-        signerId,
-        entityTxs: [
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
           {
             type: 'deposit_collateral' as const,
             data: {
@@ -880,8 +941,7 @@
             type: 'j_broadcast',
             data: {},
           },
-        ],
-      }]);
+        ])]);
 
       toasts.info(`R→C queued for ${info.symbol}. Waiting for on-chain update...`);
     } catch (err) {
@@ -917,17 +977,13 @@
     try {
       if (!env) throw new Error('Environment not ready');
       const rebalancePolicy = getOpenAccountRebalancePolicyData();
-      await enqueueEntityInputs(env as any, [{
-        entityId,
-        signerId,
-        entityTxs: [{
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
           type: 'openAccount' as const,
           data: {
             targetEntityId: trimmed,
             ...(rebalancePolicy ? { rebalancePolicy } : {}),
           },
-        }],
-      }]);
+        }])]);
       openAccountEntityId = '';
       toasts.success('Account request sent');
     } catch (err) {
@@ -947,14 +1003,10 @@
     }
     try {
       if (!env) throw new Error('Environment not ready');
-      await enqueueEntityInputs(env as any, [{
-        entityId,
-        signerId,
-        entityTxs: [{
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
           type: 'reopenDisputedAccount' as const,
           data: { counterpartyEntityId },
-        }],
-      }]);
+        }])]);
       toasts.success('Reopen disputed account queued');
     } catch (err) {
       console.error('[EntityPanel] Reopen disputed account failed:', err);
@@ -982,18 +1034,14 @@
     }
     try {
       if (!env) throw new Error('Environment not ready');
-      await enqueueEntityInputs(env as any, [{
-        entityId,
-        signerId,
-        entityTxs: [{
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
           type: 'extendCredit' as const,
           data: {
             counterpartyEntityId,
             tokenId: configureTokenId,
             amount: 0n,
           },
-        }],
-      }]);
+        }])]);
       const symbol = getTokenInfo(configureTokenId).symbol || `TKN${configureTokenId}`;
       toasts.success(`Token ${symbol} added to account`);
     } catch (err) {
@@ -1021,7 +1069,7 @@
         body: JSON.stringify(payload),
       });
 
-      const result = await readJsonResponse(response);
+      const result = await readJsonResponse<ApiResult>(response);
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
@@ -1242,7 +1290,7 @@
 
     hubConfigSaving = true;
     try {
-      const txData: any = {
+      const txData: Extract<EntityTx, { type: 'setHubConfig' }>['data'] = {
         matchingStrategy: hubMatchingStrategy,
         routingFeePPM: Math.floor(routingFeePPM),
         baseFee,
@@ -1402,8 +1450,8 @@
     const accounts = replica?.state?.accounts;
     if (!(accounts instanceof Map)) return out;
     for (const [counterpartyId, account] of accounts.entries()) {
-      const activeDispute = (account as any)?.activeDispute;
-      const status = String(account?.status || '');
+      const activeDispute = account.activeDispute;
+      const status = String(account.status || '');
       const isFinalizedDisputed = status === 'disputed' && !activeDispute;
       if (!isFinalizedDisputed) continue;
       out.push({ counterpartyId: String(counterpartyId), status: 'disputed' });
@@ -1467,7 +1515,8 @@
 
     const recent = activeHistory.slice(-300);
     for (let index = 0; index < recent.length; index += 1) {
-      const snapshot = recent[index] as any;
+      const snapshot = recent[index];
+      if (!snapshot) continue;
       const entityInputs = Array.isArray(snapshot?.runtimeInput?.entityInputs)
         ? snapshot.runtimeInput.entityInputs
         : [];
@@ -1550,7 +1599,7 @@
     timeOperations.goToLive();
   }
 
-  function countBatchOps(batch: any): number {
+  function countBatchOps(batch: JBatch | null | undefined): number {
     if (!batch) return 0;
     return (batch.reserveToCollateral?.length || 0) +
            (batch.collateralToReserve?.length || 0) +
@@ -1567,13 +1616,13 @@
   // Pending batch count for Accounts tab badge
   $: pendingBatchCount = (() => {
     if (!replica?.state) return 0;
-    const jBatchState = (replica.state as any)?.jBatchState;
+    const jBatchState = replica.state.jBatchState;
     const draft = countBatchOps(jBatchState?.batch);
     const sent = countBatchOps(jBatchState?.sentBatch?.batch);
     return draft > 0 ? draft : sent;
   })();
 
-  const tabs: Array<{ id: ViewTab; icon: any; label: string; showBadge?: boolean; badgeType?: 'pending' }> = [
+  const tabs: IconBadgeTabConfig<ViewTab>[] = [
     { id: 'external', icon: Wallet, label: 'External' },
     { id: 'reserves', icon: Landmark, label: 'Reserves' },
     { id: 'accounts', icon: Users, label: 'Accounts', showBadge: true, badgeType: 'pending' },
@@ -1581,7 +1630,7 @@
     { id: 'settings', icon: SettingsIcon, label: 'Settings' },
   ];
 
-  const moreTabs: Array<{ id: MoreTab; icon: any; label: string }> = [
+  const moreTabs: IconTabConfig<MoreTab>[] = [
     { id: 'consensus', icon: Activity, label: 'Consensus' },
     { id: 'chat', icon: MessageCircle, label: 'Chat' },
     { id: 'contacts', icon: BookUser, label: 'Contacts' },
@@ -1590,7 +1639,7 @@
     { id: 'governance', icon: Scale, label: 'Governance' },
   ];
 
-  const accountWorkspaceTabs: Array<{ id: AccountWorkspaceTab; icon: any; label: string; showPendingBatch?: boolean }> = [
+  const accountWorkspaceTabs: IconPendingTabConfig<AccountWorkspaceTab>[] = [
     { id: 'open', icon: PlusCircle, label: 'Open Account' },
     { id: 'send', icon: ArrowUpRight, label: 'Pay' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
@@ -1752,7 +1801,7 @@
             localStorage.clear();
             sessionStorage.clear();
             try {
-              const dbs = await (indexedDB as any).databases?.() || [];
+              const dbs = await (indexedDB as IndexedDbWithDatabases).databases?.() || [];
               for (const db of dbs) { if (db.name) indexedDB.deleteDatabase(db.name); }
             } catch { /* best effort */ }
             await vaultOperations.clearAll();
@@ -2285,6 +2334,27 @@
             >
               {$settings.showTimeMachine ? 'On' : 'Off'}
             </button>
+          </div>
+          <div class="setting-row">
+            <span>Frame Delay</span>
+            <input
+              type="number"
+              min="0"
+              max="10000"
+              step="1"
+              value={$settings.runtimeDelay}
+              on:input={(e) => {
+                const val = Math.max(0, Math.min(10000, Number(e.currentTarget.value) || 0));
+                settingsOperations.setServerDelay(val);
+                const env = activeEnv;
+                if (env) {
+                  if (!env.runtimeConfig) env.runtimeConfig = { minFrameDelayMs: val, loopIntervalMs: 25 };
+                  else env.runtimeConfig.minFrameDelayMs = val;
+                }
+              }}
+              style="width:72px"
+            />
+            <span class="muted">ms</span>
           </div>
 
           <h4 class="section-head">Hub Rebalance</h4>

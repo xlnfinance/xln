@@ -8,6 +8,14 @@ import type { BoardMetadata, Profile } from './gossip';
 import { deriveDelta, isLeft } from '../account-utils';
 import { getCachedSignerAddress, getCachedSignerPublicKey } from '../account-crypto';
 
+type GossipBroadcastTx = {
+  type: 'gossipBroadcast';
+  data: {
+    profile: Profile;
+    timestamp: number;
+  };
+};
+
 const toUint16 = (value: bigint | number | undefined, fallback = 0): number => {
   const raw = typeof value === 'bigint' ? Number(value) : Number(value ?? fallback);
   if (!Number.isFinite(raw)) return fallback;
@@ -79,9 +87,9 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
     }
 
     // Convert tokenCapacities Map to plain object for JSON serialization
-    const tokenCapacitiesObj: Record<number, { inCapacity: string; outCapacity: string }> = {};
+    const tokenCapacitiesObj: Record<string, { inCapacity: string; outCapacity: string }> = {};
     for (const [tokenId, cap] of tokenCapacities.entries()) {
-      tokenCapacitiesObj[tokenId] = {
+      tokenCapacitiesObj[String(tokenId)] = {
         inCapacity: cap.inCapacity.toString(),
         outCapacity: cap.outCapacity.toString(),
       };
@@ -89,7 +97,7 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
 
     accounts.push({
       counterpartyId,
-      tokenCapacities: tokenCapacitiesObj as any,  // Plain object for JSON
+      tokenCapacities: tokenCapacitiesObj,
     });
 
     if (hasInboundCapacity) {
@@ -176,7 +184,7 @@ export function mergeProfileWithExisting(profile: Profile, existing?: Profile | 
 /**
  * Create a RuntimeTx to broadcast profile update
  */
-export function createProfileBroadcastTx(entityState: EntityState, timestamp: number): any {
+export function createProfileBroadcastTx(entityState: EntityState, timestamp: number): GossipBroadcastTx {
   const profile = buildEntityProfile(entityState, undefined, timestamp);
 
   return {

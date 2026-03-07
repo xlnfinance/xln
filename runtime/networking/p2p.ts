@@ -140,6 +140,8 @@ const getReplicaSignerId = (replicaKey: string): string => {
 };
 
 const GOSSIP_POLL_MS = 5000; // Poll relay every 5s by default to avoid relay spam
+const PROFILE_ANNOUNCE_DEBOUNCE_MS = 25;
+const GOSSIP_FETCH_RETRY_DELAYS_MS = [40, 80, 160];
 
 export class RuntimeP2P {
   private env: Env;
@@ -323,7 +325,7 @@ export class RuntimeP2P {
           const missingEntities = Array.from(entitiesToCheck).filter(e => !this.hasProfileForEntity(e));
           if (missingEntities.length > 0) {
             console.log(`P2P_FETCH_PROFILE: ${missingEntities.map(e => e.slice(-4)).join(',')} (not in cache)`);
-            await this.fetchProfilesWithRetry(missingEntities);
+            await this.ensureProfiles(missingEntities);
           }
 
           this.onEntityInput(from, input);
@@ -605,6 +607,23 @@ export class RuntimeP2P {
     this.requestSeedGossip();
   }
 
+  async ensureProfiles(entityIds: string[]): Promise<boolean> {
+    const normalizedMissing = unique(entityIds.map(normalizeId)).filter(entityId => !this.hasProfileForEntity(entityId));
+    if (normalizedMissing.length === 0) {
+      return true;
+    }
+    const startedAt = Date.now();
+    for (const entityId of normalizedMissing) {
+      this.ensureRelayConnectionsForEntity(entityId);
+    }
+    const resolved = await this.fetchProfilesWithRetry(normalizedMissing);
+    console.log(
+      `[P2P] ensureProfiles ids=${normalizedMissing.map(entityId => entityId.slice(-6)).join(',')} ` +
+        `resolved=${resolved ? 1 : 0} elapsed=${Date.now() - startedAt}ms`,
+    );
+    return resolved;
+  }
+
   // Check if we have a profile for an entity in local gossip cache
   private hasProfileForEntity(entityId: string): boolean {
     const profiles = this.env.gossip?.getProfiles?.() || [];
@@ -612,34 +631,49 @@ export class RuntimeP2P {
     return profiles.some((p: any) => normalizeId(String(p.entityId || '')) === targetEntityId);
   }
 
-  // Fetch profiles from relay with retry
-  private async fetchProfilesWithRetry(missingEntityIds: string[] = []): Promise<void> {
-    const startCount = this.env.gossip?.getProfiles?.()?.length || 0;
-
-    // Request profiles multiple times with delays
-    for (let i = 0; i < 5; i++) {
+  // Fetch profiles from relay with bounded retry for cold or stale caches.
+  private async fetchProfilesWithRetry(missingEntityIds: string[] = []): Promise<boolean> {
+    if (missingEntityIds.length === 0) {
       this.requestSeedGossip();
-      await new Promise(resolve => setTimeout(resolve, 300));
+      return true;
+    }
+    if (!this.getActiveClient()) {
+      this.env.warn('network', 'GOSSIP_PROFILE_FETCH_NO_CLIENT', {
+        missingEntityIds,
+      });
+      return false;
+    }
+    const startCount = this.env.gossip?.getProfiles?.()?.length || 0;
+    const startedAt = Date.now();
+    for (const waitMs of GOSSIP_FETCH_RETRY_DELAYS_MS) {
+      this.requestSeedGossip();
+      await new Promise(resolve => setTimeout(resolve, waitMs));
       const profiles = this.env.gossip?.getProfiles?.() || [];
       const hasAllMissing = missingEntityIds.length === 0 || missingEntityIds.every((entityId) => this.hasProfileForEntity(entityId));
       if (profiles.length > startCount || hasAllMissing) {
-        console.log(`P2P_FETCH: Got ${profiles.length - startCount} new profiles (total: ${profiles.length})`);
-        return;
+        console.log(
+          `P2P_FETCH: profiles=${profiles.length} delta=${profiles.length - startCount} ` +
+            `elapsed=${Date.now() - startedAt}ms`,
+        );
+        return hasAllMissing;
       }
     }
-    console.log(`P2P_FETCH: No new profiles after 5 retries (have ${startCount})`);
+    console.log(`P2P_FETCH: No new profiles after ${Date.now() - startedAt}ms (have ${startCount})`);
     if (missingEntityIds.length > 0) {
       this.env.warn('network', 'GOSSIP_PROFILE_MISS', {
         missingEntityIds,
-        retries: 5,
+        retries: GOSSIP_FETCH_RETRY_DELAYS_MS.length,
+        elapsedMs: Date.now() - startedAt,
       });
       this.sendDebugEvent({
         level: 'warn',
         code: 'GOSSIP_PROFILE_MISS',
         missingEntityIds,
-        retries: 5,
+        retries: GOSSIP_FETCH_RETRY_DELAYS_MS.length,
+        elapsedMs: Date.now() - startedAt,
       });
     }
+    return false;
   }
 
   async announceLocalProfiles() {
@@ -675,7 +709,7 @@ export class RuntimeP2P {
       this.announceProfilesNow(targets, reason).catch(error => {
         console.warn(`P2P_ANNOUNCE_FAILED (${reason}): ${(error as Error).message}`);
       });
-    }, 150);
+    }, PROFILE_ANNOUNCE_DEBOUNCE_MS);
   }
 
   private async announceProfilesNow(entityIds: string[], reason: string) {
@@ -816,6 +850,7 @@ export class RuntimeP2P {
     let unsigned = 0;
     let skipped = 0;
     let accepted = 0;
+    const acceptedProfiles: Profile[] = [];
     for (const profile of profiles) {
       const sanitized = sanitizeIncomingProfile(profile);
       if (!sanitized) {
@@ -866,6 +901,7 @@ export class RuntimeP2P {
       // Store in local gossip cache
       this.env.gossip?.announce?.(sanitized);
       accepted++;
+      acceptedProfiles.push(sanitized);
 
       // Register validator public keys from profile board (for account signature verification)
       const board2 = sanitized.metadata?.board;
@@ -890,7 +926,7 @@ export class RuntimeP2P {
     if (accepted > 0 && this.pendingByRuntime.size > 0) {
       this.flushPending();
     }
-    this.onGossipProfiles(from, profiles);
+    this.onGossipProfiles(from, acceptedProfiles);
   }
 
   private closeClients() {

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+  import { scheduleGossipProfileFetch } from '../../utils/entityNaming';
 
   export let value: string = '';
   export let options: string[] = [];
@@ -21,9 +23,22 @@
     const norm = normalizeEntityId(id);
     if (!norm) return id;
     const profiles = activeEnv?.gossip?.getProfiles?.() || [];
-    const profile = profiles.find((p: any) => normalizeEntityId(p?.entityId) === norm);
+    const profile = profiles.find((p: GossipProfile) => normalizeEntityId(p.entityId) === norm);
+    if (!profile) {
+      scheduleGossipProfileFetch([norm]);
+    }
     const profileName = String(profile?.metadata?.name || '').trim();
     return profileName || id;
+  }
+
+  $: missingOptionIds = options.filter((id) => {
+    const norm = normalizeEntityId(id);
+    if (!norm) return false;
+    const profiles = activeEnv?.gossip?.getProfiles?.() || [];
+    return !profiles.some((profile: GossipProfile) => normalizeEntityId(profile.entityId) === norm);
+  });
+  $: if (missingOptionIds.length > 0) {
+    scheduleGossipProfileFetch(missingOptionIds);
   }
 
   $: optionViews = options.map((id) => ({

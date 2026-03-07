@@ -15,11 +15,15 @@ import {
   pushDebugEvent,
   storeGossipProfile,
   getAllGossipProfiles,
+  getDefaultGossipProfiles,
+  getGossipProfileBundle,
+  DEFAULT_GOSSIP_SYNC_LIMIT,
   registerClient,
   flushPendingMessages,
   enqueueMessage,
   cacheEncryptionKey,
 } from './relay-store';
+import type { Profile } from './networking/gossip';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -127,28 +131,67 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
     return;
   }
 
-  // ----- gossip_announce: store (NO broadcast) -----
+  // ----- gossip_announce: store + fanout -----
   if (type === 'gossip_announce') {
-    const profiles = (payload?.profiles || []) as any[];
+    const profiles = (payload?.profiles || []) as Profile[];
     let stored = 0;
+    const storedProfiles: Profile[] = [];
     for (const profile of profiles) {
       if (!profile || typeof profile !== 'object') continue;
-      const normalized = {
+      const normalized: Profile = {
         ...profile,
         runtimeId: profile.runtimeId || from,
       };
       if (storeGossipProfile(store, normalized)) {
         stored += 1;
+        storedProfiles.push(normalized);
       }
       // Mirror into env gossip cache via hook
       config.onGossipStore?.(normalized);
+    }
+    let broadcastTargets = 0;
+    if (storedProfiles.length > 0) {
+      const defaultEntityIds = new Set(
+        getDefaultGossipProfiles(store, DEFAULT_GOSSIP_SYNC_LIMIT).map(profile => profile.entityId.toLowerCase()),
+      );
+      const broadcastProfiles = storedProfiles.filter(
+        profile =>
+          defaultEntityIds.has(profile.entityId.toLowerCase()) ||
+          profile.metadata?.isHub === true ||
+          profile.capabilities.includes('hub') ||
+          profile.capabilities.includes('routing'),
+      );
+      if (broadcastProfiles.length === 0) {
+        pushDebugEvent(store, {
+          event: 'gossip_store',
+          from,
+          msgType: type,
+          status: 'stored',
+          details: { received: profiles.length, stored, broadcastTargets, traceId },
+        });
+        return;
+      }
+      for (const [runtimeId, client] of store.clients.entries()) {
+        if (!client?.ws) continue;
+        if (fromKey && runtimeId === fromKey) continue;
+        send(client.ws, safeStringify({
+          type: 'gossip_update',
+          id: `gossip_update_${Date.now()}`,
+          from: store.serverId,
+          to: runtimeId,
+          timestamp: Date.now(),
+          payload: { profiles: broadcastProfiles },
+          inReplyTo: id,
+        }));
+        broadcastTargets += 1;
+      }
     }
     pushDebugEvent(store, {
       event: 'gossip_store',
       from,
       msgType: type,
       status: 'stored',
-      details: { received: profiles.length, stored, traceId },
+      details: { received: profiles.length, stored, broadcastTargets, traceId },
     });
 
     return;
@@ -156,13 +199,30 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
 
   // ----- gossip_request -----
   if (type === 'gossip_request') {
-    const profiles = getAllGossipProfiles(store);
+    const request = payload && typeof payload === 'object' ? payload as {
+      scope?: 'all' | 'bundle';
+      entityId?: string;
+      entityIds?: string[];
+      limit?: number;
+    } : {};
+    const requestedEntityIds = Array.isArray(request.entityIds)
+      ? request.entityIds
+      : (request.entityId ? [request.entityId] : []);
+    const profiles =
+      request.scope === 'bundle'
+        ? getGossipProfileBundle(store, requestedEntityIds)
+        : getDefaultGossipProfiles(store, request.limit ?? DEFAULT_GOSSIP_SYNC_LIMIT);
     pushDebugEvent(store, {
       event: 'gossip_request',
       from,
       to,
       msgType: type,
-      details: { returnedProfiles: profiles.length, traceId },
+      details: {
+        returnedProfiles: profiles.length,
+        scope: request.scope ?? 'all',
+        requestedEntityIds,
+        traceId,
+      },
     });
     send(ws, safeStringify({
       type: 'gossip_response',

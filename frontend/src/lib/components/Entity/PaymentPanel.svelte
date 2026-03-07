@@ -1,5 +1,14 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
+  import type {
+    AccountMachine,
+    DerivedDelta,
+    RoutedEntityInput as EntityInputPayload,
+    EntityReplica,
+    Env,
+    PaymentRoute,
+    Profile as GossipProfile,
+  } from '@xln/runtime/xln-api';
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
   import { routePreview } from '../../stores/routePreviewStore';
@@ -19,6 +28,7 @@
   let amount = '';
   let tokenId = 1;
   let description = '';
+  let descriptionLocked = false;
   let useHtlc = true; // Hashlock by default (atomic), optional direct (unsafe)
   let findingRoutes = false;
   let sendingPayment = false;
@@ -58,21 +68,18 @@
   const GOSSIP_REFRESH_ATTEMPTS = 4;
   const GOSSIP_REFRESH_WAIT_MS = 250;
 
-  type GossipAccount = {
-    counterpartyId: string;
-    tokenCapacities?: unknown;
+  type TokenCapacityValue = {
+    inCapacity: bigint | string;
+    outCapacity: bigint | string;
   };
 
-  type GossipProfileView = {
-    entityId: string;
-    metadata?: {
-      name?: string;
-      cryptoPublicKey?: string;
-      encryptionPublicKey?: string;
-      [key: string]: unknown;
-    };
-    accounts?: GossipAccount[];
-    [key: string]: unknown;
+  type TokenCapacities =
+    | Map<number | string, TokenCapacityValue>
+    | Record<string, TokenCapacityValue>;
+
+  type GossipAccount = NonNullable<GossipProfile['accounts']>[number];
+  type DebugEventP2P = {
+    sendDebugEvent?: (data: unknown) => unknown;
   };
 
   $: currentReplicas = $replicas;
@@ -80,7 +87,66 @@
   $: activeXlnFunctions = $xlnFunctions;
   $: activeIsLive = $globalIsLive;
 
+  const getGossipProfiles = (): GossipProfile[] => currentEnv?.gossip?.getProfiles?.() || [];
+
   const normalizeEntityId = (id: string | null | undefined): string => String(id || '').trim().toLowerCase();
+
+  const sanitizePrefillText = (raw: string | null | undefined, maxLen = 180): string => {
+    const value = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (!value) return '';
+    return value.slice(0, maxLen);
+  };
+
+  const parseBooleanParam = (raw: string | null | undefined): boolean => {
+    const value = String(raw || '').trim().toLowerCase();
+    return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+  };
+
+  function getURLParamValue(keys: string[]): string | null {
+    if (typeof window === 'undefined') return null;
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashRaw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    const hashParams = hashRaw.includes('=') ? new URLSearchParams(hashRaw) : null;
+    for (const key of keys) {
+      const hashValue = hashParams ? hashParams.get(key) : null;
+      if (hashValue !== null && hashValue !== '') return hashValue;
+      const queryValue = searchParams.get(key);
+      if (queryValue !== null && queryValue !== '') return queryValue;
+    }
+    return null;
+  }
+
+  function applyPaymentPrefillFromURL() {
+    const targetParam = sanitizePrefillText(getURLParamValue(['target', 'targetEntityId', 'recipient', 'entity']), 120);
+    const amountParam = sanitizePrefillText(getURLParamValue(['amount']), 64);
+    const tokenParam = sanitizePrefillText(getURLParamValue(['tokenId', 'token']), 12);
+    const noteParam = sanitizePrefillText(getURLParamValue(['note', 'description', 'memo']), 200);
+    const recipientUserId = sanitizePrefillText(getURLParamValue(['uid', 'recipient_user_id', 'userId', 'recipientId']), 96);
+    const modeParam = sanitizePrefillText(getURLParamValue(['mode']), 16).toLowerCase();
+    const noteLockedParam = getURLParamValue(['note_locked', 'description_locked', 'memo_locked', 'lock_note']);
+
+    if (targetParam) targetEntityId = targetParam;
+    if (amountParam) amount = amountParam;
+    if (tokenParam) {
+      const parsedTokenId = Number(tokenParam);
+      if (Number.isFinite(parsedTokenId) && parsedTokenId > 0) {
+        tokenId = Math.floor(parsedTokenId);
+      }
+    }
+
+    const noteParts: string[] = [];
+    if (noteParam) noteParts.push(noteParam);
+    if (recipientUserId) noteParts.push(`uid:${recipientUserId}`);
+    if (noteParts.length > 0) {
+      description = noteParts.join(' | ');
+    }
+
+    if (modeParam === 'direct' || modeParam === 'unsafe') useHtlc = false;
+    if (modeParam === 'hashlock' || modeParam === 'htlc') useHtlc = true;
+
+    const explicitLock = parseBooleanParam(noteLockedParam);
+    descriptionLocked = explicitLock || Boolean(recipientUserId);
+  }
 
   // All entities for dropdown (local + gossip network)
   $: allEntities = (() => {
@@ -139,9 +205,9 @@
   }
 
   $: selectedTargetProfile = (() => {
-    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
+    const profiles = getGossipProfiles();
     const targetNorm = normalizeEntityId(targetEntityId);
-    return profiles.find((profile: GossipProfileView) => normalizeEntityId(profile?.entityId) === targetNorm) as GossipProfileView | undefined;
+    return profiles.find((profile) => normalizeEntityId(profile.entityId) === targetNorm);
   })();
 
   $: selectedTargetProfileJson = selectedTargetProfile
@@ -179,17 +245,15 @@
     if (contact?.name) return contact.name;
     const serverName = serverEntityNames.get(norm);
     if (serverName) return serverName;
-    const profile = (currentEnv?.gossip?.getProfiles?.() || [])
-      .find((p: GossipProfileView) => normalizeEntityId(p?.entityId) === norm);
+    const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === norm);
     const metaName = profile?.metadata?.name;
     return typeof metaName === 'string' && metaName.trim() ? metaName.trim() : id;
   }
 
-  function getGossipProfileByEntityId(id: string): GossipProfileView | undefined {
+  function getGossipProfileByEntityId(id: string): GossipProfile | undefined {
     const norm = normalizeEntityId(id);
     if (!norm) return undefined;
-    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
-    return profiles.find((p: GossipProfileView) => normalizeEntityId(p?.entityId) === norm) as GossipProfileView | undefined;
+    return getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === norm);
   }
 
   function isRouteableIntermediary(entity: string): boolean {
@@ -198,9 +262,8 @@
     if (!extractEntityCryptoKey(entity)) return false;
     const profile = getGossipProfileByEntityId(entity);
     if (!profile) return true; // allow local+gossip mixed discovery; key coverage is enforced above
-    const metadata = (profile.metadata || {}) as Record<string, unknown>;
-    const capabilities = Array.isArray((profile as any).capabilities) ? ((profile as any).capabilities as string[]) : [];
-    return metadata['isHub'] === true || capabilities.includes('hub') || capabilities.includes('routing');
+    const metadata = profile.metadata || {};
+    return metadata.isHub === true || profile.capabilities.includes('hub') || profile.capabilities.includes('routing');
   }
 
   function formatToken(value: bigint): string {
@@ -236,7 +299,10 @@
   };
 
   // Build bidirectional adjacency from all available sources
-  function buildNetworkAdjacency(env: any, replicas: Map<string, any>): AdjacencyBuildResult {
+  function buildNetworkAdjacency(
+    env: Env | null | undefined,
+    replicaMap: Map<string, EntityReplica>,
+  ): AdjacencyBuildResult {
     const adjacency = new Map<string, Set<string>>();
     const canonicalIds = new Map<string, string>();
 
@@ -261,7 +327,7 @@
     };
 
     // Source 1: Local replicas (our own entities' accounts)
-    for (const [replicaKey, replica] of replicas.entries()) {
+    for (const [replicaKey, replica] of replicaMap.entries()) {
       const [entId] = replicaKey.split(':');
       if (!entId || !replica.state?.accounts) continue;
       for (const counterpartyId of replica.state.accounts.keys()) {
@@ -272,8 +338,8 @@
     // Source 2: Gossip profiles (network-wide account graph)
     const profiles = env?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
-      rememberCanonical(profile?.entityId);
-      if (!profile.entityId || !profile.accounts) continue;
+      rememberCanonical(profile.entityId);
+      if (!profile.accounts) continue;
       for (const account of profile.accounts) {
         addEdge(profile.entityId, account.counterpartyId);
       }
@@ -316,12 +382,8 @@
       return v < 0n ? 0n : v;
     }
     if (typeof raw === 'string' && raw.trim() !== '') {
-      const trimmed = raw.trim();
-      const parsed = trimmed.startsWith('BigInt(') && trimmed.endsWith(')')
-        ? trimmed.slice(7, -1)
-        : trimmed;
       try {
-        const v = BigInt(parsed);
+        const v = BigInt(raw.trim());
         return v < 0n ? 0n : v;
       } catch {
         return 0n;
@@ -330,13 +392,11 @@
     return 0n;
   }
 
-  function getTokenCapacitySnapshot(tokenCapacities: unknown, token: number): { outCapacity: bigint; inCapacity: bigint } | null {
+  function getTokenCapacitySnapshot(tokenCapacities: TokenCapacities | undefined, token: number): { outCapacity: bigint; inCapacity: bigint } | null {
     if (!tokenCapacities) return null;
-    const mapLike = tokenCapacities as { get?: (key: number | string) => any; [key: string]: any };
-    const tokenCap = mapLike.get?.(token)
-      ?? mapLike.get?.(String(token))
-      ?? mapLike[String(token)]
-      ?? mapLike[token];
+    const tokenCap = tokenCapacities instanceof Map
+      ? tokenCapacities.get(token) ?? tokenCapacities.get(String(token))
+      : tokenCapacities[String(token)];
     if (!tokenCap) return null;
     const outCapacity = sanitizeBigInt(tokenCap?.outCapacity ?? 0n);
     const inCapacity = sanitizeBigInt(tokenCap?.inCapacity ?? 0n);
@@ -347,10 +407,9 @@
   function getGossipAccountCapacity(owner: string, counterparty: string, token: number): { outCapacity: bigint; inCapacity: bigint } | null {
     const ownerNorm = normalizeEntityId(owner);
     const cpNorm = normalizeEntityId(counterparty);
-    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
-    const profile = profiles.find((p: any) => normalizeEntityId(p?.entityId) === ownerNorm);
+    const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === ownerNorm);
     if (!profile || !Array.isArray(profile.accounts)) return null;
-    const account = profile.accounts.find((a: any) => normalizeEntityId(String(a?.counterpartyId || '')) === cpNorm);
+    const account = profile.accounts.find((a) => normalizeEntityId(a.counterpartyId) === cpNorm);
     return getTokenCapacitySnapshot(account?.tokenCapacities, token);
   }
 
@@ -387,7 +446,7 @@
     for (const [key, replica] of currentReplicas.entries()) {
       const [replicaEntityId] = key.split(':');
       if (normalizeEntityId(replicaEntityId) !== fromNorm) continue;
-      const accounts: Map<string, any> | undefined = replica?.state?.accounts;
+      const accounts = replica?.state?.accounts;
       if (!accounts || typeof accounts.entries !== 'function') continue;
       for (const [counterpartyId, account] of accounts.entries()) {
         if (normalizeEntityId(counterpartyId) !== toNorm) continue;
@@ -399,9 +458,9 @@
         const isLeft = leftEntity
           ? normalizeEntityId(leftEntity) === fromNorm
           : (rightEntity ? normalizeEntityId(rightEntity) !== fromNorm : fromNorm < toNorm);
-        const derived = activeXlnFunctions.deriveDelta(delta, isLeft);
-        const outCapacity = sanitizeBigInt((derived as any)?.outCapacity ?? 0n);
-        const inCapacity = sanitizeBigInt((derived as any)?.inCapacity ?? 0n);
+        const derived = activeXlnFunctions.deriveDelta(delta, isLeft) as DerivedDelta;
+        const outCapacity = sanitizeBigInt(derived.outCapacity);
+        const inCapacity = sanitizeBigInt(derived.inCapacity);
         if (outCapacity <= 0n && inCapacity <= 0n) return null;
         return { outCapacity, inCapacity };
       }
@@ -417,15 +476,14 @@
   ): { fee: bigint; feePPM: number; baseFee: bigint; outCap: bigint; inCap: bigint } | null {
     const fromNorm = normalizeEntityId(from);
     const toNorm = normalizeEntityId(to);
-    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
-    const profile = profiles.find((p: any) => normalizeEntityId(p?.entityId) === fromNorm);
+    const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === fromNorm);
     const basePpm = sanitizeFeePPM(
       profile?.metadata?.routingFeePPM ?? DEFAULT_UNKNOWN_HOP_FEE_PPM,
       DEFAULT_UNKNOWN_HOP_FEE_PPM
     );
     const baseFee = sanitizeBigInt(profile?.metadata?.baseFee ?? 0n);
     const account = Array.isArray(profile?.accounts)
-      ? profile.accounts.find((a: any) => normalizeEntityId(String(a?.counterpartyId || '')) === toNorm)
+      ? profile.accounts.find((a) => normalizeEntityId(a.counterpartyId) === toNorm)
       : null;
     const tokenCapacity =
       getTokenCapacitySnapshot(account?.tokenCapacities, token)
@@ -490,14 +548,11 @@
         }
       }
     }
-    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
-    const profile = profiles.find((p: GossipProfileView) => normalizeEntityId(p?.entityId) === entityNorm) as GossipProfileView | undefined;
+    const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === entityNorm);
     if (!profile) return null;
     const gossipCandidates = [
       profile?.metadata?.cryptoPublicKey,
       profile?.metadata?.encryptionPublicKey,
-      (profile as any)?.cryptoPublicKey,
-      (profile as any)?.encryptionPublicKey,
     ];
     for (const candidate of gossipCandidates) {
       const normalized = normalizeEnvelopeKey(candidate);
@@ -517,7 +572,7 @@
       details,
     };
     try {
-      const p2p = (currentEnv as any)?.p2p as { sendDebugEvent?: (data: unknown) => unknown } | undefined;
+      const p2p = currentEnv?.runtimeState?.p2p as DebugEventP2P | null | undefined;
       if (typeof p2p?.sendDebugEvent === 'function') p2p.sendDebugEvent(payload);
     } catch {
       // Best effort only; never block UI on debug forwarding.
@@ -528,9 +583,9 @@
 
   function getRecipientProfileIssue(): { code: string; message: string; details?: Record<string, unknown> } | null {
     if (!targetEntityId || normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) return null;
-    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
+    const profiles = getGossipProfiles();
     const targetNorm = normalizeEntityId(targetEntityId);
-    const targetProfile = profiles.find((p: GossipProfileView) => normalizeEntityId(p?.entityId) === targetNorm) as GossipProfileView | undefined;
+    const targetProfile = profiles.find((p) => normalizeEntityId(p.entityId) === targetNorm);
     if (!targetProfile) {
       const msg = `Recipient ${targetEntityId} has no downloaded gossip profile`;
       return { code: 'PAYMENT_PREFLIGHT_PROFILE_MISSING', message: msg };
@@ -556,6 +611,17 @@
     const env = currentEnv;
     if (!env) return;
     const xln = await getXLN();
+    if (targetEntities.length > 0 && typeof xln.ensureGossipProfiles === 'function') {
+      emitUiDebugEvent('PAYMENT_PREFLIGHT_GOSSIP_FETCH', `Fetching gossip profiles (${reason})`, {
+        targetEntities,
+      });
+      try {
+        const resolved = await xln.ensureGossipProfiles(env, targetEntities);
+        if (resolved) return;
+      } catch {
+        // fall back to coarse refresh loop below
+      }
+    }
     for (let attempt = 1; attempt <= GOSSIP_REFRESH_ATTEMPTS; attempt += 1) {
       emitUiDebugEvent('PAYMENT_PREFLIGHT_GOSSIP_REFRESH', `Refreshing gossip (${reason})`, {
         attempt,
@@ -778,9 +844,10 @@
 
       const runtimeGraph = env?.gossip?.getNetworkGraph?.();
       try {
-        const runtimeRoutes = await runtimeGraph?.findPaths?.(entityId, targetEntityId, amountInSmallestUnit, tokenId) || [];
+        const runtimeRoutes: PaymentRoute[] =
+          await runtimeGraph?.findPaths?.(entityId, targetEntityId, amountInSmallestUnit, tokenId) || [];
         for (const route of runtimeRoutes) {
-          pushPath((route as any)?.path);
+          pushPath(route.path);
         }
       } catch {}
 
@@ -904,7 +971,8 @@
       const signerId = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'payment-panel')
         || requireSignerIdForEntity(env, entityId, 'payment-panel');
 
-      let paymentInput: any;
+      const descriptionValue = description.trim();
+      let paymentInput: EntityInputPayload;
 
       if (useHtlc) {
         // Hashlock: atomic multi-hop with hashlock
@@ -920,8 +988,8 @@
               tokenId,
               amount: route.recipientAmount,
               route: route.path,
-              description: description || undefined,
               secret, hashlock,
+              ...(descriptionValue ? { description: descriptionValue } : {}),
             },
           }],
         };
@@ -936,7 +1004,7 @@
               targetEntityId: routeTargetEntityId, tokenId,
               amount: route.recipientAmount,
               route: route.path,
-              description: description || undefined,
+              ...(descriptionValue ? { description: descriptionValue } : {}),
             },
           }],
         };
@@ -987,6 +1055,7 @@
   }
 
   onMount(() => {
+    applyPaymentPrefillFromURL();
     void refreshServerEntityNames();
   });
 </script>
@@ -1056,13 +1125,18 @@
   </div>
 
   <div class="field">
-    <label>Description (optional)</label>
+    <label>Description {descriptionLocked ? '(locked)' : '(optional)'}</label>
     <input
       type="text"
       bind:value={description}
       placeholder="Payment for..."
+      readonly={descriptionLocked}
+      aria-readonly={descriptionLocked}
       disabled={findingRoutes || sendingPayment}
     />
+    {#if descriptionLocked}
+      <small class="description-lock-hint">Recipient user id is locked into this payment note.</small>
+    {/if}
   </div>
 
   <div class="mode-toggle">
@@ -1671,5 +1745,18 @@
     border-radius: 8px;
     padding: 10px 12px;
     font-size: 12px;
+  }
+
+  .description-lock-hint {
+    margin-top: 4px;
+    color: #a3a3a3;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+  }
+
+  input[readonly] {
+    border-color: #3f3f46;
+    background: #161514;
+    color: #d4d4d8;
   }
 </style>

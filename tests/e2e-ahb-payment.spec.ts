@@ -1,20 +1,21 @@
 /**
- * E2E: Alice → Hub → Bob HTLC Payment Flow (and reverse)
+ * E2E: Alice -> Hub -> Bob HTLC payment flow with reverse transfer, overspend rejection,
+ * self-cycle routing, and reload persistence.
  *
  * Uses deterministic BIP39 mnemonics by default (override via env) so IDs are reproducible.
- * Exercises: runtime creation, hub discovery, account opening, faucet, htlcPayment.
- *
- * Prereqs: localhost:8080 dev server, xln.finance for relay/faucet
+ * The scenario proves that three distinct runtimes can open bilateral accounts through a hub,
+ * move HTLC payments in both directions, keep sender and recipient balances coherent, and
+ * restore the same state after reload via snapshot + WAL replay.
  */
 
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet, ethers } from 'ethers';
+import { resetProdServer } from './utils/e2e-baseline';
 
 const INIT_TIMEOUT = 30_000;
 const SETTLE_MS = 10_000;
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
-const RESET_BASE_URL = process.env.E2E_RESET_BASE_URL ?? APP_BASE_URL;
 const FAST_E2E = process.env.E2E_FAST !== '0';
 const LONG_E2E = process.env.E2E_LONG === '1';
 
@@ -783,6 +784,28 @@ async function waitForOutCapIncrease(
   );
 }
 
+async function waitForSenderSpend(
+  page: Page,
+  entityId: string,
+  cpId: string,
+  baseline: bigint,
+  minSpend: bigint,
+  timeoutMs = 25_000
+): Promise<{ latest: bigint; spent: bigint }> {
+  const start = Date.now();
+  let latest = baseline;
+  let spent = 0n;
+  while (Date.now() - start < timeoutMs) {
+    latest = await outCap(page, entityId, cpId);
+    spent = baseline - latest;
+    if (spent >= minSpend) return { latest, spent };
+    await page.waitForTimeout(250);
+  }
+  throw new Error(
+    `Timed out waiting sender spend for ${entityId.slice(0, 10)}↔${cpId.slice(0, 10)}: baseline=${baseline} latest=${latest} spent=${spent} minSpend=${minSpend}`
+  );
+}
+
 async function getAccountSyncState(
   page: Page,
   entityId: string,
@@ -1000,7 +1023,10 @@ function generateHtlc(): { secret: string; hashlock: string } {
   return { secret, hashlock };
 }
 
-/** Send htlcPayment (replaces directPayment) */
+/**
+ * Enqueue an HTLC payment.
+ * This only submits runtime input; callers must wait on explicit state or log barriers.
+ */
 async function pay(page: Page, from: string, signerId: string, to: string, route: string[], amount: bigint) {
   const { secret, hashlock } = generateHtlc();
   console.log(`[E2E] HTLC: secret=${secret.slice(0, 16)}... hashlock=${hashlock.slice(0, 16)}...`);
@@ -1092,71 +1118,24 @@ async function getEntityPersistenceSnapshot(page: Page, entityId: string, counte
   }, { entityId, counterpartyId });
 }
 
-async function waitForServerHealthy(page: Page, timeoutMs = 60_000) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const res = await page.request.get(`${RESET_BASE_URL}/api/health`);
-      if (res.ok()) {
-        const body = await res.json().catch(() => ({}));
-        if (typeof body?.timestamp === 'number') return;
-      }
-    } catch {
-      // retry
-    }
-    await page.waitForTimeout(1000);
-  }
-  throw new Error('Server did not become healthy in time after reset');
-}
-
-async function resetProdServer(page: Page) {
-  let lastError = '';
-  let resetDone = false;
-  for (let attempt = 1; attempt <= 10; attempt++) {
-    try {
-      const coldResponse = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1&sync=1`);
-      const coldData = await coldResponse.json().catch(() => ({}));
-      if (coldResponse.ok()) {
-        console.log(`[E2E] Cold reset requested: ${JSON.stringify(coldData)}`);
-        resetDone = true;
-        break;
-      }
-      const softResponse = await page.request.post(`${RESET_BASE_URL}/api/debug/reset`, {
-        data: { preserveHubs: false },
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const softData = await softResponse.json().catch(() => ({}));
-      if (softResponse.ok()) {
-        console.log(`[E2E] Soft reset fallback used: ${JSON.stringify(softData)}`);
-        resetDone = true;
-        break;
-      }
-      lastError = `cold=${JSON.stringify(coldData)} soft=${JSON.stringify(softData)}`;
-    } catch (error: any) {
-      lastError = error?.message || String(error);
-    }
-    await page.waitForTimeout(1000);
-  }
-  expect(resetDone, `reset failed after retries: ${lastError}`).toBe(true);
-  await waitForServerHealthy(page);
-}
-
 // ─── Test ─────────────────────────────────────────────────────────
 
 test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
   test.setTimeout(LONG_E2E ? 300_000 : 60_000);
 
   test.beforeEach(async ({ page }) => {
-    await resetProdServer(page);
+    await resetProdServer(page, {
+      timeoutMs: LONG_E2E ? 240_000 : 120_000,
+      requireHubMesh: true,
+      requireMarketMaker: true,
+      minHubCount: 3,
+    });
     await gotoApp(page);
   });
 
-  test.afterEach(async ({ page }) => {
-    if (process.env.E2E_SKIP_AFTER_RESET === '1') return;
-    await resetProdServer(page);
-  });
-
   test('bidirectional payments through hub', async ({ page }) => {
+    // Scenario: bootstrap Alice and Bob on separate runtimes, route HTLCs through a hub,
+    // verify sender debit plus recipient credit in both directions, then confirm persistence.
     page.on('console', msg => {
       const t = msg.text();
       if (t.includes('[E2E]') || t.includes('[VaultStore]') || t.includes('P2P') || msg.type() === 'error'
@@ -1249,6 +1228,16 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await waitForAccountIdle(page, alice!.entityId, hubId);
     const paySince = Date.now() - 1000;
     const hubRuntimeId = await getEntityRuntimeId(page, hubId);
+    expect(hubRuntimeId, `hub runtimeId missing for hub=${hubId.slice(0, 12)}`).toBeTruthy();
+    const runtimeIdSet = new Set([
+      String(aliceRuntimeId || '').toLowerCase(),
+      String(hubRuntimeId || '').toLowerCase(),
+      String(bobRuntimeId || '').toLowerCase(),
+    ]);
+    expect(
+      runtimeIdSet.has('') || runtimeIdSet.size !== 3,
+      `AHB must use 3 distinct runtimes (alice/hub/bob). got alice=${aliceRuntimeId} hub=${hubRuntimeId} bob=${bobRuntimeId}`,
+    ).toBe(false);
     await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
       [alice!.entityId, hubId, bob!.entityId], payAmount);
     await waitForRelayHtlcPipeline(page, {
@@ -1261,11 +1250,16 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       timeoutMs: 12_000,
     });
 
-    // Alice: sender pays full amount (capacity decreases by payAmount)
-    const a2 = await outCap(page, alice!.entityId, hubId);
-    const alicePaid = a1 - a2;
-    console.log(`[E2E] Alice paid: ${alicePaid} (OUT ${a1} → ${a2})`);
     const aliceMinSpend = expectedSenderSpend > payAmount ? expectedSenderSpend : payAmount;
+    // Alice: sender pays the quoted lock amount once the debit is committed locally.
+    const { latest: a2, spent: alicePaid } = await waitForSenderSpend(
+      page,
+      alice!.entityId,
+      hubId,
+      a1,
+      aliceMinSpend,
+    );
+    console.log(`[E2E] Alice paid: ${alicePaid} (OUT ${a1} → ${a2})`);
     expect(alicePaid, 'Alice should pay at least quoted sender amount').toBeGreaterThanOrEqual(aliceMinSpend);
     await screenshot(page, '06a-alice-after-send');
 
@@ -1314,16 +1308,14 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await dumpState(page, 'bob-after-reverse-pay');
 
     const bobMinSpend = reverseSenderSpend > reverseAmount ? reverseSenderSpend : reverseAmount;
-    // Bob: sender pays full amount (eventual, wait until debit is committed).
-    const reverseStart = Date.now();
-    let b3 = b2;
-    let bobPaid = 0n;
-    while (Date.now() - reverseStart < 20_000) {
-      b3 = await outCap(page, bob!.entityId, hubId);
-      bobPaid = b2 - b3;
-      if (bobPaid >= bobMinSpend) break;
-      await page.waitForTimeout(300);
-    }
+    // Bob: sender pays full amount once the debit is committed locally.
+    const { latest: b3, spent: bobPaid } = await waitForSenderSpend(
+      page,
+      bob!.entityId,
+      hubId,
+      b2,
+      bobMinSpend,
+    );
     console.log(`[E2E] Bob OUT after reverse: ${b3}`);
     console.log(`[E2E] Bob paid: ${bobPaid} (OUT ${b2} → ${b3})`);
     expect(b3, 'Bob account must still exist after pay').toBeGreaterThan(0n);
@@ -1350,12 +1342,27 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const b4 = await outCap(page, bob!.entityId, hubId);
 
     await switchTo(page, 'alice');
+    const pay2Since = Date.now() - 1000;
     await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
       [alice!.entityId, hubId, bob!.entityId], pay2Amount);
-
-    const a6 = await outCap(page, alice!.entityId, hubId);
     const pay2MinSpend = pay2SenderSpend > pay2Amount ? pay2SenderSpend : pay2Amount;
-    expect(a5 - a6, '2nd payment: Alice pays at least quoted sender amount').toBeGreaterThanOrEqual(pay2MinSpend);
+    await waitForRelayHtlcPipeline(page, {
+      since: pay2Since,
+      senderRuntimeId: aliceRuntimeId,
+      hubRuntimeId,
+      recipientRuntimeId: bobRuntimeId,
+      hubEntityId: hubId,
+      recipientEntityId: bob!.entityId,
+      timeoutMs: 12_000,
+    });
+    const { latest: a6, spent: pay2Spent } = await waitForSenderSpend(
+      page,
+      alice!.entityId,
+      hubId,
+      a5,
+      pay2MinSpend,
+    );
+    expect(pay2Spent, '2nd payment: Alice pays at least quoted sender amount').toBeGreaterThanOrEqual(pay2MinSpend);
 
     await switchTo(page, 'bob');
     const b5 = await waitForOutCapDelta(page, bob!.entityId, hubId, b4, pay2Amount);
@@ -1463,8 +1470,22 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     expect(debugCheck.ok, `Debug endpoint must be reachable: ${JSON.stringify(debugCheck)}`).toBe(true);
     expect(debugCheck.count, 'Debug timeline should contain events').toBeGreaterThan(0);
 
-    // Persistence coverage is handled in tests/e2e-runtime-persistence.spec.ts.
-    // Keep this suite focused on payment correctness and routing behavior.
+    // Reload hard-assert: payment balances must survive runtime restore.
+    const aliceBeforeReload = await outCap(page, alice!.entityId, hubId);
+    await switchTo(page, 'bob');
+    const bobBeforeReload = await outCap(page, bob!.entityId, hubId);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => {
+      const env = (window as any).isolatedEnv;
+      return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
+    }, { timeout: 60_000 });
+
+    await switchTo(page, 'alice');
+    const aliceAfterReload = await outCap(page, alice!.entityId, hubId);
+    expect(aliceAfterReload, 'Alice OUT must survive reload').toBe(aliceBeforeReload);
+    await switchTo(page, 'bob');
+    const bobAfterReload = await outCap(page, bob!.entityId, hubId);
+    expect(bobAfterReload, 'Bob OUT must survive reload').toBe(bobBeforeReload);
 
     // ── Summary ───────────────────────────────────────────────────
     console.log('\n[E2E] ══════ SUMMARY ══════');
@@ -1475,7 +1496,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] 2nd fwd:  Alice sent 3, Bob got ${ethers.formatUnits(pay2Amount, 18)}`);
     console.log(`[E2E] Overspend: correctly rejected`);
     console.log(`[E2E] Self route: ${selfRoute.map(r => r.slice(0, 6)).join(' -> ')}`);
-    console.log('[E2E] Persistence: covered by e2e-runtime-persistence.spec.ts');
+    console.log('[E2E] Persistence: verified inline with page reload');
     console.log('[E2E] ✅ All payment cases passed');
   });
 });

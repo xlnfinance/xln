@@ -9,7 +9,9 @@
 -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { xlnFunctions, xlnEnvironment } from '../../stores/xlnStore';
+  import { scheduleGossipProfileFetch } from '../../utils/entityNaming';
 
   export let value: string = '';
   export let placeholder: string = 'Select or enter entity...';
@@ -23,12 +25,6 @@
   $: activeFunctions = $xlnFunctions;
   $: activeEnv = $xlnEnvironment;
 
-  // Gossip profile lookup
-  type GossipProfile = {
-    entityId?: string;
-    metadata?: { name?: string };
-  };
-
   function normalizeEntityId(id: string | null | undefined): string {
     return String(id || '').trim().toLowerCase();
   }
@@ -36,7 +32,7 @@
   function getGossipProfiles(): GossipProfile[] {
     const env = activeEnv;
     if (!env?.gossip?.getProfiles) return [];
-    return env.gossip.getProfiles() as GossipProfile[];
+    return env.gossip.getProfiles();
   }
 
   function getKnownEntityName(id: string): string {
@@ -45,6 +41,9 @@
     const contact = contacts.find((c) => normalizeEntityId(c.entityId) === norm);
     if (contact?.name?.trim()) return contact.name.trim();
     const profile = getGossipProfiles().find((p) => normalizeEntityId(p?.entityId) === norm);
+    if (!profile) {
+      scheduleGossipProfileFetch([norm]);
+    }
     return String(profile?.metadata?.name || '').trim();
   }
 
@@ -76,6 +75,7 @@
 
     // Full 32-byte hex
     if (/^0x[0-9a-fA-F]{64}$/.test(trimmed)) {
+      scheduleGossipProfileFetch([trimmed.toLowerCase()]);
       return {
         entityId: trimmed.toLowerCase(),
         shortId: getShortIdFromHex(trimmed),
@@ -191,6 +191,14 @@
       isContact: true,
       avatarUrl: activeFunctions?.generateEntityAvatar?.(c.entityId) || ''
     }));
+
+  $: missingEntityProfiles = entities.filter((id) => {
+    const norm = normalizeEntityId(id);
+    return norm.length > 0 && !getGossipProfiles().some((profile) => normalizeEntityId(profile.entityId) === norm);
+  });
+  $: if (missingEntityProfiles.length > 0) {
+    scheduleGossipProfileFetch(missingEntityProfiles);
+  }
 
   // All options
   $: allOptions = [...filteredEntities, ...contactOnlyOptions];
