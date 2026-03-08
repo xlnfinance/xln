@@ -9,8 +9,10 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { ethers } from 'ethers';
 import { resetProdServer } from './utils/e2e-baseline';
+import { getRenderedPrimaryOutbound, waitForRenderedPrimaryOutboundDelta } from './utils/e2e-account-ui';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
@@ -54,16 +56,6 @@ type FrameLogEntryView = {
   message?: string;
   entityId?: string;
   data?: Record<string, unknown>;
-};
-
-type PersistedHistoryCursor = {
-  nextHeight: number;
-};
-
-type PersistedFrameEvent = {
-  snapshotHeight: number;
-  message: string;
-  entityId?: string;
 };
 
 type XlnView = {
@@ -387,129 +379,6 @@ async function waitForAccountIdle(
   );
 }
 
-async function getRuntimeHistoryBaseline(page: Page): Promise<PersistedHistoryCursor> {
-  const meta = await runtimeDbMeta(page);
-  return { nextHeight: meta.latestHeight + 1 };
-}
-
-async function readPersistedFrameEvents(
-  page: Page,
-  cursor: PersistedHistoryCursor,
-): Promise<{
-  cursor: PersistedHistoryCursor;
-  events: PersistedFrameEvent[];
-  runtimeHeight: number;
-}> {
-  return page.evaluate(async ({ nextHeight }) => {
-    const view = window as TestWindow;
-    const env = view.isolatedEnv;
-    const getRuntimeDb = view.XLN?.getRuntimeDb;
-    const events: PersistedFrameEvent[] = [];
-    if (!env || !getRuntimeDb) {
-      return {
-        cursor: { nextHeight },
-        events,
-        runtimeHeight: Number(view.isolatedEnv?.height || 0),
-      };
-    }
-
-    const db = getRuntimeDb(env);
-    const namespace = String(env.dbNamespace || env.runtimeId || '').toLowerCase();
-    const keyOf = (name: string) => `${namespace}:${name}`;
-    const read = async (name: string): Promise<string | null> => {
-      try {
-        const bufferKey = typeof view.Buffer?.from === 'function' ? view.Buffer.from(keyOf(name)) : keyOf(name);
-        const raw = await db.get(bufferKey);
-        if (typeof raw === 'string') return raw;
-        if (raw instanceof Uint8Array) return new TextDecoder().decode(raw);
-        if (typeof raw?.toString === 'function') return raw.toString();
-        return null;
-      } catch {
-        return null;
-      }
-    };
-
-    const latestHeightRaw = await read('latest_height');
-    const latestHeight = Number(latestHeightRaw || 0);
-
-    for (let height = Math.max(1, nextHeight); height <= latestHeight; height += 1) {
-      const frameRaw = await read(`frame_input:${height}`);
-      if (!frameRaw) continue;
-      let frame: { logs?: FrameLogEntryView[] } | null = null;
-      try {
-        frame = JSON.parse(frameRaw) as { logs?: FrameLogEntryView[] };
-      } catch {
-        frame = null;
-      }
-      const logs = Array.isArray(frame?.logs) ? frame.logs : [];
-      for (const entry of logs) {
-        const message = typeof entry?.message === 'string' ? entry.message : '';
-        if (!message) continue;
-        const entityId = typeof entry?.entityId === 'string'
-          ? entry.entityId
-          : typeof entry?.data?.entityId === 'string'
-            ? entry.data.entityId
-            : undefined;
-        events.push({ snapshotHeight: height, message, ...(entityId ? { entityId } : {}) });
-      }
-    }
-
-    return {
-      cursor: {
-        nextHeight: latestHeight + 1,
-      },
-      events,
-      runtimeHeight: Number(view.isolatedEnv?.height || 0),
-    };
-  }, cursor);
-}
-
-async function waitForPersistedFrameEvent(
-  page: Page,
-  options: {
-    eventName: string;
-    entityId?: string;
-    cursor: PersistedHistoryCursor;
-    timeoutMs?: number;
-  },
-): Promise<void> {
-  const timeoutMs = options.timeoutMs ?? 20_000;
-  const startedAt = Date.now();
-  const targetEntityId = String(options.entityId || '').toLowerCase();
-  let cursor = options.cursor;
-  const recentEvents: PersistedFrameEvent[] = [];
-  let last = {
-    runtimeHeight: 0,
-    recentEvents: [] as string[],
-    scannedHeights: [] as number[],
-  };
-
-  while (Date.now() - startedAt < timeoutMs) {
-    const result = await readPersistedFrameEvents(page, cursor);
-    cursor = result.cursor;
-
-    for (const event of result.events) {
-      recentEvents.push(event);
-      if (recentEvents.length > 24) recentEvents.shift();
-      if (event.message !== options.eventName) continue;
-      if (targetEntityId && String(event.entityId || '').toLowerCase() !== targetEntityId) continue;
-      return;
-    }
-
-    last = {
-      runtimeHeight: result.runtimeHeight,
-      recentEvents: recentEvents.slice(-12).map((event) => event.message),
-      scannedHeights: recentEvents.slice(-12).map((event) => event.snapshotHeight),
-    };
-    await page.waitForTimeout(250);
-  }
-
-  throw new Error(
-    `Timed out waiting for persisted event ${options.eventName} on ${options.entityId?.slice(0, 12) || 'runtime'} ` +
-    `(height=${last.runtimeHeight} scanned=${last.scannedHeights.join(',') || 'none'} recent=${last.recentEvents.join(',') || 'none'})`,
-  );
-}
-
 async function faucet(page: Page, entityId: string, hubEntityId: string): Promise<void> {
   let result: { ok: boolean; status: number; data: Record<string, unknown> } = {
     ok: false,
@@ -747,7 +616,8 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
       const forwardAmount = toWei(10);
       const expectedForwardSpend = requiredInbound(forwardAmount, hubFee.feePPM, hubFee.baseFee);
       const bobBeforeForward = await outCap(bobPage, bob.entityId, hubId);
-      const bobForwardCursor = await getRuntimeHistoryBaseline(bobPage);
+      const bobForwardRendered = await getRenderedPrimaryOutbound(bobPage);
+      const bobForwardCursor = await getPersistedReceiptCursor(bobPage);
       await pay(alicePage, alice.entityId, alice.signerId, bob.entityId, [alice.entityId, hubId, bob.entityId], forwardAmount);
 
       const forwardSpend = await waitForSenderSpend(
@@ -769,6 +639,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
         bobBeforeForward,
         forwardAmount,
       );
+      await waitForRenderedPrimaryOutboundDelta(bobPage, bobForwardRendered, Number(ethers.formatUnits(forwardAmount, 18)));
       expect(forwardSpend.spent).toBeGreaterThanOrEqual(expectedForwardSpend);
       expect(bobAfterForward - bobBeforeForward).toBe(forwardAmount);
 
@@ -779,7 +650,8 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
       const expectedReverseSpend = requiredInbound(reverseAmount, hubFee.feePPM, hubFee.baseFee);
       const aliceBeforeReverse = await outCap(alicePage, alice.entityId, hubId);
       const bobBeforeReverse = await outCap(bobPage, bob.entityId, hubId);
-      const aliceReverseCursor = await getRuntimeHistoryBaseline(alicePage);
+      const aliceReverseRendered = await getRenderedPrimaryOutbound(alicePage);
+      const aliceReverseCursor = await getPersistedReceiptCursor(alicePage);
       await pay(bobPage, bob.entityId, bob.signerId, alice.entityId, [bob.entityId, hubId, alice.entityId], reverseAmount);
 
       const reverseSpend = await waitForSenderSpend(
@@ -801,6 +673,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
         aliceBeforeReverse,
         reverseAmount,
       );
+      await waitForRenderedPrimaryOutboundDelta(alicePage, aliceReverseRendered, Number(ethers.formatUnits(reverseAmount, 18)));
       const bobAfterReverse = await outCap(bobPage, bob.entityId, hubId);
       expect(reverseSpend.spent).toBeGreaterThanOrEqual(expectedReverseSpend);
       expect(aliceAfterReverse - aliceBeforeReverse).toBe(reverseAmount);

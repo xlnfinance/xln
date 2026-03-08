@@ -11,8 +11,10 @@
 import { test, expect, type Page } from '@playwright/test';
 import { ethers } from 'ethers';
 import { resetProdServer } from './utils/e2e-baseline';
+import { getRenderedPrimaryOutbound, waitForRenderedPrimaryOutboundDelta } from './utils/e2e-account-ui';
 import { connectHub as connectActiveRuntimeToHub } from './utils/e2e-connect';
 import { createDemoUsers, switchToRuntime } from './utils/e2e-demo-users';
+import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
 
 const INIT_TIMEOUT = 30_000;
 const SETTLE_MS = 10_000;
@@ -974,10 +976,12 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     // ── 5. Faucet Alice ──────────────────────────────────────────
     console.log('[E2E] 5. Faucet Alice');
     const a0 = await outCap(page, alice!.entityId, hubId);
+    const a0Rendered = await getRenderedPrimaryOutbound(page);
     console.log(`[E2E] Alice OUT before faucet: ${a0}`);
     await faucet(page, alice!.entityId, hubId);
     await dumpState(page, 'alice-after-faucet');
     const a1 = await waitForOutCapIncrease(page, alice!.entityId, hubId, a0);
+    await waitForRenderedPrimaryOutboundDelta(page, a0Rendered, 100, { timeoutMs: 20_000 });
     console.log(`[E2E] Alice OUT after faucet: ${a0} → ${a1}`);
     expect(a1, 'Faucet should increase Alice OUT').toBeGreaterThan(a0);
     await screenshot(page, '05-alice-after-faucet');
@@ -997,11 +1001,12 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await assertP2PSingletonAndWsHealth(page, 'switch-bob-forward-recv');
     await waitForAccountIdle(page, bob!.entityId, hubId);
     const b0 = await outCap(page, bob!.entityId, hubId);
+    const bobForwardRendered = await getRenderedPrimaryOutbound(page);
+    const bobForwardCursor = await getPersistedReceiptCursor(page);
 
     await switchToRuntime(page, 'alice');
     await assertP2PSingletonAndWsHealth(page, 'switch-alice-reverse-recv');
     await waitForAccountIdle(page, alice!.entityId, hubId);
-    const paySince = Date.now() - 1000;
     const hubRuntimeId = await getEntityRuntimeId(page, hubId);
     expect(hubRuntimeId, `hub runtimeId missing for hub=${hubId.slice(0, 12)}`).toBeTruthy();
     const runtimeIdSet = new Set([
@@ -1015,15 +1020,6 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     ).toBe(false);
     await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
       [alice!.entityId, hubId, bob!.entityId], payAmount);
-    await waitForRelayHtlcPipeline(page, {
-      since: paySince,
-      senderRuntimeId: aliceRuntimeId,
-      hubRuntimeId,
-      recipientRuntimeId: bobRuntimeId,
-      hubEntityId: hubId,
-      recipientEntityId: bob!.entityId,
-      timeoutMs: 12_000,
-    });
 
     const aliceMinSpend = expectedSenderSpend > payAmount ? expectedSenderSpend : payAmount;
     // Alice: sender pays the quoted lock amount once the debit is committed locally.
@@ -1040,7 +1036,14 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // Bob: receiver gets amount minus fee
     await switchToRuntime(page, 'bob');
+    await waitForPersistedFrameEvent(page, {
+      cursor: bobForwardCursor,
+      eventName: 'HtlcReceived',
+      entityId: bob!.entityId,
+      timeoutMs: 12_000,
+    });
     const b1 = await waitForOutCapDelta(page, bob!.entityId, hubId, b0, payAmount);
+    await waitForRenderedPrimaryOutboundDelta(page, bobForwardRendered, Number(ethers.formatUnits(payAmount, 18)));
     const bobReceived = b1 - b0;
     console.log(`[E2E] Bob received: ${bobReceived} (OUT ${b0} → ${b1})`);
     expect(bobReceived, `Bob should receive exact recipient amount (${payAmount})`).toBe(payAmount);
@@ -1069,6 +1072,8 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     await switchToRuntime(page, 'alice');
     const a3 = await outCap(page, alice!.entityId, hubId);
+    const aliceReverseRendered = await getRenderedPrimaryOutbound(page);
+    const aliceReverseCursor = await getPersistedReceiptCursor(page);
 
     await switchToRuntime(page, 'bob');
     // Verify Bob still has account before paying
@@ -1099,7 +1104,14 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // Alice: receiver gets amount minus fee
     await switchToRuntime(page, 'alice');
+    await waitForPersistedFrameEvent(page, {
+      cursor: aliceReverseCursor,
+      eventName: 'HtlcReceived',
+      entityId: alice!.entityId,
+      timeoutMs: 12_000,
+    });
     const a4 = await waitForOutCapDelta(page, alice!.entityId, hubId, a3, reverseAmount);
+    await waitForRenderedPrimaryOutboundDelta(page, aliceReverseRendered, Number(ethers.formatUnits(reverseAmount, 18)));
     const aliceReceived = a4 - a3;
     console.log(`[E2E] Alice received: ${aliceReceived} (OUT ${a3} → ${a4})`);
     expect(aliceReceived, `Alice should receive exact recipient amount (${reverseAmount})`).toBe(reverseAmount);
@@ -1115,21 +1127,13 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const a5 = await outCap(page, alice!.entityId, hubId);
     await switchToRuntime(page, 'bob');
     const b4 = await outCap(page, bob!.entityId, hubId);
+    const bobSecondForwardRendered = await getRenderedPrimaryOutbound(page);
+    const bobSecondForwardCursor = await getPersistedReceiptCursor(page);
 
     await switchToRuntime(page, 'alice');
-    const pay2Since = Date.now() - 1000;
     await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
       [alice!.entityId, hubId, bob!.entityId], pay2Amount);
     const pay2MinSpend = pay2SenderSpend > pay2Amount ? pay2SenderSpend : pay2Amount;
-    await waitForRelayHtlcPipeline(page, {
-      since: pay2Since,
-      senderRuntimeId: aliceRuntimeId,
-      hubRuntimeId,
-      recipientRuntimeId: bobRuntimeId,
-      hubEntityId: hubId,
-      recipientEntityId: bob!.entityId,
-      timeoutMs: 12_000,
-    });
     const { latest: a6, spent: pay2Spent } = await waitForSenderSpend(
       page,
       alice!.entityId,
@@ -1140,7 +1144,14 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     expect(pay2Spent, '2nd payment: Alice pays at least quoted sender amount').toBeGreaterThanOrEqual(pay2MinSpend);
 
     await switchToRuntime(page, 'bob');
+    await waitForPersistedFrameEvent(page, {
+      cursor: bobSecondForwardCursor,
+      eventName: 'HtlcReceived',
+      entityId: bob!.entityId,
+      timeoutMs: 12_000,
+    });
     const b5 = await waitForOutCapDelta(page, bob!.entityId, hubId, b4, pay2Amount);
+    await waitForRenderedPrimaryOutboundDelta(page, bobSecondForwardRendered, Number(ethers.formatUnits(pay2Amount, 18)));
     console.log(`[E2E] 2nd: Bob OUT ${b4} → ${b5}, diff=${b5 - b4}, expected=${pay2Amount}`);
     expect(b5 - b4, '2nd payment: Bob receives exact recipient amount').toBe(pay2Amount);
     await screenshot(page, '08-bob-after-second-payment');
