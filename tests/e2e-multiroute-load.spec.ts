@@ -40,6 +40,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet, ethers } from 'ethers';
+import { resetProdServer as resetSharedProdServer } from './utils/e2e-baseline';
 import {
   createRuntimeIdentity,
   gotoApp,
@@ -368,50 +369,14 @@ async function assertHubMeshReady(page: Page, retries = 5): Promise<string[]> {
   throw new Error(`Hub mesh not ready after ${retries} retries: ${JSON.stringify(pairs)}`);
 }
 
-const RESET_BASE_URL = process.env.E2E_RESET_BASE_URL ?? APP_BASE_URL;
-
-async function waitForServerHealthy(page: Page, timeoutMs = 60_000) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const res = await page.request.get(`${RESET_BASE_URL}/api/health`);
-      if (res.ok()) {
-        const body = await res.json().catch(() => ({}));
-        if (body?.hubMesh?.ok === true) return;
-      }
-    } catch {}
-    await page.waitForTimeout(1500);
-  }
-  throw new Error('Server did not become healthy with hub mesh in time after reset');
-}
-
 async function resetProdServer(page: Page) {
-  let resetDone = false;
-  for (let attempt = 1; attempt <= 10; attempt++) {
-    try {
-      const resp = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1&sync=1`);
-      if (resp.ok()) {
-        const data = await resp.json().catch(() => ({}));
-        console.log(`[E2E] Cold reset requested: ${JSON.stringify(data)}`);
-        resetDone = true;
-        break;
-      }
-    } catch {}
-    try {
-      const resp = await page.request.post(`${RESET_BASE_URL}/api/debug/reset`, {
-        data: { preserveHubs: true },
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (resp.ok()) {
-        console.log('[E2E] Soft reset (preserveHubs) used');
-        resetDone = true;
-        break;
-      }
-    } catch {}
-    await page.waitForTimeout(1000);
-  }
-  expect(resetDone, 'reset failed after retries').toBe(true);
-  await waitForServerHealthy(page);
+  await resetSharedProdServer(page, {
+    apiBaseUrl: API_BASE_URL,
+    requireHubMesh: true,
+    requireMarketMaker: false,
+    minHubCount: 3,
+    softPreserveHubs: true,
+  });
 }
 
 // ─── Test ────────────────────────────────────────────────────────
@@ -433,7 +398,6 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     // ═══════════════════════════════════════════════════════════════
     console.log('[E2E] === PHASE A: SETUP ===');
 
-    await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 2000 });
     await resetProdServer(page);
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 2000 }); // reload after server restart
 
