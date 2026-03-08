@@ -520,6 +520,14 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               console.log(`🎯 HTLC-ROUTING: WE ARE FINAL RECIPIENT!`);
               // Final recipient - reveal immediately
               if (envelope.secret) {
+                env.emit('HtlcReceived', {
+                  entityId: state.entityId,
+                  fromEntity: input.fromEntityId,
+                  hashlock: lock.hashlock,
+                  lockId: lock.lockId,
+                  amount: lock.amount.toString(),
+                  tokenId: lock.tokenId,
+                });
                 const paymentDescription = typeof envelope.description === 'string' ? envelope.description.trim() : '';
                 if (paymentDescription) {
                   if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map<HtlcNoteKey, string>();
@@ -806,6 +814,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         if (HEAVY_LOGS) console.log(`🔍 HTLC-SECRET: Processing revealed secret for hash ${hashlock.slice(0,16)}...`);
         const route = newState.htlcRoutes.get(hashlock);
         if (route) {
+          const isFinalRecipient = !!route.inboundEntity && !route.outboundEntity;
+
           // Store secret
           route.secret = secret;
 
@@ -857,6 +867,14 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             route.secretAckPending = false;
             route.secretAckedAt = newState.timestamp;
             console.log(`✅ HTLC: Payment complete (we initiated)`);
+          }
+          if (isFinalRecipient) {
+            env.emit('HtlcReceived', {
+              hashlock,
+              secret,
+              fromEntity: route.inboundEntity,
+              entityId: state.entityId,
+            });
           }
           env.emit('PaymentFinalized', {
             hashlock,

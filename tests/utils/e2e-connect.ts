@@ -76,29 +76,11 @@ async function isAccountReady(page: Page, entityId: string, hubId: string, timeo
   );
 }
 
-export async function connectHub(page: Page, hubId: string): Promise<void> {
-  await ensureRuntimeOnline(page, 'connect-hub');
-
-  const identity = await page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        eReplicas?: Map<string, unknown>;
-      };
-    }).isolatedEnv;
-    if (!env?.eReplicas) return null;
-
-    for (const replicaKey of env.eReplicas.keys()) {
-      const [entityId, signerId] = String(replicaKey).split(':');
-      if (entityId && signerId) {
-        return { entityId, signerId };
-      }
-    }
-
-    return null;
-  });
-
-  expect(identity, 'runtime must expose a local entity before opening an account').not.toBeNull();
-
+export async function connectRuntimeToHub(
+  page: Page,
+  identity: { entityId: string; signerId: string },
+  hubId: string,
+): Promise<void> {
   if (await isAccountReady(page, identity!.entityId, hubId)) {
     return;
   }
@@ -203,4 +185,31 @@ export async function connectHub(page: Page, hubId: string): Promise<void> {
   const opened = await isAccountReady(page, identity!.entityId, hubId, DEFAULT_OPEN_TIMEOUT_MS);
 
   expect(opened, `account open must converge for ${hubId.slice(0, 10)}`).toBe(true);
+}
+
+export async function connectHub(page: Page, hubId: string): Promise<void> {
+  await ensureRuntimeOnline(page, 'connect-hub');
+
+  const identity = await page.evaluate(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+        eReplicas?: Map<string, unknown>;
+      };
+    }).isolatedEnv;
+    if (!env?.eReplicas) return null;
+
+    const runtimeId = String(env.runtimeId || '').toLowerCase();
+    for (const replicaKey of env.eReplicas.keys()) {
+      const [entityId, signerId] = String(replicaKey).split(':');
+      if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
+      if (runtimeId && String(signerId).toLowerCase() !== runtimeId) continue;
+      return { entityId, signerId };
+    }
+
+    return null;
+  });
+
+  expect(identity, 'runtime must expose a local entity before opening an account').not.toBeNull();
+  await connectRuntimeToHub(page, identity!, hubId);
 }

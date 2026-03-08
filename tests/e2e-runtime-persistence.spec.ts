@@ -1,10 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
+import {
+  createRuntimeIdentity,
+  gotoApp,
+  switchToRuntimeId,
+} from './utils/e2e-demo-users';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
 const RESET_BASE_URL = process.env.E2E_RESET_BASE_URL ?? 'http://localhost:8082';
-const INIT_TIMEOUT = 20_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
 
 function randomMnemonic(): string {
@@ -33,18 +37,6 @@ async function getActiveApiBase(page: Page): Promise<string> {
     return typeof relay === 'string' ? relay : null;
   });
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
-}
-
-async function gotoApp(page: Page) {
-  await page.goto(`${APP_BASE_URL}/app`);
-  const unlock = page.locator('button:has-text("Unlock")');
-  if (await unlock.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await page.locator('input').first().fill('mml');
-    await unlock.click();
-    await page.waitForURL('**/app', { timeout: 10_000 });
-  }
-  await page.waitForFunction(() => (window as any).XLN, { timeout: INIT_TIMEOUT });
-  await page.waitForTimeout(600);
 }
 
 async function waitForServerHealthy(page: Page, timeoutMs = 60_000) {
@@ -92,61 +84,6 @@ async function resetProdServer(page: Page) {
   }
   expect(resetDone, `reset failed after retries: ${lastError}`).toBe(true);
   await waitForServerHealthy(page);
-}
-
-async function createRuntime(page: Page, label: string, mnemonic: string) {
-  const info = await page.evaluate(async ({ label, mnemonic }) => {
-    const v = (window as any).vaultOperations;
-    if (!v) return { ok: false, error: 'vaultOperations missing' };
-    const runtime = await v.createRuntime(label, mnemonic);
-    const env = (window as any).isolatedEnv;
-    let entityId: string | null = null;
-    if (env?.eReplicas) {
-      for (const [key] of env.eReplicas.entries()) {
-        const [eid, sid] = String(key).split(':');
-        if (String(sid || '').toLowerCase() === String(runtime?.id || '').toLowerCase()) {
-          entityId = eid;
-          break;
-        }
-      }
-    }
-    return { ok: true, runtimeId: runtime?.id, signerId: runtime?.id, entityId };
-  }, { label, mnemonic });
-  expect(info.ok, `createRuntime failed: ${info.error || 'unknown'}`).toBe(true);
-  expect(info.runtimeId).toBeTruthy();
-  expect((info as any).signerId).toBeTruthy();
-  expect(info.entityId).toBeTruthy();
-  await page.waitForTimeout(1200);
-  return info as { ok: true; runtimeId: string; signerId: string; entityId: string };
-}
-
-async function switchRuntime(page: Page, runtimeId: string) {
-  const deadline = Date.now() + 30_000;
-  let ok = false;
-  let lastError = '';
-
-  while (Date.now() < deadline) {
-    try {
-      ok = await page.evaluate(async (nextRuntimeId) => {
-        const v = (window as any).vaultOperations;
-        if (!v?.selectRuntime) return false;
-        await v.selectRuntime(nextRuntimeId);
-        return true;
-      }, runtimeId);
-      if (ok) break;
-      lastError = 'vaultOperations.selectRuntime returned false';
-    } catch (e: any) {
-      lastError = e?.message || String(e);
-      if (!/Execution context was destroyed|Cannot find context|Target closed/i.test(lastError)) {
-        throw e;
-      }
-    }
-    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
-    await page.waitForTimeout(300);
-  }
-
-  expect(ok, `selectRuntime(${runtimeId.slice(0, 10)}) failed: ${lastError || 'unknown'}`).toBe(true);
-  await page.waitForTimeout(400);
 }
 
 async function discoverHub(page: Page) {
@@ -596,7 +533,7 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
 
   test.beforeEach(async ({ page }) => {
     await resetProdServer(page);
-    await gotoApp(page);
+    await gotoApp(page, { appBaseUrl: APP_BASE_URL, settleMs: 600 });
   });
 
   test.afterEach(async ({ page }) => {
@@ -619,11 +556,11 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
       }
     });
 
-    const alice = await createRuntime(page, 'alice', randomMnemonic());
-    const bob = await createRuntime(page, 'bob', randomMnemonic());
+    const alice = await createRuntimeIdentity(page, 'alice', randomMnemonic());
+    const bob = await createRuntimeIdentity(page, 'bob', randomMnemonic());
     const hubId = await discoverHub(page);
 
-    await switchRuntime(page, alice.runtimeId);
+    await switchToRuntimeId(page, alice.runtimeId);
     await setSnapshotInterval(page, 5);
     await connectHub(page, alice.entityId, alice.signerId, hubId);
     const aliceOutBeforeFaucet = await outCap(page, alice.entityId, hubId);
@@ -634,7 +571,7 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     const aliceOutAfterFaucet = await outCap(page, alice.entityId, hubId);
     expect(aliceOutAfterFaucet - aliceOutBeforeFaucet).toBe(500n * 10n ** 18n);
 
-    await switchRuntime(page, bob.runtimeId);
+    await switchToRuntimeId(page, bob.runtimeId);
     await setSnapshotInterval(page, 5);
     await connectHub(page, bob.entityId, bob.signerId, hubId);
     const bobOutBeforeFaucet = await outCap(page, bob.entityId, hubId);
@@ -645,11 +582,11 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     const bobOutAfterFaucet = await outCap(page, bob.entityId, hubId);
     expect(bobOutAfterFaucet - bobOutBeforeFaucet).toBe(500n * 10n ** 18n);
 
-    await switchRuntime(page, alice.runtimeId);
+    await switchToRuntimeId(page, alice.runtimeId);
     const aliceBefore = await runtimeSnapshot(page);
     const aliceDbBefore = await runtimeDbMeta(page);
     const aliceOutBeforeReload = await outCap(page, alice.entityId, hubId);
-    await switchRuntime(page, bob.runtimeId);
+    await switchToRuntimeId(page, bob.runtimeId);
     const bobBefore = await runtimeSnapshot(page);
     const bobDbBefore = await runtimeDbMeta(page);
     const bobOutBeforeReload = await outCap(page, bob.entityId, hubId);
@@ -663,14 +600,14 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     expect(bobBefore.runtimeHeight).toBeGreaterThan(0);
 
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await gotoApp(page);
+    await gotoApp(page, { appBaseUrl: APP_BASE_URL, settleMs: 600 });
     await page.waitForTimeout(1500);
 
-    await switchRuntime(page, alice.runtimeId);
+    await switchToRuntimeId(page, alice.runtimeId);
     const aliceAfter = await runtimeSnapshot(page);
     const aliceDbAfter = await runtimeDbMeta(page);
     const aliceOutAfterReload = await outCap(page, alice.entityId, hubId);
-    await switchRuntime(page, bob.runtimeId);
+    await switchToRuntimeId(page, bob.runtimeId);
     const bobAfter = await runtimeSnapshot(page);
     const bobDbAfter = await runtimeDbMeta(page);
     const bobOutAfterReload = await outCap(page, bob.entityId, hubId);

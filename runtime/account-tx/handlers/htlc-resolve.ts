@@ -25,6 +25,9 @@ export async function handleHtlcResolve(
   secret?: string;
   hashlock?: string;
   reason?: string;
+  finalRecipient?: boolean;
+  amount?: bigint;
+  tokenId?: number;
 }> {
   const { lockId, outcome, secret, reason } = accountTx.data;
   const events: string[] = [];
@@ -100,11 +103,22 @@ export async function handleHtlcResolve(
   // 4. Remove lock
   accountMachine.locks.delete(lockId);
 
+  const finalRecipient = typeof lock.envelope === 'object'
+    && lock.envelope !== null
+    && 'finalRecipient' in lock.envelope
+    && (lock.envelope as { finalRecipient?: unknown }).finalRecipient === true;
+
   const result: {
     success: boolean; events: string[]; error?: string;
     outcome?: 'secret' | 'error'; secret?: string; hashlock?: string; reason?: string;
+    finalRecipient?: boolean; amount?: bigint; tokenId?: number;
   } = { success: true, events, outcome, hashlock: lock.hashlock };
   if (outcome === 'secret' && secret) result.secret = secret;
   if (outcome === 'error') result.reason = reason || 'unknown';
+  if (outcome === 'secret') {
+    result.finalRecipient = finalRecipient;
+    result.amount = lock.amount;
+    result.tokenId = lock.tokenId;
+  }
   return result;
 }

@@ -45,6 +45,7 @@ const HIGH_SIGNAL_EVENTS = new Set([
   'PaymentFinalized',
   'PaymentFailed',
   'HtlcPaymentInitiated',
+  'HtlcReceived',
   'BilateralFrameCommitted',
   'EntityFrameCommitted',
   'AccountOpening',

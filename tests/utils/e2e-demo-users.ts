@@ -1,6 +1,9 @@
 import { expect, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
 
+export const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
+export const DEFAULT_INIT_TIMEOUT = 30_000;
+
 export type DemoUserName = 'alice' | 'bob' | 'carol' | 'dave';
 
 export type DemoUserIdentity = {
@@ -69,6 +72,28 @@ async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   expect(ok, `[${tag}] runtime must be online`).toBe(true);
 }
 
+export async function gotoApp(
+  page: Page,
+  options: {
+    appBaseUrl?: string;
+    initTimeoutMs?: number;
+    settleMs?: number;
+  } = {},
+): Promise<void> {
+  const appBaseUrl = options.appBaseUrl ?? APP_BASE_URL;
+  const initTimeoutMs = options.initTimeoutMs ?? DEFAULT_INIT_TIMEOUT;
+  const settleMs = options.settleMs ?? 500;
+  await page.goto(`${appBaseUrl}/app`);
+  const unlock = page.locator('button:has-text("Unlock")');
+  if (await unlock.isVisible({ timeout: 1500 }).catch(() => false)) {
+    await page.locator('input').first().fill('mml');
+    await unlock.click();
+    await page.waitForURL('**/app', { timeout: 10_000 });
+  }
+  await page.waitForFunction(() => !!(window as any).XLN, { timeout: initTimeoutMs });
+  if (settleMs > 0) await page.waitForTimeout(settleMs);
+}
+
 export function selectDemoMnemonic(label: DemoUserName): string {
   const envKey = DEMO_MNEMONIC_ENV[label];
   const override = process.env[envKey];
@@ -112,12 +137,27 @@ export async function createRuntime(page: Page, label: string, mnemonic: string)
   await ensureRuntimeOnline(page, `create-${label}`);
 }
 
+export async function createRuntimeIdentity(
+  page: Page,
+  label: string,
+  mnemonic: string,
+): Promise<{ entityId: string; signerId: string; runtimeId: string }> {
+  await createRuntime(page, label, mnemonic);
+  const entity = await getActiveEntity(page);
+  expect(entity, `${label} runtime must expose a local entity`).not.toBeNull();
+  return entity!;
+}
+
 export async function getActiveEntity(page: Page): Promise<{ entityId: string; signerId: string; runtimeId: string } | null> {
   return page.evaluate(() => {
     const env = (window as any).isolatedEnv;
     if (!env?.eReplicas) return null;
+    const runtimeId = String(env.runtimeId || '').toLowerCase();
     for (const replicaKey of env.eReplicas.keys()) {
       const [entityId, signerId] = String(replicaKey).split(':');
+      const normalizedSignerId = String(signerId || '').toLowerCase();
+      if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
+      if (runtimeId && normalizedSignerId !== runtimeId) continue;
       if (entityId && signerId) {
         return { entityId, signerId, runtimeId: String(env.runtimeId || '') };
       }
@@ -204,4 +244,45 @@ export async function switchToRuntime(page: Page, label: string): Promise<void> 
   }, { runtimeId: result.id }, { timeout: 30_000 });
   await dismissOnboardingIfVisible(page);
   await ensureRuntimeOnline(page, `switch-${label}`);
+}
+
+export async function switchToRuntimeId(page: Page, runtimeId: string): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  let result: { ok: boolean; error?: string } = { ok: false, error: 'not-started' };
+
+  while (Date.now() < deadline) {
+    try {
+      result = await page.evaluate(async (nextRuntimeId) => {
+        try {
+          const vaultOperations = (window as any).vaultOperations;
+          if (!vaultOperations?.selectRuntime) {
+            return { ok: false, error: 'window.vaultOperations.selectRuntime missing' };
+          }
+          await vaultOperations.selectRuntime(nextRuntimeId);
+          return { ok: true };
+        } catch (error: any) {
+          return { ok: false, error: error?.message ?? String(error) };
+        }
+      }, runtimeId);
+    } catch (error: any) {
+      const message = error?.message ?? String(error);
+      if (!/Execution context was destroyed|Cannot find context|Target closed/i.test(message)) {
+        throw error;
+      }
+      result = { ok: false, error: message };
+    }
+
+    if (result.ok) break;
+    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+
+  expect(result.ok, `switchToRuntimeId(${runtimeId.slice(0, 10)}) failed: ${result.error ?? 'unknown'}`).toBe(true);
+  await page.waitForFunction(({ targetRuntimeId }) => {
+    const env = (window as any).isolatedEnv;
+    return String(env?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()
+      && Number(env?.eReplicas?.size || 0) > 0;
+  }, { targetRuntimeId: runtimeId }, { timeout: 30_000 });
+  await dismissOnboardingIfVisible(page);
+  await ensureRuntimeOnline(page, `switch-id-${runtimeId.slice(0, 8)}`);
 }
