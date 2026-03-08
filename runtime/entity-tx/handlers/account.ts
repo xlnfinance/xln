@@ -919,6 +919,22 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       console.error(`❌ Frame consensus failed: ${result.error}`);
       addMessage(newState, `❌ ${result.error}`);
       if (replayMode) {
+        const replayFailureDebug = {
+          entityId: state.entityId,
+          counterpartyId,
+          inputHeight: Number(input.height ?? 0),
+          hasPrevHanko: Boolean(input.prevHanko),
+          newFrameHeight: Number(input.newAccountFrame?.height ?? 0),
+          newFramePrevFrameHash: input.newAccountFrame?.prevFrameHash ?? null,
+          newFrameStateHash: input.newAccountFrame?.stateHash ?? null,
+          currentHeight: Number(accountMachine?.currentHeight ?? 0),
+          currentHash: accountMachine?.currentFrame?.stateHash ?? null,
+          pendingHeight: Number(accountMachine?.pendingFrame?.height ?? 0),
+          pendingHash: accountMachine?.pendingFrame?.stateHash ?? null,
+          mempoolSize: Number(accountMachine?.mempool?.length ?? 0),
+          error: result.error ?? 'unknown',
+        };
+        console.warn(`[REPLAY][ACCOUNT-HANDLER] failed frame consensus ${JSON.stringify(replayFailureDebug)}`);
         // During replay, stale/duplicate frames are expected (e.g. cross-entity frame
         // stored in a runtime frame that was already applied from another entity's
         // perspective). Skip gracefully instead of crashing the entire restore.

@@ -3688,7 +3688,11 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
                   `[loadEnvFromDB] frame=${h} NEWFRAME-check entity=${String(entityInput.entityId).slice(-8)} ` +
                     `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} expected=${expectedHeight}`,
                 );
-                if (currentHeight >= expectedHeight) {
+                // Same-height simultaneous proposals are a valid intermediate replay state:
+                // our local frame can stay pending while the peer's competing frame is ignored
+                // until the later ACK resolves the tie. Requiring currentHeight>=expectedHeight
+                // here incorrectly rejects that legitimate bilateral state.
+                if (currentHeight >= expectedHeight || pendingHeight === expectedHeight) {
                   applied = true;
                   break;
                 }
@@ -3701,11 +3705,24 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
                     return {
                       replicaKey: `${String(replica.entityId).slice(0, 10)}...:${String(replica.signerId).slice(0, 10)}...`,
                       currentHeight: Number(am?.currentHeight ?? 0),
+                      currentHash: am?.currentFrame?.stateHash ?? null,
+                      currentPrev: am?.currentFrame?.prevFrameHash ?? null,
                       pendingFrame: Number(am?.pendingFrame?.height ?? 0),
+                      pendingHash: am?.pendingFrame?.stateHash ?? null,
+                      pendingPrev: am?.pendingFrame?.prevFrameHash ?? null,
                       mempoolSize: Number(am?.mempool?.length ?? 0),
                       frameHistorySize: Number(am?.frameHistory?.length ?? 0),
+                      frameHistoryTail: (am?.frameHistory ?? []).slice(-3).map((frame) => ({
+                        height: Number(frame?.height ?? 0),
+                        stateHash: frame?.stateHash ?? null,
+                        prevFrameHash: frame?.prevFrameHash ?? null,
+                      })),
                     };
                   });
+                console.warn(
+                  `[loadEnvFromDB] frame=${h} REPLAY_ACCOUNT_FRAME_NOT_APPLIED entity=${String(entityInput.entityId).slice(-8)} ` +
+                    `from=${fromEntityId.slice(-8)} expected=${expectedHeight} debug=${safeStringify(replayDebug)}`,
+                );
                 throw new Error(
                   `REPLAY_ACCOUNT_FRAME_NOT_APPLIED: frame=${h} expected=${expectedHeight} actual=${JSON.stringify(replayDebug)}`,
                 );
