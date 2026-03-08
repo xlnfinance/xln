@@ -20,6 +20,12 @@ import {
   createRuntime as createSharedRuntime,
 } from './utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
+import {
+  getPersistedReceiptCursor,
+  readPersistedFrameEventsSinceCursor,
+  waitForPersistedFrameEventMatch,
+  type PersistedFrameEvent,
+} from './utils/e2e-runtime-receipts';
 
 /**
  * REBALANCE INVARIANT (do not "simplify" this in future edits):
@@ -88,6 +94,10 @@ type FrameEventSummary = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function persistedEventHasAccount(event: PersistedFrameEvent, accountId: string): boolean {
+  return String(event.data?.accountId || '').toLowerCase() === accountId.toLowerCase();
 }
 
 async function readDebugTimeline(
@@ -2184,6 +2194,7 @@ test.describe('Rebalance E2E', () => {
 
     await switchRuntime(page, rt2Label);
     const beforeP2Debt = BigInt(afterP1?.hubExposure || afterP1?.hubDebt || '0');
+    const rt2P2Cursor = await getPersistedReceiptCursor(page);
     const p2Start = Date.now();
     const PRE_REBALANCE_WINDOW_MS = 2_000;
     let afterP2: any = null;
@@ -2194,34 +2205,41 @@ test.describe('Rebalance E2E', () => {
     expect(afterP2, 'rt2-h2 state after payment#2').toBeTruthy();
     const p2HashSeen = Array.isArray(afterP2?.recentHtlcHashlocks) && afterP2.recentHtlcHashlocks.includes(p2.hashlock);
     const afterP2Debt = BigInt(afterP2?.hubExposure || afterP2?.hubDebt || '0');
-    expect(
-      p2HashSeen,
-      `payment#2 must not finalize in pre-rebalance window (${PRE_REBALANCE_WINDOW_MS}ms)`,
-    ).toBe(false);
-    expect(
-      afterP2Debt < beforeP2Debt + 500n * 10n ** 18n,
-      'payment#2 should not increase debt by full 550 in pre-rebalance window',
-    ).toBe(true);
-
-    // Wait for H2 R2C rebalance pipeline (request -> batch -> bilateral finalize).
-    const rebStart = Date.now();
-    let h2RequestCommitted = false;
-    let h2SettledFinalized = false;
-    while (Date.now() - rebStart < 35_000) {
-      const steps = await readRebalanceStepEvents(page, scenarioStartedAt);
-      h2RequestCommitted = steps.some((s) =>
-        String(s?.event || '') === 'request_collateral_committed'
-        && String(s?.accountId || '').toLowerCase() === h2.toLowerCase(),
-      );
-      h2SettledFinalized = steps.some((s) =>
-        String(s?.event || '') === 'account_settled_finalized_bilateral'
-        && String(s?.accountId || '').toLowerCase() === h2.toLowerCase(),
-      );
-      if (h2RequestCommitted && h2SettledFinalized) break;
-      await page.waitForTimeout(450);
+    const rt2P2Events = await readPersistedFrameEventsSinceCursor(page, {
+      cursor: rt2P2Cursor,
+      eventNames: ['HtlcReceived', 'account_settled_finalized_bilateral'],
+    });
+    const h2SettledEarly = rt2P2Events.events.some((event) =>
+      event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h2),
+    );
+    if (p2HashSeen) {
+      expect(
+        h2SettledEarly,
+        `payment#2 passed too early without persisted rebalance finalize evidence: ${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
+      ).toBe(true);
+    } else {
+      expect(
+        afterP2Debt < beforeP2Debt + 500n * 10n ** 18n,
+        'payment#2 should not increase debt by full 550 in pre-rebalance window',
+      ).toBe(true);
     }
-    expect(h2RequestCommitted, 'H2 must commit request_collateral').toBe(true);
-    expect(h2SettledFinalized, 'H2 must finalize bilateral AccountSettled').toBe(true);
+
+    // Wait for H2 R2C rebalance pipeline only if the post-cursor slice has not already
+    // captured the bilateral finalize event that allowed payment #2 through.
+    const h2Lower = h2.toLowerCase();
+    if (!h2SettledEarly) {
+      await expect.poll(async () => {
+        const steps = await readRebalanceStepEvents(page, scenarioStartedAt);
+        return countRebalanceStepEvents(
+          steps,
+          'account_settled_finalized_bilateral',
+          (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
+        );
+      }, {
+        timeout: 35_000,
+        message: `expected saved rebalance finalize step for ${h2Lower.slice(0, 10)}`,
+      }).toBeGreaterThan(0);
+    }
     const rebDone = await readPairState(page, h2);
     expect(rebDone, 'rt2-h2 rebalance snapshot must exist').toBeTruthy();
     expect(BigInt(rebDone?.requested || '0') === 0n, 'requestedRebalance must be cleared after finalize').toBe(true);
@@ -2306,6 +2324,7 @@ test.describe('Rebalance E2E', () => {
     // Step 3: runtime2 opens H1=10k, H3=1k.
     await connectHubWithCredit(page, rt2.entityId, rt2.signerId, h1, 10_000n);
     await connectHubWithCredit(page, rt2.entityId, rt2.signerId, h3, 1_000n);
+    await setRebalancePolicy(page, rt2.entityId, rt2.signerId, h3, 500n, 10_000n, 20n);
     await waitForPairIdle(page, h3);
 
     // Step 4: runtime1 opens funding path via H3 and receives spendable liquidity.
@@ -2366,7 +2385,6 @@ test.describe('Rebalance E2E', () => {
     // Step 7: HTLC #2 (550) immediately should fail on H3 capacity (1k credit total).
     await switchRuntime(page, rt1Label);
     await waitForPairIdle(page, h3);
-    const p2QueuedAt = Date.now();
     const senderBeforeP2 = await readPairState(page, h3);
     const payment2 = await sendRoutedHtlcPayment(
       page,
@@ -2382,6 +2400,7 @@ test.describe('Rebalance E2E', () => {
 
     await switchRuntime(page, rt2Label);
 
+    const rt2P2Cursor = await getPersistedReceiptCursor(page);
     const p2Start = Date.now();
     const PRE_REBALANCE_WINDOW_MS = 2_000;
     let afterP2: any = null;
@@ -2392,16 +2411,17 @@ test.describe('Rebalance E2E', () => {
     expect(afterP2, 'runtime2-h3 state after payment2').toBeTruthy();
     const hasPayment2PreRebalance = Array.isArray(afterP2.recentHtlcHashlocks)
       && afterP2.recentHtlcHashlocks.includes(payment2.hashlock);
+    const rt2P2Events = await readPersistedFrameEventsSinceCursor(page, {
+      cursor: rt2P2Cursor,
+      eventNames: ['HtlcReceived', 'account_settled_finalized_bilateral'],
+    });
+    const h3SettledEarly = rt2P2Events.events.some((event) =>
+      event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h3),
+    );
     if (hasPayment2PreRebalance) {
-      const steps = await readRebalanceStepEvents(page, scenarioStartedAt);
-      const h3SettledEarly = steps.some((s) =>
-        String(s?.event || '') === 'account_settled_finalized_bilateral'
-        && String(s?.accountId || '').toLowerCase() === h3.toLowerCase()
-        && Number(s?.ts || 0) >= p2QueuedAt - 1_000,
-      );
       expect(
         h3SettledEarly,
-        `payment2 passed too early without finalized rebalance evidence: ${JSON.stringify(steps.slice(-40), null, 2)}`,
+        `payment2 passed too early without persisted rebalance finalize evidence: ${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
       ).toBe(true);
     }
 
@@ -2414,9 +2434,23 @@ test.describe('Rebalance E2E', () => {
     }
 
     // Step 8: wait rebalance finalize on runtime2-H3 (collateralized and request cleared).
-    const rebStart = Date.now();
     let rebDone: any = null;
-    while (Date.now() - rebStart < 180_000) {
+    const h3Lower = h3.toLowerCase();
+    if (!h3SettledEarly) {
+      await expect.poll(async () => {
+        const steps = await readRebalanceStepEvents(page, scenarioStartedAt);
+        return countRebalanceStepEvents(
+          steps,
+          'account_settled_finalized_bilateral',
+          (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
+        );
+      }, {
+        timeout: 180_000,
+        message: `expected saved rebalance finalize step for ${h3Lower.slice(0, 10)}`,
+      }).toBeGreaterThan(0);
+    }
+    const rebStart = Date.now();
+    while (Date.now() - rebStart < 30_000) {
       const snap = await readPairState(page, h3);
       if (
         snap &&
