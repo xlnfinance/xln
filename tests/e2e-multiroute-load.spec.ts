@@ -1199,31 +1199,19 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     await page.waitForFunction(() => (window as any).XLN, { timeout: INIT_TIMEOUT });
     await page.waitForTimeout(3000);
 
-    let persistenceFailures = 0;
     for (const name of Object.keys(users)) {
-      try {
-        await switchTo(page, name);
-        await page.waitForTimeout(2000);
-        const primaryHub = hubMap[name]![0]!;
-        const balanceAfter = await outCap(page, users[name]!.entityId, primaryHub);
-        console.log(`[E2E] ${name} after reload: ${formatUsd(balanceAfter)}`);
-        expect(balanceAfter, `${name}: balance must survive reload (was ${formatUsd(balancesBefore[name]!)}, got ${formatUsd(balanceAfter)})`).toBe(balancesBefore[name]!);
-      } catch (e: any) {
-        persistenceFailures++;
-        console.error(`[E2E] PERSISTENCE FAIL ${name}: ${e.message?.slice(0, 150)}`);
-        // Known bug: REPLAY_INVARIANT_FAILED for high-activity entities
-        // Still count as failure but don't abort remaining checks
-      }
+      await switchTo(page, name);
+      await page.waitForTimeout(2000);
+      const primaryHub = hubMap[name]![0]!;
+      const balanceAfter = await outCap(page, users[name]!.entityId, primaryHub);
+      console.log(`[E2E] ${name} after reload: ${formatUsd(balanceAfter)}`);
+      expect(
+        balanceAfter,
+        `${name}: balance must survive reload (was ${formatUsd(balancesBefore[name]!)}, got ${formatUsd(balanceAfter)})`,
+      ).toBe(balancesBefore[name]!);
     }
-    if (persistenceFailures === 0) {
-      console.log('[E2E] All 6 users: balances persist after reload');
-    } else {
-      console.warn(`[E2E] PERSISTENCE: ${persistenceFailures}/6 users failed reload — known REPLAY_INVARIANT_FAILED bug`);
-      // Known bug: REPLAY_INVARIANT_FAILED — track but don't block TC1-19 verification
-      // TODO: Fix replay invariant, then re-enable hard assert
-      console.warn(`[E2E] ⚠️ PERSISTENCE: ${persistenceFailures} failures (known replay bug — not blocking)`);
-      // expect(persistenceFailures, 'Persistence failures — all users must survive reload').toBe(0);
-    }
+    const persistenceFailures = 0;
+    console.log('[E2E] All 6 users: balances persist after reload');
 
     // ═══════════════════════════════════════════════════════════════
     // SUMMARY

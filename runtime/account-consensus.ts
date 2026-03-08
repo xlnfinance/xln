@@ -903,6 +903,21 @@ export async function handleAccountInput(
   const events: string[] = [];
   const timedOutHashlocks: string[] = [];
   let ackProcessed = false;
+  const describeAccountState = () => ({
+    currentHeight: Number(accountMachine.currentHeight ?? 0),
+    currentHash: accountMachine.currentFrame?.stateHash ?? null,
+    currentPrev: accountMachine.currentFrame?.prevFrameHash ?? null,
+    currentTimestamp: Number(accountMachine.currentFrame?.timestamp ?? 0),
+    pendingHeight: Number(accountMachine.pendingFrame?.height ?? 0),
+    pendingHash: accountMachine.pendingFrame?.stateHash ?? null,
+    pendingPrev: accountMachine.pendingFrame?.prevFrameHash ?? null,
+    pendingTimestamp: Number(accountMachine.pendingFrame?.timestamp ?? 0),
+    frameHistoryTail: accountMachine.frameHistory.slice(-3).map((frame) => ({
+      height: Number(frame?.height ?? 0),
+      stateHash: frame?.stateHash ?? null,
+      prevFrameHash: frame?.prevFrameHash ?? null,
+    })),
+  });
   if (replayMode) {
     console.log(
       `[REPLAY][A-MACHINE] from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)} ` +
@@ -1231,10 +1246,26 @@ export async function handleAccountInput(
       accountMachine.currentHeight === 0 ? 'genesis' : accountMachine.currentFrame.stateHash || '';
 
     if (receivedFrame.prevFrameHash !== expectedPrevFrameHash) {
+      const mismatchDebug = {
+        inputFromEntityId: input.fromEntityId,
+        inputToEntityId: input.toEntityId,
+        inputHeight: normalizedInputHeight ?? null,
+        receivedHeight: Number(receivedFrame.height ?? 0),
+        receivedStateHash: receivedFrame.stateHash ?? null,
+        receivedPrevFrameHash: receivedFrame.prevFrameHash ?? null,
+        receivedTxTypes: receivedFrame.accountTxs.map((tx) => tx.type),
+        expectedPrevFrameHash,
+        replayMode,
+        account: describeAccountState(),
+      };
       console.warn(`⚠️ FRAME-CHAIN: prevHash mismatch at height ${accountMachine.currentHeight}`);
+      console.warn(`[A-MACHINE][FRAME-CHAIN-MISMATCH] ${safeStringify(mismatchDebug)}`);
       return {
         success: false,
-        error: `Frame chain broken: prevFrameHash mismatch (expected ${expectedPrevFrameHash.slice(0, 16)}...)`,
+        error:
+          `Frame chain broken: prevFrameHash mismatch ` +
+          `(expected ${expectedPrevFrameHash.slice(0, 16)}..., got ${String(receivedFrame.prevFrameHash).slice(0, 16)}..., ` +
+          `current=${accountMachine.currentHeight}, pending=${Number(accountMachine.pendingFrame?.height ?? 0)})`,
         events,
       };
     }
