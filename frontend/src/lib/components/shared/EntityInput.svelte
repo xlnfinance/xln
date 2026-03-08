@@ -240,6 +240,9 @@
   }
 
   function handleFocus() {
+    if (!showDropdown) {
+      dispatch('open');
+    }
     showDropdown = true;
   }
 

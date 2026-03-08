@@ -1032,6 +1032,14 @@
     clearRepeatTimer();
   }
 
+  function handleRecipientPickerOpen() {
+    void refreshGossipOnDemand(
+      'recipient-picker-open',
+      targetEntityId ? [targetEntityId] : [],
+    );
+    void refreshServerEntityNames();
+  }
+
   function handleTokenChange(e: CustomEvent) {
     tokenId = e.detail.value;
   }
@@ -1070,6 +1078,7 @@
     placeholder="Select recipient..."
     disabled={findingRoutes || sendingPayment}
     on:change={handleTargetChange}
+    on:open={handleRecipientPickerOpen}
   />
 
   {#if preflightError}
