@@ -345,6 +345,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
   const apiUrl = `http://127.0.0.1:${apiPort}`;
   const webUrl = `https://localhost:${webPort}`;
   const dbPath = join(logsDir, `db-e2e-shard-${shard}`);
+  const anvilStatePath = join(dbPath, 'anvil-state.json');
   mkdirSync(dbPath, { recursive: true });
   const phaseMs: RunResult['phaseMs'] = {
     preflight: 0,
@@ -387,6 +388,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
       '--chain-id', '31337',
       '--block-gas-limit', '60000000',
       '--code-size-limit', '65536',
+      '--state', anvilStatePath,
       '--silent',
     ], { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
     anvil.stdout.on('data', c => log.write(`[anvil] ${c.toString()}`));

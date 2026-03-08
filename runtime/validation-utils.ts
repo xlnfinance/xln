@@ -12,6 +12,7 @@ import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import type {
   Delta,
+  DeliverableEntityInput,
   RoutedEntityInput,
   EntityState,
   AccountMachine,
@@ -215,6 +216,18 @@ export function validateEntityOutput(output: unknown): RoutedEntityInput {
   }
 
   return obj as RoutedEntityInput;
+}
+
+/**
+ * CRITICAL: Validate a network-deliverable entity input.
+ * These inputs must already have a resolved runtimeId before leaving the local runtime.
+ */
+export function validateDeliverableEntityInput(output: unknown): DeliverableEntityInput {
+  const validated = validateEntityOutput(output);
+  if (typeof validated.runtimeId !== 'string' || validated.runtimeId.trim().length === 0) {
+    throw new Error('FINANCIAL-SAFETY: Deliverable EntityOutput missing runtimeId');
+  }
+  return validated as DeliverableEntityInput;
 }
 
 /**

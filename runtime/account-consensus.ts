@@ -46,29 +46,48 @@ const isAddress20 = (value: unknown): value is string => typeof value === 'strin
  * CRITICAL for replay protection - domain separator for signatures
  */
 function getDepositoryAddress(env: Env): string {
-  // Try BrowserVM first (most common)
-  if (env.browserVM) {
-    const browserVM = env.browserVM;
-    const getAddress = browserVM.getDepositoryAddress?.() || browserVM.browserVM?.getDepositoryAddress?.();
-    if (getAddress && getAddress !== '0x0000000000000000000000000000000000000000') {
-      return getAddress;
-    }
-  }
+  const browserVMAddress =
+    env.browserVM?.getDepositoryAddress?.() ||
+    env.browserVM?.browserVM?.getDepositoryAddress?.();
 
-  // Try active jurisdiction
+  // Active J-replica is authoritative for live RPC-backed runtimes.
   if (env.activeJurisdiction) {
     const jReplica = env.jReplicas.get(env.activeJurisdiction);
+    if (jReplica?.jadapter?.addresses?.depository) {
+      if (browserVMAddress && browserVMAddress !== jReplica.jadapter.addresses.depository) {
+        console.warn(
+          `[account-consensus] browserVM depository ${browserVMAddress} ignored in favor of active jurisdiction ` +
+            `${env.activeJurisdiction}=${jReplica.jadapter.addresses.depository}`,
+        );
+      }
+      return jReplica.jadapter.addresses.depository;
+    }
     if (jReplica?.depositoryAddress) {
+      if (browserVMAddress && browserVMAddress !== jReplica.depositoryAddress) {
+        console.warn(
+          `[account-consensus] browserVM depository ${browserVMAddress} ignored in favor of active jurisdiction ` +
+            `${env.activeJurisdiction}=${jReplica.depositoryAddress}`,
+        );
+      }
       return jReplica.depositoryAddress;
     }
     // Fallback to legacy contracts.depository
     if (jReplica?.contracts?.depository) {
+      if (browserVMAddress && browserVMAddress !== jReplica.contracts.depository) {
+        console.warn(
+          `[account-consensus] browserVM depository ${browserVMAddress} ignored in favor of active jurisdiction ` +
+            `${env.activeJurisdiction}=${jReplica.contracts.depository}`,
+        );
+      }
       return jReplica.contracts.depository;
     }
   }
 
   // Fallback: first J-replica with depositoryAddress
   for (const jReplica of env.jReplicas.values()) {
+    if (jReplica.jadapter?.addresses?.depository) {
+      return jReplica.jadapter.addresses.depository;
+    }
     if (jReplica.depositoryAddress) {
       return jReplica.depositoryAddress;
     }
@@ -76,6 +95,11 @@ function getDepositoryAddress(env: Env): string {
     if (jReplica.contracts?.depository) {
       return jReplica.contracts.depository;
     }
+  }
+
+  // BrowserVM is only authoritative when there is no active live jurisdiction.
+  if (browserVMAddress && browserVMAddress !== '0x0000000000000000000000000000000000000000') {
+    return browserVMAddress;
   }
 
   // Last resort: return zero address (will fail verification but won't crash)
@@ -791,6 +815,7 @@ export async function proposeAccountFrame(
   accountMachine.currentDisputeProofHanko = disputeHanko;
   accountMachine.currentDisputeProofNonce = clonedMachine.proofHeader.nonce;
   accountMachine.currentDisputeProofBodyHash = proofResult.proofBodyHash;
+  accountMachine.currentDisputeHash = disputeHash;
   if (!accountMachine.disputeProofNoncesByHash) {
     accountMachine.disputeProofNoncesByHash = {};
   }
@@ -1072,6 +1097,7 @@ export async function handleAccountInput(
               accountMachine.counterpartyDisputeProofHanko = input.newDisputeHanko;
               const signedCooperativeNonce = input.disputeProofNonce;
               accountMachine.counterpartyDisputeProofNonce = signedCooperativeNonce;
+              accountMachine.counterpartyDisputeHash = input.newDisputeHash;
               if (input.newDisputeProofBodyHash) {
                 accountMachine.counterpartyDisputeProofBodyHash = input.newDisputeProofBodyHash;
                 if (!accountMachine.disputeProofNoncesByHash) {
@@ -1722,6 +1748,7 @@ export async function handleAccountInput(
       if (disputeValid) {
         accountMachine.counterpartyDisputeProofHanko = input.newDisputeHanko;
         accountMachine.counterpartyDisputeProofNonce = input.disputeProofNonce;
+        accountMachine.counterpartyDisputeHash = input.newDisputeHash;
         if (input.newDisputeProofBodyHash) {
           accountMachine.counterpartyDisputeProofBodyHash = input.newDisputeProofBodyHash;
           if (!accountMachine.disputeProofNoncesByHash) accountMachine.disputeProofNoncesByHash = {};
@@ -1840,9 +1867,30 @@ export async function handleAccountInput(
         if (proposeResult.accountInput.newHanko) {
           response.newHanko = proposeResult.accountInput.newHanko;
         }
-        // DON'T overwrite response.newDisputeHanko (it's ACK's dispute hanko for current committed state)
-        // Proposal's newDisputeHanko will be delivered when proposal commits, not now
-        // This preserves ACK's dispute hanko for last agreed state
+        // When ACK and next frame are bundled, the attached dispute proof must
+        // describe the bundled proposal state. Sending ACK dispute metadata
+        // alongside proposal frame data mixes hashes/nonces and poisons the
+        // counterparty's stored dispute proof for the latest agreed state.
+        if (proposeResult.accountInput.newDisputeHanko) {
+          response.newDisputeHanko = proposeResult.accountInput.newDisputeHanko;
+        } else {
+          delete response.newDisputeHanko;
+        }
+        if (proposeResult.accountInput.newDisputeHash) {
+          response.newDisputeHash = proposeResult.accountInput.newDisputeHash;
+        } else {
+          delete response.newDisputeHash;
+        }
+        if (proposeResult.accountInput.newDisputeProofBodyHash) {
+          response.newDisputeProofBodyHash = proposeResult.accountInput.newDisputeProofBodyHash;
+        } else {
+          delete response.newDisputeProofBodyHash;
+        }
+        if (proposeResult.accountInput.disputeProofNonce !== undefined) {
+          response.disputeProofNonce = proposeResult.accountInput.disputeProofNonce;
+        } else {
+          delete response.disputeProofNonce;
+        }
 
         const newFrameId = proposeResult.accountInput.newAccountFrame?.height || 0;
         console.log(`✅ Batched ACK for frame ${receivedFrame.height} + proposal for frame ${newFrameId}`);
@@ -1854,6 +1902,7 @@ export async function handleAccountInput(
       accountMachine.currentDisputeProofHanko = ackDisputeHanko;
       accountMachine.currentDisputeProofNonce = ackSignedNonce;
       accountMachine.currentDisputeProofBodyHash = ackProofResult.proofBodyHash;
+      accountMachine.currentDisputeHash = ackDisputeHash;
     }
 
     // Increment nonce for this message (on-chain nonce for dispute proofs / settlements)
@@ -1878,7 +1927,9 @@ export async function handleAccountInput(
         type: 'accountFrame',
         context: `account:${input.fromEntityId.slice(-8)}:ack:${receivedFrame.height}`,
       },
-      { hash: ackDisputeHash, type: 'dispute', context: `account:${input.fromEntityId.slice(-8)}:ack-dispute` },
+      ...(!batchedWithNewFrame
+        ? [{ hash: ackDisputeHash, type: 'dispute' as const, context: `account:${input.fromEntityId.slice(-8)}:ack-dispute` }]
+        : []),
       ...(proposeResult?.hashesToSign || []), // From batched proposal
     ];
 

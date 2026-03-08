@@ -1,7 +1,25 @@
+/**
+ * E2E rebalance coverage for the secured bar, repeated R2C/C2R cycles, routed capacity cliffs,
+ * and reload persistence.
+ *
+ * Flow and goals:
+ * 1. Start from the shared 3-hub baseline and create browser users.
+ * 2. Push account usage until rebalance thresholds are crossed.
+ * 3. Verify the bar requests collateral only from the canonical derived metric.
+ * 4. Verify bilateral `j_event_claim` and finalize logic release holds correctly.
+ * 5. Reload runtimes and verify the same rebalance/account state is restored from snapshot + WAL.
+ *
+ * These tests exist to prove that rebalance is deterministic, visually correct, and replay-safe.
+ */
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet, ethers } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { resetProdServer } from './utils/e2e-baseline';
+import {
+  gotoApp as gotoSharedApp,
+  createRuntime as createSharedRuntime,
+} from './utils/e2e-demo-users';
+import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 
 /**
  * REBALANCE INVARIANT (do not "simplify" this in future edits):
@@ -13,13 +31,6 @@ import { resetProdServer } from './utils/e2e-baseline';
  * Why:
  * Using (outCollateral + outPeerCredit) over-triggers after the first successful top-up
  * and causes a new request_collateral on almost every small payment/faucet click.
- */
-/**
- * E2E rebalance coverage for the secured bar, repeated R2C/C2R cycles, routed capacity cliffs,
- * and reload persistence.
- *
- * These tests verify that hub collateralization triggers only when it should, clears through bilateral
- * j_event_claim/finalize flow, and keeps working across repeated payments and runtime reloads.
  */
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
@@ -246,48 +257,15 @@ function randomMnemonic(): string {
 }
 
 async function gotoApp(page: Page) {
-  await page.goto(`${APP_BASE_URL}/app`);
-  const unlock = page.locator('button:has-text("Unlock")');
-  if (await unlock.isVisible({ timeout: 1500 }).catch(() => false)) {
-    const input = page.locator('input').first();
-    await input.fill('mml');
-    await unlock.click();
-    await page.waitForURL('**/app', { timeout: 10_000 });
-  }
-  await page.waitForFunction(() => (window as any).XLN, { timeout: INIT_TIMEOUT });
-  await page.waitForTimeout(500);
-
-  // Dismiss onboarding if visible.
-  const onboardingCheckbox = page.locator('text=I understand and accept the risks of using this software').first();
-  if (await onboardingCheckbox.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await onboardingCheckbox.click();
-    const continueBtn = page.locator('button:has-text("Continue")').first();
-    if (await continueBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await continueBtn.click();
-      await page.waitForTimeout(300);
-    }
-  }
+  await gotoSharedApp(page, {
+    appBaseUrl: APP_BASE_URL,
+    initTimeoutMs: INIT_TIMEOUT,
+    settleMs: 500,
+  });
 }
 
 async function createRuntime(page: Page, label: string, mnemonic: string) {
-  const result = await page.evaluate(async ({ label, mnemonic }) => {
-    try {
-      const vaultOperations = (window as any).vaultOperations;
-      if (!vaultOperations) return { ok: false, error: 'window.vaultOperations missing' };
-      await vaultOperations.createRuntime(label, mnemonic, {
-        loginType: 'demo',
-        requiresOnboarding: false,
-      });
-      return { ok: true };
-    } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) };
-    }
-  }, { label, mnemonic });
-  expect(result.ok, `createRuntime failed: ${result.error || 'unknown'}`).toBe(true);
-  await page.waitForFunction(() => {
-    const env = (window as any).isolatedEnv;
-    return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
-  }, { timeout: 10_000 });
+  await createSharedRuntime(page, label, mnemonic);
 }
 
 async function ensureRuntimeOnline(page: Page, tag: string) {
@@ -381,57 +359,7 @@ async function getLocalEntity(page: Page): Promise<{ entityId: string; signerId:
 }
 
 async function connectHub(page: Page, entityId: string, signerId: string, hubId: string) {
-  const opened = await page.evaluate(async ({ entityId, signerId, hubId }) => {
-    const findAccount = (accounts: any, ownerId: string, counterpartyId: string) => {
-      if (!(accounts instanceof Map)) return null;
-      const owner = String(ownerId || '').toLowerCase();
-      const cp = String(counterpartyId || '').toLowerCase();
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey || '').toLowerCase() === cp) return account;
-        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
-          ? String(account.counterpartyEntityId).toLowerCase()
-          : '';
-        if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
-        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
-      }
-      return null;
-    };
-
-    const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN;
-    if (!env || !XLN) return false;
-
-    XLN.enqueueRuntimeInput(env, {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'openAccount',
-          data: { targetEntityId: hubId, creditAmount: 10_000n * 10n ** 18n, tokenId: 1 },
-        }],
-      }],
-    });
-
-    const start = Date.now();
-    while (Date.now() - start < 45_000) {
-      for (const [k, rep] of env.eReplicas.entries()) {
-        if (!String(k).startsWith(entityId + ':')) continue;
-        const acc = findAccount(rep?.state?.accounts, entityId, hubId);
-        if (!acc) continue;
-        const hasDelta = !!acc.deltas?.get?.(1);
-        const noPending = !acc.pendingFrame;
-        const hasFrames = Number(acc.currentHeight || 0) > 0;
-        if (hasDelta && noPending && hasFrames) return true;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 750));
-    }
-    return false;
-  }, { entityId, signerId, hubId });
-
-  expect(opened, 'openAccount -> bilateral account ready').toBe(true);
+  await connectRuntimeToSharedHub(page, { entityId, signerId }, hubId);
   await page.waitForTimeout(800);
 }
 

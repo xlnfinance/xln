@@ -6,6 +6,7 @@
 import type { Env, HankoString } from './types';
 import { buildRealHanko } from './hanko';
 import { ethers } from 'ethers';
+import { detectEntityType } from './entity-factory';
 
 // Browser-compatible Buffer helpers - ALWAYS use manual hex parsing (Node Buffer.from can be broken in some envs)
 const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncoding): Buffer => {
@@ -62,6 +63,124 @@ const publicKeyToAddress = (value: string): string | null => {
   }
   return null;
 };
+
+const HANKO_ABI = ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'];
+
+type DecodedHankoClaim = {
+  entityId: string;
+  entityIndexes: number[];
+  weights: number[];
+  threshold: number;
+};
+
+type DecodedHankoEnvelope = {
+  placeholders: string[];
+  packedSignatures: Buffer;
+  claims: DecodedHankoClaim[];
+};
+
+const toEntityIdHex = (value: Uint8Array | Buffer): string =>
+  `0x${Array.from(value).map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+
+function decodeHankoEnvelope(hankoBytes: HankoString): DecodedHankoEnvelope {
+  const decoded = ethers.AbiCoder.defaultAbiCoder().decode(HANKO_ABI, hankoBytes);
+  return {
+    placeholders: decoded[0][0].map((p: string) => ethers.hexlify(p).toLowerCase()),
+    packedSignatures: bufferFrom(decoded[0][1].replace('0x', ''), 'hex'),
+    claims: decoded[0][2].map((c: any) => ({
+      entityId: ethers.hexlify(c[0]).toLowerCase(),
+      entityIndexes: c[1].map((idx: bigint) => Number(idx)),
+      weights: c[2].map((w: bigint) => Number(w)),
+      threshold: Number(c[3]),
+    })),
+  };
+}
+
+const reconstructBoardEntityIds = (
+  claim: { entityIndexes: number[] },
+  placeholders: string[],
+  recoveredAddresses: string[],
+  claimEntityIds: string[],
+): string[] =>
+  claim.entityIndexes.map((idx) => {
+    if (idx < placeholders.length) {
+      return placeholders[idx]!;
+    }
+    const signerIndex = idx - placeholders.length;
+    if (signerIndex < recoveredAddresses.length) {
+      return ethers.zeroPadValue(recoveredAddresses[signerIndex]!, 32).toLowerCase();
+    }
+    const nestedClaimIndex = signerIndex - recoveredAddresses.length;
+    return claimEntityIds[nestedClaimIndex] ?? ethers.ZeroHash;
+  });
+
+const reconstructBoardHash = (
+  threshold: number,
+  weights: number[],
+  boardEntityIds: string[],
+): string => {
+  const encodedBoard = ethers.AbiCoder.defaultAbiCoder().encode(
+    ['tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)'],
+    [[threshold, boardEntityIds, weights, 0, 0, 0]],
+  );
+  return ethers.keccak256(encodedBoard).toLowerCase();
+};
+
+export async function inspectHankoForHash(
+  hankoBytes: HankoString,
+  hash: string,
+): Promise<{
+  placeholders: string[];
+  recoveredAddresses: string[];
+  claims: Array<{
+    entityId: string;
+    entityIndexes: number[];
+    weights: number[];
+    threshold: number;
+    boardEntityIds: string[];
+    reconstructedBoardHash: string;
+  }>;
+}> {
+  const hanko = decodeHankoEnvelope(hankoBytes);
+  const { unpackRealSignatures } = await import('./hanko');
+  const eoaSignatures = unpackRealSignatures(hanko.packedSignatures);
+  const hashBuffer = bufferFrom(hash.replace('0x', ''), 'hex');
+  const recoveredAddresses: string[] = [];
+
+  for (const sig of eoaSignatures) {
+    if (!sig || sig.length < 65) continue;
+    const r = ethers.hexlify(sig.slice(0, 32));
+    const s = ethers.hexlify(sig.slice(32, 64));
+    const v = sig[64];
+    if (v === undefined) continue;
+    const yParity = (v >= 27 ? v - 27 : v) as 0 | 1;
+    const recoveredAddr = ethers.recoverAddress(ethers.hexlify(hashBuffer), { r, s, v, yParity });
+    recoveredAddresses.push(recoveredAddr.toLowerCase());
+  }
+
+  const claims = hanko.claims.map((claim) => {
+    const boardEntityIds = reconstructBoardEntityIds(
+      claim,
+      hanko.placeholders,
+      recoveredAddresses,
+      hanko.claims.map((nestedClaim) => nestedClaim.entityId),
+    );
+    return {
+      entityId: claim.entityId,
+      entityIndexes: [...claim.entityIndexes],
+      weights: [...claim.weights],
+      threshold: claim.threshold,
+      boardEntityIds,
+      reconstructedBoardHash: reconstructBoardHash(claim.threshold, claim.weights, boardEntityIds),
+    };
+  });
+
+  return {
+    placeholders: hanko.placeholders,
+    recoveredAddresses,
+    claims,
+  };
+}
 
 /**
  * Sign hashes on behalf of an entity using one validator's key
@@ -126,6 +245,22 @@ export async function signEntityHashes(
         ],
       ],
     );
+
+    if (detectEntityType(entityId) === 'lazy') {
+      const inspected = await inspectHankoForHash(abiEncoded, hash);
+      const matchingClaim = inspected.claims.find(
+        (claim) => String(claim.entityId).toLowerCase() === String(entityId).toLowerCase(),
+      );
+      if (!matchingClaim) {
+        throw new Error(`LAZY_HANKO_SELF_MISMATCH: missing claim for ${entityId}`);
+      }
+      if (String(matchingClaim.reconstructedBoardHash).toLowerCase() !== String(entityId).toLowerCase()) {
+        throw new Error(
+          `LAZY_HANKO_SELF_MISMATCH: entityId=${entityId} reconstructed=${matchingClaim.reconstructedBoardHash} ` +
+            `signerId=${signerId} recovered=${inspected.recoveredAddresses.join(',')}`,
+        );
+      }
+    }
 
     hankos.push(abiEncoded);
   }
@@ -301,21 +436,15 @@ export async function verifyHankoForHash(
   env?: any
 ): Promise<{ valid: boolean; entityId: string | null }> {
   try {
-    // Decode hanko from ABI - MATCH EP.sol struct (4 fields, NO expectedQuorumHash)
-    const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
-      ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
-      hankoBytes
-    );
-
+    const decodedHanko = decodeHankoEnvelope(hankoBytes);
     const hanko = {
-      placeholders: decoded[0][0].map((p: string) => bufferFrom(p.replace('0x', ''), 'hex')),
-      packedSignatures: bufferFrom(decoded[0][1].replace('0x', ''), 'hex'),
-      claims: decoded[0][2].map((c: any) => ({
-        entityId: bufferFrom(c[0].replace('0x', ''), 'hex'),
-        entityIndexes: c[1].map((idx: bigint) => Number(idx)),
-        weights: c[2].map((w: bigint) => Number(w)),
-        threshold: Number(c[3]),
-        // NO expectedQuorumHash field
+      placeholders: decodedHanko.placeholders.map((p) => bufferFrom(p.replace('0x', ''), 'hex')),
+      packedSignatures: decodedHanko.packedSignatures,
+      claims: decodedHanko.claims.map((c) => ({
+        entityId: bufferFrom(c.entityId.replace('0x', ''), 'hex'),
+        entityIndexes: [...c.entityIndexes],
+        weights: [...c.weights],
+        threshold: c.threshold,
       })),
     };
 
@@ -355,7 +484,7 @@ export async function verifyHankoForHash(
     // CRITICAL: Find claim for expectedEntityId (NOT just last claim!)
     const expectedEntityIdPadded = expectedEntityId.replace('0x', '').padStart(64, '0');
     const matchingClaim = hanko.claims.find((c: { entityId: Uint8Array }) => {
-      const claimEntityHex = Array.from(c.entityId).map((b: number) => b.toString(16).padStart(2, '0')).join('');
+      const claimEntityHex = toEntityIdHex(c.entityId).replace('0x', '');
       return claimEntityHex === expectedEntityIdPadded;
     });
 
@@ -365,6 +494,26 @@ export async function verifyHankoForHash(
     }
 
     const targetEntity = '0x' + Array.from(matchingClaim.entityId).map((b) => (b as number).toString(16).padStart(2, '0')).join('');
+    const claimEntityIds = hanko.claims.map((claim) => toEntityIdHex(claim.entityId).toLowerCase());
+    const reconstructedBoardEntityIds = reconstructBoardEntityIds(
+      matchingClaim,
+      decodedHanko.placeholders,
+      recoveredAddresses,
+      claimEntityIds,
+    );
+    const reconstructedBoardHash = reconstructBoardHash(
+      matchingClaim.threshold,
+      matchingClaim.weights,
+      reconstructedBoardEntityIds,
+    );
+
+    if (detectEntityType(expectedEntityId) === 'lazy' && reconstructedBoardHash !== expectedEntityId.toLowerCase()) {
+      console.warn(
+        `❌ Hanko rejected: lazy entity board hash mismatch ` +
+          `expected=${expectedEntityId.slice(-8)} reconstructed=${reconstructedBoardHash.slice(-8)}`,
+      );
+      return { valid: false, entityId: null };
+    }
 
     // CRITICAL: Verify recovered addresses match entity's board validators
     let expectedAddresses: string[] = [];

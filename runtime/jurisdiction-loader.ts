@@ -77,10 +77,17 @@ export function loadJurisdictions(): JurisdictionsData {
   try {
     const fs = require('fs'); // Dynamic require for Node.js only
     const path = require('path');
-    // Try multiple locations: /jurisdictions/jurisdictions.json (new), then root (legacy)
-    const newPath = path.resolve(process.cwd(), 'jurisdictions', 'jurisdictions.json');
-    const legacyPath = path.resolve(process.cwd(), 'jurisdictions.json');
-    const filePath = fs.existsSync(newPath) ? newPath : legacyPath;
+    const overridePath =
+      typeof process !== 'undefined' && typeof process.env.XLN_JURISDICTIONS_PATH === 'string'
+        ? process.env.XLN_JURISDICTIONS_PATH.trim()
+        : '';
+    // Try shard-local override first, then canonical /jurisdictions/jurisdictions.json, then root legacy.
+    const candidates = [
+      overridePath,
+      path.resolve(process.cwd(), 'jurisdictions', 'jurisdictions.json'),
+      path.resolve(process.cwd(), 'jurisdictions.json'),
+    ].filter((candidate: string) => candidate.length > 0);
+    const filePath = candidates.find((candidate: string) => fs.existsSync(candidate)) ?? '';
 
     if (!fs.existsSync(filePath)) {
       console.warn('INFO: jurisdictions.json not found in /jurisdictions/ or root; using defaults');

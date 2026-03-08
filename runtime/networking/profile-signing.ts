@@ -19,8 +19,8 @@
 import { keccak256 } from 'ethers';
 import type { Profile } from './gossip';
 import type { Env, HankoString } from '../types';
-import { signHashesAsSingleEntity, verifyHankoForHash } from '../hanko-signing';
-import { getCachedSignerPublicKey } from '../account-crypto';
+import { inspectHankoForHash, signHashesAsSingleEntity, verifyHankoForHash } from '../hanko-signing';
+import { getCachedSignerAddress, getCachedSignerPublicKey } from '../account-crypto';
 
 const PROFILE_SIGN_DOMAIN = 'xln-profile-v1';
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -109,6 +109,26 @@ export async function signProfile(
   const profileHanko = hankos[0];
   if (!profileHanko) {
     throw new Error('PROFILE_SIGN_FAILED: No hanko returned');
+  }
+
+  // Fail fast if we just produced a non-canonical lazy-entity hanko.
+  // This catches wrong signer-key selection at the source runtime.
+  try {
+    const details = await inspectHankoForHash(profileHanko, hash);
+    const reconstructedBoardHash = details.claims[0]?.reconstructedBoardHash?.toLowerCase();
+    const expectedEntityId = String(profile.entityId || '').toLowerCase();
+    if (reconstructedBoardHash && reconstructedBoardHash !== expectedEntityId) {
+      const recovered = details.recoveredAddresses[0] || 'none';
+      const cachedSignerAddress = getCachedSignerAddress(signerId) || 'none';
+      throw new Error(
+        `PROFILE_SIGN_SOURCE_MISMATCH: entity=${expectedEntityId} signerId=${signerId} ` +
+        `cachedSigner=${cachedSignerAddress} recovered=${recovered} reconstructed=${reconstructedBoardHash}`,
+      );
+    }
+  } catch (error) {
+    throw error instanceof Error
+      ? error
+      : new Error(`PROFILE_SIGN_SOURCE_INSPECT_FAILED: ${String(error)}`);
   }
 
   return {

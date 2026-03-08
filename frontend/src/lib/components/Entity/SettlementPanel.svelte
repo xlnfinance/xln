@@ -619,6 +619,28 @@
       await getXLN();
       const signerId = resolveSignerId(env);
       const feeOverrides = buildFeeOverrides();
+      const pendingBatch = (replica as any)?.state?.jBatchState?.batch;
+      console.error('[settle-ui] broadcastBatch.start', JSON.stringify({
+        entityId,
+        signerId,
+        activeIsLive,
+        canBroadcastDraft,
+        hasDraftBatch,
+        hasSentBatch,
+        sending,
+        pendingOps: {
+          disputeStarts: Number(pendingBatch?.disputeStarts?.length || 0),
+          disputeFinalizations: Number(pendingBatch?.disputeFinalizations?.length || 0),
+          reserveToCollateral: Number(pendingBatch?.reserveToCollateral?.length || 0),
+          collateralToReserve: Number(pendingBatch?.collateralToReserve?.length || 0),
+          reserveToReserve: Number(pendingBatch?.reserveToReserve?.length || 0),
+          settlements: Number(pendingBatch?.settlements?.length || 0),
+        },
+        feeOverrides: feeOverrides ? {
+          maxFeePerGas: String((feeOverrides as any).maxFeePerGas ?? ''),
+          maxPriorityFeePerGas: String((feeOverrides as any).maxPriorityFeePerGas ?? ''),
+        } : null,
+      }));
 
       await enqueueEntityInputs(env, [{
         entityId,
@@ -629,6 +651,7 @@
         }],
       }]);
 
+      console.error('[settle-ui] broadcastBatch.enqueued', JSON.stringify({ entityId, signerId }));
       console.log('[On-J] j_broadcast queued');
     } catch (error) {
       console.error('[On-J] Batch failed:', error);

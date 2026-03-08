@@ -19,6 +19,7 @@ import {
   isBatchEmpty, getBatchSize, cloneJBatch, encodeJBatch,
   computeBatchHankoHash, batchOpCount, createEmptyBatch,
 } from '../../j-batch';
+import { resolveRuntimeJurisdictionConfig } from '../../jurisdiction-runtime';
 import type { ApplyEntityTxResult } from '../apply';
 
 const ZERO_HASH_32 = `0x${'0'.repeat(64)}`;
@@ -144,16 +145,33 @@ export async function handleJBroadcast(
   }
 
   // ── Validate: jurisdiction configured ──
-  const jurisdiction = entityState.config.jurisdiction;
+  const jurisdiction = resolveRuntimeJurisdictionConfig(env, newState.config.jurisdiction);
   if (!jurisdiction) {
     addMessage(newState, '❌ No jurisdiction configured for this entity');
     return { newState, outputs, jOutputs };
   }
+  newState.config = {
+    ...newState.config,
+    jurisdiction,
+  };
 
   const depositoryAddress = jurisdiction.depositoryAddress;
   const chainId = BigInt(jurisdiction.chainId ?? 0);
   if (!depositoryAddress || depositoryAddress === '0x0000000000000000000000000000000000000000') {
-    addMessage(newState, '❌ Missing depository address');
+    const jReplicaSummary = Array.from(env.jReplicas?.values?.() || []).map((replica) => ({
+      name: replica.name,
+      depositoryAddress: replica.depositoryAddress || replica.contracts?.depository || '',
+      entityProviderAddress: replica.entityProviderAddress || replica.contracts?.entityProvider || '',
+      chainId: replica.chainId ?? replica.jadapter?.chainId ?? 0,
+    }));
+    const debugMessage =
+      `❌ Missing depository address ` +
+      `[resolved=${String(depositoryAddress || 'none')}] ` +
+      `[jurisdiction=${jurisdiction.name}:${String(jurisdiction.depositoryAddress || 'none')}:${String(jurisdiction.entityProviderAddress || 'none')}:${String(jurisdiction.chainId ?? 'none')}] ` +
+      `[active=${String(env.activeJurisdiction || 'none')}] ` +
+      `[jReplicas=${JSON.stringify(jReplicaSummary)}]`;
+    addMessage(newState, debugMessage);
+    console.error(`[j_broadcast] ${debugMessage}`);
     return { newState, outputs, jOutputs };
   }
   if (!chainId) {

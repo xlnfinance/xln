@@ -11,7 +11,7 @@ import type { Account, Depository, EntityProvider, DeltaTransformer } from '../.
 import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types';
 
 import type { BrowserVMState, JTx } from '../types';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, JTokenInfo } from './types';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, JTokenInfo, JReserveMint } from './types';
 import { computeAccountKey, entityIdToAddress, isCanonicalEvent, processEventBatch, type RawJEvent } from './helpers';
 import type { BrowserVMProvider } from './browservm-provider';
 
@@ -260,6 +260,23 @@ export async function createBrowserVMAdapter(
         blockHash: e.blockHash ?? '0x',
         transactionHash: e.transactionHash ?? '0x',
       }));
+    },
+
+    async debugFundReservesBatch(mints: JReserveMint[]): Promise<JEvent[]> {
+      const events: JEvent[] = [];
+      for (const mint of mints) {
+        const batchEvents = await browserVM.debugFundReserves(mint.entityId, mint.tokenId, mint.amount);
+        events.push(
+          ...batchEvents.map((e: any) => ({
+            name: e.name,
+            args: e.args ?? {},
+            blockNumber: e.blockNumber ?? 0,
+            blockHash: e.blockHash ?? '0x',
+            transactionHash: e.transactionHash ?? '0x',
+          })),
+        );
+      }
+      return events;
     },
 
     async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<JEvent[]> {

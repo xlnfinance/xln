@@ -10,6 +10,7 @@ import {
   closeRuntimeDb,
 } from '../runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { generateLazyEntityId } from '../entity-factory';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);
@@ -36,8 +37,8 @@ async function main() {
   const signer2 = deriveSignerAddressSync(seed, '2');
   registerSignerKey(signer2, deriveSignerKeySync(seed, '2'));
 
-  const entityA = '0x' + 'a'.repeat(64);
-  const entityB = '0x' + 'b'.repeat(64);
+  const entityA = generateLazyEntityId([signer1], 1n).toLowerCase();
+  const entityB = generateLazyEntityId([signer2], 1n).toLowerCase();
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [
@@ -74,16 +75,30 @@ async function main() {
   });
   await processRuntime(env, []);
 
-  // Generate WAL frames on top of a checkpoint using no-op entity inputs.
-  // This isolates snapshot+WAL replay correctness from account-consensus signing paths.
-  for (let i = 0; i < 12; i++) {
-    await processRuntime(env, [
+  // Generate honest WAL frames above the genesis checkpoint using the smallest
+  // real bilateral flow: open account A->B, then let the ACK/proposal chain settle.
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [],
+    entityInputs: [
       {
         entityId: entityA,
         signerId: signer1,
-        entityTxs: [],
+        entityTxs: [
+          {
+            type: 'openAccount',
+            data: {
+              targetEntityId: entityB,
+              creditAmount: 1000n,
+              tokenId: 1,
+            },
+          },
+        ],
       },
-    ]);
+    ],
+  });
+  await processRuntime(env, []);
+  for (let i = 0; i < 10; i++) {
+    await processRuntime(env, []);
   }
 
   assert(env.eReplicas.size === 2, `expected 2 replicas before reload, got ${env.eReplicas.size}`);

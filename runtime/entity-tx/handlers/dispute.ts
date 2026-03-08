@@ -18,7 +18,13 @@ import type { EntityState, EntityTx, EntityInput, Env, AccountMachine } from '..
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddRevealSecret } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
-import { buildAccountProofBody, createDisputeProofHash, buildInitialDisputeProof } from '../../proof-builder';
+import {
+  buildAccountProofBody,
+  createDisputeProofHash,
+  createDisputeProofHashWithNonce,
+  buildInitialDisputeProof,
+} from '../../proof-builder';
+import { inspectHankoForHash, verifyHankoForHash } from '../../hanko-signing';
 
 // === Delta Transformer Arguments (inlined from transformer-args.ts) ===
 const MAX_FILL_RATIO = 0xffff;
@@ -132,6 +138,87 @@ function getEnvJAdapter(env: Env) {
   return null;
 }
 
+async function resolveDepositoryAddress(entityState: EntityState, env: Env): Promise<string> {
+  const browserVmAddress =
+    env.browserVM?.getDepositoryAddress?.() ||
+    env.browserVM?.browserVM?.getDepositoryAddress?.();
+
+  // Active J-replica is the canonical domain separator for live disputes.
+  if (env.activeJurisdiction) {
+    const activeReplica = env.jReplicas?.get(env.activeJurisdiction);
+    if (activeReplica?.jadapter?.addresses?.depository) {
+      if (browserVmAddress && browserVmAddress !== activeReplica.jadapter.addresses.depository) {
+        console.warn(
+          `[dispute] browserVM depository ${browserVmAddress} ignored in favor of active jurisdiction ` +
+            `${env.activeJurisdiction}=${activeReplica.jadapter.addresses.depository}`,
+        );
+      }
+      return activeReplica.jadapter.addresses.depository;
+    }
+    if (activeReplica?.depositoryAddress) {
+      if (browserVmAddress && browserVmAddress !== activeReplica.depositoryAddress) {
+        console.warn(
+          `[dispute] browserVM depository ${browserVmAddress} ignored in favor of active jurisdiction ` +
+            `${env.activeJurisdiction}=${activeReplica.depositoryAddress}`,
+        );
+      }
+      return activeReplica.depositoryAddress;
+    }
+    if (activeReplica?.contracts?.depository) {
+      if (browserVmAddress && browserVmAddress !== activeReplica.contracts.depository) {
+        console.warn(
+          `[dispute] browserVM depository ${browserVmAddress} ignored in favor of active jurisdiction ` +
+            `${env.activeJurisdiction}=${activeReplica.contracts.depository}`,
+        );
+      }
+      return activeReplica.contracts.depository;
+    }
+  }
+
+  for (const jReplica of env.jReplicas?.values?.() || []) {
+    if (jReplica?.jadapter?.addresses?.depository) {
+      return jReplica.jadapter.addresses.depository;
+    }
+    if (jReplica?.depositoryAddress) {
+      return jReplica.depositoryAddress;
+    }
+    if (jReplica?.contracts?.depository) {
+      return jReplica.contracts.depository;
+    }
+  }
+
+  if (browserVmAddress && !/^0x0{40}$/i.test(browserVmAddress)) {
+    return browserVmAddress;
+  }
+
+  if (entityState.config.jurisdiction?.depositoryAddress) {
+    return entityState.config.jurisdiction.depositoryAddress;
+  }
+
+  const jadapter = getEnvJAdapter(env);
+  const adapterAddress = jadapter?.getDepositoryAddress?.();
+  if (adapterAddress && !/^0x0{40}$/i.test(adapterAddress)) {
+    return adapterAddress;
+  }
+
+  try {
+    const { getJurisdictionByName, getAvailableJurisdictions } = await import('../../jurisdiction-config');
+    const activeName = entityState.config.jurisdiction?.name || env.activeJurisdiction || '';
+    const byName = activeName ? await getJurisdictionByName(activeName) : undefined;
+    if (byName?.depositoryAddress && !/^0x0{40}$/i.test(byName.depositoryAddress)) {
+      return byName.depositoryAddress;
+    }
+    const available = await getAvailableJurisdictions();
+    if (available.length === 1 && available[0]?.depositoryAddress && !/^0x0{40}$/i.test(available[0].depositoryAddress)) {
+      return available[0].depositoryAddress;
+    }
+  } catch {
+    // Keep zero-address fallback below; caller turns this into explicit local failure.
+  }
+
+  return '0x0000000000000000000000000000000000000000';
+}
+
 const ZERO_HASH_32 = `0x${'0'.repeat(64)}`;
 const hasActiveDisputeHash = (hash: unknown): boolean => {
   const normalized = String(hash ?? '').toLowerCase();
@@ -225,6 +312,7 @@ export async function handleDisputeStart(
   // CRITICAL: Must use the SAME proofBodyHash that the hanko signed, not a fresh one!
   const counterpartyDisputeHanko = account.counterpartyDisputeProofHanko;
   const storedProofBodyHash = account.counterpartyDisputeProofBodyHash;
+  const storedDisputeHash = account.counterpartyDisputeHash;
 
   if (!counterpartyDisputeHanko || counterpartyDisputeHanko === '0x' || counterpartyDisputeHanko.length <= 2) {
     addMessage(newState, `❌ Missing counterparty dispute hanko - cannot start dispute`);
@@ -318,6 +406,96 @@ export async function handleDisputeStart(
     addMessage(newState, msg);
     console.warn(`⚠️ disputeStart blocked: ${msg}`);
     return { newState, outputs };
+  }
+
+  const depositoryAddress = await resolveDepositoryAddress(entityState, env);
+  if (ethers.isAddress(depositoryAddress) && !/^0x0{40}$/i.test(depositoryAddress)) {
+    const exactDisputeHash =
+      storedDisputeHash && storedDisputeHash.startsWith('0x')
+        ? storedDisputeHash
+        : createDisputeProofHashWithNonce(account, proofBodyHashToUse, depositoryAddress, signedNonce);
+    const disputeHashSource =
+      storedDisputeHash && storedDisputeHash.startsWith('0x') ? 'stored' : 'recomputed';
+    const hankoDebug = await inspectHankoForHash(counterpartyDisputeHanko, exactDisputeHash);
+    const matchingClaim = hankoDebug.claims.find(
+      (claim) => String(claim.entityId).toLowerCase() === String(counterpartyEntityId).toLowerCase(),
+    );
+    console.log(
+      `🧾 disputeStart.debug ${JSON.stringify({
+        contractGuard: 'EntityProvider.sol:469 require(entityId == boardHash)',
+        entityId: entityState.entityId,
+        counterpartyEntityId,
+        signedNonce,
+        nonceSource,
+        onChainNonce,
+        proofHeaderNonce: account.proofHeader.nonce,
+        storedCounterpartyDisputeProofNonce: account.counterpartyDisputeProofNonce,
+        proofBodyHash: proofBodyHashToUse,
+        disputeHashSource,
+        disputeHash: exactDisputeHash,
+        depositoryAddress,
+        hankoBytes: Math.max(counterpartyDisputeHanko.length - 2, 0) / 2,
+        recoveredAddresses: hankoDebug.recoveredAddresses,
+        matchingClaim: matchingClaim
+          ? {
+              entityId: matchingClaim.entityId,
+              threshold: matchingClaim.threshold,
+              entityIndexes: matchingClaim.entityIndexes,
+              weights: matchingClaim.weights,
+              boardEntityIds: matchingClaim.boardEntityIds,
+              reconstructedBoardHash: matchingClaim.reconstructedBoardHash,
+              entityMatchesBoardHash:
+                String(matchingClaim.entityId).toLowerCase() ===
+                String(matchingClaim.reconstructedBoardHash).toLowerCase(),
+            }
+          : null,
+      })}`,
+    );
+    const exactDisputeVerify = await verifyHankoForHash(
+      counterpartyDisputeHanko,
+      exactDisputeHash,
+      counterpartyEntityId,
+      env,
+    );
+    if (!exactDisputeVerify.valid) {
+      const currentProofResult = buildAccountProofBody(account);
+      const msg =
+        `❌ Counterparty dispute proof invalid for current account snapshot; ` +
+        `nonce=${signedNonce} onChain=${onChainNonce} source=${nonceSource}`;
+      addMessage(newState, msg);
+      console.error(
+        `❌ disputeStart preflight failed: ${JSON.stringify({
+          entityId: entityState.entityId,
+          counterpartyEntityId,
+          signedNonce,
+          nonceSource,
+          onChainNonce,
+          proofHeaderNonce: account.proofHeader.nonce,
+          counterpartyDisputeProofNonce: account.counterpartyDisputeProofNonce,
+          storedProofBodyHash: proofBodyHashToUse,
+          storedDisputeHash,
+          currentProofBodyHash: currentProofResult.proofBodyHash,
+          storedHashMatchesCurrent: proofBodyHashToUse === currentProofResult.proofBodyHash,
+          pendingFrameHeight: account.pendingFrame?.height ?? null,
+          currentFrameHeight: account.currentFrame?.height ?? null,
+          currentHeight: account.currentHeight,
+          lockCount: account.locks?.size ?? 0,
+          swapOfferCount: account.swapOffers?.size ?? 0,
+          knownDisputeProofHashes: Object.keys(account.disputeProofNoncesByHash ?? {}),
+          disputeHashSource,
+          disputeHash: exactDisputeHash,
+          depositoryAddress,
+          recoveredEntityId: exactDisputeVerify.entityId,
+          hankoBytes: Math.max(counterpartyDisputeHanko.length - 2, 0) / 2,
+        })}`,
+      );
+      return { newState, outputs };
+    }
+  } else {
+    console.warn(
+      `⚠️ disputeStart preflight skipped: missing depositoryAddress ` +
+      `entity=${entityState.entityId.slice(-4)} counterparty=${counterpartyEntityId.slice(-4)}`,
+    );
   }
 
   // The signed nonce is passed directly to the contract. Solidity requires:

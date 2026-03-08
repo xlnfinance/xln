@@ -10,7 +10,7 @@ import { DEBUG } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify, safeParse } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
-import { cloneJBatch } from './j-batch';
+import { cloneJBatch, type CompletedBatch } from './j-batch';
 
 // Message size limit for snapshot efficiency
 const MESSAGE_LIMIT = 10;
@@ -128,6 +128,17 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
 export const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
 export const cloneArray = <T>(arr: T[]) => [...arr];
 
+const cloneBatchHistoryEntry = (entry: CompletedBatch): CompletedBatch => {
+  const cloned: CompletedBatch = { ...entry };
+  if (entry.batch) {
+    cloned.batch = cloneJBatch(entry.batch);
+  }
+  if (entry.operations) {
+    cloned.operations = { ...entry.operations };
+  }
+  return cloned;
+};
+
 /**
  * Creates a safe deep clone of entity state with guaranteed jBlock preservation
  * This prevents the jBlock corruption bugs that occur with manual state spreading
@@ -216,6 +227,9 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
           }
         : undefined,
     } : undefined,
+    batchHistory: Array.isArray(entityState.batchHistory)
+      ? entityState.batchHistory.map((entry) => cloneBatchHistoryEntry(entry as CompletedBatch))
+      : undefined,
     // JBlock consensus state
     lastFinalizedJHeight: entityState.lastFinalizedJHeight ?? 0,
     jBlockObservations: cloneArray(entityState.jBlockObservations || []),
@@ -713,6 +727,9 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   if (account.currentDisputeProofBodyHash) {
     result.currentDisputeProofBodyHash = account.currentDisputeProofBodyHash;
   }
+  if (account.currentDisputeHash) {
+    result.currentDisputeHash = account.currentDisputeHash;
+  }
   if (account.counterpartyDisputeProofHanko) {
     result.counterpartyDisputeProofHanko = account.counterpartyDisputeProofHanko;
   }
@@ -721,6 +738,9 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   }
   if (account.counterpartyDisputeProofBodyHash) {
     result.counterpartyDisputeProofBodyHash = account.counterpartyDisputeProofBodyHash;
+  }
+  if (account.counterpartyDisputeHash) {
+    result.counterpartyDisputeHash = account.counterpartyDisputeHash;
   }
   if (account.disputeProofNoncesByHash) {
     result.disputeProofNoncesByHash = { ...account.disputeProofNoncesByHash };

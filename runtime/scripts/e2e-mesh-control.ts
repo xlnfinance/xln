@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { safeStringify } from '../serialization-utils';
@@ -180,6 +180,7 @@ const parseArgs = (): Args => {
 
 const args = parseArgs();
 const relayUrl = `ws://${args.host}:${args.port}/relay`;
+const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 
 const relayStore: RelayStore = createRelayStore('e2e-mesh-relay');
 const routerConfig: RelayRouterConfig = {
@@ -286,16 +287,25 @@ const fetchJson = async <T>(url: string, timeoutMs = 2_000): Promise<T | null> =
   }
 };
 
-const readCanonicalJurisdictions = (): string => {
-  const candidates = [
-    resolve(process.cwd(), 'jurisdictions', 'jurisdictions.json'),
-    resolve(process.cwd(), 'jurisdictions.json'),
-  ];
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) continue;
-    return readFileSync(candidate, 'utf8');
+const fetchText = async (url: string, timeoutMs = 2_000): Promise<string | null> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return null;
+    return await response.text();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
-  throw new Error('JURISDICTIONS_JSON_MISSING');
+};
+
+const readShardJurisdictions = (): string => {
+  if (!existsSync(shardJurisdictionsPath)) {
+    throw new Error(`JURISDICTIONS_JSON_MISSING path=${shardJurisdictionsPath}`);
+  }
+  return readFileSync(shardJurisdictionsPath, 'utf8');
 };
 
 const pollHubHealth = async (child: HubChild): Promise<void> => {
@@ -343,6 +353,7 @@ const spawnHub = (child: HubChild): void => {
     env: {
       ...process.env,
       XLN_DB_PATH: child.dbPath,
+      XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ANVIL_RPC: args.rpcUrl,
       USE_ANVIL: 'true',
     },
@@ -591,6 +602,25 @@ const waitForSingleHubReady = async (child: HubChild): Promise<void> => {
   throw new Error(`${child.name}_READY_TIMEOUT ${safeStringify(child.lastHealth)}`);
 };
 
+const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (existsSync(shardJurisdictionsPath)) {
+      return;
+    }
+    const payload = await fetchText(`http://${args.host}:${child.apiPort}/api/jurisdictions`);
+    if (payload) {
+      writeFileSync(shardJurisdictionsPath, payload, 'utf8');
+      return;
+    }
+    if (child.proc?.exitCode !== null) {
+      throw new Error(`${child.name}_EXITED_BEFORE_JURISDICTIONS code=${String(child.proc?.exitCode)}`);
+    }
+    await delay(150);
+  }
+  throw new Error(`${child.name}_JURISDICTIONS_TIMEOUT path=${shardJurisdictionsPath}`);
+};
+
 const runReset = async (requestedMarketMaker: boolean): Promise<void> => {
   resetState.inProgress = true;
   resetState.lastError = null;
@@ -622,6 +652,7 @@ const runReset = async (requestedMarketMaker: boolean): Promise<void> => {
     const waitH1StartedAt = startTiming('reset_wait_h1');
     await waitForSingleHubReady(h1);
     finishTiming('reset_wait_h1', waitH1StartedAt);
+    await waitForShardJurisdictions(h1);
 
     const spawnH23StartedAt = startTiming('reset_spawn_h23');
     for (const child of h23) {
@@ -952,7 +983,8 @@ const server = Bun.serve({
 
     if (pathname === '/api/jurisdictions') {
       try {
-        return new Response(readCanonicalJurisdictions(), {
+        const payload = readShardJurisdictions();
+        return new Response(payload, {
           headers: {
             ...headers,
             'Content-Type': 'application/json',

@@ -1,0 +1,486 @@
+/**
+ * @typedef {{
+ *   userId: string,
+ *   createdAt: number,
+ *   lastSeenAt: number,
+ * }} SessionInfo
+ *
+ * @typedef {{
+ *   entityId: string,
+ *   signerId: string | null,
+ *   daemonWsUrl: string,
+ *   walletUrl: string,
+ *   jurisdictionId: string | null,
+ *   connected: boolean,
+ *   lastSyncOkAt: number | null,
+ *   lastSyncError: string | null,
+ * }} CustodyInfo
+ *
+ * @typedef {{ amount: string, href: string }} DepositLink
+ *
+ * @typedef {{
+ *   tokenId: number,
+ *   symbol: string,
+ *   name: string,
+ *   decimals: number,
+ *   accent: string,
+ *   amountMinor: string,
+ *   amountDisplay: string,
+ *   depositLinks: DepositLink[],
+ * }} TokenRow
+ *
+ * @typedef {{
+ *   tokenId: number,
+ *   symbol: string,
+ *   amountMinor: string,
+ *   amountDisplay: string,
+ * }} HeadlineBalance
+ *
+ * @typedef {{
+ *   kind: 'deposit' | 'withdrawal',
+ *   id: string,
+ *   status: string,
+ *   tokenId: number,
+ *   amountMinor: string,
+ *   amountDisplay: string,
+ *   description: string,
+ *   counterpartyEntityId: string,
+ *   hashlock: string | null,
+ *   frameHeight: number | null,
+ *   createdAt: number,
+ *   updatedAt: number,
+ *   error?: string | null,
+ * }} ActivityItem
+ *
+ * @typedef {{
+ *   session: SessionInfo,
+ *   custody: CustodyInfo,
+ *   headlineBalance: HeadlineBalance,
+ *   tokens: TokenRow[],
+ *   activity: ActivityItem[],
+ * }} DashboardPayload
+ */
+
+const app = document.getElementById('app');
+if (!app) {
+  throw new Error('Missing #app container');
+}
+
+/** @type {DashboardPayload | null} */
+let state = null;
+let withdrawMessage = '';
+let withdrawError = '';
+let submitting = false;
+let selectedTokenId = 1;
+let withdrawAmount = '';
+let withdrawTargetEntityId = '';
+let depositTokenId = 1;
+let depositAmount = '10';
+let depositHint = '';
+let pendingDepositHref = '';
+
+const escapeHtml = (value) => String(value || '')
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#39;');
+
+const shortId = (value) => {
+  const raw = String(value || '');
+  if (raw.length <= 16) return raw;
+  return `${raw.slice(0, 10)}...${raw.slice(-8)}`;
+};
+
+const formatTime = (value) => {
+  if (!value) return 'n/a';
+  return new Date(value).toLocaleString();
+};
+
+const getSelectedDepositToken = () => {
+  if (!state) return null;
+  return state.tokens.find((token) => token.tokenId === depositTokenId) || state.tokens[0] || null;
+};
+
+const createInvoiceId = () => {
+  return `inv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+};
+
+const buildDepositHref = (tokenId, amount) => {
+  if (!state) return '';
+  const url = new URL(state.custody.walletUrl);
+  const params = new URLSearchParams();
+  const invoiceId = createInvoiceId();
+  params.set('id', state.custody.entityId);
+  params.set('token', String(tokenId));
+  params.set('amt', String(amount).trim());
+  params.set('u', state.session.userId);
+  params.set('desc', `Custody invoice:${invoiceId}`);
+  params.set('locked', '1');
+  if (state.custody.jurisdictionId) {
+    params.set('jId', state.custody.jurisdictionId);
+  }
+  url.search = '';
+  url.hash = `pay?${params.toString()}`;
+  return url.toString();
+};
+
+const renderActivity = () => {
+  if (!state || state.activity.length === 0) {
+    return '<div class="empty-card"><p>No deposits or withdrawals yet.</p></div>';
+  }
+
+  return `<div class="activity-list">${state.activity.map((item) => {
+    const badge = item.kind === 'deposit' ? 'IN' : 'OUT';
+    const status = item.error ? `${item.status} · ${escapeHtml(item.error)}` : item.status;
+    return `
+      <div class="activity-row">
+        <div class="activity-badge ${item.kind}">${badge}</div>
+        <div>
+          <div class="activity-title">${item.kind === 'deposit' ? 'Deposit credited' : 'Withdrawal queued'}</div>
+          <div class="activity-sub">${escapeHtml(item.description || item.counterpartyEntityId)}</div>
+          <div class="activity-sub">${escapeHtml(shortId(item.counterpartyEntityId))} · frame ${item.frameHeight ?? 'pending'}</div>
+        </div>
+        <div class="activity-amount">
+          <div>${escapeHtml(item.amountDisplay)}</div>
+          <div class="status-text">${escapeHtml(status)}</div>
+        </div>
+      </div>
+    `;
+  }).join('')}</div>`;
+};
+
+const renderIntegration = () => {
+  if (!state) return '';
+  const daemon = state.custody.daemonWsUrl;
+  const signer = state.custody.signerId || '<daemon resolves proposer signer>';
+  return `
+    <section class="activity-card">
+      <h2>How To Integrate XLN</h2>
+      <div class="hint">This custody service is intentionally thin. It stores sessions and balances locally, and everything financial goes through one XLN daemon over websocket.</div>
+      <div class="token-list" style="margin-top:16px;">
+        <div class="token-card">
+          <div class="token-name">1. Start the XLN daemon</div>
+          <pre class="activity-sub">bun runtime/server.ts --port 8080</pre>
+          <div class="activity-sub">The custody backend talks to <code>${escapeHtml(daemon)}</code> and uses the daemon's persisted frame journal as the source of truth.</div>
+        </div>
+        <div class="token-card">
+          <div class="token-name">2. Run custody against one entity</div>
+          <pre class="activity-sub">CUSTODY_ENTITY_ID=${escapeHtml(state.custody.entityId)}
+CUSTODY_SIGNER_ID=${escapeHtml(signer)}
+CUSTODY_DAEMON_WS=${escapeHtml(daemon)}
+CUSTODY_WALLET_URL=${escapeHtml(state.custody.walletUrl)}
+bun custody/server.ts</pre>
+        </div>
+        <div class="token-card">
+          <div class="token-name">3. Deposit flow</div>
+          <div class="activity-sub">The user enters an amount, clicks <code>Deposit with XLN</code>, and the wallet opens at <code>#pay</code> with recipient id, amount, token, jurisdiction, user id, and a locked description already embedded in the URL. The wallet pre-finds routes and only asks for the final confirmation.</div>
+        </div>
+        <div class="token-card">
+          <div class="token-name">4. Crediting flow</div>
+          <div class="activity-sub">The backend polls daemon RPC <code>get_frame_receipts</code> over websocket, scans persisted <code>HtlcReceived</code> events for this custody entity, extracts <code>uid:&lt;user&gt;</code> from the description, and credits the local balance exactly once.</div>
+        </div>
+        <div class="token-card">
+          <div class="token-name">5. Withdrawal flow</div>
+          <div class="activity-sub">The backend reserves local balance, calls daemon RPC <code>queue_payment</code>, and then finalizes or restores the withdrawal when journal events <code>PaymentFinalized</code> or <code>PaymentFailed</code> appear for the returned hashlock.</div>
+        </div>
+      </div>
+    </section>
+  `;
+};
+
+const render = () => {
+  if (!state) {
+    app.innerHTML = '<div class="loading-card"><div class="pulse"></div><p>Loading custody dashboard...</p></div>';
+    return;
+  }
+
+  const selectedDepositToken = getSelectedDepositToken();
+  const withdrawButtonLabel = submitting ? 'Sending...' : 'Withdraw via XLN';
+  app.innerHTML = `
+    <div class="hero">
+      <section class="hero-card">
+        <div class="eyebrow">Auto session · journal-backed custody</div>
+        <h1>Move balances through XLN without building your own ledger from scratch.</h1>
+        <div class="balance-row">
+          <div class="balance-amount">${escapeHtml(state.headlineBalance.amountDisplay)}</div>
+          <div class="balance-symbol">${escapeHtml(state.headlineBalance.symbol)}</div>
+        </div>
+        <div class="hero-meta">
+          <div class="meta-box">
+            <div class="meta-label">User session</div>
+            <div class="meta-value">${escapeHtml(state.session.userId)}</div>
+          </div>
+          <div class="meta-box">
+            <div class="meta-label">Custody entity</div>
+            <div class="meta-value">${escapeHtml(shortId(state.custody.entityId))}</div>
+          </div>
+          <div class="meta-box">
+            <div class="meta-label">Daemon status</div>
+            <div class="meta-value">${state.custody.connected ? 'Connected' : 'Reconnecting'}</div>
+          </div>
+          <div class="meta-box">
+            <div class="meta-label">Last journal sync</div>
+            <div class="meta-value">${escapeHtml(formatTime(state.custody.lastSyncOkAt))}</div>
+          </div>
+        </div>
+      </section>
+
+      <div class="stack">
+        <section class="panel">
+          <h2>Runtime Link</h2>
+          <div class="status-pill ${state.custody.connected ? 'ok' : 'error'}">${state.custody.connected ? 'Daemon connected' : 'Daemon unavailable'}</div>
+          <div class="activity-sub" style="margin-top:12px;">WS: ${escapeHtml(state.custody.daemonWsUrl)}</div>
+          <div class="activity-sub">Wallet: ${escapeHtml(state.custody.walletUrl)}</div>
+          ${state.custody.lastSyncError ? `<div class="inline-error" style="margin-top:12px;">${escapeHtml(state.custody.lastSyncError)}</div>` : ''}
+        </section>
+
+        <section class="panel">
+          <h2>Deposit With XLN</h2>
+          <div class="hint">Enter an amount and open the wallet in dedicated pay mode. USDC is the default token.</div>
+          <form id="deposit-form" class="deposit-form">
+            <label>
+              Token
+              <select name="depositTokenId">
+                ${state.tokens.map(token => `<option value="${token.tokenId}" ${token.tokenId === depositTokenId ? 'selected' : ''}>${escapeHtml(token.symbol)}</option>`).join('')}
+              </select>
+            </label>
+            <label>
+              Amount
+              <input name="depositAmount" inputmode="decimal" placeholder="10" value="${escapeHtml(depositAmount)}" required />
+            </label>
+            <div class="deposit-presets">
+              ${['1', '10', '100'].map(value => `<button class="secondary" type="button" data-deposit-preset="${value}">${escapeHtml(value)} ${escapeHtml(selectedDepositToken?.symbol || 'USDC')}</button>`).join('')}
+            </div>
+            <button class="primary" type="submit">Deposit with XLN</button>
+            ${pendingDepositHref ? `
+              <div class="hint" style="margin-top:8px;">
+                ${escapeHtml(depositHint || 'Wallet checkout opens in a new tab.')}
+                <a href="${escapeHtml(pendingDepositHref)}" target="_blank" rel="noopener noreferrer">Open wallet manually</a>
+              </div>
+            ` : ''}
+          </form>
+        </section>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section class="action-card">
+        <h2>Balances</h2>
+        <div class="token-list">
+          ${state.tokens.map((token) => `
+            <div class="token-card">
+              <div class="token-top">
+                <div>
+                  <div class="token-name">${escapeHtml(token.symbol)}</div>
+                  <div class="token-sub">${escapeHtml(token.name)}</div>
+                </div>
+                <div class="token-balance" style="color:${escapeHtml(token.accent)};">${escapeHtml(token.amountDisplay)}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </section>
+
+      <section class="action-card">
+        <h2>Withdraw</h2>
+        <form id="withdraw-form">
+          <label>
+            Token
+            <select name="tokenId">
+              ${state.tokens.map(token => `<option value="${token.tokenId}" ${token.tokenId === selectedTokenId ? 'selected' : ''}>${escapeHtml(token.symbol)}</option>`).join('')}
+            </select>
+          </label>
+          <label>
+            Amount
+            <input name="amount" inputmode="decimal" placeholder="10" value="${escapeHtml(withdrawAmount)}" required />
+          </label>
+          <label>
+            Destination entity id
+            <input
+              name="targetEntityId"
+              placeholder="0x..."
+              autocomplete="off"
+              value="${escapeHtml(withdrawTargetEntityId)}"
+              required
+            />
+          </label>
+          <div class="form-foot">
+            <div>
+              <div class="hint">The backend reserves custody balance first, then asks the daemon to queue the cheapest HTLC route.</div>
+              ${withdrawError ? `<div class="inline-error">${escapeHtml(withdrawError)}</div>` : ''}
+              ${withdrawMessage ? `<div class="inline-ok">${escapeHtml(withdrawMessage)}</div>` : ''}
+            </div>
+            <button class="primary" type="submit" ${submitting ? 'disabled' : ''}>${escapeHtml(withdrawButtonLabel)}</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <section class="activity-card">
+      <h2>Recent Activity</h2>
+      ${renderActivity()}
+    </section>
+
+    ${renderIntegration()}
+  `;
+
+  const form = document.getElementById('withdraw-form');
+  if (form instanceof HTMLFormElement) {
+    form.addEventListener('submit', handleWithdrawSubmit);
+    const tokenSelect = form.elements.namedItem('tokenId');
+    if (tokenSelect instanceof HTMLSelectElement) {
+      tokenSelect.addEventListener('change', () => {
+        selectedTokenId = Number(tokenSelect.value || '1');
+        render();
+      });
+    }
+    const amountInput = form.elements.namedItem('amount');
+    if (amountInput instanceof HTMLInputElement) {
+      amountInput.addEventListener('input', () => {
+        withdrawAmount = amountInput.value;
+      });
+    }
+    const targetInput = form.elements.namedItem('targetEntityId');
+    if (targetInput instanceof HTMLInputElement) {
+      targetInput.addEventListener('input', () => {
+        withdrawTargetEntityId = targetInput.value;
+      });
+    }
+  }
+
+  const depositForm = document.getElementById('deposit-form');
+  if (depositForm instanceof HTMLFormElement) {
+    depositForm.addEventListener('submit', handleDepositSubmit);
+    const depositTokenSelect = depositForm.elements.namedItem('depositTokenId');
+    if (depositTokenSelect instanceof HTMLSelectElement) {
+      depositTokenSelect.addEventListener('change', () => {
+        depositTokenId = Number(depositTokenSelect.value || '1');
+        render();
+      });
+    }
+    const depositAmountInput = depositForm.elements.namedItem('depositAmount');
+    if (depositAmountInput instanceof HTMLInputElement) {
+      depositAmountInput.addEventListener('input', () => {
+        depositAmount = depositAmountInput.value;
+      });
+    }
+    depositForm.querySelectorAll('[data-deposit-preset]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const presetValue = button.getAttribute('data-deposit-preset') || '10';
+        depositAmount = presetValue;
+        render();
+      });
+    });
+  }
+};
+
+const load = async () => {
+  const response = await fetch('/api/me', {
+    cache: 'no-store',
+    credentials: 'same-origin',
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to load dashboard (${response.status})`);
+  }
+  state = await response.json();
+  selectedTokenId = state.tokens[0]?.tokenId || 1;
+  depositTokenId = state.tokens[0]?.tokenId || 1;
+  render();
+};
+
+const reload = async () => {
+  const response = await fetch('/api/me', {
+    cache: 'no-store',
+    credentials: 'same-origin',
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to refresh dashboard (${response.status})`);
+  }
+  state = await response.json();
+  if (!state.tokens.some((token) => token.tokenId === selectedTokenId)) {
+    selectedTokenId = state.tokens[0]?.tokenId || 1;
+  }
+  if (!state.tokens.some((token) => token.tokenId === depositTokenId)) {
+    depositTokenId = state.tokens[0]?.tokenId || 1;
+  }
+  render();
+};
+
+async function handleDepositSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) return;
+  const formData = new FormData(form);
+  const tokenId = Number(formData.get('depositTokenId') || String(depositTokenId || 1));
+  const amount = String(formData.get('depositAmount') || depositAmount || '').trim();
+  if (!amount) {
+    return;
+  }
+  depositTokenId = tokenId;
+  depositAmount = amount;
+  const href = buildDepositHref(tokenId, amount);
+  pendingDepositHref = href;
+  depositHint = 'Wallet checkout should open in a new tab.';
+  render();
+
+  const link = document.createElement('a');
+  link.href = href;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+async function handleWithdrawSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) return;
+  const formData = new FormData(form);
+  withdrawMessage = '';
+  withdrawError = '';
+  submitting = true;
+  withdrawAmount = String(formData.get('amount') || '').trim();
+  withdrawTargetEntityId = String(formData.get('targetEntityId') || '').trim();
+  selectedTokenId = Number(formData.get('tokenId') || String(selectedTokenId || 1));
+  render();
+
+  try {
+    const response = await fetch('/api/withdraw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tokenId: selectedTokenId,
+        amount: withdrawAmount,
+        targetEntityId: withdrawTargetEntityId,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok !== true) {
+      throw new Error(payload.error || `Withdrawal failed (${response.status})`);
+    }
+    withdrawMessage = `Queued withdrawal ${payload.withdrawalId}`;
+    withdrawError = '';
+    withdrawAmount = '';
+    withdrawTargetEntityId = '';
+    form.reset();
+    if (state) selectedTokenId = state.tokens[0]?.tokenId || selectedTokenId;
+    await reload();
+  } catch (error) {
+    withdrawError = error instanceof Error ? error.message : String(error);
+    await reload().catch(() => undefined);
+  } finally {
+    submitting = false;
+    render();
+  }
+}
+
+load().catch((error) => {
+  app.innerHTML = `<div class="error-card"><h2>Custody dashboard failed</h2><p>${escapeHtml(error instanceof Error ? error.message : String(error))}</p></div>`;
+});
+
+setInterval(() => {
+  void reload().catch(() => undefined);
+}, 500);

@@ -151,6 +151,69 @@ export async function createEntityFrameHash(
   return ethers.keccak256(ethers.toUtf8Bytes(encoded));
 }
 
+type HankoWitnessEntry = {
+  hanko: HankoString;
+  type: 'accountFrame' | 'dispute' | 'profile' | 'settlement' | 'jBatch';
+  entityHeight: number;
+  createdAt: number;
+};
+
+const attachHankoWitnessToOutputs = (
+  outputs: EntityInput[],
+  jOutputs: JInput[],
+  hankoWitness: Map<string, HankoWitnessEntry>,
+  entityHeight: number,
+): number => {
+  let attachedCount = 0;
+
+  for (const output of outputs) {
+    const txs = Array.isArray(output.entityTxs) ? output.entityTxs : [];
+    for (const tx of txs) {
+      if (tx.type !== 'accountInput') continue;
+      const accountInput = tx.data;
+      if (!accountInput) continue;
+
+      if (accountInput.newAccountFrame?.stateHash) {
+        const frameHankoEntry = hankoWitness.get(accountInput.newAccountFrame.stateHash);
+        if (frameHankoEntry) {
+          accountInput.newHanko = frameHankoEntry.hanko;
+          attachedCount++;
+        }
+      }
+
+      if (accountInput.newDisputeHash) {
+        const disputeHankoEntry = hankoWitness.get(accountInput.newDisputeHash);
+        if (disputeHankoEntry) {
+          accountInput.newDisputeHanko = disputeHankoEntry.hanko;
+          attachedCount++;
+        }
+      }
+
+      if (accountInput.settleAction?.type === 'approve' && accountInput.settleAction.hanko) {
+        for (const entry of hankoWitness.values()) {
+          if (entry.type === 'settlement' && entry.entityHeight === entityHeight) {
+            accountInput.settleAction.hanko = entry.hanko;
+            attachedCount++;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  for (const jInput of jOutputs) {
+    for (const jTx of jInput.jTxs) {
+      if (jTx.type !== 'batch' || !jTx.data?.batchHash) continue;
+      const batchHankoEntry = hankoWitness.get(jTx.data.batchHash);
+      if (!batchHankoEntry) continue;
+      jTx.data.hankoSignature = batchHankoEntry.hanko;
+      attachedCount++;
+    }
+  }
+
+  return attachedCount;
+};
+
 /**
  * Get previous frame hash from entity state.
  * Genesis if height=0, otherwise hash from last committed frame.
@@ -895,7 +958,12 @@ export const applyEntityInput = async (
       console.log(`🚀 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
       // For single signer entities, directly apply transactions without consensus
       // DETERMINISM: Proposer passes env.timestamp (their local time when creating the frame)
-      const { newState: newEntityState, outputs: frameOutputs, jOutputs: frameJOutputs } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool, false, env.timestamp);
+      const {
+        newState: newEntityState,
+        outputs: frameOutputs,
+        jOutputs: frameJOutputs,
+        collectedHashes,
+      } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool, false, env.timestamp);
       const newHeight = workingReplica.state.height + 1;
       const newTimestamp = env.timestamp;
 
@@ -914,6 +982,57 @@ export const applyEntityInput = async (
         workingReplica.mempool,
         singleSignerNewState
       );
+
+      const entityFrameHashToSign: import('./types').HashToSign = {
+        hash: singleSignerFrameHash,
+        type: 'entityFrame',
+        context: `entity:${workingReplica.state.entityId.slice(-4)}:frame:${newHeight}`,
+      };
+      const seenHashes = new Set<string>([singleSignerFrameHash]);
+      const additionalHashesToSign: import('./types').HashToSign[] = [];
+      for (const hashInfo of collectedHashes || []) {
+        if (seenHashes.has(hashInfo.hash)) continue;
+        seenHashes.add(hashInfo.hash);
+        additionalHashesToSign.push({
+          hash: hashInfo.hash,
+          type: hashInfo.type as import('./types').HashType,
+          context: hashInfo.context,
+        });
+      }
+      additionalHashesToSign.sort((a, b) => a.hash.localeCompare(b.hash));
+      const hashesToSign: import('./types').HashToSign[] = [entityFrameHashToSign, ...additionalHashesToSign];
+
+      const { signHashesAsSingleEntity } = await import('./hanko-signing');
+      const hankos = await signHashesAsSingleEntity(
+        env,
+        workingReplica.state.entityId,
+        workingReplica.signerId,
+        hashesToSign.map((hashInfo) => hashInfo.hash),
+      );
+
+      if (!workingReplica.hankoWitness) {
+        workingReplica.hankoWitness = new Map();
+      }
+      for (let i = 0; i < hashesToSign.length; i++) {
+        const hashInfo = hashesToSign[i];
+        const hanko = hankos[i];
+        if (!hashInfo || !hanko) continue;
+        workingReplica.hankoWitness.set(hashInfo.hash, {
+          hanko,
+          type: hashInfo.type,
+          entityHeight: newHeight,
+          createdAt: newTimestamp,
+        });
+      }
+      const attachedHankos = attachHankoWitnessToOutputs(
+        frameOutputs,
+        frameJOutputs,
+        workingReplica.hankoWitness as Map<string, HankoWitnessEntry>,
+        newHeight,
+      );
+      if (attachedHankos > 0) {
+        console.log(`🔐 SINGLE-SIGNER: Attached ${attachedHankos} hankos to outputs`);
+      }
 
       workingReplica.state = {
         ...singleSignerNewState,

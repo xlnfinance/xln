@@ -1,3 +1,15 @@
+/**
+ * E2E runtime persistence and replay coverage.
+ *
+ * Flow and goals:
+ * 1. Create browser runtimes and connect them through the shared hub mesh.
+ * 2. Perform state-changing actions that produce persisted frame journals.
+ * 3. Reload the wallet/runtime at critical points in the bilateral flow.
+ * 4. Verify the restored state matches the pre-reload state after snapshot + WAL replay.
+ *
+ * This test exists to prove that reload is not cosmetic: the runtime must restore the exact
+ * financial state machine, not a UI cache approximation.
+ */
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
 import {
@@ -5,6 +17,7 @@ import {
   gotoApp,
   switchToRuntimeId,
 } from './utils/e2e-demo-users';
+import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
@@ -101,86 +114,16 @@ async function discoverHub(page: Page) {
 
 async function connectHub(page: Page, entityId: string, signerId: string, hubId: string) {
   let opened = false;
+  let lastError = '';
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const result = await page.evaluate(async ({ entityId, signerId, hubId }) => {
-      try {
-        const env = (window as any).isolatedEnv;
-        const XLN = (window as any).XLN;
-        if (!env || !XLN) return { ok: false, error: 'env/xln missing' };
-        const p2p = env?.runtimeState?.p2p;
-        const start = Date.now();
-        let hubRuntimeId: string | null = null;
-        while (Date.now() - start < 6_000) {
-          const profiles = env?.gossip?.getProfiles?.() ?? [];
-          const hub = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === String(hubId).toLowerCase());
-          const candidate = hub?.runtimeId ?? hub?.metadata?.runtimeId ?? null;
-          if (typeof candidate === 'string' && candidate.length > 0) {
-            hubRuntimeId = candidate;
-            break;
-          }
-          if (typeof p2p?.refreshGossip === 'function') {
-            try { await p2p.refreshGossip(); } catch {}
-          }
-          await new Promise((r) => setTimeout(r, 600));
-        }
-        if (!hubRuntimeId) {
-          return { ok: false, error: 'hub runtimeId unresolved in gossip' };
-        }
-        let liveSignerId = signerId;
-        for (const key of env?.eReplicas?.keys?.() ?? []) {
-          const [eid, sid] = String(key).split(':');
-          if (String(eid).toLowerCase() === String(entityId).toLowerCase() && sid) {
-            liveSignerId = sid;
-            break;
-          }
-        }
-        XLN.enqueueRuntimeInput(env, {
-          runtimeTxs: [],
-          entityInputs: [{
-            entityId,
-            signerId: liveSignerId,
-            entityTxs: [{
-              type: 'openAccount',
-              data: {
-                targetEntityId: hubId,
-                creditAmount: 10_000n * 10n ** 18n,
-                tokenId: 1
-              }
-            }]
-          }]
-        });
-        return { ok: true };
-      } catch (e: any) {
-        return { ok: false, error: e?.message || String(e) };
-      }
-    }, { entityId, signerId, hubId });
-    expect(result.ok, `connectHub failed for ${entityId.slice(0, 10)}: ${result.error || 'unknown'}`).toBe(true);
-
-    opened = await page.evaluate(async ({ entityId, hubId }) => {
-      const ent = String(entityId).toLowerCase();
-      const start = Date.now();
-      while (Date.now() - start < 12_000) {
-        const env = (window as any).isolatedEnv;
-        if (env?.eReplicas) {
-          for (const [key, rep] of env.eReplicas.entries()) {
-            const id = String(key).split(':')[0].toLowerCase();
-            if (id !== ent) continue;
-            const accounts = rep?.state?.accounts;
-            if (!accounts) continue;
-            for (const [cpId, acc] of accounts.entries()) {
-              if (String(cpId).toLowerCase() !== String(hubId).toLowerCase()) continue;
-              const hasDelta = !!acc?.deltas?.get?.(1);
-              const noPending = !acc?.pendingFrame;
-              if (hasDelta && noPending) return true;
-            }
-          }
-        }
-        await new Promise((r) => setTimeout(r, 400));
-      }
-      return false;
-    }, { entityId, hubId });
-    if (opened) break;
-    await page.waitForTimeout(800);
+    try {
+      await connectRuntimeToSharedHub(page, { entityId, signerId }, hubId);
+      opened = true;
+      break;
+    } catch (error: any) {
+      lastError = error?.message || String(error);
+      await page.waitForTimeout(800);
+    }
   }
 
   const debugState = await page.evaluate(({ entityId, hubId }) => {
@@ -202,7 +145,10 @@ async function connectHub(page: Page, entityId: string, signerId: string, hubId:
     return { foundEntity: false, accounts: [] as any[] };
   }, { entityId, hubId });
   console.log('[PERSIST] connectHub debug state', JSON.stringify(debugState));
-  expect(opened, `Hub account missing for ${entityId.slice(0, 10)} -> ${hubId.slice(0, 10)}`).toBe(true);
+  expect(
+    opened,
+    `Hub account missing for ${entityId.slice(0, 10)} -> ${hubId.slice(0, 10)} (${lastError || 'unknown'})`,
+  ).toBe(true);
 }
 
 async function runtimeSnapshot(page: Page) {

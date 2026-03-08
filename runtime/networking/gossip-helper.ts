@@ -7,6 +7,7 @@ import type { EntityState } from '../types';
 import type { BoardMetadata, Profile } from './gossip';
 import { deriveDelta, isLeft } from '../account-utils';
 import { getCachedSignerAddress, getCachedSignerPublicKey } from '../account-crypto';
+import { safeStringify } from '../serialization-utils';
 
 type GossipBroadcastTx = {
   type: 'gossipBroadcast';
@@ -147,6 +148,68 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
   };
 
   return profile;
+}
+
+type FingerprintTokenCapacity = {
+  tokenId: string;
+  inCapacity: string;
+  outCapacity: string;
+};
+
+type FingerprintAccount = {
+  counterpartyId: string;
+  tokenCapacities: FingerprintTokenCapacity[];
+};
+
+/**
+ * Deterministic fingerprint of the public routing state we advertise via gossip.
+ * Excludes volatile fields like lastUpdated/signatures so we only re-announce
+ * when the visible profile meaningfully changes.
+ */
+export function buildEntityAdvertisedStateFingerprint(entityState: EntityState): string {
+  const profile = buildEntityProfile(entityState, undefined, 0);
+  const accounts: FingerprintAccount[] = (profile.accounts || [])
+    .map((account) => {
+      const tokenEntries =
+        account.tokenCapacities instanceof Map
+          ? Array.from(account.tokenCapacities.entries())
+          : Object.entries(account.tokenCapacities || {});
+      const tokenCapacities = tokenEntries
+        .map(([tokenId, capacity]) => ({
+          tokenId: String(tokenId),
+          inCapacity: String(capacity?.inCapacity ?? 0),
+          outCapacity: String(capacity?.outCapacity ?? 0),
+        }))
+        .sort((left, right) => left.tokenId.localeCompare(right.tokenId));
+      return {
+        counterpartyId: account.counterpartyId,
+        tokenCapacities,
+      };
+    })
+    .sort((left, right) => left.counterpartyId.localeCompare(right.counterpartyId));
+
+  const metadata = profile.metadata || {};
+  const fingerprintPayload = {
+    entityId: profile.entityId,
+    publicAccounts: [...(profile.publicAccounts || [])].sort(),
+    accounts,
+    metadata: {
+      isHub: metadata.isHub === true,
+      routingFeePPM: Number(metadata.routingFeePPM ?? 0),
+      baseFee: String(metadata.baseFee ?? 0),
+      threshold: Number(metadata.threshold ?? 0),
+      policyVersion: Number(metadata.policyVersion ?? 0),
+      rebalanceBaseFee: String(metadata.rebalanceBaseFee ?? ''),
+      rebalanceLiquidityFeeBps: String(metadata.rebalanceLiquidityFeeBps ?? ''),
+      rebalanceGasFee: String(metadata.rebalanceGasFee ?? ''),
+      rebalanceTimeoutMs: Number(metadata.rebalanceTimeoutMs ?? 0),
+      entityPublicKey: String(metadata.entityPublicKey ?? ''),
+      cryptoPublicKey: String(metadata.cryptoPublicKey ?? ''),
+      board: metadata.board ?? null,
+    },
+  };
+
+  return safeStringify(fingerprintPayload);
 }
 
 /**

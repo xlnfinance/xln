@@ -74,7 +74,7 @@ import {
   prewarmSignerKeyCache,
   setRuntimeSeed as setCryptoRuntimeSeed,
 } from './account-crypto';
-import { buildEntityProfile, mergeProfileWithExisting } from './networking/gossip-helper';
+import { buildEntityAdvertisedStateFingerprint, buildEntityProfile, mergeProfileWithExisting } from './networking/gossip-helper';
 import { RuntimeP2P, type P2PConfig } from './networking/p2p';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './networking/p2p-crypto';
 import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
@@ -171,10 +171,22 @@ import {
   validateAccountDeltas,
   createDefaultDelta,
   isDelta,
+  validateDeliverableEntityInput,
   validateEntityInput,
   validateEntityOutput,
 } from './validation-utils';
-import type { EntityInput, EntityReplica, Env, FrameLogEntry, JInput, JReplica, RoutedEntityInput, RuntimeInput } from './types';
+import { mergeRuntimeJurisdictionConfig } from './jurisdiction-runtime';
+import type {
+  DeliverableEntityInput,
+  EntityInput,
+  EntityReplica,
+  Env,
+  FrameLogEntry,
+  JInput,
+  JReplica,
+  RoutedEntityInput,
+  RuntimeInput,
+} from './types';
 import {
   clearDatabase,
   DEBUG,
@@ -542,6 +554,24 @@ const enqueueRuntimeInputs = (env: Env, inputs?: RoutedEntityInput[], runtimeTxs
   }
   if (inputs && inputs.length > 0) {
     mempool.entityInputs.push(...inputs);
+  }
+  const interestingEntityInputs = (inputs || [])
+    .map((input) => ({
+      entityId: String(input.entityId || ''),
+      signerId: String(input.signerId || ''),
+      txTypes: Array.isArray(input.entityTxs) ? input.entityTxs.map((tx) => String(tx?.type || '')) : [],
+    }))
+    .filter((input) => input.txTypes.some((type) => type.startsWith('j_') || type.startsWith('dispute')));
+  if (interestingEntityInputs.length > 0) {
+    console.log(
+      `[enqueueRuntimeInput] interesting entityInputs=${JSON.stringify({
+        runtimeId: env.runtimeId,
+        queuedAt: mempool.queuedAt,
+        totalEntityInputs: mempool.entityInputs.length,
+        totalRuntimeTxs: mempool.runtimeTxs.length,
+        inputs: interestingEntityInputs,
+      })}`,
+    );
   }
   if (inputs?.length || runtimeTxs?.length) {
     if (mempool.queuedAt === undefined) {
@@ -984,7 +1014,7 @@ const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
 };
 
 type PlannedRemoteOutput = {
-  output: RoutedEntityInput;
+  output: DeliverableEntityInput;
   targetRuntimeId: string;
 };
 
@@ -1000,6 +1030,17 @@ const getDeferredNetworkMeta = (env: Env): Map<string, { attempts: number; nextR
 };
 
 const getRuntimeNowMs = (env: Env): number => (env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs());
+
+const toDeliverableEntityInput = (
+  output: RoutedEntityInput,
+  targetRuntimeId: string,
+): DeliverableEntityInput => {
+  const deliverable: DeliverableEntityInput = {
+    ...output,
+    runtimeId: targetRuntimeId,
+  };
+  return validateDeliverableEntityInput(deliverable);
+};
 
 const splitPendingOutputsByRetryWindow = (
   env: Env,
@@ -1119,18 +1160,18 @@ const planEntityOutputs = (
       deferredOutputs.push(output);
       continue;
     }
-    remoteOutputs.push({ output, targetRuntimeId });
+    remoteOutputs.push({ output: toDeliverableEntityInput(output, targetRuntimeId), targetRuntimeId });
   }
 
   return { localOutputs, remoteOutputs, deferredOutputs };
 };
 
 // Batch multiple outputs to same entityId:signerId into one EntityInput
-const batchOutputsByTarget = (outputs: RoutedEntityInput[]): RoutedEntityInput[] => {
-  const batched = new Map<string, RoutedEntityInput>();
+const batchOutputsByTarget = (outputs: DeliverableEntityInput[]): DeliverableEntityInput[] => {
+  const batched = new Map<string, DeliverableEntityInput>();
 
   for (const output of outputs) {
-    const key = `${output.entityId}:${output.signerId || ''}`;
+    const key = `${output.runtimeId}:${output.entityId}:${output.signerId || ''}`;
     const existing = batched.get(key);
 
     if (existing) {
@@ -1151,7 +1192,7 @@ const batchOutputsByTarget = (outputs: RoutedEntityInput[]): RoutedEntityInput[]
       }
       console.log(`📦 BATCH: Merged output into ${key} (now ${existing.entityTxs?.length || 0} txs)`);
     } else {
-      batched.set(key, { ...output });
+      batched.set(key, validateDeliverableEntityInput({ ...output }));
     }
   }
 
@@ -1164,7 +1205,7 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
   const p2p = getP2P(env);
 
   // CRITICAL: Batch outputs to same target before sending
-  const groupedByRuntime = new Map<string, RoutedEntityInput[]>();
+  const groupedByRuntime = new Map<string, DeliverableEntityInput[]>();
   for (const { output, targetRuntimeId } of outputs) {
     const list = groupedByRuntime.get(targetRuntimeId) || [];
     list.push(output);
@@ -1678,6 +1719,23 @@ const applyRuntimeInput = async (
             env.jReplicas = new Map();
           }
 
+          const resolvedDepositoryAddress = jadapter.addresses.depository || '';
+          const resolvedEntityProviderAddress = jadapter.addresses.entityProvider || '';
+          const resolvedContracts = {
+            depository: resolvedDepositoryAddress,
+            entityProvider: resolvedEntityProviderAddress,
+          };
+
+          if (!resolvedDepositoryAddress || !resolvedEntityProviderAddress) {
+            throw new Error(
+              `IMPORT_J_ADDRESSES_MISSING: name=${runtimeTx.data.name} ` +
+                `depository=${resolvedDepositoryAddress || 'none'} ` +
+                `entityProvider=${resolvedEntityProviderAddress || 'none'} ` +
+                `adapterAddresses=${JSON.stringify(jadapter.addresses || {})} ` +
+                `contracts=${JSON.stringify(runtimeTx.data.contracts || {})}`,
+            );
+          }
+
           // Create JReplica (store jadapter for later use)
           const jReplica: JReplica = {
             name: runtimeTx.data.name,
@@ -1687,8 +1745,9 @@ const applyRuntimeInput = async (
             blockDelayMs: 300,
             lastBlockTimestamp: env.timestamp,
             position: { x: 0, y: 50, z: 0 }, // Default position for J-machine
-            depositoryAddress: jadapter.addresses.depository,
-            entityProviderAddress: jadapter.addresses.entityProvider,
+            depositoryAddress: resolvedDepositoryAddress,
+            entityProviderAddress: resolvedEntityProviderAddress,
+            contracts: resolvedContracts,
             rpcs: runtimeTx.data.rpcs,
             chainId: runtimeTx.data.chainId,
             jadapter, // Store for balance queries, faucets, etc
@@ -1715,11 +1774,14 @@ const applyRuntimeInput = async (
 
         const replicaKey = `${runtimeTx.entityId}:${runtimeTx.signerId}`;
         const existingReplica = env.eReplicas.get(replicaKey);
+        const config = runtimeTx.data.config
+          ? mergeRuntimeJurisdictionConfig(runtimeTx.data.config, env)
+          : runtimeTx.data.config;
         if (existingReplica) {
           // Persistence safety: never overwrite restored replica state on re-import.
           existingReplica.isProposer = runtimeTx.data.isProposer;
-          if (runtimeTx.data.config) {
-            existingReplica.state.config = runtimeTx.data.config;
+          if (config) {
+            existingReplica.state.config = config;
           }
           normalizeEntitySwapTradingPairs(existingReplica.state);
           env.eReplicas.set(replicaKey, existingReplica);
@@ -1742,7 +1804,7 @@ const applyRuntimeInput = async (
             nonces: new Map(),
             messages: [],
             proposals: new Map(),
-            config: runtimeTx.data.config,
+            config,
             // 💰 Initialize financial state
             reserves: new Map(), // tokenId -> bigint amount
             accounts: new Map(), // counterpartyEntityId -> AccountMachine
@@ -2959,6 +3021,36 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     let entityOutbox: RoutedEntityInput[] = [];
     let jOutbox: JInput[] = [];
     const changedEntityIds = new Set<string>();
+    const getLocallySignableEntityIds = (): Set<string> => {
+      const localEntityIds = new Set<string>();
+      for (const replicaKey of env.eReplicas.keys()) {
+        try {
+          const signerId = extractSignerId(replicaKey);
+          if (!signerId || !getCachedSignerPrivateKey(signerId)) continue;
+          localEntityIds.add(extractEntityId(replicaKey).toLowerCase());
+        } catch {
+          // ignore malformed key
+        }
+      }
+      return localEntityIds;
+    };
+    const getAdvertisedStateFingerprints = (localEntityIds: ReadonlySet<string>): Map<string, string> => {
+      const fingerprints = new Map<string, string>();
+      if (localEntityIds.size === 0) return fingerprints;
+      for (const replica of env.eReplicas.values()) {
+        const entityId = String(replica?.entityId || '').toLowerCase();
+        if (!entityId || !localEntityIds.has(entityId) || fingerprints.has(entityId)) continue;
+        try {
+          fingerprints.set(entityId, buildEntityAdvertisedStateFingerprint(replica.state));
+        } catch (error) {
+          if (!quietRuntimeLogs) {
+            console.warn(`GOSSIP_PROFILE_FINGERPRINT_SKIP: entity=${entityId.slice(-8)} error=${(error as Error).message}`);
+          }
+        }
+      }
+      return fingerprints;
+    };
+    const advertisedStateBeforeApply = getAdvertisedStateFingerprints(getLocallySignableEntityIds());
     const shouldAnnounceEntityProfile = (input: RoutedEntityInput): boolean => {
       if (!input?.entityTxs?.length) return false;
       return input.entityTxs.some(
@@ -2999,6 +3091,12 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
         for (const entityInput of runtimeInput.entityInputs) {
           if (entityInput.entityId && shouldAnnounceEntityProfile(entityInput)) {
             changedEntityIds.add(entityInput.entityId.toLowerCase());
+          }
+        }
+        const advertisedStateAfterApply = getAdvertisedStateFingerprints(getLocallySignableEntityIds());
+        for (const [entityId, fingerprint] of advertisedStateAfterApply.entries()) {
+          if (advertisedStateBeforeApply.get(entityId) !== fingerprint) {
+            changedEntityIds.add(entityId);
           }
         }
       } catch (error) {
@@ -3090,16 +3188,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     // Broadcast changed local entities so relay routing metadata stays fresh.
     const p2p = getP2P(env);
     if (p2p) {
-      const localEntityIds = new Set<string>();
-      for (const replicaKey of env.eReplicas.keys()) {
-        try {
-          const signerId = extractSignerId(replicaKey);
-          if (!signerId || !getCachedSignerPrivateKey(signerId)) continue;
-          localEntityIds.add(extractEntityId(replicaKey).toLowerCase());
-        } catch {
-          // ignore malformed key
-        }
-      }
+      const localEntityIds = getLocallySignableEntityIds();
       const changedLocalEntityIds = [...changedEntityIds].filter(entityId => localEntityIds.has(entityId));
       if (changedLocalEntityIds.length > 0) {
         p2p.announceProfilesForEntities(changedLocalEntityIds, 'major-entity-change');
@@ -3240,7 +3329,6 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     if (!dbReady) return;
     const dbNamespace = resolveDbNamespace({ env });
     const db = getRuntimeDb(env);
-    const persistedGossipProfiles = getPersistedGossipProfiles(env);
     const committedFrameLogs = Array.isArray(env.frameLogs)
       ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
       : [];
@@ -3255,9 +3343,6 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       // Always persist a frame record so replay has a contiguous frame timeline.
       runtimeInput: currentFrameInput ?? { runtimeTxs: [], entityInputs: [] },
       logs: committedFrameLogs,
-      // Replay can deterministically require routing/encryption metadata
-      // (e.g. HTLC onion key lookup), so persist gossip snapshot per frame.
-      persistedGossipProfiles,
     });
     frameSerializeMs = getPerfMs() - frameSerializeStartedAt;
     frameJournalBytes = Buffer.byteLength(frameJournal);
@@ -3274,6 +3359,7 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     const CHECKPOINT_INTERVAL = ensureRuntimeConfig(env).snapshotIntervalFrames ?? 100;
     const shouldCheckpoint = env.height <= 1 || env.height % CHECKPOINT_INTERVAL === 0;
     if (shouldCheckpoint) {
+      const persistedGossipProfiles = getPersistedGossipProfiles(env);
       const snapshotSerializeStartedAt = getPerfMs();
       const snapshotPayload = {
         ...env,
@@ -3354,7 +3440,7 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     const totalMs = getPerfMs() - persistStartedAt;
     console.log(
       `[PERSIST] frame=${env.height} checkpoint=${shouldCheckpoint ? 1 : 0} ` +
-        `logs=${committedFrameLogs.length} gossipProfiles=${persistedGossipProfiles.length} ops=${ops.length} ` +
+        `logs=${committedFrameLogs.length} ops=${ops.length} ` +
         `bytes(frame=${frameJournalBytes},snapshot=${snapshotBytes}) ` +
         `ms(open=${formatPerfMs(openMs)},frame=${formatPerfMs(frameSerializeMs)},snapshot=${formatPerfMs(snapshotSerializeMs)},` +
         `write=${formatPerfMs(writeMs)},verify=${verifySkipped ? 'skip' : formatPerfMs(verifyMs)},total=${formatPerfMs(totalMs)})`,
@@ -3369,6 +3455,90 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     console.error('❌ Failed to save to LevelDB:', err);
     throw new Error(`PERSISTENCE_FATAL: ${reason}`);
   }
+};
+
+export type PersistedFrameJournal = {
+  height: number;
+  timestamp: number;
+  runtimeInput: RuntimeInput;
+  logs: FrameLogEntry[];
+  persistedGossipProfiles?: Profile[];
+};
+
+export const getPersistedLatestHeight = async (env: Env): Promise<number> => {
+  const dbReady = await tryOpenDb(env);
+  if (!dbReady) return 0;
+  const dbNamespace = resolveDbNamespace({ env });
+  const db = getRuntimeDb(env);
+  try {
+    const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
+    const latestHeight = Number.parseInt(latestHeightBuffer.toString(), 10);
+    return Number.isFinite(latestHeight) && latestHeight > 0 ? latestHeight : 0;
+  } catch (error) {
+    if (isDbUnavailableError(error)) return 0;
+    throw error;
+  }
+};
+
+export const readPersistedFrameJournal = async (env: Env, height: number): Promise<PersistedFrameJournal | null> => {
+  const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
+  if (targetHeight <= 0) return null;
+  const dbReady = await tryOpenDb(env);
+  if (!dbReady) return null;
+  const dbNamespace = resolveDbNamespace({ env });
+  const db = getRuntimeDb(env);
+  try {
+    const frameBuffer = await db.get(makeDbKey(dbNamespace, `frame_input:${targetHeight}`));
+    const decoded = deserializeTaggedJson<PersistedFrameJournal>(frameBuffer.toString());
+    if (!decoded || typeof decoded !== 'object') return null;
+    const runtimeInput =
+      decoded.runtimeInput && typeof decoded.runtimeInput === 'object'
+        ? decoded.runtimeInput
+        : { runtimeTxs: [], entityInputs: [] };
+    const logs = Array.isArray(decoded.logs) ? decoded.logs : [];
+    return {
+      height:
+        Number.isFinite(Number(decoded.height)) && Number(decoded.height) > 0
+          ? Math.floor(Number(decoded.height))
+          : targetHeight,
+      timestamp: Number.isFinite(Number(decoded.timestamp)) ? Number(decoded.timestamp) : 0,
+      runtimeInput,
+      logs,
+      persistedGossipProfiles: Array.isArray(decoded.persistedGossipProfiles) ? decoded.persistedGossipProfiles : undefined,
+    };
+  } catch (error) {
+    if (isDbUnavailableError(error)) return null;
+    const code = String((error as { code?: unknown })?.code ?? '');
+    const name = String((error as { name?: unknown })?.name ?? '');
+    if (code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError') return null;
+    throw error;
+  }
+};
+
+export const readPersistedFrameJournals = async (
+  env: Env,
+  opts?: {
+    fromHeight?: number;
+    toHeight?: number;
+    limit?: number;
+  },
+): Promise<PersistedFrameJournal[]> => {
+  const latestHeight = await getPersistedLatestHeight(env);
+  if (latestHeight <= 0) return [];
+
+  const fromHeight = Math.max(1, Math.floor(opts?.fromHeight ?? 1));
+  const boundedToHeight = Math.max(fromHeight, Math.floor(opts?.toHeight ?? latestHeight));
+  const toHeight = Math.min(latestHeight, boundedToHeight);
+  const limit = Math.max(1, Math.min(1000, Math.floor(opts?.limit ?? 200)));
+  const startHeight = Math.max(fromHeight, toHeight - limit + 1);
+  const receipts: PersistedFrameJournal[] = [];
+
+  for (let height = startHeight; height <= toHeight; height++) {
+    const receipt = await readPersistedFrameJournal(env, height);
+    if (receipt) receipts.push(receipt);
+  }
+
+  return receipts;
 };
 
 export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: string | null): Promise<Env | null> => {
@@ -3485,6 +3655,9 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
     // Support both old (replicas) and new (eReplicas) format
     env.eReplicas = normalizeReplicaMap(data.eReplicas || data.replicas || []);
     env.jReplicas = normalizeJReplicaMap(data.jReplicas || []);
+    for (const replica of env.eReplicas.values()) {
+      replica.state.config = mergeRuntimeJurisdictionConfig(replica.state.config, env);
+    }
     env.history = [];
     if (selectedSnapshotHeight > 0) {
       env.history.push(buildRuntimeHistorySnapshot(env, `Frame ${selectedSnapshotHeight}`));
@@ -3582,13 +3755,6 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
             logs?: FrameLogEntry[];
             persistedGossipProfiles?: unknown[];
           }>(frameBuffer.toString());
-          if (Array.isArray(frame?.persistedGossipProfiles) && frame.persistedGossipProfiles.length > 0) {
-            if (typeof env.gossip?.setProfiles === 'function') {
-              env.gossip.setProfiles(frame.persistedGossipProfiles);
-            } else if (typeof env.gossip?.announce === 'function') {
-              for (const profile of frame.persistedGossipProfiles) env.gossip.announce(profile);
-            }
-          }
           const replayRuntimeTxs = frame?.runtimeInput?.runtimeTxs?.length ?? 0;
           const replayEntityInputs = frame?.runtimeInput?.entityInputs?.length ?? 0;
           const replayJInputs = frame?.runtimeInput?.jInputs?.length ?? 0;
@@ -3775,6 +3941,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
 
     const latestEnv = env;
     for (const replica of latestEnv.eReplicas.values()) {
+      replica.state.config = mergeRuntimeJurisdictionConfig(replica.state.config, latestEnv);
       normalizeEntitySwapTradingPairs(replica.state);
     }
     (latestEnv as any).__replayMeta = {
@@ -3857,6 +4024,13 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
                 rpcUrl: jReplica.rpcs![0],
                 fromReplica: jReplica as any, // Pass addresses for connect-only mode
               });
+              if (!jadapter.addresses?.depository || !jadapter.addresses?.entityProvider) {
+                throw new Error(
+                  `RESTORE_JADAPTER_ADDRESSES_MISSING: name=${name} ` +
+                    `depository=${jadapter.addresses?.depository || 'none'} ` +
+                    `entityProvider=${jadapter.addresses?.entityProvider || 'none'}`,
+                );
+              }
               jReplica.jadapter = jadapter;
             }
 

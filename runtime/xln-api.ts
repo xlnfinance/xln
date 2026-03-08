@@ -44,6 +44,7 @@ export type {
   EntityInput,
   RoutedEntityInput,
 } from './types';
+export type { PersistedFrameJournal } from './runtime';
 
 export type { Profile, GossipLayer } from './networking/gossip';
 export type { PaymentRoute } from './routing/pathfinding';
@@ -93,6 +94,7 @@ import type {
   RoutedEntityInput,
 } from './types';
 import type { JAdapter } from './jadapter/types';
+import type { PersistedFrameJournal } from './runtime';
 
 export type QueueEntityInputPayload = {
   type: string;
@@ -371,6 +373,16 @@ export interface XLNModule {
   clearDatabaseAndHistory: (env: Env) => Promise<Env>;
   saveEnvToDB: (env: Env) => Promise<void>;
   loadEnvFromDB: (runtimeId?: string | null, runtimeSeed?: string | null) => Promise<Env | null>;
+  getPersistedLatestHeight: (env: Env) => Promise<number>;
+  readPersistedFrameJournal: (env: Env, height: number) => Promise<PersistedFrameJournal | null>;
+  readPersistedFrameJournals: (
+    env: Env,
+    opts?: {
+      fromHeight?: number;
+      toHeight?: number;
+      limit?: number;
+    },
+  ) => Promise<PersistedFrameJournal[]>;
 
   // Blockchain operations
   submitSettle: (

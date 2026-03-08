@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import type {
     AccountMachine,
     DerivedDelta,
@@ -7,6 +7,7 @@
     EntityReplica,
     Env,
     PaymentRoute,
+    PersistedFrameJournal,
     Profile as GossipProfile,
   } from '@xln/runtime/xln-api';
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, enqueueEntityInputs } from '../../stores/xlnStore';
@@ -48,6 +49,17 @@
   let showFullEntityId = false;
   let profileExpanded = false;
   let serverEntityNames = new Map<string, string>();
+  let paymentPanelEl: HTMLDivElement | null = null;
+  let hostedCheckoutMode = false;
+  let hostedCheckoutRouteKey = '';
+  let hostedCheckoutPreparing = false;
+  let hostedCheckoutAwaitingConfirmation = false;
+  let hostedCheckoutPendingHashlock: string | null = null;
+  let hostedCheckoutStatusMessage = '';
+  let hostedCheckoutSuccessVisible = false;
+  let hostedCheckoutWatcherToken = 0;
+  let hostedCheckoutCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  let hostedCheckoutShutdownStarted = false;
   const REPEAT_OPTIONS = [
     { value: 0, label: 'No repeat' },
     { value: 1_000, label: 'Repeat 1s' },
@@ -81,6 +93,19 @@
   type DebugEventP2P = {
     sendDebugEvent?: (data: unknown) => unknown;
   };
+  type RuntimeP2PController = {
+    close?: () => void;
+  };
+  type RuntimeStateEnv = Env & {
+    runtimeState?: {
+      p2p?: RuntimeP2PController;
+    };
+  };
+  type SendPaymentResult = {
+    queued: boolean;
+    hashlock: string | null;
+  };
+  type PersistedFrameLogEntry = PersistedFrameJournal['logs'][number];
 
   $: currentReplicas = $replicas;
   $: currentEnv = $xlnEnvironment;
@@ -102,11 +127,34 @@
     return value === '1' || value === 'true' || value === 'yes' || value === 'on';
   };
 
+  function getURLHashRoute(): string | null {
+    if (typeof window === 'undefined') return null;
+    const hashRaw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    if (!hashRaw) return null;
+    const qIndex = hashRaw.indexOf('?');
+    const routePart = qIndex >= 0 ? hashRaw.slice(0, qIndex) : hashRaw;
+    if (!routePart || routePart.includes('=')) return null;
+    return routePart.trim().toLowerCase() || null;
+  }
+
+  function getURLHashParams(): URLSearchParams | null {
+    if (typeof window === 'undefined') return null;
+    const hashRaw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    if (!hashRaw) return null;
+    const qIndex = hashRaw.indexOf('?');
+    if (qIndex >= 0) {
+      const routePart = hashRaw.slice(0, qIndex);
+      if (!routePart.includes('=')) {
+        return new URLSearchParams(hashRaw.slice(qIndex + 1));
+      }
+    }
+    return hashRaw.includes('=') ? new URLSearchParams(hashRaw) : null;
+  }
+
   function getURLParamValue(keys: string[]): string | null {
     if (typeof window === 'undefined') return null;
     const searchParams = new URLSearchParams(window.location.search);
-    const hashRaw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-    const hashParams = hashRaw.includes('=') ? new URLSearchParams(hashRaw) : null;
+    const hashParams = getURLHashParams();
     for (const key of keys) {
       const hashValue = hashParams ? hashParams.get(key) : null;
       if (hashValue !== null && hashValue !== '') return hashValue;
@@ -117,13 +165,15 @@
   }
 
   function applyPaymentPrefillFromURL() {
-    const targetParam = sanitizePrefillText(getURLParamValue(['target', 'targetEntityId', 'recipient', 'entity']), 120);
-    const amountParam = sanitizePrefillText(getURLParamValue(['amount']), 64);
-    const tokenParam = sanitizePrefillText(getURLParamValue(['tokenId', 'token']), 12);
-    const noteParam = sanitizePrefillText(getURLParamValue(['note', 'description', 'memo']), 200);
-    const recipientUserId = sanitizePrefillText(getURLParamValue(['uid', 'recipient_user_id', 'userId', 'recipientId']), 96);
+    const hashRoute = getURLHashRoute();
+    const targetParam = sanitizePrefillText(getURLParamValue(['id', 'target', 'targetEntityId', 'recipient', 'entity']), 120);
+    const amountParam = sanitizePrefillText(getURLParamValue(['amt', 'amount']), 64);
+    const tokenParam = sanitizePrefillText(getURLParamValue(['t', 'tokenId', 'token']), 12);
+    const noteParam = sanitizePrefillText(getURLParamValue(['desc', 'note', 'description', 'memo']), 200);
+    const recipientUserId = sanitizePrefillText(getURLParamValue(['u', 'uid', 'recipient_user_id', 'userId', 'recipientId']), 96);
     const modeParam = sanitizePrefillText(getURLParamValue(['mode']), 16).toLowerCase();
-    const noteLockedParam = getURLParamValue(['note_locked', 'description_locked', 'memo_locked', 'lock_note']);
+    const noteLockedParam = getURLParamValue(['locked', 'note_locked', 'description_locked', 'memo_locked', 'lock_note']);
+    const checkoutParam = getURLParamValue(['checkout', 'autoclose', 'close']);
 
     if (targetParam) targetEntityId = targetParam;
     if (amountParam) amount = amountParam;
@@ -143,9 +193,19 @@
 
     if (modeParam === 'direct' || modeParam === 'unsafe') useHtlc = false;
     if (modeParam === 'hashlock' || modeParam === 'htlc') useHtlc = true;
+    if (hashRoute === 'pay' && !modeParam) useHtlc = true;
+    hostedCheckoutMode =
+      hashRoute === 'pay' &&
+      (parseBooleanParam(checkoutParam) || Boolean(targetParam || amountParam || noteParam || recipientUserId));
+    if (hostedCheckoutMode) useHtlc = true;
 
     const explicitLock = parseBooleanParam(noteLockedParam);
     descriptionLocked = explicitLock || Boolean(recipientUserId);
+    hostedCheckoutSuccessVisible = false;
+    hostedCheckoutAwaitingConfirmation = false;
+    hostedCheckoutPendingHashlock = null;
+    hostedCheckoutStatusMessage = '';
+    hostedCheckoutRouteKey = '';
   }
 
   // All entities for dropdown (local + gossip network)
@@ -221,6 +281,45 @@
     }
   };
 
+  const clearHostedCheckoutCloseTimer = () => {
+    if (hostedCheckoutCloseTimer) {
+      clearTimeout(hostedCheckoutCloseTimer);
+      hostedCheckoutCloseTimer = null;
+    }
+  };
+
+  const cancelHostedCheckoutWatcher = () => {
+    hostedCheckoutWatcherToken += 1;
+    hostedCheckoutAwaitingConfirmation = false;
+    hostedCheckoutPendingHashlock = null;
+    clearHostedCheckoutCloseTimer();
+  };
+
+  async function shutdownHostedCheckoutRuntime(): Promise<void> {
+    if (!hostedCheckoutMode || hostedCheckoutShutdownStarted) return;
+    hostedCheckoutShutdownStarted = true;
+    const env = currentEnv as RuntimeStateEnv | null;
+    if (!env) return;
+
+    try {
+      env.runtimeState?.p2p?.close?.();
+    } catch {
+      // best effort
+    }
+
+    try {
+      const xln = await getXLN();
+      xln.stopP2P(env);
+    } catch {
+      // best effort
+    }
+  }
+
+  async function closeHostedCheckoutWindow(): Promise<void> {
+    await shutdownHostedCheckoutRuntime();
+    window.close();
+  }
+
   const restartRepeatTimer = () => {
     clearRepeatTimer();
     if (repeatIntervalMs <= 0 || selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
@@ -235,7 +334,24 @@
 
   onDestroy(() => {
     clearRepeatTimer();
+    cancelHostedCheckoutWatcher();
+    if (hostedCheckoutMode) {
+      void shutdownHostedCheckoutRuntime();
+    }
   });
+
+  async function scrollHostedCheckoutIntoView(): Promise<void> {
+    if (!hostedCheckoutMode) return;
+    await tick();
+    paymentPanelEl?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+  }
+
+  function resetQuotedRoutes(): void {
+    routes = [];
+    selectedRouteIndex = -1;
+    hostedCheckoutRouteKey = '';
+    clearRepeatTimer();
+  }
 
   function getEntityName(id: string): string {
     if (!id) return 'Unknown';
@@ -937,6 +1053,23 @@
     await computeRoutes(false);
   }
 
+  async function autoPrepareHostedCheckout(checkoutKey: string): Promise<void> {
+    if (!hostedCheckoutMode || hostedCheckoutPreparing) return;
+    hostedCheckoutPreparing = true;
+    hostedCheckoutStatusMessage = 'Preparing payment route';
+    try {
+      await scrollHostedCheckoutIntoView();
+      await computeRoutes(false);
+      if (hostedCheckoutRouteKey !== checkoutKey) return;
+      if (routes.length > 0) {
+        selectedRouteIndex = 0;
+        hostedCheckoutStatusMessage = 'Route ready';
+      }
+    } finally {
+      hostedCheckoutPreparing = false;
+    }
+  }
+
   async function payNowCheapest() {
     if (sendingPayment || findingRoutes) return;
     await computeRoutes(false);
@@ -945,13 +1078,95 @@
     await sendPayment(true);
   }
 
-  async function sendPayment(manual = true) {
-    if (selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
-    if (sendingPayment) return;
+  function getPersistedLogData(entry: PersistedFrameLogEntry): Record<string, unknown> {
+    const data = entry?.data;
+    return data && typeof data === 'object' ? data : {};
+  }
+
+  async function waitForHostedCheckoutConfirmation(hashlock: string, fromHeight: number): Promise<void> {
+    if (!hostedCheckoutMode) return;
+    const env = currentEnv;
+    if (!env) return;
+    const xln = await getXLN();
+    if (
+      typeof xln.getPersistedLatestHeight !== 'function' ||
+      typeof xln.readPersistedFrameJournal !== 'function'
+    ) {
+      return;
+    }
+
+    const watcherToken = ++hostedCheckoutWatcherToken;
+    hostedCheckoutAwaitingConfirmation = true;
+    hostedCheckoutPendingHashlock = hashlock;
+    hostedCheckoutStatusMessage = 'Waiting for persisted confirmation';
+    hostedCheckoutSuccessVisible = false;
+    clearHostedCheckoutCloseTimer();
+    await scrollHostedCheckoutIntoView();
+
+    const targetEntity = normalizeEntityId(entityId);
+    const targetHashlock = String(hashlock).toLowerCase();
+    let nextHeight = Math.max(1, fromHeight);
+    const deadlineAt = Date.now() + 45_000;
+
+    try {
+      while (Date.now() < deadlineAt) {
+        if (watcherToken !== hostedCheckoutWatcherToken) return;
+        const latestHeight = await xln.getPersistedLatestHeight(env);
+        for (let height = nextHeight; height <= latestHeight; height += 1) {
+          if (watcherToken !== hostedCheckoutWatcherToken) return;
+          const receipt = await xln.readPersistedFrameJournal(env, height);
+          const logs = Array.isArray(receipt?.logs) ? receipt.logs : [];
+          for (const entry of logs) {
+            if (entry.message !== 'PaymentFinalized' && entry.message !== 'PaymentFailed') continue;
+            const data = getPersistedLogData(entry);
+            const logHashlock = typeof data.hashlock === 'string' ? data.hashlock.toLowerCase() : '';
+            if (logHashlock !== targetHashlock) continue;
+            const logEntity =
+              typeof data.entityId === 'string'
+                ? normalizeEntityId(data.entityId)
+                : normalizeEntityId(entry.entityId);
+            if (logEntity && logEntity !== targetEntity) continue;
+            if (entry.message === 'PaymentFailed') {
+              const reason = typeof data.reason === 'string' ? data.reason : 'Payment failed';
+              throw new Error(reason);
+            }
+
+            hostedCheckoutAwaitingConfirmation = false;
+            hostedCheckoutPendingHashlock = hashlock;
+            hostedCheckoutStatusMessage = 'Confirmed. Closing checkout...';
+            hostedCheckoutSuccessVisible = true;
+            toasts.success('Payment confirmed');
+            await scrollHostedCheckoutIntoView();
+            clearRepeatTimer();
+            clearHostedCheckoutCloseTimer();
+            hostedCheckoutCloseTimer = setTimeout(() => {
+              void closeHostedCheckoutWindow();
+            }, 900);
+            return;
+          }
+        }
+        nextHeight = latestHeight + 1;
+        await sleep(250);
+      }
+      throw new Error('Timed out waiting for persisted payment confirmation');
+    } catch (error) {
+      if (watcherToken !== hostedCheckoutWatcherToken) return;
+      hostedCheckoutAwaitingConfirmation = false;
+      hostedCheckoutSuccessVisible = false;
+      const message = error instanceof Error ? error.message : String(error);
+      hostedCheckoutStatusMessage = message;
+      preflightError = message;
+      toasts.error(`Payment confirmation failed: ${message}`);
+    }
+  }
+
+  async function sendPayment(manual = true): Promise<SendPaymentResult> {
+    if (selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return { queued: false, hashlock: null };
+    if (sendingPayment) return { queued: false, hashlock: null };
 
     sendingPayment = true;
     try {
-      await getXLN();
+      const xln = await getXLN();
       const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
       if (!activeIsLive) throw new Error('Payments are only available in LIVE mode');
@@ -973,11 +1188,17 @@
 
       const descriptionValue = description.trim();
       let paymentInput: EntityInputPayload;
+      let queuedHashlock: string | null = null;
+      const persistedStartHeight =
+        hostedCheckoutMode && manual && typeof xln.getPersistedLatestHeight === 'function'
+          ? await xln.getPersistedLatestHeight(env)
+          : 0;
 
       if (useHtlc) {
         // Hashlock: atomic multi-hop with hashlock
         const { secret, hashlock } = generateSecretHashlock();
         console.log(`[Send] Hashlock secret=${secret.slice(0,16)}... hashlock=${hashlock.slice(0,16)}...`);
+        queuedHashlock = hashlock;
         paymentInput = {
           entityId,
           signerId,
@@ -1012,10 +1233,15 @@
 
       await enqueueEntityInputs(env, [paymentInput]);
       console.log(`[Send] ${useHtlc ? 'Hashlock' : 'Direct (unsafe)'} payment sent via:`, route.path.join(' -> '));
+      if (hostedCheckoutMode && manual && queuedHashlock) {
+        void waitForHostedCheckoutConfirmation(queuedHashlock, persistedStartHeight + 1);
+      }
+      return { queued: true, hashlock: queuedHashlock };
     } catch (error) {
       console.error('[Send] Payment failed:', error);
       preflightError = (error as Error)?.message || 'Unknown send error';
       toasts.error(`Payment failed: ${preflightError}`);
+      return { queued: false, hashlock: null };
     } finally {
       sendingPayment = false;
       if (manual) {
@@ -1027,9 +1253,9 @@
   function handleTargetChange(e: CustomEvent) {
     targetEntityId = e.detail.value;
     preflightError = null;
-    routes = [];
-    selectedRouteIndex = -1;
-    clearRepeatTimer();
+    hostedCheckoutStatusMessage = '';
+    hostedCheckoutSuccessVisible = false;
+    resetQuotedRoutes();
   }
 
   function handleRecipientPickerOpen() {
@@ -1042,6 +1268,17 @@
 
   function handleTokenChange(e: CustomEvent) {
     tokenId = e.detail.value;
+    preflightError = null;
+    hostedCheckoutStatusMessage = '';
+    hostedCheckoutSuccessVisible = false;
+    resetQuotedRoutes();
+  }
+
+  function handleAmountInput() {
+    preflightError = null;
+    hostedCheckoutStatusMessage = '';
+    hostedCheckoutSuccessVisible = false;
+    resetQuotedRoutes();
   }
 
   function handleRepeatChange(event: Event) {
@@ -1062,13 +1299,76 @@
     }
   }
 
+  $: hostedCheckoutAutoKey =
+    hostedCheckoutMode
+      ? `${normalizeEntityId(entityId)}|${normalizeEntityId(targetEntityId)}|${tokenId}|${amount.trim()}|${description.trim()}`
+      : '';
+
+  $: if (
+    hostedCheckoutMode &&
+    hostedCheckoutAutoKey &&
+    activeIsLive &&
+    currentEnv &&
+    currentReplicas &&
+    !findingRoutes &&
+    !sendingPayment &&
+    !hostedCheckoutAwaitingConfirmation &&
+    routes.length === 0 &&
+    hostedCheckoutRouteKey !== hostedCheckoutAutoKey
+  ) {
+    hostedCheckoutRouteKey = hostedCheckoutAutoKey;
+    void autoPrepareHostedCheckout(hostedCheckoutAutoKey);
+  }
+
+  $: hostedCheckoutBannerMessage = (() => {
+    if (!hostedCheckoutMode) return '';
+    if (hostedCheckoutSuccessVisible) return 'Persisted confirmation received';
+    if (hostedCheckoutAwaitingConfirmation) return 'Waiting for persisted confirmation';
+    if (findingRoutes || hostedCheckoutPreparing) return 'Finding best route';
+    if (routes.length > 0) return 'Route ready';
+    return 'Preparing payment';
+  })();
+
   onMount(() => {
     applyPaymentPrefillFromURL();
+    void scrollHostedCheckoutIntoView();
     void refreshServerEntityNames();
+    const handleLocationChange = () => {
+      applyPaymentPrefillFromURL();
+      void scrollHostedCheckoutIntoView();
+    };
+    const handleHostedCheckoutPageHide = () => {
+      if (!hostedCheckoutMode) return;
+      void shutdownHostedCheckoutRuntime();
+    };
+    window.addEventListener('hashchange', handleLocationChange);
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('pagehide', handleHostedCheckoutPageHide);
+    window.addEventListener('beforeunload', handleHostedCheckoutPageHide);
+    return () => {
+      window.removeEventListener('hashchange', handleLocationChange);
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('pagehide', handleHostedCheckoutPageHide);
+      window.removeEventListener('beforeunload', handleHostedCheckoutPageHide);
+    };
   });
 </script>
 
-<div class="payment-panel">
+<div bind:this={paymentPanelEl} class="payment-panel" class:hosted-checkout={hostedCheckoutMode}>
+  {#if hostedCheckoutMode}
+    <div class="hosted-checkout-banner">
+      <div class="hosted-checkout-copy">
+        <span class="hosted-checkout-eyebrow">Hosted Checkout</span>
+        <strong>{hostedCheckoutBannerMessage}</strong>
+        <span>Review the payment details below, then confirm with Pay Now.</span>
+      </div>
+      <div class="hosted-checkout-summary">
+        <span>{amount || '0.00'} {activeXlnFunctions?.getTokenInfo?.(tokenId)?.symbol || 'token'}</span>
+        <span>{getEntityName(targetEntityId || entityId)}</span>
+      </div>
+    </div>
+  {/if}
+
   <EntityInput
     label="Recipient"
     value={targetEntityId}
@@ -1123,6 +1423,7 @@
         bind:value={amount}
         placeholder="0.00"
         disabled={findingRoutes || sendingPayment}
+        on:input={handleAmountInput}
       />
     </div>
     <TokenSelect
@@ -1156,7 +1457,7 @@
         class="mode-btn"
         class:active={useHtlc}
         aria-pressed={useHtlc}
-        disabled={findingRoutes || sendingPayment}
+        disabled={hostedCheckoutMode || findingRoutes || sendingPayment}
         on:click={() => (useHtlc = true)}
       >
         Hashlock
@@ -1166,7 +1467,7 @@
         class="mode-btn unsafe"
         class:active={!useHtlc}
         aria-pressed={!useHtlc}
-        disabled={findingRoutes || sendingPayment}
+        disabled={hostedCheckoutMode || findingRoutes || sendingPayment}
         on:click={() => (useHtlc = false)}
       >
         Direct (unsafe)
@@ -1278,6 +1579,13 @@
       </div>
     {/if}
   {/if}
+
+  {#if hostedCheckoutSuccessVisible}
+    <div class="checkout-success" role="status" aria-live="polite">
+      <div class="checkout-success-title">Confirmed</div>
+      <div class="checkout-success-body">{hostedCheckoutStatusMessage || 'Payment settled. Closing checkout...'}</div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -1285,6 +1593,73 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
+  }
+
+  .payment-panel.hosted-checkout {
+    position: relative;
+    padding: 18px;
+    border-radius: 18px;
+    border: 1px solid rgba(34, 197, 94, 0.28);
+    background:
+      radial-gradient(circle at top right, rgba(34, 197, 94, 0.12), transparent 38%),
+      linear-gradient(180deg, rgba(10, 16, 12, 0.96), rgba(10, 12, 14, 0.98));
+    box-shadow: 0 28px 70px rgba(0, 0, 0, 0.32);
+  }
+
+  .hosted-checkout-banner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: center;
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px solid rgba(34, 197, 94, 0.2);
+    background: rgba(6, 10, 8, 0.72);
+  }
+
+  .hosted-checkout-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: #d6f5dd;
+  }
+
+  .hosted-checkout-copy strong {
+    font-size: 15px;
+    letter-spacing: -0.02em;
+  }
+
+  .hosted-checkout-copy span:last-child {
+    color: #9fb9a6;
+    font-size: 12px;
+  }
+
+  .hosted-checkout-eyebrow {
+    color: #7dd3a5;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .hosted-checkout-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 180px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(15, 23, 18, 0.95);
+    border: 1px solid rgba(22, 163, 74, 0.24);
+    color: #ecfdf3;
+    text-align: right;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .hosted-checkout-summary span:first-child {
+    font-size: 16px;
+    letter-spacing: -0.03em;
   }
 
   .row {
@@ -1670,9 +2045,44 @@
     cursor: not-allowed;
   }
 
+  .checkout-success {
+    position: sticky;
+    bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px 18px;
+    border-radius: 14px;
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    background: linear-gradient(135deg, rgba(20, 83, 45, 0.96), rgba(22, 101, 52, 0.92));
+    box-shadow: 0 22px 60px rgba(3, 12, 6, 0.42);
+    color: #ecfdf5;
+    z-index: 2;
+  }
+
+  .checkout-success-title {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+  }
+
+  .checkout-success-body {
+    font-size: 13px;
+    color: rgba(236, 253, 245, 0.86);
+  }
+
   @media (max-width: 900px) {
     .payment-actions {
       grid-template-columns: 1fr;
+    }
+
+    .hosted-checkout-banner {
+      grid-template-columns: 1fr;
+    }
+
+    .hosted-checkout-summary {
+      min-width: 0;
+      text-align: left;
     }
   }
 

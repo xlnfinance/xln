@@ -139,6 +139,6 @@ describe('relay-router gossip fanout', () => {
     const lastResponse = responses.at(-1);
 
     expect(lastResponse).toBeDefined();
-    expect(lastResponse?.payload?.profiles?.map((profile) => profile.entityId)).toEqual([ENTITY_B]);
+    expect(lastResponse?.payload?.profiles?.map((profile) => profile.entityId)).toEqual([ENTITY_B, ENTITY_A]);
   });
 });

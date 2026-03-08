@@ -1699,6 +1699,62 @@ const readCanonicalJurisdictionsJson = async (): Promise<string> => {
   throw new Error('JURISDICTIONS_JSON_MISSING');
 };
 
+const buildRuntimeJurisdictionsJson = (env?: Env | null): string | null => {
+  if (!env?.jReplicas || env.jReplicas.size === 0) return null;
+  const jurisdictionName = env.activeJurisdiction ?? env.jReplicas.keys().next().value;
+  if (typeof jurisdictionName !== 'string' || !jurisdictionName) return null;
+  const replica = env.jReplicas.get(jurisdictionName) as
+    | {
+        name?: string;
+        chainId?: number;
+        rpcs?: string[];
+        depositoryAddress?: string;
+        entityProviderAddress?: string;
+        contracts?: {
+          account?: string;
+          depository?: string;
+          entityProvider?: string;
+          deltaTransformer?: string;
+        };
+        jadapter?: {
+          addresses?: {
+            account?: string;
+            depository?: string;
+            entityProvider?: string;
+            deltaTransformer?: string;
+          };
+        };
+      }
+    | undefined;
+  if (!replica) return null;
+
+  const addresses = replica.jadapter?.addresses ?? {};
+  const depository =
+    String(addresses.depository || replica.depositoryAddress || replica.contracts?.depository || '').trim();
+  const entityProvider =
+    String(addresses.entityProvider || replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
+  if (!depository || !entityProvider) return null;
+
+  const payload = {
+    version: '1.0.0',
+    lastUpdated: new Date().toISOString(),
+    jurisdictions: {
+      arrakis: {
+        name: String(replica.name || jurisdictionName || 'Testnet'),
+        chainId: Number(replica.chainId || 31337),
+        rpc: String(process.env.PUBLIC_RPC || replica.rpcs?.[0] || '/rpc'),
+        contracts: {
+          account: String(addresses.account || replica.contracts?.account || ''),
+          depository,
+          entityProvider,
+          deltaTransformer: String(addresses.deltaTransformer || replica.contracts?.deltaTransformer || ''),
+        },
+      },
+    },
+  };
+  return JSON.stringify(payload);
+};
+
 const clearColdResetArtifacts = async (): Promise<void> => {
   try {
     const fs = await import('fs/promises');
@@ -3706,7 +3762,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   if (pathname === '/api/jurisdictions') {
     try {
-      const payload = await readCanonicalJurisdictionsJson();
+      const payload = buildRuntimeJurisdictionsJson(env) ?? await readCanonicalJurisdictionsJson();
       return new Response(payload, {
         headers: {
           ...headers,

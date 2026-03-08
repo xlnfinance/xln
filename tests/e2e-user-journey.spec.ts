@@ -1,5 +1,22 @@
+/**
+ * E2E user journey for onboarding, funding, account growth, and collateral progress.
+ *
+ * Flow and goals:
+ * 1. Create a fresh browser user in the live wallet.
+ * 2. Connect the user to a hub and bootstrap usable capacity.
+ * 3. Verify the account machine progresses through visible states as usage grows.
+ * 4. Confirm the UI shows the expected collateral/requested-collateral progression.
+ *
+ * This test exists to keep the first-user experience honest: a brand-new user should be able
+ * to create an entity, connect, receive capacity, and see account progress without hidden setup.
+ */
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
+import {
+  gotoApp as gotoSharedApp,
+  createRuntime as createSharedRuntime,
+} from './utils/e2e-demo-users';
+import { connectHub as connectActiveRuntimeToHub } from './utils/e2e-connect';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const INIT_TIMEOUT = 30_000;
@@ -21,15 +38,11 @@ function randomMnemonic(): string {
 }
 
 async function gotoApp(page: Page): Promise<void> {
-  await page.goto(`${APP_BASE_URL}/app`);
-  const unlock = page.locator('button:has-text("Unlock")');
-  if (await unlock.isVisible({ timeout: 1500 }).catch(() => false)) {
-    await page.locator('input').first().fill('mml');
-    await unlock.click();
-    await page.waitForURL('**/app', { timeout: 10_000 });
-  }
-  await page.waitForFunction(() => !!(window as any).XLN, { timeout: INIT_TIMEOUT });
-  await page.waitForTimeout(500);
+  await gotoSharedApp(page, {
+    appBaseUrl: APP_BASE_URL,
+    initTimeoutMs: INIT_TIMEOUT,
+    settleMs: 500,
+  });
 }
 
 async function dismissOnboardingIfVisible(page: Page): Promise<void> {
@@ -45,25 +58,7 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
 }
 
 async function createDemoRuntime(page: Page, label: string, mnemonic: string): Promise<void> {
-  const result = await page.evaluate(async ({ label, mnemonic }) => {
-    try {
-      const vaultOperations = (window as any).vaultOperations;
-      if (!vaultOperations) return { ok: false, error: 'window.vaultOperations missing' };
-      await vaultOperations.createRuntime(label, mnemonic, {
-        loginType: 'demo',
-        requiresOnboarding: false,
-      });
-      return { ok: true };
-    } catch (error: any) {
-      return { ok: false, error: error?.message || String(error) };
-    }
-  }, { label, mnemonic });
-
-  expect(result.ok, `createRuntime failed: ${result.error || 'unknown'}`).toBe(true);
-  await page.waitForFunction(() => {
-    const env = (window as any).isolatedEnv;
-    return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
-  }, { timeout: 20_000 });
+  await createSharedRuntime(page, label, mnemonic);
 }
 
 async function readPrimaryAccountProgress(page: Page): Promise<AccountProgress | null> {
@@ -115,104 +110,49 @@ async function readPrimaryAccountProgress(page: Page): Promise<AccountProgress |
 }
 
 async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
-  const result = await page.evaluate(async () => {
-    const findAccount = (accounts: any, ownerId: string, counterpartyId: string) => {
-      if (!(accounts instanceof Map)) return null;
-      const owner = String(ownerId || '').toLowerCase();
-      const cp = String(counterpartyId || '').toLowerCase();
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey || '').toLowerCase() === cp) return account;
-        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
-          ? String(account.counterpartyEntityId).toLowerCase()
-          : '';
-        if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
-        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
-      }
-      return null;
-    };
-
+  const state = await page.evaluate(() => {
     const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN;
-    if (!env?.eReplicas || !XLN?.enqueueRuntimeInput) return { ok: false, error: 'isolatedEnv/XLN missing' };
+    if (!env?.eReplicas) return { ready: false, hubId: '' };
 
     const runtimeSigner = String(env.runtimeId || '').toLowerCase();
-    let entityId = '';
-    let signerId = '';
-    let openedHubId = '';
+    let ready = false;
+    let hubId = '';
+
     for (const [key, rep] of env.eReplicas.entries()) {
-      const [eid, sid] = String(key).split(':');
-      if (!eid || !sid) continue;
-      if (runtimeSigner && String(sid).toLowerCase() !== runtimeSigner) continue;
-      entityId = eid;
-      signerId = sid;
-      if (rep?.state?.accounts instanceof Map && rep.state.accounts.size > 0) {
-        for (const [cpId, account] of rep.state.accounts.entries()) {
+      const [entityId, signerId] = String(key).split(':');
+      if (!entityId || !signerId) continue;
+      if (runtimeSigner && String(signerId).toLowerCase() !== runtimeSigner) continue;
+
+      if (rep?.state?.accounts instanceof Map) {
+        for (const [counterpartyId, account] of rep.state.accounts.entries()) {
+          if (!hubId) hubId = String(counterpartyId || '');
           const hasDelta = !!account?.deltas?.get?.(1);
-          const ready = hasDelta && !account?.pendingFrame && Number(account?.currentHeight || 0) > 0;
-          if (ready) {
-            return { ok: true };
-          }
-          if (!openedHubId) {
-            openedHubId = String(cpId || '');
+          if (hasDelta && !account?.pendingFrame && Number(account?.currentHeight || 0) > 0) {
+            ready = true;
+            hubId = String(counterpartyId || '');
+            break;
           }
         }
       }
       break;
     }
-    if (!entityId || !signerId) return { ok: false, error: 'local entity not found' };
 
-    const profiles = env?.gossip?.getProfiles?.() || [];
-    const hub = profiles.find((p: any) =>
-      p?.metadata?.isHub === true ||
-      (Array.isArray(p?.capabilities) && (p.capabilities.includes('hub') || p.capabilities.includes('routing')))
-    );
-    const hubId = String(openedHubId || hub?.entityId || '');
-    if (!hubId) return { ok: false, error: 'hub not discovered in gossip' };
-
-    const existingAccount = (() => {
-      const repKey = Array.from(env.eReplicas.keys()).find((key: string) => {
-        const [eid, sid] = String(key).split(':');
-        return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-          && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-      });
-      if (!repKey) return null;
-      const rep = env.eReplicas.get(repKey);
-      return findAccount(rep?.state?.accounts, entityId, hubId);
-    })();
-
-    if (!existingAccount) {
-      XLN.enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [{
-          entityId,
-          signerId,
-          entityTxs: [{
-            type: 'openAccount',
-            data: { targetEntityId: hubId, creditAmount: 10_000n * 10n ** 18n, tokenId: 1 },
-          }],
-        }],
-      });
+    if (!hubId) {
+      const profiles = env?.gossip?.getProfiles?.() || [];
+      const hubProfile = profiles.find((profile: any) =>
+        profile?.metadata?.isHub === true ||
+        (Array.isArray(profile?.capabilities) &&
+          (profile.capabilities.includes('hub') || profile.capabilities.includes('routing'))),
+      );
+      hubId = typeof hubProfile?.entityId === 'string' ? hubProfile.entityId : '';
     }
 
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 45_000) {
-      for (const [key, rep] of env.eReplicas.entries()) {
-        const [eid] = String(key).split(':');
-        if (String(eid || '').toLowerCase() !== String(entityId).toLowerCase()) continue;
-        const account = findAccount(rep?.state?.accounts, entityId, hubId);
-        if (!account) continue;
-        if (account?.deltas?.get?.(1) && !account?.pendingFrame && Number(account?.currentHeight || 0) > 0) {
-          return { ok: true };
-        }
-      }
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    return { ok: false, error: 'openAccount timeout (45s)' };
+    return { ready, hubId };
   });
 
-  expect(result.ok, `ensureAnyHubAccountOpen failed: ${result.error || 'unknown'}`).toBe(true);
+  if (state.ready) return;
+  expect(state.hubId, 'hub must be discoverable before opening account').toBeTruthy();
+  await connectActiveRuntimeToHub(page, state.hubId);
 }
 
 test.describe('E2E User Journey', () => {

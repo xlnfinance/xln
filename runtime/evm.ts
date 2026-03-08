@@ -85,6 +85,7 @@ export const ENTITY_PROVIDER_ABI = [
 
 export const DEPOSITORY_ABI = [
   'function mintToReserve(bytes32 entity, uint256 tokenId, uint256 amount) external',
+  'function mintToReserveBatch((bytes32 entity, uint256 tokenId, uint256 amount)[] mints) external',
   'function debugFundReserves(bytes32 entity, uint256 tokenId, uint256 amount) external',
   'function debugBulkFundEntities() external',
   'function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint256 tokenId, uint256 amount) external returns (bool)',
@@ -648,6 +649,7 @@ export const transferNameBetweenEntities = async (
 export const generateJurisdictions = async (): Promise<Map<string, JurisdictionConfig>> => {
 
   const jurisdictions = new Map<string, JurisdictionConfig>();
+  const browserJurisdictionsUrl = `./jurisdictions.json?ts=${Date.now()}`;
 
   try {
     let config: any; // Complex type - loadJurisdictions returns different shapes in different contexts
@@ -664,7 +666,11 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
 
       try {
-        const response = await fetch('./jurisdictions.json', { signal: controller.signal });
+        const response = await fetch(browserJurisdictionsUrl, {
+          signal: controller.signal,
+          cache: 'no-store',
+          headers: { 'cache-control': 'no-cache' },
+        });
         clearTimeout(timeoutId);
         if (!response.ok) {
           throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);

@@ -216,10 +216,25 @@ const finishTiming = (stage: keyof typeof timings, startedAt: number): void => {
   console.log(`[MESH-TIMING] ${resolvedArgs.name}.${stage} ${ms}ms`);
 };
 
+const getJurisdictionKeyForRpc = (rpcUrl: string): string => {
+  try {
+    const parsed = new URL(rpcUrl);
+    const port = parsed.port || 'default';
+    return `arrakis_${port}`;
+  } catch {
+    return 'arrakis_local';
+  }
+};
+
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig => {
   const data = loadJurisdictions();
   const map = data.jurisdictions ?? {};
-  const arrakis = map.arrakis ?? Object.values(map)[0];
+  const requestedRpc = String(rpcUrlOverride || '').trim();
+  const exactMatch = Object.values(map).find((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    return String((entry as JurisdictionConfig).rpc || '').trim() === requestedRpc;
+  });
+  const arrakis = exactMatch ?? map.arrakis ?? Object.values(map)[0];
   if (!arrakis) {
     throw new Error('JURISDICTION_NOT_FOUND');
   }
@@ -230,6 +245,10 @@ const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =
 };
 
 const resolveJurisdictionPaths = (): string[] => {
+  const overridePath = String(process.env.XLN_JURISDICTIONS_PATH || '').trim();
+  if (overridePath) {
+    return [overridePath];
+  }
   return [
     join(process.cwd(), 'jurisdictions', 'jurisdictions.json'),
     join(process.cwd(), 'frontend', 'static', 'jurisdictions.json'),
@@ -249,8 +268,7 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
       ? JSON.parse(readFileSync(filePath, 'utf8'))
       : {};
     const jurisdictions = current.jurisdictions ?? {};
-    const keys = Object.keys(jurisdictions);
-    const targetKey = keys.includes('arrakis') ? 'arrakis' : (keys[0] || 'arrakis');
+    const targetKey = getJurisdictionKeyForRpc(rpcUrl);
     const previous = jurisdictions[targetKey] ?? {};
     jurisdictions[targetKey] = {
       ...previous,
@@ -302,11 +320,68 @@ const syncEnvJurisdictionReplica = (env: Env, jadapter: JAdapter, rpcUrl: string
   replica.jadapter = jadapter;
 };
 
+const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
+  const activeName = env.activeJurisdiction || Array.from(env.jReplicas?.keys?.() || [])[0];
+  if (!activeName) return null;
+  const replica = env.jReplicas?.get(activeName) as
+    | {
+        name?: string;
+        chainId?: number;
+        rpcs?: string[];
+        depositoryAddress?: string;
+        entityProviderAddress?: string;
+        contracts?: {
+          account?: string;
+          depository?: string;
+          entityProvider?: string;
+          deltaTransformer?: string;
+        };
+        jadapter?: {
+          addresses?: {
+            account?: string;
+            depository?: string;
+            entityProvider?: string;
+            deltaTransformer?: string;
+          };
+        };
+      }
+    | undefined;
+  if (!replica) return null;
+
+  const addresses = replica.jadapter?.addresses ?? {};
+  const depository =
+    String(addresses.depository || replica.depositoryAddress || replica.contracts?.depository || '').trim();
+  const entityProvider =
+    String(addresses.entityProvider || replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
+  if (!depository || !entityProvider) return null;
+
+  return JSON.stringify({
+    version: '1.0.0',
+    lastUpdated: new Date().toISOString(),
+    jurisdictions: {
+      arrakis: {
+        name: String(replica.name || activeName || 'Arrakis (Shared Anvil)'),
+        chainId: Number(replica.chainId || 31337),
+        rpc: String(replica.rpcs?.[0] || resolvedArgs.rpcUrl || '/rpc'),
+        contracts: {
+          account: String(addresses.account || replica.contracts?.account || ''),
+          depository,
+          entityProvider,
+          deltaTransformer: String(addresses.deltaTransformer || replica.contracts?.deltaTransformer || ''),
+        },
+      },
+    },
+  });
+};
+
 const ensureRpcStackReady = async (env: Env, jadapter: JAdapter): Promise<void> => {
   if (jadapter.mode === 'browservm') return;
   const hasAddresses = Boolean(jadapter.addresses?.depository && jadapter.addresses?.entityProvider);
   if (hasAddresses) {
     syncEnvJurisdictionReplica(env, jadapter, resolvedArgs.rpcUrl);
+    if (resolvedArgs.deployTokens) {
+      await writeJurisdictionAddresses(jadapter, resolvedArgs.rpcUrl);
+    }
     return;
   }
   if (!resolvedArgs.deployTokens) {
@@ -638,7 +713,7 @@ const run = async (): Promise<void> => {
           chainId: jurisdiction.chainId,
           ticker: 'XLN',
           rpcs: [jurisdiction.rpc],
-          contracts: jurisdiction.contracts,
+          ...(resolvedArgs.deployTokens ? {} : { contracts: jurisdiction.contracts }),
         },
       },
     ],
@@ -839,6 +914,22 @@ const run = async (): Promise<void> => {
       if (pathname === '/api/health') {
         const health = buildLocalHealth(env, bootstrap.entityId, tokenCatalog);
         return new Response(JSON.stringify(health), { headers });
+      }
+
+      if (pathname === '/api/jurisdictions') {
+        const payload = buildRuntimeJurisdictionsPayload(env);
+        if (!payload) {
+          return new Response(JSON.stringify({ error: 'JURISDICTION_PAYLOAD_UNAVAILABLE' }), {
+            status: 503,
+            headers,
+          });
+        }
+        return new Response(payload, {
+          headers: {
+            ...headers,
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+          },
+        });
       }
 
       if (pathname === '/api/faucet/offchain' && request.method === 'POST') {

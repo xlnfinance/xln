@@ -31,7 +31,8 @@ export const selectProfileBatch = (
   request: GossipProfileBatchRequest = {},
   defaultLimit: number = DEFAULT_GOSSIP_BATCH_LIMIT,
 ): Profile[] => {
-  const result = new Map<string, Profile>();
+  const explicitMatches = new Map<string, Profile>();
+  const setMatches = new Map<string, Profile>();
   const ids = Array.isArray(request.ids)
     ? Array.from(
         new Set(
@@ -52,7 +53,7 @@ export const selectProfileBatch = (
   for (const entityId of ids) {
     const profile = profiles.find((candidate) => normalizeEntityId(candidate.entityId) === entityId);
     if (profile) {
-      result.set(entityId, profile);
+      explicitMatches.set(entityId, profile);
     }
   }
 
@@ -69,13 +70,12 @@ export const selectProfileBatch = (
   }
 
   for (const profile of setProfiles) {
-    result.set(normalizeEntityId(profile.entityId), profile);
+    const normalizedEntityId = normalizeEntityId(profile.entityId);
+    if (updatedSince !== null && Number(profile.metadata?.lastUpdated || 0) <= updatedSince) {
+      continue;
+    }
+    setMatches.set(normalizedEntityId, profile);
   }
 
-  return Array.from(result.values())
-    .filter((profile) => {
-      if (updatedSince === null) return true;
-      return Number(profile.metadata?.lastUpdated || 0) > updatedSince;
-    })
-    .sort(sortProfilesForBatch);
+  return Array.from(new Map<string, Profile>([...setMatches, ...explicitMatches]).values()).sort(sortProfilesForBatch);
 };

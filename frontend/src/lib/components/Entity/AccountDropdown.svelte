@@ -13,6 +13,7 @@
   export let replica: EntityReplica | null = null;
   export let selectedAccountId: string | null = null;
   export let allowAdd: boolean = false;
+  export let envOverride: { gossip?: { getProfiles?: () => unknown[] } } | null = null;
 
   const dispatch = createEventDispatcher();
 
@@ -30,7 +31,8 @@
   }
 
   $: xlnReady = !!$xlnInstance;
-  $: gossipProfiles = $xlnEnvironment?.gossip?.getProfiles?.() || [];
+  $: activeEnv = envOverride || $xlnEnvironment;
+  $: gossipProfiles = activeEnv?.gossip?.getProfiles?.() || [];
   $: accounts = buildAccountList(replica, xlnReady ? $xlnFunctions : null, gossipProfiles as any[]);
 
   function buildAccountList(replica: EntityReplica | null, xlnFuncs: any, profiles: any[]): AccountItem[] {
