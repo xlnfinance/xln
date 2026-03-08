@@ -16,6 +16,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { ensureE2EBaseline, APP_BASE_URL } from './utils/e2e-baseline';
 import { connectHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import { getRenderedPrimaryOutbound } from './utils/e2e-account-ui';
 
 const CONSENSUS_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
@@ -85,18 +86,6 @@ async function getConnectedHubEntityId(page: Page): Promise<string | null> {
       if (!first?.done && typeof first.value === 'string') return first.value;
     }
     return null;
-  });
-}
-
-async function getRenderedOutbound(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const selectedCard = document.querySelector('.account-preview.selected') || document.querySelector('.account-preview');
-    if (!selectedCard) return 0;
-    const outEl = selectedCard.querySelector('.delta-row .compact-out-value, .compact-out-value, .cap.out .cap-value');
-    if (!outEl) return 0;
-    const raw = String(outEl.textContent || '').replace(/,/g, '').trim();
-    const numeric = Number(raw.replace(/[^0-9.-]/g, ''));
-    return Number.isFinite(numeric) ? numeric : 0;
   });
 }
 
@@ -216,7 +205,7 @@ test.describe('E2E HTLC Payment Flow', () => {
 
     let outboundBeforePayment = 0;
     await expect.poll(async () => {
-      outboundBeforePayment = await getRenderedOutbound(page);
+      outboundBeforePayment = await getRenderedPrimaryOutbound(page);
       return outboundBeforePayment;
     }, { timeout: CONSENSUS_TIMEOUT }).toBeGreaterThan(0);
     process.stdout.write(`  Outbound before payment (UI): ${outboundBeforePayment}\n`);
@@ -268,7 +257,7 @@ test.describe('E2E HTLC Payment Flow', () => {
 
     let outboundAfterPayment = outboundBeforePayment;
     await expect.poll(async () => {
-      outboundAfterPayment = await getRenderedOutbound(page);
+      outboundAfterPayment = await getRenderedPrimaryOutbound(page);
       return outboundAfterPayment;
     }, { timeout: CONSENSUS_TIMEOUT }).toBeLessThan(outboundBeforePayment);
     const persistedBeforeReload = await getPrimaryAccountState(page, connectedHubId ?? undefined);

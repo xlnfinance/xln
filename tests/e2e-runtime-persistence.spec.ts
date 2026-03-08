@@ -18,11 +18,7 @@ import {
   switchToRuntimeId,
 } from './utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
-
-const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
-const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
-const RESET_BASE_URL = process.env.E2E_RESET_BASE_URL ?? 'http://localhost:8082';
-const LONG_E2E = process.env.E2E_LONG === '1';
+import { APP_BASE_URL, API_BASE_URL, resetProdServer } from './utils/e2e-baseline';
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
@@ -50,53 +46,6 @@ async function getActiveApiBase(page: Page): Promise<string> {
     return typeof relay === 'string' ? relay : null;
   });
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
-}
-
-async function waitForServerHealthy(page: Page, timeoutMs = 60_000) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const res = await page.request.get(`${RESET_BASE_URL}/api/health`);
-      if (res.ok()) {
-        const body = await res.json().catch(() => ({}));
-        if (typeof body?.timestamp === 'number') return;
-      }
-    } catch {
-      // retry
-    }
-    await page.waitForTimeout(1000);
-  }
-  throw new Error('Server did not become healthy in time after reset');
-}
-
-async function resetProdServer(page: Page) {
-  let lastError = '';
-  let resetDone = false;
-  for (let attempt = 1; attempt <= 10; attempt++) {
-    try {
-      const coldResponse = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1&sync=1`);
-      const coldBody = await coldResponse.json().catch(() => ({}));
-      if (coldResponse.ok()) {
-        resetDone = true;
-        break;
-      }
-      const softResponse = await page.request.post(`${RESET_BASE_URL}/api/debug/reset`, {
-        data: { preserveHubs: false },
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const softBody = await softResponse.json().catch(() => ({}));
-      if (softResponse.ok()) {
-        resetDone = true;
-        break;
-      }
-      lastError = `cold=${JSON.stringify(coldBody)} soft=${JSON.stringify(softBody)}`;
-    } catch (error: any) {
-      lastError = error?.message || String(error);
-    }
-    await page.waitForTimeout(1000);
-  }
-  expect(resetDone, `reset failed after retries: ${lastError}`).toBe(true);
-  await waitForServerHealthy(page);
 }
 
 async function discoverHub(page: Page) {
@@ -475,15 +424,17 @@ async function setSnapshotInterval(page: Page, frames: number) {
 }
 
 test.describe('E2E: Multi-runtime persistence reload', () => {
-  test.setTimeout(LONG_E2E ? 120_000 : 60_000);
+  test.setTimeout(120_000);
 
   test.beforeEach(async ({ page }) => {
-    await resetProdServer(page);
+    await resetProdServer(page, {
+      apiBaseUrl: API_BASE_URL,
+      requireHubMesh: true,
+      requireMarketMaker: false,
+      minHubCount: 3,
+      softPreserveHubs: false,
+    });
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, settleMs: 600 });
-  });
-
-  test.afterEach(async ({ page }) => {
-    await resetProdServer(page);
   });
 
   test('reload restores all runtimes and account state', async ({ page }) => {
