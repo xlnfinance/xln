@@ -19,6 +19,27 @@ import { deriveDelta } from '../../account-utils';
 const formatEntityId = (id: string) => id.slice(-4);
 const addMessage = (state: EntityState, message: string) => state.messages.push(message);
 const logError = (context: string, message: string) => console.error(`[${context}] ${message}`);
+const getRuntimeJurisdictionHeight = async (env: Env, fallbackHeight: number): Promise<number> => {
+  const active = env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined;
+  const candidates = active ? [active, ...Array.from(env.jReplicas?.values?.() || [])] : Array.from(env.jReplicas?.values?.() || []);
+  let best = Number.isFinite(fallbackHeight) ? Math.max(0, Math.floor(fallbackHeight)) : 0;
+  for (const replica of candidates) {
+    const blockNumber = Number(replica?.blockNumber ?? 0n);
+    if (Number.isFinite(blockNumber) && blockNumber > best) best = Math.floor(blockNumber);
+    const provider = (replica?.jadapter as { provider?: { getBlockNumber?: () => Promise<number> } } | undefined)?.provider;
+    if (typeof provider?.getBlockNumber === 'function') {
+      try {
+        const liveBlockNumber = Number(await provider.getBlockNumber());
+        if (Number.isFinite(liveBlockNumber) && liveBlockNumber > best) {
+          best = Math.floor(liveBlockNumber);
+        }
+      } catch {
+        // Fall back to watched replica height when live RPC read is unavailable.
+      }
+    }
+  }
+  return best;
+};
 
 export async function handleHtlcPayment(
   entityState: EntityState,
@@ -142,8 +163,14 @@ export async function handleHtlcPayment(
 
   const preparedSenderLockRaw = entityTx.data.preparedSenderLockAmount;
   const preparedEnvelopeRaw = entityTx.data.preparedEnvelope;
+  const preparedLockIdRaw = entityTx.data.preparedLockId;
+  const preparedTimelockRaw = entityTx.data.preparedTimelock;
+  const preparedRevealBeforeHeightRaw = entityTx.data.preparedRevealBeforeHeight;
   let senderLockAmount: bigint | null = null;
   let totalFee: bigint | null = null;
+  let lockId: string | null = null;
+  let timelock: bigint | null = null;
+  let revealBeforeHeight: number | null = null;
   const hopForwardAmounts = new Map<string, bigint>();
 
   // Recipient-exact semantics:
@@ -227,21 +254,67 @@ export async function handleHtlcPayment(
     return { newState, outputs: [], mempoolOps: [] };
   }
 
-  // Calculate timelocks and reveal heights (Alice gets most time)
-  const totalHops = route.length - 1; // Minus sender
-  const hopIndex = 0; // We're always hop 0 (sender) in this handler
-  const minExpiryMs = totalHops * HTLC.MIN_TIMELOCK_DELTA_MS + HTLC.MIN_FORWARD_TIMELOCK_MS;
-  // Use much longer expiry for test scenarios (100+ frames × 100ms = 10s+ elapsed)
-  const expiryMs = Math.max(120_000, minExpiryMs);
-  const baseTimelock = BigInt(newState.timestamp + expiryMs);
-  // Add safety buffer for long-running test scenarios (prevent immediate expiry)
-  const baseHeight = (newState.lastFinalizedJHeight || 0) + 50;
+  if (
+    preparedLockIdRaw !== undefined &&
+    preparedTimelockRaw !== undefined &&
+    preparedRevealBeforeHeightRaw !== undefined
+  ) {
+    try {
+      lockId = String(preparedLockIdRaw).trim();
+      timelock = typeof preparedTimelockRaw === 'bigint'
+        ? preparedTimelockRaw
+        : BigInt(String(preparedTimelockRaw));
+      revealBeforeHeight = Number(preparedRevealBeforeHeightRaw);
+      if (!lockId || !/^0x[0-9a-f]{64}$/i.test(lockId)) {
+        throw new Error(`invalid lockId=${String(preparedLockIdRaw)}`);
+      }
+      if (timelock <= 0n || !Number.isFinite(revealBeforeHeight) || revealBeforeHeight <= 0) {
+        throw new Error(`invalid deadlines timelock=${String(preparedTimelockRaw)} revealBeforeHeight=${String(preparedRevealBeforeHeightRaw)}`);
+      }
+      console.log(
+        `🔒 HTLC using prepared deadlines: lockId=${lockId.slice(0, 16)}... ` +
+        `timelock=${timelock.toString()} revealBeforeHeight=${revealBeforeHeight}`,
+      );
+    } catch (error) {
+      logError(
+        'HTLC_PAYMENT',
+        `❌ Invalid prepared HTLC deadlines: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      addMessage(newState, '❌ HTLC payment failed: invalid prepared deadlines');
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+  } else {
+    // Calculate timelocks and reveal heights (Alice gets most time).
+    // Use the runtime jurisdiction tip, not entityState.lastFinalizedJHeight:
+    // leaf users may not have processed recent j_event_claims, but live hubs will gate
+    // against the runtime-wide chain tip when deciding whether a forwarded lock is still valid.
+    const totalHops = route.length - 1; // Minus sender
+    const hopIndex = 0; // We're always hop 0 (sender) in this handler
+    const minExpiryMs = totalHops * HTLC.MIN_TIMELOCK_DELTA_MS + HTLC.MIN_FORWARD_TIMELOCK_MS;
+    // Use much longer expiry for test scenarios (100+ frames × 100ms = 10s+ elapsed)
+    const expiryMs = Math.max(120_000, minExpiryMs);
+    const runtimeJHeight = await getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight || 0);
+    const baseTimelock = BigInt(newState.timestamp + expiryMs);
+    const baseHeight = runtimeJHeight + 50;
 
-  const timelock = calculateHopTimelock(baseTimelock, hopIndex, totalHops);
-  const revealBeforeHeight = calculateHopRevealHeight(baseHeight, hopIndex, totalHops);
+    timelock = calculateHopTimelock(baseTimelock, hopIndex, totalHops);
+    revealBeforeHeight = calculateHopRevealHeight(baseHeight, hopIndex, totalHops);
+    lockId = generateLockId(hashlock, newState.height, 0, newState.timestamp);
 
-  // Generate deterministic lockId
-  const lockId = generateLockId(hashlock, newState.height, 0, newState.timestamp);
+    entityTx.data.preparedLockId = lockId;
+    entityTx.data.preparedTimelock = timelock.toString();
+    entityTx.data.preparedRevealBeforeHeight = revealBeforeHeight;
+    console.log(
+      `🔒 HTLC runtime deadlines: runtimeJHeight=${runtimeJHeight} ` +
+      `timelock=${timelock.toString()} revealBeforeHeight=${revealBeforeHeight}`,
+    );
+  }
+
+  if (!lockId || timelock === null || revealBeforeHeight === null) {
+    logError('HTLC_PAYMENT', '❌ Missing finalized HTLC lock parameters');
+    addMessage(newState, '❌ HTLC payment failed: missing lock parameters');
+    return { newState, outputs: [], mempoolOps: [] };
+  }
 
   // Store routing info (like 2024 hashlockMap)
   newState.htlcRoutes.set(hashlock, {

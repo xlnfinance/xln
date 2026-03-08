@@ -126,6 +126,46 @@ async function waitForCondition(
   throw new Error(`[VaultStore] Timeout waiting for condition: ${label}`);
 }
 
+const getRuntimeFatalDiagnostics = (env: any): string => {
+  const frameLogs = Array.isArray(env?.frameLogs) ? env.frameLogs : [];
+  const cleanLogs = Array.isArray(env?.runtimeState?.cleanLogs) ? env.runtimeState.cleanLogs : [];
+  const recentErrors = frameLogs
+    .filter((entry: any) => entry?.level === 'error' || entry?.message === 'RUNTIME_LOOP_ERROR' || entry?.message === 'RUNTIME_LOOP_HALTED')
+    .slice(-3)
+    .map((entry: any) => ({
+      level: entry?.level ?? null,
+      category: entry?.category ?? null,
+      message: entry?.message ?? null,
+      data: entry?.data ?? null,
+      entityId: entry?.entityId ?? null,
+      timestamp: entry?.timestamp ?? null,
+    }));
+  const recentLogs = cleanLogs.slice(-8);
+  const replica = env?.jReplicas?.get?.('Testnet');
+  const jState = replica
+    ? {
+        name: replica?.name ?? null,
+        chainId: replica?.chainId ?? null,
+        depositoryAddress: replica?.depositoryAddress ?? null,
+        entityProviderAddress: replica?.entityProviderAddress ?? null,
+        hasAdapter: hasConnectedJurisdictionAdapter(replica),
+      }
+    : null;
+  return JSON.stringify(
+    {
+      runtimeId: env?.runtimeId ?? null,
+      height: env?.height ?? null,
+      latestHeight: env?.latestHeight ?? null,
+      loopActive: env?.runtimeState?.loopActive ?? null,
+      jState,
+      recentErrors,
+      recentLogs,
+    },
+    null,
+    2,
+  );
+};
+
 async function enqueueAndAwait(
   xln: any,
   env: any,
@@ -148,6 +188,39 @@ type JurisdictionConfig = {
     account?: string;
     deltaTransformer?: string;
   };
+};
+
+const hasRuntimeJurisdictionAddresses = (replica: unknown): boolean => {
+  const candidate = replica as {
+    depositoryAddress?: unknown;
+    entityProviderAddress?: unknown;
+    contracts?: { depository?: unknown; entityProvider?: unknown };
+  } | null;
+  const depository =
+    typeof candidate?.depositoryAddress === 'string' && candidate.depositoryAddress.length > 0
+      ? candidate.depositoryAddress
+      : (typeof candidate?.contracts?.depository === 'string' ? candidate.contracts.depository : '');
+  const entityProvider =
+    typeof candidate?.entityProviderAddress === 'string' && candidate.entityProviderAddress.length > 0
+      ? candidate.entityProviderAddress
+      : (typeof candidate?.contracts?.entityProvider === 'string' ? candidate.contracts.entityProvider : '');
+  return Boolean(depository && entityProvider);
+};
+
+const hasConnectedJurisdictionAdapter = (replica: unknown): boolean => {
+  const candidate = replica as {
+    jadapter?: {
+      addresses?: { depository?: string; entityProvider?: string };
+      depository?: unknown;
+      entityProvider?: unknown;
+    };
+  } | null;
+  return Boolean(
+    candidate?.jadapter?.addresses?.depository &&
+      candidate?.jadapter?.addresses?.entityProvider &&
+      candidate?.jadapter?.depository &&
+      candidate?.jadapter?.entityProvider,
+  );
 };
 
 const resolveJurisdictionConfig = (jurisdictions: any): JurisdictionConfig => {
@@ -303,20 +376,33 @@ const assertAnvilChain = (chainId: number, rpcUrl: string, context: string): voi
 
 const fetchJurisdictions = async (baseOrigin?: string): Promise<any> => {
   const primaryOrigin = baseOrigin ?? (typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance');
+  const bust = `ts=${Date.now()}`;
   const candidates = [
-    `${primaryOrigin}/jurisdictions.json`,
-    ...(primaryOrigin !== 'https://xln.finance' ? ['https://xln.finance/jurisdictions.json'] : []),
+    `${primaryOrigin}/api/jurisdictions?${bust}`,
+    `${primaryOrigin}/jurisdictions.json?${bust}`,
   ];
 
   let lastError: unknown = null;
   for (const url of candidates) {
     try {
-      const resp = await fetch(url);
+      const resp = await fetch(url, {
+        cache: 'no-store',
+        headers: {
+          'cache-control': 'no-cache, no-store, must-revalidate',
+          pragma: 'no-cache',
+        },
+      });
       if (!resp.ok) {
         lastError = new Error(`HTTP ${resp.status}`);
         continue;
       }
-      return await resp.json();
+      const payload = await resp.json();
+      console.log('[VaultStore] jurisdictions fetched:', JSON.stringify({
+        url,
+        finalUrl: resp.url,
+        arrakis: payload?.jurisdictions?.arrakis?.contracts ?? null,
+      }));
+      return payload;
     } catch (err) {
       lastError = err;
     }
@@ -442,6 +528,13 @@ function applyRuntimeLogPreference(env: any): void {
   env.quietRuntimeLogs = !verbose;
 }
 
+function ensureRuntimeLoopRunning(env: any, xln: any, reason: string): void {
+  if (!env || !xln?.startRuntimeLoop) return;
+  if (env.runtimeState?.loopActive) return;
+  xln.startRuntimeLoop(env);
+  console.log(`[VaultStore] ♻️ Runtime loop started for ${reason}`);
+}
+
 async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestore = false): Promise<any> {
   const runtimeIdLower = normalizeRuntimeId(runtime.id);
   if (!runtimeIdLower) {
@@ -479,7 +572,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
   const hasLiveJAdapter = (targetEnv: any): boolean => {
     if (!targetEnv?.jReplicas || targetEnv.jReplicas.size === 0) return false;
     for (const [, jReplica] of targetEnv.jReplicas.entries()) {
-      if ((jReplica as any)?.jadapter) return true;
+      if (hasConnectedJurisdictionAdapter(jReplica)) return true;
     }
     return false;
   };
@@ -531,9 +624,12 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
     applyRuntimeLogPreference(env);
     env.runtimeId = runtimeIdLower;
     env.dbNamespace = runtimeIdLower;
-    if (xln.startRuntimeLoop) {
-      xln.startRuntimeLoop(env);
+    const savedDelay = get(settings)?.runtimeDelay ?? 0;
+    if (savedDelay > 0) {
+      if (!env.runtimeConfig) env.runtimeConfig = { minFrameDelayMs: savedDelay, loopIntervalMs: 25 };
+      else env.runtimeConfig.minFrameDelayMs = savedDelay;
     }
+    ensureRuntimeLoopRunning(env, xln, `fresh-env:${runtimeIdLower.slice(0, 12)}`);
 
     console.log('[VaultStore] Importing testnet anvil...');
     await enqueueAndAwait(
@@ -552,8 +648,13 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
         }],
         entityInputs: []
       },
-      () => !!env?.jReplicas?.get?.('Testnet') && !!(env?.jReplicas?.get?.('Testnet') as any)?.jadapter,
+      () => hasConnectedJurisdictionAdapter(env?.jReplicas?.get?.('Testnet')),
       'importJ(Testnet)',
+      45_000,
+    );
+    await waitForCondition(
+      () => hasRuntimeJurisdictionAddresses(env?.jReplicas?.get?.('Testnet')),
+      'importJ(Testnet).addresses',
       45_000,
     );
     console.log('[VaultStore] ✅ Testnet imported');
@@ -578,6 +679,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
   }
 
   if (!hasLiveJAdapter(env)) {
+    ensureRuntimeLoopRunning(env, xln, `repair-import-j:${runtimeIdLower.slice(0, 12)}`);
     console.warn('[VaultStore] ⚠️ Restored env has no live J-adapter; re-importing Testnet jurisdiction');
     await enqueueAndAwait(
       xln,
@@ -595,16 +697,19 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
         }],
         entityInputs: []
       },
-      () => !!env?.jReplicas?.get?.('Testnet') && !!(env?.jReplicas?.get?.('Testnet') as any)?.jadapter,
+      () => hasConnectedJurisdictionAdapter(env?.jReplicas?.get?.('Testnet')),
       'repairImportJ(Testnet)',
+      45_000,
+    );
+    await waitForCondition(
+      () => hasRuntimeJurisdictionAddresses(env?.jReplicas?.get?.('Testnet')),
+      'repairImportJ(Testnet).addresses',
       45_000,
     );
     console.log('[VaultStore] ✅ Testnet repaired');
   }
 
-  if (xln.startRuntimeLoop) {
-    xln.startRuntimeLoop(env);
-  }
+  ensureRuntimeLoopRunning(env, xln, `post-restore:${runtimeIdLower.slice(0, 12)}`);
 
   if (xln.startJEventWatcher) {
     await xln.startJEventWatcher(env);
@@ -890,14 +995,19 @@ export const vaultOperations = {
         entityInputs: []
       },
       () => {
-        const replica = newEnv?.jReplicas?.get?.('Testnet') as any;
-        if (replica?.jadapter) return true;
+        const replica = newEnv?.jReplicas?.get?.('Testnet');
+        if (hasConnectedJurisdictionAdapter(replica)) return true;
         if (newEnv?.runtimeState?.loopActive === false) {
-          throw new Error('createRuntime.importJ(Testnet) failed: runtime loop halted');
+          throw new Error(`createRuntime.importJ(Testnet) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(newEnv)}`);
         }
         return false;
       },
       'createRuntime.importJ(Testnet)',
+      45_000,
+    );
+    await waitForCondition(
+      () => hasRuntimeJurisdictionAddresses(newEnv?.jReplicas?.get?.('Testnet')),
+      'createRuntime.importJ(Testnet).addresses',
       45_000,
     );
     markPerf('import_j_testnet');

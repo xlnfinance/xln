@@ -1,11 +1,21 @@
 /**
- * E2E HTLC payment via current Pay UI.
- * Asserts payment success by outbound capacity decrease.
+ * E2E payment coverage for the current Pay UI.
+ *
+ * Flow and goals:
+ * 1. Reset to the shared 3-hub baseline.
+ * 2. Create two browser users and connect them to hubs through the live UI.
+ * 3. Fund the sender offchain, open the pay form, and submit an HTLC payment.
+ * 4. Verify success from rendered account state, not hidden internals.
+ * 5. Verify routing failures are surfaced cleanly when capacity is insufficient.
+ *
+ * This test exists to prove that the visible wallet payment flow is sound for a real user:
+ * discover recipient, find a route, pay, and observe the balance delta on screen.
  */
 
 import { test, expect, type Page } from '@playwright/test';
 import { ensureE2EBaseline, APP_BASE_URL } from './utils/e2e-baseline';
 import { connectHub } from './utils/e2e-connect';
+import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 
 const CONSENSUS_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
@@ -173,7 +183,7 @@ test.describe('E2E HTLC Payment Flow', () => {
     const baseline = await ensureE2EBaseline(page, {
       timeoutMs: LONG_E2E ? 240_000 : 120_000,
       requireHubMesh: true,
-      requireMarketMaker: true,
+      requireMarketMaker: false,
       minHubCount: 3,
     });
     process.stdout.write(
@@ -181,45 +191,9 @@ test.describe('E2E HTLC Payment Flow', () => {
     );
 
     // ── Step 1: Load app ──
-    // Playwright gives each test a fresh browser context, so no explicit localStorage.clear() is needed.
     process.stdout.write('Step 1: Loading app...\n');
-    await page.goto(`${APP_BASE_URL}/app`);
-    // WebSocket + polling keep network active; networkidle can hang indefinitely.
-    await page.reload({ waitUntil: 'domcontentloaded' });
-
-    // Handle access code gate
-    const accessInput = page.locator('input[placeholder*="access" i], input[placeholder*="code" i]');
-    if (await accessInput.isVisible({ timeout: 3000 })) {
-      await accessInput.fill('mml');
-      await page.locator('button:has-text("Unlock")').click();
-      await page.waitForURL('**/app**', { timeout: 10_000 });
-    }
-
-    // Cold boot can land on login screen without an initialized runtime.
-    // In that case bootstrap runtime directly (same path used by working e2e suites).
-    const hasRuntimeBeforeBootstrap = await page.evaluate(() => Boolean((window as any)?.isolatedEnv?.runtimeId));
-    if (!hasRuntimeBeforeBootstrap) {
-      await page.evaluate(async () => {
-        const ops = (window as any).vaultOperations;
-        if (!ops?.createRuntime) throw new Error('vaultOperations.createRuntime missing');
-        await ops.createRuntime(
-          `smoke-${Date.now()}`,
-          'test test test test test test test test test test test junk',
-          { loginType: 'demo', requiresOnboarding: false },
-        );
-      });
-    }
-
-    // Wait for runtime/UI boot (UI structure changed over time, keep this probe broad)
-    await page.waitForFunction(() => {
-      const w = window as any;
-      const hasRuntime = Boolean(w?.XLN) && Boolean(w?.isolatedEnv?.runtimeId || w?.xlnEnv);
-      const text = document.body?.textContent || '';
-      const hasEntityId = /0x[a-fA-F0-9]{8,}/.test(text);
-      const hasAccountsUi = Array.from(document.querySelectorAll('button,[role="tab"]'))
-        .some((el) => /accounts/i.test(el.textContent || ''));
-      return hasRuntime && (hasEntityId || hasAccountsUi);
-    }, { timeout: 60_000 });
+    await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+    await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
     process.stdout.write('  Runtime initialized.\n');
 
     // ── Step 2: Open account with first baseline hub ──
