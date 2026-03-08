@@ -13,9 +13,18 @@
  *   bun runtime/server.ts --port 9000        # Custom port
  */
 
-import { main, enqueueRuntimeInput, startP2P, startRuntimeLoop, registerEntityRuntimeHint, clearDB } from './runtime';
-import { safeStringify } from './serialization-utils';
-import type { AccountMachine, Delta, Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
+import {
+  main,
+  enqueueRuntimeInput,
+  startP2P,
+  startRuntimeLoop,
+  registerEntityRuntimeHint,
+  clearDB,
+  getPersistedLatestHeight,
+  readPersistedFrameJournals,
+} from './runtime';
+import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './serialization-utils';
+import type { AccountMachine, DeliverableEntityInput, Delta, Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
 import type { HubHealth } from './health';
 import { encodeBoard, hashBoard } from './entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from './account-crypto';
@@ -29,6 +38,7 @@ import { deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from '
 import { buildEntityProfile } from './networking/gossip-helper';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
+import { hashHtlcSecret } from './htlc-utils';
 import {
   type RelayStore,
   createRelayStore,
@@ -1672,6 +1682,49 @@ const updateJurisdictionsJson = async (
   }
 };
 
+const readCanonicalJurisdictionsJson = async (): Promise<string> => {
+  const fs = await import('fs/promises');
+  const path = await import('path');
+  const candidates = [
+    path.join(process.cwd(), 'jurisdictions', 'jurisdictions.json'),
+    path.join(process.cwd(), 'jurisdictions.json'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      return await fs.readFile(candidate, 'utf8');
+    } catch {
+      // try next candidate
+    }
+  }
+  throw new Error('JURISDICTIONS_JSON_MISSING');
+};
+
+const clearColdResetArtifacts = async (): Promise<void> => {
+  try {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const artifactPaths = [
+      path.join(process.cwd(), 'jurisdictions.json'),
+      path.join(process.cwd(), 'frontend', 'static', 'jurisdictions.json'),
+      path.join(process.cwd(), 'frontend', 'build', 'jurisdictions.json'),
+      path.join(process.cwd(), 'frontend', '.svelte-kit', 'output', 'client', 'jurisdictions.json'),
+      '/var/www/html/jurisdictions.json',
+    ];
+    const removed: string[] = [];
+    for (const artifactPath of artifactPaths) {
+      try {
+        await fs.rm(artifactPath, { force: true });
+        removed.push(artifactPath);
+      } catch (error) {
+        console.warn(`[RESET] Failed to remove artifact ${artifactPath}: ${(error as Error).message}`);
+      }
+    }
+    console.log(`[RESET] Cleared jurisdiction artifacts (${removed.length}): ${removed.join(', ')}`);
+  } catch (error) {
+    console.warn('[RESET] Failed to clear cold-reset artifacts:', (error as Error).message);
+  }
+};
+
 // ============================================================================
 // SERVER OPTIONS
 // ============================================================================
@@ -1785,7 +1838,7 @@ const normalizeHubProfileForRelay = (profile: any): any => {
   };
 };
 
-const sendEntityInputDirectViaRelaySocket = (env: Env, targetRuntimeId: string, input: RoutedEntityInput): boolean => {
+const sendEntityInputDirectViaRelaySocket = (env: Env, targetRuntimeId: string, input: DeliverableEntityInput): boolean => {
   const fromRuntimeId = String(env.runtimeId || '');
   if (!fromRuntimeId) return false;
   const targetKey = normalizeRuntimeKey(targetRuntimeId);
@@ -2403,6 +2456,7 @@ const triggerColdReset = async (
 
   const rebuildWork = async (): Promise<void> => {
     const internalRelayUrl = resolveConfiguredRelayUrl(activeServerOptions.port);
+    await clearColdResetArtifacts();
     if (globalJAdapter) {
       try {
         globalJAdapter.stopWatching();
@@ -2983,7 +3037,126 @@ const handleMarketMessage = (ws: any, msg: any, env: Env | null): void => {
   }
 };
 
-const handleRpcMessage = (ws: any, msg: any, env: Env | null) => {
+const parseRpcBigInt = (value: unknown, field: string): bigint => {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return BigInt(value.trim());
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return BigInt(value);
+  throw new Error(`${field} must be an integer string`);
+};
+
+const normalizeRpcStringArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(item => (typeof item === 'string' ? item.trim() : ''))
+    .filter(item => item.length > 0);
+};
+
+const filterReceiptLogs = (
+  logs: Array<{ message?: unknown; entityId?: unknown; data?: Record<string, unknown> }>,
+  entityId?: string,
+  eventNames?: string[],
+) => {
+  const targetEntityId = typeof entityId === 'string' ? entityId.trim().toLowerCase() : '';
+  const allowedEvents = new Set((eventNames || []).map(name => name.trim()).filter(Boolean));
+  return logs.filter(log => {
+    const eventName = typeof log?.message === 'string' ? log.message : '';
+    if (allowedEvents.size > 0 && !allowedEvents.has(eventName)) return false;
+    if (!targetEntityId) return true;
+    const entityHint =
+      typeof log?.entityId === 'string'
+        ? log.entityId
+        : typeof log?.data?.entityId === 'string'
+          ? log.data.entityId
+          : '';
+    return entityHint.trim().toLowerCase() === targetEntityId;
+  });
+};
+
+const resolveRpcPaymentRoute = async (
+  env: Env,
+  sourceEntityId: string,
+  targetEntityId: string,
+  tokenId: number,
+  amount: bigint,
+  routeOverride?: unknown,
+): Promise<string[]> => {
+  if (Array.isArray(routeOverride) && routeOverride.length >= 2) {
+    const route = routeOverride
+      .map(step => (typeof step === 'string' ? step.trim().toLowerCase() : ''))
+      .filter(Boolean);
+    if (route.length >= 2) return route;
+  }
+
+  const routes = await env.gossip.getNetworkGraph().findPaths(sourceEntityId, targetEntityId, amount, tokenId);
+  if (routes.length === 0) {
+    throw new Error(`No route found from ${sourceEntityId} to ${targetEntityId}`);
+  }
+  return routes[0]!.path;
+};
+
+type ControlEntitySummary = {
+  entityId: string;
+  signerId: string;
+  name: string;
+  isRoutingEnabled: boolean;
+  runtimeId: string | null;
+};
+
+const requireDaemonControlAuth = (req: Request): Response | null => {
+  const configuredToken = process.env.DAEMON_CONTROL_TOKEN;
+  if (!configuredToken) return null;
+  const supplied = req.headers.get('x-daemon-control-token') || '';
+  if (supplied === configuredToken) return null;
+  return new Response(
+    serializeTaggedJson({ ok: false, error: 'Unauthorized' }),
+    {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    },
+  );
+};
+
+const parseTaggedControlBody = async <T>(req: Request): Promise<T> => {
+  const raw = await req.text();
+  if (!raw.trim()) return {} as T;
+  return deserializeTaggedJson<T>(raw);
+};
+
+const getProfileNameForEntity = (env: Env, entityId: string): string => {
+  const target = entityId.toLowerCase();
+  const gossipProfiles = env.gossip?.getProfiles?.() || [];
+  const gossipProfile = gossipProfiles.find(profile => String(profile?.entityId || '').toLowerCase() === target);
+  const relayProfile = relayStore.gossipProfiles.get(target)?.profile;
+  const rawName = gossipProfile?.metadata?.name ?? relayProfile?.metadata?.name;
+  return typeof rawName === 'string' && rawName.trim().length > 0 ? rawName.trim() : entityId;
+};
+
+const listLocalControlEntities = (env: Env): ControlEntitySummary[] => {
+  const seen = new Set<string>();
+  const entities: ControlEntitySummary[] = [];
+  for (const replica of env.eReplicas?.values?.() || []) {
+    const entityId = String(replica?.entityId || '').toLowerCase();
+    if (!entityId || seen.has(entityId)) continue;
+    let signerId = '';
+    try {
+      signerId = resolveEntityProposerId(env, entityId, 'daemon-control.list');
+    } catch {
+      continue;
+    }
+    seen.add(entityId);
+    entities.push({
+      entityId,
+      signerId,
+      name: getProfileNameForEntity(env, entityId),
+      isRoutingEnabled: !!replica?.state?.hubRebalanceConfig,
+      runtimeId: typeof env.runtimeId === 'string' && env.runtimeId.trim().length > 0 ? env.runtimeId : null,
+    });
+  }
+  entities.sort((left, right) => left.name.localeCompare(right.name));
+  return entities;
+};
+
+const handleRpcMessage = async (ws: any, msg: any, env: Env | null) => {
   const { type, id } = msg;
 
   if (isMarketMessageType(type)) {
@@ -3020,6 +3193,207 @@ const handleRpcMessage = (ws: any, msg: any, env: Env | null) => {
     return;
   }
 
+  if (type === 'get_frame_receipts') {
+    if (!env) {
+      ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'Runtime not ready' }));
+      return;
+    }
+    try {
+      const latestPersistedHeight = await getPersistedLatestHeight(env);
+      const fromHeightRaw = Number(msg?.fromHeight ?? msg?.sinceHeight ?? 1);
+      const toHeightRaw = Number(msg?.toHeight ?? latestPersistedHeight);
+      const limitRaw = Number(msg?.limit ?? 200);
+      const fromHeight = Number.isFinite(fromHeightRaw) ? Math.max(1, Math.floor(fromHeightRaw)) : 1;
+      const requestedToHeight = Number.isFinite(toHeightRaw)
+        ? Math.max(fromHeight, Math.floor(toHeightRaw))
+        : latestPersistedHeight;
+      const toHeight =
+        latestPersistedHeight <= 0
+          ? 0
+          : Math.min(latestPersistedHeight, requestedToHeight);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(1000, Math.floor(limitRaw))) : 200;
+      const entityId =
+        typeof msg?.entityId === 'string' && msg.entityId.trim().length > 0 ? msg.entityId.trim().toLowerCase() : undefined;
+      const eventNames = normalizeRpcStringArray(msg?.eventNames ?? msg?.events);
+      const includeInputs = msg?.includeInputs === true;
+
+      const receipts =
+        toHeight > 0 && toHeight >= fromHeight
+          ? await readPersistedFrameJournals(env, { fromHeight, toHeight, limit })
+          : [];
+      const filtered = receipts
+        .map(receipt => {
+          const matchedLogs = filterReceiptLogs(receipt.logs, entityId, eventNames);
+          if ((entityId || eventNames.length > 0) && matchedLogs.length === 0) return null;
+          return {
+            height: receipt.height,
+            timestamp: receipt.timestamp,
+            logs: matchedLogs.length > 0 || entityId || eventNames.length > 0 ? matchedLogs : receipt.logs,
+            ...(includeInputs ? { runtimeInput: receipt.runtimeInput } : {}),
+          };
+        })
+        .filter((receipt): receipt is NonNullable<typeof receipt> => receipt !== null);
+
+      ws.send(
+        safeStringify({
+          type: 'frame_receipts',
+          inReplyTo: id,
+          data: {
+            fromHeight,
+            toHeight,
+            returned: filtered.length,
+            receipts: filtered,
+          },
+        }),
+      );
+    } catch (error) {
+      ws.send(
+        safeStringify({
+          type: 'error',
+          inReplyTo: id,
+          error: (error as Error)?.message || 'Failed to load frame receipts',
+        }),
+      );
+    }
+    return;
+  }
+
+  if (type === 'find_routes') {
+    if (!env) {
+      ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'Runtime not ready' }));
+      return;
+    }
+    try {
+      const sourceEntityId = String(msg?.sourceEntityId || '').trim().toLowerCase();
+      const targetEntityId = String(msg?.targetEntityId || '').trim().toLowerCase();
+      const tokenId = Number(msg?.tokenId ?? 1);
+      const amount = parseRpcBigInt(msg?.amount, 'amount');
+      if (!isEntityId32(sourceEntityId) || !isEntityId32(targetEntityId)) {
+        throw new Error('sourceEntityId and targetEntityId must be 32-byte hex entity ids');
+      }
+      if (!Number.isFinite(tokenId) || tokenId <= 0) {
+        throw new Error('tokenId must be a positive integer');
+      }
+
+      const routes = await env.gossip.getNetworkGraph().findPaths(sourceEntityId, targetEntityId, amount, tokenId);
+      ws.send(
+        safeStringify({
+          type: 'routes',
+          inReplyTo: id,
+          data: {
+            routes: routes.map(route => ({
+              path: route.path,
+              hops: route.hops.map(hop => ({
+                from: hop.from,
+                to: hop.to,
+                fee: hop.fee.toString(),
+                feePPM: hop.feePPM,
+              })),
+              totalFee: route.totalFee.toString(),
+              senderAmount: route.totalAmount.toString(),
+              recipientAmount: amount.toString(),
+              probability: route.probability,
+            })),
+          },
+        }),
+      );
+    } catch (error) {
+      ws.send(safeStringify({ type: 'error', inReplyTo: id, error: (error as Error)?.message || 'Route lookup failed' }));
+    }
+    return;
+  }
+
+  if (type === 'queue_payment') {
+    if (!env) {
+      ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'Runtime not ready' }));
+      return;
+    }
+    try {
+      const sourceEntityId = String(msg?.sourceEntityId || '').trim().toLowerCase();
+      const targetEntityId = String(msg?.targetEntityId || '').trim().toLowerCase();
+      const tokenId = Number(msg?.tokenId ?? 1);
+      const amount = parseRpcBigInt(msg?.amount, 'amount');
+      const mode = msg?.mode === 'direct' ? 'direct' : 'htlc';
+      const description = typeof msg?.description === 'string' ? msg.description.trim() : '';
+      if (!isEntityId32(sourceEntityId) || !isEntityId32(targetEntityId)) {
+        throw new Error('sourceEntityId and targetEntityId must be 32-byte hex entity ids');
+      }
+      if (!Number.isFinite(tokenId) || tokenId <= 0) {
+        throw new Error('tokenId must be a positive integer');
+      }
+      if (amount <= 0n) {
+        throw new Error('amount must be positive');
+      }
+      if (!getEntityReplicaById(env, sourceEntityId)) {
+        throw new Error(`Source entity ${sourceEntityId} not found in runtime`);
+      }
+
+      const signerId =
+        typeof msg?.signerId === 'string' && msg.signerId.trim().length > 0
+          ? msg.signerId.trim().toLowerCase()
+          : resolveEntityProposerId(env, sourceEntityId, 'rpc.queue_payment');
+      const route = await resolveRpcPaymentRoute(env, sourceEntityId, targetEntityId, tokenId, amount, msg?.route);
+
+      let secret: string | undefined;
+      let hashlock: string | undefined;
+      const txData: Record<string, unknown> = {
+        targetEntityId,
+        tokenId,
+        amount,
+        route,
+        ...(description ? { description } : {}),
+      };
+
+      let txType: 'directPayment' | 'htlcPayment' = 'directPayment';
+      if (mode === 'htlc') {
+        txType = 'htlcPayment';
+        secret =
+          typeof msg?.secret === 'string' && msg.secret.trim().length > 0
+            ? msg.secret.trim()
+            : ethers.hexlify(ethers.randomBytes(32));
+        hashlock =
+          typeof msg?.hashlock === 'string' && msg.hashlock.trim().length > 0
+            ? msg.hashlock.trim()
+            : hashHtlcSecret(secret);
+        txData.secret = secret;
+        txData.hashlock = hashlock;
+      }
+
+      enqueueRuntimeInput(env, {
+        runtimeTxs: [],
+        entityInputs: [
+          {
+            entityId: sourceEntityId,
+            signerId,
+            entityTxs: [{ type: txType, data: txData }],
+          },
+        ],
+      });
+
+      ws.send(
+        safeStringify({
+          type: 'payment_queued',
+          inReplyTo: id,
+          data: {
+            sourceEntityId,
+            signerId,
+            targetEntityId,
+            tokenId,
+            amount: amount.toString(),
+            route,
+            mode,
+            ...(description ? { description } : {}),
+            ...(secret ? { secret } : {}),
+            ...(hashlock ? { hashlock } : {}),
+          },
+        }),
+      );
+    } catch (error) {
+      ws.send(safeStringify({ type: 'error', inReplyTo: id, error: (error as Error)?.message || 'Failed to queue payment' }));
+    }
+    return;
+  }
+
   ws.send(safeStringify({ type: 'error', error: `Unknown RPC type: ${type}` }));
 };
 
@@ -3037,6 +3411,156 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers });
+  }
+
+  if (pathname === '/api/control/entities' && req.method === 'GET') {
+    const authError = requireDaemonControlAuth(req);
+    if (authError) return authError;
+    if (!env) {
+      return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
+    }
+    return new Response(
+      serializeTaggedJson({
+        ok: true,
+        runtimeId: typeof env.runtimeId === 'string' ? env.runtimeId : null,
+        entities: listLocalControlEntities(env),
+      }),
+      { headers },
+    );
+  }
+
+  if (pathname === '/api/control/signers/register' && req.method === 'POST') {
+    const authError = requireDaemonControlAuth(req);
+    if (authError) return authError;
+    try {
+      const body = await parseTaggedControlBody<{ signerId?: unknown; privateKeyHex?: unknown }>(req);
+      const signerId = typeof body?.signerId === 'string' ? body.signerId.trim().toLowerCase() : '';
+      const privateKeyHex = typeof body?.privateKeyHex === 'string' ? body.privateKeyHex.trim().toLowerCase() : '';
+      if (!ethers.isAddress(signerId)) {
+        return new Response(
+          serializeTaggedJson({ ok: false, error: 'signerId must be an EOA address' }),
+          { status: 400, headers },
+        );
+      }
+      if (!ethers.isHexString(privateKeyHex, 32)) {
+        return new Response(
+          serializeTaggedJson({ ok: false, error: 'privateKeyHex must be a 32-byte hex string' }),
+          { status: 400, headers },
+        );
+      }
+      registerSignerKey(signerId, ethers.getBytes(privateKeyHex));
+      return new Response(
+        serializeTaggedJson({
+          ok: true,
+          signerId,
+        }),
+        { headers },
+      );
+    } catch (error) {
+      return new Response(
+        serializeTaggedJson({ ok: false, error: (error as Error).message || 'Failed to register signer' }),
+        { status: 500, headers },
+      );
+    }
+  }
+
+  if (pathname === '/api/control/runtime-input' && req.method === 'POST') {
+    const authError = requireDaemonControlAuth(req);
+    if (authError) return authError;
+    if (!env) {
+      return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
+    }
+    try {
+      const body = await parseTaggedControlBody<Partial<RuntimeInput>>(req);
+      const runtimeTxs = Array.isArray(body?.runtimeTxs) ? body.runtimeTxs : [];
+      const entityInputs = Array.isArray(body?.entityInputs) ? body.entityInputs : [];
+      const jInputs = Array.isArray(body?.jInputs) ? body.jInputs : [];
+      if (runtimeTxs.length === 0 && entityInputs.length === 0 && jInputs.length === 0) {
+        return new Response(
+          serializeTaggedJson({ ok: false, error: 'runtimeTxs, entityInputs, or jInputs are required' }),
+          { status: 400, headers },
+        );
+      }
+      enqueueRuntimeInput(env, {
+        runtimeTxs,
+        entityInputs,
+        ...(jInputs.length > 0 ? { jInputs } : {}),
+      });
+      return new Response(
+        serializeTaggedJson({
+          ok: true,
+          queued: {
+            runtimeTxs: runtimeTxs.length,
+            entityInputs: entityInputs.length,
+            jInputs: jInputs.length,
+          },
+        }),
+        { headers },
+      );
+    } catch (error) {
+      return new Response(
+        serializeTaggedJson({ ok: false, error: (error as Error).message || 'Failed to queue runtime input' }),
+        { status: 500, headers },
+      );
+    }
+  }
+
+  if (pathname === '/api/control/p2p' && req.method === 'POST') {
+    const authError = requireDaemonControlAuth(req);
+    if (authError) return authError;
+    if (!env) {
+      return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
+    }
+    try {
+      const body = await parseTaggedControlBody<{
+        relayUrls?: unknown;
+        advertiseEntityIds?: unknown;
+        isHub?: unknown;
+        profileName?: unknown;
+        gossipPollMs?: unknown;
+      }>(req);
+      const relayUrls = Array.isArray(body?.relayUrls)
+        ? body.relayUrls.map(value => (typeof value === 'string' ? value.trim() : '')).filter(Boolean)
+        : undefined;
+      const advertiseEntityIds = Array.isArray(body?.advertiseEntityIds)
+        ? body.advertiseEntityIds.map(value => (typeof value === 'string' ? value.trim().toLowerCase() : '')).filter(Boolean)
+        : undefined;
+      const profileName = typeof body?.profileName === 'string' && body.profileName.trim().length > 0
+        ? body.profileName.trim()
+        : undefined;
+      const isHub = typeof body?.isHub === 'boolean' ? body.isHub : undefined;
+      const gossipPollMs =
+        Number.isFinite(Number(body?.gossipPollMs)) && Number(body?.gossipPollMs) >= 0
+          ? Math.floor(Number(body?.gossipPollMs))
+          : undefined;
+
+      startP2P(env, {
+        ...(relayUrls ? { relayUrls } : {}),
+        ...(advertiseEntityIds ? { advertiseEntityIds } : {}),
+        ...(isHub !== undefined ? { isHub } : {}),
+        ...(profileName !== undefined ? { profileName } : {}),
+        ...(gossipPollMs !== undefined ? { gossipPollMs } : {}),
+      });
+
+      return new Response(
+        serializeTaggedJson({
+          ok: true,
+          config: {
+            relayUrls: relayUrls ?? null,
+            advertiseEntityIds: advertiseEntityIds ?? null,
+            isHub: isHub ?? null,
+            profileName: profileName ?? null,
+            gossipPollMs: gossipPollMs ?? null,
+          },
+        }),
+        { headers },
+      );
+    } catch (error) {
+      return new Response(
+        serializeTaggedJson({ ok: false, error: (error as Error).message || 'Failed to update P2P config' }),
+        { status: 500, headers },
+      );
+    }
   }
 
   // JSON-RPC proxy endpoint (single canonical path: /rpc).
@@ -3178,6 +3702,24 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }),
       { headers },
     );
+  }
+
+  if (pathname === '/api/jurisdictions') {
+    try {
+      const payload = await readCanonicalJurisdictionsJson();
+      return new Response(payload, {
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+        },
+      });
+    } catch (error: any) {
+      return new Response(
+        JSON.stringify({ error: error?.message || 'Failed to read jurisdictions.json' }),
+        { status: 500, headers },
+      );
+    }
   }
 
   // Runtime state
@@ -4667,17 +5209,16 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     },
   });
 
-  // Start P2P overlay for hub announcements only after WS /relay is actually listening.
-  if (hubEntityIds.length > 0) {
-    startP2P(env, {
-      relayUrls: [internalRelayUrl],
-      advertiseEntityIds: hubEntityIds,
-      isHub: true, // CRITICAL: Mark as hub so profiles get isHub metadata
-      // Avoid background gossip request spam on the server runtime.
-      // Hub profiles are pushed on connect and on major entity changes.
-      gossipPollMs: 0,
-    });
-  }
+  // Start P2P overlay after WS /relay is actually listening.
+  // Plain daemons stay connected even before they own a routing entity;
+  // routing capability is an entity-level setting announced later.
+  startP2P(env, {
+    relayUrls: [internalRelayUrl],
+    ...(hubEntityIds.length > 0 ? { advertiseEntityIds: hubEntityIds } : {}),
+    isHub: hubEntityIds.length > 0,
+    // Keep hub-bootstrapped servers quiet; plain daemons can still poll the relay.
+    gossipPollMs: hubEntityIds.length > 0 ? 0 : 5000,
+  });
 
   console.log(`
 ╔══════════════════════════════════════════════════════════════════╗

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { safeStringify } from '../serialization-utils';
@@ -284,6 +284,18 @@ const fetchJson = async <T>(url: string, timeoutMs = 2_000): Promise<T | null> =
   } finally {
     clearTimeout(timer);
   }
+};
+
+const readCanonicalJurisdictions = (): string => {
+  const candidates = [
+    resolve(process.cwd(), 'jurisdictions', 'jurisdictions.json'),
+    resolve(process.cwd(), 'jurisdictions.json'),
+  ];
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    return readFileSync(candidate, 'utf8');
+  }
+  throw new Error('JURISDICTIONS_JSON_MISSING');
 };
 
 const pollHubHealth = async (child: HubChild): Promise<void> => {
@@ -936,6 +948,23 @@ const server = Bun.serve({
         port: args.port,
         mmEnabled: args.mmEnabled,
       }), { headers });
+    }
+
+    if (pathname === '/api/jurisdictions') {
+      try {
+        return new Response(readCanonicalJurisdictions(), {
+          headers: {
+            ...headers,
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+          },
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: serializeError(error) }), {
+          status: 500,
+          headers,
+        });
+      }
     }
 
     return new Response(JSON.stringify({ ok: true, service: 'e2e-mesh-control' }), { headers });
