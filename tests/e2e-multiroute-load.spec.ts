@@ -40,6 +40,11 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet, ethers } from 'ethers';
+import {
+  createRuntimeIdentity,
+  gotoApp,
+  switchToRuntime,
+} from './utils/e2e-demo-users';
 
 const INIT_TIMEOUT = 30_000;
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
@@ -109,88 +114,6 @@ async function getActiveApiBase(page: Page): Promise<string> {
 // ─── Helpers ─────────────────────────────────────────────────────
 
 type Entity = { entityId: string; signerId: string; label: string };
-
-async function gotoApp(page: Page) {
-  await page.goto(`${APP_BASE_URL}/app`);
-  const unlock = page.locator('button:has-text("Unlock")');
-  if (await unlock.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await page.locator('input').first().fill('mml');
-    await unlock.click();
-    await page.waitForURL('**/app', { timeout: 10_000 });
-  }
-  await page.waitForFunction(() => (window as any).XLN, { timeout: INIT_TIMEOUT });
-  await page.waitForTimeout(2000);
-}
-
-async function createRuntime(page: Page, label: string, mnemonic: string) {
-  const r = await page.evaluate(async ({ label, mnemonic }) => {
-    try {
-      const vo = (window as any).vaultOperations;
-      if (!vo) return { ok: false, error: 'no vaultOperations' };
-      await vo.createRuntime(label, mnemonic);
-      const env = (window as any).isolatedEnv;
-      if (env) env._debugId = label;
-      return { ok: true };
-    } catch (e: any) { return { ok: false, error: e.message }; }
-  }, { label, mnemonic });
-  expect(r.ok, `createRuntime(${label}): ${(r as any).error}`).toBe(true);
-  await page.waitForTimeout(1500);
-}
-
-async function switchTo(page: Page, label: string) {
-  const deadline = Date.now() + 30_000;
-  let r: { ok: boolean; error?: string } = { ok: false, error: 'not-started' };
-
-  while (Date.now() < deadline) {
-    try {
-      r = await page.evaluate(async (runtimeLabel) => {
-        try {
-          const runtimesState = (window as any).runtimesState;
-          const vo = (window as any).vaultOperations;
-          if (!runtimesState || !vo) return { ok: false, error: 'window.runtimesState/vaultOperations missing' };
-          let state: any;
-          const unsub = runtimesState.subscribe((s: any) => { state = s; });
-          unsub();
-          for (const [id, runtime] of Object.entries(state.runtimes) as any[]) {
-            if (runtime.label?.toLowerCase() === runtimeLabel.toLowerCase()) {
-              await vo.selectRuntime(id);
-              return { ok: true };
-            }
-          }
-          return {
-            ok: false,
-            error: `"${runtimeLabel}" not found in: ${Object.values(state.runtimes).map((x: any) => x.label).join(',')}`,
-          };
-        } catch (e: any) {
-          return { ok: false, error: e.message };
-        }
-      }, label);
-      if (r.ok) break;
-    } catch (e: any) {
-      r = { ok: false, error: e?.message || String(e) };
-    }
-
-    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
-    await page.waitForTimeout(400);
-  }
-
-  expect(r.ok, `switchTo(${label}): ${r.error}`).toBe(true);
-  await page.waitForTimeout(1500);
-}
-
-async function getEntity(page: Page): Promise<{ entityId: string; signerId: string } | null> {
-  return page.evaluate(() => {
-    const env = (window as any).isolatedEnv;
-    const runtimeSigner = String(env?.runtimeId || '').toLowerCase();
-    for (const [key] of (env?.eReplicas ?? new Map()).entries()) {
-      const [eid, sid] = String(key).split(':');
-      if (!eid?.startsWith('0x') || eid.length !== 66 || !sid) continue;
-      if (runtimeSigner && String(sid).toLowerCase() !== runtimeSigner) continue;
-      return { entityId: eid, signerId: sid };
-    }
-    return null;
-  });
-}
 
 async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs = 25_000) {
   const ok = await page.evaluate(async ({ entityId, timeoutMs }) => {
@@ -571,9 +494,9 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     // ═══════════════════════════════════════════════════════════════
     console.log('[E2E] === PHASE A: SETUP ===');
 
-    await gotoApp(page);
+    await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 2000 });
     await resetProdServer(page);
-    await gotoApp(page); // reload after server restart
+    await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 2000 }); // reload after server restart
 
     const [h1, h2, h3] = await assertHubMeshReady(page);
     console.log(`[E2E] H1=${h1!.slice(0,10)}  H2=${h2!.slice(0,10)}  H3=${h3!.slice(0,10)}`);
@@ -590,12 +513,10 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     // Create 6 users
     const users: Record<string, Entity> = {};
     for (const name of ['alice', 'bob', 'carol', 'dave', 'eve', 'frank']) {
-      await createRuntime(page, name, randomMnemonic());
-      const e = await getEntity(page);
-      expect(e, `${name} entity missing`).not.toBeNull();
-      await waitForEntityAdvertised(page, e!.entityId);
-      users[name] = { ...e!, label: name };
-      console.log(`[E2E] ${name}: ${e!.entityId.slice(0, 14)}`);
+      const entity = await createRuntimeIdentity(page, name, randomMnemonic());
+      await waitForEntityAdvertised(page, entity.entityId);
+      users[name] = { entityId: entity.entityId, signerId: entity.signerId, label: name };
+      console.log(`[E2E] ${name}: ${entity.entityId.slice(0, 14)}`);
     }
 
     // Connect to hubs per topology
@@ -609,7 +530,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     };
 
     for (const [name, hubs] of Object.entries(hubMap)) {
-      await switchTo(page, name);
+      await switchToRuntime(page, name);
       for (const hub of hubs) {
         await connectHub(page, users[name]!.entityId, users[name]!.signerId, hub);
       }
@@ -619,7 +540,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
 
     // Fund all users on ALL their hub accounts
     for (const name of Object.keys(users)) {
-      await switchTo(page, name);
+      await switchToRuntime(page, name);
       for (const hub of hubMap[name]!) {
         const before = await outCap(page, users[name]!.entityId, hub);
         await faucet(page, users[name]!.entityId, hub);
@@ -661,16 +582,16 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
       const receiverHub = route[route.length - 2]!;
 
       // 1. Get receiver balance BEFORE
-      await switchTo(page, receiverName);
+      await switchToRuntime(page, receiverName);
       const receiverBefore = await outCap(page, receiver.entityId, receiverHub);
 
       // 2. Get sender balance BEFORE + send payment
-      await switchTo(page, senderName);
+      await switchToRuntime(page, senderName);
       const senderBefore = await outCap(page, sender.entityId, senderHub);
       await pay(page, sender.entityId, sender.signerId, receiver.entityId, route, wei);
 
       // 3. Wait for receiver to get funds
-      await switchTo(page, receiverName);
+      await switchToRuntime(page, receiverName);
       const timeoutMs = 30_000 + hubs.length * 15_000;
       const receiverAfter = await waitOutCapDelta(page, receiver.entityId, receiverHub, receiverBefore, wei, timeoutMs);
       const receiverGot = receiverAfter - receiverBefore;
@@ -679,7 +600,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
       expect(receiverGot, `${tcName}: ${receiverName} must receive exactly ${formatUsd(wei)}`).toBe(wei);
 
       // 5. Get sender balance AFTER (payment fully resolved by now)
-      await switchTo(page, senderName);
+      await switchToRuntime(page, senderName);
       // Wait briefly for sender state to settle
       await page.waitForTimeout(1000);
       const senderAfter = await outCap(page, sender.entityId, senderHub);
@@ -775,59 +696,59 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     // TC13: Alice->H1->Dave ($4), Bob->H2->Eve ($6), Carol->H3->Frank ($9)
 
     // Capture all before states
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     const aliceConBefore = await outCap(page, users.alice!.entityId, h1!);
-    await switchTo(page, 'dave');
+    await switchToRuntime(page, 'dave');
     const daveConBefore = await outCap(page, users.dave!.entityId, h1!);
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     const bobConBefore = await outCap(page, users.bob!.entityId, h2!);
-    await switchTo(page, 'eve');
+    await switchToRuntime(page, 'eve');
     const eveConBefore = await outCap(page, users.eve!.entityId, h2!);
-    await switchTo(page, 'carol');
+    await switchToRuntime(page, 'carol');
     const carolConBefore = await outCap(page, users.carol!.entityId, h3!);
-    await switchTo(page, 'frank');
+    await switchToRuntime(page, 'frank');
     const frankConBefore = await outCap(page, users.frank!.entityId, h3!);
 
     // Fire all 3 payments
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     await pay(page, users.alice!.entityId, users.alice!.signerId, users.dave!.entityId,
       [users.alice!.entityId, h1!, users.dave!.entityId], toWei(4));
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     await pay(page, users.bob!.entityId, users.bob!.signerId, users.eve!.entityId,
       [users.bob!.entityId, h2!, users.eve!.entityId], toWei(6));
-    await switchTo(page, 'carol');
+    await switchToRuntime(page, 'carol');
     await pay(page, users.carol!.entityId, users.carol!.signerId, users.frank!.entityId,
       [users.carol!.entityId, h3!, users.frank!.entityId], toWei(9));
 
     // Verify all 3 receivers
-    await switchTo(page, 'dave');
+    await switchToRuntime(page, 'dave');
     const daveConAfter = await waitOutCapDelta(page, users.dave!.entityId, h1!, daveConBefore, toWei(4));
     expect(daveConAfter - daveConBefore, 'TC13a: Dave receives $4').toBe(toWei(4));
 
-    await switchTo(page, 'eve');
+    await switchToRuntime(page, 'eve');
     const eveConAfter = await waitOutCapDelta(page, users.eve!.entityId, h2!, eveConBefore, toWei(6));
     expect(eveConAfter - eveConBefore, 'TC13b: Eve receives $6').toBe(toWei(6));
 
-    await switchTo(page, 'frank');
+    await switchToRuntime(page, 'frank');
     const frankConAfter = await waitOutCapDelta(page, users.frank!.entityId, h3!, frankConBefore, toWei(9));
     expect(frankConAfter - frankConBefore, 'TC13c: Frank receives $9').toBe(toWei(9));
 
     // Verify all 3 senders paid
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     await page.waitForTimeout(1000);
     const aliceConAfter = await outCap(page, users.alice!.entityId, h1!);
     const aliceConPaid = aliceConBefore - aliceConAfter;
     const expectedAliceCon = calcSenderSpend(toWei(4), [h1!], hubFees);
     expect(aliceConPaid, 'TC13a: Alice paid >= expected').toBeGreaterThanOrEqual(expectedAliceCon);
 
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     await page.waitForTimeout(1000);
     const bobConAfter = await outCap(page, users.bob!.entityId, h2!);
     const bobConPaid = bobConBefore - bobConAfter;
     const expectedBobCon = calcSenderSpend(toWei(6), [h2!], hubFees);
     expect(bobConPaid, 'TC13b: Bob paid >= expected').toBeGreaterThanOrEqual(expectedBobCon);
 
-    await switchTo(page, 'carol');
+    await switchToRuntime(page, 'carol');
     await page.waitForTimeout(1000);
     const carolConAfter = await outCap(page, users.carol!.entityId, h3!);
     const carolConPaid = carolConBefore - carolConAfter;
@@ -842,12 +763,12 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     console.log('\n[E2E] === PHASE F: RAPID-FIRE 10x ===');
 
     // TC14: 10x $2 Alice->H1->Dave (throughput test)
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     const aliceRapidBefore = await outCap(page, users.alice!.entityId, h1!);
-    await switchTo(page, 'dave');
+    await switchToRuntime(page, 'dave');
     const daveRapidBefore = await outCap(page, users.dave!.entityId, h1!);
 
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     const rapidCount = 10;
     const rapidAmount = toWei(2);
     const rapidStart = Date.now();
@@ -860,14 +781,14 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     const rapidMs = Date.now() - rapidStart;
 
     // Verify Dave received all
-    await switchTo(page, 'dave');
+    await switchToRuntime(page, 'dave');
     const expectedRapidTotal = rapidAmount * BigInt(rapidCount);
     const daveRapidAfter = await waitOutCapDelta(page, users.dave!.entityId, h1!, daveRapidBefore, expectedRapidTotal, 60_000);
     const daveRapidReceived = daveRapidAfter - daveRapidBefore;
     expect(daveRapidReceived, `TC14: Dave should receive ${rapidCount}x $2`).toBe(expectedRapidTotal);
 
     // Verify Alice paid enough (including fees for all 10 payments)
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     await page.waitForTimeout(1000);
     const aliceRapidAfter = await outCap(page, users.alice!.entityId, h1!);
     const aliceRapidPaid = aliceRapidBefore - aliceRapidAfter;
@@ -888,52 +809,52 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
 
     // Step 1: Alice->Dave via H1
     console.log('[E2E] TC15.1: Alice->Dave');
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     const aliceChainBefore = await outCap(page, users.alice!.entityId, h1!);
-    await switchTo(page, 'dave');
+    await switchToRuntime(page, 'dave');
     const daveChainBefore = await outCap(page, users.dave!.entityId, h1!);
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     await pay(page, users.alice!.entityId, users.alice!.signerId, users.dave!.entityId,
       [users.alice!.entityId, h1!, users.dave!.entityId], chainAmount);
-    await switchTo(page, 'dave');
+    await switchToRuntime(page, 'dave');
     const daveChainAfter = await waitOutCapDelta(page, users.dave!.entityId, h1!, daveChainBefore, chainAmount);
     expect(daveChainAfter - daveChainBefore, 'TC15.1: Dave receives $5').toBe(chainAmount);
 
     // Step 2: Dave->Bob via H2
     console.log('[E2E] TC15.2: Dave->Bob');
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     const bobChainBefore = await outCap(page, users.bob!.entityId, h2!);
-    await switchTo(page, 'dave');
+    await switchToRuntime(page, 'dave');
     await pay(page, users.dave!.entityId, users.dave!.signerId, users.bob!.entityId,
       [users.dave!.entityId, h2!, users.bob!.entityId], chainAmount);
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     const bobChainAfter = await waitOutCapDelta(page, users.bob!.entityId, h2!, bobChainBefore, chainAmount);
     expect(bobChainAfter - bobChainBefore, 'TC15.2: Bob receives $5').toBe(chainAmount);
 
     // Step 3: Bob->Eve via H2
     console.log('[E2E] TC15.3: Bob->Eve');
-    await switchTo(page, 'eve');
+    await switchToRuntime(page, 'eve');
     const eveChainBefore = await outCap(page, users.eve!.entityId, h2!);
-    await switchTo(page, 'bob');
+    await switchToRuntime(page, 'bob');
     await pay(page, users.bob!.entityId, users.bob!.signerId, users.eve!.entityId,
       [users.bob!.entityId, h2!, users.eve!.entityId], chainAmount);
-    await switchTo(page, 'eve');
+    await switchToRuntime(page, 'eve');
     const eveChainAfter = await waitOutCapDelta(page, users.eve!.entityId, h2!, eveChainBefore, chainAmount);
     expect(eveChainAfter - eveChainBefore, 'TC15.3: Eve receives $5').toBe(chainAmount);
 
     // Step 4: Eve->Carol via H3
     console.log('[E2E] TC15.4: Eve->Carol');
-    await switchTo(page, 'carol');
+    await switchToRuntime(page, 'carol');
     const carolChainBefore = await outCap(page, users.carol!.entityId, h3!);
-    await switchTo(page, 'eve');
+    await switchToRuntime(page, 'eve');
     await pay(page, users.eve!.entityId, users.eve!.signerId, users.carol!.entityId,
       [users.eve!.entityId, h3!, users.carol!.entityId], chainAmount);
-    await switchTo(page, 'carol');
+    await switchToRuntime(page, 'carol');
     const carolChainAfter = await waitOutCapDelta(page, users.carol!.entityId, h3!, carolChainBefore, chainAmount);
     expect(carolChainAfter - carolChainBefore, 'TC15.4: Carol receives $5').toBe(chainAmount);
 
     // Verify Alice paid for step 1
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     const aliceChainAfter = await outCap(page, users.alice!.entityId, h1!);
     const aliceChainPaid = aliceChainBefore - aliceChainAfter;
     expect(aliceChainPaid, 'TC15: Alice paid >= $5 + fee').toBeGreaterThanOrEqual(chainAmount);
@@ -947,7 +868,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     await page.waitForTimeout(5000);
 
     for (const name of Object.keys(users)) {
-      await switchTo(page, name);
+      await switchToRuntime(page, name);
       const locks = await getLockCount(page, users[name]!.entityId);
       expect(locks, `${name} should have 0 lingering locks`).toBe(0);
     }
@@ -960,7 +881,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
 
     // --- TC16: OVERSPEND REJECTION ---
     console.log('[E2E] TC16: Overspend — send more than balance');
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
     const aliceCapBefore = await outCap(page, users.alice!.entityId, h1!);
     const overAmount = aliceCapBefore + toWei(1); // more than Alice has
     const overSecret = ethers.hexlify(ethers.randomBytes(32));
@@ -998,7 +919,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     // --- TC17: REVERSE PAYMENT + NETTING ---
     console.log('[E2E] TC17: Reverse payment Bob->Eve + netting');
     // Eve received $10 from Bob in TC2, now Bob gets $5 back from Eve
-    await switchTo(page, 'eve');
+    await switchToRuntime(page, 'eve');
     const eveBeforeReverse = await outCap(page, users.eve!.entityId, h2!);
     expect(eveBeforeReverse, 'Eve must have capacity to reverse-pay').toBeGreaterThanOrEqual(toWei(5));
 
@@ -1008,7 +929,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     expect(tc17.senderPaid, 'TC17: Eve pays >= $5 + fee').toBeGreaterThan(toWei(5));
 
     // Verify netting: Eve's net position = received ($10 in TC2) - sent ($5 + fee in TC17)
-    await switchTo(page, 'eve');
+    await switchToRuntime(page, 'eve');
     const eveAfterReverse = await outCap(page, users.eve!.entityId, h2!);
     const eveNet = eveAfterReverse - eveConBefore; // relative to before TC2+TC13
     console.log(`[E2E] Eve net on H2 since start: ${formatUsd(eveNet)} (received $10+$6, sent $5+fee)`);
@@ -1020,7 +941,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     // --- TC18: SELF-PAY LOOP ---
     console.log('[E2E] TC18: Self-pay loop Frank->H1->H3->Frank');
     // Frank has accounts with H1 and H3, so Frank->H1->H3->Frank is a valid 2-hub self-pay
-    await switchTo(page, 'frank');
+    await switchToRuntime(page, 'frank');
     const frankH1Before = await outCap(page, users.frank!.entityId, h1!);
     const frankH3Before = await outCap(page, users.frank!.entityId, h3!);
 
@@ -1062,7 +983,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
 
     // TC19: Create a manual HTLC lock with short timelock, verify it expires and gets cleaned up
     console.log('[E2E] TC19: Manual HTLC lock with 10s timeout');
-    await switchTo(page, 'alice');
+    await switchToRuntime(page, 'alice');
 
     const lockCountBefore = await getAccountLockCount(page, users.alice!.entityId, h1!);
     console.log(`[E2E] Alice account locks before: ${lockCountBefore}`);
@@ -1180,7 +1101,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     // Record balances before reload
     const balancesBefore: Record<string, bigint> = {};
     for (const name of Object.keys(users)) {
-      await switchTo(page, name);
+      await switchToRuntime(page, name);
       const primaryHub = hubMap[name]![0]!;
       balancesBefore[name] = await outCap(page, users[name]!.entityId, primaryHub);
       console.log(`[E2E] ${name} balance before reload: ${formatUsd(balancesBefore[name]!)}`);
@@ -1200,7 +1121,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     await page.waitForTimeout(3000);
 
     for (const name of Object.keys(users)) {
-      await switchTo(page, name);
+      await switchToRuntime(page, name);
       await page.waitForTimeout(2000);
       const primaryHub = hubMap[name]![0]!;
       const balanceAfter = await outCap(page, users[name]!.entityId, primaryHub);

@@ -15,12 +15,12 @@ import { handleSetRebalancePolicy } from './handlers/set-rebalance-policy';
 import { handleRequestCollateral } from './handlers/request-collateral';
 import { handleReopenDisputed } from './handlers/reopen-disputed';
 import { handleHtlcLock } from './handlers/htlc-lock';
-// htlc_resolve: unified handler imported dynamically in switch case
+import { handleHtlcResolve } from './handlers/htlc-resolve';
 import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
 import { handleSwapCancelRequest } from './handlers/swap-cancel';
 import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
-import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../j-event-normalization';
+import { handleJEventClaim } from './handlers/j-event-claim';
 
 /**
  * Process single AccountTx through bilateral consensus
@@ -46,6 +46,9 @@ export async function processAccountTx(
   secret?: string;
   hashlock?: string;
   timedOutHashlock?: string;
+  finalRecipient?: boolean;
+  amount?: bigint;
+  tokenId?: number;
   swapOfferCreated?: {
     offerId: string;
     makerIsLeft: boolean;
@@ -100,12 +103,11 @@ export async function processAccountTx(
     case 'account_payment':
       // Legacy type - not used in new implementation
       console.warn(`⚠️ account_payment type is deprecated`);
-      return { success: true, events: [] };
+      return { success: false, events: ['❌ account_payment is deprecated'], error: 'account_payment is deprecated' };
 
     case 'account_settle':
       // Blockchain settlement - handled separately in entity-tx/handlers/account.ts
-      console.log(`💰 account_settle processed externally`);
-      return { success: true, events: [`⚖️ Settlement processed`] };
+      return { success: false, events: ['❌ account_settle must not be processed here'], error: 'account_settle handled externally' };
 
     case 'reserve_to_collateral':
       return handleReserveToCollateral(
@@ -166,126 +168,16 @@ export async function processAccountTx(
     case 'reopen_disputed':
       return handleReopenDisputed(accountMachine, accountTx as Extract<AccountTx, { type: 'reopen_disputed' }>);
 
-    case 'j_event_claim': {
-      // Bilateral J-event consensus: Store observation with correct left/right attribution
-      const { jHeight, jBlockHash, events, observedAt } = accountTx.data;
-      console.log(`📥 j_event_claim: jHeight=${jHeight}, hash=${jBlockHash.slice(0, 10)}, byLeft=${byLeft}`);
-
-      // Initialize consensus fields if missing
-      if (!accountMachine.leftJObservations) accountMachine.leftJObservations = [];
-      if (!accountMachine.rightJObservations) accountMachine.rightJObservations = [];
-      if (!accountMachine.jEventChain) accountMachine.jEventChain = [];
-      if (accountMachine.lastFinalizedJHeight === undefined) accountMachine.lastFinalizedJHeight = 0;
-
-      // H17 FIX: Validate jHeight bounds (soft validation - warn but don't reject)
-      // j_event_claim can be idempotent (same height re-claimed during consensus)
-      // Only reject unreasonably large forward jumps
-      const MAX_J_HEIGHT_JUMP = 10000;
-      if (jHeight > accountMachine.lastFinalizedJHeight + MAX_J_HEIGHT_JUMP) {
-        return {
-          success: false,
-          events: [`❌ j_event_claim: jHeight ${jHeight} too far ahead`],
-          error: `Invalid jHeight: jump too large (max ${MAX_J_HEIGHT_JUMP})`,
-        };
-      }
-      // Skip duplicate claims (already finalized this height)
-      if (jHeight <= accountMachine.lastFinalizedJHeight) {
-        console.log(
-          `   ℹ️ j_event_claim: jHeight ${jHeight} already finalized (lastFinalized=${accountMachine.lastFinalizedJHeight}) - skipping`,
-        );
-        return { success: true, events: [`ℹ️ j_event_claim skipped (already finalized)`] };
-      }
-
-      // AUTH: byLeft = frame proposer is left (Channel.ts block.isLeft pattern)
-      const { counterparty: cpId } = getAccountPerspective(accountMachine, myEntityId);
-      const claimIsFromLeft = byLeft;
-
-      console.log(`   🔍 AUTH: byLeft=${byLeft}, claimIsFromLeft=${claimIsFromLeft}`);
-
-      const normalizedEvents = normalizeJurisdictionEvents(events);
-      if (normalizedEvents.length === 0) {
-        return {
-          success: false,
-          events: [`❌ j_event_claim non-canonical events payload`],
-          error: `j_event_claim rejected: non-canonical events for ${jHeight}:${String(jBlockHash).slice(0, 10)}`,
-        };
-      }
-
-      const obs = { jHeight, jBlockHash, events: normalizedEvents, observedAt };
-
-      // Store observation with side-aware idempotent merge.
-      // Replayed/duplicate claims for the same (height,hash) must not create extra rows;
-      // they should merge deterministically by canonical event key.
-      const sideObservations = claimIsFromLeft ? accountMachine.leftJObservations : accountMachine.rightJObservations;
-      const existingObs = sideObservations.find(
-        (o: any) => Number(o?.jHeight) === Number(jHeight) && String(o?.jBlockHash || '') === String(jBlockHash || ''),
+    case 'j_event_claim':
+      return handleJEventClaim(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'j_event_claim' }>,
+        byLeft,
+        currentTimestamp,
+        isValidation,
+        myEntityId,
+        emitRebalanceDebug,
       );
-
-      if (existingObs) {
-        const existingNormalized = normalizeJurisdictionEvents(existingObs.events);
-        const existingKeys = new Set(existingNormalized.map(canonicalJurisdictionEventKey));
-        let merged = 0;
-        for (const ev of normalizedEvents) {
-          const key = canonicalJurisdictionEventKey(ev);
-          if (existingKeys.has(key)) continue;
-          existingObs.events.push(ev);
-          existingKeys.add(key);
-          merged += 1;
-        }
-        if (observedAt > (existingObs.observedAt || 0)) {
-          existingObs.observedAt = observedAt;
-        }
-        if (merged > 0) {
-          console.log(
-            `   🔁 j_event_claim MERGED: side=${claimIsFromLeft ? 'left' : 'right'} jHeight=${jHeight} ` +
-            `added=${merged} total=${existingObs.events.length}`,
-          );
-        } else {
-          console.log(
-            `   ℹ️ j_event_claim duplicate ignored: side=${claimIsFromLeft ? 'left' : 'right'} jHeight=${jHeight} ` +
-            `hash=${String(jBlockHash).slice(0, 10)}`,
-          );
-        }
-      } else {
-        sideObservations.push(obs);
-        console.log(
-          `   📝 Stored ${claimIsFromLeft ? 'LEFT' : 'RIGHT'} obs (${sideObservations.length} total)`,
-        );
-      }
-
-      // CRITICAL: Only finalize during COMMIT (on real accountMachine), not VALIDATION (on clone)
-      // Validation happens on clonedMachine which gets discarded - finalization would be lost!
-      // Frame delta comparison now uses offdelta only, which isn't affected by bilateral finalization.
-      if (!isValidation) {
-        const beforeFinalizedHeight = accountMachine.lastFinalizedJHeight || 0;
-        const { tryFinalizeAccountJEvents } = await import('../entity-tx/j-events');
-        tryFinalizeAccountJEvents(accountMachine, cpId, { timestamp: currentTimestamp });
-        const afterFinalizedHeight = accountMachine.lastFinalizedJHeight || 0;
-
-        // DEBUG: Check if bilateral finalization persisted
-        const settledTokenId = Number(normalizedEvents.find(e => e.type === 'AccountSettled')?.data?.tokenId ?? 1);
-        const delta = accountMachine.deltas.get(settledTokenId);
-        console.log(
-          `🔍 AFTER-BILATERAL-FINALIZE (isValidation=${isValidation}): collateral=${delta?.collateral || 0n}`,
-        );
-        if (afterFinalizedHeight > beforeFinalizedHeight) {
-          emitRebalanceDebug({
-            step: 5,
-            status: 'ok',
-            event: 'account_settled_finalized_bilateral',
-            jHeight: afterFinalizedHeight,
-            accountId: cpId,
-            tokenId: settledTokenId,
-            collateral: String(delta?.collateral ?? 0n),
-            ondelta: String(delta?.ondelta ?? 0n),
-          });
-        }
-      } else {
-        console.log(`⏭️ SKIP-BILATERAL-FINALIZE: On validation clone, will finalize during commit`);
-      }
-
-      return { success: true, events: [`📥 J-event claim processed`] };
-    }
 
     // === HTLC HANDLERS ===
     case 'htlc_lock':
@@ -299,7 +191,6 @@ export async function processAccountTx(
       );
 
     case 'htlc_resolve': {
-      const { handleHtlcResolve } = await import('./handlers/htlc-resolve');
       const resolveResult = await handleHtlcResolve(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'htlc_resolve' }>,
@@ -313,7 +204,19 @@ export async function processAccountTx(
       if (resolveResult.error) ret.error = resolveResult.error;
       if (resolveResult.secret) ret.secret = resolveResult.secret;
       if (resolveResult.hashlock) ret.hashlock = resolveResult.hashlock;
+      if (resolveResult.finalRecipient !== undefined) ret.finalRecipient = resolveResult.finalRecipient;
+      if (resolveResult.amount !== undefined) ret.amount = resolveResult.amount;
+      if (resolveResult.tokenId !== undefined) ret.tokenId = resolveResult.tokenId;
       if (resolveResult.outcome === 'error' && resolveResult.hashlock) ret.timedOutHashlock = resolveResult.hashlock;
+      if (resolveResult.outcome === 'secret' && resolveResult.finalRecipient === true && env && !isValidation) {
+        env.emit('HtlcReceived', {
+          entityId: myEntityId,
+          fromEntity: counterparty,
+          hashlock: resolveResult.hashlock,
+          amount: resolveResult.amount?.toString(),
+          tokenId: resolveResult.tokenId,
+        });
+      }
       return ret;
     }
 

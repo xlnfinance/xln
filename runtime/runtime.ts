@@ -174,7 +174,7 @@ import {
   validateEntityInput,
   validateEntityOutput,
 } from './validation-utils';
-import type { EntityInput, EntityReplica, Env, JInput, JReplica, RoutedEntityInput, RuntimeInput } from './types';
+import type { EntityInput, EntityReplica, Env, FrameLogEntry, JInput, JReplica, RoutedEntityInput, RuntimeInput } from './types';
 import {
   clearDatabase,
   DEBUG,
@@ -275,7 +275,7 @@ const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
 const dbRootPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
 
 const DEFAULT_DB_NAMESPACE = 'default';
-const PERSISTENCE_SCHEMA_VERSION = 2;
+const PERSISTENCE_SCHEMA_VERSION = 3;
 const PERSISTENCE_SNAPSHOT_EXCLUDE_KEYS = new Set([
   'history',
   'browserVM',
@@ -2843,6 +2843,9 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
 };
 
 const buildRuntimeHistorySnapshot = (env: Env, title?: string): any => {
+  const frameLogs = Array.isArray(env.frameLogs)
+    ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
+    : [];
   return {
     height: env.height,
     frame: env.height,
@@ -2862,7 +2865,8 @@ const buildRuntimeHistorySnapshot = (env: Env, title?: string): any => {
       : [],
     runtimeInput: env.runtimeInput,
     runtimeOutputs: env.pendingOutputs || [],
-    frameLogs: env.frameLogs || [],
+    frameLogs,
+    logs: frameLogs,
     title: title ?? `Frame ${env.height}`,
   };
 };
@@ -3064,6 +3068,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
         console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
       }
       await saveEnvToDB(env);
+      env.frameLogs = [];
       (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput = undefined;
       if (!quietRuntimeLogs) {
         console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
@@ -3236,8 +3241,12 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     const dbNamespace = resolveDbNamespace({ env });
     const db = getRuntimeDb(env);
     const persistedGossipProfiles = getPersistedGossipProfiles(env);
+    const committedFrameLogs = Array.isArray(env.frameLogs)
+      ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
+      : [];
 
     // Persist compact per-frame runtime input for replay from checkpoint.
+    // This WAL record doubles as the frame receipt: inputs + committed logs.
     const currentFrameInput = (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput;
     const frameSerializeStartedAt = getPerfMs();
     const frameJournal = serializeTaggedJson({
@@ -3245,6 +3254,7 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       timestamp: env.timestamp,
       // Always persist a frame record so replay has a contiguous frame timeline.
       runtimeInput: currentFrameInput ?? { runtimeTxs: [], entityInputs: [] },
+      logs: committedFrameLogs,
       // Replay can deterministically require routing/encryption metadata
       // (e.g. HTLC onion key lookup), so persist gossip snapshot per frame.
       persistedGossipProfiles,
@@ -3344,7 +3354,7 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     const totalMs = getPerfMs() - persistStartedAt;
     console.log(
       `[PERSIST] frame=${env.height} checkpoint=${shouldCheckpoint ? 1 : 0} ` +
-        `gossipProfiles=${persistedGossipProfiles.length} ops=${ops.length} ` +
+        `logs=${committedFrameLogs.length} gossipProfiles=${persistedGossipProfiles.length} ops=${ops.length} ` +
         `bytes(frame=${frameJournalBytes},snapshot=${snapshotBytes}) ` +
         `ms(open=${formatPerfMs(openMs)},frame=${formatPerfMs(frameSerializeMs)},snapshot=${formatPerfMs(snapshotSerializeMs)},` +
         `write=${formatPerfMs(writeMs)},verify=${verifySkipped ? 'skip' : formatPerfMs(verifyMs)},total=${formatPerfMs(totalMs)})`,
@@ -3569,6 +3579,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
             height: number;
             timestamp: number;
             runtimeInput: RuntimeInput;
+            logs?: FrameLogEntry[];
             persistedGossipProfiles?: unknown[];
           }>(frameBuffer.toString());
           if (Array.isArray(frame?.persistedGossipProfiles) && frame.persistedGossipProfiles.length > 0) {
@@ -3729,7 +3740,11 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
               }
             }
           }
+          env.frameLogs = Array.isArray(frame.logs)
+            ? frame.logs.map((entry): FrameLogEntry => ({ ...entry }))
+            : [];
           env.history.push(buildRuntimeHistorySnapshot(env, `Frame ${h}`));
+          env.frameLogs = [];
           lastGoodHeight = h;
         } catch (error) {
           runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
