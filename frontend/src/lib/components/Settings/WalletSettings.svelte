@@ -519,21 +519,6 @@
         <h3>Developer</h3>
 
         <label class="setting-row">
-          <span>process() frame delay</span>
-          <div class="slider-row">
-            <input
-              type="range"
-              min="0"
-              max="10000"
-              step="100"
-              value={$settings.runtimeDelay}
-              on:input={(e) => settingsOperations.setServerDelay(Number(e.currentTarget.value))}
-            />
-            <span class="slider-value">{$settings.runtimeDelay}ms</span>
-          </div>
-        </label>
-
-        <label class="setting-row">
           <span>Last process() entry</span>
           <span class="mono-value">{processLivenessLabel}</span>
         </label>

@@ -339,10 +339,6 @@
     tabOperations.addTab();
   }
 
-  function handleServerDelayChange(event: Event) {
-    const target = event.target as HTMLInputElement;
-    settingsOperations.setServerDelay(parseInt(target.value));
-  }
 </script>
 
 <div class="settings-container">
@@ -618,20 +614,6 @@
     <!-- Developer Tools Section -->
     <div class="setting-group">
       <h2>Developer Tools</h2>
-
-      <div class="preference-item">
-        <label for="runtimeDelaySlider">process() frame delay: {$settings.runtimeDelay}ms</label>
-        <input
-          type="range"
-          id="runtimeDelaySlider"
-          min="0"
-          max="10000"
-          step="100"
-          value={$settings.runtimeDelay}
-          on:input={handleServerDelayChange}
-          class="settings-slider"
-        />
-      </div>
 
       <div class="preference-item">
         <label>Last process() entry</label>

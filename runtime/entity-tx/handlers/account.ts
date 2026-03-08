@@ -520,6 +520,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               console.log(`🎯 HTLC-ROUTING: WE ARE FINAL RECIPIENT!`);
               // Final recipient - reveal immediately
               if (envelope.secret) {
+                const paymentDescription = typeof envelope.description === 'string' ? envelope.description.trim() : '';
                 env.emit('HtlcReceived', {
                   entityId: state.entityId,
                   fromEntity: input.fromEntityId,
@@ -527,8 +528,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   lockId: lock.lockId,
                   amount: lock.amount.toString(),
                   tokenId: lock.tokenId,
+                  ...(paymentDescription ? { description: paymentDescription } : {}),
                 });
-                const paymentDescription = typeof envelope.description === 'string' ? envelope.description.trim() : '';
                 if (paymentDescription) {
                   if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map<HtlcNoteKey, string>();
                   newState.htlcNotes.set(`hashlock:${lock.hashlock}`, paymentDescription);
@@ -815,6 +816,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         const route = newState.htlcRoutes.get(hashlock);
         if (route) {
           const isFinalRecipient = !!route.inboundEntity && !route.outboundEntity;
+          const outboundLock = route.outboundLockId ? newState.lockBook.get(route.outboundLockId) : undefined;
+          const inboundLock = route.inboundLockId ? newState.lockBook.get(route.inboundLockId) : undefined;
+          const eventLock = inboundLock ?? outboundLock;
+          const finalizedDescription =
+            (eventLock && newState.htlcNotes?.get(`lock:${eventLock.lockId}` as HtlcNoteKey))
+            ?? newState.htlcNotes?.get(`hashlock:${hashlock}` as HtlcNoteKey)
+            ?? undefined;
 
           // Store secret
           route.secret = secret;
@@ -874,6 +882,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               secret,
               fromEntity: route.inboundEntity,
               entityId: state.entityId,
+              ...(eventLock ? { amount: eventLock.amount.toString(), tokenId: eventLock.tokenId, lockId: eventLock.lockId } : {}),
+              ...(finalizedDescription ? { description: finalizedDescription } : {}),
             });
           }
           env.emit('PaymentFinalized', {
@@ -882,6 +892,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             inboundEntity: route.inboundEntity,
             outboundEntity: route.outboundEntity,
             entityId: state.entityId,
+            finalRecipient: isFinalRecipient,
+            ...(eventLock ? { amount: eventLock.amount.toString(), tokenId: eventLock.tokenId, lockId: eventLock.lockId } : {}),
+            ...(finalizedDescription ? { description: finalizedDescription } : {}),
           });
         } else {
           console.log(`⚠️ HTLC: No route found for hashlock ${hashlock.slice(0,16)}...`);

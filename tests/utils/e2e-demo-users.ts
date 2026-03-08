@@ -83,6 +83,15 @@ export async function gotoApp(
   const appBaseUrl = options.appBaseUrl ?? APP_BASE_URL;
   const initTimeoutMs = options.initTimeoutMs ?? DEFAULT_INIT_TIMEOUT;
   const settleMs = options.settleMs ?? 500;
+  const apiBaseUrl = process.env.E2E_API_BASE_URL ?? appBaseUrl;
+  await page.addInitScript((configuredApiBaseUrl: string) => {
+    try {
+      (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__ = configuredApiBaseUrl;
+      localStorage.setItem('xln-api-base-url', configuredApiBaseUrl);
+    } catch {
+      // no-op
+    }
+  }, apiBaseUrl);
   await page.goto(`${appBaseUrl}/app`);
   const unlock = page.locator('button:has-text("Unlock")');
   if (await unlock.isVisible({ timeout: 1500 }).catch(() => false)) {

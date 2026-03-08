@@ -18,11 +18,48 @@ import type { Account, Depository, EntityProvider, DeltaTransformer } from '../.
 import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory, ERC20Mock__factory } from '../../jurisdictions/typechain-types';
 
 import type { BrowserVMState, JTx } from '../types';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, BrowserVMProvider, JTokenInfo } from './types';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, BrowserVMProvider, JTokenInfo, JReserveMint } from './types';
 import { computeAccountKey, entityIdToAddress, setupContractEventListeners, processEventBatch, type RawJEvent } from './helpers';
 import { CANONICAL_J_EVENTS } from './helpers';
 import { DEV_CHAIN_IDS } from './index';
 import { setDeltaTransformerAddress } from '../proof-builder';
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+const isRealAddress = (value: unknown): value is string =>
+  typeof value === 'string' && value.length === 42 && value !== ZERO_ADDRESS;
+
+const firstAddress = (...values: Array<unknown>): string => {
+  for (const value of values) {
+    if (isRealAddress(value)) return value;
+  }
+  return '';
+};
+
+const linkArtifactBytecode = (
+  bytecode: string,
+  libraries: Record<string, string>,
+): string => {
+  let linked = bytecode.startsWith('0x') ? bytecode.slice(2) : bytecode;
+  const unresolvedLibraryRef = /__\$[0-9a-fA-F]{34}\$__/g;
+
+  for (const [libraryName, address] of Object.entries(libraries)) {
+    if (!address) {
+      throw new Error(`Missing linked library address for ${libraryName}`);
+    }
+    const normalizedAddress = address.replace(/^0x/, '').toLowerCase();
+    if (!/^[0-9a-f]{40}$/.test(normalizedAddress)) {
+      throw new Error(`Invalid linked library address for ${libraryName}: ${address}`);
+    }
+    linked = linked.replace(unresolvedLibraryRef, normalizedAddress);
+  }
+
+  if (/__\$[0-9a-fA-F]{34}\$__/.test(linked)) {
+    throw new Error('Unresolved library placeholders remain in linked bytecode');
+  }
+
+  return `0x${linked}`;
+};
 
 /**
  * Create RPC adapter - works with any JSON-RPC provider
@@ -41,6 +78,11 @@ export async function createRpcAdapter(
     const raw = Number(process.env.JADAPTER_TEST_WATCH_POLL_MS ?? '100');
     if (!Number.isFinite(raw)) return 100;
     return Math.max(25, Math.floor(raw));
+  })();
+  const DEV_WATCH_POLL_MS = (() => {
+    const raw = Number(process.env.JADAPTER_DEV_WATCH_POLL_MS ?? '100');
+    if (!Number.isFinite(raw)) return 100;
+    return Math.max(50, Math.floor(raw));
   })();
   const TX_WAIT_TIMEOUT_MS = Math.max(
     10_000,
@@ -95,6 +137,27 @@ export async function createRpcAdapter(
     return receipt;
   };
 
+  const parseDepositoryReceiptEvents = (receipt: { logs: Array<{ topics: readonly string[]; data: string }>; blockNumber: number; blockHash: string; hash: string }): JEvent[] => {
+    const events: JEvent[] = [];
+    for (const log of receipt.logs) {
+      try {
+        const parsed = depository.interface.parseLog({ topics: log.topics as string[], data: log.data });
+        if (parsed) {
+          events.push({
+            name: parsed.name,
+            args: Object.fromEntries(Object.entries(parsed.args)),
+            blockNumber: receipt.blockNumber,
+            blockHash: receipt.blockHash,
+            transactionHash: receipt.hash,
+          });
+        }
+      } catch {
+        // Ignore logs from other contracts.
+      }
+    }
+    return events;
+  };
+
   const estimateGasWithHeadroom = async (estimate: () => Promise<bigint>, fallback: bigint): Promise<bigint> => {
     try {
       return applyGasHeadroom(await estimate());
@@ -109,7 +172,7 @@ export async function createRpcAdapter(
       return Math.max(200, Math.floor(config.watchPollMs));
     }
     if (config.chainId === 1) return PROD_WATCH_POLL_MS;
-    if (DEV_CHAIN_IDS.has(config.chainId)) return 1000;
+    if (DEV_CHAIN_IDS.has(config.chainId)) return DEV_WATCH_POLL_MS;
     return 1500;
   };
 
@@ -174,10 +237,24 @@ export async function createRpcAdapter(
 
   // If fromReplica provided, connect to existing contracts
   if (config.fromReplica) {
-    addresses.account = config.fromReplica.contracts?.account ?? '';
-    addresses.depository = config.fromReplica.depositoryAddress ?? config.fromReplica.contracts?.depository ?? '';
-    addresses.entityProvider = config.fromReplica.entityProviderAddress ?? config.fromReplica.contracts?.entityProvider ?? '';
-    addresses.deltaTransformer = config.fromReplica.contracts?.deltaTransformer ?? '';
+    addresses.account = firstAddress(
+      config.fromReplica.jadapter?.addresses?.account,
+      config.fromReplica.contracts?.account,
+    );
+    addresses.depository = firstAddress(
+      config.fromReplica.jadapter?.addresses?.depository,
+      config.fromReplica.contracts?.depository,
+      config.fromReplica.depositoryAddress,
+    );
+    addresses.entityProvider = firstAddress(
+      config.fromReplica.jadapter?.addresses?.entityProvider,
+      config.fromReplica.contracts?.entityProvider,
+      config.fromReplica.entityProviderAddress,
+    );
+    addresses.deltaTransformer = firstAddress(
+      config.fromReplica.jadapter?.addresses?.deltaTransformer,
+      config.fromReplica.contracts?.deltaTransformer,
+    );
 
     console.log('[JAdapter:rpc] fromReplica mode - connecting to contracts:');
     console.log('  Account:', addresses.account);
@@ -195,11 +272,11 @@ export async function createRpcAdapter(
     ]);
 
     if (depCode === '0x' || epCode === '0x') {
-      console.warn('[JAdapter:rpc] fromReplica addresses have no code on chain - redeploying');
-      addresses.account = '';
-      addresses.depository = '';
-      addresses.entityProvider = '';
-      addresses.deltaTransformer = '';
+      throw new Error(
+        '[JAdapter:rpc] fromReplica addresses have no code on chain: ' +
+          `depository=${addresses.depository || 'none'} code=${depCode} ` +
+          `entityProvider=${addresses.entityProvider || 'none'} code=${epCode}`,
+      );
     } else {
       // Use any cast to handle ethers version mismatch between root and jurisdictions
       if (!addresses.account) {
@@ -214,6 +291,10 @@ export async function createRpcAdapter(
       depository = Depository__factory.connect(addresses.depository, signer as any);
       entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer as any);
       deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer as any);
+      addresses.account = await account.getAddress();
+      addresses.depository = await depository.getAddress();
+      addresses.entityProvider = await entityProvider.getAddress();
+      addresses.deltaTransformer = await deltaTransformer.getAddress();
       deployed = true;
       setDeltaTransformerAddress(addresses.deltaTransformer);
       console.log('[JAdapter:rpc] Connected to existing contracts ✓');
@@ -222,6 +303,12 @@ export async function createRpcAdapter(
 
   const eventCallbacks = new Map<string, Set<JEventCallback>>();
   const anyCallbacks = new Set<JEventCallback>();
+
+  const getLiveDepositoryAddress = async (): Promise<string> =>
+    depository ? await depository.getAddress() : addresses.depository;
+
+  const getLiveEntityProviderAddress = async (): Promise<string> =>
+    entityProvider ? await entityProvider.getAddress() : addresses.entityProvider;
 
   // Check if RPC supports snapshots (anvil)
   const supportsSnapshots = async (): Promise<boolean> => {
@@ -274,27 +361,36 @@ export async function createRpcAdapter(
       console.log(`  EntityProvider: ${addresses.entityProvider}`);
 
       // Deploy Depository (needs Account library linked)
-      const depositoryFactory = new Depository__factory(
+      const linkedDepositoryBytecode = linkArtifactBytecode(
+        Depository__factory.bytecode,
         { 'contracts/Account.sol:Account': addresses.account },
-        signer as any
       );
-      // Use block gas limit minus margin (anvil default is 30M)
-      let deployGasLimit = 30_000_000n;
-      try {
-        const latestBlock = await provider.getBlock('latest');
-        if (latestBlock?.gasLimit) {
-          const margin = 1_000_000n;
-          deployGasLimit = latestBlock.gasLimit > margin ? latestBlock.gasLimit - margin : latestBlock.gasLimit;
+      const depositoryFactory = new ethers.ContractFactory(
+        Depository__factory.abi,
+        linkedDepositoryBytecode,
+        signer as any,
+      );
+      // Fresh dev-chain deployments can exceed 30M after linking + viaIR.
+      let deployGasLimit = DEV_CHAIN_IDS.has(config.chainId)
+        ? BigInt(process.env.JADAPTER_DEPLOY_GAS_LIMIT ?? '60000000')
+        : 30_000_000n;
+      if (!DEV_CHAIN_IDS.has(config.chainId)) {
+        try {
+          const latestBlock = await provider.getBlock('latest');
+          if (latestBlock?.gasLimit) {
+            const margin = 1_000_000n;
+            deployGasLimit = latestBlock.gasLimit > margin ? latestBlock.gasLimit - margin : latestBlock.gasLimit;
+          }
+        } catch {
+          // Fallback to default when provider can't fetch block gas limit.
         }
-      } catch {
-        // Fallback to 30M if provider can't fetch block gas limit
       }
       const depositoryContract = await depositoryFactory.deploy(addresses.entityProvider, {
         gasLimit: deployGasLimit,
       });
       await depositoryContract.waitForDeployment();
       addresses.depository = await depositoryContract.getAddress();
-      depository = depositoryContract;
+      depository = Depository__factory.connect(addresses.depository, signer as any);
       console.log(`  Depository: ${addresses.depository}`);
 
       // Deploy DeltaTransformer
@@ -698,23 +794,7 @@ export async function createRpcAdapter(
         // Use mintToReserve (renamed from debugFundReserves in Depository contract)
         const tx = await depository.mintToReserve(entityId, tokenId, amount, await buildFeeOverrides());
         const receipt = await waitForReceipt(tx as any, 'mintToReserve');
-
-        const events: JEvent[] = [];
-        for (const log of receipt.logs) {
-          try {
-            const parsed = depository.interface.parseLog({ topics: log.topics as string[], data: log.data });
-            if (parsed) {
-              events.push({
-                name: parsed.name,
-                args: Object.fromEntries(Object.entries(parsed.args)),
-                blockNumber: receipt.blockNumber,
-                blockHash: receipt.blockHash,
-                transactionHash: receipt.hash,
-              });
-            }
-          } catch { }
-        }
-        return events;
+        return parseDepositoryReceiptEvents(receipt);
       }
       // Real networks: must use real deposits
       throw new Error('debugFundReserves only available on configured dev chains - use real token deposits');
@@ -742,6 +822,27 @@ export async function createRpcAdapter(
       }
       return events;
       */
+    },
+
+    async debugFundReservesBatch(mints: JReserveMint[]): Promise<JEvent[]> {
+      if (!DEV_CHAIN_IDS.has(config.chainId)) {
+        throw new Error('debugFundReservesBatch only available on configured dev chains');
+      }
+      if (mints.length === 0) return [];
+
+      const batchMint = new ethers.Contract(
+        await depository.getAddress(),
+        ['function mintToReserveBatch((bytes32 entity,uint256 tokenId,uint256 amount)[] mints) external'],
+        signer as any,
+      );
+      const payload = mints.map((mint) => ({
+        entity: mint.entityId,
+        tokenId: BigInt(mint.tokenId),
+        amount: mint.amount,
+      }));
+      const tx = await batchMint.mintToReserveBatch(payload, await buildFeeOverrides());
+      const receipt = await waitForReceipt(tx as any, 'mintToReserveBatch');
+      return parseDepositoryReceiptEvents(receipt);
     },
 
     async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
@@ -809,15 +910,16 @@ export async function createRpcAdapter(
         amount: bigint,
         overrides?: Record<string, bigint>
       ) => Promise<{ wait: (confirms?: number, timeout?: number) => Promise<unknown>; hash: string }>;
-      const allowance: bigint = await allowanceFn(signerWallet.address, addresses.depository);
+      const liveDepositoryAddress = await getLiveDepositoryAddress();
+      const allowance: bigint = await allowanceFn(signerWallet.address, liveDepositoryAddress);
       if (allowance < amount) {
         // Safer approval model: approve exact amount needed.
         // For USDT-like tokens, clear to 0 before raising allowance.
         if (allowance > 0n) {
-          const clearTx = await approveFn(addresses.depository, 0n, await buildFeeOverrides());
+          const clearTx = await approveFn(liveDepositoryAddress, 0n, await buildFeeOverrides());
           await waitForReceipt(clearTx as any, 'erc20ApproveReset');
         }
-        const approveTx = await approveFn(addresses.depository, amount, await buildFeeOverrides());
+        const approveTx = await approveFn(liveDepositoryAddress, amount, await buildFeeOverrides());
         await waitForReceipt(approveTx as any, 'erc20ApproveExact');
         console.log(`[JAdapter:rpc] Approved exact allowance=${amount} for Depository`);
       }
@@ -871,13 +973,12 @@ export async function createRpcAdapter(
           return { success: true };
         }
 
-        const entityProviderAddr = addresses.entityProvider;
         const normalizedId = normalizeEntityId(jTx.entityId);
 
         // Validate settlement signatures + entityProvider
         for (const settlement of jTx.data.batch.settlements ?? []) {
           if (!settlement.entityProvider || settlement.entityProvider === '0x0000000000000000000000000000000000000000') {
-            settlement.entityProvider = entityProviderAddr;
+            settlement.entityProvider = await getLiveEntityProviderAddress();
           }
           if (settlement.diffs?.length > 0 && (!settlement.sig || settlement.sig === '0x')) {
             return { success: false, error: `Settlement missing hanko sig` };
@@ -885,6 +986,8 @@ export async function createRpcAdapter(
         }
 
         return runSerializedBatch(async () => {
+          const entityProviderAddr = await getLiveEntityProviderAddress();
+          const depositoryAddr = await getLiveDepositoryAddress();
           // Use pre-provided encoded batch + hanko (from entity consensus) or sign locally
           let encodedBatch: string;
           let hankoData: string;
@@ -902,8 +1005,18 @@ export async function createRpcAdapter(
             if (!sid) {
               return { success: false, error: `Missing signerId for batch from ${jTx.entityId.slice(-4)}` };
             }
+            if (!depository || !depositoryAddr) {
+              return {
+                success: false,
+                error:
+                  `RPC_ADAPTER_NOT_CONNECTED:${normalizedId.slice(-4)}` +
+                  ` depository=${depositoryAddr || 'none'}` +
+                  ` entityProvider=${entityProviderAddr || 'none'}` +
+                  ` hasDepository=${depository ? 1 : 0}` +
+                  ` hasEntityProvider=${entityProvider ? 1 : 0}`,
+              };
+            }
 
-            const depositoryAddr = addresses.depository;
             encodedBatch = encodeJBatch(jTx.data.batch);
             const entityAddress = ethers.getAddress(`0x${normalizedId.slice(-40)}`);
             const currentNonce = await depository['entityNonces']?.(entityAddress) ?? 0n;
@@ -917,6 +1030,50 @@ export async function createRpcAdapter(
             if (!hankoData) {
               return { success: false, error: 'Failed to build batch hanko signature' };
             }
+          }
+
+          let disputeStartDebug: Array<Record<string, unknown>> = [];
+          if ((jTx.data.batch.disputeStarts?.length || 0) > 0) {
+            const { inspectHankoForHash } = await import('../hanko-signing');
+            disputeStartDebug = await Promise.all(jTx.data.batch.disputeStarts.map(async (start) => {
+              const accountKey = computeAccountKey(normalizedId, start.counterentity);
+              const disputeHash = ethers.keccak256(
+                ethers.AbiCoder.defaultAbiCoder().encode(
+                  ['uint8', 'address', 'bytes', 'uint256', 'bytes32'],
+                  [1, depositoryAddr, accountKey, BigInt(start.nonce), start.proofbodyHash],
+                ),
+              );
+              const hankoDebug = await inspectHankoForHash(start.sig, disputeHash);
+              const matchingClaim = hankoDebug.claims.find(
+                (claim) => String(claim.entityId).toLowerCase() === String(start.counterentity).toLowerCase(),
+              );
+              return {
+                contractGuard: 'EntityProvider.sol:469 require(entityId == boardHash)',
+                senderEntityId: normalizedId,
+                counterentity: start.counterentity,
+                nonce: start.nonce,
+                proofbodyHash: start.proofbodyHash,
+                initialArgumentsBytes: Math.max((start.initialArguments?.length || 2) - 2, 0) / 2,
+                disputeHash,
+                accountKey,
+                sigBytes: Math.max((start.sig?.length || 2) - 2, 0) / 2,
+                recoveredAddresses: hankoDebug.recoveredAddresses,
+                matchingClaim: matchingClaim
+                  ? {
+                      entityId: matchingClaim.entityId,
+                      threshold: matchingClaim.threshold,
+                      entityIndexes: matchingClaim.entityIndexes,
+                      weights: matchingClaim.weights,
+                      boardEntityIds: matchingClaim.boardEntityIds,
+                      reconstructedBoardHash: matchingClaim.reconstructedBoardHash,
+                      entityMatchesBoardHash:
+                        String(matchingClaim.entityId).toLowerCase() ===
+                        String(matchingClaim.reconstructedBoardHash).toLowerCase(),
+                    }
+                  : null,
+              };
+            }));
+            console.log(`🧾 [JAdapter:rpc] disputeStart.batch ${JSON.stringify(disputeStartDebug)}`);
           }
 
           try {
@@ -988,6 +1145,9 @@ export async function createRpcAdapter(
               } else {
                 errDetail = simErr?.reason ?? simErr?.message ?? String(simErr);
                 console.error(`🔍 [JAdapter:rpc] staticCall revert: ${errDetail}`);
+              }
+              if (disputeStartDebug.length > 0) {
+                console.error(`🧾 [JAdapter:rpc] disputeStart.batch.revert ${JSON.stringify(disputeStartDebug)}`);
               }
               // Bail — do NOT submit a known-bad batch on-chain
               return { success: false, error: `staticCall revert: ${errDetail}` };
@@ -1090,8 +1250,11 @@ export async function createRpcAdapter(
         }
       };
 
+      let pollInFlight = false;
       const doPoll = async () => {
         if (!watcherEnv) return;
+        if (pollInFlight) return;
+        pollInFlight = true;
         try {
           // Use raw RPC call to bypass ethers' block number caching
           const rpcResult = await (provider as ethers.JsonRpcProvider).send('eth_blockNumber', []);
@@ -1101,7 +1264,7 @@ export async function createRpcAdapter(
           if (lastSyncedBlock >= safeToBlock) return;
 
           const fromBlock = lastSyncedBlock + 1;
-          const filter = { address: addresses.depository, fromBlock, toBlock: safeToBlock };
+          const filter = { address: await getLiveDepositoryAddress(), fromBlock, toBlock: safeToBlock };
           const logs = await provider.getLogs(filter);
 
           if (logs.length > 0) {
@@ -1173,12 +1336,15 @@ export async function createRpcAdapter(
           if (!(error instanceof Error && error.message.includes('ECONNREFUSED'))) {
             console.error(`🔭❌ [JAdapter:rpc] Sync error:`, error instanceof Error ? error.message : String(error));
           }
+        } finally {
+          pollInFlight = false;
         }
       };
 
       // Store pollNow for scenarios that need immediate sync
       (adapter as any)._pollNow = doPoll;
       watcherInterval = setInterval(doPoll, watchPollMs);
+      void doPoll();
 
       console.log(`🔭 [JAdapter:rpc] Watcher started (${watchPollMs}ms polling)`);
     },

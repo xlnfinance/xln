@@ -14,6 +14,11 @@ import { loadJurisdictions } from './jurisdiction-loader';
 import { parseRebalancePolicyUsd } from './rebalance-policy-usd';
 import { isBrowser } from './utils';
 
+function getBrowserJurisdictionsUrl(): string {
+  const suffix = `ts=${Date.now()}`;
+  return `./jurisdictions.json?${suffix}`;
+}
+
 /**
  * Load available jurisdictions from config
  * Returns empty array if config not found (BrowserVM mode)
@@ -50,7 +55,11 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
       const timeoutId = setTimeout(() => controller.abort(), 3000);
 
       try {
-        const response = await fetch('./jurisdictions.json', { signal: controller.signal });
+        const response = await fetch(getBrowserJurisdictionsUrl(), {
+          signal: controller.signal,
+          cache: 'no-store',
+          headers: { 'cache-control': 'no-cache' },
+        });
         clearTimeout(timeoutId);
         if (!response.ok) {
           console.log('⚠️ jurisdictions.json not found - using BrowserVM mode');

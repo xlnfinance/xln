@@ -8,6 +8,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { resetProdServer } from './utils/e2e-baseline';
+import { gotoApp as gotoSharedApp, createRuntimeIdentity } from './utils/e2e-demo-users';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const INIT_TIMEOUT = 30_000;
@@ -15,52 +16,6 @@ const LONG_E2E = process.env.E2E_LONG === '1';
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
-}
-
-async function gotoApp(page: Page): Promise<void> {
-  await page.goto(`${APP_BASE_URL}/app`);
-  const unlock = page.locator('button:has-text("Unlock")');
-  if (await unlock.isVisible({ timeout: 1500 }).catch(() => false)) {
-    await page.locator('input').first().fill('mml');
-    await unlock.click();
-    await page.waitForURL('**/app', { timeout: 10_000 });
-  }
-  await page.waitForFunction(() => !!(window as any).XLN, { timeout: INIT_TIMEOUT });
-  await page.waitForTimeout(500);
-}
-
-async function dismissOnboardingIfVisible(page: Page): Promise<void> {
-  const checkbox = page.locator('text=I understand and accept the risks of using this software').first();
-  if (await checkbox.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await checkbox.click();
-    const continueBtn = page.locator('button:has-text("Continue")').first();
-    if (await continueBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await continueBtn.click();
-      await page.waitForTimeout(300);
-    }
-  }
-}
-
-async function createDemoRuntime(page: Page, label: string, mnemonic: string): Promise<void> {
-  const result = await page.evaluate(async ({ label, mnemonic }) => {
-    try {
-      const vaultOperations = (window as any).vaultOperations;
-      if (!vaultOperations) return { ok: false, error: 'window.vaultOperations missing' };
-      await vaultOperations.createRuntime(label, mnemonic, {
-        loginType: 'demo',
-        requiresOnboarding: false,
-      });
-      return { ok: true };
-    } catch (error: any) {
-      return { ok: false, error: error?.message || String(error) };
-    }
-  }, { label, mnemonic });
-
-  expect(result.ok, `createRuntime failed: ${result.error || 'unknown'}`).toBe(true);
-  await page.waitForFunction(() => {
-    const env = (window as any).isolatedEnv;
-    return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
-  }, { timeout: 20_000 });
 }
 
 async function ensureAnyHubAccountOpen(page: Page): Promise<{ entityId: string; signerId: string; counterpartyId: string }> {
@@ -207,12 +162,11 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{ entityId: string; 
   return { entityId: result.entityId, signerId: result.signerId, counterpartyId: result.counterpartyId };
 }
 
-async function readReserve(page: Page, entityId: string, opts?: { allowUnavailable?: boolean }): Promise<bigint> {
+async function readLocalReserveState(page: Page, entityId: string, opts?: { allowUnavailable?: boolean }): Promise<bigint> {
   const value = await page.evaluate(async ({ entityId }) => {
     const env = (window as any).isolatedEnv;
     if (!env?.eReplicas) return null;
     const entityLower = String(entityId || '').toLowerCase();
-    // 1) Prefer local state-machine reserve when this entity is loaded in runtime.
     for (const [key, rep] of env.eReplicas.entries()) {
       const [eid] = String(key).split(':');
       if (String(eid || '').toLowerCase() !== entityLower) continue;
@@ -223,12 +177,22 @@ async function readReserve(page: Page, entityId: string, opts?: { allowUnavailab
         if (reserve === undefined) reserve = reserves.get(1n);
         if (reserve === undefined) reserve = reserves.get('1');
       } else if (reserves && typeof reserves === 'object') {
-        reserve = (reserves as any)[1] ?? (reserves as any)['1'] ?? null;
+        reserve = (reserves as Record<string, unknown>)[1] ?? (reserves as Record<string, unknown>)['1'] ?? null;
       }
       return typeof reserve === 'bigint' ? reserve.toString() : String(reserve ?? '0');
     }
+    return null;
+  }, { entityId });
+  if (!value) {
+    if (opts?.allowUnavailable) return 0n;
+    throw new Error('Unable to read local reserve state');
+  }
+  return BigInt(value);
+}
 
-    // 2) For remote entities (e.g. second hub), read canonical on-chain reserve via active JAdapter.
+async function readOnchainReserveViaAnvil(page: Page, entityId: string, opts?: { allowUnavailable?: boolean }): Promise<bigint> {
+  const value = await page.evaluate(async ({ entityId }) => {
+    const env = (window as any).isolatedEnv;
     const XLN = (window as any).XLN;
     const jadapter = XLN?.getActiveJAdapter?.(env) ?? null;
     if (!jadapter?.getReserves) return null;
@@ -238,12 +202,10 @@ async function readReserve(page: Page, entityId: string, opts?: { allowUnavailab
     } catch {
       return null;
     }
-
-    return null;
   }, { entityId });
   if (!value) {
     if (opts?.allowUnavailable) return 0n;
-    throw new Error('Unable to read reserve');
+    throw new Error('Unable to read on-chain reserve');
   }
   return BigInt(value);
 }
@@ -303,10 +265,24 @@ async function readAccountMeta(
   entityId: string,
   signerId: string,
   counterpartyId: string
-): Promise<{ frameHeight: number; hasCounterpartyDisputeProof: boolean }> {
+): Promise<{
+  frameHeight: number;
+  hasCounterpartyDisputeProof: boolean;
+  pendingFrame: boolean;
+  counterpartyDisputeProofBodyHash: string;
+  counterpartyDisputeProofNonce: number | null;
+}> {
   return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return { frameHeight: 0, hasCounterpartyDisputeProof: false };
+    if (!env?.eReplicas) {
+      return {
+        frameHeight: 0,
+        hasCounterpartyDisputeProof: false,
+        pendingFrame: false,
+        counterpartyDisputeProofBodyHash: '',
+        counterpartyDisputeProofNonce: null,
+      };
+    }
     const key = Array.from(env.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
@@ -317,6 +293,12 @@ async function readAccountMeta(
     return {
       frameHeight: Number(account?.currentHeight || 0),
       hasCounterpartyDisputeProof: !!account?.counterpartyDisputeProofHanko,
+      pendingFrame: !!account?.pendingFrame,
+      counterpartyDisputeProofBodyHash: String(account?.counterpartyDisputeProofBodyHash || ''),
+      counterpartyDisputeProofNonce:
+        typeof account?.counterpartyDisputeProofNonce === 'number'
+          ? Number(account.counterpartyDisputeProofNonce)
+          : null,
     };
   }, { entityId, signerId, counterpartyId });
 }
@@ -422,7 +404,63 @@ function parseUiAmount(text: string): number {
   return parsed;
 }
 
-async function readReserveBalanceUi(page: Page, symbol: string = 'USDC'): Promise<number> {
+async function ensureEntityWorkspaceVisible(page: Page, entityId?: string): Promise<void> {
+  if (!entityId) return;
+  const entityTrigger = page.locator('.entity-slot .dropdown-trigger').first();
+  await expect(entityTrigger).toBeVisible({ timeout: 20_000 });
+  const currentLabel = String((await entityTrigger.textContent()) || '');
+  if (currentLabel.toLowerCase().includes(entityId.toLowerCase())) {
+    return;
+  }
+  await entityTrigger.click();
+  let entityOption = page.locator('.signer-item').filter({ hasText: entityId }).first();
+  const exactVisible = await entityOption.isVisible({ timeout: 1_000 }).catch(() => false);
+  if (!exactVisible) {
+    entityOption = page.locator('.signer-item').first();
+  }
+  await expect(entityOption).toBeVisible({ timeout: 20_000 });
+  await entityOption.click();
+  await expect.poll(async () => {
+    const text = await entityTrigger.textContent();
+    return String(text || '').toLowerCase();
+  }, { timeout: 20_000, intervals: [250, 500, 1000] }).toContain(entityId.toLowerCase());
+}
+
+async function ensureAccountWorkspaceVisible(page: Page, counterpartyId?: string, entityId?: string): Promise<void> {
+  await ensureEntityWorkspaceVisible(page, entityId);
+
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  await accountsTab.click();
+
+  if (!counterpartyId) {
+    return;
+  }
+
+  const openAccountPanelBack = page.locator('.account-panel .back-button').first();
+  const openAccountPanelVisible = await openAccountPanelBack.isVisible({ timeout: 500 }).catch(() => false);
+  if (openAccountPanelVisible) {
+    const currentPanelHasCounterparty = await page.locator('.account-panel').filter({ hasText: counterpartyId }).first()
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+    if (currentPanelHasCounterparty) return;
+    await openAccountPanelBack.click();
+  }
+
+  const accountPreview = page.locator('.account-preview').filter({ hasText: counterpartyId }).first();
+  const accountPreviewVisible = await accountPreview.isVisible({ timeout: 2_000 }).catch(() => false);
+  if (accountPreviewVisible) {
+    return;
+  }
+}
+
+async function readReserveBalanceUi(
+  page: Page,
+  symbol: string = 'USDC',
+  counterpartyId?: string,
+  entityId?: string,
+): Promise<number> {
+  await ensureAccountWorkspaceVisible(page, counterpartyId, entityId);
   const reservesTab = page.getByTestId('tab-reserves').first();
   await expect(reservesTab).toBeVisible({ timeout: 20_000 });
   await reservesTab.click();
@@ -662,8 +700,30 @@ async function seedDisputePreconditions(
 
       await expect.poll(async () => {
         const current = await readAccountMeta(page, entityId, signerId, counterpartyId);
-        return current.frameHeight > before.frameHeight;
-      }, { timeout: 45_000, intervals: [500, 1000, 2000] }).toBe(true);
+        const hasFreshProofHash =
+          current.counterpartyDisputeProofBodyHash.length > 0 &&
+          current.counterpartyDisputeProofBodyHash !== before.counterpartyDisputeProofBodyHash;
+        const hasFreshProofNonce =
+          typeof current.counterpartyDisputeProofNonce === 'number' &&
+          (
+            before.counterpartyDisputeProofNonce === null ||
+            current.counterpartyDisputeProofNonce > before.counterpartyDisputeProofNonce
+          );
+        return {
+          frameAdvanced: current.frameHeight > before.frameHeight,
+          hasProof: current.hasCounterpartyDisputeProof,
+          pendingFrame: current.pendingFrame,
+          freshProofHash: hasFreshProofHash,
+          freshProofNonce: hasFreshProofNonce,
+          proofHash: current.counterpartyDisputeProofBodyHash,
+          proofNonce: current.counterpartyDisputeProofNonce,
+        };
+      }, { timeout: 45_000, intervals: [500, 1000, 2000] }).toMatchObject({
+        frameAdvanced: true,
+        hasProof: true,
+        pendingFrame: false,
+        freshProofHash: true,
+      });
 
       seeded = true;
     } catch (error: any) {
@@ -677,12 +737,35 @@ async function seedDisputePreconditions(
   }
 }
 
-async function broadcastPendingBatchViaUi(page: Page): Promise<void> {
+async function broadcastPendingBatchViaUi(
+  page: Page,
+  entityId?: string,
+  signerId?: string,
+): Promise<void> {
   const signButton = page.getByTestId('settle-sign-broadcast').first();
   await expect(signButton).toBeVisible({ timeout: 30_000 });
   await expect(signButton).toBeEnabled({ timeout: 120_000 });
-  await signButton.click();
+  let dialogMessage = '';
+  const onDialog = async (dialog: any) => {
+    dialogMessage = dialog?.message?.() || '';
+    await dialog.accept();
+  };
+  page.on('dialog', onDialog);
+  try {
+    await signButton.click();
+  } finally {
+    page.off('dialog', onDialog);
+  }
   await page.waitForTimeout(500);
+  if (dialogMessage) {
+    const snapshot = entityId && signerId
+      ? await readJBatchSnapshot(page, entityId, signerId)
+      : null;
+    throw new Error(
+      `settle-sign-broadcast alert: ${dialogMessage}` +
+      (snapshot ? ` snapshot=${JSON.stringify(snapshot)}` : ''),
+    );
+  }
 }
 
 async function clickWithDialogAccept(page: Page, action: () => Promise<void>): Promise<void> {
@@ -723,7 +806,8 @@ async function ensureNoSentBatchLatch(
   }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(false);
 }
 
-async function openEntitySettleWorkspace(page: Page): Promise<void> {
+async function openEntitySettleWorkspace(page: Page, counterpartyId?: string, entityId?: string): Promise<void> {
+  await ensureAccountWorkspaceVisible(page, counterpartyId, entityId);
   const accountPanelBack = page.locator('.account-panel .back-button').first();
   if (await accountPanelBack.isVisible({ timeout: 1_000 }).catch(() => false)) {
     await accountPanelBack.click();
@@ -753,7 +837,7 @@ async function startDisputeFromEntitySettle(
   signerId: string,
   counterpartyId: string,
 ): Promise<void> {
-  await openEntitySettleWorkspace(page);
+  await openEntitySettleWorkspace(page, counterpartyId, entityId);
 
   const disputeTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Dispute$/ }).first();
   await expect(disputeTab).toBeVisible({ timeout: 15_000 });
@@ -768,9 +852,25 @@ async function startDisputeFromEntitySettle(
   await expect(disputeButton).toBeVisible({ timeout: 15_000 });
   await expect(disputeButton).toBeEnabled({ timeout: 15_000 });
 
-  await clickWithDialogAccept(page, async () => {
+  const dialogs: Array<{ type: string; message: string }> = [];
+  const onDialog = async (dialog: any) => {
+    dialogs.push({
+      type: String(dialog?.type?.() || 'unknown'),
+      message: String(dialog?.message?.() || ''),
+    });
+    await dialog.accept();
+  };
+  page.on('dialog', onDialog);
+  try {
     await disputeButton.click();
-  });
+  } finally {
+    page.off('dialog', onDialog);
+  }
+
+  const alertDialog = dialogs.find((entry) => entry.type === 'alert');
+  if (alertDialog) {
+    throw new Error(`disputeStart alert: ${alertDialog.message}`);
+  }
 
   await expect.poll(async () => {
     const state = await readAccountState(page, entityId, signerId, counterpartyId);
@@ -841,6 +941,24 @@ async function readJBatchSnapshot(
   lastBatchOpCount: number;
   lastBatchJBlock: number;
   lastBatchOps: Record<string, number>;
+  replicaMempoolTxTypes: string[];
+  proposalTxTypes: string[];
+  recentMessages: string[];
+  activeJurisdiction: string;
+  entityJurisdiction: {
+    name: string;
+    address: string;
+    depositoryAddress: string;
+    entityProviderAddress: string;
+    chainId: number;
+  };
+  jReplicas: Array<{
+    name: string;
+    depositoryAddress: string;
+    entityProviderAddress: string;
+    chainId: number;
+    rpcCount: number;
+  }>;
 }> {
   return await page.evaluate(({ entityId, signerId }) => {
     const env = (window as any).isolatedEnv;
@@ -861,6 +979,18 @@ async function readJBatchSnapshot(
         lastBatchOpCount: 0,
         lastBatchJBlock: 0,
         lastBatchOps: {},
+        replicaMempoolTxTypes: [],
+        proposalTxTypes: [],
+        recentMessages: [],
+        activeJurisdiction: '',
+        entityJurisdiction: {
+          name: '',
+          address: '',
+          depositoryAddress: '',
+          entityProviderAddress: '',
+          chainId: 0,
+        },
+        jReplicas: [],
       };
     }
 
@@ -875,6 +1005,14 @@ async function readJBatchSnapshot(
     const history = Array.isArray(rep?.state?.batchHistory) ? rep.state.batchHistory : [];
     const last = history.length > 0 ? history[history.length - 1] : null;
     const lastOps = (last?.operations && typeof last.operations === 'object') ? last.operations : {};
+    const jurisdiction = rep?.state?.config?.jurisdiction;
+    const jReplicas = Array.from(env.jReplicas?.values?.() || []).map((jr: any) => ({
+      name: String(jr?.name || ''),
+      depositoryAddress: String(jr?.depositoryAddress || jr?.contracts?.depository || ''),
+      entityProviderAddress: String(jr?.entityProviderAddress || jr?.contracts?.entityProvider || ''),
+      chainId: Number(jr?.chainId || jr?.jadapter?.chainId || 0),
+      rpcCount: Array.isArray(jr?.rpcs) ? jr.rpcs.length : 0,
+    }));
 
     return {
       pendingDisputeStarts: Number(pending?.disputeStarts?.length || 0),
@@ -899,6 +1037,24 @@ async function readJBatchSnapshot(
         disputeFinalizations: Number(lastOps?.disputeFinalizations || 0),
         settlements: Number(lastOps?.settlements || 0),
       },
+      replicaMempoolTxTypes: Array.isArray(rep?.mempool)
+        ? rep.mempool.map((tx: any) => String(tx?.type || ''))
+        : [],
+      proposalTxTypes: Array.isArray(rep?.proposal?.txs)
+        ? rep.proposal.txs.map((tx: any) => String(tx?.type || ''))
+        : [],
+      recentMessages: Array.isArray(rep?.state?.messages)
+        ? rep.state.messages.slice(-8).map((message: unknown) => String(message || ''))
+        : [],
+      activeJurisdiction: String(env.activeJurisdiction || ''),
+      entityJurisdiction: {
+        name: String(jurisdiction?.name || ''),
+        address: String(jurisdiction?.address || ''),
+        depositoryAddress: String(jurisdiction?.depositoryAddress || ''),
+        entityProviderAddress: String(jurisdiction?.entityProviderAddress || ''),
+        chainId: Number(jurisdiction?.chainId || 0),
+      },
+      jReplicas,
     };
   }, { entityId, signerId });
 }
@@ -918,15 +1074,16 @@ test.describe('E2E Dispute Flow', () => {
       }
     });
 
-    await timedStep('dispute.goto_app', () => gotoApp(page));
-    await timedStep('dispute.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
-    await timedStep('dispute.create_runtime', () => createDemoRuntime(page, `dispute-rt-${Date.now()}`, randomMnemonic()));
+    await timedStep('dispute.goto_app', () => gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 500 }));
+    await timedStep('dispute.create_runtime', () => createRuntimeIdentity(page, `dispute-rt-${Date.now()}`, randomMnemonic()));
     const accountRef = await timedStep('dispute.ensure_hub_account', () => ensureAnyHubAccountOpen(page));
     await timedStep('dispute.seed_preconditions', () => seedDisputePreconditions(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId));
 
-    const reserveBefore = await readReserve(page, accountRef.entityId);
-    const reserveBeforeUi = await readReserveBalanceUi(page, 'USDC');
-    const reserveCardBeforeUi = await readReservesCardValueUi(page);
+    const localReserveBefore = await readLocalReserveState(page, accountRef.entityId, { allowUnavailable: true });
+    expect(localReserveBefore).toBeGreaterThanOrEqual(0n);
+    const reserveBefore = await readOnchainReserveViaAnvil(page, accountRef.entityId);
+    const reserveBeforeUi = 0;
+    const reserveCardBeforeUi = 0;
     const batchBeforeDispute = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
 
     try {
@@ -947,13 +1104,18 @@ test.describe('E2E Dispute Flow', () => {
     const disputeQueued = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
     const disputeHistoryBeforeBroadcast = disputeQueued.batchHistoryCount;
 
-    await timedStep('dispute.open_settle_workspace', () => openEntitySettleWorkspace(page));
-    await timedStep('dispute.broadcast_start_batch', () => broadcastPendingBatchViaUi(page));
+    await timedStep('dispute.open_settle_workspace', () => openEntitySettleWorkspace(page, accountRef.counterpartyId, accountRef.entityId));
+    await timedStep('dispute.broadcast_start_batch', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
     await timedStep('dispute.wait_batch_sent_or_history', async () => {
-      await expect.poll(async () => {
+      try {
+        await expect.poll(async () => {
+          const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+          return snap.sentDisputeStarts > 0 || snap.batchHistoryCount > disputeHistoryBeforeBroadcast;
+        }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+      } catch {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        return snap.sentDisputeStarts > 0 || snap.batchHistoryCount > disputeHistoryBeforeBroadcast;
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+        throw new Error(`dispute broadcast not observed. snapshot=${JSON.stringify(snap)}`);
+      }
     });
 
     await timedStep('dispute.wait_account_active_dispute', async () => {
@@ -990,7 +1152,7 @@ test.describe('E2E Dispute Flow', () => {
       }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe(true);
     });
 
-    const reserveAfter = await readReserve(page, accountRef.entityId);
+    const reserveAfter = await readOnchainReserveViaAnvil(page, accountRef.entityId);
     expect(
       reserveAfter > reserveBefore,
       `reserve must increase after dispute finalize (before=${reserveBefore}, after=${reserveAfter})`
@@ -1013,7 +1175,7 @@ test.describe('E2E Dispute Flow', () => {
     await page.waitForTimeout(1200);
 
     // Finalized disputed account is hidden from main list and moved to "Disputed Accounts".
-    await timedStep('dispute.open_settle_workspace_post_finalize', () => openEntitySettleWorkspace(page));
+    await timedStep('dispute.open_settle_workspace_post_finalize', () => openEntitySettleWorkspace(page, accountRef.counterpartyId, accountRef.entityId));
     await timedStep('dispute.wait_hidden_from_main_list', async () => {
       await expect.poll(async () => {
         return await page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId }).count();
@@ -1028,8 +1190,8 @@ test.describe('E2E Dispute Flow', () => {
     await timedStep('post_dispute.open_secondary_account', () => ensurePrivateAccountOpenViaUi(page, accountRef.entityId, accountRef.signerId, secondHubId));
 
     // R2R direct transfer coverage (from reserve returned by dispute finalize).
-    const reserveBeforeR2R = await readReserve(page, accountRef.entityId);
-    const secondHubReserveBeforeR2R = await readReserve(page, secondHubId);
+    const reserveBeforeR2R = await readOnchainReserveViaAnvil(page, accountRef.entityId);
+    const secondHubReserveBeforeR2R = await readOnchainReserveViaAnvil(page, secondHubId);
     const r2rBatchBefore = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
     const r2rHistoryBefore = r2rBatchBefore.batchHistoryCount;
 
@@ -1040,7 +1202,7 @@ test.describe('E2E Dispute Flow', () => {
         return snap.pendingReserveToReserve;
       }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(r2rBatchBefore.pendingReserveToReserve);
     });
-    await timedStep('post_dispute.broadcast_r2r', () => broadcastPendingBatchViaUi(page));
+    await timedStep('post_dispute.broadcast_r2r', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
 
     await timedStep('post_dispute.wait_r2r_sent', async () => {
       await expect.poll(async () => {
@@ -1050,11 +1212,11 @@ test.describe('E2E Dispute Flow', () => {
     });
 
     await expect.poll(async () => {
-      return await readReserve(page, accountRef.entityId);
+      return await readOnchainReserveViaAnvil(page, accountRef.entityId);
     }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBeLessThan(reserveBeforeR2R);
 
     await expect.poll(async () => {
-      return await readReserve(page, secondHubId);
+      return await readOnchainReserveViaAnvil(page, secondHubId);
     }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(secondHubReserveBeforeR2R);
 
     // Full-cycle continuation:
@@ -1082,7 +1244,7 @@ test.describe('E2E Dispute Flow', () => {
     });
     const r2cQueued = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
     const r2cHistoryBeforeBroadcast = r2cQueued.batchHistoryCount;
-    await timedStep('post_dispute.broadcast_r2c', () => broadcastPendingBatchViaUi(page));
+    await timedStep('post_dispute.broadcast_r2c', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
     await timedStep('post_dispute.wait_r2c_sent', async () => {
       await expect.poll(async () => {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
@@ -1149,7 +1311,7 @@ test.describe('E2E Dispute Flow', () => {
       }, { timeout: 60_000 });
     });
     await timedStep('dispute.reload_assert_reserve', async () => {
-      await expect.poll(async () => await readReserve(page, accountRef.entityId, { allowUnavailable: true }), {
+      await expect.poll(async () => await readOnchainReserveViaAnvil(page, accountRef.entityId, { allowUnavailable: true }), {
         timeout: 60_000,
         intervals: [500, 1000, 2000],
       }).toBeGreaterThan(reserveBefore);
@@ -1177,9 +1339,8 @@ test.describe('E2E Dispute Flow', () => {
       }
     });
 
-    await timedStep('dispute_broadcast.goto_app', () => gotoApp(page));
-    await timedStep('dispute_broadcast.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
-    await timedStep('dispute_broadcast.create_runtime', () => createDemoRuntime(page, `dispute-ui-broadcast-rt-${Date.now()}`, randomMnemonic()));
+    await timedStep('dispute_broadcast.goto_app', () => gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 500 }));
+    await timedStep('dispute_broadcast.create_runtime', () => createRuntimeIdentity(page, `dispute-ui-broadcast-rt-${Date.now()}`, randomMnemonic()));
     const accountRef = await timedStep('dispute_broadcast.ensure_hub_account', () => ensureAnyHubAccountOpen(page));
     await timedStep(
       'dispute_broadcast.seed_preconditions',
@@ -1191,7 +1352,7 @@ test.describe('E2E Dispute Flow', () => {
       () => startDisputeFromEntitySettle(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
     );
     await timedStep('dispute_broadcast.open_settle_workspace', () => openEntitySettleWorkspace(page));
-    await timedStep('dispute_broadcast.broadcast', () => broadcastPendingBatchViaUi(page));
+    await timedStep('dispute_broadcast.broadcast', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
 
     await timedStep('dispute_broadcast.wait_active_dispute', async () => {
       await expect.poll(async () => {

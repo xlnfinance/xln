@@ -26,6 +26,8 @@ import type { ProofBodyStruct, TransformerClauseStruct } from './typechain/Depos
 import type { DeltaTransformer } from './typechain/DeltaTransformer.js';
 import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body-types.js';
 
+type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader'>;
+
 // Default DeltaTransformer address - set by BrowserVM on deploy
 let deltaTransformerAddress: string = '0x0000000000000000000000000000000000000000';
 
@@ -254,6 +256,16 @@ export function buildInitialDisputeProof(
   };
 }
 
+function getCanonicalAccountKey(accountMachine: DisputeHashAccount): string {
+  const leftEntity = String(accountMachine.leftEntity).toLowerCase();
+  const rightEntity = String(accountMachine.rightEntity).toLowerCase();
+  const [first, second] =
+    leftEntity < rightEntity
+      ? [accountMachine.leftEntity, accountMachine.rightEntity]
+      : [accountMachine.rightEntity, accountMachine.leftEntity];
+  return ethers.solidityPacked(['bytes32', 'bytes32'], [first, second]);
+}
+
 /**
  * Encode dispute message for signing (matches Account.sol verifyDisputeProofHanko)
  *
@@ -263,19 +275,12 @@ export function buildInitialDisputeProof(
  * The depository address binds the proof to a specific chain+depository for replay protection.
  */
 export function encodeDisputeMessage(
-  accountMachine: AccountMachine,
+  accountMachine: DisputeHashAccount,
   proofBodyHash: string,
   depositoryAddress: string
 ): string {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-
-  // Account key is canonical (left:right)
-  const leftEntity = accountMachine.leftEntity;
-  const rightEntity = accountMachine.rightEntity;
-  const chKey = ethers.solidityPacked(
-    ['bytes32', 'bytes32'],
-    [leftEntity, rightEntity]
-  );
+  const chKey = getCanonicalAccountKey(accountMachine);
 
   // MessageType.DisputeProof = 1
   const MESSAGE_TYPE_DISPUTE_PROOF = 1;
@@ -297,7 +302,7 @@ export function encodeDisputeMessage(
  * This is what both parties sign to authorize a dispute proof
  */
 export function createDisputeProofHash(
-  accountMachine: AccountMachine,
+  accountMachine: DisputeHashAccount,
   proofBodyHash: string,
   depositoryAddress: string
 ): string {
@@ -317,16 +322,13 @@ export function createDisputeProofHash(
  * at the new nonce.
  */
 export function createDisputeProofHashWithNonce(
-  accountMachine: AccountMachine,
+  accountMachine: DisputeHashAccount,
   proofBodyHash: string,
   depositoryAddress: string,
   nonce: number,
 ): string {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  const chKey = ethers.solidityPacked(
-    ['bytes32', 'bytes32'],
-    [accountMachine.leftEntity, accountMachine.rightEntity]
-  );
+  const chKey = getCanonicalAccountKey(accountMachine);
   const MESSAGE_TYPE_DISPUTE_PROOF = 1;
   const encodedMessage = abiCoder.encode(
     ['uint256', 'address', 'bytes', 'uint256', 'bytes32'],

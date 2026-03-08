@@ -46,6 +46,12 @@ export interface JTokenInfo {
   tokenId?: number;
 }
 
+export interface JReserveMint {
+  entityId: string;
+  tokenId: number;
+  amount: bigint;
+}
+
 export type JEventCallback = (event: JEvent) => void;
 export type SnapshotId = string;
 
@@ -105,6 +111,7 @@ export interface JAdapter {
 
   // Writes - Testing/Debug (may be no-op on mainnet)
   debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]>;
+  debugFundReservesBatch(mints: JReserveMint[]): Promise<JEvent[]>;
   reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<JEvent[]>;
 
   // Writes - Deposits (user deposits ERC20 to their entity reserves)

@@ -10,6 +10,7 @@ import {
   closeRuntimeDb,
 } from '../runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { generateLazyEntityId } from '../entity-factory';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);
@@ -38,8 +39,8 @@ async function main() {
   registerSignerKey(signer2, deriveSignerKeySync(seed, '2'));
   registerSignerKey(signer2.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '2'));
 
-  const entityA = '0x' + 'a'.repeat(64);
-  const entityB = '0x' + 'b'.repeat(64);
+  const entityA = generateLazyEntityId([signer1], 1n).toLowerCase();
+  const entityB = generateLazyEntityId([signer2], 1n).toLowerCase();
 
   // Frame 1: Import replicas
   enqueueRuntimeInput(env, {

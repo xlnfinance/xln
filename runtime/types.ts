@@ -211,8 +211,9 @@
  * ═══════════════════════════════════════════════════════════════════════
  */
 
-import type { Profile } from './networking/gossip';
+import type { GossipLayer, Profile } from './networking/gossip';
 import type { JAdapter } from './jadapter/types';
+import type { CompletedBatch, JBatch, JBatchState } from './j-batch';
 
 export interface JurisdictionConfig {
   address: string;
@@ -297,6 +298,15 @@ export interface EntityInput {
 export interface RoutedEntityInput extends EntityInput {
   signerId?: string;
   runtimeId?: string;
+}
+
+/**
+ * Network-deliverable entity input.
+ * By the time an input leaves the local runtime, target runtime resolution must
+ * already be complete and runtimeId becomes mandatory.
+ */
+export interface DeliverableEntityInput extends RoutedEntityInput {
+  runtimeId: string;
 }
 
 /** Entity output - can include both E→E messages AND J-layer outputs */
@@ -488,7 +498,12 @@ export type EntityTx =
     }
   | {
       type: 'profile-update';
-      data: { profile: any }; // replace with concrete profile type if available
+      data: {
+        profile: ProfileUpdateTx & {
+          entityId: string;
+          hankoSignature?: string;
+        };
+      };
     }
   | {
       type: 'j_event';
@@ -517,7 +532,7 @@ export type EntityTx =
         counterpartyEntityId: string; // Which account this observation is for
         jHeight: number;
         jBlockHash: string;
-        events: any[];
+        events: JurisdictionEvent[];
         observedAt: number;
       };
     }
@@ -1072,9 +1087,11 @@ export interface AccountMachine {
   currentDisputeProofHanko?: HankoString;              // My hanko on dispute proof (for J-machine enforcement)
   currentDisputeProofNonce?: number;                    // Nonce used in currentDisputeProofHanko
   currentDisputeProofBodyHash?: string;                // ProofBodyHash used in currentDisputeProofHanko
+  currentDisputeHash?: string;                         // Exact dispute hash signed in currentDisputeProofHanko
   counterpartyDisputeProofHanko?: HankoString;         // Their hanko on dispute proof (ready for disputes)
   counterpartyDisputeProofNonce?: number;               // Nonce used in counterpartyDisputeProofHanko
   counterpartyDisputeProofBodyHash?: string;           // ProofBodyHash that counterparty signed (MUST match dispute)
+  counterpartyDisputeHash?: string;                    // Exact dispute hash signed in counterpartyDisputeProofHanko
   counterpartySettlementHanko?: HankoString;           // Their hanko on settlement operations
   disputeProofNoncesByHash?: Record<string, number>;   // ProofBodyHash → nonce (local + counterparty)
   disputeProofBodiesByHash?: Record<string, any>;      // ProofBodyHash → ProofBodyStruct (for dispute finalize)
@@ -1566,8 +1583,8 @@ export interface EntityState {
   crontabState?: any; // CrontabState - avoid circular import
 
   // 📦 J-Batch system - accumulates operations for on-chain submission (typed in j-batch.ts)
-  jBatchState?: any; // JBatchState - avoid circular import
-  batchHistory?: any[]; // CompletedBatch[] - last 20 completed batch records
+  jBatchState?: JBatchState;
+  batchHistory?: CompletedBatch[]; // Last completed batch records for UI + replay diagnostics
 
 
   // 🔐 Cryptography - RSA-OAEP keys for HTLC envelope encryption
@@ -1831,10 +1848,10 @@ export interface Env {
       runtimeId: string;
       seenAt: number;
     }>;
-    directEntityInputDispatch?: ((targetRuntimeId: string, input: RoutedEntityInput) => boolean) | null;
+    directEntityInputDispatch?: ((targetRuntimeId: string, input: DeliverableEntityInput) => boolean) | null;
   };
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
-  gossip: any; // Gossip layer for network profiles
+  gossip: GossipLayer;
 
   // Isolated BrowserVM instance per runtime (prevents cross-runtime state leakage)
   browserVM?: any; // BrowserVMProvider instance for this runtime (DEPRECATED: use jAdapter)
@@ -1952,7 +1969,7 @@ export type JTx =
       type: 'batch'; // ALL J-operations go through batch (matches Depository.processBatch)
       entityId: string;
       data: {
-        batch: any; // JBatch structure from j-batch.ts
+        batch: JBatch;
         hankoSignature?: string; // Quorum hanko (attached post-commit by entity consensus)
         batchHash?: string; // Hash of encoded batch (for hanko signing)
         encodedBatch?: string; // ABI-encoded batch (for on-chain submission)

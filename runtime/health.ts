@@ -1,7 +1,7 @@
 // Health check endpoint
 // Returns status of all J-machines, hubs, and system health
 
-import type { Env } from './types.js';
+import type { EntityReplica, Env } from './types.js';
 import { getP2P } from './runtime.js';
 
 export interface HealthStatus {
@@ -27,6 +27,9 @@ export interface HubHealth {
   name: string;
   region?: string;
   relayUrl?: string;
+  runtimeId?: string;
+  online?: boolean;
+  activeClients?: string[];
   status: 'healthy' | 'degraded' | 'down';
   reserves?: Record<string, string>;
   accounts?: number;
@@ -42,9 +45,35 @@ export interface SystemHealth {
 
 const startTime = Date.now();
 
+const buildEntityReplicaIndex = (env: Env): Map<string, EntityReplica> => {
+  const replicas = new Map<string, EntityReplica>();
+  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    const fallbackEntityId = String(replicaKey).split(':')[0] || '';
+    const entityId = String(replica.entityId || fallbackEntityId).toLowerCase();
+    if (!entityId || replicas.has(entityId)) continue;
+    replicas.set(entityId, replica);
+  }
+  return replicas;
+};
+
+const serializeReserves = (reserves: ReadonlyMap<string | number, bigint>): Record<string, string> => {
+  const entries = Array.from(reserves.entries())
+    .map(([tokenId, amount]) => [String(tokenId), amount.toString()] as const)
+    .sort(([left], [right]) => {
+      const leftNum = Number(left);
+      const rightNum = Number(right);
+      if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
+        return leftNum - rightNum;
+      }
+      return left.localeCompare(right);
+    });
+  return Object.fromEntries(entries);
+};
+
 export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
   const jMachines: JMachineHealth[] = [];
   const hubs: HubHealth[] = [];
+  const replicasByEntityId = env ? buildEntityReplicaIndex(env) : new Map<string, EntityReplica>();
 
   // Check J-machines
   if (env?.jReplicas) {
@@ -89,12 +118,15 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
     const profiles = env.gossip.getProfiles();
     for (const profile of profiles) {
       if (profile.metadata?.isHub) {
+        const replica = replicasByEntityId.get(String(profile.entityId).toLowerCase());
         hubs.push({
           entityId: profile.entityId,
           name: profile.metadata.name || 'Unknown',
           region: profile.metadata.region,
           relayUrl: profile.metadata.relayUrl,
           status: 'healthy', // TODO: Add health check
+          reserves: replica?.state?.reserves?.size ? serializeReserves(replica.state.reserves) : undefined,
+          accounts: replica?.state?.accounts?.size,
         });
       }
     }
@@ -102,16 +134,16 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
 
   // Check entities with reserves (potential hubs)
   if (env?.eReplicas) {
-    for (const [entityId, replica] of env.eReplicas.entries()) {
+    for (const [entityId, replica] of replicasByEntityId.entries()) {
       const state = replica.state;
-      if (state?.reserves && Object.keys(state.reserves).length > 0) {
+      if (state?.reserves && state.reserves.size > 0) {
         // Only add if not already in hubs list
         if (!hubs.find(h => h.entityId === entityId)) {
           hubs.push({
-            entityId,
+            entityId: replica.entityId || entityId,
             name: entityId.slice(0, 10) + '...',
             status: 'healthy',
-            reserves: state.reserves,
+            reserves: serializeReserves(state.reserves),
             accounts: state.accounts?.size || 0,
           });
         }

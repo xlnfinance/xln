@@ -8,6 +8,10 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { ensureE2EBaseline } from './utils/e2e-baseline';
+import {
+  gotoApp as gotoSharedApp,
+  createRuntime as createSharedRuntime,
+} from './utils/e2e-demo-users';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const INIT_TIMEOUT = 30_000;
@@ -17,15 +21,11 @@ function randomMnemonic(): string {
 }
 
 async function gotoApp(page: Page): Promise<void> {
-  await page.goto(`${APP_BASE_URL}/app`);
-  const unlock = page.locator('button:has-text("Unlock")');
-  if (await unlock.isVisible({ timeout: 1500 }).catch(() => false)) {
-    await page.locator('input').first().fill('mml');
-    await unlock.click();
-    await page.waitForURL('**/app', { timeout: 10_000 });
-  }
-  await page.waitForFunction(() => !!(window as any).XLN, { timeout: INIT_TIMEOUT });
-  await page.waitForTimeout(500);
+  await gotoSharedApp(page, {
+    appBaseUrl: APP_BASE_URL,
+    initTimeoutMs: INIT_TIMEOUT,
+    settleMs: 500,
+  });
 }
 
 async function dismissOnboardingIfVisible(page: Page): Promise<void> {
@@ -41,25 +41,7 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
 }
 
 async function createDemoRuntime(page: Page, label: string, mnemonic: string): Promise<void> {
-  const result = await page.evaluate(async ({ label, mnemonic }) => {
-    try {
-      const vaultOperations = (window as any).vaultOperations;
-      if (!vaultOperations) return { ok: false, error: 'window.vaultOperations missing' };
-      await vaultOperations.createRuntime(label, mnemonic, {
-        loginType: 'demo',
-        requiresOnboarding: false,
-      });
-      return { ok: true };
-    } catch (error: any) {
-      return { ok: false, error: error?.message || String(error) };
-    }
-  }, { label, mnemonic });
-
-  expect(result.ok, `createRuntime failed: ${result.error || 'unknown'}`).toBe(true);
-  await page.waitForFunction(() => {
-    const env = (window as any).isolatedEnv;
-    return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
-  }, { timeout: 20_000 });
+  await createSharedRuntime(page, label, mnemonic);
 }
 
 async function ensureAnyHubAccountOpen(page: Page): Promise<{

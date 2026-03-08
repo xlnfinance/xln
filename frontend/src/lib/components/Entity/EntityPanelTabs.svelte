@@ -62,6 +62,11 @@
   export let hideHeader: boolean = false;
   export let showJurisdiction: boolean = true;
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
+  export let replicasOverride: Map<string, EntityReplica> | null = null;
+  export let envOverride: Env | EnvSnapshot | null = null;
+  export let historyOverride: EnvSnapshot[] | null = null;
+  export let timeIndexOverride: number | null = null;
+  export let isLiveOverride: boolean | null = null;
 
   // Tab types
   type ViewTab = 'external' | 'reserves' | 'accounts' | 'more' | 'settings';
@@ -133,6 +138,118 @@
       ? runtimeRelay
       : settingsRelay;
     return resolveApiBaseFromRelay(relayUrl);
+  }
+
+  function getUrlHashRoute(): string | null {
+    if (typeof window === 'undefined') return null;
+    const hashRaw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    if (!hashRaw) return null;
+    const queryIndex = hashRaw.indexOf('?');
+    const routePart = queryIndex >= 0 ? hashRaw.slice(0, queryIndex) : hashRaw;
+    if (!routePart || routePart.includes('=')) return null;
+    return routePart.trim().toLowerCase() || null;
+  }
+
+  function getUrlHashParams(): URLSearchParams | null {
+    if (typeof window === 'undefined') return null;
+    const hashRaw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    if (!hashRaw) return null;
+    const queryIndex = hashRaw.indexOf('?');
+    if (queryIndex >= 0) {
+      const routePart = hashRaw.slice(0, queryIndex);
+      if (!routePart.includes('=')) {
+        return new URLSearchParams(hashRaw.slice(queryIndex + 1));
+      }
+    }
+    return hashRaw.includes('=') ? new URLSearchParams(hashRaw) : null;
+  }
+
+  function getUrlParamValue(keys: string[]): string | null {
+    if (typeof window === 'undefined') return null;
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = getUrlHashParams();
+    for (const key of keys) {
+      const hashValue = hashParams?.get(key);
+      if (typeof hashValue === 'string' && hashValue.length > 0) return hashValue;
+      const queryValue = searchParams.get(key);
+      if (typeof queryValue === 'string' && queryValue.length > 0) return queryValue;
+    }
+    return null;
+  }
+
+  function applyDeepLinkViewFromUrl(): void {
+    if (typeof window === 'undefined') return;
+
+    const view = String(getUrlParamValue(['view']) || getUrlHashRoute() || '').trim().toLowerCase();
+    const subview = String(getUrlParamValue(['subview', 'sub']) || '').trim().toLowerCase();
+    const jurisdiction = String(getUrlParamValue(['jId', 'jurisdiction', 'j']) || '').trim();
+
+    switch (view) {
+      case 'external':
+      case 'reserves':
+      case 'accounts':
+      case 'more':
+      case 'settings':
+        activeTab = view;
+        break;
+      case 'pay':
+      case 'send':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'send';
+        break;
+      case 'swap':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'swap';
+        break;
+      case 'open':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'open';
+        break;
+      case 'activity':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'activity';
+        break;
+      case 'settle':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'settle';
+        break;
+      case 'configure':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'configure';
+        break;
+      case 'consensus':
+      case 'chat':
+      case 'contacts':
+      case 'create':
+      case 'gossip':
+      case 'governance':
+        activeTab = 'more';
+        moreTab = view as MoreTab;
+        break;
+      default:
+        break;
+    }
+
+    if (view === 'more' && subview) {
+      const nextMoreTab = ['consensus', 'chat', 'contacts', 'create', 'gossip', 'governance'].includes(subview)
+        ? subview as MoreTab
+        : null;
+      if (nextMoreTab) moreTab = nextMoreTab;
+    }
+
+    if (view === 'configure' && subview) {
+      const nextConfigureTab = ['credit', 'collateral', 'token'].includes(subview)
+        ? subview as ConfigureWorkspaceTab
+        : null;
+      if (nextConfigureTab) configureWorkspaceTab = nextConfigureTab;
+    }
+
+    if (jurisdiction) {
+      const matched = availableJurisdictions.find((candidate) =>
+        String(candidate?.name || '').trim().toLowerCase() === jurisdiction.toLowerCase(),
+      );
+      selectedJurisdictionName = matched?.name ?? jurisdiction;
+    }
   }
 
   $: apiBase = resolveApiBaseFromRelay($settings?.relayUrl);
@@ -305,12 +422,12 @@
     return `${addr.slice(0, 10)}...${addr.slice(-6)}`;
   }
 
-  $: activeReplicas = $visibleReplicas;
+  $: activeReplicas = replicasOverride || $visibleReplicas;
   $: activeXlnFunctions = $xlnFunctions;
-  $: activeHistory = $history;
-  $: activeTimeIndex = $currentTimeIndex;
-  $: activeEnv = $xlnEnvironment;
-  $: activeIsLive = $isLive;
+  $: activeHistory = historyOverride ?? $history;
+  $: activeTimeIndex = timeIndexOverride ?? $currentTimeIndex;
+  $: activeEnv = envOverride || $xlnEnvironment;
+  $: activeIsLive = isLiveOverride ?? $isLive;
 
   function resolveEntitySigner(entityId: string, reason: string): string {
     const env = activeEnv;
@@ -1108,6 +1225,15 @@
 
     // Fetch reserves and external tokens on mount
     refreshBalances();
+    applyDeepLinkViewFromUrl();
+
+    const handleUrlNavigation = () => applyDeepLinkViewFromUrl();
+    window.addEventListener('hashchange', handleUrlNavigation);
+    window.addEventListener('popstate', handleUrlNavigation);
+    return () => {
+      window.removeEventListener('hashchange', handleUrlNavigation);
+      window.removeEventListener('popstate', handleUrlNavigation);
+    };
   });
 
   $: if (activeTab === 'more' && moreTab === 'governance') {

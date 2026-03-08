@@ -257,6 +257,196 @@ export const entityPositions = writable<Map<string, RelativeEntityPosition>>(new
 // Track if XLN is already initialized to prevent data loss
 let isInitialized = false;
 
+type BootstrapJurisdictionConfig = {
+  chainId: number;
+  rpc: string;
+  contracts: {
+    depository: string;
+    entityProvider: string;
+    account?: string;
+    deltaTransformer?: string;
+  };
+};
+
+const normalizeAddress = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+const waitForCondition = async (
+  check: () => boolean,
+  label: string,
+  timeoutMs = 30_000,
+  intervalMs = 100,
+): Promise<void> => {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`[xlnStore] Timeout waiting for condition: ${label}`);
+};
+
+const resolveConfiguredApiBase = (baseOrigin: string): string => {
+  if (typeof window === 'undefined') return baseOrigin;
+  const fromWindow = (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__;
+  if (typeof fromWindow === 'string' && fromWindow.trim().length > 0) return fromWindow.trim();
+  try {
+    const fromStorage = localStorage.getItem('xln-api-base-url');
+    if (typeof fromStorage === 'string' && fromStorage.trim().length > 0) return fromStorage.trim();
+  } catch {
+    // ignore storage errors
+  }
+  return baseOrigin;
+};
+
+const waitForServerRuntimeReady = async (baseOrigin: string, timeoutMs = 30_000): Promise<void> => {
+  const url = new URL('/api/health', resolveConfiguredApiBase(baseOrigin)).toString();
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        if (payload?.reset?.inProgress !== true && payload?.system?.runtime === true) return;
+      }
+    } catch {
+      // Retry until timeout.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error('[xlnStore] SERVER_RUNTIME_NOT_READY');
+};
+
+const fetchBootstrapJurisdictionConfig = async (baseOrigin: string): Promise<BootstrapJurisdictionConfig> => {
+  const apiBase = resolveConfiguredApiBase(baseOrigin);
+  const candidates = apiBase !== baseOrigin
+    ? Array.from(new Set([
+        new URL('/api/jurisdictions', apiBase).toString(),
+        new URL('/api/jurisdictions', baseOrigin).toString(),
+      ]))
+    : [
+        new URL('/api/jurisdictions', apiBase).toString(),
+        new URL('/jurisdictions.json', baseOrigin).toString(),
+      ];
+
+  let lastError: Error | null = null;
+  for (const url of candidates) {
+    try {
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) {
+        lastError = new Error(`[xlnStore] Failed to fetch jurisdiction config: HTTP ${response.status} url=${url}`);
+        continue;
+      }
+      const payload = await response.json();
+      const first = payload?.jurisdictions?.arrakis ?? Object.values(payload?.jurisdictions ?? {})[0];
+      if (!first || typeof first !== 'object') {
+        lastError = new Error(`[xlnStore] jurisdictions payload missing primary jurisdiction: url=${url}`);
+        continue;
+      }
+      return first as BootstrapJurisdictionConfig;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+  throw lastError ?? new Error('[xlnStore] jurisdictions.json missing primary jurisdiction');
+};
+
+const resolveBootstrapRpcUrl = (rpc: string, baseOrigin: string): string => {
+  if (rpc.startsWith('/rpc/')) return new URL('/rpc', baseOrigin).toString();
+  if (rpc.startsWith('http')) {
+    try {
+      const parsed = new URL(rpc);
+      if (parsed.pathname.startsWith('/rpc/')) return `${parsed.origin}/rpc`;
+      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '0.0.0.0') {
+        return new URL('/rpc', baseOrigin).toString();
+      }
+    } catch {
+      // Fall through.
+    }
+  }
+  return rpc.startsWith('http') ? rpc : new URL(rpc, baseOrigin).toString();
+};
+
+const hasLiveJurisdictionAdapter = (replica: unknown): boolean => {
+  const candidate = replica as {
+    jadapter?: {
+      addresses?: { depository?: string; entityProvider?: string };
+      depository?: unknown;
+      entityProvider?: unknown;
+    };
+  } | null;
+  return Boolean(
+    candidate?.jadapter?.addresses?.depository &&
+      candidate?.jadapter?.addresses?.entityProvider &&
+      candidate?.jadapter?.depository &&
+      candidate?.jadapter?.entityProvider,
+  );
+};
+
+const ensureBootstrapJurisdictionFresh = async (xln: XLNModule, env: Env): Promise<void> => {
+  if (typeof window === 'undefined') return;
+  const baseOrigin = window.location.origin;
+  await waitForServerRuntimeReady(baseOrigin);
+  const config = await fetchBootstrapJurisdictionConfig(baseOrigin);
+  const rpcUrl = resolveBootstrapRpcUrl(config.rpc, baseOrigin);
+  const jurisdictionName = String(env.activeJurisdiction || 'Testnet');
+  const currentReplica = env.jReplicas?.get(jurisdictionName);
+  const currentDepository = normalizeAddress(currentReplica?.depositoryAddress || currentReplica?.contracts?.depository);
+  const currentEntityProvider = normalizeAddress(currentReplica?.entityProviderAddress || currentReplica?.contracts?.entityProvider);
+  const targetDepository = normalizeAddress(config.contracts.depository);
+  const targetEntityProvider = normalizeAddress(config.contracts.entityProvider);
+  const currentRpc = String(currentReplica?.rpcs?.[0] || '');
+
+  const needsRepair =
+    !currentReplica ||
+    !hasLiveJurisdictionAdapter(currentReplica) ||
+    currentDepository !== targetDepository ||
+    currentEntityProvider !== targetEntityProvider ||
+    currentRpc !== rpcUrl;
+
+  if (!needsRepair) return;
+
+  console.warn(
+    `[xlnStore] Repairing bootstrap jurisdiction ${jurisdictionName}: ` +
+      `dep=${currentDepository || 'none'}=>${targetDepository} ` +
+      `ep=${currentEntityProvider || 'none'}=>${targetEntityProvider}`,
+  );
+
+  xln.enqueueRuntimeInput(env, {
+    runtimeTxs: [{
+      type: 'importJ',
+      data: {
+        name: jurisdictionName,
+        chainId: Number(config.chainId),
+        ticker: 'USDC',
+        rpcs: [rpcUrl],
+        contracts: config.contracts,
+      },
+    }],
+    entityInputs: [],
+  });
+
+  await waitForCondition(() => {
+    const repaired = env.jReplicas?.get?.(jurisdictionName) as
+      | {
+          depositoryAddress?: string;
+          entityProviderAddress?: string;
+          contracts?: { depository?: string; entityProvider?: string };
+          jadapter?: {
+            addresses?: { depository?: string; entityProvider?: string };
+            depository?: unknown;
+            entityProvider?: unknown;
+          };
+        }
+      | undefined;
+    const repairedDepository = normalizeAddress(repaired?.depositoryAddress || repaired?.contracts?.depository);
+    const repairedEntityProvider = normalizeAddress(repaired?.entityProviderAddress || repaired?.contracts?.entityProvider);
+    return (
+      repairedDepository === targetDepository &&
+      repairedEntityProvider === targetEntityProvider &&
+      hasLiveJurisdictionAdapter(repaired)
+    );
+  }, `repairJurisdiction:${jurisdictionName}`, 45_000);
+};
+
 // Helper functions for common patterns (not wrappers)
 export async function initializeXLN(): Promise<Env> {
   // CRITICAL: Don't re-initialize if we already have data
@@ -335,6 +525,7 @@ export async function initializeXLN(): Promise<Env> {
 
     // Load from IndexedDB - main() handles DB timeout internally
     const env = await xln.main();
+    await ensureBootstrapJurisdictionFresh(xln, env);
 
     // Register callback for THIS env instance (runtime API is env-scoped)
     if (unregisterEnvChange) {
@@ -416,6 +607,16 @@ export function getEnv(): Env | null {
 // Enqueue entity inputs into runtime mempool (processed on next tick)
 export async function enqueueEntityInputs(env: Env, inputs: RoutedEntityInput[] = []): Promise<Env> {
   const xln = await getXLN();
+  const interesting = inputs
+    .map((input) => ({
+      entityId: String(input?.entityId || ''),
+      signerId: String(input?.signerId || ''),
+      txTypes: Array.isArray(input?.entityTxs) ? input.entityTxs.map((tx) => String(tx?.type || '')) : [],
+    }))
+    .filter((entry) => entry.txTypes.some((type) => type.startsWith('j_') || type.startsWith('dispute')));
+  if (interesting.length > 0) {
+    console.error(`[xlnStore.enqueueEntityInputs] ${JSON.stringify(interesting)}`);
+  }
   xln.enqueueRuntimeInput(env, {
     runtimeTxs: [],
     entityInputs: inputs,

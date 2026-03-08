@@ -29,6 +29,7 @@ import { buildEntityProfile, mergeProfileWithExisting } from './gossip-helper';
 import { extractEntityId } from '../ids';
 import { getCachedSignerPrivateKey, getCachedSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
 import { signProfile, verifyProfileSignature } from './profile-signing';
+import { inspectHankoForHash } from '../hanko-signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './runtime-id';
@@ -69,6 +70,8 @@ type RuntimeP2POptions = {
 type GossipResponsePayload = {
   profiles: Profile[];
 };
+
+type GossipRefreshMode = 'incremental' | 'full';
 
 const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -125,7 +128,6 @@ const sanitizeIncomingProfile = (profile: Profile): Profile | null => {
     capabilities,
     metadata: {
       ...metadata,
-      runtimeId: normalizedRuntimeId,
       name: normalizedName,
       ...(normalizedCryptoKey ? { cryptoPublicKey: normalizedCryptoKey } : {}),
       ...(normalizedEncryptionKey ? { encryptionPublicKey: normalizedEncryptionKey } : {}),
@@ -295,7 +297,7 @@ export class RuntimeP2P {
         onOpen: () => {
           this.flushPending();
           // ALWAYS request gossip on connect (even if periodic polling is disabled)
-          this.requestSeedGossip();
+          this.requestSeedGossip('full');
           this.announceLocalProfiles();
         },
         onEntityInput: async (from, input) => {
@@ -371,9 +373,9 @@ export class RuntimeP2P {
     }
     console.log(`[P2P] startPolling: Starting polling every ${this.gossipPollMs}ms`);
     // Request immediately, then periodically
-    setTimeout(() => this.requestSeedGossip(), 100);
+    setTimeout(() => this.requestSeedGossip('incremental'), 100);
     this.pollInterval = setInterval(() => {
-      this.requestSeedGossip();
+      this.requestSeedGossip('incremental');
     }, this.gossipPollMs);
   }
 
@@ -399,7 +401,7 @@ export class RuntimeP2P {
         this.reconnect();
         return;
       }
-      this.requestSeedGossip();
+      this.requestSeedGossip('incremental');
       this.flushPending();
     };
     document.addEventListener('visibilitychange', this.visibilityHandler);
@@ -591,15 +593,16 @@ export class RuntimeP2P {
     }
   }
 
-  private requestSeedGossip() {
+  private requestSeedGossip(mode: GossipRefreshMode = 'incremental') {
     const client = this.getActiveClient();
     if (!client) return;
-    const updatedSince = this.getLatestKnownRemoteProfileTimestamp();
-    client.sendGossipRequest(this.runtimeId, {
+    const updatedSince = mode === 'incremental' ? this.getLatestKnownRemoteProfileTimestamp() : 0;
+    const request: GossipProfileBatchRequest = {
       set: 'default',
       limit: DEFAULT_GOSSIP_BATCH_LIMIT,
       ...(updatedSince > 0 ? { updatedSince } : {}),
-    } satisfies GossipProfileBatchRequest);
+    };
+    client.sendGossipRequest(this.runtimeId, request);
   }
 
   private ensureRelayConnectionsForEntity(entityId: string): void {
@@ -610,7 +613,7 @@ export class RuntimeP2P {
 
   // Call this to refresh profiles from relay
   refreshGossip() {
-    this.requestSeedGossip();
+    this.requestSeedGossip('full');
   }
 
   async ensureProfiles(entityIds: string[]): Promise<boolean> {
@@ -654,7 +657,7 @@ export class RuntimeP2P {
   // Fetch profiles from relay with bounded retry for cold or stale caches.
   private async fetchProfilesWithRetry(missingEntityIds: string[] = []): Promise<boolean> {
     if (missingEntityIds.length === 0) {
-      this.requestSeedGossip();
+      this.requestSeedGossip('full');
       return true;
     }
     if (!this.getActiveClient()) {
@@ -673,7 +676,7 @@ export class RuntimeP2P {
           ids: missingEntityIds,
         } satisfies GossipProfileBatchRequest);
       } else {
-        this.requestSeedGossip();
+        this.requestSeedGossip('full');
       }
       await new Promise(resolve => setTimeout(resolve, waitMs));
       const profiles = this.env.gossip?.getProfiles?.() || [];
@@ -902,6 +905,23 @@ export class RuntimeP2P {
           const boardValidators = board && typeof board === 'object' && 'validators' in board ? board.validators : undefined;
           const hasBoardKey = Array.isArray(boardValidators) && boardValidators.some(v => typeof v?.publicKey === 'string');
           const hasEntityKey = typeof profile.metadata?.entityPublicKey === 'string';
+          let hankoInspect:
+            | {
+                recoveredAddresses: string[];
+                reconstructedBoardHash?: string;
+              }
+            | undefined;
+          try {
+            const details = await inspectHankoForHash(String(hasHanko), String(result.hash || '0x'));
+            hankoInspect = {
+              recoveredAddresses: details.recoveredAddresses,
+              reconstructedBoardHash: details.claims[0]?.reconstructedBoardHash,
+            };
+          } catch (error) {
+            hankoInspect = {
+              recoveredAddresses: [`inspect_failed:${(error as Error).message}`],
+            };
+          }
           console.error(
             `P2P_PROFILE_INVALID_SIGNATURE: ${profile.entityId.slice(-4)} from=${from.slice(-6)}`,
             {
@@ -912,6 +932,11 @@ export class RuntimeP2P {
               entityPublicKey: hasEntityKey ? (profile.metadata?.entityPublicKey as string).slice(0, 20) + '...' : 'none',
               boardPublicKey: hasBoardKey ? 'yes' : 'no',
               validators: Array.isArray(boardValidators) ? boardValidators.length : 0,
+              boardSigners: Array.isArray(boardValidators)
+                ? boardValidators.map(v => String(v?.signerId || v?.signer || '')).filter(Boolean)
+                : [],
+              recoveredAddresses: hankoInspect?.recoveredAddresses ?? [],
+              reconstructedBoardHash: hankoInspect?.reconstructedBoardHash,
               runtimeId: sanitized.runtimeId,
               name: sanitized.metadata?.name,
             }

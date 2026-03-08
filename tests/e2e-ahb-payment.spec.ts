@@ -13,7 +13,11 @@ import { ethers } from 'ethers';
 import { resetProdServer } from './utils/e2e-baseline';
 import { getRenderedPrimaryOutbound, waitForRenderedPrimaryOutboundDelta } from './utils/e2e-account-ui';
 import { connectHub as connectActiveRuntimeToHub } from './utils/e2e-connect';
-import { createDemoUsers, switchToRuntime } from './utils/e2e-demo-users';
+import {
+  createDemoUsers,
+  gotoApp as gotoSharedApp,
+  switchToRuntime,
+} from './utils/e2e-demo-users';
 import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
 
 const INIT_TIMEOUT = 30_000;
@@ -74,17 +78,11 @@ async function getActiveApiBase(page: Page): Promise<string> {
 
 /** Navigate to /app. Auto-unlock if redirect occurs. */
 async function gotoApp(page: Page) {
-  await page.goto(`${APP_BASE_URL}/app`);
-  // Handle unlock redirect
-  const unlock = page.locator('button:has-text("Unlock")');
-  if (await unlock.isVisible({ timeout: 2000 }).catch(() => false)) {
-    const input = page.locator('input').first();
-    await input.fill('mml');
-    await unlock.click();
-    await page.waitForURL('**/app', { timeout: 10_000 });
-  }
-  // Wait for XLN module to load
-  await page.waitForFunction(() => (window as any).XLN, { timeout: INIT_TIMEOUT });
+  await gotoSharedApp(page, {
+    appBaseUrl: APP_BASE_URL,
+    initTimeoutMs: INIT_TIMEOUT,
+    settleMs: 0,
+  });
   await dismissOnboardingIfVisible(page);
   await page.waitForTimeout(2000);
 }

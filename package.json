@@ -9,6 +9,8 @@
     "relay": "bun runtime/networking/ws-server.ts --port 9000",
     "build": "./scripts/build-runtime.sh",
     "start": "bun runtime/server.ts --port 8080",
+    "daemon:control": "bun runtime/scripts/daemon-control.ts",
+    "custody": "bun custody/server.ts",
     "dev:ci": "./dev-ci.sh",
     "serve": "bun run serve.ts",
     "serve:dev": "./scripts/build-runtime.sh && bun run serve.ts",

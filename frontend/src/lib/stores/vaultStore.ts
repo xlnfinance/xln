@@ -376,11 +376,29 @@ const assertAnvilChain = (chainId: number, rpcUrl: string, context: string): voi
 
 const fetchJurisdictions = async (baseOrigin?: string): Promise<any> => {
   const primaryOrigin = baseOrigin ?? (typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance');
+  const configuredApiBase =
+    typeof window !== 'undefined'
+      ? (() => {
+          const fromWindow = (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__;
+          if (typeof fromWindow === 'string' && fromWindow.trim().length > 0) return fromWindow.trim();
+          try {
+            const fromStorage = localStorage.getItem('xln-api-base-url');
+            return typeof fromStorage === 'string' && fromStorage.trim().length > 0 ? fromStorage.trim() : null;
+          } catch {
+            return null;
+          }
+        })()
+      : null;
   const bust = `ts=${Date.now()}`;
-  const candidates = [
-    `${primaryOrigin}/api/jurisdictions?${bust}`,
-    `${primaryOrigin}/jurisdictions.json?${bust}`,
-  ];
+  const candidates = configuredApiBase
+    ? Array.from(new Set([
+        `${configuredApiBase}/api/jurisdictions?${bust}`,
+        `${primaryOrigin}/api/jurisdictions?${bust}`,
+      ]))
+    : [
+        `${primaryOrigin}/api/jurisdictions?${bust}`,
+        `${primaryOrigin}/jurisdictions.json?${bust}`,
+      ];
 
   let lastError: unknown = null;
   for (const url of candidates) {

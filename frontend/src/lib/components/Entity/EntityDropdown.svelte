@@ -15,6 +15,8 @@
   export let selectedJurisdiction: string | null = null;
   export let allowAdd: boolean = false;
   export let allowAddJurisdiction: boolean = false;
+  export let replicasOverride: Map<string, EntityReplica> | null = null;
+  export let envOverride: { jReplicas?: unknown } | null = null;
 
   const dispatch = createEventDispatcher();
 
@@ -22,9 +24,9 @@
   let searchTerm = '';
 
   $: xlnReady = !!$xlnInstance;
-  $: activeReplicas = $visibleReplicas || $replicas;
+  $: activeReplicas = replicasOverride || $visibleReplicas || $replicas;
   $: activeXlnFunctions = xlnReady ? $xlnFunctions : null;
-  $: activeEnv = $xlnEnvironment;
+  $: activeEnv = envOverride || $xlnEnvironment;
 
   // Build tree structure reactively (grouped by signer, not entity)
   interface SignerNode {
@@ -76,7 +78,7 @@
     } | null,
     search: string,
   ): SignerNode[] {
-    if (!replicas || !xlnFuncs) return [];
+    if (!replicas) return [];
 
     const signerGroups = new Map<string, EntityReplica[]>();
 
@@ -143,7 +145,7 @@
     replicas: Map<string, EntityReplica> | null | undefined,
     xlnFuncs: { formatEntityId?: (id: string) => string } | null,
   ): string {
-    if (!tab.entityId || !xlnFuncs || !replicas) return 'Select Entity';
+    if (!tab.entityId || !replicas) return 'Select Entity';
 
     const replicaKey = `${tab.entityId}:${tab.signerId}`;
     const replica = replicas.get(replicaKey);

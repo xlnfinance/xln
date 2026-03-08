@@ -192,13 +192,6 @@
   $: disputeBlocksLeft = hasActiveDispute
     ? Math.max(0, disputeTimeoutBlock - Number(account.lastFinalizedJHeight || 0))
     : 0;
-  $: canFaucet =
-    !isPending &&
-    hasCommittedFrame &&
-    agg.inTotal > 0n &&
-    !hasActiveDispute &&
-    !isFinalizedDisputed;
-
   function toBigIntSafe(value: unknown): bigint | null {
     if (typeof value === 'bigint') return value;
     if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return BigInt(value);
@@ -267,7 +260,6 @@
 
   function handleFaucet(e: MouseEvent) {
     e.stopPropagation();
-    if (!canFaucet) return;
     dispatch('faucet', { counterpartyId, tokenId: agg.primaryTokenId });
   }
 
@@ -320,8 +312,7 @@
       <button
         class="btn-faucet status-pill"
         on:click={handleFaucet}
-        disabled={!canFaucet}
-        title={canFaucet ? 'Request offchain faucet payment' : 'Account not ready for faucet yet'}
+        title="Request offchain faucet payment"
       >
         Faucet
       </button>

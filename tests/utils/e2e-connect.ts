@@ -76,6 +76,51 @@ async function isAccountReady(page: Page, entityId: string, hubId: string, timeo
   );
 }
 
+type AccountOpenStatus = {
+  exists: boolean;
+  hasDelta: boolean;
+  pendingHeight: number | null;
+  currentHeight: number;
+};
+
+async function getAccountOpenStatus(page: Page, entityId: string, hubId: string): Promise<AccountOpenStatus> {
+  return page.evaluate(
+    ({ entityId, hubId }) => {
+      const env = (window as typeof window & {
+        isolatedEnv?: {
+          eReplicas?: Map<string, {
+            state?: {
+              accounts?: Map<string, {
+                deltas?: Map<number, unknown>;
+                pendingFrame?: { height?: number };
+                currentHeight?: number;
+              }>;
+            };
+          }>;
+        };
+      }).isolatedEnv;
+      if (!env?.eReplicas) {
+        return { exists: false, hasDelta: false, pendingHeight: null, currentHeight: 0 };
+      }
+
+      for (const [replicaKey, replica] of env.eReplicas.entries()) {
+        if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
+        const account = replica.state?.accounts?.get(hubId);
+        if (!account) continue;
+        return {
+          exists: true,
+          hasDelta: Boolean(account.deltas?.get?.(1)),
+          pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
+          currentHeight: Number(account.currentHeight || 0),
+        };
+      }
+
+      return { exists: false, hasDelta: false, pendingHeight: null, currentHeight: 0 };
+    },
+    { entityId, hubId },
+  );
+}
+
 export async function connectRuntimeToHub(
   page: Page,
   identity: { entityId: string; signerId: string },
@@ -84,107 +129,115 @@ export async function connectRuntimeToHub(
   if (await isAccountReady(page, identity!.entityId, hubId)) {
     return;
   }
+  const initialStatus = await getAccountOpenStatus(page, identity.entityId, hubId);
 
-  const openResult = await page.evaluate(
-    async ({ entityId, signerId, hubId, creditAmount, tokenId }) => {
-      const maybeWindow = window as typeof window & {
-        XLN?: {
-          enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
-        };
-        isolatedEnv?: {
-          eReplicas?: Map<string, {
-            state?: {
-              accounts?: Map<string, {
-                deltas?: Map<number, unknown>;
-                pendingFrame?: unknown;
-                currentHeight?: number;
-              }>;
-            };
-          }>;
-          gossip?: {
-            getProfiles?: () => Array<{ entityId: string; runtimeId?: string; metadata?: { runtimeId?: string } }>;
+  if (!initialStatus.exists) {
+    const openResult = await page.evaluate(
+      async ({ entityId, signerId, hubId, creditAmount, tokenId }) => {
+        const maybeWindow = window as typeof window & {
+          XLN?: {
+            enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
           };
-          runtimeState?: {
-            p2p?: {
-              refreshGossip?: () => Promise<void> | void;
-              ensureProfiles?: (ids: string[]) => Promise<boolean>;
+          isolatedEnv?: {
+            eReplicas?: Map<string, {
+              state?: {
+                accounts?: Map<string, {
+                  deltas?: Map<number, unknown>;
+                  pendingFrame?: unknown;
+                  currentHeight?: number;
+                }>;
+              };
+            }>;
+            gossip?: {
+              getProfiles?: () => Array<{ entityId: string; runtimeId?: string; metadata?: { runtimeId?: string } }>;
+            };
+            runtimeState?: {
+              p2p?: {
+                refreshGossip?: () => Promise<void> | void;
+                ensureProfiles?: (ids: string[]) => Promise<boolean>;
+              };
             };
           };
         };
-      };
 
-      const env = maybeWindow.isolatedEnv;
-      const xln = maybeWindow.XLN;
-      const p2p = env?.runtimeState?.p2p;
-      if (!env || !xln?.enqueueRuntimeInput || !env.eReplicas) {
-        return { ok: false, error: 'runtime env missing' };
-      }
+        const env = maybeWindow.isolatedEnv;
+        const xln = maybeWindow.XLN;
+        const p2p = env?.runtimeState?.p2p;
+        if (!env || !xln?.enqueueRuntimeInput || !env.eReplicas) {
+          return { ok: false, error: 'runtime env missing' };
+        }
 
-      let hubRuntimeId: string | null = null;
-      const lookupStartedAt = Date.now();
-      while (Date.now() - lookupStartedAt < 12_000) {
-        const profiles = env.gossip?.getProfiles?.() ?? [];
-        const hubProfile = profiles.find((profile) =>
-          String(profile.entityId || '').toLowerCase() === String(hubId).toLowerCase(),
-        );
-        const candidateRuntimeId = hubProfile?.runtimeId ?? hubProfile?.metadata?.runtimeId ?? null;
-        if (typeof candidateRuntimeId === 'string' && candidateRuntimeId.length > 0) {
-          hubRuntimeId = candidateRuntimeId;
-          break;
+        let hubRuntimeId: string | null = null;
+        const lookupStartedAt = Date.now();
+        while (Date.now() - lookupStartedAt < 12_000) {
+          const profiles = env.gossip?.getProfiles?.() ?? [];
+          const hubProfile = profiles.find((profile) =>
+            String(profile.entityId || '').toLowerCase() === String(hubId).toLowerCase(),
+          );
+          const candidateRuntimeId = hubProfile?.runtimeId ?? hubProfile?.metadata?.runtimeId ?? null;
+          if (typeof candidateRuntimeId === 'string' && candidateRuntimeId.length > 0) {
+            hubRuntimeId = candidateRuntimeId;
+            break;
+          }
+          if (typeof p2p?.ensureProfiles === 'function') {
+            try { await p2p.ensureProfiles([hubId]); } catch {}
+          }
+          if (typeof p2p?.refreshGossip === 'function') {
+            try { await p2p.refreshGossip(); } catch {}
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
-        if (typeof p2p?.ensureProfiles === 'function') {
-          try { await p2p.ensureProfiles([hubId]); } catch {}
+        if (!hubRuntimeId) {
+          return { ok: false, error: 'hub runtimeId unresolved in gossip' };
         }
-        if (typeof p2p?.refreshGossip === 'function') {
-          try { await p2p.refreshGossip(); } catch {}
-        }
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-      if (!hubRuntimeId) {
-        return { ok: false, error: 'hub runtimeId unresolved in gossip' };
-      }
 
-      let liveSignerId = signerId;
-      for (const replicaKey of env.eReplicas.keys()) {
-        const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
-        if (String(replicaEntityId).toLowerCase() === String(entityId).toLowerCase() && replicaSignerId) {
-          liveSignerId = replicaSignerId;
-          break;
+        let liveSignerId = signerId;
+        for (const replicaKey of env.eReplicas.keys()) {
+          const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
+          if (String(replicaEntityId).toLowerCase() === String(entityId).toLowerCase() && replicaSignerId) {
+            liveSignerId = replicaSignerId;
+            break;
+          }
         }
-      }
 
-      xln.enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [{
-          entityId,
-          signerId: liveSignerId,
-          entityTxs: [{
-            type: 'openAccount',
-            data: {
-              targetEntityId: hubId,
-              creditAmount: BigInt(creditAmount),
-              tokenId,
-            },
+        xln.enqueueRuntimeInput(env, {
+          runtimeTxs: [],
+          entityInputs: [{
+            entityId,
+            signerId: liveSignerId,
+            entityTxs: [{
+              type: 'openAccount',
+              data: {
+                targetEntityId: hubId,
+                creditAmount: BigInt(creditAmount),
+                tokenId,
+              },
+            }],
           }],
-        }],
-      });
+        });
 
-      return { ok: true };
-    },
-    {
-      entityId: identity!.entityId,
-      signerId: identity!.signerId,
-      hubId,
-      creditAmount: DEFAULT_CREDIT_AMOUNT.toString(),
-      tokenId: DEFAULT_TOKEN_ID,
-    },
-  );
+        return { ok: true };
+      },
+      {
+        entityId: identity.entityId,
+        signerId: identity.signerId,
+        hubId,
+        creditAmount: DEFAULT_CREDIT_AMOUNT.toString(),
+        tokenId: DEFAULT_TOKEN_ID,
+      },
+    );
 
-  expect(openResult?.ok, `connectHub failed: ${openResult?.error ?? 'unknown'}`).toBe(true);
+    expect(openResult?.ok, `connectHub failed: ${openResult?.error ?? 'unknown'}`).toBe(true);
+  }
 
-  const opened = await isAccountReady(page, identity!.entityId, hubId, DEFAULT_OPEN_TIMEOUT_MS);
+  const opened = await isAccountReady(page, identity.entityId, hubId, DEFAULT_OPEN_TIMEOUT_MS);
+  const finalStatus = await getAccountOpenStatus(page, identity.entityId, hubId);
 
-  expect(opened, `account open must converge for ${hubId.slice(0, 10)}`).toBe(true);
+  expect(
+    opened,
+    `account open must converge for ${hubId.slice(0, 10)} ` +
+      `(exists=${finalStatus.exists} hasDelta=${finalStatus.hasDelta} height=${finalStatus.currentHeight} pending=${finalStatus.pendingHeight})`,
+  ).toBe(true);
 }
 
 export async function connectHub(page: Page, hubId: string): Promise<void> {

@@ -583,6 +583,8 @@
           tab={entityTab}
           jurisdictionFilter={selectedJurisdictionName}
           selectedJurisdiction={selectedJurisdictionName}
+          replicasOverride={currentFrame?.eReplicas instanceof Map ? currentFrame.eReplicas : null}
+          envOverride={currentFrame}
           on:signerSelect={handleSignerSelect}
           on:addSigner={handleAddSigner}
           on:entitySelect={handleEntitySelect}
@@ -598,6 +600,7 @@
           <AccountDropdown
             replica={selectedReplica}
             {selectedAccountId}
+            envOverride={currentFrame}
             on:accountSelect={handleAccountSelect}
             allowAdd={true}
             on:addAccount={handleAddAccount}
@@ -658,7 +661,16 @@
           counterpartyId={selectedAccountId}
         />
       {:else}
-        <EntityPanelTabs tab={entityTab} isLast={true} hideHeader={true} />
+        <EntityPanelTabs
+          tab={entityTab}
+          isLast={true}
+          hideHeader={true}
+          replicasOverride={currentFrame?.eReplicas instanceof Map ? currentFrame.eReplicas : null}
+          envOverride={$isolatedEnv}
+          historyOverride={$isolatedHistory}
+          timeIndexOverride={$isolatedTimeIndex}
+          isLiveOverride={$isolatedIsLive}
+        />
       {/if}
     {:else if viewMode === 'jurisdiction'}
       <JurisdictionPanel
