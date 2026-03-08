@@ -40,6 +40,9 @@
   $: if (missingOptionIds.length > 0) {
     scheduleGossipProfileFetch(missingOptionIds);
   }
+  $: if (open && options.length > 0) {
+    scheduleGossipProfileFetch(options);
+  }
 
   $: optionViews = options.map((id) => ({
     id,

@@ -7,6 +7,7 @@ import { getP2P } from './runtime.js';
 export interface HealthStatus {
   timestamp: number;
   uptime: number;
+  devSessionId?: string | null;
   jMachines: JMachineHealth[];
   hubs: HubHealth[];
   system: SystemHealth;
@@ -154,6 +155,7 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
   return {
     timestamp: Date.now(),
     uptime: Date.now() - startTime,
+    devSessionId: typeof process !== 'undefined' ? process.env.XLN_DEV_SESSION_ID ?? null : null,
     jMachines,
     hubs,
     system: {

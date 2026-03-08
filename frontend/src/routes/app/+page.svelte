@@ -3,7 +3,7 @@
   import { browser } from '$app/environment';
   import View from '$lib/view/View.svelte';
   import { appState } from '$lib/stores/appStateStore';
-  import { initializeXLN, isLoading, error } from '$lib/stores/xlnStore';
+  import { initializeXLN, isLoading, error, prepareDevSession } from '$lib/stores/xlnStore';
   import { settingsOperations } from '$lib/stores/settingsStore';
   import { tabOperations } from '$lib/stores/tabStore';
   import { timeOperations } from '$lib/stores/timeStore';
@@ -21,6 +21,8 @@
     console.log('🚀 Initializing XLN application in /app...');
 
     try {
+      await prepareDevSession();
+
       // Initialize settings first
       settingsOperations.initialize();
 

@@ -50,6 +50,7 @@
   let profileExpanded = false;
   let serverEntityNames = new Map<string, string>();
   let paymentPanelEl: HTMLDivElement | null = null;
+  let refreshingRecipientOptions = false;
   let hostedCheckoutMode = false;
   let hostedCheckoutRouteKey = '';
   let hostedCheckoutPreparing = false;
@@ -1266,6 +1267,25 @@
     void refreshServerEntityNames();
   }
 
+  async function refreshRecipientPickerOptions(): Promise<void> {
+    if (refreshingRecipientOptions) return;
+    refreshingRecipientOptions = true;
+    preflightError = null;
+    try {
+      await refreshGossipOnDemand(
+        'recipient-picker-manual-refresh',
+        targetEntityId ? [targetEntityId] : [],
+      );
+      await refreshServerEntityNames();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      preflightError = message;
+      toasts.error(`Recipient refresh failed: ${message}`);
+    } finally {
+      refreshingRecipientOptions = false;
+    }
+  }
+
   function handleTokenChange(e: CustomEvent) {
     tokenId = e.detail.value;
     preflightError = null;
@@ -1369,17 +1389,31 @@
     </div>
   {/if}
 
-  <EntityInput
-    label="Recipient"
-    value={targetEntityId}
-    entities={allEntities}
-    contacts={selectorContacts}
-    excludeId=""
-    placeholder="Select recipient..."
-    disabled={findingRoutes || sendingPayment}
-    on:change={handleTargetChange}
-    on:open={handleRecipientPickerOpen}
-  />
+  <div class="recipient-picker-row">
+    <div class="recipient-picker-input">
+      <EntityInput
+        label="Recipient"
+        value={targetEntityId}
+        entities={allEntities}
+        contacts={selectorContacts}
+        excludeId=""
+        placeholder="Select recipient..."
+        disabled={findingRoutes || sendingPayment}
+        on:change={handleTargetChange}
+        on:open={handleRecipientPickerOpen}
+      />
+    </div>
+    <button
+      type="button"
+      class="recipient-refresh-btn"
+      on:click={() => void refreshRecipientPickerOptions()}
+      disabled={findingRoutes || sendingPayment || refreshingRecipientOptions}
+      title="Refresh available recipients from gossip"
+      aria-label="Refresh recipients"
+    >
+      {refreshingRecipientOptions ? '...' : 'Refresh'}
+    </button>
+  </div>
 
   {#if preflightError}
     <div class="profile-preflight-error">{preflightError}</div>
@@ -1593,6 +1627,41 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
+  }
+
+  .recipient-picker-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: end;
+  }
+
+  .recipient-picker-input {
+    min-width: 0;
+  }
+
+  .recipient-refresh-btn {
+    height: 38px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    background: rgba(15, 23, 42, 0.78);
+    color: #cbd5e1;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+
+  .recipient-refresh-btn:hover:not(:disabled) {
+    border-color: rgba(251, 191, 36, 0.55);
+    background: rgba(30, 41, 59, 0.92);
+    color: #f8fafc;
+  }
+
+  .recipient-refresh-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
   }
 
   .payment-panel.hosted-checkout {

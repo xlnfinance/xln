@@ -8,21 +8,22 @@
  * 4. The user only confirms with `Pay Now`.
  * 5. A clear success state appears and the wallet page auto-closes after persisted confirmation.
  * 6. The custody page keeps polling persisted receipts and updates the hero balance after deposit finalization.
- * 7. The wallet can reload from persisted state and still receive a later custody withdrawal.
+ * 7. The wallet can reload from persisted state and still receive later custody withdrawals back to the same user.
+ * 8. Repeated deposit and withdrawal cycles stay deterministic: custody credits from persisted events only,
+ *    debits the true sender amount including fees, and never drifts from the saved dashboard state.
  *
  * The same scenario then proves the custody backend refuses withdrawals before credit exists
  * and spends only from already credited offchain funds after the deposit lands.
  */
 
-import { test, expect, type Page } from '@playwright/test';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { deserializeTaggedJson } from '../runtime/serialization-utils';
 import { DaemonRpcClient, type DaemonFrameLog } from '../custody/daemon-client';
+import { startCustodySupport, stopManagedChild, type ManagedChild } from '../runtime/orchestrator/custody-bootstrap';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, resetProdServer } from './utils/e2e-baseline';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic, switchToRuntimeId } from './utils/e2e-demo-users';
@@ -30,52 +31,26 @@ import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e
 
 const LONG_E2E = process.env.E2E_LONG === '1';
 const TEST_TIMEOUT_MS = LONG_E2E ? 240_000 : 150_000;
-const CHILD_READY_TIMEOUT_MS = 60_000;
-const LOG_TAIL_LINES = 80;
-
-type DebugEntitySummary = {
-  entityId?: string;
-  isHub?: boolean;
-  online?: boolean;
-  name?: string;
-  accounts?: unknown[];
-  publicAccounts?: unknown[];
-};
-
-type DebugEntitiesResponse = {
-  entities?: DebugEntitySummary[];
-};
-
-type ManagedIdentity = {
-  entityId: string;
-  signerId: string;
-  name: string;
-};
-
-type DaemonControlCliResult = {
-  ok: boolean;
-  command: string;
-  result: ManagedIdentity;
-};
-
-type ManagedChild = {
-  name: string;
-  proc: ChildProcessWithoutNullStreams;
-  stdoutLines: string[];
-  stderrLines: string[];
-};
+const TOKEN_SCALE = 10n ** 18n;
 
 type CustodyDashboardPayload = {
   headlineBalance?: {
     amountDisplay?: string;
+    amountMinor?: string;
   };
   custody?: {
     lastSyncError?: string | null;
     lastSyncOkAt?: number | null;
   };
   activity?: Array<{
+    id?: string;
     kind?: string;
+    amountMinor?: string;
     amountDisplay?: string;
+    requestedAmountMinor?: string;
+    requestedAmountDisplay?: string;
+    feeMinor?: string;
+    feeDisplay?: string;
     status?: string;
     description?: string;
   }>;
@@ -129,133 +104,6 @@ const getFreePort = async (): Promise<number> => {
   });
 };
 
-const tailLines = (lines: string[]): string => lines.slice(-LOG_TAIL_LINES).join('\n');
-
-const spawnChild = (
-  name: string,
-  args: string[],
-  env: NodeJS.ProcessEnv,
-): ManagedChild => {
-  const proc = spawn('bun', args, {
-    cwd: process.cwd(),
-    env: { ...process.env, ...env },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  const stdoutLines: string[] = [];
-  const stderrLines: string[] = [];
-  const pushLines = (buffer: Buffer, target: string[]) => {
-    for (const line of buffer.toString('utf8').split(/\r?\n/)) {
-      const trimmed = line.trimEnd();
-      if (!trimmed) continue;
-      target.push(trimmed);
-      if (target.length > 500) target.shift();
-    }
-  };
-
-  proc.stdout.on('data', chunk => pushLines(chunk, stdoutLines));
-  proc.stderr.on('data', chunk => pushLines(chunk, stderrLines));
-
-  return { name, proc, stdoutLines, stderrLines };
-};
-
-const stopChild = async (child: ManagedChild | null): Promise<void> => {
-  if (!child || child.proc.exitCode !== null) return;
-  child.proc.kill('SIGTERM');
-  const deadline = Date.now() + 5_000;
-  while (child.proc.exitCode === null && Date.now() < deadline) {
-    await delay(100);
-  }
-  if (child.proc.exitCode === null) {
-    child.proc.kill('SIGKILL');
-    await delay(200);
-  }
-};
-
-const waitForHttpReady = async (
-  url: string,
-  child: ManagedChild,
-  timeoutMs = CHILD_READY_TIMEOUT_MS,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  let lastError = 'not-started';
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url);
-      if (response.status < 500) return;
-      lastError = `status=${response.status}`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-    if (child.proc.exitCode !== null) {
-      throw new Error(
-        `${child.name} exited early with code=${String(child.proc.exitCode)}\n` +
-        `stdout:\n${tailLines(child.stdoutLines)}\n\nstderr:\n${tailLines(child.stderrLines)}`,
-      );
-    }
-    await delay(250);
-  }
-
-  throw new Error(
-    `${child.name} did not become ready at ${url}: ${lastError}\n` +
-    `stdout:\n${tailLines(child.stdoutLines)}\n\nstderr:\n${tailLines(child.stderrLines)}`,
-  );
-};
-
-const runDaemonControl = async (
-  args: string[],
-  env: NodeJS.ProcessEnv,
-): Promise<DaemonControlCliResult> => {
-  return await new Promise<DaemonControlCliResult>((resolve, reject) => {
-    const proc = spawn('bun', ['runtime/scripts/daemon-control.ts', ...args], {
-      cwd: process.cwd(),
-      env: { ...process.env, ...env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', chunk => {
-      stdout += chunk.toString('utf8');
-    });
-    proc.stderr.on('data', chunk => {
-      stderr += chunk.toString('utf8');
-    });
-
-    proc.on('error', reject);
-    proc.on('close', code => {
-      if (code !== 0) {
-        reject(
-          new Error(
-            `daemon-control failed code=${String(code)}\nstdout:\n${stdout.trim()}\n\nstderr:\n${stderr.trim()}`,
-          ),
-        );
-        return;
-      }
-      const lines = stdout
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(Boolean);
-      const lastLine = lines[lines.length - 1];
-      if (!lastLine) {
-        reject(new Error(`daemon-control returned no payload\nstderr:\n${stderr.trim()}`));
-        return;
-      }
-      try {
-        resolve(deserializeTaggedJson<DaemonControlCliResult>(lastLine));
-      } catch (error) {
-        reject(
-          new Error(
-            `Failed to parse daemon-control payload: ${error instanceof Error ? error.message : String(error)}\n` +
-            `stdout:\n${stdout.trim()}\n\nstderr:\n${stderr.trim()}`,
-          ),
-        );
-      }
-    });
-  });
-};
-
 const apiUrl = (pathname: string): string => new URL(pathname, API_BASE_URL).toString();
 
 const toWsUrl = (baseUrl: string, pathname: string): string => {
@@ -263,49 +111,6 @@ const toWsUrl = (baseUrl: string, pathname: string): string => {
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.toString();
 };
-
-async function fetchDebugEntities(page: Page): Promise<DebugEntitySummary[]> {
-  const response = await page.request.get(apiUrl('/api/debug/entities?limit=5000'));
-  expect(response.ok(), 'debug entities endpoint must be reachable').toBe(true);
-  const body = await response.json() as DebugEntitiesResponse;
-  return Array.isArray(body.entities) ? body.entities : [];
-}
-
-async function discoverHubIds(page: Page): Promise<string[]> {
-  const entities = await fetchDebugEntities(page);
-  return entities
-    .filter((entry): entry is DebugEntitySummary & { entityId: string } => entry.isHub === true && typeof entry.entityId === 'string')
-    .map(entry => entry.entityId.toLowerCase())
-    .slice(0, 3);
-}
-
-async function waitForDebugEntity(
-  page: Page,
-  entityId: string,
-  predicate: (entry: DebugEntitySummary) => boolean,
-  message: string,
-): Promise<void> {
-  const normalized = entityId.toLowerCase();
-  await expect.poll(
-    async () => {
-      const entities = await fetchDebugEntities(page);
-      const match = entities.find(entry => String(entry.entityId || '').toLowerCase() === normalized);
-      if (!match) return null;
-      return predicate(match)
-        ? {
-            online: match.online === true,
-            accounts: Array.isArray(match.accounts) ? match.accounts.length : 0,
-            publicAccounts: Array.isArray(match.publicAccounts) ? match.publicAccounts.length : 0,
-          }
-        : null;
-    },
-    {
-      timeout: 30_000,
-      intervals: [500, 750, 1000],
-      message,
-    },
-  ).not.toBeNull();
-}
 
 async function ensureRuntimeProfileDownloaded(page: Page, entityId: string): Promise<void> {
   const ok = await page.evaluate(async (targetEntityId: string) => {
@@ -391,6 +196,17 @@ async function waitForHostedCheckoutSuccess(page: Page): Promise<void> {
       message: 'wallet checkout page must auto-close after persisted confirmation',
     }).toBe(true);
   }
+}
+
+async function openRestoredWalletPage(
+  context: BrowserContext,
+  runtimeId: string,
+): Promise<Page> {
+  const page = await context.newPage();
+  await gotoApp(page);
+  await switchToRuntimeId(page, runtimeId);
+  await ensureRuntimeOnline(page, `restored-${runtimeId.slice(0, 8)}`);
+  return page;
 }
 
 async function outCap(page: Page, entityId: string, counterpartyId: string): Promise<bigint> {
@@ -635,6 +451,69 @@ async function readCustodyDashboard(
   });
 }
 
+async function waitForCustodyBalance(
+  page: Page,
+  custodyBaseUrl: string,
+  expectedMinor: bigint,
+): Promise<CustodyDashboardPayload> {
+  await expect.poll(
+    async () => {
+      const dashboard = await readCustodyDashboard(page, custodyBaseUrl);
+      return String(dashboard.headlineBalance?.amountMinor || '0');
+    },
+    {
+      timeout: 30_000,
+      intervals: [500, 750, 1000],
+      message: `custody balance must converge to ${expectedMinor.toString()}`,
+    },
+  ).toBe(expectedMinor.toString());
+
+  return await readCustodyDashboard(page, custodyBaseUrl);
+}
+
+async function waitForNewActivity(
+  page: Page,
+  custodyBaseUrl: string,
+  knownIds: Set<string>,
+  kind: 'deposit' | 'withdrawal',
+  status?: string,
+): Promise<Required<NonNullable<CustodyDashboardPayload['activity']>[number]>> {
+  let found: Required<NonNullable<CustodyDashboardPayload['activity']>[number]> | null = null;
+  await expect.poll(
+    async () => {
+      const dashboard = await readCustodyDashboard(page, custodyBaseUrl);
+      const activity = Array.isArray(dashboard.activity) ? dashboard.activity : [];
+      const item = activity.find((entry) => {
+        const id = String(entry.id || '');
+        if (entry.kind !== kind || id.length === 0 || knownIds.has(id)) return false;
+        if (status && String(entry.status || '') !== status) return false;
+        return true;
+      });
+      found = item
+        ? {
+            id: String(item.id || ''),
+            kind: String(item.kind || ''),
+            amountMinor: String(item.amountMinor || '0'),
+            amountDisplay: String(item.amountDisplay || ''),
+            requestedAmountMinor: String(item.requestedAmountMinor || '0'),
+            requestedAmountDisplay: String(item.requestedAmountDisplay || ''),
+            feeMinor: String(item.feeMinor || '0'),
+            feeDisplay: String(item.feeDisplay || ''),
+            status: String(item.status || ''),
+            description: String(item.description || ''),
+          }
+        : null;
+      return found !== null;
+    },
+    {
+      timeout: 30_000,
+      intervals: [500, 750, 1000],
+      message: `custody must record a new ${kind} activity`,
+    },
+  ).toBe(true);
+  return found!;
+}
+
 test.describe('E2E Custody Flow', () => {
   // Scenario: a new custody daemon joins the existing 3-hub mesh as a separate runtime, receives
   // a journal-backed deposit from a browser wallet, refuses to withdraw before funds exist, and
@@ -654,7 +533,7 @@ test.describe('E2E Custody Flow', () => {
     let daemonClient: DaemonRpcClient | null = null;
 
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
-    const walletPage = await context.newPage();
+    let walletPage = await context.newPage();
     const custodyPage = await context.newPage();
 
     try {
@@ -671,76 +550,35 @@ test.describe('E2E Custody Flow', () => {
         minHubCount: 3,
       });
 
-      const hubIds = await discoverHubIds(walletPage);
-      expect(hubIds.length, 'baseline must expose 3 hubs').toBeGreaterThanOrEqual(3);
-
-      daemonChild = spawnChild(
-        'custody-daemon',
-        ['runtime/server.ts', '--port', String(daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${daemonPort}`],
-        {
-          USE_ANVIL: 'true',
-          BOOTSTRAP_LOCAL_HUBS: '0',
-          ANVIL_RPC: rpcProxyUrl,
-          PUBLIC_RPC: rpcProxyUrl,
-          RELAY_URL: relayUrl,
-          XLN_DB_PATH: join(tempRoot, 'daemon-db'),
-        },
-      );
-      await waitForHttpReady(`http://127.0.0.1:${daemonPort}/api/health`, daemonChild);
+      const custodySupport = await startCustodySupport({
+        apiBaseUrl: API_BASE_URL,
+        daemonPort,
+        custodyPort,
+        relayUrl,
+        rpcUrl: rpcProxyUrl,
+        walletUrl: new URL('/app', APP_BASE_URL).toString(),
+        dbRoot: tempRoot,
+        seed: 'xln-e2e-custody-seed',
+        signerLabel: 'custody-e2e-1',
+        profileName: 'Custody',
+      });
+      daemonChild = custodySupport.daemonChild;
+      custodyChild = custodySupport.custodyChild;
       daemonClient = new DaemonRpcClient(`ws://127.0.0.1:${daemonPort}/rpc`);
-
-      const controlResult = await runDaemonControl(
-        [
-          'setup-custody',
-          '--base-url', `http://127.0.0.1:${daemonPort}`,
-          '--name', 'Custody',
-          '--seed', 'xln-e2e-custody-seed',
-          '--signer-label', 'custody-e2e-1',
-          '--hub-ids', hubIds.slice(0, 3).join(','),
-          '--relay-url', relayUrl,
-          '--gossip-poll-ms', '250',
-        ],
-        {
-          USE_ANVIL: 'true',
-        },
-      );
-      expect(controlResult.ok, 'setup-custody must succeed').toBe(true);
-      const custodyIdentity = controlResult.result;
-
-      await waitForDebugEntity(
-        walletPage,
-        custodyIdentity.entityId,
-        entry => entry.online === true && Math.max(entry.accounts?.length ?? 0, entry.publicAccounts?.length ?? 0) > 0,
-        'custody entity must appear online in relay gossip with at least one advertised account',
-      );
-
-      custodyChild = spawnChild(
-        'custody-service',
-        ['custody/server.ts'],
-        {
-          CUSTODY_HOST: '127.0.0.1',
-          CUSTODY_PORT: String(custodyPort),
-          CUSTODY_DAEMON_WS: `ws://127.0.0.1:${daemonPort}/rpc`,
-          CUSTODY_WALLET_URL: new URL('/app', APP_BASE_URL).toString(),
-          CUSTODY_ENTITY_ID: custodyIdentity.entityId,
-          CUSTODY_SIGNER_ID: custodyIdentity.signerId,
-          CUSTODY_DB_PATH: join(tempRoot, 'custody.sqlite'),
-        },
-      );
-      await waitForHttpReady(`http://127.0.0.1:${custodyPort}/api/me`, custodyChild);
+      const custodyIdentity = custodySupport.identity;
+      const hubId = custodySupport.hubIds[0]!;
 
       await gotoApp(walletPage);
       const alice = await createRuntimeIdentity(walletPage, 'alice', selectDemoMnemonic('alice'));
-      await connectRuntimeToHub(walletPage, alice, hubIds[0]!);
-      await waitForDebugEntity(
+      await connectRuntimeToHub(walletPage, alice, hubId);
+      const aliceOutBeforeFunding = await outCap(walletPage, alice.entityId, hubId);
+      await faucetOffchain(walletPage, alice.entityId, hubId);
+      await waitForOutCapAtLeast(
         walletPage,
         alice.entityId,
-        entry => entry.online === true && Math.max(entry.accounts?.length ?? 0, entry.publicAccounts?.length ?? 0) > 0,
-        'alice runtime must appear online in relay gossip with an advertised hub account',
+        hubId,
+        aliceOutBeforeFunding + (10n * 10n ** 18n),
       );
-      const aliceOutBeforeFunding = await outCap(walletPage, alice.entityId, hubIds[0]!);
-      await faucetOffchain(walletPage, alice.entityId, hubIds[0]!);
-      await waitForOutCapAtLeast(walletPage, alice.entityId, hubIds[0]!, aliceOutBeforeFunding + (10n * 10n ** 18n));
       await ensureRuntimeProfileDownloaded(walletPage, custodyIdentity.entityId);
       await delay(1000);
 
@@ -753,103 +591,96 @@ test.describe('E2E Custody Flow', () => {
       await custodyPage.getByRole('button', { name: 'Withdraw via XLN' }).click();
       await expect(custodyPage.getByText('Insufficient custody balance')).toBeVisible({ timeout: 15_000 });
 
-      await custodyPage.locator('input[name="depositAmount"]').fill('10');
-      const [checkoutPage] = await Promise.all([
-        context.waitForEvent('page'),
-        custodyPage.getByRole('button', { name: 'Deposit with XLN' }).click(),
-      ]);
-      await checkoutPage.waitForLoadState('domcontentloaded');
-      await submitHostedCheckoutPayment(checkoutPage);
-      await waitForDaemonReceiptEvent(daemonClient, {
-        entityId: custodyIdentity.entityId,
-        eventName: 'HtlcReceived',
-        timeoutMs: 30_000,
-      });
+      let dashboard = await readCustodyDashboard(custodyPage, custodyBaseUrl);
+      let currentBalanceMinor = BigInt(dashboard.headlineBalance?.amountMinor || '0');
+      const cycles = [
+        { depositWhole: 10n, withdrawWhole: 5n },
+        { depositWhole: 3n, withdrawWhole: 2n },
+        { depositWhole: 2n, withdrawWhole: 1n },
+      ];
 
-      const receiptDebug = await daemonClient.getFrameReceipts({
-        fromHeight: 1,
-        limit: 32,
-        entityId: custodyIdentity.entityId,
-        eventNames: ['HtlcReceived', 'PaymentFinalized', 'PaymentFailed'],
-      });
-      console.log(`[custody-debug] receipt-events=${JSON.stringify(receiptDebug.receipts)}`);
-      const dashboardDebug = await readCustodyDashboard(custodyPage, custodyBaseUrl);
-      console.log(`[custody-debug] dashboard=${JSON.stringify(dashboardDebug)}`);
+      for (const [cycleIndex, cycle] of cycles.entries()) {
+        await walletPage.close();
+        const knownBeforeDeposit = new Set(
+          (dashboard.activity ?? [])
+            .map(item => String(item.id || ''))
+            .filter(Boolean),
+        );
 
-      await expect.poll(
-        async () => {
-          const dashboard = await readCustodyDashboard(custodyPage, custodyBaseUrl);
-          return {
-            balance: String(dashboard.headlineBalance?.amountDisplay || ''),
-            syncError: dashboard.custody?.lastSyncError || null,
-            activity: Array.isArray(dashboard.activity) ? dashboard.activity.length : 0,
-          };
-        },
-        {
-          timeout: 30_000,
-          intervals: [500, 750, 1000],
-          message: 'custody backend must reflect the credited deposit',
-        },
-      ).toMatchObject({
-        balance: expect.stringContaining('10'),
-        syncError: null,
-      });
+        await custodyPage.locator('input[name="depositAmount"]').fill(cycle.depositWhole.toString());
+        const [checkoutPage] = await Promise.all([
+          context.waitForEvent('page'),
+          custodyPage.getByRole('button', { name: 'Deposit with XLN' }).click(),
+        ]);
+        await checkoutPage.waitForLoadState('domcontentloaded');
+        await submitHostedCheckoutPayment(checkoutPage);
+        await waitForDaemonReceiptEvent(daemonClient, {
+          entityId: custodyIdentity.entityId,
+          eventName: 'HtlcReceived',
+          timeoutMs: 30_000,
+        });
+        await waitForHostedCheckoutSuccess(checkoutPage);
+        walletPage = await openRestoredWalletPage(context, alice.runtimeId);
 
-      await expect.poll(
-        async () => {
-          return await custodyPage.locator('.balance-amount').first().textContent();
-        },
-        {
-          timeout: 15_000,
-          intervals: [500, 750, 1000],
-          message: 'custody hero balance must visually reflect the credited deposit',
-        },
-      ).toContain('10');
+        const depositMinor = cycle.depositWhole * TOKEN_SCALE;
+        currentBalanceMinor += depositMinor;
+        await custodyPage.bringToFront();
+        dashboard = await waitForCustodyBalance(custodyPage, custodyBaseUrl, currentBalanceMinor);
+        const depositActivity = await waitForNewActivity(custodyPage, custodyBaseUrl, knownBeforeDeposit, 'deposit');
+        expect(BigInt(depositActivity.amountMinor)).toBe(depositMinor);
+        expect(dashboard.custody?.lastSyncError ?? null).toBeNull();
+        await expect(custodyPage.locator('.balance-amount').first()).toContainText(
+          String(dashboard.headlineBalance?.amountDisplay || ''),
+        );
 
-      await waitForHostedCheckoutSuccess(checkoutPage);
-      await walletPage.reload({ waitUntil: 'domcontentloaded' });
-      await walletPage.waitForFunction(() => !!(window as typeof window & { XLN?: unknown }).XLN, { timeout: 30_000 });
-      await switchToRuntimeId(walletPage, alice.runtimeId);
-      await ensureRuntimeOnline(walletPage, 'alice-after-checkout-reload');
-      await reannounceRuntimeProfile(walletPage, alice.entityId);
-      await waitForDebugEntity(
-        walletPage,
-        alice.entityId,
-        entry => entry.online === true,
-        'alice runtime must come back online after hosted checkout reload',
-      );
-      await ensureRuntimeProfileDownloaded(walletPage, custodyIdentity.entityId);
-      await delay(750);
+        await switchToRuntimeId(walletPage, alice.runtimeId);
+        await ensureRuntimeOnline(walletPage, `alice-before-withdraw-cycle-${cycleIndex + 1}`);
+        await reannounceRuntimeProfile(walletPage, alice.entityId);
+        await ensureRuntimeProfileDownloaded(walletPage, custodyIdentity.entityId);
+        await delay(750);
 
-      await custodyPage.locator('input[name="amount"]').fill('5');
-      await custodyPage.locator('input[name="targetEntityId"]').fill(alice.entityId);
+        const knownBeforeWithdraw = new Set(
+          (dashboard.activity ?? [])
+            .map(item => String(item.id || ''))
+            .filter(Boolean),
+        );
+        await custodyPage.locator('input[name="amount"]').fill(cycle.withdrawWhole.toString());
+        await custodyPage.locator('input[name="targetEntityId"]').fill(alice.entityId);
 
-      const withdrawCursor = await getPersistedReceiptCursor(walletPage);
-      await custodyPage.getByRole('button', { name: 'Withdraw via XLN' }).click();
+        const withdrawCursor = await getPersistedReceiptCursor(walletPage);
+        await custodyPage.getByRole('button', { name: 'Withdraw via XLN' }).click();
+        await expect(custodyPage.getByText(/Queued withdrawal/i)).toBeVisible({ timeout: 15_000 });
+        await walletPage.bringToFront();
+        await waitForPersistedFrameEvent(walletPage, {
+          cursor: withdrawCursor,
+          eventName: 'HtlcReceived',
+          entityId: alice.entityId,
+          timeoutMs: 30_000,
+        });
+        await custodyPage.bringToFront();
 
-      await expect(custodyPage.getByText(/Queued withdrawal/i)).toBeVisible({ timeout: 15_000 });
-      await waitForPersistedFrameEvent(walletPage, {
-        cursor: withdrawCursor,
-        eventName: 'HtlcReceived',
-        entityId: alice.entityId,
-        timeoutMs: 30_000,
-      });
+        const withdrawalActivity = await waitForNewActivity(
+          custodyPage,
+          custodyBaseUrl,
+          knownBeforeWithdraw,
+          'withdrawal',
+          'finalized',
+        );
+        expect(BigInt(withdrawalActivity.requestedAmountMinor)).toBe(cycle.withdrawWhole * TOKEN_SCALE);
+        expect(BigInt(withdrawalActivity.feeMinor)).toBeGreaterThan(0n);
 
-      await expect.poll(
-        async () => {
-          return await custodyPage.locator('.balance-amount').first().textContent();
-        },
-        {
-          timeout: 30_000,
-          intervals: [500, 750, 1000],
-          message: 'custody balance must debit the withdrawn amount after finalization',
-        },
-      ).toContain('5');
+        const senderSpentMinor = BigInt(withdrawalActivity.amountMinor);
+        currentBalanceMinor -= senderSpentMinor;
+        dashboard = await waitForCustodyBalance(custodyPage, custodyBaseUrl, currentBalanceMinor);
+        await expect(custodyPage.locator('.balance-amount').first()).toContainText(
+          String(dashboard.headlineBalance?.amountDisplay || ''),
+        );
+      }
     } finally {
       await context.close();
       await daemonClient?.close();
-      await stopChild(custodyChild);
-      await stopChild(daemonChild);
+      await stopManagedChild(custodyChild);
+      await stopManagedChild(daemonChild);
       await rm(tempRoot, { recursive: true, force: true });
     }
   });

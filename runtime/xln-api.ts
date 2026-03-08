@@ -369,6 +369,7 @@ export interface XLNModule {
   prepopulateFullMechanics: (env: Env) => Promise<Env>;
 
   // Database operations
+  clearDB: (env?: Env) => Promise<void>;
   clearDatabase: () => Promise<void>;
   clearDatabaseAndHistory: (env: Env) => Promise<Env>;
   saveEnvToDB: (env: Env) => Promise<void>;

@@ -7,7 +7,7 @@
   import { xlnEnvironment, xlnFunctions, xlnInstance } from '../../stores/xlnStore';
   import type { EntityReplica, AccountMachine } from '$lib/types/ui';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import { resolveEntityName } from '$lib/utils/entityNaming';
+  import { resolveEntityName, scheduleGossipProfileFetch } from '$lib/utils/entityNaming';
   import { getAccountUiStatus, getAccountUiStatusLabel, type AccountUiStatus } from '$lib/utils/accountStatus';
 
   export let replica: EntityReplica | null = null;
@@ -60,6 +60,9 @@
   }
 
   $: selectedAccount = accounts.find(acc => acc.id === selectedAccountId);
+  $: if (isOpen && accounts.length > 0) {
+    scheduleGossipProfileFetch(accounts.map((account) => account.id));
+  }
 
   $: displayText = selectedAccount
     ? `${selectedAccount.name}`

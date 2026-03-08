@@ -5,9 +5,9 @@ import { DaemonRpcClient, type DaemonFrameLog } from './daemon-client';
 import { CustodyStore, type ActivityRecord, type SessionRecord } from './store';
 
 const HOST = process.env.CUSTODY_HOST || '127.0.0.1';
-const PORT = Number(process.env.CUSTODY_PORT || '8787');
-const DAEMON_WS_URL = process.env.CUSTODY_DAEMON_WS || 'ws://127.0.0.1:8080/rpc';
-const WALLET_URL = process.env.CUSTODY_WALLET_URL || 'http://127.0.0.1:8080/app';
+const PORT = Number(process.env.CUSTODY_PORT || '8087');
+const DAEMON_WS_URL = process.env.CUSTODY_DAEMON_WS || 'ws://127.0.0.1:8088/rpc';
+const WALLET_URL = process.env.CUSTODY_WALLET_URL || 'https://localhost:8080/app';
 const CUSTODY_JURISDICTION = String(process.env.CUSTODY_JURISDICTION_ID || process.env.CUSTODY_JURISDICTION || 'arrakis').trim();
 const CUSTODY_ENTITY_ID = String(process.env.CUSTODY_ENTITY_ID || '').trim().toLowerCase();
 const CUSTODY_SIGNER_ID = String(process.env.CUSTODY_SIGNER_ID || '').trim().toLowerCase() || undefined;
@@ -57,13 +57,18 @@ const createUserId = (): string => `usr_${crypto.randomUUID().replace(/-/g, '').
 const createSessionToken = (): string => crypto.randomUUID().replace(/-/g, '');
 const createInvoiceId = (): string => `inv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
-const ensureSession = (req: Request): { session: SessionRecord; setCookie?: string } => {
+const ensureSession = (
+  req: Request,
+  options: { touch?: boolean } = {},
+): { session: SessionRecord; setCookie?: string } => {
   const cookies = parseCookies(req.headers.get('cookie'));
   const existingToken = cookies[SESSION_COOKIE];
   if (existingToken) {
-    const touched = store.touchSession(existingToken);
-    if (touched) {
-      return { session: touched };
+    const existing = options.touch === true
+      ? store.touchSession(existingToken)
+      : store.getSessionByToken(existingToken);
+    if (existing) {
+      return { session: existing };
     }
   }
 
@@ -153,6 +158,10 @@ const serializeActivity = (activity: ActivityRecord[]) => {
       tokenId: item.tokenId,
       amountMinor: item.amountMinor.toString(),
       amountDisplay: formatAmount(item.tokenId, item.amountMinor),
+      requestedAmountMinor: item.requestedAmountMinor.toString(),
+      requestedAmountDisplay: formatAmount(item.tokenId, item.requestedAmountMinor),
+      feeMinor: item.feeMinor.toString(),
+      feeDisplay: formatAmount(item.tokenId, item.feeMinor),
       description: item.description,
       counterpartyEntityId: item.targetEntityId,
       hashlock: item.hashlock,
@@ -301,7 +310,9 @@ const syncJournal = async (): Promise<void> => {
     }
 
     store.setStateNumber(JOURNAL_CURSOR_KEY, response.toHeight);
-    lastSyncOkAt = Date.now();
+    if (response.returned > 0 || lastSyncOkAt === 0 || lastSyncError) {
+      lastSyncOkAt = Date.now();
+    }
     lastSyncError = null;
   } catch (error) {
     lastSyncError = error instanceof Error ? error.message : String(error);
@@ -338,12 +349,12 @@ const server = Bun.serve({
     }
 
     if (pathname === '/api/me') {
-      const { session, setCookie } = ensureSession(req);
+      const { session, setCookie } = ensureSession(req, { touch: false });
       return json(buildDashboardPayload(session), undefined, setCookie);
     }
 
     if (pathname === '/api/withdraw' && req.method === 'POST') {
-      const { session, setCookie } = ensureSession(req);
+      const { session, setCookie } = ensureSession(req, { touch: true });
       try {
         const body = await req.json() as {
           targetEntityId?: string;
@@ -367,14 +378,46 @@ const server = Bun.serve({
         if (amountMinor <= 0n) {
           return json({ ok: false, error: 'amount must be positive' }, { status: 400 }, setCookie);
         }
+        const currentBalanceMinor = store.getBalanceAmount(session.userId, tokenId);
+        if (currentBalanceMinor < amountMinor) {
+          return json({ ok: false, error: 'Insufficient custody balance' }, { status: 400 }, setCookie);
+        }
+
+        const routeQuote = await daemon.findRoutes({
+          sourceEntityId: CUSTODY_ENTITY_ID,
+          targetEntityId,
+          tokenId,
+          amount: amountMinor.toString(),
+        });
+        const selectedRoute = routeQuote.routes[0];
+        if (!selectedRoute) {
+          return json({ ok: false, error: `No route found from ${CUSTODY_ENTITY_ID} to ${targetEntityId}` }, { status: 502 }, setCookie);
+        }
+        const senderAmountMinor = BigInt(selectedRoute.senderAmount);
+        const feeMinor = BigInt(selectedRoute.totalFee);
+        if (senderAmountMinor <= 0n || senderAmountMinor < amountMinor) {
+          return json({ ok: false, error: 'Invalid route quote from daemon' }, { status: 502 }, setCookie);
+        }
+        if (currentBalanceMinor < senderAmountMinor) {
+          return json(
+            {
+              ok: false,
+              error: `Insufficient custody balance after fees: need ${formatAmount(tokenId, senderAmountMinor)} total`,
+            },
+            { status: 400 },
+            setCookie,
+          );
+        }
 
         const withdrawalId = `wd_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
-        const description = `custody-withdrawal:${withdrawalId}`;
+        const description = `custody-withdrawal:${withdrawalId} requested:${amountMinor.toString()} fee:${feeMinor.toString()}`;
         store.reserveWithdrawal({
           id: withdrawalId,
           userId: session.userId,
           tokenId,
-          amountMinor,
+          amountMinor: senderAmountMinor,
+          requestedAmountMinor: amountMinor,
+          feeMinor,
           targetEntityId,
           description,
           createdAt: Date.now(),
@@ -388,6 +431,7 @@ const server = Bun.serve({
             tokenId,
             amount: amountMinor.toString(),
             description,
+            route: selectedRoute.path,
             mode: 'htlc',
           });
           if (!queued.hashlock) {
@@ -405,6 +449,10 @@ const server = Bun.serve({
               withdrawalId,
               hashlock: queued.hashlock,
               route: queued.route,
+              senderAmount: senderAmountMinor.toString(),
+              senderAmountDisplay: formatAmount(tokenId, senderAmountMinor),
+              feeAmount: feeMinor.toString(),
+              feeAmountDisplay: formatAmount(tokenId, feeMinor),
               dashboard: buildDashboardPayload(session),
             },
             undefined,

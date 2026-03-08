@@ -370,6 +370,7 @@ export async function handleHtlcPayment(
         for (const profile of matches) {
           const candidates: Array<{ value: unknown; source: string }> = [
             { value: profile?.metadata?.cryptoPublicKey, source: 'gossip.metadata.cryptoPublicKey' },
+            { value: profile?.metadata?.encryptionPublicKey, source: 'gossip.metadata.encryptionPublicKey' },
           ];
           for (const candidate of candidates) {
             const key = normalizeX25519Hex(candidate.value) ?? normalizeX25519Base64(candidate.value);
@@ -382,6 +383,7 @@ export async function handleHtlcPayment(
       const replica = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
       const localCandidates: Array<{ value: unknown; source: string }> = [
         { value: replica?.[1]?.state?.cryptoPublicKey, source: 'localReplica.state.cryptoPublicKey' },
+        { value: replica?.[1]?.state?.encryptionPublicKey, source: 'localReplica.state.encryptionPublicKey' },
       ];
       for (const candidate of localCandidates) {
         const key = normalizeX25519Hex(candidate.value) ?? normalizeX25519Base64(candidate.value);
