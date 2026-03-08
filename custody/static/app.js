@@ -43,6 +43,10 @@
  *   tokenId: number,
  *   amountMinor: string,
  *   amountDisplay: string,
+ *   requestedAmountMinor?: string,
+ *   requestedAmountDisplay?: string,
+ *   feeMinor?: string,
+ *   feeDisplay?: string,
  *   description: string,
  *   counterpartyEntityId: string,
  *   hashlock: string | null,
@@ -78,6 +82,7 @@ let depositTokenId = 1;
 let depositAmount = '10';
 let depositHint = '';
 let pendingDepositHref = '';
+let lastDashboardFingerprint = '';
 
 const escapeHtml = (value) => String(value || '')
   .replaceAll('&', '&amp;')
@@ -133,6 +138,9 @@ const renderActivity = () => {
   return `<div class="activity-list">${state.activity.map((item) => {
     const badge = item.kind === 'deposit' ? 'IN' : 'OUT';
     const status = item.error ? `${item.status} · ${escapeHtml(item.error)}` : item.status;
+    const amountLine = item.kind === 'withdrawal' && item.feeDisplay
+      ? `${escapeHtml(item.requestedAmountDisplay || item.amountDisplay)} sent · fee ${escapeHtml(item.feeDisplay)}`
+      : escapeHtml(item.amountDisplay);
     return `
       <div class="activity-row">
         <div class="activity-badge ${item.kind}">${badge}</div>
@@ -142,7 +150,7 @@ const renderActivity = () => {
           <div class="activity-sub">${escapeHtml(shortId(item.counterpartyEntityId))} · frame ${item.frameHeight ?? 'pending'}</div>
         </div>
         <div class="activity-amount">
-          <div>${escapeHtml(item.amountDisplay)}</div>
+          <div>${amountLine}</div>
           <div class="status-text">${escapeHtml(status)}</div>
         </div>
       </div>
@@ -206,6 +214,14 @@ const render = () => {
           <div class="balance-amount">${escapeHtml(state.headlineBalance.amountDisplay)}</div>
           <div class="balance-symbol">${escapeHtml(state.headlineBalance.symbol)}</div>
         </div>
+        <div class="token-pills">
+          ${state.tokens.map((token) => `
+            <div class="token-pill">
+              <span>${escapeHtml(token.symbol)}</span>
+              <strong style="color:${escapeHtml(token.accent)};">${escapeHtml(token.amountDisplay)}</strong>
+            </div>
+          `).join('')}
+        </div>
         <div class="hero-meta">
           <div class="meta-box">
             <div class="meta-label">User session</div>
@@ -234,52 +250,35 @@ const render = () => {
           <div class="activity-sub">Wallet: ${escapeHtml(state.custody.walletUrl)}</div>
           ${state.custody.lastSyncError ? `<div class="inline-error" style="margin-top:12px;">${escapeHtml(state.custody.lastSyncError)}</div>` : ''}
         </section>
-
-        <section class="panel">
-          <h2>Deposit With XLN</h2>
-          <div class="hint">Enter an amount and open the wallet in dedicated pay mode. USDC is the default token.</div>
-          <form id="deposit-form" class="deposit-form">
-            <label>
-              Token
-              <select name="depositTokenId">
-                ${state.tokens.map(token => `<option value="${token.tokenId}" ${token.tokenId === depositTokenId ? 'selected' : ''}>${escapeHtml(token.symbol)}</option>`).join('')}
-              </select>
-            </label>
-            <label>
-              Amount
-              <input name="depositAmount" inputmode="decimal" placeholder="10" value="${escapeHtml(depositAmount)}" required />
-            </label>
-            <div class="deposit-presets">
-              ${['1', '10', '100'].map(value => `<button class="secondary" type="button" data-deposit-preset="${value}">${escapeHtml(value)} ${escapeHtml(selectedDepositToken?.symbol || 'USDC')}</button>`).join('')}
-            </div>
-            <button class="primary" type="submit">Deposit with XLN</button>
-            ${pendingDepositHref ? `
-              <div class="hint" style="margin-top:8px;">
-                ${escapeHtml(depositHint || 'Wallet checkout opens in a new tab.')}
-                <a href="${escapeHtml(pendingDepositHref)}" target="_blank" rel="noopener noreferrer">Open wallet manually</a>
-              </div>
-            ` : ''}
-          </form>
-        </section>
       </div>
     </div>
 
-    <div class="grid">
+    <div class="grid action-grid">
       <section class="action-card">
-        <h2>Balances</h2>
-        <div class="token-list">
-          ${state.tokens.map((token) => `
-            <div class="token-card">
-              <div class="token-top">
-                <div>
-                  <div class="token-name">${escapeHtml(token.symbol)}</div>
-                  <div class="token-sub">${escapeHtml(token.name)}</div>
-                </div>
-                <div class="token-balance" style="color:${escapeHtml(token.accent)};">${escapeHtml(token.amountDisplay)}</div>
-              </div>
+        <h2>Deposit With XLN</h2>
+        <div class="hint">Enter an amount and open the wallet in dedicated pay mode. USDC is the default token.</div>
+        <form id="deposit-form" class="deposit-form">
+          <label>
+            Token
+            <select name="depositTokenId">
+              ${state.tokens.map(token => `<option value="${token.tokenId}" ${token.tokenId === depositTokenId ? 'selected' : ''}>${escapeHtml(token.symbol)}</option>`).join('')}
+            </select>
+          </label>
+          <label>
+            Amount
+            <input name="depositAmount" inputmode="decimal" placeholder="10" value="${escapeHtml(depositAmount)}" required />
+          </label>
+          <div class="deposit-presets">
+            ${['1', '10', '100'].map(value => `<button class="secondary" type="button" data-deposit-preset="${value}">${escapeHtml(value)} ${escapeHtml(selectedDepositToken?.symbol || 'USDC')}</button>`).join('')}
+          </div>
+          <button class="primary full-width" type="submit">Deposit with XLN</button>
+          ${pendingDepositHref ? `
+            <div class="hint" style="margin-top:8px;">
+              ${escapeHtml(depositHint || 'Wallet checkout opens in a new tab.')}
+              <a href="${escapeHtml(pendingDepositHref)}" target="_blank" rel="noopener noreferrer">Open wallet manually</a>
             </div>
-          `).join('')}
-        </div>
+          ` : ''}
+        </form>
       </section>
 
       <section class="action-card">
@@ -307,11 +306,11 @@ const render = () => {
           </label>
           <div class="form-foot">
             <div>
-              <div class="hint">The backend reserves custody balance first, then asks the daemon to queue the cheapest HTLC route.</div>
+              <div class="hint">The backend quotes the cheapest HTLC route first, then debits the exact sender amount: recipient amount plus route fee.</div>
               ${withdrawError ? `<div class="inline-error">${escapeHtml(withdrawError)}</div>` : ''}
               ${withdrawMessage ? `<div class="inline-ok">${escapeHtml(withdrawMessage)}</div>` : ''}
             </div>
-            <button class="primary" type="submit" ${submitting ? 'disabled' : ''}>${escapeHtml(withdrawButtonLabel)}</button>
+            <button class="primary full-width" type="submit" ${submitting ? 'disabled' : ''}>${escapeHtml(withdrawButtonLabel)}</button>
           </div>
         </form>
       </section>
@@ -375,6 +374,33 @@ const render = () => {
   }
 };
 
+const dashboardFingerprint = (payload) => JSON.stringify({
+  custody: {
+    connected: payload?.custody?.connected ?? false,
+    lastSyncOkAt: payload?.custody?.lastSyncOkAt ?? null,
+    lastSyncError: payload?.custody?.lastSyncError ?? null,
+  },
+  headlineBalance: payload?.headlineBalance ?? null,
+  tokens: payload?.tokens ?? [],
+  activity: payload?.activity ?? [],
+});
+
+const applyDashboardState = (nextState, forceRender = false) => {
+  const nextFingerprint = dashboardFingerprint(nextState);
+  const shouldRender = forceRender || nextFingerprint !== lastDashboardFingerprint;
+  state = nextState;
+  if (!state.tokens.some((token) => token.tokenId === selectedTokenId)) {
+    selectedTokenId = state.tokens[0]?.tokenId || 1;
+  }
+  if (!state.tokens.some((token) => token.tokenId === depositTokenId)) {
+    depositTokenId = state.tokens[0]?.tokenId || 1;
+  }
+  if (shouldRender) {
+    lastDashboardFingerprint = nextFingerprint;
+    render();
+  }
+};
+
 const load = async () => {
   const response = await fetch('/api/me', {
     cache: 'no-store',
@@ -383,10 +409,10 @@ const load = async () => {
   if (!response.ok) {
     throw new Error(`Failed to load dashboard (${response.status})`);
   }
-  state = await response.json();
-  selectedTokenId = state.tokens[0]?.tokenId || 1;
-  depositTokenId = state.tokens[0]?.tokenId || 1;
-  render();
+  const payload = await response.json();
+  selectedTokenId = payload.tokens[0]?.tokenId || 1;
+  depositTokenId = payload.tokens[0]?.tokenId || 1;
+  applyDashboardState(payload, true);
 };
 
 const reload = async () => {
@@ -397,14 +423,7 @@ const reload = async () => {
   if (!response.ok) {
     throw new Error(`Failed to refresh dashboard (${response.status})`);
   }
-  state = await response.json();
-  if (!state.tokens.some((token) => token.tokenId === selectedTokenId)) {
-    selectedTokenId = state.tokens[0]?.tokenId || 1;
-  }
-  if (!state.tokens.some((token) => token.tokenId === depositTokenId)) {
-    depositTokenId = state.tokens[0]?.tokenId || 1;
-  }
-  render();
+  applyDashboardState(await response.json());
 };
 
 async function handleDepositSubmit(event) {
@@ -461,7 +480,8 @@ async function handleWithdrawSubmit(event) {
     if (!response.ok || payload.ok !== true) {
       throw new Error(payload.error || `Withdrawal failed (${response.status})`);
     }
-    withdrawMessage = `Queued withdrawal ${payload.withdrawalId}`;
+    const feeSuffix = payload.feeAmountDisplay ? ` · fee ${payload.feeAmountDisplay}` : '';
+    withdrawMessage = `Queued withdrawal ${payload.withdrawalId}${feeSuffix}`;
     withdrawError = '';
     withdrawAmount = '';
     withdrawTargetEntityId = '';

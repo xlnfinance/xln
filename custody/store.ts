@@ -32,6 +32,8 @@ export type WithdrawalRecord = {
   userId: string;
   tokenId: number;
   amountMinor: bigint;
+  requestedAmountMinor: bigint;
+  feeMinor: bigint;
   targetEntityId: string;
   description: string;
   status: WithdrawalStatus;
@@ -100,6 +102,8 @@ export class CustodyStore {
         user_id TEXT NOT NULL,
         token_id INTEGER NOT NULL,
         amount_minor TEXT NOT NULL,
+        requested_amount_minor TEXT NOT NULL DEFAULT '0',
+        fee_minor TEXT NOT NULL DEFAULT '0',
         target_entity_id TEXT NOT NULL,
         description TEXT NOT NULL,
         status TEXT NOT NULL,
@@ -117,6 +121,18 @@ export class CustodyStore {
         value TEXT NOT NULL
       );
     `);
+    this.ensureWithdrawalColumn('requested_amount_minor', "ALTER TABLE withdrawals ADD COLUMN requested_amount_minor TEXT NOT NULL DEFAULT '0'");
+    this.ensureWithdrawalColumn('fee_minor', "ALTER TABLE withdrawals ADD COLUMN fee_minor TEXT NOT NULL DEFAULT '0'");
+  }
+
+  private ensureWithdrawalColumn(columnName: string, alterSql: string): void {
+    const columns = this.db
+      .query<{ name: string }>('PRAGMA table_info(withdrawals)')
+      .all()
+      .map(row => row.name);
+    if (!columns.includes(columnName)) {
+      this.db.exec(alterSql);
+    }
   }
 
   close(): void {
@@ -170,7 +186,7 @@ export class CustodyStore {
     }));
   }
 
-  private getBalanceAmount(userId: string, tokenId: number): bigint {
+  getBalanceAmount(userId: string, tokenId: number): bigint {
     const row = this.db
       .query<{ amount_minor: string }>('SELECT amount_minor FROM balances WHERE user_id = ?1 AND token_id = ?2')
       .get(userId, tokenId);
@@ -236,6 +252,8 @@ export class CustodyStore {
     userId: string;
     tokenId: number;
     amountMinor: bigint;
+    requestedAmountMinor: bigint;
+    feeMinor: bigint;
     targetEntityId: string;
     description: string;
     createdAt: number;
@@ -249,15 +267,17 @@ export class CustodyStore {
       this.db
         .query(`
           INSERT INTO withdrawals (
-            id, user_id, token_id, amount_minor, target_entity_id, description, status,
+            id, user_id, token_id, amount_minor, requested_amount_minor, fee_minor, target_entity_id, description, status,
             hashlock, route_json, daemon_error, created_at, updated_at, finalized_at, frame_height
-          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'submitting', NULL, NULL, NULL, ?7, ?7, NULL, NULL)
+          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'submitting', NULL, NULL, NULL, ?9, ?9, NULL, NULL)
         `)
         .run(
           input.id,
           input.userId,
           input.tokenId,
           input.amountMinor.toString(),
+          input.requestedAmountMinor.toString(),
+          input.feeMinor.toString(),
           input.targetEntityId,
           input.description,
           input.createdAt,
@@ -387,6 +407,8 @@ export class CustodyStore {
         user_id: string;
         token_id: number;
         amount_minor: string;
+        requested_amount_minor: string;
+        fee_minor: string;
         target_entity_id: string;
         description: string;
         status: WithdrawalStatus;
@@ -398,7 +420,7 @@ export class CustodyStore {
         finalized_at: number | null;
         frame_height: number | null;
       }>(
-        `SELECT id, user_id, token_id, amount_minor, target_entity_id, description, status, hashlock,
+        `SELECT id, user_id, token_id, amount_minor, requested_amount_minor, fee_minor, target_entity_id, description, status, hashlock,
                 route_json, daemon_error, created_at, updated_at, finalized_at, frame_height
          FROM withdrawals WHERE id = ?1`,
       )
@@ -409,6 +431,8 @@ export class CustodyStore {
       userId: row.user_id,
       tokenId: row.token_id,
       amountMinor: toBigInt(row.amount_minor),
+      requestedAmountMinor: toBigInt(row.requested_amount_minor),
+      feeMinor: toBigInt(row.fee_minor),
       targetEntityId: row.target_entity_id,
       description: row.description,
       status: row.status,
@@ -453,6 +477,8 @@ export class CustodyStore {
         user_id: string;
         token_id: number;
         amount_minor: string;
+        requested_amount_minor: string;
+        fee_minor: string;
         target_entity_id: string;
         description: string;
         status: WithdrawalStatus;
@@ -464,7 +490,7 @@ export class CustodyStore {
         finalized_at: number | null;
         frame_height: number | null;
       }>(
-        `SELECT id, user_id, token_id, amount_minor, target_entity_id, description, status, hashlock,
+        `SELECT id, user_id, token_id, amount_minor, requested_amount_minor, fee_minor, target_entity_id, description, status, hashlock,
                 route_json, daemon_error, created_at, updated_at, finalized_at, frame_height
          FROM withdrawals WHERE user_id = ?1 ORDER BY created_at DESC LIMIT ?2`,
       )
@@ -489,6 +515,8 @@ export class CustodyStore {
         userId: row.user_id,
         tokenId: row.token_id,
         amountMinor: toBigInt(row.amount_minor),
+        requestedAmountMinor: toBigInt(row.requested_amount_minor),
+        feeMinor: toBigInt(row.fee_minor),
         targetEntityId: row.target_entity_id,
         description: row.description,
         status: row.status,

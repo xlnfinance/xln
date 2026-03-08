@@ -6,6 +6,8 @@
  */
 
 import { decode, encode } from './snapshot-coder';
+import { buildEntityProfile, mergeProfileWithExisting } from './networking/gossip-helper';
+import type { Profile } from './networking/gossip';
 import type { EntityProfile, EntityTx, Env, NameIndex, NameSearchResult, ProfileUpdateTx } from './types';
 import { formatEntityDisplay, generateEntityAvatar } from './utils';
 
@@ -171,25 +173,55 @@ export const processProfileUpdate = async (
     profile.lastUpdated = env?.timestamp ?? 0;
     profile.hankoSignature = hankoSignature;
 
-    // Sync to gossip layer FIRST (before storing) to ensure it's captured in snapshots
-    if (env?.gossip?.announce) {
-      try {
-        env.gossip.announce({
-          entityId,
-          runtimeId: env.runtimeId,
-          capabilities: [], // ProfileUpdateTx doesn't include capabilities - use empty default
-          publicAccounts: [],
-          hubs: [], // Legacy alias for publicAccounts
+    const buildAnnouncedProfile = (): Profile | null => {
+      if (!env?.gossip?.announce) return null;
+
+      const existingProfile = env.gossip.getProfiles?.().find((candidate) => candidate.entityId === entityId) ?? null;
+      const localReplica = Array.from(env.eReplicas.values()).find((replica) => replica.entityId === entityId);
+      if (localReplica?.state) {
+        const builtProfile = buildEntityProfile(localReplica.state, profile.name, profile.lastUpdated);
+        builtProfile.runtimeId = env.runtimeId;
+        builtProfile.metadata = {
+          ...(builtProfile.metadata || {}),
+          avatar: profile.avatar,
+          bio: profile.bio,
+          website: profile.website,
+          hankoSignature: profile.hankoSignature,
+          lastUpdated: profile.lastUpdated,
+        };
+        return mergeProfileWithExisting(builtProfile, existingProfile);
+      }
+
+      if (existingProfile) {
+        const mergedProfile: Profile = {
+          ...existingProfile,
+          runtimeId: env.runtimeId || existingProfile.runtimeId,
           metadata: {
+            ...(existingProfile.metadata || {}),
             name: profile.name,
             avatar: profile.avatar,
             bio: profile.bio,
             website: profile.website,
-            lastUpdated: profile.lastUpdated,
             hankoSignature: profile.hankoSignature,
+            lastUpdated: profile.lastUpdated,
           },
-        });
-        console.log(`📡 Synced profile update to gossip: ${entityId}`);
+        };
+        return mergeProfileWithExisting(mergedProfile, existingProfile);
+      }
+
+      return null;
+    };
+
+    // Sync to gossip layer FIRST (before storing) to ensure it's captured in snapshots
+    if (env?.gossip?.announce) {
+      try {
+        const announcedProfile = buildAnnouncedProfile();
+        if (announcedProfile) {
+          env.gossip.announce(announcedProfile);
+          console.log(`📡 Synced full profile update to gossip: ${entityId}`);
+        } else {
+          console.warn(`⚠️ Skipped gossip profile update for ${entityId}: no full profile context available`);
+        }
       } catch (gossipError) {
         console.error(`❌ Failed to sync profile to gossip layer for ${entityId}:`, gossipError);
       }

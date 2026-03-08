@@ -144,6 +144,24 @@ body::before {
   margin-top: 26px;
 }
 
+.token-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.token-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.05);
+  border: 1px solid rgba(17, 24, 39, 0.06);
+  font-size: 13px;
+}
+
 .balance-amount {
   font-size: clamp(3rem, 6vw, 5.8rem);
   line-height: 0.95;
@@ -230,6 +248,10 @@ body::before {
   margin-top: 20px;
 }
 
+.action-grid {
+  grid-template-columns: 1fr 1fr;
+}
+
 .action-card,
 .activity-card {
   padding: 24px;
@@ -307,6 +329,10 @@ button.secondary {
   transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 
+button.full-width {
+  width: 100%;
+}
+
 .deposit-links a,
 button.primary {
   color: white;
@@ -362,8 +388,8 @@ select:focus {
 
 .form-foot {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 12px;
 }
 
@@ -467,7 +493,8 @@ pre.activity-sub {
 
 @media (max-width: 940px) {
   .hero,
-  .grid {
+  .grid,
+  .action-grid {
     grid-template-columns: 1fr;
   }
 

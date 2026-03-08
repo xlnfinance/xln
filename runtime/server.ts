@@ -20,6 +20,7 @@ import {
   startRuntimeLoop,
   registerEntityRuntimeHint,
   clearDB,
+  ensureGossipProfiles,
   getPersistedLatestHeight,
   readPersistedFrameJournals,
 } from './runtime';
@@ -3143,11 +3144,27 @@ const resolveRpcPaymentRoute = async (
     if (route.length >= 2) return route;
   }
 
+  try {
+    await ensureGossipProfiles(env, [sourceEntityId, targetEntityId]);
+  } catch {
+    // best effort prefetch only
+  }
+
   const routes = await env.gossip.getNetworkGraph().findPaths(sourceEntityId, targetEntityId, amount, tokenId);
   if (routes.length === 0) {
+    try {
+      await ensureGossipProfiles(env, [sourceEntityId, targetEntityId]);
+    } catch {
+      // best effort retry only
+    }
+  }
+  const retryRoutes = routes.length > 0
+    ? routes
+    : await env.gossip.getNetworkGraph().findPaths(sourceEntityId, targetEntityId, amount, tokenId);
+  if (retryRoutes.length === 0) {
     throw new Error(`No route found from ${sourceEntityId} to ${targetEntityId}`);
   }
-  return routes[0]!.path;
+  return retryRoutes[0]!.path;
 };
 
 type ControlEntitySummary = {
@@ -3331,25 +3348,33 @@ const handleRpcMessage = async (ws: any, msg: any, env: Env | null) => {
         throw new Error('tokenId must be a positive integer');
       }
 
+      const route = await resolveRpcPaymentRoute(env, sourceEntityId, targetEntityId, tokenId, amount);
       const routes = await env.gossip.getNetworkGraph().findPaths(sourceEntityId, targetEntityId, amount, tokenId);
+      const selected =
+        routes.find(candidate => candidate.path.join('>') === route.join('>'))
+        ?? routes[0];
+      if (!selected) {
+        throw new Error(`No route found from ${sourceEntityId} to ${targetEntityId}`);
+      }
       ws.send(
         safeStringify({
           type: 'routes',
           inReplyTo: id,
           data: {
-            routes: routes.map(route => ({
-              path: route.path,
-              hops: route.hops.map(hop => ({
+            routes: routes.map(candidate => ({
+              path: candidate.path,
+              hops: candidate.hops.map(hop => ({
                 from: hop.from,
                 to: hop.to,
                 fee: hop.fee.toString(),
                 feePPM: hop.feePPM,
               })),
-              totalFee: route.totalFee.toString(),
-              senderAmount: route.totalAmount.toString(),
+              totalFee: candidate.totalFee.toString(),
+              senderAmount: candidate.totalAmount.toString(),
               recipientAmount: amount.toString(),
-              probability: route.probability,
+              probability: candidate.probability,
             })),
+            selectedRoute: selected.path,
           },
         }),
       );

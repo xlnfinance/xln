@@ -8,7 +8,7 @@
   import { visibleReplicas } from '../../stores/timeStore';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import type { EntityReplica, Tab } from '$lib/types/ui';
-  import { resolveEntityName } from '$lib/utils/entityNaming';
+  import { resolveEntityName, scheduleGossipProfileFetch } from '$lib/utils/entityNaming';
 
   export let tab: Tab;
   export let jurisdictionFilter: string | null = null;
@@ -202,6 +202,9 @@
 
   $: canAddEntity = allowAdd && !!(jurisdictionFilter || selectedJurisdiction);
   $: canAddJurisdiction = allowAddJurisdiction && !!activeEnv;
+  $: if (isOpen && activeReplicas) {
+    scheduleGossipProfileFetch(Array.from(activeReplicas.values()).map((replica) => replica.entityId));
+  }
 </script>
 
 <Dropdown bind:open={isOpen} minWidth={420} maxWidth={650}>

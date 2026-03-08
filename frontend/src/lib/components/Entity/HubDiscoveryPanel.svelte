@@ -5,7 +5,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { xlnFunctions, xlnEnvironment, getXLN, enqueueEntityInputs, resolveRelayUrls } from '../../stores/xlnStore';
-  import { settings, settingsOperations } from '$lib/stores/settingsStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import {
     normalizeEntityId,
@@ -29,21 +28,16 @@
   let sortAsc = false;
   let sortMode: 'score_desc' | 'score_asc' | 'fee_asc' | 'fee_desc' | 'uptime_desc' | 'uptime_asc' | 'name_asc' | 'name_desc' = 'score_desc';
 
-  const RELAY_OPTIONS_ALL = [
-    { label: 'Prod (xln.finance)', url: 'wss://xln.finance/relay' },
-    { label: 'Local (localhost:9000)', url: 'ws://localhost:9000' },
-  ];
-  const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
-  const isLocalHost = typeof window !== 'undefined' && LOCAL_HOSTS.has(window.location.hostname);
-  const RELAY_OPTIONS = isLocalHost ? RELAY_OPTIONS_ALL : RELAY_OPTIONS_ALL.filter((o) => !o.url.includes('localhost'));
   const DEFAULT_RELAY = resolveRelayUrls()[0] || '';
-
-  let relaySelection = $settings.relayUrl;
-  $: relaySelection = $settings.relayUrl || DEFAULT_RELAY;
+  const relayLabel = (() => {
+    if (typeof window === 'undefined') return 'Relay';
+    return `Relay ${window.location.host}`;
+  })();
+  const relaySelection = DEFAULT_RELAY;
 
   // Hub data structure
   interface Hub {
-    profile: any;
+    profile: unknown;
     entityId: string;
     name: string;
     metadata: {
@@ -177,7 +171,16 @@
     }
   }
 
-  async function waitForP2PReady(currentEnv: any, timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<boolean> {
+  function hasP2PClient(currentEnv: unknown): boolean {
+    try {
+      return Boolean((currentEnv as { runtimeState?: { p2p?: unknown } } | null)?.runtimeState?.p2p);
+    } catch {
+      return false;
+    }
+  }
+
+  async function waitForP2PReady(currentEnv: unknown, timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<boolean> {
+    if (!hasP2PClient(currentEnv)) return false;
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       if (isP2PConnected(currentEnv)) return true;
@@ -261,7 +264,6 @@
             capacity: capacity ?? 0n,
             uptime,
           },
-          runtimeId: profile.runtimeId,
           endpoints: profile.endpoints || [],
           capabilities,
           jurisdiction: profile.metadata?.region || 'global',
@@ -271,6 +273,9 @@
           lastSeen: profile.metadata?.lastUpdated || Date.now(),
           raw: formatRawProfile(profile),
           identicon: generateIdenticon(fullEntityId),
+          ...(typeof profile.runtimeId === 'string' && profile.runtimeId.trim()
+            ? { runtimeId: profile.runtimeId }
+            : {}),
         });
       }
 
@@ -348,24 +353,6 @@
     }
   }
 
-  async function updateRelay(url: string) {
-    if (!isLocalHost && url.includes('localhost')) {
-      relaySelection = DEFAULT_RELAY;
-      settingsOperations.setRelayUrl(DEFAULT_RELAY);
-      error = 'Local relay is disabled on non-localhost environments.';
-      return;
-    }
-    settingsOperations.setRelayUrl(url);
-    const currentEnv = env;
-    if (!currentEnv) return;
-    try {
-      await ensureRuntimeRelay(currentEnv, url);
-      error = '';
-    } catch (err) {
-      error = (err as Error)?.message || 'Failed to update relay';
-    }
-  }
-
   async function waitForAccountReady(currentEnv: any, ownerEntityId: string, counterpartyEntityId: string, timeoutMs = 20_000): Promise<boolean> {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
@@ -384,7 +371,7 @@
     const xln = await getXLN();
     const p2p = xln.getP2P?.(currentEnv as any) as { relayUrls?: string[]; isConnected?: () => boolean; updateConfig?: (cfg: any) => void } | null | undefined;
     if (!p2p?.updateConfig) {
-      throw new Error('P2P is not running for this runtime yet. Create or restore the runtime first.');
+      throw new Error('Create or restore a wallet runtime first. Hub gossip uses the active runtime P2P client.');
     }
     const currentRelays = Array.isArray(p2p.relayUrls) ? p2p.relayUrls : [];
     if (currentRelays.length !== 1 || currentRelays[0] !== desired) {
@@ -406,13 +393,17 @@
 
   // Auto-load once on mount. No background retries; user can press Refresh.
   onMount(() => {
-    if (!isLocalHost && relaySelection.includes('localhost')) {
-      relaySelection = DEFAULT_RELAY;
-      settingsOperations.setRelayUrl(DEFAULT_RELAY);
-    }
     if (env) {
       hasDiscoveredOnce = true;
       (async () => {
+        if (!hasP2PClient(env)) {
+          loading = false;
+          error = 'Create or restore a wallet runtime first. Hub gossip is attached to the active runtime.';
+          setTimeout(() => {
+            hasDiscoveredOnce = false;
+          }, 1500);
+          return;
+        }
         const ready = await waitForP2PReady(env);
         if (!ready) {
           loading = false;
@@ -433,6 +424,14 @@
   $: if (env && hubs.length === 0 && !loading && !hasDiscoveredOnce) {
     hasDiscoveredOnce = true;
     (async () => {
+      if (!hasP2PClient(env)) {
+        loading = false;
+        error = 'Create or restore a wallet runtime first. Hub gossip is attached to the active runtime.';
+        setTimeout(() => {
+          hasDiscoveredOnce = false;
+        }, 1500);
+        return;
+      }
       const ready = await waitForP2PReady(env);
       if (!ready) {
         loading = false;
@@ -451,14 +450,7 @@
   <header class="panel-header">
     <h3>Hubs</h3>
     <div class="header-controls">
-      <select class="relay-select" bind:value={relaySelection} on:change={(e) => updateRelay((e.currentTarget as HTMLSelectElement).value)}>
-        {#each RELAY_OPTIONS as option}
-          <option value={option.url}>{option.label}</option>
-        {/each}
-        {#if !RELAY_OPTIONS.some(o => o.url === relaySelection)}
-          <option value={relaySelection}>Custom</option>
-        {/if}
-      </select>
+      <span class="relay-badge" title={relaySelection}>{relayLabel}</span>
       <button class="refresh-btn" on:click={() => discoverHubs(true)} disabled={loading}>
         <span class:spinning={loading}><RefreshCw size={14} /></span>
         Refresh
@@ -632,7 +624,9 @@
     gap: 8px;
   }
 
-  .relay-select {
+  .relay-badge {
+    display: inline-flex;
+    align-items: center;
     background: #1c1917;
     border: 1px solid #292524;
     color: #a8a29e;

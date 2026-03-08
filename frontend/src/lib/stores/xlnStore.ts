@@ -23,6 +23,9 @@ export const xlnInstance = writable<XLNModule | null>(null);
 let unregisterEnvChange: (() => void) | null = null;
 let globalDebugExposed = false;
 const REQUIRED_RUNTIME_SCHEMA_VERSION = 2;
+const DEV_SESSION_STORAGE_KEY = 'xln-dev-session-id';
+const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
+let devSessionMonitor: ReturnType<typeof setInterval> | null = null;
 
 type DebugWindow = Window & typeof globalThis & {
   XLN?: XLNModule;
@@ -198,6 +201,103 @@ export function resolveRelayUrls(): string[] {
   return [relay];
 }
 
+const isLocalDevOrigin = (): boolean =>
+  typeof window !== 'undefined' && LOCAL_DEV_HOSTS.has(window.location.hostname);
+
+type HealthResponse = {
+  devSessionId?: string | null;
+  system?: {
+    runtime?: boolean;
+  };
+};
+
+const fetchHealthResponse = async (): Promise<HealthResponse | null> => {
+  if (typeof window === 'undefined') return null;
+  const baseOrigin = window.location.origin;
+  const url = new URL('/api/health', resolveConfiguredApiBase(baseOrigin)).toString();
+  try {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) return null;
+    return (await response.json()) as HealthResponse;
+  } catch {
+    return null;
+  }
+};
+
+const clearDevClientPersistence = async (): Promise<void> => {
+  try {
+    const currentEnv = get(xlnEnvironment);
+    const xln = await getXLN();
+    if (currentEnv && typeof xln.stopP2P === 'function') {
+      try {
+        xln.stopP2P(currentEnv);
+      } catch {
+        // best effort
+      }
+    }
+    if (typeof xln.clearDB === 'function') {
+      await xln.clearDB(currentEnv ?? undefined);
+    }
+  } catch (error) {
+    console.warn('[xlnStore] Failed to clear browser runtime DB during dev session reset:', error);
+  }
+
+  try {
+    localStorage.clear();
+  } catch {
+    // ignore storage errors
+  }
+
+  try {
+    sessionStorage.clear();
+  } catch {
+    // ignore storage errors
+  }
+};
+
+const startDevSessionMonitor = (initialSessionId: string): void => {
+  if (!isLocalDevOrigin() || !initialSessionId || devSessionMonitor) return;
+  let knownSessionId = initialSessionId;
+  devSessionMonitor = setInterval(() => {
+    void (async () => {
+      const health = await fetchHealthResponse();
+      const nextSessionId = String(health?.devSessionId || '').trim();
+      if (!nextSessionId || nextSessionId === knownSessionId) return;
+      knownSessionId = nextSessionId;
+      await clearDevClientPersistence();
+      try {
+        localStorage.setItem(DEV_SESSION_STORAGE_KEY, nextSessionId);
+      } catch {
+        // ignore storage errors
+      }
+      window.location.reload();
+    })();
+  }, 1500);
+};
+
+export async function prepareDevSession(): Promise<void> {
+  if (!isLocalDevOrigin()) return;
+  const health = await fetchHealthResponse();
+  const sessionId = String(health?.devSessionId || '').trim();
+  if (!sessionId) return;
+  const storedSessionId = (() => {
+    try {
+      return localStorage.getItem(DEV_SESSION_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  })();
+  if (storedSessionId !== sessionId) {
+    await clearDevClientPersistence();
+    try {
+      localStorage.setItem(DEV_SESSION_STORAGE_KEY, sessionId);
+    } catch {
+      // ignore storage errors
+    }
+  }
+  startDevSessionMonitor(sessionId);
+}
+
 // Derived stores for convenience
 export const replicas = derived(xlnEnvironment, $env => $env?.eReplicas || new Map());
 
@@ -236,6 +336,10 @@ function stopP2PPoll() {
   if (p2pPollTimer) {
     clearInterval(p2pPollTimer);
     p2pPollTimer = null;
+  }
+  if (devSessionMonitor) {
+    clearInterval(devSessionMonitor);
+    devSessionMonitor = null;
   }
 }
 
