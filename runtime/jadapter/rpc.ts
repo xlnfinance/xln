@@ -830,19 +830,13 @@ export async function createRpcAdapter(
       }
       if (mints.length === 0) return [];
 
-      const batchMint = new ethers.Contract(
-        await depository.getAddress(),
-        ['function mintToReserveBatch((bytes32 entity,uint256 tokenId,uint256 amount)[] mints) external'],
-        signer as any,
-      );
-      const payload = mints.map((mint) => ({
-        entity: mint.entityId,
-        tokenId: BigInt(mint.tokenId),
-        amount: mint.amount,
-      }));
-      const tx = await batchMint.mintToReserveBatch(payload, await buildFeeOverrides());
-      const receipt = await waitForReceipt(tx as any, 'mintToReserveBatch');
-      return parseDepositoryReceiptEvents(receipt);
+      const events: JEvent[] = [];
+      for (const mint of mints) {
+        const tx = await depository.mintToReserve(mint.entityId, mint.tokenId, mint.amount, await buildFeeOverrides());
+        const receipt = await waitForReceipt(tx as any, 'mintToReserve');
+        events.push(...parseDepositoryReceiptEvents(receipt));
+      }
+      return events;
     },
 
     async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
