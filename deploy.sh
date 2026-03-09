@@ -92,7 +92,7 @@ if [ -n "$REMOTE_HOST" ]; then
     git push origin main
   fi
 
-  remote_cmd="cd /root/xln 2>/dev/null || cd ~/xln 2>/dev/null || exit 1; PATH=\"\$HOME/.bun/bin:\$PATH\" git fetch origin main && git checkout main && git pull --ff-only origin main && ./deploy.sh"
+  remote_cmd="cd /root/xln 2>/dev/null || cd ~/xln 2>/dev/null || exit 1; PATH=\"\$HOME/.bun/bin:\$PATH\" git fetch origin main && git stash push --include-untracked -m xln-deploy-prepull -- frontend/static/contracts jurisdictions/jurisdictions.json >/dev/null 2>&1 || true && git checkout main && git pull --ff-only origin main && ./deploy.sh"
   if [ "$FRESH" = "1" ]; then
     remote_cmd="$remote_cmd --fresh"
   fi
