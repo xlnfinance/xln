@@ -198,3 +198,9 @@
     - `bun build runtime/server.ts --target=bun --outfile=/tmp/xln-server-check.js`
     - `bun build runtime/scripts/start-custody-prod.ts --target=bun --outfile=/tmp/xln-custody-prod-check.js`
     - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/xln-runtime-browser-check.js`
+- 2026-03-09T20:30:55Z prod process-path fix:
+  - reproduced that current source builds strict profiles locally, so the remaining prod bug was not the builder path but the server process/bootstrap path
+  - [scripts/start-server.sh](/Users/egor/xln/scripts/start-server.sh) now kills stale listeners on `:8080` before `exec`, matching the existing custody wrapper behavior and preventing nginx from talking to an old orphaned Bun process
+  - [scripts/start-server.sh](/Users/egor/xln/scripts/start-server.sh) now exports `XLN_USE_PREDEPLOYED_ADDRESSES=true` and `XLN_JURISDICTIONS_PATH=/root/xln/jurisdictions/jurisdictions.json` so prod main server uses the same canonical contract config path as custody
+  - [scripts/start-custody.sh](/Users/egor/xln/scripts/start-custody.sh) now exports the same canonical `XLN_USE_PREDEPLOYED_ADDRESSES` / `XLN_JURISDICTIONS_PATH` env vars for the custody wrapper
+  - [scripts/bootstrap-hub.ts](/Users/egor/xln/scripts/bootstrap-hub.ts) now imports [runtime.ts](/Users/egor/xln/runtime/runtime.ts) explicitly, removing one more extensionless source ambiguity from the prod bootstrap path
