@@ -7,6 +7,16 @@ set -e
 ANVIL_STATE="/root/xln/data/anvil-state.json"
 ANVIL_LOG="/root/xln/logs/anvil.log"
 
+kill_by_port() {
+    local port="$1"
+    local pids
+    pids="$(lsof -ti TCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
+    if [ -n "$pids" ]; then
+        echo "[start-anvil] killing stale listeners on :${port} -> ${pids}"
+        echo "$pids" | xargs kill -9 2>/dev/null || true
+    fi
+}
+
 # Ensure foundry binaries are available
 export PATH="$HOME/.bun/bin:$HOME/.local/share/pnpm:/root/.foundry/bin:$PATH"
 
@@ -18,6 +28,8 @@ if [ "$1" = "--reset" ]; then
     echo "🔄 Resetting anvil state..."
     rm -f "$ANVIL_STATE"
 fi
+
+kill_by_port 8545
 
 # Start anvil
 if [ -f "$ANVIL_STATE" ]; then
