@@ -548,6 +548,7 @@ test.describe('E2E Custody Flow', () => {
         requireHubMesh: true,
         requireMarketMaker: false,
         minHubCount: 3,
+        forceReset: true,
       });
 
       const custodySupport = await startCustodySupport({

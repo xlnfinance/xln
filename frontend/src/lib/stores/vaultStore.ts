@@ -772,7 +772,8 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
             signerId: signerAddress,
             data: {
               isProposer: true,
-              config: entityConfig
+              config: entityConfig,
+              profileName: runtime.name,
             }
           }],
           entityInputs: []
@@ -1106,7 +1107,8 @@ export const vaultOperations = {
           signerId: signerAddress,
           data: {
             isProposer: true,
-            config: entityConfig
+            config: entityConfig,
+            profileName: name,
           }
         }],
         entityInputs: []

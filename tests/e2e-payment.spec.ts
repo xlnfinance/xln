@@ -174,6 +174,7 @@ test.describe('E2E HTLC Payment Flow', () => {
       requireHubMesh: true,
       requireMarketMaker: false,
       minHubCount: 3,
+      forceReset: true,
     });
     process.stdout.write(
       `  Baseline ready: hubs=${baseline.hubMesh?.hubIds?.length ?? 0}, mm=${baseline.marketMaker?.entityId ?? 'none'}\n`,

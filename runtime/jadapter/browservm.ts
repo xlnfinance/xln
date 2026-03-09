@@ -7,8 +7,8 @@
 import { ethers } from 'ethers';
 import type { Provider, Signer } from 'ethers';
 
-import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types';
-import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types';
+import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types/index';
+import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types/index';
 
 import type { BrowserVMState, JTx } from '../types';
 import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, JTokenInfo, JReserveMint } from './types';

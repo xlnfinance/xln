@@ -128,3 +128,23 @@
 - Made prod custody startup restart-safe:
   - [runtime/scripts/start-custody-prod.ts](/Users/egor/xln/runtime/scripts/start-custody-prod.ts) now reuses an already-live custody daemon/service on `:8088/:8087` when they match the deterministic custody identity.
   - [scripts/start-custody.sh](/Users/egor/xln/scripts/start-custody.sh) now kills stale orphan listeners on `:8087/:8088` before launching, so PM2 restarts cannot leave LevelDB locks behind.
+- Fixed strict WS gossip serialization in [runtime/networking/ws-protocol.ts](/Users/egor/xln/runtime/networking/ws-protocol.ts): websocket messages now use the same canonical tagged JSON codec as runtime persistence, so gossip payloads with `bigint`/`Map` survive round-trip without custom `_type` drift.
+- Fixed E2E mesh debug endpoints in [runtime/scripts/e2e-mesh-control.ts](/Users/egor/xln/runtime/scripts/e2e-mesh-control.ts) to use `safeStringify(...)`, preventing debug API crashes on `bigint` payloads during custody bootstrap and mesh inspection.
+- Removed brittle bare-directory TypeChain imports across runtime entry points; all runtime/J-adapter/server/e2e node imports now resolve the explicit `jurisdictions/typechain-types/index` barrel. This fixes Bun module resolution failures that were crashing `xln-custody` on prod restart.
+- Propagated explicit `profileName` through runtime entity creation/import paths:
+  - [runtime/types.ts](/Users/egor/xln/runtime/types.ts)
+  - [runtime/runtime.ts](/Users/egor/xln/runtime/runtime.ts)
+  - [runtime/server.ts](/Users/egor/xln/runtime/server.ts)
+  - [runtime/orchestrator/daemon-control.ts](/Users/egor/xln/runtime/orchestrator/daemon-control.ts)
+  - [frontend/src/lib/stores/vaultStore.ts](/Users/egor/xln/frontend/src/lib/stores/vaultStore.ts)
+  - [frontend/src/lib/utils/entityFactory.ts](/Users/egor/xln/frontend/src/lib/utils/entityFactory.ts)
+  - [frontend/src/lib/components/Entity/FormationPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/FormationPanel.svelte)
+  New entities now seed their public profile name from the creation source instead of falling back to anonymous/derived placeholders.
+- Fixed the real cause of recent fresh-spec E2E flakiness in [tests/utils/e2e-baseline.ts](/Users/egor/xln/tests/utils/e2e-baseline.ts): `ensureE2EBaseline(...)` now supports `forceReset: true`, so specs that require a clean mesh cannot accidentally reuse shard state left by an earlier spec. Applied to:
+  - [tests/e2e-payment.spec.ts](/Users/egor/xln/tests/e2e-payment.spec.ts)
+  - [tests/e2e-custody.spec.ts](/Users/egor/xln/tests/e2e-custody.spec.ts)
+  - [tests/e2e-swap.spec.ts](/Users/egor/xln/tests/e2e-swap.spec.ts)
+  - [tests/e2e-swap-isolated.spec.ts](/Users/egor/xln/tests/e2e-swap-isolated.spec.ts)
+- Verified the current worktree on isolated Playwright stacks:
+  - targeted `e2e-payment + e2e-custody` passed
+  - full isolated suite passed: `17 passed, 6 skipped`

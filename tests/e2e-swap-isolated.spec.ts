@@ -420,6 +420,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
+        forceReset: true,
       });
 
       const hubId = await getPrimaryHubId(page);
