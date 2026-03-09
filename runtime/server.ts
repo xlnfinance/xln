@@ -1819,39 +1819,19 @@ const RPC_MARKET_PUBLISH_MS = 1000;
 const RPC_MARKET_MAX_DEPTH = 100;
 const RPC_MARKET_DEFAULT_DEPTH = 20;
 
-const normalizeHubProfileForRelay = (profile: Profile): Profile => {
-  const capabilities = profile.capabilities;
-  const rawBaseFee = profile.metadata.rebalanceBaseFee;
-  const rawLiquidityFeeBps = profile.metadata.rebalanceLiquidityFeeBps;
-  const rawGasFee = profile.metadata.rebalanceGasFee;
-  const rawPolicyVersion = Number(profile.metadata.policyVersion ?? 1);
-  const rawTimeoutMs = Number(profile.metadata.rebalanceTimeoutMs ?? 10 * 60 * 1000);
-  return {
-    ...profile,
-    name: profile.name,
-    capabilities: Array.from(new Set([...capabilities, 'hub', 'routing', 'faucet'])),
-    metadata: {
-      ...profile.metadata,
-      isHub: true,
-      region: profile.metadata.region || 'global',
-      policyVersion: Number.isFinite(rawPolicyVersion) && rawPolicyVersion > 0 ? rawPolicyVersion : 1,
-      rebalanceBaseFee:
-        rawBaseFee !== undefined && rawBaseFee !== null
-          ? String(rawBaseFee)
-          : String(10n ** 17n),
-      rebalanceLiquidityFeeBps:
-        rawLiquidityFeeBps !== undefined && rawLiquidityFeeBps !== null
-          ? String(rawLiquidityFeeBps)
-          : '1',
-      rebalanceGasFee:
-        rawGasFee !== undefined && rawGasFee !== null
-          ? String(rawGasFee)
-          : '0',
-      rebalanceTimeoutMs:
-        Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0 ? Math.floor(rawTimeoutMs) : 10 * 60 * 1000,
-    },
-    lastUpdated: profile.lastUpdated > 0 ? profile.lastUpdated : Date.now(),
-  };
+const rebuildRelayHubProfilesFromEnv = (env: Env): void => {
+  if (relayStore.activeHubEntityIds.length === 0) return;
+  const relayUrl = resolveAdvertisedRelayUrl(activeServerOptions.port);
+  seedHubProfilesInRelayCache(
+    env,
+    relayStore.activeHubEntityIds.map((entityId) => ({
+      entityId,
+      name: getProfileNameForEntity(env, entityId),
+      region: 'global',
+      capabilities: ['hub', 'routing', 'faucet'],
+    })),
+    relayUrl,
+  );
 };
 
 const sendEntityInputDirectViaRelaySocket = (env: Env, targetRuntimeId: string, input: DeliverableEntityInput): boolean => {
@@ -2298,17 +2278,7 @@ const resetServerDebugState = (
   preserveHubs = true,
 ): { remainingReplicas: number; remainingProfiles: number } => {
   resetRelayStore(relayStore);
-
-  // Preserve full hub profiles (runtimeId + encryption keys) so immediate post-reset
-  // routing does not fail with P2P_NO_PUBKEY before fresh gossip arrives.
   const hubSet = new Set(relayStore.activeHubEntityIds.map(id => id.toLowerCase()));
-  const preservedHubProfiles = preserveHubs
-    ? new Map(
-        Array.from(relayStore.gossipProfiles.entries()).filter(([entityId]) =>
-          hubSet.has(String(entityId).toLowerCase()),
-        ),
-      )
-    : new Map<string, { profile: any; timestamp: number }>();
 
   if (env) {
     const runtimeState = env.runtimeState ?? {};
@@ -2371,27 +2341,11 @@ const resetServerDebugState = (
     }
 
     relayStore.gossipProfiles.clear();
-    if (preserveHubs && preservedHubProfiles.size > 0) {
-      for (const [entityId, entry] of preservedHubProfiles.entries()) {
-        relayStore.gossipProfiles.set(entityId, { ...entry, profile: normalizeHubProfileForRelay(entry.profile) });
-      }
-    } else {
-      // Fallback rebuild from current env gossip profile cache.
-      const profiles = env.gossip?.getProfiles?.() || [];
-      for (const profile of profiles) {
-        const entityId = String(profile?.entityId || '').toLowerCase();
-        if (!entityId) continue;
-        if (preserveHubs && !hubSet.has(entityId)) continue;
-        storeGossipProfile(relayStore, preserveHubs ? normalizeHubProfileForRelay(profile) : profile);
-      }
+    if (preserveHubs) {
+      rebuildRelayHubProfilesFromEnv(env);
     }
   } else {
     relayStore.gossipProfiles.clear();
-    if (preserveHubs) {
-      for (const [entityId, entry] of preservedHubProfiles.entries()) {
-        relayStore.gossipProfiles.set(entityId, { ...entry, profile: normalizeHubProfileForRelay(entry.profile) });
-      }
-    }
   }
 
   return {
