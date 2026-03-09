@@ -44,7 +44,7 @@ export type {
   EntityInput,
   RoutedEntityInput,
 } from './types';
-export type { PersistedFrameJournal } from './runtime';
+export type { PersistedFrameJournal } from './runtime.ts';
 
 export type { Profile, GossipLayer } from './networking/gossip';
 export type { PaymentRoute } from './routing/pathfinding';
@@ -94,7 +94,7 @@ import type {
   RoutedEntityInput,
 } from './types';
 import type { JAdapter } from './jadapter/types';
-import type { PersistedFrameJournal } from './runtime';
+import type { PersistedFrameJournal } from './runtime.ts';
 
 export type QueueEntityInputPayload = {
   type: string;

@@ -4,7 +4,7 @@
  */
 
 import { startRuntimeWsServer } from '../networking/ws-server';
-import { main, startP2P, process as runtimeProcess, enqueueRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime';
+import { main, startP2P, process as runtimeProcess, enqueueRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime.ts';
 import { processUntil, converge } from './helpers';
 import { isLeft, deriveDelta } from '../account-utils';
 import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account-crypto';

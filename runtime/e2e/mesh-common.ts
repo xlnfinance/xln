@@ -1,5 +1,5 @@
 import type { AccountMachine, Delta, EntityInput, Env, JEvent } from '../types';
-import { enqueueRuntimeInput } from '../runtime';
+import { enqueueRuntimeInput } from '../runtime.ts';
 
 export const HUB_MESH_TOKEN_ID = 1;
 export const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;

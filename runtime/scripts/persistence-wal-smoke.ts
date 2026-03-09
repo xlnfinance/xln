@@ -8,7 +8,7 @@ import {
   getRuntimeDb,
   tryOpenDb,
   closeRuntimeDb,
-} from '../runtime';
+} from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
 

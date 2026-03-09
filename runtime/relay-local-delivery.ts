@@ -5,7 +5,7 @@
  * here via a callback so the router itself stays transport/crypto-agnostic.
  */
 
-import { enqueueRuntimeInput, registerEntityRuntimeHint } from './runtime';
+import { enqueueRuntimeInput, registerEntityRuntimeHint } from './runtime.ts';
 import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from './networking/p2p-crypto';
 import type { Env, EntityInput } from './types';
 import {
