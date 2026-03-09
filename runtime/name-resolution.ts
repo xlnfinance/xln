@@ -1,237 +1,122 @@
 /**
- * Name Resolution & Profile Management System
+ * Profile lookup helpers.
  *
- * Combines basic name registry with gossip layer for profile storage.
- * Includes autocomplete functionality and hanko-signed profile updates.
+ * Public profile fields live in entity consensus state and are announced into gossip.
+ * We do not keep a second profile source of truth in the runtime DB.
  */
 
-import { decode, encode } from './snapshot-coder';
-import { buildEntityProfile, createProfileSignerResolver } from './networking/gossip-helper';
-import type { Profile } from './networking/gossip';
-import type { EntityProfile, EntityTx, Env, NameIndex, NameSearchResult, ProfileUpdateTx } from './types';
+import type { EntityTx, Env, NameSearchResult, ProfileUpdateTx } from './types';
 import { formatEntityDisplay, generateEntityAvatar } from './utils';
 
-// === PROFILE STORAGE ===
-
-/**
- * Store entity profile in gossip layer
- */
-export const storeProfile = async (db: any, profile: EntityProfile): Promise<void> => {
-  if (!db) return;
-
-  try {
-    // Store profile (using encode for BigInt safety)
-    await db.put(`profile:${profile.entityId}`, encode(profile));
-
-    // Update name index for autocomplete
-    await updateNameIndex(db, profile.name, profile.entityId);
-
-    console.log(`📝 Stored profile for ${profile.name} (${formatEntityDisplay(profile.entityId)})`);
-  } catch {
-    // Silent skip - DB unavailable or in-memory mode
-  }
+type DisplayProfile = {
+  entityId: string;
+  name: string;
+  avatar: string;
+  lastUpdated: number;
 };
 
-/**
- * Get entity profile from gossip layer
- */
-export const getProfile = async (db: any, entityId: string): Promise<EntityProfile | null> => {
-  if (!db) return null;
+const normalizeId = (value: string): string => String(value || '').trim().toLowerCase();
 
-  try {
-    const data = await db.get(`profile:${entityId}`);
-    return decode(data) as EntityProfile;
-  } catch (error) {
-    // Profile doesn't exist - return null
-    return null;
-  }
+const normalizeName = (value: string, entityId: string): string => {
+  const trimmed = String(value || '').trim();
+  return trimmed.length > 0 ? trimmed : formatEntityDisplay(entityId);
 };
 
-/**
- * Update name index for autocomplete
- */
-const updateNameIndex = async (db: any, name: string, entityId: string): Promise<void> => {
-  try {
-    // Get existing index
-    let nameIndex: NameIndex = {};
-    try {
-      const data = await db.get('name-index');
-      nameIndex = decode(data);
-    } catch {
-      // Index doesn't exist yet
-    }
+const collectProfiles = (env: Env | null | undefined): Map<string, DisplayProfile> => {
+  const profiles = new Map<string, DisplayProfile>();
+  if (!env) return profiles;
 
-    // Update index
-    nameIndex[name.toLowerCase()] = entityId;
-
-    // Store updated index (using encode for BigInt safety)
-    await db.put('name-index', encode(nameIndex));
-  } catch (error) {
-    console.error('Error updating name index:', error);
-  }
-};
-
-// === AUTOCOMPLETE SYSTEM ===
-
-/**
- * Search entity names with autocomplete
- */
-export const searchEntityNames = async (db: any, query: string, limit: number = 10): Promise<NameSearchResult[]> => {
-  if (!db || !query.trim()) return [];
-
-  try {
-    // Get name index
-    const data = await db.get('name-index');
-    const nameIndex: NameIndex = decode(data);
-
-    const queryLower = query.toLowerCase();
-    const results: NameSearchResult[] = [];
-
-    // Search through names
-    for (const [name, entityId] of Object.entries(nameIndex)) {
-      if (name.includes(queryLower)) {
-        // Calculate relevance score
-        let relevance = 0;
-        if (name.startsWith(queryLower)) {
-          relevance = 1.0; // Exact prefix match
-        } else if (name.includes(queryLower)) {
-          relevance = 0.7; // Contains query
-        }
-
-        // Get avatar (generated or custom)
-        const profile = await getProfile(db, entityId);
-        const avatar = profile?.avatar || generateEntityAvatar(entityId);
-
-        results.push({
-          entityId,
-          name: profile?.name || formatEntityDisplay(entityId),
-          avatar,
-          relevance,
-        });
-      }
-    }
-
-    // Sort by relevance and name
-    results.sort((a, b) => {
-      if (a.relevance !== b.relevance) {
-        return b.relevance - a.relevance; // Higher relevance first
-      }
-      return a.name.localeCompare(b.name); // Alphabetical
+  const gossipProfiles = env.gossip?.getProfiles?.() || [];
+  for (const profile of gossipProfiles) {
+    const entityId = normalizeId(profile.entityId);
+    if (!entityId) continue;
+    profiles.set(entityId, {
+      entityId,
+      name: normalizeName(profile.name, entityId),
+      avatar: typeof profile.avatar === 'string' ? profile.avatar : '',
+      lastUpdated: Number.isFinite(profile.lastUpdated) ? profile.lastUpdated : 0,
     });
-
-    return results.slice(0, limit);
-  } catch (error) {
-    console.error('Error searching entity names:', error);
-    return [];
   }
+
+  for (const replica of env.eReplicas.values()) {
+    const entityId = normalizeId(replica.entityId);
+    if (!entityId) continue;
+    const localProfile = replica.state.profile;
+    profiles.set(entityId, {
+      entityId,
+      name: normalizeName(localProfile.name, entityId),
+      avatar: localProfile.avatar,
+      lastUpdated: Number.isFinite(replica.state.timestamp) ? replica.state.timestamp : env.timestamp,
+    });
+  }
+
+  return profiles;
 };
 
-// === PROFILE UPDATES VIA CONSENSUS ===
-
-/**
- * Create profile update transaction
- */
 export const createProfileUpdateTx = (
   updates: ProfileUpdateTx & { entityId: string; hankoSignature?: string },
 ): EntityTx => {
   return {
-    type: 'profile-update' as const,
+    type: 'profile-update',
     data: {
       profile: updates,
     },
   };
 };
 
-/**
- * Process profile update transaction
- */
-export const processProfileUpdate = async (
-  db: any,
-  entityId: string,
-  updates: ProfileUpdateTx,
-  hankoSignature: string,
-  env?: Env,
-): Promise<void> => {
-  console.log(`🏷️ processProfileUpdate called for ${entityId} with updates:`, updates);
-  try {
-    // Get existing profile or create new one
-    let profile = await getProfile(db, entityId);
+export const searchEntityNames = async (
+  env: Env | null | undefined,
+  query: string,
+  limit: number = 10,
+): Promise<NameSearchResult[]> => {
+  const trimmedQuery = String(query || '').trim().toLowerCase();
+  if (!trimmedQuery) return [];
 
-    if (!profile) {
-      // Create new profile with defaults
-      profile = {
-        entityId,
-        name: formatEntityDisplay(entityId), // Default to formatted entity ID
-        lastUpdated: env?.timestamp ?? 0,
-        hankoSignature,
-      };
-    }
-
-    // Apply updates
-    if (updates.name !== undefined) profile.name = updates.name;
-    if (updates.avatar !== undefined) profile.avatar = updates.avatar;
-    if (updates.bio !== undefined) profile.bio = updates.bio;
-    if (updates.website !== undefined) profile.website = updates.website;
-
-    // Update metadata
-    profile.lastUpdated = env?.timestamp ?? 0;
-    profile.hankoSignature = hankoSignature;
-
-    const buildAnnouncedProfile = (): Profile => {
-      if (!env?.gossip?.announce) {
-        throw new Error('PROFILE_UPDATE_GOSSIP_UNAVAILABLE');
-      }
-      const localReplica = Array.from(env.eReplicas.values()).find((replica) => replica.entityId === entityId);
-      if (!localReplica?.state) {
-        throw new Error(`PROFILE_UPDATE_LOCAL_REPLICA_REQUIRED: entity=${entityId}`);
-      }
-      localReplica.state.profile = {
-        name: profile.name,
-        avatar: profile.avatar || '',
-        bio: profile.bio || '',
-        website: profile.website || '',
-      };
-      const builtProfile = buildEntityProfile(localReplica.state, profile.lastUpdated, createProfileSignerResolver(env));
-      builtProfile.runtimeId = env.runtimeId;
-      return builtProfile;
-    };
-
-    // Sync to gossip layer FIRST (before storing) to ensure it's captured in snapshots
-    if (env?.gossip?.announce) {
-      try {
-        const announcedProfile = buildAnnouncedProfile();
-        env.gossip.announce(announcedProfile);
-        console.log(`📡 Synced full profile update to gossip: ${entityId}`);
-      } catch (gossipError) {
-        console.error(`❌ Failed to sync profile to gossip layer for ${entityId}:`, gossipError);
-      }
-    }
-
-    // Store updated profile to database after gossip sync
-    await storeProfile(db, profile);
-
-    console.log(`✅ Updated profile for ${profile.name} (${formatEntityDisplay(entityId)})`);
-  } catch (error) {
-    console.error('Error processing profile update:', error);
+  const matches: NameSearchResult[] = [];
+  for (const profile of collectProfiles(env).values()) {
+    const loweredName = profile.name.toLowerCase();
+    if (!loweredName.includes(trimmedQuery)) continue;
+    const relevance = loweredName.startsWith(trimmedQuery) ? 1 : 0.7;
+    matches.push({
+      entityId: profile.entityId,
+      name: profile.name,
+      avatar: profile.avatar || generateEntityAvatar(profile.entityId),
+      relevance,
+    });
   }
-};
-// === NAME RESOLUTION HELPERS ===
 
-/**
- * Resolve entity ID to display name
- */
-export const resolveEntityName = async (db: any, entityId: string): Promise<string> => {
-  const profile = await getProfile(db, entityId);
-  return profile?.name || formatEntityDisplay(entityId);
+  matches.sort((left, right) => {
+    if (left.relevance !== right.relevance) return right.relevance - left.relevance;
+    return left.name.localeCompare(right.name);
+  });
+
+  return matches.slice(0, Math.max(1, Math.floor(limit)));
 };
 
-/**
- * Get entity display info (name + avatar)
- */
-export const getEntityDisplayInfo = async (db: any, entityId: string): Promise<{ name: string; avatar: string }> => {
-  const profile = await getProfile(db, entityId);
+export const resolveEntityName = async (
+  env: Env | null | undefined,
+  entityId: string,
+): Promise<string | null> => {
+  const normalizedEntityId = normalizeId(entityId);
+  if (!normalizedEntityId) return null;
+  return collectProfiles(env).get(normalizedEntityId)?.name ?? formatEntityDisplay(normalizedEntityId);
+};
+
+export const getEntityDisplayInfo = async (
+  env: Env | null | undefined,
+  entityId: string,
+): Promise<{ name: string; avatar: string }> => {
+  const normalizedEntityId = normalizeId(entityId);
+  if (!normalizedEntityId) {
+    return {
+      name: 'Entity',
+      avatar: generateEntityAvatar('entity'),
+    };
+  }
+
+  const profile = collectProfiles(env).get(normalizedEntityId);
   return {
-    name: profile?.name || formatEntityDisplay(entityId),
-    avatar: profile?.avatar || generateEntityAvatar(entityId),
+    name: profile?.name ?? formatEntityDisplay(normalizedEntityId),
+    avatar: profile?.avatar || generateEntityAvatar(normalizedEntityId),
   };
 };

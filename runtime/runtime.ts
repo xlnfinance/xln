@@ -4286,9 +4286,11 @@ export {
 } from './account-crypto.js';
 
 // === NAME RESOLUTION WRAPPERS (override imports) ===
-const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(db, query, limit);
-const resolveEntityName = (entityId: string) => resolveEntityNameOriginal(db, entityId);
-const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayInfoFromProfileOriginal(db, entityId);
+// Runtime no longer keeps a module-global env/db. These legacy wrappers stay
+// available for external callers, but they only expose deterministic fallbacks.
+const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(null, query, limit);
+const resolveEntityName = (entityId: string) => resolveEntityNameOriginal(null, entityId);
+const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayInfoFromProfileOriginal(null, entityId);
 
 // Avatar functions are already imported and exported above
 
