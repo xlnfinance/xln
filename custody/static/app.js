@@ -7,6 +7,7 @@
  *
  * @typedef {{
  *   entityId: string,
+ *   name: string,
  *   signerId: string | null,
  *   daemonWsUrl: string,
  *   walletUrl: string,
@@ -15,18 +16,14 @@
  *   lastSyncOkAt: number | null,
  *   lastSyncError: string | null,
  * }} CustodyInfo
- *
- * @typedef {{ amount: string, href: string }} DepositLink
- *
  * @typedef {{
  *   tokenId: number,
  *   symbol: string,
- *   name: string,
- *   decimals: number,
- *   accent: string,
- *   amountMinor: string,
- *   amountDisplay: string,
- *   depositLinks: DepositLink[],
+  *   name: string,
+  *   decimals: number,
+  *   accent: string,
+  *   amountMinor: string,
+  *   amountDisplay: string,
  * }} TokenRow
  *
  * @typedef {{
@@ -206,60 +203,55 @@ const render = () => {
   const selectedDepositToken = getSelectedDepositToken();
   const withdrawButtonLabel = submitting ? 'Sending...' : 'Withdraw via XLN';
   app.innerHTML = `
-    <div class="hero">
-      <section class="hero-card">
-        <div class="eyebrow">Auto session · journal-backed custody</div>
-        <h1>Move balances through XLN without building your own ledger from scratch.</h1>
-        <div class="balance-row">
-          <div class="balance-amount">${escapeHtml(state.headlineBalance.amountDisplay)}</div>
-          <div class="balance-symbol">${escapeHtml(state.headlineBalance.symbol)}</div>
-        </div>
-        <div class="token-pills">
-          ${state.tokens.map((token) => `
-            <div class="token-pill">
-              <span>${escapeHtml(token.symbol)}</span>
-              <strong style="color:${escapeHtml(token.accent)};">${escapeHtml(token.amountDisplay)}</strong>
-            </div>
-          `).join('')}
-        </div>
-        <div class="hero-meta">
-          <div class="meta-box">
-            <div class="meta-label">User session</div>
-            <div class="meta-value">${escapeHtml(state.session.userId)}</div>
-          </div>
-          <div class="meta-box">
-            <div class="meta-label">Custody entity</div>
-            <div class="meta-value">${escapeHtml(shortId(state.custody.entityId))}</div>
-          </div>
-          <div class="meta-box">
-            <div class="meta-label">Daemon status</div>
-            <div class="meta-value">${state.custody.connected ? 'Connected' : 'Reconnecting'}</div>
-          </div>
-          <div class="meta-box">
-            <div class="meta-label">Last journal sync</div>
-            <div class="meta-value">${escapeHtml(formatTime(state.custody.lastSyncOkAt))}</div>
-          </div>
-        </div>
-      </section>
-
-      <div class="stack">
-        <section class="panel">
-          <h2>Runtime Link</h2>
-          <div class="status-pill ${state.custody.connected ? 'ok' : 'error'}">${state.custody.connected ? 'Daemon connected' : 'Daemon unavailable'}</div>
-          <div class="activity-sub" style="margin-top:12px;">WS: ${escapeHtml(state.custody.daemonWsUrl)}</div>
-          <div class="activity-sub">Wallet: ${escapeHtml(state.custody.walletUrl)}</div>
-          ${state.custody.lastSyncError ? `<div class="inline-error" style="margin-top:12px;">${escapeHtml(state.custody.lastSyncError)}</div>` : ''}
-        </section>
+    <section class="hero-card">
+      <div class="hero-topline">
+        <div class="eyebrow">${escapeHtml(state.custody.name)} · journal-backed custody</div>
+        <div class="status-pill ${state.custody.connected ? 'ok' : 'error'}">${state.custody.connected ? 'Daemon connected' : 'Daemon unavailable'}</div>
       </div>
-    </div>
+      <div class="hero-copy">
+        <h1>${escapeHtml(state.custody.name)}</h1>
+        <p class="hero-sub">Deposit from XLN, keep balances locally, and withdraw back through the cheapest live route.</p>
+      </div>
+      <div class="balance-row">
+        <div class="balance-amount">${escapeHtml(state.headlineBalance.amountDisplay)}</div>
+        <div class="balance-symbol">${escapeHtml(state.headlineBalance.symbol)}</div>
+      </div>
+      <div class="token-pills compact">
+        ${state.tokens.map((token) => `
+          <div class="token-pill">
+            <span>${escapeHtml(token.symbol)}</span>
+            <strong style="color:${escapeHtml(token.accent)};">${escapeHtml(token.amountDisplay)}</strong>
+          </div>
+        `).join('')}
+      </div>
+      <div class="hero-strip">
+        <div class="meta-box">
+          <div class="meta-label">Session</div>
+          <div class="meta-value">${escapeHtml(state.session.userId)}</div>
+        </div>
+        <div class="meta-box">
+          <div class="meta-label">Custody entity</div>
+          <div class="meta-value">${escapeHtml(shortId(state.custody.entityId))}</div>
+        </div>
+        <div class="meta-box">
+          <div class="meta-label">Jurisdiction</div>
+          <div class="meta-value">${escapeHtml(state.custody.jurisdictionId || 'n/a')}</div>
+        </div>
+        <div class="meta-box">
+          <div class="meta-label">Last sync</div>
+          <div class="meta-value">${escapeHtml(formatTime(state.custody.lastSyncOkAt))}</div>
+        </div>
+      </div>
+      ${state.custody.lastSyncError ? `<div class="inline-error hero-error">${escapeHtml(state.custody.lastSyncError)}</div>` : ''}
+    </section>
 
     <div class="grid action-grid">
       <section class="action-card">
-        <h2>Deposit With XLN</h2>
-        <div class="hint">Enter an amount and open the wallet in dedicated pay mode. USDC is the default token.</div>
+        <h2>Deposit</h2>
+        <div class="hint">Open the wallet in hosted pay mode. The invoice stays locked to this custody session.</div>
         <form id="deposit-form" class="deposit-form">
           <label>
-            Token
+            Asset
             <select name="depositTokenId">
               ${state.tokens.map(token => `<option value="${token.tokenId}" ${token.tokenId === depositTokenId ? 'selected' : ''}>${escapeHtml(token.symbol)}</option>`).join('')}
             </select>
@@ -273,7 +265,7 @@ const render = () => {
           </div>
           <button class="primary full-width" type="submit">Deposit with XLN</button>
           ${pendingDepositHref ? `
-            <div class="hint" style="margin-top:8px;">
+            <div class="hint action-note">
               ${escapeHtml(depositHint || 'Wallet checkout opens in a new tab.')}
               <a href="${escapeHtml(pendingDepositHref)}" target="_blank" rel="noopener noreferrer">Open wallet manually</a>
             </div>
@@ -285,7 +277,7 @@ const render = () => {
         <h2>Withdraw</h2>
         <form id="withdraw-form">
           <label>
-            Token
+            Asset
             <select name="tokenId">
               ${state.tokens.map(token => `<option value="${token.tokenId}" ${token.tokenId === selectedTokenId ? 'selected' : ''}>${escapeHtml(token.symbol)}</option>`).join('')}
             </select>
@@ -306,7 +298,7 @@ const render = () => {
           </label>
           <div class="form-foot">
             <div>
-              <div class="hint">The backend quotes the cheapest HTLC route first, then debits the exact sender amount: recipient amount plus route fee.</div>
+              <div class="hint">Balance is debited by the real sender amount: requested payout plus route fee.</div>
               ${withdrawError ? `<div class="inline-error">${escapeHtml(withdrawError)}</div>` : ''}
               ${withdrawMessage ? `<div class="inline-ok">${escapeHtml(withdrawMessage)}</div>` : ''}
             </div>
@@ -381,7 +373,11 @@ const dashboardFingerprint = (payload) => JSON.stringify({
     lastSyncError: payload?.custody?.lastSyncError ?? null,
   },
   headlineBalance: payload?.headlineBalance ?? null,
-  tokens: payload?.tokens ?? [],
+  tokens: (payload?.tokens ?? []).map((token) => ({
+    tokenId: token.tokenId,
+    amountMinor: token.amountMinor,
+    amountDisplay: token.amountDisplay,
+  })),
   activity: payload?.activity ?? [],
 });
 

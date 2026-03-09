@@ -9,12 +9,12 @@ const HOST = process.env.CUSTODY_HOST || '127.0.0.1';
 const PORT = Number(process.env.CUSTODY_PORT || '8087');
 const DAEMON_WS_URL = process.env.CUSTODY_DAEMON_WS || 'ws://127.0.0.1:8088/rpc';
 const WALLET_URL = process.env.CUSTODY_WALLET_URL || 'https://localhost:8080/app';
+const CUSTODY_NAME = String(process.env.CUSTODY_PROFILE_NAME || 'Custody').trim() || 'Custody';
 const CUSTODY_JURISDICTION = String(process.env.CUSTODY_JURISDICTION_ID || process.env.CUSTODY_JURISDICTION || 'arrakis').trim();
 const CUSTODY_ENTITY_ID = String(process.env.CUSTODY_ENTITY_ID || '').trim().toLowerCase();
 const CUSTODY_SIGNER_ID = String(process.env.CUSTODY_SIGNER_ID || '').trim().toLowerCase() || undefined;
 const CUSTODY_DB_PATH = process.env.CUSTODY_DB_PATH || './db-tmp/custody.sqlite';
 const SESSION_COOKIE = 'custody_session';
-const DEPOSIT_PRESETS = ['1', '10', '100'] as const;
 const JOURNAL_CURSOR_KEY = 'journal_cursor';
 const JOURNAL_SYNC_INTERVAL_MS = 200;
 
@@ -56,7 +56,6 @@ const makeSessionCookie = (token: string): string => {
 
 const createUserId = (): string => `usr_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
 const createSessionToken = (): string => crypto.randomUUID().replace(/-/g, '');
-const createInvoiceId = (): string => `inv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
 const ensureSession = (
   req: Request,
@@ -108,22 +107,6 @@ const formatAmount = (tokenId: number, amountMinor: bigint): string => {
   const [whole, fractional = ''] = raw.split('.');
   const compactFractional = fractional.replace(/0+$/, '').slice(0, 6);
   return compactFractional.length > 0 ? `${whole}.${compactFractional}` : whole;
-};
-
-const buildDepositLink = (userId: string, tokenId: number, amount: string): string => {
-  const url = new URL(WALLET_URL);
-  url.search = '';
-  const params = new URLSearchParams();
-  const invoiceId = createInvoiceId();
-  params.set('id', CUSTODY_ENTITY_ID);
-  params.set('token', String(tokenId));
-  params.set('amt', amount);
-  params.set('u', userId);
-  params.set('desc', `Custody invoice:${invoiceId}`);
-  params.set('locked', '1');
-  if (CUSTODY_JURISDICTION) params.set('jId', CUSTODY_JURISDICTION);
-  url.hash = `pay?${params.toString()}`;
-  return url.toString();
 };
 
 const parseUidFromDescription = (description: string): string | null => {
@@ -188,10 +171,6 @@ const buildDashboardPayload = (session: SessionRecord) => {
       accent: token.accent,
       amountMinor: amountMinor.toString(),
       amountDisplay: formatAmount(token.tokenId, amountMinor),
-      depositLinks: DEPOSIT_PRESETS.map(amount => ({
-        amount,
-        href: buildDepositLink(session.userId, token.tokenId, amount),
-      })),
     };
   });
   const headline = tokenRows[0]!;
@@ -204,6 +183,7 @@ const buildDashboardPayload = (session: SessionRecord) => {
     },
     custody: {
       entityId: CUSTODY_ENTITY_ID,
+      name: CUSTODY_NAME,
       signerId: CUSTODY_SIGNER_ID ?? null,
       daemonWsUrl: DAEMON_WS_URL,
       walletUrl: WALLET_URL,

@@ -77,13 +77,6 @@ body::before {
   50% { transform: scale(1); opacity: 1; }
 }
 
-.hero {
-  display: grid;
-  grid-template-columns: 1.1fr 0.9fr;
-  gap: 20px;
-  align-items: stretch;
-}
-
 .hero-card,
 .panel,
 .action-card,
@@ -98,8 +91,9 @@ body::before {
 }
 
 .hero-card {
-  min-height: 300px;
-  padding: 28px;
+  min-height: 280px;
+  padding: 32px;
+  margin-top: 8px;
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.82)),
     linear-gradient(120deg, rgba(20, 99, 255, 0.14), rgba(15, 118, 110, 0.08));
@@ -130,11 +124,31 @@ body::before {
   text-transform: uppercase;
 }
 
-.hero h1 {
-  margin: 18px 0 10px;
-  font-size: clamp(2.4rem, 4vw, 4.6rem);
+.hero-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.hero-copy {
+  max-width: 680px;
+}
+
+.hero h1,
+.hero-card h1 {
+  margin: 20px 0 0;
+  font-size: clamp(3rem, 5vw, 5.8rem);
   line-height: 0.92;
   letter-spacing: -0.06em;
+}
+
+.hero-sub {
+  margin: 14px 0 0;
+  max-width: 540px;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.45;
 }
 
 .balance-row {
@@ -149,6 +163,10 @@ body::before {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 18px;
+}
+
+.token-pills.compact {
+  margin-top: 22px;
 }
 
 .token-pill {
@@ -175,9 +193,9 @@ body::before {
   font-weight: 700;
 }
 
-.hero-meta {
+.hero-strip {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-top: 28px;
 }
@@ -201,6 +219,10 @@ body::before {
   font-size: 14px;
   font-weight: 700;
   overflow-wrap: anywhere;
+}
+
+.hero-error {
+  margin-top: 14px;
 }
 
 .stack {
@@ -255,6 +277,10 @@ body::before {
 .action-card,
 .activity-card {
   padding: 24px;
+}
+
+.action-card h2 {
+  margin-bottom: 8px;
 }
 
 .token-list {
@@ -393,6 +419,10 @@ select:focus {
   gap: 12px;
 }
 
+.action-note {
+  margin-top: 8px;
+}
+
 .hint,
 .inline-error,
 .inline-ok {
@@ -492,13 +522,17 @@ pre.activity-sub {
 }
 
 @media (max-width: 940px) {
-  .hero,
   .grid,
   .action-grid {
     grid-template-columns: 1fr;
   }
 
-  .hero-meta {
+  .hero-topline {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .hero-strip {
     grid-template-columns: 1fr;
   }
 }
