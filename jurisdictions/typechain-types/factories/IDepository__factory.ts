@@ -128,6 +128,36 @@ const _abi = [
   {
     inputs: [
       {
+        components: [
+          {
+            internalType: "bytes32",
+            name: "entity",
+            type: "bytes32",
+          },
+          {
+            internalType: "uint256",
+            name: "tokenId",
+            type: "uint256",
+          },
+          {
+            internalType: "uint256",
+            name: "amount",
+            type: "uint256",
+          },
+        ],
+        internalType: "struct IDepository.ReserveMint[]",
+        name: "mints",
+        type: "tuple[]",
+      },
+    ],
+    name: "mintToReserveBatch",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      {
         internalType: "bytes32",
         name: "counterpartyEntity",
         type: "bytes32",

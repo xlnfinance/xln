@@ -23,6 +23,18 @@ import type {
 } from "./common";
 
 export declare namespace IDepository {
+  export type ReserveMintStruct = {
+    entity: BytesLike;
+    tokenId: BigNumberish;
+    amount: BigNumberish;
+  };
+
+  export type ReserveMintStructOutput = [
+    entity: string,
+    tokenId: bigint,
+    amount: bigint
+  ] & { entity: string; tokenId: bigint; amount: bigint };
+
   export type SettlementDiffStruct = {
     tokenId: BigNumberish;
     leftDiff: BigNumberish;
@@ -53,6 +65,7 @@ export interface IDepositoryInterface extends Interface {
       | "getCollateral"
       | "getTokensLength"
       | "mintToReserve"
+      | "mintToReserveBatch"
       | "prefundAccount"
       | "reserveToReserve"
       | "settle"
@@ -75,6 +88,10 @@ export interface IDepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "mintToReserve",
     values: [BytesLike, BigNumberish, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "mintToReserveBatch",
+    values: [IDepository.ReserveMintStruct[]]
   ): string;
   encodeFunctionData(
     functionFragment: "prefundAccount",
@@ -100,6 +117,10 @@ export interface IDepositoryInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "mintToReserve",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "mintToReserveBatch",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -198,6 +219,12 @@ export interface IDepository extends BaseContract {
     "nonpayable"
   >;
 
+  mintToReserveBatch: TypedContractMethod<
+    [mints: IDepository.ReserveMintStruct[]],
+    [void],
+    "nonpayable"
+  >;
+
   prefundAccount: TypedContractMethod<
     [
       counterpartyEntity: BytesLike,
@@ -254,6 +281,13 @@ export interface IDepository extends BaseContract {
     nameOrSignature: "mintToReserve"
   ): TypedContractMethod<
     [entity: BytesLike, tokenId: BigNumberish, amount: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "mintToReserveBatch"
+  ): TypedContractMethod<
+    [mints: IDepository.ReserveMintStruct[]],
     [void],
     "nonpayable"
   >;

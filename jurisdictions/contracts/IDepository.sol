@@ -58,6 +58,18 @@ interface IDepository {
    */
   function mintToReserve(bytes32 entity, uint tokenId, uint amount) external;
 
+  struct ReserveMint {
+    bytes32 entity;
+    uint tokenId;
+    uint amount;
+  }
+
+  /**
+   * @notice Mint new reserves to many entities in a single admin tx
+   * @param mints Mint operations to apply sequentially
+   */
+  function mintToReserveBatch(ReserveMint[] calldata mints) external;
+
   /**
    * @notice Transfer reserves between entities (unilateral)
    * @param from Sender entity
