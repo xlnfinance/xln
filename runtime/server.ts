@@ -3171,6 +3171,8 @@ type ControlEntitySummary = {
   name: string;
   isRoutingEnabled: boolean;
   runtimeId: string | null;
+  accountCount: number;
+  publicAccountCount: number;
 };
 
 const requireDaemonControlAuth = (req: Request): Response | null => {
@@ -3225,6 +3227,10 @@ const listLocalControlEntities = (env: Env): ControlEntitySummary[] => {
       name: getProfileNameForEntity(env, entityId),
       isRoutingEnabled: !!replica?.state?.hubRebalanceConfig,
       runtimeId: typeof env.runtimeId === 'string' && env.runtimeId.trim().length > 0 ? env.runtimeId : null,
+      accountCount: replica?.state?.accounts instanceof Map ? replica.state.accounts.size : 0,
+      publicAccountCount: Array.isArray(replica?.state?.profile?.publicAccounts)
+        ? replica.state.profile.publicAccounts.length
+        : 0,
     });
   }
   entities.sort((left, right) => left.name.localeCompare(right.name));
