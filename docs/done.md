@@ -205,3 +205,23 @@
   - [scripts/start-custody.sh](/Users/egor/xln/scripts/start-custody.sh) now exports the same canonical `XLN_USE_PREDEPLOYED_ADDRESSES` / `XLN_JURISDICTIONS_PATH` env vars for the custody wrapper
   - [scripts/bootstrap-hub.ts](/Users/egor/xln/scripts/bootstrap-hub.ts) now imports [runtime.ts](/Users/egor/xln/runtime/runtime.ts) explicitly, removing one more extensionless source ambiguity from the prod bootstrap path
   - [deploy.sh](/Users/egor/xln/deploy.sh) now recreates `xln-server` and `xln-custody` from the wrapper scripts on every production deploy instead of `pm2 restart`-ing whatever command happened to be registered before; this removes the stale-PM2-command bug where nginx kept hitting an orphaned old Bun listener on `:8080`
+- 2026-03-09T20:48:11Z prod/bootstrap contract-stack fix:
+  - removed `sync-contract-artifacts.sh` from [scripts/start-server.sh](/Users/egor/xln/scripts/start-server.sh); contract/typechain generation is now a deploy/build concern, not a runtime boot concern, which removes the race where `xln-custody` could start while `xln-server` was regenerating `jurisdictions/typechain-types`
+  - gave prod processes explicit isolated DB roots:
+    - main runtime via `XLN_DB_PATH=/root/xln/db/runtime/prod-main`
+    - custody via `CUSTODY_DB_ROOT=/root/xln/db/custody/prod`
+  - hardened [runtime/server.ts](/Users/egor/xln/runtime/server.ts) so `USE_ANVIL=true` startup probes the currently referenced Depository before trusting `jurisdictions.json`; it now verifies that both `mintToReserve` and `mintToReserveBatch` are actually callable on the live chain before reusing old addresses
+  - when the anvil chain is stale/incompatible, [runtime/server.ts](/Users/egor/xln/runtime/server.ts) now discards the stale address set and deploys the current contract stack instead of continuing into an opaque bootstrap revert
+  - production [deploy.sh](/Users/egor/xln/deploy.sh) now treats deploy as a full clean demo-stack rollout:
+    - removes main/custody runtime DB roots
+    - removes persisted anvil state
+    - restarts anvil from [scripts/start-anvil.sh](/Users/egor/xln/scripts/start-anvil.sh) with `--reset`
+    - waits for RPC chainId `31337`
+    - starts `xln-server` and waits for full `runtime + relay + 3 hubs + MM`
+    - starts `xln-custody` and waits for `/api/me`
+  - verified locally:
+    - `bash -n scripts/start-server.sh`
+    - `bash -n scripts/start-custody.sh`
+    - `bash -n deploy.sh`
+    - `bun build runtime/server.ts --target=bun --outfile=/tmp/xln-server-check.js`
+    - `bun build runtime/scripts/start-custody-prod.ts --target=bun --outfile=/tmp/xln-custody-prod-check.js`
