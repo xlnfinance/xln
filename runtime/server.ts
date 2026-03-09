@@ -57,7 +57,7 @@ import { relayRoute, type RelayRouterConfig } from './relay-router';
 import { createLocalDeliveryHandler } from './relay-local-delivery';
 import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
 import { ethers } from 'ethers';
-import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index';
+import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;

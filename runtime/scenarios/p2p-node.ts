@@ -10,7 +10,7 @@ import { isLeft, deriveDelta } from '../account-utils';
 import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account-crypto';
 import { loadJurisdictions } from '../jurisdiction-loader';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
-import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index';
+import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { hashHtlcSecret } from '../htlc-utils';
 import type { JurisdictionConfig } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';

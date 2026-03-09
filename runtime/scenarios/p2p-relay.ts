@@ -11,7 +11,7 @@ import { deriveSignerAddressSync } from '../account-crypto';
 import { createJAdapter } from '../jadapter';
 import { loadJurisdictions } from '../jurisdiction-loader';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
-import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index';
+import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { ethers } from 'ethers';
 
 const args = globalThis.process.argv.slice(2);
