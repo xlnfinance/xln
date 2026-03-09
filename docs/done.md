@@ -238,3 +238,11 @@
     - hubs `H1/H2/H3` present
     - market maker present
     - custody service and custody daemon online on isolated ports and isolated DB root
+- 2026-03-10T00:53:00Z profile-source cleanup and custody stability:
+  - [runtime/name-resolution.ts](/Users/egor/xln/runtime/name-resolution.ts) no longer stores a second profile copy in a separate runtime DB namespace; profile lookup now reads only from local entity state plus the gossip cache
+  - [runtime/runtime.ts](/Users/egor/xln/runtime/runtime.ts) no longer references an undefined module-level `db` in legacy name wrappers; those wrappers now use deterministic fallback lookup instead of a hidden global
+  - [tests/e2e-custody.spec.ts](/Users/egor/xln/tests/e2e-custody.spec.ts) was updated to match the current custody copy (`journal-backed custody`)
+  - verified:
+    - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
+    - `bun build custody/server.ts --target=bun --outfile=/tmp/custody-check.js`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`

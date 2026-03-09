@@ -585,7 +585,7 @@ test.describe('E2E Custody Flow', () => {
 
       await custodyPage.goto(custodyBaseUrl);
       await expect(custodyPage.getByText('How To Integrate XLN')).toBeVisible({ timeout: 15_000 });
-      await expect(custodyPage.getByText('Auto session')).toBeVisible({ timeout: 15_000 });
+      await expect(custodyPage.getByText('journal-backed custody')).toBeVisible({ timeout: 15_000 });
 
       await custodyPage.locator('input[name="amount"]').fill('1');
       await custodyPage.locator('input[name="targetEntityId"]').fill(alice.entityId);
