@@ -58,7 +58,6 @@ test-results/**/*.webm
 # Production/deployment scripts
 PRODUCTION-FIX-LOG.md
 auto-redeploy.sh
-deploy.sh
 ecosystem.config.cjs
 ecosystem.simple.cjs
 start-production.sh

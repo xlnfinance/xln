@@ -1,0 +1,519 @@
+/**
+ * E2E: Alice and Bob run in separate browser contexts, connect to the same hub, and trade
+ * directly against each other through the hub orderbook with market maker liquidity disabled.
+ *
+ * Flow and goals:
+ * 1. Reset the mesh without market maker liquidity so only user orders can match.
+ * 2. Open two isolated wallet pages with separate IndexedDB/localStorage state.
+ * 3. Create Alice and Bob runtimes, connect both to the same hub, and fund Alice with WETH and Bob with USDC.
+ * 4. Alice places a visible WETH/USDC sell order through the swap UI.
+ * 5. Bob opens the same swap UI, enters the matching buy order manually, and confirms it.
+ * 6. The test proves machine truth from saved account state: both sides record swap resolves and capacities move.
+ * 7. The test also proves user-visible truth: Alice's open order appears, gets filled, and stays resolved after reload.
+ */
+
+import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { API_BASE_URL, APP_BASE_URL, getHealth, resetProdServer, ensureE2EBaseline } from './utils/e2e-baseline';
+import { connectRuntimeToHub } from './utils/e2e-connect';
+import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+
+const LONG_E2E = process.env.E2E_LONG === '1';
+const INIT_TIMEOUT = 30_000;
+
+type SwapRuntimeWindow = typeof window & {
+  isolatedEnv?: {
+    runtimeId?: string;
+    eReplicas?: Map<string, {
+      state?: {
+        accounts?: Map<string, {
+          currentHeight?: number;
+          frameHistory?: Array<{ accountTxs?: Array<{ type?: string }> }>;
+          swapOffers?: Map<string, unknown>;
+          deltas?: Map<number | string, unknown>;
+        }>;
+      };
+    }>;
+  };
+  XLN?: {
+    deriveDelta?: (delta: unknown, isLeft: boolean) => {
+      outCapacity?: bigint | string | number | { toString?: () => string };
+    };
+  };
+};
+
+function mirrorConsole(page: Page, tag: string): void {
+  page.on('console', (msg) => {
+    const text = msg.text();
+    if (
+      msg.type() === 'error'
+      || text.includes('[E2E]')
+      || text.includes('swap')
+      || text.includes('Swap')
+      || text.includes('Frame consensus')
+    ) {
+      console.log(`[${tag}] ${text.slice(0, 260)}`);
+    }
+  });
+}
+
+async function getPrimaryHubId(page: Page): Promise<string> {
+  const health = await getHealth(page, API_BASE_URL);
+  const hubId = health?.hubMesh?.hubIds?.[0];
+  expect(typeof hubId === 'string' && hubId.length === 66, 'baseline must expose a primary hub id').toBe(true);
+  return hubId!;
+}
+
+async function faucetOffchain(
+  page: Page,
+  entityId: string,
+  hubEntityId: string,
+  tokenId: number,
+  amount: string,
+): Promise<void> {
+  let ok = false;
+  let lastBody: Record<string, unknown> = { error: 'not-run' };
+
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    const runtimeId = await page.evaluate(() => {
+      const view = window as SwapRuntimeWindow;
+      return view.isolatedEnv?.runtimeId ?? null;
+    });
+    expect(runtimeId, 'runtimeId must exist before faucet').toBeTruthy();
+
+    const response = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
+      data: {
+        userEntityId: entityId,
+        userRuntimeId: runtimeId,
+        hubEntityId,
+        tokenId,
+        amount,
+      },
+    });
+    lastBody = await response.json().catch(() => ({} as Record<string, unknown>));
+    ok = response.ok();
+    if (ok) return;
+
+    const code = String(lastBody.code || '');
+    const status = String(lastBody.status || '');
+    const transient =
+      response.status() === 202 ||
+      response.status() === 409 ||
+      response.status() === 503 ||
+      code === 'FAUCET_CHANNEL_NOT_READY' ||
+      status === 'channel_opening' ||
+      status === 'channel_not_ready';
+    if (!transient) break;
+    await page.waitForTimeout(1000);
+  }
+
+  expect(ok, `offchain faucet failed: ${JSON.stringify(lastBody)}`).toBe(true);
+}
+
+async function outCap(page: Page, entityId: string, counterpartyId: string, tokenId: number): Promise<bigint> {
+  const value = await page.evaluate(({ counterpartyId, entityId, tokenId }) => {
+    const view = window as SwapRuntimeWindow;
+    const env = view.isolatedEnv;
+    const deriveDelta = view.XLN?.deriveDelta;
+    if (!env?.eReplicas || typeof deriveDelta !== 'function') return '0';
+
+    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
+      const account = replica.state?.accounts?.get(counterpartyId);
+      const delta = account?.deltas?.get(tokenId) ?? account?.deltas?.get(String(tokenId));
+      if (!delta) return '0';
+      const derived = deriveDelta(delta, String(entityId).toLowerCase() < String(counterpartyId).toLowerCase());
+      const capacity = derived?.outCapacity;
+      if (typeof capacity === 'bigint') return capacity.toString();
+      if (typeof capacity === 'string') return capacity;
+      if (typeof capacity === 'number') return String(Math.trunc(capacity));
+      return typeof capacity?.toString === 'function' ? capacity.toString() : '0';
+    }
+
+    return '0';
+  }, { counterpartyId, entityId, tokenId });
+
+  return BigInt(value);
+}
+
+async function extendCreditToken(
+  page: Page,
+  identity: { entityId: string; signerId: string },
+  counterpartyId: string,
+  tokenId: number,
+  amount: bigint,
+): Promise<void> {
+  const result = await page.evaluate(async ({ amount, counterpartyId, entityId, signerId, tokenId }) => {
+    const view = window as SwapRuntimeWindow & {
+      XLN?: {
+        enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
+      };
+    };
+    const env = view.isolatedEnv;
+    const enqueueRuntimeInput = view.XLN?.enqueueRuntimeInput;
+    if (!env || typeof enqueueRuntimeInput !== 'function') {
+      return { ok: false, error: 'runtime env missing' };
+    }
+
+    let liveSignerId = signerId;
+    for (const replicaKey of env.eReplicas?.keys?.() ?? []) {
+      const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
+      if (String(replicaEntityId).toLowerCase() === String(entityId).toLowerCase() && replicaSignerId) {
+        liveSignerId = replicaSignerId;
+        break;
+      }
+    }
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId: liveSignerId,
+        entityTxs: [{
+          type: 'extendCredit',
+          data: {
+            counterpartyEntityId: counterpartyId,
+            tokenId,
+            amount: BigInt(amount),
+          },
+        }],
+      }],
+    });
+    return { ok: true };
+  }, {
+    amount: amount.toString(),
+    counterpartyId,
+    entityId: identity.entityId,
+    signerId: identity.signerId,
+    tokenId,
+  });
+
+  expect(result.ok, `extendCredit token=${tokenId} failed: ${result.error ?? 'unknown'}`).toBe(true);
+}
+
+async function waitForTokenDeltaActive(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+  tokenId: number,
+  timeoutMs = 30_000,
+): Promise<void> {
+  await expect.poll(
+    async () => {
+      return await page.evaluate(({ counterpartyId, entityId, tokenId }) => {
+        const view = window as SwapRuntimeWindow;
+        if (!view.isolatedEnv?.eReplicas) return false;
+        for (const [replicaKey, replica] of view.isolatedEnv.eReplicas.entries()) {
+          if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
+          const account = replica.state?.accounts?.get(counterpartyId);
+          const hasDelta = !!(account?.deltas?.has(tokenId) || account?.deltas?.has(String(tokenId)));
+          return hasDelta && Number(account?.currentHeight || 0) > 0;
+        }
+        return false;
+      }, { counterpartyId, entityId, tokenId });
+    },
+    {
+      timeout: timeoutMs,
+      intervals: [250, 500, 750],
+      message: `token ${tokenId} must become active on the bilateral account`,
+    },
+  ).toBe(true);
+}
+
+async function waitForOutCapAtLeast(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+  tokenId: number,
+  minimum: bigint,
+  timeoutMs = 30_000,
+): Promise<bigint> {
+  const startedAt = Date.now();
+  let latest = 0n;
+  while (Date.now() - startedAt < timeoutMs) {
+    latest = await outCap(page, entityId, counterpartyId, tokenId);
+    if (latest >= minimum) return latest;
+    await page.waitForTimeout(400);
+  }
+  throw new Error(
+    `Timed out waiting for outCap token=${tokenId} ${entityId.slice(0, 10)}↔${counterpartyId.slice(0, 10)} ` +
+    `(latest=${latest.toString()} minimum=${minimum.toString()})`,
+  );
+}
+
+async function waitForOutCapChange(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+  tokenId: number,
+  baseline: bigint,
+  direction: 'up' | 'down',
+  timeoutMs = 30_000,
+): Promise<bigint> {
+  const startedAt = Date.now();
+  let latest = baseline;
+  while (Date.now() - startedAt < timeoutMs) {
+    latest = await outCap(page, entityId, counterpartyId, tokenId);
+    if ((direction === 'up' && latest > baseline) || (direction === 'down' && latest < baseline)) {
+      return latest;
+    }
+    await page.waitForTimeout(400);
+  }
+  throw new Error(
+    `Timed out waiting for outCap ${direction} token=${tokenId} ${entityId.slice(0, 10)}↔${counterpartyId.slice(0, 10)} ` +
+    `(baseline=${baseline.toString()} latest=${latest.toString()})`,
+  );
+}
+
+async function readSwapResolveCount(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+): Promise<number> {
+  return await page.evaluate(({ counterpartyId, entityId }) => {
+    const view = window as SwapRuntimeWindow;
+    if (!view.isolatedEnv?.eReplicas) return 0;
+
+    const findAccount = (
+      accounts: Map<string, {
+        frameHistory?: Array<{ accountTxs?: Array<{ type?: string }> }>;
+      }> | undefined,
+      ownerId: string,
+      cpId: string,
+    ) => {
+      if (!(accounts instanceof Map)) return null;
+      const owner = String(ownerId || '').toLowerCase();
+      const cp = String(cpId || '').toLowerCase();
+      for (const [accountKey, account] of accounts.entries()) {
+        if (String(accountKey || '').toLowerCase() === cp) return account;
+        const left = typeof (account as { leftEntity?: unknown }).leftEntity === 'string'
+          ? String((account as { leftEntity?: string }).leftEntity).toLowerCase()
+          : '';
+        const right = typeof (account as { rightEntity?: unknown }).rightEntity === 'string'
+          ? String((account as { rightEntity?: string }).rightEntity).toLowerCase()
+          : '';
+        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+      }
+      return null;
+    };
+
+    for (const [replicaKey, replica] of view.isolatedEnv.eReplicas.entries()) {
+      if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
+      const account = findAccount(replica.state?.accounts, entityId, counterpartyId);
+      if (!account) return 0;
+      let count = 0;
+      for (const frame of account.frameHistory || []) {
+        for (const tx of frame?.accountTxs || []) {
+          if (tx?.type === 'swap_resolve') count += 1;
+        }
+      }
+      return count;
+    }
+
+    return 0;
+  }, { counterpartyId, entityId });
+}
+
+async function waitForSwapResolveCountAtLeast(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+  minimum: number,
+  timeoutMs = 30_000,
+): Promise<number> {
+  await expect.poll(
+    async () => await readSwapResolveCount(page, entityId, counterpartyId),
+    {
+      timeout: timeoutMs,
+      intervals: [250, 500, 750],
+      message: `swap_resolve count must reach ${minimum}`,
+    },
+  ).toBeGreaterThanOrEqual(minimum);
+  return await readSwapResolveCount(page, entityId, counterpartyId);
+}
+
+async function openSwapWorkspace(page: Page): Promise<void> {
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  await accountsTab.click();
+  const swapTab = page.locator('.account-workspace-tab').filter({ hasText: /Swap/i }).first();
+  await expect(swapTab).toBeVisible({ timeout: 20_000 });
+  await swapTab.click();
+  await expect(page.locator('.swap-panel h3').first()).toContainText(/Swap Trading/i, { timeout: 15_000 });
+}
+
+async function selectCounterpartyInSwap(page: Page): Promise<void> {
+  const trigger = page.locator('.swap-panel .entity-select .es-trigger').first();
+  const hasSelector = await trigger.isVisible({ timeout: 1500 }).catch(() => false);
+  if (!hasSelector) return;
+  await trigger.click();
+  const firstOption = page.locator('.swap-panel .entity-select .es-option').first();
+  await expect(firstOption).toBeVisible({ timeout: 20_000 });
+  await firstOption.click();
+}
+
+async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'): Promise<void> {
+  const pairInput = page.getByTestId('swap-pair-search').first();
+  await expect(pairInput).toBeVisible({ timeout: 20_000 });
+  await pairInput.fill(pairLabel);
+  await pairInput.press('Enter');
+  const sideButton = side === 'buy'
+    ? page.getByTestId('swap-side-buy').first()
+    : page.getByTestId('swap-side-sell').first();
+  await expect(sideButton).toBeVisible({ timeout: 20_000 });
+  await sideButton.click();
+}
+
+async function placeAliceSellOffer(page: Page, amount: string, price: string): Promise<void> {
+  await configurePair(page, 'WETH/USDC', 'sell');
+  const amountInput = page.locator('.swap-panel input[placeholder="Amount to sell"]').first();
+  const priceInput = page.locator('.swap-panel input[placeholder="Price"]').first();
+  const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+
+  await expect(amountInput).toBeVisible({ timeout: 20_000 });
+  await expect(priceInput).toBeVisible({ timeout: 20_000 });
+  await amountInput.fill(amount);
+  await priceInput.fill(price);
+  await expect(placeButton).toBeEnabled({ timeout: 20_000 });
+  await placeButton.click();
+  await expect(page.getByTestId('swap-open-orders')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.swap-panel .orders-table tbody tr').first()).toBeVisible({ timeout: 30_000 });
+}
+
+async function placeBobMatchingBuyOrder(page: Page, spendAmount: string, price: string): Promise<void> {
+  await configurePair(page, 'WETH/USDC', 'buy');
+  const amountInput = page.locator('.swap-panel input[placeholder="Amount to sell"]').first();
+  const priceInput = page.locator('.swap-panel input[placeholder="Price"]').first();
+  const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+
+  await expect(amountInput).toBeVisible({ timeout: 20_000 });
+  await expect(priceInput).toBeVisible({ timeout: 20_000 });
+  await amountInput.fill(spendAmount);
+  await priceInput.fill(price);
+  await expect(page.getByTestId('swap-auto-capacity-note')).toContainText(/auto-activate/i, { timeout: 20_000 });
+  await expect(placeButton).toBeEnabled({ timeout: 20_000 });
+  await placeButton.click();
+}
+
+async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<void> {
+  await page.waitForFunction(({ runtimeId }) => {
+    const view = window as SwapRuntimeWindow;
+    return String(view.isolatedEnv?.runtimeId || '').toLowerCase() === String(runtimeId || '').toLowerCase()
+      && Number(view.isolatedEnv?.eReplicas?.size || 0) > 0;
+  }, { runtimeId }, { timeout: INIT_TIMEOUT });
+}
+
+test.describe('E2E Swap Isolated Flow', () => {
+  test.setTimeout(LONG_E2E ? 240_000 : 150_000);
+
+  test('two isolated users trade against each other through one hub orderbook without market maker liquidity', async ({ browser, page }) => {
+    let aliceContext: BrowserContext | null = null;
+    let bobContext: BrowserContext | null = null;
+
+    try {
+      await resetProdServer(page, {
+        apiBaseUrl: API_BASE_URL,
+        requireMarketMaker: false,
+        softPreserveHubs: false,
+      });
+      await ensureE2EBaseline(page, {
+        apiBaseUrl: API_BASE_URL,
+        requireMarketMaker: false,
+        requireHubMesh: true,
+        minHubCount: 3,
+      });
+
+      const hubId = await getPrimaryHubId(page);
+
+      aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
+      bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
+      const alicePage = await aliceContext.newPage();
+      const bobPage = await bobContext.newPage();
+      mirrorConsole(alicePage, 'SWAP-ALICE');
+      mirrorConsole(bobPage, 'SWAP-BOB');
+
+      await Promise.all([
+        gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
+        gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
+      ]);
+
+      const alice = await createRuntimeIdentity(alicePage, 'alice', selectDemoMnemonic('alice'));
+      const bob = await createRuntimeIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));
+      expect(alice.entityId).not.toBe(bob.entityId);
+
+      await Promise.all([
+        connectRuntimeToHub(alicePage, alice, hubId),
+        connectRuntimeToHub(bobPage, bob, hubId),
+      ]);
+
+      await extendCreditToken(alicePage, alice, hubId, 2, 10_000n * 10n ** 18n);
+      await waitForTokenDeltaActive(alicePage, alice.entityId, hubId, 2);
+
+      await Promise.all([
+        faucetOffchain(alicePage, alice.entityId, hubId, 2, '5'),
+        faucetOffchain(bobPage, bob.entityId, hubId, 1, '100'),
+      ]);
+
+      const aliceToken2Before = await waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 2, 1n * 10n ** 18n);
+      const bobToken1Before = await waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, 10n * 10n ** 18n);
+      const aliceToken1Before = await outCap(alicePage, alice.entityId, hubId, 1);
+      const bobToken2Before = await outCap(bobPage, bob.entityId, hubId, 2);
+      const aliceSwapResolvesBefore = await readSwapResolveCount(alicePage, alice.entityId, hubId);
+      const bobSwapResolvesBefore = await readSwapResolveCount(bobPage, bob.entityId, hubId);
+
+      await openSwapWorkspace(alicePage);
+      await selectCounterpartyInSwap(alicePage);
+      await placeAliceSellOffer(alicePage, '0.03', '2500');
+
+      await openSwapWorkspace(bobPage);
+      await selectCounterpartyInSwap(bobPage);
+      await placeBobMatchingBuyOrder(bobPage, '75', '2500');
+
+      await waitForSwapResolveCountAtLeast(alicePage, alice.entityId, hubId, aliceSwapResolvesBefore + 1);
+      await waitForSwapResolveCountAtLeast(bobPage, bob.entityId, hubId, bobSwapResolvesBefore + 1);
+
+      await expect.poll(
+        async () => await alicePage.locator('.swap-panel .orders-table tbody tr').count(),
+        {
+          timeout: 30_000,
+          intervals: [250, 500, 750],
+          message: 'Alice open order row must disappear after Bob fills it',
+        },
+      ).toBe(0);
+
+      const aliceToken1After = await waitForOutCapChange(alicePage, alice.entityId, hubId, 1, aliceToken1Before, 'up');
+      const aliceToken2After = await waitForOutCapChange(alicePage, alice.entityId, hubId, 2, aliceToken2Before, 'down');
+      const bobToken1After = await waitForOutCapChange(bobPage, bob.entityId, hubId, 1, bobToken1Before, 'down');
+      const bobToken2After = await waitForOutCapChange(bobPage, bob.entityId, hubId, 2, bobToken2Before, 'up');
+
+      expect(aliceToken1After).toBeGreaterThan(aliceToken1Before);
+      expect(aliceToken2After).toBeLessThan(aliceToken2Before);
+      expect(bobToken1After).toBeLessThan(bobToken1Before);
+      expect(bobToken2After).toBeGreaterThan(bobToken2Before);
+
+      await Promise.all([
+        alicePage.reload({ waitUntil: 'domcontentloaded' }),
+        bobPage.reload({ waitUntil: 'domcontentloaded' }),
+      ]);
+      await Promise.all([
+        gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 600 }),
+        gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 600 }),
+      ]);
+      await Promise.all([
+        waitForRestoredRuntime(alicePage, alice.runtimeId),
+        waitForRestoredRuntime(bobPage, bob.runtimeId),
+      ]);
+
+      expect(await outCap(alicePage, alice.entityId, hubId, 1)).toBe(aliceToken1After);
+      expect(await outCap(alicePage, alice.entityId, hubId, 2)).toBe(aliceToken2After);
+      expect(await outCap(bobPage, bob.entityId, hubId, 1)).toBe(bobToken1After);
+      expect(await outCap(bobPage, bob.entityId, hubId, 2)).toBe(bobToken2After);
+      expect(await readSwapResolveCount(alicePage, alice.entityId, hubId)).toBeGreaterThanOrEqual(aliceSwapResolvesBefore + 1);
+      expect(await readSwapResolveCount(bobPage, bob.entityId, hubId)).toBeGreaterThanOrEqual(bobSwapResolvesBefore + 1);
+    } finally {
+      await Promise.all([
+        aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
+        bobContext ? bobContext.close().catch(() => {}) : Promise.resolve(),
+      ]);
+    }
+  });
+});
