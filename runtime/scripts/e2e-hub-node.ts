@@ -733,7 +733,6 @@ const run = async (): Promise<void> => {
     relayUrls: [resolvedArgs.relayUrl],
     advertiseEntityIds: [bootstrap.entityId],
     isHub: true,
-    profileName: resolvedArgs.name,
     gossipPollMs: BOOTSTRAP_POLL_MS * 5,
   });
   if (!p2p) {

@@ -25,9 +25,9 @@
 import type { Env, RoutedEntityInput } from '../types';
 import { canonicalizeProfile, parseProfile, type Profile } from './gossip';
 import { RuntimeWsClient } from './ws-client';
-import { buildEntityProfile } from './gossip-helper';
+import { buildLocalEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../ids';
-import { getSignerAddress, getSignerPrivateKey, getSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
+import { getSignerPrivateKey, getSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
 import { signProfile, verifyProfileSignature } from './profile-signing';
 import { inspectHankoForHash } from '../hanko-signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
@@ -49,7 +49,6 @@ export type P2PConfig = {
   signerId?: string;
   advertiseEntityIds?: string[];
   isHub?: boolean;
-  profileName?: string;
   gossipPollMs?: number;
 };
 
@@ -61,7 +60,6 @@ type RuntimeP2POptions = {
   seedRuntimeIds?: string[];
   advertiseEntityIds?: string[];
   isHub?: boolean;
-  profileName?: string;
   gossipPollMs?: number;
   onEntityInput: (from: string, input: RoutedEntityInput) => void;
   onGossipProfiles: (from: string, profiles: Profile[]) => void;
@@ -129,7 +127,6 @@ export class RuntimeP2P {
   private seedRuntimeIds: string[];
   private advertiseEntityIds: string[] | null;
   private isHub: boolean;
-  private profileName: string | undefined;
   private gossipPollMs: number;
   private onEntityInput: (from: string, input: RoutedEntityInput) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
@@ -151,7 +148,6 @@ export class RuntimeP2P {
     this.seedRuntimeIds = unique(options.seedRuntimeIds || []);
     this.advertiseEntityIds = options.advertiseEntityIds || null;
     this.isHub = options.isHub ?? false;
-    this.profileName = options.profileName;
     this.gossipPollMs = options.gossipPollMs ?? GOSSIP_POLL_MS;
     this.onEntityInput = options.onEntityInput;
     this.onGossipProfiles = options.onGossipProfiles;
@@ -181,9 +177,6 @@ export class RuntimeP2P {
     }
     if (config.isHub !== undefined) {
       this.isHub = config.isHub;
-    }
-    if (config.profileName !== undefined) {
-      this.profileName = config.profileName;
     }
     if (config.gossipPollMs !== undefined) {
       const prevPollMs = this.gossipPollMs;
@@ -773,18 +766,7 @@ export class RuntimeP2P {
       const existingProfile = this.env.gossip?.getProfiles?.().find((profile) => profile.entityId === entityId);
       const lastTimestamp = existingProfile?.lastUpdated || 0;
       const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.timestamp);
-      const profile = buildEntityProfile(
-        replica.state,
-        this.profileName,
-        monotonicTimestamp,
-        {
-          getSignerAddress: (signerId) => getSignerAddress(this.env, signerId),
-          getSignerPublicKeyHex: (signerId) => {
-            const publicKey = getSignerPublicKey(this.env, signerId);
-            return publicKey ? `0x${toHex(publicKey)}` : null;
-          },
-        },
-      );
+      const profile = buildLocalEntityProfile(this.env, replica.state, monotonicTimestamp);
       profile.runtimeId = this.runtimeId;
       if (this.isHub) {
         profile.capabilities = Array.from(new Set([...profile.capabilities, 'hub', 'relay', 'routing', 'faucet']));
@@ -794,10 +776,6 @@ export class RuntimeP2P {
           profile.relays = this.relayUrls;
         }
       }
-      if (this.profileName) {
-        profile.name = this.profileName;
-      }
-
       // Get public key from first validator (superset approach - works for single/multi-signer)
       const firstValidator = replica.state.config.validators[0];
       const publicKey = firstValidator ? getSignerPublicKey(this.env, firstValidator) : null;

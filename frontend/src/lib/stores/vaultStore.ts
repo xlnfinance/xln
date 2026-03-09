@@ -799,7 +799,6 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
     xln.startP2P(env, {
       relayUrls: resolveRelayUrls(),
       gossipPollMs: 0,
-      profileName: runtime.label || `Runtime ${runtime.id.slice(0, 6)}`,
     });
   }
 
@@ -1173,7 +1172,6 @@ export const vaultOperations = {
       xln.startP2P(newEnv, {
         relayUrls,
         gossipPollMs: 0,
-        profileName: label || `Runtime ${runtimeId.slice(0, 6)}`,
       });
     }
     markPerf('start_p2p');
@@ -1270,7 +1268,6 @@ export const vaultOperations = {
           xln.startP2P(env, {
             relayUrls: resolveRelayUrls(),
             gossipPollMs: 0,
-            profileName: runtime.label || `Runtime ${resolvedRuntimeId.slice(0, 6)}`,
           });
           p2p = xln.getP2P ? xln.getP2P(env) : null;
           console.log(`[VaultStore.selectRuntime] ♻️ Started P2P for ${resolvedRuntimeId.slice(0, 12)}`);
@@ -1279,12 +1276,6 @@ export const vaultOperations = {
             p2p.connect();
             console.log(`[VaultStore.selectRuntime] ♻️ Reconnected P2P for ${resolvedRuntimeId.slice(0, 12)}`);
           }
-        }
-
-        if (p2p && typeof p2p.updateConfig === 'function') {
-          p2p.updateConfig({
-            profileName: runtime.label || `Runtime ${resolvedRuntimeId.slice(0, 6)}`,
-          });
         }
 
         if (p2p && typeof p2p.refreshGossip === 'function') {

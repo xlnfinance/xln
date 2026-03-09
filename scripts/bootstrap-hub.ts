@@ -10,13 +10,11 @@ import { main, process as runtimeProcess } from '../runtime/runtime';
 import {
   deriveSignerKeySync,
   deriveSignerAddressSync,
-  getSignerAddress,
-  getSignerPublicKey,
   registerSignerKey,
 } from '../runtime/account-crypto';
 import { encodeBoard, hashBoard } from '../runtime/entity-factory';
 import type { ConsensusConfig, Env } from '../runtime/types';
-import { buildEntityProfile } from '../runtime/networking/gossip-helper';
+import { buildLocalEntityProfile } from '../runtime/networking/gossip-helper';
 
 const args = process.argv.slice(2);
 
@@ -89,14 +87,7 @@ const announceHubProfile = (env: Env, entityId: string, config: HubConfig, signe
     throw new Error(`BOOTSTRAP_HUB_PROFILE_REPLICA_MISSING: entity=${entityId}`);
   }
   replica.state.profile.name = config.name;
-  const profile = buildEntityProfile(replica.state, undefined, Date.now(), {
-    getSignerAddress: (signerId) => getSignerAddress(env, signerId),
-    getSignerPublicKeyHex: (signerId) => {
-      const publicKey = getSignerPublicKey(env, signerId);
-      return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
-    },
-  });
-  profile.runtimeId = env.runtimeId;
+  const profile = buildLocalEntityProfile(env, replica.state, Date.now());
   profile.capabilities = config.capabilities || ['hub', 'routing', 'faucet'];
   profile.relays = config.relayUrl ? [config.relayUrl] : [];
   profile.endpoints = config.relayUrl ? [config.relayUrl] : [];
@@ -157,6 +148,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
       data: {
         config: consensusConfig,
         isProposer: true,
+        profileName: hubConfig.name,
         position: hubConfig.position || { x: 0, y: 0, z: 0 },
       },
     });

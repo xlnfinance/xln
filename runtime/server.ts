@@ -784,7 +784,7 @@ const ensureMarketMakerEntity = async (
       throw new Error(`MARKET_MAKER_PROFILE_ENTITY_MISSING: ${entityId}`);
     }
     const seededAt = Date.now();
-    const profile: Profile = buildEntityProfile(mmReplica.state, MARKET_MAKER_NAME, seededAt, {
+    const profile: Profile = buildEntityProfile(mmReplica.state, seededAt, {
       getSignerAddress: (signerId) => getSignerAddress(env, signerId),
       getSignerPublicKeyHex: (signerId) => {
         const publicKey = getSignerPublicKey(env, signerId);
@@ -2598,7 +2598,7 @@ const seedHubProfilesInRelayCache = (
     }
     if (!hubState) continue;
 
-    const profile = buildEntityProfile(hubState, hub.name, seededAt, {
+    const profile = buildEntityProfile(hubState, seededAt, {
       getSignerAddress: (signerId) => getSignerAddress(env, signerId),
       getSignerPublicKeyHex: (signerId) => {
         const publicKey = getSignerPublicKey(env, signerId);
@@ -3559,7 +3559,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         relayUrls?: unknown;
         advertiseEntityIds?: unknown;
         isHub?: unknown;
-        profileName?: unknown;
         gossipPollMs?: unknown;
       }>(req);
       const relayUrls = Array.isArray(body?.relayUrls)
@@ -3567,9 +3566,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         : undefined;
       const advertiseEntityIds = Array.isArray(body?.advertiseEntityIds)
         ? body.advertiseEntityIds.map(value => (typeof value === 'string' ? value.trim().toLowerCase() : '')).filter(Boolean)
-        : undefined;
-      const profileName = typeof body?.profileName === 'string' && body.profileName.trim().length > 0
-        ? body.profileName.trim()
         : undefined;
       const isHub = typeof body?.isHub === 'boolean' ? body.isHub : undefined;
       const gossipPollMs =
@@ -3581,7 +3577,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         ...(relayUrls ? { relayUrls } : {}),
         ...(advertiseEntityIds ? { advertiseEntityIds } : {}),
         ...(isHub !== undefined ? { isHub } : {}),
-        ...(profileName !== undefined ? { profileName } : {}),
         ...(gossipPollMs !== undefined ? { gossipPollMs } : {}),
       });
 
@@ -3592,7 +3587,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             relayUrls: relayUrls ?? null,
             advertiseEntityIds: advertiseEntityIds ?? null,
             isHub: isHub ?? null,
-            profileName: profileName ?? null,
             gossipPollMs: gossipPollMs ?? null,
           },
         }),

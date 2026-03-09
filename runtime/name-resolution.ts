@@ -6,10 +6,9 @@
  */
 
 import { decode, encode } from './snapshot-coder';
-import { buildEntityProfile } from './networking/gossip-helper';
+import { buildEntityProfile, createProfileSignerResolver } from './networking/gossip-helper';
 import type { Profile } from './networking/gossip';
 import type { EntityProfile, EntityTx, Env, NameIndex, NameSearchResult, ProfileUpdateTx } from './types';
-import { getSignerAddress, getSignerPublicKey } from './account-crypto';
 import { formatEntityDisplay, generateEntityAvatar } from './utils';
 
 // === PROFILE STORAGE ===
@@ -132,11 +131,15 @@ export const searchEntityNames = async (db: any, query: string, limit: number = 
 /**
  * Create profile update transaction
  */
-export const createProfileUpdateTx = (updates: ProfileUpdateTx): EntityTx => {
+export const createProfileUpdateTx = (
+  updates: ProfileUpdateTx & { entityId: string; hankoSignature?: string },
+): EntityTx => {
   return {
     type: 'profile-update' as const,
-    data: updates, // Remove unsafe type assertion
-  } as EntityTx;
+    data: {
+      profile: updates,
+    },
+  };
 };
 
 /**
@@ -188,13 +191,7 @@ export const processProfileUpdate = async (
         bio: profile.bio || '',
         website: profile.website || '',
       };
-      const builtProfile = buildEntityProfile(localReplica.state, profile.name, profile.lastUpdated, {
-        getSignerAddress: (signerId) => getSignerAddress(env, signerId),
-        getSignerPublicKeyHex: (signerId) => {
-          const publicKey = getSignerPublicKey(env, signerId);
-          return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
-        },
-      });
+      const builtProfile = buildEntityProfile(localReplica.state, profile.lastUpdated, createProfileSignerResolver(env));
       builtProfile.runtimeId = env.runtimeId;
       return builtProfile;
     };

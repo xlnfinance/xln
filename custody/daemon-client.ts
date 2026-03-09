@@ -1,3 +1,5 @@
+import { deserializeTaggedJson, serializeTaggedJson } from '../runtime/serialization-utils';
+
 export type DaemonFrameLog = {
   id: number;
   timestamp: number;
@@ -118,12 +120,12 @@ export class DaemonRpcClient {
       socket.onopen = () => {
         socket.onmessage = event => {
           try {
-            const message = JSON.parse(String(event.data)) as {
+            const message = deserializeTaggedJson<{
               type?: string;
               inReplyTo?: string;
               data?: unknown;
               error?: string;
-            };
+            }>(String(event.data));
             if (typeof message.inReplyTo !== 'string') {
               return;
             }
@@ -188,7 +190,7 @@ export class DaemonRpcClient {
       this.pending.set(id, { resolve: value => resolve(value as T), reject, timeout });
 
       try {
-        this.socket!.send(JSON.stringify({ id, type, ...payload }));
+        this.socket!.send(serializeTaggedJson({ id, type, ...payload }));
       } catch (error) {
         clearTimeout(timeout);
         this.pending.delete(id);

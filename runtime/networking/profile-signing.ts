@@ -21,6 +21,7 @@ import { canonicalizeProfile, type Profile } from './gossip';
 import type { Env, HankoString } from '../types';
 import { inspectHankoForHash, signHashesAsSingleEntity, verifyHankoForHash } from '../hanko-signing';
 import { getSignerAddress, getSignerPublicKey } from '../account-crypto';
+import { serializeTaggedJson } from '../serialization-utils';
 
 const PROFILE_SIGN_DOMAIN = 'xln-profile-v1';
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -32,46 +33,17 @@ const bytesToHex = (bytes: Uint8Array): string =>
  */
 export function computeProfileHash(profile: Profile): string {
   const { metadata, ...rest } = profile;
-  const { profileHanko, profileSignature, ...metadataClean } = metadata || {};
+  const { profileHanko, ...metadataClean } = metadata || {};
 
   const signable = {
     ...rest,
     metadata: metadataClean,
   };
 
-  // Sort keys for deterministic serialization
-  const ordered = sortObjectKeys(signable);
-  const json = JSON.stringify(ordered, replacer);
+  const json = serializeTaggedJson(signable);
   const message = `${PROFILE_SIGN_DOMAIN}:${json}`;
 
   return keccak256(new TextEncoder().encode(message));
-}
-
-/**
- * JSON replacer for bigint/Map serialization
- */
-function replacer(_key: string, value: unknown): unknown {
-  if (typeof value === 'string') {
-    const match = value.match(/^BigInt\(([-\d]+)\)$/);
-    if (match) return match[1];
-  }
-  if (typeof value === 'bigint') return value.toString();
-  if (value instanceof Map) return Object.fromEntries(value);
-  return value;
-}
-
-/**
- * Recursively sort object keys for deterministic output
- */
-function sortObjectKeys(obj: unknown): unknown {
-  if (obj === null || typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(sortObjectKeys);
-
-  const sorted: Record<string, unknown> = {};
-  for (const key of Object.keys(obj).sort()) {
-    sorted[key] = sortObjectKeys((obj as Record<string, unknown>)[key]);
-  }
-  return sorted;
 }
 
 /**

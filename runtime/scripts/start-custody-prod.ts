@@ -180,7 +180,6 @@ const ensureCustodyIdentity = async (hubIds: string[]): Promise<{ entityId: stri
       relayUrls: [RELAY_URL],
       advertiseEntityIds: [identity.entityId],
       isHub: false,
-      profileName: PROFILE_NAME,
       gossipPollMs: GOSSIP_POLL_MS,
     });
   }

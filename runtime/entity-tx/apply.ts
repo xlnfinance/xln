@@ -7,8 +7,7 @@ import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInpu
 import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../types';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
-import { buildEntityProfile } from '../networking/gossip-helper';
-import { getSignerAddress, getSignerPublicKey } from '../account-crypto';
+import { announceLocalEntityProfile } from '../networking/gossip-helper';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
   handleAccountInput,
@@ -75,19 +74,6 @@ const findAccountKey = (state: EntityState, counterpartyId: string): string | nu
   }
   return null;
 };
-
-const buildLocalProfile = (
-  env: Env,
-  state: EntityState,
-  name: string | undefined,
-  timestamp: number,
-) => buildEntityProfile(state, name, timestamp, {
-  getSignerAddress: (signerId) => getSignerAddress(env, signerId),
-  getSignerPublicKeyHex: (signerId) => {
-    const publicKey = getSignerPublicKey(env, signerId);
-    return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
-  },
-});
 
 export const applyEntityTx = async (
   env: Env,
@@ -239,12 +225,7 @@ export const applyEntityTx = async (
       newState.timestamp = env.timestamp;
 
       if (env.gossip) {
-        const existingProfile = env.gossip.getProfiles?.().find((p: any) => p.entityId === newState.entityId);
-        const lastTimestamp = existingProfile?.lastUpdated || 0;
-        const monotonicTimestamp = Math.max(lastTimestamp + 1, env.timestamp);
-        const profile = buildLocalProfile(env, newState, undefined, monotonicTimestamp);
-        if (env.runtimeId) profile.runtimeId = env.runtimeId;
-        env.gossip.announce(profile);
+        announceLocalEntityProfile(env, newState, env.timestamp);
       }
 
       return { newState, outputs: [] };
@@ -493,22 +474,14 @@ export const applyEntityTx = async (
 
       // Broadcast updated profile to gossip layer
       if (env.gossip) {
-        const existingProfile = env.gossip?.getProfiles?.().find((p: any) => p.entityId === newState.entityId);
-        const lastTimestamp = existingProfile?.lastUpdated || 0;
-        const monotonicTimestamp = Math.max(lastTimestamp + 1, env.timestamp);
-        const profile = buildLocalProfile(env, newState, undefined, monotonicTimestamp);
+        const profile = announceLocalEntityProfile(env, newState, env.timestamp);
 
         console.log(
-          `🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${profile.accounts?.length || 0} name=${profile.name}`,
+          `🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${profile.accounts.length} name=${profile.name}`,
         );
-
-        if (env.runtimeId) {
-          profile.runtimeId = env.runtimeId;
-        }
         console.log(
-          `📡 Announcing profile ${newState.entityId.slice(-4)} ts=${monotonicTimestamp} accounts=${profile.accounts?.length || 0}`,
+          `📡 Announcing profile ${newState.entityId.slice(-4)} ts=${profile.lastUpdated} accounts=${profile.accounts.length}`,
         );
-        env.gossip.announce(profile);
       }
 
       return { newState, outputs };
@@ -1015,25 +988,8 @@ export const applyEntityTx = async (
 
       // Announce updated profile with isHub: true
       if (env?.gossip) {
-        const existingProfile = env.gossip.getProfiles?.().find((p: any) => p.entityId === newState.entityId);
-        const lastTimestamp = existingProfile?.lastUpdated || 0;
-        const monotonicTimestamp = Math.max(lastTimestamp + 1, env.timestamp);
-        const profile = buildLocalProfile(env, newState, undefined, monotonicTimestamp);
-        profile.metadata = {
-          ...(profile.metadata || {}),
-          isHub: true,
-          policyVersion,
-          routingFeePPM,
-          baseFee,
-          c2rWithdrawSoftLimit: effectiveC2RWithdrawSoftLimit.toString(),
-          rebalanceBaseFee: rebalanceBaseFee.toString(),
-          rebalanceLiquidityFeeBps: rebalanceLiquidityFeeBps.toString(),
-          rebalanceGasFee: rebalanceGasFee.toString(),
-          rebalanceTimeoutMs,
-        };
-        if (env.runtimeId) profile.runtimeId = env.runtimeId;
-        env.gossip.announce(profile);
-        console.log(`📡 Hub profile announced: ${newState.entityId.slice(-4)} isHub=true`);
+        const profile = announceLocalEntityProfile(env, newState, env.timestamp);
+        console.log(`📡 Hub profile announced: ${newState.entityId.slice(-4)} isHub=${profile.metadata.isHub}`);
       }
 
       addMessage(

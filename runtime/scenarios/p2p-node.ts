@@ -737,14 +737,13 @@ const run = async () => {
   });
   await runtimeProcess(env);
 
-  console.log(`🔧 P2P_CONFIG: role=${role} profileName=${role} entityId=${entityId.slice(-4)}`);
+  console.log(`🔧 P2P_CONFIG: role=${role} entityId=${entityId.slice(-4)}`);
 
   const p2p = startP2P(env, {
     relayUrls: [relayUrl],
     seedRuntimeIds: seedRuntimeId ? [seedRuntimeId] : [],
     advertiseEntityIds: [entityId],
     isHub,
-    profileName: role,  // 'hub', 'alice', 'bob'
   });
 
   if (!p2p) {
