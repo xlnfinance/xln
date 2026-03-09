@@ -195,7 +195,6 @@ export type P2PConfig = {
   signerId?: string;
   advertiseEntityIds?: string[];
   isHub?: boolean;
-  profileName?: string;
   gossipPollMs?: number;
 };
 

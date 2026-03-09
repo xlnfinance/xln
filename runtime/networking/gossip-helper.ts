@@ -4,18 +4,11 @@
  */
 
 import { ethers } from 'ethers';
-import type { EntityState } from '../types';
+import type { EntityState, Env } from '../types';
 import type { BoardMetadata, Profile, ProfileAccount, ProfileTokenCapacity } from './gossip';
 import { deriveDelta, isLeft } from '../account-utils';
 import { safeStringify } from '../serialization-utils';
-
-type GossipBroadcastTx = {
-  type: 'gossipBroadcast';
-  data: {
-    profile: Profile;
-    timestamp: number;
-  };
-};
+import { getSignerAddress, getSignerPublicKey } from '../account-crypto';
 
 const toUint16 = (value: bigint | number | undefined, fallback = 0): number => {
   const raw = typeof value === 'bigint' ? Number(value) : Number(value ?? fallback);
@@ -85,7 +78,6 @@ const buildBoardMetadata = (
  */
 export function buildEntityProfile(
   entityState: EntityState,
-  name?: string,
   timestamp: number = 0,
   signerResolver?: ProfileSignerResolver,
 ): Profile {
@@ -137,9 +129,10 @@ export function buildEntityProfile(
   if (!cryptoPublicKey) {
     throw new Error(`GOSSIP_PROFILE_MISSING_ENCRYPTION_KEY: entity=${entityState.entityId}`);
   }
-  const profileName = typeof name === 'string' && name.trim().length > 0
-    ? name.trim()
-    : entityState.profile.name;
+  const profileName = String(entityState.profile.name || '').trim();
+  if (!profileName) {
+    throw new Error(`GOSSIP_PROFILE_NAME_REQUIRED: entity=${entityState.entityId}`);
+  }
 
   // Build profile
   const profile: Profile = {
@@ -179,6 +172,47 @@ export function buildEntityProfile(
   return profile;
 }
 
+export const createProfileSignerResolver = (env: Env): ProfileSignerResolver => ({
+  getSignerAddress: (signerId) => getSignerAddress(env, signerId),
+  getSignerPublicKeyHex: (signerId) => {
+    const publicKey = getSignerPublicKey(env, signerId);
+    return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
+  },
+});
+
+export const getNextProfileTimestamp = (env: Env, entityId: string, fallbackTimestamp?: number): number => {
+  const existingProfile = env.gossip.getProfiles().find((profile) => profile.entityId === entityId);
+  const lastTimestamp = existingProfile?.lastUpdated ?? 0;
+  const candidate = typeof fallbackTimestamp === 'number' ? fallbackTimestamp : env.timestamp;
+  return Math.max(lastTimestamp + 1, candidate);
+};
+
+export const buildLocalEntityProfile = (
+  env: Env,
+  entityState: EntityState,
+  timestamp: number = getNextProfileTimestamp(env, entityState.entityId),
+): Profile => {
+  const profile = buildEntityProfile(entityState, timestamp, createProfileSignerResolver(env));
+  if (env.runtimeId) {
+    profile.runtimeId = env.runtimeId;
+  }
+  return profile;
+};
+
+export const announceLocalEntityProfile = (
+  env: Env,
+  entityState: EntityState,
+  timestamp?: number,
+): Profile => {
+  const profile = buildLocalEntityProfile(
+    env,
+    entityState,
+    timestamp ?? getNextProfileTimestamp(env, entityState.entityId),
+  );
+  env.gossip.announce(profile);
+  return profile;
+};
+
 type FingerprintTokenCapacity = {
   tokenId: string;
   inCapacity: string;
@@ -199,7 +233,7 @@ export function buildEntityAdvertisedStateFingerprint(
   entityState: EntityState,
   signerResolver?: ProfileSignerResolver,
 ): string {
-  const profile = buildEntityProfile(entityState, undefined, 0, signerResolver);
+  const profile = buildEntityProfile(entityState, 0, signerResolver);
   const accounts: FingerprintAccount[] = profile.accounts
     .map((account) => {
       const tokenEntries =
@@ -242,27 +276,4 @@ export function buildEntityAdvertisedStateFingerprint(
   };
 
   return safeStringify(fingerprintPayload);
-}
-
-/**
- * Merge an updated profile with any existing gossip profile metadata.
- * Preserves hub flags + custom fields while keeping computed fields current.
- */
-export function mergeProfileWithExisting(profile: Profile, existing?: Profile | null): Profile {
-  return profile;
-}
-
-/**
- * Create a RuntimeTx to broadcast profile update
- */
-export function createProfileBroadcastTx(entityState: EntityState, timestamp: number): GossipBroadcastTx {
-  const profile = buildEntityProfile(entityState, undefined, timestamp);
-
-  return {
-    type: 'gossipBroadcast',
-    data: {
-      profile,
-      timestamp,
-    },
-  };
 }

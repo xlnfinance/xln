@@ -160,3 +160,23 @@
   - custody daemon/runtime is isolated and healthy on `127.0.0.1:8088`
   - custody HTTP service is isolated and healthy on `127.0.0.1:8087`
   - daemon control reports the deterministic `Custody` entity with `accountCount=3`
+- Unified public profile creation around entity state:
+  - [runtime/networking/gossip-helper.ts](/Users/egor/xln/runtime/networking/gossip-helper.ts) is now the single builder path for local entity profiles.
+  - [runtime/entity-tx/apply.ts](/Users/egor/xln/runtime/entity-tx/apply.ts), [runtime/runtime.ts](/Users/egor/xln/runtime/runtime.ts), and [scripts/bootstrap-hub.ts](/Users/egor/xln/scripts/bootstrap-hub.ts) now announce profiles through the shared helper instead of ad hoc builders.
+  - `profileName` was removed from P2P/runtime-network config paths; names now come only from `entityState.profile.name` at replica creation time.
+- Hardened relay gossip schema at the real ingress point:
+  - [runtime/networking/gossip.ts](/Users/egor/xln/runtime/networking/gossip.ts) now rejects legacy profile fields both in `parseProfile(...)` and `canonicalizeProfile(...)`.
+  - [runtime/relay-router.ts](/Users/egor/xln/runtime/relay-router.ts) now drops malformed `gossip_announce` payloads with explicit debug events instead of admitting them into relay state.
+  This closes the prod class of bugs where old clients could still inject `metadata.name`, `metadata.lastUpdated`, `expiresAt`, or non-canonical bigint tags into the relay directory.
+- Unified bigint transport on the live runtime/custody path:
+  - [runtime/networking/profile-signing.ts](/Users/egor/xln/runtime/networking/profile-signing.ts) now hashes profiles through the canonical tagged JSON serializer.
+  - [custody/daemon-client.ts](/Users/egor/xln/custody/daemon-client.ts) now uses tagged JSON over daemon WS RPC.
+  - [custody/server.ts](/Users/egor/xln/custody/server.ts) now serves JSON and persists withdrawal routes with the same tagged serializer.
+- Fixed hub bootstrap name seeding in [scripts/bootstrap-hub.ts](/Users/egor/xln/scripts/bootstrap-hub.ts): hub replicas now set `profileName` at `importReplica` time, so `H1/H2/H3` become part of entity state immediately instead of falling back to `Entity xxxx` placeholders.
+- Verified after these changes:
+  - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
+  - `bun build runtime/server.ts --target=bun --outfile=/tmp/runtime-server-check.js`
+  - `bun build custody/server.ts --target=bun --outfile=/tmp/custody-check.js`
+  - `bun build scripts/bootstrap-hub.ts --target=bun --outfile=/tmp/bootstrap-hub-check.js`
+  - isolated [tests/e2e-payment.spec.ts](/Users/egor/xln/tests/e2e-payment.spec.ts) passed
+  - isolated [tests/e2e-custody.spec.ts](/Users/egor/xln/tests/e2e-custody.spec.ts) passed

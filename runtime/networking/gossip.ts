@@ -103,6 +103,40 @@ const normalizeX25519Key = (raw: unknown): string | null => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key);
+
+const assertNoLegacyProfileFields = (
+  rawProfile: Record<string, unknown>,
+  metadataRaw: Record<string, unknown>,
+  entityId: string,
+): void => {
+  if (hasOwn(rawProfile, 'expiresAt')) {
+    throw new Error(`GOSSIP_PROFILE_EXPIRES_AT_FORBIDDEN: entity=${entityId}`);
+  }
+  if (hasOwn(metadataRaw, 'name')) {
+    throw new Error(`GOSSIP_PROFILE_METADATA_NAME_FORBIDDEN: entity=${entityId}`);
+  }
+  if (hasOwn(metadataRaw, 'avatar')) {
+    throw new Error(`GOSSIP_PROFILE_METADATA_AVATAR_FORBIDDEN: entity=${entityId}`);
+  }
+  if (hasOwn(metadataRaw, 'bio')) {
+    throw new Error(`GOSSIP_PROFILE_METADATA_BIO_FORBIDDEN: entity=${entityId}`);
+  }
+  if (hasOwn(metadataRaw, 'website')) {
+    throw new Error(`GOSSIP_PROFILE_METADATA_WEBSITE_FORBIDDEN: entity=${entityId}`);
+  }
+  if (hasOwn(metadataRaw, 'lastUpdated')) {
+    throw new Error(`GOSSIP_PROFILE_METADATA_LAST_UPDATED_FORBIDDEN: entity=${entityId}`);
+  }
+  if (hasOwn(metadataRaw, 'hankoSignature')) {
+    throw new Error(`GOSSIP_PROFILE_METADATA_HANKO_SIGNATURE_FORBIDDEN: entity=${entityId}`);
+  }
+  if (hasOwn(metadataRaw, 'encryptionPubKey')) {
+    throw new Error(`GOSSIP_PROFILE_METADATA_ENCRYPTION_PUBKEY_FORBIDDEN: entity=${entityId}`);
+  }
+};
+
 const normalizeStringArray = (raw: unknown): string[] => {
   if (!Array.isArray(raw)) return [];
   const result: string[] = [];
@@ -249,16 +283,19 @@ export const parseProfile = (raw: unknown): Profile => {
   if (!isRecord(metadataRaw)) {
     throw new Error(`GOSSIP_PROFILE_METADATA_REQUIRED: entity=${entityId}`);
   }
+  assertNoLegacyProfileFields(raw, metadataRaw, entityId);
   const cryptoPublicKey = normalizeX25519Key(metadataRaw.cryptoPublicKey);
   const encryptionPublicKey = normalizeX25519Key(metadataRaw.encryptionPublicKey);
   if (!cryptoPublicKey || !encryptionPublicKey) {
     throw new Error(`GOSSIP_PROFILE_MISSING_ENCRYPTION_KEY: entity=${entityId}`);
   }
+  if (typeof raw.name !== 'string' || raw.name.trim().length === 0) {
+    throw new Error(`GOSSIP_PROFILE_NAME_REQUIRED: entity=${entityId}`);
+  }
   const name = normalizeEntityName(raw.name, entityId);
   const lastUpdated = parsePositiveTimestamp(raw.lastUpdated, entityId);
   const capabilities = normalizeStringArray(raw.capabilities);
-  const publicAccounts = normalizeStringArray(raw.publicAccounts ?? raw.hubs);
-  const hubs = normalizeStringArray(raw.hubs ?? raw.publicAccounts);
+  const publicAccounts = normalizeStringArray(raw.publicAccounts);
   const endpoints = normalizeStringArray(raw.endpoints);
   const relays = normalizeStringArray(raw.relays);
   const metadata: ProfileMetadata = {
@@ -287,7 +324,7 @@ export const parseProfile = (raw: unknown): Profile => {
     ...(typeof raw.runtimeId === 'string' && raw.runtimeId.trim().length > 0 ? { runtimeId: raw.runtimeId.trim() } : {}),
     capabilities,
     publicAccounts,
-    hubs,
+    hubs: [...publicAccounts],
     endpoints,
     relays,
     metadata,
@@ -309,7 +346,12 @@ export const canonicalizeProfile = (
     throw new Error('GOSSIP_PROFILE_ENTITY_ID_REQUIRED');
   }
 
+  const rawProfile = profile as unknown as Record<string, unknown>;
   const metadata = profile.metadata as Record<string, unknown>;
+  assertNoLegacyProfileFields(rawProfile, metadata, entityId);
+  if (typeof profile.name !== 'string' || profile.name.trim().length === 0) {
+    throw new Error(`GOSSIP_PROFILE_NAME_REQUIRED: entity=${entityId}`);
+  }
   const normalizedName = normalizeEntityName(profile.name, entityId);
   const incomingLastUpdated = parsePositiveTimestamp(profile.lastUpdated, entityId);
   const normalizedCryptoKey = normalizeX25519Key(metadata.cryptoPublicKey);
@@ -330,7 +372,6 @@ export const canonicalizeProfile = (
 
   const capabilities = normalizeStringArray(profile.capabilities);
   const publicAccounts = normalizeStringArray(profile.publicAccounts);
-  const hubs = normalizeStringArray(profile.hubs.length > 0 ? profile.hubs : publicAccounts);
   const endpoints = normalizeStringArray(profile.endpoints);
   const relays = normalizeStringArray(profile.relays);
   const board = parseBoardMetadata(metadata.board, entityId);
@@ -347,7 +388,7 @@ export const canonicalizeProfile = (
     lastUpdated: incomingLastUpdated,
     capabilities,
     publicAccounts,
-    hubs,
+    hubs: [...publicAccounts],
     endpoints,
     relays,
     accounts: profile.accounts.map((account) => ({
@@ -447,7 +488,7 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
     if (!profile) {
       return { peers: [] };
     }
-    const peerIds = profile.publicAccounts.length > 0 ? profile.publicAccounts : profile.hubs;
+    const peerIds = profile.publicAccounts;
     const peers = peerIds.map(id => profiles.get(id)).filter(Boolean) as Profile[];
     return { profile, peers };
   };

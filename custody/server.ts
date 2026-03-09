@@ -1,6 +1,7 @@
 import { formatUnits } from 'ethers';
 import { parseTokenAmount } from '../runtime/financial-utils';
 import { DEFAULT_TOKENS } from '../runtime/jadapter/default-tokens';
+import { serializeTaggedJson } from '../runtime/serialization-utils';
 import { DaemonRpcClient, type DaemonFrameLog } from './daemon-client';
 import { CustodyStore, type ActivityRecord, type SessionRecord } from './store';
 
@@ -82,7 +83,7 @@ const json = (body: unknown, init?: ResponseInit, setCookie?: string): Response 
   headers.set('Content-Type', 'application/json');
   headers.set('Cache-Control', 'no-store');
   if (setCookie) headers.append('Set-Cookie', setCookie);
-  return new Response(JSON.stringify(body), { ...init, headers });
+  return new Response(serializeTaggedJson(body), { ...init, headers });
 };
 
 const html = (content: Bun.BunFile, setCookie?: string): Response => {
@@ -440,7 +441,7 @@ const server = Bun.serve({
           store.markWithdrawalSent({
             id: withdrawalId,
             hashlock: queued.hashlock,
-            routeJson: JSON.stringify(queued.route),
+            routeJson: serializeTaggedJson(queued.route),
             updatedAt: Date.now(),
           });
           return json(

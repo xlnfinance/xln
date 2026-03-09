@@ -201,7 +201,6 @@ export class DaemonControlClient {
     relayUrls?: string[];
     advertiseEntityIds?: string[];
     isHub?: boolean;
-    profileName?: string;
     gossipPollMs?: number;
   }): Promise<void> {
     await this.post<{ ok: boolean }, typeof config>('/api/control/p2p', config);
@@ -342,7 +341,6 @@ export const enableRouting = async (
     ...(config.relayUrl ? { relayUrls: [config.relayUrl] } : {}),
     advertiseEntityIds: [identity.entityId],
     isHub: true,
-    profileName: config.name,
     gossipPollMs: config.gossipPollMs ?? 0,
   });
   return identity;
@@ -370,7 +368,6 @@ export const setupCustody = async (
       ...(config.relayUrl ? { relayUrls: [config.relayUrl] } : {}),
       advertiseEntityIds: [identity.entityId],
       isHub: false,
-      profileName: config.name,
       gossipPollMs: config.gossipPollMs ?? 5000,
     });
   }

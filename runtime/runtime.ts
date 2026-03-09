@@ -74,8 +74,9 @@ import {
   prewarmSignerKeyCache,
 } from './account-crypto';
 import {
+  announceLocalEntityProfile,
   buildEntityAdvertisedStateFingerprint,
-  buildEntityProfile,
+  createProfileSignerResolver,
 } from './networking/gossip-helper';
 import { RuntimeP2P, type P2PConfig } from './networking/p2p';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './networking/p2p-crypto';
@@ -508,19 +509,6 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   }
   return env.runtimeState;
 };
-
-const buildRuntimeLocalProfile = (
-  env: Env,
-  state: EntityState,
-  name: string | undefined,
-  timestamp: number,
-): Profile => buildEntityProfile(state, name, timestamp, {
-  getSignerAddress: (signerId) => getSignerAddress(env, signerId),
-  getSignerPublicKeyHex: (signerId) => {
-    const publicKey = getSignerPublicKey(env, signerId);
-    return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
-  },
-});
 
 const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
 const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
@@ -1474,7 +1462,6 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     seedRuntimeIds: config.seedRuntimeIds,
     advertiseEntityIds: config.advertiseEntityIds,
     isHub: config.isHub,
-    profileName: config.profileName,
     gossipPollMs: config.gossipPollMs,
     onEntityInput: (from, input) => {
       const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
@@ -2037,15 +2024,7 @@ const applyRuntimeInput = async (
 
         // Broadcast initial profile to gossip layer
         if (env.gossip && createdReplica) {
-          const primarySignerId = runtimeTx.data.config.validators?.[0];
-          const entityPublicKey = primarySignerId ? getSignerPublicKey(env, primarySignerId) : null;
-          const publicKeyHex = entityPublicKey ? `0x${Buffer.from(entityPublicKey).toString('hex')}` : undefined;
-          const profile = buildRuntimeLocalProfile(env, createdReplica.state, undefined, env.timestamp);
-          profile.runtimeId = env.runtimeId;
-          if (publicKeyHex) {
-            profile.metadata = { ...(profile.metadata || {}), entityPublicKey: publicKeyHex };
-          }
-          env.gossip.announce(profile);
+          announceLocalEntityProfile(env, createdReplica.state, env.timestamp);
         }
 
         if (typeof actualJBlock !== 'number') {
@@ -3200,13 +3179,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
         const entityId = String(replica?.entityId || '').toLowerCase();
         if (!entityId || !localEntityIds.has(entityId) || fingerprints.has(entityId)) continue;
         try {
-          fingerprints.set(entityId, buildEntityAdvertisedStateFingerprint(replica.state, {
-            getSignerAddress: (signerId) => getSignerAddress(env, signerId),
-            getSignerPublicKeyHex: (signerId) => {
-              const publicKey = getSignerPublicKey(env, signerId);
-              return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
-            },
-          }));
+          fingerprints.set(entityId, buildEntityAdvertisedStateFingerprint(replica.state, createProfileSignerResolver(env)));
         } catch (error) {
           if (!quietRuntimeLogs) {
             console.warn(`GOSSIP_PROFILE_FINGERPRINT_SKIP: entity=${entityId.slice(-8)} error=${(error as Error).message}`);

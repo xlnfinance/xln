@@ -148,6 +148,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
   if (type === 'gossip_announce') {
     const profiles = (payload?.profiles || []) as Profile[];
     let stored = 0;
+    let droppedMalformed = 0;
     const storedProfiles: Profile[] = [];
     for (const profile of profiles) {
       if (!profile || typeof profile !== 'object') continue;
@@ -155,12 +156,29 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
         ...profile,
         runtimeId: profile.runtimeId || from,
       };
-      if (storeGossipProfile(store, normalized)) {
-        stored += 1;
-        storedProfiles.push(normalized);
+      try {
+        if (storeGossipProfile(store, normalized)) {
+          stored += 1;
+          storedProfiles.push(normalized);
+        }
+        // Mirror into env gossip cache via hook
+        config.onGossipStore?.(normalized);
+      } catch (error) {
+        droppedMalformed += 1;
+        pushDebugEvent(store, {
+          event: 'error',
+          from,
+          msgType: type,
+          status: 'rejected',
+          reason: 'GOSSIP_PROFILE_DROPPED_MALFORMED',
+          details: {
+            entityId: typeof normalized.entityId === 'string' ? normalized.entityId : null,
+            message: error instanceof Error ? error.message : String(error),
+            traceId,
+          },
+        });
+        continue;
       }
-      // Mirror into env gossip cache via hook
-      config.onGossipStore?.(normalized);
     }
     let broadcastTargets = 0;
     if (storedProfiles.length > 0) {
@@ -180,7 +198,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
           from,
           msgType: type,
           status: 'stored',
-          details: { received: profiles.length, stored, broadcastTargets, traceId },
+          details: { received: profiles.length, stored, droppedMalformed, broadcastTargets, traceId },
         });
         return;
       }
@@ -204,7 +222,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       from,
       msgType: type,
       status: 'stored',
-      details: { received: profiles.length, stored, broadcastTargets, traceId },
+      details: { received: profiles.length, stored, droppedMalformed, broadcastTargets, traceId },
     });
 
     return;
