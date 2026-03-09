@@ -3644,6 +3644,16 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     for (const profile of relayHubProfiles) {
       relayHubsByEntity.set(profile.entityId.toLowerCase(), profile);
     }
+    const relayProfiles = getAllGossipProfiles(relayStore);
+    const relayProfileSummaries = relayProfiles
+      .map((profile: Profile) => ({
+        entityId: profile.entityId,
+        runtimeId: profile.runtimeId || null,
+        name: profile.name,
+        isHub: profile.metadata.isHub === true,
+        lastUpdated: profile.lastUpdated,
+      }))
+      .sort((left, right) => right.lastUpdated - left.lastUpdated);
     health.hubs = (health.hubs || []).map((hub: HubHealth) => {
       const entityId = String(hub.entityId || '');
       const profile = relayHubsByEntity.get(entityId.toLowerCase());
@@ -3678,6 +3688,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           activeClients: activeClientRuntimeIds,
           activeClientCount: activeClientRuntimeIds.length,
           clientsDetailed: activeClientsDetailed,
+          profileCount: relayProfiles.length,
+          profiles: relayProfileSummaries,
         },
       }),
       { headers },
@@ -5205,7 +5217,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   ];
   startP2P(env, {
     relayUrls: [internalRelayUrl],
-    ...(advertisedEntityIds.length > 0 ? { advertiseEntityIds } : {}),
+    ...(advertisedEntityIds.length > 0 ? { advertiseEntityIds: advertisedEntityIds } : {}),
     isHub: hubEntityIds.length > 0,
     // Keep hub-bootstrapped servers quiet; plain daemons can still poll the relay.
     gossipPollMs: hubEntityIds.length > 0 ? 0 : 5000,
