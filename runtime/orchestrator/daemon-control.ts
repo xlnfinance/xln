@@ -24,6 +24,8 @@ export type ControlEntitySummary = {
   name: string;
   isRoutingEnabled: boolean;
   runtimeId: string | null;
+  accountCount: number;
+  publicAccountCount: number;
 };
 
 export type ControlQueueResponse = {

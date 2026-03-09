@@ -4,10 +4,8 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { deriveManagedEntityIdentity, DaemonControlClient, setupCustody } from '../orchestrator/daemon-control';
 import {
-  fetchDebugEntities,
   spawnBunChild,
   stopManagedChild,
-  waitForDebugEntity,
   waitForHttpReady,
   type ManagedChild,
 } from '../orchestrator/custody-bootstrap';
@@ -89,20 +87,23 @@ const waitForMainStackReady = async (): Promise<string[]> => {
 };
 
 const ensureExistingCustodyState = async (
-  daemonBaseUrl: string,
+  client: DaemonControlClient,
   entityId: string,
   expectedHubCount: number,
 ): Promise<void> => {
-  const entry = await waitForDebugEntity(
-    daemonBaseUrl,
-    entityId,
-    candidate => Math.max(candidate.accounts?.length ?? 0, candidate.publicAccounts?.length ?? 0) >= expectedHubCount,
-    30_000,
-  );
-  const accountCount = Math.max(entry.accounts?.length ?? 0, entry.publicAccounts?.length ?? 0);
-  if (accountCount < expectedHubCount) {
-    throw new Error(`CUSTODY_STATE_INCOMPLETE: expected >=${expectedHubCount} hub accounts, got ${accountCount}`);
+  const deadline = Date.now() + 30_000;
+  const target = entityId.toLowerCase();
+  let lastCount = 0;
+  while (Date.now() < deadline) {
+    const entries = await client.listEntities();
+    const entry = entries.find(candidate => candidate.entityId.toLowerCase() === target);
+    if (entry) {
+      lastCount = Math.max(entry.accountCount, entry.publicAccountCount);
+      if (lastCount >= expectedHubCount) return;
+    }
+    await sleep(500);
   }
+  throw new Error(`CUSTODY_STATE_INCOMPLETE: expected >=${expectedHubCount} hub accounts, got ${lastCount}`);
 };
 
 const isHttpReady = async (url: string): Promise<boolean> => {
@@ -150,8 +151,7 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
 };
 
 const ensureCustodyIdentity = async (hubIds: string[]): Promise<{ entityId: string; signerId: string }> => {
-  const daemonBaseUrl = `http://127.0.0.1:${DAEMON_PORT}`;
-  const client = new DaemonControlClient({ baseUrl: daemonBaseUrl, timeoutMs: 20_000 });
+  const client = new DaemonControlClient({ baseUrl: `http://127.0.0.1:${DAEMON_PORT}`, timeoutMs: 20_000 });
   const identity = deriveManagedEntityIdentity({
     name: PROFILE_NAME,
     seed: SEED,
@@ -173,9 +173,9 @@ const ensureCustodyIdentity = async (hubIds: string[]): Promise<{ entityId: stri
       creditTokenIds: [1, 2, 3],
       routingEnabled: false,
     });
-    await ensureExistingCustodyState(daemonBaseUrl, identity.entityId, hubIds.length);
+    await ensureExistingCustodyState(client, identity.entityId, hubIds.length);
   } else {
-    await ensureExistingCustodyState(daemonBaseUrl, identity.entityId, hubIds.length);
+    await ensureExistingCustodyState(client, identity.entityId, hubIds.length);
     await client.configureP2P({
       relayUrls: [RELAY_URL],
       advertiseEntityIds: [identity.entityId],
@@ -185,8 +185,8 @@ const ensureCustodyIdentity = async (hubIds: string[]): Promise<{ entityId: stri
     });
   }
 
-  const entities = await fetchDebugEntities(daemonBaseUrl);
-  const found = entities.find(entity => String(entity.entityId || '').toLowerCase() === identity.entityId.toLowerCase());
+  const entities = await client.listEntities();
+  const found = entities.find(entity => entity.entityId.toLowerCase() === identity.entityId.toLowerCase());
   if (!found) {
     throw new Error(`CUSTODY_ENTITY_MISSING: ${identity.entityId}`);
   }
