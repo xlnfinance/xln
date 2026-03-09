@@ -227,7 +227,7 @@
     }
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
-      add(profile?.entityId);
+      add(profile.entityId);
     }
     return Array.from(ids.values()).sort();
   })();
@@ -244,9 +244,9 @@
     if (entityId) put(entityId, 'Self');
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
-      const id = String(profile?.entityId || '').trim();
+      const id = profile.entityId.trim();
       if (!id) continue;
-      const name = profile?.metadata?.name?.trim?.();
+      const name = profile.name.trim();
       if (name) put(id, name);
     }
     for (const contact of contacts) {
@@ -363,8 +363,8 @@
     const serverName = serverEntityNames.get(norm);
     if (serverName) return serverName;
     const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === norm);
-    const metaName = profile?.metadata?.name;
-    return typeof metaName === 'string' && metaName.trim() ? metaName.trim() : id;
+    const name = profile?.name;
+    return typeof name === 'string' && name.trim() ? name.trim() : id;
   }
 
   function getGossipProfileByEntityId(id: string): GossipProfile | undefined {
@@ -595,13 +595,11 @@
     const toNorm = normalizeEntityId(to);
     const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === fromNorm);
     const basePpm = sanitizeFeePPM(
-      profile?.metadata?.routingFeePPM ?? DEFAULT_UNKNOWN_HOP_FEE_PPM,
+      profile?.metadata.routingFeePPM ?? DEFAULT_UNKNOWN_HOP_FEE_PPM,
       DEFAULT_UNKNOWN_HOP_FEE_PPM
     );
-    const baseFee = sanitizeBigInt(profile?.metadata?.baseFee ?? 0n);
-    const account = Array.isArray(profile?.accounts)
-      ? profile.accounts.find((a) => normalizeEntityId(a.counterpartyId) === toNorm)
-      : null;
+    const baseFee = sanitizeBigInt(profile?.metadata.baseFee ?? 0n);
+    const account = profile?.accounts.find((a) => normalizeEntityId(a.counterpartyId) === toNorm) ?? null;
     const tokenCapacity =
       getTokenCapacitySnapshot(account?.tokenCapacities, token)
       ?? getLocalAccountCapacity(from, to, token);
@@ -668,8 +666,8 @@
     const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === entityNorm);
     if (!profile) return null;
     const gossipCandidates = [
-      profile?.metadata?.cryptoPublicKey,
-      profile?.metadata?.encryptionPublicKey,
+      profile.metadata.cryptoPublicKey,
+      profile.metadata.encryptionPublicKey,
     ];
     for (const candidate of gossipCandidates) {
       const normalized = normalizeEnvelopeKey(candidate);

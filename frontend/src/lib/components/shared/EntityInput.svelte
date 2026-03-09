@@ -44,7 +44,7 @@
     if (!profile) {
       scheduleGossipProfileFetch([norm]);
     }
-    return String(profile?.metadata?.name || '').trim();
+    return String(profile?.name || '').trim();
   }
 
   function lookupEntityFromGossip(query: string): string | null {
@@ -61,7 +61,7 @@
 
     // Search by name
     for (const profile of profiles) {
-      const name = profile.metadata?.name?.toLowerCase();
+      const name = profile.name?.toLowerCase();
       if (name === queryLower) return profile.entityId;
     }
 

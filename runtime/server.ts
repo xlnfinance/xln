@@ -28,7 +28,7 @@ import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './ser
 import type { AccountMachine, DeliverableEntityInput, Delta, Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
 import type { HubHealth } from './health';
 import { encodeBoard, hashBoard } from './entity-factory';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from './account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, getSignerAddress, getSignerPublicKey, registerSignerKey } from './account-crypto';
 import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
 import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
@@ -377,16 +377,15 @@ const ensureHubWalletFunding = async (
   return hub;
 };
 
-const isHubProfile = (profile: any): boolean => {
-  const caps: string[] = Array.isArray(profile?.capabilities) ? profile.capabilities : [];
-  return profile?.metadata?.isHub === true || caps.includes('hub') || caps.includes('routing');
+const isHubProfile = (profile: Profile): boolean => {
+  const caps = profile.capabilities;
+  return profile.metadata.isHub === true || caps.includes('hub') || caps.includes('routing');
 };
 
-const isFaucetHubProfile = (profile: any): boolean => {
-  if (!profile?.entityId) return false;
-  const caps: string[] = Array.isArray(profile?.capabilities) ? profile.capabilities : [];
+const isFaucetHubProfile = (profile: Profile): boolean => {
+  const caps = profile.capabilities;
   if (caps.includes('faucet')) return true;
-  return relayStore.activeHubEntityIds.some(id => id.toLowerCase() === String(profile.entityId).toLowerCase());
+  return relayStore.activeHubEntityIds.some(id => id.toLowerCase() === profile.entityId.toLowerCase());
 };
 
 const getFaucetHubProfiles = (env: Env): any[] => {
@@ -779,19 +778,25 @@ const ensureMarketMakerEntity = async (
   }
 
   try {
-    const profile: Profile = {
-      entityId,
-      runtimeId: env.runtimeId,
-      capabilities: ['market-maker', 'liquidity-provider'],
-      accounts: [],
-      relays: relayUrl ? [relayUrl] : [],
-      endpoints: relayUrl ? [relayUrl] : [],
-      metadata: {
-        name: MARKET_MAKER_NAME,
-        role: 'market-maker',
-        isHub: false,
-        lastUpdated: Date.now(),
+    const mmReplica = getEntityReplicaById(env, entityId);
+    if (!mmReplica) {
+      throw new Error(`MARKET_MAKER_PROFILE_ENTITY_MISSING: ${entityId}`);
+    }
+    const seededAt = Date.now();
+    const profile: Profile = buildEntityProfile(mmReplica.state, MARKET_MAKER_NAME, seededAt, {
+      getSignerAddress: (signerId) => getSignerAddress(env, signerId),
+      getSignerPublicKeyHex: (signerId) => {
+        const publicKey = getSignerPublicKey(env, signerId);
+        return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
       },
+    });
+    profile.runtimeId = env.runtimeId;
+    profile.capabilities = ['market-maker', 'liquidity-provider'];
+    profile.relays = relayUrl ? [relayUrl] : [];
+    profile.endpoints = relayUrl ? [relayUrl] : [];
+    profile.metadata = {
+      ...profile.metadata,
+      role: 'market-maker',
     };
     env.gossip?.announce?.(profile);
     storeGossipProfile(relayStore, profile);
@@ -1813,22 +1818,21 @@ const RPC_MARKET_PUBLISH_MS = 1000;
 const RPC_MARKET_MAX_DEPTH = 100;
 const RPC_MARKET_DEFAULT_DEPTH = 20;
 
-const normalizeHubProfileForRelay = (profile: any): any => {
-  if (!profile || !profile.entityId) return profile;
-  const capabilities = Array.isArray(profile.capabilities) ? profile.capabilities : [];
-  const rawBaseFee = profile.metadata?.rebalanceBaseFee;
-  const rawLiquidityFeeBps = profile.metadata?.rebalanceLiquidityFeeBps;
-  const rawGasFee = profile.metadata?.rebalanceGasFee;
-  const rawPolicyVersion = Number(profile.metadata?.policyVersion ?? 1);
-  const rawTimeoutMs = Number(profile.metadata?.rebalanceTimeoutMs ?? 10 * 60 * 1000);
+const normalizeHubProfileForRelay = (profile: Profile): Profile => {
+  const capabilities = profile.capabilities;
+  const rawBaseFee = profile.metadata.rebalanceBaseFee;
+  const rawLiquidityFeeBps = profile.metadata.rebalanceLiquidityFeeBps;
+  const rawGasFee = profile.metadata.rebalanceGasFee;
+  const rawPolicyVersion = Number(profile.metadata.policyVersion ?? 1);
+  const rawTimeoutMs = Number(profile.metadata.rebalanceTimeoutMs ?? 10 * 60 * 1000);
   return {
     ...profile,
+    name: profile.name,
     capabilities: Array.from(new Set([...capabilities, 'hub', 'routing', 'faucet'])),
     metadata: {
-      ...(profile.metadata || {}),
+      ...profile.metadata,
       isHub: true,
-      name: profile.metadata?.name || String(profile.entityId).slice(0, 10),
-      region: profile.metadata?.region || 'global',
+      region: profile.metadata.region || 'global',
       policyVersion: Number.isFinite(rawPolicyVersion) && rawPolicyVersion > 0 ? rawPolicyVersion : 1,
       rebalanceBaseFee:
         rawBaseFee !== undefined && rawBaseFee !== null
@@ -1844,8 +1848,8 @@ const normalizeHubProfileForRelay = (profile: any): any => {
           : '0',
       rebalanceTimeoutMs:
         Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0 ? Math.floor(rawTimeoutMs) : 10 * 60 * 1000,
-      lastUpdated: profile.metadata?.lastUpdated || Date.now(),
     },
+    lastUpdated: profile.lastUpdated > 0 ? profile.lastUpdated : Date.now(),
   };
 };
 
@@ -2449,9 +2453,7 @@ const triggerColdReset = async (
     if (localRuntimeKey) preservedRuntimeIds.add(localRuntimeKey);
     for (const hubEntityId of relayStore.activeHubEntityIds) {
       const entry = relayStore.gossipProfiles.get(String(hubEntityId).toLowerCase());
-      const hintedRuntime = normalizeRuntimeKey(
-        entry?.profile?.runtimeId ?? entry?.profile?.metadata?.runtimeId ?? entry?.profile?.metadata?.runtime_id,
-      );
+      const hintedRuntime = normalizeRuntimeKey(entry?.profile.runtimeId);
       if (hintedRuntime) preservedRuntimeIds.add(hintedRuntime);
     }
   }
@@ -2641,27 +2643,34 @@ const seedHubProfilesInRelayCache = (
     }
     if (!hubState) continue;
 
-    const profile = buildEntityProfile(hubState, hub.name, seededAt);
+    const profile = buildEntityProfile(hubState, hub.name, seededAt, {
+      getSignerAddress: (signerId) => getSignerAddress(env, signerId),
+      getSignerPublicKeyHex: (signerId) => {
+        const publicKey = getSignerPublicKey(env, signerId);
+        return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
+      },
+    });
     profile.runtimeId = env.runtimeId;
     profile.capabilities = Array.from(
       new Set([...(profile.capabilities || []), ...(hub.capabilities || ['hub', 'routing', 'faucet'])]),
     );
     const hubPolicy = hubState.hubRebalanceConfig;
     profile.metadata = {
-      ...(profile.metadata || {}),
+      ...profile.metadata,
       isHub: true,
-      name: hub.name || profile.metadata?.name || hub.entityId.slice(0, 10),
       region: hub.region || 'global',
       relayUrl,
-      routingFeePPM: hub.routingFeePPM ?? profile.metadata?.routingFeePPM ?? 100,
+      routingFeePPM: hub.routingFeePPM ?? profile.metadata.routingFeePPM,
       policyVersion: hubPolicy?.policyVersion ?? 1,
       rebalanceBaseFee: String(hubPolicy?.rebalanceBaseFee ?? 10n ** 17n),
       rebalanceLiquidityFeeBps: String(hubPolicy?.rebalanceLiquidityFeeBps ?? hubPolicy?.minFeeBps ?? 1n),
       rebalanceGasFee: String(hubPolicy?.rebalanceGasFee ?? 0n),
       rebalanceTimeoutMs: hubPolicy?.rebalanceTimeoutMs ?? 10 * 60 * 1000,
       ...(encryptionPublicKey ? { encryptionPublicKey } : {}),
-      lastUpdated: seededAt,
     };
+    profile.lastUpdated = seededAt;
+    profile.endpoints = [relayUrl];
+    profile.relays = [relayUrl];
 
     storeGossipProfile(relayStore, profile);
     env.gossip?.announce?.(profile);
@@ -3188,7 +3197,7 @@ const getProfileNameForEntity = (env: Env, entityId: string): string => {
   const gossipProfiles = env.gossip?.getProfiles?.() || [];
   const gossipProfile = gossipProfiles.find(profile => String(profile?.entityId || '').toLowerCase() === target);
   const relayProfile = relayStore.gossipProfiles.get(target)?.profile;
-  const rawName = gossipProfile?.metadata?.name ?? relayProfile?.metadata?.name;
+  const rawName = gossipProfile?.name ?? relayProfile?.name;
   return typeof rawName === 'string' && rawName.trim().length > 0 ? rawName.trim() : entityId;
 };
 
@@ -3704,19 +3713,17 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     }));
     // Ensure hubs are visible even when env.gossip is stale by merging relay cache profiles.
     const relayHubProfiles = getAllGossipProfiles(relayStore).filter((profile: Profile) =>
-      profile?.metadata?.isHub === true ||
-      (Array.isArray(profile?.capabilities) && profile.capabilities.includes('hub')),
+      profile.metadata.isHub === true || profile.capabilities.includes('hub'),
     );
     const existing = new Set((health.hubs || []).map((hub) => String(hub.entityId).toLowerCase()));
     for (const profile of relayHubProfiles) {
-      const entityId = String(profile?.entityId || '');
-      if (!entityId) continue;
+      const entityId = profile.entityId;
       if (existing.has(entityId.toLowerCase())) continue;
       health.hubs.push({
         entityId,
-        name: profile?.metadata?.name || 'Unknown',
-        region: typeof profile?.metadata?.region === 'string' ? profile.metadata.region : 'global',
-        relayUrl: typeof profile?.metadata?.relayUrl === 'string' ? profile.metadata.relayUrl : undefined,
+        name: profile.name,
+        region: typeof profile.metadata.region === 'string' ? profile.metadata.region : 'global',
+        relayUrl: typeof profile.metadata.relayUrl === 'string' ? profile.metadata.relayUrl : undefined,
         status: 'healthy',
         reserves: env ? getReplicaReserveSnapshot(env, entityId) : undefined,
         accounts: env ? getReplicaAccountCount(env, entityId) : undefined,
@@ -3726,17 +3733,12 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
     const relayHubsByEntity = new Map<string, Profile>();
     for (const profile of relayHubProfiles) {
-      relayHubsByEntity.set(String(profile?.entityId || '').toLowerCase(), profile);
+      relayHubsByEntity.set(profile.entityId.toLowerCase(), profile);
     }
     health.hubs = (health.hubs || []).map((hub: HubHealth) => {
       const entityId = String(hub.entityId || '');
       const profile = relayHubsByEntity.get(entityId.toLowerCase());
-      const runtimeId =
-        typeof profile?.runtimeId === 'string'
-          ? profile.runtimeId
-          : typeof profile?.metadata?.runtimeId === 'string'
-            ? profile.metadata.runtimeId
-            : undefined;
+      const runtimeId = profile?.runtimeId;
       const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
       const activeClients =
         normalizedRuntimeId && relayStore.clients.has(normalizedRuntimeId) ? [normalizedRuntimeId] : [];
@@ -3993,12 +3995,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         const runtimeId = typeof profile.runtimeId === 'string' ? profile.runtimeId : undefined;
         const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
         const name =
-          typeof profile?.metadata?.name === 'string' && profile.metadata.name.trim().length > 0
-            ? profile.metadata.name.trim()
+          typeof profile.name === 'string' && profile.name.trim().length > 0
+            ? profile.name.trim()
             : entityId;
-        const isHub =
-          profile?.metadata?.isHub === true ||
-          (Array.isArray(profile?.capabilities) && profile.capabilities.includes('hub'));
+        const isHub = profile.metadata.isHub === true || profile.capabilities.includes('hub');
         const online = normalizedRuntimeId ? relayStore.clients.has(normalizedRuntimeId) : false;
         return {
           entityId,
@@ -4006,11 +4006,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           name,
           isHub,
           online,
-          lastUpdated: Number(profile?.metadata?.lastUpdated || entry.timestamp || 0),
-          capabilities: Array.isArray(profile?.capabilities) ? profile.capabilities : [],
-          accounts: Array.isArray(profile?.accounts) ? profile.accounts : [],
-          publicAccounts: Array.isArray(profile?.publicAccounts) ? profile.publicAccounts : [],
-          metadata: profile?.metadata || {},
+          lastUpdated: Number(profile.lastUpdated || entry.timestamp || 0),
+          capabilities: profile.capabilities,
+          accounts: profile.accounts,
+          publicAccounts: profile.publicAccounts,
+          metadata: profile.metadata,
         };
       })
       .filter(e => {

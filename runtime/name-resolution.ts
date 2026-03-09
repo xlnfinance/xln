@@ -6,9 +6,10 @@
  */
 
 import { decode, encode } from './snapshot-coder';
-import { buildEntityProfile, mergeProfileWithExisting } from './networking/gossip-helper';
+import { buildEntityProfile } from './networking/gossip-helper';
 import type { Profile } from './networking/gossip';
 import type { EntityProfile, EntityTx, Env, NameIndex, NameSearchResult, ProfileUpdateTx } from './types';
+import { getSignerAddress, getSignerPublicKey } from './account-crypto';
 import { formatEntityDisplay, generateEntityAvatar } from './utils';
 
 // === PROFILE STORAGE ===
@@ -173,55 +174,37 @@ export const processProfileUpdate = async (
     profile.lastUpdated = env?.timestamp ?? 0;
     profile.hankoSignature = hankoSignature;
 
-    const buildAnnouncedProfile = (): Profile | null => {
-      if (!env?.gossip?.announce) return null;
-
-      const existingProfile = env.gossip.getProfiles?.().find((candidate) => candidate.entityId === entityId) ?? null;
+    const buildAnnouncedProfile = (): Profile => {
+      if (!env?.gossip?.announce) {
+        throw new Error('PROFILE_UPDATE_GOSSIP_UNAVAILABLE');
+      }
       const localReplica = Array.from(env.eReplicas.values()).find((replica) => replica.entityId === entityId);
-      if (localReplica?.state) {
-        const builtProfile = buildEntityProfile(localReplica.state, profile.name, profile.lastUpdated);
-        builtProfile.runtimeId = env.runtimeId;
-        builtProfile.metadata = {
-          ...(builtProfile.metadata || {}),
-          avatar: profile.avatar,
-          bio: profile.bio,
-          website: profile.website,
-          hankoSignature: profile.hankoSignature,
-          lastUpdated: profile.lastUpdated,
-        };
-        return mergeProfileWithExisting(builtProfile, existingProfile);
+      if (!localReplica?.state) {
+        throw new Error(`PROFILE_UPDATE_LOCAL_REPLICA_REQUIRED: entity=${entityId}`);
       }
-
-      if (existingProfile) {
-        const mergedProfile: Profile = {
-          ...existingProfile,
-          runtimeId: env.runtimeId || existingProfile.runtimeId,
-          metadata: {
-            ...(existingProfile.metadata || {}),
-            name: profile.name,
-            avatar: profile.avatar,
-            bio: profile.bio,
-            website: profile.website,
-            hankoSignature: profile.hankoSignature,
-            lastUpdated: profile.lastUpdated,
-          },
-        };
-        return mergeProfileWithExisting(mergedProfile, existingProfile);
-      }
-
-      return null;
+      localReplica.state.profile = {
+        name: profile.name,
+        avatar: profile.avatar || '',
+        bio: profile.bio || '',
+        website: profile.website || '',
+      };
+      const builtProfile = buildEntityProfile(localReplica.state, profile.name, profile.lastUpdated, {
+        getSignerAddress: (signerId) => getSignerAddress(env, signerId),
+        getSignerPublicKeyHex: (signerId) => {
+          const publicKey = getSignerPublicKey(env, signerId);
+          return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
+        },
+      });
+      builtProfile.runtimeId = env.runtimeId;
+      return builtProfile;
     };
 
     // Sync to gossip layer FIRST (before storing) to ensure it's captured in snapshots
     if (env?.gossip?.announce) {
       try {
         const announcedProfile = buildAnnouncedProfile();
-        if (announcedProfile) {
-          env.gossip.announce(announcedProfile);
-          console.log(`📡 Synced full profile update to gossip: ${entityId}`);
-        } else {
-          console.warn(`⚠️ Skipped gossip profile update for ${entityId}: no full profile context available`);
-        }
+        env.gossip.announce(announcedProfile);
+        console.log(`📡 Synced full profile update to gossip: ${entityId}`);
       } catch (gossipError) {
         console.error(`❌ Failed to sync profile to gossip layer for ${entityId}:`, gossipError);
       }

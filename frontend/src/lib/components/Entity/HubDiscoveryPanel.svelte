@@ -256,10 +256,10 @@
         discovered.push({
           profile,
           entityId: profile.entityId,
-          name: profile.metadata?.name || `Hub ${profile.entityId.slice(0, 8)}`,
+          name: profile.name || `Hub ${profile.entityId.slice(0, 8)}`,
           metadata: {
-            description: profile.metadata?.bio || 'Payment hub',
-            ...(profile.metadata?.website ? { website: profile.metadata.website } : {}),
+            description: profile.bio || 'Payment hub',
+            ...(profile.website ? { website: profile.website } : {}),
             fee: feePpm,
             capacity: capacity ?? 0n,
             uptime,
@@ -270,7 +270,7 @@
           verified: capabilities.includes('hub') || capabilities.includes('routing'),
           creditScore: computeCreditScore(profile.entityId, feePpm, uptime),
           isConnected,
-          lastSeen: profile.metadata?.lastUpdated || Date.now(),
+          lastSeen: profile.lastUpdated || Date.now(),
           raw: formatRawProfile(profile),
           identicon: generateIdenticon(fullEntityId),
           ...(typeof profile.runtimeId === 'string' && profile.runtimeId.trim()

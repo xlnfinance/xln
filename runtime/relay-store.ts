@@ -6,7 +6,7 @@
  */
 
 import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
-import type { Profile } from './networking/gossip';
+import { canonicalizeProfile, type Profile } from './networking/gossip';
 import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   selectProfileBatch,
@@ -103,12 +103,13 @@ export const pushDebugEvent = (store: RelayStore, event: Omit<RelayDebugEvent, '
 // ---------------------------------------------------------------------------
 
 export const storeGossipProfile = (store: RelayStore, profile: Profile): boolean => {
-  const entityId = profile.entityId;
+  const canonicalProfile = canonicalizeProfile(profile);
+  const entityId = canonicalProfile.entityId;
   if (!entityId) return false;
-  const newTs = profile?.metadata?.lastUpdated || 0;
+  const newTs = canonicalProfile.lastUpdated;
   const existing = store.gossipProfiles.get(entityId);
   if (existing && existing.timestamp >= newTs) return false;
-  store.gossipProfiles.set(entityId, { profile, timestamp: newTs });
+  store.gossipProfiles.set(entityId, { profile: canonicalProfile, timestamp: newTs });
   return true;
 };
 
@@ -201,12 +202,11 @@ export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId
   if (typeof directKey === 'string' && directKey.length > 0) return directKey;
 
   for (const { profile } of store.gossipProfiles.values()) {
-    if (!profile || typeof profile !== 'object') continue;
-    const profileRuntimeId = normalizeRuntimeKey(profile.runtimeId || profile.metadata?.runtimeId || '');
+    const profileRuntimeId = normalizeRuntimeKey(profile.runtimeId || '');
     if (!profileRuntimeId || profileRuntimeId !== normalizedTarget) continue;
     const candidateKeys = [
-      profile.metadata?.encryptionPublicKey,
-      profile.metadata?.cryptoPublicKey,
+      profile.metadata.encryptionPublicKey,
+      profile.metadata.cryptoPublicKey,
     ];
     for (const key of candidateKeys) {
       if (typeof key !== 'string' || key.length === 0) continue;

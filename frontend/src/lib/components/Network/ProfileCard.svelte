@@ -97,7 +97,7 @@
   <div class="profile-header">
     <div class="entity-id">
       <strong
-        >🏢 {isHub ? profile.metadata?.name || `Hub ${$xlnFunctions!.formatEntityId(profile.entityId)}` : `Entity ${$xlnFunctions!.formatEntityId(profile.entityId)}`}</strong
+        >🏢 {isHub ? profile.name || `Hub ${$xlnFunctions!.formatEntityId(profile.entityId)}` : `Entity ${$xlnFunctions!.formatEntityId(profile.entityId)}`}</strong
       >
     </div>
     {#if isHub}

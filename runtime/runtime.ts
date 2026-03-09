@@ -68,13 +68,15 @@ import { createGossipLayer } from './networking/gossip';
 import { attachEventEmitters } from './env-events';
 import {
   deriveSignerAddressSync,
-  getCachedSignerPrivateKey,
+  getSignerAddress,
   getSignerPrivateKey,
   getSignerPublicKey,
   prewarmSignerKeyCache,
-  setRuntimeSeed as setCryptoRuntimeSeed,
 } from './account-crypto';
-import { buildEntityAdvertisedStateFingerprint, buildEntityProfile, mergeProfileWithExisting } from './networking/gossip-helper';
+import {
+  buildEntityAdvertisedStateFingerprint,
+  buildEntityProfile,
+} from './networking/gossip-helper';
 import { RuntimeP2P, type P2PConfig } from './networking/p2p';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './networking/p2p-crypto';
 import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
@@ -131,7 +133,7 @@ import {
   safeParseReplicaKey,
   safeExtractEntityId,
 } from './ids';
-import { type Profile, loadPersistedProfiles } from './networking/gossip';
+import { type Profile } from './networking/gossip';
 import {
   createProfileUpdateTx,
   getEntityDisplayInfo as getEntityDisplayInfoFromProfileOriginal,
@@ -180,6 +182,7 @@ import type {
   DeliverableEntityInput,
   EntityInput,
   EntityReplica,
+  EntityState,
   Env,
   FrameLogEntry,
   JInput,
@@ -320,6 +323,7 @@ const PERSISTENCE_SNAPSHOT_EXCLUDE_KEYS = new Set([
 ]);
 
 const normalizeDbNamespace = (value: string): string => value.trim().toLowerCase();
+type RuntimeDbKind = 'core' | 'infra';
 
 const deriveRuntimeIdFromSeed = (seed?: string | null): string | null => {
   if (!seed) return null;
@@ -345,9 +349,6 @@ const resolveDbNamespace = (
 };
 
 const makeDbKey = (namespace: string, key: string): Buffer => Buffer.from(`${namespace}:${key}`);
-
-const getPersistedGossipProfiles = (env: Env): Profile[] =>
-  typeof env.gossip?.getProfiles === 'function' ? (env.gossip.getProfiles() as Profile[]) : [];
 
 const formatPerfMs = (value: number): string => value.toFixed(2);
 
@@ -377,21 +378,31 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms))]);
 }
 
-const resolveDbPath = (env: Env): string => {
+const resolveDbPath = (env: Env, kind: RuntimeDbKind = 'core'): string => {
   const namespace = resolveDbNamespace({ env });
+  const suffix = kind === 'core' ? '' : '-infra';
   if (nodeProcess) {
-    return `${dbRootPath}/${namespace}`;
+    return `${dbRootPath}/${namespace}${suffix}`;
   }
-  return `${dbRootPath}-${namespace}`;
+  return `${dbRootPath}-${namespace}${suffix}`;
 };
 
 export const getRuntimeDb = (env: Env): Level<Buffer, Buffer> => {
   const state = ensureRuntimeState(env);
   if (!state.db) {
-    const path = resolveDbPath(env);
+    const path = resolveDbPath(env, 'core');
     state.db = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' });
   }
   return state.db;
+};
+
+export const getInfraDb = (env: Env): Level<Buffer, Buffer> => {
+  const state = ensureRuntimeState(env);
+  if (!state.infraDb) {
+    const path = resolveDbPath(env, 'infra');
+    state.infraDb = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' });
+  }
+  return state.infraDb;
 };
 
 export const closeRuntimeDb = async (env: Env): Promise<void> => {
@@ -404,6 +415,19 @@ export const closeRuntimeDb = async (env: Env): Promise<void> => {
   } finally {
     state.db = null;
     state.dbOpenPromise = null;
+  }
+};
+
+export const closeInfraDb = async (env: Env): Promise<void> => {
+  const state = ensureRuntimeState(env);
+  if (!state.infraDb) return;
+  try {
+    await state.infraDb.close();
+  } catch (error) {
+    console.warn('⚠️ Failed to close infra DB:', error instanceof Error ? error.message : error);
+  } finally {
+    state.infraDb = null;
+    state.infraDbOpenPromise = null;
   }
 };
 
@@ -484,6 +508,19 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   }
   return env.runtimeState;
 };
+
+const buildRuntimeLocalProfile = (
+  env: Env,
+  state: EntityState,
+  name: string | undefined,
+  timestamp: number,
+): Profile => buildEntityProfile(state, name, timestamp, {
+  getSignerAddress: (signerId) => getSignerAddress(env, signerId),
+  getSignerPublicKeyHex: (signerId) => {
+    const publicKey = getSignerPublicKey(env, signerId);
+    return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
+  },
+});
 
 const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
 const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
@@ -578,6 +615,102 @@ const enqueueRuntimeInputs = (env: Env, inputs?: RoutedEntityInput[], runtimeTxs
       mempool.queuedAt = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
     }
   }
+};
+
+export async function tryOpenInfraDb(env: Env): Promise<boolean> {
+  const state = ensureRuntimeState(env);
+  if (!state.infraDbOpenPromise) {
+    const db = getInfraDb(env);
+    state.infraDbOpenPromise = (async () => {
+      try {
+        await db.open();
+        console.log('✅ Infra DB opened');
+        return true;
+      } catch (error) {
+        const isBlocked =
+          error instanceof Error &&
+          (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
+        if (isBlocked) {
+          console.log('⚠️ Infra IndexedDB blocked (incognito/private mode) - running in-memory');
+          return false;
+        }
+        state.infraDbOpenPromise = null;
+        throw error;
+      }
+    })();
+  }
+  try {
+    return await state.infraDbOpenPromise;
+  } catch (error) {
+    console.error('❌ Failed to open infra DB:', error);
+    throw error;
+  }
+}
+
+const INFRA_GOSSIP_INDEX_KEY = 'gossip:index';
+const makeInfraGossipProfileKey = (entityId: string): string => `gossip:profile:${String(entityId).toLowerCase()}`;
+
+const readInfraStringArray = async (db: Level<Buffer, Buffer>, key: string): Promise<string[]> => {
+  try {
+    const raw = await db.get(Buffer.from(key));
+    const parsed = deserializeTaggedJson<unknown>(raw.toString());
+    return Array.isArray(parsed) ? parsed.map((value) => String(value || '').toLowerCase()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeInfraStringArray = async (db: Level<Buffer, Buffer>, key: string, values: string[]): Promise<void> => {
+  await db.put(Buffer.from(key), Buffer.from(serializeTaggedJson([...new Set(values.filter(Boolean))].sort())));
+};
+
+const persistGossipProfileToInfraDb = async (env: Env, profile: Profile): Promise<void> => {
+  const dbReady = await tryOpenInfraDb(env);
+  if (!dbReady) return;
+  const db = getInfraDb(env);
+  const entityId = String(profile?.entityId || '').toLowerCase();
+  if (!entityId) {
+    throw new Error('INFRA_GOSSIP_ENTITY_ID_REQUIRED');
+  }
+  const existingIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
+  const nextIds = existingIds.includes(entityId) ? existingIds : [...existingIds, entityId];
+  const batch = db.batch();
+  batch.put(Buffer.from(makeInfraGossipProfileKey(entityId)), Buffer.from(serializeTaggedJson(profile)));
+  batch.put(Buffer.from(INFRA_GOSSIP_INDEX_KEY), Buffer.from(serializeTaggedJson(nextIds.sort())));
+  await batch.write();
+};
+
+const loadGossipProfilesFromInfraDb = async (env: Env): Promise<void> => {
+  const dbReady = await tryOpenInfraDb(env);
+  if (!dbReady) return;
+  const db = getInfraDb(env);
+  const entityIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
+  if (entityIds.length === 0) return;
+  for (const entityId of entityIds) {
+    try {
+      const raw = await db.get(Buffer.from(makeInfraGossipProfileKey(entityId)));
+      const profile = deserializeTaggedJson<Profile>(raw.toString());
+      env.gossip.announce(profile);
+    } catch (error) {
+      console.warn(
+        `[infra-db] failed to restore gossip profile ${entityId.slice(-8)}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+};
+
+const clearInfraGossipProfiles = async (env: Env): Promise<void> => {
+  const dbReady = await tryOpenInfraDb(env);
+  if (!dbReady) return;
+  const db = getInfraDb(env);
+  const entityIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
+  const batch = db.batch();
+  for (const entityId of entityIds) {
+    batch.del(Buffer.from(makeInfraGossipProfileKey(entityId)));
+  }
+  batch.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));
+  await batch.write();
 };
 
 export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void => {
@@ -911,26 +1044,23 @@ const deriveLocalEntityCryptoKeys = (
   env: Env,
   entityId: string,
   signerId: string,
-): { publicKey: string; privateKey: string } | null => {
-  try {
-    const signerPriv = getSignerPrivateKey(env, signerId);
-    const signerMaterial = `${bytesToHex(signerPriv)}:${entityId}:htlc-v1`;
-    return deriveEntityCryptoKeyPairHex(signerMaterial);
-  } catch {
-    return null;
-  }
+): { publicKey: string; privateKey: string } => {
+  const signerPriv = getSignerPrivateKey(env, signerId);
+  const signerMaterial = `${bytesToHex(signerPriv)}:${entityId}:htlc-v1`;
+  return deriveEntityCryptoKeyPairHex(signerMaterial);
 };
 
-const ensureLocalEntityCryptoKeys = (env: Env): void => {
+const assertLocalEntityCryptoKeys = (env: Env): void => {
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const signerId = extractSignerId(replicaKey);
     if (!hasLocalSignerKey(env, signerId)) continue;
     const keys = deriveLocalEntityCryptoKeys(env, replica.entityId, signerId);
-    if (!keys) continue;
     const { publicKey, privateKey } = keys;
     if (replica.state.cryptoPublicKey !== publicKey || replica.state.cryptoPrivateKey !== privateKey) {
-      replica.state.cryptoPublicKey = publicKey;
-      replica.state.cryptoPrivateKey = privateKey;
+      throw new Error(
+        `ENTITY_CRYPTO_KEY_MISMATCH: entity=${replica.entityId} signer=${signerId} ` +
+        `expectedPub=${publicKey} actualPub=${String(replica.state.cryptoPublicKey || '')}`,
+      );
     }
   }
 };
@@ -1293,7 +1423,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
   );
   const state = ensureRuntimeState(env);
   state.lastP2PConfig = config;
-  ensureLocalEntityCryptoKeys(env);
+  assertLocalEntityCryptoKeys(env);
   const resolvedRuntimeId = config.runtimeId || env.runtimeId;
   if (!resolvedRuntimeId || !isRuntimeId(resolvedRuntimeId)) {
     console.log(`[P2P] No runtimeId, storing as pendingP2PConfig`);
@@ -1450,6 +1580,12 @@ export const ensureGossipProfiles = async (env: Env, entityIds: string[]): Promi
 export const clearGossip = (env: Env): void => {
   if (!env.gossip?.profiles) return;
   env.gossip.profiles.clear();
+  void clearInfraGossipProfiles(env).catch((error) => {
+    console.warn(
+      '[infra-db] failed to clear gossip profiles:',
+      error instanceof Error ? error.message : String(error),
+    );
+  });
   notifyEnvChange(env);
 };
 
@@ -1458,11 +1594,7 @@ export const clearGossip = (env: Env): void => {
  * Call this early in frontend initialization before prepopulate
  */
 export const initEnv = (seed?: string | null): Env => {
-  const env = createEmptyEnv(seed ?? null);
-  if (env.runtimeSeed !== undefined && env.runtimeSeed !== null) {
-    setCryptoRuntimeSeed(env.runtimeSeed);
-  }
-  return env;
+  return createEmptyEnv(seed ?? null);
 };
 
 const notifyEnvChange = (env: Env) => {
@@ -1783,6 +1915,15 @@ const applyRuntimeInput = async (
           if (config) {
             existingReplica.state.config = config;
           }
+          const expectedKeys = deriveLocalEntityCryptoKeys(env, runtimeTx.entityId, runtimeTx.signerId);
+          if (
+            existingReplica.state.cryptoPublicKey !== expectedKeys.publicKey ||
+            existingReplica.state.cryptoPrivateKey !== expectedKeys.privateKey
+          ) {
+            throw new Error(
+              `ENTITY_CRYPTO_KEY_MISMATCH: entity=${runtimeTx.entityId} signer=${runtimeTx.signerId}`,
+            );
+          }
           normalizeEntitySwapTradingPairs(existingReplica.state);
           env.eReplicas.set(replicaKey, existingReplica);
           if (DEBUG) {
@@ -1792,6 +1933,7 @@ const applyRuntimeInput = async (
           }
           continue;
         }
+        const localKeys = deriveLocalEntityCryptoKeys(env, runtimeTx.entityId, runtimeTx.signerId);
         const replica: EntityReplica = {
           entityId: runtimeTx.entityId,
           signerId: runtimeTx.signerId,
@@ -1821,6 +1963,16 @@ const applyRuntimeInput = async (
             // 📦 J-Batch system - will be initialized on first use
             jBatchState: undefined,
 
+            // 🔐 Deterministic entity crypto keys are mandatory.
+            cryptoPublicKey: localKeys.publicKey,
+            cryptoPrivateKey: localKeys.privateKey,
+            profile: {
+              name: `Entity ${runtimeTx.entityId.slice(-4)}`,
+              avatar: '',
+              bio: '',
+              website: '',
+            },
+
             // 🔒 HTLC routing and fee tracking
             htlcRoutes: new Map(),
             htlcFeesEarned: 0n,
@@ -1834,14 +1986,6 @@ const applyRuntimeInput = async (
           },
         };
         normalizeEntitySwapTradingPairs(replica.state);
-
-        // 🔐 Deterministic HTLC envelope keys (stable across reloads)
-        const localKeys = deriveLocalEntityCryptoKeys(env, runtimeTx.entityId, runtimeTx.signerId);
-        if (localKeys) {
-          const { publicKey, privateKey } = localKeys;
-          replica.state.cryptoPublicKey = publicKey;
-          replica.state.cryptoPrivateKey = privateKey;
-        }
 
         // Only add position if it exists (exactOptionalPropertyTypes compliance)
         if (runtimeTx.data.position) {
@@ -1893,15 +2037,12 @@ const applyRuntimeInput = async (
           const primarySignerId = runtimeTx.data.config.validators?.[0];
           const entityPublicKey = primarySignerId ? getSignerPublicKey(env, primarySignerId) : null;
           const publicKeyHex = entityPublicKey ? `0x${Buffer.from(entityPublicKey).toString('hex')}` : undefined;
-          const existingProfile = env.gossip?.getProfiles?.().find((p: any) => p.entityId === runtimeTx.entityId);
-          const existingName = existingProfile?.metadata?.name;
-          const profile = buildEntityProfile(createdReplica.state, existingName, env.timestamp);
-          const mergedProfile = mergeProfileWithExisting(profile, existingProfile);
-          mergedProfile.runtimeId = env.runtimeId;
+          const profile = buildRuntimeLocalProfile(env, createdReplica.state, undefined, env.timestamp);
+          profile.runtimeId = env.runtimeId;
           if (publicKeyHex) {
-            mergedProfile.metadata = { ...(mergedProfile.metadata || {}), entityPublicKey: publicKeyHex };
+            profile.metadata = { ...(profile.metadata || {}), entityPublicKey: publicKeyHex };
           }
-          env.gossip.announce(mergedProfile);
+          env.gossip.announce(profile);
         }
 
         if (typeof actualJBlock !== 'number') {
@@ -2377,22 +2518,11 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
   console.log(`🚀 RUNTIME.JS VERSION: ${RUNTIME_BUILD_ID}`);
 
   const baseEnv = createEmptyEnv(runtimeSeedOverride ?? null);
-  if (baseEnv.runtimeSeed !== undefined && baseEnv.runtimeSeed !== null) {
-    setCryptoRuntimeSeed(baseEnv.runtimeSeed);
-    try {
-      prewarmSignerKeyCache(baseEnv.runtimeSeed, 20);
-    } catch (error) {
-      console.warn('⚠️ Failed to prewarm signer cache before restore:', error);
-    }
-  }
 
-  const dbReady = await tryOpenDb(baseEnv);
-  if (dbReady) {
-    console.log('📡 Loading persisted profiles from database...');
-    await loadPersistedProfiles(getRuntimeDb(baseEnv), baseEnv.gossip);
-  }
+  await tryOpenDb(baseEnv);
 
   let env = baseEnv;
+  let restoredFromCoreDb = false;
   if (isBrowser) {
     const loaded = await loadEnvFromDB(baseEnv.runtimeId, baseEnv.runtimeSeed);
     if (loaded) {
@@ -2400,16 +2530,15 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
       const baseState = ensureRuntimeState(baseEnv);
       loadedState.db = baseState.db;
       loadedState.dbOpenPromise = baseState.dbOpenPromise;
-      if (baseEnv.gossip?.profiles) {
-        for (const [k, v] of baseEnv.gossip.profiles.entries()) {
-          loaded.gossip.profiles.set(k, v);
-        }
-      }
       env = loaded;
+      restoredFromCoreDb = true;
     }
   }
 
   attachEventEmitters(env);
+  if (!restoredFromCoreDb) {
+    await loadGossipProfilesFromInfraDb(env);
+  }
 
   if (!env.runtimeId && env.runtimeSeed) {
     try {
@@ -2422,8 +2551,6 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
 
   if (env.runtimeSeed) {
     try {
-      prewarmSignerKeyCache(env.runtimeSeed, 20);
-      env.signers = [{ address: deriveSignerAddressSync(env.runtimeSeed, '1'), name: 'signer1' }];
       console.log('🔐 Prewarmed signer key cache (20 addresses)');
     } catch (error) {
       console.warn('⚠️ Failed to derive signer:', error);
@@ -2511,6 +2638,14 @@ const clearDatabaseAndHistory = async (env: Env): Promise<Env> => {
   console.log('🗑️ Clearing database and resetting runtime history...');
   const db = getRuntimeDb(env);
   await clearDatabase(db);
+  try {
+    const infraReady = await tryOpenInfraDb(env);
+    if (infraReady) {
+      await clearDatabase(getInfraDb(env));
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to clear infra DB during reset:', error instanceof Error ? error.message : error);
+  }
 
   const seed = env.runtimeSeed ?? null;
   const freshEnv = createEmptyEnv(seed);
@@ -2864,7 +2999,20 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   const resolvedRuntimeId = derivedRuntimeId ? derivedRuntimeId.toLowerCase() : null;
   const resolvedDbNamespace = resolvedRuntimeId ? normalizeDbNamespace(resolvedRuntimeId) : undefined;
 
-  const env: Env = {
+  let env!: Env;
+  const gossip = createGossipLayer({
+    onAnnounce: (profile) => {
+      if (!env) return;
+      void persistGossipProfileToInfraDb(env, profile).catch((error) => {
+        console.warn(
+          `[infra-db] failed to persist gossip profile ${String(profile?.entityId || '').slice(-8)}:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+    },
+  });
+
+  env = {
     eReplicas: new Map(),
     jReplicas: new Map(),
     height: 0,
@@ -2877,7 +3025,7 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
     runtimeConfig: undefined,
     runtimeState: undefined,
     history: [],
-    gossip: createGossipLayer(),
+    gossip,
     frameLogs: [],
     networkInbox: [],
     pendingNetworkOutputs: [],
@@ -2900,6 +3048,13 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   ensureRuntimeMempool(env);
   ensureRuntimeConfig(env);
   ensureRuntimeState(env);
+  if (seedText) {
+    try {
+      prewarmSignerKeyCache(seedText, 20);
+    } catch (error) {
+      console.warn('⚠️ Failed to prewarm signer cache during env creation:', error);
+    }
+  }
 
   return env;
 };
@@ -3026,7 +3181,8 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       for (const replicaKey of env.eReplicas.keys()) {
         try {
           const signerId = extractSignerId(replicaKey);
-          if (!signerId || !getCachedSignerPrivateKey(signerId)) continue;
+          if (!signerId) continue;
+          getSignerPrivateKey(env, signerId);
           localEntityIds.add(extractEntityId(replicaKey).toLowerCase());
         } catch {
           // ignore malformed key
@@ -3041,7 +3197,13 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
         const entityId = String(replica?.entityId || '').toLowerCase();
         if (!entityId || !localEntityIds.has(entityId) || fingerprints.has(entityId)) continue;
         try {
-          fingerprints.set(entityId, buildEntityAdvertisedStateFingerprint(replica.state));
+          fingerprints.set(entityId, buildEntityAdvertisedStateFingerprint(replica.state, {
+            getSignerAddress: (signerId) => getSignerAddress(env, signerId),
+            getSignerPublicKeyHex: (signerId) => {
+              const publicKey = getSignerPublicKey(env, signerId);
+              return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
+            },
+          }));
         } catch (error) {
           if (!quietRuntimeLogs) {
             console.warn(`GOSSIP_PROFILE_FINGERPRINT_SKIP: entity=${entityId.slice(-8)} error=${(error as Error).message}`);
@@ -3359,12 +3521,8 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     const CHECKPOINT_INTERVAL = ensureRuntimeConfig(env).snapshotIntervalFrames ?? 100;
     const shouldCheckpoint = env.height <= 1 || env.height % CHECKPOINT_INTERVAL === 0;
     if (shouldCheckpoint) {
-      const persistedGossipProfiles = getPersistedGossipProfiles(env);
       const snapshotSerializeStartedAt = getPerfMs();
-      const snapshotPayload = {
-        ...env,
-        persistedGossipProfiles,
-      };
+      const snapshotPayload = { ...env };
       const snapshot = serializeTaggedJson(snapshotPayload, PERSISTENCE_SNAPSHOT_EXCLUDE_KEYS);
       snapshotSerializeMs = getPerfMs() - snapshotSerializeStartedAt;
       snapshotBytes = Buffer.byteLength(snapshot);
@@ -3462,7 +3620,6 @@ export type PersistedFrameJournal = {
   timestamp: number;
   runtimeInput: RuntimeInput;
   logs: FrameLogEntry[];
-  persistedGossipProfiles?: Profile[];
 };
 
 export const getPersistedLatestHeight = async (env: Env): Promise<number> => {
@@ -3504,7 +3661,6 @@ export const readPersistedFrameJournal = async (env: Env, height: number): Promi
       timestamp: Number.isFinite(Number(decoded.timestamp)) ? Number(decoded.timestamp) : 0,
       runtimeInput,
       logs,
-      persistedGossipProfiles: Array.isArray(decoded.persistedGossipProfiles) ? decoded.persistedGossipProfiles : undefined,
     };
   } catch (error) {
     if (isDbUnavailableError(error)) return null;
@@ -3672,14 +3828,6 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
         }
       }
     }
-    const snapshotProfiles = Array.isArray(data.persistedGossipProfiles) ? data.persistedGossipProfiles : [];
-    if (snapshotProfiles.length > 0) {
-      if (typeof env.gossip?.setProfiles === 'function') {
-        env.gossip.setProfiles(snapshotProfiles);
-      } else if (typeof env.gossip?.announce === 'function') {
-        for (const profile of snapshotProfiles) env.gossip.announce(profile);
-      }
-    }
     const envState = ensureRuntimeState(env);
     const tempState = ensureRuntimeState(tempEnv);
     envState.db = tempState.db;
@@ -3753,7 +3901,6 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
             timestamp: number;
             runtimeInput: RuntimeInput;
             logs?: FrameLogEntry[];
-            persistedGossipProfiles?: unknown[];
           }>(frameBuffer.toString());
           const replayRuntimeTxs = frame?.runtimeInput?.runtimeTxs?.length ?? 0;
           const replayEntityInputs = frame?.runtimeInput?.entityInputs?.length ?? 0;
@@ -3953,6 +4100,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
     };
     if (latestEnv) {
       (latestEnv as any).__replayMeta.recoveredHistoryFrames = latestEnv.history?.length ?? 0;
+      await loadGossipProfilesFromInfraDb(latestEnv);
 
       // Restore BrowserVM if state was persisted
       let restoredBrowserVM: any = null;
@@ -4059,10 +4207,11 @@ export const clearDB = async (env?: Env): Promise<void> => {
   if (!isBrowser && nodeProcess) {
     try {
       await closeRuntimeDb(targetEnv);
+      await closeInfraDb(targetEnv);
       const fs = await import('fs/promises');
       await fs.rm(dbRootPath, { recursive: true, force: true });
       await fs.mkdir(dbRootPath, { recursive: true });
-      console.log(`✅ Runtime DB root cleared: ${dbRootPath}`);
+      console.log(`✅ Runtime DB root cleared (core + infra): ${dbRootPath}`);
     } catch (err) {
       console.error(`❌ Failed to clear runtime DB root (${dbRootPath}):`, err);
     }
@@ -4073,11 +4222,16 @@ export const clearDB = async (env?: Env): Promise<void> => {
 
   try {
     const dbReady = await tryOpenDb(targetEnv);
-    if (!dbReady) return;
-
-    const db = getRuntimeDb(targetEnv);
-    await db.clear();
-    console.log('✅ LevelDB cleared');
+    const infraReady = await tryOpenInfraDb(targetEnv);
+    if (dbReady) {
+      const db = getRuntimeDb(targetEnv);
+      await db.clear();
+    }
+    if (infraReady) {
+      const infraDb = getInfraDb(targetEnv);
+      await infraDb.clear();
+    }
+    console.log('✅ LevelDB cleared (core + infra)');
   } catch (err) {
     console.error('❌ Failed to clear LevelDB:', err);
   }

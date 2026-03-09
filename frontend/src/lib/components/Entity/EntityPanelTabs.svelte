@@ -398,7 +398,7 @@
     if (!entityId) return '';
     const profiles = activeEnv?.gossip?.getProfiles?.() || [];
     const profile = profiles.find((p: GossipProfile) => p.entityId.toLowerCase() === entityId);
-    return profile?.metadata?.name || '';
+    return profile?.name || '';
   })();
 
   function isPlaceholderName(value: string): boolean {
@@ -1262,13 +1262,14 @@
     governanceLoadedForEntity = currentEntityId;
     const profiles = (activeEnv?.gossip?.getProfiles?.() || []) as Array<{
       entityId?: string;
-      metadata?: { name?: string; bio?: string; website?: string };
+      name?: string;
+      bio?: string;
+      website?: string;
     }>;
     const profile = profiles.find((p) => String(p?.entityId || '').toLowerCase() === currentEntityId);
-    const metadata = profile?.metadata;
-    governanceName = String(metadata?.name || '');
-    governanceBio = String(metadata?.bio || '');
-    governanceWebsite = String(metadata?.website || '');
+    governanceName = String(profile?.name || '');
+    governanceBio = String(profile?.bio || '');
+    governanceWebsite = String(profile?.website || '');
   }
 
   async function saveGovernanceProfile() {

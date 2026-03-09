@@ -17,10 +17,10 @@
  */
 
 import { keccak256 } from 'ethers';
-import type { Profile } from './gossip';
+import { canonicalizeProfile, type Profile } from './gossip';
 import type { Env, HankoString } from '../types';
 import { inspectHankoForHash, signHashesAsSingleEntity, verifyHankoForHash } from '../hanko-signing';
-import { getCachedSignerAddress, getCachedSignerPublicKey } from '../account-crypto';
+import { getSignerAddress, getSignerPublicKey } from '../account-crypto';
 
 const PROFILE_SIGN_DOMAIN = 'xln-profile-v1';
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -83,25 +83,27 @@ export async function signProfile(
   profile: Profile,
   signerId: string
 ): Promise<Profile> {
-  const existingPubKey = profile.metadata?.entityPublicKey;
+  const canonicalProfile = canonicalizeProfile(profile);
+  const existingPubKey = canonicalProfile.metadata.entityPublicKey;
   let entityPublicKey = existingPubKey;
   if (!entityPublicKey) {
-    const cached = getCachedSignerPublicKey(signerId);
-    if (cached) {
-      entityPublicKey = bytesToHex(cached);
+    const signerPublicKey = getSignerPublicKey(env, signerId);
+    if (!signerPublicKey) {
+      throw new Error(`PROFILE_SIGN_ENTITY_PUBLIC_KEY_REQUIRED: entity=${canonicalProfile.entityId} signerId=${signerId}`);
     }
+    entityPublicKey = bytesToHex(signerPublicKey);
   }
 
   const profileWithKey = entityPublicKey
-    ? { ...profile, metadata: { ...profile.metadata, entityPublicKey } }
-    : profile;
+    ? { ...canonicalProfile, metadata: { ...canonicalProfile.metadata, entityPublicKey } }
+    : canonicalProfile;
 
   const hash = computeProfileHash(profileWithKey);
 
   // Use same signing mechanism as accountFrames
   const hankos = await signHashesAsSingleEntity(
     env,
-    profile.entityId,
+    canonicalProfile.entityId,
     signerId,
     [hash]
   );
@@ -116,13 +118,13 @@ export async function signProfile(
   try {
     const details = await inspectHankoForHash(profileHanko, hash);
     const reconstructedBoardHash = details.claims[0]?.reconstructedBoardHash?.toLowerCase();
-    const expectedEntityId = String(profile.entityId || '').toLowerCase();
+    const expectedEntityId = canonicalProfile.entityId.toLowerCase();
     if (reconstructedBoardHash && reconstructedBoardHash !== expectedEntityId) {
       const recovered = details.recoveredAddresses[0] || 'none';
-      const cachedSignerAddress = getCachedSignerAddress(signerId) || 'none';
+      const envSignerAddress = getSignerAddress(env, signerId) || 'none';
       throw new Error(
         `PROFILE_SIGN_SOURCE_MISMATCH: entity=${expectedEntityId} signerId=${signerId} ` +
-        `cachedSigner=${cachedSignerAddress} recovered=${recovered} reconstructed=${reconstructedBoardHash}`,
+        `envSigner=${envSignerAddress} recovered=${recovered} reconstructed=${reconstructedBoardHash}`,
       );
     }
   } catch (error) {
@@ -131,13 +133,13 @@ export async function signProfile(
       : new Error(`PROFILE_SIGN_SOURCE_INSPECT_FAILED: ${String(error)}`);
   }
 
-  return {
+  return canonicalizeProfile({
     ...profileWithKey,
     metadata: {
-      ...(profileWithKey.metadata || {}),
+      ...profileWithKey.metadata,
       profileHanko,
     },
-  };
+  });
 }
 
 /**
@@ -155,11 +157,12 @@ export async function verifyProfileSignature(
   profile: Profile,
   env?: Env
 ): Promise<ProfileVerifyResult> {
+  const canonicalProfile = canonicalizeProfile(profile);
   // Prefer Hanko verification
-  const hanko = profile.metadata?.['profileHanko'] as HankoString | undefined;
+  const hanko = canonicalProfile.metadata['profileHanko'] as HankoString | undefined;
   if (hanko) {
-    const hash = computeProfileHash(profile);
-    const result = await verifyHankoForHash(hanko, hash, profile.entityId, env);
+    const hash = computeProfileHash(canonicalProfile);
+    const result = await verifyHankoForHash(hanko, hash, canonicalProfile.entityId, env);
     if (!result.valid) {
       return {
         valid: false,
@@ -178,5 +181,5 @@ export async function verifyProfileSignature(
  * Note: For full Hanko verification, use async verifyProfileSignature()
  */
 export function hasValidProfileSignature(profile: Profile): boolean {
-  return !!profile.metadata?.['profileHanko'];
+  return !!profile.metadata.profileHanko;
 }

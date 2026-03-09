@@ -34,7 +34,7 @@ const isHubLikeProfile = (profile: Profile): boolean => {
 };
 
 const hasRequiredRoutingMetadata = (profile: Profile): boolean => {
-  const name = typeof profile.metadata?.name === 'string' ? profile.metadata.name.trim() : '';
+  const name = typeof profile.name === 'string' ? profile.name.trim() : '';
   if (!name) return false;
   const routingFeePPM = Number(profile.metadata?.routingFeePPM);
   return Number.isFinite(routingFeePPM) && routingFeePPM >= 0;
@@ -67,7 +67,7 @@ export function buildNetworkGraph(
 
     if (fromIsHubLike && !hasRequiredRoutingMetadata(profile)) {
       console.error(
-        `[ROUTING][DROP_HUB_PROFILE_MISSING_METADATA] entity=${fromEntity} missing metadata.name or metadata.routingFeePPM`
+        `[ROUTING][DROP_HUB_PROFILE_MISSING_METADATA] entity=${fromEntity} missing name or routingFeePPM`
       );
       continue;
     }

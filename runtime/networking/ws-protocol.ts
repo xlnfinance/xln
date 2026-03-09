@@ -17,7 +17,7 @@
  * Message IDs and nonces are for correlation/debugging, not cryptographic security.
  */
 
-import { safeStringify } from '../serialization-utils';
+import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 export type RuntimeWsMessageType =
@@ -57,31 +57,11 @@ export type RuntimeWsMessage = {
   error?: string;
 };
 
-type JsonValue = any;
-
-const jsonReplacer = (_key: string, value: JsonValue): JsonValue => {
-  if (value instanceof Map) {
-    return { _type: 'Map', value: Array.from(value.entries()) };
-  }
-  if (typeof value === 'bigint') {
-    return { _type: 'BigInt', value: value.toString() };
-  }
-  return value;
-};
-
-const jsonReviver = (_key: string, value: JsonValue): JsonValue => {
-  if (value && typeof value === 'object') {
-    if (value._type === 'Map') return new Map(value.value);
-    if (value._type === 'BigInt') return BigInt(value.value);
-  }
-  return value;
-};
-
 export const serializeWsMessage = (msg: RuntimeWsMessage): string => {
   try {
-    return JSON.stringify(msg, jsonReplacer);
+    return serializeTaggedJson(msg);
   } catch (error) {
-    return safeStringify({
+    return serializeTaggedJson({
       type: 'error',
       error: `serialize failed: ${(error as Error).message}`,
     });
@@ -97,7 +77,7 @@ export const deserializeWsMessage = (raw: string | Buffer | ArrayBuffer): Runtim
         : typeof Buffer !== 'undefined'
           ? Buffer.from(raw as Buffer).toString()
           : String(raw);
-  return JSON.parse(text, jsonReviver) as RuntimeWsMessage;
+  return deserializeTaggedJson<RuntimeWsMessage>(text);
 };
 
 let messageCounter = 0;

@@ -71,13 +71,25 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
   const fromEncryptionPubKey = typeof msg.fromEncryptionPubKey === 'string'
     ? msg.fromEncryptionPubKey
     : null;
-  if (from && fromEncryptionPubKey) {
-    cacheEncryptionKey(store, fromKey, fromEncryptionPubKey);
-  }
-
   const traceId = typeof id === 'string' && id.length > 0
     ? id
     : `relay-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  if (from && !fromEncryptionPubKey && type !== 'ping' && type !== 'pong') {
+    pushDebugEvent(store, {
+      event: 'error',
+      from,
+      to,
+      msgType: type,
+      status: 'rejected',
+      reason: 'MISSING_FROM_ENCRYPTION_PUBKEY',
+      details: { traceId },
+    });
+    send(ws, safeStringify({ type: 'error', error: 'Missing fromEncryptionPubKey' }));
+    return;
+  }
+  if (from && fromEncryptionPubKey) {
+    cacheEncryptionKey(store, fromKey, fromEncryptionPubKey);
+  }
   const deliveryEntityId = typeof msg.entityId === 'string' && msg.entityId.length > 0 ? msg.entityId : undefined;
   const deliveryTxCount = typeof msg.txs === 'number' && Number.isFinite(msg.txs) ? msg.txs : undefined;
 

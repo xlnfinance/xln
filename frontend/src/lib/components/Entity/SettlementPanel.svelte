@@ -135,8 +135,8 @@
     const profiles = activeEnv?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
       if (normalizeEntityId((profile as any)?.entityId) !== normalized) continue;
-      const metadataName = String((profile as any)?.metadata?.name || '').trim();
-      if (metadataName) return metadataName;
+      const profileName = String((profile as any)?.name || '').trim();
+      if (profileName) return profileName;
     }
     const formattedId = activeXlnFunctions?.formatEntityId?.(canonical);
     return String(formattedId || formatShortId(canonical));

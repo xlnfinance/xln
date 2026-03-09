@@ -9,12 +9,12 @@
   type GossipProfile = {
     entityId: string;
     runtimeId?: string;
+    name: string;
+    lastUpdated: number;
     capabilities?: string[];
     metadata?: {
-      name?: string;
       isHub?: boolean;
       region?: string;
-      lastUpdated?: number;
       [k: string]: unknown;
     };
   };
@@ -34,7 +34,7 @@
   $: normalizedSearch = search.trim().toLowerCase();
   $: filtered = profiles.filter((p) => {
     if (!normalizedSearch) return true;
-    const name = String(p.metadata?.name || '').toLowerCase();
+    const name = String(p.name || '').toLowerCase();
     const id = String(p.entityId || '').toLowerCase();
     const runtimeId = String(p.runtimeId || '').toLowerCase();
     return name.includes(normalizedSearch) || id.includes(normalizedSearch) || runtimeId.includes(normalizedSearch);
@@ -44,8 +44,8 @@
     const aHub = isHub(a);
     const bHub = isHub(b);
     if (aHub !== bHub) return aHub ? -1 : 1;
-    const aName = String(a.metadata?.name || '').toLowerCase();
-    const bName = String(b.metadata?.name || '').toLowerCase();
+    const aName = String(a.name || '').toLowerCase();
+    const bName = String(b.name || '').toLowerCase();
     if (aName && bName && aName !== bName) return aName.localeCompare(bName);
     return String(a.entityId).localeCompare(String(b.entityId));
   });
@@ -57,7 +57,7 @@
   }
 
   function profileName(profile: GossipProfile): string {
-    return String(profile.metadata?.name || '').trim() || 'Unnamed entity';
+    return String(profile.name || '').trim() || 'Unnamed entity';
   }
 
   function formatTs(ts?: number): string {
@@ -162,7 +162,7 @@
             {#if isHub(profile)}<span class="chip">hub</span>{/if}
             <span class="chip">runtime {profile.runtimeId ? profile.runtimeId.slice(0, 10) : '-'}</span>
             <span class="chip">{profile.metadata?.region || 'global'}</span>
-            <span class="chip">{formatTs(profile.metadata?.lastUpdated)}</span>
+            <span class="chip">{formatTs(profile.lastUpdated)}</span>
           </div>
         </div>
       {/each}

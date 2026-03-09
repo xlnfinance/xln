@@ -1,13 +1,19 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
+import { join, resolve } from 'node:path';
 import { deserializeTaggedJson } from '../serialization-utils';
 
 const DEFAULT_CHILD_READY_TIMEOUT_MS = 60_000;
 const LOG_TAIL_LINES = 80;
 const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
+};
+
+const resolveCustodyJurisdictionsJsonPath = (): string => {
+  const overridePath = process.env['XLN_JURISDICTIONS_PATH']?.trim() || '';
+  return overridePath.length > 0
+    ? resolve(overridePath)
+    : join(process.cwd(), 'jurisdictions', 'jurisdictions.json');
 };
 
 export type DebugEntitySummary = {
@@ -243,7 +249,7 @@ export const startCustodySupport = async (
 ): Promise<StartedCustodySupport> => {
   const shardJurisdictionsPath = join(options.dbRoot, 'jurisdictions.json');
   await mkdir(options.dbRoot, { recursive: true });
-  await writeFile(shardJurisdictionsPath, await readFile(resolveJurisdictionsJsonPath(), 'utf8'), 'utf8');
+  await writeFile(shardJurisdictionsPath, await readFile(resolveCustodyJurisdictionsJsonPath(), 'utf8'), 'utf8');
   const daemonChild = spawnBunChild(
     'custody-daemon',
     ['runtime/server.ts', '--port', String(options.daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${options.daemonPort}`],

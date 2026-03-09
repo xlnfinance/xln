@@ -12,7 +12,7 @@ export const DEFAULT_GOSSIP_BATCH_LIMIT = 1000;
 const normalizeEntityId = (entityId: unknown): string => String(entityId || '').toLowerCase();
 
 export const isHubProfile = (profile: Profile): boolean =>
-  profile.metadata?.isHub === true ||
+  profile.metadata.isHub === true ||
   profile.capabilities.includes('hub') ||
   profile.capabilities.includes('routing');
 
@@ -20,8 +20,8 @@ export const sortProfilesForBatch = (left: Profile, right: Profile): number => {
   const leftHub = isHubProfile(left);
   const rightHub = isHubProfile(right);
   if (leftHub !== rightHub) return leftHub ? -1 : 1;
-  const leftTs = Number(left.metadata?.lastUpdated || 0);
-  const rightTs = Number(right.metadata?.lastUpdated || 0);
+  const leftTs = left.lastUpdated;
+  const rightTs = right.lastUpdated;
   if (leftTs !== rightTs) return rightTs - leftTs;
   return String(left.entityId).localeCompare(String(right.entityId));
 };
@@ -71,7 +71,7 @@ export const selectProfileBatch = (
 
   for (const profile of setProfiles) {
     const normalizedEntityId = normalizeEntityId(profile.entityId);
-    if (updatedSince !== null && Number(profile.metadata?.lastUpdated || 0) <= updatedSince) {
+    if (updatedSince !== null && profile.lastUpdated <= updatedSince) {
       continue;
     }
     setMatches.set(normalizedEntityId, profile);

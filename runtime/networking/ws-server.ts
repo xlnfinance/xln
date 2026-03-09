@@ -187,8 +187,8 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
   const storeGossipProfile = (profile: any, fromRuntimeId: string) => {
     const entityId = profile?.entityId;
     if (!entityId) return false;
-    const newTs = profile?.metadata?.lastUpdated || 0;
-    const name = profile?.metadata?.name || '(no name)';
+    const newTs = profile?.lastUpdated || 0;
+    const name = profile?.name || '(no name)';
     const existing = gossipProfiles.get(entityId);
     if (existing && existing.timestamp >= newTs) {
       return false; // Existing is newer or same

@@ -3,10 +3,10 @@
  * Builds and broadcasts entity profiles with account information
  */
 
+import { ethers } from 'ethers';
 import type { EntityState } from '../types';
-import type { BoardMetadata, Profile } from './gossip';
+import type { BoardMetadata, Profile, ProfileAccount, ProfileTokenCapacity } from './gossip';
 import { deriveDelta, isLeft } from '../account-utils';
-import { getCachedSignerAddress, getCachedSignerPublicKey } from '../account-crypto';
 import { safeStringify } from '../serialization-utils';
 
 type GossipBroadcastTx = {
@@ -35,13 +35,35 @@ const normalizeX25519Hex = (raw: unknown): string | null => {
   return /^0x[0-9a-fA-F]{64}$/.test(prefixed) ? prefixed.toLowerCase() : null;
 };
 
-const buildBoardMetadata = (entityState: EntityState): BoardMetadata => {
+export type ProfileSignerResolver = {
+  getSignerAddress: (signerId: string) => string | null;
+  getSignerPublicKeyHex: (signerId: string) => string | null;
+};
+
+const normalizeSignerAddress = (raw: string): string => {
+  if (raw.startsWith('0x') && raw.length === 42) {
+    return ethers.getAddress(raw).toLowerCase();
+  }
+  if (raw.startsWith('0x') && raw.length === 66) {
+    return ethers.getAddress(`0x${raw.slice(-40)}`).toLowerCase();
+  }
+  throw new Error(`GOSSIP_PROFILE_SIGNER_ADDRESS_INVALID: ${raw}`);
+};
+
+const buildBoardMetadata = (
+  entityState: EntityState,
+  signerResolver?: ProfileSignerResolver,
+): BoardMetadata => {
   const validators = entityState.config.validators.map(validatorId => {
     const weight = toUint16(entityState.config.shares[validatorId] ?? 1n, 1);
-    const publicKey = getCachedSignerPublicKey(validatorId);
-    const publicKeyHex = publicKey ? bytesToHex(publicKey) : undefined;
-    const address = getCachedSignerAddress(validatorId);
-    const signer = address || validatorId;
+    const signer =
+      (validatorId.startsWith('0x') ? normalizeSignerAddress(validatorId) : null)
+      ?? signerResolver?.getSignerAddress(validatorId)
+      ?? null;
+    if (!signer) {
+      throw new Error(`GOSSIP_PROFILE_SIGNER_ADDRESS_REQUIRED: entity=${entityState.entityId} signerId=${validatorId}`);
+    }
+    const publicKeyHex = signerResolver?.getSignerPublicKeyHex(validatorId) ?? null;
 
     return {
       signer,
@@ -61,17 +83,19 @@ const buildBoardMetadata = (entityState: EntityState): BoardMetadata => {
  * Build gossip profile from entity state
  * Includes all account capacities for routing
  */
-export function buildEntityProfile(entityState: EntityState, name?: string, timestamp: number = 0): Profile {
-  const accounts: Profile['accounts'] = [];
+export function buildEntityProfile(
+  entityState: EntityState,
+  name?: string,
+  timestamp: number = 0,
+  signerResolver?: ProfileSignerResolver,
+): Profile {
+  const accounts: ProfileAccount[] = [];
   const publicAccounts: string[] = [];
   const hubConfig = entityState.hubRebalanceConfig;
 
   // Build account capacities from all accounts
   for (const [counterpartyId, accountMachine] of entityState.accounts.entries()) {
-    const tokenCapacities = new Map<number, {
-      inCapacity: bigint;
-      outCapacity: bigint;
-    }>();
+    const tokenCapacities = new Map<number, ProfileTokenCapacity>();
     let hasInboundCapacity = false;
 
     // Calculate capacities for each token
@@ -106,7 +130,7 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
     }
   }
 
-  const board = buildBoardMetadata(entityState);
+  const board = buildBoardMetadata(entityState, signerResolver);
   const entityPublicKey = board.validators[0]?.publicKey;
   // Include X25519 crypto key for HTLC envelope encryption (if available)
   const cryptoPublicKey = normalizeX25519Hex(entityState.cryptoPublicKey);
@@ -115,16 +139,22 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
   }
   const profileName = typeof name === 'string' && name.trim().length > 0
     ? name.trim()
-    : `Entity ${entityState.entityId.slice(-4)}`;
+    : entityState.profile.name;
 
   // Build profile
   const profile: Profile = {
     entityId: entityState.entityId,
+    name: profileName,
+    avatar: entityState.profile.avatar,
+    bio: entityState.profile.bio,
+    website: entityState.profile.website,
+    lastUpdated: timestamp,
     capabilities: [], // Future: Add routing, swap capabilities based on entity config
     publicAccounts,
     hubs: [...publicAccounts], // Legacy alias for compatibility
+    endpoints: [],
+    relays: [],
     metadata: {
-      lastUpdated: timestamp,
       isHub: !!hubConfig,
       routingFeePPM: hubConfig?.routingFeePPM ?? 100, // Default 100 PPM (0.01%)
       baseFee: hubConfig?.baseFee ?? 0n,
@@ -142,7 +172,6 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
       ...(entityPublicKey ? { entityPublicKey } : {}),
       cryptoPublicKey, // X25519 key for HTLC encryption
       encryptionPublicKey: cryptoPublicKey, // transport key (runtime-level)
-      name: profileName,
     },
     accounts,
   };
@@ -166,19 +195,22 @@ type FingerprintAccount = {
  * Excludes volatile fields like lastUpdated/signatures so we only re-announce
  * when the visible profile meaningfully changes.
  */
-export function buildEntityAdvertisedStateFingerprint(entityState: EntityState): string {
-  const profile = buildEntityProfile(entityState, undefined, 0);
-  const accounts: FingerprintAccount[] = (profile.accounts || [])
+export function buildEntityAdvertisedStateFingerprint(
+  entityState: EntityState,
+  signerResolver?: ProfileSignerResolver,
+): string {
+  const profile = buildEntityProfile(entityState, undefined, 0, signerResolver);
+  const accounts: FingerprintAccount[] = profile.accounts
     .map((account) => {
       const tokenEntries =
         account.tokenCapacities instanceof Map
           ? Array.from(account.tokenCapacities.entries())
-          : Object.entries(account.tokenCapacities || {});
+          : Object.entries(account.tokenCapacities);
       const tokenCapacities = tokenEntries
         .map(([tokenId, capacity]) => ({
           tokenId: String(tokenId),
-          inCapacity: String(capacity?.inCapacity ?? 0),
-          outCapacity: String(capacity?.outCapacity ?? 0),
+          inCapacity: String(capacity.inCapacity),
+          outCapacity: String(capacity.outCapacity),
         }))
         .sort((left, right) => left.tokenId.localeCompare(right.tokenId));
       return {
@@ -188,24 +220,24 @@ export function buildEntityAdvertisedStateFingerprint(entityState: EntityState):
     })
     .sort((left, right) => left.counterpartyId.localeCompare(right.counterpartyId));
 
-  const metadata = profile.metadata || {};
+  const metadata = profile.metadata;
   const fingerprintPayload = {
     entityId: profile.entityId,
-    publicAccounts: [...(profile.publicAccounts || [])].sort(),
+    publicAccounts: [...profile.publicAccounts].sort(),
     accounts,
     metadata: {
-      isHub: metadata.isHub === true,
-      routingFeePPM: Number(metadata.routingFeePPM ?? 0),
-      baseFee: String(metadata.baseFee ?? 0),
-      threshold: Number(metadata.threshold ?? 0),
+      isHub: metadata.isHub,
+      routingFeePPM: metadata.routingFeePPM,
+      baseFee: String(metadata.baseFee),
+      threshold: metadata.threshold,
       policyVersion: Number(metadata.policyVersion ?? 0),
       rebalanceBaseFee: String(metadata.rebalanceBaseFee ?? ''),
       rebalanceLiquidityFeeBps: String(metadata.rebalanceLiquidityFeeBps ?? ''),
       rebalanceGasFee: String(metadata.rebalanceGasFee ?? ''),
       rebalanceTimeoutMs: Number(metadata.rebalanceTimeoutMs ?? 0),
       entityPublicKey: String(metadata.entityPublicKey ?? ''),
-      cryptoPublicKey: String(metadata.cryptoPublicKey ?? ''),
-      board: metadata.board ?? null,
+      cryptoPublicKey: metadata.cryptoPublicKey,
+      board: metadata.board,
     },
   };
 
@@ -217,31 +249,7 @@ export function buildEntityAdvertisedStateFingerprint(entityState: EntityState):
  * Preserves hub flags + custom fields while keeping computed fields current.
  */
 export function mergeProfileWithExisting(profile: Profile, existing?: Profile | null): Profile {
-  if (!existing) return profile;
-
-  const existingMetadata = existing.metadata || {};
-  const mergedMetadata = { ...existingMetadata, ...(profile.metadata || {}) };
-
-  // Preserve hub flag if previously set
-  if (existingMetadata.isHub === true) {
-    mergedMetadata.isHub = true;
-  }
-
-  const mergedProfile: Profile = {
-    ...profile,
-    metadata: mergedMetadata,
-    capabilities: Array.from(new Set([...(existing.capabilities || []), ...(profile.capabilities || [])])),
-  };
-
-  // Preserve endpoints/relays if missing on new profile
-  if ((mergedProfile.endpoints?.length ?? 0) === 0 && existing.endpoints && existing.endpoints.length > 0) {
-    mergedProfile.endpoints = [...existing.endpoints];
-  }
-  if ((mergedProfile.relays?.length ?? 0) === 0 && existing.relays && existing.relays.length > 0) {
-    mergedProfile.relays = [...existing.relays];
-  }
-
-  return mergedProfile;
+  return profile;
 }
 
 /**

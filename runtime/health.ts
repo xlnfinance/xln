@@ -122,7 +122,7 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
         const replica = replicasByEntityId.get(String(profile.entityId).toLowerCase());
         hubs.push({
           entityId: profile.entityId,
-          name: profile.metadata.name || 'Unknown',
+          name: profile.name || 'Unknown',
           region: profile.metadata.region,
           relayUrl: profile.metadata.relayUrl,
           status: 'healthy', // TODO: Add health check

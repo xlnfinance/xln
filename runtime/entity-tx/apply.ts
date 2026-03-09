@@ -1,14 +1,14 @@
 import { calculateQuorumPower } from '../entity-consensus';
 import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
-import { processProfileUpdate } from '../name-resolution';
+import { normalizeEntityName } from '../networking/gossip';
 import { createOrderbookExtState } from '../orderbook';
-import { getRuntimeDb, tryOpenDb } from '../runtime';
 import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput, HashType } from '../types';
 import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../types';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
-import { buildEntityProfile, mergeProfileWithExisting } from '../networking/gossip-helper';
+import { buildEntityProfile } from '../networking/gossip-helper';
+import { getSignerAddress, getSignerPublicKey } from '../account-crypto';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
   handleAccountInput,
@@ -75,6 +75,19 @@ const findAccountKey = (state: EntityState, counterpartyId: string): string | nu
   }
   return null;
 };
+
+const buildLocalProfile = (
+  env: Env,
+  state: EntityState,
+  name: string | undefined,
+  timestamp: number,
+) => buildEntityProfile(state, name, timestamp, {
+  getSignerAddress: (signerId) => getSignerAddress(env, signerId),
+  getSignerPublicKeyHex: (signerId) => {
+    const publicKey = getSignerPublicKey(env, signerId);
+    return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
+  },
+});
 
 export const applyEntityTx = async (
   env: Env,
@@ -212,36 +225,29 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'profile-update') {
-      console.log(`🏷️ Profile update transaction processing - data:`, entityTx.data);
-
-      // Extract profile update data
       const profileData = entityTx.data.profile;
-      console.log(`🏷️ Extracted profileData:`, profileData);
+      if (!profileData || profileData.entityId !== entityState.entityId) {
+        throw new Error(`PROFILE_UPDATE_INVALID_ENTITY: expected=${entityState.entityId} got=${String(profileData?.entityId || '')}`);
+      }
+      const newState = cloneEntityState(entityState);
+      newState.profile = {
+        name: normalizeEntityName(profileData.name ?? newState.profile?.name, newState.entityId),
+        avatar: typeof profileData.avatar === 'string' ? profileData.avatar : (newState.profile?.avatar ?? ''),
+        bio: typeof profileData.bio === 'string' ? profileData.bio : (newState.profile?.bio ?? ''),
+        website: typeof profileData.website === 'string' ? profileData.website : (newState.profile?.website ?? ''),
+      };
+      newState.timestamp = env.timestamp;
 
-      if (profileData && profileData.entityId) {
-        console.log(`🏷️ Calling processProfileUpdate for entity ${profileData.entityId}`);
-        // Process profile update synchronously to ensure gossip is updated before snapshot
-        try {
-          const runtimeDb = env ? getRuntimeDb(env) : null;
-          if (runtimeDb && env) {
-            await tryOpenDb(env);
-            await processProfileUpdate(
-              runtimeDb,
-              profileData.entityId,
-              profileData,
-              profileData.hankoSignature || '',
-              env,
-            );
-          }
-        } catch (error) {
-          logError('ENTITY_TX', `❌ Failed to process profile update for ${profileData.entityId}:`, error);
-        }
-      } else {
-        console.warn(`⚠️ Invalid profile-update transaction data:`, entityTx.data);
-        console.warn(`⚠️ ProfileData missing or invalid:`, profileData);
+      if (env.gossip) {
+        const existingProfile = env.gossip.getProfiles?.().find((p: any) => p.entityId === newState.entityId);
+        const lastTimestamp = existingProfile?.lastUpdated || 0;
+        const monotonicTimestamp = Math.max(lastTimestamp + 1, env.timestamp);
+        const profile = buildLocalProfile(env, newState, undefined, monotonicTimestamp);
+        if (env.runtimeId) profile.runtimeId = env.runtimeId;
+        env.gossip.announce(profile);
       }
 
-      return { newState: entityState, outputs: [] };
+      return { newState, outputs: [] };
     }
 
     if (entityTx.type === 'initOrderbookExt') {
@@ -487,27 +493,22 @@ export const applyEntityTx = async (
 
       // Broadcast updated profile to gossip layer
       if (env.gossip) {
-        // MONOTONIC TIMESTAMP: Ensure timestamp grows
         const existingProfile = env.gossip?.getProfiles?.().find((p: any) => p.entityId === newState.entityId);
-        const lastTimestamp = existingProfile?.metadata?.lastUpdated || 0;
+        const lastTimestamp = existingProfile?.lastUpdated || 0;
         const monotonicTimestamp = Math.max(lastTimestamp + 1, env.timestamp);
-
-        // Preserve existing name if any (don't overwrite with undefined)
-        const existingName = existingProfile?.metadata?.name;
-        const profile = buildEntityProfile(newState, existingName, monotonicTimestamp);
-        const mergedProfile = mergeProfileWithExisting(profile, existingProfile);
+        const profile = buildLocalProfile(env, newState, undefined, monotonicTimestamp);
 
         console.log(
-          `🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${mergedProfile.accounts?.length || 0} name=${mergedProfile.metadata?.name || 'none'}`,
+          `🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${profile.accounts?.length || 0} name=${profile.name}`,
         );
 
         if (env.runtimeId) {
-          mergedProfile.runtimeId = env.runtimeId;
+          profile.runtimeId = env.runtimeId;
         }
         console.log(
-          `📡 Announcing profile ${newState.entityId.slice(-4)} ts=${monotonicTimestamp} accounts=${mergedProfile.accounts?.length || 0}`,
+          `📡 Announcing profile ${newState.entityId.slice(-4)} ts=${monotonicTimestamp} accounts=${profile.accounts?.length || 0}`,
         );
-        env.gossip.announce(mergedProfile);
+        env.gossip.announce(profile);
       }
 
       return { newState, outputs };
@@ -1015,13 +1016,11 @@ export const applyEntityTx = async (
       // Announce updated profile with isHub: true
       if (env?.gossip) {
         const existingProfile = env.gossip.getProfiles?.().find((p: any) => p.entityId === newState.entityId);
-        const lastTimestamp = existingProfile?.metadata?.lastUpdated || 0;
+        const lastTimestamp = existingProfile?.lastUpdated || 0;
         const monotonicTimestamp = Math.max(lastTimestamp + 1, env.timestamp);
-        const existingName = existingProfile?.metadata?.name;
-        const profile = buildEntityProfile(newState, existingName, monotonicTimestamp);
-        const merged = mergeProfileWithExisting(profile, existingProfile);
-        merged.metadata = {
-          ...(merged.metadata || {}),
+        const profile = buildLocalProfile(env, newState, undefined, monotonicTimestamp);
+        profile.metadata = {
+          ...(profile.metadata || {}),
           isHub: true,
           policyVersion,
           routingFeePPM,
@@ -1032,8 +1031,8 @@ export const applyEntityTx = async (
           rebalanceGasFee: rebalanceGasFee.toString(),
           rebalanceTimeoutMs,
         };
-        if (env.runtimeId) merged.runtimeId = env.runtimeId;
-        env.gossip.announce(merged);
+        if (env.runtimeId) profile.runtimeId = env.runtimeId;
+        env.gossip.announce(profile);
         console.log(`📡 Hub profile announced: ${newState.entityId.slice(-4)} isHub=true`);
       }
 
