@@ -39,15 +39,15 @@
         <div class="profile-card">
           <div class="profile-header">
             <div class="entity-id">{formatEntityId(profile.entityId)}</div>
-            <div class="timestamp">{formatTimestamp(profile.timestamp)}</div>
+            <div class="timestamp">{formatTimestamp(profile.lastUpdated || 0)}</div>
           </div>
 
           <div class="profile-body">
             <!-- Name -->
-            {#if profile.metadata?.name}
+            {#if profile.name}
               <div class="field">
                 <div class="field-label">Name</div>
-                <div class="field-value">{profile.metadata.name}</div>
+                <div class="field-value">{profile.name}</div>
               </div>
             {/if}
 

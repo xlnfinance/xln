@@ -131,14 +131,14 @@
       // Call the callback prop if provided
       onProfileAnnounced?.({
         entityId: currentEntityId,
+        name: metadata?.name || '',
+        avatar: metadata?.avatar || '',
+        bio: metadata?.bio || '',
+        website: metadata?.website || '',
+        lastUpdated: Date.now(),
         capabilities: capabilities,
         hubs: [],
-        metadata: {
-          name: metadata?.name,
-          avatar: metadata?.avatar,
-          bio: metadata?.bio,
-          website: metadata?.website,
-        },
+        metadata: {},
       });
 
       // Clear form and collapse section after successful announcement
@@ -216,18 +216,18 @@
     isHub = (profile.capabilities || []).includes('hub');
 
     // Set metadata fields
-    if (profile.metadata) {
+    if (profile) {
       if (isHub) {
         // If it's a hub, populate individual fields
-        hubName = profile.metadata.name || '';
-        hubAvatar = profile.metadata.avatar || '';
-        hubBio = profile.metadata.bio || '';
-        hubWebsite = profile.metadata.website || '';
+        hubName = profile.name || '';
+        hubAvatar = profile.avatar || '';
+        hubBio = profile.bio || '';
+        hubWebsite = profile.website || '';
         metadataInput = ''; // Clear JSON input when hub is selected
       } else {
         // For non-hub profiles, put metadata in JSON field
         // Handle BigInt serialization
-        metadataInput = JSON.stringify(profile.metadata, (_, value) => {
+        metadataInput = JSON.stringify(profile.metadata || {}, (_, value) => {
           if (typeof value === 'bigint') {
             return value.toString();
           }

@@ -541,16 +541,9 @@ const ensureBootstrapReserves = async (
 
   const bootstrapTokens = tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT);
   if (!resolvedArgs.deployTokens) {
-    const deadline = Date.now() + 45_000;
-    while (Date.now() < deadline) {
-      const health = await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);
-      if (health.ok) {
-        finishTiming('reserve_funding', startedAt);
-        return;
-      }
-      await sleep(250);
-    }
-    throw new Error(`RESERVE_SYNC_TIMEOUT: ${resolvedArgs.name}`);
+    await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);
+    finishTiming('reserve_funding', startedAt);
+    return;
   }
 
   const mints = bootstrapTokens
@@ -617,7 +610,7 @@ const readVisibleHubProfiles = (env: Env): Array<{ name: string; entityId: strin
   return profiles
     .filter(profile => profile.metadata?.isHub === true)
     .map(profile => ({
-      name: String(profile.metadata?.name || '').trim(),
+      name: String(profile.name || '').trim(),
       entityId: String(profile.entityId || '').toLowerCase(),
     }))
     .filter(profile => profile.name.length > 0 && profile.entityId.length > 0);

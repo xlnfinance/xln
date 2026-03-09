@@ -23,11 +23,11 @@
  */
 
 import type { Env, RoutedEntityInput } from '../types';
-import type { Profile } from './gossip';
+import { canonicalizeProfile, parseProfile, type Profile } from './gossip';
 import { RuntimeWsClient } from './ws-client';
-import { buildEntityProfile, mergeProfileWithExisting } from './gossip-helper';
+import { buildEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../ids';
-import { getCachedSignerPrivateKey, getCachedSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
+import { getSignerAddress, getSignerPrivateKey, getSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
 import { signProfile, verifyProfileSignature } from './profile-signing';
 import { inspectHankoForHash } from '../hanko-signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
@@ -92,47 +92,23 @@ const isHexPublicKey = (value: string): boolean => {
   return hex.length === 66 || hex.length === 130;
 };
 
-const normalizeX25519PubKey = (raw: unknown): string | null => {
-  if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const prefixed = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
-  return /^0x[0-9a-fA-F]{64}$/.test(prefixed) ? prefixed.toLowerCase() : null;
-};
-
-const sanitizeIncomingProfile = (profile: Profile): Profile | null => {
-  const entityId = String(profile?.entityId || '').trim();
-  if (!entityId) return null;
-  const metadata = (profile?.metadata || {}) as Record<string, unknown>;
-  const normalizedRuntimeId = normalizeRuntimeId(profile?.runtimeId ?? metadata.runtimeId);
-  if (!normalizedRuntimeId) return null;
-  const normalizedName = typeof metadata.name === 'string' && metadata.name.trim().length > 0
-    ? metadata.name.trim()
-    : `Entity ${entityId.slice(-4)}`;
-  // Keep entity-level HTLC key and runtime transport key distinct.
-  // `cryptoPublicKey` is used for HTLC envelope encryption (entity scoped).
-  // `encryptionPublicKey` is used for relay transport encryption (runtime scoped).
-  const normalizedCryptoKey = normalizeX25519PubKey(metadata.cryptoPublicKey);
-  const normalizedEncryptionKey =
-    normalizeX25519PubKey(metadata.encryptionPublicKey)
-    ?? normalizedCryptoKey;
-  const capabilities = Array.isArray(profile.capabilities) ? profile.capabilities : [];
-  const claimsHub =
-    metadata.isHub === true || capabilities.includes('hub') || capabilities.includes('routing');
-  if (claimsHub && !normalizedEncryptionKey) {
+const sanitizeIncomingProfile = (rawProfile: unknown): Profile | null => {
+  let profile: Profile;
+  try {
+    profile = parseProfile(rawProfile);
+  } catch {
     return null;
   }
-  return {
-    ...profile,
-    runtimeId: normalizedRuntimeId,
-    capabilities,
-    metadata: {
-      ...metadata,
-      name: normalizedName,
-      ...(normalizedCryptoKey ? { cryptoPublicKey: normalizedCryptoKey } : {}),
-      ...(normalizedEncryptionKey ? { encryptionPublicKey: normalizedEncryptionKey } : {}),
-    } as any,
-  };
+  const normalizedRuntimeId = normalizeRuntimeId(profile.runtimeId);
+  if (!normalizedRuntimeId) return null;
+  try {
+    return {
+      ...canonicalizeProfile(profile),
+      runtimeId: normalizedRuntimeId,
+    };
+  } catch {
+    return null;
+  }
 };
 
 const normalizeId = (value: string): string => value.toLowerCase();
@@ -253,18 +229,18 @@ export class RuntimeP2P {
           const profiles = this.env.gossip?.getProfiles?.() || [];
           const targetRuntimeIdNorm = normalizeRuntimeId(targetRuntimeId);
           if (!targetRuntimeIdNorm) return null;
-          const targetProfiles = profiles.filter((p: any) =>
-            normalizeRuntimeId(String(p.runtimeId || '')) === targetRuntimeIdNorm,
+          const targetProfiles = profiles.filter((profile) =>
+            normalizeRuntimeId(profile.runtimeId || '') === targetRuntimeIdNorm,
           );
           if (targetProfiles.length === 0) return null;
           // Pick the most common valid key among profiles for this runtimeId; break ties by latest lastUpdated.
           const keyStats = new Map<string, { count: number; latestTs: number }>();
           for (const profile of targetProfiles) {
-            const rawKey = profile?.metadata?.encryptionPublicKey;
+            const rawKey = profile.metadata.encryptionPublicKey;
             if (typeof rawKey !== 'string' || rawKey.length === 0) continue;
             const normalizedKey = rawKey.startsWith('0x') ? rawKey.toLowerCase() : `0x${rawKey.toLowerCase()}`;
             if (!/^0x[0-9a-f]{64}$/.test(normalizedKey)) continue;
-            const ts = Number(profile?.metadata?.lastUpdated || 0);
+            const ts = Number(profile?.lastUpdated || 0);
             const prev = keyStats.get(normalizedKey);
             if (!prev) {
               keyStats.set(normalizedKey, { count: 1, latestTs: ts });
@@ -637,18 +613,18 @@ export class RuntimeP2P {
   private hasProfileForEntity(entityId: string): boolean {
     const profiles = this.env.gossip?.getProfiles?.() || [];
     const targetEntityId = normalizeId(entityId);
-    return profiles.some((p: any) => normalizeId(String(p.entityId || '')) === targetEntityId);
+    return profiles.some((profile) => normalizeId(profile.entityId) === targetEntityId);
   }
 
   private getLatestKnownRemoteProfileTimestamp(): number {
     const profiles = this.env.gossip?.getProfiles?.() || [];
     let latest = 0;
     for (const profile of profiles) {
-      const profileRuntimeId = normalizeRuntimeId(profile?.runtimeId ?? profile?.metadata?.runtimeId ?? '');
+      const profileRuntimeId = normalizeRuntimeId(profile.runtimeId || '');
       if (profileRuntimeId && profileRuntimeId === this.runtimeId) {
         continue;
       }
-      const ts = Number(profile?.metadata?.lastUpdated || 0);
+      const ts = profile.lastUpdated;
       if (ts > latest) latest = ts;
     }
     return latest;
@@ -778,7 +754,12 @@ export class RuntimeP2P {
       // Only advertise entities we can actually sign for.
       // This excludes imported/foreign replicas in browser runtimes while still
       // allowing server runtimes (runtimeId may differ from signer addresses).
-      if (!replicaSignerId || !getCachedSignerPrivateKey(replicaSignerId)) {
+      if (!replicaSignerId) {
+        continue;
+      }
+      try {
+        getSignerPrivateKey(this.env, replicaSignerId);
+      } catch {
         continue;
       }
       const normalizedEntityId = normalizeId(entityId);
@@ -789,50 +770,55 @@ export class RuntimeP2P {
 
       // MONOTONIC TIMESTAMP: Ensure timestamp grows even if env.timestamp doesn't change
       // Get last announced timestamp for this entity from gossip
-      const existingProfile = this.env.gossip?.getProfiles?.().find((p: any) => p.entityId === entityId);
-      const lastTimestamp = existingProfile?.metadata?.lastUpdated || 0;
+      const existingProfile = this.env.gossip?.getProfiles?.().find((profile) => profile.entityId === entityId);
+      const lastTimestamp = existingProfile?.lastUpdated || 0;
       const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.timestamp);
-      // Monotonic timestamp: ensures profiles always advance
-
-      const existingName = existingProfile?.metadata?.name;
-      const profile = buildEntityProfile(replica.state, this.profileName ?? existingName, monotonicTimestamp);
+      const profile = buildEntityProfile(
+        replica.state,
+        this.profileName,
+        monotonicTimestamp,
+        {
+          getSignerAddress: (signerId) => getSignerAddress(this.env, signerId),
+          getSignerPublicKeyHex: (signerId) => {
+            const publicKey = getSignerPublicKey(this.env, signerId);
+            return publicKey ? `0x${toHex(publicKey)}` : null;
+          },
+        },
+      );
       profile.runtimeId = this.runtimeId;
       if (this.isHub) {
-        profile.capabilities = Array.from(new Set([...(profile.capabilities || []), 'hub', 'relay', 'routing', 'faucet']));
-        profile.metadata = { ...(profile.metadata || {}), isHub: true };
+        profile.capabilities = Array.from(new Set([...profile.capabilities, 'hub', 'relay', 'routing', 'faucet']));
+        profile.metadata = { ...profile.metadata, isHub: true };
         if (this.relayUrls.length > 0) {
           profile.endpoints = this.relayUrls;
           profile.relays = this.relayUrls;
         }
       }
       if (this.profileName) {
-        profile.metadata = { ...(profile.metadata || {}), name: this.profileName };
+        profile.name = this.profileName;
       }
 
       // Get public key from first validator (superset approach - works for single/multi-signer)
       const firstValidator = replica.state.config.validators[0];
-      const publicKey = firstValidator ? getCachedSignerPublicKey(firstValidator) : null;
+      const publicKey = firstValidator ? getSignerPublicKey(this.env, firstValidator) : null;
       if (publicKey) {
         profile.metadata = {
-          ...(profile.metadata || {}),
+          ...profile.metadata,
           entityPublicKey: `0x${toHex(publicKey)}`,
         };
       }
 
       // Add X25519 encryption public key for E2E messaging
       profile.metadata = {
-        ...(profile.metadata || {}),
+        ...profile.metadata,
         encryptionPublicKey: this.getEncryptionPublicKeyHex(),
       };
 
-      // Preserve existing hub metadata + custom fields
-      const merged = mergeProfileWithExisting(profile, existingProfile);
-
       // Sign profile using Hanko mechanism (same as accountFrames)
-      let signedProfile = merged;
+      let signedProfile = profile;
       if (firstValidator && this.env.runtimeSeed) {
         try {
-          signedProfile = await signProfile(this.env as Env, merged, firstValidator);
+          signedProfile = await signProfile(this.env as Env, profile, firstValidator);
         } catch (error) {
           console.warn(`P2P_PROFILE_SIGN_FAILED: ${entityId.slice(-4)} - ${(error as Error).message}`);
         }
@@ -884,27 +870,29 @@ export class RuntimeP2P {
       const sanitized = sanitizeIncomingProfile(profile);
       if (!sanitized) {
         skipped++;
-        console.warn(`P2P_PROFILE_DROPPED_MALFORMED: from=${from} entity=${String(profile?.entityId || 'unknown')}`);
+        const entityId = typeof profile === 'object' && profile !== null && 'entityId' in profile
+          ? String((profile as { entityId?: unknown }).entityId || 'unknown')
+          : 'unknown';
+        console.warn(`P2P_PROFILE_DROPPED_MALFORMED: from=${from} entity=${entityId}`);
         continue;
       }
       // Skip profiles we already have at the same or newer timestamp (avoids re-verification)
       const existingProfiles = this.env.gossip?.getProfiles?.() || [];
-      const existing = existingProfiles.find((p: any) => p.entityId === sanitized.entityId);
-      if (existing && existing.metadata?.lastUpdated >= (sanitized.metadata?.lastUpdated || 0)) {
+      const existing = existingProfiles.find((existingProfile) => existingProfile.entityId === sanitized.entityId);
+      if (existing && existing.lastUpdated >= sanitized.lastUpdated) {
         skipped++;
         continue;
       }
 
       // Verify profile signature if present (anti-spoofing)
       // Hanko is self-contained: claims embed the board, signatures prove identity
-      const hasHanko = sanitized.metadata?.['profileHanko'];
+      const hasHanko = sanitized.metadata.profileHanko;
       if (hasHanko) {
         const result = await verifyProfileSignature(sanitized, this.env);
         if (!result.valid) {
-          const board = sanitized.metadata?.board;
-          const boardValidators = board && typeof board === 'object' && 'validators' in board ? board.validators : undefined;
-          const hasBoardKey = Array.isArray(boardValidators) && boardValidators.some(v => typeof v?.publicKey === 'string');
-          const hasEntityKey = typeof profile.metadata?.entityPublicKey === 'string';
+          const boardValidators = sanitized.metadata.board.validators;
+          const hasBoardKey = boardValidators.some((validator) => typeof validator.publicKey === 'string');
+          const hasEntityKey = typeof sanitized.metadata.entityPublicKey === 'string';
           let hankoInspect:
             | {
                 recoveredAddresses: string[];
@@ -923,22 +911,20 @@ export class RuntimeP2P {
             };
           }
           console.error(
-            `P2P_PROFILE_INVALID_SIGNATURE: ${profile.entityId.slice(-4)} from=${from.slice(-6)}`,
+            `P2P_PROFILE_INVALID_SIGNATURE: ${sanitized.entityId.slice(-4)} from=${from.slice(-6)}`,
             {
               reason: result.reason,
               hash: result.hash?.slice(0, 18),
               signerId: result.signerId,
               hanko: typeof hasHanko === 'string' ? hasHanko.slice(0, 30) + '...' : !!hasHanko,
-              entityPublicKey: hasEntityKey ? (profile.metadata?.entityPublicKey as string).slice(0, 20) + '...' : 'none',
+              entityPublicKey: hasEntityKey ? sanitized.metadata.entityPublicKey!.slice(0, 20) + '...' : 'none',
               boardPublicKey: hasBoardKey ? 'yes' : 'no',
-              validators: Array.isArray(boardValidators) ? boardValidators.length : 0,
-              boardSigners: Array.isArray(boardValidators)
-                ? boardValidators.map(v => String(v?.signerId || v?.signer || '')).filter(Boolean)
-                : [],
+              validators: boardValidators.length,
+              boardSigners: boardValidators.map((validator) => String(validator.signerId || validator.signer)).filter(Boolean),
               recoveredAddresses: hankoInspect?.recoveredAddresses ?? [],
               reconstructedBoardHash: hankoInspect?.reconstructedBoardHash,
               runtimeId: sanitized.runtimeId,
-              name: sanitized.metadata?.name,
+              name: sanitized.name,
             }
           );
           continue; // Skip invalid profiles
@@ -955,21 +941,17 @@ export class RuntimeP2P {
       acceptedProfiles.push(sanitized);
 
       // Register validator public keys from profile board (for account signature verification)
-      const board2 = sanitized.metadata?.board;
-      const boardValidators = board2 && typeof board2 === 'object' && 'validators' in board2 ? board2.validators : undefined;
-      if (Array.isArray(boardValidators)) {
-        for (const validator of boardValidators) {
-          const signerId = validator?.signerId;
-          const publicKey = validator?.publicKey;
-          if (signerId && publicKey && typeof publicKey === 'string' && isHexPublicKey(publicKey)) {
-            registerSignerPublicKey(signerId, publicKey);
-          }
+      for (const validator of sanitized.metadata.board.validators) {
+        const signerId = validator.signerId;
+        const publicKey = validator.publicKey;
+        if (signerId && publicKey && isHexPublicKey(publicKey)) {
+          registerSignerPublicKey(signerId, publicKey);
         }
       }
 
       // Register public key for signature verification
-      const publicKey = sanitized.metadata?.entityPublicKey;
-      if (publicKey && typeof publicKey === 'string' && isHexPublicKey(publicKey)) {
+      const publicKey = sanitized.metadata.entityPublicKey;
+      if (publicKey && isHexPublicKey(publicKey)) {
         registerSignerPublicKey(sanitized.entityId, publicKey);
       }
     }

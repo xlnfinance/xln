@@ -159,8 +159,8 @@
     // Get gossip profiles for name resolution
     const gossipProfiles = env?.gossip?.getProfiles?.() || env?.gossip?.profiles || [];
     for (const profile of gossipProfiles) {
-      if (profile?.entityId && profile?.metadata?.name) {
-        names.set(profile.entityId, profile.metadata.name);
+      if (profile?.entityId && profile?.name) {
+        names.set(profile.entityId, profile.name);
       }
     }
 

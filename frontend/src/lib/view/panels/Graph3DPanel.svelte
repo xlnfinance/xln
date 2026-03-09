@@ -2532,7 +2532,7 @@ let vrHammer: VRHammer | null = null;
           ? computedEnv.gossip.getProfiles()
           : (computedEnv.gossip.profiles || []);
         const profile = profiles.find((p: any) => p.entityId === entityId);
-        return profile?.metadata?.name || '';
+        return profile?.name || '';
       };
 
       entityData = Array.from(uniqueEntityIds).map(entityId => {
@@ -5478,7 +5478,7 @@ let vrHammer: VRHammer | null = null;
     if (!env?.gossip) return '';
     const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : (env.gossip.profiles || []);
     const profile = profiles.find((p: any) => p.entityId === entityId);
-    return profile?.metadata?.name || '';
+    return profile?.name || '';
   }
 
   // Get signerId for an entity by looking up replica key in eReplicas

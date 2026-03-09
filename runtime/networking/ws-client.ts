@@ -468,11 +468,34 @@ export class RuntimeWsClient {
   private sendRaw(msg: RuntimeWsMessage): boolean {
     if (!this.ws) return false;
     if ('readyState' in this.ws && this.ws.readyState !== 1) return false;
+    const outboundMsg =
+      this.options.encryptionKeyPair && msg.from && !msg.fromEncryptionPubKey
+        ? {
+            ...msg,
+            fromEncryptionPubKey: pubKeyToHex(this.options.encryptionKeyPair.publicKey),
+          }
+        : msg;
     try {
-      failfastAssert(typeof msg.type === 'string', 'WS_SEND_TYPE_INVALID', 'Outgoing WS message type must be string', { msg });
-      failfastAssert(typeof msg.from === 'string' && msg.from.length > 0, 'WS_SEND_FROM_INVALID', 'Outgoing WS message missing from', { msgType: msg.type });
-      if (msg.type !== 'hello') {
-        failfastAssert(typeof msg.id === 'string' && msg.id.length > 0, 'WS_SEND_ID_INVALID', 'Outgoing WS message missing id', { msgType: msg.type });
+      failfastAssert(typeof outboundMsg.type === 'string', 'WS_SEND_TYPE_INVALID', 'Outgoing WS message type must be string', { msg: outboundMsg });
+      failfastAssert(
+        typeof outboundMsg.from === 'string' && outboundMsg.from.length > 0,
+        'WS_SEND_FROM_INVALID',
+        'Outgoing WS message missing from',
+        { msgType: outboundMsg.type },
+      );
+      failfastAssert(
+        typeof outboundMsg.fromEncryptionPubKey === 'string' && outboundMsg.fromEncryptionPubKey.length > 0,
+        'WS_SEND_ENCRYPTION_PUBKEY_MISSING',
+        'Outgoing WS message missing fromEncryptionPubKey',
+        { msgType: outboundMsg.type },
+      );
+      if (outboundMsg.type !== 'hello') {
+        failfastAssert(
+          typeof outboundMsg.id === 'string' && outboundMsg.id.length > 0,
+          'WS_SEND_ID_INVALID',
+          'Outgoing WS message missing id',
+          { msgType: outboundMsg.type },
+        );
       }
     } catch (error) {
       this.options.onError?.(error as Error);
@@ -483,7 +506,7 @@ export class RuntimeWsClient {
       });
       return false;
     }
-    const payload = serializeWsMessage(msg);
+    const payload = serializeWsMessage(outboundMsg);
     try {
       this.ws.send(payload);
       return true;

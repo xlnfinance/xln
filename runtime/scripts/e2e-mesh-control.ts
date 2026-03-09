@@ -519,8 +519,8 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
       capabilities.includes('hub') ||
       capabilities.includes('routing');
     const name =
-      typeof profile?.metadata?.name === 'string' && profile.metadata.name.trim().length > 0
-        ? profile.metadata.name.trim()
+      typeof profile?.name === 'string' && profile.name.trim().length > 0
+        ? profile.name.trim()
         : entityId;
     const online = normalizedRuntimeId ? relayStore.clients.has(normalizedRuntimeId) : false;
     entities.set(entityId.toLowerCase(), {
@@ -529,7 +529,7 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
       name,
       isHub,
       online,
-      lastUpdated: Number(profile?.metadata?.lastUpdated || entry.timestamp || 0),
+      lastUpdated: Number(profile?.lastUpdated || entry.timestamp || 0),
       capabilities,
       accounts: Array.isArray(profile?.accounts) ? profile.accounts : [],
       publicAccounts: Array.isArray(profile?.publicAccounts) ? profile.publicAccounts : [],
@@ -557,7 +557,6 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
       publicAccounts: existing?.publicAccounts || [],
       metadata: {
         ...(existing?.metadata || {}),
-        name: existing?.metadata?.name || child.name,
         isHub: true,
       },
     });
@@ -846,7 +845,7 @@ const server = Bun.serve({
 
     if (pathname === '/api/health') {
       await pollAllHubHealth();
-      return new Response(JSON.stringify(computeAggregatedHealth()), { headers });
+      return new Response(safeStringify(computeAggregatedHealth()), { headers });
     }
 
     if (pathname === '/api/debug/entities') {
@@ -863,7 +862,7 @@ const server = Bun.serve({
           dbPath: hubChild?.dbPath ?? null,
         };
       });
-      return new Response(JSON.stringify({ entities }), { headers });
+      return new Response(safeStringify({ entities }), { headers });
     }
 
     if (pathname === '/api/debug/events') {
@@ -949,14 +948,14 @@ const server = Bun.serve({
     }
 
     if (pathname === '/api/debug/relay') {
-      return new Response(JSON.stringify({
+      return new Response(safeStringify({
         clients: Array.from(relayStore.clients.keys()),
         profiles: Array.from(relayStore.gossipProfiles.values()).map(entry => ({
           entityId: entry.profile.entityId,
           runtimeId: entry.profile.runtimeId,
-          name: entry.profile.metadata?.name ?? null,
+          name: entry.profile.name ?? null,
           isHub: entry.profile.metadata?.isHub === true,
-          lastUpdated: entry.profile.metadata?.lastUpdated ?? 0,
+          lastUpdated: entry.profile.lastUpdated ?? 0,
         })),
         activeHubEntityIds: relayStore.activeHubEntityIds,
         debugEvents: relayStore.debugEvents.slice(-200),
@@ -971,10 +970,10 @@ const server = Bun.serve({
       try {
         await ensureReset(requestedMarketMaker);
         await pollAllHubHealth();
-        return new Response(JSON.stringify(computeAggregatedHealth()), { headers });
+        return new Response(safeStringify(computeAggregatedHealth()), { headers });
       } catch (error) {
         return new Response(
-          JSON.stringify({ error: serializeError(error), health: computeAggregatedHealth() }),
+          safeStringify({ error: serializeError(error), health: computeAggregatedHealth() }),
           { status: 500, headers },
         );
       }

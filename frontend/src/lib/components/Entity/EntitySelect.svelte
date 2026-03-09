@@ -27,7 +27,7 @@
     if (!profile) {
       scheduleGossipProfileFetch([norm]);
     }
-    const profileName = String(profile?.metadata?.name || '').trim();
+    const profileName = String(profile?.name || '').trim();
     return profileName || id;
   }
 

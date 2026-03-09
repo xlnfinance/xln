@@ -1587,9 +1587,20 @@ export interface EntityState {
   batchHistory?: CompletedBatch[]; // Last completed batch records for UI + replay diagnostics
 
 
-  // 🔐 Cryptography - RSA-OAEP keys for HTLC envelope encryption
-  cryptoPublicKey?: string;  // Base64 RSA-OAEP public key (shareable)
-  cryptoPrivateKey?: string; // Base64 RSA-OAEP private key (secret, encrypt at rest in prod)
+  // 🔐 Deterministic entity-scoped X25519 keys for HTLC envelope encryption.
+  // These are derived exactly once at entity creation/import and are required
+  // for every locally-owned entity. Missing keys are a hard invariant failure.
+  cryptoPublicKey: string;
+  cryptoPrivateKey: string;
+
+  // Public entity-owned profile fields.
+  // These are part of consensus state and are the source of truth for gossip.
+  profile: {
+    name: string;
+    avatar: string;
+    bio: string;
+    website: string;
+  };
 
   // 🔒 HTLC Routing - Multi-hop payment tracking (like 2024 hashlockMap)
   htlcRoutes: Map<string, HtlcRoute>; // hashlock → routing context
@@ -1829,6 +1840,8 @@ export interface Env {
     envChangeCallbacks?: Set<(env: Env) => void>;
     db?: any;
     dbOpenPromise?: Promise<boolean> | null;
+    infraDb?: any;
+    infraDbOpenPromise?: Promise<boolean> | null;
     logState?: {
       nextId: number;
       mirrorToConsole?: boolean;

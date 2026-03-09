@@ -2,6 +2,28 @@
 
 ## 2026-03-09
 
+- Unified WebSocket transport serialization with the canonical tagged JSON codec in [ws-protocol.ts](/Users/egor/xln/runtime/networking/ws-protocol.ts).
+  - Removed the separate `_type: 'BigInt'/'Map'` WS codec.
+  - WS now uses the same `serializeTaggedJson` / `deserializeTaggedJson` path as runtime persistence and server RPC.
+  - This fixed strict gossip profile ingestion where `baseFee` was arriving in a different wire shape than the runtime parser expected.
+- Hardened strict gossip profile parsing in:
+  - [gossip.ts](/Users/egor/xln/runtime/networking/gossip.ts)
+  - [gossip-helper.ts](/Users/egor/xln/runtime/networking/gossip-helper.ts)
+  - [p2p.ts](/Users/egor/xln/runtime/networking/p2p.ts)
+  - [profile-signing.ts](/Users/egor/xln/runtime/networking/profile-signing.ts)
+  - [relay-store.ts](/Users/egor/xln/runtime/relay-store.ts)
+  - [profile-batch.ts](/Users/egor/xln/runtime/relay/profile-batch.ts)
+  - [htlc-payment.ts](/Users/egor/xln/runtime/entity-tx/handlers/htlc-payment.ts)
+  - profiles now use required top-level `name/avatar/bio/website/lastUpdated`
+  - required `publicAccounts/hubs/endpoints/relays/accounts`
+  - required encryption keys in metadata, with fail-fast parsing/normalization
+- Fixed the E2E mesh debug API in [e2e-mesh-control.ts](/Users/egor/xln/runtime/scripts/e2e-mesh-control.ts) to return BigInt-safe JSON via the shared serializer instead of raw `JSON.stringify(...)`.
+  - This unblocked custody bootstrap discovery during isolated test runs.
+- Re-verified custody after the transport/profile fixes:
+  - [/Users/egor/xln/.logs/e2e-parallel/20260309-194110-534/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260309-194110-534/e2e-shard-00.log)
+- Re-ran the full isolated E2E stack and it passed on the current worktree:
+  - [/Users/egor/xln/.logs/e2e-parallel/20260309-194237-730/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260309-194237-730/e2e-shard-00.log)
+
 ### Prod Custody / Deploy
 
 - Added a dedicated prod custody supervisor in [start-custody-prod.ts](/Users/egor/xln/runtime/scripts/start-custody-prod.ts).

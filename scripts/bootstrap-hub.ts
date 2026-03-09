@@ -7,9 +7,16 @@
  */
 
 import { main, process as runtimeProcess } from '../runtime/runtime';
-import { deriveSignerKeySync, deriveSignerAddressSync, registerSignerKey } from '../runtime/account-crypto';
+import {
+  deriveSignerKeySync,
+  deriveSignerAddressSync,
+  getSignerAddress,
+  getSignerPublicKey,
+  registerSignerKey,
+} from '../runtime/account-crypto';
 import { encodeBoard, hashBoard } from '../runtime/entity-factory';
 import type { ConsensusConfig, Env } from '../runtime/types';
+import { buildEntityProfile } from '../runtime/networking/gossip-helper';
 
 const args = process.argv.slice(2);
 
@@ -77,29 +84,37 @@ const resolveJurisdiction = (env: Env) => {
 
 const announceHubProfile = (env: Env, entityId: string, config: HubConfig, signerAddress: string, jurisdictionName?: string, chainId?: number) => {
   if (!env.gossip) return;
-  env.gossip.announce({
-    entityId,
-    runtimeId: env.runtimeId,
-    capabilities: config.capabilities || ['hub', 'routing', 'faucet'],
-    accounts: [],
-    relays: config.relayUrl ? [config.relayUrl] : [],
-    endpoints: config.relayUrl ? [config.relayUrl] : [],
-    metadata: {
-      name: config.name,
-      isHub: true,
-      region: config.region,
-      relayUrl: config.relayUrl,
-      rpcUrl: config.rpcUrl || undefined,
-      httpUrl: config.httpUrl || undefined,
-      port: config.port,
-      serverId: config.serverId,
-      hubSignerId: signerAddress,
-      jurisdiction: jurisdictionName,
-      chainId,
-      routingFeePPM: config.routingFeePPM ?? 100,
-      lastUpdated: Date.now(),
+  const replica = Array.from(env.eReplicas?.values?.() || []).find((candidate) => candidate.entityId === entityId);
+  if (!replica) {
+    throw new Error(`BOOTSTRAP_HUB_PROFILE_REPLICA_MISSING: entity=${entityId}`);
+  }
+  replica.state.profile.name = config.name;
+  const profile = buildEntityProfile(replica.state, undefined, Date.now(), {
+    getSignerAddress: (signerId) => getSignerAddress(env, signerId),
+    getSignerPublicKeyHex: (signerId) => {
+      const publicKey = getSignerPublicKey(env, signerId);
+      return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
     },
   });
+  profile.runtimeId = env.runtimeId;
+  profile.capabilities = config.capabilities || ['hub', 'routing', 'faucet'];
+  profile.relays = config.relayUrl ? [config.relayUrl] : [];
+  profile.endpoints = config.relayUrl ? [config.relayUrl] : [];
+  profile.metadata = {
+    ...(profile.metadata || {}),
+    isHub: true,
+    region: config.region,
+    relayUrl: config.relayUrl,
+    rpcUrl: config.rpcUrl || undefined,
+    httpUrl: config.httpUrl || undefined,
+    port: config.port,
+    serverId: config.serverId,
+    hubSignerId: signerAddress,
+    jurisdiction: jurisdictionName,
+    chainId,
+    routingFeePPM: config.routingFeePPM ?? 100,
+  };
+  env.gossip.announce(profile);
 };
 
 export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Promise<{ entityId: string; signerId: string } | null> {

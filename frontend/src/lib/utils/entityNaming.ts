@@ -82,5 +82,5 @@ export function getGossipProfile(entityId: string, source: GossipSource): Gossip
 
 export function resolveEntityName(entityId: string, source: GossipSource): string {
   const profile = getGossipProfile(entityId, source);
-  return String(profile?.metadata?.name || '').trim();
+  return String(profile?.name || '').trim();
 }

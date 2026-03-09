@@ -5,6 +5,8 @@ import { createRelayStore } from '../relay-store';
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
 const RUNTIME_A = '0x1111111111111111111111111111111111111111';
 const RUNTIME_B = '0x2222222222222222222222222222222222222222';
+const KEY_A = '0x' + '11'.repeat(32);
+const KEY_B = '0x' + '22'.repeat(32);
 const ENTITY_A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const ENTITY_B = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const ENTITY_C = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
@@ -28,24 +30,29 @@ describe('relay-router gossip fanout', () => {
     const wsA: FakeWs = { label: 'A' };
     const wsB: FakeWs = { label: 'B' };
 
-    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A });
-    await relayRoute(config, wsB, { type: 'hello', from: RUNTIME_B });
+    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
+    await relayRoute(config, wsB, { type: 'hello', from: RUNTIME_B, fromEncryptionPubKey: KEY_B });
 
     await relayRoute(config, wsA, {
       type: 'gossip_announce',
       id: 'announce-1',
       from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
       to: SERVER_RUNTIME_ID,
       payload: {
         profiles: [
           {
             entityId: ENTITY_A,
             runtimeId: RUNTIME_A,
+            name: 'alice',
+            avatar: '',
+            bio: '',
+            website: '',
+            lastUpdated: 123,
             capabilities: ['routing'],
             metadata: {
-              name: 'alice',
-              lastUpdated: 123,
-              encryptionPublicKey: '0x' + '11'.repeat(32),
+              cryptoPublicKey: KEY_A,
+              encryptionPublicKey: KEY_A,
             },
           },
         ],
@@ -61,7 +68,7 @@ describe('relay-router gossip fanout', () => {
     expect(gossipUpdate).toBeDefined();
     expect(gossipUpdate?.payload?.profiles?.[0]?.entityId).toBe(ENTITY_A);
     expect(sentBySocket.get(wsA)?.some((message) => (message as { type?: string }).type === 'gossip_update') ?? false).toBeFalse();
-    expect(store.gossipProfiles.get(ENTITY_A)?.profile?.metadata?.name).toBe('alice');
+    expect(store.gossipProfiles.get(ENTITY_A)?.profile?.name).toBe('alice');
   });
 
   test('serves batched gossip by ids and set filters', async () => {
@@ -79,42 +86,57 @@ describe('relay-router gossip fanout', () => {
     };
     const wsA: FakeWs = { label: 'A' };
 
-    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A });
+    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
 
     await relayRoute(config, wsA, {
       type: 'gossip_announce',
       id: 'announce-a',
       from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
       to: SERVER_RUNTIME_ID,
       payload: {
         profiles: [
           {
             entityId: ENTITY_A,
             runtimeId: RUNTIME_A,
+            name: 'leaf-a',
+            avatar: '',
+            bio: '',
+            website: '',
+            lastUpdated: 100,
             capabilities: [],
             metadata: {
-              name: 'leaf-a',
-              lastUpdated: 100,
+              cryptoPublicKey: KEY_A,
+              encryptionPublicKey: KEY_A,
             },
           },
           {
             entityId: ENTITY_B,
             runtimeId: RUNTIME_B,
+            name: 'hub-b',
+            avatar: '',
+            bio: '',
+            website: '',
+            lastUpdated: 200,
             capabilities: ['hub', 'routing'],
             metadata: {
-              name: 'hub-b',
               isHub: true,
-              lastUpdated: 200,
-              encryptionPublicKey: '0x' + '22'.repeat(32),
+              cryptoPublicKey: KEY_B,
+              encryptionPublicKey: KEY_B,
             },
           },
           {
             entityId: ENTITY_C,
             runtimeId: RUNTIME_B,
+            name: 'leaf-c',
+            avatar: '',
+            bio: '',
+            website: '',
+            lastUpdated: 300,
             capabilities: [],
             metadata: {
-              name: 'leaf-c',
-              lastUpdated: 300,
+              cryptoPublicKey: KEY_B,
+              encryptionPublicKey: KEY_B,
             },
           },
         ],
@@ -125,6 +147,7 @@ describe('relay-router gossip fanout', () => {
       type: 'gossip_request',
       id: 'request-1',
       from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
       to: SERVER_RUNTIME_ID,
       payload: {
         ids: [ENTITY_A],

@@ -185,14 +185,11 @@ export async function handleHtlcPayment(
   ): { feePpm: number; baseFee: bigint } => {
     const fromNorm = String(fromEntityId || '').toLowerCase();
     const toNorm = String(toEntityId || '').toLowerCase();
-    const profile = (env.gossip?.getProfiles?.() as Profile[] | undefined)
-      ?.find((p) => String(p?.entityId || '').toLowerCase() === fromNorm);
-    const basePpm = sanitizeFeePPM(profile?.metadata?.routingFeePPM ?? 10, 10);
-    const baseFee = sanitizeBaseFee(profile?.metadata?.baseFee ?? 0n);
+    const profile = env.gossip?.getProfiles?.().find((candidate) => candidate.entityId.toLowerCase() === fromNorm);
+    const basePpm = sanitizeFeePPM(profile?.metadata.routingFeePPM ?? 10, 10);
+    const baseFee = sanitizeBaseFee(profile?.metadata.baseFee ?? 0n);
 
-    const account = Array.isArray(profile?.accounts)
-      ? profile.accounts.find((a) => String(a?.counterpartyId || '').toLowerCase() === toNorm)
-      : null;
+    const account = profile?.accounts.find((candidate) => candidate.counterpartyId.toLowerCase() === toNorm) ?? null;
     const tokenCap = getTokenCapacity(account?.tokenCapacities, tokId);
     const outCap = tokenCap?.outCapacity ?? 0n;
     const inCap = tokenCap?.inCapacity ?? 0n;
@@ -366,11 +363,11 @@ export async function handleHtlcPayment(
       // Local mirrored replicas can be stale/mixed across runtime switches.
       if (env.gossip) {
         const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : [];
-        const matches = profiles.filter((p: any) => p?.entityId === entityId);
+        const matches = profiles.filter((profile) => profile.entityId === entityId);
         for (const profile of matches) {
           const candidates: Array<{ value: unknown; source: string }> = [
-            { value: profile?.metadata?.cryptoPublicKey, source: 'gossip.metadata.cryptoPublicKey' },
-            { value: profile?.metadata?.encryptionPublicKey, source: 'gossip.metadata.encryptionPublicKey' },
+            { value: profile.metadata.cryptoPublicKey, source: 'gossip.metadata.cryptoPublicKey' },
+            { value: profile.metadata.encryptionPublicKey, source: 'gossip.metadata.encryptionPublicKey' },
           ];
           for (const candidate of candidates) {
             const key = normalizeX25519Hex(candidate.value) ?? normalizeX25519Base64(candidate.value);
