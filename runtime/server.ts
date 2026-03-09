@@ -2167,7 +2167,9 @@ const bootstrapServerHubsAndReserves = async (
 
     if (reserveMints.length > 0) {
       const signerAddress = await globalJAdapter.signer.getAddress().catch(() => '');
-      const depositoryAddress = await globalJAdapter.getDepositoryAddress().catch(() => '');
+      const depositoryAddress =
+        String(globalJAdapter.addresses?.depository || '').trim() ||
+        await globalJAdapter.depository.getAddress().catch(() => '');
       console.log(
         `[XLN][BOOTSTRAP-RESERVE] chainId=${globalJAdapter.chainId} ` +
           `depository=${depositoryAddress || 'unknown'} signer=${signerAddress || 'unknown'} ` +
