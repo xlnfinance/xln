@@ -4997,6 +4997,22 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       fromReplica.chainId = detectedChainId as any;
     }
 
+    if (fromReplica?.depositoryAddress && fromReplica?.entityProviderAddress) {
+      const probeProvider = new ethers.JsonRpcProvider(anvilRpc);
+      const [depositoryCode, entityProviderCode] = await Promise.all([
+        probeProvider.getCode(fromReplica.depositoryAddress),
+        probeProvider.getCode(fromReplica.entityProviderAddress),
+      ]);
+      if (depositoryCode === '0x' || entityProviderCode === '0x') {
+        console.warn(
+          `[XLN] Ignoring stale jurisdictions addresses with no on-chain code: ` +
+            `depository=${fromReplica.depositoryAddress} code=${depositoryCode} ` +
+            `entityProvider=${fromReplica.entityProviderAddress} code=${entityProviderCode}`,
+        );
+        fromReplica = undefined;
+      }
+    }
+
     globalJAdapter = await createJAdapter({
       mode: 'rpc',
       chainId: detectedChainId,
