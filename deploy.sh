@@ -56,7 +56,7 @@ wait_for_rpc_chain() {
   while [ "$SECONDS" -lt "$deadline" ]; do
     local body
     body="$(curl -sS -X POST -H 'Content-Type: application/json' \
-      --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_chainId\",\"params\":[],\"id\":1}' \
+      --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
       "$rpc_url" || true)"
     if printf '%s' "$body" | grep -q "\"result\":\"$expected_chain_hex\""; then
       return 0
