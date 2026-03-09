@@ -15,6 +15,19 @@ async function main() {
   }
 
   fs.rmSync(outDir, { recursive: true, force: true });
+  fs.mkdirSync(outDir, { recursive: true });
+
+  const mirroredDirs = new Set();
+  for (const file of allFiles) {
+    const relativeArtifactPath = path.relative(artifactsDir, file);
+    const relativeDir = path.dirname(relativeArtifactPath);
+    if (!relativeDir || relativeDir === '.') continue;
+    mirroredDirs.add(path.join(outDir, relativeDir));
+    mirroredDirs.add(path.join(outDir, 'factories', relativeDir));
+  }
+  for (const dir of mirroredDirs) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
 
   const result = await runTypeChain({
     cwd,
