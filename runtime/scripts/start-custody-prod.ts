@@ -3,6 +3,7 @@
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { deriveManagedEntityIdentity, DaemonControlClient, setupCustody } from '../orchestrator/daemon-control';
+import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import {
   spawnBunChild,
   stopManagedChild,
@@ -141,6 +142,8 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
       PUBLIC_RPC: PUBLIC_RPC_URL,
       PUBLIC_RELAY_URL: RELAY_URL,
       RELAY_URL,
+      XLN_USE_PREDEPLOYED_ADDRESSES: 'true',
+      XLN_JURISDICTIONS_PATH: resolveJurisdictionsJsonPath(),
       XLN_RUNTIME_SEED: DAEMON_RUNTIME_SEED,
       XLN_DB_PATH: `${DB_ROOT}/daemon-db`,
     },

@@ -180,3 +180,21 @@
   - `bun build scripts/bootstrap-hub.ts --target=bun --outfile=/tmp/bootstrap-hub-check.js`
   - isolated [tests/e2e-payment.spec.ts](/Users/egor/xln/tests/e2e-payment.spec.ts) passed
   - isolated [tests/e2e-custody.spec.ts](/Users/egor/xln/tests/e2e-custody.spec.ts) passed
+- 2026-03-09T20:18:32Z root-cause deploy fix:
+  - deleted stale tracked artifacts [runtime/runtime.js](/Users/egor/xln/runtime/runtime.js) and [runtime/runtime.js.map](/Users/egor/xln/runtime/runtime.js.map) that let Bun resolve `./runtime` to old generated code on the server
+  - switched the remaining runtime entry-point imports to explicit `.ts` sources in:
+    - [runtime/server.ts](/Users/egor/xln/runtime/server.ts)
+    - [runtime/relay-local-delivery.ts](/Users/egor/xln/runtime/relay-local-delivery.ts)
+    - [runtime/e2e/mesh-common.ts](/Users/egor/xln/runtime/e2e/mesh-common.ts)
+    - [runtime/scenarios/p2p-node.ts](/Users/egor/xln/runtime/scenarios/p2p-node.ts)
+    - [runtime/scripts/e2e-hub-node.ts](/Users/egor/xln/runtime/scripts/e2e-hub-node.ts)
+    - [runtime/scripts/persistence-jbatch-history-smoke.ts](/Users/egor/xln/runtime/scripts/persistence-jbatch-history-smoke.ts)
+    - [runtime/scripts/persistence-wal-smoke.ts](/Users/egor/xln/runtime/scripts/persistence-wal-smoke.ts)
+    - [runtime/scripts/persistence-simultaneous-proposal-smoke.ts](/Users/egor/xln/runtime/scripts/persistence-simultaneous-proposal-smoke.ts)
+    - [runtime/scripts/test-replay-bilateral.ts](/Users/egor/xln/runtime/scripts/test-replay-bilateral.ts)
+    - [runtime/xln-api.ts](/Users/egor/xln/runtime/xln-api.ts)
+  - hardened prod custody daemon bootstrap in [runtime/scripts/start-custody-prod.ts](/Users/egor/xln/runtime/scripts/start-custody-prod.ts) to always pass the canonical jurisdictions path and `XLN_USE_PREDEPLOYED_ADDRESSES=true`, so prod custody cannot silently redeploy contracts into the live anvil
+  - verified builds:
+    - `bun build runtime/server.ts --target=bun --outfile=/tmp/xln-server-check.js`
+    - `bun build runtime/scripts/start-custody-prod.ts --target=bun --outfile=/tmp/xln-custody-prod-check.js`
+    - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/xln-runtime-browser-check.js`

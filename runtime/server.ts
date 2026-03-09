@@ -23,7 +23,7 @@ import {
   ensureGossipProfiles,
   getPersistedLatestHeight,
   readPersistedFrameJournals,
-} from './runtime';
+} from './runtime.ts';
 import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './serialization-utils';
 import type { AccountMachine, DeliverableEntityInput, Delta, Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
 import type { HubHealth } from './health';

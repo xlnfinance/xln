@@ -18,7 +18,7 @@ import {
   resolveEntityProposerId,
   startP2P,
   startRuntimeLoop,
-} from '../runtime';
+} from '../runtime.ts';
 import type { EntityInput, Env } from '../types';
 import {
   applyJEventsToEnv,
