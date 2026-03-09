@@ -4,7 +4,7 @@
 
 import { get } from 'svelte/store';
 import { keccak256, toUtf8Bytes } from 'ethers';
-import type { Env } from '@xln/runtime/xln-api';
+import type { Env, EntityReplica } from '@xln/runtime/xln-api';
 
 type JurisdictionConfig = {
   name: string;
@@ -13,6 +13,8 @@ type JurisdictionConfig = {
   depositoryAddress: string;
   chainId?: number;
 };
+
+type JReplica = Env['jReplicas'] extends Map<string, infer T> ? T : never;
 
 const inflightAutoCreates = new Map<string, Promise<string | null>>();
 let warnedMissingEnv = false;
@@ -93,7 +95,8 @@ export async function createEphemeralEntity(
       signerId,
       data: {
         isProposer: true,
-        config
+        config,
+        profileName: `self-${signerId.slice(2, 8)}`,
       }
     }],
     entityInputs: []
@@ -103,10 +106,8 @@ export async function createEphemeralEntity(
   xln.enqueueRuntimeInput(env, runtimeInput);
   await waitForCondition(
     () => {
-      const reps = (env as any)?.eReplicas;
-      if (!reps?.keys) return false;
       const expected = String(entityId).toLowerCase();
-      for (const key of reps.keys()) {
+      for (const key of env.eReplicas.keys()) {
         const repEntity = String(key).split(':')[0];
         if (String(repEntity || '').toLowerCase() === expected) return true;
       }
@@ -118,44 +119,24 @@ export async function createEphemeralEntity(
   return entityId;
 }
 
-function findReplicaBySigner(env: Env, signerId: string): any | null {
-  const reps = (env as any)?.eReplicas;
-  if (!reps) return null;
-  const replicas = reps instanceof Map ? reps : new Map(Object.entries(reps || {}));
-  for (const [, replica] of replicas) {
-    const rep = replica as any;
-    if (rep?.signerId?.toLowerCase?.() === signerId.toLowerCase()) {
-      return rep;
+function findReplicaBySigner(env: Env, signerId: string): EntityReplica | null {
+  for (const replica of env.eReplicas.values()) {
+    if (replica.signerId.toLowerCase() === signerId.toLowerCase()) {
+      return replica;
     }
   }
   return null;
 }
 
 function listJMachineNames(env: Env): string[] {
-  const jReplicas = (env as any)?.jReplicas;
-  if (!jReplicas) return [];
-  if (jReplicas instanceof Map) return Array.from(jReplicas.keys());
-  if (Array.isArray(jReplicas)) return jReplicas.map((jr: any) => jr?.name).filter(Boolean);
-  return Object.keys(jReplicas || {});
+  return Array.from(env.jReplicas.keys());
 }
 
-function getJReplica(env: Env, name?: string): any | null {
-  const jReplicas = (env as any)?.jReplicas;
-  if (!jReplicas) return null;
-  if (jReplicas instanceof Map) {
-    if (name && jReplicas.has(name)) return jReplicas.get(name);
-    return jReplicas.values().next().value || null;
+function getJReplica(env: Env, name?: string): JReplica | null {
+  if (name) {
+    return env.jReplicas.get(name) ?? null;
   }
-  if (Array.isArray(jReplicas)) {
-    if (name) return jReplicas.find((jr: any) => jr?.name === name) || null;
-    return jReplicas[0] || null;
-  }
-  if (name && jReplicas[name]) return jReplicas[name];
-  const record = jReplicas as Record<string, any>;
-  const keys = Object.keys(record);
-  const firstKey = keys[0];
-  if (!firstKey) return null;
-  return record[firstKey];
+  return env.jReplicas.values().next().value ?? null;
 }
 
 function buildJurisdictionConfig(env: Env, name?: string): JurisdictionConfig | null {
@@ -195,7 +176,7 @@ async function ensureJMachine(env: Env): Promise<string | null> {
 
   const names = listJMachineNames(env);
   if (names.length > 0) {
-    return (env as any)?.activeJurisdiction || names[0];
+    return env.activeJurisdiction || names[0];
   }
 
   isCreatingJMachine = true;
@@ -239,7 +220,7 @@ export async function createSelfEntity(
   signerAddress: string,
   jurisdictionName?: string
 ): Promise<string | null> {
-  const jName = jurisdictionName || (env as any)?.activeJurisdiction || await ensureJMachine(env);
+  const jName = jurisdictionName || env.activeJurisdiction || await ensureJMachine(env);
   if (!jName) return null;
 
   return await createEphemeralEntity(signerAddress, jName, env);

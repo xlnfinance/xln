@@ -3,7 +3,7 @@
 import { ethers, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { ERC20Mock__factory } from '../../jurisdictions/typechain-types';
+import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';

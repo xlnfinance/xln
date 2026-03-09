@@ -975,7 +975,7 @@ async function readFirstOpenOrderRemaining(page: Page): Promise<number> {
 
 test.describe('E2E Swap Flow', () => {
   test.beforeEach(async ({ page }) => {
-    await timedStep('swap.ensure_baseline', () => ensureE2EBaseline(page));
+    await timedStep('swap.ensure_baseline', () => ensureE2EBaseline(page, { forceReset: true }));
   });
 
   // Scenario: the UI should auto-create the inbound token capacity required to place a WETH/USDC offer,

@@ -227,6 +227,7 @@ const buildImportReplicaInput = (identity: ManagedEntityIdentity): RuntimeInput 
       data: {
         config: identity.consensusConfig,
         isProposer: true,
+        profileName: identity.name,
         position: identity.position,
       },
     },

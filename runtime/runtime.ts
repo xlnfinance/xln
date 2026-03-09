@@ -1967,7 +1967,10 @@ const applyRuntimeInput = async (
             cryptoPublicKey: localKeys.publicKey,
             cryptoPrivateKey: localKeys.privateKey,
             profile: {
-              name: `Entity ${runtimeTx.entityId.slice(-4)}`,
+              name:
+                typeof runtimeTx.data.profileName === 'string' && runtimeTx.data.profileName.trim().length > 0
+                  ? runtimeTx.data.profileName.trim()
+                  : `Entity ${runtimeTx.entityId.slice(-4)}`,
               avatar: '',
               bio: '',
               website: '',

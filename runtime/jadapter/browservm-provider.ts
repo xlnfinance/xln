@@ -23,7 +23,7 @@ import {
   DeltaTransformer__factory,
   ERC20Mock__factory,
   Depository__factory,
-} from '../../jurisdictions/typechain-types';
+} from '../../jurisdictions/typechain-types/index';
 import { safeStringify } from '../serialization-utils.js';
 import { deriveSignerKeySync, getCachedSignerPrivateKey } from '../account-crypto.js';
 import { isLeftEntity, normalizeEntityId } from '../entity-id-utils';

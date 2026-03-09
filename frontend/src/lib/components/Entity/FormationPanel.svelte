@@ -6,6 +6,7 @@
 -->
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
+  import type { ConsensusConfig, Env, JurisdictionConfig } from '@xln/runtime/xln-api';
   import { xlnFunctions, getXLN, xlnEnvironment, enqueueAndProcess } from '../../stores/xlnStore';
   import { activeVault, vaultOperations } from '../../stores/vaultStore';
   import { tabOperations } from '../../stores/tabStore';
@@ -14,7 +15,7 @@
   export let onCreated: ((entityId: string) => void) | undefined = undefined;
 
   const dispatch = createEventDispatcher();
-  $: env = $xlnEnvironment;
+  $: env = $xlnEnvironment as Env | null;
   $: activeFunctions = $xlnFunctions;
   $: vault = $activeVault;
 
@@ -35,12 +36,20 @@
   let importJson = '';
 
   // Available jurisdictions from env
+  type FormationJurisdiction = JurisdictionConfig & {
+    chainId?: number;
+  };
+
   $: jurisdictions = (() => {
-    if (!env?.jReplicas) return [];
-    if (env.jReplicas instanceof Map) return Array.from(env.jReplicas.values());
-    if (Array.isArray(env.jReplicas)) return env.jReplicas;
-    return Object.values(env.jReplicas || {});
-  })() as Array<{ name: string; chainId?: number; config?: any }>;
+    if (!env?.jReplicas) return [] as FormationJurisdiction[];
+    return Array.from(env.jReplicas.values()).map((replica) => ({
+      name: replica.name,
+      address: replica.depositoryAddress,
+      entityProviderAddress: replica.entityProviderAddress,
+      depositoryAddress: replica.depositoryAddress,
+      ...(typeof replica.chainId === 'number' ? { chainId: replica.chainId } : {}),
+    }));
+  })();
 
   // Auto-select first jurisdiction
   $: if (jurisdictions.length > 0 && !selectedJurisdiction) {
@@ -142,27 +151,23 @@
       }
 
       let entityId: string;
-      let config: any;
+      let config: ConsensusConfig;
 
       if (entityType === 'lazy') {
         // Lazy entity - ID is hash of quorum
         entityId = xln.generateLazyEntityId(validatorNames, thresholdBigInt);
 
         // Check for duplicates
-        const existingReplicas = Array.from((currentEnv.eReplicas as Map<string, any>)?.keys?.() || []);
+        const existingReplicas = Array.from(currentEnv.eReplicas.keys());
         if (existingReplicas.some((key: string) => key.startsWith(entityId + ':'))) {
           throw new Error(`This validator configuration already exists! Entity ${formatShortId(entityId)} is in use.`);
         }
 
-        const result = xln.createLazyEntity(entityName, validatorNames, thresholdBigInt, {
-          name: selectedJurisdiction,
-        } as any);
+        const result = xln.createLazyEntity(entityName, validatorNames, thresholdBigInt, jurisdictionReplica);
         config = result.config;
       } else if (entityType === 'numbered') {
         // Numbered entity - on-chain registration
-        const creation = await xln.createNumberedEntity(entityName, validatorNames, thresholdBigInt, {
-          name: selectedJurisdiction,
-        } as any);
+        const creation = await xln.createNumberedEntity(entityName, validatorNames, thresholdBigInt, jurisdictionReplica);
         config = creation.config;
         entityId = creation.entityId;
       } else {
@@ -177,12 +182,13 @@
         signerId,
         data: {
           config,
-          isProposer: index === 0
+          isProposer: index === 0,
+          profileName: entityName,
         }
       }));
 
       // Apply to runtime
-      await enqueueAndProcess(currentEnv as any, {
+      await enqueueAndProcess(currentEnv, {
         runtimeTxs: serverTxs,
         entityInputs: []
       });
@@ -203,7 +209,7 @@
 
     } catch (err) {
       console.error('[FormationPanel] Creation failed:', err);
-      error = (err as Error)?.message || 'Creation failed';
+      error = err instanceof Error ? err.message : 'Creation failed';
     } finally {
       creating = false;
     }

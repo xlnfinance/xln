@@ -258,6 +258,7 @@ export type RuntimeTx =
       data: {
         config: ConsensusConfig;
         isProposer: boolean;
+        profileName?: string;
         position?: { x: number; y: number; z: number };
       };
     }

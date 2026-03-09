@@ -85,6 +85,7 @@ export type E2EBaselineOptions = {
   requireMarketMaker?: boolean;
   minHubCount?: number;
   autoResetGraceMs?: number;
+  forceReset?: boolean;
 };
 
 export type E2EResetOptions = E2EBaselineOptions & {
@@ -247,7 +248,22 @@ export const ensureE2EBaseline = async (
     requireMarketMaker: options.requireMarketMaker ?? false,
     minHubCount: options.minHubCount ?? 3,
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
+    forceReset: options.forceReset ?? false,
   };
+
+  if (resolved.forceReset) {
+    return await resetProdServer(page, {
+      apiBaseUrl: resolved.apiBaseUrl,
+      resetBaseUrl: RESET_BASE_URL,
+      timeoutMs: resolved.timeoutMs,
+      pollMs: resolved.pollMs,
+      requireHubMesh: resolved.requireHubMesh,
+      requireMarketMaker: resolved.requireMarketMaker,
+      minHubCount: resolved.minHubCount,
+      autoResetGraceMs: resolved.timeoutMs,
+      softPreserveHubs: false,
+    });
+  }
 
   const initialWaitMs = Math.min(resolved.timeoutMs, resolved.autoResetGraceMs);
   try {

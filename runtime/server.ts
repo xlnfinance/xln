@@ -57,7 +57,7 @@ import { relayRoute, type RelayRouterConfig } from './relay-router';
 import { createLocalDeliveryHandler } from './relay-local-delivery';
 import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
 import { ethers } from 'ethers';
-import { ERC20Mock__factory } from '../jurisdictions/typechain-types';
+import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -768,6 +768,7 @@ const ensureMarketMakerEntity = async (
           data: {
             config: consensusConfig,
             isProposer: true,
+            profileName: MARKET_MAKER_NAME,
             position: { x: 0, y: -40, z: 120 },
           },
         },
@@ -3194,10 +3195,14 @@ const parseTaggedControlBody = async <T>(req: Request): Promise<T> => {
 
 const getProfileNameForEntity = (env: Env, entityId: string): string => {
   const target = entityId.toLowerCase();
+  const localReplica = Array.from(env.eReplicas?.values?.() || []).find(
+    replica => String(replica?.entityId || '').toLowerCase() === target,
+  );
+  const localName = localReplica?.state?.profile?.name;
   const gossipProfiles = env.gossip?.getProfiles?.() || [];
   const gossipProfile = gossipProfiles.find(profile => String(profile?.entityId || '').toLowerCase() === target);
   const relayProfile = relayStore.gossipProfiles.get(target)?.profile;
-  const rawName = gossipProfile?.name ?? relayProfile?.name;
+  const rawName = localName ?? gossipProfile?.name ?? relayProfile?.name;
   return typeof rawName === 'string' && rawName.trim().length > 0 ? rawName.trim() : entityId;
 };
 

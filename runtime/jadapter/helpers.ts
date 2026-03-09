@@ -5,7 +5,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { Depository, EntityProvider } from '../../jurisdictions/typechain-types';
+import type { Depository, EntityProvider } from '../../jurisdictions/typechain-types/index';
 import type { JEvent, JEventCallback } from './types';
 
 // ═══════════════════════════════════════════════════════════════════════════
