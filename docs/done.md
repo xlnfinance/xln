@@ -103,3 +103,6 @@
 - Fixed prod hub bootstrap hard failure in [runtime/server.ts](/Users/egor/xln/runtime/server.ts): reserve bootstrap was calling non-existent `globalJAdapter.getDepositoryAddress()`. The canonical address source is `globalJAdapter.addresses.depository`.
 - Verified the full prod bootstrap path on the real server with `USE_ANVIL=true BOOTSTRAP_LOCAL_HUBS=1`: 3 hubs, mutual credit mesh, reserve funding, market maker liquidity, relay attach, and server startup all complete successfully.
 - Restored fail-fast prod startup in [scripts/start-server.sh](/Users/egor/xln/scripts/start-server.sh): `BOOTSTRAP_LOCAL_HUBS` now defaults back to `1`, so prod no longer comes up in an empty relay/no-hubs state.
+- Made prod custody startup restart-safe:
+  - [runtime/scripts/start-custody-prod.ts](/Users/egor/xln/runtime/scripts/start-custody-prod.ts) now reuses an already-live custody daemon/service on `:8088/:8087` when they match the deterministic custody identity.
+  - [scripts/start-custody.sh](/Users/egor/xln/scripts/start-custody.sh) now kills stale orphan listeners on `:8087/:8088` before launching, so PM2 restarts cannot leave LevelDB locks behind.

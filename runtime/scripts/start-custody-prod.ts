@@ -35,6 +35,12 @@ const GOSSIP_POLL_MS = Number(process.env.CUSTODY_GOSSIP_POLL_MS || '250');
 
 let shuttingDown = false;
 
+type ExistingCustodyPayload = {
+  custody?: {
+    entityId?: string | null;
+  };
+};
+
 const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
 };
@@ -98,7 +104,31 @@ const ensureExistingCustodyState = async (
   }
 };
 
-const startDaemon = async (): Promise<ManagedChild> => {
+const isHttpReady = async (url: string): Promise<boolean> => {
+  try {
+    const response = await fetch(url);
+    return response.status < 500;
+  } catch {
+    return false;
+  }
+};
+
+const readExistingCustodyPayload = async (): Promise<ExistingCustodyPayload | null> => {
+  try {
+    const response = await fetch(`http://127.0.0.1:${CUSTODY_PORT}/api/me`);
+    if (!response.ok) return null;
+    return await response.json() as ExistingCustodyPayload;
+  } catch {
+    return null;
+  }
+};
+
+const startDaemon = async (): Promise<ManagedChild | null> => {
+  if (await isHttpReady(`http://127.0.0.1:${DAEMON_PORT}/api/health`)) {
+    console.log(`[custody-prod] reusing existing custody daemon on :${DAEMON_PORT}`);
+    return null;
+  }
+
   const daemonChild = spawnBunChild(
     'custody-daemon',
     ['runtime/server.ts', '--port', String(DAEMON_PORT), '--host', '127.0.0.1', '--server-id', `custody-daemon-${DAEMON_PORT}`],
@@ -162,7 +192,18 @@ const ensureCustodyIdentity = async (hubIds: string[]): Promise<{ entityId: stri
   return { entityId: identity.entityId, signerId: identity.signerId };
 };
 
-const startCustodyService = async (identity: { entityId: string; signerId: string }): Promise<ManagedChild> => {
+const startCustodyService = async (identity: { entityId: string; signerId: string }): Promise<ManagedChild | null> => {
+  const existing = await readExistingCustodyPayload();
+  if (existing?.custody?.entityId?.toLowerCase() === identity.entityId.toLowerCase()) {
+    console.log(`[custody-prod] reusing existing custody service on :${CUSTODY_PORT}`);
+    return null;
+  }
+  if (existing?.custody?.entityId) {
+    throw new Error(
+      `CUSTODY_PORT_CONFLICT: port ${CUSTODY_PORT} is already serving ${existing.custody.entityId}, expected ${identity.entityId}`,
+    );
+  }
+
   const custodyChild = spawnBunChild(
     'custody-service',
     ['custody/server.ts'],
@@ -209,18 +250,22 @@ const main = async (): Promise<void> => {
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
-  daemonChild.proc.on('close', (code) => {
-    if (!shuttingDown) {
-      console.error(`[custody-prod] daemon exited with code=${String(code)}`);
-      void shutdown('daemon-exit');
-    }
-  });
-  custodyChild.proc.on('close', (code) => {
-    if (!shuttingDown) {
-      console.error(`[custody-prod] custody exited with code=${String(code)}`);
-      void shutdown('custody-exit');
-    }
-  });
+  if (daemonChild) {
+    daemonChild.proc.on('close', (code) => {
+      if (!shuttingDown) {
+        console.error(`[custody-prod] daemon exited with code=${String(code)}`);
+        void shutdown('daemon-exit');
+      }
+    });
+  }
+  if (custodyChild) {
+    custodyChild.proc.on('close', (code) => {
+      if (!shuttingDown) {
+        console.error(`[custody-prod] custody exited with code=${String(code)}`);
+        void shutdown('custody-exit');
+      }
+    });
+  }
 
   await new Promise<void>(() => {});
 };
