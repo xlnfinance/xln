@@ -67,3 +67,8 @@
   - `bun build runtime/server.ts --target=bun --outfile=/tmp/xln-server-check.js`
   - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-browser-check.js`
   - `bun build runtime/scripts/e2e-hub-node.ts --target=bun --outfile=/tmp/e2e-hub-node-check.js`
+## 2026-03-09
+
+- Fixed prod hub bootstrap hard failure in [runtime/server.ts](/Users/egor/xln/runtime/server.ts): reserve bootstrap was calling non-existent `globalJAdapter.getDepositoryAddress()`. The canonical address source is `globalJAdapter.addresses.depository`.
+- Verified the full prod bootstrap path on the real server with `USE_ANVIL=true BOOTSTRAP_LOCAL_HUBS=1`: 3 hubs, mutual credit mesh, reserve funding, market maker liquidity, relay attach, and server startup all complete successfully.
+- Restored fail-fast prod startup in [scripts/start-server.sh](/Users/egor/xln/scripts/start-server.sh): `BOOTSTRAP_LOCAL_HUBS` now defaults back to `1`, so prod no longer comes up in an empty relay/no-hubs state.
