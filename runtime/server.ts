@@ -77,6 +77,63 @@ const isEntityId32 = (value: unknown): value is string => typeof value === 'stri
 const formatTimingMs = (value: number): string => value.toFixed(2);
 const stringifyBootstrapDebug = (value: unknown): string =>
   JSON.stringify(value, (_key, nested) => (typeof nested === 'bigint' ? nested.toString() : nested));
+const STACK_COMPATIBILITY_PROBE_ENTITY = `0x${'11'.repeat(32)}`;
+
+const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: boolean; reason: string }> => {
+  const depositoryAddress = String(adapter.addresses?.depository || '').trim();
+  if (!depositoryAddress) {
+    return { ok: false, reason: 'DEPOSITORY_ADDRESS_MISSING' };
+  }
+
+  const code = await adapter.provider.getCode(depositoryAddress);
+  if (!code || code === '0x') {
+    return { ok: false, reason: 'DEPOSITORY_CODE_MISSING' };
+  }
+
+  const probe = new ethers.Contract(
+    depositoryAddress,
+    [
+      'function getTokensLength() view returns(uint256)',
+      'function mintToReserve(bytes32,uint256,uint256)',
+      'function mintToReserveBatch((bytes32,uint256,uint256)[])',
+    ],
+    adapter.signer as ethers.ContractRunner,
+  );
+
+  let tokensLength = 0n;
+  try {
+    tokensLength = await probe.getTokensLength();
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `DEPOSITORY_READ_FAILED:${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  if (tokensLength < 1n) {
+    return { ok: false, reason: 'TOKEN_REGISTRY_EMPTY' };
+  }
+
+  try {
+    await probe.mintToReserve.estimateGas(STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `MINT_TO_RESERVE_UNAVAILABLE:${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  try {
+    await probe.mintToReserveBatch.estimateGas([[STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n]]);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `MINT_TO_RESERVE_BATCH_UNAVAILABLE:${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  return { ok: true, reason: 'OK' };
+};
 
 const resolveRuntimeWaitPollMs = (): number => {
   if (!globalJAdapter) return 100;
@@ -4944,29 +5001,41 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       mode: 'rpc',
       chainId: detectedChainId,
       rpcUrl: anvilRpc,
-      fromReplica, // Pass pre-deployed addresses (if available)
+      fromReplica,
     });
+
+    const deployFreshLocalStack = async (reason: string): Promise<void> => {
+      console.warn(`[XLN] Existing anvil contract stack is incompatible (${reason}). Deploying fresh stack...`);
+      await globalJAdapter?.close().catch(() => undefined);
+      globalJAdapter = await createJAdapter({
+        mode: 'rpc',
+        chainId: detectedChainId,
+        rpcUrl: anvilRpc,
+      });
+      await globalJAdapter.deployStack();
+      console.log('[XLN] Contracts deployed');
+    };
+
+    const hasAddresses = !!globalJAdapter.addresses?.depository && !!globalJAdapter.addresses?.entityProvider;
+    if (!hasAddresses) {
+      console.log('[XLN] Deploying contracts to anvil (missing addresses)...');
+      await deployFreshLocalStack('MISSING_ADDRESSES');
+    } else {
+      const compatibility = await probeLocalAnvilContractStack(globalJAdapter);
+      if (!compatibility.ok) {
+        await deployFreshLocalStack(compatibility.reason);
+      } else if (fromReplica) {
+        console.log('[XLN] Using compatible contracts from jurisdictions.json');
+      } else {
+        console.log('[XLN] Using existing contracts on anvil');
+      }
+    }
 
     const block = await globalJAdapter.provider.getBlockNumber();
     console.log(`[XLN] Anvil connected (block: ${block})`);
 
-    // Ensure jurisdictions.json reflects current RPC + addresses (even if using fromReplica)
     if (globalJAdapter.addresses?.depository && globalJAdapter.addresses?.entityProvider) {
       await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId);
-    }
-
-    const hasAddresses = !!globalJAdapter.addresses?.depository && !!globalJAdapter.addresses?.entityProvider;
-
-    // Deploy if addresses missing (fresh anvil path).
-    if (!hasAddresses) {
-      console.log('[XLN] Deploying contracts to anvil (missing addresses)...');
-      await globalJAdapter.deployStack();
-      await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId);
-      console.log('[XLN] Contracts deployed');
-    } else if (fromReplica) {
-      console.log('[XLN] Using pre-deployed contracts from jurisdictions.json');
-    } else {
-      console.log('[XLN] Using existing contracts on anvil');
     }
 
     // Ensure env has a J-replica for this RPC jurisdiction (required for j_broadcast → j-mempool)
