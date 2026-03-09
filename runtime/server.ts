@@ -55,8 +55,9 @@ import {
 } from './relay-store';
 import { relayRoute, type RelayRouterConfig } from './relay-router';
 import { createLocalDeliveryHandler } from './relay-local-delivery';
+import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
 import { ethers } from 'ethers';
-import { ERC20Mock__factory } from '../jurisdictions/typechain-types/factories/ERC20Mock__factory';
+import { ERC20Mock__factory } from '../jurisdictions/typechain-types';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -1584,15 +1585,7 @@ const updateJurisdictionsJson = async (
   try {
     const fs = await import('fs/promises');
     const path = await import('path');
-    const canonicalPath = path.join(process.cwd(), 'jurisdictions', 'jurisdictions.json');
-    const symlinkMirrors = [
-      path.join(process.cwd(), 'jurisdictions.json'),
-      path.join(process.cwd(), 'frontend', 'static', 'jurisdictions.json'),
-    ];
-    const copyMirrors = [
-      path.join(process.cwd(), 'frontend', 'build', 'jurisdictions.json'),
-      '/var/www/html/jurisdictions.json',
-    ];
+    const canonicalPath = resolveJurisdictionsJsonPath();
     const publicRpc = process.env.PUBLIC_RPC ?? rpcUrl ?? '/rpc';
     await fs.mkdir(path.dirname(canonicalPath), { recursive: true });
 
@@ -1639,45 +1632,6 @@ const updateJurisdictionsJson = async (
     const payload = JSON.stringify(data, null, 2);
     await fs.writeFile(canonicalPath, payload);
     console.log(`[XLN] Updated jurisdictions.json: ${canonicalPath}`);
-
-    for (const mirrorPath of symlinkMirrors) {
-      try {
-        await fs.mkdir(path.dirname(mirrorPath), { recursive: true });
-      } catch {
-        continue;
-      }
-      const linkTarget = path.relative(path.dirname(mirrorPath), canonicalPath) || path.basename(canonicalPath);
-      let recreate = true;
-      try {
-        const stat = await fs.lstat(mirrorPath);
-        if (stat.isSymbolicLink()) {
-          const currentTarget = await fs.readlink(mirrorPath);
-          const currentResolved = path.resolve(path.dirname(mirrorPath), currentTarget);
-          if (currentResolved === canonicalPath) recreate = false;
-        }
-        if (recreate) await fs.unlink(mirrorPath);
-      } catch {
-        // Mirror doesn't exist yet; create below.
-      }
-      if (!recreate) continue;
-      try {
-        await fs.symlink(linkTarget, mirrorPath);
-        console.log(`[XLN] Symlinked jurisdictions mirror: ${mirrorPath} -> ${linkTarget}`);
-      } catch {
-        await fs.writeFile(mirrorPath, payload);
-        console.log(`[XLN] Mirrored jurisdictions via copy (symlink unavailable): ${mirrorPath}`);
-      }
-    }
-
-    for (const mirrorPath of copyMirrors) {
-      try {
-        await fs.mkdir(path.dirname(mirrorPath), { recursive: true });
-        await fs.writeFile(mirrorPath, payload);
-        console.log(`[XLN] Mirrored jurisdictions copy: ${mirrorPath}`);
-      } catch {
-        // Optional mirror target; ignore when unavailable.
-      }
-    }
   } catch (err) {
     console.warn('[XLN] Failed to update jurisdictions.json:', (err as Error).message);
   }
@@ -1685,19 +1639,7 @@ const updateJurisdictionsJson = async (
 
 const readCanonicalJurisdictionsJson = async (): Promise<string> => {
   const fs = await import('fs/promises');
-  const path = await import('path');
-  const candidates = [
-    path.join(process.cwd(), 'jurisdictions', 'jurisdictions.json'),
-    path.join(process.cwd(), 'jurisdictions.json'),
-  ];
-  for (const candidate of candidates) {
-    try {
-      return await fs.readFile(candidate, 'utf8');
-    } catch {
-      // try next candidate
-    }
-  }
-  throw new Error('JURISDICTIONS_JSON_MISSING');
+  return await fs.readFile(resolveJurisdictionsJsonPath(), 'utf8');
 };
 
 const buildRuntimeJurisdictionsJson = (env?: Env | null): string | null => {
@@ -4937,26 +4879,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     let fromReplica = undefined;
     if (usePredeployedAddresses) {
       try {
-        // Canonical source first, then legacy/root fallbacks.
-        const candidates = [
-          path.join(process.cwd(), 'jurisdictions', 'jurisdictions.json'),
-          path.join(process.cwd(), 'jurisdictions.json'),
-          '/root/xln/jurisdictions/jurisdictions.json',
-          '/root/xln/jurisdictions.json',
-        ];
-        const jurisdictionsPath = await candidates.reduce<Promise<string>>(async (foundPromise, candidate) => {
-          const found = await foundPromise;
-          if (found) return found;
-          try {
-            await fs.access(candidate);
-            return candidate;
-          } catch {
-            return '';
-          }
-        }, Promise.resolve(''));
-        if (!jurisdictionsPath) {
-          throw new Error('No jurisdictions.json found in canonical or legacy locations');
-        }
+        const jurisdictionsPath = resolveJurisdictionsJsonPath();
         console.log(`[XLN] Loading predeployed addresses from: ${jurisdictionsPath}`);
         const jurisdictionsData = await fs.readFile(jurisdictionsPath, 'utf-8');
         const jurisdictions = JSON.parse(jurisdictionsData);

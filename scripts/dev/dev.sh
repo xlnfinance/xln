@@ -1,5 +1,7 @@
 #!/bin/bash
 
+JURISDICTIONS_PATH="jurisdictions/jurisdictions.json"
+
 echo "🚀 XLN Development Setup"
 
 # Check if networks are running
@@ -31,11 +33,11 @@ fi
 # Check jurisdiction configuration
 echo ""
 echo "3️⃣ Checking jurisdiction configuration..."
-if [ -f "jurisdictions.json" ]; then
-    echo "   ✅ jurisdictions.json exists"
+if [ -f "$JURISDICTIONS_PATH" ]; then
+    echo "   ✅ $JURISDICTIONS_PATH exists"
     
     # Check if contracts are deployed (get ethereum entityProvider address)
-    ethereum_addr=$(jq -r '.ethereum.contracts.entityProvider // .jurisdictions.ethereum.contracts.entityProvider // "null"' jurisdictions.json 2>/dev/null)
+    ethereum_addr=$(jq -r '.ethereum.contracts.entityProvider // .jurisdictions.ethereum.contracts.entityProvider // "null"' "$JURISDICTIONS_PATH" 2>/dev/null)
     
     # Check for placeholder/default Hardhat addresses
     default_hardhat="0x5FbDB2315678afecb367f032d93F642f64180aa3"
@@ -52,9 +54,9 @@ if [ -f "jurisdictions.json" ]; then
         echo "   💡 Run './deploy-contracts.sh' to deploy"
     fi
 else
-    echo "   ❌ jurisdictions.json missing"
+    echo "   ❌ $JURISDICTIONS_PATH missing"
     echo "   ⚠️  Contracts must be deployed first!"
-    echo "   💡 Run './deploy-contracts.sh' to deploy and create jurisdictions.json"
+    echo "   💡 Run './deploy-contracts.sh' to deploy and create $JURISDICTIONS_PATH"
     echo "   🚫 Cannot run server without proper contract deployments"
 fi
 

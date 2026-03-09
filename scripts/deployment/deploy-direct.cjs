@@ -1,6 +1,8 @@
 const { ethers } = require('hardhat');
 const fs = require('fs');
 
+const JURISDICTIONS_PATH = 'jurisdictions/jurisdictions.json';
+
 async function deployDirect() {
   console.log('🚀 DIRECT deployment bypassing ignition...');
   
@@ -41,13 +43,13 @@ async function deployDirect() {
   }
   
   // Update jurisdictions.json
-  const jurisdictions = JSON.parse(fs.readFileSync('jurisdictions.json', 'utf8'));
+  const jurisdictions = JSON.parse(fs.readFileSync(JURISDICTIONS_PATH, 'utf8'));
   jurisdictions.jurisdictions.ethereum.contracts.entityProvider = epAddress;
   jurisdictions.jurisdictions.ethereum.contracts.depository = depAddress;
   jurisdictions.lastUpdated = new Date().toISOString();
   
-  fs.writeFileSync('jurisdictions.json', JSON.stringify(jurisdictions, null, 2));
-  console.log('✅ Updated jurisdictions.json');
+  fs.writeFileSync(JURISDICTIONS_PATH, JSON.stringify(jurisdictions, null, 2));
+  console.log(`✅ Updated ${JURISDICTIONS_PATH}`);
   
   console.log(`🎯 SUCCESS! Depository with pre-funding: ${depAddress}`);
 }

@@ -11,4 +11,6 @@ export PUBLIC_RPC=${PUBLIC_RPC:-https://xln.finance/rpc}
 export BOOTSTRAP_LOCAL_HUBS=${BOOTSTRAP_LOCAL_HUBS:-0}
 export PATH="/root/.bun/bin:$PATH"
 
+./scripts/sync-contract-artifacts.sh
+
 exec /root/.bun/bin/bun runtime/server.ts --port 8080

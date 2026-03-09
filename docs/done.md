@@ -46,3 +46,15 @@
   - proven removals
   - high-confidence candidates that still need one more proof pass
   - structural moves that should wait until the dirty runtime consensus files are settled
+
+### Jurisdictions / Typechain
+
+- Removed runtime and frontend reads of legacy root `/jurisdictions.json`; browser code now uses `/api/jurisdictions`, and Node code resolves one canonical file path with shard override support via [jurisdictions-path.ts](/Users/egor/xln/runtime/jurisdictions-path.ts).
+- Stopped mirroring `jurisdictions.json` into multiple disk locations from [server.ts](/Users/egor/xln/runtime/server.ts); canonical source stays in `jurisdictions/jurisdictions.json` unless a shard explicitly overrides it with `XLN_JURISDICTIONS_PATH`.
+- Added explicit contract sync in [sync-contract-artifacts.sh](/Users/egor/xln/scripts/sync-contract-artifacts.sh) plus [generate-typechain.cjs](/Users/egor/xln/jurisdictions/scripts/generate-typechain.cjs) so `bun run dev`, `serve:dev`, deploy, and prod startup rebuild contracts and regenerate TypeChain deterministically.
+- Switched runtime imports to the canonical generated TypeChain barrel in `jurisdictions/typechain-types`, matching the new generated layout.
+- Verified:
+  - `./scripts/sync-contract-artifacts.sh`
+  - `bun build runtime/server.ts --target=bun --outfile=/tmp/xln-server-check.js`
+  - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-browser-check.js`
+  - `bun build runtime/scripts/e2e-hub-node.ts --target=bun --outfile=/tmp/e2e-hub-node-check.js`

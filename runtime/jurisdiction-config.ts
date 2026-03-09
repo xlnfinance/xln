@@ -1,7 +1,7 @@
 /**
  * Jurisdiction Configuration Loader
  *
- * Pure functions for loading jurisdiction configs from jurisdictions.json.
+ * Pure functions for loading jurisdiction configs from the canonical jurisdictions source.
  * NO global state. NO singletons. NO mocks.
  *
  * For contract operations, use JAdapter directly on JReplica.
@@ -16,7 +16,7 @@ import { isBrowser } from './utils';
 
 function getBrowserJurisdictionsUrl(): string {
   const suffix = `ts=${Date.now()}`;
-  return `./jurisdictions.json?${suffix}`;
+  return `./api/jurisdictions?${suffix}`;
 }
 
 /**
@@ -62,7 +62,7 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
         });
         clearTimeout(timeoutId);
         if (!response.ok) {
-          console.log('⚠️ jurisdictions.json not found - using BrowserVM mode');
+          console.log('⚠️ /api/jurisdictions not available - using BrowserVM mode');
           return jurisdictions;
         }
         config = await response.json();
@@ -70,7 +70,7 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
         clearTimeout(timeoutId);
         const err = fetchError as { name?: string };
         if (err.name === 'AbortError') {
-          console.log('⏱️ jurisdictions.json fetch timed out - using BrowserVM mode');
+          console.log('⏱️ /api/jurisdictions fetch timed out - using BrowserVM mode');
         }
         return jurisdictions;
       }
