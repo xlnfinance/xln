@@ -155,6 +155,7 @@ run_local_deploy() {
         exit 1
       fi
 
+      pm2 delete xln-server >/dev/null 2>&1 || true
       pm2 start scripts/start-server.sh --name xln-server --interpreter bash
       if ! wait_for_main_stack; then
         echo "[deploy] main XLN stack did not become healthy" >&2
@@ -162,6 +163,7 @@ run_local_deploy() {
         exit 1
       fi
 
+      pm2 delete xln-custody >/dev/null 2>&1 || true
       pm2 start scripts/start-custody.sh --name xln-custody --interpreter bash
       if ! wait_for_custody; then
         echo "[deploy] custody service did not become healthy" >&2
