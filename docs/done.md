@@ -17,6 +17,15 @@
 - Restored a tracked root deploy entrypoint in [deploy.sh](/Users/egor/xln/deploy.sh).
 - Fixed package scripts in [package.json](/Users/egor/xln/package.json) so `bun run deploy*` points to the same root deploy wrapper.
 - Removed `deploy.sh` from `.gitignore` so the deployment entrypoint lives in the repo instead of silently drifting locally.
+- Hardened remote deploy so it now:
+  - pulls `origin/main` on the server before rebuilding
+  - stashes known generated artifacts (`frontend/static/contracts`, `jurisdictions/jurisdictions.json`) before the pull so deploy is not blocked by server-local generated state
+  - runs the same local deploy flow on the remote after the fast-forward
+- Verified live remote deploy on `root@xln.finance`:
+  - remote fast-forward succeeded
+  - runtime bundle build succeeded
+  - frontend production build succeeded
+  - PM2 restarted `xln-server` successfully
 
 ### Dead Code Removed
 
