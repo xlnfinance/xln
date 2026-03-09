@@ -80,8 +80,14 @@ run_local_deploy() {
 
   if command -v pm2 >/dev/null 2>&1; then
     echo "[deploy] restarting pm2 service"
-    if [ "$PRODUCTION" = "1" ] && [ -f ecosystem.production.cjs ]; then
-      pm2 restart ecosystem.production.cjs || pm2 start ecosystem.production.cjs
+    if [ "$PRODUCTION" = "1" ]; then
+      pm2 delete ecosystem.production >/dev/null 2>&1 || true
+      pm2 describe xln-server >/dev/null 2>&1 \
+        && pm2 restart xln-server --update-env \
+        || pm2 start scripts/start-server.sh --name xln-server --interpreter bash
+      pm2 describe xln-custody >/dev/null 2>&1 \
+        && pm2 restart xln-custody --update-env \
+        || pm2 start scripts/start-custody.sh --name xln-custody --interpreter bash
     else
       pm2 describe xln-server >/dev/null 2>&1 \
         && pm2 restart xln-server \

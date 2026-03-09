@@ -8,10 +8,9 @@
   - It waits for the main stack (`runtime + relay + 3 hubs + MM`), starts a separate custody daemon on `:8088`, initializes custody only on first boot, restores the same custody entity on restart, and then starts the custody dashboard on `:8087`.
   - The custody daemon remains a plain separate runtime with `BOOTSTRAP_LOCAL_HUBS=0`; routing stays entity-level, not daemon-level.
 - Added a production wrapper [start-custody.sh](/Users/egor/xln/scripts/start-custody.sh).
-- Added [ecosystem.production.cjs](/Users/egor/xln/ecosystem.production.cjs) so prod PM2 can manage both:
+- Updated [deploy.sh](/Users/egor/xln/deploy.sh) so remote prod deploys run in explicit `--production` mode and directly manage the two real PM2 processes:
   - `xln-server`
   - `xln-custody`
-- Updated [deploy.sh](/Users/egor/xln/deploy.sh) so remote prod deploys run in explicit `--production` mode and restart the production PM2 ecosystem instead of only `xln-server`.
 - Added `bun run custody:prod` in [package.json](/Users/egor/xln/package.json).
 
 ### Canonical Jurisdictions / Shards
