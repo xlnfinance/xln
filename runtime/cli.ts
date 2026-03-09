@@ -38,7 +38,7 @@ async function init(remote: boolean) {
   );
 
   // Connect to existing contracts
-  const { Depository__factory, EntityProvider__factory, Account__factory } = await import('../jurisdictions/typechain-types/index');
+  const { Depository__factory, EntityProvider__factory, Account__factory } = await import('../jurisdictions/typechain-types/index.ts');
 
   const depository = Depository__factory.connect(CONTRACTS.depository, signer);
   const entityProvider = EntityProvider__factory.connect(CONTRACTS.entityProvider, signer);
