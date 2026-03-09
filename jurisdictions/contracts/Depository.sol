@@ -30,6 +30,12 @@ interface IERC721 {
 // IERC1155 already defined in @openzeppelin/contracts (imported via EntityProvider.sol)
 
 contract Depository is ReentrancyGuardLite {
+  struct ReserveMint {
+    bytes32 entity;
+    uint tokenId;
+    uint amount;
+  }
+
 
   // Custom errors
   error E1(); // ZeroAmount
@@ -287,6 +293,23 @@ contract Depository is ReentrancyGuardLite {
 
     
     
+  }
+
+  /**
+   * @notice Mint reserves for multiple entity/token pairs in a single admin tx.
+   * @dev Testnet/dev helper for deterministic bootstrap. Emits canonical ReserveUpdated per op.
+   */
+  function mintToReserveBatch(ReserveMint[] calldata mints) external onlyAdmin {
+    uint len = mints.length;
+    if (len == 0) revert E1();
+
+    for (uint i = 0; i < len; i++) {
+      ReserveMint calldata mint = mints[i];
+      if (mint.amount == 0) revert E1();
+
+      _reserves[mint.entity][mint.tokenId] += mint.amount;
+      emit ReserveUpdated(mint.entity, mint.tokenId, _reserves[mint.entity][mint.tokenId]);
+    }
   }
 
 

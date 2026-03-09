@@ -374,6 +374,20 @@ export type BatchStructOutput = [
   hub_id: bigint;
 };
 
+export declare namespace Depository {
+  export type ReserveMintStruct = {
+    entity: BytesLike;
+    tokenId: BigNumberish;
+    amount: BigNumberish;
+  };
+
+  export type ReserveMintStructOutput = [
+    entity: string,
+    tokenId: bigint,
+    amount: bigint
+  ] & { entity: string; tokenId: bigint; amount: bigint };
+}
+
 export interface DepositoryInterface extends Interface {
   getFunction(
     nameOrSignature:
@@ -405,6 +419,7 @@ export interface DepositoryInterface extends Interface {
       | "getTokenMetadata"
       | "getTokensLength"
       | "mintToReserve"
+      | "mintToReserveBatch"
       | "onERC1155BatchReceived"
       | "onERC1155Received"
       | "packTokenReference"
@@ -546,6 +561,10 @@ export interface DepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "mintToReserve",
     values: [BytesLike, BigNumberish, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "mintToReserveBatch",
+    values: [Depository.ReserveMintStruct[]]
   ): string;
   encodeFunctionData(
     functionFragment: "onERC1155BatchReceived",
@@ -701,6 +720,10 @@ export interface DepositoryInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "mintToReserve",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "mintToReserveBatch",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -1258,6 +1281,12 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
 
+  mintToReserveBatch: TypedContractMethod<
+    [mints: Depository.ReserveMintStruct[]],
+    [void],
+    "nonpayable"
+  >;
+
   onERC1155BatchReceived: TypedContractMethod<
     [
       arg0: AddressLike,
@@ -1540,6 +1569,13 @@ export interface Depository extends BaseContract {
     nameOrSignature: "mintToReserve"
   ): TypedContractMethod<
     [entity: BytesLike, tokenId: BigNumberish, amount: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "mintToReserveBatch"
+  ): TypedContractMethod<
+    [mints: Depository.ReserveMintStruct[]],
     [void],
     "nonpayable"
   >;
