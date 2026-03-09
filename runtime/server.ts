@@ -28,15 +28,14 @@ import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './ser
 import type { AccountMachine, DeliverableEntityInput, Delta, Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
 import type { HubHealth } from './health';
 import { encodeBoard, hashBoard } from './entity-factory';
-import { deriveSignerAddressSync, deriveSignerKeySync, getSignerAddress, getSignerPublicKey, registerSignerKey } from './account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from './account-crypto';
 import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
 import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
 import { DEFAULT_SPREAD_DISTRIBUTION, ORDERBOOK_PRICE_SCALE } from './orderbook';
 import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote } from './account-utils';
-import { deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from './networking/p2p-crypto';
-import { buildEntityProfile } from './networking/gossip-helper';
+import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
 import { hashHtlcSecret } from './htlc-utils';
@@ -786,7 +785,6 @@ const buildMarketMakerPairs = (tokenIds: number[]): Array<{ baseTokenId: number;
 
 const ensureMarketMakerEntity = async (
   env: Env,
-  relayUrl: string,
 ): Promise<{ entityId: string; signerId: string } | null> => {
   const mmSignerPrivateKey = deriveSignerKeySync(MARKET_MAKER_SEED, MARKET_MAKER_SIGNER_LABEL);
   const mmSignerId = deriveSignerAddressSync(MARKET_MAKER_SEED, MARKET_MAKER_SIGNER_LABEL);
@@ -833,33 +831,6 @@ const ensureMarketMakerEntity = async (
       entityInputs: [],
     });
     await settleRuntimeFor(env, 35);
-  }
-
-  try {
-    const mmReplica = getEntityReplicaById(env, entityId);
-    if (!mmReplica) {
-      throw new Error(`MARKET_MAKER_PROFILE_ENTITY_MISSING: ${entityId}`);
-    }
-    const seededAt = Date.now();
-    const profile: Profile = buildEntityProfile(mmReplica.state, seededAt, {
-      getSignerAddress: (signerId) => getSignerAddress(env, signerId),
-      getSignerPublicKeyHex: (signerId) => {
-        const publicKey = getSignerPublicKey(env, signerId);
-        return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
-      },
-    });
-    profile.runtimeId = env.runtimeId;
-    profile.capabilities = ['market-maker', 'liquidity-provider'];
-    profile.relays = relayUrl ? [relayUrl] : [];
-    profile.endpoints = relayUrl ? [relayUrl] : [];
-    profile.metadata = {
-      ...profile.metadata,
-      role: 'market-maker',
-    };
-    env.gossip?.announce?.(profile);
-    storeGossipProfile(relayStore, profile);
-  } catch {
-    // best-effort profile announcement
   }
 
   return { entityId, signerId: mmSignerId };
@@ -1173,12 +1144,11 @@ const getMarketMakerHealth = (env: Env): {
 const bootstrapMarketMakerLiquidity = async (
   env: Env,
   hubEntityIds: string[],
-  relayUrl: string,
   tokenCatalog: JTokenInfo[],
 ): Promise<void> => {
   const marketMakerBootstrapStartedAt = Date.now();
   stopMarketMakerLoop();
-  const mm = await ensureMarketMakerEntity(env, relayUrl);
+  const mm = await ensureMarketMakerEntity(env);
   if (!mm) return;
   const tokenIds = normalizeTokenIdsForMm(tokenCatalog);
   if (tokenIds.length < 3) {
@@ -1876,21 +1846,6 @@ const RPC_MARKET_PUBLISH_MS = 1000;
 const RPC_MARKET_MAX_DEPTH = 100;
 const RPC_MARKET_DEFAULT_DEPTH = 20;
 
-const rebuildRelayHubProfilesFromEnv = (env: Env): void => {
-  if (relayStore.activeHubEntityIds.length === 0) return;
-  const relayUrl = resolveAdvertisedRelayUrl(activeServerOptions.port);
-  seedHubProfilesInRelayCache(
-    env,
-    relayStore.activeHubEntityIds.map((entityId) => ({
-      entityId,
-      name: getProfileNameForEntity(env, entityId),
-      region: 'global',
-      capabilities: ['hub', 'routing', 'faucet'],
-    })),
-    relayUrl,
-  );
-};
-
 const sendEntityInputDirectViaRelaySocket = (env: Env, targetRuntimeId: string, input: DeliverableEntityInput): boolean => {
   const fromRuntimeId = String(env.runtimeId || '');
   if (!fromRuntimeId) return false;
@@ -2049,20 +2004,6 @@ const bootstrapServerHubsAndReserves = async (
     hubSignerAddresses.set(hubEntityId, hub.signerId);
   }
 
-  if (hubEntityIds.length > 0) {
-    seedHubProfilesInRelayCache(
-      env,
-      hubConfigs.map((cfg, idx) => ({
-        entityId: hubEntityIds[idx],
-        name: cfg.name,
-        region: cfg.region,
-        routingFeePPM: cfg.routingFeePPM,
-        capabilities: cfg.capabilities,
-      })),
-      relayUrl,
-    );
-  }
-
   await new Promise(resolve => setTimeout(resolve, 100));
 
   const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true) || [];
@@ -2072,17 +2013,6 @@ const bootstrapServerHubsAndReserves = async (
     const meshBootstrapStartedAt = Date.now();
     await bootstrapHubMeshCredit(env, hubEntityIds.slice(0, 3));
     logStageTiming('hub_mesh_credit', meshBootstrapStartedAt);
-    seedHubProfilesInRelayCache(
-      env,
-      hubConfigs.map((cfg, idx) => ({
-        entityId: hubEntityIds[idx],
-        name: cfg.name,
-        region: cfg.region,
-        routingFeePPM: cfg.routingFeePPM,
-        capabilities: cfg.capabilities,
-      })),
-      relayUrl,
-    );
   }
 
   const activeJurisdictionName =
@@ -2167,7 +2097,7 @@ const bootstrapServerHubsAndReserves = async (
 
   const bootstrapMm =
     includeMarketMaker && hubEntityIds.length >= HUB_MESH_REQUIRED_HUBS
-      ? await ensureMarketMakerEntity(env, relayUrl)
+      ? await ensureMarketMakerEntity(env)
       : null;
 
   if (globalJAdapter && hubEntityIds.length > 0) {
@@ -2319,11 +2249,22 @@ const bootstrapServerHubsAndReserves = async (
     );
     if (includeMarketMaker && hubEntityIds.length >= HUB_MESH_REQUIRED_HUBS) {
       const marketMakerBootstrapStartedAt = Date.now();
-      await bootstrapMarketMakerLiquidity(env, hubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS), relayUrl, assertTokens);
+      await bootstrapMarketMakerLiquidity(env, hubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS), assertTokens);
       logStageTiming('market_maker', marketMakerBootstrapStartedAt);
     }
   } else {
     console.warn('[XLN] Skipping hub bootstrap assertions and MM liquidity (BOOTSTRAP_LOCAL_HUBS=0)');
+  }
+
+  const p2p = env.runtimeState?.p2p as { announceProfilesForEntities?: (entityIds: string[], reason?: string) => void } | undefined;
+  if (p2p?.announceProfilesForEntities) {
+    const profileEntityIds = [
+      ...hubEntityIds,
+      ...(marketMakerEntityId ? [marketMakerEntityId.toLowerCase()] : []),
+    ];
+    if (profileEntityIds.length > 0) {
+      p2p.announceProfilesForEntities(profileEntityIds, 'bootstrap-ready');
+    }
   }
 
   logStageTiming('total', bootstrapStartedAt);
@@ -2399,7 +2340,14 @@ const resetServerDebugState = (
 
     relayStore.gossipProfiles.clear();
     if (preserveHubs) {
-      rebuildRelayHubProfilesFromEnv(env);
+      const p2p = env.runtimeState?.p2p as { announceProfilesForEntities?: (entityIds: string[], reason?: string) => void } | undefined;
+      const profileEntityIds = [
+        ...relayStore.activeHubEntityIds,
+        ...(marketMakerEntityId ? [marketMakerEntityId.toLowerCase()] : []),
+      ];
+      if (p2p?.announceProfilesForEntities && profileEntityIds.length > 0) {
+        p2p.announceProfilesForEntities(profileEntityIds, 'relay-cache-reset');
+      }
     }
   } else {
     relayStore.gossipProfiles.clear();
@@ -2632,61 +2580,6 @@ const installProcessSafetyGuards = (): void => {
       details: { message, stack: error?.stack },
     });
   });
-};
-
-const seedHubProfilesInRelayCache = (
-  env: Env,
-  hubs: Array<{ entityId: string; name?: string; region?: string; routingFeePPM?: number; capabilities?: string[] }>,
-  relayUrl: string,
-): void => {
-  const p2p = env.runtimeState?.p2p as { getEncryptionPublicKeyHex?: () => string } | undefined;
-  const encryptionPublicKey = p2p?.getEncryptionPublicKeyHex?.()
-    ?? (env.runtimeSeed ? pubKeyToHex(deriveEncryptionKeyPair(env.runtimeSeed).publicKey) : undefined);
-  const seededAt = Date.now();
-
-  for (const hub of hubs) {
-    let hubState: any = null;
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
-      const [entityId] = String(replicaKey).split(':');
-      if (entityId === hub.entityId) {
-        hubState = replica.state;
-        break;
-      }
-    }
-    if (!hubState) continue;
-
-    const profile = buildEntityProfile(hubState, seededAt, {
-      getSignerAddress: (signerId) => getSignerAddress(env, signerId),
-      getSignerPublicKeyHex: (signerId) => {
-        const publicKey = getSignerPublicKey(env, signerId);
-        return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
-      },
-    });
-    profile.runtimeId = env.runtimeId;
-    profile.capabilities = Array.from(
-      new Set([...(profile.capabilities || []), ...(hub.capabilities || ['hub', 'routing', 'faucet'])]),
-    );
-    const hubPolicy = hubState.hubRebalanceConfig;
-    profile.metadata = {
-      ...profile.metadata,
-      isHub: true,
-      region: hub.region || 'global',
-      relayUrl,
-      routingFeePPM: hub.routingFeePPM ?? profile.metadata.routingFeePPM,
-      policyVersion: hubPolicy?.policyVersion ?? 1,
-      rebalanceBaseFee: String(hubPolicy?.rebalanceBaseFee ?? 10n ** 17n),
-      rebalanceLiquidityFeeBps: String(hubPolicy?.rebalanceLiquidityFeeBps ?? hubPolicy?.minFeeBps ?? 1n),
-      rebalanceGasFee: String(hubPolicy?.rebalanceGasFee ?? 0n),
-      rebalanceTimeoutMs: hubPolicy?.rebalanceTimeoutMs ?? 10 * 60 * 1000,
-      ...(encryptionPublicKey ? { encryptionPublicKey } : {}),
-    };
-    profile.lastUpdated = seededAt;
-    profile.endpoints = [relayUrl];
-    profile.relays = [relayUrl];
-
-    storeGossipProfile(relayStore, profile);
-    env.gossip?.announce?.(profile);
-  }
 };
 
 // ============================================================================
@@ -5306,9 +5199,13 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   // Start P2P overlay after WS /relay is actually listening.
   // Plain daemons stay connected even before they own a routing entity;
   // routing capability is an entity-level setting announced later.
+  const advertisedEntityIds = [
+    ...hubEntityIds,
+    ...(marketMakerEntityId ? [marketMakerEntityId.toLowerCase()] : []),
+  ];
   startP2P(env, {
     relayUrls: [internalRelayUrl],
-    ...(hubEntityIds.length > 0 ? { advertiseEntityIds: hubEntityIds } : {}),
+    ...(advertisedEntityIds.length > 0 ? { advertiseEntityIds } : {}),
     isHub: hubEntityIds.length > 0,
     // Keep hub-bootstrapped servers quiet; plain daemons can still poll the relay.
     gossipPollMs: hubEntityIds.length > 0 ? 0 : 5000,
