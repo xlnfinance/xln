@@ -8,7 +8,14 @@ async function main() {
   const cwd = path.resolve(__dirname, '..');
   const outDir = path.join(cwd, 'typechain-types');
   const artifactsDir = path.join(cwd, 'artifacts');
-  const allFiles = glob(cwd, [`${artifactsDir}/!(build-info)/**/+([a-zA-Z0-9_]).json`]);
+  const artifactPattern = 'artifacts/**/+([a-zA-Z0-9_]).json';
+  const allFiles = glob(cwd, [artifactPattern]).filter((file) => {
+    const relativeArtifactPath = path.relative(artifactsDir, file);
+    if (relativeArtifactPath.startsWith(`build-info${path.sep}`) || relativeArtifactPath === 'build-info') {
+      return false;
+    }
+    return !relativeArtifactPath.endsWith('.dbg.json');
+  });
 
   if (allFiles.length === 0) {
     throw new Error(`TYPECHAIN_ARTIFACTS_MISSING: ${artifactsDir}`);
