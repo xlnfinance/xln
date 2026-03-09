@@ -7,6 +7,8 @@ cd /root/xln
 export USE_ANVIL=true
 export ANVIL_RPC=http://localhost:8545
 export PUBLIC_RPC=${PUBLIC_RPC:-https://xln.finance/rpc}
+export PUBLIC_RELAY_URL=${PUBLIC_RELAY_URL:-wss://xln.finance/relay}
+export RELAY_URL=${RELAY_URL:-$PUBLIC_RELAY_URL}
 # Prod must come up fully bootstrapped or fail fast.
 export BOOTSTRAP_LOCAL_HUBS=${BOOTSTRAP_LOCAL_HUBS:-1}
 export PATH="/root/.bun/bin:$PATH"
