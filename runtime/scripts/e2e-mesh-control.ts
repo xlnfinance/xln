@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { safeStringify } from '../serialization-utils';
+import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import {
   createRelayStore,
   normalizeRuntimeKey,
@@ -306,6 +307,14 @@ const readShardJurisdictions = (): string => {
     throw new Error(`JURISDICTIONS_JSON_MISSING path=${shardJurisdictionsPath}`);
   }
   return readFileSync(shardJurisdictionsPath, 'utf8');
+};
+
+const seedShardJurisdictions = (): void => {
+  const canonicalPath = resolveJurisdictionsJsonPath();
+  if (!existsSync(canonicalPath)) {
+    throw new Error(`CANONICAL_JURISDICTIONS_MISSING path=${canonicalPath}`);
+  }
+  writeFileSync(shardJurisdictionsPath, readFileSync(canonicalPath, 'utf8'), 'utf8');
 };
 
 const pollHubHealth = async (child: HubChild): Promise<void> => {
@@ -640,6 +649,7 @@ const runReset = async (requestedMarketMaker: boolean): Promise<void> => {
       rmSync(args.dbRoot, { recursive: true, force: true });
     }
     mkdirSync(args.dbRoot, { recursive: true });
+    seedShardJurisdictions();
     finishTiming('reset_clear_state', clearStartedAt);
 
     const h1 = hubChildren[0]!;

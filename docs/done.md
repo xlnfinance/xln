@@ -2,6 +2,38 @@
 
 ## 2026-03-09
 
+### Prod Custody / Deploy
+
+- Added a dedicated prod custody supervisor in [start-custody-prod.ts](/Users/egor/xln/runtime/scripts/start-custody-prod.ts).
+  - It waits for the main stack (`runtime + relay + 3 hubs + MM`), starts a separate custody daemon on `:8088`, initializes custody only on first boot, restores the same custody entity on restart, and then starts the custody dashboard on `:8087`.
+  - The custody daemon remains a plain separate runtime with `BOOTSTRAP_LOCAL_HUBS=0`; routing stays entity-level, not daemon-level.
+- Added a production wrapper [start-custody.sh](/Users/egor/xln/scripts/start-custody.sh).
+- Added [ecosystem.production.cjs](/Users/egor/xln/ecosystem.production.cjs) so prod PM2 can manage both:
+  - `xln-server`
+  - `xln-custody`
+- Updated [deploy.sh](/Users/egor/xln/deploy.sh) so remote prod deploys run in explicit `--production` mode and restart the production PM2 ecosystem instead of only `xln-server`.
+- Added `bun run custody:prod` in [package.json](/Users/egor/xln/package.json).
+
+### Canonical Jurisdictions / Shards
+
+- Fixed [jurisdictions-path.ts](/Users/egor/xln/runtime/jurisdictions-path.ts) to resolve the canonical `jurisdictions/jurisdictions.json` from module location instead of `process.cwd()`.
+- Fixed isolated mesh bootstrap in [e2e-mesh-control.ts](/Users/egor/xln/runtime/scripts/e2e-mesh-control.ts):
+  - each shard now seeds its own `jurisdictions.json` copy before `H1` starts
+  - shard processes use `XLN_JURISDICTIONS_PATH` to read only their shard copy
+- Fixed [e2e-hub-node.ts](/Users/egor/xln/runtime/scripts/e2e-hub-node.ts) so shard nodes update canonical `arrakis` inside the shard file instead of inventing `arrakis_<port>` entries.
+- Hardened [server.ts](/Users/egor/xln/runtime/server.ts) so runtime updates purge stale `arrakis_*` entries from the canonical file and keep one canonical `arrakis` record.
+
+### Consensus / Rebalance
+
+- Removed the incorrect `RIGHT j_event_claim must wait for LEFT` proposal gate from [account-consensus.ts](/Users/egor/xln/runtime/account-consensus.ts).
+  - Added an inline comment there explaining why this is wrong: both sides must be allowed to record their own `j_event_claim`, and only `tryFinalizeAccountJEvents()` may require bilateral agreement.
+- Fixed the conflict visualization model in [account-consensus-state.ts](/Users/egor/xln/runtime/account-consensus-state.ts) to match the real deterministic rule:
+  - `LEFT wins`
+  - `RIGHT rolls back`
+- Added explicit rebalance/finalization emits in:
+  - [account-tx/apply.ts](/Users/egor/xln/runtime/account-tx/apply.ts)
+  - [j-event-claim.ts](/Users/egor/xln/runtime/account-tx/handlers/j-event-claim.ts)
+
 ### E2E
 
 - Added isolated two-user swap coverage in [tests/e2e-swap-isolated.spec.ts](/Users/egor/xln/tests/e2e-swap-isolated.spec.ts).

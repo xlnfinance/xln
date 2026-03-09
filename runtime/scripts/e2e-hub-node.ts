@@ -217,16 +217,6 @@ const finishTiming = (stage: keyof typeof timings, startedAt: number): void => {
   console.log(`[MESH-TIMING] ${resolvedArgs.name}.${stage} ${ms}ms`);
 };
 
-const getJurisdictionKeyForRpc = (rpcUrl: string): string => {
-  try {
-    const parsed = new URL(rpcUrl);
-    const port = parsed.port || 'default';
-    return `arrakis_${port}`;
-  } catch {
-    return 'arrakis_local';
-  }
-};
-
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig => {
   const data = loadJurisdictions();
   const map = data.jurisdictions ?? {};
@@ -261,7 +251,7 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
       ? JSON.parse(readFileSync(filePath, 'utf8'))
       : {};
     const jurisdictions = current.jurisdictions ?? {};
-    const targetKey = getJurisdictionKeyForRpc(rpcUrl);
+    const targetKey = 'arrakis';
     const previous = jurisdictions[targetKey] ?? {};
     jurisdictions[targetKey] = {
       ...previous,

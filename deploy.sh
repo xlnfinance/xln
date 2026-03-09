@@ -8,6 +8,7 @@ REMOTE_HOST=""
 PUSH=0
 FRESH=0
 BUILD_FRONTEND=0
+PRODUCTION=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -27,9 +28,13 @@ while [ $# -gt 0 ]; do
       BUILD_FRONTEND=1
       shift
       ;;
+    --production)
+      PRODUCTION=1
+      shift
+      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: ./deploy.sh [--remote host] [--push] [--fresh] [--frontend]" >&2
+      echo "Usage: ./deploy.sh [--remote host] [--push] [--fresh] [--frontend] [--production]" >&2
       exit 1
       ;;
   esac
@@ -75,7 +80,7 @@ run_local_deploy() {
 
   if command -v pm2 >/dev/null 2>&1; then
     echo "[deploy] restarting pm2 service"
-    if [ -f ecosystem.production.cjs ]; then
+    if [ "$PRODUCTION" = "1" ] && [ -f ecosystem.production.cjs ]; then
       pm2 restart ecosystem.production.cjs || pm2 start ecosystem.production.cjs
     else
       pm2 describe xln-server >/dev/null 2>&1 \
@@ -102,6 +107,7 @@ if [ -n "$REMOTE_HOST" ]; then
   if [ "$BUILD_FRONTEND" = "1" ]; then
     remote_cmd="$remote_cmd --frontend"
   fi
+  remote_cmd="$remote_cmd --production"
 
   echo "[deploy] running remote deploy on $REMOTE_HOST"
   ssh "$REMOTE_HOST" "$remote_cmd"

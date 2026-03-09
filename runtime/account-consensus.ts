@@ -454,28 +454,22 @@ export async function proposeAccountFrame(
     return { success: false, error: 'Waiting for ACK on pending frame', events };
   }
 
-  // Deterministic j-claim handshake:
-  // RIGHT side must wait for LEFT claim to be committed first.
-  // This prevents simultaneous same-height j_event_claim proposals and LEFT-WINS loops.
-  const proposerByLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-  const onlyJClaimsInMempool =
-    accountMachine.mempool.length > 0 && accountMachine.mempool.every(tx => tx.type === 'j_event_claim');
-  if (!proposerByLeft && onlyJClaimsInMempool) {
-    const leftObs = accountMachine.leftJObservations || [];
-    const hasMatchingLeftClaim = accountMachine.mempool.some(tx => {
-      if (tx.type !== 'j_event_claim') return false;
-      const key = `${tx.data.jHeight}:${tx.data.jBlockHash}`;
-      return leftObs.some(obs => `${obs.jHeight}:${obs.jBlockHash}` === key);
-    });
-    if (!hasMatchingLeftClaim) {
-      if (!quiet) {
-        console.log(
-          `⏳ RIGHT-J-CLAIM-GATE: waiting for LEFT claim before proposing ${accountMachine.mempool.length} right-side j_event_claim tx(s)`,
-        );
-      }
-      return { success: false, error: 'Waiting for LEFT j_event_claim', events };
-    }
-  }
+  // IMPORTANT: Do NOT gate RIGHT-side j_event_claim proposals on presence of a
+  // previously committed LEFT claim.
+  //
+  // Correct model:
+  // 1. Each side may observe the same J-event independently.
+  // 2. Each side is allowed to propose its own j_event_claim account frame.
+  // 3. Those claims are stored in account state as left/right observations.
+  // 4. tryFinalizeAccountJEvents() is the ONLY place that may require 2-of-2
+  //    agreement and finalize the unilateral settlement fields.
+  //
+  // If proposal logic blocks one side until the other side's claim is already
+  // committed, bilateral rebalance can deadlock at "Waiting for LEFT claim":
+  // the second observation never enters account state, so the 2-of-2 matcher
+  // never sees both sides. Same-height races are handled by the normal
+  // simultaneous-proposal rollback/tiebreaker path below, not by a special
+  // j_event_claim gate here.
 
   if (!quiet) console.log(`✅ E-MACHINE: Creating frame with ${accountMachine.mempool.length} transactions...`);
   if (HEAVY_LOGS)
@@ -1190,8 +1184,19 @@ export async function handleAccountInput(
     }
   }
 
-  // ACK for a pending frame must never be ignored (ACK-only or batched ACK+newFrame).
-  if (input.prevHanko && !ackProcessed && accountMachine.pendingFrame) {
+  const pendingFrameHeight = Number(accountMachine.pendingFrame?.height ?? 0);
+  const isSameHeightSimultaneousProposal =
+    Boolean(input.prevHanko) &&
+    Boolean(input.newAccountFrame) &&
+    pendingFrameHeight > 0 &&
+    Number(input.newAccountFrame?.height ?? 0) === pendingFrameHeight &&
+    Number(normalizedInputHeight ?? 0) === pendingFrameHeight - 1;
+
+  // ACK for a pending frame must never be ignored unless this is the valid
+  // same-height race case: peer ACKs the last committed frame and proposes the
+  // same next height we already have pending. That path is resolved below by
+  // the simultaneous-proposal handler.
+  if (input.prevHanko && !ackProcessed && accountMachine.pendingFrame && !isSameHeightSimultaneousProposal) {
     const pending = accountMachine.pendingFrame.height;
     return {
       success: false,

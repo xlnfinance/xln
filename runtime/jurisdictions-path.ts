@@ -6,5 +6,6 @@ export function resolveJurisdictionsJsonPath(): string {
       ? process.env.XLN_JURISDICTIONS_PATH.trim()
       : '';
   if (overridePath.length > 0) return path.resolve(overridePath);
-  return path.resolve(process.cwd(), 'jurisdictions', 'jurisdictions.json');
+  const canonicalUrl = new URL('../jurisdictions/jurisdictions.json', import.meta.url);
+  return path.resolve(decodeURIComponent(canonicalUrl.pathname));
 }

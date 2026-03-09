@@ -1717,8 +1717,8 @@ export interface ProposedEntityFrame {
 
   // DETERMINISTIC OUTPUTS: Stored at proposal time, used at commit time
   // CRITICAL: Cannot re-apply frame at commit because proposal.newState already
-  // has mutations applied (e.g., openAccount creates account). Idempotent handlers
-  // would return empty outputs on re-application. Store once, attach hankos at commit.
+  // has mutations applied (e.g., openAccount creates account). Store once,
+  // attach hankos at commit.
   outputs?: EntityInput[];
   jOutputs?: JInput[];
 

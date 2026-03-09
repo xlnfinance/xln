@@ -3,6 +3,8 @@
  * Liquid glassmorphism + SF Pro typography + Apple spacing
  */
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
 /* ============================================================================
    COLOR PALETTE - Apple-inspired with fintech gold accent
    ============================================================================ */
@@ -79,11 +81,6 @@
   --dropdown-selected: rgba(0, 122, 255, 0.18);
   --dropdown-radius: 10px;
 }
-
-/* ============================================================================
-   TYPOGRAPHY - SF Pro Display / Inter fallback
-   ============================================================================ */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;

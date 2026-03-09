@@ -321,10 +321,11 @@ export const applyEntityTx = async (
       const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
 
       if (findAccountKey(entityState, counterpartyId)) {
-        console.log(
-          `💳 OPEN-ACCOUNT: Account with ${formatEntityId(counterpartyId)} already exists, skipping duplicate request`,
-        );
-        return { newState: entityState, outputs: [] };
+        const error =
+          `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${formatEntityId(entityState.entityId)} ` +
+          `counterparty=${formatEntityId(counterpartyId)}`;
+        console.error(`❌ ${error}`);
+        throw new Error(error);
       }
 
       console.log(
@@ -469,13 +470,10 @@ export const applyEntityTx = async (
           `(soft=${autopilotSoftLimit}, hard=${autopilotHardLimit}, maxFee=${autopilotMaxFee})`,
         );
       } else {
-        // COUNTERPARTY (mirror): Just create account machine, don't queue txs
-        // Counterparty waits for initiator's frame and ACKs it
-        if (createdLocalAccount) {
-          console.log(`🧭 Counterparty: account created, waiting for initiator's frame`);
-        } else {
-          console.log(`↩️ openAccount duplicate ignored for ${formatEntityId(counterpartyId)} (already exists)`);
-        }
+        throw new Error(
+          `OPEN_ACCOUNT_ALREADY_EXISTS_AFTER_CLONE: entity=${formatEntityId(entityState.entityId)} ` +
+          `counterparty=${formatEntityId(counterpartyId)}`,
+        );
       }
 
       // Hub entities no longer auto-send faucet (use /api/faucet/offchain instead)
