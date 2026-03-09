@@ -33,6 +33,15 @@
   - repo startup wrapper now defaults to plain-daemon mode too in [scripts/start-server.sh](/Users/egor/xln/scripts/start-server.sh)
   - verified `https://xln.finance/api/health` returned `200` after restart
   - installed `pm2-logrotate` on the server with `50M` max file size, `7` retained archives, compression enabled
+- Verified prod again on commit `7d27c848`:
+  - `https://xln.finance/api/health` returned `200`
+  - direct `mintToReserveBatch` against the live Arrakis depository succeeded with the full 12-mint bootstrap payload
+  - installed explicit hourly PM2 log truncation on the server:
+    `0 * * * * find /root/.pm2/logs -type f -name '*.log' -exec truncate -s 0 {} +`
+- Hardened reserve bootstrap debugging in:
+  - [runtime/server.ts](/Users/egor/xln/runtime/server.ts)
+  - [runtime/jadapter/rpc.ts](/Users/egor/xln/runtime/jadapter/rpc.ts)
+  - failures now log `chainId`, `depository`, `signer`, `admin`, `nonces`, mint count, and first mint payload sample
 
 ### Dead Code Removed
 
