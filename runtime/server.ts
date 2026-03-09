@@ -1616,6 +1616,9 @@ const updateJurisdictionsJson = async (
     };
     if (data.testnet) delete data.testnet;
     data.jurisdictions = data.jurisdictions ?? {};
+    for (const key of Object.keys(data.jurisdictions)) {
+      if (key !== 'arrakis' && key.startsWith('arrakis_')) delete data.jurisdictions[key];
+    }
     const existingArrakis = data.jurisdictions.arrakis ?? {};
     data.jurisdictions.arrakis = {
       ...existingArrakis,

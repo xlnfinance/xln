@@ -7,7 +7,7 @@
 		"dev": "node copy-static-files.js && vite dev",
 		"build": "node copy-static-files.js && vite build",
 		"build:static": "node copy-static-files.js && vite build && echo 'Built for GitHub Pages deployment'",
-		"preview": "vite preview",
+		"preview": "node prepare-preview-assets.js && vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold error && vite build",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",

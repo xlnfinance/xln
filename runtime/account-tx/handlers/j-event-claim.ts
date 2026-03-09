@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx, Env } from '../../types';
 import { getAccountPerspective } from '../../state-helpers';
 import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../../j-event-normalization';
 import { tryFinalizeAccountJEvents } from '../../entity-tx/j-events';
@@ -11,6 +11,7 @@ export function handleJEventClaim(
   isValidation: boolean,
   myEntityId: string,
   emitRebalanceDebug: (payload: Record<string, unknown>) => void,
+  env?: Env,
 ): { success: boolean; events: string[]; error?: string } {
   const { jHeight, jBlockHash, events, observedAt } = accountTx.data;
   console.log(`📥 j_event_claim: jHeight=${jHeight}, hash=${jBlockHash.slice(0, 10)}, byLeft=${byLeft}`);
@@ -89,6 +90,16 @@ export function handleJEventClaim(
     const settledTokenId = Number(normalizedEvents.find(e => e.type === 'AccountSettled')?.data?.tokenId ?? 1);
     const delta = accountMachine.deltas.get(settledTokenId);
     if (afterFinalizedHeight > beforeFinalizedHeight) {
+      if (env) {
+        env.emit('account_settled_finalized_bilateral', {
+          entityId: myEntityId,
+          accountId: cpId,
+          tokenId: settledTokenId,
+          jHeight: afterFinalizedHeight,
+          collateral: String(delta?.collateral ?? 0n),
+          ondelta: String(delta?.ondelta ?? 0n),
+        });
+      }
       emitRebalanceDebug({
         step: 5,
         status: 'ok',

@@ -137,6 +137,16 @@ export async function processAccountTx(
         const tokenId = Number((accountTx as any)?.data?.tokenId ?? 0);
         const requested = accountMachine.requestedRebalance.get(tokenId) ?? 0n;
         const feeState = accountMachine.requestedRebalanceFeeState?.get(tokenId);
+        if (env && !isValidation) {
+          env.emit('request_collateral_committed', {
+            entityId: myEntityId,
+            accountId: counterparty,
+            tokenId,
+            requestedAmount: requested.toString(),
+            prepaidFee: String(feeState?.feePaidUpfront ?? 0n),
+            requestedAt: Number(feeState?.requestedAt ?? currentTimestamp),
+          });
+        }
         emitRebalanceDebug({
           step: 1,
           status: 'ok',
@@ -177,6 +187,7 @@ export async function processAccountTx(
         isValidation,
         myEntityId,
         emitRebalanceDebug,
+        env,
       );
 
     // === HTLC HANDLERS ===

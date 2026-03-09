@@ -3,7 +3,7 @@
  * Determines visual state of account for rendering uncommitted frames
  *
  * KISS principle: 3 states (mempool, proposed, committed)
- * Right-wins rule: On simultaneous proposals, LEFT rolls back
+ * Left-wins rule: On simultaneous proposals, RIGHT rolls back
  */
 
 import type { AccountMachine } from './types';
@@ -17,7 +17,7 @@ export type BilateralState =
 export interface BilateralVisualizationState {
   state: BilateralState;
   isLeftEntity: boolean;
-  shouldRollback: boolean;  // True if LEFT in conflict (Right wins)
+  shouldRollback: boolean;  // True if this side should rollback in conflict
   pendingHeight: number | null;
   mempoolCount: number;
 }
@@ -49,7 +49,7 @@ export function classifyBilateralState(
   const mempoolCount = myAccount.mempool?.length ?? 0;
 
   // CONFLICT: Both sides have pendingFrame at same height
-  // RIGHT wins, LEFT must rollback (deterministic tie-breaker)
+  // LEFT wins, RIGHT must rollback (deterministic tie-breaker)
   const hasPendingFrame = myPendingHeight !== null;
   const peerAhead = peerHeight > myHeight;
 
@@ -57,7 +57,7 @@ export function classifyBilateralState(
     return {
       state: 'conflict',
       isLeftEntity: isLeft,
-      shouldRollback: isLeft, // LEFT rolls back, RIGHT wins
+      shouldRollback: !isLeft, // RIGHT rolls back, LEFT wins
       pendingHeight: myPendingHeight,
       mempoolCount,
     };

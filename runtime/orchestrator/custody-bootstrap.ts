@@ -1,4 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { deserializeTaggedJson } from '../serialization-utils';
 
 const DEFAULT_CHILD_READY_TIMEOUT_MS = 60_000;
@@ -237,6 +240,9 @@ export const waitForDebugEntity = async (
 export const startCustodySupport = async (
   options: StartCustodySupportOptions,
 ): Promise<StartedCustodySupport> => {
+  const shardJurisdictionsPath = join(options.dbRoot, 'jurisdictions.json');
+  await mkdir(options.dbRoot, { recursive: true });
+  await writeFile(shardJurisdictionsPath, await readFile(resolveJurisdictionsJsonPath(), 'utf8'), 'utf8');
   const daemonChild = spawnBunChild(
     'custody-daemon',
     ['runtime/server.ts', '--port', String(options.daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${options.daemonPort}`],
@@ -247,6 +253,7 @@ export const startCustodySupport = async (
       PUBLIC_RPC: options.rpcUrl,
       RELAY_URL: options.relayUrl,
       XLN_DB_PATH: `${options.dbRoot}/daemon-db`,
+      XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
     },
   );
   await waitForHttpReady(`http://127.0.0.1:${options.daemonPort}/api/health`, daemonChild);

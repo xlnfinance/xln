@@ -807,7 +807,7 @@ export const applyEntityInput = async (
 
       // Step 3: Use stored outputs from proposal (NOT re-applied)
       // CRITICAL: Cannot re-apply frame because proposal.newState already has mutations.
-      // Idempotent handlers (e.g., openAccount) would return empty outputs on re-application.
+      // Re-applying mutated handlers would produce divergent results.
       const commitOutputs = proposal.outputs || [];
       const commitJOutputs = proposal.jOutputs || [];
 
@@ -1065,8 +1065,7 @@ export const applyEntityInput = async (
     // CRITICAL: proposalOutputs are stored in the proposal, NOT pushed to entityOutbox yet.
     // At commit time, we use these stored outputs and attach hankos.
     // We CANNOT re-apply the frame at commit because proposal.newState already has
-    // mutations applied (e.g., openAccount creates account). Idempotent handlers
-    // would return empty outputs on re-application.
+    // mutations applied (e.g., openAccount creates account).
 
     // Proposer creates new timestamp for this frame (DETERMINISTIC: use runtime timestamp)
     const newTimestamp = env.timestamp;
