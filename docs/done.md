@@ -148,3 +148,15 @@
 - Verified the current worktree on isolated Playwright stacks:
   - targeted `e2e-payment + e2e-custody` passed
   - full isolated suite passed: `17 passed, 6 skipped`
+- Fixed prod custody bootstrap to use daemon control state instead of the relay/debug directory read model:
+  - [runtime/server.ts](/Users/egor/xln/runtime/server.ts) `ControlEntitySummary` now includes local `accountCount` and `publicAccountCount`
+  - [runtime/orchestrator/daemon-control.ts](/Users/egor/xln/runtime/orchestrator/daemon-control.ts) exposes the same typed fields through `DaemonControlClient`
+  - [runtime/scripts/start-custody-prod.ts](/Users/egor/xln/runtime/scripts/start-custody-prod.ts) now waits on `/api/control/entities` instead of `/api/debug/entities`, so prod custody startup no longer depends on relay gossip convergence to detect its own entity/accounts
+- Made runtime TypeChain imports fully explicit with the `.ts` extension across the runtime/J-adapter/server entry points. This removed the remaining Bun/Rollup module resolution ambiguity during prod deploys.
+- Hardened [generate-typechain.cjs](/Users/egor/xln/jurisdictions/scripts/generate-typechain.cjs) to pre-create the mirrored `typechain-types/**` and `typechain-types/factories/**` directory tree before generation, fixing remote deploy failures on fresh rebuilds with `ENOENT` while writing generated files.
+- Deployed `main` to prod and verified live:
+  - [xln.finance](https://xln.finance) main app/API healthy
+  - [custody.xln.finance](https://custody.xln.finance) now serves the custody app and `/api/me`
+  - custody daemon/runtime is isolated and healthy on `127.0.0.1:8088`
+  - custody HTTP service is isolated and healthy on `127.0.0.1:8087`
+  - daemon control reports the deterministic `Custody` entity with `accountCount=3`
