@@ -108,7 +108,7 @@
         maxFeeUsd = defaults.maxFeeUsd;
       }
     } catch {
-      // Keep static fallback defaults if jurisdictions.json isn't available.
+      // Keep local defaults if /api/jurisdictions isn't available yet.
     }
   });
 

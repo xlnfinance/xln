@@ -228,13 +228,13 @@ const resolveJurisdictionConfig = (jurisdictions: any): JurisdictionConfig => {
   const arrakis = map.arrakis;
   const first = arrakis ?? Object.values(map)[0];
   if (!first) {
-    throw new Error('No jurisdictions found in jurisdictions.json');
+    throw new Error('No jurisdictions found in /api/jurisdictions');
   }
   return first as JurisdictionConfig;
 };
 
 const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
-  if (!rpc) throw new Error('Missing RPC URL in jurisdictions.json');
+  if (!rpc) throw new Error('Missing RPC URL in /api/jurisdictions');
   if (typeof window !== 'undefined' && rpc.startsWith('/rpc/')) {
     const origin = baseOrigin ?? window.location.origin;
     return new URL('/rpc', origin).toString();
@@ -395,10 +395,7 @@ const fetchJurisdictions = async (baseOrigin?: string): Promise<any> => {
         `${configuredApiBase}/api/jurisdictions?${bust}`,
         `${primaryOrigin}/api/jurisdictions?${bust}`,
       ]))
-    : [
-        `${primaryOrigin}/api/jurisdictions?${bust}`,
-        `${primaryOrigin}/jurisdictions.json?${bust}`,
-      ];
+    : [`${primaryOrigin}/api/jurisdictions?${bust}`];
 
   let lastError: unknown = null;
   for (const url of candidates) {
@@ -425,7 +422,7 @@ const fetchJurisdictions = async (baseOrigin?: string): Promise<any> => {
       lastError = err;
     }
   }
-  throw lastError ?? new Error('Failed to fetch jurisdictions.json');
+  throw lastError ?? new Error('Failed to fetch /api/jurisdictions');
 };
 
 async function fundSignerWalletViaFaucet(address: string): Promise<void> {
@@ -965,7 +962,7 @@ export const vaultOperations = {
     // All crypto functions now read from env.runtimeSeed, not global state
 
     // Fetch pre-deployed contract addresses from prod
-    console.log('[VaultStore.createRuntime] Fetching jurisdictions.json...');
+    console.log('[VaultStore.createRuntime] Fetching /api/jurisdictions...');
     const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
     await waitForServerRuntimeReady(baseOrigin);
     markPerf('wait_server_runtime_ready');

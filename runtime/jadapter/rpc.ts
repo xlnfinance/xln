@@ -13,9 +13,14 @@
 import { ethers } from 'ethers';
 import type { Provider, Signer } from 'ethers';
 
-import { Account__factory } from '../../jurisdictions/typechain-types/factories/Account__factory';
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types';
-import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory, ERC20Mock__factory } from '../../jurisdictions/typechain-types';
+import {
+  Account__factory,
+  Depository__factory,
+  EntityProvider__factory,
+  DeltaTransformer__factory,
+  ERC20Mock__factory,
+} from '../../jurisdictions/typechain-types';
 
 import type { BrowserVMState, JTx } from '../types';
 import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, BrowserVMProvider, JTokenInfo, JReserveMint } from './types';

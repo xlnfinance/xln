@@ -6,6 +6,7 @@
 
 // Browser-compatible: Use isBrowser check instead of fs
 import { isBrowser } from './utils';
+import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
 
 interface JurisdictionConfig {
   name: string;
@@ -76,21 +77,11 @@ export function loadJurisdictions(): JurisdictionsData {
 
   try {
     const fs = require('fs'); // Dynamic require for Node.js only
-    const path = require('path');
-    const overridePath =
-      typeof process !== 'undefined' && typeof process.env.XLN_JURISDICTIONS_PATH === 'string'
-        ? process.env.XLN_JURISDICTIONS_PATH.trim()
-        : '';
-    // Try shard-local override first, then canonical /jurisdictions/jurisdictions.json, then root legacy.
-    const candidates = [
-      overridePath,
-      path.resolve(process.cwd(), 'jurisdictions', 'jurisdictions.json'),
-      path.resolve(process.cwd(), 'jurisdictions.json'),
-    ].filter((candidate: string) => candidate.length > 0);
+    const candidates = [resolveJurisdictionsJsonPath()];
     const filePath = candidates.find((candidate: string) => fs.existsSync(candidate)) ?? '';
 
     if (!fs.existsSync(filePath)) {
-      console.warn('INFO: jurisdictions.json not found in /jurisdictions/ or root; using defaults');
+      console.warn('INFO: jurisdictions.json not found at canonical path; using defaults');
       cachedJurisdictions = defaultJurisdictions;
       return cachedJurisdictions;
     }

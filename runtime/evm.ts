@@ -649,7 +649,7 @@ export const transferNameBetweenEntities = async (
 export const generateJurisdictions = async (): Promise<Map<string, JurisdictionConfig>> => {
 
   const jurisdictions = new Map<string, JurisdictionConfig>();
-  const browserJurisdictionsUrl = `./jurisdictions.json?ts=${Date.now()}`;
+  const browserJurisdictionsUrl = `./api/jurisdictions?ts=${Date.now()}`;
 
   try {
     let config: any; // Complex type - loadJurisdictions returns different shapes in different contexts
@@ -673,7 +673,7 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
         });
         clearTimeout(timeoutId);
         if (!response.ok) {
-          throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);
+          throw new Error(`Failed to fetch /api/jurisdictions: ${response.status} ${response.statusText}`);
         }
         config = await response.json();
         console.log('🔍 JURISDICTION DEBUG: Browser loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
@@ -681,9 +681,9 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       } catch (fetchError: any) {
         clearTimeout(timeoutId);
         if (fetchError.name === 'AbortError') {
-          console.log('⏱️ jurisdictions.json fetch timed out - using BrowserVM mode (no external blockchain)');
+          console.log('⏱️ /api/jurisdictions fetch timed out - using BrowserVM mode (no external blockchain)');
         } else {
-          console.log('⚠️ jurisdictions.json not found - using BrowserVM mode (no external blockchain)');
+          console.log('⚠️ /api/jurisdictions not found - using BrowserVM mode (no external blockchain)');
         }
         // Return empty map for BrowserVM mode - scenarios handle their own fallback
         return jurisdictions;

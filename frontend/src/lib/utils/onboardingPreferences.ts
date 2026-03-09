@@ -66,7 +66,7 @@ const loadPolicyDefaultsFromJurisdictions = async (): Promise<Map<string, Policy
     }
 
     try {
-      const response = await fetch('/jurisdictions.json');
+      const response = await fetch('/api/jurisdictions', { cache: 'no-store' });
       if (!response.ok) {
         cachedPolicyDefaultsByJurisdiction = result;
         return result;

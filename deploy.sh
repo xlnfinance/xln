@@ -56,6 +56,9 @@ run_local_deploy() {
   echo "[deploy] installing root dependencies"
   bun install
 
+  echo "[deploy] syncing contract artifacts"
+  ./scripts/sync-contract-artifacts.sh
+
   echo "[deploy] building browser runtime bundle"
   ./scripts/build-runtime.sh
 

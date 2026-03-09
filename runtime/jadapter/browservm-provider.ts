@@ -17,11 +17,13 @@ import { createAddressFromPrivateKey, createAddressFromString, hexToBytes, creat
 import type { Address } from '@ethereumjs/util';
 import { createCustomCommon, Mainnet } from '@ethereumjs/common';
 import { ethers } from 'ethers';
-import { Account__factory } from '../../jurisdictions/typechain-types/factories/Account__factory';
-import { EntityProvider__factory } from '../../jurisdictions/typechain-types/factories/EntityProvider__factory';
-import { DeltaTransformer__factory } from '../../jurisdictions/typechain-types/factories/DeltaTransformer__factory';
-import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/factories/ERC20Mock__factory';
-import { Depository__factory } from '../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory';
+import {
+  Account__factory,
+  EntityProvider__factory,
+  DeltaTransformer__factory,
+  ERC20Mock__factory,
+  Depository__factory,
+} from '../../jurisdictions/typechain-types';
 import { safeStringify } from '../serialization-utils.js';
 import { deriveSignerKeySync, getCachedSignerPrivateKey } from '../account-crypto.js';
 import { isLeftEntity, normalizeEntityId } from '../entity-id-utils';

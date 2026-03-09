@@ -426,10 +426,7 @@ const fetchBootstrapJurisdictionConfig = async (baseOrigin: string): Promise<Boo
         new URL('/api/jurisdictions', apiBase).toString(),
         new URL('/api/jurisdictions', baseOrigin).toString(),
       ]))
-    : [
-        new URL('/api/jurisdictions', apiBase).toString(),
-        new URL('/jurisdictions.json', baseOrigin).toString(),
-      ];
+    : [new URL('/api/jurisdictions', apiBase).toString()];
 
   let lastError: Error | null = null;
   for (const url of candidates) {
@@ -450,7 +447,7 @@ const fetchBootstrapJurisdictionConfig = async (baseOrigin: string): Promise<Boo
       lastError = error instanceof Error ? error : new Error(String(error));
     }
   }
-  throw lastError ?? new Error('[xlnStore] jurisdictions.json missing primary jurisdiction');
+  throw lastError ?? new Error('[xlnStore] /api/jurisdictions missing primary jurisdiction');
 };
 
 const resolveBootstrapRpcUrl = (rpc: string, baseOrigin: string): string => {

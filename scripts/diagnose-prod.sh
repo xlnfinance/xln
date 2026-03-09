@@ -29,7 +29,7 @@ cd /root/xln 2>/dev/null || { echo "ERROR: /root/xln not found"; exit 1; }
 echo "Current directory: $(pwd)"
 echo ""
 echo "Files present:"
-ls -la ecosystem.config.cjs jurisdictions.json 2>/dev/null || echo "Missing critical files"
+ls -la ecosystem.config.cjs jurisdictions/jurisdictions.json 2>/dev/null || echo "Missing critical files"
 echo ""
 echo "Anvil running?"
 pgrep anvil && echo "Anvil is running" || echo "Anvil NOT running"

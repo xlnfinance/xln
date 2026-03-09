@@ -5,7 +5,6 @@ import { join, resolve } from 'path';
 // Copy necessary files to static folder before build
 // Note: server.js is built directly to static/ now (no copy needed)
 const files = [
-  { src: '../jurisdictions.json', dest: 'static/jurisdictions.json' },
   { src: '../jurisdictions/artifacts/contracts/Account.sol/Account.json', dest: 'static/contracts/Account.json' },
   { src: '../jurisdictions/artifacts/contracts/Depository.sol/Depository.json', dest: 'static/contracts/Depository.json' },
   { src: '../jurisdictions/artifacts/contracts/EntityProvider.sol/EntityProvider.json', dest: 'static/contracts/EntityProvider.json' },

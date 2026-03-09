@@ -3,11 +3,12 @@
 import { ethers, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/factories/ERC20Mock__factory';
+import { ERC20Mock__factory } from '../../jurisdictions/typechain-types';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction-loader';
+import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import {
   getActiveJAdapter,
@@ -245,15 +246,7 @@ const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =
 };
 
 const resolveJurisdictionPaths = (): string[] => {
-  const overridePath = String(process.env.XLN_JURISDICTIONS_PATH || '').trim();
-  if (overridePath) {
-    return [overridePath];
-  }
-  return [
-    join(process.cwd(), 'jurisdictions', 'jurisdictions.json'),
-    join(process.cwd(), 'frontend', 'static', 'jurisdictions.json'),
-    join(process.cwd(), 'frontend', 'build', 'jurisdictions.json'),
-  ];
+  return [resolveJurisdictionsJsonPath()];
 };
 
 const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): Promise<void> => {
