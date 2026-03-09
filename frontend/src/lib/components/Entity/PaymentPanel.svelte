@@ -712,6 +712,34 @@
     return null;
   }
 
+  function getRouteMissDiagnostics(): {
+    profilesCount: number;
+    targetProfilePresent: boolean;
+    targetProfileLastUpdated: number | null;
+    targetPublicAccounts: number;
+  } {
+    const profiles = getGossipProfiles();
+    const targetNorm = normalizeEntityId(targetEntityId);
+    const targetProfile = profiles.find((profile) => normalizeEntityId(profile.entityId) === targetNorm) || null;
+    return {
+      profilesCount: profiles.length,
+      targetProfilePresent: !!targetProfile,
+      targetProfileLastUpdated: targetProfile ? targetProfile.lastUpdated : null,
+      targetPublicAccounts: targetProfile ? targetProfile.publicAccounts.length : 0,
+    };
+  }
+
+  function buildRouteMissMessage(): string {
+    const diagnostics = getRouteMissDiagnostics();
+    if (!diagnostics.targetProfilePresent) {
+      return `No route found to ${targetEntityId} out of ${diagnostics.profilesCount} gossip profiles (target profile missing)`;
+    }
+    return (
+      `No route found to ${targetEntityId} out of ${diagnostics.profilesCount} gossip profiles ` +
+      `(target lastUpdated=${diagnostics.targetProfileLastUpdated}, publicAccounts=${diagnostics.targetPublicAccounts})`
+    );
+  }
+
   function getMissingRouteKeys(path: string[]): string[] {
     const missingSet = new Set<string>();
     for (const hopEntity of path.slice(1)) {
@@ -939,42 +967,54 @@
       if (!currentReplicas) throw new Error('Replicas not available');
       const sourceNorm = normalizeEntityId(entityId);
       const targetNorm = normalizeEntityId(targetEntityId);
-      const network = buildNetworkAdjacency(env, currentReplicas);
       const isSelfTarget = sourceNorm === targetNorm;
-      const pathSet = new Set<string>();
-      const foundPaths: string[][] = [];
-      const pushPath = (rawPath: unknown) => {
-        if (!Array.isArray(rawPath)) return;
-        const normalizedPath = rawPath
-          .map((id) => normalizeEntityId(String(id || '')))
-          .filter(Boolean);
-        if (!isValidRoutePath(normalizedPath, sourceNorm, targetNorm)) return;
-        const intermediaries = normalizedPath.slice(1, -1);
-        if (intermediaries.some((hop) => !isRouteableIntermediary(hop))) return;
-        const key = normalizedPath.join('>');
-        if (pathSet.has(key)) return;
-        pathSet.add(key);
-        foundPaths.push(normalizedPath);
+      const collectCandidatePaths = async (): Promise<{ network: ReturnType<typeof buildNetworkAdjacency>; foundPaths: string[][] }> => {
+        const network = buildNetworkAdjacency(env, currentReplicas);
+        const pathSet = new Set<string>();
+        const foundPaths: string[][] = [];
+        const pushPath = (rawPath: unknown) => {
+          if (!Array.isArray(rawPath)) return;
+          const normalizedPath = rawPath
+            .map((id) => normalizeEntityId(String(id || '')))
+            .filter(Boolean);
+          if (!isValidRoutePath(normalizedPath, sourceNorm, targetNorm)) return;
+          const intermediaries = normalizedPath.slice(1, -1);
+          if (intermediaries.some((hop) => !isRouteableIntermediary(hop))) return;
+          const key = normalizedPath.join('>');
+          if (pathSet.has(key)) return;
+          pathSet.add(key);
+          foundPaths.push(normalizedPath);
+        };
+
+        const runtimeGraph = env.gossip?.getNetworkGraph?.();
+        try {
+          const runtimeRoutes: PaymentRoute[] =
+            await runtimeGraph?.findPaths?.(entityId, targetEntityId, amountInSmallestUnit, tokenId) || [];
+          for (const route of runtimeRoutes) {
+            pushPath(route.path);
+          }
+        } catch {}
+
+        const localPaths = findPathsFromGraph(network.adjacency, sourceNorm, targetNorm, tokenId);
+        for (const path of localPaths) pushPath(path);
+        return { network, foundPaths };
       };
 
-      const runtimeGraph = env?.gossip?.getNetworkGraph?.();
-      try {
-        const runtimeRoutes: PaymentRoute[] =
-          await runtimeGraph?.findPaths?.(entityId, targetEntityId, amountInSmallestUnit, tokenId) || [];
-        for (const route of runtimeRoutes) {
-          pushPath(route.path);
-        }
-      } catch {}
-
-      // Always include local graph candidates (best-effort with real local capacities).
-      const localPaths = findPathsFromGraph(network.adjacency, sourceNorm, targetNorm, tokenId);
-      for (const path of localPaths) pushPath(path);
+      let { network, foundPaths } = await collectCandidatePaths();
 
       if (foundPaths.length === 0) {
-        if (isSelfTarget) {
-          throw new Error('No self-route found with at least 2 different intermediates');
+        if (!isSelfTarget) {
+          await refreshGossipOnDemand('route-miss', [targetEntityId]);
+          ({ network, foundPaths } = await collectCandidatePaths());
         }
-        throw new Error(`No route found to ${targetEntityId}`);
+        if (foundPaths.length === 0) {
+          if (isSelfTarget) {
+            throw new Error('No self-route found with at least 2 different intermediates');
+          }
+          const routeMissMessage = buildRouteMissMessage();
+          emitUiDebugEvent('PAYMENT_ROUTE_MISS', routeMissMessage, getRouteMissDiagnostics());
+          throw new Error(routeMissMessage);
+        }
       }
 
       const quotedRoutes: RouteOption[] = [];
