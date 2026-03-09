@@ -26,6 +26,13 @@
   - runtime bundle build succeeded
   - frontend production build succeeded
   - PM2 restarted `xln-server` successfully
+- Recovered `xln.finance` after a `502` outage on 2026-03-09:
+  - root cause 1: PM2 logs had filled `/` to `100%`
+  - root cause 2: prod server startup was still trying to bootstrap local hubs and crashed in reserve funding
+  - hotfix applied on the server: `BOOTSTRAP_LOCAL_HUBS=0`
+  - repo startup wrapper now defaults to plain-daemon mode too in [scripts/start-server.sh](/Users/egor/xln/scripts/start-server.sh)
+  - verified `https://xln.finance/api/health` returned `200` after restart
+  - installed `pm2-logrotate` on the server with `50M` max file size, `7` retained archives, compression enabled
 
 ### Dead Code Removed
 
