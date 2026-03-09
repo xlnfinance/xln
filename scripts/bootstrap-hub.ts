@@ -6,7 +6,7 @@
  * Idempotent: safe to run multiple times.
  */
 
-import { main, process as runtimeProcess } from '../runtime/runtime';
+import { main, process as runtimeProcess } from '../runtime/runtime.ts';
 import {
   deriveSignerKeySync,
   deriveSignerAddressSync,
