@@ -47,6 +47,7 @@ echo ""
 echo "Starting server directly with anvil env..."
 export USE_ANVIL=true
 export ANVIL_RPC=http://localhost:8545
+export XLN_RUNTIME_SEED=${XLN_RUNTIME_SEED:-xln-prod-main-runtime}
 export PATH="$HOME/.bun/bin:$PATH"
 cd /root/xln
 

@@ -51,6 +51,7 @@ export type StartCustodySupportOptions = {
   walletUrl: string;
   dbRoot: string;
   seed: string;
+  daemonRuntimeSeed?: string;
   signerLabel: string;
   profileName: string;
 };
@@ -252,6 +253,7 @@ export const startCustodySupport = async (
       ANVIL_RPC: options.rpcUrl,
       PUBLIC_RPC: options.rpcUrl,
       RELAY_URL: options.relayUrl,
+      XLN_RUNTIME_SEED: options.daemonRuntimeSeed || `${options.seed}:runtime`,
       XLN_DB_PATH: `${options.dbRoot}/daemon-db`,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
     },

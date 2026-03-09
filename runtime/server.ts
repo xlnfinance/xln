@@ -238,6 +238,13 @@ const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   Number(process.env.MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK || '10'),
 );
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [60, 140, 240, 360, 520] as const;
+const SERVER_RUNTIME_SEED = (() => {
+  const seed = process.env.XLN_RUNTIME_SEED?.trim();
+  if (!seed) {
+    throw new Error('XLN_RUNTIME_SEED is required for runtime/server.ts');
+  }
+  return seed;
+})();
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
   120n * 10n ** 18n,
   180n * 10n ** 18n,
@@ -4885,7 +4892,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
   // Always initialize runtime - every node needs it
   console.log('[XLN] Initializing runtime...');
-  const env = await main(HUB_SEED);
+  const env = await main(SERVER_RUNTIME_SEED);
   console.log('[XLN] Runtime initialized ✓');
   const verboseRuntimeLogs = /^(1|true)$/i.test(process.env.RUNTIME_VERBOSE_LOGS ?? '');
   env.quietRuntimeLogs = !verboseRuntimeLogs;
