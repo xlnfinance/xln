@@ -75,6 +75,8 @@ let processGuardsInstalled = false;
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
 const formatTimingMs = (value: number): string => value.toFixed(2);
+const stringifyBootstrapDebug = (value: unknown): string =>
+  JSON.stringify(value, (_key, nested) => (typeof nested === 'bigint' ? nested.toString() : nested));
 
 const resolveRuntimeWaitPollMs = (): number => {
   if (!globalJAdapter) return 100;
@@ -2164,6 +2166,19 @@ const bootstrapServerHubsAndReserves = async (
     }
 
     if (reserveMints.length > 0) {
+      const signerAddress = await globalJAdapter.signer.getAddress().catch(() => '');
+      const depositoryAddress = await globalJAdapter.getDepositoryAddress().catch(() => '');
+      console.log(
+        `[XLN][BOOTSTRAP-RESERVE] chainId=${globalJAdapter.chainId} ` +
+          `depository=${depositoryAddress || 'unknown'} signer=${signerAddress || 'unknown'} ` +
+          `entities=${reserveEntityIds.length} mints=${reserveMints.length} ` +
+          `first=${stringifyBootstrapDebug({
+            entityId: reserveMints[0]?.entityId,
+            tokenId: reserveMints[0]?.tokenId,
+            amount: reserveMints[0]?.amount,
+            symbol: reserveMints[0]?.symbol,
+          })}`,
+      );
       try {
         const events = await globalJAdapter.debugFundReservesBatch(
           reserveMints.map((mint) => ({
@@ -2210,7 +2225,26 @@ const bootstrapServerHubsAndReserves = async (
           );
         }
       } catch (err) {
-        console.warn('[XLN] Hub reserve batch funding failed:', (err as Error).message);
+        console.warn(
+          `[XLN] Hub reserve batch funding failed: ` +
+            stringifyBootstrapDebug({
+              chainId: globalJAdapter.chainId,
+              depositoryAddress,
+              signerAddress,
+              reserveEntityIds,
+              mintsCount: reserveMints.length,
+              tokenIds: Array.from(new Set(reserveMints.map((mint) => mint.tokenId))),
+              firstMint: reserveMints[0]
+                ? {
+                    entityId: reserveMints[0].entityId,
+                    tokenId: reserveMints[0].tokenId,
+                    amount: reserveMints[0].amount,
+                    symbol: reserveMints[0].symbol,
+                  }
+                : null,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+        );
         throw err;
       }
     }

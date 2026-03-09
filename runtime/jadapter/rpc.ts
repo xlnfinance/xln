@@ -119,6 +119,15 @@ export async function createRpcAdapter(
   const applyGasHeadroom = (value: bigint): bigint =>
     (value * BigInt(GAS_HEADROOM_BPS) + 9_999n) / 10_000n;
 
+  const formatReserveMintDebug = (mint: JReserveMint | undefined): string => {
+    if (!mint) return 'none';
+    return JSON.stringify({
+      entityId: mint.entityId,
+      tokenId: mint.tokenId,
+      amount: mint.amount.toString(),
+    });
+  };
+
   const buildFeeOverrides = async (): Promise<Record<string, bigint>> => {
     const feeData = await provider.getFeeData();
     if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
@@ -835,8 +844,24 @@ export async function createRpcAdapter(
       }
       if (mints.length === 0) return [];
 
+      const depositoryAddress = await depository.getAddress();
+      const signerAddress = await signer.getAddress();
+      const nonceLatest = await provider.getTransactionCount(signerAddress, 'latest');
+      const noncePending = await provider.getTransactionCount(signerAddress, 'pending');
+      let depositoryAdmin = '';
+      try {
+        const adminReader = new ethers.Contract(
+          depositoryAddress,
+          ['function admin() view returns(address)'],
+          provider as any,
+        );
+        depositoryAdmin = await adminReader.admin();
+      } catch {
+        depositoryAdmin = '';
+      }
+
       const batchMint = new ethers.Contract(
-        await depository.getAddress(),
+        depositoryAddress,
         ['function mintToReserveBatch((bytes32,uint256,uint256)[] mints) external'],
         signer as any,
       );
@@ -845,9 +870,27 @@ export async function createRpcAdapter(
         BigInt(mint.tokenId),
         mint.amount,
       ] as const);
-      const tx = await batchMint.mintToReserveBatch(payload, await buildFeeOverrides());
-      const receipt = await waitForReceipt(tx as any, 'mintToReserveBatch');
-      return parseDepositoryReceiptEvents(receipt);
+      console.log(
+        `[JAdapter:rpc] mintToReserveBatch start chainId=${config.chainId} ` +
+          `depository=${depositoryAddress} signer=${signerAddress} admin=${depositoryAdmin || 'unknown'} ` +
+          `nonceLatest=${nonceLatest} noncePending=${noncePending} count=${mints.length} ` +
+          `first=${formatReserveMintDebug(mints[0])}`,
+      );
+      try {
+        const tx = await batchMint.mintToReserveBatch(payload, await buildFeeOverrides());
+        console.log(`[JAdapter:rpc] mintToReserveBatch tx=${tx.hash} count=${mints.length}`);
+        const receipt = await waitForReceipt(tx as any, 'mintToReserveBatch');
+        return parseDepositoryReceiptEvents(receipt);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(
+          `[JAdapter:rpc] mintToReserveBatch failed chainId=${config.chainId} ` +
+            `depository=${depositoryAddress} signer=${signerAddress} admin=${depositoryAdmin || 'unknown'} ` +
+            `nonceLatest=${nonceLatest} noncePending=${noncePending} count=${mints.length} ` +
+            `first=${formatReserveMintDebug(mints[0])} error=${message}`,
+        );
+        throw error;
+      }
     },
 
     async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
