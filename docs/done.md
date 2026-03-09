@@ -225,3 +225,16 @@
     - `bash -n deploy.sh`
     - `bun build runtime/server.ts --target=bun --outfile=/tmp/xln-server-check.js`
     - `bun build runtime/scripts/start-custody-prod.ts --target=bun --outfile=/tmp/xln-custody-prod-check.js`
+- 2026-03-09T21:12:54Z prod rollout hardening:
+  - [scripts/start-anvil.sh](/Users/egor/xln/scripts/start-anvil.sh) now kills any stale listener on `:8545` before starting Anvil, so PM2 cannot loop forever on `Address already in use`
+  - [deploy.sh](/Users/egor/xln/deploy.sh) now kills stale `:8545`, fixes the `eth_chainId` readiness probe JSON body, and deletes `xln-server` / `xln-custody` again immediately before starting them to keep production deploy idempotent
+  - [runtime/server.ts](/Users/egor/xln/runtime/server.ts) now rejects `jurisdictions.json` addresses that have no code on the live chain before calling `createJAdapter(...)`; this prevents the `fromReplica addresses have no code on chain` crash on a freshly reset Anvil
+  - verified on prod after redeploy:
+    - `https://xln.finance/api/health`
+    - `https://xln.finance/api/debug/entities?limit=10`
+    - `https://custody.xln.finance/api/me`
+  - observed live result:
+    - main server healthy with `runtime=true`, `relay=true`, `hubMesh.ok=true`, `marketMaker.ok=true`
+    - hubs `H1/H2/H3` present
+    - market maker present
+    - custody service and custody daemon online on isolated ports and isolated DB root
