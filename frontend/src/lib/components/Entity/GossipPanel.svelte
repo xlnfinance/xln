@@ -1,22 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getXLN, xlnEnvironment } from '$lib/stores/xlnStore';
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
 
   export let entityId: string = '';
   $: activeEnv = $xlnEnvironment;
-
-  type GossipProfile = {
-    entityId: string;
-    runtimeId?: string;
-    name: string;
-    lastUpdated: number;
-    capabilities?: string[];
-    metadata?: {
-      isHub?: boolean;
-      entityPublicKey?: string;
-    };
-  };
 
   let loading = false;
   let error = '';

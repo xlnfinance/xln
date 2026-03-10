@@ -1,10 +1,11 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { tabs } from '../../stores/tabStore';
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import { hasCounterpartyAccount, normalizeEntityId } from '$lib/utils/entityReplica';
 
-  export let profile: any;
+  export let profile: GossipProfile;
 
   let isJoining = false;
   let joinError: string | null = null;
@@ -106,17 +107,6 @@
   </div>
 
   <div class="profile-content">
-    {#if profile.capabilities && profile.capabilities.length > 0}
-      <div class="capabilities-section">
-        <h4>🔧 Capabilities</h4>
-        <div class="capabilities-list">
-          {#each profile.capabilities as capability}
-            <span class="capability-tag">{capability}</span>
-          {/each}
-        </div>
-      </div>
-    {/if}
-
     {#if profile.publicAccounts && profile.publicAccounts.length > 0}
       <div class="hubs-section">
         <h4>🔗 Connected Hubs</h4>
@@ -219,20 +209,17 @@
     font-weight: 500;
   }
 
-  .capabilities-section,
   .hubs-section,
   .metadata-section {
     margin-bottom: 16px;
   }
 
-  .capabilities-list,
   .hubs-list {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
   }
 
-  .capability-tag,
   .hub-tag {
     background: #007acc;
     color: white;
@@ -241,9 +228,7 @@
     font-size: 0.8em;
   }
 
-  .hub-tag {
-    background: #6f42c1;
-  }
+  .hub-tag { background: #6f42c1; }
 
   .metadata-content {
     font-size: 0.85em;
