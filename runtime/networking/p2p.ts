@@ -133,6 +133,7 @@ const getReplicaSignerId = (replicaKey: string): string => {
 
 const GOSSIP_POLL_MS = 5000; // Poll relay every 5s by default to avoid relay spam
 const PROFILE_ANNOUNCE_DEBOUNCE_MS = 25;
+const PROFILE_HEARTBEAT_MS = 15_000;
 const GOSSIP_FETCH_RETRY_DELAYS_MS = [40, 80, 160];
 
 export class RuntimeP2P {
@@ -156,6 +157,7 @@ export class RuntimeP2P {
   private peerRuntimeEncPubKeys = new Map<string, string>();
   private announceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingAnnounceEntities = new Set<string>();
+  private lastHeartbeatAnnounceAt = 0;
 
   constructor(options: RuntimeP2POptions) {
     this.env = options.env;
@@ -380,10 +382,23 @@ export class RuntimeP2P {
     }
     console.log(`[P2P] startPolling: Starting polling every ${this.gossipPollMs}ms`);
     // Request immediately, then periodically
-    setTimeout(() => this.requestSeedGossip('incremental'), 100);
+    setTimeout(() => {
+      this.requestSeedGossip('incremental');
+      void this.maybeHeartbeatAnnounce();
+    }, 100);
     this.pollInterval = setInterval(() => {
       this.requestSeedGossip('incremental');
+      void this.maybeHeartbeatAnnounce();
     }, this.gossipPollMs);
+  }
+
+  private async maybeHeartbeatAnnounce(): Promise<void> {
+    const client = this.getActiveClient();
+    if (!client || !client.isOpen()) return;
+    const now = Date.now();
+    if (now - this.lastHeartbeatAnnounceAt < PROFILE_HEARTBEAT_MS) return;
+    this.lastHeartbeatAnnounceAt = now;
+    await this.announceLocalProfiles();
   }
 
   private stopPolling() {
@@ -630,6 +645,7 @@ export class RuntimeP2P {
   // Call this to refresh profiles from relay
   refreshGossip() {
     this.requestSeedGossip('full');
+    void this.maybeHeartbeatAnnounce();
   }
 
   async syncProfiles(): Promise<boolean> {
