@@ -21,12 +21,26 @@ function parseRenderedCapacity(rawValue: string): number {
 
 async function readRenderedAccountCards(page: Page): Promise<RenderedAccountCapacityView[]> {
   return page.evaluate(() => {
+    const extractAmountText = (valueEl: Element): string => {
+      const children = Array.from(valueEl.children);
+      for (const child of children) {
+        if (child instanceof HTMLElement && child.classList.contains('usd-hint')) continue;
+        const raw = String(child.textContent || '').trim();
+        if (raw.length > 0) return raw;
+      }
+
+      const raw = String(valueEl.textContent || '').trim();
+      const usdHintText = children
+        .filter((child) => child instanceof HTMLElement && child.classList.contains('usd-hint'))
+        .map((child) => String(child.textContent || ''))
+        .join('');
+      return usdHintText.length > 0 ? raw.replace(usdHintText, '').trim() : raw;
+    };
+
     const readMetric = (card: Element, selectors: string): number => {
       const valueEl = card.querySelector(selectors);
       if (!valueEl) return 0;
-      const raw = String(valueEl.textContent || '').replace(/,/g, '').trim();
-      const numeric = Number(raw.replace(/[^0-9.-]/g, ''));
-      return Number.isFinite(numeric) ? numeric : 0;
+      return Number.parseFloat(extractAmountText(valueEl).replace(/,/g, '').trim()) || 0;
     };
 
     return Array.from(document.querySelectorAll('.account-preview')).map((card) => {
@@ -70,6 +84,22 @@ async function getRenderedCapacityForAccount(
 
 async function getRenderedPrimaryCapacity(page: Page, selectors: string): Promise<number> {
   return page.evaluate(({ selectors }) => {
+    const extractAmountText = (valueEl: Element): string => {
+      const children = Array.from(valueEl.children);
+      for (const child of children) {
+        if (child instanceof HTMLElement && child.classList.contains('usd-hint')) continue;
+        const raw = String(child.textContent || '').trim();
+        if (raw.length > 0) return raw;
+      }
+
+      const raw = String(valueEl.textContent || '').trim();
+      const usdHintText = children
+        .filter((child) => child instanceof HTMLElement && child.classList.contains('usd-hint'))
+        .map((child) => String(child.textContent || ''))
+        .join('');
+      return usdHintText.length > 0 ? raw.replace(usdHintText, '').trim() : raw;
+    };
+
     const selectedCard =
       document.querySelector('.account-preview.selected')
       || document.querySelector('.account-preview');
@@ -78,9 +108,7 @@ async function getRenderedPrimaryCapacity(page: Page, selectors: string): Promis
     const valueEl = selectedCard.querySelector(selectors);
     if (!valueEl) return 0;
 
-    const raw = String(valueEl.textContent || '').replace(/,/g, '').trim();
-    const numeric = Number(raw.replace(/[^0-9.-]/g, ''));
-    return Number.isFinite(numeric) ? numeric : 0;
+    return Number.parseFloat(extractAmountText(valueEl).replace(/,/g, '').trim()) || 0;
   }, { selectors });
 }
 

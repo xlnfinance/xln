@@ -7,6 +7,7 @@
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import DeltaTokenList from './shared/DeltaTokenList.svelte';
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
+  import { buildTokenVisualScale, sumVisualScales } from './shared/delta-visual';
   import { getGossipProfile, resolveEntityName } from '$lib/utils/entityNaming';
   import { getAccountUiStatus, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
 
@@ -41,8 +42,7 @@
   $: isHub = (() => {
     const profile = counterpartyProfile;
     if (!profile) return false;
-    return !!(profile.metadata?.isHub === true ||
-      (Array.isArray(profile.capabilities) && profile.capabilities.includes('hub')));
+    return profile.metadata?.isHub === true;
   })();
 
   // P2P connection state
@@ -71,6 +71,8 @@
     let outHold = 0n, inHold = 0n;
     let primaryTokenId = 1;
     let primarySymbol = '?';
+    let bestPrimaryOut = -1n;
+    let bestPrimaryIn = -1n;
 
     for (const [tokenId, delta] of account.deltas.entries()) {
       const d = activeXlnFunctions.deriveDelta(delta, isLeft);
@@ -85,7 +87,15 @@
       outHold += (typeof d.outTotalHold === 'bigint' ? d.outTotalHold : 0n);
       inHold += (typeof d.inTotalHold === 'bigint' ? d.inTotalHold : 0n);
       const info = activeXlnFunctions.getTokenInfo(tokenId);
-      if (info?.symbol) { primaryTokenId = tokenId; primarySymbol = info.symbol; }
+      if (
+        info?.symbol &&
+        (d.outCapacity > bestPrimaryOut || (d.outCapacity === bestPrimaryOut && d.inCapacity > bestPrimaryIn))
+      ) {
+        bestPrimaryOut = d.outCapacity;
+        bestPrimaryIn = d.inCapacity;
+        primaryTokenId = tokenId;
+        primarySymbol = info.symbol;
+      }
     }
 
     const outTotal = outCredit + outColl + outDebt;
@@ -114,6 +124,8 @@
     decimals: 18,
   };
   $: aggDerived = {
+    outCapacity: agg.outCap,
+    inCapacity: agg.inCap,
     outOwnCredit: agg.outCredit,
     outCollateral: agg.outColl,
     outPeerCredit: agg.outDebt,
@@ -138,6 +150,7 @@
       outTotal: bigint;
       inTotal: bigint;
       pendingOutDebtMode: 'none' | 'pending' | 'settling';
+      visualScale: ReturnType<typeof buildTokenVisualScale>;
     }> = [];
     for (const [tokenId, delta] of account.deltas.entries()) {
       const derived = activeXlnFunctions.deriveDelta(delta, isLeft);
@@ -146,8 +159,8 @@
         name: `Token ${tokenId}`,
         decimals: 18,
       };
-      const outTotal = derived.outOwnCredit + derived.outCollateral + derived.outPeerCredit;
-      const inTotal = derived.inOwnCredit + derived.inCollateral + derived.inPeerCredit;
+      const outTotal = derived.outCapacity;
+      const inTotal = derived.inCapacity;
       const tokenRequested = pendingRequestedByToken.get(tokenId) || 0n;
       const tokenC2R = pendingC2RByToken.get(tokenId) || 0n;
       rows.push({
@@ -163,15 +176,20 @@
         pendingOutDebtMode: (tokenRequested > 0n || tokenC2R > 0n)
           ? (hasPendingBatch ? 'settling' : 'pending')
           : 'none',
+        visualScale: buildTokenVisualScale(String(info.symbol || ''), Number(info.decimals ?? 18), derived),
       });
     }
     return rows.sort((a, b) => {
       const aScore = a.outTotal + a.inTotal;
       const bScore = b.outTotal + b.inTotal;
-      if (aScore === bScore) return a.tokenId - b.tokenId;
+      if (aScore === bScore) {
+        if (a.derived.outCapacity === b.derived.outCapacity) return a.tokenId - b.tokenId;
+        return a.derived.outCapacity > b.derived.outCapacity ? -1 : 1;
+      }
       return aScore > bScore ? -1 : 1;
     });
   })();
+  $: aggregateVisualScale = sumVisualScales(tokenSummaries.map((row) => row.visualScale));
   $: hasAnyDeltas = tokenSummaries.length > 0;
   $: hasCommittedFrame = Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
   $: showDeltaRows = hasCommittedFrame && hasAnyDeltas;
@@ -357,6 +375,7 @@
         derived={aggDerived}
         decimals={Number(primaryTokenInfo.decimals ?? 18)}
         barHeight={9}
+        visualScale={aggregateVisualScale}
       />
     {:else}
       <DeltaTokenList

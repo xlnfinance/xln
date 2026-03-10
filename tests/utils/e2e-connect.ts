@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 
 const DEFAULT_CREDIT_AMOUNT = 10_000n * 10n ** 18n;
-const DEFAULT_TOKEN_ID = 1;
+const DEFAULT_TOKEN_IDS = [1, 3, 2] as const;
 const DEFAULT_OPEN_TIMEOUT_MS = 45_000;
 
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
@@ -37,9 +37,15 @@ async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   expect(ok, `[${tag}] runtime must be online`).toBe(true);
 }
 
-async function isAccountReady(page: Page, entityId: string, hubId: string, timeoutMs = 0): Promise<boolean> {
+async function isAccountReady(
+  page: Page,
+  entityId: string,
+  hubId: string,
+  tokenIds: readonly number[],
+  timeoutMs = 0,
+): Promise<boolean> {
   return page.evaluate(
-    async ({ entityId, hubId, timeoutMs }) => {
+    async ({ entityId, hubId, tokenIds, timeoutMs }) => {
       const env = (window as typeof window & {
         isolatedEnv?: {
           eReplicas?: Map<string, {
@@ -61,7 +67,7 @@ async function isAccountReady(page: Page, entityId: string, hubId: string, timeo
           if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
           const account = replica.state?.accounts?.get(hubId);
           if (!account) continue;
-          const hasDelta = Boolean(account.deltas?.get?.(1));
+          const hasDelta = tokenIds.every((tokenId) => Boolean(account.deltas?.get?.(tokenId)));
           const noPending = !account.pendingFrame;
           const hasFrame = Number(account.currentHeight || 0) > 0;
           if (hasDelta && noPending && hasFrame) return true;
@@ -72,7 +78,7 @@ async function isAccountReady(page: Page, entityId: string, hubId: string, timeo
 
       return false;
     },
-    { entityId, hubId, timeoutMs },
+    { entityId, hubId, tokenIds: [...tokenIds], timeoutMs },
   );
 }
 
@@ -126,14 +132,14 @@ export async function connectRuntimeToHub(
   identity: { entityId: string; signerId: string },
   hubId: string,
 ): Promise<void> {
-  if (await isAccountReady(page, identity!.entityId, hubId)) {
+  if (await isAccountReady(page, identity.entityId, hubId, DEFAULT_TOKEN_IDS)) {
     return;
   }
   const initialStatus = await getAccountOpenStatus(page, identity.entityId, hubId);
 
   if (!initialStatus.exists) {
     const openResult = await page.evaluate(
-      async ({ entityId, signerId, hubId, creditAmount, tokenId }) => {
+      async ({ entityId, signerId, hubId, creditAmount, tokenIds }) => {
         const maybeWindow = window as typeof window & {
           vaultOperations?: {
             enqueueEntityInputs?: (
@@ -151,14 +157,24 @@ export async function connectRuntimeToHub(
               inputs: Array<{
                 entityId: string;
                 signerId: string;
-                entityTxs: Array<{
-                  type: 'openAccount';
-                  data: {
-                    targetEntityId: string;
-                    creditAmount: bigint;
-                    tokenId: number;
-                  };
-                }>;
+                entityTxs: Array<
+                  | {
+                      type: 'openAccount';
+                      data: {
+                        targetEntityId: string;
+                        creditAmount: bigint;
+                        tokenId: number;
+                      };
+                    }
+                  | {
+                      type: 'extendCredit';
+                      data: {
+                        counterpartyEntityId: string;
+                        tokenId: number;
+                        amount: bigint;
+                      };
+                    }
+                >;
               }>,
             ) => Promise<unknown>;
           };
@@ -224,18 +240,34 @@ export async function connectRuntimeToHub(
           }
         }
 
+        const normalizedTokenIds = Array.isArray(tokenIds) ? tokenIds.filter((value) => Number.isFinite(value)) : [];
+        const primaryTokenId = normalizedTokenIds[0];
+        if (typeof primaryTokenId !== 'number') {
+          return { ok: false, error: 'tokenIds missing' };
+        }
+
         await vaultOperations.enqueueEntityInputs(env, [{
-            entityId,
-            signerId: liveSignerId,
-            entityTxs: [{
+          entityId,
+          signerId: liveSignerId,
+          entityTxs: [
+            {
               type: 'openAccount',
               data: {
                 targetEntityId: hubId,
                 creditAmount: BigInt(creditAmount),
-                tokenId,
+                tokenId: primaryTokenId,
               },
-            }],
-          }]);
+            },
+            ...normalizedTokenIds.slice(1).map((tokenId) => ({
+              type: 'extendCredit' as const,
+              data: {
+                counterpartyEntityId: hubId,
+                tokenId,
+                amount: BigInt(creditAmount),
+              },
+            })),
+          ],
+        }]);
 
         return { ok: true };
       },
@@ -244,14 +276,14 @@ export async function connectRuntimeToHub(
         signerId: identity.signerId,
         hubId,
         creditAmount: DEFAULT_CREDIT_AMOUNT.toString(),
-        tokenId: DEFAULT_TOKEN_ID,
+        tokenIds: DEFAULT_TOKEN_IDS,
       },
     );
 
     expect(openResult?.ok, `connectHub failed: ${openResult?.error ?? 'unknown'}`).toBe(true);
   }
 
-  const opened = await isAccountReady(page, identity.entityId, hubId, DEFAULT_OPEN_TIMEOUT_MS);
+  const opened = await isAccountReady(page, identity.entityId, hubId, DEFAULT_TOKEN_IDS, DEFAULT_OPEN_TIMEOUT_MS);
   const finalStatus = await getAccountOpenStatus(page, identity.entityId, hubId);
 
   expect(

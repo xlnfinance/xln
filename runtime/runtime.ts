@@ -62,7 +62,7 @@ import {
   submitReserveToReserve,
   transferNameBetweenEntities,
 } from './evm';
-import { createGossipLayer } from './networking/gossip';
+import { canonicalizeProfile, createGossipLayer, parseProfile } from './networking/gossip';
 import { attachEventEmitters } from './env-events';
 import {
   deriveSignerAddressSync,
@@ -134,7 +134,6 @@ import {
   safeParseReplicaKey,
   safeExtractEntityId,
 } from './ids';
-import { type Profile } from './networking/gossip';
 import {
   createProfileUpdateTx,
   getEntityDisplayInfo as getEntityDisplayInfoFromProfileOriginal,
@@ -650,18 +649,34 @@ const writeInfraStringArray = async (db: Level<Buffer, Buffer>, key: string, val
   await db.put(Buffer.from(key), Buffer.from(serializeTaggedJson([...new Set(values.filter(Boolean))].sort())));
 };
 
+const pruneInfraGossipProfile = async (db: Level<Buffer, Buffer>, entityId: string): Promise<void> => {
+  const normalizedEntityId = String(entityId || '').toLowerCase();
+  if (!normalizedEntityId) return;
+  const existingIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
+  const nextIds = existingIds.filter((value) => value !== normalizedEntityId);
+  const batch = db.batch();
+  batch.del(Buffer.from(makeInfraGossipProfileKey(normalizedEntityId)));
+  if (nextIds.length > 0) {
+    batch.put(Buffer.from(INFRA_GOSSIP_INDEX_KEY), Buffer.from(serializeTaggedJson(nextIds)));
+  } else {
+    batch.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));
+  }
+  await batch.write();
+};
+
 const persistGossipProfileToInfraDb = async (env: Env, profile: Profile): Promise<void> => {
   const dbReady = await tryOpenInfraDb(env);
   if (!dbReady) return;
   const db = getInfraDb(env);
-  const entityId = String(profile?.entityId || '').toLowerCase();
+  const canonicalProfile = canonicalizeProfile(profile);
+  const entityId = canonicalProfile.entityId.toLowerCase();
   if (!entityId) {
     throw new Error('INFRA_GOSSIP_ENTITY_ID_REQUIRED');
   }
   const existingIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
   const nextIds = existingIds.includes(entityId) ? existingIds : [...existingIds, entityId];
   const batch = db.batch();
-  batch.put(Buffer.from(makeInfraGossipProfileKey(entityId)), Buffer.from(serializeTaggedJson(profile)));
+  batch.put(Buffer.from(makeInfraGossipProfileKey(entityId)), Buffer.from(serializeTaggedJson(canonicalProfile)));
   batch.put(Buffer.from(INFRA_GOSSIP_INDEX_KEY), Buffer.from(serializeTaggedJson(nextIds.sort())));
   await batch.write();
 };
@@ -675,13 +690,14 @@ const loadGossipProfilesFromInfraDb = async (env: Env): Promise<void> => {
   for (const entityId of entityIds) {
     try {
       const raw = await db.get(Buffer.from(makeInfraGossipProfileKey(entityId)));
-      const profile = deserializeTaggedJson<Profile>(raw.toString());
+      const profile = parseProfile(deserializeTaggedJson<unknown>(raw.toString()));
       env.gossip.announce(profile);
     } catch (error) {
       console.warn(
         `[infra-db] failed to restore gossip profile ${entityId.slice(-8)}:`,
         error instanceof Error ? error.message : String(error),
       );
+      await pruneInfraGossipProfile(db, entityId);
     }
   }
 };

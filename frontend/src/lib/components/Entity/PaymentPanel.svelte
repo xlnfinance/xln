@@ -45,6 +45,7 @@
   let preflightError: string | null = null;
   let repeatIntervalMs = 0;
   let repeatTimer: ReturnType<typeof setInterval> | null = null;
+  let repeatStoppedReason = '';
   let routeSortMode: 'fee' | 'hops' = 'fee';
   let showFullEntityId = false;
   let profileExpanded = false;
@@ -285,6 +286,12 @@
     }
   };
 
+  function stopRepeatTimer(reason: string): void {
+    clearRepeatTimer();
+    repeatIntervalMs = 0;
+    repeatStoppedReason = reason;
+  }
+
   const clearHostedCheckoutCloseTimer = () => {
     if (hostedCheckoutCloseTimer) {
       clearTimeout(hostedCheckoutCloseTimer);
@@ -326,8 +333,10 @@
 
   const restartRepeatTimer = () => {
     clearRepeatTimer();
+    repeatStoppedReason = '';
     if (repeatIntervalMs <= 0 || selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
     repeatTimer = setInterval(() => {
+      if (sendingPayment || findingRoutes) return;
       void sendPayment(false);
     }, repeatIntervalMs);
   };
@@ -359,6 +368,7 @@
     selectedRouteIndex = -1;
     hostedCheckoutRouteKey = '';
     clearRepeatTimer();
+    repeatStoppedReason = '';
   }
 
   function getEntityName(id: string): string {
@@ -387,7 +397,7 @@
     const profile = getGossipProfileByEntityId(entity);
     if (!profile) return true; // allow local+gossip mixed discovery; key coverage is enforced above
     const metadata = profile.metadata || {};
-    return metadata.isHub === true || profile.capabilities.includes('hub');
+    return metadata.isHub === true;
   }
 
   function formatToken(value: bigint): string {
@@ -719,7 +729,6 @@
     const targetProfile = profiles.find((profile) => normalizeEntityId(profile.entityId) === targetNorm) || null;
     const hubsCount = profiles.filter((profile) =>
       profile.metadata.isHub === true
-      || profile.capabilities.includes('hub')
     ).length;
     return {
       profilesCount: profiles.length,
@@ -1297,6 +1306,9 @@
     } catch (error) {
       console.error('[Send] Payment failed:', error);
       preflightError = (error as Error)?.message || 'Unknown send error';
+      if (!manual) {
+        stopRepeatTimer(preflightError);
+      }
       toasts.error(`Payment failed: ${preflightError}`);
       return { queued: false, hashlock: null };
     } finally {
@@ -1667,6 +1679,10 @@
       <div class="repeat-status">
         Auto-send every {repeatIntervalMs >= 60000 ? `${Math.floor(repeatIntervalMs / 60000)}m` : `${Math.floor(repeatIntervalMs / 1000)}s`}
       </div>
+    {:else if repeatStoppedReason}
+      <div class="repeat-status repeat-stopped">
+        Auto-repeat stopped: {repeatStoppedReason}
+      </div>
     {/if}
   {/if}
 
@@ -1943,6 +1959,10 @@
     margin-top: 6px;
     font-size: 12px;
     color: #a3e635;
+  }
+
+  .repeat-status.repeat-stopped {
+    color: #f87171;
   }
 
   .routes-scroll {

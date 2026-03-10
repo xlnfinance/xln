@@ -24,6 +24,7 @@ import type { RuntimeInput, RoutedEntityInput } from '../types';
 import { deserializeWsMessage, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage, type RuntimeWsAuth } from './ws-protocol';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId as normalizeCanonicalRuntimeId } from './runtime-id';
+import type { Profile } from './gossip';
 
 type ClientEntry = {
   ws: WebSocket;
@@ -34,6 +35,12 @@ type ClientEntry = {
 type PendingMessage = {
   queuedAt: number;
   message: RuntimeWsMessage;
+};
+
+type StoredRelayProfile = {
+  profile: Profile;
+  timestamp: number;
+  fromRuntimeId: string;
 };
 
 export type RuntimeWsServerOptions = {
@@ -182,13 +189,13 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
 
   // Gossip profile storage - relay is central source of truth
   // Key: entityId, Value: profile with timestamp (newer replaces older)
-  const gossipProfiles = new Map<string, { profile: any; timestamp: number; fromRuntimeId: string }>();
+  const gossipProfiles = new Map<string, StoredRelayProfile>();
 
-  const storeGossipProfile = (profile: any, fromRuntimeId: string) => {
-    const entityId = profile?.entityId;
+  const storeGossipProfile = (profile: Profile, fromRuntimeId: string) => {
+    const entityId = profile.entityId;
     if (!entityId) return false;
-    const newTs = profile?.lastUpdated || 0;
-    const name = profile?.name || '(no name)';
+    const newTs = profile.lastUpdated || 0;
+    const name = profile.name || '(no name)';
     const existing = gossipProfiles.get(entityId);
     if (existing && existing.timestamp >= newTs) {
       return false; // Existing is newer or same
@@ -201,7 +208,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     return true;
   };
 
-  const getAllGossipProfiles = (): any[] => {
+  const getAllGossipProfiles = (): Profile[] => {
     return Array.from(gossipProfiles.values()).map(v => v.profile);
   };
 
@@ -215,7 +222,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
 
     // GOSSIP ANNOUNCE: Store profiles in relay (clients pull when needed)
     if (msg.type === 'gossip_announce') {
-      const payload = msg.payload as { profiles?: any[] } | undefined;
+      const payload = msg.payload as { profiles?: Profile[] } | undefined;
       const profiles = payload?.profiles || [];
       let stored = 0;
       for (const profile of profiles) {

@@ -1,10 +1,28 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, enqueueAndProcess } from '../../stores/xlnStore';
   import { tabs } from '../../stores/tabStore';
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import MultiSelect from 'svelte-multiselect';
 
-  // Callback prop for profile announcement
-  let { onProfileAnnounced }: { onProfileAnnounced?: (profile: any) => void } = $props();
+  type EditableProfileFields = {
+    name?: string;
+    avatar?: string;
+    bio?: string;
+    website?: string;
+  };
+
+  type AnnouncedProfile = {
+    entityId: string;
+    name: string;
+    avatar: string;
+    bio: string;
+    website: string;
+    lastUpdated: number;
+    capabilities: string[];
+    metadata: Record<string, never>;
+  };
+
+  let { onProfileAnnounced }: { onProfileAnnounced?: (profile: AnnouncedProfile) => void } = $props();
 
   let selectedCapabilities = $state<string[]>([]);
   let isHub = $state(false);
@@ -44,13 +62,23 @@
 
   // Profile loading state
   let isLoadingProfile = $state(false);
-  let existingProfile: any = $state(null);
+  let existingProfile = $state<GossipProfile | null>(null);
 
-  function parseMetadata(input: string): any {
+  function parseMetadata(input: string): EditableProfileFields | undefined {
     if (!input.trim()) return undefined;
 
     try {
-      return JSON.parse(input);
+      const parsed = JSON.parse(input) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Invalid JSON metadata');
+      }
+      const record = parsed as Record<string, unknown>;
+      return {
+        ...(typeof record.name === 'string' ? { name: record.name } : {}),
+        ...(typeof record.avatar === 'string' ? { avatar: record.avatar } : {}),
+        ...(typeof record.bio === 'string' ? { bio: record.bio } : {}),
+        ...(typeof record.website === 'string' ? { website: record.website } : {}),
+      };
     } catch (err) {
       throw new Error('Invalid JSON metadata');
     }
@@ -72,11 +100,6 @@
       announceError = null;
 
       const capabilities = [...selectedCapabilities];
-
-      // Add 'hub' capability if checkbox is checked
-      if (isHub && !capabilities.includes('hub')) {
-        capabilities.push('hub');
-      }
 
       // Build metadata from individual fields if hub is selected, otherwise use JSON input
       const metadata = isHub
@@ -185,7 +208,7 @@
 
       // Get profiles from gossip layer
       const profiles = env.gossip.getProfiles();
-      const profile = profiles.find((p: any) => p.entityId === entityId);
+      const profile = profiles.find((p: GossipProfile) => p.entityId === entityId) ?? null;
 
       if (profile) {
         existingProfile = profile;
@@ -205,12 +228,9 @@
   }
 
   // Populate form fields from existing profile
-  function populateFormFromProfile(profile: any) {
-    // Set capabilities (exclude 'hub' as it's handled separately)
-    selectedCapabilities = (profile.capabilities || []).filter((cap: string) => cap !== 'hub');
-
-    // Set hub checkbox if 'hub' capability exists
-    isHub = (profile.capabilities || []).includes('hub');
+  function populateFormFromProfile(profile: GossipProfile) {
+    selectedCapabilities = profile.capabilities || [];
+    isHub = profile.metadata?.isHub === true;
 
     // Set metadata fields
     if (profile) {
@@ -315,7 +335,7 @@
           <input type="checkbox" bind:checked={isHub} class="form-checkbox" data-testid="hub-checkbox" />
           <span class="checkbox-text">🌟 Register as Hub</span>
         </label>
-        <small class="form-hint">Automatically adds "hub" to your capabilities</small>
+        <small class="form-hint">Declared public features only. Hub status comes from the entity's hub config.</small>
       </div>
 
       {#if isHub}

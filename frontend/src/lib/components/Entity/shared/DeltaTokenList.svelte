@@ -1,6 +1,6 @@
 <script lang="ts">
   import DeltaTokenSummary from './DeltaTokenSummary.svelte';
-  import type { DeltaParts } from './delta-types';
+  import type { DeltaParts, DeltaVisualScale } from './delta-types';
 
   type DeltaListRow = {
     tokenId: number;
@@ -11,6 +11,7 @@
     derived: DeltaParts;
     decimals: number;
     pendingOutDebtMode?: 'none' | 'pending' | 'settling';
+    visualScale?: DeltaVisualScale | null;
   };
 
   export let rows: DeltaListRow[] = [];
@@ -44,6 +45,7 @@
         decimals={row.decimals}
         barHeight={barHeight}
         pendingOutDebtMode={row.pendingOutDebtMode || 'none'}
+        visualScale={row.visualScale ?? null}
         {showMetricLabels}
       />
     </div>

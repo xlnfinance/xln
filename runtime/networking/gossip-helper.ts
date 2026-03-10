@@ -151,7 +151,7 @@ export function buildEntityProfile(
     bio: entityState.profile.bio,
     website: entityState.profile.website,
     lastUpdated: timestamp,
-    capabilities: hubConfig ? ['hub'] : [],
+    capabilities: [],
     publicAccounts,
     endpoints: [],
     relays: [],

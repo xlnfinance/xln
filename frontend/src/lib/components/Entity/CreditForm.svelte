@@ -35,7 +35,44 @@
     return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
   }
 
-  async function extendCredit() {
+  type CreditEntityInput = {
+    entityId: string;
+    signerId: string;
+    entityTxs: Array<{
+      type: 'extendCredit';
+      data: {
+        counterpartyEntityId: string;
+        tokenId: number;
+        amount: bigint;
+      };
+    }>;
+  };
+
+  type CreditRequestResponse = {
+    success?: boolean;
+    error?: string;
+    approvedAmount?: string;
+  };
+
+  function resolveApiBase(): string {
+    const fallback = typeof window === 'undefined' ? '' : window.location.origin;
+    if (typeof window === 'undefined') return fallback;
+    const configuredWindow = (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__;
+    if (typeof configuredWindow === 'string' && configuredWindow.trim().length > 0) {
+      return configuredWindow.trim();
+    }
+    try {
+      const configuredStorage = localStorage.getItem('xln-api-base-url');
+      if (typeof configuredStorage === 'string' && configuredStorage.trim().length > 0) {
+        return configuredStorage.trim();
+      }
+    } catch {
+      // ignore storage access failures
+    }
+    return fallback;
+  }
+
+  async function submitExtendCredit(successMessage: string) {
     if (!effectiveCounterparty) return;
     try {
       const xln = await getXLN();
@@ -47,26 +84,60 @@
         || signerId
         || requireSignerIdForEntity(env, entityId, 'credit-form');
 
-      const adjustmentInput = {
+      const input: CreditEntityInput = {
         entityId,
         signerId: resolvedSigner,
         entityTxs: [{
-          type: 'extendCredit' as const,
+          type: 'extendCredit',
           data: {
             counterpartyEntityId: effectiveCounterparty,
             tokenId: selectedTokenId,
-            amount: creditAmountBigInt
-          }
-        }]
+            amount: creditAmountBigInt,
+          },
+        }],
       };
 
-      xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [adjustmentInput] });
-      console.log(`Credit extended: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, creditAmountBigInt)}`);
-
+      xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [input] });
+      console.log(successMessage);
       creditAmountBigInt = 0n;
-    } catch (err: any) {
-      console.error('Failed to extend credit:', err);
-      error.set(`Credit extension failed: ${err?.message || 'Unknown error'}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error('Credit action failed:', message);
+      error.set(`Credit action failed: ${message}`);
+    }
+  }
+
+  async function extendCredit() {
+    await submitExtendCredit(`Credit extended: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, creditAmountBigInt)}`);
+  }
+
+  async function requestCredit() {
+    if (!effectiveCounterparty) return;
+    try {
+      if (!activeIsLive) throw new Error('Credit requests are only available in LIVE mode');
+      const response = await fetch(`${resolveApiBase()}/api/credit/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userEntityId: entityId,
+          hubEntityId: effectiveCounterparty,
+          tokenId: selectedTokenId,
+          amount: creditAmountBigInt.toString(),
+        }),
+      });
+      const result = await response.json() as CreditRequestResponse;
+      if (!response.ok || result.success !== true) {
+        throw new Error(result.error || `Credit request failed (${response.status})`);
+      }
+      console.log(
+        `Credit requested: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, creditAmountBigInt)} ` +
+          `(approved=${result.approvedAmount ?? 'unknown'})`,
+      );
+      creditAmountBigInt = 0n;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error('Credit request failed:', message);
+      error.set(`Credit request failed: ${message}`);
     }
   }
 </script>
@@ -87,9 +158,14 @@
       decimals={selectedTokenDecimals}
       placeholder="Credit amount"
     />
-    <button class="action-button secondary" on:click={extendCredit} disabled={!effectiveCounterparty || creditAmountBigInt <= 0n}>
-      Extend Credit
-    </button>
+    <div class="button-row">
+      <button class="action-button secondary" on:click={extendCredit} disabled={!effectiveCounterparty || creditAmountBigInt <= 0n}>
+        Extend Credit
+      </button>
+      <button class="action-button tertiary" on:click={requestCredit} disabled={!effectiveCounterparty || creditAmountBigInt <= 0n}>
+        Request Credit
+      </button>
+    </div>
   </div>
 </div>
 
@@ -152,8 +228,24 @@
     background: linear-gradient(135deg, #2563eb, #1e40af);
   }
 
+  .action-button.tertiary {
+    background: linear-gradient(135deg, #14532d, #166534);
+    color: white;
+    box-shadow: 0 1px 3px rgba(22, 101, 52, 0.3);
+  }
+
+  .action-button.tertiary:hover {
+    background: linear-gradient(135deg, #15803d, #166534);
+  }
+
   .action-button:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+
+  .button-row {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
   }
 </style>

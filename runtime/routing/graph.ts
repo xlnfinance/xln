@@ -29,8 +29,7 @@ export interface NetworkGraph {
 }
 
 const isHubLikeProfile = (profile: Profile): boolean => {
-  const capabilities = Array.isArray(profile.capabilities) ? profile.capabilities : [];
-  return profile.metadata?.isHub === true || capabilities.includes('hub');
+  return profile.metadata?.isHub === true;
 };
 
 const hasRequiredRoutingMetadata = (profile: Profile): boolean => {

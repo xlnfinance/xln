@@ -1,6 +1,7 @@
 <script lang="ts">
   import DeltaCapacityBar from './DeltaCapacityBar.svelte';
-  import type { DeltaParts } from './delta-types';
+  import type { DeltaParts, DeltaVisualScale } from './delta-types';
+  import { buildTokenVisualScale } from './delta-visual';
 
   export let symbol: string;
   export let name: string = '';
@@ -13,6 +14,7 @@
   export let barLayout: 'center' | 'sides' = 'center';
   export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
   export let showMetricLabels: boolean = true;
+  export let visualScale: DeltaVisualScale | null = null;
 
   function iconForSymbol(rawSymbol: string): { text: string; cls: string } {
     const s = String(rawSymbol || '').toUpperCase();
@@ -41,6 +43,16 @@
   $: outAmountCompact = stripTrailingSymbol(outAmountDisplay, symbol);
   $: inAmountCompact = stripTrailingSymbol(inAmountDisplay, symbol);
   $: compactName = name || symbol;
+  $: resolvedVisualScale = visualScale ?? buildTokenVisualScale(symbol, decimals, derived);
+  $: outUsdHint = formatUsdHint(resolvedVisualScale?.outCapacityUsd ?? 0);
+  $: inUsdHint = formatUsdHint(resolvedVisualScale?.inCapacityUsd ?? 0);
+
+  function formatUsdHint(valueUsd: number): string {
+    if (!Number.isFinite(valueUsd) || valueUsd <= 0) return '';
+    if (valueUsd >= 1000) return `~$${Math.round(valueUsd).toLocaleString('en-US')}`;
+    if (valueUsd >= 1) return `~$${valueUsd.toFixed(0)}`;
+    return `~$${valueUsd.toFixed(2)}`;
+  }
 </script>
 
 <div class="delta-summary" class:compact>
@@ -55,12 +67,18 @@
       </div>
       <div class="compact-metric compact-out" aria-label="Outbound capacity">
         {#if showMetricLabels}<span class="metric-label">Outbound</span>{/if}
-        <span class="compact-out-value">{outAmountCompact}</span>
+        <span class="compact-out-value">
+          <span>{outAmountCompact}</span>
+          {#if outUsdHint}<span class="usd-hint">{outUsdHint}</span>{/if}
+        </span>
       </div>
       <span class="metric-divider" aria-hidden="true"></span>
       <div class="compact-metric compact-in" aria-label="Inbound capacity">
         {#if showMetricLabels}<span class="metric-label">Inbound</span>{/if}
-        <span class="compact-in-value">{inAmountCompact}</span>
+        <span class="compact-in-value">
+          <span>{inAmountCompact}</span>
+          {#if inUsdHint}<span class="usd-hint">{inUsdHint}</span>{/if}
+        </span>
       </div>
     {:else}
       <div class="token-meta">
@@ -75,11 +93,17 @@
       <div class="caps">
         <span class="cap out">
           <span class="cap-label">Outbound</span>
-          <span class="cap-value">{outAmountDisplay}</span>
+          <span class="cap-value">
+            <span>{outAmountDisplay}</span>
+            {#if outUsdHint}<span class="usd-hint">{outUsdHint}</span>{/if}
+          </span>
         </span>
         <span class="cap in">
           <span class="cap-label">Inbound</span>
-          <span class="cap-value">{inAmountDisplay}</span>
+          <span class="cap-value">
+            <span>{inAmountDisplay}</span>
+            {#if inUsdHint}<span class="usd-hint">{inUsdHint}</span>{/if}
+          </span>
         </span>
       </div>
     {/if}
@@ -93,10 +117,10 @@
 
   <DeltaCapacityBar
     {derived}
-    {decimals}
     layout={barLayout}
     {pendingOutDebtMode}
     heightPx={barHeight}
+    visualScale={resolvedVisualScale}
   />
 </div>
 
@@ -218,6 +242,17 @@
     line-height: 1;
     font-weight: 700;
     letter-spacing: -0.045em;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .usd-hint {
+    color: #94a3b8;
+    font-size: 0.48em;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
   }
 
   .actions {
@@ -296,6 +331,9 @@
     color: #f3f4f6;
     font-variant-numeric: tabular-nums;
     font-feature-settings: 'tnum' 1;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
   }
 
   .metric-divider {
@@ -331,6 +369,9 @@
     color: #e5e7eb;
     font-variant-numeric: tabular-nums;
     font-feature-settings: 'tnum' 1;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
   }
 
   @media (max-width: 1100px) {
