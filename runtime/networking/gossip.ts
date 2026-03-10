@@ -13,8 +13,8 @@ import type { PaymentRoute } from '../routing/pathfinding';
 export type BoardValidator = {
   signer: string; // canonical signer address (0x...) or signerId fallback
   weight: number; // uint16 voting power
-  signerId?: string; // optional runtime signerId for routing/debug
-  publicKey?: string; // optional hex public key
+  signerId: string; // runtime signerId for routing/debug
+  publicKey: string; // hex public key
 };
 
 export type BoardMetadata = {
@@ -28,7 +28,7 @@ export type ProfileMetadata = {
   routingFeePPM: number;
   baseFee: bigint;
   board: BoardMetadata;
-  entityPublicKey?: string;
+  entityPublicKey: string;
   profileHanko?: string;
   region?: string;
   version?: string;
@@ -64,7 +64,7 @@ export type Profile = {
   bio: string;
   website: string;
   lastUpdated: number;
-  runtimeId?: string; // Runtime identity (usually signer1 address)
+  runtimeId: string; // Runtime identity (usually signer1 address)
   runtimeEncPubKey: string;
   capabilities: string[]; // e.g. ["router", "swap:memecoins"]
   publicAccounts: string[]; // direct peers with inbound capacity
@@ -88,6 +88,7 @@ export interface GossipLayer {
 
 type GossipLayerOptions = {
   onAnnounce?: (profile: Profile) => void;
+  getLiveProfiles?: () => Profile[];
 };
 
 const normalizeX25519Key = (raw: unknown): string | null => {
@@ -207,17 +208,19 @@ const parseBoardValidator = (raw: unknown, entityId: string): BoardValidator => 
     throw new Error(`GOSSIP_PROFILE_BOARD_SIGNER_REQUIRED: entity=${entityId}`);
   }
   const weight = parseUint16(raw.weight, 'GOSSIP_PROFILE_BOARD_WEIGHT_INVALID', entityId);
-  const signerId = typeof raw.signerId === 'string' && raw.signerId.trim().length > 0
-    ? raw.signerId.trim()
-    : undefined;
-  const publicKey = typeof raw.publicKey === 'string' && raw.publicKey.trim().length > 0
-    ? raw.publicKey.trim()
-    : undefined;
+  const signerId = typeof raw.signerId === 'string' ? raw.signerId.trim() : '';
+  if (!signerId) {
+    throw new Error(`GOSSIP_PROFILE_BOARD_SIGNER_ID_REQUIRED: entity=${entityId}`);
+  }
+  const publicKey = typeof raw.publicKey === 'string' ? raw.publicKey.trim() : '';
+  if (!publicKey) {
+    throw new Error(`GOSSIP_PROFILE_BOARD_PUBLIC_KEY_REQUIRED: entity=${entityId}`);
+  }
   return {
     signer,
     weight,
-    ...(signerId ? { signerId } : {}),
-    ...(publicKey ? { publicKey } : {}),
+    signerId,
+    publicKey,
   };
 };
 
@@ -310,6 +313,14 @@ export const parseProfile = (raw: unknown): Profile => {
   if (!runtimeEncPubKey) {
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ENC_PUBKEY_REQUIRED: entity=${entityId}`);
   }
+  const runtimeId = typeof raw.runtimeId === 'string' ? raw.runtimeId.trim() : '';
+  if (!runtimeId) {
+    throw new Error(`GOSSIP_PROFILE_RUNTIME_ID_REQUIRED: entity=${entityId}`);
+  }
+  const entityPublicKey = typeof metadataRaw.entityPublicKey === 'string' ? metadataRaw.entityPublicKey.trim() : '';
+  if (!entityPublicKey) {
+    throw new Error(`GOSSIP_PROFILE_ENTITY_PUBLIC_KEY_REQUIRED: entity=${entityId}`);
+  }
   const capabilities = normalizeStringArray(raw.capabilities);
   const publicAccounts = normalizeStringArray(raw.publicAccounts);
   const endpoints = normalizeStringArray(raw.endpoints);
@@ -327,6 +338,10 @@ export const parseProfile = (raw: unknown): Profile => {
     ),
     baseFee: parseBigIntValue(metadataRaw.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
     board: parseBoardMetadata(metadataRaw.board, entityId),
+    entityPublicKey,
+    ...(typeof metadataRaw.profileHanko === 'string' && metadataRaw.profileHanko.trim().length > 0
+      ? { profileHanko: metadataRaw.profileHanko.trim() }
+      : {}),
   };
   return {
     entityId,
@@ -335,7 +350,7 @@ export const parseProfile = (raw: unknown): Profile => {
     bio: typeof raw.bio === 'string' ? raw.bio : '',
     website: typeof raw.website === 'string' ? raw.website : '',
     lastUpdated,
-    ...(typeof raw.runtimeId === 'string' && raw.runtimeId.trim().length > 0 ? { runtimeId: raw.runtimeId.trim() } : {}),
+    runtimeId,
     runtimeEncPubKey,
     capabilities,
     publicAccounts,
@@ -380,6 +395,14 @@ export const canonicalizeProfile = (
   if (!normalizedEntityEncPubKey) {
     throw new Error(`GOSSIP_PROFILE_MISSING_ENTITY_ENC_PUBKEY: entity=${entityId}`);
   }
+  if (typeof profile.runtimeId !== 'string' || profile.runtimeId.trim().length === 0) {
+    throw new Error(`GOSSIP_PROFILE_RUNTIME_ID_REQUIRED: entity=${entityId}`);
+  }
+  const normalizedRuntimeId = profile.runtimeId.trim();
+  const entityPublicKey = typeof metadata.entityPublicKey === 'string' ? metadata.entityPublicKey.trim() : '';
+  if (!entityPublicKey) {
+    throw new Error(`GOSSIP_PROFILE_ENTITY_PUBLIC_KEY_REQUIRED: entity=${entityId}`);
+  }
   if (typeof metadata.entityEncPubKey !== 'string' || metadata.entityEncPubKey !== normalizedEntityEncPubKey) {
     throw new Error(`GOSSIP_PROFILE_ENTITY_ENC_PUBKEY_NOT_NORMALIZED: entity=${entityId}`);
   }
@@ -402,6 +425,7 @@ export const canonicalizeProfile = (
     bio: profile.bio,
     website: profile.website,
     lastUpdated: incomingLastUpdated,
+    runtimeId: normalizedRuntimeId,
     runtimeEncPubKey: normalizedRuntimeEncPubKey,
     capabilities,
     publicAccounts,
@@ -417,6 +441,10 @@ export const canonicalizeProfile = (
       board,
       routingFeePPM,
       baseFee,
+      entityPublicKey,
+      ...(typeof metadata.profileHanko === 'string' && metadata.profileHanko.trim().length > 0
+        ? { profileHanko: metadata.profileHanko.trim() }
+        : {}),
       isHub:
         metadata.isHub === true ||
         capabilities.includes('hub') === true ||
@@ -447,9 +475,8 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
       !existing ||
       newTimestamp > existingTimestamp ||
       (newTimestamp === existingTimestamp && (
-        (!existing.runtimeId && !!normalizedProfile.runtimeId) ||
         (existing.runtimeId !== normalizedProfile.runtimeId) ||
-        (!!normalizedProfile.metadata.entityPublicKey && existing.metadata.entityPublicKey !== normalizedProfile.metadata.entityPublicKey) ||
+        (existing.metadata.entityPublicKey !== normalizedProfile.metadata.entityPublicKey) ||
         (existing.accounts.length !== normalizedProfile.accounts.length)  // Accept if accounts changed
       ));
 
@@ -522,7 +549,11 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
     return {
       findPaths: async (source: string, target: string, amount?: bigint, tokenId: number = 1) => {
         const requiredRecipientAmount = amount ?? 1n;
-        const graph = buildNetworkGraph(profiles, tokenId);
+        const graphProfiles = new Map(profiles);
+        for (const liveProfile of options.getLiveProfiles?.() || []) {
+          graphProfiles.set(liveProfile.entityId, canonicalizeProfile(liveProfile));
+        }
+        const graph = buildNetworkGraph(graphProfiles, tokenId);
         const finder = new PathFinder(graph);
         return finder.findRoutes(source, target, requiredRecipientAmount, tokenId, 100);
       }

@@ -56,21 +56,18 @@ export async function signProfile(
   signerId: string
 ): Promise<Profile> {
   const canonicalProfile = canonicalizeProfile(profile);
-  const existingPubKey = canonicalProfile.metadata.entityPublicKey;
-  let entityPublicKey = existingPubKey;
-  if (!entityPublicKey) {
-    const signerPublicKey = getSignerPublicKey(env, signerId);
-    if (!signerPublicKey) {
-      throw new Error(`PROFILE_SIGN_ENTITY_PUBLIC_KEY_REQUIRED: entity=${canonicalProfile.entityId} signerId=${signerId}`);
-    }
-    entityPublicKey = bytesToHex(signerPublicKey);
+  const signerPublicKey = getSignerPublicKey(env, signerId);
+  if (!signerPublicKey) {
+    throw new Error(`PROFILE_SIGN_ENTITY_PUBLIC_KEY_REQUIRED: entity=${canonicalProfile.entityId} signerId=${signerId}`);
+  }
+  const entityPublicKey = bytesToHex(signerPublicKey);
+  if (canonicalProfile.metadata.entityPublicKey !== entityPublicKey) {
+    throw new Error(
+      `PROFILE_SIGN_ENTITY_PUBLIC_KEY_MISMATCH: entity=${canonicalProfile.entityId} signerId=${signerId}`,
+    );
   }
 
-  const profileWithKey = entityPublicKey
-    ? { ...canonicalProfile, metadata: { ...canonicalProfile.metadata, entityPublicKey } }
-    : canonicalProfile;
-
-  const hash = computeProfileHash(profileWithKey);
+  const hash = computeProfileHash(canonicalProfile);
 
   // Use same signing mechanism as accountFrames
   const hankos = await signHashesAsSingleEntity(
@@ -106,9 +103,9 @@ export async function signProfile(
   }
 
   return canonicalizeProfile({
-    ...profileWithKey,
+    ...canonicalProfile,
     metadata: {
-      ...profileWithKey.metadata,
+      ...canonicalProfile.metadata,
       profileHanko,
     },
   });
