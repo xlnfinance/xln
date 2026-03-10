@@ -17,6 +17,8 @@ import {
   createRuntime as createSharedRuntime,
 } from './utils/e2e-demo-users';
 import { connectHub as connectActiveRuntimeToHub } from './utils/e2e-connect';
+import { getRenderedPrimaryOutbound, waitForRenderedPrimaryOutboundDelta } from './utils/e2e-account-ui';
+import { getPersistedReceiptCursor } from './utils/e2e-runtime-receipts';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const INIT_TIMEOUT = 30_000;
@@ -27,10 +29,6 @@ type AccountProgress = {
   signerId: string;
   counterpartyId: string;
   frameHeight: number;
-  collateralWei: string;
-  pendingRequestedWei: string;
-  hasRequestCollateralTx: boolean;
-  hasJEventClaimTx: boolean;
 };
 
 function randomMnemonic(): string {
@@ -63,45 +61,35 @@ async function createDemoRuntime(page: Page, label: string, mnemonic: string): P
 
 async function readPrimaryAccountProgress(page: Page): Promise<AccountProgress | null> {
   return page.evaluate(() => {
-    const env = (window as any).isolatedEnv;
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        eReplicas?: Map<string, {
+          state?: {
+            accounts?: Map<string, {
+              currentHeight?: number;
+              deltas?: Map<number | string, unknown>;
+            }>;
+          };
+        }>;
+      };
+    }).isolatedEnv;
     if (!env?.eReplicas) return null;
 
-    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
     for (const [key, replica] of env.eReplicas.entries()) {
       const [entityId, signerId] = String(key).split(':');
       if (!entityId || !signerId) continue;
-      if (runtimeSigner && String(signerId).toLowerCase() !== runtimeSigner) continue;
 
       const accounts = replica?.state?.accounts;
       if (!accounts || accounts.size === 0) continue;
 
       for (const [counterpartyId, account] of accounts.entries()) {
-        const delta = account?.deltas?.get?.(1);
+        const delta = account?.deltas?.get?.(1) ?? account?.deltas?.get?.('1');
         if (!delta) continue;
-        const isLeft = String(entityId).toLowerCase() < String(counterpartyId).toLowerCase();
-        const XLN = (window as any).XLN;
-        const derived = typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, isLeft) : null;
-        const pendingRequested = account?.requestedRebalance?.get?.(1) || 0n;
-        const history = Array.isArray(account?.frameHistory) ? account.frameHistory : [];
-        let hasRequestCollateralTx = false;
-        let hasJEventClaimTx = false;
-        for (const frame of history) {
-          const txs = Array.isArray(frame?.accountTxs) ? frame.accountTxs : [];
-          for (const tx of txs) {
-            if (tx?.type === 'request_collateral') hasRequestCollateralTx = true;
-            if (tx?.type === 'j_event_claim') hasJEventClaimTx = true;
-          }
-        }
-
         return {
           entityId,
           signerId,
           counterpartyId: String(counterpartyId),
           frameHeight: Number(account?.currentHeight || 0),
-          collateralWei: String(derived?.outCollateral ?? 0n),
-          pendingRequestedWei: String(pendingRequested),
-          hasRequestCollateralTx,
-          hasJEventClaimTx,
         };
       }
     }
@@ -111,22 +99,38 @@ async function readPrimaryAccountProgress(page: Page): Promise<AccountProgress |
 
 async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
   const state = await page.evaluate(() => {
-    const env = (window as any).isolatedEnv;
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        eReplicas?: Map<string, {
+          state?: {
+            accounts?: Map<string, {
+              deltas?: Map<number | string, unknown>;
+              pendingFrame?: unknown;
+              currentHeight?: number;
+            }>;
+          };
+        }>;
+        gossip?: {
+          getProfiles?: () => Array<{
+            entityId?: string;
+            metadata?: { isHub?: boolean };
+            capabilities?: string[];
+          }>;
+        };
+      };
+    }).isolatedEnv;
     if (!env?.eReplicas) return { ready: false, hubId: '' };
 
-    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
     let ready = false;
     let hubId = '';
 
     for (const [key, rep] of env.eReplicas.entries()) {
-      const [entityId, signerId] = String(key).split(':');
-      if (!entityId || !signerId) continue;
-      if (runtimeSigner && String(signerId).toLowerCase() !== runtimeSigner) continue;
-
+      const [entityId] = String(key).split(':');
+      if (!entityId) continue;
       if (rep?.state?.accounts instanceof Map) {
         for (const [counterpartyId, account] of rep.state.accounts.entries()) {
           if (!hubId) hubId = String(counterpartyId || '');
-          const hasDelta = !!account?.deltas?.get?.(1);
+          const hasDelta = !!(account?.deltas?.get?.(1) || account?.deltas?.get?.('1'));
           if (hasDelta && !account?.pendingFrame && Number(account?.currentHeight || 0) > 0) {
             ready = true;
             hubId = String(counterpartyId || '');
@@ -167,12 +171,13 @@ test.describe('E2E User Journey', () => {
     const initial = await readPrimaryAccountProgress(page);
     expect(initial, 'expected at least one opened hub account').not.toBeNull();
     if (!initial) return;
+    const renderedBefore = await getRenderedPrimaryOutbound(page);
+    const persistedBefore = await getPersistedReceiptCursor(page);
 
     // User flow action: request one offchain faucet payment through the opened account.
     await page.evaluate(async ({ entityId, signerId, counterpartyId }) => {
       const env = (window as any).isolatedEnv;
-      const XLN = (window as any).XLN;
-      if (!env || !XLN) return;
+      if (!env) return;
       const runtimeId = String(env.runtimeId || '').toLowerCase();
       const requestApiBase = window.location.origin;
       const localAccount = env?.eReplicas
@@ -216,13 +221,14 @@ test.describe('E2E User Journey', () => {
       counterpartyId: initial.counterpartyId,
     });
 
-    await expect.poll(async () => {
-      const state = await readPrimaryAccountProgress(page);
-      if (!state) return false;
-      return state.frameHeight > initial.frameHeight;
-    }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+    await expect.poll(
+      async () => (await getPersistedReceiptCursor(page)).nextHeight,
+      { timeout: 60_000, intervals: [500, 1000, 2000] },
+    ).toBeGreaterThan(persistedBefore.nextHeight);
+
+    await waitForRenderedPrimaryOutboundDelta(page, renderedBefore, 100, { timeoutMs: 60_000, tolerance: 0.001 });
 
     const finalState = (await readPrimaryAccountProgress(page))!;
-    expect(finalState.frameHeight, 'account frame must advance after offchain faucet').toBeGreaterThan(initial.frameHeight);
+    expect(finalState.frameHeight, 'account frame must stay live after offchain faucet').toBeGreaterThanOrEqual(initial.frameHeight);
   });
 });

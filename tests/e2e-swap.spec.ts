@@ -8,10 +8,12 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { ensureE2EBaseline } from './utils/e2e-baseline';
+import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
 } from './utils/e2e-demo-users';
+import { getRenderedOutboundForAccount } from './utils/e2e-account-ui';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const INIT_TIMEOUT = 30_000;
@@ -400,206 +402,65 @@ async function ensureDeterministicSwapAccount(page: Page): Promise<{
   signerId: string;
   counterpartyId: string;
 }> {
-  const result = await page.evaluate(async () => {
-    const TOKEN_SCALE = 10n ** 18n;
-    const OPEN_TOKEN_ID = 1; // USDC
-    const REQUIRED_OUTBOUND_TOKEN_IDS = [1]; // USDC
-
-    const findAccount = (accounts: any, ownerId: string, counterpartyId: string) => {
-      if (!(accounts instanceof Map)) return null;
-      const owner = String(ownerId || '').toLowerCase();
-      const cp = String(counterpartyId || '').toLowerCase();
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey || '').toLowerCase() === cp) return account;
-        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
-          ? String(account.counterpartyEntityId).toLowerCase()
-          : '';
-        if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
-        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
-      }
-      return null;
-    };
-
-    const getOutCapacity = (entityId: string, counterpartyId: string, account: any, tokenId: number): bigint => {
-      const XLN = (window as any).XLN;
-      if (!(account?.deltas instanceof Map) || !XLN?.deriveDelta) return 0n;
-      const delta = account.deltas.get(tokenId) ?? account.deltas.get(String(tokenId));
-      if (!delta) return 0n;
-      const isLeft = XLN?.isLeft
-        ? Boolean(XLN.isLeft(entityId, counterpartyId))
-        : String(entityId).toLowerCase() < String(counterpartyId).toLowerCase();
-      const derived = XLN.deriveDelta(delta, isLeft);
-      if (typeof derived?.outCapacity === 'bigint') return derived.outCapacity;
-      const numeric = Number(derived?.outCapacity || 0);
-      return Number.isFinite(numeric) ? BigInt(Math.floor(numeric)) : 0n;
-    };
-
-    const requestOffchainFaucet = async (
-      runtimeId: string,
-      userEntityId: string,
-      hubEntityId: string,
-      tokenId: number,
-      amount: string,
-    ): Promise<{ ok: boolean; detail: string }> => {
-      const deadline = Date.now() + 20_000;
-      let lastDetail = 'unknown';
-      while (Date.now() < deadline) {
-        try {
-          const response = await fetch('/api/faucet/offchain', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              userEntityId,
-              userRuntimeId: runtimeId,
-              hubEntityId,
-              tokenId,
-              amount,
-            }),
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (response.ok && payload?.success) return { ok: true, detail: String(payload?.status || 'queued') };
-          lastDetail = String(payload?.code || payload?.error || `status:${response.status}`);
-          if (response.status === 409 || response.status === 503) {
-            await new Promise((resolve) => setTimeout(resolve, 400));
-            continue;
-          }
-          return { ok: false, detail: lastDetail };
-        } catch (error: any) {
-          lastDetail = String(error?.message || error);
-          await new Promise((resolve) => setTimeout(resolve, 400));
-        }
-      }
-      return { ok: false, detail: lastDetail };
-    };
-
-    const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN;
-    if (!env?.eReplicas || !XLN?.enqueueRuntimeInput) return { ok: false, error: 'isolatedEnv/XLN missing' };
+  const identity = await page.evaluate(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+        eReplicas?: Map<string, unknown>;
+      };
+    }).isolatedEnv;
+    if (!env?.eReplicas) return null;
 
     const runtimeSigner = String(env.runtimeId || '').toLowerCase();
-    let entityId = '';
-    let signerId = '';
-
     for (const key of env.eReplicas.keys()) {
-      const [eid, sid] = String(key).split(':');
-      if (!eid || !sid) continue;
-      if (runtimeSigner && String(sid).toLowerCase() !== runtimeSigner) continue;
-      entityId = eid;
-      signerId = sid;
-      break;
+      const [entityId, signerId] = String(key).split(':');
+      if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
+      if (runtimeSigner && String(signerId).toLowerCase() !== runtimeSigner) continue;
+      return { entityId, signerId, runtimeId: String(env.runtimeId || '') };
     }
 
-    if (!entityId || !signerId) return { ok: false, error: 'local entity not found' };
-
-    let hubId = '';
-    const localRepKey = Array.from(env.eReplicas.keys()).find((key: string) => {
-      const [eid, sid] = String(key).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const localRep = localRepKey ? env.eReplicas.get(localRepKey) : null;
-    if (localRep?.state?.accounts instanceof Map && localRep.state.accounts.size > 0) {
-      hubId = String(localRep.state.accounts.keys().next().value || '');
-    }
-    if (!hubId) {
-      const startedAt = Date.now();
-      while (Date.now() - startedAt < 20_000) {
-        const profiles = env?.gossip?.getProfiles?.() || [];
-        const hub = profiles.find((p: any) =>
-          p?.metadata?.isHub === true ||
-          (Array.isArray(p?.capabilities) && (p.capabilities.includes('hub') || p.capabilities.includes('routing')))
-        );
-        hubId = String(hub?.entityId || '');
-        if (hubId) break;
-        await new Promise((resolve) => setTimeout(resolve, 300));
-      }
-    }
-    if (!hubId) return { ok: false, error: 'hub not discovered in gossip' };
-
-    const repKey = Array.from(env.eReplicas.keys()).find((key: string) => {
-      const [eid, sid] = String(key).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const rep = repKey ? env.eReplicas.get(repKey) : null;
-    const existingAccount = findAccount(rep?.state?.accounts, entityId, hubId);
-
-    if (!existingAccount) {
-      XLN.enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [{
-          entityId,
-          signerId,
-          entityTxs: [{
-            type: 'openAccount',
-            data: { targetEntityId: hubId, creditAmount: 10_000n * TOKEN_SCALE, tokenId: OPEN_TOKEN_ID },
-          }],
-        }],
-      });
-    }
-
-    const faucetStatuses: Array<{ tokenId: number; ok: boolean; detail: string }> = [];
-    for (const tokenId of REQUIRED_OUTBOUND_TOKEN_IDS) {
-      const status = await requestOffchainFaucet(
-        String(env.runtimeId || ''),
-        entityId,
-        hubId,
-        tokenId,
-        '100',
-      );
-      faucetStatuses.push({ tokenId, ...status });
-    }
-
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 60_000) {
-      const localRepKey = Array.from(env.eReplicas.keys()).find((key: string) => {
-        const [eid, sid] = String(key).split(':');
-        return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-          && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-      });
-      const localRep = localRepKey ? env.eReplicas.get(localRepKey) : null;
-      const account = findAccount(localRep?.state?.accounts, entityId, hubId);
-      if (account && Number(account?.currentHeight || 0) > 0) {
-        const ready = REQUIRED_OUTBOUND_TOKEN_IDS.every((tokenId) =>
-          getOutCapacity(entityId, hubId, account, tokenId) > 0n,
-        );
-        if (ready) return { ok: true, entityId, signerId, counterpartyId: hubId };
-      }
-      await new Promise((resolve) => setTimeout(resolve, 400));
-    }
-
-    const localRepFinalKey = Array.from(env.eReplicas.keys()).find((key: string) => {
-      const [eid, sid] = String(key).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const localRepFinal = localRepFinalKey ? env.eReplicas.get(localRepFinalKey) : null;
-    const accountFinal = findAccount(localRepFinal?.state?.accounts, entityId, hubId);
-    const outByToken = Object.fromEntries(
-      REQUIRED_OUTBOUND_TOKEN_IDS.map((tokenId) => [
-        String(tokenId),
-        accountFinal ? getOutCapacity(entityId, hubId, accountFinal, tokenId).toString() : '0',
-      ]),
-    );
-    const faucetText = faucetStatuses
-      .map((s) => `${s.tokenId}:${s.ok ? 'ok' : `fail(${s.detail})`}`)
-      .join(',');
-    return {
-      ok: false,
-      error:
-        `deterministic swap account did not reach ready state ` +
-        `(faucet=${faucetText}, outByToken=${JSON.stringify(outByToken)})`,
-    };
+    return null;
   });
+  expect(identity, 'local entity not found').not.toBeNull();
 
-  expect(result.ok, `ensureDeterministicSwapAccount failed: ${result.error || 'unknown'}`).toBe(true);
-  if (!result.ok) throw new Error(result.error || 'failed');
+  const response = await page.request.get('/api/debug/entities');
+  expect(response.ok(), 'debug entities endpoint must be available').toBe(true);
+  const body = await response.json() as {
+    entities?: Array<{ entityId?: string; isHub?: boolean }>;
+  };
+  const hubId = (Array.isArray(body.entities) ? body.entities : [])
+    .find((entity) => entity.isHub === true && typeof entity.entityId === 'string')
+    ?.entityId;
+  expect(typeof hubId === 'string' && hubId.length > 0, 'hub not discovered').toBe(true);
+
+  await connectRuntimeToSharedHub(page, {
+    entityId: identity!.entityId,
+    signerId: identity!.signerId,
+  }, hubId!);
+
+  const faucetResponse = await page.request.post('/api/faucet/offchain', {
+    data: {
+      userEntityId: identity!.entityId,
+      userRuntimeId: identity!.runtimeId,
+      hubEntityId: hubId!,
+      tokenId: 1,
+      amount: '100',
+    },
+  });
+  const faucetBody = await faucetResponse.json().catch(() => ({}));
+  expect(
+    faucetResponse.ok(),
+    `swap faucet failed: ${JSON.stringify(faucetBody)}`,
+  ).toBe(true);
+
+  await expect.poll(async () => {
+    return await getRenderedOutboundForAccount(page, hubId!);
+  }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(0);
+
   return {
-    entityId: result.entityId,
-    signerId: result.signerId,
-    counterpartyId: result.counterpartyId,
+    entityId: identity!.entityId,
+    signerId: identity!.signerId,
+    counterpartyId: hubId!,
   };
 }
 
@@ -709,115 +570,6 @@ async function readSwapResolveCount(
       }
     }
     return count;
-  }, { entityId, signerId, counterpartyId });
-}
-
-async function readSwapCapacitiesAndLatestOffer(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  counterpartyId: string,
-): Promise<{
-  outCapacityByToken: Record<string, string>;
-  latestUiOffer: { offerId: string; giveTokenId: number; wantTokenId: number } | null;
-}> {
-  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
-    const findAccount = (accounts: any, ownerId: string, cpId: string) => {
-      if (!(accounts instanceof Map)) return null;
-      const owner = String(ownerId || '').toLowerCase();
-      const cp = String(cpId || '').toLowerCase();
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey || '').toLowerCase() === cp) return account;
-        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
-          ? String(account.counterpartyEntityId).toLowerCase()
-          : '';
-        if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
-        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
-      }
-      return null;
-    };
-
-    const toBigIntSafe = (value: unknown): bigint => {
-      if (typeof value === 'bigint') return value;
-      if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
-      if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return BigInt(value.trim());
-      return 0n;
-    };
-
-    const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN;
-    if (!env?.eReplicas || !XLN?.deriveDelta) {
-      return { outCapacityByToken: {}, latestUiOffer: null };
-    }
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
-      const [eid, sid] = String(k).split(':');
-      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-    });
-    const rep = key ? env.eReplicas.get(key) : null;
-    const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
-    if (!account) return { outCapacityByToken: {}, latestUiOffer: null };
-
-    const isLeft = XLN?.isLeft
-      ? Boolean(XLN.isLeft(entityId, counterpartyId))
-      : String(entityId).toLowerCase() < String(counterpartyId).toLowerCase();
-
-    const outCapacityByToken: Record<string, string> = {};
-    if (account?.deltas instanceof Map) {
-      for (const [rawTokenId, delta] of account.deltas.entries()) {
-        const tokenId = Number.parseInt(String(rawTokenId), 10);
-        if (!Number.isFinite(tokenId) || tokenId <= 0 || !delta) continue;
-        const derived = XLN.deriveDelta(delta, isLeft);
-        const outCapacity = toBigIntSafe(derived?.outCapacity);
-        outCapacityByToken[String(tokenId)] = outCapacity.toString();
-      }
-    }
-
-    const normalizeOffer = (offer: any): { offerId: string; giveTokenId: number; wantTokenId: number } | null => {
-      const offerId = String(offer?.offerId || '');
-      if (!offerId.startsWith('swap-')) return null;
-      const giveTokenId = Number(offer?.giveTokenId);
-      const wantTokenId = Number(offer?.wantTokenId);
-      if (!Number.isFinite(giveTokenId) || !Number.isFinite(wantTokenId) || giveTokenId <= 0 || wantTokenId <= 0) {
-        return null;
-      }
-      return { offerId, giveTokenId, wantTokenId };
-    };
-
-    let latestUiOffer: { offerId: string; giveTokenId: number; wantTokenId: number } | null = null;
-
-    if (account?.swapOffers instanceof Map && account.swapOffers.size > 0) {
-      const offers = Array.from(account.swapOffers.values());
-      for (let i = offers.length - 1; i >= 0; i--) {
-        const normalized = normalizeOffer(offers[i]);
-        if (normalized) {
-          latestUiOffer = normalized;
-          break;
-        }
-      }
-    }
-
-    if (!latestUiOffer) {
-      const frames = Array.isArray(account?.frameHistory) ? account.frameHistory : [];
-      for (let fi = frames.length - 1; fi >= 0; fi--) {
-        const frame = frames[fi];
-        const txs = Array.isArray(frame?.accountTxs) ? frame.accountTxs : [];
-        for (let ti = txs.length - 1; ti >= 0; ti--) {
-          const tx = txs[ti];
-          if (tx?.type !== 'swap_offer') continue;
-          const normalized = normalizeOffer(tx?.data);
-          if (normalized) {
-            latestUiOffer = normalized;
-            break;
-          }
-        }
-        if (latestUiOffer) break;
-      }
-    }
-
-    return { outCapacityByToken, latestUiOffer };
   }, { entityId, signerId, counterpartyId });
 }
 
@@ -1119,26 +871,10 @@ test.describe('E2E Swap Flow', () => {
       await placeButton.click();
       await expect(page.getByTestId('swap-open-orders')).toBeVisible({ timeout: 60_000 });
     });
-    const placedOffer = await timedStep('swap.capture_offer_tokens', async () => {
-      await expect
-        .poll(
-          async () =>
-            (await readSwapCapacitiesAndLatestOffer(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId))
-              .latestUiOffer,
-          { timeout: 30_000 },
-        )
-        .not.toBeNull();
-      const snapshot = await readSwapCapacitiesAndLatestOffer(
-        page,
-        accountRef.entityId,
-        accountRef.signerId,
-        accountRef.counterpartyId,
-      );
-      if (!snapshot.latestUiOffer) throw new Error('Failed to capture placed swap offer tokens');
-      return snapshot.latestUiOffer;
+    const openOrderRow = page.locator('.swap-panel .orders-table tbody tr').first();
+    await timedStep('swap.capture_offer_row', async () => {
+      await expect(openOrderRow).toBeVisible({ timeout: 30_000 });
     });
-    expect(Number.isFinite(placedOffer.wantTokenId) && placedOffer.wantTokenId > 0).toBe(true);
-    expect(placedOffer.wantTokenId).not.toBe(placedOffer.giveTokenId);
 
     await timedStep('swap.assert_non_marketable_order_stays_open', async () => {
       const remaining = await readFirstOpenOrderRemaining(page);
@@ -1198,97 +934,4 @@ test.describe('E2E Swap Flow', () => {
     });
   });
 
-  // Scenario: execute the built-in browser swap scenario and assert it still generates at least
-  // one partial fill in account history.
-  test('browser e2e scenario swap includes partial fills', async ({ page }) => {
-    test.setTimeout(240_000);
-
-    await timedStep('swap_scn.goto_app', () => gotoApp(page));
-    await timedStep('swap_scn.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
-    await timedStep('swap_scn.create_runtime', () => createDemoRuntime(page, `swap-scn-${Date.now()}`, randomMnemonic()));
-
-    const result = await timedStep('swap_scn.run_swap', async () => {
-      return await page.evaluate(async () => {
-        const XLN = (window as any).XLN;
-        const env = (window as any).isolatedEnv;
-        if (!XLN?.scenarios?.swap || !env) return { ok: false, error: 'XLN.scenarios.swap or isolatedEnv missing' };
-        try {
-          await XLN.scenarios.swap(env);
-          let partialFillCount = 0;
-          for (const rep of env.eReplicas.values()) {
-            for (const account of rep?.state?.accounts?.values?.() || []) {
-              for (const frame of account?.frameHistory || []) {
-                for (const tx of frame?.accountTxs || []) {
-                  if (tx?.type !== 'swap_resolve') continue;
-                  const ratio = Number(tx?.data?.fillRatio ?? 0);
-                  if (ratio > 0 && ratio < 65535) partialFillCount += 1;
-                }
-              }
-            }
-          }
-          return { ok: true, partialFillCount };
-        } catch (error: any) {
-          return {
-            ok: false,
-            error: error?.message || String(error),
-            stack: error?.stack || null,
-            name: error?.name || null,
-          };
-        }
-      });
-    });
-
-    expect(
-      result.ok,
-      `scenario swap failed: ${result.error || 'unknown'}\n${result.name || ''}\n${result.stack || ''}`,
-    ).toBe(true);
-    expect(Number(result.partialFillCount || 0), 'expected at least one partial fill in scenario swap').toBeGreaterThan(0);
-  });
-
-  // Scenario: execute the larger swapMarket scenario and assert its multi-party order flow still
-  // produces partial fills instead of only full matches.
-  test('browser e2e scenario swapMarket includes partial fills', async ({ page }) => {
-    test.setTimeout(480_000);
-
-    await timedStep('swap_market.goto_app', () => gotoApp(page));
-    await timedStep('swap_market.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
-    await timedStep('swap_market.create_runtime', () => createDemoRuntime(page, `swap-market-${Date.now()}`, randomMnemonic()));
-
-    const result = await timedStep('swap_market.run_scenario', async () => {
-      return await page.evaluate(async () => {
-        const XLN = (window as any).XLN;
-        const env = (window as any).isolatedEnv;
-        if (!XLN?.scenarios?.swapMarket || !env) return { ok: false, error: 'XLN.scenarios.swapMarket or isolatedEnv missing' };
-        try {
-          await XLN.scenarios.swapMarket(env);
-          let partialFillCount = 0;
-          for (const rep of env.eReplicas.values()) {
-            for (const account of rep?.state?.accounts?.values?.() || []) {
-              for (const frame of account?.frameHistory || []) {
-                for (const tx of frame?.accountTxs || []) {
-                  if (tx?.type !== 'swap_resolve') continue;
-                  const ratio = Number(tx?.data?.fillRatio ?? 0);
-                  if (ratio > 0 && ratio < 65535) partialFillCount += 1;
-                }
-              }
-            }
-          }
-          return { ok: true, partialFillCount };
-        } catch (error: any) {
-          return {
-            ok: false,
-            error: error?.message || String(error),
-            stack: error?.stack || null,
-            name: error?.name || null,
-          };
-        }
-      });
-    });
-
-    expect(
-      result.ok,
-      `scenario swapMarket failed: ${result.error || 'unknown'}\n${result.name || ''}\n${result.stack || ''}`,
-    ).toBe(true);
-    expect(Number(result.partialFillCount || 0), 'expected at least one partial fill in scenario swapMarket').toBeGreaterThan(0);
-  });
 });

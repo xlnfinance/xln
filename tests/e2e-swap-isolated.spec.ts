@@ -13,9 +13,11 @@
  */
 
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { deriveDelta } from '../runtime/account-utils';
 import { API_BASE_URL, APP_BASE_URL, getHealth, resetProdServer, ensureE2EBaseline } from './utils/e2e-baseline';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import { timedStep } from './utils/e2e-timing';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
 const INIT_TIMEOUT = 30_000;
@@ -28,17 +30,23 @@ type SwapRuntimeWindow = typeof window & {
         accounts?: Map<string, {
           currentHeight?: number;
           frameHistory?: Array<{ accountTxs?: Array<{ type?: string }> }>;
-          swapOffers?: Map<string, unknown>;
           deltas?: Map<number | string, unknown>;
         }>;
       };
     }>;
   };
-  XLN?: {
-    deriveDelta?: (delta: unknown, isLeft: boolean) => {
-      outCapacity?: bigint | string | number | { toString?: () => string };
-    };
-  };
+};
+
+type DeltaSnapshot = {
+  ondelta: string;
+  offdelta: string;
+  collateral: string;
+  leftCreditLimit: string;
+  rightCreditLimit: string;
+  leftAllowance: string;
+  rightAllowance: string;
+  leftHold: string;
+  rightHold: string;
 };
 
 function mirrorConsole(page: Page, tag: string): void {
@@ -110,84 +118,89 @@ async function faucetOffchain(
 }
 
 async function outCap(page: Page, entityId: string, counterpartyId: string, tokenId: number): Promise<bigint> {
-  const value = await page.evaluate(({ counterpartyId, entityId, tokenId }) => {
+  const delta = await page.evaluate(({ counterpartyId, entityId, tokenId }) => {
     const view = window as SwapRuntimeWindow;
     const env = view.isolatedEnv;
-    const deriveDelta = view.XLN?.deriveDelta;
-    if (!env?.eReplicas || typeof deriveDelta !== 'function') return '0';
+    if (!env?.eReplicas) return null;
 
     for (const [replicaKey, replica] of env.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = replica.state?.accounts?.get(counterpartyId);
       const delta = account?.deltas?.get(tokenId) ?? account?.deltas?.get(String(tokenId));
-      if (!delta) return '0';
-      const derived = deriveDelta(delta, String(entityId).toLowerCase() < String(counterpartyId).toLowerCase());
-      const capacity = derived?.outCapacity;
-      if (typeof capacity === 'bigint') return capacity.toString();
-      if (typeof capacity === 'string') return capacity;
-      if (typeof capacity === 'number') return String(Math.trunc(capacity));
-      return typeof capacity?.toString === 'function' ? capacity.toString() : '0';
+      if (!delta || typeof delta !== 'object') return null;
+      const raw = delta as Record<string, unknown>;
+      const readBig = (value: unknown): string => {
+        if (typeof value === 'bigint') return value.toString();
+        if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return String(value);
+        if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return value.trim();
+        return '0';
+      };
+      return {
+        ondelta: readBig(raw.ondelta),
+        offdelta: readBig(raw.offdelta),
+        collateral: readBig(raw.collateral),
+        leftCreditLimit: readBig(raw.leftCreditLimit),
+        rightCreditLimit: readBig(raw.rightCreditLimit),
+        leftAllowance: readBig(raw.leftAllowance),
+        rightAllowance: readBig(raw.rightAllowance),
+        leftHold: readBig(raw.leftHold),
+        rightHold: readBig(raw.rightHold),
+      } satisfies DeltaSnapshot;
     }
 
-    return '0';
+    return null;
   }, { counterpartyId, entityId, tokenId });
 
-  return BigInt(value);
+  if (!delta) return 0n;
+  return deriveDelta({
+    tokenId,
+    ondelta: BigInt(delta.ondelta),
+    offdelta: BigInt(delta.offdelta),
+    collateral: BigInt(delta.collateral),
+    leftCreditLimit: BigInt(delta.leftCreditLimit),
+    rightCreditLimit: BigInt(delta.rightCreditLimit),
+    leftAllowance: BigInt(delta.leftAllowance),
+    rightAllowance: BigInt(delta.rightAllowance),
+    leftHold: BigInt(delta.leftHold),
+    rightHold: BigInt(delta.rightHold),
+  }, String(entityId).toLowerCase() < String(counterpartyId).toLowerCase()).outCapacity;
 }
 
-async function extendCreditToken(
-  page: Page,
-  identity: { entityId: string; signerId: string },
-  counterpartyId: string,
-  tokenId: number,
-  amount: bigint,
-): Promise<void> {
-  const result = await page.evaluate(async ({ amount, counterpartyId, entityId, signerId, tokenId }) => {
-    const view = window as SwapRuntimeWindow & {
-      XLN?: {
-        enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
-      };
-    };
-    const env = view.isolatedEnv;
-    const enqueueRuntimeInput = view.XLN?.enqueueRuntimeInput;
-    if (!env || typeof enqueueRuntimeInput !== 'function') {
-      return { ok: false, error: 'runtime env missing' };
-    }
+async function openConfigureWorkspace(page: Page): Promise<void> {
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  await accountsTab.click();
+  const configureTab = page.locator('.account-workspace-tab').filter({ hasText: /Configure/i }).first();
+  await expect(configureTab).toBeVisible({ timeout: 20_000 });
+  await configureTab.scrollIntoViewIfNeeded();
+  await configureTab.click();
+  await expect(page.locator('.configure-panel').first()).toBeVisible({ timeout: 20_000 });
+}
 
-    let liveSignerId = signerId;
-    for (const replicaKey of env.eReplicas?.keys?.() ?? []) {
-      const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
-      if (String(replicaEntityId).toLowerCase() === String(entityId).toLowerCase() && replicaSignerId) {
-        liveSignerId = replicaSignerId;
-        break;
-      }
-    }
-
-    enqueueRuntimeInput(env, {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId,
-        signerId: liveSignerId,
-        entityTxs: [{
-          type: 'extendCredit',
-          data: {
-            counterpartyEntityId: counterpartyId,
-            tokenId,
-            amount: BigInt(amount),
-          },
-        }],
-      }],
-    });
-    return { ok: true };
-  }, {
-    amount: amount.toString(),
-    counterpartyId,
-    entityId: identity.entityId,
-    signerId: identity.signerId,
-    tokenId,
-  });
-
-  expect(result.ok, `extendCredit token=${tokenId} failed: ${result.error ?? 'unknown'}`).toBe(true);
+async function extendCreditToken(page: Page, tokenId: number, amountDisplay: string): Promise<void> {
+  await openConfigureWorkspace(page);
+  const creditTab = page.locator('.configure-tab').filter({ hasText: /Extend Credit/i }).first();
+  await expect(creditTab).toBeVisible({ timeout: 20_000 });
+  await creditTab.click();
+  const panel = page.locator('.configure-panel .action-card').filter({ hasText: /Extend Credit/i }).first();
+  await expect(panel).toBeVisible({ timeout: 20_000 });
+  const tokenSelect = panel.locator('select.form-select').first();
+  await expect(tokenSelect).toBeVisible({ timeout: 20_000 });
+  await tokenSelect.selectOption(String(tokenId));
+  const amountInput = panel.locator('input[placeholder="Credit amount"]').first();
+  await expect(amountInput).toBeVisible({ timeout: 20_000 });
+  await amountInput.fill(amountDisplay);
+  const submit = panel.getByRole('button', { name: /Extend Credit/i }).first();
+  await expect(submit).toBeEnabled({ timeout: 20_000 });
+  await submit.click();
+  await expect.poll(
+    async () => await amountInput.inputValue(),
+    {
+      timeout: 15_000,
+      intervals: [200, 400, 600],
+      message: 'credit amount input should reset after enqueue',
+    },
+  ).toBe('0');
 }
 
 async function waitForTokenDeltaActive(
@@ -410,18 +423,18 @@ test.describe('E2E Swap Isolated Flow', () => {
     let bobContext: BrowserContext | null = null;
 
     try {
-      await resetProdServer(page, {
+      await timedStep('swap_isolated.reset_server', () => resetProdServer(page, {
         apiBaseUrl: API_BASE_URL,
         requireMarketMaker: false,
         softPreserveHubs: false,
-      });
-      await ensureE2EBaseline(page, {
+      }));
+      await timedStep('swap_isolated.ensure_baseline', () => ensureE2EBaseline(page, {
         apiBaseUrl: API_BASE_URL,
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
         forceReset: true,
-      });
+      }));
 
       const hubId = await getPrimaryHubId(page);
 
@@ -433,21 +446,25 @@ test.describe('E2E Swap Isolated Flow', () => {
       mirrorConsole(bobPage, 'SWAP-BOB');
 
       await Promise.all([
-        gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
-        gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
+        timedStep('swap_isolated.alice.goto_app', () => gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 })),
+        timedStep('swap_isolated.bob.goto_app', () => gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 })),
       ]);
 
-      const alice = await createRuntimeIdentity(alicePage, 'alice', selectDemoMnemonic('alice'));
-      const bob = await createRuntimeIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));
+      const alice = await timedStep('swap_isolated.alice.create_runtime', () =>
+        createRuntimeIdentity(alicePage, 'alice', selectDemoMnemonic('alice')));
+      const bob = await timedStep('swap_isolated.bob.create_runtime', () =>
+        createRuntimeIdentity(bobPage, 'bob', selectDemoMnemonic('bob')));
       expect(alice.entityId).not.toBe(bob.entityId);
 
       await Promise.all([
-        connectRuntimeToHub(alicePage, alice, hubId),
-        connectRuntimeToHub(bobPage, bob, hubId),
+        timedStep('swap_isolated.alice.connect_hub', () => connectRuntimeToHub(alicePage, alice, hubId)),
+        timedStep('swap_isolated.bob.connect_hub', () => connectRuntimeToHub(bobPage, bob, hubId)),
       ]);
 
-      await extendCreditToken(alicePage, alice, hubId, 2, 10_000n * 10n ** 18n);
-      await waitForTokenDeltaActive(alicePage, alice.entityId, hubId, 2);
+      await timedStep('swap_isolated.alice.extend_credit_weth', async () => {
+        await extendCreditToken(alicePage, 2, '10000');
+        await waitForTokenDeltaActive(alicePage, alice.entityId, hubId, 2);
+      });
 
       await Promise.all([
         faucetOffchain(alicePage, alice.entityId, hubId, 2, '5'),

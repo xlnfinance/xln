@@ -12,6 +12,7 @@
  * These tests exist to prove that rebalance is deterministic, visually correct, and replay-safe.
  */
 import { test, expect, type Page } from '@playwright/test';
+import { deriveDelta } from '../runtime/account-utils';
 import { Wallet, ethers } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { resetProdServer } from './utils/e2e-baseline';
@@ -91,6 +92,58 @@ type FrameEventSummary = {
     txTypes: string[];
   }>;
 };
+
+type DeltaSnapshot = {
+  ondelta: string;
+  offdelta: string;
+  collateral: string;
+  leftCreditLimit: string;
+  rightCreditLimit: string;
+  leftAllowance: string;
+  rightAllowance: string;
+  leftHold: string;
+  rightHold: string;
+};
+
+function deriveDeltaFromSnapshot(
+  delta: DeltaSnapshot,
+  tokenId: number,
+  isLeft: boolean,
+) {
+  return deriveDelta({
+    tokenId,
+    ondelta: BigInt(delta.ondelta),
+    offdelta: BigInt(delta.offdelta),
+    collateral: BigInt(delta.collateral),
+    leftCreditLimit: BigInt(delta.leftCreditLimit),
+    rightCreditLimit: BigInt(delta.rightCreditLimit),
+    leftAllowance: BigInt(delta.leftAllowance),
+    rightAllowance: BigInt(delta.rightAllowance),
+    leftHold: BigInt(delta.leftHold),
+    rightHold: BigInt(delta.rightHold),
+  }, isLeft);
+}
+
+function readDeltaSnapshot(value: unknown): DeltaSnapshot | null {
+  if (!isRecord(value)) return null;
+  const readBig = (input: unknown): string => {
+    if (typeof input === 'bigint') return input.toString();
+    if (typeof input === 'number' && Number.isFinite(input) && Number.isInteger(input)) return String(input);
+    if (typeof input === 'string' && /^-?\d+$/.test(input.trim())) return input.trim();
+    return '0';
+  };
+  return {
+    ondelta: readBig(value.ondelta),
+    offdelta: readBig(value.offdelta),
+    collateral: readBig(value.collateral),
+    leftCreditLimit: readBig(value.leftCreditLimit),
+    rightCreditLimit: readBig(value.rightCreditLimit),
+    leftAllowance: readBig(value.leftAllowance),
+    rightAllowance: readBig(value.rightAllowance),
+    leftHold: readBig(value.leftHold),
+    rightHold: readBig(value.rightHold),
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -217,10 +270,7 @@ async function readRecentFrameEvents(page: Page, counterpartyId: string): Promis
       }))
       : [];
 
-    const runtimeSigner = String(env?.runtimeId || '').toLowerCase();
     for (const [key, rep] of env?.eReplicas?.entries?.() || []) {
-      const signerId = String(String(key || '').split(':')[1] || '').toLowerCase();
-      if (runtimeSigner && signerId && signerId !== runtimeSigner) continue;
       const acc = rep?.state?.accounts?.get?.(counterpartyId);
       const history = Array.isArray(acc?.frameHistory)
         ? acc.frameHistory.slice(-12).map((frame: any) => ({
@@ -355,11 +405,9 @@ async function getLocalEntity(page: Page): Promise<{ entityId: string; signerId:
   const entity = await page.evaluate(() => {
     const env = (window as any).isolatedEnv;
     if (!env?.eReplicas) return null;
-    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
     for (const [key] of env.eReplicas.entries()) {
       const [entityId, signerId] = String(key).split(':');
       if (!entityId || !signerId) continue;
-      if (runtimeSigner && String(signerId).toLowerCase() !== runtimeSigner) continue;
       return { entityId, signerId };
     }
     return null;
@@ -733,25 +781,15 @@ async function sendRoutedHtlcPayment(
 }
 
 async function readPairState(page: Page, counterpartyId: string) {
-  return page.evaluate(({ counterpartyId }) => {
+  const raw = await page.evaluate(({ counterpartyId }) => {
     const env = (window as any).isolatedEnv;
     if (!env?.eReplicas) return null;
-    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
     for (const [key, rep] of env.eReplicas.entries()) {
-      const parts = String(key || '').split(':');
-      const signerId = String(parts[1] || '').toLowerCase();
-      if (runtimeSigner && signerId && signerId !== runtimeSigner) continue;
       const acc = rep.state?.accounts?.get(counterpartyId);
       if (!acc) continue;
       const delta = acc.deltas?.get?.(1);
       if (!delta) continue;
-      const XLN = (window as any).XLN;
       const isLeft = String(rep.entityId || '').toLowerCase() < String(counterpartyId).toLowerCase();
-      const derived = typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, isLeft) : null;
-      const outPeerCredit = BigInt(derived?.outPeerCredit ?? 0n);
-      const outCollateral = BigInt(derived?.outCollateral ?? 0n);
-      const hubExposure = outPeerCredit + outCollateral;
-      const uncollateralized = outPeerCredit > outCollateral ? outPeerCredit - outCollateral : 0n;
       const requested = acc.requestedRebalance?.get?.(1) || 0n;
       const history = Array.isArray(acc.frameHistory) ? acc.frameHistory : [];
       const recentDirectPaymentDescriptions = history
@@ -776,19 +814,22 @@ async function readPairState(page: Page, counterpartyId: string) {
         .filter((tx: any) => tx?.type === 'htlc_lock')
         .length;
       return {
+        delta: {
+          ondelta: String(delta.ondelta || 0n),
+          offdelta: String(delta.offdelta || 0n),
+          collateral: String(delta.collateral || 0n),
+          leftCreditLimit: String(delta.leftCreditLimit || 0n),
+          rightCreditLimit: String(delta.rightCreditLimit || 0n),
+          leftAllowance: String(delta.leftAllowance || 0n),
+          rightAllowance: String(delta.rightAllowance || 0n),
+          leftHold: String(delta.leftHold || 0n),
+          rightHold: String(delta.rightHold || 0n),
+        },
+        isLeft,
         currentHeight: Number(acc.currentHeight || 0),
         pendingHeight: acc.pendingFrame ? Number(acc.pendingFrame.height || 0) : 0,
         mempoolLen: Number(acc.mempool?.length || 0),
         requested: requested.toString(),
-        hubExposure: hubExposure.toString(),
-        hubDebt: outPeerCredit.toString(),
-        totalDelta: String(derived?.delta ?? 0n),
-        inCollateral: String(derived?.inCollateral ?? 0n),
-        outCollateral: String(derived?.outCollateral ?? 0n),
-        inCapacity: String(derived?.inCapacity ?? 0n),
-        outCapacity: String(derived?.outCapacity ?? 0n),
-        collateral: outCollateral.toString(),
-        uncollateralized: uncollateralized.toString(),
         lastFinalizedJHeight: Number(acc.lastFinalizedJHeight || 0),
         recentDirectPaymentDescriptions,
         recentHtlcHashlocks,
@@ -798,6 +839,36 @@ async function readPairState(page: Page, counterpartyId: string) {
     }
     return null;
   }, { counterpartyId });
+
+  if (!raw) return null;
+  const delta = readDeltaSnapshot(raw.delta);
+  if (!delta) return null;
+  const derived = deriveDeltaFromSnapshot(delta, 1, Boolean(raw.isLeft));
+  const outPeerCredit = derived.outPeerCredit;
+  const outCollateral = derived.outCollateral;
+  const hubExposure = outPeerCredit + outCollateral;
+  const uncollateralized = outPeerCredit > outCollateral ? outPeerCredit - outCollateral : 0n;
+
+  return {
+    currentHeight: Number(raw.currentHeight || 0),
+    pendingHeight: Number(raw.pendingHeight || 0),
+    mempoolLen: Number(raw.mempoolLen || 0),
+    requested: String(raw.requested || '0'),
+    hubExposure: hubExposure.toString(),
+    hubDebt: outPeerCredit.toString(),
+    totalDelta: derived.delta.toString(),
+    inCollateral: derived.inCollateral.toString(),
+    outCollateral: derived.outCollateral.toString(),
+    inCapacity: derived.inCapacity.toString(),
+    outCapacity: derived.outCapacity.toString(),
+    collateral: outCollateral.toString(),
+    uncollateralized: uncollateralized.toString(),
+    lastFinalizedJHeight: Number(raw.lastFinalizedJHeight || 0),
+    recentDirectPaymentDescriptions: Array.isArray(raw.recentDirectPaymentDescriptions) ? raw.recentDirectPaymentDescriptions.map(String) : [],
+    recentHtlcHashlocks: Array.isArray(raw.recentHtlcHashlocks) ? raw.recentHtlcHashlocks.map(String) : [],
+    recentHtlcResolveCount: Number(raw.recentHtlcResolveCount || 0),
+    recentHtlcLockCount: Number(raw.recentHtlcLockCount || 0),
+  };
 }
 
 async function waitForPairIdle(
@@ -957,11 +1028,7 @@ async function readAccountFlowState(page: Page, hubId: string) {
   return page.evaluate(({ hubId }) => {
     const env = (window as any).isolatedEnv;
     if (!env?.eReplicas) return null;
-    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
     for (const [key, rep] of env.eReplicas.entries()) {
-      const parts = String(key || '').split(':');
-      const signerId = String(parts[1] || '').toLowerCase();
-      if (runtimeSigner && signerId && signerId !== runtimeSigner) continue;
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       const history = Array.isArray(acc.frameHistory) ? acc.frameHistory : [];
@@ -999,11 +1066,7 @@ async function readAccountJEventClaims(page: Page, hubId: string) {
     const env = (window as any).isolatedEnv;
     if (!env?.eReplicas) return null;
     const target = String(hubId || '').toLowerCase();
-    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
     for (const [key, rep] of env.eReplicas.entries()) {
-      const parts = String(key || '').split(':');
-      const signerId = String(parts[1] || '').toLowerCase();
-      if (runtimeSigner && signerId && signerId !== runtimeSigner) continue;
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       const history = Array.isArray(acc.frameHistory) ? acc.frameHistory : [];
@@ -1052,52 +1115,34 @@ async function readAccountJEventClaims(page: Page, hubId: string) {
 }
 
 async function readRebalanceState(page: Page, hubId: string) {
-  return page.evaluate(({ hubId }) => {
+  const raw = await page.evaluate(({ hubId }) => {
     const env = (window as any).isolatedEnv;
     if (!env?.eReplicas) return null;
-    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
     for (const [key, rep] of env.eReplicas.entries()) {
-      const parts = String(key || '').split(':');
-      const signerId = String(parts[1] || '').toLowerCase();
-      if (runtimeSigner && signerId && signerId !== runtimeSigner) continue;
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       const delta = acc.deltas?.get?.(1);
       if (!delta) continue;
-      const XLN = (window as any).XLN;
       const localIsLeft = String(rep.entityId || '').toLowerCase() < String(hubId).toLowerCase();
       const hubIsLeft = String(hubId || '').toLowerCase() < String(rep.entityId || '').toLowerCase();
-      const localDerived = typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, localIsLeft) : null;
-      const hubDerived = typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, hubIsLeft) : null;
-      const outPeerCredit = BigInt(localDerived?.outPeerCredit ?? 0n);
-      const outCollateral = BigInt(localDerived?.outCollateral ?? 0n);
-      const outTotalHold = BigInt(localDerived?.outTotalHold ?? 0n);
-      const hubOutCollateral = BigInt(hubDerived?.outCollateral ?? 0n);
-      const hubOutTotalHold = BigInt(hubDerived?.outTotalHold ?? 0n);
-      const hubFreeOutCollateral = hubOutCollateral > hubOutTotalHold ? hubOutCollateral - hubOutTotalHold : 0n;
-      const hubExposure = outPeerCredit + outCollateral;
-      const uncollateralized = outPeerCredit > outCollateral ? outPeerCredit - outCollateral : 0n;
       const requested = acc.requestedRebalance?.get?.(1) || 0n;
       const policy = acc.rebalancePolicy?.get?.(1) || null;
       return {
         entityId: String(rep.entityId || ''),
+        delta: {
+          ondelta: String(delta.ondelta || 0n),
+          offdelta: String(delta.offdelta || 0n),
+          collateral: String(delta.collateral || 0n),
+          leftCreditLimit: String(delta.leftCreditLimit || 0n),
+          rightCreditLimit: String(delta.rightCreditLimit || 0n),
+          leftAllowance: String(delta.leftAllowance || 0n),
+          rightAllowance: String(delta.rightAllowance || 0n),
+          leftHold: String(delta.leftHold || 0n),
+          rightHold: String(delta.rightHold || 0n),
+        },
+        localIsLeft,
+        hubIsLeft,
         requested: requested.toString(),
-        collateral: outCollateral.toString(),
-        ondelta: String(delta.ondelta || 0n),
-        offdelta: String(delta.offdelta || 0n),
-        hubExposure: hubExposure.toString(),
-        hubDebt: outPeerCredit.toString(),
-        totalDelta: String(localDerived?.delta ?? 0n),
-        inCollateral: String(localDerived?.inCollateral ?? 0n),
-        outCollateral: String(localDerived?.outCollateral ?? 0n),
-        outTotalHold: String(localDerived?.outTotalHold ?? 0n),
-        freeOutCollateral: String(outCollateral > outTotalHold ? outCollateral - outTotalHold : 0n),
-        inCapacity: String(localDerived?.inCapacity ?? 0n),
-        outCapacity: String(localDerived?.outCapacity ?? 0n),
-        uncollateralized: uncollateralized.toString(),
-        hubOutCollateral: hubOutCollateral.toString(),
-        hubOutTotalHold: hubOutTotalHold.toString(),
-        hubFreeOutCollateral: hubFreeOutCollateral.toString(),
         lastFinalizedJHeight: Number(acc.lastFinalizedJHeight || 0),
         currentHeight: Number(acc.currentHeight || 0),
         hasPolicy: !!policy,
@@ -1105,6 +1150,43 @@ async function readRebalanceState(page: Page, hubId: string) {
     }
     return null;
   }, { hubId });
+
+  if (!raw) return null;
+  const delta = readDeltaSnapshot(raw.delta);
+  if (!delta) return null;
+  const localDerived = deriveDeltaFromSnapshot(delta, 1, Boolean(raw.localIsLeft));
+  const hubDerived = deriveDeltaFromSnapshot(delta, 1, Boolean(raw.hubIsLeft));
+  const outPeerCredit = localDerived.outPeerCredit;
+  const outCollateral = localDerived.outCollateral;
+  const outTotalHold = localDerived.outTotalHold;
+  const hubOutCollateral = hubDerived.outCollateral;
+  const hubOutTotalHold = hubDerived.outTotalHold;
+  const hubFreeOutCollateral = hubOutCollateral > hubOutTotalHold ? hubOutCollateral - hubOutTotalHold : 0n;
+  const hubExposure = outPeerCredit + outCollateral;
+  const uncollateralized = outPeerCredit > outCollateral ? outPeerCredit - outCollateral : 0n;
+  return {
+    entityId: String(raw.entityId || ''),
+    requested: String(raw.requested || '0'),
+    collateral: outCollateral.toString(),
+    ondelta: delta.ondelta,
+    offdelta: delta.offdelta,
+    hubExposure: hubExposure.toString(),
+    hubDebt: outPeerCredit.toString(),
+    totalDelta: localDerived.delta.toString(),
+    inCollateral: localDerived.inCollateral.toString(),
+    outCollateral: localDerived.outCollateral.toString(),
+    outTotalHold: localDerived.outTotalHold.toString(),
+    freeOutCollateral: String(outCollateral > outTotalHold ? outCollateral - outTotalHold : 0n),
+    inCapacity: localDerived.inCapacity.toString(),
+    outCapacity: localDerived.outCapacity.toString(),
+    uncollateralized: uncollateralized.toString(),
+    hubOutCollateral: hubOutCollateral.toString(),
+    hubOutTotalHold: hubOutTotalHold.toString(),
+    hubFreeOutCollateral: hubFreeOutCollateral.toString(),
+    lastFinalizedJHeight: Number(raw.lastFinalizedJHeight || 0),
+    currentHeight: Number(raw.currentHeight || 0),
+    hasPolicy: Boolean(raw.hasPolicy),
+  };
 }
 
 async function readRebalanceDiagnostics(page: Page, hubId: string) {
@@ -1115,11 +1197,7 @@ async function readRebalanceDiagnostics(page: Page, hubId: string) {
     const target = String(hubId || '').toLowerCase();
     const profiles = env?.gossip?.getProfiles?.() || [];
     profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === target) || null;
-    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
     for (const [key, rep] of env.eReplicas.entries()) {
-      const parts = String(key || '').split(':');
-      const signerId = String(parts[1] || '').toLowerCase();
-      if (runtimeSigner && signerId && signerId !== runtimeSigner) continue;
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       return {

@@ -11,7 +11,12 @@
 import { test, expect, type Page } from '@playwright/test';
 import { ethers } from 'ethers';
 import { resetProdServer } from './utils/e2e-baseline';
-import { getRenderedPrimaryOutbound, waitForRenderedPrimaryOutboundDelta } from './utils/e2e-account-ui';
+import {
+  getRenderedPrimaryOutbound,
+  listRenderedCounterpartyIds,
+  waitForRenderedOutboundForAccount,
+  waitForRenderedPrimaryOutboundDelta,
+} from './utils/e2e-account-ui';
 import { connectHub as connectActiveRuntimeToHub } from './utils/e2e-connect';
 import {
   createDemoUsers,
@@ -239,17 +244,10 @@ async function dumpState(page: Page, label: string) {
             const deltas: any[] = [];
             if (acc.deltas) {
               for (const [tokenId, d] of acc.deltas.entries()) {
-                const XLN = (window as any).XLN;
-                const entityId = key.split(':')[0];
-                const v = XLN?.deriveDelta?.(
-                  d,
-                  String(entityId).toLowerCase() < String(cpId).toLowerCase(),
-                );
                 deltas.push({
                   tokenId,
-                  out: v?.outCapacity?.toString() || '?',
-                  in_: v?.inCapacity?.toString() || '?',
                   offdelta: d.offdelta?.toString() || '0',
+                  collateral: d.collateral?.toString?.() || '0',
                 });
               }
             }
@@ -323,23 +321,6 @@ async function getHubFeeConfig(page: Page, hubId: string): Promise<{ feePPM: big
 async function discoverHubs(page: Page): Promise<string[]> {
   const apiBaseUrl = await getActiveApiBase(page);
   for (let i = 0; i < 45; i++) {
-    const fromGossip = await page.evaluate<string[]>(() => {
-      try {
-        const env = (window as any).isolatedEnv;
-        const XLN = (window as any).XLN;
-        XLN?.refreshGossip?.(env);
-        const profiles = env?.gossip?.getProfiles?.() || [];
-        const ids = profiles
-          .filter((p: any) => p?.metadata?.isHub === true || Array.isArray(p?.capabilities) && p.capabilities.includes('hub'))
-          .map((p: any) => p.entityId)
-          .filter((id: any): id is string => typeof id === 'string');
-        return Array.from(new Set(ids));
-      } catch {
-        return [] as string[];
-      }
-    });
-    if (fromGossip.length > 0) return fromGossip;
-
     try {
       const r = await page.request.get(`${apiBaseUrl}/api/debug/entities`);
       if (r.ok()) {
@@ -465,51 +446,14 @@ async function findSelfCycleRoute(
 
 /** Get USDC outCapacity */
 async function outCap(page: Page, entityId: string, cpId: string): Promise<bigint> {
-  const s = await page.evaluate(({ entityId, cpId }) => {
-    const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN;
-    if (!env || !XLN) return 'ENV_MISSING';
-    for (const [k, r] of env.eReplicas.entries()) {
-      if (!k.startsWith(entityId + ':')) continue;
-      const acc = r.state?.accounts?.get(cpId);
-      if (!acc) {
-        const accKeys = r.state?.accounts ? [...r.state.accounts.keys()].map((k: string) => k.slice(0, 12)) : [];
-        console.log(`[E2E] outCap: NO_ACCOUNT for ${cpId.slice(0,12)}, accounts=[${accKeys}]`);
-        return 'NO_ACCOUNT';
-      }
-      const d = acc.deltas?.get(1);
-      if (!d) {
-        const deltaKeys = acc.deltas ? [...acc.deltas.keys()] : [];
-        console.log(`[E2E] outCap: NO_DELTA for tokenId=1, deltaKeys=[${deltaKeys}], height=${acc.currentHeight}, mempool=${acc.mempool?.length}`);
-        return 'NO_DELTA';
-      }
-      return XLN
-        .deriveDelta(d, String(entityId).toLowerCase() < String(cpId).toLowerCase())
-        .outCapacity
-        .toString();
-    }
-    return 'NO_ENTITY';
-  }, { entityId, cpId });
-  if (s === 'NO_ACCOUNT' || s === 'NO_DELTA' || s === 'NO_ENTITY' || s === 'ENV_MISSING') {
-    console.log(`[E2E] outCap(${entityId.slice(0,12)}, ${cpId.slice(0,12)}) = ${s}`);
-    return 0n;
-  }
-  return BigInt(s);
+  void entityId;
+  const rendered = await waitForRenderedOutboundForAccount(page, cpId, { timeoutMs: 12_000 });
+  return ethers.parseUnits(String(rendered), 18);
 }
 
 async function connectedCounterparties(page: Page, entityId: string): Promise<Set<string>> {
-  const counterparties = await page.evaluate((targetEntityId) => {
-    const env = (window as any).isolatedEnv;
-    const results = new Set<string>();
-    for (const [replicaKey, replica] of (env?.eReplicas || new Map()).entries()) {
-      if (!String(replicaKey).startsWith(`${targetEntityId}:`)) continue;
-      for (const counterpartyId of replica?.state?.accounts?.keys?.() || []) {
-        results.add(String(counterpartyId).toLowerCase());
-      }
-    }
-    return Array.from(results);
-  }, entityId);
-  return new Set(counterparties);
+  void entityId;
+  return new Set(await listRenderedCounterpartyIds(page));
 }
 
 async function waitForOutCapDelta(
@@ -801,8 +745,11 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
 
   const r = await page.evaluate(async ({ from, signerId, to, route, amt, secret, hashlock }) => {
     try {
-      const XLN = (window as any).XLN;
       const env = (window as any).isolatedEnv;
+      const vaultOperations = (window as any).vaultOperations;
+      if (!env || !vaultOperations?.enqueueEntityInputs) {
+        return { ok: false, error: 'runtime env missing', preKeys: [], postKeys: [], preAccounts: 0, postAccounts: 0 };
+      }
       let liveSignerId = signerId;
       for (const key of env?.eReplicas?.keys?.() ?? []) {
         const [eid, sid] = String(key).split(':');
@@ -820,14 +767,11 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
       }
       console.log(`[E2E] pay() PRE: envId=${env._debugId}, eReplicas=[${preKeys.join(', ')}], fromAccounts=${preAccounts}`);
 
-      XLN.enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [{
+      await vaultOperations.enqueueEntityInputs(env, [{
           entityId: from,
           signerId: liveSignerId,
           entityTxs: [{ type: 'htlcPayment', data: { targetEntityId: to, tokenId: 1, amount: BigInt(amt), route, secret, hashlock } }],
-        }],
-      });
+        }]);
 
       // Post-process diagnostics (immediate, before settle)
       const postKeys = env.eReplicas ? [...env.eReplicas.keys()] : [];
@@ -1163,8 +1107,11 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const { secret: overSecret, hashlock: overHash } = generateHtlc();
     const overResult = await page.evaluate(async ({ from, signerId, to, route, amt, secret, hashlock }) => {
       try {
-        const XLN = (window as any).XLN;
         const env = (window as any).isolatedEnv;
+        const vaultOperations = (window as any).vaultOperations;
+        if (!env || !vaultOperations?.enqueueEntityInputs) {
+          return { ok: false, error: 'runtime env missing' };
+        }
         let liveSignerId = signerId;
         for (const key of env?.eReplicas?.keys?.() ?? []) {
           const [eid, sid] = String(key).split(':');
@@ -1173,14 +1120,11 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
             break;
           }
         }
-        XLN.enqueueRuntimeInput(env, {
-          runtimeTxs: [],
-          entityInputs: [{
+        await vaultOperations.enqueueEntityInputs(env, [{
             entityId: from,
             signerId: liveSignerId,
             entityTxs: [{ type: 'htlcPayment', data: { targetEntityId: to, tokenId: 1, amount: BigInt(amt), route, secret, hashlock } }],
-          }],
-        });
+          }]);
         return { ok: true };
       } catch (e: any) { return { ok: false, error: e.message }; }
     }, { from: alice!.entityId, signerId: alice!.signerId, to: bob!.entityId,

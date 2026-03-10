@@ -277,3 +277,21 @@
     - `bun build custody/server.ts --target=bun --outfile=/tmp/custody-check.js`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+- 2026-03-10T05:56:00Z E2E cleanup pass: DOM + persisted truth, no `window.XLN` dependency in fixed flows:
+  - [tests/e2e-user-journey.spec.ts](/Users/egor/xln/tests/e2e-user-journey.spec.ts) no longer treats `runtimeId` as a signer id and no longer waits on the wrong raw-account invariant; it now asserts persisted frame progress plus visible outbound growth after the offchain faucet
+  - [tests/e2e-swap-isolated.spec.ts](/Users/egor/xln/tests/e2e-swap-isolated.spec.ts) now drives `Extend Credit` through the real Configure/Credit UI instead of `window.XLN.enqueueRuntimeInput`, and derives account math from raw delta snapshots in Node instead of page globals
+  - [tests/e2e-dispute.spec.ts](/Users/egor/xln/tests/e2e-dispute.spec.ts) now clears any stale `sentBatch` latch before reload, which fixed the aggregate-only replay failure after the post-dispute `c2r` path
+  - [tests/e2e-rebalance-bar.spec.ts](/Users/egor/xln/tests/e2e-rebalance-bar.spec.ts) no longer filters replicas by `runtimeId===signerId` and no longer depends on page-global `deriveDelta` in the fixed state readers; rebalance assertions now see the same secured state the user sees
+  - cleaned E2E helpers/UI evidence:
+    - [tests/utils/e2e-account-ui.ts](/Users/egor/xln/tests/utils/e2e-account-ui.ts) is the shared rendered-account reader for visible outbound/inbound checks
+    - [tests/e2e-swap.spec.ts](/Users/egor/xln/tests/e2e-swap.spec.ts), [tests/e2e-ahb-payment.spec.ts](/Users/egor/xln/tests/e2e-ahb-payment.spec.ts), [tests/e2e-runtime-persistence.spec.ts](/Users/egor/xln/tests/e2e-runtime-persistence.spec.ts), and [tests/e2e-ahb-isolated.spec.ts](/Users/egor/xln/tests/e2e-ahb-isolated.spec.ts) were kept aligned with the same DOM/persisted-truth standard
+  - isolated mesh/server support kept with the suite:
+    - [runtime/server.ts](/Users/egor/xln/runtime/server.ts), [runtime/scripts/e2e-hub-node.ts](/Users/egor/xln/runtime/scripts/e2e-hub-node.ts), [runtime/scripts/e2e-mesh-control.ts](/Users/egor/xln/runtime/scripts/e2e-mesh-control.ts), [runtime/scenarios/boot.ts](/Users/egor/xln/runtime/scenarios/boot.ts)
+  - verified:
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-swap-isolated.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-user-journey.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-dispute.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-rebalance-bar.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+    - full isolated sweep passed:
+      - log: [/Users/egor/xln/.logs/e2e-parallel/20260310-055021-307/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-055021-307/e2e-shard-00.log)

@@ -9,7 +9,10 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { ethers } from 'ethers';
 import { resetProdServer } from './utils/e2e-baseline';
-import { getRenderedPrimaryOutbound, waitForRenderedPrimaryOutboundDelta } from './utils/e2e-account-ui';
+import {
+  getRenderedOutboundForAccount,
+  waitForRenderedOutboundForAccountDelta,
+} from './utils/e2e-account-ui';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
@@ -60,20 +63,39 @@ type FrameLogEntryView = {
 
 type XlnView = {
   refreshGossip?: (env: unknown) => void;
-  deriveDelta?: (delta: unknown, isLeft: boolean) => { outCapacity: bigint; inCapacity: bigint };
   enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
-  getRuntimeDb?: (env: unknown) => {
-    get: (key: string | Uint8Array) => Promise<{ toString?: () => string } | Uint8Array | string>;
-  };
 };
 
 type TestWindow = typeof window & {
-  Buffer?: { from: (value: string) => Uint8Array | string };
   XLN?: XlnView;
+  vaultOperations?: {
+    enqueueEntityInputs?: (
+      env: unknown,
+      inputs: Array<{
+        entityId: string;
+        signerId: string;
+        entityTxs: Array<{
+          type: 'htlcPayment';
+          data: {
+            amount: bigint;
+            hashlock: string;
+            route: string[];
+            secret: string;
+            targetEntityId: string;
+            tokenId: number;
+          };
+        }>;
+      }>,
+    ) => Promise<unknown>;
+    getPersistedLatestHeight?: (env: unknown) => Promise<number>;
+    readPersistedFrameJournal?: (
+      env: unknown,
+      height: number,
+    ) => Promise<{ logs?: FrameLogEntryView[] } | null>;
+  };
   isolatedEnv?: {
     runtimeId?: string;
     height?: number;
-    dbNamespace?: string;
     frameLogs?: FrameLogEntryView[];
     eReplicas?: Map<string, EntityReplicaView>;
     gossip?: {
@@ -253,89 +275,24 @@ async function getHubFeeConfig(page: Page, hubId: string): Promise<HubFeeConfig>
   };
 }
 
-async function outCap(page: Page, entityId: string, counterpartyId: string): Promise<bigint> {
-  const raw = await page.evaluate(({ counterpartyId, entityId }) => {
-    const view = window as TestWindow;
-    const env = view.isolatedEnv;
-    const xln = view.XLN;
-    if (!env?.eReplicas || !xln?.deriveDelta) return '0';
-
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
-      if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
-      const account = replica.state?.accounts?.get(counterpartyId);
-      const delta = account?.deltas?.get(1);
-      if (!delta) return '0';
-      return xln
-        .deriveDelta(delta, String(entityId).toLowerCase() < String(counterpartyId).toLowerCase())
-        .outCapacity
-        .toString();
-    }
-    return '0';
-  }, { counterpartyId, entityId });
-
-  return BigInt(raw);
-}
-
-async function waitForOutCapIncrease(
-  page: Page,
-  entityId: string,
-  counterpartyId: string,
-  baseline: bigint,
-  timeoutMs = 30_000,
-): Promise<bigint> {
-  const startedAt = Date.now();
-  let latest = baseline;
-  while (Date.now() - startedAt < timeoutMs) {
-    latest = await outCap(page, entityId, counterpartyId);
-    if (latest > baseline) return latest;
-    await page.waitForTimeout(500);
-  }
-  throw new Error(
-    `Timed out waiting for outCap increase ${entityId.slice(0, 10)}↔${counterpartyId.slice(0, 10)} ` +
-    `(baseline=${baseline} latest=${latest})`,
-  );
-}
-
-async function waitForOutCapDelta(
-  page: Page,
-  entityId: string,
-  counterpartyId: string,
-  baseline: bigint,
-  expectedDelta: bigint,
-  timeoutMs = 30_000,
-): Promise<bigint> {
-  const startedAt = Date.now();
-  let latest = baseline;
-  while (Date.now() - startedAt < timeoutMs) {
-    latest = await outCap(page, entityId, counterpartyId);
-    if (latest - baseline === expectedDelta) return latest;
-    await page.waitForTimeout(500);
-  }
-  throw new Error(
-    `Timed out waiting for outCap delta ${entityId.slice(0, 10)}↔${counterpartyId.slice(0, 10)} ` +
-    `(baseline=${baseline} latest=${latest} expected=${expectedDelta})`,
-  );
-}
-
 async function waitForSenderSpend(
   page: Page,
-  entityId: string,
   counterpartyId: string,
-  baseline: bigint,
-  minSpend: bigint,
+  baseline: number,
+  minSpend: number,
   timeoutMs = 30_000,
-): Promise<{ latest: bigint; spent: bigint }> {
+): Promise<{ latest: number; spent: number }> {
   const startedAt = Date.now();
   let latest = baseline;
-  let spent = 0n;
+  let spent = 0;
   while (Date.now() - startedAt < timeoutMs) {
-    latest = await outCap(page, entityId, counterpartyId);
+    latest = await getRenderedOutboundForAccount(page, counterpartyId);
     spent = baseline - latest;
     if (spent >= minSpend) return { latest, spent };
     await page.waitForTimeout(250);
   }
   throw new Error(
-    `Timed out waiting for sender spend ${entityId.slice(0, 10)}↔${counterpartyId.slice(0, 10)} ` +
+    `Timed out waiting for sender spend on ${counterpartyId.slice(0, 10)} ` +
     `(baseline=${baseline} latest=${latest} spent=${spent} minSpend=${minSpend})`,
   );
 }
@@ -449,6 +406,10 @@ function generateHtlc(): { secret: string; hashlock: string } {
   return { secret, hashlock };
 }
 
+function toDisplayed(amount: bigint): number {
+  return Number(ethers.formatUnits(amount, 18));
+}
+
 async function pay(
   page: Page,
   from: string,
@@ -463,8 +424,8 @@ async function pay(
     try {
       const view = window as TestWindow;
       const env = view.isolatedEnv;
-      const xln = view.XLN;
-      if (!env || !xln?.enqueueRuntimeInput) {
+      const vaultOperations = view.vaultOperations;
+      if (!env || !vaultOperations?.enqueueEntityInputs) {
         return { ok: false, error: 'runtime env missing' };
       }
 
@@ -477,9 +438,7 @@ async function pay(
         }
       }
 
-      xln.enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [{
+      await vaultOperations.enqueueEntityInputs(env, [{
           entityId: from,
           signerId: liveSignerId,
           entityTxs: [{
@@ -493,8 +452,7 @@ async function pay(
               tokenId: 1,
             },
           }],
-        }],
-      });
+        }]);
 
       return { ok: true };
     } catch (error) {
@@ -517,33 +475,20 @@ async function runtimeDbMeta(page: Page): Promise<{
   return page.evaluate(async () => {
     const view = window as TestWindow;
     const env = view.isolatedEnv;
-    const getRuntimeDb = view.XLN?.getRuntimeDb;
-    if (!env || !getRuntimeDb) {
+    const getPersistedLatestHeight = view.vaultOperations?.getPersistedLatestHeight;
+    const readPersistedFrameJournal = view.vaultOperations?.readPersistedFrameJournal;
+    if (
+      !env ||
+      typeof getPersistedLatestHeight !== 'function' ||
+      typeof readPersistedFrameJournal !== 'function'
+    ) {
       return { checkpointHeight: 0, hasLatestFrame: false, latestHeight: 0 };
     }
 
-    const db = getRuntimeDb(env);
-    const namespace = String(env.dbNamespace || env.runtimeId || '').toLowerCase();
-    const keyOf = (name: string) => `${namespace}:${name}`;
-
-    const read = async (name: string): Promise<string | null> => {
-      try {
-        const bufferKey = typeof view.Buffer?.from === 'function' ? view.Buffer.from(keyOf(name)) : keyOf(name);
-        const raw = await db.get(bufferKey);
-        if (typeof raw === 'string') return raw;
-        if (raw instanceof Uint8Array) return new TextDecoder().decode(raw);
-        if (typeof raw?.toString === 'function') return raw.toString();
-        return null;
-      } catch {
-        return null;
-      }
-    };
-
-    const latestHeightRaw = await read('latest_height');
-    const checkpointHeightRaw = await read('latest_checkpoint_height');
-    const latestHeight = Number(latestHeightRaw || 0);
-    const checkpointHeight = Number(checkpointHeightRaw || 0);
-    const hasLatestFrame = latestHeight > 0 && await read(`frame_input:${latestHeight}`) !== null;
+    const latestHeight = Number(await getPersistedLatestHeight(env) || 0);
+    const latestFrame = latestHeight > 0 ? await readPersistedFrameJournal(env, latestHeight) : null;
+    const hasLatestFrame = latestFrame !== null;
+    const checkpointHeight = hasLatestFrame ? latestHeight : 0;
 
     return { checkpointHeight, hasLatestFrame, latestHeight };
   });
@@ -605,78 +550,66 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
       await connectRuntimeToHub(bobPage, bob, hubId);
 
       console.log('[E2E] fund Alice through the selected hub');
-      const aliceBeforeFaucet = await outCap(alicePage, alice.entityId, hubId);
+      const aliceBeforeFaucet = await getRenderedOutboundForAccount(alicePage, hubId);
+      const aliceFaucetCursor = await getPersistedReceiptCursor(alicePage);
       await faucet(alicePage, alice.entityId, hubId);
-      const aliceAfterFaucet = await waitForOutCapIncrease(alicePage, alice.entityId, hubId, aliceBeforeFaucet);
+      await waitForPersistedFrameEvent(alicePage, {
+        eventName: 'BilateralFrameCommitted',
+        cursor: aliceFaucetCursor,
+        timeoutMs: 30_000,
+      });
+      const aliceAfterFaucet = await waitForRenderedOutboundForAccountDelta(alicePage, hubId, aliceBeforeFaucet, 100);
       expect(aliceAfterFaucet).toBeGreaterThan(aliceBeforeFaucet);
 
       const hubFee = await getHubFeeConfig(alicePage, hubId);
 
       console.log('[E2E] forward HTLC Alice -> Hub -> Bob');
       const forwardAmount = toWei(10);
-      const expectedForwardSpend = requiredInbound(forwardAmount, hubFee.feePPM, hubFee.baseFee);
-      const bobBeforeForward = await outCap(bobPage, bob.entityId, hubId);
-      const bobForwardRendered = await getRenderedPrimaryOutbound(bobPage);
+      const expectedForwardSpend = toDisplayed(requiredInbound(forwardAmount, hubFee.feePPM, hubFee.baseFee));
+      const bobBeforeForward = await getRenderedOutboundForAccount(bobPage, hubId);
       const bobForwardCursor = await getPersistedReceiptCursor(bobPage);
       await pay(alicePage, alice.entityId, alice.signerId, bob.entityId, [alice.entityId, hubId, bob.entityId], forwardAmount);
 
-      const forwardSpend = await waitForSenderSpend(
-        alicePage,
-        alice.entityId,
-        hubId,
-        aliceAfterFaucet,
-        expectedForwardSpend,
-      );
+      const forwardSpend = await waitForSenderSpend(alicePage, hubId, aliceAfterFaucet, expectedForwardSpend);
       await waitForPersistedFrameEvent(bobPage, {
         eventName: 'HtlcReceived',
         entityId: bob.entityId,
         cursor: bobForwardCursor,
       });
-      const bobAfterForward = await waitForOutCapDelta(
+      const bobAfterForward = await waitForRenderedOutboundForAccountDelta(
         bobPage,
-        bob.entityId,
         hubId,
         bobBeforeForward,
-        forwardAmount,
+        toDisplayed(forwardAmount),
       );
-      await waitForRenderedPrimaryOutboundDelta(bobPage, bobForwardRendered, Number(ethers.formatUnits(forwardAmount, 18)));
       expect(forwardSpend.spent).toBeGreaterThanOrEqual(expectedForwardSpend);
-      expect(bobAfterForward - bobBeforeForward).toBe(forwardAmount);
+      expect(bobAfterForward - bobBeforeForward).toBe(toDisplayed(forwardAmount));
 
       console.log('[E2E] reverse HTLC Bob -> Hub -> Alice');
       await waitForAccountIdle(bobPage, bob.entityId, hubId);
       await waitForAccountIdle(alicePage, alice.entityId, hubId);
       const reverseAmount = toWei(5);
-      const expectedReverseSpend = requiredInbound(reverseAmount, hubFee.feePPM, hubFee.baseFee);
-      const aliceBeforeReverse = await outCap(alicePage, alice.entityId, hubId);
-      const bobBeforeReverse = await outCap(bobPage, bob.entityId, hubId);
-      const aliceReverseRendered = await getRenderedPrimaryOutbound(alicePage);
+      const expectedReverseSpend = toDisplayed(requiredInbound(reverseAmount, hubFee.feePPM, hubFee.baseFee));
+      const aliceBeforeReverse = await getRenderedOutboundForAccount(alicePage, hubId);
+      const bobBeforeReverse = await getRenderedOutboundForAccount(bobPage, hubId);
       const aliceReverseCursor = await getPersistedReceiptCursor(alicePage);
       await pay(bobPage, bob.entityId, bob.signerId, alice.entityId, [bob.entityId, hubId, alice.entityId], reverseAmount);
 
-      const reverseSpend = await waitForSenderSpend(
-        bobPage,
-        bob.entityId,
-        hubId,
-        bobAfterForward,
-        expectedReverseSpend,
-      );
+      const reverseSpend = await waitForSenderSpend(bobPage, hubId, bobAfterForward, expectedReverseSpend);
       await waitForPersistedFrameEvent(alicePage, {
         eventName: 'HtlcReceived',
         entityId: alice.entityId,
         cursor: aliceReverseCursor,
       });
-      const aliceAfterReverse = await waitForOutCapDelta(
+      const aliceAfterReverse = await waitForRenderedOutboundForAccountDelta(
         alicePage,
-        alice.entityId,
         hubId,
         aliceBeforeReverse,
-        reverseAmount,
+        toDisplayed(reverseAmount),
       );
-      await waitForRenderedPrimaryOutboundDelta(alicePage, aliceReverseRendered, Number(ethers.formatUnits(reverseAmount, 18)));
-      const bobAfterReverse = await outCap(bobPage, bob.entityId, hubId);
+      const bobAfterReverse = await getRenderedOutboundForAccount(bobPage, hubId);
       expect(reverseSpend.spent).toBeGreaterThanOrEqual(expectedReverseSpend);
-      expect(aliceAfterReverse - aliceBeforeReverse).toBe(reverseAmount);
+      expect(aliceAfterReverse - aliceBeforeReverse).toBe(toDisplayed(reverseAmount));
       expect(bobBeforeReverse - bobAfterReverse).toBeGreaterThanOrEqual(expectedReverseSpend);
 
       console.log('[E2E] capture persistence state before reload');
@@ -700,8 +633,8 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
         waitForRestoredRuntime(bobPage, bob.runtimeId),
       ]);
 
-      const aliceAfterReload = await outCap(alicePage, alice.entityId, hubId);
-      const bobAfterReload = await outCap(bobPage, bob.entityId, hubId);
+      const aliceAfterReload = await getRenderedOutboundForAccount(alicePage, hubId);
+      const bobAfterReload = await getRenderedOutboundForAccount(bobPage, hubId);
       const aliceDbAfter = await runtimeDbMeta(alicePage);
       const bobDbAfter = await runtimeDbMeta(bobPage);
 

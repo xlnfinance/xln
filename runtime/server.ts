@@ -3974,6 +3974,39 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     );
   }
 
+  if (pathname === '/api/debug/reserve') {
+    if (!globalJAdapter) {
+      return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
+    }
+
+    const url = new URL(req.url);
+    const entityId = String(url.searchParams.get('entityId') || '').trim();
+    const tokenId = Number(url.searchParams.get('tokenId') || '1');
+
+    if (!entityId) {
+      return new Response(JSON.stringify({ error: 'Missing entityId' }), { status: 400, headers });
+    }
+    if (!Number.isInteger(tokenId) || tokenId <= 0) {
+      return new Response(JSON.stringify({ error: 'Invalid tokenId' }), { status: 400, headers });
+    }
+
+    try {
+      const reserve = await globalJAdapter.getReserves(entityId, tokenId);
+      return new Response(
+        safeStringify({
+          ok: true,
+          entityId,
+          tokenId,
+          reserve: reserve.toString(),
+        }),
+        { headers },
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers });
+    }
+  }
+
   // J-event watching is handled by JAdapter.startWatching() per-jReplica
 
   // Token catalog (for UI token list + deposits)

@@ -812,6 +812,46 @@ const proxyHubApi = async (
   }
 };
 
+const proxyAnyHubGet = async (request: Request, endpointWithQuery: string): Promise<Response> => {
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': '*',
+    'Access-Control-Allow-Headers': '*',
+    'Content-Type': 'application/json',
+  };
+
+  await pollAllHubHealth();
+  const child = hubChildren.find((candidate) => candidate.proc?.exitCode === null && candidate.lastHealth);
+  if (!child) {
+    return new Response(JSON.stringify({ error: 'No healthy hub API available' }), {
+      status: 503,
+      headers,
+    });
+  }
+
+  try {
+    const response = await fetch(`http://${args.host}:${child.apiPort}${endpointWithQuery}`, {
+      method: 'GET',
+      headers: {
+        'content-type': request.headers.get('content-type') || 'application/json',
+      },
+    });
+    const text = await response.text();
+    return new Response(text, {
+      status: response.status,
+      headers: {
+        ...headers,
+        'content-type': response.headers.get('content-type') || 'application/json',
+      },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: serializeError(error) }), {
+      status: 502,
+      headers,
+    });
+  }
+};
+
 const server = Bun.serve({
   hostname: args.host,
   port: args.port,
@@ -863,6 +903,10 @@ const server = Bun.serve({
         };
       });
       return new Response(safeStringify({ entities }), { headers });
+    }
+
+    if (pathname === '/api/debug/reserve' && request.method === 'GET') {
+      return await proxyAnyHubGet(request, `${pathname}${url.search}`);
     }
 
     if (pathname === '/api/debug/events') {
