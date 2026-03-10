@@ -1,6 +1,6 @@
 import { writable, get, derived } from 'svelte/store';
 import { HDNodeWallet, Mnemonic, getAddress } from 'ethers';
-import type { Env, PersistedFrameJournal, RoutedEntityInput, RuntimeInput } from '@xln/runtime/xln-api';
+import type { Env, JurisdictionConfig, PersistedFrameJournal, RoutedEntityInput, RuntimeInput, XLNModule } from '@xln/runtime/xln-api';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
 import { xlnEnvironment, setXlnEnvironment } from './xlnStore';
 import { settings } from './settingsStore';
@@ -90,6 +90,40 @@ let resumeRefreshPromise: Promise<boolean> | null = null;
 let runtimeSyncChannel: BroadcastChannel | null = null;
 const runtimeEnvChangeUnsubscribers = new Map<string, () => void>();
 
+type FrameLogEntry = Env['frameLogs'][number];
+type HealthMachine = { name?: string; status?: string; chainId?: number; lastBlock?: unknown };
+type HealthPayload = {
+  timestamp?: number;
+  reset?: { inProgress?: boolean; lastError?: unknown };
+  system?: { runtime?: boolean } | null;
+  jMachines?: HealthMachine[];
+};
+type JurisdictionsPayload = { jurisdictions: Record<string, JurisdictionConfig> };
+type FaucetResult = { success?: boolean; txHash?: string; error?: string };
+type RuntimeP2PHandle = {
+  isConnected?: () => boolean;
+  connect?: () => void;
+  refreshGossip?: () => void;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
+const hasStartRuntimeLoop = (xln: XLNModule): xln is XLNModule & { startRuntimeLoop: (env: Env) => unknown } =>
+  typeof Reflect.get(xln as object, 'startRuntimeLoop') === 'function';
+
+const hasStartJEventWatcher = (xln: XLNModule): xln is XLNModule & { startJEventWatcher: (env: Env) => Promise<void> } =>
+  typeof Reflect.get(xln as object, 'startJEventWatcher') === 'function';
+
+const getRuntimeP2PHandle = (xln: XLNModule, env: Env): RuntimeP2PHandle | null => {
+  const candidate = xln.getP2P(env);
+  return isRecord(candidate) ? (candidate as RuntimeP2PHandle) : null;
+};
+
+const getReplayMeta = (env: Env): unknown | null => {
+  const value = Reflect.get(env as object, '__replayMeta');
+  return value === undefined ? null : value;
+};
+
 // HD derivation helper
 function deriveAddress(seed: string, index: number): string {
   const mnemonic = Mnemonic.fromPhrase(seed);
@@ -133,37 +167,37 @@ async function waitForCondition(
   throw new Error(`[VaultStore] Timeout waiting for condition: ${label}`);
 }
 
-const getRuntimeFatalDiagnostics = (env: any): string => {
-  const frameLogs = Array.isArray(env?.frameLogs) ? env.frameLogs : [];
-  const cleanLogs = Array.isArray(env?.runtimeState?.cleanLogs) ? env.runtimeState.cleanLogs : [];
+const getRuntimeFatalDiagnostics = (env: Env): string => {
+  const frameLogs = env.frameLogs;
+  const cleanLogs = Array.isArray(env.runtimeState?.cleanLogs) ? env.runtimeState.cleanLogs : [];
   const recentErrors = frameLogs
-    .filter((entry: any) => entry?.level === 'error' || entry?.message === 'RUNTIME_LOOP_ERROR' || entry?.message === 'RUNTIME_LOOP_HALTED')
+    .filter((entry: FrameLogEntry) => entry.level === 'error' || entry.message === 'RUNTIME_LOOP_ERROR' || entry.message === 'RUNTIME_LOOP_HALTED')
     .slice(-3)
-    .map((entry: any) => ({
-      level: entry?.level ?? null,
-      category: entry?.category ?? null,
-      message: entry?.message ?? null,
-      data: entry?.data ?? null,
-      entityId: entry?.entityId ?? null,
-      timestamp: entry?.timestamp ?? null,
+    .map((entry: FrameLogEntry) => ({
+      level: entry.level ?? null,
+      category: entry.category ?? null,
+      message: entry.message ?? null,
+      data: entry.data ?? null,
+      entityId: entry.entityId ?? null,
+      timestamp: entry.timestamp ?? null,
     }));
   const recentLogs = cleanLogs.slice(-8);
-  const replica = env?.jReplicas?.get?.('Testnet');
+  const replica = env.jReplicas.get('Testnet');
   const jState = replica
     ? {
-        name: replica?.name ?? null,
-        chainId: replica?.chainId ?? null,
-        depositoryAddress: replica?.depositoryAddress ?? null,
-        entityProviderAddress: replica?.entityProviderAddress ?? null,
+        name: replica.name ?? null,
+        chainId: replica.chainId ?? null,
+        depositoryAddress: replica.depositoryAddress ?? null,
+        entityProviderAddress: replica.entityProviderAddress ?? null,
         hasAdapter: hasConnectedJurisdictionAdapter(replica),
       }
     : null;
   return JSON.stringify(
     {
-      runtimeId: env?.runtimeId ?? null,
-      height: env?.height ?? null,
-      latestHeight: env?.latestHeight ?? null,
-      loopActive: env?.runtimeState?.loopActive ?? null,
+      runtimeId: env.runtimeId ?? null,
+      height: env.height ?? null,
+      latestHeight: env.latestHeight ?? null,
+      loopActive: env.runtimeState?.loopActive ?? null,
       jState,
       recentErrors,
       recentLogs,
@@ -174,9 +208,9 @@ const getRuntimeFatalDiagnostics = (env: any): string => {
 };
 
 async function enqueueAndAwait(
-  xln: any,
-  env: any,
-  runtimeInput: { runtimeTxs: any[]; entityInputs: any[] },
+  xln: XLNModule,
+  env: Env,
+  runtimeInput: RuntimeInput,
   ready: () => boolean,
   label: string,
   timeoutMs = 30_000,
@@ -184,18 +218,6 @@ async function enqueueAndAwait(
   xln.enqueueRuntimeInput(env, runtimeInput);
   await waitForCondition(ready, label, timeoutMs);
 }
-
-type JurisdictionConfig = {
-  name: string;
-  chainId: number;
-  rpc: string;
-  contracts: {
-    depository: string;
-    entityProvider: string;
-    account?: string;
-    deltaTransformer?: string;
-  };
-};
 
 const hasRuntimeJurisdictionAddresses = (replica: unknown): boolean => {
   const candidate = replica as {
@@ -230,14 +252,14 @@ const hasConnectedJurisdictionAdapter = (replica: unknown): boolean => {
   );
 };
 
-const resolveJurisdictionConfig = (jurisdictions: any): JurisdictionConfig => {
-  const map = jurisdictions?.jurisdictions ?? {};
+const resolveJurisdictionConfig = (jurisdictions: JurisdictionsPayload): JurisdictionConfig => {
+  const map = jurisdictions.jurisdictions;
   const arrakis = map.arrakis;
   const first = arrakis ?? Object.values(map)[0];
   if (!first) {
     throw new Error('No jurisdictions found in /api/jurisdictions');
   }
-  return first as JurisdictionConfig;
+  return first;
 };
 
 const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
@@ -276,15 +298,15 @@ const logRpcFatal = (reason: string, details: Record<string, unknown>): void => 
   console.error('%c[RPC FAIL-FAST]', RPC_FATAL_STYLE, reason, details);
 };
 
-const summarizeHealth = (payload: any): Record<string, unknown> => {
-  if (!payload || typeof payload !== 'object') return {};
+const summarizeHealth = (payload: HealthPayload | null): Record<string, unknown> => {
+  if (!payload) return {};
   return {
     timestamp: payload.timestamp,
     resetInProgress: payload?.reset?.inProgress ?? null,
     resetError: payload?.reset?.lastError ?? null,
     system: payload?.system ?? null,
     jMachines: Array.isArray(payload?.jMachines)
-      ? payload.jMachines.map((j: any) => ({
+      ? payload.jMachines.map((j: HealthMachine) => ({
           name: j?.name,
           status: j?.status,
           chainId: j?.chainId,
@@ -304,7 +326,7 @@ const waitForServerRuntimeReady = async (baseOrigin: string, timeoutMs = 30_000)
       const response = await fetch(healthUrl);
       lastStatus = response.status;
       if (response.ok) {
-        const payload = await response.json().catch(() => ({}));
+        const payload = (await response.json().catch(() => ({}))) as HealthPayload;
         lastHealth = summarizeHealth(payload);
         const ready =
           typeof payload?.timestamp === 'number'
@@ -381,7 +403,7 @@ const assertAnvilChain = (chainId: number, rpcUrl: string, context: string): voi
   }
 };
 
-const fetchJurisdictions = async (baseOrigin?: string): Promise<any> => {
+const fetchJurisdictions = async (baseOrigin?: string): Promise<JurisdictionsPayload> => {
   const primaryOrigin = baseOrigin ?? (typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance');
   const configuredApiBase =
     typeof window !== 'undefined'
@@ -418,7 +440,7 @@ const fetchJurisdictions = async (baseOrigin?: string): Promise<any> => {
         lastError = new Error(`HTTP ${resp.status}`);
         continue;
       }
-      const payload = await resp.json();
+      const payload = (await resp.json()) as JurisdictionsPayload;
       console.log('[VaultStore] jurisdictions fetched:', JSON.stringify({
         url,
         finalUrl: resp.url,
@@ -447,7 +469,7 @@ async function fundSignerWalletViaFaucet(address: string): Promise<void> {
     });
 
     const raw = await response.text();
-    let result: any = null;
+    let result: FaucetResult | null = null;
     if (raw) {
       try { result = JSON.parse(raw); } catch { /* ignore */ }
     }
@@ -486,9 +508,7 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
     const xln = await getXLN();
 
     // Stop WS/P2P first to avoid new inbound events while shutting down loop.
-    if (xln.stopP2P) {
-      (xln.stopP2P as any)(env);
-    }
+    xln.stopP2P(env);
 
     // Stop async runtime loop if active.
     env.runtimeState?.stopLoop?.();
@@ -497,21 +517,11 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
       env.runtimeState.stopLoop = null;
     }
 
-    // Clear database and close DB handle for full wipe
-    const xlnAny = xln as any;
-    if (xlnAny.clearDatabase && xlnAny.getRuntimeDb) {
-      try {
-        const db = xlnAny.getRuntimeDb(env);
-        if (db) {
-          await xlnAny.clearDatabase(db);
-          console.log(`[VaultStore] 🗑️ Database cleared for runtime ${runtimeId.slice(0, 12)}`);
-        }
-      } catch (dbErr) {
-        console.warn(`[VaultStore] DB clear failed:`, dbErr);
-      }
-    }
-    if (xlnAny.closeRuntimeDb) {
-      await xlnAny.closeRuntimeDb(env);
+    try {
+      await xln.clearDB(env);
+      console.log(`[VaultStore] 🗑️ Database cleared for runtime ${runtimeId.slice(0, 12)}`);
+    } catch (dbErr) {
+      console.warn('[VaultStore] DB clear failed:', dbErr);
     }
   } catch (err) {
     console.warn(`[VaultStore] Failed to cleanup runtime ${runtimeId.slice(0, 12)}:`, err);
@@ -568,7 +578,7 @@ function registerRuntimeEnvChange(
   onEnvChange(env);
 }
 
-function runtimeToEntry(runtime: Runtime, env: any) {
+function runtimeToEntry(runtime: Runtime, env: Env) {
   const runtimeId = normalizeRuntimeId(runtime.id);
   if (!runtimeId) {
     throw new Error(`[VaultStore] Invalid runtime.id: ${String(runtime.id)}`);
@@ -585,7 +595,7 @@ function runtimeToEntry(runtime: Runtime, env: any) {
   };
 }
 
-async function registerRuntimeSignerKeys(runtime: Runtime, xln: any): Promise<void> {
+async function registerRuntimeSignerKeys(runtime: Runtime, xln: XLNModule): Promise<void> {
   for (const signer of runtime.signers) {
     const privateKey = derivePrivateKey(runtime.seed, signer.index);
     const privateKeyBytes = new Uint8Array(
@@ -595,27 +605,27 @@ async function registerRuntimeSignerKeys(runtime: Runtime, xln: any): Promise<vo
   }
 }
 
-function applyRuntimeLogPreference(env: any): void {
+function applyRuntimeLogPreference(env: Env): void {
   if (!env) return;
   const verbose = !!get(settings).verboseLogging;
   env.quietRuntimeLogs = !verbose;
 }
 
-function ensureRuntimeLoopRunning(env: any, xln: any, reason: string): void {
-  if (!env || !xln?.startRuntimeLoop) return;
+function ensureRuntimeLoopRunning(env: Env, xln: XLNModule, reason: string): void {
+  if (!hasStartRuntimeLoop(xln)) return;
   if (env.runtimeState?.loopActive) return;
   xln.startRuntimeLoop(env);
   console.log(`[VaultStore] ♻️ Runtime loop started for ${reason}`);
 }
 
-async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestore = false): Promise<any> {
+async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strictRestore = false): Promise<Env> {
   const runtimeIdLower = normalizeRuntimeId(runtime.id);
   if (!runtimeIdLower) {
     throw new Error(`[VaultStore] Invalid runtime.id for env restore: ${String(runtime.id)}`);
   }
   console.log('[VaultStore] 🔎 buildOrRestoreRuntimeEnv called for:', runtimeIdLower?.slice(0, 12), new Error('stack').stack?.split('\n').slice(1, 5).join(' ← '));
   const runtimeSeed = runtime.seed;
-  let env: any = null;
+  let env: Env | null = null;
 
   try {
     if (xln.loadEnvFromDB) {
@@ -642,7 +652,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
     env = null;
   }
 
-  const hasLiveJAdapter = (targetEnv: any): boolean => {
+  const hasLiveJAdapter = (targetEnv: Env | null): boolean => {
     if (!targetEnv?.jReplicas || targetEnv.jReplicas.size === 0) return false;
     for (const [, jReplica] of targetEnv.jReplicas.entries()) {
       if (hasConnectedJurisdictionAdapter(jReplica)) return true;
@@ -742,7 +752,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
       jReplicas: env.jReplicas?.size || 0,
       entities: env.eReplicas?.size || 0,
       accounts: restoredAccounts,
-      replayMeta: (env as any).__replayMeta || null,
+      replayMeta: getReplayMeta(env),
     }));
   }
 
@@ -779,7 +789,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
 
   ensureRuntimeLoopRunning(env, xln, `post-restore:${runtimeIdLower.slice(0, 12)}`);
 
-  if (xln.startJEventWatcher) {
+  if (hasStartJEventWatcher(xln)) {
     await xln.startJEventWatcher(env);
   }
 
@@ -1179,7 +1189,7 @@ export const vaultOperations = {
       45_000,
     );
     markPerf('import_j_testnet');
-    if (xln.startJEventWatcher) {
+    if (hasStartJEventWatcher(xln)) {
       await xln.startJEventWatcher(newEnv);
     }
     markPerf('start_j_event_watcher');
@@ -1419,13 +1429,13 @@ export const vaultOperations = {
           console.log(`[VaultStore.selectRuntime] ♻️ Restarted runtime loop for ${resolvedRuntimeId.slice(0, 12)}`);
         }
 
-        let p2p: any = xln.getP2P ? xln.getP2P(env) : null;
-        if (!p2p && xln.startP2P) {
+        let p2p = getRuntimeP2PHandle(xln, env);
+        if (!p2p) {
           xln.startP2P(env, {
             relayUrls: resolveRelayUrls(),
             gossipPollMs: BROWSER_GOSSIP_POLL_MS,
           });
-          p2p = xln.getP2P ? xln.getP2P(env) : null;
+          p2p = getRuntimeP2PHandle(xln, env);
           console.log(`[VaultStore.selectRuntime] ♻️ Started P2P for ${resolvedRuntimeId.slice(0, 12)}`);
         } else if (p2p && typeof p2p.isConnected === 'function' && !p2p.isConnected()) {
           if (typeof p2p.connect === 'function') {
@@ -1677,8 +1687,7 @@ export const vaultOperations = {
           await registerRuntimeSignerKeys(runtime, xln);
           console.log(`[VaultStore.initialize] ✅ Registered ${runtime.signers.length} HD-derived keys for ${runtimeId.slice(0, 12)}`);
 
-          let env: any;
-          env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+          const env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
           if (normalizeRuntimeId(env?.runtimeId || '') !== runtimeId) {
             throw new Error(
               `[VaultStore.initialize] Runtime isolation mismatch: slot=${runtimeId} env.runtimeId=${String(env?.runtimeId || 'none')}`

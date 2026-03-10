@@ -472,3 +472,8 @@
     - `bun build runtime/server.ts --target=bun --outfile=/tmp/runtime-server-check.js`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-custody.spec.ts,tests/e2e-dispute.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-215216-941/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-215216-941/e2e-shard-00.log)
+
+- 2026-03-10
+  - Tightened vaultStore hot-path typing. Removed all remaining any/as any from frontend/src/lib/stores/vaultStore.ts.
+  - Simplified runtime cleanup to use clearDB(env) instead of ad-hoc DB-handle access.
+  - Verified: frontend dev build, runtime/server.ts build, focused isolated E2E payment + custody.
