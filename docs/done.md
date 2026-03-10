@@ -441,3 +441,20 @@
   - verified:
     - `bun test frontend/src/lib/components/Entity/shared/delta-visual.test.ts`
     - `cd frontend && bunx vite build --mode development`
+  - fixed stale E2E assumptions after default multi-token hub bootstrap:
+    - removed obsolete `swap-auto-capacity-note` assertions from:
+      - [e2e-swap-isolated.spec.ts](/Users/egor/xln/tests/e2e-swap-isolated.spec.ts)
+      - [e2e-swap.spec.ts](/Users/egor/xln/tests/e2e-swap.spec.ts)
+    - renamed the shared swap scenario to match current behavior: executable WETH/USDC offers survive reload instead of relying on auto-activation
+  - fixed a real replay bug in hub rebalance:
+    - [entity-crontab.ts](/Users/egor/xln/runtime/entity-crontab.ts) no longer clears stale `sentBatch` latches by direct state mutation
+    - stale latch recovery now queues persisted `j_abort_sent_batch(requeueToCurrent=true)` and retries on the next tick
+    - this keeps live execution and WAL replay on the same state-machine path and removes the `REPLAY_INVARIANT_FAILED ... Cannot broadcast: sentBatch pending` dispute reload failure
+  - re-verified:
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-swap.spec.ts,tests/e2e-swap-isolated.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-212548-055/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-212548-055/e2e-shard-00.log)
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-dispute.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-213456-861/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-213456-861/e2e-shard-00.log)
+    - full isolated suite:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=2 --workers-per-shard=1 --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-213625-963/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-213625-963/e2e-shard-00.log)

@@ -727,9 +727,9 @@ test.describe('E2E Swap Flow', () => {
     await timedStep('swap.ensure_baseline', () => ensureE2EBaseline(page, { forceReset: true }));
   });
 
-  // Scenario: the UI should auto-create the inbound token capacity required to place a WETH/USDC offer,
-  // and that prepared state must still be present after a reload.
-  test('swap place auto-prepares inbound token capacity', async ({ page }) => {
+  // Scenario: the runtime baseline now pre-opens the common hub deltas, so a WETH/USDC offer
+  // should stay executable through the visible swap UI and remain present after a reload.
+  test('swap place executable WETH/USDC offer survives reload', async ({ page }) => {
     test.setTimeout(240_000);
 
     await timedStep('swap_auto.goto_app', () => gotoApp(page));
@@ -759,8 +759,6 @@ test.describe('E2E Swap Flow', () => {
     await amountInput.fill(formatDecimalForInput(targetAmount));
     await priceInput.fill('2500');
     await page.waitForTimeout(350);
-
-    await expect(page.getByTestId('swap-auto-capacity-note')).toContainText(/auto-activate/i, { timeout: 20_000 });
 
     const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
     await expect(placeButton).toBeEnabled({ timeout: 20_000 });
