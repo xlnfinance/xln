@@ -2512,7 +2512,7 @@ const triggerColdReset = async (
     try {
       startP2P(env, {
         relayUrls: [internalRelayUrl],
-        gossipPollMs: 0,
+        gossipPollMs: 1000,
         serverId: activeServerOptions.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server',
       });
       console.log(`[RESET] P2P reconnected: ${internalRelayUrl}`);
@@ -3536,10 +3536,9 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         ? body.advertiseEntityIds.map(value => (typeof value === 'string' ? value.trim().toLowerCase() : '')).filter(Boolean)
         : undefined;
       const isHub = typeof body?.isHub === 'boolean' ? body.isHub : undefined;
-      const gossipPollMs =
-        Number.isFinite(Number(body?.gossipPollMs)) && Number(body?.gossipPollMs) >= 0
-          ? Math.floor(Number(body?.gossipPollMs))
-          : undefined;
+      const gossipPollMs = Number.isFinite(Number(body?.gossipPollMs))
+        ? Math.max(1000, Math.floor(Number(body?.gossipPollMs)))
+        : undefined;
 
       startP2P(env, {
         ...(relayUrls ? { relayUrls } : {}),
@@ -5270,8 +5269,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     relayUrls: [internalRelayUrl],
     ...(advertisedEntityIds.length > 0 ? { advertiseEntityIds: advertisedEntityIds } : {}),
     isHub: hubEntityIds.length > 0,
-    // Keep hub-bootstrapped servers quiet; plain daemons can still poll the relay.
-    gossipPollMs: hubEntityIds.length > 0 ? 0 : 5000,
+    gossipPollMs: 1000,
   });
 
   console.log(`

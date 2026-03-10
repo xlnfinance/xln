@@ -295,3 +295,15 @@
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-rebalance-bar.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
     - full isolated sweep passed:
       - log: [/Users/egor/xln/.logs/e2e-parallel/20260310-055021-307/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-055021-307/e2e-shard-00.log)
+- 2026-03-10T15:10:00Z minimum 1s gossip sync enforced across runtime, browser, and custody paths:
+  - [runtime/networking/p2p.ts](/Users/egor/xln/runtime/networking/p2p.ts) now clamps all runtime gossip polling to at least `1000ms`; no runtime can silently fall back to relay-manual-only mode through `gossipPollMs: 0`
+  - [runtime/server.ts](/Users/egor/xln/runtime/server.ts) now normalizes incoming `/api/control/p2p` `gossipPollMs` to at least `1000ms` and boots server P2P with `1000ms` polling for all entity sets
+  - [runtime/orchestrator/daemon-control.ts](/Users/egor/xln/runtime/orchestrator/daemon-control.ts) now defaults routing and custody daemon control flows to `1000ms` gossip polling
+  - [frontend/src/lib/stores/vaultStore.ts](/Users/egor/xln/frontend/src/lib/stores/vaultStore.ts) now starts browser runtimes with `1000ms` relay sync instead of `5000ms`
+  - [custody/static/app.js](/Users/egor/xln/custody/static/app.js) preserves focused field state across dashboard re-renders, so the custody form no longer fights typing while background polling updates balances/activity
+  - verified:
+    - `bun build runtime/server.ts --target=bun --outfile=/tmp/runtime-server-check.js`
+    - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-browser-check.js`
+    - `bun build custody/server.ts --target=bun --outfile=/tmp/custody-check.js`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-150559-359/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-150559-359/e2e-shard-00.log)

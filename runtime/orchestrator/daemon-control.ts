@@ -341,7 +341,7 @@ export const enableRouting = async (
     ...(config.relayUrl ? { relayUrls: [config.relayUrl] } : {}),
     advertiseEntityIds: [identity.entityId],
     isHub: true,
-    gossipPollMs: config.gossipPollMs ?? 0,
+    gossipPollMs: config.gossipPollMs ?? 1000,
   });
   return identity;
 };
@@ -368,7 +368,7 @@ export const setupCustody = async (
       ...(config.relayUrl ? { relayUrls: [config.relayUrl] } : {}),
       advertiseEntityIds: [identity.entityId],
       isHub: false,
-      gossipPollMs: config.gossipPollMs ?? 5000,
+      gossipPollMs: config.gossipPollMs ?? 1000,
     });
   }
   return identity;
