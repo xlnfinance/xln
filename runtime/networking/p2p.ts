@@ -49,7 +49,6 @@ export type P2PConfig = {
   runtimeId?: string;
   signerId?: string;
   advertiseEntityIds?: string[];
-  isHub?: boolean;
   gossipPollMs?: number;
 };
 
@@ -60,7 +59,6 @@ type RuntimeP2POptions = {
   relayUrls?: string[];
   seedRuntimeIds?: string[];
   advertiseEntityIds?: string[];
-  isHub?: boolean;
   gossipPollMs?: number;
   onEntityInput: (from: string, input: RoutedEntityInput) => void;
   onGossipProfiles: (from: string, profiles: Profile[]) => void;
@@ -149,7 +147,6 @@ export class RuntimeP2P {
   private relayUrls: string[];
   private seedRuntimeIds: string[];
   private advertiseEntityIds: string[] | null;
-  private isHub: boolean;
   private gossipPollMs: number;
   private onEntityInput: (from: string, input: RoutedEntityInput) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
@@ -173,7 +170,6 @@ export class RuntimeP2P {
     this.relayUrls = unique(options.relayUrls || [DEFAULT_RELAY_URL]);
     this.seedRuntimeIds = unique(options.seedRuntimeIds || []);
     this.advertiseEntityIds = options.advertiseEntityIds || null;
-    this.isHub = options.isHub ?? false;
     this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
     this.onEntityInput = options.onEntityInput;
     this.onGossipProfiles = options.onGossipProfiles;
@@ -200,9 +196,6 @@ export class RuntimeP2P {
     }
     if (config.advertiseEntityIds) {
       this.advertiseEntityIds = config.advertiseEntityIds;
-    }
-    if (config.isHub !== undefined) {
-      this.isHub = config.isHub;
     }
     if (config.gossipPollMs !== undefined) {
       const prevPollMs = this.gossipPollMs;

@@ -90,6 +90,7 @@ export function buildEntityProfile(
   const accounts: ProfileAccount[] = [];
   const publicAccounts: string[] = [];
   const hubConfig = entityState.hubRebalanceConfig;
+  const isHub = entityState.profile.isHub === true;
 
   // Build account capacities from all accounts
   for (const [counterpartyId, accountMachine] of entityState.accounts.entries()) {
@@ -151,10 +152,10 @@ export function buildEntityProfile(
     endpoints: [],
     relays: [],
     metadata: {
-      isHub: !!hubConfig,
+      isHub,
       routingFeePPM: hubConfig?.routingFeePPM ?? 100, // Default 100 PPM (0.01%)
       baseFee: hubConfig?.baseFee ?? 0n,
-      ...(hubConfig
+      ...(isHub && hubConfig
         ? {
             policyVersion: hubConfig.policyVersion,
             rebalanceBaseFee: String(hubConfig.rebalanceBaseFee ?? 10n ** 17n),

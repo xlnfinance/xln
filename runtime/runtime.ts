@@ -1972,6 +1972,7 @@ const applyRuntimeInput = async (
                 typeof runtimeTx.data.profileName === 'string' && runtimeTx.data.profileName.trim().length > 0
                   ? runtimeTx.data.profileName.trim()
                   : `Entity ${runtimeTx.entityId.slice(-4)}`,
+              isHub: false,
               avatar: '',
               bio: '',
               website: '',

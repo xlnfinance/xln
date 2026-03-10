@@ -367,3 +367,24 @@
   - verified collateral/rebalance path explicitly:
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-rebalance-bar.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-200613-354/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-200613-354/e2e-shard-00.log)
+  - made hub classification explicit in entity consensus state instead of inferring it from `hubRebalanceConfig`
+    - `EntityState.profile.isHub` is now the single public hub bit
+    - fresh entities start with `isHub=false`
+    - `setHubConfig` flips the bit to `true`
+    - gossip profile building now reads the explicit bit instead of treating any rebalance config as a hub declaration
+    - this prevents MM or any non-hub entity from advertising as a hub just because it shares runtime features or stale config
+  - removed dead `isHub` plumbing from runtime P2P/control config because it was stored but never used by the transport layer:
+    - [runtime/networking/p2p.ts](/Users/egor/xln/runtime/networking/p2p.ts)
+    - [runtime/orchestrator/daemon-control.ts](/Users/egor/xln/runtime/orchestrator/daemon-control.ts)
+    - [runtime/server.ts](/Users/egor/xln/runtime/server.ts)
+    - [runtime/xln-api.ts](/Users/egor/xln/runtime/xln-api.ts)
+  - tightened the debugging gossip panel typing and fixed its broken account count rendering:
+    - [GossipPanel.svelte](/Users/egor/xln/frontend/src/lib/view/panels/GossipPanel.svelte)
+  - added a focused runtime regression test for the new explicit hub-bit behavior:
+    - [entity-hub-profile.test.ts](/Users/egor/xln/runtime/__tests__/entity-hub-profile.test.ts)
+  - verified:
+    - `bun test runtime/__tests__/entity-hub-profile.test.ts runtime/__tests__/routing-metadata.test.ts runtime/__tests__/relay-router.test.ts`
+    - `cd frontend && bunx vite build --mode development`
+    - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-202359-229/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-202359-229/e2e-shard-00.log)
