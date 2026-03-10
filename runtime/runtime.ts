@@ -1069,22 +1069,7 @@ const assertLocalEntityCryptoKeys = (env: Env): void => {
 
 const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | null => {
   if (!profile) return null;
-  const direct = normalizeRuntimeId(profile.runtimeId);
-  if (direct) return direct;
-
-  const metaRuntimeId = normalizeRuntimeId((profile.metadata as Record<string, unknown> | undefined)?.runtimeId);
-  if (metaRuntimeId) {
-    return metaRuntimeId;
-  }
-
-  const board = profile.metadata?.board;
-  if (board && typeof board === 'object' && 'validators' in board && Array.isArray(board.validators)) {
-    const firstSigner = board.validators[0]?.signer;
-    const signerRuntimeId = normalizeRuntimeId(firstSigner);
-    if (signerRuntimeId) return signerRuntimeId;
-  }
-
-  return null;
+  return normalizeRuntimeId(profile.runtimeId);
 };
 
 const RUNTIME_HINT_TTL_MS = 60_000;
