@@ -4,7 +4,6 @@
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
 
-  export let entityId: string = '';
   $: activeEnv = $xlnEnvironment;
 
   let loading = false;
@@ -41,7 +40,7 @@
   $: hubCount = profiles.filter(isHub).length;
 
   function isHub(profile: GossipProfile): boolean {
-    return profile.metadata?.isHub === true;
+    return profile.metadata.isHub === true;
   }
 
   function profileName(profile: GossipProfile): string {
@@ -148,7 +147,7 @@
           />
           <div class="meta">
             {#if isHub(profile)}<span class="chip">hub</span>{/if}
-            <span class="chip">runtime {profile.runtimeId ? profile.runtimeId.slice(0, 10) : '-'}</span>
+            <span class="chip">runtime {profile.runtimeId.slice(0, 10)}</span>
             <span class="chip">{formatTs(profile.lastUpdated)}</span>
           </div>
         </div>

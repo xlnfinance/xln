@@ -44,11 +44,11 @@
     metadata: {
       description?: string;
       website?: string;
-      fee?: number;
+      fee: number;
       peerCount: number;
     };
-    runtimeId?: string;
-    endpoints?: string[];
+    runtimeId: string;
+    endpoints: string[];
     verified: boolean;
     creditScore: number;
     isConnected: boolean;
@@ -193,38 +193,35 @@
       const gossipProfiles: GossipProfile[] = typeof currentEnv.gossip?.getHubs === 'function'
         ? currentEnv.gossip.getHubs()
         : (currentEnv.gossip?.getProfiles?.() || []).filter(
-            (profile: GossipProfile) => profile.metadata?.isHub === true,
+            (profile: GossipProfile) => profile.metadata.isHub === true,
           );
 
       for (const profile of gossipProfiles) {
-        if (!profile?.entityId) continue;
         if (normalizeEntityId(profile.entityId) === normalizeEntityId(entityId)) continue;
 
         const isConnected = hasCounterpartyAccount(currentEnv, entityId, profile.entityId);
-        const feePpm = profile.metadata?.routingFeePPM || 100;
+        const feePpm = profile.metadata.routingFeePPM;
         const fullEntityId = profile.entityId.startsWith('0x') ? profile.entityId : `0x${profile.entityId}`;
-        const peerCount = Array.isArray(profile.publicAccounts) ? profile.publicAccounts.length : 0;
+        const peerCount = profile.publicAccounts.length;
 
         discovered.push({
           profile,
           entityId: profile.entityId,
-          name: profile.name || `Hub ${profile.entityId.slice(0, 8)}`,
+          name: profile.name,
           metadata: {
             description: profile.bio || 'Payment hub',
             ...(profile.website ? { website: profile.website } : {}),
             fee: feePpm,
             peerCount,
           },
-          endpoints: profile.endpoints || [],
-          verified: profile.metadata?.isHub === true,
+          endpoints: profile.endpoints,
+          verified: profile.metadata.isHub === true,
           creditScore: computeCreditScore(profile.entityId, feePpm, peerCount),
           isConnected,
-          lastSeen: profile.lastUpdated || Date.now(),
+          lastSeen: profile.lastUpdated,
           raw: formatRawProfile(profile),
           identicon: generateIdenticon(fullEntityId),
-          ...(typeof profile.runtimeId === 'string' && profile.runtimeId.trim()
-            ? { runtimeId: profile.runtimeId }
-            : {}),
+          runtimeId: profile.runtimeId,
         });
       }
 

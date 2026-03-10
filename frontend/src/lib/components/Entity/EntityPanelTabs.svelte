@@ -2358,7 +2358,7 @@
             <FormationPanel />
 
           {:else if moreTab === 'gossip'}
-            <GossipPanel entityId={replica?.state?.entityId || tab.entityId} />
+            <GossipPanel />
 
           {:else if moreTab === 'governance'}
             <h4 class="section-head">Entity Governance Profile</h4>
