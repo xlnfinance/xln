@@ -41,6 +41,7 @@ import {
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion (DoS protection)
+const MIN_GOSSIP_POLL_MS = 1000;
 
 export type P2PConfig = {
   relayUrls?: string[];
@@ -70,6 +71,11 @@ type GossipResponsePayload = {
 };
 
 type GossipRefreshMode = 'incremental' | 'full';
+
+const normalizeGossipPollMs = (value: number | undefined): number => {
+  if (!Number.isFinite(Number(value))) return GOSSIP_POLL_MS;
+  return Math.max(MIN_GOSSIP_POLL_MS, Math.floor(Number(value)));
+};
 
 const unique = (items: string[]): string[] => Array.from(new Set(items.filter(Boolean)));
 
@@ -131,7 +137,7 @@ const getReplicaSignerId = (replicaKey: string): string => {
   return idx === -1 ? '' : replicaKey.slice(idx + 1);
 };
 
-const GOSSIP_POLL_MS = 5000; // Poll relay every 5s by default to avoid relay spam
+const GOSSIP_POLL_MS = 1000; // Keep every runtime synced to relay at least once per second
 const PROFILE_ANNOUNCE_DEBOUNCE_MS = 25;
 const PROFILE_HEARTBEAT_MS = 15_000;
 const GOSSIP_FETCH_RETRY_DELAYS_MS = [40, 80, 160];
@@ -168,7 +174,7 @@ export class RuntimeP2P {
     this.seedRuntimeIds = unique(options.seedRuntimeIds || []);
     this.advertiseEntityIds = options.advertiseEntityIds || null;
     this.isHub = options.isHub ?? false;
-    this.gossipPollMs = options.gossipPollMs ?? GOSSIP_POLL_MS;
+    this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
     this.onEntityInput = options.onEntityInput;
     this.onGossipProfiles = options.onGossipProfiles;
     // Derive X25519 encryption keypair from seed (mandatory, no fallback)
@@ -200,10 +206,8 @@ export class RuntimeP2P {
     }
     if (config.gossipPollMs !== undefined) {
       const prevPollMs = this.gossipPollMs;
-      this.gossipPollMs = config.gossipPollMs;
-      if (this.gossipPollMs <= 0) {
-        this.stopPolling();
-      } else if (!this.pollInterval) {
+      this.gossipPollMs = normalizeGossipPollMs(config.gossipPollMs);
+      if (!this.pollInterval) {
         this.startPolling();
       } else if (prevPollMs !== this.gossipPollMs) {
         // Interval changed while polling: restart to apply the new cadence.
@@ -374,10 +378,6 @@ export class RuntimeP2P {
   private startPolling() {
     if (this.pollInterval) {
       // Already polling
-      return;
-    }
-    if (this.gossipPollMs <= 0) {
-      console.log('[P2P] startPolling: Gossip polling disabled (manual refresh only)');
       return;
     }
     console.log(`[P2P] startPolling: Starting polling every ${this.gossipPollMs}ms`);

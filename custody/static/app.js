@@ -82,6 +82,43 @@ let pendingDepositHref = '';
 let lastDashboardFingerprint = '';
 const CHECKOUT_WINDOW_NAME = 'xln-custody-checkout';
 
+const captureActiveField = () => {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLInputElement || active instanceof HTMLSelectElement || active instanceof HTMLTextAreaElement)) {
+    return null;
+  }
+  if (!app.contains(active)) return null;
+  const fieldName = active.name;
+  if (!fieldName) return null;
+  return {
+    name: fieldName,
+    tag: active.tagName,
+    selectionStart: active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement ? active.selectionStart : null,
+    selectionEnd: active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement ? active.selectionEnd : null,
+  };
+};
+
+const restoreActiveField = (snapshot) => {
+  if (!snapshot) return;
+  const selector = `[name="${CSS.escape(snapshot.name)}"]`;
+  const next = app.querySelector(selector);
+  if (!(next instanceof HTMLInputElement || next instanceof HTMLSelectElement || next instanceof HTMLTextAreaElement)) {
+    return;
+  }
+  next.focus({ preventScroll: true });
+  if (
+    snapshot.selectionStart !== null &&
+    snapshot.selectionEnd !== null &&
+    (next instanceof HTMLInputElement || next instanceof HTMLTextAreaElement)
+  ) {
+    try {
+      next.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+    } catch {
+      // ignore non-text inputs
+    }
+  }
+};
+
 const escapeHtml = (value) => String(value || '')
   .replaceAll('&', '&amp;')
   .replaceAll('<', '&lt;')
@@ -201,6 +238,7 @@ const render = () => {
     return;
   }
 
+  const activeField = captureActiveField();
   const selectedDepositToken = getSelectedDepositToken();
   const withdrawButtonLabel = submitting ? 'Sending...' : 'Withdraw via XLN';
   app.innerHTML = `
@@ -365,6 +403,8 @@ const render = () => {
       });
     });
   }
+
+  restoreActiveField(activeField);
 };
 
 const dashboardFingerprint = (payload) => JSON.stringify({

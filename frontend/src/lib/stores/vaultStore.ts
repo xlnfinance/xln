@@ -49,7 +49,7 @@ const defaultState: RuntimesState = {
 
 // Storage key
 const VAULT_STORAGE_KEY = 'xln-vaults';
-const BROWSER_GOSSIP_POLL_MS = 5000;
+const BROWSER_GOSSIP_POLL_MS = 1000;
 const DEBUG_GLOBAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 const normalizeRuntimeId = (value: string | null | undefined): string => {
   const raw = String(value || '').trim();
