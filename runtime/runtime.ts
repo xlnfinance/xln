@@ -27,8 +27,8 @@ const LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS = (() => {
   return Math.floor(parsed);
 })();
 const DEFAULT_SNAPSHOT_INTERVAL_FRAMES = (() => {
-  const parsed = Number(readRuntimeEnv('XLN_SNAPSHOT_INTERVAL_FRAMES') ?? '10');
-  if (!Number.isFinite(parsed) || parsed < 1) return 10;
+  const parsed = Number(readRuntimeEnv('XLN_SNAPSHOT_INTERVAL_FRAMES') ?? '5');
+  if (!Number.isFinite(parsed) || parsed < 1) return 5;
   return Math.floor(parsed);
 })();
 
@@ -800,7 +800,7 @@ const hasDueEntityHooks = (env: Env): boolean => {
   if (!env.eReplicas || env.eReplicas.size === 0) return false;
   const nowMs = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
   for (const [, replica] of env.eReplicas) {
-    const crontab = (replica as any).state?.crontabState;
+    const crontab = replica.state?.crontabState;
     if (!crontab) continue;
     // One-shot hooks (setTimeout-like)
     const hooks = crontab.hooks;
@@ -837,7 +837,7 @@ const generateHookPings = (env: Env): void => {
   const mempool = ensureRuntimeMempool(env);
 
   for (const [key, replica] of env.eReplicas) {
-    const crontab = (replica as any).state?.crontabState;
+    const crontab = replica.state?.crontabState;
     if (!crontab) continue;
 
     let hasDue = false;
@@ -3576,8 +3576,8 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
         const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
         const latestHeight = Number.parseInt(latestHeightBuffer.toString(), 10);
         if (!Number.isFinite(latestHeight) || latestHeight !== env.height) {
-          console.warn(
-            `⚠️ latest_height mismatch after write: expected=${env.height} actual=${String(latestHeightBuffer.toString())}`,
+          throw new Error(
+            `PERSISTENCE_FATAL: latest_height mismatch after write: expected=${env.height} actual=${String(latestHeightBuffer.toString())}`,
           );
         }
       } catch (verifyError) {
@@ -3765,24 +3765,12 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       );
     }
 
-    // Time-machine requirement: always rebuild full frame history on reload.
-    // Use genesis checkpoint (frame 1) as replay base when runtime has frames.
-    let selectedSnapshotHeight = checkpointHeight;
-    let selectedSnapshotLabel = `checkpoint:${checkpointHeight}`;
-    let snapshotBufferToUse = checkpointBuffer;
-    if (latestHeight > 0) {
-      try {
-        const genesisSnapshotBuffer = await db.get(makeDbKey(dbNamespace, 'snapshot:1'));
-        selectedSnapshotHeight = 1;
-        selectedSnapshotLabel = 'checkpoint:1';
-        snapshotBufferToUse = genesisSnapshotBuffer;
-      } catch (error) {
-        const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-        throw new Error(
-          `REPLAY_INVARIANT_FAILED: frame=1 checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing genesis checkpoint snapshot (${message})`,
-        );
-      }
-    }
+    // Restore from latest checkpoint + replay WAL tail.
+    // Previous design always replayed from genesis (snapshot:1) which was O(N) on total frames
+    // and made any replay nondeterminism fatal. Checkpoints are already written and verified.
+    const selectedSnapshotHeight = checkpointHeight;
+    const selectedSnapshotLabel = `checkpoint:${checkpointHeight}`;
+    const snapshotBufferToUse = checkpointBuffer;
     console.log(
       `[loadEnvFromDB] snapshot selection checkpoint=${checkpointHeight} selected=${selectedSnapshotHeight} source=${selectedSnapshotLabel}`,
     );

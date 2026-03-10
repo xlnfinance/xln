@@ -43,42 +43,18 @@
  * same hook fire at the same logical time because the proposer's
  * env.timestamp is used for the frame.
  *
- * PERSISTENCE: Hooks live on crontabState (transient, not in consensus hash).
- * Lost on page reload — periodic task polling serves as safety-net fallback.
+ * PERSISTENCE: crontabState is part of entity state, but it stays declarative:
+ * task method names, schedule data, and hook payloads. Runtime code rebinds the
+ * method names to concrete handlers via a static registry.
  */
 
 import type { Env, EntityReplica, EntityInput, AccountMachine, SettlementOp, EntityTx } from './types';
+import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook } from './crontab-types';
 import { isLeftEntity } from './entity-id-utils';
 import { deriveDelta } from './account-utils';
 import { resolveEntityProposerId } from './state-helpers';
 import { normalizeRebalanceMatchingStrategy } from './rebalance-policy';
 import { DEFAULT_SOFT_LIMIT } from './types';
-
-// ═══════════════════════════════════════════════════════════════════════
-// Types
-// ═══════════════════════════════════════════════════════════════════════
-
-export interface CrontabTask {
-  name: string;
-  intervalMs: number; // How often to run (in milliseconds)
-  lastRun: number; // Timestamp of last execution
-  handler: (env: Env, replica: EntityReplica) => Promise<EntityInput[]>;
-}
-
-/** A one-shot hook that fires at a specific wall-clock time */
-export interface ScheduledHook {
-  id: string; // Unique ID (e.g., "htlc-timeout:0xabc...")
-  triggerAt: number; // Wall-clock ms — when this should fire
-  type: string; // Hook type for routing (e.g., 'htlc_timeout')
-  data: Record<string, any>; // Payload passed to handler
-}
-
-export interface CrontabState {
-  tasks: Map<string, CrontabTask>;
-  hooks: Map<string, ScheduledHook>;
-  // Set by entity-consensus for current apply tick only.
-  inputHasManualBroadcast?: boolean;
-}
 
 // Configuration constants
 export const ACCOUNT_TIMEOUT_MS = 30000; // 30 seconds (configurable)
@@ -107,29 +83,46 @@ const hasActiveDisputeHash = (hash: unknown): boolean => {
   return normalized !== '' && normalized !== '0x' && normalized !== '0x0' && normalized !== ZERO_HASH_32;
 };
 
+type CrontabExecutionContext = {
+  manualBroadcastInInput: boolean;
+};
+
+type CrontabTaskHandler = (
+  env: Env,
+  replica: EntityReplica,
+  task: CrontabTaskState,
+  context: CrontabExecutionContext,
+) => Promise<EntityInput[]>;
+
+const createTaskState = (
+  method: CrontabTaskMethod,
+  intervalMs: number,
+  params: Record<string, string | number | boolean> = {},
+): CrontabTaskState => ({
+  method,
+  intervalMs,
+  lastRun: 0,
+  enabled: true,
+  params,
+});
+
 /**
  * Initialize crontab state for an entity
  */
 export function initCrontab(): CrontabState {
-  const tasks = new Map<string, CrontabTask>();
-
-  // Register default periodic tasks (setInterval-like)
-  tasks.set('checkAccountTimeouts', {
-    name: 'checkAccountTimeouts',
-    intervalMs: ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS,
-    lastRun: 0,
-    handler: checkAccountTimeoutsHandler,
-  });
-
-  tasks.set('hubRebalance', {
-    name: 'hubRebalance',
-    intervalMs: HUB_REBALANCE_INTERVAL_MS,
-    lastRun: 0,
-    handler: hubRebalanceHandler,
-  });
-
-  return { tasks, hooks: new Map(), inputHasManualBroadcast: false };
+  return {
+    tasks: new Map<CrontabTaskMethod, CrontabTaskState>([
+      ['checkAccountTimeouts', createTaskState('checkAccountTimeouts', ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS)],
+      ['hubRebalance', createTaskState('hubRebalance', HUB_REBALANCE_INTERVAL_MS)],
+    ]),
+    hooks: new Map(),
+  };
 }
+
+const CRONTAB_TASK_HANDLERS: Record<CrontabTaskMethod, CrontabTaskHandler> = {
+  checkAccountTimeouts: checkAccountTimeoutsHandler,
+  hubRebalance: hubRebalanceHandler,
+};
 
 // ═══════════════════════════════════════════════════════════════════════
 // Scheduled Hooks API (setTimeout-like)
@@ -173,6 +166,7 @@ export async function executeCrontab(
   env: Env,
   replica: EntityReplica,
   crontabState: CrontabState,
+  context: CrontabExecutionContext,
 ): Promise<EntityInput[]> {
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
   const allOutputs: EntityInput[] = [];
@@ -189,25 +183,28 @@ export async function executeCrontab(
 
     if (dueHooks.length > 0) {
       console.log(`⏰ HOOKS: ${dueHooks.length} hooks fired (entity ${replica.entityId.slice(-4)}, timestamp=${now})`);
-      const hookOutputs = await processDueHooks(dueHooks, env, replica);
+      const hookOutputs = await processDueHooks(dueHooks, env, replica, context);
       allOutputs.push(...hookOutputs);
     }
   }
 
   // ── 2. Process periodic tasks (setInterval-like, fires repeatedly) ──
   for (const task of crontabState.tasks.values()) {
+    if (!task.enabled) continue;
     const timeSinceLastRun = now - task.lastRun;
 
     if (timeSinceLastRun >= task.intervalMs) {
+      const handler = CRONTAB_TASK_HANDLERS[task.method];
+      if (!handler) throw new Error(`Unknown crontab task method: ${task.method}`);
       try {
-        const outputs = await task.handler(env, replica);
+        const outputs = await handler(env, replica, task, context);
         allOutputs.push(...outputs);
         task.lastRun = now;
         if (outputs.length > 0) {
-          console.log(`✅ CRONTAB: Task "${task.name}" generated ${outputs.length} outputs`);
+          console.log(`✅ CRONTAB: Task "${task.method}" generated ${outputs.length} outputs`);
         }
       } catch (error) {
-        console.error(`❌ CRONTAB: Task "${task.name}" failed:`, error);
+        console.error(`❌ CRONTAB: Task "${task.method}" failed:`, error);
       }
     }
   }
@@ -219,7 +216,12 @@ export async function executeCrontab(
  * Process fired hooks → generate entityTxs by hook type.
  * Each hook type maps to a specific security/protocol action.
  */
-async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: EntityReplica): Promise<EntityInput[]> {
+async function processDueHooks(
+  hooks: ScheduledHook[],
+  env: Env,
+  replica: EntityReplica,
+  context: CrontabExecutionContext,
+): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
   const firstValidator = replica.state.config.validators?.[0];
   if (!firstValidator) return outputs;
@@ -501,8 +503,7 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
       `⏰ HOOKS: auto disputeFinalize+j_broadcast queued for ${disputeFinalizeCounterparties.size} account(s)`,
     );
   } else if (shouldBroadcastQueuedDisputeFinalizations) {
-    const inputHasManualBroadcast = Boolean(replica.state.crontabState?.inputHasManualBroadcast);
-    if (!inputHasManualBroadcast) {
+    if (!context.manualBroadcastInInput) {
       outputs.push({
         entityId: replica.entityId,
         signerId: firstValidator,
@@ -523,7 +524,12 @@ async function processDueHooks(hooks: ScheduledHook[], env: Env, replica: Entity
  * - Check missed_ack time
  * - If > threshold, suggest dispute to entity members
  */
-async function checkAccountTimeoutsHandler(_env: Env, replica: EntityReplica): Promise<EntityInput[]> {
+async function checkAccountTimeoutsHandler(
+  _env: Env,
+  replica: EntityReplica,
+  _task: CrontabTaskState,
+  context: CrontabExecutionContext,
+): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
   const currentHeight = replica.state.lastFinalizedJHeight || 0;
@@ -740,7 +746,12 @@ export function getAccountTimeoutStats(replica: EntityReplica): {
  * Hub consumes pending requests, adds direct R→C ops to jBatch, and broadcasts.
  * Hub never auto-refunds in crontab; any refund must be explicit/manual.
  */
-async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<EntityInput[]> {
+async function hubRebalanceHandler(
+  _env: Env,
+  replica: EntityReplica,
+  _task: CrontabTaskState,
+  context: CrontabExecutionContext,
+): Promise<EntityInput[]> {
   // Only hubs should run the rebalance handler
   if (!replica.state.hubRebalanceConfig) return [];
 
@@ -1232,11 +1243,10 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     });
   }
 
-  const inputHasManualBroadcast = Boolean(replica.state.crontabState?.inputHasManualBroadcast);
   const shouldBroadcast =
     canTouchBatch &&
     !replica.state.jBatchState.sentBatch &&
-    !inputHasManualBroadcast &&
+    !context.manualBroadcastInInput &&
     (queuedCount > 0 || selectedC2RExec.length > 0);
   if (shouldBroadcast) {
     localEntityTxs.push({ type: 'j_broadcast', data: {} });
@@ -1254,7 +1264,7 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     queuedCount > 0 || selectedC2RExec.length > 0
   ) {
     const blockedByBatchState = !canTouchBatch || !!replica.state.jBatchState.sentBatch;
-    const blockedByInputBroadcast = inputHasManualBroadcast;
+    const blockedByInputBroadcast = context.manualBroadcastInInput;
     if (!blockedByBatchState && !blockedByInputBroadcast) {
       // Nothing blocked and still no broadcast means we had no eligible work.
       // Keep silent to avoid noisy logs.

@@ -214,6 +214,7 @@
 import type { GossipLayer, Profile } from './networking/gossip';
 import type { JAdapter } from './jadapter/types';
 import type { CompletedBatch, JBatch, JBatchState } from './j-batch';
+import type { CrontabState } from './crontab-types';
 
 export interface JurisdictionConfig {
   address: string;
@@ -1581,8 +1582,8 @@ export interface EntityState {
   // 🔗 Account machine integration
   accountInputQueue?: AccountInput[]; // Queue of settlement events to be processed by a-machine
 
-  // ⏰ Crontab system - periodic task execution (typed in entity-crontab.ts)
-  crontabState?: any; // CrontabState - avoid circular import
+  // ⏰ Declarative entity-local schedule. Persisted as pure data and rebound to handlers at runtime.
+  crontabState?: CrontabState;
 
   // 📦 J-Batch system - accumulates operations for on-chain submission (typed in j-batch.ts)
   jBatchState?: JBatchState;

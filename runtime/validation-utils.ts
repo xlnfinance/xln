@@ -18,6 +18,7 @@ import type {
   AccountMachine,
   AccountFrame
 } from './types';
+import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook } from './crontab-types';
 
 /**
  * Strict validation for Delta objects - financial data must be complete
@@ -380,6 +381,63 @@ function validateRebalanceFeeStateMap(value: unknown, fieldName: string): void {
   }
 }
 
+function isValidCrontabTaskMethod(value: unknown): value is CrontabTaskMethod {
+  return value === 'checkAccountTimeouts' || value === 'hubRebalance';
+}
+
+function validateCrontabTaskState(value: unknown, fieldName: string): CrontabTaskState {
+  const obj = validateObject(value, fieldName);
+  if (!isValidCrontabTaskMethod(obj['method'])) {
+    throw new FinancialDataCorruptionError(`${fieldName}.method must be a known crontab task method`);
+  }
+  validateNumber(obj['intervalMs'], `${fieldName}.intervalMs`);
+  validateNumber(obj['lastRun'], `${fieldName}.lastRun`);
+  if (typeof obj['enabled'] !== 'boolean') {
+    throw new FinancialDataCorruptionError(`${fieldName}.enabled must be a boolean`);
+  }
+  const params = validateObject(obj['params'], `${fieldName}.params`);
+  for (const [paramKey, paramValue] of Object.entries(params)) {
+    if (typeof paramValue !== 'string' && typeof paramValue !== 'number' && typeof paramValue !== 'boolean') {
+      throw new FinancialDataCorruptionError(`${fieldName}.params.${paramKey} must be string | number | boolean`);
+    }
+  }
+  return obj as CrontabTaskState;
+}
+
+function validateScheduledHook(value: unknown, fieldName: string): ScheduledHook {
+  const obj = validateObject(value, fieldName);
+  validateString(obj['id'], `${fieldName}.id`);
+  validateNumber(obj['triggerAt'], `${fieldName}.triggerAt`);
+  validateString(obj['type'], `${fieldName}.type`);
+  validateObject(obj['data'], `${fieldName}.data`);
+  return obj as ScheduledHook;
+}
+
+function validateCrontabState(value: unknown, fieldName: string): CrontabState {
+  const obj = validateObject(value, fieldName);
+  const tasks = validateMapInstance(obj['tasks'], `${fieldName}.tasks`);
+  const hooks = validateMapInstance(obj['hooks'], `${fieldName}.hooks`);
+  for (const [taskKey, taskValue] of tasks.entries()) {
+    if (!isValidCrontabTaskMethod(taskKey)) {
+      throw new FinancialDataCorruptionError(`${fieldName}.tasks key must be a known crontab task method`);
+    }
+    const task = validateCrontabTaskState(taskValue, `${fieldName}.tasks[${String(taskKey)}]`);
+    if (task.method !== taskKey) {
+      throw new FinancialDataCorruptionError(`${fieldName}.tasks[${String(taskKey)}].method must match task key`);
+    }
+  }
+  for (const [hookId, hookValue] of hooks.entries()) {
+    if (typeof hookId !== 'string' || hookId.length === 0) {
+      throw new FinancialDataCorruptionError(`${fieldName}.hooks key must be a non-empty string`);
+    }
+    const hook = validateScheduledHook(hookValue, `${fieldName}.hooks[${hookId}]`);
+    if (hook.id !== hookId) {
+      throw new FinancialDataCorruptionError(`${fieldName}.hooks[${hookId}].id must match hook key`);
+    }
+  }
+  return obj as CrontabState;
+}
+
 // =============================================================================
 // COMPREHENSIVE VALIDATORS - Complete Type Safety
 // =============================================================================
@@ -517,6 +575,10 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
 
   for (const [accountId, accountMachine] of obj['accounts'].entries()) {
     validateAccountMachine(accountMachine, `${context}.accounts[${String(accountId)}]`);
+  }
+
+  if (obj['crontabState'] !== undefined) {
+    validateCrontabState(obj['crontabState'], `${context}.crontabState`);
   }
 
   return obj as EntityState; // Cast after basic validation

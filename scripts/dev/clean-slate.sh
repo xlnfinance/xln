@@ -5,6 +5,8 @@ echo "🧹 XLN clean-slate: stopping stale processes and wiping local state..."
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT_DIR"
+CANONICAL_J_PATH="$ROOT_DIR/jurisdictions/jurisdictions.json"
+DEV_J_PATH="$ROOT_DIR/db/dev/jurisdictions.json"
 
 kill_by_port() {
   local port="$1"
@@ -44,6 +46,7 @@ rm -rf db-relay 2>/dev/null || true
 rm -rf pids/*.pid 2>/dev/null || true
 rm -rf logs/*.log 2>/dev/null || true
 
-mkdir -p db-tmp/runtime logs pids
+mkdir -p db-tmp/runtime db/dev logs pids
+cp "$CANONICAL_J_PATH" "$DEV_J_PATH"
 
 echo "✅ Clean slate ready"
