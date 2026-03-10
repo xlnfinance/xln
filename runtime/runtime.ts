@@ -74,8 +74,10 @@ import {
 import {
   announceLocalEntityProfile,
   buildEntityAdvertisedStateFingerprint,
+  buildLocalEntityProfile,
   createProfileSignerResolver,
 } from './networking/gossip-helper';
+import type { Profile } from './networking/gossip';
 import { RuntimeP2P, type P2PConfig } from './networking/p2p';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './networking/p2p-crypto';
 import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
@@ -2985,6 +2987,25 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
           error instanceof Error ? error.message : String(error),
         );
       });
+    },
+    getLiveProfiles: () => {
+      if (!env?.eReplicas || env.eReplicas.size === 0) return [];
+      const profiles = new Map<string, Profile>();
+      for (const [replicaKey, replica] of env.eReplicas.entries()) {
+        const entityId = extractEntityId(replicaKey);
+        const signerId = extractSignerId(replicaKey);
+        if (!entityId || !signerId) continue;
+        try {
+          getSignerPrivateKey(env, signerId);
+        } catch {
+          continue;
+        }
+        if (profiles.has(entityId)) continue;
+        const existingTs = env.gossip?.getProfiles?.().find((profile) => profile.entityId === entityId)?.lastUpdated ?? 0;
+        const liveTimestamp = Math.max(existingTs + 1, env.timestamp || 1);
+        profiles.set(entityId, buildLocalEntityProfile(env, replica.state, liveTimestamp));
+      }
+      return Array.from(profiles.values());
     },
   });
 

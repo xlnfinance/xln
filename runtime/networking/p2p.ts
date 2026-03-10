@@ -19,7 +19,7 @@
  * - Profile hash signed using same path as accountFrame/disputeHash/settlement
  * - Verification uses verifyHankoForHash() - same security as all entity operations
  * - Key binding: signer must be in entity's board.validators[]
- * - Invalid signatures rejected; unsigned profiles accepted with warning (migration)
+ * - Invalid or unsigned profiles are rejected
  */
 
 import type { Env, RoutedEntityInput } from '../types';
@@ -27,7 +27,7 @@ import { canonicalizeProfile, parseProfile, type Profile } from './gossip';
 import { RuntimeWsClient } from './ws-client';
 import { buildLocalEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../ids';
-import { getSignerPrivateKey, getSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
+import { getSignerPrivateKey, registerSignerPublicKey } from '../account-crypto';
 import { signProfile, verifyProfileSignature } from './profile-signing';
 import { inspectHankoForHash } from '../hanko-signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
@@ -70,9 +70,6 @@ type GossipResponsePayload = {
 };
 
 type GossipRefreshMode = 'incremental' | 'full';
-
-const toHex = (bytes: Uint8Array): string =>
-  Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 
 const unique = (items: string[]): string[] => Array.from(new Set(items.filter(Boolean)));
 
@@ -862,25 +859,11 @@ export class RuntimeP2P {
           profile.relays = this.relayUrls;
         }
       }
-      // Get public key from first validator (superset approach - works for single/multi-signer)
       const firstValidator = replica.state.config.validators[0];
-      const publicKey = firstValidator ? getSignerPublicKey(this.env, firstValidator) : null;
-      if (publicKey) {
-        profile.metadata = {
-          ...profile.metadata,
-          entityPublicKey: `0x${toHex(publicKey)}`,
-        };
+      if (!firstValidator) {
+        throw new Error(`P2P_PROFILE_SIGNER_REQUIRED: entity=${entityId}`);
       }
-
-      // Sign profile using Hanko mechanism (same as accountFrames)
-      let signedProfile = profile;
-      if (firstValidator && this.env.runtimeSeed) {
-        try {
-          signedProfile = await signProfile(this.env as Env, profile, firstValidator);
-        } catch (error) {
-          console.warn(`P2P_PROFILE_SIGN_FAILED: ${entityId.slice(-4)} - ${(error as Error).message}`);
-        }
-      }
+      const signedProfile = await signProfile(this.env as Env, profile, firstValidator);
       profiles.push(signedProfile);
     }
     return profiles;
@@ -920,7 +903,6 @@ export class RuntimeP2P {
   private async applyIncomingProfiles(from: string, profiles: Profile[]) {
     if (profiles.length === 0) return;
     let verified = 0;
-    let unsigned = 0;
     let skipped = 0;
     let accepted = 0;
     const acceptedProfiles: Profile[] = [];
@@ -947,7 +929,12 @@ export class RuntimeP2P {
       // Verify profile signature if present (anti-spoofing)
       // Hanko is self-contained: claims embed the board, signatures prove identity
       const hasHanko = sanitized.metadata.profileHanko;
-      if (hasHanko) {
+      if (!hasHanko) {
+        skipped++;
+        console.warn(`P2P_PROFILE_DROPPED_UNSIGNED: from=${from} entity=${sanitized.entityId}`);
+        continue;
+      }
+      {
         const result = await verifyProfileSignature(sanitized, this.env);
         if (!result.valid) {
           const boardValidators = sanitized.metadata.board.validators;
@@ -990,9 +977,6 @@ export class RuntimeP2P {
           continue; // Skip invalid profiles
         }
         verified++;
-      } else {
-        // Warn but accept unsigned profiles for migration
-        unsigned++;
       }
 
       // Store in local gossip cache
@@ -1015,7 +999,7 @@ export class RuntimeP2P {
         registerSignerPublicKey(sanitized.entityId, publicKey);
       }
     }
-    if (verified > 0 || unsigned > 0) console.log(`P2P_PROFILE_NEW from=${from} verified=${verified} unsigned=${unsigned} skipped=${skipped}`);
+    if (verified > 0) console.log(`P2P_PROFILE_NEW from=${from} verified=${verified} skipped=${skipped}`);
     if (accepted > 0 && this.pendingByRuntime.size > 0) {
       this.flushPending();
     }
