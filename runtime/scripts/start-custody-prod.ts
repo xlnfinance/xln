@@ -46,44 +46,64 @@ const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
 };
 
-const runShell = async (script: string): Promise<void> => {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn('bash', ['-lc', script], {
+const findProcessIdsByPattern = async (pattern: string): Promise<number[]> => {
+  return await new Promise<number[]>((resolve, reject) => {
+    const child = spawn('pgrep', ['-f', '--', pattern], {
       cwd: process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
+    let stdout = '';
     let stderr = '';
+    child.stdout.on('data', chunk => {
+      stdout += chunk.toString();
+    });
     child.stderr.on('data', chunk => {
       stderr += chunk.toString();
     });
 
     child.on('error', reject);
     child.on('close', code => {
-      if (code === 0) {
-        resolve();
+      if (code !== 0 && stdout.trim().length === 0) {
+        resolve([]);
         return;
       }
-      reject(new Error(stderr.trim() || `shell exited with code ${String(code)}`));
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `pgrep exited with code ${String(code)}`));
+        return;
+      }
+      const pids = stdout
+        .split(/\r?\n/)
+        .map(line => Number.parseInt(line.trim(), 10))
+        .filter(pid => Number.isFinite(pid) && pid > 0 && pid !== process.pid);
+      resolve(pids);
     });
   });
 };
 
 const killStaleCustodyDaemon = async (): Promise<void> => {
   const pattern = `runtime/server.ts --port ${DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${DAEMON_PORT}`;
-  const script = `
-    pids="$(pgrep -f -- "${pattern}" || true)"
-    if [ -n "$pids" ]; then
-      echo "[custody-prod] killing stale custody daemon(s): $pids"
-      kill -TERM $pids 2>/dev/null || true
-      sleep 1
-      still="$(pgrep -f -- "${pattern}" || true)"
-      if [ -n "$still" ]; then
-        kill -KILL $still 2>/dev/null || true
-      fi
-    fi
-  `;
-  await runShell(script);
+  const pids = await findProcessIdsByPattern(pattern);
+  if (pids.length === 0) return;
+
+  console.log(`[custody-prod] killing stale custody daemon(s): ${pids.join(' ')}`);
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // Ignore already-dead processes.
+    }
+  }
+  await sleep(1000);
+
+  const remaining = await findProcessIdsByPattern(pattern);
+  for (const pid of remaining) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Ignore already-dead processes.
+    }
+  }
 };
 
 const mirrorChildLogs = (prefix: string, child: ManagedChild): void => {
