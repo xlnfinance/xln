@@ -146,10 +146,10 @@
 
   // Populate form fields from existing profile
   function populateFormFromProfile(profile: GossipProfile) {
-    name = profile.name || '';
-    avatar = profile.avatar || '';
-    bio = profile.bio || '';
-    website = profile.website || '';
+    name = profile.name;
+    avatar = profile.avatar;
+    bio = profile.bio;
+    website = profile.website;
   }
 
   // Clear all form fields

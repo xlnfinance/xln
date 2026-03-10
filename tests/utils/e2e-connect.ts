@@ -214,7 +214,7 @@ export async function connectRuntimeToHub(
           const hubProfile = profiles.find((profile) =>
             String(profile.entityId || '').toLowerCase() === String(hubId).toLowerCase(),
           );
-          const candidateRuntimeId = hubProfile?.runtimeId ?? hubProfile?.metadata?.runtimeId ?? null;
+          const candidateRuntimeId = hubProfile?.runtimeId ?? null;
           if (typeof candidateRuntimeId === 'string' && candidateRuntimeId.length > 0) {
             hubRuntimeId = candidateRuntimeId;
             break;

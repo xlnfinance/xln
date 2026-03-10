@@ -416,3 +416,17 @@
     - `cd frontend && bunx vite build --mode development`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-204043-863/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-204043-863/e2e-shard-00.log)
+  - removed more legacy profile fallbacks from the live runtime/frontend path:
+    - runtime lookup now trusts only canonical top-level `profile.runtimeId` in [runtime.ts](/Users/egor/xln/runtime/runtime.ts)
+    - relay broadcast fanout no longer checks optional `metadata?.isHub` in [relay-router.ts](/Users/egor/xln/runtime/relay-router.ts)
+    - WS gossip store logging no longer fabricates a fallback profile name in [ws-server.ts](/Users/egor/xln/runtime/networking/ws-server.ts)
+    - shared E2E hub connect helper no longer falls back to nonexistent `metadata.runtimeId` in [e2e-connect.ts](/Users/egor/xln/tests/utils/e2e-connect.ts)
+    - profile edit/view panels now read required `name/avatar/bio/website` directly in:
+      - [ProfileForm.svelte](/Users/egor/xln/frontend/src/lib/components/Network/ProfileForm.svelte)
+      - [ProfileCard.svelte](/Users/egor/xln/frontend/src/lib/components/Network/ProfileCard.svelte)
+      - [GossipPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/GossipPanel.svelte)
+  - re-verified:
+    - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
+    - `cd frontend && bunx vite build --mode development`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-204658-605/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-204658-605/e2e-shard-00.log)

@@ -44,7 +44,7 @@
   }
 
   function profileName(profile: GossipProfile): string {
-    return String(profile.name || '').trim() || 'Unnamed entity';
+    return profile.name;
   }
 
   function formatTs(ts?: number): string {

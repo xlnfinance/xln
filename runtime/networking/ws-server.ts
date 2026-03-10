@@ -195,7 +195,6 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     const entityId = profile.entityId;
     if (!entityId) return false;
     const newTs = profile.lastUpdated || 0;
-    const name = profile.name || '(no name)';
     const existing = gossipProfiles.get(entityId);
     if (existing && existing.timestamp >= newTs) {
       return false; // Existing is newer or same
@@ -203,7 +202,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     const isNew = !existing;
     gossipProfiles.set(entityId, { profile, timestamp: newTs, fromRuntimeId });
     if (isNew) {
-      console.log(`[WS] Gossip new profile: ${entityId.slice(-4)} name="${name}"`);
+      console.log(`[WS] Gossip new profile: ${entityId.slice(-4)} name="${profile.name}"`);
     }
     return true;
   };
