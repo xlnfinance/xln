@@ -361,3 +361,9 @@
     - `cd frontend && bunx vite build --mode development`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-200142-038/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-200142-038/e2e-shard-00.log)
+  - tightened the remaining explicit `any` policy lookup in [CollateralForm.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/CollateralForm.svelte)
+    - local rebalance policy resolution now uses narrow runtime/account view types instead of `any`
+    - `catch (err: any)` removed there too
+  - verified collateral/rebalance path explicitly:
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-rebalance-bar.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-200613-354/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-200613-354/e2e-shard-00.log)

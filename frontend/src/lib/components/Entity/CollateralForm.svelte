@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Env, Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
@@ -13,6 +14,37 @@
   export let signerId: string | null = null;
   export let counterpartyId: string | null;
   export let accountIds: string[] = [];
+
+  type FeePolicyView = {
+    policyVersion: number;
+    baseFee?: bigint | number | string;
+    liquidityFeeBps?: bigint | number | string;
+    gasFee?: bigint | number | string;
+  };
+
+  type HubConfigView = {
+    policyVersion: number;
+    rebalanceBaseFee?: bigint | number | string;
+    baseFee?: bigint | number | string;
+    rebalanceLiquidityFeeBps?: bigint | number | string;
+    minFeeBps?: bigint | number | string;
+    rebalanceGasFee?: bigint | number | string;
+  };
+
+  type AccountView = {
+    counterpartyRebalanceFeePolicy?: FeePolicyView;
+  };
+
+  type ReplicaView = {
+    state?: {
+      accounts?: Map<string, AccountView>;
+      hubRebalanceConfig?: HubConfigView;
+    };
+  };
+
+  type RuntimeEnv = Env & {
+    eReplicas: Map<string, ReplicaView>;
+  };
 
   let selectedCounterparty = counterpartyId || '';
   let selectedTokenId = 1;
@@ -77,13 +109,13 @@
     }
   }
 
-  function isRuntimeEnv(value: unknown): value is { eReplicas: Map<string, unknown>; jReplicas: Map<string, unknown> } {
+  function isRuntimeEnv(value: unknown): value is RuntimeEnv {
     if (!value || typeof value !== 'object') return false;
     const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
     return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
   }
 
-  function resolveCounterpartyPolicy(env: any, ownerEntityId: string, cpEntityId: string): {
+  function resolveCounterpartyPolicy(env: RuntimeEnv, ownerEntityId: string, cpEntityId: string): {
     policyVersion: number;
     baseFee: bigint;
     liquidityFeeBps: bigint;
@@ -93,13 +125,13 @@
     const cpNorm = normalizeEntityId(cpEntityId);
     if (!ownerNorm || !cpNorm) return null;
 
-    const replicas: Map<string, any> | null = env?.eReplicas instanceof Map ? env.eReplicas : null;
+    const replicas = env.eReplicas;
     if (replicas) {
       // 1) Prefer account-learned counterparty policy (most specific).
       for (const [key, replica] of replicas.entries()) {
         const [replicaEntityId] = String(key).split(':');
         if (normalizeEntityId(replicaEntityId) !== ownerNorm) continue;
-        const accounts: Map<string, any> | undefined = replica?.state?.accounts;
+        const accounts = replica?.state?.accounts;
         if (!(accounts instanceof Map)) break;
         for (const [accountKey, account] of accounts.entries()) {
           if (normalizeEntityId(accountKey) !== cpNorm) continue;
@@ -133,8 +165,8 @@
     }
 
     // 3) Gossip metadata (when bilateral policy not yet learned from account state).
-    const profiles = env?.gossip?.getProfiles?.() || [];
-    const profile = profiles.find((p: any) => normalizeEntityId(p?.entityId) === cpNorm);
+    const profiles: GossipProfile[] = env.gossip?.getProfiles?.() || [];
+    const profile = profiles.find((p) => normalizeEntityId(p.entityId) === cpNorm);
     const md = profile?.metadata || {};
     const policyVersion = Number(md?.policyVersion ?? 0);
     if (!Number.isFinite(policyVersion) || policyVersion <= 0) return null;
@@ -191,9 +223,10 @@
       console.log(`Collateral requested: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, collateralAmount)}`);
 
       collateralAmount = 0n;
-    } catch (err: any) {
+    } catch (err) {
       console.error('Failed to request collateral:', err);
-      error.set(`Collateral request failed: ${err?.message || 'Unknown error'}`);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      error.set(`Collateral request failed: ${message}`);
     }
   }
 
