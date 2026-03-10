@@ -28,7 +28,6 @@ const buildProfile = (
   website: '',
   lastUpdated: 1,
   runtimeEncPubKey,
-  capabilities: [],
   publicAccounts: [],
   endpoints: [],
   relays: [],
@@ -126,7 +125,6 @@ describe('relay-router gossip fanout', () => {
           buildProfile(ENTITY_B, RUNTIME_B, KEY_B, {
             lastUpdated: 200,
             name: 'hub-b',
-            capabilities: [],
             metadata: {
               entityEncPubKey: KEY_B,
               isHub: true,

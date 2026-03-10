@@ -2542,7 +2542,6 @@ let vrHammer: VRHammer | null = null;
 
         return {
           entityId,
-          capabilities: ['consensus'],
           metadata: { name: displayName }
         };
       });

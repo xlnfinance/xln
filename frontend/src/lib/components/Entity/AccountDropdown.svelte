@@ -5,6 +5,7 @@
    */
   import { createEventDispatcher } from 'svelte';
   import { xlnEnvironment, xlnFunctions, xlnInstance } from '../../stores/xlnStore';
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { EntityReplica, AccountMachine } from '$lib/types/ui';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import { resolveEntityName, scheduleGossipProfileFetch } from '$lib/utils/entityNaming';
@@ -13,7 +14,7 @@
   export let replica: EntityReplica | null = null;
   export let selectedAccountId: string | null = null;
   export let allowAdd: boolean = false;
-  export let envOverride: { gossip?: { getProfiles?: () => unknown[] } } | null = null;
+  export let envOverride: { gossip?: { getProfiles?: () => GossipProfile[] } } | null = null;
 
   const dispatch = createEventDispatcher();
 
@@ -33,13 +34,17 @@
   $: xlnReady = !!$xlnInstance;
   $: activeEnv = envOverride || $xlnEnvironment;
   $: gossipProfiles = activeEnv?.gossip?.getProfiles?.() || [];
-  $: accounts = buildAccountList(replica, xlnReady ? $xlnFunctions : null, gossipProfiles as any[]);
+  $: accounts = buildAccountList(replica, xlnReady ? $xlnFunctions : null, gossipProfiles);
 
-  function buildAccountList(replica: EntityReplica | null, xlnFuncs: any, profiles: any[]): AccountItem[] {
-    if (!replica?.state?.accounts) return [];
+  function buildAccountList(
+    currentReplica: EntityReplica | null,
+    xlnFuncs: typeof $xlnFunctions | null,
+    profiles: GossipProfile[],
+  ): AccountItem[] {
+    if (!currentReplica?.state?.accounts) return [];
 
     const items: AccountItem[] = [];
-    const accountsMap = replica.state.accounts;
+    const accountsMap = currentReplica.state.accounts;
 
     for (const [counterpartyId, account] of accountsMap.entries()) {
       const acc = account as AccountMachine;
