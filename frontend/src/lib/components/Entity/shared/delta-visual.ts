@@ -25,11 +25,7 @@ export function buildTokenVisualScale(
 
   const outCapacityUsd = amountToUsd(derived.outCapacity, decimals, symbol);
   const inCapacityUsd = amountToUsd(derived.inCapacity, decimals, symbol);
-  const [
-    outOwnCreditUsd,
-    outCollateralUsd,
-    outPeerCreditUsd,
-  ] = fitComponentsToCapacity(
+  const outComponentsUsd = fitComponentsToCapacity(
     [
       amountToUsd(derived.outOwnCredit, decimals, symbol),
       amountToUsd(derived.outCollateral, decimals, symbol),
@@ -37,11 +33,7 @@ export function buildTokenVisualScale(
     ],
     outCapacityUsd,
   );
-  const [
-    inOwnCreditUsd,
-    inCollateralUsd,
-    inPeerCreditUsd,
-  ] = fitComponentsToCapacity(
+  const inComponentsUsd = fitComponentsToCapacity(
     [
       amountToUsd(derived.inOwnCredit, decimals, symbol),
       amountToUsd(derived.inCollateral, decimals, symbol),
@@ -49,6 +41,12 @@ export function buildTokenVisualScale(
     ],
     inCapacityUsd,
   );
+  const outOwnCreditUsd = outComponentsUsd[0] ?? 0;
+  const outCollateralUsd = outComponentsUsd[1] ?? 0;
+  const outPeerCreditUsd = outComponentsUsd[2] ?? 0;
+  const inOwnCreditUsd = inComponentsUsd[0] ?? 0;
+  const inCollateralUsd = inComponentsUsd[1] ?? 0;
+  const inPeerCreditUsd = inComponentsUsd[2] ?? 0;
 
   return {
     outCapacityUsd,

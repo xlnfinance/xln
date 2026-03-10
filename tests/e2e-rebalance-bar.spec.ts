@@ -15,10 +15,11 @@ import { test, expect, type Page } from '@playwright/test';
 import { deriveDelta } from '../runtime/account-utils';
 import { Wallet, ethers } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
-import { resetProdServer } from './utils/e2e-baseline';
+import { resetProdServer, waitForNamedHubs } from './utils/e2e-baseline';
 import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
+  switchToRuntime as switchToSharedRuntime,
 } from './utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 import {
@@ -483,126 +484,17 @@ async function connectHubWithCredit(
 }
 
 async function switchRuntime(page: Page, label: string) {
-  const deadline = Date.now() + 30_000;
-  let result: { ok: boolean; runtimeId?: string; error?: string } = { ok: false, error: 'not-started' };
-
-  while (Date.now() < deadline) {
-    try {
-      result = await page.evaluate(async (runtimeLabel) => {
-        try {
-          const runtimesState = (window as any).runtimesState;
-          const vaultOperations = (window as any).vaultOperations;
-          if (!runtimesState || !vaultOperations) {
-            return { ok: false, error: 'window.runtimesState/window.vaultOperations missing' };
-          }
-          let state: any;
-          const unsub = runtimesState.subscribe((s: any) => { state = s; });
-          unsub();
-          for (const [id, runtime] of Object.entries(state.runtimes) as any[]) {
-            if (String(runtime?.label || '').toLowerCase() !== String(runtimeLabel).toLowerCase()) continue;
-            await vaultOperations.selectRuntime(id);
-            return { ok: true, runtimeId: String(id) };
-          }
-          return { ok: false, error: `Runtime ${runtimeLabel} not found` };
-        } catch (e: any) {
-          return { ok: false, error: e?.message || String(e) };
-        }
-      }, label);
-      if (result.ok) break;
-    } catch (e: any) {
-      const message = String(e?.message || e || '');
-      if (/Execution context was destroyed|Cannot find context|Target closed/i.test(message)) {
-        result = { ok: false, error: message };
-      } else {
-        throw e;
-      }
-    }
-    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
-    await page.waitForTimeout(400);
-  }
-
-  expect(result.ok, `switchRuntime(${label}) failed: ${result.error || 'unknown'}`).toBe(true);
-  await page.waitForFunction((expectedRuntimeId) => {
-    type RuntimeState = {
-      activeRuntimeId?: string | null;
-      runtimes?: Record<string, { label?: string }>;
-    };
-    type RuntimeEnv = {
-      runtimeId?: string;
-      eReplicas?: Map<string, unknown>;
-    };
-    type RuntimeWindow = Window & typeof globalThis & {
-      isolatedEnv?: RuntimeEnv;
-      runtimesState?: {
-        subscribe: (callback: (state: RuntimeState) => void) => () => void;
-      };
-    };
-    const runtimeWindow = window as RuntimeWindow;
-    const normalizedExpected = String(expectedRuntimeId || '').toLowerCase();
-    const env = runtimeWindow.isolatedEnv;
-    const envRuntimeId = String(env?.runtimeId || '').toLowerCase();
-    if (!normalizedExpected || envRuntimeId !== normalizedExpected) return false;
-
-    let activeRuntimeId = '';
-    const stateStore = runtimeWindow.runtimesState;
-    if (stateStore?.subscribe) {
-      const unsubscribe = stateStore.subscribe((state) => {
-        activeRuntimeId = String(state?.activeRuntimeId || '');
-      });
-      unsubscribe();
-    }
-    if (String(activeRuntimeId).toLowerCase() !== normalizedExpected) return false;
-
-    const replicaKeys = env?.eReplicas ? Array.from(env.eReplicas.keys()) : [];
-    return replicaKeys.some((key) => String(key).split(':')[1]?.toLowerCase() === normalizedExpected);
-  }, result.runtimeId, { timeout: 15_000 });
+  await switchToSharedRuntime(page, label);
   await ensureRuntimeOnline(page, `switch-${label}`);
 }
 
-async function discoverHubsByName(
-  page: Page,
-  requiredNames: string[],
-): Promise<Record<string, string>> {
-  for (let i = 0; i < 80; i++) {
-    const hubs = await page.evaluate(() => {
-      const env = (window as any).isolatedEnv;
-      const XLN = (window as any).XLN;
-      XLN?.refreshGossip?.(env);
-      const profiles = env?.gossip?.getProfiles?.() || [];
-      return profiles
-        .filter((p: any) => p?.metadata?.isHub === true)
-        .map((p: any) => ({
-          entityId: String(p?.entityId || ''),
-          name: String(p?.metadata?.name || ''),
-        }))
-        .filter((h: any) => !!h.entityId);
-    });
-    const hubByName = new Map<string, string>();
-    for (const hub of hubs) hubByName.set(String(hub.name || '').toLowerCase(), hub.entityId);
-    const out: Record<string, string> = {};
-    let ready = true;
-    for (const requiredName of requiredNames) {
-      const key = String(requiredName || '').toLowerCase();
-      const entityId = hubByName.get(key);
-      if (!entityId) {
-        ready = false;
-        break;
-      }
-      out[key] = entityId;
-    }
-    if (ready) return out;
-    await page.waitForTimeout(1000);
-  }
-  throw new Error(`Required hubs not discovered in gossip: ${requiredNames.join(', ')}`);
-}
-
 async function discoverNamedHubs(page: Page): Promise<{ h1: string; h3: string }> {
-  const hubs = await discoverHubsByName(page, ['h1', 'h3']);
+  const hubs = await waitForNamedHubs(page, ['h1', 'h3'], { apiBaseUrl: API_BASE_URL });
   return { h1: hubs.h1, h3: hubs.h3 };
 }
 
 async function discoverH1H2(page: Page): Promise<{ h1: string; h2: string }> {
-  const hubs = await discoverHubsByName(page, ['h1', 'h2']);
+  const hubs = await waitForNamedHubs(page, ['h1', 'h2'], { apiBaseUrl: API_BASE_URL });
   return { h1: hubs.h1, h2: hubs.h2 };
 }
 
@@ -935,93 +827,50 @@ async function sendDirectPaymentToHub(
   hubId: string,
   amountUsd: bigint,
 ) {
-  const res = await page.evaluate(
-    async ({ entityId, signerId, hubId, amountUsd }) => {
-      try {
-        const env = (window as any).isolatedEnv;
-        const XLN = (window as any).XLN;
-        if (!env || !XLN?.enqueueRuntimeInput) {
-          return { ok: false, error: 'isolatedEnv/XLN missing' };
-        }
-        XLN.enqueueRuntimeInput(env, {
-          runtimeTxs: [],
-          entityInputs: [{
-            entityId,
-            signerId,
-            entityTxs: [{
-              type: 'directPayment',
-              data: {
-                targetEntityId: hubId,
-                tokenId: 1,
-                amount: BigInt(amountUsd) * 10n ** 18n,
-                route: [entityId, hubId],
-                description: 'e2e-c2r-drain',
-              },
-            }],
-          }],
-        });
-        return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error?.message || String(error) };
-      }
-    },
-    { entityId, signerId, hubId, amountUsd: amountUsd.toString() },
-  );
-  expect(res.ok, `directPayment enqueue failed: ${res.error || 'unknown'}`).toBe(true);
-}
+  void entityId;
+  void signerId;
 
-function generateHtlcPayload(): { secret: string; hashlock: string } {
-  const secret = ethers.hexlify(ethers.randomBytes(32));
-  const hashlock = ethers.keccak256(
-    ethers.AbiCoder.defaultAbiCoder().encode(['bytes32'], [secret]),
-  );
-  return { secret, hashlock };
-}
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  if (!await accountsTab.isVisible().catch(() => false)) {
+    const backButton = page.locator('.account-panel .back-button').first();
+    if (await backButton.isVisible().catch(() => false)) {
+      await backButton.click();
+    }
+  }
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  await accountsTab.click();
 
-async function sendHtlcPaymentToHub(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  hubId: string,
-  amountUsd: bigint,
-): Promise<{ secret: string; hashlock: string }> {
-  const { secret, hashlock } = generateHtlcPayload();
-  const res = await page.evaluate(
-    async ({ entityId, signerId, hubId, amountUsd, secret, hashlock }) => {
-      try {
-        const env = (window as any).isolatedEnv;
-        const XLN = (window as any).XLN;
-        if (!env || !XLN?.enqueueRuntimeInput) {
-          return { ok: false, error: 'isolatedEnv/XLN missing' };
-        }
-        XLN.enqueueRuntimeInput(env, {
-          runtimeTxs: [],
-          entityInputs: [{
-            entityId,
-            signerId,
-            entityTxs: [{
-              type: 'htlcPayment',
-              data: {
-                targetEntityId: hubId,
-                tokenId: 1,
-                amount: BigInt(amountUsd) * 10n ** 18n,
-                route: [entityId, hubId],
-                description: 'e2e-htlc-before-rebalance',
-                secret,
-                hashlock,
-              },
-            }],
-          }],
-        });
-        return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error?.message || String(error) };
-      }
-    },
-    { entityId, signerId, hubId, amountUsd: amountUsd.toString(), secret, hashlock },
-  );
-  expect(res.ok, `htlcPayment enqueue failed: ${res.error || 'unknown'}`).toBe(true);
-  return { secret, hashlock };
+  const payTab = page.locator('.account-workspace-tab').filter({ hasText: /Pay/i }).first();
+  await expect(payTab).toBeVisible({ timeout: 20_000 });
+  await payTab.click();
+
+  const directModeBtn = page.getByRole('button', { name: /Direct \(unsafe\)|Direct active/i }).first();
+  await expect(directModeBtn).toBeVisible({ timeout: 10_000 });
+  await directModeBtn.click();
+
+  const recipientInput = page.getByRole('textbox', { name: 'Select recipient...' }).first();
+  await expect(recipientInput).toBeVisible({ timeout: 10_000 });
+  await recipientInput.click();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.keyboard.press('Backspace');
+  await recipientInput.fill(hubId);
+  await page.keyboard.press('Enter');
+
+  const amountInput = page.locator('input[placeholder="0.00"]').first();
+  await expect(amountInput).toBeVisible({ timeout: 10_000 });
+  await amountInput.fill(amountUsd.toString());
+
+  const findRoutesBtn = page.getByRole('button', { name: 'Find Routes' }).first();
+  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
+  await findRoutesBtn.click();
+
+  const routesPanel = page.locator('.route-option').first();
+  await expect(routesPanel).toBeVisible({ timeout: 15_000 });
+
+  const sendPaymentBtn = page.getByRole('button', { name: /Send Direct Payment|Pay Now/i }).first();
+  await expect(sendPaymentBtn).toBeEnabled({ timeout: 10_000 });
+  await sendPaymentBtn.click();
+  await page.waitForTimeout(200);
 }
 
 async function readAccountFlowState(page: Page, hubId: string) {

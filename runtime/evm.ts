@@ -30,7 +30,7 @@ import { encodeJBatch, computeBatchHankoHash, type JBatch } from './j-batch';
 import { detectEntityType, encodeBoard, extractNumberFromEntityId, hashBoard } from './entity-factory';
 import { normalizeEntityId } from './entity-id-utils';
 import { safeStringify } from './serialization-utils';
-import type { ConsensusConfig, JurisdictionConfig } from './types';
+import type { ConsensusConfig, Env, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
 import { logError } from './logger';
 import { BrowserVMEthersProvider } from './jadapter/browservm-ethers-provider';
@@ -57,6 +57,48 @@ const uiError = (message: string, details?: unknown) => {
   if (isBrowser && window.xlnErrorLog) {
     window.xlnErrorLog(message, 'EVM-ERROR', details);
   }
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
+const extractErrorDetails = (error: unknown): Record<string, unknown> => {
+  if (!(error instanceof Error) && !isRecord(error)) {
+    return { errorType: typeof error, errorMessage: String(error) };
+  }
+
+  const details: Record<string, unknown> = {
+    errorType: error instanceof Error ? error.constructor.name : typeof error,
+    errorMessage: error instanceof Error ? error.message : String(Reflect.get(error, 'message') ?? error),
+  };
+
+  if (isRecord(error)) {
+    const code = Reflect.get(error, 'code');
+    const reason = Reflect.get(error, 'reason');
+    const stack = Reflect.get(error, 'stack');
+    if (code !== undefined) details.errorCode = code;
+    if (reason !== undefined) details.errorReason = reason;
+    if (typeof stack === 'string') details.errorStack = stack;
+  }
+
+  return details;
+};
+
+type JurisdictionLoaderPayload = {
+  jurisdictions?: Record<string, {
+    name?: string;
+    chainId?: number;
+    rpc?: string;
+    rebalancePolicyUsd?: JurisdictionConfig['rebalancePolicyUsd'];
+    contracts?: {
+      entityProvider?: string;
+      depository?: string;
+    };
+  }>;
+};
+
+type BrowserVMCarrier = BrowserVMInstance | {
+  browserVM?: BrowserVMInstance | null;
+  getProvider?: () => BrowserVMInstance | null;
 };
 
 // === ETHEREUM INTEGRATION ===
@@ -211,9 +253,7 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
       } catch (netError) {
         uiError(`❌ NETWORK-CONNECT-FAILED`, {
           rpcUrl,
-          errorCode: (netError as any)?.code,
-          errorMessage: (netError as any)?.message,
-          errorStack: (netError as any)?.stack
+          ...extractErrorDetails(netError),
         });
         throw netError;
       }
@@ -230,11 +270,7 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
   } catch (error) {
     uiError(`❌ CONNECT-FAILED: ${jurisdiction.name}`, {
       rpcUrl,
-      errorType: (error as any)?.constructor?.name,
-      errorCode: (error as any)?.code,
-      errorReason: (error as any)?.reason,
-      errorMessage: (error as any)?.message,
-      errorStack: (error as any)?.stack
+      ...extractErrorDetails(error),
     });
     throw error;
   }
@@ -325,10 +361,10 @@ export const submitPrefundAccount = async (jurisdiction: JurisdictionConfig, ent
 };
 
 export const submitProcessBatch = async (
-  env: any,
+  env: Env,
   jurisdiction: JurisdictionConfig,
   entityId: string,
-  batch: JBatch | any,
+  batch: JBatch,
   signerId?: string
 ) => {
   try {
@@ -652,7 +688,7 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
   const browserJurisdictionsUrl = `./api/jurisdictions?ts=${Date.now()}`;
 
   try {
-    let config: any; // Complex type - loadJurisdictions returns different shapes in different contexts
+    let config: JurisdictionLoaderPayload;
 
     if (!isBrowser && typeof process !== 'undefined') {
       // Node.js environment - use centralized loader
@@ -678,9 +714,9 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
         config = await response.json();
         console.log('🔍 JURISDICTION DEBUG: Browser loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
         console.log('✅ Loaded jurisdictions from runtime');
-      } catch (fetchError: any) {
+      } catch (fetchError: unknown) {
         clearTimeout(timeoutId);
-        if (fetchError.name === 'AbortError') {
+        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
           console.log('⏱️ /api/jurisdictions fetch timed out - using BrowserVM mode (no external blockchain)');
         } else {
           console.log('⚠️ /api/jurisdictions not found - using BrowserVM mode (no external blockchain)');
@@ -810,7 +846,7 @@ export const getAvailableJurisdictions = async (): Promise<JurisdictionConfig[]>
 };
 
 // DEPRECATED: Use env.browserVM instead of global singleton
-let BROWSER_VM_INSTANCE: any = null;
+let BROWSER_VM_INSTANCE: BrowserVMInstance | null = null;
 
 /**
  * Set BrowserVM jurisdiction (for isolated /view environments)
@@ -818,12 +854,17 @@ let BROWSER_VM_INSTANCE: any = null;
  * @param depositoryAddress - Depository contract address
  * @param browserVMInstance - Optional pre-initialized BrowserVM instance
  */
-export const setBrowserVMJurisdiction = (env: any, depositoryAddress: string, browserVMInstance?: any) => {
+export const setBrowserVMJurisdiction = (env: Env | null, depositoryAddress: string, browserVMInstance?: BrowserVMCarrier | null) => {
   console.log('[BrowserVM] Setting jurisdiction override:', { depositoryAddress, hasBrowserVM: !!browserVMInstance, hasEnv: !!env });
 
-  const rawBrowserVM = browserVMInstance?.browserVM ?? browserVMInstance;
-  const resolvedBrowserVM = rawBrowserVM?.getProvider ? rawBrowserVM.getProvider() : rawBrowserVM;
-  console.log('[BrowserVM] rawBrowserVM:', !!rawBrowserVM, 'resolvedBrowserVM:', !!resolvedBrowserVM, 'hasGetProvider:', !!rawBrowserVM?.getProvider);
+  const wrappedBrowserVM = browserVMInstance && isRecord(browserVMInstance) && 'browserVM' in browserVMInstance
+    ? browserVMInstance.browserVM ?? null
+    : browserVMInstance ?? null;
+  const resolvedBrowserVM =
+    wrappedBrowserVM && isRecord(wrappedBrowserVM) && typeof Reflect.get(wrappedBrowserVM, 'getProvider') === 'function'
+      ? ((Reflect.get(wrappedBrowserVM, 'getProvider') as () => BrowserVMInstance | null)() ?? null)
+      : wrappedBrowserVM;
+  console.log('[BrowserVM] rawBrowserVM:', !!wrappedBrowserVM, 'resolvedBrowserVM:', !!resolvedBrowserVM);
 
   // Store browserVM instance in env (isolated per-runtime)
   // NOTE: J-event forwarding is handled by JAdapter.startWatching() — not here.
@@ -873,8 +914,8 @@ export const getJurisdictionByAddress = async (address: string): Promise<Jurisdi
  * Get BrowserVM instance (for demos that need direct BrowserVM access)
  * Uses env.browserVM only (no legacy global fallback)
  */
-export const getBrowserVMInstance = (env?: any): BrowserVMInstance | null => {
-  return env?.browserVM || null;
+export const getBrowserVMInstance = (env?: Env | null): BrowserVMInstance | null => {
+  return env?.browserVM ?? null;
 };
 
 // Settlement diff structure matching contract
