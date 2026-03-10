@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { deriveManagedEntityIdentity, DaemonControlClient, setupCustody } from '../orchestrator/daemon-control';
@@ -43,6 +44,46 @@ type ExistingCustodyPayload = {
 
 const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
+};
+
+const runShell = async (script: string): Promise<void> => {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn('bash', ['-lc', script], {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.on('data', chunk => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(stderr.trim() || `shell exited with code ${String(code)}`));
+    });
+  });
+};
+
+const killStaleCustodyDaemon = async (): Promise<void> => {
+  const pattern = `runtime/server.ts --port ${DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${DAEMON_PORT}`;
+  const script = `
+    pids="$(pgrep -f -- "${pattern}" || true)"
+    if [ -n "$pids" ]; then
+      echo "[custody-prod] killing stale custody daemon(s): $pids"
+      kill -TERM $pids 2>/dev/null || true
+      sleep 1
+      still="$(pgrep -f -- "${pattern}" || true)"
+      if [ -n "$still" ]; then
+        kill -KILL $still 2>/dev/null || true
+      fi
+    fi
+  `;
+  await runShell(script);
 };
 
 const mirrorChildLogs = (prefix: string, child: ManagedChild): void => {
@@ -131,6 +172,8 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
     console.log(`[custody-prod] reusing existing custody daemon on :${DAEMON_PORT}`);
     return null;
   }
+
+  await killStaleCustodyDaemon();
 
   const daemonChild = spawnBunChild(
     'custody-daemon',

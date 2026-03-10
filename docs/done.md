@@ -515,3 +515,12 @@
   - Removed the localhost-only window.vaultOperations debug surface.
   - Cleaned SettingsView typing: jurisdiction status, proposer list, IndexedDB enumeration, and error detail extraction now use explicit local types.
   - Verified: frontend dev build.
+
+- 2026-03-11
+  - Fixed prod custody restart drift:
+    - [start-custody.sh](/Users/egor/xln/scripts/start-custody.sh) now kills stale non-listening `custody-daemon-<port>` processes by command pattern, not only listening sockets
+    - [start-custody-prod.ts](/Users/egor/xln/runtime/scripts/start-custody-prod.ts) now kills stale custody daemon children before respawn when `:8088` health is down
+    - this fixes orphaned `bun runtime/server.ts --port 8088` children holding `/root/xln/db/custody/prod/daemon-db/.../LOCK` and breaking redeploy
+  - Verified:
+    - `bun build runtime/scripts/start-custody-prod.ts --target=bun --outfile=/tmp/start-custody-prod-check.js`
+    - `bash -n scripts/start-custody.sh`

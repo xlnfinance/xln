@@ -13,6 +13,21 @@ kill_by_port() {
   fi
 }
 
+kill_by_pattern() {
+  local pattern="$1"
+  local pids
+  pids="$(pgrep -f -- "$pattern" 2>/dev/null || true)"
+  if [ -n "$pids" ]; then
+    echo "[start-custody] killing stale process pattern '$pattern' -> ${pids}"
+    echo "$pids" | xargs kill -TERM 2>/dev/null || true
+    sleep 1
+    pids="$(pgrep -f -- "$pattern" 2>/dev/null || true)"
+    if [ -n "$pids" ]; then
+      echo "$pids" | xargs kill -KILL 2>/dev/null || true
+    fi
+  fi
+}
+
 export PATH="/root/.bun/bin:$PATH"
 export USE_ANVIL=true
 export CUSTODY_MAIN_API_BASE_URL=${CUSTODY_MAIN_API_BASE_URL:-http://127.0.0.1:8080}
@@ -34,5 +49,6 @@ fi
 
 kill_by_port "$CUSTODY_PORT"
 kill_by_port "$CUSTODY_DAEMON_PORT"
+kill_by_pattern "runtime/server.ts --port ${CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${CUSTODY_DAEMON_PORT}"
 
 exec /root/.bun/bin/bun runtime/scripts/start-custody-prod.ts
