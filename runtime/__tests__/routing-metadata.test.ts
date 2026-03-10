@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Profile } from '../networking/gossip';
+import { parseProfile } from '../networking/gossip';
 import { buildNetworkGraph } from '../routing/graph';
 import { PathFinder } from '../routing/pathfinding';
 
@@ -43,6 +44,34 @@ function profile(
 }
 
 describe('Routing metadata hard requirements', () => {
+  test('rejects dead legacy metadata.position field', () => {
+    expect(() => parseProfile({
+      entityId: ALICE,
+      runtimeId: ALICE.slice(0, 42),
+      name: 'Alice',
+      avatar: '',
+      bio: '',
+      website: '',
+      lastUpdated: 1,
+      runtimeEncPubKey: `0x${'aa'.repeat(32)}`,
+      publicAccounts: [],
+      endpoints: [],
+      relays: [],
+      metadata: {
+        entityEncPubKey: `0x${'ab'.repeat(32)}`,
+        routingFeePPM: 10_000,
+        baseFee: '0',
+        isHub: false,
+        position: { x: 1, y: 2, z: 3 },
+        board: {
+          threshold: 1,
+          validators: [{ signer: ALICE.slice(0, 42), signerId: ALICE.slice(0, 42), weight: 1, publicKey: 'board:alice' }],
+        },
+      },
+      accounts: [],
+    })).toThrow(/GOSSIP_PROFILE_METADATA_UNKNOWN_FIELD/);
+  });
+
   test('drops malformed hub profile and never routes through it', () => {
     const high = 10_000_000_000_000_000_000_000n;
     const profiles = new Map<string, Profile>([

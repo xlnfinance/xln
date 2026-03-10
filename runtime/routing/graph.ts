@@ -29,13 +29,13 @@ export interface NetworkGraph {
 }
 
 const isHubLikeProfile = (profile: Profile): boolean => {
-  return profile.metadata?.isHub === true;
+  return profile.metadata.isHub === true;
 };
 
 const hasRequiredRoutingMetadata = (profile: Profile): boolean => {
-  const name = typeof profile.name === 'string' ? profile.name.trim() : '';
+  const name = profile.name.trim();
   if (!name) return false;
-  const routingFeePPM = Number(profile.metadata?.routingFeePPM);
+  const routingFeePPM = Number(profile.metadata.routingFeePPM);
   return Number.isFinite(routingFeePPM) && routingFeePPM >= 0;
 };
 
@@ -71,54 +71,47 @@ export function buildNetworkGraph(
       continue;
     }
 
-    if (profile.accounts) {
-      for (const account of profile.accounts) {
-        const toEntity = account.counterpartyId;
+    for (const account of profile.accounts) {
+      const toEntity = account.counterpartyId;
 
-        // Only add if counterparty exists in network
-        if (!nodes.has(toEntity)) continue;
-        const toProfile = profiles.get(toEntity);
-        if (toProfile && isHubLikeProfile(toProfile) && !hasRequiredRoutingMetadata(toProfile)) {
-          continue;
-        }
-
-        // Get capacities for this token
-        const tokenCapacity = getTokenCapacity(account.tokenCapacities, tokenId);
-        if (!tokenCapacity || tokenCapacity.outCapacity === 0n) continue;
-
-        // Get fee configuration from profile with explicit validation
-        const metadata = profile.metadata;
-        if (!metadata) {
-          console.warn(`🚨 ROUTING-SAFETY: Entity ${fromEntity} has no metadata, using safe defaults`);
-        }
-        const baseFee = sanitizeBaseFee(metadata?.baseFee ?? 0n);
-        const basePpm = sanitizeFeePPM(metadata?.routingFeePPM ?? 100, 100);
-        const feePPM = calculateDirectionalFeePPM(
-          basePpm,
-          tokenCapacity.outCapacity,
-          tokenCapacity.inCapacity
-        );
-
-        // Create edge
-        const edge: AccountEdge = {
-          from: fromEntity,
-          to: toEntity,
-          tokenId,
-          capacity: tokenCapacity.outCapacity,
-          baseFee,
-          feePPM,
-          disabled: false,
-        };
-
-        fromEdges.push(edge);
-
-        // Store account capacities
-        const accountKey = `${fromEntity}:${toEntity}:${tokenId}`;
-        accountCapacities.set(accountKey, {
-          outbound: tokenCapacity.outCapacity,
-          inbound: tokenCapacity.inCapacity,
-        });
+      // Only add if counterparty exists in network
+      if (!nodes.has(toEntity)) continue;
+      const toProfile = profiles.get(toEntity);
+      if (toProfile && isHubLikeProfile(toProfile) && !hasRequiredRoutingMetadata(toProfile)) {
+        continue;
       }
+
+      // Get capacities for this token
+      const tokenCapacity = getTokenCapacity(account.tokenCapacities, tokenId);
+      if (!tokenCapacity || tokenCapacity.outCapacity === 0n) continue;
+
+      const baseFee = sanitizeBaseFee(profile.metadata.baseFee);
+      const basePpm = sanitizeFeePPM(profile.metadata.routingFeePPM, 100);
+      const feePPM = calculateDirectionalFeePPM(
+        basePpm,
+        tokenCapacity.outCapacity,
+        tokenCapacity.inCapacity
+      );
+
+      // Create edge
+      const edge: AccountEdge = {
+        from: fromEntity,
+        to: toEntity,
+        tokenId,
+        capacity: tokenCapacity.outCapacity,
+        baseFee,
+        feePPM,
+        disabled: false,
+      };
+
+      fromEdges.push(edge);
+
+      // Store account capacities
+      const accountKey = `${fromEntity}:${toEntity}:${tokenId}`;
+      accountCapacities.set(accountKey, {
+        outbound: tokenCapacity.outCapacity,
+        inbound: tokenCapacity.inCapacity,
+      });
     }
 
     if (fromEdges.length > 0) {

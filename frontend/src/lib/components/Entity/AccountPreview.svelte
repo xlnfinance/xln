@@ -42,7 +42,7 @@
   $: isHub = (() => {
     const profile = counterpartyProfile;
     if (!profile) return false;
-    return profile.metadata?.isHub === true;
+    return profile.metadata.isHub === true;
   })();
 
   // P2P connection state

@@ -116,11 +116,11 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
   if (env?.gossip) {
     const profiles = env.gossip.getProfiles();
     for (const profile of profiles) {
-      if (profile.metadata?.isHub) {
+      if (profile.metadata.isHub === true) {
         const replica = replicasByEntityId.get(String(profile.entityId).toLowerCase());
         hubs.push({
           entityId: profile.entityId,
-          name: profile.name || 'Unknown',
+          name: profile.name,
           status: 'healthy', // TODO: Add health check
           reserves: replica?.state?.reserves?.size ? serializeReserves(replica.state.reserves) : undefined,
           accounts: replica?.state?.accounts?.size,
