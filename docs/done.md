@@ -263,3 +263,17 @@
     - `bun build custody/server.ts --target=bun --outfile=/tmp/custody-check.js`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+- 2026-03-10T04:18:00Z gossip route prefetch hardening for wallet + custody:
+  - [frontend/src/lib/components/Entity/PaymentPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/PaymentPanel.svelte) no longer returns early after a shallow `syncProfiles()` call; the checkout path now always continues into targeted/full gossip fetch before declaring route failure
+  - route-miss diagnostics in both the wallet and daemon RPC path now include structural graph context:
+    - total gossip profiles
+    - hub count
+    - target `lastUpdated`
+    - target public account count
+  - [runtime/networking/p2p.ts](/Users/egor/xln/runtime/networking/p2p.ts) now treats a full-sync fetch that returns zero new profiles as a real miss instead of a false success; this closes the stale-local-graph race where the target profile existed but the hub set was still incomplete
+  - [runtime/server.ts](/Users/egor/xln/runtime/server.ts) now emits the same route-miss diagnostics for custody/daemon RPC route lookup so prod failures show graph shape immediately
+  - verified:
+    - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
+    - `bun build custody/server.ts --target=bun --outfile=/tmp/custody-check.js`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`

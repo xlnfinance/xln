@@ -666,9 +666,10 @@ export class RuntimeP2P {
     requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
     missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));
     const resolved = missingEntityIds.length === 0;
+    const hubCount = this.env.gossip?.getHubs?.().length || 0;
     console.log(
       `[P2P] ensureProfiles requested=${requestedEntityIds.length} required=${requiredEntityIds.length} ` +
-        `missing=${missingEntityIds.length} resolved=${resolved ? 1 : 0} elapsed=${Date.now() - startedAt}ms`,
+        `missing=${missingEntityIds.length} hubs=${hubCount} resolved=${resolved ? 1 : 0} elapsed=${Date.now() - startedAt}ms`,
     );
     return resolved;
   }
@@ -739,13 +740,11 @@ export class RuntimeP2P {
           `P2P_FETCH: profiles=${profiles.length} delta=${profiles.length - startCount} ` +
             `elapsed=${Date.now() - startedAt}ms`,
         );
-        return missingEntityIds.length === 0 || hasAllMissing;
+        return missingEntityIds.length === 0 ? profiles.length > startCount : hasAllMissing;
       }
     }
     console.log(`P2P_FETCH: No new profiles after ${Date.now() - startedAt}ms (have ${startCount})`);
-    if (missingEntityIds.length === 0) {
-      return true;
-    }
+    if (missingEntityIds.length === 0) return false;
     if (missingEntityIds.length > 0) {
       this.env.warn('network', 'GOSSIP_PROFILE_MISS', {
         missingEntityIds,
