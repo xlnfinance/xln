@@ -1,10 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { visibleGossip, isLive } from '../../stores/timeStore';
   import ProfileCard from './ProfileCard.svelte';
   import ProfileForm from './ProfileForm.svelte';
 
-  let profiles: any[] = [];
+  type AnnouncedProfile = Pick<GossipProfile, 'entityId' | 'name' | 'avatar' | 'bio' | 'website' | 'lastUpdated'>;
+
+  let profiles: GossipProfile[] = [];
   let isLoading = true;
   let error: string | null = null;
 
@@ -23,7 +26,7 @@
       }
 
       // Access gossip profiles from the time-aware gossip layer
-      const gossipProfiles = gossip.getProfiles ? gossip.getProfiles() : [];
+      const gossipProfiles = gossip.getProfiles ? gossip.getProfiles() as GossipProfile[] : [];
       profiles = gossipProfiles;
 
       console.log(`📡 Loaded gossip profiles (${$isLive ? 'LIVE' : 'HISTORICAL'}):`, profiles);
@@ -45,7 +48,7 @@
     loadProfiles();
   }
 
-  function handleProfileAnnounced(profile: any) {
+  function handleProfileAnnounced(profile: AnnouncedProfile) {
     console.log('📡 Profile announced, refreshing directory...', profile);
     // Immediately refresh the profile list to show the newly announced profile
     loadProfiles();

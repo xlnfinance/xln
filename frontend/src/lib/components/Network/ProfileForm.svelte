@@ -2,58 +2,18 @@
   import { getXLN, xlnEnvironment, enqueueAndProcess } from '../../stores/xlnStore';
   import { tabs } from '../../stores/tabStore';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
-  import MultiSelect from 'svelte-multiselect';
 
-  type EditableProfileFields = {
-    name?: string;
-    avatar?: string;
-    bio?: string;
-    website?: string;
-  };
-
-  type AnnouncedProfile = {
-    entityId: string;
-    name: string;
-    avatar: string;
-    bio: string;
-    website: string;
-    lastUpdated: number;
-    capabilities: string[];
-    metadata: Record<string, never>;
-  };
+  type AnnouncedProfile = Pick<GossipProfile, 'entityId' | 'name' | 'avatar' | 'bio' | 'website' | 'lastUpdated'>;
 
   let { onProfileAnnounced }: { onProfileAnnounced?: (profile: AnnouncedProfile) => void } = $props();
 
-  let selectedCapabilities = $state<string[]>([]);
-  let isHub = $state(false);
-  let metadataInput = $state('');
   let isExpanded = $state(false);
   let isAnnouncing = $state(false);
   let announceError = $state<string | null>(null);
-
-  // Hub metadata fields
-  let hubName = $state('');
-  let hubAvatar = $state('');
-  let hubBio = $state('');
-  let hubWebsite = $state('');
-
-  // Predefined capability options
-  const availableCapabilities = [
-    'trading',
-    'liquidity',
-    'settlement',
-    'custody',
-    'market-making',
-    'routing',
-    'bridging',
-    'lending',
-    'borrowing',
-    'staking',
-    'governance',
-    'analytics',
-    'risk-management',
-    'compliance',
-  ];
+  let name = $state('');
+  let avatar = $state('');
+  let bio = $state('');
+  let website = $state('');
 
   // Get current active entity
   let activeTab = $derived($tabs.find(tab => tab.isActive));
@@ -63,26 +23,6 @@
   // Profile loading state
   let isLoadingProfile = $state(false);
   let existingProfile = $state<GossipProfile | null>(null);
-
-  function parseMetadata(input: string): EditableProfileFields | undefined {
-    if (!input.trim()) return undefined;
-
-    try {
-      const parsed = JSON.parse(input) as unknown;
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('Invalid JSON metadata');
-      }
-      const record = parsed as Record<string, unknown>;
-      return {
-        ...(typeof record.name === 'string' ? { name: record.name } : {}),
-        ...(typeof record.avatar === 'string' ? { avatar: record.avatar } : {}),
-        ...(typeof record.bio === 'string' ? { bio: record.bio } : {}),
-        ...(typeof record.website === 'string' ? { website: record.website } : {}),
-      };
-    } catch (err) {
-      throw new Error('Invalid JSON metadata');
-    }
-  }
 
   async function announceProfile() {
     if (!currentEntityId) {
@@ -98,20 +38,7 @@
     try {
       isAnnouncing = true;
       announceError = null;
-
-      const capabilities = [...selectedCapabilities];
-
-      // Build metadata from individual fields if hub is selected, otherwise use JSON input
-      const metadata = isHub
-        ? {
-            name: hubName,
-            avatar: hubAvatar,
-            bio: hubBio,
-            website: hubWebsite,
-          }
-        : parseMetadata(metadataInput);
-
-      const xln = await getXLN();
+      await getXLN();
       const env = $xlnEnvironment;
 
       if (!env) {
@@ -124,11 +51,10 @@
         data: {
           profile: {
             entityId: currentEntityId,
-            name: metadata?.name || '',
-            avatar: metadata?.avatar || '',
-            bio: metadata?.bio || '',
-            website: metadata?.website || '',
-            capabilities: capabilities,
+            name: name.trim(),
+            avatar: avatar.trim(),
+            bio: bio.trim(),
+            website: website.trim(),
           },
         },
       };
@@ -152,23 +78,14 @@
       // Call the callback prop if provided
       onProfileAnnounced?.({
         entityId: currentEntityId,
-        name: metadata?.name || '',
-        avatar: metadata?.avatar || '',
-        bio: metadata?.bio || '',
-        website: metadata?.website || '',
+        name: name.trim(),
+        avatar: avatar.trim(),
+        bio: bio.trim(),
+        website: website.trim(),
         lastUpdated: Date.now(),
-        capabilities: capabilities,
-        metadata: {},
       });
 
       // Clear form and collapse section after successful announcement
-      selectedCapabilities = [];
-      isHub = false;
-      metadataInput = '';
-      hubName = '';
-      hubAvatar = '';
-      hubBio = '';
-      hubWebsite = '';
       isExpanded = false; // Collapse the profile form
     } catch (err) {
       console.error('❌ Failed to submit profile update:', err);
@@ -229,51 +146,18 @@
 
   // Populate form fields from existing profile
   function populateFormFromProfile(profile: GossipProfile) {
-    selectedCapabilities = profile.capabilities || [];
-    isHub = profile.metadata?.isHub === true;
-
-    // Set metadata fields
-    if (profile) {
-      if (isHub) {
-        // If it's a hub, populate individual fields
-        hubName = profile.name || '';
-        hubAvatar = profile.avatar || '';
-        hubBio = profile.bio || '';
-        hubWebsite = profile.website || '';
-        metadataInput = ''; // Clear JSON input when hub is selected
-      } else {
-        // For non-hub profiles, put metadata in JSON field
-        // Handle BigInt serialization
-        metadataInput = JSON.stringify(profile.metadata || {}, (_, value) => {
-          if (typeof value === 'bigint') {
-            return value.toString();
-          }
-          return value;
-        }, 2);
-        hubName = '';
-        hubAvatar = '';
-        hubBio = '';
-        hubWebsite = '';
-      }
-    } else {
-      clearMetadataFields();
-    }
+    name = profile.name || '';
+    avatar = profile.avatar || '';
+    bio = profile.bio || '';
+    website = profile.website || '';
   }
 
   // Clear all form fields
   function clearForm() {
-    selectedCapabilities = [];
-    isHub = false;
-    clearMetadataFields();
-  }
-
-  // Clear metadata fields
-  function clearMetadataFields() {
-    metadataInput = '';
-    hubName = '';
-    hubAvatar = '';
-    hubBio = '';
-    hubWebsite = '';
+    name = '';
+    avatar = '';
+    bio = '';
+    website = '';
   }
 
   // Watch for entity changes and load profile
@@ -307,77 +191,26 @@
           <span>Editing existing profile for <strong>{existingProfile.entityId}</strong></span>
         </div>
       {/if}
+
       <div class="form-group">
-        <div>
-          <label for="capabilities-select">Capabilities:</label>
-          <MultiSelect
-            id="capabilities-select"
-            options={availableCapabilities}
-            bind:selected={selectedCapabilities}
-            placeholder="Select capabilities..."
-            searchable={true}
-            liMaxHeight="200px"
-            --sms-border="1px solid #3e3e3e"
-            --sms-bg="#1e1e1e"
-            --sms-text-color="#d4d4d4"
-            --sms-focus-border="#007acc"
-            --sms-selected-bg="#007acc"
-            --sms-options-bg="#1e1e1e"
-            --sms-options-text="#d4d4d4"
-            --sms-options-hover-bg="rgba(255, 255, 255, 0.05)"
-            data-testid="capabilities-multiselect"
-          />
-        </div>
+        <label for="profile-name">Name</label>
+        <input id="profile-name" type="text" bind:value={name} placeholder="Display name" class="form-input" />
       </div>
 
       <div class="form-group">
-        <label class="checkbox-label">
-          <input type="checkbox" bind:checked={isHub} class="form-checkbox" data-testid="hub-checkbox" />
-          <span class="checkbox-text">🌟 Register as Hub</span>
-        </label>
-        <small class="form-hint">Declared public features only. Hub status comes from the entity's hub config.</small>
+        <label for="profile-avatar">Avatar URL</label>
+        <input id="profile-avatar" type="url" bind:value={avatar} placeholder="Avatar URL" class="form-input" />
       </div>
 
-      {#if isHub}
-        <div class="hub-details-section">
-          <h4 class="hub-details-header">🏢 Hub Details</h4>
+      <div class="form-group">
+        <label for="profile-bio">Bio</label>
+        <textarea id="profile-bio" bind:value={bio} placeholder="Short description" class="form-textarea" rows="3"></textarea>
+      </div>
 
-          <div class="form-group">
-            <label for="hub-name">Hub Name:</label>
-            <input id="hub-name" type="text" bind:value={hubName} placeholder="Hub name" class="form-input" />
-          </div>
-
-          <div class="form-group">
-            <label for="hub-avatar">Avatar URL:</label>
-            <input id="hub-avatar" type="url" bind:value={hubAvatar} placeholder="Avatar URL" class="form-input" />
-          </div>
-
-          <div class="form-group">
-            <label for="hub-bio">Description / Bio:</label>
-            <textarea id="hub-bio" bind:value={hubBio} placeholder="Description / bio" class="form-textarea" rows="3"
-            ></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="hub-website">Website:</label>
-            <input id="hub-website" type="url" bind:value={hubWebsite} placeholder="Website" class="form-input" />
-          </div>
-        </div>
-      {/if}
-
-      {#if !isHub}
-        <div class="form-group">
-          <label for="metadata">📋 Metadata (optional JSON)</label>
-          <textarea
-            id="metadata"
-            bind:value={metadataInput}
-            placeholder="Enter JSON metadata here..."
-            class="form-textarea"
-            rows="3"
-          ></textarea>
-          <small class="form-hint">Optional JSON metadata for additional information</small>
-        </div>
-      {/if}
+      <div class="form-group">
+        <label for="profile-website">Website</label>
+        <input id="profile-website" type="url" bind:value={website} placeholder="https://example.com" class="form-input" />
+      </div>
 
       <div class="form-actions">
         <button

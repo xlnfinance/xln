@@ -49,7 +49,6 @@
     };
     runtimeId?: string;
     endpoints?: string[];
-    capabilities?: string[];
     verified: boolean;
     creditScore: number;
     isConnected: boolean;
@@ -203,7 +202,6 @@
 
         const isConnected = hasCounterpartyAccount(currentEnv, entityId, profile.entityId);
         const feePpm = profile.metadata?.routingFeePPM || 100;
-        const capabilities = profile.capabilities || [];
         const fullEntityId = profile.entityId.startsWith('0x') ? profile.entityId : `0x${profile.entityId}`;
         const peerCount = Array.isArray(profile.publicAccounts) ? profile.publicAccounts.length : 0;
 
@@ -218,7 +216,6 @@
             peerCount,
           },
           endpoints: profile.endpoints || [],
-          capabilities,
           verified: profile.metadata?.isHub === true,
           creditScore: computeCreditScore(profile.entityId, feePpm, peerCount),
           isConnected,
@@ -526,10 +523,6 @@
                 <div class="detail">
                   <span class="label">Endpoints</span>
                   <span class="value mono">{hub.endpoints?.join(', ') || '-'}</span>
-                </div>
-                <div class="detail">
-                  <span class="label">Capabilities</span>
-                  <span class="value">{hub.capabilities?.join(', ') || '-'}</span>
                 </div>
                 <div class="detail">
                   <span class="label">Last Seen</span>
