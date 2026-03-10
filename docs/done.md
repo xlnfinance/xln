@@ -430,3 +430,14 @@
     - `cd frontend && bunx vite build --mode development`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-204658-605/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-204658-605/e2e-shard-00.log)
+  - fixed the account capacity bar math so visible slices shrink with current post-hold capacity instead of rendering raw pre-hold components inside a too-large shell:
+    - proportional USD fitting now lives in [delta-visual.ts](/Users/egor/xln/frontend/src/lib/components/Entity/shared/delta-visual.ts)
+    - bar shell/track presentation tightened in [DeltaCapacityBar.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/shared/DeltaCapacityBar.svelte)
+    - this keeps equal-USD token values visually equal (`$100` USDC ~= `$100` WETH) and stops the bar from feeling "full" when available outbound is already mostly gone
+  - added focused frontend regression coverage:
+    - [delta-visual.test.ts](/Users/egor/xln/frontend/src/lib/components/Entity/shared/delta-visual.test.ts)
+      - visible slices are capped to post-capacity USD
+      - equal USD across tokens maps to equal visual widths within rounding tolerance
+  - verified:
+    - `bun test frontend/src/lib/components/Entity/shared/delta-visual.test.ts`
+    - `cd frontend && bunx vite build --mode development`

@@ -8,7 +8,7 @@
   export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
   export let visualScale: DeltaVisualScale | null = null;
 
-  const CENTER_GAP_PX = 10;
+  const CENTER_GAP_PX = 8;
   const SIDES_GAP_PX = 14;
   const MIN_VISIBLE_SIDE_PX = 3;
 
@@ -168,8 +168,8 @@
     width: 100%;
     height: var(--bar-h);
     border-radius: 999px;
-    background: rgba(24, 24, 27, 0.72);
-    box-shadow: inset 0 0 0 1px rgba(82, 82, 91, 0.35);
+    background: rgba(15, 23, 42, 0.14);
+    box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.14);
   }
 
   .axis,
@@ -177,16 +177,16 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 10px;
+    width: 6px;
     background: linear-gradient(
       180deg,
-      rgba(71, 85, 105, 0.38) 0%,
-      rgba(100, 116, 139, 0.5) 50%,
-      rgba(71, 85, 105, 0.38) 100%
+      rgba(71, 85, 105, 0.22) 0%,
+      rgba(148, 163, 184, 0.46) 50%,
+      rgba(71, 85, 105, 0.22) 100%
     );
-    border-left: 1px solid rgba(226, 232, 240, 0.78);
-    border-right: 1px solid rgba(148, 163, 184, 0.55);
-    box-shadow: 0 0 8px rgba(148, 163, 184, 0.2);
+    border-left: 1px solid rgba(226, 232, 240, 0.52);
+    border-right: 1px solid rgba(148, 163, 184, 0.34);
+    box-shadow: 0 0 6px rgba(148, 163, 184, 0.12);
     z-index: 4;
   }
 
@@ -232,8 +232,10 @@
     overflow: hidden;
     display: flex;
     align-items: stretch;
-    background: rgba(226, 232, 240, 0.05);
-    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+    background: rgba(226, 232, 240, 0.07);
+    box-shadow:
+      inset 0 0 0 1px rgba(148, 163, 184, 0.16),
+      0 0 0 1px rgba(15, 23, 42, 0.12);
     z-index: 2;
   }
 
@@ -288,18 +290,19 @@
   .seg {
     min-width: 1px;
     height: 100%;
+    opacity: 0.92;
   }
 
   .seg.credit {
-    background: #9ca3af;
+    background: linear-gradient(180deg, rgba(203, 213, 225, 0.9), rgba(148, 163, 184, 0.95));
   }
 
   .seg.coll {
-    background: #10b981;
+    background: linear-gradient(180deg, rgba(52, 211, 153, 0.92), rgba(16, 185, 129, 0.96));
   }
 
   .seg.debt {
-    background: #f43f5e;
+    background: linear-gradient(180deg, rgba(251, 113, 133, 0.94), rgba(244, 63, 94, 0.98));
   }
 
   .seg.debt.striped {
