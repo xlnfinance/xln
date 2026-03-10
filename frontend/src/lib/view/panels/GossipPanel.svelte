@@ -4,9 +4,10 @@
    * For debugging and inspection of entity discovery
    */
   import type { Writable } from 'svelte/store';
+  import type { Env, Profile as GossipProfile } from '@xln/runtime/xln-api';
 
-  export let isolatedEnv: Writable<any> | undefined = undefined;
-  export let isolatedHistory: Writable<any[]> | undefined = undefined;
+  export let isolatedEnv: Writable<Env | null> | undefined = undefined;
+  export let isolatedHistory: Writable<unknown[]> | undefined = undefined;
   export let isolatedTimeIndex: Writable<number> | undefined = undefined;
 
   $: env = isolatedEnv ? $isolatedEnv : null;
@@ -20,9 +21,9 @@
     return id;
   }
 
-  function getPrimaryBoardPublicKey(profile: { metadata?: { board?: { validators?: Array<{ publicKey?: string }> } } }): string {
-    const publicKey = profile.metadata?.board?.validators?.[0]?.publicKey;
-    return typeof publicKey === 'string' ? publicKey : '';
+  function getPrimaryBoardPublicKey(profile: GossipProfile): string {
+    const validator = profile.metadata.board.validators[0];
+    return validator ? validator.publicKey : '';
   }
 </script>
 
@@ -44,7 +45,7 @@
         <div class="profile-card">
           <div class="profile-header">
             <div class="entity-id">{formatEntityId(profile.entityId)}</div>
-            <div class="timestamp">{formatTimestamp(profile.lastUpdated || 0)}</div>
+            <div class="timestamp">{formatTimestamp(profile.lastUpdated)}</div>
           </div>
 
           <div class="profile-body">
@@ -65,23 +66,17 @@
             {/if}
 
             <!-- Board -->
-            {#if profile.metadata?.board}
-              <div class="field">
-                <div class="field-label">Board</div>
-                <div class="field-value">
-                  {#if Array.isArray(profile.metadata.board)}
-                    {profile.metadata.board.length} validators
-                  {:else}
-                    {JSON.stringify(profile.metadata.board)}
-                  {/if}
-                </div>
+            <div class="field">
+              <div class="field-label">Board</div>
+              <div class="field-value">
+                {profile.metadata.board.validators.length} validators
               </div>
-            {/if}
+            </div>
 
             <!-- Accounts -->
             <div class="field">
               <div class="field-label">Accounts</div>
-              <div class="field-value">{profile.accounts} bilateral channels</div>
+              <div class="field-value">{profile.accounts.length} bilateral channels</div>
             </div>
 
             <!-- Full Metadata (expandable) -->

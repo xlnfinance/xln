@@ -218,6 +218,7 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       newState.profile = {
         name: normalizeEntityName(profileData.name ?? newState.profile?.name, newState.entityId),
+        isHub: newState.profile.isHub,
         avatar: typeof profileData.avatar === 'string' ? profileData.avatar : (newState.profile?.avatar ?? ''),
         bio: typeof profileData.bio === 'string' ? profileData.bio : (newState.profile?.bio ?? ''),
         website: typeof profileData.website === 'string' ? profileData.website : (newState.profile?.website ?? ''),
@@ -981,6 +982,10 @@ export const applyEntityTx = async (
         rebalanceLiquidityFeeBps,
         rebalanceGasFee,
         rebalanceTimeoutMs,
+      };
+      newState.profile = {
+        ...newState.profile,
+        isHub: true,
       };
       console.log(
         `🏦 Hub config set: strategy=${matchingStrategy}, policyVersion=${policyVersion}, routingFee=${routingFeePPM}ppm, ` +

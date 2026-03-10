@@ -1599,6 +1599,7 @@ export interface EntityState {
   // These are part of consensus state and are the source of truth for gossip.
   profile: {
     name: string;
+    isHub: boolean;
     avatar: string;
     bio: string;
     website: string;

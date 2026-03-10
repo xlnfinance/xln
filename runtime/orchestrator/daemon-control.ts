@@ -200,7 +200,6 @@ export class DaemonControlClient {
   async configureP2P(config: {
     relayUrls?: string[];
     advertiseEntityIds?: string[];
-    isHub?: boolean;
     gossipPollMs?: number;
   }): Promise<void> {
     await this.post<{ ok: boolean }, typeof config>('/api/control/p2p', config);
@@ -340,7 +339,6 @@ export const enableRouting = async (
   await client.configureP2P({
     ...(config.relayUrl ? { relayUrls: [config.relayUrl] } : {}),
     advertiseEntityIds: [identity.entityId],
-    isHub: true,
     gossipPollMs: config.gossipPollMs ?? 1000,
   });
   return identity;
@@ -367,7 +365,6 @@ export const setupCustody = async (
     await client.configureP2P({
       ...(config.relayUrl ? { relayUrls: [config.relayUrl] } : {}),
       advertiseEntityIds: [identity.entityId],
-      isHub: false,
       gossipPollMs: config.gossipPollMs ?? 1000,
     });
   }

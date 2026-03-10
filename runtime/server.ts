@@ -3503,7 +3503,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const body = await parseTaggedControlBody<{
         relayUrls?: unknown;
         advertiseEntityIds?: unknown;
-        isHub?: unknown;
         gossipPollMs?: unknown;
       }>(req);
       const relayUrls = Array.isArray(body?.relayUrls)
@@ -3512,7 +3511,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const advertiseEntityIds = Array.isArray(body?.advertiseEntityIds)
         ? body.advertiseEntityIds.map(value => (typeof value === 'string' ? value.trim().toLowerCase() : '')).filter(Boolean)
         : undefined;
-      const isHub = typeof body?.isHub === 'boolean' ? body.isHub : undefined;
       const gossipPollMs = Number.isFinite(Number(body?.gossipPollMs))
         ? Math.max(1000, Math.floor(Number(body?.gossipPollMs)))
         : undefined;
@@ -3520,7 +3518,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       startP2P(env, {
         ...(relayUrls ? { relayUrls } : {}),
         ...(advertiseEntityIds ? { advertiseEntityIds } : {}),
-        ...(isHub !== undefined ? { isHub } : {}),
         ...(gossipPollMs !== undefined ? { gossipPollMs } : {}),
       });
 
@@ -3530,7 +3527,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           config: {
             relayUrls: relayUrls ?? null,
             advertiseEntityIds: advertiseEntityIds ?? null,
-            isHub: isHub ?? null,
             gossipPollMs: gossipPollMs ?? null,
           },
         }),
