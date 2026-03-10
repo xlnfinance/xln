@@ -20,7 +20,24 @@
   $: outgoingLocks = allLocks.filter(l => l.direction === 'outgoing');
   $: incomingLocks = allLocks.filter(l => l.direction === 'incoming');
 
-  function getLockStatus(lock: any): string {
+  type LockDirection = 'incoming' | 'outgoing';
+
+  type LockView = {
+    lockId: string;
+    accountId: string;
+    tokenId: number;
+    amount: bigint;
+    hashlock: string;
+    timelock: bigint;
+    direction: LockDirection;
+    createdAt: bigint;
+  };
+
+  type RouteView = {
+    secret?: string;
+  };
+
+  function getLockStatus(lock: LockView): string {
     const now = Date.now();
 
     // LockBookEntry only has timelock, not revealBeforeHeight
@@ -28,7 +45,7 @@
       return 'expired';
     }
 
-    const route = htlcRoutes.get(lock.hashlock);
+    const route = htlcRoutes.get(lock.hashlock) as RouteView | undefined;
     if (route?.secret) {
       return 'revealed';
     }
@@ -36,7 +53,7 @@
     return 'pending';
   }
 
-  function getTimeRemaining(lock: any): string {
+  function getTimeRemaining(lock: LockView): string {
     const now = Date.now();
     const remaining = Number(lock.timelock) - now;
     if (remaining <= 0) return 'Expired';

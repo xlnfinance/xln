@@ -4,25 +4,45 @@
   export let replica: EntityReplica | null;
   export let tab: Tab; void tab; // Reserved for tab-aware features
 
+  type VoteChoice = 'yes' | 'no' | 'abstain';
+  type VoteRecord = VoteChoice | { choice: VoteChoice; comment: string };
+  type ProposalView = {
+    proposer: string;
+    action?: {
+      data?: {
+        message?: string;
+      };
+    };
+    votes: Map<string, VoteRecord>;
+  };
+  type ProposalConfigView = {
+    threshold?: number | bigint;
+    shares?: Record<string, number | bigint>;
+  };
+
+  const isVoteRecordObject = (value: VoteRecord): value is { choice: VoteChoice; comment: string } =>
+    typeof value === 'object' && value !== null;
+
   // Helper to convert BigInt to number safely
-  function toNumber(value: any): number {
+  function toNumber(value: unknown): number {
     if (typeof value === 'bigint') return Number(value);
     if (typeof value === 'number') return value;
-    return parseInt(value) || 0;
+    if (typeof value === 'string') return parseInt(value, 10) || 0;
+    return 0;
   }
 
   // Helper to extract vote choice from either simple or complex format
-  function getVoteChoice(voteData: any): string {
-    if (typeof voteData === 'object' && voteData.choice) {
+  function getVoteChoice(voteData: VoteRecord): VoteChoice {
+    if (isVoteRecordObject(voteData) && voteData.choice) {
       return voteData.choice; // Complex format: { choice: "yes", comment: "..." }
     }
     if (voteData === true) return 'yes';
     if (voteData === false) return 'no';
-    return voteData; // Simple format: "yes", "no", "abstain"
+    return voteData;
   }
 
   // Helper to get vote display and calculate voting power
-  function getVoteInfo(proposal: any, config: any) {
+  function getVoteInfo(proposal: ProposalView, config: ProposalConfigView | undefined) {
     const votes = proposal.votes ? [...proposal.votes.entries()] : [];
     const yesVotes = votes.filter(([_, vote]) => getVoteChoice(vote) === 'yes');
     const noVotes = votes.filter(([_, vote]) => getVoteChoice(vote) === 'no');
@@ -93,7 +113,7 @@
                       class:abstain={choice === 'abstain'}>
                   {choice.toUpperCase()}
                 </span>
-                {#if typeof voteData === 'object' && voteData.comment}
+                {#if isVoteRecordObject(voteData) && voteData.comment}
                   <span class="vote-comment">"{voteData.comment}"</span>
                 {/if}
               </div>
