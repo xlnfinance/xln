@@ -342,3 +342,12 @@
     - `cd frontend && bunx vite build --mode development`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-193333-245/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-193333-245/e2e-shard-00.log)
+  - aligned the live account bar pricing and repeat-payment behavior:
+    - introduced shared token USD pricing in [assetPricing.ts](/Users/egor/xln/frontend/src/lib/utils/assetPricing.ts)
+    - unified value calculations in [delta-visual.ts](/Users/egor/xln/frontend/src/lib/components/Entity/shared/delta-visual.ts) and [EntityPanelTabs.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/EntityPanelTabs.svelte)
+    - simplified width math in [DeltaCapacityBar.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/shared/DeltaCapacityBar.svelte) so left/right shoulders scale from real USD capacity instead of a fake full-width shell
+    - stopped repeat-pay from stacking HTLCs on the same target/token in [PaymentPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/PaymentPanel.svelte) by checking the live local `lockBook`
+  - verified again:
+    - `cd frontend && bunx vite build --mode development`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-195139-497/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-195139-497/e2e-shard-00.log)

@@ -87,6 +87,11 @@
     inCapacity: bigint | string;
     outCapacity: bigint | string;
   };
+  type LockBookEntry = {
+    accountId: string;
+    tokenId: number;
+    direction: 'incoming' | 'outgoing';
+  };
 
   type TokenCapacities =
     | Map<number | string, TokenCapacityValue>
@@ -120,6 +125,26 @@
   const getGossipProfiles = (): GossipProfile[] => currentEnv?.gossip?.getProfiles?.() || [];
 
   const normalizeEntityId = (id: string | null | undefined): string => String(id || '').trim().toLowerCase();
+
+  function hasPendingOutgoingLock(from: string, to: string, token: number): boolean {
+    if (!currentReplicas) return false;
+    const fromNorm = normalizeEntityId(from);
+    const toNorm = normalizeEntityId(to);
+    for (const [key, replica] of currentReplicas.entries()) {
+      const [replicaEntityId] = key.split(':');
+      if (normalizeEntityId(replicaEntityId) !== fromNorm) continue;
+      const lockBook = replica?.state?.lockBook;
+      if (!(lockBook instanceof Map)) continue;
+      for (const lock of lockBook.values()) {
+        const entry = lock as LockBookEntry;
+        if (entry.direction !== 'outgoing') continue;
+        if (normalizeEntityId(entry.accountId) !== toNorm) continue;
+        if (Number(entry.tokenId) !== token) continue;
+        return true;
+      }
+    }
+    return false;
+  }
 
   const sanitizePrefillText = (raw: string | null | undefined, maxLen = 180): string => {
     const value = String(raw || '').replace(/\s+/g, ' ').trim();
@@ -337,6 +362,10 @@
     if (repeatIntervalMs <= 0 || selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
     repeatTimer = setInterval(() => {
       if (sendingPayment || findingRoutes) return;
+      if (hasPendingOutgoingLock(entityId, targetEntityId, tokenId)) {
+        stopRepeatTimer('Previous HTLC is still settling on this account.');
+        return;
+      }
       void sendPayment(false);
     }, repeatIntervalMs);
   };
