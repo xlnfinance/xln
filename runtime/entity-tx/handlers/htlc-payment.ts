@@ -15,6 +15,8 @@ import { HTLC } from '../../constants';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../routing/fees';
 import { getTokenCapacity } from '../../routing/capacity';
 import { deriveDelta } from '../../account-utils';
+import { NobleCryptoProvider } from '../../crypto-noble';
+import { createOnionEnvelopes } from '../../htlc-envelope-types';
 
 const formatEntityId = (id: string) => id.slice(-4);
 const addMessage = (state: EntityState, message: string) => state.messages.push(message);
@@ -333,7 +335,6 @@ export async function handleHtlcPayment(
   if (preparedEnvelopeRaw !== undefined) {
     envelope = preparedEnvelopeRaw;
   } else try {
-    const { createOnionEnvelopes } = await import('../../htlc-envelope-types');
     const normalizeX25519Hex = (raw: unknown): string | null => {
       if (typeof raw !== 'string') return null;
       const trimmed = raw.trim();
@@ -365,27 +366,17 @@ export async function handleHtlcPayment(
         const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : [];
         const matches = profiles.filter((profile) => profile.entityId === entityId);
         for (const profile of matches) {
-          const candidates: Array<{ value: unknown; source: string }> = [
-            { value: profile.metadata.cryptoPublicKey, source: 'gossip.metadata.cryptoPublicKey' },
-            { value: profile.metadata.encryptionPublicKey, source: 'gossip.metadata.encryptionPublicKey' },
-          ];
-          for (const candidate of candidates) {
-            const key = normalizeX25519Hex(candidate.value) ?? normalizeX25519Base64(candidate.value);
-            if (key) return { key, source: candidate.source };
-          }
+          const key = normalizeX25519Hex(profile.metadata.entityEncPubKey)
+            ?? normalizeX25519Base64(profile.metadata.entityEncPubKey);
+          if (key) return { key, source: 'gossip.metadata.entityEncPubKey' };
         }
       }
 
       // Fallback: local replica key for same-rt scenarios or when gossip is stale.
       const replica = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
-      const localCandidates: Array<{ value: unknown; source: string }> = [
-        { value: replica?.[1]?.state?.cryptoPublicKey, source: 'localReplica.state.cryptoPublicKey' },
-        { value: replica?.[1]?.state?.encryptionPublicKey, source: 'localReplica.state.encryptionPublicKey' },
-      ];
-      for (const candidate of localCandidates) {
-        const key = normalizeX25519Hex(candidate.value) ?? normalizeX25519Base64(candidate.value);
-        if (key) return { key, source: candidate.source };
-      }
+      const localKey = normalizeX25519Hex(replica?.[1]?.state?.entityEncPubKey)
+        ?? normalizeX25519Base64(replica?.[1]?.state?.entityEncPubKey);
+      if (localKey) return { key: localKey, source: 'localReplica.state.entityEncPubKey' };
 
       return null;
     };
@@ -406,7 +397,6 @@ export async function handleHtlcPayment(
       missingKeys.push(entityId);
     }
 
-    const { NobleCryptoProvider } = await import('../../crypto-noble');
     if (missingKeys.length > 0) {
       const missingList = missingKeys.map(e => formatEntityId(e)).join(', ');
       const availableList = [...entityPubKeys.keys()].map(e => formatEntityId(e)).join(', ');

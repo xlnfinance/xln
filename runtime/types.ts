@@ -1591,8 +1591,8 @@ export interface EntityState {
   // 🔐 Deterministic entity-scoped X25519 keys for HTLC envelope encryption.
   // These are derived exactly once at entity creation/import and are required
   // for every locally-owned entity. Missing keys are a hard invariant failure.
-  cryptoPublicKey: string;
-  cryptoPrivateKey: string;
+  entityEncPubKey: string;
+  entityEncPrivKey: string;
 
   // Public entity-owned profile fields.
   // These are part of consensus state and are the source of truth for gossip.

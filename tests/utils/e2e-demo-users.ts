@@ -99,7 +99,18 @@ export async function gotoApp(
     await unlock.click();
     await page.waitForURL('**/app', { timeout: 10_000 });
   }
-  await page.waitForFunction(() => !!(window as any).XLN, { timeout: initTimeoutMs });
+  await page.waitForFunction(() => {
+    const maybeWindow = window as typeof window & {
+      vaultOperations?: { createRuntime?: unknown };
+      runtimesState?: unknown;
+    };
+    const loadingVisible = Boolean(document.querySelector('.loading-screen'));
+    const errorVisible = Boolean(document.querySelector('.error-screen'));
+    return !loadingVisible &&
+      !errorVisible &&
+      typeof maybeWindow.vaultOperations?.createRuntime === 'function' &&
+      !!maybeWindow.runtimesState;
+  }, { timeout: initTimeoutMs });
   if (settleMs > 0) await page.waitForTimeout(settleMs);
 }
 

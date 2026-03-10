@@ -90,22 +90,41 @@ const isHexPublicKey = (value: string): boolean => {
   return hex.length === 66 || hex.length === 130;
 };
 
-const sanitizeIncomingProfile = (rawProfile: unknown): Profile | null => {
+type SanitizedIncomingProfile = {
+  profile: Profile | null;
+  error: string | null;
+};
+
+const sanitizeIncomingProfile = (rawProfile: unknown): SanitizedIncomingProfile => {
   let profile: Profile;
   try {
     profile = parseProfile(rawProfile);
-  } catch {
-    return null;
+  } catch (error) {
+    return {
+      profile: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
   const normalizedRuntimeId = normalizeRuntimeId(profile.runtimeId);
-  if (!normalizedRuntimeId) return null;
+  if (!normalizedRuntimeId) {
+    return {
+      profile: null,
+      error: `P2P_PROFILE_RUNTIME_ID_INVALID: entity=${profile.entityId}`,
+    };
+  }
   try {
     return {
-      ...canonicalizeProfile(profile),
-      runtimeId: normalizedRuntimeId,
+      profile: {
+        ...canonicalizeProfile(profile),
+        runtimeId: normalizedRuntimeId,
+      },
+      error: null,
     };
-  } catch {
-    return null;
+  } catch (error) {
+    return {
+      profile: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 };
 
@@ -135,7 +154,9 @@ export class RuntimeP2P {
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private retryInterval: ReturnType<typeof setInterval> | null = null;
   private visibilityHandler: (() => void) | null = null;
+  private focusHandler: (() => void) | null = null;
   private encryptionKeyPair: P2PKeyPair;
+  private peerRuntimeEncPubKeys = new Map<string, string>();
   private announceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingAnnounceEntities = new Set<string>();
 
@@ -217,8 +238,25 @@ export class RuntimeP2P {
         signerId: this.signerId,
         ...(runtimeSeed ? { seed: runtimeSeed } : {}),  // Pass seed for hello auth signing if available
         encryptionKeyPair: this.encryptionKeyPair, // Pass our keypair for encryption/decryption
+        onPeerEncryptionKey: (fromRuntimeId: string, pubKeyHex: string) => {
+          const normalizedRuntimeId = normalizeRuntimeId(fromRuntimeId);
+          const normalizedKey = typeof pubKeyHex === 'string'
+            ? (pubKeyHex.startsWith('0x') ? pubKeyHex.toLowerCase() : `0x${pubKeyHex.toLowerCase()}`)
+            : '';
+          if (!normalizedRuntimeId) return;
+          if (!/^0x[0-9a-f]{64}$/.test(normalizedKey)) return;
+          this.peerRuntimeEncPubKeys.set(normalizedRuntimeId, normalizedKey);
+        },
         getTargetEncryptionKey: (targetRuntimeId: string) => {
-          // Lookup target's public key from gossip
+          const hintedKey = this.peerRuntimeEncPubKeys.get(normalizeRuntimeId(targetRuntimeId) || '');
+          if (hintedKey) {
+            try {
+              return hexToPubKey(hintedKey);
+            } catch {
+              this.peerRuntimeEncPubKeys.delete(normalizeRuntimeId(targetRuntimeId) || '');
+            }
+          }
+          // Lookup target runtime transport key from gossip.
           const profiles = this.env.gossip?.getProfiles?.() || [];
           const targetRuntimeIdNorm = normalizeRuntimeId(targetRuntimeId);
           if (!targetRuntimeIdNorm) return null;
@@ -229,7 +267,7 @@ export class RuntimeP2P {
           // Pick the most common valid key among profiles for this runtimeId; break ties by latest lastUpdated.
           const keyStats = new Map<string, { count: number; latestTs: number }>();
           for (const profile of targetProfiles) {
-            const rawKey = profile.metadata.encryptionPublicKey;
+            const rawKey = profile.runtimeEncPubKey;
             if (typeof rawKey !== 'string' || rawKey.length === 0) continue;
             const normalizedKey = rawKey.startsWith('0x') ? rawKey.toLowerCase() : `0x${rawKey.toLowerCase()}`;
             if (!/^0x[0-9a-f]{64}$/.test(normalizedKey)) continue;
@@ -296,7 +334,9 @@ export class RuntimeP2P {
           const missingEntities = Array.from(entitiesToCheck).filter(e => !this.hasProfileForEntity(e));
           if (missingEntities.length > 0) {
             console.log(`P2P_FETCH_PROFILE: ${missingEntities.map(e => e.slice(-4)).join(',')} (not in cache)`);
-            await this.ensureProfiles(missingEntities);
+            void this.ensureProfiles(missingEntities).catch(error => {
+              console.warn(`P2P_FETCH_PROFILE_FAILED: ${(error as Error).message}`);
+            });
           }
 
           this.onEntityInput(from, input);
@@ -322,6 +362,7 @@ export class RuntimeP2P {
     this.stopPolling();
     this.stopRetryLoop();
     this.unregisterVisibilityReconnect();
+    this.peerRuntimeEncPubKeys.clear();
     if (this.announceTimer) {
       clearTimeout(this.announceTimer);
       this.announceTimer = null;
@@ -358,13 +399,15 @@ export class RuntimeP2P {
   private registerVisibilityReconnect() {
     if (typeof document === 'undefined') return;
     if (this.visibilityHandler) return;
-    this.visibilityHandler = () => {
+    const resume = () => {
       const activeClient = !!this.getActiveClient();
       console.log(
         `[P2P] visibilitychange state=${document.visibilityState} activeClient=${activeClient ? 1 : 0} ` +
           `pendingTargets=${this.pendingByRuntime.size}`,
       );
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
       if (!activeClient) {
         console.warn('[P2P] Tab resumed with no active WS client — forcing reconnect');
         this.reconnect();
@@ -373,7 +416,10 @@ export class RuntimeP2P {
       this.requestSeedGossip('incremental');
       this.flushPending();
     };
+    this.visibilityHandler = resume;
+    this.focusHandler = resume;
     document.addEventListener('visibilitychange', this.visibilityHandler);
+    window.addEventListener('focus', this.focusHandler);
   }
 
   private unregisterVisibilityReconnect() {
@@ -381,6 +427,10 @@ export class RuntimeP2P {
     if (!this.visibilityHandler) return;
     document.removeEventListener('visibilitychange', this.visibilityHandler);
     this.visibilityHandler = null;
+    if (this.focusHandler) {
+      window.removeEventListener('focus', this.focusHandler);
+      this.focusHandler = null;
+    }
   }
 
   private startRetryLoop() {
@@ -585,28 +635,66 @@ export class RuntimeP2P {
     this.requestSeedGossip('full');
   }
 
+  async syncProfiles(): Promise<boolean> {
+    return this.fetchProfilesWithRetry([]);
+  }
+
   async ensureProfiles(entityIds: string[]): Promise<boolean> {
-    const normalizedMissing = unique(entityIds.map(normalizeId)).filter(entityId => !this.hasProfileForEntity(entityId));
-    if (normalizedMissing.length === 0) {
-      return true;
-    }
+    const requestedEntityIds = unique(entityIds.map(normalizeId)).filter(Boolean);
+    if (requestedEntityIds.length === 0) return true;
     const startedAt = Date.now();
-    for (const entityId of normalizedMissing) {
+    let requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
+    let missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));
+
+    for (const entityId of missingEntityIds) {
       this.ensureRelayConnectionsForEntity(entityId);
     }
-    const resolved = await this.fetchProfilesWithRetry(normalizedMissing);
+    if (missingEntityIds.length > 0) {
+      await this.fetchProfilesWithRetry(missingEntityIds);
+    }
+
+    requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
+    missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));
+    if (missingEntityIds.length > 0) {
+      await this.fetchProfilesWithRetry(missingEntityIds);
+    }
+
+    // Route-finding needs the structural hub graph, not just the target profile.
+    // Pull one bounded default batch so callers do not continue with a half-filled cache.
+    await this.fetchProfilesWithRetry([]);
+
+    requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
+    missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));
+    const resolved = missingEntityIds.length === 0;
     console.log(
-      `[P2P] ensureProfiles ids=${normalizedMissing.map(entityId => entityId.slice(-6)).join(',')} ` +
-        `resolved=${resolved ? 1 : 0} elapsed=${Date.now() - startedAt}ms`,
+      `[P2P] ensureProfiles requested=${requestedEntityIds.length} required=${requiredEntityIds.length} ` +
+        `missing=${missingEntityIds.length} resolved=${resolved ? 1 : 0} elapsed=${Date.now() - startedAt}ms`,
     );
     return resolved;
   }
 
+  private getProfileByEntity(entityId: string): Profile | null {
+    const targetEntityId = normalizeId(entityId);
+    const profiles = this.env.gossip?.getProfiles?.() || [];
+    return profiles.find((profile) => normalizeId(profile.entityId) === targetEntityId) || null;
+  }
+
+  private expandRequiredProfileIds(entityIds: string[]): string[] {
+    const required = new Set<string>(entityIds.map(normalizeId).filter(Boolean));
+    for (const entityId of Array.from(required)) {
+      const profile = this.getProfileByEntity(entityId);
+      if (!profile) continue;
+      for (const peerId of profile.publicAccounts) {
+        const normalizedPeerId = normalizeId(peerId);
+        if (normalizedPeerId) required.add(normalizedPeerId);
+      }
+    }
+    return Array.from(required);
+  }
+
   // Check if we have a profile for an entity in local gossip cache
   private hasProfileForEntity(entityId: string): boolean {
-    const profiles = this.env.gossip?.getProfiles?.() || [];
-    const targetEntityId = normalizeId(entityId);
-    return profiles.some((profile) => normalizeId(profile.entityId) === targetEntityId);
+    return this.getProfileByEntity(entityId) !== null;
   }
 
   private getLatestKnownRemoteProfileTimestamp(): number {
@@ -625,10 +713,6 @@ export class RuntimeP2P {
 
   // Fetch profiles from relay with bounded retry for cold or stale caches.
   private async fetchProfilesWithRetry(missingEntityIds: string[] = []): Promise<boolean> {
-    if (missingEntityIds.length === 0) {
-      this.requestSeedGossip('full');
-      return true;
-    }
     if (!this.getActiveClient()) {
       this.env.warn('network', 'GOSSIP_PROFILE_FETCH_NO_CLIENT', {
         missingEntityIds,
@@ -649,16 +733,19 @@ export class RuntimeP2P {
       }
       await new Promise(resolve => setTimeout(resolve, waitMs));
       const profiles = this.env.gossip?.getProfiles?.() || [];
-      const hasAllMissing = missingEntityIds.length === 0 || missingEntityIds.every((entityId) => this.hasProfileForEntity(entityId));
+      const hasAllMissing = missingEntityIds.length > 0 && missingEntityIds.every((entityId) => this.hasProfileForEntity(entityId));
       if (profiles.length > startCount || hasAllMissing) {
         console.log(
           `P2P_FETCH: profiles=${profiles.length} delta=${profiles.length - startCount} ` +
             `elapsed=${Date.now() - startedAt}ms`,
         );
-        return hasAllMissing;
+        return missingEntityIds.length === 0 || hasAllMissing;
       }
     }
     console.log(`P2P_FETCH: No new profiles after ${Date.now() - startedAt}ms (have ${startCount})`);
+    if (missingEntityIds.length === 0) {
+      return true;
+    }
     if (missingEntityIds.length > 0) {
       this.env.warn('network', 'GOSSIP_PROFILE_MISS', {
         missingEntityIds,
@@ -786,12 +873,6 @@ export class RuntimeP2P {
         };
       }
 
-      // Add X25519 encryption public key for E2E messaging
-      profile.metadata = {
-        ...profile.metadata,
-        encryptionPublicKey: this.getEncryptionPublicKeyHex(),
-      };
-
       // Sign profile using Hanko mechanism (same as accountFrames)
       let signedProfile = profile;
       if (firstValidator && this.env.runtimeSeed) {
@@ -845,13 +926,15 @@ export class RuntimeP2P {
     let accepted = 0;
     const acceptedProfiles: Profile[] = [];
     for (const profile of profiles) {
-      const sanitized = sanitizeIncomingProfile(profile);
+      const { profile: sanitized, error: malformedReason } = sanitizeIncomingProfile(profile);
       if (!sanitized) {
         skipped++;
         const entityId = typeof profile === 'object' && profile !== null && 'entityId' in profile
           ? String((profile as { entityId?: unknown }).entityId || 'unknown')
           : 'unknown';
-        console.warn(`P2P_PROFILE_DROPPED_MALFORMED: from=${from} entity=${entityId}`);
+        console.warn(
+          `P2P_PROFILE_DROPPED_MALFORMED: from=${from} entity=${entityId} reason=${malformedReason || 'unknown'}`,
+        );
         continue;
       }
       // Skip profiles we already have at the same or newer timestamp (avoids re-verification)
@@ -946,4 +1029,5 @@ export class RuntimeP2P {
     }
     this.clients = [];
   }
+
 }

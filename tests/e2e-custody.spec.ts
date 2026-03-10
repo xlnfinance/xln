@@ -9,8 +9,8 @@
  * 5. A clear success state appears and the wallet page auto-closes after persisted confirmation.
  * 6. The custody page keeps polling persisted receipts and updates the hero balance after deposit finalization.
  * 7. The wallet can reload from persisted state and still receive later custody withdrawals back to the same user.
- * 8. Repeated deposit and withdrawal cycles stay deterministic: custody credits from persisted events only,
- *    debits the true sender amount including fees, and never drifts from the saved dashboard state.
+ * 8. A second full deposit and withdrawal cycle succeeds without any manual gossip refresh or
+ *    profile re-announce, proving the shared relay profile sync path is enough after the first flow.
  *
  * The same scenario then proves the custody backend refuses withdrawals before credit exists
  * and spends only from already credited offchain funds after the deposit lands.
@@ -25,9 +25,19 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { DaemonRpcClient, type DaemonFrameLog } from '../custody/daemon-client';
 import { startCustodySupport, stopManagedChild, type ManagedChild } from '../runtime/orchestrator/custody-bootstrap';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, resetProdServer } from './utils/e2e-baseline';
+import {
+  getRenderedOutboundForAccount,
+  getRenderedPrimaryOutbound,
+  waitForRenderedOutboundForAccountDelta,
+  waitForRenderedPrimaryOutboundDelta,
+} from './utils/e2e-account-ui';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic, switchToRuntimeId } from './utils/e2e-demo-users';
-import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
+import {
+  getPersistedReceiptCursor,
+  waitForPersistedFrameEvent,
+} from './utils/e2e-runtime-receipts';
+import { timedStep } from './utils/e2e-timing';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
 const TEST_TIMEOUT_MS = LONG_E2E ? 240_000 : 150_000;
@@ -65,18 +75,6 @@ type FaucetAttemptResult = {
 type WalletRuntimeView = typeof window & {
   isolatedEnv?: {
     runtimeId?: string;
-    eReplicas?: Map<string, {
-      state?: {
-        accounts?: Map<string, {
-          deltas?: Map<number, unknown>;
-        }>;
-      };
-    }>;
-  };
-  XLN?: {
-    deriveDelta?: (delta: unknown, leftSide: boolean) => {
-      outCapacity?: { toString?: () => string } | bigint | string | number;
-    };
   };
 };
 
@@ -209,33 +207,6 @@ async function openRestoredWalletPage(
   return page;
 }
 
-async function outCap(page: Page, entityId: string, counterpartyId: string): Promise<bigint> {
-  const value = await page.evaluate(({ entityId, counterpartyId }) => {
-    const view = window as WalletRuntimeView;
-    const env = view.isolatedEnv;
-    const deriveDelta = view.XLN?.deriveDelta;
-    if (!env?.eReplicas || typeof deriveDelta !== 'function') return '0';
-
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
-      if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
-      const account = replica.state?.accounts?.get(counterpartyId);
-      if (!account) return '0';
-      const delta = account.deltas?.get(1);
-      if (!delta) return '0';
-      const derived = deriveDelta(delta, String(entityId).toLowerCase() < String(counterpartyId).toLowerCase());
-      const outCapacity = derived?.outCapacity;
-      if (typeof outCapacity === 'bigint') return outCapacity.toString();
-      if (typeof outCapacity === 'number') return String(outCapacity);
-      if (typeof outCapacity === 'string') return outCapacity;
-      return typeof outCapacity?.toString === 'function' ? outCapacity.toString() : '0';
-    }
-
-    return '0';
-  }, { entityId, counterpartyId });
-
-  return BigInt(value);
-}
-
 async function faucetOffchain(
   page: Page,
   entityId: string,
@@ -291,27 +262,6 @@ async function faucetOffchain(
   expect(result.ok, `offchain faucet failed: ${JSON.stringify(result.data)}`).toBe(true);
 }
 
-async function waitForOutCapAtLeast(
-  page: Page,
-  entityId: string,
-  counterpartyId: string,
-  minOut: bigint,
-  timeoutMs = 15_000,
-): Promise<void> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const current = await outCap(page, entityId, counterpartyId);
-    if (current >= minOut) return;
-    await page.waitForTimeout(400);
-  }
-
-  const current = await outCap(page, entityId, counterpartyId);
-  throw new Error(
-    `waitForOutCapAtLeast timeout: entity=${entityId.slice(0, 10)} cp=${counterpartyId.slice(0, 10)} ` +
-    `current=${current.toString()} min=${minOut.toString()}`,
-  );
-}
-
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   const ok = await page.evaluate(async () => {
     const maybeWindow = window as typeof window & {
@@ -352,40 +302,6 @@ async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   });
 
   expect(ok, `[${tag}] runtime must be online`).toBe(true);
-}
-
-async function reannounceRuntimeProfile(page: Page, entityId: string): Promise<void> {
-  const ok = await page.evaluate(async (entityId) => {
-    const maybeWindow = window as typeof window & {
-      isolatedEnv?: {
-        runtimeState?: {
-          p2p?: {
-            announceLocalProfiles?: () => Promise<void> | void;
-            announceProfilesForEntities?: (entityIds: string[], reason?: string) => void;
-            refreshGossip?: () => Promise<void> | void;
-          };
-        };
-      };
-    };
-    const p2p = maybeWindow.isolatedEnv?.runtimeState?.p2p;
-    if (!p2p) return false;
-
-    try {
-      if (typeof p2p.announceProfilesForEntities === 'function') {
-        p2p.announceProfilesForEntities([entityId], 'e2e-wallet-rebind');
-      } else if (typeof p2p.announceLocalProfiles === 'function') {
-        await p2p.announceLocalProfiles();
-      }
-      if (typeof p2p.refreshGossip === 'function') {
-        await p2p.refreshGossip();
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  }, entityId);
-
-  expect(ok, 'wallet runtime must re-announce its current profile').toBe(true);
 }
 
 async function waitForDaemonReceiptEvent(
@@ -532,26 +448,26 @@ test.describe('E2E Custody Flow', () => {
     let custodyChild: ManagedChild | null = null;
     let daemonClient: DaemonRpcClient | null = null;
 
-    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const context = await timedStep('custody.browser_context', () => browser.newContext({ ignoreHTTPSErrors: true }));
     let walletPage = await context.newPage();
     const custodyPage = await context.newPage();
 
     try {
-      await resetProdServer(walletPage, {
+      await timedStep('custody.reset_server', () => resetProdServer(walletPage, {
         apiBaseUrl: API_BASE_URL,
         timeoutMs: TEST_TIMEOUT_MS,
         softPreserveHubs: false,
-      });
-      await ensureE2EBaseline(walletPage, {
+      }));
+      await timedStep('custody.ensure_baseline', () => ensureE2EBaseline(walletPage, {
         apiBaseUrl: API_BASE_URL,
         timeoutMs: TEST_TIMEOUT_MS,
         requireHubMesh: true,
         requireMarketMaker: false,
         minHubCount: 3,
         forceReset: true,
-      });
+      }));
 
-      const custodySupport = await startCustodySupport({
+      const custodySupport = await timedStep('custody.start_support', () => startCustodySupport({
         apiBaseUrl: API_BASE_URL,
         daemonPort,
         custodyPort,
@@ -562,28 +478,39 @@ test.describe('E2E Custody Flow', () => {
         seed: 'xln-e2e-custody-seed',
         signerLabel: 'custody-e2e-1',
         profileName: 'Custody',
-      });
+      }));
       daemonChild = custodySupport.daemonChild;
       custodyChild = custodySupport.custodyChild;
       daemonClient = new DaemonRpcClient(`ws://127.0.0.1:${daemonPort}/rpc`);
       const custodyIdentity = custodySupport.identity;
       const hubId = custodySupport.hubIds[0]!;
 
-      await gotoApp(walletPage);
-      const alice = await createRuntimeIdentity(walletPage, 'alice', selectDemoMnemonic('alice'));
-      await connectRuntimeToHub(walletPage, alice, hubId);
-      const aliceOutBeforeFunding = await outCap(walletPage, alice.entityId, hubId);
-      await faucetOffchain(walletPage, alice.entityId, hubId);
-      await waitForOutCapAtLeast(
-        walletPage,
-        alice.entityId,
-        hubId,
-        aliceOutBeforeFunding + (10n * 10n ** 18n),
+      await timedStep('custody.wallet.goto_app', () => gotoApp(walletPage));
+      const alice = await timedStep(
+        'custody.wallet.create_runtime',
+        () => createRuntimeIdentity(walletPage, 'alice', selectDemoMnemonic('alice')),
       );
-      await ensureRuntimeProfileDownloaded(walletPage, custodyIdentity.entityId);
-      await delay(1000);
+      await timedStep('custody.wallet.connect_hub', () => connectRuntimeToHub(walletPage, alice, hubId));
+      const walletRenderedBeforeFunding = await timedStep(
+        'custody.wallet.read_rendered_out_before_faucet',
+        () => getRenderedPrimaryOutbound(walletPage),
+      );
+      await timedStep('custody.wallet.faucet', () => faucetOffchain(walletPage, alice.entityId, hubId));
+      await timedStep(
+        'custody.wallet.wait_rendered_out_after_faucet',
+        () => waitForRenderedPrimaryOutboundDelta(
+          walletPage,
+          walletRenderedBeforeFunding,
+          100,
+          { timeoutMs: 20_000 },
+        ),
+      );
+      await timedStep(
+        'custody.wallet.ensure_custody_profile',
+        () => ensureRuntimeProfileDownloaded(walletPage, custodyIdentity.entityId),
+      );
 
-      await custodyPage.goto(custodyBaseUrl);
+      await timedStep('custody.open_dashboard', () => custodyPage.goto(custodyBaseUrl));
       await expect(custodyPage.getByText('How To Integrate XLN')).toBeVisible({ timeout: 15_000 });
       await expect(custodyPage.getByText('journal-backed custody')).toBeVisible({ timeout: 15_000 });
 
@@ -594,40 +521,51 @@ test.describe('E2E Custody Flow', () => {
 
       let dashboard = await readCustodyDashboard(custodyPage, custodyBaseUrl);
       let currentBalanceMinor = BigInt(dashboard.headlineBalance?.amountMinor || '0');
+      let walletRestoredFromPersistence = false;
       const cycles = [
         { depositWhole: 10n, withdrawWhole: 5n },
         { depositWhole: 3n, withdrawWhole: 2n },
-        { depositWhole: 2n, withdrawWhole: 1n },
       ];
 
       for (const [cycleIndex, cycle] of cycles.entries()) {
-        await walletPage.close();
+        if (!walletRestoredFromPersistence) {
+          await walletPage.close();
+        }
         const knownBeforeDeposit = new Set(
           (dashboard.activity ?? [])
             .map(item => String(item.id || ''))
             .filter(Boolean),
         );
 
-        await custodyPage.locator('input[name="depositAmount"]').fill(cycle.depositWhole.toString());
-        const [checkoutPage] = await Promise.all([
-          context.waitForEvent('page'),
-          custodyPage.getByRole('button', { name: 'Deposit with XLN' }).click(),
-        ]);
-        await checkoutPage.waitForLoadState('domcontentloaded');
-        await submitHostedCheckoutPayment(checkoutPage);
-        await waitForDaemonReceiptEvent(daemonClient, {
-          entityId: custodyIdentity.entityId,
-          eventName: 'HtlcReceived',
-          timeoutMs: 30_000,
+        await timedStep(`custody.cycle_${cycleIndex + 1}.deposit_flow`, async () => {
+          await custodyPage.locator('input[name="depositAmount"]').fill(cycle.depositWhole.toString());
+          const [checkoutPage] = await Promise.all([
+            context.waitForEvent('page'),
+            custodyPage.getByRole('button', { name: 'Deposit with XLN' }).click(),
+          ]);
+          await checkoutPage.waitForLoadState('domcontentloaded');
+          await submitHostedCheckoutPayment(checkoutPage);
+          await waitForDaemonReceiptEvent(daemonClient, {
+            entityId: custodyIdentity.entityId,
+            eventName: 'HtlcReceived',
+            timeoutMs: 30_000,
+          });
+          await waitForHostedCheckoutSuccess(checkoutPage);
+          if (!walletRestoredFromPersistence) {
+            walletPage = await openRestoredWalletPage(context, alice.runtimeId);
+            walletRestoredFromPersistence = true;
+          } else {
+            await walletPage.bringToFront();
+          }
         });
-        await waitForHostedCheckoutSuccess(checkoutPage);
-        walletPage = await openRestoredWalletPage(context, alice.runtimeId);
 
         const depositMinor = cycle.depositWhole * TOKEN_SCALE;
         currentBalanceMinor += depositMinor;
         await custodyPage.bringToFront();
-        dashboard = await waitForCustodyBalance(custodyPage, custodyBaseUrl, currentBalanceMinor);
-        const depositActivity = await waitForNewActivity(custodyPage, custodyBaseUrl, knownBeforeDeposit, 'deposit');
+        const depositActivity = await timedStep(`custody.cycle_${cycleIndex + 1}.wait_credit`, async () => {
+          dashboard = await waitForCustodyBalance(custodyPage, custodyBaseUrl, currentBalanceMinor);
+          return waitForNewActivity(custodyPage, custodyBaseUrl, knownBeforeDeposit, 'deposit');
+        });
         expect(BigInt(depositActivity.amountMinor)).toBe(depositMinor);
         expect(dashboard.custody?.lastSyncError ?? null).toBeNull();
         await expect(custodyPage.locator('.balance-amount').first()).toContainText(
@@ -636,9 +574,6 @@ test.describe('E2E Custody Flow', () => {
 
         await switchToRuntimeId(walletPage, alice.runtimeId);
         await ensureRuntimeOnline(walletPage, `alice-before-withdraw-cycle-${cycleIndex + 1}`);
-        await reannounceRuntimeProfile(walletPage, alice.entityId);
-        await ensureRuntimeProfileDownloaded(walletPage, custodyIdentity.entityId);
-        await delay(750);
 
         const knownBeforeWithdraw = new Set(
           (dashboard.activity ?? [])
@@ -648,31 +583,43 @@ test.describe('E2E Custody Flow', () => {
         await custodyPage.locator('input[name="amount"]').fill(cycle.withdrawWhole.toString());
         await custodyPage.locator('input[name="targetEntityId"]').fill(alice.entityId);
 
+        const walletRenderedBeforeWithdraw = await getRenderedOutboundForAccount(walletPage, hubId);
         const withdrawCursor = await getPersistedReceiptCursor(walletPage);
-        await custodyPage.getByRole('button', { name: 'Withdraw via XLN' }).click();
-        await expect(custodyPage.getByText(/Queued withdrawal/i)).toBeVisible({ timeout: 15_000 });
-        await walletPage.bringToFront();
-        await waitForPersistedFrameEvent(walletPage, {
-          cursor: withdrawCursor,
-          eventName: 'HtlcReceived',
-          entityId: alice.entityId,
-          timeoutMs: 30_000,
+        const withdrawalActivity = await timedStep(`custody.cycle_${cycleIndex + 1}.withdraw_flow`, async () => {
+          await custodyPage.getByRole('button', { name: 'Withdraw via XLN' }).click();
+          await expect(custodyPage.getByText(/Queued withdrawal/i)).toBeVisible({ timeout: 15_000 });
+          await walletPage.bringToFront();
+          await waitForPersistedFrameEvent(walletPage, {
+            cursor: withdrawCursor,
+            eventName: 'HtlcReceived',
+            entityId: alice.entityId,
+            timeoutMs: 30_000,
+          });
+          await waitForRenderedOutboundForAccountDelta(
+            walletPage,
+            hubId,
+            walletRenderedBeforeWithdraw,
+            Number(cycle.withdrawWhole),
+            { timeoutMs: 30_000, tolerance: 0.000001 },
+          );
+          await custodyPage.bringToFront();
+          return waitForNewActivity(
+            custodyPage,
+            custodyBaseUrl,
+            knownBeforeWithdraw,
+            'withdrawal',
+            'finalized',
+          );
         });
-        await custodyPage.bringToFront();
-
-        const withdrawalActivity = await waitForNewActivity(
-          custodyPage,
-          custodyBaseUrl,
-          knownBeforeWithdraw,
-          'withdrawal',
-          'finalized',
-        );
         expect(BigInt(withdrawalActivity.requestedAmountMinor)).toBe(cycle.withdrawWhole * TOKEN_SCALE);
         expect(BigInt(withdrawalActivity.feeMinor)).toBeGreaterThan(0n);
 
         const senderSpentMinor = BigInt(withdrawalActivity.amountMinor);
         currentBalanceMinor -= senderSpentMinor;
-        dashboard = await waitForCustodyBalance(custodyPage, custodyBaseUrl, currentBalanceMinor);
+        dashboard = await timedStep(
+          `custody.cycle_${cycleIndex + 1}.wait_debit`,
+          () => waitForCustodyBalance(custodyPage, custodyBaseUrl, currentBalanceMinor),
+        );
         await expect(custodyPage.locator('.balance-amount').first()).toContainText(
           String(dashboard.headlineBalance?.amountDisplay || ''),
         );

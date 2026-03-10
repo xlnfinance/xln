@@ -3047,6 +3047,12 @@ const resolveRpcPaymentRoute = async (
   }
 
   try {
+    await env.runtimeState?.p2p?.syncProfiles?.();
+  } catch {
+    // best effort prefetch only
+  }
+
+  try {
     await ensureGossipProfiles(env, [sourceEntityId, targetEntityId]);
   } catch {
     // best effort prefetch only

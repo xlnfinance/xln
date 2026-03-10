@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
-import { activeRuntimeId, runtimes } from './runtimeStore';
+import { activeRuntimeId, runtimes, runtimeOperations } from './runtimeStore';
 import type {
   XLNModule,
   Env,
@@ -21,16 +21,12 @@ let XLN: XLNModule | null = null;
 let xlnLoadPromise: Promise<XLNModule> | null = null;
 export const xlnInstance = writable<XLNModule | null>(null);
 let unregisterEnvChange: (() => void) | null = null;
-let globalDebugExposed = false;
-const REQUIRED_RUNTIME_SCHEMA_VERSION = 2;
+const REQUIRED_RUNTIME_SCHEMA_VERSION = 3;
 const DEV_SESSION_STORAGE_KEY = 'xln-dev-session-id';
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 let devSessionMonitor: ReturnType<typeof setInterval> | null = null;
 
 type DebugWindow = Window & typeof globalThis & {
-  XLN?: XLNModule;
-  xlnEnv?: typeof xlnEnvironment | Env;
-  xlnErrorLog?: (message: string, source: string, details?: unknown) => void;
   vaultOperations?: typeof import('./vaultStore').vaultOperations;
   runtimesState?: typeof import('./vaultStore').runtimesState;
 };
@@ -102,7 +98,6 @@ async function getXLN(): Promise<XLNModule> {
     }
     XLN = loaded;
     xlnInstance.set(XLN);
-    exposeGlobalDebugObjects();
     return XLN;
   })();
 
@@ -111,41 +106,6 @@ async function getXLN(): Promise<XLNModule> {
   } catch (err) {
     xlnLoadPromise = null;
     throw err;
-  }
-}
-
-/**
- * Expose XLN objects globally for console debugging
- */
-function exposeGlobalDebugObjects() {
-  if (typeof window !== 'undefined' && XLN) {
-    const debugWindow = window as DebugWindow;
-    debugWindow.XLN = XLN;
-    debugWindow.xlnEnv = xlnEnvironment;
-    debugWindow.xlnErrorLog = (message: string, source: string, details?: unknown) => {
-      errorLog.log(message, source, details);
-    };
-
-    if (!globalDebugExposed) {
-      globalDebugExposed = true;
-      console.log('🌍 GLOBAL DEBUG: XLN objects exposed');
-      console.log('  window.XLN - All runtime functions (deriveDelta, isLeft, etc.)');
-      console.log('  window.xlnEnv - Reactive environment store');
-      console.log('  window.xlnErrorLog - Logs to Settings error panel');
-      console.log('  Usage: window.XLN.deriveDelta(delta, true).ascii');
-      console.log('  Usage: Get current env value with xlnEnv subscribe pattern');
-    }
-
-    // Ensure vault controls are reachable in production E2E/debug sessions
-    // even before RuntimeCreation panel imports vaultStore.
-    import('./vaultStore')
-      .then(({ vaultOperations, runtimesState }) => {
-        debugWindow.vaultOperations = vaultOperations;
-        debugWindow.runtimesState = runtimesState;
-      })
-      .catch(err => {
-        console.warn('[xlnStore] Failed to expose vaultStore globals:', err);
-      });
   }
 }
 
@@ -361,33 +321,6 @@ export const entityPositions = writable<Map<string, RelativeEntityPosition>>(new
 // Track if XLN is already initialized to prevent data loss
 let isInitialized = false;
 
-type BootstrapJurisdictionConfig = {
-  chainId: number;
-  rpc: string;
-  contracts: {
-    depository: string;
-    entityProvider: string;
-    account?: string;
-    deltaTransformer?: string;
-  };
-};
-
-const normalizeAddress = (value: unknown): string => String(value || '').trim().toLowerCase();
-
-const waitForCondition = async (
-  check: () => boolean,
-  label: string,
-  timeoutMs = 30_000,
-  intervalMs = 100,
-): Promise<void> => {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    if (check()) return;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error(`[xlnStore] Timeout waiting for condition: ${label}`);
-};
-
 const resolveConfiguredApiBase = (baseOrigin: string): string => {
   if (typeof window === 'undefined') return baseOrigin;
   const fromWindow = (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__;
@@ -399,153 +332,6 @@ const resolveConfiguredApiBase = (baseOrigin: string): string => {
     // ignore storage errors
   }
   return baseOrigin;
-};
-
-const waitForServerRuntimeReady = async (baseOrigin: string, timeoutMs = 30_000): Promise<void> => {
-  const url = new URL('/api/health', resolveConfiguredApiBase(baseOrigin)).toString();
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (payload?.reset?.inProgress !== true && payload?.system?.runtime === true) return;
-      }
-    } catch {
-      // Retry until timeout.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error('[xlnStore] SERVER_RUNTIME_NOT_READY');
-};
-
-const fetchBootstrapJurisdictionConfig = async (baseOrigin: string): Promise<BootstrapJurisdictionConfig> => {
-  const apiBase = resolveConfiguredApiBase(baseOrigin);
-  const candidates = apiBase !== baseOrigin
-    ? Array.from(new Set([
-        new URL('/api/jurisdictions', apiBase).toString(),
-        new URL('/api/jurisdictions', baseOrigin).toString(),
-      ]))
-    : [new URL('/api/jurisdictions', apiBase).toString()];
-
-  let lastError: Error | null = null;
-  for (const url of candidates) {
-    try {
-      const response = await fetch(url, { cache: 'no-store' });
-      if (!response.ok) {
-        lastError = new Error(`[xlnStore] Failed to fetch jurisdiction config: HTTP ${response.status} url=${url}`);
-        continue;
-      }
-      const payload = await response.json();
-      const first = payload?.jurisdictions?.arrakis ?? Object.values(payload?.jurisdictions ?? {})[0];
-      if (!first || typeof first !== 'object') {
-        lastError = new Error(`[xlnStore] jurisdictions payload missing primary jurisdiction: url=${url}`);
-        continue;
-      }
-      return first as BootstrapJurisdictionConfig;
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-    }
-  }
-  throw lastError ?? new Error('[xlnStore] /api/jurisdictions missing primary jurisdiction');
-};
-
-const resolveBootstrapRpcUrl = (rpc: string, baseOrigin: string): string => {
-  if (rpc.startsWith('/rpc/')) return new URL('/rpc', baseOrigin).toString();
-  if (rpc.startsWith('http')) {
-    try {
-      const parsed = new URL(rpc);
-      if (parsed.pathname.startsWith('/rpc/')) return `${parsed.origin}/rpc`;
-      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '0.0.0.0') {
-        return new URL('/rpc', baseOrigin).toString();
-      }
-    } catch {
-      // Fall through.
-    }
-  }
-  return rpc.startsWith('http') ? rpc : new URL(rpc, baseOrigin).toString();
-};
-
-const hasLiveJurisdictionAdapter = (replica: unknown): boolean => {
-  const candidate = replica as {
-    jadapter?: {
-      addresses?: { depository?: string; entityProvider?: string };
-      depository?: unknown;
-      entityProvider?: unknown;
-    };
-  } | null;
-  return Boolean(
-    candidate?.jadapter?.addresses?.depository &&
-      candidate?.jadapter?.addresses?.entityProvider &&
-      candidate?.jadapter?.depository &&
-      candidate?.jadapter?.entityProvider,
-  );
-};
-
-const ensureBootstrapJurisdictionFresh = async (xln: XLNModule, env: Env): Promise<void> => {
-  if (typeof window === 'undefined') return;
-  const baseOrigin = window.location.origin;
-  await waitForServerRuntimeReady(baseOrigin);
-  const config = await fetchBootstrapJurisdictionConfig(baseOrigin);
-  const rpcUrl = resolveBootstrapRpcUrl(config.rpc, baseOrigin);
-  const jurisdictionName = String(env.activeJurisdiction || 'Testnet');
-  const currentReplica = env.jReplicas?.get(jurisdictionName);
-  const currentDepository = normalizeAddress(currentReplica?.depositoryAddress || currentReplica?.contracts?.depository);
-  const currentEntityProvider = normalizeAddress(currentReplica?.entityProviderAddress || currentReplica?.contracts?.entityProvider);
-  const targetDepository = normalizeAddress(config.contracts.depository);
-  const targetEntityProvider = normalizeAddress(config.contracts.entityProvider);
-  const currentRpc = String(currentReplica?.rpcs?.[0] || '');
-
-  const needsRepair =
-    !currentReplica ||
-    !hasLiveJurisdictionAdapter(currentReplica) ||
-    currentDepository !== targetDepository ||
-    currentEntityProvider !== targetEntityProvider ||
-    currentRpc !== rpcUrl;
-
-  if (!needsRepair) return;
-
-  console.warn(
-    `[xlnStore] Repairing bootstrap jurisdiction ${jurisdictionName}: ` +
-      `dep=${currentDepository || 'none'}=>${targetDepository} ` +
-      `ep=${currentEntityProvider || 'none'}=>${targetEntityProvider}`,
-  );
-
-  xln.enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importJ',
-      data: {
-        name: jurisdictionName,
-        chainId: Number(config.chainId),
-        ticker: 'USDC',
-        rpcs: [rpcUrl],
-        contracts: config.contracts,
-      },
-    }],
-    entityInputs: [],
-  });
-
-  await waitForCondition(() => {
-    const repaired = env.jReplicas?.get?.(jurisdictionName) as
-      | {
-          depositoryAddress?: string;
-          entityProviderAddress?: string;
-          contracts?: { depository?: string; entityProvider?: string };
-          jadapter?: {
-            addresses?: { depository?: string; entityProvider?: string };
-            depository?: unknown;
-            entityProvider?: unknown;
-          };
-        }
-      | undefined;
-    const repairedDepository = normalizeAddress(repaired?.depositoryAddress || repaired?.contracts?.depository);
-    const repairedEntityProvider = normalizeAddress(repaired?.entityProviderAddress || repaired?.contracts?.entityProvider);
-    return (
-      repairedDepository === targetDepository &&
-      repairedEntityProvider === targetEntityProvider &&
-      hasLiveJurisdictionAdapter(repaired)
-    );
-  }, `repairJurisdiction:${jurisdictionName}`, 45_000);
 };
 
 // Helper functions for common patterns (not wrappers)
@@ -560,11 +346,6 @@ export async function initializeXLN(): Promise<Env> {
       return currentEnv;
     }
   }
-
-  // Slow-start warning only; do not force error-screen while initialization is still progressing.
-  const loadingWarningTimeout = setTimeout(() => {
-    console.warn('⚠️ XLN initialization still running after 10s...');
-  }, 10000);
 
   try {
     isLoading.set(true);
@@ -592,9 +373,7 @@ export async function initializeXLN(): Promise<Env> {
       currentHeight.set(env?.height || 0);
 
       // Sync to runtimeStore (local runtime)
-      import('./runtimeStore').then(({ runtimeOperations }) => {
-        runtimeOperations.updateLocalEnv(env);
-      });
+      runtimeOperations.updateLocalEnv(env);
 
       // Extract and persist entity positions from eReplicas (positions are immutable)
       // Positions are RELATIVE to j-machine - store jReplica reference for world position calculation
@@ -619,14 +398,10 @@ export async function initializeXLN(): Promise<Env> {
       }
 
       // Update window for e2e testing
-      if (typeof window !== 'undefined') {
-        (window as DebugWindow).xlnEnv = env;
-      }
     };
 
     // Load from IndexedDB - main() handles DB timeout internally
     const env = await xln.main();
-    await ensureBootstrapJurisdictionFresh(xln, env);
 
     // Register callback for THIS env instance (runtime API is env-scoped)
     if (unregisterEnvChange) {
@@ -639,9 +414,7 @@ export async function initializeXLN(): Promise<Env> {
     onEnvChange(env);
 
     // Sync to runtimeStore (local runtime)
-    import('./runtimeStore').then(({ runtimeOperations }) => {
-      runtimeOperations.updateLocalEnv(env);
-    });
+    runtimeOperations.updateLocalEnv(env);
 
     // Extract positions from initial load as well
     // Positions are RELATIVE to j-machine - store jReplica reference for world position calculation
@@ -670,19 +443,10 @@ export async function initializeXLN(): Promise<Env> {
     // P2P is started per-runtime in vaultStore.createRuntime() and initialize()
     // No need to start P2P on xlnStore's env — it's not a runtime env
 
-    // Expose to window for e2e testing
-    if (typeof window !== 'undefined') {
-      (window as DebugWindow).xlnEnv = env;
-    }
-
-    console.log('✅ XLN Environment initialized');
     isInitialized = true;
     startP2PPoll();
-
-    clearTimeout(loadingWarningTimeout);
     return env;
   } catch (err) {
-    clearTimeout(loadingWarningTimeout);
     console.error('🚨 XLN initialization failed:', err);
 
     // Log to persistent error store

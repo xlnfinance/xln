@@ -18,8 +18,6 @@
 
   // Initialize runtime on mount
   onMount(async () => {
-    console.log('🚀 Initializing XLN application in /app...');
-
     try {
       await prepareDevSession();
 
@@ -37,8 +35,6 @@
 
       // Initialize time machine
       timeOperations.initialize();
-
-      console.log('✅ XLN application initialized');
     } catch (err) {
       console.error('❌ Failed to initialize XLN:', err);
       error.set((err as Error)?.message || 'Initialization failed');

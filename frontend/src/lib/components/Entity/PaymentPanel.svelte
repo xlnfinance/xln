@@ -50,6 +50,7 @@
   let profileExpanded = false;
   let serverEntityNames = new Map<string, string>();
   let paymentPanelEl: HTMLDivElement | null = null;
+  let routesPanelEl: HTMLDivElement | null = null;
   let refreshingRecipientOptions = false;
   let hostedCheckoutMode = false;
   let hostedCheckoutRouteKey = '';
@@ -96,6 +97,8 @@
   };
   type RuntimeP2PController = {
     close?: () => void;
+    syncProfiles?: () => Promise<boolean>;
+    refreshGossip?: () => Promise<void> | void;
   };
   type RuntimeStateEnv = Env & {
     runtimeState?: {
@@ -344,7 +347,11 @@
   async function scrollHostedCheckoutIntoView(): Promise<void> {
     if (!hostedCheckoutMode) return;
     await tick();
-    paymentPanelEl?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    if (routesPanelEl && routes.length > 0) {
+      routesPanelEl.scrollIntoView({ behavior: 'smooth', block: 'end', inline: 'nearest' });
+      return;
+    }
+    paymentPanelEl?.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
   }
 
   function resetQuotedRoutes(): void {
@@ -653,26 +660,14 @@
       for (const [replicaKey, replica] of currentReplicas.entries()) {
         const [replicaEntityId] = replicaKey.split(':');
         if (normalizeEntityId(replicaEntityId) !== entityNorm) continue;
-        const localCandidates = [
-          replica?.state?.cryptoPublicKey,
-          replica?.state?.encryptionPublicKey,
-        ];
-        for (const candidate of localCandidates) {
-          const normalized = normalizeEnvelopeKey(candidate);
-          if (normalized) return normalized;
-        }
+        const normalized = normalizeEnvelopeKey(replica.state.entityEncPubKey);
+        if (normalized) return normalized;
       }
     }
     const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === entityNorm);
     if (!profile) return null;
-    const gossipCandidates = [
-      profile.metadata.cryptoPublicKey,
-      profile.metadata.encryptionPublicKey,
-    ];
-    for (const candidate of gossipCandidates) {
-      const normalized = normalizeEnvelopeKey(candidate);
-      if (normalized) return normalized;
-    }
+    const normalized = normalizeEnvelopeKey(profile.metadata.entityEncPubKey);
+    if (normalized) return normalized;
     return null;
   }
 
@@ -754,6 +749,12 @@
     const env = currentEnv;
     if (!env) return;
     const xln = await getXLN();
+    try {
+      const synced = await env.runtimeState?.p2p?.syncProfiles?.();
+      if (synced) return;
+    } catch {
+      // fall through to targeted fetch / refresh loop
+    }
     if (targetEntities.length > 0 && typeof xln.ensureGossipProfiles === 'function') {
       emitUiDebugEvent('PAYMENT_PREFLIGHT_GOSSIP_FETCH', `Fetching gossip profiles (${reason})`, {
         targetEntities,
@@ -954,9 +955,21 @@
     }
 
     try {
-      await getXLN();
+      const xln = await getXLN();
       const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
+      try {
+        await env.runtimeState?.p2p?.syncProfiles?.();
+      } catch {
+        // best effort only
+      }
+      if (typeof xln.ensureGossipProfiles === 'function') {
+        try {
+          await xln.ensureGossipProfiles(env, [entityId, targetEntityId]);
+        } catch {
+          // best effort only
+        }
+      }
       await ensureRecipientProfileReady();
 
       const amountInSmallestUnit = parseAmountToWei(amount, getTokenDecimals(tokenId));
@@ -1568,7 +1581,7 @@
   </div>
 
   {#if routes.length > 0}
-    <div class="routes">
+    <div bind:this={routesPanelEl} class="routes">
       <div class="routes-header">
         <h4>Routes ({routes.length})</h4>
         <div class="route-controls">

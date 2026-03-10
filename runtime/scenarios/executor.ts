@@ -303,26 +303,13 @@ async function handleImport(
     context.entityMapping.set(scenarioId, result.entityId);
     console.log(`  ✅ import scenario=${scenarioId} → entity#${result.entityNumber} (${result.entityId.slice(0, 10)}...)`);
 
-    // Store position in gossip profile if provided
+    let position: { x: number; y: number; z: number } | undefined;
     if (positionData && ('x' in positionData || 'y' in positionData || 'z' in positionData)) {
-      const position = {
+      position = {
         x: parseFloat(positionData['x'] || '0'),
         y: parseFloat(positionData['y'] || '0'),
         z: parseFloat(positionData['z'] || '0'),
       };
-
-      // Store in gossip layer for visualization (persisted in snapshots)
-      env.gossip?.announce({
-        entityId: result.entityId,
-        capabilities: [],
-        hubs: [],
-        metadata: {
-          name: `Entity-${scenarioId}`,
-          avatar: '',
-          position,
-        }
-      });
-
       console.log(`  📍 Positioned at (${position.x}, ${position.y}, ${position.z})`);
     }
 
@@ -334,6 +321,8 @@ async function handleImport(
       data: {
         config: result.config,
         isProposer: true,
+        profileName: `Entity-${scenarioId}`,
+        ...(position ? { position } : {}),
       },
     });
   }
@@ -466,24 +455,11 @@ async function handleGrid(
 
     const pos = positions.get(gridCoord);
 
-    // Store in gossip for profile display
-    if (pos) {
-      env.gossip?.announce({
-        entityId: result.entityId,
-        capabilities: [],
-        hubs: [],
-        metadata: {
-          name: entityDef.name,
-          avatar: '',
-          position: pos,
-        }
-      });
-    }
-
     // Include position in runtimeTx for replica state
     const txData: any = {
       config: result.config,
       isProposer: true,
+      profileName: entityDef.name,
     };
     if (pos) {
       txData.position = pos;
@@ -629,18 +605,6 @@ async function handleLazyGrid(
 
         const pos = { x: x * spacing, y: y * spacing, z: z * spacing };
 
-        // Announce to gossip for visualization (no blockchain)
-        env.gossip?.announce({
-          entityId,
-          capabilities: [],
-          hubs: [],
-          metadata: {
-            name: gridCoord.slice(0, 4), // First 4 chars for lazy entities
-            avatar: '',
-            position: pos,
-          }
-        });
-
         // Create in-memory replica (no blockchain registration)
         runtimeTxs.push({
           type: 'importReplica' as const,
@@ -653,6 +617,7 @@ async function handleLazyGrid(
               mode: 'proposer-based' as const,
             },
             isProposer: true,
+            profileName: gridCoord.slice(0, 4),
             position: pos,
           },
         });

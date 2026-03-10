@@ -42,6 +42,7 @@ export type RuntimeWsClientOptions = {
   useHelloAuth?: boolean; // Optional transport hardening; disabled by default
   encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
+  onPeerEncryptionKey?: (runtimeId: string, pubKeyHex: string) => void;
   onRuntimeInput?: (from: string, input: RuntimeInput) => Promise<void> | void;
   onEntityInput?: (from: string, input: RoutedEntityInput) => Promise<void> | void;
   onGossipRequest?: (from: string, payload: unknown) => Promise<void> | void;
@@ -251,10 +252,15 @@ export class RuntimeWsClient {
     const normalizedReason = String(reason || '').toLowerCase();
     const isDuplicateRuntime = code === 4009 || normalizedReason.includes('duplicate-runtime');
     if (isDuplicateRuntime) {
-      this.closed = true;
+      const browserStandby = typeof document !== 'undefined';
+      if (!browserStandby) {
+        this.closed = true;
+      }
       console.warn(
         `[WS] Duplicate runtime session for ${this.options.runtimeId} on ${this.options.url}; ` +
-        'stopping auto-reconnect for this client',
+        (browserStandby
+          ? 'entering standby until this tab is visible again'
+          : 'stopping auto-reconnect for this client'),
       );
       return false;
     }
@@ -315,6 +321,10 @@ export class RuntimeWsClient {
     if (msg.type === 'error') {
       this.options.onError?.(new Error(msg.error || 'Unknown error'));
       return;
+    }
+
+    if (typeof msg.from === 'string' && typeof msg.fromEncryptionPubKey === 'string') {
+      this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
     }
 
     if (msg.type === 'runtime_input' && msg.payload && msg.from) {
@@ -518,6 +528,19 @@ export class RuntimeWsClient {
 
   isOpen(): boolean {
     return !!this.ws && 'readyState' in this.ws && this.ws.readyState === 1;
+  }
+
+  pause() {
+    this.connecting = false;
+    this.suppressNextClose = true;
+    this.reconnectAttempts = 0;
+    this.nextReconnectAt = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.ws?.close();
+    this.ws = null;
   }
 
   close() {

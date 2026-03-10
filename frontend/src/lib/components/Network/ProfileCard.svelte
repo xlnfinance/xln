@@ -117,11 +117,11 @@
       </div>
     {/if}
 
-    {#if profile.hubs && profile.hubs.length > 0}
+    {#if profile.publicAccounts && profile.publicAccounts.length > 0}
       <div class="hubs-section">
         <h4>🔗 Connected Hubs</h4>
         <div class="hubs-list">
-          {#each profile.hubs as hub}
+          {#each profile.publicAccounts as hub}
             <span class="hub-tag">{hub}</span>
           {/each}
         </div>

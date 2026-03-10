@@ -272,6 +272,8 @@
 <div
   class="account-preview"
   class:selected={isSelected}
+  data-counterparty-id={counterpartyId}
+  data-owner-entity-id={entityId}
   on:click={handleClick}
   on:keydown={(e) => e.key === 'Enter' && handleClick()}
   role="button"
