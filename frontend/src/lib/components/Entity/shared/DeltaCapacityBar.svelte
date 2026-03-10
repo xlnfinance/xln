@@ -10,7 +10,7 @@
 
   const CENTER_GAP_PX = 10;
   const SIDES_GAP_PX = 14;
-  const MIN_VISIBLE_SIDE_PX = 4;
+  const MIN_VISIBLE_SIDE_PX = 3;
 
   $: outTotal = derived.outOwnCredit + derived.outCollateral + derived.outPeerCredit;
   $: inTotal = derived.inOwnCredit + derived.inCollateral + derived.inPeerCredit;
@@ -24,14 +24,16 @@
   $: inVisualOwnUsd = visualScale?.inOwnCreditUsd ?? 0;
   $: inVisualCollUsd = visualScale?.inCollateralUsd ?? 0;
   $: inVisualCreditUsd = visualScale?.inPeerCreditUsd ?? 0;
+  $: outSegmentTotalUsd = outVisualOwnUsd + outVisualCollUsd + outVisualDebtUsd;
+  $: inSegmentTotalUsd = inVisualOwnUsd + inVisualCollUsd + inVisualCreditUsd;
   $: hasVisualScale = visualScale !== null;
   $: usdPerPx = $settings.accountBarUsdPerPx ?? 100;
-  $: outWidthPx = outCapacityUsd > 0 ? Math.max(MIN_VISIBLE_SIDE_PX, outCapacityUsd / usdPerPx) : 0;
-  $: inWidthPx = inCapacityUsd > 0 ? Math.max(MIN_VISIBLE_SIDE_PX, inCapacityUsd / usdPerPx) : 0;
-  $: outCenterWidthStyle = `width:min(${outWidthPx}px, calc(50% - ${CENTER_GAP_PX / 2}px))`;
-  $: inCenterWidthStyle = `width:min(${inWidthPx}px, calc(50% - ${CENTER_GAP_PX / 2}px))`;
-  $: outSideWidthStyle = `width:min(${outWidthPx}px, calc(50% - ${SIDES_GAP_PX / 2}px))`;
-  $: inSideWidthStyle = `width:min(${inWidthPx}px, calc(50% - ${SIDES_GAP_PX / 2}px))`;
+  $: outWidthPx = widthPxForUsd(outCapacityUsd, usdPerPx);
+  $: inWidthPx = widthPxForUsd(inCapacityUsd, usdPerPx);
+  $: outCenterWidthStyle = shellWidthStyle(outWidthPx, CENTER_GAP_PX);
+  $: inCenterWidthStyle = shellWidthStyle(inWidthPx, CENTER_GAP_PX);
+  $: outSideWidthStyle = shellWidthStyle(outWidthPx, SIDES_GAP_PX);
+  $: inSideWidthStyle = shellWidthStyle(inWidthPx, SIDES_GAP_PX);
 
   function pctOf(value: bigint, base: bigint): number {
     return base > 0n ? Number((value * 10000n) / base) / 100 : 0;
@@ -39,6 +41,15 @@
 
   function pctOfNumber(value: number, base: number): number {
     return base > 0 ? (value / base) * 100 : 0;
+  }
+
+  function widthPxForUsd(valueUsd: number, usdPerPixel: number): number {
+    if (!Number.isFinite(valueUsd) || valueUsd <= 0 || !Number.isFinite(usdPerPixel) || usdPerPixel <= 0) return 0;
+    return Math.max(MIN_VISIBLE_SIDE_PX, Math.round((valueUsd / usdPerPixel) * 100) / 100);
+  }
+
+  function shellWidthStyle(widthPx: number, gapPx: number): string {
+    return `width:min(${widthPx}px, calc(50% - ${gapPx / 2}px))`;
   }
 </script>
 
@@ -56,14 +67,14 @@
 
       {#if outWidthPx > 0}
         <div class="shell out center-shell" style={outCenterWidthStyle}>
-          {#if outVisualOwnUsd > 0}<div class="seg credit" style={`width:${pctOfNumber(outVisualOwnUsd, outTotal > 0n ? (outVisualOwnUsd + outVisualCollUsd + outVisualDebtUsd) : 0)}%`}></div>{/if}
-          {#if outVisualCollUsd > 0}<div class="seg coll" style={`width:${pctOfNumber(outVisualCollUsd, outVisualOwnUsd + outVisualCollUsd + outVisualDebtUsd)}%`}></div>{/if}
+          {#if outVisualOwnUsd > 0}<div class="seg credit" style={`width:${pctOfNumber(outVisualOwnUsd, outSegmentTotalUsd)}%`}></div>{/if}
+          {#if outVisualCollUsd > 0}<div class="seg coll" style={`width:${pctOfNumber(outVisualCollUsd, outSegmentTotalUsd)}%`}></div>{/if}
           {#if outVisualDebtUsd > 0}
             <div
               class="seg debt"
               class:striped={pendingOutDebtMode === 'pending'}
               class:settling={pendingOutDebtMode === 'settling'}
-              style={`width:${pctOfNumber(outVisualDebtUsd, outVisualOwnUsd + outVisualCollUsd + outVisualDebtUsd)}%`}
+              style={`width:${pctOfNumber(outVisualDebtUsd, outSegmentTotalUsd)}%`}
             ></div>
           {/if}
         </div>
@@ -71,22 +82,22 @@
 
       {#if inWidthPx > 0}
         <div class="shell in center-shell" style={inCenterWidthStyle}>
-          {#if inVisualOwnUsd > 0}<div class="seg debt" style={`width:${pctOfNumber(inVisualOwnUsd, inVisualOwnUsd + inVisualCollUsd + inVisualCreditUsd)}%`}></div>{/if}
-          {#if inVisualCollUsd > 0}<div class="seg coll" style={`width:${pctOfNumber(inVisualCollUsd, inVisualOwnUsd + inVisualCollUsd + inVisualCreditUsd)}%`}></div>{/if}
-          {#if inVisualCreditUsd > 0}<div class="seg credit" style={`width:${pctOfNumber(inVisualCreditUsd, inVisualOwnUsd + inVisualCollUsd + inVisualCreditUsd)}%`}></div>{/if}
+          {#if inVisualOwnUsd > 0}<div class="seg debt" style={`width:${pctOfNumber(inVisualOwnUsd, inSegmentTotalUsd)}%`}></div>{/if}
+          {#if inVisualCollUsd > 0}<div class="seg coll" style={`width:${pctOfNumber(inVisualCollUsd, inSegmentTotalUsd)}%`}></div>{/if}
+          {#if inVisualCreditUsd > 0}<div class="seg credit" style={`width:${pctOfNumber(inVisualCreditUsd, inSegmentTotalUsd)}%`}></div>{/if}
         </div>
       {/if}
     {:else}
       {#if outWidthPx > 0}
         <div class="shell out side-shell" style={outSideWidthStyle}>
-          {#if outVisualOwnUsd > 0}<div class="seg credit" style={`width:${pctOfNumber(outVisualOwnUsd, outVisualOwnUsd + outVisualCollUsd + outVisualDebtUsd)}%`}></div>{/if}
-          {#if outVisualCollUsd > 0}<div class="seg coll" style={`width:${pctOfNumber(outVisualCollUsd, outVisualOwnUsd + outVisualCollUsd + outVisualDebtUsd)}%`}></div>{/if}
+          {#if outVisualOwnUsd > 0}<div class="seg credit" style={`width:${pctOfNumber(outVisualOwnUsd, outSegmentTotalUsd)}%`}></div>{/if}
+          {#if outVisualCollUsd > 0}<div class="seg coll" style={`width:${pctOfNumber(outVisualCollUsd, outSegmentTotalUsd)}%`}></div>{/if}
           {#if outVisualDebtUsd > 0}
             <div
               class="seg debt"
               class:striped={pendingOutDebtMode === 'pending'}
               class:settling={pendingOutDebtMode === 'settling'}
-              style={`width:${pctOfNumber(outVisualDebtUsd, outVisualOwnUsd + outVisualCollUsd + outVisualDebtUsd)}%`}
+              style={`width:${pctOfNumber(outVisualDebtUsd, outSegmentTotalUsd)}%`}
             ></div>
           {/if}
         </div>
@@ -94,9 +105,9 @@
 
       {#if inWidthPx > 0}
         <div class="shell in side-shell" style={inSideWidthStyle}>
-          {#if inVisualOwnUsd > 0}<div class="seg debt" style={`width:${pctOfNumber(inVisualOwnUsd, inVisualOwnUsd + inVisualCollUsd + inVisualCreditUsd)}%`}></div>{/if}
-          {#if inVisualCollUsd > 0}<div class="seg coll" style={`width:${pctOfNumber(inVisualCollUsd, inVisualOwnUsd + inVisualCollUsd + inVisualCreditUsd)}%`}></div>{/if}
-          {#if inVisualCreditUsd > 0}<div class="seg credit" style={`width:${pctOfNumber(inVisualCreditUsd, inVisualOwnUsd + inVisualCollUsd + inVisualCreditUsd)}%`}></div>{/if}
+          {#if inVisualOwnUsd > 0}<div class="seg debt" style={`width:${pctOfNumber(inVisualOwnUsd, inSegmentTotalUsd)}%`}></div>{/if}
+          {#if inVisualCollUsd > 0}<div class="seg coll" style={`width:${pctOfNumber(inVisualCollUsd, inSegmentTotalUsd)}%`}></div>{/if}
+          {#if inVisualCreditUsd > 0}<div class="seg credit" style={`width:${pctOfNumber(inVisualCreditUsd, inSegmentTotalUsd)}%`}></div>{/if}
         </div>
       {/if}
     {/if}
@@ -157,7 +168,7 @@
     width: 100%;
     height: var(--bar-h);
     border-radius: 999px;
-    background: rgba(39, 39, 42, 0.72);
+    background: rgba(24, 24, 27, 0.72);
     box-shadow: inset 0 0 0 1px rgba(82, 82, 91, 0.35);
   }
 
@@ -221,8 +232,8 @@
     overflow: hidden;
     display: flex;
     align-items: stretch;
-    background: rgba(244, 244, 245, 0.06);
-    box-shadow: inset 0 0 0 1px rgba(161, 161, 170, 0.2);
+    background: rgba(226, 232, 240, 0.05);
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
     z-index: 2;
   }
 

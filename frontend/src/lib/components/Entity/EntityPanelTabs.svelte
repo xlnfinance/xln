@@ -24,6 +24,7 @@
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { getAvailableThemes, THEME_DEFINITIONS } from '../../utils/themes';
+  import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
   import type { ThemeName } from '$lib/types/ui';
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
   import { xlnFunctions, entityPositions, enqueueEntityInputs, p2pState } from '../../stores/xlnStore';
@@ -1475,31 +1476,18 @@
     return '$' + value.toFixed(2);
   }
 
-  const PRICE_BY_SYMBOL: Record<string, number> = {
-    USDC: 1,
-    USDT: 1,
-    WETH: 2500,
-    ETH: 2500,
-  };
-
   function getAssetPrice(symbol: string): number {
-    return PRICE_BY_SYMBOL[symbol.toUpperCase()] ?? 0;
+    return getAssetUsdPrice(symbol);
   }
 
   function getAssetValue(tokenId: number, amount: bigint, symbolOverride?: string): number {
     const info = getTokenInfo(tokenId);
     const symbol = symbolOverride ?? info.symbol ?? 'UNK';
-    const divisor = BigInt(10) ** BigInt(info.decimals);
-    const numericAmount = Number(amount) / Number(divisor);
-    const price = getAssetPrice(symbol);
-    return numericAmount * price;
+    return amountToUsd(amount, info.decimals, symbol);
   }
 
   function getExternalValue(token: ExternalToken): number {
-    const divisor = BigInt(10) ** BigInt(token.decimals ?? 18);
-    const numericAmount = Number(token.balance) / Number(divisor);
-    const price = getAssetPrice(token.symbol);
-    return numericAmount * price;
+    return amountToUsd(token.balance, token.decimals ?? 18, token.symbol);
   }
 
   function calculatePortfolioValue(reserves: Map<number | string, bigint>): number {
