@@ -4,8 +4,25 @@
   import { tabOperations } from '../../stores/tabStore';
   import { THEME_DEFINITIONS } from '../../utils/themes';
   import type { ThemeName } from '$lib/types/ui';
+  import type { JurisdictionConfig } from '@xln/runtime/xln-api';
   import { VERSION } from '../../generated/version';
   import { errorLog, formatErrorLog } from '../../stores/errorLogStore';
+
+  type JurisdictionStatusRow = {
+    name: string;
+    rpcUrl: string;
+    connected: boolean;
+    lastBlock: number | null;
+    error: string | null;
+  };
+
+  type ProposerStatus = {
+    entityId: string;
+    signerId: string;
+    jBlock: number;
+  };
+
+  const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
   // Browser capabilities check
   $: browserCapabilities = {
@@ -46,7 +63,7 @@
   // J-machine status (derived from environment)
   $: jMachineStatus = (() => {
     if (!$xlnEnvironment) return { block: 0, events: 0, height: 0 };
-    const maxJBlock = Math.max(0, ...Array.from($xlnEnvironment.eReplicas?.values() || []).map((r: any) => r.state?.lastFinalizedJHeight || 0));
+    const maxJBlock = Math.max(0, ...Array.from($xlnEnvironment.eReplicas.values()).map((replica) => replica.state?.lastFinalizedJHeight ?? 0));
     return {
       block: maxJBlock,
       events: $xlnEnvironment?.runtimeInput?.entityInputs?.length || 0,
@@ -60,11 +77,11 @@
     try {
       const proposers = [...($xlnEnvironment.eReplicas?.entries() || [])]
         .filter(([, replica]) => replica.isProposer)
-        .map(([key, replica]) => {
+        .map(([key, replica]): ProposerStatus => {
           const [entityId, signerId] = key.split(':');
           return {
             entityId: entityId || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })(),
-            signerId,
+            signerId: signerId || (() => { throw new Error('FINTECH-SAFETY: Missing signerId'); })(),
             jBlock: replica.state.lastFinalizedJHeight,
           };
         });
@@ -152,15 +169,15 @@
   }
 
   // Jurisdiction connection status
-  let jurisdictionStatus: any = null;
-  let statusCheckInterval: any = null;
+  let jurisdictionStatus: JurisdictionStatusRow[] | null = null;
+  let statusCheckInterval: ReturnType<typeof setInterval> | null = null;
 
   async function checkJurisdictionStatus() {
     try {
       const xln = await getXLN();
       const jurisdictions = await xln.getAvailableJurisdictions();
 
-      const status = await Promise.all(jurisdictions.map(async (j: any) => {
+      const status = await Promise.all(jurisdictions.map(async (j: JurisdictionConfig): Promise<JurisdictionStatusRow> => {
         try {
           const { ethers } = await import('ethers');
           const provider = new ethers.JsonRpcProvider(j.address);
@@ -180,24 +197,32 @@
           const errorMsg = error instanceof Error ? error.message : 'Connection failed';
 
           // DETAILED ERROR LOGGING FOR OCULUS DEBUGGING
-          const debugInfo: any = {
+          const debugInfo: Record<string, unknown> = {
             rpcUrl: j.address,
             jurisdictionName: j.name,
             errorMessage: errorMsg,
-            errorType: error?.constructor?.name || typeof error,
+            errorType: error instanceof Error ? error.constructor.name : typeof error,
             userAgent: navigator.userAgent,
             protocol: window.location.protocol,
             hostname: window.location.hostname,
           };
 
           // Extract ethers.js specific error details
-          if (error && typeof error === 'object') {
-            const e = error as any;
-            if (e.code) debugInfo.errorCode = e.code;
-            if (e.reason) debugInfo.errorReason = e.reason;
-            if (e.action) debugInfo.errorAction = e.action;
-            if (e.error) debugInfo.nestedError = e.error?.message || String(e.error);
-            if (e.stack) debugInfo.stackTrace = e.stack.split('\n').slice(0, 5).join('\n');
+          if (isRecord(error)) {
+            const errorCode = Reflect.get(error, 'code');
+            const errorReason = Reflect.get(error, 'reason');
+            const errorAction = Reflect.get(error, 'action');
+            const nestedError = Reflect.get(error, 'error');
+            const errorStack = Reflect.get(error, 'stack');
+            if (typeof errorCode === 'string') debugInfo.errorCode = errorCode;
+            if (typeof errorReason === 'string') debugInfo.errorReason = errorReason;
+            if (typeof errorAction === 'string') debugInfo.errorAction = errorAction;
+            if (nestedError !== undefined) {
+              debugInfo.nestedError = nestedError instanceof Error ? nestedError.message : String(nestedError);
+            }
+            if (typeof errorStack === 'string') {
+              debugInfo.stackTrace = errorStack.split('\n').slice(0, 5).join('\n');
+            }
           }
 
           // Log to persistent error store with full details
@@ -299,8 +324,13 @@
           let allDatabases: string[] = [];
           if ('databases' in indexedDB) {
             try {
-              const dbs = await (indexedDB as any).databases();
-              allDatabases = dbs.map((db: any) => db.name);
+              const idbWithDatabases = indexedDB as IDBFactory & {
+                databases?: () => Promise<Array<{ name?: string }>>;
+              };
+              if (typeof idbWithDatabases.databases === 'function') {
+                const dbs = await idbWithDatabases.databases();
+                allDatabases = dbs.flatMap((db) => (typeof db.name === 'string' && db.name.length > 0 ? [db.name] : []));
+              }
             } catch (err) {
               console.log('⚠️ Could not enumerate databases');
             }
@@ -405,7 +435,7 @@
           <div class="stat-item stat-full-width">
             <span class="stat-label">Proposers:</span>
             <span class="stat-value">
-              {jWatcherStatus.proposers.map((p: any) => `${p.signerId}@${p.jBlock}`).join(', ')}
+              {jWatcherStatus.proposers.map((p: ProposerStatus) => `${p.signerId}@${p.jBlock}`).join(', ')}
             </span>
           </div>
           <div class="stat-item">

@@ -26,11 +26,6 @@ const DEV_SESSION_STORAGE_KEY = 'xln-dev-session-id';
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 let devSessionMonitor: ReturnType<typeof setInterval> | null = null;
 
-type DebugWindow = Window & typeof globalThis & {
-  vaultOperations?: typeof import('./vaultStore').vaultOperations;
-  runtimesState?: typeof import('./vaultStore').runtimesState;
-};
-
 type FrontendEntitySummary = {
   id: string;
   shortId: string;
