@@ -36,7 +36,6 @@ const buildProfile = (
     isHub: false,
     routingFeePPM: 100,
     baseFee: 0n,
-    entityPublicKey: `pub:${entityId.slice(2, 10)}`,
     board: {
       threshold: 1,
       validators: [{
@@ -130,7 +129,6 @@ describe('relay-router gossip fanout', () => {
               isHub: true,
               routingFeePPM: 100,
               baseFee: 0n,
-              entityPublicKey: `pub:${ENTITY_B.slice(2, 10)}`,
               board: {
                 threshold: 1,
                 validators: [{

@@ -65,7 +65,6 @@ describe('Routing metadata hard requirements', () => {
             routingFeePPM: 10_000,
             baseFee: 0n,
             isHub: false,
-            entityPublicKey: 'pub:alice',
             board: {
               threshold: 1,
               validators: [{ signer: ALICE.slice(0, 42), signerId: ALICE.slice(0, 42), weight: 1, publicKey: 'board:alice' }],
@@ -81,7 +80,6 @@ describe('Routing metadata hard requirements', () => {
           H1.slice(0, 42),
           {
             entityEncPubKey: `0x${'11'.repeat(32)}`,
-            entityPublicKey: 'pub:h1',
             routingFeePPM: 10_000,
             baseFee: 0n,
             isHub: true,
@@ -103,7 +101,6 @@ describe('Routing metadata hard requirements', () => {
           H2.slice(0, 42),
           {
             entityEncPubKey: `0x${'22'.repeat(32)}`,
-            entityPublicKey: 'pub:h2',
             routingFeePPM: 10_000,
             baseFee: 0n,
             isHub: true,
@@ -123,7 +120,6 @@ describe('Routing metadata hard requirements', () => {
           MALFORMED_HUB.slice(0, 42),
           {
             entityEncPubKey: `0x${'33'.repeat(32)}`,
-            entityPublicKey: 'pub:bad',
             baseFee: 0n,
             isHub: true,
             board: {
@@ -158,7 +154,6 @@ describe('Routing metadata hard requirements', () => {
             routingFeePPM: 10_000,
             baseFee: 0n,
             isHub: false,
-            entityPublicKey: 'pub:bob',
             board: {
               threshold: 1,
               validators: [{ signer: BOB.slice(0, 42), signerId: BOB.slice(0, 42), weight: 1, publicKey: 'board:bob' }],

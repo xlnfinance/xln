@@ -351,3 +351,13 @@
     - `cd frontend && bunx vite build --mode development`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-195139-497/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-195139-497/e2e-shard-00.log)
+  - removed the duplicated `metadata.entityPublicKey` gossip alias and switched all live consumers to the canonical board key:
+    - runtime schema and canonicalization in [gossip.ts](/Users/egor/xln/runtime/networking/gossip.ts)
+    - profile builder/fingerprint in [gossip-helper.ts](/Users/egor/xln/runtime/networking/gossip-helper.ts)
+    - signature verification and P2P validation in [profile-signing.ts](/Users/egor/xln/runtime/networking/profile-signing.ts) and [p2p.ts](/Users/egor/xln/runtime/networking/p2p.ts)
+    - debug/inspection views and fixtures updated to read `board.validators[0].publicKey`
+  - verified once more:
+    - `bun test runtime/__tests__/routing-metadata.test.ts runtime/__tests__/relay-router.test.ts`
+    - `cd frontend && bunx vite build --mode development`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-200142-038/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-200142-038/e2e-shard-00.log)

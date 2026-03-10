@@ -5,7 +5,7 @@
  *
  * SECURITY MODEL - P2P is a "dumb pipe":
  * - NO replay protection here - accountFrame heights handle that in consensus layer
- * - Profile signatures prevent spoofing (entityPublicKey bound to board validators)
+ * - Profile signatures prevent spoofing (board validator public keys bind the entity)
  * - Queue limits prevent memory exhaustion from disconnected peers
  * - Actual transaction validation happens at entity/account consensus layer
  *
@@ -23,7 +23,7 @@
  */
 
 import type { Env, RoutedEntityInput } from '../types';
-import { canonicalizeProfile, parseProfile, type Profile } from './gossip';
+import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from './gossip';
 import { RuntimeWsClient } from './ws-client';
 import { buildLocalEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../ids';
@@ -951,7 +951,7 @@ export class RuntimeP2P {
         if (!result.valid) {
           const boardValidators = sanitized.metadata.board.validators;
           const hasBoardKey = boardValidators.some((validator) => typeof validator.publicKey === 'string');
-          const hasEntityKey = typeof sanitized.metadata.entityPublicKey === 'string';
+          const entityPublicKey = getBoardPrimaryPublicKey(sanitized.metadata.board, sanitized.entityId);
           let hankoInspect:
             | {
                 recoveredAddresses: string[];
@@ -976,7 +976,7 @@ export class RuntimeP2P {
               hash: result.hash?.slice(0, 18),
               signerId: result.signerId,
               hanko: typeof hasHanko === 'string' ? hasHanko.slice(0, 30) + '...' : !!hasHanko,
-              entityPublicKey: hasEntityKey ? sanitized.metadata.entityPublicKey!.slice(0, 20) + '...' : 'none',
+              entityPublicKey: entityPublicKey.slice(0, 20) + '...',
               boardPublicKey: hasBoardKey ? 'yes' : 'no',
               validators: boardValidators.length,
               boardSigners: boardValidators.map((validator) => String(validator.signerId || validator.signer)).filter(Boolean),
@@ -1006,7 +1006,7 @@ export class RuntimeP2P {
       }
 
       // Register public key for signature verification
-      const publicKey = sanitized.metadata.entityPublicKey;
+      const publicKey = getBoardPrimaryPublicKey(sanitized.metadata.board, sanitized.entityId);
       if (publicKey && isHexPublicKey(publicKey)) {
         registerSignerPublicKey(sanitized.entityId, publicKey);
       }
