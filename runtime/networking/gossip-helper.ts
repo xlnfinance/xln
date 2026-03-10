@@ -129,10 +129,6 @@ export function buildEntityProfile(
   }
 
   const board = buildBoardMetadata(entityState, signerResolver);
-  const entityPublicKey = board.validators[0]?.publicKey;
-  if (!entityPublicKey) {
-    throw new Error(`GOSSIP_PROFILE_MISSING_ENTITY_PUBLIC_KEY: entity=${entityState.entityId}`);
-  }
   // Include X25519 crypto key for HTLC envelope encryption (if available)
   const entityEncPubKey = normalizeX25519Hex(entityState.entityEncPubKey);
   if (!entityEncPubKey) {
@@ -168,7 +164,6 @@ export function buildEntityProfile(
           }
         : {}),
       board,
-      entityPublicKey,
       entityEncPubKey,
     },
     accounts,
@@ -278,7 +273,6 @@ export function buildEntityAdvertisedStateFingerprint(
       rebalanceLiquidityFeeBps: String(metadata.rebalanceLiquidityFeeBps ?? ''),
       rebalanceGasFee: String(metadata.rebalanceGasFee ?? ''),
       rebalanceTimeoutMs: Number(metadata.rebalanceTimeoutMs ?? 0),
-      entityPublicKey: String(metadata.entityPublicKey ?? ''),
       entityEncPubKey: metadata.entityEncPubKey,
       board: metadata.board,
     },

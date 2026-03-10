@@ -374,7 +374,7 @@ const logProfile = (label: string, profile: any) => {
     endpoints: profile.endpoints || [],
     accounts: (profile.accounts || []).map((acct: any) => acct.counterpartyId?.slice(-4)).filter(Boolean),
     boardSize,
-    hasPublicKey: typeof profile.metadata?.entityPublicKey === 'string',
+    hasPublicKey: typeof profile.metadata?.board?.validators?.[0]?.publicKey === 'string',
   });
 };
 
@@ -398,7 +398,7 @@ const waitForProfile = async (
         ? board.length
         : (board?.validators ? board.validators.length : 0);
       const hasBoard = !requireBoard || boardSize > 0;
-      const hasPublicKey = !requirePublicKey || typeof profile.metadata?.entityPublicKey === 'string';
+      const hasPublicKey = !requirePublicKey || typeof profile.metadata?.board?.validators?.[0]?.publicKey === 'string';
       if (hasRuntime && hasBoard && hasPublicKey) return profile;
     }
     refresh?.();
@@ -416,7 +416,7 @@ const waitForProfile = async (
       throw new Error(`PROFILE_MISSING_BOARD: ${name}`);
     }
   }
-  if (lastProfile && requirePublicKey && typeof lastProfile.metadata?.entityPublicKey !== 'string') {
+  if (lastProfile && requirePublicKey && typeof lastProfile.metadata?.board?.validators?.[0]?.publicKey !== 'string') {
     throw new Error(`PROFILE_MISSING_PUBLIC_KEY: ${name}`);
   }
   throw new Error(`PROFILE_TIMEOUT: ${name}`);

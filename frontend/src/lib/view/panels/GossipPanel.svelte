@@ -19,6 +19,11 @@
   function formatEntityId(id: string): string {
     return id;
   }
+
+  function getPrimaryBoardPublicKey(profile: { metadata?: { board?: { validators?: Array<{ publicKey?: string }> } } }): string {
+    const publicKey = profile.metadata?.board?.validators?.[0]?.publicKey;
+    return typeof publicKey === 'string' ? publicKey : '';
+  }
 </script>
 
 <div class="gossip-panel">
@@ -52,10 +57,10 @@
             {/if}
 
             <!-- Entity Public Key -->
-            {#if profile.metadata?.entityPublicKey}
+            {#if getPrimaryBoardPublicKey(profile)}
               <div class="field">
                 <div class="field-label">Public Key</div>
-                <div class="field-value mono">{profile.metadata.entityPublicKey.slice(0, 20)}...</div>
+                <div class="field-value mono">{getPrimaryBoardPublicKey(profile).slice(0, 20)}...</div>
               </div>
             {/if}
 

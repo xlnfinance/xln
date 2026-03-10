@@ -17,7 +17,7 @@
  */
 
 import { keccak256 } from 'ethers';
-import { canonicalizeProfile, type Profile } from './gossip';
+import { canonicalizeProfile, getBoardPrimaryPublicKey, type Profile } from './gossip';
 import type { Env, HankoString } from '../types';
 import { inspectHankoForHash, signHashesAsSingleEntity, verifyHankoForHash } from '../hanko-signing';
 import { getSignerAddress, getSignerPublicKey } from '../account-crypto';
@@ -61,7 +61,8 @@ export async function signProfile(
     throw new Error(`PROFILE_SIGN_ENTITY_PUBLIC_KEY_REQUIRED: entity=${canonicalProfile.entityId} signerId=${signerId}`);
   }
   const entityPublicKey = bytesToHex(signerPublicKey);
-  if (canonicalProfile.metadata.entityPublicKey !== entityPublicKey) {
+  const boardPrimaryPublicKey = getBoardPrimaryPublicKey(canonicalProfile.metadata.board, canonicalProfile.entityId);
+  if (boardPrimaryPublicKey !== entityPublicKey) {
     throw new Error(
       `PROFILE_SIGN_ENTITY_PUBLIC_KEY_MISMATCH: entity=${canonicalProfile.entityId} signerId=${signerId}`,
     );

@@ -28,7 +28,6 @@ export type ProfileMetadata = {
   routingFeePPM: number;
   baseFee: bigint;
   board: BoardMetadata;
-  entityPublicKey: string;
   profileHanko?: string;
   position?: { x: number; y: number; z: number };
   policyVersion?: number;
@@ -139,7 +138,6 @@ const ALLOWED_PROFILE_METADATA_KEYS = [
   'routingFeePPM',
   'baseFee',
   'board',
-  'entityPublicKey',
   'profileHanko',
   'position',
   'policyVersion',
@@ -314,6 +312,14 @@ const parseBoardMetadata = (raw: unknown, entityId: string): BoardMetadata => {
   };
 };
 
+export const getBoardPrimaryPublicKey = (board: BoardMetadata, entityId: string): string => {
+  const publicKey = typeof board.validators[0]?.publicKey === 'string' ? board.validators[0].publicKey.trim() : '';
+  if (!publicKey) {
+    throw new Error(`GOSSIP_PROFILE_BOARD_PRIMARY_PUBLIC_KEY_REQUIRED: entity=${entityId}`);
+  }
+  return publicKey;
+};
+
 const parseProfileTokenCapacities = (
   raw: unknown,
   entityId: string,
@@ -400,13 +406,11 @@ export const parseProfile = (raw: unknown): Profile => {
   if (!runtimeId) {
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ID_REQUIRED: entity=${entityId}`);
   }
-  const entityPublicKey = typeof metadataRaw.entityPublicKey === 'string' ? metadataRaw.entityPublicKey.trim() : '';
-  if (!entityPublicKey) {
-    throw new Error(`GOSSIP_PROFILE_ENTITY_PUBLIC_KEY_REQUIRED: entity=${entityId}`);
-  }
   const publicAccounts = normalizeStringArray(raw.publicAccounts);
   const endpoints = normalizeStringArray(raw.endpoints);
   const relays = normalizeStringArray(raw.relays);
+  const board = parseBoardMetadata(metadataRaw.board, entityId);
+  getBoardPrimaryPublicKey(board, entityId);
   const metadata: ProfileMetadata = {
     entityEncPubKey,
     isHub: metadataRaw.isHub === true,
@@ -415,8 +419,7 @@ export const parseProfile = (raw: unknown): Profile => {
       Number.isFinite(Number(metadataRaw.routingFeePPM)) ? Math.floor(Number(metadataRaw.routingFeePPM)) : 100,
     ),
     baseFee: parseBigIntValue(metadataRaw.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
-    board: parseBoardMetadata(metadataRaw.board, entityId),
-    entityPublicKey,
+    board,
     ...(isRecord(metadataRaw.position)
       && (assertOnlyAllowedKeys(
         metadataRaw.position,
@@ -509,10 +512,6 @@ export const canonicalizeProfile = (
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ID_REQUIRED: entity=${entityId}`);
   }
   const normalizedRuntimeId = profile.runtimeId.trim();
-  const entityPublicKey = typeof metadata.entityPublicKey === 'string' ? metadata.entityPublicKey.trim() : '';
-  if (!entityPublicKey) {
-    throw new Error(`GOSSIP_PROFILE_ENTITY_PUBLIC_KEY_REQUIRED: entity=${entityId}`);
-  }
   if (typeof metadata.entityEncPubKey !== 'string' || metadata.entityEncPubKey !== normalizedEntityEncPubKey) {
     throw new Error(`GOSSIP_PROFILE_ENTITY_ENC_PUBKEY_NOT_NORMALIZED: entity=${entityId}`);
   }
@@ -524,6 +523,7 @@ export const canonicalizeProfile = (
   const endpoints = normalizeStringArray(profile.endpoints);
   const relays = normalizeStringArray(profile.relays);
   const board = parseBoardMetadata(metadata.board, entityId);
+  getBoardPrimaryPublicKey(board, entityId);
   const routingFeePPM = Math.max(0, Number.isFinite(Number(metadata.routingFeePPM)) ? Math.floor(Number(metadata.routingFeePPM)) : 100);
   const baseFee = parseBigIntValue(metadata.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId);
   return {
@@ -548,7 +548,6 @@ export const canonicalizeProfile = (
       board,
       routingFeePPM,
       baseFee,
-      entityPublicKey,
       ...(isRecord(metadata.position)
         && (assertOnlyAllowedKeys(
           metadata.position,
@@ -613,7 +612,8 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
       newTimestamp > existingTimestamp ||
       (newTimestamp === existingTimestamp && (
         (existing.runtimeId !== normalizedProfile.runtimeId) ||
-        (existing.metadata.entityPublicKey !== normalizedProfile.metadata.entityPublicKey) ||
+        (getBoardPrimaryPublicKey(existing.metadata.board, existing.entityId)
+          !== getBoardPrimaryPublicKey(normalizedProfile.metadata.board, normalizedProfile.entityId)) ||
         (existing.accounts.length !== normalizedProfile.accounts.length)  // Accept if accounts changed
       ));
 
