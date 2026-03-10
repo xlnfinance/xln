@@ -151,6 +151,34 @@ const ALLOWED_PROFILE_METADATA_KEYS = [
   'rebalanceTimeoutMs',
 ] as const;
 
+const ALLOWED_PROFILE_ACCOUNT_KEYS = [
+  'counterpartyId',
+  'tokenCapacities',
+] as const;
+
+const ALLOWED_PROFILE_TOKEN_CAPACITY_KEYS = [
+  'inCapacity',
+  'outCapacity',
+] as const;
+
+const ALLOWED_BOARD_METADATA_KEYS = [
+  'threshold',
+  'validators',
+] as const;
+
+const ALLOWED_BOARD_VALIDATOR_KEYS = [
+  'signer',
+  'weight',
+  'signerId',
+  'publicKey',
+] as const;
+
+const ALLOWED_POSITION_KEYS = [
+  'x',
+  'y',
+  'z',
+] as const;
+
 const assertNoLegacyProfileFields = (
   rawProfile: Record<string, unknown>,
   metadataRaw: Record<string, unknown>,
@@ -251,6 +279,7 @@ const parseBoardValidator = (raw: unknown, entityId: string): BoardValidator => 
   if (!isRecord(raw)) {
     throw new Error(`GOSSIP_PROFILE_BOARD_VALIDATOR_INVALID: entity=${entityId}`);
   }
+  assertOnlyAllowedKeys(raw, ALLOWED_BOARD_VALIDATOR_KEYS, 'GOSSIP_PROFILE_BOARD_VALIDATOR_UNKNOWN_FIELD', entityId);
   const signer = typeof raw.signer === 'string' ? raw.signer.trim() : '';
   if (!signer) {
     throw new Error(`GOSSIP_PROFILE_BOARD_SIGNER_REQUIRED: entity=${entityId}`);
@@ -276,6 +305,7 @@ const parseBoardMetadata = (raw: unknown, entityId: string): BoardMetadata => {
   if (!isRecord(raw)) {
     throw new Error(`GOSSIP_PROFILE_BOARD_REQUIRED: entity=${entityId}`);
   }
+  assertOnlyAllowedKeys(raw, ALLOWED_BOARD_METADATA_KEYS, 'GOSSIP_PROFILE_BOARD_UNKNOWN_FIELD', entityId);
   const validatorsRaw = raw.validators;
   if (!Array.isArray(validatorsRaw) || validatorsRaw.length === 0) {
     throw new Error(`GOSSIP_PROFILE_BOARD_VALIDATORS_REQUIRED: entity=${entityId}`);
@@ -308,6 +338,12 @@ const parseProfileTokenCapacities = (
         `GOSSIP_PROFILE_ACCOUNT_TOKEN_CAPACITY_INVALID: entity=${entityId} counterparty=${counterpartyId} token=${tokenId}`,
       );
     }
+    assertOnlyAllowedKeys(
+      capacityRaw,
+      ALLOWED_PROFILE_TOKEN_CAPACITY_KEYS,
+      'GOSSIP_PROFILE_ACCOUNT_TOKEN_CAPACITY_UNKNOWN_FIELD',
+      entityId,
+    );
     capacities[tokenId] = {
       inCapacity: stringifyBigIntLike(capacityRaw.inCapacity),
       outCapacity: stringifyBigIntLike(capacityRaw.outCapacity),
@@ -322,6 +358,7 @@ const parseProfileAccounts = (raw: unknown, entityId: string): ProfileAccount[] 
     if (!isRecord(accountRaw)) {
       throw new Error(`GOSSIP_PROFILE_ACCOUNT_INVALID: entity=${entityId}`);
     }
+    assertOnlyAllowedKeys(accountRaw, ALLOWED_PROFILE_ACCOUNT_KEYS, 'GOSSIP_PROFILE_ACCOUNT_UNKNOWN_FIELD', entityId);
     const counterpartyId = typeof accountRaw.counterpartyId === 'string'
       ? accountRaw.counterpartyId.trim()
       : '';
@@ -384,6 +421,12 @@ export const parseProfile = (raw: unknown): Profile => {
     board: parseBoardMetadata(metadataRaw.board, entityId),
     entityPublicKey,
     ...(isRecord(metadataRaw.position)
+      && (assertOnlyAllowedKeys(
+        metadataRaw.position,
+        ALLOWED_POSITION_KEYS,
+        'GOSSIP_PROFILE_POSITION_UNKNOWN_FIELD',
+        entityId,
+      ), true)
       && Number.isFinite(Number(metadataRaw.position.x))
       && Number.isFinite(Number(metadataRaw.position.y))
       && Number.isFinite(Number(metadataRaw.position.z))
@@ -513,6 +556,12 @@ export const canonicalizeProfile = (
       baseFee,
       entityPublicKey,
       ...(isRecord(metadata.position)
+        && (assertOnlyAllowedKeys(
+          metadata.position,
+          ALLOWED_POSITION_KEYS,
+          'GOSSIP_PROFILE_POSITION_UNKNOWN_FIELD',
+          entityId,
+        ), true)
         && Number.isFinite(Number(metadata.position.x))
         && Number.isFinite(Number(metadata.position.y))
         && Number.isFinite(Number(metadata.position.z))
