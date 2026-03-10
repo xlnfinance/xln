@@ -25,7 +25,7 @@ import {
   readPersistedFrameJournals,
 } from './runtime.ts';
 import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './serialization-utils';
-import type { AccountMachine, DeliverableEntityInput, Delta, Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
+import type { AccountMachine, DeliverableEntityInput, Delta, EntityReplica, Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
 import type { HubHealth } from './health';
 import { encodeBoard, hashBoard } from './entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from './account-crypto';
@@ -158,6 +158,22 @@ const logOneShot = (key: string, message: string) => {
   console.warn(message);
 };
 
+type ObservedJEvent = JEvent & {
+  args?: Record<string, unknown>;
+  type?: string;
+};
+
+type KnownAccountSnapshot = {
+  currentHeight?: number;
+  hasPending?: boolean;
+  pendingHeight?: number | null;
+};
+
+const isKnownAccountSnapshot = (value: unknown): value is KnownAccountSnapshot => {
+  if (!value || typeof value !== 'object') return false;
+  return true;
+};
+
 const applyJEventsToEnv = async (env: Env, events: JEvent[], label = 'J-EVENTS'): Promise<void> => {
   if (!events || events.length === 0) return;
   const grouped = new Map<
@@ -170,8 +186,10 @@ const applyJEventsToEnv = async (env: Env, events: JEvent[], label = 'J-EVENTS')
     }
   >();
 
-  for (const ev of events) {
-    const entity = (ev as any)?.args?.entity || (ev as any)?.args?.entityId || (ev as any)?.args?.leftEntity;
+  for (const rawEvent of events) {
+    const ev = rawEvent as ObservedJEvent;
+    const args = ev.args ?? {};
+    const entity = args.entity ?? args.entityId ?? args.leftEntity;
     if (!entity) continue;
     const key = String(entity).toLowerCase();
     const entry = grouped.get(key) ?? {
@@ -180,7 +198,7 @@ const applyJEventsToEnv = async (env: Env, events: JEvent[], label = 'J-EVENTS')
       blockHash: ev.blockHash ?? '0x',
       transactionHash: ev.transactionHash ?? '0x',
     };
-    entry.events.push({ type: ev.name ?? (ev as any).type ?? 'Unknown', data: (ev as any).args ?? {} });
+    entry.events.push({ type: ev.name ?? ev.type ?? 'Unknown', data: args });
     grouped.set(key, entry);
   }
 
@@ -216,8 +234,8 @@ const hasPendingRuntimeWork = (env: Env): boolean => {
   if (env.networkInbox?.length) return true;
   if (env.runtimeInput?.runtimeTxs?.length) return true;
   // Check P2P mempool (where enqueueRuntimeInputs puts inbound messages)
-  if ((env as any).runtimeMempool?.entityInputs?.length) return true;
-  if ((env as any).runtimeMempool?.runtimeTxs?.length) return true;
+  if (env.runtimeMempool?.entityInputs?.length) return true;
+  if (env.runtimeMempool?.runtimeTxs?.length) return true;
 
   if (env.jReplicas) {
     for (const replica of env.jReplicas.values()) {
@@ -469,7 +487,7 @@ const getRequestCreditCap = (tokenId: number): bigint => {
   return REQUEST_CREDIT_CAP_WHOLE * 10n ** BigInt(normalizedDecimals);
 };
 
-const getEntityReplicaById = (env: Env, entityId: string): any | null => {
+const getEntityReplicaById = (env: Env, entityId: string): EntityReplica | null => {
   if (!env.eReplicas) return null;
   const target = entityId.toLowerCase();
   for (const [key, replica] of env.eReplicas.entries()) {
@@ -481,7 +499,7 @@ const getEntityReplicaById = (env: Env, entityId: string): any | null => {
 };
 
 const accountMatchesCounterparty = (
-  account: any,
+  account: AccountMachine | null | undefined,
   ownerEntityId: string,
   counterpartyId: string,
 ): boolean => {
@@ -832,7 +850,12 @@ const ensureMarketMakerEntity = async (
   return { entityId, signerId: mmSignerId };
 };
 
-const collectOfferIdsForAccount = (account: any): Set<string> => {
+const collectOfferIdsForAccount = (
+  account:
+    | Pick<AccountMachine, 'swapOffers' | 'mempool' | 'pendingFrame'>
+    | null
+    | undefined,
+): Set<string> => {
   const ids = new Set<string>();
   if (account?.swapOffers instanceof Map) {
     for (const offerId of account.swapOffers.keys()) {
@@ -4439,8 +4462,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         tokenId = 1,
         amount = '100',
         hubEntityId: requestedHubEntityId,
-        knownAccount,
       } = body;
+      const knownAccount = isKnownAccountSnapshot(body.knownAccount) ? body.knownAccount : undefined;
       const requestId = `offchain_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
       if (!userEntityId) {
@@ -4641,13 +4664,13 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const accountPending = hasHubAccount ? !!accountMachine?.pendingFrame : false;
       const serverCurrentHeight = Number(accountMachine?.currentHeight ?? 0);
       const serverPendingHeight = accountMachine?.pendingFrame?.height ?? null;
-      const knownCurrentHeightRaw = (knownAccount as any)?.currentHeight;
+      const knownCurrentHeightRaw = knownAccount?.currentHeight;
       const knownCurrentHeight =
         knownCurrentHeightRaw !== undefined && Number.isFinite(Number(knownCurrentHeightRaw))
           ? Number(knownCurrentHeightRaw)
           : null;
-      const knownPending = Boolean((knownAccount as any)?.hasPending);
-      const knownPendingHeightRaw = (knownAccount as any)?.pendingHeight;
+      const knownPending = Boolean(knownAccount?.hasPending);
+      const knownPendingHeightRaw = knownAccount?.pendingHeight;
       const knownPendingHeight =
         knownPendingHeightRaw !== undefined && knownPendingHeightRaw !== null && Number.isFinite(Number(knownPendingHeightRaw))
           ? Number(knownPendingHeightRaw)

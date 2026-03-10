@@ -3,7 +3,8 @@
   import { getXLN, xlnEnvironment, replicas, enqueueEntityInputs, xlnFunctions } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
-  import type { EntityReplica } from '$lib/types/ui';
+  import type { EntityReplica, EntityTx, AccountMachine, EntityState } from '$lib/types/ui';
+  import type { Env } from '$types';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
 
@@ -21,6 +22,18 @@
     entities: string[];
     details: BatchDetailField[];
   };
+  type RuntimeEnv = Env;
+  type JBatchState = NonNullable<EntityState['jBatchState']>;
+  type BatchShape = JBatchState['batch'];
+  type CompletedBatch = NonNullable<EntityState['batchHistory']>[number];
+  type BatchHistoryRow = { entry: CompletedBatch; details: BatchDetailOp[]; key: string };
+  type ActiveDispute = NonNullable<AccountMachine['activeDispute']>;
+  type FeeOverrides = { gasBumpBps?: number; maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string };
+  type RuntimeJReplica = RuntimeEnv['jReplicas'] extends Map<string, infer Replica> ? Replica : never;
+  type PendingSettleEntityTx =
+    | Extract<EntityTx, { type: 'deposit_collateral' }>
+    | Extract<EntityTx, { type: 'requestWithdrawal' }>
+    | Extract<EntityTx, { type: 'reserve_to_reserve' }>;
 
   $: activeReplicas = $replicas;
   $: activeXlnFunctions = $xlnFunctions;
@@ -49,13 +62,13 @@
     return String(id || '').trim().toLowerCase();
   }
 
-  function isRuntimeEnv(value: unknown): value is { eReplicas: Map<string, unknown>; jReplicas: Map<string, unknown> } {
+  function isRuntimeEnv(value: unknown): value is RuntimeEnv {
     if (!value || typeof value !== 'object') return false;
-    const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
+    const obj = value as { eReplicas?: unknown; jReplicas?: unknown; runtimeInput?: unknown };
     return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
   }
 
-  function resolveSignerId(env: any): string {
+  function resolveSignerId(env: RuntimeEnv): string {
     return activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'settlement-panel')
       || requireSignerIdForEntity(env, entityId, 'settlement-panel');
   }
@@ -134,8 +147,8 @@
     }
     const profiles = activeEnv?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
-      if (normalizeEntityId((profile as any)?.entityId) !== normalized) continue;
-      const profileName = String((profile as any)?.name || '').trim();
+      if (normalizeEntityId(profile.entityId) !== normalized) continue;
+      const profileName = profile.name.trim();
       if (profileName) return profileName;
     }
     const formattedId = activeXlnFunctions?.formatEntityId?.(canonical);
@@ -175,7 +188,7 @@
     };
   }
 
-  function buildBatchDetailOps(batch: any): BatchDetailOp[] {
+  function buildBatchDetailOps(batch: BatchShape | undefined | null): BatchDetailOp[] {
     if (!batch || typeof batch !== 'object') return [];
     const ops: BatchDetailOp[] = [];
 
@@ -251,7 +264,7 @@
     for (const [index, op] of (Array.isArray(batch.settlements) ? batch.settlements : []).entries()) {
       const diffs = Array.isArray(op?.diffs) ? op.diffs : [];
       const diffSummary = diffs
-        .map((diff: any) => {
+        .map((diff) => {
           const token = Number(diff?.tokenId || 0);
           const left = toBigInt(diff?.leftDiff);
           const right = toBigInt(diff?.rightDiff);
@@ -397,10 +410,10 @@
   async function refreshLiveJHeight(): Promise<void> {
     const jReplicas = activeEnv?.jReplicas;
     if (!(jReplicas instanceof Map) || jReplicas.size === 0) return;
-    const activeJKey = (activeEnv as any)?.activeJurisdiction;
+    const activeJKey = activeEnv?.activeJurisdiction;
     const activeJReplica = activeJKey ? jReplicas.get(activeJKey) : null;
-    const anyJReplica = activeJReplica ?? Array.from(jReplicas.values())[0];
-    const provider = (anyJReplica as any)?.jadapter?.provider;
+    const anyJReplica: RuntimeJReplica | undefined = activeJReplica ?? Array.from(jReplicas.values())[0];
+    const provider = anyJReplica?.jadapter?.provider;
     if (!provider || typeof provider.getBlockNumber !== 'function') return;
     try {
       const blockNumber = Number(await provider.getBlockNumber());
@@ -413,10 +426,10 @@
   async function refreshGasSuggestions(): Promise<void> {
     const jReplicas = activeEnv?.jReplicas;
     if (!(jReplicas instanceof Map) || jReplicas.size === 0) return;
-    const activeJKey = (activeEnv as any)?.activeJurisdiction;
+    const activeJKey = activeEnv?.activeJurisdiction;
     const activeJReplica = activeJKey ? jReplicas.get(activeJKey) : null;
-    const anyJReplica = activeJReplica ?? Array.from(jReplicas.values())[0];
-    const provider = (anyJReplica as any)?.jadapter?.provider;
+    const anyJReplica: RuntimeJReplica | undefined = activeJReplica ?? Array.from(jReplicas.values())[0];
+    const provider = anyJReplica?.jadapter?.provider;
     if (!provider || typeof provider.getFeeData !== 'function') return;
 
     gasLoading = true;
@@ -481,12 +494,12 @@
 
     for (const accountId of accountEntityIds) add(accountId);
     for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
-    for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add((profile as any)?.entityId);
+    for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add(profile.entityId);
 
     return Array.from(ids.values()).sort();
   })();
 
-  function countBatchOps(batch: any): number {
+  function countBatchOps(batch: BatchShape | undefined | null): number {
     if (!batch) return 0;
     return (
       (batch.flashloans?.length || 0) +
@@ -502,7 +515,7 @@
     );
   }
 
-  function batchSummary(batch: any): Array<{ label: string; count: number }> {
+  function batchSummary(batch: BatchShape | undefined | null): Array<{ label: string; count: number }> {
     return [
       { label: 'Flashloan', count: Number(batch?.flashloans?.length || 0) },
       { label: 'ReserveToCollateral', count: Number(batch?.reserveToCollateral?.length || 0) },
@@ -517,15 +530,20 @@
     ].filter((entry) => entry.count > 0);
   }
 
-  $: jBatchState = (replica?.state as any)?.jBatchState || null;
+  $: jBatchState = replica?.state?.jBatchState ?? null;
   $: jBatch = jBatchState?.batch || null;
   $: sentBatch = jBatchState?.sentBatch || null;
+  $: batchHistory = (() => {
+    const history = replica?.state?.batchHistory;
+    if (!Array.isArray(history)) return [] as CompletedBatch[];
+    return [...history].reverse();
+  })();
   $: pendingOps = countBatchOps(jBatch);
   $: sentOps = countBatchOps(sentBatch?.batch);
   $: hasSentBatch = !!sentBatch;
   $: hasDraftBatch = pendingOps > 0;
   $: latestFinalizedBatch = Array.isArray(batchHistory)
-    ? (batchHistory.find((entry: any) => entry?.status !== 'failed') ?? null)
+    ? (batchHistory.find((entry) => entry.status !== 'failed') ?? null)
     : null;
   $: hasFinalizedBatch = !!latestFinalizedBatch;
   $: hasAnyBatch = hasSentBatch || hasDraftBatch;
@@ -534,12 +552,7 @@
   $: sentSummary = batchSummary(sentBatch?.batch);
   $: draftDetailOps = buildBatchDetailOps(jBatch);
   $: sentDetailOps = buildBatchDetailOps(sentBatch?.batch);
-  $: batchHistory = (() => {
-    const history = (replica?.state as any)?.batchHistory;
-    if (!Array.isArray(history)) return [];
-    return [...history].reverse();
-  })();
-  $: batchHistoryRows = batchHistory.map((entry: any, index: number) => ({
+  $: batchHistoryRows = batchHistory.map((entry, index): BatchHistoryRow => ({
     entry,
     details: buildBatchDetailOps(entry?.batch),
     key: String(entry?.txHash || `${entry?.batchHash || 'batch'}-${index}`),
@@ -552,7 +565,7 @@
         ? `Last finalized batch: J#${Number(latestFinalizedBatch?.jBlockNumber || 0)}`
         : 'No draft or sent batch';
 
-  function historySummary(entry: any): Array<{ label: string; count: number }> {
+  function historySummary(entry: CompletedBatch | null | undefined): Array<{ label: string; count: number }> {
     const operations = entry?.operations;
     if (operations && typeof operations === 'object') {
       return [
@@ -572,14 +585,14 @@
     return opCount > 0 ? [{ label: 'Ops', count: opCount }] : [];
   }
 
-  function historyOriginLabel(entry: any): string {
+  function historyOriginLabel(entry: CompletedBatch | null | undefined): string {
     if (entry?.source === 'counterparty-event') return 'Counterparty Event';
     return 'Self Batch';
   }
 
   $: selectedAccount = counterpartyEntityId ? replica?.state?.accounts?.get?.(counterpartyEntityId) : null;
-  $: selectedAccountActiveDispute = (selectedAccount as any)?.activeDispute ?? null;
-  $: selectedAccountStatus = String((selectedAccount as any)?.status || '');
+  $: selectedAccountActiveDispute = selectedAccount?.activeDispute ?? null;
+  $: selectedAccountStatus = String(selectedAccount?.status || '');
   $: selectedDisputeTimeout = Number(selectedAccountActiveDispute?.disputeTimeout || 0);
   $: selectedDisputeBlocksLeft = selectedAccountActiveDispute
     ? Math.max(0, selectedDisputeTimeout - Math.max(Number(replica?.state?.lastFinalizedJHeight || 0), Number(liveJHeight || 0)))
@@ -619,7 +632,7 @@
       await getXLN();
       const signerId = resolveSignerId(env);
       const feeOverrides = buildFeeOverrides();
-      const pendingBatch = (replica as any)?.state?.jBatchState?.batch;
+      const pendingBatch = replica?.state?.jBatchState?.batch;
       console.error('[settle-ui] broadcastBatch.start', JSON.stringify({
         entityId,
         signerId,
@@ -637,8 +650,8 @@
           settlements: Number(pendingBatch?.settlements?.length || 0),
         },
         feeOverrides: feeOverrides ? {
-          maxFeePerGas: String((feeOverrides as any).maxFeePerGas ?? ''),
-          maxPriorityFeePerGas: String((feeOverrides as any).maxPriorityFeePerGas ?? ''),
+          maxFeePerGasWei: String(feeOverrides.maxFeePerGasWei ?? ''),
+          maxPriorityFeePerGasWei: String(feeOverrides.maxPriorityFeePerGasWei ?? ''),
         } : null,
       }));
 
@@ -696,7 +709,7 @@
       const signerId = resolveSignerId(env);
       const parsedAmount = parsePositiveAmount(amount, tokenId);
 
-      let entityTx: any;
+      let entityTx: PendingSettleEntityTx;
       if (action === 'fund') {
         if (!counterpartyEntityId) throw new Error('Select an account to fund');
         entityTx = {

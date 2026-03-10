@@ -458,3 +458,17 @@
     - full isolated suite:
       - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=2 --workers-per-shard=1 --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-213625-963/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-213625-963/e2e-shard-00.log)
+  - removed another concentrated live-path unsafe-cast cluster:
+    - [SettlementPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/SettlementPanel.svelte)
+      - replaced local `as any`/`any` usage with typed `Env`, `EntityState`, `AccountMachine`, `CompletedBatch`, and narrow batch helper aliases
+      - batch history, dispute state, live J-height, gas suggestions, and broadcast debug payloads now read typed fields directly
+    - [server.ts](/Users/egor/xln/runtime/server.ts)
+      - typed J-event grouping without `as any`
+      - removed unnecessary `runtimeMempool` casts
+      - typed entity/account offer helpers
+      - typed faucet `knownAccount` payload shape
+  - re-verified:
+    - `cd frontend && bunx vite build --mode development`
+    - `bun build runtime/server.ts --target=bun --outfile=/tmp/runtime-server-check.js`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-custody.spec.ts,tests/e2e-dispute.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-215216-941/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-215216-941/e2e-shard-00.log)
