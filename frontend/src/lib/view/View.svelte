@@ -142,9 +142,11 @@
     }
   });
 
-  // CRITICAL: window.isolatedEnv is a GETTER — always reads from active runtime.
-  // This prevents stale env references after runtime switch (race-free).
-  if (typeof window !== 'undefined') {
+  // Localhost-only legacy debug surface while E2E helpers migrate off globals.
+  if (
+    typeof window !== 'undefined' &&
+    ['localhost', '127.0.0.1', '0.0.0.0'].includes(window.location.hostname)
+  ) {
     Object.defineProperty(window, 'isolatedEnv', {
       get() {
         return get(localEnvStore);
