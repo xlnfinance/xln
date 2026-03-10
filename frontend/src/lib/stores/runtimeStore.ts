@@ -34,6 +34,11 @@ export const activeEnv = derived(
   ($activeRuntime) => $activeRuntime?.env || null
 );
 
+const getEnvRuntimeId = (env: Env | null | undefined): string => {
+  const runtimeId = typeof env?.runtimeId === 'string' ? env.runtimeId.trim() : '';
+  return runtimeId.toLowerCase();
+};
+
 // Operations
 export const runtimeOperations = {
   // Add local runtime (for multi-party testing)
@@ -144,7 +149,7 @@ export const runtimeOperations = {
   // Update active runtime env (legacy name kept for compatibility).
   updateLocalEnv(env: Env) {
     runtimes.update(r => {
-      const envRuntimeId = String((env as any)?.runtimeId || '').toLowerCase();
+      const envRuntimeId = getEnvRuntimeId(env);
       if (envRuntimeId && r.has(envRuntimeId)) {
         const runtime = r.get(envRuntimeId)!;
         runtime.env = env;
@@ -155,7 +160,7 @@ export const runtimeOperations = {
       const activeId = String(get(activeRuntimeId) || '').toLowerCase();
       if (activeId && r.has(activeId)) {
         const runtime = r.get(activeId)!;
-        const activeEnvRuntimeId = String((runtime.env as any)?.runtimeId || '').toLowerCase();
+        const activeEnvRuntimeId = getEnvRuntimeId(runtime.env);
         if (!activeEnvRuntimeId || (envRuntimeId && activeEnvRuntimeId === envRuntimeId)) {
           runtime.env = env;
           runtime.lastSynced = Date.now();

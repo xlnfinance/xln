@@ -1,5 +1,6 @@
 import { writable, derived, get } from 'svelte/store';
 import type { TimeState } from '$lib/types/ui';
+import type { GossipLayer, Profile as GossipProfile } from '@xln/runtime/xln-api';
 import { xlnEnvironment, history } from './xlnStore';
 
 // Load initial state from localStorage
@@ -57,17 +58,26 @@ export const visibleReplicas = derived(
 );
 
 // Derived store for getting current visible gossip (based on time index)
-function normalizeGossip(gossip: any) {
+type StoredGossip = {
+  profiles: GossipProfile[];
+};
+
+const isStoredGossip = (value: unknown): value is StoredGossip =>
+  typeof value === 'object' &&
+  value !== null &&
+  Array.isArray((value as { profiles?: unknown }).profiles);
+
+function normalizeGossip(gossip: GossipLayer | StoredGossip | null | undefined): GossipLayer | null {
   if (!gossip) return null;
   if (typeof gossip.getProfiles === 'function') {
     return gossip;
   }
 
-  if (Array.isArray(gossip.profiles)) {
-    const cachedProfiles = gossip.profiles.map((profile: any) => ({ ...profile }));
+  if (isStoredGossip(gossip)) {
+    const cachedProfiles = gossip.profiles.map((profile) => ({ ...profile }));
     return {
       getProfiles: () => cachedProfiles
-    };
+    } as GossipLayer;
   }
 
   return null;
