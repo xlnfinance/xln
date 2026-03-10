@@ -801,6 +801,7 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
   // Pending broadcast blocks direct jBatch mutations (R→C/C→R execute), but we can still
   // prepare C→R settlement proposals that only touch account consensus.
   let canTouchBatch = true;
+  let abortStaleSentBatchReason: string | null = null;
   if (replica.state.jBatchState.sentBatch) {
     const sentBatch = replica.state.jBatchState.sentBatch;
     const ageMs = now - (sentBatch.lastSubmittedAt || replica.state.jBatchState.lastBroadcast || 0);
@@ -827,10 +828,11 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
             );
           } else {
             console.warn(
-              `⚠️ Hub rebalance stale sentBatch (${ageMs}ms) - clearing latch (nonce local=${localNonce}, chain=${chainNonce})`,
+              `⚠️ Hub rebalance stale sentBatch (${ageMs}ms) - queueing persisted abort ` +
+              `(nonce local=${localNonce}, chain=${chainNonce})`,
             );
-            replica.state.jBatchState.sentBatch = undefined;
-            replica.state.jBatchState.status = 'empty';
+            abortStaleSentBatchReason = 'stale-hub-rebalance-latch';
+            canTouchBatch = false;
           }
         } catch (error) {
           canTouchBatch = false;
@@ -841,12 +843,28 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
         }
       } else {
         console.warn(
-          `⚠️ Hub rebalance stale sentBatch (${ageMs}ms) - clearing latch (no jadapter nonce check available)`,
+          `⚠️ Hub rebalance stale sentBatch (${ageMs}ms) - queueing persisted abort (no jadapter nonce check available)`,
         );
-        replica.state.jBatchState.sentBatch = undefined;
-        replica.state.jBatchState.status = 'empty';
+        abortStaleSentBatchReason = 'stale-hub-rebalance-latch-no-jadapter';
+        canTouchBatch = false;
       }
     }
+  }
+
+  if (abortStaleSentBatchReason) {
+    localEntityTxs.push({
+      type: 'j_abort_sent_batch',
+      data: {
+        reason: abortStaleSentBatchReason,
+        requeueToCurrent: true,
+      },
+    });
+    outputs.push({
+      entityId: replica.entityId,
+      signerId,
+      entityTxs: localEntityTxs,
+    });
+    return outputs;
   }
 
   // Effective reserves: actual + pending C→R amounts in batch

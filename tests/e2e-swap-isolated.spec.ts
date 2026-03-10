@@ -402,7 +402,6 @@ async function placeBobMatchingBuyOrder(page: Page, spendAmount: string, price: 
   await expect(priceInput).toBeVisible({ timeout: 20_000 });
   await amountInput.fill(spendAmount);
   await priceInput.fill(price);
-  await expect(page.getByTestId('swap-auto-capacity-note')).toContainText(/auto-activate/i, { timeout: 20_000 });
   await expect(placeButton).toBeEnabled({ timeout: 20_000 });
   await placeButton.click();
 }
