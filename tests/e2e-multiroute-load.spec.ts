@@ -140,7 +140,7 @@ async function discoverHubs(page: Page): Promise<string[]> {
     while (Date.now() - start < 20_000) {
       const profiles = env?.gossip?.getProfiles?.() ?? [];
       const hubs = profiles
-        .filter((p: any) => p?.metadata?.isHub === true || (Array.isArray(p?.capabilities) && p.capabilities.includes('hub')))
+        .filter((p: any) => p?.metadata?.isHub === true)
         .map((p: any) => String(p.entityId));
       if (hubs.length >= 3) return hubs;
       const p2p = env?.runtimeState?.p2p;
