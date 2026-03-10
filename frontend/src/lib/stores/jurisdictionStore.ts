@@ -1,4 +1,6 @@
 import { writable } from 'svelte/store';
+import { getXLN } from './xlnStore';
+import type { JurisdictionConfig as RuntimeJurisdictionConfig } from '@xln/runtime/xln-api';
 
 interface JurisdictionConfig {
   name: string;
@@ -49,8 +51,6 @@ export async function loadJurisdictions(): Promise<JurisdictionsData> {
     try {
       console.log('🔍 JURISDICTIONS: Loading ONCE from server (single source)');
 
-      // Use runtime.js getAvailableJurisdictions instead of multiple fetches
-      const { getXLN } = await import('../stores/xlnStore');
       const xln = await getXLN();
       const jurisdictionsList = await xln.getAvailableJurisdictions();
 
@@ -67,7 +67,7 @@ export async function loadJurisdictions(): Promise<JurisdictionsData> {
       };
 
       // Convert jurisdiction array to object format
-      jurisdictionsList.forEach((j: any) => {
+      jurisdictionsList.forEach((j: RuntimeJurisdictionConfig) => {
         data.jurisdictions[j.name.toLowerCase()] = {
           name: j.name,
           chainId: j.chainId,

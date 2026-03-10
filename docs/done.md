@@ -315,3 +315,30 @@
 - Verified: bun test runtime/__tests__/relay-router.test.ts runtime/__tests__/routing-metadata.test.ts
 - Verified: tests/e2e-payment.spec.ts (isolated)
 - Verified: tests/e2e-custody.spec.ts (isolated)
+- 2026-03-10T19:40:00Z frontend/runtime cleanup continued in small validated batches:
+  - removed the dead public `Profile.capabilities` field from the real gossip schema path:
+    - [runtime/networking/gossip.ts](/Users/egor/xln/runtime/networking/gossip.ts)
+    - [runtime/networking/gossip-helper.ts](/Users/egor/xln/runtime/networking/gossip-helper.ts)
+    - [runtime/server.ts](/Users/egor/xln/runtime/server.ts)
+    - [runtime/scripts/e2e-mesh-control.ts](/Users/egor/xln/runtime/scripts/e2e-mesh-control.ts)
+    - aligned tests and debug readers with the stricter schema
+  - removed a redundant safe lazy-import path in [View.svelte](/Users/egor/xln/frontend/src/lib/view/View.svelte) by switching to static imports where there is no circular dependency
+  - tightened live frontend component typing without changing runtime behavior:
+    - [AccountDropdown.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/AccountDropdown.svelte)
+    - [AccountList.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/AccountList.svelte)
+    - [HtlcActivityPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/HtlcActivityPanel.svelte)
+    - [ProposalsList.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/ProposalsList.svelte)
+    - [ChatMessages.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/ChatMessages.svelte)
+    - [OnboardingPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/OnboardingPanel.svelte)
+    - [PaymentForm.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/PaymentForm.svelte)
+  - tightened small store helpers:
+    - [runtimeStore.ts](/Users/egor/xln/frontend/src/lib/stores/runtimeStore.ts)
+    - [jurisdictionStore.ts](/Users/egor/xln/frontend/src/lib/stores/jurisdictionStore.ts)
+    - [timeStore.ts](/Users/egor/xln/frontend/src/lib/stores/timeStore.ts)
+  - fixed one real bug on the way:
+    - [ChatMessages.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/ChatMessages.svelte) now awaits `getXLN()` before calling `queueEntityInput`
+  - verified:
+    - `bun test runtime/__tests__/routing-metadata.test.ts runtime/__tests__/relay-router.test.ts`
+    - `cd frontend && bunx vite build --mode development`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-193333-245/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-193333-245/e2e-shard-00.log)
