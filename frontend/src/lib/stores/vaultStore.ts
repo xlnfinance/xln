@@ -50,7 +50,6 @@ const defaultState: RuntimesState = {
 // Storage key
 const VAULT_STORAGE_KEY = 'xln-vaults';
 const BROWSER_GOSSIP_POLL_MS = 1000;
-const DEBUG_GLOBAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 const normalizeRuntimeId = (value: string | null | undefined): string => {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -1800,13 +1799,3 @@ export const vaultOperations = {
     return signer?.entityId || null;
   }
 };
-
-// Localhost-only debug surface for legacy E2E helpers during migration off globals.
-if (typeof window !== 'undefined' && DEBUG_GLOBAL_HOSTS.has(window.location.hostname)) {
-  const debugWindow = window as Window & typeof globalThis & {
-    vaultOperations?: typeof vaultOperations;
-    runtimesState?: typeof runtimesState;
-  };
-  debugWindow.vaultOperations = vaultOperations;
-  debugWindow.runtimesState = runtimesState;
-}

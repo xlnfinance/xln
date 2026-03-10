@@ -477,3 +477,8 @@
   - Tightened vaultStore hot-path typing. Removed all remaining any/as any from frontend/src/lib/stores/vaultStore.ts.
   - Simplified runtime cleanup to use clearDB(env) instead of ad-hoc DB-handle access.
   - Verified: frontend dev build, runtime/server.ts build, focused isolated E2E payment + custody.
+
+- 2026-03-10
+  - Removed the localhost-only window.vaultOperations debug surface.
+  - Cleaned SettingsView typing: jurisdiction status, proposer list, IndexedDB enumeration, and error detail extraction now use explicit local types.
+  - Verified: frontend dev build.
