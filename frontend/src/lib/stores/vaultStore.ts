@@ -697,11 +697,6 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
     applyRuntimeLogPreference(env);
     env.runtimeId = runtimeIdLower;
     env.dbNamespace = runtimeIdLower;
-    const savedDelay = get(settings)?.runtimeDelay ?? 0;
-    if (savedDelay > 0) {
-      if (!env.runtimeConfig) env.runtimeConfig = { minFrameDelayMs: savedDelay, loopIntervalMs: 25 };
-      else env.runtimeConfig.minFrameDelayMs = savedDelay;
-    }
     ensureRuntimeLoopRunning(env, xln, `fresh-env:${runtimeIdLower.slice(0, 12)}`);
 
     console.log('[VaultStore] Importing testnet anvil...');

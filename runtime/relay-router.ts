@@ -189,8 +189,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
         profile =>
           defaultEntityIds.has(profile.entityId.toLowerCase()) ||
           profile.metadata?.isHub === true ||
-          profile.capabilities.includes('hub') ||
-          profile.capabilities.includes('routing'),
+          profile.capabilities.includes('hub'),
       );
       if (broadcastProfiles.length === 0) {
         pushDebugEvent(store, {

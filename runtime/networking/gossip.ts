@@ -30,19 +30,12 @@ export type ProfileMetadata = {
   board: BoardMetadata;
   entityPublicKey: string;
   profileHanko?: string;
-  region?: string;
-  version?: string;
-  capacity?: number;
-  uptime?: string;
   position?: { x: number; y: number; z: number };
-  role?: string;
-  relayUrl?: string;
   policyVersion?: number;
   rebalanceBaseFee?: string;
   rebalanceLiquidityFeeBps?: string;
   rebalanceGasFee?: string;
   rebalanceTimeoutMs?: number;
-  [key: string]: unknown;
 };
 
 export type ProfileTokenCapacity = {
@@ -85,6 +78,12 @@ export interface GossipLayer {
     findPaths: (source: string, target: string, amount?: bigint, tokenId?: number) => Promise<PaymentRoute[]>;
   };
 }
+
+export const isHubProfile = (profile: Profile): boolean =>
+  profile.metadata.isHub === true || profile.capabilities.includes('hub');
+
+export const isRoutableProfile = (profile: Profile): boolean =>
+  isHubProfile(profile);
 
 type GossipLayerOptions = {
   onAnnounce?: (profile: Profile) => void;
@@ -326,12 +325,10 @@ export const parseProfile = (raw: unknown): Profile => {
   const endpoints = normalizeStringArray(raw.endpoints);
   const relays = normalizeStringArray(raw.relays);
   const metadata: ProfileMetadata = {
-    ...metadataRaw,
     entityEncPubKey,
     isHub:
       metadataRaw.isHub === true ||
-      capabilities.includes('hub') ||
-      capabilities.includes('routing'),
+      capabilities.includes('hub'),
     routingFeePPM: Math.max(
       0,
       Number.isFinite(Number(metadataRaw.routingFeePPM)) ? Math.floor(Number(metadataRaw.routingFeePPM)) : 100,
@@ -339,8 +336,35 @@ export const parseProfile = (raw: unknown): Profile => {
     baseFee: parseBigIntValue(metadataRaw.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
     board: parseBoardMetadata(metadataRaw.board, entityId),
     entityPublicKey,
+    ...(isRecord(metadataRaw.position)
+      && Number.isFinite(Number(metadataRaw.position.x))
+      && Number.isFinite(Number(metadataRaw.position.y))
+      && Number.isFinite(Number(metadataRaw.position.z))
+      ? {
+          position: {
+            x: Number(metadataRaw.position.x),
+            y: Number(metadataRaw.position.y),
+            z: Number(metadataRaw.position.z),
+          },
+        }
+      : {}),
     ...(typeof metadataRaw.profileHanko === 'string' && metadataRaw.profileHanko.trim().length > 0
       ? { profileHanko: metadataRaw.profileHanko.trim() }
+      : {}),
+    ...(typeof metadataRaw.policyVersion === 'number' && Number.isFinite(metadataRaw.policyVersion)
+      ? { policyVersion: Math.floor(metadataRaw.policyVersion) }
+      : {}),
+    ...(typeof metadataRaw.rebalanceBaseFee === 'string' && metadataRaw.rebalanceBaseFee.trim().length > 0
+      ? { rebalanceBaseFee: metadataRaw.rebalanceBaseFee.trim() }
+      : {}),
+    ...(typeof metadataRaw.rebalanceLiquidityFeeBps === 'string' && metadataRaw.rebalanceLiquidityFeeBps.trim().length > 0
+      ? { rebalanceLiquidityFeeBps: metadataRaw.rebalanceLiquidityFeeBps.trim() }
+      : {}),
+    ...(typeof metadataRaw.rebalanceGasFee === 'string' && metadataRaw.rebalanceGasFee.trim().length > 0
+      ? { rebalanceGasFee: metadataRaw.rebalanceGasFee.trim() }
+      : {}),
+    ...(typeof metadataRaw.rebalanceTimeoutMs === 'number' && Number.isFinite(metadataRaw.rebalanceTimeoutMs)
+      ? { rebalanceTimeoutMs: Math.floor(metadataRaw.rebalanceTimeoutMs) }
       : {}),
   };
   return {
@@ -376,7 +400,7 @@ export const canonicalizeProfile = (
   }
 
   const rawProfile = profile as unknown as Record<string, unknown>;
-  const metadata = profile.metadata as Record<string, unknown>;
+  const metadata = profile.metadata as unknown as Record<string, unknown>;
   assertNoLegacyProfileFields(rawProfile, metadata, entityId);
   if (typeof profile.name !== 'string' || profile.name.trim().length === 0) {
     throw new Error(`GOSSIP_PROFILE_NAME_REQUIRED: entity=${entityId}`);
@@ -436,19 +460,44 @@ export const canonicalizeProfile = (
       tokenCapacities: parseProfileTokenCapacities(account.tokenCapacities, entityId, account.counterpartyId),
     })),
     metadata: {
-      ...metadata,
       entityEncPubKey: normalizedEntityEncPubKey,
       board,
       routingFeePPM,
       baseFee,
       entityPublicKey,
+      ...(isRecord(metadata.position)
+        && Number.isFinite(Number(metadata.position.x))
+        && Number.isFinite(Number(metadata.position.y))
+        && Number.isFinite(Number(metadata.position.z))
+        ? {
+            position: {
+              x: Number(metadata.position.x),
+              y: Number(metadata.position.y),
+              z: Number(metadata.position.z),
+            },
+          }
+        : {}),
+      ...(typeof metadata.policyVersion === 'number' && Number.isFinite(metadata.policyVersion)
+        ? { policyVersion: Math.floor(metadata.policyVersion) }
+        : {}),
+      ...(typeof metadata.rebalanceBaseFee === 'string' && metadata.rebalanceBaseFee.trim().length > 0
+        ? { rebalanceBaseFee: metadata.rebalanceBaseFee.trim() }
+        : {}),
+      ...(typeof metadata.rebalanceLiquidityFeeBps === 'string' && metadata.rebalanceLiquidityFeeBps.trim().length > 0
+        ? { rebalanceLiquidityFeeBps: metadata.rebalanceLiquidityFeeBps.trim() }
+        : {}),
+      ...(typeof metadata.rebalanceGasFee === 'string' && metadata.rebalanceGasFee.trim().length > 0
+        ? { rebalanceGasFee: metadata.rebalanceGasFee.trim() }
+        : {}),
+      ...(typeof metadata.rebalanceTimeoutMs === 'number' && Number.isFinite(metadata.rebalanceTimeoutMs)
+        ? { rebalanceTimeoutMs: Math.floor(metadata.rebalanceTimeoutMs) }
+        : {}),
       ...(typeof metadata.profileHanko === 'string' && metadata.profileHanko.trim().length > 0
         ? { profileHanko: metadata.profileHanko.trim() }
         : {}),
       isHub:
         metadata.isHub === true ||
-        capabilities.includes('hub') === true ||
-        capabilities.includes('routing') === true,
+        capabilities.includes('hub') === true,
     },
   };
 };
@@ -511,15 +560,10 @@ export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer
 
   // Get all hubs (profiles with isHub=true)
   const getHubs = (): Profile[] => {
-    const hubs = Array.from(profiles.values()).filter(
-      p =>
-        p.metadata.isHub === true ||
-        p.capabilities.includes('hub') === true ||
-        p.capabilities.includes('routing') === true
-    );
+    const hubs = Array.from(profiles.values()).filter((p) => isHubProfile(p));
     logDebug('GOSSIP', `🏠 getHubs(): Found ${hubs.length} hubs`);
     for (const h of hubs) {
-      logDebug('GOSSIP', `  - ${h.entityId.slice(-4)}: ${h.name} region=${h.metadata.region || 'unknown'}`);
+      logDebug('GOSSIP', `  - ${h.entityId.slice(-4)}: ${h.name}`);
     }
     return hubs;
   };

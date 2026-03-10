@@ -867,13 +867,9 @@ export class RuntimeP2P {
       const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.timestamp);
       const profile = buildLocalEntityProfile(this.env, replica.state, monotonicTimestamp);
       profile.runtimeId = this.runtimeId;
-      if (this.isHub) {
-        profile.capabilities = Array.from(new Set([...profile.capabilities, 'hub', 'relay', 'routing', 'faucet']));
-        profile.metadata = { ...profile.metadata, isHub: true };
-        if (this.relayUrls.length > 0) {
-          profile.endpoints = this.relayUrls;
-          profile.relays = this.relayUrls;
-        }
+      if (this.relayUrls.length > 0) {
+        profile.endpoints = this.relayUrls;
+        profile.relays = this.relayUrls;
       }
       const firstValidator = replica.state.config.validators[0];
       if (!firstValidator) {

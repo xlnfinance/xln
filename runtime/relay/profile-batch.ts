@@ -13,8 +13,7 @@ const normalizeEntityId = (entityId: unknown): string => String(entityId || '').
 
 export const isHubProfile = (profile: Profile): boolean =>
   profile.metadata.isHub === true ||
-  profile.capabilities.includes('hub') ||
-  profile.capabilities.includes('routing');
+  profile.capabilities.includes('hub');
 
 export const sortProfilesForBatch = (left: Profile, right: Profile): number => {
   const leftHub = isHubProfile(left);

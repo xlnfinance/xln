@@ -137,8 +137,8 @@ const settingsOperations = {
     this.setDropdownMode(current.dropdownMode === 'signer-first' ? 'entity-first' : 'signer-first');
   },
 
-  // Update server delay
-  setServerDelay(delay: number) {
+  // Update runtime frame delay
+  setRuntimeDelay(delay: number) {
     settings.update(current => ({ ...current, runtimeDelay: delay }));
     this.saveToStorage();
   },

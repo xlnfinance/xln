@@ -708,7 +708,7 @@ const run = async (): Promise<void> => {
     rpcUrl: jurisdiction.rpc,
     httpUrl: apiUrl,
     port: resolvedArgs.apiPort,
-    capabilities: ['hub', 'routing', 'faucet'],
+    capabilities: ['hub'],
   });
   if (!bootstrap?.entityId) {
     throw new Error('HUB_BOOTSTRAP_FAILED');

@@ -100,16 +100,12 @@ export async function gotoApp(
     await page.waitForURL('**/app', { timeout: 10_000 });
   }
   await page.waitForFunction(() => {
-    const maybeWindow = window as typeof window & {
-      vaultOperations?: { createRuntime?: unknown };
-      runtimesState?: unknown;
-    };
     const loadingVisible = Boolean(document.querySelector('.loading-screen'));
     const errorVisible = Boolean(document.querySelector('.error-screen'));
+    const viewVisible = Boolean(document.querySelector('.view-wrapper'));
     return !loadingVisible &&
       !errorVisible &&
-      typeof maybeWindow.vaultOperations?.createRuntime === 'function' &&
-      !!maybeWindow.runtimesState;
+      viewVisible;
   }, { timeout: initTimeoutMs });
   if (settleMs > 0) await page.waitForTimeout(settleMs);
 }
@@ -127,6 +123,13 @@ export function selectDemoMnemonic(label: DemoUserName): string {
 }
 
 export async function createRuntime(page: Page, label: string, mnemonic: string): Promise<void> {
+  await page.waitForFunction(() => {
+    const view = window as typeof window & {
+      vaultOperations?: { createRuntime?: unknown };
+    };
+    return typeof view.vaultOperations?.createRuntime === 'function';
+  }, { timeout: 30_000 });
+
   const result = await page.evaluate(
     async ({ label, mnemonic }) => {
       try {

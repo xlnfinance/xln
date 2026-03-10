@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { Profile } from '../networking/gossip';
 import { relayRoute } from '../relay-router';
 import { createRelayStore } from '../relay-store';
 
@@ -12,6 +13,44 @@ const ENTITY_B = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 const ENTITY_C = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 
 type FakeWs = { label: string };
+
+const buildProfile = (
+  entityId: string,
+  runtimeId: string,
+  runtimeEncPubKey: string,
+  overrides: Partial<Profile> = {},
+): Profile => ({
+  entityId,
+  runtimeId,
+  name: entityId === ENTITY_A ? 'alice' : entityId === ENTITY_B ? 'hub-b' : 'leaf-c',
+  avatar: '',
+  bio: '',
+  website: '',
+  lastUpdated: 1,
+  runtimeEncPubKey,
+  capabilities: [],
+  publicAccounts: [],
+  endpoints: [],
+  relays: [],
+  metadata: {
+    entityEncPubKey: runtimeEncPubKey,
+    isHub: false,
+    routingFeePPM: 100,
+    baseFee: 0n,
+    entityPublicKey: `pub:${entityId.slice(2, 10)}`,
+    board: {
+      threshold: 1,
+      validators: [{
+        signer: runtimeId,
+        signerId: runtimeId,
+        weight: 1,
+        publicKey: `board:${entityId.slice(2, 10)}`,
+      }],
+    },
+  },
+  accounts: [],
+  ...overrides,
+});
 
 describe('relay-router gossip fanout', () => {
   test('broadcasts fresh gossip updates to other connected clients', async () => {
@@ -41,31 +80,7 @@ describe('relay-router gossip fanout', () => {
       to: SERVER_RUNTIME_ID,
       payload: {
         profiles: [
-          {
-            entityId: ENTITY_A,
-            runtimeId: RUNTIME_A,
-            name: 'alice',
-            avatar: '',
-            bio: '',
-            website: '',
-            lastUpdated: 123,
-            capabilities: ['routing'],
-            runtimeEncPubKey: KEY_A,
-            publicAccounts: [],
-            endpoints: [],
-            relays: [],
-            metadata: {
-              entityEncPubKey: KEY_A,
-              isHub: false,
-              routingFeePPM: 100,
-              baseFee: '0',
-              board: {
-                threshold: 1,
-                validators: [{ signer: '0x1111111111111111111111111111111111111111', weight: 1 }],
-              },
-            },
-            accounts: [],
-          },
+          buildProfile(ENTITY_A, RUNTIME_A, KEY_A, { lastUpdated: 123, name: 'alice' }),
         ],
       },
     });
@@ -107,81 +122,29 @@ describe('relay-router gossip fanout', () => {
       to: SERVER_RUNTIME_ID,
       payload: {
         profiles: [
-          {
-            entityId: ENTITY_A,
-            runtimeId: RUNTIME_A,
-            name: 'leaf-a',
-            avatar: '',
-            bio: '',
-            website: '',
-            lastUpdated: 100,
-            capabilities: [],
-            runtimeEncPubKey: KEY_A,
-            publicAccounts: [],
-            endpoints: [],
-            relays: [],
-            metadata: {
-              entityEncPubKey: KEY_A,
-              isHub: false,
-              routingFeePPM: 100,
-              baseFee: '0',
-              board: {
-                threshold: 1,
-                validators: [{ signer: '0x1111111111111111111111111111111111111111', weight: 1 }],
-              },
-            },
-            accounts: [],
-          },
-          {
-            entityId: ENTITY_B,
-            runtimeId: RUNTIME_B,
-            name: 'hub-b',
-            avatar: '',
-            bio: '',
-            website: '',
+          buildProfile(ENTITY_A, RUNTIME_A, KEY_A, { lastUpdated: 100, name: 'leaf-a' }),
+          buildProfile(ENTITY_B, RUNTIME_B, KEY_B, {
             lastUpdated: 200,
-            capabilities: ['hub', 'routing'],
-            runtimeEncPubKey: KEY_B,
-            publicAccounts: [],
-            endpoints: [],
-            relays: [],
+            name: 'hub-b',
+            capabilities: ['hub'],
             metadata: {
+              entityEncPubKey: KEY_B,
               isHub: true,
-              entityEncPubKey: KEY_B,
               routingFeePPM: 100,
-              baseFee: '0',
+              baseFee: 0n,
+              entityPublicKey: `pub:${ENTITY_B.slice(2, 10)}`,
               board: {
                 threshold: 1,
-                validators: [{ signer: '0x2222222222222222222222222222222222222222', weight: 1 }],
+                validators: [{
+                  signer: RUNTIME_B,
+                  signerId: RUNTIME_B,
+                  weight: 1,
+                  publicKey: `board:${ENTITY_B.slice(2, 10)}`,
+                }],
               },
             },
-            accounts: [],
-          },
-          {
-            entityId: ENTITY_C,
-            runtimeId: RUNTIME_B,
-            name: 'leaf-c',
-            avatar: '',
-            bio: '',
-            website: '',
-            lastUpdated: 300,
-            capabilities: [],
-            runtimeEncPubKey: KEY_B,
-            publicAccounts: [],
-            endpoints: [],
-            relays: [],
-            metadata: {
-              entityEncPubKey: KEY_B,
-              isHub: false,
-              routingFeePPM: 100,
-              baseFee: '0',
-              board: {
-                threshold: 1,
-                validators: [{ signer: '0x2222222222222222222222222222222222222222', weight: 1 }],
-              },
-            },
-            accounts: [],
-          },
+          }),
+          buildProfile(ENTITY_C, RUNTIME_B, KEY_B, { lastUpdated: 300, name: 'leaf-c' }),
         ],
       },
     });

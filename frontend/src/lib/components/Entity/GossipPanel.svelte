@@ -14,8 +14,7 @@
     capabilities?: string[];
     metadata?: {
       isHub?: boolean;
-      region?: string;
-      [k: string]: unknown;
+      entityPublicKey?: string;
     };
   };
 
@@ -161,7 +160,6 @@
           <div class="meta">
             {#if isHub(profile)}<span class="chip">hub</span>{/if}
             <span class="chip">runtime {profile.runtimeId ? profile.runtimeId.slice(0, 10) : '-'}</span>
-            <span class="chip">{profile.metadata?.region || 'global'}</span>
             <span class="chip">{formatTs(profile.lastUpdated)}</span>
           </div>
         </div>
