@@ -114,7 +114,6 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
           getProfiles?: () => Array<{
             entityId?: string;
             metadata?: { isHub?: boolean };
-            capabilities?: string[];
           }>;
         };
       };

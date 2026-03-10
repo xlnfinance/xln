@@ -32,7 +32,6 @@ type HubFeeConfig = {
 type GossipProfile = {
   entityId: string;
   runtimeId?: string;
-  capabilities?: string[];
   metadata?: {
     runtimeId?: string;
     isHub?: boolean;

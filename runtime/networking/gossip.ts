@@ -2,7 +2,7 @@
  * Gossip Layer Implementation for XLN
  *
  * This module implements the gossip layer inside the runtime object.
- * It manages entity profiles and their capabilities in a distributed network.
+ * It manages entity profiles in a distributed network.
  */
 
 import { logDebug } from '../logger';
@@ -59,7 +59,6 @@ export type Profile = {
   lastUpdated: number;
   runtimeId: string; // Runtime identity (usually signer1 address)
   runtimeEncPubKey: string;
-  capabilities: string[]; // generic declared features, not used to infer hub status
   publicAccounts: string[]; // direct peers with inbound capacity
   endpoints: string[]; // websocket endpoints for this runtime
   relays: string[]; // preferred relay runtimes
@@ -127,7 +126,6 @@ const ALLOWED_PROFILE_KEYS = [
   'lastUpdated',
   'runtimeId',
   'runtimeEncPubKey',
-  'capabilities',
   'publicAccounts',
   'endpoints',
   'relays',
@@ -406,7 +404,6 @@ export const parseProfile = (raw: unknown): Profile => {
   if (!entityPublicKey) {
     throw new Error(`GOSSIP_PROFILE_ENTITY_PUBLIC_KEY_REQUIRED: entity=${entityId}`);
   }
-  const capabilities = normalizeStringArray(raw.capabilities);
   const publicAccounts = normalizeStringArray(raw.publicAccounts);
   const endpoints = normalizeStringArray(raw.endpoints);
   const relays = normalizeStringArray(raw.relays);
@@ -466,7 +463,6 @@ export const parseProfile = (raw: unknown): Profile => {
     lastUpdated,
     runtimeId,
     runtimeEncPubKey,
-    capabilities,
     publicAccounts,
     endpoints,
     relays,
@@ -524,7 +520,6 @@ export const canonicalizeProfile = (
     throw new Error(`GOSSIP_PROFILE_NAME_NOT_NORMALIZED: entity=${entityId}`);
   }
 
-  const capabilities = normalizeStringArray(profile.capabilities);
   const publicAccounts = normalizeStringArray(profile.publicAccounts);
   const endpoints = normalizeStringArray(profile.endpoints);
   const relays = normalizeStringArray(profile.relays);
@@ -541,7 +536,6 @@ export const canonicalizeProfile = (
     lastUpdated: incomingLastUpdated,
     runtimeId: normalizedRuntimeId,
     runtimeEncPubKey: normalizedRuntimeEncPubKey,
-    capabilities,
     publicAccounts,
     endpoints,
     relays,

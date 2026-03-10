@@ -483,7 +483,6 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
   isHub: boolean;
   online: boolean;
   lastUpdated: number;
-  capabilities: string[];
   accounts: unknown[];
   publicAccounts: unknown[];
   metadata: Record<string, unknown>;
@@ -499,7 +498,6 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
     isHub: boolean;
     online: boolean;
     lastUpdated: number;
-    capabilities: string[];
     accounts: unknown[];
     publicAccounts: unknown[];
     metadata: Record<string, unknown>;
@@ -513,7 +511,6 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
       profile?.metadata && typeof profile.metadata === 'object'
         ? profile.metadata as Record<string, unknown>
         : {};
-    const capabilities = Array.isArray(profile?.capabilities) ? profile.capabilities : [];
     const isHub = profile?.metadata?.isHub === true;
     const name =
       typeof profile?.name === 'string' && profile.name.trim().length > 0
@@ -527,7 +524,6 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
       isHub,
       online,
       lastUpdated: Number(profile?.lastUpdated || entry.timestamp || 0),
-      capabilities,
       accounts: Array.isArray(profile?.accounts) ? profile.accounts : [],
       publicAccounts: Array.isArray(profile?.publicAccounts) ? profile.publicAccounts : [],
       metadata,
@@ -549,7 +545,6 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
       isHub: true,
       online: existing?.online === true || online,
       lastUpdated: Math.max(existing?.lastUpdated || 0, Date.now()),
-      capabilities: existing?.capabilities || [],
       accounts: existing?.accounts || [],
       publicAccounts: existing?.publicAccounts || [],
       metadata: {
@@ -563,8 +558,7 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
     .filter((entity) => {
       if (onlineOnly && !entity.online) return false;
       if (!q) return true;
-      const blob =
-        `${entity.entityId} ${entity.runtimeId || ''} ${entity.name} ${JSON.stringify(entity.capabilities || [])}`.toLowerCase();
+      const blob = `${entity.entityId} ${entity.runtimeId || ''} ${entity.name}`.toLowerCase();
       return blob.includes(q);
     })
     .sort((left, right) => (right.lastUpdated || 0) - (left.lastUpdated || 0))

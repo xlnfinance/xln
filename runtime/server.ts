@@ -3920,7 +3920,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           isHub,
           online,
           lastUpdated: Number(profile.lastUpdated || entry.timestamp || 0),
-          capabilities: profile.capabilities,
           accounts: profile.accounts,
           publicAccounts: profile.publicAccounts,
           metadata: profile.metadata,
@@ -3929,8 +3928,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       .filter(e => {
         if (onlineOnly && !e.online) return false;
         if (!q) return true;
-        const blob =
-          `${e.entityId} ${e.runtimeId || ''} ${e.name} ${JSON.stringify(e.capabilities || [])}`.toLowerCase();
+        const blob = `${e.entityId} ${e.runtimeId || ''} ${e.name}`.toLowerCase();
         return blob.includes(q);
       })
       .sort((a, b) => (b.lastUpdated || 0) - (a.lastUpdated || 0))
@@ -4534,9 +4532,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       console.log(`[FAUCET/OFFCHAIN] profiles=${allProfiles.length} user=${userSuffix}`);
       for (const p of allProfiles) {
         const entityId = typeof p?.entityId === 'string' ? p.entityId : 'unknown';
-        const capabilities = Array.isArray(p?.capabilities) ? p.capabilities.join(',') : '';
         console.log(
-          `  profile: ${entityId === 'unknown' ? entityId : entityId.slice(-8)} isHub=${p?.metadata?.isHub === true} caps=[${capabilities}]`,
+          `  profile: ${entityId === 'unknown' ? entityId : entityId.slice(-8)} isHub=${p?.metadata?.isHub === true}`,
         );
       }
       const gossipHubs = getFaucetHubProfiles(env);

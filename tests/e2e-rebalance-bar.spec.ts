@@ -1205,7 +1205,6 @@ async function readRebalanceDiagnostics(page: Page, hubId: string) {
         counterpartyRebalanceFeePolicy: acc.counterpartyRebalanceFeePolicy || null,
         profileFound: !!profile,
         profileIsHub: profile?.metadata?.isHub === true,
-        profileCapabilities: Array.isArray(profile?.capabilities) ? profile.capabilities : [],
         profileFeeFields: {
           rebalanceBaseFee: profile?.metadata?.rebalanceBaseFee ?? null,
           rebalanceLiquidityFeeBps: profile?.metadata?.rebalanceLiquidityFeeBps ?? null,
