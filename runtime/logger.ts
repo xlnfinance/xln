@@ -144,30 +144,3 @@ export function disableAllLogs(): void {
 }
 
 // Extend Window interface for debugging
-declare global {
-  interface Window {
-    __xlnLogConfigInstalled?: boolean;
-    logConfig: {
-      show: typeof showLogConfig;
-      set: typeof setLogConfig;
-      enableAll: typeof enableAllLogs;
-      disableAll: typeof disableAllLogs;
-      config: typeof LOG_CONFIG;
-    };
-  }
-}
-
-// Export to window for runtime debugging
-if (typeof window !== 'undefined') {
-  window.logConfig = {
-    show: showLogConfig,
-    set: setLogConfig,
-    enableAll: enableAllLogs,
-    disableAll: disableAllLogs,
-    config: LOG_CONFIG,
-  };
-  if (!window.__xlnLogConfigInstalled) {
-    window.__xlnLogConfigInstalled = true;
-    console.log('🔧 Log config available at window.logConfig');
-  }
-}

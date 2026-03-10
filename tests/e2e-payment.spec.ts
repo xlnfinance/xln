@@ -17,15 +17,10 @@ import { ensureE2EBaseline, APP_BASE_URL } from './utils/e2e-baseline';
 import { connectHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { getRenderedPrimaryOutbound } from './utils/e2e-account-ui';
+import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
 
 const CONSENSUS_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
-
-type PrimaryAccountState = {
-  counterpartyId: string;
-  currentHeight: number;
-  outboundWei: string;
-};
 
 // Collect console messages matching patterns
 class ConsoleCollector {
@@ -89,71 +84,6 @@ async function getConnectedHubEntityId(page: Page): Promise<string | null> {
   });
 }
 
-async function getPrimaryAccountState(
-  page: Page,
-  preferredCounterpartyId?: string,
-): Promise<PrimaryAccountState | null> {
-  return page.evaluate(({ preferredCounterpartyId: preferred }) => {
-    const maybeWindow = window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-        eReplicas?: Map<string, {
-          state?: {
-            accounts?: Map<string, {
-              currentHeight?: number;
-              deltas?: Map<number | string, unknown>;
-            }>;
-          };
-        }>;
-      };
-      XLN?: {
-        deriveDelta?: (delta: unknown, isLeft: boolean) => { outCapacity?: bigint | string | number };
-        isLeft?: (leftEntityId: string, rightEntityId: string) => boolean;
-      };
-    };
-
-    const env = maybeWindow.isolatedEnv;
-    const xln = maybeWindow.XLN;
-    if (!env?.eReplicas || typeof xln?.deriveDelta !== 'function') return null;
-
-    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
-      const [entityId, signerId] = String(replicaKey).split(':');
-      if (!entityId || !signerId) continue;
-      if (runtimeSigner && String(signerId).toLowerCase() !== runtimeSigner) continue;
-
-      const accounts = replica.state?.accounts;
-      if (!(accounts instanceof Map)) continue;
-
-      const orderedCounterparties = [
-        ...(preferred ? [preferred] : []),
-        ...Array.from(accounts.keys()).filter((counterpartyId) => String(counterpartyId) !== preferred),
-      ];
-
-      for (const counterpartyId of orderedCounterparties) {
-        const account = accounts.get(counterpartyId);
-        const delta = account?.deltas?.get?.(1) ?? account?.deltas?.get?.('1');
-        if (!account || delta === undefined) continue;
-        const isLeft = typeof xln.isLeft === 'function'
-          ? Boolean(xln.isLeft(entityId, String(counterpartyId)))
-          : entityId.toLowerCase() < String(counterpartyId).toLowerCase();
-        const derived = xln.deriveDelta(delta, isLeft);
-        const outbound = derived?.outCapacity;
-        const outboundWei = typeof outbound === 'bigint'
-          ? outbound.toString()
-          : String(outbound ?? '0');
-        return {
-          counterpartyId: String(counterpartyId),
-          currentHeight: Number(account.currentHeight || 0),
-          outboundWei,
-        };
-      }
-    }
-
-    return null;
-  }, { preferredCounterpartyId: preferredCounterpartyId ?? null });
-}
-
 test.describe('E2E HTLC Payment Flow', () => {
   // Scenario: a fresh runtime connects to the baseline hub mesh, receives offchain funds,
   // sends one HTLC payment through the current Pay UI, and proves reload restores the same account state.
@@ -183,7 +113,7 @@ test.describe('E2E HTLC Payment Flow', () => {
     // ── Step 1: Load app ──
     process.stdout.write('Step 1: Loading app...\n');
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
-    await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
+    const alice = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
     process.stdout.write('  Runtime initialized.\n');
 
     // ── Step 2: Open account with first baseline hub ──
@@ -245,6 +175,7 @@ test.describe('E2E HTLC Payment Flow', () => {
     await expect(page.locator('text=/1 hop|route/i').first()).toBeVisible({ timeout: 10_000 });
 
     // Send Payment — capture HTLC-specific console logs
+    const paymentCursor = await getPersistedReceiptCursor(page);
     const htlcSecretP = console.waitFor(/\[Send\] Hashlock secret=/);
     const sendPaymentBtn = page.getByRole('button', { name: 'Pay Now' });
     await expect(sendPaymentBtn).toBeEnabled({ timeout: 5000 });
@@ -256,13 +187,19 @@ test.describe('E2E HTLC Payment Flow', () => {
     expect(htlcLog).toContain('Hashlock secret=');
     expect(htlcLog).toContain('hashlock=');
 
+    await waitForPersistedFrameEvent(page, {
+      cursor: paymentCursor,
+      eventName: 'PaymentFinalized',
+      entityId: alice.entityId,
+      timeoutMs: CONSENSUS_TIMEOUT,
+    });
+
     let outboundAfterPayment = outboundBeforePayment;
     await expect.poll(async () => {
       outboundAfterPayment = await getRenderedPrimaryOutbound(page);
       return outboundAfterPayment;
     }, { timeout: CONSENSUS_TIMEOUT }).toBeLessThan(outboundBeforePayment);
-    const persistedBeforeReload = await getPrimaryAccountState(page, connectedHubId ?? undefined);
-    expect(persistedBeforeReload, 'account state must exist before reload').not.toBeNull();
+    const persistedHeightBeforeReload = (await getPersistedReceiptCursor(page)).nextHeight - 1;
 
     // Verify HTLC handler was invoked (browser-side logs)
     const htlcHandlerLog = console.find(/HTLC-PAYMENT HANDLER/);
@@ -285,12 +222,13 @@ test.describe('E2E HTLC Payment Flow', () => {
       };
       return Boolean(maybeWindow.isolatedEnv?.runtimeId) && Number(maybeWindow.isolatedEnv?.eReplicas?.size || 0) > 0;
     }, { timeout: 60_000 });
-
-    await expect.poll(async () => {
-      return await getPrimaryAccountState(page, connectedHubId ?? undefined);
-    }, { timeout: 60_000 }).toEqual(persistedBeforeReload);
+    await expect.poll(async () => await getRenderedPrimaryOutbound(page), { timeout: 60_000 }).toBe(outboundAfterPayment);
+    await expect.poll(
+      async () => (await getPersistedReceiptCursor(page)).nextHeight - 1,
+      { timeout: 60_000 },
+    ).toBeGreaterThanOrEqual(persistedHeightBeforeReload);
     process.stdout.write(
-      `  Reload state verified: h=${persistedBeforeReload?.currentHeight ?? 0}, outWei=${persistedBeforeReload?.outboundWei ?? '0'}\n`,
+      `  Reload state verified: persistedHeight>=${persistedHeightBeforeReload}, renderedOut=${outboundAfterPayment}\n`,
     );
 
     // Screenshot for evidence

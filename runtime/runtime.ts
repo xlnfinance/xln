@@ -1,16 +1,15 @@
 // for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
-// FORCE AUTO-REBUILD: Fixed signerId consistency and fintech type safety
 
 // Import utilities and types
 // High-level database using Level polyfill (works in both Node.js and browser)
 import { Level } from 'level';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
-const RUNTIME_BUILD_ID = '2026-02-09-22:10Z';
+const RUNTIME_BUILD_ID = '2026-03-10-03:40Z';
 // Bump this only on breaking persistence/replay format or invariants.
-export const RUNTIME_SCHEMA_VERSION = 2;
+export const RUNTIME_SCHEMA_VERSION = 3;
 export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
 const LOCAL_DEV_CHAIN_ID = 31337;
 const readRuntimeEnv = (name: string): string | undefined => {
@@ -27,7 +26,6 @@ const LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS = (() => {
   if (!Number.isFinite(parsed) || parsed < 1) return 5;
   return Math.floor(parsed);
 })();
-console.log(`🚀 RUNTIME.JS BUILD: ${RUNTIME_BUILD_ID}`);
 
 import { getPerfMs, getWallClockMs } from './utils';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
@@ -439,7 +437,6 @@ export async function tryOpenDb(env: Env): Promise<boolean> {
     state.dbOpenPromise = (async () => {
       try {
         await db.open();
-        console.log('✅ Database opened');
         return true;
       } catch (error) {
         const isBlocked =
@@ -612,7 +609,6 @@ export async function tryOpenInfraDb(env: Env): Promise<boolean> {
     state.infraDbOpenPromise = (async () => {
       try {
         await db.open();
-        console.log('✅ Infra DB opened');
         return true;
       } catch (error) {
         const isBlocked =
@@ -1044,10 +1040,10 @@ const assertLocalEntityCryptoKeys = (env: Env): void => {
     if (!hasLocalSignerKey(env, signerId)) continue;
     const keys = deriveLocalEntityCryptoKeys(env, replica.entityId, signerId);
     const { publicKey, privateKey } = keys;
-    if (replica.state.cryptoPublicKey !== publicKey || replica.state.cryptoPrivateKey !== privateKey) {
+    if (replica.state.entityEncPubKey !== publicKey || replica.state.entityEncPrivKey !== privateKey) {
       throw new Error(
         `ENTITY_CRYPTO_KEY_MISMATCH: entity=${replica.entityId} signer=${signerId} ` +
-        `expectedPub=${publicKey} actualPub=${String(replica.state.cryptoPublicKey || '')}`,
+        `expectedPub=${publicKey} actualPub=${String(replica.state.entityEncPubKey || '')}`,
       );
     }
   }
@@ -1904,8 +1900,8 @@ const applyRuntimeInput = async (
           }
           const expectedKeys = deriveLocalEntityCryptoKeys(env, runtimeTx.entityId, runtimeTx.signerId);
           if (
-            existingReplica.state.cryptoPublicKey !== expectedKeys.publicKey ||
-            existingReplica.state.cryptoPrivateKey !== expectedKeys.privateKey
+            existingReplica.state.entityEncPubKey !== expectedKeys.publicKey ||
+            existingReplica.state.entityEncPrivKey !== expectedKeys.privateKey
           ) {
             throw new Error(
               `ENTITY_CRYPTO_KEY_MISMATCH: entity=${runtimeTx.entityId} signer=${runtimeTx.signerId}`,
@@ -1950,9 +1946,9 @@ const applyRuntimeInput = async (
             // 📦 J-Batch system - will be initialized on first use
             jBatchState: undefined,
 
-            // 🔐 Deterministic entity crypto keys are mandatory.
-            cryptoPublicKey: localKeys.publicKey,
-            cryptoPrivateKey: localKeys.privateKey,
+            // 🔐 Deterministic entity encryption keys are mandatory.
+            entityEncPubKey: localKeys.publicKey,
+            entityEncPrivKey: localKeys.privateKey,
             profile: {
               name:
                 typeof runtimeTx.data.profileName === 'string' && runtimeTx.data.profileName.trim().length > 0
@@ -2497,8 +2493,6 @@ const applyRuntimeInput = async (
 
 // Runtime bootstrap
 const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
-  console.log(`🚀 RUNTIME.JS VERSION: ${RUNTIME_BUILD_ID}`);
-
   const baseEnv = createEmptyEnv(runtimeSeedOverride ?? null);
 
   await tryOpenDb(baseEnv);
@@ -3579,6 +3573,14 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
         `ms(open=${formatPerfMs(openMs)},frame=${formatPerfMs(frameSerializeMs)},snapshot=${formatPerfMs(snapshotSerializeMs)},` +
         `write=${formatPerfMs(writeMs)},verify=${verifySkipped ? 'skip' : formatPerfMs(verifyMs)},total=${formatPerfMs(totalMs)})`,
     );
+    if (isBrowser && typeof BroadcastChannel !== 'undefined' && typeof env.runtimeId === 'string' && env.runtimeId.length > 0) {
+      const runtimeSyncChannel = new BroadcastChannel('xln-runtime-sync');
+      runtimeSyncChannel.postMessage({
+        runtimeId: env.runtimeId,
+        height: env.height,
+      });
+      runtimeSyncChannel.close();
+    }
   } catch (err) {
     const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     // In browser, DB errors are non-fatal — runtime continues without persistence

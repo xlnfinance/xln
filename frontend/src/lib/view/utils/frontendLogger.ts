@@ -34,59 +34,25 @@ export function logDebug(category: keyof FrontendLogConfig, ...args: unknown[]):
   }
 }
 
-// Extend window for console debugging
-declare global {
-  interface Window {
-    frontendLogs: {
-      enable: (category: keyof FrontendLogConfig) => void;
-      disable: (category: keyof FrontendLogConfig) => void;
-      enableAll: () => void;
-      disableAll: () => void;
-      show: () => void;
-    };
-  }
-}
-
 // Global verbose logging toggle (controlled by Settings panel)
 let VERBOSE_ENABLED = true; // DEFAULT ON for development
 
 // Monkey-patch console for performance-aware logging
 const originalLog = console.log;
-const originalInfo = console.info;
-const originalDebug = console.debug;
 
-// DISABLED monkey-patching for debugging - all logs show
-// console.log = (...args: unknown[]) => {
-//   if (VERBOSE_ENABLED || args[0]?.toString().includes('ERROR') || args[0]?.toString().includes('❌')) {
-//     originalLog(...args);
-//   }
-// };
+export function enableFrontendLog(category: keyof FrontendLogConfig): void {
+  LOG_CONFIG[category] = true;
+  originalLog(`✅ ${category} enabled`);
+}
 
-// console.info = (...args: unknown[]) => {
-//   if (VERBOSE_ENABLED) originalInfo(...args);
-// };
+export function disableFrontendLog(category: keyof FrontendLogConfig): void {
+  LOG_CONFIG[category] = false;
+  originalLog(`❌ ${category} disabled`);
+}
 
-// console.debug = (...args: unknown[]) => {
-//   if (VERBOSE_ENABLED) originalDebug(...args);
-// };
-
-// console.error and console.warn ALWAYS show (never silenced)
-
-if (typeof window !== 'undefined') {
-  window.frontendLogs = {
-    enable: (cat) => { LOG_CONFIG[cat] = true; originalLog(`✅ ${cat} enabled`); },
-    disable: (cat) => { LOG_CONFIG[cat] = false; originalLog(`❌ ${cat} disabled`); },
-    enableAll: () => {
-      VERBOSE_ENABLED = true;
-      Object.keys(LOG_CONFIG).forEach(k => LOG_CONFIG[k as keyof FrontendLogConfig] = true);
-      originalLog('✅ All frontend logs enabled');
-    },
-    disableAll: () => {
-      VERBOSE_ENABLED = false;
-      Object.keys(LOG_CONFIG).forEach(k => LOG_CONFIG[k as keyof FrontendLogConfig] = false);
-      originalLog('❌ All frontend logs disabled (errors still show)');
-    },
-    show: () => { originalLog('Verbose:', VERBOSE_ENABLED); console.table(LOG_CONFIG); }
-  };
-  originalLog('🔧 Frontend log control: window.frontendLogs.show()');
+export function setFrontendVerboseLogging(enabled: boolean): void {
+  VERBOSE_ENABLED = enabled;
+  for (const key of Object.keys(LOG_CONFIG) as Array<keyof FrontendLogConfig>) {
+    LOG_CONFIG[key] = enabled;
+  }
 }

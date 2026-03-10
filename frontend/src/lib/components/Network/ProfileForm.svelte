@@ -106,8 +106,6 @@
             bio: metadata?.bio || '',
             website: metadata?.website || '',
             capabilities: capabilities,
-            hubs: [],
-            hankoSignature: '', // TODO: Add actual Hanko signature
           },
         },
       };
@@ -137,7 +135,6 @@
         website: metadata?.website || '',
         lastUpdated: Date.now(),
         capabilities: capabilities,
-        hubs: [],
         metadata: {},
       });
 

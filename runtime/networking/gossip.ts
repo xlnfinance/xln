@@ -23,13 +23,11 @@ export type BoardMetadata = {
 };
 
 export type ProfileMetadata = {
-  cryptoPublicKey: string;
-  encryptionPublicKey: string;
+  entityEncPubKey: string;
   isHub: boolean;
   routingFeePPM: number;
   baseFee: bigint;
   board: BoardMetadata;
-  threshold: number;
   entityPublicKey?: string;
   profileHanko?: string;
   region?: string;
@@ -67,9 +65,9 @@ export type Profile = {
   website: string;
   lastUpdated: number;
   runtimeId?: string; // Runtime identity (usually signer1 address)
+  runtimeEncPubKey: string;
   capabilities: string[]; // e.g. ["router", "swap:memecoins"]
   publicAccounts: string[]; // direct peers with inbound capacity
-  hubs: string[]; // legacy alias for publicAccounts
   endpoints: string[]; // websocket endpoints for this runtime
   relays: string[]; // preferred relay runtimes
   metadata: ProfileMetadata;
@@ -111,6 +109,9 @@ const assertNoLegacyProfileFields = (
   metadataRaw: Record<string, unknown>,
   entityId: string,
 ): void => {
+  if (hasOwn(rawProfile, 'hubs')) {
+    throw new Error(`GOSSIP_PROFILE_HUBS_ALIAS_FORBIDDEN: entity=${entityId}`);
+  }
   if (hasOwn(rawProfile, 'expiresAt')) {
     throw new Error(`GOSSIP_PROFILE_EXPIRES_AT_FORBIDDEN: entity=${entityId}`);
   }
@@ -134,6 +135,18 @@ const assertNoLegacyProfileFields = (
   }
   if (hasOwn(metadataRaw, 'encryptionPubKey')) {
     throw new Error(`GOSSIP_PROFILE_METADATA_ENCRYPTION_PUBKEY_FORBIDDEN: entity=${entityId}`);
+  }
+  if (hasOwn(metadataRaw, 'cryptoPublicKey')) {
+    throw new Error(`GOSSIP_PROFILE_METADATA_CRYPTO_PUBLIC_KEY_FORBIDDEN: entity=${entityId}`);
+  }
+  if (hasOwn(metadataRaw, 'encryptionPublicKey')) {
+    throw new Error(`GOSSIP_PROFILE_METADATA_ENCRYPTION_PUBLIC_KEY_FORBIDDEN: entity=${entityId}`);
+  }
+  if (hasOwn(metadataRaw, 'threshold')) {
+    throw new Error(`GOSSIP_PROFILE_METADATA_THRESHOLD_FORBIDDEN: entity=${entityId}`);
+  }
+  if (hasOwn(rawProfile, 'runtimeEncryptionPublicKey')) {
+    throw new Error(`GOSSIP_PROFILE_RUNTIME_ENCRYPTION_PUBLIC_KEY_FORBIDDEN: entity=${entityId}`);
   }
 };
 
@@ -284,24 +297,26 @@ export const parseProfile = (raw: unknown): Profile => {
     throw new Error(`GOSSIP_PROFILE_METADATA_REQUIRED: entity=${entityId}`);
   }
   assertNoLegacyProfileFields(raw, metadataRaw, entityId);
-  const cryptoPublicKey = normalizeX25519Key(metadataRaw.cryptoPublicKey);
-  const encryptionPublicKey = normalizeX25519Key(metadataRaw.encryptionPublicKey);
-  if (!cryptoPublicKey || !encryptionPublicKey) {
-    throw new Error(`GOSSIP_PROFILE_MISSING_ENCRYPTION_KEY: entity=${entityId}`);
+  const entityEncPubKey = normalizeX25519Key(metadataRaw.entityEncPubKey);
+  if (!entityEncPubKey) {
+    throw new Error(`GOSSIP_PROFILE_MISSING_ENTITY_ENC_PUBKEY: entity=${entityId}`);
   }
   if (typeof raw.name !== 'string' || raw.name.trim().length === 0) {
     throw new Error(`GOSSIP_PROFILE_NAME_REQUIRED: entity=${entityId}`);
   }
   const name = normalizeEntityName(raw.name, entityId);
   const lastUpdated = parsePositiveTimestamp(raw.lastUpdated, entityId);
+  const runtimeEncPubKey = normalizeX25519Key(raw.runtimeEncPubKey);
+  if (!runtimeEncPubKey) {
+    throw new Error(`GOSSIP_PROFILE_RUNTIME_ENC_PUBKEY_REQUIRED: entity=${entityId}`);
+  }
   const capabilities = normalizeStringArray(raw.capabilities);
   const publicAccounts = normalizeStringArray(raw.publicAccounts);
   const endpoints = normalizeStringArray(raw.endpoints);
   const relays = normalizeStringArray(raw.relays);
   const metadata: ProfileMetadata = {
     ...metadataRaw,
-    cryptoPublicKey,
-    encryptionPublicKey,
+    entityEncPubKey,
     isHub:
       metadataRaw.isHub === true ||
       capabilities.includes('hub') ||
@@ -312,7 +327,6 @@ export const parseProfile = (raw: unknown): Profile => {
     ),
     baseFee: parseBigIntValue(metadataRaw.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
     board: parseBoardMetadata(metadataRaw.board, entityId),
-    threshold: parseUint16(metadataRaw.threshold, 'GOSSIP_PROFILE_THRESHOLD_INVALID', entityId),
   };
   return {
     entityId,
@@ -322,9 +336,9 @@ export const parseProfile = (raw: unknown): Profile => {
     website: typeof raw.website === 'string' ? raw.website : '',
     lastUpdated,
     ...(typeof raw.runtimeId === 'string' && raw.runtimeId.trim().length > 0 ? { runtimeId: raw.runtimeId.trim() } : {}),
+    runtimeEncPubKey,
     capabilities,
     publicAccounts,
-    hubs: [...publicAccounts],
     endpoints,
     relays,
     metadata,
@@ -354,17 +368,20 @@ export const canonicalizeProfile = (
   }
   const normalizedName = normalizeEntityName(profile.name, entityId);
   const incomingLastUpdated = parsePositiveTimestamp(profile.lastUpdated, entityId);
-  const normalizedCryptoKey = normalizeX25519Key(metadata.cryptoPublicKey);
-  const normalizedEncryptionKey = normalizeX25519Key(metadata.encryptionPublicKey);
+  const normalizedRuntimeEncPubKey = normalizeX25519Key(profile.runtimeEncPubKey);
+  const normalizedEntityEncPubKey = normalizeX25519Key(metadata.entityEncPubKey);
 
-  if (!normalizedCryptoKey || !normalizedEncryptionKey) {
-    throw new Error(`GOSSIP_PROFILE_MISSING_ENCRYPTION_KEY: entity=${entityId}`);
+  if (!normalizedRuntimeEncPubKey) {
+    throw new Error(`GOSSIP_PROFILE_RUNTIME_ENC_PUBKEY_REQUIRED: entity=${entityId}`);
   }
-  if (typeof metadata.cryptoPublicKey !== 'string' || metadata.cryptoPublicKey !== normalizedCryptoKey) {
-    throw new Error(`GOSSIP_PROFILE_CRYPTO_KEY_NOT_NORMALIZED: entity=${entityId}`);
+  if (profile.runtimeEncPubKey !== normalizedRuntimeEncPubKey) {
+    throw new Error(`GOSSIP_PROFILE_RUNTIME_ENC_PUBKEY_NOT_NORMALIZED: entity=${entityId}`);
   }
-  if (typeof metadata.encryptionPublicKey !== 'string' || metadata.encryptionPublicKey !== normalizedEncryptionKey) {
-    throw new Error(`GOSSIP_PROFILE_ENCRYPTION_KEY_NOT_NORMALIZED: entity=${entityId}`);
+  if (!normalizedEntityEncPubKey) {
+    throw new Error(`GOSSIP_PROFILE_MISSING_ENTITY_ENC_PUBKEY: entity=${entityId}`);
+  }
+  if (typeof metadata.entityEncPubKey !== 'string' || metadata.entityEncPubKey !== normalizedEntityEncPubKey) {
+    throw new Error(`GOSSIP_PROFILE_ENTITY_ENC_PUBKEY_NOT_NORMALIZED: entity=${entityId}`);
   }
   if (profile.name !== normalizedName) {
     throw new Error(`GOSSIP_PROFILE_NAME_NOT_NORMALIZED: entity=${entityId}`);
@@ -377,7 +394,6 @@ export const canonicalizeProfile = (
   const board = parseBoardMetadata(metadata.board, entityId);
   const routingFeePPM = Math.max(0, Number.isFinite(Number(metadata.routingFeePPM)) ? Math.floor(Number(metadata.routingFeePPM)) : 100);
   const baseFee = parseBigIntValue(metadata.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId);
-  const threshold = parseUint16(metadata.threshold, 'GOSSIP_PROFILE_THRESHOLD_INVALID', entityId);
   return {
     ...profile,
     entityId,
@@ -386,9 +402,9 @@ export const canonicalizeProfile = (
     bio: profile.bio,
     website: profile.website,
     lastUpdated: incomingLastUpdated,
+    runtimeEncPubKey: normalizedRuntimeEncPubKey,
     capabilities,
     publicAccounts,
-    hubs: [...publicAccounts],
     endpoints,
     relays,
     accounts: profile.accounts.map((account) => ({
@@ -397,12 +413,10 @@ export const canonicalizeProfile = (
     })),
     metadata: {
       ...metadata,
-      cryptoPublicKey: normalizedCryptoKey,
-      encryptionPublicKey: normalizedEncryptionKey,
+      entityEncPubKey: normalizedEntityEncPubKey,
       board,
       routingFeePPM,
       baseFee,
-      threshold,
       isHub:
         metadata.isHub === true ||
         capabilities.includes('hub') === true ||

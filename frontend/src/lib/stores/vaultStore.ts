@@ -1,5 +1,6 @@
 import { writable, get, derived } from 'svelte/store';
 import { HDNodeWallet, Mnemonic, getAddress } from 'ethers';
+import type { Env, PersistedFrameJournal, RoutedEntityInput, RuntimeInput } from '@xln/runtime/xln-api';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
 import { xlnEnvironment, setXlnEnvironment } from './xlnStore';
 import { settings } from './settingsStore';
@@ -82,6 +83,10 @@ export const allVaults = allRuntimes;
 
 let initializePromise: Promise<void> | null = null;
 let initialized = false;
+let resumeListenerRegistered = false;
+let resumeRefreshPromise: Promise<boolean> | null = null;
+let runtimeSyncChannel: BroadcastChannel | null = null;
+const runtimeEnvChangeUnsubscribers = new Map<string, () => void>();
 
 // HD derivation helper
 function deriveAddress(seed: string, index: number): string {
@@ -470,6 +475,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
 async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
   try {
+    unregisterRuntimeEnvChange(runtimeId);
     const runtimeEntry = get(runtimes).get(runtimeId);
     const env = runtimeEntry?.env;
     if (!env) return;
@@ -508,6 +514,56 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
   } catch (err) {
     console.warn(`[VaultStore] Failed to cleanup runtime ${runtimeId.slice(0, 12)}:`, err);
   }
+}
+
+async function stopRuntimeEnv(env: Env): Promise<void> {
+  const { getXLN } = await import('./xlnStore');
+  const xln = await getXLN();
+
+  if (xln.stopP2P) {
+    xln.stopP2P(env);
+  }
+
+  env.runtimeState?.stopLoop?.();
+  if (env.runtimeState) {
+    env.runtimeState.loopActive = false;
+    env.runtimeState.stopLoop = null;
+  }
+}
+
+function unregisterRuntimeEnvChange(runtimeId: string): void {
+  const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+  if (!normalizedRuntimeId) return;
+  const unsubscribe = runtimeEnvChangeUnsubscribers.get(normalizedRuntimeId);
+  if (!unsubscribe) return;
+  runtimeEnvChangeUnsubscribers.delete(normalizedRuntimeId);
+  unsubscribe();
+}
+
+function registerRuntimeEnvChange(
+  runtimeId: string,
+  env: Env,
+  xln: { registerEnvChangeCallback?: (env: Env, callback: (env: Env) => void) => (() => void) },
+): void {
+  const normalizedRuntimeId = normalizeRuntimeId(runtimeId || env.runtimeId);
+  if (!normalizedRuntimeId) {
+    throw new Error('[VaultStore] Cannot register env change callback without runtimeId');
+  }
+  unregisterRuntimeEnvChange(normalizedRuntimeId);
+  if (typeof xln.registerEnvChangeCallback !== 'function') return;
+
+  const onEnvChange = (nextEnv: Env): void => {
+    runtimeOperations.updateRuntimeEnv(normalizedRuntimeId, nextEnv);
+    if (normalizeRuntimeId(get(activeRuntimeId) || '') === normalizedRuntimeId) {
+      setXlnEnvironment(nextEnv);
+    }
+  };
+
+  runtimeEnvChangeUnsubscribers.set(
+    normalizedRuntimeId,
+    xln.registerEnvChangeCallback(env, onEnvChange),
+  );
+  onEnvChange(env);
 }
 
 function runtimeToEntry(runtime: Runtime, env: any) {
@@ -805,9 +861,108 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
   return env;
 }
 
+function registerRuntimeResumeListener(): void {
+  if (resumeListenerRegistered || typeof window === 'undefined' || typeof document === 'undefined') return;
+  const triggerRefresh = () => {
+    if (document.visibilityState !== 'visible') return;
+    void vaultOperations.refreshActiveRuntimeFromDbIfBehind().catch((error) => {
+      console.warn('[VaultStore] Resume refresh failed:', error);
+    });
+  };
+  document.addEventListener('visibilitychange', triggerRefresh);
+  window.addEventListener('focus', triggerRefresh);
+  if (typeof BroadcastChannel !== 'undefined') {
+    runtimeSyncChannel = new BroadcastChannel('xln-runtime-sync');
+    runtimeSyncChannel.onmessage = (event: MessageEvent<{ runtimeId?: string; height?: number }>) => {
+      const runtimeId = normalizeRuntimeId(event.data?.runtimeId);
+      const height = Number(event.data?.height ?? 0);
+      if (!runtimeId || !Number.isFinite(height) || height <= 0) return;
+      const runtimeEntry = get(runtimes).get(runtimeId);
+      const currentHeight = Number(runtimeEntry?.env?.height ?? 0);
+      if (height <= currentHeight) return;
+      void vaultOperations.refreshActiveRuntimeFromDbIfBehind().catch((error) => {
+        console.warn('[VaultStore] Broadcast refresh failed:', error);
+      });
+    };
+  }
+  resumeListenerRegistered = true;
+}
+
   // Runtime operations
 export const vaultOperations = {
-    syncRuntime(runtime: Runtime | null) {
+  async refreshActiveRuntimeFromDbIfBehind(): Promise<boolean> {
+    if (resumeRefreshPromise) return resumeRefreshPromise;
+    resumeRefreshPromise = (async () => {
+      const currentState = get(runtimesState);
+      const runtimeId = normalizeRuntimeId(currentState.activeRuntimeId);
+      if (!runtimeId) return false;
+
+      const runtime = currentState.runtimes[runtimeId];
+      const runtimeEntry = get(runtimes).get(runtimeId);
+      const env = runtimeEntry?.env as Env | undefined;
+      if (!runtime || !env) return false;
+
+      const { getXLN } = await import('./xlnStore');
+      const xln = await getXLN();
+      if (typeof xln.getPersistedLatestHeight !== 'function') return false;
+
+      const persistedLatestHeight = Number(await xln.getPersistedLatestHeight(env) || 0);
+      const currentHeight = Number(env.height || 0);
+      if (persistedLatestHeight <= currentHeight) return false;
+
+      console.log(
+        `[VaultStore] ♻️ Refreshing runtime ${runtimeId.slice(0, 12)} from DB ` +
+        `(persisted=${persistedLatestHeight}, current=${currentHeight})`,
+      );
+
+      await registerRuntimeSignerKeys(runtime, xln);
+      const refreshedEnv = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+      unregisterRuntimeEnvChange(runtimeId);
+      await stopRuntimeEnv(env);
+
+      runtimes.update((currentRuntimes) => {
+        currentRuntimes.set(runtimeId, runtimeToEntry(runtime, refreshedEnv));
+        return currentRuntimes;
+      });
+      registerRuntimeEnvChange(runtimeId, refreshedEnv, xln);
+
+      if (normalizeRuntimeId(get(activeRuntimeId) || '') === runtimeId) {
+        setXlnEnvironment(refreshedEnv);
+      }
+
+      return true;
+    })();
+
+    try {
+      return await resumeRefreshPromise;
+    } finally {
+      resumeRefreshPromise = null;
+    }
+  },
+
+  async enqueueRuntimeInput(env: Env, input: RuntimeInput): Promise<Env> {
+    const { enqueueAndProcess } = await import('./xlnStore');
+    return enqueueAndProcess(env, input);
+  },
+
+  async enqueueEntityInputs(env: Env, inputs: RoutedEntityInput[]): Promise<Env> {
+    const { enqueueEntityInputs } = await import('./xlnStore');
+    return enqueueEntityInputs(env, inputs);
+  },
+
+  async getPersistedLatestHeight(env: Env): Promise<number> {
+    const { getXLN } = await import('./xlnStore');
+    const xln = await getXLN();
+    return xln.getPersistedLatestHeight(env);
+  },
+
+  async readPersistedFrameJournal(env: Env, height: number): Promise<PersistedFrameJournal | null> {
+    const { getXLN } = await import('./xlnStore');
+    const xln = await getXLN();
+    return xln.readPersistedFrameJournal(env, height);
+  },
+
+  syncRuntime(runtime: Runtime | null) {
     const meta: { label?: string; seed?: string; vaultId?: string } = {};
     meta.label = runtime?.label || 'Runtime';
     if (runtime?.seed) meta.seed = runtime.seed;
@@ -819,7 +974,7 @@ export const vaultOperations = {
     }
     // P2P is started per-env in createRuntime() and initialize() — no need to restart here
     // Restarting on every selectRuntime caused WS connection leak (15+ connections with 4 runtimes)
-    },
+  },
 
   // Load from localStorage
   loadFromStorage() {
@@ -870,6 +1025,7 @@ export const vaultOperations = {
 
   // Create new runtime from seed
   async createRuntime(name: string, seed: string, options: CreateRuntimeOptions = {}): Promise<Runtime> {
+    registerRuntimeResumeListener();
     const perfStartedAt = Date.now();
     const perfMarks: Array<{ step: string; at: number }> = [{ step: 'start', at: perfStartedAt }];
     const markPerf = (step: string): void => {
@@ -1162,6 +1318,7 @@ export const vaultOperations = {
       });
       return r;
     });
+    registerRuntimeEnvChange(runtimeId, newEnv, xln);
     markPerf('attach_runtime_to_store');
 
     // Start P2P for this runtime's env (one WS per runtime, stays alive across switches)
@@ -1250,8 +1407,10 @@ export const vaultOperations = {
           r.set(resolvedRuntimeId, runtimeToEntry(runtime, env));
           return r;
         });
+        registerRuntimeEnvChange(resolvedRuntimeId, env, xln);
       }
       if (env) {
+        registerRuntimeEnvChange(resolvedRuntimeId, env, xln);
         const envRuntimeId = normalizeRuntimeId(env.runtimeId || '');
         if (envRuntimeId !== resolvedRuntimeId) {
           throw new Error(
@@ -1496,6 +1655,7 @@ export const vaultOperations = {
 
   // Initialize
   async initialize() {
+    registerRuntimeResumeListener();
     if (initialized) return;
     if (initializePromise) return initializePromise;
 
@@ -1531,6 +1691,7 @@ export const vaultOperations = {
             r.set(runtimeId, runtimeToEntry({ ...runtime, id: runtimeId }, env));
             return r;
           });
+          registerRuntimeEnvChange(runtimeId, env, xln);
           console.log('[VaultStore.initialize] ✅ Runtime restored:', runtimeId.slice(0, 12));
         }
       }

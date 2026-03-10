@@ -135,8 +135,32 @@ export async function connectRuntimeToHub(
     const openResult = await page.evaluate(
       async ({ entityId, signerId, hubId, creditAmount, tokenId }) => {
         const maybeWindow = window as typeof window & {
-          XLN?: {
-            enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
+          vaultOperations?: {
+            enqueueEntityInputs?: (
+              env: {
+                eReplicas?: Map<string, {
+                  state?: {
+                    accounts?: Map<string, {
+                      deltas?: Map<number, unknown>;
+                      pendingFrame?: unknown;
+                      currentHeight?: number;
+                    }>;
+                  };
+                }>;
+              },
+              inputs: Array<{
+                entityId: string;
+                signerId: string;
+                entityTxs: Array<{
+                  type: 'openAccount';
+                  data: {
+                    targetEntityId: string;
+                    creditAmount: bigint;
+                    tokenId: number;
+                  };
+                }>;
+              }>,
+            ) => Promise<unknown>;
           };
           isolatedEnv?: {
             eReplicas?: Map<string, {
@@ -161,9 +185,9 @@ export async function connectRuntimeToHub(
         };
 
         const env = maybeWindow.isolatedEnv;
-        const xln = maybeWindow.XLN;
+        const vaultOperations = maybeWindow.vaultOperations;
         const p2p = env?.runtimeState?.p2p;
-        if (!env || !xln?.enqueueRuntimeInput || !env.eReplicas) {
+        if (!env || !vaultOperations?.enqueueEntityInputs || !env.eReplicas) {
           return { ok: false, error: 'runtime env missing' };
         }
 
@@ -200,9 +224,7 @@ export async function connectRuntimeToHub(
           }
         }
 
-        xln.enqueueRuntimeInput(env, {
-          runtimeTxs: [],
-          entityInputs: [{
+        await vaultOperations.enqueueEntityInputs(env, [{
             entityId,
             signerId: liveSignerId,
             entityTxs: [{
@@ -213,8 +235,7 @@ export async function connectRuntimeToHub(
                 tokenId,
               },
             }],
-          }],
-        });
+          }]);
 
         return { ok: true };
       },

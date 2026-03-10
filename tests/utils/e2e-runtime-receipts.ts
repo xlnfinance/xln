@@ -26,7 +26,7 @@ type XlnDbView = {
 };
 
 type RuntimeWindow = typeof window & {
-  XLN?: XlnDbView;
+  vaultOperations?: XlnDbView;
   isolatedEnv?: {
     runtimeId?: string;
     height?: number;
@@ -37,7 +37,7 @@ async function readRuntimeDbMeta(page: Page): Promise<{ latestHeight: number; ru
   return page.evaluate(async () => {
     const view = window as RuntimeWindow;
     const env = view.isolatedEnv;
-    const getPersistedLatestHeight = view.XLN?.getPersistedLatestHeight;
+    const getPersistedLatestHeight = view.vaultOperations?.getPersistedLatestHeight;
     if (!env || typeof getPersistedLatestHeight !== 'function') {
       return { latestHeight: 0, runtimeHeight: Number(view.isolatedEnv?.height || 0) };
     }
@@ -69,8 +69,8 @@ async function readPersistedFrameEvents(
   return page.evaluate(async ({ nextHeight }) => {
     const view = window as RuntimeWindow;
     const env = view.isolatedEnv;
-    const getPersistedLatestHeight = view.XLN?.getPersistedLatestHeight;
-    const readPersistedFrameJournal = view.XLN?.readPersistedFrameJournal;
+    const getPersistedLatestHeight = view.vaultOperations?.getPersistedLatestHeight;
+    const readPersistedFrameJournal = view.vaultOperations?.readPersistedFrameJournal;
     const events: PersistedFrameEvent[] = [];
     if (
       !env ||

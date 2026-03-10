@@ -21,6 +21,8 @@ import {
   scheduleHook as scheduleCrontabHook,
   HTLC_SECRET_ACK_TIMEOUT_MS,
 } from '../../entity-crontab';
+import { NobleCryptoProvider } from '../../crypto-noble';
+import { unwrapEnvelope, validateEnvelope } from '../../htlc-envelope-types';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counterpartyId: string): string | null => {
@@ -403,17 +405,15 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
                 // Decrypt if encrypted (base64), or use cleartext (JSON starts with '{')
                 const isCleartext1 = envelopeData.trimStart().startsWith('{');
-                if (newState.cryptoPrivateKey && !isCleartext1) {
-                  const { NobleCryptoProvider } = await import('../../crypto-noble');
+                if (newState.entityEncPrivKey && !isCleartext1) {
                   const crypto = new NobleCryptoProvider();
-                  envelopeData = await crypto.decrypt(envelope as string, newState.cryptoPrivateKey);
+                  envelopeData = await crypto.decrypt(envelope as string, newState.entityEncPrivKey);
                   console.log(`🔓 Decryption successful`);
                 } else if (isCleartext1) {
                   console.log(`🔓 Envelope is cleartext JSON — skipping decrypt`);
                 }
 
                 // Unwrap decrypted envelope
-                const { unwrapEnvelope } = await import('../../htlc-envelope-types');
                 envelope = unwrapEnvelope(envelopeData);
                 console.log(`🔓 Unwrapped envelope: finalRecipient=${envelope.finalRecipient}, nextHop=${envelope.nextHop?.slice(-4)}`);
                 console.log(`🔓 Decrypted envelope structure: ${JSON.stringify(envelope, null, 2).slice(0, 300)}...`);
@@ -437,17 +437,15 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
                 // Decrypt if encrypted (base64), or use cleartext (JSON starts with '{')
                 const isCleartext2 = envelopeData.trimStart().startsWith('{');
-                if (newState.cryptoPrivateKey && !isCleartext2) {
-                  const { NobleCryptoProvider } = await import('../../crypto-noble');
+                if (newState.entityEncPrivKey && !isCleartext2) {
                   const crypto = new NobleCryptoProvider();
-                  envelopeData = await crypto.decrypt(envelope.innerEnvelope, newState.cryptoPrivateKey);
+                  envelopeData = await crypto.decrypt(envelope.innerEnvelope, newState.entityEncPrivKey);
                   console.log(`🔓 Decryption successful`);
                 } else if (isCleartext2) {
                   console.log(`🔓 InnerEnvelope is cleartext JSON — skipping decrypt`);
                 }
 
                 // Unwrap decrypted envelope - THIS is our actual routing instruction
-                const { unwrapEnvelope } = await import('../../htlc-envelope-types');
                 envelope = unwrapEnvelope(envelopeData);
                 console.log(`🔓 Unwrapped envelope: finalRecipient=${envelope.finalRecipient}, nextHop=${envelope.nextHop?.slice(-4)}`);
                 console.log(`🔓 Decrypted envelope structure: ${JSON.stringify(envelope, null, 2).slice(0, 300)}...`);
@@ -465,7 +463,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             }
 
             // Validate envelope structure (safety check)
-            const { validateEnvelope } = await import('../../htlc-envelope-types');
             try {
               validateEnvelope(envelope);
               console.log(`🧅 Envelope validation: PASSED`);

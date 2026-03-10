@@ -80,6 +80,7 @@ let depositAmount = '10';
 let depositHint = '';
 let pendingDepositHref = '';
 let lastDashboardFingerprint = '';
+const CHECKOUT_WINDOW_NAME = 'xln-custody-checkout';
 
 const escapeHtml = (value) => String(value || '')
   .replaceAll('&', '&amp;')
@@ -267,7 +268,7 @@ const render = () => {
           ${pendingDepositHref ? `
             <div class="hint action-note">
               ${escapeHtml(depositHint || 'Wallet checkout opens in a new tab.')}
-              <a href="${escapeHtml(pendingDepositHref)}" target="_blank" rel="noopener noreferrer">Open wallet manually</a>
+              <a href="${escapeHtml(pendingDepositHref)}" target="${CHECKOUT_WINDOW_NAME}" rel="noreferrer">Open wallet manually</a>
             </div>
           ` : ''}
         </form>
@@ -369,7 +370,6 @@ const render = () => {
 const dashboardFingerprint = (payload) => JSON.stringify({
   custody: {
     connected: payload?.custody?.connected ?? false,
-    lastSyncOkAt: payload?.custody?.lastSyncOkAt ?? null,
     lastSyncError: payload?.custody?.lastSyncError ?? null,
   },
   headlineBalance: payload?.headlineBalance ?? null,
@@ -436,17 +436,13 @@ async function handleDepositSubmit(event) {
   depositAmount = amount;
   const href = buildDepositHref(tokenId, amount);
   pendingDepositHref = href;
-  depositHint = 'Wallet checkout should open in a new tab.';
+  depositHint = 'Wallet checkout opens in one reusable checkout window.';
   render();
 
-  const link = document.createElement('a');
-  link.href = href;
-  link.target = '_blank';
-  link.rel = 'noopener noreferrer';
-  link.style.display = 'none';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  const checkoutWindow = window.open(href, CHECKOUT_WINDOW_NAME);
+  if (checkoutWindow) {
+    checkoutWindow.focus();
+  }
 }
 
 async function handleWithdrawSubmit(event) {

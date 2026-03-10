@@ -204,12 +204,8 @@ export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId
   for (const { profile } of store.gossipProfiles.values()) {
     const profileRuntimeId = normalizeRuntimeKey(profile.runtimeId || '');
     if (!profileRuntimeId || profileRuntimeId !== normalizedTarget) continue;
-    const candidateKeys = [
-      profile.metadata.encryptionPublicKey,
-      profile.metadata.cryptoPublicKey,
-    ];
-    for (const key of candidateKeys) {
-      if (typeof key !== 'string' || key.length === 0) continue;
+    const key = profile.runtimeEncPubKey;
+    if (typeof key === 'string' && key.length > 0) {
       return key.startsWith('0x') ? key : `0x${key}`;
     }
   }

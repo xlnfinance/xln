@@ -246,3 +246,20 @@
     - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
     - `bun build custody/server.ts --target=bun --outfile=/tmp/custody-check.js`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+- 2026-03-10T03:59:00Z live runtime callback fix and custody withdrawal confirmation:
+  - [frontend/src/lib/stores/vaultStore.ts](/Users/egor/xln/frontend/src/lib/stores/vaultStore.ts) now registers per-runtime env change callbacks for created, restored, selected, and DB-refreshed runtimes; local runtime UIs no longer rely on DB polling alone to reflect committed frames
+  - that fix closed the custody withdraw bug where the persisted frame journal advanced but the wallet DOM stayed stale until a manual refresh/tab cycle
+  - [frontend/src/lib/components/Entity/AccountPreview.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/AccountPreview.svelte) now exposes stable `data-counterparty-id` / `data-owner-entity-id` hooks so E2E reads the exact visible account card instead of guessing the selected one
+  - [tests/utils/e2e-account-ui.ts](/Users/egor/xln/tests/utils/e2e-account-ui.ts) now reads rendered outbound/inbound values from visible HTML per specific counterparty card and prints the visible card set on timeout
+  - [tests/e2e-custody.spec.ts](/Users/egor/xln/tests/e2e-custody.spec.ts) now waits for the real recipient-side persisted milestone (`HtlcReceived`) and confirms the visible wallet hub account grows after custody withdrawal
+  - removed normal-path UI noise:
+    - [frontend/src/routes/app/+page.svelte](/Users/egor/xln/frontend/src/routes/app/+page.svelte) no longer logs app init start/success on every load
+    - [frontend/src/lib/stores/xlnStore.ts](/Users/egor/xln/frontend/src/lib/stores/xlnStore.ts) no longer emits the false-positive 10s init warning or success chatter
+    - [runtime/runtime.ts](/Users/egor/xln/runtime/runtime.ts) no longer logs runtime build/version and DB-open success on every browser load
+    - [frontend/src/lib/view/utils/frontendLogger.ts](/Users/egor/xln/frontend/src/lib/view/utils/frontendLogger.ts) no longer exposes global `window.frontendLogs`
+    - [frontend/src/lib/view/panels/SettingsPanel.svelte](/Users/egor/xln/frontend/src/lib/view/panels/SettingsPanel.svelte) now toggles frontend/runtime verbosity via imports and the passed `isolatedEnv` store instead of `window.frontendLogs` / `window.xlnEnv`
+  - verified:
+    - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
+    - `bun build custody/server.ts --target=bun --outfile=/tmp/custody-check.js`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`

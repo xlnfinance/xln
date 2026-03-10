@@ -9,6 +9,9 @@ import type { BoardMetadata, Profile, ProfileAccount, ProfileTokenCapacity } fro
 import { deriveDelta, isLeft } from '../account-utils';
 import { safeStringify } from '../serialization-utils';
 import { getSignerAddress, getSignerPublicKey } from '../account-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from './p2p-crypto';
+
+type BuiltProfile = Omit<Profile, 'runtimeEncPubKey'>;
 
 const toUint16 = (value: bigint | number | undefined, fallback = 0): number => {
   const raw = typeof value === 'bigint' ? Number(value) : Number(value ?? fallback);
@@ -80,7 +83,7 @@ export function buildEntityProfile(
   entityState: EntityState,
   timestamp: number = 0,
   signerResolver?: ProfileSignerResolver,
-): Profile {
+): BuiltProfile {
   const accounts: ProfileAccount[] = [];
   const publicAccounts: string[] = [];
   const hubConfig = entityState.hubRebalanceConfig;
@@ -125,9 +128,9 @@ export function buildEntityProfile(
   const board = buildBoardMetadata(entityState, signerResolver);
   const entityPublicKey = board.validators[0]?.publicKey;
   // Include X25519 crypto key for HTLC envelope encryption (if available)
-  const cryptoPublicKey = normalizeX25519Hex(entityState.cryptoPublicKey);
-  if (!cryptoPublicKey) {
-    throw new Error(`GOSSIP_PROFILE_MISSING_ENCRYPTION_KEY: entity=${entityState.entityId}`);
+  const entityEncPubKey = normalizeX25519Hex(entityState.entityEncPubKey);
+  if (!entityEncPubKey) {
+    throw new Error(`GOSSIP_PROFILE_MISSING_ENTITY_ENC_PUBKEY: entity=${entityState.entityId}`);
   }
   const profileName = String(entityState.profile.name || '').trim();
   if (!profileName) {
@@ -135,7 +138,7 @@ export function buildEntityProfile(
   }
 
   // Build profile
-  const profile: Profile = {
+  const profile: BuiltProfile = {
     entityId: entityState.entityId,
     name: profileName,
     avatar: entityState.profile.avatar,
@@ -144,7 +147,6 @@ export function buildEntityProfile(
     lastUpdated: timestamp,
     capabilities: [], // Future: Add routing, swap capabilities based on entity config
     publicAccounts,
-    hubs: [...publicAccounts], // Legacy alias for compatibility
     endpoints: [],
     relays: [],
     metadata: {
@@ -161,10 +163,8 @@ export function buildEntityProfile(
           }
         : {}),
       board,
-      threshold: toUint16(entityState.config.threshold, 1),
       ...(entityPublicKey ? { entityPublicKey } : {}),
-      cryptoPublicKey, // X25519 key for HTLC encryption
-      encryptionPublicKey: cryptoPublicKey, // transport key (runtime-level)
+      entityEncPubKey,
     },
     accounts,
   };
@@ -192,10 +192,15 @@ export const buildLocalEntityProfile = (
   entityState: EntityState,
   timestamp: number = getNextProfileTimestamp(env, entityState.entityId),
 ): Profile => {
+  const runtimeSeed = String(env.runtimeSeed || '').trim();
+  if (!runtimeSeed) {
+    throw new Error(`GOSSIP_PROFILE_RUNTIME_SEED_REQUIRED: entity=${entityState.entityId}`);
+  }
   const profile = buildEntityProfile(entityState, timestamp, createProfileSignerResolver(env));
   if (env.runtimeId) {
     profile.runtimeId = env.runtimeId;
   }
+  profile.runtimeEncPubKey = pubKeyToHex(deriveEncryptionKeyPair(runtimeSeed).publicKey);
   return profile;
 };
 
@@ -263,14 +268,13 @@ export function buildEntityAdvertisedStateFingerprint(
       isHub: metadata.isHub,
       routingFeePPM: metadata.routingFeePPM,
       baseFee: String(metadata.baseFee),
-      threshold: metadata.threshold,
       policyVersion: Number(metadata.policyVersion ?? 0),
       rebalanceBaseFee: String(metadata.rebalanceBaseFee ?? ''),
       rebalanceLiquidityFeeBps: String(metadata.rebalanceLiquidityFeeBps ?? ''),
       rebalanceGasFee: String(metadata.rebalanceGasFee ?? ''),
       rebalanceTimeoutMs: Number(metadata.rebalanceTimeoutMs ?? 0),
       entityPublicKey: String(metadata.entityPublicKey ?? ''),
-      cryptoPublicKey: metadata.cryptoPublicKey,
+      entityEncPubKey: metadata.entityEncPubKey,
       board: metadata.board,
     },
   };
