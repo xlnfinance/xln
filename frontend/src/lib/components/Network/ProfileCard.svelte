@@ -13,8 +13,7 @@
   // Use central safeStringify from xlnFunctions
   $: safeStringify = $xlnFunctions.safeStringify;
 
-  // Check if this profile is a hub/router
-  $: isHub = profile?.metadata?.isHub === true;
+  $: isHub = profile.metadata.isHub === true;
 
   // Get current active entity and signer
   $: activeTab = $tabs.find(tab => tab.isActive);
@@ -107,7 +106,7 @@
   </div>
 
   <div class="profile-content">
-    {#if profile.publicAccounts && profile.publicAccounts.length > 0}
+    {#if profile.publicAccounts.length > 0}
       <div class="hubs-section">
         <h4>🔗 Connected Hubs</h4>
         <div class="hubs-list">
@@ -118,19 +117,17 @@
       </div>
     {/if}
 
-    {#if profile.metadata}
-      <div class="metadata-section">
-        <h4>📋 Metadata</h4>
-        <div class="metadata-content">
-          {#each Object.entries(profile.metadata) as [key, value]}
-            <div class="metadata-item">
-              <span class="metadata-key">{key}:</span>
-              <span class="metadata-value">{safeStringify(value)}</span>
-            </div>
-          {/each}
-        </div>
+    <div class="metadata-section">
+      <h4>📋 Metadata</h4>
+      <div class="metadata-content">
+        {#each Object.entries(profile.metadata) as [key, value]}
+          <div class="metadata-item">
+            <span class="metadata-key">{key}:</span>
+            <span class="metadata-value">{safeStringify(value)}</span>
+          </div>
+        {/each}
       </div>
-    {/if}
+    </div>
   </div>
 
   <div class="profile-actions">

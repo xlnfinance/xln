@@ -388,3 +388,11 @@
     - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-202359-229/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-202359-229/e2e-shard-00.log)
+  - tightened frontend live-profile consumers to use the now-strict gossip shape directly instead of optional/legacy fallbacks:
+    - removed the dead `entityId` prop from [GossipPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/GossipPanel.svelte) and stopped passing it from [EntityPanelTabs.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/EntityPanelTabs.svelte)
+    - made hub discovery read required profile fields directly in [HubDiscoveryPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/HubDiscoveryPanel.svelte)
+    - removed stale optional metadata/publicAccounts guards in [ProfileCard.svelte](/Users/egor/xln/frontend/src/lib/components/Network/ProfileCard.svelte)
+  - re-verified the live path after the UI cleanup:
+    - `cd frontend && bunx vite build --mode development`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-203104-274/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-203104-274/e2e-shard-00.log)
