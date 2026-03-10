@@ -396,3 +396,23 @@
     - `cd frontend && bunx vite build --mode development`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-203104-274/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-203104-274/e2e-shard-00.log)
+  - removed dead `profile.metadata.position` support from the strict gossip schema
+    - the live profile builder never emitted it
+    - no runtime/frontend/test consumer read it
+    - only parser/canonicalizer still carried it as dead baggage
+  - tightened direct consumers of the strict profile shape:
+    - [runtime/routing/graph.ts](/Users/egor/xln/runtime/routing/graph.ts)
+    - [runtime/health.ts](/Users/egor/xln/runtime/health.ts)
+    - [runtime/state-helpers.ts](/Users/egor/xln/runtime/state-helpers.ts)
+    - [runtime/server.ts](/Users/egor/xln/runtime/server.ts)
+    - [AccountPreview.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/AccountPreview.svelte)
+    - [EntityPanelTabs.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/EntityPanelTabs.svelte)
+  - added a focused runtime regression test:
+    - [routing-metadata.test.ts](/Users/egor/xln/runtime/__tests__/routing-metadata.test.ts)
+      - profiles carrying `metadata.position` are now rejected with `GOSSIP_PROFILE_METADATA_UNKNOWN_FIELD`
+  - re-verified:
+    - `bun test runtime/__tests__/routing-metadata.test.ts runtime/__tests__/relay-router.test.ts`
+    - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
+    - `cd frontend && bunx vite build --mode development`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-204043-863/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-204043-863/e2e-shard-00.log)

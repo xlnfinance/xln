@@ -2017,7 +2017,7 @@ const bootstrapServerHubsAndReserves = async (
 
   await new Promise(resolve => setTimeout(resolve, 100));
 
-  const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true) || [];
+  const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata.isHub === true) || [];
   console.log(`[XLN] Found ${hubs.length} hubs in gossip`);
 
   if (hubEntityIds.length >= 3) {
@@ -4529,7 +4529,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       for (const p of allProfiles) {
         const entityId = typeof p?.entityId === 'string' ? p.entityId : 'unknown';
         console.log(
-          `  profile: ${entityId === 'unknown' ? entityId : entityId.slice(-8)} isHub=${p?.metadata?.isHub === true}`,
+          `  profile: ${entityId === 'unknown' ? entityId : entityId.slice(-8)} isHub=${p?.metadata.isHub === true}`,
         );
       }
       const gossipHubs = getFaucetHubProfiles(env);

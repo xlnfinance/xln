@@ -29,7 +29,6 @@ export type ProfileMetadata = {
   baseFee: bigint;
   board: BoardMetadata;
   profileHanko?: string;
-  position?: { x: number; y: number; z: number };
   policyVersion?: number;
   rebalanceBaseFee?: string;
   rebalanceLiquidityFeeBps?: string;
@@ -139,7 +138,6 @@ const ALLOWED_PROFILE_METADATA_KEYS = [
   'baseFee',
   'board',
   'profileHanko',
-  'position',
   'policyVersion',
   'rebalanceBaseFee',
   'rebalanceLiquidityFeeBps',
@@ -167,12 +165,6 @@ const ALLOWED_BOARD_VALIDATOR_KEYS = [
   'weight',
   'signerId',
   'publicKey',
-] as const;
-
-const ALLOWED_POSITION_KEYS = [
-  'x',
-  'y',
-  'z',
 ] as const;
 
 const assertNoLegacyProfileFields = (
@@ -420,24 +412,6 @@ export const parseProfile = (raw: unknown): Profile => {
     ),
     baseFee: parseBigIntValue(metadataRaw.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
     board,
-    ...(isRecord(metadataRaw.position)
-      && (assertOnlyAllowedKeys(
-        metadataRaw.position,
-        ALLOWED_POSITION_KEYS,
-        'GOSSIP_PROFILE_POSITION_UNKNOWN_FIELD',
-        entityId,
-      ), true)
-      && Number.isFinite(Number(metadataRaw.position.x))
-      && Number.isFinite(Number(metadataRaw.position.y))
-      && Number.isFinite(Number(metadataRaw.position.z))
-      ? {
-          position: {
-            x: Number(metadataRaw.position.x),
-            y: Number(metadataRaw.position.y),
-            z: Number(metadataRaw.position.z),
-          },
-        }
-      : {}),
     ...(typeof metadataRaw.profileHanko === 'string' && metadataRaw.profileHanko.trim().length > 0
       ? { profileHanko: metadataRaw.profileHanko.trim() }
       : {}),
@@ -548,24 +522,6 @@ export const canonicalizeProfile = (
       board,
       routingFeePPM,
       baseFee,
-      ...(isRecord(metadata.position)
-        && (assertOnlyAllowedKeys(
-          metadata.position,
-          ALLOWED_POSITION_KEYS,
-          'GOSSIP_PROFILE_POSITION_UNKNOWN_FIELD',
-          entityId,
-        ), true)
-        && Number.isFinite(Number(metadata.position.x))
-        && Number.isFinite(Number(metadata.position.y))
-        && Number.isFinite(Number(metadata.position.z))
-        ? {
-            position: {
-              x: Number(metadata.position.x),
-              y: Number(metadata.position.y),
-              z: Number(metadata.position.z),
-            },
-          }
-        : {}),
       ...(typeof metadata.policyVersion === 'number' && Number.isFinite(metadata.policyVersion)
         ? { policyVersion: Math.floor(metadata.policyVersion) }
         : {}),
