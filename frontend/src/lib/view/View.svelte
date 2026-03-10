@@ -22,6 +22,7 @@
   import GossipPanel from './panels/GossipPanel.svelte';
   import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
   import UserModePanel from './UserModePanel.svelte';
+  import { parseURLHash } from './utils/stateCodec';
   // REMOVED PANELS:
   // - EntitiesPanel: Graph3D entity cards provide better UX
   // - DepositoryPanel: JurisdictionPanel shows same data with better tables
@@ -30,8 +31,9 @@
   import TimeMachine from './core/TimeMachine.svelte';
   import Tutorial from './components/Tutorial.svelte';
   import { panelBridge } from './utils/panelBridge';
-  import { runtimeOperations } from '$lib/stores/runtimeStore';
+  import { activeRuntimeId, runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
   import { settings } from '$lib/stores/settingsStore';
+  import { getXLN, xlnInstance } from '$lib/stores/xlnStore';
   import 'dockview/dist/styles/dockview.css';
 
   // Props for layout/mode switching
@@ -195,17 +197,13 @@
 
     // Initialize isolated XLN runtime
     try {
-      // Load XLN runtime module (single instance shared via xlnStore)
-      const { getXLN } = await import('$lib/stores/xlnStore');
       const XLN = await getXLN();
 
       // CRITICAL: Initialize global xlnInstance for utility functions (deriveDelta, etc)
       // Graph3DPanel needs xlnFunctions even when using isolated stores
-      const { xlnInstance } = await import('$lib/stores/xlnStore');
       xlnInstance.set(XLN);
 
       // Check for URL hash import (shareable state)
-      const { parseURLHash } = await import('./utils/stateCodec');
       const urlImport = parseURLHash();
 
       let env;
@@ -226,8 +224,6 @@
         });
       } else {
         // Get env from VaultStore's active runtime (testnet already imported)
-        const { runtimes, activeRuntimeId } = await import('$lib/stores/runtimeStore');
-        const { get } = await import('svelte/store');
         const runtimeId = get(activeRuntimeId);
 
         if (runtimeId) {
@@ -267,7 +263,6 @@
 
       // CRITICAL: Subscribe to activeRuntimeId changes to reactively update env
       // This ensures View always shows correct env after VaultStore creates/switches runtimes
-      const { runtimes, activeRuntimeId } = await import('$lib/stores/runtimeStore');
       unsubActiveRuntime = activeRuntimeId.subscribe((runtimeId) => {
         if (!runtimeId) return;
         const allRuntimes = get(runtimes);
