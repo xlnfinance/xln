@@ -15,7 +15,7 @@ import {
 } from './utils/e2e-account-ui';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
-import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
+import { getPersistedReceiptCursor, getPersistedRuntimeDbMeta, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
@@ -60,38 +60,7 @@ type FrameLogEntryView = {
   data?: Record<string, unknown>;
 };
 
-type XlnView = {
-  refreshGossip?: (env: unknown) => void;
-  enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
-};
-
 type TestWindow = typeof window & {
-  XLN?: XlnView;
-  vaultOperations?: {
-    enqueueEntityInputs?: (
-      env: unknown,
-      inputs: Array<{
-        entityId: string;
-        signerId: string;
-        entityTxs: Array<{
-          type: 'htlcPayment';
-          data: {
-            amount: bigint;
-            hashlock: string;
-            route: string[];
-            secret: string;
-            targetEntityId: string;
-            tokenId: number;
-          };
-        }>;
-      }>,
-    ) => Promise<unknown>;
-    getPersistedLatestHeight?: (env: unknown) => Promise<number>;
-    readPersistedFrameJournal?: (
-      env: unknown,
-      height: number,
-    ) => Promise<{ logs?: FrameLogEntryView[] } | null>;
-  };
   isolatedEnv?: {
     runtimeId?: string;
     height?: number;
@@ -398,15 +367,25 @@ async function faucet(page: Page, entityId: string, hubEntityId: string): Promis
   await page.waitForTimeout(SETTLE_MS);
 }
 
-function generateHtlc(): { secret: string; hashlock: string } {
-  const secret = ethers.hexlify(ethers.randomBytes(32));
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  const hashlock = ethers.keccak256(abiCoder.encode(['bytes32'], [secret]));
-  return { secret, hashlock };
-}
-
 function toDisplayed(amount: bigint): number {
   return Number(ethers.formatUnits(amount, 18));
+}
+
+async function openPayWorkspace(page: Page): Promise<void> {
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  if (!await accountsTab.isVisible().catch(() => false)) {
+    const backButton = page.locator('.account-panel .back-button').first();
+    if (await backButton.isVisible().catch(() => false)) {
+      await backButton.click();
+    }
+  }
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  await accountsTab.click();
+  const workspaceTabs = page.locator('.account-workspace-tabs').first();
+  await expect(workspaceTabs).toBeVisible({ timeout: 20_000 });
+  const payTab = workspaceTabs.locator('.account-workspace-tab').filter({ hasText: /Pay/i }).first();
+  await expect(payTab).toBeVisible({ timeout: 20_000 });
+  await payTab.click();
 }
 
 async function pay(
@@ -417,52 +396,37 @@ async function pay(
   route: string[],
   amount: bigint,
 ): Promise<void> {
-  const { hashlock, secret } = generateHtlc();
+  void from;
+  void signerId;
+  void route;
 
-  const result = await page.evaluate(async ({ amount, from, hashlock, route, secret, signerId, to }) => {
-    try {
-      const view = window as TestWindow;
-      const env = view.isolatedEnv;
-      const vaultOperations = view.vaultOperations;
-      if (!env || !vaultOperations?.enqueueEntityInputs) {
-        return { ok: false, error: 'runtime env missing' };
-      }
+  await openPayWorkspace(page);
+  const hashlockModeBtn = page.getByRole('button', { name: 'Hashlock' }).first();
+  await expect(hashlockModeBtn).toBeVisible({ timeout: 10_000 });
+  await hashlockModeBtn.click();
+  await expect(hashlockModeBtn).toHaveAttribute('aria-pressed', 'true');
 
-      let liveSignerId = signerId;
-      for (const replicaKey of env.eReplicas?.keys?.() ?? []) {
-        const [entityId, replicaSignerId] = String(replicaKey).split(':');
-        if (String(entityId).toLowerCase() === String(from).toLowerCase() && replicaSignerId) {
-          liveSignerId = replicaSignerId;
-          break;
-        }
-      }
+  const recipientInput = page.getByRole('textbox', { name: 'Select recipient...' }).first();
+  await expect(recipientInput).toBeVisible({ timeout: 10_000 });
+  await recipientInput.click();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.keyboard.press('Backspace');
+  await recipientInput.fill(to);
+  await page.keyboard.press('Enter');
 
-      await vaultOperations.enqueueEntityInputs(env, [{
-          entityId: from,
-          signerId: liveSignerId,
-          entityTxs: [{
-            type: 'htlcPayment',
-            data: {
-              amount: BigInt(amount),
-              hashlock,
-              route,
-              secret,
-              targetEntityId: to,
-              tokenId: 1,
-            },
-          }],
-        }]);
+  const amountInput = page.locator('input[placeholder="0.00"]').first();
+  await expect(amountInput).toBeVisible({ timeout: 10_000 });
+  await amountInput.click();
+  await amountInput.fill(ethers.formatUnits(amount, 18));
 
-      return { ok: true };
-    } catch (error) {
-      return {
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }, { amount: amount.toString(), from, hashlock, route, secret, signerId, to });
+  const findRoutesBtn = page.getByRole('button', { name: 'Find Routes' }).first();
+  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
+  await findRoutesBtn.click();
+  await expect(page.locator('text=/1 hop|route/i').first()).toBeVisible({ timeout: 15_000 });
 
-  expect(result.ok, `htlcPayment failed: ${result.error ?? 'unknown'}`).toBe(true);
+  const payNowBtn = page.getByRole('button', { name: 'Pay Now' }).first();
+  await expect(payNowBtn).toBeEnabled({ timeout: 10_000 });
+  await payNowBtn.click();
   await page.waitForTimeout(200);
 }
 
@@ -471,26 +435,12 @@ async function runtimeDbMeta(page: Page): Promise<{
   hasLatestFrame: boolean;
   latestHeight: number;
 }> {
-  return page.evaluate(async () => {
-    const view = window as TestWindow;
-    const env = view.isolatedEnv;
-    const getPersistedLatestHeight = view.vaultOperations?.getPersistedLatestHeight;
-    const readPersistedFrameJournal = view.vaultOperations?.readPersistedFrameJournal;
-    if (
-      !env ||
-      typeof getPersistedLatestHeight !== 'function' ||
-      typeof readPersistedFrameJournal !== 'function'
-    ) {
-      return { checkpointHeight: 0, hasLatestFrame: false, latestHeight: 0 };
-    }
-
-    const latestHeight = Number(await getPersistedLatestHeight(env) || 0);
-    const latestFrame = latestHeight > 0 ? await readPersistedFrameJournal(env, latestHeight) : null;
-    const hasLatestFrame = latestFrame !== null;
-    const checkpointHeight = hasLatestFrame ? latestHeight : 0;
-
-    return { checkpointHeight, hasLatestFrame, latestHeight };
-  });
+  const meta = await getPersistedRuntimeDbMeta(page);
+  return {
+    checkpointHeight: meta.checkpointHeight,
+    hasLatestFrame: meta.hasLatestFrame,
+    latestHeight: meta.latestHeight,
+  };
 }
 
 async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<void> {

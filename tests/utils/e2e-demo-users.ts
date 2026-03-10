@@ -28,6 +28,128 @@ const DEMO_MNEMONIC_ENV: Record<DemoUserName, string> = {
   dave: 'E2E_DAVE_MNEMONIC',
 };
 
+const runtimeIdsByLabel = new Map<string, string>();
+
+const normalizeMnemonic = (mnemonic: string): string => mnemonic.trim().split(/\s+/).join(' ');
+
+const deriveRuntimeIdFromMnemonic = (mnemonic: string): string =>
+  Wallet.fromPhrase(normalizeMnemonic(mnemonic)).address.toLowerCase();
+
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+async function openRuntimeDropdown(page: Page): Promise<void> {
+  const trigger = page.locator('button').filter({
+    hasText: /Add Runtime|Select Runtime|0x[a-fA-F0-9]{4}\.\.\.[a-fA-F0-9]{4}/,
+  }).first();
+  await expect(trigger).toBeVisible({ timeout: 15_000 });
+  await trigger.click();
+  await expect(page.locator('.menu-content')).toBeVisible({ timeout: 10_000 });
+}
+
+async function ensureRuntimeCreationView(page: Page, label: string): Promise<void> {
+  const mnemonicTab = page.getByRole('button', { name: 'Mnemonic', exact: true });
+  const quickLoginButton = page.getByRole('button', { name: new RegExp(`^${escapeRegex(label)}$`, 'i') });
+
+  if (await mnemonicTab.isVisible().catch(() => false) || await quickLoginButton.isVisible().catch(() => false)) {
+    return;
+  }
+
+  const creationBackButton = page.getByRole('button', { name: /Back/i }).first();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await mnemonicTab.isVisible().catch(() => false) || await quickLoginButton.isVisible().catch(() => false)) {
+      return;
+    }
+    if (await creationBackButton.isVisible().catch(() => false)) {
+      await creationBackButton.click();
+      await page.waitForTimeout(200);
+      continue;
+    }
+    break;
+  }
+
+  if (await mnemonicTab.isVisible().catch(() => false) || await quickLoginButton.isVisible().catch(() => false)) {
+    return;
+  }
+
+  await openRuntimeDropdown(page);
+  const addRuntimeItem = page.locator('.menu-content .menu-item').filter({ hasText: /Add Runtime/i }).first();
+  await expect(addRuntimeItem).toBeVisible({ timeout: 10_000 });
+  await addRuntimeItem.click();
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await mnemonicTab.isVisible().catch(() => false) || await quickLoginButton.isVisible().catch(() => false)) {
+      return;
+    }
+    if (await creationBackButton.isVisible().catch(() => false)) {
+      await creationBackButton.click();
+      await page.waitForTimeout(200);
+    }
+  }
+
+  await expect
+    .poll(
+      async () =>
+        await mnemonicTab.isVisible().catch(() => false) ||
+        await quickLoginButton.isVisible().catch(() => false),
+      { timeout: 15_000, intervals: [200, 400, 600] },
+    )
+    .toBe(true);
+}
+
+async function waitForRuntimeReady(page: Page, runtimeId: string): Promise<void> {
+  await page.waitForFunction(({ targetRuntimeId }) => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+        eReplicas?: Map<string, unknown>;
+      };
+    }).isolatedEnv;
+    return String(env?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()
+      && Number(env?.eReplicas?.size || 0) > 0;
+  }, { targetRuntimeId: runtimeId }, { timeout: 30_000 });
+}
+
+async function waitForAnyRuntimeReady(page: Page): Promise<string> {
+  return await page.waitForFunction(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+        eReplicas?: Map<string, unknown>;
+      };
+    }).isolatedEnv;
+    if (!env?.runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
+    return String(env.runtimeId).toLowerCase();
+  }, { timeout: 30_000 }).then(async (handle) => {
+    const value = await handle.jsonValue();
+    if (typeof value !== 'string' || value.length === 0) {
+      throw new Error('runtimeId missing after runtime creation');
+    }
+    return value;
+  });
+}
+
+async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | null): Promise<string> {
+  return await page.waitForFunction(({ priorRuntimeId }) => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+        eReplicas?: Map<string, unknown>;
+      };
+    }).isolatedEnv;
+    const runtimeId = String(env?.runtimeId || '').toLowerCase();
+    if (!runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
+    const previous = String(priorRuntimeId || '').toLowerCase();
+    if (previous && runtimeId === previous) return null;
+    return runtimeId;
+  }, { priorRuntimeId: previousRuntimeId }, { timeout: 30_000 }).then(async (handle) => {
+    const value = await handle.jsonValue();
+    if (typeof value !== 'string' || value.length === 0) {
+      throw new Error('next runtimeId missing after quick login');
+    }
+    return value;
+  });
+}
+
 async function dismissOnboardingIfVisible(page: Page): Promise<void> {
   const checkbox = page.locator('text=I understand and accept the risks of using this software').first();
   if (await checkbox.isVisible({ timeout: 1000 }).catch(() => false)) {
@@ -37,6 +159,31 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
       await continueBtn.click();
     }
   }
+}
+
+async function completeProfileOnboardingIfVisible(page: Page, label: string): Promise<void> {
+  const profileHeading = page.getByRole('heading', { name: 'Your Public Profile', exact: true });
+  if (!await profileHeading.isVisible({ timeout: 1000 }).catch(() => false)) {
+    return;
+  }
+
+  const displayNameInput = page.getByRole('textbox', { name: /e\.g\. Alice, CryptoShop, MyExchange/i }).first();
+  await expect(displayNameInput).toBeVisible({ timeout: 15_000 });
+  const currentValue = (await displayNameInput.inputValue()).trim();
+  if (currentValue.length === 0) {
+    await displayNameInput.fill(label);
+  }
+
+  const continueButton = page.getByRole('button', { name: /Continue/i }).first();
+  await expect(continueButton).toBeEnabled({ timeout: 15_000 });
+  await continueButton.click();
+
+  const finishButton = page.getByRole('button', { name: /Start Using xln/i }).first();
+  await expect(finishButton).toBeVisible({ timeout: 15_000 });
+  await expect(finishButton).toBeEnabled({ timeout: 15_000 });
+  await finishButton.click();
+
+  await expect(profileHeading).not.toBeVisible({ timeout: 20_000 });
 }
 
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
@@ -123,40 +270,35 @@ export function selectDemoMnemonic(label: DemoUserName): string {
 }
 
 export async function createRuntime(page: Page, label: string, mnemonic: string): Promise<void> {
-  await page.waitForFunction(() => {
-    const view = window as typeof window & {
-      vaultOperations?: { createRuntime?: unknown };
-    };
-    return typeof view.vaultOperations?.createRuntime === 'function';
-  }, { timeout: 30_000 });
+  const quickLoginLabel = label.toLowerCase();
+  const isQuickLoginDemo =
+    (quickLoginLabel === 'alice' || quickLoginLabel === 'bob' || quickLoginLabel === 'carol' || quickLoginLabel === 'dave')
+    && normalizeMnemonic(mnemonic) === normalizeMnemonic(selectDemoMnemonic(quickLoginLabel as DemoUserName));
+  let runtimeId = deriveRuntimeIdFromMnemonic(mnemonic);
+  const previousRuntimeId = await getActiveEntity(page).then((entity) => entity?.runtimeId ?? null);
 
-  const result = await page.evaluate(
-    async ({ label, mnemonic }) => {
-      try {
-        const vaultOperations = (window as any).vaultOperations;
-        if (!vaultOperations?.createRuntime) {
-          return { ok: false, error: 'window.vaultOperations.createRuntime missing' };
-        }
-        await vaultOperations.createRuntime(label, mnemonic, {
-          loginType: 'demo',
-          requiresOnboarding: false,
-        });
-        const env = (window as any).isolatedEnv;
-        if (env && !env._debugId) env._debugId = `${label}-${Date.now()}`;
-        return { ok: true, debugId: env?._debugId ?? null };
-      } catch (error: any) {
-        return { ok: false, error: error?.message ?? String(error) };
-      }
-    },
-    { label, mnemonic },
-  );
+  await ensureRuntimeCreationView(page, label);
 
-  expect(result.ok, `createRuntime(${label}) failed: ${result.error ?? 'unknown'}`).toBe(true);
-  await page.waitForFunction(() => {
-    const env = (window as any).isolatedEnv;
-    return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
-  }, { timeout: 30_000 });
+  if (isQuickLoginDemo) {
+    const quickLoginButton = page.getByRole('button', { name: new RegExp(`^${escapeRegex(label)}$`, 'i') });
+    await expect(quickLoginButton).toBeVisible({ timeout: 15_000 });
+    await quickLoginButton.click();
+    runtimeId = await waitForNextRuntimeReady(page, previousRuntimeId);
+  } else {
+    const mnemonicTab = page.getByRole('button', { name: 'Mnemonic', exact: true });
+    await expect(mnemonicTab).toBeVisible({ timeout: 15_000 });
+    await mnemonicTab.click();
+    const mnemonicInput = page.locator('#mnemonic');
+    await expect(mnemonicInput).toBeVisible({ timeout: 15_000 });
+    await mnemonicInput.fill(normalizeMnemonic(mnemonic));
+    const openVaultButton = page.getByRole('button', { name: 'Open Vault', exact: true });
+    await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
+    await openVaultButton.click();
+    await waitForRuntimeReady(page, runtimeId);
+  }
+  runtimeIdsByLabel.set(label.toLowerCase(), runtimeId);
   await dismissOnboardingIfVisible(page);
+  await completeProfileOnboardingIfVisible(page, label);
   await ensureRuntimeOnline(page, `create-${label}`);
 }
 
@@ -218,94 +360,20 @@ export async function createDemoUsers(
 }
 
 export async function switchToRuntime(page: Page, label: string): Promise<void> {
-  const deadline = Date.now() + 30_000;
-  let result: { ok: boolean; id?: string; error?: string } = { ok: false, error: 'not-started' };
-
-  while (Date.now() < deadline) {
-    try {
-      result = await page.evaluate(async (runtimeLabel) => {
-        try {
-          const runtimesState = (window as any).runtimesState;
-          const vaultOperations = (window as any).vaultOperations;
-          if (!runtimesState || !vaultOperations?.selectRuntime) {
-            return { ok: false, error: 'window.runtimesState/window.vaultOperations.selectRuntime missing' };
-          }
-
-          let state: any;
-          const unsubscribe = runtimesState.subscribe((value: any) => { state = value; });
-          unsubscribe();
-
-          for (const [id, runtime] of Object.entries(state.runtimes) as Array<[string, { label?: string }]>) {
-            if (runtime.label?.toLowerCase() === runtimeLabel.toLowerCase()) {
-              await vaultOperations.selectRuntime(id);
-              return { ok: true, id };
-            }
-          }
-
-          return {
-            ok: false,
-            error: `Runtime "${runtimeLabel}" not found`,
-          };
-        } catch (error: any) {
-          return { ok: false, error: error?.message ?? String(error) };
-        }
-      }, label);
-    } catch (error: any) {
-      result = { ok: false, error: error?.message ?? String(error) };
-    }
-
-    if (result.ok) break;
-    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
-    await page.waitForTimeout(400);
-  }
-
-  expect(result.ok, `switchToRuntime(${label}) failed: ${result.error ?? 'unknown'}`).toBe(true);
-  await page.waitForFunction(({ runtimeId }) => {
-    const env = (window as any).isolatedEnv;
-    return String(env?.runtimeId || '').toLowerCase() === String(runtimeId || '').toLowerCase()
-      && Number(env?.eReplicas?.size || 0) > 0;
-  }, { runtimeId: result.id }, { timeout: 30_000 });
-  await dismissOnboardingIfVisible(page);
-  await ensureRuntimeOnline(page, `switch-${label}`);
+  const runtimeId = runtimeIdsByLabel.get(label.toLowerCase()) ?? '';
+  expect(runtimeId, `switchToRuntime(${label}) requires a known runtimeId`).not.toBe('');
+  await switchToRuntimeId(page, runtimeId);
 }
 
 export async function switchToRuntimeId(page: Page, runtimeId: string): Promise<void> {
-  const deadline = Date.now() + 30_000;
-  let result: { ok: boolean; error?: string } = { ok: false, error: 'not-started' };
-
-  while (Date.now() < deadline) {
-    try {
-      result = await page.evaluate(async (nextRuntimeId) => {
-        try {
-          const vaultOperations = (window as any).vaultOperations;
-          if (!vaultOperations?.selectRuntime) {
-            return { ok: false, error: 'window.vaultOperations.selectRuntime missing' };
-          }
-          await vaultOperations.selectRuntime(nextRuntimeId);
-          return { ok: true };
-        } catch (error: any) {
-          return { ok: false, error: error?.message ?? String(error) };
-        }
-      }, runtimeId);
-    } catch (error: any) {
-      const message = error?.message ?? String(error);
-      if (!/Execution context was destroyed|Cannot find context|Target closed/i.test(message)) {
-        throw error;
-      }
-      result = { ok: false, error: message };
-    }
-
-    if (result.ok) break;
-    await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
-    await page.waitForTimeout(300);
-  }
-
-  expect(result.ok, `switchToRuntimeId(${runtimeId.slice(0, 10)}) failed: ${result.error ?? 'unknown'}`).toBe(true);
-  await page.waitForFunction(({ targetRuntimeId }) => {
-    const env = (window as any).isolatedEnv;
-    return String(env?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()
-      && Number(env?.eReplicas?.size || 0) > 0;
-  }, { targetRuntimeId: runtimeId }, { timeout: 30_000 });
+  const normalizedRuntimeId = runtimeId.toLowerCase();
+  const shortAddress = `${normalizedRuntimeId.slice(0, 6)}...${normalizedRuntimeId.slice(-4)}`;
+  await openRuntimeDropdown(page);
+  const targetItem = page.locator('.menu-content .menu-item').filter({ hasText: shortAddress }).first();
+  await expect(targetItem, `runtime dropdown must contain ${shortAddress}`).toBeVisible({ timeout: 15_000 });
+  await targetItem.click();
+  await waitForRuntimeReady(page, normalizedRuntimeId);
   await dismissOnboardingIfVisible(page);
+  await completeProfileOnboardingIfVisible(page, `Runtime ${normalizedRuntimeId.slice(2, 6)}`);
   await ensureRuntimeOnline(page, `switch-id-${runtimeId.slice(0, 8)}`);
 }

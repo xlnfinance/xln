@@ -1,8 +1,8 @@
 import { expect, type Page } from '@playwright/test';
 
-const DEFAULT_CREDIT_AMOUNT = 10_000n * 10n ** 18n;
 const DEFAULT_TOKEN_IDS = [1, 3, 2] as const;
 const DEFAULT_OPEN_TIMEOUT_MS = 45_000;
+const DEFAULT_CREDIT_AMOUNT_DISPLAY = '10000';
 
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   const ok = await page.evaluate(async () => {
@@ -82,6 +82,106 @@ async function isAccountReady(
   );
 }
 
+async function openAccountsWorkspace(page: Page): Promise<void> {
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  if (!await accountsTab.isVisible().catch(() => false)) {
+    const backButton = page.locator('.account-panel .back-button').first();
+    if (await backButton.isVisible().catch(() => false)) {
+      await backButton.click();
+    }
+  }
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  await accountsTab.click();
+}
+
+async function openWorkspaceTab(page: Page, label: RegExp): Promise<void> {
+  await openAccountsWorkspace(page);
+  const tab = page.locator('.account-workspace-tab').filter({ hasText: label }).first();
+  await expect(tab).toBeVisible({ timeout: 20_000 });
+  await tab.scrollIntoViewIfNeeded();
+  await tab.click();
+}
+
+async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
+  await openWorkspaceTab(page, /Open Account/i);
+  const panel = page.locator('.hub-panel').first();
+  await expect(panel).toBeVisible({ timeout: 20_000 });
+  const hubCard = panel.locator('.hub-card').filter({ hasText: hubId }).first();
+  const refresh = panel.getByRole('button', { name: /^Refresh$/ }).first();
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (await hubCard.isVisible().catch(() => false)) return;
+    await expect(refresh).toBeVisible({ timeout: 10_000 });
+    await refresh.click();
+    await page.waitForTimeout(1_000);
+  }
+
+  await expect(hubCard, `hub ${hubId} must appear in hub discovery`).toBeVisible({ timeout: 20_000 });
+}
+
+async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
+  await ensureHubCardVisible(page, hubId);
+  const hubCard = page.locator('.hub-card').filter({ hasText: hubId }).first();
+  const connectButton = hubCard.getByRole('button', { name: /Connect/i }).first();
+  if (await connectButton.isVisible().catch(() => false)) {
+    await connectButton.click();
+  }
+}
+
+async function focusConfiguredAccount(page: Page, hubId: string): Promise<void> {
+  await openAccountsWorkspace(page);
+  const preview = page.locator(`.account-preview[data-counterparty-id="${hubId}"]`).first();
+  if (await preview.isVisible().catch(() => false)) {
+    await preview.click();
+  }
+}
+
+async function openConfigureWorkspace(page: Page, hubId: string): Promise<void> {
+  await focusConfiguredAccount(page, hubId);
+  await openWorkspaceTab(page, /Configure/i);
+  await expect(page.locator('.configure-panel').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.configure-empty').first()).not.toBeVisible({ timeout: 20_000 });
+}
+
+async function addTokenToAccount(page: Page, hubId: string, tokenId: number): Promise<void> {
+  await openConfigureWorkspace(page, hubId);
+  const tokenTab = page.locator('.configure-tab').filter({ hasText: /Add Token/i }).first();
+  await expect(tokenTab).toBeVisible({ timeout: 20_000 });
+  await tokenTab.click();
+  const tokenSelect = page.locator('.configure-token-select').first();
+  await expect(tokenSelect).toBeVisible({ timeout: 20_000 });
+  await tokenSelect.selectOption(String(tokenId));
+  const addButton = page.getByRole('button', { name: /^Add Token$/ }).first();
+  await expect(addButton).toBeEnabled({ timeout: 20_000 });
+  await addButton.click();
+}
+
+async function extendCreditToken(page: Page, hubId: string, tokenId: number, amountDisplay: string): Promise<void> {
+  await openConfigureWorkspace(page, hubId);
+  const creditTab = page.locator('.configure-tab').filter({ hasText: /Extend Credit/i }).first();
+  await expect(creditTab).toBeVisible({ timeout: 20_000 });
+  await creditTab.click();
+  const panel = page.locator('.configure-panel .action-card').filter({ hasText: /Extend Credit/i }).first();
+  await expect(panel).toBeVisible({ timeout: 20_000 });
+  const tokenSelect = panel.locator('select.form-select').first();
+  await expect(tokenSelect).toBeVisible({ timeout: 20_000 });
+  await tokenSelect.selectOption(String(tokenId));
+  const amountInput = panel.locator('input[placeholder="Credit amount"]').first();
+  await expect(amountInput).toBeVisible({ timeout: 20_000 });
+  await amountInput.fill(amountDisplay);
+  const submit = panel.getByRole('button', { name: /^Extend Credit$/ }).first();
+  await expect(submit).toBeEnabled({ timeout: 20_000 });
+  await submit.click();
+  await expect.poll(
+    async () => await amountInput.inputValue(),
+    {
+      timeout: 15_000,
+      intervals: [200, 400, 600],
+      message: `credit amount input should reset after extending token ${tokenId}`,
+    },
+  ).toBe('0');
+}
+
 type AccountOpenStatus = {
   exists: boolean;
   hasDelta: boolean;
@@ -138,149 +238,45 @@ export async function connectRuntimeToHub(
   const initialStatus = await getAccountOpenStatus(page, identity.entityId, hubId);
 
   if (!initialStatus.exists) {
-    const openResult = await page.evaluate(
-      async ({ entityId, signerId, hubId, creditAmount, tokenIds }) => {
-        const maybeWindow = window as typeof window & {
-          vaultOperations?: {
-            enqueueEntityInputs?: (
-              env: {
-                eReplicas?: Map<string, {
-                  state?: {
-                    accounts?: Map<string, {
-                      deltas?: Map<number, unknown>;
-                      pendingFrame?: unknown;
-                      currentHeight?: number;
-                    }>;
-                  };
-                }>;
-              },
-              inputs: Array<{
-                entityId: string;
-                signerId: string;
-                entityTxs: Array<
-                  | {
-                      type: 'openAccount';
-                      data: {
-                        targetEntityId: string;
-                        creditAmount: bigint;
-                        tokenId: number;
-                      };
-                    }
-                  | {
-                      type: 'extendCredit';
-                      data: {
-                        counterpartyEntityId: string;
-                        tokenId: number;
-                        amount: bigint;
-                      };
-                    }
-                >;
-              }>,
-            ) => Promise<unknown>;
-          };
+    await connectHubThroughUi(page, hubId);
+  }
+
+  await expect.poll(
+    async () => (await getAccountOpenStatus(page, identity.entityId, hubId)).exists,
+    {
+      timeout: DEFAULT_OPEN_TIMEOUT_MS,
+      intervals: [250, 500, 750],
+      message: `account ${hubId.slice(0, 10)} must appear after hub connect`,
+    },
+  ).toBe(true);
+
+  for (const tokenId of DEFAULT_TOKEN_IDS.slice(1)) {
+    const tokenActive = await page.evaluate(
+      ({ entityId, hubId, tokenId }) => {
+        const env = (window as typeof window & {
           isolatedEnv?: {
             eReplicas?: Map<string, {
               state?: {
                 accounts?: Map<string, {
                   deltas?: Map<number, unknown>;
-                  pendingFrame?: unknown;
-                  currentHeight?: number;
                 }>;
               };
             }>;
-            gossip?: {
-              getProfiles?: () => Array<{ entityId: string; runtimeId?: string; metadata?: { runtimeId?: string } }>;
-            };
-            runtimeState?: {
-              p2p?: {
-                refreshGossip?: () => Promise<void> | void;
-                ensureProfiles?: (ids: string[]) => Promise<boolean>;
-              };
-            };
           };
-        };
-
-        const env = maybeWindow.isolatedEnv;
-        const vaultOperations = maybeWindow.vaultOperations;
-        const p2p = env?.runtimeState?.p2p;
-        if (!env || !vaultOperations?.enqueueEntityInputs || !env.eReplicas) {
-          return { ok: false, error: 'runtime env missing' };
+        }).isolatedEnv;
+        if (!env?.eReplicas) return false;
+        for (const [replicaKey, replica] of env.eReplicas.entries()) {
+          if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
+          return Boolean(replica.state?.accounts?.get(hubId)?.deltas?.has(tokenId));
         }
-
-        let hubRuntimeId: string | null = null;
-        const lookupStartedAt = Date.now();
-        while (Date.now() - lookupStartedAt < 12_000) {
-          const profiles = env.gossip?.getProfiles?.() ?? [];
-          const hubProfile = profiles.find((profile) =>
-            String(profile.entityId || '').toLowerCase() === String(hubId).toLowerCase(),
-          );
-          const candidateRuntimeId = hubProfile?.runtimeId ?? null;
-          if (typeof candidateRuntimeId === 'string' && candidateRuntimeId.length > 0) {
-            hubRuntimeId = candidateRuntimeId;
-            break;
-          }
-          if (typeof p2p?.ensureProfiles === 'function') {
-            try { await p2p.ensureProfiles([hubId]); } catch {}
-          }
-          if (typeof p2p?.refreshGossip === 'function') {
-            try { await p2p.refreshGossip(); } catch {}
-          }
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-        if (!hubRuntimeId) {
-          return { ok: false, error: 'hub runtimeId unresolved in gossip' };
-        }
-
-        let liveSignerId = signerId;
-        for (const replicaKey of env.eReplicas.keys()) {
-          const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
-          if (String(replicaEntityId).toLowerCase() === String(entityId).toLowerCase() && replicaSignerId) {
-            liveSignerId = replicaSignerId;
-            break;
-          }
-        }
-
-        const normalizedTokenIds = Array.isArray(tokenIds) ? tokenIds.filter((value) => Number.isFinite(value)) : [];
-        const primaryTokenId = normalizedTokenIds[0];
-        if (typeof primaryTokenId !== 'number') {
-          return { ok: false, error: 'tokenIds missing' };
-        }
-
-        await vaultOperations.enqueueEntityInputs(env, [{
-          entityId,
-          signerId: liveSignerId,
-          entityTxs: [
-            {
-              type: 'openAccount',
-              data: {
-                targetEntityId: hubId,
-                creditAmount: BigInt(creditAmount),
-                tokenId: primaryTokenId,
-              },
-            },
-            ...normalizedTokenIds.slice(1).map((tokenId) => ({
-              type: 'extendCredit' as const,
-              data: {
-                counterpartyEntityId: hubId,
-                tokenId,
-                amount: BigInt(creditAmount),
-              },
-            })),
-          ],
-        }]);
-
-        return { ok: true };
+        return false;
       },
-      {
-        entityId: identity.entityId,
-        signerId: identity.signerId,
-        hubId,
-        creditAmount: DEFAULT_CREDIT_AMOUNT.toString(),
-        tokenIds: DEFAULT_TOKEN_IDS,
-      },
+      { entityId: identity.entityId, hubId, tokenId },
     );
-
-    expect(openResult?.ok, `connectHub failed: ${openResult?.error ?? 'unknown'}`).toBe(true);
+    if (!tokenActive) {
+      await addTokenToAccount(page, hubId, tokenId);
+    }
+    await extendCreditToken(page, hubId, tokenId, DEFAULT_CREDIT_AMOUNT_DISPLAY);
   }
 
   const opened = await isAccountReady(page, identity.entityId, hubId, DEFAULT_TOKEN_IDS, DEFAULT_OPEN_TIMEOUT_MS);

@@ -326,6 +326,60 @@ function validateArray<T>(value: unknown, fieldName: string): T[] {
 
 // Removed unused validateMap function
 
+function validateMapInstance(value: unknown, fieldName: string): Map<unknown, unknown> {
+  if (!(value instanceof Map)) {
+    throw new TypeSafetyViolationError(`${fieldName} must be a Map`, value);
+  }
+  return value;
+}
+
+function validateObservationArray(
+  value: unknown,
+  fieldName: string,
+  finalizedField: 'observedAt' | 'finalizedAt',
+): void {
+  const entries = validateArray<Record<string, unknown>>(value, fieldName);
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = validateObject(entries[index], `${fieldName}[${index}]`);
+    validateNumber(entry['jHeight'], `${fieldName}[${index}].jHeight`);
+    validateString(entry['jBlockHash'], `${fieldName}[${index}].jBlockHash`);
+    validateArray(entry['events'], `${fieldName}[${index}].events`);
+    validateNumber(entry[finalizedField], `${fieldName}[${index}].${finalizedField}`);
+  }
+}
+
+function validateBigIntMapValues(value: unknown, fieldName: string): void {
+  const map = validateMapInstance(value, fieldName);
+  for (const [key, entryValue] of map.entries()) {
+    if (typeof entryValue !== 'bigint') {
+      throw new FinancialDataCorruptionError(`${fieldName}[${String(key)}] must be bigint`, {
+        key: String(key),
+        value: entryValue,
+      });
+    }
+  }
+}
+
+function validateRebalanceFeeStateMap(value: unknown, fieldName: string): void {
+  const map = validateMapInstance(value, fieldName);
+  for (const [tokenId, rawFeeState] of map.entries()) {
+    const feeState = validateObject(rawFeeState, `${fieldName}[${String(tokenId)}]`);
+    validateNumber(feeState['feeTokenId'], `${fieldName}[${String(tokenId)}].feeTokenId`);
+    if (typeof feeState['feePaidUpfront'] !== 'bigint') {
+      throw new FinancialDataCorruptionError(`${fieldName}[${String(tokenId)}].feePaidUpfront must be bigint`);
+    }
+    if (typeof feeState['requestedAmount'] !== 'bigint') {
+      throw new FinancialDataCorruptionError(`${fieldName}[${String(tokenId)}].requestedAmount must be bigint`);
+    }
+    validateNumber(feeState['policyVersion'], `${fieldName}[${String(tokenId)}].policyVersion`);
+    validateNumber(feeState['requestedAt'], `${fieldName}[${String(tokenId)}].requestedAt`);
+    if (typeof feeState['requestedByLeft'] !== 'boolean') {
+      throw new FinancialDataCorruptionError(`${fieldName}[${String(tokenId)}].requestedByLeft must be boolean`);
+    }
+    validateNumber(feeState['jBatchSubmittedAt'], `${fieldName}[${String(tokenId)}].jBatchSubmittedAt`);
+  }
+}
+
 // =============================================================================
 // COMPREHENSIVE VALIDATORS - Complete Type Safety
 // =============================================================================
@@ -336,14 +390,25 @@ function validateArray<T>(value: unknown, fieldName: string): T[] {
  */
 export function validateAccountFrame(value: unknown, context = 'AccountFrame'): AccountFrame {
   const obj = validateObject(value, context);
+  const height = validateNumber(obj['height'], `${context}.height`);
+  const prevFrameHashRaw = obj['prevFrameHash'];
+  const prevFrameHash =
+    typeof prevFrameHashRaw === 'string' && (prevFrameHashRaw.length > 0 || height === 0)
+      ? prevFrameHashRaw
+      : validateString(prevFrameHashRaw, `${context}.prevFrameHash`);
+  const stateHashRaw = obj['stateHash'];
+  const stateHash =
+    typeof stateHashRaw === 'string' && (stateHashRaw.length > 0 || height === 0)
+      ? stateHashRaw
+      : validateString(stateHashRaw, `${context}.stateHash`);
 
   const validated: AccountFrame = {
-    height: validateNumber(obj['height'], `${context}.height`),
+    height,
     timestamp: validateNumber(obj['timestamp'], `${context}.timestamp`),
     jHeight: validateNumber(obj['jHeight'], `${context}.jHeight`),
     accountTxs: validateArray(obj['accountTxs'], `${context}.accountTxs`),
-    prevFrameHash: validateString(obj['prevFrameHash'], `${context}.prevFrameHash`),
-    stateHash: validateString(obj['stateHash'], `${context}.stateHash`),
+    prevFrameHash,
+    stateHash,
     tokenIds: validateArray<number>(obj['tokenIds'] || [], `${context}.tokenIds`),
     deltas: validateArray<bigint>(obj['deltas'] || [], `${context}.deltas`),
     // Optional fields - preserve if present (deep copy to prevent mutation issues)
@@ -352,11 +417,11 @@ export function validateAccountFrame(value: unknown, context = 'AccountFrame'): 
   };
 
   // Additional integrity checks
-  if (validated.stateHash.length === 0) {
+  if (validated.height > 0 && validated.stateHash.length === 0) {
     throw new FinancialDataCorruptionError('AccountFrame.stateHash cannot be empty');
   }
 
-  if (validated.timestamp <= 0) {
+  if (validated.height > 0 && validated.timestamp <= 0) {
     throw new FinancialDataCorruptionError('AccountFrame.timestamp must be positive', { timestamp: validated.timestamp });
   }
 
@@ -382,9 +447,30 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
     throw new FinancialDataCorruptionError(`${context} canonical order violated: leftEntity must be < rightEntity`);
   }
 
-  if (!obj['deltas'] || !(obj['deltas'] instanceof Map)) {
-    throw new FinancialDataCorruptionError(`${context}.deltas must be a Map`);
+  validateString(obj['status'], `${context}.status`);
+  validateArray(obj['mempool'], `${context}.mempool`);
+  validateAccountFrame(obj['currentFrame'], `${context}.currentFrame`);
+  validateMapInstance(obj['deltas'], `${context}.deltas`);
+  validateMapInstance(obj['locks'], `${context}.locks`);
+  validateMapInstance(obj['swapOffers'], `${context}.swapOffers`);
+  validateObject(obj['globalCreditLimits'], `${context}.globalCreditLimits`);
+  if (typeof obj['globalCreditLimits']['ownLimit'] !== 'bigint') {
+    throw new FinancialDataCorruptionError(`${context}.globalCreditLimits.ownLimit must be bigint`);
   }
+  if (typeof obj['globalCreditLimits']['peerLimit'] !== 'bigint') {
+    throw new FinancialDataCorruptionError(`${context}.globalCreditLimits.peerLimit must be bigint`);
+  }
+  validateNumber(obj['currentHeight'], `${context}.currentHeight`);
+  validateArray(obj['pendingSignatures'], `${context}.pendingSignatures`);
+  validateNumber(obj['rollbackCount'], `${context}.rollbackCount`);
+  validateObservationArray(obj['leftJObservations'], `${context}.leftJObservations`, 'observedAt');
+  validateObservationArray(obj['rightJObservations'], `${context}.rightJObservations`, 'observedAt');
+  validateObservationArray(obj['jEventChain'], `${context}.jEventChain`, 'finalizedAt');
+  validateNumber(obj['lastFinalizedJHeight'], `${context}.lastFinalizedJHeight`);
+  validateArray(obj['frameHistory'], `${context}.frameHistory`);
+  validateMapInstance(obj['pendingWithdrawals'], `${context}.pendingWithdrawals`);
+  validateBigIntMapValues(obj['requestedRebalance'], `${context}.requestedRebalance`);
+  validateRebalanceFeeStateMap(obj['requestedRebalanceFeeState'], `${context}.requestedRebalanceFeeState`);
 
   // Validate all deltas in the map
   for (const [tokenId, delta] of obj['deltas'].entries()) {
@@ -427,6 +513,10 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
     if (typeof amount !== 'bigint') {
       throw new FinancialDataCorruptionError(`Reserve amount for token ${tokenId} must be bigint`, { tokenId, amount });
     }
+  }
+
+  for (const [accountId, accountMachine] of obj['accounts'].entries()) {
+    validateAccountMachine(accountMachine, `${context}.accounts[${String(accountId)}]`);
   }
 
   return obj as EntityState; // Cast after basic validation

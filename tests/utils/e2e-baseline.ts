@@ -215,6 +215,52 @@ export const getHealth = async (
   }
 };
 
+export const waitForNamedHubs = async (
+  page: Page,
+  requiredNames: string[],
+  options: {
+    apiBaseUrl?: string;
+    timeoutMs?: number;
+    pollMs?: number;
+  } = {},
+): Promise<Record<string, string>> => {
+  const apiBaseUrl = options.apiBaseUrl ?? API_BASE_URL;
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
+  const startedAt = Date.now();
+  let lastHealth: E2EHealthResponse | null = null;
+  const wanted = requiredNames.map((name) => name.trim().toLowerCase()).filter(Boolean);
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastHealth = await getHealth(page, apiBaseUrl);
+    const hubs = Array.isArray(lastHealth?.hubs) ? lastHealth.hubs : [];
+    const byName = new Map<string, string>();
+    for (const hub of hubs) {
+      const name = String(hub.name ?? '').trim().toLowerCase();
+      const entityId = String(hub.entityId ?? '').trim().toLowerCase();
+      if (!name || !entityId) continue;
+      byName.set(name, entityId);
+    }
+
+    const resolved: Record<string, string> = {};
+    let ready = true;
+    for (const name of wanted) {
+      const entityId = byName.get(name);
+      if (!entityId) {
+        ready = false;
+        break;
+      }
+      resolved[name] = entityId;
+    }
+    if (ready) return resolved;
+    await page.waitForTimeout(pollMs);
+  }
+
+  throw new Error(
+    `Named hubs not ready within ${timeoutMs}ms: ${requiredNames.join(', ')}\n${summarizeHealth(lastHealth)}`,
+  );
+};
+
 export const waitForApiReachable = async (
   page: Page,
   timeoutMs = 120_000,

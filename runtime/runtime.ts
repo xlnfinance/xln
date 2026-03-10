@@ -26,6 +26,11 @@ const LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS = (() => {
   if (!Number.isFinite(parsed) || parsed < 1) return 5;
   return Math.floor(parsed);
 })();
+const DEFAULT_SNAPSHOT_INTERVAL_FRAMES = (() => {
+  const parsed = Number(readRuntimeEnv('XLN_SNAPSHOT_INTERVAL_FRAMES') ?? '10');
+  if (!Number.isFinite(parsed) || parsed < 1) return 10;
+  return Math.floor(parsed);
+})();
 
 import { getPerfMs, getWallClockMs } from './utils';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
@@ -173,6 +178,7 @@ import {
   validateAccountDeltas,
   createDefaultDelta,
   isDelta,
+  validateEntityState,
   validateDeliverableEntityInput,
   validateEntityInput,
   validateEntityOutput,
@@ -480,12 +486,12 @@ const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
     env.runtimeConfig = {
       minFrameDelayMs: 0,
       loopIntervalMs: 25,
-      snapshotIntervalFrames: 100,
+      snapshotIntervalFrames: DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
     };
   }
   const configuredSnapshotInterval = env.runtimeConfig.snapshotIntervalFrames;
   if (!Number.isFinite(configuredSnapshotInterval ?? NaN) || (configuredSnapshotInterval ?? 0) < 1) {
-    env.runtimeConfig.snapshotIntervalFrames = 100;
+    env.runtimeConfig.snapshotIntervalFrames = DEFAULT_SNAPSHOT_INTERVAL_FRAMES;
   }
   return env.runtimeConfig;
 };
@@ -3549,10 +3555,8 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
           await db.put(op.key, op.value);
         }
       } catch (putError) {
-        // In browser, IndexedDB can close during page refresh — non-fatal, skip persistence
-        const msg = putError instanceof Error ? putError.message : String(putError);
-        if ((isBrowser || state.persistencePaused || ensureRuntimeState(env).db !== db) && isDbUnavailableError(putError)) {
-          console.warn(`⚠️ DB write skipped (db unavailable): frame ${env.height}`);
+        if ((state.persistencePaused || ensureRuntimeState(env).db !== db) && isDbUnavailableError(putError)) {
+          console.warn(`⚠️ DB write aborted during reset/pause: frame ${env.height}`);
           return;
         }
         throw putError;
@@ -3560,12 +3564,10 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     }
     writeMs = getPerfMs() - writeStartedAt;
 
-    // Verify write succeeded (skip in browser if DB is flaky)
-    let verifySkipped = isBrowser;
-    if (!isBrowser) {
-      if (state.persistencePaused || ensureRuntimeState(env).db !== db) {
-        verifySkipped = true;
-      }
+    // Verify write succeeded before exposing the frame as durable to the UI.
+    let verifySkipped = false;
+    if (state.persistencePaused || ensureRuntimeState(env).db !== db) {
+      verifySkipped = true;
     }
     if (!verifySkipped) {
       const verifyStartedAt = getPerfMs();
@@ -3580,7 +3582,7 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
         }
       } catch (verifyError) {
         if ((state.persistencePaused || ensureRuntimeState(env).db !== db) && isDbUnavailableError(verifyError)) {
-          console.warn(`⚠️ DB verify skipped (db unavailable): frame ${env.height}`);
+          console.warn(`⚠️ DB verify aborted during reset/pause: frame ${env.height}`);
           return;
         }
         throw new Error(`PERSISTENCE_FATAL: write verification failed at frame ${env.height}: ${String(verifyError)}`);
@@ -3606,9 +3608,8 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     }
   } catch (err) {
     const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-    // In browser, DB errors are non-fatal — runtime continues without persistence
-    if (isBrowser || (state.persistencePaused && isDbUnavailableError(err))) {
-      console.warn(`⚠️ DB save failed (non-fatal in browser): ${reason}`);
+    if (state.persistencePaused && isDbUnavailableError(err)) {
+      console.warn(`⚠️ DB save aborted during reset/pause: ${reason}`);
       return;
     }
     console.error('❌ Failed to save to LevelDB:', err);
@@ -3813,6 +3814,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
     env.eReplicas = normalizeReplicaMap(data.eReplicas || data.replicas || []);
     env.jReplicas = normalizeJReplicaMap(data.jReplicas || []);
     for (const replica of env.eReplicas.values()) {
+      validateEntityState(replica.state, `loadEnvFromDB.eReplicas[${String(replica.entityId)}].state`);
       replica.state.config = mergeRuntimeJurisdictionConfig(replica.state.config, env);
     }
     env.history = [];

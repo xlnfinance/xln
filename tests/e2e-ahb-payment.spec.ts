@@ -727,67 +727,115 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
   await page.waitForTimeout(SETTLE_MS);
 }
 
-/** Generate HTLC secret + hashlock (Node.js side) */
-function generateHtlc(): { secret: string; hashlock: string } {
-  const secret = ethers.hexlify(ethers.randomBytes(32));
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  const hashlock = ethers.keccak256(abiCoder.encode(['bytes32'], [secret]));
-  return { secret, hashlock };
+async function openPayWorkspace(page: Page): Promise<void> {
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  if (!await accountsTab.isVisible().catch(() => false)) {
+    const backButton = page.locator('.account-panel .back-button').first();
+    if (await backButton.isVisible().catch(() => false)) {
+      await backButton.click();
+    }
+  }
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  await accountsTab.click();
+  const workspaceTabs = page.locator('.account-workspace-tabs').first();
+  await expect(workspaceTabs).toBeVisible({ timeout: 20_000 });
+  const payTab = workspaceTabs.locator('.account-workspace-tab').filter({ hasText: /Pay/i }).first();
+  await expect(payTab).toBeVisible({ timeout: 20_000 });
+  await payTab.click();
 }
 
-/**
- * Enqueue an HTLC payment.
- * This only submits runtime input; callers must wait on explicit state or log barriers.
- */
-async function pay(page: Page, from: string, signerId: string, to: string, route: string[], amount: bigint) {
-  const { secret, hashlock } = generateHtlc();
-  console.log(`[E2E] HTLC: secret=${secret.slice(0, 16)}... hashlock=${hashlock.slice(0, 16)}...`);
+async function chooseVisibleRoute(page: Page, route: string[]): Promise<void> {
+  if (route.length === 0) return;
+  const routeOptions = page.locator('.route-option');
+  const routeCount = await routeOptions.count();
+  if (routeCount <= 1) return;
+  const routeNeedles = route.map((hopId) => hopId.toLowerCase().slice(0, 10));
+  for (let index = 0; index < routeCount; index += 1) {
+    const option = routeOptions.nth(index);
+    const text = (await option.textContent()).toLowerCase();
+    const matches = routeNeedles.every((needle) => text.includes(needle));
+    if (matches) {
+      await option.click();
+      return;
+    }
+  }
+}
 
-  const r = await page.evaluate(async ({ from, signerId, to, route, amt, secret, hashlock }) => {
-    try {
-      const env = (window as any).isolatedEnv;
-      const vaultOperations = (window as any).vaultOperations;
-      if (!env || !vaultOperations?.enqueueEntityInputs) {
-        return { ok: false, error: 'runtime env missing', preKeys: [], postKeys: [], preAccounts: 0, postAccounts: 0 };
-      }
-      let liveSignerId = signerId;
-      for (const key of env?.eReplicas?.keys?.() ?? []) {
-        const [eid, sid] = String(key).split(':');
-        if (String(eid).toLowerCase() === String(from).toLowerCase() && sid) {
-          liveSignerId = sid;
-          break;
-        }
-      }
+function parseRouteFeeText(rawText: string): bigint {
+  const match = rawText.match(/Fee:\s*([0-9][0-9,]*(?:\.[0-9]+)?)/i);
+  if (!match?.[1]) return 0n;
+  const normalized = match[1].replace(/,/g, '').trim();
+  return ethers.parseUnits(normalized, 18);
+}
 
-      // Pre-pay diagnostics
-      const preKeys = env.eReplicas ? [...env.eReplicas.keys()] : [];
-      let preAccounts = 0;
-      for (const [k, rep] of (env.eReplicas || new Map()).entries()) {
-        if (k.startsWith(from + ':')) preAccounts = rep.state?.accounts?.size || 0;
-      }
-      console.log(`[E2E] pay() PRE: envId=${env._debugId}, eReplicas=[${preKeys.join(', ')}], fromAccounts=${preAccounts}`);
+async function pay(page: Page, from: string, signerId: string, to: string, route: string[], amount: bigint): Promise<bigint> {
+  void from;
+  void signerId;
 
-      await vaultOperations.enqueueEntityInputs(env, [{
-          entityId: from,
-          signerId: liveSignerId,
-          entityTxs: [{ type: 'htlcPayment', data: { targetEntityId: to, tokenId: 1, amount: BigInt(amt), route, secret, hashlock } }],
-        }]);
+  await openPayWorkspace(page);
+  const hashlockModeBtn = page.getByRole('button', { name: /Hashlock/i }).first();
+  await expect(hashlockModeBtn).toBeVisible({ timeout: 10_000 });
+  await hashlockModeBtn.click();
 
-      // Post-process diagnostics (immediate, before settle)
-      const postKeys = env.eReplicas ? [...env.eReplicas.keys()] : [];
-      let postAccounts = 0;
-      for (const [k, rep] of (env.eReplicas || new Map()).entries()) {
-        if (k.startsWith(from + ':')) postAccounts = rep.state?.accounts?.size || 0;
-      }
-      console.log(`[E2E] pay() POST-PROCESS: eReplicas=[${postKeys.join(', ')}], fromAccounts=${postAccounts}`);
+  const recipientInput = page.getByRole('textbox', { name: 'Select recipient...' }).first();
+  await expect(recipientInput).toBeVisible({ timeout: 10_000 });
+  await recipientInput.click();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.keyboard.press('Backspace');
+  await recipientInput.fill(to);
+  await page.keyboard.press('Enter');
 
-      return { ok: true, preKeys, postKeys, preAccounts, postAccounts };
-    } catch (e: any) { return { ok: false, error: e.message, preKeys: [], postKeys: [], preAccounts: 0, postAccounts: 0 }; }
-  }, { from, signerId, to, route, amt: amount.toString(), secret, hashlock });
-  console.log(`[E2E] pay() result: pre=${r.preAccounts}accs/${r.preKeys.length}ents → post=${r.postAccounts}accs/${r.postKeys.length}ents`);
-  expect(r.ok, `htlcPayment: ${r.error}`).toBe(true);
-  // Keep the loop responsive and rely on state-based waits in assertions.
+  const amountInput = page.locator('input[placeholder="0.00"]').first();
+  await expect(amountInput).toBeVisible({ timeout: 10_000 });
+  await amountInput.click();
+  await amountInput.fill(ethers.formatUnits(amount, 18));
+
+  const findRoutesBtn = page.getByRole('button', { name: 'Find Routes' }).first();
+  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
+  await findRoutesBtn.click();
+
+  const routesPanel = page.locator('.route-option').first();
+  await expect(routesPanel).toBeVisible({ timeout: 15_000 });
+  await chooseVisibleRoute(page, route);
+  const selectedRoute = page.locator('.route-option.selected, .route-option:has(input[type="radio"]:checked)').first();
+  const selectedRouteText = (await selectedRoute.textContent().catch(() => '')) || '';
+  const quotedSenderSpend = amount + parseRouteFeeText(selectedRouteText);
+
+  const sendPaymentBtn = page.getByRole('button', { name: /Send Hashlock Payment|Pay Now/i }).first();
+  await expect(sendPaymentBtn).toBeEnabled({ timeout: 10_000 });
+  await sendPaymentBtn.click();
   await page.waitForTimeout(200);
+  return quotedSenderSpend;
+}
+
+async function attemptOverspend(page: Page, to: string, route: string[], amount: bigint): Promise<void> {
+  await openPayWorkspace(page);
+  const hashlockModeBtn = page.getByRole('button', { name: /Hashlock/i }).first();
+  await expect(hashlockModeBtn).toBeVisible({ timeout: 10_000 });
+  await hashlockModeBtn.click();
+
+  const recipientInput = page.getByRole('textbox', { name: 'Select recipient...' }).first();
+  await recipientInput.click();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+  await page.keyboard.press('Backspace');
+  await recipientInput.fill(to);
+  await page.keyboard.press('Enter');
+
+  const amountInput = page.locator('input[placeholder="0.00"]').first();
+  await amountInput.click();
+  await amountInput.fill(ethers.formatUnits(amount, 18));
+
+  const findRoutesBtn = page.getByRole('button', { name: 'Find Routes' }).first();
+  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
+  await findRoutesBtn.click();
+  await page.waitForTimeout(500);
+  await chooseVisibleRoute(page, route);
+
+  const sendPaymentBtn = page.getByRole('button', { name: /Send Hashlock Payment|Pay Now/i }).first();
+  if (await sendPaymentBtn.isEnabled().catch(() => false)) {
+    await sendPaymentBtn.click();
+    await page.waitForTimeout(300);
+  }
 }
 
 /** Take named screenshot and save to test-results */
@@ -960,10 +1008,10 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       runtimeIdSet.has('') || runtimeIdSet.size !== 3,
       `AHB must use 3 distinct runtimes (alice/hub/bob). got alice=${aliceRuntimeId} hub=${hubRuntimeId} bob=${bobRuntimeId}`,
     ).toBe(false);
-    await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
+    const forwardQuotedSpend = await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
       [alice!.entityId, hubId, bob!.entityId], payAmount);
 
-    const aliceMinSpend = expectedSenderSpend > payAmount ? expectedSenderSpend : payAmount;
+    const aliceMinSpend = forwardQuotedSpend > payAmount ? forwardQuotedSpend : payAmount;
     // Alice: sender pays the quoted lock amount once the debit is committed locally.
     const { latest: a2, spent: alicePaid } = await waitForSenderSpend(
       page,
@@ -1023,13 +1071,13 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] Bob OUT pre-pay check: ${b2check}`);
     expect(b2check, 'Bob must have account before reverse pay').toBe(b2);
 
-    await pay(page, bob!.entityId, bob!.signerId, alice!.entityId,
+    const reverseQuotedSpend = await pay(page, bob!.entityId, bob!.signerId, alice!.entityId,
       [bob!.entityId, hubId, alice!.entityId], reverseAmount);
 
     // Dump state to understand what happened
     await dumpState(page, 'bob-after-reverse-pay');
 
-    const bobMinSpend = reverseSenderSpend > reverseAmount ? reverseSenderSpend : reverseAmount;
+    const bobMinSpend = reverseQuotedSpend > reverseAmount ? reverseQuotedSpend : reverseAmount;
     // Bob: sender pays full amount once the debit is committed locally.
     const { latest: b3, spent: bobPaid } = await waitForSenderSpend(
       page,
@@ -1040,7 +1088,11 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     );
     console.log(`[E2E] Bob OUT after reverse: ${b3}`);
     console.log(`[E2E] Bob paid: ${bobPaid} (OUT ${b2} → ${b3})`);
-    expect(b3, 'Bob account must still exist after pay').toBeGreaterThan(0n);
+    const bobCounterpartiesAfterReverse = await connectedCounterparties(page, bob!.entityId);
+    expect(
+      bobCounterpartiesAfterReverse.has(hubId.toLowerCase()),
+      'Bob account must still exist after pay',
+    ).toBe(true);
     expect(bobPaid, 'Bob should pay at least quoted sender amount').toBeGreaterThanOrEqual(bobMinSpend);
     await screenshot(page, '07a-bob-after-reverse-send');
 
@@ -1073,9 +1125,9 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const bobSecondForwardCursor = await getPersistedReceiptCursor(page);
 
     await switchToRuntime(page, 'alice');
-    await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
+    const secondForwardQuotedSpend = await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
       [alice!.entityId, hubId, bob!.entityId], pay2Amount);
-    const pay2MinSpend = pay2SenderSpend > pay2Amount ? pay2SenderSpend : pay2Amount;
+    const pay2MinSpend = secondForwardQuotedSpend > pay2Amount ? secondForwardQuotedSpend : pay2Amount;
     const { latest: a6, spent: pay2Spent } = await waitForSenderSpend(
       page,
       alice!.entityId,
@@ -1104,35 +1156,9 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await switchToRuntime(page, 'alice');
     console.log('[E2E] 9. Overspend: Alice tries to send more than capacity');
     const overAmount = a6 + toWei(1); // more than Alice has
-    const { secret: overSecret, hashlock: overHash } = generateHtlc();
-    const overResult = await page.evaluate(async ({ from, signerId, to, route, amt, secret, hashlock }) => {
-      try {
-        const env = (window as any).isolatedEnv;
-        const vaultOperations = (window as any).vaultOperations;
-        if (!env || !vaultOperations?.enqueueEntityInputs) {
-          return { ok: false, error: 'runtime env missing' };
-        }
-        let liveSignerId = signerId;
-        for (const key of env?.eReplicas?.keys?.() ?? []) {
-          const [eid, sid] = String(key).split(':');
-          if (String(eid).toLowerCase() === String(from).toLowerCase() && sid) {
-            liveSignerId = sid;
-            break;
-          }
-        }
-        await vaultOperations.enqueueEntityInputs(env, [{
-            entityId: from,
-            signerId: liveSignerId,
-            entityTxs: [{ type: 'htlcPayment', data: { targetEntityId: to, tokenId: 1, amount: BigInt(amt), route, secret, hashlock } }],
-          }]);
-        return { ok: true };
-      } catch (e: any) { return { ok: false, error: e.message }; }
-    }, { from: alice!.entityId, signerId: alice!.signerId, to: bob!.entityId,
-         route: [alice!.entityId, hubId, bob!.entityId], amt: overAmount.toString(),
-         secret: overSecret, hashlock: overHash });
+    await attemptOverspend(page, bob!.entityId, [alice!.entityId, hubId, bob!.entityId], overAmount);
     // Overspend should either throw or not change Alice's balance
     const a7 = await outCap(page, alice!.entityId, hubId);
-    console.log(`[E2E] Overspend result: ok=${overResult.ok}, error=${overResult.error?.slice(0, 80)}`);
     console.log(`[E2E] Alice OUT unchanged: ${a6} → ${a7}`);
     expect(a7, 'Overspend should not change Alice balance').toBe(a6);
 
