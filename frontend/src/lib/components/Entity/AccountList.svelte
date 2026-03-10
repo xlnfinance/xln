@@ -20,21 +20,57 @@
     return v >= 0n ? v : -v;
   }
 
-  function getAccountDeltaMagnitude(account: any): bigint {
-    const deltas = account?.deltas;
-    if (!deltas || typeof deltas.values !== 'function') return 0n;
+  type DeltaView = {
+    ondelta: bigint;
+    offdelta: bigint;
+  };
+
+  type AccountView = {
+    deltas?: Map<number, DeltaView>;
+    status?: string;
+    activeDispute?: unknown;
+  };
+
+  type LockDirection = 'incoming' | 'outgoing';
+
+  type LockBookEntryView = {
+    accountId: string;
+    amount: bigint;
+    direction: LockDirection;
+  };
+
+  const isDeltaView = (value: unknown): value is DeltaView =>
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { ondelta?: unknown }).ondelta === 'bigint' &&
+    typeof (value as { offdelta?: unknown }).offdelta === 'bigint';
+
+  const isLockBookEntryView = (value: unknown): value is LockBookEntryView => {
+    if (typeof value !== 'object' || value === null) return false;
+    const candidate = value as Partial<LockBookEntryView>;
+    return (
+      typeof candidate.accountId === 'string' &&
+      typeof candidate.amount === 'bigint' &&
+      (candidate.direction === 'incoming' || candidate.direction === 'outgoing')
+    );
+  };
+
+  function getAccountDeltaMagnitude(account: AccountView): bigint {
+    const deltas = account.deltas;
+    if (!(deltas instanceof Map)) return 0n;
     let sum = 0n;
     for (const delta of deltas.values()) {
-      const on = typeof delta?.ondelta === 'bigint' ? delta.ondelta : 0n;
-      const off = typeof delta?.offdelta === 'bigint' ? delta.offdelta : 0n;
+      if (!isDeltaView(delta)) continue;
+      const on = delta.ondelta;
+      const off = delta.offdelta;
       sum += absBigInt(on + off);
     }
     return sum;
   }
 
-  function isFinalizedDisputed(account: any): boolean {
-    const status = String(account?.status || '');
-    const activeDispute = !!account?.activeDispute;
+  function isFinalizedDisputed(account: AccountView): boolean {
+    const status = String(account.status || '');
+    const activeDispute = !!account.activeDispute;
     return status === 'disputed' && !activeDispute;
   }
 
@@ -122,12 +158,13 @@
 
     const cpNorm = normalizeId(counterpartyId);
     for (const lock of lockBook.values()) {
-      if (normalizeId(String((lock as any)?.accountId || '')) !== cpNorm) continue;
-      const amount = typeof (lock as any)?.amount === 'bigint' ? (lock as any).amount : 0n;
-      if ((lock as any)?.direction === 'incoming') {
+      if (!isLockBookEntryView(lock)) continue;
+      if (normalizeId(lock.accountId) !== cpNorm) continue;
+      const amount = lock.amount;
+      if (lock.direction === 'incoming') {
         summary.incomingCount += 1;
         summary.incomingAmount += amount;
-      } else if ((lock as any)?.direction === 'outgoing') {
+      } else {
         summary.outgoingCount += 1;
         summary.outgoingAmount += amount;
       }
