@@ -93,7 +93,15 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
   killManagedAnvil();
   console.warn(`[Boot] RPC ${rpcUrl} unavailable, auto-starting local anvil (chainId=${chainId}, port=${port})`);
   const { spawn } = await import('node:child_process');
-  managedAnvil = spawn('anvil', ['--host', '127.0.0.1', '--port', String(port), '--chain-id', String(chainId)], {
+  // Keep scenario auto-start aligned with the E2E/dev stack. If this diverges,
+  // scenarios can fail on contract deployment while the rest of the system passes.
+  managedAnvil = spawn('anvil', [
+    '--host', '127.0.0.1',
+    '--port', String(port),
+    '--chain-id', String(chainId),
+    '--block-gas-limit', '60000000',
+    '--code-size-limit', '65536',
+  ], {
     stdio: 'ignore',
   });
   managedAnvilRpc = rpcUrl;

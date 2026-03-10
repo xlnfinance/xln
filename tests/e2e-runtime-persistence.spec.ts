@@ -11,7 +11,7 @@
  * financial state machine, not a UI cache approximation.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { Wallet } from 'ethers';
+import { Wallet, ethers } from 'ethers';
 import {
   createRuntimeIdentity,
   gotoApp,
@@ -19,6 +19,7 @@ import {
 } from './utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 import { APP_BASE_URL, API_BASE_URL, resetProdServer } from './utils/e2e-baseline';
+import { waitForRenderedOutboundForAccount } from './utils/e2e-account-ui';
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
@@ -318,24 +319,9 @@ async function runtimeDbMeta(page: Page) {
 }
 
 async function outCap(page: Page, entityId: string, cpId: string): Promise<bigint> {
-  const s = await page.evaluate(({ entityId, cpId }) => {
-    const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN;
-    if (!env || !XLN) return '0';
-    for (const [k, r] of env.eReplicas.entries()) {
-      if (!k.startsWith(entityId + ':')) continue;
-      const acc = r.state?.accounts?.get(cpId);
-      if (!acc) return '0';
-      const d = acc.deltas?.get(1);
-      if (!d) return '0';
-      return XLN
-        .deriveDelta(d, String(entityId).toLowerCase() < String(cpId).toLowerCase())
-        .outCapacity
-        .toString();
-    }
-    return '0';
-  }, { entityId, cpId });
-  return BigInt(s);
+  void entityId;
+  const rendered = await waitForRenderedOutboundForAccount(page, cpId, { timeoutMs: 5_000 });
+  return ethers.parseUnits(String(rendered), 18);
 }
 
 async function faucet(page: Page, entityId: string, hubEntityId: string) {

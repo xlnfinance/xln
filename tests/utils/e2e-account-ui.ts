@@ -45,6 +45,13 @@ async function readRenderedAccountCards(page: Page): Promise<RenderedAccountCapa
   });
 }
 
+export async function listRenderedCounterpartyIds(page: Page): Promise<string[]> {
+  const cards = await readRenderedAccountCards(page);
+  return cards
+    .map((card) => normalizeEntityId(card.counterpartyId))
+    .filter((counterpartyId) => counterpartyId.length > 0);
+}
+
 async function getRenderedCapacityForAccount(
   page: Page,
   counterpartyId: string,
@@ -181,6 +188,29 @@ export async function getRenderedOutboundForAccount(page: Page, counterpartyId: 
 
 export async function getRenderedInboundForAccount(page: Page, counterpartyId: string): Promise<number> {
   return getRenderedCapacityForAccount(page, counterpartyId, 'inbound');
+}
+
+export async function waitForRenderedOutboundForAccount(
+  page: Page,
+  counterpartyId: string,
+  options?: {
+    timeoutMs?: number;
+  },
+): Promise<number> {
+  const timeoutMs = options?.timeoutMs ?? 20_000;
+  const startedAt = Date.now();
+  let lastError: Error | null = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      return await getRenderedOutboundForAccount(page, counterpartyId);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      await page.waitForTimeout(250);
+    }
+  }
+
+  throw lastError ?? new Error(`Timed out waiting for rendered outbound account ${counterpartyId}`);
 }
 
 export async function waitForRenderedOutboundForAccountDelta(

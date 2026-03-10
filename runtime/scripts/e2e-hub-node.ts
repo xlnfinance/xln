@@ -960,6 +960,34 @@ const run = async (): Promise<void> => {
         return new Response(JSON.stringify({ success: true, accepted: true }), { headers });
       }
 
+      if (pathname === '/api/debug/reserve' && request.method === 'GET') {
+        const entityId = String(url.searchParams.get('entityId') || '').trim();
+        const tokenId = Number(url.searchParams.get('tokenId') || '1');
+        if (!entityId) {
+          return new Response(JSON.stringify({ error: 'Missing entityId' }), { status: 400, headers });
+        }
+        if (!Number.isInteger(tokenId) || tokenId <= 0) {
+          return new Response(JSON.stringify({ error: 'Invalid tokenId' }), { status: 400, headers });
+        }
+
+        const jadapter = getActiveJAdapter(env);
+        if (!jadapter) {
+          return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
+        }
+
+        try {
+          const reserve = await jadapter.getReserves(entityId, tokenId);
+          return new Response(JSON.stringify({
+            ok: true,
+            entityId,
+            tokenId,
+            reserve: reserve.toString(),
+          }), { headers });
+        } catch (error) {
+          return new Response(JSON.stringify({ error: (error as Error).message }), { status: 500, headers });
+        }
+      }
+
       return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers });
     },
   });

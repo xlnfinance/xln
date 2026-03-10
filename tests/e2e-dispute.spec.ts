@@ -9,6 +9,11 @@ import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { resetProdServer } from './utils/e2e-baseline';
 import { gotoApp as gotoSharedApp, createRuntimeIdentity } from './utils/e2e-demo-users';
+import { connectHub } from './utils/e2e-connect';
+import {
+  getPersistedReceiptCursor,
+  waitForPersistedFrameEventMatch,
+} from './utils/e2e-runtime-receipts';
 
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const INIT_TIMEOUT = 30_000;
@@ -18,148 +23,78 @@ function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
 }
 
-async function ensureAnyHubAccountOpen(page: Page): Promise<{ entityId: string; signerId: string; counterpartyId: string }> {
-  let fallbackHubIds: string[] = [];
+function relayToApiBase(relayUrl: string | null | undefined): string | null {
+  if (!relayUrl) return null;
   try {
-    const apiBase = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
-    const response = await page.request.get(`${apiBase}/api/debug/entities`);
-    if (response.ok()) {
-      const body = await response.json() as any;
-      const entities = Array.isArray(body?.entities) ? body.entities : [];
-      fallbackHubIds = entities
-        .filter((e: any) => e?.isHub === true && typeof e?.entityId === 'string')
-        .map((e: any) => String(e.entityId));
-    }
-  } catch {}
+    const relay = new URL(relayUrl);
+    const protocol =
+      relay.protocol === 'wss:' ? 'https:' :
+      relay.protocol === 'ws:' ? 'http:' :
+      relay.protocol;
+    return `${protocol}//${relay.host}`;
+  } catch {
+    return null;
+  }
+}
 
-  const result = await page.evaluate(async ({ fallbackHubIds }) => {
-    const findAccount = (accounts: any, ownerId: string, counterpartyId: string) => {
-      if (!(accounts instanceof Map)) return null;
-      const owner = String(ownerId || '').toLowerCase();
-      const cp = String(counterpartyId || '').toLowerCase();
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey || '').toLowerCase() === cp) return account;
-        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
-          ? String(account.counterpartyEntityId).toLowerCase()
-          : '';
-        if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
-        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
-      }
-      return null;
-    };
+async function getActiveApiBase(page: Page): Promise<string> {
+  if (process.env.E2E_API_BASE_URL) return process.env.E2E_API_BASE_URL;
+  const runtimeApi = await page.evaluate(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeState?: {
+          p2p?: {
+            relayUrls?: string[];
+          };
+        };
+      };
+    }).isolatedEnv;
+    const relay = env?.runtimeState?.p2p?.relayUrls?.[0] ?? null;
+    return typeof relay === 'string' ? relay : null;
+  });
+  return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
+}
 
-    const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN;
-    if (!env?.eReplicas || !XLN?.enqueueRuntimeInput) return { ok: false, error: 'isolatedEnv/XLN missing' };
+async function ensureAnyHubAccountOpen(page: Page): Promise<{ entityId: string; signerId: string; counterpartyId: string }> {
+  const apiBase = await getActiveApiBase(page);
+  const response = await page.request.get(`${apiBase}/api/debug/entities`);
+  expect(response.ok(), 'debug entities endpoint must be available').toBe(true);
+  const body = await response.json() as {
+    entities?: Array<{ entityId?: string; isHub?: boolean }>;
+  };
+  const hubId = (Array.isArray(body.entities) ? body.entities : [])
+    .find((entity) => entity.isHub === true && typeof entity.entityId === 'string')
+    ?.entityId;
+  expect(typeof hubId === 'string' && hubId.length > 0, 'at least one hub must be available').toBe(true);
 
-    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
-    let entityId = '';
-    let signerId = '';
-    let openedHubId = '';
-    for (const [key, rep] of env.eReplicas.entries()) {
-      const [eid, sid] = String(key).split(':');
-      if (!eid || !sid) continue;
-      if (runtimeSigner && String(sid).toLowerCase() !== runtimeSigner) continue;
-      entityId = eid;
-      signerId = sid;
-      if (rep?.state?.accounts instanceof Map && rep.state.accounts.size > 0) {
-        for (const [cpId, account] of rep.state.accounts.entries()) {
-          const hasDelta = !!account?.deltas?.get?.(1);
-          const ready = hasDelta && Number(account?.currentHeight || 0) > 0;
-          if (ready) {
-            return { ok: true, entityId, signerId, counterpartyId: String(cpId) };
-          }
-          if (!openedHubId) openedHubId = String(cpId || '');
-        }
-      }
-      break;
-    }
-    if (!entityId || !signerId) return { ok: false, error: 'local entity not found' };
+  await connectHub(page, hubId!);
 
-    const ownerLower = String(entityId).toLowerCase();
-    const profiles = env?.gossip?.getProfiles?.() || [];
-    const profileHubIds = profiles
-      .filter((p: any) =>
-        p?.metadata?.isHub === true ||
-        (Array.isArray(p?.capabilities) && (p.capabilities.includes('hub') || p.capabilities.includes('routing')))
-      )
-      .map((p: any) => String(p?.entityId || ''))
-      .filter((id: string) => !!id && id.toLowerCase() !== ownerLower);
-    const fallbackHub = (Array.isArray(fallbackHubIds) ? fallbackHubIds : [])
-      .map((id: any) => String(id || ''))
-      .find((id: string) => !!id && id.toLowerCase() !== ownerLower) || '';
-    const preferredOpenedHub = String(openedHubId || '');
-    const hubId = (
-      preferredOpenedHub && preferredOpenedHub.toLowerCase() !== ownerLower
-        ? preferredOpenedHub
-        : (profileHubIds[0] || fallbackHub || '')
-    );
-    if (!hubId) return { ok: false, error: 'hub not discovered in gossip' };
+  const identity = await page.evaluate(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+        eReplicas?: Map<string, unknown>;
+      };
+    }).isolatedEnv;
+    if (!env?.eReplicas) return null;
 
-    const existingAccount = (() => {
-      const repKey = Array.from(env.eReplicas.keys()).find((key: string) => {
-        const [eid, sid] = String(key).split(':');
-        return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
-          && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
-      });
-      if (!repKey) return null;
-      const rep = env.eReplicas.get(repKey);
-      return findAccount(rep?.state?.accounts, entityId, hubId);
-    })();
-
-    if (!existingAccount) {
-      XLN.enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [{
-          entityId,
-          signerId,
-          entityTxs: [{
-            type: 'openAccount',
-            data: { targetEntityId: hubId, creditAmount: 10_000n * 10n ** 18n, tokenId: 1 },
-          }],
-        }],
-      });
+    const runtimeId = String(env.runtimeId || '').toLowerCase();
+    for (const replicaKey of env.eReplicas.keys()) {
+      const [entityId, signerId] = String(replicaKey).split(':');
+      if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
+      if (runtimeId && String(signerId).toLowerCase() !== runtimeId) continue;
+      return { entityId, signerId };
     }
 
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 90_000) {
-      for (const [key, rep] of env.eReplicas.entries()) {
-        const [eid] = String(key).split(':');
-        if (String(eid || '').toLowerCase() !== String(entityId).toLowerCase()) continue;
-        const account = findAccount(rep?.state?.accounts, entityId, hubId);
-        if (!account) continue;
-        if (account?.deltas?.get?.(1) && Number(account?.currentHeight || 0) > 0) {
-          return { ok: true, entityId, signerId, counterpartyId: hubId };
-        }
-      }
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    const timeoutState: Array<{ cp: string; h: number; pending: boolean; hasDelta1: boolean }> = [];
-    for (const [key, rep] of env.eReplicas.entries()) {
-      const [eid] = String(key).split(':');
-      if (String(eid || '').toLowerCase() !== ownerLower) continue;
-      const accounts = rep?.state?.accounts;
-      if (!(accounts instanceof Map)) continue;
-      for (const [cpId, account] of accounts.entries()) {
-        timeoutState.push({
-          cp: String(cpId),
-          h: Number(account?.currentHeight || 0),
-          pending: !!account?.pendingFrame,
-          hasDelta1: !!account?.deltas?.get?.(1),
-        });
-      }
-    }
-    return {
-      ok: false,
-      error: `openAccount timeout (90s); owner=${entityId.slice(0, 10)} hub=${hubId.slice(0, 10)} profiles=${profileHubIds.length} accounts=${JSON.stringify(timeoutState)}`,
-    };
-  }, { fallbackHubIds });
+    return null;
+  });
 
-  expect(result.ok, `ensureAnyHubAccountOpen failed: ${result.error || 'unknown'}`).toBe(true);
-  if (!result.ok) throw new Error(result.error || 'failed');
-  return { entityId: result.entityId, signerId: result.signerId, counterpartyId: result.counterpartyId };
+  expect(identity, 'runtime must expose a local entity after connectHub').not.toBeNull();
+  return {
+    entityId: identity!.entityId,
+    signerId: identity!.signerId,
+    counterpartyId: hubId!,
+  };
 }
 
 async function readLocalReserveState(page: Page, entityId: string, opts?: { allowUnavailable?: boolean }): Promise<bigint> {
@@ -191,23 +126,22 @@ async function readLocalReserveState(page: Page, entityId: string, opts?: { allo
 }
 
 async function readOnchainReserveViaAnvil(page: Page, entityId: string, opts?: { allowUnavailable?: boolean }): Promise<bigint> {
-  const value = await page.evaluate(async ({ entityId }) => {
-    const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN;
-    const jadapter = XLN?.getActiveJAdapter?.(env) ?? null;
-    if (!jadapter?.getReserves) return null;
-    try {
-      const reserve = await jadapter.getReserves(entityId, 1);
-      return typeof reserve === 'bigint' ? reserve.toString() : String(reserve ?? '0');
-    } catch {
-      return null;
-    }
-  }, { entityId });
-  if (!value) {
+  const apiBase = await getActiveApiBase(page);
+  const response = await page.request.get(
+    `${apiBase}/api/debug/reserve?entityId=${encodeURIComponent(entityId)}&tokenId=1`,
+  );
+  if (!response.ok()) {
     if (opts?.allowUnavailable) return 0n;
-    throw new Error('Unable to read on-chain reserve');
+    const bodyText = await response.text().catch(() => '');
+    throw new Error(`Unable to read on-chain reserve: status=${response.status()} body=${bodyText}`);
   }
-  return BigInt(value);
+  const bodyText = await response.text();
+  const body = JSON.parse(bodyText) as { reserve?: string };
+  if (typeof body.reserve !== 'string') {
+    if (opts?.allowUnavailable) return 0n;
+    throw new Error(`Unable to read on-chain reserve: body=${bodyText}`);
+  }
+  return BigInt(body.reserve);
 }
 
 async function readAccountState(
@@ -226,7 +160,6 @@ async function readAccountState(
 }> {
   return await page.evaluate(async ({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN;
     if (!env?.eReplicas) {
       return {
         exists: false,
@@ -246,18 +179,32 @@ async function readAccountState(
     const rep = key ? env.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     const batch = rep?.state?.jBatchState?.batch;
-    const jadapter = XLN?.getActiveJAdapter?.(env) ?? null;
-    const block = jadapter?.provider?.getBlockNumber ? Number(await jadapter.provider.getBlockNumber()) : 0;
     return {
       exists: !!account,
       status: String(account?.status || ''),
       activeDispute: !!account?.activeDispute,
       disputeTimeout: Number(account?.activeDispute?.disputeTimeout || 0),
-      block,
+      block: 0,
       jBatchDisputeStarts: Number(batch?.disputeStarts?.length || 0),
       jBatchDisputeFinalizations: Number(batch?.disputeFinalizations?.length || 0),
     };
   }, { entityId, signerId, counterpartyId });
+}
+
+async function readCurrentChainBlock(page: Page): Promise<number> {
+  const apiBase = await getActiveApiBase(page);
+  const response = await page.request.post(`${apiBase}/api/rpc`, {
+    data: {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'eth_blockNumber',
+      params: [],
+    },
+  });
+  expect(response.ok(), 'eth_blockNumber RPC must succeed').toBe(true);
+  const body = await response.json() as { result?: string };
+  expect(typeof body.result === 'string', `unexpected eth_blockNumber body: ${JSON.stringify(body)}`).toBe(true);
+  return Number.parseInt(body.result!, 16);
 }
 
 async function readAccountMeta(
@@ -303,15 +250,22 @@ async function readAccountMeta(
   }, { entityId, signerId, counterpartyId });
 }
 
-async function readAccountTokenState(
+async function readAccountProgress(
   page: Page,
   entityId: string,
   signerId: string,
   counterpartyId: string,
-  tokenId: number,
-): Promise<{ exists: boolean; currentHeight: number; pendingFrame: boolean; outCollateral: bigint; freeOutCollateral: bigint }> {
-  const result = await page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
-    const findAccount = (accounts: any, ownerId: string, cpId: string) => {
+): Promise<{ exists: boolean; currentHeight: number; pendingFrame: boolean }> {
+  const result = await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+    const findAccount = (
+      accounts: Map<string, {
+        counterpartyEntityId?: string;
+        leftEntity?: string;
+        rightEntity?: string;
+      }> | null | undefined,
+      ownerId: string,
+      cpId: string,
+    ) => {
       if (!(accounts instanceof Map)) return null;
       const owner = String(ownerId || '').toLowerCase();
       const cp = String(cpId || '').toLowerCase();
@@ -330,7 +284,7 @@ async function readAccountTokenState(
 
     const env = (window as any).isolatedEnv;
     if (!env?.eReplicas) {
-      return { exists: false, currentHeight: 0, pendingFrame: false, collateral: '0' };
+      return { exists: false, currentHeight: 0, pendingFrame: false };
     }
 
     const key = Array.from(env.eReplicas.keys()).find((k: string) => {
@@ -340,29 +294,18 @@ async function readAccountTokenState(
     });
     const rep = key ? env.eReplicas.get(key) : null;
     const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
-    const delta = account?.deltas?.get?.(tokenId);
-    const XLN = (window as any).XLN;
-    const isLeft = String(entityId || '').toLowerCase() < String(counterpartyId || '').toLowerCase();
-    const derived = delta && typeof XLN?.deriveDelta === 'function' ? XLN.deriveDelta(delta, isLeft) : null;
-    const outCollateral = BigInt(derived?.outCollateral ?? 0n);
-    const outHold = BigInt(derived?.outTotalHold ?? 0n);
-    const freeOutCollateral = outCollateral > outHold ? outCollateral - outHold : 0n;
 
     return {
       exists: !!account,
       currentHeight: Number(account?.currentHeight || 0),
       pendingFrame: !!account?.pendingFrame,
-      outCollateral: String(outCollateral),
-      freeOutCollateral: String(freeOutCollateral),
     };
-  }, { entityId, signerId, counterpartyId, tokenId });
+  }, { entityId, signerId, counterpartyId });
 
   return {
     exists: !!result.exists,
     currentHeight: Number(result.currentHeight || 0),
     pendingFrame: !!result.pendingFrame,
-    outCollateral: BigInt(result.outCollateral || '0'),
-    freeOutCollateral: BigInt(result.freeOutCollateral || '0'),
   };
 }
 
@@ -547,7 +490,7 @@ async function ensurePrivateAccountOpenViaUi(
   signerId: string,
   counterpartyId: string,
 ): Promise<void> {
-  const already = await readAccountTokenState(page, entityId, signerId, counterpartyId, 1);
+  const already = await readAccountProgress(page, entityId, signerId, counterpartyId);
   if (already.exists && !already.pendingFrame && already.currentHeight > 0) return;
 
   const accountsTab = page.getByTestId('tab-accounts').first();
@@ -565,10 +508,10 @@ async function ensurePrivateAccountOpenViaUi(
 
   const openButton = page.locator('.open-private-form .btn-add').first();
   await expect(openButton).toBeEnabled({ timeout: 20_000 });
-  await openButton.click();
+    await openButton.click();
 
   await expect.poll(async () => {
-    const state = await readAccountTokenState(page, entityId, signerId, counterpartyId, 1);
+    const state = await readAccountProgress(page, entityId, signerId, counterpartyId);
     return state.exists && !state.pendingFrame && state.currentHeight > 0;
   }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
 }
@@ -1138,8 +1081,9 @@ test.describe('E2E Dispute Flow', () => {
     }
 
     const disputedState = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-    expect(disputedState.disputeTimeout, 'disputeTimeout should be set after disputeStart').toBeGreaterThan(disputedState.block);
-    const disputeWindowBlocks = disputedState.disputeTimeout - disputedState.block;
+    const currentChainBlock = await readCurrentChainBlock(page);
+    expect(disputedState.disputeTimeout, 'disputeTimeout should be set after disputeStart').toBeGreaterThan(currentChainBlock);
+    const disputeWindowBlocks = disputedState.disputeTimeout - currentChainBlock;
     expect(
       disputeWindowBlocks <= 6 && disputeWindowBlocks >= 1,
       `expected local dispute delay around 5 blocks, got ${disputeWindowBlocks}`
@@ -1230,10 +1174,9 @@ test.describe('E2E Dispute Flow', () => {
       await secondHubPanelBackBefore.click();
     }
 
-    const beforeR2C = await readAccountTokenState(page, accountRef.entityId, accountRef.signerId, secondHubId, 1);
-    const outCollateralBefore = beforeR2C.outCollateral;
     const batchBeforeR2C = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
     const lastTxHashBeforeR2C = batchBeforeR2C.lastBatchTxHash;
+    const r2cFinalizeCursor = await getPersistedReceiptCursor(page);
 
     await timedStep('post_dispute.queue_r2c', () => queueFundR2CViaUi(page, secondHubId, '1'));
     await timedStep('post_dispute.wait_r2c_queued', async () => {
@@ -1257,11 +1200,15 @@ test.describe('E2E Dispute Flow', () => {
         return snap.lastBatchTxHash;
       }, { timeout: 60_000, intervals: [500, 1000, 2000] }).not.toEqual(lastTxHashBeforeR2C);
     });
-
-    await expect.poll(async () => {
-      const current = await readAccountTokenState(page, accountRef.entityId, accountRef.signerId, secondHubId, 1);
-      return current.outCollateral > outCollateralBefore;
-    }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe(true);
+    await waitForPersistedFrameEventMatch(page, {
+      cursor: r2cFinalizeCursor,
+      eventName: 'account_settled_finalized_bilateral',
+      entityId: accountRef.entityId,
+      timeoutMs: 120_000,
+      predicate: (event) =>
+        String(event.data?.accountId || '').toLowerCase() === secondHubId.toLowerCase()
+        && Number(event.data?.tokenId || 0) === 1,
+    });
 
     await openAccountPanelByCounterparty(page, secondHubId);
     await expect.poll(async () => {
@@ -1301,6 +1248,8 @@ test.describe('E2E Dispute Flow', () => {
         || finalSnapshot.lastBatchOps.disputeFinalizations > 0,
       `expected dispute/R2C footprint in history, got ${JSON.stringify(finalSnapshot.lastBatchOps)}`,
     ).toBe(true);
+    await timedStep('dispute.reload_clear_stale_sent_batch', () =>
+      ensureNoSentBatchLatch(page, accountRef.entityId, accountRef.signerId));
 
     // Reload hard-assert: WAL restore keeps finalized dispute + batch history.
     await timedStep('dispute.reload_page', async () => {
