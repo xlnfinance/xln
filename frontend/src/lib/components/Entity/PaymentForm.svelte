@@ -67,9 +67,10 @@
 
       paymentAmountBigInt = 0n;
       paymentDescription = '';
-    } catch (err: any) {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
       console.error('Failed to send payment:', err);
-      error.set(`Payment failed: ${err?.message || 'Unknown error'}`);
+      error.set(`Payment failed: ${message}`);
     }
   }
 </script>

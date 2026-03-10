@@ -12,6 +12,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
+  import type { Env } from '@xln/runtime/xln-api';
   import { enqueueEntityInputs, getEnv } from '../../stores/xlnStore';
   import {
     type HubJoinPreference,
@@ -112,7 +113,7 @@
     }
   });
 
-  function getHubEntityIds(currentEnv: any): string[] {
+  function getHubEntityIds(currentEnv: Env): string[] {
     const discovered: string[] = [];
     const add = (value: unknown) => {
       const id = String(value || '').trim();
@@ -125,12 +126,11 @@
 
     if (currentEnv?.gossip?.getHubs) {
       const hubs = currentEnv.gossip.getHubs();
-      for (const profile of hubs || []) add(profile?.entityId);
+      for (const profile of hubs || []) add(profile.entityId);
     } else if (currentEnv?.gossip?.getProfiles) {
       const profiles = currentEnv.gossip.getProfiles();
       for (const profile of profiles || []) {
-        const isHub = profile?.metadata?.isHub === true;
-        if (isHub) add(profile?.entityId);
+        if (profile.metadata.isHub === true) add(profile.entityId);
       }
     }
 
@@ -178,7 +178,7 @@
       },
     }));
 
-    await enqueueEntityInputs(env as any, [{
+    await enqueueEntityInputs(env, [{
       entityId,
       signerId,
       entityTxs,
@@ -222,7 +222,7 @@
       if (entityId && signerId) {
         const env = getEnv();
         if (env) {
-          await enqueueEntityInputs(env as any, [{
+          await enqueueEntityInputs(env, [{
             entityId,
             signerId,
             entityTxs: [{

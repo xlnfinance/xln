@@ -20,8 +20,8 @@
 
     sending = true;
     try {
-      const xln = getXLN();
-      if (!xln) throw new Error('XLN not initialized');
+      const xln = await getXLN();
+      if (!xln.queueEntityInput) throw new Error('XLN queueEntityInput is not available');
 
       await xln.queueEntityInput(tab.entityId, tab.signerId, {
         type: 'chat',
@@ -65,8 +65,21 @@
     shouldAutoScroll = isAtBottom;
   }
 
+  type ParsedMessageDetails = {
+    block?: string;
+    tx?: string;
+    entity?: string;
+    balance?: string;
+  };
+
+  type ParsedMessage = {
+    type: 'message' | 'j-event' | 'reserve-update';
+    content: string;
+    details: ParsedMessageDetails | null;
+  };
+
   // Enhanced message parsing for better display
-  function parseMessage(message: string): { type: string; content: string; details?: any } {
+  function parseMessage(message: string): ParsedMessage {
     // Parse j-event messages for detailed display
     if (message.includes('observed j-event:')) {
       const match = message.match(/(\w+) observed j-event: (\w+) \(block (\d+), tx (0x\w+)\)/);
