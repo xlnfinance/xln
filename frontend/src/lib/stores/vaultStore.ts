@@ -49,6 +49,7 @@ const defaultState: RuntimesState = {
 
 // Storage key
 const VAULT_STORAGE_KEY = 'xln-vaults';
+const BROWSER_GOSSIP_POLL_MS = 5000;
 const normalizeRuntimeId = (value: string | null | undefined): string => {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -854,7 +855,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestor
     const { resolveRelayUrls } = await import('./xlnStore');
     xln.startP2P(env, {
       relayUrls: resolveRelayUrls(),
-      gossipPollMs: 0,
+      gossipPollMs: BROWSER_GOSSIP_POLL_MS,
     });
   }
 
@@ -1328,7 +1329,7 @@ export const vaultOperations = {
       console.log(`[VaultStore.createRuntime] P2P: Starting on env runtimeId=${newEnv.runtimeId?.slice(0,12)}, relay=${relayUrls[0]}`);
       xln.startP2P(newEnv, {
         relayUrls,
-        gossipPollMs: 0,
+        gossipPollMs: BROWSER_GOSSIP_POLL_MS,
       });
     }
     markPerf('start_p2p');
@@ -1426,7 +1427,7 @@ export const vaultOperations = {
         if (!p2p && xln.startP2P) {
           xln.startP2P(env, {
             relayUrls: resolveRelayUrls(),
-            gossipPollMs: 0,
+            gossipPollMs: BROWSER_GOSSIP_POLL_MS,
           });
           p2p = xln.getP2P ? xln.getP2P(env) : null;
           console.log(`[VaultStore.selectRuntime] ♻️ Started P2P for ${resolvedRuntimeId.slice(0, 12)}`);
