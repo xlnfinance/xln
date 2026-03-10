@@ -1,5 +1,38 @@
 # Done Log
 
+## 2026-03-11
+
+- Refactored entity crontab persistence to be declarative instead of storing live function handlers.
+  - Added [crontab-types.ts](/Users/egor/xln/runtime/crontab-types.ts) with strict persisted task/hook shapes.
+  - [entity-crontab.ts](/Users/egor/xln/runtime/entity-crontab.ts) now stores only task method names, intervals, `lastRun`, `enabled`, and params in entity state.
+  - Runtime code binds task methods to handlers through a static registry.
+  - Removed the tick-local `inputHasManualBroadcast` field from persisted entity state; crontab execution now receives that as execution context for the current apply only.
+  - [entity-consensus.ts](/Users/egor/xln/runtime/entity-consensus.ts) now uses static crontab imports instead of dynamic `await import(...)`.
+- Tightened persisted-state validation for crontab in [validation-utils.ts](/Users/egor/xln/runtime/validation-utils.ts).
+  - Reload now fail-fast validates crontab tasks and hooks, including task method keys and hook id/key consistency.
+- Kept checkpoint-first restore and strict persistence behavior in [runtime.ts](/Users/egor/xln/runtime/runtime.ts).
+  - restore uses the latest checkpoint plus WAL tail replay
+  - default snapshot interval remains configurable and now defaults to `5`
+  - browser persistence no longer silently advances in-memory state while dropping frame durability
+- Isolated mutable `jurisdictions.json` per environment.
+  - `bun run dev` now uses `./db/dev/jurisdictions.json` through `XLN_JURISDICTIONS_PATH`
+  - [clean-slate.sh](/Users/egor/xln/scripts/dev/clean-slate.sh) now seeds that file from the tracked canonical seed
+  - [start-server.sh](/Users/egor/xln/scripts/start-server.sh) now uses `$XLN_DB_PATH/jurisdictions.json`
+  - [start-custody.sh](/Users/egor/xln/scripts/start-custody.sh) now uses `$CUSTODY_DB_ROOT/jurisdictions.json`
+  - [start-custody-dev.ts](/Users/egor/xln/runtime/scripts/start-custody-dev.ts) now defaults to `./db/dev/custody`
+  - verified that the tracked [jurisdictions.json](/Users/egor/xln/jurisdictions/jurisdictions.json) stayed untouched through the full isolated suite
+- Removed warning spam that was polluting green runs without adding signal.
+  - dropped the always-on `extendCredit` mempool dump / pending-frame spam in [entity-consensus.ts](/Users/egor/xln/runtime/entity-consensus.ts)
+  - downgraded duplicate-input merge logs to heavy-debug only
+  - downgraded account `structuredClone` fallback log to heavy-debug only in [state-helpers.ts](/Users/egor/xln/runtime/state-helpers.ts)
+- Verification:
+  - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
+  - `bun build runtime/server.ts --target=bun --outfile=/tmp/server-check.js`
+  - targeted persistence-heavy E2E pass:
+    - [/Users/egor/xln/.logs/e2e-parallel/20260311-021425-155/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-021425-155/e2e-shard-00.log)
+  - full isolated E2E pass on the final code:
+    - [/Users/egor/xln/.logs/e2e-parallel/20260311-022238-534/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-022238-534/e2e-shard-00.log)
+
 ## 2026-03-09
 
 - Unified WebSocket transport serialization with the canonical tagged JSON codec in [ws-protocol.ts](/Users/egor/xln/runtime/networking/ws-protocol.ts).

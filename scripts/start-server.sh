@@ -22,10 +22,15 @@ export RELAY_URL=${RELAY_URL:-$PUBLIC_RELAY_URL}
 export XLN_RUNTIME_SEED=${XLN_RUNTIME_SEED:-xln-prod-main-runtime}
 export XLN_DB_PATH=${XLN_DB_PATH:-/root/xln/db/runtime/prod-main}
 export XLN_USE_PREDEPLOYED_ADDRESSES=${XLN_USE_PREDEPLOYED_ADDRESSES:-true}
-export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-/root/xln/jurisdictions/jurisdictions.json}
+export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-$XLN_DB_PATH/jurisdictions.json}
 # Prod must come up fully bootstrapped or fail fast.
 export BOOTSTRAP_LOCAL_HUBS=${BOOTSTRAP_LOCAL_HUBS:-1}
 export PATH="/root/.bun/bin:$PATH"
+
+mkdir -p "$XLN_DB_PATH"
+if [ ! -f "$XLN_JURISDICTIONS_PATH" ]; then
+  cp /root/xln/jurisdictions/jurisdictions.json "$XLN_JURISDICTIONS_PATH"
+fi
 
 kill_by_port 8080
 

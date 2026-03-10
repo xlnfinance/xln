@@ -6,7 +6,7 @@
 import { encode } from './snapshot-coder';
 import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica, LogCategory, BrowserVMState } from './types';
 import type { Profile } from './networking/gossip';
-import { DEBUG } from './utils';
+import { DEBUG, HEAVY_LOGS } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify, safeParse } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
@@ -636,7 +636,9 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
     const cloned = structuredClone(account);
     return cloned;
   } catch (error) {
-    console.log(`⚠️ structuredClone failed, using manual clone`);
+    if (HEAVY_LOGS) {
+      console.log(`structuredClone failed for AccountMachine, using manual clone`);
+    }
     return manualCloneAccountMachine(account, false);
   }
 }

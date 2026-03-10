@@ -13,6 +13,7 @@ import { addMessages, cloneEntityReplica, cloneEntityState, canonicalAccountKey,
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
 import { processOrderbookSwaps, processOrderbookCancels } from './entity-tx/handlers/account';
+import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
 import { ethers } from 'ethers';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -426,27 +427,15 @@ export const applyEntityInput = async (
     workingReplica.state.timestamp = env.timestamp;
   }
 
-  // ⏰ Execute crontab tasks (periodic checks like account timeouts)
-  const { executeCrontab, initCrontab, scheduleHook, cancelHook } = await import('./entity-crontab');
-
   // Initialize crontab on first use
   if (!workingReplica.state.crontabState) {
     workingReplica.state.crontabState = initCrontab();
   }
 
   const hasManualBroadcast = Boolean(entityInput.entityTxs?.some(tx => tx.type === 'j_broadcast'));
-  workingReplica.state.crontabState.inputHasManualBroadcast = hasManualBroadcast;
-  if (hasManualBroadcast) {
-    const broadcastTask = workingReplica.state.crontabState.tasks.get('broadcastBatch');
-    if (broadcastTask) {
-      // Avoid auto-broadcast clobbering explicit j_broadcast in this tick.
-      broadcastTask.lastRun = workingReplica.state.timestamp;
-    }
-  }
-
-  const crontabOutputs = await executeCrontab(env, workingReplica, workingReplica.state.crontabState);
-  // Input-scoped hint: only relevant for current apply call.
-  workingReplica.state.crontabState.inputHasManualBroadcast = false;
+  const crontabOutputs = await executeCrontab(env, workingReplica, workingReplica.state.crontabState, {
+    manualBroadcastInInput: hasManualBroadcast,
+  });
   if (crontabOutputs.length > 0) {
     console.log(`⏰ CRONTAB: Generated ${crontabOutputs.length} outputs from periodic tasks`);
     entityOutbox.push(...crontabOutputs);
@@ -1237,14 +1226,9 @@ export const applyEntityFrame = async (
     console.log(`🎯 Transaction ${index}: type="${tx.type}", data=`, tx.data);
   });
 
-  // Import hook scheduling for HTLC timeout hooks
-  const { scheduleHook: scheduleHookFn, cancelHook: cancelHookFn } = await import('./entity-crontab');
-
   // CRITICAL: Clone state to avoid mutating the input (determinism fix)
   // Without this, proposer and validator can end up with different states
   let currentEntityState = cloneEntityState(entityState);
-  // Carry transient crontabState through clone (not in consensus hash, but needed for hooks)
-  if (entityState.crontabState) currentEntityState.crontabState = entityState.crontabState;
 
   // FIX: Set frame timestamp BEFORE running handlers (not after)
   // Without this, HTLC timelocks use stale timestamp (1-frame lag)
@@ -1311,7 +1295,7 @@ export const applyEntityFrame = async (
           // to trigger crontab → processHtlcTimeouts → resolve with error:timeout
           if (tx.type === 'htlc_lock' && tx.data?.timelock && tx.data?.lockId) {
             if (currentEntityState.crontabState) {
-              scheduleHookFn(currentEntityState.crontabState, {
+              scheduleCrontabHook(currentEntityState.crontabState, {
                 id: `htlc-timeout:${tx.data.lockId}`,
                 triggerAt: Number(tx.data.timelock),
                 type: 'htlc_timeout',
@@ -1323,7 +1307,7 @@ export const applyEntityFrame = async (
           // Cancel timeout hooks for resolved HTLC locks
           if (tx.type === 'htlc_resolve' && tx.data?.lockId) {
             if (currentEntityState.crontabState) {
-              cancelHookFn(currentEntityState.crontabState, `htlc-timeout:${tx.data.lockId}`);
+              cancelCrontabHook(currentEntityState.crontabState, `htlc-timeout:${tx.data.lockId}`);
             }
           }
         } else {
@@ -1336,16 +1320,16 @@ export const applyEntityFrame = async (
     if (swapCancelRequests) allSwapCancelRequests.push(...swapCancelRequests);
     if (swapOffersCancelled) allSwapOffersCancelled.push(...swapOffersCancelled);
 
-    // Debug: Log all account mempools after each tx
-    if (entityTx.type === 'extendCredit') {
+    if (HEAVY_LOGS && entityTx.type === 'extendCredit') {
       console.log(`💳 POST-EXTEND-CREDIT: Checking all account mempools:`);
       for (const [cpId, acctMachine] of currentEntityState.accounts) {
-        console.log(`💳   Account with ${cpId.slice(0,10)}: mempool=${acctMachine.mempool.length}, pendingFrame=${acctMachine.pendingFrame ? `height=${acctMachine.pendingFrame.height}` : 'none'}, currentHeight=${acctMachine.currentHeight}`);
+        console.log(
+          `💳   Account with ${cpId.slice(0, 10)}: mempool=${acctMachine.mempool.length}, ` +
+            `pendingFrame=${acctMachine.pendingFrame ? `height=${acctMachine.pendingFrame.height}` : 'none'}, ` +
+            `currentHeight=${acctMachine.currentHeight}`,
+        );
         if (acctMachine.mempool.length > 0) {
           console.log(`💳   Mempool txs:`, acctMachine.mempool.map(tx => tx.type));
-        }
-        if (acctMachine.pendingFrame) {
-          console.log(`💳   ⚠️ BLOCKING: pendingFrame exists - no new proposals until ACKed!`);
         }
       }
     }
@@ -1802,8 +1786,8 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
     }
   }
 
-  if (duplicateCount > 0) {
-    console.log(`    ⚠️  CORNER CASE: Merged ${duplicateCount} duplicate inputs (${inputs.length} → ${merged.size})`);
+  if (HEAVY_LOGS && duplicateCount > 0) {
+    console.log(`    deduped ${duplicateCount} duplicate inputs (${inputs.length} -> ${merged.size})`);
   }
 
   const mergedInputs = Array.from(merged.values());
