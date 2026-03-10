@@ -59,7 +59,7 @@ export type Profile = {
   lastUpdated: number;
   runtimeId: string; // Runtime identity (usually signer1 address)
   runtimeEncPubKey: string;
-  capabilities: string[]; // e.g. ["router", "swap:memecoins"]
+  capabilities: string[]; // generic declared features, not used to infer hub status
   publicAccounts: string[]; // direct peers with inbound capacity
   endpoints: string[]; // websocket endpoints for this runtime
   relays: string[]; // preferred relay runtimes
@@ -80,7 +80,7 @@ export interface GossipLayer {
 }
 
 export const isHubProfile = (profile: Profile): boolean =>
-  profile.metadata.isHub === true || profile.capabilities.includes('hub');
+  profile.metadata.isHub === true;
 
 export const isRoutableProfile = (profile: Profile): boolean =>
   isHubProfile(profile);
@@ -326,9 +326,7 @@ export const parseProfile = (raw: unknown): Profile => {
   const relays = normalizeStringArray(raw.relays);
   const metadata: ProfileMetadata = {
     entityEncPubKey,
-    isHub:
-      metadataRaw.isHub === true ||
-      capabilities.includes('hub'),
+    isHub: metadataRaw.isHub === true,
     routingFeePPM: Math.max(
       0,
       Number.isFinite(Number(metadataRaw.routingFeePPM)) ? Math.floor(Number(metadataRaw.routingFeePPM)) : 100,
@@ -495,9 +493,7 @@ export const canonicalizeProfile = (
       ...(typeof metadata.profileHanko === 'string' && metadata.profileHanko.trim().length > 0
         ? { profileHanko: metadata.profileHanko.trim() }
         : {}),
-      isHub:
-        metadata.isHub === true ||
-        capabilities.includes('hub') === true,
+      isHub: metadata.isHub === true,
     },
   };
 };

@@ -13,7 +13,7 @@
   $: safeStringify = $xlnFunctions.safeStringify;
 
   // Check if this profile is a hub/router
-  $: isHub = (profile.capabilities?.includes('hub') || profile.capabilities?.includes('router')) ?? false;
+  $: isHub = profile?.metadata?.isHub === true;
 
   // Get current active entity and signer
   $: activeTab = $tabs.find(tab => tab.isActive);

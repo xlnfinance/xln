@@ -14,7 +14,6 @@ import {
 } from '../runtime/account-crypto';
 import { encodeBoard, hashBoard } from '../runtime/entity-factory';
 import type { ConsensusConfig, Env } from '../runtime/types';
-import { buildLocalEntityProfile } from '../runtime/networking/gossip-helper';
 
 const args = process.argv.slice(2);
 
@@ -28,13 +27,23 @@ export type HubConfig = {
   region?: string;
   signerId: string;
   seed: string;
+  matchingStrategy?: 'amount' | 'time' | 'fee';
+  policyVersion?: number;
   routingFeePPM?: number;
+  baseFee?: bigint;
+  disputeAutoFinalizeMode?: 'auto' | 'ignore';
+  minCollateralThreshold?: bigint;
+  c2rWithdrawSoftLimit?: bigint;
+  minFeeBps?: bigint;
+  rebalanceBaseFee?: bigint;
+  rebalanceLiquidityFeeBps?: bigint;
+  rebalanceGasFee?: bigint;
+  rebalanceTimeoutMs?: number;
   relayUrl?: string;
   rpcUrl?: string;
   httpUrl?: string;
   port?: number;
   serverId?: string;
-  capabilities?: string[];
   position?: { x: number; y: number; z: number };
 };
 
@@ -49,7 +58,6 @@ const DEFAULT_CONFIG: HubConfig = {
   httpUrl: getArg('--http', process.env.PUBLIC_HTTP ?? ''),
   port: Number(getArg('--port', process.env.PORT ?? '0')) || undefined,
   serverId: process.env.SERVER_ID ?? undefined,
-  capabilities: ['hub'],
   position: { x: 0, y: 0, z: 0 },
 };
 
@@ -78,25 +86,6 @@ const resolveJurisdiction = (env: Env) => {
     entityProviderAddress: jr.entityProviderAddress ?? jr.contracts?.entityProvider ?? '',
     depositoryAddress: jr.depositoryAddress ?? jr.contracts?.depository ?? '',
   };
-};
-
-const announceHubProfile = (env: Env, entityId: string, config: HubConfig, signerAddress: string, jurisdictionName?: string, chainId?: number) => {
-  if (!env.gossip) return;
-  const replica = Array.from(env.eReplicas?.values?.() || []).find((candidate) => candidate.entityId === entityId);
-  if (!replica) {
-    throw new Error(`BOOTSTRAP_HUB_PROFILE_REPLICA_MISSING: entity=${entityId}`);
-  }
-  replica.state.profile.name = config.name;
-  const profile = buildLocalEntityProfile(env, replica.state, Date.now());
-  profile.capabilities = config.capabilities || ['hub'];
-  profile.relays = config.relayUrl ? [config.relayUrl] : [];
-  profile.endpoints = config.relayUrl ? [config.relayUrl] : [];
-  profile.metadata = {
-    ...(profile.metadata || {}),
-    isHub: true,
-    routingFeePPM: config.routingFeePPM ?? 100,
-  };
-  env.gossip.announce(profile);
 };
 
 export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Promise<{ entityId: string; signerId: string } | null> {
@@ -158,7 +147,31 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
     console.log('[BOOTSTRAP] ✅ Hub entity already exists');
   }
 
-  announceHubProfile(env, entityId, hubConfig, signerAddress, jurisdiction?.name, jurisdiction?.chainId);
+  ensureRuntimeInput(env);
+  env.runtimeInput.entityInputs.push({
+    entityId,
+    signerId: signerAddress,
+    entityTxs: [
+      {
+        type: 'setHubConfig',
+        data: {
+          matchingStrategy: hubConfig.matchingStrategy ?? 'amount',
+          ...(hubConfig.policyVersion !== undefined ? { policyVersion: hubConfig.policyVersion } : {}),
+          routingFeePPM: hubConfig.routingFeePPM ?? 100,
+          baseFee: hubConfig.baseFee ?? 0n,
+          disputeAutoFinalizeMode: hubConfig.disputeAutoFinalizeMode ?? 'auto',
+          ...(hubConfig.minCollateralThreshold !== undefined ? { minCollateralThreshold: hubConfig.minCollateralThreshold } : {}),
+          ...(hubConfig.c2rWithdrawSoftLimit !== undefined ? { c2rWithdrawSoftLimit: hubConfig.c2rWithdrawSoftLimit } : {}),
+          ...(hubConfig.minFeeBps !== undefined ? { minFeeBps: hubConfig.minFeeBps } : {}),
+          ...(hubConfig.rebalanceBaseFee !== undefined ? { rebalanceBaseFee: hubConfig.rebalanceBaseFee } : {}),
+          ...(hubConfig.rebalanceLiquidityFeeBps !== undefined ? { rebalanceLiquidityFeeBps: hubConfig.rebalanceLiquidityFeeBps } : {}),
+          ...(hubConfig.rebalanceGasFee !== undefined ? { rebalanceGasFee: hubConfig.rebalanceGasFee } : {}),
+          ...(hubConfig.rebalanceTimeoutMs !== undefined ? { rebalanceTimeoutMs: hubConfig.rebalanceTimeoutMs } : {}),
+        },
+      },
+    ],
+  });
+  await runtimeProcess(env, []);
 
   if (env.gossip?.getHubs) {
     const hubs = env.gossip.getHubs();

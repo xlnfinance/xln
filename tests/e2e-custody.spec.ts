@@ -28,8 +28,8 @@ import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, resetProdServer } from '
 import {
   getRenderedOutboundForAccount,
   getRenderedPrimaryOutbound,
-  waitForRenderedOutboundForAccountDelta,
   waitForRenderedPrimaryOutboundDelta,
+  waitForRenderedOutboundForAccountDelta,
 } from './utils/e2e-account-ui';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic, switchToRuntimeId } from './utils/e2e-demo-users';
@@ -521,14 +521,13 @@ test.describe('E2E Custody Flow', () => {
 
       let dashboard = await readCustodyDashboard(custodyPage, custodyBaseUrl);
       let currentBalanceMinor = BigInt(dashboard.headlineBalance?.amountMinor || '0');
-      let walletRestoredFromPersistence = false;
       const cycles = [
         { depositWhole: 10n, withdrawWhole: 5n },
         { depositWhole: 3n, withdrawWhole: 2n },
       ];
 
       for (const [cycleIndex, cycle] of cycles.entries()) {
-        if (!walletRestoredFromPersistence) {
+        if (!walletPage.isClosed()) {
           await walletPage.close();
         }
         const knownBeforeDeposit = new Set(
@@ -551,12 +550,6 @@ test.describe('E2E Custody Flow', () => {
             timeoutMs: 30_000,
           });
           await waitForHostedCheckoutSuccess(checkoutPage);
-          if (!walletRestoredFromPersistence) {
-            walletPage = await openRestoredWalletPage(context, alice.runtimeId);
-            walletRestoredFromPersistence = true;
-          } else {
-            await walletPage.bringToFront();
-          }
         });
 
         const depositMinor = cycle.depositWhole * TOKEN_SCALE;
@@ -572,7 +565,10 @@ test.describe('E2E Custody Flow', () => {
           String(dashboard.headlineBalance?.amountDisplay || ''),
         );
 
-        await switchToRuntimeId(walletPage, alice.runtimeId);
+        if (!walletPage.isClosed()) {
+          await walletPage.close();
+        }
+        walletPage = await openRestoredWalletPage(context, alice.runtimeId);
         await ensureRuntimeOnline(walletPage, `alice-before-withdraw-cycle-${cycleIndex + 1}`);
 
         const knownBeforeWithdraw = new Set(

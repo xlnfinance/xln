@@ -339,7 +339,7 @@
   }
 
   function isHubProfile(profile: GossipProfile | undefined): boolean {
-    return profile?.metadata?.isHub === true || profile?.capabilities?.includes('hub') === true;
+    return profile?.metadata?.isHub === true;
   }
 
   function resolveAccountCounterparty(entityId: string, account: AccountMachine): string {

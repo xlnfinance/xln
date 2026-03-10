@@ -23,6 +23,7 @@ import type { EntityInput, Env } from '../types';
 import {
   applyJEventsToEnv,
   BOOTSTRAP_POLL_MS,
+  DEFAULT_ACCOUNT_TOKEN_IDS,
   getAccountMachine,
   getCreditGrantedByEntity,
   getEntityReplicaById,
@@ -34,6 +35,7 @@ import {
   HUB_RESERVE_TARGET_UNITS,
   hasAccount,
   hasPairMutualCredit,
+  hasPairMutualCredits,
   serializeReserves,
   settleRuntimeFor,
   sleep,
@@ -436,24 +438,6 @@ const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTo
   throw new Error('TOKEN_CATALOG_EMPTY');
 };
 
-const applyHubConfig = (env: Env, entityId: string): void => {
-  const replica = getEntityReplicaById(env, entityId);
-  if (!replica?.state) {
-    throw new Error(`HUB_REPLICA_MISSING: ${entityId}`);
-  }
-  replica.state.hubRebalanceConfig = {
-    matchingStrategy: 'amount',
-    policyVersion: 1,
-    routingFeePPM: 1000,
-    baseFee: 0n,
-    disputeAutoFinalizeMode: resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
-    rebalanceBaseFee: 10n ** 17n,
-    rebalanceLiquidityFeeBps: 1n,
-    rebalanceGasFee: 0n,
-    rebalanceTimeoutMs: 10 * 60 * 1000,
-  };
-};
-
 const ensureOrderbook = async (env: Env, entityId: string, signerId: string): Promise<void> => {
   const replica = getEntityReplicaById(env, entityId);
   if (replica?.state?.orderbookExt) return;
@@ -627,7 +611,7 @@ const buildPairHealth = (env: Env, selfEntityId: string, peers: Array<{ name: st
       hasAccount: hasAccount(env, selfEntityId, peer.entityId),
       grantedByMe: grantedByMe.toString(),
       grantedByPeer: grantedByPeer.toString(),
-      ready: hasPairMutualCredit(env, selfEntityId, peer.entityId, HUB_MESH_TOKEN_ID, HUB_MESH_CREDIT_AMOUNT),
+      ready: hasPairMutualCredits(env, selfEntityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, HUB_MESH_CREDIT_AMOUNT),
     };
   });
 };
@@ -704,16 +688,21 @@ const run = async (): Promise<void> => {
     region: resolvedArgs.region,
     signerId: resolvedArgs.signerLabel,
     seed: resolvedArgs.seed,
+    routingFeePPM: 1000,
+    baseFee: 0n,
+    disputeAutoFinalizeMode: resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
+    rebalanceBaseFee: 10n ** 17n,
+    rebalanceLiquidityFeeBps: 1n,
+    rebalanceGasFee: 0n,
+    rebalanceTimeoutMs: 10 * 60 * 1000,
     relayUrl: resolvedArgs.relayUrl,
     rpcUrl: jurisdiction.rpc,
     httpUrl: apiUrl,
     port: resolvedArgs.apiPort,
-    capabilities: ['hub'],
   });
   if (!bootstrap?.entityId) {
     throw new Error('HUB_BOOTSTRAP_FAILED');
   }
-  applyHubConfig(env, bootstrap.entityId);
   finishTiming('hub_bootstrap', hubBootstrapStartedAt);
 
   await ensureOrderbook(env, bootstrap.entityId, bootstrap.signerId);
@@ -794,26 +783,34 @@ const run = async (): Promise<void> => {
                   creditAmount: HUB_MESH_CREDIT_AMOUNT,
                 },
               },
+              ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map((tokenId) => ({
+                type: 'extendCredit' as const,
+                data: {
+                  counterpartyEntityId: peer.entityId,
+                  tokenId,
+                  amount: HUB_MESH_CREDIT_AMOUNT,
+                },
+              })),
             ],
           });
         }
 
         if (!localAccount || !canWrite) continue;
-        const grantedByMe = getCreditGrantedByEntity(localAccount, bootstrap.entityId, HUB_MESH_TOKEN_ID);
-        if (grantedByMe < HUB_MESH_CREDIT_AMOUNT) {
+        const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter((tokenId) =>
+          getCreditGrantedByEntity(localAccount, bootstrap.entityId, tokenId) < HUB_MESH_CREDIT_AMOUNT
+        );
+        if (missingTokenIds.length > 0) {
           creditInputs.push({
             entityId: bootstrap.entityId,
             signerId: bootstrap.signerId,
-            entityTxs: [
-              {
-                type: 'extendCredit',
-                data: {
-                  counterpartyEntityId: peer.entityId,
-                  tokenId: HUB_MESH_TOKEN_ID,
-                  amount: HUB_MESH_CREDIT_AMOUNT,
-                },
+            entityTxs: missingTokenIds.map((tokenId) => ({
+              type: 'extendCredit' as const,
+              data: {
+                counterpartyEntityId: peer.entityId,
+                tokenId,
+                amount: HUB_MESH_CREDIT_AMOUNT,
               },
-            ],
+            })),
           });
         }
       }
@@ -826,7 +823,10 @@ const run = async (): Promise<void> => {
 
       const allAccountsReady =
         peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
-        peers.every(peer => hasAccount(env, bootstrap.entityId, peer.entityId));
+        peers.every(peer =>
+          hasAccount(env, bootstrap.entityId, peer.entityId) &&
+          DEFAULT_ACCOUNT_TOKEN_IDS.every((tokenId) => Boolean(getAccountMachine(env, bootstrap.entityId, peer.entityId)?.deltas.get(tokenId)))
+        );
       if (allAccountsReady && !accountsReadyMarked) {
         const startedAt = timings.mesh_accounts.startedAt ?? startTiming('mesh_accounts');
         finishTiming('mesh_accounts', startedAt);
@@ -842,7 +842,7 @@ const run = async (): Promise<void> => {
       const allCreditReady =
         peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
         peers.every(peer =>
-          hasPairMutualCredit(env, bootstrap.entityId, peer.entityId, HUB_MESH_TOKEN_ID, HUB_MESH_CREDIT_AMOUNT),
+          hasPairMutualCredits(env, bootstrap.entityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, HUB_MESH_CREDIT_AMOUNT),
         );
       if (allCreditReady && !creditReadyMarked) {
         const startedAt = timings.mesh_credit.startedAt ?? startTiming('mesh_credit');

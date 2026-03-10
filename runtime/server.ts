@@ -34,7 +34,7 @@ import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
 import { DEFAULT_SPREAD_DISTRIBUTION, ORDERBOOK_PRICE_SCALE } from './orderbook';
-import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote } from './account-utils';
+import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenInfo } from './account-utils';
 import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -434,17 +434,16 @@ const ensureHubWalletFunding = async (
 };
 
 const isHubProfile = (profile: Profile): boolean => {
-  const caps = profile.capabilities;
-  return profile.metadata.isHub === true || caps.includes('hub');
+  return profile.metadata.isHub === true;
 };
 
 const isFaucetHubProfile = (profile: Profile): boolean => {
   return relayStore.activeHubEntityIds.some(id => id.toLowerCase() === profile.entityId.toLowerCase());
 };
 
-const getFaucetHubProfiles = (env: Env): any[] => {
+const getFaucetHubProfiles = (env: Env): Profile[] => {
   const profiles = env.gossip?.getProfiles?.() || [];
-  const selected: any[] = [];
+  const selected: Profile[] = [];
   for (const profile of profiles) {
     if (!isHubProfile(profile) || !isFaucetHubProfile(profile)) continue;
     selected.push(profile);
@@ -455,20 +454,19 @@ const getFaucetHubProfiles = (env: Env): any[] => {
     const bActive = activeSet.has(String(b?.entityId || '').toLowerCase()) ? 1 : 0;
     return bActive - aActive;
   });
-  if (selected.length === 0 && relayStore.activeHubEntityIds.length > 0) {
-    // Fallback for cold gossip cache: active server hubs remain faucet-capable.
-    return relayStore.activeHubEntityIds.map(entityId => ({
-      entityId,
-      metadata: { isHub: true },
-      capabilities: ['hub'],
-      accounts: [],
-    }));
-  }
   return selected;
 };
 
 const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
+};
+
+const REQUEST_CREDIT_CAP_WHOLE = 1_000n;
+
+const getRequestCreditCap = (tokenId: number): bigint => {
+  const decimals = Number(getTokenInfo(tokenId).decimals);
+  const normalizedDecimals = Number.isFinite(decimals) && decimals >= 0 ? Math.floor(decimals) : 18;
+  return REQUEST_CREDIT_CAP_WHOLE * 10n ** BigInt(normalizedDecimals);
 };
 
 const getEntityReplicaById = (env: Env, entityId: string): any | null => {
@@ -1949,13 +1947,18 @@ const bootstrapServerHubsAndReserves = async (
           region: 'global',
           signerId: 'hub-1',
           seed: HUB_SEED,
-          routingFeePPM: 100,
+          routingFeePPM: 1000,
+          baseFee: 5n * 10n ** 18n,
+          disputeAutoFinalizeMode: 'auto',
+          rebalanceBaseFee: 10n ** 17n,
+          rebalanceLiquidityFeeBps: 1n,
+          rebalanceGasFee: 0n,
+          rebalanceTimeoutMs: 10 * 60 * 1000,
           relayUrl,
           rpcUrl: publicRpc,
           httpUrl: publicHttp,
           port: options.port,
           serverId: options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server',
-          capabilities: ['hub'],
           position: { x: -80, y: 0, z: 0 },
         },
         {
@@ -1963,13 +1966,18 @@ const bootstrapServerHubsAndReserves = async (
           region: 'global',
           signerId: 'hub-2',
           seed: HUB_SEED,
-          routingFeePPM: 100,
+          routingFeePPM: 1000,
+          baseFee: 5n * 10n ** 18n,
+          disputeAutoFinalizeMode: 'ignore',
+          rebalanceBaseFee: 10n ** 17n,
+          rebalanceLiquidityFeeBps: 1n,
+          rebalanceGasFee: 0n,
+          rebalanceTimeoutMs: 10 * 60 * 1000,
           relayUrl,
           rpcUrl: publicRpc,
           httpUrl: publicHttp,
           port: options.port,
           serverId: options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server',
-          capabilities: ['hub'],
           position: { x: 0, y: 0, z: 0 },
         },
         {
@@ -1977,13 +1985,18 @@ const bootstrapServerHubsAndReserves = async (
           region: 'global',
           signerId: 'hub-3',
           seed: HUB_SEED,
-          routingFeePPM: 100,
+          routingFeePPM: 1000,
+          baseFee: 5n * 10n ** 18n,
+          disputeAutoFinalizeMode: 'auto',
+          rebalanceBaseFee: 10n ** 17n,
+          rebalanceLiquidityFeeBps: 1n,
+          rebalanceGasFee: 0n,
+          rebalanceTimeoutMs: 10 * 60 * 1000,
           relayUrl,
           rpcUrl: publicRpc,
           httpUrl: publicHttp,
           port: options.port,
           serverId: options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server',
-          capabilities: ['hub'],
           position: { x: 80, y: 0, z: 0 },
         },
       ]
@@ -2029,38 +2042,6 @@ const bootstrapServerHubsAndReserves = async (
   const hubConfigBySignerLabel = new Map<string, (typeof hubConfigs)[number]>();
   for (const cfg of hubConfigs) {
     hubConfigBySignerLabel.set(String(cfg.signerId || '').toLowerCase(), cfg);
-  }
-
-  for (const hub of hubBootstraps) {
-    const hubEntityId = String(hub.entityId || '').toLowerCase();
-    const signerLabel = String(hub.signerLabel || '').toLowerCase();
-    const hubConfig = hubConfigBySignerLabel.get(signerLabel);
-    const hubName = String(hubConfig?.name || '').toLowerCase();
-    const disputeAutoFinalizeMode: 'auto' | 'ignore' =
-      hubName === 'h2' || signerLabel === 'hub-2' ? 'ignore' : 'auto';
-    const replica = getEntityReplicaById(env, hubEntityId);
-    if (!replica?.state) continue;
-    replica.state.hubRebalanceConfig = {
-      matchingStrategy: 'amount',
-      policyVersion: 1,
-      routingFeePPM: 1000,
-      baseFee: 5n * 10n ** 18n,
-      disputeAutoFinalizeMode,
-      rebalanceBaseFee: 10n ** 17n,
-      rebalanceLiquidityFeeBps: 1n,
-      rebalanceGasFee: 0n,
-      rebalanceTimeoutMs: 10 * 60 * 1000,
-    };
-    if (jurisdictionConfig && !replica.state.config?.jurisdiction) {
-      replica.state.config.jurisdiction = jurisdictionConfig;
-      console.log(
-        `[XLN] Hub ${hubEntityId.slice(-8)} jurisdiction set: ${activeJurisdictionName} (depository=${jurisdictionConfig.depositoryAddress.slice(0, 10)}...)`,
-      );
-    }
-    console.log(
-      `[XLN] Hub ${hubEntityId.slice(-8)} (${hubConfig?.name || hub.signerLabel || 'unknown'}) rebalance config set ` +
-      `(amount, 1000ppm, disputeAutoFinalize=${disputeAutoFinalizeMode}, rebalance policy triplet)`,
-    );
   }
 
   const orderbookInitInputs: EntityInput[] = [];
@@ -3072,7 +3053,6 @@ const resolveRpcPaymentRoute = async (
     const targetProfile = profiles.find((profile) => profile.entityId.toLowerCase() === targetEntityId.toLowerCase()) || null;
     const hubCount = profiles.filter((profile) =>
       profile.metadata.isHub === true
-      || profile.capabilities.includes('hub')
     ).length;
     throw new Error(
       `No route found from ${sourceEntityId} to ${targetEntityId} ` +
@@ -3636,7 +3616,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     }));
     // Ensure hubs are visible even when env.gossip is stale by merging relay cache profiles.
     const relayHubProfiles = getAllGossipProfiles(relayStore).filter((profile: Profile) =>
-      profile.metadata.isHub === true || profile.capabilities.includes('hub'),
+      profile.metadata.isHub === true,
     );
     const existing = new Set((health.hubs || []).map((hub) => String(hub.entityId).toLowerCase()));
     for (const profile of relayHubProfiles) {
@@ -3931,7 +3911,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           typeof profile.name === 'string' && profile.name.trim().length > 0
             ? profile.name.trim()
             : entityId;
-        const isHub = profile.metadata.isHub === true || profile.capabilities.includes('hub');
+        const isHub = profile.metadata.isHub === true;
         const online = normalizedRuntimeId ? relayStore.clients.has(normalizedRuntimeId) : false;
         return {
           entityId,
@@ -4831,6 +4811,125 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const status =
         message.includes('SIGNER_RESOLUTION_FAILED') || message.includes('RUNTIME_REPLICA_NOT_FOUND') ? 503 : 500;
       return new Response(JSON.stringify({ error: message }), { status, headers });
+    }
+  }
+
+  if (pathname === '/api/credit/request' && req.method === 'POST') {
+    try {
+      if (!env) {
+        return new Response(JSON.stringify({ error: 'Runtime not initialized' }), { status: 503, headers });
+      }
+
+      const body = await req.json();
+      const userEntityId = typeof body?.userEntityId === 'string' ? body.userEntityId.toLowerCase() : '';
+      const requestedHubEntityId = typeof body?.hubEntityId === 'string' ? body.hubEntityId.toLowerCase() : '';
+      const tokenId = Number(body?.tokenId ?? 1);
+      const amountRaw = typeof body?.amount === 'string' ? body.amount.trim() : '';
+
+      if (!isEntityId32(userEntityId)) {
+        return new Response(JSON.stringify({ error: 'Invalid userEntityId' }), { status: 400, headers });
+      }
+      if (!isEntityId32(requestedHubEntityId)) {
+        return new Response(JSON.stringify({ error: 'Invalid hubEntityId' }), { status: 400, headers });
+      }
+      if (!/^\d+$/.test(amountRaw)) {
+        return new Response(JSON.stringify({ error: 'Invalid amount' }), { status: 400, headers });
+      }
+      if (!Number.isFinite(tokenId) || tokenId <= 0) {
+        return new Response(JSON.stringify({ error: 'Invalid tokenId' }), { status: 400, headers });
+      }
+
+      const hubs = getFaucetHubProfiles(env);
+      const hubProfile = hubs.find((profile) => profile.entityId.toLowerCase() === requestedHubEntityId);
+      if (!hubProfile) {
+        return new Response(
+          JSON.stringify({
+            error: 'Requested hub is not available',
+            knownHubEntityIds: hubs.map((profile) => profile.entityId),
+          }),
+          { status: 404, headers },
+        );
+      }
+
+      const hubEntityId = hubProfile.entityId;
+      const accountMachine = getAccountMachine(env, hubEntityId, userEntityId);
+      if (!accountMachine || !hasAccount(env, hubEntityId, userEntityId)) {
+        return new Response(
+          JSON.stringify({
+            error: 'No bilateral account with selected hub. Open account first.',
+            hubEntityId,
+            userEntityId,
+          }),
+          { status: 409, headers },
+        );
+      }
+
+      const requestedAmount = BigInt(amountRaw);
+      if (requestedAmount <= 0n) {
+        return new Response(JSON.stringify({ error: 'Amount must be positive' }), { status: 400, headers });
+      }
+
+      const approvedAmount = requestedAmount > getRequestCreditCap(tokenId)
+        ? getRequestCreditCap(tokenId)
+        : requestedAmount;
+      const currentGranted = getCreditGrantedByEntity(accountMachine, hubEntityId, tokenId);
+      const nextGranted = currentGranted > approvedAmount ? currentGranted : approvedAmount;
+      if (nextGranted === currentGranted) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            hubEntityId,
+            userEntityId,
+            tokenId,
+            approvedAmount: nextGranted.toString(),
+          }),
+          { status: 200, headers },
+        );
+      }
+
+      let hubSignerId: string;
+      try {
+        hubSignerId = resolveEntityProposerId(env, hubEntityId, 'credit-request');
+      } catch (error) {
+        return new Response(
+          JSON.stringify({ error: error instanceof Error ? error.message : 'Hub signer unavailable' }),
+          { status: 503, headers },
+        );
+      }
+
+      enqueueRuntimeInput(env, {
+        runtimeTxs: [],
+        entityInputs: [
+          {
+            entityId: hubEntityId,
+            signerId: hubSignerId,
+            entityTxs: [
+              {
+                type: 'extendCredit',
+                data: {
+                  counterpartyEntityId: userEntityId,
+                  tokenId,
+                  amount: nextGranted,
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          hubEntityId,
+          userEntityId,
+          tokenId,
+          approvedAmount: nextGranted.toString(),
+        }),
+        { status: 200, headers },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers });
     }
   }
 

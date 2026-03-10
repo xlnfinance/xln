@@ -126,7 +126,7 @@ describe('relay-router gossip fanout', () => {
           buildProfile(ENTITY_B, RUNTIME_B, KEY_B, {
             lastUpdated: 200,
             name: 'hub-b',
-            capabilities: ['hub'],
+            capabilities: [],
             metadata: {
               entityEncPubKey: KEY_B,
               isHub: true,

@@ -514,9 +514,7 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
         ? profile.metadata as Record<string, unknown>
         : {};
     const capabilities = Array.isArray(profile?.capabilities) ? profile.capabilities : [];
-    const isHub =
-      profile?.metadata?.isHub === true ||
-      capabilities.includes('hub');
+    const isHub = profile?.metadata?.isHub === true;
     const name =
       typeof profile?.name === 'string' && profile.name.trim().length > 0
         ? profile.name.trim()
@@ -551,7 +549,7 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
       isHub: true,
       online: existing?.online === true || online,
       lastUpdated: Math.max(existing?.lastUpdated || 0, Date.now()),
-      capabilities: existing?.capabilities || ['hub'],
+      capabilities: existing?.capabilities || [],
       accounts: existing?.accounts || [],
       publicAccounts: existing?.publicAccounts || [],
       metadata: {

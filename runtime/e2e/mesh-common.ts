@@ -3,6 +3,8 @@ import { enqueueRuntimeInput } from '../runtime.ts';
 
 export const HUB_MESH_TOKEN_ID = 1;
 export const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
+export const DEFAULT_ACCOUNT_TOKEN_IDS = [1, 3, 2] as const; // USDC, USDT, WETH
+export const DEFAULT_USER_HUB_CREDIT_AMOUNT = 10_000n * 10n ** 18n;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
 export const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
 export const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
@@ -204,6 +206,14 @@ export const hasPairMutualCredit = (
   if (!delta) return false;
   return (delta.leftCreditLimit ?? 0n) >= amount && (delta.rightCreditLimit ?? 0n) >= amount;
 };
+
+export const hasPairMutualCredits = (
+  env: Env,
+  leftEntityId: string,
+  rightEntityId: string,
+  tokenIds: readonly number[],
+  amount: bigint,
+): boolean => tokenIds.every((tokenId) => hasPairMutualCredit(env, leftEntityId, rightEntityId, tokenId, amount));
 
 export const serializeReserves = (reserves: ReadonlyMap<string | number, bigint>): Record<string, string> => {
   const entries = Array.from(reserves.entries())

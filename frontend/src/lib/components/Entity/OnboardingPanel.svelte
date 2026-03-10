@@ -129,9 +129,7 @@
     } else if (currentEnv?.gossip?.getProfiles) {
       const profiles = currentEnv.gossip.getProfiles();
       for (const profile of profiles || []) {
-        const isHub = profile?.metadata?.isHub === true ||
-          (Array.isArray(profile?.capabilities) &&
-            profile.capabilities.includes('hub'));
+        const isHub = profile?.metadata?.isHub === true;
         if (isHub) add(profile?.entityId);
       }
     }

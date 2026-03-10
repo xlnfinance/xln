@@ -1,6 +1,20 @@
-type ReplicaMapLike = Map<string, any> | Record<string, any> | null | undefined;
+type AccountLike = {
+  counterpartyEntityId?: string;
+  leftEntity?: string;
+  rightEntity?: string;
+};
 
-function toReplicaEntries(eReplicas: ReplicaMapLike): Array<[string, any]> {
+type ReplicaLike = {
+  entityId?: string;
+  state?: {
+    accounts?: Map<string, AccountLike>;
+  };
+};
+
+type ReplicaMapLike = Map<string, ReplicaLike> | Record<string, ReplicaLike> | null | undefined;
+type EnvLike = { eReplicas?: ReplicaMapLike } | null | undefined;
+
+function toReplicaEntries(eReplicas: ReplicaMapLike): Array<[string, ReplicaLike]> {
   if (!eReplicas) return [];
   if (eReplicas instanceof Map) return Array.from(eReplicas.entries());
   return Object.entries(eReplicas);
@@ -11,7 +25,7 @@ export function normalizeEntityId(value: unknown): string {
 }
 
 function matchesCounterparty(
-  account: any,
+  account: AccountLike,
   ownerEntityId: string,
   counterpartyEntityId: string,
 ): boolean {
@@ -32,7 +46,7 @@ function matchesCounterparty(
   return false;
 }
 
-function resolveCounterpartyFromAccount(account: any, ownerEntityId: string): string {
+function resolveCounterpartyFromAccount(account: AccountLike, ownerEntityId: string): string {
   const cp = normalizeEntityId(account?.counterpartyEntityId);
   if (cp) return cp;
   const owner = normalizeEntityId(ownerEntityId);
@@ -45,7 +59,7 @@ function resolveCounterpartyFromAccount(account: any, ownerEntityId: string): st
   return '';
 }
 
-export function getReplicaEntryForEntity(envLike: any, entityId: string): [string, any] | null {
+export function getReplicaEntryForEntity(envLike: EnvLike, entityId: string): [string, ReplicaLike] | null {
   const entries = toReplicaEntries(envLike?.eReplicas);
   const target = normalizeEntityId(entityId);
   for (const [key, replica] of entries) {
@@ -55,17 +69,17 @@ export function getReplicaEntryForEntity(envLike: any, entityId: string): [strin
   return null;
 }
 
-export function getReplicaForEntity(envLike: any, entityId: string): any | null {
+export function getReplicaForEntity(envLike: EnvLike, entityId: string): ReplicaLike | null {
   return getReplicaEntryForEntity(envLike, entityId)?.[1] ?? null;
 }
 
-export function getSignerIdForEntity(envLike: any, entityId: string, fallback = '1'): string {
+export function getSignerIdForEntity(envLike: EnvLike, entityId: string, fallback = '1'): string {
   const key = getReplicaEntryForEntity(envLike, entityId)?.[0];
   if (!key) return fallback;
   return String(key).split(':')[1] || fallback;
 }
 
-export function requireSignerIdForEntity(envLike: any, entityId: string, context = 'entity-action'): string {
+export function requireSignerIdForEntity(envLike: EnvLike, entityId: string, context = 'entity-action'): string {
   const signerId = getSignerIdForEntity(envLike, entityId, '');
   if (signerId) return signerId;
   const normalized = normalizeEntityId(entityId) || String(entityId || 'unknown');
@@ -73,10 +87,10 @@ export function requireSignerIdForEntity(envLike: any, entityId: string, context
 }
 
 export function getCounterpartyAccount(
-  envLike: any,
+  envLike: EnvLike,
   ownerEntityId: string,
   counterpartyEntityId: string,
-): { key: string; account: any } | null {
+): { key: string; account: AccountLike } | null {
   const replica = getReplicaForEntity(envLike, ownerEntityId);
   const accounts = replica?.state?.accounts;
   if (!(accounts instanceof Map)) return null;
@@ -93,14 +107,14 @@ export function getCounterpartyAccount(
 }
 
 export function hasCounterpartyAccount(
-  envLike: any,
+  envLike: EnvLike,
   ownerEntityId: string,
   counterpartyEntityId: string,
 ): boolean {
   return !!getCounterpartyAccount(envLike, ownerEntityId, counterpartyEntityId);
 }
 
-export function getConnectedCounterpartyIds(envLike: any, ownerEntityId: string): Set<string> {
+export function getConnectedCounterpartyIds(envLike: EnvLike, ownerEntityId: string): Set<string> {
   const connected = new Set<string>();
   const replica = getReplicaForEntity(envLike, ownerEntityId);
   const accounts = replica?.state?.accounts;

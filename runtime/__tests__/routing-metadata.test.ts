@@ -34,7 +34,7 @@ function profile(
     website: '',
     lastUpdated: 1,
     runtimeEncPubKey: `0x${entityId.slice(2, 66)}`,
-    capabilities: ['hub'],
+    capabilities: [],
     publicAccounts: accounts.map((account) => account.counterpartyId),
     endpoints: [],
     relays: [],

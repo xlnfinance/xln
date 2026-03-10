@@ -52,7 +52,7 @@
   $: hubCount = profiles.filter(isHub).length;
 
   function isHub(profile: GossipProfile): boolean {
-    return profile.metadata?.isHub === true || profile.capabilities?.includes('hub') === true;
+    return profile.metadata?.isHub === true;
   }
 
   function profileName(profile: GossipProfile): string {

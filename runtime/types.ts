@@ -695,6 +695,7 @@ export type EntityTx =
         policyVersion?: number;             // Fee-policy version (auto-incremented if omitted)
         routingFeePPM?: number;             // Default: 100 (0.01%)
         baseFee?: bigint;                   // Default: 0n
+        disputeAutoFinalizeMode?: 'auto' | 'ignore';
         minCollateralThreshold?: bigint;    // Reserved for future policy gates
         c2rWithdrawSoftLimit?: bigint;              // Hub-owned collateral keep-buffer before C→R pullback
         minFeeBps?: bigint;                 // Legacy fallback min-fee bps gate (if policy triplet missing)

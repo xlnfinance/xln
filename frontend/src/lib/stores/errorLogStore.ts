@@ -4,7 +4,7 @@ interface ErrorLogEntry {
   timestamp: number;
   message: string;
   source: string;
-  details?: any;
+  details?: unknown;
 }
 
 function createErrorLogStore() {
@@ -12,7 +12,7 @@ function createErrorLogStore() {
 
   return {
     subscribe,
-    log(message: string, source: string, details?: any) {
+    log(message: string, source: string, details?: unknown) {
       update(logs => {
         const entry: ErrorLogEntry = {
           timestamp: Date.now(),
@@ -33,11 +33,20 @@ function createErrorLogStore() {
 
 export const errorLog = createErrorLogStore();
 
+function formatDetails(details: unknown): string {
+  if (details === undefined) return '';
+  try {
+    return `\n  ${JSON.stringify(details)}`;
+  } catch {
+    return '\n  [unserializable details]';
+  }
+}
+
 // Format error log as text
 export function formatErrorLog(logs: ErrorLogEntry[]): string {
   return logs.map(entry => {
     const time = new Date(entry.timestamp).toISOString().slice(11, 23);
-    const details = entry.details ? `\n  ${JSON.stringify(entry.details)}` : '';
+    const details = formatDetails(entry.details);
     return `[${time}] ${entry.source}: ${entry.message}${details}`;
   }).join('\n\n');
 }

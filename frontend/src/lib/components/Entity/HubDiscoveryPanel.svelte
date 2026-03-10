@@ -4,6 +4,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { Env, Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { xlnFunctions, xlnEnvironment, getXLN, enqueueEntityInputs, resolveRelayUrls } from '../../stores/xlnStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import {
@@ -37,7 +38,7 @@
 
   // Hub data structure
   interface Hub {
-    profile: unknown;
+    profile: GossipProfile;
     entityId: string;
     name: string;
     metadata: {
@@ -59,6 +60,12 @@
 
   let hubs: Hub[] = [];
   const DISCOVERY_TIMEOUT_MS = 8000;
+
+  type RuntimeP2PView = {
+    relayUrls?: string[];
+    isConnected?: () => boolean;
+    updateConfig?: (cfg: { relayUrls: string[] }) => void;
+  };
 
   function generateIdenticon(entityId: string): string {
     const canonicalId = String(entityId || '').trim().toLowerCase();
@@ -109,7 +116,7 @@
     return clamp(base + feeAdj + peerAdj, 650, 980);
   }
 
-  const formatRawProfile = (profile: any): string => {
+  const formatRawProfile = (profile: unknown): string => {
     if (activeFunctions?.safeStringify) {
       return activeFunctions.safeStringify(profile, 2);
     }
@@ -133,7 +140,7 @@
     expandedHub = expandedHub === hubId ? null : hubId;
   }
 
-  function isP2PConnected(currentEnv: any): boolean {
+  function isP2PConnected(currentEnv: Env | null): boolean {
     try {
       return Boolean(currentEnv?.runtimeState?.p2p?.isConnected?.());
     } catch {
@@ -184,27 +191,10 @@
 
       const discovered: Hub[] = [];
 
-      type GossipHubProfile = {
-        entityId: string;
-        runtimeId?: string;
-        endpoints?: string[];
-        capabilities?: string[];
-        metadata?: {
-          name?: string;
-          bio?: string;
-          website?: string;
-          routingFeePPM?: number;
-          lastUpdated?: number;
-          isHub?: boolean;
-        };
-      };
-
-      const gossipProfiles: GossipHubProfile[] = typeof currentEnv.gossip?.getHubs === 'function'
+      const gossipProfiles: GossipProfile[] = typeof currentEnv.gossip?.getHubs === 'function'
         ? currentEnv.gossip.getHubs()
         : (currentEnv.gossip?.getProfiles?.() || []).filter(
-            (profile: GossipHubProfile) =>
-              profile?.metadata?.isHub === true ||
-              (Array.isArray(profile?.capabilities) && profile.capabilities.includes('hub')),
+            (profile: GossipProfile) => profile.metadata?.isHub === true,
           );
 
       for (const profile of gossipProfiles) {
@@ -229,7 +219,7 @@
           },
           endpoints: profile.endpoints || [],
           capabilities,
-          verified: capabilities.includes('hub'),
+          verified: profile.metadata?.isHub === true,
           creditScore: computeCreditScore(profile.entityId, feePpm, peerCount),
           isConnected,
           lastSeen: profile.lastUpdated || Date.now(),
@@ -279,7 +269,7 @@
       // Open account WITH credit extension (both in same frame)
       // Frame #1 will have: [add_delta, set_credit_limit] - order matters!
       console.log('[HubDiscovery] Opening account + extending credit to', hub.entityId);
-      await enqueueEntityInputs(currentEnv as any, [{
+      await enqueueEntityInputs(currentEnv, [{
         entityId,
         signerId,
         entityTxs: [
@@ -315,7 +305,7 @@
     }
   }
 
-  async function waitForAccountReady(currentEnv: any, ownerEntityId: string, counterpartyEntityId: string, timeoutMs = 20_000): Promise<boolean> {
+  async function waitForAccountReady(currentEnv: Env, ownerEntityId: string, counterpartyEntityId: string, timeoutMs = 20_000): Promise<boolean> {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
       const accountEntry = getCounterpartyAccount(currentEnv, ownerEntityId, counterpartyEntityId);
@@ -327,11 +317,11 @@
     return false;
   }
 
-  async function ensureRuntimeRelay(currentEnv: any, relayUrl: string, timeoutMs = 12_000): Promise<void> {
+  async function ensureRuntimeRelay(currentEnv: Env, relayUrl: string, timeoutMs = 12_000): Promise<void> {
     const desired = String(relayUrl || '').trim();
     if (!desired) return;
     const xln = await getXLN();
-    const p2p = xln.getP2P?.(currentEnv as any) as { relayUrls?: string[]; isConnected?: () => boolean; updateConfig?: (cfg: any) => void } | null | undefined;
+    const p2p = xln.getP2P?.(currentEnv) as RuntimeP2PView | null | undefined;
     if (!p2p?.updateConfig) {
       throw new Error('Create or restore a wallet runtime first. Hub gossip uses the active runtime P2P client.');
     }
