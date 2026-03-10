@@ -3070,7 +3070,19 @@ const resolveRpcPaymentRoute = async (
     ? routes
     : await env.gossip.getNetworkGraph().findPaths(sourceEntityId, targetEntityId, amount, tokenId);
   if (retryRoutes.length === 0) {
-    throw new Error(`No route found from ${sourceEntityId} to ${targetEntityId}`);
+    const profiles = env.gossip.getProfiles();
+    const targetProfile = profiles.find((profile) => profile.entityId.toLowerCase() === targetEntityId.toLowerCase()) || null;
+    const hubCount = profiles.filter((profile) =>
+      profile.metadata.isHub === true
+      || profile.capabilities.includes('hub')
+      || profile.capabilities.includes('routing')
+    ).length;
+    throw new Error(
+      `No route found from ${sourceEntityId} to ${targetEntityId} ` +
+      `out of ${profiles.length} gossip profiles (hubs=${hubCount}, ` +
+      `target lastUpdated=${targetProfile ? targetProfile.lastUpdated : 'missing'}, ` +
+      `publicAccounts=${targetProfile ? targetProfile.publicAccounts.length : 0})`,
+    );
   }
   return retryRoutes[0]!.path;
 };

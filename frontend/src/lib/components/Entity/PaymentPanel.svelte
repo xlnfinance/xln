@@ -709,6 +709,7 @@
 
   function getRouteMissDiagnostics(): {
     profilesCount: number;
+    hubsCount: number;
     targetProfilePresent: boolean;
     targetProfileLastUpdated: number | null;
     targetPublicAccounts: number;
@@ -716,8 +717,14 @@
     const profiles = getGossipProfiles();
     const targetNorm = normalizeEntityId(targetEntityId);
     const targetProfile = profiles.find((profile) => normalizeEntityId(profile.entityId) === targetNorm) || null;
+    const hubsCount = profiles.filter((profile) =>
+      profile.metadata.isHub === true
+      || profile.capabilities.includes('hub')
+      || profile.capabilities.includes('routing')
+    ).length;
     return {
       profilesCount: profiles.length,
+      hubsCount,
       targetProfilePresent: !!targetProfile,
       targetProfileLastUpdated: targetProfile ? targetProfile.lastUpdated : null,
       targetPublicAccounts: targetProfile ? targetProfile.publicAccounts.length : 0,
@@ -731,7 +738,7 @@
     }
     return (
       `No route found to ${targetEntityId} out of ${diagnostics.profilesCount} gossip profiles ` +
-      `(target lastUpdated=${diagnostics.targetProfileLastUpdated}, publicAccounts=${diagnostics.targetPublicAccounts})`
+      `(hubs=${diagnostics.hubsCount}, target lastUpdated=${diagnostics.targetProfileLastUpdated}, publicAccounts=${diagnostics.targetPublicAccounts})`
     );
   }
 
@@ -750,8 +757,7 @@
     if (!env) return;
     const xln = await getXLN();
     try {
-      const synced = await env.runtimeState?.p2p?.syncProfiles?.();
-      if (synced) return;
+      await env.runtimeState?.p2p?.syncProfiles?.();
     } catch {
       // fall through to targeted fetch / refresh loop
     }
