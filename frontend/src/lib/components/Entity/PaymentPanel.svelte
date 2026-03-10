@@ -387,7 +387,7 @@
     const profile = getGossipProfileByEntityId(entity);
     if (!profile) return true; // allow local+gossip mixed discovery; key coverage is enforced above
     const metadata = profile.metadata || {};
-    return metadata.isHub === true || profile.capabilities.includes('hub') || profile.capabilities.includes('routing');
+    return metadata.isHub === true || profile.capabilities.includes('hub');
   }
 
   function formatToken(value: bigint): string {
@@ -720,7 +720,6 @@
     const hubsCount = profiles.filter((profile) =>
       profile.metadata.isHub === true
       || profile.capabilities.includes('hub')
-      || profile.capabilities.includes('routing')
     ).length;
     return {
       profilesCount: profiles.length,

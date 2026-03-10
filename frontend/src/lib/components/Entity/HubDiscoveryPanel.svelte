@@ -24,9 +24,9 @@
   let error = '';
   let connecting: string | null = null;
   let expandedHub: string | null = null;
-  let sortKey: 'score' | 'fee' | 'uptime' | 'name' = 'score';
+  let sortKey: 'score' | 'fee' | 'name' = 'score';
   let sortAsc = false;
-  let sortMode: 'score_desc' | 'score_asc' | 'fee_asc' | 'fee_desc' | 'uptime_desc' | 'uptime_asc' | 'name_asc' | 'name_desc' = 'score_desc';
+  let sortMode: 'score_desc' | 'score_asc' | 'fee_asc' | 'fee_desc' | 'name_asc' | 'name_desc' = 'score_desc';
 
   const DEFAULT_RELAY = resolveRelayUrls()[0] || '';
   const relayLabel = (() => {
@@ -44,13 +44,11 @@
       description?: string;
       website?: string;
       fee?: number;
-      capacity?: bigint;
-      uptime?: number;
+      peerCount: number;
     };
     runtimeId?: string;
     endpoints?: string[];
     capabilities?: string[];
-    jurisdiction: string;
     verified: boolean;
     creditScore: number;
     isConnected: boolean;
@@ -87,21 +85,9 @@
         case 'score':
           cmp = a.creditScore - b.creditScore;
           break;
-        case 'uptime':
-          cmp = (a.metadata.uptime || 0) - (b.metadata.uptime || 0);
-          break;
       }
       return sortAsc ? cmp : -cmp;
     });
-
-  // Format functions
-  function formatCapacity(cap?: bigint): string {
-    if (!cap) return '-';
-    const num = Number(cap) / 1e18;
-    if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
-    if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
-    return num.toFixed(2);
-  }
 
   function formatFee(ppm?: number): string {
     if (!ppm && ppm !== 0) return '-';
@@ -112,32 +98,16 @@
     return Math.min(max, Math.max(min, value));
   }
 
-  function computeCreditScore(entity: string, feePpm: number, uptime: number): number {
+  function computeCreditScore(entity: string, feePpm: number, peerCount: number): number {
     let hash = 0;
     for (let i = 0; i < entity.length; i += 1) {
       hash = ((hash << 5) - hash + entity.charCodeAt(i)) | 0;
     }
     const base = 720 + (Math.abs(hash) % 181); // 720..900 deterministic
     const feeAdj = clamp(Math.round((120 - feePpm) / 10), -40, 20);
-    const uptimeAdj = clamp(Math.round((uptime - 99.5) * 20), -30, 30);
-    return clamp(base + feeAdj + uptimeAdj, 650, 980);
+    const peerAdj = clamp(peerCount * 4, 0, 24);
+    return clamp(base + feeAdj + peerAdj, 650, 980);
   }
-
-  const parseCapacity = (value: unknown): bigint | undefined => {
-    if (value === null || value === undefined) return undefined;
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
-    if (typeof value === 'string' && value.trim() !== '') {
-      try {
-        const match = value.match(/^BigInt\(([-\d]+)\)$/);
-        const raw = match?.[1] ?? value;
-        return BigInt(raw);
-      } catch {
-        return undefined;
-      }
-    }
-    return undefined;
-  };
 
   const formatRawProfile = (profile: any): string => {
     if (activeFunctions?.safeStringify) {
@@ -152,7 +122,7 @@
 
   function applySortMode(mode: string) {
     const [key, dir] = mode.split('_');
-    if (key === 'score' || key === 'fee' || key === 'uptime' || key === 'name') {
+    if (key === 'score' || key === 'fee' || key === 'name') {
       sortKey = key;
       sortAsc = dir === 'asc';
       sortMode = `${key}_${sortAsc ? 'asc' : 'desc'}` as typeof sortMode;
@@ -224,9 +194,6 @@
           bio?: string;
           website?: string;
           routingFeePPM?: number;
-          capacity?: unknown;
-          uptime?: string | number;
-          region?: string;
           lastUpdated?: number;
           isHub?: boolean;
         };
@@ -245,13 +212,10 @@
         if (normalizeEntityId(profile.entityId) === normalizeEntityId(entityId)) continue;
 
         const isConnected = hasCounterpartyAccount(currentEnv, entityId, profile.entityId);
-        const capacity = parseCapacity(profile.metadata?.capacity);
         const feePpm = profile.metadata?.routingFeePPM || 100;
-        const uptime = typeof profile.metadata?.uptime === 'number'
-          ? profile.metadata.uptime
-          : Number.parseFloat(String(profile.metadata?.uptime || '99.9'));
         const capabilities = profile.capabilities || [];
         const fullEntityId = profile.entityId.startsWith('0x') ? profile.entityId : `0x${profile.entityId}`;
+        const peerCount = Array.isArray(profile.publicAccounts) ? profile.publicAccounts.length : 0;
 
         discovered.push({
           profile,
@@ -261,14 +225,12 @@
             description: profile.bio || 'Payment hub',
             ...(profile.website ? { website: profile.website } : {}),
             fee: feePpm,
-            capacity: capacity ?? 0n,
-            uptime,
+            peerCount,
           },
           endpoints: profile.endpoints || [],
           capabilities,
-          jurisdiction: profile.metadata?.region || 'global',
-          verified: capabilities.includes('hub') || capabilities.includes('routing'),
-          creditScore: computeCreditScore(profile.entityId, feePpm, uptime),
+          verified: capabilities.includes('hub'),
+          creditScore: computeCreditScore(profile.entityId, feePpm, peerCount),
           isConnected,
           lastSeen: profile.lastUpdated || Date.now(),
           raw: formatRawProfile(profile),
@@ -487,8 +449,6 @@
           <option value="score_asc">Credit score ↑</option>
           <option value="fee_asc">Fee ↑</option>
           <option value="fee_desc">Fee ↓</option>
-          <option value="uptime_desc">Uptime ↓</option>
-          <option value="uptime_asc">Uptime ↑</option>
           <option value="name_asc">Name A→Z</option>
           <option value="name_desc">Name Z→A</option>
         </select>
@@ -545,16 +505,16 @@
               <span class="metric-inline-value">{formatFee(hub.metadata.fee)}</span>
             </div>
             <div class="metric-inline">
-              <span class="metric-inline-label">Capacity</span>
-              <span class="metric-inline-value">{formatCapacity(hub.metadata.capacity)}</span>
+              <span class="metric-inline-label">Peers</span>
+              <span class="metric-inline-value">{hub.metadata.peerCount}</span>
             </div>
             <div class="metric-inline">
-              <span class="metric-inline-label">Uptime</span>
-              <span class="metric-inline-value">{hub.metadata.uptime?.toFixed(1) || '-'}%</span>
+              <span class="metric-inline-label">Runtime</span>
+              <span class="metric-inline-value mono">{hub.runtimeId ? hub.runtimeId.slice(0, 10) : '-'}</span>
             </div>
             <div class="metric-inline">
-              <span class="metric-inline-label">Region</span>
-              <span class="metric-inline-value">{hub.jurisdiction}</span>
+              <span class="metric-inline-label">Updated</span>
+              <span class="metric-inline-value">{new Date(hub.lastSeen).toLocaleTimeString()}</span>
             </div>
           </div>
 

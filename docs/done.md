@@ -307,3 +307,11 @@
     - `bun build custody/server.ts --target=bun --outfile=/tmp/custody-check.js`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260310-150559-359/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260310-150559-359/e2e-shard-00.log)
+## 2026-03-10 profile cleanup milestone
+- Removed public profile capability aliases: no more 'routing'/'faucet' as hub synonyms.
+- Hub classification is now entity-driven only; MM can no longer be classified as a hub by runtime co-location.
+- Tightened public gossip metadata to the live fields used by routing/signing; dropped fake UI metadata usage (capacity/uptime/region chips).
+- Replaced stale E2E app-ready wait on page globals with visible app mount + scoped runtime-create wait.
+- Verified: bun test runtime/__tests__/relay-router.test.ts runtime/__tests__/routing-metadata.test.ts
+- Verified: tests/e2e-payment.spec.ts (isolated)
+- Verified: tests/e2e-custody.spec.ts (isolated)

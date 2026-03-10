@@ -21,14 +21,25 @@ const caps = (out: bigint, inn: bigint) => ({
 
 function profile(
   entityId: string,
-  metadata: Record<string, unknown>,
+  runtimeId: string,
+  metadata: Profile['metadata'],
   accounts: Array<{ counterpartyId: string; tokenCapacities: ReturnType<typeof caps> }>
 ): Profile {
   return {
     entityId,
-    capabilities: ['hub', 'routing'],
-    metadata: metadata as any,
-    accounts: accounts as any,
+    runtimeId,
+    name: entityId,
+    avatar: '',
+    bio: '',
+    website: '',
+    lastUpdated: 1,
+    runtimeEncPubKey: `0x${entityId.slice(2, 66)}`,
+    capabilities: ['hub'],
+    publicAccounts: accounts.map((account) => account.counterpartyId),
+    endpoints: [],
+    relays: [],
+    metadata,
+    accounts,
   };
 }
 
@@ -40,16 +51,47 @@ describe('Routing metadata hard requirements', () => {
         ALICE,
         {
           entityId: ALICE,
+          runtimeId: ALICE.slice(0, 42),
+          name: 'Alice',
+          avatar: '',
+          bio: '',
+          website: '',
+          lastUpdated: 1,
+          runtimeEncPubKey: `0x${'aa'.repeat(32)}`,
           capabilities: [],
-          metadata: { name: 'Alice', routingFeePPM: 10_000, isHub: false },
-          accounts: [{ counterpartyId: H1, tokenCapacities: caps(high, high) }] as any,
+          publicAccounts: [H1],
+          endpoints: [],
+          relays: [],
+          metadata: {
+            entityEncPubKey: `0x${'ab'.repeat(32)}`,
+            routingFeePPM: 10_000,
+            baseFee: 0n,
+            isHub: false,
+            entityPublicKey: 'pub:alice',
+            board: {
+              threshold: 1,
+              validators: [{ signer: ALICE.slice(0, 42), signerId: ALICE.slice(0, 42), weight: 1, publicKey: 'board:alice' }],
+            },
+          },
+          accounts: [{ counterpartyId: H1, tokenCapacities: caps(high, high) }],
         },
       ],
       [
         H1,
         profile(
           H1,
-          { name: 'H1', routingFeePPM: 10_000, isHub: true },
+          H1.slice(0, 42),
+          {
+            entityEncPubKey: `0x${'11'.repeat(32)}`,
+            entityPublicKey: 'pub:h1',
+            routingFeePPM: 10_000,
+            baseFee: 0n,
+            isHub: true,
+            board: {
+              threshold: 1,
+              validators: [{ signer: H1.slice(0, 42), signerId: H1.slice(0, 42), weight: 1, publicKey: 'board:h1' }],
+            },
+          },
           [
             { counterpartyId: H2, tokenCapacities: caps(high, high) },
             { counterpartyId: MALFORMED_HUB, tokenCapacities: caps(high, high) },
@@ -60,7 +102,18 @@ describe('Routing metadata hard requirements', () => {
         H2,
         profile(
           H2,
-          { name: 'H2', routingFeePPM: 10_000, isHub: true },
+          H2.slice(0, 42),
+          {
+            entityEncPubKey: `0x${'22'.repeat(32)}`,
+            entityPublicKey: 'pub:h2',
+            routingFeePPM: 10_000,
+            baseFee: 0n,
+            isHub: true,
+            board: {
+              threshold: 1,
+              validators: [{ signer: H2.slice(0, 42), signerId: H2.slice(0, 42), weight: 1, publicKey: 'board:h2' }],
+            },
+          },
           [{ counterpartyId: BOB, tokenCapacities: caps(high, high) }]
         ),
       ],
@@ -69,7 +122,22 @@ describe('Routing metadata hard requirements', () => {
         // Missing name + routingFeePPM on purpose.
         profile(
           MALFORMED_HUB,
-          { isHub: true },
+          MALFORMED_HUB.slice(0, 42),
+          {
+            entityEncPubKey: `0x${'33'.repeat(32)}`,
+            entityPublicKey: 'pub:bad',
+            baseFee: 0n,
+            isHub: true,
+            board: {
+              threshold: 1,
+              validators: [{
+                signer: MALFORMED_HUB.slice(0, 42),
+                signerId: MALFORMED_HUB.slice(0, 42),
+                weight: 1,
+                publicKey: 'board:bad',
+              }],
+            },
+          } as Profile['metadata'],
           [{ counterpartyId: H2, tokenCapacities: caps(high, high) }]
         ),
       ],
@@ -77,9 +145,29 @@ describe('Routing metadata hard requirements', () => {
         BOB,
         {
           entityId: BOB,
+          runtimeId: BOB.slice(0, 42),
+          name: 'Bob',
+          avatar: '',
+          bio: '',
+          website: '',
+          lastUpdated: 1,
+          runtimeEncPubKey: `0x${'bb'.repeat(32)}`,
           capabilities: [],
-          metadata: { name: 'Bob', routingFeePPM: 10_000, isHub: false },
-          accounts: [] as any,
+          publicAccounts: [],
+          endpoints: [],
+          relays: [],
+          metadata: {
+            entityEncPubKey: `0x${'bc'.repeat(32)}`,
+            routingFeePPM: 10_000,
+            baseFee: 0n,
+            isHub: false,
+            entityPublicKey: 'pub:bob',
+            board: {
+              threshold: 1,
+              validators: [{ signer: BOB.slice(0, 42), signerId: BOB.slice(0, 42), weight: 1, publicKey: 'board:bob' }],
+            },
+          },
+          accounts: [],
         },
       ],
     ]);
@@ -97,4 +185,3 @@ describe('Routing metadata hard requirements', () => {
     }
   });
 });
-

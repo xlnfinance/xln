@@ -49,7 +49,7 @@ const DEFAULT_CONFIG: HubConfig = {
   httpUrl: getArg('--http', process.env.PUBLIC_HTTP ?? ''),
   port: Number(getArg('--port', process.env.PORT ?? '0')) || undefined,
   serverId: process.env.SERVER_ID ?? undefined,
-  capabilities: ['hub', 'routing', 'faucet'],
+  capabilities: ['hub'],
   position: { x: 0, y: 0, z: 0 },
 };
 
@@ -88,21 +88,12 @@ const announceHubProfile = (env: Env, entityId: string, config: HubConfig, signe
   }
   replica.state.profile.name = config.name;
   const profile = buildLocalEntityProfile(env, replica.state, Date.now());
-  profile.capabilities = config.capabilities || ['hub', 'routing', 'faucet'];
+  profile.capabilities = config.capabilities || ['hub'];
   profile.relays = config.relayUrl ? [config.relayUrl] : [];
   profile.endpoints = config.relayUrl ? [config.relayUrl] : [];
   profile.metadata = {
     ...(profile.metadata || {}),
     isHub: true,
-    region: config.region,
-    relayUrl: config.relayUrl,
-    rpcUrl: config.rpcUrl || undefined,
-    httpUrl: config.httpUrl || undefined,
-    port: config.port,
-    serverId: config.serverId,
-    hubSignerId: signerAddress,
-    jurisdiction: jurisdictionName,
-    chainId,
     routingFeePPM: config.routingFeePPM ?? 100,
   };
   env.gossip.announce(profile);

@@ -17,8 +17,6 @@
     hubs: Array<{
       entityId: string;
       name: string;
-      region?: string;
-      relayUrl?: string;
       runtimeId?: string;
       online?: boolean;
       activeClients?: string[];

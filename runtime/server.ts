@@ -435,12 +435,10 @@ const ensureHubWalletFunding = async (
 
 const isHubProfile = (profile: Profile): boolean => {
   const caps = profile.capabilities;
-  return profile.metadata.isHub === true || caps.includes('hub') || caps.includes('routing');
+  return profile.metadata.isHub === true || caps.includes('hub');
 };
 
 const isFaucetHubProfile = (profile: Profile): boolean => {
-  const caps = profile.capabilities;
-  if (caps.includes('faucet')) return true;
   return relayStore.activeHubEntityIds.some(id => id.toLowerCase() === profile.entityId.toLowerCase());
 };
 
@@ -462,7 +460,7 @@ const getFaucetHubProfiles = (env: Env): any[] => {
     return relayStore.activeHubEntityIds.map(entityId => ({
       entityId,
       metadata: { isHub: true },
-      capabilities: ['hub', 'routing', 'faucet'],
+      capabilities: ['hub'],
       accounts: [],
     }));
   }
@@ -1957,7 +1955,7 @@ const bootstrapServerHubsAndReserves = async (
           httpUrl: publicHttp,
           port: options.port,
           serverId: options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server',
-          capabilities: ['hub', 'routing', 'faucet'],
+          capabilities: ['hub'],
           position: { x: -80, y: 0, z: 0 },
         },
         {
@@ -1971,7 +1969,7 @@ const bootstrapServerHubsAndReserves = async (
           httpUrl: publicHttp,
           port: options.port,
           serverId: options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server',
-          capabilities: ['hub', 'routing', 'faucet'],
+          capabilities: ['hub'],
           position: { x: 0, y: 0, z: 0 },
         },
         {
@@ -1985,7 +1983,7 @@ const bootstrapServerHubsAndReserves = async (
           httpUrl: publicHttp,
           port: options.port,
           serverId: options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server',
-          capabilities: ['hub', 'routing', 'faucet'],
+          capabilities: ['hub'],
           position: { x: 80, y: 0, z: 0 },
         },
       ]
@@ -3075,7 +3073,6 @@ const resolveRpcPaymentRoute = async (
     const hubCount = profiles.filter((profile) =>
       profile.metadata.isHub === true
       || profile.capabilities.includes('hub')
-      || profile.capabilities.includes('routing')
     ).length;
     throw new Error(
       `No route found from ${sourceEntityId} to ${targetEntityId} ` +
@@ -3648,8 +3645,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       health.hubs.push({
         entityId,
         name: profile.name,
-        region: typeof profile.metadata.region === 'string' ? profile.metadata.region : 'global',
-        relayUrl: typeof profile.metadata.relayUrl === 'string' ? profile.metadata.relayUrl : undefined,
         status: 'healthy',
         reserves: env ? getReplicaReserveSnapshot(env, entityId) : undefined,
         accounts: env ? getReplicaAccountCount(env, entityId) : undefined,

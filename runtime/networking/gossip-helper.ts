@@ -151,7 +151,7 @@ export function buildEntityProfile(
     bio: entityState.profile.bio,
     website: entityState.profile.website,
     lastUpdated: timestamp,
-    capabilities: [], // Future: Add routing, swap capabilities based on entity config
+    capabilities: hubConfig ? ['hub'] : [],
     publicAccounts,
     endpoints: [],
     relays: [],

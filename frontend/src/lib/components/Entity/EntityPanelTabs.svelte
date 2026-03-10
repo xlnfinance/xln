@@ -2464,7 +2464,7 @@
               value={$settings.runtimeDelay}
               on:input={(e) => {
                 const val = Math.max(0, Math.min(10000, Number(e.currentTarget.value) || 0));
-                settingsOperations.setServerDelay(val);
+                settingsOperations.setRuntimeDelay(val);
                 const env = activeEnv;
                 if (env) {
                   if (!env.runtimeConfig) env.runtimeConfig = { minFrameDelayMs: val, loopIntervalMs: 25 };

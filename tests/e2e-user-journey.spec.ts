@@ -146,7 +146,7 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
       const hubProfile = profiles.find((profile: any) =>
         profile?.metadata?.isHub === true ||
         (Array.isArray(profile?.capabilities) &&
-          (profile.capabilities.includes('hub') || profile.capabilities.includes('routing'))),
+          profile.capabilities.includes('hub')),
       );
       hubId = typeof hubProfile?.entityId === 'string' ? hubProfile.entityId : '';
     }

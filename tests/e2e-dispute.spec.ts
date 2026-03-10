@@ -473,7 +473,7 @@ async function pickSecondaryHubEntityId(page: Page, excludeCounterpartyId: strin
         const id = String(p?.entityId || '').toLowerCase();
         if (!id || id === exclude) return false;
         return p?.metadata?.isHub === true ||
-          (Array.isArray(p?.capabilities) && (p.capabilities.includes('hub') || p.capabilities.includes('routing')));
+          (Array.isArray(p?.capabilities) && p.capabilities.includes('hub'));
       })
       .map((p: any) => String(p.entityId))
       .sort();

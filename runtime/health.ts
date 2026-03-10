@@ -26,8 +26,6 @@ export interface JMachineHealth {
 export interface HubHealth {
   entityId: string;
   name: string;
-  region?: string;
-  relayUrl?: string;
   runtimeId?: string;
   online?: boolean;
   activeClients?: string[];
@@ -123,8 +121,6 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
         hubs.push({
           entityId: profile.entityId,
           name: profile.name || 'Unknown',
-          region: profile.metadata.region,
-          relayUrl: profile.metadata.relayUrl,
           status: 'healthy', // TODO: Add health check
           reserves: replica?.state?.reserves?.size ? serializeReserves(replica.state.reserves) : undefined,
           accounts: replica?.state?.accounts?.size,

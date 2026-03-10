@@ -131,7 +131,7 @@
       for (const profile of profiles || []) {
         const isHub = profile?.metadata?.isHub === true ||
           (Array.isArray(profile?.capabilities) &&
-            (profile.capabilities.includes('hub') || profile.capabilities.includes('routing')));
+            profile.capabilities.includes('hub'));
         if (isHub) add(profile?.entityId);
       }
     }
