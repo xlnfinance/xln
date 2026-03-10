@@ -263,10 +263,7 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
       const startedAt = Date.now();
       while (Date.now() - startedAt < 15_000) {
         const profiles = env?.gossip?.getProfiles?.() || [];
-        const hub = profiles.find((p: any) =>
-          p?.metadata?.isHub === true ||
-          (Array.isArray(p?.capabilities) && p.capabilities.includes('hub'))
-        );
+        const hub = profiles.find((p: any) => p?.metadata?.isHub === true);
         hubId = String(hub?.entityId || '');
         if (hubId) break;
         await new Promise((resolve) => setTimeout(resolve, 300));

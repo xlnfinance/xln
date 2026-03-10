@@ -217,7 +217,7 @@ async function discoverHubs(page: Page): Promise<string[]> {
       }
       const profiles = view.isolatedEnv?.gossip?.getProfiles?.() ?? [];
       const ids = profiles
-        .filter((profile) => profile.metadata?.isHub === true || profile.capabilities?.includes('hub') === true)
+        .filter((profile) => profile.metadata?.isHub === true)
         .map((profile) => profile.entityId)
         .filter((entityId): entityId is string => typeof entityId === 'string');
       return Array.from(new Set(ids));

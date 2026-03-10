@@ -372,7 +372,7 @@ async function discoverHub(page: Page): Promise<string> {
       XLN?.refreshGossip?.(env);
       const profiles = env?.gossip?.getProfiles?.() || [];
       const hub = profiles.find((p: any) =>
-        p?.metadata?.isHub === true || (Array.isArray(p?.capabilities) && p.capabilities.includes('hub')));
+        p?.metadata?.isHub === true);
       return typeof hub?.entityId === 'string' ? hub.entityId : null;
     });
     if (fromGossip) return fromGossip;
@@ -391,7 +391,7 @@ async function waitForHubProfile(page: Page, hubId: string) {
       XLN?.refreshGossip?.(env);
       const profiles = env?.gossip?.getProfiles?.() || [];
       const profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === target);
-      if (profile?.metadata?.isHub === true || (Array.isArray(profile?.capabilities) && profile.capabilities.includes('hub'))) {
+      if (profile?.metadata?.isHub === true) {
         return true;
       }
       await new Promise((resolve) => setTimeout(resolve, 800));
@@ -570,7 +570,7 @@ async function discoverHubsByName(
       XLN?.refreshGossip?.(env);
       const profiles = env?.gossip?.getProfiles?.() || [];
       return profiles
-        .filter((p: any) => p?.metadata?.isHub === true || (Array.isArray(p?.capabilities) && p.capabilities.includes('hub')))
+        .filter((p: any) => p?.metadata?.isHub === true)
         .map((p: any) => ({
           entityId: String(p?.entityId || ''),
           name: String(p?.metadata?.name || ''),

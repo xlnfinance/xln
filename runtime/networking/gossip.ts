@@ -104,11 +104,60 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, key);
 
+const assertOnlyAllowedKeys = (
+  raw: Record<string, unknown>,
+  allowedKeys: readonly string[],
+  errorPrefix: string,
+  entityId: string,
+): void => {
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(raw)) {
+    if (!allowed.has(key)) {
+      throw new Error(`${errorPrefix}: entity=${entityId} key=${key}`);
+    }
+  }
+};
+
+const ALLOWED_PROFILE_KEYS = [
+  'entityId',
+  'name',
+  'avatar',
+  'bio',
+  'website',
+  'lastUpdated',
+  'runtimeId',
+  'runtimeEncPubKey',
+  'capabilities',
+  'publicAccounts',
+  'endpoints',
+  'relays',
+  'metadata',
+  'accounts',
+] as const;
+
+const ALLOWED_PROFILE_METADATA_KEYS = [
+  'entityEncPubKey',
+  'isHub',
+  'routingFeePPM',
+  'baseFee',
+  'board',
+  'entityPublicKey',
+  'profileHanko',
+  'position',
+  'policyVersion',
+  'rebalanceBaseFee',
+  'rebalanceLiquidityFeeBps',
+  'rebalanceGasFee',
+  'rebalanceTimeoutMs',
+] as const;
+
 const assertNoLegacyProfileFields = (
   rawProfile: Record<string, unknown>,
   metadataRaw: Record<string, unknown>,
   entityId: string,
 ): void => {
+  assertOnlyAllowedKeys(rawProfile, ALLOWED_PROFILE_KEYS, 'GOSSIP_PROFILE_UNKNOWN_FIELD', entityId);
+  assertOnlyAllowedKeys(metadataRaw, ALLOWED_PROFILE_METADATA_KEYS, 'GOSSIP_PROFILE_METADATA_UNKNOWN_FIELD', entityId);
   if (hasOwn(rawProfile, 'hubs')) {
     throw new Error(`GOSSIP_PROFILE_HUBS_ALIAS_FORBIDDEN: entity=${entityId}`);
   }
