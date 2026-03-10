@@ -1,6 +1,21 @@
 import type { DeltaParts, DeltaVisualScale } from './delta-types';
 import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
 
+function fitComponentsToCapacity(
+  componentsUsd: readonly number[],
+  capacityUsd: number,
+): number[] {
+  const totalUsd = componentsUsd.reduce((sum, value) => sum + value, 0);
+  if (!Number.isFinite(capacityUsd) || capacityUsd <= 0 || totalUsd <= 0) {
+    return componentsUsd.map(() => 0);
+  }
+  if (capacityUsd >= totalUsd) {
+    return [...componentsUsd];
+  }
+  const ratio = capacityUsd / totalUsd;
+  return componentsUsd.map((value) => value * ratio);
+}
+
 export function buildTokenVisualScale(
   symbol: string,
   decimals: number,
@@ -8,14 +23,32 @@ export function buildTokenVisualScale(
 ): DeltaVisualScale | null {
   if (getAssetUsdPrice(symbol) <= 0) return null;
 
-  const outOwnCreditUsd = amountToUsd(derived.outOwnCredit, decimals, symbol);
-  const outCollateralUsd = amountToUsd(derived.outCollateral, decimals, symbol);
-  const outPeerCreditUsd = amountToUsd(derived.outPeerCredit, decimals, symbol);
-  const inOwnCreditUsd = amountToUsd(derived.inOwnCredit, decimals, symbol);
-  const inCollateralUsd = amountToUsd(derived.inCollateral, decimals, symbol);
-  const inPeerCreditUsd = amountToUsd(derived.inPeerCredit, decimals, symbol);
   const outCapacityUsd = amountToUsd(derived.outCapacity, decimals, symbol);
   const inCapacityUsd = amountToUsd(derived.inCapacity, decimals, symbol);
+  const [
+    outOwnCreditUsd,
+    outCollateralUsd,
+    outPeerCreditUsd,
+  ] = fitComponentsToCapacity(
+    [
+      amountToUsd(derived.outOwnCredit, decimals, symbol),
+      amountToUsd(derived.outCollateral, decimals, symbol),
+      amountToUsd(derived.outPeerCredit, decimals, symbol),
+    ],
+    outCapacityUsd,
+  );
+  const [
+    inOwnCreditUsd,
+    inCollateralUsd,
+    inPeerCreditUsd,
+  ] = fitComponentsToCapacity(
+    [
+      amountToUsd(derived.inOwnCredit, decimals, symbol),
+      amountToUsd(derived.inCollateral, decimals, symbol),
+      amountToUsd(derived.inPeerCredit, decimals, symbol),
+    ],
+    inCapacityUsd,
+  );
 
   return {
     outCapacityUsd,
