@@ -2098,12 +2098,12 @@
         <div class="hero-right">
           <div class="hero-networth">{formatCompact(netWorth)}</div>
           <div class="hero-label">Net Worth</div>
-          <div class="hero-inline-metrics">
-            <span class="hero-inline-chip">External {formatCompact(externalTotal)}</span>
-            <span class="hero-inline-chip" data-testid="reserves-card-value">Reserves {formatCompact(reservesTotal)}</span>
-            <span class="hero-inline-chip">Accounts {formatCompact(accountsData.total)}</span>
+          <div class="hero-breakdown">
+            <span>Ext {formatCompact(externalTotal)}</span>
+            <span data-testid="reserves-card-value">Reserve {formatCompact(reservesTotal)}</span>
+            <span>Accounts {formatCompact(accountsData.total)}</span>
             {#if accountsData.outPeerDebt > 0}
-              <span class="hero-inline-chip debt" data-testid="accounts-card-owed">owed {formatCompact(accountsData.outPeerDebt)}</span>
+              <span class="debt" data-testid="accounts-card-owed">owed {formatCompact(accountsData.outPeerDebt)}</span>
             {/if}
           </div>
         </div>
@@ -2148,7 +2148,7 @@
       <section class="content">
         {#if activeTab === 'assets'}
           <div class="tab-header-row">
-            <h4 class="section-head" style="margin: 0;">Assets Ledger</h4>
+            <h4 class="section-head" style="margin: 0;">Assets</h4>
             <div class="header-actions">
               <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 15000} on:change={updateBalanceRefresh}>
                 {#each REFRESH_OPTIONS as opt}
@@ -2999,30 +2999,22 @@
     font-weight: 500;
   }
 
-  .hero-inline-metrics {
+  .hero-breakdown {
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
+    gap: 10px;
     flex-wrap: wrap;
-    margin-top: 10px;
-  }
-
-  .hero-inline-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    border: 1px solid #27272a;
-    background: #111115;
+    margin-top: 8px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    font-weight: 600;
-    color: #e7e5e4;
+    color: #a1a1aa;
+  }
+
+  .hero-breakdown span {
     white-space: nowrap;
   }
 
-  .hero-inline-chip.debt {
+  .hero-breakdown .debt {
     color: #f59e0b;
   }
 
