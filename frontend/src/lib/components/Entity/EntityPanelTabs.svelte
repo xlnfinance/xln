@@ -577,6 +577,7 @@
   let externalTokensLoading = true;
   let depositingToken: string | null = null; // symbol of token being deposited
   let collateralFundingToken: string | null = null; // symbol of token being moved to collateral
+  let reserveCollateralDrafts = new Map<number, string>();
 
   // Faucet: fund entity reserves with test tokens
   function resolveReserveTokenMeta(tokenId: number, symbolHint?: string): { tokenId: number; symbol: string; decimals: number } {
@@ -600,6 +601,44 @@
     const fracPadded = (fracRaw + '0'.repeat(decimals)).slice(0, decimals);
     const frac = fracPadded.length > 0 ? BigInt(fracPadded) : 0n;
     return whole * 10n ** BigInt(decimals) + frac;
+  }
+
+  function formatTokenInputAmount(amount: bigint, decimals: number): string {
+    if (amount <= 0n) return '';
+    const divisor = 10n ** BigInt(decimals);
+    const whole = amount / divisor;
+    const frac = amount % divisor;
+    if (frac === 0n) return whole.toString();
+    return `${whole.toString()}.${frac.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
+  }
+
+  function readReserveCollateralDraft(tokenId: number): string {
+    return reserveCollateralDrafts.get(tokenId) ?? '';
+  }
+
+  function writeReserveCollateralDraft(tokenId: number, value: string): void {
+    reserveCollateralDrafts = new Map(reserveCollateralDrafts).set(tokenId, value);
+  }
+
+  function applyReserveCollateralPreset(tokenId: number, percent: 25 | 50 | 75 | 100): void {
+    const reserveAmount = onchainReserves.get(tokenId) ?? 0n;
+    const info = resolveReserveTokenMeta(tokenId);
+    const presetAmount = percent === 100
+      ? reserveAmount
+      : (reserveAmount * BigInt(percent)) / 100n;
+    writeReserveCollateralDraft(tokenId, formatTokenInputAmount(presetAmount, info.decimals));
+  }
+
+  function parsePositiveReserveCollateralAmount(tokenId: number): bigint {
+    const raw = readReserveCollateralDraft(tokenId).trim();
+    if (!raw) throw new Error('Amount is required');
+    if (!/^(?:\d+|\d+\.\d*|\.\d+)$/.test(raw)) throw new Error('Invalid amount format');
+    const info = resolveReserveTokenMeta(tokenId);
+    const parsed = parseTokenAmount(raw, info.decimals);
+    if (parsed <= 0n) throw new Error('Amount must be greater than zero');
+    const reserveAmount = onchainReserves.get(tokenId) ?? 0n;
+    if (parsed > reserveAmount) throw new Error('Amount exceeds reserve balance');
+    return parsed;
   }
 
   async function faucetReserves(tokenId: number = 1, symbolHint?: string) {
@@ -1005,7 +1044,7 @@
   }
 
   // Reserve → Collateral (deposit reserves into selected bilateral account)
-  async function reserveToCollateral(tokenId: number) {
+  async function reserveToCollateral(tokenId: number, amountOverride?: bigint) {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'reserve-to-collateral');
     if (!entityId || !signerId) return;
@@ -1020,7 +1059,7 @@
       return;
     }
 
-    const amount = onchainReserves.get(tokenId) ?? 0n;
+    const amount = amountOverride ?? (onchainReserves.get(tokenId) ?? 0n);
     if (amount <= 0n) {
       toasts.error('No reserve balance for this token');
       return;
@@ -1054,11 +1093,23 @@
         ])]);
 
       toasts.info(`R→C queued for ${info.symbol}. Waiting for on-chain update...`);
+      if (amountOverride !== undefined) {
+        writeReserveCollateralDraft(tokenId, '');
+      }
     } catch (err) {
       console.error('[EntityPanel] Reserve → Collateral failed:', err);
       toasts.error(`Reserve → Collateral failed: ${(err as Error).message}`);
     } finally {
       collateralFundingToken = null;
+    }
+  }
+
+  async function reserveToCollateralPartial(tokenId: number) {
+    try {
+      const amount = parsePositiveReserveCollateralAmount(tokenId);
+      await reserveToCollateral(tokenId, amount);
+    } catch (err) {
+      toasts.error(`Reserve → Collateral failed: ${toErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -2008,6 +2059,13 @@
             </div>
           </div>
           <p class="muted wallet-label">Entity: {replica?.state?.entityId || tab.entityId}</p>
+          <p class="muted wallet-label">
+            {#if selectedAccountId}
+              Target account: {selectedAccountId}
+            {:else}
+              Select an account in Accounts to queue reserve collateral directly.
+            {/if}
+          </p>
 
           <!-- Table Header -->
           <div class="token-table-header">
@@ -2048,10 +2106,40 @@
                     class="btn-table-action collateral"
                     on:click={() => openOnchainDeposit(Number(tokenId))}
                     disabled={collateralFundingToken === info.symbol}
-                    title="Deposit reserve to account"
+                    title="Open settlement flow"
                   >
                     {collateralFundingToken === info.symbol ? '...' : 'Deposit to Account'}
                   </button>
+                  <div class="reserve-collateral-editor">
+                    <input
+                      class="reserve-collateral-input"
+                      type="text"
+                      value={readReserveCollateralDraft(Number(tokenId))}
+                      placeholder="Partial amount"
+                      disabled={collateralFundingToken === info.symbol || amount === 0n || !selectedAccountId}
+                      on:input={(event) => writeReserveCollateralDraft(Number(tokenId), (event.target as HTMLInputElement).value)}
+                    />
+                    <div class="reserve-collateral-presets">
+                      {#each [25, 50, 75, 100] as percent}
+                        <button
+                          type="button"
+                          class="reserve-preset"
+                          disabled={collateralFundingToken === info.symbol || amount === 0n || !selectedAccountId}
+                          on:click={() => applyReserveCollateralPreset(Number(tokenId), percent as 25 | 50 | 75 | 100)}
+                        >
+                          {percent}%
+                        </button>
+                      {/each}
+                    </div>
+                    <button
+                      class="btn-table-action collateral partial"
+                      type="button"
+                      on:click={() => reserveToCollateralPartial(Number(tokenId))}
+                      disabled={collateralFundingToken === info.symbol || !readReserveCollateralDraft(Number(tokenId)).trim() || !selectedAccountId}
+                    >
+                      Queue Partial
+                    </button>
+                  </div>
                 </div>
               </div>
             {/each}
@@ -4125,8 +4213,59 @@
 
   .col-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     justify-content: flex-end;
+  }
+
+  .reserve-collateral-editor {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .reserve-collateral-input {
+    min-width: 120px;
+    padding: 5px 8px;
+    border: 1px solid #3f3f46;
+    border-radius: 4px;
+    background: #111827;
+    color: #f4f4f5;
+    font-size: 11px;
+  }
+
+  .reserve-collateral-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .reserve-collateral-presets {
+    display: inline-flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .reserve-preset {
+    padding: 5px 8px;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    border-radius: 4px;
+    background: rgba(245, 158, 11, 0.08);
+    color: #fcd34d;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .reserve-preset:hover:not(:disabled) {
+    background: rgba(245, 158, 11, 0.18);
+  }
+
+  .reserve-preset:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Token Icon (small) */
@@ -4213,6 +4352,14 @@
 
   .btn-table-action.collateral:hover:not(:disabled) {
     background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  }
+
+  .btn-table-action.collateral.partial {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+  }
+
+  .btn-table-action.collateral.partial:hover:not(:disabled) {
+    background: linear-gradient(135deg, #fb923c, #f97316);
   }
 
   .btn-table-action:disabled {

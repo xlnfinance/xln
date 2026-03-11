@@ -545,3 +545,18 @@
     - `bun x tsc --noEmit`
     - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260311-032256-888/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-032256-888/e2e-shard-00.log)
+
+- 2026-03-11
+  - Finished the next reserve UX follow-up in [EntityPanelTabs.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/EntityPanelTabs.svelte):
+    - on-chain reserves now keep the existing one-click `Deposit to Account` shortcut
+    - each reserve row also exposes a partial amount input with `25/50/75/100%` presets
+    - partial reserve-to-collateral queues directly through the existing `deposit_collateral + j_broadcast` flow
+    - reserves tab now shows the currently selected target account, or an explicit hint if no account is selected
+  - Re-verified:
+    - `bun x tsc --noEmit`
+    - `cd frontend && bunx vite build --mode development`
+    - full isolated E2E suite:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=2 --workers-per-shard=1 --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass logs:
+        - [/Users/egor/xln/.logs/e2e-parallel/20260311-033340-644/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-033340-644/e2e-shard-00.log)
+        - [/Users/egor/xln/.logs/e2e-parallel/20260311-033340-644/e2e-shard-01.log](/Users/egor/xln/.logs/e2e-parallel/20260311-033340-644/e2e-shard-01.log)
