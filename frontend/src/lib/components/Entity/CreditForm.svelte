@@ -29,12 +29,6 @@
     return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
   })();
 
-  function isRuntimeEnv(value: unknown): value is { eReplicas: Map<string, unknown>; jReplicas: Map<string, unknown> } {
-    if (!value || typeof value !== 'object') return false;
-    const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
-    return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
-  }
-
   type CreditEntityInput = {
     entityId: string;
     signerId: string;
@@ -54,30 +48,11 @@
     approvedAmount?: string;
   };
 
-  function resolveApiBase(): string {
-    const fallback = typeof window === 'undefined' ? '' : window.location.origin;
-    if (typeof window === 'undefined') return fallback;
-    const configuredWindow = (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__;
-    if (typeof configuredWindow === 'string' && configuredWindow.trim().length > 0) {
-      return configuredWindow.trim();
-    }
-    try {
-      const configuredStorage = localStorage.getItem('xln-api-base-url');
-      if (typeof configuredStorage === 'string' && configuredStorage.trim().length > 0) {
-        return configuredStorage.trim();
-      }
-    } catch {
-      // ignore storage access failures
-    }
-    return fallback;
-  }
-
   async function submitExtendCredit(successMessage: string) {
     if (!effectiveCounterparty) return;
     try {
       const env = activeEnv;
       if (!env) throw new Error('XLN environment not ready');
-      if (!isRuntimeEnv(env)) throw new Error('Runtime environment not available');
       if (!activeIsLive) throw new Error('Credit updates are only available in LIVE mode');
       const resolvedSigner = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'credit-form')
         || signerId
@@ -114,7 +89,8 @@
     if (!effectiveCounterparty) return;
     try {
       if (!activeIsLive) throw new Error('Credit requests are only available in LIVE mode');
-      const response = await fetch(`${resolveApiBase()}/api/credit/request`, {
+      const apiBase = typeof window === 'undefined' ? '' : window.location.origin;
+      const response = await fetch(`${apiBase}/api/credit/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

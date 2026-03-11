@@ -301,6 +301,14 @@ const waitForHttpsReady = async (url: string, timeoutMs: number): Promise<void> 
   throw new Error(`HTTPS endpoint not ready: ${url}`);
 };
 
+const sanitizeChildEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const next: NodeJS.ProcessEnv = { ...env };
+  if (next['FORCE_COLOR'] && next['NO_COLOR']) {
+    delete next['NO_COLOR'];
+  }
+  return next;
+};
+
 const runCmd = async (
   cmd: string,
   args: string[],
@@ -308,7 +316,7 @@ const runCmd = async (
 ): Promise<number | null> => {
   const proc = spawn(cmd, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: opts.env ?? process.env,
+    env: sanitizeChildEnv(opts.env ?? process.env),
     cwd: opts.cwd,
   });
 
@@ -390,7 +398,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
       '--code-size-limit', '65536',
       '--state', anvilStatePath,
       '--silent',
-    ], { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
+    ], { stdio: ['ignore', 'pipe', 'pipe'], env: sanitizeChildEnv(process.env) });
     anvil.stdout.on('data', c => log.write(`[anvil] ${c.toString()}`));
     anvil.stderr.on('data', c => log.write(`[anvil:err] ${c.toString()}`));
     await waitForRpcReady(rpcUrl, args.stackTimeoutMs);
@@ -399,12 +407,12 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
     const apiStart = Date.now();
     api = spawn('bun', ['runtime/scripts/e2e-mesh-control.ts', '--host', '127.0.0.1', '--port', String(apiPort), '--rpc-url', rpcUrl, '--db-root', dbPath], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
+      env: sanitizeChildEnv({
         ...process.env,
         USE_ANVIL: 'true',
         ANVIL_RPC: rpcUrl,
         XLN_DB_PATH: dbPath,
-      },
+      }),
     });
     api.stdout.on('data', c => log.write(`[api] ${c.toString()}`));
     api.stderr.on('data', c => log.write(`[api:err] ${c.toString()}`));
@@ -419,12 +427,12 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
     vite = spawn('bun', ['run', 'preview', '--', '--host', '0.0.0.0', '--port', String(webPort), '--strictPort'], {
       cwd: resolve(process.cwd(), 'frontend'),
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
+      env: sanitizeChildEnv({
         ...process.env,
         VITE_DEV_PORT: String(webPort),
         VITE_API_PROXY_TARGET: apiUrl,
         VITE_CACHE_DIR: shardViteCacheDir,
-      },
+      }),
     });
     vite.stdout.on('data', c => log.write(`[vite] ${c.toString()}`));
     vite.stderr.on('data', c => log.write(`[vite:err] ${c.toString()}`));

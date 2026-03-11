@@ -27,6 +27,7 @@ import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallbac
 import { computeAccountKey, entityIdToAddress, setupContractEventListeners, processEventBatch, type RawJEvent } from './helpers';
 import { CANONICAL_J_EVENTS } from './helpers';
 import { DEV_CHAIN_IDS } from './index';
+import { preflightBatchForE2 } from '../j-batch';
 import { setDeltaTransformerAddress } from '../proof-builder';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -654,8 +655,16 @@ export async function createRpcAdapter(
       );
       const feeOverrides = await buildFeeOverrides();
       maybeResetSignerNonce();
+      const signerAddress = await signer.getAddress();
+      const txNonce = Math.max(
+        await provider.getTransactionCount(signerAddress, 'latest'),
+        await provider.getTransactionCount(signerAddress, 'pending'),
+      );
+      // Direct scenario calls use the same EOA as regular J-submits. Keep the nonce selection
+      // identical here so empty-batch mining and manual batch flows cannot reuse an already-mined nonce.
       const tx = await depository.processBatch(encodedBatch, addresses.entityProvider, hankoData, nonce, {
         gasLimit,
+        nonce: txNonce,
         ...feeOverrides,
       });
       const receipt = await waitForReceipt(tx as any, 'processBatch');
@@ -1022,6 +1031,16 @@ export async function createRpcAdapter(
         }
 
         const normalizedId = normalizeEntityId(jTx.entityId);
+        const preflightIssues = preflightBatchForE2(
+          normalizedId,
+          jTx.data.batch,
+          Math.floor(Number(timestamp ?? env?.timestamp ?? 0) / 1000),
+        );
+        if (preflightIssues.length > 0) {
+          console.warn(
+            `⚠️ [JAdapter:rpc] batch preflight issues (${normalizedId.slice(-4)}): ${preflightIssues.join(' | ')}`,
+          );
+        }
 
         // Validate settlement signatures + entityProvider
         for (const settlement of jTx.data.batch.settlements ?? []) {
@@ -1207,8 +1226,17 @@ export async function createRpcAdapter(
                   maybeResetSignerNonce();
                   console.warn(`⚠️ [JAdapter:rpc] retrying processBatch after nonce sync (attempt ${attempt}/2)`);
                 }
+                const signerAddress = await signer.getAddress();
+                const txNonce = Math.max(
+                  await provider.getTransactionCount(signerAddress, 'latest'),
+                  await provider.getTransactionCount(signerAddress, 'pending'),
+                );
+                // Local Anvil can briefly report a stale cached nonce to the nonce-tracking signer after
+                // rapid same-signer batch submits. We serialize submissions globally, so an explicit fresh
+                // EOA nonce here is the simplest deterministic guard against reusing an already-mined nonce.
                 const tx = await depository['processBatch']!(encodedBatch, entityProviderAddr, hankoData, nextNonce, {
                   gasLimit,
+                  nonce: txNonce,
                   ...resolvedFeeOverrides,
                 });
                 const receipt = await waitForReceipt(tx as any, 'submitTx:processBatch');
@@ -1372,6 +1400,16 @@ export async function createRpcAdapter(
                 eventCounts,
               });
             }
+            lastSyncedBlock = safeToBlock;
+            return;
+          }
+
+          // Do not permanently skip a single just-mined tail block on an empty poll.
+          // Some RPC backends briefly return no logs for the newest block even after the
+          // receipt is available. If we advance lastSyncedBlock here, that block is lost
+          // forever and the runtime never sees its J-events.
+          if (fromBlock === safeToBlock) {
+            return;
           }
 
           lastSyncedBlock = safeToBlock;

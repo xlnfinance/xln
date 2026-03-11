@@ -4,7 +4,8 @@
  * Verifies:
  * 1) disputeStart freezes account immediately (local shadow state)
  * 2) DisputeStarted/DisputeFinalized are handled unilaterally (no j_event_claim path)
- * 3) account unfreezes after finalize and business traffic resumes
+ * 3) DisputeFinalized clears activeDispute but keeps the account finalized-disputed
+ * 4) explicit reopen moves both sides back to active and clears pending disputed state
  */
 
 import type { Env } from '../types';
@@ -53,6 +54,27 @@ async function mineUntilHeight(jadapter: JAdapter, targetHeight: number): Promis
       throw new Error(`mineUntilHeight guard tripped: current=${current}, target=${targetHeight}`);
     }
   }
+}
+
+async function reopenFromAlice(
+  env: Env,
+  process: Awaited<ReturnType<typeof getProcess>>,
+  aliceId: string,
+  aliceSigner: string,
+  hubId: string,
+): Promise<void> {
+  await process(env, [{
+    entityId: aliceId,
+    signerId: aliceSigner,
+    entityTxs: [{
+      type: 'reopenDisputedAccount',
+      data: { counterpartyEntityId: hubId },
+    }],
+  }]);
+  for (let i = 0; i < 6; i++) {
+    await process(env);
+  }
+  await converge(env, 10);
 }
 
 export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
@@ -315,8 +337,16 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
     const hubAfterFinalize = findReplica(env, hub.id)[1].state.accounts.get(alice.id);
     assert(!aliceAfterFinalize?.activeDispute, 'Alice activeDispute must clear after DisputeFinalized', env);
     assert(!hubAfterFinalize?.activeDispute, 'Hub activeDispute must clear after DisputeFinalized', env);
-    assert(aliceAfterFinalize?.status === 'active', 'Alice account must reactivate after finalize', env);
-    assert(hubAfterFinalize?.status === 'active', 'Hub account must reactivate after finalize', env);
+    assert(
+      aliceAfterFinalize?.status === 'disputed',
+      'Alice account must remain finalized-disputed until explicit reopen',
+      env,
+    );
+    assert(
+      hubAfterFinalize?.status === 'disputed',
+      'Hub account must remain finalized-disputed until explicit reopen',
+      env,
+    );
 
     const aliceOnChainNonce = Number(aliceAfterFinalize?.onChainSettlementNonce || 0);
     const hubOnChainNonce = Number(hubAfterFinalize?.onChainSettlementNonce || 0);
@@ -373,26 +403,14 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
       );
     }
 
-    // Business resumes after finalize: direct payment should work again.
-    const frameBeforeResume = Number(aliceAfterFinalize?.currentHeight || 0);
-    await process(env, [{
-      entityId: alice.id,
-      signerId: alice.signer,
-      entityTxs: [{
-        type: 'directPayment',
-        data: {
-          targetEntityId: hub.id,
-          tokenId: USDC,
-          amount: usd(10),
-          route: [alice.id, hub.id],
-          description: 'post-dispute-resume',
-        },
-      }],
-    }]);
-    for (let i = 0; i < 6; i++) await process(env);
-    await converge(env, 10);
-    const frameAfterResume = Number(findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.currentHeight || 0);
-    assert(frameAfterResume > frameBeforeResume, 'Account did not progress after dispute finalize', env);
+    await reopenFromAlice(env, process, alice.id, alice.signer, hub.id);
+
+    const aliceAfterReopen = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
+    const hubAfterReopen = findReplica(env, hub.id)[1].state.accounts.get(alice.id);
+    assert(aliceAfterReopen?.status === 'active', 'Alice account must reactivate after explicit reopen', env);
+    assert(hubAfterReopen?.status === 'active', 'Hub account must reactivate after explicit reopen', env);
+    assert(!aliceAfterReopen?.pendingFrame, 'Alice pendingFrame must clear after explicit reopen', env);
+    assert(!hubAfterReopen?.pendingFrame, 'Hub pendingFrame must clear after explicit reopen', env);
 
     console.log('✅ dispute-lifecycle passed');
     return env;
