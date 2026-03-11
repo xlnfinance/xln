@@ -230,7 +230,10 @@ export async function gotoApp(
   const appBaseUrl = options.appBaseUrl ?? APP_BASE_URL;
   const initTimeoutMs = options.initTimeoutMs ?? DEFAULT_INIT_TIMEOUT;
   const settleMs = options.settleMs ?? 500;
-  const apiBaseUrl = process.env.E2E_API_BASE_URL ?? appBaseUrl;
+  // Browser flows must stay same-origin in E2E and go through the preview /api proxy.
+  // Directly injecting the raw shard API URL into the page makes browser-only paths
+  // diverge from production and can bypass normal origin/proxy behavior.
+  const apiBaseUrl = appBaseUrl;
   await page.addInitScript((configuredApiBaseUrl: string) => {
     try {
       (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__ = configuredApiBaseUrl;

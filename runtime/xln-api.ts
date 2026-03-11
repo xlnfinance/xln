@@ -286,6 +286,7 @@ export interface XLNModule {
 
   // Crypto key management (for HD wallet integration)
   registerSignerKey: (signerId: string, privateKey: Uint8Array) => void;
+  getCachedSignerPrivateKey: (signerId: string) => Uint8Array | null;
   deriveSignerKey: (seed: Uint8Array | string, signerId: string) => Promise<Uint8Array>;
   deriveSignerKeySync: (seed: Uint8Array | string, signerId: string) => Uint8Array;
 

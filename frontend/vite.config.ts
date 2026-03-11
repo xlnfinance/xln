@@ -2,6 +2,9 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import fs from 'fs';
 import net from 'net';
+import http from 'node:http';
+import https from 'node:https';
+import { URL } from 'node:url';
 
 /**
  * HTTPS CONFIGURATION (DEV-ONLY)
@@ -71,6 +74,48 @@ const proxyConfig = {
 	},
 };
 
+const PREVIEW_PROXY_PREFIXES = ['/api', '/rpc', '/reset'];
+
+function createPreviewHttpProxyMiddleware(targetBase: string) {
+	const upstream = new URL(targetBase);
+	const transport = upstream.protocol === 'https:' ? https : http;
+
+	return (req: http.IncomingMessage, res: http.ServerResponse, next: (err?: unknown) => void) => {
+		const requestUrl = String(req.url || '');
+		if (!PREVIEW_PROXY_PREFIXES.some((prefix) => requestUrl === prefix || requestUrl.startsWith(`${prefix}/`))) {
+			next();
+			return;
+		}
+
+		const targetUrl = new URL(requestUrl, upstream);
+		const proxyReq = transport.request(targetUrl, {
+			method: req.method,
+			headers: {
+				...req.headers,
+				host: upstream.host,
+			},
+		}, (proxyRes) => {
+			res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+			proxyRes.pipe(res);
+		});
+
+		proxyReq.on('error', (error) => {
+			if (res.headersSent) {
+				res.end();
+				return;
+			}
+			res.statusCode = 502;
+			res.setHeader('content-type', 'application/json');
+			res.end(JSON.stringify({
+				error: 'PREVIEW_PROXY_FAILED',
+				details: error instanceof Error ? error.message : String(error),
+			}));
+		});
+
+		req.pipe(proxyReq);
+	};
+}
+
 async function assertPortAvailable(port: number, host: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const server = net.createServer();
@@ -100,7 +145,15 @@ export default defineConfig(async ({ command }) => {
 	}
 
 	return {
-	plugins: [sveltekit()],
+	plugins: [
+		sveltekit(),
+		{
+			name: 'xln-preview-http-proxy',
+			configurePreviewServer(server) {
+				server.middlewares.use(createPreviewHttpProxyMiddleware(API_PROXY_TARGET));
+			},
+		},
+	],
 	publicDir: 'static',
 	cacheDir: VITE_CACHE_DIR,
 	server: {

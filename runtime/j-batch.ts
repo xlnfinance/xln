@@ -693,6 +693,28 @@ export function batchAddReserveToReserve(
 }
 
 /**
+ * Add reserve → external withdrawal to batch.
+ * receivingEntity must already be the bytes32-encoded destination address.
+ */
+export function batchAddReserveToExternal(
+  jBatchState: JBatchState,
+  receivingEntity: string,
+  tokenId: number,
+  amount: bigint
+): void {
+  assertBatchNotPending(jBatchState, 'R2E');
+
+  jBatchState.batch.reserveToExternalToken.push({
+    receivingEntity,
+    tokenId,
+    amount,
+  });
+
+  if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
+  console.log(`📦 jBatch: Added R→E ${amount} token ${tokenId} to ${receivingEntity.slice(-4)}`);
+}
+
+/**
  * Add HTLC secret reveal to batch (idempotent per transformer+secret)
  */
 export function batchAddRevealSecret(

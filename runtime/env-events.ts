@@ -46,6 +46,11 @@ const HIGH_SIGNAL_EVENTS = new Set([
   'PaymentFailed',
   'HtlcPaymentInitiated',
   'HtlcReceived',
+  // J-event ingress is the canonical source-of-truth signal that an on-chain event
+  // actually reached the runtime state machine. Keep it in the relay debug timeline.
+  'JEventReceived',
+  // J-batch submission is the matching source signal for entity -> chain transitions.
+  'JBatchQueued',
   'BilateralFrameCommitted',
   'EntityFrameCommitted',
   'AccountOpening',

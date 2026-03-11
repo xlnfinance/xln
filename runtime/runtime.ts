@@ -71,6 +71,7 @@ import { canonicalizeProfile, createGossipLayer, parseProfile } from './networki
 import { attachEventEmitters } from './env-events';
 import {
   deriveSignerAddressSync,
+  getCachedSignerPrivateKey,
   getSignerAddress,
   getSignerPrivateKey,
   getSignerPublicKey,
@@ -4289,6 +4290,7 @@ export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from
 export {
   deriveSignerKey,
   deriveSignerKeySync,
+  getCachedSignerPrivateKey,
   registerSignerKey,
   registerSignerPublicKey,
   registerTestKeys,

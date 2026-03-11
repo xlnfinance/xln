@@ -4,6 +4,7 @@ import { ethers, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
+import { createExternalWalletApi } from '../api/external-wallet-api';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
@@ -178,6 +179,10 @@ const parseArgs = (): Args => {
 const resolvedArgs = parseArgs();
 const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
 const DEFAULT_ANVIL_MNEMONIC = 'test test test test test test test test test test test junk';
+const FAUCET_SIGNER_LABEL = 'faucet-1';
+const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('10');
+const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
+const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
 const resolveHubSignerIndex = (name: string): number => {
   const normalized = String(name || '').trim().toUpperCase();
@@ -707,15 +712,40 @@ const run = async (): Promise<void> => {
 
   await ensureOrderbook(env, bootstrap.entityId, bootstrap.signerId);
 
+  let activeJAdapter: JAdapter | null = null;
+  let activeTokenCatalog: JTokenInfo[] = [];
+  const externalWalletApi = createExternalWalletApi({
+    getJAdapter: () => activeJAdapter,
+    getRuntimeId: () => String(env.runtimeId || ''),
+    getTokenCatalog: async () => {
+      if (!activeJAdapter) throw new Error('J-adapter not initialized');
+      if (activeTokenCatalog.length > 0) return activeTokenCatalog;
+      activeTokenCatalog = await waitForTokenCatalog(activeJAdapter);
+      return activeTokenCatalog;
+    },
+    jsonHeaders: JSON_HEADERS,
+    faucetSeed: `${resolvedArgs.seed}:faucet`,
+    faucetSignerLabel: FAUCET_SIGNER_LABEL,
+    faucetWalletEthTarget: FAUCET_WALLET_ETH_TARGET,
+    faucetTokenTargetUnits: FAUCET_TOKEN_TARGET_UNITS,
+    emitDebugEvent: () => {},
+    fundBrowserVmWallet: async () => false,
+  });
+
   const jadapter = getActiveJAdapter(env);
   if (!jadapter) {
     throw new Error('ACTIVE_JADAPTER_MISSING_AFTER_IMPORT');
   }
+  activeJAdapter = jadapter;
   await ensureRpcStackReady(env, jadapter);
 
   const tokenCatalog = resolvedArgs.deployTokens
     ? await ensureTokenCatalog(jadapter, true)
     : await waitForTokenCatalog(jadapter);
+  activeTokenCatalog = tokenCatalog;
+  if (resolvedArgs.deployTokens) {
+    await externalWalletApi.provisionFaucetWallet();
+  }
 
   const p2pConnectStartedAt = startTiming('p2p_connect');
   const p2p = startP2P(env, {
@@ -871,7 +901,7 @@ const run = async (): Promise<void> => {
     async fetch(request) {
       const url = new URL(request.url);
       const pathname = url.pathname;
-      const headers = { 'Content-Type': 'application/json' };
+      const headers = JSON_HEADERS;
 
       if (pathname === '/api/info') {
         return new Response(
@@ -905,6 +935,18 @@ const run = async (): Promise<void> => {
             'Cache-Control': 'no-store, no-cache, must-revalidate',
           },
         });
+      }
+
+      if (pathname === '/api/tokens' && request.method === 'GET') {
+        return await externalWalletApi.handleTokens();
+      }
+
+      if (pathname === '/api/faucet/erc20' && request.method === 'POST') {
+        return await externalWalletApi.handleErc20Faucet(request);
+      }
+
+      if (pathname === '/api/faucet/gas' && request.method === 'POST') {
+        return await externalWalletApi.handleGasFaucet(request);
       }
 
       if (pathname === '/api/faucet/offchain' && request.method === 'POST') {

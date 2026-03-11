@@ -343,6 +343,45 @@ export async function waitForPersistedFrameEventMatch(
   );
 }
 
+export async function waitForPersistedFrameMessageMatch(
+  page: Page,
+  options: {
+    cursor: PersistedReceiptCursor;
+    entityId?: string;
+    timeoutMs?: number;
+    predicate: (event: PersistedFrameEvent) => boolean;
+  },
+): Promise<PersistedFrameEvent> {
+  const timeoutMs = options.timeoutMs ?? 20_000;
+  const targetEntityId = String(options.entityId || '').toLowerCase();
+  const startedAt = Date.now();
+  let cursor = options.cursor;
+  const recentEvents: PersistedFrameEvent[] = [];
+  let runtimeHeight = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const result = await readPersistedFrameEvents(page, cursor);
+    cursor = result.cursor;
+    runtimeHeight = result.runtimeHeight;
+
+    for (const event of result.events) {
+      recentEvents.push(event);
+      if (recentEvents.length > 24) recentEvents.shift();
+      if (targetEntityId && String(event.entityId || '').toLowerCase() !== targetEntityId) continue;
+      if (!options.predicate(event)) continue;
+      return event;
+    }
+
+    await page.waitForTimeout(250);
+  }
+
+  throw new Error(
+    `Timed out waiting for persisted frame message on ${options.entityId?.slice(0, 12) || 'runtime'} ` +
+      `(height=${runtimeHeight} frames=${recentEvents.map((event) => event.frameHeight).join(',') || 'none'} ` +
+      `recent=${recentEvents.map((event) => event.message).join(',') || 'none'})`,
+  );
+}
+
 export async function expectPersistedFrameEvent(
   page: Page,
   options: {
