@@ -26,23 +26,26 @@ import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook }
  * @param source - Source context for error messages
  */
 export function validateDelta(delta: unknown, source: string = 'unknown'): Delta {
-  if (!delta || typeof delta !== 'object') {
-    throw new Error(`Invalid Delta object from ${source}: ${delta}`);
-  }
-
-  // Type narrowing: after checking it's an object, we validate fields immediately
-  // Using 'as any' here is safe because we validate every field before returning
-  const obj = delta as any;
+  const obj = validateObject(delta, `Delta from ${source}`);
 
   // Ensure all required properties exist and are proper types
   const errors: string[] = [];
 
-  if (typeof obj.tokenId !== 'number' || !Number.isInteger(obj.tokenId) || obj.tokenId < 0) {
-    errors.push(`tokenId must be non-negative integer, got: ${obj.tokenId}`);
+  const tokenId = obj['tokenId'];
+  if (typeof tokenId !== 'number' || !Number.isInteger(tokenId) || tokenId < 0) {
+    errors.push(`tokenId must be non-negative integer, got: ${String(tokenId)}`);
   }
 
   // Validate all BigInt fields
-  const bigintFields = ['collateral', 'ondelta', 'offdelta', 'leftCreditLimit', 'rightCreditLimit', 'leftAllowance', 'rightAllowance'] as const;
+  const bigintFields = [
+    'collateral',
+    'ondelta',
+    'offdelta',
+    'leftCreditLimit',
+    'rightCreditLimit',
+    'leftAllowance',
+    'rightAllowance',
+  ] as const;
 
   for (const field of bigintFields) {
     const value = obj[field];
@@ -68,14 +71,16 @@ export function validateDelta(delta: unknown, source: string = 'unknown'): Delta
 
   // After validation, safe to cast to Delta
   return {
-    tokenId: obj.tokenId as number,
-    collateral: obj.collateral as bigint,
-    ondelta: obj.ondelta as bigint,
-    offdelta: obj.offdelta as bigint,
-    leftCreditLimit: obj.leftCreditLimit as bigint,
-    rightCreditLimit: obj.rightCreditLimit as bigint,
-    leftAllowance: obj.leftAllowance as bigint,
-    rightAllowance: obj.rightAllowance as bigint,
+    tokenId: obj['tokenId'] as number,
+    collateral: obj['collateral'] as bigint,
+    ondelta: obj['ondelta'] as bigint,
+    offdelta: obj['offdelta'] as bigint,
+    leftCreditLimit: obj['leftCreditLimit'] as bigint,
+    rightCreditLimit: obj['rightCreditLimit'] as bigint,
+    leftAllowance: obj['leftAllowance'] as bigint,
+    rightAllowance: obj['rightAllowance'] as bigint,
+    ...(obj['leftHold'] === undefined ? {} : { leftHold: validateOptionalBigInt(obj['leftHold'], `${source}.leftHold`) }),
+    ...(obj['rightHold'] === undefined ? {} : { rightHold: validateOptionalBigInt(obj['rightHold'], `${source}.rightHold`) }),
   };
 }
 
@@ -168,27 +173,22 @@ export function isDelta(obj: unknown): obj is Delta {
  * @param input - Unvalidated input claiming to be EntityInput
  */
 export function validateEntityInput(input: unknown): RoutedEntityInput {
-  if (!input || typeof input !== 'object') {
-    throw new Error(`FINANCIAL-SAFETY: EntityInput is null/undefined or not an object`);
-  }
+  const obj = validateObject(input, 'EntityInput');
 
-  // Safe to use 'as any' since we validate all required fields immediately
-  const obj = input as any;
-
-  if (!obj.entityId || typeof obj.entityId !== 'string') {
+  if (typeof obj['entityId'] !== 'string' || obj['entityId'].length === 0) {
     throw new Error(`FINANCIAL-SAFETY: entityId is missing or invalid - financial routing corruption detected`);
   }
 
-  if (obj.signerId !== undefined && typeof obj.signerId !== 'string') {
+  if (obj['signerId'] !== undefined && typeof obj['signerId'] !== 'string') {
     throw new Error(`FINANCIAL-SAFETY: signerId must be string when provided`);
   }
 
   // entityTxs optional if proposedFrame or hashPrecommits present (multi-signer proposals)
-  if (!obj.entityTxs && !obj.proposedFrame && !obj.hashPrecommits) {
+  if (obj['entityTxs'] === undefined && obj['proposedFrame'] === undefined && obj['hashPrecommits'] === undefined) {
     throw new Error(`FINANCIAL-SAFETY: entityTxs, proposedFrame, or hashPrecommits required`);
   }
 
-  if (obj.entityTxs && !Array.isArray(obj.entityTxs)) {
+  if (obj['entityTxs'] !== undefined && !Array.isArray(obj['entityTxs'])) {
     throw new Error(`FINANCIAL-SAFETY: entityTxs must be array`);
   }
 
@@ -201,18 +201,13 @@ export function validateEntityInput(input: unknown): RoutedEntityInput {
  * @param output - Unvalidated output claiming to be EntityOutput
  */
 export function validateEntityOutput(output: unknown): RoutedEntityInput {
-  if (!output || typeof output !== 'object') {
-    throw new Error(`FINANCIAL-SAFETY: EntityOutput is null/undefined or not an object`);
-  }
+  const obj = validateObject(output, 'EntityOutput');
 
-  // Safe to use 'as any' since we validate all required fields immediately
-  const obj = output as any;
-
-  if (!obj.entityId || typeof obj.entityId !== 'string') {
+  if (typeof obj['entityId'] !== 'string' || obj['entityId'].length === 0) {
     throw new Error(`FINANCIAL-SAFETY: EntityOutput entityId is missing - routing corruption`);
   }
 
-  if (obj.signerId !== undefined && typeof obj.signerId !== 'string') {
+  if (obj['signerId'] !== undefined && typeof obj['signerId'] !== 'string') {
     throw new Error(`FINANCIAL-SAFETY: EntityOutput signerId must be string when provided`);
   }
 
@@ -311,11 +306,16 @@ function validateNumber(value: unknown, fieldName: string): number {
   return value;
 }
 
-function validateObject(value: unknown, fieldName: string): Record<string, any> {
+function validateOptionalBigInt(value: unknown, fieldName: string): bigint {
+  if (typeof value === 'bigint') return value;
+  throw new TypeSafetyViolationError(`${fieldName} must be a bigint when present`, value);
+}
+
+function validateObject(value: unknown, fieldName: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeSafetyViolationError(`${fieldName} must be a non-null object`, value);
   }
-  return value as Record<string, any>;
+  return value as Record<string, unknown>;
 }
 
 function validateArray<T>(value: unknown, fieldName: string): T[] {
@@ -471,7 +471,13 @@ export function validateAccountFrame(value: unknown, context = 'AccountFrame'): 
     deltas: validateArray<bigint>(obj['deltas'] || [], `${context}.deltas`),
     // Optional fields - preserve if present (deep copy to prevent mutation issues)
     ...(typeof obj['byLeft'] === 'boolean' ? { byLeft: obj['byLeft'] } : {}),
-    ...(Array.isArray(obj['fullDeltaStates']) ? { fullDeltaStates: obj['fullDeltaStates'].map((d: any) => ({ ...d })) } : {}),
+    ...(Array.isArray(obj['fullDeltaStates'])
+      ? {
+          fullDeltaStates: obj['fullDeltaStates'].map((deltaState, index) =>
+            validateDelta(deltaState, `${context}.fullDeltaStates[${index}]`),
+          ),
+        }
+      : {}),
   };
 
   // Additional integrity checks
