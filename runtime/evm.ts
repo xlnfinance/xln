@@ -38,25 +38,12 @@ import { parseRebalancePolicyUsd } from './rebalance-policy-usd';
 // BrowserVMProvider is also available via jadapter/browservm-provider
 import type { BrowserVMInstance } from './xln-api';
 
-// Global logger for UI-accessible error logging (set by frontend)
-declare global {
-  interface Window {
-    xlnErrorLog?: (message: string, source: string, details?: unknown) => void;
-  }
-}
-
 const uiLog = (message: string, details?: unknown) => {
   console.log(message, details);
-  if (isBrowser && window.xlnErrorLog) {
-    window.xlnErrorLog(message, 'EVM', details);
-  }
 };
 
 const uiError = (message: string, details?: unknown) => {
   logError("BLOCKCHAIN", message, details);
-  if (isBrowser && window.xlnErrorLog) {
-    window.xlnErrorLog(message, 'EVM-ERROR', details);
-  }
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;

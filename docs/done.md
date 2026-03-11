@@ -610,3 +610,19 @@
       - pass logs:
         - [/Users/egor/xln/.logs/e2e-parallel/20260311-042232-365/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-042232-365/e2e-shard-00.log)
         - [/Users/egor/xln/.logs/e2e-parallel/20260311-042232-365/e2e-shard-01.log](/Users/egor/xln/.logs/e2e-parallel/20260311-042232-365/e2e-shard-01.log)
+
+- 2026-03-11
+  - Simplified the live payment routing UI path:
+    - extracted duplicated local-replica/gossip capacity and encryption-key resolution from [PaymentPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/PaymentPanel.svelte) into [payment-routing.ts](/Users/egor/xln/frontend/src/lib/components/Entity/payment-routing.ts)
+    - made the local-runtime-first rule explicit for route capacity and recipient key lookup
+    - removed the dead browser-global `window.xlnErrorLog` hook from [runtime/evm.ts](/Users/egor/xln/runtime/evm.ts)
+    - added focused regressions in [payment-routing.test.ts](/Users/egor/xln/frontend/src/lib/components/Entity/payment-routing.test.ts) for:
+      - local capacity beating stale gossip for owned entities
+      - local encryption key beating stale gossip cache
+  - Re-verified:
+    - `bun test frontend/src/lib/components/Entity/payment-routing.test.ts frontend/src/lib/components/Entity/shared/delta-visual.test.ts`
+    - `bun x tsc --noEmit`
+    - `cd frontend && bunx vite build --mode development`
+    - focused isolated E2E rerun:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260311-044334-034/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-044334-034/e2e-shard-00.log)
