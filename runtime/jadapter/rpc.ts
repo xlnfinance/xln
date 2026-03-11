@@ -1026,6 +1026,78 @@ export async function createRpcAdapter(
       return events;
     },
 
+    async getErc20Allowance(tokenAddress: string, owner: string, spender: string): Promise<bigint> {
+      const erc20 = new ethers.Contract(tokenAddress, [
+        'function allowance(address owner, address spender) view returns (uint256)',
+      ], provider);
+      const allowanceFn = erc20.getFunction('allowance') as (ownerAddress: string, spenderAddress: string) => Promise<bigint>;
+      return allowanceFn(owner, spender);
+    },
+
+    async approveErc20(
+      signerPrivateKey: Uint8Array,
+      tokenAddress: string,
+      spender: string,
+      amount: bigint,
+    ): Promise<string> {
+      const signerWallet = new ethers.Wallet(
+        '0x' + Buffer.from(signerPrivateKey).toString('hex'),
+        provider,
+      );
+      const erc20 = new ethers.Contract(tokenAddress, [
+        'function approve(address spender, uint256 amount) returns (bool)',
+      ], signerWallet);
+      const approveFn = erc20.getFunction('approve') as (
+        spenderAddress: string,
+        approvalAmount: bigint,
+        overrides?: Record<string, bigint>
+      ) => Promise<{ hash: string }>;
+      const tx = await approveFn(spender, amount, await buildFeeOverrides());
+      await waitForReceipt(tx as any, 'approveErc20');
+      return tx.hash;
+    },
+
+    async transferErc20(
+      signerPrivateKey: Uint8Array,
+      tokenAddress: string,
+      to: string,
+      amount: bigint,
+    ): Promise<string> {
+      const signerWallet = new ethers.Wallet(
+        '0x' + Buffer.from(signerPrivateKey).toString('hex'),
+        provider,
+      );
+      const erc20 = new ethers.Contract(tokenAddress, [
+        'function transfer(address to, uint256 amount) returns (bool)',
+      ], signerWallet);
+      const transferFn = erc20.getFunction('transfer') as (
+        recipient: string,
+        transferAmount: bigint,
+        overrides?: Record<string, bigint>
+      ) => Promise<{ hash: string }>;
+      const tx = await transferFn(to, amount, await buildFeeOverrides());
+      await waitForReceipt(tx as any, 'transferErc20');
+      return tx.hash;
+    },
+
+    async transferNative(
+      signerPrivateKey: Uint8Array,
+      to: string,
+      amount: bigint,
+    ): Promise<string> {
+      const signerWallet = new ethers.Wallet(
+        '0x' + Buffer.from(signerPrivateKey).toString('hex'),
+        provider,
+      );
+      const tx = await signerWallet.sendTransaction({
+        to,
+        value: amount,
+        ...(await buildFeeOverrides()),
+      });
+      await waitForReceipt(tx as any, 'transferNative');
+      return tx.hash;
+    },
+
     // === High-level J-tx submission ===
     async submitTx(jTx: JTx, options: { env: any; signerId?: string; timestamp?: number }): Promise<JSubmitResult> {
       const { env, signerId, timestamp } = options;

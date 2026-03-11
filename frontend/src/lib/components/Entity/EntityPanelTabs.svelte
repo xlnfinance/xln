@@ -73,7 +73,7 @@
   type ViewTab = 'assets' | 'accounts' | 'more' | 'settings';
   type MoreTab = 'consensus' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance';
   type AccountWorkspaceTab = 'send' | 'swap' | 'open' | 'activity' | 'settle' | 'configure';
-  type AssetWorkspaceTab = 'faucet' | 'e2r' | 'r2e';
+  type AssetWorkspaceTab = 'faucet' | 'e2r' | 'r2e' | 'send' | 'allow';
   type ConfigureWorkspaceTab = 'credit' | 'collateral' | 'token';
 
   // Set initial tab based on action
@@ -545,8 +545,16 @@
   let faucetAssetSymbol = 'USDC';
   let externalToReserveSymbol = 'USDC';
   let reserveToExternalSymbol = 'USDC';
+  let sendAssetSymbol = 'USDC';
+  let sendAssetAmount = '';
+  let sendAssetRecipient = '';
+  let allowAssetSymbol = 'USDC';
+  let allowAssetAmount = '';
+  let allowAssetSpender = '';
   let externalToReserveAmount = '';
   let reserveToExternalAmount = '';
+  let sendingExternalToken: string | null = null;
+  let approvingExternalToken: string | null = null;
   let transferableAssetOptions: Array<ExternalToken & { tokenId: number }> = [];
   let assetLedgerRows: AssetLedgerRow[] = [];
   let accountSpendableByToken = new Map<number, bigint>();
@@ -590,6 +598,12 @@
   function findReserveTransferTokenBySymbol(symbol: string): (ExternalToken & { tokenId: number }) | null {
     const token = findExternalTokenBySymbol(symbol);
     if (!token || !isReserveTransferToken(token)) return null;
+    return token;
+  }
+
+  function requireExternalTokenBySymbol(symbol: string): ExternalToken {
+    const token = findExternalTokenBySymbol(symbol);
+    if (!token) throw new Error(`Unknown asset ${symbol}`);
     return token;
   }
 
@@ -1055,8 +1069,13 @@
   $: {
     const preferred = choosePreferredAssetSymbol(externalTokens);
     if (!findExternalTokenBySymbol(faucetAssetSymbol)) faucetAssetSymbol = preferred;
+    if (!findExternalTokenBySymbol(sendAssetSymbol)) sendAssetSymbol = preferred;
     if (!findReserveTransferTokenBySymbol(externalToReserveSymbol)) externalToReserveSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
     if (!findReserveTransferTokenBySymbol(reserveToExternalSymbol)) reserveToExternalSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
+    const approvePreferred = transferableAssetOptions.find((token) => token.symbol === 'USDC')?.symbol
+      ?? transferableAssetOptions[0]?.symbol
+      ?? preferred;
+    if (!findReserveTransferTokenBySymbol(allowAssetSymbol)) allowAssetSymbol = approvePreferred;
   }
 
   $: if (pendingReserveFaucets.length > 0) {
@@ -1206,6 +1225,59 @@
       toasts.error(`Deposit failed: ${message}`);
     } finally {
       depositingToken = null;
+    }
+  }
+
+  async function getActiveSignerPrivateKey(): Promise<Uint8Array> {
+    const signerId = String(tab.signerId || '').trim();
+    if (!signerId) throw new Error('No active signer selected');
+    const xln = await getXLN();
+    const privKey = xln.getCachedSignerPrivateKey?.(signerId);
+    if (!privKey) throw new Error(`No registered signer key for ${signerId}`);
+    return privKey;
+  }
+
+  async function sendExternalAsset(): Promise<void> {
+    const token = requireExternalTokenBySymbol(sendAssetSymbol);
+    const recipient = sendAssetRecipient.trim();
+    if (!isAddress(recipient)) throw new Error('Recipient must be a valid EOA address');
+    const amount = parsePositiveAssetAmount(sendAssetAmount, token, token.balance);
+    const xln = await getXLN();
+    const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
+    if (!jadapter) throw new Error('J-adapter not available');
+    const privKey = await getActiveSignerPrivateKey();
+    sendingExternalToken = token.symbol;
+    try {
+      if (token.address === ZeroAddress) {
+        await jadapter.transferNative(privKey, recipient, amount);
+      } else {
+        await jadapter.transferErc20(privKey, token.address, recipient, amount);
+      }
+      sendAssetAmount = '';
+      toasts.success(`Sent ${token.symbol}`);
+      await fetchExternalTokens();
+    } finally {
+      sendingExternalToken = null;
+    }
+  }
+
+  async function approveExternalAsset(): Promise<void> {
+    const token = requireExternalTokenBySymbol(allowAssetSymbol);
+    if (token.address === ZeroAddress) throw new Error('Native ETH cannot be approved');
+    const spender = allowAssetSpender.trim();
+    if (!isAddress(spender)) throw new Error('Spender must be a valid address');
+    const amount = parsePositiveAssetAmount(allowAssetAmount, token);
+    const xln = await getXLN();
+    const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
+    if (!jadapter) throw new Error('J-adapter not available');
+    const privKey = await getActiveSignerPrivateKey();
+    approvingExternalToken = token.symbol;
+    try {
+      await jadapter.approveErc20(privKey, token.address, spender, amount);
+      allowAssetAmount = '';
+      toasts.success(`Approved ${token.symbol}`);
+    } finally {
+      approvingExternalToken = null;
     }
   }
 
@@ -2211,14 +2283,20 @@
               {/each}
             </div>
             <nav class="account-workspace-tabs asset-workspace-tabs" aria-label="Asset workspace">
-              <button class="account-workspace-tab" class:active={assetWorkspaceTab === 'faucet'} on:click={() => assetWorkspaceTab = 'faucet'}>
+              <button class="account-workspace-tab" data-testid="asset-tab-faucet" class:active={assetWorkspaceTab === 'faucet'} on:click={() => assetWorkspaceTab = 'faucet'}>
                 <span>Faucet</span>
               </button>
-              <button class="account-workspace-tab" class:active={assetWorkspaceTab === 'e2r'} on:click={() => assetWorkspaceTab = 'e2r'}>
-                <span>E→R</span>
+              <button class="account-workspace-tab" data-testid="asset-tab-deposit" class:active={assetWorkspaceTab === 'e2r'} on:click={() => assetWorkspaceTab = 'e2r'}>
+                <span>Deposit</span>
               </button>
-              <button class="account-workspace-tab" class:active={assetWorkspaceTab === 'r2e'} on:click={() => assetWorkspaceTab = 'r2e'}>
-                <span>R→E</span>
+              <button class="account-workspace-tab" data-testid="asset-tab-withdraw" class:active={assetWorkspaceTab === 'r2e'} on:click={() => assetWorkspaceTab = 'r2e'}>
+                <span>Withdraw</span>
+              </button>
+              <button class="account-workspace-tab" data-testid="asset-tab-send" class:active={assetWorkspaceTab === 'send'} on:click={() => assetWorkspaceTab = 'send'}>
+                <span>Send</span>
+              </button>
+              <button class="account-workspace-tab" data-testid="asset-tab-allow" class:active={assetWorkspaceTab === 'allow'} on:click={() => assetWorkspaceTab = 'allow'}>
+                <span>Allow</span>
               </button>
             </nav>
 
@@ -2282,7 +2360,7 @@
                     {depositingToken === externalToReserveSymbol ? 'Depositing...' : 'Deposit To Reserve'}
                   </button>
                 </div>
-              {:else}
+              {:else if assetWorkspaceTab === 'r2e'}
                 <h4 class="section-head">Reserve To External</h4>
                 <p class="muted">Withdraw ERC20 from reserve back to your signer wallet.</p>
                 <div class="asset-form-grid">
@@ -2312,6 +2390,84 @@
                     disabled={withdrawingExternalToken === reserveToExternalSymbol || !reserveToExternalAmount.trim()}
                   >
                     {withdrawingExternalToken === reserveToExternalSymbol ? 'Withdrawing...' : 'Withdraw To External'}
+                  </button>
+                </div>
+              {:else if assetWorkspaceTab === 'send'}
+                <h4 class="section-head">Send From External Wallet</h4>
+                <p class="muted">Transfer native ETH or ERC20 directly from your signer EOA.</p>
+                <div class="asset-form-grid">
+                  <label class="asset-field">
+                    <span>Asset</span>
+                    <select bind:value={sendAssetSymbol} data-testid="asset-send-symbol">
+                      {#each externalTokens as token}
+                        <option value={token.symbol}>{token.symbol}</option>
+                      {/each}
+                    </select>
+                  </label>
+                  <label class="asset-field">
+                    <span>Amount</span>
+                    <input type="text" bind:value={sendAssetAmount} placeholder="0.00" data-testid="asset-send-amount" />
+                  </label>
+                </div>
+                <div class="asset-form-grid">
+                  <label class="asset-field asset-field-wide">
+                    <span>Recipient EOA</span>
+                    <input type="text" bind:value={sendAssetRecipient} placeholder="0x..." data-testid="asset-send-recipient" />
+                  </label>
+                </div>
+                <div class="asset-action-row">
+                  <button
+                    class="btn-table-action deposit"
+                    data-testid={`asset-send-${sendAssetSymbol}`}
+                    on:click={async () => {
+                      try {
+                        await sendExternalAsset();
+                      } catch (err) {
+                        toasts.error(`Send failed: ${toErrorMessage(err, 'Unknown error')}`);
+                      }
+                    }}
+                    disabled={sendingExternalToken === sendAssetSymbol || !sendAssetAmount.trim() || !sendAssetRecipient.trim()}
+                  >
+                    {sendingExternalToken === sendAssetSymbol ? 'Sending...' : 'Send Asset'}
+                  </button>
+                </div>
+              {:else}
+                <h4 class="section-head">Allow Spending</h4>
+                <p class="muted">Approve an ERC20 allowance for another contract or protocol.</p>
+                <div class="asset-form-grid">
+                  <label class="asset-field">
+                    <span>Asset</span>
+                    <select bind:value={allowAssetSymbol} data-testid="asset-allow-symbol">
+                      {#each transferableAssetOptions as token}
+                        <option value={token.symbol}>{token.symbol}</option>
+                      {/each}
+                    </select>
+                  </label>
+                  <label class="asset-field">
+                    <span>Amount</span>
+                    <input type="text" bind:value={allowAssetAmount} placeholder="0.00" data-testid="asset-allow-amount" />
+                  </label>
+                </div>
+                <div class="asset-form-grid">
+                  <label class="asset-field asset-field-wide">
+                    <span>Spender</span>
+                    <input type="text" bind:value={allowAssetSpender} placeholder="0x..." data-testid="asset-allow-spender" />
+                  </label>
+                </div>
+                <div class="asset-action-row">
+                  <button
+                    class="btn-table-action deposit"
+                    data-testid={`asset-allow-${allowAssetSymbol}`}
+                    on:click={async () => {
+                      try {
+                        await approveExternalAsset();
+                      } catch (err) {
+                        toasts.error(`Approve failed: ${toErrorMessage(err, 'Unknown error')}`);
+                      }
+                    }}
+                    disabled={approvingExternalToken === allowAssetSymbol || !allowAssetAmount.trim() || !allowAssetSpender.trim()}
+                  >
+                    {approvingExternalToken === allowAssetSymbol ? 'Approving...' : 'Approve Allowance'}
                   </button>
                 </div>
               {/if}
@@ -4373,6 +4529,10 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  .asset-field-wide {
+    grid-column: 1 / -1;
   }
 
   .asset-field span {

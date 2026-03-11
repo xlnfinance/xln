@@ -534,6 +534,15 @@ export class BrowserVMProvider {
     return result.txHash;
   }
 
+  async transferNative(privKey: Uint8Array, to: string, amount: bigint): Promise<string> {
+    const result = await this.executeTx({
+      to,
+      value: amount,
+      gasLimit: 21000n,
+    }, privKey);
+    return result.txHash;
+  }
+
   async externalTokenToReserve(
     privKey: Uint8Array,
     entityId: string,

@@ -4,9 +4,9 @@
  * Flow and goals:
  * 1. Reset to the shared 3-hub baseline and create one fresh browser runtime.
  * 2. Use the visible asset faucet form to mint classic ERC20 funds to the signer EOA.
- * 3. Deposit those external ERC20 funds into Depository.sol through the visible E→R form.
+ * 3. Deposit those external ERC20 funds into Depository.sol through the visible Deposit form.
  * 4. Verify the reserve credit from both saved runtime frame logs and rendered HTML balances.
- * 5. Withdraw part of the reserve balance back to the same external EOA through the visible R→E form.
+ * 5. Withdraw part of the reserve balance back to the same external EOA through the visible Withdraw form.
  * 6. Verify the reserve decrease and external balance recovery from both saved frame logs and rendered HTML.
  *
  * This test exists to prove the user-facing external wallet route is sound end to end:
@@ -181,7 +181,7 @@ test.describe('E2R2E External Reserve Route', () => {
       const sinceTs = Date.now();
       const depositWhole = Math.max(1, Math.floor(externalAfterFaucet / 2));
       await openAssetsTab(page);
-      await page.getByText('E→R').first().click();
+      await page.getByTestId('asset-tab-deposit').first().click();
       await page.getByTestId('external-to-reserve-symbol').selectOption(symbol);
       await page.getByTestId('external-to-reserve-amount').fill(String(depositWhole));
       await page.getByTestId(`external-deposit-${symbol}`).first().click();
@@ -207,7 +207,7 @@ test.describe('E2R2E External Reserve Route', () => {
       withdrawWhole = Math.max(1, Math.floor(reserveAfterDeposit / 2));
       const cursor = await getPersistedReceiptCursor(page);
       await openAssetsTab(page);
-      await page.getByText('R→E').first().click();
+      await page.getByTestId('asset-tab-withdraw').first().click();
       await page.getByTestId('reserve-to-external-symbol').selectOption(symbol);
       const withdrawInput = page.getByTestId(`reserve-withdraw-input-${symbol}`).first();
       await expect(withdrawInput).toBeVisible({ timeout: 20_000 });

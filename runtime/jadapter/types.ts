@@ -93,6 +93,7 @@ export interface JAdapter {
   getTokenRegistry(): Promise<JTokenInfo[]>;
   getErc20Balance(tokenAddress: string, owner: string): Promise<bigint>;
   getErc20Balances(tokenAddresses: string[], owner: string): Promise<bigint[]>;
+  getErc20Allowance(tokenAddress: string, owner: string, spender: string): Promise<bigint>;
 
   // Writes - Core Operations
   processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt>;
@@ -126,6 +127,23 @@ export interface JAdapter {
       internalTokenId?: number;
     }
   ): Promise<JEvent[]>;
+  approveErc20(
+    signerPrivateKey: Uint8Array,
+    tokenAddress: string,
+    spender: string,
+    amount: bigint,
+  ): Promise<string>;
+  transferErc20(
+    signerPrivateKey: Uint8Array,
+    tokenAddress: string,
+    to: string,
+    amount: bigint,
+  ): Promise<string>;
+  transferNative(
+    signerPrivateKey: Uint8Array,
+    to: string,
+    amount: bigint,
+  ): Promise<string>;
 
   // === High-level J-tx submission (unified interface for all modes) ===
   // Handles encoding, signing, and execution. Events arrive via j-watcher → next frame.

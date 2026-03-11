@@ -447,6 +447,46 @@ export async function createBrowserVMAdapter(
       return { success: false, error: `Unknown JTx type: ${(jTx as any).type}` };
     },
 
+    async getErc20Allowance(tokenAddress: string, owner: string, spender: string): Promise<bigint> {
+      if (!browserVM.getErc20Allowance) return 0n;
+      return browserVM.getErc20Allowance(tokenAddress, owner, spender);
+    },
+
+    async approveErc20(
+      signerPrivateKey: Uint8Array,
+      tokenAddress: string,
+      spender: string,
+      amount: bigint,
+    ): Promise<string> {
+      if (!browserVM.approveErc20) {
+        throw new Error('BrowserVM approveErc20 not available');
+      }
+      return browserVM.approveErc20(signerPrivateKey, tokenAddress, spender, amount);
+    },
+
+    async transferErc20(
+      signerPrivateKey: Uint8Array,
+      tokenAddress: string,
+      to: string,
+      amount: bigint,
+    ): Promise<string> {
+      if (!browserVM.transferErc20) {
+        throw new Error('BrowserVM transferErc20 not available');
+      }
+      return browserVM.transferErc20(signerPrivateKey, tokenAddress, to, amount);
+    },
+
+    async transferNative(
+      signerPrivateKey: Uint8Array,
+      to: string,
+      amount: bigint,
+    ): Promise<string> {
+      if (!browserVM.transferNative) {
+        throw new Error('BrowserVM transferNative not available');
+      }
+      return browserVM.transferNative(signerPrivateKey, to, amount);
+    },
+
     // === J-Watcher integration (uses shared event conversion from helpers.ts) ===
     startWatching(env: any): void {
       if (watcherUnsubscribe) {
