@@ -575,3 +575,21 @@
       - pass logs:
         - [/Users/egor/xln/.logs/e2e-parallel/20260311-040258-138/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-040258-138/e2e-shard-00.log)
         - [/Users/egor/xln/.logs/e2e-parallel/20260311-040258-138/e2e-shard-01.log](/Users/egor/xln/.logs/e2e-parallel/20260311-040258-138/e2e-shard-01.log)
+
+- 2026-03-11
+  - Tightened `runtime/validation-utils.ts` on the live persistence/routing path:
+    - replaced the low-value `any` casts in `validateDelta`, `validateEntityInput`, and `validateEntityOutput` with strict object reads
+    - `validateAccountFrame` now validates `fullDeltaStates` as real `Delta[]` instead of shallow-cloning unknown objects
+    - preserved optional `leftHold/rightHold` while doing so; otherwise dispute-proof frame hashes diverge on HTLC/swap flows
+  - Re-verified:
+    - `bun x tsc --noEmit`
+    - `bun build runtime/runtime.ts --target=browser --outfile=/tmp/runtime-check.js`
+    - `bun test runtime/__tests__/serialization-utils.test.ts runtime/__tests__/relay-router.test.ts runtime/__tests__/ids.test.ts runtime/__tests__/routing-metadata.test.ts`
+    - targeted isolated E2E rerun:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-ahb-isolated.spec.ts,tests/e2e-swap-isolated.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260311-041231-080/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-041231-080/e2e-shard-00.log)
+    - full isolated E2E suite:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=2 --workers-per-shard=1 --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass logs:
+        - [/Users/egor/xln/.logs/e2e-parallel/20260311-041356-753/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-041356-753/e2e-shard-00.log)
+        - [/Users/egor/xln/.logs/e2e-parallel/20260311-041356-753/e2e-shard-01.log](/Users/egor/xln/.logs/e2e-parallel/20260311-041356-753/e2e-shard-01.log)
