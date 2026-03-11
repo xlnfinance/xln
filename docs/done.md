@@ -626,3 +626,21 @@
     - focused isolated E2E rerun:
       - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260311-044334-034/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-044334-034/e2e-shard-00.log)
+
+- 2026-03-11
+  - Hardened scenario/runtime persistence and dispute flows:
+    - [runtime/entity-tx/handlers/account.ts](/Users/egor/xln/runtime/entity-tx/handlers/account.ts) now allows only `j_event_claim` and `reopen_disputed` through the disputed-account inbound gate, with an explicit comment to keep the transport-layer rule aligned with account-tx consensus.
+    - [runtime/scenarios/dispute-lifecycle.ts](/Users/egor/xln/runtime/scenarios/dispute-lifecycle.ts) now follows the current unilateral protocol exactly: dispute start, unilateral finalize, explicit reopen, and no stale “auto-reactivate” assumption.
+    - [runtime/scenarios/lock-ahb.ts](/Users/egor/xln/runtime/scenarios/lock-ahb.ts) no longer mines timeout blocks via signed empty `processBatch` calls; it uses direct local `evm_mine` on RPC for deterministic timeout advancement.
+    - [runtime/jadapter/rpc.ts](/Users/egor/xln/runtime/jadapter/rpc.ts) now uses an explicit fresh EOA nonce for both direct `processBatch()` calls and queued `submitTx(batch)` sends, preventing local rapid-submit nonce reuse on Anvil.
+    - [runtime/scripts/run-e2e-parallel-isolated.ts](/Users/egor/xln/runtime/scripts/run-e2e-parallel-isolated.ts) and [runtime/scripts/e2e-mesh-control.ts](/Users/egor/xln/runtime/scripts/e2e-mesh-control.ts) now sanitize child env color flags and stop reporting clean `code=0` child exits as “unexpected”.
+  - Re-verified:
+    - `bun x tsc --noEmit`
+    - full CLI scenario suite:
+      - `bun runtime/scenarios/run.ts`
+      - pass log: `/Users/egor/xln/.logs/scenarios-parallel/20260311-142831-523`
+    - full isolated E2E suite:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --video=off --trace=off --screenshot=only-on-failure --max-failures=1`
+      - pass logs:
+        - `/Users/egor/xln/.logs/e2e-parallel/20260311-142903-146`
+        - `/Users/egor/xln/.logs/e2e-parallel/20260311-143608-129`

@@ -200,10 +200,19 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     throw new Error(`CRITICAL: AccountMachine creation failed for ${input.fromEntityId}`);
   }
 
-  // Dispute freeze: once account is disputed, do not accept new bilateral inputs
-  // until dispute lifecycle is completed and account is reopened/activated.
+  // Dispute freeze: once account is disputed, only allow the minimal bilateral traffic
+  // that can resolve the dispute state itself. The account-tx layer already allows only
+  // `j_event_claim` and `reopen_disputed`, so the transport/input gate must mirror that
+  // rule instead of dropping reopen frames before consensus can apply them.
   if ((accountMachine.status ?? 'active') === 'disputed') {
     const frameTxTypes = input.newAccountFrame?.accountTxs?.map((tx) => tx.type) || [];
+    const allowedWhileDisputed = frameTxTypes.every((txType) => txType === 'j_event_claim' || txType === 'reopen_disputed');
+    if (allowedWhileDisputed) {
+      console.log(
+        `🔓 Disputed account input allowed for ${counterpartyId.slice(-4)} ` +
+        `(txs=[${frameTxTypes.join(',')}])`,
+      );
+    } else {
     const dropMsg =
       `🛑 Disputed account input dropped for ${counterpartyId.slice(-4)} ` +
       `(height=${input.height ?? input.newAccountFrame?.height ?? 'n/a'}, txs=[${frameTxTypes.join(',')}], ack=${!!input.prevHanko})`;
@@ -231,6 +240,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       swapOffersCancelled: allSwapOffersCancelled,
       ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
     };
+    }
   }
 
   // NOTE: Credit limits start at 0 - no auto-credit on account opening

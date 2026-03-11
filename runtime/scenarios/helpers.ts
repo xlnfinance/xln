@@ -3,6 +3,7 @@
  */
 
 import type { Env, EntityInput, EntityReplica, Delta, RuntimeInput } from '../types';
+import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../runtime-ascii';
 import { setFailFastErrors } from '../logger';
 import { getCachedSignerPrivateKey, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
@@ -509,14 +510,22 @@ export const dai = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 export async function syncChain(env: Env, rounds = 3): Promise<void> {
   const process = await getProcess();
 
-  // Poll all jadapters attached to jReplicas
-  for (const [, jReplica] of env.jReplicas) {
-    const ja = (jReplica as any).jadapter;
-    if (ja?.pollNow) await ja.pollNow();
-  }
-
-  // Process events through runtime loop
+  // Poll every round, not just once.
+  // Scenario J-adapters are polling-based, so a single poll can miss the tail
+  // of a just-submitted tx lifecycle (submit -> watcher ingest -> runtime input).
+  // Re-polling here keeps scenario assertions aligned with the real persisted state.
   for (let i = 0; i < rounds; i++) {
+    for (const [, jReplica] of env.jReplicas) {
+      const ja = (jReplica as { jadapter?: JAdapter }).jadapter;
+      if (!ja) continue;
+      // Local RPC scenarios can briefly hide logs on the newest mined block.
+      // Mine one empty block before polling so the watcher reads from a stable tail
+      // instead of a just-submitted batch block that some providers expose late.
+      if (ja.mode === 'rpc' && Number(ja.chainId) === 31337) {
+        await ja.processBlock();
+      }
+      if (ja.pollNow) await ja.pollNow();
+    }
     advanceScenarioTime(env, 350);
     await process(env);
     await processJEvents(env);

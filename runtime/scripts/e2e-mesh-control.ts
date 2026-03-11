@@ -335,6 +335,14 @@ const pollAllHubHealth = async (): Promise<void> => {
 
 const getHubSpecsArg = (): string => HUB_NAMES.join(',');
 
+const sanitizeChildEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const next: NodeJS.ProcessEnv = { ...env };
+  if (next['FORCE_COLOR'] && next['NO_COLOR']) {
+    delete next['NO_COLOR'];
+  }
+  return next;
+};
+
 const spawnHub = (child: HubChild): void => {
   mkdirSync(child.dbPath, { recursive: true });
   const cmd = [
@@ -359,13 +367,13 @@ const spawnHub = (child: HubChild): void => {
   child.proc = spawn('bun', cmd, {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
+    env: sanitizeChildEnv({
       ...process.env,
       XLN_DB_PATH: child.dbPath,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ANVIL_RPC: args.rpcUrl,
       USE_ANVIL: 'true',
-    },
+    }),
   });
   child.proc.stdout.on('data', chunk => {
     process.stdout.write(`[${child.name}] ${chunk.toString()}`);
@@ -376,7 +384,7 @@ const spawnHub = (child: HubChild): void => {
   child.proc.once('exit', code => {
     child.exitedAt = Date.now();
     child.exitCode = code;
-    if (!resetState.inProgress) {
+    if (!resetState.inProgress && code !== 0) {
       console.error(`[E2E-MESH] ${child.name} exited unexpectedly with code=${String(code)}`);
     }
   });

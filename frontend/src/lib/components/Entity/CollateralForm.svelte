@@ -2,7 +2,12 @@
   import type { Env, Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { enqueueEntityInputs, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
-  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
+  import {
+    getCounterpartyAccount,
+    getReplicaForEntity,
+    normalizeEntityId,
+    requireSignerIdForEntity,
+  } from '$lib/utils/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
 
@@ -14,37 +19,6 @@
   export let signerId: string | null = null;
   export let counterpartyId: string | null;
   export let accountIds: string[] = [];
-
-  type FeePolicyView = {
-    policyVersion: number;
-    baseFee?: bigint | number | string;
-    liquidityFeeBps?: bigint | number | string;
-    gasFee?: bigint | number | string;
-  };
-
-  type HubConfigView = {
-    policyVersion: number;
-    rebalanceBaseFee?: bigint | number | string;
-    baseFee?: bigint | number | string;
-    rebalanceLiquidityFeeBps?: bigint | number | string;
-    minFeeBps?: bigint | number | string;
-    rebalanceGasFee?: bigint | number | string;
-  };
-
-  type AccountView = {
-    counterpartyRebalanceFeePolicy?: FeePolicyView;
-  };
-
-  type ReplicaView = {
-    state?: {
-      accounts?: Map<string, AccountView>;
-      hubRebalanceConfig?: HubConfigView;
-    };
-  };
-
-  type RuntimeEnv = Env & {
-    eReplicas: Map<string, ReplicaView>;
-  };
 
   let selectedCounterparty = counterpartyId || '';
   let selectedTokenId = 1;
@@ -63,24 +37,14 @@
     return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
   })();
   $: maxCollateralNeeded = (() => {
-    if (!activeEnv?.eReplicas || !effectiveCounterparty || !activeXlnFunctions) return 0n;
-    const selfIdNorm = normalizeEntityId(entityId);
-    const cpNorm = normalizeEntityId(effectiveCounterparty);
-    if (!selfIdNorm || !cpNorm) return 0n;
-    const replicas = activeEnv.eReplicas instanceof Map ? activeEnv.eReplicas : null;
-    if (!replicas) return 0n;
-    for (const [key, replica] of replicas.entries()) {
-      const [replicaEntityId] = String(key).split(':');
-      if (normalizeEntityId(replicaEntityId) !== selfIdNorm) continue;
-      const account = replica?.state?.accounts?.get?.(effectiveCounterparty);
-      const delta = account?.deltas?.get?.(selectedTokenId);
-      if (!delta) return 0n;
-      const derived = activeXlnFunctions.deriveDelta(delta, entityId < effectiveCounterparty);
-      return derived.outPeerCredit > derived.outCollateral
-        ? (derived.outPeerCredit - derived.outCollateral)
-        : 0n;
-    }
-    return 0n;
+    if (!activeEnv || !effectiveCounterparty || !activeXlnFunctions) return 0n;
+    const accountEntry = getCounterpartyAccount(activeEnv, entityId, effectiveCounterparty);
+    const delta = accountEntry?.account.deltas?.get?.(selectedTokenId);
+    if (!delta) return 0n;
+    const derived = activeXlnFunctions.deriveDelta(delta, entityId < effectiveCounterparty);
+    return derived.outPeerCredit > derived.outCollateral
+      ? (derived.outPeerCredit - derived.outCollateral)
+      : 0n;
   })();
   $: {
     const key = `${normalizeEntityId(effectiveCounterparty)}:${selectedTokenId}`;
@@ -94,10 +58,6 @@
     }
   }
 
-  function normalizeEntityId(value: unknown): string {
-    return String(value || '').trim().toLowerCase();
-  }
-
   function parseBigIntSafe(value: unknown, defaultValue = 0n): bigint {
     try {
       if (typeof value === 'bigint') return value;
@@ -109,81 +69,73 @@
     }
   }
 
-  function isRuntimeEnv(value: unknown): value is RuntimeEnv {
-    if (!value || typeof value !== 'object') return false;
-    const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
-    return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
-  }
-
-  function resolveCounterpartyPolicy(env: RuntimeEnv, ownerEntityId: string, cpEntityId: string): {
+  type CounterpartyFeePolicy = {
     policyVersion: number;
     baseFee: bigint;
     liquidityFeeBps: bigint;
     gasFee: bigint;
-  } | null {
+  };
+
+  function resolveCounterpartyPolicy(env: Env, ownerEntityId: string, cpEntityId: string): CounterpartyFeePolicy | null {
     const ownerNorm = normalizeEntityId(ownerEntityId);
     const cpNorm = normalizeEntityId(cpEntityId);
     if (!ownerNorm || !cpNorm) return null;
 
-    const replicas = env.eReplicas;
-    if (replicas) {
-      // 1) Prefer account-learned counterparty policy (most specific).
-      for (const [key, replica] of replicas.entries()) {
-        const [replicaEntityId] = String(key).split(':');
-        if (normalizeEntityId(replicaEntityId) !== ownerNorm) continue;
-        const accounts = replica?.state?.accounts;
-        if (!(accounts instanceof Map)) break;
-        for (const [accountKey, account] of accounts.entries()) {
-          if (normalizeEntityId(accountKey) !== cpNorm) continue;
-          const policy = account?.counterpartyRebalanceFeePolicy;
-          const policyVersion = Number(policy?.policyVersion ?? 0);
-          if (Number.isFinite(policyVersion) && policyVersion > 0) {
-            return {
-              policyVersion,
-              baseFee: parseBigIntSafe(policy?.baseFee, 0n),
-              liquidityFeeBps: parseBigIntSafe(policy?.liquidityFeeBps, 0n),
-              gasFee: parseBigIntSafe(policy?.gasFee, 0n),
-            };
-          }
-        }
-      }
-
-      // 2) Fallback to counterparty hub config from replica state.
-      for (const [key, replica] of replicas.entries()) {
-        const [replicaEntityId] = String(key).split(':');
-        if (normalizeEntityId(replicaEntityId) !== cpNorm) continue;
-        const cfg = replica?.state?.hubRebalanceConfig;
-        const policyVersion = Number(cfg?.policyVersion ?? 0);
-        if (!Number.isFinite(policyVersion) || policyVersion <= 0) break;
-        return {
-          policyVersion,
-          baseFee: parseBigIntSafe(cfg?.rebalanceBaseFee ?? cfg?.baseFee, 0n),
-          liquidityFeeBps: parseBigIntSafe(cfg?.rebalanceLiquidityFeeBps ?? cfg?.minFeeBps, 0n),
-          gasFee: parseBigIntSafe(cfg?.rebalanceGasFee, 0n),
-        };
-      }
+    const accountPolicy = getCounterpartyAccount(env, ownerEntityId, cpEntityId)?.account.counterpartyRebalanceFeePolicy;
+    const accountPolicyVersion = Number(accountPolicy?.policyVersion ?? 0);
+    if (Number.isFinite(accountPolicyVersion) && accountPolicyVersion > 0) {
+      return {
+        policyVersion: accountPolicyVersion,
+        baseFee: parseBigIntSafe(accountPolicy?.baseFee, 0n),
+        liquidityFeeBps: parseBigIntSafe(accountPolicy?.liquidityFeeBps, 0n),
+        gasFee: parseBigIntSafe(accountPolicy?.gasFee, 0n),
+      };
     }
 
-    // 3) Gossip metadata (when bilateral policy not yet learned from account state).
-    const profiles: GossipProfile[] = env.gossip?.getProfiles?.() || [];
-    const profile = profiles.find((p) => normalizeEntityId(p.entityId) === cpNorm);
-    const md = profile?.metadata || {};
+    const hubConfig = getReplicaForEntity(env, cpEntityId)?.state?.hubRebalanceConfig;
+    const hubPolicyVersion = Number(hubConfig?.policyVersion ?? 0);
+    if (Number.isFinite(hubPolicyVersion) && hubPolicyVersion > 0) {
+      return {
+        policyVersion: hubPolicyVersion,
+        baseFee: parseBigIntSafe(hubConfig?.rebalanceBaseFee ?? hubConfig?.baseFee, 0n),
+        liquidityFeeBps: parseBigIntSafe(hubConfig?.rebalanceLiquidityFeeBps ?? hubConfig?.minFeeBps, 0n),
+        gasFee: parseBigIntSafe(hubConfig?.rebalanceGasFee, 0n),
+      };
+    }
+
+    const profile = env.gossip.getProfiles().find((candidate: GossipProfile) => normalizeEntityId(candidate.entityId) === cpNorm);
+    const md = profile?.metadata;
     const policyVersion = Number(md?.policyVersion ?? 0);
     if (!Number.isFinite(policyVersion) || policyVersion <= 0) return null;
     return {
       policyVersion,
-      baseFee: parseBigIntSafe(md?.rebalanceBaseFee ?? md?.baseFee, 0n),
-      liquidityFeeBps: parseBigIntSafe(md?.rebalanceLiquidityFeeBps ?? md?.minFeeBps, 0n),
-      gasFee: parseBigIntSafe(md?.rebalanceGasFee, 0n),
+      baseFee: parseBigIntSafe(md.rebalanceBaseFee ?? md.baseFee, 0n),
+      liquidityFeeBps: parseBigIntSafe(md.rebalanceLiquidityFeeBps, 0n),
+      gasFee: parseBigIntSafe(md.rebalanceGasFee, 0n),
     };
   }
+
+  type CollateralEntityInput = {
+    entityId: string;
+    signerId: string;
+    entityTxs: Array<{
+      type: 'requestCollateral';
+      data: {
+        counterpartyEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        feeTokenId: number;
+        feeAmount: bigint;
+        policyVersion: number;
+      };
+    }>;
+  };
 
   async function requestCollateral() {
     if (!effectiveCounterparty) return;
     try {
       const env = activeEnv;
       if (!env) throw new Error('XLN environment not ready');
-      if (!isRuntimeEnv(env)) throw new Error('Runtime environment not available');
       if (!activeIsLive) throw new Error('Collateral request is only available in LIVE mode');
       const resolvedSigner = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'collateral-form')
         || signerId
@@ -203,19 +155,20 @@
         throw new Error('Computed rebalance fee is negative. Counterparty policy is invalid.');
       }
 
-      const collateralInput = {
+      const collateralInput: CollateralEntityInput = {
         entityId,
         signerId: resolvedSigner,
         entityTxs: [{
-          type: 'requestCollateral' as const,
+          type: 'requestCollateral',
           data: {
             counterpartyEntityId: effectiveCounterparty,
             tokenId: selectedTokenId,
             amount: collateralAmount,
+            feeTokenId: selectedTokenId,
             feeAmount,
-            policyVersion: feePolicy.policyVersion
-          }
-        }]
+            policyVersion: feePolicy.policyVersion,
+          },
+        }],
       };
 
       await enqueueEntityInputs(env, [collateralInput]);

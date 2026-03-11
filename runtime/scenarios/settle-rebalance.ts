@@ -101,6 +101,20 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
     );
   };
 
+  const waitForHubCollateral = async (counterpartyId: string, expected: bigint, label: string, maxRounds = 20): Promise<void> => {
+    for (let i = 0; i < maxRounds; i++) {
+      const current =
+        findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.deltas.get(USDC)?.collateral || 0n;
+      if (current === expected) return;
+      await syncChain(env, 1);
+      advanceTime(200);
+      await process(env);
+    }
+    const current =
+      findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.deltas.get(USDC)?.collateral || 0n;
+    assert(current === expected, `${label}: collateral ${current}, expected ${expected}`, env);
+  };
+
   // Fund all entities
   for (const entity of [hub, ...users]) {
     const amount = entity === hub ? usd(200_000) : usd(25_000);
@@ -152,8 +166,7 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
 
   // Verify collateral
   for (const user of users) {
-    const delta = findReplica(env, hub.id)[1].state.accounts.get(user.id)?.deltas.get(USDC);
-    assert(delta && delta.collateral === usd(5_000), `${user.name} collateral wrong`, env);
+    await waitForHubCollateral(user.id, usd(5_000), `${user.name} collateral wrong`);
   }
 
   console.log = originalLog;

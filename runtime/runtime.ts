@@ -806,17 +806,16 @@ const hasDueEntityHooks = (env: Env): boolean => {
     const hooks = crontab.hooks;
     if (hooks && hooks.size > 0) {
       for (const hook of hooks.values()) {
-        if ((hook as any).triggerAt <= nowMs) return true;
+        if (hook.triggerAt <= nowMs) return true;
       }
     }
     // Periodic tasks (setInterval-like) — only when hub has actual pending work.
     // Fully idle hubs should not receive synthetic empty pings.
-    if (hubNeedsPeriodicWake(replica as EntityReplica)) {
+    if (hubNeedsPeriodicWake(replica)) {
       const tasks = crontab.tasks;
       if (tasks && tasks.size > 0) {
         for (const task of tasks.values()) {
-          const t = task as any;
-          if (nowMs - (t.lastRun || 0) >= (t.intervalMs || Infinity)) return true;
+          if (nowMs - task.lastRun >= task.intervalMs) return true;
         }
       }
     }
@@ -841,23 +840,22 @@ const generateHookPings = (env: Env): void => {
     if (!crontab) continue;
 
     let hasDue = false;
-    // One-shot hooks
+    // crontab state is declarative and validated on restore; use the typed fields directly.
     const hooks = crontab.hooks;
     if (hooks && hooks.size > 0) {
       for (const hook of hooks.values()) {
-        if ((hook as any).triggerAt <= nowMs) {
+        if (hook.triggerAt <= nowMs) {
           hasDue = true;
           break;
         }
       }
     }
     // Periodic tasks — only when hub has actual pending work.
-    if (!hasDue && hubNeedsPeriodicWake(replica as EntityReplica)) {
+    if (!hasDue && hubNeedsPeriodicWake(replica)) {
       const tasks = crontab.tasks;
       if (tasks && tasks.size > 0) {
         for (const task of tasks.values()) {
-          const t = task as any;
-          if (nowMs - (t.lastRun || 0) >= (t.intervalMs || Infinity)) {
+          if (nowMs - task.lastRun >= task.intervalMs) {
             hasDue = true;
             break;
           }
@@ -867,8 +865,8 @@ const generateHookPings = (env: Env): void => {
     if (!hasDue) continue;
 
     // Extract entityId and signerId from replica key (format: "entityId:signerId")
-    const entityId = (replica as any).entityId ?? String(key).split(':')[0];
-    const signerId = (replica as any).state?.config?.validators?.[0] ?? String(key).split(':')[1];
+    const entityId = replica.entityId || String(key).split(':')[0];
+    const signerId = replica.state?.config?.validators?.[0] || String(key).split(':')[1];
     if (!entityId || !signerId) continue;
 
     // Check if there's already a pending entityInput for this entity
@@ -3517,7 +3515,7 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
 
     // Persist a durable checkpoint snapshot every N runtime frames.
     // Restore is always: checkpoint snapshot + contiguous WAL replay on top.
-    const CHECKPOINT_INTERVAL = ensureRuntimeConfig(env).snapshotIntervalFrames ?? 100;
+    const CHECKPOINT_INTERVAL = ensureRuntimeConfig(env).snapshotIntervalFrames ?? DEFAULT_SNAPSHOT_INTERVAL_FRAMES;
     const shouldCheckpoint = env.height <= 1 || env.height % CHECKPOINT_INTERVAL === 0;
     if (shouldCheckpoint) {
       const snapshotSerializeStartedAt = getPerfMs();

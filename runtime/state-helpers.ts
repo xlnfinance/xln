@@ -11,6 +11,7 @@ import { validateEntityState } from './validation-utils';
 import { safeStringify, safeParse } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { cloneJBatch, type CompletedBatch } from './j-batch';
+import type { CrontabState } from './crontab-types';
 
 // Message size limit for snapshot efficiency
 const MESSAGE_LIMIT = 10;
@@ -231,6 +232,11 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     lastFinalizedJHeight: entityState.lastFinalizedJHeight ?? 0,
     jBlockObservations: cloneArray(entityState.jBlockObservations || []),
     jBlockChain: cloneArray(entityState.jBlockChain || []),
+    // Crontab state is part of entity state, but it remains declarative:
+    // task metadata + scheduled hooks only. Handlers are rebound from the static
+    // registry in entity-crontab.ts, so clone/persistence must preserve the data
+    // and never try to serialize executable functions.
+    crontabState: entityState.crontabState ? cloneCrontabState(entityState.crontabState) : undefined,
     // HTLC routing table (deep clone)
     htlcRoutes: new Map(
       Array.from((entityState.htlcRoutes || new Map()).entries()).map(([hashlock, route]) => [
@@ -261,6 +267,34 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
       : undefined,
     pendingSwapFillRatios: new Map(
       Array.from((entityState.pendingSwapFillRatios || new Map()).entries())
+    ),
+  };
+}
+
+function cloneCrontabState(crontabState: CrontabState): CrontabState {
+  return {
+    tasks: new Map(
+      Array.from(crontabState.tasks.entries()).map(([method, task]) => [
+        method,
+        {
+          method: task.method,
+          intervalMs: task.intervalMs,
+          lastRun: task.lastRun,
+          enabled: task.enabled,
+          params: { ...task.params },
+        },
+      ]),
+    ),
+    hooks: new Map(
+      Array.from(crontabState.hooks.entries()).map(([hookId, hook]) => [
+        hookId,
+        {
+          id: hook.id,
+          triggerAt: hook.triggerAt,
+          type: hook.type,
+          data: { ...hook.data },
+        },
+      ]),
     ),
   };
 }

@@ -8,7 +8,7 @@ import type { EntityState, Env } from '../types';
 import type { BoardMetadata, Profile, ProfileAccount, ProfileTokenCapacity } from './gossip';
 import { deriveDelta, isLeft } from '../account-utils';
 import { safeStringify } from '../serialization-utils';
-import { getSignerAddress, getSignerPublicKey } from '../account-crypto';
+import { deriveSignerAddressSync, getSignerAddress, getSignerPublicKey } from '../account-crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './p2p-crypto';
 
 type BuiltProfile = Omit<Profile, 'runtimeEncPubKey'>;
@@ -185,7 +185,18 @@ export const getNextProfileTimestamp = (env: Env, entityId: string, fallbackTime
   const existingProfile = env.gossip.getProfiles().find((profile) => profile.entityId === entityId);
   const lastTimestamp = existingProfile?.lastUpdated ?? 0;
   const candidate = typeof fallbackTimestamp === 'number' ? fallbackTimestamp : env.timestamp;
-  return Math.max(lastTimestamp + 1, candidate);
+  return Math.max(1, lastTimestamp + 1, candidate);
+};
+
+const resolveProfileRuntimeId = (env: Env, entityId: string): string => {
+  if (typeof env.runtimeId === 'string' && env.runtimeId.trim().length > 0) {
+    return env.runtimeId.trim().toLowerCase();
+  }
+  const runtimeSeed = typeof env.runtimeSeed === 'string' ? env.runtimeSeed.trim() : '';
+  if (!runtimeSeed) {
+    throw new Error(`GOSSIP_PROFILE_RUNTIME_ID_REQUIRED: entity=${entityId}`);
+  }
+  return deriveSignerAddressSync(runtimeSeed, '1').toLowerCase();
 };
 
 export const buildLocalEntityProfile = (
@@ -197,10 +208,9 @@ export const buildLocalEntityProfile = (
   if (!runtimeSeed) {
     throw new Error(`GOSSIP_PROFILE_RUNTIME_SEED_REQUIRED: entity=${entityState.entityId}`);
   }
-  const profile = buildEntityProfile(entityState, timestamp, createProfileSignerResolver(env));
-  if (env.runtimeId) {
-    profile.runtimeId = env.runtimeId;
-  }
+  const profileTimestamp = Math.max(1, timestamp);
+  const profile = buildEntityProfile(entityState, profileTimestamp, createProfileSignerResolver(env));
+  profile.runtimeId = resolveProfileRuntimeId(env, entityState.entityId);
   profile.runtimeEncPubKey = pubKeyToHex(deriveEncryptionKeyPair(runtimeSeed).publicKey);
   return profile;
 };

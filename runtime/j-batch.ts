@@ -12,6 +12,7 @@
  */
 
 import { ethers } from 'ethers';
+import type { ProofBodyStruct } from './typechain/Depository.js';
 import { isLeftEntity, normalizeEntityId, compareEntityIds } from './entity-id-utils';
 import type { JurisdictionConfig } from './types';
 import { safeStringify } from './serialization-utils';
@@ -92,7 +93,7 @@ export interface JBatch {
     initialNonce: number; // nonce when dispute was started
     finalNonce: number; // signed finalize nonce; unilateral timeout path may keep equal to initialNonce
     initialProofbodyHash: string;
-    finalProofbody: any;  // ProofBody struct
+    finalProofbody: ProofBodyStruct;
     finalArguments: string;
     initialArguments: string;
     sig: string;
@@ -197,12 +198,23 @@ export function createEmptyBatch(): JBatch {
   };
 }
 
-const cloneProofbody = (proofbody: any): any => {
-  if (!proofbody) return proofbody;
+const cloneProofbody = (proofbody: ProofBodyStruct): ProofBodyStruct => {
   try {
     return structuredClone(proofbody);
   } catch {
-    return proofbody;
+    return {
+      offdeltas: [...proofbody.offdeltas],
+      tokenIds: [...proofbody.tokenIds],
+      transformers: proofbody.transformers.map((transformer) => ({
+        transformerAddress: transformer.transformerAddress,
+        encodedBatch: transformer.encodedBatch,
+        allowances: transformer.allowances.map((allowance) => ({
+          deltaIndex: allowance.deltaIndex,
+          rightAllowance: allowance.rightAllowance,
+          leftAllowance: allowance.leftAllowance,
+        })),
+      })),
+    };
   }
 };
 

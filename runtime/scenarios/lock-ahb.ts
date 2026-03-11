@@ -402,12 +402,7 @@ export async function lockAhb(env: Env): Promise<void> {
     // STEP 4: Advance time and process J-block
     console.log('\n⚡ FRAME 4: J-Block #1 processes R2R batch');
 
-    env.timestamp += 350; // Advance past blockDelayMs
-    await process(env); // Triggers J-processor
-
-    // Process j-events from BrowserVM
-    await processJEvents(env);
-    await process(env);
+    await syncChain(env, 4);
 
     // Verify funding via entity state
     const [, aliceFunded] = findReplica(env, alice.id);
@@ -480,10 +475,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // Process J-block
     console.log('\n⚡ FRAME 6: J-Block processes Alice→Bob');
-    env.timestamp += 350;
-    await process(env);
-    await processJEvents(env);
-    await process(env);
+    await syncChain(env, 4);
 
     // Verify
     const [, aliceAfterA2B] = findReplica(env, alice.id);
@@ -657,21 +649,8 @@ export async function lockAhb(env: Env): Promise<void> {
     // Step 3: Advance time for J-block #2 to process
     console.log('\n⚡ FRAME 11: J-Block #2 processes R2C');
 
-    // After j_broadcast, need to wait for blockDelayMs before J-processor runs
-    // Since lastBlockTimestamp was just set when Block #1 finalized,
-    // we need to advance by MORE than blockDelayMs to trigger Block #2
-    env.timestamp += 500; // Well past 300ms blockDelayMs
-    console.log(`   ⏰ Time advanced: +500ms`);
-
-    await process(env); // Should trigger J-machine processor
-
-    // Step 4: Process j_events from BrowserVM
-    await processJEvents(env);
-
-    // CRITICAL: Process bilateral j_event_claim frame ACKs (same as ahb.ts)
-    await process(env); // Process j_event_claim frame proposals
-    await process(env); // Process ACK responses and commit frames
-    await syncChain(env, 5); // Drain residual ACK/claim traffic before bilateral assertions
+    console.log(`   ⏰ Time advanced via syncChain (> blockDelayMs)`);
+    await syncChain(env, 6);
 
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K
     const [, aliceRep9] = findReplica(env, alice.id);
@@ -902,11 +881,7 @@ export async function lockAhb(env: Env): Promise<void> {
         }]
       }]);
 
-      // Advance time to allow J-block processing
-      env.timestamp += 350; // > blockDelayMs (300ms)
-      await process(env);
-      await processJEvents(env);
-      await process(env);
+      await syncChain(env, 4);
 
       const [, hubAfterReveal] = findReplica(env, hub.id);
       const revealMessage = hubAfterReveal.state.messages.find(m => m.includes('HTLC reveal observed'));
@@ -1252,14 +1227,8 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // STEP 25: Advance time and process J-mempool
     console.log('\n🏦 FRAME 25: Processing J-block...');
-
-    env.timestamp += 350;
-    console.log(`   Time advanced: +350ms (> 300ms blockDelayMs)`);
-
-    await process(env);
-    await processJEvents(env);
-    await process(env);
-    await converge(env);
+    console.log(`   Time advanced via syncChain (> 300ms blockDelayMs)`);
+    await syncChain(env, 5);
     logPending();
 
     // ✅ ASSERT: H-B collateral increased by $200K
@@ -1786,28 +1755,18 @@ export async function lockAhb(env: Env): Promise<void> {
     // STEP 4: Wait for dispute timeout (fast-forward blocks)
     const targetBlock = bobHubAccountAfterStart.activeDispute!.disputeTimeout;
     console.log(`⏳ STEP 4: Waiting for dispute timeout (target block: ${targetBlock})...`);
-    const { createEmptyBatch, encodeJBatch, computeBatchHankoHash } = await import('../j-batch');
-    const { signHashesAsSingleEntity } = await import('../hanko-signing');
+    const providerAny = jadapter.provider as { send?: (method: string, params: unknown[]) => Promise<unknown> };
+    if (typeof providerAny.send !== 'function') {
+      throw new Error('lock-ahb timeout mining requires RPC provider with evm_mine support');
+    }
     while (true) {
-      // Get current block from provider (works for both BrowserVM and RPC)
       const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
       if (currentBlock >= targetBlock) {
         console.log(`✅ Timeout reached at block ${currentBlock}`);
         break;
       }
-      // Mine empty blocks (requires hanko-signed batch)
-      const emptyBatch = createEmptyBatch();
-      const encodedBatch = encodeJBatch(emptyBatch);
-      const chainId = BigInt(jadapter.chainId);
-      const depositoryAddress = jadapter.addresses.depository;
-      const currentNonce = await jadapter.getEntityNonce(bob.id);
-      const nextNonce = currentNonce + 1n;
-      const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
-      const hankos = await signHashesAsSingleEntity(env, bob.id, bob.signer, [batchHash]);
-      const hankoData = hankos[0];
-      if (!hankoData) throw new Error('Failed to build empty batch hanko');
-      await jadapter.processBatch(encodedBatch, hankoData, nextNonce);
-      await process(env); // Let runtime process any events
+      await providerAny.send('evm_mine', []);
+      await process(env);
     }
 
     // Initialize jBatchState if needed (for tracking revealSecrets)

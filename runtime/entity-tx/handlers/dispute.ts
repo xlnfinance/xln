@@ -15,6 +15,7 @@
 
 import { ethers } from 'ethers';
 import type { EntityState, EntityTx, EntityInput, Env, AccountMachine } from '../../types';
+import type { ProofBodyStruct } from '../../typechain/Depository';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddRevealSecret } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
@@ -33,6 +34,88 @@ type BuildArgsOptions = {
   fillRatiosByOfferId?: Map<string, number>;
   leftSecrets?: string[];
   rightSecrets?: string[];
+};
+
+const isProofBodyStruct = (value: unknown): value is ProofBodyStruct => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    Array.isArray(candidate.offdeltas) &&
+    Array.isArray(candidate.tokenIds) &&
+    Array.isArray(candidate.transformers)
+  );
+};
+
+const requireProofBodyStruct = (
+  value: unknown,
+  entityId: string,
+  counterpartyEntityId: string,
+  source: string,
+): ProofBodyStruct => {
+  if (!isProofBodyStruct(value)) {
+    throw new Error(
+      `DISPUTE_FINALIZE_PROOFBODY_INVALID: entity=${entityId} counterparty=${counterpartyEntityId} source=${source}`,
+    );
+  }
+  return value;
+};
+
+const toBigIntStrict = (value: unknown, label: string): bigint => {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' && Number.isInteger(value)) return BigInt(value);
+  if (typeof value === 'string' && /^-?\d+$/.test(value)) return BigInt(value);
+  throw new Error(`DISPUTE_FINALIZE_PROOFBODY_VALUE_INVALID:${label}`);
+};
+
+const requireBytesLike = (value: unknown, label: string): string => {
+  if (typeof value !== 'string' || !value.startsWith('0x')) {
+    throw new Error(`DISPUTE_FINALIZE_PROOFBODY_BYTES_INVALID:${label}`);
+  }
+  return value;
+};
+
+const requireAddressLike = (value: unknown, label: string): string => {
+  if (typeof value !== 'string' || !value.startsWith('0x') || value.length !== 42) {
+    throw new Error(`DISPUTE_FINALIZE_PROOFBODY_ADDRESS_INVALID:${label}`);
+  }
+  return value;
+};
+
+const canonicalizeProofBodyStruct = (
+  value: ProofBodyStruct,
+  entityId: string,
+  counterpartyEntityId: string,
+  source: string,
+): ProofBodyStruct => {
+  const proofBody = requireProofBodyStruct(value, entityId, counterpartyEntityId, source);
+  return {
+    offdeltas: proofBody.offdeltas.map((entry, index) => toBigIntStrict(entry, `${source}.offdeltas[${index}]`)),
+    tokenIds: proofBody.tokenIds.map((entry, index) => toBigIntStrict(entry, `${source}.tokenIds[${index}]`)),
+    transformers: proofBody.transformers.map((transformer, transformerIndex) => ({
+      transformerAddress: requireAddressLike(
+        transformer.transformerAddress,
+        `${source}.transformers[${transformerIndex}].transformerAddress`,
+      ),
+      encodedBatch: requireBytesLike(
+        transformer.encodedBatch,
+        `${source}.transformers[${transformerIndex}].encodedBatch`,
+      ),
+      allowances: transformer.allowances.map((allowance, allowanceIndex) => ({
+        deltaIndex: toBigIntStrict(
+          allowance.deltaIndex,
+          `${source}.transformers[${transformerIndex}].allowances[${allowanceIndex}].deltaIndex`,
+        ),
+        rightAllowance: toBigIntStrict(
+          allowance.rightAllowance,
+          `${source}.transformers[${transformerIndex}].allowances[${allowanceIndex}].rightAllowance`,
+        ),
+        leftAllowance: toBigIntStrict(
+          allowance.leftAllowance,
+          `${source}.transformers[${transformerIndex}].allowances[${allowanceIndex}].leftAllowance`,
+        ),
+      })),
+    })),
+  };
 };
 
 function clampFillRatio(value: number): number {
@@ -696,10 +779,24 @@ export async function handleDisputeFinalize(
   const finalArguments = callerIsLeft ? leftArguments : rightArguments;
   const initialArguments = account.activeDispute.initialArguments || (callerIsLeft ? rightArguments : leftArguments);
 
-  const storedProofBody = account.activeDispute.initialProofbodyHash
+  const storedProofBodyRaw = account.activeDispute.initialProofbodyHash
     ? account.disputeProofBodiesByHash?.[account.activeDispute.initialProofbodyHash]
     : undefined;
-  const shouldUseStoredProof = !!storedProofBody;
+  const currentProofBody = canonicalizeProofBodyStruct(
+    currentProofResult.proofBodyStruct,
+    entityState.entityId,
+    counterpartyEntityId,
+    'current',
+  );
+  const storedProofBody = storedProofBodyRaw
+    ? canonicalizeProofBodyStruct(
+        storedProofBodyRaw,
+        entityState.entityId,
+        counterpartyEntityId,
+        'stored',
+      )
+    : null;
+  const shouldUseStoredProof = storedProofBody !== null;
   if (currentProofResult.proofBodyHash !== account.activeDispute.initialProofbodyHash) {
     console.warn(`⚠️ disputeFinalize: current proofBodyHash != initial (current=${currentProofResult.proofBodyHash.slice(0, 10)}..., initial=${account.activeDispute.initialProofbodyHash.slice(0, 10)}...)`);
     if (!storedProofBody) {
@@ -709,7 +806,7 @@ export async function handleDisputeFinalize(
 
   const finalProofbody = shouldUseStoredProof
     ? storedProofBody
-    : currentProofResult.proofBodyStruct;
+    : currentProofBody;
 
   const finalProof = {
     counterentity: counterpartyEntityId,

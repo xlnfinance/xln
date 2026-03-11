@@ -1,23 +1,14 @@
-type AccountLike = {
-  counterpartyEntityId?: string;
-  leftEntity?: string;
-  rightEntity?: string;
-};
+import type { AccountMachine, EntityReplica, Env } from '@xln/runtime/xln-api';
 
-type ReplicaLike = {
-  entityId?: string;
-  state?: {
-    accounts?: Map<string, AccountLike>;
-  };
-};
+// These helpers operate on validated runtime state only.
+// The only nullable boundary is the outer env reference before a runtime is attached.
+// Do not widen these helpers to ad hoc partial frontend shapes: missing accounts/deltas
+// inside a live replica is a bug and must fail at the real decode/validation layer.
+type EnvLike = Env | null | undefined;
 
-type ReplicaMapLike = Map<string, ReplicaLike> | Record<string, ReplicaLike> | null | undefined;
-type EnvLike = { eReplicas?: ReplicaMapLike } | null | undefined;
-
-function toReplicaEntries(eReplicas: ReplicaMapLike): Array<[string, ReplicaLike]> {
-  if (!eReplicas) return [];
-  if (eReplicas instanceof Map) return Array.from(eReplicas.entries());
-  return Object.entries(eReplicas);
+function toReplicaEntries(envLike: EnvLike): Array<[string, EntityReplica]> {
+  if (!envLike) return [];
+  return Array.from(envLike.eReplicas.entries());
 }
 
 export function normalizeEntityId(value: unknown): string {
@@ -25,7 +16,7 @@ export function normalizeEntityId(value: unknown): string {
 }
 
 function matchesCounterparty(
-  account: AccountLike,
+  account: AccountMachine,
   ownerEntityId: string,
   counterpartyEntityId: string,
 ): boolean {
@@ -33,34 +24,22 @@ function matchesCounterparty(
   const target = normalizeEntityId(counterpartyEntityId);
   if (!target) return false;
 
-  const cp = normalizeEntityId(account?.counterpartyEntityId);
-  if (cp === target) return true;
-
-  const left = normalizeEntityId(account?.leftEntity);
-  const right = normalizeEntityId(account?.rightEntity);
-  if (left && right) {
-    if (left === owner && right === target) return true;
-    if (right === owner && left === target) return true;
-  }
-
-  return false;
+  const left = normalizeEntityId(account.leftEntity);
+  const right = normalizeEntityId(account.rightEntity);
+  return (left === owner && right === target) || (right === owner && left === target);
 }
 
-function resolveCounterpartyFromAccount(account: AccountLike, ownerEntityId: string): string {
-  const cp = normalizeEntityId(account?.counterpartyEntityId);
-  if (cp) return cp;
+function resolveCounterpartyFromAccount(account: AccountMachine, ownerEntityId: string): string {
   const owner = normalizeEntityId(ownerEntityId);
-  const left = normalizeEntityId(account?.leftEntity);
-  const right = normalizeEntityId(account?.rightEntity);
-  if (left && right) {
-    if (left === owner) return right;
-    if (right === owner) return left;
-  }
+  const left = normalizeEntityId(account.leftEntity);
+  const right = normalizeEntityId(account.rightEntity);
+  if (left === owner) return right;
+  if (right === owner) return left;
   return '';
 }
 
-export function getReplicaEntryForEntity(envLike: EnvLike, entityId: string): [string, ReplicaLike] | null {
-  const entries = toReplicaEntries(envLike?.eReplicas);
+export function getReplicaEntryForEntity(envLike: EnvLike, entityId: string): [string, EntityReplica] | null {
+  const entries = toReplicaEntries(envLike);
   const target = normalizeEntityId(entityId);
   for (const [key, replica] of entries) {
     const [replicaEntityId] = String(key).split(':');
@@ -69,7 +48,7 @@ export function getReplicaEntryForEntity(envLike: EnvLike, entityId: string): [s
   return null;
 }
 
-export function getReplicaForEntity(envLike: EnvLike, entityId: string): ReplicaLike | null {
+export function getReplicaForEntity(envLike: EnvLike, entityId: string): EntityReplica | null {
   return getReplicaEntryForEntity(envLike, entityId)?.[1] ?? null;
 }
 
@@ -90,10 +69,10 @@ export function getCounterpartyAccount(
   envLike: EnvLike,
   ownerEntityId: string,
   counterpartyEntityId: string,
-): { key: string; account: AccountLike } | null {
+) : { key: string; account: AccountMachine } | null {
   const replica = getReplicaForEntity(envLike, ownerEntityId);
-  const accounts = replica?.state?.accounts;
-  if (!(accounts instanceof Map)) return null;
+  if (!replica) return null;
+  const accounts = replica.state.accounts;
   const target = normalizeEntityId(counterpartyEntityId);
   for (const [accountKey, account] of accounts.entries()) {
     if (normalizeEntityId(accountKey) === target) {
@@ -117,8 +96,8 @@ export function hasCounterpartyAccount(
 export function getConnectedCounterpartyIds(envLike: EnvLike, ownerEntityId: string): Set<string> {
   const connected = new Set<string>();
   const replica = getReplicaForEntity(envLike, ownerEntityId);
-  const accounts = replica?.state?.accounts;
-  if (!(accounts instanceof Map)) return connected;
+  if (!replica) return connected;
+  const accounts = replica.state.accounts;
   for (const [accountKey, account] of accounts.entries()) {
     const byKey = normalizeEntityId(accountKey);
     if (byKey) connected.add(byKey);

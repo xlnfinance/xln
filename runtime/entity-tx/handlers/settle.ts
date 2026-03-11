@@ -462,6 +462,17 @@ export async function handleSettleExecute(
     newState.jBatchState = initJBatch();
   }
 
+  // Settlement proofs are nonce-bound to the current bilateral account state.
+  // Do not queue them behind an in-flight sentBatch: by the time that batch finalizes,
+  // these proofs can already be stale and the next processBatch will revert on-chain.
+  if (newState.jBatchState.sentBatch) {
+    addMessage(newState, `⏭️ settle_execute skipped: jBatch sentBatch pending`);
+    console.warn(
+      `⚠️ settle_execute skipped: sentBatch pending for ${counterpartyEntityId.slice(-4)} (retry after HankoBatchProcessed)`,
+    );
+    return { newState, outputs, mempoolOps };
+  }
+
   const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
   const leftEntity = isLeft ? entityState.entityId : counterpartyEntityId;
   const rightEntity = isLeft ? counterpartyEntityId : entityState.entityId;

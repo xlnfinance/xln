@@ -227,9 +227,12 @@ export async function runProcessBatchScenario(_existingEnv?: Env): Promise<Env> 
 
   const hubAfterBroadcast = findReplica(env, hub.id)[1];
   const batchHashBeforeFinalize = hubAfterBroadcast.state.jBatchState?.sentBatch?.batchHash;
-  if (jadapter.mode === 'rpc') {
+  if (jadapter.mode === 'rpc' && !hubAfterBroadcast.state.jBatchState?.sentBatch) {
+    const alreadyConfirmed = (hubAfterBroadcast.state.batchHistory?.length || 0) > historyBefore;
+    assert(alreadyConfirmed, 'j_broadcast either latches sentBatch or confirms immediately', env);
+  }
+  if (hubAfterBroadcast.state.jBatchState?.sentBatch) {
     assert(!!batchHashBeforeFinalize, 'batch hash computed for j_broadcast', env);
-    assert(!!hubAfterBroadcast.state.jBatchState?.sentBatch, 'sentBatch latched after submit', env);
   }
 
   await syncChain(env, 6);
