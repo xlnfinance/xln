@@ -30,8 +30,8 @@
   $: inOwnWidthPx = widthPxForUsd(inVisualOwnUsd, usdPerPx);
   $: inCollWidthPx = widthPxForUsd(inVisualCollUsd, usdPerPx);
   $: inCreditWidthPx = widthPxForUsd(inVisualCreditUsd, usdPerPx);
-  $: outWidthPx = outOwnWidthPx + outCollWidthPx + outDebtWidthPx;
-  $: inWidthPx = inOwnWidthPx + inCollWidthPx + inCreditWidthPx;
+  $: outWidthPx = widthPxForUsd(visualScale?.outCapacityUsd ?? 0, usdPerPx);
+  $: inWidthPx = widthPxForUsd(visualScale?.inCapacityUsd ?? 0, usdPerPx);
   $: outCenterWidthStyle = shellWidthStyle(outWidthPx, CENTER_GAP_PX);
   $: inCenterWidthStyle = shellWidthStyle(inWidthPx, CENTER_GAP_PX);
   $: outSideWidthStyle = shellWidthStyle(outWidthPx, SIDES_GAP_PX);
@@ -170,8 +170,8 @@
     width: 100%;
     height: var(--bar-h);
     border-radius: 999px;
-    background: rgba(15, 23, 42, 0.12);
-    box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.12);
+    background: rgba(15, 23, 42, 0.05);
+    box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.08);
   }
 
   .axis,

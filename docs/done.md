@@ -560,3 +560,18 @@
       - pass logs:
         - [/Users/egor/xln/.logs/e2e-parallel/20260311-033340-644/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-033340-644/e2e-shard-00.log)
         - [/Users/egor/xln/.logs/e2e-parallel/20260311-033340-644/e2e-shard-01.log](/Users/egor/xln/.logs/e2e-parallel/20260311-033340-644/e2e-shard-01.log)
+
+- 2026-03-11
+  - Tightened the shared account capacity bar in [DeltaCapacityBar.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/shared/DeltaCapacityBar.svelte):
+    - left and right shell widths now derive directly from `outCapacityUsd` / `inCapacityUsd`
+    - segment shells no longer overstate account size by summing internal colored slices
+    - track background/border were softened so short-capacity shells read as real economic size instead of a full-span bar
+  - Re-verified:
+    - `bun test frontend/src/lib/components/Entity/shared/delta-visual.test.ts`
+    - `bun x tsc --noEmit`
+    - `cd frontend && bunx vite build --mode development`
+    - full isolated E2E suite:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=2 --workers-per-shard=1 --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass logs:
+        - [/Users/egor/xln/.logs/e2e-parallel/20260311-040258-138/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-040258-138/e2e-shard-00.log)
+        - [/Users/egor/xln/.logs/e2e-parallel/20260311-040258-138/e2e-shard-01.log](/Users/egor/xln/.logs/e2e-parallel/20260311-040258-138/e2e-shard-01.log)
