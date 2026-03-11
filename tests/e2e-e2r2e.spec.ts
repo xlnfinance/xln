@@ -3,10 +3,10 @@
  *
  * Flow and goals:
  * 1. Reset to the shared 3-hub baseline and create one fresh browser runtime.
- * 2. Use the visible External tab faucet to mint classic ERC20 funds to the signer EOA.
- * 3. Deposit those external ERC20 funds into Depository.sol through the visible External tab.
+ * 2. Use the visible asset faucet form to mint classic ERC20 funds to the signer EOA.
+ * 3. Deposit those external ERC20 funds into Depository.sol through the visible E→R form.
  * 4. Verify the reserve credit from both saved runtime frame logs and rendered HTML balances.
- * 5. Withdraw part of the reserve balance back to the same external EOA through the visible Reserves tab.
+ * 5. Withdraw part of the reserve balance back to the same external EOA through the visible R→E form.
  * 6. Verify the reserve decrease and external balance recovery from both saved frame logs and rendered HTML.
  *
  * This test exists to prove the user-facing external wallet route is sound end to end:
@@ -41,29 +41,22 @@ type RelayDebugEvent = {
   };
 };
 
-async function openExternalTab(page: Page): Promise<void> {
-  const tab = page.getByTestId('tab-external').first();
+async function openAssetsTab(page: Page): Promise<void> {
+  const tab = page.getByTestId('tab-assets').first();
   await expect(tab).toBeVisible({ timeout: 20_000 });
   await tab.click();
-  await expect(page.getByTestId('external-refresh').first()).toBeVisible({ timeout: 20_000 });
-}
-
-async function openReservesTab(page: Page): Promise<void> {
-  const tab = page.getByTestId('tab-reserves').first();
-  await expect(tab).toBeVisible({ timeout: 20_000 });
-  await tab.click();
-  await expect(page.getByTestId('reserves-refresh').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('asset-ledger-refresh').first()).toBeVisible({ timeout: 20_000 });
 }
 
 async function refreshExternalBalance(page: Page, symbol: string): Promise<number> {
-  await openExternalTab(page);
-  await page.getByTestId('external-refresh').first().click();
+  await openAssetsTab(page);
+  await page.getByTestId('asset-ledger-refresh').first().click();
   return getRenderedExternalBalance(page, symbol);
 }
 
 async function refreshReserveBalance(page: Page, symbol: string): Promise<number> {
-  await openReservesTab(page);
-  await page.getByTestId('reserves-refresh').first().click();
+  await openAssetsTab(page);
+  await page.getByTestId('asset-ledger-refresh').first().click();
   return getRenderedReserveBalance(page, symbol);
 }
 
@@ -175,7 +168,8 @@ test.describe('E2R2E External Reserve Route', () => {
     });
 
     await timedStep('e2r2e.external-faucet', async () => {
-      await openExternalTab(page);
+      await openAssetsTab(page);
+      await page.getByTestId('asset-faucet-symbol').selectOption(symbol);
       await page.getByTestId(`external-faucet-${symbol}`).first().click();
       await expect
         .poll(async () => refreshExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
@@ -185,7 +179,11 @@ test.describe('E2R2E External Reserve Route', () => {
 
     await timedStep('e2r2e.deposit-to-reserve', async () => {
       const sinceTs = Date.now();
-      await openExternalTab(page);
+      const depositWhole = Math.max(1, Math.floor(externalAfterFaucet / 2));
+      await openAssetsTab(page);
+      await page.getByText('E→R').first().click();
+      await page.getByTestId('external-to-reserve-symbol').selectOption(symbol);
+      await page.getByTestId('external-to-reserve-amount').fill(String(depositWhole));
       await page.getByTestId(`external-deposit-${symbol}`).first().click();
 
       await waitForReserveUpdatedDebugEvent(page, {
@@ -208,7 +206,9 @@ test.describe('E2R2E External Reserve Route', () => {
     await timedStep('e2r2e.withdraw-to-external', async () => {
       withdrawWhole = Math.max(1, Math.floor(reserveAfterDeposit / 2));
       const cursor = await getPersistedReceiptCursor(page);
-      await openReservesTab(page);
+      await openAssetsTab(page);
+      await page.getByText('R→E').first().click();
+      await page.getByTestId('reserve-to-external-symbol').selectOption(symbol);
       const withdrawInput = page.getByTestId(`reserve-withdraw-input-${symbol}`).first();
       await expect(withdrawInput).toBeVisible({ timeout: 20_000 });
       await withdrawInput.fill(String(withdrawWhole));

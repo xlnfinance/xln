@@ -61,6 +61,7 @@ import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
+let serverEnv: Env | null = null;
 // Server encryption keypair now managed by relay-local-delivery.ts
 const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
 let coldResetRebuildInFlight: Promise<void> | null = null;
@@ -464,7 +465,7 @@ const ensureHubWalletFunding = async (
 
 const externalWalletApi = createExternalWalletApi({
   getJAdapter: () => globalJAdapter,
-  getRuntimeId: () => String(env?.runtimeId || ''),
+  getRuntimeId: () => String(serverEnv?.runtimeId || ''),
   getTokenCatalog: async () => ensureTokenCatalog(),
   jsonHeaders: JSON_HEADERS,
   faucetSeed: FAUCET_SEED,
@@ -4769,6 +4770,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   // Always initialize runtime - every node needs it
   console.log('[XLN] Initializing runtime...');
   const env = await main(SERVER_RUNTIME_SEED);
+  serverEnv = env;
   console.log('[XLN] Runtime initialized ✓');
   const verboseRuntimeLogs = /^(1|true)$/i.test(process.env.RUNTIME_VERBOSE_LOGS ?? '');
   env.quietRuntimeLogs = !verboseRuntimeLogs;

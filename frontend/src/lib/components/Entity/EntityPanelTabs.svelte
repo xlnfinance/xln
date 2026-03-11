@@ -70,9 +70,10 @@
   export let isLiveOverride: boolean | null = null;
 
   // Tab types
-  type ViewTab = 'external' | 'reserves' | 'accounts' | 'more' | 'settings';
+  type ViewTab = 'assets' | 'accounts' | 'more' | 'settings';
   type MoreTab = 'consensus' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance';
   type AccountWorkspaceTab = 'send' | 'swap' | 'open' | 'activity' | 'settle' | 'configure';
+  type AssetWorkspaceTab = 'faucet' | 'e2r' | 'r2e';
   type ConfigureWorkspaceTab = 'credit' | 'collateral' | 'token';
 
   // Set initial tab based on action
@@ -87,6 +88,7 @@
   let activeTab: ViewTab = getInitialTab();
   let moreTab: MoreTab = 'consensus';
   let accountWorkspaceTab: AccountWorkspaceTab = getInitialAccountWorkspaceTab();
+  let assetWorkspaceTab: AssetWorkspaceTab = 'faucet';
   let configureWorkspaceTab: ConfigureWorkspaceTab = 'credit';
   let workspaceAccountId = '';
   let configureTokenId = 1;
@@ -148,12 +150,13 @@
     const jurisdiction = String(getUrlParamValue(['jId', 'jurisdiction', 'j']) || '').trim();
 
     switch (view) {
+      case 'assets':
       case 'external':
       case 'reserves':
       case 'accounts':
       case 'more':
       case 'settings':
-        activeTab = view;
+        activeTab = (view === 'external' || view === 'reserves') ? 'assets' : view;
         break;
       case 'pay':
       case 'send':
@@ -539,8 +542,66 @@
   let depositingToken: string | null = null; // symbol of token being deposited
   let withdrawingExternalToken: string | null = null; // symbol of token being withdrawn back to EOA
   let collateralFundingToken: string | null = null; // symbol of token being moved to collateral
+  let faucetAssetSymbol = 'USDC';
+  let externalToReserveSymbol = 'USDC';
+  let reserveToExternalSymbol = 'USDC';
+  let externalToReserveAmount = '';
+  let reserveToExternalAmount = '';
+  let transferableAssetOptions: Array<ExternalToken & { tokenId: number }> = [];
+  let assetLedgerRows: AssetLedgerRow[] = [];
+  let accountSpendableByToken = new Map<number, bigint>();
   let reserveCollateralDrafts = new Map<number, string>();
   let reserveExternalDrafts = new Map<number, string>();
+
+  type AssetLedgerRow = {
+    symbol: string;
+    address: string;
+    decimals: number;
+    tokenId: number | undefined;
+    isNative: boolean;
+    externalBalance: bigint;
+    reserveBalance: bigint;
+    accountBalance: bigint;
+    externalUsd: number;
+    reserveUsd: number;
+    accountUsd: number;
+    totalUsd: number;
+  };
+
+  function isReserveTransferToken(token: ExternalToken): token is ExternalToken & { tokenId: number } {
+    return typeof token.tokenId === 'number' && token.tokenId > 0;
+  }
+
+  function choosePreferredAssetSymbol(tokens: ExternalToken[]): string {
+    const reserveTokens = tokens.filter(isReserveTransferToken);
+    const usdc = reserveTokens.find((token) => token.symbol === 'USDC');
+    if (usdc) return usdc.symbol;
+    if (reserveTokens[0]) return reserveTokens[0].symbol;
+    const eth = tokens.find((token) => token.symbol === 'ETH');
+    if (eth) return eth.symbol;
+    return tokens[0]?.symbol ?? 'USDC';
+  }
+
+  function findExternalTokenBySymbol(symbol: string): ExternalToken | null {
+    const normalized = symbol.trim().toUpperCase();
+    return externalTokens.find((token) => token.symbol.toUpperCase() === normalized) ?? null;
+  }
+
+  function findReserveTransferTokenBySymbol(symbol: string): (ExternalToken & { tokenId: number }) | null {
+    const token = findExternalTokenBySymbol(symbol);
+    if (!token || !isReserveTransferToken(token)) return null;
+    return token;
+  }
+
+  function parsePositiveAssetAmount(raw: string, token: { decimals: number }, maxAmount?: bigint): bigint {
+    const trimmed = raw.trim();
+    if (!trimmed) throw new Error('Amount is required');
+    if (!/^(?:\d+|\d+\.\d*|\.\d+)$/.test(trimmed)) throw new Error('Invalid amount format');
+    const parsed = parseTokenAmount(trimmed, token.decimals);
+    if (parsed <= 0n) throw new Error('Amount must be greater than zero');
+    if (typeof maxAmount === 'bigint' && parsed > maxAmount) throw new Error('Amount exceeds available balance');
+    return parsed;
+  }
 
   // Faucet: fund entity reserves with test tokens
   function resolveReserveTokenMeta(tokenId: number, symbolHint?: string): { tokenId: number; symbol: string; decimals: number } {
@@ -643,7 +704,7 @@
     return new EthersWallet(hexlify(privKey)).address;
   }
 
-  async function withdrawReserveToExternal(tokenId: number): Promise<void> {
+  async function withdrawReserveToExternal(tokenId: number, amountOverride?: bigint): Promise<void> {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
     if (!activeIsLive) {
@@ -657,7 +718,7 @@
       const env = activeEnv;
       if (!env) throw new Error('Environment not ready');
       const signerId = requireSignerIdForEntity(env, entityId, 'reserve-to-external');
-      const amount = parsePositiveReserveExternalAmount(tokenId);
+      const amount = amountOverride ?? parsePositiveReserveExternalAmount(tokenId);
       const externalAddress = await resolveCurrentExternalAddress();
       const receivingEntity = zeroPadValue(externalAddress, 32).toLowerCase();
 
@@ -911,6 +972,93 @@
 
   $: onchainReserves = buildOnchainReserves(replica?.state?.reserves, externalTokens);
 
+  $: transferableAssetOptions = externalTokens.filter(isReserveTransferToken);
+  $: accountSpendableByToken = (() => {
+    const totals = new Map<number, bigint>();
+    const accounts = replica?.state?.accounts;
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').toLowerCase();
+    if (!accounts || !entityId || !activeXlnFunctions?.deriveDelta) return totals;
+    for (const [counterpartyId, account] of accounts.entries()) {
+      if (!(account?.deltas instanceof Map)) continue;
+      const isLeftEntity = entityId < String(counterpartyId || '').toLowerCase();
+      for (const [tokenId, delta] of account.deltas.entries()) {
+        const numericTokenId = Number(tokenId);
+        if (!Number.isFinite(numericTokenId) || numericTokenId <= 0) continue;
+        const derived = activeXlnFunctions.deriveDelta(delta, isLeftEntity);
+        const spendable = derived?.outCapacity ?? 0n;
+        if (spendable <= 0n) continue;
+        totals.set(numericTokenId, (totals.get(numericTokenId) ?? 0n) + spendable);
+      }
+    }
+    return totals;
+  })();
+  $: assetLedgerRows = (() => {
+    const rows = new Map<string, AssetLedgerRow>();
+    for (const token of externalTokens) {
+      const reserveBalance = isReserveTransferToken(token)
+        ? (onchainReserves.get(token.tokenId) ?? 0n)
+        : 0n;
+      const accountBalance = isReserveTransferToken(token)
+        ? (accountSpendableByToken.get(token.tokenId) ?? 0n)
+        : 0n;
+      const externalUsd = getExternalValue(token);
+      const reserveUsd = isReserveTransferToken(token)
+        ? getAssetValue(token.tokenId, reserveBalance, token.symbol)
+        : 0;
+      const accountUsd = isReserveTransferToken(token)
+        ? getAssetValue(token.tokenId, accountBalance, token.symbol)
+        : 0;
+      rows.set(token.symbol, {
+        symbol: token.symbol,
+        address: token.address,
+        decimals: token.decimals,
+        tokenId: token.tokenId,
+        isNative: token.symbol === 'ETH' || token.address === ZeroAddress,
+        externalBalance: token.balance,
+        reserveBalance,
+        accountBalance,
+        externalUsd,
+        reserveUsd,
+        accountUsd,
+        totalUsd: externalUsd + reserveUsd + accountUsd,
+      });
+    }
+    for (const [tokenId, reserveBalance] of onchainReserves.entries()) {
+      const numericId = Number(tokenId);
+      if (!Number.isFinite(numericId) || numericId <= 0) continue;
+      const existing = Array.from(rows.values()).find((row) => row.tokenId === numericId);
+      if (existing) continue;
+      const info = resolveReserveTokenMeta(numericId);
+      const reserveUsd = getAssetValue(numericId, reserveBalance, info.symbol);
+      rows.set(info.symbol, {
+        symbol: info.symbol,
+        address: '',
+        decimals: info.decimals,
+        tokenId: numericId,
+        isNative: false,
+        externalBalance: 0n,
+        reserveBalance,
+        accountBalance: accountSpendableByToken.get(numericId) ?? 0n,
+        externalUsd: 0,
+        reserveUsd,
+        accountUsd: getAssetValue(numericId, accountSpendableByToken.get(numericId) ?? 0n, info.symbol),
+        totalUsd: reserveUsd + getAssetValue(numericId, accountSpendableByToken.get(numericId) ?? 0n, info.symbol),
+      });
+    }
+    return Array.from(rows.values()).sort((left, right) => {
+      const usdDiff = right.totalUsd - left.totalUsd;
+      if (Math.abs(usdDiff) > 0.0001) return usdDiff;
+      return left.symbol.localeCompare(right.symbol);
+    });
+  })();
+
+  $: {
+    const preferred = choosePreferredAssetSymbol(externalTokens);
+    if (!findExternalTokenBySymbol(faucetAssetSymbol)) faucetAssetSymbol = preferred;
+    if (!findReserveTransferTokenBySymbol(externalToReserveSymbol)) externalToReserveSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
+    if (!findReserveTransferTokenBySymbol(reserveToExternalSymbol)) reserveToExternalSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
+  }
+
   $: if (pendingReserveFaucets.length > 0) {
     const now = Date.now();
     const remaining: typeof pendingReserveFaucets = [];
@@ -1021,10 +1169,11 @@
   }
 
   // Deposit ERC20 token to entity reserve
-  async function depositToReserve(token: ExternalToken) {
+  async function depositToReserve(token: ExternalToken, amountOverride?: bigint) {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = tab.signerId;
-    if (!entityId || !signerId || token.balance <= 0n) return;
+    const amount = amountOverride ?? token.balance;
+    if (!entityId || !signerId || amount <= 0n) return;
     if (!activeIsLive) {
       toasts.error('Deposit requires LIVE mode');
       return;
@@ -1045,7 +1194,7 @@
       if (!privKey) throw new Error(`No registered signer key for ${signerId}`);
 
       // Deposit all available balance
-      await jadapter.externalTokenToReserve(privKey, entityId, token.address, token.balance);
+      await jadapter.externalTokenToReserve(privKey, entityId, token.address, amount);
 
       console.log(`[EntityPanel] Deposited ${token.symbol} to entity reserves`);
 
@@ -1057,6 +1206,37 @@
       toasts.error(`Deposit failed: ${message}`);
     } finally {
       depositingToken = null;
+    }
+  }
+
+  async function submitExternalToReserve(): Promise<void> {
+    const token = findReserveTransferTokenBySymbol(externalToReserveSymbol);
+    if (!token) {
+      toasts.error('Select ERC20 asset first');
+      return;
+    }
+    try {
+      const amount = parsePositiveAssetAmount(externalToReserveAmount, token, token.balance);
+      await depositToReserve(token, amount);
+      externalToReserveAmount = '';
+    } catch (err) {
+      toasts.error(`Deposit failed: ${toErrorMessage(err, 'Unknown error')}`);
+    }
+  }
+
+  async function submitReserveToExternal(): Promise<void> {
+    const token = findReserveTransferTokenBySymbol(reserveToExternalSymbol);
+    if (!token) {
+      toasts.error('Select reserve asset first');
+      return;
+    }
+    try {
+      const reserveAmount = onchainReserves.get(token.tokenId) ?? 0n;
+      const amount = parsePositiveAssetAmount(reserveToExternalAmount, token, reserveAmount);
+      await withdrawReserveToExternal(token.tokenId, amount);
+      reserveToExternalAmount = '';
+    } catch (err) {
+      toasts.error(`Withdraw failed: ${toErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -1262,6 +1442,19 @@
       console.error('[EntityPanel] External faucet failed:', err);
       toasts.error(`External faucet failed: ${(err as Error).message}`);
     }
+  }
+
+  async function submitAssetFaucet(target: 'external' | 'reserve'): Promise<void> {
+    if (target === 'external') {
+      await faucetExternalTokens(faucetAssetSymbol);
+      return;
+    }
+    const token = findReserveTransferTokenBySymbol(faucetAssetSymbol);
+    if (!token) {
+      toasts.error('Reserve faucet supports ERC20 assets only');
+      return;
+    }
+    await faucetReserves(token.tokenId, token.symbol);
   }
 
   function refreshBalances() {
@@ -1545,6 +1738,10 @@
     return '$' + value.toFixed(2);
   }
 
+  function formatApproxUsd(value: number): string {
+    return `~${formatCompact(value)}`;
+  }
+
   function getAssetPrice(symbol: string): number {
     return getAssetUsdPrice(symbol);
   }
@@ -1799,8 +1996,7 @@
   })();
 
   const tabs: IconBadgeTabConfig<ViewTab>[] = [
-    { id: 'external', icon: Wallet, label: 'External' },
-    { id: 'reserves', icon: Landmark, label: 'Reserves' },
+    { id: 'assets', icon: Landmark, label: 'Assets' },
     { id: 'accounts', icon: Users, label: 'Accounts', showBadge: true, badgeType: 'pending' },
     { id: 'more', icon: MoreHorizontal, label: 'More' },
     { id: 'settings', icon: SettingsIcon, label: 'Settings' },
@@ -1902,56 +2098,15 @@
         <div class="hero-right">
           <div class="hero-networth">{formatCompact(netWorth)}</div>
           <div class="hero-label">Net Worth</div>
+          <div class="hero-inline-metrics">
+            <span class="hero-inline-chip">External {formatCompact(externalTotal)}</span>
+            <span class="hero-inline-chip" data-testid="reserves-card-value">Reserves {formatCompact(reservesTotal)}</span>
+            <span class="hero-inline-chip">Accounts {formatCompact(accountsData.total)}</span>
+            {#if accountsData.outPeerDebt > 0}
+              <span class="hero-inline-chip debt" data-testid="accounts-card-owed">owed {formatCompact(accountsData.outPeerDebt)}</span>
+            {/if}
+          </div>
         </div>
-      </section>
-
-      <!-- Breakdown Cards -->
-      <section class="breakdown">
-        <button class="breakdown-card" class:active={activeTab === 'external'} on:click={() => activeTab = 'external'}>
-          <div class="card-icon">💳</div>
-          <div class="card-body">
-            <div class="card-value">{formatCompact(externalTotal)}</div>
-            <div class="card-label">External</div>
-            <div class="card-sub">{externalTokens.filter(t => t.balance > 0n).length} token{externalTokens.filter(t => t.balance > 0n).length !== 1 ? 's' : ''}</div>
-          </div>
-        </button>
-        <button class="breakdown-card" class:active={activeTab === 'reserves'} on:click={() => activeTab = 'reserves'}>
-          <div class="card-icon">🏦</div>
-          <div class="card-body">
-            <div class="card-value" data-testid="reserves-card-value">{formatCompact(reservesTotal)}</div>
-            <div class="card-label">Reserves</div>
-            <div class="card-sub">
-              {Array.from(onchainReserves.values()).filter(v => v > 0n).length}
-              token{Array.from(onchainReserves.values()).filter(v => v > 0n).length !== 1 ? 's' : ''}
-            </div>
-          </div>
-        </button>
-        <button class="breakdown-card wide" class:active={activeTab === 'accounts'} on:click={() => activeTab = 'accounts'}>
-          <div class="card-icon">⚡</div>
-          <div class="card-body">
-            <div class="card-value" data-testid="accounts-card-value">{formatCompact(accountsData.total)}</div>
-            <div class="card-label">Accounts</div>
-            <div class="card-sub">
-              {#if accountsData.count > 0}
-                {accountsData.count} channel{accountsData.count !== 1 ? 's' : ''}
-                {#if accountsData.outPeerDebt > 0}
-                  <span class="accounts-breakdown debt" data-testid="accounts-card-owed">owed {formatCompact(accountsData.outPeerDebt)}</span>
-                {/if}
-                {#if accountsData.outCollateral > 0}
-                  <span class="accounts-breakdown coll">coll {formatCompact(accountsData.outCollateral)}</span>
-                {/if}
-                {#if accountsData.outOurCredit > 0}
-                  <span class="accounts-breakdown credit">credit {formatCompact(accountsData.outOurCredit)}</span>
-                {/if}
-                {#if accountsData.inbound > 0}
-                  <span class="accounts-breakdown in-capacity">in {formatCompact(accountsData.inbound)}</span>
-                {/if}
-              {:else}
-                No accounts yet
-              {/if}
-            </div>
-          </div>
-        </button>
       </section>
 
       <!-- Tab Bar -->
@@ -1991,22 +2146,24 @@
 
       <!-- Tab Content -->
       <section class="content">
-        {#if activeTab === 'external'}
-          <!-- External Tokens (ERC20 wallet balances) - Horizontal Table -->
+        {#if activeTab === 'assets'}
           <div class="tab-header-row">
-            <h4 class="section-head" style="margin: 0;">External Tokens (ERC20)</h4>
+            <h4 class="section-head" style="margin: 0;">Assets Ledger</h4>
             <div class="header-actions">
               <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 15000} on:change={updateBalanceRefresh}>
                 {#each REFRESH_OPTIONS as opt}
                   <option value={opt.value}>{opt.label}</option>
                 {/each}
               </select>
-              <button class="btn-refresh-small" data-testid="external-refresh" on:click={() => fetchExternalTokens()} disabled={externalTokensLoading}>
+              <button class="btn-refresh-small" data-testid="asset-ledger-refresh" on:click={() => refreshBalances()} disabled={externalTokensLoading}>
                 {externalTokensLoading ? '...' : 'Refresh'}
               </button>
             </div>
           </div>
-          <p class="muted wallet-label">Wallet: {tab.signerId?.slice(0, 8)}...{tab.signerId?.slice(-4)}</p>
+          <div class="asset-ledger-meta">
+            <p class="muted wallet-label">EOA: {tab.signerId || '-'}</p>
+            <p class="muted wallet-label">Entity: {replica?.state?.entityId || tab.entityId}</p>
+          </div>
 
           {#if externalTokensLoading}
             <div class="loading-row">
@@ -2014,188 +2171,152 @@
               <span>Loading...</span>
             </div>
           {:else}
-            <!-- Table Header -->
-            <div class="token-table-header">
-              <span class="col-token">Token</span>
-              <span class="col-balance">Balance</span>
-              <span class="col-value">Value</span>
-              <span class="col-actions">Actions</span>
+            <div class="token-table-header asset-ledger-header">
+              <span class="col-token">Asset</span>
+              <span class="col-balance">External</span>
+              <span class="col-balance">Reserve</span>
+              <span class="col-balance">Accounts</span>
             </div>
-            <!-- Table Rows -->
-            <div class="token-table">
-              {#each externalTokens as token}
-                <div class="token-table-row" class:has-balance={token.balance > 0n} data-testid={`external-row-${token.symbol}`}>
+            <div class="token-table asset-ledger-table">
+              {#each assetLedgerRows as row}
+                <div class="token-table-row asset-ledger-row" class:has-balance={row.externalBalance > 0n || row.reserveBalance > 0n} data-testid={`asset-row-${row.symbol}`}>
                   <div class="col-token">
-                    <span class="token-icon-small" class:usdc={token.symbol === 'USDC'} class:weth={token.symbol === 'WETH'} class:usdt={token.symbol === 'USDT'}>
-                      {token.symbol.slice(0, 1)}
+                    <span class="token-icon-small" class:usdc={row.symbol === 'USDC'} class:weth={row.symbol === 'WETH' || row.symbol === 'ETH'} class:usdt={row.symbol === 'USDT'}>
+                      {row.symbol.slice(0, 1)}
                     </span>
-                    <span class="token-name">{token.symbol}</span>
+                    <div class="asset-name-block">
+                      <span class="token-name">{row.symbol}</span>
+                      <span class="asset-kind">{row.isNative ? 'Native gas' : 'ERC20 / reserve'}</span>
+                    </div>
                   </div>
-                  <div class="col-balance">
-                    <span class="balance-text" class:zero={token.balance === 0n} data-testid={`external-balance-${token.symbol}`}>
-                      {formatAmount(token.balance, token.decimals)}
+                  <div class="col-balance asset-balance-block">
+                    <span class="balance-text" class:zero={row.externalBalance === 0n} data-testid={`external-balance-${row.symbol}`}>
+                      {formatAmount(row.externalBalance, row.decimals)}
                     </span>
+                    <span class="value-text subtle">{formatApproxUsd(row.externalUsd)}</span>
                   </div>
-                  <div class="col-value">
-                    <span class="value-text">{formatCompact(getExternalValue(token))}</span>
+                  <div class="col-balance asset-balance-block">
+                    <span class="balance-text" class:zero={row.reserveBalance === 0n} data-testid={`reserve-balance-${row.symbol}`}>
+                      {row.tokenId && row.tokenId > 0 ? formatAmount(row.reserveBalance, row.decimals) : '—'}
+                    </span>
+                    <span class="value-text subtle">{row.tokenId && row.tokenId > 0 ? formatApproxUsd(row.reserveUsd) : '—'}</span>
                   </div>
-                  <div class="col-actions">
-                    <button
-                      class="btn-table-action faucet"
-                      data-testid={`external-faucet-${token.symbol}`}
-                      on:click={() => faucetExternalTokens(token.symbol)}
-                      title="Faucet"
-                    >
-                      Faucet
-                    </button>
-                    <button
-                      class="btn-table-action deposit"
-                      data-testid={`external-deposit-${token.symbol}`}
-                      on:click={() => depositToReserve(token)}
-                      disabled={depositingToken === token.symbol || token.balance === 0n || token.symbol === 'ETH'}
-                      title={token.symbol === 'ETH' ? 'ETH deposit not supported (use WETH)' : 'Deposit to Reserve'}
-                    >
-                      {depositingToken === token.symbol ? '...' : 'Deposit to Reserve'}
-                    </button>
+                  <div class="col-balance asset-balance-block">
+                    <span class="balance-text" class:zero={row.accountBalance === 0n} data-testid={`account-spendable-${row.symbol}`}>
+                      {row.tokenId && row.tokenId > 0 ? formatAmount(row.accountBalance, row.decimals) : '—'}
+                    </span>
+                    <span class="value-text subtle">{row.tokenId && row.tokenId > 0 ? formatApproxUsd(row.accountUsd) : '—'}</span>
                   </div>
                 </div>
               {/each}
             </div>
-          {/if}
-
-        {:else if activeTab === 'reserves'}
-          <!-- Reserves Detail (Depository.sol balances) - Horizontal Table -->
-          <div class="tab-header-row">
-            <h4 class="section-head" style="margin: 0;">On-Chain Reserves</h4>
-            <div class="header-actions">
-              <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 15000} on:change={updateBalanceRefresh}>
-                {#each REFRESH_OPTIONS as opt}
-                  <option value={opt.value}>{opt.label}</option>
-                {/each}
-              </select>
-              <button class="btn-refresh-small" data-testid="reserves-refresh" on:click={() => refreshBalances()}>
-                Refresh
+            <nav class="account-workspace-tabs asset-workspace-tabs" aria-label="Asset workspace">
+              <button class="account-workspace-tab" class:active={assetWorkspaceTab === 'faucet'} on:click={() => assetWorkspaceTab = 'faucet'}>
+                <span>Faucet</span>
               </button>
-            </div>
-          </div>
-          <p class="muted wallet-label">Entity: {replica?.state?.entityId || tab.entityId}</p>
-          <p class="muted wallet-label">
-            {#if selectedAccountId}
-              Target account: {selectedAccountId}
-            {:else}
-              Select an account in Accounts to queue reserve collateral directly.
-            {/if}
-          </p>
+              <button class="account-workspace-tab" class:active={assetWorkspaceTab === 'e2r'} on:click={() => assetWorkspaceTab = 'e2r'}>
+                <span>E→R</span>
+              </button>
+              <button class="account-workspace-tab" class:active={assetWorkspaceTab === 'r2e'} on:click={() => assetWorkspaceTab = 'r2e'}>
+                <span>R→E</span>
+              </button>
+            </nav>
 
-          <!-- Table Header -->
-          <div class="token-table-header">
-            <span class="col-token">Token</span>
-            <span class="col-balance">Balance</span>
-            <span class="col-value">Value</span>
-            <span class="col-actions">Actions</span>
-          </div>
-          <!-- Table Rows -->
-          <div class="token-table">
-            {#each Array.from(onchainReserves.entries()) as [tokenId, amount]}
-              {@const info = resolveReserveTokenMeta(Number(tokenId))}
-              {@const value = getAssetValue(Number(tokenId), amount)}
-              <div class="token-table-row" class:has-balance={amount > 0n} data-testid={`reserve-row-${info.symbol}`}>
-                <div class="col-token">
-                  <span class="token-icon-small" class:usdc={info.symbol === 'USDC'} class:weth={info.symbol === 'WETH' || info.symbol === 'ETH'} class:usdt={info.symbol === 'USDT'}>
-                    {info.symbol.slice(0, 1)}
-                  </span>
-                  <span class="token-name">{info.symbol}</span>
-                </div>
-                <div class="col-balance">
-                  <span class="balance-text" class:zero={amount === 0n} data-testid={`reserve-balance-${info.symbol}`}>
-                    {formatAmount(amount, info.decimals)}
-                  </span>
-                </div>
-                <div class="col-value">
-                  <span class="value-text">{formatCompact(value)}</span>
-                </div>
-                  <div class="col-actions">
-                  <button
-                    class="btn-table-action faucet"
-                    data-testid={`reserve-faucet-${info.symbol}`}
-                    on:click={() => faucetReserves(Number(tokenId), info.symbol)}
-                  >
-                    Faucet
-                  </button>
-                    <button
-                      class="btn-table-action collateral"
-                      on:click={() => openOnchainDeposit(Number(tokenId))}
-                      disabled={collateralFundingToken === info.symbol}
-                    title="Open settlement flow"
-                  >
-                    {collateralFundingToken === info.symbol ? '...' : 'Deposit to Account'}
-                  </button>
-                    <div class="reserve-collateral-editor">
-                    <input
-                      class="reserve-collateral-input"
-                      type="text"
-                      value={readReserveCollateralDraft(Number(tokenId))}
-                      placeholder="Partial amount"
-                      disabled={collateralFundingToken === info.symbol || amount === 0n || !selectedAccountId}
-                      on:input={(event) => writeReserveCollateralDraft(Number(tokenId), (event.target as HTMLInputElement).value)}
-                    />
-                    <div class="reserve-collateral-presets">
-                      {#each [25, 50, 75, 100] as percent}
-                        <button
-                          type="button"
-                          class="reserve-preset"
-                          disabled={collateralFundingToken === info.symbol || amount === 0n || !selectedAccountId}
-                          on:click={() => applyReserveCollateralPreset(Number(tokenId), percent as 25 | 50 | 75 | 100)}
-                        >
-                          {percent}%
-                        </button>
+            <section class="asset-action-card">
+              {#if assetWorkspaceTab === 'faucet'}
+                <h4 class="section-head">Faucet</h4>
+                <p class="muted">Top up wallet ERC20 or fund entity reserve directly for fast testing.</p>
+                <div class="asset-form-grid">
+                  <label class="asset-field">
+                    <span>Asset</span>
+                    <select bind:value={faucetAssetSymbol} data-testid="asset-faucet-symbol">
+                      {#each externalTokens as token}
+                        <option value={token.symbol}>{token.symbol}</option>
                       {/each}
-                    </div>
-                    <button
-                      class="btn-table-action collateral partial"
-                      type="button"
-                      on:click={() => reserveToCollateralPartial(Number(tokenId))}
-                      disabled={collateralFundingToken === info.symbol || !readReserveCollateralDraft(Number(tokenId)).trim() || !selectedAccountId}
-                    >
-                      Queue Partial
-                    </button>
-                    </div>
-                    <div class="reserve-collateral-editor reserve-external-editor">
-                      <input
-                        class="reserve-collateral-input"
-                        data-testid={`reserve-withdraw-input-${info.symbol}`}
-                        type="text"
-                        value={readReserveExternalDraft(Number(tokenId))}
-                        placeholder="Withdraw to external"
-                        disabled={withdrawingExternalToken === info.symbol || amount === 0n}
-                        on:input={(event) => writeReserveExternalDraft(Number(tokenId), (event.target as HTMLInputElement).value)}
-                      />
-                      <div class="reserve-collateral-presets">
-                        {#each [25, 50, 75, 100] as percent}
-                          <button
-                            type="button"
-                            class="reserve-preset"
-                            disabled={withdrawingExternalToken === info.symbol || amount === 0n}
-                            on:click={() => applyReserveExternalPreset(Number(tokenId), percent as 25 | 50 | 75 | 100)}
-                          >
-                            {percent}%
-                          </button>
-                        {/each}
-                      </div>
-                      <button
-                        class="btn-table-action deposit partial"
-                        data-testid={`reserve-withdraw-${info.symbol}`}
-                        type="button"
-                        on:click={() => withdrawReserveToExternal(Number(tokenId))}
-                        disabled={withdrawingExternalToken === info.symbol || !readReserveExternalDraft(Number(tokenId)).trim()}
-                      >
-                        {withdrawingExternalToken === info.symbol ? '...' : 'Withdraw to External'}
-                      </button>
-                    </div>
-                  </div>
+                    </select>
+                  </label>
                 </div>
-              {/each}
-          </div>
+                <div class="asset-action-row">
+                  <button class="btn-table-action faucet" data-testid={`external-faucet-${faucetAssetSymbol}`} on:click={() => submitAssetFaucet('external')}>
+                    Faucet External
+                  </button>
+                  <button
+                    class="btn-table-action deposit"
+                    data-testid={`reserve-faucet-${faucetAssetSymbol}`}
+                    on:click={() => submitAssetFaucet('reserve')}
+                    disabled={!findReserveTransferTokenBySymbol(faucetAssetSymbol)}
+                    title={!findReserveTransferTokenBySymbol(faucetAssetSymbol) ? 'Reserve faucet supports ERC20 assets only' : 'Faucet reserve'}
+                  >
+                    Faucet Reserve
+                  </button>
+                </div>
+              {:else if assetWorkspaceTab === 'e2r'}
+                <h4 class="section-head">External To Reserve</h4>
+                <p class="muted">Deposit ERC20 from your signer wallet into entity reserves.</p>
+                <div class="asset-form-grid">
+                  <label class="asset-field">
+                    <span>Asset</span>
+                    <select bind:value={externalToReserveSymbol} data-testid="external-to-reserve-symbol">
+                      {#each transferableAssetOptions as token}
+                        <option value={token.symbol}>{token.symbol}</option>
+                      {/each}
+                    </select>
+                  </label>
+                  <label class="asset-field">
+                    <span>Amount</span>
+                    <input
+                      type="text"
+                      bind:value={externalToReserveAmount}
+                      placeholder="0.00"
+                      data-testid="external-to-reserve-amount"
+                    />
+                  </label>
+                </div>
+                <div class="asset-action-row">
+                  <button
+                    class="btn-table-action deposit"
+                    data-testid={`external-deposit-${externalToReserveSymbol}`}
+                    on:click={submitExternalToReserve}
+                    disabled={depositingToken === externalToReserveSymbol || !externalToReserveAmount.trim()}
+                  >
+                    {depositingToken === externalToReserveSymbol ? 'Depositing...' : 'Deposit To Reserve'}
+                  </button>
+                </div>
+              {:else}
+                <h4 class="section-head">Reserve To External</h4>
+                <p class="muted">Withdraw ERC20 from reserve back to your signer wallet.</p>
+                <div class="asset-form-grid">
+                  <label class="asset-field">
+                    <span>Asset</span>
+                    <select bind:value={reserveToExternalSymbol} data-testid="reserve-to-external-symbol">
+                      {#each transferableAssetOptions as token}
+                        <option value={token.symbol}>{token.symbol}</option>
+                      {/each}
+                    </select>
+                  </label>
+                  <label class="asset-field">
+                    <span>Amount</span>
+                    <input
+                      type="text"
+                      bind:value={reserveToExternalAmount}
+                      placeholder="0.00"
+                      data-testid={`reserve-withdraw-input-${reserveToExternalSymbol}`}
+                    />
+                  </label>
+                </div>
+                <div class="asset-action-row">
+                  <button
+                    class="btn-table-action deposit"
+                    data-testid={`reserve-withdraw-${reserveToExternalSymbol}`}
+                    on:click={submitReserveToExternal}
+                    disabled={withdrawingExternalToken === reserveToExternalSymbol || !reserveToExternalAmount.trim()}
+                  >
+                    {withdrawingExternalToken === reserveToExternalSymbol ? 'Withdrawing...' : 'Withdraw To External'}
+                  </button>
+                </div>
+              {/if}
+            </section>
+          {/if}
 
         {:else if activeTab === 'accounts'}
           <div class="accounts-selector-row">
@@ -2683,7 +2804,9 @@
     --panel-gutter-x: 16px;
     display: flex;
     flex-direction: column;
+    width: min(100%, 1520px);
     height: 100%;
+    margin: 0 auto;
     background: #0a0a0a;
     color: #e5e5e5;
     font-family: 'Inter', -apple-system, sans-serif;
@@ -2876,102 +2999,31 @@
     font-weight: 500;
   }
 
-  /* Breakdown Cards */
-  .breakdown {
+  .hero-inline-metrics {
     display: flex;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--panel-gutter-x);
-    border-bottom: 1px solid #18181b;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
   }
 
-  .breakdown-card {
-    flex: 1;
-    padding: 14px;
-    background: #18181b;
+  .hero-inline-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
     border: 1px solid #27272a;
-    border-radius: 10px;
-    text-align: left;
-    cursor: pointer;
-    transition: all 0.15s;
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-  }
-
-  .breakdown-card:hover {
-    border-color: #3f3f46;
-    background: #1c1c20;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  }
-
-  .breakdown-card.active {
-    border-color: #fbbf24;
-    background: linear-gradient(135deg, rgba(251, 191, 36, 0.08) 0%, rgba(251, 191, 36, 0.02) 100%);
-    box-shadow: 0 0 12px rgba(251, 191, 36, 0.06);
-  }
-
-  .breakdown-card.wide {
-    flex: 1.3;
-  }
-
-  .card-icon {
-    font-size: 18px;
-    flex-shrink: 0;
-    margin-top: 1px;
-    filter: grayscale(0.3);
-  }
-
-  .card-body {
-    min-width: 0;
-    flex: 1;
-  }
-
-  .card-value {
+    background: #111115;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 17px;
-    font-weight: 700;
-    color: #fafaf9;
-    letter-spacing: -0.02em;
-    line-height: 1.1;
-  }
-
-  .card-label {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
-    color: #a1a1aa;
-    margin-top: 3px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    color: #e7e5e4;
+    white-space: nowrap;
   }
 
-  .card-sub {
-    font-size: 10px;
-    color: #52525b;
-    margin-top: 4px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .accounts-breakdown {
-    color: #71717a;
-    text-transform: none;
-  }
-  .accounts-breakdown.debt {
-    color: #f87171;
-  }
-  .accounts-breakdown.coll {
-    color: #34d399;
-  }
-  .accounts-breakdown.credit {
-    color: #a1a1aa;
-  }
-  .accounts-breakdown.in-capacity {
-    color: #52525b;
-    opacity: 0.8;
-    border-left: 1px solid #27272a;
-    padding-left: 6px;
-    margin-left: 2px;
+  .hero-inline-chip.debt {
+    color: #f59e0b;
   }
 
   /* Portfolio - legacy, keep btn-faucet for tab content */
@@ -4131,6 +4183,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     margin-bottom: 10px;
   }
 
@@ -4181,6 +4234,14 @@
   .wallet-label {
     margin-bottom: 12px;
     font-family: 'JetBrains Mono', monospace;
+    overflow-wrap: anywhere;
+  }
+
+  .asset-ledger-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 16px;
+    margin-bottom: 12px;
   }
 
   .loading-row {
@@ -4261,6 +4322,79 @@
     text-align: right;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
+  }
+
+  .asset-ledger-header,
+  .asset-ledger-row {
+    grid-template-columns: minmax(120px, 180px) repeat(3, minmax(0, 1fr));
+  }
+
+  .asset-ledger-table {
+    overflow-x: auto;
+  }
+
+  .asset-name-block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .asset-kind {
+    font-size: 10px;
+    color: #57534e;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .asset-balance-block {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+  }
+
+  .subtle {
+    color: #78716c;
+  }
+
+  .asset-workspace-tabs {
+    margin-top: 16px;
+  }
+
+  .asset-action-card {
+    margin-top: 12px;
+    padding: 16px;
+    background: linear-gradient(180deg, rgba(28, 25, 23, 0.96), rgba(20, 18, 16, 0.96));
+    border: 1px solid #292524;
+    border-radius: 10px;
+  }
+
+  .asset-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  .asset-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .asset-field span {
+    font-size: 10px;
+    color: #78716c;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .asset-action-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 14px;
   }
 
   .col-actions {
@@ -4512,12 +4646,41 @@
       --space-3: 12px;
     }
 
-    .breakdown {
-      flex-direction: column;
+    .hero {
+      align-items: flex-start;
+      gap: 12px;
     }
 
-    .breakdown-card.wide {
-      flex: 1;
+    .hero-right {
+      min-width: 0;
+    }
+
+    .hero-inline-metrics {
+      justify-content: flex-start;
+    }
+
+    .tab-header-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .header-actions {
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+
+    .asset-ledger-meta {
+      grid-template-columns: 1fr;
+      gap: 4px;
+    }
+
+    .asset-ledger-header,
+    .asset-ledger-row {
+      min-width: 620px;
+    }
+
+    .asset-form-grid {
+      grid-template-columns: 1fr;
     }
 
     .account-workspace-tabs {

@@ -644,3 +644,5 @@
       - pass logs:
         - `/Users/egor/xln/.logs/e2e-parallel/20260311-142903-146`
         - `/Users/egor/xln/.logs/e2e-parallel/20260311-143608-129`
+
+- 2026-03-12: unified External/Reserve asset ledger into one Assets tab, added spendable Accounts column, centered desktop shell, and fixed server external faucet runtimeId closure (validated via isolated E2E plus direct /api/faucet/erc20 smoke).
