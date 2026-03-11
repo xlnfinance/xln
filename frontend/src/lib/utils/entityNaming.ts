@@ -11,7 +11,7 @@ type GossipSource = {
 } | GossipProfile[] | null | undefined;
 
 function normalizeId(value: string): string {
-  return String(value || '').toLowerCase();
+  return value.trim().toLowerCase();
 }
 
 const ENTITY_ID_RE = /^0x[0-9a-f]{64}$/;
@@ -73,7 +73,7 @@ export function getGossipProfile(entityId: string, source: GossipSource): Gossip
   const id = normalizeId(entityId);
   if (!id) return null;
   const profiles = getGossipProfiles(source);
-  const found = profiles.find((profile) => normalizeId(String(profile?.entityId || '')) === id);
+  const found = profiles.find((profile) => normalizeId(profile.entityId) === id);
   if (!found) {
     scheduleGossipProfileFetch([id]);
   }
@@ -82,5 +82,5 @@ export function getGossipProfile(entityId: string, source: GossipSource): Gossip
 
 export function resolveEntityName(entityId: string, source: GossipSource): string {
   const profile = getGossipProfile(entityId, source);
-  return String(profile?.name || '').trim();
+  return profile ? profile.name.trim() : '';
 }
