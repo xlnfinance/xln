@@ -75,7 +75,7 @@
 
   function parseDecimalToUnits(input: string, decimals: number): bigint {
     const trimmed = input.trim();
-    if (!/^\d+(\.\d+)?$/.test(trimmed)) throw new Error('Invalid amount format');
+    if (!/^(?:\d+|\d+\.\d*|\.\d+)$/.test(trimmed)) throw new Error('Invalid amount format');
     const [wholeRaw, fracRaw = ''] = trimmed.split('.');
     const whole = BigInt(wholeRaw || '0');
     const fracPadded = (fracRaw + '0'.repeat(decimals)).slice(0, decimals);

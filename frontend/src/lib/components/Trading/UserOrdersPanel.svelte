@@ -9,7 +9,9 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { xlnEnvironment } from '$lib/stores/xlnStore';
+  import { enqueueEntityInputs, xlnEnvironment } from '$lib/stores/xlnStore';
+  import type { AccountMachine, EntityReplica, Env } from '@xln/runtime/xln-api';
+  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { formatEntityId } from '$lib/utils/format';
 
   export let entityId: string = '';
@@ -40,6 +42,8 @@
     2: 'USDC',
     3: 'DAI',
   };
+  type RuntimeEnv = Pick<Env, 'eReplicas'>;
+  type OrderReplica = Pick<EntityReplica, 'state'>;
 
   function getTokenName(tokenId: number): string {
     return TOKEN_NAMES[tokenId] || `T${tokenId}`;
@@ -50,13 +54,7 @@
     if (!env || !entityId) return;
 
     // Find entity replica
-    let entityReplica: any = null;
-    for (const [key, replica] of env.eReplicas) {
-      if (key.startsWith(entityId + ':')) {
-        entityReplica = replica;
-        break;
-      }
-    }
+    const entityReplica = findReplica(env, entityId);
 
     if (!entityReplica?.state?.accounts) {
       orders = [];
@@ -68,7 +66,9 @@
     for (const [counterpartyId, account] of entityReplica.state.accounts) {
       if (!account.swapOffers) continue;
 
-      for (const [offerId, offer] of account.swapOffers) {
+      const swapOffers = (account as AccountMachine).swapOffers;
+      if (!(swapOffers instanceof Map)) continue;
+      for (const [offerId, offer] of swapOffers.entries()) {
         // Determine side based on which token we're giving
         // Convention: giving base token (lower ID) = SELL, giving quote = BUY
         const side = offer.giveTokenId < offer.wantTokenId ? 'SELL' : 'BUY';
@@ -120,9 +120,9 @@
     orders = newOrders;
   }
 
-  function findReplica(env: any, entityId: string): any {
+  function findReplica(env: RuntimeEnv, currentEntityId: string): OrderReplica | null {
     for (const [key, replica] of env.eReplicas) {
-      if (key.startsWith(entityId + ':')) return replica;
+      if (key.startsWith(currentEntityId + ':')) return replica;
     }
     return null;
   }
@@ -140,24 +140,12 @@
   }
 
   async function cancelOrder(order: Order) {
-    const runtime = (window as any).XLN;
-    if (!runtime) {
-      console.error('XLN runtime not available');
-      return;
-    }
-
     const env = $xlnEnvironment;
     if (!env) return;
 
-    // Find signer for this entity
-    let signerId = 'user';
-    const replica = findReplica(env, entityId);
-    if (replica?.state?.config?.validators?.[0]) {
-      signerId = replica.state.config.validators[0];
-    }
-
     try {
-      runtime.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{
+      const signerId = requireSignerIdForEntity(env, entityId, 'user-orders-panel');
+      await enqueueEntityInputs(env, [{
         entityId,
         signerId,
         entityTxs: [{
@@ -167,7 +155,7 @@
             offerId: order.offerId,
           }
         }]
-      }] });
+      }]);
       console.log(`Cancelled order ${order.offerId}`);
     } catch (err) {
       console.error('Failed to cancel order:', err);

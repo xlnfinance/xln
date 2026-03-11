@@ -1,6 +1,6 @@
   <script lang="ts">
     import type { AccountMachine, AccountTx, EntityReplica, Tab } from '$lib/types/ui';
-    import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+    import { enqueueEntityInputs, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
     import { isLive as globalIsLive } from '../../stores/timeStore';
     import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
     import EntitySelect from './EntitySelect.svelte';
@@ -979,7 +979,6 @@
     }
 
     try {
-      const xln = await getXLN();
       const env = activeEnv;
       if (!env) throw new Error('XLN environment not ready');
       if (!isRuntimeEnv(env)) throw new Error('Runtime environment not available');
@@ -1047,11 +1046,11 @@
         },
       });
 
-      xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{
+      await enqueueEntityInputs(env, [{
         entityId: tab.entityId,
         signerId,
         entityTxs,
-      }] });
+      }]);
 
       console.log('📊 Swap offer placed:', offerId);
       if (shouldAutoPrepareInbound) {
@@ -1075,7 +1074,6 @@
     if (!tab.entityId) return;
 
     try {
-      const xln = await getXLN();
       const env = activeEnv;
       if (!env) throw new Error('XLN environment not ready');
       if (!isRuntimeEnv(env)) throw new Error('Runtime environment not available');
@@ -1083,7 +1081,7 @@
       const signerId = resolveSignerId(tab.entityId);
       if (!signerId) throw new Error('No signer available for selected entity');
 
-      xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{
+      await enqueueEntityInputs(env, [{
         entityId: tab.entityId,
         signerId,
         entityTxs: [{
@@ -1093,7 +1091,7 @@
             counterpartyEntityId: accountId, // accountId is the counterparty entity ID
           }
         }]
-      }] });
+      }]);
 
       console.log('📨 Swap cancel requested:', offerId);
     } catch (error) {

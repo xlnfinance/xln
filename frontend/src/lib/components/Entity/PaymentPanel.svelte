@@ -47,6 +47,7 @@
   let repeatTimer: ReturnType<typeof setInterval> | null = null;
   let repeatStoppedReason = '';
   let routeSortMode: 'fee' | 'hops' = 'fee';
+  let allowSelfRoute = false;
   let showFullEntityId = false;
   let profileExpanded = false;
   let serverEntityNames = new Map<string, string>();
@@ -228,6 +229,9 @@
       hashRoute === 'pay' &&
       (parseBooleanParam(checkoutParam) || Boolean(targetParam || amountParam || noteParam || recipientUserId));
     if (hostedCheckoutMode) useHtlc = true;
+    if (normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) {
+      allowSelfRoute = true;
+    }
 
     const explicitLock = parseBooleanParam(noteLockedParam);
     descriptionLocked = explicitLock || Boolean(recipientUserId);
@@ -289,9 +293,9 @@
     return self ? [self, ...rest] : rest;
   })();
 
-  // Default recipient to self for loopback routing flows.
-  $: if (!targetEntityId && entityId) {
-    targetEntityId = entityId;
+  $: if (!allowSelfRoute && normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) {
+    targetEntityId = '';
+    resetQuotedRoutes();
   }
 
   $: selectedTargetProfile = (() => {
@@ -1001,6 +1005,9 @@
       const xln = await getXLN();
       const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
+      if (!allowSelfRoute && normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) {
+        throw new Error('Enable "Allow self-route" to send to the same entity');
+      }
       try {
         await env.runtimeState?.p2p?.syncProfiles?.();
       } catch {
@@ -1350,6 +1357,21 @@
 
   function handleTargetChange(e: CustomEvent) {
     targetEntityId = e.detail.value;
+    if (normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) {
+      allowSelfRoute = true;
+    }
+    preflightError = null;
+    hostedCheckoutStatusMessage = '';
+    hostedCheckoutSuccessVisible = false;
+    resetQuotedRoutes();
+  }
+
+  function handleAllowSelfRouteToggle(event: Event) {
+    const target = event.target as HTMLInputElement | null;
+    allowSelfRoute = target?.checked === true;
+    if (!allowSelfRoute && normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) {
+      targetEntityId = '';
+    }
     preflightError = null;
     hostedCheckoutStatusMessage = '';
     hostedCheckoutSuccessVisible = false;
@@ -1493,7 +1515,7 @@
         value={targetEntityId}
         entities={allEntities}
         contacts={selectorContacts}
-        excludeId=""
+        excludeId={allowSelfRoute ? '' : entityId}
         placeholder="Select recipient..."
         disabled={findingRoutes || sendingPayment}
         on:change={handleTargetChange}
@@ -1511,6 +1533,16 @@
       {refreshingRecipientOptions ? '...' : 'Refresh'}
     </button>
   </div>
+
+  <label class="self-route-toggle">
+    <input
+      type="checkbox"
+      checked={allowSelfRoute}
+      disabled={findingRoutes || sendingPayment}
+      on:change={handleAllowSelfRouteToggle}
+    />
+    <span>Allow self-route</span>
+  </label>
 
   {#if preflightError}
     <div class="profile-preflight-error">{preflightError}</div>
@@ -1763,6 +1795,20 @@
   .recipient-refresh-btn:disabled {
     cursor: not-allowed;
     opacity: 0.55;
+  }
+
+  .self-route-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.65rem;
+    color: #94a3b8;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .self-route-toggle input {
+    accent-color: #fbbf24;
   }
 
   .payment-panel.hosted-checkout {

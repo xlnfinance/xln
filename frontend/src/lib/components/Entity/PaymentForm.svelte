@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
+  import { enqueueEntityInputs, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
@@ -39,7 +39,6 @@
   async function sendPayment() {
     if (!effectiveCounterparty) return;
     try {
-      const xln = await getXLN();
       const env = activeEnv;
       if (!env) throw new Error('XLN environment not ready');
       if (!isRuntimeEnv(env)) throw new Error('Runtime environment not available');
@@ -62,7 +61,7 @@
         entityTxs: [{ type: 'directPayment' as const, data }]
       };
 
-      xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [paymentInput] });
+      await enqueueEntityInputs(env, [paymentInput]);
       console.log(`Payment sent: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, paymentAmountBigInt)}`);
 
       paymentAmountBigInt = 0n;
