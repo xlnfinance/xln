@@ -2,7 +2,6 @@
   import { onDestroy, onMount, tick } from 'svelte';
   import type {
     AccountMachine,
-    DerivedDelta,
     RoutedEntityInput as EntityInputPayload,
     EntityReplica,
     Env,
@@ -20,6 +19,14 @@
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
+  import {
+    extractEntityEncPubKey,
+    findProfileByEntityId,
+    getDirectionalEdgeCapacity,
+    normalizeEntityId,
+    quoteHop,
+    sanitizeBigInt,
+  } from './payment-routing';
 
   export let entityId: string;
   export let contacts: Array<{ name: string; entityId: string }> = [];
@@ -84,28 +91,17 @@
   const GOSSIP_REFRESH_ATTEMPTS = 4;
   const GOSSIP_REFRESH_WAIT_MS = 250;
 
-  type TokenCapacityValue = {
-    inCapacity: bigint | string;
-    outCapacity: bigint | string;
-  };
   type LockBookEntry = {
     accountId: string;
     tokenId: number;
     direction: 'incoming' | 'outgoing';
   };
 
-  type TokenCapacities =
-    | Map<number | string, TokenCapacityValue>
-    | Record<string, TokenCapacityValue>;
-
-  type GossipAccount = NonNullable<GossipProfile['accounts']>[number];
-  type DebugEventP2P = {
-    sendDebugEvent?: (data: unknown) => unknown;
-  };
   type RuntimeP2PController = {
     close?: () => void;
     syncProfiles?: () => Promise<boolean>;
     refreshGossip?: () => Promise<void> | void;
+    sendDebugEvent?: (data: unknown) => unknown;
   };
   type RuntimeStateEnv = Env & {
     runtimeState?: {
@@ -124,8 +120,6 @@
   $: activeIsLive = $globalIsLive;
 
   const getGossipProfiles = (): GossipProfile[] => currentEnv?.gossip?.getProfiles?.() || [];
-
-  const normalizeEntityId = (id: string | null | undefined): string => String(id || '').trim().toLowerCase();
 
   function hasPendingOutgoingLock(from: string, to: string, token: number): boolean {
     if (!currentReplicas) return false;
@@ -418,19 +412,16 @@
   }
 
   function getGossipProfileByEntityId(id: string): GossipProfile | undefined {
-    const norm = normalizeEntityId(id);
-    if (!norm) return undefined;
-    return getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === norm);
+    return findProfileByEntityId(getGossipProfiles(), id) ?? undefined;
   }
 
   function isRouteableIntermediary(entity: string): boolean {
     // Routeability is a transport/security property, not a display-metadata property.
     // A hop is routeable iff we can encrypt for it and it is hub-like when profile exists.
-    if (!extractEntityCryptoKey(entity)) return false;
+    if (!extractEntityEncPubKey(currentReplicas, getGossipProfiles(), entity)) return false;
     const profile = getGossipProfileByEntityId(entity);
     if (!profile) return true; // allow local+gossip mixed discovery; key coverage is enforced above
-    const metadata = profile.metadata || {};
-    return metadata.isHub === true;
+    return profile.metadata.isHub === true;
   }
 
   function formatToken(value: bigint): string {
@@ -533,136 +524,16 @@
     return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
   }
 
-  function sanitizeFeePPM(raw: unknown, defaultFeePPM = 10): number {
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return defaultFeePPM;
-    const v = Math.floor(n);
-    if (v < 0) return 0;
-    if (v > 1_000_000) return 1_000_000;
-    return v;
-  }
-
-  function sanitizeBigInt(raw: unknown): bigint {
-    if (typeof raw === 'bigint') return raw < 0n ? 0n : raw;
-    if (typeof raw === 'number' && Number.isFinite(raw)) {
-      const v = BigInt(Math.floor(raw));
-      return v < 0n ? 0n : v;
-    }
-    if (typeof raw === 'string' && raw.trim() !== '') {
-      try {
-        const v = BigInt(raw.trim());
-        return v < 0n ? 0n : v;
-      } catch {
-        return 0n;
-      }
-    }
-    return 0n;
-  }
-
-  function getTokenCapacitySnapshot(tokenCapacities: TokenCapacities | undefined, token: number): { outCapacity: bigint; inCapacity: bigint } | null {
-    if (!tokenCapacities) return null;
-    const tokenCap = tokenCapacities instanceof Map
-      ? tokenCapacities.get(token) ?? tokenCapacities.get(String(token))
-      : tokenCapacities[String(token)];
-    if (!tokenCap) return null;
-    const outCapacity = sanitizeBigInt(tokenCap?.outCapacity ?? 0n);
-    const inCapacity = sanitizeBigInt(tokenCap?.inCapacity ?? 0n);
-    if (outCapacity <= 0n && inCapacity <= 0n) return null;
-    return { outCapacity, inCapacity };
-  }
-
-  function getGossipAccountCapacity(owner: string, counterparty: string, token: number): { outCapacity: bigint; inCapacity: bigint } | null {
-    const ownerNorm = normalizeEntityId(owner);
-    const cpNorm = normalizeEntityId(counterparty);
-    const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === ownerNorm);
-    if (!profile || !Array.isArray(profile.accounts)) return null;
-    const account = profile.accounts.find((a) => normalizeEntityId(a.counterpartyId) === cpNorm);
-    return getTokenCapacitySnapshot(account?.tokenCapacities, token);
-  }
-
-  function getDirectionalEdgeCapacity(from: string, to: string, token: number): bigint {
-    // A -> B is valid if sender side can send (A.out) and receiver side can accept (B.in).
-    // Use both local+gossip, then take conservative min when both sides are known.
-    const fromLocal = getLocalAccountCapacity(from, to, token);
-    const toLocal = getLocalAccountCapacity(to, from, token);
-    const fromGossip = getGossipAccountCapacity(from, to, token);
-    const toGossip = getGossipAccountCapacity(to, from, token);
-
-    const fromOut = [
-      fromLocal?.outCapacity ?? 0n,
-      fromGossip?.outCapacity ?? 0n,
-    ].reduce((m, v) => (v > m ? v : m), 0n);
-
-    const toIn = [
-      toLocal?.inCapacity ?? 0n,
-      toGossip?.inCapacity ?? 0n,
-    ].reduce((m, v) => (v > m ? v : m), 0n);
-
-    if (fromOut > 0n && toIn > 0n) return fromOut < toIn ? fromOut : toIn;
-    return fromOut > toIn ? fromOut : toIn;
-  }
-
   function hasOutboundCapacity(from: string, to: string, token: number): boolean {
-    return getDirectionalEdgeCapacity(from, to, token) > 0n;
-  }
-
-  function getLocalAccountCapacity(from: string, to: string, token: number): { outCapacity: bigint; inCapacity: bigint } | null {
-    if (!currentReplicas || !activeXlnFunctions?.deriveDelta) return null;
-    const fromNorm = normalizeEntityId(from);
-    const toNorm = normalizeEntityId(to);
-    for (const [key, replica] of currentReplicas.entries()) {
-      const [replicaEntityId] = key.split(':');
-      if (normalizeEntityId(replicaEntityId) !== fromNorm) continue;
-      const accounts = replica?.state?.accounts;
-      if (!accounts || typeof accounts.entries !== 'function') continue;
-      for (const [counterpartyId, account] of accounts.entries()) {
-        if (normalizeEntityId(counterpartyId) !== toNorm) continue;
-        const deltas = account?.deltas;
-        const delta = deltas?.get?.(token) ?? deltas?.get?.(String(token));
-        if (!delta) return null;
-        const leftEntity = String(account?.leftEntity || '');
-        const rightEntity = String(account?.rightEntity || '');
-        const isLeft = leftEntity
-          ? normalizeEntityId(leftEntity) === fromNorm
-          : (rightEntity ? normalizeEntityId(rightEntity) !== fromNorm : fromNorm < toNorm);
-        const derived = activeXlnFunctions.deriveDelta(delta, isLeft) as DerivedDelta;
-        const outCapacity = sanitizeBigInt(derived.outCapacity);
-        const inCapacity = sanitizeBigInt(derived.inCapacity);
-        if (outCapacity <= 0n && inCapacity <= 0n) return null;
-        return { outCapacity, inCapacity };
-      }
-    }
-    return null;
-  }
-
-  function quoteHop(
-    from: string,
-    to: string,
-    token: number,
-    amountIn: bigint
-  ): { fee: bigint; feePPM: number; baseFee: bigint; outCap: bigint; inCap: bigint } | null {
-    const fromNorm = normalizeEntityId(from);
-    const toNorm = normalizeEntityId(to);
-    const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === fromNorm);
-    const basePpm = sanitizeFeePPM(
-      profile?.metadata.routingFeePPM ?? DEFAULT_UNKNOWN_HOP_FEE_PPM,
-      DEFAULT_UNKNOWN_HOP_FEE_PPM
-    );
-    const baseFee = sanitizeBigInt(profile?.metadata.baseFee ?? 0n);
-    const account = profile?.accounts.find((a) => normalizeEntityId(a.counterpartyId) === toNorm) ?? null;
-    const tokenCapacity =
-      getTokenCapacitySnapshot(account?.tokenCapacities, token)
-      ?? getLocalAccountCapacity(from, to, token);
-    const directionalOutCap = getDirectionalEdgeCapacity(from, to, token);
-    if (directionalOutCap <= 0n) return null;
-    const pricingOut = sanitizeBigInt(tokenCapacity?.outCapacity ?? directionalOutCap);
-    const pricingIn = sanitizeBigInt(tokenCapacity?.inCapacity ?? 0n);
-    const outCap = directionalOutCap;
-    const inCap = pricingIn;
-    // Keep routing quotes deterministic: use advertised per-hop fee directly.
-    const feePPM = sanitizeFeePPM(basePpm, 10);
-    const ppmFee = (amountIn * BigInt(feePPM)) / 1_000_000n;
-    return { fee: baseFee + ppmFee, feePPM, baseFee, outCap, inCap };
+    if (!activeXlnFunctions?.deriveDelta) return false;
+    return getDirectionalEdgeCapacity(
+      currentReplicas,
+      getGossipProfiles(),
+      activeXlnFunctions.deriveDelta,
+      from,
+      to,
+      token,
+    ) > 0n;
   }
 
   function quoteRequiredInboundForForward(desiredForward: bigint, feePPM: number, baseFee: bigint): bigint {
@@ -686,34 +557,6 @@
     return low;
   }
 
-  function normalizeEnvelopeKey(raw: unknown): string | null {
-    if (typeof raw !== 'string') return null;
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    const prefixed = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
-    if (/^0x[0-9a-fA-F]{64}$/.test(prefixed)) return prefixed.toLowerCase();
-    if (trimmed.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(trimmed)) return trimmed;
-    return null;
-  }
-
-  function extractEntityCryptoKey(entity: string): string | null {
-    if (!entity) return null;
-    const entityNorm = normalizeEntityId(entity);
-    if (currentReplicas) {
-      for (const [replicaKey, replica] of currentReplicas.entries()) {
-        const [replicaEntityId] = replicaKey.split(':');
-        if (normalizeEntityId(replicaEntityId) !== entityNorm) continue;
-        const normalized = normalizeEnvelopeKey(replica.state.entityEncPubKey);
-        if (normalized) return normalized;
-      }
-    }
-    const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === entityNorm);
-    if (!profile) return null;
-    const normalized = normalizeEnvelopeKey(profile.metadata.entityEncPubKey);
-    if (normalized) return normalized;
-    return null;
-  }
-
   function emitUiDebugEvent(code: string, message: string, details: Record<string, unknown> = {}) {
     const payload = {
       source: 'PaymentPanel',
@@ -725,7 +568,7 @@
       details,
     };
     try {
-      const p2p = currentEnv?.runtimeState?.p2p as DebugEventP2P | null | undefined;
+      const p2p = currentEnv?.runtimeState?.p2p;
       if (typeof p2p?.sendDebugEvent === 'function') p2p.sendDebugEvent(payload);
     } catch {
       // Best effort only; never block UI on debug forwarding.
@@ -743,7 +586,7 @@
       const msg = `Recipient ${targetEntityId} has no downloaded gossip profile`;
       return { code: 'PAYMENT_PREFLIGHT_PROFILE_MISSING', message: msg };
     }
-    if (!extractEntityCryptoKey(targetEntityId)) {
+    if (!extractEntityEncPubKey(currentReplicas, profiles, targetEntityId)) {
       const msg = `Recipient ${targetEntityId} profile has no encryption key`;
       return { code: 'PAYMENT_PREFLIGHT_KEY_MISSING', message: msg, details: { targetProfile } };
     }
@@ -786,7 +629,7 @@
   function getMissingRouteKeys(path: string[]): string[] {
     const missingSet = new Set<string>();
     for (const hopEntity of path.slice(1)) {
-      if (!extractEntityCryptoKey(hopEntity)) {
+      if (!extractEntityEncPubKey(currentReplicas, getGossipProfiles(), hopEntity)) {
         missingSet.add(hopEntity);
       }
     }
@@ -1090,7 +933,19 @@
         for (let i = intermediaries.length - 1; i >= 0; i -= 1) {
           const intermediary = intermediaries[i]!;
           const nextHop = path[i + 2]!;
-          const quote = quoteHop(intermediary, nextHop, tokenId, downstreamAmount);
+          if (!activeXlnFunctions?.deriveDelta) {
+            throw new Error('Runtime deriveDelta is unavailable');
+          }
+          const quote = quoteHop(
+            currentReplicas,
+            getGossipProfiles(),
+            activeXlnFunctions.deriveDelta,
+            intermediary,
+            nextHop,
+            tokenId,
+            downstreamAmount,
+            DEFAULT_UNKNOWN_HOP_FEE_PPM,
+          );
           if (!quote || quote.outCap < downstreamAmount) {
             hasCapacity = false;
             break;
@@ -1105,7 +960,19 @@
         if (!hasCapacity) continue;
 
         if (path.length > 1) {
-          const senderQuote = quoteHop(path[0]!, path[1]!, tokenId, downstreamAmount);
+          if (!activeXlnFunctions?.deriveDelta) {
+            throw new Error('Runtime deriveDelta is unavailable');
+          }
+          const senderQuote = quoteHop(
+            currentReplicas,
+            getGossipProfiles(),
+            activeXlnFunctions.deriveDelta,
+            path[0]!,
+            path[1]!,
+            tokenId,
+            downstreamAmount,
+            DEFAULT_UNKNOWN_HOP_FEE_PPM,
+          );
           if (!senderQuote || senderQuote.outCap < downstreamAmount) {
             continue;
           }
@@ -1556,7 +1423,7 @@
           {#if normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)}
             <span class="profile-status ok">self</span>
           {:else if selectedTargetProfile}
-            {#if extractEntityCryptoKey(targetEntityId)}
+            {#if extractEntityEncPubKey(currentReplicas, getGossipProfiles(), targetEntityId)}
               <span class="profile-status ok">key ready</span>
             {:else}
               <span class="profile-status fail">missing key</span>
