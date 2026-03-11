@@ -593,3 +593,20 @@
       - pass logs:
         - [/Users/egor/xln/.logs/e2e-parallel/20260311-041356-753/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-041356-753/e2e-shard-00.log)
         - [/Users/egor/xln/.logs/e2e-parallel/20260311-041356-753/e2e-shard-01.log](/Users/egor/xln/.logs/e2e-parallel/20260311-041356-753/e2e-shard-01.log)
+
+- 2026-03-11
+  - Tightened shared gossip/UI readers on the live selector path:
+    - [entityNaming.ts](/Users/egor/xln/frontend/src/lib/utils/entityNaming.ts) now uses the strict profile shape directly for `entityId` and `name`
+    - [EntitySelect.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/EntitySelect.svelte) now reuses the shared gossip helpers instead of re-implementing lookup/fetch logic
+    - [EntityInput.svelte](/Users/egor/xln/frontend/src/lib/components/shared/EntityInput.svelte) now reuses the same strict gossip lookup path
+  - Re-verified:
+    - `bun x tsc --noEmit`
+    - `cd frontend && bunx vite build --mode development`
+    - focused isolated E2E rerun:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260311-042024-619/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-042024-619/e2e-shard-00.log)
+    - full isolated E2E suite:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=2 --workers-per-shard=1 --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass logs:
+        - [/Users/egor/xln/.logs/e2e-parallel/20260311-042232-365/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-042232-365/e2e-shard-00.log)
+        - [/Users/egor/xln/.logs/e2e-parallel/20260311-042232-365/e2e-shard-01.log](/Users/egor/xln/.logs/e2e-parallel/20260311-042232-365/e2e-shard-01.log)

@@ -11,7 +11,7 @@
   import { createEventDispatcher } from 'svelte';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { xlnFunctions, xlnEnvironment } from '../../stores/xlnStore';
-  import { scheduleGossipProfileFetch } from '../../utils/entityNaming';
+  import { getGossipProfile, getGossipProfiles as getProfilesFromSource, scheduleGossipProfileFetch } from '../../utils/entityNaming';
 
   export let value: string = '';
   export let placeholder: string = 'Select or enter entity...';
@@ -30,9 +30,7 @@
   }
 
   function getGossipProfiles(): GossipProfile[] {
-    const env = activeEnv;
-    if (!env?.gossip?.getProfiles) return [];
-    return env.gossip.getProfiles();
+    return getProfilesFromSource(activeEnv);
   }
 
   function getKnownEntityName(id: string): string {
@@ -40,11 +38,12 @@
     if (!norm) return '';
     const contact = contacts.find((c) => normalizeEntityId(c.entityId) === norm);
     if (contact?.name?.trim()) return contact.name.trim();
-    const profile = getGossipProfiles().find((p) => normalizeEntityId(p?.entityId) === norm);
+    const profile = getGossipProfile(norm, activeEnv);
     if (!profile) {
       scheduleGossipProfileFetch([norm]);
+      return '';
     }
-    return String(profile?.name || '').trim();
+    return profile.name.trim();
   }
 
   function lookupEntityFromGossip(query: string): string | null {
