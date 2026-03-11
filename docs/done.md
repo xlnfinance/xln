@@ -524,3 +524,24 @@
   - Verified:
     - `bun build runtime/scripts/start-custody-prod.ts --target=bun --outfile=/tmp/start-custody-prod-check.js`
     - `bash -n scripts/start-custody.sh`
+
+- 2026-03-11
+  - Finished the next low-risk frontend follow-up batch:
+    - [PaymentPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/PaymentPanel.svelte)
+      - recipient selector now excludes self by default
+      - added explicit `Allow self-route` toggle
+      - self-targeted checkout URLs auto-enable the toggle instead of silently relying on loopback defaults
+    - [SettlementPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/SettlementPanel.svelte)
+      - decimal parser now accepts transient inputs like `.5` and `100.` and normalizes on submit
+    - standardized the small mutating frontend forms on the shared `enqueueEntityInputs(...)` ingress:
+      - [PaymentForm.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/PaymentForm.svelte)
+      - [CreditForm.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/CreditForm.svelte)
+      - [CollateralForm.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/CollateralForm.svelte)
+      - [SwapPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/SwapPanel.svelte)
+      - [ProfileCard.svelte](/Users/egor/xln/frontend/src/lib/components/Network/ProfileCard.svelte)
+    - removed the `window.XLN` dependency from:
+      - [UserOrdersPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Trading/UserOrdersPanel.svelte)
+  - Re-verified:
+    - `bun x tsc --noEmit`
+    - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-custody.spec.ts --max-failures=1 --trace=off --video=off --screenshot=only-on-failure`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260311-032256-888/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260311-032256-888/e2e-shard-00.log)

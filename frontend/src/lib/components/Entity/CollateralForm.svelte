@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Env, Profile as GossipProfile } from '@xln/runtime/xln-api';
-  import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
+  import { enqueueEntityInputs, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
@@ -181,7 +181,6 @@
   async function requestCollateral() {
     if (!effectiveCounterparty) return;
     try {
-      const xln = await getXLN();
       const env = activeEnv;
       if (!env) throw new Error('XLN environment not ready');
       if (!isRuntimeEnv(env)) throw new Error('Runtime environment not available');
@@ -219,7 +218,7 @@
         }]
       };
 
-      xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [collateralInput] });
+      await enqueueEntityInputs(env, [collateralInput]);
       console.log(`Collateral requested: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, collateralAmount)}`);
 
       collateralAmount = 0n;

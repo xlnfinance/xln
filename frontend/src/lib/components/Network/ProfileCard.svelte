@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+  import { enqueueEntityInputs, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { tabs } from '../../stores/tabStore';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
@@ -55,7 +55,6 @@
 
       console.log(`🚀 Joining hub: ${currentEntityId} → ${targetEntityId}`);
 
-      const xln = await getXLN();
       const env = $xlnEnvironment;
 
       if (!env) {
@@ -64,24 +63,21 @@
 
       // Open bilateral account via EntityTx (never craft raw accountInput from UI)
       const rebalancePolicy = getOpenAccountRebalancePolicyData();
-      xln.enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [
-          {
-            entityId: currentEntityId,
-            signerId: currentSignerId,
-            entityTxs: [
-              {
-                type: 'openAccount',
-                data: {
-                  targetEntityId,
-                  ...(rebalancePolicy ? { rebalancePolicy } : {}),
-                },
+      await enqueueEntityInputs(env, [
+        {
+          entityId: currentEntityId,
+          signerId: currentSignerId,
+          entityTxs: [
+            {
+              type: 'openAccount',
+              data: {
+                targetEntityId,
+                ...(rebalancePolicy ? { rebalancePolicy } : {}),
               },
-            ],
-          },
-        ],
-      });
+            },
+          ],
+        },
+      ]);
 
       console.log(`✅ Successfully sent join request to ${targetEntityId}`);
     } catch (err) {
