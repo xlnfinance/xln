@@ -404,11 +404,11 @@ async function readReserveBalanceUi(
   entityId?: string,
 ): Promise<number> {
   await ensureAccountWorkspaceVisible(page, counterpartyId, entityId);
-  const reservesTab = page.getByTestId('tab-reserves').first();
-  await expect(reservesTab).toBeVisible({ timeout: 20_000 });
-  await reservesTab.click();
+  const assetsTab = page.getByTestId('tab-assets').first();
+  await expect(assetsTab).toBeVisible({ timeout: 20_000 });
+  await assetsTab.click();
 
-  const refreshButton = page.locator('.btn-refresh-small').first();
+  const refreshButton = page.getByTestId('asset-ledger-refresh').first();
   if (await refreshButton.isVisible({ timeout: 1_500 }).catch(() => false)) {
     await refreshButton.click();
   }

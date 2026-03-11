@@ -41,6 +41,10 @@ import { ethers } from 'ethers';
 import type { HankoBytes, HankoClaim } from './types';
 import { createHash, randomBytes } from './utils';
 
+const HANKO_DEBUG =
+  typeof process !== 'undefined' &&
+  /^(1|true)$/i.test(process.env.HANKO_DEBUG ?? process.env.RUNTIME_VERBOSE_LOGS ?? '');
+
 // Browser-compatible Buffer.concat replacement
 const bufferConcat = (buffers: Buffer[]): Buffer => {
   if (typeof Buffer.concat === 'function') {
@@ -107,9 +111,11 @@ export const createDirectHashSignature = async (hash: Buffer, privateKey: Buffer
     rPadded.set(r, 32 - r.length);
     sPadded.set(s, 32 - s.length);
 
-    console.log(
-      `🔑 Created signature: r=${ethers.hexlify(r).slice(0, 10)}..., s=${ethers.hexlify(s).slice(0, 10)}..., v=${v}`,
-    );
+    if (HANKO_DEBUG) {
+      console.log(
+        `🔑 Created signature: r=${ethers.hexlify(r).slice(0, 10)}..., s=${ethers.hexlify(s).slice(0, 10)}..., v=${v}`,
+      );
+    }
 
     return bufferConcat([Buffer.from(rPadded), Buffer.from(sPadded), Buffer.from([v])]);
   } catch (error) {
@@ -137,9 +143,11 @@ export const verifySignatureRecovery = async (
     const recoveredAddress = ethers.recoverAddress(ethers.hexlify(hash), { r, s, v: v!, yParity });
 
     const matches = recoveredAddress.toLowerCase() === expectedAddress.toLowerCase();
-    console.log(
-      `🔍 Recovery test: expected=${expectedAddress.slice(0, 10)}..., recovered=${recoveredAddress.slice(0, 10)}..., match=${matches}`,
-    );
+    if (HANKO_DEBUG || !matches) {
+      console.log(
+        `🔍 Recovery test: expected=${expectedAddress.slice(0, 10)}..., recovered=${recoveredAddress.slice(0, 10)}..., match=${matches}`,
+      );
+    }
 
     return matches;
   } catch (error) {
