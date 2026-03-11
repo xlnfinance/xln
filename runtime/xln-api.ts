@@ -131,6 +131,7 @@ export type BrowserVMInstance = {
   fundSignerWallet: (address: string, amount?: bigint) => Promise<void>;
   approveErc20?: (privKey: Uint8Array, tokenAddress: string, spender: string, amount: bigint) => Promise<string>;
   transferErc20?: (privKey: Uint8Array, tokenAddress: string, to: string, amount: bigint) => Promise<string>;
+  transferNative?: (privKey: Uint8Array, to: string, amount: bigint) => Promise<string>;
   externalTokenToReserve?: (
     privKey: Uint8Array,
     entityId: string,
