@@ -37,6 +37,7 @@ import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-help
 import { logError } from '../logger';
 import { FINANCIAL } from '../constants';
 import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
+import { handleReserveToExternal } from './handlers/reserve-to-external';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -1257,6 +1258,10 @@ export const applyEntityTx = async (
     if (entityTx.type === 'requestWithdrawal') {
       const { handleRequestWithdrawal } = await import('./handlers/request-withdrawal');
       return { newState: handleRequestWithdrawal(entityState, entityTx), outputs: [] };
+    }
+
+    if (entityTx.type === 'reserve_to_external') {
+      return handleReserveToExternal(entityState, entityTx);
     }
 
     if (entityTx.type === 'settleDiffs') {

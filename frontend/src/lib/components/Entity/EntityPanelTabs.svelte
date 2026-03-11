@@ -8,7 +8,7 @@
   import { onDestroy, onMount } from 'svelte';
   import type { ComponentType } from 'svelte';
   import { get } from 'svelte/store';
-  import { Wallet as EthersWallet, hexlify, isAddress, ZeroAddress } from 'ethers';
+  import { Wallet as EthersWallet, hexlify, isAddress, ZeroAddress, zeroPadValue } from 'ethers';
   import type {
     AccountMachine,
     Env,
@@ -20,7 +20,7 @@
     EntityTx,
   } from '@xln/runtime/xln-api';
   import type { Tab, EntityReplica } from '$lib/types/ui';
-  import { history, xlnEnvironment } from '../../stores/xlnStore';
+  import { getXLN, history, resolveConfiguredApiBase, xlnEnvironment } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { getAvailableThemes, THEME_DEFINITIONS } from '../../utils/themes';
@@ -98,47 +98,9 @@
   let selectedJurisdictionName: string | null = null;
   let addressCopied = false;
   let openAccountEntityId = '';
-  type RelayAwareEnv = {
-    runtimeState?: {
-      p2p?: {
-        relayUrls?: string[];
-      };
-    };
-  };
-
-  function isLocalHost(hostname: string): boolean {
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
-  }
-
-  function resolveApiBaseFromRelay(relayUrl: string | undefined | null): string {
+  function resolveApiBase(): string {
     if (typeof window === 'undefined') return 'https://xln.finance';
-    const pageHost = window.location.hostname;
-    // When running locally, ALWAYS use page origin for API calls.
-    // This prevents CORS issues where relay URL points to production
-    // but the page is served from localhost.
-    if (isLocalHost(pageHost)) {
-      return window.location.origin;
-    }
-    if (!relayUrl) return 'https://xln.finance';
-    try {
-      const relay = new URL(relayUrl);
-      const protocol =
-        relay.protocol === 'wss:' ? 'https:' :
-        relay.protocol === 'ws:' ? 'http:' :
-        relay.protocol;
-      return `${protocol}//${relay.host}`;
-    } catch {
-      return 'https://xln.finance';
-    }
-  }
-
-  function resolveApiBaseForEnv(envLike: RelayAwareEnv | null | undefined): string {
-    const runtimeRelay = envLike?.runtimeState?.p2p?.relayUrls?.[0];
-    const settingsRelay = $settings?.relayUrl;
-    const relayUrl = typeof runtimeRelay === 'string' && runtimeRelay.length > 0
-      ? runtimeRelay
-      : settingsRelay;
-    return resolveApiBaseFromRelay(relayUrl);
+    return resolveConfiguredApiBase(window.location.origin);
   }
 
   function getUrlHashRoute(): string | null {
@@ -253,7 +215,6 @@
     }
   }
 
-  $: apiBase = resolveApiBaseFromRelay($settings?.relayUrl);
   const REFRESH_OPTIONS = [
     { label: 'Off', value: 0 },
     { label: '1s', value: 1000 },
@@ -576,8 +537,10 @@
   let externalTokens: ExternalToken[] = [];
   let externalTokensLoading = true;
   let depositingToken: string | null = null; // symbol of token being deposited
+  let withdrawingExternalToken: string | null = null; // symbol of token being withdrawn back to EOA
   let collateralFundingToken: string | null = null; // symbol of token being moved to collateral
   let reserveCollateralDrafts = new Map<number, string>();
+  let reserveExternalDrafts = new Map<number, string>();
 
   // Faucet: fund entity reserves with test tokens
   function resolveReserveTokenMeta(tokenId: number, symbolHint?: string): { tokenId: number; symbol: string; decimals: number } {
@@ -620,6 +583,14 @@
     reserveCollateralDrafts = new Map(reserveCollateralDrafts).set(tokenId, value);
   }
 
+  function readReserveExternalDraft(tokenId: number): string {
+    return reserveExternalDrafts.get(tokenId) ?? '';
+  }
+
+  function writeReserveExternalDraft(tokenId: number, value: string): void {
+    reserveExternalDrafts = new Map(reserveExternalDrafts).set(tokenId, value);
+  }
+
   function applyReserveCollateralPreset(tokenId: number, percent: 25 | 50 | 75 | 100): void {
     const reserveAmount = onchainReserves.get(tokenId) ?? 0n;
     const info = resolveReserveTokenMeta(tokenId);
@@ -627,6 +598,15 @@
       ? reserveAmount
       : (reserveAmount * BigInt(percent)) / 100n;
     writeReserveCollateralDraft(tokenId, formatTokenInputAmount(presetAmount, info.decimals));
+  }
+
+  function applyReserveExternalPreset(tokenId: number, percent: 25 | 50 | 75 | 100): void {
+    const reserveAmount = onchainReserves.get(tokenId) ?? 0n;
+    const info = resolveReserveTokenMeta(tokenId);
+    const presetAmount = percent === 100
+      ? reserveAmount
+      : (reserveAmount * BigInt(percent)) / 100n;
+    writeReserveExternalDraft(tokenId, formatTokenInputAmount(presetAmount, info.decimals));
   }
 
   function parsePositiveReserveCollateralAmount(tokenId: number): bigint {
@@ -641,11 +621,83 @@
     return parsed;
   }
 
+  function parsePositiveReserveExternalAmount(tokenId: number): bigint {
+    const raw = readReserveExternalDraft(tokenId).trim();
+    if (!raw) throw new Error('Amount is required');
+    if (!/^(?:\d+|\d+\.\d*|\.\d+)$/.test(raw)) throw new Error('Invalid amount format');
+    const info = resolveReserveTokenMeta(tokenId);
+    const parsed = parseTokenAmount(raw, info.decimals);
+    if (parsed <= 0n) throw new Error('Amount must be greater than zero');
+    const reserveAmount = onchainReserves.get(tokenId) ?? 0n;
+    if (parsed > reserveAmount) throw new Error('Amount exceeds reserve balance');
+    return parsed;
+  }
+
+  async function resolveCurrentExternalAddress(): Promise<string> {
+    const signerId = String(tab.signerId || '').trim();
+    if (isAddress(signerId)) return signerId;
+
+    const xln = await getXLN();
+    const privKey = xln.getCachedSignerPrivateKey?.(signerId);
+    if (!privKey) throw new Error(`No registered signer key for ${signerId}`);
+    return new EthersWallet(hexlify(privKey)).address;
+  }
+
+  async function withdrawReserveToExternal(tokenId: number): Promise<void> {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    if (!entityId) return;
+    if (!activeIsLive) {
+      toasts.error('Withdraw requires LIVE mode');
+      return;
+    }
+
+    const info = resolveReserveTokenMeta(tokenId);
+    withdrawingExternalToken = info.symbol;
+    try {
+      const env = activeEnv;
+      if (!env) throw new Error('Environment not ready');
+      const signerId = requireSignerIdForEntity(env, entityId, 'reserve-to-external');
+      const amount = parsePositiveReserveExternalAmount(tokenId);
+      const externalAddress = await resolveCurrentExternalAddress();
+      const receivingEntity = zeroPadValue(externalAddress, 32).toLowerCase();
+
+      await enqueueEntityInputs(env, [{
+        entityId,
+        signerId,
+        entityTxs: [
+          {
+            type: 'reserve_to_external',
+            data: {
+              receivingEntity,
+              tokenId,
+              amount,
+            },
+          },
+          {
+            type: 'j_broadcast',
+            data: {},
+          },
+        ],
+      }]);
+
+      writeReserveExternalDraft(tokenId, '');
+      setTimeout(() => {
+        refreshBalances();
+      }, 1000);
+    } catch (err) {
+      console.error('[EntityPanel] Reserve withdraw failed:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      toasts.error(`Reserve withdraw failed: ${message}`);
+    } finally {
+      withdrawingExternalToken = null;
+    }
+  }
+
   async function faucetReserves(tokenId: number = 1, symbolHint?: string) {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
     try {
-      const requestApiBase = resolveApiBaseForEnv(activeEnv);
+      const requestApiBase = resolveApiBase();
       const tokenMeta = resolveReserveTokenMeta(tokenId, symbolHint);
       const amountStr = tokenMeta.symbol === 'WETH' || tokenMeta.symbol === 'ETH' ? '0.1' : '100';
       const amountWei = parseTokenAmount(amountStr, tokenMeta.decimals);
@@ -691,7 +743,7 @@
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
     try {
-      const requestApiBase = resolveApiBaseForEnv(activeEnv);
+      const requestApiBase = resolveApiBase();
       const runtimeId = getRuntimeId(activeEnv);
       if (!runtimeId) {
         throw new Error('Runtime is not ready yet (missing runtimeId). Re-open runtime and retry.');
@@ -880,7 +932,8 @@
   // Known token addresses for RPC mode (from deploy-tokens.cjs on anvil)
   async function fetchTokenCatalog(): Promise<ExternalToken[]> {
     try {
-      const response = await fetch(`${apiBase}/api/tokens`);
+      const requestApiBase = resolveApiBase();
+      const response = await fetch(`${requestApiBase}/api/tokens`);
       if (!response.ok) return [];
       const data = await readJsonResponse<TokenCatalogResponse>(response);
       const tokens = Array.isArray(data?.tokens) ? data.tokens : [];
@@ -906,7 +959,6 @@
     }
 
     try {
-      const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
       // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
       const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
@@ -980,7 +1032,6 @@
 
     depositingToken = token.symbol;
     try {
-      const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
       // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
       const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
@@ -988,45 +1039,10 @@
         throw new Error('J-adapter deposit not available');
       }
 
-      // Get signer's private key from runtime
-      let seed = activeEnv?.runtimeSeed;
-      if (!seed) {
-        const vault = get(activeVault);
-        if (vault?.seed) {
-          seed = vault.seed;
-        }
-      }
-      if (!seed) {
-        throw new Error('No runtime seed available (unlock vault or load runtime)');
-      }
-
-      const privKey = xln.deriveSignerKeySync?.(seed, signerId);
-      if (!privKey) {
-        throw new Error('Cannot derive signer private key');
-      }
-      xln.registerSignerKey?.(signerId, privKey);
-
-      // Ensure signer has gas for approve/deposit (RPC mode only)
-      if (jadapter?.mode !== 'browservm') {
-        let ownerAddress = signerId;
-        try {
-          ownerAddress = new EthersWallet(hexlify(privKey)).address;
-        } catch {
-          // Fallback to signerId if wallet derivation fails
-        }
-        try {
-          await fetch(`${apiBase}/api/faucet/gas`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userAddress: ownerAddress,
-              amount: '0.1',
-            }),
-          });
-        } catch (err) {
-          console.warn('[EntityPanel] Gas faucet failed (continuing):', err);
-        }
-      }
+      // Reserve deposits must use the exact registered signer key for this runtime signer.
+      // Never derive a new key by signerId here: signerId is already the canonical EOA address.
+      const privKey = xln.getCachedSignerPrivateKey?.(signerId);
+      if (!privKey) throw new Error(`No registered signer key for ${signerId}`);
 
       // Deposit all available balance
       await jadapter.externalTokenToReserve(privKey, entityId, token.address, token.balance);
@@ -1037,7 +1053,8 @@
       await fetchExternalTokens();
     } catch (err) {
       console.error('[EntityPanel] Deposit failed:', err);
-      toasts.error(`Deposit failed: ${(err as Error).message}`);
+      const message = err instanceof Error ? err.message : String(err);
+      toasts.error(`Deposit failed: ${message}`);
     } finally {
       depositingToken = null;
     }
@@ -1217,9 +1234,10 @@
     if (!signerId) return;
 
     try {
+      const requestApiBase = resolveApiBase();
       const amount = tokenSymbol === 'ETH' ? '0.1' : '100';
       const isEth = tokenSymbol === 'ETH';
-      const endpoint = isEth ? `${apiBase}/api/faucet/gas` : `${apiBase}/api/faucet/erc20`;
+      const endpoint = isEth ? `${requestApiBase}/api/faucet/gas` : `${requestApiBase}/api/faucet/erc20`;
       const payload = isEth
         ? { userAddress: signerId, amount }
         : { userAddress: signerId, tokenSymbol, amount };
@@ -1983,7 +2001,7 @@
                   <option value={opt.value}>{opt.label}</option>
                 {/each}
               </select>
-              <button class="btn-refresh-small" on:click={() => fetchExternalTokens()} disabled={externalTokensLoading}>
+              <button class="btn-refresh-small" data-testid="external-refresh" on:click={() => fetchExternalTokens()} disabled={externalTokensLoading}>
                 {externalTokensLoading ? '...' : 'Refresh'}
               </button>
             </div>
@@ -2006,7 +2024,7 @@
             <!-- Table Rows -->
             <div class="token-table">
               {#each externalTokens as token}
-                <div class="token-table-row" class:has-balance={token.balance > 0n}>
+                <div class="token-table-row" class:has-balance={token.balance > 0n} data-testid={`external-row-${token.symbol}`}>
                   <div class="col-token">
                     <span class="token-icon-small" class:usdc={token.symbol === 'USDC'} class:weth={token.symbol === 'WETH'} class:usdt={token.symbol === 'USDT'}>
                       {token.symbol.slice(0, 1)}
@@ -2014,7 +2032,7 @@
                     <span class="token-name">{token.symbol}</span>
                   </div>
                   <div class="col-balance">
-                    <span class="balance-text" class:zero={token.balance === 0n}>
+                    <span class="balance-text" class:zero={token.balance === 0n} data-testid={`external-balance-${token.symbol}`}>
                       {formatAmount(token.balance, token.decimals)}
                     </span>
                   </div>
@@ -2024,6 +2042,7 @@
                   <div class="col-actions">
                     <button
                       class="btn-table-action faucet"
+                      data-testid={`external-faucet-${token.symbol}`}
                       on:click={() => faucetExternalTokens(token.symbol)}
                       title="Faucet"
                     >
@@ -2031,6 +2050,7 @@
                     </button>
                     <button
                       class="btn-table-action deposit"
+                      data-testid={`external-deposit-${token.symbol}`}
                       on:click={() => depositToReserve(token)}
                       disabled={depositingToken === token.symbol || token.balance === 0n || token.symbol === 'ETH'}
                       title={token.symbol === 'ETH' ? 'ETH deposit not supported (use WETH)' : 'Deposit to Reserve'}
@@ -2053,7 +2073,7 @@
                   <option value={opt.value}>{opt.label}</option>
                 {/each}
               </select>
-              <button class="btn-refresh-small" on:click={() => refreshBalances()}>
+              <button class="btn-refresh-small" data-testid="reserves-refresh" on:click={() => refreshBalances()}>
                 Refresh
               </button>
             </div>
@@ -2094,7 +2114,7 @@
                 <div class="col-value">
                   <span class="value-text">{formatCompact(value)}</span>
                 </div>
-                <div class="col-actions">
+                  <div class="col-actions">
                   <button
                     class="btn-table-action faucet"
                     data-testid={`reserve-faucet-${info.symbol}`}
@@ -2102,15 +2122,15 @@
                   >
                     Faucet
                   </button>
-                  <button
-                    class="btn-table-action collateral"
-                    on:click={() => openOnchainDeposit(Number(tokenId))}
-                    disabled={collateralFundingToken === info.symbol}
+                    <button
+                      class="btn-table-action collateral"
+                      on:click={() => openOnchainDeposit(Number(tokenId))}
+                      disabled={collateralFundingToken === info.symbol}
                     title="Open settlement flow"
                   >
                     {collateralFundingToken === info.symbol ? '...' : 'Deposit to Account'}
                   </button>
-                  <div class="reserve-collateral-editor">
+                    <div class="reserve-collateral-editor">
                     <input
                       class="reserve-collateral-input"
                       type="text"
@@ -2139,10 +2159,42 @@
                     >
                       Queue Partial
                     </button>
+                    </div>
+                    <div class="reserve-collateral-editor reserve-external-editor">
+                      <input
+                        class="reserve-collateral-input"
+                        data-testid={`reserve-withdraw-input-${info.symbol}`}
+                        type="text"
+                        value={readReserveExternalDraft(Number(tokenId))}
+                        placeholder="Withdraw to external"
+                        disabled={withdrawingExternalToken === info.symbol || amount === 0n}
+                        on:input={(event) => writeReserveExternalDraft(Number(tokenId), (event.target as HTMLInputElement).value)}
+                      />
+                      <div class="reserve-collateral-presets">
+                        {#each [25, 50, 75, 100] as percent}
+                          <button
+                            type="button"
+                            class="reserve-preset"
+                            disabled={withdrawingExternalToken === info.symbol || amount === 0n}
+                            on:click={() => applyReserveExternalPreset(Number(tokenId), percent as 25 | 50 | 75 | 100)}
+                          >
+                            {percent}%
+                          </button>
+                        {/each}
+                      </div>
+                      <button
+                        class="btn-table-action deposit partial"
+                        data-testid={`reserve-withdraw-${info.symbol}`}
+                        type="button"
+                        on:click={() => withdrawReserveToExternal(Number(tokenId))}
+                        disabled={withdrawingExternalToken === info.symbol || !readReserveExternalDraft(Number(tokenId)).trim()}
+                      >
+                        {withdrawingExternalToken === info.symbol ? '...' : 'Withdraw to External'}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            {/each}
+              {/each}
           </div>
 
         {:else if activeTab === 'accounts'}

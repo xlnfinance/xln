@@ -27,6 +27,7 @@ import {
 import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './serialization-utils';
 import type { AccountMachine, DeliverableEntityInput, Delta, EntityReplica, Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
 import type { HubHealth } from './health';
+import { createExternalWalletApi } from './api/external-wallet-api';
 import { encodeBoard, hashBoard } from './entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from './account-crypto';
 import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
@@ -73,6 +74,12 @@ let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
 let processGuardsInstalled = false;
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
+const JSON_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': '*',
+  'Access-Control-Allow-Headers': '*',
+  'Content-Type': 'application/json',
+} as const;
 const formatTimingMs = (value: number): string => value.toFixed(2);
 const stringifyBootstrapDebug = (value: unknown): string =>
   JSON.stringify(value, (_key, nested) => (typeof nested === 'bigint' ? nested.toString() : nested));
@@ -290,12 +297,23 @@ const waitForReserveUpdate = async (
 
 const hubSignerLabels = new Map<string, string>();
 const hubSignerAddresses = new Map<string, string>();
+const SERVER_RUNTIME_SEED = (() => {
+  const seed = process.env.XLN_RUNTIME_SEED?.trim();
+  if (!seed) {
+    throw new Error('XLN_RUNTIME_SEED is required for runtime/server.ts');
+  }
+  return seed;
+})();
 const HUB_MESH_TOKEN_ID = 1;
 const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
 const HUB_MESH_REQUIRED_HUBS = 3;
 const HUB_REQUIRED_TOKEN_COUNT = 3;
 const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
 const HUB_WALLET_ETH_TARGET = ethers.parseEther('1000');
+const FAUCET_SIGNER_LABEL = process.env.FAUCET_SIGNER_LABEL ?? 'faucet-1';
+const FAUCET_SEED = process.env.FAUCET_SEED ?? `${SERVER_RUNTIME_SEED}:faucet`;
+const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('100');
+const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
 const HUB_RESERVE_ASSERT_TIMEOUT_MS = 30_000;
 const HUB_MESH_ASSERT_TIMEOUT_MS = 20_000;
 const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
@@ -312,13 +330,6 @@ const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   Number(process.env.MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK || '10'),
 );
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [60, 140, 240, 360, 520] as const;
-const SERVER_RUNTIME_SEED = (() => {
-  const seed = process.env.XLN_RUNTIME_SEED?.trim();
-  if (!seed) {
-    throw new Error('XLN_RUNTIME_SEED is required for runtime/server.ts');
-  }
-  return seed;
-})();
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
   120n * 10n ** 18n,
   180n * 10n ** 18n,
@@ -450,6 +461,27 @@ const ensureHubWalletFunding = async (
 
   return hub;
 };
+
+const externalWalletApi = createExternalWalletApi({
+  getJAdapter: () => globalJAdapter,
+  getRuntimeId: () => String(env?.runtimeId || ''),
+  getTokenCatalog: async () => ensureTokenCatalog(),
+  jsonHeaders: JSON_HEADERS,
+  faucetSeed: FAUCET_SEED,
+  faucetSignerLabel: FAUCET_SIGNER_LABEL,
+  faucetWalletEthTarget: FAUCET_WALLET_ETH_TARGET,
+  faucetTokenTargetUnits: FAUCET_TOKEN_TARGET_UNITS,
+  emitDebugEvent: (entry) => {
+    pushDebugEvent(relayStore, entry);
+  },
+  fundBrowserVmWallet: async (address: string, amount: bigint): Promise<boolean> => {
+    if (!globalJAdapter) return false;
+    const browserVM = globalJAdapter.getBrowserVM();
+    if (!browserVM?.fundSignerWallet) return false;
+    await browserVM.fundSignerWallet(address, amount);
+    return true;
+  },
+});
 
 const isHubProfile = (profile: Profile): boolean => {
   return profile.metadata.isHub === true;
@@ -2242,6 +2274,7 @@ const bootstrapServerHubsAndReserves = async (
   }
 
   const assertTokens = await ensureTokenCatalog();
+  await externalWalletApi.provisionFaucetWallet();
   if (bootstrapLocalHubs) {
     const hubAssertionsStartedAt = Date.now();
     await assertHubBootstrapReadiness(env, hubEntityIds, assertTokens);
@@ -2610,7 +2643,6 @@ const faucetLock = {
     }
   },
 };
-let faucetNonce: number | null = null;
 
 // ============================================================================
 // STATIC FILE SERVING
@@ -3413,12 +3445,7 @@ const handleRpcMessage = async (ws: any, msg: any, env: Env | null) => {
 // ============================================================================
 
 const handleApi = async (req: Request, pathname: string, env: Env | null): Promise<Response> => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Content-Type': 'application/json',
-  };
+  const headers = JSON_HEADERS;
 
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers });
@@ -4002,17 +4029,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   // Token catalog (for UI token list + deposits)
   if (pathname === '/api/tokens') {
-    try {
-      if (!globalJAdapter) {
-        return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
-      }
-
-      const tokens = await ensureTokenCatalog();
-      return new Response(JSON.stringify({ tokens }), { headers });
-    } catch (error: any) {
-      console.error('[API/TOKENS] Error:', error);
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
-    }
+    return await externalWalletApi.handleTokens();
   }
 
   // ============================================================================
@@ -4021,234 +4038,12 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   // Faucet A: External ERC20 → user wallet
   if (pathname === '/api/faucet/erc20' && req.method === 'POST') {
-    // Acquire mutex to prevent nonce collisions
-    await faucetLock.acquire();
-    try {
-      const requestId =
-        globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      const logPrefix = `FAUCET/ERC20 ${requestId}`;
-      if (!globalJAdapter) {
-        faucetLock.release();
-        return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
-      }
-      if (!env) {
-        faucetLock.release();
-        return new Response(JSON.stringify({ error: 'Runtime not initialized' }), { status: 503, headers });
-      }
-
-      const body = await req.json();
-      const { userAddress, tokenSymbol = 'USDC', amount = '100' } = body;
-      console.log(`[${logPrefix}] Request: to=${userAddress} token=${tokenSymbol} amount=${amount}`);
-
-      if (!userAddress || !ethers.isAddress(userAddress)) {
-        faucetLock.release();
-        return new Response(JSON.stringify({ error: 'Invalid userAddress' }), { status: 400, headers });
-      }
-
-      if (globalJAdapter.mode === 'browservm') {
-        const browserVM = globalJAdapter.getBrowserVM();
-        if (!browserVM?.fundSignerWallet) {
-          faucetLock.release();
-          return new Response(JSON.stringify({ error: 'BrowserVM faucet unavailable' }), { status: 503, headers });
-        }
-        const amountWei = ethers.parseUnits(amount, 18);
-        await (browserVM as any).fundSignerWallet(userAddress, amountWei);
-        faucetLock.release();
-        console.log(`[${logPrefix}] BrowserVM funded ${userAddress} amount=${amount}`);
-        return new Response(
-          JSON.stringify({
-            success: true,
-            type: 'erc20',
-            amount,
-            tokenSymbol,
-            userAddress,
-            requestId,
-          }),
-          { headers },
-        );
-      }
-
-      if (tokenSymbol?.toUpperCase?.() === 'ETH') {
-        const hub = await ensureHubWalletFunding(env!, { ensureEth: true, ensureTokens: false });
-        if (!hub) {
-          faucetLock.release();
-          return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
-        }
-        const hubWallet = hub.wallet;
-        const topupAmount = ethers.parseEther(amount);
-        const pendingNonce = await hubWallet.getNonce('pending');
-        if (faucetNonce === null || pendingNonce > faucetNonce) {
-          faucetNonce = pendingNonce;
-        }
-        const nonce = faucetNonce;
-        const tx = await hubWallet.sendTransaction({
-          to: userAddress,
-          value: topupAmount,
-          nonce,
-        });
-        faucetNonce = nonce + 1;
-        await tx.wait();
-        faucetLock.release();
-        console.log(`[${logPrefix}] ETH-only faucet tx=${tx.hash}`);
-        return new Response(
-          JSON.stringify({
-            success: true,
-            type: 'gas',
-            amount,
-            tokenSymbol: 'ETH',
-            userAddress,
-            txHash: tx.hash,
-            requestId,
-          }),
-          { headers },
-        );
-      }
-
-      const tokens = await ensureTokenCatalog();
-      const tokenInfo = tokens.find(t => t.symbol?.toUpperCase() === tokenSymbol.toUpperCase());
-      if (!tokenInfo?.address) {
-        faucetLock.release();
-        return new Response(JSON.stringify({ error: `Token ${tokenSymbol} not found` }), { status: 404, headers });
-      }
-      const amountWei = ethers.parseUnits(amount, tokenInfo.decimals ?? 18);
-      console.log(`[${logPrefix}] Token resolved: ${tokenInfo.symbol} @ ${tokenInfo.address}`);
-
-      const hub = await ensureHubWalletFunding(env!, {
-        tokenCatalog: tokens,
-        ensureEth: true,
-        ensureTokens: true,
-      });
-      if (!hub) {
-        faucetLock.release();
-        return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
-      }
-
-      const hubWallet = hub.wallet;
-      console.log(`[${logPrefix}] Hub wallet: ${await hubWallet.getAddress()}`);
-
-      // Transfer ERC20 from hub to user (with explicit nonce for safety)
-      const ERC20_ABI = ['function transfer(address to, uint256 amount) returns (bool)'];
-      const erc20 = new ethers.Contract(tokenInfo.address, ERC20_ABI, hubWallet);
-      const pendingNonce = await hubWallet.getNonce('pending');
-      if (faucetNonce === null || pendingNonce > faucetNonce) {
-        faucetNonce = pendingNonce;
-      }
-      const nonce = faucetNonce;
-      const tx = await erc20.transfer(userAddress, amountWei, { nonce });
-      faucetNonce = nonce + 1;
-      await tx.wait();
-      console.log(`[${logPrefix}] ERC20 transfer tx=${tx.hash}`);
-
-      // Only top up ETH if user is low on gas
-      let ethTxHash: string | undefined;
-      try {
-        const userEth = await globalJAdapter.provider.getBalance(userAddress);
-        const minBalance = ethers.parseEther('0.01');
-        const targetBalance = ethers.parseEther('0.1');
-        if (userEth < minBalance) {
-          const topup = targetBalance - userEth;
-          const ethNonce = faucetNonce;
-          const ethTx = await hubWallet.sendTransaction({
-            to: userAddress,
-            value: topup,
-            nonce: ethNonce,
-          });
-          faucetNonce = ethNonce + 1;
-          await ethTx.wait();
-          ethTxHash = ethTx.hash;
-          console.log(`[${logPrefix}] ETH topup tx=${ethTx.hash} topup=${ethers.formatEther(topup)}`);
-        } else {
-          console.log(`[${logPrefix}] ETH topup skipped (balance=${ethers.formatEther(userEth)})`);
-        }
-      } catch (err) {
-        console.warn(`[${logPrefix}] ETH topup check failed:`, (err as Error).message);
-      }
-
-      faucetLock.release();
-      return new Response(
-        JSON.stringify({
-          success: true,
-          type: 'erc20',
-          amount,
-          tokenSymbol,
-          userAddress,
-          txHash: tx.hash,
-          ...(ethTxHash ? { ethTxHash } : {}),
-          requestId,
-        }),
-        { headers },
-      );
-    } catch (error: any) {
-      faucetLock.release();
-      console.error('[FAUCET/ERC20] Error:', error);
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
-    }
+    return await externalWalletApi.handleErc20Faucet(req);
   }
 
   // Faucet A2: Gas-only topup (for approve/deposit)
   if (pathname === '/api/faucet/gas' && req.method === 'POST') {
-    await faucetLock.acquire();
-    try {
-      const requestId =
-        globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      const logPrefix = `FAUCET/GAS ${requestId}`;
-      if (!globalJAdapter) {
-        faucetLock.release();
-        return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
-      }
-      if (!env) {
-        faucetLock.release();
-        return new Response(JSON.stringify({ error: 'Runtime not initialized' }), { status: 503, headers });
-      }
-
-      const body = await req.json();
-      const { userAddress, amount = '0.1' } = body;
-      console.log(`[${logPrefix}] Request: to=${userAddress} amount=${amount}`);
-
-      if (!userAddress || !ethers.isAddress(userAddress)) {
-        faucetLock.release();
-        return new Response(JSON.stringify({ error: 'Invalid userAddress' }), { status: 400, headers });
-      }
-
-      const hub = await ensureHubWalletFunding(env, { ensureEth: true, ensureTokens: false });
-      if (!hub) {
-        faucetLock.release();
-        return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
-      }
-      const hubWallet = hub.wallet;
-
-      const topupAmount = ethers.parseEther(amount);
-      const pendingNonce = await hubWallet.getNonce('pending');
-      if (faucetNonce === null || pendingNonce > faucetNonce) {
-        faucetNonce = pendingNonce;
-      }
-      const nonce = faucetNonce;
-      const tx = await hubWallet.sendTransaction({
-        to: userAddress,
-        value: topupAmount,
-        nonce,
-      });
-      faucetNonce = nonce + 1;
-      await tx.wait();
-      console.log(`[${logPrefix}] ETH topup tx=${tx.hash}`);
-
-      faucetLock.release();
-      return new Response(
-        JSON.stringify({
-          success: true,
-          type: 'gas',
-          amount,
-          userAddress,
-          txHash: tx.hash,
-          requestId,
-        }),
-        { headers },
-      );
-    } catch (error: any) {
-      faucetLock.release();
-      console.error('[FAUCET/GAS] Error:', error);
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
-    }
+    return await externalWalletApi.handleGasFaucet(req);
   }
 
   // Faucet B: Hub reserve → user reserve via processBatch

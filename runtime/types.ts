@@ -645,6 +645,16 @@ export type EntityTx =
       };
     }
   | {
+      // Reserve-to-external: Entity withdraws reserve balance to an external EOA address encoded as bytes32.
+      // This stays declarative at the entity layer; J-batch execution handles the actual token transfer.
+      type: 'reserve_to_external';
+      data: {
+        receivingEntity: string; // bytes32-encoded external EOA destination
+        tokenId: number;
+        amount: bigint;
+      };
+    }
+  | {
       // J-Broadcast: Entity broadcasts accumulated jBatch to J-machine
       type: 'j_broadcast';
       data: {

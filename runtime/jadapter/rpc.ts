@@ -939,12 +939,12 @@ export async function createRpcAdapter(
         internalTokenId?: number;
       }
     ): Promise<JEvent[]> {
-      // Create wallet from private key (use NonceManager to avoid nonce races)
       const signerWallet = new ethers.Wallet(
         '0x' + Buffer.from(signerPrivateKey).toString('hex'),
         provider
       );
-      const managedSigner = new ethers.NonceManager(signerWallet);
+      const signerAddress = signerWallet.address;
+      let nextNonce = await provider.getTransactionCount(signerAddress, 'pending');
 
       const tokenType = options?.tokenType ?? 0;
       const externalTokenIdRaw = options?.externalTokenId ?? 0n;
@@ -958,7 +958,7 @@ export async function createRpcAdapter(
       const erc20 = new ethers.Contract(tokenAddress, [
         'function approve(address spender, uint256 amount) returns (bool)',
         'function allowance(address owner, address spender) view returns (uint256)',
-      ], managedSigner);
+      ], signerWallet);
 
       // Step 1: Approve Depository to spend tokens (max allowance for smoother UX)
       const allowanceFn = erc20.getFunction('allowance') as (owner: string, spender: string) => Promise<bigint>;
@@ -968,22 +968,30 @@ export async function createRpcAdapter(
         overrides?: Record<string, bigint>
       ) => Promise<{ wait: (confirms?: number, timeout?: number) => Promise<unknown>; hash: string }>;
       const liveDepositoryAddress = await getLiveDepositoryAddress();
-      const allowance: bigint = await allowanceFn(signerWallet.address, liveDepositoryAddress);
+      const allowance: bigint = await allowanceFn(signerAddress, liveDepositoryAddress);
       if (allowance < amount) {
         // Safer approval model: approve exact amount needed.
         // For USDT-like tokens, clear to 0 before raising allowance.
         if (allowance > 0n) {
-          const clearTx = await approveFn(liveDepositoryAddress, 0n, await buildFeeOverrides());
+          const clearTx = await approveFn(liveDepositoryAddress, 0n, {
+            ...(await buildFeeOverrides()),
+            nonce: nextNonce,
+          });
+          nextNonce += 1;
           await waitForReceipt(clearTx as any, 'erc20ApproveReset');
         }
-        const approveTx = await approveFn(liveDepositoryAddress, amount, await buildFeeOverrides());
+        const approveTx = await approveFn(liveDepositoryAddress, amount, {
+          ...(await buildFeeOverrides()),
+          nonce: nextNonce,
+        });
+        nextNonce += 1;
         await waitForReceipt(approveTx as any, 'erc20ApproveExact');
         console.log(`[JAdapter:rpc] Approved exact allowance=${amount} for Depository`);
       }
 
       // Step 3: Call externalTokenToReserve
       // Connect depository with signer's wallet
-      const depositoryWithSigner = depository.connect(managedSigner as any) as typeof depository;
+      const depositoryWithSigner = depository.connect(signerWallet as any) as typeof depository;
       const depositTx = await depositoryWithSigner.externalTokenToReserve({
         entity: entityId,
         contractAddress: tokenAddress,
@@ -991,7 +999,10 @@ export async function createRpcAdapter(
         tokenType,
         internalTokenId, // Auto-detect from registry when 0
         amount: amount,
-      }, await buildFeeOverrides());
+      }, {
+        ...(await buildFeeOverrides()),
+        nonce: nextNonce,
+      });
       const receipt = await waitForReceipt(depositTx as any, 'externalTokenToReserve');
 
       // Parse events

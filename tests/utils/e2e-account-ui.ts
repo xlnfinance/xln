@@ -112,6 +112,13 @@ async function getRenderedPrimaryCapacity(page: Page, selectors: string): Promis
   }, { selectors });
 }
 
+async function getNumericTextByTestId(page: Page, testId: string): Promise<number> {
+  const locator = page.getByTestId(testId).first();
+  await locator.waitFor({ state: 'visible', timeout: 20_000 });
+  const text = (await locator.textContent())?.trim() ?? '0';
+  return parseRenderedCapacity(text);
+}
+
 async function waitForRenderedAccountCapacityDelta(
   page: Page,
   counterpartyId: string,
@@ -216,6 +223,14 @@ export async function getRenderedOutboundForAccount(page: Page, counterpartyId: 
 
 export async function getRenderedInboundForAccount(page: Page, counterpartyId: string): Promise<number> {
   return getRenderedCapacityForAccount(page, counterpartyId, 'inbound');
+}
+
+export async function getRenderedExternalBalance(page: Page, symbol: string): Promise<number> {
+  return getNumericTextByTestId(page, `external-balance-${symbol}`);
+}
+
+export async function getRenderedReserveBalance(page: Page, symbol: string): Promise<number> {
+  return getNumericTextByTestId(page, `reserve-balance-${symbol}`);
 }
 
 export async function waitForRenderedOutboundForAccount(

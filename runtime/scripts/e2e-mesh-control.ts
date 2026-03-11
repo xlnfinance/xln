@@ -851,6 +851,55 @@ const proxyAnyHubGet = async (request: Request, endpointWithQuery: string): Prom
   }
 };
 
+const proxyAnyHubRequest = async (
+  request: Request,
+  endpointWithQuery: string,
+): Promise<Response> => {
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': '*',
+    'Access-Control-Allow-Headers': '*',
+    'Content-Type': 'application/json',
+  };
+
+  await pollAllHubHealth();
+  const child = hubChildren.find((candidate) => candidate.proc?.exitCode === null && candidate.lastHealth);
+  if (!child) {
+    return new Response(JSON.stringify({ error: 'No healthy hub API available' }), {
+      status: 503,
+      headers,
+    });
+  }
+
+  let bodyText = '';
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    bodyText = await request.text();
+  }
+
+  try {
+    const response = await fetch(`http://${args.host}:${child.apiPort}${endpointWithQuery}`, {
+      method: request.method,
+      headers: {
+        'content-type': request.headers.get('content-type') || 'application/json',
+      },
+      ...(bodyText.length > 0 ? { body: bodyText } : {}),
+    });
+    const text = await response.text();
+    return new Response(text, {
+      status: response.status,
+      headers: {
+        ...headers,
+        'content-type': response.headers.get('content-type') || 'application/json',
+      },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: serializeError(error) }), {
+      status: 502,
+      headers,
+    });
+  }
+};
+
 const server = Bun.serve({
   hostname: args.host,
   port: args.port,
@@ -880,6 +929,13 @@ const server = Bun.serve({
 
     if (pathname === '/api/faucet/offchain' && request.method === 'POST') {
       return await proxyHubApi(request, '/api/faucet/offchain');
+    }
+
+    if (
+      (pathname === '/api/faucet/erc20' || pathname === '/api/faucet/gas')
+      && request.method === 'POST'
+    ) {
+      return await proxyAnyHubRequest(request, pathname);
     }
 
     if (pathname === '/api/health') {
@@ -1051,7 +1107,25 @@ const server = Bun.serve({
       }
     }
 
-    return new Response(JSON.stringify({ ok: true, service: 'e2e-mesh-control' }), { headers });
+    if (pathname === '/api/tokens' && request.method === 'GET') {
+      return await proxyAnyHubRequest(request, `${pathname}${url.search}`);
+    }
+
+    if (pathname.startsWith('/api/')) {
+      return new Response(JSON.stringify({
+        error: `Unhandled e2e-mesh-control API route: ${request.method} ${pathname}`,
+      }), {
+        status: 404,
+        headers,
+      });
+    }
+
+    return new Response(JSON.stringify({
+      error: `Unhandled e2e-mesh-control route: ${request.method} ${pathname}`,
+    }), {
+      status: 404,
+      headers,
+    });
   },
   websocket: {
     open() {

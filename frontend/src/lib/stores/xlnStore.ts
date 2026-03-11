@@ -316,7 +316,7 @@ export const entityPositions = writable<Map<string, RelativeEntityPosition>>(new
 // Track if XLN is already initialized to prevent data loss
 let isInitialized = false;
 
-const resolveConfiguredApiBase = (baseOrigin: string): string => {
+export const resolveConfiguredApiBase = (baseOrigin: string): string => {
   if (typeof window === 'undefined') return baseOrigin;
   const fromWindow = (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__;
   if (typeof fromWindow === 'string' && fromWindow.trim().length > 0) return fromWindow.trim();
