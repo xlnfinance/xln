@@ -129,25 +129,6 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
     }
   }
 
-  // Check entities with reserves (potential hubs)
-  if (env?.eReplicas) {
-    for (const [entityId, replica] of replicasByEntityId.entries()) {
-      const state = replica.state;
-      if (state?.reserves && state.reserves.size > 0) {
-        // Only add if not already in hubs list
-        if (!hubs.find(h => h.entityId === entityId)) {
-          hubs.push({
-            entityId: replica.entityId || entityId,
-            name: entityId.slice(0, 10) + '...',
-            status: 'healthy',
-            reserves: serializeReserves(state.reserves),
-            accounts: state.accounts?.size || 0,
-          });
-        }
-      }
-    }
-  }
-
   return {
     timestamp: Date.now(),
     uptime: Date.now() - startTime,

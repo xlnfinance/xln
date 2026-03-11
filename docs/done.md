@@ -646,3 +646,16 @@
         - `/Users/egor/xln/.logs/e2e-parallel/20260311-143608-129`
 
 - 2026-03-12: unified External/Reserve asset ledger into one Assets tab, added spendable Accounts column, centered desktop shell, and fixed server external faucet runtimeId closure (validated via isolated E2E plus direct /api/faucet/erc20 smoke).
+
+- 2026-03-12
+  - Tightened the live Assets and health surface without changing wallet flows:
+    - [runtime/health.ts](/Users/egor/xln/runtime/health.ts) no longer promotes every reserve-bearing entity into `hubs`; only explicit `profile.metadata.isHub === true` entities appear in hub health.
+    - [EntityPanelTabs.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/EntityPanelTabs.svelte) now uses a tighter centered shell, simpler Assets heading copy, and cleaner EOA/entity meta presentation under the single ledger view.
+  - Re-verified:
+    - `bun x tsc --noEmit`
+    - focused isolated reserve wallet flow:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-e2r2e.spec.ts --video=off --trace=off --screenshot=only-on-failure --max-failures=1`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260312-020505-928/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260312-020505-928/e2e-shard-00.log)
+    - full isolated E2E suite:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --video=off --trace=off --screenshot=only-on-failure --max-failures=1`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260312-020555-109/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260312-020555-109/e2e-shard-00.log)
