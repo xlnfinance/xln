@@ -2220,7 +2220,10 @@
       <section class="content">
         {#if activeTab === 'assets'}
           <div class="tab-header-row">
-            <h4 class="section-head" style="margin: 0;">Assets</h4>
+            <div class="asset-title-block">
+              <h4 class="section-head" style="margin: 0;">Assets</h4>
+              <p class="muted asset-ledger-note">External wallet, on-chain reserves, and spendable account capacity in one ledger.</p>
+            </div>
             <div class="header-actions">
               <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 15000} on:change={updateBalanceRefresh}>
                 {#each REFRESH_OPTIONS as opt}
@@ -2960,7 +2963,7 @@
     --panel-gutter-x: 16px;
     display: flex;
     flex-direction: column;
-    width: min(100%, 1520px);
+    width: min(100%, 1360px);
     height: 100%;
     margin: 0 auto;
     background: #0a0a0a;
@@ -4335,6 +4338,17 @@
     margin-bottom: 10px;
   }
 
+  .asset-title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .asset-ledger-note {
+    margin: 0;
+    max-width: 520px;
+  }
+
   .header-actions {
     display: flex;
     align-items: center;
@@ -4380,7 +4394,7 @@
   }
 
   .wallet-label {
-    margin-bottom: 12px;
+    margin-bottom: 0;
     font-family: 'JetBrains Mono', monospace;
     overflow-wrap: anywhere;
   }
@@ -4390,6 +4404,8 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px 16px;
     margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #1f1f23;
   }
 
   .loading-row {
@@ -4814,6 +4830,10 @@
     .tab-header-row {
       flex-direction: column;
       align-items: stretch;
+    }
+
+    .asset-ledger-note {
+      max-width: none;
     }
 
     .header-actions {
