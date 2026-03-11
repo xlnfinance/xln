@@ -87,9 +87,17 @@ const readGasFaucetBody = async (request: Request): Promise<GasFaucetRequestBody
   return { userAddress, amount };
 };
 
-const getFaucetWallet = (context: ExternalWalletApiContext, adapter: JAdapter): ethers.Wallet => {
+const faucetSignerByAddress = new Map<string, ethers.NonceManager>();
+
+const getFaucetWallet = (context: ExternalWalletApiContext, adapter: JAdapter): ethers.NonceManager => {
   const privateKeyBytes = deriveSignerKeySync(context.faucetSeed, context.faucetSignerLabel);
-  return new ethers.Wallet(ethers.hexlify(privateKeyBytes), adapter.provider);
+  const wallet = new ethers.Wallet(ethers.hexlify(privateKeyBytes), adapter.provider);
+  const cacheKey = wallet.address.toLowerCase();
+  const cached = faucetSignerByAddress.get(cacheKey);
+  if (cached) return cached;
+  const managed = new ethers.NonceManager(wallet);
+  faucetSignerByAddress.set(cacheKey, managed);
+  return managed;
 };
 
 const provisionFaucetWalletFunding = async (
@@ -100,7 +108,7 @@ const provisionFaucetWalletFunding = async (
     ensureEth: boolean;
     ensureTokens: boolean;
   },
-): Promise<ethers.Wallet> => {
+) : Promise<ethers.NonceManager> => {
   const faucetWallet = getFaucetWallet(context, adapter);
   const faucetAddress = await faucetWallet.getAddress();
   const deployerAddress = await adapter.signer.getAddress().catch(() => '');
@@ -173,7 +181,7 @@ const requireFaucetWalletBalances = async (
     requiredTokenAddress?: string;
     requiredTokenAmount?: bigint;
   },
-): Promise<ethers.Wallet> => {
+) : Promise<ethers.NonceManager> => {
   const faucetWallet = getFaucetWallet(context, adapter);
   const faucetAddress = await faucetWallet.getAddress();
 
@@ -293,12 +301,10 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         requiredTokenAmount: amountWei,
       });
       const faucetAddress = await faucetWallet.getAddress();
-      let nextNonce = await adapter.provider.getTransactionCount(faucetAddress, 'pending');
 
       console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer token=${tokenInfo.symbol} amountWei=${amountWei}`);
       const tokenContract = ERC20Mock__factory.connect(tokenInfo.address, faucetWallet);
-      const transferTx = await tokenContract.transfer(userAddress, amountWei, { nonce: nextNonce });
-      nextNonce += 1;
+      const transferTx = await tokenContract.transfer(userAddress, amountWei);
       console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer tx=${transferTx.hash} waiting`);
       await transferTx.wait();
       console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer mined`);
@@ -308,9 +314,7 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         const topupTx = await faucetWallet.sendTransaction({
           to: userAddress,
           value: targetBalance - userEth,
-          nonce: nextNonce,
         });
-        nextNonce += 1;
         console.log(`[EXT-FAUCET/ERC20 ${requestId}] topup tx=${topupTx.hash} waiting`);
         await topupTx.wait();
         ethTxHash = topupTx.hash;
@@ -376,13 +380,10 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
       const faucetWallet = await requireFaucetWalletBalances(context, adapter, [], {
         requiredEth: topupAmount + ethers.parseEther('0.01'),
       });
-      const faucetAddress = await faucetWallet.getAddress();
-      const nextNonce = await adapter.provider.getTransactionCount(faucetAddress, 'pending');
       console.log(`[EXT-FAUCET/GAS ${requestId}] sending topup wei=${topupAmount}`);
       const tx = await faucetWallet.sendTransaction({
         to: userAddress,
         value: topupAmount,
-        nonce: nextNonce,
       });
       console.log(`[EXT-FAUCET/GAS ${requestId}] tx=${tx.hash} waiting`);
       await tx.wait();
