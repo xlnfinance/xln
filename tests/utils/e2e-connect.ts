@@ -82,7 +82,24 @@ async function isAccountReady(
   );
 }
 
+async function dismissOnboardingIfVisible(page: Page): Promise<void> {
+  const startUsingButton = page.getByRole('button', { name: /Start using xln|Continue/i }).first();
+  if (!await startUsingButton.isVisible().catch(() => false)) return;
+
+  const riskCheckbox = page.getByRole('checkbox', {
+    name: /I understand.*testnet software|I understand and accept the risks/i,
+  }).first();
+  if (await riskCheckbox.isVisible().catch(() => false)) {
+    const checked = await riskCheckbox.isChecked().catch(() => false);
+    if (!checked) await riskCheckbox.check();
+  }
+
+  await startUsingButton.click();
+  await expect(startUsingButton).not.toBeVisible({ timeout: 20_000 });
+}
+
 async function openAccountsWorkspace(page: Page): Promise<void> {
+  await dismissOnboardingIfVisible(page);
   const accountsTab = page.getByTestId('tab-accounts').first();
   if (!await accountsTab.isVisible().catch(() => false)) {
     const backButton = page.locator('.account-panel .back-button').first();
