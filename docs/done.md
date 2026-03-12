@@ -659,3 +659,5 @@
     - full isolated E2E suite:
       - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --video=off --trace=off --screenshot=only-on-failure --max-failures=1`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260312-020555-109/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260312-020555-109/e2e-shard-00.log)
+
+- 2026-03-12: Fixed assets-tab background refresh block structure, removed noisy recipient gossip dump from pay form, moved pay Max inline, kept focused payment + e2r2e green.

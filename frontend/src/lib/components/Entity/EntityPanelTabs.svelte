@@ -2295,62 +2295,56 @@
             <p class="muted wallet-label">Entity: {replica?.state?.entityId || tab.entityId}</p>
           </div>
 
-          {#if externalTokensLoading}
-            <div class="loading-row">
-              <div class="loading-spinner"></div>
-              <span>Loading...</span>
-            </div>
-          {:else}
-            <div class="token-table-header asset-ledger-header">
-              <span class="col-token">Asset</span>
-              <span class="col-balance">External</span>
-              <span class="col-balance">Reserve</span>
-              <span class="col-balance">Accounts</span>
-            </div>
-            <div class="token-table asset-ledger-table">
-              {#each assetLedgerRows as row}
-                <div class="token-table-row asset-ledger-row" class:has-balance={row.externalBalance > 0n || row.reserveBalance > 0n} data-testid={`asset-row-${row.symbol}`}>
-                  <div class="col-token">
-                    <span class="token-icon-small" class:usdc={row.symbol === 'USDC'} class:weth={row.symbol === 'WETH' || row.symbol === 'ETH'} class:usdt={row.symbol === 'USDT'}>
-                      {row.symbol.slice(0, 1)}
-                    </span>
-                    <div class="asset-name-block">
-                      <span class="token-name">{row.symbol}</span>
-                      <span class="asset-kind">{row.isNative ? 'Native gas' : 'ERC20 / reserve'}</span>
-                    </div>
-                  </div>
-                  <div class="col-balance asset-balance-block">
-                    {#if isAssetBridgeSyncPending(row.tokenId)}
-                      <span class="balance-text subtle asset-syncing">Syncing…</span>
-                      <span class="value-text subtle">—</span>
-                    {:else}
-                      <span class="balance-text" class:zero={row.externalBalance === 0n} data-testid={`external-balance-${row.symbol}`}>
-                        {formatAmount(row.externalBalance, row.decimals)}
-                      </span>
-                      <span class="value-text subtle">{formatApproxUsd(row.externalUsd)}</span>
-                    {/if}
-                  </div>
-                  <div class="col-balance asset-balance-block">
-                    {#if isAssetBridgeSyncPending(row.tokenId)}
-                      <span class="balance-text subtle asset-syncing">Syncing…</span>
-                      <span class="value-text subtle">—</span>
-                    {:else}
-                      <span class="balance-text" class:zero={row.reserveBalance === 0n} data-testid={`reserve-balance-${row.symbol}`}>
-                        {row.tokenId && row.tokenId > 0 ? formatAmount(row.reserveBalance, row.decimals) : '—'}
-                      </span>
-                      <span class="value-text subtle">{row.tokenId && row.tokenId > 0 ? formatApproxUsd(row.reserveUsd) : '—'}</span>
-                    {/if}
-                  </div>
-                  <div class="col-balance asset-balance-block">
-                    <span class="balance-text" class:zero={row.accountBalance === 0n} data-testid={`account-spendable-${row.symbol}`}>
-                      {row.tokenId && row.tokenId > 0 ? formatAmount(row.accountBalance, row.decimals) : '—'}
-                    </span>
-                    <span class="value-text subtle">{row.tokenId && row.tokenId > 0 ? formatApproxUsd(row.accountUsd) : '—'}</span>
+          <div class="token-table-header asset-ledger-header">
+            <span class="col-token">Asset</span>
+            <span class="col-balance">External</span>
+            <span class="col-balance">Reserve</span>
+            <span class="col-balance">Accounts</span>
+          </div>
+          <div class="token-table asset-ledger-table" class:is-refreshing={externalTokensLoading}>
+            {#each assetLedgerRows as row}
+              <div class="token-table-row asset-ledger-row" class:has-balance={row.externalBalance > 0n || row.reserveBalance > 0n} data-testid={`asset-row-${row.symbol}`}>
+                <div class="col-token">
+                  <span class="token-icon-small" class:usdc={row.symbol === 'USDC'} class:weth={row.symbol === 'WETH' || row.symbol === 'ETH'} class:usdt={row.symbol === 'USDT'}>
+                    {row.symbol.slice(0, 1)}
+                  </span>
+                  <div class="asset-name-block">
+                    <span class="token-name">{row.symbol}</span>
+                    <span class="asset-kind">{row.isNative ? 'Native gas' : 'ERC20 / reserve'}</span>
                   </div>
                 </div>
-              {/each}
-            </div>
-            <nav class="account-workspace-tabs asset-workspace-tabs" aria-label="Asset workspace">
+                <div class="col-balance asset-balance-block">
+                  {#if isAssetBridgeSyncPending(row.tokenId)}
+                    <span class="balance-text subtle asset-syncing">Syncing…</span>
+                    <span class="value-text subtle">—</span>
+                  {:else}
+                    <span class="balance-text" class:zero={row.externalBalance === 0n} data-testid={`external-balance-${row.symbol}`}>
+                      {formatAmount(row.externalBalance, row.decimals)}
+                    </span>
+                    <span class="value-text subtle">{formatApproxUsd(row.externalUsd)}</span>
+                  {/if}
+                </div>
+                <div class="col-balance asset-balance-block">
+                  {#if isAssetBridgeSyncPending(row.tokenId)}
+                    <span class="balance-text subtle asset-syncing">Syncing…</span>
+                    <span class="value-text subtle">—</span>
+                  {:else}
+                    <span class="balance-text" class:zero={row.reserveBalance === 0n} data-testid={`reserve-balance-${row.symbol}`}>
+                      {row.tokenId && row.tokenId > 0 ? formatAmount(row.reserveBalance, row.decimals) : '—'}
+                    </span>
+                    <span class="value-text subtle">{row.tokenId && row.tokenId > 0 ? formatApproxUsd(row.reserveUsd) : '—'}</span>
+                  {/if}
+                </div>
+                <div class="col-balance asset-balance-block">
+                  <span class="balance-text" class:zero={row.accountBalance === 0n} data-testid={`account-spendable-${row.symbol}`}>
+                    {row.tokenId && row.tokenId > 0 ? formatAmount(row.accountBalance, row.decimals) : '—'}
+                  </span>
+                  <span class="value-text subtle">{row.tokenId && row.tokenId > 0 ? formatApproxUsd(row.accountUsd) : '—'}</span>
+                </div>
+              </div>
+            {/each}
+          </div>
+          <nav class="account-workspace-tabs asset-workspace-tabs" aria-label="Asset workspace">
               <button class="account-workspace-tab" data-testid="asset-tab-faucet" class:active={assetWorkspaceTab === 'faucet'} on:click={() => assetWorkspaceTab = 'faucet'}>
                 <span>Faucet</span>
               </button>
@@ -2366,7 +2360,7 @@
               <button class="account-workspace-tab" data-testid="asset-tab-allow" class:active={assetWorkspaceTab === 'allow'} on:click={() => assetWorkspaceTab = 'allow'}>
                 <span>Allow</span>
               </button>
-            </nav>
+          </nav>
 
             <section class="asset-action-card">
               {#if assetWorkspaceTab === 'faucet'}
@@ -2387,15 +2381,6 @@
                     Faucet External
                   </button>
                   <button
-                    class="btn-table-action faucet"
-                    data-testid={`account-faucet-${faucetAssetSymbol}`}
-                    on:click={() => submitAssetFaucet('account')}
-                    disabled={!findReserveTransferTokenBySymbol(faucetAssetSymbol) || workspaceAccountIds.length === 0}
-                    title={workspaceAccountIds.length === 0 ? 'Open an account first' : 'Faucet first available account'}
-                  >
-                    Faucet Account
-                  </button>
-                  <button
                     class="btn-table-action deposit"
                     data-testid={`reserve-faucet-${faucetAssetSymbol}`}
                     on:click={() => submitAssetFaucet('reserve')}
@@ -2403,6 +2388,15 @@
                     title={!findReserveTransferTokenBySymbol(faucetAssetSymbol) ? 'Reserve faucet supports ERC20 assets only' : 'Faucet reserve'}
                   >
                     Faucet Reserve
+                  </button>
+                  <button
+                    class="btn-table-action faucet"
+                    data-testid={`account-faucet-${faucetAssetSymbol}`}
+                    on:click={() => submitAssetFaucet('account')}
+                    disabled={!findReserveTransferTokenBySymbol(faucetAssetSymbol) || workspaceAccountIds.length === 0}
+                    title={workspaceAccountIds.length === 0 ? 'Open an account first' : 'Faucet first available account'}
+                  >
+                    Faucet Account
                   </button>
                 </div>
               {:else if assetWorkspaceTab === 'e2r'}
@@ -2579,8 +2573,6 @@
                 </div>
               {/if}
             </section>
-          {/if}
-
         {:else if activeTab === 'accounts'}
           <div class="accounts-selector-row">
             <AccountDropdown
