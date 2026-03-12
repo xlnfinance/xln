@@ -2,7 +2,6 @@
   import type { EntityReplica } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
   import { replicas, xlnFunctions } from '../../stores/xlnStore';
-  import { settings, settingsOperations } from '../../stores/settingsStore';
   import AccountPreview from './AccountPreview.svelte';
 
   export let replica: EntityReplica | null;
@@ -206,9 +205,6 @@
                 {showAllAccounts ? 'Top 3' : `All (${activeAccountsCount})`}
               </button>
             {/if}
-            <button class="layout-toggle" on:click={() => settingsOperations.update({ barLayout: $settings.barLayout === 'center' ? 'sides' : 'center' })} title="{$settings.barLayout === 'center' ? 'Switch to sides view' : 'Switch to center view'}">
-              {$settings.barLayout === 'center' ? '⊞' : '⊟'}
-            </button>
           </div>
         </div>
         <div class="scrollable-component accounts-list">
@@ -288,22 +284,6 @@
     color: #78716c;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-  }
-
-  .layout-toggle {
-    background: none;
-    border: 1px solid #292524;
-    border-radius: 3px;
-    color: #78716c;
-    font-size: 1em;
-    cursor: pointer;
-    padding: 2px 6px;
-    line-height: 1;
-  }
-
-  .layout-toggle:hover {
-    color: #a8a29e;
-    border-color: #44403c;
   }
 
   .list-controls {

@@ -4,6 +4,19 @@ import { applyThemeToDocument } from '../utils/themes';
 
 const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token'] as const;
 const VALID_ACCOUNT_DELTA_VIEW_MODES: readonly AccountDeltaViewMode[] = ['per-token', 'aggregated'] as const;
+const ACCOUNT_BAR_USD_PER_100PX_MIN = 10;
+const ACCOUNT_BAR_USD_PER_100PX_MAX = 10_000;
+const ACCOUNT_BAR_USD_PER_100PX_DEFAULT = 10_000;
+
+function clampAccountBarUsdPerPx(raw: unknown): number {
+  const numeric = Number(raw);
+  const fallback = ACCOUNT_BAR_USD_PER_100PX_DEFAULT / 100;
+  if (!Number.isFinite(numeric)) return fallback;
+  const min = ACCOUNT_BAR_USD_PER_100PX_MIN / 100;
+  const max = ACCOUNT_BAR_USD_PER_100PX_MAX / 100;
+  return Math.max(min, Math.min(max, Math.round(numeric * 100) / 100));
+}
+
 const resolveDefaultRelayUrl = (): string => {
   if (typeof window === 'undefined') return 'wss://xln.finance/relay';
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -15,7 +28,7 @@ const defaultSettings: Settings = {
   theme: 'dark',
   barColorMode: 'rgy',
   barLayout: 'center',
-  accountBarUsdPerPx: 100,
+  accountBarUsdPerPx: ACCOUNT_BAR_USD_PER_100PX_DEFAULT / 100,
   accountDeltaViewMode: 'per-token',
   tokenPrecision: 8, // 2..18 digits after decimal for token amounts (18 = full)
   showTokenIcons: true,
@@ -63,10 +76,7 @@ const settingsOperations = {
         if (typeof parsed.showTimeMachine !== 'boolean') {
           parsed.showTimeMachine = defaultSettings.showTimeMachine;
         }
-        const allowedUsdPerPx = [1, 10, 100, 1000];
-        if (!allowedUsdPerPx.includes(Number(parsed.accountBarUsdPerPx))) {
-          parsed.accountBarUsdPerPx = defaultSettings.accountBarUsdPerPx;
-        }
+        parsed.accountBarUsdPerPx = clampAccountBarUsdPerPx(parsed.accountBarUsdPerPx);
         if (!VALID_ACCOUNT_DELTA_VIEW_MODES.includes(parsed.accountDeltaViewMode)) {
           parsed.accountDeltaViewMode = defaultSettings.accountDeltaViewMode;
         }
@@ -122,6 +132,12 @@ const settingsOperations = {
       ? (mode as BarColorMode)
       : 'rgy';
     settings.update(current => ({ ...current, barColorMode: safe }));
+    this.saveToStorage();
+  },
+
+  setBarLayout(layout: BarLayoutMode) {
+    const next: BarLayoutMode = layout === 'sides' ? 'sides' : 'center';
+    settings.update(current => ({ ...current, barLayout: next }));
     this.saveToStorage();
   },
 
@@ -193,10 +209,13 @@ const settingsOperations = {
   },
 
   setAccountBarUsdPerPx(value: number) {
-    const allowed = new Set([1, 10, 100, 1000]);
-    const next = allowed.has(Number(value)) ? Number(value) as 1 | 10 | 100 | 1000 : defaultSettings.accountBarUsdPerPx;
+    const next = clampAccountBarUsdPerPx(value);
     settings.update(current => ({ ...current, accountBarUsdPerPx: next }));
     this.saveToStorage();
+  },
+
+  setAccountBarUsdPer100Px(value: number) {
+    this.setAccountBarUsdPerPx(Number(value) / 100);
   },
 
   setAccountDeltaViewMode(mode: AccountDeltaViewMode) {
