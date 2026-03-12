@@ -19,6 +19,7 @@
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
+  import { amountToUsd } from '$lib/utils/assetPricing';
   import {
     extractEntityEncPubKey,
     findProfileByEntityId,
@@ -54,8 +55,9 @@
   let repeatTimer: ReturnType<typeof setInterval> | null = null;
   let repeatStoppedReason = '';
   let routeSortMode: 'fee' | 'hops' = 'fee';
-  let allowSelfRoute = false;
   let showFullEntityId = false;
+  let payMaxAmount = 0n;
+  let payMaxUsd = 0;
   let profileExpanded = false;
   let serverEntityNames = new Map<string, string>();
   let paymentPanelEl: HTMLDivElement | null = null;
@@ -71,6 +73,7 @@
   let hostedCheckoutWatcherToken = 0;
   let hostedCheckoutCloseTimer: ReturnType<typeof setTimeout> | null = null;
   let hostedCheckoutShutdownStarted = false;
+  let seededDefaultTarget = false;
   const REPEAT_OPTIONS = [
     { value: 0, label: 'No repeat' },
     { value: 1_000, label: 'Repeat 1s' },
@@ -223,9 +226,7 @@
       hashRoute === 'pay' &&
       (parseBooleanParam(checkoutParam) || Boolean(targetParam || amountParam || noteParam || recipientUserId));
     if (hostedCheckoutMode) useHtlc = true;
-    if (normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) {
-      allowSelfRoute = true;
-    }
+    if (!targetParam && entityId) targetEntityId = entityId;
 
     const explicitLock = parseBooleanParam(noteLockedParam);
     descriptionLocked = explicitLock || Boolean(recipientUserId);
@@ -268,7 +269,24 @@
       if (!norm || byEntity.has(norm)) return;
       byEntity.set(norm, { name, entityId: canonical });
     };
-    if (entityId) put(entityId, 'Self');
+    if (entityId) {
+      const selfNorm = normalizeEntityId(entityId);
+      let selfReplica: EntityReplica | null = null;
+      if (currentReplicas) {
+        for (const replica of currentReplicas.values()) {
+          if (normalizeEntityId(replica.entityId) === selfNorm) {
+            selfReplica = replica;
+            break;
+          }
+        }
+      }
+      const selfProfile = (currentEnv?.gossip?.getProfiles?.() || []).find((profile) => normalizeEntityId(profile.entityId) === selfNorm) ?? null;
+      const selfName = selfReplica?.state?.profile?.name?.trim()
+        || selfProfile?.name?.trim()
+        || contacts.find((contact) => normalizeEntityId(contact.entityId) === selfNorm)?.name?.trim()
+        || 'Self';
+      put(entityId, `${selfName} (self)`);
+    }
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
       const id = profile.entityId.trim();
@@ -286,10 +304,9 @@
       .sort((a, b) => a.name.localeCompare(b.name));
     return self ? [self, ...rest] : rest;
   })();
-
-  $: if (!allowSelfRoute && normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) {
-    targetEntityId = '';
-    resetQuotedRoutes();
+  $: if (!seededDefaultTarget && entityId) {
+    if (!targetEntityId) targetEntityId = entityId;
+    seededDefaultTarget = true;
   }
 
   $: selectedTargetProfile = (() => {
@@ -401,7 +418,10 @@
   function getEntityName(id: string): string {
     if (!id) return 'Unknown';
     const norm = normalizeEntityId(id);
-    if (norm === normalizeEntityId(entityId)) return 'Self';
+    if (norm === normalizeEntityId(entityId)) {
+      const selfLabel = selectorContacts.find((contact) => normalizeEntityId(contact.entityId) === norm)?.name;
+      return selfLabel && selfLabel.trim() ? selfLabel.trim() : 'Self';
+    }
     const contact = selectorContacts.find((c) => normalizeEntityId(c.entityId) === norm);
     if (contact?.name) return contact.name;
     const serverName = serverEntityNames.get(norm);
@@ -414,6 +434,46 @@
   function getGossipProfileByEntityId(id: string): GossipProfile | undefined {
     return findProfileByEntityId(getGossipProfiles(), id) ?? undefined;
   }
+
+  function getTokenSymbol(tokenIdValue: number): string {
+    return String(activeXlnFunctions?.getTokenInfo?.(tokenIdValue)?.symbol || 'token').trim() || 'token';
+  }
+
+  function formatUsdHint(valueUsd: number): string {
+    if (!Number.isFinite(valueUsd) || valueUsd <= 0) return '$0.00';
+    if (valueUsd >= 1000) {
+      return '~$' + valueUsd.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    }
+    return '~$' + valueUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function computeLocalPayMax(tokenIdValue: number): bigint {
+    if (!currentReplicas || !activeXlnFunctions?.deriveDelta) return 0n;
+    const selfNorm = normalizeEntityId(entityId);
+    let maxOut = 0n;
+    for (const [replicaKey, replica] of currentReplicas.entries()) {
+      const [replicaEntityId] = replicaKey.split(':');
+      if (normalizeEntityId(replicaEntityId) !== selfNorm) continue;
+      for (const account of replica.state.accounts.values()) {
+        for (const [deltaTokenId, delta] of account.deltas.entries()) {
+          if (Number(deltaTokenId) !== tokenIdValue) continue;
+          const isLeft = normalizeEntityId(account.leftEntity) === selfNorm;
+          const derived = activeXlnFunctions.deriveDelta(delta, isLeft);
+          if (derived.outCapacity > maxOut) maxOut = derived.outCapacity;
+        }
+      }
+    }
+    return maxOut;
+  }
+
+  function fillMaxPaymentAmount(): void {
+    const maxAmount = computeLocalPayMax(tokenId);
+    if (maxAmount <= 0n) return;
+    amount = formatTokenNumberOnly(maxAmount);
+  }
+
+  $: payMaxAmount = computeLocalPayMax(tokenId);
+  $: payMaxUsd = amountToUsd(payMaxAmount, getTokenDecimals(tokenId), getTokenSymbol(tokenId));
 
   function isRouteableIntermediary(entity: string): boolean {
     // Routeability is a transport/security property, not a display-metadata property.
@@ -848,9 +908,6 @@
       const xln = await getXLN();
       const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
-      if (!allowSelfRoute && normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) {
-        throw new Error('Enable "Allow self-route" to send to the same entity');
-      }
       try {
         await env.runtimeState?.p2p?.syncProfiles?.();
       } catch {
@@ -1224,21 +1281,6 @@
 
   function handleTargetChange(e: CustomEvent) {
     targetEntityId = e.detail.value;
-    if (normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) {
-      allowSelfRoute = true;
-    }
-    preflightError = null;
-    hostedCheckoutStatusMessage = '';
-    hostedCheckoutSuccessVisible = false;
-    resetQuotedRoutes();
-  }
-
-  function handleAllowSelfRouteToggle(event: Event) {
-    const target = event.target as HTMLInputElement | null;
-    allowSelfRoute = target?.checked === true;
-    if (!allowSelfRoute && normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) {
-      targetEntityId = '';
-    }
     preflightError = null;
     hostedCheckoutStatusMessage = '';
     hostedCheckoutSuccessVisible = false;
@@ -1382,7 +1424,7 @@
         value={targetEntityId}
         entities={allEntities}
         contacts={selectorContacts}
-        excludeId={allowSelfRoute ? '' : entityId}
+        preferredId={entityId}
         placeholder="Select recipient..."
         disabled={findingRoutes || sendingPayment}
         on:change={handleTargetChange}
@@ -1400,16 +1442,6 @@
       {refreshingRecipientOptions ? '...' : 'Refresh'}
     </button>
   </div>
-
-  <label class="self-route-toggle">
-    <input
-      type="checkbox"
-      checked={allowSelfRoute}
-      disabled={findingRoutes || sendingPayment}
-      on:change={handleAllowSelfRouteToggle}
-    />
-    <span>Allow self-route</span>
-  </label>
 
   {#if preflightError}
     <div class="profile-preflight-error">{preflightError}</div>
@@ -1447,7 +1479,17 @@
 
   <div class="row">
     <div class="amount-field">
-      <label>Amount</label>
+      <label>
+        <span>Amount</span>
+        <button
+          type="button"
+          class="field-max-link"
+          on:click={fillMaxPaymentAmount}
+          disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
+        >
+          Max: {formatTokenNumberOnly(payMaxAmount)} {getTokenSymbol(tokenId)} ({formatUsdHint(payMaxUsd)})
+        </button>
+      </label>
       <input
         type="text"
         bind:value={amount}
@@ -1664,20 +1706,6 @@
     opacity: 0.55;
   }
 
-  .self-route-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.65rem;
-    color: #94a3b8;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .self-route-toggle input {
-    accent-color: #fbbf24;
-  }
-
   .payment-panel.hosted-checkout {
     position: relative;
     padding: 18px;
@@ -1750,6 +1778,34 @@
     grid-template-columns: 1fr 1fr;
     gap: 12px;
     align-items: end;
+  }
+
+  .amount-field label,
+  .field label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .field-max-link {
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: #a5b4fc;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .field-max-link:hover:not(:disabled) {
+    color: #f8fafc;
+  }
+
+  .field-max-link:disabled {
+    color: #64748b;
+    cursor: default;
   }
 
   .row :global(.token-select) {

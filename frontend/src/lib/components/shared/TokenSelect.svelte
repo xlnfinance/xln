@@ -15,9 +15,9 @@
 
   // Token definitions
   const tokens = [
-    { id: 1, symbol: 'USDC', name: 'USD Coin', color: '#2775ca', icon: '$' },
     { id: 2, symbol: 'WETH', name: 'Wrapped Ether', color: '#627eea', icon: 'E' },
     { id: 3, symbol: 'USDT', name: 'Tether', color: '#26a17b', icon: '$' },
+    { id: 1, symbol: 'USDC', name: 'USD Coin', color: '#2775ca', icon: '$' },
   ];
 
   let showDropdown = false;

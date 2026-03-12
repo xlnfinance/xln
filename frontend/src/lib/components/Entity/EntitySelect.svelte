@@ -73,8 +73,15 @@
 <div class="entity-select">
   <button class="es-trigger" class:open on:click|stopPropagation={() => open = !open}>
     {#if selectedOption}
-      <span class="es-value-main">{selectedOption.name}</span>
-      <span class="es-value-id">{selectedOption.id}</span>
+      {#if selectedOption.avatarUrl}
+        <img class="es-avatar" src={selectedOption.avatarUrl} alt="" />
+      {:else}
+        <span class="es-avatar placeholder">?</span>
+      {/if}
+      <span class="es-value-meta">
+        <span class="es-value-main">{selectedOption.name}</span>
+        <span class="es-value-id">{selectedOption.id}</span>
+      </span>
     {:else}
       <span class="es-placeholder">{placeholder}</span>
     {/if}
@@ -118,7 +125,7 @@
 
   .es-trigger {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     row-gap: 2px;
     column-gap: 8px;
@@ -155,7 +162,6 @@
   }
 
   .es-value-id {
-    grid-column: 1;
     text-align: left;
     color: #71717a;
     font-size: 10px;
@@ -167,13 +173,20 @@
   }
 
   .es-placeholder {
-    grid-column: 1;
+    grid-column: 1 / span 2;
     text-align: left;
     color: #52525b;
   }
 
+  .es-value-meta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
   .es-arrow {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 1 / span 2;
     font-size: 9px;
     color: #52525b;
