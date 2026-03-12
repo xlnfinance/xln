@@ -2349,10 +2349,10 @@
                 <span>Faucet</span>
               </button>
               <button class="account-workspace-tab" data-testid="asset-tab-deposit" class:active={assetWorkspaceTab === 'e2r'} on:click={() => assetWorkspaceTab = 'e2r'}>
-                <span>Deposit</span>
+                <span>External → Reserve</span>
               </button>
               <button class="account-workspace-tab" data-testid="asset-tab-withdraw" class:active={assetWorkspaceTab === 'r2e'} on:click={() => assetWorkspaceTab = 'r2e'}>
-                <span>Withdraw</span>
+                <span>Reserve → External</span>
               </button>
               <button class="account-workspace-tab" data-testid="asset-tab-send" class:active={assetWorkspaceTab === 'send'} on:click={() => assetWorkspaceTab = 'send'}>
                 <span>Send</span>
@@ -2400,7 +2400,7 @@
                   </button>
                 </div>
               {:else if assetWorkspaceTab === 'e2r'}
-                <h4 class="section-head">External To Reserve</h4>
+                <h4 class="section-head">External → Reserve</h4>
                 <p class="muted">Deposit ERC20 from your signer wallet into entity reserves.</p>
                 <div class="asset-form-grid">
                   <label class="asset-field">
@@ -2438,11 +2438,11 @@
                     on:click={submitExternalToReserve}
                     disabled={depositingToken === externalToReserveSymbol || !externalToReserveAmount.trim()}
                   >
-                    {depositingToken === externalToReserveSymbol ? 'Depositing...' : 'Deposit To Reserve'}
+                    {depositingToken === externalToReserveSymbol ? 'Moving...' : 'Move To Reserve'}
                   </button>
                 </div>
               {:else if assetWorkspaceTab === 'r2e'}
-                <h4 class="section-head">Reserve To External</h4>
+                <h4 class="section-head">Reserve → External</h4>
                 <p class="muted">Withdraw ERC20 from reserve back to your signer wallet.</p>
                 <div class="asset-form-grid">
                   <label class="asset-field">
@@ -2480,7 +2480,7 @@
                     on:click={submitReserveToExternal}
                     disabled={withdrawingExternalToken === reserveToExternalSymbol || !reserveToExternalAmount.trim()}
                   >
-                    {withdrawingExternalToken === reserveToExternalSymbol ? 'Withdrawing...' : 'Withdraw To External'}
+                    {withdrawingExternalToken === reserveToExternalSymbol ? 'Moving...' : 'Move To External'}
                   </button>
                 </div>
               {:else if assetWorkspaceTab === 'send'}

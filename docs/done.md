@@ -661,3 +661,5 @@
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260312-020555-109/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260312-020555-109/e2e-shard-00.log)
 
 - 2026-03-12: Fixed assets-tab background refresh block structure, removed noisy recipient gossip dump from pay form, moved pay Max inline, kept focused payment + e2r2e green.
+
+- 2026-03-12: Replaced onboarding wizard with one-pass setup, rounded BrainVault derive ETA to seconds, tightened payment amount/token controls, and renamed asset movement labels to explicit directions.
