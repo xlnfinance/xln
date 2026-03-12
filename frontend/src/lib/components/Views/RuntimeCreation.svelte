@@ -384,6 +384,23 @@
     return '$' + value.toFixed(2);
   }
 
+  function formatRuntimeDurationRounded(ms: number): string {
+    const safeMs = Math.max(0, Math.floor(ms));
+    const totalSeconds = Math.max(0, Math.ceil(safeMs / 1000));
+    if (totalSeconds < 60) return `${totalSeconds}s`;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes < 60) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  }
+
+  function formatMemoryLabel(memoryMb: number): string {
+    if (memoryMb >= 1024) return `${(memoryMb / 1024).toFixed(1)} GB`;
+    return `${Math.floor(memoryMb)} MB`;
+  }
+
   let lastDeriveRequest = 0;
   $: if ($deriveRequestSignal !== lastDeriveRequest) {
     lastDeriveRequest = $deriveRequestSignal;
@@ -1254,10 +1271,10 @@
                 <div class="speed-control">
                   <div class="speed-header">
                     <span class="speed-label">SPEED</span>
-                    <span class="speed-eta">ETA: {formatDuration(projectedRemainingMs)}</span>
+                    <span class="speed-eta">ETA: {formatRuntimeDurationRounded(projectedRemainingMs)}</span>
                   </div>
                   <div class="speed-slider-wrapper">
-                    <span class="speed-min">🐢</span>
+                    <span class="speed-min">Low</span>
                     <input
                       type="range"
                       min="1"
@@ -1266,11 +1283,11 @@
                       on:input={adjustWorkers}
                       class="speed-slider"
                     />
-                    <span class="speed-max">🚀</span>
+                    <span class="speed-max">High</span>
                   </div>
                   <div class="speed-details">
                     <span class="speed-threads">{targetWorkerCount} threads</span>
-                    <span class="speed-memory">{allocatedMemoryMB}MB RAM</span>
+                    <span class="speed-memory">{formatMemoryLabel(allocatedMemoryMB)} RAM</span>
                   </div>
                 </div>
               </div>
@@ -1321,7 +1338,7 @@
               </div>
             </div>
             <h2>Vault Opened</h2>
-            <p class="success-stats">{formatDuration(elapsedMs)} <span class="stat-divider">·</span> {shardCount} shards</p>
+            <p class="success-stats">{formatRuntimeDurationRounded(elapsedMs)} <span class="stat-divider">·</span> {shardCount} shards</p>
           </div>
         {/if}
 

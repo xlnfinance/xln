@@ -1435,9 +1435,29 @@
     <div class="profile-preflight-error">{preflightError}</div>
   {/if}
 
-  <div class="row">
+  <div class="amount-token-row">
     <div class="amount-field">
-      <label><span>Amount</span></label>
+      <label>
+        <span>Amount</span>
+        <div class="amount-toolbar">
+          <button
+            type="button"
+            class="inline-max-link"
+            on:click={fillMaxPaymentAmount}
+            disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
+          >
+            Max: {formatTokenNumberOnly(payMaxAmount)} {getTokenSymbol(tokenId)} ({formatUsdHint(payMaxUsd)})
+          </button>
+          <div class="inline-token-select">
+            <TokenSelect
+              value={tokenId}
+              compact={true}
+              disabled={findingRoutes || sendingPayment}
+              on:change={handleTokenChange}
+            />
+          </div>
+        </div>
+      </label>
       <div class="amount-input-with-max">
         <input
           type="text"
@@ -1446,22 +1466,8 @@
           disabled={findingRoutes || sendingPayment}
           on:input={handleAmountInput}
         />
-        <button
-          type="button"
-          class="inline-max-link"
-          on:click={fillMaxPaymentAmount}
-          disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
-        >
-          Max: {formatTokenNumberOnly(payMaxAmount)} {getTokenSymbol(tokenId)} ({formatUsdHint(payMaxUsd)})
-        </button>
       </div>
     </div>
-    <TokenSelect
-      label="Token"
-      value={tokenId}
-      disabled={findingRoutes || sendingPayment}
-      on:change={handleTokenChange}
-    />
   </div>
 
   <div class="field">
@@ -1627,6 +1633,8 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
+    width: 100%;
+    max-width: 1080px;
   }
 
   .recipient-picker-row {
@@ -1731,11 +1739,8 @@
     letter-spacing: -0.03em;
   }
 
-  .row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    align-items: end;
+  .amount-token-row {
+    display: block;
   }
 
   .amount-field label,
@@ -1746,12 +1751,25 @@
     gap: 12px;
   }
 
-  .row :global(.token-select) {
+  .amount-toolbar {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .inline-token-select {
+    width: 168px;
+    flex-shrink: 0;
+  }
+
+  .inline-token-select :global(.token-select) {
     width: 100%;
   }
 
-  .row :global(.token-select .select-trigger) {
-    min-height: 44px;
+  .inline-token-select :global(.select-trigger) {
+    min-height: 34px;
+    padding: 8px 10px;
   }
 
   .field, .amount-field {
@@ -1765,14 +1783,10 @@
   }
 
   .amount-input-with-max input {
-    padding-right: 210px;
+    padding-right: 14px;
   }
 
   .inline-max-link {
-    position: absolute;
-    top: 50%;
-    right: 12px;
-    transform: translateY(-50%);
     border: none;
     background: transparent;
     padding: 0;
@@ -1823,6 +1837,22 @@
 
   input:disabled {
     opacity: 0.5;
+  }
+
+  @media (max-width: 900px) {
+    .amount-field label {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .amount-toolbar {
+      width: 100%;
+      justify-content: space-between;
+    }
+
+    .inline-token-select {
+      width: 148px;
+    }
   }
 
   .btn-find, .btn-send, .btn-pay-now {

@@ -1,19 +1,16 @@
 <!--
-  OnboardingPanel.svelte — Post-BrainVault setup (step 2)
+  OnboardingPanel.svelte
 
-  Shown once after first runtime creation. User must:
-  1. Accept terms & conditions
-  2. Set a public display name (gossip-visible, searchable)
-  3. Configure autopilot policy + optional auto-join hubs
-
-  After completion, profile is broadcast via gossip and onboarding completion
-  is persisted per-entity in localStorage.
+  Single-pass post-wallet setup.
+  Public profile, default policy, and initial hub join live on one screen so
+  the user can create a usable entity without walking a legacy wizard.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
   import type { Env } from '@xln/runtime/xln-api';
-  import { enqueueEntityInputs, getEnv } from '../../stores/xlnStore';
+  import { enqueueEntityInputs, getEnv, xlnFunctions } from '../../stores/xlnStore';
+  import { activeVault } from '../../stores/vaultStore';
   import {
     type HubJoinPreference,
     hydrateJurisdictionPolicyDefaults,
@@ -31,9 +28,7 @@
 
   const dispatch = createEventDispatcher();
 
-  // ── State ────────────────────────────────────────
-  let step = 1; // 1=terms, 2=profile, 3=policy
-  let termsAccepted = false;
+  let termsAccepted = true;
   let displayName = '';
   let softLimitUsd = 500;
   let hardLimitUsd = 10_000;
@@ -41,17 +36,20 @@
   let defaultSoftLimitUsd = 500;
   let defaultHardLimitUsd = 10_000;
   let defaultMaxFeeUsd = 15;
-  let autoJoinHubs: HubJoinPreference = 'manual';
+  let autoJoinHubs: HubJoinPreference = '1';
   let submitting = false;
   let error = '';
   let hasPersistedPolicy = false;
+  let avatarUrl = '';
 
   const HUB_JOIN_OPTIONS: Array<{ value: HubJoinPreference; label: string }> = [
     { value: 'manual', label: 'Join hubs manually' },
-    { value: '1', label: 'Auto-join 1 random hub' },
-    { value: '2', label: 'Auto-join 2 random hubs' },
-    { value: '3', label: 'Auto-join 3 random hubs' },
+    { value: '1', label: 'Auto-join 1 hub' },
+    { value: '2', label: 'Auto-join 2 hubs' },
+    { value: '3', label: 'Auto-join 3 hubs' },
   ];
+
+  const HUB_JOIN_STORAGE_KEY = 'xln-hub-join-preference';
 
   const toUsdInt = (value: number, fallback: number): number => {
     const parsed = Number(value);
@@ -73,11 +71,28 @@
     }
     return out;
   };
+
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // ── Validation ───────────────────────────────────
-  $: canProceedStep1 = termsAccepted;
-  $: canProceedStep2 = displayName.trim().length >= 2;
+  const hasSavedHubJoinPreference = (): boolean =>
+    typeof localStorage !== 'undefined' && localStorage.getItem(HUB_JOIN_STORAGE_KEY) !== null;
+
+  const getRuntimeSuggestedName = (): string => {
+    const currentEnv = getEnv();
+    const replica = currentEnv?.eReplicas?.get(entityId);
+    const replicaName = String(replica?.state?.profile?.name || '').trim();
+    if (replicaName) return replicaName;
+    const vaultLabel = String($activeVault?.label || '').trim();
+    if (vaultLabel) return vaultLabel;
+    if (typeof localStorage !== 'undefined') {
+      const savedName = String(localStorage.getItem('xln-display-name') || '').trim();
+      if (savedName) return savedName;
+    }
+    return '';
+  };
+
+  $: avatarUrl = $xlnFunctions?.generateEntityAvatar?.(entityId) || '';
+
   $: canFinish =
     termsAccepted &&
     displayName.trim().length >= 2 &&
@@ -91,10 +106,15 @@
     hardLimitUsd = savedPolicy.hardLimitUsd;
     maxFeeUsd = savedPolicy.maxFeeUsd;
     hasPersistedPolicy = savedPolicy.timestamp > 0;
-    autoJoinHubs = readHubJoinPreference();
+    autoJoinHubs = hasSavedHubJoinPreference() ? readHubJoinPreference() : '1';
   }
 
   onMount(async () => {
+    const suggestedName = getRuntimeSuggestedName();
+    if (!displayName.trim() && suggestedName) {
+      displayName = suggestedName.slice(0, 32);
+    }
+
     try {
       const env = getEnv();
       const activeJurisdiction = String(env?.activeJurisdiction || '').trim().toLowerCase();
@@ -124,14 +144,9 @@
       }
     };
 
-    if (currentEnv?.gossip?.getHubs) {
-      const hubs = currentEnv.gossip.getHubs();
-      for (const profile of hubs || []) add(profile.entityId);
-    } else if (currentEnv?.gossip?.getProfiles) {
-      const profiles = currentEnv.gossip.getProfiles();
-      for (const profile of profiles || []) {
-        if (profile.metadata.isHub === true) add(profile.entityId);
-      }
+    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
+    for (const profile of profiles) {
+      if (profile.metadata.isHub === true) add(profile.entityId);
     }
 
     return discovered;
@@ -139,6 +154,7 @@
 
   async function queueAutoHubJoins(joinCount: number): Promise<number> {
     if (joinCount <= 0 || !entityId || !signerId) return 0;
+
     const waitForCandidates = async (): Promise<string[]> => {
       const timeoutMs = 12_000;
       const pollMs = 300;
@@ -149,7 +165,7 @@
         const currentEnv = getEnv();
         if (currentEnv) {
           const currentCandidates = shuffle(getHubEntityIds(currentEnv))
-            .filter(hubId => !hasCounterpartyAccount(currentEnv, entityId, hubId));
+            .filter((hubId) => !hasCounterpartyAccount(currentEnv, entityId, hubId));
           if (currentCandidates.length > best.length) best = currentCandidates;
           if (currentCandidates.length >= joinCount) return currentCandidates.slice(0, joinCount);
         }
@@ -187,29 +203,15 @@
     return candidates.length;
   }
 
-  // ── Actions ──────────────────────────────────────
-  function nextStep() {
-    if (step === 1 && canProceedStep1) step = 2;
-    else if (step === 2 && canProceedStep2) step = 3;
-  }
-
-  function prevStep() {
-    if (step > 1) step--;
-  }
-
   async function finish() {
     if (!canFinish || submitting) return;
     submitting = true;
     error = '';
 
     try {
-      // Persist onboarding flag for this entity only.
       writeOnboardingComplete(entityId, true);
-
-      // Persist display name
       localStorage.setItem('xln-display-name', displayName.trim());
 
-      // Persist autopilot + hub-join preferences
       const policyData = writeSavedCollateralPolicy({
         mode: 'autopilot',
         softLimitUsd: toUsdInt(softLimitUsd, defaultSoftLimitUsd),
@@ -218,7 +220,6 @@
       });
       const savedJoinPreference = writeHubJoinPreference(autoJoinHubs);
 
-      // Submit profile update via REA (valid EntityTx path)
       if (entityId && signerId) {
         const env = getEnv();
         if (env) {
@@ -253,15 +254,9 @@
         autoJoinedCount,
       });
     } catch (err) {
-      error = (err as Error).message || 'Setup failed';
+      error = err instanceof Error ? err.message : 'Setup failed';
       submitting = false;
     }
-  }
-
-  // ── Helpers ──────────────────────────────────────
-  function formatEntityShort(id: string): string {
-    if (!id || id.length < 12) return id || '?';
-    return `${id.slice(0, 8)}...${id.slice(-4)}`;
   }
 
   export function isOnboardingComplete(checkEntityId: string): boolean {
@@ -284,530 +279,400 @@
 </script>
 
 <div class="onboarding">
-  <!-- Progress bar -->
-  <div class="progress">
-    <div class="progress-track">
-      <div class="progress-fill" style="width: {(step / 3) * 100}%"></div>
-    </div>
-    <div class="progress-steps">
-      <span class="progress-step" class:active={step >= 1} class:done={step > 1}>1</span>
-      <span class="progress-step" class:active={step >= 2} class:done={step > 2}>2</span>
-      <span class="progress-step" class:active={step >= 3}>3</span>
-    </div>
-  </div>
-
-  <!-- Step 1: Terms -->
-  {#if step === 1}
-    <div class="step">
-      <h2>Welcome to xln</h2>
-      <p class="subtitle">Peer-to-peer payment network with on-chain settlement</p>
-
-      <div class="terms-box">
-        <h4>Before you continue</h4>
-        <ul>
-          <li>Your keys are derived from your BrainVault seed — <strong>never share it</strong></li>
-          <li>Bilateral accounts use cryptographic consensus — both sides sign every state change</li>
-          <li>Collateral is secured on-chain via smart contracts</li>
-          <li>Unsecured credit carries counterparty risk — manage your limits</li>
-          <li>This is testnet software — use at your own risk</li>
-        </ul>
+  <div class="setup-card">
+    <header class="setup-header">
+      <div class="identity-block">
+        {#if avatarUrl}
+          <img src={avatarUrl} alt="Entity avatar" class="identity-avatar" />
+        {:else}
+          <div class="identity-avatar placeholder">?</div>
+        {/if}
+        <div class="identity-copy">
+          <h2>Finish your profile</h2>
+          <p class="subtitle">Set your public identity, default limits, and initial hub connectivity in one pass.</p>
+          <div class="identity-meta">
+            <span class="meta-chip">Entity</span>
+            <code>{entityId}</code>
+          </div>
+        </div>
       </div>
+    </header>
 
+    <section class="setup-section">
+      <div class="section-headline">
+        <h3>Public profile</h3>
+        <p>Your name is visible in gossip, account lists, and routing flows.</p>
+      </div>
+      <label class="form-label" for="display-name">Display name</label>
+      <input
+        id="display-name"
+        type="text"
+        class="form-input"
+        placeholder="e.g. Alice, CryptoShop, MyExchange"
+        bind:value={displayName}
+        maxlength="32"
+        autofocus
+      />
+      <div class="profile-preview-card">
+        {#if avatarUrl}
+          <img src={avatarUrl} alt="Entity avatar" class="profile-preview-avatar" />
+        {:else}
+          <div class="profile-preview-avatar placeholder">?</div>
+        {/if}
+        <div class="profile-preview-copy">
+          <strong>{displayName.trim() || 'Your public name'}</strong>
+          <code>{entityId}</code>
+          <span>{displayName.trim().length}/32 characters</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="setup-section">
+      <div class="section-headline">
+        <h3>Default limits</h3>
+        <p>These values are used when new hub accounts are opened.</p>
+      </div>
+      <div class="policy-grid">
+        <label class="policy-field">
+          <span class="form-label">Soft limit (USD)</span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="form-input policy-input"
+            bind:value={softLimitUsd}
+            on:input={() => softLimitUsd = toUsdInt(softLimitUsd, defaultSoftLimitUsd)}
+          />
+        </label>
+
+        <label class="policy-field">
+          <span class="form-label">Hard limit (USD)</span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="form-input policy-input"
+            bind:value={hardLimitUsd}
+            on:input={() => hardLimitUsd = toUsdInt(hardLimitUsd, defaultHardLimitUsd)}
+          />
+        </label>
+
+        <label class="policy-field">
+          <span class="form-label">Max fee (USD)</span>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            class="form-input policy-input"
+            bind:value={maxFeeUsd}
+            on:input={() => maxFeeUsd = toUsdInt(maxFeeUsd, defaultMaxFeeUsd)}
+          />
+        </label>
+      </div>
+      <p class="form-hint">
+        Default for this jurisdiction: soft <strong>{defaultSoftLimitUsd.toLocaleString()}</strong>,
+        hard <strong>{defaultHardLimitUsd.toLocaleString()}</strong>,
+        fee <strong>{defaultMaxFeeUsd.toLocaleString()}</strong>.
+      </p>
+    </section>
+
+    <section class="setup-section">
+      <div class="section-headline">
+        <h3>Initial hub join</h3>
+        <p>Auto-join opens your first bilateral account immediately after setup.</p>
+      </div>
+      <select class="hub-join-select" bind:value={autoJoinHubs}>
+        {#each HUB_JOIN_OPTIONS as option}
+          <option value={option.value}>{option.label}</option>
+        {/each}
+      </select>
+    </section>
+
+    <section class="setup-section confirm-section">
       <label class="checkbox-row">
         <input type="checkbox" bind:checked={termsAccepted} />
-        <span>I understand and accept the risks of using this software</span>
+        <span>I understand this is testnet software and I accept the associated risks.</span>
       </label>
-
-      <div class="actions">
-        <div></div>
-        <button class="btn-primary" disabled={!canProceedStep1} on:click={nextStep}>
-          Continue →
-        </button>
-      </div>
-    </div>
-
-  <!-- Step 2: Profile -->
-  {:else if step === 2}
-    <div class="step">
-      <h2>Your Public Profile</h2>
-      <p class="subtitle">This name is visible to everyone on the network</p>
-
-      <div class="form-group">
-        <label class="form-label">Display Name</label>
-        <input
-          type="text"
-          class="form-input"
-          placeholder="e.g. Alice, CryptoShop, MyExchange"
-          bind:value={displayName}
-          maxlength="32"
-          autofocus
-        />
-        <span class="form-hint">
-          {displayName.trim().length}/32 — searchable in gossip, shown in accounts
-        </span>
-      </div>
-
-      <div class="identity-preview">
-        <div class="identity-avatar">
-          {displayName.trim().slice(0, 2).toUpperCase() || '??'}
-        </div>
-        <div class="identity-info">
-          <span class="identity-name">{displayName.trim() || 'Your Name'}</span>
-          <span class="identity-id">{formatEntityShort(entityId)}</span>
-        </div>
-      </div>
-
-      <div class="actions">
-        <button class="btn-ghost" on:click={prevStep}>← Back</button>
-        <button class="btn-primary" disabled={!canProceedStep2} on:click={nextStep}>
-          Continue →
-        </button>
-      </div>
-    </div>
-
-  <!-- Step 3: Autopilot + Hub Join -->
-  {:else if step === 3}
-    <div class="step">
-      <h2>Autopilot Settings</h2>
-      <p class="subtitle">Set your default collateral thresholds and initial hub connectivity.</p>
-
-      <div class="autopilot-config">
-        <div class="policy-grid">
-          <label class="policy-field">
-            <span class="form-label">Soft Limit (USD)</span>
-            <input
-              type="number"
-              min="1"
-              step="1"
-              class="form-input policy-input"
-              bind:value={softLimitUsd}
-              on:input={() => softLimitUsd = toUsdInt(softLimitUsd, defaultSoftLimitUsd)}
-            />
-          </label>
-
-          <label class="policy-field">
-            <span class="form-label">Hard Limit (USD)</span>
-            <input
-              type="number"
-              min="1"
-              step="1"
-              class="form-input policy-input"
-              bind:value={hardLimitUsd}
-              on:input={() => hardLimitUsd = toUsdInt(hardLimitUsd, defaultHardLimitUsd)}
-            />
-          </label>
-
-          <label class="policy-field">
-            <span class="form-label">Max Fee (USD)</span>
-            <input
-              type="number"
-              min="0"
-              step="1"
-              class="form-input policy-input"
-              bind:value={maxFeeUsd}
-              on:input={() => maxFeeUsd = toUsdInt(maxFeeUsd, defaultMaxFeeUsd)}
-            />
-          </label>
-        </div>
-
-        <p class="form-hint">
-          Default for this jurisdiction: soft=<strong>{defaultSoftLimitUsd.toLocaleString()}</strong>,
-          hard=<strong>{defaultHardLimitUsd.toLocaleString()}</strong>,
-          fee=<strong>{defaultMaxFeeUsd.toLocaleString()}</strong>.
-          These values are used when new hub accounts are opened.
-        </p>
-      </div>
-
-      <div class="manual-info">
-        <label class="form-label">Initial Hub Join</label>
-        <select class="hub-join-select" bind:value={autoJoinHubs}>
-          {#each HUB_JOIN_OPTIONS as option}
-            <option value={option.value}>{option.label}</option>
-          {/each}
-        </select>
-        <p class="form-hint">
-          Auto-join uses random discovered hubs and immediately opens bilateral accounts.
-        </p>
-      </div>
-
-      <div class="summary">
-        <h4>Summary</h4>
-        <div class="summary-row">
-          <span>Name</span>
-          <span class="summary-value">{displayName.trim()}</span>
-        </div>
-        <div class="summary-row">
-          <span>Autopilot</span>
-          <span class="summary-value">soft ${softLimitUsd.toLocaleString()} / hard ${hardLimitUsd.toLocaleString()} / fee ${maxFeeUsd.toLocaleString()}</span>
-        </div>
-        <div class="summary-row">
-          <span>Hub Join</span>
-          <span class="summary-value">{HUB_JOIN_OPTIONS.find(option => option.value === autoJoinHubs)?.label || 'Join hubs manually'}</span>
-        </div>
-        <div class="summary-row">
-          <span>Entity</span>
-          <span class="summary-value mono">{formatEntityShort(entityId)}</span>
-        </div>
-      </div>
-
       {#if error}
         <div class="error-msg">{error}</div>
       {/if}
-
-      <div class="actions">
-        <button class="btn-ghost" on:click={prevStep}>← Back</button>
+      <div class="actions single">
         <button class="btn-primary" disabled={!canFinish || submitting} on:click={finish}>
-          {submitting ? 'Setting up...' : 'Start Using xln →'}
+          {submitting ? 'Setting up...' : 'Start using xln →'}
         </button>
       </div>
-    </div>
-  {/if}
+    </section>
+  </div>
 </div>
 
 <style>
   .onboarding {
-    max-width: 520px;
+    width: 100%;
+    max-width: 760px;
     margin: 0 auto;
-    padding: 32px 24px;
-    min-height: 100vh;
+    padding: 8px 16px 24px;
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    gap: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    justify-content: flex-start;
     color: var(--theme-text-primary, #e4e4e7);
   }
 
-  /* ── Progress ──────────────────────────── */
-  .progress {
-    margin-bottom: 32px;
-  }
-  .progress-track {
-    height: 3px;
-    background: var(--theme-bar-bg, #27272a);
-    border-radius: 2px;
-    overflow: hidden;
-    margin-bottom: 12px;
-  }
-  .progress-fill {
-    height: 100%;
-    background: var(--theme-accent, #fbbf24);
-    border-radius: 2px;
-    transition: width 0.3s ease;
-  }
-  .progress-steps {
+  .setup-card {
     display: flex;
-    justify-content: space-between;
-    padding: 0 10%;
-  }
-  .progress-step {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    font-weight: 600;
-    background: var(--theme-surface, #18181b);
-    border: 2px solid var(--theme-surface-border, #27272a);
-    color: var(--theme-text-muted, #71717a);
-    transition: all 0.2s;
-  }
-  .progress-step.active {
-    border-color: var(--theme-accent, #fbbf24);
-    color: var(--theme-accent, #fbbf24);
-  }
-  .progress-step.done {
-    background: var(--theme-accent, #fbbf24);
-    border-color: var(--theme-accent, #fbbf24);
-    color: #000;
+    flex-direction: column;
+    gap: 18px;
   }
 
-  /* ── Step container ────────────────────── */
-  .step {
-    animation: fadeIn 0.2s ease;
-  }
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  h2 {
-    font-size: 24px;
-    font-weight: 700;
-    margin: 0 0 6px 0;
-    letter-spacing: -0.02em;
-  }
-  .subtitle {
-    color: var(--theme-text-secondary, #a1a1aa);
-    font-size: 14px;
-    margin: 0 0 24px 0;
-    line-height: 1.5;
-  }
-
-  /* ── Terms ──────────────────────────────── */
-  .terms-box {
+  .setup-header,
+  .setup-section {
     background: var(--theme-surface, #18181b);
     border: 1px solid var(--theme-surface-border, #27272a);
-    border-radius: 10px;
-    padding: 16px 20px;
-    margin-bottom: 20px;
-  }
-  .terms-box h4 {
-    margin: 0 0 10px 0;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--theme-text-primary, #e4e4e7);
-  }
-  .terms-box ul {
-    margin: 0;
-    padding: 0 0 0 18px;
-    font-size: 12px;
-    color: var(--theme-text-secondary, #a1a1aa);
-    line-height: 1.8;
-  }
-  .terms-box li {
-    margin-bottom: 2px;
-  }
-  .terms-box strong {
-    color: var(--theme-text-primary, #e4e4e7);
+    border-radius: 14px;
+    padding: 18px;
   }
 
-  .checkbox-row {
+  .identity-block {
     display: flex;
     align-items: center;
-    gap: 10px;
-    cursor: pointer;
-    font-size: 13px;
-    color: var(--theme-text-secondary, #a1a1aa);
-    padding: 12px 0;
+    gap: 16px;
   }
-  .checkbox-row input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    accent-color: var(--theme-accent, #fbbf24);
-    cursor: pointer;
+
+  .identity-avatar,
+  .profile-preview-avatar {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    object-fit: cover;
     flex-shrink: 0;
   }
 
-  /* ── Form ───────────────────────────────── */
-  .form-group {
-    margin-bottom: 20px;
+  .identity-avatar.placeholder,
+  .profile-preview-avatar.placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--theme-accent, #fbbf24), #f59e0b);
+    color: #09090b;
+    font-weight: 700;
   }
+
+  .identity-copy {
+    min-width: 0;
+  }
+
+  h2, h3 {
+    margin: 0;
+    letter-spacing: -0.02em;
+  }
+
+  h2 {
+    font-size: 30px;
+    line-height: 1.05;
+  }
+
+  h3 {
+    font-size: 17px;
+  }
+
+  .subtitle,
+  .section-headline p {
+    margin: 6px 0 0;
+    color: var(--theme-text-secondary, #a1a1aa);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  .identity-meta {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .meta-chip {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--theme-text-muted, #71717a);
+  }
+
+  code {
+    display: inline-block;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--theme-text-primary, #f4f4f5);
+  }
+
+  .section-headline {
+    margin-bottom: 14px;
+  }
+
   .form-label {
     display: block;
+    margin-bottom: 6px;
     font-size: 11px;
     font-weight: 600;
     color: var(--theme-text-muted, #71717a);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    margin-bottom: 6px;
   }
-  .form-input {
+
+  .form-input,
+  .hub-join-select {
     width: 100%;
+    box-sizing: border-box;
     padding: 12px 14px;
     background: var(--theme-input-bg, #09090b);
     border: 1px solid var(--theme-input-border, #27272a);
-    border-radius: 8px;
+    border-radius: 10px;
     color: var(--theme-text-primary, #e4e4e7);
     font-size: 15px;
-    transition: border-color 0.15s;
-    box-sizing: border-box;
-  }
-  .form-input:focus {
-    outline: none;
-    border-color: var(--theme-input-focus, #fbbf24);
-    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.1);
-  }
-  .form-input::placeholder {
-    color: var(--theme-text-muted, #52525b);
-  }
-  .form-hint {
-    font-size: 11px;
-    color: var(--theme-text-muted, #71717a);
-    margin-top: 6px;
-    line-height: 1.5;
-  }
-  .form-hint strong {
-    color: var(--theme-accent, #fbbf24);
   }
 
-  /* ── Identity preview ──────────────────── */
-  .identity-preview {
+  .form-input:focus,
+  .hub-join-select:focus {
+    outline: none;
+    border-color: var(--theme-input-focus, #fbbf24);
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.08);
+  }
+
+  .profile-preview-card {
+    margin-top: 14px;
     display: flex;
     align-items: center;
     gap: 14px;
-    padding: 16px;
-    background: var(--theme-surface, #18181b);
-    border: 1px solid var(--theme-surface-border, #27272a);
-    border-radius: 10px;
-    margin-bottom: 20px;
-  }
-  .identity-avatar {
-    width: 44px;
-    height: 44px;
+    padding: 14px;
     border-radius: 12px;
-    background: linear-gradient(135deg, var(--theme-accent, #fbbf24), #f59e0b);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 15px;
-    font-weight: 700;
-    color: #000;
-    flex-shrink: 0;
+    background: #11100f;
+    border: 1px solid #27272a;
   }
-  .identity-info {
+
+  .profile-preview-copy {
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
   }
-  .identity-name {
-    font-size: 15px;
-    font-weight: 600;
+
+  .profile-preview-copy strong {
+    font-size: 18px;
     color: var(--theme-text-primary, #fafaf9);
   }
-  .identity-id {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
+
+  .profile-preview-copy span {
+    font-size: 12px;
     color: var(--theme-text-muted, #71717a);
   }
 
-  /* ── Autopilot config ──────────────────── */
-  .autopilot-config {
-    padding: 16px;
-    background: var(--theme-surface, #18181b);
-    border: 1px solid var(--theme-surface-border, #27272a);
-    border-radius: 10px;
-    margin-bottom: 20px;
-  }
   .policy-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
-    margin-bottom: 10px;
   }
+
   .policy-field {
     min-width: 0;
   }
+
   .policy-input {
     margin-top: 4px;
-    font-size: 14px;
-    padding: 10px 12px;
-  }
-  .hub-join-select {
-    width: 100%;
-    margin-top: 6px;
-    background: var(--theme-input-bg, #09090b);
-    border: 1px solid var(--theme-input-border, #27272a);
-    border-radius: 8px;
-    color: var(--theme-text-primary, #e4e4e7);
-    font-size: 14px;
-    padding: 10px 12px;
   }
 
-  .manual-info {
-    padding: 16px;
-    background: var(--theme-surface, #18181b);
-    border: 1px solid var(--theme-surface-border, #27272a);
-    border-radius: 10px;
-    margin-bottom: 20px;
-  }
-  @media (max-width: 720px) {
-    .policy-grid {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  /* ── Summary ───────────────────────────── */
-  .summary {
-    padding: 16px;
-    background: var(--theme-surface, #18181b);
-    border: 1px solid var(--theme-surface-border, #27272a);
-    border-radius: 10px;
-    margin-bottom: 20px;
-  }
-  .summary h4 {
-    margin: 0 0 10px 0;
-    font-size: 11px;
-    font-weight: 600;
+  .form-hint {
+    margin: 10px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
     color: var(--theme-text-muted, #71717a);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
   }
-  .summary-row {
+
+  .form-hint strong {
+    color: var(--theme-accent, #fbbf24);
+  }
+
+  .checkbox-row {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 6px 0;
-    font-size: 13px;
-    border-bottom: 1px solid var(--theme-surface-border, #1f1f23);
-  }
-  .summary-row:last-child {
-    border-bottom: none;
-  }
-  .summary-row span:first-child {
+    align-items: flex-start;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1.5;
     color: var(--theme-text-secondary, #a1a1aa);
   }
-  .summary-value {
-    color: var(--theme-text-primary, #e4e4e7);
-    font-weight: 500;
-  }
-  .summary-value.mono {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
+
+  .checkbox-row input[type='checkbox'] {
+    margin-top: 2px;
+    width: 18px;
+    height: 18px;
+    accent-color: var(--theme-accent, #fbbf24);
+    flex-shrink: 0;
   }
 
-  /* ── Error ──────────────────────────────── */
+  .confirm-section {
+    gap: 14px;
+  }
+
   .error-msg {
     padding: 10px 14px;
     background: rgba(244, 63, 94, 0.08);
     border: 1px solid rgba(244, 63, 94, 0.2);
-    border-radius: 8px;
+    border-radius: 10px;
     color: #f43f5e;
     font-size: 12px;
-    margin-bottom: 16px;
   }
 
-  /* ── Actions ────────────────────────────── */
-  .actions {
+  .actions.single {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-top: 8px;
+    justify-content: flex-end;
   }
+
   .btn-primary {
-    padding: 12px 28px;
+    padding: 13px 24px;
     background: linear-gradient(135deg, var(--theme-accent, #fbbf24), #f59e0b);
     border: none;
     border-radius: 10px;
-    color: #000;
+    color: #09090b;
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
-    transition: all 0.15s;
-    letter-spacing: -0.01em;
   }
-  .btn-primary:hover:not(:disabled) {
-    box-shadow: 0 4px 12px rgba(251, 191, 36, 0.3);
-    transform: translateY(-1px);
-  }
+
   .btn-primary:disabled {
     opacity: 0.4;
     cursor: not-allowed;
   }
-  .btn-ghost {
-    padding: 10px 18px;
-    background: transparent;
-    border: 1px solid var(--theme-surface-border, #27272a);
-    border-radius: 8px;
-    color: var(--theme-text-secondary, #a1a1aa);
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .btn-ghost:hover {
-    border-color: var(--theme-card-hover-border, #3f3f46);
-    color: var(--theme-text-primary, #e4e4e7);
+
+  @media (max-width: 720px) {
+    .onboarding {
+      padding-top: 0;
+      padding-left: 12px;
+      padding-right: 12px;
+    }
+
+    .setup-header,
+    .setup-section {
+      padding: 14px;
+      border-radius: 12px;
+    }
+
+    .identity-block,
+    .profile-preview-card {
+      align-items: flex-start;
+    }
+
+    .policy-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .actions.single {
+      justify-content: stretch;
+    }
+
+    .btn-primary {
+      width: 100%;
+    }
   }
 </style>

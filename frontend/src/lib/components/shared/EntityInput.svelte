@@ -298,6 +298,7 @@
   }
 
   // Display value
+  $: closedSelectionVisible = Boolean(value && !showDropdown && selectedOption);
   $: displayValue = value ? (selectedOption?.displayName || getDisplayName(value)) : '';
 </script>
 
@@ -309,9 +310,9 @@
   <div class="input-wrapper">
     <input
       bind:this={inputRef}
-      class:has-selection-overlay={Boolean(value && !showDropdown && selectedOption)}
+      class:has-selection-overlay={closedSelectionVisible}
       type="text"
-      value={showDropdown ? inputValue : displayValue}
+      value={showDropdown ? inputValue : (closedSelectionVisible ? '' : displayValue)}
       {placeholder}
       {disabled}
       on:focus={handleFocus}
@@ -324,7 +325,7 @@
       <span class="selected-badge unresolved" title="Entity not found in gossip">?{unresolvedInput}</span>
     {/if}
 
-    {#if value && !showDropdown && selectedOption}
+    {#if closedSelectionVisible && selectedOption}
       <div class="selected-overlay" aria-hidden="true">
         {#if selectedOption.avatarUrl}
           <img class="item-avatar" src={selectedOption.avatarUrl} alt="" />
