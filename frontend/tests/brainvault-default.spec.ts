@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/test';
 
+async function completeOnboarding(page: import('@playwright/test').Page): Promise<void> {
+  await expect(page.getByRole('heading', { name: 'Finish your profile' })).toBeVisible({ timeout: 240_000 });
+  const startButton = page.getByRole('button', { name: /start using xln/i });
+  await expect(startButton).toBeVisible();
+  await startButton.click();
+  await expect(page.getByTestId('tab-accounts')).toBeVisible({ timeout: 30_000 });
+}
+
 test.describe('BrainVault default flow', () => {
   test('derives a vault end-to-end (real worker, 1 factor)', async ({ page }) => {
     // Allow extra time for hash-wasm download + Argon2 computation
@@ -17,8 +25,7 @@ test.describe('BrainVault default flow', () => {
     await expect(deriveButton).toBeEnabled({ timeout: 10_000 });
     await deriveButton.click();
 
-    await expect(page.getByRole('heading', { name: 'Welcome to xln' })).toBeVisible({ timeout: 240_000 });
-    await expect(page.getByRole('button', { name: /continue →/i })).toBeVisible();
+    await completeOnboarding(page);
     await expect(page.getByRole('button', { name: /^🧭 0x/i })).toBeVisible();
   });
 
@@ -37,8 +44,7 @@ test.describe('BrainVault default flow', () => {
     await expect(deriveButton).toBeEnabled({ timeout: 10_000 });
     await deriveButton.click();
 
-    await expect(page.getByRole('heading', { name: 'Welcome to xln' })).toBeVisible({ timeout: 240_000 });
-    await expect(page.getByRole('button', { name: /continue →/i })).toBeVisible();
+    await completeOnboarding(page);
     await expect(page.getByRole('button', { name: /^🧭 0x/i })).toBeVisible();
   });
 });
