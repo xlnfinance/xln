@@ -57,7 +57,8 @@ export interface Settings {
   theme: ThemeName;
   barColorMode: BarColorMode;
   barLayout: BarLayoutMode;
-  accountBarUsdPerPx: 1 | 10 | 100 | 1000;
+  // Internal normalized bar scale. UI presents this as "100px = $N".
+  accountBarUsdPerPx: number;
   accountDeltaViewMode: AccountDeltaViewMode;
   tokenPrecision: number;
   showTokenIcons: boolean;

@@ -36,7 +36,7 @@
   import {
     ArrowUpRight, Repeat, Landmark, Users, Activity,
     MessageCircle, Settings as SettingsIcon, BookUser,
-    ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check, Scale, Globe, Trash2, MoreHorizontal
+    ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check, Scale, Globe, Trash2, MoreHorizontal, SlidersHorizontal
   } from 'lucide-svelte';
 
   // Child components
@@ -72,7 +72,7 @@
   // Tab types
   type ViewTab = 'assets' | 'accounts' | 'more' | 'settings';
   type MoreTab = 'consensus' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance';
-  type AccountWorkspaceTab = 'send' | 'swap' | 'open' | 'activity' | 'settle' | 'configure';
+  type AccountWorkspaceTab = 'send' | 'swap' | 'open' | 'activity' | 'settle' | 'configure' | 'appearance';
   type AssetWorkspaceTab = 'faucet' | 'e2r' | 'r2c' | 'c2r' | 'r2e' | 'send' | 'allow';
   type ConfigureWorkspaceTab = 'credit' | 'collateral' | 'token';
 
@@ -183,6 +183,10 @@
         activeTab = 'accounts';
         accountWorkspaceTab = 'configure';
         break;
+      case 'appearance':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'appearance';
+        break;
       case 'consensus':
       case 'chat':
       case 'contacts':
@@ -226,6 +230,25 @@
     { label: '30s', value: 30000 },
     { label: '60s', value: 60000 },
   ];
+
+  const ACCOUNT_BAR_USD_PER_100PX_MIN = 10;
+  const ACCOUNT_BAR_USD_PER_100PX_MAX = 10_000;
+
+  function clampAccountBarUsdPer100Px(raw: unknown): number {
+    const numeric = Number(raw);
+    if (!Number.isFinite(numeric)) return 10_000;
+    return Math.max(
+      ACCOUNT_BAR_USD_PER_100PX_MIN,
+      Math.min(ACCOUNT_BAR_USD_PER_100PX_MAX, Math.round(numeric)),
+    );
+  }
+
+  $: accountBarUsdPer100Px = clampAccountBarUsdPer100Px(($settings.accountBarUsdPerPx ?? 100) * 100);
+
+  function setAccountBarScale(event: Event): void {
+    const target = event.currentTarget as HTMLInputElement;
+    settingsOperations.setAccountBarUsdPer100Px(clampAccountBarUsdPer100Px(target.value));
+  }
 
   function updateBalanceRefresh(event: Event) {
     const target = event.target as HTMLSelectElement;
@@ -2258,6 +2281,7 @@
     { id: 'send', icon: ArrowUpRight, label: 'Pay' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
     { id: 'configure', icon: SettingsIcon, label: 'Configure' },
+    { id: 'appearance', icon: SlidersHorizontal, label: 'Appearance' },
     { id: 'activity', icon: Activity, label: 'Activity' },
     { id: 'settle', icon: Landmark, label: 'Settle', showPendingBatch: true },
   ];
@@ -2944,6 +2968,58 @@
                   </div>
                 {/if}
               </div>
+
+            {:else if accountWorkspaceTab === 'appearance'}
+              <section class="account-appearance-panel">
+                <div class="appearance-card">
+                  <div class="appearance-head">
+                    <div>
+                      <h4 class="section-head">Account Bars</h4>
+                      <p class="muted">Control how account capacity bars are laid out and scaled inside Accounts.</p>
+                    </div>
+                  </div>
+
+                  <div class="appearance-block">
+                    <span class="appearance-label">Layout</span>
+                    <div class="appearance-toggle-group" role="tablist" aria-label="Account bar layout">
+                      <button
+                        class="appearance-toggle"
+                        class:active={$settings.barLayout === 'center'}
+                        on:click={() => settingsOperations.setBarLayout('center')}
+                      >
+                        Center
+                      </button>
+                      <button
+                        class="appearance-toggle"
+                        class:active={$settings.barLayout === 'sides'}
+                        on:click={() => settingsOperations.setBarLayout('sides')}
+                      >
+                        Sides
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="appearance-block">
+                    <div class="appearance-scale-row">
+                      <span class="appearance-label">Scale</span>
+                      <strong class="appearance-scale-value">100px = ${accountBarUsdPer100Px.toLocaleString('en-US')}</strong>
+                    </div>
+                    <input
+                      class="appearance-slider"
+                      type="range"
+                      min={ACCOUNT_BAR_USD_PER_100PX_MIN}
+                      max={ACCOUNT_BAR_USD_PER_100PX_MAX}
+                      step="10"
+                      value={accountBarUsdPer100Px}
+                      on:input={setAccountBarScale}
+                    />
+                    <div class="appearance-scale-caption">
+                      <span>${ACCOUNT_BAR_USD_PER_100PX_MIN}</span>
+                      <span>${ACCOUNT_BAR_USD_PER_100PX_MAX.toLocaleString('en-US')}</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
 
             {:else if accountWorkspaceTab === 'open'}
               <div class="account-open-sections">
@@ -4256,6 +4332,103 @@
     border-radius: 10px;
     padding: 14px;
     background: #16171c;
+  }
+
+  .account-appearance-panel {
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    background: #101114;
+    padding: 14px;
+  }
+
+  .appearance-card {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .appearance-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .appearance-block {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 2px;
+  }
+
+  .appearance-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #a1a1aa;
+  }
+
+  .appearance-toggle-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px;
+    border: 1px solid #27272a;
+    border-radius: 10px;
+    background: #0d0e11;
+    width: fit-content;
+  }
+
+  .appearance-toggle {
+    min-width: 96px;
+    padding: 8px 12px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: #9ca3af;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .appearance-toggle:hover {
+    color: #e5e7eb;
+  }
+
+  .appearance-toggle.active {
+    color: #fbbf24;
+    border-color: #fbbf24;
+    background: rgba(251, 191, 36, 0.08);
+  }
+
+  .appearance-scale-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .appearance-scale-value {
+    color: #f3f4f6;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .appearance-slider {
+    width: 100%;
+    accent-color: #fbbf24;
+  }
+
+  .appearance-scale-caption {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: #71717a;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
   }
 
   .configure-token-row {
