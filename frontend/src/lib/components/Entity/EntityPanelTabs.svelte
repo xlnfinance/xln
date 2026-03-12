@@ -73,7 +73,7 @@
   type ViewTab = 'assets' | 'accounts' | 'more' | 'settings';
   type MoreTab = 'consensus' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance';
   type AccountWorkspaceTab = 'send' | 'swap' | 'open' | 'activity' | 'settle' | 'configure';
-  type AssetWorkspaceTab = 'faucet' | 'e2r' | 'r2e' | 'send' | 'allow';
+  type AssetWorkspaceTab = 'faucet' | 'e2r' | 'r2c' | 'c2r' | 'r2e' | 'send' | 'allow';
   type ConfigureWorkspaceTab = 'credit' | 'collateral' | 'token';
 
   // Set initial tab based on action
@@ -548,6 +548,8 @@
   let collateralFundingToken: string | null = null; // symbol of token being moved to collateral
   let faucetAssetSymbol = 'USDC';
   let externalToReserveSymbol = 'USDC';
+  let reserveToCollateralSymbol = 'USDC';
+  let collateralToReserveSymbol = 'USDC';
   let reserveToExternalSymbol = 'USDC';
   let sendAssetSymbol = 'USDC';
   let sendAssetAmount = '';
@@ -556,6 +558,8 @@
   let allowAssetAmount = '';
   let allowAssetSpender = '';
   let externalToReserveAmount = '';
+  let reserveToCollateralAmount = '';
+  let collateralToReserveAmount = '';
   let reserveToExternalAmount = '';
   let sendingExternalToken: string | null = null;
   let approvingExternalToken: string | null = null;
@@ -572,6 +576,8 @@
   let resolvingAssetBridgeSync = false;
   let externalFetchSeq = 0;
   let selectedExternalToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
+  let selectedReserveToCollateralToken: (ExternalToken & { tokenId: number }) | null = null;
+  let selectedCollateralToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedReserveToExternalToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedSendAssetToken: ExternalToken | null = null;
 
@@ -643,6 +649,23 @@
     if (parsed <= 0n) throw new Error('Amount must be greater than zero');
     if (typeof maxAmount === 'bigint' && parsed > maxAmount) throw new Error('Amount exceeds available balance');
     return parsed;
+  }
+
+  function getWorkspaceDerivedDelta(tokenId: number) {
+    const account = workspaceAccount;
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    const counterpartyId = String(workspaceAccountId || '').trim().toLowerCase();
+    if (!account || !entityId || !counterpartyId || !activeXlnFunctions?.deriveDelta) return null;
+    const delta = account.deltas?.get?.(tokenId);
+    if (!delta) return null;
+    return activeXlnFunctions.deriveDelta(delta, entityId < counterpartyId);
+  }
+
+  function getWorkspaceWithdrawableCollateral(tokenId: number): bigint {
+    const derived = getWorkspaceDerivedDelta(tokenId);
+    if (!derived) return 0n;
+    const hold = derived.outTotalHold ?? 0n;
+    return derived.outCollateral > hold ? derived.outCollateral - hold : 0n;
   }
 
   // Faucet: fund entity reserves with test tokens
@@ -1018,8 +1041,15 @@
 
   $: transferableAssetOptions = externalTokens.filter(isReserveTransferToken);
   $: selectedExternalToReserveToken = findReserveTransferTokenBySymbol(externalToReserveSymbol);
+  $: selectedReserveToCollateralToken = findReserveTransferTokenBySymbol(reserveToCollateralSymbol);
+  $: selectedCollateralToReserveToken = findReserveTransferTokenBySymbol(collateralToReserveSymbol);
   $: selectedReserveToExternalToken = findReserveTransferTokenBySymbol(reserveToExternalSymbol);
   $: selectedSendAssetToken = findExternalTokenBySymbol(sendAssetSymbol);
+  $: workspaceAccount = (() => {
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
+    if (!entityId || !workspaceAccountId || !replica?.state?.accounts) return null;
+    return findLocalAccountByCounterparty(entityId, replica.state.accounts, workspaceAccountId);
+  })();
   $: accountSpendableByToken = (() => {
     const totals = new Map<number, bigint>();
     const accounts = replica?.state?.accounts;
@@ -1100,6 +1130,8 @@
     if (!findExternalTokenBySymbol(faucetAssetSymbol)) faucetAssetSymbol = preferred;
     if (!findExternalTokenBySymbol(sendAssetSymbol)) sendAssetSymbol = preferred;
     if (!findReserveTransferTokenBySymbol(externalToReserveSymbol)) externalToReserveSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
+    if (!findReserveTransferTokenBySymbol(reserveToCollateralSymbol)) reserveToCollateralSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
+    if (!findReserveTransferTokenBySymbol(collateralToReserveSymbol)) collateralToReserveSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
     if (!findReserveTransferTokenBySymbol(reserveToExternalSymbol)) reserveToExternalSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
     const approvePreferred = transferableAssetOptions.find((token) => token.symbol === 'USDC')?.symbol
       ?? transferableAssetOptions[0]?.symbol
@@ -1355,13 +1387,83 @@
     }
   }
 
+  async function submitReserveToCollateral(): Promise<void> {
+    const token = findReserveTransferTokenBySymbol(reserveToCollateralSymbol);
+    if (!token) {
+      toasts.error('Select reserve asset first');
+      return;
+    }
+    try {
+      const reserveAmount = onchainReserves.get(token.tokenId) ?? 0n;
+      const amount = parsePositiveAssetAmount(reserveToCollateralAmount, token, reserveAmount);
+      await reserveToCollateral(token.tokenId, amount);
+      reserveToCollateralAmount = '';
+    } catch (err) {
+      toasts.error(`Reserve → Collateral failed: ${toErrorMessage(err, 'Unknown error')}`);
+    }
+  }
+
+  async function collateralToReserve(tokenId: number, amount: bigint): Promise<void> {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const counterpartyEntityId = String(workspaceAccountId || '').trim();
+    if (!entityId) return;
+    if (!counterpartyEntityId) {
+      toasts.error('Select an account first');
+      return;
+    }
+    if (!activeIsLive) {
+      toasts.error('Collateral → Reserve requires LIVE mode');
+      return;
+    }
+
+    try {
+      const env = activeEnv;
+      if (!env) throw new Error('Environment not ready');
+      const signerId = resolveEntitySigner(entityId, 'collateral-to-reserve');
+
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+        {
+          type: 'requestWithdrawal' as const,
+          data: {
+            counterpartyEntityId,
+            tokenId,
+            amount,
+          },
+        },
+      ])]);
+
+      const info = getTokenInfo(tokenId);
+      toasts.info(`Collateral → Reserve queued for ${info.symbol}. Sign & broadcast in Settle when ready.`);
+    } catch (err) {
+      console.error('[EntityPanel] Collateral → Reserve failed:', err);
+      toasts.error(`Collateral → Reserve failed: ${(err as Error).message}`);
+    }
+  }
+
+  async function submitCollateralToReserve(): Promise<void> {
+    const token = findReserveTransferTokenBySymbol(collateralToReserveSymbol);
+    if (!token) {
+      toasts.error('Select collateral asset first');
+      return;
+    }
+    try {
+      const withdrawable = getWorkspaceWithdrawableCollateral(token.tokenId);
+      const amount = parsePositiveAssetAmount(collateralToReserveAmount, token, withdrawable);
+      await collateralToReserve(token.tokenId, amount);
+      collateralToReserveAmount = '';
+    } catch (err) {
+      toasts.error(`Collateral → Reserve failed: ${toErrorMessage(err, 'Unknown error')}`);
+    }
+  }
+
   // Reserve → Collateral (deposit reserves into selected bilateral account)
   async function reserveToCollateral(tokenId: number, amountOverride?: bigint) {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'reserve-to-collateral');
+    const counterpartyEntityId = String(workspaceAccountId || selectedAccountId || '').trim();
     if (!entityId || !signerId) return;
 
-    if (!selectedAccountId) {
+    if (!counterpartyEntityId) {
       toasts.error('Select an account to deposit collateral');
       return;
     }
@@ -1378,7 +1480,7 @@
     }
 
     const accounts = replica?.state?.accounts;
-    if (!accounts || !accounts.has(selectedAccountId)) {
+    if (!accounts || !findLocalAccountByCounterparty(entityId, accounts, counterpartyEntityId)) {
       toasts.error('No account found for selected counterparty');
       return;
     }
@@ -1393,7 +1495,7 @@
           {
             type: 'deposit_collateral' as const,
             data: {
-              counterpartyId: selectedAccountId,
+              counterpartyId: counterpartyEntityId,
               tokenId,
               amount,
             },
@@ -1860,6 +1962,18 @@
       selectedExternalToReserveToken.balance,
       selectedExternalToReserveToken.decimals,
     );
+  }
+
+  function fillReserveToCollateralMax(): void {
+    if (!selectedReserveToCollateralToken) return;
+    const reserveAmount = onchainReserves.get(selectedReserveToCollateralToken.tokenId) ?? 0n;
+    reserveToCollateralAmount = formatTokenInputAmount(reserveAmount, selectedReserveToCollateralToken.decimals);
+  }
+
+  function fillCollateralToReserveMax(): void {
+    if (!selectedCollateralToReserveToken) return;
+    const withdrawable = getWorkspaceWithdrawableCollateral(selectedCollateralToReserveToken.tokenId);
+    collateralToReserveAmount = formatTokenInputAmount(withdrawable, selectedCollateralToReserveToken.decimals);
   }
 
   function fillReserveToExternalMax(): void {
@@ -2351,6 +2465,12 @@
               <button class="account-workspace-tab" data-testid="asset-tab-deposit" class:active={assetWorkspaceTab === 'e2r'} on:click={() => assetWorkspaceTab = 'e2r'}>
                 <span>External → Reserve</span>
               </button>
+              <button class="account-workspace-tab" data-testid="asset-tab-r2c" class:active={assetWorkspaceTab === 'r2c'} on:click={() => assetWorkspaceTab = 'r2c'}>
+                <span>Reserve → Collateral</span>
+              </button>
+              <button class="account-workspace-tab" data-testid="asset-tab-c2r" class:active={assetWorkspaceTab === 'c2r'} on:click={() => assetWorkspaceTab = 'c2r'}>
+                <span>Collateral → Reserve</span>
+              </button>
               <button class="account-workspace-tab" data-testid="asset-tab-withdraw" class:active={assetWorkspaceTab === 'r2e'} on:click={() => assetWorkspaceTab = 'r2e'}>
                 <span>Reserve → External</span>
               </button>
@@ -2439,6 +2559,118 @@
                     disabled={depositingToken === externalToReserveSymbol || !externalToReserveAmount.trim()}
                   >
                     {depositingToken === externalToReserveSymbol ? 'Moving...' : 'Move To Reserve'}
+                  </button>
+                </div>
+              {:else if assetWorkspaceTab === 'r2c'}
+                <h4 class="section-head">Reserve → Collateral</h4>
+                <p class="muted">Move reserve balance into one selected bilateral account.</p>
+                <div class="asset-form-grid">
+                  <div class="asset-field asset-field-wide">
+                    <EntityInput
+                      label="Account"
+                      value={workspaceAccountId}
+                      entities={workspaceAccountIds}
+                      {contacts}
+                      excludeId={replica?.state?.entityId || tab.entityId}
+                      placeholder="Select account..."
+                      disabled={!activeIsLive || workspaceAccountIds.length === 0}
+                      on:change={handleWorkspaceAccountChange}
+                    />
+                  </div>
+                </div>
+                <div class="asset-form-grid">
+                  <label class="asset-field">
+                    <span>Asset</span>
+                    <select bind:value={reserveToCollateralSymbol} data-testid="reserve-to-collateral-symbol">
+                      {#each transferableAssetOptions as token}
+                        <option value={token.symbol}>{token.symbol}</option>
+                      {/each}
+                    </select>
+                  </label>
+                  <label class="asset-field">
+                    <span>Amount</span>
+                    <div class="amount-input-with-max">
+                      <input
+                        type="text"
+                        bind:value={reserveToCollateralAmount}
+                        placeholder="0.00"
+                        data-testid="reserve-to-collateral-amount"
+                      />
+                      <button
+                        type="button"
+                        class="asset-max-inline"
+                        on:click={fillReserveToCollateralMax}
+                        disabled={!selectedReserveToCollateralToken || (onchainReserves.get(selectedReserveToCollateralToken.tokenId) ?? 0n) <= 0n}
+                      >
+                        Max: {#if selectedReserveToCollateralToken}{formatAmount(onchainReserves.get(selectedReserveToCollateralToken.tokenId) ?? 0n, selectedReserveToCollateralToken.decimals)} {selectedReserveToCollateralToken.symbol}{:else}0{/if}
+                      </button>
+                    </div>
+                  </label>
+                </div>
+                <div class="asset-action-row">
+                  <button
+                    class="btn-table-action deposit"
+                    data-testid={`reserve-to-collateral-${reserveToCollateralSymbol}`}
+                    on:click={submitReserveToCollateral}
+                    disabled={collateralFundingToken === reserveToCollateralSymbol || !workspaceAccountId || !reserveToCollateralAmount.trim()}
+                  >
+                    {collateralFundingToken === reserveToCollateralSymbol ? 'Moving...' : 'Move To Collateral'}
+                  </button>
+                </div>
+              {:else if assetWorkspaceTab === 'c2r'}
+                <h4 class="section-head">Collateral → Reserve</h4>
+                <p class="muted">Queue a withdrawal request from one selected bilateral account back into reserve.</p>
+                <div class="asset-form-grid">
+                  <div class="asset-field asset-field-wide">
+                    <EntityInput
+                      label="Account"
+                      value={workspaceAccountId}
+                      entities={workspaceAccountIds}
+                      {contacts}
+                      excludeId={replica?.state?.entityId || tab.entityId}
+                      placeholder="Select account..."
+                      disabled={!activeIsLive || workspaceAccountIds.length === 0}
+                      on:change={handleWorkspaceAccountChange}
+                    />
+                  </div>
+                </div>
+                <div class="asset-form-grid">
+                  <label class="asset-field">
+                    <span>Asset</span>
+                    <select bind:value={collateralToReserveSymbol} data-testid="collateral-to-reserve-symbol">
+                      {#each transferableAssetOptions as token}
+                        <option value={token.symbol}>{token.symbol}</option>
+                      {/each}
+                    </select>
+                  </label>
+                  <label class="asset-field">
+                    <span>Amount</span>
+                    <div class="amount-input-with-max">
+                      <input
+                        type="text"
+                        bind:value={collateralToReserveAmount}
+                        placeholder="0.00"
+                        data-testid="collateral-to-reserve-amount"
+                      />
+                      <button
+                        type="button"
+                        class="asset-max-inline"
+                        on:click={fillCollateralToReserveMax}
+                        disabled={!selectedCollateralToReserveToken || getWorkspaceWithdrawableCollateral(selectedCollateralToReserveToken.tokenId) <= 0n}
+                      >
+                        Max: {#if selectedCollateralToReserveToken}{formatAmount(getWorkspaceWithdrawableCollateral(selectedCollateralToReserveToken.tokenId), selectedCollateralToReserveToken.decimals)} {selectedCollateralToReserveToken.symbol}{:else}0{/if}
+                      </button>
+                    </div>
+                  </label>
+                </div>
+                <div class="asset-action-row">
+                  <button
+                    class="btn-table-action deposit"
+                    data-testid={`collateral-to-reserve-${collateralToReserveSymbol}`}
+                    on:click={submitCollateralToReserve}
+                    disabled={!workspaceAccountId || !collateralToReserveAmount.trim()}
+                  >
+                    Queue To Reserve
                   </button>
                 </div>
               {:else if assetWorkspaceTab === 'r2e'}
