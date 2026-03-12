@@ -2,23 +2,11 @@
 
 ## Frontend Follow-Ups
 
-1. `EntityPanelTabs` reserve-to-collateral currently deposits 100% of token reserve.
-   File: `frontend/src/lib/components/Entity/EntityPanelTabs.svelte:817`
-   Task: add partial-amount input + percent presets (25/50/75/100) and keep current one-click as a shortcut.
+1. Simplify `reserve -> collateral` UI to exact-amount transfer only.
+   File: `frontend/src/lib/components/Entity/EntityPanelTabs.svelte`
+   Task: keep a plain amount input and queue that exact token amount into the batch. Remove percent presets from this flow.
 
-2. Standardize mutating UI paths on `enqueueEntityInputs` wrapper.
-   Files: `PaymentForm/CreditForm/CollateralForm/SwapPanel/AccountPanel` still use direct `enqueueRuntimeInput`.
-   Task: use one ingress API for consistent validation/logging and easier future auth hardening.
-
-3. Improve decimal parser UX in settlement text input.
-   File: `frontend/src/lib/components/Entity/SettlementPanel.svelte`
-   Task: accept transient states like `.5`, `100.`, and normalize on submit.
-
-4. Self-route behavior should be explicit.
-   File: `frontend/src/lib/components/Entity/PaymentPanel.svelte:978`
-   Task: default recipient selector to exclude self, add explicit "allow self-route" toggle.
-
-5. `SettlementPanel` transfer still goes through direct on-chain `submitReserveToReserve`.
+2. `SettlementPanel` transfer still goes through direct on-chain `submitReserveToReserve`.
    Task: decide whether this should stay as direct chain call or be routed through entity-tx + quorum flow for consistency.
 
 
@@ -57,4 +45,3 @@ Goal: treat single-signer as `1-of-1` special case of full entity quorum, not a 
    - insufficient quorum rejection.
    - circular board claim validation.
    - proposer compromise simulation (must fail without quorum).
-

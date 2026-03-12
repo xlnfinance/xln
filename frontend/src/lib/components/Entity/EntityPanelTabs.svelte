@@ -558,8 +558,15 @@
   let transferableAssetOptions: Array<ExternalToken & { tokenId: number }> = [];
   let assetLedgerRows: AssetLedgerRow[] = [];
   let accountSpendableByToken = new Map<number, bigint>();
-  let reserveCollateralDrafts = new Map<number, string>();
   let reserveExternalDrafts = new Map<number, string>();
+  let pendingAssetBridgeSync: {
+    tokenId: number;
+    symbol: string;
+    direction: 'deposit' | 'withdraw';
+    baselineReserve: bigint;
+  } | null = null;
+  let resolvingAssetBridgeSync = false;
+  let externalFetchSeq = 0;
 
   type AssetLedgerRow = {
     symbol: string;
@@ -650,29 +657,12 @@
     return `${whole.toString()}.${frac.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
   }
 
-  function readReserveCollateralDraft(tokenId: number): string {
-    return reserveCollateralDrafts.get(tokenId) ?? '';
-  }
-
-  function writeReserveCollateralDraft(tokenId: number, value: string): void {
-    reserveCollateralDrafts = new Map(reserveCollateralDrafts).set(tokenId, value);
-  }
-
   function readReserveExternalDraft(tokenId: number): string {
     return reserveExternalDrafts.get(tokenId) ?? '';
   }
 
   function writeReserveExternalDraft(tokenId: number, value: string): void {
     reserveExternalDrafts = new Map(reserveExternalDrafts).set(tokenId, value);
-  }
-
-  function applyReserveCollateralPreset(tokenId: number, percent: 25 | 50 | 75 | 100): void {
-    const reserveAmount = onchainReserves.get(tokenId) ?? 0n;
-    const info = resolveReserveTokenMeta(tokenId);
-    const presetAmount = percent === 100
-      ? reserveAmount
-      : (reserveAmount * BigInt(percent)) / 100n;
-    writeReserveCollateralDraft(tokenId, formatTokenInputAmount(presetAmount, info.decimals));
   }
 
   function applyReserveExternalPreset(tokenId: number, percent: 25 | 50 | 75 | 100): void {
@@ -682,18 +672,6 @@
       ? reserveAmount
       : (reserveAmount * BigInt(percent)) / 100n;
     writeReserveExternalDraft(tokenId, formatTokenInputAmount(presetAmount, info.decimals));
-  }
-
-  function parsePositiveReserveCollateralAmount(tokenId: number): bigint {
-    const raw = readReserveCollateralDraft(tokenId).trim();
-    if (!raw) throw new Error('Amount is required');
-    if (!/^(?:\d+|\d+\.\d*|\.\d+)$/.test(raw)) throw new Error('Invalid amount format');
-    const info = resolveReserveTokenMeta(tokenId);
-    const parsed = parseTokenAmount(raw, info.decimals);
-    if (parsed <= 0n) throw new Error('Amount must be greater than zero');
-    const reserveAmount = onchainReserves.get(tokenId) ?? 0n;
-    if (parsed > reserveAmount) throw new Error('Amount exceeds reserve balance');
-    return parsed;
   }
 
   function parsePositiveReserveExternalAmount(tokenId: number): bigint {
@@ -756,15 +734,18 @@
       }]);
 
       writeReserveExternalDraft(tokenId, '');
-      setTimeout(() => {
-        refreshBalances();
-      }, 1000);
+      pendingAssetBridgeSync = {
+        tokenId,
+        symbol: info.symbol,
+        direction: 'withdraw',
+        baselineReserve: onchainReserves.get(tokenId) ?? 0n,
+      };
     } catch (err) {
       console.error('[EntityPanel] Reserve withdraw failed:', err);
       const message = err instanceof Error ? err.message : String(err);
       toasts.error(`Reserve withdraw failed: ${message}`);
-    } finally {
       withdrawingExternalToken = null;
+    } finally {
     }
   }
 
@@ -985,6 +966,34 @@
   }
 
   $: onchainReserves = buildOnchainReserves(replica?.state?.reserves, externalTokens);
+  $: {
+    if (!pendingAssetBridgeSync || resolvingAssetBridgeSync) {
+      // no-op
+    } else {
+      const currentReserve = onchainReserves.get(pendingAssetBridgeSync.tokenId) ?? 0n;
+      const reserveMoved = pendingAssetBridgeSync.direction === 'deposit'
+        ? currentReserve > pendingAssetBridgeSync.baselineReserve
+        : currentReserve < pendingAssetBridgeSync.baselineReserve;
+      if (reserveMoved) {
+        resolvingAssetBridgeSync = true;
+        const sync = pendingAssetBridgeSync;
+        void (async () => {
+          try {
+            await fetchExternalTokens();
+          } finally {
+            if (sync.direction === 'deposit' && depositingToken === sync.symbol) depositingToken = null;
+            if (sync.direction === 'withdraw' && withdrawingExternalToken === sync.symbol) withdrawingExternalToken = null;
+            pendingAssetBridgeSync = null;
+            resolvingAssetBridgeSync = false;
+          }
+        })();
+      }
+    }
+  }
+
+  function isAssetBridgeSyncPending(tokenId: number | undefined): boolean {
+    return typeof tokenId === 'number' && pendingAssetBridgeSync?.tokenId === tokenId;
+  }
 
   $: transferableAssetOptions = externalTokens.filter(isReserveTransferToken);
   $: accountSpendableByToken = (() => {
@@ -1120,8 +1129,10 @@
   // Fetch external tokens (ERC20 balances for signer) - works for both BrowserVM and RPC modes
   async function fetchExternalTokens() {
     const signerId = tab.signerId;
+    const fetchSeq = ++externalFetchSeq;
+    externalTokensLoading = true;
     if (!signerId) {
-      externalTokensLoading = false;
+      if (fetchSeq === externalFetchSeq) externalTokensLoading = false;
       return;
     }
 
@@ -1148,8 +1159,10 @@
         }
       }
       if (!jadapter?.getErc20Balance) {
-        externalTokens = tokenList;
-        externalTokensLoading = false;
+        if (fetchSeq === externalFetchSeq) {
+          externalTokens = tokenList;
+          externalTokensLoading = false;
+        }
         return;
       }
 
@@ -1179,11 +1192,13 @@
         }
       }
 
-      externalTokens = nativeToken ? [nativeToken, ...tokenList] : tokenList;
-      externalTokensLoading = false;
+      if (fetchSeq === externalFetchSeq) {
+        externalTokens = nativeToken ? [nativeToken, ...tokenList] : tokenList;
+        externalTokensLoading = false;
+      }
     } catch (err) {
       console.error('[EntityPanel] Failed to fetch external tokens:', err);
-      externalTokensLoading = false;
+      if (fetchSeq === externalFetchSeq) externalTokensLoading = false;
     }
   }
 
@@ -1216,15 +1231,23 @@
       await jadapter.externalTokenToReserve(privKey, entityId, token.address, amount);
 
       console.log(`[EntityPanel] Deposited ${token.symbol} to entity reserves`);
-
-      // Reserves are event-driven via replica.state.reserves; only external balances need polling.
-      await fetchExternalTokens();
+      if (typeof token.tokenId === 'number' && token.tokenId > 0) {
+        pendingAssetBridgeSync = {
+          tokenId: token.tokenId,
+          symbol: token.symbol,
+          direction: 'deposit',
+          baselineReserve: onchainReserves.get(token.tokenId) ?? 0n,
+        };
+      } else {
+        depositingToken = null;
+        await fetchExternalTokens();
+      }
     } catch (err) {
       console.error('[EntityPanel] Deposit failed:', err);
       const message = err instanceof Error ? err.message : String(err);
       toasts.error(`Deposit failed: ${message}`);
-    } finally {
       depositingToken = null;
+    } finally {
     }
   }
 
@@ -1362,23 +1385,11 @@
         ])]);
 
       toasts.info(`R→C queued for ${info.symbol}. Waiting for on-chain update...`);
-      if (amountOverride !== undefined) {
-        writeReserveCollateralDraft(tokenId, '');
-      }
     } catch (err) {
       console.error('[EntityPanel] Reserve → Collateral failed:', err);
       toasts.error(`Reserve → Collateral failed: ${(err as Error).message}`);
     } finally {
       collateralFundingToken = null;
-    }
-  }
-
-  async function reserveToCollateralPartial(tokenId: number) {
-    try {
-      const amount = parsePositiveReserveCollateralAmount(tokenId);
-      await reserveToCollateral(tokenId, amount);
-    } catch (err) {
-      toasts.error(`Reserve → Collateral failed: ${toErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -1852,7 +1863,6 @@
   $: accountsData = (() => {
     let outbound = 0;
     let inbound = 0;
-    let outPeerDebt = 0;   // peer owes us (backed by their credit to us)
     let outCollateral = 0; // collateral on our out side
     let outOurCredit = 0;  // unused credit we set (our risk)
     let count = 0;
@@ -1872,7 +1882,6 @@
             if (derived.outCapacity > 0n) outbound += valueOf(derived.outCapacity);
             if (derived.inCapacity > 0n) inbound += valueOf(derived.inCapacity);
             // outCapacity = outPeerCredit + outCollateral + outOwnCredit
-            if (derived.outPeerCredit > 0n) outPeerDebt += valueOf(derived.outPeerCredit);
             if (derived.outCollateral > 0n) outCollateral += valueOf(derived.outCollateral);
             if (derived.outOwnCredit > 0n) outOurCredit += valueOf(derived.outOwnCredit);
           }
@@ -1882,7 +1891,6 @@
     return {
       outbound,
       inbound,
-      outPeerDebt,
       outCollateral,
       outOurCredit,
       count,
@@ -2171,12 +2179,11 @@
           <div class="hero-networth">{formatCompact(netWorth)}</div>
           <div class="hero-label">Net Worth</div>
           <div class="hero-breakdown">
-            <span>Ext {formatCompact(externalTotal)}</span>
+            <span>External {formatCompact(externalTotal)}</span>
+            <span>+</span>
             <span data-testid="reserves-card-value">Reserve {formatCompact(reservesTotal)}</span>
+            <span>+</span>
             <span>Accounts {formatCompact(accountsData.total)}</span>
-            {#if accountsData.outPeerDebt > 0}
-              <span class="debt" data-testid="accounts-card-owed">owed {formatCompact(accountsData.outPeerDebt)}</span>
-            {/if}
           </div>
         </div>
       </section>
@@ -2265,16 +2272,26 @@
                     </div>
                   </div>
                   <div class="col-balance asset-balance-block">
-                    <span class="balance-text" class:zero={row.externalBalance === 0n} data-testid={`external-balance-${row.symbol}`}>
-                      {formatAmount(row.externalBalance, row.decimals)}
-                    </span>
-                    <span class="value-text subtle">{formatApproxUsd(row.externalUsd)}</span>
+                    {#if isAssetBridgeSyncPending(row.tokenId)}
+                      <span class="balance-text subtle asset-syncing">Syncing…</span>
+                      <span class="value-text subtle">—</span>
+                    {:else}
+                      <span class="balance-text" class:zero={row.externalBalance === 0n} data-testid={`external-balance-${row.symbol}`}>
+                        {formatAmount(row.externalBalance, row.decimals)}
+                      </span>
+                      <span class="value-text subtle">{formatApproxUsd(row.externalUsd)}</span>
+                    {/if}
                   </div>
                   <div class="col-balance asset-balance-block">
-                    <span class="balance-text" class:zero={row.reserveBalance === 0n} data-testid={`reserve-balance-${row.symbol}`}>
-                      {row.tokenId && row.tokenId > 0 ? formatAmount(row.reserveBalance, row.decimals) : '—'}
-                    </span>
-                    <span class="value-text subtle">{row.tokenId && row.tokenId > 0 ? formatApproxUsd(row.reserveUsd) : '—'}</span>
+                    {#if isAssetBridgeSyncPending(row.tokenId)}
+                      <span class="balance-text subtle asset-syncing">Syncing…</span>
+                      <span class="value-text subtle">—</span>
+                    {:else}
+                      <span class="balance-text" class:zero={row.reserveBalance === 0n} data-testid={`reserve-balance-${row.symbol}`}>
+                        {row.tokenId && row.tokenId > 0 ? formatAmount(row.reserveBalance, row.decimals) : '—'}
+                      </span>
+                      <span class="value-text subtle">{row.tokenId && row.tokenId > 0 ? formatApproxUsd(row.reserveUsd) : '—'}</span>
+                    {/if}
                   </div>
                   <div class="col-balance asset-balance-block">
                     <span class="balance-text" class:zero={row.accountBalance === 0n} data-testid={`account-spendable-${row.symbol}`}>
@@ -3171,10 +3188,6 @@
 
   .hero-breakdown span {
     white-space: nowrap;
-  }
-
-  .hero-breakdown .debt {
-    color: #f59e0b;
   }
 
   /* Portfolio - legacy, keep btn-faucet for tab content */
