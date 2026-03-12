@@ -22,15 +22,33 @@ import {
   ERC20Mock__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
 
-import type { BrowserVMState, JTx } from '../types';
+import type { BrowserVMState, JTx, Env } from '../types';
 import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, BrowserVMProvider, JTokenInfo, JReserveMint } from './types';
-import { computeAccountKey, entityIdToAddress, setupContractEventListeners, processEventBatch, type RawJEvent } from './helpers';
+import {
+  computeAccountKey,
+  entityIdToAddress,
+  setupContractEventListeners,
+  processEventBatch,
+  type EventBatchCounter,
+  type RawJEvent,
+  type RawJEventArgs,
+} from './helpers';
 import { CANONICAL_J_EVENTS } from './helpers';
 import { DEV_CHAIN_IDS } from './index';
 import { preflightBatchForE2 } from '../j-batch';
 import { setDeltaTransformerAddress } from '../proof-builder';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+type DebugEventEmitter = {
+  sendDebugEvent(payload: Record<string, unknown>): void;
+};
+
+const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
+  typeof value === 'object' &&
+  value !== null &&
+  'sendDebugEvent' in value &&
+  typeof value.sendDebugEvent === 'function';
 
 const isRealAddress = (value: unknown): value is string =>
   typeof value === 'string' && value.length === 42 && value !== ZERO_ADDRESS;
@@ -216,24 +234,34 @@ export async function createRpcAdapter(
     return next;
   };
 
+  type NonceResettableSigner = {
+    resetNonce(): void;
+  };
   const maybeResetSignerNonce = (): void => {
-    const signerAny = signer as any;
-    if (typeof signerAny?.resetNonce === 'function') {
+    const candidate = signer as unknown as Partial<NonceResettableSigner>;
+    if (typeof candidate.resetNonce === 'function') {
       try {
-        signerAny.resetNonce();
+        candidate.resetNonce();
       } catch {
         // Best-effort only.
       }
     }
   };
 
+  type ErrorWithMessage = {
+    message?: unknown;
+  };
   const isNonceSyncError = (error: unknown): boolean => {
-    const msg = String((error as any)?.message || error || '').toLowerCase();
+    const msg =
+      typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as ErrorWithMessage).message ?? '')
+        : String(error ?? '');
+    const normalized = msg.toLowerCase();
     return (
-      msg.includes('nonce too low') ||
-      msg.includes('nonce has already been used') ||
-      msg.includes('nonce expired') ||
-      msg.includes('code=nonce_expired')
+      normalized.includes('nonce too low') ||
+      normalized.includes('nonce has already been used') ||
+      normalized.includes('nonce expired') ||
+      normalized.includes('code=nonce_expired')
     );
   };
 
@@ -1099,7 +1127,7 @@ export async function createRpcAdapter(
     },
 
     // === High-level J-tx submission ===
-    async submitTx(jTx: JTx, options: { env: any; signerId?: string; timestamp?: number }): Promise<JSubmitResult> {
+    async submitTx(jTx: JTx, options: { env: Env; signerId?: string; timestamp?: number }): Promise<JSubmitResult> {
       const { env, signerId, timestamp } = options;
 
       console.log(`📤 [JAdapter:rpc] submitTx type=${jTx.type} entity=${jTx.entityId.slice(-4)}`);
@@ -1346,9 +1374,9 @@ export async function createRpcAdapter(
       }
 
       if (jTx.type === 'mint') {
-        const entityId = String((jTx.data as any)?.entityId || jTx.entityId || '');
-        const tokenId = Number((jTx.data as any)?.tokenId);
-        const amount = BigInt((jTx.data as any)?.amount ?? 0n);
+        const entityId = String(jTx.data.entityId || jTx.entityId || '');
+        const tokenId = Number(jTx.data.tokenId);
+        const amount = BigInt(jTx.data.amount ?? 0n);
         if (!entityId || !Number.isFinite(tokenId) || amount <= 0n) {
           return { success: false, error: 'Invalid mint payload' };
         }
@@ -1368,11 +1396,12 @@ export async function createRpcAdapter(
         }
       }
 
-      return { success: false, error: `Unknown JTx type: ${(jTx as any).type}` };
+      const unhandledType: never = jTx;
+      return { success: false, error: `Unknown JTx type: ${String(unhandledType)}` };
     },
 
     // === J-Watcher integration (RPC polling — uses shared event conversion from helpers.ts) ===
-    startWatching(env: any): void {
+    startWatching(env: Env): void {
       if (watcherInterval) {
         console.log(`🔭 [JAdapter:rpc] Already watching`);
         return;
@@ -1380,7 +1409,7 @@ export async function createRpcAdapter(
       watcherEnv = env;
       lastSyncedBlock = 0;
       txCounter.value = 0;
-      (txCounter as any)._seenLogs = { set: new Set<string>(), order: [] as string[] };
+      txCounter._seenLogs = { set: new Set<string>(), order: [] as string[] };
       const watchPollMs = resolveWatcherPollMs(!!env?.scenarioMode);
       const confirmationDepth = resolveFinalityDepth(!!env?.scenarioMode);
       console.log(`🔭 [JAdapter:rpc] Starting event watcher (${watchPollMs}ms polling, depth=${confirmationDepth})...`);
@@ -1399,8 +1428,8 @@ export async function createRpcAdapter(
       const depositoryIface = new ethers.Interface(depositoryABI);
 
       const emitWatcherDebug = (payload: Record<string, unknown>) => {
-        const p2p = (watcherEnv as any)?.runtimeState?.p2p;
-        if (p2p && typeof p2p.sendDebugEvent === 'function') {
+        const p2p = watcherEnv?.runtimeState?.p2p;
+        if (isDebugEventEmitter(p2p)) {
           p2p.sendDebugEvent({
             level: 'info',
             code: 'J_WATCH_RPC',
@@ -1409,15 +1438,13 @@ export async function createRpcAdapter(
         }
       };
 
-      let pollInFlight = false;
-      const doPoll = async () => {
-        if (!watcherEnv) return;
-        if (pollInFlight) return;
-        pollInFlight = true;
-        try {
-          // Use raw RPC call to bypass ethers' block number caching
-          const rpcResult = await (provider as ethers.JsonRpcProvider).send('eth_blockNumber', []);
-          const currentBlock = parseInt(rpcResult, 16);
+      const doPoll = (): Promise<void> => {
+        if (!watcherEnv) return Promise.resolve();
+        if (pollInFlight) return pollInFlight;
+        pollInFlight = (async () => {
+          const activeEnv = watcherEnv;
+          if (!activeEnv) return;
+          const currentBlock = parseInt(await (provider as ethers.JsonRpcProvider).send('eth_blockNumber', []), 16);
           const safeToBlock = currentBlock - confirmationDepth;
           if (safeToBlock <= 0) return;
           if (lastSyncedBlock >= safeToBlock) return;
@@ -1432,10 +1459,10 @@ export async function createRpcAdapter(
               try {
                 const parsed = depositoryIface.parseLog({ topics: log.topics as string[], data: log.data });
                 if (!parsed) continue;
-                if (!CANONICAL_J_EVENTS.includes(parsed.name as any)) continue;
+                if (!CANONICAL_J_EVENTS.some(name => name === parsed.name)) continue;
                 // Extract named args from ethers v6 Result (array-like, named keys
                 // not enumerable via Object.keys). Use positional fallback for unnamed params.
-                const args: Record<string, any> = {};
+                const args: RawJEventArgs = {};
                 for (let idx = 0; idx < parsed.fragment.inputs.length; idx++) {
                   const input = parsed.fragment.inputs[idx];
                   const key = input.name || String(idx);
@@ -1469,7 +1496,7 @@ export async function createRpcAdapter(
               }
               for (const [blockNum, events] of byBlock) {
                 const blockHash = events[0]?.blockHash ?? '0x0';
-                processEventBatch(events, watcherEnv, blockNum, blockHash, txCounter, 'rpc');
+                processEventBatch(events, activeEnv, blockNum, blockHash, txCounter, 'rpc');
               }
 
               emitWatcherDebug({
@@ -1496,7 +1523,7 @@ export async function createRpcAdapter(
           }
 
           lastSyncedBlock = safeToBlock;
-        } catch (error) {
+        })().catch((error: unknown) => {
           emitWatcherDebug({
             event: 'j_watch_error',
             message: error instanceof Error ? error.message : String(error),
@@ -1505,21 +1532,23 @@ export async function createRpcAdapter(
           if (!(error instanceof Error && error.message.includes('ECONNREFUSED'))) {
             console.error(`🔭❌ [JAdapter:rpc] Sync error:`, error instanceof Error ? error.message : String(error));
           }
-        } finally {
-          pollInFlight = false;
-        }
+        }).finally(() => {
+          pollInFlight = null;
+        });
+        return pollInFlight;
       };
 
-      // Store pollNow for scenarios that need immediate sync
-      (adapter as any)._pollNow = doPoll;
-      watcherInterval = setInterval(doPoll, watchPollMs);
+      pollNowHandler = doPoll;
+      watcherInterval = setInterval(() => {
+        void doPoll();
+      }, watchPollMs);
       void doPoll();
 
       console.log(`🔭 [JAdapter:rpc] Watcher started (${watchPollMs}ms polling)`);
     },
 
     async pollNow(): Promise<void> {
-      const fn = (adapter as any)._pollNow;
+      const fn = pollNowHandler;
       if (fn) await fn();
     },
 
@@ -1528,6 +1557,8 @@ export async function createRpcAdapter(
         clearInterval(watcherInterval);
         watcherInterval = null;
         watcherEnv = null;
+        pollInFlight = null;
+        pollNowHandler = null;
         console.log(`🔭 [JAdapter:rpc] Watcher stopped`);
       }
     },
@@ -1548,10 +1579,12 @@ export async function createRpcAdapter(
   };
 
   // Watcher state
-  let watcherInterval: any = null;
-  let watcherEnv: any = null;
+  let watcherInterval: ReturnType<typeof setInterval> | null = null;
+  let watcherEnv: Env | null = null;
+  let pollInFlight: Promise<void> | null = null;
+  let pollNowHandler: (() => Promise<void>) | null = null;
   let lastSyncedBlock = 0;
-  const txCounter = { value: 0 };
+  const txCounter: EventBatchCounter = { value: 0 };
 
   return adapter;
 }

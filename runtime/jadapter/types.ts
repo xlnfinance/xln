@@ -5,7 +5,7 @@
 
 import type { Provider, Signer } from 'ethers';
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types/index.ts';
-import type { JReplica, JTx, BrowserVMState } from '../types';
+import type { JReplica, JTx, BrowserVMState, Env } from '../types';
 
 export type JAdapterMode = 'browservm' | 'anvil' | 'rpc';
 
@@ -148,14 +148,14 @@ export interface JAdapter {
   // === High-level J-tx submission (unified interface for all modes) ===
   // Handles encoding, signing, and execution. Events arrive via j-watcher → next frame.
   submitTx(jTx: JTx, options: {
-    env: any;           // Runtime env (for hanko signing)
+    env: Env;           // Runtime env (for hanko signing)
     signerId?: string;  // Which signer to use for hanko
     timestamp?: number; // Block timestamp (scenarioMode)
   }): Promise<JSubmitResult>;
 
   // === J-Watcher integration ===
   // Starts feeding J-events back to runtime mempool. Same object handles submit + watch.
-  startWatching(env: any): void;
+  startWatching(env: Env): void;
   stopWatching(): void;
   // Immediate poll for scenarios (no-op if watcher not started)
   pollNow?(): Promise<void>;
