@@ -14,7 +14,6 @@
   import { routePreview } from '../../stores/routePreviewStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { toasts } from '$lib/stores/toastStore';
-  import { safeStringify } from '$lib/utils/safeStringify';
   import { keccak256, AbiCoder, hexlify } from 'ethers';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
@@ -58,7 +57,6 @@
   let showFullEntityId = false;
   let payMaxAmount = 0n;
   let payMaxUsd = 0;
-  let profileExpanded = false;
   let serverEntityNames = new Map<string, string>();
   let paymentPanelEl: HTMLDivElement | null = null;
   let routesPanelEl: HTMLDivElement | null = null;
@@ -308,16 +306,6 @@
     if (!targetEntityId) targetEntityId = entityId;
     seededDefaultTarget = true;
   }
-
-  $: selectedTargetProfile = (() => {
-    const profiles = getGossipProfiles();
-    const targetNorm = normalizeEntityId(targetEntityId);
-    return profiles.find((profile) => normalizeEntityId(profile.entityId) === targetNorm);
-  })();
-
-  $: selectedTargetProfileJson = selectedTargetProfile
-    ? safeStringify(selectedTargetProfile, 2)
-    : null;
 
   const clearRepeatTimer = () => {
     if (repeatTimer) {
@@ -1447,56 +1435,26 @@
     <div class="profile-preflight-error">{preflightError}</div>
   {/if}
 
-  {#if targetEntityId}
-    <div class="profile-preview">
-      <button class="profile-preview-header" on:click={() => profileExpanded = !profileExpanded}>
-        <span class="profile-toggle">{profileExpanded ? '▾' : '▸'} Recipient Gossip Profile</span>
-        <div class="profile-header-right">
-          {#if normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)}
-            <span class="profile-status ok">self</span>
-          {:else if selectedTargetProfile}
-            {#if extractEntityEncPubKey(currentReplicas, getGossipProfiles(), targetEntityId)}
-              <span class="profile-status ok">key ready</span>
-            {:else}
-              <span class="profile-status fail">missing key</span>
-            {/if}
-          {:else}
-            <span class="profile-status fail">not downloaded</span>
-          {/if}
-        </div>
-      </button>
-      {#if profileExpanded}
-        {#if selectedTargetProfileJson}
-          <pre>{selectedTargetProfileJson}</pre>
-        {:else if normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)}
-          <pre>{safeStringify({ entityId, note: 'Self recipient uses local entity state' }, 2)}</pre>
-        {:else}
-          <pre>{safeStringify({ entityId: targetEntityId, error: 'No gossip profile in local cache' }, 2)}</pre>
-        {/if}
-      {/if}
-    </div>
-  {/if}
-
   <div class="row">
     <div class="amount-field">
-      <label>
-        <span>Amount</span>
+      <label><span>Amount</span></label>
+      <div class="amount-input-with-max">
+        <input
+          type="text"
+          bind:value={amount}
+          placeholder="0.00"
+          disabled={findingRoutes || sendingPayment}
+          on:input={handleAmountInput}
+        />
         <button
           type="button"
-          class="field-max-link"
+          class="inline-max-link"
           on:click={fillMaxPaymentAmount}
           disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
         >
           Max: {formatTokenNumberOnly(payMaxAmount)} {getTokenSymbol(tokenId)} ({formatUsdHint(payMaxUsd)})
         </button>
-      </label>
-      <input
-        type="text"
-        bind:value={amount}
-        placeholder="0.00"
-        disabled={findingRoutes || sendingPayment}
-        on:input={handleAmountInput}
-      />
+      </div>
     </div>
     <TokenSelect
       label="Token"
@@ -1788,26 +1746,6 @@
     gap: 12px;
   }
 
-  .field-max-link {
-    border: none;
-    background: transparent;
-    padding: 0;
-    color: #a5b4fc;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .field-max-link:hover:not(:disabled) {
-    color: #f8fafc;
-  }
-
-  .field-max-link:disabled {
-    color: #64748b;
-    cursor: default;
-  }
-
   .row :global(.token-select) {
     width: 100%;
   }
@@ -1820,6 +1758,38 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  .amount-input-with-max {
+    position: relative;
+  }
+
+  .amount-input-with-max input {
+    padding-right: 210px;
+  }
+
+  .inline-max-link {
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: #a5b4fc;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .inline-max-link:hover:not(:disabled) {
+    color: #f8fafc;
+  }
+
+  .inline-max-link:disabled {
+    color: #64748b;
+    cursor: default;
   }
 
   label {
@@ -2227,77 +2197,6 @@
       min-width: 0;
       text-align: left;
     }
-  }
-
-  .profile-preview {
-    border: 1px solid #292524;
-    border-radius: 8px;
-    background: #11100f;
-    overflow: hidden;
-  }
-
-  .profile-preview-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 12px;
-    color: #a8a29e;
-    font-size: 11px;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    width: 100%;
-    background: none;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: color 0.15s;
-  }
-
-  .profile-preview-header:hover {
-    color: #d6d3d1;
-  }
-
-  .profile-toggle {
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .profile-header-right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .profile-status {
-    font-size: 10px;
-    border-radius: 999px;
-    padding: 2px 8px;
-    border: 1px solid transparent;
-  }
-
-  .profile-status.ok {
-    color: #86efac;
-    border-color: #166534;
-    background: #052e16;
-  }
-
-  .profile-status.fail {
-    color: #fca5a5;
-    border-color: #7f1d1d;
-    background: #450a0a;
-  }
-
-  .profile-preview pre {
-    margin: 0;
-    max-height: 220px;
-    overflow: auto;
-    padding: 12px;
-    border-top: 1px solid #292524;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    line-height: 1.45;
-    color: #d6d3d1;
-    white-space: pre-wrap;
-    word-break: break-word;
   }
 
   .profile-preflight-error {

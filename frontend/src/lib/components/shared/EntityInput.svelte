@@ -309,6 +309,7 @@
   <div class="input-wrapper">
     <input
       bind:this={inputRef}
+      class:has-selection-overlay={Boolean(value && !showDropdown && selectedOption)}
       type="text"
       value={showDropdown ? inputValue : displayValue}
       {placeholder}
@@ -323,6 +324,20 @@
       <span class="selected-badge unresolved" title="Entity not found in gossip">?{unresolvedInput}</span>
     {/if}
 
+    {#if value && !showDropdown && selectedOption}
+      <div class="selected-overlay" aria-hidden="true">
+        {#if selectedOption.avatarUrl}
+          <img class="item-avatar" src={selectedOption.avatarUrl} alt="" />
+        {:else}
+          <span class="item-avatar placeholder">?</span>
+        {/if}
+        <span class="item-meta">
+          <span class="item-name">{selectedOption.displayName}</span>
+          <span class="item-id">{selectedOption.id}</span>
+        </span>
+      </div>
+    {/if}
+
     <button
       class="dropdown-toggle"
       type="button"
@@ -334,20 +349,6 @@
       </svg>
     </button>
   </div>
-
-  {#if value && !showDropdown && selectedOption}
-    <div class="selected-preview-inline">
-      {#if selectedOption.avatarUrl}
-        <img class="item-avatar" src={selectedOption.avatarUrl} alt="" />
-      {:else}
-        <span class="item-avatar placeholder">?</span>
-      {/if}
-      <span class="item-meta">
-        <span class="item-name">{selectedOption.displayName}</span>
-        <span class="item-id">{selectedOption.id}</span>
-      </span>
-    </div>
-  {/if}
 
   {#if showDropdown && !disabled}
     <div class="dropdown">
@@ -443,17 +444,6 @@
     align-items: center;
   }
 
-  .selected-preview-inline {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: 8px;
-    padding: 8px 12px;
-    background: rgba(28, 25, 23, 0.76);
-    border: 1px solid #292524;
-    border-radius: 8px;
-  }
-
   input {
     width: 100%;
     padding: 12px 80px 12px 14px;
@@ -464,6 +454,11 @@
     font-size: 14px;
     font-family: inherit;
     transition: border-color 0.15s;
+  }
+
+  input.has-selection-overlay {
+    color: transparent;
+    caret-color: transparent;
   }
 
   input:focus {
@@ -490,6 +485,16 @@
     color: #f97316;
     background: #431407;
     border: 1px dashed #c2410c;
+  }
+
+  .selected-overlay {
+    position: absolute;
+    inset: 0 36px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    pointer-events: none;
   }
 
   .dropdown-toggle {
