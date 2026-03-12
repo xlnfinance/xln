@@ -663,3 +663,5 @@
 - 2026-03-12: Fixed assets-tab background refresh block structure, removed noisy recipient gossip dump from pay form, moved pay Max inline, kept focused payment + e2r2e green.
 
 - 2026-03-12: Replaced onboarding wizard with one-pass setup, rounded BrainVault derive ETA to seconds, tightened payment amount/token controls, and renamed asset movement labels to explicit directions.
+
+- 2026-03-12: Added direct `Reserve -> Collateral` and `Collateral -> Reserve` forms under `Assets` without moving the existing `Accounts` flow. The new asset-side forms reuse the same runtime actions, include account picker + exact amount + single-account Max, and kept focused isolated `payment` + `e2r2e` green.
