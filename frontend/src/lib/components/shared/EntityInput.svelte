@@ -8,6 +8,7 @@
   - Auto profile lookup from gossip cache
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import { createEventDispatcher } from 'svelte';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { xlnFunctions, xlnEnvironment } from '../../stores/xlnStore';
@@ -20,6 +21,7 @@
   export let excludeId: string = ''; // Exclude current entity
   export let disabled: boolean = false;
   export let label: string = '';
+  export let preferredId: string = '';
 
   const dispatch = createEventDispatcher();
   $: activeFunctions = $xlnFunctions;
@@ -156,7 +158,7 @@
   // UI state
   let showDropdown = false;
   let inputValue = '';
-  let inputRef: HTMLInputElement;
+  let inputRef: HTMLInputElement | null = null;
 
   // Format entity ID consistently: #XXXX (last 4 hex chars)
   function formatShortId(id: string): string {
@@ -199,8 +201,23 @@
     scheduleGossipProfileFetch(missingEntityProfiles);
   }
 
+  function compareOptionPriority(
+    left: { id: string; displayName: string; isContact: boolean },
+    right: { id: string; displayName: string; isContact: boolean },
+  ): number {
+    const leftNorm = normalizeEntityId(left.id);
+    const rightNorm = normalizeEntityId(right.id);
+    const preferredNorm = normalizeEntityId(preferredId);
+    if (preferredNorm) {
+      if (leftNorm === preferredNorm && rightNorm !== preferredNorm) return -1;
+      if (rightNorm === preferredNorm && leftNorm !== preferredNorm) return 1;
+    }
+    if (left.isContact !== right.isContact) return left.isContact ? -1 : 1;
+    return left.displayName.localeCompare(right.displayName);
+  }
+
   // All options
-  $: allOptions = [...filteredEntities, ...contactOnlyOptions];
+  $: allOptions = [...filteredEntities, ...contactOnlyOptions].sort(compareOptionPriority);
 
   // Filter by search
   $: visibleOptions = inputValue
@@ -209,6 +226,15 @@
         opt.id.toLowerCase().includes(inputValue.toLowerCase())
       )
     : allOptions;
+
+  $: preferredNorm = normalizeEntityId(preferredId);
+  $: pinnedOption = preferredNorm
+    ? visibleOptions.find((opt) => normalizeEntityId(opt.id) === preferredNorm) ?? null
+    : null;
+  $: remainingOptions = pinnedOption
+    ? visibleOptions.filter((opt) => normalizeEntityId(opt.id) !== preferredNorm)
+    : visibleOptions;
+  $: selectedOption = allOptions.find((opt) => normalizeEntityId(opt.id) === normalizeEntityId(value)) ?? null;
 
   // Handle selection
   function selectEntity(id: string) {
@@ -245,6 +271,17 @@
     showDropdown = true;
   }
 
+  async function openPicker() {
+    if (disabled) return;
+    inputValue = '';
+    if (!showDropdown) {
+      dispatch('open');
+    }
+    showDropdown = true;
+    await tick();
+    inputRef?.focus();
+  }
+
   function handleBlur() {
     // Delay to allow click on dropdown
     setTimeout(() => showDropdown = false, 150);
@@ -261,7 +298,7 @@
   }
 
   // Display value
-  $: displayValue = value ? getDisplayName(value) : '';
+  $: displayValue = value ? (selectedOption?.displayName || getDisplayName(value)) : '';
 </script>
 
 <div class="entity-input" class:disabled>
@@ -289,7 +326,7 @@
     <button
       class="dropdown-toggle"
       type="button"
-      on:click={() => { showDropdown = !showDropdown; inputRef?.focus(); }}
+      on:click={openPicker}
       {disabled}
     >
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -298,14 +335,56 @@
     </button>
   </div>
 
+  {#if value && !showDropdown && selectedOption}
+    <div class="selected-preview-inline">
+      {#if selectedOption.avatarUrl}
+        <img class="item-avatar" src={selectedOption.avatarUrl} alt="" />
+      {:else}
+        <span class="item-avatar placeholder">?</span>
+      {/if}
+      <span class="item-meta">
+        <span class="item-name">{selectedOption.displayName}</span>
+        <span class="item-id">{selectedOption.id}</span>
+      </span>
+    </div>
+  {/if}
+
   {#if showDropdown && !disabled}
     <div class="dropdown">
+      {#if pinnedOption}
+        <div class="dropdown-section-label">Self</div>
+        <button
+          class="dropdown-item pinned"
+          class:contact={pinnedOption.isContact}
+          class:selected={pinnedOption.id === value}
+          on:mousedown|preventDefault={() => selectEntity(pinnedOption.id)}
+        >
+          {#if pinnedOption.avatarUrl}
+            <img class="item-avatar" src={pinnedOption.avatarUrl} alt="" />
+          {:else}
+            <span class="item-avatar placeholder">?</span>
+          {/if}
+          <span class="item-meta">
+            <span class="item-name">{pinnedOption.displayName}</span>
+            <span class="item-id">{pinnedOption.id}</span>
+          </span>
+        </button>
+        {#if remainingOptions.length > 0}
+          <div class="dropdown-divider"></div>
+        {/if}
+      {/if}
+
       {#if visibleOptions.length === 0}
         <div class="dropdown-empty">
           {inputValue ? 'No matches' : 'No entities available'}
         </div>
       {:else}
-        {#each visibleOptions as opt}
+        {#if remainingOptions.length > 0}
+          {#if pinnedOption}
+            <div class="dropdown-section-label">Network</div>
+          {/if}
+        {/if}
+        {#each remainingOptions as opt}
           <button
             class="dropdown-item"
             class:contact={opt.isContact}
@@ -362,6 +441,17 @@
     position: relative;
     display: flex;
     align-items: center;
+  }
+
+  .selected-preview-inline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: rgba(28, 25, 23, 0.76);
+    border: 1px solid #292524;
+    border-radius: 8px;
   }
 
   input {
@@ -476,6 +566,10 @@
     background: #422006;
   }
 
+  .dropdown-item.pinned {
+    background: rgba(251, 191, 36, 0.08);
+  }
+
   .item-name {
     color: #e7e5e4;
     font-size: 12px;
@@ -529,6 +623,21 @@
     border-radius: 3px;
     text-transform: uppercase;
     font-weight: 600;
+  }
+
+  .dropdown-section-label {
+    padding: 8px 14px 6px;
+    color: #78716c;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .dropdown-divider {
+    height: 1px;
+    background: #292524;
+    margin: 4px 0;
   }
 
   .dropdown-hint {

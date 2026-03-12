@@ -417,7 +417,7 @@
   $: selectedAccount = isAccountFocused && replica?.state?.accounts && selectedAccountId
     ? replica.state.accounts.get(selectedAccountId) : null;
   $: accountIds = replica?.state?.accounts
-    ? Array.from(replica.state.accounts.keys()).map((id) => String(id)).sort()
+    ? Array.from(replica.state.accounts.keys()).map((id) => String(id))
     : [];
   $: workspaceAccountIds = accountIds.filter((id) => {
     const account = replica?.state?.accounts?.get?.(id) as AccountMachine | undefined;
@@ -434,7 +434,11 @@
       const numericId = Number(tokenId);
       if (Number.isFinite(numericId) && numericId > 0) ids.add(numericId);
     }
-    return Array.from(ids).sort((a, b) => a - b).map((id) => {
+    return Array.from(ids).sort((leftId, rightId) => {
+      const leftInfo = getTokenInfo(leftId);
+      const rightInfo = getTokenInfo(rightId);
+      return compareTokenSymbols(leftInfo.symbol || `TKN${leftId}`, rightInfo.symbol || `TKN${rightId}`);
+    }).map((id) => {
       const info = getTokenInfo(id);
       return { id, symbol: info.symbol || `TKN${id}` };
     });
@@ -567,6 +571,9 @@
   } | null = null;
   let resolvingAssetBridgeSync = false;
   let externalFetchSeq = 0;
+  let selectedExternalToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
+  let selectedReserveToExternalToken: (ExternalToken & { tokenId: number }) | null = null;
+  let selectedSendAssetToken: ExternalToken | null = null;
 
   type AssetLedgerRow = {
     symbol: string;
@@ -587,14 +594,28 @@
     return typeof token.tokenId === 'number' && token.tokenId > 0;
   }
 
+  const TOKEN_UI_ORDER = ['ETH', 'WETH', 'USDT', 'USDC'];
+
+  function getTokenUiRank(symbol: string): number {
+    const normalized = String(symbol || '').trim().toUpperCase();
+    const index = TOKEN_UI_ORDER.indexOf(normalized);
+    return index >= 0 ? index : TOKEN_UI_ORDER.length + 100;
+  }
+
+  function compareTokenSymbols(left: string, right: string): number {
+    const leftRank = getTokenUiRank(left);
+    const rightRank = getTokenUiRank(right);
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return left.localeCompare(right);
+  }
+
+  function sortExternalTokens(tokens: ExternalToken[]): ExternalToken[] {
+    return [...tokens].sort((left, right) => compareTokenSymbols(left.symbol, right.symbol));
+  }
+
   function choosePreferredAssetSymbol(tokens: ExternalToken[]): string {
-    const reserveTokens = tokens.filter(isReserveTransferToken);
-    const usdc = reserveTokens.find((token) => token.symbol === 'USDC');
-    if (usdc) return usdc.symbol;
-    if (reserveTokens[0]) return reserveTokens[0].symbol;
-    const eth = tokens.find((token) => token.symbol === 'ETH');
-    if (eth) return eth.symbol;
-    return tokens[0]?.symbol ?? 'USDC';
+    const ordered = sortExternalTokens(tokens);
+    return ordered[0]?.symbol ?? 'USDC';
   }
 
   function findExternalTokenBySymbol(symbol: string): ExternalToken | null {
@@ -996,6 +1017,9 @@
   }
 
   $: transferableAssetOptions = externalTokens.filter(isReserveTransferToken);
+  $: selectedExternalToReserveToken = findReserveTransferTokenBySymbol(externalToReserveSymbol);
+  $: selectedReserveToExternalToken = findReserveTransferTokenBySymbol(reserveToExternalSymbol);
+  $: selectedSendAssetToken = findExternalTokenBySymbol(sendAssetSymbol);
   $: accountSpendableByToken = (() => {
     const totals = new Map<number, bigint>();
     const accounts = replica?.state?.accounts;
@@ -1068,11 +1092,7 @@
         totalUsd: reserveUsd + getAssetValue(numericId, accountSpendableByToken.get(numericId) ?? 0n, info.symbol),
       });
     }
-    return Array.from(rows.values()).sort((left, right) => {
-      const usdDiff = right.totalUsd - left.totalUsd;
-      if (Math.abs(usdDiff) > 0.0001) return usdDiff;
-      return left.symbol.localeCompare(right.symbol);
-    });
+    return Array.from(rows.values()).sort((left, right) => compareTokenSymbols(left.symbol, right.symbol));
   })();
 
   $: {
@@ -1160,7 +1180,7 @@
       }
       if (!jadapter?.getErc20Balance) {
         if (fetchSeq === externalFetchSeq) {
-          externalTokens = tokenList;
+          externalTokens = sortExternalTokens(tokenList);
           externalTokensLoading = false;
         }
         return;
@@ -1193,7 +1213,7 @@
       }
 
       if (fetchSeq === externalFetchSeq) {
-        externalTokens = nativeToken ? [nativeToken, ...tokenList] : tokenList;
+        externalTokens = sortExternalTokens(nativeToken ? [nativeToken, ...tokenList] : tokenList);
         externalTokensLoading = false;
       }
     } catch (err) {
@@ -1527,7 +1547,7 @@
     }
   }
 
-  async function submitAssetFaucet(target: 'external' | 'reserve'): Promise<void> {
+  async function submitAssetFaucet(target: 'external' | 'reserve' | 'account'): Promise<void> {
     if (target === 'external') {
       await faucetExternalTokens(faucetAssetSymbol);
       return;
@@ -1535,6 +1555,15 @@
     const token = findReserveTransferTokenBySymbol(faucetAssetSymbol);
     if (!token) {
       toasts.error('Reserve faucet supports ERC20 assets only');
+      return;
+    }
+    if (target === 'account') {
+      const firstAccountId = workspaceAccountIds[0];
+      if (!firstAccountId) {
+        toasts.error('Open an account first');
+        return;
+      }
+      await faucetOffchain(firstAccountId, token.tokenId);
       return;
     }
     await faucetReserves(token.tokenId, token.symbol);
@@ -1823,6 +1852,25 @@
 
   function formatApproxUsd(value: number): string {
     return `~${formatCompact(value)}`;
+  }
+
+  function fillExternalToReserveMax(): void {
+    if (!selectedExternalToReserveToken) return;
+    externalToReserveAmount = formatTokenInputAmount(
+      selectedExternalToReserveToken.balance,
+      selectedExternalToReserveToken.decimals,
+    );
+  }
+
+  function fillReserveToExternalMax(): void {
+    if (!selectedReserveToExternalToken) return;
+    const reserveAmount = onchainReserves.get(selectedReserveToExternalToken.tokenId) ?? 0n;
+    reserveToExternalAmount = formatTokenInputAmount(reserveAmount, selectedReserveToExternalToken.decimals);
+  }
+
+  function fillSendAssetMax(): void {
+    if (!selectedSendAssetToken) return;
+    sendAssetAmount = formatTokenInputAmount(selectedSendAssetToken.balance, selectedSendAssetToken.decimals);
   }
 
   function getAssetPrice(symbol: string): number {
@@ -2339,6 +2387,15 @@
                     Faucet External
                   </button>
                   <button
+                    class="btn-table-action faucet"
+                    data-testid={`account-faucet-${faucetAssetSymbol}`}
+                    on:click={() => submitAssetFaucet('account')}
+                    disabled={!findReserveTransferTokenBySymbol(faucetAssetSymbol) || workspaceAccountIds.length === 0}
+                    title={workspaceAccountIds.length === 0 ? 'Open an account first' : 'Faucet first available account'}
+                  >
+                    Faucet Account
+                  </button>
+                  <button
                     class="btn-table-action deposit"
                     data-testid={`reserve-faucet-${faucetAssetSymbol}`}
                     on:click={() => submitAssetFaucet('reserve')}
@@ -2362,12 +2419,22 @@
                   </label>
                   <label class="asset-field">
                     <span>Amount</span>
-                    <input
-                      type="text"
-                      bind:value={externalToReserveAmount}
-                      placeholder="0.00"
-                      data-testid="external-to-reserve-amount"
-                    />
+                    <div class="amount-input-with-max">
+                      <input
+                        type="text"
+                        bind:value={externalToReserveAmount}
+                        placeholder="0.00"
+                        data-testid="external-to-reserve-amount"
+                      />
+                      <button
+                        type="button"
+                        class="asset-max-inline"
+                        on:click={fillExternalToReserveMax}
+                        disabled={!selectedExternalToReserveToken || selectedExternalToReserveToken.balance <= 0n}
+                      >
+                        Max: {selectedExternalToReserveToken ? `${formatAmount(selectedExternalToReserveToken.balance, selectedExternalToReserveToken.decimals)} ${selectedExternalToReserveToken.symbol}` : '0'}
+                      </button>
+                    </div>
                   </label>
                 </div>
                 <div class="asset-action-row">
@@ -2394,12 +2461,22 @@
                   </label>
                   <label class="asset-field">
                     <span>Amount</span>
-                    <input
-                      type="text"
-                      bind:value={reserveToExternalAmount}
-                      placeholder="0.00"
-                      data-testid={`reserve-withdraw-input-${reserveToExternalSymbol}`}
-                    />
+                    <div class="amount-input-with-max">
+                      <input
+                        type="text"
+                        bind:value={reserveToExternalAmount}
+                        placeholder="0.00"
+                        data-testid={`reserve-withdraw-input-${reserveToExternalSymbol}`}
+                      />
+                      <button
+                        type="button"
+                        class="asset-max-inline"
+                        on:click={fillReserveToExternalMax}
+                        disabled={!selectedReserveToExternalToken || (onchainReserves.get(selectedReserveToExternalToken.tokenId) ?? 0n) <= 0n}
+                      >
+                        Max: {#if selectedReserveToExternalToken}{formatAmount(onchainReserves.get(selectedReserveToExternalToken.tokenId) ?? 0n, selectedReserveToExternalToken.decimals)} {selectedReserveToExternalToken.symbol}{:else}0{/if}
+                      </button>
+                    </div>
                   </label>
                 </div>
                 <div class="asset-action-row">
@@ -2426,7 +2503,17 @@
                   </label>
                   <label class="asset-field">
                     <span>Amount</span>
-                    <input type="text" bind:value={sendAssetAmount} placeholder="0.00" data-testid="asset-send-amount" />
+                    <div class="amount-input-with-max">
+                      <input type="text" bind:value={sendAssetAmount} placeholder="0.00" data-testid="asset-send-amount" />
+                      <button
+                        type="button"
+                        class="asset-max-inline"
+                        on:click={fillSendAssetMax}
+                        disabled={!selectedSendAssetToken || selectedSendAssetToken.balance <= 0n}
+                      >
+                        Max: {selectedSendAssetToken ? `${formatAmount(selectedSendAssetToken.balance, selectedSendAssetToken.decimals)} ${selectedSendAssetToken.symbol}` : '0'}
+                      </button>
+                    </div>
                   </label>
                 </div>
                 <div class="asset-form-grid">
@@ -4569,6 +4656,40 @@
     color: #78716c;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+
+  .amount-input-with-max {
+    position: relative;
+  }
+
+  .amount-input-with-max :global(input) {
+    padding-right: 130px !important;
+  }
+
+  .asset-max-inline {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: #a5b4fc;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .asset-max-inline:hover:not(:disabled) {
+    color: #f8fafc;
+  }
+
+  .asset-max-inline:disabled {
+    color: #64748b;
+    cursor: default;
   }
 
   .asset-action-row {
