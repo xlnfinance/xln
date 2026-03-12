@@ -30,6 +30,7 @@ import { logError } from './logger';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
+import type { Profile } from './networking/gossip';
 // NOTE: Settlements now use SettlementWorkspace flow (see entity-tx/handlers/settle.ts)
 
 // Removed createValidAccountSnapshot - using simplified AccountSnapshot interface
@@ -40,6 +41,14 @@ const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS_HEX_20_RE = /^0x[0-9a-fA-F]{40}$/;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
 const isAddress20 = (value: unknown): value is string => typeof value === 'string' && ADDRESS_HEX_20_RE.test(value);
+type DebugEventEmitter = {
+  sendDebugEvent(payload: Record<string, unknown>): void;
+};
+const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
+  typeof value === 'object' &&
+  value !== null &&
+  'sendDebugEvent' in value &&
+  typeof value.sendDebugEvent === 'function';
 
 /**
  * Get depositoryAddress from environment (BrowserVM or active J-replica)
@@ -131,6 +140,12 @@ function accountTxFingerprint(tx: AccountTx): string {
   return `${tx.type}:${safeStringify(tx.data)}`;
 }
 
+type TokenizedAccountTx = AccountTx & {
+  data?: {
+    tokenId?: unknown;
+  };
+};
+
 function prependUniqueMempoolTxs(accountMachine: AccountMachine, txs: AccountTx[]): number {
   if (txs.length === 0) return 0;
   const existing = new Set(accountMachine.mempool.map(accountTxFingerprint));
@@ -178,9 +193,9 @@ async function runPostFrameAutoRebalanceCheck(
 ): Promise<AccountTx[]> {
   try {
     const { checkAutoRebalance } = await import('./account-tx/handlers/request-collateral');
-    const p2p = (env as any)?.runtimeState?.p2p;
+    const p2p = env.runtimeState?.p2p;
     const emitRebalanceDebug = (payload: Record<string, unknown>) => {
-      if (p2p && typeof p2p.sendDebugEvent === 'function') {
+      if (isDebugEventEmitter(p2p)) {
         p2p.sendDebugEvent({
           level: 'info',
           code: 'REB_STEP',
@@ -196,7 +211,7 @@ async function runPostFrameAutoRebalanceCheck(
     const ourIsHub = !!ourReplica?.state?.hubRebalanceConfig;
     const counterpartyIdLower = String(counterpartyEntityId || '').toLowerCase();
     const counterpartyProfile = env.gossip?.getProfiles?.().find(
-      (p: any) => String(p?.entityId || '').toLowerCase() === counterpartyIdLower,
+      (profile: Profile) => profile.entityId.toLowerCase() === counterpartyIdLower,
     );
 
     const emitSkip = (reason: string) => {
@@ -223,7 +238,10 @@ async function runPostFrameAutoRebalanceCheck(
     const parseBigIntMaybe = (value: unknown): bigint | undefined => {
       if (value === undefined || value === null) return undefined;
       try {
-        return typeof value === 'bigint' ? value : BigInt(value as any);
+        if (typeof value === 'bigint') return value;
+        if (typeof value === 'number' && Number.isInteger(value)) return BigInt(value);
+        if (typeof value === 'string' && /^-?\d+$/.test(value)) return BigInt(value);
+        return undefined;
       } catch {
         return undefined;
       }
@@ -277,7 +295,7 @@ async function runPostFrameAutoRebalanceCheck(
         event: 'request_queued',
         txCount: rebalanceTxs.length,
         tokenIds: rebalanceTxs
-          .map((tx: any) => tx?.data?.tokenId)
+          .map((tx: TokenizedAccountTx) => tx.data?.tokenId)
           .filter((v: unknown) => typeof v === 'number'),
       });
       return rebalanceTxs;

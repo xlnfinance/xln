@@ -48,7 +48,7 @@
  * method names to concrete handlers via a static registry.
  */
 
-import type { Env, EntityReplica, EntityInput, AccountMachine, SettlementOp, EntityTx } from './types';
+import type { Env, EntityReplica, EntityInput, AccountMachine, SettlementOp, EntityTx, HtlcLock } from './types';
 import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook } from './crontab-types';
 import { isLeftEntity } from './entity-id-utils';
 import { deriveDelta } from './account-utils';
@@ -86,6 +86,16 @@ const hasActiveDisputeHash = (hash: unknown): boolean => {
 type CrontabExecutionContext = {
   manualBroadcastInInput: boolean;
 };
+
+type DebugEventEmitter = {
+  sendDebugEvent(payload: Record<string, unknown>): void;
+};
+
+const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
+  typeof value === 'object' &&
+  value !== null &&
+  'sendDebugEvent' in value &&
+  typeof value.sendDebugEvent === 'function';
 
 type CrontabTaskHandler = (
   env: Env,
@@ -255,8 +265,7 @@ async function processDueHooks(
       case 'htlc_timeout':
         // HTLC lock expired → resolve with error:timeout
         {
-          const accountId = String(hook.data['accountId'] || '');
-          const lockId = String(hook.data['lockId'] || '');
+          const { accountId, lockId } = hook.data;
           const account = replica.state.accounts.get(accountId);
           // Stale hook (already resolved/cancelled path) — skip silently.
           if (!account?.locks?.has(lockId)) {
@@ -268,7 +277,7 @@ async function processDueHooks(
 
       case 'dispute_deadline':
         {
-          const accountId = String(hook.data['accountId'] || '');
+          const { accountId } = hook.data;
           const account = replica.state.accounts.get(accountId);
           if (!account?.activeDispute) break;
           if (replica.state.hubRebalanceConfig?.disputeAutoFinalizeMode === 'ignore') {
@@ -393,10 +402,7 @@ async function processDueHooks(
 
       case 'htlc_secret_ack_timeout':
         {
-          const hashlock = String(hook.data['hashlock'] || '');
-          const counterpartyEntityId = String(hook.data['counterpartyEntityId'] || '');
-          const inboundLockId = String(hook.data['inboundLockId'] || '');
-          if (!hashlock || !counterpartyEntityId) break;
+          const { hashlock, counterpartyEntityId, inboundLockId } = hook.data;
 
           const route = replica.state.htlcRoutes.get(hashlock);
           if (!route?.secretAckPending) break;
@@ -443,9 +449,6 @@ async function processDueHooks(
           }
         }
         break;
-
-      default:
-        console.warn(`⏰ HOOK: Unknown type "${hook.type}" — skipping`);
     }
   }
 
@@ -640,7 +643,7 @@ async function checkHtlcTimeoutsHandler(_env: Env, replica: EntityReplica): Prom
   );
 
   // Collect expired locks per account
-  const expiredLocksByAccount: Array<{ accountId: string; lockId: string; lock: any }> = [];
+  const expiredLocksByAccount: Array<{ accountId: string; lockId: string; lock: HtlcLock }> = [];
   let totalLocks = 0;
 
   // Iterate over all accounts
@@ -775,8 +778,8 @@ async function hubRebalanceHandler(
     : 1;
   const hubId = replica.entityId;
   const emitRebalanceDebug = (payload: Record<string, unknown>) => {
-    const p2p = (_env as any)?.runtimeState?.p2p;
-    if (p2p && typeof p2p.sendDebugEvent === 'function') {
+    const p2p = _env.runtimeState?.p2p;
+    if (isDebugEventEmitter(p2p)) {
       p2p.sendDebugEvent({
         level: 'info',
         code: 'REB_STEP',

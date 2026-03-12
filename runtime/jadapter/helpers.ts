@@ -7,6 +7,7 @@
 import { ethers } from 'ethers';
 import type { Depository, EntityProvider } from '../../jurisdictions/typechain-types/index.ts';
 import type { JEvent, JEventCallback } from './types';
+import type { Env } from '../types';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CANONICAL J-EVENTS (Single Source of Truth — must match Depository.sol)
@@ -16,6 +17,7 @@ export const CANONICAL_J_EVENTS = [
   'DisputeStarted', 'DisputeFinalized', 'DebtCreated', 'DebtEnforced', 'HankoBatchProcessed',
 ] as const;
 export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
+const CANONICAL_J_EVENT_SET = new Set<string>(CANONICAL_J_EVENTS);
 
 // TEST-ONLY fallback signer (Hardhat account #0, publicly known key)
 export const DEFAULT_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
@@ -38,18 +40,31 @@ export function setupContractEventListeners(
   eventCallbacks: Map<string, Set<JEventCallback>>,
   anyCallbacks: Set<JEventCallback>
 ) {
+  type ContractEventLike = {
+    args?: { entries(): Iterable<[string, unknown]> };
+    blockNumber?: number;
+    blockHash?: string;
+    transactionHash?: string;
+  };
+  type ContractEventSource = {
+    on(eventName: string, listener: (...args: unknown[]) => void): unknown;
+  };
+  const readEvent = (args: unknown[]): ContractEventLike | null => {
+    const lastArg = args.at(-1);
+    if (typeof lastArg !== 'object' || lastArg === null) return null;
+    return lastArg as ContractEventLike;
+  };
   const depositoryEvents = [...CANONICAL_J_EVENTS];
 
   for (const eventName of depositoryEvents) {
-    // Use any cast to bypass strict typechain event typing
-    (depository as any).on(eventName, (...args: any[]) => {
-      const event = args[args.length - 1];
+    (depository as unknown as ContractEventSource).on(eventName, (...args: unknown[]) => {
+      const event = readEvent(args);
       const jEvent: JEvent = {
         name: eventName,
-        args: event.args ? Object.fromEntries(event.args.entries()) : {},
-        blockNumber: event.blockNumber ?? 0,
-        blockHash: event.blockHash ?? '0x',
-        transactionHash: event.transactionHash ?? '0x',
+        args: event?.args ? Object.fromEntries(event.args.entries()) : {},
+        blockNumber: event?.blockNumber ?? 0,
+        blockHash: event?.blockHash ?? '0x',
+        transactionHash: event?.transactionHash ?? '0x',
       };
 
       eventCallbacks.get(eventName)?.forEach(cb => cb(jEvent));
@@ -65,15 +80,14 @@ export function setupContractEventListeners(
   ];
 
   for (const eventName of entityProviderEvents) {
-    // Use any cast to bypass strict typechain event typing
-    (entityProvider as any).on(eventName, (...args: any[]) => {
-      const event = args[args.length - 1];
+    (entityProvider as unknown as ContractEventSource).on(eventName, (...args: unknown[]) => {
+      const event = readEvent(args);
       const jEvent: JEvent = {
         name: eventName,
-        args: event.args ? Object.fromEntries(event.args.entries()) : {},
-        blockNumber: event.blockNumber ?? 0,
-        blockHash: event.blockHash ?? '0x',
-        transactionHash: event.transactionHash ?? '0x',
+        args: event?.args ? Object.fromEntries(event.args.entries()) : {},
+        blockNumber: event?.blockNumber ?? 0,
+        blockHash: event?.blockHash ?? '0x',
+        transactionHash: event?.transactionHash ?? '0x',
       };
 
       eventCallbacks.get(eventName)?.forEach(cb => cb(jEvent));
@@ -90,22 +104,34 @@ export function setupContractEventListeners(
 /**
  * Raw event format — common denominator for both BrowserVM and ethers RPC events.
  * BrowserVM emits these directly. RPC adapter normalizes ethers EventLog to this.
- * args uses any to avoid TS index signature access issues with Record<string, any>.
+ * args supports both named keys and positional indexes.
  */
+export type RawJEventArgs = Record<string, unknown> & {
+  [index: number]: unknown;
+};
+
 export interface RawJEvent {
   name: string;
-  args: any;
+  args: RawJEventArgs;
   blockNumber?: number;
   blockHash?: string;
   transactionHash?: string;
   logIndex?: number;
 }
 
+export type EventBatchCounter = {
+  value: number;
+  _seenLogs?: {
+    set: Set<string>;
+    order: string[];
+  };
+};
+
 /**
  * Check if a raw event is a canonical j-event.
  */
 export function isCanonicalEvent(event: RawJEvent): boolean {
-  return CANONICAL_J_EVENTS.includes(event.name as CanonicalJEvent);
+  return CANONICAL_J_EVENT_SET.has(event.name);
 }
 
 /**
@@ -113,7 +139,7 @@ export function isCanonicalEvent(event: RawJEvent): boolean {
  * Shared between all adapter modes — same logic regardless of source.
  */
 export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boolean {
-  const normalize = (id: any): string => String(id).toLowerCase();
+  const normalize = (id: unknown): string => String(id).toLowerCase();
   const normalizedEntity = normalize(entityId);
   const args = event.args;
 
@@ -159,7 +185,7 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
  * Returns ARRAY because AccountSettled can contain multiple settlements for same entity.
  * Output format: { type: 'PascalCase', data: { ... } } — matches j-events.ts expectations.
  */
-export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ type: string; data: Record<string, any> }> {
+export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ type: string; data: Record<string, unknown> }> {
   const args = event.args;
 
   switch (event.name) {
@@ -293,10 +319,10 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
  */
 export function processEventBatch(
   rawEvents: RawJEvent[],
-  env: any,
+  env: Env,
   blockNumber: number,
   blockHash: string,
-  txCounter: { value: number },
+  txCounter: EventBatchCounter,
   adapterLabel: string,
 ): void {
   // Filter to canonical events only
@@ -305,14 +331,13 @@ export function processEventBatch(
 
   // De-duplicate watcher re-scans using canonical log identity.
   const dedup = (() => {
-    const state = txCounter as any;
-    if (!state._seenLogs) {
-      state._seenLogs = {
+    if (!txCounter._seenLogs) {
+      txCounter._seenLogs = {
         set: new Set<string>(),
         order: [] as string[],
       };
     }
-    return state._seenLogs as { set: Set<string>; order: string[] };
+    return txCounter._seenLogs;
   })();
   const MAX_DEDUP_LOGS = 50_000;
   const deduped: RawJEvent[] = [];

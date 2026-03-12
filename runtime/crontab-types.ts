@@ -10,12 +10,52 @@ export interface CrontabTaskState {
   params: Record<string, CrontabTaskParam>;
 }
 
-export interface ScheduledHook {
+export type ScheduledHookType =
+  | 'htlc_timeout'
+  | 'dispute_deadline'
+  | 'htlc_secret_ack_timeout'
+  | 'settlement_window'
+  | 'watchdog'
+  | 'hub_rebalance_kick';
+
+type ScheduledHookBase<TType extends ScheduledHookType, TData extends Record<string, unknown>> = {
   id: string;
   triggerAt: number;
-  type: string;
-  data: Record<string, unknown>;
-}
+  type: TType;
+  data: TData;
+};
+
+export type HtlcTimeoutHook = ScheduledHookBase<'htlc_timeout', {
+  accountId: string;
+  lockId: string;
+}>;
+
+export type DisputeDeadlineHook = ScheduledHookBase<'dispute_deadline', {
+  accountId: string;
+}>;
+
+export type HtlcSecretAckTimeoutHook = ScheduledHookBase<'htlc_secret_ack_timeout', {
+  hashlock: string;
+  counterpartyEntityId: string;
+  inboundLockId: string;
+}>;
+
+export type SettlementWindowHook = ScheduledHookBase<'settlement_window', Record<string, never>>;
+
+export type WatchdogHook = ScheduledHookBase<'watchdog', Record<string, never>>;
+
+export type HubRebalanceKickHook = ScheduledHookBase<'hub_rebalance_kick', {
+  reason: string;
+  counterpartyId: string;
+}>;
+
+export type ScheduledHook =
+  | HtlcTimeoutHook
+  | DisputeDeadlineHook
+  | HtlcSecretAckTimeoutHook
+  | SettlementWindowHook
+  | WatchdogHook
+  | HubRebalanceKickHook;
 
 export interface CrontabState {
   tasks: Map<CrontabTaskMethod, CrontabTaskState>;

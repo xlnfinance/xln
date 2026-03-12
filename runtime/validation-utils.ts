@@ -18,7 +18,7 @@ import type {
   AccountMachine,
   AccountFrame
 } from './types';
-import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook } from './crontab-types';
+import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook, ScheduledHookType } from './crontab-types';
 
 /**
  * Strict validation for Delta objects - financial data must be complete
@@ -385,6 +385,29 @@ function isValidCrontabTaskMethod(value: unknown): value is CrontabTaskMethod {
   return value === 'checkAccountTimeouts' || value === 'hubRebalance';
 }
 
+function isValidScheduledHookType(value: unknown): value is ScheduledHookType {
+  return (
+    value === 'htlc_timeout' ||
+    value === 'dispute_deadline' ||
+    value === 'htlc_secret_ack_timeout' ||
+    value === 'settlement_window' ||
+    value === 'watchdog' ||
+    value === 'hub_rebalance_kick'
+  );
+}
+
+function rejectUnexpectedKeys(
+  obj: Record<string, unknown>,
+  allowedKeys: readonly string[],
+  fieldName: string,
+): void {
+  for (const key of Object.keys(obj)) {
+    if (!allowedKeys.includes(key)) {
+      throw new FinancialDataCorruptionError(`${fieldName} has unexpected key "${key}"`);
+    }
+  }
+}
+
 function validateCrontabTaskState(value: unknown, fieldName: string): CrontabTaskState {
   const obj = validateObject(value, fieldName);
   if (!isValidCrontabTaskMethod(obj['method'])) {
@@ -406,11 +429,74 @@ function validateCrontabTaskState(value: unknown, fieldName: string): CrontabTas
 
 function validateScheduledHook(value: unknown, fieldName: string): ScheduledHook {
   const obj = validateObject(value, fieldName);
-  validateString(obj['id'], `${fieldName}.id`);
-  validateNumber(obj['triggerAt'], `${fieldName}.triggerAt`);
-  validateString(obj['type'], `${fieldName}.type`);
-  validateObject(obj['data'], `${fieldName}.data`);
-  return obj as ScheduledHook;
+  const id = validateString(obj['id'], `${fieldName}.id`);
+  const triggerAt = validateNumber(obj['triggerAt'], `${fieldName}.triggerAt`);
+  const hookType = obj['type'];
+  if (!isValidScheduledHookType(hookType)) {
+    throw new FinancialDataCorruptionError(`${fieldName}.type must be a known crontab hook type`);
+  }
+  const data = validateObject(obj['data'], `${fieldName}.data`);
+
+  switch (hookType) {
+    case 'htlc_timeout': {
+      rejectUnexpectedKeys(data, ['accountId', 'lockId'], `${fieldName}.data`);
+      return {
+        id,
+        triggerAt,
+        type: hookType,
+        data: {
+          accountId: validateString(data['accountId'], `${fieldName}.data.accountId`),
+          lockId: validateString(data['lockId'], `${fieldName}.data.lockId`),
+        },
+      };
+    }
+    case 'dispute_deadline': {
+      rejectUnexpectedKeys(data, ['accountId'], `${fieldName}.data`);
+      return {
+        id,
+        triggerAt,
+        type: hookType,
+        data: {
+          accountId: validateString(data['accountId'], `${fieldName}.data.accountId`),
+        },
+      };
+    }
+    case 'htlc_secret_ack_timeout': {
+      rejectUnexpectedKeys(data, ['hashlock', 'counterpartyEntityId', 'inboundLockId'], `${fieldName}.data`);
+      return {
+        id,
+        triggerAt,
+        type: hookType,
+        data: {
+          hashlock: validateString(data['hashlock'], `${fieldName}.data.hashlock`),
+          counterpartyEntityId: validateString(data['counterpartyEntityId'], `${fieldName}.data.counterpartyEntityId`),
+          inboundLockId: validateString(data['inboundLockId'], `${fieldName}.data.inboundLockId`),
+        },
+      };
+    }
+    case 'settlement_window':
+    case 'watchdog': {
+      rejectUnexpectedKeys(data, [], `${fieldName}.data`);
+      return {
+        id,
+        triggerAt,
+        type: hookType,
+        data: {},
+      };
+    }
+    case 'hub_rebalance_kick': {
+      rejectUnexpectedKeys(data, ['reason', 'counterpartyId'], `${fieldName}.data`);
+      return {
+        id,
+        triggerAt,
+        type: hookType,
+        data: {
+          reason: validateString(data['reason'], `${fieldName}.data.reason`),
+          counterpartyId: validateString(data['counterpartyId'], `${fieldName}.data.counterpartyId`),
+        },
+      };
+    }
+  }
 }
 
 function validateCrontabState(value: unknown, fieldName: string): CrontabState {
