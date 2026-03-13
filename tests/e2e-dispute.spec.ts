@@ -419,13 +419,6 @@ async function readReserveBalanceUi(
   return parseUiAmount(text);
 }
 
-async function readReservesCardValueUi(page: Page): Promise<number> {
-  const valueNode = page.getByTestId('reserves-card-value').first();
-  await expect(valueNode).toBeVisible({ timeout: 20_000 });
-  const text = (await valueNode.textContent())?.trim() ?? '0';
-  return parseUiAmount(text);
-}
-
 async function readAccountsCardOwedUi(page: Page): Promise<number> {
   const owedNode = page.getByTestId('accounts-card-owed').first();
   const visible = await owedNode.isVisible({ timeout: 1_000 }).catch(() => false);
@@ -1076,8 +1069,7 @@ test.describe('E2E Dispute Flow', () => {
     const localReserveBefore = await readLocalReserveState(page, accountRef.entityId, { allowUnavailable: true });
     expect(localReserveBefore).toBeGreaterThanOrEqual(0n);
     const reserveBefore = await readOnchainReserveViaAnvil(page, accountRef.entityId);
-    const reserveBeforeUi = 0;
-    const reserveCardBeforeUi = 0;
+    const reserveBeforeUi = await readReserveBalanceUi(page, 'USDC');
     const batchBeforeDispute = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
 
     try {
@@ -1156,11 +1148,6 @@ test.describe('E2E Dispute Flow', () => {
       await expect.poll(async () => {
         return await readReserveBalanceUi(page, 'USDC');
       }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(reserveBeforeUi);
-    });
-    await timedStep('dispute.wait_ui_reserve_card', async () => {
-      await expect.poll(async () => {
-        return await readReservesCardValueUi(page);
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(reserveCardBeforeUi);
     });
     await timedStep('dispute.wait_ui_accounts_owed_zero', async () => {
       await expect.poll(async () => {

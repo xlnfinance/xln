@@ -281,9 +281,6 @@
 <div class="onboarding">
   <div class="setup-card">
     <section class="setup-section">
-      <div class="section-headline">
-        <p>Your public name appears in gossip, account lists, and routing flows.</p>
-      </div>
       <label class="form-label" for="display-name">Display name</label>
       <input
         id="display-name"
@@ -294,6 +291,7 @@
         maxlength="32"
         autofocus
       />
+      <p class="form-hint compact">Visible in gossip, account lists, and routing flows.</p>
       <div class="profile-preview-card">
         {#if avatarUrl}
           <img src={avatarUrl} alt="Entity avatar" class="profile-preview-avatar" />
@@ -398,14 +396,14 @@
   .setup-card {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 14px;
   }
 
   .setup-section {
     background: linear-gradient(180deg, #16120f 0%, #100d0b 100%);
     border: 1px solid #2f2620;
     border-radius: 14px;
-    padding: 18px;
+    padding: 16px;
   }
 
   .profile-preview-avatar {
@@ -452,10 +450,6 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
     color: #f5f5f4;
-  }
-
-  .section-headline {
-    margin-bottom: 14px;
   }
 
   .form-label {
@@ -577,6 +571,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
+    flex-wrap: wrap;
   }
 
   .error-msg {

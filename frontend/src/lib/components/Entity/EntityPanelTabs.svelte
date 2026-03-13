@@ -606,6 +606,8 @@
   } | null = null;
   let resolvingAssetAutoC2R = false;
   let externalFetchSeq = 0;
+  let externalFetchStartedAt = 0;
+  let externalFetchInFlight: Promise<void> | null = null;
   let selectedExternalToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedReserveToCollateralToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedCollateralToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
@@ -1264,78 +1266,87 @@
 
   // Fetch external tokens (ERC20 balances for signer) - works for both BrowserVM and RPC modes
   async function fetchExternalTokens() {
-    const signerId = tab.signerId;
-    const fetchSeq = ++externalFetchSeq;
-    externalTokensLoading = true;
-    if (!signerId) {
-      if (fetchSeq === externalFetchSeq) externalTokensLoading = false;
-      return;
-    }
-
-    try {
-      const xln = await getXLN();
-      // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
-      const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
-
-      const tokenList = await getTokenList(jadapter);
-      let nativeToken: ExternalToken | null = null;
-      // Include native ETH balance (external funds) when possible
-      if (jadapter?.provider && typeof jadapter.provider.getBalance === 'function' && isAddress(signerId)) {
-        try {
-          const nativeBalance = await jadapter.provider.getBalance(signerId);
-          nativeToken = {
-            symbol: 'ETH',
-            address: ZeroAddress,
-            balance: nativeBalance,
-            decimals: 18,
-            tokenId: 0,
-          };
-        } catch (err) {
-          console.warn('[EntityPanel] Failed to fetch native ETH balance:', err);
-        }
-      }
-      if (!jadapter?.getErc20Balance) {
-        if (fetchSeq === externalFetchSeq) {
-          externalTokens = sortExternalTokens(tokenList);
-          externalTokensLoading = false;
-        }
+    if (externalFetchInFlight) return externalFetchInFlight;
+    const waitMs = Math.max(0, 1000 - (Date.now() - externalFetchStartedAt));
+    externalFetchInFlight = (async () => {
+      if (waitMs > 0) await sleep(waitMs);
+      externalFetchStartedAt = Date.now();
+      const signerId = tab.signerId;
+      const fetchSeq = ++externalFetchSeq;
+      externalTokensLoading = true;
+      if (!signerId) {
+        if (fetchSeq === externalFetchSeq) externalTokensLoading = false;
         return;
       }
 
-      if (jadapter.getErc20Balances) {
-        try {
-          const balances = await jadapter.getErc20Balances(tokenList.map(t => t.address), signerId);
-          balances.forEach((balance: bigint, idx: number) => {
-            if (tokenList[idx]) tokenList[idx].balance = balance;
-          });
-        } catch (err) {
-          console.warn('[EntityPanel] Batch balance fetch failed, falling back to per-token:', err);
+      try {
+        const xln = await getXLN();
+        // External balances are read directly from the active J-adapter/provider.
+        // Never derive them from cached UI state; the wallet EOA is the source of truth.
+        const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
+
+        const tokenList = await getTokenList(jadapter);
+        let nativeToken: ExternalToken | null = null;
+        if (jadapter?.provider && typeof jadapter.provider.getBalance === 'function' && isAddress(signerId)) {
+          try {
+            const nativeBalance = await jadapter.provider.getBalance(signerId);
+            nativeToken = {
+              symbol: 'ETH',
+              address: ZeroAddress,
+              balance: nativeBalance,
+              decimals: 18,
+              tokenId: 0,
+            };
+          } catch (err) {
+            console.warn('[EntityPanel] Failed to fetch native ETH balance:', err);
+          }
+        }
+        if (!jadapter?.getErc20Balance) {
+          if (fetchSeq === externalFetchSeq) {
+            externalTokens = sortExternalTokens(tokenList);
+            externalTokensLoading = false;
+          }
+          return;
+        }
+
+        if (jadapter.getErc20Balances) {
+          try {
+            const balances = await jadapter.getErc20Balances(tokenList.map(t => t.address), signerId);
+            balances.forEach((balance: bigint, idx: number) => {
+              if (tokenList[idx]) tokenList[idx].balance = balance;
+            });
+          } catch (err) {
+            console.warn('[EntityPanel] Batch balance fetch failed, falling back to per-token:', err);
+            for (const token of tokenList) {
+              try {
+                token.balance = await jadapter.getErc20Balance(token.address, signerId);
+              } catch (innerErr) {
+                console.warn(`[EntityPanel] Failed to fetch ${token.symbol} balance:`, innerErr);
+              }
+            }
+          }
+        } else {
           for (const token of tokenList) {
             try {
               token.balance = await jadapter.getErc20Balance(token.address, signerId);
-            } catch (innerErr) {
-              console.warn(`[EntityPanel] Failed to fetch ${token.symbol} balance:`, innerErr);
+            } catch (err) {
+              console.warn(`[EntityPanel] Failed to fetch ${token.symbol} balance:`, err);
             }
           }
         }
-      } else {
-        for (const token of tokenList) {
-          try {
-            token.balance = await jadapter.getErc20Balance(token.address, signerId);
-          } catch (err) {
-            console.warn(`[EntityPanel] Failed to fetch ${token.symbol} balance:`, err);
-          }
-        }
-      }
 
-      if (fetchSeq === externalFetchSeq) {
-        externalTokens = sortExternalTokens(nativeToken ? [nativeToken, ...tokenList] : tokenList);
-        externalTokensLoading = false;
+        if (fetchSeq === externalFetchSeq) {
+          externalTokens = sortExternalTokens(nativeToken ? [nativeToken, ...tokenList] : tokenList);
+          externalTokensLoading = false;
+        }
+      } catch (err) {
+        console.error('[EntityPanel] Failed to fetch external tokens:', err);
+        if (fetchSeq === externalFetchSeq) externalTokensLoading = false;
       }
-    } catch (err) {
-      console.error('[EntityPanel] Failed to fetch external tokens:', err);
-      if (fetchSeq === externalFetchSeq) externalTokensLoading = false;
-    }
+    })().finally(() => {
+      externalFetchInFlight = null;
+    });
+    return externalFetchInFlight;
   }
 
   // Deposit ERC20 token to entity reserve
@@ -2440,9 +2451,7 @@
           <div class="hero-label">Net Worth</div>
           <div class="hero-breakdown">
             <span>External {formatCompact(externalTotal)}</span>
-            <span>+</span>
-            <span data-testid="reserves-card-value">Reserve {formatCompact(reservesTotal)}</span>
-            <span>+</span>
+            <span>Reserve {formatCompact(reservesTotal)}</span>
             <span>Accounts {formatCompact(accountsData.total)}</span>
           </div>
         </div>
@@ -2472,7 +2481,7 @@
           <div class="tab-header-row">
             <div class="asset-title-block">
               <h4 class="section-head" style="margin: 0;">Assets</h4>
-              <p class="muted asset-ledger-note">External wallet, on-chain reserves, and spendable account capacity in one ledger.</p>
+              <p class="muted asset-ledger-note">EOA balances, entity reserves, and spendable account capacity in one ledger.</p>
             </div>
             <div class="header-actions">
               <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 15000} on:change={updateBalanceRefresh}>
@@ -2489,12 +2498,12 @@
             <div class="wallet-meta-block">
               <p class="muted wallet-label">EOA</p>
               <p class="wallet-meta-value">{tab.signerId || '-'}</p>
-              <p class="muted wallet-meta-help">External wallet address used for native ETH and ERC20 transfers.</p>
+              <p class="muted wallet-meta-help">Wallet address for native ETH and ERC20 transfers.</p>
             </div>
             <div class="wallet-meta-block">
               <p class="muted wallet-label">Entity</p>
               <p class="wallet-meta-value">{replica?.state?.entityId || tab.entityId}</p>
-              <p class="muted wallet-meta-help">XLN identity used for accounts, reserves, gossip, and consensus.</p>
+              <p class="muted wallet-meta-help">XLN identity for accounts, reserves, gossip, and consensus.</p>
             </div>
           </div>
 
@@ -2540,7 +2549,7 @@
               <div class="col-token asset-ledger-total-label">
                 <div class="asset-name-block">
                   <span class="token-name">Net Worth</span>
-                  <span class="asset-kind">{formatApproxUsd(assetLedgerGrandTotal)} across all assets</span>
+                  <span class="asset-kind">{formatApproxUsd(assetLedgerGrandTotal)} sum of columns</span>
                 </div>
               </div>
               <div class="col-balance asset-balance-block">
@@ -2584,7 +2593,7 @@
             <section class="asset-action-card">
               {#if assetWorkspaceTab === 'faucet'}
                 <h4 class="section-head">Faucet</h4>
-                <p class="muted">Top up wallet ERC20 or fund entity reserve directly for fast testing.</p>
+                <p class="muted">Top up your EOA, reserve, or first available account for fast testing.</p>
                 <div class="asset-form-grid">
                   <label class="asset-field">
                     <span>Asset</span>
@@ -3063,14 +3072,14 @@
                         class:active={$settings.barLayout === 'center'}
                         on:click={() => settingsOperations.setBarLayout('center')}
                       >
-                        Center
+                        Center split
                       </button>
                       <button
                         class="appearance-toggle"
                         class:active={$settings.barLayout === 'sides'}
                         on:click={() => settingsOperations.setBarLayout('sides')}
                       >
-                        Sides
+                        Side rails
                       </button>
                     </div>
                   </div>
@@ -3090,8 +3099,8 @@
                       on:input={setAccountBarScale}
                     />
                     <div class="appearance-scale-caption">
-                      <span>${ACCOUNT_BAR_USD_PER_100PX_MIN}</span>
-                      <span>${ACCOUNT_BAR_USD_PER_100PX_MAX.toLocaleString('en-US')}</span>
+                      <span>$10</span>
+                      <span>$10,000</span>
                     </div>
                   </div>
                 </div>
@@ -3641,7 +3650,7 @@
   .hero-breakdown {
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
+    gap: 14px;
     flex-wrap: wrap;
     margin-top: 8px;
     font-family: 'JetBrains Mono', monospace;
@@ -4449,18 +4458,19 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 4px;
-    border: 1px solid #27272a;
-    border-radius: 10px;
-    background: #0d0e11;
+    padding: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(12px);
     width: fit-content;
   }
 
   .appearance-toggle {
     min-width: 96px;
-    padding: 8px 12px;
+    padding: 9px 14px;
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: 999px;
     background: transparent;
     color: #9ca3af;
     font-size: 12px;
@@ -4474,9 +4484,10 @@
   }
 
   .appearance-toggle.active {
-    color: #fbbf24;
-    border-color: #fbbf24;
-    background: rgba(251, 191, 36, 0.08);
+    color: #f5f5f4;
+    border-color: rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.08));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 6px 18px rgba(0,0,0,0.18);
   }
 
   .appearance-scale-row {
@@ -4496,6 +4507,7 @@
   .appearance-slider {
     width: 100%;
     accent-color: #fbbf24;
+    height: 28px;
   }
 
   .appearance-scale-caption {
@@ -4981,6 +4993,26 @@
     border-bottom: 1px solid #1f1f23;
   }
 
+  .wallet-meta-block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .wallet-meta-value {
+    margin: 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #e7e5e4;
+    overflow-wrap: anywhere;
+  }
+
+  .wallet-meta-help {
+    margin: 0;
+    max-width: 40ch;
+  }
+
   .loading-row {
     display: flex;
     align-items: center;
@@ -5070,6 +5102,14 @@
     overflow-x: auto;
   }
 
+  .asset-ledger-total {
+    background: rgba(245, 158, 11, 0.05);
+  }
+
+  .asset-ledger-total .token-name {
+    color: #f5f5f4;
+  }
+
   .asset-name-block {
     display: flex;
     flex-direction: column;
@@ -5154,18 +5194,22 @@
   .asset-amount-shell {
     display: flex;
     align-items: center;
-    gap: 12px;
-    min-height: 46px;
-    padding: 0 8px 0 12px;
+    gap: 10px;
+    min-height: 52px;
+    padding: 4px 6px 4px 14px;
     border: 1px solid #2f2620;
     border-radius: 10px;
     background: #0f0b09;
   }
 
+  .asset-amount-shell:focus-within {
+    border-color: #fbbf24;
+  }
+
   .asset-amount-shell input {
     flex: 1;
     min-width: 0;
-    padding: 12px 0;
+    padding: 0;
     border: none;
     background: transparent;
   }
@@ -5175,10 +5219,10 @@
   }
 
   .asset-inline-controls {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 8px;
-    flex-shrink: 0;
+    margin-left: auto;
     min-width: 0;
   }
 
@@ -5187,8 +5231,8 @@
     background: transparent;
     padding: 0;
     color: #a8a29e;
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 500;
     text-transform: none;
     letter-spacing: 0;
     cursor: pointer;
@@ -5215,7 +5259,7 @@
   }
 
   .asset-token-select-inline.compact {
-    min-height: 38px;
+    min-height: 40px;
     padding: 8px 12px;
     border-radius: 10px;
   }
@@ -5240,48 +5284,6 @@
     justify-content: flex-end;
     gap: 6px;
     width: 100%;
-  }
-
-  .reserve-collateral-input {
-    min-width: 120px;
-    padding: 5px 8px;
-    border: 1px solid #3f3f46;
-    border-radius: 4px;
-    background: #111827;
-    color: #f4f4f5;
-    font-size: 11px;
-  }
-
-  .reserve-collateral-input:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .reserve-collateral-presets {
-    display: inline-flex;
-    gap: 4px;
-    flex-wrap: wrap;
-  }
-
-  .reserve-preset {
-    padding: 5px 8px;
-    border: 1px solid rgba(245, 158, 11, 0.25);
-    border-radius: 4px;
-    background: rgba(245, 158, 11, 0.08);
-    color: #fcd34d;
-    font-size: 10px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .reserve-preset:hover:not(:disabled) {
-    background: rgba(245, 158, 11, 0.18);
-  }
-
-  .reserve-preset:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 
   /* Token Icon (small) */

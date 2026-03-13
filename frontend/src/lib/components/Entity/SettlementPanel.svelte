@@ -588,10 +588,6 @@
     return out;
   })();
   $: executableSettlementCount = executableSettlementCounterparties.length;
-  $: latestFinalizedBatch = Array.isArray(batchHistory)
-    ? (batchHistory.find((entry) => entry.status !== 'failed') ?? null)
-    : null;
-  $: hasFinalizedBatch = !!latestFinalizedBatch;
   $: hasAnyBatch = hasSentBatch || hasDraftBatch;
   $: canBroadcastDraft = !hasSentBatch && (hasDraftBatch || executableSettlementCount > 0);
   $: pendingSummary = batchSummary(jBatch);
@@ -1003,9 +999,6 @@
         {/if}
       </span>
       <span class="batch-status-copy">{lifecycleHint}</span>
-      {#if latestFinalizedBatch}
-        <span class="batch-status-meta">Last J#{Number(latestFinalizedBatch.jBlockNumber || 0)}</span>
-      {/if}
       <span class="batch-status-meta">History {batchHistory.length}</span>
     </div>
 
@@ -1015,7 +1008,7 @@
           <span>Nonce #{sentBatch.entityNonce}</span>
           <span>Hash {sentBatch.batchHash?.slice(0, 10)}...</span>
           <span>Attempts {sentBatch.submitAttempts}</span>
-          <span>Last submit {formatClock(sentBatch.lastSubmittedAt)}</span>
+          <span>Submitted {formatClock(sentBatch.lastSubmittedAt)}</span>
         </div>
         {#if sentSummary.length > 0}
           <div class="batch-summary">
@@ -1066,7 +1059,7 @@
     {/if}
 
     <div class="draft-batch" class:locked={hasSentBatch}>
-      <div class="preview-label">Current Draft Batch</div>
+      <div class="preview-label">Draft Queue</div>
     {#if hasDraftBatch}
       <div class="batch-summary">
         {#each pendingSummary as item}
@@ -1114,9 +1107,9 @@
     {:else}
       <div class="batch-empty">
         {#if hasSentBatch}
-          Draft is empty. You can keep queueing new ops while sent batch is in-flight.
+          Draft queue is empty. You can keep queueing new ops while the submitted batch is in-flight.
         {:else}
-          Queue actions below, then sign & broadcast.
+          Queue actions below, then sign and broadcast.
         {/if}
       </div>
     {/if}
@@ -1177,7 +1170,7 @@
     <button class="tab" class:active={action === 'withdraw'} on:click={() => action = 'withdraw'} disabled={sending}>Collateral → Reserve</button>
     <button class="tab" class:active={action === 'transfer'} on:click={() => action = 'transfer'} disabled={sending}>Reserve → Reserve</button>
     <button class="tab" class:active={action === 'dispute'} on:click={() => action = 'dispute'} disabled={sending}>Dispute</button>
-    <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History ({batchHistory.length})</button>
+    <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History · {batchHistory.length}</button>
   </div>
 
   <p class="action-desc">
@@ -1393,7 +1386,7 @@
   {/if}
 
   {#if action !== 'history'}
-    <p class="two-step-note">All on-chain actions queue in batch. Review above, then Sign & Broadcast.</p>
+    <p class="two-step-note">All on-chain actions enter the draft first. Review above, then sign and broadcast.</p>
   {/if}
 </div>
 
