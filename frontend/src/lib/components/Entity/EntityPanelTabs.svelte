@@ -742,6 +742,11 @@
     return `${whole.toString()}.${frac.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
   }
 
+  function formatInlineFillAmount(amount: bigint, decimals: number): string {
+    if (amount <= 0n) return '0';
+    return formatTokenInputAmount(amount, decimals);
+  }
+
   async function resolveCurrentExternalAddress(): Promise<string> {
     const signerId = String(tab.signerId || '').trim();
     if (isAddress(signerId)) return signerId;
@@ -2549,7 +2554,7 @@
               <div class="col-token asset-ledger-total-label">
                 <div class="asset-name-block">
                   <span class="token-name">Net Worth</span>
-                  <span class="asset-kind">{formatApproxUsd(assetLedgerGrandTotal)} sum of columns</span>
+                  <span class="asset-kind">{formatApproxUsd(assetLedgerGrandTotal)}</span>
                 </div>
               </div>
               <div class="col-balance asset-balance-block">
@@ -2646,7 +2651,7 @@
                         on:click={fillExternalToReserveMax}
                         disabled={!selectedExternalToReserveToken || selectedExternalToReserveToken.balance <= 0n}
                       >
-                        {selectedExternalToReserveToken ? `${formatAmount(selectedExternalToReserveToken.balance, selectedExternalToReserveToken.decimals)} ${selectedExternalToReserveToken.symbol}` : '0'}
+                        {selectedExternalToReserveToken ? formatInlineFillAmount(selectedExternalToReserveToken.balance, selectedExternalToReserveToken.decimals) : '0'}
                       </button>
                       <select class="asset-token-select-inline compact" bind:value={externalToReserveSymbol} data-testid="external-to-reserve-symbol">
                         {#each transferableAssetOptions as token}
@@ -2699,7 +2704,7 @@
                         on:click={fillReserveToCollateralMax}
                         disabled={!selectedReserveToCollateralToken || (onchainReserves.get(selectedReserveToCollateralToken.tokenId) ?? 0n) <= 0n}
                       >
-                        {#if selectedReserveToCollateralToken}{formatAmount(onchainReserves.get(selectedReserveToCollateralToken.tokenId) ?? 0n, selectedReserveToCollateralToken.decimals)} {selectedReserveToCollateralToken.symbol}{:else}0{/if}
+                        {#if selectedReserveToCollateralToken}{formatInlineFillAmount(onchainReserves.get(selectedReserveToCollateralToken.tokenId) ?? 0n, selectedReserveToCollateralToken.decimals)}{:else}0{/if}
                       </button>
                       <select class="asset-token-select-inline compact" bind:value={reserveToCollateralSymbol} data-testid="reserve-to-collateral-symbol">
                         {#each transferableAssetOptions as token}
@@ -2752,7 +2757,7 @@
                         on:click={fillCollateralToReserveMax}
                         disabled={!selectedCollateralToReserveToken || getWorkspaceWithdrawableCollateral(selectedCollateralToReserveToken.tokenId) <= 0n}
                       >
-                        {#if selectedCollateralToReserveToken}{formatAmount(getWorkspaceWithdrawableCollateral(selectedCollateralToReserveToken.tokenId), selectedCollateralToReserveToken.decimals)} {selectedCollateralToReserveToken.symbol}{:else}0{/if}
+                        {#if selectedCollateralToReserveToken}{formatInlineFillAmount(getWorkspaceWithdrawableCollateral(selectedCollateralToReserveToken.tokenId), selectedCollateralToReserveToken.decimals)}{:else}0{/if}
                       </button>
                       <select class="asset-token-select-inline compact" bind:value={collateralToReserveSymbol} data-testid="collateral-to-reserve-symbol">
                         {#each transferableAssetOptions as token}
@@ -2791,7 +2796,7 @@
                         on:click={fillReserveToExternalMax}
                         disabled={!selectedReserveToExternalToken || (onchainReserves.get(selectedReserveToExternalToken.tokenId) ?? 0n) <= 0n}
                       >
-                        {#if selectedReserveToExternalToken}{formatAmount(onchainReserves.get(selectedReserveToExternalToken.tokenId) ?? 0n, selectedReserveToExternalToken.decimals)} {selectedReserveToExternalToken.symbol}{:else}0{/if}
+                        {#if selectedReserveToExternalToken}{formatInlineFillAmount(onchainReserves.get(selectedReserveToExternalToken.tokenId) ?? 0n, selectedReserveToExternalToken.decimals)}{:else}0{/if}
                       </button>
                       <select class="asset-token-select-inline compact" bind:value={reserveToExternalSymbol} data-testid="reserve-to-external-symbol">
                         {#each transferableAssetOptions as token}
@@ -2825,7 +2830,7 @@
                         on:click={fillSendAssetMax}
                         disabled={!selectedSendAssetToken || selectedSendAssetToken.balance <= 0n}
                       >
-                        {selectedSendAssetToken ? `${formatAmount(selectedSendAssetToken.balance, selectedSendAssetToken.decimals)} ${selectedSendAssetToken.symbol}` : '0'}
+                        {selectedSendAssetToken ? formatInlineFillAmount(selectedSendAssetToken.balance, selectedSendAssetToken.decimals) : '0'}
                       </button>
                       <select class="asset-token-select-inline compact" bind:value={sendAssetSymbol} data-testid="asset-send-symbol">
                         {#each externalTokens as token}
@@ -5195,15 +5200,16 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 52px;
-    padding: 4px 6px 4px 14px;
-    border: 1px solid #2f2620;
-    border-radius: 10px;
-    background: #0f0b09;
+    min-height: 48px;
+    padding: 0 8px 0 14px;
+    border: 1px solid #322821;
+    border-radius: 12px;
+    background: #110d0b;
   }
 
   .asset-amount-shell:focus-within {
     border-color: #fbbf24;
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.12);
   }
 
   .asset-amount-shell input {
@@ -5212,6 +5218,8 @@
     padding: 0;
     border: none;
     background: transparent;
+    color: #f5f5f4;
+    font-size: 15px;
   }
 
   .asset-amount-shell input:focus {
@@ -5221,23 +5229,27 @@
   .asset-inline-controls {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     margin-left: auto;
     min-width: 0;
+    flex: 0 0 auto;
   }
 
   .asset-max-hint {
     border: none;
     background: transparent;
     padding: 0;
-    color: #a8a29e;
-    font-size: 12px;
-    font-weight: 500;
+    color: #8d857d;
+    font-size: 11px;
+    font-weight: 600;
     text-transform: none;
     letter-spacing: 0;
     cursor: pointer;
     white-space: nowrap;
     text-align: right;
+    max-width: 132px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .asset-max-hint.text-link {
@@ -5254,14 +5266,17 @@
   }
 
   .asset-token-select-inline {
-    min-height: 44px;
-    min-width: 116px;
+    min-height: 36px;
+    min-width: 96px;
   }
 
   .asset-token-select-inline.compact {
-    min-height: 40px;
-    padding: 8px 12px;
-    border-radius: 10px;
+    min-height: 36px;
+    padding: 0 30px 0 12px;
+    border-radius: 9px;
+    background: #1a1512;
+    border: 1px solid #2f2620;
+    color: #e7e5e4;
   }
 
   .asset-action-row {
@@ -5521,10 +5536,6 @@
 
     .asset-amount-row {
       grid-template-columns: 1fr;
-    }
-
-    .asset-amount-shell input {
-      padding-right: 132px;
     }
 
     .account-workspace-tabs {

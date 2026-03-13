@@ -107,16 +107,9 @@
     return Number.isFinite(tokenInfo?.decimals) ? Number(tokenInfo?.decimals) : 18;
   }
 
-  function getTokenSymbol(currentTokenId: number): string {
-    return activeXlnFunctions?.getTokenInfo?.(currentTokenId)?.symbol || `#${currentTokenId}`;
-  }
-
   function formatInlineMaxHint(amountBig: bigint, currentTokenId: number): string {
     if (amountBig <= 0n) return '0';
-    if (activeXlnFunctions?.formatTokenAmount) {
-      return activeXlnFunctions.formatTokenAmount(currentTokenId, amountBig);
-    }
-    return `${formatTokenInputAmount(amountBig, getTokenDecimals(currentTokenId))} ${getTokenSymbol(currentTokenId)}`;
+    return formatTokenInputAmount(amountBig, getTokenDecimals(currentTokenId));
   }
 
   function formatShortId(id: string): string {
@@ -989,17 +982,8 @@
     </div>
 
     <div class="batch-status-row">
-      <span class="batch-status-chip" class:sent={hasSentBatch} class:draft={!hasSentBatch && (hasDraftBatch || executableSettlementCount > 0)}>
-        {#if hasSentBatch}
-          Sent
-        {:else if hasDraftBatch || executableSettlementCount > 0}
-          Draft
-        {:else}
-          Ready
-        {/if}
-      </span>
       <span class="batch-status-copy">{lifecycleHint}</span>
-      <span class="batch-status-meta">History {batchHistory.length}</span>
+      <span class="batch-status-meta">History · {batchHistory.length}</span>
     </div>
 
     {#if hasSentBatch}
@@ -1059,7 +1043,7 @@
     {/if}
 
     <div class="draft-batch" class:locked={hasSentBatch}>
-      <div class="preview-label">Draft Queue</div>
+      <div class="preview-label">Draft</div>
     {#if hasDraftBatch}
       <div class="batch-summary">
         {#each pendingSummary as item}
@@ -1445,32 +1429,6 @@
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
-  }
-
-  .batch-status-chip {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 999px;
-    padding: 5px 10px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    background: #111111;
-    border: 1px solid #292524;
-    color: #d6d3d1;
-  }
-
-  .batch-status-chip.sent {
-    border-color: rgba(248, 113, 113, 0.4);
-    color: #fecaca;
-    background: rgba(127, 29, 29, 0.18);
-  }
-
-  .batch-status-chip.draft {
-    border-color: rgba(251, 191, 36, 0.35);
-    color: #fbbf24;
-    background: rgba(120, 53, 15, 0.22);
   }
 
   .batch-status-copy,
@@ -2054,15 +2012,16 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 52px;
-    padding: 4px 6px 4px 14px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 10px;
+    min-height: 48px;
+    padding: 0 8px 0 14px;
+    background: #110d0b;
+    border: 1px solid #322821;
+    border-radius: 12px;
   }
 
   .settle-amount-shell:focus-within {
     border-color: #fbbf24;
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.12);
   }
 
   .settle-amount-shell input {
@@ -2072,24 +2031,30 @@
     background: transparent;
     border: none;
     border-radius: 0;
+    color: #f5f5f4;
+    font-size: 15px;
   }
 
   .settle-inline-controls {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     margin-left: auto;
+    flex: 0 0 auto;
   }
 
   .settle-max-link {
     border: none;
     background: transparent;
     padding: 0;
-    color: #a8a29e;
-    font-size: 12px;
-    font-weight: 500;
+    color: #8d857d;
+    font-size: 11px;
+    font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
+    max-width: 132px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .settle-max-link:hover:not(:disabled) {
@@ -2103,7 +2068,15 @@
 
   .settle-token-inline {
     flex: 0 0 auto;
-    min-width: 160px;
+    min-width: 132px;
+  }
+
+  .settle-token-inline :global(.token-select.compact .select-trigger) {
+    min-height: 36px;
+    padding: 0 12px;
+    border-radius: 9px;
+    background: #1a1512;
+    border: 1px solid #2f2620;
   }
 
   .btn-submit {
