@@ -1216,7 +1216,8 @@ test.describe('E2E Dispute Flow', () => {
     const lastTxHashBeforeR2C = batchBeforeR2C.lastBatchTxHash;
     const r2cFinalizeCursor = await getPersistedReceiptCursor(page);
 
-    await timedStep('post_dispute.queue_r2c', () => queueFundR2CViaUi(page, secondHubId, '1'));
+    const postDisputeCollateralAmount = '1';
+    await timedStep('post_dispute.queue_r2c', () => queueFundR2CViaUi(page, secondHubId, postDisputeCollateralAmount));
     await timedStep('post_dispute.wait_r2c_queued', async () => {
       await expect.poll(async () => {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
@@ -1257,25 +1258,32 @@ test.describe('E2E Dispute Flow', () => {
       await secondHubPanelBackAfterFund.click();
     }
 
-    // C2R handling: queue manual settlement workspace and verify state-machine records a c2r settle_propose.
-    // (for this account, on-chain C2R execution may happen on counterparty side).
-    await timedStep('post_dispute.queue_c2r_withdraw', () => queueWithdrawC2RViaUi(page, secondHubId, '25'));
+    // C2R handling: queue manual collateral -> reserve settlement, let hub sign it, then
+    // verify it lands in the local draft batch before manual broadcast.
+    const c2rBatchBefore = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+    const c2rHistoryBeforeBroadcast = c2rBatchBefore.batchHistoryCount;
+    const reserveBeforeC2R = await readOnchainReserveViaAnvil(page, accountRef.entityId);
+    await timedStep('post_dispute.queue_c2r_withdraw', () => queueWithdrawC2RViaUi(page, secondHubId, postDisputeCollateralAmount));
     await timedStep('post_dispute.open_settle_workspace_c2r', () => openEntitySettleWorkspace(page));
     const signButtonDuringC2R = page.getByTestId('settle-sign-broadcast').first();
-    await timedStep('post_dispute.wait_c2r_workspace', async () => {
+    await timedStep('post_dispute.wait_c2r_draft', async () => {
       await expect.poll(async () => {
-        const workspace = await readSettlementWorkspaceSnapshot(page, accountRef.entityId, accountRef.signerId, secondHubId);
-        if (!workspace.exists) return '';
-        return `${workspace.status}|${workspace.memo}|${workspace.version}|${workspace.opTypes.join(',')}`;
-      }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toMatch(/^(awaiting_counterparty|ready_to_submit)\|manual-c2r\|1\|c2r$/);
-
-      const workspace = await readSettlementWorkspaceSnapshot(page, accountRef.entityId, accountRef.signerId, secondHubId);
-
-      if (workspace.status === 'ready_to_submit') {
-        await expect(signButtonDuringC2R).toBeEnabled({ timeout: 5_000 });
-      } else {
-        await expect(signButtonDuringC2R).toBeDisabled({ timeout: 5_000 });
-      }
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.pendingCollateralToReserve;
+      }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(c2rBatchBefore.pendingCollateralToReserve);
+      await expect(signButtonDuringC2R).toBeEnabled({ timeout: 5_000 });
+    });
+    await timedStep('post_dispute.broadcast_c2r', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
+    await timedStep('post_dispute.wait_c2r_sent', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.sentCollateralToReserve > 0 || snap.batchHistoryCount > c2rHistoryBeforeBroadcast;
+      }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBe(true);
+    });
+    await timedStep('post_dispute.wait_c2r_reserve_update', async () => {
+      await expect.poll(async () => {
+        return await readOnchainReserveViaAnvil(page, accountRef.entityId);
+      }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(reserveBeforeC2R);
     });
 
     await openEntitySettleWorkspace(page);
@@ -1290,6 +1298,7 @@ test.describe('E2E Dispute Flow', () => {
     expect(finalSnapshot.lastBatchOpCount).toBeGreaterThan(0);
     expect(
       finalSnapshot.lastBatchOps.reserveToCollateral > 0
+        || finalSnapshot.lastBatchOps.collateralToReserve > 0
         || finalSnapshot.lastBatchOps.disputeStarts > 0
         || finalSnapshot.lastBatchOps.disputeFinalizations > 0,
       `expected dispute/R2C footprint in history, got ${JSON.stringify(finalSnapshot.lastBatchOps)}`,
