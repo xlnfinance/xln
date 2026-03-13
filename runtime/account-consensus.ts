@@ -1811,6 +1811,10 @@ export async function handleAccountInput(
     );
     if (postCommitAutoRebalanceTxs.length > 0) {
       for (const tx of postCommitAutoRebalanceTxs) {
+        // Post-commit rebalance is a fresh follow-up account reaction. The
+        // received frame is already committed; queuing new account txs into the
+        // local mempool here is the correct "next proposal" path, not handler
+        // mutation of an in-flight entity frame.
         accountMachine.mempool.push(tx);
       }
       events.push(`🔄 Auto-rebalance queued ${postCommitAutoRebalanceTxs.length} tx(s) after frame commit`);

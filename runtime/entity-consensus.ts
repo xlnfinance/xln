@@ -1242,10 +1242,8 @@ export const applyEntityFrame = async (
   const proposableAccounts = new Set<string>();
 
   // === AGGREGATE PURE EVENTS FROM ALL HANDLERS ===
-  const allMempoolOps: Array<{ accountId: string; tx: any }> = [];
   const allSwapOffersCreated: Array<any> = [];
   const allSwapCancelRequests: Array<any> = [];
-  const allSwapOffersCancelled: Array<any> = [];
 
   // Preserve WAL transaction order exactly during live processing and replay.
   // Reordering batched txs can change bilateral account state transitions
@@ -1279,8 +1277,10 @@ export const applyEntityFrame = async (
     allOutputs.push(...outputs);
     if (jOutputs) allJOutputs.push(...jOutputs);
 
-    // CRITICAL FIX: Apply mempoolOps IMMEDIATELY instead of batching
-    // This ensures directPayment can detect newly-added mempool items in the same tick
+    // CRITICAL: handlers stay pure by returning mempoolOps; the orchestrator is the
+    // only place that mutates account.mempool during entity-frame application.
+    // Apply returned mempoolOps immediately on the cloned working state so later
+    // entityTxs in the same frame observe the same in-frame account state.
     if (mempoolOps && mempoolOps.length > 0) {
       console.log(`📦 ENTITY-ORCHESTRATOR: Applying ${mempoolOps.length} mempoolOps (inline)`);
       for (const { accountId, tx } of mempoolOps) {
@@ -1318,7 +1318,6 @@ export const applyEntityFrame = async (
 
     if (swapOffersCreated) allSwapOffersCreated.push(...swapOffersCreated);
     if (swapCancelRequests) allSwapCancelRequests.push(...swapCancelRequests);
-    if (swapOffersCancelled) allSwapOffersCancelled.push(...swapOffersCancelled);
 
     if (HEAVY_LOGS && entityTx.type === 'extendCredit') {
       console.log(`💳 POST-EXTEND-CREDIT: Checking all account mempools:`);
@@ -1440,7 +1439,9 @@ export const applyEntityFrame = async (
       matchResult = { mempoolOps: [], bookUpdates: [] };
     }
 
-    // Apply match results to account mempools
+    // Orderbook matching returns pure mempoolOps/book updates. Applying the
+    // returned account txs here is still orchestrator-owned mutation of the
+    // cloned working state, not handler-side in-place state injection.
     for (const { accountId, tx } of matchResult.mempoolOps) {
       const account = currentEntityState.accounts.get(accountId);
       if (account) {
@@ -1488,6 +1489,9 @@ export const applyEntityFrame = async (
       for (const { accountId, offerId } of allSwapCancelRequests) {
         const account = currentEntityState.accounts.get(accountId);
         if (!account?.swapOffers?.has(offerId)) continue;
+        // Fallback cancel resolution is synthesized by the orchestrator itself.
+        // It must land in the same working-state mempool so the later account
+        // proposal step sees it in this frame.
         account.mempool.push({
           type: 'swap_resolve',
           data: { offerId, fillRatio: 0, cancelRemainder: true },
