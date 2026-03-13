@@ -9,8 +9,6 @@ import { handleAddDelta } from './handlers/add-delta';
 import { handleSetCreditLimit } from './handlers/set-credit-limit';
 import { handleDirectPayment } from './handlers/direct-payment';
 import { handleReserveToCollateral } from './handlers/reserve-to-collateral';
-import { handleRequestWithdrawal } from './handlers/request-withdrawal';
-import { handleApproveWithdrawal } from './handlers/approve-withdrawal';
 import { handleSetRebalancePolicy } from './handlers/set-rebalance-policy';
 import { handleRequestCollateral } from './handlers/request-collateral';
 import { handleReopenDisputed } from './handlers/reopen-disputed';
@@ -114,16 +112,6 @@ export async function processAccountTx(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'reserve_to_collateral' }>,
       );
-
-    case 'request_withdrawal':
-      return handleRequestWithdrawal(
-        accountMachine,
-        accountTx as Extract<AccountTx, { type: 'request_withdrawal' }>,
-        byLeft,
-      );
-
-    case 'approve_withdrawal':
-      return handleApproveWithdrawal(accountMachine, accountTx as Extract<AccountTx, { type: 'approve_withdrawal' }>);
 
     case 'request_collateral':
       {

@@ -125,8 +125,6 @@
  *    ├─ 'direct_payment'               // Update offdelta (instant settlement)
  *    ├─ 'add_delta'                    // Add new token to account
  *    ├─ 'set_credit_limit'             // Set mutual credit limits
- *    ├─ 'request_withdrawal'           // Phase 2: C→R (collateral to reserve)
- *    ├─ 'approve_withdrawal'           // ACK/NACK withdrawal request
  *    └─ 'reserve_to_collateral'        // Phase 1: R→C (from j_event)
  *
  * 7. Delta (Per-token bilateral state - the money)
@@ -562,14 +560,6 @@ export type EntityTx =
         preparedEnvelope?: unknown;
         preparedSenderLockAmount?: bigint | string;
         preparedTotalFee?: bigint | string;
-      };
-    }
-  | {
-      type: 'requestWithdrawal';
-      data: {
-        counterpartyEntityId: string;
-        tokenId: number;
-        amount: bigint;
       };
     }
   | {
@@ -1380,24 +1370,6 @@ export type AccountTx =
         side: 'receiving' | 'counterparty';
         blockNumber: number;
         transactionHash: string;
-      };
-    }
-  | {
-      type: 'request_withdrawal';
-      data: {
-        tokenId: number;
-        amount: bigint;
-        requestId: string; // Unique ID for matching ACK/NACK
-      };
-    }
-  | {
-      type: 'approve_withdrawal';
-      data: {
-        tokenId: number;
-        amount: bigint;
-        requestId: string; // Matches request_withdrawal.requestId
-        approved: boolean; // true = ACK, false = NACK
-        signature?: string; // If approved: signature for on-chain submission
       };
     }
   | {

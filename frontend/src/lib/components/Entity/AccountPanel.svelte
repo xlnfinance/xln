@@ -171,8 +171,6 @@
     const known: Record<string, string> = {
       request_collateral: 'Request Collateral',
       set_rebalance_policy: 'Set Rebalance Policy',
-      request_withdrawal: 'Request Withdrawal',
-      approve_withdrawal: 'Approve Withdrawal',
       reserve_to_collateral: 'Reserve to Collateral',
       account_settle: 'Account Settle',
       j_event_claim: 'J Event Claim',
@@ -382,8 +380,8 @@
   }
 
   function txKindTone(type: string): 'neutral' | 'good' | 'warn' | 'danger' {
-    if (type === 'swap_resolve' || type === 'approve_withdrawal' || type === 'account_settle') return 'good';
-    if (type === 'swap_cancel_request' || type === 'request_withdrawal' || type === 'request_collateral') return 'warn';
+    if (type === 'swap_resolve' || type === 'account_settle') return 'good';
+    if (type === 'swap_cancel_request' || type === 'request_collateral') return 'warn';
     if (type === 'reopen_disputed') return 'danger';
     return 'neutral';
   }

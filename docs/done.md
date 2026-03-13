@@ -688,3 +688,27 @@
     - full isolated E2E suite:
       - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --video=off --trace=off --screenshot=only-on-failure --max-failures=1`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260313-060614-903/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260313-060614-903/e2e-shard-00.log)
+
+- 2026-03-13
+  - Removed the dead legacy `requestWithdrawal` / `request_withdrawal` / `approve_withdrawal` path from the live runtime and UI labels:
+    - [runtime/types.ts](/Users/egor/xln/runtime/types.ts)
+    - [runtime/entity-tx/apply.ts](/Users/egor/xln/runtime/entity-tx/apply.ts)
+    - [runtime/account-tx/apply.ts](/Users/egor/xln/runtime/account-tx/apply.ts)
+    - deleted legacy handlers:
+      - [runtime/entity-tx/handlers/request-withdrawal.ts](/Users/egor/xln/runtime/entity-tx/handlers/request-withdrawal.ts)
+      - [runtime/account-tx/handlers/request-withdrawal.ts](/Users/egor/xln/runtime/account-tx/handlers/request-withdrawal.ts)
+      - [runtime/account-tx/handlers/approve-withdrawal.ts](/Users/egor/xln/runtime/account-tx/handlers/approve-withdrawal.ts)
+    - [AccountPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/AccountPanel.svelte) no longer labels the removed tx kinds.
+  - Brought the dispute browser spec in line with the real `c2r` state machine:
+    - [tests/e2e-dispute.spec.ts](/Users/egor/xln/tests/e2e-dispute.spec.ts) now accepts the actual workspace progression:
+      - `awaiting_counterparty`
+      - or fast-follow `ready_to_submit`
+    - `Sign & Broadcast` is only asserted disabled when the workspace is still awaiting the counterparty, and enabled once the counterparty signature has already landed.
+  - Re-verified on this exact tree:
+    - `bun x tsc --noEmit`
+    - full CLI scenario suite:
+      - `bun runtime/scenarios/run.ts`
+      - pass log: `/Users/egor/xln/.logs/scenarios-parallel/20260313-073148-256`
+    - full isolated E2E suite:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --video=off --trace=off --screenshot=only-on-failure --max-failures=1`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260313-073148-183/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260313-073148-183/e2e-shard-00.log)

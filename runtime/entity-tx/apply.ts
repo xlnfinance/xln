@@ -1255,12 +1255,6 @@ export const applyEntityTx = async (
       return { newState, outputs, mempoolOps };
     }
 
-    if (entityTx.type === 'requestWithdrawal') {
-      const { handleRequestWithdrawal } = await import('./handlers/request-withdrawal');
-      const result = handleRequestWithdrawal(entityState, entityTx);
-      return { newState: result.newState, outputs: [], mempoolOps: result.mempoolOps };
-    }
-
     if (entityTx.type === 'reserve_to_external') {
       return handleReserveToExternal(entityState, entityTx);
     }
