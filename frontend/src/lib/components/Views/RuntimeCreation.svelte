@@ -22,6 +22,7 @@
     hexToBytes,
   } from '@xln/brainvault/core';
   import { generateLazyEntityId } from '@xln/runtime/entity-factory';
+  import { DEMO_ACCOUNTS } from '$lib/config/demo-accounts';
 
   // Props
   export let embedded: boolean = false;
@@ -230,9 +231,13 @@
     }
   })();
 
+  type NavigatorWithDeviceMemory = Navigator & { deviceMemory?: number };
+
   // Device memory detection (navigator.deviceMemory gives GB, default 8GB if unavailable)
   // NOTE: Browser privacy limits cap at 8GB - power users can override below
-  let deviceMemoryGB = typeof navigator !== 'undefined' ? ((navigator as any).deviceMemory || 8) : 8;
+  let deviceMemoryGB = typeof navigator !== 'undefined'
+    ? ((navigator as NavigatorWithDeviceMemory).deviceMemory ?? 8)
+    : 8;
 
   // POWER USER OVERRIDE: Uncomment to set actual RAM (bypasses browser 8GB cap)
   // For M3 Ultra 512GB or similar high-RAM machines
@@ -258,21 +263,28 @@
     return Math.min(coreBased, memBased, 512);
   };
 
+  const WASM_SAFE_WORKER_LIMIT = Math.floor(3000 / 256);
   let maxWorkers = computeMaxWorkers();
-  let targetWorkerCount = Math.max(1, Math.min(Math.ceil(maxWorkers * 2 / 3), maxWorkers)); // Start at ~2/3 capacity
+  let usableWorkerCap = Math.max(1, Math.min(maxWorkers, WASM_SAFE_WORKER_LIMIT));
+  let targetWorkerCount = Math.max(1, Math.min(hardwareCores, usableWorkerCap));
   let effectiveTargetWorkerCount = targetWorkerCount;
 
-  $: effectiveTargetWorkerCount = shardCount > 0
-    ? Math.min(targetWorkerCount, shardCount)
-    : targetWorkerCount;
+  // Use one cap for slider, live scaling, and displayed limits.
+  $: usableWorkerCap = Math.max(
+    1,
+    Math.min(maxWorkers, WASM_SAFE_WORKER_LIMIT, shardCount > 0 ? shardCount : WASM_SAFE_WORKER_LIMIT)
+  );
+  $: if (targetWorkerCount > usableWorkerCap) targetWorkerCount = usableWorkerCap;
+  $: if (targetWorkerCount < 1) targetWorkerCount = 1;
+  $: effectiveTargetWorkerCount = Math.min(targetWorkerCount, usableWorkerCap);
 
   // Reactive: Adjust workers when user changes slider during derivation
   $: if (phase === 'deriving' && effectiveTargetWorkerCount !== activeWorkerCount) {
     adjustWorkers();
   }
 
-  // Reactive memory calculations - show TARGET for immediate feedback, not actual workerCount
-  $: allocatedMemoryMB = targetWorkerCount * 256;
+  // Show actual active worker memory, not an optimistic target.
+  $: allocatedMemoryMB = activeWorkerCount * 256;
   $: memoryPercent = Math.min(100, (allocatedMemoryMB / deviceMemoryMB) * 100);
   let shardCount = 0;
   let shardsCompleted = 0;
@@ -544,13 +556,13 @@
     ? (name.length >= BRAINVAULT_V1.MIN_NAME_LENGTH && passphrase.length >= BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH)
     : mnemonicInput.trim().split(/\s+/).filter(w => w).length >= 12;
   $: progress = shardCount > 0 ? (shardsCompleted / shardCount) * 100 : 0;
-  // Remaining time based on ACTUAL worker count (for live display during derivation)
+  // Remaining time based on ACTUAL active worker count.
   $: remainingMs = shardCount > 0
-    ? Math.max(0, ((shardCount - shardsCompleted) / Math.max(workerCount, 1)) * estimatedShardTimeMs)
+    ? Math.max(0, ((shardCount - shardsCompleted) / Math.max(activeWorkerCount, 1)) * estimatedShardTimeMs)
     : 0;
-  // Projected ETA based on TARGET worker count (for slider preview)
+  // Projected ETA based on the current requested worker target.
   $: projectedRemainingMs = shardCount > 0
-    ? Math.max(0, ((shardCount - shardsCompleted) / Math.max(targetWorkerCount, 1)) * estimatedShardTimeMs)
+    ? Math.max(0, ((shardCount - shardsCompleted) / Math.max(effectiveTargetWorkerCount, 1)) * estimatedShardTimeMs)
     : 0;
 
   // Shard grid dimensions (for visualization)
@@ -661,9 +673,7 @@
 
     // === BRAINVAULT MODE: Full argon2 derivation ===
     shardCount = isPreset ? getShardCount(shardInput) : shardInput;
-    // Cap workers to 3GB total WASM memory (Chrome limit ~4GB, leave headroom)
-    const WASM_SAFE_LIMIT = Math.floor(3000 / 256); // 3GB / 256MB per worker = 11 workers max
-    let initialWorkers = Math.min(targetWorkerCount, shardCount, WASM_SAFE_LIMIT);
+    let initialWorkers = Math.min(effectiveTargetWorkerCount, usableWorkerCap);
     workerCount = initialWorkers;
     activeWorkerCount = initialWorkers;
     finalizeInProgress = false;
@@ -679,9 +689,9 @@
       elapsedMs = Date.now() - startTime;
     }, 100);
 
-    // Create workers - start at targetWorkerCount (50% of maxWorkers by default)
+    // Start with the exact worker count the UI is allowed to request.
     const cpuCores = navigator.hardwareConcurrency || 4;
-    console.log(`[BrainVault] Using ${initialWorkers} workers (${cpuCores} cores, max ${maxWorkers}, starting at ${targetWorkerCount})`);
+    console.log(`[BrainVault] Using ${initialWorkers} workers (${cpuCores} cores, cap ${usableWorkerCap}, requested ${effectiveTargetWorkerCount})`);
 
     try {
       let attempts = 0;
@@ -891,7 +901,7 @@
     if (phase !== 'deriving') return;
 
     const currentCount = activeWorkerCount;
-    const target = effectiveTargetWorkerCount;
+    const target = Math.min(effectiveTargetWorkerCount, usableWorkerCap);
 
     if (target < currentCount) {
       // Scale down: drain excess workers (no new shards assigned)
@@ -1035,29 +1045,27 @@
       <div class="glass-card input-section" class:deriving={phase === 'deriving'}>
 
         <!-- Quick Login (Demo Accounts) -->
-        {#await import('$lib/config/demo-accounts') then { DEMO_ACCOUNTS }}
-          <div class="quick-login-section">
-            <div class="quick-login-header">Quick Login (Testnet)</div>
-            <div class="quick-login-grid">
-              {#each DEMO_ACCOUNTS as account}
-                <button
-                  class="quick-login-btn"
-                  type="button"
-                  on:click={() => {
-                    name = account.name;
-                    passphrase = account.password;
-                    shardInput = account.factor;
-                    inputMode = 'brainvault';
-                    createLoginType = 'demo';
-                    setTimeout(() => startDerivation(), 100);
-                  }}
-                >
-                  {account.name}
-                </button>
-              {/each}
-            </div>
+        <div class="quick-login-section">
+          <div class="quick-login-header">Quick Login (Testnet)</div>
+          <div class="quick-login-grid">
+            {#each DEMO_ACCOUNTS as account}
+              <button
+                class="quick-login-btn"
+                type="button"
+                on:click={() => {
+                  name = account.name;
+                  passphrase = account.password;
+                  shardInput = account.factor;
+                  inputMode = 'brainvault';
+                  createLoginType = 'demo';
+                  setTimeout(() => startDerivation(), 100);
+                }}
+              >
+                {account.name}
+              </button>
+            {/each}
           </div>
-        {/await}
+        </div>
 
         <!-- Input Mode Tabs -->
         <div class="input-mode-tabs">
@@ -1256,11 +1264,11 @@
                   </div>
                   <div class="stat-row">
                     <span class="stat-label">THREADS</span>
-                    <span class="stat-value">{workerCount}/{maxWorkers}</span>
+                    <span class="stat-value">{activeWorkerCount}/{usableWorkerCap}</span>
                   </div>
                   <div class="stat-row">
                     <span class="stat-label">MEMORY</span>
-                    <span class="stat-value">{allocatedMemoryMB}MB</span>
+                    <span class="stat-value">{formatMemoryLabel(allocatedMemoryMB)}</span>
                   </div>
                 </div>
 
@@ -1274,19 +1282,17 @@
                     <span class="speed-eta">ETA: {formatRuntimeDurationRounded(projectedRemainingMs)}</span>
                   </div>
                   <div class="speed-slider-wrapper">
-                    <span class="speed-min">Low</span>
                     <input
                       type="range"
                       min="1"
-                      max={maxWorkers}
+                      max={usableWorkerCap}
                       bind:value={targetWorkerCount}
                       on:input={adjustWorkers}
                       class="speed-slider"
                     />
-                    <span class="speed-max">High</span>
                   </div>
                   <div class="speed-details">
-                    <span class="speed-threads">{targetWorkerCount} threads</span>
+                    <span class="speed-threads">{activeWorkerCount} active / {usableWorkerCap} cap</span>
                     <span class="speed-memory">{formatMemoryLabel(allocatedMemoryMB)} RAM</span>
                   </div>
                 </div>
@@ -1641,9 +1647,11 @@
   .quick-login-section {
     margin-bottom: 20px;
     padding: 16px;
-    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
-    border: 1px solid rgba(102, 126, 234, 0.3);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
+    width: 100%;
+    box-sizing: border-box;
   }
   .quick-login-header {
     font-size: 11px;
@@ -1655,24 +1663,27 @@
   }
   .quick-login-grid {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 8px;
+    width: 100%;
   }
   .quick-login-btn {
     padding: 10px 12px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
-    border: none;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
-    color: white;
+    color: rgba(255, 255, 255, 0.92);
     font-weight: 600;
     font-size: 13px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
     text-transform: capitalize;
+    min-height: 40px;
   }
   .quick-login-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 200, 100, 0.24);
+    color: rgba(255, 200, 100, 0.95);
   }
 
   .brainvault-wrapper {
@@ -2217,8 +2228,10 @@
     font-size: 14px;
     font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
     line-height: 1.6;
-    resize: vertical;
+    resize: none;
     transition: all 0.2s ease;
+    min-height: 120px;
+    box-sizing: border-box;
   }
 
   .input-wrapper textarea:focus {
@@ -2237,10 +2250,10 @@
     width: 100%;
     padding: 14px 24px;
     margin-bottom: 20px;
-    background: rgba(100, 150, 255, 0.12);
-    border: 1px solid rgba(100, 150, 255, 0.25);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
-    color: rgba(100, 150, 255, 1);
+    color: rgba(255, 255, 255, 0.88);
     font-size: 14px;
     font-weight: 600;
     letter-spacing: 0.5px;
@@ -2250,9 +2263,9 @@
   }
 
   .generate-mnemonic-btn:hover {
-    background: rgba(100, 150, 255, 0.18);
-    border-color: rgba(100, 150, 255, 0.35);
-    box-shadow: 0 0 20px rgba(100, 150, 255, 0.15);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 200, 100, 0.24);
+    color: rgba(255, 200, 100, 0.95);
   }
 
   .input-progress {
@@ -2449,9 +2462,11 @@
 
   .factor-buttons {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 8px;
     margin-top: 12px;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .factor-btn {
@@ -3747,11 +3762,6 @@
     display: flex;
     align-items: center;
     gap: 10px;
-  }
-
-  .speed-min, .speed-max {
-    font-size: 16px;
-    opacity: 0.8;
   }
 
   .speed-slider {
@@ -5286,20 +5296,32 @@
       padding: 20px;
     }
 
+    .quick-login-grid {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .quick-login-btn {
+      padding: 9px 6px;
+      font-size: 12px;
+      min-height: 38px;
+    }
+
     .factor-buttons {
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 6px;
     }
 
     .factor-btn {
-      padding: 10px 6px;
+      padding: 10px 4px;
     }
 
     .factor-num {
-      font-size: 16px;
+      font-size: 15px;
     }
 
     .factor-tier {
-      font-size: 9px;
+      font-size: 8px;
     }
 
     .mnemonic-words {
