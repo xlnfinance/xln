@@ -759,7 +759,7 @@
 
 <div class="view-wrapper" class:embed-mode={embedMode}>
   <!-- Always render both, toggle visibility via CSS -->
-  <div class="user-mode-container" class:hidden={!userMode} class:with-timemachine={$settings.showTimeMachine}>
+  <div class="user-mode-container" class:hidden={!userMode}>
     <UserModePanel
       isolatedEnv={localEnvStore}
       isolatedHistory={localHistoryStore}
@@ -776,7 +776,7 @@
   ></div>
 
   <!-- TimeMachine - Visible in both modes for time-travel debugging -->
-  {#if $settings.showTimeMachine}
+  {#if $settings.showTimeMachine && !userMode}
     <div class="time-machine-bar" class:collapsed class:embed={embedMode} data-position={timeMachinePosition}>
       {#if !embedMode}
         <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
@@ -823,7 +823,8 @@
 <style>
   .view-wrapper {
     width: 100%;
-    height: calc(100vh - 56px); /* Account for topbar (56px) */
+    height: 100dvh;
+    min-height: 100dvh;
     background: #0a0a0a;
     display: flex;
     flex-direction: column;
@@ -836,10 +837,6 @@
     overflow: visible; /* Dropdowns must overlay - scroll is in panel-content */
     padding-bottom: 0;
     background: #0a0a0a;
-  }
-
-  .user-mode-container.with-timemachine {
-    padding-bottom: 52px; /* Space for TimeMachine bar */
   }
 
   .user-mode-container.hidden {
@@ -857,20 +854,21 @@
   }
 
   .view-container.with-timemachine {
-    height: calc(100vh - 56px - 48px); /* Topbar (56px) + TimeMachine (48px) */
+    height: calc(100dvh - 48px);
   }
 
   /* Embed mode - no topbar, just TimeMachine */
   .view-wrapper.embed-mode {
-    height: 100vh;
+    height: 100dvh;
+    min-height: 100dvh;
   }
 
   .view-wrapper.embed-mode .view-container {
-    height: 100vh;
+    height: 100dvh;
   }
 
   .view-wrapper.embed-mode .view-container.with-timemachine {
-    height: calc(100vh - 48px);
+    height: calc(100dvh - 48px);
   }
 
   .view-wrapper.embed-mode :global(.dockview-tabs-container),
