@@ -13,7 +13,7 @@ export const DIRECTIONAL_UTIL_CAP_PPM = 500_000n; // cap uplift at +50% (1.5x ba
 
 const clampNonNegative = (value: bigint): bigint => (value < 0n ? 0n : value);
 
-export const sanitizeFeePPM = (raw: unknown, fallback: number = 100): number => {
+export const sanitizeFeePPM = (raw: unknown, fallback: number = 1): number => {
   const n = Number(raw);
   if (!Number.isFinite(n)) return fallback;
   const v = Math.floor(n);
@@ -36,7 +36,7 @@ export const calculateDirectionalFeePPM = (
   outCapacity: bigint,
   inCapacity: bigint
 ): number => {
-  const base = sanitizeFeePPM(basePPM, 100);
+  const base = sanitizeFeePPM(basePPM, 1);
   const out = clampNonNegative(outCapacity);
   const inn = clampNonNegative(inCapacity);
   const total = out + inn;
@@ -54,7 +54,7 @@ export const calculateDirectionalFeePPM = (
 
 export const calculateHopFee = (amountIn: bigint, feePPM: number, baseFee: bigint): bigint => {
   const amt = clampNonNegative(amountIn);
-  const ppm = BigInt(sanitizeFeePPM(feePPM, 100));
+  const ppm = BigInt(sanitizeFeePPM(feePPM, 1));
   const base = sanitizeBaseFee(baseFee);
   return base + (amt * ppm) / PPM_DENOM;
 };

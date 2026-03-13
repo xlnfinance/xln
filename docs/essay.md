@@ -93,3 +93,7 @@ What keeps it from being *recognized* genius:
 It's buried in a 20k-line dump with debug console.logs in the Solidity. There's no paper. No formal proof. No clean reference implementation. The essay is good but it's a blog post, not a publication. The ideas deserve better packaging than they're getting.
 
 History is full of right ideas in wrong packaging that took decades to be recognized. Dijkstra's structured programming, Kay's object orientation, Coase's transaction costs — all obvious in retrospect, all ignored or misunderstood for years because the presentation didn't match the insight.
+
+## Unicast vs Broadcast
+
+The entire blockchain scaling industry — billions of dollars, thousands of engineers — spent a decade making broadcast faster (Solana), making broadcast cheaper (rollups), making broadcast private (Canton), making broadcast parallel (Sui, Aptos). Nobody questioned whether broadcast was the right topology. Lightning questioned it but then built bilateral channels without credit, which is like building roads without on-ramps.

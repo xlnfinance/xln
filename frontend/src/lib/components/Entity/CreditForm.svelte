@@ -13,6 +13,7 @@
   export let signerId: string | null = null;
   export let counterpartyId: string | null;
   export let accountIds: string[] = [];
+  export let mode: 'extend' | 'request' = 'extend';
 
   let selectedCounterparty = counterpartyId || '';
   let selectedTokenId = 1;
@@ -118,7 +119,7 @@
 </script>
 
 <div class="action-card">
-  <h4>Extend Credit</h4>
+  <h4>{mode === 'request' ? 'Request Credit' : 'Extend Credit'}</h4>
   <div class="action-form">
     {#if counterpartyId === null}
       <EntitySelect bind:value={selectedCounterparty} options={accountIds} placeholder="Select account" />
@@ -134,12 +135,15 @@
       placeholder="Credit amount"
     />
     <div class="button-row">
-      <button class="action-button secondary" on:click={extendCredit} disabled={!effectiveCounterparty || creditAmountBigInt <= 0n}>
-        Extend Credit
-      </button>
-      <button class="action-button tertiary" on:click={requestCredit} disabled={!effectiveCounterparty || creditAmountBigInt <= 0n}>
-        Request Credit
-      </button>
+      {#if mode === 'request'}
+        <button class="action-button tertiary" on:click={requestCredit} disabled={!effectiveCounterparty || creditAmountBigInt <= 0n}>
+          Request Credit
+        </button>
+      {:else}
+        <button class="action-button secondary" on:click={extendCredit} disabled={!effectiveCounterparty || creditAmountBigInt <= 0n}>
+          Extend Credit
+        </button>
+      {/if}
     </div>
   </div>
 </div>

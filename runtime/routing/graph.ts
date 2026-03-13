@@ -86,7 +86,7 @@ export function buildNetworkGraph(
       if (!tokenCapacity || tokenCapacity.outCapacity === 0n) continue;
 
       const baseFee = sanitizeBaseFee(profile.metadata.baseFee);
-      const basePpm = sanitizeFeePPM(profile.metadata.routingFeePPM, 100);
+      const basePpm = sanitizeFeePPM(profile.metadata.routingFeePPM, 1);
       const feePPM = calculateDirectionalFeePPM(
         basePpm,
         tokenCapacity.outCapacity,

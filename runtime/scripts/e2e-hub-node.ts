@@ -693,7 +693,7 @@ const run = async (): Promise<void> => {
     region: resolvedArgs.region,
     signerId: resolvedArgs.signerLabel,
     seed: resolvedArgs.seed,
-    routingFeePPM: 1000,
+    routingFeePPM: 1,
     baseFee: 0n,
     disputeAutoFinalizeMode: resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
     rebalanceBaseFee: 10n ** 17n,

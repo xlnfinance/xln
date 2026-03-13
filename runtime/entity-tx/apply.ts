@@ -931,7 +931,7 @@ export const applyEntityTx = async (
       const {
         matchingStrategy: matchingStrategyRaw = 'amount',
         policyVersion: policyVersionRaw,
-        routingFeePPM = 100,
+        routingFeePPM = 1,
         baseFee = 0n,
         disputeAutoFinalizeMode = 'auto',
         minCollateralThreshold = 0n,
@@ -1257,7 +1257,8 @@ export const applyEntityTx = async (
 
     if (entityTx.type === 'requestWithdrawal') {
       const { handleRequestWithdrawal } = await import('./handlers/request-withdrawal');
-      return { newState: handleRequestWithdrawal(entityState, entityTx), outputs: [] };
+      const result = handleRequestWithdrawal(entityState, entityTx);
+      return { newState: result.newState, outputs: [], mempoolOps: result.mempoolOps };
     }
 
     if (entityTx.type === 'reserve_to_external') {

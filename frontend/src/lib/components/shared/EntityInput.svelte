@@ -308,25 +308,13 @@
   {/if}
 
   <div class="input-wrapper">
-    <input
-      bind:this={inputRef}
-      class:has-selection-overlay={closedSelectionVisible}
-      type="text"
-      value={showDropdown ? inputValue : (closedSelectionVisible ? '' : displayValue)}
-      {placeholder}
-      {disabled}
-      on:focus={handleFocus}
-      on:blur={handleBlur}
-      on:input={handleInputChange}
-      on:keydown={handleKeydown}
-    />
-
-    {#if unresolvedInput && !showDropdown && !value}
-      <span class="selected-badge unresolved" title="Entity not found in gossip">?{unresolvedInput}</span>
-    {/if}
-
     {#if closedSelectionVisible && selectedOption}
-      <div class="selected-overlay" aria-hidden="true">
+      <button
+        class="closed-trigger"
+        type="button"
+        on:click={openPicker}
+        {disabled}
+      >
         {#if selectedOption.avatarUrl}
           <img class="item-avatar" src={selectedOption.avatarUrl} alt="" />
         {:else}
@@ -336,19 +324,40 @@
           <span class="item-name">{selectedOption.displayName}</span>
           <span class="item-id">{selectedOption.id}</span>
         </span>
-      </div>
-    {/if}
+        <span class="closed-trigger-arrow" aria-hidden="true">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </span>
+      </button>
+    {:else}
+      <input
+        bind:this={inputRef}
+        type="text"
+        value={showDropdown ? inputValue : displayValue}
+        {placeholder}
+        {disabled}
+        on:focus={handleFocus}
+        on:blur={handleBlur}
+        on:input={handleInputChange}
+        on:keydown={handleKeydown}
+      />
 
-    <button
-      class="dropdown-toggle"
-      type="button"
-      on:click={openPicker}
-      {disabled}
-    >
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-        <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-      </svg>
-    </button>
+      {#if unresolvedInput && !showDropdown && !value}
+        <span class="selected-badge unresolved" title="Entity not found in gossip">?{unresolvedInput}</span>
+      {/if}
+
+      <button
+        class="dropdown-toggle"
+        type="button"
+        on:click={openPicker}
+        {disabled}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+    {/if}
   </div>
 
   {#if showDropdown && !disabled}
@@ -457,11 +466,6 @@
     transition: border-color 0.15s;
   }
 
-  input.has-selection-overlay {
-    color: transparent;
-    caret-color: transparent;
-  }
-
   input:focus {
     outline: none;
     border-color: #fbbf24;
@@ -488,14 +492,35 @@
     border: 1px dashed #c2410c;
   }
 
-  .selected-overlay {
-    position: absolute;
-    inset: 0 36px 0 0;
+  .closed-trigger {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 0 12px;
-    pointer-events: none;
+    width: 100%;
+    min-height: 46px;
+    padding: 8px 12px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 8px;
+    color: #e7e5e4;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s;
+  }
+
+  .closed-trigger:hover {
+    border-color: #3f3f46;
+  }
+
+  .closed-trigger:focus-visible {
+    outline: none;
+    border-color: #fbbf24;
+  }
+
+  .closed-trigger-arrow {
+    margin-left: auto;
+    color: #78716c;
+    flex-shrink: 0;
   }
 
   .dropdown-toggle {

@@ -6,7 +6,7 @@ const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token']
 const VALID_ACCOUNT_DELTA_VIEW_MODES: readonly AccountDeltaViewMode[] = ['per-token', 'aggregated'] as const;
 const ACCOUNT_BAR_USD_PER_100PX_MIN = 10;
 const ACCOUNT_BAR_USD_PER_100PX_MAX = 10_000;
-const ACCOUNT_BAR_USD_PER_100PX_DEFAULT = 10_000;
+const ACCOUNT_BAR_USD_PER_100PX_DEFAULT = 2_000;
 
 function clampAccountBarUsdPerPx(raw: unknown): number {
   const numeric = Number(raw);

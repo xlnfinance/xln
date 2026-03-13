@@ -188,7 +188,7 @@ export async function handleHtlcPayment(
     const fromNorm = String(fromEntityId || '').toLowerCase();
     const toNorm = String(toEntityId || '').toLowerCase();
     const profile = env.gossip?.getProfiles?.().find((candidate) => candidate.entityId.toLowerCase() === fromNorm);
-    const basePpm = sanitizeFeePPM(profile?.metadata.routingFeePPM ?? 10, 10);
+    const basePpm = sanitizeFeePPM(profile?.metadata.routingFeePPM ?? 1, 1);
     const baseFee = sanitizeBaseFee(profile?.metadata.baseFee ?? 0n);
 
     const account = profile?.accounts.find((candidate) => candidate.counterpartyId.toLowerCase() === toNorm) ?? null;

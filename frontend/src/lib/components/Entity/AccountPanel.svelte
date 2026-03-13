@@ -111,7 +111,6 @@
   })();
   $: hasCommittedFrame = Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
   $: showTokenDetails = hasCommittedFrame && tokenDetails.length > 0;
-  $: currentFrameTxs = Array.isArray(account.currentFrame?.accountTxs) ? account.currentFrame.accountTxs : [];
   $: activityRows = (() => {
     const rows: ActivityRow[] = [];
     if (account.pendingFrame) {
@@ -602,47 +601,6 @@
         {/if}
       </div>
     {/if}
-
-    <div class="proof-card">
-      <div class="proof-header">
-        <span>Frame #{account.currentFrame?.height ?? account.currentHeight ?? 0}</span>
-        <span>{formatTimestamp(Number(account.currentFrame?.timestamp || 0))}</span>
-        {#if account.currentFrame?.stateHash}
-          <code title={account.currentFrame.stateHash}>{account.currentFrame.stateHash.slice(0, 16)}...</code>
-          <span class="proof-ok">✓</span>
-        {/if}
-        {#if hasPendingConsensus}
-          <span class="proof-pending">Consensus pending</span>
-        {:else}
-          <span class="proof-ok">Confirmed</span>
-        {/if}
-        {#if hasQueuedMempool}
-          <span class="proof-pending">Mempool: {mempoolCount} op{mempoolCount === 1 ? '' : 's'}</span>
-        {/if}
-      </div>
-      {#if currentFrameTxs.length > 0}
-        <div class="tx-cards">
-          {#each currentFrameTxs as tx, txIndex (`latest-${txIndex}-${tx.type}`)}
-            <article class="tx-action-card">
-              <div class="tx-action-head">
-                <span class="tx-type tone-{txKindTone(tx.type)}">{txTypeLabel(tx.type)}</span>
-                <span class="tx-idx">#{txIndex + 1}</span>
-              </div>
-              <div class="tx-params">
-                {#each buildActionParams(tx) as param (`${param.label}-${param.value}`)}
-                  <div class="tx-param">
-                    <span class="tx-param-label">{param.label}</span>
-                    <span class="tx-param-value tone-{param.tone || 'default'}">{param.value}</span>
-                  </div>
-                {/each}
-              </div>
-            </article>
-          {/each}
-        </div>
-      {:else}
-        <div class="frame-empty">No account txs in current frame.</div>
-      {/if}
-    </div>
 
     <div class="action-card management-card">
       <h4>Dispute</h4>

@@ -51,9 +51,9 @@
   let selectedRouteIndex = -1;
   let preflightError: string | null = null;
   let repeatIntervalMs = 0;
+  let repeatArmed = false;
   let repeatTimer: ReturnType<typeof setInterval> | null = null;
   let repeatStoppedReason = '';
-  let routeSortMode: 'fee' | 'hops' = 'fee';
   let showFullEntityId = false;
   let payMaxAmount = 0n;
   let payMaxUsd = 0;
@@ -78,13 +78,9 @@
     { value: 10_000, label: 'Repeat 10s' },
     { value: 60_000, label: 'Repeat 1m' },
   ];
-  const ROUTE_SORT_OPTIONS: Array<{ value: 'fee' | 'hops'; label: string }> = [
-    { value: 'fee', label: 'Fee (lowest first)' },
-    { value: 'hops', label: 'Hops (fewest first)' },
-  ];
   // If a hop does not publish fee metadata, use a conservative default so
   // unknown peers cannot appear artificially cheaper than known hubs.
-  const DEFAULT_UNKNOWN_HOP_FEE_PPM = 10_000;
+  const DEFAULT_UNKNOWN_HOP_FEE_PPM = 1;
   const MAX_ROUTES = 100;
   const MAX_CANDIDATE_PATHS = 500;
   const MAX_PATH_HOPS = 6;
@@ -316,7 +312,7 @@
 
   function stopRepeatTimer(reason: string): void {
     clearRepeatTimer();
-    repeatIntervalMs = 0;
+    repeatArmed = false;
     repeatStoppedReason = reason;
   }
 
@@ -361,8 +357,8 @@
 
   const restartRepeatTimer = () => {
     clearRepeatTimer();
+    if (!repeatArmed || repeatIntervalMs <= 0 || selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
     repeatStoppedReason = '';
-    if (repeatIntervalMs <= 0 || selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
     repeatTimer = setInterval(() => {
       if (sendingPayment || findingRoutes) return;
       if (hasPendingOutgoingLock(entityId, targetEntityId, tokenId)) {
@@ -375,6 +371,7 @@
 
   $: if (repeatIntervalMs === 0) {
     clearRepeatTimer();
+    repeatArmed = false;
   }
 
   onDestroy(() => {
@@ -400,6 +397,7 @@
     selectedRouteIndex = -1;
     hostedCheckoutRouteKey = '';
     clearRepeatTimer();
+    repeatArmed = false;
     repeatStoppedReason = '';
   }
 
@@ -848,12 +846,6 @@
 
   function sortRoutesList(input: RouteOption[]): RouteOption[] {
     return [...input].sort((a, b) => {
-      if (routeSortMode === 'hops') {
-        if (a.hops.length !== b.hops.length) return a.hops.length - b.hops.length;
-        if (a.totalFee !== b.totalFee) return a.totalFee < b.totalFee ? -1 : 1;
-        if (a.senderAmount !== b.senderAmount) return a.senderAmount < b.senderAmount ? -1 : 1;
-        return a.path.length - b.path.length;
-      }
       if (a.totalFee !== b.totalFee) return a.totalFee < b.totalFee ? -1 : 1;
       if (a.hops.length !== b.hops.length) return a.hops.length - b.hops.length;
       if (a.senderAmount !== b.senderAmount) return a.senderAmount < b.senderAmount ? -1 : 1;
@@ -884,7 +876,6 @@
     if (!targetEntityId || !amount) return;
 
     findingRoutes = true;
-    routeSortMode = 'fee';
     routes = [];
     selectedRouteIndex = -1;
     preflightError = null;
@@ -1179,6 +1170,7 @@
     if (sendingPayment) return { queued: false, hashlock: null };
 
     sendingPayment = true;
+    let queued = false;
     try {
       const xln = await getXLN();
       const env = currentEnv;
@@ -1246,6 +1238,7 @@
       }
 
       await enqueueEntityInputs(env, [paymentInput]);
+      queued = true;
       console.log(`[Send] ${useHtlc ? 'Hashlock' : 'Direct (unsafe)'} payment sent via:`, route.path.join(' -> '));
       if (hostedCheckoutMode && manual && queuedHashlock) {
         void waitForHostedCheckoutConfirmation(queuedHashlock, persistedStartHeight + 1);
@@ -1261,7 +1254,8 @@
       return { queued: false, hashlock: null };
     } finally {
       sendingPayment = false;
-      if (manual) {
+      if (manual && queued && repeatIntervalMs > 0) {
+        repeatArmed = true;
         restartRepeatTimer();
       }
     }
@@ -1320,19 +1314,13 @@
   function handleRepeatChange(event: Event) {
     const target = event.target as HTMLSelectElement | null;
     repeatIntervalMs = target ? Number(target.value) : 0;
-    restartRepeatTimer();
-  }
-
-  function handleRouteSortChange(event: Event) {
-    const target = event.target as HTMLSelectElement | null;
-    if (!target) return;
-    if (target.value === 'hops' || target.value === 'fee') {
-      routeSortMode = target.value;
-      if (routes.length > 1) {
-        routes = sortRoutesList(routes);
-        selectedRouteIndex = routes.length > 0 ? 0 : -1;
-      }
+    clearRepeatTimer();
+    if (repeatIntervalMs <= 0) {
+      repeatArmed = false;
+      repeatStoppedReason = '';
+      return;
     }
+    repeatStoppedReason = '';
   }
 
   $: hostedCheckoutAutoKey =
@@ -1437,12 +1425,14 @@
 
   <div class="amount-token-row">
     <div class="amount-field">
-      <label>
-        <span>Amount</span>
-        <div class="amount-toolbar">
+      <div class="amount-head-row">
+        <label for="payment-amount-input">
+          <span>Amount</span>
+        </label>
+        <div class="amount-inline-tools">
           <button
             type="button"
-            class="inline-max-link"
+            class="inline-max-link amount-max-link"
             on:click={fillMaxPaymentAmount}
             disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
           >
@@ -1457,9 +1447,10 @@
             />
           </div>
         </div>
-      </label>
-      <div class="amount-input-with-max">
+      </div>
+      <div class="amount-input-shell">
         <input
+          id="payment-amount-input"
           type="text"
           bind:value={amount}
           placeholder="0.00"
@@ -1536,14 +1527,6 @@
       <div class="routes-header">
         <h4>Routes ({routes.length})</h4>
         <div class="route-controls">
-          <label class="route-sort-control">
-            <span>Sort</span>
-            <select value={routeSortMode} on:change={handleRouteSortChange} disabled={sendingPayment || findingRoutes}>
-              {#each ROUTE_SORT_OPTIONS as option}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
           <label class="route-id-toggle">
             <input type="checkbox" bind:checked={showFullEntityId} />
             <span>Show full entity id</span>
@@ -1611,7 +1594,11 @@
     </div>
     {#if repeatIntervalMs > 0}
       <div class="repeat-status">
+        {#if repeatTimer}
         Auto-send every {repeatIntervalMs >= 60000 ? `${Math.floor(repeatIntervalMs / 60000)}m` : `${Math.floor(repeatIntervalMs / 1000)}s`}
+        {:else}
+        Repeat armed. Starts after the next successful payment.
+        {/if}
       </div>
     {:else if repeatStoppedReason}
       <div class="repeat-status repeat-stopped">
@@ -1634,13 +1621,13 @@
     flex-direction: column;
     gap: 16px;
     width: 100%;
-    max-width: 1080px;
+    max-width: 840px;
   }
 
   .recipient-picker-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
+    gap: 12px;
     align-items: end;
   }
 
@@ -1747,19 +1734,27 @@
   .field label {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 12px;
   }
 
-  .amount-toolbar {
-    display: inline-flex;
+  .amount-head-row {
+    display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 12px;
-    min-width: 0;
+    margin-bottom: 6px;
+  }
+
+  .amount-inline-tools {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
   }
 
   .inline-token-select {
-    width: 168px;
+    width: 164px;
     flex-shrink: 0;
   }
 
@@ -1768,22 +1763,18 @@
   }
 
   .inline-token-select :global(.select-trigger) {
-    min-height: 34px;
+    min-height: 40px;
     padding: 8px 10px;
+  }
+
+  .amount-input-shell {
+    position: relative;
   }
 
   .field, .amount-field {
     display: flex;
     flex-direction: column;
     gap: 6px;
-  }
-
-  .amount-input-with-max {
-    position: relative;
-  }
-
-  .amount-input-with-max input {
-    padding-right: 14px;
   }
 
   .inline-max-link {
@@ -1795,6 +1786,10 @@
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
+  }
+
+  .amount-max-link {
+    line-height: 1.2;
   }
 
   .inline-max-link:hover:not(:disabled) {
@@ -1840,12 +1835,12 @@
   }
 
   @media (max-width: 900px) {
-    .amount-field label {
+    .amount-head-row {
       flex-direction: column;
       align-items: flex-start;
     }
 
-    .amount-toolbar {
+    .amount-inline-tools {
       width: 100%;
       justify-content: space-between;
     }
@@ -1983,31 +1978,10 @@
     margin: 0;
   }
 
-  .route-sort-control {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    font-size: 10px;
-    color: #78716c;
-  }
-
-  .route-sort-control select {
-    height: 30px;
-    border-radius: 6px;
-    border: 1px solid #292524;
-    background: #1c1917;
-    color: #e7e5e4;
-    font-size: 11px;
-    padding: 0 8px;
-    font-family: inherit;
-  }
-
   .route-controls {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     flex-wrap: wrap;
     justify-content: flex-end;
   }
