@@ -83,7 +83,7 @@ async function isAccountReady(
 }
 
 async function dismissOnboardingIfVisible(page: Page): Promise<void> {
-  const startUsingButton = page.getByRole('button', { name: /Start using xln|Continue/i }).first();
+  const startUsingButton = page.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
   if (!await startUsingButton.isVisible().catch(() => false)) return;
 
   const riskCheckbox = page.getByRole('checkbox', {

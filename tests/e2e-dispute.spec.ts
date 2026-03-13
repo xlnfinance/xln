@@ -522,14 +522,16 @@ async function queueFundR2CViaUi(
 ): Promise<void> {
   await openEntitySettleWorkspace(page);
 
-  const fundTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Fund$/ }).first();
+  const fundTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Reserve → Collateral$/ }).first();
   await expect(fundTab).toBeVisible({ timeout: 20_000 });
   await fundTab.click();
 
-  const accountInput = page.locator('.settlement-panel .entity-input input').first();
-  await expect(accountInput).toBeVisible({ timeout: 20_000 });
-  await accountInput.fill(counterpartyId);
-  await accountInput.press('Tab');
+  const accountPicker = page.locator('.settlement-panel button.closed-trigger, .settlement-panel input[placeholder="Select account..."]').first();
+  await expect(accountPicker).toBeVisible({ timeout: 20_000 });
+  await accountPicker.click();
+  const accountOption = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();
+  await expect(accountOption).toBeVisible({ timeout: 20_000 });
+  await accountOption.click();
 
   const amountInput = page.locator('.settlement-panel .amount-field input').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
@@ -547,14 +549,16 @@ async function queueWithdrawC2RViaUi(
 ): Promise<void> {
   await openEntitySettleWorkspace(page);
 
-  const withdrawTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Withdraw$/ }).first();
+  const withdrawTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Collateral → Reserve$/ }).first();
   await expect(withdrawTab).toBeVisible({ timeout: 20_000 });
   await withdrawTab.click();
 
-  const accountInput = page.locator('.settlement-panel .entity-input input').first();
-  await expect(accountInput).toBeVisible({ timeout: 20_000 });
-  await accountInput.fill(counterpartyId);
-  await accountInput.press('Tab');
+  const accountPicker = page.locator('.settlement-panel button.closed-trigger, .settlement-panel input[placeholder="Select account..."]').first();
+  await expect(accountPicker).toBeVisible({ timeout: 20_000 });
+  await accountPicker.click();
+  const accountOption = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();
+  await expect(accountOption).toBeVisible({ timeout: 20_000 });
+  await accountOption.click();
 
   const amountInput = page.locator('.settlement-panel .amount-field input').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
@@ -572,14 +576,16 @@ async function queueTransferR2RViaUi(
 ): Promise<void> {
   await openEntitySettleWorkspace(page);
 
-  const transferTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Transfer$/ }).first();
+  const transferTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Reserve → Reserve$/ }).first();
   await expect(transferTab).toBeVisible({ timeout: 20_000 });
   await transferTab.click();
 
-  const recipientInput = page.locator('.settlement-panel .entity-input input').first();
-  await expect(recipientInput).toBeVisible({ timeout: 20_000 });
-  await recipientInput.fill(recipientEntityId);
-  await recipientInput.press('Tab');
+  const recipientPicker = page.locator('.settlement-panel button.closed-trigger, .settlement-panel input[placeholder="Select recipient..."]').first();
+  await expect(recipientPicker).toBeVisible({ timeout: 20_000 });
+  await recipientPicker.click();
+  const recipientOption = page.locator('.dropdown-item').filter({ hasText: recipientEntityId }).first();
+  await expect(recipientOption).toBeVisible({ timeout: 20_000 });
+  await recipientOption.click();
 
   const amountInput = page.locator('.settlement-panel .amount-field input').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
@@ -765,7 +771,7 @@ async function openEntitySettleWorkspace(page: Page, counterpartyId?: string, en
 }
 
 async function assertBatchHistoryVisible(page: Page): Promise<void> {
-  const historyTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^History$/ }).first();
+  const historyTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^History/ }).first();
   await expect(historyTab).toBeVisible({ timeout: 20_000 });
   await historyTab.click();
   const historyTitle = page.locator('.settlement-panel .history-title').first();
@@ -785,10 +791,12 @@ async function startDisputeFromEntitySettle(
   await expect(disputeTab).toBeVisible({ timeout: 15_000 });
   await disputeTab.click();
 
-  const disputeInput = page.locator('.dispute-inline .entity-input input').first();
-  await expect(disputeInput).toBeVisible({ timeout: 15_000 });
-  await disputeInput.fill(counterpartyId);
-  await disputeInput.press('Tab');
+  const disputePicker = page.locator('.dispute-inline button.closed-trigger, .dispute-inline input[placeholder="Select account..."]').first();
+  await expect(disputePicker).toBeVisible({ timeout: 15_000 });
+  await disputePicker.click();
+  const disputeOption = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();
+  await expect(disputeOption).toBeVisible({ timeout: 15_000 });
+  await disputeOption.click();
 
   const disputeButton = page.getByTestId('settle-dispute-start').first();
   await expect(disputeButton).toBeVisible({ timeout: 15_000 });
@@ -999,6 +1007,50 @@ async function readJBatchSnapshot(
       jReplicas,
     };
   }, { entityId, signerId });
+}
+
+async function readSettlementWorkspaceSnapshot(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+): Promise<{
+  exists: boolean;
+  status: string;
+  memo: string;
+  version: number;
+  opTypes: string[];
+}> {
+  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+    const env = (window as Window & {
+      isolatedEnv?: {
+        eReplicas?: Map<string, { state?: { accounts?: Map<string, { settlementWorkspace?: unknown }> } }>;
+      };
+    }).isolatedEnv;
+    const replicas = env?.eReplicas;
+    if (!(replicas instanceof Map)) {
+      return { exists: false, status: '', memo: '', version: 0, opTypes: [] };
+    }
+
+    const key = Array.from(replicas.keys()).find((rawKey) => {
+      const [eid, sid] = String(rawKey).split(':');
+      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+    });
+    const replica = key ? replicas.get(key) : null;
+    const account = replica?.state?.accounts?.get?.(counterpartyId);
+    const workspace = account?.settlementWorkspace as
+      | { status?: unknown; memo?: unknown; version?: unknown; ops?: Array<{ type?: unknown }> }
+      | undefined;
+
+    return {
+      exists: !!workspace,
+      status: String(workspace?.status || ''),
+      memo: String(workspace?.memo || ''),
+      version: Number(workspace?.version || 0),
+      opTypes: Array.isArray(workspace?.ops) ? workspace.ops.map((op) => String(op?.type || '')) : [],
+    };
+  }, { entityId, signerId, counterpartyId });
 }
 
 test.describe('E2E Dispute Flow', () => {
@@ -1218,17 +1270,23 @@ test.describe('E2E Dispute Flow', () => {
       await secondHubPanelBackAfterFund.click();
     }
 
-    // C2R handling: queue withdrawal request and verify state-machine records request_withdrawal.
+    // C2R handling: queue manual settlement workspace and verify state-machine records a c2r settle_propose.
     // (for this account, on-chain C2R execution may happen on counterparty side).
     await timedStep('post_dispute.queue_c2r_withdraw', () => queueWithdrawC2RViaUi(page, secondHubId, '25'));
     await timedStep('post_dispute.open_settle_workspace_c2r', () => openEntitySettleWorkspace(page));
     const signButtonDuringC2R = page.getByTestId('settle-sign-broadcast').first();
     await expect(signButtonDuringC2R).toBeDisabled({ timeout: 30_000 });
-    await timedStep('post_dispute.wait_c2r_request_withdrawal', async () => {
+    await timedStep('post_dispute.wait_c2r_workspace', async () => {
       await expect.poll(async () => {
-        const txs = await readAccountTxTypePresence(page, accountRef.entityId, accountRef.signerId, secondHubId, 'request_withdrawal');
-        return txs.mempool || txs.pending || txs.history;
-      }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBe(true);
+        const workspace = await readSettlementWorkspaceSnapshot(page, accountRef.entityId, accountRef.signerId, secondHubId);
+        return workspace;
+      }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toMatchObject({
+        exists: true,
+        status: 'awaiting_counterparty',
+        memo: 'manual-c2r',
+        version: 1,
+        opTypes: ['c2r'],
+      });
     });
 
     await openEntitySettleWorkspace(page);

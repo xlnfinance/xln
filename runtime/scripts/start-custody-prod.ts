@@ -212,7 +212,7 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
     },
   );
   mirrorChildLogs('custody-daemon', daemonChild);
-  await waitForHttpReady(`http://127.0.0.1:${DAEMON_PORT}/api/health`, daemonChild, 120_000);
+  await waitForHttpReady(`http://127.0.0.1:${DAEMON_PORT}/api/health`, daemonChild, 240_000);
   return daemonChild;
 };
 
@@ -286,7 +286,7 @@ const startCustodyService = async (identity: { entityId: string; signerId: strin
     },
   );
   mirrorChildLogs('custody', custodyChild);
-  await waitForHttpReady(`http://127.0.0.1:${CUSTODY_PORT}/api/me`, custodyChild, 120_000);
+  await waitForHttpReady(`http://127.0.0.1:${CUSTODY_PORT}/api/me`, custodyChild, 240_000);
   return custodyChild;
 };
 
