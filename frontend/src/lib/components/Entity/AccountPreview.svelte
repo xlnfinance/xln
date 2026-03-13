@@ -266,7 +266,7 @@
       if (iAmProposer) return 'Awaiting counterparty signature';
       return 'Awaiting signature';
     }
-    if (status === 'ready_to_submit') return 'Ready to submit';
+    if (status === 'ready_to_submit') return 'Counterparty signed';
     if (status === 'submitted') return 'Submitted on-chain';
     if (status === 'draft') return 'Draft';
     return status.replace(/_/g, ' ');

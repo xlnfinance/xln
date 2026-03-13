@@ -8,7 +8,7 @@
   export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
   export let visualScale: DeltaVisualScale | null = null;
 
-  const CENTER_GAP_PX = 120;
+  const CENTER_GAP_PX = 50;
   const SIDES_GAP_PX = 14;
   const MIN_VISIBLE_SIDE_PX = 0;
 
@@ -180,7 +180,7 @@
     top: 0;
     bottom: 0;
     width: var(--center-gap);
-    background: #000000;
+    background: transparent;
     border: none;
     box-shadow: none;
     z-index: 4;
@@ -285,7 +285,7 @@
 
   .mid.one-sided-sep {
     width: 12px;
-    background: #000000;
+    background: transparent;
     transform: translateX(-6px);
   }
 
