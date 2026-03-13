@@ -8,7 +8,7 @@
   export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
   export let visualScale: DeltaVisualScale | null = null;
 
-  const CENTER_GAP_PX = 42;
+  const CENTER_GAP_PX = 84;
   const SIDES_GAP_PX = 14;
   const MIN_VISIBLE_SIDE_PX = 0;
 
@@ -238,11 +238,15 @@
   .visual-center .shell.out.center-shell {
     right: calc(50% + var(--center-gap) / 2);
     justify-content: flex-end;
+    background: transparent;
+    box-shadow: none;
   }
 
   .visual-center .shell.in.center-shell {
     left: calc(50% + var(--center-gap) / 2);
     justify-content: flex-start;
+    background: transparent;
+    box-shadow: none;
   }
 
   .visual-sides .shell.out.side-shell {

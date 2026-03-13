@@ -665,3 +665,26 @@
 - 2026-03-12: Replaced onboarding wizard with one-pass setup, rounded BrainVault derive ETA to seconds, tightened payment amount/token controls, and renamed asset movement labels to explicit directions.
 
 - 2026-03-12: Added direct `Reserve -> Collateral` and `Collateral -> Reserve` forms under `Assets` without moving the existing `Accounts` flow. The new asset-side forms reuse the same runtime actions, include account picker + exact amount + single-account Max, and kept focused isolated `payment` + `e2r2e` green.
+
+- 2026-03-13
+  - Refined the live wallet UI without changing the underlying asset / settlement flows:
+    - [EntityPanelTabs.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/EntityPanelTabs.svelte) now throttles direct EOA balance reads to one in-flight fetch with a 1000ms floor, keeps EOA balances sourced from the active J-adapter/provider, tightens the Assets ledger copy, trims dead reserve-preset CSS, and keeps the totals row as a true last ledger row.
+    - [PaymentPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/PaymentPanel.svelte) now uses the same slimmer amount shell as the asset bridge inputs, with inline token picker and inline max affordance.
+    - [SettlementPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/SettlementPanel.svelte) now drops the stale "Last J#" status noise, renames the draft section to `Draft Queue`, keeps history as the durable finalized record, and uses the same inline amount/token input pattern.
+    - [OnboardingPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/OnboardingPanel.svelte) trims repeated copy and keeps the one-pass setup form tighter.
+    - [DeltaCapacityBar.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/shared/DeltaCapacityBar.svelte) now uses a wider black center separator with no gray shell in center mode.
+    - [tests/e2e-dispute.spec.ts](/Users/egor/xln/tests/e2e-dispute.spec.ts) now reads the live reserve ledger row instead of a removed reserves card test id.
+  - Re-verified:
+    - `bun x tsc --noEmit`
+    - full CLI scenario suite:
+      - `bun runtime/scenarios/run.ts`
+      - pass log: `/Users/egor/xln/.logs/scenarios-parallel/20260313-055907-332`
+    - focused isolated browser checks:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-e2r2e.spec.ts,frontend/tests/brainvault-default.spec.ts --video=off --trace=off --screenshot=only-on-failure --max-failures=1`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260313-055746-125/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260313-055746-125/e2e-shard-00.log)
+    - isolated dispute check:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-dispute.spec.ts --video=off --trace=off --screenshot=only-on-failure --max-failures=1`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260313-060459-885/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260313-060459-885/e2e-shard-00.log)
+    - full isolated E2E suite:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --video=off --trace=off --screenshot=only-on-failure --max-failures=1`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260313-060614-903/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260313-060614-903/e2e-shard-00.log)

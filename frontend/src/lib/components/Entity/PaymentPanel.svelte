@@ -1736,14 +1736,15 @@
   }
 
   .amount-inline-tools {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 8px;
-    flex-shrink: 0;
+    margin-left: auto;
+    min-width: 0;
   }
 
   .inline-token-select {
-    width: 164px;
+    width: 156px;
     flex-shrink: 0;
   }
 
@@ -1760,12 +1761,23 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding-right: 8px;
+    min-height: 52px;
+    padding: 4px 6px 4px 14px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 10px;
+  }
+
+  .amount-input-shell:focus-within {
+    border-color: #fbbf24;
   }
 
   .amount-input-shell input {
     flex: 1;
     min-width: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
   }
 
   .field, .amount-field {
@@ -1779,8 +1791,8 @@
     background: transparent;
     padding: 0;
     color: #a8a29e;
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
   }
