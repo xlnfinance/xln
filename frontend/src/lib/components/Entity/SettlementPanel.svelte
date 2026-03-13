@@ -1356,18 +1356,6 @@
     color: #9ca3af;
   }
 
-  .batch-pill {
-    background: #7f1d1d;
-    color: #fecaca;
-    border: 1px solid rgba(248, 113, 113, 0.4);
-    border-radius: 999px;
-    font-size: 10px;
-    font-weight: 700;
-    padding: 3px 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
   .batch-status-row {
     margin-top: 12px;
     display: flex;
@@ -1540,39 +1528,12 @@
     border-color: #2e2e2e;
   }
 
-  .batch-preview {
-    margin-top: 10px;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-    gap: 10px;
-  }
-
-  .preview-group {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 8px;
-    border: 1px solid #292524;
-    border-radius: 8px;
-    background: #151310;
-  }
-
   .preview-label {
     font-size: 10px;
     font-weight: 700;
     color: #9ca3af;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-  }
-
-  .preview-item {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #e7e5e4;
-    background: #0c0a09;
-    border: 1px solid #292524;
-    border-radius: 6px;
-    padding: 4px 6px;
   }
 
   .gas-card {
@@ -2054,10 +2015,6 @@
   }
 
   @media (max-width: 900px) {
-    .batch-preview {
-      grid-template-columns: 1fr;
-    }
-
     .gas-presets {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }

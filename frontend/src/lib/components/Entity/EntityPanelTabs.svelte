@@ -613,6 +613,7 @@
   let selectedCollateralToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedReserveToExternalToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedSendAssetToken: ExternalToken | null = null;
+  let selectedAllowAssetToken: ExternalToken | null = null;
 
   type AssetLedgerRow = {
     symbol: string;
@@ -1110,6 +1111,7 @@
   $: selectedCollateralToReserveToken = findReserveTransferTokenBySymbol(collateralToReserveSymbol);
   $: selectedReserveToExternalToken = findReserveTransferTokenBySymbol(reserveToExternalSymbol);
   $: selectedSendAssetToken = findExternalTokenBySymbol(sendAssetSymbol);
+  $: selectedAllowAssetToken = findExternalTokenBySymbol(allowAssetSymbol);
   $: workspaceAccount = (() => {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
     if (!entityId || !workspaceAccountId || !replica?.state?.accounts) return null;
@@ -2100,6 +2102,11 @@
     sendAssetAmount = formatTokenInputAmount(selectedSendAssetToken.balance, selectedSendAssetToken.decimals);
   }
 
+  function fillAllowAssetMax(): void {
+    if (!selectedAllowAssetToken) return;
+    allowAssetAmount = formatTokenInputAmount(selectedAllowAssetToken.balance, selectedAllowAssetToken.decimals);
+  }
+
   function getAssetPrice(symbol: string): number {
     return getAssetUsdPrice(symbol);
   }
@@ -2866,17 +2873,26 @@
                 <h4 class="section-head">Allow Spending</h4>
                 <p class="muted">Approve an ERC20 allowance for another contract or protocol.</p>
                 <div class="asset-form-grid">
-                  <label class="asset-field">
-                    <span>Asset</span>
-                    <select bind:value={allowAssetSymbol} data-testid="asset-allow-symbol">
-                      {#each transferableAssetOptions as token}
-                        <option value={token.symbol}>{token.symbol}</option>
-                      {/each}
-                    </select>
-                  </label>
-                  <label class="asset-field">
+                  <label class="asset-field asset-field-wide">
                     <span>Amount</span>
-                    <input type="text" bind:value={allowAssetAmount} placeholder="0.00" data-testid="asset-allow-amount" />
+                    <div class="asset-amount-shell combined">
+                      <input type="text" bind:value={allowAssetAmount} placeholder="0.00" data-testid="asset-allow-amount" />
+                      <div class="asset-inline-controls">
+                        <button
+                          type="button"
+                          class="asset-max-hint text-link"
+                          on:click={fillAllowAssetMax}
+                          disabled={!selectedAllowAssetToken || selectedAllowAssetToken.balance <= 0n}
+                        >
+                          {selectedAllowAssetToken ? formatInlineFillAmount(selectedAllowAssetToken.balance, selectedAllowAssetToken.decimals) : '0'}
+                        </button>
+                        <select bind:value={allowAssetSymbol} class="asset-token-select-inline compact" data-testid="asset-allow-symbol">
+                          {#each transferableAssetOptions as token}
+                            <option value={token.symbol}>{token.symbol}</option>
+                          {/each}
+                        </select>
+                      </div>
+                    </div>
                   </label>
                 </div>
                 <div class="asset-form-grid">
