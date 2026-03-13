@@ -533,7 +533,7 @@ async function queueFundR2CViaUi(
   await expect(accountOption).toBeVisible({ timeout: 20_000 });
   await accountOption.click();
 
-  const amountInput = page.locator('.settlement-panel .amount-field input').first();
+  const amountInput = page.locator('.settlement-panel .settle-amount-shell input').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await amountInput.fill(amount);
 
@@ -560,7 +560,7 @@ async function queueWithdrawC2RViaUi(
   await expect(accountOption).toBeVisible({ timeout: 20_000 });
   await accountOption.click();
 
-  const amountInput = page.locator('.settlement-panel .amount-field input').first();
+  const amountInput = page.locator('.settlement-panel .settle-amount-shell input').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await amountInput.fill(amount);
 
@@ -587,7 +587,7 @@ async function queueTransferR2RViaUi(
   await expect(recipientOption).toBeVisible({ timeout: 20_000 });
   await recipientOption.click();
 
-  const amountInput = page.locator('.settlement-panel .amount-field input').first();
+  const amountInput = page.locator('.settlement-panel .settle-amount-shell input').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await amountInput.fill(amount);
 

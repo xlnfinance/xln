@@ -748,9 +748,12 @@ export async function processSettleAction(
         account.settlementWorkspace.nonceAtSign = settleAction.nonceAtSign;
       }
 
-      // Update status
-      const myHanko = iAmLeft ? account.settlementWorkspace.leftHanko : account.settlementWorkspace.rightHanko;
-      if (myHanko) {
+      // Mark the workspace submit-ready only for the elected executor side.
+      // settle_execute submits the counterparty's signed proof into jBatch; it does not
+      // require a second local hanko on the executor path. If we gate on "my hanko exists"
+      // here, proposer-driven C2R flows get stuck forever after the counterparty approves.
+      const iAmExecutor = account.settlementWorkspace.executorIsLeft === iAmLeft;
+      if (iAmExecutor) {
         account.settlementWorkspace.status = 'ready_to_submit';
       }
 

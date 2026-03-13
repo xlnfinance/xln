@@ -5,18 +5,20 @@
  * 1. Reset to the shared 3-hub baseline and create one fresh browser runtime.
  * 2. Use the visible asset faucet form to mint classic ERC20 funds to the signer EOA.
  * 3. Deposit those external ERC20 funds into Depository.sol through the visible Deposit form.
- * 4. Verify the reserve credit from both saved runtime frame logs and rendered HTML balances.
- * 5. Withdraw part of the reserve balance back to the same external EOA through the visible Withdraw form.
- * 6. Verify the reserve decrease and external balance recovery from both saved frame logs and rendered HTML.
+ * 4. Open one real hub account and move reserve into collateral through the visible Assets flow.
+ * 5. Move part of that collateral back to reserve through the same visible Assets flow.
+ * 6. Withdraw part of the reserve balance back to the same external EOA through the visible Withdraw form.
+ * 7. Verify every step from both saved runtime frame logs and rendered HTML balances.
  *
  * This test exists to prove the user-facing external wallet route is sound end to end:
  * external ERC20 -> entity reserve -> external ERC20 again.
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL } from './utils/e2e-baseline';
+import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL, waitForNamedHubs } from './utils/e2e-baseline';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
-import { getRenderedExternalBalance, getRenderedReserveBalance } from './utils/e2e-account-ui';
+import { connectRuntimeToHub } from './utils/e2e-connect';
+import { getRenderedAccountSpendableBalance, getRenderedExternalBalance, getRenderedReserveBalance } from './utils/e2e-account-ui';
 import {
   getPersistedReceiptCursor,
   waitForPersistedFrameEventMatch,
@@ -58,6 +60,12 @@ async function refreshReserveBalance(page: Page, symbol: string): Promise<number
   await openAssetsTab(page);
   await page.getByTestId('asset-ledger-refresh').first().click();
   return getRenderedReserveBalance(page, symbol);
+}
+
+async function refreshAccountSpendableBalance(page: Page, symbol: string): Promise<number> {
+  await openAssetsTab(page);
+  await page.getByTestId('asset-ledger-refresh').first().click();
+  return getRenderedAccountSpendableBalance(page, symbol);
 }
 
 async function getActiveRuntimeId(page: Page): Promise<string> {
@@ -142,14 +150,15 @@ test.describe('E2R2E External Reserve Route', () => {
     });
 
     let entityId = '';
+    let identity: { entityId: string; signerId: string; runtimeId: string } | null = null;
     await timedStep('e2r2e.runtime', async () => {
       await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
       await page.evaluate((apiBaseUrl: string) => {
         (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__ = apiBaseUrl;
         localStorage.setItem('xln-api-base-url', apiBaseUrl);
       }, API_BASE_URL);
-      const user = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
-      entityId = user.entityId;
+      identity = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
+      entityId = identity.entityId;
     });
 
     const symbol = 'USDC';
@@ -159,12 +168,21 @@ test.describe('E2R2E External Reserve Route', () => {
     let externalAfterDeposit = 0;
     let withdrawWhole = 0;
     let runtimeId = '';
+    let accountSpendableAfterR2C = 0;
 
     await timedStep('e2r2e.read-initial-balances', async () => {
       runtimeId = await getActiveRuntimeId(page);
       externalBeforeFaucet = await refreshExternalBalance(page, symbol);
       const reserveBefore = await refreshReserveBalance(page, symbol);
       expect(reserveBefore).toBeGreaterThanOrEqual(0);
+    });
+
+    await timedStep('e2r2e.open-account', async () => {
+      expect(identity, 'runtime identity must exist').not.toBeNull();
+      const hubsByName = await waitForNamedHubs(page, ['H1'], { timeoutMs: ROUTE_TIMEOUT_MS });
+      await connectRuntimeToHub(page, { entityId, signerId: identity!.signerId }, hubsByName.h1);
+      const spendableBefore = await refreshAccountSpendableBalance(page, symbol);
+      expect(spendableBefore).toBeGreaterThanOrEqual(0);
     });
 
     await timedStep('e2r2e.external-faucet', async () => {
@@ -201,6 +219,86 @@ test.describe('E2R2E External Reserve Route', () => {
         .poll(async () => refreshExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
         .toBeLessThan(externalAfterFaucet);
       externalAfterDeposit = await refreshExternalBalance(page, symbol);
+    });
+
+    await timedStep('e2r2e.reserve-to-collateral', async () => {
+      const cursor = await getPersistedReceiptCursor(page);
+      const moveWhole = Math.max(1, Math.floor(reserveAfterDeposit / 2));
+      await openAssetsTab(page);
+      await page.getByTestId('asset-tab-r2c').first().click();
+      await page.getByTestId('reserve-to-collateral-symbol').selectOption(symbol);
+      await page.getByTestId('reserve-to-collateral-amount').fill(String(moveWhole));
+      await page.getByTestId(`reserve-to-collateral-${symbol}`).first().click();
+
+      await waitForPersistedFrameEventMatch(page, {
+        cursor,
+        eventName: 'JBatchQueued',
+        entityId,
+        timeoutMs: ROUTE_TIMEOUT_MS,
+        predicate: (event) => Number(event.data?.batchSize || 0) > 0,
+      });
+
+      await waitForPersistedFrameEventMatch(page, {
+        cursor,
+        eventName: 'JEventReceived',
+        entityId,
+        timeoutMs: ROUTE_TIMEOUT_MS,
+        predicate: (event) => String(event.data?.eventType || '') === 'AccountSettled',
+      });
+
+      await expect
+        .poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeLessThan(reserveAfterDeposit);
+      const reserveAfterR2C = await refreshReserveBalance(page, symbol);
+
+      await expect
+        .poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(0);
+      accountSpendableAfterR2C = await refreshAccountSpendableBalance(page, symbol);
+
+      expect(reserveAfterR2C).toBeLessThan(reserveAfterDeposit);
+      expect(accountSpendableAfterR2C).toBeGreaterThan(0);
+      reserveAfterDeposit = reserveAfterR2C;
+    });
+
+    await timedStep('e2r2e.collateral-to-reserve', async () => {
+      const cursor = await getPersistedReceiptCursor(page);
+      const moveWhole = Math.max(1, Math.floor(accountSpendableAfterR2C / 2));
+      await openAssetsTab(page);
+      await page.getByTestId('asset-tab-c2r').first().click();
+      await page.getByTestId('collateral-to-reserve-symbol').selectOption(symbol);
+      await page.getByTestId('collateral-to-reserve-amount').fill(String(moveWhole));
+      await page.getByTestId(`collateral-to-reserve-${symbol}`).first().click();
+
+      await waitForPersistedFrameEventMatch(page, {
+        cursor,
+        eventName: 'JBatchQueued',
+        entityId,
+        timeoutMs: ROUTE_TIMEOUT_MS,
+        predicate: (event) => Number(event.data?.batchSize || 0) > 0,
+      });
+
+      await waitForPersistedFrameEventMatch(page, {
+        cursor,
+        eventName: 'JEventReceived',
+        entityId,
+        timeoutMs: ROUTE_TIMEOUT_MS,
+        predicate: (event) => String(event.data?.eventType || '') === 'AccountSettled',
+      });
+
+      await expect
+        .poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(reserveAfterDeposit);
+      const reserveAfterC2R = await refreshReserveBalance(page, symbol);
+
+      await expect
+        .poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeLessThan(accountSpendableAfterR2C);
+      const accountSpendableAfterC2R = await refreshAccountSpendableBalance(page, symbol);
+
+      expect(reserveAfterC2R).toBeGreaterThan(reserveAfterDeposit);
+      expect(accountSpendableAfterC2R).toBeLessThan(accountSpendableAfterR2C);
+      reserveAfterDeposit = reserveAfterC2R;
     });
 
     await timedStep('e2r2e.withdraw-to-external', async () => {

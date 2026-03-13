@@ -1425,10 +1425,18 @@
 
   <div class="amount-token-row">
     <div class="amount-field">
-      <div class="amount-head-row">
-        <label for="payment-amount-input">
-          <span>Amount</span>
-        </label>
+      <label for="payment-amount-input">
+        <span>Amount</span>
+      </label>
+      <div class="amount-input-shell">
+        <input
+          id="payment-amount-input"
+          type="text"
+          bind:value={amount}
+          placeholder="0.00"
+          disabled={findingRoutes || sendingPayment}
+          on:input={handleAmountInput}
+        />
         <div class="amount-inline-tools">
           <button
             type="button"
@@ -1436,7 +1444,7 @@
             on:click={fillMaxPaymentAmount}
             disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
           >
-            Max: {formatTokenNumberOnly(payMaxAmount)} {getTokenSymbol(tokenId)} ({formatUsdHint(payMaxUsd)})
+            {formatTokenNumberOnly(payMaxAmount)} {getTokenSymbol(tokenId)} ({formatUsdHint(payMaxUsd)})
           </button>
           <div class="inline-token-select">
             <TokenSelect
@@ -1447,16 +1455,6 @@
             />
           </div>
         </div>
-      </div>
-      <div class="amount-input-shell">
-        <input
-          id="payment-amount-input"
-          type="text"
-          bind:value={amount}
-          placeholder="0.00"
-          disabled={findingRoutes || sendingPayment}
-          on:input={handleAmountInput}
-        />
       </div>
     </div>
   </div>
@@ -1737,20 +1735,11 @@
     gap: 12px;
   }
 
-  .amount-head-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 6px;
-  }
-
   .amount-inline-tools {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
-    flex-wrap: wrap;
+    gap: 8px;
+    flex-shrink: 0;
   }
 
   .inline-token-select {
@@ -1768,7 +1757,15 @@
   }
 
   .amount-input-shell {
-    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-right: 8px;
+  }
+
+  .amount-input-shell input {
+    flex: 1;
+    min-width: 0;
   }
 
   .field, .amount-field {
@@ -1781,7 +1778,7 @@
     border: none;
     background: transparent;
     padding: 0;
-    color: #a5b4fc;
+    color: #a8a29e;
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
@@ -1835,14 +1832,10 @@
   }
 
   @media (max-width: 900px) {
-    .amount-head-row {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-
     .amount-inline-tools {
       width: 100%;
       justify-content: space-between;
+      flex-wrap: wrap;
     }
 
     .inline-token-select {

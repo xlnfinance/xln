@@ -592,7 +592,6 @@
   let transferableAssetOptions: Array<ExternalToken & { tokenId: number }> = [];
   let assetLedgerRows: AssetLedgerRow[] = [];
   let accountSpendableByToken = new Map<number, bigint>();
-  let reserveExternalDrafts = new Map<number, string>();
   let pendingAssetBridgeSync: {
     tokenId: number;
     symbol: string;
@@ -741,35 +740,6 @@
     return `${whole.toString()}.${frac.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
   }
 
-  function readReserveExternalDraft(tokenId: number): string {
-    return reserveExternalDrafts.get(tokenId) ?? '';
-  }
-
-  function writeReserveExternalDraft(tokenId: number, value: string): void {
-    reserveExternalDrafts = new Map(reserveExternalDrafts).set(tokenId, value);
-  }
-
-  function applyReserveExternalPreset(tokenId: number, percent: 25 | 50 | 75 | 100): void {
-    const reserveAmount = onchainReserves.get(tokenId) ?? 0n;
-    const info = resolveReserveTokenMeta(tokenId);
-    const presetAmount = percent === 100
-      ? reserveAmount
-      : (reserveAmount * BigInt(percent)) / 100n;
-    writeReserveExternalDraft(tokenId, formatTokenInputAmount(presetAmount, info.decimals));
-  }
-
-  function parsePositiveReserveExternalAmount(tokenId: number): bigint {
-    const raw = readReserveExternalDraft(tokenId).trim();
-    if (!raw) throw new Error('Amount is required');
-    if (!/^(?:\d+|\d+\.\d*|\.\d+)$/.test(raw)) throw new Error('Invalid amount format');
-    const info = resolveReserveTokenMeta(tokenId);
-    const parsed = parseTokenAmount(raw, info.decimals);
-    if (parsed <= 0n) throw new Error('Amount must be greater than zero');
-    const reserveAmount = onchainReserves.get(tokenId) ?? 0n;
-    if (parsed > reserveAmount) throw new Error('Amount exceeds reserve balance');
-    return parsed;
-  }
-
   async function resolveCurrentExternalAddress(): Promise<string> {
     const signerId = String(tab.signerId || '').trim();
     if (isAddress(signerId)) return signerId;
@@ -817,7 +787,6 @@
         ],
       }]);
 
-      writeReserveExternalDraft(tokenId, '');
       pendingAssetBridgeSync = {
         tokenId,
         symbol: info.symbol,
@@ -1578,6 +1547,7 @@
       const withdrawable = getWorkspaceWithdrawableCollateral(token.tokenId);
       const amount = parsePositiveAssetAmount(collateralToReserveAmount, token, withdrawable);
       await collateralToReserve(token.tokenId, amount);
+      collateralToReserveAmount = '';
     } catch (err) {
       toasts.error(`Collateral → Reserve failed: ${toErrorMessage(err, 'Unknown error')}`);
     }
@@ -2569,13 +2539,13 @@
             <div class="token-table-row asset-ledger-row asset-ledger-total" data-testid="asset-ledger-total">
               <div class="col-token asset-ledger-total-label">
                 <div class="asset-name-block">
-                  <span class="token-name">Net Worth {formatApproxUsd(assetLedgerGrandTotal)}</span>
-                  <span class="asset-kind">External + reserve + accounts</span>
+                  <span class="token-name">Net Worth</span>
+                  <span class="asset-kind">{formatApproxUsd(assetLedgerGrandTotal)} across all assets</span>
                 </div>
               </div>
               <div class="col-balance asset-balance-block">
                 <span class="balance-text">{formatApproxUsd(assetLedgerTotals.externalUsd)}</span>
-                <span class="value-text subtle">External</span>
+                  <span class="value-text subtle">External</span>
               </div>
               <div class="col-balance asset-balance-block">
                 <span class="balance-text">{formatApproxUsd(assetLedgerTotals.reserveUsd)}</span>
@@ -2651,35 +2621,32 @@
               {:else if assetWorkspaceTab === 'e2r'}
                 <h4 class="section-head">External → Reserve</h4>
                 <p class="muted">Deposit ERC20 from your signer wallet into entity reserves.</p>
-                <div class="asset-amount-row">
-                  <label class="asset-field asset-amount-field">
-                    <span>Amount</span>
-                    <div class="asset-amount-shell">
-                      <input
-                        type="text"
-                        bind:value={externalToReserveAmount}
-                        placeholder="0.00"
-                        data-testid="external-to-reserve-amount"
-                      />
+                <label class="asset-field asset-field-wide">
+                  <span>Amount</span>
+                  <div class="asset-amount-shell combined">
+                    <input
+                      type="text"
+                      bind:value={externalToReserveAmount}
+                      placeholder="0.00"
+                      data-testid="external-to-reserve-amount"
+                    />
+                    <div class="asset-inline-controls">
                       <button
                         type="button"
-                        class="asset-max-hint"
+                        class="asset-max-hint text-link"
                         on:click={fillExternalToReserveMax}
                         disabled={!selectedExternalToReserveToken || selectedExternalToReserveToken.balance <= 0n}
                       >
                         {selectedExternalToReserveToken ? `${formatAmount(selectedExternalToReserveToken.balance, selectedExternalToReserveToken.decimals)} ${selectedExternalToReserveToken.symbol}` : '0'}
                       </button>
+                      <select class="asset-token-select-inline compact" bind:value={externalToReserveSymbol} data-testid="external-to-reserve-symbol">
+                        {#each transferableAssetOptions as token}
+                          <option value={token.symbol}>{token.symbol}</option>
+                        {/each}
+                      </select>
                     </div>
-                  </label>
-                  <label class="asset-field asset-token-field">
-                    <span>Asset</span>
-                    <select class="asset-token-select-inline" bind:value={externalToReserveSymbol} data-testid="external-to-reserve-symbol">
-                      {#each transferableAssetOptions as token}
-                        <option value={token.symbol}>{token.symbol}</option>
-                      {/each}
-                    </select>
-                  </label>
-                </div>
+                  </div>
+                </label>
                 <div class="asset-action-row">
                   <button
                     class="btn-table-action deposit"
@@ -2707,35 +2674,32 @@
                     />
                   </div>
                 </div>
-                <div class="asset-amount-row">
-                  <label class="asset-field asset-amount-field">
-                    <span>Amount</span>
-                    <div class="asset-amount-shell">
-                      <input
-                        type="text"
-                        bind:value={reserveToCollateralAmount}
-                        placeholder="0.00"
-                        data-testid="reserve-to-collateral-amount"
-                      />
+                <label class="asset-field asset-field-wide">
+                  <span>Amount</span>
+                  <div class="asset-amount-shell combined">
+                    <input
+                      type="text"
+                      bind:value={reserveToCollateralAmount}
+                      placeholder="0.00"
+                      data-testid="reserve-to-collateral-amount"
+                    />
+                    <div class="asset-inline-controls">
                       <button
                         type="button"
-                        class="asset-max-hint"
+                        class="asset-max-hint text-link"
                         on:click={fillReserveToCollateralMax}
                         disabled={!selectedReserveToCollateralToken || (onchainReserves.get(selectedReserveToCollateralToken.tokenId) ?? 0n) <= 0n}
                       >
                         {#if selectedReserveToCollateralToken}{formatAmount(onchainReserves.get(selectedReserveToCollateralToken.tokenId) ?? 0n, selectedReserveToCollateralToken.decimals)} {selectedReserveToCollateralToken.symbol}{:else}0{/if}
                       </button>
+                      <select class="asset-token-select-inline compact" bind:value={reserveToCollateralSymbol} data-testid="reserve-to-collateral-symbol">
+                        {#each transferableAssetOptions as token}
+                          <option value={token.symbol}>{token.symbol}</option>
+                        {/each}
+                      </select>
                     </div>
-                  </label>
-                  <label class="asset-field asset-token-field">
-                    <span>Asset</span>
-                    <select class="asset-token-select-inline" bind:value={reserveToCollateralSymbol} data-testid="reserve-to-collateral-symbol">
-                      {#each transferableAssetOptions as token}
-                        <option value={token.symbol}>{token.symbol}</option>
-                      {/each}
-                    </select>
-                  </label>
-                </div>
+                  </div>
+                </label>
                 <div class="asset-action-row">
                   <button
                     class="btn-table-action deposit"
@@ -2763,35 +2727,32 @@
                     />
                   </div>
                 </div>
-                <div class="asset-amount-row">
-                  <label class="asset-field asset-amount-field">
-                    <span>Amount</span>
-                    <div class="asset-amount-shell">
-                      <input
-                        type="text"
-                        bind:value={collateralToReserveAmount}
-                        placeholder="0.00"
-                        data-testid="collateral-to-reserve-amount"
-                      />
+                <label class="asset-field asset-field-wide">
+                  <span>Amount</span>
+                  <div class="asset-amount-shell combined">
+                    <input
+                      type="text"
+                      bind:value={collateralToReserveAmount}
+                      placeholder="0.00"
+                      data-testid="collateral-to-reserve-amount"
+                    />
+                    <div class="asset-inline-controls">
                       <button
                         type="button"
-                        class="asset-max-hint"
+                        class="asset-max-hint text-link"
                         on:click={fillCollateralToReserveMax}
                         disabled={!selectedCollateralToReserveToken || getWorkspaceWithdrawableCollateral(selectedCollateralToReserveToken.tokenId) <= 0n}
                       >
                         {#if selectedCollateralToReserveToken}{formatAmount(getWorkspaceWithdrawableCollateral(selectedCollateralToReserveToken.tokenId), selectedCollateralToReserveToken.decimals)} {selectedCollateralToReserveToken.symbol}{:else}0{/if}
                       </button>
+                      <select class="asset-token-select-inline compact" bind:value={collateralToReserveSymbol} data-testid="collateral-to-reserve-symbol">
+                        {#each transferableAssetOptions as token}
+                          <option value={token.symbol}>{token.symbol}</option>
+                        {/each}
+                      </select>
                     </div>
-                  </label>
-                  <label class="asset-field asset-token-field">
-                    <span>Asset</span>
-                    <select class="asset-token-select-inline" bind:value={collateralToReserveSymbol} data-testid="collateral-to-reserve-symbol">
-                      {#each transferableAssetOptions as token}
-                        <option value={token.symbol}>{token.symbol}</option>
-                      {/each}
-                    </select>
-                  </label>
-                </div>
+                  </div>
+                </label>
                 <div class="asset-action-row">
                   <button
                     class="btn-table-action deposit"
@@ -2805,35 +2766,32 @@
               {:else if assetWorkspaceTab === 'r2e'}
                 <h4 class="section-head">Reserve → External</h4>
                 <p class="muted">Withdraw ERC20 from reserve back to your signer wallet.</p>
-                <div class="asset-amount-row">
-                  <label class="asset-field asset-amount-field">
-                    <span>Amount</span>
-                    <div class="asset-amount-shell">
-                      <input
-                        type="text"
-                        bind:value={reserveToExternalAmount}
-                        placeholder="0.00"
-                        data-testid={`reserve-withdraw-input-${reserveToExternalSymbol}`}
-                      />
+                <label class="asset-field asset-field-wide">
+                  <span>Amount</span>
+                  <div class="asset-amount-shell combined">
+                    <input
+                      type="text"
+                      bind:value={reserveToExternalAmount}
+                      placeholder="0.00"
+                      data-testid={`reserve-withdraw-input-${reserveToExternalSymbol}`}
+                    />
+                    <div class="asset-inline-controls">
                       <button
                         type="button"
-                        class="asset-max-hint"
+                        class="asset-max-hint text-link"
                         on:click={fillReserveToExternalMax}
                         disabled={!selectedReserveToExternalToken || (onchainReserves.get(selectedReserveToExternalToken.tokenId) ?? 0n) <= 0n}
                       >
                         {#if selectedReserveToExternalToken}{formatAmount(onchainReserves.get(selectedReserveToExternalToken.tokenId) ?? 0n, selectedReserveToExternalToken.decimals)} {selectedReserveToExternalToken.symbol}{:else}0{/if}
                       </button>
+                      <select class="asset-token-select-inline compact" bind:value={reserveToExternalSymbol} data-testid="reserve-to-external-symbol">
+                        {#each transferableAssetOptions as token}
+                          <option value={token.symbol}>{token.symbol}</option>
+                        {/each}
+                      </select>
                     </div>
-                  </label>
-                  <label class="asset-field asset-token-field">
-                    <span>Asset</span>
-                    <select class="asset-token-select-inline" bind:value={reserveToExternalSymbol} data-testid="reserve-to-external-symbol">
-                      {#each transferableAssetOptions as token}
-                        <option value={token.symbol}>{token.symbol}</option>
-                      {/each}
-                    </select>
-                  </label>
-                </div>
+                  </div>
+                </label>
                 <div class="asset-action-row">
                   <button
                     class="btn-table-action deposit"
@@ -2847,30 +2805,27 @@
               {:else if assetWorkspaceTab === 'send'}
                 <h4 class="section-head">Send From External Wallet</h4>
                 <p class="muted">Transfer native ETH or ERC20 directly from your signer EOA.</p>
-                <div class="asset-amount-row">
-                  <label class="asset-field asset-amount-field">
-                    <span>Amount</span>
-                    <div class="asset-amount-shell">
-                      <input type="text" bind:value={sendAssetAmount} placeholder="0.00" data-testid="asset-send-amount" />
+                <label class="asset-field asset-field-wide">
+                  <span>Amount</span>
+                  <div class="asset-amount-shell combined">
+                    <input type="text" bind:value={sendAssetAmount} placeholder="0.00" data-testid="asset-send-amount" />
+                    <div class="asset-inline-controls">
                       <button
                         type="button"
-                        class="asset-max-hint"
+                        class="asset-max-hint text-link"
                         on:click={fillSendAssetMax}
                         disabled={!selectedSendAssetToken || selectedSendAssetToken.balance <= 0n}
                       >
                         {selectedSendAssetToken ? `${formatAmount(selectedSendAssetToken.balance, selectedSendAssetToken.decimals)} ${selectedSendAssetToken.symbol}` : '0'}
                       </button>
+                      <select class="asset-token-select-inline compact" bind:value={sendAssetSymbol} data-testid="asset-send-symbol">
+                        {#each externalTokens as token}
+                          <option value={token.symbol}>{token.symbol}</option>
+                        {/each}
+                      </select>
                     </div>
-                  </label>
-                  <label class="asset-field asset-token-field">
-                    <span>Asset</span>
-                    <select class="asset-token-select-inline" bind:value={sendAssetSymbol} data-testid="asset-send-symbol">
-                      {#each externalTokens as token}
-                        <option value={token.symbol}>{token.symbol}</option>
-                      {/each}
-                    </select>
-                  </label>
-                </div>
+                  </div>
+                </label>
                 <div class="asset-form-grid">
                   <label class="asset-field asset-field-wide">
                     <span>Recipient EOA</span>
@@ -5197,18 +5152,37 @@
   }
 
   .asset-amount-shell {
-    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 46px;
+    padding: 0 8px 0 12px;
+    border: 1px solid #2f2620;
+    border-radius: 10px;
+    background: #0f0b09;
   }
 
   .asset-amount-shell input {
-    padding-right: 148px;
+    flex: 1;
+    min-width: 0;
+    padding: 12px 0;
+    border: none;
+    background: transparent;
+  }
+
+  .asset-amount-shell input:focus {
+    outline: none;
+  }
+
+  .asset-inline-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    min-width: 0;
   }
 
   .asset-max-hint {
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    transform: translateY(-50%);
     border: none;
     background: transparent;
     padding: 0;
@@ -5222,6 +5196,10 @@
     text-align: right;
   }
 
+  .asset-max-hint.text-link {
+    min-width: 0;
+  }
+
   .asset-max-hint:hover:not(:disabled) {
     color: #f5f5f4;
   }
@@ -5233,6 +5211,13 @@
 
   .asset-token-select-inline {
     min-height: 44px;
+    min-width: 116px;
+  }
+
+  .asset-token-select-inline.compact {
+    min-height: 38px;
+    padding: 8px 12px;
+    border-radius: 10px;
   }
 
   .asset-action-row {
