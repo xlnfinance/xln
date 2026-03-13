@@ -2569,8 +2569,8 @@
             <div class="token-table-row asset-ledger-row asset-ledger-total" data-testid="asset-ledger-total">
               <div class="col-token asset-ledger-total-label">
                 <div class="asset-name-block">
-                  <span class="token-name">Net Worth</span>
-                  <span class="asset-kind">All tracked assets</span>
+                  <span class="token-name">Net Worth {formatApproxUsd(assetLedgerGrandTotal)}</span>
+                  <span class="asset-kind">External + reserve + accounts</span>
                 </div>
               </div>
               <div class="col-balance asset-balance-block">
@@ -2652,14 +2652,6 @@
                 <h4 class="section-head">External → Reserve</h4>
                 <p class="muted">Deposit ERC20 from your signer wallet into entity reserves.</p>
                 <div class="asset-amount-row">
-                  <label class="asset-field asset-token-field">
-                    <span>Asset</span>
-                    <select class="asset-token-select-inline" bind:value={externalToReserveSymbol} data-testid="external-to-reserve-symbol">
-                      {#each transferableAssetOptions as token}
-                        <option value={token.symbol}>{token.symbol}</option>
-                      {/each}
-                    </select>
-                  </label>
                   <label class="asset-field asset-amount-field">
                     <span>Amount</span>
                     <div class="asset-amount-shell">
@@ -2678,6 +2670,14 @@
                         {selectedExternalToReserveToken ? `${formatAmount(selectedExternalToReserveToken.balance, selectedExternalToReserveToken.decimals)} ${selectedExternalToReserveToken.symbol}` : '0'}
                       </button>
                     </div>
+                  </label>
+                  <label class="asset-field asset-token-field">
+                    <span>Asset</span>
+                    <select class="asset-token-select-inline" bind:value={externalToReserveSymbol} data-testid="external-to-reserve-symbol">
+                      {#each transferableAssetOptions as token}
+                        <option value={token.symbol}>{token.symbol}</option>
+                      {/each}
+                    </select>
                   </label>
                 </div>
                 <div class="asset-action-row">
@@ -2708,14 +2708,6 @@
                   </div>
                 </div>
                 <div class="asset-amount-row">
-                  <label class="asset-field asset-token-field">
-                    <span>Asset</span>
-                    <select class="asset-token-select-inline" bind:value={reserveToCollateralSymbol} data-testid="reserve-to-collateral-symbol">
-                      {#each transferableAssetOptions as token}
-                        <option value={token.symbol}>{token.symbol}</option>
-                      {/each}
-                    </select>
-                  </label>
                   <label class="asset-field asset-amount-field">
                     <span>Amount</span>
                     <div class="asset-amount-shell">
@@ -2734,6 +2726,14 @@
                         {#if selectedReserveToCollateralToken}{formatAmount(onchainReserves.get(selectedReserveToCollateralToken.tokenId) ?? 0n, selectedReserveToCollateralToken.decimals)} {selectedReserveToCollateralToken.symbol}{:else}0{/if}
                       </button>
                     </div>
+                  </label>
+                  <label class="asset-field asset-token-field">
+                    <span>Asset</span>
+                    <select class="asset-token-select-inline" bind:value={reserveToCollateralSymbol} data-testid="reserve-to-collateral-symbol">
+                      {#each transferableAssetOptions as token}
+                        <option value={token.symbol}>{token.symbol}</option>
+                      {/each}
+                    </select>
                   </label>
                 </div>
                 <div class="asset-action-row">
@@ -2764,14 +2764,6 @@
                   </div>
                 </div>
                 <div class="asset-amount-row">
-                  <label class="asset-field asset-token-field">
-                    <span>Asset</span>
-                    <select class="asset-token-select-inline" bind:value={collateralToReserveSymbol} data-testid="collateral-to-reserve-symbol">
-                      {#each transferableAssetOptions as token}
-                        <option value={token.symbol}>{token.symbol}</option>
-                      {/each}
-                    </select>
-                  </label>
                   <label class="asset-field asset-amount-field">
                     <span>Amount</span>
                     <div class="asset-amount-shell">
@@ -2791,6 +2783,14 @@
                       </button>
                     </div>
                   </label>
+                  <label class="asset-field asset-token-field">
+                    <span>Asset</span>
+                    <select class="asset-token-select-inline" bind:value={collateralToReserveSymbol} data-testid="collateral-to-reserve-symbol">
+                      {#each transferableAssetOptions as token}
+                        <option value={token.symbol}>{token.symbol}</option>
+                      {/each}
+                    </select>
+                  </label>
                 </div>
                 <div class="asset-action-row">
                   <button
@@ -2806,14 +2806,6 @@
                 <h4 class="section-head">Reserve → External</h4>
                 <p class="muted">Withdraw ERC20 from reserve back to your signer wallet.</p>
                 <div class="asset-amount-row">
-                  <label class="asset-field asset-token-field">
-                    <span>Asset</span>
-                    <select class="asset-token-select-inline" bind:value={reserveToExternalSymbol} data-testid="reserve-to-external-symbol">
-                      {#each transferableAssetOptions as token}
-                        <option value={token.symbol}>{token.symbol}</option>
-                      {/each}
-                    </select>
-                  </label>
                   <label class="asset-field asset-amount-field">
                     <span>Amount</span>
                     <div class="asset-amount-shell">
@@ -2833,6 +2825,14 @@
                       </button>
                     </div>
                   </label>
+                  <label class="asset-field asset-token-field">
+                    <span>Asset</span>
+                    <select class="asset-token-select-inline" bind:value={reserveToExternalSymbol} data-testid="reserve-to-external-symbol">
+                      {#each transferableAssetOptions as token}
+                        <option value={token.symbol}>{token.symbol}</option>
+                      {/each}
+                    </select>
+                  </label>
                 </div>
                 <div class="asset-action-row">
                   <button
@@ -2848,14 +2848,6 @@
                 <h4 class="section-head">Send From External Wallet</h4>
                 <p class="muted">Transfer native ETH or ERC20 directly from your signer EOA.</p>
                 <div class="asset-amount-row">
-                  <label class="asset-field asset-token-field">
-                    <span>Asset</span>
-                    <select class="asset-token-select-inline" bind:value={sendAssetSymbol} data-testid="asset-send-symbol">
-                      {#each externalTokens as token}
-                        <option value={token.symbol}>{token.symbol}</option>
-                      {/each}
-                    </select>
-                  </label>
                   <label class="asset-field asset-amount-field">
                     <span>Amount</span>
                     <div class="asset-amount-shell">
@@ -2869,6 +2861,14 @@
                         {selectedSendAssetToken ? `${formatAmount(selectedSendAssetToken.balance, selectedSendAssetToken.decimals)} ${selectedSendAssetToken.symbol}` : '0'}
                       </button>
                     </div>
+                  </label>
+                  <label class="asset-field asset-token-field">
+                    <span>Asset</span>
+                    <select class="asset-token-select-inline" bind:value={sendAssetSymbol} data-testid="asset-send-symbol">
+                      {#each externalTokens as token}
+                        <option value={token.symbol}>{token.symbol}</option>
+                      {/each}
+                    </select>
                   </label>
                 </div>
                 <div class="asset-form-grid">
