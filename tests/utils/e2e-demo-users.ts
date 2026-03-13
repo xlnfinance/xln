@@ -151,34 +151,33 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
 }
 
 async function dismissOnboardingIfVisible(page: Page): Promise<void> {
-  const checkbox = page.locator('text=I understand and accept the risks of using this software').first();
+  const checkbox = page.getByRole('checkbox', {
+    name: /I understand.*testnet software|I understand and accept the risks/i,
+  }).first();
   if (await checkbox.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await checkbox.click();
-    const continueBtn = page.locator('button:has-text("Continue")').first();
-    if (await continueBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await continueBtn.click();
+    const checked = await checkbox.isChecked().catch(() => false);
+    if (!checked) await checkbox.check();
+    const startBtn = page.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
+    if (await startBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await startBtn.click();
     }
   }
 }
 
 async function completeProfileOnboardingIfVisible(page: Page, label: string): Promise<void> {
-  const profileHeading = page.getByRole('heading', { name: 'Your Public Profile', exact: true });
+  const profileHeading = page.getByRole('heading', { name: 'Public profile', exact: true });
   if (!await profileHeading.isVisible({ timeout: 1000 }).catch(() => false)) {
     return;
   }
 
-  const displayNameInput = page.getByRole('textbox', { name: /e\.g\. Alice, CryptoShop, MyExchange/i }).first();
+  const displayNameInput = page.getByRole('textbox', { name: /Display name/i }).first();
   await expect(displayNameInput).toBeVisible({ timeout: 15_000 });
   const currentValue = (await displayNameInput.inputValue()).trim();
   if (currentValue.length === 0) {
     await displayNameInput.fill(label);
   }
 
-  const continueButton = page.getByRole('button', { name: /Continue/i }).first();
-  await expect(continueButton).toBeEnabled({ timeout: 15_000 });
-  await continueButton.click();
-
-  const finishButton = page.getByRole('button', { name: /Start Using xln/i }).first();
+  const finishButton = page.getByRole('button', { name: /Start( using xln)?/i }).first();
   await expect(finishButton).toBeVisible({ timeout: 15_000 });
   await expect(finishButton).toBeEnabled({ timeout: 15_000 });
   await finishButton.click();

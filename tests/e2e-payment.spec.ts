@@ -155,13 +155,13 @@ test.describe('E2E HTLC Payment Flow', () => {
     await expect(hashlockModeBtn).toHaveAttribute('aria-pressed', 'true');
     process.stdout.write('  HTLC mode: ON\n');
 
-    // Fill recipient
-    const recipientInput = page.getByRole('textbox', { name: 'Select recipient...' });
-    await recipientInput.click();
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-    await page.keyboard.press('Backspace');
-    await recipientInput.fill(connectedHubId!);
-    await page.keyboard.press('Enter');
+    // The shared recipient picker now defaults to self. Open it and choose the connected hub.
+    const recipientPicker = page.locator('button.closed-trigger, input[placeholder="Select recipient..."]').first();
+    await expect(recipientPicker).toBeVisible({ timeout: 10_000 });
+    await recipientPicker.click();
+    const recipientOption = page.locator('.dropdown-item').filter({ hasText: connectedHubId! }).first();
+    await expect(recipientOption).toBeVisible({ timeout: 10_000 });
+    await recipientOption.click();
 
     // Fill amount
     const amountInput = page.locator('input[placeholder="0.00"]').first();

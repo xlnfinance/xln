@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { deserializeTaggedJson } from '../serialization-utils';
 
-const DEFAULT_CHILD_READY_TIMEOUT_MS = 60_000;
+const DEFAULT_CHILD_READY_TIMEOUT_MS = 120_000;
 const LOG_TAIL_LINES = 80;
 const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
@@ -133,7 +133,7 @@ export const waitForHttpReady = async (
         `stdout:\n${tailLines(child.stdoutLines)}\n\nstderr:\n${tailLines(child.stderrLines)}`,
       );
     }
-    await sleep(250);
+    await sleep(1000);
   }
 
   if (child) {

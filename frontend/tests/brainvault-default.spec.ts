@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test';
 
 async function completeOnboarding(page: import('@playwright/test').Page): Promise<void> {
-  await expect(page.getByRole('heading', { name: 'Finish your profile' })).toBeVisible({ timeout: 240_000 });
-  const startButton = page.getByRole('button', { name: /start using xln/i });
+  await expect(page.getByRole('heading', { name: 'Public profile' })).toBeVisible({ timeout: 240_000 });
+  const startButton = page.getByRole('button', { name: /^start$/i });
   await expect(startButton).toBeVisible();
   await startButton.click();
   await expect(page.getByTestId('tab-accounts')).toBeVisible({ timeout: 30_000 });
