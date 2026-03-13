@@ -38,7 +38,7 @@ export function sanitizeBigInt(raw: unknown): bigint {
   return normalized < 0n ? 0n : normalized;
 }
 
-export function sanitizeFeePPM(raw: unknown, defaultFeePPM = 10): number {
+export function sanitizeFeePPM(raw: unknown, defaultFeePPM = 1): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return defaultFeePPM;
   const value = Math.floor(n);

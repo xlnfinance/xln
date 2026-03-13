@@ -153,7 +153,7 @@ export function buildEntityProfile(
     relays: [],
     metadata: {
       isHub,
-      routingFeePPM: hubConfig?.routingFeePPM ?? 100, // Default 100 PPM (0.01%)
+      routingFeePPM: hubConfig?.routingFeePPM ?? 1,
       baseFee: hubConfig?.baseFee ?? 0n,
       ...(isHub && hubConfig
         ? {

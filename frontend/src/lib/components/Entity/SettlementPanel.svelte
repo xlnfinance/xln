@@ -32,7 +32,7 @@
   type RuntimeJReplica = RuntimeEnv['jReplicas'] extends Map<string, infer Replica> ? Replica : never;
   type PendingSettleEntityTx =
     | Extract<EntityTx, { type: 'deposit_collateral' }>
-    | Extract<EntityTx, { type: 'requestWithdrawal' }>
+    | Extract<EntityTx, { type: 'settle_propose' }>
     | Extract<EntityTx, { type: 'reserve_to_reserve' }>;
 
   $: activeReplicas = $replicas;
@@ -472,6 +472,16 @@
 
   $: isSelfTransfer = recipientEntityId && recipientEntityId.toLowerCase() === entityId.toLowerCase();
 
+  function isLocalExecutorForWorkspace(counterparty: string, account: AccountMachine | null | undefined): boolean {
+    const workspace = account?.settlementWorkspace;
+    const normalizedEntityId = normalizeEntityId(entityId);
+    const normalizedCounterparty = normalizeEntityId(counterparty);
+    if (!workspace || workspace.status !== 'ready_to_submit' || !normalizedEntityId || !normalizedCounterparty) {
+      return false;
+    }
+    return workspace.executorIsLeft === (normalizedEntityId < normalizedCounterparty);
+  }
+
   $: accountEntityIds = (() => {
     const accounts = replica?.state?.accounts;
     if (!accounts || typeof accounts.keys !== 'function') return [];
@@ -480,7 +490,7 @@
       const value = String(id || '').trim();
       if (value) unique.add(value);
     }
-    return Array.from(unique.values()).sort();
+    return Array.from(unique.values());
   })();
 
   $: transferEntityOptions = (() => {
@@ -496,7 +506,7 @@
     for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
     for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add(profile.entityId);
 
-    return Array.from(ids.values()).sort();
+    return Array.from(ids.values());
   })();
 
   function countBatchOps(batch: BatchShape | undefined | null): number {
@@ -542,12 +552,22 @@
   $: sentOps = countBatchOps(sentBatch?.batch);
   $: hasSentBatch = !!sentBatch;
   $: hasDraftBatch = pendingOps > 0;
+  $: executableSettlementCounterparties = (() => {
+    const accounts = replica?.state?.accounts;
+    if (!(accounts instanceof Map)) return [] as string[];
+    const out: string[] = [];
+    for (const [counterparty, account] of accounts.entries()) {
+      if (isLocalExecutorForWorkspace(counterparty, account)) out.push(String(counterparty));
+    }
+    return out;
+  })();
+  $: executableSettlementCount = executableSettlementCounterparties.length;
   $: latestFinalizedBatch = Array.isArray(batchHistory)
     ? (batchHistory.find((entry) => entry.status !== 'failed') ?? null)
     : null;
   $: hasFinalizedBatch = !!latestFinalizedBatch;
   $: hasAnyBatch = hasSentBatch || hasDraftBatch;
-  $: canBroadcastDraft = hasDraftBatch && !hasSentBatch;
+  $: canBroadcastDraft = !hasSentBatch && (hasDraftBatch || executableSettlementCount > 0);
   $: pendingSummary = batchSummary(jBatch);
   $: sentSummary = batchSummary(sentBatch?.batch);
   $: draftDetailOps = buildBatchDetailOps(jBatch);
@@ -559,11 +579,11 @@
   }));
   $: lifecycleHint = hasSentBatch
     ? `Sent batch nonce #${Number(sentBatch?.entityNonce || 0)} waiting for finalization`
-    : hasDraftBatch
+    : executableSettlementCount > 0
+      ? `${executableSettlementCount} signed settlement${executableSettlementCount === 1 ? '' : 's'} ready to submit`
+      : hasDraftBatch
       ? `Draft contains ${pendingOps} operation${pendingOps === 1 ? '' : 's'}`
-      : hasFinalizedBatch
-        ? `Last finalized batch: J#${Number(latestFinalizedBatch?.jBlockNumber || 0)}`
-        : 'No draft or sent batch';
+      : 'Ready';
 
   function historySummary(entry: CompletedBatch | null | undefined): Array<{ label: string; count: number }> {
     const operations = entry?.operations;
@@ -633,6 +653,14 @@
       const signerId = resolveSignerId(env);
       const feeOverrides = buildFeeOverrides();
       const pendingBatch = replica?.state?.jBatchState?.batch;
+      const entityTxs: EntityTx[] = executableSettlementCounterparties.map((counterpartyEntityId) => ({
+        type: 'settle_execute' as const,
+        data: { counterpartyEntityId },
+      }));
+      entityTxs.push({
+        type: 'j_broadcast',
+        data: feeOverrides ? { feeOverrides } : {},
+      });
       console.error('[settle-ui] broadcastBatch.start', JSON.stringify({
         entityId,
         signerId,
@@ -640,6 +668,7 @@
         canBroadcastDraft,
         hasDraftBatch,
         hasSentBatch,
+        executableSettlementCount,
         sending,
         pendingOps: {
           disputeStarts: Number(pendingBatch?.disputeStarts?.length || 0),
@@ -658,10 +687,7 @@
       await enqueueEntityInputs(env, [{
         entityId,
         signerId,
-        entityTxs: [{
-          type: 'j_broadcast',
-          data: feeOverrides ? { feeOverrides } : {},
-        }],
+        entityTxs,
       }]);
 
       console.error('[settle-ui] broadcastBatch.enqueued', JSON.stringify({ entityId, signerId }));
@@ -723,11 +749,18 @@
       } else if (action === 'withdraw') {
         if (!counterpartyEntityId) throw new Error('Select account to withdraw from');
         entityTx = {
-          type: 'requestWithdrawal' as const,
+          type: 'settle_propose' as const,
           data: {
             counterpartyEntityId,
-            tokenId,
-            amount: parsedAmount,
+            executorIsLeft: normalizeEntityId(entityId) < normalizeEntityId(counterpartyEntityId),
+            memo: 'manual-c2r',
+            ops: [
+              {
+                type: 'c2r',
+                tokenId,
+                amount: parsedAmount,
+              },
+            ],
           },
         };
       } else {
@@ -889,15 +922,19 @@
             Broadcasted batch in-flight + {pendingOps} draft operation{pendingOps === 1 ? '' : 's'}
           {:else if hasSentBatch}
             Broadcasted batch in-flight ({sentOps} operation{sentOps === 1 ? '' : 's'})
+          {:else if executableSettlementCount > 0}
+            {executableSettlementCount} signed settlement{executableSettlementCount === 1 ? '' : 's'} ready
           {:else if hasDraftBatch}
             Draft batch: {pendingOps} operation{pendingOps === 1 ? '' : 's'}
           {:else}
-            No pending on-chain operations
+            Ready for on-chain actions
           {/if}
         </div>
       </div>
       {#if hasSentBatch}
         <span class="batch-pill">Awaiting Finalization</span>
+      {:else if executableSettlementCount > 0}
+        <span class="batch-pill">Ready To Submit</span>
       {:else if hasDraftBatch}
         <span class="batch-pill">Needs Signature</span>
       {/if}
@@ -906,25 +943,25 @@
     <div class="lifecycle-rail" data-testid="settle-lifecycle-rail">
       <div
         class="rail-step"
-        class:active={hasDraftBatch && !hasSentBatch}
-        class:done={hasSentBatch || (!hasDraftBatch && hasFinalizedBatch)}
+        class:active={!hasDraftBatch && !hasSentBatch && executableSettlementCount === 0}
+        class:done={hasDraftBatch || hasSentBatch || executableSettlementCount > 0}
+      >
+        <span class="rail-dot"></span>
+        <span class="rail-label">Ready</span>
+      </div>
+      <div class="rail-line" class:active={hasDraftBatch || hasSentBatch || executableSettlementCount > 0}></div>
+      <div
+        class="rail-step"
+        class:active={hasDraftBatch || executableSettlementCount > 0}
+        class:done={hasSentBatch}
       >
         <span class="rail-dot"></span>
         <span class="rail-label">Draft</span>
       </div>
-      <div class="rail-line" class:active={hasSentBatch || hasFinalizedBatch}></div>
-      <div
-        class="rail-step"
-        class:active={hasSentBatch}
-        class:done={!hasSentBatch && hasFinalizedBatch}
-      >
+      <div class="rail-line" class:active={hasSentBatch}></div>
+      <div class="rail-step" class:active={hasSentBatch}>
         <span class="rail-dot"></span>
         <span class="rail-label">Sent</span>
-      </div>
-      <div class="rail-line" class:active={!hasSentBatch && hasFinalizedBatch}></div>
-      <div class="rail-step" class:active={!hasSentBatch && !hasDraftBatch && hasFinalizedBatch}>
-        <span class="rail-dot"></span>
-        <span class="rail-label">Finalized</span>
       </div>
     </div>
     <div class="lifecycle-hint">{lifecycleHint}</div>
@@ -1093,18 +1130,18 @@
   </div>
 
   <div class="action-tabs">
-    <button class="tab" class:active={action === 'fund'} on:click={() => action = 'fund'} disabled={sending}>Fund</button>
-    <button class="tab" class:active={action === 'withdraw'} on:click={() => action = 'withdraw'} disabled={sending}>Withdraw</button>
-    <button class="tab" class:active={action === 'transfer'} on:click={() => action = 'transfer'} disabled={sending}>Transfer</button>
+    <button class="tab" class:active={action === 'fund'} on:click={() => action = 'fund'} disabled={sending}>Reserve → Collateral</button>
+    <button class="tab" class:active={action === 'withdraw'} on:click={() => action = 'withdraw'} disabled={sending}>Collateral → Reserve</button>
+    <button class="tab" class:active={action === 'transfer'} on:click={() => action = 'transfer'} disabled={sending}>Reserve → Reserve</button>
     <button class="tab" class:active={action === 'dispute'} on:click={() => action = 'dispute'} disabled={sending}>Dispute</button>
-    <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History</button>
+    <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History ({batchHistory.length})</button>
   </div>
 
   <p class="action-desc">
     {#if action === 'fund'}
-      Queue reserve-to-collateral into selected account.
+      Queue reserve-to-collateral into the selected account.
     {:else if action === 'withdraw'}
-      Queue collateral withdrawal request for selected account.
+      Propose a collateral-to-reserve settlement for the selected account.
     {:else if action === 'dispute'}
       Queue dispute start/finalize for selected account.
     {:else if action === 'history'}
@@ -1291,11 +1328,11 @@
       {#if sending}
         Processing...
       {:else if action === 'fund'}
-        Queue Fund (R2C)
+        Queue Reserve → Collateral
       {:else if action === 'withdraw'}
-        Queue Withdraw (C2R)
+        Queue Collateral → Reserve
       {:else}
-        Queue Transfer (R2R)
+        Queue Reserve → Reserve
       {/if}
     </button>
   {/if}

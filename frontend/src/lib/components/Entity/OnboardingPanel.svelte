@@ -280,24 +280,6 @@
 
 <div class="onboarding">
   <div class="setup-card">
-    <header class="setup-header">
-      <div class="identity-block">
-        {#if avatarUrl}
-          <img src={avatarUrl} alt="Entity avatar" class="identity-avatar" />
-        {:else}
-          <div class="identity-avatar placeholder">?</div>
-        {/if}
-        <div class="identity-copy">
-          <h2>Finish your profile</h2>
-          <p class="subtitle">Set your public identity, default limits, and initial hub connectivity in one pass.</p>
-          <div class="identity-meta">
-            <span class="meta-chip">Entity</span>
-            <code>{entityId}</code>
-          </div>
-        </div>
-      </div>
-    </header>
-
     <section class="setup-section">
       <div class="section-headline">
         <h3>Public profile</h3>
@@ -374,21 +356,31 @@
         hard <strong>{defaultHardLimitUsd.toLocaleString()}</strong>,
         fee <strong>{defaultMaxFeeUsd.toLocaleString()}</strong>.
       </p>
-    </section>
-
-    <section class="setup-section">
-      <div class="section-headline">
-        <h3>Initial hub join</h3>
-        <p>Auto-join opens your first bilateral account immediately after setup.</p>
+      <div class="hub-join-inline">
+        <div class="section-headline compact">
+          <h3>Initial hub join</h3>
+          <p>Auto-join opens your first bilateral account immediately after setup.</p>
+        </div>
+        <select class="hub-join-select" bind:value={autoJoinHubs}>
+          {#each HUB_JOIN_OPTIONS as option}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
       </div>
-      <select class="hub-join-select" bind:value={autoJoinHubs}>
-        {#each HUB_JOIN_OPTIONS as option}
-          <option value={option.value}>{option.label}</option>
-        {/each}
-      </select>
     </section>
 
     <section class="setup-section confirm-section">
+      <div class="identity-inline">
+        {#if avatarUrl}
+          <img src={avatarUrl} alt="Entity avatar" class="identity-avatar" />
+        {:else}
+          <div class="identity-avatar placeholder">?</div>
+        {/if}
+        <div class="identity-copy">
+          <span class="meta-chip">Entity</span>
+          <code>{entityId}</code>
+        </div>
+      </div>
       <label class="checkbox-row">
         <input type="checkbox" bind:checked={termsAccepted} />
         <span>I understand this is testnet software and I accept the associated risks.</span>
@@ -398,7 +390,7 @@
       {/if}
       <div class="actions single">
         <button class="btn-primary" disabled={!canFinish || submitting} on:click={finish}>
-          {submitting ? 'Setting up...' : 'Start using xln →'}
+          {submitting ? 'Starting...' : 'Start'}
         </button>
       </div>
     </section>
@@ -414,7 +406,7 @@
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
-    color: var(--theme-text-primary, #e4e4e7);
+    color: #e7e5e4;
   }
 
   .setup-card {
@@ -423,15 +415,14 @@
     gap: 18px;
   }
 
-  .setup-header,
   .setup-section {
-    background: var(--theme-surface, #18181b);
-    border: 1px solid var(--theme-surface-border, #27272a);
+    background: linear-gradient(180deg, #16120f 0%, #100d0b 100%);
+    border: 1px solid #2f2620;
     border-radius: 14px;
     padding: 18px;
   }
 
-  .identity-block {
+  .identity-inline {
     display: flex;
     align-items: center;
     gap: 16px;
@@ -451,7 +442,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, var(--theme-accent, #fbbf24), #f59e0b);
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
     color: #09090b;
     font-weight: 700;
   }
@@ -465,19 +456,13 @@
     letter-spacing: -0.02em;
   }
 
-  h2 {
-    font-size: 30px;
-    line-height: 1.05;
-  }
-
   h3 {
     font-size: 17px;
   }
 
-  .subtitle,
   .section-headline p {
     margin: 6px 0 0;
-    color: var(--theme-text-secondary, #a1a1aa);
+    color: #a8a29e;
     font-size: 14px;
     line-height: 1.55;
   }
@@ -495,7 +480,7 @@
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--theme-text-muted, #71717a);
+    color: #78716c;
   }
 
   code {
@@ -504,11 +489,15 @@
     overflow-wrap: anywhere;
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
-    color: var(--theme-text-primary, #f4f4f5);
+    color: #f5f5f4;
   }
 
   .section-headline {
     margin-bottom: 14px;
+  }
+
+  .section-headline.compact {
+    margin-bottom: 10px;
   }
 
   .form-label {
@@ -516,7 +505,7 @@
     margin-bottom: 6px;
     font-size: 11px;
     font-weight: 600;
-    color: var(--theme-text-muted, #71717a);
+    color: #78716c;
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
@@ -526,17 +515,17 @@
     width: 100%;
     box-sizing: border-box;
     padding: 12px 14px;
-    background: var(--theme-input-bg, #09090b);
-    border: 1px solid var(--theme-input-border, #27272a);
+    background: #0f0b09;
+    border: 1px solid #322821;
     border-radius: 10px;
-    color: var(--theme-text-primary, #e4e4e7);
+    color: #e7e5e4;
     font-size: 15px;
   }
 
   .form-input:focus,
   .hub-join-select:focus {
     outline: none;
-    border-color: var(--theme-input-focus, #fbbf24);
+    border-color: #fbbf24;
     box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.08);
   }
 
@@ -560,12 +549,12 @@
 
   .profile-preview-copy strong {
     font-size: 18px;
-    color: var(--theme-text-primary, #fafaf9);
+    color: #fafaf9;
   }
 
   .profile-preview-copy span {
     font-size: 12px;
-    color: var(--theme-text-muted, #71717a);
+    color: #78716c;
   }
 
   .policy-grid {
@@ -586,11 +575,17 @@
     margin: 10px 0 0;
     font-size: 12px;
     line-height: 1.5;
-    color: var(--theme-text-muted, #71717a);
+    color: #78716c;
   }
 
   .form-hint strong {
-    color: var(--theme-accent, #fbbf24);
+    color: #fbbf24;
+  }
+
+  .hub-join-inline {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #27211c;
   }
 
   .checkbox-row {
@@ -600,19 +595,29 @@
     cursor: pointer;
     font-size: 14px;
     line-height: 1.5;
-    color: var(--theme-text-secondary, #a1a1aa);
+    color: #a8a29e;
   }
 
   .checkbox-row input[type='checkbox'] {
     margin-top: 2px;
     width: 18px;
     height: 18px;
-    accent-color: var(--theme-accent, #fbbf24);
+    accent-color: #fbbf24;
     flex-shrink: 0;
   }
 
   .confirm-section {
     gap: 14px;
+  }
+
+  .identity-inline {
+    gap: 12px;
+  }
+
+  .identity-inline .identity-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
   }
 
   .error-msg {
@@ -631,7 +636,7 @@
 
   .btn-primary {
     padding: 13px 24px;
-    background: linear-gradient(135deg, var(--theme-accent, #fbbf24), #f59e0b);
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
     border: none;
     border-radius: 10px;
     color: #09090b;

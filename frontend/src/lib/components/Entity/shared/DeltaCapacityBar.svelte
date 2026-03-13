@@ -8,7 +8,7 @@
   export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
   export let visualScale: DeltaVisualScale | null = null;
 
-  const CENTER_GAP_PX = 8;
+  const CENTER_GAP_PX = 42;
   const SIDES_GAP_PX = 14;
   const MIN_VISIBLE_SIDE_PX = 0;
 
@@ -179,16 +179,10 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 6px;
-    background: linear-gradient(
-      180deg,
-      rgba(71, 85, 105, 0.22) 0%,
-      rgba(148, 163, 184, 0.46) 50%,
-      rgba(71, 85, 105, 0.22) 100%
-    );
-    border-left: 1px solid rgba(226, 232, 240, 0.52);
-    border-right: 1px solid rgba(148, 163, 184, 0.34);
-    box-shadow: 0 0 6px rgba(148, 163, 184, 0.12);
+    width: var(--center-gap);
+    background: #020617;
+    border: none;
+    box-shadow: none;
     z-index: 4;
   }
 

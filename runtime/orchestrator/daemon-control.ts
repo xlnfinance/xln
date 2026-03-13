@@ -7,8 +7,8 @@ import type { ConsensusConfig, RoutedEntityInput, RuntimeInput } from '../types'
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_MS = 100;
-const DEFAULT_ROUTING_FEE_PPM = 1000;
-const DEFAULT_ROUTING_BASE_FEE = 5n * 10n ** 18n;
+const DEFAULT_ROUTING_FEE_PPM = 1;
+const DEFAULT_ROUTING_BASE_FEE = 0n;
 const DEFAULT_REBALANCE_BASE_FEE = 10n ** 17n;
 const DEFAULT_REBALANCE_LIQUIDITY_FEE_BPS = 1n;
 const DEFAULT_REBALANCE_GAS_FEE = 0n;

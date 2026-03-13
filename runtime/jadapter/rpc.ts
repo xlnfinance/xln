@@ -202,7 +202,7 @@ export async function createRpcAdapter(
   const resolveWatcherPollMs = (scenarioMode: boolean): number => {
     if (scenarioMode) return TEST_WATCH_POLL_MS;
     if (config.watchPollMs && Number.isFinite(config.watchPollMs)) {
-      return Math.max(200, Math.floor(config.watchPollMs));
+      return Math.max(1000, Math.floor(config.watchPollMs));
     }
     if (config.chainId === 1) return PROD_WATCH_POLL_MS;
     if (DEV_CHAIN_IDS.has(config.chainId)) return DEV_WATCH_POLL_MS;
