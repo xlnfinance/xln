@@ -478,7 +478,7 @@ const getReserveHealth = (env: Env, entityId: string, tokenCatalog: JTokenInfo[]
   const tokens = tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT).map(token => {
     const tokenId = Number(token.tokenId);
     const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
-    const current = replica?.state?.reserves?.get(String(tokenId)) ?? 0n;
+    const current = replica?.state?.reserves?.get(tokenId) ?? 0n;
     const expectedMin = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(decimals);
     return {
       tokenId,
@@ -512,7 +512,7 @@ const syncReserveSnapshotFromChain = async (
     const tokenId = Number(token.tokenId);
     if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
     const onChain = await jadapter.getReserves(entityId, tokenId);
-    replica.state.reserves.set(String(tokenId), onChain);
+    replica.state.reserves.set(tokenId, onChain);
   }
   return getReserveHealth(env, entityId, tokenCatalog);
 };

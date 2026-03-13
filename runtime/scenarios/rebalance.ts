@@ -266,7 +266,7 @@ export async function runRebalanceScenario(): Promise<void> {
   await syncChain(); // Poll all ReserveUpdated events at once
 
   // Verify reserves (Hub: $200K)
-  const hubReserve = findReplica(env, hub.id)[1].state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+  const hubReserve = findReplica(env, hub.id)[1].state.reserves.get(USDC_TOKEN_ID) || 0n;
   assert(hubReserve === HUB_INITIAL_RESERVE, `Hub reserve wrong: ${hubReserve}, expected ${HUB_INITIAL_RESERVE}`, env);
   console.log(`✅ Funding complete: Hub=$${hubReserve / 10n**18n}K, Users=$${USER_RESERVE / 10n**18n}K each`);
 
@@ -739,7 +739,7 @@ export async function runRebalanceScenario(): Promise<void> {
   console.log('\n✅ Final state:');
 
   let hubFinal = findReplica(env, hub.id)[1].state;
-  const hubFinalReserve = hubFinal.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+  const hubFinalReserve = hubFinal.reserves.get(USDC_TOKEN_ID) || 0n;
 
   console.log(`\n  Hub final reserve: $${hubFinalReserve / 10n**18n}`);
 

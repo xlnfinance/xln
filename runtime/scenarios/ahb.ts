@@ -683,7 +683,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // ✅ ASSERT: J-event delivered - Hub reserve updated
     const [, hubRep1] = findReplica(env, hub.id);
-    const hubReserve1 = hubRep1.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const hubReserve1 = hubRep1.state.reserves.get(USDC_TOKEN_ID) || 0n;
     if (hubReserve1 !== HUB_INITIAL_RESERVE) {
       throw new Error(`ASSERT FAIL Frame 1: Hub reserve = ${hubReserve1}, expected ${HUB_INITIAL_RESERVE}. J-event NOT delivered!`);
     }
@@ -1138,7 +1138,7 @@ export async function ahb(env: Env): Promise<void> {
       throw new Error(`ASSERT FAIL Frame 9: Alice-Hub ondelta = ${aliceDelta9.ondelta}, expected ${expectedOndelta9}. R2C ondelta mismatch!`);
     }
     // ✅ ASSERT: Alice reserve decreased by $500K (was $2.5M after R2R #3, now $2M)
-    const aliceReserve9 = aliceRep9.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const aliceReserve9 = aliceRep9.state.reserves.get(USDC_TOKEN_ID) || 0n;
     const expectedAliceReserve9 = usd(2_000_000); // $2.5M - $500K R2C
     if (aliceReserve9 !== expectedAliceReserve9) {
       throw new Error(`ASSERT FAIL Frame 9: Alice reserve = ${aliceReserve9 / 10n**18n}M, expected $2M. R2C reserve deduction failed!`);
@@ -1619,7 +1619,7 @@ export async function ahb(env: Env): Promise<void> {
     const [, alicePreSettle] = findReplica(env, alice.id);
     const [, hubPreSettle] = findReplica(env, hub.id);
     const ahPreCollateral = alicePreSettle.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
-    const hubPreReserve = hubPreSettle.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const hubPreReserve = hubPreSettle.state.reserves.get(USDC_TOKEN_ID) || 0n;
     console.log(`   A-H pre-settlement: collateral=${ahPreCollateral}, Hub reserve=${hubPreReserve}`);
 
     // Broadcast settlement to J-Machine via jOutput pattern
@@ -1654,7 +1654,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // ✅ ASSERT: Hub reserve increased by $200K (Hub received from A-H)
     const [, hubPostAHSettle] = findReplica(env, hub.id);
-    const hubPostReserve = hubPostAHSettle.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const hubPostReserve = hubPostAHSettle.state.reserves.get(USDC_TOKEN_ID) || 0n;
     const expectedHubReserve = hubPreReserve + rebalanceAmount;
     if (hubPostReserve !== expectedHubReserve) {
       throw new Error(`❌ ASSERT FAIL: Hub reserve = ${hubPostReserve}, expected ${expectedHubReserve}. Settlement reserve update failed!`);
@@ -1730,7 +1730,7 @@ export async function ahb(env: Env): Promise<void> {
     // ✅ Store pre-settlement state for H-B assertions
     const [, hubPreHBSettle] = findReplica(env, hub.id);
     const hbPreCollateral = hubPreHBSettle.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
-    const hubPreHBReserve = hubPreHBSettle.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const hubPreHBReserve = hubPreHBSettle.state.reserves.get(USDC_TOKEN_ID) || 0n;
     console.log(`   H-B pre-settlement: collateral=${hbPreCollateral}, Hub reserve=${hubPreHBReserve}`);
 
     snap(env, 'Rebalancing 2/2: Deposit to Net-Receiver', {
@@ -1778,7 +1778,7 @@ export async function ahb(env: Env): Promise<void> {
     console.log(`✅ ASSERT: H-B collateral ${hbPreCollateral} → ${hbDeltaRebal.collateral} (+$200K) ✓`);
 
     // ✅ ASSERT: Hub reserve decreased by $200K (Hub deposited to H-B)
-    const hubPostHBReserve = hubRepRebal.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const hubPostHBReserve = hubRepRebal.state.reserves.get(USDC_TOKEN_ID) || 0n;
     const expectedHubPostHBReserve = hubPreHBReserve - rebalanceAmount;
     if (hubPostHBReserve !== expectedHubPostHBReserve) {
       throw new Error(`❌ ASSERT FAIL: Hub reserve = ${hubPostHBReserve}, expected ${expectedHubPostHBReserve}. Settlement reserve update failed!`);

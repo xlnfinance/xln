@@ -123,7 +123,7 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   await syncChain(env, 3);
 
   // Verify hub funded
-  const hubReserve = findReplica(env, hub.id)[1].state.reserves.get(String(USDC)) || 0n;
+  const hubReserve = findReplica(env, hub.id)[1].state.reserves.get(USDC) || 0n;
   assert(hubReserve === usd(200_000), `Hub reserve: ${hubReserve}, expected ${usd(200_000)}`, env);
 
   // Open bilateral accounts (each user ↔ Hub)
@@ -611,7 +611,7 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   }
 
   // Final state summary
-  const hubFinalReserve = hubFinal.reserves.get(String(USDC)) || 0n;
+  const hubFinalReserve = hubFinal.reserves.get(USDC) || 0n;
   console.log(`\n  Hub reserve: $${hubFinalReserve / 10n**18n}`);
   for (const user of users) {
     const delta = hubFinal.accounts.get(user.id)?.deltas.get(USDC);

@@ -126,7 +126,7 @@ async function outCap(page: Page, entityId: string, counterpartyId: string, toke
     for (const [replicaKey, replica] of env.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = replica.state?.accounts?.get(counterpartyId);
-      const delta = account?.deltas?.get(tokenId) ?? account?.deltas?.get(String(tokenId));
+      const delta = account?.deltas?.get(tokenId);
       if (!delta || typeof delta !== 'object') return null;
       const raw = delta as Record<string, unknown>;
       const readBig = (value: unknown): string => {
@@ -218,7 +218,7 @@ async function waitForTokenDeltaActive(
         for (const [replicaKey, replica] of view.isolatedEnv.eReplicas.entries()) {
           if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
           const account = replica.state?.accounts?.get(counterpartyId);
-          const hasDelta = !!(account?.deltas?.has(tokenId) || account?.deltas?.has(String(tokenId)));
+          const hasDelta = !!account?.deltas?.has(tokenId);
           return hasDelta && Number(account?.currentHeight || 0) > 0;
         }
         return false;

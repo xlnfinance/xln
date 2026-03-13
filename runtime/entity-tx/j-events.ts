@@ -870,16 +870,17 @@ async function applyFinalizedJEvent(
 
   if (event.type === 'ReserveUpdated') {
     const { entity, tokenId, newBalance } = event.data;
-    const tokenSymbol = getTokenSymbol(tokenId as number);
-    const decimals = getTokenDecimals(tokenId as number);
+    const tokenIdNum = Number(tokenId);
+    const tokenSymbol = getTokenSymbol(tokenIdNum);
+    const decimals = getTokenDecimals(tokenIdNum);
     const balanceDisplay = (Number(newBalance) / (10 ** decimals)).toFixed(4);
 
     if (entity === entityState.entityId) {
-      const before = entityState.reserves.get(String(tokenId)) ?? 0n;
-      newState.reserves.set(String(tokenId), BigInt(newBalance as string | number | bigint));
+      const before = entityState.reserves.get(tokenIdNum) ?? 0n;
+      newState.reserves.set(tokenIdNum, BigInt(newBalance as string | number | bigint));
       console.log(`💰 ReserveUpdated APPLIED: entity=${entityShort} token=${tokenId} balance=${newBalance}`);
       console.log(`   Before: ${before.toString()}`);
-      console.log(`   After: ${(newState.reserves.get(String(tokenId)) ?? 0n).toString()}`);
+      console.log(`   After: ${(newState.reserves.get(tokenIdNum) ?? 0n).toString()}`);
     }
 
     addMessage(newState, `📊 RESERVE: ${tokenSymbol} = ${balanceDisplay} | Block ${blockNumber} | Tx ${txHashShort}`);
@@ -908,11 +909,11 @@ async function applyFinalizedJEvent(
     const decimals = getTokenDecimals(tokenIdNum);
 
     // Update own reserves (entity-level, unilateral OK)
-    const oldReserve = newState.reserves.get(String(tokenId)) || 0n;
+    const oldReserve = newState.reserves.get(tokenIdNum) || 0n;
     console.log(`   💰 RESERVE-UPDATE: ownReserve=${ownReserve}, old=${oldReserve}, tokenId=${tokenId}`);
     if (ownReserve) {
       const newReserve = BigInt(ownReserve as string | number | bigint);
-      newState.reserves.set(String(tokenId), newReserve);
+      newState.reserves.set(tokenIdNum, newReserve);
       console.log(`   💰 RESERVE-SET: ${oldReserve} → ${newReserve}`);
     } else {
       console.log(`   ⚠️ RESERVE-SKIP: ownReserve is falsy`);

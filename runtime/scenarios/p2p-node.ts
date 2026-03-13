@@ -149,7 +149,7 @@ const waitForTokenCatalog = async (jadapter: JAdapter, maxRounds = 40): Promise<
 const getReserveBalance = (env: any, entityId: string, signerId: string, tokenId: number) => {
   const replica = env.eReplicas.get(`${entityId}:${signerId}`);
   if (!replica) return 0n;
-  return replica.state.reserves?.get(String(tokenId)) ?? 0n;
+  return replica.state.reserves?.get(tokenId) ?? 0n;
 };
 
 const waitForReserveBalance = async (

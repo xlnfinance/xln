@@ -315,7 +315,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // ✅ ASSERT: J-event delivered - Hub reserve updated
     const [, hubRep1] = findReplica(env, hub.id);
-    const hubReserve1 = hubRep1.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const hubReserve1 = hubRep1.state.reserves.get(USDC_TOKEN_ID) || 0n;
     if (hubReserve1 !== HUB_INITIAL_RESERVE) {
       throw new Error(`ASSERT FAIL Frame 1: Hub reserve = ${hubReserve1}, expected ${HUB_INITIAL_RESERVE}. J-event NOT delivered!`);
     }
@@ -409,9 +409,9 @@ export async function lockAhb(env: Env): Promise<void> {
     const [, bobFunded] = findReplica(env, bob.id);
     const [, hubAfterR2R] = findReplica(env, hub.id);
 
-    const aliceReserve = aliceFunded.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
-    const bobReserve = bobFunded.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
-    const hubReserve = hubAfterR2R.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const aliceReserve = aliceFunded.state.reserves.get(USDC_TOKEN_ID) || 0n;
+    const bobReserve = bobFunded.state.reserves.get(USDC_TOKEN_ID) || 0n;
+    const hubReserve = hubAfterR2R.state.reserves.get(USDC_TOKEN_ID) || 0n;
 
     console.log('[AHB] J-Block #1 executed - Fundings complete:');
     console.log(`  Alice: ${Number(aliceReserve) / 1e18} USDC`);
@@ -480,8 +480,8 @@ export async function lockAhb(env: Env): Promise<void> {
     // Verify
     const [, aliceAfterA2B] = findReplica(env, alice.id);
     const [, bobAfterA2B] = findReplica(env, bob.id);
-    const aliceReserveA2B = aliceAfterA2B.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
-    const bobReserveA2B = bobAfterA2B.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const aliceReserveA2B = aliceAfterA2B.state.reserves.get(USDC_TOKEN_ID) || 0n;
+    const bobReserveA2B = bobAfterA2B.state.reserves.get(USDC_TOKEN_ID) || 0n;
 
     if (aliceReserveA2B !== usd(2_500_000)) {
       throw new Error(`❌ ASSERT FAIL: Alice reserve = ${aliceReserveA2B}, expected ${usd(2_500_000)}`);
@@ -669,7 +669,7 @@ export async function lockAhb(env: Env): Promise<void> {
     }
     // ✅ ASSERT: Alice reserve after R2C
     // Alice: $3M (from Hub) - $500K (to Bob) - $500K (R2C) = $2M
-    const aliceReserve9 = aliceRep9.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const aliceReserve9 = aliceRep9.state.reserves.get(USDC_TOKEN_ID) || 0n;
     const expectedAliceReserve9 = usd(2_000_000); // $3M - $500K (to Bob) - $500K (R2C) = $2M
     if (aliceReserve9 !== expectedAliceReserve9) {
       throw new Error(`ASSERT FAIL Frame 9: Alice reserve = ${aliceReserve9 / 10n**18n}M, expected $2M. R2C reserve deduction failed!`);
@@ -1137,7 +1137,7 @@ export async function lockAhb(env: Env): Promise<void> {
     const [, hubPreRebal] = findReplica(env, hub.id);
     const [, bobPreRebal] = findReplica(env, bob.id);
     const hbPreCollateral = hubPreRebal.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
-    const hubPreReserve = hubPreRebal.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const hubPreReserve = hubPreRebal.state.reserves.get(USDC_TOKEN_ID) || 0n;
 
     console.log(`   Pre-rebalance state:`);
     console.log(`     H-B collateral: ${hbPreCollateral}`);
@@ -1245,7 +1245,7 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`✅ ASSERT: H-B collateral ${hbPreCollateral} → ${hbDeltaRebal.collateral} (+$200K) ✓`);
 
     // ✅ ASSERT: Hub reserve decreased by $200K
-    const hubPostReserve = hubRepRebal.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const hubPostReserve = hubRepRebal.state.reserves.get(USDC_TOKEN_ID) || 0n;
     const expectedHubReserve = hubPreReserve - rebalanceAmount;
     if (hubPostReserve !== expectedHubReserve) {
       throw new Error(`❌ ASSERT FAIL: Hub reserve = ${hubPostReserve}, expected ${expectedHubReserve}`);

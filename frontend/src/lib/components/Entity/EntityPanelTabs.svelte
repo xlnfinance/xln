@@ -860,6 +860,8 @@
     if (!entityId) return;
     try {
       const requestApiBase = resolveApiBase();
+      const tokenMeta = resolveReserveTokenMeta(tokenId);
+      const amountStr = tokenMeta.symbol === 'WETH' || tokenMeta.symbol === 'ETH' ? '0.2' : '100';
       const runtimeId = getRuntimeId(activeEnv);
       if (!runtimeId) {
         throw new Error('Runtime is not ready yet (missing runtimeId). Re-open runtime and retry.');
@@ -911,7 +913,7 @@
             userRuntimeId: runtimeId,
             hubEntityId,
             tokenId,
-            amount: '100',
+            amount: amountStr,
             ...(knownAccount ? { knownAccount } : {}),
           })
         });
@@ -3096,7 +3098,11 @@
                   <div class="appearance-block">
                     <div class="appearance-scale-row">
                       <span class="appearance-label">Scale</span>
-                      <strong class="appearance-scale-value">100px = ${accountBarUsdPer100Px.toLocaleString('en-US')}</strong>
+                      <div class="appearance-scale-meta">
+                        <span class="appearance-scale-bound">$10</span>
+                        <strong class="appearance-scale-value">100px = ${accountBarUsdPer100Px.toLocaleString('en-US')}</strong>
+                        <span class="appearance-scale-bound">$10,000</span>
+                      </div>
                     </div>
                     <input
                       class="appearance-slider"
@@ -3107,10 +3113,6 @@
                       value={accountBarUsdPer100Px}
                       on:input={setAccountBarScale}
                     />
-                    <div class="appearance-scale-caption">
-                      <span>$10</span>
-                      <span>$10,000</span>
-                    </div>
                   </div>
                 </div>
               </section>
@@ -3460,7 +3462,7 @@
     --panel-gutter-x: 16px;
     display: flex;
     flex-direction: column;
-    width: min(100%, 1360px);
+    width: min(100%, 1220px);
     height: 100%;
     margin: 0 auto;
     background: #0a0a0a;
@@ -4506,10 +4508,24 @@
     flex-wrap: wrap;
   }
 
+  .appearance-scale-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
   .appearance-scale-value {
     color: #f3f4f6;
     font-size: 13px;
     font-weight: 600;
+  }
+
+  .appearance-scale-bound {
+    color: #71717a;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
   }
 
   .appearance-slider {
@@ -4551,15 +4567,6 @@
     border: 1px solid rgba(255, 255, 255, 0.18);
     background: #fbbf24;
     box-shadow: 0 4px 14px rgba(251, 191, 36, 0.35);
-  }
-
-  .appearance-scale-caption {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    color: #71717a;
-    font-size: 11px;
-    font-family: 'JetBrains Mono', monospace;
   }
 
   .configure-token-row {
@@ -5272,12 +5279,13 @@
     min-width: 0;
     flex: 0 0 auto;
     padding-left: 8px;
+    align-self: stretch;
   }
 
   .asset-max-hint {
     border: none;
     background: transparent;
-    padding: 0;
+    padding: 0 2px;
     color: #8d857d;
     font-size: 11px;
     font-weight: 600;
@@ -5289,6 +5297,9 @@
     max-width: 72px;
     overflow: hidden;
     text-overflow: ellipsis;
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
   }
 
   .asset-max-hint.text-link {
@@ -5305,17 +5316,18 @@
   }
 
   .asset-token-select-inline {
-    min-height: 32px;
+    min-height: 36px;
     min-width: 94px;
   }
 
   .asset-token-select-inline.compact {
-    min-height: 32px;
+    min-height: 36px;
     padding: 0 18px 0 2px;
     border-radius: 0;
     background: transparent;
     border: none;
     color: #e7e5e4;
+    align-self: stretch;
   }
 
   .asset-action-row {
