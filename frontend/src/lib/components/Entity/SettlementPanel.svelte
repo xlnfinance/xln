@@ -584,9 +584,7 @@
   $: hasAnyBatch = hasSentBatch || hasDraftBatch;
   $: canBroadcastDraft = !hasSentBatch && (hasDraftBatch || executableSettlementCount > 0);
   $: pendingSummary = batchSummary(jBatch);
-  $: sentSummary = batchSummary(sentBatch?.batch);
   $: draftDetailOps = buildBatchDetailOps(jBatch);
-  $: sentDetailOps = buildBatchDetailOps(sentBatch?.batch);
   $: batchHistoryRows = batchHistory.map((entry, index): BatchHistoryRow => ({
     entry,
     details: buildBatchDetailOps(entry?.batch),
@@ -957,28 +955,19 @@
   <div class="batch-card" class:has-pending={hasAnyBatch}>
     <div class="batch-header">
       <div>
-        <div class="batch-title">Batch Workspace</div>
+        <div class="batch-title">On-Chain Batch</div>
         <div class="batch-subtitle">
-          {#if hasSentBatch && hasDraftBatch}
-            Broadcasted batch in-flight + {pendingOps} draft operation{pendingOps === 1 ? '' : 's'}
-          {:else if hasSentBatch}
-            Broadcasted batch in-flight ({sentOps} operation{sentOps === 1 ? '' : 's'})
+          {#if hasSentBatch}
+            Broadcasted batch is waiting for finalization.
           {:else if executableSettlementCount > 0}
-            {executableSettlementCount} signed settlement{executableSettlementCount === 1 ? '' : 's'} ready
+            Signed settlement{executableSettlementCount === 1 ? '' : 's'} ready to broadcast.
           {:else if hasDraftBatch}
-            Draft batch: {pendingOps} operation{pendingOps === 1 ? '' : 's'}
+            Draft queue holds {pendingOps} operation{pendingOps === 1 ? '' : 's'}.
           {:else}
-            Ready for on-chain actions
+            Ready for on-chain actions.
           {/if}
         </div>
       </div>
-      {#if hasSentBatch}
-        <span class="batch-pill">Awaiting Finalization</span>
-      {:else if executableSettlementCount > 0}
-        <span class="batch-pill">Ready To Submit</span>
-      {:else if hasDraftBatch}
-        <span class="batch-pill">Needs Signature</span>
-      {/if}
     </div>
 
     <div class="batch-status-row">
@@ -989,56 +978,12 @@
     {#if hasSentBatch}
       <div class="sent-batch">
         <div class="sent-meta">
+          <span>Sent</span>
           <span>Nonce #{sentBatch.entityNonce}</span>
           <span>Hash {sentBatch.batchHash?.slice(0, 10)}...</span>
           <span>Attempts {sentBatch.submitAttempts}</span>
           <span>Submitted {formatClock(sentBatch.lastSubmittedAt)}</span>
         </div>
-        {#if sentSummary.length > 0}
-          <div class="batch-summary">
-            {#each sentSummary as item}
-              <span class="summary-chip">{item.label}: {item.count}</span>
-            {/each}
-          </div>
-        {/if}
-        {#if sentDetailOps.length > 0}
-          <div class="batch-ops-grid">
-            {#each sentDetailOps as op (op.key)}
-              <article class="batch-op-card">
-                <div class="batch-op-title">{op.operation}</div>
-                {#if op.entities.length > 0}
-                  <div class="batch-op-entities">
-                    {#each op.entities as opEntityId}
-                      {@const identity = {
-                        id: String(opEntityId || ''),
-                        short: formatShortId(String(opEntityId || '')),
-                        name: entityName(String(opEntityId || '')),
-                        avatarUrl: entityAvatar(String(opEntityId || '')),
-                      }}
-                      <div class="entity-chip" title={identity.id}>
-                        {#if identity.avatarUrl}
-                          <img class="entity-chip-avatar" src={identity.avatarUrl} alt="" />
-                        {:else}
-                          <span class="entity-chip-avatar placeholder">{identity.name.slice(0, 1).toUpperCase()}</span>
-                        {/if}
-                        <span class="entity-chip-name">{identity.name}</span>
-                        <code class="entity-chip-id">{identity.short}</code>
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-                <div class="batch-op-details">
-                  {#each op.details as field}
-                    <div class="batch-op-field">
-                      <span class="batch-op-field-label">{field.label}</span>
-                      <span class="batch-op-field-value">{field.value}</span>
-                    </div>
-                  {/each}
-                </div>
-              </article>
-            {/each}
-          </div>
-        {/if}
       </div>
     {/if}
 
