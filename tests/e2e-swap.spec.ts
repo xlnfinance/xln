@@ -79,7 +79,7 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
 
     const getDelta = (account: any, tokenId: number): any => {
       if (!(account?.deltas instanceof Map)) return null;
-      return account.deltas.get(tokenId) ?? account.deltas.get(String(tokenId)) ?? null;
+      return account.deltas.get(tokenId) ?? null;
     };
 
     const getTokenDecimals = (tokenId: number): number => {
@@ -253,7 +253,10 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
           if (!openedHubId) openedHubId = String(cpId || '');
         }
       }
-      break;
+      // Keep scanning local replicas until we either find a usable account
+      // or exhaust the runtime-owned replicas. Stopping after the first replica
+      // silently picks the wrong local entity when the first entry has no account.
+      if (entityId && signerId && openedHubId) break;
     }
 
     if (!entityId || !signerId) return { ok: false, error: 'local entity not found' };

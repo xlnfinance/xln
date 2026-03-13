@@ -18,7 +18,12 @@ import { expect, test, type Page } from '@playwright/test';
 import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL, waitForNamedHubs } from './utils/e2e-baseline';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { connectRuntimeToHub } from './utils/e2e-connect';
-import { getRenderedAccountSpendableBalance, getRenderedExternalBalance, getRenderedReserveBalance } from './utils/e2e-account-ui';
+import {
+  getRenderedAccountSpendableBalance,
+  getRenderedExternalBalance,
+  getRenderedOutboundForAccount,
+  getRenderedReserveBalance,
+} from './utils/e2e-account-ui';
 import {
   getPersistedReceiptCursor,
   waitForPersistedFrameEventMatch,
@@ -48,6 +53,94 @@ async function openAssetsTab(page: Page): Promise<void> {
   await expect(tab).toBeVisible({ timeout: 20_000 });
   await tab.click();
   await expect(page.getByTestId('asset-ledger-refresh').first()).toBeVisible({ timeout: 20_000 });
+}
+
+async function openSettleWorkspace(page: Page): Promise<void> {
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  await accountsTab.click();
+
+  const settleTab = page.locator('.account-workspace-tab').filter({ hasText: /Settle/i }).first();
+  await expect(settleTab).toBeVisible({ timeout: 20_000 });
+  await settleTab.click();
+}
+
+async function selectSettleAccount(page: Page, counterpartyId: string): Promise<void> {
+  await openSettleWorkspace(page);
+  const picker = page.locator('.settlement-panel button.closed-trigger, .settlement-panel input[placeholder="Select account..."]').first();
+  await expect(picker).toBeVisible({ timeout: 20_000 });
+  await picker.click();
+  const option = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();
+  await expect(option).toBeVisible({ timeout: 20_000 });
+  await option.click();
+}
+
+async function broadcastSettleBatch(page: Page): Promise<void> {
+  const button = page.getByTestId('settle-sign-broadcast').first();
+  await expect(button).toBeVisible({ timeout: 20_000 });
+  await expect(button).toBeEnabled({ timeout: 60_000 });
+  await button.click();
+}
+
+async function readJBatchSnapshot(
+  page: Page,
+  entityId: string,
+  runtimeId: string,
+): Promise<{
+  pendingReserveToCollateral: number;
+  pendingCollateralToReserve: number;
+  sentReserveToCollateral: number;
+  sentCollateralToReserve: number;
+  batchHistoryCount: number;
+}> {
+  return await page.evaluate(({ entityId, runtimeId }) => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        eReplicas?: Map<string, {
+          state?: {
+            jBatchState?: {
+              batch?: {
+                reserveToCollateral?: unknown[];
+                collateralToReserve?: unknown[];
+              };
+              sentBatch?: {
+                batch?: {
+                  reserveToCollateral?: unknown[];
+                  collateralToReserve?: unknown[];
+                };
+              };
+            };
+            batchHistory?: unknown[];
+          };
+        }>;
+      };
+    }).isolatedEnv;
+    if (!(env?.eReplicas instanceof Map)) {
+      return {
+        pendingReserveToCollateral: 0,
+        pendingCollateralToReserve: 0,
+        sentReserveToCollateral: 0,
+        sentCollateralToReserve: 0,
+        batchHistoryCount: 0,
+      };
+    }
+    const replicaKey = Array.from(env.eReplicas.keys()).find((key) => {
+      const [eid, sid] = String(key).split(':');
+      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(sid || '').toLowerCase() === String(runtimeId).toLowerCase();
+    });
+    const replica = replicaKey ? env.eReplicas.get(replicaKey) : null;
+    const pending = replica?.state?.jBatchState?.batch;
+    const sent = replica?.state?.jBatchState?.sentBatch?.batch;
+    const history = Array.isArray(replica?.state?.batchHistory) ? replica.state.batchHistory : [];
+    return {
+      pendingReserveToCollateral: Number(pending?.reserveToCollateral?.length || 0),
+      pendingCollateralToReserve: Number(pending?.collateralToReserve?.length || 0),
+      sentReserveToCollateral: Number(sent?.reserveToCollateral?.length || 0),
+      sentCollateralToReserve: Number(sent?.collateralToReserve?.length || 0),
+      batchHistoryCount: Number(history.length || 0),
+    };
+  }, { entityId, runtimeId });
 }
 
 async function refreshExternalBalance(page: Page, symbol: string): Promise<number> {
@@ -343,5 +436,168 @@ test.describe('E2R2E External Reserve Route', () => {
       const externalAfterWithdraw = await refreshExternalBalance(page, symbol);
       expect(externalAfterWithdraw).toBeGreaterThan(externalAfterDeposit);
     });
+  });
+
+  test('manual settle queues R2C and C2R into local draft batch before broadcast', async ({ page }) => {
+    test.setTimeout(LONG_E2E ? 180_000 : 120_000);
+
+    await timedStep('settle-r2c-c2r.baseline', async () => {
+      await ensureE2EBaseline(page, {
+        timeoutMs: LONG_E2E ? 240_000 : 120_000,
+        requireHubMesh: true,
+        requireMarketMaker: false,
+        minHubCount: 3,
+        forceReset: true,
+      });
+    });
+
+    let identity: { entityId: string; signerId: string; runtimeId: string } | null = null;
+    let entityId = '';
+    let runtimeId = '';
+    await timedStep('settle-r2c-c2r.runtime', async () => {
+      await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+      await page.evaluate((apiBaseUrl: string) => {
+        (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__ = apiBaseUrl;
+        localStorage.setItem('xln-api-base-url', apiBaseUrl);
+      }, API_BASE_URL);
+      identity = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
+      entityId = identity.entityId;
+      runtimeId = identity.runtimeId;
+    });
+
+    const hubsByName = await waitForNamedHubs(page, ['H1'], { timeoutMs: ROUTE_TIMEOUT_MS });
+    await timedStep('settle-r2c-c2r.open-account', async () => {
+      await connectRuntimeToHub(page, { entityId, signerId: identity!.signerId }, hubsByName.h1);
+    });
+
+    const symbol = 'USDC';
+    let runtimeReceiptCursor = await getPersistedReceiptCursor(page);
+
+    await timedStep('settle-r2c-c2r.seed-reserve', async () => {
+      await openAssetsTab(page);
+      await page.getByTestId('asset-faucet-symbol').selectOption(symbol);
+      await page.getByTestId(`external-faucet-${symbol}`).first().click();
+      await expect
+        .poll(async () => refreshExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(0);
+
+      await page.getByTestId('asset-tab-deposit').first().click();
+      await page.getByTestId('external-to-reserve-symbol').selectOption(symbol);
+      await page.getByTestId('external-to-reserve-amount').first().fill('20');
+      await page.getByTestId(`external-deposit-${symbol}`).first().click();
+
+      await waitForPersistedFrameEventMatch(page, {
+        cursor: runtimeReceiptCursor,
+        eventName: 'JEventReceived',
+        entityId,
+        timeoutMs: ROUTE_TIMEOUT_MS,
+        predicate: (event) => String(event.data?.eventType || '') === 'ReserveUpdated',
+      });
+    });
+
+    const reserveAfterDeposit = await refreshReserveBalance(page, symbol);
+    expect(reserveAfterDeposit).toBeGreaterThan(0);
+
+    await timedStep('settle-r2c-c2r.queue-r2c-draft', async () => {
+      await selectSettleAccount(page, hubsByName.h1);
+      const before = await readJBatchSnapshot(page, entityId, runtimeId);
+
+      const r2cTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Reserve → Collateral$/ }).first();
+      await expect(r2cTab).toBeVisible({ timeout: 20_000 });
+      await r2cTab.click();
+
+      const amountInput = page.locator('.settlement-panel .settle-amount-shell input').first();
+      await expect(amountInput).toBeVisible({ timeout: 20_000 });
+      await amountInput.fill('10');
+
+      const queueButton = page.getByTestId('settle-queue-r2c').first();
+      await expect(queueButton).toBeEnabled({ timeout: 20_000 });
+      await queueButton.click();
+
+      await expect
+        .poll(async () => (await readJBatchSnapshot(page, entityId, runtimeId)).pendingReserveToCollateral, {
+          timeout: ROUTE_TIMEOUT_MS,
+        })
+        .toBeGreaterThan(before.pendingReserveToCollateral);
+    });
+
+    runtimeReceiptCursor = await getPersistedReceiptCursor(page);
+    await timedStep('settle-r2c-c2r.broadcast-r2c', async () => {
+      await openSettleWorkspace(page);
+      const before = await readJBatchSnapshot(page, entityId, runtimeId);
+      await broadcastSettleBatch(page);
+      await expect
+        .poll(async () => {
+          const snap = await readJBatchSnapshot(page, entityId, runtimeId);
+          return snap.sentReserveToCollateral > before.sentReserveToCollateral || snap.batchHistoryCount > before.batchHistoryCount;
+        }, { timeout: ROUTE_TIMEOUT_MS })
+        .toBe(true);
+      await waitForPersistedFrameEventMatch(page, {
+        cursor: runtimeReceiptCursor,
+        eventName: 'JEventReceived',
+        entityId,
+        timeoutMs: ROUTE_TIMEOUT_MS,
+        predicate: (event) => String(event.data?.eventType || '') === 'AccountSettled',
+      });
+    });
+
+    await expect
+      .poll(async () => getRenderedOutboundForAccount(page, hubsByName.h1), {
+        timeout: ROUTE_TIMEOUT_MS,
+      })
+      .toBeGreaterThan(0);
+    const outboundAfterR2C = await getRenderedOutboundForAccount(page, hubsByName.h1);
+    expect(outboundAfterR2C).toBeGreaterThan(0);
+
+    runtimeReceiptCursor = await getPersistedReceiptCursor(page);
+    await timedStep('settle-r2c-c2r.queue-c2r-draft', async () => {
+      await selectSettleAccount(page, hubsByName.h1);
+      const before = await readJBatchSnapshot(page, entityId, runtimeId);
+
+      const c2rTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Collateral → Reserve$/ }).first();
+      await expect(c2rTab).toBeVisible({ timeout: 20_000 });
+      await c2rTab.click();
+
+      const amountInput = page.locator('.settlement-panel .settle-amount-shell input').first();
+      await expect(amountInput).toBeVisible({ timeout: 20_000 });
+      await amountInput.fill('5');
+
+      const queueButton = page.getByTestId('settle-queue-c2r').first();
+      await expect(queueButton).toBeEnabled({ timeout: 20_000 });
+      await queueButton.click();
+
+      await expect
+        .poll(async () => (await readJBatchSnapshot(page, entityId, runtimeId)).pendingCollateralToReserve, {
+          timeout: ROUTE_TIMEOUT_MS,
+        })
+        .toBeGreaterThan(before.pendingCollateralToReserve);
+    });
+
+    await timedStep('settle-r2c-c2r.broadcast-c2r', async () => {
+      await openSettleWorkspace(page);
+      const before = await readJBatchSnapshot(page, entityId, runtimeId);
+      await broadcastSettleBatch(page);
+      await expect
+        .poll(async () => {
+          const snap = await readJBatchSnapshot(page, entityId, runtimeId);
+          return snap.sentCollateralToReserve > before.sentCollateralToReserve || snap.batchHistoryCount > before.batchHistoryCount;
+        }, { timeout: ROUTE_TIMEOUT_MS })
+        .toBe(true);
+      await waitForPersistedFrameEventMatch(page, {
+        cursor: runtimeReceiptCursor,
+        eventName: 'JEventReceived',
+        entityId,
+        timeoutMs: ROUTE_TIMEOUT_MS,
+        predicate: (event) => String(event.data?.eventType || '') === 'AccountSettled',
+      });
+    });
+
+    await expect
+      .poll(async () => refreshReserveBalance(page, symbol), {
+        timeout: ROUTE_TIMEOUT_MS,
+      })
+      .toBeGreaterThan(0);
+    const reserveAfterC2R = await refreshReserveBalance(page, symbol);
+    expect(reserveAfterC2R).toBeGreaterThan(0);
   });
 });

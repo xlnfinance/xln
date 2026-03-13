@@ -87,7 +87,7 @@ export async function runProcessBatchScenario(_existingEnv?: Env): Promise<Env> 
 
   await jadapter.debugFundReserves(hub.id, USDC, HUB_RESERVE);
   await syncChain(env, 3);
-  const hubReserveAfterFund = findReplica(env, hub.id)[1].state.reserves.get(String(USDC)) || 0n;
+  const hubReserveAfterFund = findReplica(env, hub.id)[1].state.reserves.get(USDC) || 0n;
   assert(hubReserveAfterFund === HUB_RESERVE, `hub reserve funded (${hubReserveAfterFund})`, env);
 
   // Create bilateral accounts with Hub.
