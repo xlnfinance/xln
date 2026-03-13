@@ -613,7 +613,7 @@
         </p>
       {:else if account.status === 'disputed'}
         <p class="dispute-status queued">
-          Dispute queued. Use `Accounts -> Settle -> Dispute`, then Sign & Broadcast.
+          Dispute queued. Open the batch panel and broadcast the pending dispute batch.
         </p>
       {:else}
         <p class="dispute-status idle">No active dispute.</p>

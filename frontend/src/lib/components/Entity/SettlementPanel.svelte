@@ -11,9 +11,7 @@
   export let entityId: string;
   export let contacts: Array<{ name: string; entityId: string }> = [];
   export let replica: EntityReplica | null = null;
-  export let prefill: { tokenId?: number; id: number } | null = null;
-
-  type Action = 'fund' | 'withdraw' | 'transfer' | 'dispute' | 'history';
+  type Action = 'transfer' | 'dispute' | 'history';
   type GasPreset = 'standard' | 'fast' | 'urgent' | 'custom';
   type BatchDetailField = { label: string; value: string };
   type BatchDetailOp = {
@@ -30,10 +28,7 @@
   type ActiveDispute = NonNullable<AccountMachine['activeDispute']>;
   type FeeOverrides = { gasBumpBps?: number; maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string };
   type RuntimeJReplica = RuntimeEnv['jReplicas'] extends Map<string, infer Replica> ? Replica : never;
-  type PendingSettleEntityTx =
-    | Extract<EntityTx, { type: 'deposit_collateral' }>
-    | Extract<EntityTx, { type: 'settle_propose' }>
-    | Extract<EntityTx, { type: 'reserve_to_reserve' }>;
+  type PendingSettleEntityTx = Extract<EntityTx, { type: 'reserve_to_reserve' }>;
 
   $: activeReplicas = $replicas;
   $: activeXlnFunctions = $xlnFunctions;
@@ -47,11 +42,9 @@
   let counterpartyEntityId = '';
   let recipientEntityId = '';
   let tokenId = 1;
-  let action: Action = 'fund';
+  let action: Action = 'dispute';
   let amount = '';
   let sending = false;
-  let lastPrefillId = 0;
-  let resolvingAutoExecute = false;
 
   let gasPreset: GasPreset = 'standard';
   let customMaxFeeGwei = '';
@@ -491,22 +484,6 @@
 
   $: isSelfTransfer = recipientEntityId && recipientEntityId.toLowerCase() === entityId.toLowerCase();
 
-  function isLocalExecutorForWorkspace(counterparty: string, account: AccountMachine | null | undefined): boolean {
-    const workspace = account?.settlementWorkspace;
-    const normalizedEntityId = normalizeEntityId(entityId);
-    const normalizedCounterparty = normalizeEntityId(counterparty);
-    if (!workspace || workspace.status !== 'ready_to_submit' || !normalizedEntityId || !normalizedCounterparty) {
-      return false;
-    }
-    return workspace.executorIsLeft === (normalizedEntityId < normalizedCounterparty);
-  }
-
-  function isManualC2RWorkspace(account: AccountMachine | null | undefined): boolean {
-    const workspace = account?.settlementWorkspace;
-    if (!workspace || workspace.memo !== 'manual-c2r') return false;
-    return workspace.ops.length === 1 && workspace.ops[0]?.type === 'c2r';
-  }
-
   $: accountEntityIds = (() => {
     const accounts = currentReplica?.state?.accounts;
     if (!accounts || typeof accounts.keys !== 'function') return [];
@@ -577,18 +554,8 @@
   $: sentOps = countBatchOps(sentBatch?.batch);
   $: hasSentBatch = !!sentBatch;
   $: hasDraftBatch = pendingOps > 0;
-  $: executableSettlementCounterparties = (() => {
-    const accounts = currentReplica?.state?.accounts;
-    if (!(accounts instanceof Map)) return [] as string[];
-    const out: string[] = [];
-    for (const [counterparty, account] of accounts.entries()) {
-      if (isLocalExecutorForWorkspace(counterparty, account)) out.push(String(counterparty));
-    }
-    return out;
-  })();
-  $: executableSettlementCount = executableSettlementCounterparties.length;
   $: hasAnyBatch = hasSentBatch || hasDraftBatch;
-  $: canBroadcastDraft = !hasSentBatch && (hasDraftBatch || executableSettlementCount > 0);
+  $: canBroadcastDraft = !hasSentBatch && hasDraftBatch;
   $: pendingSummary = batchSummary(jBatch);
   $: draftDetailOps = buildBatchDetailOps(jBatch);
   $: batchHistoryRows = batchHistory.map((entry, index): BatchHistoryRow => ({
@@ -622,11 +589,6 @@
   }
 
   $: selectedAccount = counterpartyEntityId ? currentReplica?.state?.accounts?.get?.(counterpartyEntityId) : null;
-  $: selectedSettlementWorkspace = selectedAccount?.settlementWorkspace ?? null;
-  $: selectedWorkspaceAwaitingCounterparty =
-    !!selectedSettlementWorkspace &&
-    isManualC2RWorkspace(selectedAccount) &&
-    selectedSettlementWorkspace.status === 'awaiting_counterparty';
   $: selectedAccountActiveDispute = selectedAccount?.activeDispute ?? null;
   $: selectedAccountStatus = String(selectedAccount?.status || '');
   $: selectedDisputeTimeout = Number(selectedAccountActiveDispute?.disputeTimeout || 0);
@@ -638,19 +600,8 @@
     return currentReplica?.state?.onchainReserves?.get?.(currentTokenId) ?? 0n;
   }
 
-  function getSelectedAccountWithdrawableCollateral(currentTokenId: number): bigint {
-    if (!selectedAccount || !activeXlnFunctions?.deriveDelta || !counterpartyEntityId) return 0n;
-    const delta = selectedAccount.deltas?.get?.(currentTokenId);
-    if (!delta) return 0n;
-    const derived = activeXlnFunctions.deriveDelta(delta, normalizeEntityId(entityId) < normalizeEntityId(counterpartyEntityId));
-    const totalHold = derived.outTotalHold ?? 0n;
-    return derived.outCollateral > totalHold ? derived.outCollateral - totalHold : 0n;
-  }
-
   function getActionMaxAmount(): bigint {
-    if (action === 'fund' || action === 'transfer') return getReserveBalance(tokenId);
-    if (action === 'withdraw') return getSelectedAccountWithdrawableCollateral(tokenId);
-    return 0n;
+    return action === 'transfer' ? getReserveBalance(tokenId) : 0n;
   }
 
   function fillActionMax(): void {
@@ -694,15 +645,10 @@
       await getXLN();
       const signerId = resolveSignerId(env);
       const feeOverrides = buildFeeOverrides();
-      const pendingBatch = currentReplica?.state?.jBatchState?.batch;
-      const entityTxs: EntityTx[] = executableSettlementCounterparties.map((counterpartyEntityId) => ({
-        type: 'settle_execute' as const,
-        data: { counterpartyEntityId },
-      }));
-      entityTxs.push({
+      const entityTxs: EntityTx[] = [{
         type: 'j_broadcast',
         data: feeOverrides ? { feeOverrides } : {},
-      });
+      }];
       await enqueueEntityInputs(env, [{
         entityId,
         signerId,
@@ -752,61 +698,23 @@
       const signerId = resolveSignerId(env);
       const parsedAmount = parsePositiveAmount(amount, tokenId);
 
-      let entityTx: PendingSettleEntityTx;
-      if (action === 'fund') {
-        if (!counterpartyEntityId) throw new Error('Select an account to fund');
-        entityTx = {
-          type: 'deposit_collateral' as const,
-          data: {
-            counterpartyId: counterpartyEntityId,
-            tokenId,
-            amount: parsedAmount,
-          },
-        };
-      } else if (action === 'withdraw') {
-        if (!counterpartyEntityId) throw new Error('Select account to withdraw from');
-        entityTx = {
-          type: 'settle_propose' as const,
-          data: {
-            counterpartyEntityId,
-            executorIsLeft: normalizeEntityId(entityId) < normalizeEntityId(counterpartyEntityId),
-            memo: 'manual-c2r',
-            ops: [
-              {
-                type: 'c2r',
-                tokenId,
-                amount: parsedAmount,
-              },
-            ],
-          },
-        };
-      } else {
-        const recipient = recipientEntityId || counterpartyEntityId;
-        if (!recipient) throw new Error('Select a recipient');
-        if (recipient.toLowerCase() === entityId.toLowerCase()) throw new Error('Cannot transfer to yourself');
-        entityTx = {
-          type: 'reserve_to_reserve' as const,
-          data: {
-            toEntityId: recipient,
-            tokenId,
-            amount: parsedAmount,
-          },
-        };
-      }
+      const recipient = recipientEntityId || counterpartyEntityId;
+      if (!recipient) throw new Error('Select a recipient');
+      if (recipient.toLowerCase() === entityId.toLowerCase()) throw new Error('Cannot transfer to yourself');
+      const entityTx: PendingSettleEntityTx = {
+        type: 'reserve_to_reserve' as const,
+        data: {
+          toEntityId: recipient,
+          tokenId,
+          amount: parsedAmount,
+        },
+      };
 
       await enqueueEntityInputs(env, [{
         entityId,
         signerId,
         entityTxs: [entityTx],
       }]);
-      if (action === 'withdraw') {
-        resolvingAutoExecute = true;
-        try {
-          await waitForManualC2RIntoDraft(counterpartyEntityId, Number(currentReplica?.state?.jBatchState?.batch?.collateralToReserve?.length || 0));
-        } finally {
-          resolvingAutoExecute = false;
-        }
-      }
       amount = '';
     } catch (error) {
       console.error('[On-J] Failed:', error);
@@ -891,53 +799,6 @@
     tokenId = e.detail.value;
   }
 
-  $: if (prefill && prefill.id !== lastPrefillId) {
-    lastPrefillId = prefill.id;
-    if (typeof prefill.tokenId === 'number') tokenId = prefill.tokenId;
-    action = 'fund';
-  }
-
-  function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  async function waitForManualC2RIntoDraft(counterpartyEntityId: string, baselinePendingCount: number): Promise<void> {
-    const deadline = Date.now() + 60_000;
-    let settleExecuteQueued = false;
-    while (Date.now() < deadline) {
-      const env = activeEnv;
-      const liveAccount = currentReplica?.state?.accounts?.get?.(counterpartyEntityId) ?? null;
-      const pendingCollateralToReserve = Number(currentReplica?.state?.jBatchState?.batch?.collateralToReserve?.length || 0);
-      if (pendingCollateralToReserve > baselinePendingCount) return;
-      if (!liveAccount || !isManualC2RWorkspace(liveAccount)) {
-        await sleep(250);
-        continue;
-      }
-      const workspace = liveAccount.settlementWorkspace;
-      if (workspace?.status === 'submitted') return;
-      if (
-        workspace?.status === 'ready_to_submit'
-        && !settleExecuteQueued
-        && !currentReplica?.state?.jBatchState?.sentBatch
-        && isLocalExecutorForWorkspace(counterpartyEntityId, liveAccount)
-      ) {
-        if (!env || !isRuntimeEnv(env)) throw new Error('Runtime environment not available');
-        const signerId = resolveSignerId(env);
-        settleExecuteQueued = true;
-        await enqueueEntityInputs(env, [{
-          entityId,
-          signerId,
-          entityTxs: [{
-            type: 'settle_execute',
-            data: { counterpartyEntityId },
-          }],
-        }]);
-      }
-      await sleep(250);
-    }
-    throw new Error('Timed out adding collateral → reserve to draft batch');
-  }
-
   $: gasPreview = (() => {
     const pick = (preset: GasPreset): { maxFeeWei: bigint; maxPriorityWei: bigint } => {
       if (preset === 'custom') {
@@ -988,10 +849,6 @@
             Sent. Waiting for finalization.
           {:else if hasDraftBatch}
             Draft contains {pendingOps} operation{pendingOps === 1 ? '' : 's'}.
-          {:else if resolvingAutoExecute}
-            Adding collateral → reserve to your draft batch.
-          {:else if selectedWorkspaceAwaitingCounterparty}
-            Waiting for counterparty signature.
           {:else}
             Ready.
           {/if}
@@ -1056,10 +913,6 @@
       <div class="batch-empty">
         {#if hasSentBatch}
           Draft queue is empty. You can keep queueing new ops while the submitted batch is in-flight.
-        {:else if resolvingAutoExecute}
-          Adding collateral → reserve to your draft batch.
-        {:else if selectedWorkspaceAwaitingCounterparty}
-          Waiting for counterparty signature.
         {:else}
           Queue actions below, then sign and broadcast.
         {/if}
@@ -1109,9 +962,9 @@
       {/if}
       <button class="btn-sign-broadcast" data-testid="settle-sign-broadcast" on:click={broadcastBatch} disabled={sending || !canBroadcastDraft}>
         {#if sending}
-          {executableSettlementCount > 0 && !hasDraftBatch ? 'Executing & Broadcasting...' : 'Signing & Broadcasting...'}
+          Signing & Broadcasting...
         {:else}
-          {executableSettlementCount > 0 && !hasDraftBatch ? 'Execute & Broadcast' : 'Sign & Broadcast'}
+          Sign & Broadcast
         {/if}
       </button>
     </div>
@@ -1122,25 +975,13 @@
   </div>
 
     <div class="action-tabs">
-    <button class="tab" class:active={action === 'fund'} on:click={() => action = 'fund'} disabled={sending}>Reserve → Collateral</button>
-    <button class="tab" class:active={action === 'withdraw'} on:click={() => action = 'withdraw'} disabled={sending}>Collateral → Reserve</button>
     <button class="tab" class:active={action === 'transfer'} on:click={() => action = 'transfer'} disabled={sending}>Reserve → Reserve</button>
     <button class="tab" class:active={action === 'dispute'} on:click={() => action = 'dispute'} disabled={sending}>Dispute</button>
     <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History ({batchHistory.length})</button>
   </div>
 
   <p class="action-desc">
-    {#if action === 'fund'}
-      Queue reserve-to-collateral into the selected account.
-    {:else if action === 'withdraw'}
-      {#if resolvingAutoExecute}
-        Adding collateral → reserve to your draft batch now.
-      {:else if selectedWorkspaceAwaitingCounterparty}
-        Waiting for counterparty signature.
-      {:else}
-        Queue a collateral → reserve settlement for the selected account.
-      {/if}
-    {:else if action === 'dispute'}
+    {#if action === 'dispute'}
       Queue dispute start/finalize for selected account.
     {:else if action === 'history'}
       Review {batchHistory.length} finalized on-chain batch{batchHistory.length === 1 ? '' : 'es'} for this entity.
@@ -1292,25 +1133,9 @@
     {#if isSelfTransfer}
       <p class="error-hint">Cannot transfer to yourself</p>
     {/if}
-  {:else}
-    <EntityInput
-      label="Account"
-      value={counterpartyEntityId}
-      entities={accountEntityIds}
-      {contacts}
-      excludeId={entityId}
-      placeholder="Select account..."
-      disabled={sending}
-      on:change={handleAccountChange}
-    />
-    {#if accountEntityIds.length === 0}
-      <p class="error-hint">No accounts found. Open one in Accounts first.</p>
-    {:else if action === 'withdraw' && (selectedWorkspaceAwaitingCounterparty || resolvingAutoExecute)}
-      <p class="dispute-state finalized">{resolvingAutoExecute ? 'Adding collateral → reserve to your draft batch.' : 'Waiting for counterparty signature.'}</p>
-    {/if}
   {/if}
 
-  {#if action === 'fund' || action === 'withdraw' || action === 'transfer'}
+  {#if action === 'transfer'}
     <label class="settle-field settle-field-wide">
       <span>Amount</span>
       <div class="settle-amount-shell">
@@ -1335,14 +1160,10 @@
       data-testid="settle-queue-action"
       class="btn-submit"
       on:click={submitAction}
-      disabled={sending || !amount || Boolean(action === 'transfer' ? (!recipientEntityId || isSelfTransfer) : !counterpartyEntityId) || Boolean(action === 'withdraw' && (selectedWorkspaceAwaitingCounterparty || resolvingAutoExecute))}
+      disabled={sending || !amount || !recipientEntityId || isSelfTransfer}
     >
       {#if sending}
         Processing...
-      {:else if action === 'fund'}
-        Queue Reserve → Collateral
-      {:else if action === 'withdraw'}
-        Queue Collateral → Reserve
       {:else}
         Queue Reserve → Reserve
       {/if}

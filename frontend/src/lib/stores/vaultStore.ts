@@ -4,6 +4,7 @@ import type { Env, JurisdictionConfig, PersistedFrameJournal, RoutedEntityInput,
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
 import { xlnEnvironment, setXlnEnvironment } from './xlnStore';
 import { settings } from './settingsStore';
+import { toasts } from './toastStore';
 import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
 import { writeOnboardingComplete } from '$lib/utils/onboardingState';
 
@@ -625,6 +626,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   console.log('[VaultStore] 🔎 buildOrRestoreRuntimeEnv called for:', runtimeIdLower?.slice(0, 12), new Error('stack').stack?.split('\n').slice(1, 5).join(' ← '));
   const runtimeSeed = runtime.seed;
   let env: Env | null = null;
+  let resetBrokenPersistence = false;
 
   try {
     if (xln.loadEnvFromDB) {
@@ -633,13 +635,29 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     }
   } catch (error) {
     if (strictRestore) {
-      throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[VaultStore] Strict restore corruption detected for ${runtime.id.slice(0, 12)}; clearing runtime storage`, error);
+      try {
+        const resetEnv = xln.createEmptyEnv(runtimeSeed);
+        applyRuntimeLogPreference(resetEnv);
+        resetEnv.runtimeId = runtimeIdLower;
+        resetEnv.dbNamespace = runtimeIdLower;
+        await xln.clearDB(resetEnv);
+        resetBrokenPersistence = true;
+        toasts.warning('Network was reset', 8000);
+      } catch (resetError) {
+        throw new Error(
+          `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: ${message}; reset failed: ${resetError instanceof Error ? resetError.message : String(resetError)}`
+        );
+      }
+      env = null;
+    } else {
+      console.warn('[VaultStore] ⚠️ Failed to load env from DB, falling back to fresh import:', error);
+      env = null;
     }
-    console.warn('[VaultStore] ⚠️ Failed to load env from DB, falling back to fresh import:', error);
-    env = null;
   }
 
-  if (!env && strictRestore) {
+  if (!env && strictRestore && !resetBrokenPersistence) {
     throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: persisted env missing`);
   }
 

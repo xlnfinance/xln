@@ -96,7 +96,6 @@
   // State
   let replica: EntityReplica | null = null;
   let selectedAccountId: string | null = null;
-  let onchainPrefill: { tokenId?: number; id: number } | null = null;
   let selectedJurisdictionName: string | null = null;
   let addressCopied = false;
   let openAccountEntityId = '';
@@ -2311,22 +2310,10 @@
     accountWorkspaceTab = 'activity';
   }
 
-  function handleAccountPanelGoToSettle() {
-    selectedAccountId = null;
-    activeTab = 'accounts';
-    accountWorkspaceTab = 'settle';
-  }
-
   function handleAccountPanelGoToOpenAccounts() {
     selectedAccountId = null;
     activeTab = 'accounts';
     accountWorkspaceTab = 'open';
-  }
-
-  function openOnchainDeposit(tokenId: number) {
-    onchainPrefill = { tokenId, id: Date.now() };
-    activeTab = 'accounts';
-    accountWorkspaceTab = 'settle';
   }
 
   function goToLive() {
@@ -2429,7 +2416,6 @@
           {tab}
           on:back={handleBackToAccounts}
           on:faucet={handleAccountFaucet}
-          on:goToSettle={handleAccountPanelGoToSettle}
           on:goToOpenAccounts={handleAccountPanelGoToOpenAccounts}
         />
         {/key}
@@ -3228,7 +3214,6 @@
                   entityId={replica.state?.entityId || tab.entityId}
                   {replica}
                   {contacts}
-                  prefill={onchainPrefill}
                 />
               {/if}
             {/if}

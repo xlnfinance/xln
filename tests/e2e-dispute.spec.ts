@@ -513,24 +513,26 @@ async function queueFundR2CViaUi(
   counterpartyId: string,
   amount: string,
 ): Promise<void> {
-  await openEntitySettleWorkspace(page);
+  const assetsTab = page.getByTestId('tab-assets').first();
+  await expect(assetsTab).toBeVisible({ timeout: 20_000 });
+  await assetsTab.click();
 
-  const fundTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Reserve → Collateral$/ }).first();
+  const fundTab = page.getByTestId('asset-tab-r2c').first();
   await expect(fundTab).toBeVisible({ timeout: 20_000 });
   await fundTab.click();
 
-  const accountPicker = page.locator('.settlement-panel button.closed-trigger, .settlement-panel input[placeholder="Select account..."]').first();
+  const accountPicker = page.locator('.asset-action-card button.closed-trigger, .asset-action-card input[placeholder="Select account..."]').first();
   await expect(accountPicker).toBeVisible({ timeout: 20_000 });
   await accountPicker.click();
   const accountOption = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();
   await expect(accountOption).toBeVisible({ timeout: 20_000 });
   await accountOption.click();
 
-  const amountInput = page.locator('.settlement-panel .settle-amount-shell input').first();
+  const amountInput = page.getByTestId('reserve-to-collateral-amount').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await amountInput.fill(amount);
 
-  const fundButton = page.getByTestId('settle-queue-action').first();
+  const fundButton = page.getByTestId('reserve-to-collateral-USDC').first();
   await expect(fundButton).toBeEnabled({ timeout: 20_000 });
   await fundButton.click();
 }
@@ -540,24 +542,26 @@ async function queueWithdrawC2RViaUi(
   counterpartyId: string,
   amount: string,
 ): Promise<void> {
-  await openEntitySettleWorkspace(page);
+  const assetsTab = page.getByTestId('tab-assets').first();
+  await expect(assetsTab).toBeVisible({ timeout: 20_000 });
+  await assetsTab.click();
 
-  const withdrawTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Collateral → Reserve$/ }).first();
+  const withdrawTab = page.getByTestId('asset-tab-c2r').first();
   await expect(withdrawTab).toBeVisible({ timeout: 20_000 });
   await withdrawTab.click();
 
-  const accountPicker = page.locator('.settlement-panel button.closed-trigger, .settlement-panel input[placeholder="Select account..."]').first();
+  const accountPicker = page.locator('.asset-action-card button.closed-trigger, .asset-action-card input[placeholder="Select account..."]').first();
   await expect(accountPicker).toBeVisible({ timeout: 20_000 });
   await accountPicker.click();
   const accountOption = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();
   await expect(accountOption).toBeVisible({ timeout: 20_000 });
   await accountOption.click();
 
-  const amountInput = page.locator('.settlement-panel .settle-amount-shell input').first();
+  const amountInput = page.getByTestId('collateral-to-reserve-amount').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await amountInput.fill(amount);
 
-  const withdrawButton = page.getByTestId('settle-queue-action').first();
+  const withdrawButton = page.getByTestId('collateral-to-reserve-USDC').first();
   await expect(withdrawButton).toBeEnabled({ timeout: 20_000 });
   await withdrawButton.click();
 }
@@ -1202,8 +1206,8 @@ test.describe('E2E Dispute Flow', () => {
     }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(secondHubReserveBeforeR2R);
 
     // Full-cycle continuation:
-    // 1) Queue R2C fund into second hub account (UI)
-    // 2) Sign & Broadcast (UI)
+    // 1) Queue R2C fund into second hub account through Assets
+    // 2) Assets auto-broadcasts the on-chain batch
     // 3) Verify collateral increased on second hub account (state)
     await openAccountPanelByCounterparty(page, secondHubId);
     const collateralBeforeUi = await readRawCollateralUiFromOpenAccount(page);
@@ -1213,24 +1217,16 @@ test.describe('E2E Dispute Flow', () => {
     }
 
     const batchBeforeR2C = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+    const sentReserveToCollateralBefore = batchBeforeR2C.sentReserveToCollateral;
     const lastTxHashBeforeR2C = batchBeforeR2C.lastBatchTxHash;
     const r2cFinalizeCursor = await getPersistedReceiptCursor(page);
 
     const postDisputeCollateralAmount = '1';
     await timedStep('post_dispute.queue_r2c', () => queueFundR2CViaUi(page, secondHubId, postDisputeCollateralAmount));
-    await timedStep('post_dispute.wait_r2c_queued', async () => {
-      await expect.poll(async () => {
-        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        return snap.pendingReserveToCollateral;
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(batchBeforeR2C.pendingReserveToCollateral);
-    });
-    const r2cQueued = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-    const r2cHistoryBeforeBroadcast = r2cQueued.batchHistoryCount;
-    await timedStep('post_dispute.broadcast_r2c', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
     await timedStep('post_dispute.wait_r2c_sent', async () => {
       await expect.poll(async () => {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        return snap.sentReserveToCollateral > 0 || snap.batchHistoryCount > r2cHistoryBeforeBroadcast;
+        return snap.sentReserveToCollateral > sentReserveToCollateralBefore || snap.batchHistoryCount > batchBeforeR2C.batchHistoryCount;
       }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
     });
     await timedStep('post_dispute.wait_new_txhash', async () => {
@@ -1258,26 +1254,17 @@ test.describe('E2E Dispute Flow', () => {
       await secondHubPanelBackAfterFund.click();
     }
 
-    // C2R handling: queue manual collateral -> reserve settlement, let hub sign it, then
-    // verify it lands in the local draft batch before manual broadcast.
+    // C2R handling through Assets:
+    // propose settlement, wait for counterparty signature, auto-execute into jBatch, then
+    // verify reserve increases without a second manual broadcast click.
     const c2rBatchBefore = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-    const c2rHistoryBeforeBroadcast = c2rBatchBefore.batchHistoryCount;
+    const c2rSentBefore = c2rBatchBefore.sentCollateralToReserve;
     const reserveBeforeC2R = await readOnchainReserveViaAnvil(page, accountRef.entityId);
     await timedStep('post_dispute.queue_c2r_withdraw', () => queueWithdrawC2RViaUi(page, secondHubId, postDisputeCollateralAmount));
-    await timedStep('post_dispute.open_settle_workspace_c2r', () => openEntitySettleWorkspace(page));
-    const signButtonDuringC2R = page.getByTestId('settle-sign-broadcast').first();
-    await timedStep('post_dispute.wait_c2r_draft', async () => {
-      await expect.poll(async () => {
-        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        return snap.pendingCollateralToReserve;
-      }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(c2rBatchBefore.pendingCollateralToReserve);
-      await expect(signButtonDuringC2R).toBeEnabled({ timeout: 5_000 });
-    });
-    await timedStep('post_dispute.broadcast_c2r', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
     await timedStep('post_dispute.wait_c2r_sent', async () => {
       await expect.poll(async () => {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        return snap.sentCollateralToReserve > 0 || snap.batchHistoryCount > c2rHistoryBeforeBroadcast;
+        return snap.sentCollateralToReserve > c2rSentBefore || snap.batchHistoryCount > c2rBatchBefore.batchHistoryCount;
       }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBe(true);
     });
     await timedStep('post_dispute.wait_c2r_reserve_update', async () => {
