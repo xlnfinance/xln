@@ -955,16 +955,16 @@
   <div class="batch-card" class:has-pending={hasAnyBatch}>
     <div class="batch-header">
       <div>
-        <div class="batch-title">On-Chain Batch</div>
+        <div class="batch-title">Batch</div>
         <div class="batch-subtitle">
           {#if hasSentBatch}
-            Broadcasted batch is waiting for finalization.
+            Waiting for the submitted batch to finalize.
           {:else if executableSettlementCount > 0}
-            Signed settlement{executableSettlementCount === 1 ? '' : 's'} ready to broadcast.
+            Settlement{executableSettlementCount === 1 ? '' : 's'} ready to broadcast.
           {:else if hasDraftBatch}
-            Draft queue holds {pendingOps} operation{pendingOps === 1 ? '' : 's'}.
+            Draft contains {pendingOps} operation{pendingOps === 1 ? '' : 's'}.
           {:else}
-            Ready for on-chain actions.
+            Ready.
           {/if}
         </div>
       </div>
@@ -972,7 +972,7 @@
 
     <div class="batch-status-row">
       <span class="batch-status-copy">{lifecycleHint}</span>
-      <span class="batch-status-meta">History · {batchHistory.length}</span>
+      <span class="batch-status-meta">History ({batchHistory.length})</span>
     </div>
 
     {#if hasSentBatch}
@@ -1099,7 +1099,7 @@
     <button class="tab" class:active={action === 'withdraw'} on:click={() => action = 'withdraw'} disabled={sending}>Collateral → Reserve</button>
     <button class="tab" class:active={action === 'transfer'} on:click={() => action = 'transfer'} disabled={sending}>Reserve → Reserve</button>
     <button class="tab" class:active={action === 'dispute'} on:click={() => action = 'dispute'} disabled={sending}>Dispute</button>
-    <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History · {batchHistory.length}</button>
+    <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History ({batchHistory.length})</button>
   </div>
 
   <p class="action-desc">
@@ -1314,9 +1314,6 @@
     </button>
   {/if}
 
-  {#if action !== 'history'}
-    <p class="two-step-note">All on-chain actions enter the draft first. Review above, then sign and broadcast.</p>
-  {/if}
 </div>
 
 <style>
@@ -1917,9 +1914,9 @@
   .settle-amount-shell {
     display: flex;
     align-items: center;
-    gap: 10px;
-    min-height: 48px;
-    padding: 0 8px 0 14px;
+    gap: 8px;
+    min-height: 46px;
+    padding: 0 10px 0 14px;
     background: #110d0b;
     border: 1px solid #322821;
     border-radius: 12px;
@@ -1944,9 +1941,11 @@
   .settle-inline-controls {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     margin-left: auto;
     flex: 0 0 auto;
+    padding-left: 10px;
+    border-left: 1px solid #2a221c;
   }
 
   .settle-max-link {
@@ -1954,11 +1953,11 @@
     background: transparent;
     padding: 0;
     color: #8d857d;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
-    max-width: 132px;
+    max-width: 88px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -1974,15 +1973,15 @@
 
   .settle-token-inline {
     flex: 0 0 auto;
-    min-width: 132px;
+    min-width: 84px;
   }
 
   .settle-token-inline :global(.token-select.compact .select-trigger) {
-    min-height: 36px;
-    padding: 0 12px;
-    border-radius: 9px;
-    background: #1a1512;
-    border: 1px solid #2f2620;
+    min-height: 32px;
+    padding: 0 18px 0 2px;
+    border-radius: 0;
+    background: transparent;
+    border: none;
   }
 
   .btn-submit {
@@ -2005,13 +2004,6 @@
     margin: 4px 0 0;
     font-size: 11px;
     color: #ef4444;
-  }
-
-  .two-step-note {
-    margin: 0;
-    font-size: 11px;
-    color: #6b7280;
-    text-align: center;
   }
 
   @media (max-width: 900px) {

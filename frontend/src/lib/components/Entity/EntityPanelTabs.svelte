@@ -2560,8 +2560,8 @@
             <div class="token-table-row asset-ledger-row asset-ledger-total" data-testid="asset-ledger-total">
               <div class="col-token asset-ledger-total-label">
                 <div class="asset-name-block">
-                  <span class="token-name">Net Worth</span>
-                  <span class="asset-kind">{formatApproxUsd(assetLedgerGrandTotal)}</span>
+                  <span class="token-name">Total</span>
+                  <span class="asset-kind">Net worth {formatApproxUsd(assetLedgerGrandTotal)}</span>
                 </div>
               </div>
               <div class="col-balance asset-balance-block">
@@ -5215,9 +5215,9 @@
   .asset-amount-shell {
     display: flex;
     align-items: center;
-    gap: 10px;
-    min-height: 48px;
-    padding: 0 8px 0 14px;
+    gap: 8px;
+    min-height: 46px;
+    padding: 0 10px 0 14px;
     border: 1px solid #322821;
     border-radius: 12px;
     background: #110d0b;
@@ -5245,10 +5245,12 @@
   .asset-inline-controls {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     margin-left: auto;
     min-width: 0;
     flex: 0 0 auto;
+    padding-left: 10px;
+    border-left: 1px solid #2a221c;
   }
 
   .asset-max-hint {
@@ -5256,14 +5258,14 @@
     background: transparent;
     padding: 0;
     color: #8d857d;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     text-transform: none;
     letter-spacing: 0;
     cursor: pointer;
     white-space: nowrap;
     text-align: right;
-    max-width: 132px;
+    max-width: 88px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -5282,16 +5284,16 @@
   }
 
   .asset-token-select-inline {
-    min-height: 36px;
-    min-width: 96px;
+    min-height: 32px;
+    min-width: 84px;
   }
 
   .asset-token-select-inline.compact {
-    min-height: 36px;
-    padding: 0 30px 0 12px;
-    border-radius: 9px;
-    background: #1a1512;
-    border: 1px solid #2f2620;
+    min-height: 32px;
+    padding: 0 18px 0 2px;
+    border-radius: 0;
+    background: transparent;
+    border: none;
     color: #e7e5e4;
   }
 

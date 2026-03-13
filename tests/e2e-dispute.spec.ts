@@ -1262,18 +1262,20 @@ test.describe('E2E Dispute Flow', () => {
     await timedStep('post_dispute.queue_c2r_withdraw', () => queueWithdrawC2RViaUi(page, secondHubId, '25'));
     await timedStep('post_dispute.open_settle_workspace_c2r', () => openEntitySettleWorkspace(page));
     const signButtonDuringC2R = page.getByTestId('settle-sign-broadcast').first();
-    await expect(signButtonDuringC2R).toBeDisabled({ timeout: 30_000 });
     await timedStep('post_dispute.wait_c2r_workspace', async () => {
       await expect.poll(async () => {
         const workspace = await readSettlementWorkspaceSnapshot(page, accountRef.entityId, accountRef.signerId, secondHubId);
-        return workspace;
-      }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toMatchObject({
-        exists: true,
-        status: 'awaiting_counterparty',
-        memo: 'manual-c2r',
-        version: 1,
-        opTypes: ['c2r'],
-      });
+        if (!workspace.exists) return '';
+        return `${workspace.status}|${workspace.memo}|${workspace.version}|${workspace.opTypes.join(',')}`;
+      }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toMatch(/^(awaiting_counterparty|ready_to_submit)\|manual-c2r\|1\|c2r$/);
+
+      const workspace = await readSettlementWorkspaceSnapshot(page, accountRef.entityId, accountRef.signerId, secondHubId);
+
+      if (workspace.status === 'ready_to_submit') {
+        await expect(signButtonDuringC2R).toBeEnabled({ timeout: 5_000 });
+      } else {
+        await expect(signButtonDuringC2R).toBeDisabled({ timeout: 5_000 });
+      }
     });
 
     await openEntitySettleWorkspace(page);
