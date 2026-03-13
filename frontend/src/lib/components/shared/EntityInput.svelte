@@ -170,7 +170,7 @@
     const canonical = String(id || '').trim();
     if (!canonical) return '';
     const knownName = getKnownEntityName(canonical);
-    return knownName ? `${knownName} (${canonical})` : canonical;
+    return knownName || canonical;
   }
 
   // Filtered options
@@ -300,6 +300,7 @@
   // Display value
   $: closedSelectionVisible = Boolean(value && !showDropdown && selectedOption);
   $: displayValue = value ? (selectedOption?.displayName || getDisplayName(value)) : '';
+  $: selectedIsPreferred = selectedOption ? normalizeEntityId(selectedOption.id) === preferredNorm : false;
 </script>
 
 <div class="entity-input" class:disabled>
@@ -321,7 +322,12 @@
           <span class="item-avatar placeholder">?</span>
         {/if}
         <span class="item-meta">
-          <span class="item-name">{selectedOption.displayName}</span>
+          <span class="item-name-row">
+            <span class="item-name">{selectedOption.displayName}</span>
+            {#if selectedIsPreferred}
+              <span class="item-badge">Self</span>
+            {/if}
+          </span>
           <span class="item-id">{selectedOption.id}</span>
         </span>
         <span class="closed-trigger-arrow" aria-hidden="true">
@@ -376,7 +382,10 @@
             <span class="item-avatar placeholder">?</span>
           {/if}
           <span class="item-meta">
-            <span class="item-name">{pinnedOption.displayName}</span>
+            <span class="item-name-row">
+              <span class="item-name">{pinnedOption.displayName}</span>
+              <span class="item-badge">Self</span>
+            </span>
             <span class="item-id">{pinnedOption.id}</span>
           </span>
         </button>
@@ -608,6 +617,13 @@
     line-height: 1.2;
   }
 
+  .item-name-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
   .item-id {
     color: #78716c;
     font-size: 10px;
@@ -640,6 +656,21 @@
     gap: 2px;
     min-width: 0;
     flex: 1;
+  }
+
+  .item-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+    color: #86efac;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    flex-shrink: 0;
   }
 
   .item-right {

@@ -712,3 +712,28 @@
     - full isolated E2E suite:
       - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --video=off --trace=off --screenshot=only-on-failure --max-failures=1`
       - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260313-073148-183/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260313-073148-183/e2e-shard-00.log)
+
+- 2026-03-13
+  - Tightened the live asset/payment branch without changing the runtime settlement model:
+    - [EntityInput.svelte](/Users/egor/xln/frontend/src/lib/components/shared/EntityInput.svelte) now renders one clean selected identity row with a pinned `Self` badge instead of duplicate text.
+    - [EntityPanelTabs.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/EntityPanelTabs.svelte) keeps the Assets ledger deterministic, uses inline amount shells for asset moves, shows `EOA` / `Entity` as separate described blocks, and keeps the net-worth total as the last ledger row.
+    - [PaymentPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/PaymentPanel.svelte) keeps the compact amount field with inline fill hint and inline token selector, with self pinned/default in the recipient picker.
+    - [SettlementPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/SettlementPanel.svelte) keeps `Reserve → Collateral` / `Collateral → Reserve` naming and the same compact amount-shell pattern.
+    - [DeltaCapacityBar.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/shared/DeltaCapacityBar.svelte) keeps the wider black center separator for center mode.
+    - [OnboardingPanel.svelte](/Users/egor/xln/frontend/src/lib/components/Entity/OnboardingPanel.svelte) removes extra preview noise and keeps the setup flow single-pass.
+  - Enforced a hard minimum `1000ms` RPC watcher cadence in [rpc.ts](/Users/egor/xln/runtime/jadapter/rpc.ts) so dead localhost RPC targets do not hammer `/rpc` with rapid retries.
+  - Tightened live routing fee defaults to the intended tiny values:
+    - [gossip.ts](/Users/egor/xln/runtime/networking/gossip.ts)
+    - [rebalance.ts](/Users/egor/xln/runtime/scenarios/rebalance.ts)
+    - [types.ts](/Users/egor/xln/runtime/types.ts)
+  - Re-verified on this exact tree:
+    - `bun x tsc --noEmit`
+    - focused wallet flows:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --pw-files=tests/e2e-payment.spec.ts,tests/e2e-e2r2e.spec.ts --video=off --trace=off --screenshot=only-on-failure --max-failures=1`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260313-081950-600/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260313-081950-600/e2e-shard-00.log)
+    - full CLI scenario suite:
+      - `bun runtime/scenarios/run.ts`
+      - pass log: [/Users/egor/xln/.logs/scenarios-parallel/20260313-082116-945](/Users/egor/xln/.logs/scenarios-parallel/20260313-082116-945)
+    - full isolated E2E suite:
+      - `bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=1 --workers-per-shard=1 --video=off --trace=off --screenshot=only-on-failure --max-failures=1`
+      - pass log: [/Users/egor/xln/.logs/e2e-parallel/20260313-082117-015/e2e-shard-00.log](/Users/egor/xln/.logs/e2e-parallel/20260313-082117-015/e2e-shard-00.log)

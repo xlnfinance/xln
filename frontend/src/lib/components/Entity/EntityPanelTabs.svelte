@@ -255,7 +255,7 @@
 
   function updateBalanceRefresh(event: Event) {
     const target = event.target as HTMLSelectElement;
-    settingsOperations.setBalanceRefreshMs(Number(target.value));
+    settingsOperations.setBalanceRefreshMs(Math.max(1000, Number(target.value)));
   }
 
   function isRuntimeEnv(value: unknown): value is Env {
@@ -2463,7 +2463,9 @@
           <div class="hero-label">Net Worth</div>
           <div class="hero-breakdown">
             <span>External {formatCompact(externalTotal)}</span>
+            <span>+</span>
             <span>Reserve {formatCompact(reservesTotal)}</span>
+            <span>+</span>
             <span>Accounts {formatCompact(accountsData.total)}</span>
           </div>
         </div>
@@ -2493,7 +2495,7 @@
           <div class="tab-header-row">
             <div class="asset-title-block">
               <h4 class="section-head" style="margin: 0;">Assets</h4>
-              <p class="muted asset-ledger-note">EOA balances, entity reserves, and spendable account capacity in one ledger.</p>
+              <p class="muted asset-ledger-note">External wallet, reserves, and spendable account capacity in one ledger.</p>
             </div>
             <div class="header-actions">
               <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 15000} on:change={updateBalanceRefresh}>
@@ -2510,12 +2512,12 @@
             <div class="wallet-meta-block">
               <p class="muted wallet-label">EOA</p>
               <p class="wallet-meta-value">{tab.signerId || '-'}</p>
-              <p class="muted wallet-meta-help">Wallet address for native ETH and ERC20 transfers.</p>
+              <p class="muted wallet-meta-help">Native ETH and ERC20 wallet address.</p>
             </div>
             <div class="wallet-meta-block">
               <p class="muted wallet-label">Entity</p>
               <p class="wallet-meta-value">{replica?.state?.entityId || tab.entityId}</p>
-              <p class="muted wallet-meta-help">XLN identity for accounts, reserves, gossip, and consensus.</p>
+              <p class="muted wallet-meta-help">XLN identity for reserves, accounts, and consensus.</p>
             </div>
           </div>
 
@@ -2560,13 +2562,13 @@
             <div class="token-table-row asset-ledger-row asset-ledger-total" data-testid="asset-ledger-total">
               <div class="col-token asset-ledger-total-label">
                 <div class="asset-name-block">
-                  <span class="token-name">Total</span>
-                  <span class="asset-kind">Net worth {formatApproxUsd(assetLedgerGrandTotal)}</span>
+                  <span class="token-name">Net Worth</span>
+                  <span class="asset-kind">Total {formatApproxUsd(assetLedgerGrandTotal)}</span>
                 </div>
               </div>
               <div class="col-balance asset-balance-block">
                 <span class="balance-text">{formatApproxUsd(assetLedgerTotals.externalUsd)}</span>
-                  <span class="value-text subtle">External</span>
+                <span class="value-text subtle">External</span>
               </div>
               <div class="col-balance asset-balance-block">
                 <span class="balance-text">{formatApproxUsd(assetLedgerTotals.reserveUsd)}</span>
@@ -2824,7 +2826,7 @@
                   </button>
                 </div>
               {:else if assetWorkspaceTab === 'send'}
-                <h4 class="section-head">Send From External Wallet</h4>
+                <h4 class="section-head">External Send</h4>
                 <p class="muted">Transfer native ETH or ERC20 directly from your signer EOA.</p>
                 <label class="asset-field asset-field-wide">
                   <span>Amount</span>
@@ -2870,7 +2872,7 @@
                   </button>
                 </div>
               {:else}
-                <h4 class="section-head">Allow Spending</h4>
+                <h4 class="section-head">External Allow</h4>
                 <p class="muted">Approve an ERC20 allowance for another contract or protocol.</p>
                 <div class="asset-form-grid">
                   <label class="asset-field asset-field-wide">
@@ -3093,14 +3095,14 @@
                         class:active={$settings.barLayout === 'center'}
                         on:click={() => settingsOperations.setBarLayout('center')}
                       >
-                        Center split
+                        Center
                       </button>
                       <button
                         class="appearance-toggle"
                         class:active={$settings.barLayout === 'sides'}
                         on:click={() => settingsOperations.setBarLayout('sides')}
                       >
-                        Side rails
+                        Sides
                       </button>
                     </div>
                   </div>
@@ -4478,8 +4480,8 @@
   .appearance-toggle-group {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 5px;
+    gap: 4px;
+    padding: 4px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.04);
@@ -4488,8 +4490,8 @@
   }
 
   .appearance-toggle {
-    min-width: 96px;
-    padding: 9px 14px;
+    min-width: 88px;
+    padding: 8px 12px;
     border: 1px solid transparent;
     border-radius: 999px;
     background: transparent;
@@ -4527,8 +4529,43 @@
 
   .appearance-slider {
     width: 100%;
-    accent-color: #fbbf24;
-    height: 28px;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 18px;
+    background: transparent;
+  }
+
+  .appearance-slider::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.9), rgba(113, 113, 122, 0.45));
+  }
+
+  .appearance-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: #fbbf24;
+    box-shadow: 0 4px 14px rgba(251, 191, 36, 0.35);
+    margin-top: -6px;
+  }
+
+  .appearance-slider::-moz-range-track {
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.9), rgba(113, 113, 122, 0.45));
+  }
+
+  .appearance-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: #fbbf24;
+    box-shadow: 0 4px 14px rgba(251, 191, 36, 0.35);
   }
 
   .appearance-scale-caption {
@@ -5215,9 +5252,9 @@
   .asset-amount-shell {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-height: 46px;
-    padding: 0 10px 0 14px;
+    gap: 6px;
+    min-height: 48px;
+    padding: 0 8px 0 12px;
     border: 1px solid #322821;
     border-radius: 12px;
     background: #110d0b;
@@ -5245,12 +5282,11 @@
   .asset-inline-controls {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     margin-left: auto;
     min-width: 0;
     flex: 0 0 auto;
-    padding-left: 10px;
-    border-left: 1px solid #2a221c;
+    padding-left: 8px;
   }
 
   .asset-max-hint {
@@ -5258,14 +5294,14 @@
     background: transparent;
     padding: 0;
     color: #8d857d;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     text-transform: none;
     letter-spacing: 0;
     cursor: pointer;
     white-space: nowrap;
     text-align: right;
-    max-width: 88px;
+    max-width: 72px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -5285,7 +5321,7 @@
 
   .asset-token-select-inline {
     min-height: 32px;
-    min-width: 84px;
+    min-width: 94px;
   }
 
   .asset-token-select-inline.compact {

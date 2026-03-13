@@ -7,6 +7,7 @@ const VALID_ACCOUNT_DELTA_VIEW_MODES: readonly AccountDeltaViewMode[] = ['per-to
 const ACCOUNT_BAR_USD_PER_100PX_MIN = 10;
 const ACCOUNT_BAR_USD_PER_100PX_MAX = 10_000;
 const ACCOUNT_BAR_USD_PER_100PX_DEFAULT = 2_000;
+const MIN_BALANCE_REFRESH_MS = 1_000;
 
 function clampAccountBarUsdPerPx(raw: unknown): number {
   const numeric = Number(raw);
@@ -160,7 +161,8 @@ const settingsOperations = {
   },
 
   setBalanceRefreshMs(refreshMs: number) {
-    settings.update(current => ({ ...current, balanceRefreshMs: refreshMs }));
+    const next = Math.max(MIN_BALANCE_REFRESH_MS, Math.floor(Number(refreshMs) || MIN_BALANCE_REFRESH_MS));
+    settings.update(current => ({ ...current, balanceRefreshMs: next }));
     this.saveToStorage();
   },
 

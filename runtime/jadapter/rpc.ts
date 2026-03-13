@@ -99,14 +99,14 @@ export async function createRpcAdapter(
 ): Promise<JAdapter> {
   const PROD_WATCH_POLL_MS = 3000;
   const TEST_WATCH_POLL_MS = (() => {
-    const raw = Number(process.env.JADAPTER_TEST_WATCH_POLL_MS ?? '100');
-    if (!Number.isFinite(raw)) return 100;
-    return Math.max(25, Math.floor(raw));
+    const raw = Number(process.env.JADAPTER_TEST_WATCH_POLL_MS ?? '1000');
+    if (!Number.isFinite(raw)) return 1000;
+    return Math.max(1000, Math.floor(raw));
   })();
   const DEV_WATCH_POLL_MS = (() => {
-    const raw = Number(process.env.JADAPTER_DEV_WATCH_POLL_MS ?? '100');
-    if (!Number.isFinite(raw)) return 100;
-    return Math.max(50, Math.floor(raw));
+    const raw = Number(process.env.JADAPTER_DEV_WATCH_POLL_MS ?? '1000');
+    if (!Number.isFinite(raw)) return 1000;
+    return Math.max(1000, Math.floor(raw));
   })();
   const TX_WAIT_TIMEOUT_MS = Math.max(
     10_000,
