@@ -18,7 +18,7 @@ critical rules for bilateral consensus correctness. update this when bugs are fo
 - `swap_resolve`: `callerIsLeft = byLeft`
 - `j_event_claim`: `claimIsFromLeft = byLeft`
 
-**cosmetic-only perspective:** `direct_payment` and `request_withdrawal` derive `isOurFrame = (byLeft === iAmLeft)` locally for event labels ("Sent" vs "Received"). this is NOT consensus-critical.
+**cosmetic-only perspective:** `direct_payment` may derive `isOurFrame = (byLeft === iAmLeft)` locally for event labels ("Sent" vs "Received"). this is NOT consensus-critical.
 
 **bug caught 2026-02-05:** server had stale `proofHeader.fromEntity` from previous session. credit limit applied to wrong side, causing "Bilateral state injection detected" error on Frame 2 consensus.
 

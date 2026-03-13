@@ -567,7 +567,10 @@ export const applyEntityTx = async (
             }
             // Don't re-add htlc_lock to mempool (it's being cancelled)
           } else {
-            // Non-HTLC txs: restore to mempool for re-proposal
+            // Rollback path: these txs were already part of the failed pending
+            // account frame. Restoring them to the same account mempool is the
+            // inverse of that failed proposal, not a new handler-originated
+            // mutation.
             accountMachine.mempool.push(tx);
             console.log(`📥   Restored ${tx.type} to mempool`);
           }
