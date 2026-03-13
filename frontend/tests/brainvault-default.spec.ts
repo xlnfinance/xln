@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 async function completeOnboarding(page: import('@playwright/test').Page): Promise<void> {
-  await expect(page.getByRole('heading', { name: 'Public profile' })).toBeVisible({ timeout: 240_000 });
+  await expect(page.getByLabel('Display name')).toBeVisible({ timeout: 240_000 });
   const startButton = page.getByRole('button', { name: /^start$/i });
   await expect(startButton).toBeVisible();
   await startButton.click();
@@ -26,7 +26,7 @@ test.describe('BrainVault default flow', () => {
     await deriveButton.click();
 
     await completeOnboarding(page);
-    await expect(page.getByRole('button', { name: /^🧭 0x/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /vault-test@example\.com/i }).first()).toBeVisible();
   });
 
   test('derives a vault end-to-end (real worker, 2 factors)', async ({ page }) => {
@@ -45,6 +45,6 @@ test.describe('BrainVault default flow', () => {
     await deriveButton.click();
 
     await completeOnboarding(page);
-    await expect(page.getByRole('button', { name: /^🧭 0x/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /vault-tes2t@example\.com/i }).first()).toBeVisible();
   });
 });

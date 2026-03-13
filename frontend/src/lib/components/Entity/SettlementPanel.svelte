@@ -93,6 +93,32 @@
     return parsed;
   }
 
+  function formatTokenInputAmount(amount: bigint, decimals: number): string {
+    if (amount <= 0n) return '';
+    const divisor = 10n ** BigInt(decimals);
+    const whole = amount / divisor;
+    const frac = amount % divisor;
+    if (frac === 0n) return whole.toString();
+    return `${whole.toString()}.${frac.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
+  }
+
+  function getTokenDecimals(currentTokenId: number): number {
+    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(currentTokenId);
+    return Number.isFinite(tokenInfo?.decimals) ? Number(tokenInfo?.decimals) : 18;
+  }
+
+  function getTokenSymbol(currentTokenId: number): string {
+    return activeXlnFunctions?.getTokenInfo?.(currentTokenId)?.symbol || `#${currentTokenId}`;
+  }
+
+  function formatInlineMaxHint(amountBig: bigint, currentTokenId: number): string {
+    if (amountBig <= 0n) return '0';
+    if (activeXlnFunctions?.formatTokenAmount) {
+      return activeXlnFunctions.formatTokenAmount(currentTokenId, amountBig);
+    }
+    return `${formatTokenInputAmount(amountBig, getTokenDecimals(currentTokenId))} ${getTokenSymbol(currentTokenId)}`;
+  }
+
   function formatShortId(id: string): string {
     if (!id) return '';
     if (id.length < 22) return id;
@@ -618,6 +644,32 @@
     ? Math.max(0, selectedDisputeTimeout - Math.max(Number(replica?.state?.lastFinalizedJHeight || 0), Number(liveJHeight || 0)))
     : 0;
 
+  function getReserveBalance(currentTokenId: number): bigint {
+    return replica?.state?.onchainReserves?.get?.(currentTokenId) ?? 0n;
+  }
+
+  function getSelectedAccountWithdrawableCollateral(currentTokenId: number): bigint {
+    if (!selectedAccount || !activeXlnFunctions?.deriveDelta || !counterpartyEntityId) return 0n;
+    const delta = selectedAccount.deltas?.get?.(currentTokenId);
+    if (!delta) return 0n;
+    const derived = activeXlnFunctions.deriveDelta(delta, normalizeEntityId(entityId) < normalizeEntityId(counterpartyEntityId));
+    const totalHold = derived.outTotalHold ?? 0n;
+    return derived.outCollateral > totalHold ? derived.outCollateral - totalHold : 0n;
+  }
+
+  function getActionMaxAmount(): bigint {
+    if (action === 'fund' || action === 'transfer') return getReserveBalance(tokenId);
+    if (action === 'withdraw') return getSelectedAccountWithdrawableCollateral(tokenId);
+    return 0n;
+  }
+
+  function fillActionMax(): void {
+    const amountBig = getActionMaxAmount();
+    amount = formatTokenInputAmount(amountBig, getTokenDecimals(tokenId));
+  }
+
+  $: actionMaxAmount = getActionMaxAmount();
+
   async function clearBatch() {
     if (!hasAnyBatch) return;
     if (!confirm('Clear current draft and sent batch state?')) return;
@@ -916,7 +968,7 @@
   <div class="batch-card" class:has-pending={hasAnyBatch}>
     <div class="batch-header">
       <div>
-        <div class="batch-title">On-Chain Batch Lifecycle</div>
+        <div class="batch-title">Batch Workspace</div>
         <div class="batch-subtitle">
           {#if hasSentBatch && hasDraftBatch}
             Broadcasted batch in-flight + {pendingOps} draft operation{pendingOps === 1 ? '' : 's'}
@@ -940,31 +992,22 @@
       {/if}
     </div>
 
-    <div class="lifecycle-rail" data-testid="settle-lifecycle-rail">
-      <div
-        class="rail-step"
-        class:active={!hasDraftBatch && !hasSentBatch && executableSettlementCount === 0}
-        class:done={hasDraftBatch || hasSentBatch || executableSettlementCount > 0}
-      >
-        <span class="rail-dot"></span>
-        <span class="rail-label">Ready</span>
-      </div>
-      <div class="rail-line" class:active={hasDraftBatch || hasSentBatch || executableSettlementCount > 0}></div>
-      <div
-        class="rail-step"
-        class:active={hasDraftBatch || executableSettlementCount > 0}
-        class:done={hasSentBatch}
-      >
-        <span class="rail-dot"></span>
-        <span class="rail-label">Draft</span>
-      </div>
-      <div class="rail-line" class:active={hasSentBatch}></div>
-      <div class="rail-step" class:active={hasSentBatch}>
-        <span class="rail-dot"></span>
-        <span class="rail-label">Sent</span>
-      </div>
+    <div class="batch-status-row">
+      <span class="batch-status-chip" class:sent={hasSentBatch} class:draft={!hasSentBatch && (hasDraftBatch || executableSettlementCount > 0)}>
+        {#if hasSentBatch}
+          Sent
+        {:else if hasDraftBatch || executableSettlementCount > 0}
+          Draft
+        {:else}
+          Ready
+        {/if}
+      </span>
+      <span class="batch-status-copy">{lifecycleHint}</span>
+      {#if latestFinalizedBatch}
+        <span class="batch-status-meta">Last J#{Number(latestFinalizedBatch.jBlockNumber || 0)}</span>
+      {/if}
+      <span class="batch-status-meta">History {batchHistory.length}</span>
     </div>
-    <div class="lifecycle-hint">{lifecycleHint}</div>
 
     {#if hasSentBatch}
       <div class="sent-batch">
@@ -1311,13 +1354,25 @@
   {/if}
 
   {#if action === 'fund' || action === 'withdraw' || action === 'transfer'}
-    <div class="row">
-      <div class="amount-field">
-        <label>Amount</label>
-        <input type="text" bind:value={amount} placeholder="100" disabled={sending} />
+    <label class="settle-field settle-field-wide">
+      <span>Amount</span>
+      <div class="settle-amount-shell">
+        <input type="text" bind:value={amount} placeholder="0.00" disabled={sending} />
+        <div class="settle-inline-controls">
+          <button
+            type="button"
+            class="settle-max-link"
+            on:click={fillActionMax}
+            disabled={sending || actionMaxAmount <= 0n}
+          >
+            {formatInlineMaxHint(actionMaxAmount, tokenId)}
+          </button>
+          <div class="settle-token-inline">
+            <TokenSelect value={tokenId} compact={true} disabled={sending} on:change={handleTokenChange} />
+          </div>
+        </div>
       </div>
-      <TokenSelect label="Token" value={tokenId} disabled={sending} on:change={handleTokenChange} />
-    </div>
+    </label>
 
     <button
       data-testid="settle-queue-action"
@@ -1391,65 +1446,44 @@
     letter-spacing: 0.05em;
   }
 
-  .lifecycle-rail {
+  .batch-status-row {
     margin-top: 12px;
-    display: grid;
-    grid-template-columns: auto minmax(16px, 1fr) auto minmax(16px, 1fr) auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
     align-items: center;
-    gap: 6px;
   }
 
-  .rail-step {
+  .batch-status-chip {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    color: #6b7280;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .rail-step.active {
-    color: #fbbf24;
-  }
-
-  .rail-step.done {
-    color: #86efac;
-  }
-
-  .rail-dot {
-    width: 8px;
-    height: 8px;
     border-radius: 999px;
-    border: 1px solid #3f3f46;
-    background: #18181b;
-    flex: 0 0 auto;
+    padding: 5px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    background: #111111;
+    border: 1px solid #292524;
+    color: #d6d3d1;
   }
 
-  .rail-step.active .rail-dot {
-    border-color: rgba(251, 191, 36, 0.85);
-    background: rgba(251, 191, 36, 0.8);
+  .batch-status-chip.sent {
+    border-color: rgba(248, 113, 113, 0.4);
+    color: #fecaca;
+    background: rgba(127, 29, 29, 0.18);
   }
 
-  .rail-step.done .rail-dot {
-    border-color: rgba(34, 197, 94, 0.8);
-    background: rgba(34, 197, 94, 0.75);
+  .batch-status-chip.draft {
+    border-color: rgba(251, 191, 36, 0.35);
+    color: #fbbf24;
+    background: rgba(120, 53, 15, 0.22);
   }
 
-  .rail-line {
-    height: 1px;
-    background: #2f2f2f;
-  }
-
-  .rail-line.active {
-    background: linear-gradient(90deg, rgba(34, 197, 94, 0.9), rgba(251, 191, 36, 0.9));
-  }
-
-  .lifecycle-hint {
-    margin-top: 6px;
-    color: #9ca3af;
+  .batch-status-copy,
+  .batch-status-meta {
     font-size: 11px;
+    color: #9ca3af;
   }
 
   .sent-batch {
@@ -1942,14 +1976,15 @@
 
   .action-tabs {
     display: flex;
-    gap: 4px;
+    flex-wrap: wrap;
+    gap: 6px;
     background: #0c0a09;
     border-radius: 8px;
     padding: 4px;
   }
 
   .tab {
-    flex: 1;
+    flex: 1 1 160px;
     padding: 10px 8px;
     background: transparent;
     border: none;
@@ -1983,17 +2018,14 @@
     line-height: 1.4;
   }
 
-  .row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 12px;
-    align-items: end;
-  }
-
-  .amount-field {
+  .settle-field {
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  .settle-field-wide {
+    width: 100%;
   }
 
   label {
@@ -2023,6 +2055,62 @@
 
   input::placeholder {
     color: #57534e;
+  }
+
+  .settle-amount-shell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 52px;
+    padding: 4px 6px 4px 14px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 10px;
+  }
+
+  .settle-amount-shell:focus-within {
+    border-color: #fbbf24;
+  }
+
+  .settle-amount-shell input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+  }
+
+  .settle-inline-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  .settle-max-link {
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: #a8a29e;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .settle-max-link:hover:not(:disabled) {
+    color: #f5f5f4;
+  }
+
+  .settle-max-link:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .settle-token-inline {
+    flex: 0 0 auto;
+    min-width: 160px;
   }
 
   .btn-submit {
@@ -2055,15 +2143,6 @@
   }
 
   @media (max-width: 900px) {
-    .lifecycle-rail {
-      grid-template-columns: 1fr;
-      gap: 4px;
-    }
-
-    .rail-line {
-      display: none;
-    }
-
     .batch-preview {
       grid-template-columns: 1fr;
     }
@@ -2076,8 +2155,19 @@
       grid-template-columns: 1fr;
     }
 
-    .row {
-      grid-template-columns: 1fr;
+    .settle-amount-shell {
+      flex-direction: column;
+      align-items: stretch;
+      padding: 12px;
+    }
+
+    .settle-inline-controls {
+      width: 100%;
+      justify-content: space-between;
+    }
+
+    .settle-token-inline {
+      min-width: 0;
     }
 
     .batch-actions {

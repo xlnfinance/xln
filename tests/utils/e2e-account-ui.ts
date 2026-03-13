@@ -233,6 +233,10 @@ export async function getRenderedReserveBalance(page: Page, symbol: string): Pro
   return getNumericTextByTestId(page, `reserve-balance-${symbol}`);
 }
 
+export async function getRenderedAccountSpendableBalance(page: Page, symbol: string): Promise<number> {
+  return getNumericTextByTestId(page, `account-spendable-${symbol}`);
+}
+
 export async function waitForRenderedOutboundForAccount(
   page: Page,
   counterpartyId: string,

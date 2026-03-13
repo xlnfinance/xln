@@ -282,8 +282,7 @@
   <div class="setup-card">
     <section class="setup-section">
       <div class="section-headline">
-        <h3>Public profile</h3>
-        <p>Your name is visible in gossip, account lists, and routing flows.</p>
+        <p>Your public name appears in gossip, account lists, and routing flows.</p>
       </div>
       <label class="form-label" for="display-name">Display name</label>
       <input
@@ -357,42 +356,29 @@
         fee <strong>{defaultMaxFeeUsd.toLocaleString()}</strong>.
       </p>
       <div class="hub-join-inline">
-        <div class="section-headline compact">
-          <h3>Initial hub join</h3>
-          <p>Auto-join opens your first bilateral account immediately after setup.</p>
-        </div>
-        <select class="hub-join-select" bind:value={autoJoinHubs}>
+        <label class="form-label" for="hub-join-select">Initial hub join</label>
+        <select id="hub-join-select" class="hub-join-select" bind:value={autoJoinHubs}>
           {#each HUB_JOIN_OPTIONS as option}
             <option value={option.value}>{option.label}</option>
           {/each}
         </select>
+        <p class="form-hint compact">Open your first bilateral account automatically right after setup.</p>
       </div>
     </section>
 
     <section class="setup-section confirm-section">
-      <div class="identity-inline">
-        {#if avatarUrl}
-          <img src={avatarUrl} alt="Entity avatar" class="identity-avatar" />
-        {:else}
-          <div class="identity-avatar placeholder">?</div>
-        {/if}
-        <div class="identity-copy">
-          <span class="meta-chip">Entity</span>
-          <code>{entityId}</code>
-        </div>
-      </div>
-      <label class="checkbox-row">
-        <input type="checkbox" bind:checked={termsAccepted} />
-        <span>I understand this is testnet software and I accept the associated risks.</span>
-      </label>
-      {#if error}
-        <div class="error-msg">{error}</div>
-      {/if}
-      <div class="actions single">
+      <div class="confirm-row">
+        <label class="checkbox-row">
+          <input type="checkbox" bind:checked={termsAccepted} />
+          <span>I understand this is testnet software and I accept the associated risks.</span>
+        </label>
         <button class="btn-primary" disabled={!canFinish || submitting} on:click={finish}>
           {submitting ? 'Starting...' : 'Start'}
         </button>
       </div>
+      {#if error}
+        <div class="error-msg">{error}</div>
+      {/if}
     </section>
   </div>
 </div>
@@ -422,13 +408,6 @@
     padding: 18px;
   }
 
-  .identity-inline {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-
-  .identity-avatar,
   .profile-preview-avatar {
     width: 56px;
     height: 56px;
@@ -437,7 +416,6 @@
     flex-shrink: 0;
   }
 
-  .identity-avatar.placeholder,
   .profile-preview-avatar.placeholder {
     display: flex;
     align-items: center;
@@ -447,32 +425,16 @@
     font-weight: 700;
   }
 
-  .identity-copy {
-    min-width: 0;
-  }
-
   h2, h3 {
     margin: 0;
     letter-spacing: -0.02em;
   }
 
-  h3 {
-    font-size: 17px;
-  }
-
   .section-headline p {
-    margin: 6px 0 0;
+    margin: 0;
     color: #a8a29e;
     font-size: 14px;
     line-height: 1.55;
-  }
-
-  .identity-meta {
-    margin-top: 12px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
   }
 
   .meta-chip {
@@ -494,10 +456,6 @@
 
   .section-headline {
     margin-bottom: 14px;
-  }
-
-  .section-headline.compact {
-    margin-bottom: 10px;
   }
 
   .form-label {
@@ -582,6 +540,10 @@
     color: #fbbf24;
   }
 
+  .form-hint.compact {
+    margin-top: 8px;
+  }
+
   .hub-join-inline {
     margin-top: 16px;
     padding-top: 16px;
@@ -610,14 +572,11 @@
     gap: 14px;
   }
 
-  .identity-inline {
-    gap: 12px;
-  }
-
-  .identity-inline .identity-avatar {
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
+  .confirm-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
   }
 
   .error-msg {
@@ -627,11 +586,6 @@
     border-radius: 10px;
     color: #f43f5e;
     font-size: 12px;
-  }
-
-  .actions.single {
-    display: flex;
-    justify-content: flex-end;
   }
 
   .btn-primary {
@@ -672,12 +626,13 @@
       grid-template-columns: 1fr;
     }
 
-    .actions.single {
-      justify-content: stretch;
-    }
-
     .btn-primary {
       width: 100%;
+    }
+
+    .confirm-row {
+      flex-direction: column;
+      align-items: stretch;
     }
   }
 </style>
