@@ -303,7 +303,7 @@ export async function runRebalanceScenario(): Promise<void> {
       type: 'setHubConfig',
       data: {
         matchingStrategy: 'amount',
-        routingFeePPM: 100,
+        routingFeePPM: 1,
         baseFee: 0n,
         minCollateralThreshold: 0n,
         rebalanceBaseFee: 10n ** 17n,
@@ -508,7 +508,7 @@ export async function runRebalanceScenario(): Promise<void> {
     signerId: hub.signer,
     entityTxs: [{
       type: 'setHubConfig',
-      data: { matchingStrategy: 'amount', routingFeePPM: 100, baseFee: 0n, minCollateralThreshold: 0n },
+      data: { matchingStrategy: 'amount', routingFeePPM: 1, baseFee: 0n, minCollateralThreshold: 0n },
     }]
   }]);
   await converge(env);

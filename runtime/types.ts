@@ -694,7 +694,7 @@ export type EntityTx =
       data: {
         matchingStrategy?: 'amount' | 'time' | 'fee'; // Default: 'amount'
         policyVersion?: number;             // Fee-policy version (auto-incremented if omitted)
-        routingFeePPM?: number;             // Default: 100 (0.01%)
+        routingFeePPM?: number;             // Default: 1 (0.0001%)
         baseFee?: bigint;                   // Default: 0n
         disputeAutoFinalizeMode?: 'auto' | 'ignore';
         minCollateralThreshold?: bigint;    // Reserved for future policy gates

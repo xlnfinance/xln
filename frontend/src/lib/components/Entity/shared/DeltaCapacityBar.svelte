@@ -8,7 +8,7 @@
   export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
   export let visualScale: DeltaVisualScale | null = null;
 
-  const CENTER_GAP_PX = 84;
+  const CENTER_GAP_PX = 120;
   const SIDES_GAP_PX = 14;
   const MIN_VISIBLE_SIDE_PX = 0;
 
@@ -170,8 +170,8 @@
     width: 100%;
     height: var(--bar-h);
     border-radius: 999px;
-    background: rgba(15, 23, 42, 0.05);
-    box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.08);
+    background: #09090b;
+    box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.06);
   }
 
   .axis,
@@ -180,7 +180,7 @@
     top: 0;
     bottom: 0;
     width: var(--center-gap);
-    background: #020617;
+    background: #000000;
     border: none;
     box-shadow: none;
     z-index: 4;
@@ -284,7 +284,9 @@
   }
 
   .mid.one-sided-sep {
-    transform: translateX(-5px);
+    width: 12px;
+    background: #000000;
+    transform: translateX(-6px);
   }
 
   .seg {

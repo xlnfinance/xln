@@ -54,7 +54,6 @@
   let repeatArmed = false;
   let repeatTimer: ReturnType<typeof setInterval> | null = null;
   let repeatStoppedReason = '';
-  let showFullEntityId = false;
   let payMaxAmount = 0n;
   let payMaxUsd = 0;
   let serverEntityNames = new Map<string, string>();
@@ -1524,12 +1523,6 @@
     <div bind:this={routesPanelEl} class="routes">
       <div class="routes-header">
         <h4>Routes ({routes.length})</h4>
-        <div class="route-controls">
-          <label class="route-id-toggle">
-            <input type="checkbox" bind:checked={showFullEntityId} />
-            <span>Show full entity id</span>
-          </label>
-        </div>
       </div>
       <div class="routes-scroll">
         {#each routes as route, index}
@@ -1550,7 +1543,7 @@
                       compact={true}
                       clickable={false}
                       copyable={false}
-                      showAddress={showFullEntityId}
+                      showAddress={false}
                       size={24}
                     />
                   </div>
@@ -1619,7 +1612,7 @@
     flex-direction: column;
     gap: 16px;
     width: 100%;
-    max-width: 840px;
+    max-width: 760px;
   }
 
   .recipient-picker-row {
@@ -1738,13 +1731,13 @@
   .amount-inline-tools {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     margin-left: auto;
     min-width: 0;
   }
 
   .inline-token-select {
-    width: 156px;
+    width: 132px;
     flex-shrink: 0;
   }
 
@@ -1754,18 +1747,18 @@
 
   .inline-token-select :global(.select-trigger) {
     min-height: 40px;
-    padding: 8px 10px;
+    padding: 7px 9px;
   }
 
   .amount-input-shell {
     display: flex;
     align-items: center;
-    gap: 10px;
-    min-height: 52px;
-    padding: 4px 6px 4px 14px;
+    gap: 8px;
+    min-height: 48px;
+    padding: 4px 6px 4px 12px;
     background: #1c1917;
     border: 1px solid #292524;
-    border-radius: 10px;
+    border-radius: 12px;
   }
 
   .amount-input-shell:focus-within {
@@ -1790,9 +1783,9 @@
     border: none;
     background: transparent;
     padding: 0;
-    color: #a8a29e;
-    font-size: 12px;
-    font-weight: 500;
+    color: #8d857d;
+    font-size: 11px;
+    font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
   }
@@ -1981,32 +1974,6 @@
     font-weight: 500;
     color: #78716c;
     margin: 0;
-  }
-
-  .route-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .route-id-toggle {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    text-transform: none;
-    letter-spacing: 0;
-    font-size: 12px;
-    color: #a8a29e;
-    font-weight: 400;
-  }
-
-  .route-id-toggle input[type="checkbox"] {
-    width: 14px;
-    height: 14px;
-    margin: 0;
-    accent-color: #fbbf24;
   }
 
   .route-option {

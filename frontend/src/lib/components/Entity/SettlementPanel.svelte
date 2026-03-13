@@ -411,11 +411,6 @@
     return `${whole.toString()}.${frac2.toString().padStart(2, '0')}`;
   }
 
-  function formatClock(ms: number | undefined): string {
-    if (!ms || !Number.isFinite(ms)) return '—';
-    return new Date(ms).toLocaleTimeString();
-  }
-
   function formatDateTime(ms: number | undefined): string {
     if (!ms || !Number.isFinite(ms)) return '—';
     return new Date(ms).toLocaleString();
@@ -590,14 +585,6 @@
     details: buildBatchDetailOps(entry?.batch),
     key: String(entry?.txHash || `${entry?.batchHash || 'batch'}-${index}`),
   }));
-  $: lifecycleHint = hasSentBatch
-    ? `Sent batch nonce #${Number(sentBatch?.entityNonce || 0)} waiting for finalization`
-    : executableSettlementCount > 0
-      ? `${executableSettlementCount} signed settlement${executableSettlementCount === 1 ? '' : 's'} ready to submit`
-      : hasDraftBatch
-      ? `Draft contains ${pendingOps} operation${pendingOps === 1 ? '' : 's'}`
-      : 'Ready';
-
   function historySummary(entry: CompletedBatch | null | undefined): Array<{ label: string; count: number }> {
     const operations = entry?.operations;
     if (operations && typeof operations === 'object') {
@@ -958,9 +945,9 @@
         <div class="batch-title">Batch</div>
         <div class="batch-subtitle">
           {#if hasSentBatch}
-            Waiting for the submitted batch to finalize.
+            Sent. Waiting for finalization.
           {:else if executableSettlementCount > 0}
-            Settlement{executableSettlementCount === 1 ? '' : 's'} ready to broadcast.
+            {executableSettlementCount} signed settlement{executableSettlementCount === 1 ? '' : 's'} ready.
           {:else if hasDraftBatch}
             Draft contains {pendingOps} operation{pendingOps === 1 ? '' : 's'}.
           {:else}
@@ -968,27 +955,11 @@
           {/if}
         </div>
       </div>
+      <div class="batch-status-meta">History ({batchHistory.length})</div>
     </div>
-
-    <div class="batch-status-row">
-      <span class="batch-status-copy">{lifecycleHint}</span>
-      <span class="batch-status-meta">History ({batchHistory.length})</span>
-    </div>
-
-    {#if hasSentBatch}
-      <div class="sent-batch">
-        <div class="sent-meta">
-          <span>Sent</span>
-          <span>Nonce #{sentBatch.entityNonce}</span>
-          <span>Hash {sentBatch.batchHash?.slice(0, 10)}...</span>
-          <span>Attempts {sentBatch.submitAttempts}</span>
-          <span>Submitted {formatClock(sentBatch.lastSubmittedAt)}</span>
-        </div>
-      </div>
-    {/if}
 
     <div class="draft-batch" class:locked={hasSentBatch}>
-      <div class="preview-label">Draft</div>
+      <div class="preview-label">{hasSentBatch ? 'Queued draft' : 'Draft'}</div>
     {#if hasDraftBatch}
       <div class="batch-summary">
         {#each pendingSummary as item}
@@ -1094,7 +1065,7 @@
 
   </div>
 
-  <div class="action-tabs">
+    <div class="action-tabs">
     <button class="tab" class:active={action === 'fund'} on:click={() => action = 'fund'} disabled={sending}>Reserve → Collateral</button>
     <button class="tab" class:active={action === 'withdraw'} on:click={() => action = 'withdraw'} disabled={sending}>Collateral → Reserve</button>
     <button class="tab" class:active={action === 'transfer'} on:click={() => action = 'transfer'} disabled={sending}>Reserve → Reserve</button>
@@ -1110,7 +1081,7 @@
     {:else if action === 'dispute'}
       Queue dispute start/finalize for selected account.
     {:else if action === 'history'}
-      Review finalized on-chain batches for this entity.
+      Review {batchHistory.length} finalized on-chain batch{batchHistory.length === 1 ? '' : 'es'} for this entity.
     {:else}
       Queue reserve-to-reserve transfer to another entity.
     {/if}
@@ -1120,7 +1091,7 @@
     <div class="history-card">
       <div class="history-header">
         <div class="history-title">On-Chain Batch History</div>
-        <div class="history-subtitle">{batchHistory.length} record{batchHistory.length === 1 ? '' : 's'}</div>
+        <div class="history-subtitle">{batchHistory.length} finalized batch{batchHistory.length === 1 ? '' : 'es'}</div>
       </div>
 
       {#if batchHistory.length === 0}
@@ -1353,35 +1324,9 @@
     color: #9ca3af;
   }
 
-  .batch-status-row {
-    margin-top: 12px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .batch-status-copy,
   .batch-status-meta {
     font-size: 11px;
     color: #9ca3af;
-  }
-
-  .sent-batch {
-    margin-top: 10px;
-    border: 1px solid rgba(248, 113, 113, 0.35);
-    border-radius: 8px;
-    background: rgba(127, 29, 29, 0.16);
-    padding: 10px;
-  }
-
-  .sent-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    font-size: 11px;
-    color: #fecaca;
-    font-family: 'JetBrains Mono', monospace;
   }
 
   .draft-batch {
@@ -1914,9 +1859,9 @@
   .settle-amount-shell {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-height: 46px;
-    padding: 0 10px 0 14px;
+    gap: 6px;
+    min-height: 48px;
+    padding: 0 8px 0 12px;
     background: #110d0b;
     border: 1px solid #322821;
     border-radius: 12px;
@@ -1941,11 +1886,11 @@
   .settle-inline-controls {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     margin-left: auto;
     flex: 0 0 auto;
-    padding-left: 10px;
-    border-left: 1px solid #2a221c;
+    min-width: 0;
+    padding-left: 8px;
   }
 
   .settle-max-link {
@@ -1953,11 +1898,11 @@
     background: transparent;
     padding: 0;
     color: #8d857d;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
-    max-width: 88px;
+    max-width: 72px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -1973,7 +1918,7 @@
 
   .settle-token-inline {
     flex: 0 0 auto;
-    min-width: 84px;
+    min-width: 94px;
   }
 
   .settle-token-inline :global(.token-select.compact .select-trigger) {

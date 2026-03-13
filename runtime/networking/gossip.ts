@@ -408,7 +408,7 @@ export const parseProfile = (raw: unknown): Profile => {
     isHub: metadataRaw.isHub === true,
     routingFeePPM: Math.max(
       0,
-      Number.isFinite(Number(metadataRaw.routingFeePPM)) ? Math.floor(Number(metadataRaw.routingFeePPM)) : 100,
+      Number.isFinite(Number(metadataRaw.routingFeePPM)) ? Math.floor(Number(metadataRaw.routingFeePPM)) : 1,
     ),
     baseFee: parseBigIntValue(metadataRaw.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
     board,
@@ -498,7 +498,7 @@ export const canonicalizeProfile = (
   const relays = normalizeStringArray(profile.relays);
   const board = parseBoardMetadata(metadata.board, entityId);
   getBoardPrimaryPublicKey(board, entityId);
-  const routingFeePPM = Math.max(0, Number.isFinite(Number(metadata.routingFeePPM)) ? Math.floor(Number(metadata.routingFeePPM)) : 100);
+  const routingFeePPM = Math.max(0, Number.isFinite(Number(metadata.routingFeePPM)) ? Math.floor(Number(metadata.routingFeePPM)) : 1);
   const baseFee = parseBigIntValue(metadata.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId);
   return {
     ...profile,

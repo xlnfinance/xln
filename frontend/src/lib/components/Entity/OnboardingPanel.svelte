@@ -301,7 +301,6 @@
         <div class="profile-preview-copy">
           <strong>{displayName.trim() || 'Your public name'}</strong>
           <code>{entityId}</code>
-          <span>{displayName.trim().length}/32 characters</span>
         </div>
       </div>
     </section>
@@ -496,17 +495,12 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
   }
 
   .profile-preview-copy strong {
-    font-size: 18px;
+    font-size: 17px;
     color: #fafaf9;
-  }
-
-  .profile-preview-copy span {
-    font-size: 12px;
-    color: #78716c;
   }
 
   .policy-grid {
