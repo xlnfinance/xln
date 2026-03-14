@@ -112,6 +112,7 @@
   let orderListTab: 'open' | 'closed' = 'open';
   let closedOrderStatusFilter: 'all' | ClosedOrderStatus = 'all';
   const MIN_ORDER_NOTIONAL_USD = 10;
+  const FILLED_DISPLAY_PPM_THRESHOLD = 999_950n;
 
     $: activeXlnFunctions = $xlnFunctions;
     $: activeEnv = $xlnEnvironment;
@@ -832,7 +833,25 @@
     return activeXlnFunctions.computeSwapPriceTicks(giveToken, wantToken, give, want);
   }
 
+  function remainingOfferUsd(offer: SwapOfferLike): number {
+    const giveToken = Number(offer?.giveTokenId || 0);
+    const giveAmountValue = toBigIntSafe(offer?.giveAmount) ?? 0n;
+    if (!Number.isFinite(giveToken) || giveToken <= 0 || giveAmountValue <= 0n) return 0;
+    const info = activeXlnFunctions?.getTokenInfo?.(giveToken);
+    const decimals = Number(info?.decimals ?? 18);
+    const symbol = String(info?.symbol || '');
+    return amountToUsd(giveAmountValue, decimals, symbol);
+  }
+
+  function isDustOpenOffer(offer: SwapOfferLike): boolean {
+    const remainingUsd = remainingOfferUsd(offer);
+    return remainingUsd > 0 && remainingUsd < MIN_ORDER_NOTIONAL_USD;
+  }
+
   $: openOrders = [...activeOffers].sort((a: SwapOfferLike, b: SwapOfferLike) => {
+    const aDust = isDustOpenOffer(a);
+    const bDust = isDustOpenOffer(b);
+    if (aDust !== bDust) return aDust ? 1 : -1;
     const aCreated = toBigIntSafe(a?.createdAt) ?? 0n;
     const bCreated = toBigIntSafe(b?.createdAt) ?? 0n;
     if (aCreated === bCreated) return String(a?.offerId || '').localeCompare(String(b?.offerId || ''));
@@ -931,7 +950,7 @@
 
   function classifyClosedStatus(lifecycle: OfferLifecycle): ClosedOrderStatus {
     const filledPpm = computeFilledPpm(lifecycle.resolves);
-    if (filledPpm >= 1_000_000n) return 'filled';
+    if (filledPpm >= FILLED_DISPLAY_PPM_THRESHOLD) return 'filled';
     const hasFill = lifecycle.resolves.some((resolve) => resolve.fillRatio > 0);
     const hasCancelResolve = lifecycle.resolves.some((resolve) => resolve.cancelRemainder);
     if (hasCancelResolve && hasFill) return 'partial';
@@ -972,6 +991,9 @@
       const filledPpm = computeFilledPpm(offer.resolves);
       const filledGiveAmount = (offer.giveAmount * filledPpm) / 1_000_000n;
       const filledWantAmount = (offer.wantAmount * filledPpm) / 1_000_000n;
+      const filledPercent = filledPpm >= FILLED_DISPLAY_PPM_THRESHOLD
+        ? 100
+        : Number((filledPpm * 10_000n) / 1_000_000n) / 100;
       const latestResolveTs = offer.resolves.length > 0 ? offer.resolves[offer.resolves.length - 1]!.timestamp : offer.createdAt;
       return {
         offerId: offer.offerId,
@@ -985,7 +1007,7 @@
         wantAmount: offer.wantAmount,
         filledGiveAmount,
         filledWantAmount,
-        filledPercent: Number((filledPpm * 10_000n) / 1_000_000n) / 100,
+        filledPercent,
         status: classifyClosedStatus(offer),
         createdAt: offer.createdAt,
         closedAt: latestResolveTs,
@@ -1384,6 +1406,8 @@
               {#each openOrders as offer}
                 {@const side = offerSideLabel(offer)}
                 {@const pairView = resolvePairOrientation(offer.giveTokenId, offer.wantTokenId)}
+                {@const isDust = isDustOpenOffer(offer)}
+                {@const remainingUsd = remainingOfferUsd(offer)}
                 <tr>
                   <td>
                     <span class:side-ask={side === 'Ask'} class:side-bid={side === 'Bid'} class="side-badge">{side}</span>
@@ -1391,7 +1415,19 @@
                   <td>{tokenSymbol(pairView.baseTokenId)}/{tokenSymbol(pairView.quoteTokenId)}</td>
                   <td>{formatPriceTicks(offerPriceTicks(offer))}</td>
                   <td>
-                    {formatAmount(toBigIntSafe(offer.giveAmount) ?? 0n, Number(offer.giveTokenId || 0))} {tokenSymbol(Number(offer.giveTokenId || 0))}
+                    {#if isDust}
+                      <div class="remaining-cell">
+                        <span class="dust-label">Dust (&lt;${MIN_ORDER_NOTIONAL_USD})</span>
+                        <span class="dust-amount">
+                          {formatAmount(toBigIntSafe(offer.giveAmount) ?? 0n, Number(offer.giveTokenId || 0))} {tokenSymbol(Number(offer.giveTokenId || 0))}
+                          {#if remainingUsd > 0}
+                            · ~${remainingUsd.toFixed(2)}
+                          {/if}
+                        </span>
+                      </div>
+                    {:else}
+                      {formatAmount(toBigIntSafe(offer.giveAmount) ?? 0n, Number(offer.giveTokenId || 0))} {tokenSymbol(Number(offer.giveTokenId || 0))}
+                    {/if}
                   </td>
                   <td>{String(offer.accountId || '').slice(0, 10)}...</td>
                   <td>
@@ -1866,6 +1902,26 @@
     border-radius: 8px;
     padding: 10px 12px;
     color: #9ca3af;
+    font-size: 12px;
+  }
+
+  .remaining-cell {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .dust-label {
+    color: #fbbf24;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .dust-amount {
+    color: #a1a1aa;
     font-size: 12px;
   }
 
