@@ -434,7 +434,12 @@ async function openAccountPanelByCounterparty(page: Page, counterpartyId: string
 
   const accountPreview = page.locator('.account-preview').filter({ hasText: counterpartyId }).first();
   await expect(accountPreview).toBeVisible({ timeout: 20_000 });
-  await accountPreview.click();
+  const exploreButton = accountPreview.getByRole('button', { name: /^Explore$/ }).first();
+  if (await exploreButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await exploreButton.click();
+  } else {
+    await accountPreview.click();
+  }
 
   const back = page.locator('.account-panel .back-button').first();
   await expect(back).toBeVisible({ timeout: 20_000 });
@@ -614,17 +619,6 @@ async function seedDisputePreconditions(
           return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
             && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
         });
-        const rep = repKey ? env.eReplicas.get(repKey) : null;
-        const account = rep?.state?.accounts?.get?.(counterpartyId) ?? null;
-        const knownAccount = account
-          ? {
-              currentHeight: Number(account.currentHeight || 0),
-              hasPending: !!account.pendingFrame,
-              pendingHeight: account.pendingFrame?.height ?? null,
-              currentFrameHash: account.currentFrame?.stateHash || null,
-            }
-          : null;
-
         const response = await fetch(`${window.location.origin}/api/faucet/offchain`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -634,7 +628,6 @@ async function seedDisputePreconditions(
             tokenId: 1,
             amount: '100',
             hubEntityId: counterpartyId,
-            ...(knownAccount ? { knownAccount } : {}),
           }),
         });
         const body = await response.json().catch(() => ({}));
@@ -1117,7 +1110,12 @@ test.describe('E2E Dispute Flow', () => {
 
     const disputedAccountPreview = page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId }).first();
     await expect(disputedAccountPreview).toBeVisible({ timeout: 20_000 });
-    await disputedAccountPreview.click();
+    const disputedExploreButton = disputedAccountPreview.getByRole('button', { name: /^Explore$/ }).first();
+    if (await disputedExploreButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await disputedExploreButton.click();
+    } else {
+      await disputedAccountPreview.click();
+    }
 
     const disputeStatusText = page.locator('.management-card .dispute-status').first();
     await expect(disputeStatusText).toContainText(/Dispute active:\s*\d+\s*block/i, { timeout: 15_000 });

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createEventDispatcher } from 'svelte';
   import DeltaTokenSummary from './DeltaTokenSummary.svelte';
   import type { DeltaParts, DeltaVisualScale } from './delta-types';
 
@@ -12,6 +13,8 @@
     decimals: number;
     pendingOutDebtMode?: 'none' | 'pending' | 'settling';
     visualScale?: DeltaVisualScale | null;
+    actionLabel?: string;
+    actionDisabled?: boolean;
   };
 
   export let rows: DeltaListRow[] = [];
@@ -20,6 +23,8 @@
   export let showMetricLabels = false;
   export let showHeader = true;
   export let mode: 'plain' | 'sheet' = 'plain';
+
+  const dispatch = createEventDispatcher<{ action: { tokenId: number } }>();
 </script>
 
 <div class="delta-token-list" class:sheet={mode === 'sheet'} class:plain={mode === 'plain'}>
@@ -47,6 +52,10 @@
         pendingOutDebtMode={row.pendingOutDebtMode || 'none'}
         visualScale={row.visualScale ?? null}
         {showMetricLabels}
+        actionLabel={row.actionLabel || ''}
+        actionTokenId={row.tokenId}
+        actionDisabled={row.actionDisabled || false}
+        on:action={() => dispatch('action', { tokenId: row.tokenId })}
       />
     </div>
   {/each}

@@ -83,7 +83,20 @@ async function getRenderedCapacityForAccount(
 }
 
 async function getRenderedPrimaryCapacity(page: Page, selectors: string): Promise<number> {
-  return page.evaluate(({ selectors }) => {
+  const cards = await readRenderedAccountCards(page);
+  const selectedCards = cards.filter((card) => card.selected);
+  const targetCard =
+    selectedCards[0]
+    ?? (cards.length === 1 ? cards[0] : null);
+
+  if (!targetCard) {
+    throw new Error(
+      `Primary rendered capacity is ambiguous. Selected=${selectedCards.length} visible=${cards.map((card) => card.counterpartyId || 'unknown').join(',') || 'none'}`,
+    );
+  }
+
+  return page.evaluate(({ selectors, counterpartyId }) => {
+    const normalizeEntityId = (value: string): string => String(value || '').trim().toLowerCase();
     const extractAmountText = (valueEl: Element): string => {
       const children = Array.from(valueEl.children);
       for (const child of children) {
@@ -100,16 +113,22 @@ async function getRenderedPrimaryCapacity(page: Page, selectors: string): Promis
       return usdHintText.length > 0 ? raw.replace(usdHintText, '').trim() : raw;
     };
 
-    const selectedCard =
-      document.querySelector('.account-preview.selected')
-      || document.querySelector('.account-preview');
-    if (!selectedCard) return 0;
-
-    const valueEl = selectedCard.querySelector(selectors);
-    if (!valueEl) return 0;
+    const cards = Array.from(document.querySelectorAll('.account-preview'));
+    const card = cards.find((entry) => {
+      const rawCounterpartyId = String(
+        entry.getAttribute('data-counterparty-id')
+        || entry.querySelector('.entity-id, .id, [data-entity-id]')?.textContent
+        || '',
+      ).trim();
+      return normalizeEntityId(rawCounterpartyId) === normalizeEntityId(counterpartyId);
+    });
+    const valueEl = card?.querySelector(selectors);
+    if (!valueEl) {
+      throw new Error(`Primary rendered capacity target not found for ${counterpartyId}`);
+    }
 
     return Number.parseFloat(extractAmountText(valueEl).replace(/,/g, '').trim()) || 0;
-  }, { selectors });
+  }, { selectors, counterpartyId: targetCard.counterpartyId });
 }
 
 async function getNumericTextByTestId(page: Page, testId: string): Promise<number> {
@@ -131,7 +150,7 @@ async function waitForRenderedAccountCapacityDelta(
   },
 ): Promise<number> {
   const timeoutMs = options?.timeoutMs ?? 20_000;
-  const tolerance = options?.tolerance ?? 0.000001;
+  const tolerance = options?.tolerance ?? 0.000000001;
   const startedAt = Date.now();
   let latest = baseline;
 
@@ -158,7 +177,7 @@ async function waitForRenderedPrimaryCapacityDelta(
   },
 ): Promise<number> {
   const timeoutMs = options?.timeoutMs ?? 20_000;
-  const tolerance = options?.tolerance ?? 0.000001;
+  const tolerance = options?.tolerance ?? 0.000000001;
   const startedAt = Date.now();
   let latest = baseline;
 

@@ -171,17 +171,6 @@ type ObservedJEvent = JEvent & {
   type?: string;
 };
 
-type KnownAccountSnapshot = {
-  currentHeight?: number;
-  hasPending?: boolean;
-  pendingHeight?: number | null;
-};
-
-const isKnownAccountSnapshot = (value: unknown): value is KnownAccountSnapshot => {
-  if (!value || typeof value !== 'object') return false;
-  return true;
-};
-
 const applyJEventsToEnv = async (env: Env, events: JEvent[], label = 'J-EVENTS'): Promise<void> => {
   if (!events || events.length === 0) return;
   const grouped = new Map<
@@ -318,7 +307,7 @@ const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
 const HUB_RESERVE_ASSERT_TIMEOUT_MS = 30_000;
 const HUB_MESH_ASSERT_TIMEOUT_MS = 20_000;
 const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
-const HUB_DEFAULT_MIN_TRADE_SIZE = 50n * 10n ** 18n;
+const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** 18n;
 const BOOTSTRAP_POLL_MS = Math.max(10, Number(process.env.BOOTSTRAP_POLL_MS || '40'));
 const RUNTIME_SETTLE_POLL_MS = Math.max(10, Number(process.env.RUNTIME_SETTLE_POLL_MS || '25'));
 const MARKET_MAKER_SIGNER_LABEL = process.env.MARKET_MAKER_SIGNER_LABEL ?? 'mm-1';
@@ -613,7 +602,27 @@ const getCreditGrantedByEntity = (
   return BigInt(isOwnerLeft ? (delta.rightCreditLimit ?? 0n) : (delta.leftCreditLimit ?? 0n));
 };
 
-const getHubMeshHealth = (env: Env) => {
+const getHubMeshHealth = (env: Env | null) => {
+  if (!env) {
+    return {
+      requiredHubCount: HUB_MESH_REQUIRED_HUBS,
+      tokenId: HUB_MESH_TOKEN_ID,
+      requiredCredit: HUB_MESH_CREDIT_AMOUNT.toString(),
+      hubIds: [] as string[],
+      pairs: [] as Array<{
+        left: string;
+        right: string;
+        tokenId: number;
+        requiredCredit: string;
+        leftHasAccount: boolean;
+        rightHasAccount: boolean;
+        leftCreditLimit: string;
+        rightCreditLimit: string;
+        ok: boolean;
+      }>,
+      ok: false,
+    };
+  }
   const hubIds = relayStore.activeHubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS);
   const pairStatuses: Array<{
     left: string;
@@ -752,7 +761,7 @@ const getBootstrapReserveHealth = async (env: Env | null): Promise<BootstrapRese
     const role: 'hub' | 'market-maker' =
       marketMakerEntityId && entityId === marketMakerEntityId.toLowerCase() ? 'market-maker' : 'hub';
     const tokens = bootstrapTokens.map<BootstrapReserveTokenHealth>((token) => {
-      const current = replica?.state?.reserves?.get(String(token.tokenId)) ?? 0n;
+      const current = replica?.state?.reserves?.get(token.tokenId) ?? 0n;
       const expectedMin = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(token.decimals);
       return {
         tokenId: token.tokenId,
@@ -1153,7 +1162,7 @@ const maintainMarketMakerQuotes = async (
   }
 };
 
-const getMarketMakerHealth = (env: Env): {
+const getMarketMakerHealth = (env: Env | null): {
   enabled: boolean;
   ok: boolean;
   entityId: string | null;
@@ -1172,6 +1181,20 @@ const getMarketMakerHealth = (env: Env): {
       entityId: entityId || null,
       expectedOffersPerHub: Math.max(0, expectedOffersPerHub),
       hubs: [],
+    };
+  }
+
+  if (!env) {
+    return {
+      enabled: true,
+      ok: false,
+      entityId,
+      expectedOffersPerHub,
+      hubs: hubs.map((hubEntityId) => ({
+        hubEntityId,
+        offers: 0,
+        ready: false,
+      })),
     };
   }
 
@@ -1464,7 +1487,7 @@ const assertHubBootstrapReadiness = async (
         const replica = getEntityReplicaById(env, hubEntityId);
         if (!replica?.state) return false;
         for (const token of expectedTargets) {
-          const current = replica.state.reserves.get(String(token.tokenId)) ?? 0n;
+          const current = replica.state.reserves.get(token.tokenId) ?? 0n;
           if (current < token.target) return false;
         }
       }
@@ -1481,7 +1504,7 @@ const assertHubBootstrapReadiness = async (
         tokenId: token.tokenId,
         symbol: token.symbol,
         expectedMin: token.target.toString(),
-        actual: (replica?.state?.reserves?.get(String(token.tokenId)) ?? 0n).toString(),
+                actual: (replica?.state?.reserves?.get(token.tokenId) ?? 0n).toString(),
       }));
       return { hubEntityId, reserves };
     });
@@ -2236,7 +2259,7 @@ const bootstrapServerHubsAndReserves = async (
 
           const replica = getEntityReplicaById(env, reserveCheck.entityId);
           if (replica?.state) {
-            replica.state.reserves.set(String(reserveCheck.tokenId), reserveCheck.onChainReserve);
+            replica.state.reserves.set(reserveCheck.tokenId, reserveCheck.onChainReserve);
           }
           console.log(
             `[XLN] Hub ${reserveCheck.entityId.slice(-8)} reserves funded: tokenId=${reserveCheck.tokenId} ` +
@@ -4122,7 +4145,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const prevUserReserve = await globalJAdapter.getReserves(userEntityId, tokenId).catch(() => 0n);
       let hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
       let hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
-      const hubReserve = hubReplica?.state?.reserves?.get(String(tokenId)) ?? 0n;
+      const hubReserve = hubReplica?.state?.reserves?.get(tokenId) ?? 0n;
       console.log(`[${logPrefix}] Hub reserve before R2R: token ${tokenId} = ${hubReserve.toString()}`);
       if (hubReserve < amountWei) {
         faucetLock.release();
@@ -4259,7 +4282,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         amount = '100',
         hubEntityId: requestedHubEntityId,
       } = body;
-      const knownAccount = isKnownAccountSnapshot(body.knownAccount) ? body.knownAccount : undefined;
       const requestId = `offchain_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
       if (!userEntityId) {
@@ -4458,20 +4480,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const accountMachine = getAccountMachine(env, hubEntityId, normalizedUserEntityId);
       const hasHubAccount = hasAccount(env, hubEntityId, normalizedUserEntityId) || !!accountMachine;
       const accountPending = hasHubAccount ? !!accountMachine?.pendingFrame : false;
-      const serverCurrentHeight = Number(accountMachine?.currentHeight ?? 0);
-      const serverPendingHeight = accountMachine?.pendingFrame?.height ?? null;
-      const knownCurrentHeightRaw = knownAccount?.currentHeight;
-      const knownCurrentHeight =
-        knownCurrentHeightRaw !== undefined && Number.isFinite(Number(knownCurrentHeightRaw))
-          ? Number(knownCurrentHeightRaw)
-          : null;
-      const knownPending = Boolean(knownAccount?.hasPending);
-      const knownPendingHeightRaw = knownAccount?.pendingHeight;
-      const knownPendingHeight =
-        knownPendingHeightRaw !== undefined && knownPendingHeightRaw !== null && Number.isFinite(Number(knownPendingHeightRaw))
-          ? Number(knownPendingHeightRaw)
-          : null;
-      const knownAnchorHeight = Math.max(knownCurrentHeight ?? 0, knownPendingHeight ?? 0);
       const accountPresence = hubs.map(hub => ({
         hubEntityId: hub.entityId,
         hasAccount: hasAccount(env, hub.entityId, normalizedUserEntityId),
@@ -4509,51 +4517,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           }),
           { status: 409, headers },
         );
-      }
-
-      // Fail-fast: detect client/server account chain mismatch and refuse auto-open.
-      // Typical case: server reset while browser kept old bilateral chain.
-      if (knownAnchorHeight > 0 || knownPending) {
-        const serverMissingOrFresh = !hasHubAccount || serverCurrentHeight === 0;
-        const serverFarBehind = hasHubAccount && serverCurrentHeight + 3 < knownAnchorHeight;
-        if (serverMissingOrFresh || serverFarBehind) {
-          pushDebugEvent(relayStore, {
-            event: 'error',
-            status: 'rejected',
-            reason: 'FAUCET_ACCOUNT_STATE_MISMATCH',
-            details: {
-              requestId,
-              hubEntityId,
-              userEntityId: normalizedUserEntityId,
-              knownCurrentHeight,
-              knownPending,
-              knownPendingHeight,
-              knownAnchorHeight,
-              serverHasAccount: hasHubAccount,
-              serverCurrentHeight,
-              serverPendingHeight,
-            },
-          });
-          return new Response(
-            JSON.stringify({
-              success: false,
-              error:
-                'Account state mismatch (client has older/newer chain than server). Reset runtime network or re-open runtime before faucet.',
-              code: 'FAUCET_ACCOUNT_STATE_MISMATCH',
-              requestId,
-              hubEntityId,
-              userEntityId: normalizedUserEntityId,
-              knownCurrentHeight,
-              knownPending,
-              knownPendingHeight,
-              knownAnchorHeight,
-              serverHasAccount: hasHubAccount,
-              serverCurrentHeight,
-              serverPendingHeight,
-            }),
-            { status: 409, headers },
-          );
-        }
       }
 
       // Single-writer invariant: enqueue only; runtime loop applies.

@@ -11,7 +11,7 @@
   export let entityId: string;
   export let contacts: Array<{ name: string; entityId: string }> = [];
   export let replica: EntityReplica | null = null;
-  type Action = 'transfer' | 'dispute' | 'history';
+  type Action = 'r2c' | 'c2r' | 'transfer' | 'dispute' | 'history';
   type GasPreset = 'standard' | 'fast' | 'urgent' | 'custom';
   type BatchDetailField = { label: string; value: string };
   type BatchDetailOp = {
@@ -34,15 +34,14 @@
   $: activeXlnFunctions = $xlnFunctions;
   $: activeEnv = $xlnEnvironment;
   $: activeIsLive = $globalIsLive;
-  $: currentReplica = (() => {
-    const liveReplica = activeEnv?.eReplicas instanceof Map ? activeEnv.eReplicas.get(entityId) : null;
-    return liveReplica ?? replica;
-  })();
+  // Settlement must read the same visible entity replica as the rest of the screen.
+  // Mixing a second live lookup here causes split-brain UI (Assets sees new reserves, Settle sees old zeroes).
+  $: currentReplica = replica ?? null;
 
   let counterpartyEntityId = '';
   let recipientEntityId = '';
   let tokenId = 1;
-  let action: Action = 'dispute';
+  let action: Action = 'r2c';
   let amount = '';
   let sending = false;
 
@@ -52,6 +51,8 @@
   let suggestedBaseMaxFeeWei = 0n;
   let suggestedBasePriorityWei = 0n;
   let gasLoading = false;
+  let autoExecuteWorkspaceKey = '';
+  let autoExecutingWorkspaceKey = '';
 
   let liveJHeight = 0;
   let liveJTimer: ReturnType<typeof setInterval> | null = null;
@@ -107,6 +108,13 @@
 
   function formatInlineMaxHint(amountBig: bigint, currentTokenId: number): string {
     if (amountBig <= 0n) return '0';
+    return formatTokenInputAmount(amountBig, getTokenDecimals(currentTokenId));
+  }
+
+  function formatConfirmAmount(currentTokenId: number, amountBig: bigint): string {
+    if (activeXlnFunctions?.formatTokenAmount) {
+      return activeXlnFunctions.formatTokenAmount(currentTokenId, amountBig);
+    }
     return formatTokenInputAmount(amountBig, getTokenDecimals(currentTokenId));
   }
 
@@ -596,12 +604,51 @@
     ? Math.max(0, selectedDisputeTimeout - Math.max(Number(currentReplica?.state?.lastFinalizedJHeight || 0), Number(liveJHeight || 0)))
     : 0;
 
+  function requireCurrentReplica(): EntityReplica {
+    if (!currentReplica) throw new Error('Current entity replica is not available');
+    return currentReplica;
+  }
+
   function getReserveBalance(currentTokenId: number): bigint {
-    return currentReplica?.state?.onchainReserves?.get?.(currentTokenId) ?? 0n;
+    return requireCurrentReplica().state.reserves.get(currentTokenId) ?? 0n;
+  }
+
+  function getWorkspaceDerivedDelta(currentTokenId: number) {
+    const account = selectedAccount;
+    const owner = String(entityId || '').trim().toLowerCase();
+    const counterparty = String(counterpartyEntityId || '').trim().toLowerCase();
+    if (!account || !owner || !counterparty || !activeXlnFunctions?.deriveDelta) return null;
+    const delta = account.deltas?.get?.(currentTokenId);
+    if (!delta) return null;
+    return activeXlnFunctions.deriveDelta(delta, owner < counterparty);
+  }
+
+  function getWorkspaceWithdrawableCollateral(currentTokenId: number): bigint {
+    const derived = getWorkspaceDerivedDelta(currentTokenId);
+    if (!derived) return 0n;
+    const hold = derived.outTotalHold ?? 0n;
+    return derived.outCollateral > hold ? derived.outCollateral - hold : 0n;
+  }
+
+  function isLocalExecutorForWorkspace(counterparty: string, account: AccountMachine | null): boolean {
+    const workspace = account?.settlementWorkspace;
+    const owner = String(entityId || '').trim().toLowerCase();
+    const peer = String(counterparty || '').trim().toLowerCase();
+    if (!workspace || workspace.status !== 'ready_to_submit' || !owner || !peer) return false;
+    return workspace.executorIsLeft === (owner < peer);
+  }
+
+  function getWorkspaceAutoExecuteKey(counterparty: string, account: AccountMachine | null): string {
+    const workspace = account?.settlementWorkspace;
+    if (!workspace) return '';
+    const nonceAtSign = workspace.nonceAtSign ?? 0;
+    return `${normalizeEntityId(counterparty)}:${workspace.version}:${workspace.status}:${nonceAtSign}`;
   }
 
   function getActionMaxAmount(): bigint {
-    return action === 'transfer' ? getReserveBalance(tokenId) : 0n;
+    if (action === 'transfer' || action === 'r2c') return getReserveBalance(tokenId);
+    if (action === 'c2r') return getWorkspaceWithdrawableCollateral(tokenId);
+    return 0n;
   }
 
   function fillActionMax(): void {
@@ -724,6 +771,98 @@
     }
   }
 
+  async function queueReserveToCollateral(): Promise<void> {
+    if (!counterpartyEntityId) throw new Error('Select account first');
+    const parsedAmount = parsePositiveAmount(amount, tokenId);
+    const reserveBalance = getReserveBalance(tokenId);
+    if (parsedAmount > reserveBalance) {
+      const requestedLabel = formatConfirmAmount(tokenId, parsedAmount);
+      const reserveLabel = formatConfirmAmount(tokenId, reserveBalance);
+      const proceed = confirm(
+        `Requested Reserve → Collateral exceeds current reserve.\n\n` +
+        `Current reserve: ${reserveLabel}\n` +
+        `Requested amount: ${requestedLabel}\n\n` +
+        `Queue it anyway?`,
+      );
+      if (!proceed) return;
+    }
+    const env = activeEnv;
+    if (!env || !isRuntimeEnv(env)) throw new Error('Runtime environment not available');
+    if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');
+    const signerId = resolveSignerId(env);
+    await enqueueEntityInputs(env, [{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'deposit_collateral',
+        data: {
+          counterpartyId: counterpartyEntityId,
+          tokenId,
+          amount: parsedAmount,
+        },
+      }],
+    }]);
+    amount = '';
+  }
+
+  async function queueCollateralToReserve(): Promise<void> {
+    if (!counterpartyEntityId) throw new Error('Select account first');
+    const parsedAmount = parsePositiveAmount(amount, tokenId);
+    const withdrawable = getWorkspaceWithdrawableCollateral(tokenId);
+    if (parsedAmount > withdrawable) throw new Error('Amount exceeds available collateral');
+    const env = activeEnv;
+    if (!env || !isRuntimeEnv(env)) throw new Error('Runtime environment not available');
+    if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');
+    const signerId = resolveSignerId(env);
+    await enqueueEntityInputs(env, [{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'settle_propose',
+        data: {
+          counterpartyEntityId,
+          executorIsLeft: String(entityId).trim().toLowerCase() < counterpartyEntityId.toLowerCase(),
+          memo: 'settle-c2r',
+          ops: [{ type: 'c2r', tokenId, amount: parsedAmount }],
+        },
+      }],
+    }]);
+    amount = '';
+  }
+
+  async function autoAddSignedWorkspaceToDraft(): Promise<void> {
+    const account = selectedAccount;
+    const counterparty = String(counterpartyEntityId || '').trim();
+    if (!counterparty || !account) return;
+    if (!isLocalExecutorForWorkspace(counterparty, account)) return;
+    const workspaceKey = getWorkspaceAutoExecuteKey(counterparty, account);
+    if (!workspaceKey || workspaceKey === autoExecuteWorkspaceKey || workspaceKey === autoExecutingWorkspaceKey) return;
+
+    const env = activeEnv;
+    if (!env || !isRuntimeEnv(env)) return;
+    if (!activeIsLive) return;
+
+    autoExecutingWorkspaceKey = workspaceKey;
+    try {
+      const signerId = resolveSignerId(env);
+      await enqueueEntityInputs(env, [{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'settle_execute',
+          data: {
+            counterpartyEntityId: counterparty,
+          },
+        }],
+      }]);
+      autoExecuteWorkspaceKey = workspaceKey;
+    } catch (error) {
+      console.error('[Settle] Auto execute into draft failed:', error);
+    } finally {
+      autoExecutingWorkspaceKey = '';
+    }
+  }
+
   async function startDispute() {
     if (!counterpartyEntityId) {
       alert('Select account first');
@@ -823,6 +962,24 @@
 
   $: if (activeIsLive) {
     void refreshLiveJHeight();
+  }
+
+  $: {
+    const workspace = selectedAccount?.settlementWorkspace;
+    const workspaceKey = getWorkspaceAutoExecuteKey(counterpartyEntityId, selectedAccount);
+    if (!workspace || workspace.status !== 'ready_to_submit') {
+      autoExecuteWorkspaceKey = '';
+    } else if (
+      isLocalExecutorForWorkspace(counterpartyEntityId, selectedAccount)
+      && workspaceKey
+      && workspaceKey !== autoExecuteWorkspaceKey
+      && workspaceKey !== autoExecutingWorkspaceKey
+    ) {
+      // Once the counterparty has signed, the local executor should immediately
+      // materialize the signed settlement into the local draft batch. This is
+      // still a local draft step only; j_broadcast remains an explicit user action.
+      void autoAddSignedWorkspaceToDraft();
+    }
   }
 
   onMount(() => {
@@ -975,13 +1132,19 @@
   </div>
 
     <div class="action-tabs">
+    <button class="tab" class:active={action === 'r2c'} on:click={() => action = 'r2c'} disabled={sending}>Reserve → Collateral</button>
+    <button class="tab" class:active={action === 'c2r'} on:click={() => action = 'c2r'} disabled={sending}>Collateral → Reserve</button>
     <button class="tab" class:active={action === 'transfer'} on:click={() => action = 'transfer'} disabled={sending}>Reserve → Reserve</button>
     <button class="tab" class:active={action === 'dispute'} on:click={() => action = 'dispute'} disabled={sending}>Dispute</button>
     <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History ({batchHistory.length})</button>
   </div>
 
   <p class="action-desc">
-    {#if action === 'dispute'}
+    {#if action === 'r2c'}
+      Queue reserve-to-collateral into the current draft batch.
+    {:else if action === 'c2r'}
+      Queue collateral-to-reserve. Once the counterparty signs, it is added to your local draft batch.
+    {:else if action === 'dispute'}
       Queue dispute start/finalize for selected account.
     {:else if action === 'history'}
       Review {batchHistory.length} finalized on-chain batch{batchHistory.length === 1 ? '' : 'es'} for this entity.
@@ -1119,6 +1282,60 @@
         </button>
       </div>
     </div>
+  {:else if action === 'r2c' || action === 'c2r'}
+    <EntityInput
+      label="Account"
+      value={counterpartyEntityId}
+      entities={accountEntityIds}
+      {contacts}
+      excludeId={entityId}
+      placeholder="Select account..."
+      disabled={sending}
+      on:change={handleAccountChange}
+    />
+
+    <label class="settle-field settle-field-wide">
+      <span>Amount</span>
+      <div class="settle-amount-shell">
+        <input type="text" bind:value={amount} placeholder="0.00" disabled={sending} />
+        <div class="settle-inline-controls">
+          <button
+            type="button"
+            class="settle-max-link"
+            on:click={fillActionMax}
+            disabled={sending || actionMaxAmount <= 0n}
+          >
+            {formatInlineMaxHint(actionMaxAmount, tokenId)}
+          </button>
+          <div class="settle-token-inline">
+            <TokenSelect value={tokenId} compact={true} disabled={sending} on:change={handleTokenChange} />
+          </div>
+        </div>
+      </div>
+    </label>
+
+    {#if action === 'c2r' && selectedAccount?.settlementWorkspace?.status === 'awaiting_counterparty'}
+      <p class="dispute-state">
+        Waiting for counterparty signature.
+      </p>
+    {:else if action === 'c2r' && autoExecutingWorkspaceKey}
+      <p class="dispute-state">Counterparty signed. Adding to local draft batch.</p>
+    {/if}
+
+    <button
+      data-testid={action === 'r2c' ? 'settle-queue-r2c' : 'settle-queue-c2r'}
+      class="btn-submit"
+      on:click={action === 'r2c' ? queueReserveToCollateral : queueCollateralToReserve}
+      disabled={sending || !counterpartyEntityId || !amount}
+    >
+      {#if sending}
+        Processing...
+      {:else if action === 'r2c'}
+        Queue Reserve → Collateral
+      {:else}
+        Queue Collateral → Reserve
+      {/if}
+    </button>
   {:else if action === 'transfer'}
     <EntityInput
       label="Recipient"

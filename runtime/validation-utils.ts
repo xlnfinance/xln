@@ -658,8 +658,12 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
     throw new FinancialDataCorruptionError(`${context}.accounts must be a Map`);
   }
 
-  // Validate all reserves are valid bigints
+  // Financial invariant: reserves must be keyed by numeric tokenId and valued by bigint.
+  // Do not tolerate string token keys in live state; decode boundaries must canonicalize before this.
   for (const [tokenId, amount] of obj['reserves'].entries()) {
+    if (typeof tokenId !== 'number' || !Number.isInteger(tokenId) || tokenId <= 0) {
+      throw new FinancialDataCorruptionError(`Reserve token key must be a positive integer`, { tokenId });
+    }
     if (typeof amount !== 'bigint') {
       throw new FinancialDataCorruptionError(`Reserve amount for token ${tokenId} must be bigint`, { tokenId, amount });
     }

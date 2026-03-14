@@ -16,6 +16,18 @@ import { processOrderbookSwaps, processOrderbookCancels } from './entity-tx/hand
 import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
 import { ethers } from 'ethers';
 
+const compareNumericKey = (
+  left: string | number,
+  right: string | number,
+): number => {
+  const leftNum = Number(left);
+  const rightNum = Number(right);
+  if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
+    return leftNum - rightNum;
+  }
+  return String(left).localeCompare(String(right));
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ENTITY FRAME HASH - Cryptographic commitment to entity state
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -94,7 +106,7 @@ export async function createEntityFrameHash(
     entityId: newState.entityId,
     // Reserves: sorted by tokenId for determinism
     reserves: Array.from(newState.reserves.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
+      .sort((a, b) => compareNumericKey(a[0], b[0]))
       .map(([k, v]) => [k, v.toString()]),
     // J-machine tracking
     lastFinalizedJHeight: newState.lastFinalizedJHeight,
@@ -111,7 +123,7 @@ export async function createEntityFrameHash(
     htlcRoutesHash: newState.htlcRoutes.size > 0
       ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
           Array.from(newState.htlcRoutes.entries())
-            .sort((a, b) => a[0].localeCompare(b[0]))
+            .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
         )))
       : null,
     htlcFeesEarned: newState.htlcFeesEarned.toString(),
@@ -119,13 +131,13 @@ export async function createEntityFrameHash(
     lockBookHash: newState.lockBook.size > 0
       ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
           Array.from(newState.lockBook.entries())
-            .sort((a, b) => a[0].localeCompare(b[0]))
+            .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
         )))
       : null,
     swapBookHash: newState.swapBook.size > 0
       ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
           Array.from(newState.swapBook.entries())
-            .sort((a, b) => a[0].localeCompare(b[0]))
+            .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
         )))
       : null,
     // Orderbook extension hash (if hub)

@@ -2,7 +2,7 @@ import { writable, get, derived } from 'svelte/store';
 import { HDNodeWallet, Mnemonic, getAddress } from 'ethers';
 import type { Env, JurisdictionConfig, PersistedFrameJournal, RoutedEntityInput, RuntimeInput, XLNModule } from '@xln/runtime/xln-api';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
-import { xlnEnvironment, setXlnEnvironment } from './xlnStore';
+import { xlnEnvironment, setXlnEnvironment, isFinancialRestoreFailure } from './xlnStore';
 import { settings } from './settingsStore';
 import { toasts } from './toastStore';
 import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
@@ -60,6 +60,8 @@ const normalizeRuntimeId = (value: string | null | undefined): string => {
     return '';
   }
 };
+
+const normalizeEntityId = (value: string | null | undefined): string => String(value || '').trim().toLowerCase();
 
 // Main store
 export const runtimesState = writable<RuntimesState>(defaultState);
@@ -611,6 +613,17 @@ function applyRuntimeLogPreference(env: Env): void {
   env.quietRuntimeLogs = !verbose;
 }
 
+async function resetRuntimePersistence(runtime: Runtime, xln: XLNModule): Promise<void> {
+  const runtimeIdLower = normalizeRuntimeId(runtime.id);
+  if (!runtimeIdLower) throw new Error('Invalid runtime id for reset');
+  const resetEnv = xln.createEmptyEnv(runtime.seed);
+  applyRuntimeLogPreference(resetEnv);
+  resetEnv.runtimeId = runtimeIdLower;
+  resetEnv.dbNamespace = runtimeIdLower;
+  await xln.clearDB(resetEnv);
+  toasts.warning('Network was reset', 8000);
+}
+
 function ensureRuntimeLoopRunning(env: Env, xln: XLNModule, reason: string): void {
   if (!hasStartRuntimeLoop(xln)) return;
   if (env.runtimeState?.loopActive) return;
@@ -627,9 +640,32 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   const runtimeSeed = runtime.seed;
   let env: Env | null = null;
   let resetBrokenPersistence = false;
+  let signerMetadataChanged = false;
+
+  for (const signer of runtime.signers || []) {
+    if (!signer?.address) continue;
+    const canonicalEntityId = String(xln.generateLazyEntityId([signer.address], 1n)).toLowerCase();
+    if (normalizeEntityId(signer.entityId) === canonicalEntityId) continue;
+    signer.entityId = canonicalEntityId;
+    signerMetadataChanged = true;
+    resetBrokenPersistence = true;
+    console.error(
+      `[VaultStore] Canonical signer/entity mismatch detected for ${signer.address.slice(0, 10)}; forcing lazy entity ${canonicalEntityId.slice(0, 12)} and clearing persisted runtime`,
+    );
+  }
+
+  if (resetBrokenPersistence) {
+    const resetEnv = xln.createEmptyEnv(runtimeSeed);
+    applyRuntimeLogPreference(resetEnv);
+    resetEnv.runtimeId = runtimeIdLower;
+    resetEnv.dbNamespace = runtimeIdLower;
+    await xln.clearDB(resetEnv);
+    toasts.warning('Network was reset', 8000);
+    env = null;
+  }
 
   try {
-    if (xln.loadEnvFromDB) {
+    if (!resetBrokenPersistence && xln.loadEnvFromDB) {
       console.log('[VaultStore] Loading env from DB namespace:', runtimeIdLower);
       env = await xln.loadEnvFromDB(runtimeIdLower, runtimeSeed);
     }
@@ -637,6 +673,30 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     if (strictRestore) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[VaultStore] Strict restore corruption detected for ${runtime.id.slice(0, 12)}; clearing runtime storage`, error);
+      if (isFinancialRestoreFailure(error)) {
+        const resetEnv = xln.createEmptyEnv(runtimeSeed);
+        applyRuntimeLogPreference(resetEnv);
+        resetEnv.runtimeId = runtimeIdLower;
+        resetEnv.dbNamespace = runtimeIdLower;
+        await xln.clearDB(resetEnv);
+        try {
+          localStorage.clear();
+        } catch {
+          // ignore storage errors
+        }
+        try {
+          sessionStorage.clear();
+        } catch {
+          // ignore storage errors
+        }
+        try {
+          sessionStorage.setItem('xln-reset-notice', 'Network was reset');
+        } catch {
+          // ignore storage errors
+        }
+        window.location.reload();
+        throw error;
+      }
       try {
         const resetEnv = xln.createEmptyEnv(runtimeSeed);
         applyRuntimeLogPreference(resetEnv);
@@ -657,13 +717,32 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     }
   }
 
+  if (signerMetadataChanged) {
+    runtimesState.update((state) => ({
+      ...state,
+      runtimes: {
+        ...state.runtimes,
+        [runtime.id]: runtime,
+      },
+    }));
+    try {
+      localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(get(runtimesState)));
+    } catch {
+      // ignore storage errors
+    }
+  }
+
   if (!env && strictRestore && !resetBrokenPersistence) {
-    throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: persisted env missing`);
+    console.error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: persisted env missing; resetting runtime storage`);
+    await resetRuntimePersistence(runtime, xln);
+    return buildOrRestoreRuntimeEnv(runtime, xln, false);
   }
 
   if (env && (!env.jReplicas || env.jReplicas.size === 0)) {
     if (strictRestore) {
-      throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: restored env missing jReplicas`);
+      console.error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: restored env missing jReplicas; resetting runtime storage`);
+      await resetRuntimePersistence(runtime, xln);
+      return buildOrRestoreRuntimeEnv(runtime, xln, false);
     }
     console.warn('[VaultStore] ⚠️ Restored env missing J-replicas; re-importing');
     env = null;
@@ -691,9 +770,11 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     for (const signer of runtime.signers || []) {
       if (!signer?.entityId) continue;
       if (!hasEntityReplica(signer.entityId)) {
-        throw new Error(
-          `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: missing restored entity ${signer.entityId.slice(0, 12)}`
+        console.error(
+          `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: missing restored entity ${signer.entityId.slice(0, 12)}; resetting runtime storage`
         );
+        await resetRuntimePersistence(runtime, xln);
+        return buildOrRestoreRuntimeEnv(runtime, xln, false);
       }
     }
   }

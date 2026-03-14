@@ -60,6 +60,8 @@
   let hubs: Hub[] = [];
   const DISCOVERY_TIMEOUT_MS = 8000;
 
+  const HUB_NAME_ORDER = ['H1', 'H2', 'H3'] as const;
+
   type RuntimeP2PView = {
     relayUrls?: string[];
     isConnected?: () => boolean;
@@ -80,6 +82,13 @@
       isConnected: connectedHubIds.has(normalizeEntityId(hub.entityId)),
     }))
     .sort((a, b) => {
+      const fixedOrderA = HUB_NAME_ORDER.indexOf(String(a.name || '').toUpperCase() as typeof HUB_NAME_ORDER[number]);
+      const fixedOrderB = HUB_NAME_ORDER.indexOf(String(b.name || '').toUpperCase() as typeof HUB_NAME_ORDER[number]);
+      if (fixedOrderA !== fixedOrderB) {
+        if (fixedOrderA === -1) return 1;
+        if (fixedOrderB === -1) return -1;
+        return fixedOrderA - fixedOrderB;
+      }
       let cmp = 0;
       switch (sortKey) {
         case 'name':
