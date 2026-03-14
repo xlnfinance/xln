@@ -5,16 +5,13 @@
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
   import { vaultOperations, activeVault, activeSigner, allVaults, type Runtime as Vault, type Signer } from '$lib/stores/vaultStore';
   import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
-  import { Copy, Check, Settings } from 'lucide-svelte';
+  import { Copy, Check } from 'lucide-svelte';
   import {
     BRAINVAULT_V1,
     bytesToHex,
     combineShards,
     deriveEthereumAddress,
-    deriveEthereumAddressMatrix,
-    deriveEthereumPrivateKeyAtPath,
     deriveKey,
-    deriveSitePassword as deriveSitePasswordFromRuntime,
     entropyToMnemonic,
     estimatePasswordStrength,
     formatDuration,
@@ -43,8 +40,6 @@
     { factor: 4, shards: 1000, time: '50min', tier: 'Strong' },
     { factor: 5, shards: 10000, time: '8hr', tier: 'Maximum' },
   ];
-  const SETTINGS_ADDRESS_COUNT = 5;
-
   // ============================================================================
   // IDENTICON GENERATOR (Ethereum Blockies-style)
   // ============================================================================
@@ -299,25 +294,12 @@
   // Result state
   let mnemonic24 = '';
   let mnemonic12 = '';
+  let recoveryMnemonic24 = '';
+  let recoveryMnemonic12 = '';
   let devicePassphrase = '';
   let ethereumAddress = '';
-  let masterKeyHex = '';
   let entityId = ''; // bytes32 entity ID derived from address
-  let settingsMnemonic = '';
-  let settingsPrimaryPrivateKey = '';
-  let settingsStandardAddresses: string[] = [];
-  let settingsLedgerLiveAddresses: string[] = [];
-  let settingsSensitiveLoading = false;
-  let settingsSensitiveError = '';
-  let settingsSensitiveRequestId = 0;
-  let settingsSensitiveSeedKey = '';
-  let settingsDevicePassphrase = '';
   let copiedField: string | null = null;
-
-  // Password manager state
-  let siteDomain = '';
-  let sitePassword = '';
-  let showSitePassword = false;
 
   // FAQ state
   let expandedFaq: number | null = null;
@@ -336,7 +318,7 @@
       // Restore state from saved vault
       name = vault.id;
       mnemonic24 = vault.seed;
-      mnemonic12 = '';
+      mnemonic12 = vault.mnemonic12 || '';
       devicePassphrase = vault.devicePassphrase || '';
 
       // Get active signer's address
@@ -352,9 +334,6 @@
       console.log('🔐 Vault restored from storage:', vault.id);
     }
   });
-
-  // Settings modal state (no more tabs)
-  let showSettingsModal = false;
 
   // Vault management state
   let vaultDropdownOpen = false;
@@ -428,56 +407,13 @@
   $: currentSigner = $activeSigner;
   $: savedVaults = $allVaults;
 
-  // Current signer's private key (derived from active vault)
-  $: currentSignerPrivateKey = currentVault && currentSigner
-    ? vaultOperations.getSignerPrivateKey(currentSigner.index)
-    : null;
-
   // Current signer's address
   $: currentSignerAddress = currentSigner?.address || ethereumAddress;
 
   // Identicon for current signer
   $: currentSignerIdenticon = currentSignerAddress ? generateIdenticon(currentSignerAddress) : identiconSrc;
-  $: settingsDevicePassphrase = devicePassphrase || currentVault?.devicePassphrase || '';
-  $: settingsMnemonic = (mnemonic24 || currentVault?.seed || '').trim().split(/\s+/).join(' ');
-  $: if (phase === 'complete' && settingsMnemonic && settingsSensitiveSeedKey !== settingsMnemonic) {
-    settingsSensitiveSeedKey = settingsMnemonic;
-    void deriveSettingsSensitiveData(settingsMnemonic);
-  }
-  $: if ((phase !== 'complete' || !settingsMnemonic) && settingsSensitiveSeedKey) {
-    settingsSensitiveSeedKey = '';
-    settingsPrimaryPrivateKey = '';
-    settingsStandardAddresses = [];
-    settingsLedgerLiveAddresses = [];
-    settingsSensitiveLoading = false;
-    settingsSensitiveError = '';
-  }
-
-  async function deriveSettingsSensitiveData(seedMnemonic: string): Promise<void> {
-    const requestId = ++settingsSensitiveRequestId;
-    settingsSensitiveLoading = true;
-    settingsSensitiveError = '';
-    try {
-      const [matrix, primaryKey] = await Promise.all([
-        deriveEthereumAddressMatrix(seedMnemonic, '', SETTINGS_ADDRESS_COUNT),
-        deriveEthereumPrivateKeyAtPath(seedMnemonic, "m/44'/60'/0'/0/0"),
-      ]);
-      if (requestId !== settingsSensitiveRequestId) return;
-      settingsStandardAddresses = matrix.standard;
-      settingsLedgerLiveAddresses = matrix.ledgerLive;
-      settingsPrimaryPrivateKey = primaryKey;
-    } catch (err) {
-      if (requestId !== settingsSensitiveRequestId) return;
-      settingsStandardAddresses = [];
-      settingsLedgerLiveAddresses = [];
-      settingsPrimaryPrivateKey = '';
-      settingsSensitiveError = err instanceof Error ? err.message : String(err);
-    } finally {
-      if (requestId === settingsSensitiveRequestId) {
-        settingsSensitiveLoading = false;
-      }
-    }
-  }
+  $: recoveryMnemonic24 = (mnemonic24 || currentVault?.seed || '').trim().split(/\s+/).join(' ');
+  $: recoveryMnemonic12 = (mnemonic12 || currentVault?.mnemonic12 || '').trim().split(/\s+/).join(' ');
 
   // Helper to add a new signer
   function handleAddSigner() {
@@ -503,7 +439,8 @@
     await vaultOperations.createRuntime(label, mnemonic24, {
       loginType: 'manual',
       requiresOnboarding: true,
-      devicePassphrase: settingsDevicePassphrase || undefined,
+      mnemonic12: recoveryMnemonic12 || undefined,
+      devicePassphrase: devicePassphrase || undefined,
     });
     showSaveVaultModal = false;
     vaultNameInput = '';
@@ -659,6 +596,7 @@
         await vaultOperations.createRuntime(label, mnemonic24, {
           loginType: 'manual',
           requiresOnboarding: true,
+          mnemonic12: undefined,
         });
         // entityId is set by createRuntime internally
         console.log('🔐 Mnemonic runtime created:', runtimeId.slice(0, 10));
@@ -846,12 +784,12 @@
     }
 
     const masterKey = await combineShards(orderedResults, factor);
-    masterKeyHex = bytesToHex(masterKey);
 
     // Derive BIP39 mnemonic (24 words)
     const entropy = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
     mnemonic24 = await entropyToMnemonic(entropy);
-    mnemonic12 = ''; // Not used - only 24-word is canonical
+    const entropy12 = await deriveKey(masterKey, 'bip39/entropy-128/v1.0', 16);
+    mnemonic12 = await entropyToMnemonic(entropy12);
 
     // Derive device passphrase
     const deviceKey = await deriveKey(masterKey, 'bip39/passphrase/v1.0', 32);
@@ -873,6 +811,7 @@
         await vaultOperations.createRuntime(label, mnemonic24, {
           loginType: createLoginType,
           requiresOnboarding: createLoginType !== 'demo',
+          mnemonic12,
           devicePassphrase: devicePassphrase || undefined,
         });
         // Auto-create entity for first signer
@@ -934,25 +873,6 @@
 
 
 
-  // Password manager - auto-derive on domain change
-  $: if (siteDomain.trim() && masterKeyHex && phase === 'complete') {
-    deriveSitePasswordReactive();
-  }
-
-  async function deriveSitePasswordReactive() {
-    await updateSitePassword();
-  }
-
-  async function updateSitePassword() {
-    if (!siteDomain.trim() || !masterKeyHex) {
-      sitePassword = '';
-      return;
-    }
-
-    const domain = siteDomain.trim().toLowerCase();
-    sitePassword = await deriveSitePasswordFromRuntime(masterKeyHex, domain, 20);
-  }
-
   function reset() {
     phase = 'input';
     terminateWorkers();
@@ -970,17 +890,6 @@
     mnemonic12 = '';
     devicePassphrase = '';
     ethereumAddress = '';
-    masterKeyHex = '';
-    settingsMnemonic = '';
-    settingsPrimaryPrivateKey = '';
-    settingsStandardAddresses = [];
-    settingsLedgerLiveAddresses = [];
-    settingsSensitiveError = '';
-    settingsSensitiveLoading = false;
-    settingsSensitiveSeedKey = '';
-    settingsSensitiveRequestId++;
-    siteDomain = '';
-    sitePassword = '';
     shardsCompleted = 0;
     shardResults = new Map();
     shardStatus = [];
@@ -1430,208 +1339,89 @@
                   {/if}
                 </div>
 
-                <!-- Settings Gear Icon -->
-                <button
-                  class="settings-gear"
-                  on:click={() => showSettingsModal = true}
-                  title="Settings"
-                >
-                  ⚙️
-                </button>
               </div>
           {/if}
 
-          <!-- Entity view (Entity = Wallet) -->
-          <div class="entity-created-message">
-            <h3>✅ Entity Created!</h3>
-            <p>Entity ID: {entityId}</p>
-            <p>Signer: {currentSignerAddress?.slice(0, 20)}...</p>
-            <p class="next-step">Close this panel to access your entity wallet.</p>
-          </div>
-
-            <!-- Save Vault Modal -->
-            {#if showSaveVaultModal}
-              <div class="modal-overlay" on:click={() => showSaveVaultModal = false}>
-                <div class="modal-content" on:click|stopPropagation>
-                  <h3>Save Vault</h3>
-                  <p class="modal-desc">Give this vault a name to save it for quick access later.</p>
-                  <input
-                    type="text"
-                    class="vault-name-input"
-                    placeholder="Enter vault name..."
-                    bind:value={vaultNameInput}
-                    on:keydown={(e) => e.key === 'Enter' && saveCurrentAsVault()}
-                  />
-                  <div class="modal-actions">
-                    <button class="modal-btn cancel" on:click={() => showSaveVaultModal = false}>Cancel</button>
-                    <button class="modal-btn save" on:click={saveCurrentAsVault} disabled={!vaultNameInput.trim()}>Save Vault</button>
-                  </div>
+          <section class="recovery-card">
+            <div class="recovery-head">
+              <div class="recovery-identity">
+                <img src={currentSignerIdenticon} alt="" class="context-identicon" />
+                <div>
+                  <h3>Recovery</h3>
+                  <p class="muted-tight">Entity {entityId}</p>
+                  <p class="muted-tight">Signer {currentSignerAddress || ethereumAddress}</p>
                 </div>
               </div>
-            {/if}
+              <button class="copy-btn" on:click={copyAddress}>
+                {addressCopied ? '✓' : 'Copy address'}
+              </button>
+            </div>
 
-            <!-- Settings Modal -->
-            {#if showSettingsModal}
-              <div class="modal-overlay" on:click={() => showSettingsModal = false}>
-                <div class="modal-content settings-modal" on:click|stopPropagation>
-                  <div class="modal-header">
-                    <h3>Settings</h3>
-                    <button class="close-btn" on:click={() => showSettingsModal = false}>✕</button>
-                  </div>
-
-                  <!-- Address with Identicon -->
-                  <div class="result-section">
-                    <label>Ethereum Address</label>
-                    <div class="result-box address with-identicon">
-                      <img src={currentSignerIdenticon} alt="Address identicon" class="identicon" />
-                      <code>{currentSignerAddress || ethereumAddress}</code>
-                      <button class="copy-btn" on:click={() => copyToClipboard(currentSignerAddress || ethereumAddress, 'address')}>
-                        {copiedField === 'address' ? '✓' : '📋'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div class="danger-zone-note">
-                    <strong>Danger Zone:</strong> sensitive values are visible immediately in this build.
-                  </div>
-
-                  <!-- 24-word Mnemonic -->
-                  <div class="result-section">
-                    <label>
-                      Recovery Phrase
-                      <span class="label-hint">(24 words)</span>
-                    </label>
-                    <div class="result-box mnemonic">
-                      <div class="mnemonic-words">
-                        {#each settingsMnemonic.split(' ') as word, i}
-                          {#if word}
-                            <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
-                          {/if}
-                        {/each}
-                      </div>
-                      <button class="copy-btn full" on:click={() => copyToClipboard(settingsMnemonic, 'mnemonic24')}>
-                        {copiedField === 'mnemonic24' ? '✓ Copied!' : '📋 Copy all 24 words'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <!-- Primary Private Key -->
-                  <div class="result-section">
-                    <label>
-                      Primary Private Key
-                      <span class="label-hint">(m/44&apos;/60&apos;/0&apos;/0/0)</span>
-                    </label>
-                    <div class="result-box passphrase">
-                      <code>{settingsPrimaryPrivateKey || currentSignerPrivateKey || '-'}</code>
-                      <button class="copy-btn" on:click={() => copyToClipboard(settingsPrimaryPrivateKey || currentSignerPrivateKey || '', 'primaryPriv')}>
-                        {copiedField === 'primaryPriv' ? '✓' : '📋'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <!-- Device Passphrase -->
-                  <div class="result-section">
-                    <label>
-                      Device Passphrase
-                      <span class="label-hint">(Ledger/Trezor)</span>
-                    </label>
-                    <div class="result-box passphrase">
-                      <code>{settingsDevicePassphrase || '-'}</code>
-                      <button class="copy-btn" on:click={() => copyToClipboard(settingsDevicePassphrase, 'devicePass')}>
-                        {copiedField === 'devicePass' ? '✓' : '📋'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <!-- Standard Address Matrix -->
-                  <div class="result-section">
-                    <label>
-                      Standard Addresses
-                      <span class="label-hint">(MetaMask / Rabby)</span>
-                    </label>
-                    <div class="result-box matrix">
-                      {#if settingsSensitiveLoading}
-                        <div class="matrix-status">Deriving address matrix...</div>
-                      {:else if settingsSensitiveError}
-                        <div class="matrix-status error">{settingsSensitiveError}</div>
-                      {:else}
-                        {#each settingsStandardAddresses as address, i}
-                          <div class="matrix-row">
-                            <div class="matrix-row-header">
-                              <span class="matrix-row-label">{i === 0 ? 'Address 1 (Primary)' : `Address ${i + 1} (Secondary)`}</span>
-                              <code class="matrix-path">m/44&apos;/60&apos;/0&apos;/0/{i}</code>
-                            </div>
-                            <div class="matrix-row-value">
-                              <code>{address}</code>
-                              <button class="copy-btn" on:click={() => copyToClipboard(address, `stdAddr${i}`)}>
-                                {copiedField === `stdAddr${i}` ? '✓' : '📋'}
-                              </button>
-                            </div>
-                          </div>
-                        {/each}
+            {#if recoveryMnemonic12}
+              <div class="result-section">
+                <label>
+                  Recovery Phrase
+                  <span class="label-hint">(12 words)</span>
+                </label>
+                <div class="result-box mnemonic">
+                  <div class="mnemonic-words compact">
+                    {#each recoveryMnemonic12.split(' ') as word, i}
+                      {#if word}
+                        <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
                       {/if}
-                    </div>
+                    {/each}
                   </div>
-
-                  <!-- Ledger Live Address Matrix -->
-                  <div class="result-section">
-                    <label>
-                      Ledger Live Addresses
-                      <span class="label-hint">(m/44&apos;/60&apos;/i&apos;/0/0)</span>
-                    </label>
-                    <div class="result-box matrix">
-                      {#if settingsSensitiveLoading}
-                        <div class="matrix-status">Deriving address matrix...</div>
-                      {:else if settingsSensitiveError}
-                        <div class="matrix-status error">{settingsSensitiveError}</div>
-                      {:else}
-                        {#each settingsLedgerLiveAddresses as address, i}
-                          <div class="matrix-row">
-                            <div class="matrix-row-header">
-                              <span class="matrix-row-label">Address {i + 1}</span>
-                              <code class="matrix-path">m/44&apos;/60&apos;/{i}&apos;/0/0</code>
-                            </div>
-                            <div class="matrix-row-value">
-                              <code>{address}</code>
-                              <button class="copy-btn" on:click={() => copyToClipboard(address, `ledgerAddr${i}`)}>
-                                {copiedField === `ledgerAddr${i}` ? '✓' : '📋'}
-                              </button>
-                            </div>
-                          </div>
-                        {/each}
-                      {/if}
-                    </div>
-                  </div>
-
-                  <!-- Password Generator -->
-                  <div class="result-section password-manager-inline">
-                    <label>Password Generator</label>
-                    <div class="pm-row">
-                      <input
-                        type="text"
-                        class="pm-domain-input"
-                        placeholder="domain.com"
-                        bind:value={siteDomain}
-                      />
-                      <code class="pm-password" class:empty={!sitePassword}>
-                        {sitePassword || 'BLAKE3(key, domain)'}
-                      </code>
-                      {#if sitePassword}
-                        <button class="copy-btn" on:click={() => copyToClipboard(sitePassword, 'sitePass')}>
-                          {copiedField === 'sitePass' ? '✓' : '📋'}
-                        </button>
-                      {/if}
-                    </div>
-                  </div>
-
-                  <!-- New Vault Button -->
-                  <button class="derive-btn secondary" on:click={() => { showSettingsModal = false; reset(); }}>
-                    <span class="btn-icon">🔄</span>
-                    Derive Another Vault
+                  <button class="copy-btn full" on:click={() => copyToClipboard(recoveryMnemonic12, 'mnemonic12')}>
+                    {copiedField === 'mnemonic12' ? '✓ Copied!' : 'Copy 12 words'}
                   </button>
                 </div>
               </div>
             {/if}
+
+            <div class="result-section">
+              <label>
+                Recovery Phrase
+                <span class="label-hint">(24 words)</span>
+              </label>
+              <div class="result-box mnemonic">
+                <div class="mnemonic-words">
+                  {#each recoveryMnemonic24.split(' ') as word, i}
+                    {#if word}
+                      <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
+                    {/if}
+                  {/each}
+                </div>
+                <button class="copy-btn full" on:click={() => copyToClipboard(recoveryMnemonic24, 'mnemonic24')}>
+                  {copiedField === 'mnemonic24' ? '✓ Copied!' : 'Copy 24 words'}
+                </button>
+              </div>
+            </div>
+
+            <button class="derive-btn secondary" on:click={reset}>
+              Derive Another Vault
+            </button>
+          </section>
+
+          <!-- Save Vault Modal -->
+          {#if showSaveVaultModal}
+            <div class="modal-overlay" on:click={() => showSaveVaultModal = false}>
+              <div class="modal-content" on:click|stopPropagation>
+                <h3>Save Vault</h3>
+                <p class="modal-desc">Give this vault a name to save it for quick access later.</p>
+                <input
+                  type="text"
+                  class="vault-name-input"
+                  placeholder="Enter vault name..."
+                  bind:value={vaultNameInput}
+                  on:keydown={(e) => e.key === 'Enter' && saveCurrentAsVault()}
+                />
+                <div class="modal-actions">
+                  <button class="modal-btn cancel" on:click={() => showSaveVaultModal = false}>Cancel</button>
+                  <button class="modal-btn save" on:click={saveCurrentAsVault} disabled={!vaultNameInput.trim()}>Save Vault</button>
+                </div>
+              </div>
+            </div>
+          {/if}
         </div>
       </div>
     {/if}
@@ -2804,61 +2594,6 @@
     align-items: center;
   }
 
-  .settings-gear {
-    padding: 8px;
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 16px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-  }
-
-  .settings-gear:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(180, 140, 80, 0.3);
-    color: rgba(255, 200, 100, 0.9);
-  }
-
-  /* Settings Modal Styles */
-  .settings-modal {
-    max-width: 480px;
-    max-height: 80vh;
-    overflow-y: auto;
-  }
-
-  .modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .modal-header h3 {
-    margin: 0;
-    font-size: 18px;
-    color: rgba(255, 200, 100, 0.95);
-  }
-
-  .close-btn {
-    padding: 4px 10px;
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    color: rgba(255, 255, 255, 0.5);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .close-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: white;
-  }
-
   .context-dropdown {
     position: relative;
   }
@@ -2926,6 +2661,42 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .recovery-card {
+    margin-top: 24px;
+    padding: 20px;
+    border: 1px solid rgba(180, 140, 80, 0.12);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .recovery-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .recovery-identity {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .recovery-identity h3 {
+    margin: 0 0 6px;
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.95);
+  }
+
+  .muted-tight {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.55);
+    word-break: break-word;
   }
 
   .context-networth {
@@ -4674,11 +4445,15 @@
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 10px;
-    margin-top: 24px;
-    padding: 24px;
+    margin-top: 12px;
+    padding: 14px;
     background: rgba(0, 0, 0, 0.5);
     border-radius: 16px;
     border: 1px solid rgba(180, 140, 80, 0.15);
+  }
+
+  .mnemonic-words.compact {
+    grid-template-columns: repeat(3, 1fr);
   }
 
   .word {

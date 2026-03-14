@@ -19,7 +19,8 @@ export interface Signer {
 export interface Runtime {
   id: string; // signer EOA (0xABCD...)
   label: string; // user-chosen name ("MyWallet")
-  seed: string; // raw 12-word mnemonic
+  seed: string; // canonical 24-word mnemonic
+  mnemonic12?: string; // optional 12-word compatibility mnemonic
   devicePassphrase?: string; // optional BrainVault device passphrase (if available)
   signers: Signer[];
   activeSignerIndex: number;
@@ -32,6 +33,7 @@ type CreateRuntimeOptions = {
   loginType?: 'manual' | 'demo';
   requiresOnboarding?: boolean;
   devicePassphrase?: string;
+  mnemonic12?: string;
 };
 
 export interface RuntimesState {
@@ -1182,6 +1184,7 @@ export const vaultOperations = {
       id,
       label,
       seed,
+      ...(options.mnemonic12 ? { mnemonic12: options.mnemonic12 } : {}),
       ...(options.devicePassphrase ? { devicePassphrase: options.devicePassphrase } : {}),
       signers: [{
         index: 0,

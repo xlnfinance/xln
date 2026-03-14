@@ -57,6 +57,7 @@
   import HubDiscoveryPanel from './HubDiscoveryPanel.svelte';
   import GossipPanel from './GossipPanel.svelte';
   import EntityInput from '../shared/EntityInput.svelte';
+  import WalletSettings from '$lib/components/Settings/WalletSettings.svelte';
 
   export let tab: Tab;
   export let isLast: boolean = false;
@@ -3291,6 +3292,9 @@
           {/if}
 
         {:else if activeTab === 'settings'}
+          <h4 class="section-head">Wallet</h4>
+          <WalletSettings embedded={true} />
+
           <h4 class="section-head">Appearance</h4>
           <div class="theme-grid">
             {#each getAvailableThemes() as theme}

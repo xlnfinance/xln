@@ -33,9 +33,7 @@
   // Removed WalletView - using EntityPanelTabs for everything (Entity = Wallet)
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import FormationPanel from '$lib/components/Entity/FormationPanel.svelte';
-  import WalletSettings from '$lib/components/Settings/WalletSettings.svelte';
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
-  import { Settings } from 'lucide-svelte';
 
   interface Props {
     isolatedEnv: Writable<any>;
@@ -63,7 +61,7 @@
   let selectedJurisdictionName = $state<string | null>(null);
   let isCreatingJMachine = false; // Stays true on failure to prevent retry
   // Inline panels - NO POPUPS! All panels are inline for desktop/mobile
-  type InlinePanel = 'none' | 'formation' | 'add-jmachine' | 'settings';
+  type InlinePanel = 'none' | 'formation' | 'add-jmachine';
   let activeInlinePanel = $state<InlinePanel>('none');
   const selfEntityChecked = new Set<string>();
   const selfEntityInFlight = new Set<string>();
@@ -608,9 +606,6 @@
         </div>
       {/if}
     </div>
-    <button class="settings-btn" on:click={() => activeInlinePanel = 'settings'} title="Settings">
-      <Settings size={18} />
-    </button>
   </div>
 
   <!-- Content - NO POPUPS! All panels are inline -->
@@ -635,15 +630,6 @@
           on:create={handleJMachineCreate}
           on:cancel={() => activeInlinePanel = 'none'}
         />
-      </div>
-    {:else if activeInlinePanel === 'settings'}
-      <!-- Inline: Settings -->
-      <div class="inline-panel">
-        <div class="inline-panel-header">
-          <button class="back-btn" on:click={() => activeInlinePanel = 'none'}>← Back</button>
-          <h3>Settings</h3>
-        </div>
-        <WalletSettings on:close={() => activeInlinePanel = 'none'} />
       </div>
     {:else if showVaultPanelVisible}
       <RuntimeCreation embedded={true} />
@@ -855,27 +841,6 @@
     background: rgba(255, 255, 255, 0.1);
     color: var(--text-primary, #e6edf3);
     border-color: rgba(255, 255, 255, 0.2);
-  }
-
-  .settings-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    color: rgba(255, 255, 255, 0.6);
-    cursor: pointer;
-    transition: all 0.15s;
-    flex-shrink: 0;
-  }
-
-  .settings-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 200, 100, 0.3);
-    color: rgba(255, 200, 100, 0.9);
   }
 
   /* Mobile responsive */
