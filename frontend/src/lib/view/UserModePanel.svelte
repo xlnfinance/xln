@@ -736,7 +736,7 @@
   /* Content - below nav z-index so dropdowns overlay */
   .panel-content {
     flex: 1;
-    overflow: auto;
+    overflow: hidden;
     min-height: 0;
     position: relative;
     z-index: 1;

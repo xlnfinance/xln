@@ -771,7 +771,7 @@
   <div
     class="view-container"
     class:hidden={userMode}
-    class:with-timemachine={$settings.showTimeMachine && !collapsed}
+    class:with-timemachine={$settings.showTimeMachine && !collapsed && !userMode}
     bind:this={container}
   ></div>
 

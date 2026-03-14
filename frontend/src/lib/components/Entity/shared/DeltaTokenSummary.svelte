@@ -80,20 +80,22 @@
           </button>
         {/if}
       </div>
-      <div class="compact-metric compact-out" aria-label="Outbound capacity">
-        {#if showMetricLabels}<span class="metric-label">Outbound</span>{/if}
-        <span class="compact-out-value">
-          <span>{outAmountCompact}</span>
-          {#if outUsdHint}<span class="usd-hint">{outUsdHint}</span>{/if}
-        </span>
-      </div>
-      <span class="metric-divider" aria-hidden="true"></span>
-      <div class="compact-metric compact-in" aria-label="Inbound capacity">
-        {#if showMetricLabels}<span class="metric-label">Inbound</span>{/if}
-        <span class="compact-in-value">
-          <span>{inAmountCompact}</span>
-          {#if inUsdHint}<span class="usd-hint">{inUsdHint}</span>{/if}
-        </span>
+      <div class="compact-metrics">
+        <div class="compact-metric compact-out" aria-label="Outbound capacity">
+          {#if showMetricLabels}<span class="metric-label">Outbound</span>{/if}
+          <span class="compact-out-value">
+            <span>{outAmountCompact}</span>
+            {#if outUsdHint}<span class="usd-hint">{outUsdHint}</span>{/if}
+          </span>
+        </div>
+        <span class="metric-divider" aria-hidden="true"></span>
+        <div class="compact-metric compact-in" aria-label="Inbound capacity">
+          {#if showMetricLabels}<span class="metric-label">Inbound</span>{/if}
+          <span class="compact-in-value">
+            <span>{inAmountCompact}</span>
+            {#if inUsdHint}<span class="usd-hint">{inUsdHint}</span>{/if}
+          </span>
+        </div>
       </div>
     {:else}
       <div class="token-meta">
@@ -286,15 +288,18 @@
   .summary-action {
     font-size: 11px;
     padding: 0 12px;
-    min-height: 30px;
+    height: 32px;
     border-radius: 7px;
-    border: 1px solid rgba(134, 239, 172, 0.45);
-    background: rgba(134, 239, 172, 0.16);
+    border: 1px solid rgba(134, 239, 172, 0.34);
+    background: rgba(34, 197, 94, 0.18);
     color: #dcfce7;
     cursor: pointer;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .compact-token-action {
@@ -317,20 +322,30 @@
   }
 
   .delta-summary.compact .summary-head {
-    min-height: 34px;
+    min-height: 36px;
   }
 
   .compact-head {
     display: flex;
     align-items: center;
-    gap: 16px;
+    justify-content: flex-start;
+    gap: 18px;
+    min-width: 0;
   }
 
   .delta-summary.compact .token-meta.compact-meta {
-    min-width: 220px;
-    flex: 1 1 auto;
+    min-width: 0;
+    flex: 0 1 auto;
     gap: 10px;
     align-items: center;
+  }
+
+  .compact-metrics {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 0 1 auto;
   }
 
   .delta-summary.compact .token-symbol {
@@ -353,7 +368,7 @@
 
   .compact-metric {
     display: inline-flex;
-    align-items: flex-end;
+    align-items: center;
     gap: 8px;
     color: #d1d5db;
     white-space: nowrap;
@@ -394,7 +409,7 @@
 
   .metric-divider {
     width: 1px;
-    height: 22px;
+    height: 18px;
     background: linear-gradient(
       180deg,
       rgba(148, 163, 184, 0.05) 0%,
@@ -444,11 +459,17 @@
     .compact-head {
       flex-wrap: wrap;
       align-items: flex-start;
+      gap: 10px;
     }
 
     .delta-summary.compact .compact-meta {
       min-width: 0;
       flex: 1 1 100%;
+    }
+
+    .compact-metrics {
+      width: 100%;
+      justify-content: space-between;
     }
 
     .delta-summary.compact .compact-out {

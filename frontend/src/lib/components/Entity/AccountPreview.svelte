@@ -411,7 +411,7 @@
     background: #18181b;
     border: 1px solid #27272a;
     border-radius: 12px;
-    padding: 14px 16px;
+    padding: 14px 16px 12px;
     transition: all 0.15s ease;
   }
   .account-preview:hover {
@@ -429,7 +429,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     gap: 10px;
   }
   .entity-col { min-width: 0; flex: 1; }
@@ -450,9 +450,10 @@
   .status-col {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex-shrink: 0;
     flex-wrap: wrap;
+    row-gap: 6px;
   }
 
   .conn-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
@@ -466,7 +467,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 30px;
+    height: 32px;
     padding: 0 12px;
     border-radius: 7px;
     line-height: 1;
@@ -489,7 +490,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 30px;
+    height: 32px;
     padding: 0 12px;
     border-radius: 7px;
     border: 1px solid #3f3f46;
@@ -513,7 +514,7 @@
     display: flex;
     justify-content: space-between;
     gap: 8px;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
   }
 
   .lock-badge {
