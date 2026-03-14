@@ -177,6 +177,7 @@
           ? (hasPendingBatch ? 'settling' : 'pending')
           : 'none',
         visualScale: buildTokenVisualScale(String(info.symbol || ''), Number(info.decimals ?? 18), derived),
+        actionLabel: 'Faucet',
       });
     }
     return rows.sort((a, b) => {
@@ -281,6 +282,10 @@
     dispatch('faucet', { counterpartyId, tokenId: agg.primaryTokenId });
   }
 
+  function handleTokenFaucet(tokenId: number): void {
+    dispatch('faucet', { counterpartyId, tokenId });
+  }
+
   function handleSettleApprove(e: MouseEvent) {
     e.stopPropagation();
     dispatch('settleApprove', { counterpartyId });
@@ -292,10 +297,6 @@
   class:selected={isSelected}
   data-counterparty-id={counterpartyId}
   data-owner-entity-id={entityId}
-  on:click={handleClick}
-  on:keydown={(e) => e.key === 'Enter' && handleClick()}
-  role="button"
-  tabindex="0"
 >
   <!-- Row 1: Entity + status -->
   <div class="row-header">
@@ -329,12 +330,8 @@
           ⚠ {disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left · {disputeRole}
         </span>
       {/if}
-      <button
-        class="btn-faucet status-pill"
-        on:click={handleFaucet}
-        title="Request offchain faucet payment"
-      >
-        Faucet
+      <button class="btn-explore" on:click={handleClick}>
+        Explore
       </button>
     </div>
   </div>
@@ -376,6 +373,9 @@
         decimals={Number(primaryTokenInfo.decimals ?? 18)}
         barHeight={9}
         visualScale={aggregateVisualScale}
+        actionLabel="Faucet"
+        actionTokenId={agg.primaryTokenId}
+        on:action={() => handleTokenFaucet(agg.primaryTokenId)}
       />
     {:else}
       <DeltaTokenList
@@ -385,6 +385,7 @@
         showMetricLabels={false}
         showHeader={true}
         mode="plain"
+        on:action={(event) => handleTokenFaucet(event.detail.tokenId)}
       />
     {/if}
   {:else}
@@ -411,7 +412,6 @@
     border: 1px solid #27272a;
     border-radius: 12px;
     padding: 14px 16px;
-    cursor: pointer;
     transition: all 0.15s ease;
   }
   .account-preview:hover {
@@ -484,6 +484,30 @@
   .badge.sent { color: #fbbf24; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.12); }
   .badge.disputed { color: #fecdd3; background: rgba(244,63,94,0.2); border: 1px solid rgba(244,63,94,0.35); }
   .badge.finalized_disputed { color: #fca5a5; background: rgba(153, 27, 27, 0.26); border: 1px solid rgba(248, 113, 113, 0.38); }
+
+  .btn-explore {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 30px;
+    padding: 0 12px;
+    border-radius: 7px;
+    border: 1px solid #3f3f46;
+    background: transparent;
+    color: #a1a1aa;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-explore:hover {
+    border-color: #fbbf24;
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.08);
+  }
 
   .locks-row {
     display: flex;
@@ -560,31 +584,6 @@
     border: 1px solid rgba(251, 113, 133, 0.35);
     padding: 0 12px;
     white-space: nowrap;
-  }
-
-  .btn-faucet {
-    font-size: 11px;
-    padding: 0 12px;
-    border-radius: 7px;
-    border: 1px solid #3f3f46;
-    background: transparent;
-    color: #71717a;
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    transition: all 0.15s;
-  }
-  .btn-faucet:hover {
-    border-color: #fbbf24;
-    color: #fbbf24;
-    background: rgba(251, 191, 36, 0.08);
-  }
-  .btn-faucet:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-    border-color: #3f3f46;
-    color: #71717a;
-    background: transparent;
   }
 
   /* ── Misc ──────────────────────────────────────── */

@@ -34,7 +34,7 @@ export async function handleDepositCollateral(
   const mempoolOps: MempoolOp[] = [];
 
   // Validate: Do we have enough reserve?
-  const currentReserve = entityState.reserves.get(String(tokenId)) || 0n;
+  const currentReserve = entityState.reserves.get(tokenId) || 0n;
   if (currentReserve < amount) {
     console.log(`❌ deposit_collateral: Insufficient reserve ${currentReserve} < ${amount}`);
     addMessage(newState,

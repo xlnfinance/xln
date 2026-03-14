@@ -1,10 +1,11 @@
   <script lang="ts">
     import type { AccountMachine, AccountTx, EntityReplica, Tab } from '$lib/types/ui';
-    import { enqueueEntityInputs, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
-    import { isLive as globalIsLive } from '../../stores/timeStore';
-    import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
-    import EntitySelect from './EntitySelect.svelte';
-    import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
+  import { enqueueEntityInputs, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+  import { isLive as globalIsLive } from '../../stores/timeStore';
+  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
+  import { amountToUsd } from '$lib/utils/assetPricing';
+  import EntitySelect from './EntitySelect.svelte';
+  import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
 
   export let replica: EntityReplica | null;
   export let tab: Tab;
@@ -108,9 +109,9 @@
   let orderMode: 'buy-base' | 'sell-base' | 'none' = 'none';
   let limitPriceTicks: bigint | null = null;
   let priceRatioScaled = 0n;
-  let showDepthChart = false;
   let orderListTab: 'open' | 'closed' = 'open';
   let closedOrderStatusFilter: 'all' | ClosedOrderStatus = 'all';
+  const MIN_ORDER_NOTIONAL_USD = 10;
 
     $: activeXlnFunctions = $xlnFunctions;
     $: activeEnv = $xlnEnvironment;
@@ -544,6 +545,7 @@
     availableWantInCapacity: bigint;
     formattedAvailableGive: string;
     formattedAvailableWantIn: string;
+    notionalUsd: number;
   };
 
   function validateSwapForm(input: SwapFormValidationInput): string {
@@ -562,6 +564,9 @@
     if (input.priceRatioScaled <= 0n) return 'Enter valid price.';
     if (!input.limitPriceTicks || input.limitPriceTicks <= 0n) return 'Price is too small.';
     if (input.wantAmount <= 0n) return 'Amount to receive is too small for selected price.';
+    if (input.notionalUsd < MIN_ORDER_NOTIONAL_USD) {
+      return `Minimum order size is ~$${MIN_ORDER_NOTIONAL_USD}.`;
+    }
     if (!input.wantTokenPresentInAccount) {
       return 'Inbound token is not active in this account. Add token capacity first.';
     }
@@ -574,23 +579,71 @@
     return '';
   }
 
-  $: swapDisabledReason = validateSwapForm({
-    isLive: activeIsLive,
-    entityId: String(tab.entityId || ''),
-    counterpartyId: String(counterpartyId || ''),
-    accountIds,
-    giveToken,
-    wantToken,
-    giveAmount,
-    priceRatioScaled,
-    limitPriceTicks,
-    wantAmount,
-    wantTokenPresentInAccount,
-    availableGiveCapacity,
-    availableWantInCapacity,
-    formattedAvailableGive,
-    formattedAvailableWantIn,
-  });
+  function computeOrderNotionalUsd(
+    mode: 'buy-base' | 'sell-base' | 'none',
+    giveTokenValue: number,
+    wantTokenValue: number,
+    effectiveGiveAmount: bigint,
+    effectiveWantAmount: bigint,
+  ): number {
+    if (mode === 'sell-base') {
+      return amountToUsd(effectiveWantAmount, getTokenDecimals(wantTokenValue), tokenSymbol(wantTokenValue));
+    }
+    if (mode === 'buy-base') {
+      return amountToUsd(effectiveGiveAmount, getTokenDecimals(giveTokenValue), tokenSymbol(giveTokenValue));
+    }
+    return 0;
+  }
+
+  function buildSwapValidationInput(
+    candidateCounterpartyId: string,
+    candidateGiveToken: number,
+    candidateWantToken: number,
+    candidateGiveAmount: bigint,
+    candidateWantAmount: bigint,
+    candidatePriceRatioScaled: bigint,
+    candidateLimitPriceTicks: bigint | null,
+  ): SwapFormValidationInput {
+    const liveWantTokenPresentInAccount = hasTokenInAccount(candidateCounterpartyId, candidateWantToken);
+    const liveAvailableGiveCapacity = readOutCapacity(candidateCounterpartyId, candidateGiveToken);
+    const liveAvailableWantInCapacity = readInCapacity(candidateCounterpartyId, candidateWantToken);
+    const liveFormattedAvailableGive = Number.isFinite(candidateGiveToken) && candidateGiveToken > 0
+      ? `${formatAmount(liveAvailableGiveCapacity, candidateGiveToken)} ${tokenSymbol(candidateGiveToken)}`
+      : liveAvailableGiveCapacity.toString();
+    const liveFormattedAvailableWantIn = Number.isFinite(candidateWantToken) && candidateWantToken > 0
+      ? `${formatAmount(liveAvailableWantInCapacity, candidateWantToken)} ${tokenSymbol(candidateWantToken)}`
+      : liveAvailableWantInCapacity.toString();
+    return {
+      isLive: activeIsLive,
+      entityId: String(tab.entityId || ''),
+      counterpartyId: String(candidateCounterpartyId || ''),
+      accountIds,
+      giveToken: candidateGiveToken,
+      wantToken: candidateWantToken,
+      giveAmount: candidateGiveAmount,
+      priceRatioScaled: candidatePriceRatioScaled,
+      limitPriceTicks: candidateLimitPriceTicks,
+      wantAmount: candidateWantAmount,
+      wantTokenPresentInAccount: liveWantTokenPresentInAccount,
+      availableGiveCapacity: liveAvailableGiveCapacity,
+      availableWantInCapacity: liveAvailableWantInCapacity,
+      formattedAvailableGive: liveFormattedAvailableGive,
+      formattedAvailableWantIn: liveFormattedAvailableWantIn,
+      notionalUsd: computeOrderNotionalUsd(orderMode, candidateGiveToken, candidateWantToken, candidateGiveAmount, candidateWantAmount),
+    };
+  }
+
+  $: swapDisabledReason = validateSwapForm(
+    buildSwapValidationInput(
+      String(counterpartyId || ''),
+      giveToken,
+      wantToken,
+      giveAmount,
+      wantAmount,
+      priceRatioScaled,
+      limitPriceTicks,
+    ),
+  );
   $: swapActionDisabledReason = (
     isInboundCapacityValidationError(swapDisabledReason) && canAutoPrepareInboundCapacity
       ? ''
@@ -759,36 +812,6 @@
     }
     return 0n;
   })();
-  $: depthLevels = (() => {
-    const bids = orderbookSnapshot.bids.slice(0, 12);
-    const asks = orderbookSnapshot.asks.slice(0, 12);
-    return { bids, asks };
-  })();
-
-  function buildDepthPolyline(levels: SnapshotLevel[], side: 'bid' | 'ask'): string {
-    if (levels.length === 0) return '';
-    const ordered = side === 'bid' ? [...levels].reverse() : [...levels];
-    const allPrices = [...depthLevels.bids.map(l => l.price), ...depthLevels.asks.map(l => l.price)];
-    const minPrice = Math.min(...allPrices);
-    const maxPrice = Math.max(...allPrices);
-    const priceRange = Math.max(1, maxPrice - minPrice);
-    const maxTotal = Math.max(
-      1,
-      ...depthLevels.bids.map(l => l.total),
-      ...depthLevels.asks.map(l => l.total),
-    );
-    return ordered
-      .map(level => {
-        const x = ((level.price - minPrice) / priceRange) * 100;
-        const y = 100 - (level.total / maxTotal) * 100;
-        return `${x.toFixed(2)},${y.toFixed(2)}`;
-      })
-      .join(' ');
-  }
-
-  $: bidDepthPolyline = buildDepthPolyline(depthLevels.bids, 'bid');
-  $: askDepthPolyline = buildDepthPolyline(depthLevels.asks, 'ask');
-
   function offerSideLabel(offer: SwapOfferLike): 'Ask' | 'Bid' {
     const give = Number(offer?.giveTokenId || 0);
     const want = Number(offer?.wantTokenId || 0);
@@ -907,6 +930,8 @@
   }
 
   function classifyClosedStatus(lifecycle: OfferLifecycle): ClosedOrderStatus {
+    const filledPpm = computeFilledPpm(lifecycle.resolves);
+    if (filledPpm >= 1_000_000n) return 'filled';
     const hasFill = lifecycle.resolves.some((resolve) => resolve.fillRatio > 0);
     const hasCancelResolve = lifecycle.resolves.some((resolve) => resolve.cancelRemainder);
     if (hasCancelResolve && hasFill) return 'partial';
@@ -973,11 +998,6 @@
 
   async function placeSwapOffer() {
     submitError = '';
-    if (swapActionDisabledReason) {
-      submitError = swapActionDisabledReason;
-      return;
-    }
-
     try {
       const env = activeEnv;
       if (!env) throw new Error('XLN environment not ready');
@@ -1007,6 +1027,19 @@
       if (giveToken === wantToken) {
         throw new Error('Give token and want token must be different');
       }
+      const liveValidation = buildSwapValidationInput(
+        resolvedCounterparty,
+        giveToken,
+        wantToken,
+        effectiveGiveAmount,
+        effectiveWantAmount,
+        priceRatioScaled,
+        limitPriceTicks,
+      );
+      const liveValidationReason = validateSwapForm(liveValidation);
+      if (liveValidationReason && !(isInboundCapacityValidationError(liveValidationReason) && canAutoPrepareInboundCapacity)) {
+        throw new Error(liveValidationReason);
+      }
 
       const offerId = `swap-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const minFillRatio = 0;
@@ -1019,7 +1052,7 @@
       const shouldAutoPrepareInbound = (
         requiredInboundCreditLimit !== null
         && requiredInboundCreditLimit > currentInboundCreditLimit
-        && isInboundCapacityValidationError(swapDisabledReason)
+        && isInboundCapacityValidationError(liveValidationReason)
       );
       const entityTxs = [];
       if (shouldAutoPrepareInbound) {
@@ -1125,7 +1158,7 @@
 <div class="swap-panel">
   <h3>Swap Trading</h3>
 
-  <div class="trade-grid" class:with-depth={showDepthChart}>
+  <div class="trade-grid">
     <div class="section section-market">
       <div class="orderbook-header">
         <h4>Orderbook</h4>
@@ -1193,15 +1226,6 @@
             Sell {baseTokenSymbol}
           </button>
         </div>
-        <button
-          type="button"
-          class="scope-btn"
-          class:active={showDepthChart}
-          data-testid="swap-depth-chart-toggle"
-          on:click={() => (showDepthChart = !showDepthChart)}
-        >
-          {showDepthChart ? 'Hide Depth' : 'Show Depth'}
-        </button>
       </div>
 
       <p class="orderbook-hint">
@@ -1226,30 +1250,6 @@
         <div class="orderbook-empty">No connected account orderbooks yet.</div>
       {/if}
     </div>
-
-    {#if showDepthChart}
-      <div class="section section-depth" data-testid="swap-depth-chart">
-        <div class="depth-header">
-          <span>Depth Chart</span>
-          <span>{orderbookPairId}</span>
-        </div>
-        {#if orderbookHubIds.length === 0}
-          <div class="depth-empty">No connected account orderbooks yet.</div>
-        {:else if bidDepthPolyline || askDepthPolyline}
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Orderbook depth chart">
-            {#if bidDepthPolyline}
-              <polyline points={bidDepthPolyline} class="depth-line bid" />
-            {/if}
-            {#if askDepthPolyline}
-              <polyline points={askDepthPolyline} class="depth-line ask" />
-            {/if}
-          </svg>
-        {:else}
-          <div class="depth-empty">No depth available yet.</div>
-        {/if}
-      </div>
-    {/if}
-
     <div class="section section-order">
       <h4>Place Limit Order</h4>
 

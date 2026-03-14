@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createEventDispatcher } from 'svelte';
   import DeltaCapacityBar from './DeltaCapacityBar.svelte';
   import type { DeltaParts, DeltaVisualScale } from './delta-types';
   import { buildTokenVisualScale } from './delta-visual';
@@ -15,6 +16,11 @@
   export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
   export let showMetricLabels: boolean = true;
   export let visualScale: DeltaVisualScale | null = null;
+  export let actionLabel = '';
+  export let actionTokenId: number | null = null;
+  export let actionDisabled = false;
+
+  const dispatch = createEventDispatcher<{ action: { tokenId: number | null } }>();
 
   function iconForSymbol(rawSymbol: string): { text: string; cls: string } {
     const s = String(rawSymbol || '').toUpperCase();
@@ -53,6 +59,10 @@
     if (valueUsd >= 1) return `~$${valueUsd.toFixed(0)}`;
     return `~$${valueUsd.toFixed(2)}`;
   }
+
+  function emitAction(): void {
+    dispatch('action', { tokenId: actionTokenId });
+  }
 </script>
 
 <div class="delta-summary" class:compact>
@@ -64,6 +74,11 @@
           <span class="token-symbol">{symbol}</span>
           <span class="token-name">{compactName}</span>
         </div>
+        {#if actionLabel}
+          <button class="summary-action compact-token-action" on:click={emitAction} disabled={actionDisabled}>
+            {actionLabel}
+          </button>
+        {/if}
       </div>
       <div class="compact-metric compact-out" aria-label="Outbound capacity">
         {#if showMetricLabels}<span class="metric-label">Outbound</span>{/if}
@@ -108,7 +123,13 @@
       </div>
     {/if}
 
-    {#if $$slots.actions}
+    {#if actionLabel && !compact}
+      <div class="actions">
+        <button class="summary-action" on:click={emitAction} disabled={actionDisabled}>
+          {actionLabel}
+        </button>
+      </div>
+    {:else if $$slots.actions}
       <div class="actions">
         <slot name="actions" />
       </div>
@@ -135,7 +156,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     min-height: 28px;
   }
 
@@ -262,6 +283,39 @@
     justify-self: end;
   }
 
+  .summary-action {
+    font-size: 11px;
+    padding: 0 12px;
+    min-height: 30px;
+    border-radius: 7px;
+    border: 1px solid rgba(134, 239, 172, 0.45);
+    background: rgba(134, 239, 172, 0.16);
+    color: #dcfce7;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    transition: all 0.15s;
+  }
+
+  .compact-token-action {
+    margin-left: 8px;
+    flex: 0 0 auto;
+  }
+
+  .summary-action:hover:not(:disabled) {
+    border-color: rgba(134, 239, 172, 0.72);
+    color: #f0fdf4;
+    background: rgba(134, 239, 172, 0.26);
+  }
+
+  .summary-action:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    border-color: #3f3f46;
+    color: #71717a;
+    background: transparent;
+  }
+
   .delta-summary.compact .summary-head {
     min-height: 34px;
   }
@@ -269,13 +323,14 @@
   .compact-head {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
   }
 
   .delta-summary.compact .token-meta.compact-meta {
-    min-width: 180px;
+    min-width: 220px;
     flex: 1 1 auto;
-    gap: 9px;
+    gap: 10px;
+    align-items: center;
   }
 
   .delta-summary.compact .token-symbol {
@@ -297,10 +352,9 @@
   }
 
   .compact-metric {
-    display: flex;
-    flex-direction: column;
+    display: inline-flex;
     align-items: flex-end;
-    gap: 1px;
+    gap: 8px;
     color: #d1d5db;
     white-space: nowrap;
     min-width: 0;
@@ -308,19 +362,21 @@
     font-variant-numeric: tabular-nums;
     font-feature-settings: 'tnum' 1;
     text-align: right;
+    min-width: 0;
   }
 
   .compact-out {
-    margin-left: auto;
+    margin-left: 0;
   }
 
   .metric-label {
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.07em;
     line-height: 1;
     text-transform: uppercase;
     color: #9ca3af;
     font-weight: 700;
+    flex: 0 0 auto;
   }
 
   .compact-out-value {
@@ -351,14 +407,6 @@
 
   .compact-in {
     flex: 0 0 auto;
-  }
-
-  .delta-summary.compact .actions {
-    flex: 0 0 auto;
-    margin-left: 4px;
-    margin-top: 0;
-    align-self: center;
-    white-space: nowrap;
   }
 
   .compact-in-value {
@@ -407,7 +455,7 @@
       margin-left: 0;
       min-width: 0;
       text-align: left;
-      align-items: flex-start;
+      align-items: baseline;
     }
 
     .delta-summary.compact .metric-divider {
@@ -417,7 +465,7 @@
     .delta-summary.compact .compact-in {
       margin-left: auto;
       text-align: right;
-      align-items: flex-end;
+      align-items: baseline;
       min-width: 0;
     }
 

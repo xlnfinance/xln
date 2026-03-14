@@ -8,7 +8,7 @@ export const DEFAULT_USER_HUB_CREDIT_AMOUNT = 10_000n * 10n ** 18n;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
 export const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
 export const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
-export const HUB_DEFAULT_MIN_TRADE_SIZE = 50n * 10n ** 18n;
+export const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** 18n;
 export const BOOTSTRAP_POLL_MS = Math.max(10, Number(process.env.BOOTSTRAP_POLL_MS || '40'));
 export const RUNTIME_SETTLE_POLL_MS = Math.max(10, Number(process.env.RUNTIME_SETTLE_POLL_MS || '25'));
 

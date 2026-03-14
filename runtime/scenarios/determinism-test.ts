@@ -18,6 +18,15 @@ import { safeStringify } from '../serialization-utils';
 const RUNS = 3; // Number of times to run each scenario
 const SEED = 'determinism-test-seed-42';
 
+function compareNumericKey(left: string | number, right: string | number): number {
+  const leftNum = Number(left);
+  const rightNum = Number(right);
+  if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
+    return leftNum - rightNum;
+  }
+  return String(left).localeCompare(String(right));
+}
+
 /**
  * Compute deterministic hash of entity state
  * Uses canonical JSON serialization for consistency
@@ -27,9 +36,9 @@ function hashEntityState(state: EntityState): string {
     entityId: state.entityId,
     height: state.height,
     timestamp: state.timestamp,
-    reserves: Array.from(state.reserves.entries()).sort((a, b) => Number(a[0]) - Number(b[0])),
+    reserves: Array.from(state.reserves.entries()).sort((a, b) => compareNumericKey(a[0], b[0])),
     accounts: Array.from(state.accounts.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
       .map(([id, acc]) => ({
         id,
         currentHeight: acc.currentHeight,

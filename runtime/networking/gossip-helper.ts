@@ -240,6 +240,15 @@ type FingerprintAccount = {
   tokenCapacities: FingerprintTokenCapacity[];
 };
 
+const compareTokenIdStrings = (left: string, right: string): number => {
+  const leftNum = Number(left);
+  const rightNum = Number(right);
+  if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
+    return leftNum - rightNum;
+  }
+  return left.localeCompare(right);
+};
+
 /**
  * Deterministic fingerprint of the public routing state we advertise via gossip.
  * Excludes volatile fields like lastUpdated/signatures so we only re-announce
@@ -262,7 +271,7 @@ export function buildEntityAdvertisedStateFingerprint(
           inCapacity: String(capacity.inCapacity),
           outCapacity: String(capacity.outCapacity),
         }))
-        .sort((left, right) => left.tokenId.localeCompare(right.tokenId));
+        .sort((left, right) => compareTokenIdStrings(left.tokenId, right.tokenId));
       return {
         counterpartyId: account.counterpartyId,
         tokenCapacities,

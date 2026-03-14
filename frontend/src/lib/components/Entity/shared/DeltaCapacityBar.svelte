@@ -170,8 +170,8 @@
     width: 100%;
     height: var(--bar-h);
     border-radius: 999px;
-    background: #09090b;
-    box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.06);
+    background: transparent;
+    box-shadow: none;
   }
 
   .axis,
@@ -201,16 +201,16 @@
 
   .bar.empty {
     border-radius: 999px;
-    background: rgba(39, 39, 42, 0.72);
-    box-shadow: inset 0 0 0 1px rgba(82, 82, 91, 0.35);
+    background: transparent;
+    box-shadow: inset 0 0 0 1px rgba(82, 82, 91, 0.2);
     opacity: 0.45;
   }
 
   .bar.one-sided {
     border-radius: 999px;
     overflow: hidden;
-    background: rgba(39, 39, 42, 0.72);
-    box-shadow: inset 0 0 0 1px rgba(82, 82, 91, 0.35);
+    background: transparent;
+    box-shadow: none;
     display: flex;
     align-items: stretch;
   }
@@ -228,10 +228,8 @@
     overflow: hidden;
     display: flex;
     align-items: stretch;
-    background: rgba(226, 232, 240, 0.035);
-    box-shadow:
-      inset 0 0 0 1px rgba(148, 163, 184, 0.12),
-      0 0 0 1px rgba(15, 23, 42, 0.08);
+    background: transparent;
+    box-shadow: none;
     z-index: 2;
   }
 
@@ -266,8 +264,8 @@
     overflow: hidden;
     min-width: 0;
     flex: 1 1 auto;
-    background: rgba(39, 39, 42, 0.72);
-    box-shadow: inset 0 0 0 1px rgba(82, 82, 91, 0.35);
+    background: transparent;
+    box-shadow: none;
     border-radius: 999px;
   }
 

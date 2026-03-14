@@ -2,6 +2,7 @@ import { writable, derived, get } from 'svelte/store';
 import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
 import { activeRuntimeId, runtimes, runtimeOperations } from './runtimeStore';
+import { toasts } from './toastStore';
 import type {
   XLNModule,
   Env,
@@ -23,6 +24,7 @@ export const xlnInstance = writable<XLNModule | null>(null);
 let unregisterEnvChange: (() => void) | null = null;
 const REQUIRED_RUNTIME_SCHEMA_VERSION = 3;
 const DEV_SESSION_STORAGE_KEY = 'xln-dev-session-id';
+const RESET_NOTICE_STORAGE_KEY = 'xln-reset-notice';
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 let devSessionMonitor: ReturnType<typeof setInterval> | null = null;
 
@@ -102,6 +104,31 @@ async function getXLN(): Promise<XLNModule> {
     xlnLoadPromise = null;
     throw err;
   }
+}
+
+export function isFinancialRestoreFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('FINANCIAL-SAFETY VIOLATION')
+    || message.includes('FinancialDataCorruptionError')
+    || message.includes('TypeSafetyViolationError')
+    || message.includes('loadEnvFromDB failed');
+}
+
+function showPendingResetNotice(): void {
+  if (typeof window === 'undefined') return;
+  let notice = '';
+  try {
+    notice = sessionStorage.getItem(RESET_NOTICE_STORAGE_KEY) || '';
+  } catch {
+    notice = '';
+  }
+  if (!notice) return;
+  try {
+    sessionStorage.removeItem(RESET_NOTICE_STORAGE_KEY);
+  } catch {
+    // ignore storage errors
+  }
+  toasts.warning(notice, 8000);
 }
 
 // Bootstrap env (used before runtime selection or when no runtime env exists)
@@ -331,6 +358,7 @@ export const resolveConfiguredApiBase = (baseOrigin: string): string => {
 
 // Helper functions for common patterns (not wrappers)
 export async function initializeXLN(): Promise<Env> {
+  showPendingResetNotice();
   // CRITICAL: Don't re-initialize if we already have data
   if (isInitialized) {
     const currentEnv = get(xlnEnvironment);
@@ -396,7 +424,23 @@ export async function initializeXLN(): Promise<Env> {
     };
 
     // Load from IndexedDB - main() handles DB timeout internally
-    const env = await xln.main();
+    let env: Env;
+    try {
+      env = await xln.main();
+    } catch (restoreError) {
+      if (!isFinancialRestoreFailure(restoreError) || typeof xln.clearDB !== 'function') {
+        throw restoreError;
+      }
+      console.error('[xlnStore] Financial restore failure; clearing local client storage and reloading', restoreError);
+      await clearDevClientPersistence();
+      try {
+        sessionStorage.setItem(RESET_NOTICE_STORAGE_KEY, 'Network was reset');
+      } catch {
+        // ignore storage errors
+      }
+      window.location.reload();
+      throw restoreError;
+    }
 
     // Register callback for THIS env instance (runtime API is env-scoped)
     if (unregisterEnvChange) {

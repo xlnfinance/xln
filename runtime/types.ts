@@ -1552,7 +1552,9 @@ export interface EntityState {
   prevFrameHash?: string; // Chain linkage for BFT consensus (keccak256 of previous frame)
 
   // 💰 Financial state
-  reserves: Map<string, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
+  // Financial invariant: entity reserves are always keyed by numeric tokenId.
+  // Never persist or pass string token keys through live state.
+  reserves: Map<number, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
   accounts: Map<string, AccountMachine>; // canonicalKey "left:right" -> account state
   // Account frame scheduling (accounts blocked by pendingFrame, retried on next ACK)
   deferredAccountProposals?: Map<string, true>;

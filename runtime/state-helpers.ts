@@ -473,14 +473,8 @@ export const captureSnapshot = async (
           if (replica.state?.reserves) {
             const tokenMap = new Map<number, bigint>();
             // Handle both Map and plain object
-            if (replica.state.reserves instanceof Map) {
-              replica.state.reserves.forEach((amount: bigint, tokenId: string) => {
-                tokenMap.set(Number(tokenId), amount);
-              });
-            } else {
-              for (const [tokenId, amount] of Object.entries(replica.state.reserves as Record<string, bigint>)) {
-                tokenMap.set(Number(tokenId), BigInt(amount));
-              }
+            for (const [tokenId, amount] of replica.state.reserves.entries()) {
+              tokenMap.set(tokenId, amount);
             }
             if (tokenMap.size > 0) {
               reserves.set(entityId, tokenMap);

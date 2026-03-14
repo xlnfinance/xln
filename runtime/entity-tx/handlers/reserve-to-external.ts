@@ -18,7 +18,7 @@ export async function handleReserveToExternal(
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
-  const currentReserve = entityState.reserves.get(String(tokenId)) || 0n;
+  const currentReserve = entityState.reserves.get(tokenId) || 0n;
   if (currentReserve < amount) {
     const message = `❌ Insufficient reserve: have ${currentReserve}, need ${amount} token ${tokenId}`;
     addMessage(newState, message);

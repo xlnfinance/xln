@@ -15,17 +15,7 @@
     ? Array.from(replica.state.accounts.entries())
     : [];
 
-  function absBigInt(v: bigint): bigint {
-    return v >= 0n ? v : -v;
-  }
-
-  type DeltaView = {
-    ondelta: bigint;
-    offdelta: bigint;
-  };
-
   type AccountView = {
-    deltas?: Map<number, DeltaView>;
     status?: string;
     activeDispute?: unknown;
   };
@@ -38,12 +28,6 @@
     direction: LockDirection;
   };
 
-  const isDeltaView = (value: unknown): value is DeltaView =>
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as { ondelta?: unknown }).ondelta === 'bigint' &&
-    typeof (value as { offdelta?: unknown }).offdelta === 'bigint';
-
   const isLockBookEntryView = (value: unknown): value is LockBookEntryView => {
     if (typeof value !== 'object' || value === null) return false;
     const candidate = value as Partial<LockBookEntryView>;
@@ -53,19 +37,6 @@
       (candidate.direction === 'incoming' || candidate.direction === 'outgoing')
     );
   };
-
-  function getAccountDeltaMagnitude(account: AccountView): bigint {
-    const deltas = account.deltas;
-    if (!(deltas instanceof Map)) return 0n;
-    let sum = 0n;
-    for (const delta of deltas.values()) {
-      if (!isDeltaView(delta)) continue;
-      const on = delta.ondelta;
-      const off = delta.offdelta;
-      sum += absBigInt(on + off);
-    }
-    return sum;
-  }
 
   function isFinalizedDisputed(account: AccountView): boolean {
     const status = String(account.status || '');
@@ -77,13 +48,9 @@
     .map(([counterpartyId, account]) => ({
       counterpartyId,
       account,
-      score: getAccountDeltaMagnitude(account),
     }))
-    .filter((entry) => !isFinalizedDisputed(entry.account))
-    .sort((a, b) => {
-      if (a.score === b.score) return a.counterpartyId.localeCompare(b.counterpartyId);
-      return a.score > b.score ? -1 : 1;
-    });
+    // Preserve Map insertion order so the UI stays stable by first account appearance.
+    .filter((entry) => !isFinalizedDisputed(entry.account));
 
   $: visibleAccounts = showAllAccounts ? rankedAccounts : rankedAccounts.slice(0, 3);
   $: hiddenAccountsCount = Math.max(0, rankedAccounts.length - visibleAccounts.length);
@@ -207,7 +174,7 @@
             {/if}
           </div>
         </div>
-        <div class="scrollable-component accounts-list">
+        <div class="accounts-list">
           {#each visibleAccounts as entry (entry.counterpartyId)}
             <AccountPreview
               account={entry.account}
@@ -239,9 +206,10 @@
     flex-direction: column;
   }
 
-  .scrollable-component {
-    flex: 1;
-    overflow-y: auto;
+  .accounts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
     padding: 8px;
   }
 

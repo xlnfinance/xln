@@ -291,13 +291,6 @@
     tokens?: TokenCatalogItem[];
   };
 
-  type LocalAccountSnapshot = {
-    currentHeight: number;
-    hasPending: boolean;
-    pendingHeight: number | null;
-    currentFrameHash: string | null;
-  };
-
   type IconTabConfig<T extends string> = {
     id: T;
     icon: ComponentType;
@@ -870,16 +863,6 @@
         throw new Error('Offchain faucet requires a target hub account.');
       }
 
-      const localAccount = findLocalAccountByCounterparty(entityId, replica?.state?.accounts, hubEntityId);
-      const knownAccount: LocalAccountSnapshot | null = localAccount
-        ? {
-            currentHeight: Number(localAccount.currentHeight || 0),
-            hasPending: !!localAccount.pendingFrame,
-            pendingHeight: localAccount.pendingFrame?.height ?? null,
-            currentFrameHash: localAccount.currentFrame?.stateHash || null,
-          }
-        : null;
-
       const requestTimeoutMs = 12000;
       let response: Response | null = null;
       let result: ApiResult | null = null;
@@ -900,9 +883,6 @@
           p2pConnected: !!p2p?.connected,
           p2pReconnect: p2p?.reconnect || null,
           p2pQueue: p2p?.queue || null,
-          localAccountHeight: knownAccount?.currentHeight ?? null,
-          localPending: knownAccount?.hasPending ?? null,
-          localPendingHeight: knownAccount?.pendingHeight ?? null,
         });
         response = await fetch(`${requestApiBase}/api/faucet/offchain`, {
           method: 'POST',
@@ -914,7 +894,6 @@
             hubEntityId,
             tokenId,
             amount: amountStr,
-            ...(knownAccount ? { knownAccount } : {}),
           })
         });
         result = await readJsonResponse<ApiResult>(response);
@@ -937,9 +916,6 @@
           error: result?.error || null,
           details: result?.details || null,
         });
-        if (code === 'FAUCET_ACCOUNT_STATE_MISMATCH') {
-          throw new Error('Account state mismatch with server. Reset network/runtime and retry.');
-        }
         throw new Error(result?.error || `Faucet failed (${status})`);
       }
 

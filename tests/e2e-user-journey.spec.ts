@@ -137,7 +137,7 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
           }
         }
       }
-      break;
+      if (ready) break;
     }
 
     if (!hubId) {
@@ -175,25 +175,6 @@ test.describe('E2E User Journey', () => {
       if (!env) return;
       const runtimeId = String(env.runtimeId || '').toLowerCase();
       const requestApiBase = window.location.origin;
-      const localAccount = env?.eReplicas
-        ? (() => {
-            for (const [key, rep] of env.eReplicas.entries()) {
-              const [eid, sid] = String(key).split(':');
-              if (String(eid || '').toLowerCase() !== String(entityId).toLowerCase()) continue;
-              if (String(sid || '').toLowerCase() !== String(signerId).toLowerCase()) continue;
-              return rep?.state?.accounts?.get?.(counterpartyId) ?? null;
-            }
-            return null;
-          })()
-        : null;
-      const knownAccount = localAccount
-        ? {
-            currentHeight: Number(localAccount.currentHeight || 0),
-            hasPending: !!localAccount.pendingFrame,
-            pendingHeight: localAccount.pendingFrame?.height ?? null,
-            currentFrameHash: localAccount.currentFrame?.stateHash || null,
-          }
-        : null;
       const res = await fetch(`${requestApiBase}/api/faucet/offchain`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -203,7 +184,6 @@ test.describe('E2E User Journey', () => {
           tokenId: 1,
           amount: '100',
           hubEntityId: counterpartyId,
-          ...(knownAccount ? { knownAccount } : {}),
         }),
       });
       const body = await res.json().catch(() => ({}));

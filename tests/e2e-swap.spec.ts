@@ -840,7 +840,6 @@ test.describe('E2E Swap Flow', () => {
     await timedStep('swap.select_counterparty', () => selectCounterpartyInSwap(page));
 
     await expect(page.getByTestId('swap-orderbook')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId('swap-depth-chart-toggle')).toBeVisible({ timeout: 20_000 });
     const swapResolveCountBefore = await timedStep('swap.read_resolve_count_before', () =>
       readSwapResolveCount(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
     );

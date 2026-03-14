@@ -371,6 +371,14 @@ function toDisplayed(amount: bigint): number {
   return Number(ethers.formatUnits(amount, 18));
 }
 
+function expectRenderedDeltaClose(actualDelta: number, expectedDelta: number, label: string): void {
+  const drift = Math.abs(actualDelta - expectedDelta);
+  expect(
+    drift,
+    `${label} drift must stay within rendered-number tolerance (actual=${actualDelta}, expected=${expectedDelta}, drift=${drift})`,
+  ).toBeLessThanOrEqual(0.000000001);
+}
+
 async function openPayWorkspace(page: Page): Promise<void> {
   const accountsTab = page.getByTestId('tab-accounts').first();
   if (!await accountsTab.isVisible().catch(() => false)) {
@@ -535,7 +543,11 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
         toDisplayed(forwardAmount),
       );
       expect(forwardSpend.spent).toBeGreaterThanOrEqual(expectedForwardSpend);
-      expect(bobAfterForward - bobBeforeForward).toBe(toDisplayed(forwardAmount));
+      expectRenderedDeltaClose(
+        bobAfterForward - bobBeforeForward,
+        toDisplayed(forwardAmount),
+        'bob forward receive',
+      );
 
       console.log('[E2E] reverse HTLC Bob -> Hub -> Alice');
       await waitForAccountIdle(bobPage, bob.entityId, hubId);
@@ -561,7 +573,11 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
       );
       const bobAfterReverse = await getRenderedOutboundForAccount(bobPage, hubId);
       expect(reverseSpend.spent).toBeGreaterThanOrEqual(expectedReverseSpend);
-      expect(aliceAfterReverse - aliceBeforeReverse).toBe(toDisplayed(reverseAmount));
+      expectRenderedDeltaClose(
+        aliceAfterReverse - aliceBeforeReverse,
+        toDisplayed(reverseAmount),
+        'alice reverse receive',
+      );
       expect(bobBeforeReverse - bobAfterReverse).toBeGreaterThanOrEqual(expectedReverseSpend);
 
       console.log('[E2E] capture persistence state before reload');

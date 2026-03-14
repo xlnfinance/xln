@@ -882,7 +882,7 @@ async function hubRebalanceHandler(
   }
 
   // Effective reserves: actual + pending C→R amounts in batch
-  const effectiveReserves = new Map<string, bigint>();
+  const effectiveReserves = new Map<number, bigint>();
   for (const [tokenKey, amount] of replica.state.reserves.entries()) {
     effectiveReserves.set(tokenKey, amount);
   }
@@ -1023,7 +1023,7 @@ async function hubRebalanceHandler(
       }
 
       const requestedAmount = requestedAmountRaw > uncollateralized ? uncollateralized : requestedAmountRaw;
-      const reserve = effectiveReserves.get(String(tokenId)) || 0n;
+      const reserve = effectiveReserves.get(tokenId) || 0n;
       const depositAmount = requestedAmount > reserve ? reserve : requestedAmount;
       if (depositAmount > 0n) {
         targets.push({
@@ -1033,7 +1033,7 @@ async function hubRebalanceHandler(
           requestedAt: feeState.requestedAt || 0,
           feePaidUpfront: prepaidFee,
         });
-        effectiveReserves.set(String(tokenId), reserve - depositAmount);
+        effectiveReserves.set(tokenId, reserve - depositAmount);
       } else {
         console.warn(
           `⚠️ R→C request pending but skipped (zero reserve): token=${tokenId} cp=${counterpartyId.slice(-4)} requested=${requestedAmount}`,

@@ -149,6 +149,11 @@ async function focusConfiguredAccount(page: Page, hubId: string): Promise<void> 
   await openAccountsWorkspace(page);
   const preview = page.locator(`.account-preview[data-counterparty-id="${hubId}"]`).first();
   if (await preview.isVisible().catch(() => false)) {
+    const exploreButton = preview.getByRole('button', { name: /^Explore$/ }).first();
+    if (await exploreButton.isVisible().catch(() => false)) {
+      await exploreButton.click();
+      return;
+    }
     await preview.click();
   }
 }

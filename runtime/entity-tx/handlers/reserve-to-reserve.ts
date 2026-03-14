@@ -24,7 +24,7 @@ export async function handleReserveToReserve(
   const outputs: EntityInput[] = [];
 
   // Validate: Do we have enough reserve?
-  const currentReserve = entityState.reserves.get(String(tokenId)) || 0n;
+  const currentReserve = entityState.reserves.get(tokenId) || 0n;
   if (currentReserve < amount) {
     const msg = `❌ Insufficient reserve: have ${currentReserve}, need ${amount} token ${tokenId}`;
     addMessage(newState, msg);
