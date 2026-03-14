@@ -16,16 +16,15 @@
   import { THEME_DEFINITIONS } from '$lib/utils/themes';
   import { getBarColors } from '$lib/utils/bar-colors';
   import type { ThemeName, BarColorMode } from '$lib/types/ui';
-  import { X, Eye, EyeOff, Copy, Check, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-svelte';
+  import { X, Copy, Check, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-svelte';
 
   const dispatch = createEventDispatcher();
+  export let embedded = false;
 
   // Tabs
   type Tab = 'wallet' | 'jmachines' | 'general';
   let activeTab: Tab = 'wallet';
 
-  // Wallet tab state
-  let showSeed = false;
   let seedCopied = false;
 
   // J-Machines tab state
@@ -104,13 +103,21 @@
   $: barLegendColors = getBarColors($settings.barColorMode, '#2775ca');
 
   // Wallet functions
-  function copySeed() {
-    if ($activeVault?.seed) {
-      navigator.clipboard.writeText($activeVault.seed);
-      seedCopied = true;
-      setTimeout(() => seedCopied = false, 2000);
-    }
+function copySeed() {
+  if ($activeVault?.seed) {
+    navigator.clipboard.writeText($activeVault.seed);
+    seedCopied = true;
+    setTimeout(() => seedCopied = false, 2000);
   }
+}
+
+function copyMnemonic12() {
+  if ($activeVault?.mnemonic12) {
+    navigator.clipboard.writeText($activeVault.mnemonic12);
+    seedCopied = true;
+    setTimeout(() => seedCopied = false, 2000);
+  }
+}
 
   function formatAddress(addr: string): string {
     if (!addr) return '';
@@ -208,14 +215,16 @@
   }
 </script>
 
-<div class="wallet-settings">
+<div class="wallet-settings" class:embedded>
   <!-- Header -->
-  <div class="header">
-    <h2>Settings</h2>
-    <button class="close-btn" on:click={close}>
-      <X size={20} />
-    </button>
-  </div>
+  {#if !embedded}
+    <div class="header">
+      <h2>Settings</h2>
+      <button class="close-btn" on:click={close}>
+        <X size={20} />
+      </button>
+    </div>
+  {/if}
 
   <!-- Tabs -->
   <div class="tabs">
@@ -273,21 +282,28 @@
           <div class="seed-section">
             <div class="seed-header">
               <h4>Recovery Phrase</h4>
-              <button class="icon-btn" on:click={() => showSeed = !showSeed}>
-                {#if showSeed}
-                  <EyeOff size={16} />
-                {:else}
-                  <Eye size={16} />
-                {/if}
-              </button>
             </div>
-
-            {#if showSeed}
-              <div class="seed-warning">
-                Never share your recovery phrase. Anyone with it can access your funds.
+            <div class="seed-warning">
+              Never share your recovery phrase. Anyone with it can access your funds.
+            </div>
+            {#if $activeVault.mnemonic12}
+              <div class="seed-subsection">
+                <div class="seed-subhead">
+                  <span>12 words</span>
+                  <button class="copy-btn" on:click={copyMnemonic12}>
+                    {#if seedCopied}
+                      <Check size={14} />
+                    {:else}
+                      <Copy size={14} />
+                    {/if}
+                  </button>
+                </div>
+                <code class="seed-code">{$activeVault.mnemonic12}</code>
               </div>
-              <div class="seed-display">
-                <code>{$activeVault.seed}</code>
+            {/if}
+            <div class="seed-subsection">
+              <div class="seed-subhead">
+                <span>24 words</span>
                 <button class="copy-btn" on:click={copySeed}>
                   {#if seedCopied}
                     <Check size={14} />
@@ -296,11 +312,8 @@
                   {/if}
                 </button>
               </div>
-            {:else}
-              <div class="seed-hidden">
-                Click the eye icon to reveal your recovery phrase
-              </div>
-            {/if}
+              <code class="seed-code">{$activeVault.seed}</code>
+            </div>
           </div>
         {:else}
           <div class="empty-state">
@@ -565,6 +578,12 @@
     overflow: hidden;
   }
 
+  .wallet-settings.embedded {
+    max-width: none;
+    max-height: none;
+    border-radius: 12px;
+  }
+
   .header {
     display: flex;
     justify-content: space-between;
@@ -718,24 +737,6 @@
     color: rgba(255, 200, 100, 0.9);
   }
 
-  .icon-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    background: rgba(255, 255, 255, 0.06);
-    border: none;
-    border-radius: 6px;
-    color: rgba(255, 255, 255, 0.6);
-    cursor: pointer;
-  }
-
-  .icon-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.9);
-  }
-
   .seed-warning {
     padding: 10px 12px;
     background: rgba(255, 100, 100, 0.1);
@@ -745,22 +746,34 @@
     margin-bottom: 12px;
   }
 
-  .seed-display {
-    display: flex;
-    gap: 8px;
-    align-items: flex-start;
+  .seed-subsection + .seed-subsection {
+    margin-top: 12px;
   }
 
-  .seed-display code {
-    flex: 1;
+  .seed-subhead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.72);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .seed-code {
+    display: block;
+    width: 100%;
     padding: 12px;
     background: rgba(0, 0, 0, 0.4);
     border-radius: 6px;
     font-family: 'SF Mono', monospace;
     font-size: 12px;
     color: rgba(255, 200, 100, 0.9);
-    word-break: break-all;
+    word-break: break-word;
+    white-space: normal;
     line-height: 1.6;
+    box-sizing: border-box;
   }
 
   .copy-btn {
