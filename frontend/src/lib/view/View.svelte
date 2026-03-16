@@ -757,7 +757,7 @@
   });
 </script>
 
-<div class="view-wrapper" class:embed-mode={embedMode}>
+<div class="view-wrapper" class:embed-mode={embedMode} class:user-mode={userMode}>
   <!-- Always render both, toggle visibility via CSS -->
   <div class="user-mode-container" class:hidden={!userMode}>
     <UserModePanel
@@ -869,6 +869,17 @@
 
   .view-wrapper.embed-mode .view-container.with-timemachine {
     height: calc(100dvh - 48px);
+  }
+
+  .view-wrapper.user-mode {
+    height: auto;
+    min-height: 100dvh;
+  }
+
+  .view-wrapper.user-mode .user-mode-container {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
   }
 
   .view-wrapper.embed-mode :global(.dockview-tabs-container),
