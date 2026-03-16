@@ -169,7 +169,7 @@ export async function resetEverything(triggerError?: unknown): Promise<void> {
   }
 
   console.log('[RESET] All state cleared. Reloading...');
-  window.location.href = '/vault';
+  window.location.href = '/app';
 }
 
 /**
