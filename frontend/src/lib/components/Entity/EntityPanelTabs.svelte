@@ -3684,6 +3684,7 @@
 
   .hero-context-switcher {
     max-width: min(360px, 100%);
+    width: fit-content;
   }
 
   .hero-name {
