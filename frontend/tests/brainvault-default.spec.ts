@@ -13,7 +13,7 @@ test.describe('BrainVault default flow', () => {
     // Allow extra time for hash-wasm download + Argon2 computation
     test.setTimeout(5 * 60 * 1000);
 
-    await page.goto('/vault');
+    await page.goto('/app');
 
     await page.getByLabel('Name').fill('vault-test@example.com');
     await page.getByLabel('Password').fill('A_VeryHARDpassword123!');
@@ -33,7 +33,7 @@ test.describe('BrainVault default flow', () => {
     // Allow extra time for hash-wasm download + Argon2 computation
     test.setTimeout(5 * 60 * 1000);
 
-    await page.goto('/vault');
+    await page.goto('/app');
 
     await page.getByLabel('Name').fill('vault-tes2t@example.com');
     await page.getByLabel('Password').fill('NotHardEnough!11');
