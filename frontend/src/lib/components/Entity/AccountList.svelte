@@ -52,7 +52,7 @@
     // Preserve Map insertion order so the UI stays stable by first account appearance.
     .filter((entry) => !isFinalizedDisputed(entry.account));
 
-  $: visibleAccounts = showAllAccounts ? rankedAccounts : rankedAccounts.slice(0, 3);
+  $: visibleAccounts = showAllAccounts ? rankedAccounts : rankedAccounts.slice(0, 5);
   $: hiddenAccountsCount = Math.max(0, rankedAccounts.length - visibleAccounts.length);
   $: activeAccountsCount = rankedAccounts.length;
 
@@ -155,21 +155,14 @@
         </div>
       {:else}
         <div class="list-header">
-          <span class="list-count">
-            {#if hiddenAccountsCount > 0}
-              Top {visibleAccounts.length} of {activeAccountsCount} accounts
-            {:else}
-              {activeAccountsCount} account{activeAccountsCount !== 1 ? 's' : ''}
-            {/if}
-          </span>
           <div class="list-controls">
-            {#if activeAccountsCount > 3}
+            {#if activeAccountsCount > 5}
               <button
                 class="list-toggle"
                 on:click={() => showAllAccounts = !showAllAccounts}
-                title={showAllAccounts ? 'Show top 3 only' : 'Show all accounts'}
+                title={showAllAccounts ? 'Show first 5 only' : 'Show all accounts'}
               >
-                {showAllAccounts ? 'Top 3' : `All (${activeAccountsCount})`}
+                {showAllAccounts ? 'Collapse' : `Show All (${activeAccountsCount})`}
               </button>
             {/if}
           </div>
@@ -242,16 +235,9 @@
 
   .list-header {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
-    padding: 6px 8px;
-  }
-
-  .list-count {
-    font-size: 0.75em;
-    color: #78716c;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    padding: 2px 8px 6px;
   }
 
   .list-controls {
@@ -263,11 +249,11 @@
   .list-toggle {
     background: transparent;
     border: 1px solid #292524;
-    border-radius: 3px;
+    border-radius: 999px;
     color: #a8a29e;
     font-size: 0.72em;
     cursor: pointer;
-    padding: 3px 8px;
+    padding: 5px 10px;
     line-height: 1.2;
   }
 

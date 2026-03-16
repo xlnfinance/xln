@@ -81,16 +81,16 @@
         {/if}
       </div>
       <div class="compact-metrics">
-        <div class="compact-metric compact-out" aria-label="Outbound capacity">
-          {#if showMetricLabels}<span class="metric-label">Outbound</span>{/if}
+        <div class="compact-metric compact-out" aria-label="Out capacity">
+          {#if showMetricLabels}<span class="metric-label">Out</span>{/if}
           <span class="compact-out-value">
             <span>{outAmountCompact}</span>
             {#if outUsdHint}<span class="usd-hint">{outUsdHint}</span>{/if}
           </span>
         </div>
         <span class="metric-divider" aria-hidden="true"></span>
-        <div class="compact-metric compact-in" aria-label="Inbound capacity">
-          {#if showMetricLabels}<span class="metric-label">Inbound</span>{/if}
+        <div class="compact-metric compact-in" aria-label="In capacity">
+          {#if showMetricLabels}<span class="metric-label">In</span>{/if}
           <span class="compact-in-value">
             <span>{inAmountCompact}</span>
             {#if inUsdHint}<span class="usd-hint">{inUsdHint}</span>{/if}
@@ -109,14 +109,14 @@
       </div>
       <div class="caps">
         <span class="cap out">
-          <span class="cap-label">Outbound</span>
+          <span class="cap-label">Out</span>
           <span class="cap-value">
             <span>{outAmountDisplay}</span>
             {#if outUsdHint}<span class="usd-hint">{outUsdHint}</span>{/if}
           </span>
         </span>
         <span class="cap in">
-          <span class="cap-label">Inbound</span>
+          <span class="cap-label">In</span>
           <span class="cap-value">
             <span>{inAmountDisplay}</span>
             {#if inUsdHint}<span class="usd-hint">{inUsdHint}</span>{/if}

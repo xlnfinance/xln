@@ -3,6 +3,7 @@
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import { allRuntimes, activeRuntime as activeVault, vaultOperations } from '$lib/stores/vaultStore';
   import { runtimes as runtimeEntries } from '$lib/stores/runtimeStore';
+  import { resetEverything } from '$lib/utils/resetEverything';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { resolveEntityName } from '$lib/utils/entityNaming';
@@ -188,6 +189,12 @@
     dispatch('deleteRuntime', { runtimeId });
     open = false;
   }
+
+  async function handleReset() {
+    if (!confirm('Reset ALL data? Wallets, accounts, settings — everything will be wiped.')) return;
+    open = false;
+    await resetEverything();
+  }
 </script>
 
 <div class="context-switcher">
@@ -258,11 +265,12 @@
       {/each}
     </div>
 
-    {#if allowAddRuntime}
-      <div class="menu-footer">
+    <div class="menu-footer">
+      {#if allowAddRuntime}
         <button class="add-runtime-btn" on:click={handleAddRuntime}>{addRuntimeLabel}</button>
-      </div>
-    {/if}
+      {/if}
+      <button class="reset-btn" on:click={handleReset}>Reset All Data</button>
+    </div>
   </div>
 </Dropdown>
 </div>
@@ -315,7 +323,7 @@
     border-radius: 10px;
     flex-shrink: 0;
     object-fit: cover;
-    background: rgba(255, 255, 255, 0.06);
+    background: transparent;
   }
 
   .entity-avatar {
@@ -488,6 +496,12 @@
     padding-top: 10px;
   }
 
+  .menu-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
   .add-runtime-btn {
     width: 100%;
     padding: 12px 14px;
@@ -495,6 +509,21 @@
     background: rgba(251, 191, 36, 0.12);
     color: #fde68a;
     font-weight: 600;
+  }
+
+  .reset-btn {
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(239, 68, 68, 0.08);
+    color: rgba(248, 113, 113, 0.8);
+    border: 1px solid rgba(239, 68, 68, 0.15);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .reset-btn:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fca5a5;
   }
 
   @media (max-width: 900px) {

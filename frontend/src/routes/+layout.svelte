@@ -4,7 +4,6 @@
 	import { page } from '$app/stores';
 	import Topbar from '$lib/components/Topbar.svelte';
 	import Toast from '$lib/components/Toast.svelte';
-	import EmergencyReset from '$lib/components/EmergencyReset.svelte';
 	import { installFatalErrorInterceptor } from '$lib/utils/resetEverything';
 	import '$lib/styles/apple-glass.css';
 	let { children } = $props();
@@ -34,7 +33,6 @@
 </main>
 
 <Toast />
-<EmergencyReset />
 
 <style>
 	:global(body) {
