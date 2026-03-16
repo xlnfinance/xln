@@ -3655,12 +3655,12 @@
     width: 44px;
     height: 44px;
     border-radius: 12px;
-    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
     flex-shrink: 0;
-    box-shadow: 0 2px 8px rgba(251, 191, 36, 0.2);
   }
 
   .hero-avatar.placeholder {
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+    box-shadow: 0 2px 8px rgba(251, 191, 36, 0.2);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -4991,8 +4991,7 @@
   .content :global(.payment-panel),
   .content :global(.swap-panel),
   .content :global(.settlement-panel),
-  .content :global(.account-list),
-  .content :global(.scrollable-component) {
+  .content :global(.account-list) {
     background: transparent !important;
     border: none !important;
     padding: 0 !important;
