@@ -160,7 +160,7 @@ import {
   createDemoDelta,
   getDefaultCreditLimit,
 } from './account-utils';
-import { computeSwapPriceTicks } from './orderbook';
+import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import {
   formatTokenAmount as formatTokenAmountEthers,
@@ -1698,6 +1698,10 @@ const applyRuntimeInput = async (
   }
 
   try {
+    const rejectRuntimeInput = (message: string): never => {
+      log.error(`❌ ${message}`);
+      throw new Error(message);
+    };
     if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
       console.log(
         `[REPLAY] applyRuntimeInput runtimeTxs=${runtimeInput.runtimeTxs.length} entityInputs=${runtimeInput.entityInputs.length}`,
@@ -1705,31 +1709,13 @@ const applyRuntimeInput = async (
     }
     // SECURITY: Validate runtime input
     if (!runtimeInput) {
-      log.error('❌ Null runtime input provided');
-      return {
-        entityOutbox: [],
-        mergedInputs: [],
-        jOutbox: [],
-        appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] },
-      };
+      rejectRuntimeInput('Null runtime input provided');
     }
     if (!Array.isArray(runtimeInput.runtimeTxs)) {
-      log.error(`❌ Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`);
-      return {
-        entityOutbox: [],
-        mergedInputs: [],
-        jOutbox: [],
-        appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] },
-      };
+      rejectRuntimeInput(`Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`);
     }
     if (!Array.isArray(runtimeInput.entityInputs)) {
-      log.error(`❌ Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
-      return {
-        entityOutbox: [],
-        mergedInputs: [],
-        jOutbox: [],
-        appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] },
-      };
+      rejectRuntimeInput(`Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
     }
 
     // Collect incoming J-inputs into early jOutbox (will be merged with handler jOutputs later)
@@ -1754,17 +1740,10 @@ const applyRuntimeInput = async (
 
     // SECURITY: Resource limits
     if (runtimeInput.runtimeTxs.length > 1000) {
-      log.error(`❌ Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
-      return {
-        entityOutbox: [],
-        mergedInputs: [],
-        jOutbox: [],
-        appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] },
-      };
+      rejectRuntimeInput(`Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
     }
     if (runtimeInput.entityInputs.length > 10000) {
-      log.error(`❌ Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
-      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
+      rejectRuntimeInput(`Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
     }
 
     // FINTECH-LEVEL TYPE SAFETY: Validate all inputs BEFORE mutating env
@@ -2727,6 +2706,8 @@ export {
   getSwapPairOrientation,
   getDefaultSwapTradingPairs,
   computeSwapPriceTicks,
+  prepareSwapOrder,
+  quantizeSwapOrder,
   formatTokenAmount,
   createDemoDelta,
   getDefaultCreditLimit,

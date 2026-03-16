@@ -5,6 +5,7 @@
   Clean fintech design with proper form inputs.
 -->
 <script lang="ts">
+  import { createEventDispatcher } from 'svelte';
   import { onDestroy, onMount } from 'svelte';
   import type { ComponentType } from 'svelte';
   import { get } from 'svelte/store';
@@ -58,17 +59,28 @@
   import GossipPanel from './GossipPanel.svelte';
   import EntityInput from '../shared/EntityInput.svelte';
   import WalletSettings from '$lib/components/Settings/WalletSettings.svelte';
+  import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
 
   export let tab: Tab;
   export let isLast: boolean = false;
   export let hideHeader: boolean = false;
   export let showJurisdiction: boolean = true;
+  export let userModeHeader: boolean = false;
+  export let selectedJurisdiction: string | null = null;
+  export let jurisdictionFilter: string | null = null;
+  export let allowHeaderAddEntity: boolean = false;
+  export let allowHeaderAddJurisdiction: boolean = false;
+  export let allowHeaderAddRuntime: boolean = false;
+  export let allowHeaderDeleteRuntime: boolean = false;
+  export let headerRuntimeAddLabel: string = '+ Add Runtime';
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
   export let replicasOverride: Map<string, EntityReplica> | null = null;
   export let envOverride: Env | EnvSnapshot | null = null;
   export let historyOverride: EnvSnapshot[] | null = null;
   export let timeIndexOverride: number | null = null;
   export let isLiveOverride: boolean | null = null;
+
+  const dispatch = createEventDispatcher();
 
   // Tab types
   type ViewTab = 'assets' | 'accounts' | 'more' | 'settings';
@@ -100,6 +112,11 @@
   let selectedJurisdictionName: string | null = null;
   let addressCopied = false;
   let openAccountEntityId = '';
+
+  $: if (userModeHeader) {
+    selectedJurisdictionName = selectedJurisdiction;
+  }
+
   function resolveApiBase(): string {
     if (typeof window === 'undefined') return 'https://xln.finance';
     return resolveConfiguredApiBase(window.location.origin);
@@ -2267,7 +2284,36 @@
   function handleEntitySelect(event: CustomEvent) {
     const { jurisdiction, signerId, entityId } = event.detail;
     selectedAccountId = null;
+    dispatch('entitySelect', event.detail);
+    if (userModeHeader) return;
     tab = { ...tab, jurisdiction, signerId, entityId };
+  }
+
+  function handleSignerSelect(event: CustomEvent<{ signerId: string }>) {
+    selectedAccountId = null;
+    dispatch('signerSelect', event.detail);
+    if (userModeHeader) return;
+    tab = { ...tab, signerId: event.detail.signerId, entityId: '' };
+  }
+
+  function handleHeaderAddSigner() {
+    dispatch('addSigner');
+  }
+
+  function handleHeaderAddEntity() {
+    dispatch('addEntity');
+  }
+
+  function handleHeaderAddJurisdiction() {
+    dispatch('addJurisdiction');
+  }
+
+  function handleHeaderAddRuntime() {
+    dispatch('addRuntime');
+  }
+
+  function handleHeaderDeleteRuntime(event: CustomEvent<{ runtimeId: string }>) {
+    dispatch('deleteRuntime', event.detail);
   }
 
   function handleAccountSelect(event: CustomEvent) {
@@ -2279,7 +2325,8 @@
   }
 
   function handleJurisdictionSelect(event: CustomEvent<{ selected: string | null }>) {
-    const next = event.detail?.selected;
+    const next = event.detail?.selected ?? event.detail?.name ?? null;
+    dispatch('jurisdictionSelect', next ? { name: next } : { name: null });
     if (next) selectedJurisdictionName = next;
   }
 
@@ -2353,17 +2400,46 @@
 <div class="entity-panel" data-panel-id={tab.id}>
   <!-- Header -->
   {#if !hideHeader}
-    <header class="header">
-      {#if showJurisdiction}
-        <JurisdictionDropdown
-          bind:selected={selectedJurisdictionName}
-          on:select={handleJurisdictionSelect}
+    <header class="header" class:user-mode-header={userModeHeader}>
+      {#if userModeHeader}
+        <div class="header-slot header-slot-runtime">
+          <RuntimeDropdown
+            allowAdd={allowHeaderAddRuntime}
+            allowDelete={allowHeaderDeleteRuntime}
+            addLabel={headerRuntimeAddLabel}
+            on:addRuntime={handleHeaderAddRuntime}
+            on:deleteRuntime={handleHeaderDeleteRuntime}
+          />
+        </div>
+        <div class="header-slot header-slot-entity">
+          <EntityDropdown
+            {tab}
+            {selectedJurisdiction}
+            {jurisdictionFilter}
+            allowAdd={allowHeaderAddEntity}
+            allowAddJurisdiction={allowHeaderAddJurisdiction}
+            {replicasOverride}
+            {envOverride}
+            on:signerSelect={handleSignerSelect}
+            on:addSigner={handleHeaderAddSigner}
+            on:entitySelect={handleEntitySelect}
+            on:jurisdictionSelect={handleJurisdictionSelect}
+            on:addJurisdiction={handleHeaderAddJurisdiction}
+            on:addEntity={handleHeaderAddEntity}
+          />
+        </div>
+      {:else}
+        {#if showJurisdiction}
+          <JurisdictionDropdown
+            bind:selected={selectedJurisdictionName}
+            on:select={handleJurisdictionSelect}
+          />
+        {/if}
+        <EntityDropdown
+          {tab}
+          on:entitySelect={handleEntitySelect}
         />
       {/if}
-      <EntityDropdown
-        {tab}
-        on:entitySelect={handleEntitySelect}
-      />
     </header>
   {/if}
 
@@ -3462,6 +3538,12 @@
     flex-shrink: 0;
   }
 
+  .header.user-mode-header {
+    gap: 10px;
+    padding: 10px var(--panel-gutter-x);
+    background: linear-gradient(180deg, #171412 0%, #12100f 100%);
+  }
+
   .header :global(select),
   .header :global(button),
   .header :global(.dropdown-trigger) {
@@ -3472,6 +3554,18 @@
     font-size: 12px;
     padding: 6px 10px;
     cursor: pointer;
+  }
+
+  .header-slot {
+    min-width: 0;
+  }
+
+  .header-slot-runtime {
+    flex: 0 1 260px;
+  }
+
+  .header-slot-entity {
+    flex: 1 1 auto;
   }
 
   /* History Warning */
@@ -3498,6 +3592,7 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
+    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
   }
 
   .main-scroll::-webkit-scrollbar {
@@ -5578,6 +5673,16 @@
       min-height: 42px;
       padding: 9px 12px;
       font-size: 11px;
+    }
+
+    .header.user-mode-header {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .header-slot-runtime,
+    .header-slot-entity {
+      flex: 1 1 auto;
     }
   }
 </style>

@@ -12,6 +12,7 @@
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
   import { settings, settingsOperations } from '$lib/stores/settingsStore';
   import { xlnEnvironment } from '$lib/stores/xlnStore';
+  import { resetEverything } from '$lib/utils/resetEverything';
   import { POPULAR_NETWORKS, BROWSERVM_CHAIN_START, type NetworkConfig } from '$lib/config/networks';
   import { THEME_DEFINITIONS } from '$lib/utils/themes';
   import { getBarColors } from '$lib/utils/bar-colors';
@@ -540,24 +541,7 @@ function copyMnemonic12() {
       <div class="section">
         <h3>Data</h3>
 
-        <button class="btn danger" on:click={async () => {
-          if (confirm('Clear all data? This cannot be undone.')) {
-            localStorage.clear();
-            sessionStorage.clear();
-            // Clear IndexedDB
-            try {
-              const listDatabases = (indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> }).databases;
-              const dbs = listDatabases ? await listDatabases.call(indexedDB) : [];
-              for (const db of dbs) {
-                if (db.name) indexedDB.deleteDatabase(db.name);
-              }
-            } catch {
-              // Browser does not support indexedDB.databases() - best effort clear only.
-            }
-            await vaultOperations.clearAll();
-            window.location.reload();
-          }
-        }}>
+        <button class="btn danger" on:click={() => resetEverything()}>
           Clear All Data
         </button>
       </div>

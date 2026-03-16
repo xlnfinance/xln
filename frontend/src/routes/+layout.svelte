@@ -1,10 +1,17 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import Topbar from '$lib/components/Topbar.svelte';
 	import Toast from '$lib/components/Toast.svelte';
+	import EmergencyReset from '$lib/components/EmergencyReset.svelte';
+	import { installFatalErrorInterceptor } from '$lib/utils/resetEverything';
 	import '$lib/styles/apple-glass.css';
 	let { children } = $props();
+
+	onMount(() => {
+		if (browser) installFatalErrorInterceptor();
+	});
 
 	// Check for embed mode from URL
 	let isEmbed = $derived(browser && new URLSearchParams(window.location.search).get('embed') === '1');
@@ -27,6 +34,7 @@
 </main>
 
 <Toast />
+<EmergencyReset />
 
 <style>
 	:global(body) {

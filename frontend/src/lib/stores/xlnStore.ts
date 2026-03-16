@@ -44,6 +44,8 @@ export interface FrontendXlnFunctions {
   getSwapPairOrientation: XLNModule['getSwapPairOrientation'];
   getDefaultSwapTradingPairs: XLNModule['getDefaultSwapTradingPairs'];
   computeSwapPriceTicks: XLNModule['computeSwapPriceTicks'];
+  prepareSwapOrder: XLNModule['prepareSwapOrder'];
+  quantizeSwapOrder: XLNModule['quantizeSwapOrder'];
   isLeft: XLNModule['isLeft'];
   createDemoDelta: XLNModule['createDemoDelta'];
   getDefaultCreditLimit: XLNModule['getDefaultCreditLimit'];
@@ -598,6 +600,8 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([,
     getSwapPairOrientation: $xlnInstance.getSwapPairOrientation,
     getDefaultSwapTradingPairs: $xlnInstance.getDefaultSwapTradingPairs,
     computeSwapPriceTicks: $xlnInstance.computeSwapPriceTicks,
+    prepareSwapOrder: $xlnInstance.prepareSwapOrder,
+    quantizeSwapOrder: $xlnInstance.quantizeSwapOrder,
     isLeft: $xlnInstance.isLeft,
     createDemoDelta: $xlnInstance.createDemoDelta,
     getDefaultCreditLimit: $xlnInstance.getDefaultCreditLimit,

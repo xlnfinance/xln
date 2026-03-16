@@ -22,6 +22,9 @@ const SCENARIOS: Record<string, { file: string; fn: string }> = {
   'settle':    { file: './settle',    fn: 'runSettleScenario' },
   'htlc-4hop': { file: './htlc-4hop', fn: 'htlc4hop' },
   'grid':              { file: './grid',              fn: 'grid' },
+  'swap-market':       { file: './swap-market',       fn: 'swapMarket' },
+  'multi-sig':         { file: './multi-sig',         fn: 'multiSig' },
+  'rapid-fire':        { file: './rapid-fire',        fn: 'rapidFire' },
   'settle-rebalance':  { file: './settle-rebalance',  fn: 'runSettleRebalance' },
   'processbatch':      { file: './processbatch',      fn: 'runProcessBatchScenario' },
   'process-batch':     { file: './processbatch',      fn: 'runProcessBatchScenario' },
@@ -34,6 +37,22 @@ const DEFAULT_PARALLEL_SET = [
   'settle-rebalance',
   'lock-ahb',
   'dispute-lifecycle',
+];
+
+const ALL_PARALLEL_SET = [
+  'processbatch',
+  'rebalance',
+  'settle-rebalance',
+  'lock-ahb',
+  'dispute-lifecycle',
+  'ahb',
+  'swap',
+  'settle',
+  'htlc-4hop',
+  'grid',
+  'swap-market',
+  'multi-sig',
+  'rapid-fire',
 ];
 
 const SMOKE_PARALLEL_SET = [
@@ -168,7 +187,11 @@ type ParallelResult = {
 
 async function runParallelScenarios(mode: string, workersArg?: number, setName?: string): Promise<number> {
   const set = (setName || process.env.SCENARIO_SET || 'full').toLowerCase();
-  const selectedSet = set === 'smoke' ? SMOKE_PARALLEL_SET : DEFAULT_PARALLEL_SET;
+  const selectedSet = set === 'smoke'
+    ? SMOKE_PARALLEL_SET
+    : (set === 'all' || set === 'everything' || set === 'full-catalog')
+      ? ALL_PARALLEL_SET
+      : DEFAULT_PARALLEL_SET;
   const scenarios = selectedSet.filter(s => SCENARIOS[s]);
   if (scenarios.length === 0) {
     console.error('No scenarios configured for parallel run');

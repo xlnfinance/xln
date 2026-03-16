@@ -67,6 +67,95 @@ export function computeSwapPriceTicks(
   return priceTicks > 0n ? priceTicks : 0n;
 }
 
+/** Lot granularity for swap order quantization (shared with frontend) */
+export const SWAP_LOT_SCALE = 10n ** 12n;
+
+export interface PreparedSwapOrder {
+  side: 0 | 1;
+  baseTokenId: number;
+  quoteTokenId: number;
+  priceTicks: bigint;
+  rawBaseAmount: bigint;
+  rawQuoteAmount: bigint;
+  quantizedBaseAmount: bigint;
+  quantizedQuoteAmount: bigint;
+  effectiveGive: bigint;
+  effectiveWant: bigint;
+  unspentGiveAmount: bigint;
+}
+
+/**
+ * Canonical swap-order preparation.
+ * This is the single source of truth for UI/runtime agreement on:
+ * - side inference
+ * - base-lot quantization
+ * - canonical price ticks
+ * - mapped effective give/want amounts
+ * - honest leftover reporting for max-spend UX
+ */
+export function prepareSwapOrder(
+  giveTokenId: number,
+  wantTokenId: number,
+  giveAmount: bigint,
+  wantAmount: bigint,
+): PreparedSwapOrder | null {
+  if (giveAmount <= 0n || wantAmount <= 0n) return null;
+
+  const side = deriveSide(giveTokenId, wantTokenId);
+  const rawBaseAmount = side === 1 ? giveAmount : wantAmount;
+  const rawQuoteAmount = side === 1 ? wantAmount : giveAmount;
+  if (rawBaseAmount < SWAP_LOT_SCALE || rawQuoteAmount <= 0n) return null;
+
+  const priceTicks = computeSwapPriceTicks(giveTokenId, wantTokenId, giveAmount, wantAmount);
+  if (priceTicks <= 0n) return null;
+
+  const quantizedBaseAmount = (rawBaseAmount / SWAP_LOT_SCALE) * SWAP_LOT_SCALE;
+  if (quantizedBaseAmount <= 0n) return null;
+
+  const quantizedQuoteAmount = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+  if (quantizedQuoteAmount <= 0n) return null;
+
+  const { base, quote } = canonicalPair(giveTokenId, wantTokenId);
+  const effectiveGive = side === 1 ? quantizedBaseAmount : quantizedQuoteAmount;
+  const effectiveWant = side === 1 ? quantizedQuoteAmount : quantizedBaseAmount;
+  const unspentGiveAmount = giveAmount > effectiveGive ? giveAmount - effectiveGive : 0n;
+
+  return {
+    side,
+    baseTokenId: base,
+    quoteTokenId: quote,
+    priceTicks,
+    rawBaseAmount,
+    rawQuoteAmount,
+    quantizedBaseAmount,
+    quantizedQuoteAmount,
+    effectiveGive,
+    effectiveWant,
+    unspentGiveAmount,
+  };
+}
+
+/**
+ * Quantize a swap order to lot granularity — canonical single source of truth.
+ * Both frontend and runtime must use this to avoid dust.
+ *
+ * Returns effectiveGive/effectiveWant after quantization, or null if order becomes zero.
+ */
+export function quantizeSwapOrder(
+  giveTokenId: number,
+  wantTokenId: number,
+  giveAmount: bigint,
+  wantAmount: bigint,
+): { effectiveGive: bigint; effectiveWant: bigint; priceTicks: bigint } | null {
+  const prepared = prepareSwapOrder(giveTokenId, wantTokenId, giveAmount, wantAmount);
+  if (!prepared) return null;
+  return {
+    effectiveGive: prepared.effectiveGive,
+    effectiveWant: prepared.effectiveWant,
+    priceTicks: prepared.priceTicks,
+  };
+}
+
 /** Calculate fill amount from ratio (uint16) */
 export function applyFillRatio(amount: bigint, ratio: number): bigint {
   if (ratio >= MAX_FILL_RATIO) return amount;

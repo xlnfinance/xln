@@ -188,7 +188,8 @@ export function safeStringify(obj: unknown, space?: number): string {
   try {
     return stringifyCanonical(obj, space === undefined ? {} : { space });
   } catch (err) {
-    return `[Error stringifying: ${(err as Error).message}]`;
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`SAFE_STRINGIFY_FAILED: ${message}`, err instanceof Error ? { cause: err } : undefined);
   }
 }
 
@@ -197,7 +198,12 @@ export function safeStringify(obj: unknown, space?: number): string {
  */
 export function safeLog(message: string, obj?: unknown): void {
   if (obj !== undefined) {
-    console.log(message, safeStringify(obj, 2));
+    try {
+      console.log(message, safeStringify(obj, 2));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.log(message, `[Unserializable: ${detail}]`);
+    }
   } else {
     console.log(message);
   }

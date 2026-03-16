@@ -233,8 +233,12 @@ const attachHankoWitnessToOutputs = (
  */
 function getPrevFrameHash(state: EntityState): string {
   if (state.height === 0) return 'genesis';
-  // Store prevFrameHash in EntityState on commit (added below)
-  return (state as any).prevFrameHash || 'genesis';
+  if (typeof state.prevFrameHash === 'string' && state.prevFrameHash.length > 0) {
+    return state.prevFrameHash;
+  }
+  throw new Error(
+    `ENTITY_FRAME_CHAIN_CORRUPTED: missing prevFrameHash at height=${state.height} entity=${state.entityId}`,
+  );
 }
 
 // === SECURITY VALIDATION ===

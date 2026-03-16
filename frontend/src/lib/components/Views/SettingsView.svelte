@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, setXlnEnvironment, isLoading, error } from '../../stores/xlnStore';
+  import { resetEverything } from '../../utils/resetEverything';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { tabOperations } from '../../stores/tabStore';
   import { THEME_DEFINITIONS } from '../../utils/themes';
@@ -311,54 +312,7 @@
   }
 
   async function handleClearDatabase() {
-    if (confirm('Are you sure you want to clear the database? This will reset all data.')) {
-      try {
-        const xln = await getXLN();
-        const env = $xlnEnvironment;
-        if (!env) throw new Error('No active runtime to clear');
-        const freshEnv = await xln.clearDatabaseAndHistory(env);
-        localStorage.clear();
-        sessionStorage.clear();
-
-        if (typeof indexedDB !== 'undefined') {
-          let allDatabases: string[] = [];
-          if ('databases' in indexedDB) {
-            try {
-              const idbWithDatabases = indexedDB as IDBFactory & {
-                databases?: () => Promise<Array<{ name?: string }>>;
-              };
-              if (typeof idbWithDatabases.databases === 'function') {
-                const dbs = await idbWithDatabases.databases();
-                allDatabases = dbs.flatMap((db) => (typeof db.name === 'string' && db.name.length > 0 ? [db.name] : []));
-              }
-            } catch (err) {
-              console.log('⚠️ Could not enumerate databases');
-            }
-          }
-          if (allDatabases.length === 0) {
-            allDatabases = ['db', 'level-js-db', 'level-db', 'xln-db', '_pouch_db'];
-          }
-          for (const dbName of allDatabases) {
-            try {
-              await new Promise<void>((resolve, reject) => {
-                const deleteReq = indexedDB.deleteDatabase(dbName);
-                deleteReq.onsuccess = () => resolve();
-                deleteReq.onerror = () => reject(deleteReq.error);
-                deleteReq.onblocked = () => resolve();
-              });
-            } catch (err) {
-              console.log(`⚠️ Could not clear IndexedDB: ${dbName}`);
-            }
-          }
-        }
-        // Reset stores instead of reload
-        setXlnEnvironment(freshEnv);
-        alert('Database cleared. Please reinitialize or navigate to /vault.');
-      } catch (error) {
-        console.error('❌ Clear database failed:', error);
-        alert(`Clear database failed: ${(error as Error)?.message || 'Unknown error'}`);
-      }
-    }
+    await resetEverything();
   }
 
   function handleToggleDropdownMode() {
