@@ -971,18 +971,18 @@
 
   <!-- Main Content -->
   <div class="main-content">
-    {#if embedded && savedVaults.length > 0}
-      <div class="creation-context-bar">
-        <ContextSwitcher
-          tab={creationContextTab}
-          on:entitySelect={handleCreationContextSelect}
-        />
-      </div>
-    {/if}
-
     <!-- INPUT SECTION - Always visible at top -->
     {#if phase === 'input' || phase === 'deriving'}
       <div class="glass-card input-section" class:deriving={phase === 'deriving'}>
+        {#if embedded && savedVaults.length > 0}
+          <div class="creation-context-bar">
+            <div class="creation-context-copy">Existing Runtimes</div>
+            <ContextSwitcher
+              tab={creationContextTab}
+              on:entitySelect={handleCreationContextSelect}
+            />
+          </div>
+        {/if}
 
         <!-- Quick Login (Demo Accounts) -->
         <div class="quick-login-section">
@@ -1985,9 +1985,18 @@
 
   .creation-context-bar {
     width: 100%;
-    margin: 0 0 16px 0;
+    margin: 0 0 20px 0;
     display: flex;
+    flex-direction: column;
+    gap: 8px;
     justify-content: flex-start;
+  }
+
+  .creation-context-copy {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(196, 181, 161, 0.7);
   }
 
   /* Glass Card - Sacred Chamber */

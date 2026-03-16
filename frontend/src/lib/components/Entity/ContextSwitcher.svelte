@@ -40,8 +40,10 @@
   $: currentEntity = resolveCurrentEntity();
   $: currentAvatar = currentEntity?.avatarUrl || currentGroup?.signerAvatarUrl || '';
   $: currentTitle = resolveCurrentTitle();
-  $: currentSubtitle = currentGroup
-    ? truncateMiddle(currentGroup.signerId || currentGroup.runtimeId)
+  $: currentSubtitle = currentEntity?.entityId
+    ? truncateMiddle(currentEntity.entityId)
+    : currentGroup?.selfEntity?.entityId
+      ? truncateMiddle(currentGroup.selfEntity.entityId)
     : 'No runtime selected';
 
   function buildRuntimeGroups(): RuntimeSummary[] {
@@ -151,10 +153,7 @@
   }
 
   function resolveRuntimeMeta(group: RuntimeSummary): string {
-    if (group.selfEntity?.name && !isOpaqueIdLabel(group.selfEntity.name) && group.selfEntity.name !== group.runtimeLabel) {
-      return `${group.selfEntity.name} • ${truncateMiddle(group.signerId || group.runtimeId)}`;
-    }
-    return truncateMiddle(group.signerId || group.runtimeId);
+    return truncateMiddle(group.selfEntity?.entityId || group.runtimeId);
   }
 
   async function selectRuntimeEntity(runtimeId: string, signerId: string, entityId: string) {
@@ -192,7 +191,7 @@
 </script>
 
 <div class="context-switcher">
-<Dropdown bind:open minWidth={320} maxWidth={640}>
+<Dropdown bind:open minWidth={320} maxWidth={640} local={true}>
   <span slot="trigger" class="pill-trigger">
     {#if currentAvatar}
       <img src={currentAvatar} alt="" class="pill-avatar" />
@@ -218,7 +217,13 @@
                 <span class="runtime-avatar placeholder">◎</span>
               {/if}
               <span class="runtime-copy">
-                <span class="runtime-name">{group.runtimeLabel}</span>
+                <span class="runtime-name">
+                  {#if group.selfEntity?.name && !isOpaqueIdLabel(group.selfEntity.name)}
+                    {group.selfEntity.name}
+                  {:else}
+                    {group.runtimeLabel}
+                  {/if}
+                </span>
                 <span class="runtime-meta">
                   {resolveRuntimeMeta(group)}
                 </span>
@@ -241,7 +246,10 @@
                   {:else}
                     <span class="entity-avatar placeholder">◌</span>
                   {/if}
-                  <span class="entity-name">{isOpaqueIdLabel(entity.name) ? truncateMiddle(entity.entityId) : entity.name}</span>
+                  <span class="entity-copy">
+                    <span class="entity-name">{isOpaqueIdLabel(entity.name) ? truncateMiddle(entity.entityId) : entity.name}</span>
+                    <span class="entity-meta">{truncateMiddle(entity.entityId)}</span>
+                  </span>
                 </button>
               {/each}
             </div>
@@ -261,20 +269,34 @@
 
 <style>
   .context-switcher {
-    display: inline-block;
-    max-width: min(360px, 100%);
+    --dropdown-bg: linear-gradient(180deg, rgba(31, 27, 24, 0.98) 0%, rgba(24, 20, 18, 0.98) 100%);
+    --dropdown-bg-hover: linear-gradient(180deg, rgba(38, 33, 29, 0.98) 0%, rgba(29, 24, 21, 0.98) 100%);
+    --dropdown-menu-bg: linear-gradient(180deg, rgba(24, 20, 18, 0.98) 0%, rgba(17, 14, 12, 0.98) 100%);
+    --dropdown-border: rgba(180, 140, 80, 0.18);
+    --dropdown-border-hover: rgba(180, 140, 80, 0.32);
+    --dropdown-radius: 14px;
+    display: block;
+    width: 100%;
+    max-width: min(420px, 100%);
   }
 
   .context-switcher :global(.dropdown-wrapper) {
-    width: auto;
+    width: 100%;
     max-width: 100%;
   }
 
   .context-switcher :global(.dropdown-trigger) {
-    width: auto;
+    width: 100%;
     min-width: 220px;
-    max-width: min(320px, calc(100vw - 32px));
-    padding: 6px 8px;
+    max-width: 100%;
+    padding: 8px 10px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+  }
+
+  .context-switcher :global(.dropdown-menu) {
+    width: 100%;
+    max-width: min(640px, calc(100vw - 24px)) !important;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
   }
 
   .pill-trigger {
@@ -311,7 +333,8 @@
   }
 
   .pill-copy,
-  .runtime-copy {
+  .runtime-copy,
+  .entity-copy {
     display: flex;
     flex-direction: column;
     min-width: 0;
@@ -332,7 +355,8 @@
   }
 
   .pill-subtitle,
-  .runtime-meta {
+  .runtime-meta,
+  .entity-meta {
     font-size: 11px;
     color: #a8a29e;
   }
