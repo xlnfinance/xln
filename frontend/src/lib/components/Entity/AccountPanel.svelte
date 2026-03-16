@@ -686,7 +686,7 @@
 
 <style>
   .account-panel {
-    height: 100%;
+    min-height: 100%;
     display: flex;
     flex-direction: column;
     background: #0c0a09;
@@ -832,8 +832,6 @@
   }
 
   .panel-content {
-    flex: 1;
-    overflow-y: auto;
     padding: 20px;
     display: flex;
     flex-direction: column;

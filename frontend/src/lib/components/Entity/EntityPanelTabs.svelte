@@ -3632,7 +3632,7 @@
 
   /* Focused Account View */
   .focused-view {
-    height: 100%;
+    min-height: 100%;
   }
 
   /* Hero Section - Entity + Net Worth */
