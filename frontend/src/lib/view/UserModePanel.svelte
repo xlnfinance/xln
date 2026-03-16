@@ -604,27 +604,30 @@
 
 <style>
   .user-panel {
-    display: block;
-    min-height: 100dvh;
-    height: auto;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
     background: #0a0a0a;
     color: #e5e5e5;
   }
 
   /* Content - below nav z-index so dropdowns overlay */
   .panel-content {
-    display: block;
-    overflow: visible;
-    min-height: auto;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
     position: relative;
     z-index: 1;
     padding: 0;
+    -webkit-overflow-scrolling: touch;
   }
 
   /* Inline Panels - NO POPUPS! */
   .inline-panel {
     display: block;
-    min-height: 100dvh;
+    min-height: 100%;
     height: auto;
     overflow: visible;
   }

@@ -122,6 +122,8 @@
     return resolveConfiguredApiBase(window.location.origin);
   }
 
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
   function getUrlHashRoute(): string | null {
     if (typeof window === 'undefined') return null;
     const hashRaw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
