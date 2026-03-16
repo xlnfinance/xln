@@ -198,7 +198,7 @@
 </script>
 
 <div class="context-switcher">
-<Dropdown bind:open minWidth={320} maxWidth={640} local={true}>
+<Dropdown bind:open minWidth={300} maxWidth={380} local={true}>
   <span slot="trigger" class="pill-trigger">
     {#if currentAvatar}
       <img src={currentAvatar} alt="" class="pill-avatar" />
@@ -283,34 +283,34 @@
     --dropdown-border: rgba(180, 140, 80, 0.18);
     --dropdown-border-hover: rgba(180, 140, 80, 0.32);
     --dropdown-radius: 14px;
-    display: block;
-    width: 100%;
-    max-width: min(420px, 100%);
+    display: inline-block;
+    width: auto;
+    max-width: min(360px, 100%);
   }
 
   .context-switcher :global(.dropdown-wrapper) {
-    width: 100%;
+    width: auto;
     max-width: 100%;
   }
 
   .context-switcher :global(.dropdown-trigger) {
-    width: 100%;
-    min-width: 220px;
-    max-width: 100%;
-    padding: 8px 10px;
+    width: auto;
+    min-width: 240px;
+    max-width: min(360px, 100%);
+    padding: 7px 10px;
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
   }
 
   .context-switcher :global(.dropdown-menu) {
-    width: 100%;
-    max-width: min(640px, calc(100vw - 24px)) !important;
+    width: auto;
+    max-width: min(380px, calc(100vw - 24px)) !important;
     box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
   }
 
   .pill-trigger {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 9px;
     width: auto;
     min-width: 0;
   }
@@ -318,18 +318,18 @@
   .pill-avatar,
   .runtime-avatar,
   .entity-avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 10px;
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
     flex-shrink: 0;
     object-fit: cover;
     background: transparent;
   }
 
   .entity-avatar {
-    width: 24px;
-    height: 24px;
-    border-radius: 8px;
+    width: 22px;
+    height: 22px;
+    border-radius: 7px;
   }
 
   .placeholder {
@@ -360,12 +360,14 @@
   .pill-title {
     font-weight: 600;
     color: #f5f5f4;
+    font-size: 13px;
+    line-height: 1.15;
   }
 
   .pill-subtitle,
   .runtime-meta,
   .entity-meta {
-    font-size: 11px;
+    font-size: 10px;
     color: #a8a29e;
   }
 
@@ -380,18 +382,18 @@
   }
 
   .switcher-menu {
-    padding: 8px;
+    padding: 6px;
   }
 
   .runtime-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
   }
 
   .runtime-group {
     border: 1px solid #292524;
-    border-radius: 14px;
+    border-radius: 12px;
     background: #141210;
     overflow: hidden;
   }
@@ -404,8 +406,8 @@
   .runtime-row {
     display: flex;
     align-items: stretch;
-    gap: 8px;
-    padding: 8px;
+    gap: 6px;
+    padding: 6px;
   }
 
   .runtime-main,
@@ -419,10 +421,10 @@
   .runtime-main {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 9px;
     width: 100%;
-    padding: 10px;
-    border-radius: 12px;
+    padding: 9px 10px;
+    border-radius: 10px;
     background: rgba(255, 255, 255, 0.03);
     color: #f5f5f4;
     text-align: left;
@@ -436,9 +438,9 @@
 
   .status-badge {
     flex-shrink: 0;
-    padding: 4px 8px;
+    padding: 4px 9px;
     border-radius: 999px;
-    font-size: 10px;
+    font-size: 9px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     border: 1px solid transparent;
@@ -465,11 +467,11 @@
   }
 
   .runtime-delete {
-    width: 36px;
-    border-radius: 12px;
+    width: 34px;
+    border-radius: 10px;
     background: rgba(239, 68, 68, 0.08);
     color: rgba(248, 113, 113, 0.92);
-    font-size: 22px;
+    font-size: 20px;
     line-height: 1;
   }
 
@@ -477,35 +479,32 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 0 8px 8px 52px;
+    padding: 0 6px 6px 46px;
   }
 
   .entity-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 9px;
     width: 100%;
-    padding: 8px 10px;
-    border-radius: 10px;
+    padding: 7px 9px;
+    border-radius: 9px;
     background: transparent;
     color: #d6d3d1;
     text-align: left;
   }
 
   .menu-footer {
-    padding-top: 10px;
-  }
-
-  .menu-footer {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    padding-top: 8px;
   }
 
   .add-runtime-btn {
     width: 100%;
-    padding: 12px 14px;
-    border-radius: 12px;
+    padding: 10px 12px;
+    border-radius: 11px;
     background: rgba(251, 191, 36, 0.12);
     color: #fde68a;
     font-weight: 600;
@@ -513,8 +512,8 @@
 
   .reset-btn {
     width: 100%;
-    padding: 10px 14px;
-    border-radius: 12px;
+    padding: 9px 12px;
+    border-radius: 11px;
     background: rgba(239, 68, 68, 0.08);
     color: rgba(248, 113, 113, 0.8);
     border: 1px solid rgba(239, 68, 68, 0.15);
@@ -531,6 +530,12 @@
     .context-switcher :global(.dropdown-trigger) {
       max-width: 100%;
       width: 100%;
+    }
+
+    .context-switcher :global(.dropdown-wrapper),
+    .context-switcher :global(.dropdown-menu) {
+      width: 100%;
+      max-width: min(100%, calc(100vw - 24px)) !important;
     }
 
     .pill-subtitle {
