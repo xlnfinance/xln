@@ -5,6 +5,8 @@
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
   import { vaultOperations, activeVault, activeSigner, allVaults, type Runtime as Vault, type Signer } from '$lib/stores/vaultStore';
   import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
+  import type { Tab } from '$lib/types/ui';
+  import ContextSwitcher from '$lib/components/Entity/ContextSwitcher.svelte';
   import { Copy, Check } from 'lucide-svelte';
   import {
     BRAINVAULT_V1,
@@ -257,7 +259,6 @@
 
   // Ultra-permissive worker limits (browser WASM will be the real bottleneck)
   const computeMaxWorkers = () => {
-    if (isIOSFamilyWebKit) return 1;
     // For memory-bound ops like argon2id, 8x CPU cores is reasonable ceiling
     const coreBased = hardwareCores * 8; // 32 cores → 256 workers
     // Allow 4 workers per GB of RAM (conservative estimate)
@@ -266,16 +267,15 @@
     return Math.min(coreBased, memBased, 512);
   };
 
-  const WASM_SAFE_WORKER_LIMIT = isIOSFamilyWebKit ? 1 : Math.floor(3000 / 256);
   let maxWorkers = computeMaxWorkers();
-  let usableWorkerCap = Math.max(1, Math.min(maxWorkers, WASM_SAFE_WORKER_LIMIT));
-  let targetWorkerCount = isIOSFamilyWebKit ? 1 : Math.max(1, Math.min(hardwareCores, usableWorkerCap));
+  let usableWorkerCap = Math.max(1, maxWorkers);
+  let targetWorkerCount = Math.max(1, Math.min(hardwareCores, usableWorkerCap));
   let effectiveTargetWorkerCount = targetWorkerCount;
 
   // Use one cap for slider, live scaling, and displayed limits.
   $: usableWorkerCap = Math.max(
     1,
-    Math.min(maxWorkers, WASM_SAFE_WORKER_LIMIT, shardCount > 0 ? shardCount : WASM_SAFE_WORKER_LIMIT)
+    Math.min(maxWorkers, shardCount > 0 ? shardCount : maxWorkers)
   );
   $: if (targetWorkerCount > usableWorkerCap) targetWorkerCount = usableWorkerCap;
   $: if (targetWorkerCount < 1) targetWorkerCount = 1;
@@ -417,6 +417,14 @@
 
   // Current signer's address
   $: currentSignerAddress = currentSigner?.address || ethereumAddress;
+  $: creationContextTab = ({
+    id: 'runtime-creation',
+    title: 'Runtime Creation',
+    jurisdiction: 'browservm',
+    signerId: currentSigner?.address || '',
+    entityId: currentSigner?.entityId || '',
+    isActive: true,
+  }) satisfies Tab;
 
   // Identicon for current signer
   $: currentSignerIdenticon = currentSignerAddress ? generateIdenticon(currentSignerAddress) : identiconSrc;
@@ -464,6 +472,12 @@
   function switchSigner(index: number) {
     vaultOperations.selectSigner(index);
     signerDropdownOpen = false;
+  }
+
+  function handleCreationContextSelect() {
+    if (embedded && savedVaults.length > 0) {
+      vaultUiOperations.hideVault();
+    }
   }
 
   // ============================================================================
@@ -619,7 +633,7 @@
 
     // === BRAINVAULT MODE: Full argon2 derivation ===
     shardCount = isPreset ? getShardCount(shardInput) : shardInput;
-    const initialUsableCap = Math.max(1, Math.min(maxWorkers, WASM_SAFE_WORKER_LIMIT, shardCount));
+    const initialUsableCap = Math.max(1, Math.min(maxWorkers, shardCount));
     let initialWorkers = Math.min(effectiveTargetWorkerCount, initialUsableCap);
     workerCount = initialWorkers;
     activeWorkerCount = initialWorkers;
@@ -957,6 +971,14 @@
 
   <!-- Main Content -->
   <div class="main-content">
+    {#if embedded && savedVaults.length > 0}
+      <div class="creation-context-bar">
+        <ContextSwitcher
+          tab={creationContextTab}
+          on:entitySelect={handleCreationContextSelect}
+        />
+      </div>
+    {/if}
 
     <!-- INPUT SECTION - Always visible at top -->
     {#if phase === 'input' || phase === 'deriving'}
@@ -1213,11 +1235,6 @@
                     <span class="speed-threads">{activeWorkerCount} active / {usableWorkerCap} cap</span>
                     <span class="speed-memory">{formatMemoryLabel(allocatedMemoryMB)} RAM</span>
                   </div>
-                  {#if isIOSFamilyWebKit}
-                    <div class="speed-details">
-                      <span class="speed-memory">iOS/WebKit is capped to 1 worker to avoid WebAssembly memory kills.</span>
-                    </div>
-                  {/if}
                 </div>
               </div>
 
@@ -1964,6 +1981,13 @@
     min-height: 0;
     box-sizing: border-box;
     overflow: visible;
+  }
+
+  .creation-context-bar {
+    width: 100%;
+    margin: 0 0 16px 0;
+    display: flex;
+    justify-content: flex-start;
   }
 
   /* Glass Card - Sacred Chamber */
