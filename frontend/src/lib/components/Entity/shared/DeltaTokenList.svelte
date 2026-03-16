@@ -31,9 +31,9 @@
   {#if showHeader && rows.length > 0}
     <div class="delta-list-header">
       <span class="delta-list-header-spacer"></span>
-      <span class="delta-list-header-out">Outbound</span>
+      <span class="delta-list-header-out">Out</span>
       <span class="delta-list-header-sep"></span>
-      <span class="delta-list-header-in">Inbound</span>
+      <span class="delta-list-header-in">In</span>
     </div>
   {/if}
 

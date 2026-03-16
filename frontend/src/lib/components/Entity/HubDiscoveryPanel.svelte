@@ -25,15 +25,7 @@
   let error = '';
   let connecting: string | null = null;
   let expandedHub: string | null = null;
-  let sortKey: 'score' | 'fee' | 'name' = 'score';
-  let sortAsc = false;
-  let sortMode: 'score_desc' | 'score_asc' | 'fee_asc' | 'fee_desc' | 'name_asc' | 'name_desc' = 'score_desc';
-
   const DEFAULT_RELAY = resolveRelayUrls()[0] || '';
-  const relayLabel = (() => {
-    if (typeof window === 'undefined') return 'Relay';
-    return `Relay ${window.location.host}`;
-  })();
   const relaySelection = DEFAULT_RELAY;
 
   // Hub data structure
@@ -89,19 +81,7 @@
         if (fixedOrderB === -1) return -1;
         return fixedOrderA - fixedOrderB;
       }
-      let cmp = 0;
-      switch (sortKey) {
-        case 'name':
-          cmp = a.name.localeCompare(b.name);
-          break;
-        case 'fee':
-          cmp = (a.metadata.fee || 0) - (b.metadata.fee || 0);
-          break;
-        case 'score':
-          cmp = a.creditScore - b.creditScore;
-          break;
-      }
-      return sortAsc ? cmp : -cmp;
+      return a.name.localeCompare(b.name);
     });
 
   function formatFee(ppm?: number): string {
@@ -134,15 +114,6 @@
       return '[unserializable profile]';
     }
   };
-
-  function applySortMode(mode: string) {
-    const [key, dir] = mode.split('_');
-    if (key === 'score' || key === 'fee' || key === 'name') {
-      sortKey = key;
-      sortAsc = dir === 'asc';
-      sortMode = `${key}_${sortAsc ? 'asc' : 'desc'}` as typeof sortMode;
-    }
-  }
 
   function toggleExpand(hubId: string) {
     expandedHub = expandedHub === hubId ? null : hubId;
@@ -403,9 +374,7 @@
 
 <div class="hub-panel">
   <header class="panel-header">
-    <h3>Hubs</h3>
     <div class="header-controls">
-      <span class="relay-badge" title={relaySelection}>{relayLabel}</span>
       <button class="refresh-btn" on:click={() => discoverHubs(true)} disabled={loading}>
         <span class:spinning={loading}><RefreshCw size={14} /></span>
         Refresh
@@ -434,20 +403,6 @@
       <span>No hubs found</span>
     </div>
   {:else}
-    <div class="hub-sorting">
-      <label>
-        Sort by
-        <select bind:value={sortMode} on:change={(e) => applySortMode((e.currentTarget as HTMLSelectElement).value)}>
-          <option value="score_desc">Credit score ↓</option>
-          <option value="score_asc">Credit score ↑</option>
-          <option value="fee_asc">Fee ↑</option>
-          <option value="fee_desc">Fee ↓</option>
-          <option value="name_asc">Name A→Z</option>
-          <option value="name_desc">Name Z→A</option>
-        </select>
-      </label>
-    </div>
-
     <div class="hub-cards">
       {#each sortedHubs as hub (hub.entityId)}
         <article class="hub-card" class:connected={hub.isConnected}>
@@ -492,28 +447,17 @@
 
           <div class="hub-strip" aria-hidden="true"></div>
 
-          <div class="hub-metrics-inline">
-            <div class="metric-inline">
-              <span class="metric-inline-label">Fee</span>
-              <span class="metric-inline-value">{formatFee(hub.metadata.fee)}</span>
-            </div>
-            <div class="metric-inline">
-              <span class="metric-inline-label">Peers</span>
-              <span class="metric-inline-value">{hub.metadata.peerCount}</span>
-            </div>
-            <div class="metric-inline">
-              <span class="metric-inline-label">Runtime</span>
-              <span class="metric-inline-value mono">{hub.runtimeId ? hub.runtimeId.slice(0, 10) : '-'}</span>
-            </div>
-            <div class="metric-inline">
-              <span class="metric-inline-label">Updated</span>
-              <span class="metric-inline-value">{new Date(hub.lastSeen).toLocaleTimeString()}</span>
-            </div>
-          </div>
-
           {#if expandedHub === hub.entityId}
             <div class="row-details">
               <div class="detail-grid">
+                <div class="detail">
+                  <span class="label">Fee</span>
+                  <span class="value">{formatFee(hub.metadata.fee)}</span>
+                </div>
+                <div class="detail">
+                  <span class="label">Peers</span>
+                  <span class="value">{hub.metadata.peerCount}</span>
+                </div>
                 <div class="detail">
                   <span class="label">Runtime ID</span>
                   <span class="value mono">{hub.runtimeId || '-'}</span>
@@ -557,31 +501,13 @@
   .panel-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-  }
-
-  .panel-header h3 {
-    margin: 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: #e7e5e4;
+    justify-content: flex-end;
   }
 
   .header-controls {
     display: flex;
     align-items: center;
     gap: 8px;
-  }
-
-  .relay-badge {
-    display: inline-flex;
-    align-items: center;
-    background: #1c1917;
-    border: 1px solid #292524;
-    color: #a8a29e;
-    padding: 6px 8px;
-    border-radius: 6px;
-    font-size: 11px;
   }
 
   .refresh-btn {
@@ -658,40 +584,6 @@
     50% { opacity: 1; }
   }
 
-  .hub-sorting {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .hub-sorting label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: #a8a29e;
-    font-size: 12px;
-  }
-
-  .hub-sorting select {
-    background: #1c1917;
-    border: 1px solid #292524;
-    color: #e7e5e4;
-    padding: 6px 8px;
-    border-radius: 6px;
-    font-size: 12px;
-  }
-
-  .sort-direction {
-    background: #1c1917;
-    border: 1px solid #292524;
-    color: #a8a29e;
-    padding: 6px 10px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 12px;
-  }
-
   .hub-cards {
     display: flex;
     flex-direction: column;
@@ -711,7 +603,7 @@
   }
 
   .hub-card.connected {
-    background: linear-gradient(90deg, rgba(34, 197, 94, 0.04), transparent 38%);
+    background: linear-gradient(90deg, rgba(250, 204, 21, 0.035), transparent 38%);
   }
 
   .hub-card-top {
@@ -798,8 +690,8 @@
   }
 
   .badge.open {
-    border-color: rgba(34, 197, 94, 0.35);
-    color: #4ade80;
+    border-color: rgba(250, 204, 21, 0.24);
+    color: #fcd34d;
   }
 
   .btn-connect {
@@ -847,33 +739,6 @@
     margin: 10px 0 12px;
     height: 1px;
     background: linear-gradient(90deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03));
-  }
-
-  .hub-metrics-inline {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 16px;
-  }
-
-  .metric-inline {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  .metric-inline-label {
-    font-size: 10px;
-    color: #838ca1;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-
-  .metric-inline-value {
-    font-size: 13px;
-    color: #e9ecf4;
-    font-weight: 500;
   }
 
   /* Expanded details */
@@ -944,24 +809,12 @@
 
   @media (max-width: 740px) {
     .panel-header {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 8px;
+      justify-content: flex-end;
     }
 
     .header-controls {
-      width: 100%;
-      justify-content: space-between;
-    }
-
-    .relay-select {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .hub-sorting {
-      flex-direction: column;
-      align-items: stretch;
+      width: auto;
+      justify-content: flex-end;
     }
 
     .hub-card-top {

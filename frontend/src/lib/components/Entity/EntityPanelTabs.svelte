@@ -1274,7 +1274,7 @@
     if (externalFetchInFlight) return externalFetchInFlight;
     const waitMs = Math.max(0, 1000 - (Date.now() - externalFetchStartedAt));
     externalFetchInFlight = (async () => {
-      if (waitMs > 0) await sleep(waitMs);
+      if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
       externalFetchStartedAt = Date.now();
       const signerId = tab.signerId;
       const fetchSeq = ++externalFetchSeq;
@@ -2953,13 +2953,15 @@
               {/if}
             </section>
         {:else if activeTab === 'accounts'}
-          <div class="accounts-selector-row">
-            <AccountDropdown
-              {replica}
-              {selectedAccountId}
-              on:accountSelect={handleAccountSelect}
-            />
-          </div>
+          {#if accountIds.length > 5}
+            <div class="accounts-selector-row">
+              <AccountDropdown
+                {replica}
+                {selectedAccountId}
+                on:accountSelect={handleAccountSelect}
+              />
+            </div>
+          {/if}
 
           <AccountList
             {replica}
@@ -3183,7 +3185,6 @@
                       Open
                     </button>
                   </div>
-                  <div class="muted" style="margin-top: 6px;">Works with selector or manual full ID entry (0x...).</div>
                 </div>
 
                 {#if disputedAccounts.length > 0}

@@ -533,8 +533,8 @@
                 <div class="detail-table">
                   <div class="detail-grid-three detail-head">
                     <span class="detail-header">Parameter</span>
-                    <span class="detail-header detail-header-right">Outbound</span>
-                    <span class="detail-header detail-header-right">Inbound</span>
+                    <span class="detail-header detail-header-right">Out</span>
+                    <span class="detail-header detail-header-right">In</span>
                   </div>
                   <div class="detail-grid-three">
                     <span class="detail-label-cell">Capacity</span>
