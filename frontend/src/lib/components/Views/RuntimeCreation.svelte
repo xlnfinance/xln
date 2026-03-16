@@ -501,6 +501,8 @@
       color: STRENGTH_COLORS[strength.rating] ?? '#666',
     };
   })();
+  $: workFactorBits = actualShardCount > 0 ? Math.log2(actualShardCount) : 0;
+  $: totalSecurityBits = passwordStrength.bits + workFactorBits;
   // Compute factorInfo from shardInput
   $: factorInfo = isPreset
     ? FACTOR_INFO[shardInput - 1]!
@@ -976,7 +978,7 @@
       <div class="glass-card input-section" class:deriving={phase === 'deriving'}>
         {#if embedded && savedVaults.length > 0}
           <div class="creation-context-bar">
-            <div class="creation-context-copy">Existing Runtimes</div>
+            <div class="creation-context-copy">Back to Existing Runtimes</div>
             <ContextSwitcher
               tab={creationContextTab}
               on:entitySelect={handleCreationContextSelect}
@@ -1092,7 +1094,7 @@
               ></div>
             </div>
             <span class="strength-text" style="color: {passwordStrength.color}">
-              {passwordStrength.bits} bits - {passwordStrength.rating}
+              {passwordStrength.bits} bits phrase + {workFactorBits.toFixed(1)} bits work factor = {totalSecurityBits.toFixed(1)} bits
             </span>
           {/if}
         </div>
