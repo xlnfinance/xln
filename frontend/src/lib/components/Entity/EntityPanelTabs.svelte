@@ -60,6 +60,7 @@
   import EntityInput from '../shared/EntityInput.svelte';
   import WalletSettings from '$lib/components/Settings/WalletSettings.svelte';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
+  import ContextSwitcher from './ContextSwitcher.svelte';
 
   export let tab: Tab;
   export let isLast: boolean = false;
@@ -2404,30 +2405,15 @@
   {#if !hideHeader}
     <header class="header" class:user-mode-header={userModeHeader}>
       {#if userModeHeader}
-        <div class="header-slot header-slot-runtime">
-          <RuntimeDropdown
-            allowAdd={allowHeaderAddRuntime}
-            allowDelete={allowHeaderDeleteRuntime}
-            addLabel={headerRuntimeAddLabel}
+        <div class="header-slot header-slot-context">
+          <ContextSwitcher
+            {tab}
+            allowAddRuntime={allowHeaderAddRuntime}
+            allowDeleteRuntime={allowHeaderDeleteRuntime}
+            addRuntimeLabel={headerRuntimeAddLabel}
             on:addRuntime={handleHeaderAddRuntime}
             on:deleteRuntime={handleHeaderDeleteRuntime}
-          />
-        </div>
-        <div class="header-slot header-slot-entity">
-          <EntityDropdown
-            {tab}
-            {selectedJurisdiction}
-            {jurisdictionFilter}
-            allowAdd={allowHeaderAddEntity}
-            allowAddJurisdiction={allowHeaderAddJurisdiction}
-            {replicasOverride}
-            {envOverride}
-            on:signerSelect={handleSignerSelect}
-            on:addSigner={handleHeaderAddSigner}
             on:entitySelect={handleEntitySelect}
-            on:jurisdictionSelect={handleJurisdictionSelect}
-            on:addJurisdiction={handleHeaderAddJurisdiction}
-            on:addEntity={handleHeaderAddEntity}
           />
         </div>
       {:else}
@@ -3568,6 +3554,11 @@
 
   .header-slot-entity {
     flex: 1 1 auto;
+  }
+
+  .header-slot-context {
+    flex: 1 1 420px;
+    max-width: 720px;
   }
 
   /* History Warning */
@@ -5682,7 +5673,8 @@
     }
 
     .header-slot-runtime,
-    .header-slot-entity {
+    .header-slot-entity,
+    .header-slot-context {
       flex: 1 1 auto;
     }
   }
