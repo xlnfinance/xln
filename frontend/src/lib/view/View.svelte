@@ -872,11 +872,14 @@
   }
 
   .view-wrapper.user-mode {
+    display: block;
     height: auto;
     min-height: 100dvh;
   }
 
   .view-wrapper.user-mode .user-mode-container {
+    display: block;
+    flex: none;
     height: auto;
     min-height: 100dvh;
     overflow: visible;

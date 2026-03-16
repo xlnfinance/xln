@@ -604,8 +604,7 @@
 
 <style>
   .user-panel {
-    display: flex;
-    flex-direction: column;
+    display: block;
     min-height: 100dvh;
     height: auto;
     background: #0a0a0a;
@@ -614,20 +613,17 @@
 
   /* Content - below nav z-index so dropdowns overlay */
   .panel-content {
-    flex: 0 0 auto;
+    display: block;
     overflow: visible;
     min-height: auto;
     position: relative;
     z-index: 1;
     padding: 0;
-    display: flex;
-    flex-direction: column;
   }
 
   /* Inline Panels - NO POPUPS! */
   .inline-panel {
-    display: flex;
-    flex-direction: column;
+    display: block;
     min-height: 100dvh;
     height: auto;
     overflow: visible;
