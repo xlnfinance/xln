@@ -255,4 +255,13 @@
     margin-left: 8px;
     font-size: 0.9em;
   }
+
+  @media (max-width: 900px) {
+    .scrollable-component {
+      height: auto;
+      max-height: none;
+      overflow: visible;
+      padding: 0;
+    }
+  }
 </style>

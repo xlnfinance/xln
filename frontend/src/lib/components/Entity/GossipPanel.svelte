@@ -258,6 +258,12 @@
   }
 
   @media (max-width: 900px) {
+    .list {
+      max-height: none;
+      overflow: visible;
+      padding-right: 0;
+    }
+
     .row {
       flex-direction: column;
       align-items: flex-start;

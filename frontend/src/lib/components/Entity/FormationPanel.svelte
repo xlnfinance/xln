@@ -872,4 +872,11 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
+
+  @media (max-width: 900px) {
+    .validators-list {
+      max-height: none;
+      overflow: visible;
+    }
+  }
 </style>
