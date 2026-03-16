@@ -2402,32 +2402,18 @@
 
 <div class="entity-panel" data-panel-id={tab.id}>
   <!-- Header -->
-  {#if !hideHeader}
+  {#if !hideHeader && !userModeHeader}
     <header class="header" class:user-mode-header={userModeHeader}>
-      {#if userModeHeader}
-        <div class="header-slot header-slot-context">
-          <ContextSwitcher
-            {tab}
-            allowAddRuntime={allowHeaderAddRuntime}
-            allowDeleteRuntime={allowHeaderDeleteRuntime}
-            addRuntimeLabel={headerRuntimeAddLabel}
-            on:addRuntime={handleHeaderAddRuntime}
-            on:deleteRuntime={handleHeaderDeleteRuntime}
-            on:entitySelect={handleEntitySelect}
-          />
-        </div>
-      {:else}
-        {#if showJurisdiction}
-          <JurisdictionDropdown
-            bind:selected={selectedJurisdictionName}
-            on:select={handleJurisdictionSelect}
-          />
-        {/if}
-        <EntityDropdown
-          {tab}
-          on:entitySelect={handleEntitySelect}
+      {#if showJurisdiction}
+        <JurisdictionDropdown
+          bind:selected={selectedJurisdictionName}
+          on:select={handleJurisdictionSelect}
         />
       {/if}
+      <EntityDropdown
+        {tab}
+        on:entitySelect={handleEntitySelect}
+      />
     </header>
   {/if}
 
@@ -2445,7 +2431,7 @@
       <div class="empty-state">
         <Wallet size={40} />
         <h3>Select Entity</h3>
-        <p>Choose from the dropdown above</p>
+        <p>{userModeHeader ? 'Choose from the context pill above' : 'Choose from the dropdown above'}</p>
       </div>
 
     {:else if isAccountFocused && selectedAccount && selectedAccountId}
@@ -2467,16 +2453,32 @@
     {:else if replica}
       <!-- Hero: Entity + Net Worth -->
       <section class="hero">
-        <div class="hero-left">
-          {#if avatarUrl}
-            <img src={avatarUrl} alt="Entity avatar" class="hero-avatar" />
-          {:else}
-            <div class="hero-avatar placeholder">
-              {activeXlnFunctions?.getEntityShortId?.(tab.entityId)?.slice(0,2) || '??'}
-            </div>
+        <div class="hero-left" class:user-mode={userModeHeader}>
+          {#if !userModeHeader}
+            {#if avatarUrl}
+              <img src={avatarUrl} alt="Entity avatar" class="hero-avatar" />
+            {:else}
+              <div class="hero-avatar placeholder">
+                {activeXlnFunctions?.getEntityShortId?.(tab.entityId)?.slice(0,2) || '??'}
+              </div>
+            {/if}
           {/if}
-          <div class="hero-identity">
-            <span class="hero-name">{heroDisplayName}</span>
+          <div class="hero-identity" class:user-mode={userModeHeader}>
+            {#if userModeHeader}
+              <div class="hero-context-switcher">
+                <ContextSwitcher
+                  {tab}
+                  allowAddRuntime={allowHeaderAddRuntime}
+                  allowDeleteRuntime={allowHeaderDeleteRuntime}
+                  addRuntimeLabel={headerRuntimeAddLabel}
+                  on:addRuntime={handleHeaderAddRuntime}
+                  on:deleteRuntime={handleHeaderDeleteRuntime}
+                  on:entitySelect={handleEntitySelect}
+                />
+              </div>
+            {:else}
+              <span class="hero-name">{heroDisplayName}</span>
+            {/if}
             <button class="hero-address" on:click={copyAddress} title="Copy full address">
               <span>{replica?.state?.entityId || tab.entityId}</span>
               {#if addressCopied}
@@ -3642,11 +3644,16 @@
     display: flex;
     align-items: center;
     gap: 14px;
+    min-width: 0;
+  }
+
+  .hero-left.user-mode {
+    align-items: flex-start;
   }
 
   .hero-avatar {
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
     border-radius: 12px;
     flex-shrink: 0;
   }
@@ -3666,7 +3673,16 @@
   .hero-identity {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .hero-identity.user-mode {
+    gap: 8px;
+  }
+
+  .hero-context-switcher {
+    max-width: min(360px, 100%);
   }
 
   .hero-name {
@@ -3681,13 +3697,15 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 3px 8px;
-    margin-left: -8px;
+    width: fit-content;
+    max-width: 100%;
+    padding: 3px 0;
+    margin-left: 0;
     background: transparent;
     border: none;
     border-radius: 6px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     color: #71717a;
     cursor: pointer;
     transition: all 0.15s;

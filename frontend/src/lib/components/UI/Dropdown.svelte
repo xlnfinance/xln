@@ -20,6 +20,7 @@
   export let maxWidth = 420;
   export let disabled = false;
   export let allowMultiple = false; // Allow multiple dropdowns open simultaneously
+  export let local = false;
 
   const dispatch = createEventDispatcher();
 
@@ -50,10 +51,15 @@
   function updatePosition() {
     if (!triggerEl) return;
     const rect = triggerEl.getBoundingClientRect();
-    top = rect.bottom + 4;
-    left = rect.left;
     const cap = maxWidth > 0 ? Math.max(minWidth, maxWidth) : minWidth;
     width = Math.min(Math.max(rect.width, minWidth), cap);
+    if (local) {
+      top = rect.height + 4;
+      left = 0;
+      return;
+    }
+    top = rect.bottom + 4;
+    left = rect.left;
 
     // Clamp to viewport after menu renders
     tick().then(() => {
@@ -135,9 +141,9 @@
     <div
       bind:this={menuEl}
       class="dropdown-menu"
+      class:local-menu={local}
       style="
-        top: {top}px;
-        left: {left}px;
+        {local ? '' : `top: ${top}px; left: ${left}px;`}
         min-width: {width}px;
         max-width: {maxWidth}px;
       "
@@ -193,6 +199,12 @@
     overflow-y: auto;
     animation: dropdown-fade 0.05s ease-out;
     backdrop-filter: blur(var(--blur-sm, 16px));
+  }
+
+  .dropdown-menu.local-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
   }
 
   @keyframes dropdown-fade {
