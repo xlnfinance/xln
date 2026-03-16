@@ -872,17 +872,17 @@
   }
 
   .view-wrapper.user-mode {
-    display: block;
-    height: auto;
+    display: flex;
+    height: 100dvh;
     min-height: 100dvh;
   }
 
   .view-wrapper.user-mode .user-mode-container {
     display: block;
-    flex: none;
-    height: auto;
-    min-height: 100dvh;
-    overflow: visible;
+    flex: 1;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .view-wrapper.embed-mode :global(.dockview-tabs-container),
