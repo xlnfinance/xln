@@ -15,7 +15,7 @@ import { deriveDelta, getSwapPairPolicyByBaseQuote } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { formatEntityId } from '../../utils';
 import { canonicalAccountKey } from '../../state-helpers';
-import { computeSwapPriceTicks, deriveSide, ORDERBOOK_PRICE_SCALE } from '../../orderbook';
+import { deriveSide, SWAP_LOT_SCALE, prepareSwapOrder } from '../../orderbook';
 import { FINANCIAL } from '../../constants';
 
 export async function handleSwapOffer(
@@ -27,7 +27,7 @@ export async function handleSwapOffer(
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: { offerId: string; makerIsLeft: boolean; fromEntity: string; toEntity: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; minFillRatio: number } }> {
   const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, minFillRatio } = accountTx.data;
   const events: string[] = [];
-  const LOT_SCALE = 10n ** 12n;
+  const LOT_SCALE = SWAP_LOT_SCALE;
 
   // Initialize swapOffers Map if not present
   if (!accountMachine.swapOffers) {
@@ -81,10 +81,11 @@ export async function handleSwapOffer(
   }
   const pairPolicy = getSwapPairPolicyByBaseQuote(baseTokenId, quoteTokenId);
   const stepTicks = BigInt(Math.max(1, pairPolicy.priceStepTicks));
-  const priceTicks = computeSwapPriceTicks(giveTokenId, wantTokenId, giveAmount, wantAmount);
-  if (priceTicks <= 0n) {
-    return { success: false, error: `Invalid price ratio for swap offer`, events };
+  const prepared = prepareSwapOrder(giveTokenId, wantTokenId, giveAmount, wantAmount);
+  if (!prepared) {
+    return { success: false, error: `Invalid price ratio or order too small after canonical quantization`, events };
   }
+  const priceTicks = prepared.priceTicks;
   if (inputPriceTicks !== undefined) {
     if (inputPriceTicks <= 0n) {
       return { success: false, error: `Invalid explicit priceTicks: ${inputPriceTicks}`, events };
@@ -106,16 +107,8 @@ export async function handleSwapOffer(
       };
     }
   }
-  const quantizedBase = (rawBaseAmount / LOT_SCALE) * LOT_SCALE;
-  if (quantizedBase <= 0n) {
-    return { success: false, error: `Quantized base amount became zero`, events };
-  }
-  const quantizedQuote = (quantizedBase * priceTicks) / ORDERBOOK_PRICE_SCALE;
-  if (quantizedQuote <= 0n) {
-    return { success: false, error: `Quantized quote amount became zero`, events };
-  }
-  const effectiveGiveAmount = side === 1 ? quantizedBase : quantizedQuote;
-  const effectiveWantAmount = side === 1 ? quantizedQuote : quantizedBase;
+  const effectiveGiveAmount = prepared.effectiveGive;
+  const effectiveWantAmount = prepared.effectiveWant;
   if (effectiveGiveAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || effectiveGiveAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
     return {
       success: false,

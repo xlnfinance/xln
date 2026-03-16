@@ -16,6 +16,13 @@
   let orderbookScope: 'all' | 'selected' = 'all';
   const ORDERBOOK_PRICE_SCALE = 10_000n;
   const ORDERBOOK_LOT_SCALE = 10n ** 12n;
+  type PreparedSwapOrderLike = {
+    side: 0 | 1;
+    priceTicks: bigint;
+    effectiveGive: bigint;
+    effectiveWant: bigint;
+    unspentGiveAmount: bigint;
+  };
   function decimalPlacesFromScale(scale: bigint): number {
     const s = scale.toString();
     return /^10*$/.test(s) ? Math.max(0, s.length - 1) : 0;
@@ -105,6 +112,7 @@
   let priceRatioInput = '';
   let giveAmount: bigint = 0n;
   let wantAmount: bigint = 0n;
+  let preparedOrder: PreparedSwapOrderLike | null = null;
   let parsedOrderbookPair: { baseTokenId: number; quoteTokenId: number } | null = null;
   let orderMode: 'buy-base' | 'sell-base' | 'none' = 'none';
   let limitPriceTicks: bigint | null = null;
@@ -507,9 +515,10 @@
 
   $: giveTokenSymbol = tokenSymbol(giveToken);
   $: wantTokenSymbol = tokenSymbol(wantToken);
-  $: wantTokenPresentInAccount = hasTokenInAccount(counterpartyId, wantToken);
-  $: availableGiveCapacity = readOutCapacity(counterpartyId, giveToken);
-  $: availableWantInCapacity = readInCapacity(counterpartyId, wantToken);
+  $: wantTokenPresentInAccount = (replica, hasTokenInAccount(counterpartyId, wantToken));
+  // Include replica in deps so capacity updates when account state changes (new frames)
+  $: availableGiveCapacity = (replica, readOutCapacity(counterpartyId, giveToken));
+  $: availableWantInCapacity = (replica, readInCapacity(counterpartyId, wantToken));
   $: formattedAvailableGive = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(availableGiveCapacity, giveToken)} ${giveTokenSymbol}`
     : availableGiveCapacity.toString();
@@ -518,13 +527,16 @@
     : availableWantInCapacity.toString();
   $: estimatedPrice = priceRatioScaled > 0n ? formatScaled(priceRatioScaled, PRICE_RATIO_DECIMALS) : 'n/a';
   $: estimatedReceiveLabel = Number.isFinite(wantToken) && wantToken > 0
-    ? `${formatAmount(wantAmount, wantToken)} ${wantTokenSymbol}`
-    : wantAmount.toString();
+    ? `${formatAmount(canonicalWantAmount, wantToken)} ${wantTokenSymbol}`
+    : canonicalWantAmount.toString();
   $: estimatedSpendLabel = Number.isFinite(giveToken) && giveToken > 0
-    ? `${formatAmount(giveAmount, giveToken)} ${giveTokenSymbol}`
-    : giveAmount.toString();
-  $: autoInboundCreditTarget = computeAutoInboundCreditTarget(counterpartyId, wantToken, wantAmount);
-  $: currentPeerCreditLimit = readPeerCreditLimit(counterpartyId, wantToken);
+    ? `${formatAmount(canonicalGiveAmount, giveToken)} ${giveTokenSymbol}`
+    : canonicalGiveAmount.toString();
+  $: leftoverGiveLabel = Number.isFinite(giveToken) && giveToken > 0
+    ? `${formatAmount(giveAmountLeftover, giveToken)} ${giveTokenSymbol}`
+    : giveAmountLeftover.toString();
+  $: autoInboundCreditTarget = (replica, computeAutoInboundCreditTarget(counterpartyId, wantToken, canonicalWantAmount));
+  $: currentPeerCreditLimit = (replica, readPeerCreditLimit(counterpartyId, wantToken));
   $: autoInboundCreditIncrease = autoInboundCreditTarget && autoInboundCreditTarget > currentPeerCreditLimit
     ? autoInboundCreditTarget - currentPeerCreditLimit
     : 0n;
@@ -634,15 +646,21 @@
     };
   }
 
-  $: swapDisabledReason = validateSwapForm(
+  $: swapPreparationError = (
+    giveAmount > 0n
+    && priceRatioScaled > 0n
+    && parsedOrderbookPair
+    && !preparedOrder
+  ) ? 'Order does not fit canonical lot/tick constraints.' : '';
+  $: swapDisabledReason = swapPreparationError || validateSwapForm(
     buildSwapValidationInput(
       String(counterpartyId || ''),
       giveToken,
       wantToken,
-      giveAmount,
-      wantAmount,
+      canonicalGiveAmount,
+      canonicalWantAmount,
       priceRatioScaled,
-      limitPriceTicks,
+      canonicalPriceTicks,
     ),
   );
   $: swapActionDisabledReason = (
@@ -656,6 +674,9 @@
     const increaseLabel = formatAmount(autoInboundCreditIncrease, wantToken);
     return `Placing this swap will auto-activate ${wantTokenSymbol} and set inbound capacity to ${targetLabel} ${wantTokenSymbol} (+${increaseLabel}).`;
   })();
+  $: leftoverGiveNote = giveAmountLeftover > 0n
+    ? `Canonical order leaves ${leftoverGiveLabel} unspent after lot quantization.`
+    : '';
   $: capacityWarning = (() => {
     if (!counterpartyId || !Number.isFinite(giveToken) || giveToken <= 0) return '';
     if (availableGiveCapacity <= 0n) return `Observed available ${giveTokenSymbol}: 0 (may update after next frame).`;
@@ -674,7 +695,11 @@
     orderPercent = clamped;
     const currentGiveCapacity = readOutCapacity(counterpartyId, giveToken);
     if (!selectedOrderLevel) {
-      const fillGive = (currentGiveCapacity * BigInt(clamped)) / 100n;
+      const rawGive = (currentGiveCapacity * BigInt(clamped)) / 100n;
+      const rawWant = orderMode === 'sell-base'
+        ? quoteFromBase(rawGive, priceRatioScaled, baseTokenDecimals, quoteTokenDecimals)
+        : baseFromQuote(rawGive, priceRatioScaled, baseTokenDecimals, quoteTokenDecimals);
+      const fillGive = prepareCanonicalOrder(rawGive, rawWant)?.effectiveGive ?? 0n;
       orderAmountInput = formatAmountForInput(fillGive, giveToken);
       return;
     }
@@ -690,7 +715,11 @@
       ? quoteFromBase(selectedOrderLevel.sizeBaseWei, priceScaled, levelBaseDecimals, levelQuoteDecimals)
       : selectedOrderLevel.sizeBaseWei;
     const maxFillGive = levelGiveCapacity < maxFillGiveByBook ? levelGiveCapacity : maxFillGiveByBook;
-    const fillGive = (maxFillGive * BigInt(clamped)) / 100n;
+    const rawGive = (maxFillGive * BigInt(clamped)) / 100n;
+    const rawWant = tradeSide === 'sell-base'
+      ? quoteFromBase(rawGive, priceScaled, levelBaseDecimals, levelQuoteDecimals)
+      : baseFromQuote(rawGive, priceScaled, levelBaseDecimals, levelQuoteDecimals);
+    const fillGive = prepareCanonicalOrder(rawGive, rawWant)?.effectiveGive ?? 0n;
 
     orderAmountInput = formatAmountForInput(fillGive, levelGiveTokenId);
     priceRatioInput = formatPriceTicks(selectedOrderLevel.priceTicks);
@@ -775,6 +804,17 @@
     return (quoteAmount * PRICE_RATIO_SCALE * baseScale) / (priceScaled * quoteScale);
   }
 
+  function prepareCanonicalOrder(rawGiveAmount: bigint, rawWantAmount: bigint): PreparedSwapOrderLike | null {
+    if (!activeXlnFunctions?.isReady || !activeXlnFunctions?.prepareSwapOrder) return null;
+    if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0) return null;
+    if (rawGiveAmount <= 0n || rawWantAmount <= 0n) return null;
+    try {
+      return activeXlnFunctions.prepareSwapOrder(giveToken, wantToken, rawGiveAmount, rawWantAmount);
+    } catch {
+      return null;
+    }
+  }
+
   function isRuntimeEnv(value: unknown): value is { eReplicas: Map<string, unknown>; jReplicas: Map<string, unknown> } {
     if (!value || typeof value !== 'object') return false;
     const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
@@ -813,6 +853,11 @@
     }
     return 0n;
   })();
+  $: preparedOrder = prepareCanonicalOrder(giveAmount, wantAmount);
+  $: canonicalPriceTicks = preparedOrder?.priceTicks ?? limitPriceTicks;
+  $: canonicalGiveAmount = preparedOrder?.effectiveGive ?? 0n;
+  $: canonicalWantAmount = preparedOrder?.effectiveWant ?? 0n;
+  $: giveAmountLeftover = preparedOrder?.unspentGiveAmount ?? 0n;
   function offerSideLabel(offer: SwapOfferLike): 'Ask' | 'Bid' {
     const give = Number(offer?.giveTokenId || 0);
     const want = Number(offer?.wantTokenId || 0);
@@ -1035,10 +1080,16 @@
 
       const giveToken = Number.parseInt(giveTokenId, 10);
       const wantToken = Number.parseInt(wantTokenId, 10);
-      const effectiveGiveAmount = giveAmount;
-      const effectiveWantAmount = wantAmount;
-      if (effectiveGiveAmount <= 0n || effectiveWantAmount <= 0n) {
+      if (giveAmount <= 0n || wantAmount <= 0n) {
         throw new Error('Enter amount and limit price');
+      }
+      const prepared = prepareCanonicalOrder(giveAmount, wantAmount);
+      if (!prepared) throw new Error('Order does not fit canonical lot/tick constraints');
+      const effectiveGiveAmount = prepared.effectiveGive;
+      const effectiveWantAmount = prepared.effectiveWant;
+      const canonicalPriceTicks = prepared.priceTicks;
+      if (effectiveGiveAmount <= 0n || effectiveWantAmount <= 0n) {
+        throw new Error('Quantized order too small');
       }
       if (!Number.isFinite(giveToken) || !allowedSwapTokenIds.has(giveToken)) {
         throw new Error('Invalid give token');
@@ -1056,7 +1107,7 @@
         effectiveGiveAmount,
         effectiveWantAmount,
         priceRatioScaled,
-        limitPriceTicks,
+        canonicalPriceTicks,
       );
       const liveValidationReason = validateSwapForm(liveValidation);
       if (liveValidationReason && !(isInboundCapacityValidationError(liveValidationReason) && canAutoPrepareInboundCapacity)) {
@@ -1096,7 +1147,7 @@
           giveAmount: effectiveGiveAmount,
           wantTokenId: wantToken,
           wantAmount: effectiveWantAmount,
-          priceTicks: limitPriceTicks ?? undefined,
+          priceTicks: canonicalPriceTicks,
           minFillRatio,
         },
       });
@@ -1334,6 +1385,9 @@
         {/if}
         {#if capacityWarning}
           <p class="size-warning">{capacityWarning}</p>
+        {/if}
+        {#if leftoverGiveNote}
+          <p class="size-hint">{leftoverGiveNote}</p>
         {/if}
       </div>
 

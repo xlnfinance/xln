@@ -381,6 +381,12 @@ export class BrowserVMProvider {
     for (const token of DEFAULT_TOKENS) {
       const address = await this.deployErc20Token(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
       const tokenId = await this.registerErc20Token(address);
+
+      // Pre-fund Depository with real ERC20 so reserveToExternalToken works.
+      // mintToReserve only updates internal accounting — Depository needs actual token balance.
+      const prefundAmount = 1_000_000_000_000n * 10n ** 18n; // 1T tokens
+      await this.mintErc20(address, this.depositoryAddress!.toString(), prefundAmount);
+
       this.tokenRegistry.set(token.symbol, {
         address,
         name: token.name,
@@ -388,7 +394,7 @@ export class BrowserVMProvider {
         decimals: token.decimals,
         tokenId,
       });
-      console.log(`[BrowserVM] Token registered: ${token.symbol} id=${tokenId} addr=${address.slice(0, 10)}...`);
+      console.log(`[BrowserVM] Token registered: ${token.symbol} id=${tokenId} addr=${address.slice(0, 10)}... (depository pre-funded)`);
     }
   }
 
@@ -521,6 +527,17 @@ export class BrowserVMProvider {
       data: callData,
       gasLimit: 200000n,
     }, privKey);
+    return result.txHash;
+  }
+
+  async mintErc20(tokenAddress: string, to: string, amount: bigint): Promise<string> {
+    const iface = new ethers.Interface(['function mint(address to, uint256 amount)']);
+    const callData = iface.encodeFunctionData('mint', [to, amount]);
+    const result = await this.executeTx({
+      to: tokenAddress,
+      data: callData,
+      gasLimit: 200000n,
+    }, this.deployerPrivKey);
     return result.txHash;
   }
 

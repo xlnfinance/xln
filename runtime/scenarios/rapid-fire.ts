@@ -240,26 +240,19 @@ export async function rapidFire(env: Env): Promise<void> {
   console.log('                   VERIFICATION                                ');
   console.log('═══════════════════════════════════════════════════════════════\n');
 
-  // Check final deltas (should net to zero - same amount each direction)
+  // Equal traffic in both directions should leave only symmetric routing-fee spread.
   const ahDelta = getOffdelta(env, alice.id, hub.id, USDC);
   const hbDelta = getOffdelta(env, hub.id, bob.id, USDC);
 
-  const expectedNet = 0n; // 100 forward @ $1 - 100 reverse @ $1 = $0
-
   console.log(`📊 Final positions:`);
-  console.log(`   Alice-Hub: ${ahDelta} (expected ~${expectedNet})`);
-  console.log(`   Hub-Bob:   ${hbDelta} (expected ~${expectedNet})`);
+  console.log(`   Alice-Hub: ${ahDelta} (routing-fee carry allowed)`);
+  console.log(`   Hub-Bob:   ${hbDelta} (routing-fee carry allowed)`);
 
-  // Allow some tolerance for in-flight frames
-  const tolerance = usd(20); // $20 tolerance for pending settlements
-  assert(
-    ahDelta >= -tolerance && ahDelta <= tolerance,
-    `Alice-Hub delta within tolerance: ${ahDelta}`
-  );
-  assert(
-    hbDelta >= -tolerance && hbDelta <= tolerance,
-    `Hub-Bob delta within tolerance: ${hbDelta}`
-  );
+  const feeCarryCap = usd(paymentCount);
+  assert(ahDelta === -hbDelta, `Fee carry is symmetric across both hub edges: ${ahDelta} === -(${hbDelta})`);
+  assert(ahDelta <= 0n, `Alice-Hub fee carry debits the sender side: ${ahDelta}`);
+  assert(hbDelta >= 0n, `Hub-Bob fee carry credits the opposite side: ${hbDelta}`);
+  assert(ahDelta >= -feeCarryCap, `Fee carry stays bounded under total sent volume: ${ahDelta} >= -${feeCarryCap}`);
 
   // Check no stuck mempools
   let totalMempool = 0;

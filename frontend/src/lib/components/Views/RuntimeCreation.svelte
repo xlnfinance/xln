@@ -227,11 +227,18 @@
   })();
 
   type NavigatorWithDeviceMemory = Navigator & { deviceMemory?: number };
+  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  const isAppleMobile = typeof navigator !== 'undefined' && (
+    /iPhone|iPad|iPod/i.test(userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+  const isWebKitEngine = /AppleWebKit/i.test(userAgent);
+  const isIOSFamilyWebKit = isAppleMobile && isWebKitEngine;
 
   // Device memory detection (navigator.deviceMemory gives GB, default 8GB if unavailable)
-  // NOTE: Browser privacy limits cap at 8GB - power users can override below
+  // Safari/iOS does not expose deviceMemory reliably and has much tighter WebContent limits.
   let deviceMemoryGB = typeof navigator !== 'undefined'
-    ? ((navigator as NavigatorWithDeviceMemory).deviceMemory ?? 8)
+    ? ((navigator as NavigatorWithDeviceMemory).deviceMemory ?? (isIOSFamilyWebKit ? 2 : 8))
     : 8;
 
   // POWER USER OVERRIDE: Uncomment to set actual RAM (bypasses browser 8GB cap)
@@ -250,6 +257,7 @@
 
   // Ultra-permissive worker limits (browser WASM will be the real bottleneck)
   const computeMaxWorkers = () => {
+    if (isIOSFamilyWebKit) return 1;
     // For memory-bound ops like argon2id, 8x CPU cores is reasonable ceiling
     const coreBased = hardwareCores * 8; // 32 cores → 256 workers
     // Allow 4 workers per GB of RAM (conservative estimate)
@@ -258,10 +266,10 @@
     return Math.min(coreBased, memBased, 512);
   };
 
-  const WASM_SAFE_WORKER_LIMIT = Math.floor(3000 / 256);
+  const WASM_SAFE_WORKER_LIMIT = isIOSFamilyWebKit ? 1 : Math.floor(3000 / 256);
   let maxWorkers = computeMaxWorkers();
   let usableWorkerCap = Math.max(1, Math.min(maxWorkers, WASM_SAFE_WORKER_LIMIT));
-  let targetWorkerCount = Math.max(1, Math.min(hardwareCores, usableWorkerCap));
+  let targetWorkerCount = isIOSFamilyWebKit ? 1 : Math.max(1, Math.min(hardwareCores, usableWorkerCap));
   let effectiveTargetWorkerCount = targetWorkerCount;
 
   // Use one cap for slider, live scaling, and displayed limits.
@@ -611,7 +619,8 @@
 
     // === BRAINVAULT MODE: Full argon2 derivation ===
     shardCount = isPreset ? getShardCount(shardInput) : shardInput;
-    let initialWorkers = Math.min(effectiveTargetWorkerCount, usableWorkerCap);
+    const initialUsableCap = Math.max(1, Math.min(maxWorkers, WASM_SAFE_WORKER_LIMIT, shardCount));
+    let initialWorkers = Math.min(effectiveTargetWorkerCount, initialUsableCap);
     workerCount = initialWorkers;
     activeWorkerCount = initialWorkers;
     finalizeInProgress = false;
@@ -685,11 +694,11 @@
         }
       }
 
-      // Probe first worker for time estimate
-      workers[0]?.postMessage({ type: 'probe', id: 0 });
-
-      // Wait a bit for probe result
-      await new Promise(r => setTimeout(r, 500));
+      // Probe is cheap on desktop, but on iOS/WebKit we avoid extra wasm churn.
+      if (!isIOSFamilyWebKit) {
+        workers[0]?.postMessage({ type: 'probe', id: 0 });
+        await new Promise(r => setTimeout(r, 500));
+      }
 
       // Dispatch initial shards
       dispatchShards(name);
@@ -1204,6 +1213,11 @@
                     <span class="speed-threads">{activeWorkerCount} active / {usableWorkerCap} cap</span>
                     <span class="speed-memory">{formatMemoryLabel(allocatedMemoryMB)} RAM</span>
                   </div>
+                  {#if isIOSFamilyWebKit}
+                    <div class="speed-details">
+                      <span class="speed-memory">iOS/WebKit is capped to 1 worker to avoid WebAssembly memory kills.</span>
+                    </div>
+                  {/if}
                 </div>
               </div>
 

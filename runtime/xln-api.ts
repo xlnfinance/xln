@@ -50,6 +50,7 @@ export type { Profile, GossipLayer } from './networking/gossip';
 export type { PaymentRoute } from './routing/pathfinding';
 export type { CompletedBatch, JBatch, JBatchState } from './j-batch';
 export type { JAdapter } from './jadapter/types';
+export type { PreparedSwapOrder } from './orderbook';
 
 // Re-export identity functions types
 export {
@@ -300,6 +301,8 @@ export interface XLNModule {
   getSwapPairOrientation: (tokenA: number, tokenB: number) => { baseTokenId: number; quoteTokenId: number; pairId: string };
   getDefaultSwapTradingPairs: () => Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }>;
   computeSwapPriceTicks: (giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => bigint;
+  prepareSwapOrder: (giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => import('./orderbook').PreparedSwapOrder | null;
+  quantizeSwapOrder: (giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => { effectiveGive: bigint; effectiveWant: bigint; priceTicks: bigint } | null;
   createDemoDelta: () => Delta;
   getDefaultCreditLimit: (tokenId: number) => bigint;
 

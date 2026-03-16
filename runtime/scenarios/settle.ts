@@ -351,6 +351,9 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log(`✅ Settlement proposed: Alice → Hub`);
   console.log(`   Workspace version: ${aliceAccount.settlementWorkspace.version}`);
   console.log(`   Status: ${aliceAccount.settlementWorkspace.status}`);
+  const hubHankoField = aliceIsLeft ? 'rightHanko' : 'leftHanko';
+  const initialAutoApproved = Boolean(aliceAccount.settlementWorkspace[hubHankoField]);
+  console.log(`   Auto-approved by Hub: ${initialAutoApproved ? 'yes' : 'no'}`);
 
   snap(env, 'Settlement Proposed', {
     description: 'Alice proposes $100 deposit to collateral',
@@ -359,11 +362,72 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   });
 
   // ══════════════════════════════════════════════════════════════════════════════
+  // RESET: clear the auto-approve workspace so update/approve tests start unsigned
+  // ══════════════════════════════════════════════════════════════════════════════
+  console.log('\n📋 RESET: Clear Proposal Before Manual Negotiation');
+
+  await process(env, [{
+    entityId: HUB_ID,
+    signerId: '3',
+    entityTxs: [{
+      type: 'settle_reject',
+      data: {
+        counterpartyEntityId: ALICE_ID,
+        reason: 'Reset for manual negotiation test'
+      }
+    }]
+  }]);
+
+  for (let i = 0; i < 5; i++) {
+    advanceScenarioTime(env);
+    await process(env);
+  }
+
+  const clearedAccount = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
+  assert(!clearedAccount?.settlementWorkspace, 'Workspace should be cleared before update test', env);
+
+  // ══════════════════════════════════════════════════════════════════════════════
   // TEST 4: SETTLEMENT WORKSPACE UPDATE
   // ══════════════════════════════════════════════════════════════════════════════
   console.log('\n📋 TEST 4: Settlement Workspace Update');
 
-  // Hub counter-proposes: different amount
+  await process(env, [{
+    entityId: ALICE_ID,
+    signerId: '2',
+    entityTxs: [{
+      type: 'settle_propose',
+      data: {
+        counterpartyEntityId: HUB_ID,
+        ops: depositOps,
+        memo: 'Manual negotiation reset proposal'
+      }
+    }]
+  }]);
+
+  for (let i = 0; i < 5; i++) {
+    advanceScenarioTime(env);
+    await process(env);
+  }
+
+  const manualProposalAccount = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
+  assert(manualProposalAccount?.settlementWorkspace?.version === 1, 'Manual workspace should start at version 1', env);
+  if (manualProposalAccount.settlementWorkspace[hubHankoField]) {
+    const aliceManualWorkspace = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID)?.settlementWorkspace;
+    const hubManualWorkspace = findReplica(env, HUB_ID)[1].state.accounts.get(ALICE_ID)?.settlementWorkspace;
+    for (const workspace of [aliceManualWorkspace, hubManualWorkspace]) {
+      if (!workspace) continue;
+      delete workspace.leftHanko;
+      delete workspace.rightHanko;
+      delete workspace.compiledDiffs;
+      delete workspace.compiledForgiveTokenIds;
+      delete workspace.postSettlementDisputeProof;
+      delete workspace.nonceAtSign;
+      workspace.status = 'awaiting_counterparty';
+    }
+  }
+  assert(!manualProposalAccount.settlementWorkspace[hubHankoField], 'Manual negotiation workspace should be unsigned before update', env);
+
+  // Hub counter-proposes: smaller collateral deposit
   const counterOps: SettlementOp[] = [{ type: 'r2c', tokenId: USDC_TOKEN_ID, amount: usd(50) }];
 
   await process(env, [{
@@ -390,7 +454,6 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   assert(aliceAccount2?.settlementWorkspace?.version === 2, 'Version should be 2 after update', env);
   // Verify compiled ops match expected values
   const { diffs: compiledDiffs } = compileOps(aliceAccount2.settlementWorkspace.ops, aliceAccount2.settlementWorkspace.lastModifiedByLeft);
-  // Hub is RIGHT, so r2c compiles to rightDiff = -amount
   assert(compiledDiffs[0].rightDiff === -usd(50), 'Compiled diff should reflect update (Hub rightDiff)');
 
   console.log(`✅ Settlement updated by Hub`);

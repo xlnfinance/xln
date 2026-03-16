@@ -271,7 +271,12 @@ export class FinancialDataCorruptionError extends Error {
     super(`🚨 FINANCIAL-SAFETY VIOLATION: ${message}`);
     this.name = 'FinancialDataCorruptionError';
     if (context) {
-      this.message += `\nContext: ${safeStringify(context)}`;
+      try {
+        this.message += `\nContext: ${safeStringify(context)}`;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        this.message += `\nContext: [Unserializable: ${detail}]`;
+      }
     }
   }
 }

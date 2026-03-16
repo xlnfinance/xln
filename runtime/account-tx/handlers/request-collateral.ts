@@ -79,18 +79,15 @@ export function handleRequestCollateral(
     return { success: false, events: [], error: `request_collateral: no delta for fee token ${feeToken}` };
   }
 
-  const feeTotal = feeDelta.ondelta + feeDelta.offdelta;
-  const requesterFeeClaim = requesterIsLeft
-    ? (feeTotal > 0n ? feeTotal : 0n)
-    : (feeTotal < 0n ? -feeTotal : 0n);
+  const requesterFeeCapacity = deriveDelta(feeDelta, requesterIsLeft).outCapacity;
   // No in-place upsize path: each request starts with fresh upfront fee debit.
   const existingFeePaid = existingRequest > 0n ? (existingFeeState?.feePaidUpfront ?? 0n) : 0n;
   const feeTopup = effectiveFeeTarget > existingFeePaid ? effectiveFeeTarget - existingFeePaid : 0n;
-  if (feeTopup > requesterFeeClaim) {
+  if (feeTopup > requesterFeeCapacity) {
     return {
       success: false,
       events: [],
-      error: `request_collateral: insufficient fee balance in token ${feeToken} (${requesterFeeClaim} < ${feeTopup})`,
+      error: `request_collateral: insufficient fee capacity in token ${feeToken} (${requesterFeeCapacity} < ${feeTopup})`,
     };
   }
 

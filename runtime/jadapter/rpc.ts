@@ -452,6 +452,13 @@ export async function createRpcAdapter(
       const erc20Address = await erc20Contract.getAddress();
       console.log(`  ERC20Mock(USDC): ${erc20Address}`);
 
+      // Pre-fund Depository with ERC20 so withdrawals (reserveToExternalToken) work.
+      // mintToReserve only updates internal accounting — the Depository needs real ERC20 balance.
+      const prefundAmount = ethers.parseUnits('1000000000000', 18); // 1T tokens
+      const prefundTx = await erc20Contract.mint(addresses.depository, prefundAmount, await buildFeeOverrides());
+      await waitForReceipt(prefundTx as any, 'erc20.mint-to-depository');
+      console.log(`  Depository pre-funded: ${ethers.formatUnits(prefundAmount, 18)} USDC`);
+
       // Register token in Depository token registry (tokenId > 0)
       const tokenRegistrationAmount = 1_000_000n;
       const approveTx = await erc20Contract.approve(addresses.depository, tokenRegistrationAmount, await buildFeeOverrides());

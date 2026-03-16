@@ -167,7 +167,7 @@ const buildDepositHref = (tokenId, amount) => {
 
 const renderActivity = () => {
   if (!state || state.activity.length === 0) {
-    return '<div class="empty-card"><p>No deposits or withdrawals yet.</p></div>';
+    return '<div class="empty-activity">No deposits or withdrawals yet.</div>';
   }
 
   return `<div class="activity-list">${state.activity.map((item) => {
@@ -181,11 +181,10 @@ const renderActivity = () => {
         <div class="activity-badge ${item.kind}">${badge}</div>
         <div>
           <div class="activity-title">${item.kind === 'deposit' ? 'Deposit credited' : 'Withdrawal queued'}</div>
-          <div class="activity-sub">${escapeHtml(item.description || item.counterpartyEntityId)}</div>
           <div class="activity-sub">${escapeHtml(shortId(item.counterpartyEntityId))} · frame ${item.frameHeight ?? 'pending'}</div>
         </div>
         <div class="activity-amount">
-          <div>${amountLine}</div>
+          <div class="amount-value">${amountLine}</div>
           <div class="status-text">${escapeHtml(status)}</div>
         </div>
       </div>
@@ -198,34 +197,34 @@ const renderIntegration = () => {
   const daemon = state.custody.daemonWsUrl;
   const signer = state.custody.signerId || '<daemon resolves proposer signer>';
   return `
-    <section class="activity-card">
-      <h2>How To Integrate XLN</h2>
-      <div class="hint">This custody service is intentionally thin. It stores sessions and balances locally, and everything financial goes through one XLN daemon over websocket.</div>
-      <div class="token-list" style="margin-top:16px;">
-        <div class="token-card">
-          <div class="token-name">1. Start the XLN daemon</div>
+    <section class="integration-section">
+      <h2>How to integrate</h2>
+      <div class="hint">This custody service stores sessions and balances locally. Everything financial goes through one XLN daemon over websocket.</div>
+      <div class="integration-list">
+        <div class="integration-step">
+          <div class="step-title">1. Start the XLN daemon</div>
           <pre class="activity-sub">bun runtime/server.ts --port 8080</pre>
-          <div class="activity-sub">The custody backend talks to <code>${escapeHtml(daemon)}</code> and uses the daemon's persisted frame journal as the source of truth.</div>
+          <div class="activity-sub">Custody backend talks to <code>${escapeHtml(daemon)}</code> using the daemon's frame journal as source of truth.</div>
         </div>
-        <div class="token-card">
-          <div class="token-name">2. Run custody against one entity</div>
+        <div class="integration-step">
+          <div class="step-title">2. Run custody against one entity</div>
           <pre class="activity-sub">CUSTODY_ENTITY_ID=${escapeHtml(state.custody.entityId)}
 CUSTODY_SIGNER_ID=${escapeHtml(signer)}
 CUSTODY_DAEMON_WS=${escapeHtml(daemon)}
 CUSTODY_WALLET_URL=${escapeHtml(state.custody.walletUrl)}
 bun custody/server.ts</pre>
         </div>
-        <div class="token-card">
-          <div class="token-name">3. Deposit flow</div>
-          <div class="activity-sub">The user enters an amount, clicks <code>Deposit with XLN</code>, and the wallet opens at <code>#pay</code> with recipient id, amount, token, jurisdiction, user id, and a locked description already embedded in the URL. The wallet pre-finds routes and only asks for the final confirmation.</div>
+        <div class="integration-step">
+          <div class="step-title">3. Deposit flow</div>
+          <div class="activity-sub">User clicks <code>Deposit with XLN</code> &rarr; wallet opens at <code>#pay</code> with recipient, amount, token, jurisdiction, and user id pre-filled. Wallet finds routes and asks for confirmation.</div>
         </div>
-        <div class="token-card">
-          <div class="token-name">4. Crediting flow</div>
-          <div class="activity-sub">The backend polls daemon RPC <code>get_frame_receipts</code> over websocket, scans persisted <code>HtlcReceived</code> events for this custody entity, extracts <code>uid:&lt;user&gt;</code> from the description, and credits the local balance exactly once.</div>
+        <div class="integration-step">
+          <div class="step-title">4. Crediting</div>
+          <div class="activity-sub">Backend polls <code>get_frame_receipts</code>, scans <code>HtlcReceived</code> events, extracts <code>uid:&lt;user&gt;</code> from description, credits balance exactly once.</div>
         </div>
-        <div class="token-card">
-          <div class="token-name">5. Withdrawal flow</div>
-          <div class="activity-sub">The backend reserves local balance, calls daemon RPC <code>queue_payment</code>, and then finalizes or restores the withdrawal when journal events <code>PaymentFinalized</code> or <code>PaymentFailed</code> appear for the returned hashlock.</div>
+        <div class="integration-step">
+          <div class="step-title">5. Withdrawal</div>
+          <div class="activity-sub">Backend reserves balance, calls <code>queue_payment</code>, finalizes or restores when <code>PaymentFinalized</code> or <code>PaymentFailed</code> events appear.</div>
         </div>
       </div>
     </section>
@@ -241,54 +240,51 @@ const render = () => {
   const activeField = captureActiveField();
   const selectedDepositToken = getSelectedDepositToken();
   const withdrawButtonLabel = submitting ? 'Sending...' : 'Withdraw via XLN';
-  app.innerHTML = `
-    <section class="hero-card">
-      <div class="hero-topline">
-        <div class="eyebrow">${escapeHtml(state.custody.name)} · journal-backed custody</div>
-        <div class="status-pill ${state.custody.connected ? 'ok' : 'error'}">${state.custody.connected ? 'Daemon connected' : 'Daemon unavailable'}</div>
-      </div>
-      <div class="hero-copy">
-        <h1>${escapeHtml(state.custody.name)}</h1>
-        <p class="hero-sub">Deposit from XLN, keep balances locally, and withdraw back through the cheapest live route.</p>
-      </div>
-      <div class="balance-row">
-        <div class="balance-amount">${escapeHtml(state.headlineBalance.amountDisplay)}</div>
-        <div class="balance-symbol">${escapeHtml(state.headlineBalance.symbol)}</div>
-      </div>
-      <div class="token-pills compact">
-        ${state.tokens.map((token) => `
-          <div class="token-pill">
-            <span>${escapeHtml(token.symbol)}</span>
-            <strong style="color:${escapeHtml(token.accent)};">${escapeHtml(token.amountDisplay)}</strong>
-          </div>
-        `).join('')}
-      </div>
-      <div class="hero-strip">
-        <div class="meta-box">
-          <div class="meta-label">Session</div>
-          <div class="meta-value">${escapeHtml(state.session.userId)}</div>
-        </div>
-        <div class="meta-box">
-          <div class="meta-label">Custody entity</div>
-          <div class="meta-value">${escapeHtml(shortId(state.custody.entityId))}</div>
-        </div>
-        <div class="meta-box">
-          <div class="meta-label">Jurisdiction</div>
-          <div class="meta-value">${escapeHtml(state.custody.jurisdictionId || 'n/a')}</div>
-        </div>
-        <div class="meta-box">
-          <div class="meta-label">Last sync</div>
-          <div class="meta-value">${escapeHtml(formatTime(state.custody.lastSyncOkAt))}</div>
-        </div>
-      </div>
-      ${state.custody.lastSyncError ? `<div class="inline-error hero-error">${escapeHtml(state.custody.lastSyncError)}</div>` : ''}
-    </section>
 
-    <div class="grid action-grid">
+  const tokenColors = {
+    USDC: '#2775ca',
+    WETH: '#627eea',
+    USDT: '#26a17b',
+  };
+
+  app.innerHTML = `
+    <header class="page-header">
+      <div>
+        <h1>${escapeHtml(state.custody.name)}</h1>
+        <p class="sub">Deposit from XLN, keep balances locally, withdraw through the cheapest route.</p>
+      </div>
+      <div class="status-pill ${state.custody.connected ? 'ok' : 'error'}">
+        <span class="dot"></span>
+        ${state.custody.connected ? 'Connected' : 'Disconnected'}
+      </div>
+    </header>
+
+    <div class="token-grid">
+      ${state.tokens.map((token) => {
+        const bg = tokenColors[token.symbol] || token.accent;
+        return `
+          <div class="token-card">
+            <div class="token-header">
+              <div class="token-icon" style="background: ${escapeHtml(bg)};">${escapeHtml(token.symbol.slice(0, 1))}</div>
+              <div>
+                <div class="token-name">${escapeHtml(token.symbol)}</div>
+                <div class="token-full-name">${escapeHtml(token.name)}</div>
+              </div>
+            </div>
+            <div class="token-balance">${escapeHtml(token.amountDisplay)}</div>
+            <div class="token-minor">${escapeHtml(token.symbol)} balance</div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+
+    ${state.custody.lastSyncError ? `<div class="inline-error" style="margin-bottom:16px;">${escapeHtml(state.custody.lastSyncError)}</div>` : ''}
+
+    <div class="action-grid">
       <section class="action-card">
         <h2>Deposit</h2>
-        <div class="hint">Open the wallet in hosted pay mode. The invoice stays locked to this custody session.</div>
-        <form id="deposit-form" class="deposit-form">
+        <div class="action-sub">Open the wallet in hosted pay mode. Invoice stays locked to this session.</div>
+        <form id="deposit-form">
           <label>
             Asset
             <select name="depositTokenId">
@@ -314,6 +310,7 @@ const render = () => {
 
       <section class="action-card">
         <h2>Withdraw</h2>
+        <div class="action-sub">Send funds to any XLN entity. Route and fee resolved automatically.</div>
         <form id="withdraw-form">
           <label>
             Asset
@@ -336,21 +333,38 @@ const render = () => {
             />
           </label>
           <div class="form-foot">
-            <div>
-              <div class="hint">Balance is debited by the real sender amount: requested payout plus route fee.</div>
-              ${withdrawError ? `<div class="inline-error">${escapeHtml(withdrawError)}</div>` : ''}
-              ${withdrawMessage ? `<div class="inline-ok">${escapeHtml(withdrawMessage)}</div>` : ''}
-            </div>
+            <div class="hint">Balance debited by requested payout plus route fee.</div>
+            ${withdrawError ? `<div class="inline-error">${escapeHtml(withdrawError)}</div>` : ''}
+            ${withdrawMessage ? `<div class="inline-ok">${escapeHtml(withdrawMessage)}</div>` : ''}
             <button class="primary full-width" type="submit" ${submitting ? 'disabled' : ''}>${escapeHtml(withdrawButtonLabel)}</button>
           </div>
         </form>
       </section>
     </div>
 
-    <section class="activity-card">
-      <h2>Recent Activity</h2>
+    <section class="activity-section">
+      <h2>Recent activity</h2>
       ${renderActivity()}
     </section>
+
+    <div class="meta-footer">
+      <div class="meta-cell">
+        <div class="meta-label">Session</div>
+        <div class="meta-value">${escapeHtml(state.session.userId)}</div>
+      </div>
+      <div class="meta-cell">
+        <div class="meta-label">Custody entity</div>
+        <div class="meta-value">${escapeHtml(shortId(state.custody.entityId))}</div>
+      </div>
+      <div class="meta-cell">
+        <div class="meta-label">Jurisdiction</div>
+        <div class="meta-value">${escapeHtml(state.custody.jurisdictionId || 'n/a')}</div>
+      </div>
+      <div class="meta-cell">
+        <div class="meta-label">Last sync</div>
+        <div class="meta-value">${escapeHtml(formatTime(state.custody.lastSyncOkAt))}</div>
+      </div>
+    </div>
 
     ${renderIntegration()}
   `;
