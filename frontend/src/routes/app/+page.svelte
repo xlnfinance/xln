@@ -46,6 +46,8 @@
   <title>xln - {$appState.mode === 'user' ? 'Wallet' : 'Network Workspace'}</title>
 </svelte:head>
 
+<svelte:body class:user-mode-scroll={$appState.mode === 'user'} />
+
 {#if $isLoading}
   <div class="loading-screen">
     <img src="/img/finis.png" alt="Loading" class="loading-spinner" />
@@ -72,6 +74,13 @@
     margin: 0;
     overflow: hidden;
     height: 100vh;
+  }
+
+  :global(body.user-mode-scroll) {
+    overflow-x: hidden;
+    overflow-y: auto;
+    height: auto;
+    min-height: 100vh;
   }
 
   .loading-screen,

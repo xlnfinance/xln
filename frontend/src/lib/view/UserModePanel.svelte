@@ -606,16 +606,17 @@
   .user-panel {
     display: flex;
     flex-direction: column;
-    height: 100%;
+    min-height: 100dvh;
+    height: auto;
     background: #0a0a0a;
     color: #e5e5e5;
   }
 
   /* Content - below nav z-index so dropdowns overlay */
   .panel-content {
-    flex: 1;
-    overflow: hidden;
-    min-height: 0;
+    flex: 0 0 auto;
+    overflow: visible;
+    min-height: auto;
     position: relative;
     z-index: 1;
     padding: 0;
@@ -627,8 +628,9 @@
   .inline-panel {
     display: flex;
     flex-direction: column;
-    height: 100%;
-    overflow-y: auto;
+    min-height: 100dvh;
+    height: auto;
+    overflow: visible;
   }
 
   .inline-panel-header {
@@ -650,6 +652,16 @@
     color: var(--text-primary, #e6edf3);
   }
 
+  .panel-content :global(.entity-panel) {
+    min-height: 100dvh;
+    height: auto;
+  }
+
+  .panel-content :global(.main-scroll) {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
   .back-btn {
     display: flex;
     align-items: center;
@@ -668,5 +680,11 @@
     background: rgba(255, 255, 255, 0.1);
     color: var(--text-primary, #e6edf3);
     border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  @media (max-width: 768px) {
+    .panel-content :global(.header.user-mode-header) {
+      position: static;
+    }
   }
 </style>
