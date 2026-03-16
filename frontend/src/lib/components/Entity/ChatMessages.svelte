@@ -353,12 +353,4 @@
     background: rgba(255, 200, 100, 0.25);
   }
 
-  @media (max-width: 900px) {
-    .scrollable-component {
-      min-height: 0;
-      max-height: none;
-      overflow: visible;
-      padding: 0 0 8px;
-    }
-  }
 </style>
