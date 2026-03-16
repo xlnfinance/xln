@@ -39,9 +39,9 @@
   $: currentGroup = runtimeGroups.find((group) => group.runtimeId === $activeVault?.id) || null;
   $: currentEntity = resolveCurrentEntity();
   $: currentAvatar = currentEntity?.avatarUrl || currentGroup?.signerAvatarUrl || '';
-  $: currentTitle = currentEntity?.name || currentGroup?.runtimeLabel || 'Select Runtime';
+  $: currentTitle = resolveCurrentTitle();
   $: currentSubtitle = currentGroup
-    ? `${currentGroup.runtimeLabel}${currentGroup.signerId ? ` • ${currentGroup.signerId.slice(0, 6)}...${currentGroup.signerId.slice(-4)}` : ''}`
+    ? truncateMiddle(currentGroup.signerId || currentGroup.runtimeId)
     : 'No runtime selected';
 
   function buildRuntimeGroups(): RuntimeSummary[] {
@@ -130,6 +130,33 @@
     return String(value || '').trim().toLowerCase();
   }
 
+  function truncateMiddle(value: string | null | undefined, head = 6, tail = 4): string {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (text.length <= head + tail + 3) return text;
+    return `${text.slice(0, head)}...${text.slice(-tail)}`;
+  }
+
+  function isOpaqueIdLabel(value: string | null | undefined): boolean {
+    const text = String(value || '').trim();
+    return /^0x[a-f0-9]{16,}$/i.test(text);
+  }
+
+  function resolveCurrentTitle(): string {
+    if (currentEntity?.name && !isOpaqueIdLabel(currentEntity.name)) return currentEntity.name;
+    if (currentGroup?.runtimeLabel) return currentGroup.runtimeLabel;
+    if (currentEntity?.entityId) return truncateMiddle(currentEntity.entityId);
+    if (currentGroup?.runtimeId) return truncateMiddle(currentGroup.runtimeId);
+    return 'Select Runtime';
+  }
+
+  function resolveRuntimeMeta(group: RuntimeSummary): string {
+    if (group.selfEntity?.name && !isOpaqueIdLabel(group.selfEntity.name) && group.selfEntity.name !== group.runtimeLabel) {
+      return `${group.selfEntity.name} • ${truncateMiddle(group.signerId || group.runtimeId)}`;
+    }
+    return truncateMiddle(group.signerId || group.runtimeId);
+  }
+
   async function selectRuntimeEntity(runtimeId: string, signerId: string, entityId: string) {
     await vaultOperations.selectRuntime(runtimeId);
     dispatch('entitySelect', {
@@ -164,6 +191,7 @@
   }
 </script>
 
+<div class="context-switcher">
 <Dropdown bind:open minWidth={320} maxWidth={640}>
   <span slot="trigger" class="pill-trigger">
     {#if currentAvatar}
@@ -179,11 +207,6 @@
   </span>
 
   <div slot="menu" class="switcher-menu">
-    <div class="switcher-header">
-      <div class="switcher-eyebrow">Wallet Context</div>
-      <div class="switcher-title">Runtimes & Entities</div>
-    </div>
-
     <div class="runtime-list">
       {#each runtimeGroups as group (group.runtimeId)}
         <section class="runtime-group" class:active={group.runtimeId === $activeVault?.id}>
@@ -197,7 +220,7 @@
               <span class="runtime-copy">
                 <span class="runtime-name">{group.runtimeLabel}</span>
                 <span class="runtime-meta">
-                  {#if group.selfEntity}{group.selfEntity.name}{:else}No self entity yet{/if}
+                  {resolveRuntimeMeta(group)}
                 </span>
               </span>
               <span class="status-badge {group.status}">{group.status}</span>
@@ -218,7 +241,7 @@
                   {:else}
                     <span class="entity-avatar placeholder">◌</span>
                   {/if}
-                  <span class="entity-name">{entity.name}</span>
+                  <span class="entity-name">{isOpaqueIdLabel(entity.name) ? truncateMiddle(entity.entityId) : entity.name}</span>
                 </button>
               {/each}
             </div>
@@ -234,13 +257,31 @@
     {/if}
   </div>
 </Dropdown>
+</div>
 
 <style>
+  .context-switcher {
+    display: inline-block;
+    max-width: min(360px, 100%);
+  }
+
+  .context-switcher :global(.dropdown-wrapper) {
+    width: auto;
+    max-width: 100%;
+  }
+
+  .context-switcher :global(.dropdown-trigger) {
+    width: auto;
+    min-width: 220px;
+    max-width: min(320px, calc(100vw - 32px));
+    padding: 6px 8px;
+  }
+
   .pill-trigger {
     display: flex;
     align-items: center;
     gap: 10px;
-    width: 100%;
+    width: auto;
     min-width: 0;
   }
 
@@ -296,6 +337,10 @@
     color: #a8a29e;
   }
 
+  .runtime-name {
+    font-weight: 600;
+  }
+
   .pill-arrow {
     color: #a8a29e;
     font-size: 12px;
@@ -306,27 +351,10 @@
     padding: 8px;
   }
 
-  .switcher-header {
-    padding: 8px 10px 12px;
-  }
-
-  .switcher-eyebrow {
-    color: #78716c;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-
-  .switcher-title {
-    color: #f5f5f4;
-    font-size: 16px;
-    font-weight: 700;
-  }
-
   .runtime-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
   }
 
   .runtime-group {
@@ -446,6 +474,12 @@
   }
 
   @media (max-width: 900px) {
+    .context-switcher,
+    .context-switcher :global(.dropdown-trigger) {
+      max-width: 100%;
+      width: 100%;
+    }
+
     .pill-subtitle {
       display: none;
     }
