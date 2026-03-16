@@ -2165,6 +2165,11 @@
       grid-template-columns: 1fr;
     }
 
+    .routes-scroll {
+      max-height: none;
+      overflow: visible;
+    }
+
     .hosted-checkout-banner {
       grid-template-columns: 1fr;
     }

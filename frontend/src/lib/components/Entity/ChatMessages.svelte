@@ -190,7 +190,8 @@
 
 <style>
   .scrollable-component {
-    height: 25vh;
+    min-height: 220px;
+    max-height: 40vh;
     overflow-y: auto;
     padding: 8px;
   }
@@ -350,5 +351,14 @@
 
   .chat-input button:hover:not(:disabled) {
     background: rgba(255, 200, 100, 0.25);
+  }
+
+  @media (max-width: 900px) {
+    .scrollable-component {
+      min-height: 0;
+      max-height: none;
+      overflow: visible;
+      padding: 0 0 8px;
+    }
   }
 </style>
