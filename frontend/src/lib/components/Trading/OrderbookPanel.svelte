@@ -92,7 +92,7 @@
   const STREAM_STALE_MS = 3000;
   const STREAM_RETRY_MS = 2000;
   const streamSnapshots = new Map<string, MarketSnapshotPayload>();
-  const PRICE_STEP_OPTIONS = ['0.01', '0.1', '1', '10', '50', '100'] as const;
+  const PRICE_STEP_OPTIONS = ['0.0001', '0.001', '0.01', '0.1', '1', '10', '50', '100'] as const;
   const PRICE_STEP_STORAGE_KEY = 'xln.orderbook.price-step-overrides.v1';
   let selectedPriceStep = '1';
   let priceStepOverrides: Record<string, string> = {};
@@ -328,6 +328,9 @@
 
   function computeSmartStep(rawBestBid: number | null, rawBestAsk: number | null): string {
     const numericSteps = PRICE_STEP_OPTIONS.map(Number);
+    if (canonicalPairId() === '1/3') {
+      return '0.0001';
+    }
     if (!Number.isFinite(rawBestBid || NaN) || !Number.isFinite(rawBestAsk || NaN) || !rawBestBid || !rawBestAsk || rawBestAsk <= rawBestBid) {
       return '1';
     }
@@ -1069,7 +1072,7 @@
     display: grid;
     grid-template-columns: 1fr 90px 110px;
     gap: 8px;
-    padding: 2px 6px 6px;
+    padding: 2px 6px 5px;
     color: var(--text-tertiary, #666);
     font-size: 10px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -1096,10 +1099,10 @@
   .spread-indicator {
     display: flex;
     justify-content: center;
-    padding: 6px 0;
+    padding: 5px 0;
     border-top: 1px solid var(--border-color, #333);
     border-bottom: 1px solid var(--border-color, #333);
-    margin: 4px 0;
+    margin: 3px 0;
   }
 
   .mid-price {
@@ -1111,9 +1114,10 @@
     display: grid;
     grid-template-columns: 1fr 90px 110px;
     gap: 8px;
-    padding: 3px 6px;
+    padding: 2px 6px;
     position: relative;
     align-items: center;
+    min-height: 26px;
   }
 
   .row.with-sources {
@@ -1123,18 +1127,18 @@
   .sources-cell {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
     align-items: flex-start;
     z-index: 1;
   }
 
   .source-icon {
-    width: 22px;
-    height: 22px;
+    width: 18px;
+    height: 18px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 7px;
+    border-radius: 6px;
     border: 1px solid rgba(251, 191, 36, 0.16);
     background: rgba(251, 191, 36, 0.06);
     overflow: hidden;
@@ -1149,7 +1153,7 @@
 
   .source-avatar-fallback {
     color: #f3d27a;
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 700;
     line-height: 1;
   }
