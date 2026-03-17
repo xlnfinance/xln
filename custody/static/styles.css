@@ -315,6 +315,147 @@ button.primary:disabled {
   cursor: not-allowed;
 }
 
+/* ── XLN branded button ── */
+
+.btn-xln {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  padding: 14px 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(17, 24, 39, 0.14);
+  background: linear-gradient(180deg, #151922 0%, #0d1118 100%);
+  color: white;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 12px 28px rgba(14, 17, 24, 0.18);
+}
+
+.btn-xln:hover:not(:disabled) {
+  background: linear-gradient(180deg, #1a2130 0%, #111722 100%);
+  box-shadow: 0 16px 36px rgba(14, 17, 24, 0.24);
+  transform: translateY(-1px);
+}
+
+.btn-xln:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+
+.btn-xln:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-xln svg {
+  flex-shrink: 0;
+  opacity: 0.95;
+}
+
+.deposit-cta-group {
+  display: grid;
+  gap: 12px;
+}
+
+.deposit-cta-group.segmented {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0;
+  align-items: stretch;
+  overflow: visible;
+}
+
+.deposit-cta-segment {
+  min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.deposit-cta-segment.left {
+  min-height: 74px;
+}
+
+.deposit-cta-segment.right {
+  background: linear-gradient(180deg, #26211d 0%, #1b1714 100%);
+  border-radius: 0 28px 28px 0;
+  overflow: hidden;
+  box-shadow: 0 18px 38px rgba(14, 17, 24, 0.18);
+}
+
+.deposit-cta-divider {
+  width: 1px;
+  background: rgba(244, 216, 151, 0.18);
+}
+
+.deposit-find-routes-btn {
+  width: 100%;
+  min-height: 74px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 24px;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.deposit-controller-host {
+  position: relative;
+  width: 100%;
+  min-height: 74px;
+  overflow: hidden;
+  border-radius: 28px 0 0 28px;
+  box-shadow: 0 18px 38px rgba(14, 17, 24, 0.18);
+  background: linear-gradient(180deg, #3b342d 0%, #2a241f 100%);
+}
+
+.paybutton-controller-frame {
+  width: 100%;
+  height: 74px;
+  border: 0;
+  display: block;
+  background: transparent;
+}
+
+.deposit-find-routes-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.deposit-find-routes-btn:active {
+  transform: translateY(1px);
+}
+
+.find-routes-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.find-routes-logo svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
+.route-pay-btn {
+  min-height: 54px;
+  border-radius: 16px;
+  box-shadow: 0 8px 20px rgba(99, 91, 255, 0.18);
+}
+
 button.secondary {
   color: var(--ink);
   background: #f6f9fc;
@@ -358,6 +499,21 @@ button.secondary:hover {
 
 .action-note {
   margin-top: 4px;
+}
+
+.deposit-status-line {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.deposit-status-line[data-state="ready"] {
+  color: var(--ok);
+}
+
+.deposit-status-line[data-state="error"] {
+  color: var(--danger);
 }
 
 .action-note a {
@@ -576,6 +732,24 @@ pre.activity-sub {
     grid-template-columns: 1fr;
   }
 
+  .deposit-cta-group.segmented {
+    grid-template-columns: 1fr;
+  }
+
+  .deposit-cta-divider {
+    display: none;
+  }
+
+  .deposit-find-routes-btn {
+    min-height: 68px;
+  }
+
+  .deposit-controller-host,
+  .paybutton-controller-frame {
+    min-height: 68px;
+    height: 68px;
+  }
+
   .token-grid {
     grid-template-columns: 1fr;
   }
@@ -583,6 +757,7 @@ pre.activity-sub {
   .meta-footer {
     grid-template-columns: 1fr;
   }
+
 }
 
 @media (max-width: 640px) {
@@ -598,4 +773,5 @@ pre.activity-sub {
     grid-column: 2;
     text-align: left;
   }
+
 }

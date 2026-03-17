@@ -1,44 +1,123 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { browser } from '$app/environment';
   import View from '$lib/view/View.svelte';
+  import EmbeddedPayButton from '$lib/components/Embed/EmbeddedPayButton.svelte';
   import { appState } from '$lib/stores/appStateStore';
-  import { initializeXLN, isLoading, error, prepareDevSession } from '$lib/stores/xlnStore';
+  import { initializeXLN, isLoading, error, prepareDevSession, suspendClientActivity, xlnFunctions } from '$lib/stores/xlnStore';
   import { settingsOperations } from '$lib/stores/settingsStore';
   import { tabOperations } from '$lib/stores/tabStore';
   import { timeOperations } from '$lib/stores/timeStore';
+  import { vaultOperations } from '$lib/stores/vaultStore';
+  import { initializeActiveTabLock } from '$lib/utils/activeTabLock';
 
-  // Parse URL params
   let embedMode = false;
+  let embeddedPayMode = false;
+  let deepLinkedPayRoute = false;
+  let hasActiveTabLock = false;
+  let activeTabLockReady = false;
+  let embedBootReady = false;
 
-  if (browser) {
+  function syncModeFromLocation(): void {
+    if (!browser) return;
     const params = new URLSearchParams(window.location.search);
     embedMode = params.get('embed') === '1';
+    const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    const qIndex = rawHash.indexOf('?');
+    const hashRoute = qIndex >= 0 ? rawHash.slice(0, qIndex).trim().toLowerCase() : rawHash.trim().toLowerCase();
+    const hashParams = new URLSearchParams(qIndex >= 0 ? rawHash.slice(qIndex + 1) : rawHash);
+    deepLinkedPayRoute = hashRoute === 'pay';
+    embeddedPayMode =
+      hashRoute === 'pay' &&
+      (
+        hashParams.get('mode') === 'embed' ||
+        hashParams.get('embed') === '1' ||
+        hashParams.get('embed') === 'true'
+      );
   }
 
-  // Initialize runtime on mount
-  onMount(async () => {
+  if (browser) {
+    syncModeFromLocation();
+  }
+
+  async function deactivateThisTab(): Promise<void> {
+    await vaultOperations.suspendAllRuntimeActivity();
+    await suspendClientActivity();
+    hasActiveTabLock = false;
+    activeTabLockReady = true;
+    error.set(null);
+    isLoading.set(false);
+  }
+
+  async function bootApp(): Promise<void> {
+    if (!hasActiveTabLock) return;
+    embedBootReady = false;
     try {
+      console.log('[app.boot] start', { embeddedPayMode });
       await prepareDevSession();
+      console.log('[app.boot] prepareDevSession done');
 
       // Initialize settings first
       settingsOperations.initialize();
+      console.log('[app.boot] settings initialized');
 
-      // Load tabs from storage
+      // Load tabs from storage for both normal and embedded pay flows.
+      // Embedded pay must resolve the same active entity as the normal app.
       tabOperations.loadFromStorage();
-
-      // Initialize default tabs if none exist
-      tabOperations.initializeDefaultTabs();
+      if (!embeddedPayMode) {
+        tabOperations.initializeDefaultTabs();
+      }
+      console.log('[app.boot] tabs initialized');
 
       // Initialize XLN environment (includes history loading)
       await initializeXLN();
+      console.log('[app.boot] initializeXLN done');
+
+      // Embed pay button still needs an active wallet/runtime loaded from storage.
+      await vaultOperations.initialize();
+      console.log('[app.boot] vaultOperations.initialize done');
+      await tick();
+      console.log('[app.boot] store flush done');
 
       // Initialize time machine
-      timeOperations.initialize();
+      if (!embeddedPayMode) {
+        timeOperations.initialize();
+        console.log('[app.boot] time initialized');
+      }
+      embedBootReady = true;
+      console.log('[app.boot] ready', { embeddedPayMode });
     } catch (err) {
       console.error('❌ Failed to initialize XLN:', err);
       error.set((err as Error)?.message || 'Initialization failed');
+      embedBootReady = false;
     }
+  }
+
+  // Initialize runtime on mount
+  onMount(() => {
+    const handleLocationChange = () => {
+      syncModeFromLocation();
+    };
+    window.addEventListener('hashchange', handleLocationChange);
+    if (embeddedPayMode) {
+      hasActiveTabLock = true;
+      activeTabLockReady = true;
+      void bootApp();
+      return () => {
+        window.removeEventListener('hashchange', handleLocationChange);
+      };
+    }
+
+    const releaseLock = initializeActiveTabLock(async () => {
+      await deactivateThisTab();
+    });
+    hasActiveTabLock = true;
+    activeTabLockReady = true;
+    void bootApp();
+    return () => {
+      window.removeEventListener('hashchange', handleLocationChange);
+      releaseLock();
+    };
   });
 </script>
 
@@ -46,7 +125,17 @@
   <title>xln - {$appState.mode === 'user' ? 'Wallet' : 'Network Workspace'}</title>
 </svelte:head>
 
-{#if $isLoading}
+{#if activeTabLockReady && !hasActiveTabLock}
+  <div class="inactive-tab-screen">
+    <h2>Inactive Tab</h2>
+    <p>This wallet tab lost the active lock to a newer tab.</p>
+    <button on:click={() => window.location.reload()}>Reload to acquire active lock</button>
+  </div>
+{:else if embeddedPayMode}
+  <div class="embedded-pay-screen">
+    <EmbeddedPayButton />
+  </div>
+{:else if !activeTabLockReady || $isLoading || !$xlnFunctions.isReady}
   <div class="loading-screen">
     <img src="/img/finis.png" alt="Loading" class="loading-spinner" />
     <p>Loading xln runtime...</p>
@@ -75,7 +164,9 @@
   }
 
   .loading-screen,
-  .error-screen {
+  .error-screen,
+  .inactive-tab-screen,
+  .embedded-pay-screen {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -107,6 +198,42 @@
     padding: 40px;
   }
 
+  .embedded-pay-screen {
+    padding: 0;
+    background: transparent;
+  }
+
+  .inactive-tab-screen {
+    gap: 14px;
+    padding: 40px;
+    text-align: center;
+  }
+
+  .inactive-tab-screen h2 {
+    font-size: 32px;
+    color: #f2e7c8;
+    margin: 0;
+  }
+
+  .inactive-tab-screen p {
+    margin: 0;
+    color: rgba(232, 232, 232, 0.72);
+    font-size: 16px;
+  }
+
+  .inactive-tab-screen button,
+  .error-screen button {
+    appearance: none;
+    border: 1px solid rgba(217, 179, 58, 0.45);
+    background: rgba(38, 30, 18, 0.96);
+    color: #f2d37a;
+    border-radius: 12px;
+    padding: 12px 18px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
   .error-screen h2 {
     font-size: 32px;
     color: #ff4444;
@@ -120,18 +247,10 @@
     border: 1px solid rgba(255, 68, 68, 0.3);
   }
 
-  .error-screen button {
-    padding: 12px 32px;
-    background: #007acc;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 16px;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
+  .inactive-tab-screen button:hover,
   .error-screen button:hover {
-    background: #0086e6;
+    transform: translateY(-1px);
+    border-color: rgba(217, 179, 58, 0.6);
+    background: rgba(52, 39, 20, 0.98);
   }
 </style>

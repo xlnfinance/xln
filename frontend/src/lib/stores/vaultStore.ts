@@ -7,6 +7,7 @@ import { settings } from './settingsStore';
 import { toasts } from './toastStore';
 import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
 import { writeOnboardingComplete } from '$lib/utils/onboardingState';
+import { clearAllPersistentClientState, resetEverything } from '$lib/utils/resetEverything';
 
 // Types
 export interface Signer {
@@ -67,6 +68,7 @@ const normalizeEntityId = (value: string | null | undefined): string => String(v
 
 // Main store
 export const runtimesState = writable<RuntimesState>(defaultState);
+export const vaultStorageLoaded = writable(false);
 
 // Derived stores
 export const activeRuntime = derived(runtimesState, ($state) => {
@@ -108,6 +110,7 @@ type RuntimeP2PHandle = {
   isConnected?: () => boolean;
   connect?: () => void;
   refreshGossip?: () => void;
+  getReconnectState?: () => { attempt: number; nextAt: number } | null;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
@@ -221,6 +224,70 @@ async function enqueueAndAwait(
 ): Promise<void> {
   xln.enqueueRuntimeInput(env, runtimeInput);
   await waitForCondition(ready, label, timeoutMs);
+}
+
+async function ensureRuntimePipelineAlive(runtime: Runtime | null, xln: XLNModule): Promise<void> {
+  if (!runtime?.env) return;
+  const resolvedRuntimeId = normalizeRuntimeId(runtime.id);
+  if (!resolvedRuntimeId) return;
+  const env = runtime.env;
+  console.log(
+    `[VaultStore.ensureRuntimePipelineAlive] runtime=${resolvedRuntimeId.slice(0, 12)} envRuntime=${String(env.runtimeId || 'none').slice(0, 12)} loopActive=${String(env.runtimeState?.loopActive ?? 'none')}`,
+  );
+  registerRuntimeEnvChange(resolvedRuntimeId, env, xln);
+  const envRuntimeId = normalizeRuntimeId(env.runtimeId || '');
+  if (envRuntimeId !== resolvedRuntimeId) {
+    throw new Error(
+      `[VaultStore.ensureRuntimePipelineAlive] Runtime isolation mismatch: selected=${resolvedRuntimeId} env.runtimeId=${String(env.runtimeId || 'none')}`,
+    );
+  }
+  if (!env.runtimeState?.loopActive && xln.startRuntimeLoop) {
+    xln.startRuntimeLoop(env);
+    console.log(`[VaultStore.ensureRuntimePipelineAlive] ♻️ Restarted runtime loop for ${resolvedRuntimeId.slice(0, 12)}`);
+  }
+
+  let p2p = getRuntimeP2PHandle(xln, env);
+  console.log(
+    `[VaultStore.ensureRuntimePipelineAlive] p2p before start runtime=${resolvedRuntimeId.slice(0, 12)} present=${String(Boolean(p2p))} connected=${String(typeof p2p?.isConnected === 'function' ? p2p.isConnected() : 'unknown')}`,
+  );
+  if (!p2p) {
+    xln.startP2P(env, {
+      relayUrls: resolveRelayUrls(),
+      gossipPollMs: BROWSER_GOSSIP_POLL_MS,
+    });
+    p2p = getRuntimeP2PHandle(xln, env);
+    console.log(`[VaultStore.ensureRuntimePipelineAlive] ♻️ Started P2P for ${resolvedRuntimeId.slice(0, 12)}`);
+  } else if (typeof p2p.isConnected === 'function' && !p2p.isConnected()) {
+    const waitDeadline = Date.now() + 2_000;
+    while (Date.now() < waitDeadline) {
+      if (p2p.isConnected()) {
+        console.log(`[VaultStore.ensureRuntimePipelineAlive] ⏳ P2P connected without reconnect for ${resolvedRuntimeId.slice(0, 12)}`);
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (p2p.isConnected()) {
+      // no-op
+    } else {
+    const reconnectState = typeof p2p.getReconnectState === 'function' ? p2p.getReconnectState() : null;
+    if (!reconnectState && typeof p2p.connect === 'function') {
+      p2p.connect();
+      console.log(`[VaultStore.ensureRuntimePipelineAlive] ♻️ Reconnected P2P for ${resolvedRuntimeId.slice(0, 12)}`);
+    } else if (reconnectState) {
+      console.log(
+        `[VaultStore.ensureRuntimePipelineAlive] ⏳ P2P reconnect already pending for ${resolvedRuntimeId.slice(0, 12)} ` +
+        `(attempt=${reconnectState.attempt})`,
+      );
+    }
+    }
+  }
+
+  if (p2p && typeof p2p.refreshGossip === 'function') {
+    p2p.refreshGossip();
+  }
+  console.log(
+    `[VaultStore.ensureRuntimePipelineAlive] p2p ready runtime=${resolvedRuntimeId.slice(0, 12)} connected=${String(typeof p2p?.isConnected === 'function' ? p2p.isConnected() : 'unknown')}`,
+  );
 }
 
 const hasRuntimeJurisdictionAddresses = (replica: unknown): boolean => {
@@ -676,27 +743,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[VaultStore] Strict restore corruption detected for ${runtime.id.slice(0, 12)}; clearing runtime storage`, error);
       if (isFinancialRestoreFailure(error)) {
-        const resetEnv = xln.createEmptyEnv(runtimeSeed);
-        applyRuntimeLogPreference(resetEnv);
-        resetEnv.runtimeId = runtimeIdLower;
-        resetEnv.dbNamespace = runtimeIdLower;
-        await xln.clearDB(resetEnv);
-        try {
-          localStorage.clear();
-        } catch {
-          // ignore storage errors
-        }
-        try {
-          sessionStorage.clear();
-        } catch {
-          // ignore storage errors
-        }
-        try {
-          sessionStorage.setItem('xln-reset-notice', 'Network was reset');
-        } catch {
-          // ignore storage errors
-        }
-        window.location.reload();
+        await resetEverything(error);
         throw error;
       }
       try {
@@ -997,6 +1044,15 @@ function registerRuntimeResumeListener(): void {
 
   // Runtime operations
 export const vaultOperations = {
+  async suspendAllRuntimeActivity(): Promise<void> {
+    const entries = Array.from(get(runtimes).entries());
+    await Promise.all(entries.map(async ([runtimeId, entry]) => {
+      unregisterRuntimeEnvChange(runtimeId);
+      if (!entry?.env) return;
+      await stopRuntimeEnv(entry.env);
+    }));
+  },
+
   async refreshActiveRuntimeFromDbIfBehind(): Promise<boolean> {
     if (resumeRefreshPromise) return resumeRefreshPromise;
     resumeRefreshPromise = (async () => {
@@ -1108,12 +1164,20 @@ export const vaultOperations = {
             ? normalizedActiveId
             : (Object.keys(normalizedRuntimes)[0] || null),
         });
-        console.log('🔐 Runtimes loaded from localStorage');
+        console.log('🔐 Runtimes loaded from localStorage', {
+          count: Object.keys(normalizedRuntimes).length,
+          activeRuntimeId: normalizedActiveId && normalizedRuntimes[normalizedActiveId]
+            ? normalizedActiveId
+            : (Object.keys(normalizedRuntimes)[0] || null),
+          runtimeIds: Object.keys(normalizedRuntimes),
+        });
       }
+      vaultStorageLoaded.set(true);
     } catch (error) {
       console.error('❌ Failed to load runtimes (clearing corrupted storage):', error);
       localStorage.removeItem(VAULT_STORAGE_KEY);
       runtimesState.set(defaultState);
+      vaultStorageLoaded.set(true);
     }
   },
 
@@ -1517,38 +1581,7 @@ export const vaultOperations = {
         });
         registerRuntimeEnvChange(resolvedRuntimeId, env, xln);
       }
-      if (env) {
-        registerRuntimeEnvChange(resolvedRuntimeId, env, xln);
-        const envRuntimeId = normalizeRuntimeId(env.runtimeId || '');
-        if (envRuntimeId !== resolvedRuntimeId) {
-          throw new Error(
-            `[VaultStore.selectRuntime] Runtime isolation mismatch: selected=${resolvedRuntimeId} env.runtimeId=${String(env.runtimeId || 'none')}`
-          );
-        }
-        if (!env.runtimeState?.loopActive && xln.startRuntimeLoop) {
-          xln.startRuntimeLoop(env);
-          console.log(`[VaultStore.selectRuntime] ♻️ Restarted runtime loop for ${resolvedRuntimeId.slice(0, 12)}`);
-        }
-
-        let p2p = getRuntimeP2PHandle(xln, env);
-        if (!p2p) {
-          xln.startP2P(env, {
-            relayUrls: resolveRelayUrls(),
-            gossipPollMs: BROWSER_GOSSIP_POLL_MS,
-          });
-          p2p = getRuntimeP2PHandle(xln, env);
-          console.log(`[VaultStore.selectRuntime] ♻️ Started P2P for ${resolvedRuntimeId.slice(0, 12)}`);
-        } else if (p2p && typeof p2p.isConnected === 'function' && !p2p.isConnected()) {
-          if (typeof p2p.connect === 'function') {
-            p2p.connect();
-            console.log(`[VaultStore.selectRuntime] ♻️ Reconnected P2P for ${resolvedRuntimeId.slice(0, 12)}`);
-          }
-        }
-
-        if (p2p && typeof p2p.refreshGossip === 'function') {
-          p2p.refreshGossip();
-        }
-      }
+      await ensureRuntimePipelineAlive(runtime ? { ...runtime, env } : null, xln);
     }
 
     activeRuntimeId.set(resolvedRuntimeId);
@@ -1771,10 +1804,11 @@ export const vaultOperations = {
       this.loadFromStorage();
       const current = get(runtimesState);
       const all = Object.values(current.runtimes);
+      let xln: XLNModule | null = null;
 
       if (all.length > 0) {
         const { getXLN } = await import('./xlnStore');
-        const xln = await getXLN();
+        xln = await getXLN();
 
         for (const runtime of all) {
           const runtimeId = normalizeRuntimeId(runtime.id);
@@ -1811,13 +1845,30 @@ export const vaultOperations = {
       const activeId = keepCurrentSelection
         ? currentSelected
         : normalizeRuntimeId(resolvedActive?.key ?? allLatest[0]?.id ?? null);
+      console.log('[VaultStore.initialize] selection inputs', {
+        runtimeCount: allLatest.length,
+        runtimeIds: Object.keys(latest.runtimes),
+        latestActiveRuntimeId: latest.activeRuntimeId,
+        currentSelected,
+        keepCurrentSelection,
+        chosenActiveId: activeId || null,
+      });
       activeRuntimeId.set(activeId);
-      const runtimeToSync = activeId ? latest.runtimes[activeId] : null;
+      const runtimeEntry = activeId ? get(runtimes).get(activeId) : null;
+      const runtimeMeta = activeId ? latest.runtimes[activeId] : null;
+      const runtimeToSync = runtimeMeta && runtimeEntry?.env
+        ? { ...runtimeMeta, env: runtimeEntry.env }
+        : runtimeMeta;
       if (activeId && runtimeToSync?.env && normalizeRuntimeId(runtimeToSync.env.runtimeId || '') !== activeId) {
         throw new Error(
           `[VaultStore.initialize] Active runtime env mismatch: active=${activeId} env.runtimeId=${String(runtimeToSync.env.runtimeId || 'none')}`
         );
       }
+      if (runtimeToSync) {
+        const activeXln = xln ?? await getXLN();
+        await ensureRuntimePipelineAlive(runtimeToSync, activeXln);
+      }
+      console.log('[VaultStore.initialize] Active runtime selected:', activeId || 'none');
       this.syncRuntime(runtimeToSync);
       initialized = true;
     })();
@@ -1835,6 +1886,7 @@ export const vaultOperations = {
     await Promise.all(runtimeIds.map(id => cleanupRuntimeEnv(id)));
 
     runtimesState.set(defaultState);
+    vaultStorageLoaded.set(true);
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(VAULT_STORAGE_KEY);
     }

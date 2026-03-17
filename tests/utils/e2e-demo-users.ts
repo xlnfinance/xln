@@ -38,12 +38,10 @@ const deriveRuntimeIdFromMnemonic = (mnemonic: string): string =>
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function openRuntimeDropdown(page: Page): Promise<void> {
-  const trigger = page.locator('button').filter({
-    hasText: /Add Runtime|Select Runtime|0x[a-fA-F0-9]{4}\.\.\.[a-fA-F0-9]{4}/,
-  }).first();
+  const trigger = page.locator('.context-switcher .dropdown-trigger, .context-switcher .pill-trigger').first();
   await expect(trigger).toBeVisible({ timeout: 15_000 });
   await trigger.click();
-  await expect(page.locator('.menu-content')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.context-switcher .dropdown-menu').first()).toBeVisible({ timeout: 10_000 });
 }
 
 async function ensureRuntimeCreationView(page: Page, label: string): Promise<void> {
@@ -72,7 +70,7 @@ async function ensureRuntimeCreationView(page: Page, label: string): Promise<voi
   }
 
   await openRuntimeDropdown(page);
-  const addRuntimeItem = page.locator('.menu-content .menu-item').filter({ hasText: /Add Runtime/i }).first();
+  const addRuntimeItem = page.locator('.switcher-menu .add-runtime-btn').filter({ hasText: /Add Runtime/i }).first();
   await expect(addRuntimeItem).toBeVisible({ timeout: 10_000 });
   await addRuntimeItem.click();
 
@@ -369,9 +367,48 @@ export async function switchToRuntime(page: Page, label: string): Promise<void> 
 
 export async function switchToRuntimeId(page: Page, runtimeId: string): Promise<void> {
   const normalizedRuntimeId = runtimeId.toLowerCase();
+  const currentRuntimeId = await page.evaluate(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+      };
+    }).isolatedEnv;
+    return String(env?.runtimeId || '').toLowerCase();
+  });
+  if (currentRuntimeId === normalizedRuntimeId) {
+    await waitForRuntimeReady(page, normalizedRuntimeId);
+    await dismissOnboardingIfVisible(page);
+    await completeProfileOnboardingIfVisible(page, `Runtime ${normalizedRuntimeId.slice(2, 6)}`);
+    await ensureRuntimeOnline(page, `switch-id-${runtimeId.slice(0, 8)}`);
+    return;
+  }
+  const switchedViaStorage = await page.evaluate((targetRuntimeId) => {
+    const raw = window.localStorage.getItem('xln-vaults');
+    if (!raw) return false;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || !parsed.runtimes || typeof parsed.runtimes !== 'object') return false;
+      const runtimeKeys = Object.keys(parsed.runtimes);
+      const matchingKey = runtimeKeys.find((key) => key.toLowerCase() === targetRuntimeId);
+      if (!matchingKey) return false;
+      parsed.activeRuntimeId = matchingKey;
+      window.localStorage.setItem('xln-vaults', JSON.stringify(parsed));
+      return true;
+    } catch {
+      return false;
+    }
+  }, normalizedRuntimeId);
+  if (switchedViaStorage) {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForRuntimeReady(page, normalizedRuntimeId);
+    await dismissOnboardingIfVisible(page);
+    await completeProfileOnboardingIfVisible(page, `Runtime ${normalizedRuntimeId.slice(2, 6)}`);
+    await ensureRuntimeOnline(page, `switch-id-${runtimeId.slice(0, 8)}`);
+    return;
+  }
   const shortAddress = `${normalizedRuntimeId.slice(0, 6)}...${normalizedRuntimeId.slice(-4)}`;
   await openRuntimeDropdown(page);
-  const targetItem = page.locator('.menu-content .menu-item').filter({ hasText: shortAddress }).first();
+  const targetItem = page.locator('.switcher-menu .runtime-main').filter({ hasText: shortAddress }).first();
   await expect(targetItem, `runtime dropdown must contain ${shortAddress}`).toBeVisible({ timeout: 15_000 });
   await targetItem.click();
   await waitForRuntimeReady(page, normalizedRuntimeId);

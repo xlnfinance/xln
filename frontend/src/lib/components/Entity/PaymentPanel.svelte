@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
+  import { RefreshCw } from 'lucide-svelte';
   import type {
     AccountMachine,
     RoutedEntityInput as EntityInputPayload,
     EntityReplica,
     Env,
     PaymentRoute,
-    PersistedFrameJournal,
     Profile as GossipProfile,
   } from '@xln/runtime/xln-api';
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, enqueueEntityInputs } from '../../stores/xlnStore';
@@ -37,7 +37,7 @@
   let tokenId = 1;
   let description = '';
   let descriptionLocked = false;
-  let useHtlc = true; // Hashlock by default (atomic), optional direct (unsafe)
+  let useHtlc = true;
   let findingRoutes = false;
   let sendingPayment = false;
   type RouteOption = {
@@ -60,16 +60,6 @@
   let paymentPanelEl: HTMLDivElement | null = null;
   let routesPanelEl: HTMLDivElement | null = null;
   let refreshingRecipientOptions = false;
-  let hostedCheckoutMode = false;
-  let hostedCheckoutRouteKey = '';
-  let hostedCheckoutPreparing = false;
-  let hostedCheckoutAwaitingConfirmation = false;
-  let hostedCheckoutPendingHashlock: string | null = null;
-  let hostedCheckoutStatusMessage = '';
-  let hostedCheckoutSuccessVisible = false;
-  let hostedCheckoutWatcherToken = 0;
-  let hostedCheckoutCloseTimer: ReturnType<typeof setTimeout> | null = null;
-  let hostedCheckoutShutdownStarted = false;
   let seededDefaultTarget = false;
   const REPEAT_OPTIONS = [
     { value: 0, label: 'No repeat' },
@@ -86,34 +76,22 @@
   const MIN_SELF_CYCLE_INTERMEDIATES = 2;
   const GOSSIP_REFRESH_ATTEMPTS = 4;
   const GOSSIP_REFRESH_WAIT_MS = 250;
-
   type LockBookEntry = {
     accountId: string;
     tokenId: number;
     direction: 'incoming' | 'outgoing';
   };
 
-  type RuntimeP2PController = {
-    close?: () => void;
-    syncProfiles?: () => Promise<boolean>;
-    refreshGossip?: () => Promise<void> | void;
-    sendDebugEvent?: (data: unknown) => unknown;
-  };
-  type RuntimeStateEnv = Env & {
-    runtimeState?: {
-      p2p?: RuntimeP2PController;
-    };
-  };
   type SendPaymentResult = {
     queued: boolean;
     hashlock: string | null;
   };
-  type PersistedFrameLogEntry = PersistedFrameJournal['logs'][number];
 
   $: currentReplicas = $replicas;
   $: currentEnv = $xlnEnvironment;
   $: activeXlnFunctions = $xlnFunctions;
   $: activeIsLive = $globalIsLive;
+  $: isSelfRecipient = Boolean(targetEntityId) && normalizeEntityId(targetEntityId) === normalizeEntityId(entityId);
 
   const getGossipProfiles = (): GossipProfile[] => currentEnv?.gossip?.getProfiles?.() || [];
 
@@ -194,8 +172,6 @@
     const recipientUserId = sanitizePrefillText(getURLParamValue(['u', 'uid', 'recipient_user_id', 'userId', 'recipientId']), 96);
     const modeParam = sanitizePrefillText(getURLParamValue(['mode']), 16).toLowerCase();
     const noteLockedParam = getURLParamValue(['locked', 'note_locked', 'description_locked', 'memo_locked', 'lock_note']);
-    const checkoutParam = getURLParamValue(['checkout', 'autoclose', 'close']);
-
     if (targetParam) targetEntityId = targetParam;
     if (amountParam) amount = amountParam;
     if (tokenParam) {
@@ -212,22 +188,21 @@
       description = noteParts.join(' | ');
     }
 
-    if (modeParam === 'direct' || modeParam === 'unsafe') useHtlc = false;
-    if (modeParam === 'hashlock' || modeParam === 'htlc') useHtlc = true;
-    if (hashRoute === 'pay' && !modeParam) useHtlc = true;
-    hostedCheckoutMode =
-      hashRoute === 'pay' &&
-      (parseBooleanParam(checkoutParam) || Boolean(targetParam || amountParam || noteParam || recipientUserId));
-    if (hostedCheckoutMode) useHtlc = true;
+    if (modeParam === 'direct' || modeParam === 'unsafe' || modeParam === 'hashlock' || modeParam === 'htlc') {
+      useHtlc = true;
+    }
+    if (hashRoute === 'pay') useHtlc = true;
+    console.info('[PaymentPanel.prefill]', {
+      hashRoute,
+      useHtlc,
+      targetEntityId: targetParam || targetEntityId,
+      amount: amountParam || amount,
+      tokenId,
+    });
     if (!targetParam && entityId) targetEntityId = entityId;
 
     const explicitLock = parseBooleanParam(noteLockedParam);
     descriptionLocked = explicitLock || Boolean(recipientUserId);
-    hostedCheckoutSuccessVisible = false;
-    hostedCheckoutAwaitingConfirmation = false;
-    hostedCheckoutPendingHashlock = null;
-    hostedCheckoutStatusMessage = '';
-    hostedCheckoutRouteKey = '';
   }
 
   // All entities for dropdown (local + gossip network)
@@ -315,45 +290,6 @@
     repeatStoppedReason = reason;
   }
 
-  const clearHostedCheckoutCloseTimer = () => {
-    if (hostedCheckoutCloseTimer) {
-      clearTimeout(hostedCheckoutCloseTimer);
-      hostedCheckoutCloseTimer = null;
-    }
-  };
-
-  const cancelHostedCheckoutWatcher = () => {
-    hostedCheckoutWatcherToken += 1;
-    hostedCheckoutAwaitingConfirmation = false;
-    hostedCheckoutPendingHashlock = null;
-    clearHostedCheckoutCloseTimer();
-  };
-
-  async function shutdownHostedCheckoutRuntime(): Promise<void> {
-    if (!hostedCheckoutMode || hostedCheckoutShutdownStarted) return;
-    hostedCheckoutShutdownStarted = true;
-    const env = currentEnv as RuntimeStateEnv | null;
-    if (!env) return;
-
-    try {
-      env.runtimeState?.p2p?.close?.();
-    } catch {
-      // best effort
-    }
-
-    try {
-      const xln = await getXLN();
-      xln.stopP2P(env);
-    } catch {
-      // best effort
-    }
-  }
-
-  async function closeHostedCheckoutWindow(): Promise<void> {
-    await shutdownHostedCheckoutRuntime();
-    window.close();
-  }
-
   const restartRepeatTimer = () => {
     clearRepeatTimer();
     if (!repeatArmed || repeatIntervalMs <= 0 || selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
@@ -375,26 +311,11 @@
 
   onDestroy(() => {
     clearRepeatTimer();
-    cancelHostedCheckoutWatcher();
-    if (hostedCheckoutMode) {
-      void shutdownHostedCheckoutRuntime();
-    }
   });
-
-  async function scrollHostedCheckoutIntoView(): Promise<void> {
-    if (!hostedCheckoutMode) return;
-    await tick();
-    if (routesPanelEl && routes.length > 0) {
-      routesPanelEl.scrollIntoView({ behavior: 'smooth', block: 'end', inline: 'nearest' });
-      return;
-    }
-    paymentPanelEl?.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
-  }
 
   function resetQuotedRoutes(): void {
     routes = [];
     selectedRouteIndex = -1;
-    hostedCheckoutRouteKey = '';
     clearRepeatTimer();
     repeatArmed = false;
     repeatStoppedReason = '';
@@ -414,6 +335,15 @@
     const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === norm);
     const name = profile?.name;
     return typeof name === 'string' && name.trim() ? name.trim() : id;
+  }
+
+  function buildHostedCheckoutRouteLabel(route: RouteOption): string {
+    const viaNames = route.path
+      .slice(1, -1)
+      .map((hopId) => getEntityName(hopId))
+      .map((name) => String(name || '').trim())
+      .filter(Boolean);
+    return viaNames.length > 0 ? `Pay via ${viaNames.join('-')}` : 'Pay now';
   }
 
   function getGossipProfileByEntityId(id: string): GossipProfile | undefined {
@@ -1057,111 +987,53 @@
     await computeRoutes(false);
   }
 
-  async function autoPrepareHostedCheckout(checkoutKey: string): Promise<void> {
-    if (!hostedCheckoutMode || hostedCheckoutPreparing) return;
-    hostedCheckoutPreparing = true;
-    hostedCheckoutStatusMessage = 'Preparing payment route';
-    try {
-      await scrollHostedCheckoutIntoView();
-      await computeRoutes(false);
-      if (hostedCheckoutRouteKey !== checkoutKey) return;
-      if (routes.length > 0) {
-        selectedRouteIndex = 0;
-        hostedCheckoutStatusMessage = 'Route ready';
-      }
-    } finally {
-      hostedCheckoutPreparing = false;
+  export async function embeddedPrepareFirstRoute(): Promise<string> {
+    if (sendingPayment || findingRoutes) {
+      throw new Error('Payment already in progress');
     }
+    if (isSelfRecipient) {
+      throw new Error('Self-payment requires explicit route selection');
+    }
+    preflightError = null;
+    await findRoutes();
+    if (routes.length === 0) {
+      throw new Error(preflightError || 'No route found');
+    }
+    selectedRouteIndex = 0;
+    return buildHostedCheckoutRouteLabel(routes[0]!);
   }
 
   async function payNowCheapest() {
     if (sendingPayment || findingRoutes) return;
+    if (isSelfRecipient) return;
     await computeRoutes(false);
     if (routes.length === 0) return;
     selectedRouteIndex = 0; // routes are sorted by cheapest fee by default
     await sendPayment(true);
   }
 
-  function getPersistedLogData(entry: PersistedFrameLogEntry): Record<string, unknown> {
-    const data = entry?.data;
-    return data && typeof data === 'object' ? data : {};
-  }
-
-  async function waitForHostedCheckoutConfirmation(hashlock: string, fromHeight: number): Promise<void> {
-    if (!hostedCheckoutMode) return;
-    const env = currentEnv;
-    if (!env) return;
-    const xln = await getXLN();
-    if (
-      typeof xln.getPersistedLatestHeight !== 'function' ||
-      typeof xln.readPersistedFrameJournal !== 'function'
-    ) {
-      return;
+  export async function embeddedPayUsingFirstRoute(): Promise<void> {
+    console.info('[PaymentPanel.embeddedPayUsingFirstRoute] start');
+    if (sendingPayment || findingRoutes) {
+      throw new Error('Payment already in progress');
     }
-
-    const watcherToken = ++hostedCheckoutWatcherToken;
-    hostedCheckoutAwaitingConfirmation = true;
-    hostedCheckoutPendingHashlock = hashlock;
-    hostedCheckoutStatusMessage = 'Waiting for persisted confirmation';
-    hostedCheckoutSuccessVisible = false;
-    clearHostedCheckoutCloseTimer();
-    await scrollHostedCheckoutIntoView();
-
-    const targetEntity = normalizeEntityId(entityId);
-    const targetHashlock = String(hashlock).toLowerCase();
-    let nextHeight = Math.max(1, fromHeight);
-    const deadlineAt = Date.now() + 45_000;
-
-    try {
-      while (Date.now() < deadlineAt) {
-        if (watcherToken !== hostedCheckoutWatcherToken) return;
-        const latestHeight = await xln.getPersistedLatestHeight(env);
-        for (let height = nextHeight; height <= latestHeight; height += 1) {
-          if (watcherToken !== hostedCheckoutWatcherToken) return;
-          const receipt = await xln.readPersistedFrameJournal(env, height);
-          const logs = Array.isArray(receipt?.logs) ? receipt.logs : [];
-          for (const entry of logs) {
-            if (entry.message !== 'PaymentFinalized' && entry.message !== 'PaymentFailed') continue;
-            const data = getPersistedLogData(entry);
-            const logHashlock = typeof data.hashlock === 'string' ? data.hashlock.toLowerCase() : '';
-            if (logHashlock !== targetHashlock) continue;
-            const logEntity =
-              typeof data.entityId === 'string'
-                ? normalizeEntityId(data.entityId)
-                : normalizeEntityId(entry.entityId);
-            if (logEntity && logEntity !== targetEntity) continue;
-            if (entry.message === 'PaymentFailed') {
-              const reason = typeof data.reason === 'string' ? data.reason : 'Payment failed';
-              throw new Error(reason);
-            }
-
-            hostedCheckoutAwaitingConfirmation = false;
-            hostedCheckoutPendingHashlock = hashlock;
-            hostedCheckoutStatusMessage = 'Confirmed. Closing checkout...';
-            hostedCheckoutSuccessVisible = true;
-            toasts.success('Payment confirmed');
-            await scrollHostedCheckoutIntoView();
-            clearRepeatTimer();
-            clearHostedCheckoutCloseTimer();
-            hostedCheckoutCloseTimer = setTimeout(() => {
-              void closeHostedCheckoutWindow();
-            }, 900);
-            return;
-          }
-        }
-        nextHeight = latestHeight + 1;
-        await sleep(250);
-      }
-      throw new Error('Timed out waiting for persisted payment confirmation');
-    } catch (error) {
-      if (watcherToken !== hostedCheckoutWatcherToken) return;
-      hostedCheckoutAwaitingConfirmation = false;
-      hostedCheckoutSuccessVisible = false;
-      const message = error instanceof Error ? error.message : String(error);
-      hostedCheckoutStatusMessage = message;
-      preflightError = message;
-      toasts.error(`Payment confirmation failed: ${message}`);
+    if (isSelfRecipient) {
+      throw new Error('Self-payment requires explicit route selection');
     }
+    if (routes.length === 0 || !routes[selectedRouteIndex]) {
+      await embeddedPrepareFirstRoute();
+    }
+    if (routes.length === 0) {
+      throw new Error(preflightError || 'No route available');
+    }
+    if (selectedRouteIndex < 0 || !routes[selectedRouteIndex]) {
+      selectedRouteIndex = 0;
+    }
+    const result = await sendPayment(true);
+    if (!result.queued) {
+      throw new Error(preflightError || 'Payment failed');
+    }
+    console.info('[PaymentPanel.embeddedPayUsingFirstRoute] done');
   }
 
   async function sendPayment(manual = true): Promise<SendPaymentResult> {
@@ -1185,6 +1057,14 @@
 
       const route = routes[selectedRouteIndex];
       if (!route) throw new Error('Selected route is no longer available');
+      console.info('[PaymentPanel.sendPayment]', {
+        manual,
+        useHtlc,
+        selectedRouteIndex,
+        route: route.path,
+        senderAmount: route.senderAmount.toString(),
+        recipientAmount: route.recipientAmount.toString(),
+      });
       await ensureRouteKeyCoverage(route.path);
       const routeTargetEntityId = route.path[route.path.length - 1] || targetEntityId;
 
@@ -1194,11 +1074,6 @@
       const descriptionValue = description.trim();
       let paymentInput: EntityInputPayload;
       let queuedHashlock: string | null = null;
-      const persistedStartHeight =
-        hostedCheckoutMode && manual && typeof xln.getPersistedLatestHeight === 'function'
-          ? await xln.getPersistedLatestHeight(env)
-          : 0;
-
       if (useHtlc) {
         // Hashlock: atomic multi-hop with hashlock
         const { secret, hashlock } = generateSecretHashlock();
@@ -1238,10 +1113,12 @@
 
       await enqueueEntityInputs(env, [paymentInput]);
       queued = true;
-      console.log(`[Send] ${useHtlc ? 'Hashlock' : 'Direct (unsafe)'} payment sent via:`, route.path.join(' -> '));
-      if (hostedCheckoutMode && manual && queuedHashlock) {
-        void waitForHostedCheckoutConfirmation(queuedHashlock, persistedStartHeight + 1);
-      }
+      console.info('[PaymentPanel.sendPayment.queued]', {
+        manual,
+        useHtlc,
+        hashlock: queuedHashlock,
+      });
+      console.log('[Send] Hashlock payment sent via:', route.path.join(' -> '));
       return { queued: true, hashlock: queuedHashlock };
     } catch (error) {
       console.error('[Send] Payment failed:', error);
@@ -1263,8 +1140,6 @@
   function handleTargetChange(e: CustomEvent) {
     targetEntityId = e.detail.value;
     preflightError = null;
-    hostedCheckoutStatusMessage = '';
-    hostedCheckoutSuccessVisible = false;
     resetQuotedRoutes();
   }
 
@@ -1298,15 +1173,11 @@
   function handleTokenChange(e: CustomEvent) {
     tokenId = e.detail.value;
     preflightError = null;
-    hostedCheckoutStatusMessage = '';
-    hostedCheckoutSuccessVisible = false;
     resetQuotedRoutes();
   }
 
   function handleAmountInput() {
     preflightError = null;
-    hostedCheckoutStatusMessage = '';
-    hostedCheckoutSuccessVisible = false;
     resetQuotedRoutes();
   }
 
@@ -1322,85 +1193,31 @@
     repeatStoppedReason = '';
   }
 
-  $: hostedCheckoutAutoKey =
-    hostedCheckoutMode
-      ? `${normalizeEntityId(entityId)}|${normalizeEntityId(targetEntityId)}|${tokenId}|${amount.trim()}|${description.trim()}`
-      : '';
-
-  $: if (
-    hostedCheckoutMode &&
-    hostedCheckoutAutoKey &&
-    activeIsLive &&
-    currentEnv &&
-    currentReplicas &&
-    !findingRoutes &&
-    !sendingPayment &&
-    !hostedCheckoutAwaitingConfirmation &&
-    routes.length === 0 &&
-    hostedCheckoutRouteKey !== hostedCheckoutAutoKey
-  ) {
-    hostedCheckoutRouteKey = hostedCheckoutAutoKey;
-    void autoPrepareHostedCheckout(hostedCheckoutAutoKey);
-  }
-
-  $: hostedCheckoutBannerMessage = (() => {
-    if (!hostedCheckoutMode) return '';
-    if (hostedCheckoutSuccessVisible) return 'Persisted confirmation received';
-    if (hostedCheckoutAwaitingConfirmation) return 'Waiting for persisted confirmation';
-    if (findingRoutes || hostedCheckoutPreparing) return 'Finding best route';
-    if (routes.length > 0) return 'Route ready';
-    return 'Preparing payment';
-  })();
-
   onMount(() => {
     applyPaymentPrefillFromURL();
-    void scrollHostedCheckoutIntoView();
     void refreshServerEntityNames();
     const handleLocationChange = () => {
       applyPaymentPrefillFromURL();
-      void scrollHostedCheckoutIntoView();
-    };
-    const handleHostedCheckoutPageHide = () => {
-      if (!hostedCheckoutMode) return;
-      void shutdownHostedCheckoutRuntime();
     };
     window.addEventListener('hashchange', handleLocationChange);
     window.addEventListener('popstate', handleLocationChange);
-    window.addEventListener('pagehide', handleHostedCheckoutPageHide);
-    window.addEventListener('beforeunload', handleHostedCheckoutPageHide);
     return () => {
       window.removeEventListener('hashchange', handleLocationChange);
       window.removeEventListener('popstate', handleLocationChange);
-      window.removeEventListener('pagehide', handleHostedCheckoutPageHide);
-      window.removeEventListener('beforeunload', handleHostedCheckoutPageHide);
     };
   });
 </script>
 
-<div bind:this={paymentPanelEl} class="payment-panel" class:hosted-checkout={hostedCheckoutMode}>
-  {#if hostedCheckoutMode}
-    <div class="hosted-checkout-banner">
-      <div class="hosted-checkout-copy">
-        <span class="hosted-checkout-eyebrow">Hosted Checkout</span>
-        <strong>{hostedCheckoutBannerMessage}</strong>
-        <span>Review the payment details below, then confirm with Pay Now.</span>
-      </div>
-      <div class="hosted-checkout-summary">
-        <span>{amount || '0.00'} {activeXlnFunctions?.getTokenInfo?.(tokenId)?.symbol || 'token'}</span>
-        <span>{getEntityName(targetEntityId || entityId)}</span>
-      </div>
-    </div>
-  {/if}
-
+<div bind:this={paymentPanelEl} class="payment-panel">
   <div class="recipient-picker-row">
     <div class="recipient-picker-input">
       <EntityInput
-        label="Recipient"
+        label="Entity"
         value={targetEntityId}
         entities={allEntities}
         contacts={selectorContacts}
         preferredId={entityId}
-        placeholder="Select recipient..."
+        placeholder="Select entity..."
         disabled={findingRoutes || sendingPayment}
         on:change={handleTargetChange}
         on:open={handleRecipientPickerOpen}
@@ -1411,10 +1228,11 @@
       class="recipient-refresh-btn"
       on:click={() => void refreshRecipientPickerOptions()}
       disabled={findingRoutes || sendingPayment || refreshingRecipientOptions}
-      title="Refresh available recipients from gossip"
-      aria-label="Refresh recipients"
+      title="Refresh available entities from gossip"
+      aria-label="Refresh entities"
     >
-      {refreshingRecipientOptions ? '...' : 'Refresh'}
+      <RefreshCw size={14} />
+      <span>{refreshingRecipientOptions ? 'Refreshing' : 'Refresh'}</span>
     </button>
   </div>
 
@@ -1473,40 +1291,11 @@
     {/if}
   </div>
 
-  <div class="mode-toggle">
-    <span class="mode-label">Mode</span>
-    <div class="mode-switch" role="group" aria-label="Payment mode">
-      <button
-        type="button"
-        class="mode-btn"
-        class:active={useHtlc}
-        aria-pressed={useHtlc}
-        disabled={hostedCheckoutMode || findingRoutes || sendingPayment}
-        on:click={() => (useHtlc = true)}
-      >
-        Hashlock
-      </button>
-      <button
-        type="button"
-        class="mode-btn unsafe"
-        class:active={!useHtlc}
-        aria-pressed={!useHtlc}
-        disabled={hostedCheckoutMode || findingRoutes || sendingPayment}
-        on:click={() => (useHtlc = false)}
-      >
-        Direct (unsafe)
-      </button>
-    </div>
-    <span class="mode-state" class:safe={useHtlc} class:unsafe={!useHtlc}>
-      {useHtlc ? 'Hashlock active' : 'Direct active (unsafe)'}
-    </span>
-  </div>
-
   <div class="payment-actions">
     <button
       class="btn-pay-now"
       on:click={payNowCheapest}
-      disabled={!targetEntityId || !amount || findingRoutes || sendingPayment || !activeIsLive}
+      disabled={!targetEntityId || !amount || findingRoutes || sendingPayment || !activeIsLive || isSelfRecipient}
     >
       {sendingPayment ? 'Sending...' : (findingRoutes ? 'Finding Routes...' : 'Pay Now')}
     </button>
@@ -1518,6 +1307,12 @@
       {findingRoutes ? 'Finding Routes...' : 'Find Routes'}
     </button>
   </div>
+
+  {#if isSelfRecipient}
+    <div class="payment-note">
+      Self-payment needs an explicit route. Use <strong>Find Routes</strong> first instead of auto-pay.
+    </div>
+  {/if}
 
   {#if routes.length > 0}
     <div bind:this={routesPanelEl} class="routes">
@@ -1572,7 +1367,7 @@
         on:click={() => sendPayment(true)}
         disabled={selectedRouteIndex < 0 || sendingPayment}
       >
-        {sendingPayment ? 'Sending...' : (useHtlc ? 'Send Hashlock Payment' : 'Send Direct Payment')}
+        {sendingPayment ? 'Sending...' : 'Send On Selected Route'}
       </button>
       <label class="repeat-control">
         <span>Repeat</span>
@@ -1598,21 +1393,15 @@
     {/if}
   {/if}
 
-  {#if hostedCheckoutSuccessVisible}
-    <div class="checkout-success" role="status" aria-live="polite">
-      <div class="checkout-success-title">Confirmed</div>
-      <div class="checkout-success-body">{hostedCheckoutStatusMessage || 'Payment settled. Closing checkout...'}</div>
-    </div>
-  {/if}
 </div>
 
 <style>
   .payment-panel {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 18px;
     width: 100%;
-    max-width: 760px;
+    max-width: 1120px;
   }
 
   .recipient-picker-row {
@@ -1627,22 +1416,26 @@
   }
 
   .recipient-refresh-btn {
-    height: 38px;
-    padding: 0 12px;
-    border-radius: 10px;
-    border: 1px solid rgba(148, 163, 184, 0.28);
-    background: rgba(15, 23, 42, 0.78);
-    color: #cbd5e1;
-    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 48px;
+    min-width: 116px;
+    padding: 0 14px;
+    border-radius: 12px;
+    border: none;
+    background: rgba(255, 255, 255, 0.04);
+    color: #cfc7bd;
+    font-size: 13px;
     font-weight: 600;
     cursor: pointer;
-    transition: border-color 0.15s, background 0.15s, color 0.15s;
+    transition: background 0.15s, color 0.15s;
   }
 
   .recipient-refresh-btn:hover:not(:disabled) {
-    border-color: rgba(251, 191, 36, 0.55);
-    background: rgba(30, 41, 59, 0.92);
-    color: #f8fafc;
+    background: rgba(255, 255, 255, 0.07);
+    color: #f5efe6;
   }
 
   .recipient-refresh-btn:disabled {
@@ -1757,7 +1550,7 @@
     min-height: 48px;
     padding: 4px 6px 4px 12px;
     background: #1c1917;
-    border: 1px solid #292524;
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 12px;
   }
 
@@ -1814,7 +1607,7 @@
   input {
     padding: 12px 14px;
     background: #1c1917;
-    border: 1px solid #292524;
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 8px;
     color: #e7e5e4;
     font-size: 14px;
@@ -1861,19 +1654,19 @@
   .payment-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    gap: 12px;
   }
 
   .btn-pay-now {
-    background: linear-gradient(135deg, #15803d, #166534);
-    border: 1px solid #166534;
-    color: #dcfce7;
+    background: linear-gradient(180deg, #7c4a1e, #8f551f);
+    border: 1px solid #a16207;
+    color: #fff7ed;
     font-weight: 700;
   }
 
   .btn-pay-now:hover:not(:disabled) {
-    background: linear-gradient(135deg, #16a34a, #15803d);
-    border-color: #22c55e;
+    background: linear-gradient(180deg, #8d5421, #a16207);
+    border-color: #ca8a04;
   }
 
   .btn-pay-now:disabled {
@@ -1882,13 +1675,13 @@
   }
 
   .btn-find {
-    background: #1c1917;
-    border: 1px solid #292524;
+    background: rgba(255, 255, 255, 0.04);
+    border: none;
     color: #a8a29e;
   }
 
   .btn-find:hover:not(:disabled) {
-    border-color: #fbbf24;
+    background: rgba(255, 255, 255, 0.07);
     color: #fbbf24;
   }
 
@@ -1898,12 +1691,14 @@
   }
 
   .btn-send {
-    background: linear-gradient(135deg, #15803d, #166534);
-    color: #dcfce7;
+    background: linear-gradient(180deg, #7c4a1e, #8f551f);
+    border: 1px solid #a16207;
+    color: #fff7ed;
   }
 
   .btn-send:hover:not(:disabled) {
-    background: linear-gradient(135deg, #16a34a, #15803d);
+    background: linear-gradient(180deg, #8d5421, #a16207);
+    border-color: #ca8a04;
   }
 
   .btn-send:disabled {
@@ -1954,6 +1749,21 @@
 
   .repeat-status.repeat-stopped {
     color: #f87171;
+  }
+
+  .payment-note {
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: none;
+    background: rgba(38, 26, 18, 0.52);
+    color: #d6c7b3;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .payment-note strong {
+    color: #f5d28a;
+    font-weight: 700;
   }
 
   .routes-scroll {
@@ -2047,91 +1857,16 @@
     color: #71717a;
   }
 
-  .mode-toggle {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
+  @media (max-width: 900px) {
+    .recipient-picker-row,
+    .payment-actions,
+    .send-controls {
+      grid-template-columns: 1fr;
+    }
 
-  .mode-label {
-    color: #78716c;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .mode-switch {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px;
-    border: 1px solid #31343d;
-    border-radius: 11px;
-    background: #12141a;
-  }
-
-  .mode-btn {
-    border: 1px solid #2c2f38;
-    border-radius: 8px;
-    background: #161922;
-    color: #9ca3af;
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1;
-    padding: 9px 12px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    white-space: nowrap;
-    opacity: 0.72;
-  }
-
-  .mode-btn:hover:not(:disabled) {
-    color: #e5e7eb;
-    border-color: #4b5563;
-  }
-
-  .mode-btn.active {
-    background: linear-gradient(180deg, rgba(34, 197, 94, 0.9), rgba(22, 163, 74, 0.84));
-    border-color: #22c55e;
-    color: #04130a;
-    opacity: 1;
-  }
-
-  .mode-btn.unsafe.active {
-    background: linear-gradient(180deg, rgba(239, 68, 68, 0.92), rgba(220, 38, 38, 0.84));
-    border-color: #ef4444;
-    color: #200706;
-    opacity: 1;
-  }
-
-  .mode-state {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    padding: 5px 10px;
-    border-radius: 999px;
-    border: 1px solid #353949;
-    background: #151924;
-    color: #94a3b8;
-  }
-
-  .mode-state.safe {
-    border-color: rgba(34, 197, 94, 0.42);
-    color: #86efac;
-    background: rgba(21, 128, 61, 0.15);
-  }
-
-  .mode-state.unsafe {
-    border-color: rgba(239, 68, 68, 0.45);
-    color: #fca5a5;
-    background: rgba(127, 29, 29, 0.14);
-  }
-
-  .mode-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+    .recipient-refresh-btn {
+      width: 100%;
+    }
   }
 
   .checkout-success {

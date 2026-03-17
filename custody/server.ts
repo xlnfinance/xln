@@ -1,14 +1,23 @@
 import { formatUnits } from 'ethers';
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseTokenAmount } from '../runtime/financial-utils';
 import { DEFAULT_TOKENS } from '../runtime/jadapter/default-tokens';
 import { serializeTaggedJson } from '../runtime/serialization-utils';
 import { DaemonRpcClient, type DaemonFrameLog } from './daemon-client';
 import { CustodyStore, type ActivityRecord, type SessionRecord } from './store';
 
-const HOST = process.env.CUSTODY_HOST || '127.0.0.1';
+const HOST = process.env.CUSTODY_HOST || 'localhost';
 const PORT = Number(process.env.CUSTODY_PORT || '8087');
 const DAEMON_WS_URL = process.env.CUSTODY_DAEMON_WS || 'ws://127.0.0.1:8088/rpc';
 const WALLET_URL = process.env.CUSTODY_WALLET_URL || 'https://localhost:8080/app';
+const ENABLE_HTTPS = (() => {
+  const raw = String(process.env.CUSTODY_HTTPS || '').trim().toLowerCase();
+  if (raw === '0' || raw === 'false' || raw === 'no') return false;
+  if (raw === '1' || raw === 'true' || raw === 'yes') return true;
+  return HOST === 'localhost';
+})();
 const CUSTODY_NAME = String(process.env.CUSTODY_PROFILE_NAME || 'Custody').trim() || 'Custody';
 const CUSTODY_JURISDICTION = String(process.env.CUSTODY_JURISDICTION_ID || process.env.CUSTODY_JURISDICTION || 'arrakis').trim();
 const CUSTODY_ENTITY_ID = String(process.env.CUSTODY_ENTITY_ID || '').trim().toLowerCase();
@@ -38,6 +47,22 @@ let lastSyncOkAt = 0;
 let lastSyncError: string | null = null;
 
 const staticDir = new URL('./static/', import.meta.url);
+const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+
+const resolveTlsFiles = (): { key: string; cert: string } | null => {
+  const candidates = [
+    { key: join(repoRoot, 'frontend', 'localhost+3-key.pem'), cert: join(repoRoot, 'frontend', 'localhost+3.pem') },
+    { key: join(repoRoot, 'frontend', 'localhost+2-key.pem'), cert: join(repoRoot, 'frontend', 'localhost+2.pem') },
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate.key) && existsSync(candidate.cert)) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const tlsFiles = ENABLE_HTTPS ? resolveTlsFiles() : null;
 
 const parseCookies = (raw: string | null): Record<string, string> => {
   const out: Record<string, string> = {};
@@ -312,6 +337,14 @@ void syncJournal();
 const server = Bun.serve({
   hostname: HOST,
   port: PORT,
+  ...(tlsFiles
+    ? {
+        tls: {
+          key: Bun.file(tlsFiles.key),
+          cert: Bun.file(tlsFiles.cert),
+        },
+      }
+    : {}),
   async fetch(req) {
     const url = new URL(req.url);
     const pathname = url.pathname;
@@ -475,6 +508,6 @@ process.on('SIGTERM', () => {
   void shutdown().finally(() => process.exit(0));
 });
 
-console.log(`[custody] listening on http://${HOST}:${PORT}`);
+console.log(`[custody] listening on ${tlsFiles ? 'https' : 'http'}://${HOST}:${PORT}`);
 console.log(`[custody] daemon ws: ${DAEMON_WS_URL}`);
 console.log(`[custody] custody entity: ${CUSTODY_ENTITY_ID}`);
