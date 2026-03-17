@@ -519,8 +519,11 @@ export class RuntimeP2P {
     if (client && client.isOpen()) {
       try {
         const sent = client.sendEntityInput(normalizedTargetRuntimeId, input);
+        console.log(
+          `[P2P] enqueueEntityInput attempt target=${normalizedTargetRuntimeId} entity=${input.entityId.slice(-4)} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
+        );
         if (sent) return;
-            console.warn(`P2P-SEND-FAILED: Client.send returned false for ${normalizedTargetRuntimeId}`);
+        console.warn(`P2P-SEND-FAILED: Client.send returned false for ${normalizedTargetRuntimeId}`);
       } catch (error) {
         const message = (error as Error).message || String(error);
         if (message.includes('P2P_NO_PUBKEY')) {
@@ -604,6 +607,9 @@ export class RuntimeP2P {
       for (const entry of queue) {
         try {
           const sent = client.sendEntityInput(targetRuntimeId, entry.input);
+          console.log(
+            `[P2P] flushPending target=${targetRuntimeId} entity=${entry.input.entityId.slice(-4)} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
+          );
           if (!sent) remaining.push(entry);
         } catch {
           remaining.push(entry);

@@ -17,7 +17,7 @@
   $: displayName = hasRealName ? (name || '').trim() : (safeEntityId || 'Unknown');
   $: detailAddress = safeEntityId;
   $: identiconSvg = safeEntityId
-    ? (activeXlnFunctions?.generateEntityAvatar?.(safeEntityId) || '')
+    ? (activeXlnFunctions?.isReady ? (activeXlnFunctions.generateEntityAvatar?.(safeEntityId) || '') : '')
     : '';
   $: href = safeEntityId ? `/address/${encodeURIComponent(safeEntityId)}` : '#';
 
@@ -91,7 +91,6 @@
 
   .avatar {
     border-radius: 8px;
-    background: #10151d;
     border: 1px solid #232c39;
     flex: 0 0 auto;
   }

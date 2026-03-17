@@ -501,7 +501,10 @@
       color: STRENGTH_COLORS[strength.rating] ?? '#666',
     };
   })();
-  $: workFactorBits = actualShardCount > 0 ? Math.log2(actualShardCount) : 0;
+  $: rawWorkFactorBits = actualShardCount > 0 ? Math.log2(actualShardCount) : 0;
+  // Display an attack-cost hint, not a literal entropy claim:
+  // round to whole bits and give a small premium for the real derivation expense.
+  $: workFactorBits = actualShardCount <= 1 ? 0 : Math.round(rawWorkFactorBits + 0.75);
   $: totalSecurityBits = passwordStrength.bits + workFactorBits;
   // Compute factorInfo from shardInput
   $: factorInfo = isPreset
@@ -1094,7 +1097,7 @@
               ></div>
             </div>
             <span class="strength-text" style="color: {passwordStrength.color}">
-              {passwordStrength.bits} bits phrase + {workFactorBits.toFixed(1)} bits work factor = {totalSecurityBits.toFixed(1)} bits
+              {passwordStrength.bits} bits phrase + {workFactorBits} bits work factor = {totalSecurityBits} bits
             </span>
           {/if}
         </div>

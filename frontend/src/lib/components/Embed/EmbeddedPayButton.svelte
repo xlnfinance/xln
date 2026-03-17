@@ -33,6 +33,8 @@
   let preparingRouteKey = '';
   let preparedRouteKey = '';
   let paymentIntentNonce = 0;
+  const PREPARE_ROUTE_TIMEOUT_MS = 15_000;
+  const PREPARE_ROUTE_RETRY_MS = 750;
 
   function getParentOrigin(): string {
     const params = getHashParams();
@@ -313,7 +315,17 @@
     ) {
       return 'No route found';
     }
-    return 'No route found';
+    return 'No outbound';
+  }
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function shouldRetryRoutePreparation(message: string): boolean {
+    const raw = String(message || '').trim().toLowerCase();
+    if (!raw) return true;
+    if (raw.includes('no route has enough real capacity') || raw.includes('enough real capacity')) return false;
+    if (raw.includes('no outbound')) return false;
+    return true;
   }
 
   function normalizeRouteLabel(label: string): string {
@@ -381,18 +393,38 @@
     preparingRouteKey = key;
     routeStatus = 'finding-routes';
     routeLabel = '';
+    const startedAt = Date.now();
+    let lastMappedError = 'No route found';
     try {
-      const label = await paymentPanelRef.embeddedPrepareFirstRoute();
+      while (preparingRouteKey === key && Date.now() - startedAt < PREPARE_ROUTE_TIMEOUT_MS) {
+        try {
+          const label = await paymentPanelRef.embeddedPrepareFirstRoute();
+          if (preparingRouteKey !== key) return;
+          routeStatus = 'route-ready';
+          routeLabel = normalizeRouteLabel(label);
+          preparedRouteKey = key;
+          statusText = '';
+          return;
+        } catch (error) {
+          if (preparingRouteKey !== key) return;
+          const message = error instanceof Error ? error.message : String(error);
+          lastMappedError = mapRouteStatusMessage(message);
+          if (!shouldRetryRoutePreparation(message)) {
+            routeStatus = 'route-error';
+            routeLabel = lastMappedError;
+            preparedRouteKey = '';
+            statusText = '';
+            return;
+          }
+          routeStatus = 'finding-routes';
+          routeLabel = '';
+          statusText = '';
+          await sleep(PREPARE_ROUTE_RETRY_MS);
+        }
+      }
       if (preparingRouteKey !== key) return;
-      routeStatus = 'route-ready';
-      routeLabel = normalizeRouteLabel(label);
-      preparedRouteKey = key;
-      statusText = '';
-    } catch (error) {
-      if (preparingRouteKey !== key) return;
-      const message = error instanceof Error ? error.message : String(error);
       routeStatus = 'route-error';
-      routeLabel = mapRouteStatusMessage(message);
+      routeLabel = lastMappedError;
       preparedRouteKey = '';
       statusText = '';
     } finally {
@@ -465,14 +497,15 @@
     ensuringEntity ||
     hasSenderEntity;
   $: readyToPay = hasPaymentParams && appReadyForPaymentPanel && Boolean(checkoutEntityId);
-  $: if (paymentIntentNonce >= 0 && hasPaymentParams && appReadyForPaymentPanel && checkoutEntityId && paymentPanelRef && uiState === 'idle' && routeStatus !== 'route-ready') {
+  $: if (paymentIntentNonce >= 0 && hasPaymentParams && appReadyForPaymentPanel && checkoutEntityId && paymentPanelRef && uiState === 'idle' && routeStatus === 'booting') {
     void prepareRoute();
   }
   $: idleLabel = (() => {
     if (!hasPaymentParams) return 'Missing params';
+    if (!$vaultStorageLoaded) return 'Loading wallet...';
+    if (!hasVaultRuntime) return 'No runtimes';
     if (!bootResolved) return 'Loading wallet...';
     if (!runtimeSelectionSettled) return 'Loading wallet...';
-    if (!hasVaultRuntime) return 'No runtimes';
     if (ensuringEntity) return 'Loading profile...';
     if (routeStatus === 'booting') return hasSenderEntity ? 'Finding routes...' : 'Loading wallet...';
     if (routeStatus === 'finding-routes') return 'Finding routes...';
@@ -502,12 +535,14 @@
       ? $error
       : !hasPaymentParams
         ? 'Missing payment parameters'
-        : !bootResolved
+        : !$vaultStorageLoaded
+          ? 'Loading wallet...'
+          : !hasVaultRuntime
+            ? 'No runtimes'
+            : !bootResolved
           ? 'Loading wallet...'
           : !runtimeSelectionSettled
             ? 'Loading wallet...'
-          : !hasVaultRuntime
-            ? 'No runtimes'
           : ensuringEntity
             ? 'Loading profile...'
             : routeStatus === 'finding-routes'

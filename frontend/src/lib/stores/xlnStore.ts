@@ -3,6 +3,7 @@ import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
 import { activeRuntimeId, runtimes, runtimeOperations } from './runtimeStore';
 import { toasts } from './toastStore';
+import { resetEverything } from '$lib/utils/resetEverything';
 import type {
   XLNModule,
   Env,
@@ -208,37 +209,6 @@ const fetchHealthResponse = async (): Promise<HealthResponse | null> => {
   }
 };
 
-const clearDevClientPersistence = async (): Promise<void> => {
-  try {
-    const currentEnv = get(xlnEnvironment);
-    const xln = await getXLN();
-    if (currentEnv && typeof xln.stopP2P === 'function') {
-      try {
-        xln.stopP2P(currentEnv);
-      } catch {
-        // best effort
-      }
-    }
-    if (typeof xln.clearDB === 'function') {
-      await xln.clearDB(currentEnv ?? undefined);
-    }
-  } catch (error) {
-    console.warn('[xlnStore] Failed to clear browser runtime DB during dev session reset:', error);
-  }
-
-  try {
-    localStorage.clear();
-  } catch {
-    // ignore storage errors
-  }
-
-  try {
-    sessionStorage.clear();
-  } catch {
-    // ignore storage errors
-  }
-};
-
 const startDevSessionMonitor = (initialSessionId: string): void => {
   if (!isLocalDevOrigin() || !initialSessionId || devSessionMonitor) return;
   let knownSessionId = initialSessionId;
@@ -248,13 +218,12 @@ const startDevSessionMonitor = (initialSessionId: string): void => {
       const nextSessionId = String(health?.devSessionId || '').trim();
       if (!nextSessionId || nextSessionId === knownSessionId) return;
       knownSessionId = nextSessionId;
-      await clearDevClientPersistence();
       try {
         localStorage.setItem(DEV_SESSION_STORAGE_KEY, nextSessionId);
       } catch {
         // ignore storage errors
       }
-      window.location.reload();
+      console.warn('[xlnStore] Dev session changed; preserving local runtimes and refreshing only');
     })();
   }, 1500);
 };
@@ -271,8 +240,13 @@ export async function prepareDevSession(): Promise<void> {
       return '';
     }
   })();
-  if (storedSessionId !== sessionId) {
-    await clearDevClientPersistence();
+  if (storedSessionId && storedSessionId !== sessionId) {
+    try {
+      localStorage.setItem(DEV_SESSION_STORAGE_KEY, sessionId);
+    } catch {
+      // ignore storage errors
+    }
+  } else if (!storedSessionId) {
     try {
       localStorage.setItem(DEV_SESSION_STORAGE_KEY, sessionId);
     } catch {
@@ -324,6 +298,25 @@ function stopP2PPoll() {
   if (devSessionMonitor) {
     clearInterval(devSessionMonitor);
     devSessionMonitor = null;
+  }
+}
+
+export async function suspendClientActivity(): Promise<void> {
+  stopP2PPoll();
+  try {
+    const env = get(xlnEnvironment);
+    if (!env) return;
+    const xln = await getXLN();
+    if (typeof xln.stopP2P === 'function') {
+      xln.stopP2P(env);
+    }
+    env.runtimeState?.stopLoop?.();
+    if (env.runtimeState) {
+      env.runtimeState.loopActive = false;
+      env.runtimeState.stopLoop = null;
+    }
+  } catch (error) {
+    console.warn('[xlnStore] Failed to suspend client activity:', error);
   }
 }
 
@@ -434,13 +427,7 @@ export async function initializeXLN(): Promise<Env> {
         throw restoreError;
       }
       console.error('[xlnStore] Financial restore failure; clearing local client storage and reloading', restoreError);
-      await clearDevClientPersistence();
-      try {
-        sessionStorage.setItem(RESET_NOTICE_STORAGE_KEY, 'Network was reset');
-      } catch {
-        // ignore storage errors
-      }
-      window.location.reload();
+      await resetEverything(restoreError);
       throw restoreError;
     }
 
@@ -565,21 +552,53 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([,
     const fail = (fnName: string): never => {
       throw new Error(`XLN_NOT_READY:${fnName}`);
     };
-    const failValue = <T>(fnName: string): T =>
-      new Proxy(Object.create(null), {
-        get() {
-          return fail(fnName);
-        },
-      }) as T;
+    const failFn = <T extends (...args: any[]) => any>(fnName: string): T =>
+      (((..._args: unknown[]) => fail(fnName)) as unknown as T);
 
-    return new Proxy({ isReady: false }, {
-      get(_target, prop) {
-        if (prop === 'isReady') return false;
-        if (prop === 'BigIntMath') return failValue<BigIntMathUtils>('BigIntMath');
-        if (prop === 'FINANCIAL_CONSTANTS') return failValue<FinancialConstants>('FINANCIAL_CONSTANTS');
-        return (..._args: unknown[]) => fail(String(prop));
-      },
-    }) as FrontendXlnFunctions;
+    return {
+      deriveDelta: failFn('deriveDelta'),
+      formatTokenAmount: failFn('formatTokenAmount'),
+      getTokenInfo: failFn('getTokenInfo'),
+      isLiquidSwapToken: failFn('isLiquidSwapToken'),
+      getSwapPairOrientation: failFn('getSwapPairOrientation'),
+      getDefaultSwapTradingPairs: failFn('getDefaultSwapTradingPairs'),
+      computeSwapPriceTicks: failFn('computeSwapPriceTicks'),
+      prepareSwapOrder: failFn('prepareSwapOrder'),
+      quantizeSwapOrder: failFn('quantizeSwapOrder'),
+      isLeft: failFn('isLeft'),
+      createDemoDelta: failFn('createDemoDelta'),
+      getDefaultCreditLimit: failFn('getDefaultCreditLimit'),
+      safeStringify: failFn('safeStringify'),
+      formatTokenAmountEthers: failFn('formatTokenAmountEthers'),
+      parseTokenAmount: failFn('parseTokenAmount'),
+      convertTokenPrecision: failFn('convertTokenPrecision'),
+      calculatePercentageEthers: failFn('calculatePercentageEthers'),
+      formatAssetAmountEthers: failFn('formatAssetAmountEthers'),
+      BigIntMath: {} as BigIntMathUtils,
+      FINANCIAL_CONSTANTS: {} as FinancialConstants,
+      getEntity: failFn('getEntity'),
+      getEntityShortId: failFn('getEntityShortId'),
+      formatEntityId: failFn('formatEntityId'),
+      getEntityNumber: failFn('getEntityNumber'),
+      formatEntityDisplay: failFn('formatEntityDisplay'),
+      formatShortEntityId: failFn('formatShortEntityId'),
+      // Display-only helpers must not crash early boot paths like /app#pay deep links.
+      generateEntityAvatar: (() => '') as FrontendXlnFunctions['generateEntityAvatar'],
+      generateSignerAvatar: (() => '') as FrontendXlnFunctions['generateSignerAvatar'],
+      getEntityDisplayInfo: failFn('getEntityDisplayInfo'),
+      getSignerDisplayInfo: failFn('getSignerDisplayInfo'),
+      extractEntityId: failFn('extractEntityId'),
+      extractSignerId: failFn('extractSignerId'),
+      parseReplicaKey: failFn('parseReplicaKey'),
+      formatReplicaKey: failFn('formatReplicaKey'),
+      createReplicaKey: failFn('createReplicaKey'),
+      classifyBilateralState: failFn('classifyBilateralState'),
+      getAccountBarVisual: failFn('getAccountBarVisual'),
+      sendEntityInput: failFn('sendEntityInput'),
+      resolveEntityProposerId: failFn('resolveEntityProposerId'),
+      ensureGossipProfiles: failFn('ensureGossipProfiles'),
+      isReady: false,
+    } as FrontendXlnFunctions;
   }
 
   const formatTokenAmountUi = (tokenId: number, amount: bigint | null | undefined): string => {

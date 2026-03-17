@@ -3,7 +3,7 @@
   import type { DeltaParts, DeltaVisualScale } from './delta-types';
 
   export let derived: DeltaParts;
-  export let heightPx: number = 8;
+  export let heightPx: number = 4;
   export let layout: 'center' | 'sides' = 'center';
   export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
   export let visualScale: DeltaVisualScale | null = null;
@@ -24,14 +24,15 @@
   $: inVisualCreditUsd = visualScale?.inPeerCreditUsd ?? 0;
   $: hasVisualScale = visualScale !== null;
   $: usdPerPx = $settings.accountBarUsdPerPx ?? 100;
-  $: outOwnWidthPx = widthPxForUsd(outVisualOwnUsd, usdPerPx);
-  $: outCollWidthPx = widthPxForUsd(outVisualCollUsd, usdPerPx);
-  $: outDebtWidthPx = widthPxForUsd(outVisualDebtUsd, usdPerPx);
-  $: inOwnWidthPx = widthPxForUsd(inVisualOwnUsd, usdPerPx);
-  $: inCollWidthPx = widthPxForUsd(inVisualCollUsd, usdPerPx);
-  $: inCreditWidthPx = widthPxForUsd(inVisualCreditUsd, usdPerPx);
-  $: outWidthPx = widthPxForUsd(visualScale?.outCapacityUsd ?? 0, usdPerPx);
-  $: inWidthPx = widthPxForUsd(visualScale?.inCapacityUsd ?? 0, usdPerPx);
+  $: visualUsdPerPx = usdPerPx * 2;
+  $: outOwnWidthPx = widthPxForUsd(outVisualOwnUsd, visualUsdPerPx);
+  $: outCollWidthPx = widthPxForUsd(outVisualCollUsd, visualUsdPerPx);
+  $: outDebtWidthPx = widthPxForUsd(outVisualDebtUsd, visualUsdPerPx);
+  $: inOwnWidthPx = widthPxForUsd(inVisualOwnUsd, visualUsdPerPx);
+  $: inCollWidthPx = widthPxForUsd(inVisualCollUsd, visualUsdPerPx);
+  $: inCreditWidthPx = widthPxForUsd(inVisualCreditUsd, visualUsdPerPx);
+  $: outWidthPx = widthPxForUsd(visualScale?.outCapacityUsd ?? 0, visualUsdPerPx);
+  $: inWidthPx = widthPxForUsd(visualScale?.inCapacityUsd ?? 0, visualUsdPerPx);
   $: outCenterWidthStyle = shellWidthStyle(outWidthPx, CENTER_GAP_PX);
   $: inCenterWidthStyle = shellWidthStyle(inWidthPx, CENTER_GAP_PX);
   $: outSideWidthStyle = shellWidthStyle(outWidthPx, SIDES_GAP_PX);
@@ -294,7 +295,7 @@
   }
 
   .seg.credit {
-    background: linear-gradient(180deg, rgba(203, 213, 225, 0.9), rgba(148, 163, 184, 0.95));
+    background: linear-gradient(180deg, rgba(241, 245, 249, 0.94), rgba(203, 213, 225, 0.98));
   }
 
   .seg.coll {

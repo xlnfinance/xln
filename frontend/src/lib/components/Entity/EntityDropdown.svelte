@@ -114,7 +114,7 @@
           entityId,
           name: displayName,
           shortId,
-          avatarUrl: xlnFuncs.generateEntityAvatar?.(entityId) || '',
+          avatarUrl: xlnFuncs.isReady ? xlnFuncs.generateEntityAvatar?.(entityId) || '' : '',
           signerId
         });
       }

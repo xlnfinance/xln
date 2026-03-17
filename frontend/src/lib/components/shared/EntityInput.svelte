@@ -180,7 +180,7 @@
       id,
       displayName: getKnownEntityName(id) || formatShortId(id),
       isContact: contacts.some(c => normalizeEntityId(c.entityId) === normalizeEntityId(id)),
-      avatarUrl: activeFunctions?.generateEntityAvatar?.(id) || ''
+      avatarUrl: activeFunctions?.isReady ? activeFunctions.generateEntityAvatar?.(id) || '' : ''
     }));
 
   // Contact-only options (for entities not in the network)
@@ -190,7 +190,7 @@
       id: c.entityId,
       displayName: c.name,
       isContact: true,
-      avatarUrl: activeFunctions?.generateEntityAvatar?.(c.entityId) || ''
+      avatarUrl: activeFunctions?.isReady ? activeFunctions.generateEntityAvatar?.(c.entityId) || '' : ''
     }));
 
   $: missingEntityProfiles = entities.filter((id) => {

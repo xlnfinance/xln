@@ -418,10 +418,6 @@ async function pay(
   void route;
 
   await openPayWorkspace(page);
-  const hashlockModeBtn = page.getByRole('button', { name: 'Hashlock' }).first();
-  await expect(hashlockModeBtn).toBeVisible({ timeout: 10_000 });
-  await hashlockModeBtn.click();
-  await expect(hashlockModeBtn).toHaveAttribute('aria-pressed', 'true');
 
   await selectPayRecipient(page, to);
 

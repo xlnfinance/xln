@@ -15,6 +15,77 @@ const FATAL_PATTERNS = [
   'loadEnvFromDB failed',
 ];
 
+const RESET_CHANNEL_NAME = 'xln-global-reset';
+const RESET_MARKER_KEY = 'xln-reset-marker';
+const RESET_PREPARATION_DELAY_MS = 180;
+const RESET_DB_DELETE_RETRIES = 8;
+const RESET_DB_DELETE_RETRY_DELAY_MS = 250;
+const RESET_FORCE_NAVIGATION_MS = 1500;
+
+type ResetSignal = {
+  type: 'begin-reset';
+  token: string;
+  timestamp: number;
+  reason: string;
+};
+
+let installedResetListeners = false;
+let resetChannel: BroadcastChannel | null = null;
+let activeResetPromise: Promise<void> | null = null;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+function createResetSignal(triggerError?: unknown): ResetSignal {
+  const reason = triggerError instanceof Error ? triggerError.message : String(triggerError ?? 'manual');
+  return {
+    type: 'begin-reset',
+    token: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    timestamp: Date.now(),
+    reason,
+  };
+}
+
+function readResetMarker(): ResetSignal | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(RESET_MARKER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ResetSignal>;
+    if (parsed?.type !== 'begin-reset' || typeof parsed.token !== 'string' || typeof parsed.timestamp !== 'number') {
+      return null;
+    }
+    return {
+      type: 'begin-reset',
+      token: parsed.token,
+      timestamp: parsed.timestamp,
+      reason: typeof parsed.reason === 'string' ? parsed.reason : 'manual',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistResetMarker(signal: ResetSignal): void {
+  try {
+    localStorage.setItem(RESET_MARKER_KEY, JSON.stringify(signal));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function announceReset(signal: ResetSignal): void {
+  persistResetMarker(signal);
+  try {
+    if (typeof BroadcastChannel === 'undefined') return;
+    if (!resetChannel) {
+      resetChannel = new BroadcastChannel(RESET_CHANNEL_NAME);
+    }
+    resetChannel.postMessage(signal);
+  } catch {
+    // ignore channel errors
+  }
+}
+
 /** Check if an error is a fatal runtime corruption that requires reset */
 export function isFatalRuntimeError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error ?? '');
@@ -80,20 +151,12 @@ function collectDebugDump(triggerError?: unknown): string {
   return JSON.stringify(dump, null, 2);
 }
 
-/** Ship debug dump — log + save for later retrieval */
+/** Ship debug dump — log + best-effort ship without keeping client persistence */
 async function shipDebugDump(dump: string): Promise<void> {
   // 1. Console (always visible in F12)
   console.log('[RESET] Debug dump:\n', dump);
 
-  // 2. Save to a key that WON'T be cleared (we clear localStorage, not this specific key)
-  try {
-    // Use a fixed key so latest crash is always retrievable
-    const crashKey = 'xln-last-crash-dump';
-    // We'll re-set this AFTER localStorage.clear() in resetEverything
-    (window as any).__xln_pending_crash_dump = { key: crashKey, value: dump };
-  } catch { /* */ }
-
-  // 3. Ship to server relay (best effort, may fail if disconnected)
+  // 2. Ship to server relay (best effort, may fail if disconnected)
   try {
     const p2p = (window as any).__xln_env?.runtimeState?.p2p;
     if (p2p && typeof p2p.sendDebugEvent === 'function') {
@@ -121,43 +184,133 @@ async function clearAllIndexedDB(): Promise<void> {
 
   for (const name of dbNames) {
     try {
-      await new Promise<void>((resolve) => {
-        const req = indexedDB.deleteDatabase(name);
-        req.onsuccess = () => resolve();
-        req.onerror = () => resolve();
-        req.onblocked = () => resolve();
-      });
-    } catch { /* best effort */ }
+      let deleted = false;
+      for (let attempt = 0; attempt < RESET_DB_DELETE_RETRIES; attempt += 1) {
+        const status = await new Promise<'success' | 'error' | 'blocked'>((resolve) => {
+          const req = indexedDB.deleteDatabase(name);
+          req.onsuccess = () => resolve('success');
+          req.onerror = () => resolve('error');
+          req.onblocked = () => resolve('blocked');
+        });
+        if (status === 'success' || status === 'error') {
+          deleted = true;
+          break;
+        }
+        await sleep(RESET_DB_DELETE_RETRY_DELAY_MS * (attempt + 1));
+      }
+      if (!deleted) {
+        console.warn(`[RESET] IndexedDB delete remained blocked: ${name}`);
+      }
+    } catch {
+      // best effort
+    }
   }
 }
 
-/**
- * Reset everything and reload.
- * Works even when runtime is corrupted / entities won't load.
- */
-export async function resetEverything(triggerError?: unknown): Promise<void> {
-  // Ship debug dump BEFORE clearing (so we have state to analyze)
-  const dump = collectDebugDump(triggerError);
-  await shipDebugDump(dump);
+function hardNavigateAfterReset(token: string): void {
+  try {
+    window.onbeforeunload = null;
+  } catch {
+    // ignore
+  }
+  const targetPath = '/app';
+  const targetUrl = `${targetPath}?reset=${encodeURIComponent(token)}`;
+  if (window.location.pathname === targetPath) {
+    window.location.href = targetUrl;
+    setTimeout(() => {
+      window.location.reload();
+    }, 30);
+    return;
+  }
+  window.location.replace(targetUrl);
+}
 
-  console.log('[RESET] Clearing all persistent state...');
+async function clearCacheStorage(): Promise<void> {
+  if (typeof caches === 'undefined') return;
+  try {
+    const names = await caches.keys();
+    await Promise.all(names.map((name) => caches.delete(name).catch(() => false)));
+  } catch {
+    // best effort
+  }
+}
 
-  // 1. Web storage
+async function unregisterServiceWorkers(): Promise<void> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister().catch(() => false)));
+  } catch {
+    // best effort
+  }
+}
+
+async function clearOriginPrivateFileSystem(): Promise<void> {
+  try {
+    const storageWithDirectory = navigator.storage as StorageManager & {
+      getDirectory?: () => Promise<FileSystemDirectoryHandle>;
+    };
+    if (typeof storageWithDirectory?.getDirectory !== 'function') return;
+    const root = await storageWithDirectory.getDirectory();
+    // TS DOM typing for FileSystemDirectoryHandle iteration is still spotty across toolchains.
+    // @ts-ignore
+    for await (const [name] of root.entries()) {
+      try {
+        await root.removeEntry(name, { recursive: true });
+      } catch {
+        // best effort
+      }
+    }
+  } catch {
+    // best effort
+  }
+}
+
+function clearAllCookies(): void {
+  if (typeof document === 'undefined' || !document.cookie) return;
+  const cookies = document.cookie.split(';');
+  const host = window.location.hostname;
+  const parts = host.split('.').filter(Boolean);
+  const domains = new Set<string>(['', host]);
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    domains.add(`.${parts.slice(i).join('.')}`);
+  }
+  for (const cookie of cookies) {
+    const eqIndex = cookie.indexOf('=');
+    const name = (eqIndex >= 0 ? cookie.slice(0, eqIndex) : cookie).trim();
+    if (!name) continue;
+    const encodedName = encodeURIComponent(name);
+    const expires = 'expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    document.cookie = `${encodedName}=; ${expires}; path=/`;
+    for (const domain of domains) {
+      if (!domain) continue;
+      document.cookie = `${encodedName}=; ${expires}; path=/; domain=${domain}`;
+    }
+  }
+}
+
+export async function clearAllPersistentClientState(): Promise<void> {
+  try { window.name = ''; } catch { /* */ }
   try { localStorage.clear(); } catch { /* */ }
   try { sessionStorage.clear(); } catch { /* */ }
-
-  // Re-save crash dump after clear (so it's retrievable on next load)
-  try {
-    const pending = (window as any).__xln_pending_crash_dump;
-    if (pending) {
-      localStorage.setItem(pending.key, pending.value);
-    }
-  } catch { /* */ }
-
-  // 2. IndexedDB (LevelDB backing store in browser)
+  clearAllCookies();
+  await unregisterServiceWorkers();
+  await clearCacheStorage();
+  await clearOriginPrivateFileSystem();
   await clearAllIndexedDB();
+}
 
-  // 3. Runtime DB (if runtime is loaded and accessible)
+async function stopRuntimeBeforeReset(): Promise<void> {
+  try {
+    const xln = (window as any).__xln_instance;
+    const env = (window as any).__xln_env;
+    if (xln?.stopP2P && env) {
+      await xln.stopP2P(env);
+    }
+  } catch {
+    // best effort
+  }
+
   try {
     const xln = (window as any).__xln_instance;
     const env = (window as any).__xln_env;
@@ -167,9 +320,97 @@ export async function resetEverything(triggerError?: unknown): Promise<void> {
   } catch (e) {
     console.warn('[RESET] Runtime clearDB failed (expected if corrupted):', e);
   }
+}
 
-  console.log('[RESET] All state cleared. Reloading...');
-  window.location.href = '/app';
+async function performReset(triggerError: unknown, signal: ResetSignal, initiatedHere: boolean): Promise<void> {
+  if (activeResetPromise) return activeResetPromise;
+
+  activeResetPromise = (async () => {
+    const forceNavigationTimer = window.setTimeout(() => {
+      console.warn('[RESET] Cleanup watchdog fired; forcing navigation');
+      hardNavigateAfterReset(signal.token);
+    }, RESET_FORCE_NAVIGATION_MS);
+
+    if (initiatedHere) {
+      const dump = collectDebugDump(triggerError);
+      await shipDebugDump(dump);
+      console.log('[RESET] Starting coordinated reset across all tabs...');
+      announceReset(signal);
+      await sleep(RESET_PREPARATION_DELAY_MS);
+    } else {
+      console.log('[RESET] External reset signal received. Clearing local tab state...');
+    }
+
+    try {
+      await Promise.race([
+        (async () => {
+          await stopRuntimeBeforeReset();
+          await clearAllPersistentClientState();
+        })(),
+        sleep(RESET_FORCE_NAVIGATION_MS - 100),
+      ]);
+    } finally {
+      clearTimeout(forceNavigationTimer);
+    }
+
+    try {
+      resetChannel?.close();
+    } catch {
+      // ignore
+    }
+    resetChannel = null;
+
+    console.log('[RESET] All state cleared. Reloading...');
+    hardNavigateAfterReset(signal.token);
+  })();
+
+  return activeResetPromise;
+}
+
+/**
+ * Reset everything and reload.
+ * Works even when runtime is corrupted / entities won't load.
+ */
+export async function resetEverything(triggerError?: unknown): Promise<void> {
+  const signal = createResetSignal(triggerError);
+  await performReset(triggerError, signal, true);
+}
+
+async function handleIncomingResetSignal(signal: ResetSignal): Promise<void> {
+  if (!signal?.token) return;
+  await performReset(signal.reason, signal, false);
+}
+
+function installGlobalResetListeners(): void {
+  if (typeof window === 'undefined' || installedResetListeners) return;
+  installedResetListeners = true;
+
+  window.addEventListener('storage', (event) => {
+    if (event.key !== RESET_MARKER_KEY || !event.newValue) return;
+    const signal = readResetMarker();
+    if (signal) {
+      void handleIncomingResetSignal(signal);
+    }
+  });
+
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      resetChannel = new BroadcastChannel(RESET_CHANNEL_NAME);
+      resetChannel.onmessage = (event: MessageEvent<ResetSignal>) => {
+        const signal = event.data;
+        if (signal?.type === 'begin-reset') {
+          void handleIncomingResetSignal(signal);
+        }
+      };
+    }
+  } catch {
+    resetChannel = null;
+  }
+
+  const existingMarker = readResetMarker();
+  if (existingMarker) {
+    void handleIncomingResetSignal(existingMarker);
+  }
 }
 
 /**
@@ -179,6 +420,7 @@ export async function resetEverything(triggerError?: unknown): Promise<void> {
  */
 export function installFatalErrorInterceptor(): void {
   if (typeof window === 'undefined') return;
+  installGlobalResetListeners();
 
   let prompted = false; // prevent multiple dialogs
 

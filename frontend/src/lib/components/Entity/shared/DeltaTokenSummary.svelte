@@ -92,8 +92,8 @@
         <div class="compact-metric compact-in" aria-label="In capacity">
           {#if showMetricLabels}<span class="metric-label">In</span>{/if}
           <span class="compact-in-value">
+            <span class="inbound-arrow" aria-hidden="true">←</span>
             <span>{inAmountCompact}</span>
-            {#if inUsdHint}<span class="usd-hint">{inUsdHint}</span>{/if}
           </span>
         </div>
       </div>
@@ -119,7 +119,6 @@
           <span class="cap-label">In</span>
           <span class="cap-value">
             <span>{inAmountDisplay}</span>
-            {#if inUsdHint}<span class="usd-hint">{inUsdHint}</span>{/if}
           </span>
         </span>
       </div>
@@ -345,7 +344,9 @@
     align-items: center;
     gap: 12px;
     min-width: 0;
-    flex: 0 1 auto;
+    flex: 1 1 auto;
+    width: 100%;
+    margin-left: auto;
   }
 
   .delta-summary.compact .token-symbol {
@@ -382,6 +383,7 @@
 
   .compact-out {
     margin-left: 0;
+    margin-right: auto;
   }
 
   .metric-label {
@@ -422,6 +424,9 @@
 
   .compact-in {
     flex: 0 0 auto;
+    margin-left: auto;
+    justify-content: flex-end;
+    text-align: right;
   }
 
   .compact-in-value {
@@ -435,6 +440,13 @@
     display: inline-flex;
     align-items: baseline;
     gap: 6px;
+  }
+
+  .inbound-arrow {
+    color: #9ca3af;
+    font-size: 12px;
+    line-height: 1;
+    transform: translateY(-1px);
   }
 
   @media (max-width: 1100px) {

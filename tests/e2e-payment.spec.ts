@@ -148,12 +148,7 @@ test.describe('E2E HTLC Payment Flow', () => {
     const sendTab = page.getByRole('button', { name: 'Pay' });
     await expect(sendTab).toBeVisible({ timeout: 10_000 });
     await sendTab.click();
-
-    // Enforce hashlock mode in current Pay UI.
-    const hashlockModeBtn = page.getByRole('button', { name: 'Hashlock' });
-    await hashlockModeBtn.click();
-    await expect(hashlockModeBtn).toHaveAttribute('aria-pressed', 'true');
-    process.stdout.write('  HTLC mode: ON\n');
+    process.stdout.write('  HTLC mode: default\n');
 
     // The shared recipient picker now defaults to self. Open it and choose the connected hub.
     const recipientPicker = page.locator('button.closed-trigger, input[placeholder="Select recipient..."]').first();

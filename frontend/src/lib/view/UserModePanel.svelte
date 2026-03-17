@@ -66,7 +66,7 @@
   const signer = $derived($activeVault?.signers?.[0] || null);
   const positionsMap = $derived($entityPositions);
   const activeXlnFunctions = $derived($xlnFunctions);
-  const xlnReady = $derived(!!$xlnInstance);
+  const xlnReady = $derived(Boolean(activeXlnFunctions?.isReady));
 
   const signerWalletAddress = $derived(signer?.address || '');
   const signerWalletPrivateKey = $derived(

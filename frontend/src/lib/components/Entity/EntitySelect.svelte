@@ -45,7 +45,7 @@
   $: optionViews = options.map((id) => ({
     id,
     name: getOptionName(id),
-    avatarUrl: activeXlnFunctions?.generateEntityAvatar?.(id) || '',
+    avatarUrl: activeXlnFunctions?.isReady ? activeXlnFunctions.generateEntityAvatar?.(id) || '' : '',
   }));
   $: selectedOption = optionViews.find((opt) => opt.id === value) || null;
 

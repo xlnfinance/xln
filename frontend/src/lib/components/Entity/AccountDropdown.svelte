@@ -54,7 +54,7 @@
         id: counterpartyId,
         name: profileName || counterpartyId,
         shortId: counterpartyId,
-        avatarUrl: xlnFuncs?.generateEntityAvatar?.(counterpartyId) || '',
+        avatarUrl: xlnFuncs?.isReady ? xlnFuncs.generateEntityAvatar?.(counterpartyId) || '' : '',
         status,
         statusLabel: getAccountUiStatusLabel(status),
         pendingCount: acc.mempool?.length || 0
