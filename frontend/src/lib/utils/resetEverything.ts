@@ -207,22 +207,21 @@ async function clearAllIndexedDB(): Promise<void> {
   }
 }
 
-function hardNavigateAfterReset(token: string): void {
+function hardNavigateAfterReset(): void {
   try {
     window.onbeforeunload = null;
   } catch {
     // ignore
   }
   const targetPath = '/app';
-  const targetUrl = `${targetPath}?reset=${encodeURIComponent(token)}`;
   if (window.location.pathname === targetPath) {
-    window.location.href = targetUrl;
+    window.location.href = targetPath;
     setTimeout(() => {
       window.location.reload();
     }, 30);
     return;
   }
-  window.location.replace(targetUrl);
+  window.location.replace(targetPath);
 }
 
 async function clearCacheStorage(): Promise<void> {
@@ -328,7 +327,7 @@ async function performReset(triggerError: unknown, signal: ResetSignal, initiate
   activeResetPromise = (async () => {
     const forceNavigationTimer = window.setTimeout(() => {
       console.warn('[RESET] Cleanup watchdog fired; forcing navigation');
-      hardNavigateAfterReset(signal.token);
+      hardNavigateAfterReset();
     }, RESET_FORCE_NAVIGATION_MS);
 
     if (initiatedHere) {
@@ -361,7 +360,7 @@ async function performReset(triggerError: unknown, signal: ResetSignal, initiate
     resetChannel = null;
 
     console.log('[RESET] All state cleared. Reloading...');
-    hardNavigateAfterReset(signal.token);
+    hardNavigateAfterReset();
   })();
 
   return activeResetPromise;
