@@ -414,6 +414,7 @@ async function processDueHooks(
           if (inboundLockId && !account.locks?.has(inboundLockId)) {
             route.secretAckPending = false;
             route.secretAckedAt = replica.state.timestamp;
+            replica.state.htlcRoutes.delete(hashlock);
             break;
           }
 

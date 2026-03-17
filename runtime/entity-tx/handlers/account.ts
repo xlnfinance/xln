@@ -350,15 +350,15 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             }
             // Secret-return ACK received from inbound counterparty: clear pending ACK timer.
             if (accountTx.data.outcome === 'secret') {
-              for (const route of newState.htlcRoutes.values()) {
+              for (const [hashlock, route] of newState.htlcRoutes.entries()) {
                 if (route.inboundLockId !== accountTx.data.lockId) continue;
-                if (!route.secretAckPending) continue;
                 route.secretAckPending = false;
                 route.secretAckedAt = newState.timestamp;
                 if (newState.crontabState) {
                   cancelScheduledHook(newState.crontabState, `htlc-secret-ack:${route.hashlock}`);
                 }
                 console.log(`✅ HTLC: secret ACK confirmed for hashlock ${route.hashlock.slice(0, 16)}...`);
+                newState.htlcRoutes.delete(hashlock);
               }
             }
           }
@@ -822,6 +822,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         if (HEAVY_LOGS) console.log(`🔍 HTLC-SECRET: Processing revealed secret for hash ${hashlock.slice(0,16)}...`);
         const route = newState.htlcRoutes.get(hashlock);
         if (route) {
+          if (route.secret) {
+            console.log(`⏭️ HTLC: Secret already recorded for ${hashlock.slice(0, 16)}..., skipping duplicate propagation`);
+            continue;
+          }
           const isFinalRecipient = !!route.inboundEntity && !route.outboundEntity;
           const outboundLock = route.outboundLockId ? newState.lockBook.get(route.outboundLockId) : undefined;
           const inboundLock = route.inboundLockId ? newState.lockBook.get(route.inboundLockId) : undefined;
@@ -882,6 +886,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             route.secretAckPending = false;
             route.secretAckedAt = newState.timestamp;
             console.log(`✅ HTLC: Payment complete (we initiated)`);
+            newState.htlcRoutes.delete(hashlock);
           }
           if (isFinalRecipient) {
             env.emit('HtlcReceived', {
