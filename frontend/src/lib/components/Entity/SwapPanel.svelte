@@ -4,16 +4,22 @@
   import { isLive as globalIsLive } from '../../stores/timeStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { amountToUsd } from '$lib/utils/assetPricing';
-  import EntitySelect from './EntitySelect.svelte';
   import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
+  import { resolveEntityName } from '$lib/utils/entityNaming';
+  import { formatEntityId } from '$lib/utils/format';
 
   export let replica: EntityReplica | null;
   export let tab: Tab;
 
   // Props
   export let counterpartyId: string = '';
-  export let prefilledCounterparty = false;
-  let orderbookScope: 'all' | 'selected' = 'all';
+  const AGGREGATED_ACCOUNT_VALUE = '__aggregated__';
+  let accountViewValue = AGGREGATED_ACCOUNT_VALUE;
+  let createOrderAccountId = '';
+  let selectedBookAccountId = '';
+  let activeOrderAccountId = '';
+  const AGGREGATED_ORDERBOOK_DEPTH = 18;
+  const SELECTED_ORDERBOOK_DEPTH = 12;
   const ORDERBOOK_PRICE_SCALE = 10_000n;
   const ORDERBOOK_LOT_SCALE = 10n ** 12n;
   type PreparedSwapOrderLike = {
@@ -48,6 +54,7 @@
     baseTokenId: number;
     quoteTokenId: number;
     accountId: string;
+    accountIds: string[];
   };
   type SnapshotLevel = { price: number; size: number; total: number };
   type OrderbookSnapshot = {
@@ -100,6 +107,8 @@
     sourceCount: 0,
     updatedAt: 0,
   };
+  let orderbookPairId = '1/2';
+  let orderbookViewKey = '';
   let orderPercent = 100;
   let submitError = '';
   let selectedPairValue = '';
@@ -137,12 +146,31 @@
   })();
   $: cappedAccountIds = accountIds.slice(0, 10);
   $: hiddenAccountCount = Math.max(0, accountIds.length - cappedAccountIds.length);
-  $: if (orderbookScope === 'selected' && !counterpartyId) {
-    orderbookScope = 'all';
+  $: if (accountViewValue !== AGGREGATED_ACCOUNT_VALUE && !cappedAccountIds.includes(accountViewValue)) {
+    accountViewValue = counterpartyId && cappedAccountIds.includes(counterpartyId)
+      ? counterpartyId
+      : AGGREGATED_ACCOUNT_VALUE;
   }
-  $: orderbookHubIds = orderbookScope === 'selected'
-    ? (counterpartyId ? [counterpartyId] : [])
-    : cappedAccountIds;
+  $: selectedBookAccountId = accountViewValue === AGGREGATED_ACCOUNT_VALUE ? '' : accountViewValue;
+  $: if (accountViewValue === AGGREGATED_ACCOUNT_VALUE) {
+    if (!createOrderAccountId || !cappedAccountIds.includes(createOrderAccountId)) {
+      createOrderAccountId = counterpartyId && cappedAccountIds.includes(counterpartyId)
+        ? counterpartyId
+        : (cappedAccountIds[0] || '');
+    }
+  } else {
+    createOrderAccountId = selectedBookAccountId;
+  }
+  $: activeOrderAccountId = accountViewValue === AGGREGATED_ACCOUNT_VALUE
+    ? createOrderAccountId
+    : selectedBookAccountId;
+  $: orderbookHubIds = accountViewValue === AGGREGATED_ACCOUNT_VALUE
+    ? cappedAccountIds
+    : (selectedBookAccountId ? [selectedBookAccountId] : []);
+  $: orderbookDepth = accountViewValue === AGGREGATED_ACCOUNT_VALUE
+    ? AGGREGATED_ORDERBOOK_DEPTH
+    : SELECTED_ORDERBOOK_DEPTH;
+  $: orderbookViewKey = `${orderbookPairId}|${accountViewValue}|${orderbookHubIds.join(',')}`;
 
   function resolveCounterpartyId(input: string): string {
     const normalized = String(input || '').trim().toLowerCase();
@@ -150,18 +178,21 @@
     const match = accountIds.find((id) => String(id || '').toLowerCase() === normalized);
     return match || String(input || '').trim();
   }
-  $: orderbookHint = (() => {
-    if (orderbookScope === 'selected') {
-      return counterpartyId
-        ? 'Showing selected account orderbook.'
-        : 'Select account to view selected orderbook.';
-    }
-    if (orderbookHubIds.length === 0) {
-      return 'Select account to trade. No orderbook sources yet.';
-    }
-    const hidden = hiddenAccountCount > 0 ? ` (+${hiddenAccountCount} hidden)` : '';
-    return `Showing aggregate orderbook across ${orderbookHubIds.length} account(s)${hidden}. Select account to place orders.`;
-  })();
+  function accountLabel(accountIdValue: string): string {
+    const resolved = resolveEntityName(accountIdValue, activeEnv);
+    return resolved || formatEntityId(accountIdValue);
+  }
+  $: accountViewOptions = [
+    { value: AGGREGATED_ACCOUNT_VALUE, label: 'Aggregated' },
+    ...cappedAccountIds.map((id) => ({ value: id, label: accountLabel(id) })),
+  ];
+  $: placementAccountOptions = cappedAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
+  $: orderbookSourceLabels = Object.fromEntries(
+    cappedAccountIds.map((id) => [id, accountLabel(id)]),
+  );
+  $: orderbookSourceAvatars = Object.fromEntries(
+    cappedAccountIds.map((id) => [id, activeXlnFunctions?.isReady ? (activeXlnFunctions.generateEntityAvatar?.(id) || '') : '']),
+  );
 
   type TokenKeyedMap<V> = Map<number, V> | Map<string, V>;
   type DeltaLike = {
@@ -487,10 +518,10 @@
 
   $: giveTokenSymbol = tokenSymbol(giveToken);
   $: wantTokenSymbol = tokenSymbol(wantToken);
-  $: wantTokenPresentInAccount = (replica, hasTokenInAccount(counterpartyId, wantToken));
+  $: wantTokenPresentInAccount = (replica, hasTokenInAccount(activeOrderAccountId, wantToken));
   // Include replica in deps so capacity updates when account state changes (new frames)
-  $: availableGiveCapacity = (replica, readOutCapacity(counterpartyId, giveToken));
-  $: availableWantInCapacity = (replica, readInCapacity(counterpartyId, wantToken));
+  $: availableGiveCapacity = (replica, readOutCapacity(activeOrderAccountId, giveToken));
+  $: availableWantInCapacity = (replica, readInCapacity(activeOrderAccountId, wantToken));
   $: formattedAvailableGive = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(availableGiveCapacity, giveToken)} ${giveTokenSymbol}`
     : availableGiveCapacity.toString();
@@ -507,8 +538,8 @@
   $: leftoverGiveLabel = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(giveAmountLeftover, giveToken)} ${giveTokenSymbol}`
     : giveAmountLeftover.toString();
-  $: autoInboundCreditTarget = (replica, computeAutoInboundCreditTarget(counterpartyId, wantToken, canonicalWantAmount));
-  $: currentPeerCreditLimit = (replica, readPeerCreditLimit(counterpartyId, wantToken));
+  $: autoInboundCreditTarget = (replica, computeAutoInboundCreditTarget(activeOrderAccountId, wantToken, canonicalWantAmount));
+  $: currentPeerCreditLimit = (replica, readPeerCreditLimit(activeOrderAccountId, wantToken));
   $: autoInboundCreditIncrease = autoInboundCreditTarget && autoInboundCreditTarget > currentPeerCreditLimit
     ? autoInboundCreditTarget - currentPeerCreditLimit
     : 0n;
@@ -626,7 +657,7 @@
   ) ? 'Order does not fit canonical lot/tick constraints.' : '';
   $: swapDisabledReason = swapPreparationError || validateSwapForm(
     buildSwapValidationInput(
-      String(counterpartyId || ''),
+      String(activeOrderAccountId || ''),
       giveToken,
       wantToken,
       canonicalGiveAmount,
@@ -650,14 +681,14 @@
     ? `Canonical order leaves ${leftoverGiveLabel} unspent after lot quantization.`
     : '';
   $: capacityWarning = (() => {
-    if (!counterpartyId || !Number.isFinite(giveToken) || giveToken <= 0) return '';
+    if (!activeOrderAccountId || !Number.isFinite(giveToken) || giveToken <= 0) return '';
     if (availableGiveCapacity <= 0n) return `Observed available ${giveTokenSymbol}: 0 (may update after next frame).`;
     if (giveAmount > 0n && giveAmount > availableGiveCapacity) {
       return `Give amount is above observed available capacity (${formattedAvailableGive}).`;
     }
     return '';
   })();
-  $: if (selectedOrderLevel && selectedOrderLevel.accountId !== counterpartyId) {
+  $: if (selectedOrderLevel && accountViewValue !== AGGREGATED_ACCOUNT_VALUE && selectedOrderLevel.accountId !== selectedBookAccountId) {
     selectedOrderLevel = null;
     orderPercent = 100;
   }
@@ -665,7 +696,7 @@
   function applyOrderPercent(percent: number) {
     const clamped = Math.max(0, Math.min(100, Math.round(percent)));
     orderPercent = clamped;
-    const currentGiveCapacity = readOutCapacity(counterpartyId, giveToken);
+    const currentGiveCapacity = readOutCapacity(activeOrderAccountId, giveToken);
     if (!selectedOrderLevel) {
       const rawGive = (currentGiveCapacity * BigInt(clamped)) / 100n;
       const rawWant = orderMode === 'sell-base'
@@ -679,10 +710,15 @@
     const levelGiveTokenId = selectedOrderLevel.side === 'ask'
       ? selectedOrderLevel.quoteTokenId
       : selectedOrderLevel.baseTokenId;
+    const selectedLevelAccountId =
+      createOrderAccountId
+      || selectedBookAccountId
+      || selectedOrderLevel.accountIds[0]
+      || '';
     const priceScaled = (selectedOrderLevel.priceTicks * PRICE_RATIO_SCALE) / ORDERBOOK_PRICE_SCALE;
     const levelBaseDecimals = getTokenDecimals(selectedOrderLevel.baseTokenId);
     const levelQuoteDecimals = getTokenDecimals(selectedOrderLevel.quoteTokenId);
-    const levelGiveCapacity = readOutCapacity(selectedOrderLevel.accountId, levelGiveTokenId);
+    const levelGiveCapacity = readOutCapacity(selectedLevelAccountId, levelGiveTokenId);
     const maxFillGiveByBook = selectedOrderLevel.side === 'ask'
       ? quoteFromBase(selectedOrderLevel.sizeBaseWei, priceScaled, levelBaseDecimals, levelQuoteDecimals)
       : selectedOrderLevel.sizeBaseWei;
@@ -707,13 +743,27 @@
     orderbookSnapshot = event.detail;
   }
 
-  function handleOrderbookLevelClick(event: CustomEvent<{ side: BookSide; priceTicks: string; size: number }>) {
-    submitError = '';
-    if (!counterpartyId) {
-      submitError = 'Select account first, then click an orderbook level.';
-      return;
-    }
+  function handleAccountViewChange(event: Event): void {
+    const nextValue = String((event.currentTarget as HTMLSelectElement | null)?.value || AGGREGATED_ACCOUNT_VALUE);
+    accountViewValue = nextValue;
+    selectedOrderLevel = null;
+    orderPercent = 100;
+  }
 
+  function handleCreateOrderAccountChange(event: Event): void {
+    createOrderAccountId = String((event.currentTarget as HTMLSelectElement | null)?.value || '');
+    selectedOrderLevel = null;
+    orderPercent = 100;
+  }
+
+  function handlePairChange(): void {
+    selectedOrderLevel = null;
+    orderPercent = 100;
+    submitError = '';
+  }
+
+  function handleOrderbookLevelClick(event: CustomEvent<{ side: BookSide; priceTicks: string; size: number; accountIds: string[] }>) {
+    submitError = '';
     const pair = selectedPair;
     if (!pair) {
       submitError = 'Select valid token pair first.';
@@ -733,6 +783,20 @@
       return;
     }
 
+    const availableAccountIds = Array.isArray(event.detail?.accountIds)
+      ? event.detail.accountIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : [];
+    const clickedAccountId = accountViewValue === AGGREGATED_ACCOUNT_VALUE
+      ? String(availableAccountIds.find((id) => cappedAccountIds.includes(id)) || activeOrderAccountId || '')
+      : String(selectedBookAccountId || availableAccountIds.find((id) => cappedAccountIds.includes(id)) || '');
+    if (!clickedAccountId) {
+      submitError = 'Pick a priced level from a connected account.';
+      return;
+    }
+    if (accountViewValue === AGGREGATED_ACCOUNT_VALUE && createOrderAccountId !== clickedAccountId) {
+      createOrderAccountId = clickedAccountId;
+    }
+
     const priceTicks = parsedPriceTicks;
     const sizeBaseWei = lotsToBaseWei(rawSize);
     selectedOrderLevel = {
@@ -741,7 +805,8 @@
       sizeBaseWei,
       baseTokenId: pair.baseTokenId,
       quoteTokenId: pair.quoteTokenId,
-      accountId: counterpartyId,
+      accountId: clickedAccountId,
+      accountIds: availableAccountIds,
     };
 
     tradeSide = side === 'ask' ? 'buy-base' : 'sell-base';
@@ -1045,7 +1110,7 @@
       const signerId = resolveSignerId(tab.entityId);
       if (!signerId) throw new Error('No signer available for selected entity');
 
-      const resolvedCounterparty = resolveCounterpartyId(counterpartyId);
+      const resolvedCounterparty = resolveCounterpartyId(activeOrderAccountId);
       if (!resolvedCounterparty) {
         throw new Error('Select counterparty from your account list');
       }
@@ -1201,113 +1266,102 @@
 </script>
 
 <div class="swap-panel">
-  <h3>Swap Trading</h3>
-
   <div class="trade-grid">
     <div class="section section-market">
-      <div class="orderbook-header">
-        <h4>Orderbook</h4>
-        <div class="scope-toggle">
-          <button
-            class="scope-btn"
-            class:active={orderbookScope === 'all'}
-            on:click={() => (orderbookScope = 'all')}
+      <div class="swap-toolbar">
+        <div class="toolbar-select toolbar-select-pair">
+          <select
+            bind:value={selectedPairValue}
+            data-testid="swap-pair-select"
+            aria-label="Swap pair"
+            on:change={handlePairChange}
           >
-            All Accounts
-          </button>
-          <button
-            class="scope-btn"
-            class:active={orderbookScope === 'selected'}
-            disabled={!counterpartyId}
-            on:click={() => (orderbookScope = 'selected')}
-          >
-            Selected Account
-          </button>
-        </div>
-      </div>
-      {#if !prefilledCounterparty}
-        <div class="form-row compact">
-          <label>
-            Account (Hub)
-            <EntitySelect bind:value={counterpartyId} options={accountIds} placeholder="Select account" />
-          </label>
-        </div>
-      {/if}
-
-      <div class="form-row compact">
-        <label>
-          Pair
-          <select bind:value={selectedPairValue} data-testid="swap-pair-select">
             {#each pairOptions as pair (pair.value)}
               <option value={pair.value}>{pair.label}</option>
             {/each}
           </select>
-        </label>
-        <div class="side-toggle-group">
-          <button
-            type="button"
-            class="scope-btn"
-            class:active={tradeSide === 'buy-base'}
-            data-testid="swap-side-buy"
-            on:click={() => setTradeSide('buy-base')}
+        </div>
+        <div class="toolbar-select toolbar-select-account">
+          <select
+            bind:value={accountViewValue}
+            data-testid="swap-account-select"
+            aria-label="Swap orderbook scope"
+            on:change={handleAccountViewChange}
           >
-            Buy {baseTokenSymbol}
-          </button>
-          <button
-            type="button"
-            class="scope-btn"
-            class:active={tradeSide === 'sell-base'}
-            data-testid="swap-side-sell"
-            on:click={() => setTradeSide('sell-base')}
-          >
-            Sell {baseTokenSymbol}
-          </button>
+            {#each accountViewOptions as option (option.value)}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
         </div>
       </div>
-
-      <p class="orderbook-hint">
-        Pair: {baseTokenSymbol}/{quoteTokenSymbol}. Price is quoted in {quoteTokenSymbol} per {baseTokenSymbol}.
-        {orderbookHint}
-      </p>
       {#if orderbookHubIds.length > 0}
         <div class="orderbook-wrap" data-testid="swap-orderbook">
-          <OrderbookPanel
-            hubIds={orderbookHubIds}
-            hubId={counterpartyId}
-            pairId={orderbookPairId}
-            pairLabel={selectedPair?.label || `${baseTokenSymbol}/${quoteTokenSymbol}`}
-            depth={12}
-            priceScale={Number(ORDERBOOK_PRICE_SCALE)}
-            sizeDisplayScale={orderbookSizeDisplayScale}
-            on:levelclick={handleOrderbookLevelClick}
-            on:snapshot={handleOrderbookSnapshot}
-          />
+          {#key orderbookViewKey}
+            <OrderbookPanel
+              hubIds={orderbookHubIds}
+              hubId={selectedBookAccountId}
+              pairId={orderbookPairId}
+              pairLabel={selectedPair?.label || `${baseTokenSymbol}/${quoteTokenSymbol}`}
+              depth={orderbookDepth}
+              showSources={true}
+              sourceLabels={orderbookSourceLabels}
+              sourceAvatars={orderbookSourceAvatars}
+              compactHeader={true}
+              priceScale={Number(ORDERBOOK_PRICE_SCALE)}
+              sizeDisplayScale={orderbookSizeDisplayScale}
+              on:levelclick={handleOrderbookLevelClick}
+              on:snapshot={handleOrderbookSnapshot}
+            />
+          {/key}
         </div>
       {:else}
         <div class="orderbook-empty">No connected account orderbooks yet.</div>
       {/if}
     </div>
     <div class="section section-order">
-      <h4>Place Limit Order</h4>
+      <div class="order-side-row">
+        <div
+          class="toolbar-select toolbar-select-create-account"
+          class:is-hidden={accountViewValue !== AGGREGATED_ACCOUNT_VALUE}
+        >
+          <select
+            bind:value={createOrderAccountId}
+            data-testid="swap-create-account-select"
+            aria-label="Create swap order on account"
+            disabled={accountViewValue !== AGGREGATED_ACCOUNT_VALUE}
+            on:change={handleCreateOrderAccountChange}
+          >
+            {#each placementAccountOptions as option (option.value)}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </div>
+        <button
+          type="button"
+          class="scope-btn"
+          class:active={tradeSide === 'buy-base'}
+          data-testid="swap-side-buy"
+          on:click={() => setTradeSide('buy-base')}
+        >
+          Buy {baseTokenSymbol}
+        </button>
+        <button
+          type="button"
+          class="scope-btn"
+          class:active={tradeSide === 'sell-base'}
+          data-testid="swap-side-sell"
+          on:click={() => setTradeSide('sell-base')}
+        >
+          Sell {baseTokenSymbol}
+        </button>
+      </div>
 
-      <div class="form-row order-entry-row">
-        <label>
+      <div class="order-entry-row">
+        <label class="order-field order-field-amount">
           {tradeSide === 'buy-base' ? 'Amount to Spend' : 'Amount to Sell'} ({giveTokenSymbol})
           <input type="text" bind:value={orderAmountInput} inputmode="decimal" placeholder="Amount to sell" />
-          <div class="slider-inline">
-            <input
-              class="size-slider"
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              value={orderPercent}
-              on:input={handleOrderPercentInput}
-            />
-            <span class="slider-value">{orderPercent}%</span>
-          </div>
         </label>
-        <label>
+        <label class="order-field order-field-price">
           Price ({quoteTokenSymbol} per {baseTokenSymbol})
           <input
             type="text"
@@ -1317,7 +1371,7 @@
             on:input={handlePriceRatioInput}
           />
         </label>
-        <label>
+        <label class="order-field order-field-receive">
           Amount to Receive ({wantTokenSymbol})
           <input
             type="text"
@@ -1326,6 +1380,19 @@
             class="readonly-input"
           />
         </label>
+      </div>
+
+      <div class="slider-inline">
+        <input
+          class="size-slider"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value={orderPercent}
+          on:input={handleOrderPercentInput}
+        />
+        <span class="slider-value">{orderPercent}%</span>
       </div>
 
       <div class="size-tools">
@@ -1557,18 +1624,70 @@
     margin-top: 14px;
   }
 
-  .orderbook-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-
-  .scope-toggle {
+  .swap-toolbar {
     display: flex;
     gap: 8px;
-    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .toolbar-select {
+    position: relative;
+    border: 1px solid #2d313b;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(34, 35, 42, 0.96), rgba(24, 25, 31, 0.96));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  }
+
+  .toolbar-select::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.04);
+  }
+
+  .toolbar-select-pair {
+    flex: 0 0 220px;
+  }
+
+  .toolbar-select-account {
+    flex: 0 0 170px;
+  }
+
+  .toolbar-select-create-account {
+    flex: 1 1 100%;
+    max-width: 220px;
+    transition: opacity 120ms ease;
+  }
+
+  .toolbar-select-create-account.is-hidden {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .toolbar-select select {
+    width: 100%;
+    height: 48px;
+    border: 0;
+    background: transparent;
+    padding: 0 14px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #f3f4f6;
+  }
+
+  .order-side-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+    flex-wrap: nowrap;
+  }
+
+  .order-side-row .scope-btn {
+    min-width: 112px;
   }
 
   .side-toggle-group {
@@ -1598,13 +1717,6 @@
   .scope-btn:disabled {
     opacity: 0.45;
     cursor: not-allowed;
-  }
-
-  .orderbook-hint {
-    margin: 6px 0 10px;
-    color: #9ca3af;
-    font-size: 12px;
-    line-height: 1.45;
   }
 
   .orderbook-empty {
@@ -1708,21 +1820,51 @@
 
   .order-entry-row {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr) minmax(0, 1fr);
     gap: 12px;
     align-items: start;
+    margin-bottom: 10px;
   }
 
-  .order-entry-row > label {
+  .order-field {
     margin: 0;
+    padding: 10px 12px 12px;
+    border: 1px solid #2f343f;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(18, 19, 24, 0.96), rgba(14, 15, 20, 0.96));
+    gap: 8px;
+  }
+
+  .order-field-amount {
+    grid-column: 1;
+  }
+
+  .order-field-price {
+    grid-column: 2;
+  }
+
+  .order-field-receive {
+    grid-column: 3;
+  }
+
+  .order-field input {
+    height: 46px;
+    padding: 0 12px;
+    background: #17181d;
+    border-color: #333844;
+    font-size: 15px;
   }
 
   .slider-inline {
-    margin-top: 8px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px;
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border: 1px solid #2f343f;
+    border-radius: 12px;
+    background: #101116;
   }
 
   .readonly-input {
@@ -1756,7 +1898,7 @@
   }
 
   .size-tools {
-    margin: 8px 0 14px;
+    margin: 0 0 14px;
     padding: 10px;
     border: 1px solid #2f343f;
     border-radius: 8px;
@@ -2037,12 +2179,24 @@
   }
 
   @media (max-width: 900px) {
+    .toolbar-select-pair,
+    .toolbar-select-account {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+
     .form-row {
       flex-direction: column;
     }
 
     .order-entry-row {
       grid-template-columns: 1fr;
+    }
+
+    .order-field-amount,
+    .order-field-price,
+    .order-field-receive {
+      grid-column: auto;
     }
 
   }

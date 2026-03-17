@@ -7,7 +7,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
-import { resetProdServer } from './utils/e2e-baseline';
+import { APP_BASE_URL, resetProdServer } from './utils/e2e-baseline';
 import { gotoApp as gotoSharedApp, createRuntimeIdentity } from './utils/e2e-demo-users';
 import { connectHub } from './utils/e2e-connect';
 import {
@@ -15,7 +15,6 @@ import {
   waitForPersistedFrameEventMatch,
 } from './utils/e2e-runtime-receipts';
 
-const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
 

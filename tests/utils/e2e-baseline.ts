@@ -1,8 +1,9 @@
 import { expect, type APIResponse, type Page } from '@playwright/test';
+import { requireAppBaseUrl, requireApiBaseUrl, requireResetBaseUrl } from './e2e-base-url';
 
-export const APP_BASE_URL = process.env.E2E_BASE_URL ?? process.env.PW_BASE_URL ?? 'https://localhost:8080';
-export const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
-export const RESET_BASE_URL = process.env.E2E_RESET_BASE_URL ?? API_BASE_URL;
+export const APP_BASE_URL = requireAppBaseUrl();
+export const API_BASE_URL = requireApiBaseUrl();
+export const RESET_BASE_URL = requireResetBaseUrl();
 
 export type E2EResetHealth = {
   inProgress?: boolean;
@@ -27,6 +28,11 @@ export type E2EMarketMakerHubHealth = {
   hubEntityId: string;
   offers: number;
   ready: boolean;
+  pairs?: Array<{
+    pairId: string;
+    offers: number;
+    ready: boolean;
+  }>;
 };
 
 export type E2EMarketMakerHealth = {
@@ -34,6 +40,7 @@ export type E2EMarketMakerHealth = {
   ok?: boolean;
   entityId?: string | null;
   expectedOffersPerHub?: number;
+  expectedOffersPerPair?: number;
   hubs?: E2EMarketMakerHubHealth[];
 };
 
@@ -134,10 +141,16 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
         ok: health.marketMaker?.ok ?? false,
         entityId: health.marketMaker?.entityId ?? null,
         expectedOffersPerHub: health.marketMaker?.expectedOffersPerHub ?? 0,
+        expectedOffersPerPair: health.marketMaker?.expectedOffersPerPair ?? 0,
         hubs: (health.marketMaker?.hubs ?? []).map((hub) => ({
           hubEntityId: hub.hubEntityId,
           offers: hub.offers,
           ready: hub.ready,
+          pairs: (hub.pairs ?? []).map((pair) => ({
+            pairId: pair.pairId,
+            offers: pair.offers,
+            ready: pair.ready,
+          })),
         })),
       },
       bootstrapReserves: {

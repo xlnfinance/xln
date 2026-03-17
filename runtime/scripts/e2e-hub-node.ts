@@ -888,8 +888,16 @@ const run = async (): Promise<void> => {
     }
   };
 
+  let shuttingDown = false;
+  const isExpectedMeshBootstrapError = (error: unknown): boolean => {
+    const message = String((error as Error)?.message || error || '');
+    return message.includes('ECONNREFUSED') || message.includes('fetch failed');
+  };
   const meshLoop = setInterval(() => {
+    if (shuttingDown) return;
     void driveMeshBootstrap().catch(error => {
+      if (shuttingDown) return;
+      if (isExpectedMeshBootstrapError(error)) return;
       console.error(`[${resolvedArgs.name}] mesh bootstrap tick failed:`, (error as Error).message);
     });
   }, BOOTSTRAP_POLL_MS);
@@ -1039,6 +1047,7 @@ const run = async (): Promise<void> => {
   );
 
   const shutdown = async () => {
+    shuttingDown = true;
     clearInterval(meshLoop);
     server.stop(true);
     process.exit(0);

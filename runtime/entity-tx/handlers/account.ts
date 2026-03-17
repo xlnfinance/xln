@@ -23,6 +23,7 @@ import {
 } from '../../entity-crontab';
 import { NobleCryptoProvider } from '../../crypto-noble';
 import { unwrapEnvelope, validateEnvelope } from '../../htlc-envelope-types';
+import { terminateHtlcRoute } from '../htlc-route-lifecycle';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counterpartyId: string): string | null => {
@@ -352,13 +353,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             if (accountTx.data.outcome === 'secret') {
               for (const [hashlock, route] of newState.htlcRoutes.entries()) {
                 if (route.inboundLockId !== accountTx.data.lockId) continue;
-                route.secretAckPending = false;
-                route.secretAckedAt = newState.timestamp;
-                if (newState.crontabState) {
-                  cancelScheduledHook(newState.crontabState, `htlc-secret-ack:${route.hashlock}`);
-                }
                 console.log(`✅ HTLC: secret ACK confirmed for hashlock ${route.hashlock.slice(0, 16)}...`);
-                newState.htlcRoutes.delete(hashlock);
+                terminateHtlcRoute(newState, hashlock, newState.timestamp);
               }
             }
           }
@@ -883,10 +879,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             }
             console.log(`⬅️ HTLC: Propagating secret to ${route.inboundEntity.slice(-4)}`);
           } else {
-            route.secretAckPending = false;
-            route.secretAckedAt = newState.timestamp;
             console.log(`✅ HTLC: Payment complete (we initiated)`);
-            newState.htlcRoutes.delete(hashlock);
+            terminateHtlcRoute(newState, hashlock, newState.timestamp);
           }
           if (isFinalRecipient) {
             env.emit('HtlcReceived', {

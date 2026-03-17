@@ -156,6 +156,43 @@ export function quantizeSwapOrder(
   };
 }
 
+/**
+ * Re-quantize the remaining leg of an existing order while preserving its priceTicks.
+ * This keeps subsequent partial fills aligned to lot granularity.
+ */
+export function requantizeRemainingSwapAtPrice(
+  giveTokenId: number,
+  wantTokenId: number,
+  remainingGiveAmount: bigint,
+  priceTicks: bigint,
+): { effectiveGive: bigint; effectiveWant: bigint; releasedGiveDust: bigint } | null {
+  if (remainingGiveAmount <= 0n || priceTicks <= 0n) return null;
+
+  const side = deriveSide(giveTokenId, wantTokenId);
+  if (side === 1) {
+    const quantizedBaseAmount = (remainingGiveAmount / SWAP_LOT_SCALE) * SWAP_LOT_SCALE;
+    if (quantizedBaseAmount <= 0n) return null;
+    const quantizedQuoteAmount = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+    if (quantizedQuoteAmount <= 0n) return null;
+    return {
+      effectiveGive: quantizedBaseAmount,
+      effectiveWant: quantizedQuoteAmount,
+      releasedGiveDust: remainingGiveAmount - quantizedBaseAmount,
+    };
+  }
+
+  const remainingQuoteAmount = remainingGiveAmount;
+  const quantizedBaseAmount = (remainingQuoteAmount * ORDERBOOK_PRICE_SCALE / priceTicks / SWAP_LOT_SCALE) * SWAP_LOT_SCALE;
+  if (quantizedBaseAmount <= 0n) return null;
+  const quantizedQuoteAmount = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+  if (quantizedQuoteAmount <= 0n) return null;
+  return {
+    effectiveGive: quantizedQuoteAmount,
+    effectiveWant: quantizedBaseAmount,
+    releasedGiveDust: remainingGiveAmount > quantizedQuoteAmount ? remainingGiveAmount - quantizedQuoteAmount : 0n,
+  };
+}
+
 /** Calculate fill amount from ratio (uint16) */
 export function applyFillRatio(amount: bigint, ratio: number): bigint {
   if (ratio >= MAX_FILL_RATIO) return amount;

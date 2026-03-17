@@ -969,6 +969,7 @@ export interface SwapOffer {
   giveAmount: bigint;           // Original amount (partial fills reduce this)
   wantTokenId: number;          // Token maker wants in return
   wantAmount: bigint;           // Corresponding want amount (maintains ratio)
+  priceTicks?: bigint;          // Canonical limit price used for requantization after partial fills
   minFillRatio: number;         // 0-65535, minimum acceptable fill
   makerIsLeft: boolean;         // Who created this offer (canonical direction)
   createdHeight: number;        // AccountFrame height when created

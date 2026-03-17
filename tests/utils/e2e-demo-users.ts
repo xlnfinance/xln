@@ -1,7 +1,8 @@
 import { expect, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
+import { requireAppBaseUrl } from './e2e-base-url';
 
-export const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
+export const APP_BASE_URL = requireAppBaseUrl();
 export const DEFAULT_INIT_TIMEOUT = 30_000;
 
 export type DemoUserName = 'alice' | 'bob' | 'carol' | 'dave';

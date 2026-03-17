@@ -55,6 +55,7 @@ import { deriveDelta } from './account-utils';
 import { resolveEntityProposerId } from './state-helpers';
 import { normalizeRebalanceMatchingStrategy } from './rebalance-policy';
 import { DEFAULT_SOFT_LIMIT } from './types';
+import { terminateHtlcRoute } from './entity-tx/htlc-route-lifecycle';
 
 // Configuration constants
 export const ACCOUNT_TIMEOUT_MS = 30000; // 30 seconds (configurable)
@@ -412,9 +413,7 @@ async function processDueHooks(
 
           // ACK already finalized (lock removed) — clear latch and skip.
           if (inboundLockId && !account.locks?.has(inboundLockId)) {
-            route.secretAckPending = false;
-            route.secretAckedAt = replica.state.timestamp;
-            replica.state.htlcRoutes.delete(hashlock);
+            terminateHtlcRoute(replica.state, hashlock, replica.state.timestamp);
             break;
           }
 

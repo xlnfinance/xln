@@ -35,7 +35,7 @@ import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
 import { DEFAULT_SPREAD_DISTRIBUTION, ORDERBOOK_PRICE_SCALE } from './orderbook';
-import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenInfo } from './account-utils';
+import { buildDefaultEntitySwapPairs, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenInfo } from './account-utils';
 import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -310,6 +310,7 @@ const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
 const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** 18n;
 const BOOTSTRAP_POLL_MS = Math.max(10, Number(process.env.BOOTSTRAP_POLL_MS || '40'));
 const RUNTIME_SETTLE_POLL_MS = Math.max(10, Number(process.env.RUNTIME_SETTLE_POLL_MS || '25'));
+const INCLUDE_MARKET_MAKER_BY_DEFAULT = !/^(0|false)$/i.test(process.env.XLN_INCLUDE_MARKET_MAKER ?? '1');
 const MARKET_MAKER_SIGNER_LABEL = process.env.MARKET_MAKER_SIGNER_LABEL ?? 'mm-1';
 const MARKET_MAKER_SEED = process.env.MARKET_MAKER_SEED ?? `${HUB_SEED}:market-maker`;
 const MARKET_MAKER_NAME = process.env.MARKET_MAKER_NAME ?? 'MM1';
@@ -319,7 +320,7 @@ const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   4,
   Number(process.env.MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK || '10'),
 );
-const MARKET_MAKER_LEVEL_OFFSETS_BPS = [4, 10, 18, 30, 45] as const;
+const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 6, 12, 20, 32] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
   120n * 10n ** 18n,
   180n * 10n ** 18n,
@@ -327,6 +328,40 @@ const MARKET_MAKER_LEVEL_BASE_SIZES = [
   300n * 10n ** 18n,
   360n * 10n ** 18n,
 ] as const;
+const MARKET_MAKER_STABLE_LEVEL_OFFSETS_BPS = [1, 2, 4, 6, 9, 12, 16, 20, 28, 36] as const;
+const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
+  120n * 10n ** 18n,
+  180n * 10n ** 18n,
+  240n * 10n ** 18n,
+  300n * 10n ** 18n,
+  360n * 10n ** 18n,
+  420n * 10n ** 18n,
+  480n * 10n ** 18n,
+  560n * 10n ** 18n,
+  640n * 10n ** 18n,
+  720n * 10n ** 18n,
+] as const;
+type MarketMakerLevelProfile = {
+  offsetsBps: readonly number[];
+  baseSizes: readonly bigint[];
+};
+
+const getMarketMakerLevelProfile = (baseTokenId: number, quoteTokenId: number): MarketMakerLevelProfile => {
+  if (baseTokenId === 1 && quoteTokenId === 3) {
+    return {
+      offsetsBps: MARKET_MAKER_STABLE_LEVEL_OFFSETS_BPS,
+      baseSizes: MARKET_MAKER_STABLE_LEVEL_BASE_SIZES,
+    };
+  }
+  return {
+    offsetsBps: MARKET_MAKER_LEVEL_OFFSETS_BPS,
+    baseSizes: MARKET_MAKER_LEVEL_BASE_SIZES,
+  };
+};
+
+const getExpectedMarketMakerOffersForPair = (baseTokenId: number, quoteTokenId: number): number => {
+  return getMarketMakerLevelProfile(baseTokenId, quoteTokenId).offsetsBps.length * 2;
+};
 
 let marketMakerLoopTimer: ReturnType<typeof setInterval> | null = null;
 let marketMakerLoopInFlight = false;
@@ -830,13 +865,7 @@ const normalizeTokenIdsForMm = (tokenCatalog: JTokenInfo[]): number[] => {
 };
 
 const buildMarketMakerPairs = (tokenIds: number[]): Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> => {
-  if (tokenIds.length < 3) return [];
-  const [a, b, c] = tokenIds;
-  return [
-    getSwapPairOrientation(a, b),
-    getSwapPairOrientation(a, c),
-    getSwapPairOrientation(b, c),
-  ];
+  return buildDefaultEntitySwapPairs(tokenIds);
 };
 
 const ensureMarketMakerEntity = async (
@@ -932,6 +961,22 @@ const countMarketMakerOffersForHub = (
   return count;
 };
 
+const countMarketMakerOffersForHubPair = (
+  env: Env,
+  mmEntityId: string,
+  hubEntityId: string,
+  pair: { baseTokenId: number; quoteTokenId: number },
+): number => {
+  const account = getAccountMachine(env, mmEntityId, hubEntityId);
+  if (!account) return 0;
+  const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-${pair.baseTokenId}-${pair.quoteTokenId}-`;
+  let count = 0;
+  for (const offerId of collectOfferIdsForAccount(account)) {
+    if (offerId.startsWith(prefix)) count += 1;
+  }
+  return count;
+};
+
 const snapPriceTicks = (ticks: bigint, stepTicks: number, mode: 'up' | 'down'): bigint => {
   const step = BigInt(Math.max(1, stepTicks));
   if (mode === 'up') {
@@ -946,17 +991,27 @@ const buildMarketMakerOfferSpecs = (
 ): MarketMakerOfferSpec[] => {
   const specs: MarketMakerOfferSpec[] = [];
   const pairs = buildMarketMakerPairs(tokenIds);
+  const hubSkewBps = (hubEntityId: string, pairIndex: number): number => {
+    const tail = hubEntityId.slice(-6);
+    let hash = 0;
+    for (let i = 0; i < tail.length; i += 1) {
+      hash = ((hash * 33) + tail.charCodeAt(i) + (pairIndex * 17)) % 11;
+    }
+    return hash - 5;
+  };
   for (const hubEntityId of hubEntityIds) {
     const hubSuffix = hubEntityId.slice(-6).toLowerCase();
     for (let pairIndex = 0; pairIndex < pairs.length; pairIndex++) {
       const pair = pairs[pairIndex]!;
       const pairPolicy = getSwapPairPolicyByBaseQuote(pair.baseTokenId, pair.quoteTokenId);
-      const midPriceTicks = pairPolicy.mmMidPriceTicks;
+      const levelProfile = getMarketMakerLevelProfile(pair.baseTokenId, pair.quoteTokenId);
+      const skewBps = hubSkewBps(hubEntityId, pairIndex);
+      const midPriceTicks = (pairPolicy.mmMidPriceTicks * BigInt(10_000 + skewBps)) / 10_000n;
       const stepTicks = Math.max(1, pairPolicy.priceStepTicks);
       const stepTicksBig = BigInt(stepTicks);
-      for (let level = 0; level < MARKET_MAKER_LEVEL_OFFSETS_BPS.length; level++) {
-        const offsetBps = MARKET_MAKER_LEVEL_OFFSETS_BPS[level]!;
-        const baseSize = MARKET_MAKER_LEVEL_BASE_SIZES[level]!;
+      for (let level = 0; level < levelProfile.offsetsBps.length; level++) {
+        const offsetBps = levelProfile.offsetsBps[level]!;
+        const baseSize = levelProfile.baseSizes[level]!;
         const askRaw = (midPriceTicks * BigInt(10_000 + offsetBps)) / 10_000n;
         const bidRaw = (midPriceTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
         const askPriceTicks = snapPriceTicks(askRaw, stepTicks, 'up');
@@ -1126,7 +1181,7 @@ const maintainMarketMakerQuotes = async (
     grouped.set(spec.hubEntityId, arr);
   }
 
-  const offerInputs: EntityInput[] = [];
+  const entityTxs: EntityInput['entityTxs'] = [];
   for (const [hubEntityId, specs] of grouped.entries()) {
     const account = getAccountMachine(env, mmEntityId, hubEntityId);
     if (!account) continue;
@@ -1139,26 +1194,29 @@ const maintainMarketMakerQuotes = async (
       .slice(0, Math.max(1, Math.floor(maxOffersPerAccount)));
     if (missing.length === 0) continue;
 
-    offerInputs.push({
-      entityId: mmEntityId,
-      signerId: mmSignerId,
-      entityTxs: missing.map(spec => ({
-        type: 'placeSwapOffer',
-        data: {
-          counterpartyEntityId: spec.hubEntityId,
-          offerId: spec.offerId,
-          giveTokenId: spec.giveTokenId,
-          giveAmount: spec.giveAmount,
-          wantTokenId: spec.wantTokenId,
-          wantAmount: spec.wantAmount,
-          minFillRatio: spec.minFillRatio,
-        },
-      })),
-    });
+    entityTxs.push(...missing.map(spec => ({
+      type: 'placeSwapOffer' as const,
+      data: {
+        counterpartyEntityId: spec.hubEntityId,
+        offerId: spec.offerId,
+        giveTokenId: spec.giveTokenId,
+        giveAmount: spec.giveAmount,
+        wantTokenId: spec.wantTokenId,
+        wantAmount: spec.wantAmount,
+        minFillRatio: spec.minFillRatio,
+      },
+    })));
   }
 
-  if (offerInputs.length > 0) {
-    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: offerInputs });
+  if (entityTxs.length > 0) {
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: mmEntityId,
+        signerId: mmSignerId,
+        entityTxs,
+      }],
+    });
   }
 };
 
@@ -1167,12 +1225,21 @@ const getMarketMakerHealth = (env: Env | null): {
   ok: boolean;
   entityId: string | null;
   expectedOffersPerHub: number;
-  hubs: Array<{ hubEntityId: string; offers: number; ready: boolean }>;
+  expectedOffersPerPair: number;
+  hubs: Array<{
+    hubEntityId: string;
+    offers: number;
+    ready: boolean;
+    pairs: Array<{ pairId: string; offers: number; ready: boolean }>;
+  }>;
 } => {
   const entityId = marketMakerEntityId;
   const hubs = [...marketMakerTargetHubIds];
-  const expectedOffersPerHub =
-    buildMarketMakerPairs(marketMakerTokenIds).length * MARKET_MAKER_LEVEL_OFFSETS_BPS.length * 2;
+  const pairs = buildMarketMakerPairs(marketMakerTokenIds);
+  const expectedOffersPerHub = pairs.reduce(
+    (sum, pair) => sum + getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId),
+    0,
+  );
 
   if (!entityId || hubs.length === 0 || expectedOffersPerHub <= 0) {
     return {
@@ -1180,6 +1247,7 @@ const getMarketMakerHealth = (env: Env | null): {
       ok: false,
       entityId: entityId || null,
       expectedOffersPerHub: Math.max(0, expectedOffersPerHub),
+      expectedOffersPerPair: Math.max(...pairs.map((pair) => getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId)), 0),
       hubs: [],
     };
   }
@@ -1190,20 +1258,36 @@ const getMarketMakerHealth = (env: Env | null): {
       ok: false,
       entityId,
       expectedOffersPerHub,
+      expectedOffersPerPair: Math.max(...pairs.map((pair) => getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId)), 0),
       hubs: hubs.map((hubEntityId) => ({
         hubEntityId,
         offers: 0,
         ready: false,
+        pairs: pairs.map((pair) => ({
+          pairId: pair.pairId,
+          offers: 0,
+          ready: false,
+        })),
       })),
     };
   }
 
   const perHub = hubs.map((hubEntityId) => {
     const offers = countMarketMakerOffersForHub(env, entityId, hubEntityId);
+    const pairHealth = pairs.map((pair) => {
+      const pairOffers = countMarketMakerOffersForHubPair(env, entityId, hubEntityId, pair);
+      const expectedPairOffers = getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId);
+      return {
+        pairId: pair.pairId,
+        offers: pairOffers,
+        ready: pairOffers >= expectedPairOffers,
+      };
+    });
     return {
       hubEntityId,
       offers,
-      ready: offers >= expectedOffersPerHub,
+      ready: offers >= expectedOffersPerHub && pairHealth.every((pair) => pair.ready),
+      pairs: pairHealth,
     };
   });
 
@@ -1212,6 +1296,7 @@ const getMarketMakerHealth = (env: Env | null): {
     ok: perHub.length > 0 && perHub.every((entry) => entry.ready),
     entityId,
     expectedOffersPerHub,
+    expectedOffersPerPair: Math.max(...pairs.map((pair) => getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId)), 0),
     hubs: perHub,
   };
 };
@@ -1235,8 +1320,10 @@ const bootstrapMarketMakerLiquidity = async (
   marketMakerEntityId = mm.entityId;
   marketMakerTargetHubIds = [...targetHubs];
   marketMakerTokenIds = [...tokenIds];
-  const expectedOffersPerHub =
-    buildMarketMakerPairs(tokenIds).length * MARKET_MAKER_LEVEL_OFFSETS_BPS.length * 2;
+  const expectedOffersPerHub = buildMarketMakerPairs(tokenIds).reduce(
+    (sum, pair) => sum + getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId),
+    0,
+  );
   const bootstrapOfferLimit = Math.max(expectedOffersPerHub, MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK);
 
   const bootstrapDeadline = Date.now() + 45_000;
@@ -2420,18 +2507,26 @@ const resetServerDebugState = (
 
 const triggerColdReset = async (
   env: Env,
-  opts: { resetRpc?: boolean; clearDb?: boolean; preserveHubs?: boolean; syncRebuild?: boolean } = {},
+  opts: {
+    resetRpc?: boolean;
+    clearDb?: boolean;
+    preserveHubs?: boolean;
+    syncRebuild?: boolean;
+    includeMarketMaker?: boolean;
+  } = {},
 ): Promise<{
   resetRpc: boolean;
   clearDb: boolean;
   activeClientsClosed: number;
   preserveHubs: boolean;
   rebuilding: boolean;
+  includeMarketMaker: boolean;
 }> => {
   const resetRpc = opts.resetRpc !== false;
   const clearDbState = opts.clearDb !== false;
   const preserveHubs = opts.preserveHubs === true;
   const syncRebuild = opts.syncRebuild === true;
+  const includeMarketMaker = opts.includeMarketMaker !== false;
   const inFlightAtEntry = coldResetRebuildInFlight;
   if (inFlightAtEntry) {
     if (syncRebuild) {
@@ -2439,9 +2534,9 @@ const triggerColdReset = async (
       if (coldResetRebuildError) {
         throw new Error(`RESET_REBUILD_FAILED: ${coldResetRebuildError}`);
       }
-      return { resetRpc, clearDb: clearDbState, activeClientsClosed: 0, preserveHubs, rebuilding: false };
+      return { resetRpc, clearDb: clearDbState, activeClientsClosed: 0, preserveHubs, rebuilding: false, includeMarketMaker };
     }
-    return { resetRpc, clearDb: clearDbState, activeClientsClosed: 0, preserveHubs, rebuilding: true };
+    return { resetRpc, clearDb: clearDbState, activeClientsClosed: 0, preserveHubs, rebuilding: true, includeMarketMaker };
   }
   const previousGate = coldResetGate;
   let releaseGate: (() => void) | null = null;
@@ -2456,9 +2551,9 @@ const triggerColdReset = async (
         if (coldResetRebuildError) {
           throw new Error(`RESET_REBUILD_FAILED: ${coldResetRebuildError}`);
         }
-        return { resetRpc, clearDb: clearDbState, activeClientsClosed: 0, preserveHubs, rebuilding: false };
+        return { resetRpc, clearDb: clearDbState, activeClientsClosed: 0, preserveHubs, rebuilding: false, includeMarketMaker };
       }
-      return { resetRpc, clearDb: clearDbState, activeClientsClosed: 0, preserveHubs, rebuilding: true };
+      return { resetRpc, clearDb: clearDbState, activeClientsClosed: 0, preserveHubs, rebuilding: true, includeMarketMaker };
     }
   stopMarketMakerLoop();
   const runtimeState = env.runtimeState;
@@ -2580,7 +2675,7 @@ const triggerColdReset = async (
     }
 
     await bootstrapServerHubsAndReserves(env, activeServerOptions, advertisedRelayUrl, anvilRpc, {
-      includeMarketMaker: true,
+      includeMarketMaker,
     });
     console.log('[RESET] Rebuild complete');
   };
@@ -2606,10 +2701,10 @@ const triggerColdReset = async (
     if (coldResetRebuildError) {
       throw new Error(`RESET_REBUILD_FAILED: ${coldResetRebuildError}`);
     }
-    return { resetRpc, clearDb: clearDbState, activeClientsClosed, preserveHubs, rebuilding: false };
+    return { resetRpc, clearDb: clearDbState, activeClientsClosed, preserveHubs, rebuilding: false, includeMarketMaker };
   }
 
-  return { resetRpc, clearDb: clearDbState, activeClientsClosed, preserveHubs, rebuilding: true };
+  return { resetRpc, clearDb: clearDbState, activeClientsClosed, preserveHubs, rebuilding: true, includeMarketMaker };
   } finally {
     releaseGate?.();
   }
@@ -3894,10 +3989,16 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     }
 
     let preserveHubs = false;
+    let includeMarketMaker = INCLUDE_MARKET_MAKER_BY_DEFAULT;
     try {
       const body = await req.json().catch(() => ({}));
       if (typeof body?.preserveHubs === 'boolean') {
         preserveHubs = body.preserveHubs;
+      }
+      if (typeof body?.requireMarketMaker === 'boolean') {
+        includeMarketMaker = body.requireMarketMaker;
+      } else if (typeof body?.marketMaker === 'boolean') {
+        includeMarketMaker = body.marketMaker;
       }
     } catch {
       // Keep defaults for malformed/empty body.
@@ -3909,6 +4010,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       status: 'ok',
       details: {
         preserveHubs,
+        includeMarketMaker,
         ...stats,
       },
     });
@@ -3916,6 +4018,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       safeStringify({
         ok: true,
         preserveHubs,
+        includeMarketMaker,
         ...stats,
         ts: Date.now(),
       }),
@@ -3939,10 +4042,27 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     const preserveParam = url.searchParams.get('preserveHubs');
     const preserveHubs = preserveParam === '1';
     const syncRebuild = url.searchParams.get('sync') === '1';
+    let includeMarketMaker = INCLUDE_MARKET_MAKER_BY_DEFAULT;
+    try {
+      const body = await req.clone().json().catch(() => ({}));
+      if (typeof body?.requireMarketMaker === 'boolean') {
+        includeMarketMaker = body.requireMarketMaker;
+      } else if (typeof body?.marketMaker === 'boolean') {
+        includeMarketMaker = body.marketMaker;
+      }
+    } catch {
+      // Ignore invalid JSON body.
+    }
     // Keep server alive by default (local dev/e2e). Supervisor restart is opt-in via exit=1.
     const shouldExit = url.searchParams.get('exit') === '1';
 
-    const result = await triggerColdReset(env, { resetRpc, clearDb: clearDbState, preserveHubs, syncRebuild });
+    const result = await triggerColdReset(env, {
+      resetRpc,
+      clearDb: clearDbState,
+      preserveHubs,
+      syncRebuild,
+      includeMarketMaker,
+    });
     pushDebugEvent(relayStore, {
       event: 'reset',
       status: 'ok',
@@ -4948,7 +5068,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     }
   }
 
-  const hubEntityIds = await bootstrapServerHubsAndReserves(env, options, advertisedRelayUrl, anvilRpc);
+  const hubEntityIds = await bootstrapServerHubsAndReserves(env, options, advertisedRelayUrl, anvilRpc, {
+    includeMarketMaker: INCLUDE_MARKET_MAKER_BY_DEFAULT,
+  });
 
   // Wire relay-router + local delivery
   const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);

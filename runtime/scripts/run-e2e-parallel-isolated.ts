@@ -52,6 +52,14 @@ type RunResult = {
   error?: string;
 };
 
+type RunTask = {
+  shard: number;
+  totalShards: number;
+  pwTargets: string[];
+  requireMarketMaker: boolean;
+  usePlaywrightShard: boolean;
+};
+
 const parseArgs = (): CliArgs => {
   const args = process.argv.slice(2);
   const longMode = process.env.E2E_LONG === '1';
@@ -156,6 +164,77 @@ const parseStepTimings = (path: string): StepTiming[] => {
   } catch {
     return [];
   }
+};
+
+const expandPlaywrightTargets = (pwFiles: string[]): Array<{ target: string; requireMarketMaker: boolean }> => {
+  const out: Array<{ target: string; requireMarketMaker: boolean }> = [];
+  const updateBraceDepth = (line: string, depth: number): number => {
+    let next = depth;
+    let inSingle = false;
+    let inDouble = false;
+    let inTemplate = false;
+    let escaped = false;
+
+    for (let i = 0; i < line.length; i += 1) {
+      const ch = line[i] || '';
+      const nxt = line[i + 1] || '';
+
+      if (!inSingle && !inDouble && !inTemplate && ch === '/' && nxt === '/') break;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (!inDouble && !inTemplate && ch === "'") {
+        inSingle = !inSingle;
+        continue;
+      }
+      if (!inSingle && !inTemplate && ch === '"') {
+        inDouble = !inDouble;
+        continue;
+      }
+      if (!inSingle && !inDouble && ch === '`') {
+        inTemplate = !inTemplate;
+        continue;
+      }
+      if (inSingle || inDouble || inTemplate) continue;
+      if (ch === '{') next += 1;
+      else if (ch === '}') next = Math.max(0, next - 1);
+    }
+
+    return next;
+  };
+
+  for (const file of pwFiles) {
+    const absolute = resolve(process.cwd(), file);
+    const text = readFileSync(absolute, 'utf8');
+    const lines = text.split('\n');
+    let added = 0;
+    let braceDepth = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] || '';
+      const matchesTopLevelTest =
+        braceDepth <= 1 && /^\s*test(?:\.(?:only|fail))?\(/.test(line);
+      if (matchesTopLevelTest) {
+        out.push({
+          target: `${file}:${i + 1}`,
+          requireMarketMaker: !/e2e-swap-isolated\.spec\.ts$/.test(file),
+        });
+        added += 1;
+      }
+      braceDepth = updateBraceDepth(line, braceDepth);
+    }
+    if (added === 0) {
+      out.push({
+        target: file,
+        requireMarketMaker: !/e2e-swap-isolated\.spec\.ts$/.test(file),
+      });
+    }
+  }
+  return out;
 };
 
 const stopProcess = async (proc: ChildProcessWithoutNullStreams | null): Promise<void> => {
@@ -337,7 +416,9 @@ const runCmd = async (
   return code;
 };
 
-const runShard = async (shard: number, totalShards: number, args: CliArgs, logsDir: string): Promise<RunResult> => {
+const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<RunResult> => {
+  const shard = task.shard;
+  const totalShards = task.totalShards;
   const startedAt = Date.now();
   const logPath = join(logsDir, `e2e-shard-${String(shard).padStart(2, '0')}.log`);
   const log = createWriteStream(logPath, { flags: 'w' });
@@ -377,9 +458,9 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
     // from previous crashed/aborted runs.
     // Layout:
     // - rpc: anvil
-    // - api: runtime server
+    // - api: production runtime/server.ts on an isolated shard port
     // - web: vite preview
-    // - hub children: local APIs owned by mesh supervisor
+    // - extra reserved ports kept for any local child APIs the server may spawn
     const preflightStart = Date.now();
     await freePort(rpcPort, log);
     await freePort(apiPort, log);
@@ -405,13 +486,15 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
     markPhase('anvilBoot', anvilStart);
 
     const apiStart = Date.now();
-    api = spawn('bun', ['runtime/scripts/e2e-mesh-control.ts', '--host', '127.0.0.1', '--port', String(apiPort), '--rpc-url', rpcUrl, '--db-root', dbPath], {
+    api = spawn('bun', ['runtime/server.ts', '--host', '127.0.0.1', '--port', String(apiPort)], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: sanitizeChildEnv({
         ...process.env,
         USE_ANVIL: 'true',
         ANVIL_RPC: rpcUrl,
         XLN_DB_PATH: dbPath,
+        XLN_RUNTIME_SEED: `e2e-isolated-shard-${shard}`,
+        XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
       }),
     });
     api.stdout.on('data', c => log.write(`[api] ${c.toString()}`));
@@ -445,9 +528,10 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
       'test',
       '--config',
       'playwright.config.ts',
-      '--shard',
-      shardArg,
     ];
+    if (task.usePlaywrightShard) {
+      playwrightArgs.push('--shard', shardArg);
+    }
     if (args.pwGrep) {
       playwrightArgs.push('--grep', args.pwGrep);
     }
@@ -457,7 +541,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
     playwrightArgs.push(`--workers=${args.workersPerShard}`);
     playwrightArgs.push(`--reporter=${args.reporter}`);
     if (args.maxFailures > 0) playwrightArgs.push(`--max-failures=${args.maxFailures}`);
-    for (const file of args.pwFiles) playwrightArgs.push(file);
+    for (const target of task.pwTargets) playwrightArgs.push(target);
     log.write(`[runner] playwright args: ${JSON.stringify(playwrightArgs)}\n`);
 
     const playwrightStart = Date.now();
@@ -480,6 +564,7 @@ const runShard = async (shard: number, totalShards: number, args: CliArgs, logsD
           E2E_API_BASE_URL: apiUrl,
           E2E_RESET_BASE_URL: apiUrl,
           E2E_FAST: process.env.E2E_FAST ?? '1',
+          XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
         },
         log,
         timeoutMs: args.testTimeoutMs,
@@ -564,9 +649,26 @@ async function main(): Promise<void> {
   }
 
   const startedAt = Date.now();
+  const tasks: RunTask[] =
+    args.pwFiles.length > 0
+      ? expandPlaywrightTargets(args.pwFiles).map((entry, index, entries) => ({
+          shard: index,
+          totalShards: entries.length,
+          pwTargets: [entry.target],
+          requireMarketMaker: entry.requireMarketMaker,
+          usePlaywrightShard: false,
+        }))
+      : Array.from({ length: args.shards }, (_, index) => ({
+          shard: index,
+          totalShards: args.shards,
+          pwTargets: [],
+          requireMarketMaker: true,
+          usePlaywrightShard: true,
+        }));
+
   const promises: Array<Promise<RunResult>> = [];
-  for (let i = 0; i < args.shards; i++) {
-    promises.push(runShard(i, args.shards, args, logsDir));
+  for (const task of tasks) {
+    promises.push(runShard(task, args, logsDir));
   }
 
   const results = await Promise.all(promises);

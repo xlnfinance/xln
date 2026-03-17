@@ -12,6 +12,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
+import { APP_BASE_URL } from './utils/e2e-baseline';
 import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
@@ -20,7 +21,6 @@ import { connectHub as connectActiveRuntimeToHub } from './utils/e2e-connect';
 import { getRenderedPrimaryOutbound, waitForRenderedPrimaryOutboundDelta } from './utils/e2e-account-ui';
 import { getPersistedReceiptCursor } from './utils/e2e-runtime-receipts';
 
-const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
 
