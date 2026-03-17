@@ -6,10 +6,13 @@ async function completeOnboarding(page: import('@playwright/test').Page): Promis
   await expect(startButton).toBeVisible();
   await startButton.click();
   await expect(page.getByTestId('tab-accounts')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('button', { name: /^Open Account$/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Open Account', exact: true })).toBeVisible();
+  await expect(page.getByPlaceholder('Select entity or paste full ID...')).toBeVisible();
 }
 
 test.describe('BrainVault default flow', () => {
-  test('derives a vault end-to-end (real worker, 1 factor)', async ({ page }) => {
+  test('derives a vault end-to-end (real worker, 1 factor)', async ({ page }, testInfo) => {
     // Allow extra time for hash-wasm download + Argon2 computation
     test.setTimeout(5 * 60 * 1000);
 
@@ -26,10 +29,11 @@ test.describe('BrainVault default flow', () => {
     await deriveButton.click();
 
     await completeOnboarding(page);
+    await page.screenshot({ path: testInfo.outputPath('wallet-after-onboarding.png'), fullPage: true });
     await expect(page.getByRole('button', { name: /vault-test@example\.com/i }).first()).toBeVisible();
   });
 
-  test('derives a vault end-to-end (real worker, 2 factors)', async ({ page }) => {
+  test('derives a vault end-to-end (real worker, 2 factors)', async ({ page }, testInfo) => {
     // Allow extra time for hash-wasm download + Argon2 computation
     test.setTimeout(5 * 60 * 1000);
 
@@ -45,6 +49,7 @@ test.describe('BrainVault default flow', () => {
     await deriveButton.click();
 
     await completeOnboarding(page);
+    await page.screenshot({ path: testInfo.outputPath('wallet-after-onboarding.png'), fullPage: true });
     await expect(page.getByRole('button', { name: /vault-tes2t@example\.com/i }).first()).toBeVisible();
   });
 });

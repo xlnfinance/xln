@@ -371,7 +371,7 @@
         inAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}
         derived={aggDerived}
         decimals={Number(primaryTokenInfo.decimals ?? 18)}
-        barHeight={9}
+        barHeight={4}
         visualScale={aggregateVisualScale}
         actionLabel="Faucet"
         actionTokenId={agg.primaryTokenId}
@@ -381,9 +381,9 @@
       <DeltaTokenList
         rows={tokenSummaries}
         barLayout={$settings.barLayout ?? 'center'}
-        barHeight={9}
+        barHeight={4}
         showMetricLabels={false}
-        showHeader={true}
+        showHeader={false}
         mode="plain"
         on:action={(event) => handleTokenFaucet(event.detail.tokenId)}
       />

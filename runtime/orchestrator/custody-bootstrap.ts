@@ -121,7 +121,16 @@ export const waitForHttpReady = async (
   let lastError = 'not-started';
   while (Date.now() < deadline) {
     try {
+      const insecureLocalHttps = url.startsWith('https://localhost:') || url.startsWith('https://127.0.0.1:');
+      const prevTlsReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      if (insecureLocalHttps) {
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      }
       const response = await fetch(url);
+      if (insecureLocalHttps) {
+        if (prevTlsReject === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTlsReject;
+      }
       if (response.status < 500) return;
       lastError = `status=${response.status}`;
     } catch (error) {
@@ -298,8 +307,9 @@ export const startCustodySupport = async (
     'custody-service',
     ['custody/server.ts'],
     {
-      CUSTODY_HOST: '127.0.0.1',
+      CUSTODY_HOST: 'localhost',
       CUSTODY_PORT: String(options.custodyPort),
+      CUSTODY_HTTPS: '1',
       CUSTODY_DAEMON_WS: `ws://127.0.0.1:${options.daemonPort}/rpc`,
       CUSTODY_WALLET_URL: options.walletUrl,
       CUSTODY_ENTITY_ID: identity.entityId,
@@ -307,7 +317,7 @@ export const startCustodySupport = async (
       CUSTODY_DB_PATH: `${options.dbRoot}/custody.sqlite`,
     },
   );
-  await waitForHttpReady(`http://127.0.0.1:${options.custodyPort}/api/me`, custodyChild);
+  await waitForHttpReady(`https://localhost:${options.custodyPort}/api/me`, custodyChild);
 
   return {
     daemonChild,

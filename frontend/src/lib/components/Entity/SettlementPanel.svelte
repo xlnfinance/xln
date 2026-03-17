@@ -183,7 +183,7 @@
   function entityAvatar(entity: string): string {
     const canonical = String(entity || '').trim();
     if (!canonical) return '';
-    return activeXlnFunctions?.generateEntityAvatar?.(canonical) || '';
+    return activeXlnFunctions?.isReady ? (activeXlnFunctions.generateEntityAvatar?.(canonical) || '') : '';
   }
 
   function uniqueEntities(values: Array<unknown>): string[] {

@@ -393,8 +393,15 @@
     }
   }
 
-  // Get avatar URL
-  $: avatarUrl = activeXlnFunctions?.generateEntityAvatar?.(tab.entityId) || '';
+  // Get avatar URL without tripping early boot fail-fast guards.
+  $: avatarUrl = (() => {
+    if (!activeXlnFunctions?.isReady) return '';
+    try {
+      return activeXlnFunctions.generateEntityAvatar?.(tab.entityId) || '';
+    } catch {
+      return '';
+    }
+  })();
 
   // Resolve entity name from gossip profiles
   $: gossipName = (() => {
@@ -2398,6 +2405,21 @@
     { id: 'activity', icon: Activity, label: 'Activity' },
     { id: 'settle', icon: Landmark, label: 'Settle', showPendingBatch: true },
   ];
+  $: hasWorkspaceAccounts = workspaceAccountIds.length > 0;
+  $: visibleAccountWorkspaceTabs = hasWorkspaceAccounts
+    ? accountWorkspaceTabs
+    : accountWorkspaceTabs.filter((tabConfig) => tabConfig.id === 'open');
+  $: if (!hasWorkspaceAccounts && accountWorkspaceTab !== 'open') {
+    accountWorkspaceTab = 'open';
+  }
+  let lastDeepLinkWorkspaceSignature = '';
+  $: {
+    const signature = `${getUrlHashRoute() || ''}|${workspaceAccountIds.length}|${accountIds.length}`;
+    if (signature !== lastDeepLinkWorkspaceSignature) {
+      lastDeepLinkWorkspaceSignature = signature;
+      applyDeepLinkViewFromUrl();
+    }
+  }
 </script>
 
 <div class="entity-panel" data-panel-id={tab.id}>
@@ -2971,7 +2993,7 @@
           />
 
           <nav class="account-workspace-tabs" aria-label="Account workspace">
-            {#each accountWorkspaceTabs as t}
+            {#each visibleAccountWorkspaceTabs as t}
               <button
                 class="account-workspace-tab"
                 class:active={accountWorkspaceTab === t.id}
@@ -3165,14 +3187,14 @@
             {:else if accountWorkspaceTab === 'open'}
               <div class="account-open-sections">
                 <div class="open-section">
-                  <h4 class="section-head">Open with Public Hub</h4>
+                  <h4 class="section-head">Open Account</h4>
                   <HubDiscoveryPanel entityId={replica?.state?.entityId || tab.entityId} />
                 </div>
                 <div class="open-section">
-                  <h4 class="section-head">Open Private Account</h4>
+                  <h4 class="section-head">Enter Entity ID</h4>
                   <div class="open-private-form">
                     <EntityInput
-                      label="Counterparty"
+                      label="Entity"
                       value={openAccountEntityId}
                       entities={openAccountEntityOptions}
                       {contacts}
@@ -5549,15 +5571,15 @@
   .account-open-sections {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    margin-top: 12px;
+    gap: 10px;
+    margin-top: 8px;
   }
 
   .open-section {
-    padding: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.02);
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
   }
 
   .open-private-form {
@@ -5567,8 +5589,11 @@
   }
 
   .disputed-section {
+    padding: 10px;
     border-color: rgba(244, 63, 94, 0.25);
     background: rgba(244, 63, 94, 0.06);
+    border: 1px solid rgba(244, 63, 94, 0.25);
+    border-radius: 8px;
   }
 
   .disputed-list {

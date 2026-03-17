@@ -91,7 +91,7 @@
     return '';
   };
 
-  $: avatarUrl = $xlnFunctions?.generateEntityAvatar?.(entityId) || '';
+  $: avatarUrl = $xlnFunctions?.isReady ? ($xlnFunctions.generateEntityAvatar?.(entityId) || '') : '';
 
   $: canFinish =
     termsAccepted &&
@@ -406,9 +406,9 @@
   }
 
   .profile-preview-avatar {
-    width: 56px;
-    height: 56px;
-    border-radius: 14px;
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
     object-fit: cover;
     flex-shrink: 0;
   }

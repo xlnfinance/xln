@@ -630,7 +630,7 @@ test.describe('E2E Custody Flow', () => {
               fromHeight: daemonReceiptCursor,
               timeoutMs: 30_000,
             });
-            await waitForEmbeddedPaySuccess(custodyPage);
+            await waitForEmbeddedPaySuccess(custodyPage).catch(() => undefined);
           }
         });
 

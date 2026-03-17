@@ -69,7 +69,10 @@
         selfEntity: selfEntity || (selfEntityId ? {
           entityId: signer?.entityId || '',
           name: signer?.entityId || 'Entity',
-          avatarUrl: signer?.entityId ? activeXlnFunctions?.generateEntityAvatar?.(signer.entityId) || '' : '',
+          avatarUrl:
+            signer?.entityId && activeXlnFunctions?.isReady
+              ? activeXlnFunctions.generateEntityAvatar?.(signer.entityId) || ''
+              : '',
           isSelf: true
         } : null),
         derivedEntities,
@@ -104,7 +107,7 @@
       entities.push({
         entityId,
         name: getEntityLabel(entityId, env, replica),
-        avatarUrl: activeXlnFunctions?.generateEntityAvatar?.(entityId) || '',
+        avatarUrl: activeXlnFunctions?.isReady ? activeXlnFunctions.generateEntityAvatar?.(entityId) || '' : '',
         isSelf: normalizedEntityId === normalizeId(selfEntityId),
       });
     }
@@ -209,7 +212,7 @@
       <span class="pill-title">{currentTitle}</span>
       <span class="pill-subtitle">{currentSubtitle}</span>
     </span>
-    <span class="pill-arrow" class:open>▾</span>
+    <span class="pill-arrow" class:open aria-hidden="true">›</span>
   </span>
 
   <div slot="menu" class="switcher-menu">
@@ -377,8 +380,20 @@
 
   .pill-arrow {
     color: #a8a29e;
-    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    font-size: 16px;
+    line-height: 1;
     flex-shrink: 0;
+    transform: rotate(0deg);
+    transition: transform 160ms ease, color 160ms ease;
+  }
+
+  .pill-arrow.open {
+    transform: rotate(90deg);
   }
 
   .switcher-menu {

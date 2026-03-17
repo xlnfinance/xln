@@ -62,7 +62,7 @@
 
   function generateIdenticon(entityId: string): string {
     const canonicalId = String(entityId || '').trim().toLowerCase();
-    return activeFunctions?.generateEntityAvatar?.(canonicalId) || '';
+    return activeFunctions?.isReady ? (activeFunctions.generateEntityAvatar?.(canonicalId) || '') : '';
   }
 
   $: connectedHubIds = getConnectedCounterpartyIds(env, entityId);
@@ -207,7 +207,7 @@
 
       hubs = discovered;
       if (hubs.length === 0) {
-        error = 'No hubs discovered yet. Try Refresh; if it persists, check relay connectivity.';
+        error = 'No public hubs discovered yet. Try Refresh; if it persists, check relay connectivity.';
       }
 
     } catch (err) {
@@ -385,7 +385,7 @@
   {#if !entityId}
     <div class="warning-banner">
       <AlertTriangle size={14} />
-      <span>Select an entity to connect to hubs</span>
+      <span>Select an entity to discover counterparties</span>
     </div>
   {/if}
 
@@ -400,7 +400,7 @@
     </div>
   {:else if hubs.length === 0}
     <div class="empty-state">
-      <span>No hubs found</span>
+      <span>No counterparties found</span>
     </div>
   {:else}
     <div class="hub-cards">
@@ -514,19 +514,19 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 12px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 6px;
-    color: #a8a29e;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: none;
+    border-radius: 10px;
+    color: #b7aea4;
     font-size: 12px;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background 0.15s, color 0.15s;
   }
 
   .refresh-btn:hover:not(:disabled) {
-    border-color: #fbbf24;
-    color: #fbbf24;
+    background: rgba(255, 255, 255, 0.06);
+    color: #f5efe6;
   }
 
   .refresh-btn:disabled {
@@ -587,15 +587,15 @@
   .hub-cards {
     display: flex;
     flex-direction: column;
-    border: 1px solid #292524;
-    border-radius: 10px;
-    background: linear-gradient(180deg, rgba(24, 24, 27, 0.96) 0%, rgba(15, 15, 17, 0.96) 100%);
+    border: none;
+    border-radius: 0;
+    background: transparent;
     overflow: hidden;
   }
 
   .hub-card {
-    padding: 14px 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   }
 
   .hub-card:last-child {
@@ -667,8 +667,8 @@
 
   .badge {
     border-radius: 999px;
-    border: 1px solid transparent;
-    padding: 4px 9px;
+    border: none;
+    padding: 4px 8px;
     font-size: 10px;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -680,18 +680,18 @@
   }
 
   .badge.verified {
-    border-color: rgba(251, 191, 36, 0.4);
     color: #fbbf24;
+    background: rgba(251, 191, 36, 0.08);
   }
 
   .badge.score {
-    border-color: rgba(255, 255, 255, 0.14);
     color: #d8dde8;
+    background: rgba(255, 255, 255, 0.05);
   }
 
   .badge.open {
-    border-color: rgba(250, 204, 21, 0.24);
     color: #fcd34d;
+    background: rgba(250, 204, 21, 0.08);
   }
 
   .btn-connect {
@@ -700,7 +700,7 @@
     gap: 4px;
     padding: 6px 11px;
     background: rgba(255, 196, 75, 0.08);
-    border: 1px solid rgba(255, 196, 75, 0.42);
+    border: none;
     border-radius: 999px;
     color: #ffc24b;
     font-size: 11px;
@@ -711,7 +711,6 @@
 
   .btn-connect:hover:not(:disabled) {
     background: rgba(255, 196, 75, 0.16);
-    border-color: rgba(255, 196, 75, 0.62);
   }
 
   .btn-connect:disabled {
@@ -726,8 +725,8 @@
     gap: 4px;
     padding: 6px 10px;
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: transparent;
+    border: none;
+    background: rgba(255, 255, 255, 0.04);
     color: #aeb5c4;
     cursor: pointer;
     font-size: 11px;
@@ -736,9 +735,7 @@
   }
 
   .hub-strip {
-    margin: 10px 0 12px;
-    height: 1px;
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03));
+    display: none;
   }
 
   /* Expanded details */

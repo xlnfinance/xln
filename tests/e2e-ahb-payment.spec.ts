@@ -782,9 +782,6 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
   void signerId;
 
   await openPayWorkspace(page);
-  const hashlockModeBtn = page.getByRole('button', { name: /Hashlock/i }).first();
-  await expect(hashlockModeBtn).toBeVisible({ timeout: 10_000 });
-  await hashlockModeBtn.click();
 
   await selectPayRecipient(page, to);
 
@@ -813,9 +810,6 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
 
 async function attemptOverspend(page: Page, to: string, route: string[], amount: bigint): Promise<void> {
   await openPayWorkspace(page);
-  const hashlockModeBtn = page.getByRole('button', { name: /Hashlock/i }).first();
-  await expect(hashlockModeBtn).toBeVisible({ timeout: 10_000 });
-  await hashlockModeBtn.click();
 
   await selectPayRecipient(page, to);
 
