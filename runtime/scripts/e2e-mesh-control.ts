@@ -92,6 +92,23 @@ type HubHealthPayload = {
       ready: boolean;
     }>;
   };
+  marketMaker?: {
+    enabled: boolean;
+    ok: boolean;
+    entityId: string | null;
+    expectedOffersPerHub: number;
+    expectedOffersPerPair?: number;
+    hubs: Array<{
+      hubEntityId: string;
+      offers: number;
+      ready: boolean;
+      pairs?: Array<{
+        pairId: string;
+        offers: number;
+        ready: boolean;
+      }>;
+    }>;
+  };
   timings?: TimingMap;
 };
 
@@ -444,6 +461,41 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     })
     .filter((value): value is NonNullable<typeof value> => value !== null);
 
+  const mmEntityIdCandidates = hubChildren
+    .map((child) => String(child.lastHealth?.marketMaker?.entityId || '').trim())
+    .filter(Boolean);
+  const mmEntityId = mmEntityIdCandidates[0] || null;
+  const mmExpectedOffersPerHub = Math.max(
+    0,
+    ...hubChildren.map((child) => Number(child.lastHealth?.marketMaker?.expectedOffersPerHub || 0)),
+  );
+  const mmHubsById = new Map<string, { hubEntityId: string; offers: number; ready: boolean }>();
+  for (const child of hubChildren) {
+    for (const hub of child.lastHealth?.marketMaker?.hubs ?? []) {
+      const hubEntityId = String(hub.hubEntityId || '').toLowerCase();
+      if (!hubEntityId) continue;
+      const existing = mmHubsById.get(hubEntityId);
+      if (!existing || Number(hub.offers || 0) > existing.offers || (hub.ready && !existing.ready)) {
+        mmHubsById.set(hubEntityId, {
+          hubEntityId,
+          offers: Number(hub.offers || 0),
+          ready: hub.ready === true,
+        });
+      }
+    }
+  }
+  const mmHubs = hubIds.map((hubEntityId) => {
+    const existing = mmHubsById.get(hubEntityId);
+    return {
+      hubEntityId,
+      offers: existing?.offers ?? 0,
+      ready: existing?.ready === true || (!!mmExpectedOffersPerHub && (existing?.offers ?? 0) >= mmExpectedOffersPerHub),
+    };
+  });
+  const mmOk = !resetState.requestedMarketMaker
+    ? true
+    : mmHubs.length === HUB_NAMES.length && mmHubs.every((hub) => hub.ready);
+
   return {
     timestamp: Date.now(),
     reset: { ...resetState },
@@ -462,14 +514,10 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     },
     marketMaker: {
       enabled: resetState.requestedMarketMaker,
-      ok: resetState.requestedMarketMaker ? false : true,
-      entityId: null,
-      expectedOffersPerHub: 0,
-      hubs: hubIds.map((hubEntityId) => ({
-        hubEntityId,
-        offers: 0,
-        ready: !resetState.requestedMarketMaker,
-      })),
+      ok: mmOk,
+      entityId: mmEntityId,
+      expectedOffersPerHub: mmExpectedOffersPerHub,
+      hubs: mmHubs,
     },
     bootstrapReserves: {
       ok:

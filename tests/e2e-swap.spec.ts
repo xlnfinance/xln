@@ -7,16 +7,22 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
-import { ensureE2EBaseline } from './utils/e2e-baseline';
+import { APP_BASE_URL, ensureE2EBaseline, getHealth } from './utils/e2e-baseline';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
 } from './utils/e2e-demo-users';
 import { getRenderedOutboundForAccount } from './utils/e2e-account-ui';
+import { buildDefaultEntitySwapPairs, getTokenInfo } from '../runtime/account-utils';
 
-const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const INIT_TIMEOUT = 30_000;
+const CANONICAL_SWAP_PAIRS = buildDefaultEntitySwapPairs().map((pair) => ({
+  ...pair,
+  label: `${getTokenInfo(pair.baseTokenId).symbol}/${getTokenInfo(pair.quoteTokenId).symbol}`,
+}));
+const CANONICAL_SWAP_PAIR_IDS = CANONICAL_SWAP_PAIRS.map((pair) => pair.pairId);
+const CANONICAL_SWAP_PAIR_LABELS = CANONICAL_SWAP_PAIRS.map((pair) => pair.label);
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
@@ -423,14 +429,8 @@ async function ensureDeterministicSwapAccount(page: Page): Promise<{
   });
   expect(identity, 'local entity not found').not.toBeNull();
 
-  const response = await page.request.get('/api/debug/entities');
-  expect(response.ok(), 'debug entities endpoint must be available').toBe(true);
-  const body = await response.json() as {
-    entities?: Array<{ entityId?: string; isHub?: boolean }>;
-  };
-  const hubId = (Array.isArray(body.entities) ? body.entities : [])
-    .find((entity) => entity.isHub === true && typeof entity.entityId === 'string')
-    ?.entityId;
+  const hubIds = await listSharedHubIds(page);
+  const hubId = hubIds[0];
   expect(typeof hubId === 'string' && hubId.length > 0, 'hub not discovered').toBe(true);
 
   await connectRuntimeToSharedHub(page, {
@@ -461,6 +461,95 @@ async function ensureDeterministicSwapAccount(page: Page): Promise<{
     entityId: identity!.entityId,
     signerId: identity!.signerId,
     counterpartyId: hubId!,
+  };
+}
+
+async function listSharedHubIds(page: Page): Promise<string[]> {
+  const response = await page.request.get('/api/health');
+  expect(response.ok(), 'health endpoint must be available').toBe(true);
+  const body = await response.json() as {
+    hubMesh?: { hubIds?: string[] };
+    hubs?: Array<{ entityId?: string; online?: boolean }>;
+  };
+
+  const hubMeshIds = Array.isArray(body.hubMesh?.hubIds) ? body.hubMesh!.hubIds.filter(Boolean) : [];
+  if (hubMeshIds.length > 0) return Array.from(new Set(hubMeshIds.map((id) => String(id))));
+
+  const liveHubIds = Array.isArray(body.hubs)
+    ? body.hubs
+        .filter((hub) => hub.online !== false && typeof hub.entityId === 'string' && hub.entityId.length > 0)
+        .map((hub) => String(hub.entityId))
+    : [];
+  return Array.from(new Set(liveHubIds));
+}
+
+async function ensureDeterministicSwapAccounts(
+  page: Page,
+  minHubCount = 3,
+): Promise<{
+  entityId: string;
+  signerId: string;
+  runtimeId: string;
+  hubIds: string[];
+}> {
+  const identity = await page.evaluate(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+        eReplicas?: Map<string, unknown>;
+      };
+    }).isolatedEnv;
+    if (!env?.eReplicas) return null;
+
+    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
+    for (const key of env.eReplicas.keys()) {
+      const [entityId, signerId] = String(key).split(':');
+      if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
+      if (runtimeSigner && String(signerId).toLowerCase() !== runtimeSigner) continue;
+      return { entityId, signerId, runtimeId: String(env.runtimeId || '') };
+    }
+
+    return null;
+  });
+  expect(identity, 'local entity not found').not.toBeNull();
+
+  const hubIds = (await listSharedHubIds(page)).slice(0, minHubCount);
+  expect(hubIds.length, `expected at least ${minHubCount} hubs for aggregated swap coverage`).toBeGreaterThanOrEqual(minHubCount);
+
+  for (const hubId of hubIds) {
+    await connectRuntimeToSharedHub(page, {
+      entityId: identity!.entityId,
+      signerId: identity!.signerId,
+    }, hubId);
+  }
+
+  await expect
+    .poll(async () => {
+      const health = await getHealth(page);
+      const mmHubs = Array.isArray(health?.marketMaker?.hubs) ? health.marketMaker!.hubs : [];
+      let readyHubs = 0;
+      let pairBookCount = 0;
+      for (const hubId of hubIds) {
+        const hub = mmHubs.find((entry) => String(entry.hubEntityId || '').toLowerCase() === String(hubId).toLowerCase());
+        const readyPairs = (hub?.pairs ?? []).filter((pair) =>
+          CANONICAL_SWAP_PAIR_IDS.includes(String(pair.pairId || '')) && pair.ready === true,
+        );
+        pairBookCount += readyPairs.length;
+        if (readyPairs.length === CANONICAL_SWAP_PAIR_IDS.length) readyHubs += 1;
+      }
+      return { readyHubs, pairBookCount };
+    }, {
+      timeout: 30_000,
+      intervals: [250, 500, 1000],
+      message: 'server market-maker must expose 3x3 hub orderbooks before swap UI assertions',
+    })
+    .toEqual({ readyHubs: hubIds.length, pairBookCount: hubIds.length * CANONICAL_SWAP_PAIR_IDS.length });
+
+  return {
+    entityId: identity!.entityId,
+    signerId: identity!.signerId,
+    runtimeId: identity!.runtimeId,
+    hubIds,
   };
 }
 
@@ -580,17 +669,31 @@ async function openSwapWorkspace(page: Page): Promise<void> {
   const swapTab = page.locator('.account-workspace-tab').filter({ hasText: /Swap/i }).first();
   await expect(swapTab).toBeVisible({ timeout: 20_000 });
   await swapTab.click();
-  await expect(page.locator('.swap-panel h3').first()).toContainText(/Swap Trading/i, { timeout: 15_000 });
+  await expect(page.locator('.swap-panel').first()).toBeVisible({ timeout: 15_000 });
 }
 
-async function selectCounterpartyInSwap(page: Page): Promise<void> {
-  const trigger = page.locator('.swap-panel .entity-select .es-trigger').first();
-  const hasSelector = await trigger.isVisible({ timeout: 1500 }).catch(() => false);
+async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string): Promise<void> {
+  const createSelect = page.getByTestId('swap-create-account-select').first();
+  const createVisible = await createSelect.isVisible({ timeout: 1500 }).catch(() => false);
+  const select = createVisible ? createSelect : page.getByTestId('swap-account-select').first();
+  const hasSelector = await select.isVisible({ timeout: 1500 }).catch(() => false);
   if (!hasSelector) return;
-  await trigger.click();
-  const firstOption = page.locator('.swap-panel .entity-select .es-option').first();
-  await expect(firstOption).toBeVisible({ timeout: 20_000 });
-  await firstOption.click();
+  const values = await select.locator('option').evaluateAll((options) =>
+    options.map((option) => ({ value: String((option as HTMLOptionElement).value || ''), label: option.textContent || '' })),
+  );
+  const normalizedPreferred = String(preferredAccountId || '').trim().toLowerCase();
+  const preferredAccount = normalizedPreferred
+    ? values.find((option) => String(option.value || '').trim().toLowerCase() === normalizedPreferred)
+    : null;
+  const targetAccount = preferredAccount
+    || values.find((option) => option.value && option.value !== '__aggregated__');
+  if (!targetAccount) return;
+  await select.evaluate((node, value) => {
+    const element = node as HTMLSelectElement;
+    element.value = String(value || '');
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  }, targetAccount.value);
 }
 
 function parseFirstNumber(text: string): number {
@@ -612,7 +715,7 @@ async function prepareExecutableOrder(page: Page): Promise<number> {
     .map((text) => text.trim())
     .filter((text) => text.length > 0);
   if (pairOptions.length === 0) throw new Error('No pair options found');
-  const expectedPairs = ['WETH/USDC', 'WETH/USDT', 'USDC/USDT'];
+  const expectedPairs = CANONICAL_SWAP_PAIR_LABELS;
   for (const expectedPair of expectedPairs) {
     if (!pairOptions.includes(expectedPair)) {
       throw new Error(`Expected pair ${expectedPair} is missing from swap pair options`);
@@ -707,6 +810,69 @@ async function prepareExecutableOrder(page: Page): Promise<number> {
   throw new Error(`No preferred WETH pair is executable${lastFormError ? ` (${lastFormError})` : ''}`);
 }
 
+async function expectAllCanonicalSwapPairsHaveLiquidity(page: Page): Promise<void> {
+  const pairSelect = page.getByTestId('swap-pair-select').first();
+  const scopeSelect = page.getByTestId('swap-account-select').first();
+  await expect(pairSelect).toBeVisible({ timeout: 20_000 });
+  await expect(scopeSelect).toBeVisible({ timeout: 20_000 });
+  await scopeSelect.selectOption('__aggregated__');
+  const expectedPairs = CANONICAL_SWAP_PAIR_LABELS;
+
+  for (const pairLabel of expectedPairs) {
+    await pairSelect.selectOption({ label: pairLabel });
+    await page.waitForTimeout(250);
+    await expect
+      .poll(async () => {
+        const asks = await page.locator('.swap-panel .orderbook-panel .asks-section .row.clickable').count();
+        const bids = await page.locator('.swap-panel .orderbook-panel .bids-section .row.clickable').count();
+        const uniqueSourceIds = await page.locator('[data-testid="orderbook-source-icon"]').evaluateAll((nodes) => {
+          const ids = new Set<string>();
+          for (const node of nodes) {
+            const sourceId = String((node as HTMLElement).dataset.sourceId || '').trim();
+            if (sourceId) ids.add(sourceId);
+          }
+          return ids.size;
+        });
+        return { asks, bids, rows: asks + bids, sources: uniqueSourceIds };
+      }, {
+        timeout: 15_000,
+        intervals: [250, 500, 1000],
+        message: `orderbook for ${pairLabel} should have visible liquidity from 3 hubs`,
+      })
+      .toEqual(expect.objectContaining({
+        asks: expect.any(Number),
+        bids: expect.any(Number),
+        rows: expect.any(Number),
+        sources: 3,
+      }));
+    await expect
+      .poll(async () => {
+        const asks = await page.locator('.swap-panel .orderbook-panel .asks-section .row.clickable').count();
+        const bids = await page.locator('.swap-panel .orderbook-panel .bids-section .row.clickable').count();
+        return { asks, bids };
+      }, {
+        timeout: 5_000,
+        intervals: [250, 500],
+      })
+      .toEqual(expect.objectContaining({
+        asks: expect.any(Number),
+        bids: expect.any(Number),
+      }));
+    await expect
+      .poll(async () => await page.locator('.swap-panel .orderbook-panel .asks-section .row.clickable').count(), {
+        timeout: 5_000,
+        intervals: [250, 500],
+      })
+      .toBeGreaterThanOrEqual(3);
+    await expect
+      .poll(async () => await page.locator('.swap-panel .orderbook-panel .bids-section .row.clickable').count(), {
+        timeout: 5_000,
+        intervals: [250, 500],
+      })
+      .toBeGreaterThanOrEqual(3);
+  }
+}
+
 async function readAvailableFromSizing(page: Page): Promise<number> {
   const stat = page.locator('.swap-panel .size-stats span').filter({ hasText: /^Available:/ }).first();
   await expect(stat).toBeVisible({ timeout: 20_000 });
@@ -726,22 +892,35 @@ async function readFirstOpenOrderRemaining(page: Page): Promise<number> {
 }
 
 test.describe('E2E Swap Flow', () => {
+  test.setTimeout(240_000);
+
   test.beforeEach(async ({ page }) => {
-    await timedStep('swap.ensure_baseline', () => ensureE2EBaseline(page, { forceReset: true }));
+    await timedStep('swap.ensure_baseline', () => ensureE2EBaseline(page, {
+      requireMarketMaker: true,
+      requireHubMesh: true,
+      minHubCount: 3,
+    }));
+  });
+
+  test('swap shows liquidity on all canonical pairs', async ({ page }) => {
+    await timedStep('swap_pairs.goto_app', () => gotoApp(page));
+    await timedStep('swap_pairs.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('swap_pairs.create_runtime', () => createDemoRuntime(page, `swap-pairs-${Date.now()}`, randomMnemonic()));
+    await timedStep('swap_pairs.ensure_hub_accounts', () => ensureDeterministicSwapAccounts(page, 3));
+    await timedStep('swap_pairs.open_workspace', () => openSwapWorkspace(page));
+    await timedStep('swap_pairs.check_liquidity', () => expectAllCanonicalSwapPairsHaveLiquidity(page));
   });
 
   // Scenario: the runtime baseline now pre-opens the common hub deltas, so a WETH/USDC offer
   // should stay executable through the visible swap UI and remain present after a reload.
   test('swap place executable WETH/USDC offer survives reload', async ({ page }) => {
-    test.setTimeout(240_000);
-
     await timedStep('swap_auto.goto_app', () => gotoApp(page));
     await timedStep('swap_auto.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
     await timedStep('swap_auto.create_runtime', () => createDemoRuntime(page, `swap-auto-${Date.now()}`, randomMnemonic()));
     const accountRef = await timedStep('swap_auto.ensure_hub_account', () => ensureDeterministicSwapAccount(page));
 
     await timedStep('swap_auto.open_workspace', () => openSwapWorkspace(page));
-    await timedStep('swap_auto.select_counterparty', () => selectCounterpartyInSwap(page));
+    await timedStep('swap_auto.select_counterparty', () => selectCounterpartyInSwap(page, accountRef.counterpartyId));
 
     const pairSelect = page.getByTestId('swap-pair-select').first();
     await pairSelect.scrollIntoViewIfNeeded().catch(() => {});
@@ -829,15 +1008,13 @@ test.describe('E2E Swap Flow', () => {
   // Scenario: place a non-marketable order, cancel it from the UI, and verify both state machine
   // and rendered order table clear before and after reload.
   test('swap place and cancel from UI updates state machine', async ({ page }) => {
-    test.setTimeout(240_000);
-
     await timedStep('swap.goto_app', () => gotoApp(page));
     await timedStep('swap.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
     await timedStep('swap.create_runtime', () => createDemoRuntime(page, `swap-rt-${Date.now()}`, randomMnemonic()));
     const accountRef = await timedStep('swap.ensure_hub_account', () => ensureDeterministicSwapAccount(page));
 
     await timedStep('swap.open_workspace', () => openSwapWorkspace(page));
-    await timedStep('swap.select_counterparty', () => selectCounterpartyInSwap(page));
+    await timedStep('swap.select_counterparty', () => selectCounterpartyInSwap(page, accountRef.counterpartyId));
 
     await expect(page.getByTestId('swap-orderbook')).toBeVisible({ timeout: 20_000 });
     const swapResolveCountBefore = await timedStep('swap.read_resolve_count_before', () =>

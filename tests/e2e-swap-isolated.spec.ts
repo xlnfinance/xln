@@ -3,7 +3,7 @@
  * directly against each other through the hub orderbook with market maker liquidity disabled.
  *
  * Flow and goals:
- * 1. Reset the mesh without market maker liquidity so only user orders can match.
+ * 1. Start on a fresh isolated shard without market maker liquidity so only user orders can match.
  * 2. Open two isolated wallet pages with separate IndexedDB/localStorage state.
  * 3. Create Alice and Bob runtimes, connect both to the same hub, and fund Alice with WETH and Bob with USDC.
  * 4. Alice places a visible WETH/USDC sell order through the swap UI.
@@ -14,13 +14,16 @@
 
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { deriveDelta } from '../runtime/account-utils';
-import { API_BASE_URL, APP_BASE_URL, getHealth, resetProdServer, ensureE2EBaseline } from './utils/e2e-baseline';
+import { getHealth, ensureE2EBaseline } from './utils/e2e-baseline';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 import { timedStep } from './utils/e2e-timing';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
 const INIT_TIMEOUT = 30_000;
+const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
+const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');
 
 type SwapRuntimeWindow = typeof window & {
   isolatedEnv?: {
@@ -351,17 +354,26 @@ async function openSwapWorkspace(page: Page): Promise<void> {
   const swapTab = page.locator('.account-workspace-tab').filter({ hasText: /Swap/i }).first();
   await expect(swapTab).toBeVisible({ timeout: 20_000 });
   await swapTab.click();
-  await expect(page.locator('.swap-panel h3').first()).toContainText(/Swap Trading/i, { timeout: 15_000 });
+  await expect(page.locator('.swap-panel').first()).toBeVisible({ timeout: 15_000 });
 }
 
 async function selectCounterpartyInSwap(page: Page): Promise<void> {
-  const trigger = page.locator('.swap-panel .entity-select .es-trigger').first();
-  const hasSelector = await trigger.isVisible({ timeout: 1500 }).catch(() => false);
+  const createSelect = page.getByTestId('swap-create-account-select').first();
+  const createVisible = await createSelect.isVisible({ timeout: 1500 }).catch(() => false);
+  const select = createVisible ? createSelect : page.getByTestId('swap-account-select').first();
+  const hasSelector = await select.isVisible({ timeout: 1500 }).catch(() => false);
   if (!hasSelector) return;
-  await trigger.click();
-  const firstOption = page.locator('.swap-panel .entity-select .es-option').first();
-  await expect(firstOption).toBeVisible({ timeout: 20_000 });
-  await firstOption.click();
+  const values = await select.locator('option').evaluateAll((options) =>
+    options.map((option) => ({ value: String((option as HTMLOptionElement).value || ''), label: option.textContent || '' })),
+  );
+  const firstAccount = values.find((option) => option.value && option.value !== '__aggregated__');
+  if (!firstAccount) return;
+  await select.evaluate((node, value) => {
+    const element = node as HTMLSelectElement;
+    element.value = String(value || '');
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  }, firstAccount.value);
 }
 
 async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'): Promise<void> {
@@ -414,6 +426,42 @@ async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<vo
   }, { runtimeId }, { timeout: INIT_TIMEOUT });
 }
 
+async function readSwapOfferCount(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+): Promise<number> {
+  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+    const view = window as SwapRuntimeWindow;
+    const env = view.isolatedEnv;
+    if (!env?.eReplicas) return 0;
+    const key = Array.from(env.eReplicas.keys()).find((replicaKey: string) => {
+      const [replicaEntityId, replicaSignerId] = String(replicaKey || '').split(':');
+      return String(replicaEntityId || '').toLowerCase() === String(entityId || '').toLowerCase()
+        && String(replicaSignerId || '').toLowerCase() === String(signerId || '').toLowerCase();
+    });
+    const replica = key ? env.eReplicas.get(key) : null;
+    if (!replica?.state?.accounts) return 0;
+    const owner = String(entityId || '').toLowerCase();
+    const cp = String(counterpartyId || '').toLowerCase();
+    for (const [accountKey, account] of replica.state.accounts.entries()) {
+      if (String(accountKey || '').toLowerCase() === cp) {
+        return Number(account?.swapOffers?.size || 0);
+      }
+      const canonicalCp = typeof account?.counterpartyEntityId === 'string'
+        ? String(account.counterpartyEntityId).toLowerCase()
+        : '';
+      const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
+      const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+      if (canonicalCp === cp || (left && right && ((left === owner && right === cp) || (right === owner && left === cp)))) {
+        return Number(account?.swapOffers?.size || 0);
+      }
+    }
+    return 0;
+  }, { entityId, signerId, counterpartyId });
+}
+
 test.describe('E2E Swap Isolated Flow', () => {
   test.setTimeout(LONG_E2E ? 240_000 : 150_000);
 
@@ -422,17 +470,11 @@ test.describe('E2E Swap Isolated Flow', () => {
     let bobContext: BrowserContext | null = null;
 
     try {
-      await timedStep('swap_isolated.reset_server', () => resetProdServer(page, {
-        apiBaseUrl: API_BASE_URL,
-        requireMarketMaker: false,
-        softPreserveHubs: false,
-      }));
       await timedStep('swap_isolated.ensure_baseline', () => ensureE2EBaseline(page, {
         apiBaseUrl: API_BASE_URL,
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
-        forceReset: true,
       }));
 
       const hubId = await getPrimaryHubId(page);
@@ -474,9 +516,6 @@ test.describe('E2E Swap Isolated Flow', () => {
       const bobToken1Before = await waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, 10n * 10n ** 18n);
       const aliceToken1Before = await outCap(alicePage, alice.entityId, hubId, 1);
       const bobToken2Before = await outCap(bobPage, bob.entityId, hubId, 2);
-      const aliceSwapResolvesBefore = await readSwapResolveCount(alicePage, alice.entityId, hubId);
-      const bobSwapResolvesBefore = await readSwapResolveCount(bobPage, bob.entityId, hubId);
-
       await openSwapWorkspace(alicePage);
       await selectCounterpartyInSwap(alicePage);
       await placeAliceSellOffer(alicePage, '0.03', '2500');
@@ -485,15 +524,12 @@ test.describe('E2E Swap Isolated Flow', () => {
       await selectCounterpartyInSwap(bobPage);
       await placeBobMatchingBuyOrder(bobPage, '75', '2500');
 
-      await waitForSwapResolveCountAtLeast(alicePage, alice.entityId, hubId, aliceSwapResolvesBefore + 1);
-      await waitForSwapResolveCountAtLeast(bobPage, bob.entityId, hubId, bobSwapResolvesBefore + 1);
-
       await expect.poll(
-        async () => await alicePage.locator('.swap-panel .orders-table tbody tr').count(),
+        async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId),
         {
           timeout: 30_000,
           intervals: [250, 500, 750],
-          message: 'Alice open order row must disappear after Bob fills it',
+          message: 'Alice swapOffers state must clear after Bob fills the order',
         },
       ).toBe(0);
 
@@ -519,13 +555,14 @@ test.describe('E2E Swap Isolated Flow', () => {
         waitForRestoredRuntime(alicePage, alice.runtimeId),
         waitForRestoredRuntime(bobPage, bob.runtimeId),
       ]);
+      await openSwapWorkspace(alicePage);
+      await selectCounterpartyInSwap(alicePage);
+      await expect(alicePage.locator('.swap-panel .orders-table tbody tr')).toHaveCount(0, { timeout: 20_000 });
 
       expect(await outCap(alicePage, alice.entityId, hubId, 1)).toBe(aliceToken1After);
       expect(await outCap(alicePage, alice.entityId, hubId, 2)).toBe(aliceToken2After);
       expect(await outCap(bobPage, bob.entityId, hubId, 1)).toBe(bobToken1After);
       expect(await outCap(bobPage, bob.entityId, hubId, 2)).toBe(bobToken2After);
-      expect(await readSwapResolveCount(alicePage, alice.entityId, hubId)).toBeGreaterThanOrEqual(aliceSwapResolvesBefore + 1);
-      expect(await readSwapResolveCount(bobPage, bob.entityId, hubId)).toBeGreaterThanOrEqual(bobSwapResolvesBefore + 1);
     } finally {
       await Promise.all([
         aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),

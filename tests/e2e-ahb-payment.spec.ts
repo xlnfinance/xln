@@ -10,7 +10,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { ethers } from 'ethers';
-import { resetProdServer } from './utils/e2e-baseline';
+import { APP_BASE_URL, API_BASE_URL, resetProdServer } from './utils/e2e-baseline';
 import {
   listRenderedCounterpartyIds,
   getRenderedOutboundForAccount,
@@ -27,8 +27,6 @@ import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e
 
 const INIT_TIMEOUT = 30_000;
 const SETTLE_MS = 10_000;
-const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
-const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
 const FAST_E2E = process.env.E2E_FAST !== '0';
 const LONG_E2E = process.env.E2E_LONG === '1';
 

@@ -34,6 +34,7 @@ import type { AccountMachine, AccountTx } from '../../types';
 import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL } from '../../constants';
+import { computeSwapPriceTicks, requantizeRemainingSwapAtPrice } from '../../orderbook/types';
 
 const MAX_FILL_RATIO = 65535;
 
@@ -213,15 +214,54 @@ export async function handleSwapResolve(
     swapOfferCancelled = { offerId, accountId: makerId };
     events.push(`📊 Swap offer ${offerId.slice(0,8)}... ${fillRatio === MAX_FILL_RATIO ? 'fully filled' : 'cancelled'}`);
   } else {
-    // Partial fill - update remaining amounts (use quantized values for consistency)
-    offer.giveAmount = effectiveGive - filledGive;
-    offer.wantAmount = effectiveWant - filledWant;
-    // Update quantized amounts too
-    if (offer.quantizedGive !== undefined) {
-      offer.quantizedGive = offer.giveAmount;
-      offer.quantizedWant = offer.wantAmount;
+    // Partial fill - requantize remainder so subsequent fills stay lot-aligned.
+    const remainingGiveRaw = effectiveGive - filledGive;
+    const remainingWantRaw = effectiveWant - filledWant;
+    const offerPriceTicks = offer.priceTicks ?? computeSwapPriceTicks(
+      offer.giveTokenId,
+      offer.wantTokenId,
+      effectiveGive,
+      effectiveWant,
+    );
+    const requantized = requantizeRemainingSwapAtPrice(
+      offer.giveTokenId,
+      offer.wantTokenId,
+      remainingGiveRaw,
+      offerPriceTicks,
+    );
+
+    if (!requantized) {
+      if (remainingGiveRaw > 0n) {
+        if (offer.makerIsLeft) {
+          const currentHold = giveDelta.leftHold || 0n;
+          giveDelta.leftHold = currentHold > remainingGiveRaw ? currentHold - remainingGiveRaw : 0n;
+        } else {
+          const currentHold = giveDelta.rightHold || 0n;
+          giveDelta.rightHold = currentHold > remainingGiveRaw ? currentHold - remainingGiveRaw : 0n;
+        }
+      }
+      accountMachine.swapOffers.delete(offerId);
+      swapOfferCancelled = { offerId, accountId: makerId };
+      events.push(`📊 Swap offer ${offerId.slice(0,8)}... filled remainder dropped below lot size`);
+    } else {
+      const releasedGiveDust = requantized.releasedGiveDust;
+      if (releasedGiveDust > 0n) {
+        if (offer.makerIsLeft) {
+          const currentHold = giveDelta.leftHold || 0n;
+          giveDelta.leftHold = currentHold > releasedGiveDust ? currentHold - releasedGiveDust : 0n;
+        } else {
+          const currentHold = giveDelta.rightHold || 0n;
+          giveDelta.rightHold = currentHold > releasedGiveDust ? currentHold - releasedGiveDust : 0n;
+        }
+      }
+
+      offer.giveAmount = requantized.effectiveGive;
+      offer.wantAmount = requantized.effectiveWant;
+      offer.priceTicks = offerPriceTicks;
+      offer.quantizedGive = requantized.effectiveGive;
+      offer.quantizedWant = requantized.effectiveWant;
+      events.push(`📊 Swap offer ${offerId.slice(0,8)}... partially filled, ${offer.giveAmount} remaining`);
     }
-    events.push(`📊 Swap offer ${offerId.slice(0,8)}... partially filled, ${offer.giveAmount} remaining`);
   }
 
   return { success: true, events, ...(swapOfferCancelled !== undefined && { swapOfferCancelled }) };

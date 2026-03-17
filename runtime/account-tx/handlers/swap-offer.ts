@@ -152,6 +152,7 @@ export async function handleSwapOffer(
     giveAmount: effectiveGiveAmount,
     wantTokenId,
     wantAmount: effectiveWantAmount,
+    priceTicks,
     minFillRatio,
     makerIsLeft,
     createdHeight: currentHeight,

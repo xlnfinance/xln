@@ -3013,31 +3013,10 @@
               <PaymentPanel entityId={replica.state?.entityId || tab.entityId} {contacts} />
 
             {:else if accountWorkspaceTab === 'swap'}
-              <div class="workspace-inline-selector">
-                <EntityInput
-                  label="Swap Account"
-                  value={workspaceAccountId}
-                  entities={workspaceAccountIds}
-                  {contacts}
-                  excludeId={replica?.state?.entityId || tab.entityId}
-                  placeholder="Select account for swap..."
-                  disabled={!activeIsLive || workspaceAccountIds.length === 0}
-                  on:change={handleWorkspaceAccountChange}
-                />
-              </div>
-              {#if !workspaceAccountId}
-                <div class="live-required configure-empty">
-                  <AlertTriangle size={18} />
-                  <p>Select account first.</p>
-                </div>
-              {:else}
-                <SwapPanel
-                  {replica}
-                  {tab}
-                  counterpartyId={workspaceAccountId}
-                  prefilledCounterparty={true}
-                />
-              {/if}
+              <SwapPanel
+                {replica}
+                {tab}
+              />
 
             {:else if accountWorkspaceTab === 'configure'}
               <div class="configure-panel">

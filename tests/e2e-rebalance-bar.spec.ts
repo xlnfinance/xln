@@ -15,7 +15,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { deriveDelta } from '../runtime/account-utils';
 import { Wallet, ethers } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
-import { resetProdServer, waitForNamedHubs } from './utils/e2e-baseline';
+import { APP_BASE_URL, API_BASE_URL, resetProdServer, waitForNamedHubs } from './utils/e2e-baseline';
 import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
@@ -40,8 +40,6 @@ import {
  * Using (outCollateral + outPeerCredit) over-triggers after the first successful top-up
  * and causes a new request_collateral on almost every small payment/faucet click.
  */
-const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
-const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
 const INIT_TIMEOUT = 30_000;
 const FAST_E2E = process.env.E2E_FAST !== '0';
 const LONG_E2E = process.env.E2E_LONG === '1';

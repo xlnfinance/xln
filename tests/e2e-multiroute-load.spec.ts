@@ -41,6 +41,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { Wallet, ethers } from 'ethers';
 import { resetProdServer as resetSharedProdServer } from './utils/e2e-baseline';
+import { APP_BASE_URL, API_BASE_URL } from './utils/e2e-baseline';
 import {
   createRuntimeIdentity,
   gotoApp,
@@ -49,8 +50,6 @@ import {
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 
 const INIT_TIMEOUT = 30_000;
-const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
-const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
 const FAST_E2E = process.env.E2E_FAST !== '0';
 const LONG_E2E = process.env.E2E_LONG === '1';
 

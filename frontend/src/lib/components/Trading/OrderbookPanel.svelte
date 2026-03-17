@@ -20,12 +20,16 @@
   export let pairLabel: string = '';
   export let depth: number = 10;
   export let showOwners: boolean = false;
+  export let showSources: boolean = false;
+  export let sourceLabels: Record<string, string> = {};
+  export let sourceAvatars: Record<string, string> = {};
+  export let compactHeader: boolean = false;
   export let priceScale: number = 1;
   export let sizeDisplayScale: number = 1;
   export let envStore: Readable<any> = xlnEnvironment;
 
   type BookSide = 'bid' | 'ask';
-  type LevelClickDetail = { side: BookSide; priceTicks: string; size: number };
+  type LevelClickDetail = { side: BookSide; priceTicks: string; size: number; accountIds: string[] };
   type SnapshotDetail = {
     pairId: string;
     bids: Array<{ price: number; size: number; total: number }>;
@@ -60,6 +64,13 @@
     size: number;
     total: number;
     owners?: string[];
+    accountIds?: string[];
+  }
+  interface RawSourceLevel {
+    price: number;
+    size: number;
+    sourceId: string;
+    owners?: string[];
   }
 
   let bids: OrderLevel[] = [];
@@ -71,7 +82,7 @@
   let sourceLabel = 'None';
 
   let pollInterval: number | null = null;
-  const POLL_MS = 200;  // 5 updates/sec
+  const POLL_MS = 1000;
 
   let marketWs: WebSocket | null = null;
   let marketRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -189,9 +200,12 @@
 
   function accumulateBookSide(
     book: any,
+    sourceHubId: string,
     side: 'bid' | 'ask',
     sideSizes: Map<number, number>,
-    sideOwners: Map<number, Set<string>>
+    sideOwners: Map<number, Set<string>>,
+    sideSources: Map<number, Set<string>>,
+    rawLevels?: RawSourceLevel[],
   ) {
     const { orderQtyLots, orderOwnerIdx, orderNext, orderActive, owners, params } = book;
     const { pmin, tick } = params || { pmin: 0, tick: 1 };
@@ -230,6 +244,15 @@
           for (const owner of levelOwnerSet) ownersSet.add(owner);
           sideOwners.set(price, ownersSet);
         }
+        const sourcesSet = sideSources.get(price) || new Set<string>();
+        sourcesSet.add(sourceHubId);
+        sideSources.set(price, sourcesSet);
+        rawLevels?.push({
+          price,
+          size: levelSize,
+          sourceId: sourceHubId,
+          owners: showOwners ? Array.from(levelOwnerSet) : undefined,
+        });
       }
 
       idx = side === 'bid'
@@ -241,6 +264,7 @@
   function buildOrderLevels(
     sideSizes: Map<number, number>,
     sideOwners: Map<number, Set<string>>,
+    sideSources: Map<number, Set<string>>,
     side: 'bid' | 'ask'
   ): OrderLevel[] {
     const sorted = Array.from(sideSizes.entries())
@@ -254,7 +278,33 @@
       if (showOwners) {
         entry.owners = Array.from(sideOwners.get(price) || []);
       }
+      entry.accountIds = Array.from(sideSources.get(price) || []);
       return entry;
+    });
+  }
+
+  function buildSourceSpecificLevels(levels: RawSourceLevel[], side: 'bid' | 'ask'): OrderLevel[] {
+    const sorted = [...levels]
+      .sort((a, b) => {
+        if (side === 'bid') {
+          if (b.price !== a.price) return b.price - a.price;
+        } else if (a.price !== b.price) {
+          return a.price - b.price;
+        }
+        return a.sourceId.localeCompare(b.sourceId);
+      })
+      .slice(0, depth);
+
+    let cumulative = 0;
+    return sorted.map((level) => {
+      cumulative += level.size;
+      return {
+        price: level.price,
+        size: level.size,
+        total: cumulative,
+        owners: level.owners,
+        accountIds: [level.sourceId],
+      };
     });
   }
 
@@ -321,15 +371,17 @@
   function aggregateSideLevels(
     sideSizes: Map<number, number>,
     sideOwners: Map<number, Set<string>>,
+    sideSources: Map<number, Set<string>>,
     side: 'bid' | 'ask',
-  ): { sizes: Map<number, number>; owners: Map<number, Set<string>> } {
+  ): { sizes: Map<number, number>; owners: Map<number, Set<string>>; sources: Map<number, Set<string>> } {
     const stepTicks = getSelectedPriceStepTicks();
     if (stepTicks <= 1) {
-      return { sizes: sideSizes, owners: sideOwners };
+      return { sizes: sideSizes, owners: sideOwners, sources: sideSources };
     }
 
     const aggregatedSizes = new Map<number, number>();
     const aggregatedOwners = new Map<number, Set<string>>();
+    const aggregatedSources = new Map<number, Set<string>>();
 
     for (const [price, size] of sideSizes.entries()) {
       const bucketPrice = side === 'bid'
@@ -344,9 +396,15 @@
           aggregatedOwners.set(bucketPrice, dstOwners);
         }
       }
+      const srcSources = sideSources.get(price);
+      if (srcSources && srcSources.size > 0) {
+        const dstSources = aggregatedSources.get(bucketPrice) || new Set<string>();
+        for (const source of srcSources) dstSources.add(source);
+        aggregatedSources.set(bucketPrice, dstSources);
+      }
     }
 
-    return { sizes: aggregatedSizes, owners: aggregatedOwners };
+    return { sizes: aggregatedSizes, owners: aggregatedOwners, sources: aggregatedSources };
   }
 
   function updateView(
@@ -390,7 +448,12 @@
     const askSizes = new Map<number, number>();
     const bidOwners = new Map<number, Set<string>>();
     const askOwners = new Map<number, Set<string>>();
+    const bidSources = new Map<number, Set<string>>();
+    const askSources = new Map<number, Set<string>>();
+    const rawBidLevels: RawSourceLevel[] = [];
+    const rawAskLevels: RawSourceLevel[] = [];
     let found = 0;
+    let hasAnyLevel = false;
     let newestHubUpdate = 0;
 
     for (const sourceHubId of sources) {
@@ -405,22 +468,38 @@
         const price = toSafePriceTicks(level.price);
         const size = Number(level.size || 0);
         if (price === null || !Number.isFinite(size) || size <= 0) continue;
+        hasAnyLevel = true;
+        rawBidLevels.push({ price, size, sourceId: sourceHubId });
         bidSizes.set(price, (bidSizes.get(price) || 0) + size);
+        const sourcesSet = bidSources.get(price) || new Set<string>();
+        sourcesSet.add(sourceHubId);
+        bidSources.set(price, sourcesSet);
       }
       for (const level of snapshot.asks || []) {
         const price = toSafePriceTicks(level.price);
         const size = Number(level.size || 0);
         if (price === null || !Number.isFinite(size) || size <= 0) continue;
+        hasAnyLevel = true;
+        rawAskLevels.push({ price, size, sourceId: sourceHubId });
         askSizes.set(price, (askSizes.get(price) || 0) + size);
+        const sourcesSet = askSources.get(price) || new Set<string>();
+        sourcesSet.add(sourceHubId);
+        askSources.set(price, sourcesSet);
       }
     }
 
     if (found === 0) return false;
+    if (!hasAnyLevel) return false;
     applySmartOrSavedStep(getBestPrice(bidSizes, 'bid'), getBestPrice(askSizes, 'ask'));
-    const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, 'bid');
-    const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, 'ask');
-    const nextBids = buildOrderLevels(aggregatedBids.sizes, aggregatedBids.owners, 'bid');
-    const nextAsks = buildOrderLevels(aggregatedAsks.sizes, aggregatedAsks.owners, 'ask');
+    const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, bidSources, 'bid');
+    const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, askSources, 'ask');
+    const useSourceSpecificRows = showSources && sources.length > 1;
+    const nextBids = useSourceSpecificRows
+      ? buildSourceSpecificLevels(rawBidLevels, 'bid')
+      : buildOrderLevels(aggregatedBids.sizes, aggregatedBids.owners, aggregatedBids.sources, 'bid');
+    const nextAsks = useSourceSpecificRows
+      ? buildSourceSpecificLevels(rawAskLevels, 'ask')
+      : buildOrderLevels(aggregatedAsks.sizes, aggregatedAsks.owners, aggregatedAsks.sources, 'ask');
     updateView(nextBids, nextAsks, pair, sources, newestHubUpdate);
     return true;
   }
@@ -444,6 +523,10 @@
     const askSizes = new Map<number, number>();
     const bidOwners = new Map<number, Set<string>>();
     const askOwners = new Map<number, Set<string>>();
+    const bidSources = new Map<number, Set<string>>();
+    const askSources = new Map<number, Set<string>>();
+    const rawBidLevels: RawSourceLevel[] = [];
+    const rawAskLevels: RawSourceLevel[] = [];
     let newestHubUpdate = 0;
 
     for (const sourceHubId of sources) {
@@ -456,15 +539,20 @@
       if (Number.isFinite(hubUpdatedAt) && hubUpdatedAt > newestHubUpdate) {
         newestHubUpdate = hubUpdatedAt;
       }
-      accumulateBookSide(book, 'bid', bidSizes, bidOwners);
-      accumulateBookSide(book, 'ask', askSizes, askOwners);
+      accumulateBookSide(book, sourceHubId, 'bid', bidSizes, bidOwners, bidSources, rawBidLevels);
+      accumulateBookSide(book, sourceHubId, 'ask', askSizes, askOwners, askSources, rawAskLevels);
     }
 
     applySmartOrSavedStep(getBestPrice(bidSizes, 'bid'), getBestPrice(askSizes, 'ask'));
-    const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, 'bid');
-    const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, 'ask');
-    const nextBids = buildOrderLevels(aggregatedBids.sizes, aggregatedBids.owners, 'bid');
-    const nextAsks = buildOrderLevels(aggregatedAsks.sizes, aggregatedAsks.owners, 'ask');
+    const useSourceSpecificRows = showSources && sources.length > 1;
+    const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, bidSources, 'bid');
+    const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, askSources, 'ask');
+    const nextBids = useSourceSpecificRows
+      ? buildSourceSpecificLevels(rawBidLevels, 'bid')
+      : buildOrderLevels(aggregatedBids.sizes, aggregatedBids.owners, aggregatedBids.sources, 'bid');
+    const nextAsks = useSourceSpecificRows
+      ? buildSourceSpecificLevels(rawAskLevels, 'ask')
+      : buildOrderLevels(aggregatedAsks.sizes, aggregatedAsks.owners, aggregatedAsks.sources, 'ask');
     updateView(nextBids, nextAsks, pair, sources, newestHubUpdate);
   }
 
@@ -522,7 +610,21 @@
       side,
       priceTicks: String(level.price),
       size: level.size,
+      accountIds: Array.isArray(level.accountIds) ? level.accountIds : [],
     });
+  }
+
+  function labelForSource(sourceId: string): string {
+    return sourceLabels[sourceId] || formatEntityId(sourceId || '');
+  }
+
+  function avatarForSource(sourceId: string): string {
+    return sourceAvatars[sourceId] || '';
+  }
+
+  function initialsForSource(sourceId: string): string {
+    const label = labelForSource(sourceId).trim();
+    return label ? label.slice(0, 1).toUpperCase() : '?';
   }
 
   function sendMarketSubscribe(replace: boolean) {
@@ -641,7 +743,10 @@
     const pair = canonicalPairId();
     const nextKey = `${pair}|${depth}|${sources.join(',')}`;
     if (typeof window !== 'undefined' && marketWs && marketWs.readyState === 1 && nextKey !== marketSubKey) {
+      streamFreshUntil = 0;
+      streamSnapshots.clear();
       sendMarketSubscribe(true);
+      requestMarketSnapshot();
     }
   }
 
@@ -671,13 +776,19 @@
   $: if (hubId || hubIds.length || pairId) extractOrderbook();
 </script>
 
-<div class="orderbook-panel">
+<div class="orderbook-panel" class:compact-header={compactHeader}>
   <div class="header">
-    <span class="title">Order Book</span>
+    {#if !compactHeader}
+      <span class="title">Order Book</span>
+    {/if}
     <div class="header-controls">
-      <span class="pair">{pairLabel || pairId.replace('/', ' / ')}</span>
+      {#if !compactHeader}
+        <span class="pair">{pairLabel || pairId.replace('/', ' / ')}</span>
+      {/if}
       <label class="price-step">
-        <span class="price-step-label">Step</span>
+        {#if !compactHeader}
+          <span class="price-step-label">Step</span>
+        {/if}
         <select bind:value={selectedPriceStep} on:change={handlePriceStepChange}>
           {#each PRICE_STEP_OPTIONS as step}
             <option value={step}>{step}</option>
@@ -703,7 +814,10 @@
   </div>
 
   <div class="book-container">
-    <div class="columns-row">
+    <div class="columns-row" class:with-sources={showSources}>
+      {#if showSources}
+        <span class="head-label">Acct</span>
+      {/if}
       <span class="head-label">Price</span>
       <span class="head-label">Amount</span>
       <span class="head-label">Total</span>
@@ -714,6 +828,7 @@
       {#each [...asks].reverse() as ask, i}
         <div
           class="row ask-row clickable"
+          class:with-sources={showSources}
           role="button"
           tabindex="0"
           on:click={() => emitLevelClick('ask', ask)}
@@ -725,6 +840,24 @@
           }}
         >
           <div class="bar ask-bar" style="width: {(ask.size / maxSize) * 100}%"></div>
+          {#if showSources}
+            <span class="sources-cell">
+              {#each ask.accountIds || [] as sourceId (sourceId)}
+                <span
+                  class="source-icon"
+                  title={labelForSource(sourceId)}
+                  data-source-id={sourceId}
+                  data-testid="orderbook-source-icon"
+                >
+                  {#if avatarForSource(sourceId)}
+                    <img src={avatarForSource(sourceId)} alt="" class="source-avatar" />
+                  {:else}
+                    <span class="source-avatar-fallback">{initialsForSource(sourceId)}</span>
+                  {/if}
+                </span>
+              {/each}
+            </span>
+          {/if}
           <span class="price ask-price">{formatPrice(ask.price)}</span>
           <span class="size">{formatSize(ask.size)}</span>
           <span class="total">{formatSize(ask.total)}</span>
@@ -749,6 +882,7 @@
       {#each bids as bid, i}
         <div
           class="row bid-row clickable"
+          class:with-sources={showSources}
           role="button"
           tabindex="0"
           on:click={() => emitLevelClick('bid', bid)}
@@ -760,6 +894,24 @@
           }}
         >
           <div class="bar bid-bar" style="width: {(bid.size / maxSize) * 100}%"></div>
+          {#if showSources}
+            <span class="sources-cell">
+              {#each bid.accountIds || [] as sourceId (sourceId)}
+                <span
+                  class="source-icon"
+                  title={labelForSource(sourceId)}
+                  data-source-id={sourceId}
+                  data-testid="orderbook-source-icon"
+                >
+                  {#if avatarForSource(sourceId)}
+                    <img src={avatarForSource(sourceId)} alt="" class="source-avatar" />
+                  {:else}
+                    <span class="source-avatar-fallback">{initialsForSource(sourceId)}</span>
+                  {/if}
+                </span>
+              {/each}
+            </span>
+          {/if}
           <span class="price bid-price">{formatPrice(bid.price)}</span>
           <span class="size">{formatSize(bid.size)}</span>
           <span class="total">{formatSize(bid.total)}</span>
@@ -788,10 +940,10 @@
       class="update-time refresh-link"
       type="button"
       on:click={refreshOrderbookNow}
-      title="Updated from hub timestamp. Click to request fresh orderbook now."
-      aria-label="Click to refresh orderbook from hub"
+      title="Request fresh orderbook snapshot"
+      aria-label="Refresh orderbook"
     >
-      Updated (hub): {formatUpdatedAt(lastUpdate)}
+      Updated: {formatUpdatedAt(lastUpdate)}
     </button>
   </div>
 </div>
@@ -830,6 +982,12 @@
     display: flex;
     align-items: center;
     gap: 10px;
+    margin-left: auto;
+  }
+
+  .orderbook-panel.compact-header .header {
+    margin-bottom: 6px;
+    padding-bottom: 6px;
   }
 
   .price-step {
@@ -920,8 +1078,12 @@
     letter-spacing: 0.04em;
   }
 
-  .head-label:nth-child(2),
-  .head-label:nth-child(3) {
+  .columns-row.with-sources {
+    grid-template-columns: 52px 1fr 90px 110px;
+  }
+
+  .head-label:nth-last-child(2),
+  .head-label:nth-last-child(1) {
     text-align: right;
   }
 
@@ -952,6 +1114,44 @@
     padding: 3px 6px;
     position: relative;
     align-items: center;
+  }
+
+  .row.with-sources {
+    grid-template-columns: 52px 1fr 90px 110px;
+  }
+
+  .sources-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    align-items: flex-start;
+    z-index: 1;
+  }
+
+  .source-icon {
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    border: 1px solid rgba(251, 191, 36, 0.16);
+    background: rgba(251, 191, 36, 0.06);
+    overflow: hidden;
+  }
+
+  .source-avatar {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+  }
+
+  .source-avatar-fallback {
+    color: #f3d27a;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
   }
 
   .row.clickable {

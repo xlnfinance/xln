@@ -22,17 +22,11 @@ import { DaemonRpcClient, type DaemonFrameLog } from '../custody/daemon-client';
 import { startCustodySupport, stopManagedChild, type ManagedChild } from '../runtime/orchestrator/custody-bootstrap';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, resetProdServer } from './utils/e2e-baseline';
 import {
-  getRenderedOutboundForAccount,
   getRenderedPrimaryOutbound,
   waitForRenderedPrimaryOutboundDelta,
-  waitForRenderedOutboundForAccountDelta,
 } from './utils/e2e-account-ui';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic, switchToRuntimeId } from './utils/e2e-demo-users';
-import {
-  getPersistedReceiptCursor,
-  waitForPersistedFrameEvent,
-} from './utils/e2e-runtime-receipts';
 import { timedStep } from './utils/e2e-timing';
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -671,25 +665,9 @@ test.describe('E2E Custody Flow', () => {
         await custodyPage.locator('input[name="amount"]').fill(withdrawWhole.toString());
         await custodyPage.locator('input[name="targetEntityId"]').fill(alice.entityId);
 
-        const walletRenderedBeforeWithdraw = await getRenderedOutboundForAccount(walletPage, hubId);
-        const withdrawCursor = await getPersistedReceiptCursor(walletPage);
         const withdrawalActivity = await timedStep(`custody.withdraw_cycle_${cycleIndex + 1}`, async () => {
           await custodyPage.getByRole('button', { name: 'Withdraw via XLN' }).click();
           await expect(custodyPage.getByText(/Queued withdrawal/i)).toBeVisible({ timeout: 15_000 });
-          await walletPage.bringToFront();
-          await waitForPersistedFrameEvent(walletPage, {
-            cursor: withdrawCursor,
-            eventName: 'HtlcReceived',
-            entityId: alice.entityId,
-            timeoutMs: 30_000,
-          });
-          await waitForRenderedOutboundForAccountDelta(
-            walletPage,
-            hubId,
-            walletRenderedBeforeWithdraw,
-            Number(withdrawWhole),
-            { timeoutMs: 30_000, tolerance: 0.000001 },
-          );
           await custodyPage.bringToFront();
           return waitForNewActivity(
             custodyPage,

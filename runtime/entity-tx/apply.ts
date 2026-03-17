@@ -2,7 +2,7 @@ import { calculateQuorumPower } from '../entity-consensus';
 import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
 import { normalizeEntityName } from '../networking/gossip';
-import { createOrderbookExtState } from '../orderbook';
+import { createOrderbookExtState, validateSpreadDistribution } from '../orderbook';
 import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput, HashType } from '../types';
 import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../types';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
@@ -235,6 +235,11 @@ export const applyEntityTx = async (
 
     if (entityTx.type === 'initOrderbookExt') {
       if (entityState.orderbookExt) {
+        return { newState: entityState, outputs: [] };
+      }
+
+      if (!validateSpreadDistribution(entityTx.data.spreadDistribution)) {
+        log.error(`❌ Invalid spread distribution for initOrderbookExt on ${formatEntityId(entityState.entityId)}`);
         return { newState: entityState, outputs: [] };
       }
 
