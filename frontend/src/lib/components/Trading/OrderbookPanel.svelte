@@ -496,7 +496,7 @@
     applySmartOrSavedStep(getBestPrice(bidSizes, 'bid'), getBestPrice(askSizes, 'ask'));
     const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, bidSources, 'bid');
     const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, askSources, 'ask');
-    const useSourceSpecificRows = showSources && sources.length > 1;
+    const useSourceSpecificRows = showSources;
     const nextBids = useSourceSpecificRows
       ? buildSourceSpecificLevels(rawBidLevels, 'bid')
       : buildOrderLevels(aggregatedBids.sizes, aggregatedBids.owners, aggregatedBids.sources, 'bid');
@@ -547,7 +547,7 @@
     }
 
     applySmartOrSavedStep(getBestPrice(bidSizes, 'bid'), getBestPrice(askSizes, 'ask'));
-    const useSourceSpecificRows = showSources && sources.length > 1;
+    const useSourceSpecificRows = showSources;
     const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, bidSources, 'bid');
     const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, askSources, 'ask');
     const nextBids = useSourceSpecificRows

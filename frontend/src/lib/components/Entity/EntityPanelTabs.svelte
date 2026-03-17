@@ -32,6 +32,7 @@
   import { toasts } from '../../stores/toastStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
+  import { resolveEntityName } from '$lib/utils/entityNaming';
 
   // Icons
   import {
@@ -433,7 +434,9 @@
     return `${addr.slice(0, 10)}...${addr.slice(-6)}`;
   }
 
-  $: activeReplicas = replicasOverride || $visibleReplicas;
+  $: activeReplicas = replicasOverride
+    || (isRuntimeEnv(activeEnv) && activeEnv.eReplicas instanceof Map ? activeEnv.eReplicas as Map<string, EntityReplica> : null)
+    || $visibleReplicas;
   $: activeXlnFunctions = $xlnFunctions;
   $: activeHistory = historyOverride ?? $history;
   $: activeTimeIndex = timeIndexOverride ?? $currentTimeIndex;
@@ -448,11 +451,32 @@
     return requireSignerIdForEntity(env, entityId, reason);
   }
 
+  function findReplicaForTab(
+    replicas: Map<string, EntityReplica> | null | undefined,
+    entityId: string,
+    signerId: string,
+  ): EntityReplica | null {
+    if (!replicas || !entityId) return null;
+
+    const exactKey = signerId ? `${entityId}:${signerId}` : '';
+    const exact = exactKey ? replicas.get(exactKey) ?? null : null;
+    if (exact) return exact;
+
+    const normalizedEntityId = String(entityId || '').trim().toLowerCase();
+    for (const [replicaKey, candidate] of replicas.entries()) {
+      const [replicaEntityId] = String(replicaKey).split(':');
+      if (String(replicaEntityId || '').trim().toLowerCase() === normalizedEntityId) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
   // Get replica
   $: {
     if (tab.entityId && tab.signerId) {
-      const replicaKey = `${tab.entityId}:${tab.signerId}`;
-      replica = activeReplicas?.get?.(replicaKey) ?? null;
+      replica = findReplicaForTab(activeReplicas, tab.entityId, tab.signerId);
     } else {
       replica = null;
     }
@@ -471,6 +495,21 @@
     const isFinalizedDisputed = String(account.status || '') === 'disputed' && !account.activeDispute;
     return !isFinalizedDisputed;
   });
+  let lastAccountReplicaSignature = '';
+  $: {
+    const signature = [
+      String(tab.entityId || ''),
+      String(tab.signerId || ''),
+      String(activeEnv && 'runtimeId' in activeEnv ? activeEnv.runtimeId || '' : ''),
+      String(replica?.state?.entityId || ''),
+      String(accountIds.length),
+      String(workspaceAccountIds.length),
+      accountIds.join(','),
+    ].join('|');
+    if (signature !== lastAccountReplicaSignature) {
+      lastAccountReplicaSignature = signature;
+    }
+  }
   $: if (!workspaceAccountId || !workspaceAccountIds.includes(workspaceAccountId)) {
     workspaceAccountId = workspaceAccountIds[0] || '';
   }
@@ -2205,6 +2244,14 @@
     id: string;
     height: number;
     timestamp: number;
+    accountId: string;
+    accountLabel: string;
+    kind: 'pending' | 'mempool' | 'confirmed';
+    actor: 'you' | 'peer' | 'system';
+    actorSide: 'L' | 'R' | '';
+    actorLabel: string;
+    frameLabel: string;
+    statusLabel: string;
     txCount: number;
     types: Array<{ type: string; count: number }>;
   };
@@ -2247,47 +2294,116 @@
 
   $: entityHeightBadge = Number(replica?.state?.height ?? 0);
   $: finalizedJHeightBadge = Number(replica?.state?.lastFinalizedJHeight ?? 0);
+  function activityAccountLabel(counterpartyId: string): string {
+    const raw = String(counterpartyId || '');
+    if (!raw) return 'Unknown account';
+    return resolveEntityName(raw, activeEnv) || formatEntityId(raw);
+  }
+
+  function frameActorMeta(account: AccountMachine, byLeft: boolean | undefined): {
+    actor: 'you' | 'peer' | 'system';
+    actorSide: 'L' | 'R' | '';
+    actorLabel: string;
+  } {
+    const localEntity = String(replica?.state?.entityId || tab.entityId || '').toLowerCase();
+    const leftEntity = String(account?.leftEntity || '').toLowerCase();
+    const localIsLeft = Boolean(localEntity && leftEntity && localEntity === leftEntity);
+    if (typeof byLeft !== 'boolean') {
+      return { actor: 'system', actorSide: '', actorLabel: 'System' };
+    }
+    const actorSide = byLeft ? 'L' : 'R';
+    const actor = byLeft === localIsLeft ? 'you' : 'peer';
+    return {
+      actor,
+      actorSide,
+      actorLabel: `${actor === 'you' ? 'You' : 'Peer'} (${actorSide})`,
+    };
+  }
+
   $: entityActivityRows = (() => {
     const rows: EntityFrameActivityRow[] = [];
-    const entityNorm = String(replica?.state?.entityId || tab.entityId || '').toLowerCase();
-    const signerNorm = String(tab.signerId || '').toLowerCase();
-    if (!entityNorm || !Array.isArray(activeHistory) || activeHistory.length === 0) return rows;
+    const accounts = replica?.state?.accounts;
+    if (!(accounts instanceof Map) || accounts.size === 0) return rows;
 
-    const recent = activeHistory.slice(-300);
-    for (let index = 0; index < recent.length; index += 1) {
-      const snapshot = recent[index];
-      if (!snapshot) continue;
-      const entityInputs = Array.isArray(snapshot?.runtimeInput?.entityInputs)
-        ? snapshot.runtimeInput.entityInputs
-        : [];
-      const txs: Array<{ type?: string }> = [];
-      for (const input of entityInputs) {
-        const inputEntity = String(input?.entityId || '').toLowerCase();
-        if (inputEntity !== entityNorm) continue;
-        const inputSigner = String(input?.signerId || '').toLowerCase();
-        if (signerNorm && inputSigner && inputSigner !== signerNorm) continue;
-        const inputTxs = Array.isArray(input?.entityTxs) ? input.entityTxs : [];
-        txs.push(...inputTxs);
-      }
-      if (txs.length === 0) continue;
+    for (const [counterpartyId, account] of accounts.entries()) {
+      const accountId = String(counterpartyId || '');
+      const accountLabel = activityAccountLabel(accountId);
+      const pushRow = (
+        kind: 'pending' | 'mempool' | 'confirmed',
+        frameLabel: string,
+        statusLabel: string,
+        height: number,
+        timestamp: number,
+        txs: Array<{ type?: string }>,
+        byLeft?: boolean,
+      ) => {
+        if (!Array.isArray(txs) || txs.length === 0) return;
+        const grouped = new Map<string, number>();
+        for (const tx of txs) {
+          const type = String(tx?.type || 'unknown');
+          grouped.set(type, (grouped.get(type) || 0) + 1);
+        }
+        const actorMeta = frameActorMeta(account, byLeft);
+        rows.push({
+          id: `entity-activity-${accountId}-${kind}-${height}-${timestamp}`,
+          height,
+          timestamp,
+          accountId,
+          accountLabel,
+          kind,
+          actor: actorMeta.actor,
+          actorSide: actorMeta.actorSide,
+          actorLabel: actorMeta.actorLabel,
+          frameLabel,
+          statusLabel,
+          txCount: txs.length,
+          types: Array.from(grouped.entries()).map(([type, count]) => ({ type, count })),
+        });
+      };
 
-      const grouped = new Map<string, number>();
-      for (const tx of txs) {
-        const type = String(tx?.type || 'unknown');
-        grouped.set(type, (grouped.get(type) || 0) + 1);
+      if (account.pendingFrame) {
+        pushRow(
+          'pending',
+          `Pending Frame #${Number(account.pendingFrame.height || 0)}`,
+          'Awaiting Consensus',
+          Number(account.pendingFrame.height || 0),
+          Number(account.pendingFrame.timestamp || 0),
+          Array.isArray(account.pendingFrame.accountTxs) ? account.pendingFrame.accountTxs : [],
+          account.pendingFrame.byLeft,
+        );
       }
-      const snapshotHeight = Number(snapshot?.height);
-      const fallbackHeight = activeHistory.length - recent.length + index + 1;
-      const height = Number.isFinite(snapshotHeight) && snapshotHeight > 0 ? snapshotHeight : fallbackHeight;
-      rows.push({
-        id: `entity-frame-${height}-${index}`,
-        height,
-        timestamp: Number(snapshot?.timestamp || 0),
-        txCount: txs.length,
-        types: Array.from(grouped.entries()).map(([type, count]) => ({ type, count })),
-      });
+
+      if (Array.isArray(account.mempool) && account.mempool.length > 0) {
+        const pendingHeight = Number(account.pendingFrame?.height || 0);
+        pushRow(
+          'mempool',
+          'Mempool Queue',
+          `${account.mempool.length} queued`,
+          pendingHeight > 0 ? pendingHeight : Number(account.currentHeight || 0),
+          Number(account.pendingFrame?.timestamp || account.currentFrame?.timestamp || 0),
+          account.mempool,
+          account.leftEntity === (replica?.state?.entityId || tab.entityId),
+        );
+      }
+
+      const frames = Array.isArray(account.frameHistory) ? account.frameHistory.slice(-12) : [];
+      for (const frame of frames) {
+        pushRow(
+          'confirmed',
+          `Frame #${Number(frame.height || 0)}`,
+          'Confirmed',
+          Number(frame.height || 0),
+          Number(frame.timestamp || 0),
+          Array.isArray(frame.accountTxs) ? frame.accountTxs : [],
+          frame.byLeft,
+        );
+      }
     }
-    return rows.reverse();
+    return rows.sort((a, b) => {
+      if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
+      if (a.height !== b.height) return b.height - a.height;
+      return a.accountLabel.localeCompare(b.accountLabel);
+    });
   })();
 
   // Handlers
@@ -3167,7 +3283,10 @@
               <div class="account-open-sections">
                 <div class="open-section">
                   <h4 class="section-head">Open Account</h4>
-                  <HubDiscoveryPanel entityId={replica?.state?.entityId || tab.entityId} />
+                  <HubDiscoveryPanel
+                    entityId={replica?.state?.entityId || tab.entityId}
+                    envOverride={isRuntimeEnv(activeEnv) ? activeEnv : null}
+                  />
                 </div>
                 <div class="open-section">
                   <h4 class="section-head">Enter Entity ID</h4>
@@ -3222,13 +3341,28 @@
               {:else}
                 <div class="entity-activity-list">
                   {#each entityActivityRows as row (row.id)}
-                    <article class="entity-frame-row">
+                    <article
+                      class="entity-frame-row"
+                      class:ours={row.actor === 'you'}
+                      class:peer={row.actor === 'peer'}
+                      class:system={row.actor === 'system'}
+                      class:queue={row.kind !== 'confirmed'}
+                    >
                       <div class="entity-frame-row-head">
                         <div class="entity-frame-row-left">
                           <span class="entity-height-badge">E#{row.height}</span>
+                          <span class="entity-frame-actor">{row.actorLabel}</span>
+                          <span class="entity-frame-account">{row.accountLabel}</span>
                           <span class="entity-frame-time">{formatTime(row.timestamp)}</span>
                         </div>
-                        <span class="entity-frame-count">{row.txCount} tx</span>
+                        <div class="entity-frame-row-meta">
+                          <span class="entity-frame-status">{row.statusLabel}</span>
+                          <span class="entity-frame-count">{row.txCount} tx</span>
+                        </div>
+                      </div>
+                      <div class="entity-frame-row-subhead">
+                        <span>{row.frameLabel}</span>
+                        <span>{formatEntityId(row.accountId)}</span>
                       </div>
                       <div class="entity-frame-types">
                         {#each row.types as txType}
@@ -4769,6 +4903,29 @@
     border-radius: 10px;
     background: #12141a;
     padding: 10px;
+    max-width: calc(100% - 28px);
+  }
+
+  .entity-frame-row.ours {
+    margin-left: auto;
+    background: linear-gradient(180deg, rgba(22, 27, 34, 0.98), rgba(16, 20, 28, 0.98));
+    border-color: #2d435b;
+  }
+
+  .entity-frame-row.peer {
+    margin-right: auto;
+    background: linear-gradient(180deg, rgba(28, 20, 14, 0.96), rgba(21, 16, 12, 0.96));
+    border-color: #473324;
+  }
+
+  .entity-frame-row.system {
+    margin-right: auto;
+    max-width: 100%;
+    background: #12141a;
+  }
+
+  .entity-frame-row.queue {
+    border-style: dashed;
   }
 
   .entity-frame-row-head {
@@ -4801,6 +4958,60 @@
     font-family: 'JetBrains Mono', monospace;
   }
 
+  .entity-frame-actor,
+  .entity-frame-account,
+  .entity-frame-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .entity-frame-actor {
+    background: #181b22;
+    border: 1px solid #333844;
+    color: #fbbf24;
+  }
+
+  .entity-frame-account {
+    background: #101217;
+    border: 1px solid #2d3139;
+    color: #d4d4d8;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .entity-frame-row-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .entity-frame-status {
+    background: #151922;
+    border: 1px solid #313645;
+    color: #a1a1aa;
+  }
+
+  .entity-frame-row-subhead {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin: -2px 0 8px;
+    color: #71717a;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
   .entity-frame-time {
     font-size: 11px;
     color: #9ca3af;
@@ -4830,6 +5041,22 @@
     font-size: 11px;
     font-weight: 600;
     white-space: nowrap;
+  }
+
+  @media (max-width: 720px) {
+    .entity-frame-row {
+      max-width: 100%;
+    }
+
+    .entity-frame-row-head,
+    .entity-frame-row-subhead {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .entity-frame-row-meta {
+      justify-content: flex-start;
+    }
   }
 
   /* Contacts */

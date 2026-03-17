@@ -1336,24 +1336,26 @@
             {/each}
           </select>
         </div>
-        <button
-          type="button"
-          class="scope-btn"
-          class:active={tradeSide === 'buy-base'}
-          data-testid="swap-side-buy"
-          on:click={() => setTradeSide('buy-base')}
-        >
-          Buy {baseTokenSymbol}
-        </button>
-        <button
-          type="button"
-          class="scope-btn"
-          class:active={tradeSide === 'sell-base'}
-          data-testid="swap-side-sell"
-          on:click={() => setTradeSide('sell-base')}
-        >
-          Sell {baseTokenSymbol}
-        </button>
+        <div class="side-toggle-group">
+          <button
+            type="button"
+            class="scope-btn"
+            class:active={tradeSide === 'buy-base'}
+            data-testid="swap-side-buy"
+            on:click={() => setTradeSide('buy-base')}
+          >
+            Buy {baseTokenSymbol}
+          </button>
+          <button
+            type="button"
+            class="scope-btn"
+            class:active={tradeSide === 'sell-base'}
+            data-testid="swap-side-sell"
+            on:click={() => setTradeSide('sell-base')}
+          >
+            Sell {baseTokenSymbol}
+          </button>
+        </div>
       </div>
 
       <div class="order-entry-row">
@@ -1657,8 +1659,8 @@
   }
 
   .toolbar-select-create-account {
-    flex: 1 1 100%;
-    max-width: 220px;
+    flex: 0 0 160px;
+    max-width: 160px;
     transition: opacity 120ms ease;
   }
 
@@ -1680,25 +1682,28 @@
 
   .order-side-row {
     display: flex;
-    gap: 8px;
+    justify-content: space-between;
+    gap: 10px;
     align-items: center;
     margin-bottom: 12px;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
   }
 
   .order-side-row .scope-btn {
-    min-width: 112px;
+    min-width: 108px;
+    height: 36px;
   }
 
   .side-toggle-group {
     display: flex;
     gap: 8px;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    margin-left: auto;
   }
 
   .scope-btn {
-    padding: 6px 10px;
+    padding: 0 12px;
     border-radius: 8px;
     border: 1px solid #353942;
     background: #111217;
@@ -1828,11 +1833,14 @@
 
   .order-field {
     margin: 0;
-    padding: 10px 12px 12px;
+    padding: 9px 10px 10px;
     border: 1px solid #2f343f;
     border-radius: 12px;
     background: linear-gradient(180deg, rgba(18, 19, 24, 0.96), rgba(14, 15, 20, 0.96));
     gap: 8px;
+    color: #a1a1aa;
+    font-size: 11px;
+    font-weight: 600;
   }
 
   .order-field-amount {
@@ -1848,11 +1856,11 @@
   }
 
   .order-field input {
-    height: 46px;
+    height: 42px;
     padding: 0 12px;
     background: #17181d;
     border-color: #333844;
-    font-size: 15px;
+    font-size: 14px;
   }
 
   .slider-inline {
@@ -1861,7 +1869,7 @@
     align-items: center;
     gap: 8px;
     margin: 0 0 12px;
-    padding: 10px 12px;
+    padding: 8px 10px;
     border: 1px solid #2f343f;
     border-radius: 12px;
     background: #101116;
@@ -1885,6 +1893,16 @@
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
+  }
+
+  @media (max-width: 980px) {
+    .order-side-row {
+      justify-content: flex-start;
+    }
+
+    .side-toggle-group {
+      margin-left: 0;
+    }
   }
 
   .primary-btn:hover {

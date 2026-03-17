@@ -16,7 +16,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL, waitForNamedHubs } from './utils/e2e-baseline';
-import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import { createRuntimeIdentity, gotoApp, selectDemoMnemonic, switchToRuntimeId } from './utils/e2e-demo-users';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import {
   getRenderedAccountSpendableBalance,
@@ -251,6 +251,7 @@ test.describe('E2R2E External Reserve Route', () => {
         localStorage.setItem('xln-api-base-url', apiBaseUrl);
       }, API_BASE_URL);
       identity = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
+      await switchToRuntimeId(page, identity.runtimeId);
       entityId = identity.entityId;
     });
 
@@ -461,6 +462,7 @@ test.describe('E2R2E External Reserve Route', () => {
         localStorage.setItem('xln-api-base-url', apiBaseUrl);
       }, API_BASE_URL);
       identity = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
+      await switchToRuntimeId(page, identity.runtimeId);
       entityId = identity.entityId;
       runtimeId = identity.runtimeId;
     });

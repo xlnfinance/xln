@@ -337,7 +337,7 @@
     return typeof name === 'string' && name.trim() ? name.trim() : id;
   }
 
-  function buildHostedCheckoutRouteLabel(route: RouteOption): string {
+  function buildEmbeddedRouteLabel(route: RouteOption): string {
     const viaNames = route.path
       .slice(1, -1)
       .map((hopId) => getEntityName(hopId))
@@ -1000,7 +1000,7 @@
       throw new Error(preflightError || 'No route found');
     }
     selectedRouteIndex = 0;
-    return buildHostedCheckoutRouteLabel(routes[0]!);
+    return buildEmbeddedRouteLabel(routes[0]!);
   }
 
   async function payNowCheapest() {
@@ -1443,73 +1443,6 @@
     opacity: 0.55;
   }
 
-  .payment-panel.hosted-checkout {
-    position: relative;
-    padding: 18px;
-    border-radius: 18px;
-    border: 1px solid rgba(34, 197, 94, 0.28);
-    background:
-      radial-gradient(circle at top right, rgba(34, 197, 94, 0.12), transparent 38%),
-      linear-gradient(180deg, rgba(10, 16, 12, 0.96), rgba(10, 12, 14, 0.98));
-    box-shadow: 0 28px 70px rgba(0, 0, 0, 0.32);
-  }
-
-  .hosted-checkout-banner {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 14px;
-    align-items: center;
-    padding: 14px 16px;
-    border-radius: 14px;
-    border: 1px solid rgba(34, 197, 94, 0.2);
-    background: rgba(6, 10, 8, 0.72);
-  }
-
-  .hosted-checkout-copy {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    color: #d6f5dd;
-  }
-
-  .hosted-checkout-copy strong {
-    font-size: 15px;
-    letter-spacing: -0.02em;
-  }
-
-  .hosted-checkout-copy span:last-child {
-    color: #9fb9a6;
-    font-size: 12px;
-  }
-
-  .hosted-checkout-eyebrow {
-    color: #7dd3a5;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .hosted-checkout-summary {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 180px;
-    padding: 10px 12px;
-    border-radius: 12px;
-    background: rgba(15, 23, 18, 0.95);
-    border: 1px solid rgba(22, 163, 74, 0.24);
-    color: #ecfdf3;
-    text-align: right;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .hosted-checkout-summary span:first-child {
-    font-size: 16px;
-    letter-spacing: -0.03em;
-  }
-
   .amount-token-row {
     display: block;
   }
@@ -1869,32 +1802,6 @@
     }
   }
 
-  .checkout-success {
-    position: sticky;
-    bottom: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 16px 18px;
-    border-radius: 14px;
-    border: 1px solid rgba(34, 197, 94, 0.35);
-    background: linear-gradient(135deg, rgba(20, 83, 45, 0.96), rgba(22, 101, 52, 0.92));
-    box-shadow: 0 22px 60px rgba(3, 12, 6, 0.42);
-    color: #ecfdf5;
-    z-index: 2;
-  }
-
-  .checkout-success-title {
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: -0.04em;
-  }
-
-  .checkout-success-body {
-    font-size: 13px;
-    color: rgba(236, 253, 245, 0.86);
-  }
-
   @media (max-width: 900px) {
     .payment-actions {
       grid-template-columns: 1fr;
@@ -1903,15 +1810,6 @@
     .routes-scroll {
       max-height: none;
       overflow: visible;
-    }
-
-    .hosted-checkout-banner {
-      grid-template-columns: 1fr;
-    }
-
-    .hosted-checkout-summary {
-      min-width: 0;
-      text-align: left;
     }
   }
 

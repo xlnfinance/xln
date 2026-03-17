@@ -74,13 +74,13 @@
           <span class="token-symbol">{symbol}</span>
           <span class="token-name">{compactName}</span>
         </div>
-        {#if actionLabel}
-          <button class="summary-action compact-token-action" on:click={emitAction} disabled={actionDisabled}>
-            {actionLabel}
-          </button>
-        {/if}
       </div>
-      <div class="compact-metrics">
+      {#if actionLabel}
+        <button class="summary-action compact-token-action" on:click={emitAction} disabled={actionDisabled}>
+          {actionLabel}
+        </button>
+      {/if}
+      <div class="compact-metrics compact-metrics-wide">
         <div class="compact-metric compact-out" aria-label="Out capacity">
           {#if showMetricLabels}<span class="metric-label">Out</span>{/if}
           <span class="compact-out-value">
@@ -302,8 +302,8 @@
   }
 
   .compact-token-action {
-    margin-left: 8px;
     flex: 0 0 auto;
+    justify-self: end;
   }
 
   .summary-action:hover:not(:disabled) {
@@ -325,10 +325,11 @@
   }
 
   .compact-head {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: flex-start;
-    gap: 18px;
+    column-gap: 14px;
+    row-gap: 8px;
     min-width: 0;
   }
 
@@ -346,7 +347,10 @@
     min-width: 0;
     flex: 1 1 auto;
     width: 100%;
-    margin-left: auto;
+  }
+
+  .compact-metrics-wide {
+    grid-column: 1 / -1;
   }
 
   .delta-summary.compact .token-symbol {
@@ -461,22 +465,21 @@
     }
 
     .compact-head {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      column-gap: 10px;
+      row-gap: 8px;
     }
   }
 
   @media (max-width: 760px) {
     .compact-head {
-      flex-wrap: wrap;
-      align-items: flex-start;
+      grid-template-columns: minmax(0, 1fr);
+      align-items: start;
       gap: 10px;
     }
 
     .delta-summary.compact .compact-meta {
       min-width: 0;
-      flex: 1 1 100%;
     }
 
     .compact-metrics {
@@ -503,8 +506,11 @@
     }
 
     .delta-summary.compact .actions {
-      margin-left: auto;
       margin-top: 4px;
+    }
+
+    .compact-token-action {
+      justify-self: start;
     }
 
     .compact-out-value,

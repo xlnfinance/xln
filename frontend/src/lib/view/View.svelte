@@ -243,7 +243,6 @@
           unregisterEnvChange = null;
         }
         unregisterEnvChange = XLN.registerEnvChangeCallback(envToRegister, (nextEnv: any) => {
-          if (get(localEnvStore) !== nextEnv) return;
           localEnvStore.set(nextEnv);
           localHistoryStore.set(nextEnv.history || []);
         });
