@@ -1,5 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const host = process.env.PLAYWRIGHT_FRONTEND_HOST || '127.0.0.1';
+const port = Number(process.env.PLAYWRIGHT_FRONTEND_PORT || 4173);
+const baseURL = `https://${host}:${port}`;
+
 /**
  * Playwright Configuration for XLN Frontend
  *
@@ -7,16 +11,15 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './tests',
-  fullyParallel: true,
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: 'html',
   use: {
-    // Local dev runs over HTTP unless you generate self-signed certs; use HTTP to avoid SSL protocol errors
-    baseURL: 'http://localhost:8080',
+    baseURL,
     trace: 'on-first-retry',
-    ignoreHTTPSErrors: true,  // Dev server uses self-signed cert
+    ignoreHTTPSErrors: true,
   },
 
   projects: [
@@ -28,9 +31,10 @@ export default defineConfig({
 
   // Run dev server before tests
   webServer: {
-    command: 'SKIP_TYPECHECK=1 bun run dev',
-    url: 'http://localhost:8080',
-    reuseExistingServer: true,  // Always reuse - dev server runs separately
+    command: `SKIP_TYPECHECK=1 VITE_DEV_PORT=${port} bun run dev -- --host ${host} --port ${port} --strictPort`,
+    url: baseURL,
+    ignoreHTTPSErrors: true,
+    reuseExistingServer: false,
     timeout: 120 * 1000,
   },
 });
