@@ -46,6 +46,9 @@ playwright-report/**/*.webm
 test-results/**/*.webm
 .playwright-mcp/
 .logs/
+.tmp/
+.tmp-*
+frontend/static/img/print.png
 **/.playwright-artifacts-*/
 
 # Archive (old implementations)
