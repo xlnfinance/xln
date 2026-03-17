@@ -18,8 +18,8 @@
   let createOrderAccountId = '';
   let selectedBookAccountId = '';
   let activeOrderAccountId = '';
-  const AGGREGATED_ORDERBOOK_DEPTH = 18;
-  const SELECTED_ORDERBOOK_DEPTH = 12;
+  const AGGREGATED_ORDERBOOK_DEPTH = 15;
+  const SELECTED_ORDERBOOK_DEPTH = 15;
   const ORDERBOOK_PRICE_SCALE = 10_000n;
   const ORDERBOOK_LOT_SCALE = 10n ** 12n;
   type PreparedSwapOrderLike = {
