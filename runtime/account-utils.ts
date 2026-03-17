@@ -287,28 +287,28 @@ export type SwapPairPolicy = {
 };
 
 const DEFAULT_SWAP_PAIR_POLICY: SwapPairPolicy = {
-  priceStepTicks: 100,   // 0.01
-  bookRangeBps: 900,
+  priceStepTicks: 1,   // 0.0001
+  bookRangeBps: 400,
   mmMidPriceTicks: 10_000n, // 1.0000
 };
 
 const SWAP_PAIR_POLICY_BY_BASE_QUOTE: Record<string, SwapPairPolicy> = {
   // WETH/USDC
   '2/1': {
-    priceStepTicks: 100,    // 0.01 USDC per WETH
-    bookRangeBps: 700,
+    priceStepTicks: 1,    // 0.0001 USDC per WETH
+    bookRangeBps: 250,
     mmMidPriceTicks: 25_000_000n, // 2500.0000
   },
   // WETH/USDT
   '2/3': {
-    priceStepTicks: 100,    // 0.01 USDT per WETH
-    bookRangeBps: 700,
+    priceStepTicks: 1,    // 0.0001 USDT per WETH
+    bookRangeBps: 250,
     mmMidPriceTicks: 25_000_000n, // 2500.0000
   },
   // USDC/USDT
   '1/3': {
     priceStepTicks: 1,      // 0.0001
-    bookRangeBps: 1200,
+    bookRangeBps: 40,
     mmMidPriceTicks: 10_000n, // 1.0000
   },
 };

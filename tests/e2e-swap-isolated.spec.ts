@@ -365,10 +365,10 @@ async function selectCounterpartyInSwap(page: Page): Promise<void> {
 }
 
 async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'): Promise<void> {
-  const pairInput = page.getByTestId('swap-pair-search').first();
-  await expect(pairInput).toBeVisible({ timeout: 20_000 });
-  await pairInput.fill(pairLabel);
-  await pairInput.press('Enter');
+  const pairSelect = page.getByTestId('swap-pair-select').first();
+  await pairSelect.scrollIntoViewIfNeeded().catch(() => {});
+  await expect(pairSelect).toBeVisible({ timeout: 20_000 });
+  await pairSelect.selectOption({ label: pairLabel });
   const sideButton = side === 'buy'
     ? page.getByTestId('swap-side-buy').first()
     : page.getByTestId('swap-side-sell').first();
