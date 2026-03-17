@@ -40,10 +40,11 @@ export CUSTODY_DAEMON_PORT=${CUSTODY_DAEMON_PORT:-8088}
 export CUSTODY_PORT=${CUSTODY_PORT:-8087}
 export CUSTODY_DB_ROOT=${CUSTODY_DB_ROOT:-/root/xln/db/custody/prod}
 export XLN_USE_PREDEPLOYED_ADDRESSES=${XLN_USE_PREDEPLOYED_ADDRESSES:-true}
-export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-$CUSTODY_DB_ROOT/jurisdictions.json}
+export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-/root/xln/db/runtime/prod-main/jurisdictions.json}
 
 mkdir -p "$CUSTODY_DB_ROOT"
 if [ ! -f "$XLN_JURISDICTIONS_PATH" ]; then
+  mkdir -p "$(dirname "$XLN_JURISDICTIONS_PATH")"
   cp /root/xln/jurisdictions/jurisdictions.json "$XLN_JURISDICTIONS_PATH"
 fi
 
