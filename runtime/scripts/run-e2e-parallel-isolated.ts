@@ -237,6 +237,20 @@ const expandPlaywrightTargets = (pwFiles: string[]): Array<{ target: string; req
   return out;
 };
 
+const listPlaywrightSpecFiles = (): string[] => {
+  const res = Bun.spawnSync(['rg', '--files', 'tests'], {
+    cwd: process.cwd(),
+    stdout: 'pipe',
+    stderr: 'ignore',
+  });
+  const text = Buffer.from(res.stdout).toString('utf8');
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.endsWith('.spec.ts'))
+    .sort();
+};
+
 const stopProcess = async (proc: ChildProcessWithoutNullStreams | null): Promise<void> => {
   if (!proc || proc.exitCode !== null) return;
   proc.kill('SIGTERM');
@@ -649,22 +663,15 @@ async function main(): Promise<void> {
   }
 
   const startedAt = Date.now();
-  const tasks: RunTask[] =
-    args.pwFiles.length > 0
-      ? expandPlaywrightTargets(args.pwFiles).map((entry, index, entries) => ({
-          shard: index,
-          totalShards: entries.length,
-          pwTargets: [entry.target],
-          requireMarketMaker: entry.requireMarketMaker,
-          usePlaywrightShard: false,
-        }))
-      : Array.from({ length: args.shards }, (_, index) => ({
-          shard: index,
-          totalShards: args.shards,
-          pwTargets: [],
-          requireMarketMaker: true,
-          usePlaywrightShard: true,
-        }));
+  const sourceFiles = args.pwFiles.length > 0 ? args.pwFiles : listPlaywrightSpecFiles();
+  const expandedTargets = expandPlaywrightTargets(sourceFiles);
+  const tasks: RunTask[] = expandedTargets.map((entry, index, entries) => ({
+    shard: index,
+    totalShards: entries.length,
+    pwTargets: [entry.target],
+    requireMarketMaker: entry.requireMarketMaker,
+    usePlaywrightShard: false,
+  }));
 
   const promises: Array<Promise<RunResult>> = [];
   for (const task of tasks) {

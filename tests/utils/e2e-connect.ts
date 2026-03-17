@@ -40,12 +40,13 @@ async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
 async function isAccountReady(
   page: Page,
   entityId: string,
+  signerId: string,
   hubId: string,
   tokenIds: readonly number[],
   timeoutMs = 0,
 ): Promise<boolean> {
   return page.evaluate(
-    async ({ entityId, hubId, tokenIds, timeoutMs }) => {
+    async ({ entityId, signerId, hubId, tokenIds, timeoutMs }) => {
       const env = (window as typeof window & {
         isolatedEnv?: {
           eReplicas?: Map<string, {
@@ -64,7 +65,9 @@ async function isAccountReady(
       const startedAt = Date.now();
       while (Date.now() - startedAt <= timeoutMs) {
         for (const [replicaKey, replica] of env.eReplicas.entries()) {
-          if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
+          const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
+          if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
+          if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
           const account = replica.state?.accounts?.get(hubId);
           if (!account) continue;
           const hasDelta = tokenIds.every((tokenId) => Boolean(account.deltas?.get?.(tokenId)));
@@ -78,7 +81,7 @@ async function isAccountReady(
 
       return false;
     },
-    { entityId, hubId, tokenIds: [...tokenIds], timeoutMs },
+    { entityId, signerId, hubId, tokenIds: [...tokenIds], timeoutMs },
   );
 }
 
@@ -101,14 +104,43 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
 async function openAccountsWorkspace(page: Page): Promise<void> {
   await dismissOnboardingIfVisible(page);
   const accountsTab = page.getByTestId('tab-accounts').first();
-  if (!await accountsTab.isVisible().catch(() => false)) {
-    const backButton = page.locator('.account-panel .back-button').first();
-    if (await backButton.isVisible().catch(() => false)) {
-      await backButton.click();
+  const accountList = page.getByTestId('account-list-wrapper').first();
+  const workspaceTabs = page.locator('.account-workspace-tab').first();
+  const isAccountsWorkspaceVisible = async () =>
+    await accountList.isVisible().catch(() => false)
+      || await workspaceTabs.isVisible().catch(() => false);
+
+  if (await isAccountsWorkspaceVisible()) {
+    if (await accountsTab.isVisible().catch(() => false)) {
+      await accountsTab.click();
     }
+    return;
   }
-  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
-  await accountsTab.click();
+
+  const backButton = page.locator('.back-button').first();
+  if (await backButton.isVisible().catch(() => false)) {
+    await backButton.click();
+    await expect
+      .poll(async () => await isAccountsWorkspaceVisible(), {
+        timeout: 20_000,
+        intervals: [200, 400, 800],
+        message: 'back from focused account must return to accounts workspace',
+      })
+      .toBe(true);
+  }
+
+  if (await accountsTab.isVisible().catch(() => false)) {
+    await accountsTab.click();
+    return;
+  }
+
+  await expect
+    .poll(async () => await isAccountsWorkspaceVisible(), {
+      timeout: 20_000,
+      intervals: [200, 400, 800],
+      message: 'accounts workspace must be visible',
+    })
+    .toBe(true);
 }
 
 async function openWorkspaceTab(page: Page, label: RegExp): Promise<void> {
@@ -149,13 +181,30 @@ async function focusConfiguredAccount(page: Page, hubId: string): Promise<void> 
   await openAccountsWorkspace(page);
   const preview = page.locator(`.account-preview[data-counterparty-id="${hubId}"]`).first();
   if (await preview.isVisible().catch(() => false)) {
-    const exploreButton = preview.getByRole('button', { name: /^Explore$/ }).first();
-    if (await exploreButton.isVisible().catch(() => false)) {
-      await exploreButton.click();
+    return;
+  }
+}
+
+async function selectConfigureAccount(page: Page, hubId: string): Promise<void> {
+  const selector = page.locator('.configure-panel .workspace-inline-selector .entity-input').first();
+  await expect(selector).toBeVisible({ timeout: 20_000 });
+
+  const closedTrigger = selector.locator('.closed-trigger').first();
+  if (await closedTrigger.isVisible().catch(() => false)) {
+    if (await closedTrigger.textContent().then((text) => String(text || '').toLowerCase().includes(hubId.toLowerCase())).catch(() => false)) {
       return;
     }
-    await preview.click();
+    await closedTrigger.click();
+  } else {
+    const input = selector.locator('input').first();
+    await expect(input).toBeVisible({ timeout: 20_000 });
+    await input.click();
   }
+
+  const option = page.locator('.dropdown-item').filter({ hasText: hubId }).first();
+  await expect(option).toBeVisible({ timeout: 20_000 });
+  await option.click();
+  await expect(selector.locator('.closed-trigger').first()).toContainText(hubId.slice(0, 10), { timeout: 20_000 });
 }
 
 async function openConfigureWorkspace(page: Page, hubId: string): Promise<void> {
@@ -163,6 +212,7 @@ async function openConfigureWorkspace(page: Page, hubId: string): Promise<void> 
   await openWorkspaceTab(page, /Configure/i);
   await expect(page.locator('.configure-panel').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.configure-empty').first()).not.toBeVisible({ timeout: 20_000 });
+  await selectConfigureAccount(page, hubId);
 }
 
 async function addTokenToAccount(page: Page, hubId: string, tokenId: number): Promise<void> {
@@ -211,9 +261,14 @@ type AccountOpenStatus = {
   currentHeight: number;
 };
 
-async function getAccountOpenStatus(page: Page, entityId: string, hubId: string): Promise<AccountOpenStatus> {
+async function getAccountOpenStatus(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  hubId: string,
+): Promise<AccountOpenStatus> {
   return page.evaluate(
-    ({ entityId, hubId }) => {
+    ({ entityId, signerId, hubId }) => {
       const env = (window as typeof window & {
         isolatedEnv?: {
           eReplicas?: Map<string, {
@@ -232,7 +287,9 @@ async function getAccountOpenStatus(page: Page, entityId: string, hubId: string)
       }
 
       for (const [replicaKey, replica] of env.eReplicas.entries()) {
-        if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
+        const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
+        if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
+        if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
         const account = replica.state?.accounts?.get(hubId);
         if (!account) continue;
         return {
@@ -245,7 +302,7 @@ async function getAccountOpenStatus(page: Page, entityId: string, hubId: string)
 
       return { exists: false, hasDelta: false, pendingHeight: null, currentHeight: 0 };
     },
-    { entityId, hubId },
+    { entityId, signerId, hubId },
   );
 }
 
@@ -254,27 +311,30 @@ export async function connectRuntimeToHub(
   identity: { entityId: string; signerId: string },
   hubId: string,
 ): Promise<void> {
-  if (await isAccountReady(page, identity.entityId, hubId, DEFAULT_TOKEN_IDS)) {
+  if (await isAccountReady(page, identity.entityId, identity.signerId, hubId, DEFAULT_TOKEN_IDS)) {
     return;
   }
-  const initialStatus = await getAccountOpenStatus(page, identity.entityId, hubId);
+  const initialStatus = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
 
   if (!initialStatus.exists) {
     await connectHubThroughUi(page, hubId);
   }
 
   await expect.poll(
-    async () => (await getAccountOpenStatus(page, identity.entityId, hubId)).exists,
+    async () => {
+      const status = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
+      return status.exists && status.currentHeight > 0 && !status.pendingHeight;
+    },
     {
       timeout: DEFAULT_OPEN_TIMEOUT_MS,
       intervals: [250, 500, 750],
-      message: `account ${hubId.slice(0, 10)} must appear after hub connect`,
+      message: `account ${hubId.slice(0, 10)} must be committed after hub connect`,
     },
   ).toBe(true);
 
   for (const tokenId of DEFAULT_TOKEN_IDS.slice(1)) {
     const tokenActive = await page.evaluate(
-      ({ entityId, hubId, tokenId }) => {
+      ({ entityId, signerId, hubId, tokenId }) => {
         const env = (window as typeof window & {
           isolatedEnv?: {
             eReplicas?: Map<string, {
@@ -288,12 +348,14 @@ export async function connectRuntimeToHub(
         }).isolatedEnv;
         if (!env?.eReplicas) return false;
         for (const [replicaKey, replica] of env.eReplicas.entries()) {
-          if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
+          const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
+          if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
+          if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
           return Boolean(replica.state?.accounts?.get(hubId)?.deltas?.has(tokenId));
         }
         return false;
       },
-      { entityId: identity.entityId, hubId, tokenId },
+      { entityId: identity.entityId, signerId: identity.signerId, hubId, tokenId },
     );
     if (!tokenActive) {
       await addTokenToAccount(page, hubId, tokenId);
@@ -301,8 +363,8 @@ export async function connectRuntimeToHub(
     await extendCreditToken(page, hubId, tokenId, DEFAULT_CREDIT_AMOUNT_DISPLAY);
   }
 
-  const opened = await isAccountReady(page, identity.entityId, hubId, DEFAULT_TOKEN_IDS, DEFAULT_OPEN_TIMEOUT_MS);
-  const finalStatus = await getAccountOpenStatus(page, identity.entityId, hubId);
+  const opened = await isAccountReady(page, identity.entityId, identity.signerId, hubId, DEFAULT_TOKEN_IDS, DEFAULT_OPEN_TIMEOUT_MS);
+  const finalStatus = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
 
   expect(
     opened,

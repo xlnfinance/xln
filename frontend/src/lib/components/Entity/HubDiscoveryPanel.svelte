@@ -17,7 +17,8 @@
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle } from 'lucide-svelte';
 
   export let entityId: string = '';
-  $: env = $xlnEnvironment;
+  export let envOverride: Env | null = null;
+  $: env = envOverride || $xlnEnvironment;
   $: activeFunctions = $xlnFunctions;
 
   // State

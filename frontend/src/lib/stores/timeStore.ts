@@ -45,14 +45,16 @@ export const maxTimeIndex = derived(timeState, $state => $state.maxTimeIndex);
 export const visibleReplicas = derived(
   [timeState, history, xlnEnvironment],
   ([$timeState, $history, $env]) => {
-    // Always read from history[timeIndex] (consistent snapshots)
+    if ($timeState.isLive) {
+      return $env?.eReplicas ? new Map($env.eReplicas) : new Map();
+    }
+
     const idx = $timeState.currentTimeIndex;
     if ($history && $history.length > 0) {
       const clampedIdx = Math.max(0, Math.min(idx, $history.length - 1));
       const frame = $history[clampedIdx];
       if (frame?.eReplicas) return new Map(frame.eReplicas);
     }
-    // Fallback to raw env before any frames exist
     return $env?.eReplicas ? new Map($env.eReplicas) : new Map();
   }
 );

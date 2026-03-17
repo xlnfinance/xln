@@ -2,31 +2,7 @@
 set -euo pipefail
 
 cd /root/xln
-
-kill_by_port() {
-  local port="$1"
-  local pids
-  pids="$(lsof -ti TCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
-  if [ -n "$pids" ]; then
-    echo "[start-custody] killing stale listeners on :${port} -> ${pids}"
-    echo "$pids" | xargs kill -9 2>/dev/null || true
-  fi
-}
-
-kill_by_pattern() {
-  local pattern="$1"
-  local pids
-  pids="$(pgrep -f -- "$pattern" 2>/dev/null || true)"
-  if [ -n "$pids" ]; then
-    echo "[start-custody] killing stale process pattern '$pattern' -> ${pids}"
-    echo "$pids" | xargs kill -TERM 2>/dev/null || true
-    sleep 1
-    pids="$(pgrep -f -- "$pattern" 2>/dev/null || true)"
-    if [ -n "$pids" ]; then
-      echo "$pids" | xargs kill -KILL 2>/dev/null || true
-    fi
-  fi
-}
+source /root/xln/scripts/lib/start-common.sh
 
 export PATH="/root/.bun/bin:$PATH"
 export USE_ANVIL=true
@@ -43,13 +19,10 @@ export XLN_USE_PREDEPLOYED_ADDRESSES=${XLN_USE_PREDEPLOYED_ADDRESSES:-true}
 export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-/root/xln/db/runtime/prod-main/jurisdictions.json}
 
 mkdir -p "$CUSTODY_DB_ROOT"
-if [ ! -f "$XLN_JURISDICTIONS_PATH" ]; then
-  mkdir -p "$(dirname "$XLN_JURISDICTIONS_PATH")"
-  cp /root/xln/jurisdictions/jurisdictions.json "$XLN_JURISDICTIONS_PATH"
-fi
+xln_ensure_jurisdictions_path "$XLN_JURISDICTIONS_PATH"
 
-kill_by_port "$CUSTODY_PORT"
-kill_by_port "$CUSTODY_DAEMON_PORT"
-kill_by_pattern "runtime/server.ts --port ${CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${CUSTODY_DAEMON_PORT}"
+xln_kill_by_port "$CUSTODY_PORT" start-custody
+xln_kill_by_port "$CUSTODY_DAEMON_PORT" start-custody
+xln_kill_by_pattern "runtime/server.ts --port ${CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${CUSTODY_DAEMON_PORT}" start-custody
 
 exec /root/.bun/bin/bun runtime/scripts/start-custody-prod.ts

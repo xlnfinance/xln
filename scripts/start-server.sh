@@ -2,17 +2,10 @@
 # XLN Server Startup Script for pm2
 # This wraps the bun server with proper environment setup
 
-cd /root/xln
+set -euo pipefail
 
-kill_by_port() {
-  local port="$1"
-  local pids
-  pids="$(lsof -ti TCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
-  if [ -n "$pids" ]; then
-    echo "[start-server] killing stale listeners on :${port} -> ${pids}"
-    echo "$pids" | xargs kill -9 2>/dev/null || true
-  fi
-}
+cd /root/xln
+source /root/xln/scripts/lib/start-common.sh
 
 export USE_ANVIL=true
 export ANVIL_RPC=http://localhost:8545
@@ -28,10 +21,8 @@ export BOOTSTRAP_LOCAL_HUBS=${BOOTSTRAP_LOCAL_HUBS:-1}
 export PATH="/root/.bun/bin:$PATH"
 
 mkdir -p "$XLN_DB_PATH"
-if [ ! -f "$XLN_JURISDICTIONS_PATH" ]; then
-  cp /root/xln/jurisdictions/jurisdictions.json "$XLN_JURISDICTIONS_PATH"
-fi
+xln_ensure_jurisdictions_path "$XLN_JURISDICTIONS_PATH"
 
-kill_by_port 8080
+xln_kill_by_port 8080 start-server
 
 exec /root/.bun/bin/bun runtime/server.ts --port 8080
