@@ -89,21 +89,37 @@ wait_for_main_stack() {
   return 1
 }
 
-wait_for_custody() {
-  local deadline=$((SECONDS + 120))
+wait_for_http_json_field() {
+  local url="$1"
+  local js_expr="$2"
+  local deadline="$3"
   while [ "$SECONDS" -lt "$deadline" ]; do
     local body
-    body="$(curl -fsS http://127.0.0.1:8087/api/me || true)"
-    if [ -n "$body" ] && node -e '
+    body="$(curl -fsS "$url" || true)"
+    if [ -n "$body" ] && node -e "
       const payload = JSON.parse(process.argv[1]);
-      const ok = typeof payload?.custody?.entityId === "string" && payload.custody.entityId.length > 0;
+      const ok = (() => { ${js_expr} })();
       process.exit(ok ? 0 : 1);
-    ' "$body"; then
+    " "$body"; then
       return 0
     fi
     sleep 1
   done
   return 1
+}
+
+wait_for_custody() {
+  local deadline=$((SECONDS + 240))
+  wait_for_http_json_field \
+    "http://127.0.0.1:8088/api/health" \
+    "return payload?.system?.runtime === true && payload?.system?.relay === true;" \
+    "$deadline" \
+    || return 1
+
+  wait_for_http_json_field \
+    "http://127.0.0.1:8087/api/me" \
+    "return typeof payload?.custody?.entityId === 'string' && payload.custody.entityId.length > 0;" \
+    "$deadline"
 }
 
 ensure_production_host_hygiene() {
