@@ -605,9 +605,10 @@ function formatDecimalForInput(value: number): string {
 }
 
 async function prepareExecutableOrder(page: Page): Promise<number> {
-  const pairInput = page.getByTestId('swap-pair-search').first();
-  await expect(pairInput).toBeVisible({ timeout: 20_000 });
-  const pairOptions = (await page.locator('#swap-pair-options option').allTextContents())
+  const pairSelect = page.getByTestId('swap-pair-select').first();
+  await pairSelect.scrollIntoViewIfNeeded().catch(() => {});
+  await expect(pairSelect).toBeVisible({ timeout: 20_000 });
+  const pairOptions = (await pairSelect.locator('option').allTextContents())
     .map((text) => text.trim())
     .filter((text) => text.length > 0);
   if (pairOptions.length === 0) throw new Error('No pair options found');
@@ -639,8 +640,7 @@ async function prepareExecutableOrder(page: Page): Promise<number> {
   let lastFormError = '';
   while (Date.now() < deadline) {
     for (const pairLabel of preferredPairs) {
-      await pairInput.fill(pairLabel);
-      await pairInput.press('Enter');
+      await pairSelect.selectOption({ label: pairLabel });
       await page.waitForTimeout(250);
       const sidesToTry: Array<{
         mode: 'buy' | 'sell';
@@ -743,10 +743,10 @@ test.describe('E2E Swap Flow', () => {
     await timedStep('swap_auto.open_workspace', () => openSwapWorkspace(page));
     await timedStep('swap_auto.select_counterparty', () => selectCounterpartyInSwap(page));
 
-    const pairInput = page.getByTestId('swap-pair-search').first();
-    await expect(pairInput).toBeVisible({ timeout: 20_000 });
-    await pairInput.fill('WETH/USDC');
-    await pairInput.press('Enter');
+    const pairSelect = page.getByTestId('swap-pair-select').first();
+    await pairSelect.scrollIntoViewIfNeeded().catch(() => {});
+    await expect(pairSelect).toBeVisible({ timeout: 20_000 });
+    await pairSelect.selectOption({ label: 'WETH/USDC' });
 
     const buySide = page.getByTestId('swap-side-buy').first();
     await expect(buySide).toBeVisible({ timeout: 20_000 });
@@ -844,10 +844,10 @@ test.describe('E2E Swap Flow', () => {
       readSwapResolveCount(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
     );
 
-    const pairInput = page.getByTestId('swap-pair-search').first();
-    await expect(pairInput).toBeVisible({ timeout: 20_000 });
-    await pairInput.fill('WETH/USDC');
-    await pairInput.press('Enter');
+    const pairSelect = page.getByTestId('swap-pair-select').first();
+    await pairSelect.scrollIntoViewIfNeeded().catch(() => {});
+    await expect(pairSelect).toBeVisible({ timeout: 20_000 });
+    await pairSelect.selectOption({ label: 'WETH/USDC' });
     const buySideButton = page.getByTestId('swap-side-buy').first();
     await expect(buySideButton).toBeVisible({ timeout: 20_000 });
     await buySideButton.click();

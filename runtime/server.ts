@@ -319,7 +319,7 @@ const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   4,
   Number(process.env.MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK || '10'),
 );
-const MARKET_MAKER_LEVEL_OFFSETS_BPS = [60, 140, 240, 360, 520] as const;
+const MARKET_MAKER_LEVEL_OFFSETS_BPS = [4, 10, 18, 30, 45] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
   120n * 10n ** 18n,
   180n * 10n ** 18n,

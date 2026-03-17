@@ -103,7 +103,6 @@
   let orderPercent = 100;
   let submitError = '';
   let selectedPairValue = '';
-  let pairSearchInput = '';
   let tradeSide: 'buy-base' | 'sell-base' = 'buy-base';
   let selectedPair: PairOption | null = null;
   let giveTokenId = '1';
@@ -291,36 +290,9 @@
     const hasSelected = pairOptions.some((option) => option.value === selectedPairValue);
     if (!hasSelected) {
       selectedPairValue = pairOptions[0]!.value;
-      pairSearchInput = pairOptions[0]!.label;
-    } else {
-      const current = pairOptions.find((option) => option.value === selectedPairValue);
-      if (current) pairSearchInput = current.label;
     }
   }
   $: selectedPair = pairOptions.find((option) => option.value === selectedPairValue) || null;
-
-  function setPairBySearch(raw: string): void {
-    const normalized = String(raw || '').trim().toLowerCase();
-    if (!normalized) return;
-    const exact = pairOptions.find((option) => option.label.toLowerCase() === normalized);
-    if (exact) {
-      selectedPairValue = exact.value;
-      pairSearchInput = exact.label;
-      return;
-    }
-    const partial = pairOptions.find((option) => option.label.toLowerCase().includes(normalized));
-    if (partial) {
-      selectedPairValue = partial.value;
-      pairSearchInput = partial.label;
-    }
-  }
-
-  function handlePairSearchInput(event: Event): void {
-    const target = event.currentTarget as HTMLInputElement | null;
-    const next = String(target?.value || '');
-    pairSearchInput = next;
-    setPairBySearch(next);
-  }
 
   function setTradeSide(next: 'buy-base' | 'sell-base'): void {
     tradeSide = next;
@@ -1265,19 +1237,11 @@
       <div class="form-row compact">
         <label>
           Pair
-          <input
-            list="swap-pair-options"
-            bind:value={pairSearchInput}
-            inputmode="search"
-            placeholder="Search pair (e.g. WETH/USDC)"
-            data-testid="swap-pair-search"
-            on:input={handlePairSearchInput}
-          />
-          <datalist id="swap-pair-options">
+          <select bind:value={selectedPairValue} data-testid="swap-pair-select">
             {#each pairOptions as pair (pair.value)}
-              <option value={pair.label}>{pair.label}</option>
+              <option value={pair.value}>{pair.label}</option>
             {/each}
-          </datalist>
+          </select>
         </label>
         <div class="side-toggle-group">
           <button
