@@ -106,6 +106,58 @@ wait_for_custody() {
   return 1
 }
 
+ensure_production_host_hygiene() {
+  echo "[deploy] enforcing production log and memory hygiene"
+
+  mkdir -p /etc/systemd/journald.conf.d
+  cat > /etc/systemd/journald.conf.d/xln-limits.conf <<'EOF'
+[Journal]
+SystemMaxUse=200M
+RuntimeMaxUse=64M
+SystemKeepFree=1G
+RuntimeKeepFree=32M
+MaxFileSec=7day
+EOF
+
+  systemctl restart systemd-journald || true
+  journalctl --vacuum-size=200M || true
+
+  if command -v pm2 >/dev/null 2>&1; then
+    if ! pm2 module:list 2>/dev/null | grep -q 'pm2-logrotate'; then
+      pm2 install pm2-logrotate || true
+    fi
+    pm2 set pm2-logrotate:max_size 20M >/dev/null || true
+    pm2 set pm2-logrotate:retain 5 >/dev/null || true
+    pm2 set pm2-logrotate:compress true >/dev/null || true
+    pm2 set pm2-logrotate:workerInterval 3600 >/dev/null || true
+    pm2 set pm2-logrotate:rotateInterval '0 * * * *' >/dev/null || true
+    pm2 set pm2-logrotate:rotateModule true >/dev/null || true
+  fi
+
+  install -d /etc/cron.hourly
+  cat > /etc/cron.hourly/xln-log-hygiene <<'EOF'
+#!/bin/sh
+find /root/.pm2/logs -type f -name '*.log' -size +20M -exec truncate -s 0 {} \; 2>/dev/null || true
+find /root/xln/logs -type f -name '*.log' -size +20M -exec truncate -s 0 {} \; 2>/dev/null || true
+journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+EOF
+  chmod +x /etc/cron.hourly/xln-log-hygiene
+
+  cat > /etc/logrotate.d/xln-runtime-logs <<'EOF'
+/root/xln/logs/*.log {
+  daily
+  rotate 7
+  compress
+  missingok
+  notifempty
+  copytruncate
+}
+EOF
+
+  find /root/.pm2/logs -type f -name '*.log' -exec truncate -s 0 {} \; 2>/dev/null || true
+  find /root/xln/logs -type f -name '*.log' -exec truncate -s 0 {} \; 2>/dev/null || true
+}
+
 run_local_deploy() {
   export PATH="$HOME/.bun/bin:$PATH"
 
@@ -138,6 +190,7 @@ run_local_deploy() {
   if command -v pm2 >/dev/null 2>&1; then
     echo "[deploy] restarting pm2 service"
     if [ "$PRODUCTION" = "1" ]; then
+      ensure_production_host_hygiene
       echo "[deploy] resetting production anvil + runtime state"
       mkdir -p db/runtime db/custody data logs
       rm -rf db/runtime/prod-main db/custody/prod db-tmp/prod-custody
@@ -148,7 +201,7 @@ run_local_deploy() {
       pm2 delete xln-custody >/dev/null 2>&1 || true
       pm2 delete anvil >/dev/null 2>&1 || true
 
-      pm2 start scripts/start-anvil.sh --name anvil --interpreter bash -- --reset
+      pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
       if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
         echo "[deploy] anvil did not become ready on :8545" >&2
         pm2 logs anvil --lines 120 --nostream || true
@@ -156,7 +209,7 @@ run_local_deploy() {
       fi
 
       pm2 delete xln-server >/dev/null 2>&1 || true
-      pm2 start scripts/start-server.sh --name xln-server --interpreter bash
+      pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
       if ! wait_for_main_stack; then
         echo "[deploy] main XLN stack did not become healthy" >&2
         pm2 logs xln-server --lines 160 --nostream || true
@@ -164,7 +217,7 @@ run_local_deploy() {
       fi
 
       pm2 delete xln-custody >/dev/null 2>&1 || true
-      pm2 start scripts/start-custody.sh --name xln-custody --interpreter bash
+      pm2 start scripts/start-custody.sh --name xln-custody --interpreter bash --max-memory-restart 512M
       if ! wait_for_custody; then
         echo "[deploy] custody service did not become healthy" >&2
         pm2 logs xln-custody --lines 160 --nostream || true
@@ -173,7 +226,7 @@ run_local_deploy() {
     else
       pm2 describe xln-server >/dev/null 2>&1 \
         && pm2 restart xln-server \
-        || pm2 start scripts/start-server.sh --name xln-server --interpreter bash
+        || pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
     fi
     pm2 save
   else
