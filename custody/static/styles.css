@@ -362,29 +362,21 @@ button.primary:disabled {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   gap: 18px;
-  padding: 18px;
-  border-radius: 18px;
-  background: #f8fafc;
-  border: 1px solid var(--line);
+  align-items: start;
 }
 
 .deposit-qr-wrap {
-  display: grid;
-  place-items: center;
+  display: block;
   aspect-ratio: 1;
-  padding: 12px;
-  border-radius: 16px;
-  background: #171513;
-  border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .deposit-qr-image,
 .deposit-qr-placeholder {
   width: 100%;
-  max-width: 180px;
+  max-width: 220px;
   aspect-ratio: 1;
   height: auto;
-  border-radius: 12px;
+  border-radius: 0;
   display: block;
   object-fit: contain;
 }
@@ -392,46 +384,38 @@ button.primary:disabled {
 .deposit-qr-placeholder {
   display: grid;
   place-items: center;
-  color: #f8fafc;
+  color: var(--muted);
   font-size: 13px;
+  background: #f6f9fc;
+  border-radius: 16px;
 }
 
 .deposit-invoice-details {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
+  padding-top: 6px;
 }
 
 .deposit-invoice-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 
-.deposit-caption {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-  font-weight: 700;
-}
-
-.deposit-invoice-string {
+.deposit-invoice-text {
   display: block;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: white;
-  border: 1px solid var(--line);
+  padding: 0;
+  background: transparent;
+  border: none;
   color: var(--ink);
   font-family: "SFMono-Regular", ui-monospace, monospace;
   font-size: 12px;
   line-height: 1.45;
   word-break: break-all;
-  resize: none;
-  overflow: auto;
-  min-height: 108px;
+  overflow-wrap: anywhere;
   width: 100%;
 }
 
@@ -441,8 +425,50 @@ button.primary:disabled {
 
 .deposit-action-row {
   display: flex;
-  gap: 10px;
+  align-items: center;
+  gap: 14px;
   flex-wrap: wrap;
+}
+
+.deposit-copy-inline {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  cursor: pointer;
+}
+
+.deposit-copy-inline:hover {
+  color: var(--blue);
+}
+
+.btn-wallet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #5b5ff7 0%, #6f77ff 100%);
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  box-shadow: 0 10px 24px rgba(99, 91, 255, 0.22);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.btn-wallet:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+  box-shadow: 0 14px 28px rgba(99, 91, 255, 0.26);
 }
 
 button.secondary {
@@ -695,6 +721,11 @@ pre.activity-sub {
 
   .deposit-invoice-card {
     grid-template-columns: 1fr;
+  }
+
+  .deposit-qr-wrap {
+    width: min(220px, 100%);
+    margin: 0 auto 4px;
   }
 
   .token-grid {

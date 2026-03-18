@@ -364,7 +364,7 @@ const render = () => {
     <div class="action-grid">
       <section class="action-card">
         <h2>Deposit</h2>
-        <div class="action-sub">Scan the invoice, copy it into any XLN wallet, or open the wallet directly in this browser.</div>
+        <div class="action-sub">Scan the QR, copy the payment request, or open it directly in your wallet.</div>
         <form id="deposit-form">
           <label>
             Asset
@@ -385,13 +385,12 @@ const render = () => {
             </div>
             <div class="deposit-invoice-details">
               <div class="deposit-invoice-row">
-                <span class="deposit-caption">Invoice</span>
-                <textarea class="deposit-invoice-string" readonly rows="5">${escapeHtml(pendingInvoice)}</textarea>
+                <div class="deposit-invoice-text">${escapeHtml(pendingInvoice)}</div>
               </div>
               <div class="inline-ok ${depositHint ? '' : 'hidden'}" data-deposit-hint>${escapeHtml(depositHint)}</div>
               <div class="deposit-action-row">
-                <button class="primary" type="button" data-open-wallet-href="${escapeHtml(pendingWalletHref)}">Open Wallet</button>
-                <button class="secondary" type="button" data-copy-invoice="${escapeHtml(pendingInvoice)}">Copy Invoice</button>
+                <button class="deposit-copy-inline" type="button" data-copy-invoice="${escapeHtml(pendingInvoice)}">Copy invoice</button>
+                <button class="btn-wallet" type="button" data-open-wallet-href="${escapeHtml(pendingWalletHref)}">Open Wallet</button>
               </div>
             </div>
           </div>
