@@ -339,11 +339,6 @@
     }
   }
 
-  /** Start UI Tutorial (overlay walkthrough) */
-  function startUITutorial() {
-    panelBridge.emit('tutorial:action', { action: 'start' });
-  }
-
   /** Start AHB Tutorial with autopilot */
   let ahbRunning = false; // Guard against double execution
   async function startAHBTutorial() {
@@ -2642,9 +2637,6 @@
 <div class="architect-panel">
   <div class="header">
     <h3> Architect</h3>
-    <button class="tutorial-btn" on:click={startUITutorial} title="Start interactive tutorial">
-       Start Tutorial
-    </button>
   </div>
 
   <div class="mode-selector">

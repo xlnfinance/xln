@@ -184,7 +184,8 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     
     location = /app {
-        alias /home/ubuntu/xln/frontend/build/index.html;
+        root /home/ubuntu/xln/frontend/build;
+        rewrite ^ /index.html break;
         add_header Content-Security-Policy "frame-ancestors 'self' https://xln.finance https://app.xln.finance https://custody.xln.finance https://localhost:* http://localhost:*" always;
     }
 
