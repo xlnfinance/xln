@@ -46,6 +46,14 @@ const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
 };
 
+const isDaemonHealthReady = (payload: unknown): boolean => {
+  const body = payload as {
+    system?: { runtime?: boolean };
+    jMachines?: Array<{ status?: string }>;
+  } | null;
+  return body?.system?.runtime === true && Array.isArray(body?.jMachines) && body!.jMachines.length > 0;
+};
+
 const findProcessIdsByPattern = async (pattern: string): Promise<number[]> => {
   return await new Promise<number[]>((resolve, reject) => {
     const child = spawn('pgrep', ['-f', '--', pattern], {
@@ -171,7 +179,11 @@ const ensureExistingCustodyState = async (
 const isHttpReady = async (url: string): Promise<boolean> => {
   try {
     const response = await fetch(url);
-    return response.status < 500;
+    if (response.status >= 500) return false;
+    if (url.endsWith('/api/health')) {
+      return isDaemonHealthReady(await response.json());
+    }
+    return true;
   } catch {
     return false;
   }
@@ -202,6 +214,7 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
       USE_ANVIL: 'true',
       BOOTSTRAP_LOCAL_HUBS: '0',
       XLN_SKIP_SERVER_BOOTSTRAP: '1',
+      XLN_EARLY_HTTP_BIND: '1',
       ANVIL_RPC: MAIN_RPC_URL,
       PUBLIC_RPC: PUBLIC_RPC_URL,
       PUBLIC_RELAY_URL: RELAY_URL,
@@ -213,7 +226,12 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
     },
   );
   mirrorChildLogs('custody-daemon', daemonChild);
-  await waitForHttpReady(`http://127.0.0.1:${DAEMON_PORT}/api/health`, daemonChild, 240_000);
+  await waitForHttpReady(
+    `http://127.0.0.1:${DAEMON_PORT}/api/health`,
+    daemonChild,
+    240_000,
+    async (_response, bodyText) => isDaemonHealthReady(JSON.parse(bodyText)),
+  );
   return daemonChild;
 };
 

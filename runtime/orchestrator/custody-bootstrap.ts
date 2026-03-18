@@ -116,6 +116,7 @@ export const waitForHttpReady = async (
   url: string,
   child: ManagedChild | null = null,
   timeoutMs = DEFAULT_CHILD_READY_TIMEOUT_MS,
+  isReady?: (response: Response, bodyText: string) => boolean | Promise<boolean>,
 ): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
   let lastError = 'not-started';
@@ -131,8 +132,14 @@ export const waitForHttpReady = async (
         if (prevTlsReject === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
         else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTlsReject;
       }
-      if (response.status < 500) return;
-      lastError = `status=${response.status}`;
+      const bodyText = await response.text();
+      if (response.status < 500) {
+        const ready = isReady ? await isReady(response, bodyText) : true;
+        if (ready) return;
+        lastError = `predicate=false status=${response.status}`;
+      } else {
+        lastError = `status=${response.status}`;
+      }
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
@@ -153,6 +160,18 @@ export const waitForHttpReady = async (
   }
 
   throw new Error(`URL did not become ready at ${url}: ${lastError}`);
+};
+
+const isDaemonHealthReady = (_response: Response, bodyText: string): boolean => {
+  try {
+    const body = JSON.parse(bodyText) as {
+      system?: { runtime?: boolean };
+      jMachines?: Array<{ status?: string }>;
+    };
+    return body.system?.runtime === true && Array.isArray(body.jMachines) && body.jMachines.length > 0;
+  } catch {
+    return false;
+  }
 };
 
 export const runDaemonControl = async (
@@ -266,6 +285,7 @@ export const startCustodySupport = async (
       USE_ANVIL: 'true',
       BOOTSTRAP_LOCAL_HUBS: '0',
       XLN_SKIP_SERVER_BOOTSTRAP: '1',
+      XLN_EARLY_HTTP_BIND: '1',
       ANVIL_RPC: options.rpcUrl,
       PUBLIC_RPC: options.rpcUrl,
       RELAY_URL: options.relayUrl,
@@ -274,7 +294,7 @@ export const startCustodySupport = async (
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
     },
   );
-  await waitForHttpReady(`http://127.0.0.1:${options.daemonPort}/api/health`, daemonChild);
+  await waitForHttpReady(`http://127.0.0.1:${options.daemonPort}/api/health`, daemonChild, DEFAULT_CHILD_READY_TIMEOUT_MS, isDaemonHealthReady);
 
   const hubIds = await discoverHubIds(options.apiBaseUrl);
   const controlResult = await runDaemonControl(

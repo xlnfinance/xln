@@ -312,6 +312,7 @@ const BOOTSTRAP_POLL_MS = Math.max(10, Number(process.env.BOOTSTRAP_POLL_MS || '
 const RUNTIME_SETTLE_POLL_MS = Math.max(10, Number(process.env.RUNTIME_SETTLE_POLL_MS || '25'));
 const INCLUDE_MARKET_MAKER_BY_DEFAULT = !/^(0|false)$/i.test(process.env.XLN_INCLUDE_MARKET_MAKER ?? '1');
 const SKIP_SERVER_BOOTSTRAP = /^(1|true)$/i.test(process.env.XLN_SKIP_SERVER_BOOTSTRAP ?? '');
+const EARLY_HTTP_BIND = /^(1|true)$/i.test(process.env.XLN_EARLY_HTTP_BIND ?? '');
 const MARKET_MAKER_SIGNER_LABEL = process.env.MARKET_MAKER_SIGNER_LABEL ?? 'mm-1';
 const MARKET_MAKER_SEED = process.env.MARKET_MAKER_SEED ?? `${HUB_SEED}:market-maker`;
 const MARKET_MAKER_NAME = process.env.MARKET_MAKER_NAME ?? 'MM1';
@@ -4867,6 +4868,167 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   startRuntimeLoop(env);
   console.log('[XLN] Runtime event loop started ✓');
 
+  let routerConfig: RelayRouterConfig | null = null;
+  const createHttpServer = () => Bun.serve({
+    port: options.port,
+    hostname: options.host,
+
+    async fetch(req, server) {
+      const url = new URL(req.url);
+      const pathname = url.pathname;
+
+      if (req.headers.get('upgrade') === 'websocket') {
+        const wsType = pathname === '/relay' ? 'relay' : pathname === '/rpc' ? 'rpc' : null;
+        if (wsType) {
+          const upgraded = server.upgrade(req, { data: { type: wsType } });
+          if (upgraded) return undefined as any;
+        }
+        return new Response('WebSocket upgrade failed', { status: 400 });
+      }
+
+      if (
+        pathname.startsWith('/api/') ||
+        pathname === '/reset' ||
+        pathname === '/rpc'
+      ) {
+        try {
+          return await handleApi(req, pathname, env);
+        } catch (error) {
+          const message = (error as Error)?.message || 'API handler failed';
+          console.error(`[API] Unhandled route error (${pathname}): ${message}`);
+          pushDebugEvent(relayStore, {
+            event: 'error',
+            reason: 'API_HANDLER_EXCEPTION',
+            details: { pathname, message },
+          });
+          return new Response(safeStringify({ error: message, code: 'API_HANDLER_EXCEPTION' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      if (options.staticDir) {
+        if (pathname === '/runtime.js') {
+          const runtimeBundle = await serveRuntimeBundle();
+          if (runtimeBundle) return runtimeBundle;
+        }
+
+        if (pathname === '/') {
+          const index = await serveStatic('/index.html', options.staticDir);
+          if (index) return index;
+        }
+
+        const file = await serveStatic(pathname, options.staticDir);
+        if (file) return file;
+
+        const fallback = await serveStatic('/index.html', options.staticDir);
+        if (fallback) return fallback;
+      }
+
+      return new Response('Not found', { status: 404 });
+    },
+
+    websocket: {
+      open(ws) {
+        const data = (ws as any).data;
+        console.log(`[WS] New ${data.type} connection`);
+        pushDebugEvent(relayStore, {
+          event: 'ws_open',
+          details: { wsType: data.type },
+        });
+      },
+
+      message(ws, message) {
+        const data = (ws as any).data;
+        const msgStr = message.toString();
+        try {
+          const msg = JSON.parse(msgStr);
+          if (data.type === 'relay') {
+            if (isMarketMessageType(msg?.type)) {
+              handleMarketMessage(ws, msg, env);
+              return;
+            }
+            if (!routerConfig) {
+              ws.send(safeStringify({ type: 'error', error: 'Runtime transport not ready' }));
+              return;
+            }
+            Promise.resolve(relayRoute(routerConfig, ws, msg)).catch(error => {
+              const reason = (error as Error).message || 'relay handler error';
+              console.error(`[WS] Relay handler error: ${reason}`);
+              pushDebugEvent(relayStore, {
+                event: 'error',
+                reason: 'RELAY_HANDLER_EXCEPTION',
+                details: {
+                  error: reason,
+                  msgType: msg?.type,
+                  from: msg?.from,
+                  to: msg?.to,
+                },
+              });
+              try {
+                ws.send(safeStringify({ type: 'error', error: 'Relay handler exception' }));
+              } catch {
+                // Socket may already be closed; ignore.
+              }
+            });
+          } else if (data.type === 'rpc') {
+            Promise.resolve(handleRpcMessage(ws, msg, env)).catch(error => {
+              const reason = (error as Error).message || 'rpc handler error';
+              console.error(`[WS] RPC handler error: ${reason}`);
+              pushDebugEvent(relayStore, {
+                event: 'error',
+                reason: 'RPC_HANDLER_EXCEPTION',
+                details: { error: reason, msgType: msg?.type },
+              });
+              try {
+                ws.send(safeStringify({ type: 'error', error: 'RPC handler exception' }));
+              } catch {
+                // Socket may already be closed; ignore.
+              }
+            });
+          }
+        } catch (error) {
+          console.error(`[WS] Parse error (type=${data.type}, len=${msgStr.length}):`, error);
+          pushDebugEvent(relayStore, {
+            event: 'error',
+            reason: 'Invalid JSON',
+            details: { wsType: data.type, len: msgStr.length, error: (error as Error).message },
+          });
+          ws.send(safeStringify({ type: 'error', error: 'Invalid JSON' }));
+        }
+      },
+
+      close(ws, code, reason) {
+        cleanupRpcMarketSubscription(ws);
+        const removedId = removeClient(relayStore, ws);
+        const reasonText =
+          typeof reason === 'string'
+            ? reason
+            : reason
+              ? String(reason)
+              : '';
+        console.warn(
+          `[WS] CLOSE wsType=${((ws as any).data || {}).type || 'unknown'} runtime=${removedId?.slice(0, 10) || 'unknown'} ` +
+          `code=${Number(code || 0)} reason="${reasonText || 'n/a'}"`,
+        );
+        if (removedId) {
+          pushDebugEvent(relayStore, {
+            event: 'ws_close',
+            runtimeId: removedId,
+            from: removedId,
+            details: {
+              wsType: ((ws as any).data || {}).type || 'unknown',
+              code: Number(code || 0),
+              reason: reasonText || null,
+            },
+          });
+        }
+      },
+    },
+  });
+  let server = EARLY_HTTP_BIND ? createHttpServer() : null;
+
   // Initialize J-adapter (anvil for testnet, browserVM for local)
   const anvilRpc = process.env.ANVIL_RPC || 'http://localhost:8545';
   const useAnvil = process.env.USE_ANVIL === 'true';
@@ -5082,7 +5244,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
   // Wire relay-router + local delivery
   const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
-  const routerConfig: RelayRouterConfig = {
+  routerConfig = {
     store: relayStore,
     localRuntimeId: env.runtimeId,
     localDeliver,
@@ -5096,167 +5258,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     },
   };
 
-  const server = Bun.serve({
-    port: options.port,
-    hostname: options.host,
-
-    async fetch(req, server) {
-      const url = new URL(req.url);
-      const pathname = url.pathname;
-
-      // WebSocket upgrade
-      if (req.headers.get('upgrade') === 'websocket') {
-        const wsType = pathname === '/relay' ? 'relay' : pathname === '/rpc' ? 'rpc' : null;
-        if (wsType) {
-          const upgraded = server.upgrade(req, { data: { type: wsType, env } });
-          if (upgraded) return undefined as any;
-        }
-        return new Response('WebSocket upgrade failed', { status: 400 });
-      }
-
-      // REST API (+ hard reset shortcut at /reset + JSON-RPC /rpc endpoint)
-      if (
-        pathname.startsWith('/api/') ||
-        pathname === '/reset' ||
-        pathname === '/rpc'
-      ) {
-        try {
-          return await handleApi(req, pathname, env);
-        } catch (error) {
-          const message = (error as Error)?.message || 'API handler failed';
-          console.error(`[API] Unhandled route error (${pathname}): ${message}`);
-          pushDebugEvent(relayStore, {
-            event: 'error',
-            reason: 'API_HANDLER_EXCEPTION',
-            details: { pathname, message },
-          });
-          return new Response(safeStringify({ error: message, code: 'API_HANDLER_EXCEPTION' }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
-      }
-
-      // Static files
-      if (options.staticDir) {
-        // Runtime bundle is served from canonical runtime locations.
-        if (pathname === '/runtime.js') {
-          const runtimeBundle = await serveRuntimeBundle();
-          if (runtimeBundle) return runtimeBundle;
-        }
-
-        // Root → index.html
-        if (pathname === '/') {
-          const index = await serveStatic('/index.html', options.staticDir);
-          if (index) return index;
-        }
-
-        // Try static file
-        const file = await serveStatic(pathname, options.staticDir);
-        if (file) return file;
-
-        // SPA fallback
-        const fallback = await serveStatic('/index.html', options.staticDir);
-        if (fallback) return fallback;
-      }
-
-      return new Response('Not found', { status: 404 });
-    },
-
-    websocket: {
-      open(ws) {
-        const data = (ws as any).data;
-        console.log(`[WS] New ${data.type} connection`);
-        pushDebugEvent(relayStore, {
-          event: 'ws_open',
-          details: { wsType: data.type },
-        });
-      },
-
-      message(ws, message) {
-        const data = (ws as any).data;
-        const msgStr = message.toString();
-        try {
-          const msg = JSON.parse(msgStr);
-          if (data.type === 'relay') {
-            if (isMarketMessageType(msg?.type)) {
-              handleMarketMessage(ws, msg, data.env);
-              return;
-            }
-            Promise.resolve(relayRoute(routerConfig, ws, msg)).catch(error => {
-              const reason = (error as Error).message || 'relay handler error';
-              console.error(`[WS] Relay handler error: ${reason}`);
-              pushDebugEvent(relayStore, {
-                event: 'error',
-                reason: 'RELAY_HANDLER_EXCEPTION',
-                details: {
-                  error: reason,
-                  msgType: msg?.type,
-                  from: msg?.from,
-                  to: msg?.to,
-                },
-              });
-              try {
-                ws.send(safeStringify({ type: 'error', error: 'Relay handler exception' }));
-              } catch {
-                // Socket may already be closed; ignore.
-              }
-            });
-          } else if (data.type === 'rpc') {
-            Promise.resolve(handleRpcMessage(ws, msg, data.env)).catch(error => {
-              const reason = (error as Error).message || 'rpc handler error';
-              console.error(`[WS] RPC handler error: ${reason}`);
-              pushDebugEvent(relayStore, {
-                event: 'error',
-                reason: 'RPC_HANDLER_EXCEPTION',
-                details: { error: reason, msgType: msg?.type },
-              });
-              try {
-                ws.send(safeStringify({ type: 'error', error: 'RPC handler exception' }));
-              } catch {
-                // Socket may already be closed; ignore.
-              }
-            });
-          }
-        } catch (error) {
-          console.error(`[WS] Parse error (type=${data.type}, len=${msgStr.length}):`, error);
-          pushDebugEvent(relayStore, {
-            event: 'error',
-            reason: 'Invalid JSON',
-            details: { wsType: data.type, len: msgStr.length, error: (error as Error).message },
-          });
-          ws.send(safeStringify({ type: 'error', error: 'Invalid JSON' }));
-        }
-      },
-
-      close(ws, code, reason) {
-        cleanupRpcMarketSubscription(ws);
-        const removedId = removeClient(relayStore, ws);
-        const reasonText =
-          typeof reason === 'string'
-            ? reason
-            : reason
-              ? String(reason)
-              : '';
-        console.warn(
-          `[WS] CLOSE wsType=${((ws as any).data || {}).type || 'unknown'} runtime=${removedId?.slice(0, 10) || 'unknown'} ` +
-          `code=${Number(code || 0)} reason="${reasonText || 'n/a'}"`,
-        );
-        if (removedId) {
-          pushDebugEvent(relayStore, {
-            event: 'ws_close',
-            runtimeId: removedId,
-            from: removedId,
-            details: {
-              wsType: ((ws as any).data || {}).type || 'unknown',
-              code: Number(code || 0),
-              reason: reasonText || null,
-            },
-          });
-        }
-      },
-    },
-  });
+  if (!server) {
+    server = createHttpServer();
+  }
 
   // Start P2P overlay after WS /relay is actually listening.
   // Plain daemons stay connected even before they own a routing entity;

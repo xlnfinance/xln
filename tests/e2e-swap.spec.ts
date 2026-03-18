@@ -943,6 +943,7 @@ test.describe('E2E Swap Flow', () => {
       options.map((option) => String((option as HTMLOptionElement).value || '')).filter((value) => value.length > 0),
     );
     let configured = false;
+    let chosenCreateAccountValue: string | null = null;
     for (const accountValue of accountValues) {
       await createAccountSelect.selectOption(accountValue);
       await page.waitForTimeout(150);
@@ -955,6 +956,7 @@ test.describe('E2E Swap Flow', () => {
         await priceInput.fill('2490');
         await page.waitForTimeout(350);
         if (await placeButton.isEnabled()) {
+          chosenCreateAccountValue = accountValue;
           configured = true;
           break;
         }
@@ -968,6 +970,7 @@ test.describe('E2E Swap Flow', () => {
         await priceInput.fill('2510');
         await page.waitForTimeout(350);
         if (await placeButton.isEnabled()) {
+          chosenCreateAccountValue = accountValue;
           configured = true;
           break;
         }
@@ -988,6 +991,25 @@ test.describe('E2E Swap Flow', () => {
           { timeout: 60_000 },
         )
         .toBe(true);
+      const settledAccountId = chosenCreateAccountValue || accountRef.counterpartyId;
+      await page.waitForFunction(
+        ({ entityId, accountId }) => {
+          const env = (window as any).isolatedEnv;
+          if (!env?.eReplicas || !(env.eReplicas instanceof Map)) return false;
+          const targetEntityId = String(entityId || '').toLowerCase();
+          const targetAccountId = String(accountId || '').toLowerCase();
+          const replica = Array.from(env.eReplicas.values()).find((candidate: any) =>
+            String(candidate?.entityId || '').toLowerCase() === targetEntityId,
+          );
+          const account = replica?.state?.accounts?.get?.(targetAccountId);
+          if (!account) return false;
+          const offerCount = account.swapOffers instanceof Map ? account.swapOffers.size : 0;
+          const pendingCount = Array.isArray(account.mempool) ? account.mempool.length : 0;
+          return offerCount > 0 && !account.pendingFrame && pendingCount === 0;
+        },
+        { entityId: accountRef.entityId, accountId: settledAccountId },
+        { timeout: 60_000 },
+      );
       await page.waitForTimeout(1200);
     });
 
@@ -999,6 +1021,9 @@ test.describe('E2E Swap Flow', () => {
       }, { timeout: 60_000 });
       await openSwapWorkspace(page);
       await selectCounterpartyInSwap(page, accountRef.counterpartyId);
+      if (chosenCreateAccountValue) {
+        await createAccountSelect.selectOption(chosenCreateAccountValue);
+      }
     });
     await timedStep('swap_auto.reload_assert_offer_persisted', async () => {
       await expect
