@@ -262,6 +262,7 @@ export interface XLNModule {
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
   processJBlockEvents?: (env: Env) => Promise<void>;
   queueEntityInput?: (entityId: string, signerId: string, txData: QueueEntityInputPayload) => Promise<void>;
+  setDeltaTransformerAddress?: (address: string) => void;
 
   // Identity system (from ids.ts)
   parseReplicaKey: (keyString: string) => ReplicaKey;

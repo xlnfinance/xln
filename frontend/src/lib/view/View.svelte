@@ -134,21 +134,30 @@
       if (id > newLastSeen) newLastSeen = id;
       const message = String(entry?.message || '').trim();
       const entryData = entry?.data || {};
-      if (!isInitialPass && message === 'HtlcReceived') {
+      if (!isInitialPass && message === 'PaymentFinalized') {
         const hashlock = String(entryData.hashlock || id);
-        const dedupeKey = `${runtimeKey}:htlc:${hashlock}`;
+        const dedupeKey = `${runtimeKey}:finalized:${hashlock}`;
         const now = Date.now();
         const lastShownAt = lastPaymentSpotlightAtByKey.get(dedupeKey) ?? 0;
         if (now - lastShownAt >= PAYMENT_SPOTLIGHT_COOLDOWN_MS) {
-          lastPaymentSpotlightAtByKey.set(dedupeKey, now);
-          const timing = parsePaymentTiming(String(entryData.description || ''));
-          const elapsedMs = timing.startedAtMs ? Math.max(1, Date.now() - timing.startedAtMs) : null;
-          paymentSpotlight.show({
-            title: elapsedMs ? `Received in ${elapsedMs}ms` : 'Received',
-            amountLine: formatSpotlightAmount(entryData.tokenId, entryData.amount),
-            ...(timing.displayDescription ? { detail: timing.displayDescription } : {}),
-            duration: 3600,
-          });
+          const isFinalRecipient = entryData.finalRecipient === true;
+          const inboundEntity = String(entryData.inboundEntity || '').trim();
+          const outboundEntity = String(entryData.outboundEntity || '').trim();
+          const isSender = !isFinalRecipient && !inboundEntity && !!outboundEntity;
+          if (isFinalRecipient || isSender) {
+            lastPaymentSpotlightAtByKey.set(dedupeKey, now);
+            const timing = parsePaymentTiming(String(entryData.description || ''));
+            const elapsedMs = timing.startedAtMs ? Math.max(1, Date.now() - timing.startedAtMs) : null;
+            paymentSpotlight.show({
+              kicker: isFinalRecipient ? 'Payment Received' : 'Payment Sent',
+              title: elapsedMs
+                ? `${isFinalRecipient ? 'Received' : 'Paid'} in ${elapsedMs}ms`
+                : (isFinalRecipient ? 'Received' : 'Paid'),
+              amountLine: formatSpotlightAmount(entryData.tokenId, entryData.amount),
+              ...(timing.displayDescription ? { detail: timing.displayDescription } : {}),
+              duration: 4200,
+            });
+          }
         }
       }
       if (!shouldSurfaceLogAsToast(entry)) continue;

@@ -46,6 +46,7 @@ const HIGH_SIGNAL_EVENTS = new Set([
   'PaymentFailed',
   'HtlcPaymentInitiated',
   'HtlcReceived',
+  'HtlcFinalized',
   // J-event ingress is the canonical source-of-truth signal that an on-chain event
   // actually reached the runtime state machine. Keep it in the relay debug timeline.
   'JEventReceived',

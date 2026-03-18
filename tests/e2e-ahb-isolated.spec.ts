@@ -15,7 +15,12 @@ import {
 } from './utils/e2e-account-ui';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
-import { getPersistedReceiptCursor, getPersistedRuntimeDbMeta, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
+import {
+  getPersistedReceiptCursor,
+  getPersistedRuntimeDbMeta,
+  waitForPersistedFrameEvent,
+  waitForPersistedFrameEventMatch,
+} from './utils/e2e-runtime-receipts';
 
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
@@ -442,12 +447,14 @@ async function runtimeDbMeta(page: Page): Promise<{
   checkpointHeight: number;
   hasLatestFrame: boolean;
   latestHeight: number;
+  runtimeHeight: number;
 }> {
   const meta = await getPersistedRuntimeDbMeta(page);
   return {
     checkpointHeight: meta.checkpointHeight,
     hasLatestFrame: meta.hasLatestFrame,
     latestHeight: meta.latestHeight,
+    runtimeHeight: meta.runtimeHeight,
   };
 }
 
@@ -457,6 +464,47 @@ async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<vo
     return String(view.isolatedEnv?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()
       && Number(view.isolatedEnv?.eReplicas?.size || 0) > 0;
   }, { targetRuntimeId: runtimeId }, { timeout: INIT_TIMEOUT });
+}
+
+async function waitForDurableRuntimeState(page: Page, label: string): Promise<void> {
+  await expect
+    .poll(async () => {
+      const meta = await runtimeDbMeta(page);
+      return meta.hasLatestFrame && meta.latestHeight >= meta.runtimeHeight;
+    }, {
+      timeout: 30_000,
+      message: `${label} durable persisted height must catch up to runtime height`,
+    })
+    .toBe(true);
+}
+
+async function waitForRuntimeInputDrain(page: Page, label: string, timeoutMs = 15_000): Promise<void> {
+  await expect
+    .poll(async () => {
+      return await page.evaluate(() => {
+        const view = window as TestWindow & {
+          isolatedEnv?: {
+            runtimeInput?: { runtimeTxs?: unknown[]; entityInputs?: unknown[]; jInputs?: unknown[] };
+            runtimeMempool?: { runtimeTxs?: unknown[]; entityInputs?: unknown[]; jInputs?: unknown[] };
+          };
+        };
+        const input = view.isolatedEnv?.runtimeInput;
+        const mempool = view.isolatedEnv?.runtimeMempool;
+        const inputCount =
+          Number(input?.runtimeTxs?.length || 0) +
+          Number(input?.entityInputs?.length || 0) +
+          Number(input?.jInputs?.length || 0);
+        const mempoolCount =
+          Number(mempool?.runtimeTxs?.length || 0) +
+          Number(mempool?.entityInputs?.length || 0) +
+          Number(mempool?.jInputs?.length || 0);
+        return inputCount === 0 && mempoolCount === 0;
+      });
+    }, {
+      timeout: timeoutMs,
+      message: `${label} runtime input queues must be empty before reload`,
+    })
+    .toBe(true);
 }
 
 test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
@@ -525,9 +573,17 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
       const expectedForwardSpend = toDisplayed(requiredInbound(forwardAmount, hubFee.feePPM, hubFee.baseFee));
       const bobBeforeForward = await getRenderedOutboundForAccount(bobPage, hubId);
       const bobForwardCursor = await getPersistedReceiptCursor(bobPage);
+      const aliceForwardFinalizeCursor = await getPersistedReceiptCursor(alicePage);
       await pay(alicePage, alice.entityId, alice.signerId, bob.entityId, [alice.entityId, hubId, bob.entityId], forwardAmount);
 
       const forwardSpend = await waitForSenderSpend(alicePage, hubId, aliceAfterFaucet, expectedForwardSpend);
+      await waitForPersistedFrameEventMatch(alicePage, {
+        eventName: 'HtlcFinalized',
+        entityId: alice.entityId,
+        cursor: aliceForwardFinalizeCursor,
+        timeoutMs: 30_000,
+        predicate: (event) => String(event.data?.amount || '') === forwardAmount.toString(),
+      });
       await waitForPersistedFrameEvent(bobPage, {
         eventName: 'HtlcReceived',
         entityId: bob.entityId,
@@ -554,9 +610,17 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
       const aliceBeforeReverse = await getRenderedOutboundForAccount(alicePage, hubId);
       const bobBeforeReverse = await getRenderedOutboundForAccount(bobPage, hubId);
       const aliceReverseCursor = await getPersistedReceiptCursor(alicePage);
+      const bobReverseFinalizeCursor = await getPersistedReceiptCursor(bobPage);
       await pay(bobPage, bob.entityId, bob.signerId, alice.entityId, [bob.entityId, hubId, alice.entityId], reverseAmount);
 
       const reverseSpend = await waitForSenderSpend(bobPage, hubId, bobAfterForward, expectedReverseSpend);
+      await waitForPersistedFrameEventMatch(bobPage, {
+        eventName: 'HtlcFinalized',
+        entityId: bob.entityId,
+        cursor: bobReverseFinalizeCursor,
+        timeoutMs: 30_000,
+        predicate: (event) => String(event.data?.amount || '') === reverseAmount.toString(),
+      });
       await waitForPersistedFrameEvent(alicePage, {
         eventName: 'HtlcReceived',
         entityId: alice.entityId,
@@ -576,6 +640,12 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
         'alice reverse receive',
       );
       expect(bobBeforeReverse - bobAfterReverse).toBeGreaterThanOrEqual(expectedReverseSpend);
+      await waitForAccountIdle(alicePage, alice.entityId, hubId);
+      await waitForAccountIdle(bobPage, bob.entityId, hubId);
+      await waitForRuntimeInputDrain(alicePage, 'alice');
+      await waitForRuntimeInputDrain(bobPage, 'bob');
+      await waitForDurableRuntimeState(alicePage, 'alice');
+      await waitForDurableRuntimeState(bobPage, 'bob');
 
       console.log('[E2E] capture persistence state before reload');
       const aliceDbBefore = await runtimeDbMeta(alicePage);

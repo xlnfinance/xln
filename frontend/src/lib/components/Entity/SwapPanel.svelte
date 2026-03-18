@@ -405,7 +405,8 @@
     priceRatioInput = normalizeDecimalInput(target?.value || '', PRICE_RATIO_DECIMALS);
   }
 
-  // Get active swap offers for this entity
+  // Open orders use entity swapBook for immediate UX. Restore path rebuilds swapBook
+  // from authoritative account.swapOffers to avoid stale rows after reload.
   $: activeOffers = replica?.state?.swapBook
     ? Array.from(replica.state.swapBook.values()) as SwapOfferLike[]
     : [];

@@ -985,6 +985,8 @@ export interface SwapOffer {
  */
 export interface HtlcRoute {
   hashlock: string;
+  tokenId?: number;
+  amount?: bigint;
 
   // Inbound hop (who sent us this HTLC)
   inboundEntity?: string;

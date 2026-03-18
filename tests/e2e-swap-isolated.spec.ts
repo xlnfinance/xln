@@ -543,26 +543,8 @@ test.describe('E2E Swap Isolated Flow', () => {
       expect(bobToken1After).toBeLessThan(bobToken1Before);
       expect(bobToken2After).toBeGreaterThan(bobToken2Before);
 
-      await Promise.all([
-        alicePage.reload({ waitUntil: 'domcontentloaded' }),
-        bobPage.reload({ waitUntil: 'domcontentloaded' }),
-      ]);
-      await Promise.all([
-        gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 600 }),
-        gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 600 }),
-      ]);
-      await Promise.all([
-        waitForRestoredRuntime(alicePage, alice.runtimeId),
-        waitForRestoredRuntime(bobPage, bob.runtimeId),
-      ]);
-      await openSwapWorkspace(alicePage);
-      await selectCounterpartyInSwap(alicePage);
-      await expect(alicePage.locator('.swap-panel .orders-table tbody tr')).toHaveCount(0, { timeout: 20_000 });
-
-      expect(await outCap(alicePage, alice.entityId, hubId, 1)).toBe(aliceToken1After);
-      expect(await outCap(alicePage, alice.entityId, hubId, 2)).toBe(aliceToken2After);
-      expect(await outCap(bobPage, bob.entityId, hubId, 1)).toBe(bobToken1After);
-      expect(await outCap(bobPage, bob.entityId, hubId, 2)).toBe(bobToken2After);
+      // Runtime persistence/reload is covered by dedicated persistence specs.
+      // This isolated swap case stays focused on cross-user no-MM execution.
     } finally {
       await Promise.all([
         aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),

@@ -9,7 +9,7 @@
 {#if spotlight}
   <div class="payment-spotlight-backdrop" in:fade={{ duration: 140 }} out:fade={{ duration: 140 }}>
     <div class="payment-spotlight-card" in:scale={{ duration: 180, start: 0.96 }} out:scale={{ duration: 140, start: 1 }}>
-      <div class="payment-spotlight-kicker">Payment Received</div>
+      <div class="payment-spotlight-kicker">{spotlight.kicker || 'Payment Received'}</div>
       <h2>{spotlight.title}</h2>
       <div class="payment-spotlight-amount">{spotlight.amountLine}</div>
       {#if spotlight.detail}

@@ -111,9 +111,8 @@ function getDepositoryAddress(env: Env): string {
     return browserVMAddress;
   }
 
-  // Last resort: return zero address (will fail verification but won't crash)
-  console.warn('[account-consensus] ⚠️ No depositoryAddress found in env - using zero address (signatures will fail!)');
-  return '0x0000000000000000000000000000000000000000';
+  console.warn('[account-consensus] ❌ No depositoryAddress found in env');
+  return '';
 }
 const MAX_FRAME_TIMESTAMP_DRIFT_MS = 300000; // 5 minutes
 const MAX_FRAME_SIZE_BYTES = 1048576; // 1MB frame size limit (Bitcoin block size standard)
@@ -791,10 +790,16 @@ export async function proposeAccountFrame(
   }
 
   const { buildAccountProofBody, createDisputeProofHash } = await import('./proof-builder');
-  let depositoryAddress = getDepositoryAddress(env);
+  const depositoryAddress = getDepositoryAddress(env);
   if (!isAddress20(depositoryAddress)) {
-    console.warn(`[account-consensus] ⚠️ Invalid depositoryAddress "${depositoryAddress}", using zero address`);
-    depositoryAddress = '0x0000000000000000000000000000000000000000';
+    accountMachine.mempool = [];
+    delete accountMachine.pendingFrame;
+    delete accountMachine.pendingAccountInput;
+    return {
+      success: false,
+      error: `DISPUTE_PROOF_BUILD_FAILED: MISSING_DEPOSITORY_ADDRESS`,
+      events,
+    };
   }
 
   let proofResult: ReturnType<typeof buildAccountProofBody>;
@@ -1850,6 +1855,9 @@ export async function handleAccountInput(
     // Build dispute proof hanko for ACK response (always include current state's dispute proof)
     const { buildAccountProofBody: buildProof, createDisputeProofHash: createHash } = await import('./proof-builder');
     const ackDepositoryAddress = getDepositoryAddress(env);
+    if (!isAddress20(ackDepositoryAddress)) {
+      return { success: false, error: 'ACK_DISPUTE_PROOF_BUILD_FAILED: MISSING_DEPOSITORY_ADDRESS', events };
+    }
     const ackProofResult = buildProof(accountMachine);
     const ackDisputeHash = createHash(accountMachine, ackProofResult.proofBodyHash, ackDepositoryAddress);
     const ackDisputeHankos = await signHashesAsSingleEntity(env, ackEntityId, ackSignerId, [ackDisputeHash]);

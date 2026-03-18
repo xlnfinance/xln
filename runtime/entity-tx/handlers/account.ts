@@ -25,7 +25,29 @@ import { NobleCryptoProvider } from '../../crypto-noble';
 import { unwrapEnvelope, validateEnvelope } from '../../htlc-envelope-types';
 import { terminateHtlcRoute } from '../htlc-route-lifecycle';
 
+const ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY = Symbol.for('xln.runtime.env.replay.skippedAccountInputs');
+const PAYMENT_TS_MARKER_RE = /(?:^|\s)tsms:(\d{10,})(?=$|\s)/i;
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const extractStartedAtMs = (description?: string): number | null => {
+  const match = String(description || '').match(PAYMENT_TS_MARKER_RE);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+const buildPaymentTimingFields = (description: string | undefined, completedAtMs: number) => {
+  const startedAtMs = extractStartedAtMs(description);
+  if (!startedAtMs) {
+    return { receivedAtMs: completedAtMs };
+  }
+  return {
+    startedAtMs,
+    receivedAtMs: completedAtMs,
+    elapsedMs: Math.max(1, completedAtMs - startedAtMs),
+  };
+};
+const getJurisdictionId = (state: EntityState, env: Env): string => {
+  return String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
+};
 const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counterpartyId: string): string | null => {
   const target = normalizeEntityRef(counterpartyId);
   for (const key of accounts.keys()) {
@@ -532,6 +554,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   amount: lock.amount.toString(),
                   tokenId: lock.tokenId,
                   ...(paymentDescription ? { description: paymentDescription } : {}),
+                  ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
+                  ...buildPaymentTimingFields(paymentDescription || undefined, newState.timestamp),
                 });
                 if (paymentDescription) {
                   if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map<HtlcNoteKey, string>();
@@ -571,6 +595,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               // Create route object (typed as HtlcRoute for pendingFee)
               const htlcRoute: HtlcRoute = {
                 hashlock: lock.hashlock,
+                tokenId: lock.tokenId,
+                amount: lock.amount,
                 inboundEntity,
                 inboundLockId: lock.lockId,
                 outboundEntity: nextHop,
@@ -826,6 +852,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           const outboundLock = route.outboundLockId ? newState.lockBook.get(route.outboundLockId) : undefined;
           const inboundLock = route.inboundLockId ? newState.lockBook.get(route.inboundLockId) : undefined;
           const eventLock = inboundLock ?? outboundLock;
+          const eventAmount = eventLock?.amount ?? route.amount;
+          const eventTokenId = eventLock?.tokenId ?? route.tokenId;
+          const eventLockId = eventLock?.lockId ?? route.inboundLockId ?? route.outboundLockId;
           const finalizedDescription =
             (eventLock && newState.htlcNotes?.get(`lock:${eventLock.lockId}` as HtlcNoteKey))
             ?? newState.htlcNotes?.get(`hashlock:${hashlock}` as HtlcNoteKey)
@@ -881,6 +910,22 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           } else {
             console.log(`✅ HTLC: Payment complete (we initiated)`);
             terminateHtlcRoute(newState, hashlock, newState.timestamp);
+            env.emit('HtlcFinalized', {
+              hashlock,
+              secret,
+              entityId: state.entityId,
+              outboundEntity: route.outboundEntity,
+              ...((eventAmount !== undefined && eventTokenId !== undefined)
+                ? {
+                    amount: eventAmount.toString(),
+                    tokenId: eventTokenId,
+                    ...(eventLockId ? { lockId: eventLockId } : {}),
+                  }
+                : {}),
+              ...(finalizedDescription ? { description: finalizedDescription } : {}),
+              ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
+              ...buildPaymentTimingFields(finalizedDescription, newState.timestamp),
+            });
           }
           if (isFinalRecipient) {
             env.emit('HtlcReceived', {
@@ -888,8 +933,16 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               secret,
               fromEntity: route.inboundEntity,
               entityId: state.entityId,
-              ...(eventLock ? { amount: eventLock.amount.toString(), tokenId: eventLock.tokenId, lockId: eventLock.lockId } : {}),
+              ...((eventAmount !== undefined && eventTokenId !== undefined)
+                ? {
+                    amount: eventAmount.toString(),
+                    tokenId: eventTokenId,
+                    ...(eventLockId ? { lockId: eventLockId } : {}),
+                  }
+                : {}),
               ...(finalizedDescription ? { description: finalizedDescription } : {}),
+              ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
+              ...buildPaymentTimingFields(finalizedDescription, newState.timestamp),
             });
           }
           env.emit('PaymentFinalized', {
@@ -899,7 +952,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             outboundEntity: route.outboundEntity,
             entityId: state.entityId,
             finalRecipient: isFinalRecipient,
-            ...(eventLock ? { amount: eventLock.amount.toString(), tokenId: eventLock.tokenId, lockId: eventLock.lockId } : {}),
+            ...((eventAmount !== undefined && eventTokenId !== undefined)
+              ? {
+                  amount: eventAmount.toString(),
+                  tokenId: eventTokenId,
+                  ...(eventLockId ? { lockId: eventLockId } : {}),
+                }
+              : {}),
             ...(finalizedDescription ? { description: finalizedDescription } : {}),
           });
         } else {
@@ -956,6 +1015,33 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       console.error(`❌ Frame consensus failed: ${result.error}`);
       addMessage(newState, `❌ ${result.error}`);
       if (replayMode) {
+        const replayRuntimeFrameHeight = Number(env.height ?? 0) + 1;
+        const skippedReplayAccountInputs =
+          (((env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] as Set<string> | undefined) ??
+            new Set<string>());
+        (env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] = skippedReplayAccountInputs;
+        if (input.prevHanko && !input.newAccountFrame && Number.isFinite(Number(input.height ?? 0)) && Number(input.height ?? 0) > 0) {
+          skippedReplayAccountInputs.add(
+            [
+              replayRuntimeFrameHeight,
+              normalizeEntityRef(state.entityId),
+              normalizeEntityRef(counterpartyId),
+              Number(input.height ?? 0),
+              'ack',
+            ].join(':'),
+          );
+        }
+        if (input.newAccountFrame && Number.isFinite(Number(input.newAccountFrame.height ?? 0)) && Number(input.newAccountFrame.height ?? 0) > 0) {
+          skippedReplayAccountInputs.add(
+            [
+              replayRuntimeFrameHeight,
+              normalizeEntityRef(state.entityId),
+              normalizeEntityRef(counterpartyId),
+              Number(input.newAccountFrame.height ?? 0),
+              'newframe',
+            ].join(':'),
+          );
+        }
         const replayFailureDebug = {
           entityId: state.entityId,
           counterpartyId,

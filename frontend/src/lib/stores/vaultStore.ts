@@ -37,6 +37,18 @@ type CreateRuntimeOptions = {
   mnemonic12?: string;
 };
 
+const requireContractAddress = (value: string | null | undefined, label: string): string => {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    throw new Error(`MISSING_${label.toUpperCase()}_ADDRESS`);
+  }
+  try {
+    return getAddress(raw);
+  } catch {
+    throw new Error(`INVALID_${label.toUpperCase()}_ADDRESS: ${raw}`);
+  }
+};
+
 export interface RuntimesState {
   runtimes: Record<string, Runtime>;
   activeRuntimeId: string | null;
@@ -603,6 +615,14 @@ async function stopRuntimeEnv(env: Env): Promise<void> {
   const { getXLN } = await import('./xlnStore');
   const xln = await getXLN();
 
+  for (const jReplica of env.jReplicas?.values?.() || []) {
+    try {
+      jReplica.jadapter?.stopWatching?.();
+    } catch (error) {
+      console.warn(`[VaultStore] Failed to stop J-watcher for ${jReplica.name}:`, error);
+    }
+  }
+
   if (xln.stopP2P) {
     xln.stopP2P(env);
   }
@@ -833,6 +853,11 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   const jurisdictions = await fetchJurisdictions(baseOrigin);
   const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
   const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
+  const canonicalDeltaTransformerAddress = requireContractAddress(
+    arrakisConfig.contracts?.deltaTransformer,
+    'delta_transformer',
+  );
+  xln.setDeltaTransformerAddress?.(canonicalDeltaTransformerAddress);
   let chainId: number;
   try {
     chainId = await detectRpcChainId(rpcUrl, baseOrigin);
@@ -888,6 +913,26 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     env.runtimeSeed = runtimeSeed;
     env.runtimeId = runtimeIdLower;
     env.dbNamespace = runtimeIdLower;
+    if (env.jReplicas && env.jReplicas.size > 0) {
+      for (const [, jReplica] of env.jReplicas.entries()) {
+        const existingContracts = (jReplica.contracts || {}) as {
+          account?: string;
+          depository?: string;
+          entityProvider?: string;
+          deltaTransformer?: string;
+        };
+        jReplica.contracts = {
+          account: String(existingContracts.account || arrakisConfig.contracts.account || ''),
+          depository: String(existingContracts.depository || arrakisConfig.contracts.depository || ''),
+          entityProvider: String(existingContracts.entityProvider || arrakisConfig.contracts.entityProvider || ''),
+          deltaTransformer: String(existingContracts.deltaTransformer || arrakisConfig.contracts.deltaTransformer || ''),
+        };
+        jReplica.depositoryAddress = String(jReplica.depositoryAddress || jReplica.contracts.depository || '');
+        jReplica.entityProviderAddress = String(
+          jReplica.entityProviderAddress || jReplica.contracts.entityProvider || '',
+        );
+      }
+    }
     let restoredAccounts = 0;
     for (const [, replica] of (env.eReplicas ?? new Map()).entries()) {
       restoredAccounts += Number(replica?.state?.accounts?.size || 0);

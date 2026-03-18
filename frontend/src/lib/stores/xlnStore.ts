@@ -306,6 +306,13 @@ export async function suspendClientActivity(): Promise<void> {
   try {
     const env = get(xlnEnvironment);
     if (!env) return;
+    for (const jReplica of env.jReplicas?.values?.() || []) {
+      try {
+        jReplica.jadapter?.stopWatching?.();
+      } catch (watchError) {
+        console.warn(`[xlnStore] Failed to stop J-watcher for ${jReplica.name}:`, watchError);
+      }
+    }
     const xln = await getXLN();
     if (typeof xln.stopP2P === 'function') {
       xln.stopP2P(env);

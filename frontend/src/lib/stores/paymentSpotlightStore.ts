@@ -2,6 +2,7 @@ import { writable } from 'svelte/store';
 
 export type PaymentSpotlight = {
   id: string;
+  kicker?: string;
   title: string;
   amountLine: string;
   detail?: string;
