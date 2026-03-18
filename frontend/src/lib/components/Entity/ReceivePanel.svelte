@@ -3,7 +3,7 @@
   import QRCode from 'qrcode';
   import { Check, Copy, Download, QrCode } from 'lucide-svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
-  import { buildWalletPayHref, buildXlnInvoiceUri } from '$lib/utils/xlnInvoice';
+  import { buildXlnInvoiceUri } from '$lib/utils/xlnInvoice';
 
   export let entityId: string;
 
@@ -34,14 +34,6 @@
     amount,
     description,
   });
-  $: walletFallbackUrl = typeof window === 'undefined'
-    ? ''
-    : buildWalletPayHref(window.location.origin, {
-        targetEntityId: entityId,
-        tokenId,
-        amount,
-        description,
-      });
   $: invoicePreview = amount.trim() || description.trim() ? fullInvoice : `xln:?id=${entityId}`;
 
   $: {
@@ -131,10 +123,6 @@
           <span>Download QR</span>
         </button>
       </div>
-      <div class="wallet-fallback">
-        <span>Wallet fallback</span>
-        <code>{walletFallbackUrl}</code>
-      </div>
     </section>
 
     <section class="invoice-preview">
@@ -160,6 +148,8 @@
 
 <style>
   .receive-panel {
+    --receive-field-h: 48px;
+    --receive-field-radius: 12px;
     display: flex;
     flex-direction: column;
     gap: 18px;
@@ -240,8 +230,9 @@
   .field input {
     width: 100%;
     box-sizing: border-box;
-    padding: 12px 14px;
-    border-radius: 10px;
+    min-height: var(--receive-field-h);
+    padding: 0 14px;
+    border-radius: var(--receive-field-radius);
     border: 1px solid rgba(255, 255, 255, 0.08);
     background: #211d1a;
     color: #f5efe6;
@@ -258,8 +249,8 @@
   }
 
   .token-field :global(.select-trigger) {
-    min-height: 46px;
-    border-radius: 10px;
+    min-height: var(--receive-field-h);
+    border-radius: var(--receive-field-radius);
     background: #211d1a;
   }
 
@@ -314,6 +305,8 @@
     align-self: center;
     background: #0e0c0b;
     border: 1px solid rgba(255, 255, 255, 0.08);
+    object-fit: contain;
+    display: block;
   }
 
   .qr-placeholder {
@@ -323,11 +316,20 @@
     font-size: 14px;
   }
 
-  .invoice-string,
-  .wallet-fallback {
+  .invoice-string {
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  .invoice-string code {
+    display: block;
+    max-height: 124px;
+    overflow: auto;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: #211d1a;
+    border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .invoice-error {

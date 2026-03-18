@@ -86,6 +86,14 @@ let pendingDepositInvoiceId = '';
 let lastDashboardFingerprint = '';
 const WALLET_WINDOW_NAME = 'xln-wallet';
 
+const updateDepositHintUi = () => {
+  const nodes = app.querySelectorAll('[data-deposit-hint]');
+  nodes.forEach((node) => {
+    node.textContent = depositHint || '';
+    node.classList.toggle('hidden', !depositHint);
+  });
+};
+
 const captureActiveField = () => {
   const active = document.activeElement;
   if (!(active instanceof HTMLInputElement || active instanceof HTMLSelectElement || active instanceof HTMLTextAreaElement)) {
@@ -176,13 +184,49 @@ const buildInvoiceUri = (sourceState, tokenId, amount, invoiceId) => {
   params.set('u', sourceState.session.userId);
   params.set('desc', `Custody invoice:${invoiceId}`);
   params.set('locked', '1');
-  params.set('mode', 'embed');
-  params.set('segment', 'left');
-  params.set('parentOrigin', window.location.origin);
   if (sourceState.custody.jurisdictionId) {
     params.set('jId', sourceState.custody.jurisdictionId);
   }
   return `xln:?${params.toString()}`;
+};
+
+const parsePaymentIntent = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const parseParams = (params) => {
+    const entityId = String(params.get('id') || '').trim().toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/i.test(entityId)) return null;
+    const tokenIdValue = Number(params.get('token') || '1');
+    const amount = String(params.get('amt') || '').trim();
+    return {
+      entityId,
+      tokenId: Number.isFinite(tokenIdValue) && tokenIdValue > 0 ? tokenIdValue : 1,
+      amount,
+    };
+  };
+
+  try {
+    if (raw.startsWith('xln:?')) {
+      return parseParams(new URLSearchParams(raw.slice('xln:?'.length)));
+    }
+    const url = new URL(raw);
+    if (url.hash.startsWith('#pay?')) {
+      return parseParams(new URLSearchParams(url.hash.slice('#pay?'.length)));
+    }
+  } catch {
+    // fall through to raw entity id
+  }
+
+  if (/^0x[0-9a-f]{64}$/i.test(raw)) {
+    return {
+      entityId: raw.toLowerCase(),
+      tokenId: selectedTokenId,
+      amount: '',
+    };
+  }
+
+  return null;
 };
 
 const syncDepositTargets = (tokenId, amount, sourceState = state, options = {}) => {
@@ -342,13 +386,9 @@ const render = () => {
             <div class="deposit-invoice-details">
               <div class="deposit-invoice-row">
                 <span class="deposit-caption">Invoice</span>
-                <code class="deposit-invoice-string">${escapeHtml(pendingInvoice)}</code>
+                <textarea class="deposit-invoice-string" readonly rows="5">${escapeHtml(pendingInvoice)}</textarea>
               </div>
-              <div class="deposit-invoice-row">
-                <span class="deposit-caption">Wallet</span>
-                <code class="deposit-invoice-string">${escapeHtml(pendingWalletHref)}</code>
-              </div>
-              ${depositHint ? `<div class="inline-ok">${escapeHtml(depositHint)}</div>` : ''}
+              <div class="inline-ok ${depositHint ? '' : 'hidden'}" data-deposit-hint>${escapeHtml(depositHint)}</div>
               <div class="deposit-action-row">
                 <button class="primary" type="button" data-open-wallet-href="${escapeHtml(pendingWalletHref)}">Open Wallet</button>
                 <button class="secondary" type="button" data-copy-invoice="${escapeHtml(pendingInvoice)}">Copy Invoice</button>
@@ -373,10 +413,10 @@ const render = () => {
             <input name="amount" inputmode="decimal" placeholder="10" value="${escapeHtml(withdrawAmount)}" required />
           </label>
           <label>
-            Destination entity id
+            Invoice or entity id
             <input
               name="targetEntityId"
-              placeholder="0x..."
+              placeholder="xln:?id=... or 0x..."
               autocomplete="off"
               value="${escapeHtml(withdrawTargetEntityId)}"
               required
@@ -450,11 +490,11 @@ const render = () => {
     depositForm.addEventListener('submit', handleDepositSubmit);
     const depositTokenSelect = depositForm.elements.namedItem('depositTokenId');
     if (depositTokenSelect instanceof HTMLSelectElement) {
-      depositTokenSelect.addEventListener('change', () => {
-        depositTokenId = Number(depositTokenSelect.value || '1');
-        syncDepositTargets(depositTokenId, depositAmount || '0');
-        render();
-      });
+        depositTokenSelect.addEventListener('change', () => {
+          depositTokenId = Number(depositTokenSelect.value || '1');
+          syncDepositTargets(depositTokenId, depositAmount || '0');
+          render();
+        });
     }
     const depositAmountInput = depositForm.elements.namedItem('depositAmount');
     if (depositAmountInput instanceof HTMLInputElement) {
@@ -488,7 +528,7 @@ const render = () => {
         if (!invoice) return;
         await navigator.clipboard.writeText(invoice);
         depositHint = 'Invoice copied.';
-        render();
+        updateDepositHintUi();
       });
     }
   }
@@ -583,13 +623,24 @@ async function handleWithdrawSubmit(event) {
   render();
 
   try {
+    const parsedIntent = parsePaymentIntent(withdrawTargetEntityId);
+    const resolvedTargetEntityId = parsedIntent?.entityId || withdrawTargetEntityId;
+    if (!/^0x[0-9a-f]{64}$/i.test(resolvedTargetEntityId)) {
+      throw new Error('Enter a valid XLN invoice or destination entity id');
+    }
+    if (parsedIntent?.tokenId) {
+      selectedTokenId = parsedIntent.tokenId;
+    }
+    if (parsedIntent?.amount) {
+      withdrawAmount = parsedIntent.amount;
+    }
     const response = await fetch('/api/withdraw', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         tokenId: selectedTokenId,
         amount: withdrawAmount,
-        targetEntityId: withdrawTargetEntityId,
+        targetEntityId: resolvedTargetEntityId,
       }),
     });
     const payload = await response.json();
