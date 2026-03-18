@@ -805,4 +805,4 @@ load().catch((error) => {
 
 setInterval(() => {
   void reload().catch(() => undefined);
-}, 2000);
+}, 1000);

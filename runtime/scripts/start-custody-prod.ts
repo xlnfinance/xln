@@ -31,7 +31,7 @@ const SEED = process.env.CUSTODY_SEED || 'xln-prod-custody-seed';
 const SIGNER_LABEL = process.env.CUSTODY_SIGNER_LABEL || 'custody-prod-1';
 const PROFILE_NAME = process.env.CUSTODY_PROFILE_NAME || 'Custody';
 const JURISDICTION_ID = process.env.CUSTODY_JURISDICTION_ID || 'arrakis';
-const GOSSIP_POLL_MS = Number(process.env.CUSTODY_GOSSIP_POLL_MS || '250');
+const GOSSIP_POLL_MS = Number(process.env.CUSTODY_GOSSIP_POLL_MS || '1000');
 const DAEMON_RUNTIME_SEED = process.env.CUSTODY_DAEMON_RUNTIME_SEED || `${SEED}:runtime`;
 
 let shuttingDown = false;

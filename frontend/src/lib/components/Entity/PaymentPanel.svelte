@@ -46,6 +46,7 @@
   let paymentStartedAtMs = 0;
   let pendingAutoRouteKey = '';
   let completedAutoRouteKey = '';
+  let autoRouteRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let scannerOpen = false;
   let scannerStatus = '';
   let scannerError = '';
@@ -245,6 +246,10 @@
 
   function requestAutoFindRoutes(): void {
     if (!targetEntityId || !amount) return;
+    if (autoRouteRetryTimer) {
+      clearTimeout(autoRouteRetryTimer);
+      autoRouteRetryTimer = null;
+    }
     pendingAutoRouteKey = buildAutoRouteKey();
   }
 
@@ -398,6 +403,10 @@
 
   onDestroy(() => {
     clearRepeatTimer();
+    if (autoRouteRetryTimer) {
+      clearTimeout(autoRouteRetryTimer);
+      autoRouteRetryTimer = null;
+    }
   });
 
   function resetQuotedRoutes(): void {
@@ -805,6 +814,20 @@
     );
   }
 
+  function getEntitiesFromPaths(paths: string[][]): string[] {
+    const seen = new Set<string>();
+    const entities: string[] = [];
+    for (const path of paths) {
+      for (const rawEntityId of path) {
+        const norm = normalizeEntityId(rawEntityId);
+        if (!norm || seen.has(norm)) continue;
+        seen.add(norm);
+        entities.push(rawEntityId);
+      }
+    }
+    return entities;
+  }
+
   function getMissingRouteKeys(path: string[]): string[] {
     const missingSet = new Set<string>();
     for (const hopEntity of path.slice(1)) {
@@ -1005,7 +1028,7 @@
     return true;
   }
 
-  async function computeRoutes(preserveRepeatTimer = false) {
+  async function findRoutes(preserveRepeatTimer = false): Promise<boolean> {
     if (!targetEntityId || !amount) return;
 
     findingRoutes = true;
@@ -1092,79 +1115,89 @@
         }
       }
 
-      const quotedRoutes: RouteOption[] = [];
-      for (const normalizedPath of foundPaths) {
-        const path = normalizedPath.map((id) => network.canonicalIds.get(id) || id);
-        const intermediaries = path.slice(1, -1);
-        let downstreamAmount = amountInSmallestUnit;
-        const intermediaryFeeByEntity = new Map<string, { fee: bigint; feePPM: number }>();
-        let hasCapacity = true;
-        for (let i = intermediaries.length - 1; i >= 0; i -= 1) {
-          const intermediary = intermediaries[i]!;
-          const nextHop = path[i + 2]!;
-          if (!activeXlnFunctions?.deriveDelta) {
-            throw new Error('Runtime deriveDelta is unavailable');
+      const quoteCandidateRoutes = (paths: string[][]): RouteOption[] => {
+        const quotedRoutes: RouteOption[] = [];
+        for (const normalizedPath of paths) {
+          const path = normalizedPath.map((id) => network.canonicalIds.get(id) || id);
+          const intermediaries = path.slice(1, -1);
+          let downstreamAmount = amountInSmallestUnit;
+          const intermediaryFeeByEntity = new Map<string, { fee: bigint; feePPM: number }>();
+          let hasCapacity = true;
+          for (let i = intermediaries.length - 1; i >= 0; i -= 1) {
+            const intermediary = intermediaries[i]!;
+            const nextHop = path[i + 2]!;
+            if (!activeXlnFunctions?.deriveDelta) {
+              throw new Error('Runtime deriveDelta is unavailable');
+            }
+            const quote = quoteHop(
+              currentReplicas,
+              getGossipProfiles(),
+              activeXlnFunctions.deriveDelta,
+              intermediary,
+              nextHop,
+              tokenId,
+              downstreamAmount,
+              DEFAULT_UNKNOWN_HOP_FEE_PPM,
+            );
+            if (!quote || quote.outCap < downstreamAmount) {
+              hasCapacity = false;
+              break;
+            }
+            const requiredInbound = quoteRequiredInboundForForward(downstreamAmount, quote.feePPM, quote.baseFee);
+            intermediaryFeeByEntity.set(intermediary, {
+              fee: requiredInbound - downstreamAmount,
+              feePPM: quote.feePPM,
+            });
+            downstreamAmount = requiredInbound;
           }
-          const quote = quoteHop(
-            currentReplicas,
-            getGossipProfiles(),
-            activeXlnFunctions.deriveDelta,
-            intermediary,
-            nextHop,
-            tokenId,
-            downstreamAmount,
-            DEFAULT_UNKNOWN_HOP_FEE_PPM,
-          );
-          if (!quote || quote.outCap < downstreamAmount) {
-            hasCapacity = false;
-            break;
+          if (!hasCapacity) continue;
+
+          if (path.length > 1) {
+            if (!activeXlnFunctions?.deriveDelta) {
+              throw new Error('Runtime deriveDelta is unavailable');
+            }
+            const senderQuote = quoteHop(
+              currentReplicas,
+              getGossipProfiles(),
+              activeXlnFunctions.deriveDelta,
+              path[0]!,
+              path[1]!,
+              tokenId,
+              downstreamAmount,
+              DEFAULT_UNKNOWN_HOP_FEE_PPM,
+            );
+            if (!senderQuote || senderQuote.outCap < downstreamAmount) {
+              continue;
+            }
           }
-          const requiredInbound = quoteRequiredInboundForForward(downstreamAmount, quote.feePPM, quote.baseFee);
-          intermediaryFeeByEntity.set(intermediary, {
-            fee: requiredInbound - downstreamAmount,
-            feePPM: quote.feePPM,
+
+          const senderAmount = downstreamAmount;
+          const hops = path.slice(0, -1).map((from, i) => {
+            const feeInfo = intermediaryFeeByEntity.get(from) || { fee: 0n, feePPM: 0 };
+            return {
+              from,
+              to: path[i + 1]!,
+              fee: feeInfo.fee,
+              feePPM: feeInfo.feePPM,
+            };
           });
-          downstreamAmount = requiredInbound;
+          const totalFee = senderAmount - amountInSmallestUnit;
+          quotedRoutes.push({
+            path,
+            hops,
+            totalFee,
+            senderAmount,
+            recipientAmount: amountInSmallestUnit,
+          });
         }
-        if (!hasCapacity) continue;
+        return quotedRoutes;
+      };
 
-        if (path.length > 1) {
-          if (!activeXlnFunctions?.deriveDelta) {
-            throw new Error('Runtime deriveDelta is unavailable');
-          }
-          const senderQuote = quoteHop(
-            currentReplicas,
-            getGossipProfiles(),
-            activeXlnFunctions.deriveDelta,
-            path[0]!,
-            path[1]!,
-            tokenId,
-            downstreamAmount,
-            DEFAULT_UNKNOWN_HOP_FEE_PPM,
-          );
-          if (!senderQuote || senderQuote.outCap < downstreamAmount) {
-            continue;
-          }
-        }
-
-        const senderAmount = downstreamAmount;
-        const hops = path.slice(0, -1).map((from, i) => {
-          const feeInfo = intermediaryFeeByEntity.get(from) || { fee: 0n, feePPM: 0 };
-          return {
-            from,
-            to: path[i + 1]!,
-            fee: feeInfo.fee,
-            feePPM: feeInfo.feePPM,
-          };
-        });
-        const totalFee = senderAmount - amountInSmallestUnit;
-        quotedRoutes.push({
-          path,
-          hops,
-          totalFee,
-          senderAmount,
-          recipientAmount: amountInSmallestUnit,
-        });
+      let quotedRoutes = quoteCandidateRoutes(foundPaths);
+      if (quotedRoutes.length === 0 && foundPaths.length > 0) {
+        await refreshGossipOnDemand('route-capacity', getEntitiesFromPaths(foundPaths));
+        ({ network, foundPaths } = await collectCandidatePaths());
+        quotedRoutes = quoteCandidateRoutes(foundPaths);
       }
 
       routes = sortRoutesList(quotedRoutes).slice(0, MAX_ROUTES);
@@ -1178,17 +1211,15 @@
       }
 
       if (routes.length > 0) selectedRouteIndex = 0;
+      return routes.length > 0;
     } catch (error) {
       console.error('[Send] Route finding failed:', error);
       preflightError = (error as Error)?.message || 'Unknown route preflight error';
       toasts.error(`Route finding failed: ${preflightError}`);
+      return false;
     } finally {
       findingRoutes = false;
     }
-  }
-
-  async function findRoutes() {
-    await computeRoutes(false);
   }
 
   $: if (
@@ -1203,7 +1234,17 @@
   ) {
     const routeKey = pendingAutoRouteKey;
     completedAutoRouteKey = routeKey;
-    void findRoutes();
+    void findRoutes(false).then((success) => {
+      if (success) return;
+      if (pendingAutoRouteKey !== routeKey || completedAutoRouteKey !== routeKey) return;
+      if (autoRouteRetryTimer) clearTimeout(autoRouteRetryTimer);
+      autoRouteRetryTimer = setTimeout(() => {
+        if (completedAutoRouteKey === routeKey) {
+          completedAutoRouteKey = '';
+        }
+        autoRouteRetryTimer = null;
+      }, 1000);
+    });
   }
 
   async function waitForEmbeddedHtlcConfirmation(hashlock: string, timeoutMs = 45_000): Promise<void> {
@@ -1245,7 +1286,7 @@
       throw new Error('Self-payment requires explicit route selection');
     }
     preflightError = null;
-    await findRoutes();
+    await findRoutes(false);
     if (routes.length === 0) {
       throw new Error(preflightError || 'No route found');
     }
@@ -1256,7 +1297,7 @@
   async function payNowCheapest() {
     if (sendingPayment || findingRoutes) return;
     if (isSelfRecipient) return;
-    await computeRoutes(false);
+    await findRoutes(false);
     if (routes.length === 0) return;
     selectedRouteIndex = 0; // routes are sorted by cheapest fee by default
     await sendPayment(true);
@@ -1306,7 +1347,7 @@
 
       // Timer-driven sends must refresh route quotes to avoid reusing stale capacities.
       if (!manual) {
-        await computeRoutes(true);
+        await findRoutes(true);
       }
 
       const route = routes[selectedRouteIndex];
@@ -1597,7 +1638,7 @@
     </button>
     <button
       class="btn-find"
-      on:click={findRoutes}
+      on:click={() => void findRoutes(false)}
       disabled={!targetEntityId || !amount || findingRoutes || sendingPayment}
     >
       {findingRoutes ? 'Finding Routes...' : 'Find Routes'}
