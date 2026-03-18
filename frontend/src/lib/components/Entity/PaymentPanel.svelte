@@ -1228,7 +1228,7 @@
         if (message === 'PaymentFailed') {
           throw new Error(String(data.reason || 'Payment failed'));
         }
-        if (message === 'PaymentFinalized') {
+        if (message === 'HtlcFinalized') {
           return;
         }
       }

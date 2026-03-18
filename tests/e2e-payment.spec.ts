@@ -189,8 +189,15 @@ test.describe('E2E HTLC Payment Flow', () => {
       timeoutMs: CONSENSUS_TIMEOUT,
     });
     expect(String(finalizedEvent.data?.amount || ''), 'sender finalized event should include amount').toBe('25000000000000000000');
+    expect(String(finalizedEvent.data?.fromEntity || '').toLowerCase(), 'sender finalized event should include fromEntity').toBe(alice.entityId.toLowerCase());
+    expect(String(finalizedEvent.data?.toEntity || '').toLowerCase(), 'sender finalized event should include toEntity').toBe(String(connectedHubId || '').toLowerCase());
+    expect(String(finalizedEvent.data?.hashlock || ''), 'sender finalized event should include hashlock').toMatch(/^0x[0-9a-f]{64}$/i);
+    expect(String(finalizedEvent.data?.lockId || '').length, 'sender finalized event should include lockId').toBeGreaterThan(0);
+    expect(String(finalizedEvent.data?.jurisdictionId || '').length, 'sender finalized event should include jurisdictionId').toBeGreaterThan(0);
     expect(Number(finalizedEvent.data?.startedAtMs || 0), 'sender finalized event should include startedAtMs').toBeGreaterThan(0);
+    expect(Number(finalizedEvent.data?.finalizedAtMs || 0), 'sender finalized event should include finalizedAtMs').toBeGreaterThan(0);
     expect(Number(finalizedEvent.data?.elapsedMs || 0), 'sender finalized event should include elapsedMs').toBeGreaterThan(0);
+    expect(Number(finalizedEvent.data?.finalizedInMs || 0), 'sender finalized event should include finalizedInMs').toBeGreaterThan(0);
 
     let outboundAfterPayment = outboundBeforePayment;
     await expect.poll(async () => {

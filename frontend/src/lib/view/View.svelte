@@ -26,7 +26,6 @@
   import UserModePanel from './UserModePanel.svelte';
   import PaymentSpotlight from '$lib/components/PaymentSpotlight.svelte';
   import { parseURLHash } from './utils/stateCodec';
-  import { parsePaymentTiming } from '$lib/utils/paymentTiming';
   // REMOVED PANELS:
   // - EntitiesPanel: Graph3D entity cards provide better UX
   // - DepositoryPanel: JurisdictionPanel shows same data with better tables
@@ -134,30 +133,25 @@
       if (id > newLastSeen) newLastSeen = id;
       const message = String(entry?.message || '').trim();
       const entryData = entry?.data || {};
-      if (!isInitialPass && message === 'PaymentFinalized') {
+      if (!isInitialPass && (message === 'HtlcReceived' || message === 'HtlcFinalized')) {
         const hashlock = String(entryData.hashlock || id);
-        const dedupeKey = `${runtimeKey}:finalized:${hashlock}`;
+        const dedupeKey = `${runtimeKey}:${message}:${hashlock}`;
         const now = Date.now();
         const lastShownAt = lastPaymentSpotlightAtByKey.get(dedupeKey) ?? 0;
         if (now - lastShownAt >= PAYMENT_SPOTLIGHT_COOLDOWN_MS) {
-          const isFinalRecipient = entryData.finalRecipient === true;
-          const inboundEntity = String(entryData.inboundEntity || '').trim();
-          const outboundEntity = String(entryData.outboundEntity || '').trim();
-          const isSender = !isFinalRecipient && !inboundEntity && !!outboundEntity;
-          if (isFinalRecipient || isSender) {
-            lastPaymentSpotlightAtByKey.set(dedupeKey, now);
-            const timing = parsePaymentTiming(String(entryData.description || ''));
-            const elapsedMs = timing.startedAtMs ? Math.max(1, Date.now() - timing.startedAtMs) : null;
-            paymentSpotlight.show({
-              kicker: isFinalRecipient ? 'Payment Received' : 'Payment Sent',
-              title: elapsedMs
-                ? `${isFinalRecipient ? 'Received' : 'Paid'} in ${elapsedMs}ms`
-                : (isFinalRecipient ? 'Received' : 'Paid'),
-              amountLine: formatSpotlightAmount(entryData.tokenId, entryData.amount),
-              ...(timing.displayDescription ? { detail: timing.displayDescription } : {}),
-              duration: 4200,
-            });
-          }
+          const isSender = message === 'HtlcFinalized';
+          const elapsedMsRaw = Number(entryData.finalizedInMs ?? entryData.elapsedMs ?? 0);
+          const elapsedMs = Number.isFinite(elapsedMsRaw) && elapsedMsRaw > 0 ? Math.max(1, Math.floor(elapsedMsRaw)) : null;
+          lastPaymentSpotlightAtByKey.set(dedupeKey, now);
+          paymentSpotlight.show({
+            kicker: isSender ? 'Payment Sent' : 'Payment Received',
+            title: elapsedMs
+              ? `${isSender ? 'Paid' : 'Received'} in ${elapsedMs}ms`
+              : (isSender ? 'Paid' : 'Received'),
+            amountLine: formatSpotlightAmount(entryData.tokenId, entryData.amount),
+            ...(String(entryData.description || '').trim() ? { detail: String(entryData.description || '').trim() } : {}),
+            duration: 4200,
+          });
         }
       }
       if (!shouldSurfaceLogAsToast(entry)) continue;
