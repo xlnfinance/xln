@@ -4,8 +4,10 @@
 
 set -e
 
-ANVIL_STATE="/root/xln/data/anvil-state.json"
-ANVIL_LOG="/root/xln/logs/anvil.log"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ANVIL_STATE="${ANVIL_STATE:-$REPO_ROOT/data/anvil-state.json}"
+ANVIL_LOG="${ANVIL_LOG:-$REPO_ROOT/logs/anvil.log}"
 
 kill_by_port() {
     local port="$1"
@@ -18,10 +20,10 @@ kill_by_port() {
 }
 
 # Ensure foundry binaries are available
-export PATH="$HOME/.bun/bin:$HOME/.local/share/pnpm:/root/.foundry/bin:$PATH"
+export PATH="$HOME/.bun/bin:$HOME/.local/share/pnpm:$HOME/.foundry/bin:$PATH"
 
 # Create directories if missing
-mkdir -p /root/xln/data /root/xln/logs
+mkdir -p "$(dirname "$ANVIL_STATE")" "$(dirname "$ANVIL_LOG")"
 
 # Reset flag
 if [ "$1" = "--reset" ]; then
