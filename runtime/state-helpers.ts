@@ -3,16 +3,13 @@
  * Utilities for entity replica cloning, snapshots, and state persistence
  */
 
-import { encode } from './snapshot-coder';
-import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica, LogCategory, BrowserVMState } from './types';
-import type { Profile } from './networking/gossip';
+import type { EntityReplica, EntityState, Env, RuntimeInput, AccountMachine, JReplica, LogCategory } from './types';
 import { DEBUG, HEAVY_LOGS } from './utils';
 import { validateEntityState } from './validation-utils';
-import { safeStringify, safeParse } from './serialization-utils';
+import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { cloneJBatch, type CompletedBatch } from './j-batch';
 import type { CrontabState } from './crontab-types';
-import { buildCanonicalEnvSnapshot } from './canonical-snapshot';
 
 // Message size limit for snapshot efficiency
 const MESSAGE_LIMIT = 10;
@@ -403,144 +400,6 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
     // SECURITY: Clone validator's computed state for state injection prevention
     ...(replica.validatorComputedState && { validatorComputedState: cloneEntityState(replica.validatorComputedState) }),
   };
-};
-
-export const captureSnapshot = async (
-  env: Env,
-  envHistory: EnvSnapshot[],
-  db: any,
-  runtimeInput: RuntimeInput,
-  runtimeOutputs: EntityInput[],
-  description: string,
-): Promise<void> => {
-  // Snapshots ALWAYS happen - they're essential for time-travel debugging
-  // Use env.frameDisplayMs to hint how long to display important frames
-
-  // Solvency check if set (from scenarios)
-  if (env.extra?.expectedSolvency !== undefined) {
-    const { checkSolvency } = await import('./scenarios/solvency-check');
-    checkSolvency(env, env.extra.expectedSolvency, `Frame ${envHistory.length}`);
-  }
-
-  const gossipProfiles = env.gossip?.getProfiles
-    ? env.gossip.getProfiles().map((profile: Profile) => {
-        try {
-          return structuredClone(profile);
-        } catch {
-          return safeParse(safeStringify(profile));
-        }
-      })
-    : [];
-
-  // Capture fresh stateRoot from BrowserVM for time-travel (if available)
-  let freshStateRoot: Uint8Array | null = null;
-  let browserVMState: BrowserVMState | null = null;
-  if (env.jReplicas) {
-    try {
-      const { getBrowserVMInstance } = await import('./evm');
-      const browserVM = getBrowserVMInstance(env);
-      if (browserVM?.captureStateRoot) {
-        freshStateRoot = await browserVM.captureStateRoot();
-        // Update live jReplicas so next snapshot has correct base
-        for (const [, jReplica] of env.jReplicas.entries()) {
-          jReplica.stateRoot = freshStateRoot;
-        }
-      }
-      if (browserVM?.serializeState) {
-        browserVMState = await browserVM.serializeState() as unknown as BrowserVMState;
-      }
-    } catch {
-      // Silent fail - stateRoot capture is optional
-    }
-  }
-
-  // Capture and reset frame logs
-  const frameLogs = env.frameLogs ? [...env.frameLogs] : [];
-  if (frameLogs.length > 0) {
-    console.log(`📋 Capturing ${frameLogs.length} frame events into snapshot`);
-  }
-  if (env.frameLogs) {
-    env.frameLogs = [];
-  }
-
-  const snapshot = buildCanonicalEnvSnapshot(env, {
-    browserVMState,
-    runtimeInput,
-    runtimeOutputs,
-    description: env.extra?.description ?? description,
-    meta: {
-      title: env.extra?.subtitle?.title ?? `Frame ${env.height}`,
-      ...(env.extra?.subtitle ? { subtitle: env.extra.subtitle } : {}),
-      ...(env.frameDisplayMs !== undefined ? { displayMs: env.frameDisplayMs } : {}),
-    },
-    gossipProfiles,
-    logs: frameLogs,
-  });
-
-  // Clear consumed extras
-  env.frameDisplayMs = undefined;
-  env.extra = undefined;
-
-  envHistory.push(snapshot);
-
-  // --- SNAPSHOT SIZE MONITORING ---
-  const snapshotBuffer = encode(snapshot);
-  const snapshotSize = snapshotBuffer.length;
-  const sizeMB = (snapshotSize / 1024 / 1024).toFixed(2);
-
-  // Alert if snapshot exceeds 1MB threshold
-  if (snapshotSize > 1_000_000) {
-    console.warn(`📦 LARGE SNAPSHOT: ${sizeMB}MB at height ${snapshot.height}`);
-    console.warn(`   E-Replicas: ${snapshot.eReplicas.size}, J-Replicas: ${snapshot.jReplicas.length}`);
-
-    // Log per-entity diagnostics
-    for (const [key, replica] of snapshot.eReplicas) {
-      const msgCount = replica.state.messages?.length || 0;
-      const accountCount = replica.state.accounts?.size || 0;
-      if (msgCount > 20 || accountCount > 10) {
-        console.warn(`   ${key.slice(0,25)}...: ${msgCount} msgs, ${accountCount} accounts`);
-      }
-    }
-  }
-
-  // --- PERSISTENCE WITH BATCH OPERATIONS ---
-  // Try to save, but gracefully handle IndexedDB unavailable (incognito mode, etc)
-  try {
-    const batch = db.batch();
-    batch.put(Buffer.from(`snapshot:${snapshot.height}`), snapshotBuffer);
-    batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
-    batch.write();
-  } catch (error) {
-    // Silent fail - IndexedDB unavailable (incognito) or full - continue anyway
-  }
-
-  if (DEBUG) {
-    console.log(`📸 Snapshot ${snapshot.height}: ${sizeMB}MB - "${description}" (total: ${envHistory.length})`);
-    if (runtimeInput.runtimeTxs.length > 0) {
-      console.log(`    🖥️  RuntimeTxs: ${runtimeInput.runtimeTxs.length}`);
-      runtimeInput.runtimeTxs.forEach((tx, i) => {
-        if (tx.type === 'importReplica') {
-          console.log(
-            `      ${i + 1}. ${tx.type} ${tx.entityId}:${tx.signerId} (${tx.data.isProposer ? 'proposer' : 'validator'})`,
-          );
-        } else if (tx.type === 'importJ') {
-          console.log(
-            `      ${i + 1}. ${tx.type} ${tx.data.name} (chain ${tx.data.chainId})`,
-          );
-        }
-      });
-    }
-    if (runtimeInput.entityInputs.length > 0) {
-      console.log(`    📨 EntityInputs: ${runtimeInput.entityInputs.length}`);
-      runtimeInput.entityInputs.forEach((input, i) => {
-        const parts = [];
-        if (input.entityTxs?.length) parts.push(`${input.entityTxs.length} txs`);
-        if (input.hashPrecommits?.size) parts.push(`${input.hashPrecommits.size} precommits`);
-        if (input.proposedFrame) parts.push(`frame: ${input.proposedFrame.hash.slice(0, 10)}...`);
-        console.log(`      ${i + 1}. ${input.entityId}:${input.signerId} (${parts.join(', ') || 'empty'})`);
-      });
-    }
-  }
 };
 
 // === ACCOUNT MACHINE HELPERS ===
