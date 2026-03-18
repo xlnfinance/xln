@@ -371,6 +371,7 @@ button.primary:disabled {
 .deposit-qr-wrap {
   display: grid;
   place-items: center;
+  aspect-ratio: 1;
   padding: 12px;
   border-radius: 16px;
   background: #171513;
@@ -379,9 +380,13 @@ button.primary:disabled {
 
 .deposit-qr-image,
 .deposit-qr-placeholder {
-  width: 180px;
-  height: 180px;
+  width: 100%;
+  max-width: 180px;
+  aspect-ratio: 1;
+  height: auto;
   border-radius: 12px;
+  display: block;
+  object-fit: contain;
 }
 
 .deposit-qr-placeholder {
@@ -424,6 +429,14 @@ button.primary:disabled {
   font-size: 12px;
   line-height: 1.45;
   word-break: break-all;
+  resize: none;
+  overflow: auto;
+  min-height: 108px;
+  width: 100%;
+}
+
+.hidden {
+  display: none !important;
 }
 
 .deposit-action-row {

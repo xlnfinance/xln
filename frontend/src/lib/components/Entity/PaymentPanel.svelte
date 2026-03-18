@@ -1721,6 +1721,8 @@
 
 <style>
   .payment-panel {
+    --pay-field-h: 48px;
+    --pay-field-radius: 12px;
     display: flex;
     flex-direction: column;
     gap: 18px;
@@ -1757,13 +1759,18 @@
     align-items: center;
   }
 
+  .invoice-entry-shell input {
+    min-height: var(--pay-field-h);
+    border-radius: var(--pay-field-radius);
+  }
+
   .invoice-tool-btn {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    height: 44px;
+    height: var(--pay-field-h);
     padding: 0 14px;
-    border-radius: 10px;
+    border-radius: var(--pay-field-radius);
     border: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.04);
     color: #f5efe6;
@@ -1792,10 +1799,10 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    height: 48px;
+    height: var(--pay-field-h);
     min-width: 116px;
     padding: 0 14px;
-    border-radius: 12px;
+    border-radius: var(--pay-field-radius);
     border: none;
     background: rgba(255, 255, 255, 0.04);
     color: #cfc7bd;
@@ -1844,7 +1851,7 @@
   }
 
   .inline-token-select :global(.select-trigger) {
-    min-height: 40px;
+    min-height: calc(var(--pay-field-h) - 8px);
     padding: 7px 9px;
   }
 
@@ -1852,11 +1859,11 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    min-height: 48px;
+    min-height: var(--pay-field-h);
     padding: 4px 6px 4px 12px;
     background: #1c1917;
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 12px;
+    border-radius: var(--pay-field-radius);
   }
 
   .amount-input-shell:focus-within {
@@ -1910,10 +1917,11 @@
   }
 
   input {
-    padding: 12px 14px;
+    min-height: var(--pay-field-h);
+    padding: 0 14px;
     background: #1c1917;
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 8px;
+    border-radius: var(--pay-field-radius);
     color: #e7e5e4;
     font-size: 14px;
     font-family: inherit;
