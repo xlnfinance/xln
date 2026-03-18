@@ -29,8 +29,14 @@ xln_kill_by_pattern() {
 
 xln_ensure_jurisdictions_path() {
   local jurisdictions_path="$1"
+  local script_dir
+  local repo_root
+  local source_jurisdictions
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd "$script_dir/../.." && pwd)"
+  source_jurisdictions="$repo_root/jurisdictions/jurisdictions.json"
   mkdir -p "$(dirname "$jurisdictions_path")"
   if [ ! -f "$jurisdictions_path" ]; then
-    cp /root/xln/jurisdictions/jurisdictions.json "$jurisdictions_path"
+    cp "$source_jurisdictions" "$jurisdictions_path"
   fi
 }
