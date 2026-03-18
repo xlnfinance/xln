@@ -49,9 +49,9 @@ const sleep = async (ms: number): Promise<void> => {
 const isDaemonHealthReady = (payload: unknown): boolean => {
   const body = payload as {
     system?: { runtime?: boolean };
-    jMachines?: Array<{ status?: string }>;
+    database?: boolean;
   } | null;
-  return body?.system?.runtime === true && Array.isArray(body?.jMachines) && body!.jMachines.length > 0;
+  return body?.system?.runtime === true;
 };
 
 const findProcessIdsByPattern = async (pattern: string): Promise<number[]> => {
@@ -189,6 +189,15 @@ const isHttpReady = async (url: string): Promise<boolean> => {
   }
 };
 
+const isDaemonControlReady = async (): Promise<boolean> => {
+  try {
+    const response = await fetch(`http://127.0.0.1:${DAEMON_PORT}/api/control/entities`);
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
 const readExistingCustodyPayload = async (): Promise<ExistingCustodyPayload | null> => {
   try {
     const response = await fetch(`http://127.0.0.1:${CUSTODY_PORT}/api/me`);
@@ -200,7 +209,10 @@ const readExistingCustodyPayload = async (): Promise<ExistingCustodyPayload | nu
 };
 
 const startDaemon = async (): Promise<ManagedChild | null> => {
-  if (await isHttpReady(`http://127.0.0.1:${DAEMON_PORT}/api/health`)) {
+  if (
+    await isHttpReady(`http://127.0.0.1:${DAEMON_PORT}/api/health`)
+    && await isDaemonControlReady()
+  ) {
     console.log(`[custody-prod] reusing existing custody daemon on :${DAEMON_PORT}`);
     return null;
   }
@@ -232,7 +244,14 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
     240_000,
     async (_response, bodyText) => isDaemonHealthReady(JSON.parse(bodyText)),
   );
-  return daemonChild;
+  const controlDeadline = Date.now() + 60_000;
+  while (Date.now() < controlDeadline) {
+    if (await isDaemonControlReady()) {
+      return daemonChild;
+    }
+    await sleep(500);
+  }
+  throw new Error(`CUSTODY_DAEMON_CONTROL_NOT_READY: http://127.0.0.1:${DAEMON_PORT}/api/control/entities`);
 };
 
 const ensureCustodyIdentity = async (hubIds: string[]): Promise<{ entityId: string; signerId: string }> => {
