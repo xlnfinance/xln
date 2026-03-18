@@ -375,7 +375,7 @@ const render = () => {
           </label>
           <label>
             Amount
-            <input name="depositAmount" inputmode="decimal" placeholder="10" value="${escapeHtml(depositAmount)}" required />
+            <input name="depositAmount" inputmode="decimal" aria-label="Deposit amount" value="${escapeHtml(depositAmount)}" required />
           </label>
           <div class="deposit-presets">
             ${['1', '10', '100'].map(value => `<button class="secondary" type="button" data-deposit-preset="${value}">${escapeHtml(value)} ${escapeHtml(selectedDepositToken?.symbol || 'USDC')}</button>`).join('')}
@@ -385,12 +385,14 @@ const render = () => {
               ${pendingQrSrc ? `<img class="deposit-qr-image" src="${escapeHtml(pendingQrSrc)}" alt="XLN invoice QR" />` : '<div class="deposit-qr-placeholder">Generating QR…</div>'}
             </div>
             <div class="deposit-invoice-details">
+              <div class="deposit-copy-row">
+                <button class="deposit-copy-inline" type="button" data-copy-invoice="${escapeHtml(pendingInvoice)}">Copy invoice</button>
+              </div>
               <div class="deposit-invoice-row">
                 <div class="deposit-invoice-text">${escapeHtml(pendingInvoice)}</div>
               </div>
               <div class="inline-ok ${depositHint ? '' : 'hidden'}" data-deposit-hint>${escapeHtml(depositHint)}</div>
-              <div class="deposit-action-row">
-                <button class="deposit-copy-inline" type="button" data-copy-invoice="${escapeHtml(pendingInvoice)}">Copy invoice</button>
+              <div class="deposit-wallet-row">
                 <button class="btn-wallet" type="button" data-open-wallet-href="${escapeHtml(pendingWalletHref)}">Open Wallet</button>
               </div>
             </div>
@@ -410,13 +412,13 @@ const render = () => {
           </label>
           <label>
             Amount
-            <input name="amount" inputmode="decimal" placeholder="10" value="${escapeHtml(withdrawAmount)}" required />
+            <input name="amount" inputmode="decimal" aria-label="Withdraw amount" value="${escapeHtml(withdrawAmount)}" required />
           </label>
           <label>
             Invoice or entity id
             <input
               name="targetEntityId"
-              placeholder="xln:?id=... or 0x..."
+              aria-label="Withdraw destination"
               autocomplete="off"
               value="${escapeHtml(withdrawTargetEntityId)}"
               required
