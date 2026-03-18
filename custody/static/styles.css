@@ -428,13 +428,17 @@ button.primary:disabled {
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
+  min-height: 46px;
 }
 
 .deposit-copy-inline {
+  display: inline-flex;
+  align-items: center;
   appearance: none;
   border: none;
   background: transparent;
   padding: 0;
+  min-height: 46px;
   color: var(--ink);
   font-size: 14px;
   font-weight: 600;
