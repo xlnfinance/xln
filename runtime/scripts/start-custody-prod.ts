@@ -201,6 +201,7 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
     {
       USE_ANVIL: 'true',
       BOOTSTRAP_LOCAL_HUBS: '0',
+      XLN_SKIP_SERVER_BOOTSTRAP: '1',
       ANVIL_RPC: MAIN_RPC_URL,
       PUBLIC_RPC: PUBLIC_RPC_URL,
       PUBLIC_RELAY_URL: RELAY_URL,

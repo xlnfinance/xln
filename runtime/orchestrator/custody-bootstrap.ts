@@ -265,6 +265,7 @@ export const startCustodySupport = async (
     {
       USE_ANVIL: 'true',
       BOOTSTRAP_LOCAL_HUBS: '0',
+      XLN_SKIP_SERVER_BOOTSTRAP: '1',
       ANVIL_RPC: options.rpcUrl,
       PUBLIC_RPC: options.rpcUrl,
       RELAY_URL: options.relayUrl,
