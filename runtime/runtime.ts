@@ -177,7 +177,7 @@ import {
   BigIntMath,
   FINANCIAL_CONSTANTS,
 } from './financial-utils';
-import { captureSnapshot, cloneEntityReplica, resolveEntityProposerId } from './state-helpers';
+import { cloneEntityReplica, resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
 import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
 import {
@@ -2880,18 +2880,24 @@ const normalizeJReplica = (jr: JReplica): JReplica => {
     };
   }
   const depository = normalizeContractAddress(
-    jr.contracts.depository || (jr.contracts as { depositoryAddress?: unknown }).depositoryAddress,
+    jr.contracts.depository ?? (jr.contracts as { depositoryAddress?: unknown }).depositoryAddress,
   );
   const entityProvider = normalizeContractAddress(
-    jr.contracts.entityProvider || (jr.contracts as { entityProviderAddress?: unknown }).entityProviderAddress,
+    jr.contracts.entityProvider ?? (jr.contracts as { entityProviderAddress?: unknown }).entityProviderAddress,
   );
+  const account = normalizeContractAddress(jr.contracts.account);
+  const deltaTransformer = normalizeContractAddress(jr.contracts.deltaTransformer);
   return {
     ...rest,
+    ...(depository ? { depositoryAddress: depository } : {}),
+    ...(entityProvider ? { entityProviderAddress: entityProvider } : {}),
     ...(hasLiveJAdapter(rawJAdapter) ? { jadapter: rawJAdapter } : {}),
     contracts: {
       ...jr.contracts,
       ...(depository ? { depository } : {}),
       ...(entityProvider ? { entityProvider } : {}),
+      ...(account ? { account } : {}),
+      ...(deltaTransformer ? { deltaTransformer } : {}),
     },
   };
 };
@@ -3035,21 +3041,31 @@ const computePersistedEnvStateHash = (snapshot: Record<string, unknown>): string
   return ethers.keccak256(ethers.toUtf8Bytes(safeStringify(snapshot)));
 };
 
-const requirePersistedDeltaTransformerAddress = (jReplicas: Map<string, JReplica>, label: string): string => {
+const requirePersistedContractAddress = (
+  jReplicas: Map<string, JReplica>,
+  label: string,
+  contractName: 'depository' | 'entityProvider' | 'deltaTransformer',
+): string => {
   for (const [, jReplica] of jReplicas.entries()) {
-    const restoredDeltaTransformer = String(
-      (jReplica as { contracts?: { deltaTransformer?: string } }).contracts?.deltaTransformer || '',
-    ).trim();
-    if (restoredDeltaTransformer && ethers.isAddress(restoredDeltaTransformer)) {
-      return restoredDeltaTransformer;
+    const rawAddress =
+      contractName === 'depository'
+        ? jReplica.depositoryAddress ?? jReplica.contracts?.depository
+        : contractName === 'entityProvider'
+          ? jReplica.entityProviderAddress ?? jReplica.contracts?.entityProvider
+          : jReplica.contracts?.deltaTransformer;
+    const restoredAddress = String(rawAddress ?? '').trim();
+    if (restoredAddress && ethers.isAddress(restoredAddress)) {
+      return restoredAddress;
     }
   }
-  throw new Error(`MISSING_DELTA_TRANSFORMER_ADDRESS: ${label}`);
+  throw new Error(`MISSING_${contractName.toUpperCase()}_ADDRESS: ${label}`);
 };
 
 const assertPersistedContractConfigReady = (env: Env, label: string): void => {
   if (env.jReplicas && env.jReplicas.size > 0) {
-    setDeltaTransformerAddress(requirePersistedDeltaTransformerAddress(env.jReplicas, label));
+    requirePersistedContractAddress(env.jReplicas, label, 'depository');
+    requirePersistedContractAddress(env.jReplicas, label, 'entityProvider');
+    setDeltaTransformerAddress(requirePersistedContractAddress(env.jReplicas, label, 'deltaTransformer'));
   }
 };
 
