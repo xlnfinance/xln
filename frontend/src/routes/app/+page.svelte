@@ -21,7 +21,8 @@
   function syncModeFromLocation(): void {
     if (!browser) return;
     const params = new URLSearchParams(window.location.search);
-    embedMode = params.get('embed') === '1';
+    const hasEmbedQuery = params.get('embed') === '1' || params.has('e');
+    embedMode = hasEmbedQuery;
     const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
     const qIndex = rawHash.indexOf('?');
     const hashRoute = qIndex >= 0 ? rawHash.slice(0, qIndex).trim().toLowerCase() : rawHash.trim().toLowerCase();
@@ -30,6 +31,7 @@
     embeddedPayMode =
       hashRoute === 'pay' &&
       (
+        hasEmbedQuery ||
         hashParams.get('mode') === 'embed' ||
         hashParams.get('embed') === '1' ||
         hashParams.get('embed') === 'true'

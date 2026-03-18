@@ -576,6 +576,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
           PW_OUTPUT_DIR: join(logsDir, `test-results-shard-${shard}`),
           E2E_BASE_URL: webUrl,
           E2E_API_BASE_URL: apiUrl,
+          E2E_ANVIL_RPC: rpcUrl,
           E2E_RESET_BASE_URL: apiUrl,
           E2E_FAST: process.env.E2E_FAST ?? '1',
           XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',

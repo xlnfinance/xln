@@ -180,6 +180,7 @@ const buildEmbeddedButtonHrefWithInvoice = (sourceState, tokenId, amount, invoic
   if (!sourceState?.custody?.walletUrl) return '';
   const base = new URL(sourceState.custody.walletUrl);
   const url = new URL('/app', base.origin);
+  url.searchParams.set('e', '1');
   const params = new URLSearchParams();
   params.set('id', sourceState.custody.entityId);
   params.set('token', String(tokenId));
@@ -208,20 +209,25 @@ const ensurePayControllerFrame = () => {
   return iframe;
 };
 
-const postEmbeddedIntentUpdate = (tokenId, amount) => {
-  if (!payControllerFrame?.contentWindow || !state?.custody?.walletUrl) return false;
+const postEmbeddedIntentUpdate = (tokenId, amount, invoiceId = pendingDepositInvoiceId, sourceState = state) => {
+  if (!payControllerFrame?.contentWindow || !sourceState?.custody?.walletUrl) return false;
   let targetOrigin = '';
   try {
-    targetOrigin = new URL(state.custody.walletUrl).origin;
+    targetOrigin = new URL(sourceState.custody.walletUrl).origin;
   } catch {
     return false;
   }
   if (!targetOrigin) return false;
+  const description = `Custody invoice:${invoiceId}`;
   payControllerFrame.contentWindow.postMessage({
     source: 'xln-custody',
     command: 'update-intent',
+    entityId: String(sourceState?.custody?.entityId || '').trim(),
     tokenId: String(tokenId),
     amount: String(amount || '').trim(),
+    userId: String(sourceState?.session?.userId || '').trim(),
+    jurisdictionId: String(sourceState?.custody?.jurisdictionId || '').trim(),
+    description,
   }, targetOrigin);
   return true;
 };
@@ -256,7 +262,8 @@ const patchEmbeddedDepositUi = () => {
   }
 };
 
-const syncDepositTargets = (tokenId, amount, sourceState = state) => {
+const syncDepositTargets = (tokenId, amount, sourceState = state, options = {}) => {
+  const forceInvoiceRefresh = options.forceInvoiceRefresh === true;
   const intentKey = [
     sourceState?.custody?.entityId || '',
     sourceState?.custody?.jurisdictionId || '',
@@ -264,7 +271,7 @@ const syncDepositTargets = (tokenId, amount, sourceState = state) => {
     String(tokenId),
     String(amount || '').trim(),
   ].join('|');
-  if (intentKey !== pendingDepositIntentKey) {
+  if (intentKey !== pendingDepositIntentKey || forceInvoiceRefresh) {
     const hadIntent = Boolean(pendingDepositIntentKey);
     pendingDepositIntentKey = intentKey;
     pendingDepositInvoiceId = createInvoiceId();
@@ -274,10 +281,13 @@ const syncDepositTargets = (tokenId, amount, sourceState = state) => {
       embeddedCheckoutStatus = '';
       embeddedCheckoutError = '';
       embeddedCheckoutStage = 'Loading wallet...';
-      try {
-        payControllerFrame.src = pendingPayButtonHref;
-      } catch {
-        // ignore reload errors; next render will reconcile src
+      const updated = postEmbeddedIntentUpdate(tokenId, amount, pendingDepositInvoiceId, sourceState);
+      if (!updated) {
+        try {
+          payControllerFrame.src = pendingPayButtonHref;
+        } catch {
+          // ignore reload errors; next render will reconcile src
+        }
       }
     }
   }
@@ -304,7 +314,7 @@ const handleCheckoutMessage = (event) => {
   if (!expectedOrigin || event.origin !== expectedOrigin) return;
 
   const payload = event.data || {};
-  if (payload.source !== 'xln-hosted-checkout') return;
+  if (payload.source !== 'xln-hosted-checkout' && payload.source !== 'xln-embedded-pay') return;
 
   if (payload.event === 'checkout-ready') {
     console.info('[custody.embed.checkout]', payload);
@@ -326,13 +336,14 @@ const handleCheckoutMessage = (event) => {
 
   if (payload.event === 'payment-success') {
     console.info('[custody.embed.checkout]', payload);
-    embeddedCheckoutStatus = 'Payment confirmed';
+    embeddedCheckoutStatus = 'Paid';
     embeddedCheckoutError = '';
-    embeddedCheckoutStage = 'Payment confirmed';
+    embeddedCheckoutStage = 'Paid';
     patchEmbeddedDepositUi();
     setTimeout(() => {
+      syncDepositTargets(depositTokenId, depositAmount || '0', state, { forceInvoiceRefresh: true });
       void reload().catch(() => undefined);
-    }, 1200);
+    }, 1100);
     return;
   }
 
@@ -372,8 +383,15 @@ const handlePaymentFrameMessage = (event) => {
   }
   if (!expectedOrigin || event.origin !== expectedOrigin) return;
   const payload = event.data || {};
-  if (payload.source === 'xln-embedded-pay' && payload.event === 'state') {
-    handleEmbeddedPayState(payload);
+  if (payload.source === 'xln-embedded-pay') {
+    if (payload.event === 'state') {
+      handleEmbeddedPayState(payload);
+      return;
+    }
+    if (payload.event === 'payment-success' || payload.event === 'payment-error') {
+      handleCheckoutMessage(event);
+      return;
+    }
     return;
   }
   handleCheckoutMessage(event);

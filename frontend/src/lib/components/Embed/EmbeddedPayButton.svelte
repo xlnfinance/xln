@@ -75,6 +75,18 @@
     window.parent.postMessage(payload, targetOrigin);
   }
 
+  function postParentEvent(event: string, details: Record<string, unknown> = {}): void {
+    if (typeof window === 'undefined' || !window.parent || window.parent === window) return;
+    const targetOrigin = getParentOrigin();
+    if (!targetOrigin) return;
+    window.parent.postMessage({
+      source: 'xln-embedded-pay',
+      event,
+      timestamp: Date.now(),
+      ...details,
+    }, targetOrigin);
+  }
+
   function getActiveSignerEntityId(): string {
     const vault = get(activeVault);
     const signer = vault?.signers?.[vault?.activeSignerIndex ?? 0] || vault?.signers?.[0];
@@ -276,7 +288,8 @@
     pendingClick = false;
     uiState = 'success';
     elapsedMs = clickStartedAt > 0 ? Math.max(1, Math.round(performance.now() - clickStartedAt)) : elapsedMs;
-    statusText = elapsedMs > 0 ? `Paid in ${elapsedMs} ms` : 'Paid';
+    statusText = 'Paid';
+    postParentEvent('payment-success');
     successResetTimer = setTimeout(() => {
       uiState = 'idle';
       statusText = '';
@@ -297,6 +310,7 @@
     uiState = 'error';
     statusText = message;
     activated = false;
+    postParentEvent('payment-error', { message });
   }
 
   function mapRouteStatusMessage(message: string): string {
@@ -435,7 +449,16 @@
   }
 
   function handleParentMessage(event: MessageEvent): void {
-    const payload = event.data as { source?: string; command?: string; amount?: string | number; tokenId?: string | number } | null;
+    const payload = event.data as {
+      source?: string;
+      command?: string;
+      amount?: string | number;
+      tokenId?: string | number;
+      entityId?: string;
+      userId?: string;
+      jurisdictionId?: string;
+      description?: string;
+    } | null;
     if (!payload || payload.source !== 'xln-custody') return;
     if (payload.command === 'pay-now') {
       void startPayment();
@@ -443,8 +466,12 @@
     }
     if (payload.command === 'update-intent') {
       rebuildEmbeddedHash({
+        id: String(payload.entityId ?? '').trim(),
         amt: String(payload.amount ?? '').trim(),
         token: String(payload.tokenId ?? '').trim(),
+        u: String(payload.userId ?? '').trim(),
+        jId: String(payload.jurisdictionId ?? '').trim(),
+        desc: String(payload.description ?? '').trim(),
       });
       resetPreparedRouteState();
     }
@@ -514,7 +541,7 @@
     return 'Loading wallet...';
   })();
   $: buttonLabel = uiState === 'success'
-    ? (elapsedMs > 0 ? `Paid in ${elapsedMs} ms` : 'Paid')
+    ? 'Paid'
     : uiState === 'processing'
       ? (pendingClick && !readyToPay
           ? 'Preparing...'
