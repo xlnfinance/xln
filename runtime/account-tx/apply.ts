@@ -20,6 +20,23 @@ import { handleSwapCancelRequest } from './handlers/swap-cancel';
 import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 import { handleJEventClaim } from './handlers/j-event-claim';
 
+const PAYMENT_TS_MARKER_RE = /(?:^|\s)tsms:(\d{10,})(?=$|\s)/i;
+const extractStartedAtMs = (description?: string): number | null => {
+  const match = String(description || '').match(PAYMENT_TS_MARKER_RE);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+const buildPaymentTimingFields = (description: string | undefined, completedAtMs: number) => {
+  const startedAtMs = extractStartedAtMs(description);
+  if (!startedAtMs) return { receivedAtMs: completedAtMs };
+  return {
+    startedAtMs,
+    receivedAtMs: completedAtMs,
+    elapsedMs: Math.max(1, completedAtMs - startedAtMs),
+  };
+};
+
 /**
  * Process single AccountTx through bilateral consensus
  * @param accountMachine - The account machine state
@@ -208,12 +225,20 @@ export async function processAccountTx(
       if (resolveResult.tokenId !== undefined) ret.tokenId = resolveResult.tokenId;
       if (resolveResult.outcome === 'error' && resolveResult.hashlock) ret.timedOutHashlock = resolveResult.hashlock;
       if (resolveResult.outcome === 'secret' && resolveResult.finalRecipient === true && env && !isValidation) {
+        const description = typeof resolveResult.description === 'string'
+          ? resolveResult.description
+          : typeof (accountTx as { data?: { description?: string } })?.data?.description === 'string'
+            ? (accountTx as { data?: { description?: string } }).data?.description
+            : undefined;
         env.emit('HtlcReceived', {
           entityId: myEntityId,
           fromEntity: counterparty,
           hashlock: resolveResult.hashlock,
           amount: resolveResult.amount?.toString(),
           tokenId: resolveResult.tokenId,
+          ...(description ? { description } : {}),
+          ...(env.activeJurisdiction ? { jurisdictionId: env.activeJurisdiction } : {}),
+          ...buildPaymentTimingFields(description, currentTimestamp),
         });
       }
       return ret;

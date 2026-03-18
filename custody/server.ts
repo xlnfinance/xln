@@ -167,6 +167,7 @@ const serializeActivity = (activity: ActivityRecord[]) => {
         frameHeight: item.frameHeight,
         createdAt: item.createdAt,
         updatedAt: item.createdAt,
+        finalizedAt: item.createdAt,
       };
     }
 
@@ -187,6 +188,7 @@ const serializeActivity = (activity: ActivityRecord[]) => {
       frameHeight: item.frameHeight,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
+      finalizedAt: item.finalizedAt,
       error: item.daemonError,
     };
   });
@@ -397,6 +399,12 @@ const server = Bun.serve({
     if (pathname === '/api/me') {
       const { session, setCookie } = ensureSession(req, { touch: false });
       return json(buildDashboardPayload(session), undefined, setCookie);
+    }
+
+    if (pathname === '/api/reset-session' && req.method === 'POST') {
+      const token = createSessionToken();
+      const session = store.createSession(token, createUserId());
+      return json({ ok: true, dashboard: buildDashboardPayload(session) }, undefined, makeSessionCookie(token));
     }
 
     if (pathname === '/api/withdraw' && req.method === 'POST') {

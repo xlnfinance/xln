@@ -18,6 +18,7 @@ import { deriveDelta } from '../../account-utils';
 import { NobleCryptoProvider } from '../../crypto-noble';
 import { createOnionEnvelopes } from '../../htlc-envelope-types';
 
+const PAYMENT_TS_MARKER_RE = /(?:^|\s)tsms:(\d{10,})(?=$|\s)/i;
 const formatEntityId = (id: string) => id.slice(-4);
 const addMessage = (state: EntityState, message: string) => state.messages.push(message);
 const logError = (context: string, message: string) => console.error(`[${context}] ${message}`);
@@ -318,12 +319,17 @@ export async function handleHtlcPayment(
   // Store routing info (like 2024 hashlockMap)
   newState.htlcRoutes.set(hashlock, {
     hashlock,
+    tokenId,
+    amount,
     outboundEntity: nextHop,
     outboundLockId: lockId,
     createdTimestamp: newState.timestamp
   });
 
-  const paymentDescription = typeof description === 'string' ? description.trim() : '';
+  const rawPaymentDescription = typeof description === 'string' ? description.trim() : '';
+  const paymentDescription = PAYMENT_TS_MARKER_RE.test(rawPaymentDescription)
+    ? rawPaymentDescription
+    : `${rawPaymentDescription ? `${rawPaymentDescription} ` : ''}tsms:${newState.timestamp}`;
   if (paymentDescription) {
     if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map<HtlcNoteKey, string>();
     newState.htlcNotes.set(`hashlock:${hashlock}`, paymentDescription);

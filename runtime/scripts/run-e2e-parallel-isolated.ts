@@ -674,12 +674,18 @@ async function main(): Promise<void> {
     usePlaywrightShard: false,
   }));
 
-  const promises: Array<Promise<RunResult>> = [];
-  for (const task of tasks) {
-    promises.push(runShard(task, args, logsDir));
-  }
-
-  const results = await Promise.all(promises);
+  const maxConcurrency = Math.max(1, Math.min(args.shards, tasks.length));
+  const results: RunResult[] = new Array(tasks.length);
+  let nextTaskIndex = 0;
+  const runWorker = async (): Promise<void> => {
+    while (nextTaskIndex < tasks.length) {
+      const taskIndex = nextTaskIndex++;
+      const task = tasks[taskIndex];
+      if (!task) break;
+      results[taskIndex] = await runShard(task, args, logsDir);
+    }
+  };
+  await Promise.all(Array.from({ length: maxConcurrency }, () => runWorker()));
   const totalMs = Date.now() - startedAt;
   const failed = results.filter(r => r.status === 'failed');
 

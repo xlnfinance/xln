@@ -483,6 +483,11 @@ button.primary:disabled {
   cursor: not-allowed;
 }
 
+.withdraw-submit-btn {
+  width: auto;
+  min-width: 148px;
+}
+
 .btn-xln-mark {
   display: inline-flex;
   width: 16px;
@@ -682,6 +687,14 @@ pre.activity-sub {
   padding: 16px 20px;
 }
 
+.meta-row {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .meta-label {
   font-size: 11px;
   text-transform: uppercase;
@@ -691,12 +704,32 @@ pre.activity-sub {
 }
 
 .meta-value {
-  margin-top: 6px;
   font-size: 13px;
   font-weight: 600;
   overflow-wrap: anywhere;
   font-family: "SFMono-Regular", "Menlo", monospace;
   color: var(--ink);
+}
+
+.meta-reset-btn {
+  flex: 0 0 auto;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  background: #f6f9fc;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.meta-reset-btn:hover:not(:disabled) {
+  background: #edf1f7;
+}
+
+.meta-reset-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* ── Integration docs ── */

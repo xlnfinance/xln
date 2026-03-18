@@ -28,16 +28,30 @@ import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body-types.js';
 
 type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader'>;
 
-// Default DeltaTransformer address - set by BrowserVM on deploy
-let deltaTransformerAddress: string = '0x0000000000000000000000000000000000000000';
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+const isUsableContractAddress = (address: string | null | undefined): address is string =>
+  typeof address === 'string' && ethers.isAddress(address) && address !== ZERO_ADDRESS;
+
+const requireContractAddress = (label: string, address: string | null | undefined): string => {
+  if (!isUsableContractAddress(address)) {
+    throw new Error(`MISSING_${label.toUpperCase()}_ADDRESS`);
+  }
+  return address;
+};
+
+// Set by BrowserVM / RPC adapter after real deployment or real connect.
+let deltaTransformerAddress = '';
 
 /**
  * Set the DeltaTransformer contract address
  * Called by BrowserVM after deploying the contract
  */
 export function setDeltaTransformerAddress(address: string): void {
-  deltaTransformerAddress = address;
-  console.log(`[ProofBuilder] DeltaTransformer address set: ${address}`);
+  deltaTransformerAddress = isUsableContractAddress(address) ? address : '';
+  console.log(
+    `[ProofBuilder] DeltaTransformer address set: ${deltaTransformerAddress || 'missing'}`,
+  );
 }
 
 /**
@@ -141,8 +155,9 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
   // Only include transformer if there are HTLCs or swaps
   const transformers: RuntimeTransformerClause[] = [];
   if (payments.length > 0 || swaps.length > 0) {
+    const transformerAddress = requireContractAddress('delta_transformer', deltaTransformerAddress);
     transformers.push({
-      transformerAddress: deltaTransformerAddress,
+      transformerAddress,
       batch,
       allowances: [], // Phase 2: Stub with empty array
     });
@@ -306,7 +321,11 @@ export function createDisputeProofHash(
   proofBodyHash: string,
   depositoryAddress: string
 ): string {
-  const encodedMessage = encodeDisputeMessage(accountMachine, proofBodyHash, depositoryAddress);
+  const encodedMessage = encodeDisputeMessage(
+    accountMachine,
+    proofBodyHash,
+    requireContractAddress('depository', depositoryAddress),
+  );
   return ethers.keccak256(encodedMessage);
 }
 
@@ -334,7 +353,7 @@ export function createDisputeProofHashWithNonce(
     ['uint256', 'address', 'bytes', 'uint256', 'bytes32'],
     [
       MESSAGE_TYPE_DISPUTE_PROOF,
-      depositoryAddress,
+      requireContractAddress('depository', depositoryAddress),
       chKey,
       nonce,
       proofBodyHash,

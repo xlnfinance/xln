@@ -23,7 +23,7 @@ import {
   gotoApp as gotoSharedApp,
   switchToRuntime,
 } from './utils/e2e-demo-users';
-import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
+import { getPersistedReceiptCursor, waitForPersistedFrameEvent, waitForPersistedFrameEventMatch } from './utils/e2e-runtime-receipts';
 
 const INIT_TIMEOUT = 30_000;
 const SETTLE_MS = 10_000;
@@ -1055,6 +1055,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const b0 = await outCap(page, bob!.entityId, hubId);
     const bobForwardRendered = await getRenderedOutboundForAccount(page, hubId);
     const bobForwardCursor = await getPersistedReceiptCursor(page);
+    const aliceForwardFinalizeCursor = await getPersistedReceiptCursor(page);
 
     await switchToRuntime(page, 'alice');
     await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-reverse-recv');
@@ -1083,6 +1084,13 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       a1,
       aliceMinSpend,
     );
+    await waitForPersistedFrameEventMatch(page, {
+      cursor: aliceForwardFinalizeCursor,
+      eventName: 'HtlcFinalized',
+      entityId: alice!.entityId,
+      timeoutMs: 20_000,
+      predicate: (event) => String(event.data?.amount || '') === payAmount.toString(),
+    });
     console.log(`[E2E] Alice paid: ${alicePaid} (OUT ${a1} → ${a2})`);
     expect(alicePaid, 'Alice should pay at least quoted sender amount').toBeGreaterThanOrEqual(aliceMinSpend);
     await screenshot(page, '06a-alice-after-send');
@@ -1091,12 +1099,16 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await switchToRuntime(page, 'bob');
     await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-forward-verify');
     await assertP2PSingletonAndWsHealth(page, 'switch-bob-forward-verify');
-    await waitForPersistedFrameEvent(page, {
+    const bobReceiveEvent = await waitForPersistedFrameEventMatch(page, {
       cursor: bobForwardCursor,
       eventName: 'HtlcReceived',
       entityId: bob!.entityId,
       timeoutMs: 12_000,
     });
+    expect(String(bobReceiveEvent.data?.amount || ''), 'Bob receive event should include amount').toBe(payAmount.toString());
+    expect(Number(bobReceiveEvent.data?.startedAtMs || 0), 'Bob receive event should include startedAtMs').toBeGreaterThan(0);
+    expect(Number(bobReceiveEvent.data?.receivedAtMs || 0), 'Bob receive event should include receivedAtMs').toBeGreaterThan(0);
+    expect(Number(bobReceiveEvent.data?.elapsedMs || 0), 'Bob receive event should include elapsedMs').toBeGreaterThan(0);
     const b1 = await waitForOutCapDelta(page, bob!.entityId, hubId, b0, payAmount);
     await waitForRenderedOutboundForAccountDelta(
       page,
@@ -1136,6 +1148,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const a3 = await outCap(page, alice!.entityId, hubId);
     const aliceReverseRendered = await getRenderedOutboundForAccount(page, hubId);
     const aliceReverseCursor = await getPersistedReceiptCursor(page);
+    const bobReverseFinalizeCursor = await getPersistedReceiptCursor(page);
 
     await switchToRuntime(page, 'bob');
     await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-before-reverse');
@@ -1160,6 +1173,13 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       b2,
       bobMinSpend,
     );
+    await waitForPersistedFrameEventMatch(page, {
+      cursor: bobReverseFinalizeCursor,
+      eventName: 'HtlcFinalized',
+      entityId: bob!.entityId,
+      timeoutMs: 20_000,
+      predicate: (event) => String(event.data?.amount || '') === reverseAmount.toString(),
+    });
     console.log(`[E2E] Bob OUT after reverse: ${b3}`);
     console.log(`[E2E] Bob paid: ${bobPaid} (OUT ${b2} → ${b3})`);
     const bobCounterpartiesAfterReverse = await connectedCounterparties(page, bob!.entityId);
@@ -1174,12 +1194,16 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await switchToRuntime(page, 'alice');
     await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-reverse-verify');
     await assertP2PSingletonAndWsHealth(page, 'switch-alice-reverse-verify');
-    await waitForPersistedFrameEvent(page, {
+    const aliceReceiveEvent = await waitForPersistedFrameEventMatch(page, {
       cursor: aliceReverseCursor,
       eventName: 'HtlcReceived',
       entityId: alice!.entityId,
       timeoutMs: 12_000,
     });
+    expect(String(aliceReceiveEvent.data?.amount || ''), 'Alice receive event should include amount').toBe(reverseAmount.toString());
+    expect(Number(aliceReceiveEvent.data?.startedAtMs || 0), 'Alice receive event should include startedAtMs').toBeGreaterThan(0);
+    expect(Number(aliceReceiveEvent.data?.receivedAtMs || 0), 'Alice receive event should include receivedAtMs').toBeGreaterThan(0);
+    expect(Number(aliceReceiveEvent.data?.elapsedMs || 0), 'Alice receive event should include elapsedMs').toBeGreaterThan(0);
     const a4 = await waitForOutCapDelta(page, alice!.entityId, hubId, a3, reverseAmount);
     await waitForRenderedOutboundForAccountDelta(
       page,
@@ -1206,6 +1230,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const b4 = await outCap(page, bob!.entityId, hubId);
     const bobSecondForwardRendered = await getRenderedOutboundForAccount(page, hubId);
     const bobSecondForwardCursor = await getPersistedReceiptCursor(page);
+    const aliceSecondForwardFinalizeCursor = await getPersistedReceiptCursor(page);
 
     await switchToRuntime(page, 'alice');
     await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-second-forward-send');
@@ -1220,17 +1245,28 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       a5,
       pay2MinSpend,
     );
+    await waitForPersistedFrameEventMatch(page, {
+      cursor: aliceSecondForwardFinalizeCursor,
+      eventName: 'HtlcFinalized',
+      entityId: alice!.entityId,
+      timeoutMs: 20_000,
+      predicate: (event) => String(event.data?.amount || '') === pay2Amount.toString(),
+    });
     expect(pay2Spent, '2nd payment: Alice pays at least quoted sender amount').toBeGreaterThanOrEqual(pay2MinSpend);
 
     await switchToRuntime(page, 'bob');
     await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-second-forward-verify');
     await assertP2PSingletonAndWsHealth(page, 'switch-bob-second-forward-verify');
-    await waitForPersistedFrameEvent(page, {
+    const bobSecondReceiveEvent = await waitForPersistedFrameEventMatch(page, {
       cursor: bobSecondForwardCursor,
       eventName: 'HtlcReceived',
       entityId: bob!.entityId,
       timeoutMs: 12_000,
     });
+    expect(String(bobSecondReceiveEvent.data?.amount || ''), '2nd Bob receive event should include amount').toBe(pay2Amount.toString());
+    expect(Number(bobSecondReceiveEvent.data?.startedAtMs || 0), '2nd Bob receive event should include startedAtMs').toBeGreaterThan(0);
+    expect(Number(bobSecondReceiveEvent.data?.receivedAtMs || 0), '2nd Bob receive event should include receivedAtMs').toBeGreaterThan(0);
+    expect(Number(bobSecondReceiveEvent.data?.elapsedMs || 0), '2nd Bob receive event should include elapsedMs').toBeGreaterThan(0);
     const b5 = await waitForOutCapDelta(page, bob!.entityId, hubId, b4, pay2Amount);
     await waitForRenderedOutboundForAccountDelta(
       page,

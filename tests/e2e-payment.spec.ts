@@ -17,7 +17,7 @@ import { ensureE2EBaseline, APP_BASE_URL } from './utils/e2e-baseline';
 import { connectHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { getRenderedPrimaryOutbound } from './utils/e2e-account-ui';
-import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
+import { getPersistedReceiptCursor, waitForPersistedFrameEvent, waitForPersistedFrameEventMatch } from './utils/e2e-runtime-receipts';
 
 const CONSENSUS_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
@@ -182,12 +182,15 @@ test.describe('E2E HTLC Payment Flow', () => {
     expect(htlcLog).toContain('Hashlock secret=');
     expect(htlcLog).toContain('hashlock=');
 
-    await waitForPersistedFrameEvent(page, {
+    const finalizedEvent = await waitForPersistedFrameEventMatch(page, {
       cursor: paymentCursor,
-      eventName: 'PaymentFinalized',
+      eventName: 'HtlcFinalized',
       entityId: alice.entityId,
       timeoutMs: CONSENSUS_TIMEOUT,
     });
+    expect(String(finalizedEvent.data?.amount || ''), 'sender finalized event should include amount').toBe('25000000000000000000');
+    expect(Number(finalizedEvent.data?.startedAtMs || 0), 'sender finalized event should include startedAtMs').toBeGreaterThan(0);
+    expect(Number(finalizedEvent.data?.elapsedMs || 0), 'sender finalized event should include elapsedMs').toBeGreaterThan(0);
 
     let outboundAfterPayment = outboundBeforePayment;
     await expect.poll(async () => {

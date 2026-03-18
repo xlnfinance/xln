@@ -28,6 +28,7 @@ export async function handleHtlcResolve(
   finalRecipient?: boolean;
   amount?: bigint;
   tokenId?: number;
+  description?: string;
 }> {
   const { lockId, outcome, secret, reason } = accountTx.data;
   const events: string[] = [];
@@ -107,11 +108,18 @@ export async function handleHtlcResolve(
     && lock.envelope !== null
     && 'finalRecipient' in lock.envelope
     && (lock.envelope as { finalRecipient?: unknown }).finalRecipient === true;
+  const resolvedDescription =
+    typeof lock.envelope === 'object'
+    && lock.envelope !== null
+    && 'description' in lock.envelope
+    && typeof (lock.envelope as { description?: unknown }).description === 'string'
+      ? (lock.envelope as { description: string }).description
+      : undefined;
 
   const result: {
     success: boolean; events: string[]; error?: string;
     outcome?: 'secret' | 'error'; secret?: string; hashlock?: string; reason?: string;
-    finalRecipient?: boolean; amount?: bigint; tokenId?: number;
+    finalRecipient?: boolean; amount?: bigint; tokenId?: number; description?: string;
   } = { success: true, events, outcome, hashlock: lock.hashlock };
   if (outcome === 'secret' && secret) result.secret = secret;
   if (outcome === 'error') result.reason = reason || 'unknown';
@@ -119,6 +127,7 @@ export async function handleHtlcResolve(
     result.finalRecipient = finalRecipient;
     result.amount = lock.amount;
     result.tokenId = lock.tokenId;
+    if (resolvedDescription) result.description = resolvedDescription;
   }
   return result;
 }

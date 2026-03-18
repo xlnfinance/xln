@@ -305,31 +305,35 @@ export async function createRpcAdapter(
     console.log('  EntityProvider:', addresses.entityProvider);
     console.log('  DeltaTransformer:', addresses.deltaTransformer);
 
-    if (!addresses.depository || !addresses.entityProvider) {
-      throw new Error('fromReplica: Missing required addresses (depository or entityProvider)');
+    const missingReplicaAddresses = [
+      !addresses.account ? 'account' : null,
+      !addresses.depository ? 'depository' : null,
+      !addresses.entityProvider ? 'entityProvider' : null,
+      !addresses.deltaTransformer ? 'deltaTransformer' : null,
+    ].filter((value): value is string => Boolean(value));
+    if (missingReplicaAddresses.length > 0) {
+      throw new Error(
+        `fromReplica: Missing required addresses (${missingReplicaAddresses.join(', ')})`,
+      );
     }
 
-    const [depCode, epCode] = await Promise.all([
+    const [accountCode, depCode, epCode, transformerCode] = await Promise.all([
+      provider.getCode(addresses.account),
       provider.getCode(addresses.depository),
       provider.getCode(addresses.entityProvider),
+      provider.getCode(addresses.deltaTransformer),
     ]);
 
-    if (depCode === '0x' || epCode === '0x') {
+    if (accountCode === '0x' || depCode === '0x' || epCode === '0x' || transformerCode === '0x') {
       throw new Error(
-        '[JAdapter:rpc] fromReplica addresses have no code on chain: ' +
+        '[JAdapter:rpc] fromReplica contract addresses have no code on chain: ' +
+          `account=${addresses.account || 'none'} code=${accountCode} ` +
           `depository=${addresses.depository || 'none'} code=${depCode} ` +
-          `entityProvider=${addresses.entityProvider || 'none'} code=${epCode}`,
+          `entityProvider=${addresses.entityProvider || 'none'} code=${epCode} ` +
+          `deltaTransformer=${addresses.deltaTransformer || 'none'} code=${transformerCode}`,
       );
     } else {
       // Use any cast to handle ethers version mismatch between root and jurisdictions
-      if (!addresses.account) {
-        console.warn('[JAdapter:rpc] fromReplica missing Account address - using zero address placeholder');
-        addresses.account = ethers.ZeroAddress;
-      }
-      if (!addresses.deltaTransformer) {
-        console.warn('[JAdapter:rpc] fromReplica missing DeltaTransformer address - using zero address placeholder');
-        addresses.deltaTransformer = ethers.ZeroAddress;
-      }
       account = Account__factory.connect(addresses.account, signer as any);
       depository = Depository__factory.connect(addresses.depository, signer as any);
       entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer as any);

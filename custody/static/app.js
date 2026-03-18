@@ -50,6 +50,7 @@
  *   frameHeight: number | null,
  *   createdAt: number,
  *   updatedAt: number,
+ *   finalizedAt?: number | null,
  *   error?: string | null,
  * }} ActivityItem
  *
@@ -85,6 +86,7 @@ let pendingDepositIntentKey = '';
 let pendingDepositInvoiceId = '';
 let lastDashboardFingerprint = '';
 let copyInvoiceResetTimer = null;
+let resettingSession = false;
 const WALLET_WINDOW_NAME = 'xln-wallet';
 
 const updateDepositHintUi = () => {
@@ -245,6 +247,43 @@ const parsePaymentIntent = (value) => {
   return null;
 };
 
+const extractStartedAtMs = (description) => {
+  const match = String(description || '').match(/(?:^|\s)tsms:(\d{10,})(?=$|\s)/i);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const getFinalizedElapsedMs = (item) => {
+  if (!item || item.status !== 'finalized') return null;
+  const startedAtMs = extractStartedAtMs(item.description);
+  const completedAtMs = Number(item.finalizedAt || item.updatedAt || item.createdAt || 0);
+  if (!startedAtMs || !Number.isFinite(completedAtMs) || completedAtMs <= 0) return null;
+  return Math.max(1, completedAtMs - startedAtMs);
+};
+
+const applyWithdrawIntentPrefill = (form) => {
+  if (!(form instanceof HTMLFormElement)) return;
+  const targetInput = form.elements.namedItem('targetEntityId');
+  const amountInput = form.elements.namedItem('amount');
+  const tokenSelect = form.elements.namedItem('tokenId');
+  if (!(targetInput instanceof HTMLInputElement)) return;
+  const parsedIntent = parsePaymentIntent(targetInput.value);
+  if (!parsedIntent) return;
+  if (parsedIntent.amount) {
+    withdrawAmount = parsedIntent.amount;
+    if (amountInput instanceof HTMLInputElement) {
+      amountInput.value = parsedIntent.amount;
+    }
+  }
+  if (parsedIntent.tokenId && Number.isFinite(parsedIntent.tokenId) && parsedIntent.tokenId > 0) {
+    selectedTokenId = parsedIntent.tokenId;
+    if (tokenSelect instanceof HTMLSelectElement) {
+      tokenSelect.value = String(parsedIntent.tokenId);
+    }
+  }
+};
+
 const syncDepositTargets = (tokenId, amount, sourceState = state, options = {}) => {
   const forceInvoiceRefresh = options.forceInvoiceRefresh === true;
   const intentKey = [
@@ -270,7 +309,16 @@ const renderActivity = () => {
 
   return `<div class="activity-list">${state.activity.map((item) => {
     const badge = item.kind === 'deposit' ? 'IN' : 'OUT';
+    const elapsedMs = getFinalizedElapsedMs(item);
     const status = item.error ? `${item.status} · ${escapeHtml(item.error)}` : item.status;
+    const finalizedText = elapsedMs ? ` · finalized in ${elapsedMs}ms` : '';
+    const title = item.kind === 'deposit'
+      ? 'Deposit finalized'
+      : item.status === 'finalized'
+        ? 'Withdrawal finalized'
+        : item.status === 'failed'
+          ? 'Withdrawal failed'
+          : 'Withdrawal queued';
     const amountLine = item.kind === 'withdrawal' && item.feeDisplay
       ? `${escapeHtml(item.requestedAmountDisplay || item.amountDisplay)} sent · fee ${escapeHtml(item.feeDisplay)}`
       : escapeHtml(item.amountDisplay);
@@ -278,12 +326,12 @@ const renderActivity = () => {
       <div class="activity-row">
         <div class="activity-badge ${item.kind}">${badge}</div>
         <div>
-          <div class="activity-title">${item.kind === 'deposit' ? 'Deposit credited' : 'Withdrawal queued'}</div>
+          <div class="activity-title">${title}</div>
           <div class="activity-sub">${escapeHtml(shortId(item.counterpartyEntityId))} · frame ${item.frameHeight ?? 'pending'}</div>
         </div>
         <div class="activity-amount">
           <div class="amount-value">${amountLine}</div>
-          <div class="status-text">${escapeHtml(status)}</div>
+          <div class="status-text">${escapeHtml(status)}${escapeHtml(finalizedText)}</div>
         </div>
       </div>
     `;
@@ -348,7 +396,7 @@ const render = () => {
     <header class="page-header">
       <div>
         <h1>${escapeHtml(state.custody.name)}</h1>
-        <p class="sub">Deposit from XLN, keep balances locally, withdraw through the cheapest route.</p>
+        <p class="sub">Demo how any CEX or service can integrate XLN deposits, local balances, and cheapest-route withdrawals.</p>
       </div>
       <div class="status-pill ${state.custody.connected ? 'ok' : 'error'}">
         <span class="dot"></span>
@@ -428,6 +476,16 @@ const render = () => {
         <div class="action-sub">Send funds to any XLN entity. Route and fee resolved automatically.</div>
         <form id="withdraw-form">
           <label>
+            Invoice or ID
+            <input
+              name="targetEntityId"
+              aria-label="Withdraw destination"
+              autocomplete="off"
+              value="${escapeHtml(withdrawTargetEntityId)}"
+              required
+            />
+          </label>
+          <label>
             Asset
             <select name="tokenId">
               ${state.tokens.map(token => `<option value="${token.tokenId}" ${token.tokenId === selectedTokenId ? 'selected' : ''}>${escapeHtml(token.symbol)}</option>`).join('')}
@@ -437,22 +495,12 @@ const render = () => {
             Amount
             <input name="amount" inputmode="decimal" aria-label="Withdraw amount" value="${escapeHtml(withdrawAmount)}" required />
           </label>
-          <label>
-            Invoice or entity id
-            <input
-              name="targetEntityId"
-              aria-label="Withdraw destination"
-              autocomplete="off"
-              value="${escapeHtml(withdrawTargetEntityId)}"
-              required
-            />
-          </label>
           <div class="form-foot">
             <div class="hint">Balance debited by requested payout plus route fee.</div>
             ${withdrawError ? `<div class="inline-error">${escapeHtml(withdrawError)}</div>` : ''}
             ${withdrawMessage ? `<div class="inline-ok">${escapeHtml(withdrawMessage)}</div>` : ''}
             <div class="checkout-cta-group">
-              <button class="btn-xln-action full-width" type="submit" ${submitting ? 'disabled' : ''}>
+              <button class="btn-xln-action withdraw-submit-btn" type="submit" ${submitting ? 'disabled' : ''}>
                 <span class="btn-xln-mark" aria-hidden="true">
                   <img src="https://xln.finance/img/logo.png" alt="" />
                 </span>
@@ -472,7 +520,10 @@ const render = () => {
     <div class="meta-footer">
       <div class="meta-cell">
         <div class="meta-label">Session</div>
-        <div class="meta-value">${escapeHtml(state.session.userId)}</div>
+        <div class="meta-row">
+          <div class="meta-value">${escapeHtml(state.session.userId)}</div>
+          <button class="meta-reset-btn" type="button" data-reset-session ${resettingSession ? 'disabled' : ''}>Reset</button>
+        </div>
       </div>
       <div class="meta-cell">
         <div class="meta-label">Custody entity</div>
@@ -511,6 +562,11 @@ const render = () => {
     if (targetInput instanceof HTMLInputElement) {
       targetInput.addEventListener('input', () => {
         withdrawTargetEntityId = targetInput.value;
+        applyWithdrawIntentPrefill(form);
+      });
+      targetInput.addEventListener('change', () => {
+        withdrawTargetEntityId = targetInput.value;
+        applyWithdrawIntentPrefill(form);
       });
     }
   }
@@ -574,6 +630,13 @@ const render = () => {
   }
 
   restoreActiveField(activeField);
+
+  const resetSessionButton = document.querySelector('[data-reset-session]');
+  if (resetSessionButton instanceof HTMLButtonElement) {
+    resetSessionButton.addEventListener('click', () => {
+      void handleResetSession();
+    });
+  }
 };
 
 const dashboardFingerprint = (payload) => JSON.stringify({
@@ -630,6 +693,38 @@ const reload = async () => {
     throw new Error(`Failed to refresh dashboard (${response.status})`);
   }
   applyDashboardState(await response.json());
+};
+
+const handleResetSession = async () => {
+  resettingSession = true;
+  render();
+  try {
+    const response = await fetch('/api/reset-session', {
+      method: 'POST',
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to reset session (${response.status})`);
+    }
+    const payload = await response.json();
+    if (payload?.dashboard) {
+      selectedTokenId = payload.dashboard.tokens[0]?.tokenId || 1;
+      depositTokenId = payload.dashboard.tokens[0]?.tokenId || 1;
+      withdrawAmount = '';
+      withdrawTargetEntityId = '';
+      withdrawMessage = '';
+      withdrawError = '';
+      syncDepositTargets(depositTokenId, depositAmount || '10', payload.dashboard, { forceInvoiceRefresh: true });
+      applyDashboardState(payload.dashboard, true);
+    } else {
+      await load();
+    }
+  } catch (error) {
+    console.error('[custody] reset session failed', error);
+  } finally {
+    resettingSession = false;
+    render();
+  }
 };
 
 async function handleDepositSubmit(event) {
