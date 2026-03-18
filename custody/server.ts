@@ -2,6 +2,7 @@ import { formatUnits } from 'ethers';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import QRCode from 'qrcode';
 import { parseTokenAmount } from '../runtime/financial-utils';
 import { DEFAULT_TOKENS } from '../runtime/jadapter/default-tokens';
 import { serializeTaggedJson } from '../runtime/serialization-utils';
@@ -122,6 +123,15 @@ const html = (content: Bun.BunFile, setCookie?: string): Response => {
 const asset = (path: string): Response => {
   const file = Bun.file(new URL(path, staticDir));
   return new Response(file);
+};
+
+const svg = (content: string): Response => {
+  return new Response(content, {
+    headers: {
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  });
 };
 
 const getToken = (tokenId: number) => TOKENS.find(token => token.tokenId === tokenId) || TOKENS[0]!;
@@ -360,6 +370,28 @@ const server = Bun.serve({
 
     if (pathname === '/styles.css') {
       return asset('./styles.css');
+    }
+
+    if (pathname === '/api/qr') {
+      const data = String(url.searchParams.get('data') || '').trim();
+      if (!data) {
+        return json({ ok: false, error: 'data is required' }, { status: 400 });
+      }
+      try {
+        const markup = await QRCode.toString(data, {
+          type: 'svg',
+          errorCorrectionLevel: 'M',
+          margin: 1,
+          width: 320,
+          color: {
+            dark: '#f5efe6',
+            light: '#171513',
+          },
+        });
+        return svg(markup);
+      } catch (error) {
+        return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 400 });
+      }
     }
 
     if (pathname === '/api/me') {

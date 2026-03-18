@@ -78,17 +78,13 @@ let withdrawTargetEntityId = '';
 let depositTokenId = 1;
 let depositAmount = '10';
 let depositHint = '';
-let pendingPayButtonHref = '';
-let pendingFindRoutesHref = '';
+let pendingInvoice = '';
+let pendingWalletHref = '';
+let pendingQrSrc = '';
 let pendingDepositIntentKey = '';
 let pendingDepositInvoiceId = '';
-let embeddedCheckoutStatus = '';
-let embeddedCheckoutError = '';
-let embeddedCheckoutStage = 'Waiting for wallet boot...';
 let lastDashboardFingerprint = '';
-/** @type {HTMLIFrameElement | null} */
-let payControllerFrame = null;
-const FIND_ROUTES_WINDOW_NAME = 'xln-custody-find-routes';
+const WALLET_WINDOW_NAME = 'xln-wallet';
 
 const captureActiveField = () => {
   const active = document.activeElement;
@@ -172,15 +168,7 @@ const buildWalletPayHref = (sourceState, tokenId, amount, invoiceId) => {
   return url.toString();
 };
 
-const buildEmbeddedButtonHref = (sourceState, tokenId, amount) => {
-  return buildEmbeddedButtonHrefWithInvoice(sourceState, tokenId, amount, createInvoiceId());
-};
-
-const buildEmbeddedButtonHrefWithInvoice = (sourceState, tokenId, amount, invoiceId) => {
-  if (!sourceState?.custody?.walletUrl) return '';
-  const base = new URL(sourceState.custody.walletUrl);
-  const url = new URL('/app', base.origin);
-  url.searchParams.set('e', '1');
+const buildInvoiceUri = (sourceState, tokenId, amount, invoiceId) => {
   const params = new URLSearchParams();
   params.set('id', sourceState.custody.entityId);
   params.set('token', String(tokenId));
@@ -194,72 +182,7 @@ const buildEmbeddedButtonHrefWithInvoice = (sourceState, tokenId, amount, invoic
   if (sourceState.custody.jurisdictionId) {
     params.set('jId', sourceState.custody.jurisdictionId);
   }
-  url.hash = `pay?${params.toString()}`;
-  return url.toString();
-};
-
-const ensurePayControllerFrame = () => {
-  if (payControllerFrame) return payControllerFrame;
-  const iframe = document.createElement('iframe');
-  iframe.className = 'paybutton-controller-frame';
-  iframe.setAttribute('title', 'xln pay controller');
-  iframe.setAttribute('loading', 'eager');
-  iframe.setAttribute('referrerpolicy', 'origin');
-  payControllerFrame = iframe;
-  return iframe;
-};
-
-const postEmbeddedIntentUpdate = (tokenId, amount, invoiceId = pendingDepositInvoiceId, sourceState = state) => {
-  if (!payControllerFrame?.contentWindow || !sourceState?.custody?.walletUrl) return false;
-  let targetOrigin = '';
-  try {
-    targetOrigin = new URL(sourceState.custody.walletUrl).origin;
-  } catch {
-    return false;
-  }
-  if (!targetOrigin) return false;
-  const description = `Custody invoice:${invoiceId}`;
-  payControllerFrame.contentWindow.postMessage({
-    source: 'xln-custody',
-    command: 'update-intent',
-    entityId: String(sourceState?.custody?.entityId || '').trim(),
-    tokenId: String(tokenId),
-    amount: String(amount || '').trim(),
-    userId: String(sourceState?.session?.userId || '').trim(),
-    jurisdictionId: String(sourceState?.custody?.jurisdictionId || '').trim(),
-    description,
-  }, targetOrigin);
-  return true;
-};
-
-const patchEmbeddedDepositUi = () => {
-  const note = app.querySelector('.action-note');
-  if (note instanceof HTMLDivElement) {
-    note.textContent = embeddedCheckoutError
-      ? 'Payment failed. Check the embedded wallet and retry.'
-      : (embeddedCheckoutStatus || 'Left side prepares and pays inside the embedded wallet. Right side opens the full wallet to choose a route manually.');
-  }
-  const status = app.querySelector('.deposit-status-line');
-  if (status instanceof HTMLDivElement) {
-    status.textContent = embeddedCheckoutError || embeddedCheckoutStage || embeddedCheckoutStatus || 'Waiting for wallet boot...';
-    status.dataset.state = embeddedCheckoutError
-      ? 'error'
-      : (String(embeddedCheckoutStage || '').toLowerCase().includes('pay via') || String(embeddedCheckoutStatus || '').toLowerCase().includes('confirmed'))
-        ? 'ready'
-        : 'loading';
-  }
-  let inlineError = app.querySelector('.deposit-inline-error');
-  if (embeddedCheckoutError) {
-    if (!(inlineError instanceof HTMLDivElement)) {
-      inlineError = document.createElement('div');
-      inlineError.className = 'inline-error deposit-inline-error';
-      const form = document.getElementById('deposit-form');
-      form?.appendChild(inlineError);
-    }
-    inlineError.textContent = embeddedCheckoutError;
-  } else if (inlineError instanceof HTMLDivElement) {
-    inlineError.remove();
-  }
+  return `xln:?${params.toString()}`;
 };
 
 const syncDepositTargets = (tokenId, amount, sourceState = state, options = {}) => {
@@ -272,132 +195,13 @@ const syncDepositTargets = (tokenId, amount, sourceState = state, options = {}) 
     String(amount || '').trim(),
   ].join('|');
   if (intentKey !== pendingDepositIntentKey || forceInvoiceRefresh) {
-    const hadIntent = Boolean(pendingDepositIntentKey);
     pendingDepositIntentKey = intentKey;
     pendingDepositInvoiceId = createInvoiceId();
-    pendingPayButtonHref = buildEmbeddedButtonHrefWithInvoice(sourceState, tokenId, amount, pendingDepositInvoiceId);
-    pendingFindRoutesHref = buildWalletPayHref(sourceState, tokenId, amount, pendingDepositInvoiceId);
-    if (hadIntent && payControllerFrame) {
-      embeddedCheckoutStatus = '';
-      embeddedCheckoutError = '';
-      embeddedCheckoutStage = 'Loading wallet...';
-      const updated = postEmbeddedIntentUpdate(tokenId, amount, pendingDepositInvoiceId, sourceState);
-      if (!updated) {
-        try {
-          payControllerFrame.src = pendingPayButtonHref;
-        } catch {
-          // ignore reload errors; next render will reconcile src
-        }
-      }
-    }
-  }
-  const iframe = ensurePayControllerFrame();
-  if (!iframe.src || iframe.src === 'about:blank') {
-    embeddedCheckoutStatus = '';
-    embeddedCheckoutError = '';
-    embeddedCheckoutStage = 'Loading wallet...';
-    iframe.src = pendingPayButtonHref;
-  }
-  const findRoutesButton = app.querySelector('.deposit-find-routes-btn');
-  if (findRoutesButton instanceof HTMLButtonElement) {
-    findRoutesButton.setAttribute('data-find-routes-href', pendingFindRoutesHref);
+    pendingInvoice = buildInvoiceUri(sourceState, tokenId, amount, pendingDepositInvoiceId);
+    pendingWalletHref = buildWalletPayHref(sourceState, tokenId, amount, pendingDepositInvoiceId);
+    pendingQrSrc = `/api/qr?data=${encodeURIComponent(pendingInvoice)}`;
   }
 };
-
-const handleCheckoutMessage = (event) => {
-  let expectedOrigin = '';
-  try {
-    expectedOrigin = new URL(state?.custody?.walletUrl || '').origin;
-  } catch {
-    expectedOrigin = '';
-  }
-  if (!expectedOrigin || event.origin !== expectedOrigin) return;
-
-  const payload = event.data || {};
-  if (payload.source !== 'xln-hosted-checkout' && payload.source !== 'xln-embedded-pay') return;
-
-  if (payload.event === 'checkout-ready') {
-    console.info('[custody.embed.checkout]', payload);
-    embeddedCheckoutStatus = String(payload.status || '').trim() || 'Loading';
-    embeddedCheckoutStage = embeddedCheckoutStatus || 'Loading wallet...';
-    embeddedCheckoutError = '';
-    patchEmbeddedDepositUi();
-    return;
-  }
-
-  if (payload.event === 'payment-error') {
-    console.error('[custody.embed.checkout]', payload);
-    embeddedCheckoutStatus = '';
-    embeddedCheckoutError = String(payload.message || 'Embedded payment failed');
-    embeddedCheckoutStage = embeddedCheckoutError;
-    patchEmbeddedDepositUi();
-    return;
-  }
-
-  if (payload.event === 'payment-success') {
-    console.info('[custody.embed.checkout]', payload);
-    embeddedCheckoutStatus = 'Paid';
-    embeddedCheckoutError = '';
-    embeddedCheckoutStage = 'Paid';
-    patchEmbeddedDepositUi();
-    setTimeout(() => {
-      syncDepositTargets(depositTokenId, depositAmount || '0', state, { forceInvoiceRefresh: true });
-      void reload().catch(() => undefined);
-    }, 1100);
-    return;
-  }
-
-  if (payload.event === 'checkout-close') {
-    patchEmbeddedDepositUi();
-  }
-};
-
-const handleEmbeddedPayState = (payload) => {
-  console.info('[custody.embed.state]', payload);
-  embeddedCheckoutStatus = String(payload.statusText || '');
-  embeddedCheckoutError = String(payload.error || '');
-  embeddedCheckoutStage = String(payload.label || payload.statusText || '').trim() || 'Loading wallet...';
-  patchEmbeddedDepositUi();
-};
-
-const isEmbeddedPayBusy = () => {
-  const frameSrc = String(payControllerFrame?.src || '').trim();
-  if (!frameSrc || frameSrc === 'about:blank') return false;
-  const stage = String(embeddedCheckoutStage || '').trim().toLowerCase();
-  if (!stage) return false;
-  return (
-    stage.includes('loading') ||
-    stage.includes('finding routes') ||
-    stage.includes('preparing') ||
-    stage.includes('paying') ||
-    stage.includes('authorizing')
-  );
-};
-
-const handlePaymentFrameMessage = (event) => {
-  let expectedOrigin = '';
-  try {
-    expectedOrigin = new URL(state?.custody?.walletUrl || '').origin;
-  } catch {
-    expectedOrigin = '';
-  }
-  if (!expectedOrigin || event.origin !== expectedOrigin) return;
-  const payload = event.data || {};
-  if (payload.source === 'xln-embedded-pay') {
-    if (payload.event === 'state') {
-      handleEmbeddedPayState(payload);
-      return;
-    }
-    if (payload.event === 'payment-success' || payload.event === 'payment-error') {
-      handleCheckoutMessage(event);
-      return;
-    }
-    return;
-  }
-  handleCheckoutMessage(event);
-};
-
-window.addEventListener('message', handlePaymentFrameMessage);
 
 const renderActivity = () => {
   if (!state || state.activity.length === 0) {
@@ -450,7 +254,7 @@ bun custody/server.ts</pre>
         </div>
         <div class="integration-step">
           <div class="step-title">3. Deposit flow</div>
-          <div class="activity-sub">User clicks the embedded XLN button. It already knows the target entity, amount, token, jurisdiction, and user id from the iframe URL and executes the payment in place.</div>
+          <div class="activity-sub">Custody generates a signed XLN invoice. User scans the QR, copies the invoice, or opens the wallet directly on the prefilled pay screen.</div>
         </div>
         <div class="integration-step">
           <div class="step-title">4. Crediting</div>
@@ -473,9 +277,6 @@ const render = () => {
 
   const activeField = captureActiveField();
   const selectedDepositToken = getSelectedDepositToken();
-  const withdrawButtonLabel = submitting ? 'Sending...' : 'Withdraw via xln';
-  const payButtonHref = pendingPayButtonHref;
-  const findRoutesHref = pendingFindRoutesHref;
 
   const tokenColors = {
     USDC: '#2775ca',
@@ -519,7 +320,7 @@ const render = () => {
     <div class="action-grid">
       <section class="action-card">
         <h2>Deposit</h2>
-        <div class="action-sub">Pay directly to this custody entity. Left button pays immediately. Right button opens the wallet so the user can choose a route manually.</div>
+        <div class="action-sub">Scan the invoice, copy it into any XLN wallet, or open the wallet directly in this browser.</div>
         <form id="deposit-form">
           <label>
             Asset
@@ -534,19 +335,24 @@ const render = () => {
           <div class="deposit-presets">
             ${['1', '10', '100'].map(value => `<button class="secondary" type="button" data-deposit-preset="${value}">${escapeHtml(value)} ${escapeHtml(selectedDepositToken?.symbol || 'USDC')}</button>`).join('')}
           </div>
-          <div class="deposit-cta-group segmented">
-            <div class="deposit-cta-segment left">
-              <div class="deposit-controller-host" aria-label="Embedded Pay Controller"></div>
+          <div class="deposit-invoice-card">
+            <div class="deposit-qr-wrap">
+              ${pendingQrSrc ? `<img class="deposit-qr-image" src="${escapeHtml(pendingQrSrc)}" alt="XLN invoice QR" />` : '<div class="deposit-qr-placeholder">Generating QR…</div>'}
             </div>
-            <div class="deposit-cta-divider" aria-hidden="true"></div>
-            <div class="deposit-cta-segment right">
-              <button
-                class="deposit-find-routes-btn"
-                type="button"
-                data-find-routes-href="${escapeHtml(findRoutesHref)}"
-              >
-                <span>Find Routes</span>
-              </button>
+            <div class="deposit-invoice-details">
+              <div class="deposit-invoice-row">
+                <span class="deposit-caption">Invoice</span>
+                <code class="deposit-invoice-string">${escapeHtml(pendingInvoice)}</code>
+              </div>
+              <div class="deposit-invoice-row">
+                <span class="deposit-caption">Wallet</span>
+                <code class="deposit-invoice-string">${escapeHtml(pendingWalletHref)}</code>
+              </div>
+              ${depositHint ? `<div class="inline-ok">${escapeHtml(depositHint)}</div>` : ''}
+              <div class="deposit-action-row">
+                <button class="primary" type="button" data-open-wallet-href="${escapeHtml(pendingWalletHref)}">Open Wallet</button>
+                <button class="secondary" type="button" data-copy-invoice="${escapeHtml(pendingInvoice)}">Copy Invoice</button>
+              </div>
             </div>
           </div>
         </form>
@@ -655,6 +461,7 @@ const render = () => {
       depositAmountInput.addEventListener('input', () => {
         depositAmount = depositAmountInput.value;
         syncDepositTargets(depositTokenId, depositAmount || '0');
+        render();
       });
     }
     depositForm.querySelectorAll('[data-deposit-preset]').forEach((button) => {
@@ -665,35 +472,25 @@ const render = () => {
         render();
       });
     });
-    const findRoutesButton = depositForm.querySelector('.deposit-find-routes-btn');
-    if (findRoutesButton instanceof HTMLButtonElement) {
-      findRoutesButton.addEventListener('click', () => {
-        const href = findRoutesButton.getAttribute('data-find-routes-href') || '';
+    const openWalletButton = depositForm.querySelector('[data-open-wallet-href]');
+    if (openWalletButton instanceof HTMLButtonElement) {
+      openWalletButton.addEventListener('click', () => {
+        const href = openWalletButton.getAttribute('data-open-wallet-href') || '';
         if (!href) return;
-        embeddedCheckoutStatus = '';
-        embeddedCheckoutError = '';
-        embeddedCheckoutStage = 'Manual route selection';
-        patchEmbeddedDepositUi();
-        if (payControllerFrame) {
-          try {
-            payControllerFrame.src = 'about:blank';
-          } catch {
-            // ignore
-          }
-        }
-        const popup = window.open(href, FIND_ROUTES_WINDOW_NAME);
+        const popup = window.open(href, WALLET_WINDOW_NAME);
         popup?.focus();
       });
     }
-  }
-
-  const controllerHost = app.querySelector('.deposit-controller-host');
-  if (controllerHost instanceof HTMLDivElement) {
-    const frame = ensurePayControllerFrame();
-    if (payButtonHref && frame.src !== payButtonHref) {
-      frame.src = payButtonHref;
+    const copyInvoiceButton = depositForm.querySelector('[data-copy-invoice]');
+    if (copyInvoiceButton instanceof HTMLButtonElement) {
+      copyInvoiceButton.addEventListener('click', async () => {
+        const invoice = copyInvoiceButton.getAttribute('data-copy-invoice') || '';
+        if (!invoice) return;
+        await navigator.clipboard.writeText(invoice);
+        depositHint = 'Invoice copied.';
+        render();
+      });
     }
-    controllerHost.replaceChildren(frame);
   }
 
   restoreActiveField(activeField);
@@ -769,9 +566,6 @@ async function handleDepositSubmit(event) {
   depositAmount = amount;
   syncDepositTargets(tokenId, amount);
   depositHint = 'Deposit options updated.';
-  embeddedCheckoutStatus = 'Wallet ready';
-  embeddedCheckoutError = '';
-  embeddedCheckoutStage = 'Wallet ready';
   render();
 }
 
@@ -824,6 +618,5 @@ load().catch((error) => {
 });
 
 setInterval(() => {
-  if (isEmbeddedPayBusy()) return;
   void reload().catch(() => undefined);
 }, 2000);

@@ -36,7 +36,7 @@
 
   // Icons
   import {
-    ArrowUpRight, Repeat, Landmark, Users, Activity,
+    ArrowUpRight, ArrowDownLeft, Repeat, Landmark, Users, Activity,
     MessageCircle, Settings as SettingsIcon, BookUser,
     ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check, Scale, Globe, Trash2, MoreHorizontal, SlidersHorizontal
   } from 'lucide-svelte';
@@ -47,6 +47,7 @@
   import AccountPanel from './AccountPanel.svelte';
   import AccountList from './AccountList.svelte';
   import PaymentPanel from './PaymentPanel.svelte';
+  import ReceivePanel from './ReceivePanel.svelte';
   import SwapPanel from './SwapPanel.svelte';
   import SettlementPanel from './SettlementPanel.svelte';
   import CreditForm from './CreditForm.svelte';
@@ -87,7 +88,7 @@
   // Tab types
   type ViewTab = 'assets' | 'accounts' | 'more' | 'settings';
   type MoreTab = 'consensus' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance';
-  type AccountWorkspaceTab = 'send' | 'swap' | 'open' | 'activity' | 'settle' | 'configure' | 'appearance';
+  type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'settle' | 'configure' | 'appearance';
   type AssetWorkspaceTab = 'faucet' | 'e2r' | 'r2c' | 'c2r' | 'r2e' | 'send' | 'allow';
   type ConfigureWorkspaceTab = 'extend-credit' | 'request-credit' | 'collateral' | 'token';
 
@@ -183,6 +184,10 @@
       case 'send':
         activeTab = 'accounts';
         accountWorkspaceTab = 'send';
+        break;
+      case 'receive':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'receive';
         break;
       case 'swap':
         activeTab = 'accounts';
@@ -2515,6 +2520,7 @@
   const accountWorkspaceTabs: IconPendingTabConfig<AccountWorkspaceTab>[] = [
     { id: 'open', icon: PlusCircle, label: 'Open Account' },
     { id: 'send', icon: ArrowUpRight, label: 'Pay' },
+    { id: 'receive', icon: ArrowDownLeft, label: 'Receive' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
     { id: 'configure', icon: SettingsIcon, label: 'Configure' },
     { id: 'appearance', icon: SlidersHorizontal, label: 'Appearance' },
@@ -3127,6 +3133,9 @@
           <section class="account-workspace-content">
             {#if accountWorkspaceTab === 'send'}
               <PaymentPanel entityId={replica.state?.entityId || tab.entityId} {contacts} />
+
+            {:else if accountWorkspaceTab === 'receive'}
+              <ReceivePanel entityId={replica.state?.entityId || tab.entityId} />
 
             {:else if accountWorkspaceTab === 'swap'}
               <SwapPanel
