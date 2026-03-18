@@ -398,7 +398,7 @@ async function openPayWorkspace(page: Page): Promise<void> {
 }
 
 async function selectPayRecipient(page: Page, targetEntityId: string): Promise<void> {
-  const recipientPicker = page.locator('button.closed-trigger, input[placeholder="Select recipient..."]').first();
+  const recipientPicker = page.locator('button.closed-trigger').first();
   await expect(recipientPicker).toBeVisible({ timeout: 10_000 });
   await recipientPicker.click();
   const recipientOption = page.locator('.dropdown-item').filter({ hasText: targetEntityId }).first();
@@ -422,7 +422,7 @@ async function pay(
 
   await selectPayRecipient(page, to);
 
-  const amountInput = page.locator('input[placeholder="0.00"]').first();
+  const amountInput = page.locator('#payment-amount-input');
   await expect(amountInput).toBeVisible({ timeout: 10_000 });
   await amountInput.click();
   await amountInput.fill(ethers.formatUnits(amount, 18));

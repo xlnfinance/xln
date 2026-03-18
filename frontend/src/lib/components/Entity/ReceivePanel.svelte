@@ -96,7 +96,7 @@
     <section class="invoice-builder">
       <div class="field">
         <label>Amount</label>
-        <input type="text" bind:value={amount} placeholder="Optional amount" />
+        <input type="text" bind:value={amount} data-testid="receive-invoice-amount" aria-label="Invoice amount" />
       </div>
       <div class="field">
         <label>Asset</label>
@@ -106,7 +106,7 @@
       </div>
       <div class="field">
         <label>Description</label>
-        <input type="text" bind:value={description} placeholder="Optional description" />
+        <input type="text" bind:value={description} data-testid="receive-invoice-description" aria-label="Invoice description" />
       </div>
       <div class="invoice-actions">
         <button class="primary-inline" type="button" on:click={() => copyText(invoicePreview, 'invoice')}>

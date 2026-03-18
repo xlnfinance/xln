@@ -390,8 +390,8 @@ async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'
 
 async function placeAliceSellOffer(page: Page, amount: string, price: string): Promise<void> {
   await configurePair(page, 'WETH/USDC', 'sell');
-  const amountInput = page.locator('.swap-panel input[placeholder="Amount to sell"]').first();
-  const priceInput = page.locator('.swap-panel input[placeholder="Price"]').first();
+  const amountInput = page.getByTestId('swap-order-amount').first();
+  const priceInput = page.getByTestId('swap-order-price').first();
   const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
 
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
@@ -406,8 +406,8 @@ async function placeAliceSellOffer(page: Page, amount: string, price: string): P
 
 async function placeBobMatchingBuyOrder(page: Page, spendAmount: string, price: string): Promise<void> {
   await configurePair(page, 'WETH/USDC', 'buy');
-  const amountInput = page.locator('.swap-panel input[placeholder="Amount to sell"]').first();
-  const priceInput = page.locator('.swap-panel input[placeholder="Price"]').first();
+  const amountInput = page.getByTestId('swap-order-amount').first();
+  const priceInput = page.getByTestId('swap-order-price').first();
   const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
 
   await expect(amountInput).toBeVisible({ timeout: 20_000 });

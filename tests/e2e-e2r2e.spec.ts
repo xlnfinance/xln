@@ -67,7 +67,7 @@ async function openSettleWorkspace(page: Page): Promise<void> {
 
 async function selectSettleAccount(page: Page, counterpartyId: string): Promise<void> {
   await openSettleWorkspace(page);
-  const picker = page.locator('.settlement-panel button.closed-trigger, .settlement-panel input[placeholder="Select account..."]').first();
+  const picker = page.locator('.settlement-panel .entity-input .closed-trigger, .settlement-panel .entity-input input').first();
   await expect(picker).toBeVisible({ timeout: 20_000 });
   await picker.click();
   const option = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();

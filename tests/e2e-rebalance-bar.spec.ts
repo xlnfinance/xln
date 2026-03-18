@@ -846,14 +846,14 @@ async function sendDirectPaymentToHub(
   await expect(directModeBtn).toBeVisible({ timeout: 10_000 });
   await directModeBtn.click();
 
-  const recipientPicker = page.locator('button.closed-trigger, input[placeholder="Select recipient..."]').first();
+  const recipientPicker = page.locator('button.closed-trigger').first();
   await expect(recipientPicker).toBeVisible({ timeout: 10_000 });
   await recipientPicker.click();
   const recipientOption = page.locator('.dropdown-item').filter({ hasText: hubId }).first();
   await expect(recipientOption).toBeVisible({ timeout: 10_000 });
   await recipientOption.click();
 
-  const amountInput = page.locator('input[placeholder="0.00"]').first();
+  const amountInput = page.locator('#payment-amount-input');
   await expect(amountInput).toBeVisible({ timeout: 10_000 });
   await amountInput.fill(amountUsd.toString());
 

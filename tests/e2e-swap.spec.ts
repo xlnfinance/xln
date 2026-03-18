@@ -731,8 +731,8 @@ async function prepareExecutableOrder(page: Page): Promise<number> {
   }
 
   const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
-  const amountInput = page.locator('.swap-panel input[placeholder="Amount to sell"]').first();
-  const priceInput = page.locator('.swap-panel input[placeholder="Price"]').first();
+  const amountInput = page.getByTestId('swap-order-amount').first();
+  const priceInput = page.getByTestId('swap-order-price').first();
   const buySideButton = page.getByTestId('swap-side-buy').first();
   const sellSideButton = page.getByTestId('swap-side-sell').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
@@ -931,9 +931,9 @@ test.describe('E2E Swap Flow', () => {
     await expect(buySide).toBeVisible({ timeout: 20_000 });
     await buySide.click();
 
-    const amountInput = page.locator('.swap-panel input[placeholder="Amount to sell"]').first();
+    const amountInput = page.getByTestId('swap-order-amount').first();
     await expect(amountInput).toBeVisible({ timeout: 20_000 });
-    const priceInput = page.locator('.swap-panel input[placeholder="Price"]').first();
+    const priceInput = page.getByTestId('swap-order-price').first();
     await expect(priceInput).toBeVisible({ timeout: 20_000 });
 
     const availableGive = await readAvailableFromSizing(page);
@@ -1028,8 +1028,8 @@ test.describe('E2E Swap Flow', () => {
     const buySideButton = page.getByTestId('swap-side-buy').first();
     await expect(buySideButton).toBeVisible({ timeout: 20_000 });
     await buySideButton.click();
-    const amountInput = page.locator('.swap-panel input[placeholder="Amount to sell"]').first();
-    const priceInput = page.locator('.swap-panel input[placeholder="Price"]').first();
+    const amountInput = page.getByTestId('swap-order-amount').first();
+    const priceInput = page.getByTestId('swap-order-price').first();
     await expect(amountInput).toBeVisible({ timeout: 20_000 });
     await expect(priceInput).toBeVisible({ timeout: 20_000 });
     const availableGive = await readAvailableFromSizing(page);

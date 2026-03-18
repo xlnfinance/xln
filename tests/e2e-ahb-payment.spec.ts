@@ -835,7 +835,7 @@ function parseRouteFeeText(rawText: string): bigint {
 }
 
 async function selectPayRecipient(page: Page, targetEntityId: string): Promise<void> {
-  const recipientPicker = page.locator('button.closed-trigger, input[placeholder="Select recipient..."]').first();
+  const recipientPicker = page.locator('button.closed-trigger').first();
   await expect(recipientPicker).toBeVisible({ timeout: 10_000 });
   await recipientPicker.click();
   const recipientOption = page.locator('.dropdown-item').filter({ hasText: targetEntityId }).first();
@@ -851,7 +851,7 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
 
   await selectPayRecipient(page, to);
 
-  const amountInput = page.locator('input[placeholder="0.00"]').first();
+  const amountInput = page.locator('#payment-amount-input');
   await expect(amountInput).toBeVisible({ timeout: 10_000 });
   await amountInput.click();
   await amountInput.fill(ethers.formatUnits(amount, 18));
@@ -879,7 +879,7 @@ async function attemptOverspend(page: Page, to: string, route: string[], amount:
 
   await selectPayRecipient(page, to);
 
-  const amountInput = page.locator('input[placeholder="0.00"]').first();
+  const amountInput = page.locator('#payment-amount-input');
   await amountInput.click();
   await amountInput.fill(ethers.formatUnits(amount, 18));
 

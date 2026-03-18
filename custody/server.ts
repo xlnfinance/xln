@@ -456,7 +456,7 @@ const server = Bun.serve({
         }
 
         const withdrawalId = `wd_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
-        const description = `custody-withdrawal:${withdrawalId} requested:${amountMinor.toString()} fee:${feeMinor.toString()}`;
+        const description = `custody-withdrawal:${withdrawalId} requested:${amountMinor.toString()} fee:${feeMinor.toString()} tsms:${Date.now()}`;
         store.reserveWithdrawal({
           id: withdrawalId,
           userId: session.userId,

@@ -159,8 +159,18 @@ const createInvoiceId = () => {
   return `inv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 };
 
+const appendPaymentTimestamp = (description, startedAtMs = Date.now()) => {
+  const clean = String(description || '')
+    .replace(/\btsms:\d{10,}\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const marker = `tsms:${Math.max(0, Math.trunc(startedAtMs))}`;
+  return clean ? `${clean} ${marker}` : marker;
+};
+
 const buildWalletPayHref = (sourceState, tokenId, amount, invoiceId) => {
   if (!sourceState?.custody?.walletUrl) return '';
+  const startedAtMs = Date.now();
   const base = new URL(sourceState.custody.walletUrl);
   const url = new URL('/app', base.origin);
   const params = new URLSearchParams();
@@ -168,8 +178,10 @@ const buildWalletPayHref = (sourceState, tokenId, amount, invoiceId) => {
   params.set('token', String(tokenId));
   params.set('amt', String(amount).trim());
   params.set('u', sourceState.session.userId);
-  params.set('desc', `Custody invoice:${invoiceId}`);
+  params.set('desc', appendPaymentTimestamp(`Custody invoice:${invoiceId}`, startedAtMs));
   params.set('locked', '1');
+  params.set('mode', 'htlc');
+  params.set('ts', String(startedAtMs));
   if (sourceState.custody.jurisdictionId) {
     params.set('jId', sourceState.custody.jurisdictionId);
   }
@@ -178,13 +190,16 @@ const buildWalletPayHref = (sourceState, tokenId, amount, invoiceId) => {
 };
 
 const buildInvoiceUri = (sourceState, tokenId, amount, invoiceId) => {
+  const startedAtMs = Date.now();
   const params = new URLSearchParams();
   params.set('id', sourceState.custody.entityId);
   params.set('token', String(tokenId));
   params.set('amt', String(amount).trim());
   params.set('u', sourceState.session.userId);
-  params.set('desc', `Custody invoice:${invoiceId}`);
+  params.set('desc', appendPaymentTimestamp(`Custody invoice:${invoiceId}`, startedAtMs));
   params.set('locked', '1');
+  params.set('mode', 'htlc');
+  params.set('ts', String(startedAtMs));
   if (sourceState.custody.jurisdictionId) {
     params.set('jId', sourceState.custody.jurisdictionId);
   }
@@ -385,15 +400,23 @@ const render = () => {
               ${pendingQrSrc ? `<img class="deposit-qr-image" src="${escapeHtml(pendingQrSrc)}" alt="XLN invoice QR" />` : '<div class="deposit-qr-placeholder">Generating QR…</div>'}
             </div>
             <div class="deposit-invoice-details">
-              <div class="deposit-copy-row">
-                <button class="deposit-copy-inline" type="button" data-copy-invoice="${escapeHtml(pendingInvoice)}">Copy invoice</button>
-              </div>
               <div class="deposit-invoice-row">
-                <div class="deposit-invoice-text">${escapeHtml(pendingInvoice)}</div>
+                <div class="deposit-invoice-text deposit-invoice-string">${escapeHtml(pendingInvoice)}</div>
               </div>
-              <div class="inline-ok ${depositHint ? '' : 'hidden'}" data-deposit-hint>${escapeHtml(depositHint)}</div>
-              <div class="deposit-wallet-row">
-                <button class="btn-wallet" type="button" data-open-wallet-href="${escapeHtml(pendingWalletHref)}">Open Wallet</button>
+              <div class="deposit-actions-row">
+                <button class="btn-xln-action" type="button" data-open-wallet-href="${escapeHtml(pendingWalletHref)}">
+                  <span class="btn-xln-mark" aria-hidden="true">
+                    <img src="https://xln.finance/img/logo.png" alt="" />
+                  </span>
+                  <span>Local Wallet</span>
+                </button>
+                <button
+                  class="deposit-copy-inline"
+                  type="button"
+                  data-copy-invoice="${escapeHtml(pendingInvoice)}"
+                  data-default-label="Copy invoice"
+                  data-copied-label="Copied"
+                >Copy invoice</button>
               </div>
             </div>
           </div>
@@ -429,7 +452,12 @@ const render = () => {
             ${withdrawError ? `<div class="inline-error">${escapeHtml(withdrawError)}</div>` : ''}
             ${withdrawMessage ? `<div class="inline-ok">${escapeHtml(withdrawMessage)}</div>` : ''}
             <div class="checkout-cta-group">
-              <button class="primary full-width" type="submit" ${submitting ? 'disabled' : ''}>Withdraw via XLN</button>
+              <button class="btn-xln-action full-width" type="submit" ${submitting ? 'disabled' : ''}>
+                <span class="btn-xln-mark" aria-hidden="true">
+                  <img src="https://xln.finance/img/logo.png" alt="" />
+                </span>
+                <span>Withdraw</span>
+              </button>
             </div>
           </div>
         </form>
@@ -531,12 +559,14 @@ const render = () => {
         await navigator.clipboard.writeText(invoice);
         depositHint = '';
         updateDepositHintUi();
-        copyInvoiceButton.textContent = 'Copied';
+        const defaultLabel = copyInvoiceButton.getAttribute('data-default-label') || 'Copy invoice';
+        const copiedLabel = copyInvoiceButton.getAttribute('data-copied-label') || 'Copied';
+        copyInvoiceButton.textContent = copiedLabel;
         if (copyInvoiceResetTimer) {
           clearTimeout(copyInvoiceResetTimer);
         }
         copyInvoiceResetTimer = setTimeout(() => {
-          copyInvoiceButton.textContent = 'Copy invoice';
+          copyInvoiceButton.textContent = defaultLabel;
           copyInvoiceResetTimer = null;
         }, 1200);
       });

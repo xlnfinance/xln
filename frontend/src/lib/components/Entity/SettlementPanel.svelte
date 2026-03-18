@@ -1251,7 +1251,6 @@
         entities={accountEntityIds}
         {contacts}
         excludeId={entityId}
-        placeholder="Select account..."
         disabled={sending}
         on:change={handleAccountChange}
       />
@@ -1289,7 +1288,6 @@
       entities={accountEntityIds}
       {contacts}
       excludeId={entityId}
-      placeholder="Select account..."
       disabled={sending}
       on:change={handleAccountChange}
     />
@@ -1297,7 +1295,7 @@
     <label class="settle-field settle-field-wide">
       <span>Amount</span>
       <div class="settle-amount-shell">
-        <input type="text" bind:value={amount} placeholder="0.00" disabled={sending} />
+        <input type="text" bind:value={amount} data-testid="settlement-amount-input" aria-label="Settlement amount" disabled={sending} />
         <div class="settle-inline-controls">
           <button
             type="button"
@@ -1343,7 +1341,6 @@
       entities={transferEntityOptions}
       {contacts}
       excludeId={entityId}
-      placeholder="Select recipient..."
       disabled={sending}
       on:change={handleRecipientChange}
     />
@@ -1356,7 +1353,7 @@
     <label class="settle-field settle-field-wide">
       <span>Amount</span>
       <div class="settle-amount-shell">
-        <input type="text" bind:value={amount} placeholder="0.00" disabled={sending} />
+        <input type="text" bind:value={amount} data-testid="settlement-transfer-amount-input" aria-label="Transfer amount" disabled={sending} />
         <div class="settle-inline-controls">
           <button
             type="button"

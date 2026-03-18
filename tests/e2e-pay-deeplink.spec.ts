@@ -111,7 +111,7 @@ test.describe('Canonical /app#pay deep link', () => {
       await payPage.goto(payUrl, { waitUntil: 'domcontentloaded' });
 
       await expect(payPage.locator('.payment-panel')).toBeVisible({ timeout: 60_000 });
-      await expect(payPage.locator('input[placeholder="0.00"]').first()).toHaveValue('5');
+      await expect(payPage.locator('#payment-amount-input')).toHaveValue('5');
 
       const paymentCursor = await getPersistedReceiptCursor(bobPage);
       const findRoutesBtn = payPage.getByRole('button', { name: /^Find Routes$/i });
