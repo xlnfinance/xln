@@ -360,7 +360,7 @@ button.primary:disabled {
 
 .deposit-invoice-card {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 154px minmax(0, 1fr);
   gap: 18px;
   align-items: start;
 }
@@ -373,7 +373,7 @@ button.primary:disabled {
 .deposit-qr-image,
 .deposit-qr-placeholder {
   width: 100%;
-  max-width: 220px;
+  max-width: 154px;
   aspect-ratio: 1;
   height: auto;
   border-radius: 0;
@@ -423,11 +423,14 @@ button.primary:disabled {
   display: none !important;
 }
 
-.deposit-action-row {
+.deposit-copy-row,
+.deposit-wallet-row {
   display: flex;
   align-items: center;
-  gap: 14px;
   flex-wrap: wrap;
+}
+
+.deposit-wallet-row {
   min-height: 46px;
 }
 
@@ -728,7 +731,7 @@ pre.activity-sub {
   }
 
   .deposit-qr-wrap {
-    width: min(220px, 100%);
+    width: min(154px, 100%);
     margin: 0 auto 4px;
   }
 
