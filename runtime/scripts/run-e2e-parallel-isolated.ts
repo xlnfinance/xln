@@ -526,6 +526,8 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
       stdio: ['ignore', 'pipe', 'pipe'],
       env: sanitizeChildEnv({
         ...process.env,
+        ANVIL_RPC: rpcUrl,
+        RPC_ETHEREUM: rpcUrl,
         VITE_DEV_PORT: String(webPort),
         VITE_API_PROXY_TARGET: apiUrl,
         VITE_CACHE_DIR: shardViteCacheDir,

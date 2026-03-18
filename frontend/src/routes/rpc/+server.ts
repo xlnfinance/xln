@@ -1,11 +1,17 @@
 import type { RequestHandler } from './$types';
 
-const DEFAULT_RPC_URL = process.env.RPC_ETHEREUM ?? process.env.ANVIL_RPC ?? 'http://localhost:8545';
+const getRpcUrl = (): string => {
+  const rpcUrl = process.env.RPC_ETHEREUM ?? process.env.ANVIL_RPC;
+  if (!rpcUrl) {
+    throw new Error('RPC_PROXY_MISCONFIGURED: set RPC_ETHEREUM or ANVIL_RPC');
+  }
+  return rpcUrl;
+};
 
 export const POST: RequestHandler = async ({ request }) => {
   try {
     const body = await request.text();
-    const upstream = await fetch(DEFAULT_RPC_URL, {
+    const upstream = await fetch(getRpcUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
