@@ -311,6 +311,7 @@ const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** 18n;
 const BOOTSTRAP_POLL_MS = Math.max(10, Number(process.env.BOOTSTRAP_POLL_MS || '40'));
 const RUNTIME_SETTLE_POLL_MS = Math.max(10, Number(process.env.RUNTIME_SETTLE_POLL_MS || '25'));
 const INCLUDE_MARKET_MAKER_BY_DEFAULT = !/^(0|false)$/i.test(process.env.XLN_INCLUDE_MARKET_MAKER ?? '1');
+const SKIP_SERVER_BOOTSTRAP = /^(1|true)$/i.test(process.env.XLN_SKIP_SERVER_BOOTSTRAP ?? '');
 const MARKET_MAKER_SIGNER_LABEL = process.env.MARKET_MAKER_SIGNER_LABEL ?? 'mm-1';
 const MARKET_MAKER_SEED = process.env.MARKET_MAKER_SEED ?? `${HUB_SEED}:market-maker`;
 const MARKET_MAKER_NAME = process.env.MARKET_MAKER_NAME ?? 'MM1';
@@ -5068,9 +5069,16 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     }
   }
 
-  const hubEntityIds = await bootstrapServerHubsAndReserves(env, options, advertisedRelayUrl, anvilRpc, {
-    includeMarketMaker: INCLUDE_MARKET_MAKER_BY_DEFAULT,
-  });
+  const hubEntityIds = SKIP_SERVER_BOOTSTRAP
+    ? (() => {
+        console.log('[XLN] Skipping server bootstrap (XLN_SKIP_SERVER_BOOTSTRAP=1)');
+        relayStore.activeHubEntityIds = [];
+        stopMarketMakerLoop();
+        return [] as string[];
+      })()
+    : await bootstrapServerHubsAndReserves(env, options, advertisedRelayUrl, anvilRpc, {
+        includeMarketMaker: INCLUDE_MARKET_MAKER_BY_DEFAULT,
+      });
 
   // Wire relay-router + local delivery
   const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
