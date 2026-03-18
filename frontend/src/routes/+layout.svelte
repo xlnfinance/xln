@@ -13,7 +13,10 @@
 	});
 
 	// Check for embed mode from URL
-	let isEmbed = $derived(browser && new URLSearchParams(window.location.search).get('embed') === '1');
+	let isEmbed = $derived(browser && (() => {
+		const params = new URLSearchParams(window.location.search);
+		return params.get('embed') === '1' || params.has('e');
+	})());
 
 	// Landing page gets transparent topbar
 	let isLandingPage = $derived($page.url.pathname === '/');

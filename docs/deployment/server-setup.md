@@ -56,7 +56,6 @@ server {
 
     # Security headers
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
 
     # /c - Plain text display (LLMs, curl, quick reads, no download prompt)
@@ -82,9 +81,15 @@ server {
         expires off;
     }
 
+    location = /app {
+        alias /root/xln/frontend/build/index.html;
+        add_header Content-Security-Policy "frame-ancestors 'self' https://xln.finance https://app.xln.finance https://custody.xln.finance https://localhost:* http://localhost:*" always;
+    }
+
     location / {
         root /root/xln/frontend/build;
         try_files $uri $uri/ /index.html;
+        add_header Content-Security-Policy "frame-ancestors 'self'" always;
 
         location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
             expires 1y;

@@ -180,14 +180,19 @@ server {
     server_name _;
     
     # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header X-Content-Type-Options "nosniff" always;
     
+    location = /app {
+        alias /home/ubuntu/xln/frontend/build/index.html;
+        add_header Content-Security-Policy "frame-ancestors 'self' https://xln.finance https://app.xln.finance https://custody.xln.finance https://localhost:* http://localhost:*" always;
+    }
+
     # Serve static frontend files
     location / {
         root /home/ubuntu/xln/frontend/build;
         try_files $uri $uri/ /index.html;
+        add_header Content-Security-Policy "frame-ancestors 'self'" always;
         
         # Cache static assets
         location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {

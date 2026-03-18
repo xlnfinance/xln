@@ -987,6 +987,37 @@
     await computeRoutes(false);
   }
 
+  async function waitForEmbeddedHtlcConfirmation(hashlock: string, timeoutMs = 45_000): Promise<void> {
+    const startedAfterId = (() => {
+      const lastLog = Array.isArray(currentEnv?.frameLogs) && currentEnv.frameLogs.length > 0
+        ? currentEnv.frameLogs[currentEnv.frameLogs.length - 1]
+        : null;
+      return Number((lastLog as { id?: number } | null)?.id ?? -1);
+    })();
+    const entityNorm = normalizeEntityId(entityId);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const logs = Array.isArray(currentEnv?.frameLogs) ? currentEnv.frameLogs : [];
+      for (const rawEntry of logs as Array<{ id?: number; message?: string; data?: Record<string, unknown> }>) {
+        const entryId = Number(rawEntry?.id ?? -1);
+        if (entryId <= startedAfterId) continue;
+        const message = String(rawEntry?.message || '').trim();
+        const data = rawEntry?.data || {};
+        if (String(data.hashlock || '').trim() !== hashlock) continue;
+        const eventEntityNorm = normalizeEntityId(String(data.entityId || ''));
+        if (eventEntityNorm && eventEntityNorm !== entityNorm) continue;
+        if (message === 'PaymentFailed') {
+          throw new Error(String(data.reason || 'Payment failed'));
+        }
+        if (message === 'PaymentFinalized') {
+          return;
+        }
+      }
+      await sleep(50);
+    }
+    throw new Error('Payment confirmation timed out');
+  }
+
   export async function embeddedPrepareFirstRoute(): Promise<string> {
     if (sendingPayment || findingRoutes) {
       throw new Error('Payment already in progress');
@@ -1033,6 +1064,10 @@
     if (!result.queued) {
       throw new Error(preflightError || 'Payment failed');
     }
+    if (!result.hashlock) {
+      throw new Error('Missing HTLC hashlock');
+    }
+    await waitForEmbeddedHtlcConfirmation(result.hashlock);
     console.info('[PaymentPanel.embeddedPayUsingFirstRoute] done');
   }
 
