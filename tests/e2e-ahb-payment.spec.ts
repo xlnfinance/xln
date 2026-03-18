@@ -10,11 +10,11 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { ethers } from 'ethers';
+import { deriveDelta } from '../runtime/account-utils';
 import { APP_BASE_URL, API_BASE_URL, resetProdServer } from './utils/e2e-baseline';
 import {
   listRenderedCounterpartyIds,
   getRenderedOutboundForAccount,
-  waitForRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
 } from './utils/e2e-account-ui';
 import { connectHub as connectActiveRuntimeToHub } from './utils/e2e-connect';
@@ -51,6 +51,18 @@ const requiredInbound = (desiredForward: bigint, feePPM: bigint, baseFee: bigint
 function toWei(n: number): bigint {
   return BigInt(n) * 10n ** 18n;
 }
+
+type DeltaSnapshot = {
+  ondelta: string;
+  offdelta: string;
+  collateral: string;
+  leftCreditLimit: string;
+  rightCreditLimit: string;
+  leftAllowance: string;
+  rightAllowance: string;
+  leftHold: string;
+  rightHold: string;
+};
 
 function relayToApiBase(relayUrl: string | null | undefined): string | null {
   if (!relayUrl) return null;
@@ -169,6 +181,17 @@ async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
     snapshot.wsOpenForRuntime,
     `[${tag}] relay should not churn ws_open for same runtime (opens=${snapshot.wsOpenForRuntime}, closes=${snapshot.wsCloseForRuntime})`,
   ).toBeLessThanOrEqual(snapshot.wsCloseForRuntime + 2);
+}
+
+async function waitForActiveRuntime(page: Page, expectedRuntimeId: string, tag: string): Promise<void> {
+  await page.waitForFunction(({ expectedRuntimeId }) => {
+    const env = (window as any).isolatedEnv;
+    return String(env?.runtimeId || '').toLowerCase() === String(expectedRuntimeId || '').toLowerCase()
+      && Number(env?.eReplicas?.size || 0) > 0;
+  }, { expectedRuntimeId }, { timeout: 20_000 });
+
+  const activeRuntimeId = await page.evaluate(() => String((window as any).isolatedEnv?.runtimeId || '').toLowerCase());
+  expect(activeRuntimeId, `[${tag}] active runtime mismatch`).toBe(String(expectedRuntimeId || '').toLowerCase());
 }
 
 async function ensureRuntimeOnline(page: Page, tag: string) {
@@ -444,9 +467,54 @@ async function findSelfCycleRoute(
 
 /** Get USDC outCapacity */
 async function outCap(page: Page, entityId: string, cpId: string): Promise<bigint> {
-  void entityId;
-  const rendered = await waitForRenderedOutboundForAccount(page, cpId, { timeoutMs: 12_000 });
-  return ethers.parseUnits(String(rendered), 18);
+  const delta = await page.evaluate(({ entityId, cpId }) => {
+    const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) return null;
+
+    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
+      const account = replica?.state?.accounts?.get?.(cpId);
+      const rawDelta = account?.deltas?.get?.(1);
+      if (!rawDelta || typeof rawDelta !== 'object') return null;
+
+      const raw = rawDelta as Record<string, unknown>;
+      const readBig = (value: unknown): string => {
+        if (typeof value === 'bigint') return value.toString();
+        if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return String(value);
+        if (typeof value === 'string' && /^-?\\d+$/.test(value.trim())) return value.trim();
+        return '0';
+      };
+
+      return {
+        ondelta: readBig(raw.ondelta),
+        offdelta: readBig(raw.offdelta),
+        collateral: readBig(raw.collateral),
+        leftCreditLimit: readBig(raw.leftCreditLimit),
+        rightCreditLimit: readBig(raw.rightCreditLimit),
+        leftAllowance: readBig(raw.leftAllowance),
+        rightAllowance: readBig(raw.rightAllowance),
+        leftHold: readBig(raw.leftHold),
+        rightHold: readBig(raw.rightHold),
+      } satisfies DeltaSnapshot;
+    }
+
+    return null;
+  }, { entityId, cpId });
+
+  if (!delta) return 0n;
+
+  return deriveDelta({
+    tokenId: 1,
+    ondelta: BigInt(delta.ondelta),
+    offdelta: BigInt(delta.offdelta),
+    collateral: BigInt(delta.collateral),
+    leftCreditLimit: BigInt(delta.leftCreditLimit),
+    rightCreditLimit: BigInt(delta.rightCreditLimit),
+    leftAllowance: BigInt(delta.leftAllowance),
+    rightAllowance: BigInt(delta.rightAllowance),
+    leftHold: BigInt(delta.leftHold),
+    rightHold: BigInt(delta.rightHold),
+  }, String(entityId).toLowerCase() < String(cpId).toLowerCase()).outCapacity;
 }
 
 async function connectedCounterparties(page: Page, entityId: string): Promise<Set<string>> {
@@ -910,6 +978,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] Bob mnemonic: ${bob!.mnemonic.split(' ').slice(0, 3).join(' ')}...`);
 
     await switchToRuntime(page, 'alice');
+    await waitForActiveRuntime(page, alice!.runtimeId, 'alice-create');
     await assertP2PSingletonAndWsHealth(page, 'alice-create');
     await waitForEntityAdvertised(page, alice!.entityId);
     const aliceRuntimeId = alice!.runtimeId;
@@ -917,6 +986,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await dumpState(page, 'alice-after-create');
 
     await switchToRuntime(page, 'bob');
+    await waitForActiveRuntime(page, bob!.runtimeId, 'bob-create');
     await assertP2PSingletonAndWsHealth(page, 'bob-create');
     expect(bob!.entityId).not.toBe(alice!.entityId);
     await waitForEntityAdvertised(page, bob!.entityId);
@@ -941,6 +1011,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     console.log('[E2E] 4b. Switch to Alice');
     await switchToRuntime(page, 'alice');
+    await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice');
     await assertP2PSingletonAndWsHealth(page, 'switch-alice');
     await dumpState(page, 'alice-after-switch');
 
@@ -978,6 +1049,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E]    Received: ${payAmount} (${ethers.formatUnits(payAmount, 18)} USDC)`);
 
     await switchToRuntime(page, 'bob');
+    await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-forward-recv');
     await assertP2PSingletonAndWsHealth(page, 'switch-bob-forward-recv');
     await waitForAccountIdle(page, bob!.entityId, hubId);
     const b0 = await outCap(page, bob!.entityId, hubId);
@@ -985,6 +1057,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const bobForwardCursor = await getPersistedReceiptCursor(page);
 
     await switchToRuntime(page, 'alice');
+    await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-reverse-recv');
     await assertP2PSingletonAndWsHealth(page, 'switch-alice-reverse-recv');
     await waitForAccountIdle(page, alice!.entityId, hubId);
     const hubRuntimeId = await getEntityRuntimeId(page, hubId);
@@ -1016,6 +1089,8 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // Bob: receiver gets amount minus fee
     await switchToRuntime(page, 'bob');
+    await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-forward-verify');
+    await assertP2PSingletonAndWsHealth(page, 'switch-bob-forward-verify');
     await waitForPersistedFrameEvent(page, {
       cursor: bobForwardCursor,
       eventName: 'HtlcReceived',
@@ -1056,11 +1131,15 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] Bob OUT available for reverse: ${b2}`);
 
     await switchToRuntime(page, 'alice');
+    await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-before-reverse');
+    await assertP2PSingletonAndWsHealth(page, 'switch-alice-before-reverse');
     const a3 = await outCap(page, alice!.entityId, hubId);
     const aliceReverseRendered = await getRenderedOutboundForAccount(page, hubId);
     const aliceReverseCursor = await getPersistedReceiptCursor(page);
 
     await switchToRuntime(page, 'bob');
+    await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-before-reverse');
+    await assertP2PSingletonAndWsHealth(page, 'switch-bob-before-reverse');
     // Verify Bob still has account before paying
     const b2check = await outCap(page, bob!.entityId, hubId);
     console.log(`[E2E] Bob OUT pre-pay check: ${b2check}`);
@@ -1093,6 +1172,8 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // Alice: receiver gets amount minus fee
     await switchToRuntime(page, 'alice');
+    await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-reverse-verify');
+    await assertP2PSingletonAndWsHealth(page, 'switch-alice-reverse-verify');
     await waitForPersistedFrameEvent(page, {
       cursor: aliceReverseCursor,
       eventName: 'HtlcReceived',
@@ -1120,11 +1201,15 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     const a5 = await outCap(page, alice!.entityId, hubId);
     await switchToRuntime(page, 'bob');
+    await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-second-forward-baseline');
+    await assertP2PSingletonAndWsHealth(page, 'switch-bob-second-forward-baseline');
     const b4 = await outCap(page, bob!.entityId, hubId);
     const bobSecondForwardRendered = await getRenderedOutboundForAccount(page, hubId);
     const bobSecondForwardCursor = await getPersistedReceiptCursor(page);
 
     await switchToRuntime(page, 'alice');
+    await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-second-forward-send');
+    await assertP2PSingletonAndWsHealth(page, 'switch-alice-second-forward-send');
     const secondForwardQuotedSpend = await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
       [alice!.entityId, hubId, bob!.entityId], pay2Amount);
     const pay2MinSpend = secondForwardQuotedSpend > pay2Amount ? secondForwardQuotedSpend : pay2Amount;
@@ -1138,6 +1223,8 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     expect(pay2Spent, '2nd payment: Alice pays at least quoted sender amount').toBeGreaterThanOrEqual(pay2MinSpend);
 
     await switchToRuntime(page, 'bob');
+    await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-second-forward-verify');
+    await assertP2PSingletonAndWsHealth(page, 'switch-bob-second-forward-verify');
     await waitForPersistedFrameEvent(page, {
       cursor: bobSecondForwardCursor,
       eventName: 'HtlcReceived',
@@ -1159,6 +1246,8 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // ── 9. Insufficient capacity (should fail gracefully) ─────────
     await switchToRuntime(page, 'alice');
+    await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-overspend');
+    await assertP2PSingletonAndWsHealth(page, 'switch-alice-overspend');
     console.log('[E2E] 9. Overspend: Alice tries to send more than capacity');
     const overAmount = a6 + toWei(1); // more than Alice has
     await attemptOverspend(page, bob!.entityId, [alice!.entityId, hubId, bob!.entityId], overAmount);
@@ -1231,6 +1320,8 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     // Reload hard-assert: payment balances must survive runtime restore.
     const aliceBeforeReload = await outCap(page, alice!.entityId, hubId);
     await switchToRuntime(page, 'bob');
+    await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-before-reload');
+    await assertP2PSingletonAndWsHealth(page, 'switch-bob-before-reload');
     const bobBeforeReload = await outCap(page, bob!.entityId, hubId);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => {
@@ -1239,9 +1330,13 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     }, { timeout: 60_000 });
 
     await switchToRuntime(page, 'alice');
+    await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-after-reload');
+    await assertP2PSingletonAndWsHealth(page, 'switch-alice-after-reload');
     const aliceAfterReload = await outCap(page, alice!.entityId, hubId);
     expect(aliceAfterReload, 'Alice OUT must survive reload').toBe(aliceBeforeReload);
     await switchToRuntime(page, 'bob');
+    await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-after-reload');
+    await assertP2PSingletonAndWsHealth(page, 'switch-bob-after-reload');
     const bobAfterReload = await outCap(page, bob!.entityId, hubId);
     expect(bobAfterReload, 'Bob OUT must survive reload').toBe(bobBeforeReload);
 

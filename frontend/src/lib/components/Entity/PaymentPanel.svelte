@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
-  import { RefreshCw } from 'lucide-svelte';
+  import { RefreshCw, ScanLine, X } from 'lucide-svelte';
+  import jsQR from 'jsqr';
   import type {
     AccountMachine,
     RoutedEntityInput as EntityInputPayload,
@@ -19,6 +20,7 @@
   import TokenSelect from '../shared/TokenSelect.svelte';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import { amountToUsd } from '$lib/utils/assetPricing';
+  import { buildXlnInvoiceUri, parseXlnInvoice, type ParsedXlnInvoice } from '$lib/utils/xlnInvoice';
   import {
     extractEntityEncPubKey,
     findProfileByEntityId,
@@ -37,6 +39,18 @@
   let tokenId = 1;
   let description = '';
   let descriptionLocked = false;
+  let invoiceValue = '';
+  let invoiceError = '';
+  let invoiceLocked = false;
+  let pendingAutoRouteKey = '';
+  let completedAutoRouteKey = '';
+  let scannerOpen = false;
+  let scannerStatus = '';
+  let scannerError = '';
+  let scannerVideoEl: HTMLVideoElement | null = null;
+  let scannerFileInputEl: HTMLInputElement | null = null;
+  let scannerStream: MediaStream | null = null;
+  let scannerFrame = 0;
   let useHtlc = true;
   let findingRoutes = false;
   let sendingPayment = false;
@@ -86,6 +100,10 @@
     queued: boolean;
     hashlock: string | null;
   };
+  type BarcodeDetectorLike = {
+    detect(source: CanvasImageSource): Promise<Array<{ rawValue?: string }>>;
+  };
+  type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
 
   $: currentReplicas = $replicas;
   $: currentEnv = $xlnEnvironment;
@@ -203,6 +221,71 @@
 
     const explicitLock = parseBooleanParam(noteLockedParam);
     descriptionLocked = explicitLock || Boolean(recipientUserId);
+    if (targetParam) {
+      invoiceLocked = true;
+      invoiceError = '';
+      invoiceValue = buildXlnInvoiceUri({
+        targetEntityId: targetParam,
+        tokenId,
+        amount: amountParam,
+        description: noteParam,
+        recipientUserId,
+        jurisdictionId: sanitizePrefillText(getURLParamValue(['jId', 'jurisdiction', 'j']), 64),
+        noteLocked: explicitLock || Boolean(recipientUserId),
+      });
+      requestAutoFindRoutes();
+    }
+  }
+
+  function buildAutoRouteKey(): string {
+    return [targetEntityId, amount, tokenId, description].join('|');
+  }
+
+  function requestAutoFindRoutes(): void {
+    if (!targetEntityId || !amount) return;
+    pendingAutoRouteKey = buildAutoRouteKey();
+  }
+
+  function clearInvoiceIntent(): void {
+    invoiceLocked = false;
+    invoiceError = '';
+    invoiceValue = '';
+    descriptionLocked = false;
+  }
+
+  function applyInvoiceIntent(parsed: ParsedXlnInvoice): void {
+    invoiceValue = parsed.canonicalUri;
+    invoiceError = '';
+    invoiceLocked = Boolean(parsed.amount);
+    targetEntityId = parsed.targetEntityId;
+    if (parsed.amount) amount = parsed.amount;
+    if (parsed.tokenId) tokenId = parsed.tokenId;
+    const noteParts: string[] = [];
+    if (parsed.description) noteParts.push(parsed.description);
+    if (parsed.recipientUserId) noteParts.push(`uid:${parsed.recipientUserId}`);
+    description = noteParts.join(' | ');
+    descriptionLocked = parsed.noteLocked || Boolean(parsed.description) || Boolean(parsed.recipientUserId);
+    resetQuotedRoutes();
+    requestAutoFindRoutes();
+  }
+
+  function handleInvoiceInput(): void {
+    const trimmed = invoiceValue.trim();
+    if (!trimmed) {
+      clearInvoiceIntent();
+      return;
+    }
+    if (!/^(xln:|https?:\/\/)/i.test(trimmed)) {
+      invoiceError = '';
+      return;
+    }
+    try {
+      const parsed = parseXlnInvoice(trimmed);
+      applyInvoiceIntent(parsed);
+    } catch (error) {
+      invoiceLocked = false;
+      invoiceError = error instanceof Error ? error.message : String(error);
+    }
   }
 
   // All entities for dropdown (local + gossip network)
@@ -551,6 +634,123 @@
   }
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function startInvoiceScanner(): Promise<void> {
+    scannerError = '';
+    scannerStatus = 'Starting camera…';
+    scannerOpen = true;
+    await tick();
+    try {
+      scannerStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+        },
+        audio: false,
+      });
+      if (scannerVideoEl) {
+        scannerVideoEl.srcObject = scannerStream;
+        await scannerVideoEl.play();
+      }
+      scannerStatus = 'Point camera at an XLN invoice QR';
+      loopInvoiceScanner();
+    } catch (error) {
+      scannerError = error instanceof Error ? error.message : String(error);
+      scannerStatus = '';
+    }
+  }
+
+  function stopInvoiceScanner(): void {
+    scannerOpen = false;
+    scannerStatus = '';
+    scannerError = '';
+    if (scannerFrame) {
+      cancelAnimationFrame(scannerFrame);
+      scannerFrame = 0;
+    }
+    if (scannerVideoEl) {
+      scannerVideoEl.pause();
+      scannerVideoEl.srcObject = null;
+    }
+    if (scannerStream) {
+      for (const track of scannerStream.getTracks()) track.stop();
+      scannerStream = null;
+    }
+  }
+
+  const getBarcodeDetectorCtor = (): BarcodeDetectorCtor | null => {
+    if (typeof window === 'undefined') return null;
+    return ((window as typeof window & { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector || null);
+  };
+
+  async function tryDetectQrFromVideo(video: HTMLVideoElement): Promise<string | null> {
+    const BarcodeDetectorCtor = getBarcodeDetectorCtor();
+    if (BarcodeDetectorCtor) {
+      try {
+        const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] });
+        const results = await detector.detect(video);
+        const rawValue = String(results[0]?.rawValue || '').trim();
+        if (rawValue) return rawValue;
+      } catch {
+        // fall through to jsQR
+      }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const result = jsQR(imageData.data, imageData.width, imageData.height);
+    return result?.data?.trim() || null;
+  }
+
+  function loopInvoiceScanner(): void {
+    if (!scannerOpen || !scannerVideoEl) return;
+    scannerFrame = requestAnimationFrame(async () => {
+      if (!scannerOpen || !scannerVideoEl) return;
+      if (scannerVideoEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && scannerVideoEl.videoWidth > 0 && scannerVideoEl.videoHeight > 0) {
+        const raw = await tryDetectQrFromVideo(scannerVideoEl);
+        if (raw) {
+          try {
+            const parsed = parseXlnInvoice(raw);
+            applyInvoiceIntent(parsed);
+            stopInvoiceScanner();
+            return;
+          } catch (error) {
+            scannerError = error instanceof Error ? error.message : String(error);
+          }
+        }
+      }
+      loopInvoiceScanner();
+    });
+  }
+
+  async function handleScannerFileChange(event: Event): Promise<void> {
+    const input = event.currentTarget as HTMLInputElement | null;
+    const file = input?.files?.[0];
+    if (!file) return;
+    scannerError = '';
+    try {
+      const bitmap = await createImageBitmap(file);
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) throw new Error('Failed to decode image');
+      ctx.drawImage(bitmap, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const result = jsQR(imageData.data, imageData.width, imageData.height);
+      if (!result?.data) throw new Error('No QR code found in image');
+      const parsed = parseXlnInvoice(result.data);
+      applyInvoiceIntent(parsed);
+      stopInvoiceScanner();
+    } catch (error) {
+      scannerError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (input) input.value = '';
+    }
+  }
 
   function getRecipientProfileIssue(): { code: string; message: string; details?: Record<string, unknown> } | null {
     if (!targetEntityId || normalizeEntityId(targetEntityId) === normalizeEntityId(entityId)) return null;
@@ -987,6 +1187,21 @@
     await computeRoutes(false);
   }
 
+  $: if (
+    pendingAutoRouteKey &&
+    pendingAutoRouteKey !== completedAutoRouteKey &&
+    targetEntityId &&
+    amount &&
+    currentEnv &&
+    activeIsLive &&
+    !findingRoutes &&
+    !sendingPayment
+  ) {
+    const routeKey = pendingAutoRouteKey;
+    completedAutoRouteKey = routeKey;
+    void findRoutes();
+  }
+
   async function waitForEmbeddedHtlcConfirmation(hashlock: string, timeoutMs = 45_000): Promise<void> {
     const startedAfterId = (() => {
       const lastLog = Array.isArray(currentEnv?.frameLogs) && currentEnv.frameLogs.length > 0
@@ -1239,11 +1454,52 @@
     return () => {
       window.removeEventListener('hashchange', handleLocationChange);
       window.removeEventListener('popstate', handleLocationChange);
+      stopInvoiceScanner();
     };
   });
 </script>
 
 <div bind:this={paymentPanelEl} class="payment-panel">
+  <div class="invoice-entry">
+    <div class="invoice-label-row">
+      <label for="payment-invoice-input">Invoice</label>
+      <span class="invoice-helper">Paste invoice or enter details manually below</span>
+    </div>
+    <div class="invoice-entry-shell">
+      <input
+        id="payment-invoice-input"
+        type="text"
+        bind:value={invoiceValue}
+        placeholder="xln:?id=0x..."
+        disabled={findingRoutes || sendingPayment}
+        on:input={handleInvoiceInput}
+      />
+      <button
+        type="button"
+        class="invoice-tool-btn"
+        on:click={startInvoiceScanner}
+        disabled={findingRoutes || sendingPayment}
+      >
+        <ScanLine size={14} />
+        <span>Scan QR</span>
+      </button>
+      {#if invoiceLocked}
+        <button
+          type="button"
+          class="invoice-tool-btn invoice-clear-btn"
+          on:click={clearInvoiceIntent}
+          disabled={findingRoutes || sendingPayment}
+        >
+          <X size={14} />
+          <span>Clear</span>
+        </button>
+      {/if}
+    </div>
+    {#if invoiceError}
+      <div class="profile-preflight-error">{invoiceError}</div>
+    {/if}
+  </div>
+
   <div class="recipient-picker-row">
     <div class="recipient-picker-input">
       <EntityInput
@@ -1253,7 +1509,7 @@
         contacts={selectorContacts}
         preferredId={entityId}
         placeholder="Select entity..."
-        disabled={findingRoutes || sendingPayment}
+        disabled={invoiceLocked || findingRoutes || sendingPayment}
         on:change={handleTargetChange}
         on:open={handleRecipientPickerOpen}
       />
@@ -1286,7 +1542,7 @@
           type="text"
           bind:value={amount}
           placeholder="0.00"
-          disabled={findingRoutes || sendingPayment}
+          disabled={invoiceLocked || findingRoutes || sendingPayment}
           on:input={handleAmountInput}
         />
         <div class="amount-inline-tools">
@@ -1302,7 +1558,7 @@
             <TokenSelect
               value={tokenId}
               compact={true}
-              disabled={findingRoutes || sendingPayment}
+              disabled={invoiceLocked || findingRoutes || sendingPayment}
               on:change={handleTokenChange}
             />
           </div>
@@ -1317,8 +1573,8 @@
       type="text"
       bind:value={description}
       placeholder="Payment for..."
-      readonly={descriptionLocked}
-      aria-readonly={descriptionLocked}
+      readonly={descriptionLocked || invoiceLocked}
+      aria-readonly={descriptionLocked || invoiceLocked}
       disabled={findingRoutes || sendingPayment}
     />
     {#if descriptionLocked}
@@ -1430,6 +1686,39 @@
 
 </div>
 
+{#if scannerOpen}
+  <div class="scanner-modal" role="dialog" aria-modal="true" aria-label="Scan invoice QR">
+    <div class="scanner-card">
+      <div class="scanner-card-header">
+        <h4>Scan Invoice QR</h4>
+        <button type="button" class="invoice-tool-btn invoice-clear-btn" on:click={stopInvoiceScanner}>
+          <X size={14} />
+          <span>Close</span>
+        </button>
+      </div>
+      <video bind:this={scannerVideoEl} class="scanner-video" playsinline muted></video>
+      {#if scannerStatus}
+        <div class="scanner-status">{scannerStatus}</div>
+      {/if}
+      {#if scannerError}
+        <div class="profile-preflight-error">{scannerError}</div>
+      {/if}
+      <div class="scanner-actions">
+        <input
+          bind:this={scannerFileInputEl}
+          type="file"
+          accept="image/*"
+          class="scanner-file-input"
+          on:change={handleScannerFileChange}
+        />
+        <button type="button" class="invoice-tool-btn" on:click={() => scannerFileInputEl?.click()}>
+          <span>Upload QR Image</span>
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .payment-panel {
     display: flex;
@@ -1437,6 +1726,54 @@
     gap: 18px;
     width: 100%;
     max-width: 1120px;
+  }
+
+  .invoice-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+  }
+
+  .invoice-label-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: baseline;
+  }
+
+  .invoice-helper {
+    color: #8d857d;
+    font-size: 12px;
+  }
+
+  .invoice-entry-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .invoice-tool-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: #f5efe6;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .invoice-clear-btn {
+    color: #e7b6a5;
   }
 
   .recipient-picker-row {
@@ -1598,6 +1935,10 @@
   }
 
   @media (max-width: 900px) {
+    .invoice-entry-shell {
+      grid-template-columns: 1fr;
+    }
+
     .amount-inline-tools {
       width: 100%;
       justify-content: space-between;
@@ -1677,6 +2018,64 @@
   .routes {
     padding-top: 16px;
     border-top: 1px solid #292524;
+  }
+
+  .scanner-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.74);
+    display: grid;
+    place-items: center;
+    z-index: 3000;
+    padding: 20px;
+  }
+
+  .scanner-card {
+    width: min(100%, 560px);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+    border-radius: 18px;
+    background: #14110f;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  }
+
+  .scanner-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .scanner-card-header h4 {
+    margin: 0;
+    color: #f5efe6;
+    font-size: 18px;
+  }
+
+  .scanner-video {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: 16px;
+    background: #0c0a09;
+  }
+
+  .scanner-status {
+    color: #cfc7bd;
+    font-size: 13px;
+  }
+
+  .scanner-actions {
+    display: flex;
+    justify-content: flex-start;
+    gap: 10px;
+  }
+
+  .scanner-file-input {
+    display: none;
   }
 
   .send-controls {

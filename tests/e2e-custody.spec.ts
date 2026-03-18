@@ -3,8 +3,8 @@
  *
  * Flow and goals:
  * 1. Load the custody page and prove withdraw is rejected before any credited balance exists.
- * 2. Deposit cycle A opens the full wallet via `Find Routes` and lets the user choose a route.
- * 3. Deposit cycle B uses the embedded `Pay` button for one-click payment.
+ * 2. Deposit cycle A opens the wallet directly from the custody invoice.
+ * 3. Deposit cycle B copies the invoice and pastes it into the wallet pay screen.
  * 5. Both deposit modes must credit custody balance from persisted receipts.
  * 6. Later withdrawals still spend only from already credited custody balance.
  *
@@ -150,41 +150,7 @@ async function ensureRuntimeProfileDownloaded(page: Page, entityId: string): Pro
   expect(ok, `runtime must download gossip profile for ${entityId.slice(0, 12)}`).toBe(true);
 }
 
-async function submitEmbeddedPayAction(page: Page): Promise<void> {
-  const button = page.frameLocator('.paybutton-controller-frame').locator('button.paybutton').first();
-  await expect(button).toBeVisible({ timeout: 60_000 });
-  await expect.poll(
-    async () => {
-      try {
-        return await button.evaluate((node) => {
-          const buttonEl = node as HTMLButtonElement;
-          return {
-            detached: false,
-            disabled: buttonEl.disabled,
-            text: buttonEl.textContent?.trim() || '',
-          };
-        });
-      } catch (error) {
-        return {
-          detached: true,
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-    },
-    {
-      timeout: 60_000,
-      intervals: [250, 500, 1_000],
-      message: 'embedded pay button must become enabled',
-    },
-  ).toMatchObject({ detached: false, disabled: false });
-  await button.click();
-}
-
-async function submitPopupFindRoutesAction(page: Page, targetEntityId: string): Promise<Page> {
-  const popupPromise = page.waitForEvent('popup');
-  await page.getByRole('button', { name: /^Find Routes$/i }).click();
-  const popup = await popupPromise;
-  await popup.waitForLoadState('domcontentloaded');
+async function waitForPopupRoutesAndSubmit(popup: Page, targetEntityId: string): Promise<void> {
   const findRoutesButton = popup.getByRole('button', { name: /^Find Routes$/i });
   const firstRoute = popup.locator('.route-option').first();
   const routeError = popup.locator('.profile-preflight-error');
@@ -192,6 +158,7 @@ async function submitPopupFindRoutesAction(page: Page, targetEntityId: string): 
   await popup.waitForTimeout(1_000);
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
+    if (await firstRoute.isVisible().catch(() => false)) break;
     await findRoutesButton.click();
     try {
       await expect(firstRoute).toBeVisible({ timeout: 4_000 });
@@ -207,26 +174,21 @@ async function submitPopupFindRoutesAction(page: Page, targetEntityId: string): 
   }
   await expect(firstRoute).toBeVisible({ timeout: 1_000 });
   await popup.locator('.route-option').first().click();
-  await popup.getByRole('button', { name: /Send On Selected Route/i }).click();
-  return popup;
+  const sendOnSelectedRoute = popup.getByRole('button', { name: /^Send On Selected Route$/i });
+  if (await sendOnSelectedRoute.isVisible().catch(() => false)) {
+    await sendOnSelectedRoute.click();
+    return;
+  }
+  await popup.getByRole('button', { name: /^Pay Now$/i }).click();
 }
 
-async function waitForEmbeddedPaySuccess(page: Page): Promise<void> {
-  const frameButton = page.frameLocator('.paybutton-controller-frame').locator('button.paybutton').first();
-  await expect.poll(
-    async () => {
-      const parentConfirmed = await page.getByText('Payment confirmed', { exact: false }).isVisible().catch(() => false);
-      if (parentConfirmed) return 'confirmed';
-      const framePaid = await frameButton.textContent().catch(() => '');
-      if ((framePaid || '').match(/Paid in .* ms/i)) return 'paid';
-      return 'pending';
-    },
-    {
-      timeout: 45_000,
-      intervals: [250, 500, 750],
-      message: 'embedded pay button must confirm payment',
-    },
-  ).not.toBe('pending');
+async function submitPopupOpenWalletAction(page: Page, targetEntityId: string): Promise<Page> {
+  const popupPromise = page.waitForEvent('popup');
+  await page.getByRole('button', { name: /^Open Wallet$/i }).click();
+  const popup = await popupPromise;
+  await popup.waitForLoadState('domcontentloaded');
+  await waitForPopupRoutesAndSubmit(popup, targetEntityId);
+  return popup;
 }
 
 async function openRestoredWalletPage(
@@ -581,8 +543,8 @@ test.describe('E2E Custody Flow', () => {
 
       await timedStep('custody.open_dashboard', () => custodyPage.goto(custodyBaseUrl));
       await expect(custodyPage.getByRole('heading', { name: 'Deposit' })).toBeVisible({ timeout: 15_000 });
-      await expect(custodyPage.locator('.paybutton-controller-frame').first()).toBeVisible({ timeout: 60_000 });
-      await expect(custodyPage.getByRole('button', { name: /^Find Routes$/i })).toBeVisible({ timeout: 60_000 });
+      await expect(custodyPage.locator('.deposit-qr-image').first()).toBeVisible({ timeout: 60_000 });
+      await expect(custodyPage.getByRole('button', { name: /^Open Wallet$/i })).toBeVisible({ timeout: 60_000 });
       await custodyPage.screenshot({ path: test.info().outputPath('custody-dashboard-initial.png'), fullPage: true });
 
       await custodyPage.locator('input[name="amount"]').fill('1');
@@ -593,8 +555,8 @@ test.describe('E2E Custody Flow', () => {
       let dashboard = await readCustodyDashboard(custodyPage, custodyBaseUrl);
       let currentBalanceMinor = BigInt(dashboard.headlineBalance?.amountMinor || '0');
       const depositCycles = [
-        { whole: 3n, action: 'pay' as const },
-        { whole: 10n, action: 'findroutes' as const },
+        { whole: 3n, action: 'open-wallet' as const },
+        { whole: 10n, action: 'copy-invoice' as const },
       ];
 
       for (const [cycleIndex, cycle] of depositCycles.entries()) {
@@ -607,8 +569,8 @@ test.describe('E2E Custody Flow', () => {
 
         await timedStep(`custody.deposit_cycle_${cycleIndex + 1}`, async () => {
           await custodyPage.locator('input[name="depositAmount"]').fill(cycle.whole.toString());
-          if (cycle.action === 'findroutes') {
-            const popup = await submitPopupFindRoutesAction(custodyPage, custodyIdentity.entityId);
+          if (cycle.action === 'open-wallet') {
+            const popup = await submitPopupOpenWalletAction(custodyPage, custodyIdentity.entityId);
             await waitForDaemonReceiptEvent(daemonClient, {
               entityId: custodyIdentity.entityId,
               eventName: 'HtlcReceived',
@@ -617,14 +579,21 @@ test.describe('E2E Custody Flow', () => {
             });
             await popup.close().catch(() => undefined);
           } else {
-            await submitEmbeddedPayAction(custodyPage);
+            const invoice = (await custodyPage.locator('.deposit-invoice-string').first().textContent())?.trim() || '';
+            expect(invoice.startsWith('xln:?')).toBe(true);
+            if (!walletPage.isClosed()) {
+              await walletPage.close();
+            }
+            walletPage = await openRestoredWalletPage(context, alice.runtimeId);
+            await walletPage.goto(`${APP_BASE_URL}/app#pay`, { waitUntil: 'domcontentloaded' });
+            await walletPage.locator('#payment-invoice-input').fill(invoice);
+            await waitForPopupRoutesAndSubmit(walletPage, custodyIdentity.entityId);
             await waitForDaemonReceiptEvent(daemonClient, {
               entityId: custodyIdentity.entityId,
               eventName: 'HtlcReceived',
               fromHeight: daemonReceiptCursor,
               timeoutMs: 30_000,
             });
-            await waitForEmbeddedPaySuccess(custodyPage).catch(() => undefined);
           }
         });
 
@@ -644,13 +613,6 @@ test.describe('E2E Custody Flow', () => {
 
       const withdrawCycles = [5n, 2n];
       for (const [cycleIndex, withdrawWhole] of withdrawCycles.entries()) {
-        const embeddedFrame = custodyPage.locator('.paybutton-controller-frame').first();
-        if (await embeddedFrame.isVisible().catch(() => false)) {
-          await embeddedFrame.evaluate((node) => {
-            const frame = node as HTMLIFrameElement;
-            frame.src = 'about:blank';
-          }).catch(() => undefined);
-        }
         if (!walletPage.isClosed()) {
           await walletPage.close();
         }
