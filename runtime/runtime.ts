@@ -35,6 +35,10 @@ const DEFAULT_SNAPSHOT_INTERVAL_FRAMES = (() => {
 
 import { getPerfMs, getWallClockMs } from './utils';
 import { setDeltaTransformerAddress } from './proof-builder';
+import {
+  buildPersistedEntityReplicaSnapshot,
+  buildPersistedJReplicaSnapshot,
+} from './htlc-events';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { isLeftEntity } from './entity-id-utils';
 import type { JAdapter } from './jadapter';
@@ -3053,15 +3057,17 @@ const buildRuntimeHistorySnapshot = (env: Env, title?: string): any => {
 };
 
 const buildPersistedEnvSnapshot = (env: Env): Record<string, unknown> => {
+  const persistedEReplicas = env.eReplicas
+    ? Array.from(env.eReplicas.entries()).map(([replicaKey, replica]) => [
+        replicaKey,
+        buildPersistedEntityReplicaSnapshot(replica),
+      ])
+    : [];
   const persistedJReplicas = env.jReplicas
-    ? Array.from(env.jReplicas.values()).map((jr) => {
-        const { jadapter: _jadapter, ...jrSnapshot } = jr as JReplica & { jadapter?: unknown };
-        return {
-          ...jrSnapshot,
-          mempool: [...jr.mempool],
-          stateRoot: new Uint8Array(jr.stateRoot),
-        };
-      })
+    ? Array.from(env.jReplicas.entries()).map(([replicaKey, jr]) => [
+        replicaKey,
+        buildPersistedJReplicaSnapshot(jr),
+      ])
     : [];
 
   return {
@@ -3072,7 +3078,7 @@ const buildPersistedEnvSnapshot = (env: Env): Record<string, unknown> => {
     ...(env.dbNamespace ? { dbNamespace: env.dbNamespace } : {}),
     ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
     ...(env.browserVMState ? { browserVMState: env.browserVMState } : {}),
-    eReplicas: new Map(env.eReplicas),
+    eReplicas: persistedEReplicas,
     jReplicas: persistedJReplicas,
   };
 };
@@ -3091,6 +3097,12 @@ const requirePersistedDeltaTransformerAddress = (jReplicas: Map<string, JReplica
     }
   }
   throw new Error(`MISSING_DELTA_TRANSFORMER_ADDRESS: ${label}`);
+};
+
+const assertPersistedContractConfigReady = (env: Env, label: string): void => {
+  if (env.jReplicas && env.jReplicas.size > 0) {
+    setDeltaTransformerAddress(requirePersistedDeltaTransformerAddress(env.jReplicas, label));
+  }
 };
 
 // === CONSENSUS PROCESSING ===
@@ -3497,6 +3509,7 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     // Persist compact per-frame runtime input for replay from checkpoint.
     // This WAL record doubles as the frame receipt: inputs + committed logs.
     const currentFrameInput = (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput;
+    assertPersistedContractConfigReady(env, `saveEnvToDB frame=${env.height}`);
     const persistedSnapshot = buildPersistedEnvSnapshot(env);
     const runtimeStateHash = computePersistedEnvStateHash(persistedSnapshot);
     const frameSerializeStartedAt = getPerfMs();
@@ -3828,14 +3841,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       // Support both old (replicas) and new (eReplicas) format
       env.eReplicas = normalizeReplicaMap(data.eReplicas || data.replicas || []);
       env.jReplicas = normalizeJReplicaMap(data.jReplicas || []);
-      if (env.jReplicas.size > 0) {
-        setDeltaTransformerAddress(
-          requirePersistedDeltaTransformerAddress(
-            env.jReplicas,
-            `snapshot=${selectedSnapshotHeight} source=${selectedSnapshotLabel}`,
-          ),
-        );
-      }
+      assertPersistedContractConfigReady(env, `snapshot=${selectedSnapshotHeight} source=${selectedSnapshotLabel}`);
       for (const replica of env.eReplicas.values()) {
         validateEntityState(replica.state, `loadEnvFromDB.eReplicas[${String(replica.entityId)}].state`);
         replica.state.config = mergeRuntimeJurisdictionConfig(replica.state.config, env);
@@ -4194,17 +4200,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       // Restore the global proof-builder transformer address before any live inputs arrive.
       // JAdapters reconnect asynchronously after DB load, but dispute/payment proof building
       // may happen immediately during replay or inbound processing.
-      if (latestEnv.jReplicas && latestEnv.jReplicas.size > 0) {
-        for (const [, jReplica] of latestEnv.jReplicas.entries()) {
-          const restoredDeltaTransformer = String(
-            (jReplica as { contracts?: { deltaTransformer?: string } }).contracts?.deltaTransformer || '',
-          ).trim();
-          if (restoredDeltaTransformer) {
-            setDeltaTransformerAddress(restoredDeltaTransformer);
-            break;
-          }
-        }
-      }
+      assertPersistedContractConfigReady(latestEnv, 'loadEnvFromDB post-replay');
 
       // Restore BrowserVM if state was persisted
       let restoredBrowserVM: any = null;

@@ -52,6 +52,34 @@ function toWei(n: number): bigint {
   return BigInt(n) * 10n ** 18n;
 }
 
+function assertHtlcReceivedPayload(event: { data?: Record<string, unknown> }, recipientEntityId: string, expectedFromEntity: string, expectedAmount: bigint) {
+  expect(String(event.data?.amount || ''), 'receive event should include amount').toBe(expectedAmount.toString());
+  expect(String(event.data?.entityId || '').toLowerCase(), 'receive event should include entityId').toBe(recipientEntityId.toLowerCase());
+  expect(String(event.data?.toEntity || '').toLowerCase(), 'receive event should include toEntity').toBe(recipientEntityId.toLowerCase());
+  expect(String(event.data?.fromEntity || '').toLowerCase(), 'receive event should include fromEntity').toBe(expectedFromEntity.toLowerCase());
+  expect(String(event.data?.hashlock || ''), 'receive event should include hashlock').toMatch(/^0x[0-9a-f]{64}$/i);
+  expect(String(event.data?.lockId || '').length, 'receive event should include lockId').toBeGreaterThan(0);
+  expect(String(event.data?.jurisdictionId || '').length, 'receive event should include jurisdictionId').toBeGreaterThan(0);
+  expect(Number(event.data?.startedAtMs || 0), 'receive event should include startedAtMs').toBeGreaterThan(0);
+  expect(Number(event.data?.receivedAtMs || 0), 'receive event should include receivedAtMs').toBeGreaterThan(0);
+  expect(Number(event.data?.elapsedMs || 0), 'receive event should include elapsedMs').toBeGreaterThan(0);
+  expect(Number(event.data?.finalizedInMs || 0), 'receive event should include finalizedInMs').toBeGreaterThan(0);
+}
+
+function assertHtlcFinalizedPayload(event: { data?: Record<string, unknown> }, senderEntityId: string, expectedToEntity: string, expectedAmount: bigint) {
+  expect(String(event.data?.amount || ''), 'finalized event should include amount').toBe(expectedAmount.toString());
+  expect(String(event.data?.entityId || '').toLowerCase(), 'finalized event should include entityId').toBe(senderEntityId.toLowerCase());
+  expect(String(event.data?.fromEntity || '').toLowerCase(), 'finalized event should include fromEntity').toBe(senderEntityId.toLowerCase());
+  expect(String(event.data?.toEntity || '').toLowerCase(), 'finalized event should include toEntity').toBe(expectedToEntity.toLowerCase());
+  expect(String(event.data?.hashlock || ''), 'finalized event should include hashlock').toMatch(/^0x[0-9a-f]{64}$/i);
+  expect(String(event.data?.lockId || '').length, 'finalized event should include lockId').toBeGreaterThan(0);
+  expect(String(event.data?.jurisdictionId || '').length, 'finalized event should include jurisdictionId').toBeGreaterThan(0);
+  expect(Number(event.data?.startedAtMs || 0), 'finalized event should include startedAtMs').toBeGreaterThan(0);
+  expect(Number(event.data?.finalizedAtMs || 0), 'finalized event should include finalizedAtMs').toBeGreaterThan(0);
+  expect(Number(event.data?.elapsedMs || 0), 'finalized event should include elapsedMs').toBeGreaterThan(0);
+  expect(Number(event.data?.finalizedInMs || 0), 'finalized event should include finalizedInMs').toBeGreaterThan(0);
+}
+
 type DeltaSnapshot = {
   ondelta: string;
   offdelta: string;
@@ -1084,13 +1112,14 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       a1,
       aliceMinSpend,
     );
-    await waitForPersistedFrameEventMatch(page, {
+    const aliceForwardFinalizeEvent = await waitForPersistedFrameEventMatch(page, {
       cursor: aliceForwardFinalizeCursor,
       eventName: 'HtlcFinalized',
       entityId: alice!.entityId,
       timeoutMs: 20_000,
       predicate: (event) => String(event.data?.amount || '') === payAmount.toString(),
     });
+    assertHtlcFinalizedPayload(aliceForwardFinalizeEvent, alice!.entityId, hubId, payAmount);
     console.log(`[E2E] Alice paid: ${alicePaid} (OUT ${a1} → ${a2})`);
     expect(alicePaid, 'Alice should pay at least quoted sender amount').toBeGreaterThanOrEqual(aliceMinSpend);
     await screenshot(page, '06a-alice-after-send');
@@ -1105,10 +1134,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       entityId: bob!.entityId,
       timeoutMs: 12_000,
     });
-    expect(String(bobReceiveEvent.data?.amount || ''), 'Bob receive event should include amount').toBe(payAmount.toString());
-    expect(Number(bobReceiveEvent.data?.startedAtMs || 0), 'Bob receive event should include startedAtMs').toBeGreaterThan(0);
-    expect(Number(bobReceiveEvent.data?.receivedAtMs || 0), 'Bob receive event should include receivedAtMs').toBeGreaterThan(0);
-    expect(Number(bobReceiveEvent.data?.elapsedMs || 0), 'Bob receive event should include elapsedMs').toBeGreaterThan(0);
+    assertHtlcReceivedPayload(bobReceiveEvent, bob!.entityId, hubId, payAmount);
     const b1 = await waitForOutCapDelta(page, bob!.entityId, hubId, b0, payAmount);
     await waitForRenderedOutboundForAccountDelta(
       page,
@@ -1173,13 +1199,14 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       b2,
       bobMinSpend,
     );
-    await waitForPersistedFrameEventMatch(page, {
+    const bobReverseFinalizeEvent = await waitForPersistedFrameEventMatch(page, {
       cursor: bobReverseFinalizeCursor,
       eventName: 'HtlcFinalized',
       entityId: bob!.entityId,
       timeoutMs: 20_000,
       predicate: (event) => String(event.data?.amount || '') === reverseAmount.toString(),
     });
+    assertHtlcFinalizedPayload(bobReverseFinalizeEvent, bob!.entityId, hubId, reverseAmount);
     console.log(`[E2E] Bob OUT after reverse: ${b3}`);
     console.log(`[E2E] Bob paid: ${bobPaid} (OUT ${b2} → ${b3})`);
     const bobCounterpartiesAfterReverse = await connectedCounterparties(page, bob!.entityId);
@@ -1200,10 +1227,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       entityId: alice!.entityId,
       timeoutMs: 12_000,
     });
-    expect(String(aliceReceiveEvent.data?.amount || ''), 'Alice receive event should include amount').toBe(reverseAmount.toString());
-    expect(Number(aliceReceiveEvent.data?.startedAtMs || 0), 'Alice receive event should include startedAtMs').toBeGreaterThan(0);
-    expect(Number(aliceReceiveEvent.data?.receivedAtMs || 0), 'Alice receive event should include receivedAtMs').toBeGreaterThan(0);
-    expect(Number(aliceReceiveEvent.data?.elapsedMs || 0), 'Alice receive event should include elapsedMs').toBeGreaterThan(0);
+    assertHtlcReceivedPayload(aliceReceiveEvent, alice!.entityId, hubId, reverseAmount);
     const a4 = await waitForOutCapDelta(page, alice!.entityId, hubId, a3, reverseAmount);
     await waitForRenderedOutboundForAccountDelta(
       page,
@@ -1245,13 +1269,14 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       a5,
       pay2MinSpend,
     );
-    await waitForPersistedFrameEventMatch(page, {
+    const aliceSecondFinalizeEvent = await waitForPersistedFrameEventMatch(page, {
       cursor: aliceSecondForwardFinalizeCursor,
       eventName: 'HtlcFinalized',
       entityId: alice!.entityId,
       timeoutMs: 20_000,
       predicate: (event) => String(event.data?.amount || '') === pay2Amount.toString(),
     });
+    assertHtlcFinalizedPayload(aliceSecondFinalizeEvent, alice!.entityId, hubId, pay2Amount);
     expect(pay2Spent, '2nd payment: Alice pays at least quoted sender amount').toBeGreaterThanOrEqual(pay2MinSpend);
 
     await switchToRuntime(page, 'bob');
@@ -1263,10 +1288,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       entityId: bob!.entityId,
       timeoutMs: 12_000,
     });
-    expect(String(bobSecondReceiveEvent.data?.amount || ''), '2nd Bob receive event should include amount').toBe(pay2Amount.toString());
-    expect(Number(bobSecondReceiveEvent.data?.startedAtMs || 0), '2nd Bob receive event should include startedAtMs').toBeGreaterThan(0);
-    expect(Number(bobSecondReceiveEvent.data?.receivedAtMs || 0), '2nd Bob receive event should include receivedAtMs').toBeGreaterThan(0);
-    expect(Number(bobSecondReceiveEvent.data?.elapsedMs || 0), '2nd Bob receive event should include elapsedMs').toBeGreaterThan(0);
+    assertHtlcReceivedPayload(bobSecondReceiveEvent, bob!.entityId, hubId, pay2Amount);
     const b5 = await waitForOutCapDelta(page, bob!.entityId, hubId, b4, pay2Amount);
     await waitForRenderedOutboundForAccountDelta(
       page,

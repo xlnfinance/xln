@@ -24,27 +24,13 @@ import {
 import { NobleCryptoProvider } from '../../crypto-noble';
 import { unwrapEnvelope, validateEnvelope } from '../../htlc-envelope-types';
 import { terminateHtlcRoute } from '../htlc-route-lifecycle';
+import {
+  buildHtlcFinalizedEventPayload,
+  buildHtlcReceivedEventPayload,
+} from '../../htlc-events';
 
 const ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY = Symbol.for('xln.runtime.env.replay.skippedAccountInputs');
-const PAYMENT_TS_MARKER_RE = /(?:^|\s)tsms:(\d{10,})(?=$|\s)/i;
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
-const extractStartedAtMs = (description?: string): number | null => {
-  const match = String(description || '').match(PAYMENT_TS_MARKER_RE);
-  if (!match) return null;
-  const parsed = Number(match[1]);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-};
-const buildPaymentTimingFields = (description: string | undefined, completedAtMs: number) => {
-  const startedAtMs = extractStartedAtMs(description);
-  if (!startedAtMs) {
-    return { receivedAtMs: completedAtMs };
-  }
-  return {
-    startedAtMs,
-    receivedAtMs: completedAtMs,
-    elapsedMs: Math.max(1, completedAtMs - startedAtMs),
-  };
-};
 const getJurisdictionId = (state: EntityState, env: Env): string => {
   return String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 };
@@ -547,15 +533,18 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               if (envelope.secret) {
                 const paymentDescription = typeof envelope.description === 'string' ? envelope.description.trim() : '';
                 env.emit('HtlcReceived', {
-                  entityId: state.entityId,
-                  fromEntity: input.fromEntityId,
-                  hashlock: lock.hashlock,
-                  lockId: lock.lockId,
-                  amount: lock.amount.toString(),
-                  tokenId: lock.tokenId,
-                  ...(paymentDescription ? { description: paymentDescription } : {}),
-                  ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
-                  ...buildPaymentTimingFields(paymentDescription || undefined, newState.timestamp),
+                  ...buildHtlcReceivedEventPayload({
+                    entityId: state.entityId,
+                    fromEntity: input.fromEntityId,
+                    toEntity: state.entityId,
+                    hashlock: lock.hashlock,
+                    lockId: lock.lockId,
+                    amount: lock.amount,
+                    tokenId: lock.tokenId,
+                    ...(paymentDescription ? { description: paymentDescription } : {}),
+                    ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
+                    receivedAtMs: newState.timestamp,
+                  }),
                 });
                 if (paymentDescription) {
                   if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map<HtlcNoteKey, string>();
@@ -911,38 +900,19 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             console.log(`✅ HTLC: Payment complete (we initiated)`);
             terminateHtlcRoute(newState, hashlock, newState.timestamp);
             env.emit('HtlcFinalized', {
-              hashlock,
-              secret,
-              entityId: state.entityId,
-              outboundEntity: route.outboundEntity,
-              ...((eventAmount !== undefined && eventTokenId !== undefined)
-                ? {
-                    amount: eventAmount.toString(),
-                    tokenId: eventTokenId,
-                    ...(eventLockId ? { lockId: eventLockId } : {}),
-                  }
-                : {}),
-              ...(finalizedDescription ? { description: finalizedDescription } : {}),
-              ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
-              ...buildPaymentTimingFields(finalizedDescription, newState.timestamp),
-            });
-          }
-          if (isFinalRecipient) {
-            env.emit('HtlcReceived', {
-              hashlock,
-              secret,
-              fromEntity: route.inboundEntity,
-              entityId: state.entityId,
-              ...((eventAmount !== undefined && eventTokenId !== undefined)
-                ? {
-                    amount: eventAmount.toString(),
-                    tokenId: eventTokenId,
-                    ...(eventLockId ? { lockId: eventLockId } : {}),
-                  }
-                : {}),
-              ...(finalizedDescription ? { description: finalizedDescription } : {}),
-              ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
-              ...buildPaymentTimingFields(finalizedDescription, newState.timestamp),
+              ...buildHtlcFinalizedEventPayload({
+                entityId: state.entityId,
+                fromEntity: state.entityId,
+                ...(route.outboundEntity ? { toEntity: route.outboundEntity } : {}),
+                hashlock,
+                secret,
+                ...(eventLockId ? { lockId: eventLockId } : {}),
+                ...(eventAmount !== undefined ? { amount: eventAmount } : {}),
+                ...(eventTokenId !== undefined ? { tokenId: eventTokenId } : {}),
+                ...(finalizedDescription ? { description: finalizedDescription } : {}),
+                ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
+                finalizedAtMs: newState.timestamp,
+              }),
             });
           }
           env.emit('PaymentFinalized', {
