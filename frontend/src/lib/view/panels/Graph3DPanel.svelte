@@ -6285,8 +6285,9 @@ let vrHammer: VRHammer | null = null;
 
       const timestamp = i - start; // Relative time from slice start
 
-      if (frame.title || frame.narrative) {
-        scenarioLines.push(`${timestamp}: ${frame.title || 'Frame ' + i}`);
+      const frameTitle = frame.meta?.title;
+      if (frameTitle || frame.narrative) {
+        scenarioLines.push(`${timestamp}: ${frameTitle || 'Frame ' + i}`);
         if (frame.narrative) {
           scenarioLines.push(frame.narrative);
         }

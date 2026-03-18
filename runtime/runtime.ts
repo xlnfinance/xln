@@ -36,9 +36,9 @@ const DEFAULT_SNAPSHOT_INTERVAL_FRAMES = (() => {
 import { getPerfMs, getWallClockMs } from './utils';
 import { setDeltaTransformerAddress } from './proof-builder';
 import {
-  buildPersistedEntityReplicaSnapshot,
-  buildPersistedJReplicaSnapshot,
-} from './htlc-events';
+  buildCanonicalEnvSnapshot,
+  buildCanonicalRuntimeStateSnapshot,
+} from './canonical-snapshot';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { isLeftEntity } from './entity-id-utils';
 import type { JAdapter } from './jadapter';
@@ -3027,60 +3027,8 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   return env;
 };
 
-const buildRuntimeHistorySnapshot = (env: Env, title?: string): any => {
-  const frameLogs = Array.isArray(env.frameLogs)
-    ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
-    : [];
-  return {
-    height: env.height,
-    frame: env.height,
-    timestamp: env.timestamp,
-    ...(env.runtimeSeed !== undefined && env.runtimeSeed !== null ? { runtimeSeed: env.runtimeSeed } : {}),
-    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
-    eReplicas: new Map(env.eReplicas),
-    jReplicas: env.jReplicas
-      ? Array.from(env.jReplicas.values()).map(jr => {
-          const { jadapter: _jadapter, ...jrSnapshot } = jr as JReplica & { jadapter?: unknown };
-          return {
-            ...jrSnapshot,
-            mempool: [...jr.mempool],
-            stateRoot: new Uint8Array(jr.stateRoot),
-          };
-        })
-      : [],
-    runtimeInput: env.runtimeInput,
-    runtimeOutputs: env.pendingOutputs || [],
-    frameLogs,
-    logs: frameLogs,
-    title: title ?? `Frame ${env.height}`,
-  };
-};
-
 const buildPersistedEnvSnapshot = (env: Env): Record<string, unknown> => {
-  const persistedEReplicas = env.eReplicas
-    ? Array.from(env.eReplicas.entries()).map(([replicaKey, replica]) => [
-        replicaKey,
-        buildPersistedEntityReplicaSnapshot(replica),
-      ])
-    : [];
-  const persistedJReplicas = env.jReplicas
-    ? Array.from(env.jReplicas.entries()).map(([replicaKey, jr]) => [
-        replicaKey,
-        buildPersistedJReplicaSnapshot(jr),
-      ])
-    : [];
-
-  return {
-    height: env.height,
-    timestamp: env.timestamp,
-    ...(env.runtimeSeed !== undefined && env.runtimeSeed !== null ? { runtimeSeed: env.runtimeSeed } : {}),
-    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
-    ...(env.dbNamespace ? { dbNamespace: env.dbNamespace } : {}),
-    ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
-    ...(env.browserVMState ? { browserVMState: env.browserVMState } : {}),
-    eReplicas: persistedEReplicas,
-    jReplicas: persistedJReplicas,
-  };
+  return buildCanonicalRuntimeStateSnapshot(env);
 };
 
 const computePersistedEnvStateHash = (snapshot: Record<string, unknown>): string => {
@@ -3310,22 +3258,27 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
 
     const frameAdvanced = env.height !== frameHeightBeforeTick;
     if (frameAdvanced) {
-      const snapshot: any = buildRuntimeHistorySnapshot(env, `Frame ${env.height}`);
-
-      if (env.extra) {
-        const { subtitle, description } = env.extra;
-        if (subtitle) {
-          snapshot.subtitle = subtitle;
-          snapshot.title = subtitle.title || snapshot.title;
-        }
-        if (description) snapshot.description = description;
-      }
+      const committedFrameLogs = Array.isArray(env.frameLogs)
+        ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
+        : [];
+      const snapshot = buildCanonicalEnvSnapshot(env, {
+        runtimeInput: env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+        runtimeOutputs: env.pendingOutputs ?? [],
+        description: env.extra?.description ?? `Frame ${env.height}`,
+        meta: {
+          title: env.extra?.subtitle?.title ?? `Frame ${env.height}`,
+          ...(env.extra?.subtitle ? { subtitle: env.extra.subtitle } : {}),
+          ...(env.frameDisplayMs !== undefined ? { displayMs: env.frameDisplayMs } : {}),
+        },
+        logs: committedFrameLogs,
+        gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
+      });
 
       if (!env.history) env.history = [];
-      env.history.push(snapshot);
+      env.history.push(snapshot as any);
 
       if (!quietRuntimeLogs) {
-        console.log(`📸 Snapshot: ${snapshot.title} (${env.history.length} total)`);
+        console.log(`📸 Snapshot: ${snapshot.meta?.title ?? `Frame ${env.height}`} (${env.history.length} total)`);
       }
     }
     env.extra = undefined;
@@ -3848,7 +3801,16 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       }
       env.history = [];
       if (selectedSnapshotHeight > 0) {
-        env.history.push(buildRuntimeHistorySnapshot(env, `Frame ${selectedSnapshotHeight}`));
+        env.history.push(
+          buildCanonicalEnvSnapshot(env, {
+            runtimeInput: env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+            runtimeOutputs: env.pendingOutputs ?? [],
+            description: `Frame ${selectedSnapshotHeight}`,
+            meta: { title: `Frame ${selectedSnapshotHeight}` },
+            logs: env.frameLogs,
+            gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
+          }) as any,
+        );
       }
       if (persistedSnapshotStateHash) {
         const actualSnapshotStateHash = computePersistedEnvStateHash(buildPersistedEnvSnapshot(env));
@@ -4114,7 +4076,16 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
             env.frameLogs = Array.isArray(frame.logs)
               ? frame.logs.map((entry): FrameLogEntry => ({ ...entry }))
               : [];
-            env.history.push(buildRuntimeHistorySnapshot(env, `Frame ${h}`));
+            env.history.push(
+              buildCanonicalEnvSnapshot(env, {
+                runtimeInput: env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+                runtimeOutputs: env.pendingOutputs ?? [],
+                description: `Frame ${h}`,
+                meta: { title: `Frame ${h}` },
+                logs: env.frameLogs,
+                gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
+              }) as any,
+            );
             env.frameLogs = [];
             delete runtimeEnv[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY];
             lastGoodHeight = h;

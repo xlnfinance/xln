@@ -121,7 +121,10 @@ async function executeEvent(
     const latestSnapshot = env.history[env.history.length - 1];
     if (latestSnapshot) {
       if (event.title) {
-        latestSnapshot.title = event.title;
+        latestSnapshot.meta = {
+          ...(latestSnapshot.meta ?? {}),
+          title: event.title,
+        };
       }
       if (event.description) {
         latestSnapshot.narrative = event.description;
