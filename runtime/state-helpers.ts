@@ -12,6 +12,7 @@ import { safeStringify, safeParse } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { cloneJBatch, type CompletedBatch } from './j-batch';
 import type { CrontabState } from './crontab-types';
+import { buildCanonicalEnvSnapshot } from './canonical-snapshot';
 
 // Message size limit for snapshot efficiency
 const MESSAGE_LIMIT = 10;
@@ -424,14 +425,9 @@ export const captureSnapshot = async (
   const gossipProfiles = env.gossip?.getProfiles
     ? env.gossip.getProfiles().map((profile: Profile) => {
         try {
-          // structuredClone keeps nested data without mutating live gossip state
           return structuredClone(profile);
-        } catch (error) {
-          try {
-            return safeParse(safeStringify(profile));
-          } catch {
-            return profile;
-          }
+        } catch {
+          return safeParse(safeStringify(profile));
         }
       })
     : [];
@@ -458,84 +454,6 @@ export const captureSnapshot = async (
     }
   }
 
-  // Clone jReplicas (J-layer state) + SYNC reserves/collaterals from eReplicas for time travel
-  const jReplicas: JReplica[] = env.jReplicas
-    ? Array.from(env.jReplicas.values()).map(jr => {
-        // Sync reserves from eReplicas into JReplica snapshot
-        const reserves = new Map<string, Map<number, bigint>>();
-        const registeredEntities = new Map<string, { name: string; quorum: string[]; threshold: number }>();
-        // Collaterals: accountKey → tokenId → { collateral, ondelta }
-        const collaterals = new Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>();
-
-        // Aggregate reserves and collaterals from all entity replicas
-        for (const [key, replica] of env.eReplicas.entries()) {
-          const entityId = key.split(':')[0] || key; // fallback to full key if no separator
-          if (replica.state?.reserves) {
-            const tokenMap = new Map<number, bigint>();
-            // Handle both Map and plain object
-            for (const [tokenId, amount] of replica.state.reserves.entries()) {
-              tokenMap.set(tokenId, amount);
-            }
-            if (tokenMap.size > 0) {
-              reserves.set(entityId, tokenMap);
-            }
-          }
-
-          // Extract collaterals from bilateral accounts (only for LEFT entity to avoid duplicates)
-          if (replica.state?.accounts) {
-            for (const [counterpartyId, account] of replica.state.accounts.entries()) {
-              // Only capture from LEFT entity (smaller ID) to avoid duplicates
-              if (isLeftEntity(entityId, counterpartyId) && account.deltas) {
-                // Create account key: LEFT-RIGHT (canonical ordering)
-                const accountKey = `${entityId.slice(-4)}-${counterpartyId.slice(-4)}`;
-                const tokenMap = new Map<number, { collateral: bigint; ondelta: bigint }>();
-
-                for (const [tokenId, delta] of account.deltas.entries()) {
-                  if (delta.collateral > 0n || delta.ondelta !== 0n) {
-                    tokenMap.set(Number(tokenId), {
-                      collateral: delta.collateral,
-                      ondelta: delta.ondelta,
-                    });
-                  }
-                }
-
-                if (tokenMap.size > 0) {
-                  collaterals.set(accountKey, tokenMap);
-                }
-              }
-            }
-          }
-
-          // Add entity to registeredEntities
-          if (!registeredEntities.has(entityId)) {
-            registeredEntities.set(entityId, {
-              name: `E${entityId.slice(-4)}`,
-              quorum: replica.state.config?.validators || [],
-              threshold: Number(replica.state.config?.threshold || 1n),
-            });
-          }
-        }
-
-        return {
-          name: jr.name,
-          blockNumber: jr.blockNumber,
-          stateRoot: freshStateRoot ? new Uint8Array(freshStateRoot) : new Uint8Array(jr.stateRoot),
-          mempool: [...jr.mempool],
-          blockDelayMs: jr.blockDelayMs || 300,
-          lastBlockTimestamp: jr.lastBlockTimestamp || 0,
-          position: { ...jr.position },
-          ...(jr.rpcs && { rpcs: [...jr.rpcs] }),
-          ...(jr.chainId !== undefined && { chainId: jr.chainId }),
-          ...(jr.depositoryAddress && { depositoryAddress: jr.depositoryAddress }),
-          ...(jr.entityProviderAddress && { entityProviderAddress: jr.entityProviderAddress }),
-          ...(jr.contracts && { contracts: { ...jr.contracts } }),
-          reserves,
-          collaterals,  // Collateral state from bilateral accounts
-          registeredEntities,
-        };
-      })
-    : [];
-
   // Capture and reset frame logs
   const frameLogs = env.frameLogs ? [...env.frameLogs] : [];
   if (frameLogs.length > 0) {
@@ -545,41 +463,23 @@ export const captureSnapshot = async (
     env.frameLogs = [];
   }
 
-  const snapshot: EnvSnapshot = {
-    height: env.height,
-    timestamp: env.timestamp,
-    ...(env.runtimeSeed !== undefined && env.runtimeSeed !== null ? { runtimeSeed: env.runtimeSeed } : {}),
-    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
-    eReplicas: new Map(Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica, true)])), // forSnapshot=true excludes clonedForValidation
-    jReplicas,
-    ...(browserVMState ? { browserVMState } : {}),
-    runtimeInput: {
-      runtimeTxs: [...runtimeInput.runtimeTxs],
-      entityInputs: runtimeInput.entityInputs.map(input => ({
-        entityId: input.entityId,
-        signerId: input.signerId,
-        ...(input.entityTxs && { entityTxs: [...input.entityTxs] }),
-        ...(input.hashPrecommits && { hashPrecommits: new Map(Array.from(input.hashPrecommits.entries()).map(([k, v]) => [k, [...v]])) }),
-        ...(input.proposedFrame && { proposedFrame: input.proposedFrame }),
-      })),
+  const snapshot = buildCanonicalEnvSnapshot(env, {
+    browserVMState,
+    runtimeInput,
+    runtimeOutputs,
+    description: env.extra?.description ?? description,
+    meta: {
+      title: env.extra?.subtitle?.title ?? `Frame ${env.height}`,
+      ...(env.extra?.subtitle ? { subtitle: env.extra.subtitle } : {}),
+      ...(env.frameDisplayMs !== undefined ? { displayMs: env.frameDisplayMs } : {}),
     },
-    runtimeOutputs: runtimeOutputs.map(output => ({
-      entityId: output.entityId,
-      signerId: output.signerId,
-      ...(output.entityTxs && { entityTxs: [...output.entityTxs] }),
-      ...(output.hashPrecommits && { hashPrecommits: new Map(Array.from(output.hashPrecommits.entries()).map(([k, v]) => [k, [...v]])) }),
-      ...(output.proposedFrame && { proposedFrame: output.proposedFrame }),
-    })),
-    description: env.extra?.description || description,
-    gossip: { profiles: gossipProfiles },
+    gossipProfiles,
     logs: frameLogs,
-    ...(env.frameDisplayMs && { displayMs: env.frameDisplayMs }),
-    ...(env.extra?.subtitle && { subtitle: { ...env.extra.subtitle } }),
-  };
+  });
 
   // Clear consumed extras
-  delete env.frameDisplayMs;
-  delete env.extra;
+  env.frameDisplayMs = undefined;
+  env.extra = undefined;
 
   envHistory.push(snapshot);
 

@@ -2023,17 +2023,19 @@ export interface EnvSnapshot {
   gossip?: {
     profiles: Profile[];
   };
-  // Interactive storytelling narrative
-  title?: string; // Short headline (e.g., "Bank Run Begins")
-  narrative?: string; // Detailed explanation of what's happening in this frame
-  // Fed Chair educational subtitles (AHB demo)
-  subtitle?: {
-    title: string;           // Technical summary (e.g., "Reserve-to-Reserve Transfer")
-    what?: string;           // What's happening (optional)
-    why?: string;            // Why it matters (optional)
-    tradfiParallel?: string; // Traditional finance equivalent (optional)
-    keyMetrics?: string[];   // Bullet points of key numbers
+  meta?: {
+    title?: string; // Short headline (e.g., "Bank Run Begins")
+    subtitle?: {
+      title: string;           // Technical summary (e.g., "Reserve-to-Reserve Transfer")
+      what?: string;           // What's happening (optional)
+      why?: string;            // Why it matters (optional)
+      tradfiParallel?: string; // Traditional finance equivalent (optional)
+      keyMetrics?: string[];   // Bullet points of key numbers
+    };
+    displayMs?: number; // Display duration hint for time-travel visualization
   };
+  // Interactive storytelling narrative
+  narrative?: string; // Detailed explanation of what's happening in this frame
   // Cinematic view state for scenario playback
   viewState?: {
     camera?: 'orbital' | 'overview' | 'follow' | 'free';
@@ -2046,8 +2048,6 @@ export interface EnvSnapshot {
   };
   // Frame-specific structured logs
   logs?: FrameLogEntry[];
-  // Display duration hint for time-travel visualization (default: 100ms)
-  displayMs?: number;
 }
 
 // Entity types - canonical definition in ids.ts

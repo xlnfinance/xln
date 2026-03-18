@@ -154,7 +154,7 @@
   let sliceEnd: number | null = null;
 
   // Get current frame subtitle (Fed Chair educational content)
-  $: currentSubtitle = $history[$timeIndex]?.subtitle;
+  $: currentSubtitle = $history[$timeIndex]?.meta?.subtitle;
 
   // FPS tracking
   let fps = 0;
