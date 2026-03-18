@@ -384,8 +384,8 @@ const server = Bun.serve({
           margin: 1,
           width: 320,
           color: {
-            dark: '#f5efe6',
-            light: '#171513',
+            dark: '#111827',
+            light: '#ffffff',
           },
         });
         return svg(markup);
