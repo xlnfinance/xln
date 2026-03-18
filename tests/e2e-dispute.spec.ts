@@ -621,7 +621,7 @@ async function queueFundR2CViaUi(
   await expect(fundTab).toBeVisible({ timeout: 20_000 });
   await fundTab.click();
 
-  const accountPicker = page.locator('.asset-action-card button.closed-trigger, .asset-action-card input[placeholder="Select account..."]').first();
+  const accountPicker = page.locator('.asset-action-card .entity-input .closed-trigger, .asset-action-card .entity-input input').first();
   await expect(accountPicker).toBeVisible({ timeout: 20_000 });
   await accountPicker.click();
   const accountOption = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();
@@ -651,7 +651,7 @@ async function queueWithdrawC2RViaUi(
   await expect(withdrawTab).toBeVisible({ timeout: 20_000 });
   await withdrawTab.click();
 
-  const accountPicker = page.locator('.asset-action-card button.closed-trigger, .asset-action-card input[placeholder="Select account..."]').first();
+  const accountPicker = page.locator('.asset-action-card .entity-input .closed-trigger, .asset-action-card .entity-input input').first();
   await expect(accountPicker).toBeVisible({ timeout: 20_000 });
   await accountPicker.click();
   const accountOption = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();
@@ -678,7 +678,7 @@ async function queueTransferR2RViaUi(
   await expect(transferTab).toBeVisible({ timeout: 20_000 });
   await transferTab.click();
 
-  const recipientPicker = page.locator('.settlement-panel button.closed-trigger, .settlement-panel input[placeholder="Select recipient..."]').first();
+  const recipientPicker = page.locator('.settlement-panel .entity-input .closed-trigger, .settlement-panel .entity-input input').first();
   await expect(recipientPicker).toBeVisible({ timeout: 20_000 });
   await recipientPicker.click();
   const recipientOption = page.locator('.dropdown-item').filter({ hasText: recipientEntityId }).first();
@@ -884,7 +884,7 @@ async function startDisputeFromEntitySettle(
   await expect(disputeTab).toBeVisible({ timeout: 15_000 });
   await disputeTab.click();
 
-  const disputePicker = page.locator('.dispute-inline button.closed-trigger, .dispute-inline input[placeholder="Select account..."]').first();
+  const disputePicker = page.locator('.dispute-inline .entity-input .closed-trigger, .dispute-inline .entity-input input').first();
   await expect(disputePicker).toBeVisible({ timeout: 15_000 });
   await disputePicker.click();
   const disputeOption = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();

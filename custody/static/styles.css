@@ -393,9 +393,10 @@ button.primary:disabled {
 .deposit-invoice-details {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 14px;
   min-width: 0;
-  padding-top: 6px;
+  padding-top: 2px;
 }
 
 .deposit-invoice-row {
@@ -423,15 +424,12 @@ button.primary:disabled {
   display: none !important;
 }
 
-.deposit-copy-row,
-.deposit-wallet-row {
+.deposit-actions-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  gap: 12px;
   flex-wrap: wrap;
-}
-
-.deposit-wallet-row {
-  min-height: 46px;
+  min-height: 38px;
 }
 
 .deposit-copy-inline {
@@ -441,41 +439,62 @@ button.primary:disabled {
   border: none;
   background: transparent;
   padding: 0;
-  min-height: 46px;
+  min-height: 38px;
+  width: 104px;
   color: var(--ink);
   font-size: 14px;
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 0.18em;
   cursor: pointer;
+  justify-content: flex-start;
 }
 
 .deposit-copy-inline:hover {
   color: var(--blue);
 }
 
-.btn-wallet {
+.btn-xln-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 46px;
-  padding: 0 18px;
-  border: none;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #5b5ff7 0%, #6f77ff 100%);
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(17, 24, 39, 0.14);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #151922 0%, #0d1118 100%);
   color: white;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: -0.01em;
-  box-shadow: 0 10px 24px rgba(99, 91, 255, 0.22);
+  box-shadow: 0 12px 28px rgba(14, 17, 24, 0.18);
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
-.btn-wallet:hover {
+.btn-xln-action:hover:not(:disabled) {
   transform: translateY(-1px);
-  filter: brightness(1.03);
-  box-shadow: 0 14px 28px rgba(99, 91, 255, 0.26);
+  box-shadow: 0 16px 36px rgba(14, 17, 24, 0.24);
+}
+
+.btn-xln-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-xln-mark {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+
+.btn-xln-mark img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
 }
 
 button.secondary {
@@ -733,6 +752,10 @@ pre.activity-sub {
   .deposit-qr-wrap {
     width: min(154px, 100%);
     margin: 0 auto 4px;
+  }
+
+  .deposit-actions-row {
+    align-items: center;
   }
 
   .token-grid {

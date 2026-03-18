@@ -1,5 +1,5 @@
 ﻿# XLN: Bilateral Ethereum + Bank-Grade Credit + Instant Settlement
-# ~298k tokens | Generated: 2026-03-12 21:59:50 | Git: f780dda
+# ~298k tokens | Generated: 2026-03-18 14:41:51 | Git: 07ae1c3
 
 **TL;DR**: Banks without bailouts. Lightning without the inbound capacity wall.
 
@@ -172,25 +172,25 @@ xln/
     DeltaTransformer.sol       194 lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
-    types.ts                     2325 lines - All TypeScript interfaces (START HERE)
+    types.ts                     2300 lines - All TypeScript interfaces (START HERE)
     ids.ts                       515 lines - Identity system: EntityId, SignerId, JId, ReplicaKey
-    runtime.ts                   4339 lines - Main coordinator, 100ms ticks, R->E->A routing
-    entity-consensus.ts          1850 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    account-consensus.ts         2128 lines - Bilateral consensus, left/right perspective
+    runtime.ts                   4320 lines - Main coordinator, 100ms ticks, R->E->A routing
+    entity-consensus.ts          1870 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    account-consensus.ts         2132 lines - Bilateral consensus, left/right perspective
     account-consensus-state.ts   168 lines - Bilateral state machine
     j-batch.ts                   1034 lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
     account-utils.ts             389 lines - deriveDelta() RCPAN calculation
-    serialization-utils.ts       252 lines - BigInt serialization
+    serialization-utils.ts       258 lines - BigInt serialization
     account-crypto.ts            558 lines - Signature verification
 
     entity-tx/
       index.ts                   7 lines - Entity transaction types
-      apply.ts                   1383 lines - Entity tx dispatcher
+      apply.ts                   1386 lines - Entity tx dispatcher
       validation.ts              37 lines - Transaction validation
       financial.ts               33 lines - Financial accounting
       proposals.ts               35 lines - Proposal logic
-      j-events.ts                1456 lines - Jurisdiction events
-      handlers/account.ts              1316 lines - Account operations
+      j-events.ts                1457 lines - Jurisdiction events
+      handlers/account.ts              1315 lines - Account operations
       handlers/deposit-collateral.ts   143 lines - R2C deposits
       handlers/htlc-payment.ts         481 lines - HTLC routing
       handlers/create-settlement.ts    65 lines - Settlement creation
@@ -198,20 +198,20 @@ xln/
 
     account-tx/
       index.ts                   10 lines - Account transaction types
-      apply.ts                   280 lines - Account tx dispatcher
+      apply.ts                   268 lines - Account tx dispatcher
       handlers/add-delta.ts      41 lines - Delta addition
 
     routing/
       graph.ts                   141 lines - Network graph
       pathfinding.ts             269 lines - Dijkstra routing
 
-    state-helpers.ts             835 lines - Pure state management
+    state-helpers.ts             829 lines - Pure state management
     snapshot-coder.ts            20 lines - Deterministic RLP serialization
     evm.ts                       1011 lines - Blockchain integration
 
   docs/
     intro.md                           53 lines - * 5-min overview (new reader onramp)
-    essay.md                            96 lines - * Core philosophy and vision (CRITICAL PATH)
+    essay.md                            99 lines - * Core philosophy and vision (CRITICAL PATH)
     core/12_invariant.md                90 lines - * RCPAN innovation (CRITICAL PATH)
     core/rjea-architecture.md           669 lines - * RJEA 4-layer model (CRITICAL PATH)
     core/11_Jurisdiction_Machine.md     45 lines - Architecture deep-dive
@@ -3348,7 +3348,7 @@ contract DeltaTransformer is Console {
 }
 
 
-//runtime/types.ts (2325 lines)
+//runtime/types.ts (2300 lines)
 /**
  * XLN Type Definitions
  * All interfaces and type definitions used across the XLN system
@@ -3476,8 +3476,6 @@ contract DeltaTransformer is Console {
  *    ├─ 'direct_payment'               // Update offdelta (instant settlement)
  *    ├─ 'add_delta'                    // Add new token to account
  *    ├─ 'set_credit_limit'             // Set mutual credit limits
- *    ├─ 'request_withdrawal'           // Phase 2: C→R (collateral to reserve)
- *    ├─ 'approve_withdrawal'           // ACK/NACK withdrawal request
  *    └─ 'reserve_to_collateral'        // Phase 1: R→C (from j_event)
  *
  * 7. Delta (Per-token bilateral state - the money)
@@ -3916,14 +3914,6 @@ export type EntityTx =
       };
     }
   | {
-      type: 'requestWithdrawal';
-      data: {
-        counterpartyEntityId: string;
-        tokenId: number;
-        amount: bigint;
-      };
-    }
-  | {
       // Request hub collateralization on a bilateral account (prepaid fee model)
       type: 'requestCollateral';
       data: {
@@ -4055,7 +4045,7 @@ export type EntityTx =
       data: {
         matchingStrategy?: 'amount' | 'time' | 'fee'; // Default: 'amount'
         policyVersion?: number;             // Fee-policy version (auto-incremented if omitted)
-        routingFeePPM?: number;             // Default: 100 (0.01%)
+        routingFeePPM?: number;             // Default: 1 (0.0001%)
         baseFee?: bigint;                   // Default: 0n
         disputeAutoFinalizeMode?: 'auto' | 'ignore';
         minCollateralThreshold?: bigint;    // Reserved for future policy gates
@@ -4330,6 +4320,7 @@ export interface SwapOffer {
   giveAmount: bigint;           // Original amount (partial fills reduce this)
   wantTokenId: number;          // Token maker wants in return
   wantAmount: bigint;           // Corresponding want amount (maintains ratio)
+  priceTicks?: bigint;          // Canonical limit price used for requantization after partial fills
   minFillRatio: number;         // 0-65535, minimum acceptable fill
   makerIsLeft: boolean;         // Who created this offer (canonical direction)
   createdHeight: number;        // AccountFrame height when created
@@ -4734,24 +4725,6 @@ export type AccountTx =
       };
     }
   | {
-      type: 'request_withdrawal';
-      data: {
-        tokenId: number;
-        amount: bigint;
-        requestId: string; // Unique ID for matching ACK/NACK
-      };
-    }
-  | {
-      type: 'approve_withdrawal';
-      data: {
-        tokenId: number;
-        amount: bigint;
-        requestId: string; // Matches request_withdrawal.requestId
-        approved: boolean; // true = ACK, false = NACK
-        signature?: string; // If approved: signature for on-chain submission
-      };
-    }
-  | {
       type: 'request_collateral';
       data: {
         tokenId: number;
@@ -4931,7 +4904,9 @@ export interface EntityState {
   prevFrameHash?: string; // Chain linkage for BFT consensus (keccak256 of previous frame)
 
   // 💰 Financial state
-  reserves: Map<string, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
+  // Financial invariant: entity reserves are always keyed by numeric tokenId.
+  // Never persist or pass string token keys through live state.
+  reserves: Map<number, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
   accounts: Map<string, AccountMachine>; // canonicalKey "left:right" -> account state
   // Account frame scheduling (accounts blocked by pendingFrame, retried on next ACK)
   deferredAccountProposals?: Map<string, true>;
@@ -6192,7 +6167,7 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 };
 
 
-//runtime/runtime.ts (4339 lines)
+//runtime/runtime.ts (4320 lines)
 // for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
@@ -6355,7 +6330,7 @@ import {
   createDemoDelta,
   getDefaultCreditLimit,
 } from './account-utils';
-import { computeSwapPriceTicks } from './orderbook';
+import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import {
   formatTokenAmount as formatTokenAmountEthers,
@@ -7893,6 +7868,10 @@ const applyRuntimeInput = async (
   }
 
   try {
+    const rejectRuntimeInput = (message: string): never => {
+      log.error(`❌ ${message}`);
+      throw new Error(message);
+    };
     if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
       console.log(
         `[REPLAY] applyRuntimeInput runtimeTxs=${runtimeInput.runtimeTxs.length} entityInputs=${runtimeInput.entityInputs.length}`,
@@ -7900,31 +7879,13 @@ const applyRuntimeInput = async (
     }
     // SECURITY: Validate runtime input
     if (!runtimeInput) {
-      log.error('❌ Null runtime input provided');
-      return {
-        entityOutbox: [],
-        mergedInputs: [],
-        jOutbox: [],
-        appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] },
-      };
+      rejectRuntimeInput('Null runtime input provided');
     }
     if (!Array.isArray(runtimeInput.runtimeTxs)) {
-      log.error(`❌ Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`);
-      return {
-        entityOutbox: [],
-        mergedInputs: [],
-        jOutbox: [],
-        appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] },
-      };
+      rejectRuntimeInput(`Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`);
     }
     if (!Array.isArray(runtimeInput.entityInputs)) {
-      log.error(`❌ Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
-      return {
-        entityOutbox: [],
-        mergedInputs: [],
-        jOutbox: [],
-        appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] },
-      };
+      rejectRuntimeInput(`Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
     }
 
     // Collect incoming J-inputs into early jOutbox (will be merged with handler jOutputs later)
@@ -7949,17 +7910,10 @@ const applyRuntimeInput = async (
 
     // SECURITY: Resource limits
     if (runtimeInput.runtimeTxs.length > 1000) {
-      log.error(`❌ Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
-      return {
-        entityOutbox: [],
-        mergedInputs: [],
-        jOutbox: [],
-        appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] },
-      };
+      rejectRuntimeInput(`Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
     }
     if (runtimeInput.entityInputs.length > 10000) {
-      log.error(`❌ Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
-      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
+      rejectRuntimeInput(`Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
     }
 
     // FINTECH-LEVEL TYPE SAFETY: Validate all inputs BEFORE mutating env
@@ -8922,6 +8876,8 @@ export {
   getSwapPairOrientation,
   getDefaultSwapTradingPairs,
   computeSwapPriceTicks,
+  prepareSwapOrder,
+  quantizeSwapOrder,
   formatTokenAmount,
   createDemoDelta,
   getDefaultCreditLimit,
@@ -10533,7 +10489,7 @@ export type { ParsedEntityId } from './entity-id-utils';
 export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from './runtime-ascii';
 
 
-//runtime/entity-consensus.ts (1850 lines)
+//runtime/entity-consensus.ts (1870 lines)
 /**
  * XLN Entity Consensus and State Management
  * Core entity processing logic, consensus, proposals, and state transitions
@@ -10551,6 +10507,18 @@ import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } 
 import { processOrderbookSwaps, processOrderbookCancels } from './entity-tx/handlers/account';
 import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
 import { ethers } from 'ethers';
+
+const compareNumericKey = (
+  left: string | number,
+  right: string | number,
+): number => {
+  const leftNum = Number(left);
+  const rightNum = Number(right);
+  if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
+    return leftNum - rightNum;
+  }
+  return String(left).localeCompare(String(right));
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ENTITY FRAME HASH - Cryptographic commitment to entity state
@@ -10630,7 +10598,7 @@ export async function createEntityFrameHash(
     entityId: newState.entityId,
     // Reserves: sorted by tokenId for determinism
     reserves: Array.from(newState.reserves.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
+      .sort((a, b) => compareNumericKey(a[0], b[0]))
       .map(([k, v]) => [k, v.toString()]),
     // J-machine tracking
     lastFinalizedJHeight: newState.lastFinalizedJHeight,
@@ -10647,7 +10615,7 @@ export async function createEntityFrameHash(
     htlcRoutesHash: newState.htlcRoutes.size > 0
       ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
           Array.from(newState.htlcRoutes.entries())
-            .sort((a, b) => a[0].localeCompare(b[0]))
+            .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
         )))
       : null,
     htlcFeesEarned: newState.htlcFeesEarned.toString(),
@@ -10655,13 +10623,13 @@ export async function createEntityFrameHash(
     lockBookHash: newState.lockBook.size > 0
       ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
           Array.from(newState.lockBook.entries())
-            .sort((a, b) => a[0].localeCompare(b[0]))
+            .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
         )))
       : null,
     swapBookHash: newState.swapBook.size > 0
       ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
           Array.from(newState.swapBook.entries())
-            .sort((a, b) => a[0].localeCompare(b[0]))
+            .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
         )))
       : null,
     // Orderbook extension hash (if hub)
@@ -10757,8 +10725,12 @@ const attachHankoWitnessToOutputs = (
  */
 function getPrevFrameHash(state: EntityState): string {
   if (state.height === 0) return 'genesis';
-  // Store prevFrameHash in EntityState on commit (added below)
-  return (state as any).prevFrameHash || 'genesis';
+  if (typeof state.prevFrameHash === 'string' && state.prevFrameHash.length > 0) {
+    return state.prevFrameHash;
+  }
+  throw new Error(
+    `ENTITY_FRAME_CHAIN_CORRUPTED: missing prevFrameHash at height=${state.height} entity=${state.entityId}`,
+  );
 }
 
 // === SECURITY VALIDATION ===
@@ -11778,10 +11750,8 @@ export const applyEntityFrame = async (
   const proposableAccounts = new Set<string>();
 
   // === AGGREGATE PURE EVENTS FROM ALL HANDLERS ===
-  const allMempoolOps: Array<{ accountId: string; tx: any }> = [];
   const allSwapOffersCreated: Array<any> = [];
   const allSwapCancelRequests: Array<any> = [];
-  const allSwapOffersCancelled: Array<any> = [];
 
   // Preserve WAL transaction order exactly during live processing and replay.
   // Reordering batched txs can change bilateral account state transitions
@@ -11815,8 +11785,10 @@ export const applyEntityFrame = async (
     allOutputs.push(...outputs);
     if (jOutputs) allJOutputs.push(...jOutputs);
 
-    // CRITICAL FIX: Apply mempoolOps IMMEDIATELY instead of batching
-    // This ensures directPayment can detect newly-added mempool items in the same tick
+    // CRITICAL: handlers stay pure by returning mempoolOps; the orchestrator is the
+    // only place that mutates account.mempool during entity-frame application.
+    // Apply returned mempoolOps immediately on the cloned working state so later
+    // entityTxs in the same frame observe the same in-frame account state.
     if (mempoolOps && mempoolOps.length > 0) {
       console.log(`📦 ENTITY-ORCHESTRATOR: Applying ${mempoolOps.length} mempoolOps (inline)`);
       for (const { accountId, tx } of mempoolOps) {
@@ -11854,7 +11826,6 @@ export const applyEntityFrame = async (
 
     if (swapOffersCreated) allSwapOffersCreated.push(...swapOffersCreated);
     if (swapCancelRequests) allSwapCancelRequests.push(...swapCancelRequests);
-    if (swapOffersCancelled) allSwapOffersCancelled.push(...swapOffersCancelled);
 
     if (HEAVY_LOGS && entityTx.type === 'extendCredit') {
       console.log(`💳 POST-EXTEND-CREDIT: Checking all account mempools:`);
@@ -11976,7 +11947,9 @@ export const applyEntityFrame = async (
       matchResult = { mempoolOps: [], bookUpdates: [] };
     }
 
-    // Apply match results to account mempools
+    // Orderbook matching returns pure mempoolOps/book updates. Applying the
+    // returned account txs here is still orchestrator-owned mutation of the
+    // cloned working state, not handler-side in-place state injection.
     for (const { accountId, tx } of matchResult.mempoolOps) {
       const account = currentEntityState.accounts.get(accountId);
       if (account) {
@@ -12024,6 +11997,9 @@ export const applyEntityFrame = async (
       for (const { accountId, offerId } of allSwapCancelRequests) {
         const account = currentEntityState.accounts.get(accountId);
         if (!account?.swapOffers?.has(offerId)) continue;
+        // Fallback cancel resolution is synthesized by the orchestrator itself.
+        // It must land in the same working-state mempool so the later account
+        // proposal step sees it in this frame.
         account.mempool.push({
           type: 'swap_resolve',
           data: { offerId, fillRatio: 0, cancelRemainder: true },
@@ -12385,7 +12361,7 @@ export const handleEmptyMempoolProposer = (): void => {
 };
 
 
-//runtime/account-consensus.ts (2128 lines)
+//runtime/account-consensus.ts (2132 lines)
 /**
  * XLN Account Consensus System
  *
@@ -14199,6 +14175,10 @@ export async function handleAccountInput(
     );
     if (postCommitAutoRebalanceTxs.length > 0) {
       for (const tx of postCommitAutoRebalanceTxs) {
+        // Post-commit rebalance is a fresh follow-up account reaction. The
+        // received frame is already committed; queuing new account txs into the
+        // local mempool here is the correct "next proposal" path, not handler
+        // mutation of an in-flight entity frame.
         accountMachine.mempool.push(tx);
       }
       events.push(`🔄 Auto-rebalance queued ${postCommitAutoRebalanceTxs.length} tx(s) after frame commit`);
@@ -16011,28 +15991,28 @@ export type SwapPairPolicy = {
 };
 
 const DEFAULT_SWAP_PAIR_POLICY: SwapPairPolicy = {
-  priceStepTicks: 100,   // 0.01
-  bookRangeBps: 900,
+  priceStepTicks: 1,   // 0.0001
+  bookRangeBps: 400,
   mmMidPriceTicks: 10_000n, // 1.0000
 };
 
 const SWAP_PAIR_POLICY_BY_BASE_QUOTE: Record<string, SwapPairPolicy> = {
   // WETH/USDC
   '2/1': {
-    priceStepTicks: 100,    // 0.01 USDC per WETH
-    bookRangeBps: 700,
+    priceStepTicks: 1,    // 0.0001 USDC per WETH
+    bookRangeBps: 250,
     mmMidPriceTicks: 25_000_000n, // 2500.0000
   },
   // WETH/USDT
   '2/3': {
-    priceStepTicks: 100,    // 0.01 USDT per WETH
-    bookRangeBps: 700,
+    priceStepTicks: 1,    // 0.0001 USDT per WETH
+    bookRangeBps: 250,
     mmMidPriceTicks: 25_000_000n, // 2500.0000
   },
   // USDC/USDT
   '1/3': {
     priceStepTicks: 1,      // 0.0001
-    bookRangeBps: 1200,
+    bookRangeBps: 40,
     mmMidPriceTicks: 10_000n, // 1.0000
   },
 };
@@ -16112,7 +16092,7 @@ export { formatTokenAmount } from './financial-utils';
 export { calculatePercentage } from './financial-utils';
 
 
-//runtime/serialization-utils.ts (252 lines)
+//runtime/serialization-utils.ts (258 lines)
 /**
  * Deterministic, BigInt-safe serialization utilities.
  * One canonical codec is used for logs, network payloads, and persisted snapshots.
@@ -16303,7 +16283,8 @@ export function safeStringify(obj: unknown, space?: number): string {
   try {
     return stringifyCanonical(obj, space === undefined ? {} : { space });
   } catch (err) {
-    return `[Error stringifying: ${(err as Error).message}]`;
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`SAFE_STRINGIFY_FAILED: ${message}`, err instanceof Error ? { cause: err } : undefined);
   }
 }
 
@@ -16312,7 +16293,12 @@ export function safeStringify(obj: unknown, space?: number): string {
  */
 export function safeLog(message: string, obj?: unknown): void {
   if (obj !== undefined) {
-    console.log(message, safeStringify(obj, 2));
+    try {
+      console.log(message, safeStringify(obj, 2));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.log(message, `[Unserializable: ${detail}]`);
+    }
   } else {
     console.log(message);
   }
@@ -16375,12 +16361,12 @@ export * from './proposals';
 export * from './validation';
 
 
-//runtime/entity-tx/apply.ts (1383 lines)
+//runtime/entity-tx/apply.ts (1386 lines)
 import { calculateQuorumPower } from '../entity-consensus';
 import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
 import { normalizeEntityName } from '../networking/gossip';
-import { createOrderbookExtState } from '../orderbook';
+import { createOrderbookExtState, validateSpreadDistribution } from '../orderbook';
 import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput, HashType } from '../types';
 import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../types';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
@@ -16613,6 +16599,11 @@ export const applyEntityTx = async (
 
     if (entityTx.type === 'initOrderbookExt') {
       if (entityState.orderbookExt) {
+        return { newState: entityState, outputs: [] };
+      }
+
+      if (!validateSpreadDistribution(entityTx.data.spreadDistribution)) {
+        log.error(`❌ Invalid spread distribution for initOrderbookExt on ${formatEntityId(entityState.entityId)}`);
         return { newState: entityState, outputs: [] };
       }
 
@@ -16945,7 +16936,10 @@ export const applyEntityTx = async (
             }
             // Don't re-add htlc_lock to mempool (it's being cancelled)
           } else {
-            // Non-HTLC txs: restore to mempool for re-proposal
+            // Rollback path: these txs were already part of the failed pending
+            // account frame. Restoring them to the same account mempool is the
+            // inverse of that failed proposal, not a new handler-originated
+            // mutation.
             accountMachine.mempool.push(tx);
             console.log(`📥   Restored ${tx.type} to mempool`);
           }
@@ -17309,7 +17303,7 @@ export const applyEntityTx = async (
       const {
         matchingStrategy: matchingStrategyRaw = 'amount',
         policyVersion: policyVersionRaw,
-        routingFeePPM = 100,
+        routingFeePPM = 1,
         baseFee = 0n,
         disputeAutoFinalizeMode = 'auto',
         minCollateralThreshold = 0n,
@@ -17633,11 +17627,6 @@ export const applyEntityTx = async (
       return { newState, outputs, mempoolOps };
     }
 
-    if (entityTx.type === 'requestWithdrawal') {
-      const { handleRequestWithdrawal } = await import('./handlers/request-withdrawal');
-      return { newState: handleRequestWithdrawal(entityState, entityTx), outputs: [] };
-    }
-
     if (entityTx.type === 'reserve_to_external') {
       return handleReserveToExternal(entityState, entityTx);
     }
@@ -17871,7 +17860,7 @@ export const executeProposal = (entityState: EntityState, proposal: Proposal): E
 };
 
 
-//runtime/entity-tx/j-events.ts (1456 lines)
+//runtime/entity-tx/j-events.ts (1457 lines)
 import type { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env } from '../types';
 import { ethers } from 'ethers';
 import { DEBUG } from '../utils';
@@ -18744,16 +18733,17 @@ async function applyFinalizedJEvent(
 
   if (event.type === 'ReserveUpdated') {
     const { entity, tokenId, newBalance } = event.data;
-    const tokenSymbol = getTokenSymbol(tokenId as number);
-    const decimals = getTokenDecimals(tokenId as number);
+    const tokenIdNum = Number(tokenId);
+    const tokenSymbol = getTokenSymbol(tokenIdNum);
+    const decimals = getTokenDecimals(tokenIdNum);
     const balanceDisplay = (Number(newBalance) / (10 ** decimals)).toFixed(4);
 
     if (entity === entityState.entityId) {
-      const before = entityState.reserves.get(String(tokenId)) ?? 0n;
-      newState.reserves.set(String(tokenId), BigInt(newBalance as string | number | bigint));
+      const before = entityState.reserves.get(tokenIdNum) ?? 0n;
+      newState.reserves.set(tokenIdNum, BigInt(newBalance as string | number | bigint));
       console.log(`💰 ReserveUpdated APPLIED: entity=${entityShort} token=${tokenId} balance=${newBalance}`);
       console.log(`   Before: ${before.toString()}`);
-      console.log(`   After: ${(newState.reserves.get(String(tokenId)) ?? 0n).toString()}`);
+      console.log(`   After: ${(newState.reserves.get(tokenIdNum) ?? 0n).toString()}`);
     }
 
     addMessage(newState, `📊 RESERVE: ${tokenSymbol} = ${balanceDisplay} | Block ${blockNumber} | Tx ${txHashShort}`);
@@ -18782,11 +18772,11 @@ async function applyFinalizedJEvent(
     const decimals = getTokenDecimals(tokenIdNum);
 
     // Update own reserves (entity-level, unilateral OK)
-    const oldReserve = newState.reserves.get(String(tokenId)) || 0n;
+    const oldReserve = newState.reserves.get(tokenIdNum) || 0n;
     console.log(`   💰 RESERVE-UPDATE: ownReserve=${ownReserve}, old=${oldReserve}, tokenId=${tokenId}`);
     if (ownReserve) {
       const newReserve = BigInt(ownReserve as string | number | bigint);
-      newState.reserves.set(String(tokenId), newReserve);
+      newState.reserves.set(tokenIdNum, newReserve);
       console.log(`   💰 RESERVE-SET: ${oldReserve} → ${newReserve}`);
     } else {
       console.log(`   ⚠️ RESERVE-SKIP: ownReserve is falsy`);
@@ -19329,7 +19319,7 @@ async function applyFinalizedJEvent(
 }
 
 
-//runtime/entity-tx/handlers/account.ts (1316 lines)
+//runtime/entity-tx/handlers/account.ts (1315 lines)
 import type { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
@@ -19355,6 +19345,7 @@ import {
 } from '../../entity-crontab';
 import { NobleCryptoProvider } from '../../crypto-noble';
 import { unwrapEnvelope, validateEnvelope } from '../../htlc-envelope-types';
+import { terminateHtlcRoute } from '../htlc-route-lifecycle';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counterpartyId: string): string | null => {
@@ -19682,15 +19673,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             }
             // Secret-return ACK received from inbound counterparty: clear pending ACK timer.
             if (accountTx.data.outcome === 'secret') {
-              for (const route of newState.htlcRoutes.values()) {
+              for (const [hashlock, route] of newState.htlcRoutes.entries()) {
                 if (route.inboundLockId !== accountTx.data.lockId) continue;
-                if (!route.secretAckPending) continue;
-                route.secretAckPending = false;
-                route.secretAckedAt = newState.timestamp;
-                if (newState.crontabState) {
-                  cancelScheduledHook(newState.crontabState, `htlc-secret-ack:${route.hashlock}`);
-                }
                 console.log(`✅ HTLC: secret ACK confirmed for hashlock ${route.hashlock.slice(0, 16)}...`);
+                terminateHtlcRoute(newState, hashlock, newState.timestamp);
               }
             }
           }
@@ -20154,6 +20140,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         if (HEAVY_LOGS) console.log(`🔍 HTLC-SECRET: Processing revealed secret for hash ${hashlock.slice(0,16)}...`);
         const route = newState.htlcRoutes.get(hashlock);
         if (route) {
+          if (route.secret) {
+            console.log(`⏭️ HTLC: Secret already recorded for ${hashlock.slice(0, 16)}..., skipping duplicate propagation`);
+            continue;
+          }
           const isFinalRecipient = !!route.inboundEntity && !route.outboundEntity;
           const outboundLock = route.outboundLockId ? newState.lockBook.get(route.outboundLockId) : undefined;
           const inboundLock = route.inboundLockId ? newState.lockBook.get(route.inboundLockId) : undefined;
@@ -20211,9 +20201,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             }
             console.log(`⬅️ HTLC: Propagating secret to ${route.inboundEntity.slice(-4)}`);
           } else {
-            route.secretAckPending = false;
-            route.secretAckedAt = newState.timestamp;
             console.log(`✅ HTLC: Payment complete (we initiated)`);
+            terminateHtlcRoute(newState, hashlock, newState.timestamp);
           }
           if (isFinalRecipient) {
             env.emit('HtlcReceived', {
@@ -20684,7 +20673,7 @@ export async function handleDepositCollateral(
   const mempoolOps: MempoolOp[] = [];
 
   // Validate: Do we have enough reserve?
-  const currentReserve = entityState.reserves.get(String(tokenId)) || 0n;
+  const currentReserve = entityState.reserves.get(tokenId) || 0n;
   if (currentReserve < amount) {
     console.log(`❌ deposit_collateral: Insufficient reserve ${currentReserve} < ${amount}`);
     addMessage(newState,
@@ -20983,7 +20972,7 @@ export async function handleHtlcPayment(
     const fromNorm = String(fromEntityId || '').toLowerCase();
     const toNorm = String(toEntityId || '').toLowerCase();
     const profile = env.gossip?.getProfiles?.().find((candidate) => candidate.entityId.toLowerCase() === fromNorm);
-    const basePpm = sanitizeFeePPM(profile?.metadata.routingFeePPM ?? 10, 10);
+    const basePpm = sanitizeFeePPM(profile?.metadata.routingFeePPM ?? 1, 1);
     const baseFee = sanitizeBaseFee(profile?.metadata.baseFee ?? 0n);
 
     const account = profile?.accounts.find((candidate) => candidate.counterpartyId.toLowerCase() === toNorm) ?? null;
@@ -21409,7 +21398,7 @@ export { handleSetCreditLimit } from './handlers/set-credit-limit';
 export { handleDirectPayment } from './handlers/direct-payment';
 
 
-//runtime/account-tx/apply.ts (280 lines)
+//runtime/account-tx/apply.ts (268 lines)
 /**
  * Account Transaction Dispatcher
  * Routes AccountTx to appropriate handlers (like entity-tx/apply.ts pattern)
@@ -21421,8 +21410,6 @@ import { handleAddDelta } from './handlers/add-delta';
 import { handleSetCreditLimit } from './handlers/set-credit-limit';
 import { handleDirectPayment } from './handlers/direct-payment';
 import { handleReserveToCollateral } from './handlers/reserve-to-collateral';
-import { handleRequestWithdrawal } from './handlers/request-withdrawal';
-import { handleApproveWithdrawal } from './handlers/approve-withdrawal';
 import { handleSetRebalancePolicy } from './handlers/set-rebalance-policy';
 import { handleRequestCollateral } from './handlers/request-collateral';
 import { handleReopenDisputed } from './handlers/reopen-disputed';
@@ -21526,16 +21513,6 @@ export async function processAccountTx(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'reserve_to_collateral' }>,
       );
-
-    case 'request_withdrawal':
-      return handleRequestWithdrawal(
-        accountMachine,
-        accountTx as Extract<AccountTx, { type: 'request_withdrawal' }>,
-        byLeft,
-      );
-
-    case 'approve_withdrawal':
-      return handleApproveWithdrawal(accountMachine, accountTx as Extract<AccountTx, { type: 'approve_withdrawal' }>);
 
     case 'request_collateral':
       {
@@ -21823,7 +21800,7 @@ export function buildNetworkGraph(
       if (!tokenCapacity || tokenCapacity.outCapacity === 0n) continue;
 
       const baseFee = sanitizeBaseFee(profile.metadata.baseFee);
-      const basePpm = sanitizeFeePPM(profile.metadata.routingFeePPM, 100);
+      const basePpm = sanitizeFeePPM(profile.metadata.routingFeePPM, 1);
       const feePPM = calculateDirectionalFeePPM(
         basePpm,
         tokenCapacity.outCapacity,
@@ -22708,7 +22685,7 @@ export function validateAccountSignatures(
 }
 
 
-//runtime/state-helpers.ts (835 lines)
+//runtime/state-helpers.ts (829 lines)
 /**
  * XLN State Management Helpers
  * Utilities for entity replica cloning, snapshots, and state persistence
@@ -23184,14 +23161,8 @@ export const captureSnapshot = async (
           if (replica.state?.reserves) {
             const tokenMap = new Map<number, bigint>();
             // Handle both Map and plain object
-            if (replica.state.reserves instanceof Map) {
-              replica.state.reserves.forEach((amount: bigint, tokenId: string) => {
-                tokenMap.set(Number(tokenId), amount);
-              });
-            } else {
-              for (const [tokenId, amount] of Object.entries(replica.state.reserves as Record<string, bigint>)) {
-                tokenMap.set(Number(tokenId), BigInt(amount));
-              }
+            for (const [tokenId, amount] of replica.state.reserves.entries()) {
+              tokenMap.set(tokenId, amount);
             }
             if (tokenMap.size > 0) {
               reserves.set(entityId, tokenMap);
@@ -24635,7 +24606,7 @@ Interpretation:
 3. jurisdictions/contracts/Depository.sol
 
 
-//docs/essay.md (96 lines)
+//docs/essay.md (99 lines)
 # The Inevitability of Provable Credit: Why XLN Represents the True Evolution of Finance
 
 The history of financial innovation is littered with false dichotomies. Centralized versus decentralized. Trustless versus efficient. Privacy versus transparency. These framings obscure a deeper truth that XLN illuminates: the fundamental structure of value transfer networks is not a choice between competing ideologies, but an inevitable convergence toward what has always worked, enhanced by what has always been missing.
@@ -24732,6 +24703,9 @@ It's buried in a 20k-line dump with debug console.logs in the Solidity. There's 
 
 History is full of right ideas in wrong packaging that took decades to be recognized. Dijkstra's structured programming, Kay's object orientation, Coase's transaction costs — all obvious in retrospect, all ignored or misunderstood for years because the presentation didn't match the insight.
 
+## Unicast vs Broadcast
+
+The entire blockchain scaling industry — billions of dollars, thousands of engineers — spent a decade making broadcast faster (Solana), making broadcast cheaper (rollups), making broadcast private (Canton), making broadcast parallel (Sui, Aptos). Nobody questioned whether broadcast was the right topology. Lightning questioned it but then built bilateral channels without credit, which is like building roads without on-ramps.
 
 //docs/core/12_invariant.md (90 lines)
 # 1.2 RCPAN Invariant 

@@ -21,6 +21,7 @@
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import { amountToUsd } from '$lib/utils/assetPricing';
   import { buildXlnInvoiceUri, parseXlnInvoice, type ParsedXlnInvoice } from '$lib/utils/xlnInvoice';
+  import { appendPaymentTimestamp } from '$lib/utils/paymentTiming';
   import {
     extractEntityEncPubKey,
     findProfileByEntityId,
@@ -42,6 +43,7 @@
   let invoiceValue = '';
   let invoiceError = '';
   let invoiceLocked = false;
+  let paymentStartedAtMs = 0;
   let pendingAutoRouteKey = '';
   let completedAutoRouteKey = '';
   let scannerOpen = false;
@@ -251,6 +253,7 @@
     invoiceError = '';
     invoiceValue = '';
     descriptionLocked = false;
+    paymentStartedAtMs = 0;
   }
 
   function applyInvoiceIntent(parsed: ParsedXlnInvoice): void {
@@ -260,6 +263,7 @@
     targetEntityId = parsed.targetEntityId;
     if (parsed.amount) amount = parsed.amount;
     if (parsed.tokenId) tokenId = parsed.tokenId;
+    paymentStartedAtMs = Number(parsed.startedAtMs || 0);
     const noteParts: string[] = [];
     if (parsed.description) noteParts.push(parsed.description);
     if (parsed.recipientUserId) noteParts.push(`uid:${parsed.recipientUserId}`);
@@ -1321,7 +1325,7 @@
       const signerId = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'payment-panel')
         || requireSignerIdForEntity(env, entityId, 'payment-panel');
 
-      const descriptionValue = description.trim();
+      const descriptionValue = appendPaymentTimestamp(description.trim(), paymentStartedAtMs || Date.now());
       let paymentInput: EntityInputPayload;
       let queuedHashlock: string | null = null;
       if (useHtlc) {
@@ -1470,7 +1474,7 @@
         id="payment-invoice-input"
         type="text"
         bind:value={invoiceValue}
-        placeholder="xln:?id=0x..."
+        aria-label="Invoice"
         disabled={findingRoutes || sendingPayment}
         on:input={handleInvoiceInput}
       />
@@ -1508,7 +1512,6 @@
         entities={allEntities}
         contacts={selectorContacts}
         preferredId={entityId}
-        placeholder="Select entity..."
         disabled={invoiceLocked || findingRoutes || sendingPayment}
         on:change={handleTargetChange}
         on:open={handleRecipientPickerOpen}
@@ -1541,7 +1544,8 @@
           id="payment-amount-input"
           type="text"
           bind:value={amount}
-          placeholder="0.00"
+          data-testid="payment-amount-input"
+          aria-label="Payment amount"
           disabled={invoiceLocked || findingRoutes || sendingPayment}
           on:input={handleAmountInput}
         />
@@ -1570,9 +1574,10 @@
   <div class="field">
     <label>Description {descriptionLocked ? '(locked)' : '(optional)'}</label>
     <input
+      id="payment-description-input"
       type="text"
       bind:value={description}
-      placeholder="Payment for..."
+      aria-label="Payment description"
       readonly={descriptionLocked || invoiceLocked}
       aria-readonly={descriptionLocked || invoiceLocked}
       disabled={findingRoutes || sendingPayment}

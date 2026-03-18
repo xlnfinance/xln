@@ -50,8 +50,8 @@ test.describe('Invoice QR flow', () => {
       await connectRuntimeToHub(bobPage, bob, hubId);
 
       await bobPage.getByRole('button', { name: /^Receive$/i }).click();
-      await bobPage.locator('.invoice-builder input[placeholder="Optional amount"]').fill('7');
-      await bobPage.locator('.invoice-builder input[placeholder="Optional description"]').fill('QR settle');
+      await bobPage.getByTestId('receive-invoice-amount').fill('7');
+      await bobPage.getByTestId('receive-invoice-description').fill('QR settle');
 
       const downloadPromise = bobPage.waitForEvent('download');
       await bobPage.getByRole('button', { name: /Download QR/i }).click();

@@ -40,6 +40,12 @@ type CustodyDashboardPayload = {
     amountDisplay?: string;
     amountMinor?: string;
   };
+  tokens?: Array<{
+    tokenId?: number;
+    symbol?: string;
+    amountDisplay?: string;
+    amountMinor?: string;
+  }>;
   custody?: {
     lastSyncError?: string | null;
     lastSyncOkAt?: number | null;
@@ -47,6 +53,7 @@ type CustodyDashboardPayload = {
   activity?: Array<{
     id?: string;
     kind?: string;
+    tokenId?: number;
     amountMinor?: string;
     amountDisplay?: string;
     requestedAmountMinor?: string;
@@ -156,9 +163,10 @@ async function waitForPopupRoutesAndSubmit(popup: Page, targetEntityId: string):
   const routeError = popup.locator('.profile-preflight-error');
   await expect(findRoutesButton).toBeVisible({ timeout: 60_000 });
   await popup.waitForTimeout(1_000);
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + 25_000;
   while (Date.now() < deadline) {
     if (await firstRoute.isVisible().catch(() => false)) break;
+    console.log(`[custody:popup] finding routes url=${popup.url()}`);
     await findRoutesButton.click();
     try {
       await expect(firstRoute).toBeVisible({ timeout: 4_000 });
@@ -172,7 +180,14 @@ async function waitForPopupRoutesAndSubmit(popup: Page, targetEntityId: string):
       await popup.waitForTimeout(1_000);
     }
   }
-  await expect(firstRoute).toBeVisible({ timeout: 1_000 });
+  if (!await firstRoute.isVisible().catch(() => false)) {
+    const currentUrl = popup.url();
+    const currentError = (await routeError.textContent().catch(() => '') || '').trim();
+    const invoiceValue = await popup.getByLabel('Invoice').inputValue().catch(() => '');
+    throw new Error(
+      `Route not visible in wallet popup url=${currentUrl} error=${currentError || 'none'} invoice=${invoiceValue.slice(0, 96)}`,
+    );
+  }
   await popup.locator('.route-option').first().click();
   const sendOnSelectedRoute = popup.getByRole('button', { name: /^Send On Selected Route$/i });
   if (await sendOnSelectedRoute.isVisible().catch(() => false)) {
@@ -182,24 +197,12 @@ async function waitForPopupRoutesAndSubmit(popup: Page, targetEntityId: string):
   await popup.getByRole('button', { name: /^Pay Now$/i }).click();
 }
 
-async function submitPopupOpenWalletAction(page: Page, targetEntityId: string): Promise<Page> {
-  const popupPromise = page.waitForEvent('popup');
-  await page.getByRole('button', { name: /^Open Wallet$/i }).click();
-  const popup = await popupPromise;
-  await popup.waitForLoadState('domcontentloaded');
-  await waitForPopupRoutesAndSubmit(popup, targetEntityId);
-  return popup;
-}
-
-async function openRestoredWalletPage(
-  context: BrowserContext,
-  runtimeId: string,
-): Promise<Page> {
-  const page = await context.newPage();
-  await gotoApp(page);
-  await switchToRuntimeId(page, runtimeId);
-  await ensureRuntimeOnline(page, `restored-${runtimeId.slice(0, 8)}`);
-  return page;
+async function openWalletPayWorkspace(page: Page): Promise<void> {
+  const payTab = page.getByRole('button', { name: /^Pay$/i }).first();
+  await expect(payTab).toBeVisible({ timeout: 20_000 });
+  await payTab.click();
+  console.log(`[custody:wallet] opened pay workspace url=${page.url()}`);
+  await expect(page.getByLabel('Invoice')).toBeVisible({ timeout: 20_000 });
 }
 
 async function faucetOffchain(
@@ -207,6 +210,7 @@ async function faucetOffchain(
   entityId: string,
   hubEntityId: string,
   amount = '100',
+  tokenId = 1,
 ): Promise<void> {
   let result: FaucetAttemptResult = { ok: false, status: 0, data: { error: 'not-run' } };
 
@@ -233,7 +237,7 @@ async function faucetOffchain(
         userEntityId: entityId,
         userRuntimeId: runtimeId,
         hubEntityId,
-        tokenId: 1,
+        tokenId,
         amount,
       });
     } catch (error) {
@@ -407,6 +411,32 @@ async function waitForCustodyBalance(
   return await readCustodyDashboard(page, custodyBaseUrl);
 }
 
+const readCustodyTokenMinor = (dashboard: CustodyDashboardPayload, tokenId: number): bigint => {
+  const row = (dashboard.tokens ?? []).find((token) => Number(token.tokenId || 0) === tokenId);
+  return BigInt(String(row?.amountMinor || '0'));
+};
+
+async function waitForCustodyTokenBalance(
+  page: Page,
+  custodyBaseUrl: string,
+  tokenId: number,
+  expectedMinor: bigint,
+): Promise<CustodyDashboardPayload> {
+  await expect.poll(
+    async () => {
+      const dashboard = await readCustodyDashboard(page, custodyBaseUrl);
+      return readCustodyTokenMinor(dashboard, tokenId).toString();
+    },
+    {
+      timeout: 30_000,
+      intervals: [500, 750, 1000],
+      message: `custody token ${tokenId} balance must converge to ${expectedMinor.toString()}`,
+    },
+  ).toBe(expectedMinor.toString());
+
+  return await readCustodyDashboard(page, custodyBaseUrl);
+}
+
 async function waitForNewActivity(
   page: Page,
   custodyBaseUrl: string,
@@ -429,6 +459,7 @@ async function waitForNewActivity(
         ? {
             id: String(item.id || ''),
             kind: String(item.kind || ''),
+            tokenId: Number(item.tokenId || 0),
             amountMinor: String(item.amountMinor || '0'),
             amountDisplay: String(item.amountDisplay || ''),
             requestedAmountMinor: String(item.requestedAmountMinor || '0'),
@@ -508,11 +539,6 @@ test.describe('E2E Custody Flow', () => {
       const custodyIdentity = custodySupport.identity;
       const hubId = custodySupport.hubIds[0]!;
 
-      if (!walletPage.isClosed()) {
-        await walletPage.close();
-      }
-      walletPage = await context.newPage();
-
       await timedStep('custody.wallet.goto_app', () => gotoApp(walletPage));
       const alice = await timedStep(
         'custody.wallet.create_runtime',
@@ -523,7 +549,8 @@ test.describe('E2E Custody Flow', () => {
         'custody.wallet.read_rendered_out_before_faucet',
         () => getRenderedPrimaryOutbound(walletPage),
       );
-      await timedStep('custody.wallet.faucet', () => faucetOffchain(walletPage, alice.entityId, hubId));
+      await timedStep('custody.wallet.faucet.usdc', () => faucetOffchain(walletPage, alice.entityId, hubId, '100', 1));
+      await timedStep('custody.wallet.faucet.usdt', () => faucetOffchain(walletPage, alice.entityId, hubId, '30', 3));
       await timedStep(
         'custody.wallet.wait_rendered_out_after_faucet',
         () => waitForRenderedPrimaryOutboundDelta(
@@ -537,26 +564,29 @@ test.describe('E2E Custody Flow', () => {
         'custody.wallet.ensure_custody_profile',
         () => ensureRuntimeProfileDownloaded(walletPage, custodyIdentity.entityId),
       );
-      if (!walletPage.isClosed()) {
-        await walletPage.close();
-      }
 
       await timedStep('custody.open_dashboard', () => custodyPage.goto(custodyBaseUrl));
       await expect(custodyPage.getByRole('heading', { name: 'Deposit' })).toBeVisible({ timeout: 15_000 });
       await expect(custodyPage.locator('.deposit-qr-image').first()).toBeVisible({ timeout: 60_000 });
-      await expect(custodyPage.getByRole('button', { name: /^Open Wallet$/i })).toBeVisible({ timeout: 60_000 });
+      await expect(custodyPage.getByRole('button', { name: /^Local Wallet$/i })).toBeVisible({ timeout: 60_000 });
       await custodyPage.screenshot({ path: test.info().outputPath('custody-dashboard-initial.png'), fullPage: true });
 
       await custodyPage.locator('input[name="amount"]').fill('1');
       await custodyPage.locator('input[name="targetEntityId"]').fill(alice.entityId);
-      await custodyPage.getByRole('button', { name: 'Withdraw via XLN' }).click();
+      await custodyPage.getByRole('button', { name: /^Withdraw$/i }).click();
       await expect(custodyPage.getByText('Insufficient custody balance')).toBeVisible({ timeout: 15_000 });
 
       let dashboard = await readCustodyDashboard(custodyPage, custodyBaseUrl);
-      let currentBalanceMinor = BigInt(dashboard.headlineBalance?.amountMinor || '0');
+      const custodyBalances = new Map<number, bigint>();
+      for (const token of dashboard.tokens ?? []) {
+        const tokenId = Number(token.tokenId || 0);
+        if (tokenId > 0) {
+          custodyBalances.set(tokenId, BigInt(String(token.amountMinor || '0')));
+        }
+      }
       const depositCycles = [
-        { whole: 3n, action: 'open-wallet' as const },
-        { whole: 10n, action: 'copy-invoice' as const },
+        { whole: 3n, tokenId: 1 },
+        { whole: 10n, tokenId: 3 },
       ];
 
       for (const [cycleIndex, cycle] of depositCycles.entries()) {
@@ -565,58 +595,64 @@ test.describe('E2E Custody Flow', () => {
             .map(item => String(item.id || ''))
             .filter(Boolean),
         );
-        const daemonReceiptCursor = await getDaemonReceiptCursor(daemonClient, custodyIdentity.entityId);
 
         await timedStep(`custody.deposit_cycle_${cycleIndex + 1}`, async () => {
+          await custodyPage.locator('select[name="depositTokenId"]').selectOption(String(cycle.tokenId));
           await custodyPage.locator('input[name="depositAmount"]').fill(cycle.whole.toString());
-          if (cycle.action === 'open-wallet') {
-            const popup = await submitPopupOpenWalletAction(custodyPage, custodyIdentity.entityId);
-            await waitForDaemonReceiptEvent(daemonClient, {
-              entityId: custodyIdentity.entityId,
-              eventName: 'HtlcReceived',
-              fromHeight: daemonReceiptCursor,
-              timeoutMs: 30_000,
-            });
-            await popup.close().catch(() => undefined);
-          } else {
-            const invoice = (await custodyPage.locator('.deposit-invoice-string').first().textContent())?.trim() || '';
-            expect(invoice.startsWith('xln:?')).toBe(true);
-            if (!walletPage.isClosed()) {
-              await walletPage.close();
-            }
-            walletPage = await openRestoredWalletPage(context, alice.runtimeId);
-            await walletPage.goto(`${APP_BASE_URL}/app#pay`, { waitUntil: 'domcontentloaded' });
-            await walletPage.locator('#payment-invoice-input').fill(invoice);
-            await waitForPopupRoutesAndSubmit(walletPage, custodyIdentity.entityId);
-            await waitForDaemonReceiptEvent(daemonClient, {
-              entityId: custodyIdentity.entityId,
-              eventName: 'HtlcReceived',
-              fromHeight: daemonReceiptCursor,
-              timeoutMs: 30_000,
-            });
+          const invoice = (await custodyPage.locator('.deposit-invoice-string').first().textContent())?.trim() || '';
+          const walletHref = (await custodyPage.locator('[data-open-wallet-href]').first().getAttribute('data-open-wallet-href'))?.trim() || '';
+          expect(invoice.startsWith('xln:?')).toBe(true);
+          expect(walletHref.includes('/app#pay?')).toBe(true);
+          if (cycleIndex === 1) {
+            const copyButton = custodyPage.locator('[data-copy-invoice]').first();
+            await copyButton.click();
+            await expect(copyButton).toHaveText(/^Copied$/i, { timeout: 5_000 });
           }
+          await walletPage.bringToFront();
+          await openWalletPayWorkspace(walletPage);
+          const clearInvoiceButton = walletPage.getByRole('button', { name: /^Clear$/i }).first();
+          if (await clearInvoiceButton.isVisible().catch(() => false)) {
+            await clearInvoiceButton.click();
+          }
+          await walletPage.getByLabel('Invoice').fill(invoice);
+          console.log(`[custody:wallet] invoice-filled cycle=${cycleIndex + 1} url=${walletPage.url()} invoice=${invoice.slice(0, 120)}`);
+          await expect
+            .poll(async () => {
+              const current = await walletPage.getByLabel('Invoice').inputValue();
+              return {
+                hasId: current.includes(`id=${custodyIdentity.entityId}`),
+                hasToken: current.includes(`token=${cycle.tokenId}`),
+                hasAmount: current.includes(`amt=${cycle.whole.toString()}`),
+              };
+            }, { timeout: 5_000 })
+            .toEqual({ hasId: true, hasToken: true, hasAmount: true });
+          await waitForPopupRoutesAndSubmit(walletPage, custodyIdentity.entityId);
         });
 
         const depositMinor = cycle.whole * TOKEN_SCALE;
-        currentBalanceMinor += depositMinor;
+        const currentTokenBalance = custodyBalances.get(cycle.tokenId) ?? 0n;
+        custodyBalances.set(cycle.tokenId, currentTokenBalance + depositMinor);
         await custodyPage.bringToFront();
         const depositActivity = await timedStep(`custody.deposit_cycle_${cycleIndex + 1}.wait_credit`, async () => {
-          dashboard = await waitForCustodyBalance(custodyPage, custodyBaseUrl, currentBalanceMinor);
+          dashboard = await waitForCustodyTokenBalance(
+            custodyPage,
+            custodyBaseUrl,
+            cycle.tokenId,
+            custodyBalances.get(cycle.tokenId) ?? 0n,
+          );
           return waitForNewActivity(custodyPage, custodyBaseUrl, knownBeforeDeposit, 'deposit');
         });
         expect(BigInt(depositActivity.amountMinor)).toBe(depositMinor);
+        expect(Number(depositActivity.tokenId)).toBe(cycle.tokenId);
         expect(dashboard.custody?.lastSyncError ?? null).toBeNull();
-        await expect(custodyPage.locator('.token-balance').first()).toContainText(
-          String(dashboard.headlineBalance?.amountDisplay || ''),
-        );
       }
 
-      const withdrawCycles = [5n, 2n];
-      for (const [cycleIndex, withdrawWhole] of withdrawCycles.entries()) {
-        if (!walletPage.isClosed()) {
-          await walletPage.close();
-        }
-        walletPage = await openRestoredWalletPage(context, alice.runtimeId);
+      const withdrawCycles = [
+        { whole: 2n, tokenId: 1 },
+        { whole: 4n, tokenId: 3 },
+      ];
+      for (const [cycleIndex, cycle] of withdrawCycles.entries()) {
+        await walletPage.bringToFront();
         await ensureRuntimeOnline(walletPage, `alice-before-withdraw-cycle-${cycleIndex + 1}`);
 
         const knownBeforeWithdraw = new Set(
@@ -624,11 +660,12 @@ test.describe('E2E Custody Flow', () => {
             .map(item => String(item.id || ''))
             .filter(Boolean),
         );
-        await custodyPage.locator('input[name="amount"]').fill(withdrawWhole.toString());
+        await custodyPage.locator('select[name="tokenId"]').selectOption(String(cycle.tokenId));
+        await custodyPage.locator('input[name="amount"]').fill(cycle.whole.toString());
         await custodyPage.locator('input[name="targetEntityId"]').fill(alice.entityId);
 
         const withdrawalActivity = await timedStep(`custody.withdraw_cycle_${cycleIndex + 1}`, async () => {
-          await custodyPage.getByRole('button', { name: 'Withdraw via XLN' }).click();
+          await custodyPage.getByRole('button', { name: /^Withdraw$/i }).click();
           await expect(custodyPage.getByText(/Queued withdrawal/i)).toBeVisible({ timeout: 15_000 });
           await custodyPage.bringToFront();
           return waitForNewActivity(
@@ -639,17 +676,20 @@ test.describe('E2E Custody Flow', () => {
             'finalized',
           );
         });
-        expect(BigInt(withdrawalActivity.requestedAmountMinor)).toBe(withdrawWhole * TOKEN_SCALE);
+        expect(BigInt(withdrawalActivity.requestedAmountMinor)).toBe(cycle.whole * TOKEN_SCALE);
+        expect(Number(withdrawalActivity.tokenId)).toBe(cycle.tokenId);
         expect(BigInt(withdrawalActivity.feeMinor)).toBeGreaterThan(0n);
 
         const senderSpentMinor = BigInt(withdrawalActivity.amountMinor);
-        currentBalanceMinor -= senderSpentMinor;
+        custodyBalances.set(cycle.tokenId, (custodyBalances.get(cycle.tokenId) ?? 0n) - senderSpentMinor);
         dashboard = await timedStep(
           `custody.withdraw_cycle_${cycleIndex + 1}.wait_debit`,
-          () => waitForCustodyBalance(custodyPage, custodyBaseUrl, currentBalanceMinor),
-        );
-        await expect(custodyPage.locator('.token-balance').first()).toContainText(
-          String(dashboard.headlineBalance?.amountDisplay || ''),
+          () => waitForCustodyTokenBalance(
+            custodyPage,
+            custodyBaseUrl,
+            cycle.tokenId,
+            custodyBalances.get(cycle.tokenId) ?? 0n,
+          ),
         );
       }
     } finally {

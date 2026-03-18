@@ -151,7 +151,7 @@ test.describe('E2E HTLC Payment Flow', () => {
     process.stdout.write('  HTLC mode: default\n');
 
     // The shared recipient picker now defaults to self. Open it and choose the connected hub.
-    const recipientPicker = page.locator('button.closed-trigger, input[placeholder="Select recipient..."]').first();
+    const recipientPicker = page.locator('button.closed-trigger').first();
     await expect(recipientPicker).toBeVisible({ timeout: 10_000 });
     await recipientPicker.click();
     const recipientOption = page.locator('.dropdown-item').filter({ hasText: connectedHubId! }).first();
@@ -159,7 +159,7 @@ test.describe('E2E HTLC Payment Flow', () => {
     await recipientOption.click();
 
     // Fill amount
-    const amountInput = page.locator('input[placeholder="0.00"]').first();
+    const amountInput = page.locator('#payment-amount-input');
     await amountInput.click();
     await amountInput.fill('25');
 

@@ -1361,7 +1361,7 @@
       <div class="order-entry-row">
         <label class="order-field order-field-amount">
           {tradeSide === 'buy-base' ? 'Amount to Spend' : 'Amount to Sell'} ({giveTokenSymbol})
-          <input type="text" bind:value={orderAmountInput} inputmode="decimal" placeholder="Amount to sell" />
+          <input type="text" bind:value={orderAmountInput} inputmode="decimal" data-testid="swap-order-amount" aria-label="Swap order amount" />
         </label>
         <label class="order-field order-field-price">
           Price ({quoteTokenSymbol} per {baseTokenSymbol})
@@ -1369,7 +1369,8 @@
             type="text"
             bind:value={priceRatioInput}
             inputmode="decimal"
-            placeholder="Price"
+            data-testid="swap-order-price"
+            aria-label="Swap order price"
             on:input={handlePriceRatioInput}
           />
         </label>

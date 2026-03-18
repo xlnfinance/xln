@@ -1,3 +1,5 @@
+import { appendPaymentTimestamp, parsePaymentTiming } from './paymentTiming';
+
 export type XlnInvoiceIntent = {
   targetEntityId: string;
   tokenId: number | null;
@@ -6,6 +8,7 @@ export type XlnInvoiceIntent = {
   recipientUserId: string;
   jurisdictionId: string;
   noteLocked: boolean;
+  startedAtMs?: number;
 };
 
 export type ParsedXlnInvoice = XlnInvoiceIntent & {
@@ -46,9 +49,13 @@ const parseInvoiceParams = (params: URLSearchParams, source: ParsedXlnInvoice['s
   const parsedToken = tokenRaw ? Number(tokenRaw) : null;
   const tokenId = Number.isFinite(parsedToken) && parsedToken && parsedToken > 0 ? Math.floor(parsedToken) : null;
   const amount = sanitizeText(params.get('amt') || params.get('amount'), 64);
-  const description = sanitizeText(params.get('desc') || params.get('description') || params.get('memo'), 200);
+  const descriptionMeta = parsePaymentTiming(sanitizeText(params.get('desc') || params.get('description') || params.get('memo'), 200));
+  const description = descriptionMeta.displayDescription;
   const recipientUserId = sanitizeText(params.get('u') || params.get('uid') || params.get('recipient_user_id'), 96);
   const jurisdictionId = sanitizeText(params.get('jId') || params.get('jurisdiction') || params.get('j'), 64);
+  const tsRaw = sanitizeText(params.get('ts') || params.get('startedAtMs') || params.get('started_at_ms'), 20);
+  const parsedTs = tsRaw ? Number(tsRaw) : descriptionMeta.startedAtMs;
+  const startedAtMs = Number.isFinite(parsedTs) ? parsedTs : undefined;
   const noteLocked = parseBoolean(params.get('locked') || params.get('note_locked') || params.get('description_locked')) || Boolean(recipientUserId);
   const canonicalUri = buildXlnInvoiceUri({
     targetEntityId,
@@ -58,6 +65,7 @@ const parseInvoiceParams = (params: URLSearchParams, source: ParsedXlnInvoice['s
     recipientUserId,
     jurisdictionId,
     noteLocked,
+    startedAtMs,
   });
 
   return {
@@ -71,6 +79,7 @@ const parseInvoiceParams = (params: URLSearchParams, source: ParsedXlnInvoice['s
     recipientUserId,
     jurisdictionId,
     noteLocked,
+    startedAtMs,
   };
 };
 
@@ -82,8 +91,10 @@ export function buildXlnInvoiceUri(intent: Partial<XlnInvoiceIntent> & { targetE
   }
   const amount = sanitizeText(intent.amount, 64);
   if (amount) params.set('amt', amount);
-  const description = sanitizeText(intent.description, 200);
+  const startedAtMs = Number.isFinite(intent.startedAtMs) ? Number(intent.startedAtMs) : Date.now();
+  const description = appendPaymentTimestamp(sanitizeText(intent.description, 200), startedAtMs);
   if (description) params.set('desc', description);
+  params.set('ts', String(startedAtMs));
   const recipientUserId = sanitizeText(intent.recipientUserId, 96);
   if (recipientUserId) params.set('u', recipientUserId);
   const jurisdictionId = sanitizeText(intent.jurisdictionId, 64);
@@ -103,8 +114,10 @@ export function buildWalletPayHref(baseUrl: string | URL, intent: Partial<XlnInv
   }
   const amount = sanitizeText(intent.amount, 64);
   if (amount) params.set('amt', amount);
-  const description = sanitizeText(intent.description, 200);
+  const startedAtMs = Number.isFinite(intent.startedAtMs) ? Number(intent.startedAtMs) : Date.now();
+  const description = appendPaymentTimestamp(sanitizeText(intent.description, 200), startedAtMs);
   if (description) params.set('desc', description);
+  params.set('ts', String(startedAtMs));
   const recipientUserId = sanitizeText(intent.recipientUserId, 96);
   if (recipientUserId) params.set('u', recipientUserId);
   const jurisdictionId = sanitizeText(intent.jurisdictionId, 64);

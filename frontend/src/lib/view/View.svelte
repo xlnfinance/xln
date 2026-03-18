@@ -9,7 +9,9 @@
 
   import { onMount, onDestroy, mount } from 'svelte';
   import { writable, get } from 'svelte/store';
+  import { formatUnits } from 'ethers';
   import { toasts } from '$lib/stores/toastStore';
+  import { paymentSpotlight } from '$lib/stores/paymentSpotlightStore';
   import { DockviewComponent } from 'dockview';
   import './utils/frontendLogger'; // Initialize global log control
   import Graph3DPanel from './panels/Graph3DPanel.svelte';
@@ -22,7 +24,9 @@
   import GossipPanel from './panels/GossipPanel.svelte';
   import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
   import UserModePanel from './UserModePanel.svelte';
+  import PaymentSpotlight from '$lib/components/PaymentSpotlight.svelte';
   import { parseURLHash } from './utils/stateCodec';
+  import { parsePaymentTiming } from '$lib/utils/paymentTiming';
   // REMOVED PANELS:
   // - EntitiesPanel: Graph3D entity cards provide better UX
   // - DepositoryPanel: JurisdictionPanel shows same data with better tables
@@ -84,6 +88,20 @@
   const LOG_TOAST_COOLDOWN_MS = 12000;
   const lastSeenFrameLogIdByRuntime = new Map<string, number>();
   const lastToastAtByKey = new Map<string, number>();
+  const PAYMENT_SPOTLIGHT_COOLDOWN_MS = 60000;
+  const lastPaymentSpotlightAtByKey = new Map<string, number>();
+
+  const formatSpotlightAmount = (tokenIdRaw: unknown, amountRaw: unknown): string => {
+    const tokenId = Number(tokenIdRaw || 0);
+    const amountMinor = String(amountRaw || '').trim();
+    if (!tokenId || !amountMinor) return 'Payment settled';
+    try {
+      const token = get(xlnInstance)?.getTokenInfo?.(tokenId) ?? { symbol: `T${tokenId}`, decimals: 18 };
+      return `${formatUnits(BigInt(amountMinor), token.decimals ?? 18)} ${token.symbol || `T${tokenId}`}`;
+    } catch {
+      return 'Payment settled';
+    }
+  };
 
   const shouldSurfaceLogAsToast = (entry: any): boolean => {
     const level = String(entry?.level || '').toLowerCase();
@@ -107,17 +125,37 @@
     if (!env?.frameLogs || !Array.isArray(env.frameLogs)) return;
     const runtimeKey = String(env.runtimeId || 'unknown');
     const lastSeen = lastSeenFrameLogIdByRuntime.get(runtimeKey) ?? -1;
+    const isInitialPass = lastSeen < 0;
     let newLastSeen = lastSeen;
 
     for (const entry of env.frameLogs as any[]) {
       const id = Number(entry?.id);
       if (!Number.isFinite(id) || id <= lastSeen) continue;
       if (id > newLastSeen) newLastSeen = id;
+      const message = String(entry?.message || '').trim();
+      const entryData = entry?.data || {};
+      if (!isInitialPass && message === 'HtlcReceived') {
+        const hashlock = String(entryData.hashlock || id);
+        const dedupeKey = `${runtimeKey}:htlc:${hashlock}`;
+        const now = Date.now();
+        const lastShownAt = lastPaymentSpotlightAtByKey.get(dedupeKey) ?? 0;
+        if (now - lastShownAt >= PAYMENT_SPOTLIGHT_COOLDOWN_MS) {
+          lastPaymentSpotlightAtByKey.set(dedupeKey, now);
+          const timing = parsePaymentTiming(String(entryData.description || ''));
+          const elapsedMs = timing.startedAtMs ? Math.max(1, Date.now() - timing.startedAtMs) : null;
+          paymentSpotlight.show({
+            title: elapsedMs ? `Received in ${elapsedMs}ms` : 'Received',
+            amountLine: formatSpotlightAmount(entryData.tokenId, entryData.amount),
+            ...(timing.displayDescription ? { detail: timing.displayDescription } : {}),
+            duration: 3600,
+          });
+        }
+      }
       if (!shouldSurfaceLogAsToast(entry)) continue;
 
       const level = String(entry?.level || 'warn').toLowerCase();
-      const message = String(entry?.message || 'Runtime error');
-      const dedupeKey = `${runtimeKey}:${message}`;
+      const toastMessage = String(entry?.message || 'Runtime error');
+      const dedupeKey = `${runtimeKey}:${toastMessage}`;
       const now = Date.now();
       const lastToastAt = lastToastAtByKey.get(dedupeKey) ?? 0;
       if (now - lastToastAt < LOG_TOAST_COOLDOWN_MS) continue;
@@ -127,7 +165,7 @@
       }
 
       const prefix = level === 'error' ? 'Runtime error' : 'Runtime warning';
-      const text = `${prefix}: ${message}`;
+      const text = `${prefix}: ${toastMessage}`;
       if (level === 'error') {
         toasts.error(text, 9000);
       } else {
@@ -749,6 +787,7 @@
     }
     lastSeenFrameLogIdByRuntime.clear();
     lastToastAtByKey.clear();
+    lastPaymentSpotlightAtByKey.clear();
     if (dockview) {
       dockview.dispose();
     }
@@ -756,6 +795,7 @@
 </script>
 
 <div class="view-wrapper" class:embed-mode={embedMode} class:user-mode={userMode}>
+  <PaymentSpotlight />
   <!-- Always render both, toggle visibility via CSS -->
   <div class="user-mode-container" class:hidden={!userMode}>
     <UserModePanel
