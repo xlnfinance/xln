@@ -84,6 +84,7 @@ let pendingQrSrc = '';
 let pendingDepositIntentKey = '';
 let pendingDepositInvoiceId = '';
 let lastDashboardFingerprint = '';
+let copyInvoiceResetTimer = null;
 const WALLET_WINDOW_NAME = 'xln-wallet';
 
 const updateDepositHintUi = () => {
@@ -526,8 +527,16 @@ const render = () => {
         const invoice = copyInvoiceButton.getAttribute('data-copy-invoice') || '';
         if (!invoice) return;
         await navigator.clipboard.writeText(invoice);
-        depositHint = 'Invoice copied.';
+        depositHint = '';
         updateDepositHintUi();
+        copyInvoiceButton.textContent = 'Copied';
+        if (copyInvoiceResetTimer) {
+          clearTimeout(copyInvoiceResetTimer);
+        }
+        copyInvoiceResetTimer = setTimeout(() => {
+          copyInvoiceButton.textContent = 'Copy invoice';
+          copyInvoiceResetTimer = null;
+        }, 1200);
       });
     }
   }
