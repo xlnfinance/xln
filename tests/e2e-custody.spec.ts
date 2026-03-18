@@ -22,8 +22,8 @@ import { DaemonRpcClient, type DaemonFrameLog } from '../custody/daemon-client';
 import { startCustodySupport, stopManagedChild, type ManagedChild } from '../runtime/orchestrator/custody-bootstrap';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, resetProdServer } from './utils/e2e-baseline';
 import {
-  getRenderedPrimaryOutbound,
-  waitForRenderedPrimaryOutboundDelta,
+  getRenderedOutboundForAccount,
+  waitForRenderedOutboundForAccountDelta,
 } from './utils/e2e-account-ui';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic, switchToRuntimeId } from './utils/e2e-demo-users';
@@ -537,24 +537,28 @@ test.describe('E2E Custody Flow', () => {
       custodyChild = custodySupport.custodyChild;
       daemonClient = new DaemonRpcClient(`ws://127.0.0.1:${daemonPort}/rpc`);
       const custodyIdentity = custodySupport.identity;
-      const hubId = custodySupport.hubIds[0]!;
+      const senderHubIds = custodySupport.hubIds.slice(0, 2);
+      const fundingHubId = senderHubIds[1] ?? senderHubIds[0]!;
 
       await timedStep('custody.wallet.goto_app', () => gotoApp(walletPage));
       const alice = await timedStep(
         'custody.wallet.create_runtime',
         () => createRuntimeIdentity(walletPage, 'alice', selectDemoMnemonic('alice')),
       );
-      await timedStep('custody.wallet.connect_hub', () => connectRuntimeToHub(walletPage, alice, hubId));
+      for (const [index, hubId] of senderHubIds.entries()) {
+        await timedStep(`custody.wallet.connect_hub_${index + 1}`, () => connectRuntimeToHub(walletPage, alice, hubId));
+      }
       const walletRenderedBeforeFunding = await timedStep(
         'custody.wallet.read_rendered_out_before_faucet',
-        () => getRenderedPrimaryOutbound(walletPage),
+        () => getRenderedOutboundForAccount(walletPage, fundingHubId),
       );
-      await timedStep('custody.wallet.faucet.usdc', () => faucetOffchain(walletPage, alice.entityId, hubId, '100', 1));
-      await timedStep('custody.wallet.faucet.usdt', () => faucetOffchain(walletPage, alice.entityId, hubId, '30', 3));
+      await timedStep('custody.wallet.faucet.usdc', () => faucetOffchain(walletPage, alice.entityId, fundingHubId, '100', 1));
+      await timedStep('custody.wallet.faucet.usdt', () => faucetOffchain(walletPage, alice.entityId, fundingHubId, '30', 3));
       await timedStep(
         'custody.wallet.wait_rendered_out_after_faucet',
-        () => waitForRenderedPrimaryOutboundDelta(
+        () => waitForRenderedOutboundForAccountDelta(
           walletPage,
+          fundingHubId,
           walletRenderedBeforeFunding,
           100,
           { timeoutMs: 20_000 },
