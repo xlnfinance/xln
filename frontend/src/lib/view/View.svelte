@@ -29,7 +29,6 @@
   // - ConsolePanel: Now embedded in SettingsPanel as tab
   import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
-  import Tutorial from './components/Tutorial.svelte';
   import { panelBridge } from './utils/panelBridge';
   import { activeRuntimeId, runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
   import { settings } from '$lib/stores/settingsStore';
@@ -799,11 +798,6 @@
         </button>
       {/if}
     </div>
-  {/if}
-
-  {#if !embedMode && !userMode}
-    <!-- Interactive Tutorial (first-time users, dev mode only) -->
-    <Tutorial />
   {/if}
 
   {#if embedMode}

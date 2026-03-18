@@ -82,7 +82,8 @@ server {
     }
 
     location = /app {
-        alias /root/xln/frontend/build/index.html;
+        root /root/xln/frontend/build;
+        rewrite ^ /index.html break;
         add_header Content-Security-Policy "frame-ancestors 'self' https://xln.finance https://app.xln.finance https://custody.xln.finance https://localhost:* http://localhost:*" always;
     }
 
