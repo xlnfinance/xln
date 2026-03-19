@@ -92,7 +92,7 @@
   const MAX_PATH_HOPS = 6;
   const MIN_SELF_CYCLE_INTERMEDIATES = 2;
   const GOSSIP_REFRESH_ATTEMPTS = 4;
-  const GOSSIP_REFRESH_WAIT_MS = 250;
+  const GOSSIP_REFRESH_WAIT_MS = 100;
   type LockBookEntry = {
     accountId: string;
     tokenId: number;
@@ -1243,7 +1243,7 @@
           completedAutoRouteKey = '';
         }
         autoRouteRetryTimer = null;
-      }, 1000);
+      }, 300);
     });
   }
 
@@ -1273,7 +1273,7 @@
           return;
         }
       }
-      await sleep(50);
+      await sleep(10);
     }
     throw new Error('Payment confirmation timed out');
   }

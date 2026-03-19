@@ -264,7 +264,9 @@ if [ -n "$REMOTE_HOST" ]; then
   if [ "$BUILD_FRONTEND" = "1" ]; then
     remote_cmd="$remote_cmd --frontend"
   fi
-  remote_cmd="$remote_cmd --production"
+  if [ "$PRODUCTION" = "1" ]; then
+    remote_cmd="$remote_cmd --production"
+  fi
 
   echo "[deploy] running remote deploy on $REMOTE_HOST"
   ssh "$REMOTE_HOST" "$remote_cmd"
