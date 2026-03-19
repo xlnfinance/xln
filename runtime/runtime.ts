@@ -37,7 +37,6 @@ import { getPerfMs, getWallClockMs } from './utils';
 import { setDeltaTransformerAddress } from './proof-builder';
 import {
   buildCanonicalEnvSnapshot,
-  buildCanonicalRuntimeStateSnapshot,
 } from './canonical-snapshot';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { isLeftEntity } from './entity-id-utils';
@@ -217,6 +216,12 @@ import {
   log,
 } from './utils';
 import { logError } from './logger';
+import {
+  buildRuntimeCheckpointSnapshot,
+  computePersistedEnvStateHash,
+  selectReplayRetryFromGenesis,
+  selectReplayStart,
+} from './wal';
 
 if (isBrowser && typeof globalThis.process === 'undefined') {
   const nowMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
@@ -3117,37 +3122,6 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   return env;
 };
 
-const buildPersistedEnvSnapshot = (env: Env): Record<string, unknown> => {
-  return buildCanonicalRuntimeStateSnapshot(env);
-};
-
-const buildPersistedEnvHashInput = (snapshot: Record<string, unknown>): Record<string, unknown> => {
-  const eReplicas = Array.isArray(snapshot.eReplicas)
-    ? snapshot.eReplicas.map((entry) => {
-        if (!Array.isArray(entry) || entry.length !== 2) return entry;
-        const [replicaKey, replica] = entry as [unknown, Record<string, unknown>];
-        const state =
-          replica && typeof replica === 'object' && replica.state && typeof replica.state === 'object'
-            ? { ...(replica.state as Record<string, unknown>) }
-            : undefined;
-        if (state && 'batchHistory' in state) {
-          delete state.batchHistory;
-        }
-        return [
-          replicaKey,
-          state ? { ...replica, state } : replica,
-        ];
-      })
-    : snapshot.eReplicas;
-  return {
-    eReplicas,
-  };
-};
-
-const computePersistedEnvStateHash = (snapshot: Record<string, unknown>): string => {
-  return ethers.keccak256(ethers.toUtf8Bytes(safeStringify(buildPersistedEnvHashInput(snapshot))));
-};
-
 const requirePersistedContractAddress = (
   jReplicas: Map<string, JReplica>,
   label: string,
@@ -3586,7 +3560,7 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     // This WAL record doubles as the frame receipt: inputs + committed logs.
     const currentFrameInput = (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput;
     assertPersistedContractConfigReady(env, `saveEnvToDB frame=${env.height}`);
-    const persistedSnapshot = buildPersistedEnvSnapshot(env);
+    const persistedSnapshot = buildRuntimeCheckpointSnapshot(env);
     const runtimeStateHash = computePersistedEnvStateHash(persistedSnapshot);
     const frameSerializeStartedAt = getPerfMs();
     const frameJournal = serializeTaggedJson({
@@ -3898,7 +3872,11 @@ function rebuildEntityOrderbookExtFromAccounts(env: Env): void {
   }
 }
 
-export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: string | null): Promise<Env | null> => {
+export const loadEnvFromDB = async (
+  runtimeId?: string | null,
+  runtimeSeed?: string | null,
+  options?: { fromGenesis?: boolean },
+): Promise<Env | null> => {
   const isDbNotFound = (error: unknown): boolean => {
     if (!error || typeof error !== 'object') return false;
     const code = String((error as { code?: unknown }).code ?? '');
@@ -4005,7 +3983,6 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       assertPersistedContractConfigReady(env, `snapshot=${selectedSnapshotHeight} source=${selectedSnapshotLabel}`);
       for (const replica of env.eReplicas.values()) {
         validateEntityState(replica.state, `loadEnvFromDB.eReplicas[${String(replica.entityId)}].state`);
-        replica.state.config = mergeRuntimeJurisdictionConfig(replica.state.config, env);
       }
       // Derived entity indexes are intentionally not persisted. Rebuild them before WAL
       // replay so replay handlers observe the same swap/lock views they had in live mode.
@@ -4026,7 +4003,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
         );
       }
       if (persistedSnapshotStateHash) {
-        const actualSnapshotStateHash = computePersistedEnvStateHash(buildPersistedEnvSnapshot(env));
+        const actualSnapshotStateHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
         if (actualSnapshotStateHash !== persistedSnapshotStateHash) {
           throw new Error(
             `SNAPSHOT_STATE_HASH_MISMATCH: snapshot=${selectedSnapshotHeight} expected=${persistedSnapshotStateHash} actual=${actualSnapshotStateHash}`,
@@ -4150,7 +4127,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
             await applyRuntimeInput(env, frame.runtimeInput);
             runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
             if (typeof frame.runtimeStateHash === 'string' && frame.runtimeStateHash.length > 0) {
-              const actualRuntimeStateHash = computePersistedEnvStateHash(buildPersistedEnvSnapshot(env));
+              const actualRuntimeStateHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
               if (actualRuntimeStateHash !== frame.runtimeStateHash) {
                 throw new Error(
                   `REPLAY_STATE_HASH_MISMATCH: frame=${h} expected=${frame.runtimeStateHash} actual=${actualRuntimeStateHash}`,
@@ -4344,7 +4321,6 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       );
 
       for (const replica of env.eReplicas.values()) {
-        replica.state.config = mergeRuntimeJurisdictionConfig(replica.state.config, env);
         normalizeEntitySwapTradingPairs(replica.state);
       }
       rebuildEntitySwapBookFromAccounts(env);
@@ -4354,6 +4330,8 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
         namespace: dbNamespace,
         latestHeight,
         checkpointHeight: selectedSnapshotHeight,
+        requestedFromGenesis: options?.fromGenesis === true,
+        selectedSnapshotLabel,
         restoredHeight: lastGoodHeight,
         recoveredHistoryFrames: env.history?.length ?? 0,
       };
@@ -4362,8 +4340,23 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
     };
 
     let latestEnv: Env;
-    try {
-      latestEnv = await replayFromSnapshot(checkpointHeight, `checkpoint:${checkpointHeight}`, checkpointBuffer);
+    const replayStart = selectReplayStart(options?.fromGenesis === true ? 'force-genesis' : 'default', checkpointHeight);
+    if (replayStart.source === 'forced-genesis') {
+      let genesisSnapshotBuffer: Buffer;
+      try {
+        genesisSnapshotBuffer = await db.get(makeDbKey(dbNamespace, 'snapshot:1'));
+      } catch (genesisError) {
+        const message = genesisError instanceof Error ? `${genesisError.name}: ${genesisError.message}` : String(genesisError);
+        throw new Error(
+          `REPLAY_INVARIANT_FAILED: frame=1 checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing genesis snapshot (${message})`,
+        );
+      }
+      latestEnv = await replayFromSnapshot(replayStart.snapshotHeight, replayStart.snapshotLabel, genesisSnapshotBuffer);
+      console.warn(
+        `[loadEnvFromDB] forced genesis replay requested; ignored checkpoint=${checkpointHeight} latest=${latestHeight}`,
+      );
+    } else try {
+      latestEnv = await replayFromSnapshot(replayStart.snapshotHeight, replayStart.snapshotLabel, checkpointBuffer);
     } catch (checkpointReplayError) {
       const checkpointMessage =
         checkpointReplayError instanceof Error ? checkpointReplayError.message : String(checkpointReplayError);
@@ -4382,8 +4375,13 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
           `REPLAY_INVARIANT_FAILED: frame=1 checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing genesis snapshot (${message})`,
         );
       }
+      const retryReplayStart = selectReplayRetryFromGenesis();
       try {
-        latestEnv = await replayFromSnapshot(1, 'genesis:1', genesisSnapshotBuffer);
+        latestEnv = await replayFromSnapshot(
+          retryReplayStart.snapshotHeight,
+          retryReplayStart.snapshotLabel,
+          genesisSnapshotBuffer,
+        );
       } catch (genesisReplayError) {
         const genesisMessage =
           genesisReplayError instanceof Error ? genesisReplayError.message : String(genesisReplayError);

@@ -745,6 +745,26 @@ function isRuntimePersistenceContractFailure(error: unknown): boolean {
     || message.includes('SNAPSHOT_STATE_HASH_MISMATCH');
 }
 
+function shouldForceGenesisReplayFromHash(): boolean {
+  if (typeof window === 'undefined') return false;
+  const searchParams = new URLSearchParams(window.location.search);
+  if (searchParams.has('nosnapshot')) {
+    const searchValue = String(searchParams.get('nosnapshot') || '').trim().toLowerCase();
+    if (searchValue === '' || searchValue === '1' || searchValue === 'true' || searchValue === 'yes') {
+      return true;
+    }
+  }
+  const rawHashValue = String(window.location.hash || '');
+  const rawHash = rawHashValue.startsWith('#') ? rawHashValue.slice(1) : rawHashValue;
+  if (!rawHash) return false;
+  const queryIndex = rawHash.indexOf('?');
+  const query = queryIndex >= 0 ? rawHash.slice(queryIndex + 1) : rawHash;
+  const params = new URLSearchParams(query);
+  if (!params.has('nosnapshot')) return false;
+  const value = String(params.get('nosnapshot') || '').trim().toLowerCase();
+  return value === '' || value === '1' || value === 'true' || value === 'yes';
+}
+
 async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strictRestore = false): Promise<Env> {
   const runtimeIdLower = normalizeRuntimeId(runtime.id);
   if (!runtimeIdLower) {
@@ -770,7 +790,9 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   try {
     if (xln.loadEnvFromDB) {
       console.log('[VaultStore] Loading env from DB namespace:', runtimeIdLower);
-      env = await xln.loadEnvFromDB(runtimeIdLower, runtimeSeed);
+      env = await xln.loadEnvFromDB(runtimeIdLower, runtimeSeed, {
+        fromGenesis: shouldForceGenesisReplayFromHash(),
+      });
     }
   } catch (error) {
     if (strictRestore) {
