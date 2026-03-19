@@ -4051,6 +4051,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   }
 
   if (pathname === '/api/gossip/profile') {
+    const url = new URL(req.url);
     const targetEntityId = String(url.searchParams.get('entityId') || '').trim().toLowerCase();
     if (!targetEntityId) {
       return new Response(
