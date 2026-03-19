@@ -816,11 +816,6 @@ test.describe('E2E Custody Flow', () => {
         'custody.wallet.wait_usdt_out_after_faucet',
         () => waitForOffchainOutboundCapacity(walletPage, alice.entityId, fundingHubId, 3, 30n * TOKEN_SCALE, 20_000),
       );
-      await timedStep(
-        'custody.wallet.ensure_custody_profile',
-        () => ensureRuntimeProfileDownloaded(walletPage, custodyIdentity.entityId),
-      );
-
       await timedStep('custody.open_dashboard', () => custodyPage.goto(custodyBaseUrl));
       await expect(custodyPage.getByRole('heading', { name: 'Deposit' })).toBeVisible({ timeout: 15_000 });
       await expect(custodyPage.locator('.deposit-qr-image').first()).toBeVisible({ timeout: 60_000 });

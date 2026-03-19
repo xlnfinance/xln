@@ -890,6 +890,37 @@
     const env = currentEnv;
     if (!env) return;
     const xln = await getXLN();
+    const seedProfilesFromServer = async (entityIds: string[]): Promise<boolean> => {
+      if (typeof fetch === 'undefined' || !env.gossip?.announce) return false;
+      let seeded = false;
+      for (const entityId of entityIds) {
+        const target = normalizeEntityId(entityId);
+        if (!target) continue;
+        try {
+          const response = await fetch(`/api/gossip/profile?entityId=${encodeURIComponent(target)}`);
+          if (!response.ok) continue;
+          const payload = await response.json().catch(() => null) as {
+            profile?: GossipProfile | null;
+            peers?: GossipProfile[];
+          } | null;
+          const profiles: GossipProfile[] = [];
+          if (payload?.profile) profiles.push(payload.profile);
+          if (Array.isArray(payload?.peers)) profiles.push(...payload.peers);
+          for (const profile of profiles) {
+            if (!profile?.entityId) continue;
+            env.gossip.announce(profile);
+            seeded = true;
+          }
+        } catch {
+          // best effort only
+        }
+      }
+      return seeded;
+    };
+
+    if (targetEntities.length > 0) {
+      await seedProfilesFromServer(targetEntities);
+    }
     try {
       await env.runtimeState?.p2p?.syncProfiles?.();
     } catch {
@@ -922,6 +953,9 @@
         // best effort only
       }
       await sleep(GOSSIP_REFRESH_WAIT_MS);
+      if (targetEntities.length > 0) {
+        await seedProfilesFromServer(targetEntities);
+      }
     }
   }
 
