@@ -496,6 +496,44 @@ const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
 const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
 const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
 const ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY = Symbol.for('xln.runtime.env.replay.skippedAccountInputs');
+const replayHankoFingerprint = (value: unknown): string => {
+  const normalized = typeof value === 'string' ? value : '';
+  if (!normalized) return 'none';
+  if (normalized.length <= 36) return normalized;
+  return `${normalized.slice(0, 18)}:${normalized.slice(-18)}`;
+};
+const buildSkippedReplayAckKey = (
+  runtimeFrameHeight: number,
+  entityId: string,
+  counterpartyId: string,
+  inputHeight: number,
+  prevHanko: unknown,
+): string =>
+  [
+    runtimeFrameHeight,
+    String(entityId || '').toLowerCase(),
+    String(counterpartyId || '').toLowerCase(),
+    inputHeight,
+    replayHankoFingerprint(prevHanko),
+    'ack',
+  ].join(':');
+const buildSkippedReplayNewFrameKey = (
+  runtimeFrameHeight: number,
+  entityId: string,
+  counterpartyId: string,
+  frameHeight: number,
+  stateHash: unknown,
+  prevFrameHash: unknown,
+): string =>
+  [
+    runtimeFrameHeight,
+    String(entityId || '').toLowerCase(),
+    String(counterpartyId || '').toLowerCase(),
+    frameHeight,
+    typeof stateHash === 'string' ? stateHash : 'none',
+    typeof prevFrameHash === 'string' ? prevFrameHash : 'none',
+    'newframe',
+  ].join(':');
 
 const failfastAssert = (
   condition: unknown,
@@ -4166,7 +4204,13 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
                     if (currentHeight < inputHeight || pendingHeight === inputHeight) {
                       const skippedReplayAccountInputs =
                         ((runtimeEnv[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] as Set<string> | undefined) ?? new Set<string>());
-                      const skippedReplayAckKey = [h, entityIdNorm, String(fromEntityId).toLowerCase(), inputHeight, 'ack'].join(':');
+                      const skippedReplayAckKey = buildSkippedReplayAckKey(
+                        h,
+                        entityIdNorm,
+                        fromEntityId,
+                        inputHeight,
+                        data?.prevHanko,
+                      );
                       if (skippedReplayAccountInputs.has(skippedReplayAckKey)) {
                         console.warn(
                           `[loadEnvFromDB] frame=${h} ACK-check skipping replay-stale ack entity=${String(entityInput.entityId).slice(-8)} ` +
@@ -4202,7 +4246,14 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
                 if (!applied) {
                   const skippedReplayAccountInputs =
                     ((runtimeEnv[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] as Set<string> | undefined) ?? new Set<string>());
-                  const skippedReplayNewFrameKey = [h, entityIdNorm, String(fromEntityId).toLowerCase(), expectedHeight, 'newframe'].join(':');
+                  const skippedReplayNewFrameKey = buildSkippedReplayNewFrameKey(
+                    h,
+                    entityIdNorm,
+                    fromEntityId,
+                    expectedHeight,
+                    newAccountFrame?.stateHash,
+                    newAccountFrame?.prevFrameHash,
+                  );
                   if (skippedReplayAccountInputs.has(skippedReplayNewFrameKey)) {
                     console.warn(
                       `[loadEnvFromDB] frame=${h} NEWFRAME-check skipping replay-stale frame entity=${String(entityInput.entityId).slice(-8)} ` +

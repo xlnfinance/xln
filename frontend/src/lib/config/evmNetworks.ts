@@ -19,12 +19,27 @@ export interface TokenInfo {
   logoUrl?: string;
 }
 
+const DEFAULT_LOCAL_RPC_URL = 'http://127.0.0.1:8545';
+
+function resolveLocalRpcUrl(): string {
+  if (typeof window === 'undefined') return DEFAULT_LOCAL_RPC_URL;
+  const { hostname, protocol, port } = window.location;
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') return DEFAULT_LOCAL_RPC_URL;
+  const currentPort = Number(port || 0);
+  if (!Number.isFinite(currentPort) || currentPort < 1) return DEFAULT_LOCAL_RPC_URL;
+  if (currentPort === 8080) return DEFAULT_LOCAL_RPC_URL;
+  const shiftedRpcPort = currentPort - 4;
+  if (shiftedRpcPort < 1) return DEFAULT_LOCAL_RPC_URL;
+  const rpcProtocol = protocol === 'https:' ? 'https:' : 'http:';
+  return `${rpcProtocol}//${hostname}:${shiftedRpcPort}`;
+}
+
 export const EVM_NETWORKS: EVMNetwork[] = [
   {
     chainId: 31337,
     name: 'Localhost',
     symbol: 'ETH',
-    rpcUrl: 'http://127.0.0.1:8545',
+    rpcUrl: resolveLocalRpcUrl(),
     explorerUrl: '',
     explorerName: 'Local',
     isTestnet: true,

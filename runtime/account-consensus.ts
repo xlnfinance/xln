@@ -708,7 +708,7 @@ export async function proposeAccountFrame(
   frameData.stateHash = await createFrameHash(frameData as AccountFrame);
 
   // Debug: log what's being hashed at creation time
-  if (HEAVY_LOGS) {
+  if (HEAVY_LOGS && !quiet) {
     console.log(`[HASH-DEBUG] Frame creation for ${accountMachine.proofHeader.toEntity.slice(-4)}:`);
     console.log(`  height: ${frameData.height}`);
     console.log(`  timestamp: ${frameData.timestamp}`);

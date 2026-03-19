@@ -17,13 +17,28 @@ export interface NetworkConfig {
   testnet?: boolean;
 }
 
+const DEFAULT_LOCAL_RPC_URL = 'http://127.0.0.1:8545';
+
+function resolveLocalRpcUrl(): string {
+  if (typeof window === 'undefined') return DEFAULT_LOCAL_RPC_URL;
+  const { hostname, protocol, port } = window.location;
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') return DEFAULT_LOCAL_RPC_URL;
+  const currentPort = Number(port || 0);
+  if (!Number.isFinite(currentPort) || currentPort < 1) return DEFAULT_LOCAL_RPC_URL;
+  if (currentPort === 8080) return DEFAULT_LOCAL_RPC_URL;
+  const shiftedRpcPort = currentPort - 4;
+  if (shiftedRpcPort < 1) return DEFAULT_LOCAL_RPC_URL;
+  const rpcProtocol = protocol === 'https:' ? 'https:' : 'http:';
+  return `${rpcProtocol}//${hostname}:${shiftedRpcPort}`;
+}
+
 export const POPULAR_NETWORKS: NetworkConfig[] = [
   {
     chainId: 31337,
     name: 'Localhost',
     ticker: 'ETH',
     icon: '🏠',
-    rpcs: ['http://127.0.0.1:8545'],
+    rpcs: [resolveLocalRpcUrl()],
     explorer: '',
     testnet: true,
   },

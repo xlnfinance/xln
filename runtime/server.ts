@@ -85,6 +85,13 @@ const formatTimingMs = (value: number): string => value.toFixed(2);
 const stringifyBootstrapDebug = (value: unknown): string =>
   JSON.stringify(value, (_key, nested) => (typeof nested === 'bigint' ? nested.toString() : nested));
 const STACK_COMPATIBILITY_PROBE_ENTITY = `0x${'11'.repeat(32)}`;
+const resolveRequiredAnvilRpc = (): string => {
+  const rpcUrl = String(process.env.ANVIL_RPC || '').trim();
+  if (!rpcUrl) {
+    throw new Error('ANVIL_RPC is required for server RPC operations');
+  }
+  return rpcUrl;
+};
 
 const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: boolean; reason: string }> => {
   const depositoryAddress = String(adapter.addresses?.depository || '').trim();
@@ -2695,7 +2702,7 @@ const triggerColdReset = async (
     }
   }
 
-  const anvilRpc = process.env.ANVIL_RPC || 'http://localhost:8545';
+  const anvilRpc = resolveRequiredAnvilRpc();
   const advertisedRelayUrl = resolveAdvertisedRelayUrl(activeServerOptions.port);
 
   tokenCatalogCache = null;
@@ -5114,8 +5121,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   let server = EARLY_HTTP_BIND ? createHttpServer() : null;
 
   // Initialize J-adapter (anvil for testnet, browserVM for local)
-  const anvilRpc = process.env.ANVIL_RPC || 'http://localhost:8545';
   const useAnvil = process.env.USE_ANVIL === 'true';
+  const anvilRpc = useAnvil ? resolveRequiredAnvilRpc() : '';
 
   console.log('[XLN] J-adapter mode check:');
   console.log('  USE_ANVIL =', useAnvil);
