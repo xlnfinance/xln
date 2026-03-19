@@ -8,6 +8,7 @@ import {
   computeSwapPriceTicks,
   deriveSide,
   ORDERBOOK_PRICE_SCALE,
+  SWAP_LOT_SCALE,
   type BookState,
   type OrderbookExtState,
 } from '../../orderbook';
@@ -1277,7 +1278,11 @@ export function processOrderbookSwaps(
     bookUpdates.push({ pairId: bookKey, book });
 
     // Process trade events
-    const fillsPerOrder = new Map<string, { filledLots: number; originalLots: number }>();
+    const fillsPerOrder = new Map<string, {
+      filledLots: number;
+      originalLots: number;
+      weightedCost: bigint;
+    }>();
 
     for (const event of result.events) {
       if (event.type === 'TRADE') {
@@ -1285,19 +1290,30 @@ export function processOrderbookSwaps(
           const lastColon = namespacedId.lastIndexOf(':');
           return lastColon >= 0 ? namespacedId.slice(lastColon + 1) : namespacedId;
         };
+        const tradeCost = BigInt(event.price) * BigInt(event.qty);
 
         const makerEntry = fillsPerOrder.get(event.makerOrderId);
         if (!makerEntry) {
-          fillsPerOrder.set(event.makerOrderId, { filledLots: event.qty, originalLots: event.makerQtyBefore });
+          fillsPerOrder.set(event.makerOrderId, {
+            filledLots: event.qty,
+            originalLots: event.makerQtyBefore,
+            weightedCost: tradeCost,
+          });
         } else {
           makerEntry.filledLots += event.qty;
+          makerEntry.weightedCost += tradeCost;
         }
 
         const takerEntry = fillsPerOrder.get(event.takerOrderId);
         if (!takerEntry) {
-          fillsPerOrder.set(event.takerOrderId, { filledLots: event.qty, originalLots: event.takerQtyTotal });
+          fillsPerOrder.set(event.takerOrderId, {
+            filledLots: event.qty,
+            originalLots: event.takerQtyTotal,
+            weightedCost: tradeCost,
+          });
         } else {
           takerEntry.filledLots += event.qty;
+          takerEntry.weightedCost += tradeCost;
         }
 
         console.log(`📊 ORDERBOOK TRADE: ${extractOfferId(event.makerOrderId)} ↔ ${extractOfferId(event.takerOrderId)} @ ${event.price}, qty=${event.qty}`);
@@ -1307,7 +1323,7 @@ export function processOrderbookSwaps(
     // Emit swap_resolve for each filled order
     const MAX_FILL_RATIO = 65535;
 
-    for (const [namespacedOrderId, { filledLots, originalLots }] of fillsPerOrder) {
+    for (const [namespacedOrderId, { filledLots, originalLots, weightedCost }] of fillsPerOrder) {
       // Parse namespacedOrderId format: "counterpartyId:offerId"
       // counterpartyId is the Map key used to store the account
       const lastColon = namespacedOrderId.lastIndexOf(':');
@@ -1332,6 +1348,8 @@ export function processOrderbookSwaps(
       const fillRatio = originalBig > 0n
         ? Number((filledBig * BigInt(MAX_FILL_RATIO)) / originalBig)
         : 0;
+      const executionBaseAmount = filledBig * SWAP_LOT_SCALE;
+      const executionQuoteAmount = (weightedCost * SWAP_LOT_SCALE) / ORDERBOOK_PRICE_SCALE;
 
       const orderStillInBook = book.orderIdToIdx.has(namespacedOrderId) &&
         book.orderActive[book.orderIdToIdx.get(namespacedOrderId)!];
@@ -1344,6 +1362,8 @@ export function processOrderbookSwaps(
             offerId,
             fillRatio: Math.min(fillRatio, MAX_FILL_RATIO),
             cancelRemainder: !orderStillInBook,
+            executionBaseAmount,
+            executionQuoteAmount,
           }
         }
       });

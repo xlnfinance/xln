@@ -9,6 +9,7 @@ import {
   spawnBunChild,
   stopManagedChild,
   waitForHttpReady,
+  waitForCustodyRouteableState,
   type ManagedChild,
 } from '../orchestrator/custody-bootstrap';
 
@@ -263,30 +264,19 @@ const ensureCustodyIdentity = async (hubIds: string[]): Promise<{ entityId: stri
   });
 
   await client.registerSigner(identity.signerId, identity.privateKeyHex);
-  const existing = await client.listEntities();
-  const alreadyPresent = existing.some(entity => entity.entityId.toLowerCase() === identity.entityId.toLowerCase());
+  await setupCustody(client, {
+    name: PROFILE_NAME,
+    seed: SEED,
+    signerLabel: SIGNER_LABEL,
+    hubEntityIds: hubIds,
+    relayUrl: RELAY_URL,
+    gossipPollMs: GOSSIP_POLL_MS,
+    creditTokenIds: [1, 2, 3],
+    routingEnabled: false,
+  });
 
-  if (!alreadyPresent) {
-    await setupCustody(client, {
-      name: PROFILE_NAME,
-      seed: SEED,
-      signerLabel: SIGNER_LABEL,
-      hubEntityIds: hubIds,
-      relayUrl: RELAY_URL,
-      gossipPollMs: GOSSIP_POLL_MS,
-      creditTokenIds: [1, 2, 3],
-      routingEnabled: false,
-    });
-    await ensureExistingCustodyState(client, identity.entityId, hubIds.length);
-  } else {
-    await ensureExistingCustodyState(client, identity.entityId, hubIds.length);
-    await client.configureP2P({
-      relayUrls: [RELAY_URL],
-      advertiseEntityIds: [identity.entityId],
-      isHub: false,
-      gossipPollMs: GOSSIP_POLL_MS,
-    });
-  }
+  await ensureExistingCustodyState(client, identity.entityId, hubIds.length);
+  await waitForCustodyRouteableState(MAIN_API_BASE_URL, identity.entityId, hubIds);
 
   const entities = await client.listEntities();
   const found = entities.find(entity => entity.entityId.toLowerCase() === identity.entityId.toLowerCase());

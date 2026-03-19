@@ -26,7 +26,9 @@ const CUSTODY_SIGNER_ID = String(process.env.CUSTODY_SIGNER_ID || '').trim().toL
 const CUSTODY_DB_PATH = process.env.CUSTODY_DB_PATH || './db-tmp/custody.sqlite';
 const SESSION_COOKIE = 'custody_session';
 const JOURNAL_CURSOR_KEY = 'journal_cursor';
-const JOURNAL_SYNC_INTERVAL_MS = 200;
+const JOURNAL_ACTIVE_SYNC_MS = 1000;
+const JOURNAL_IDLE_SYNC_MS = 5000;
+const JOURNAL_ERROR_SYNC_MS = 5000;
 
 if (!CUSTODY_ENTITY_ID) {
   throw new Error('CUSTODY_ENTITY_ID is required');
@@ -46,6 +48,7 @@ const daemon = new DaemonRpcClient(DAEMON_WS_URL);
 let syncInFlight = false;
 let lastSyncOkAt = 0;
 let lastSyncError: string | null = null;
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
 
 const staticDir = new URL('./static/', import.meta.url);
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -80,8 +83,18 @@ const makeSessionCookie = (token: string): string => {
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`;
 };
 
-const createUserId = (): string => `usr_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
-const createSessionToken = (): string => crypto.randomUUID().replace(/-/g, '');
+const compactUuid = (raw: string, limit?: number): string => {
+  let compact = '';
+  for (const char of raw) {
+    if (char === '-') continue;
+    compact += char;
+    if (limit && compact.length >= limit) break;
+  }
+  return compact;
+};
+
+const createUserId = (): string => `usr_${compactUuid(crypto.randomUUID(), 20)}`;
+const createSessionToken = (): string => compactUuid(crypto.randomUUID());
 
 const ensureSession = (
   req: Request,
@@ -140,13 +153,38 @@ const formatAmount = (tokenId: number, amountMinor: bigint): string => {
   const token = getToken(tokenId);
   const raw = formatUnits(amountMinor, token.decimals);
   const [whole, fractional = ''] = raw.split('.');
-  const compactFractional = fractional.replace(/0+$/, '').slice(0, 6);
+  let compactFractional = fractional;
+  while (compactFractional.endsWith('0')) {
+    compactFractional = compactFractional.slice(0, -1);
+  }
+  compactFractional = compactFractional.slice(0, 6);
   return compactFractional.length > 0 ? `${whole}.${compactFractional}` : whole;
 };
 
 const parseUidFromDescription = (description: string): string | null => {
-  const match = description.match(/(?:^|\b)uid:([a-zA-Z0-9_-]+)/);
-  return match?.[1] || null;
+  const source = String(description || '');
+  for (let index = 0; index < source.length; index += 1) {
+    const isBoundary = index === 0 || source[index - 1] === ' ' || source[index - 1] === '|';
+    if (!isBoundary) continue;
+    if (source.slice(index, index + 4) !== 'uid:') continue;
+    let cursor = index + 4;
+    let value = '';
+    while (cursor < source.length) {
+      const char = source[cursor]!;
+      const code = char.charCodeAt(0);
+      const isUpper = code >= 65 && code <= 90;
+      const isLower = code >= 97 && code <= 122;
+      const isDigit = code >= 48 && code <= 57;
+      if (isUpper || isLower || isDigit || char === '_' || char === '-') {
+        value += char;
+        cursor += 1;
+        continue;
+      }
+      break;
+    }
+    return value || null;
+  }
+  return null;
 };
 
 const getLogString = (value: unknown): string => (typeof value === 'string' ? value : '');
@@ -168,6 +206,7 @@ const serializeActivity = (activity: ActivityRecord[]) => {
         createdAt: item.createdAt,
         updatedAt: item.createdAt,
         finalizedAt: item.createdAt,
+        startedAtMs: item.startedAtMs,
       };
     }
 
@@ -189,6 +228,7 @@ const serializeActivity = (activity: ActivityRecord[]) => {
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
       finalizedAt: item.finalizedAt,
+      startedAtMs: item.startedAtMs,
       error: item.daemonError,
     };
   });
@@ -251,6 +291,7 @@ const creditDepositFromLog = (height: number, log: DaemonFrameLog): void => {
   const amountMinor = BigInt(getLogString(data.amount) || '0');
   const hashlock = getLogString(data.hashlock);
   const fromEntityId = getLogString(data.inboundEntity) || getLogString(data.fromEntity);
+  const startedAtMs = Number(data.startedAtMs || 0);
   if (tokenId <= 0 || amountMinor <= 0n || !hashlock) return;
 
   store.creditDeposit({
@@ -263,6 +304,7 @@ const creditDepositFromLog = (height: number, log: DaemonFrameLog): void => {
     hashlock,
     frameHeight: height,
     createdAt: log.timestamp || Date.now(),
+    startedAtMs: Number.isFinite(startedAtMs) && startedAtMs > 0 ? startedAtMs : null,
   });
 };
 
@@ -332,16 +374,22 @@ const syncJournal = async (): Promise<void> => {
       lastSyncOkAt = Date.now();
     }
     lastSyncError = null;
+    scheduleJournalSync(response.returned > 0 ? JOURNAL_ACTIVE_SYNC_MS : JOURNAL_IDLE_SYNC_MS);
   } catch (error) {
     lastSyncError = error instanceof Error ? error.message : String(error);
+    scheduleJournalSync(JOURNAL_ERROR_SYNC_MS);
   } finally {
     syncInFlight = false;
   }
 };
 
-const syncTimer = setInterval(() => {
-  void syncJournal();
-}, JOURNAL_SYNC_INTERVAL_MS);
+const scheduleJournalSync = (delayMs: number): void => {
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    void syncJournal();
+  }, delayMs);
+};
 
 store.recoverSubmittingWithdrawals('Recovered after custody service restart before daemon confirmation');
 void syncJournal();
@@ -463,8 +511,9 @@ const server = Bun.serve({
           );
         }
 
-        const withdrawalId = `wd_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
-        const description = `custody-withdrawal:${withdrawalId} requested:${amountMinor.toString()} fee:${feeMinor.toString()} tsms:${Date.now()}`;
+        const withdrawalId = `wd_${compactUuid(crypto.randomUUID(), 20)}`;
+        const startedAtMs = Date.now();
+        const description = `custody-withdrawal:${withdrawalId} requested:${amountMinor.toString()} fee:${feeMinor.toString()}`;
         store.reserveWithdrawal({
           id: withdrawalId,
           userId: session.userId,
@@ -475,6 +524,7 @@ const server = Bun.serve({
           targetEntityId,
           description,
           createdAt: Date.now(),
+          startedAtMs,
         });
 
         try {
@@ -485,6 +535,7 @@ const server = Bun.serve({
             tokenId,
             amount: amountMinor.toString(),
             description,
+            startedAtMs,
             route: selectedRoute.path,
             mode: 'htlc',
           });
@@ -535,7 +586,7 @@ const server = Bun.serve({
 });
 
 const shutdown = async (): Promise<void> => {
-  clearInterval(syncTimer);
+  if (syncTimer) clearTimeout(syncTimer);
   await daemon.close();
   store.close();
   server.stop(true);

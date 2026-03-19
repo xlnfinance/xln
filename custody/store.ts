@@ -23,6 +23,7 @@ export type DepositRecord = {
   hashlock: string;
   frameHeight: number;
   createdAt: number;
+  startedAtMs: number | null;
 };
 
 export type WithdrawalStatus = 'submitting' | 'sent' | 'finalized' | 'failed';
@@ -44,6 +45,7 @@ export type WithdrawalRecord = {
   updatedAt: number;
   finalizedAt: number | null;
   frameHeight: number | null;
+  startedAtMs: number | null;
 };
 
 export type ActivityRecord =
@@ -94,7 +96,8 @@ export class CustodyStore {
         from_entity_id TEXT NOT NULL,
         hashlock TEXT NOT NULL,
         frame_height INTEGER NOT NULL,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        started_at_ms INTEGER
       );
 
       CREATE TABLE IF NOT EXISTS withdrawals (
@@ -113,7 +116,8 @@ export class CustodyStore {
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         finalized_at INTEGER,
-        frame_height INTEGER
+        frame_height INTEGER,
+        started_at_ms INTEGER
       );
 
       CREATE TABLE IF NOT EXISTS service_state (
@@ -121,8 +125,20 @@ export class CustodyStore {
         value TEXT NOT NULL
       );
     `);
+    this.ensureDepositColumn('started_at_ms', 'ALTER TABLE deposits ADD COLUMN started_at_ms INTEGER');
     this.ensureWithdrawalColumn('requested_amount_minor', "ALTER TABLE withdrawals ADD COLUMN requested_amount_minor TEXT NOT NULL DEFAULT '0'");
     this.ensureWithdrawalColumn('fee_minor', "ALTER TABLE withdrawals ADD COLUMN fee_minor TEXT NOT NULL DEFAULT '0'");
+    this.ensureWithdrawalColumn('started_at_ms', 'ALTER TABLE withdrawals ADD COLUMN started_at_ms INTEGER');
+  }
+
+  private ensureDepositColumn(columnName: string, alterSql: string): void {
+    const columns = this.db
+      .query<{ name: string }>('PRAGMA table_info(deposits)')
+      .all()
+      .map(row => row.name);
+    if (!columns.includes(columnName)) {
+      this.db.exec(alterSql);
+    }
   }
 
   private ensureWithdrawalColumn(columnName: string, alterSql: string): void {
@@ -214,11 +230,12 @@ export class CustodyStore {
     hashlock: string;
     frameHeight: number;
     createdAt: number;
+    startedAtMs?: number | null;
   }): { inserted: boolean; credited: boolean } {
     const insertDeposit = this.db.query(`
       INSERT INTO deposits (
-        event_key, user_id, token_id, amount_minor, description, from_entity_id, hashlock, frame_height, created_at
-      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        event_key, user_id, token_id, amount_minor, description, from_entity_id, hashlock, frame_height, created_at, started_at_ms
+      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
       ON CONFLICT(event_key) DO NOTHING
     `);
 
@@ -233,6 +250,7 @@ export class CustodyStore {
         input.hashlock,
         input.frameHeight,
         input.createdAt,
+        input.startedAtMs ?? null,
       );
       const inserted = Number(result.changes) > 0;
       if (!inserted) return { inserted: false, credited: false };
@@ -257,6 +275,7 @@ export class CustodyStore {
     targetEntityId: string;
     description: string;
     createdAt: number;
+    startedAtMs?: number | null;
   }): WithdrawalRecord {
     const txn = this.db.transaction((input: typeof params) => {
       const current = this.getBalanceAmount(input.userId, input.tokenId);
@@ -268,8 +287,8 @@ export class CustodyStore {
         .query(`
           INSERT INTO withdrawals (
             id, user_id, token_id, amount_minor, requested_amount_minor, fee_minor, target_entity_id, description, status,
-            hashlock, route_json, daemon_error, created_at, updated_at, finalized_at, frame_height
-          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'submitting', NULL, NULL, NULL, ?9, ?9, NULL, NULL)
+            hashlock, route_json, daemon_error, created_at, updated_at, finalized_at, frame_height, started_at_ms
+          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'submitting', NULL, NULL, NULL, ?9, ?9, NULL, NULL, ?10)
         `)
         .run(
           input.id,
@@ -281,6 +300,7 @@ export class CustodyStore {
           input.targetEntityId,
           input.description,
           input.createdAt,
+          input.startedAtMs ?? null,
         );
       return this.getWithdrawalById(input.id);
     });
@@ -419,9 +439,10 @@ export class CustodyStore {
         updated_at: number;
         finalized_at: number | null;
         frame_height: number | null;
+        started_at_ms: number | null;
       }>(
         `SELECT id, user_id, token_id, amount_minor, requested_amount_minor, fee_minor, target_entity_id, description, status, hashlock,
-                route_json, daemon_error, created_at, updated_at, finalized_at, frame_height
+                route_json, daemon_error, created_at, updated_at, finalized_at, frame_height, started_at_ms
          FROM withdrawals WHERE id = ?1`,
       )
       .get(id);
@@ -443,6 +464,7 @@ export class CustodyStore {
       updatedAt: row.updated_at,
       finalizedAt: row.finalized_at,
       frameHeight: row.frame_height,
+      startedAtMs: row.started_at_ms,
     };
   }
 
@@ -465,8 +487,9 @@ export class CustodyStore {
         hashlock: string;
         frame_height: number;
         created_at: number;
+        started_at_ms: number | null;
       }>(
-        `SELECT event_key, user_id, token_id, amount_minor, description, from_entity_id, hashlock, frame_height, created_at
+        `SELECT event_key, user_id, token_id, amount_minor, description, from_entity_id, hashlock, frame_height, created_at, started_at_ms
          FROM deposits WHERE user_id = ?1 ORDER BY created_at DESC LIMIT ?2`,
       )
       .all(userId, limit);
@@ -489,9 +512,10 @@ export class CustodyStore {
         updated_at: number;
         finalized_at: number | null;
         frame_height: number | null;
+        started_at_ms: number | null;
       }>(
         `SELECT id, user_id, token_id, amount_minor, requested_amount_minor, fee_minor, target_entity_id, description, status, hashlock,
-                route_json, daemon_error, created_at, updated_at, finalized_at, frame_height
+                route_json, daemon_error, created_at, updated_at, finalized_at, frame_height, started_at_ms
          FROM withdrawals WHERE user_id = ?1 ORDER BY created_at DESC LIMIT ?2`,
       )
       .all(userId, limit);
@@ -508,6 +532,7 @@ export class CustodyStore {
         hashlock: row.hashlock,
         frameHeight: row.frame_height,
         createdAt: row.created_at,
+        startedAtMs: row.started_at_ms,
       })),
       ...withdrawalRows.map(row => ({
         kind: 'withdrawal' as const,
@@ -527,6 +552,7 @@ export class CustodyStore {
         updatedAt: row.updated_at,
         finalizedAt: row.finalized_at,
         frameHeight: row.frame_height,
+        startedAtMs: row.started_at_ms,
       })),
     ];
 

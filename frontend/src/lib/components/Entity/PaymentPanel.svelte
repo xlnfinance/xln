@@ -21,7 +21,6 @@
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import { amountToUsd } from '$lib/utils/assetPricing';
   import { buildXlnInvoiceUri, parseXlnInvoice, type ParsedXlnInvoice } from '$lib/utils/xlnInvoice';
-  import { appendPaymentTimestamp } from '$lib/utils/paymentTiming';
   import {
     extractEntityEncPubKey,
     findProfileByEntityId,
@@ -43,10 +42,10 @@
   let invoiceValue = '';
   let invoiceError = '';
   let invoiceLocked = false;
-  let paymentStartedAtMs = 0;
   let pendingAutoRouteKey = '';
   let completedAutoRouteKey = '';
   let autoRouteRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let autoRouteRetryDeadlineMs = 0;
   let scannerOpen = false;
   let scannerStatus = '';
   let scannerError = '';
@@ -91,8 +90,11 @@
   const MAX_CANDIDATE_PATHS = 500;
   const MAX_PATH_HOPS = 6;
   const MIN_SELF_CYCLE_INTERMEDIATES = 2;
-  const GOSSIP_REFRESH_ATTEMPTS = 4;
+  const GOSSIP_REFRESH_ATTEMPTS = 3;
   const GOSSIP_REFRESH_WAIT_MS = 100;
+  const AUTO_ROUTE_RETRY_WINDOW_MS = 8_000;
+  const AUTO_ROUTE_RETRY_DELAY_MS = 200;
+  const EMBEDDED_CONFIRMATION_POLL_MS = 150;
   type LockBookEntry = {
     accountId: string;
     tokenId: number;
@@ -137,9 +139,22 @@
   }
 
   const sanitizePrefillText = (raw: string | null | undefined, maxLen = 180): string => {
-    const value = String(raw || '').replace(/\s+/g, ' ').trim();
-    if (!value) return '';
-    return value.slice(0, maxLen);
+    const source = String(raw || '').trim();
+    if (!source) return '';
+    let value = '';
+    let lastWasSpace = false;
+    for (const char of source) {
+      const isWhitespace = char === ' ' || char === '\n' || char === '\r' || char === '\t';
+      if (isWhitespace) {
+        if (!lastWasSpace) value += ' ';
+        lastWasSpace = true;
+        continue;
+      }
+      value += char;
+      lastWasSpace = false;
+      if (value.length >= maxLen) break;
+    }
+    return value.trim();
   };
 
   const parseBooleanParam = (raw: string | null | undefined): boolean => {
@@ -251,6 +266,22 @@
       autoRouteRetryTimer = null;
     }
     pendingAutoRouteKey = buildAutoRouteKey();
+    autoRouteRetryDeadlineMs = Date.now() + AUTO_ROUTE_RETRY_WINDOW_MS;
+    completedAutoRouteKey = '';
+  }
+
+  function isTransientRoutePreflightError(message: string | null | undefined): boolean {
+    const normalized = String(message || '').trim().toLowerCase();
+    if (!normalized) return false;
+    return normalized.includes('no route has enough real capacity')
+      || normalized.includes('enough real capacity')
+      || normalized.includes('no route found')
+      || normalized.includes('no route available')
+      || normalized.includes('target profile missing')
+      || normalized.includes('refresh gossip')
+      || normalized.includes('has no downloaded gossip profile')
+      || normalized.includes('profile has no encryption key')
+      || normalized.includes('missing encryption keys for route hops');
   }
 
   function clearInvoiceIntent(): void {
@@ -258,7 +289,6 @@
     invoiceError = '';
     invoiceValue = '';
     descriptionLocked = false;
-    paymentStartedAtMs = 0;
   }
 
   function applyInvoiceIntent(parsed: ParsedXlnInvoice): void {
@@ -268,7 +298,6 @@
     targetEntityId = parsed.targetEntityId;
     if (parsed.amount) amount = parsed.amount;
     if (parsed.tokenId) tokenId = parsed.tokenId;
-    paymentStartedAtMs = Number(parsed.startedAtMs || 0);
     const noteParts: string[] = [];
     if (parsed.description) noteParts.push(parsed.description);
     if (parsed.recipientUserId) noteParts.push(`uid:${parsed.recipientUserId}`);
@@ -284,7 +313,8 @@
       clearInvoiceIntent();
       return;
     }
-    if (!/^(xln:|https?:\/\/)/i.test(trimmed)) {
+    const normalized = trimmed.toLowerCase();
+    if (!normalized.startsWith('xln:') && !normalized.startsWith('http://') && !normalized.startsWith('https://')) {
       invoiceError = '';
       return;
     }
@@ -508,8 +538,12 @@
     const raw = formatToken(value);
     const symbol = String(activeXlnFunctions?.getTokenInfo?.(tokenId)?.symbol || '').trim();
     if (!symbol) return raw;
-    const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return raw.replace(new RegExp(`\\s+${escaped}\\s*$`, 'i'), '').trim();
+    const rawLower = raw.toLowerCase();
+    const symbolLower = symbol.toLowerCase();
+    if (rawLower.endsWith(symbolLower)) {
+      return raw.slice(0, raw.length - symbol.length).trimEnd();
+    }
+    return raw.trim();
   }
 
   // Generate HTLC secret/hashlock pair (browser-side, outside consensus)
@@ -579,7 +613,21 @@
 
   function parseAmountToWei(input: string, decimals = 18): bigint {
     const normalized = input.trim();
-    if (!/^\d+(\.\d+)?$/.test(normalized)) {
+    if (!normalized) {
+      throw new Error('Amount must be a positive decimal number');
+    }
+    let dotCount = 0;
+    for (let index = 0; index < normalized.length; index += 1) {
+      const char = normalized[index]!;
+      const isDigit = char >= '0' && char <= '9';
+      if (isDigit) continue;
+      if (char === '.') {
+        dotCount += 1;
+        continue;
+      }
+      throw new Error('Amount must be a positive decimal number');
+    }
+    if (dotCount > 1 || normalized === '.' || normalized.startsWith('.') || normalized.endsWith('.')) {
       throw new Error('Amount must be a positive decimal number');
     }
     const [wholeRaw = '0', fracRaw = ''] = normalized.split('.');
@@ -873,7 +921,7 @@
       } catch {
         // best effort only
       }
-      await sleep(GOSSIP_REFRESH_WAIT_MS * attempt);
+      await sleep(GOSSIP_REFRESH_WAIT_MS);
     }
   }
 
@@ -1028,7 +1076,7 @@
     return true;
   }
 
-  async function findRoutes(preserveRepeatTimer = false): Promise<boolean> {
+  async function findRoutes(preserveRepeatTimer = false, silent = false): Promise<boolean> {
     if (!targetEntityId || !amount) return;
 
     findingRoutes = true;
@@ -1215,7 +1263,9 @@
     } catch (error) {
       console.error('[Send] Route finding failed:', error);
       preflightError = (error as Error)?.message || 'Unknown route preflight error';
-      toasts.error(`Route finding failed: ${preflightError}`);
+      if (!silent) {
+        toasts.error(`Route finding failed: ${preflightError}`);
+      }
       return false;
     } finally {
       findingRoutes = false;
@@ -1234,16 +1284,19 @@
   ) {
     const routeKey = pendingAutoRouteKey;
     completedAutoRouteKey = routeKey;
-    void findRoutes(false).then((success) => {
+    void findRoutes(false, true).then((success) => {
       if (success) return;
       if (pendingAutoRouteKey !== routeKey || completedAutoRouteKey !== routeKey) return;
+      if (!isTransientRoutePreflightError(preflightError) || Date.now() >= autoRouteRetryDeadlineMs) {
+        return;
+      }
       if (autoRouteRetryTimer) clearTimeout(autoRouteRetryTimer);
       autoRouteRetryTimer = setTimeout(() => {
         if (completedAutoRouteKey === routeKey) {
           completedAutoRouteKey = '';
         }
         autoRouteRetryTimer = null;
-      }, 300);
+      }, AUTO_ROUTE_RETRY_DELAY_MS);
     });
   }
 
@@ -1273,7 +1326,7 @@
           return;
         }
       }
-      await sleep(10);
+      await sleep(EMBEDDED_CONFIRMATION_POLL_MS);
     }
     throw new Error('Payment confirmation timed out');
   }
@@ -1366,7 +1419,7 @@
       const signerId = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'payment-panel')
         || requireSignerIdForEntity(env, entityId, 'payment-panel');
 
-      const descriptionValue = appendPaymentTimestamp(description.trim(), paymentStartedAtMs || Date.now());
+      const descriptionValue = description.trim();
       let paymentInput: EntityInputPayload;
       let queuedHashlock: string | null = null;
       if (useHtlc) {

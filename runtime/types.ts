@@ -554,6 +554,7 @@ export type EntityTx =
         amount: bigint;
         route: string[]; // Full path from source to target
         description?: string;
+        startedAtMs?: number;
         secret?: string;   // Optional - generated if not provided
         hashlock?: string; // Optional - generated if not provided
         // Deterministic replay payload captured on first execution.
@@ -987,6 +988,7 @@ export interface HtlcRoute {
   hashlock: string;
   tokenId?: number;
   amount?: bigint;
+  startedAtMs?: number;
 
   // Inbound hop (who sent us this HTLC)
   inboundEntity?: string;
@@ -1451,6 +1453,8 @@ export type AccountTx =
         offerId: string;
         fillRatio: number;        // 0-65535 (uint16)
         cancelRemainder: boolean; // true = fill + cancel, false = fill + keep open
+        executionBaseAmount?: bigint;   // Exact base amount filled (orderbook match)
+        executionQuoteAmount?: bigint;  // Exact quote amount paid/received (orderbook match)
       };
     }
   // === SETTLEMENT HOLD TYPES (ring-fencing via bilateral consensus) ===

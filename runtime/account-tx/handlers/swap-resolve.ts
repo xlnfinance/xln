@@ -34,7 +34,7 @@ import type { AccountMachine, AccountTx } from '../../types';
 import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL } from '../../constants';
-import { computeSwapPriceTicks, requantizeRemainingSwapAtPrice } from '../../orderbook/types';
+import { canonicalPair, computeSwapPriceTicks, requantizeRemainingSwapAtPrice, SWAP_LOT_SCALE } from '../../orderbook/types';
 
 const MAX_FILL_RATIO = 65535;
 
@@ -45,7 +45,13 @@ export async function handleSwapResolve(
   currentHeight: number,
   isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelled?: { offerId: string; accountId: string } }> {
-  const { offerId, fillRatio, cancelRemainder } = accountTx.data;
+  const {
+    offerId,
+    fillRatio,
+    cancelRemainder,
+    executionBaseAmount,
+    executionQuoteAmount,
+  } = accountTx.data;
   const events: string[] = [];
 
   // 1. Find offer
@@ -79,14 +85,63 @@ export async function handleSwapResolve(
   // This ensures fill ratios computed from lots match settlement amounts exactly
   const effectiveGive = offer.quantizedGive ?? offer.giveAmount;
   const effectiveWant = offer.quantizedWant ?? offer.wantAmount;
+  const hasExecutionBaseAmount = executionBaseAmount !== undefined;
+  const hasExecutionQuoteAmount = executionQuoteAmount !== undefined;
+  if (hasExecutionBaseAmount !== hasExecutionQuoteAmount) {
+    return { success: false, error: 'Exact execution amounts must be provided together', events };
+  }
 
-  // filledGive anchors the fill, filledWant derived using ceil() to protect maker
-  // Maker must receive AT LEAST their limit price - taker pays any dust
-  const filledGive = (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
-  // Ceiling division: (a * b + c - 1) / c ensures maker gets >= limit price
-  const filledWant = effectiveGive > 0n
-    ? (filledGive * effectiveWant + effectiveGive - 1n) / effectiveGive
-    : 0n;
+  let filledGive: bigint;
+  let filledWant: bigint;
+  if (hasExecutionBaseAmount && hasExecutionQuoteAmount) {
+    const exactBaseAmount = executionBaseAmount;
+    const exactQuoteAmount = executionQuoteAmount;
+    if (fillRatio === 0 && (exactBaseAmount !== 0n || exactQuoteAmount !== 0n)) {
+      return { success: false, error: 'Exact execution amounts must be zero for zero fill', events };
+    }
+    if (fillRatio > 0 && (exactBaseAmount <= 0n || exactQuoteAmount <= 0n)) {
+      return { success: false, error: 'Exact execution amounts must be positive when fillRatio > 0', events };
+    }
+    if (exactBaseAmount % SWAP_LOT_SCALE !== 0n) {
+      return { success: false, error: 'Exact base execution amount must be lot-aligned', events };
+    }
+
+    const { base: baseTokenId } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
+    const makerSellsBase = offer.giveTokenId === baseTokenId;
+    const expectedBaseAmount = makerSellsBase
+      ? (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO)
+      : (effectiveWant * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
+    if (exactBaseAmount !== expectedBaseAmount) {
+      return {
+        success: false,
+        error: `Exact base amount ${exactBaseAmount} does not match fillRatio-derived amount ${expectedBaseAmount}`,
+        events,
+      };
+    }
+
+    if (makerSellsBase) {
+      filledGive = exactBaseAmount;
+      filledWant = exactQuoteAmount;
+    } else {
+      const maximumQuoteAmount = (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
+      if (exactQuoteAmount > maximumQuoteAmount) {
+        return {
+          success: false,
+          error: `Exact quote amount ${exactQuoteAmount} exceeds maker max spend ${maximumQuoteAmount}`,
+          events,
+        };
+      }
+      filledGive = exactQuoteAmount;
+      filledWant = exactBaseAmount;
+    }
+  } else {
+    // filledGive anchors the fill, filledWant derived using ceil() to protect maker.
+    // Maker must receive at least their limit price; taker pays any dust.
+    filledGive = (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
+    filledWant = effectiveGive > 0n
+      ? (filledGive * effectiveWant + effectiveGive - 1n) / effectiveGive
+      : 0n;
+  }
 
   if (fillRatio > 0) {
     if (filledGive < FINANCIAL.MIN_PAYMENT_AMOUNT || filledGive > FINANCIAL.MAX_PAYMENT_AMOUNT) {

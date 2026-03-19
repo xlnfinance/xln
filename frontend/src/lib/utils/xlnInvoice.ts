@@ -1,5 +1,3 @@
-import { appendPaymentTimestamp, parsePaymentTiming } from './paymentTiming';
-
 export type XlnInvoiceIntent = {
   targetEntityId: string;
   tokenId: number | null;
@@ -8,7 +6,6 @@ export type XlnInvoiceIntent = {
   recipientUserId: string;
   jurisdictionId: string;
   noteLocked: boolean;
-  startedAtMs?: number;
 };
 
 export type ParsedXlnInvoice = XlnInvoiceIntent & {
@@ -18,9 +15,40 @@ export type ParsedXlnInvoice = XlnInvoiceIntent & {
 };
 
 const sanitizeText = (value: string | null | undefined, maxLen: number): string => {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  const source = String(value || '').trim();
+  let text = '';
+  let lastWasSpace = false;
+  for (const char of source) {
+    const isWhitespace = char === ' ' || char === '\n' || char === '\r' || char === '\t';
+    if (isWhitespace) {
+      if (!lastWasSpace) text += ' ';
+      lastWasSpace = true;
+      continue;
+    }
+    text += char;
+    lastWasSpace = false;
+  }
   return text ? text.slice(0, maxLen) : '';
 };
+
+const isHexChar = (char: string): boolean => {
+  const code = char.charCodeAt(0);
+  return (
+    (code >= 48 && code <= 57)
+    || (code >= 65 && code <= 70)
+    || (code >= 97 && code <= 102)
+  );
+};
+
+const isEntityId = (value: string): boolean => {
+  if (value.length !== 66 || !value.startsWith('0x')) return false;
+  for (let index = 2; index < value.length; index += 1) {
+    if (!isHexChar(value[index]!)) return false;
+  }
+  return true;
+};
+
+const isHttpUrl = (value: string): boolean => value.startsWith('http://') || value.startsWith('https://');
 
 const parseBoolean = (value: string | null | undefined): boolean => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -41,7 +69,7 @@ const normalizeHashParams = (rawHash: string): URLSearchParams => {
 
 const parseInvoiceParams = (params: URLSearchParams, source: ParsedXlnInvoice['source'], raw: string): ParsedXlnInvoice => {
   const targetEntityId = sanitizeText(params.get('id') || params.get('target') || params.get('entity'), 120).toLowerCase();
-  if (!/^0x[0-9a-f]{64}$/i.test(targetEntityId)) {
+  if (!isEntityId(targetEntityId)) {
     throw new Error('Invoice is missing a valid recipient entity id');
   }
 
@@ -49,13 +77,9 @@ const parseInvoiceParams = (params: URLSearchParams, source: ParsedXlnInvoice['s
   const parsedToken = tokenRaw ? Number(tokenRaw) : null;
   const tokenId = Number.isFinite(parsedToken) && parsedToken && parsedToken > 0 ? Math.floor(parsedToken) : null;
   const amount = sanitizeText(params.get('amt') || params.get('amount'), 64);
-  const descriptionMeta = parsePaymentTiming(sanitizeText(params.get('desc') || params.get('description') || params.get('memo'), 200));
-  const description = descriptionMeta.displayDescription;
+  const description = sanitizeText(params.get('desc') || params.get('description') || params.get('memo'), 200);
   const recipientUserId = sanitizeText(params.get('u') || params.get('uid') || params.get('recipient_user_id'), 96);
   const jurisdictionId = sanitizeText(params.get('jId') || params.get('jurisdiction') || params.get('j'), 64);
-  const tsRaw = sanitizeText(params.get('ts') || params.get('startedAtMs') || params.get('started_at_ms'), 20);
-  const parsedTs = tsRaw ? Number(tsRaw) : descriptionMeta.startedAtMs;
-  const startedAtMs = Number.isFinite(parsedTs) ? parsedTs : undefined;
   const noteLocked = parseBoolean(params.get('locked') || params.get('note_locked') || params.get('description_locked')) || Boolean(recipientUserId);
   const canonicalUri = buildXlnInvoiceUri({
     targetEntityId,
@@ -65,7 +89,6 @@ const parseInvoiceParams = (params: URLSearchParams, source: ParsedXlnInvoice['s
     recipientUserId,
     jurisdictionId,
     noteLocked,
-    startedAtMs,
   });
 
   return {
@@ -79,7 +102,6 @@ const parseInvoiceParams = (params: URLSearchParams, source: ParsedXlnInvoice['s
     recipientUserId,
     jurisdictionId,
     noteLocked,
-    startedAtMs,
   };
 };
 
@@ -91,10 +113,8 @@ export function buildXlnInvoiceUri(intent: Partial<XlnInvoiceIntent> & { targetE
   }
   const amount = sanitizeText(intent.amount, 64);
   if (amount) params.set('amt', amount);
-  const startedAtMs = Number.isFinite(intent.startedAtMs) ? Number(intent.startedAtMs) : Date.now();
-  const description = appendPaymentTimestamp(sanitizeText(intent.description, 200), startedAtMs);
+  const description = sanitizeText(intent.description, 200);
   if (description) params.set('desc', description);
-  params.set('ts', String(startedAtMs));
   const recipientUserId = sanitizeText(intent.recipientUserId, 96);
   if (recipientUserId) params.set('u', recipientUserId);
   const jurisdictionId = sanitizeText(intent.jurisdictionId, 64);
@@ -114,10 +134,8 @@ export function buildWalletPayHref(baseUrl: string | URL, intent: Partial<XlnInv
   }
   const amount = sanitizeText(intent.amount, 64);
   if (amount) params.set('amt', amount);
-  const startedAtMs = Number.isFinite(intent.startedAtMs) ? Number(intent.startedAtMs) : Date.now();
-  const description = appendPaymentTimestamp(sanitizeText(intent.description, 200), startedAtMs);
+  const description = sanitizeText(intent.description, 200);
   if (description) params.set('desc', description);
-  params.set('ts', String(startedAtMs));
   const recipientUserId = sanitizeText(intent.recipientUserId, 96);
   if (recipientUserId) params.set('u', recipientUserId);
   const jurisdictionId = sanitizeText(intent.jurisdictionId, 64);
@@ -135,14 +153,14 @@ export function parseXlnInvoice(rawValue: string): ParsedXlnInvoice {
 
   if (raw.toLowerCase().startsWith('xln:')) {
     const body = raw.slice(4);
-    if (/^0x[0-9a-f]{64}$/i.test(body.trim())) {
+    if (isEntityId(body.trim())) {
       return parseInvoiceParams(new URLSearchParams(`id=${body.trim()}`), 'xln', raw);
     }
     const query = body.startsWith('?') ? body.slice(1) : body;
     return parseInvoiceParams(new URLSearchParams(query), 'xln', raw);
   }
 
-  if (/^https?:\/\//i.test(raw)) {
+  if (isHttpUrl(raw)) {
     const url = new URL(raw);
     const params = normalizeHashParams(url.hash);
     if (!params.has('id') && !params.has('target') && !params.has('entity')) {

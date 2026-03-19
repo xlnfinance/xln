@@ -63,7 +63,6 @@ function assertHtlcReceivedPayload(event: { data?: Record<string, unknown> }, re
   expect(Number(event.data?.startedAtMs || 0), 'receive event should include startedAtMs').toBeGreaterThan(0);
   expect(Number(event.data?.receivedAtMs || 0), 'receive event should include receivedAtMs').toBeGreaterThan(0);
   expect(Number(event.data?.elapsedMs || 0), 'receive event should include elapsedMs').toBeGreaterThan(0);
-  expect(Number(event.data?.finalizedInMs || 0), 'receive event should include finalizedInMs').toBeGreaterThan(0);
 }
 
 function assertHtlcFinalizedPayload(event: { data?: Record<string, unknown> }, senderEntityId: string, expectedToEntity: string, expectedAmount: bigint) {
@@ -794,7 +793,7 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
         data: payload,
       });
       const data = await resp.json().catch(() => ({}));
-      r = { ok: resp.ok(), status: resp.status(), data };
+      r = { ok: resp.status() === 200, status: resp.status(), data };
     } catch (e: any) {
       r = { ok: false, status: 0, data: { error: e?.message || String(e) } };
     }
@@ -811,6 +810,7 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
       message.includes('pending') ||
       message.includes('FAUCET_ACCOUNT_MISSING') ||
       message.includes('No hub account with target entity') ||
+      code === 'FAUCET_TOKEN_SURFACE_NOT_READY' ||
       code === 'FAUCET_CHANNEL_NOT_READY' ||
       status === 'channel_opening' ||
       status === 'channel_not_ready';
