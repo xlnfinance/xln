@@ -737,6 +737,14 @@ function ensureRuntimeLoopRunning(env: Env, xln: XLNModule, reason: string): voi
   console.log(`[VaultStore] ♻️ Runtime loop started for ${reason}`);
 }
 
+function isRuntimePersistenceContractFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('Unsupported persistence schema')
+    || message.includes('REPLAY_INVARIANT_FAILED')
+    || message.includes('REPLAY_STATE_HASH_MISMATCH')
+    || message.includes('SNAPSHOT_STATE_HASH_MISMATCH');
+}
+
 async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strictRestore = false): Promise<Env> {
   const runtimeIdLower = normalizeRuntimeId(runtime.id);
   if (!runtimeIdLower) {
@@ -768,6 +776,11 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     if (strictRestore) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[VaultStore] Strict restore corruption detected for ${runtime.id.slice(0, 12)}; clearing runtime storage`, error);
+      if (isRuntimePersistenceContractFailure(error)) {
+        await resetRuntimePersistence(runtime, xln);
+        resetBrokenPersistence = true;
+        return buildOrRestoreRuntimeEnv(runtime, xln, false);
+      }
       if (isFinancialRestoreFailure(error)) {
         await resetEverything(error);
         throw error;
