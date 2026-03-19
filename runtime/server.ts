@@ -2046,25 +2046,27 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
 let activeServerOptions: XlnServerOptions = { ...DEFAULT_OPTIONS };
 const DEFAULT_TOKEN_CATALOG = DEFAULT_TOKENS.map(token => ({ ...token }));
 const getDefaultLocalRelayUrl = (port?: number): string => `ws://localhost:${port ?? DEFAULT_OPTIONS.port}/relay`;
-const resolveUnifiedRelayUrl = (port?: number): string => {
+const resolveConfiguredRelayUrl = (port?: number): string => {
   const fallback = getDefaultLocalRelayUrl(port);
   const candidates = [
     process.env.INTERNAL_RELAY_URL,
     process.env.RELAY_URL,
-    process.env.PUBLIC_RELAY_URL,
   ]
     .map(value => String(value || '').trim())
     .filter(Boolean);
-  const unique = Array.from(new Set(candidates));
-  if (unique.length > 1) {
-    throw new Error(
-      `RELAY_URL_MISMATCH: expected single relay URL, got INTERNAL/RELAY/PUBLIC=${unique.join(', ')}`,
-    );
-  }
-  return unique[0] || fallback;
+  return candidates[0] || fallback;
 };
-const resolveConfiguredRelayUrl = (port?: number): string => resolveUnifiedRelayUrl(port);
-const resolveAdvertisedRelayUrl = (port?: number): string => resolveUnifiedRelayUrl(port);
+const resolveAdvertisedRelayUrl = (port?: number): string => {
+  const fallback = getDefaultLocalRelayUrl(port);
+  const candidates = [
+    process.env.PUBLIC_RELAY_URL,
+    process.env.RELAY_URL,
+    process.env.INTERNAL_RELAY_URL,
+  ]
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+  return candidates[0] || fallback;
+};
 
 // ============================================================================
 // RELAY STATE (single store for all relay concerns)
