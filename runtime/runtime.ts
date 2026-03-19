@@ -463,7 +463,7 @@ const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
   if (!env.runtimeConfig) {
     env.runtimeConfig = {
       minFrameDelayMs: 0,
-      loopIntervalMs: process.env.NODE_ENV === 'production' ? 25 : 0,
+      loopIntervalMs: isProductionRuntime ? 25 : 0,
       snapshotIntervalFrames: DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
     };
   }
@@ -657,6 +657,7 @@ export async function tryOpenInfraDb(env: Env): Promise<boolean> {
 
 const INFRA_GOSSIP_INDEX_KEY = 'gossip:index';
 const makeInfraGossipProfileKey = (entityId: string): string => `gossip:profile:${String(entityId).toLowerCase()}`;
+const isProductionRuntime = typeof process !== 'undefined' && process?.env?.NODE_ENV === 'production';
 
 const readInfraStringArray = async (db: Level<Buffer, Buffer>, key: string): Promise<string[]> => {
   try {
@@ -938,7 +939,7 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
 
   const tickDelayMs = config?.tickDelayMs
     ?? ensureRuntimeConfig(env).loopIntervalMs
-    ?? (process.env.NODE_ENV === 'production' ? 25 : 0);
+    ?? (isProductionRuntime ? 25 : 0);
   let running = true;
   state.loopActive = true;
 
