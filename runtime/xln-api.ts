@@ -101,6 +101,10 @@ export type QueueEntityInputPayload = {
   type: string;
 } & Record<string, unknown>;
 
+export type LoadEnvFromDbOptions = {
+  fromGenesis?: boolean;
+};
+
 export type BrowserVMOverride = BrowserVMInstance | { browserVM?: BrowserVMInstance | null } | null;
 
 export type BrowserVMTokenInfo = {
@@ -377,7 +381,11 @@ export interface XLNModule {
   clearDatabase: () => Promise<void>;
   clearDatabaseAndHistory: (env: Env) => Promise<Env>;
   saveEnvToDB: (env: Env) => Promise<void>;
-  loadEnvFromDB: (runtimeId?: string | null, runtimeSeed?: string | null) => Promise<Env | null>;
+  loadEnvFromDB: (
+    runtimeId?: string | null,
+    runtimeSeed?: string | null,
+    options?: LoadEnvFromDbOptions,
+  ) => Promise<Env | null>;
   getPersistedLatestHeight: (env: Env) => Promise<number>;
   readPersistedFrameJournal: (env: Env, height: number) => Promise<PersistedFrameJournal | null>;
   readPersistedFrameJournals: (

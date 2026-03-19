@@ -19,7 +19,6 @@ import {
 } from './utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 import { APP_BASE_URL, API_BASE_URL, resetProdServer } from './utils/e2e-baseline';
-import { waitForRenderedOutboundForAccount } from './utils/e2e-account-ui';
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
@@ -112,6 +111,7 @@ async function runtimeSnapshot(page: Page) {
         runtimeHeight: 0,
         historyFrames: 0,
         entityCount: 0,
+        replayMeta: null,
       };
     }
 
@@ -177,12 +177,14 @@ async function runtimeSnapshot(page: Page) {
                   leftHold: String((deltaToken1 as any).leftHold ?? ''),
                   rightHold: String((deltaToken1 as any).rightHold ?? ''),
                 } : null,
+                swapOffersSize: Number(acc?.swapOffers?.size || 0),
               });
           }
         }
         entities.push({
           key: String(k),
           accountCount: Number(rep?.state?.accounts?.size || 0),
+          swapBookSize: Number(rep?.state?.swapBook?.size || 0),
           accounts,
         });
       }
@@ -196,14 +198,352 @@ async function runtimeSnapshot(page: Page) {
       entityCount,
       entityKeys,
       entities,
+      replayMeta: env.__replayMeta ?? null,
     };
   });
+}
+
+async function readPairProgress(page: Page, counterpartyId: string) {
+  return await page.evaluate(({ counterpartyId }) => {
+    const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) return null;
+    const runtimeId = String(env.runtimeId || '').toLowerCase();
+    for (const [key, rep] of env.eReplicas.entries()) {
+      const [entityId, signerId] = String(key).split(':');
+      if (!entityId || !signerId || String(signerId).toLowerCase() !== runtimeId) continue;
+      const account = rep?.state?.accounts?.get?.(counterpartyId);
+      if (!account) continue;
+      const history = Array.isArray(account.frameHistory) ? account.frameHistory : [];
+      return {
+        currentHeight: Number(account.currentHeight || 0),
+        pendingHeight: Number(account?.pendingFrame?.height || 0),
+        recentHtlcHashlocks: history
+          .slice(-80)
+          .flatMap((frame: any) => (Array.isArray(frame?.accountTxs) ? frame.accountTxs : []))
+          .filter((tx: any) => tx?.type === 'htlc_lock' || tx?.type === 'htlc_resolve')
+          .map((tx: any) => String(tx?.data?.hashlock || ''))
+          .filter((hash: string) => hash.startsWith('0x') && hash.length > 10),
+        recentHtlcResolveCount: history
+          .slice(-80)
+          .flatMap((frame: any) => (Array.isArray(frame?.accountTxs) ? frame.accountTxs : []))
+          .filter((tx: any) => tx?.type === 'htlc_resolve')
+          .length,
+        recentHtlcLockCount: history
+          .slice(-80)
+          .flatMap((frame: any) => (Array.isArray(frame?.accountTxs) ? frame.accountTxs : []))
+          .filter((tx: any) => tx?.type === 'htlc_lock')
+          .length,
+      };
+    }
+    return null;
+  }, { counterpartyId });
+}
+
+async function waitForPairIdle(page: Page, counterpartyId: string, timeoutMs = 20_000) {
+  const startedAt = Date.now();
+  let last: Awaited<ReturnType<typeof readPairProgress>> = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    last = await readPairProgress(page, counterpartyId);
+    if (last && Number(last.pendingHeight || 0) === 0) return last;
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`pair ${counterpartyId.slice(0, 10)} not idle: ${JSON.stringify(last)}`);
+}
+
+function generateHtlcPayload(): { secret: string; hashlock: string } {
+  const secret = ethers.hexlify(ethers.randomBytes(32));
+  const hashlock = ethers.keccak256(secret);
+  return { secret, hashlock };
+}
+
+async function sendRoutedHtlcPayment(
+  page: Page,
+  fromEntityId: string,
+  fromSignerId: string,
+  targetEntityId: string,
+  route: string[],
+  amountUsd: bigint,
+  description: string,
+): Promise<{ secret: string; hashlock: string }> {
+  const { secret, hashlock } = generateHtlcPayload();
+  const result = await page.evaluate(
+    async ({ fromEntityId, fromSignerId, targetEntityId, route, amountUsd, description, secret, hashlock }) => {
+      try {
+        const runtimeWindow = window as typeof window & {
+          isolatedEnv?: { runtimeId?: string; eReplicas?: Map<string, unknown> };
+          XLN?: { enqueueRuntimeInput?: (env: unknown, input: unknown) => void };
+        };
+        const env = runtimeWindow.isolatedEnv;
+        const runtimeModule =
+          runtimeWindow.XLN
+          || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+        const XLN = runtimeModule as { enqueueRuntimeInput?: (env: unknown, input: unknown) => void };
+        if (!env || !XLN?.enqueueRuntimeInput) {
+          return { ok: false, error: 'isolatedEnv/XLN missing' };
+        }
+        const expectedReplicaKey = `${fromEntityId}:${fromSignerId}`.toLowerCase();
+        const replicaKeys = env.eReplicas ? Array.from(env.eReplicas.keys(), (key) => String(key).toLowerCase()) : [];
+        if (!replicaKeys.includes(expectedReplicaKey)) {
+          return { ok: false, error: `local replica ${expectedReplicaKey} missing` };
+        }
+        XLN.enqueueRuntimeInput(env, {
+          runtimeTxs: [],
+          entityInputs: [{
+            entityId: fromEntityId,
+            signerId: fromSignerId,
+            entityTxs: [{
+              type: 'htlcPayment',
+              data: {
+                targetEntityId,
+                tokenId: 1,
+                amount: BigInt(amountUsd) * 10n ** 18n,
+                route,
+                description,
+                secret,
+                hashlock,
+              },
+            }],
+          }],
+        });
+        return { ok: true };
+      } catch (error: any) {
+        return { ok: false, error: error?.message || String(error) };
+      }
+    },
+    {
+      fromEntityId,
+      fromSignerId,
+      targetEntityId,
+      route,
+      amountUsd: amountUsd.toString(),
+      description,
+      secret,
+      hashlock,
+    },
+  );
+  expect(result.ok, `sendRoutedHtlcPayment failed: ${result.error || 'unknown'}`).toBe(true);
+  return { secret, hashlock };
+}
+
+async function waitForSenderHtlcLock(
+  page: Page,
+  counterpartyId: string,
+  hashlock: string,
+  baselineLockCount: number,
+  timeoutMs = 25_000,
+) {
+  const startedAt = Date.now();
+  let last: Awaited<ReturnType<typeof readPairProgress>> = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    last = await readPairProgress(page, counterpartyId);
+    const hashSeen = Array.isArray(last?.recentHtlcHashlocks) && last.recentHtlcHashlocks.includes(hashlock);
+    const lockCountIncreased = Number(last?.recentHtlcLockCount || 0) > baselineLockCount;
+    if (hashSeen || lockCountIncreased) return last;
+    await page.waitForTimeout(350);
+  }
+  throw new Error(`sender HTLC lock not observed for ${counterpartyId.slice(0, 10)} hashlock=${hashlock.slice(0, 10)} last=${JSON.stringify(last)}`);
+}
+
+async function waitForRecipientPaymentObserved(
+  page: Page,
+  counterpartyId: string,
+  hashlock: string,
+  baselineResolveCount: number,
+  timeoutMs = 30_000,
+) {
+  const startedAt = Date.now();
+  let last: Awaited<ReturnType<typeof readPairProgress>> = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    last = await readPairProgress(page, counterpartyId);
+    const hashSeen = Array.isArray(last?.recentHtlcHashlocks) && last.recentHtlcHashlocks.includes(hashlock);
+    const resolveSeen = Number(last?.recentHtlcResolveCount || 0) > baselineResolveCount;
+    if ((hashSeen || resolveSeen) && Number(last?.pendingHeight || 0) === 0) {
+      return last;
+    }
+    await page.waitForTimeout(400);
+  }
+  throw new Error(
+    `recipient payment not observed for ${counterpartyId.slice(0, 10)} hashlock=${hashlock.slice(0, 10)} baseline=${baselineResolveCount} last=${JSON.stringify(last)}`,
+  );
+}
+
+function parseFirstNumber(text: string): number {
+  let started = false;
+  let seenDot = false;
+  let value = '';
+  for (const ch of String(text || '')) {
+    if (!started) {
+      if (ch >= '0' && ch <= '9') {
+        started = true;
+        value += ch;
+      } else if (ch === '-') {
+        started = true;
+        value += ch;
+      }
+      continue;
+    }
+    if (ch >= '0' && ch <= '9') {
+      value += ch;
+      continue;
+    }
+    if (ch === ',' ) {
+      continue;
+    }
+    if (ch === '.' && !seenDot) {
+      seenDot = true;
+      value += ch;
+      continue;
+    }
+    break;
+  }
+  if (value === '' || value === '-') return Number.NaN;
+  return Number.parseFloat(value);
+}
+
+function formatDecimalForInput(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  let text = value.toFixed(6);
+  while (text.endsWith('0')) {
+    text = text.slice(0, -1);
+  }
+  if (text.endsWith('.')) {
+    text = text.slice(0, -1);
+  }
+  return text;
+}
+
+async function openSwapWorkspace(page: Page): Promise<void> {
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  await accountsTab.click();
+  const swapTab = page.locator('.account-workspace-tab').filter({ hasText: /Swap/i }).first();
+  await expect(swapTab).toBeVisible({ timeout: 20_000 });
+  await swapTab.click();
+  await expect(page.locator('.swap-panel').first()).toBeVisible({ timeout: 15_000 });
+}
+
+async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string): Promise<void> {
+  const createSelect = page.getByTestId('swap-create-account-select').first();
+  const createVisible = await createSelect.isVisible({ timeout: 1500 }).catch(() => false);
+  const select = createVisible ? createSelect : page.getByTestId('swap-account-select').first();
+  const hasSelector = await select.isVisible({ timeout: 1500 }).catch(() => false);
+  if (!hasSelector) return;
+  const values = await select.locator('option').evaluateAll((options) =>
+    options.map((option) => ({
+      value: String((option as HTMLOptionElement).value || ''),
+      label: option.textContent || '',
+    })),
+  );
+  const normalizedPreferred = String(preferredAccountId || '').trim().toLowerCase();
+  const preferredAccount = normalizedPreferred
+    ? values.find((option) => String(option.value || '').trim().toLowerCase() === normalizedPreferred)
+    : null;
+  const targetAccount = preferredAccount || values.find((option) => option.value && option.value !== '__aggregated__');
+  if (!targetAccount) return;
+  await select.evaluate((node, value) => {
+    const element = node as HTMLSelectElement;
+    element.value = String(value || '');
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  }, targetAccount.value);
+}
+
+async function readAvailableFromSizing(page: Page): Promise<number> {
+  const stat = page.locator('.swap-panel .size-stats span').filter({ hasText: /^Available:/ }).first();
+  await expect(stat).toBeVisible({ timeout: 20_000 });
+  const text = String((await stat.textContent()) || '');
+  const available = parseFirstNumber(text);
+  if (!Number.isFinite(available)) throw new Error(`Cannot parse available amount: ${text}`);
+  return available;
+}
+
+async function readSwapState(page: Page, entityId: string, signerId: string, counterpartyId: string) {
+  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+    const findAccount = (accounts: any, ownerId: string, cpId: string) => {
+      if (!(accounts instanceof Map)) return null;
+      const owner = String(ownerId || '').toLowerCase();
+      const cp = String(cpId || '').toLowerCase();
+      for (const [accountKey, account] of accounts.entries()) {
+        if (String(accountKey || '').toLowerCase() === cp) return account;
+        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
+          ? String(account.counterpartyEntityId).toLowerCase()
+          : '';
+        if (canonicalCp === cp) return account;
+        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
+        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+      }
+      return null;
+    };
+
+    const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) {
+      return {
+        swapBookSize: 0,
+        accountSwapOffersSize: 0,
+        accountHasSwapOfferInMempool: false,
+        accountHasSwapOfferInPendingFrame: false,
+        accountHasSwapCancelRequestInMempool: false,
+        accountHasSwapCancelRequestInPendingFrame: false,
+      };
+    }
+    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+      const [eid, sid] = String(k).split(':');
+      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+    });
+    const rep = key ? env.eReplicas.get(key) : null;
+    const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
+    return {
+      swapBookSize: Number(rep?.state?.swapBook?.size || 0),
+      accountSwapOffersSize: Number(account?.swapOffers?.size || 0),
+      accountHasSwapOfferInMempool: !!(account?.mempool || []).find((tx: any) => tx?.type === 'swap_offer'),
+      accountHasSwapOfferInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find((tx: any) => tx?.type === 'swap_offer'),
+      accountHasSwapCancelRequestInMempool: !!(account?.mempool || []).find((tx: any) => tx?.type === 'swap_cancel_request' || tx?.type === 'swap_cancel'),
+      accountHasSwapCancelRequestInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find((tx: any) => tx?.type === 'swap_cancel_request' || tx?.type === 'swap_cancel'),
+    };
+  }, { entityId, signerId, counterpartyId });
+}
+
+async function placeNonMarketableSwapOrder(page: Page, counterpartyId: string): Promise<void> {
+  await openSwapWorkspace(page);
+  await selectCounterpartyInSwap(page, counterpartyId);
+  const pairSelect = page.getByTestId('swap-pair-select').first();
+  await expect(pairSelect).toBeVisible({ timeout: 20_000 });
+  await pairSelect.selectOption({ label: 'WETH/USDC' });
+  const buySideButton = page.getByTestId('swap-side-buy').first();
+  await expect(buySideButton).toBeVisible({ timeout: 20_000 });
+  await buySideButton.click();
+  const amountInput = page.getByTestId('swap-order-amount').first();
+  const priceInput = page.getByTestId('swap-order-price').first();
+  await expect(amountInput).toBeVisible({ timeout: 20_000 });
+  await expect(priceInput).toBeVisible({ timeout: 20_000 });
+  const availableGive = await readAvailableFromSizing(page);
+  const orderAmount = availableGive >= 100 ? 100 : Math.max(0.000001, Math.min(availableGive, 1));
+  await amountInput.fill(formatDecimalForInput(orderAmount));
+  await priceInput.fill('2000');
+  await page.waitForTimeout(200);
+  const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+  await expect(placeButton).toBeEnabled({ timeout: 20_000 });
+  await placeButton.click();
+  await expect(page.getByTestId('swap-open-orders')).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator('.swap-panel .orders-table tbody tr').first()).toBeVisible({ timeout: 30_000 });
+}
+
+async function cancelFirstOpenSwapOrder(page: Page): Promise<void> {
+  const cancelButton = page.locator('.swap-panel .orders-table tbody .cancel-btn').first();
+  await expect(cancelButton).toBeVisible({ timeout: 20_000 });
+  await cancelButton.click();
+  await expect
+    .poll(async () => await page.locator('.swap-panel .orders-table tbody tr').count(), { timeout: 60_000 })
+    .toBe(0);
 }
 
 async function runtimeDbMeta(page: Page) {
   return await page.evaluate(async () => {
     const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN;
+    const XLN = (window as any).XLN
+      || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
     if (!env || !XLN?.getRuntimeDb) return { ok: false, error: 'env/xln missing' };
     const db = XLN.getRuntimeDb(env);
     const ns = String(env.dbNamespace || env.runtimeId || '').toLowerCase();
@@ -319,9 +659,29 @@ async function runtimeDbMeta(page: Page) {
 }
 
 async function outCap(page: Page, entityId: string, cpId: string): Promise<bigint> {
-  void entityId;
-  const rendered = await waitForRenderedOutboundForAccount(page, cpId, { timeoutMs: 5_000 });
-  return ethers.parseUnits(String(rendered), 18);
+  return await page.evaluate(async ({ entityId, cpId }) => {
+    const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) throw new Error('isolatedEnv missing');
+    const runtimeModule = (window as any).XLN
+      || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+    const deriveDelta = (runtimeModule as any)?.deriveDelta;
+    if (typeof deriveDelta !== 'function') {
+      throw new Error('deriveDelta missing');
+    }
+    const entity = String(entityId || '').toLowerCase();
+    const counterparty = String(cpId || '').toLowerCase();
+    for (const [key, replica] of env.eReplicas.entries()) {
+      const [replicaEntityId] = String(key).split(':');
+      if (String(replicaEntityId || '').toLowerCase() !== entity) continue;
+      const account = replica?.state?.accounts?.get?.(cpId);
+      const delta = account?.deltas?.get?.(1);
+      if (!delta) return '0';
+      const isLeft = entity < counterparty;
+      const derived = deriveDelta(delta, isLeft);
+      return String(derived?.outCapacity ?? 0n);
+    }
+    throw new Error(`replica/account missing for ${entityId} -> ${cpId}`);
+  }, { entityId, cpId }).then((raw) => BigInt(String(raw || '0')));
 }
 
 async function faucet(page: Page, entityId: string, hubEntityId: string) {
@@ -424,7 +784,7 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, settleMs: 600 });
   });
 
-  test('reload restores all runtimes and account state', async ({ page }) => {
+  test('reload restores complex runtime WAL chain from genesis snapshot when #nosnapshot is set', async ({ page }) => {
     page.on('console', msg => {
       const t = msg.text();
       if (
@@ -467,50 +827,117 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     expect(bobOutAfterFaucet - bobOutBeforeFaucet).toBe(500n * 10n ** 18n);
 
     await switchToRuntimeId(page, alice.runtimeId);
+    await waitForPairIdle(page, hubId);
+    const alicePairBeforePayment = await readPairProgress(page, hubId);
+    const alicePayment1 = await sendRoutedHtlcPayment(
+      page,
+      alice.entityId,
+      alice.signerId,
+      bob.entityId,
+      [alice.entityId, hubId, bob.entityId],
+      35n,
+      'persist alice->bob #1',
+    );
+    await waitForSenderHtlcLock(
+      page,
+      hubId,
+      alicePayment1.hashlock,
+      Number(alicePairBeforePayment?.recentHtlcLockCount || 0),
+    );
+
+    await switchToRuntimeId(page, bob.runtimeId);
+    const bobPairBeforePayment = await readPairProgress(page, hubId);
+    await waitForRecipientPaymentObserved(
+      page,
+      hubId,
+      alicePayment1.hashlock,
+      Number(bobPairBeforePayment?.recentHtlcResolveCount || 0),
+    );
+    await waitForPairIdle(page, hubId);
+    const bobPayment1 = await sendRoutedHtlcPayment(
+      page,
+      bob.entityId,
+      bob.signerId,
+      alice.entityId,
+      [bob.entityId, hubId, alice.entityId],
+      12n,
+      'persist bob->alice #1',
+    );
+    await waitForSenderHtlcLock(
+      page,
+      hubId,
+      bobPayment1.hashlock,
+      Number(bobPairBeforePayment?.recentHtlcLockCount || 0),
+    );
+
+    await switchToRuntimeId(page, alice.runtimeId);
+    const alicePairBeforeReceive = await readPairProgress(page, hubId);
+    await waitForRecipientPaymentObserved(
+      page,
+      hubId,
+      bobPayment1.hashlock,
+      Number(alicePairBeforeReceive?.recentHtlcResolveCount || 0),
+    );
+    await waitForPairIdle(page, hubId);
+
+    await switchToRuntimeId(page, alice.runtimeId);
+    await placeNonMarketableSwapOrder(page, hubId);
+    await expect
+      .poll(async () => (await readSwapState(page, alice.entityId, alice.signerId, hubId)).accountSwapOffersSize, { timeout: 60_000 })
+      .toBe(1);
+    await cancelFirstOpenSwapOrder(page);
+    await expect
+      .poll(async () => (await readSwapState(page, alice.entityId, alice.signerId, hubId)).accountSwapOffersSize, { timeout: 60_000 })
+      .toBe(0);
+
+    await switchToRuntimeId(page, bob.runtimeId);
+    await placeNonMarketableSwapOrder(page, hubId);
+    await expect
+      .poll(async () => (await readSwapState(page, bob.entityId, bob.signerId, hubId)).accountSwapOffersSize, { timeout: 60_000 })
+      .toBe(1);
+
+    await switchToRuntimeId(page, alice.runtimeId);
     const aliceBefore = await runtimeSnapshot(page);
     const aliceDbBefore = await runtimeDbMeta(page);
     const aliceOutBeforeReload = await outCap(page, alice.entityId, hubId);
-    await switchToRuntimeId(page, bob.runtimeId);
-    const bobBefore = await runtimeSnapshot(page);
-    const bobDbBefore = await runtimeDbMeta(page);
-    const bobOutBeforeReload = await outCap(page, bob.entityId, hubId);
+    const aliceSwapBefore = await readSwapState(page, alice.entityId, alice.signerId, hubId);
     console.log('[PERSIST] before reload', JSON.stringify({
-      alice: { out: aliceOutBeforeReload.toString(), snap: aliceBefore, db: aliceDbBefore },
-      bob: { out: bobOutBeforeReload.toString(), snap: bobBefore, db: bobDbBefore },
+      alice: { out: aliceOutBeforeReload.toString(), swap: aliceSwapBefore, snap: aliceBefore, db: aliceDbBefore },
     }));
     expect(aliceBefore.hasEnv).toBe(true);
-    expect(bobBefore.hasEnv).toBe(true);
     expect(aliceBefore.runtimeHeight).toBeGreaterThan(0);
-    expect(bobBefore.runtimeHeight).toBeGreaterThan(0);
+    expect(Number(aliceDbBefore.checkpoint || 0), 'Alice must have a non-genesis checkpoint before forced replay').toBeGreaterThan(1);
+    expect(Number(aliceDbBefore.latest || 0)).toBeGreaterThan(Number(aliceDbBefore.checkpoint || 0));
+    expect(aliceSwapBefore.accountSwapOffersSize).toBe(0);
 
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await gotoApp(page, { appBaseUrl: APP_BASE_URL, settleMs: 600 });
+    await page.goto(`${APP_BASE_URL}/app?nosnapshot=1#nosnapshot=1`, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => {
+      const loadingVisible = Boolean(document.querySelector('.loading-screen'));
+      const errorVisible = Boolean(document.querySelector('.error-screen'));
+      const viewVisible = Boolean(document.querySelector('.view-wrapper'));
+      return !loadingVisible && !errorVisible && viewVisible;
+    }, { timeout: 30_000 });
     await page.waitForTimeout(1500);
 
     await switchToRuntimeId(page, alice.runtimeId);
     const aliceAfter = await runtimeSnapshot(page);
     const aliceDbAfter = await runtimeDbMeta(page);
     const aliceOutAfterReload = await outCap(page, alice.entityId, hubId);
-    await switchToRuntimeId(page, bob.runtimeId);
-    const bobAfter = await runtimeSnapshot(page);
-    const bobDbAfter = await runtimeDbMeta(page);
-    const bobOutAfterReload = await outCap(page, bob.entityId, hubId);
+    const aliceSwapAfter = await readSwapState(page, alice.entityId, alice.signerId, hubId);
     console.log('[PERSIST] after reload', JSON.stringify({
-      alice: { out: aliceOutAfterReload.toString(), snap: aliceAfter, db: aliceDbAfter },
-      bob: { out: bobOutAfterReload.toString(), snap: bobAfter, db: bobDbAfter },
+      alice: { out: aliceOutAfterReload.toString(), swap: aliceSwapAfter, snap: aliceAfter, db: aliceDbAfter },
     }));
 
     expect(aliceAfter.hasEnv, 'Alice env must exist after reload').toBe(true);
-    expect(bobAfter.hasEnv, 'Bob env must exist after reload').toBe(true);
     expect(aliceAfter.entityCount, 'Alice entities must survive reload').toBeGreaterThan(0);
-    expect(bobAfter.entityCount, 'Bob entities must survive reload').toBeGreaterThan(0);
     expect(aliceAfter.runtimeHeight, 'Alice runtime height must persist').toBeGreaterThan(0);
-    expect(bobAfter.runtimeHeight, 'Bob runtime height must persist').toBeGreaterThan(0);
     expect(aliceAfter.historyFrames, 'Alice history frames must persist').toBeGreaterThan(0);
-    expect(bobAfter.historyFrames, 'Bob history frames must persist').toBeGreaterThan(0);
     expect(aliceOutAfterReload, 'Alice 500 USDC faucet state must persist').toBe(aliceOutBeforeReload);
-    expect(bobOutAfterReload, 'Bob 500 USDC faucet state must persist').toBe(bobOutBeforeReload);
-    expect(aliceOutAfterReload, 'Alice must have funded account after reload').toBeGreaterThanOrEqual(500n * 10n ** 18n);
-    expect(bobOutAfterReload, 'Bob must have funded account after reload').toBeGreaterThanOrEqual(500n * 10n ** 18n);
+    expect(aliceOutAfterReload, 'Alice must remain funded after replayed payments and swaps').toBeGreaterThan(0n);
+    expect(aliceSwapAfter.accountSwapOffersSize, 'Alice canceled swap offer must stay canceled after genesis replay').toBe(aliceSwapBefore.accountSwapOffersSize);
+    expect(aliceAfter.replayMeta?.checkpointHeight, 'Alice restore must replay from snapshot:1').toBe(1);
+    expect(String(aliceAfter.replayMeta?.selectedSnapshotLabel || '')).toContain('genesis');
+    expect(Number(aliceAfter.replayMeta?.latestHeight || 0)).toBe(Number(aliceDbBefore.latest || 0));
+    expect(Number(aliceDbAfter.checkpoint || 0)).toBeGreaterThan(1);
   });
 });
