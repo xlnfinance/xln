@@ -463,7 +463,7 @@ const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
   if (!env.runtimeConfig) {
     env.runtimeConfig = {
       minFrameDelayMs: 0,
-      loopIntervalMs: 25,
+      loopIntervalMs: 0,
       snapshotIntervalFrames: DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
     };
   }
@@ -936,7 +936,7 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
   const state = ensureRuntimeState(env);
   if (state.loopActive) return state.stopLoop ?? (() => {});
 
-  const tickDelayMs = config?.tickDelayMs ?? ensureRuntimeConfig(env).loopIntervalMs ?? 25;
+  const tickDelayMs = config?.tickDelayMs ?? ensureRuntimeConfig(env).loopIntervalMs ?? 0;
   let running = true;
   state.loopActive = true;
 

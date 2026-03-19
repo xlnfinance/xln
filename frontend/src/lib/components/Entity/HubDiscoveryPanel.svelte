@@ -5,7 +5,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Env, Profile as GossipProfile } from '@xln/runtime/xln-api';
-  import { xlnFunctions, xlnEnvironment, getXLN, enqueueEntityInputs, resolveRelayUrls } from '../../stores/xlnStore';
+  import {
+    xlnFunctions,
+    xlnEnvironment,
+    getXLN,
+    enqueueEntityInputs,
+    resolveConfiguredApiBase,
+    resolveRelayUrls,
+  } from '../../stores/xlnStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import {
     normalizeEntityId,
@@ -52,6 +59,25 @@
 
   let hubs: Hub[] = [];
   const DISCOVERY_TIMEOUT_MS = 8000;
+
+  type PublicHubResponse = {
+    ok: boolean;
+    hubs?: Array<{
+      entityId: string;
+      runtimeId?: string | null;
+      name?: string;
+      bio?: string | null;
+      website?: string | null;
+      endpoints?: string[];
+      publicAccounts?: string[];
+      metadata?: {
+        isHub?: boolean;
+        routingFeePPM?: number;
+      };
+      lastUpdated?: number;
+      online?: boolean;
+    }>;
+  };
 
   const HUB_NAME_ORDER = ['H1', 'H2', 'H3'] as const;
 
@@ -120,6 +146,67 @@
     expandedHub = expandedHub === hubId ? null : hubId;
   }
 
+  async function fetchPublicHubs(timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<Hub[]> {
+    if (typeof window === 'undefined') return [];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const apiBase = resolveConfiguredApiBase(window.location.origin);
+      const url = new URL('/api/hubs', apiBase);
+      url.searchParams.set('ts', String(Date.now()));
+      const response = await fetch(url.toString(), {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (!response.ok) return [];
+      const payload = await response.json() as PublicHubResponse;
+      const serverHubs = Array.isArray(payload.hubs) ? payload.hubs : [];
+      return serverHubs
+        .filter((hub) => hub?.entityId && hub?.metadata?.isHub === true)
+        .map((hub) => {
+          const fullEntityId = hub.entityId.startsWith('0x') ? hub.entityId : `0x${hub.entityId}`;
+          const peerCount = Array.isArray(hub.publicAccounts) ? hub.publicAccounts.length : 0;
+          const feePpm = Number(hub.metadata?.routingFeePPM ?? 0);
+          return {
+            profile: {
+              entityId: hub.entityId,
+              name: hub.name || hub.entityId,
+              bio: hub.bio || '',
+              website: hub.website || undefined,
+              endpoints: hub.endpoints || [],
+              publicAccounts: hub.publicAccounts || [],
+              metadata: {
+                isHub: true,
+                routingFeePPM: feePpm,
+              },
+              runtimeId: hub.runtimeId || '',
+              lastUpdated: Number(hub.lastUpdated || 0),
+            } as GossipProfile,
+            entityId: hub.entityId,
+            name: hub.name || hub.entityId,
+            metadata: {
+              description: hub.bio || 'Payment hub',
+              ...(hub.website ? { website: hub.website } : {}),
+              fee: feePpm,
+              peerCount,
+            },
+            runtimeId: hub.runtimeId || '',
+            endpoints: hub.endpoints || [],
+            verified: true,
+            creditScore: computeCreditScore(hub.entityId, feePpm, peerCount),
+            isConnected: false,
+            lastSeen: Number(hub.lastUpdated || 0),
+            raw: formatRawProfile(hub),
+            identicon: generateIdenticon(fullEntityId),
+          } satisfies Hub;
+        });
+    } catch {
+      return [];
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   function isP2PConnected(currentEnv: Env | null): boolean {
     try {
       return Boolean(currentEnv?.runtimeState?.p2p?.isConnected?.());
@@ -152,24 +239,27 @@
     error = '';
 
     try {
+      const discoveredByEntity = new Map<string, Hub>();
+      for (const hub of await fetchPublicHubs()) {
+        discoveredByEntity.set(normalizeEntityId(hub.entityId), hub);
+      }
+      const currentEnv = env;
+      if (!currentEnv) throw new Error('Environment not ready');
+      const relayReady = await ensureRuntimeRelay(currentEnv, relaySelection)
+        .then(() => true)
+        .catch(() => false);
       if (refreshGossip) {
         const xln = await getXLN();
-        if (env && xln.refreshGossip) {
+        if (relayReady && xln.refreshGossip) {
           await Promise.race([
-            Promise.resolve(xln.refreshGossip(env)),
+            Promise.resolve(xln.refreshGossip(currentEnv)),
             new Promise((_, reject) => setTimeout(() => reject(new Error('gossip refresh timeout')), DISCOVERY_TIMEOUT_MS)),
           ]).catch(() => {
             // best-effort refresh only
           });
+          await new Promise(resolve => setTimeout(resolve, 50));
         }
-        await new Promise(resolve => setTimeout(resolve, 50));
       }
-
-      const currentEnv = env;
-      if (!currentEnv) throw new Error('Environment not ready');
-      await ensureRuntimeRelay(currentEnv, relaySelection);
-
-      const discovered: Hub[] = [];
 
       const gossipProfiles: GossipProfile[] = typeof currentEnv.gossip?.getHubs === 'function'
         ? currentEnv.gossip.getHubs()
@@ -185,7 +275,7 @@
         const fullEntityId = profile.entityId.startsWith('0x') ? profile.entityId : `0x${profile.entityId}`;
         const peerCount = profile.publicAccounts.length;
 
-        discovered.push({
+        discoveredByEntity.set(normalizeEntityId(profile.entityId), {
           profile,
           entityId: profile.entityId,
           name: profile.name,
@@ -206,7 +296,7 @@
         });
       }
 
-      hubs = discovered;
+      hubs = Array.from(discoveredByEntity.values());
       if (hubs.length === 0) {
         error = 'No public hubs discovered yet. Try Refresh; if it persists, check relay connectivity.';
       }
@@ -323,24 +413,6 @@
     if (env) {
       hasDiscoveredOnce = true;
       (async () => {
-        if (!hasP2PClient(env)) {
-          loading = false;
-          error = 'Create or restore a wallet runtime first. Hub gossip is attached to the active runtime.';
-          setTimeout(() => {
-            hasDiscoveredOnce = false;
-          }, 1500);
-          return;
-        }
-        const ready = await waitForP2PReady(env);
-        if (!ready) {
-          loading = false;
-          error = 'Relay not connected yet. Wait a moment or press Refresh.';
-          setTimeout(() => {
-            hasDiscoveredOnce = false;
-          }, 1500);
-          return;
-        }
-        // One-shot gossip refresh on first load once network is connected.
         await discoverHubs(true);
       })();
     }
@@ -351,23 +423,6 @@
   $: if (env && hubs.length === 0 && !loading && !hasDiscoveredOnce) {
     hasDiscoveredOnce = true;
     (async () => {
-      if (!hasP2PClient(env)) {
-        loading = false;
-        error = 'Create or restore a wallet runtime first. Hub gossip is attached to the active runtime.';
-        setTimeout(() => {
-          hasDiscoveredOnce = false;
-        }, 1500);
-        return;
-      }
-      const ready = await waitForP2PReady(env);
-      if (!ready) {
-        loading = false;
-        error = 'Relay not connected yet. Wait a moment or press Refresh.';
-        setTimeout(() => {
-          hasDiscoveredOnce = false;
-        }, 1500);
-        return;
-      }
       await discoverHubs(true);
     })();
   }
