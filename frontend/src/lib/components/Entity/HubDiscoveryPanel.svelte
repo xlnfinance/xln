@@ -141,7 +141,7 @@
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       if (isP2PConnected(currentEnv)) return true;
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
     return false;
   }
@@ -309,7 +309,7 @@
       const relaysNow = Array.isArray(p2p.relayUrls) ? p2p.relayUrls : [];
       const connected = typeof p2p.isConnected === 'function' ? p2p.isConnected() : false;
       if (relaysNow.length === 1 && relaysNow[0] === desired && connected) return;
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
     const relaysNow = Array.isArray(p2p.relayUrls) ? p2p.relayUrls.join(',') : 'none';
     throw new Error(`Relay switch timeout (desired=${desired}, actual=${relaysNow})`);
