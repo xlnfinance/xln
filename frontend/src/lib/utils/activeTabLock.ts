@@ -2,12 +2,40 @@ import { writable } from 'svelte/store';
 
 const ACTIVE_TAB_LOCK_KEY = 'xln-active-tab-lock';
 const ACTIVE_TAB_CHANNEL_NAME = 'xln-active-tab-lock';
+const TAKEOVER_APPROVAL_TIMEOUT_MS = 3000;
 
 type ActiveTabLockRecord = {
   tabId: string;
   timestamp: number;
   pathname: string;
 };
+
+type ActiveTabLockChannelMessage =
+  | {
+    type: 'takeover-request';
+    tabId: string;
+    targetOwnerTabId: string;
+    timestamp: number;
+    pathname: string;
+  }
+  | {
+    type: 'takeover-approved';
+    tabId: string;
+    requesterTabId: string;
+    timestamp: number;
+  }
+  | {
+    type: 'claim';
+    tabId: string;
+    previousOwnerTabId: string | null;
+    timestamp: number;
+    pathname: string;
+  }
+  | {
+    type: 'released';
+    tabId: string;
+    timestamp: number;
+  };
 
 export type ActiveTabLockState = {
   tabId: string;
@@ -27,6 +55,7 @@ let releaseCallback: (() => void) | null = null;
 let installed = false;
 let onLoseLockHandler: (() => void | Promise<void>) | null = null;
 let lockLost = false;
+const approvalWaiters = new Map<string, Set<() => void>>();
 
 function getOrCreateTabId(): string {
   if (currentTabId) return currentTabId;
@@ -64,7 +93,24 @@ function readLockRecord(): ActiveTabLockRecord | null {
   }
 }
 
-function writeLockRecord(tabId: string): ActiveTabLockRecord {
+function resolveApprovalWaiters(tabId: string): void {
+  const waiters = approvalWaiters.get(tabId);
+  if (!waiters) return;
+  approvalWaiters.delete(tabId);
+  for (const resolve of waiters) {
+    resolve();
+  }
+}
+
+function postChannelMessage(message: ActiveTabLockChannelMessage): void {
+  try {
+    activeChannel?.postMessage(message);
+  } catch {
+    // ignore channel errors
+  }
+}
+
+function writeLockRecord(tabId: string, previousOwnerTabId: string | null): ActiveTabLockRecord {
   const record: ActiveTabLockRecord = {
     tabId,
     timestamp: Date.now(),
@@ -75,11 +121,13 @@ function writeLockRecord(tabId: string): ActiveTabLockRecord {
   } catch {
     // ignore storage errors
   }
-  try {
-    activeChannel?.postMessage(record);
-  } catch {
-    // ignore channel errors
-  }
+  postChannelMessage({
+    type: 'claim',
+    tabId,
+    previousOwnerTabId,
+    timestamp: record.timestamp,
+    pathname: record.pathname,
+  });
   activeTabLock.set({
     tabId,
     ownerTabId: tabId,
@@ -98,7 +146,16 @@ async function handleExternalOwner(ownerTabId: string): Promise<void> {
   activeTabLock.set({ tabId, ownerTabId, isOwner: false });
   if (lockLost) return;
   lockLost = true;
-  await onLoseLockHandler?.();
+  try {
+    await onLoseLockHandler?.();
+  } finally {
+    postChannelMessage({
+      type: 'takeover-approved',
+      tabId,
+      requesterTabId: ownerTabId,
+      timestamp: Date.now(),
+    });
+  }
 }
 
 function maybeReleaseLock(): void {
@@ -112,10 +169,38 @@ function maybeReleaseLock(): void {
   }
 }
 
-export function initializeActiveTabLock(onLoseLock: () => void | Promise<void>): () => void {
+function waitForTakeoverApproval(tabId: string, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      const waiters = approvalWaiters.get(tabId);
+      if (waiters) {
+        waiters.delete(onApproved);
+        if (waiters.size === 0) {
+          approvalWaiters.delete(tabId);
+        }
+      }
+      clearTimeout(timeoutId);
+      resolve();
+    };
+    const onApproved = () => {
+      finish();
+    };
+    const timeoutId = window.setTimeout(finish, timeoutMs);
+    const waiters = approvalWaiters.get(tabId) ?? new Set<() => void>();
+    waiters.add(onApproved);
+    approvalWaiters.set(tabId, waiters);
+  });
+}
+
+export async function initializeActiveTabLock(onLoseLock: () => void | Promise<void>): Promise<() => void> {
   if (typeof window === 'undefined') return () => {};
 
   const tabId = getOrCreateTabId();
+  const previousOwner = readLockRecord();
+  const previousOwnerTabId = previousOwner?.tabId && previousOwner.tabId !== tabId ? previousOwner.tabId : null;
   onLoseLockHandler = onLoseLock;
   lockLost = false;
 
@@ -124,10 +209,32 @@ export function initializeActiveTabLock(onLoseLock: () => void | Promise<void>):
     try {
       if (typeof BroadcastChannel !== 'undefined') {
         activeChannel = new BroadcastChannel(ACTIVE_TAB_CHANNEL_NAME);
-        activeChannel.onmessage = (event: MessageEvent<ActiveTabLockRecord>) => {
-          const ownerTabId = typeof event.data?.tabId === 'string' ? event.data.tabId : '';
-          if (ownerTabId) {
-            void handleExternalOwner(ownerTabId);
+        activeChannel.onmessage = (event: MessageEvent<ActiveTabLockChannelMessage>) => {
+          const message = event.data;
+          if (!message || typeof message !== 'object') return;
+          if (
+            message.type === 'takeover-request' &&
+            typeof message.tabId === 'string' &&
+            typeof message.targetOwnerTabId === 'string' &&
+            message.targetOwnerTabId === tabId
+          ) {
+            void handleExternalOwner(message.tabId);
+            return;
+          }
+          if (
+            message.type === 'takeover-approved' &&
+            typeof message.requesterTabId === 'string' &&
+            message.requesterTabId === tabId
+          ) {
+            resolveApprovalWaiters(tabId);
+            return;
+          }
+          if (message.type === 'claim') {
+            const ownerTabId = typeof message.tabId === 'string' ? message.tabId : '';
+            if (ownerTabId) {
+              void handleExternalOwner(ownerTabId);
+            }
+            return;
           }
         };
       }
@@ -165,7 +272,18 @@ export function initializeActiveTabLock(onLoseLock: () => void | Promise<void>):
     };
   }
 
-  writeLockRecord(tabId);
+  if (previousOwnerTabId) {
+    postChannelMessage({
+      type: 'takeover-request',
+      tabId,
+      targetOwnerTabId: previousOwnerTabId,
+      timestamp: Date.now(),
+      pathname: typeof window !== 'undefined' ? window.location.pathname : '/app',
+    });
+    await waitForTakeoverApproval(tabId, TAKEOVER_APPROVAL_TIMEOUT_MS);
+  }
+
+  writeLockRecord(tabId, previousOwnerTabId);
 
   return () => {
     releaseCallback?.();

@@ -70,6 +70,7 @@ export type StartCustodySupportOptions = {
   daemonRuntimeSeed?: string;
   signerLabel: string;
   profileName: string;
+  jurisdictionId: string;
 };
 
 export type StartedCustodySupport = {
@@ -432,6 +433,7 @@ export const startCustodySupport = async (
       CUSTODY_WALLET_URL: options.walletUrl,
       CUSTODY_ENTITY_ID: identity.entityId,
       CUSTODY_SIGNER_ID: identity.signerId,
+      CUSTODY_JURISDICTION_ID: options.jurisdictionId,
       CUSTODY_DB_PATH: `${options.dbRoot}/custody.sqlite`,
     },
   );

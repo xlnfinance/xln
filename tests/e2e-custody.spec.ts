@@ -779,6 +779,7 @@ test.describe('E2E Custody Flow', () => {
         seed: 'xln-e2e-custody-seed',
         signerLabel: 'custody-e2e-1',
         profileName: 'Custody',
+        jurisdictionId: 'arrakis',
       }));
       daemonChild = custodySupport.daemonChild;
       custodyChild = custodySupport.custodyChild;

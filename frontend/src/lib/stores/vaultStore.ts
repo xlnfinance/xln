@@ -8,6 +8,7 @@ import { toasts } from './toastStore';
 import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
 import { writeOnboardingComplete } from '$lib/utils/onboardingState';
 import { clearAllPersistentClientState, resetEverything } from '$lib/utils/resetEverything';
+import { tabOperations } from './tabStore';
 
 // Types
 export interface Signer {
@@ -705,6 +706,22 @@ function applyRuntimeLogPreference(env: Env): void {
 async function resetRuntimePersistence(runtime: Runtime, xln: XLNModule): Promise<void> {
   const runtimeIdLower = normalizeRuntimeId(runtime.id);
   if (!runtimeIdLower) throw new Error('Invalid runtime id for reset');
+  const liveRuntimeEntry = get(runtimes).get(runtimeIdLower);
+  if (liveRuntimeEntry?.env) {
+    await stopRuntimeEnv(liveRuntimeEntry.env);
+  }
+  runtimes.update((currentRuntimes) => {
+    const runtimeEntry = currentRuntimes.get(runtimeIdLower);
+    if (!runtimeEntry) return currentRuntimes;
+    runtimeEntry.env = null;
+    runtimeEntry.status = 'disconnected';
+    runtimeEntry.lastSynced = Date.now();
+    return currentRuntimes;
+  });
+  if (normalizeRuntimeId(get(activeRuntimeId) || '') === runtimeIdLower) {
+    setXlnEnvironment(null);
+    tabOperations.clearAllTabs();
+  }
   const resetEnv = xln.createEmptyEnv(runtime.seed);
   applyRuntimeLogPreference(resetEnv);
   resetEnv.runtimeId = runtimeIdLower;
@@ -1014,10 +1031,10 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
             type: 'importReplica',
             entityId,
             signerId: signerAddress,
-            data: {
+              data: {
               isProposer: true,
               config: entityConfig,
-              profileName: runtime.name,
+              profileName: runtime.label,
             }
           }],
           entityInputs: []

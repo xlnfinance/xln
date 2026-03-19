@@ -303,28 +303,6 @@ function stopP2PPoll() {
 
 export async function suspendClientActivity(): Promise<void> {
   stopP2PPoll();
-  try {
-    const env = get(xlnEnvironment);
-    if (!env) return;
-    for (const jReplica of env.jReplicas?.values?.() || []) {
-      try {
-        jReplica.jadapter?.stopWatching?.();
-      } catch (watchError) {
-        console.warn(`[xlnStore] Failed to stop J-watcher for ${jReplica.name}:`, watchError);
-      }
-    }
-    const xln = await getXLN();
-    if (typeof xln.stopP2P === 'function') {
-      xln.stopP2P(env);
-    }
-    env.runtimeState?.stopLoop?.();
-    if (env.runtimeState) {
-      env.runtimeState.loopActive = false;
-      env.runtimeState.stopLoop = null;
-    }
-  } catch (error) {
-    console.warn('[xlnStore] Failed to suspend client activity:', error);
-  }
 }
 
 // Direct stores for immediate updates (no derived timing races)

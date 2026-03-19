@@ -75,6 +75,7 @@ const main = async (): Promise<void> => {
     seed: SEED,
     signerLabel: SIGNER_LABEL,
     profileName: PROFILE_NAME,
+    jurisdictionId: 'arrakis',
   });
 
   if (VERBOSE) {

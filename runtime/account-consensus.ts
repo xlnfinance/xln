@@ -935,6 +935,7 @@ export async function handleAccountInput(
     return { success: false, error: `Invalid account input height: ${String(input.height)}`, events: [] };
   }
   const replayMode = (env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true;
+  const quiet = env.quietRuntimeLogs === true;
   console.log(
     `📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`,
   );
@@ -1001,8 +1002,8 @@ export async function handleAccountInput(
 
   // Handle pending frame confirmation
   if (accountMachine.pendingFrame && ackHeight === accountMachine.pendingFrame.height && input.prevHanko) {
-    console.log(`✅ Received confirmation for pending frame ${ackHeight}`);
-    console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}`);
+    if (!quiet) console.log(`✅ Received confirmation for pending frame ${ackHeight}`);
+    if (HEAVY_LOGS) console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}`);
 
     const frameHash = accountMachine.pendingFrame.stateHash;
 
