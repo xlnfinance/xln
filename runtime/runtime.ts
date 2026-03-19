@@ -304,7 +304,7 @@ const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
 const dbRootPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
 
 const DEFAULT_DB_NAMESPACE = 'default';
-const PERSISTENCE_SCHEMA_VERSION = 3;
+const PERSISTENCE_SCHEMA_VERSION = 4;
 
 const normalizeDbNamespace = (value: string): string => value.trim().toLowerCase();
 type RuntimeDbKind = 'core' | 'infra';
