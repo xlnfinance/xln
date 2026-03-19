@@ -547,6 +547,44 @@ const getFaucetHubProfiles = (env: Env): Profile[] => {
   return selected;
 };
 
+const getMergedKnownGossipProfiles = (env: Env | null): Map<string, Profile> => {
+  const merged = new Map<string, Profile>();
+  for (const profile of getAllGossipProfiles(relayStore)) {
+    const entityId = String(profile?.entityId || '').trim().toLowerCase();
+    if (!entityId) continue;
+    merged.set(entityId, profile);
+  }
+  for (const profile of env?.gossip?.getProfiles?.() || []) {
+    const entityId = String(profile?.entityId || '').trim().toLowerCase();
+    if (!entityId) continue;
+    merged.set(entityId, profile);
+  }
+  return merged;
+};
+
+const getKnownProfileBundle = (env: Env | null, entityId: string): { profile: Profile | null; peers: Profile[] } => {
+  const target = String(entityId || '').trim().toLowerCase();
+  if (!target) return { profile: null, peers: [] };
+  const merged = getMergedKnownGossipProfiles(env);
+  const profile = merged.get(target) || null;
+  if (!profile) return { profile: null, peers: [] };
+  const peerIds = new Set<string>();
+  for (const peerId of Array.isArray(profile.publicAccounts) ? profile.publicAccounts : []) {
+    const normalized = String(peerId || '').trim().toLowerCase();
+    if (normalized) peerIds.add(normalized);
+  }
+  for (const account of Array.isArray(profile.accounts) ? profile.accounts : []) {
+    const normalized = String(account?.counterpartyId || '').trim().toLowerCase();
+    if (normalized) peerIds.add(normalized);
+  }
+  const peers: Profile[] = [];
+  for (const peerId of peerIds) {
+    const peer = merged.get(peerId);
+    if (peer) peers.push(peer);
+  }
+  return { profile, peers };
+};
+
 const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
 };
@@ -4007,6 +4045,41 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         count: hubs.length,
         serverTime: Date.now(),
         hubs,
+      }),
+      { headers },
+    );
+  }
+
+  if (pathname === '/api/gossip/profile') {
+    const targetEntityId = String(url.searchParams.get('entityId') || '').trim().toLowerCase();
+    if (!targetEntityId) {
+      return new Response(
+        safeStringify({ ok: false, error: 'entityId is required' }),
+        { status: 400, headers },
+      );
+    }
+
+    try {
+      await env?.runtimeState?.p2p?.syncProfiles?.();
+    } catch {
+      // best effort only
+    }
+    try {
+      if (env) {
+        await ensureGossipProfiles(env, [targetEntityId]);
+      }
+    } catch {
+      // best effort only
+    }
+
+    const bundle = getKnownProfileBundle(env, targetEntityId);
+    return new Response(
+      safeStringify({
+        ok: true,
+        entityId: targetEntityId,
+        found: !!bundle.profile,
+        profile: bundle.profile,
+        peers: bundle.peers,
       }),
       { headers },
     );

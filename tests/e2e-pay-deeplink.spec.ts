@@ -1,56 +1,10 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext } from '@playwright/test';
 import { APP_BASE_URL, ensureE2EBaseline, waitForNamedHubs } from './utils/e2e-baseline';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
 
 const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 240_000 : 150_000;
-
-async function ensureRuntimeProfileDownloaded(page: Page, entityId: string): Promise<void> {
-  const ok = await page.evaluate(async (targetEntityId: string) => {
-    const maybeWindow = window as typeof window & {
-      isolatedEnv?: {
-        gossip?: { getProfiles?: () => Array<{ entityId?: string }> };
-        runtimeState?: {
-          p2p?: {
-            ensureProfiles?: (entityIds: string[]) => Promise<boolean>;
-            refreshGossip?: () => Promise<void> | void;
-          };
-        };
-      };
-    };
-    const env = maybeWindow.isolatedEnv;
-    const p2p = env?.runtimeState?.p2p;
-    const target = String(targetEntityId || '').toLowerCase();
-    const hasProfile = (): boolean =>
-      (env?.gossip?.getProfiles?.() ?? []).some(profile => String(profile.entityId || '').toLowerCase() === target);
-
-    if (hasProfile()) return true;
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 15_000) {
-      if (typeof p2p?.ensureProfiles === 'function') {
-        try {
-          const found = await p2p.ensureProfiles([target]);
-          if (found && hasProfile()) return true;
-        } catch {
-          // best effort
-        }
-      }
-      if (typeof p2p?.refreshGossip === 'function') {
-        try {
-          await p2p.refreshGossip();
-        } catch {
-          // best effort
-        }
-      }
-      if (hasProfile()) return true;
-      await new Promise((resolve) => setTimeout(resolve, 300));
-    }
-    return hasProfile();
-  }, entityId);
-
-  expect(ok).toBe(true);
-}
 
 async function faucetOffchain(page: Page, entityId: string, hubId: string): Promise<void> {
   const result = await page.evaluate(async ({ entityId, hubId }) => {
@@ -96,7 +50,6 @@ test.describe('Canonical /app#pay deep link', () => {
       await gotoApp(bobPage);
       const bob = await createRuntimeIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));
       await connectRuntimeToHub(bobPage, bob, hubId);
-      await ensureRuntimeProfileDownloaded(aliceSetupPage, bob.entityId);
       await aliceSetupPage.close();
 
       const payPage = await aliceContext.newPage();
