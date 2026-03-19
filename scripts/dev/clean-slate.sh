@@ -5,8 +5,14 @@ echo "🧹 XLN clean-slate: stopping stale processes and wiping local state..."
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT_DIR"
+source "$ROOT_DIR/scripts/lib/port-layout.sh"
 CANONICAL_J_PATH="$ROOT_DIR/jurisdictions/jurisdictions.json"
 DEV_J_PATH="$ROOT_DIR/db/dev/jurisdictions.json"
+RPC_PORT="$(xln_rpc_port)"
+API_PORT="$(xln_api_port)"
+WEB_PORT="$(xln_web_port)"
+CUSTODY_PORT="$(xln_custody_port)"
+CUSTODY_DAEMON_PORT="$(xln_custody_daemon_port)"
 
 kill_by_port() {
   local port="$1"
@@ -49,21 +55,21 @@ pkill -9 -f "vite dev" 2>/dev/null || true
 pkill -9 -f "node .*vite" 2>/dev/null || true
 pkill -9 -f "concurrently --names ANVIL,API,CUSTODY,RUNTIME,VITE" 2>/dev/null || true
 
-kill_by_port 8545
-kill_by_port 8080
-kill_by_port 8082
-kill_by_port 8087
-kill_by_port 8088
+kill_by_port "$RPC_PORT"
+kill_by_port "$WEB_PORT"
+kill_by_port "$API_PORT"
+kill_by_port "$CUSTODY_PORT"
+kill_by_port "$CUSTODY_DAEMON_PORT"
 kill_by_port 8090
 kill_by_port 9000
 kill_by_port 5173
 kill_by_port 8787
 
-wait_for_port_clear 8545
-wait_for_port_clear 8080
-wait_for_port_clear 8082
-wait_for_port_clear 8087
-wait_for_port_clear 8088
+wait_for_port_clear "$RPC_PORT"
+wait_for_port_clear "$WEB_PORT"
+wait_for_port_clear "$API_PORT"
+wait_for_port_clear "$CUSTODY_PORT"
+wait_for_port_clear "$CUSTODY_DAEMON_PORT"
 
 echo "🧽 Removing lock files and local runtime state..."
 find db-tmp -name LOCK -type f -delete 2>/dev/null || true

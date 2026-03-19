@@ -9,9 +9,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$REPO_ROOT"
 source "$REPO_ROOT/scripts/lib/start-common.sh"
+source "$REPO_ROOT/scripts/lib/port-layout.sh"
+
+RPC_PORT="${ANVIL_PORT:-$(xln_rpc_port)}"
+API_PORT="${XLN_SERVER_PORT:-$(xln_web_port)}"
 
 export USE_ANVIL=true
-export ANVIL_RPC=http://localhost:8545
+export ANVIL_RPC="http://localhost:${RPC_PORT}"
 export PUBLIC_RPC=${PUBLIC_RPC:-https://xln.finance/rpc}
 export PUBLIC_RELAY_URL=${PUBLIC_RELAY_URL:-wss://xln.finance/relay}
 export RELAY_URL=${RELAY_URL:-$PUBLIC_RELAY_URL}
@@ -26,6 +30,6 @@ export PATH="${HOME}/.bun/bin:$PATH"
 mkdir -p "$XLN_DB_PATH"
 xln_ensure_jurisdictions_path "$XLN_JURISDICTIONS_PATH"
 
-xln_kill_by_port 8080 start-server
+xln_kill_by_port "$API_PORT" start-server
 
-exec "${HOME}/.bun/bin/bun" runtime/server.ts --port 8080
+exec "${HOME}/.bun/bin/bun" runtime/server.ts --port "$API_PORT"

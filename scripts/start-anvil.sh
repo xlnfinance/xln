@@ -6,8 +6,10 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$REPO_ROOT/scripts/lib/port-layout.sh"
 ANVIL_STATE="${ANVIL_STATE:-$REPO_ROOT/data/anvil-state.json}"
 ANVIL_LOG="${ANVIL_LOG:-$REPO_ROOT/logs/anvil.log}"
+ANVIL_PORT="${ANVIL_PORT:-$(xln_rpc_port)}"
 
 kill_by_port() {
     local port="$1"
@@ -31,12 +33,12 @@ if [ "$1" = "--reset" ]; then
     rm -f "$ANVIL_STATE"
 fi
 
-kill_by_port 8545
+kill_by_port "$ANVIL_PORT"
 
 # Start anvil
 if [ -f "$ANVIL_STATE" ]; then
     echo "📂 Loading state from $ANVIL_STATE"
-    anvil --host 0.0.0.0 --port 8545 \
+    anvil --host 0.0.0.0 --port "$ANVIL_PORT" \
           --chain-id 31337 \
           --block-gas-limit 60000000 \
           --code-size-limit 65536 \
@@ -45,7 +47,7 @@ if [ -f "$ANVIL_STATE" ]; then
           2>&1 | tee -a "$ANVIL_LOG"
 else
     echo "🆕 Starting fresh anvil (no state file)"
-    anvil --host 0.0.0.0 --port 8545 \
+    anvil --host 0.0.0.0 --port "$ANVIL_PORT" \
           --chain-id 31337 \
           --block-gas-limit 60000000 \
           --code-size-limit 65536 \
