@@ -769,7 +769,6 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
           `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: ${message}; reset failed: ${resetError instanceof Error ? resetError.message : String(resetError)}`
         );
       }
-      env = null;
     } else {
       console.warn('[VaultStore] ⚠️ Failed to load env from DB, falling back to fresh import:', error);
       env = null;
