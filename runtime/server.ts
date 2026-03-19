@@ -3972,16 +3972,20 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       mergedHubProfiles.set(entityId, profile);
     }
 
+    const advertisedRelayUrl = resolveAdvertisedRelayUrl(activeServerOptions.port);
     const hubs = Array.from(mergedHubProfiles.values())
       .map((profile: Profile) => {
         const runtimeId = normalizeRuntimeKey(profile.runtimeId);
+        const resolvedEndpoints = advertisedRelayUrl
+          ? [advertisedRelayUrl]
+          : profile.endpoints || [];
         return {
           entityId: profile.entityId,
           runtimeId: runtimeId || profile.runtimeId || null,
           name: profile.name,
           bio: profile.bio || null,
           website: profile.website || null,
-          endpoints: profile.endpoints || [],
+          endpoints: resolvedEndpoints,
           publicAccounts: profile.publicAccounts || [],
           metadata: profile.metadata,
           lastUpdated: profile.lastUpdated,
