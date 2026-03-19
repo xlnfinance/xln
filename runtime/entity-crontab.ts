@@ -1164,7 +1164,10 @@ async function hubRebalanceHandler(
       // Trigger threshold is c2rWithdrawSoftLimit, withdrawal amount is full freeOutCollateral.
       const hubDerived = deriveDelta(delta, hubIsLeft);
       const hubOwnedCollateral = hubDerived.outCollateral;
-      const outHold = hubDerived.outTotalHold || 0n;
+      const outHold = hubDerived.outTotalHold;
+      if (outHold === undefined) {
+        throw new Error(`deriveDelta missing outTotalHold for token ${String(tokenId)} on ${counterpartyId}`);
+      }
       const freeOutCollateral = hubOwnedCollateral > outHold ? hubOwnedCollateral - outHold : 0n;
       if (freeOutCollateral <= effectiveC2RWithdrawSoftLimit) continue;
 

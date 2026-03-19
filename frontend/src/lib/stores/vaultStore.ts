@@ -774,6 +774,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
         await xln.clearDB(resetEnv);
         resetBrokenPersistence = true;
         toasts.warning('Network was reset', 8000);
+        return buildOrRestoreRuntimeEnv(runtime, xln, false);
       } catch (resetError) {
         throw new Error(
           `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: ${message}; reset failed: ${resetError instanceof Error ? resetError.message : String(resetError)}`

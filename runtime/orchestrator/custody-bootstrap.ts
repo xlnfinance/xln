@@ -29,6 +29,16 @@ type DebugEntitiesResponse = {
   entities?: DebugEntitySummary[];
 };
 
+type DebugTokenCapacitySummary = {
+  inCapacity?: string;
+  outCapacity?: string;
+};
+
+type DebugAccountSummary = {
+  counterpartyId?: string;
+  tokenCapacities?: Record<string, DebugTokenCapacitySummary>;
+};
+
 export type ManagedIdentity = {
   entityId: string;
   signerId: string;
@@ -68,6 +78,8 @@ export type StartedCustodySupport = {
   identity: ManagedIdentity;
   hubIds: string[];
 };
+
+const DEFAULT_CUSTODY_TOKEN_IDS = [1, 2, 3] as const;
 
 const tailLines = (lines: string[]): string => lines.slice(-LOG_TAIL_LINES).join('\n');
 
@@ -237,6 +249,94 @@ export const fetchDebugEntities = async (apiBaseUrl: string): Promise<DebugEntit
   return Array.isArray(body.entities) ? body.entities : [];
 };
 
+const toLowerId = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  return trimmed ? trimmed.toLowerCase() : '';
+};
+
+const hasPositiveCapacity = (value: unknown): boolean => {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  try {
+    return BigInt(trimmed) > 0n;
+  } catch {
+    return false;
+  }
+};
+
+const hasAccountCapacityForToken = (
+  entry: DebugEntitySummary,
+  counterpartyId: string,
+  tokenId: number,
+): boolean => {
+  if (!Array.isArray(entry.accounts)) return false;
+  const counterpartyNorm = counterpartyId.toLowerCase();
+  const tokenKey = String(tokenId);
+  for (const rawAccount of entry.accounts) {
+    const account = rawAccount as DebugAccountSummary;
+    if (toLowerId(account.counterpartyId) !== counterpartyNorm) continue;
+    const capacities = account.tokenCapacities;
+    if (!capacities || typeof capacities !== 'object') continue;
+    const capacity = capacities[tokenKey];
+    if (!capacity || typeof capacity !== 'object') continue;
+    if (hasPositiveCapacity(capacity.inCapacity) || hasPositiveCapacity(capacity.outCapacity)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const isEntityRouteableAcrossHubs = (
+  entry: DebugEntitySummary,
+  hubEntityIds: string[],
+  tokenIds: readonly number[],
+): boolean => {
+  const publicAccounts = Array.isArray(entry.publicAccounts)
+    ? entry.publicAccounts.map(value => toLowerId(value)).filter(Boolean)
+    : [];
+  for (const hubEntityId of hubEntityIds) {
+    const hubNorm = hubEntityId.toLowerCase();
+    if (!publicAccounts.includes(hubNorm)) return false;
+    let tokenReady = false;
+    for (const tokenId of tokenIds) {
+      if (hasAccountCapacityForToken(entry, hubNorm, tokenId)) {
+        tokenReady = true;
+        break;
+      }
+    }
+    if (!tokenReady) return false;
+  }
+  return true;
+};
+
+export const waitForCustodyRouteableState = async (
+  apiBaseUrl: string,
+  entityId: string,
+  hubEntityIds: string[],
+  tokenIds: readonly number[] = DEFAULT_CUSTODY_TOKEN_IDS,
+  timeoutMs = 60_000,
+): Promise<DebugEntitySummary> => {
+  const normalizedEntityId = entityId.toLowerCase();
+  const normalizedHubIds = hubEntityIds.map(id => id.toLowerCase()).filter(Boolean);
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const entities = await fetchDebugEntities(apiBaseUrl);
+    const custodyEntry = entities.find(entry => toLowerId(entry.entityId) === normalizedEntityId);
+    if (custodyEntry && isEntityRouteableAcrossHubs(custodyEntry, normalizedHubIds, tokenIds)) {
+      return custodyEntry;
+    }
+
+    await sleep(500);
+  }
+
+  throw new Error(
+    `CUSTODY_ROUTEABLE_STATE_NOT_READY: entity=${entityId} hubs=${normalizedHubIds.join(',')} tokenIds=${tokenIds.join(',')}`,
+  );
+};
+
 export const discoverHubIds = async (
   apiBaseUrl: string,
   minCount = 3,
@@ -294,9 +394,10 @@ export const startCustodySupport = async (
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
     },
   );
-  await waitForHttpReady(`http://127.0.0.1:${options.daemonPort}/api/health`, daemonChild, DEFAULT_CHILD_READY_TIMEOUT_MS, isDaemonHealthReady);
-
-  const hubIds = await discoverHubIds(options.apiBaseUrl);
+  const [, hubIds] = await Promise.all([
+    waitForHttpReady(`http://127.0.0.1:${options.daemonPort}/api/health`, daemonChild, DEFAULT_CHILD_READY_TIMEOUT_MS, isDaemonHealthReady),
+    discoverHubIds(options.apiBaseUrl),
+  ]);
   const controlResult = await runDaemonControl(
     [
       'setup-custody',
@@ -318,11 +419,7 @@ export const startCustodySupport = async (
   }
 
   const identity = controlResult.result;
-  await waitForDebugEntity(
-    options.apiBaseUrl,
-    identity.entityId,
-    entry => entry.online === true && Math.max(entry.accounts?.length ?? 0, entry.publicAccounts?.length ?? 0) > 0,
-  );
+  await waitForCustodyRouteableState(options.apiBaseUrl, identity.entityId, hubIds);
 
   const custodyChild = spawnBunChild(
     'custody-service',

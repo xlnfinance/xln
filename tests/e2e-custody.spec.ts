@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DaemonRpcClient, type DaemonFrameLog } from '../custody/daemon-client';
+import { deriveDelta } from '../runtime/account-utils';
 import { startCustodySupport, stopManagedChild, type ManagedChild } from '../runtime/orchestrator/custody-bootstrap';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, resetProdServer } from './utils/e2e-baseline';
 import {
@@ -75,6 +76,39 @@ type WalletRuntimeView = typeof window & {
   isolatedEnv?: {
     runtimeId?: string;
   };
+};
+
+type SerializedDeltaSnapshot = {
+  tokenId: string;
+  collateral: string;
+  ondelta: string;
+  offdelta: string;
+  leftCreditLimit: string;
+  rightCreditLimit: string;
+  leftAllowance: string;
+  rightAllowance: string;
+  leftHold: string;
+  rightHold: string;
+};
+
+type OffchainCapacitySnapshot = {
+  runtimeId: string;
+  reason: string;
+  delta: SerializedDeltaSnapshot | null;
+  iAmLeft: boolean;
+  replicas: Array<{
+    replicaKey: string;
+    entityId: string;
+    signerId: string;
+    accountCount: number;
+    accountMatches: Array<{
+      accountKey: string;
+      matchesCounterparty: boolean;
+      leftEntity: string;
+      rightEntity: string;
+      deltaKeys: string[];
+    }>;
+  }>;
 };
 
 const getFreePort = async (): Promise<number> => {
@@ -232,7 +266,7 @@ async function faucetOffchain(
           body: JSON.stringify(payload),
         });
         const body = await response.json().catch(() => ({} as Record<string, unknown>));
-        return { ok: response.ok, status: response.status, data: body };
+        return { ok: response.status === 200, status: response.status, data: body };
       }, {
         userEntityId: entityId,
         userRuntimeId: runtimeId,
@@ -255,6 +289,7 @@ async function faucetOffchain(
     const transient =
       result.status === 202 ||
       result.status === 409 ||
+      code === 'FAUCET_TOKEN_SURFACE_NOT_READY' ||
       code === 'FAUCET_CHANNEL_NOT_READY' ||
       status === 'channel_opening' ||
       status === 'channel_not_ready';
@@ -346,6 +381,218 @@ async function waitForDaemonReceiptEvent(
     `Timed out waiting for daemon receipt ${options.eventName} on ${targetEntityId.slice(0, 12)} ` +
     `(recent=${recent.join(',') || 'none'})`,
   );
+}
+
+async function getOffchainOutboundCapacity(
+  page: Page,
+  ownerEntityId: string,
+  counterpartyEntityId: string,
+  tokenId: number,
+): Promise<bigint> {
+  const snapshot = await page.evaluate(
+    ({ ownerEntityId, counterpartyEntityId, tokenId }) => {
+      const view = window as typeof window & { isolatedEnv?: any };
+      const env = view.isolatedEnv;
+      const normalize = (raw: unknown): string => String(raw || '').trim().toLowerCase();
+      const accountMatchesCounterparty = (account: unknown, ownerNorm: string, counterpartyNorm: string): boolean => {
+        const accountRecord = account as {
+          counterpartyEntityId?: unknown;
+          leftEntity?: unknown;
+          rightEntity?: unknown;
+        };
+        const directCounterparty = normalize(accountRecord?.counterpartyEntityId);
+        if (directCounterparty === counterpartyNorm) return true;
+        const left = normalize(accountRecord?.leftEntity);
+        const right = normalize(accountRecord?.rightEntity);
+        if (!left || !right) return false;
+        return (left === ownerNorm && right === counterpartyNorm) || (right === ownerNorm && left === counterpartyNorm);
+      };
+      const serializeAmount = (value: unknown): string => String(typeof value === 'bigint' ? value : 0n);
+      const serializeDelta = (delta: unknown): SerializedDeltaSnapshot | null => {
+        if (!delta || typeof delta !== 'object') return null;
+        const record = delta as Record<string, unknown>;
+        return {
+          tokenId: serializeAmount(record.tokenId),
+          collateral: serializeAmount(record.collateral),
+          ondelta: serializeAmount(record.ondelta),
+          offdelta: serializeAmount(record.offdelta),
+          leftCreditLimit: serializeAmount(record.leftCreditLimit),
+          rightCreditLimit: serializeAmount(record.rightCreditLimit),
+          leftAllowance: serializeAmount(record.leftAllowance),
+          rightAllowance: serializeAmount(record.rightAllowance),
+          leftHold: serializeAmount(record.leftHold),
+          rightHold: serializeAmount(record.rightHold),
+        };
+      };
+      if (!env?.eReplicas) {
+        return {
+          runtimeId: String(env?.runtimeId || ''),
+          reason: 'isolatedEnv missing',
+          delta: null,
+          iAmLeft: false,
+          replicas: [],
+        } satisfies OffchainCapacitySnapshot;
+      }
+      const ownerNorm = String(ownerEntityId || '').trim().toLowerCase();
+      const counterpartyNorm = String(counterpartyEntityId || '').trim().toLowerCase();
+      const runtimeSignerNorm = String(env.runtimeId || '').trim().toLowerCase();
+      const debugReplicas: OffchainCapacitySnapshot['replicas'] = [];
+      for (const [replicaKey, replica] of env.eReplicas.entries()) {
+        const replicaParts = String(replicaKey || '').split(':');
+        const replicaEntityId = String(replicaParts[0] || '').trim().toLowerCase();
+        const replicaSignerId = String(replicaParts[1] || '').trim().toLowerCase();
+        const replicaDebug: OffchainCapacitySnapshot['replicas'][number] = {
+          replicaKey: String(replicaKey || ''),
+          entityId: replicaEntityId,
+          signerId: replicaSignerId,
+          accountCount: Number(replica?.state?.accounts?.size || 0),
+          accountMatches: [],
+        };
+        debugReplicas.push(replicaDebug);
+        if (replicaEntityId !== ownerNorm) continue;
+        if (runtimeSignerNorm && replicaSignerId !== runtimeSignerNorm) continue;
+        for (const [accountEntityId, account] of replica.state.accounts.entries()) {
+          const accountKeyNorm = String(accountEntityId || '').trim().toLowerCase();
+          const matchesCounterparty =
+            accountKeyNorm === counterpartyNorm || accountMatchesCounterparty(account, ownerNorm, counterpartyNorm);
+          const accountDebug: OffchainCapacitySnapshot['replicas'][number]['accountMatches'][number] = {
+            accountKey: String(accountEntityId || ''),
+            matchesCounterparty,
+            leftEntity: String(account?.leftEntity || ''),
+            rightEntity: String(account?.rightEntity || ''),
+            deltaKeys: account?.deltas instanceof Map ? Array.from(account.deltas.keys()).map((value: unknown) => String(value)) : [],
+          };
+          replicaDebug.accountMatches.push(accountDebug);
+          if (!matchesCounterparty) {
+            continue;
+          }
+          const delta = account?.deltas?.get?.(tokenId);
+          if (!delta) {
+            return {
+              runtimeId: String(env.runtimeId || ''),
+              reason: 'matching account missing token delta',
+              delta: null,
+              iAmLeft: false,
+              replicas: debugReplicas,
+            } satisfies OffchainCapacitySnapshot;
+          }
+          return {
+            runtimeId: String(env.runtimeId || ''),
+            reason: 'ok',
+            delta: serializeDelta(delta),
+            iAmLeft: String(account.leftEntity || '').trim().toLowerCase() === ownerNorm,
+            replicas: debugReplicas,
+          } satisfies OffchainCapacitySnapshot;
+        }
+      }
+      return {
+        runtimeId: String(env.runtimeId || ''),
+        reason: 'matching replica/account not found',
+        delta: null,
+        iAmLeft: false,
+        replicas: debugReplicas,
+      } satisfies OffchainCapacitySnapshot;
+    },
+    { ownerEntityId, counterpartyEntityId, tokenId },
+  );
+  if (!snapshot?.delta) return 0n;
+  const derived = deriveDelta({
+    tokenId: Number(snapshot.delta.tokenId),
+    collateral: BigInt(snapshot.delta.collateral),
+    ondelta: BigInt(snapshot.delta.ondelta),
+    offdelta: BigInt(snapshot.delta.offdelta),
+    leftCreditLimit: BigInt(snapshot.delta.leftCreditLimit),
+    rightCreditLimit: BigInt(snapshot.delta.rightCreditLimit),
+    leftAllowance: BigInt(snapshot.delta.leftAllowance),
+    rightAllowance: BigInt(snapshot.delta.rightAllowance),
+    leftHold: BigInt(snapshot.delta.leftHold),
+    rightHold: BigInt(snapshot.delta.rightHold),
+  }, snapshot.iAmLeft);
+  return derived.outCapacity;
+}
+
+async function waitForOffchainOutboundCapacity(
+  page: Page,
+  ownerEntityId: string,
+  counterpartyEntityId: string,
+  tokenId: number,
+  minimum: bigint,
+  timeoutMs = 30_000,
+): Promise<void> {
+  let lastDebug = '';
+  await expect
+    .poll(
+      async () => {
+        const value = await getOffchainOutboundCapacity(page, ownerEntityId, counterpartyEntityId, tokenId);
+        const debug = await page.evaluate(
+          ({ ownerEntityId, counterpartyEntityId, tokenId }) => {
+            const view = window as typeof window & { isolatedEnv?: any };
+            const env = view.isolatedEnv;
+            const normalize = (raw: unknown): string => String(raw || '').trim().toLowerCase();
+            const accountMatchesCounterparty = (account: unknown, ownerNorm: string, counterpartyNorm: string): boolean => {
+              const accountRecord = account as {
+                counterpartyEntityId?: unknown;
+                leftEntity?: unknown;
+                rightEntity?: unknown;
+              };
+              const directCounterparty = normalize(accountRecord?.counterpartyEntityId);
+              if (directCounterparty === counterpartyNorm) return true;
+              const left = normalize(accountRecord?.leftEntity);
+              const right = normalize(accountRecord?.rightEntity);
+              if (!left || !right) return false;
+              return (left === ownerNorm && right === counterpartyNorm) || (right === ownerNorm && left === counterpartyNorm);
+            };
+            if (!env?.eReplicas) {
+              return { runtimeId: String(env?.runtimeId || ''), reason: 'isolatedEnv missing', replicas: [] };
+            }
+            const ownerNorm = String(ownerEntityId || '').trim().toLowerCase();
+            const counterpartyNorm = String(counterpartyEntityId || '').trim().toLowerCase();
+            const runtimeSignerNorm = String(env.runtimeId || '').trim().toLowerCase();
+            const replicas: OffchainCapacitySnapshot['replicas'] = [];
+            for (const [replicaKey, replica] of env.eReplicas.entries()) {
+              const replicaParts = String(replicaKey || '').split(':');
+              const replicaEntityId = String(replicaParts[0] || '').trim().toLowerCase();
+              const replicaSignerId = String(replicaParts[1] || '').trim().toLowerCase();
+              const replicaDebug: OffchainCapacitySnapshot['replicas'][number] = {
+                replicaKey: String(replicaKey || ''),
+                entityId: replicaEntityId,
+                signerId: replicaSignerId,
+                accountCount: Number(replica?.state?.accounts?.size || 0),
+                accountMatches: [],
+              };
+              replicas.push(replicaDebug);
+              if (replicaEntityId !== ownerNorm) continue;
+              if (runtimeSignerNorm && replicaSignerId !== runtimeSignerNorm) continue;
+              for (const [accountEntityId, account] of replica.state.accounts.entries()) {
+                replicaDebug.accountMatches.push({
+                  accountKey: String(accountEntityId || ''),
+                  matchesCounterparty:
+                    String(accountEntityId || '').trim().toLowerCase() === counterpartyNorm
+                    || accountMatchesCounterparty(account, ownerNorm, counterpartyNorm),
+                  leftEntity: String(account?.leftEntity || ''),
+                  rightEntity: String(account?.rightEntity || ''),
+                  deltaKeys: account?.deltas instanceof Map ? Array.from(account.deltas.keys()).map((item: unknown) => String(item)) : [],
+                });
+              }
+            }
+            return { runtimeId: String(env.runtimeId || ''), reason: 'debug', tokenId, replicas };
+          },
+          { ownerEntityId, counterpartyEntityId, tokenId },
+        );
+        lastDebug = JSON.stringify(debug);
+        return value.toString();
+      },
+      {
+        timeout: timeoutMs,
+        intervals: [500, 750, 1000],
+        message: `outbound capacity token=${tokenId} must reach ${minimum.toString()}`,
+      },
+    )
+    .toBe(minimum.toString())
+    .catch((error) => {
+      const details = lastDebug.length > 0 ? ` debug=${lastDebug}` : '';
+      throw new Error(`${String(error)}${details}`);
+    });
 }
 
 async function getDaemonReceiptCursor(
@@ -563,6 +810,10 @@ test.describe('E2E Custody Flow', () => {
           100,
           { timeoutMs: 20_000 },
         ),
+      );
+      await timedStep(
+        'custody.wallet.wait_usdt_out_after_faucet',
+        () => waitForOffchainOutboundCapacity(walletPage, alice.entityId, fundingHubId, 3, 30n * TOKEN_SCALE, 20_000),
       );
       await timedStep(
         'custody.wallet.ensure_custody_profile',
