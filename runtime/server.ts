@@ -871,10 +871,7 @@ const getBootstrapReserveHealth = async (env: Env | null): Promise<BootstrapRese
     const role: 'hub' | 'market-maker' =
       marketMakerEntityId && entityId === marketMakerEntityId.toLowerCase() ? 'market-maker' : 'hub';
     const tokens = bootstrapTokens.map<BootstrapReserveTokenHealth>((token) => {
-      const current = replica?.state?.reserves?.get(token.tokenId);
-      if (current === undefined) {
-        throw new Error(`bootstrap reserve missing for token ${String(token.tokenId)} on ${entityId}`);
-      }
+      const current = replica?.state?.reserves?.get(token.tokenId) ?? 0n;
       const expectedMin = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(token.decimals);
       return {
         tokenId: token.tokenId,

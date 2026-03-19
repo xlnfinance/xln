@@ -3782,10 +3782,11 @@ function rebuildEntityLockBookFromAccounts(env: Env): void {
       if (!(account?.locks instanceof Map)) continue;
       const iAmLeft = replica.entityId === account.leftEntity;
       for (const [lockId, lock] of account.locks.entries()) {
-        const direction =
+      const direction =
           (lock.senderIsLeft && iAmLeft) || (!lock.senderIsLeft && !iAmLeft)
             ? 'outgoing'
             : 'incoming';
+        if (direction !== 'outgoing') continue;
         rebuiltLockBook.set(lockId, {
           lockId,
           accountId: String(accountId),
