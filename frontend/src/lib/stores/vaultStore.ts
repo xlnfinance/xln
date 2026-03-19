@@ -737,24 +737,13 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     if (normalizeEntityId(signer.entityId) === canonicalEntityId) continue;
     signer.entityId = canonicalEntityId;
     signerMetadataChanged = true;
-    resetBrokenPersistence = true;
     console.error(
-      `[VaultStore] Canonical signer/entity mismatch detected for ${signer.address.slice(0, 10)}; forcing lazy entity ${canonicalEntityId.slice(0, 12)} and clearing persisted runtime`,
+      `[VaultStore] Canonical signer/entity mismatch detected for ${signer.address.slice(0, 10)}; forcing lazy entity ${canonicalEntityId.slice(0, 12)} without deleting persisted runtime`,
     );
   }
 
-  if (resetBrokenPersistence) {
-    const resetEnv = xln.createEmptyEnv(runtimeSeed);
-    applyRuntimeLogPreference(resetEnv);
-    resetEnv.runtimeId = runtimeIdLower;
-    resetEnv.dbNamespace = runtimeIdLower;
-    await xln.clearDB(resetEnv);
-    toasts.warning('Network was reset', 8000);
-    env = null;
-  }
-
   try {
-    if (!resetBrokenPersistence && xln.loadEnvFromDB) {
+    if (xln.loadEnvFromDB) {
       console.log('[VaultStore] Loading env from DB namespace:', runtimeIdLower);
       env = await xln.loadEnvFromDB(runtimeIdLower, runtimeSeed);
     }
