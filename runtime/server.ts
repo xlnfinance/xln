@@ -315,8 +315,8 @@ const HUB_RESERVE_ASSERT_TIMEOUT_MS = 30_000;
 const HUB_MESH_ASSERT_TIMEOUT_MS = 20_000;
 const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
 const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** 18n;
-const BOOTSTRAP_POLL_MS = Math.max(10, Number(process.env.BOOTSTRAP_POLL_MS || '40'));
-const RUNTIME_SETTLE_POLL_MS = Math.max(10, Number(process.env.RUNTIME_SETTLE_POLL_MS || '25'));
+const BOOTSTRAP_POLL_MS = Math.max(0, Number(process.env.BOOTSTRAP_POLL_MS || '0'));
+const RUNTIME_SETTLE_POLL_MS = Math.max(0, Number(process.env.RUNTIME_SETTLE_POLL_MS || '0'));
 const INCLUDE_MARKET_MAKER_BY_DEFAULT = !/^(0|false)$/i.test(process.env.XLN_INCLUDE_MARKET_MAKER ?? '1');
 const SKIP_SERVER_BOOTSTRAP = /^(1|true)$/i.test(process.env.XLN_SKIP_SERVER_BOOTSTRAP ?? '');
 const EARLY_HTTP_BIND = /^(1|true)$/i.test(process.env.XLN_EARLY_HTTP_BIND ?? '');
@@ -3947,6 +3947,56 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           profileCount: relayProfiles.length,
           profiles: relayProfileSummaries,
         },
+      }),
+      { headers },
+    );
+  }
+
+  if (pathname === '/api/hubs') {
+    const relayHubProfiles = getAllGossipProfiles(relayStore).filter((profile: Profile) =>
+      profile.metadata.isHub === true,
+    );
+    const mergedHubProfiles = new Map<string, Profile>();
+    for (const profile of relayHubProfiles) {
+      mergedHubProfiles.set(String(profile.entityId || '').toLowerCase(), profile);
+    }
+    for (const profile of env?.gossip?.getHubs?.() || []) {
+      const entityId = String(profile.entityId || '').toLowerCase();
+      if (!entityId || mergedHubProfiles.has(entityId)) continue;
+      mergedHubProfiles.set(entityId, profile);
+    }
+
+    const hubs = Array.from(mergedHubProfiles.values())
+      .map((profile: Profile) => {
+        const runtimeId = normalizeRuntimeKey(profile.runtimeId);
+        return {
+          entityId: profile.entityId,
+          runtimeId: runtimeId || profile.runtimeId || null,
+          name: profile.name,
+          bio: profile.bio || null,
+          website: profile.website || null,
+          endpoints: profile.endpoints || [],
+          publicAccounts: profile.publicAccounts || [],
+          metadata: profile.metadata,
+          lastUpdated: profile.lastUpdated,
+          online: runtimeId ? relayStore.clients.has(runtimeId) : false,
+        };
+      })
+      .sort((left, right) => {
+        const leftName = String(left.name || '');
+        const rightName = String(right.name || '');
+        if (leftName && rightName && leftName !== rightName) {
+          return leftName.localeCompare(rightName);
+        }
+        return Number(right.lastUpdated || 0) - Number(left.lastUpdated || 0);
+      });
+
+    return new Response(
+      safeStringify({
+        ok: true,
+        count: hubs.length,
+        serverTime: Date.now(),
+        hubs,
       }),
       { headers },
     );
