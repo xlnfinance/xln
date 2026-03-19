@@ -32,6 +32,44 @@ import {
 
 const ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY = Symbol.for('xln.runtime.env.replay.skippedAccountInputs');
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const replayHankoFingerprint = (value: unknown): string => {
+  const normalized = typeof value === 'string' ? value : '';
+  if (!normalized) return 'none';
+  if (normalized.length <= 36) return normalized;
+  return `${normalized.slice(0, 18)}:${normalized.slice(-18)}`;
+};
+const buildSkippedReplayAckKey = (
+  runtimeFrameHeight: number,
+  entityId: string,
+  counterpartyId: string,
+  inputHeight: number,
+  prevHanko: unknown,
+): string =>
+  [
+    runtimeFrameHeight,
+    normalizeEntityRef(entityId),
+    normalizeEntityRef(counterpartyId),
+    inputHeight,
+    replayHankoFingerprint(prevHanko),
+    'ack',
+  ].join(':');
+const buildSkippedReplayNewFrameKey = (
+  runtimeFrameHeight: number,
+  entityId: string,
+  counterpartyId: string,
+  frameHeight: number,
+  stateHash: unknown,
+  prevFrameHash: unknown,
+): string =>
+  [
+    runtimeFrameHeight,
+    normalizeEntityRef(entityId),
+    normalizeEntityRef(counterpartyId),
+    frameHeight,
+    typeof stateHash === 'string' ? stateHash : 'none',
+    typeof prevFrameHash === 'string' ? prevFrameHash : 'none',
+    'newframe',
+  ].join(':');
 const getJurisdictionId = (state: EntityState, env: Env): string => {
   return String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 };
@@ -1056,27 +1094,24 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         console.warn(`[REPLAY][ACCOUNT-HANDLER] failed frame consensus ${JSON.stringify(replayFailureDebug)}`);
         if (ackAlreadyApplied) {
           (env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] = skippedReplayAccountInputs;
-          skippedReplayAccountInputs.add(
-            [
-              replayRuntimeFrameHeight,
-              normalizeEntityRef(state.entityId),
-              normalizeEntityRef(counterpartyId),
-              inputHeight,
-              'ack',
-            ].join(':'),
-          );
+          skippedReplayAccountInputs.add(buildSkippedReplayAckKey(
+            replayRuntimeFrameHeight,
+            state.entityId,
+            counterpartyId,
+            inputHeight,
+            input.prevHanko,
+          ));
           console.warn(`[REPLAY] Skipping duplicate ACK already reflected in current frame: ${result.error}`);
         } else if (newFrameAlreadyApplied) {
           (env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] = skippedReplayAccountInputs;
-          skippedReplayAccountInputs.add(
-            [
-              replayRuntimeFrameHeight,
-              normalizeEntityRef(state.entityId),
-              normalizeEntityRef(counterpartyId),
-              newFrameHeight,
-              'newframe',
-            ].join(':'),
-          );
+          skippedReplayAccountInputs.add(buildSkippedReplayNewFrameKey(
+            replayRuntimeFrameHeight,
+            state.entityId,
+            counterpartyId,
+            newFrameHeight,
+            input.newAccountFrame?.stateHash,
+            input.newAccountFrame?.prevFrameHash,
+          ));
           console.warn(`[REPLAY] Skipping duplicate frame already reflected in current/pending state: ${result.error}`);
         } else {
           throw new Error(`REPLAY_FRAME_CONSENSUS_FAILED: ${result.error ?? 'unknown'}`);

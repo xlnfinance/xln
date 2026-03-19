@@ -727,7 +727,7 @@ async function resetRuntimePersistence(runtime: Runtime, xln: XLNModule): Promis
   resetEnv.runtimeId = runtimeIdLower;
   resetEnv.dbNamespace = runtimeIdLower;
   await xln.clearDB(resetEnv);
-  toasts.warning('Network was reset', 8000);
+  toasts.warning('This runtime storage was reset', 8000);
 }
 
 function ensureRuntimeLoopRunning(env: Env, xln: XLNModule, reason: string): void {
@@ -773,13 +773,8 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
         throw error;
       }
       try {
-        const resetEnv = xln.createEmptyEnv(runtimeSeed);
-        applyRuntimeLogPreference(resetEnv);
-        resetEnv.runtimeId = runtimeIdLower;
-        resetEnv.dbNamespace = runtimeIdLower;
-        await xln.clearDB(resetEnv);
+        await resetRuntimePersistence(runtime, xln);
         resetBrokenPersistence = true;
-        toasts.warning('Network was reset', 8000);
         return buildOrRestoreRuntimeEnv(runtime, xln, false);
       } catch (resetError) {
         throw new Error(
