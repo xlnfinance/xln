@@ -657,7 +657,11 @@ export async function tryOpenInfraDb(env: Env): Promise<boolean> {
 
 const INFRA_GOSSIP_INDEX_KEY = 'gossip:index';
 const makeInfraGossipProfileKey = (entityId: string): string => `gossip:profile:${String(entityId).toLowerCase()}`;
-const isProductionRuntime = typeof process !== 'undefined' && process?.env?.NODE_ENV === 'production';
+const runtimeProcessEnv =
+  typeof globalThis === 'object'
+    ? (globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env
+    : undefined;
+const isProductionRuntime = runtimeProcessEnv?.NODE_ENV === 'production';
 
 const readInfraStringArray = async (db: Level<Buffer, Buffer>, key: string): Promise<string[]> => {
   try {
