@@ -1323,7 +1323,7 @@
   // Fetch external tokens (ERC20 balances for signer) - works for both BrowserVM and RPC modes
   async function fetchExternalTokens() {
     if (externalFetchInFlight) return externalFetchInFlight;
-    const waitMs = Math.max(0, 1000 - (Date.now() - externalFetchStartedAt));
+    const waitMs = Math.max(0, 100 - (Date.now() - externalFetchStartedAt));
     externalFetchInFlight = (async () => {
       if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
       externalFetchStartedAt = Date.now();
@@ -1805,8 +1805,7 @@
       console.log('[EntityPanel] External faucet success:', result);
       toasts.success(`Received ${amount} ${tokenSymbol} in wallet!`);
 
-      // Refresh external tokens
-      setTimeout(() => fetchExternalTokens(), 1000);
+      void fetchExternalTokens();
     } catch (err) {
       console.error('[EntityPanel] External faucet failed:', err);
       toasts.error(`External faucet failed: ${(err as Error).message}`);

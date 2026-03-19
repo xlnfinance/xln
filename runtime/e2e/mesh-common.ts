@@ -202,9 +202,12 @@ export const hasPairMutualCredit = (
   tokenId: number,
   amount: bigint,
 ): boolean => {
-  const delta = getAccountDelta(env, leftEntityId, rightEntityId, tokenId);
-  if (!delta) return false;
-  return (delta.leftCreditLimit ?? 0n) >= amount && (delta.rightCreditLimit ?? 0n) >= amount;
+  const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
+  const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
+  if (!leftAccount || !rightAccount) return false;
+  const grantedByLeft = getCreditGrantedByEntity(leftAccount, leftEntityId, tokenId);
+  const grantedByRight = getCreditGrantedByEntity(rightAccount, rightEntityId, tokenId);
+  return grantedByLeft >= amount && grantedByRight >= amount;
 };
 
 export const hasPairMutualCredits = (

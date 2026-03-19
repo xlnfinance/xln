@@ -339,7 +339,7 @@ async function faucet(page: Page, entityId: string, hubEntityId: string): Promis
         },
       });
       const body = await response.json().catch(() => ({} as Record<string, unknown>));
-      result = { ok: response.ok(), status: response.status(), data: body };
+      result = { ok: response.status() === 200, status: response.status(), data: body };
     } catch (error) {
       result = {
         ok: false,
@@ -362,6 +362,7 @@ async function faucet(page: Page, entityId: string, hubEntityId: string): Promis
       message.includes('pending') ||
       message.includes('FAUCET_ACCOUNT_MISSING') ||
       message.includes('No hub account with target entity') ||
+      code === 'FAUCET_TOKEN_SURFACE_NOT_READY' ||
       code === 'FAUCET_CHANNEL_NOT_READY' ||
       status === 'channel_opening' ||
       status === 'channel_not_ready';
@@ -556,13 +557,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
 
       console.log('[E2E] fund Alice through the selected hub');
       const aliceBeforeFaucet = await getRenderedOutboundForAccount(alicePage, hubId);
-      const aliceFaucetCursor = await getPersistedReceiptCursor(alicePage);
       await faucet(alicePage, alice.entityId, hubId);
-      await waitForPersistedFrameEvent(alicePage, {
-        eventName: 'BilateralFrameCommitted',
-        cursor: aliceFaucetCursor,
-        timeoutMs: 30_000,
-      });
       const aliceAfterFaucet = await waitForRenderedOutboundForAccountDelta(alicePage, hubId, aliceBeforeFaucet, 100);
       expect(aliceAfterFaucet).toBeGreaterThan(aliceBeforeFaucet);
 

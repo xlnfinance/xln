@@ -51,6 +51,7 @@
  *   createdAt: number,
  *   updatedAt: number,
  *   finalizedAt?: number | null,
+ *   startedAtMs?: number | null,
  *   error?: string | null,
  * }} ActivityItem
  *
@@ -88,6 +89,28 @@ let lastDashboardFingerprint = '';
 let copyInvoiceResetTimer = null;
 let resettingSession = false;
 const WALLET_WINDOW_NAME = 'xln-wallet';
+const ACTIVE_RELOAD_MS = 1000;
+const IDLE_RELOAD_MS = 5000;
+const MAX_RELOAD_BACKOFF_MS = 5000;
+
+const isHexChar = (char) => {
+  if (typeof char !== 'string' || char.length !== 1) return false;
+  const code = char.charCodeAt(0);
+  const isDigit = code >= 48 && code <= 57;
+  const isLowerHex = code >= 97 && code <= 102;
+  const isUpperHex = code >= 65 && code <= 70;
+  return isDigit || isLowerHex || isUpperHex;
+};
+
+const isEntityId = (value) => {
+  const raw = String(value || '').trim();
+  if (raw.length !== 66) return false;
+  if (raw[0] !== '0' || raw[1] !== 'x') return false;
+  for (let index = 2; index < raw.length; index += 1) {
+    if (!isHexChar(raw[index])) return false;
+  }
+  return true;
+};
 
 const updateDepositHintUi = () => {
   const nodes = app.querySelectorAll('[data-deposit-hint]');
@@ -161,18 +184,8 @@ const createInvoiceId = () => {
   return `inv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 };
 
-const appendPaymentTimestamp = (description, startedAtMs = Date.now()) => {
-  const clean = String(description || '')
-    .replace(/\btsms:\d{10,}\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const marker = `tsms:${Math.max(0, Math.trunc(startedAtMs))}`;
-  return clean ? `${clean} ${marker}` : marker;
-};
-
 const buildWalletPayHref = (sourceState, tokenId, amount, invoiceId) => {
   if (!sourceState?.custody?.walletUrl) return '';
-  const startedAtMs = Date.now();
   const base = new URL(sourceState.custody.walletUrl);
   const url = new URL('/app', base.origin);
   const params = new URLSearchParams();
@@ -180,10 +193,9 @@ const buildWalletPayHref = (sourceState, tokenId, amount, invoiceId) => {
   params.set('token', String(tokenId));
   params.set('amt', String(amount).trim());
   params.set('u', sourceState.session.userId);
-  params.set('desc', appendPaymentTimestamp(`Custody invoice:${invoiceId}`, startedAtMs));
+  params.set('desc', `Custody invoice:${invoiceId}`);
   params.set('locked', '1');
   params.set('mode', 'htlc');
-  params.set('ts', String(startedAtMs));
   if (sourceState.custody.jurisdictionId) {
     params.set('jId', sourceState.custody.jurisdictionId);
   }
@@ -192,16 +204,14 @@ const buildWalletPayHref = (sourceState, tokenId, amount, invoiceId) => {
 };
 
 const buildInvoiceUri = (sourceState, tokenId, amount, invoiceId) => {
-  const startedAtMs = Date.now();
   const params = new URLSearchParams();
   params.set('id', sourceState.custody.entityId);
   params.set('token', String(tokenId));
   params.set('amt', String(amount).trim());
   params.set('u', sourceState.session.userId);
-  params.set('desc', appendPaymentTimestamp(`Custody invoice:${invoiceId}`, startedAtMs));
+  params.set('desc', `Custody invoice:${invoiceId}`);
   params.set('locked', '1');
   params.set('mode', 'htlc');
-  params.set('ts', String(startedAtMs));
   if (sourceState.custody.jurisdictionId) {
     params.set('jId', sourceState.custody.jurisdictionId);
   }
@@ -214,7 +224,7 @@ const parsePaymentIntent = (value) => {
 
   const parseParams = (params) => {
     const entityId = String(params.get('id') || '').trim().toLowerCase();
-    if (!/^0x[0-9a-f]{64}$/i.test(entityId)) return null;
+    if (!isEntityId(entityId)) return null;
     const tokenIdValue = Number(params.get('token') || '1');
     const amount = String(params.get('amt') || '').trim();
     return {
@@ -236,7 +246,7 @@ const parsePaymentIntent = (value) => {
     // fall through to raw entity id
   }
 
-  if (/^0x[0-9a-f]{64}$/i.test(raw)) {
+  if (isEntityId(raw)) {
     return {
       entityId: raw.toLowerCase(),
       tokenId: selectedTokenId,
@@ -247,17 +257,10 @@ const parsePaymentIntent = (value) => {
   return null;
 };
 
-const extractStartedAtMs = (description) => {
-  const match = String(description || '').match(/(?:^|\s)tsms:(\d{10,})(?=$|\s)/i);
-  if (!match) return null;
-  const parsed = Number(match[1]);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-};
-
 const getFinalizedElapsedMs = (item) => {
   if (!item || item.status !== 'finalized') return null;
-  const startedAtMs = extractStartedAtMs(item.description);
-  const completedAtMs = Number(item.finalizedAt || item.updatedAt || item.createdAt || 0);
+  const startedAtMs = Number(item.startedAtMs || item.createdAt || 0);
+  const completedAtMs = Number(item.finalizedAt || item.updatedAt || 0);
   if (!startedAtMs || !Number.isFinite(completedAtMs) || completedAtMs <= 0) return null;
   return Math.max(1, completedAtMs - startedAtMs);
 };
@@ -667,6 +670,7 @@ const applyDashboardState = (nextState, forceRender = false) => {
     lastDashboardFingerprint = nextFingerprint;
     render();
   }
+  return shouldRender;
 };
 
 const load = async () => {
@@ -692,7 +696,7 @@ const reload = async () => {
   if (!response.ok) {
     throw new Error(`Failed to refresh dashboard (${response.status})`);
   }
-  applyDashboardState(await response.json());
+  return applyDashboardState(await response.json());
 };
 
 const handleResetSession = async () => {
@@ -760,7 +764,7 @@ async function handleWithdrawSubmit(event) {
   try {
     const parsedIntent = parsePaymentIntent(withdrawTargetEntityId);
     const resolvedTargetEntityId = parsedIntent?.entityId || withdrawTargetEntityId;
-    if (!/^0x[0-9a-f]{64}$/i.test(resolvedTargetEntityId)) {
+    if (!isEntityId(resolvedTargetEntityId)) {
       throw new Error('Enter a valid XLN invoice or destination entity id');
     }
     if (parsedIntent?.tokenId) {
@@ -803,6 +807,15 @@ load().catch((error) => {
   app.innerHTML = `<div class="error-card"><h2>Custody dashboard failed</h2><p>${escapeHtml(error instanceof Error ? error.message : String(error))}</p></div>`;
 });
 
-setInterval(() => {
-  void reload().catch(() => undefined);
-}, 1000);
+async function scheduleReload(delayMs) {
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  try {
+    const changed = await reload();
+    const nextDelay = document.visibilityState === 'visible' && changed ? ACTIVE_RELOAD_MS : IDLE_RELOAD_MS;
+    void scheduleReload(nextDelay);
+  } catch {
+    void scheduleReload(Math.min(delayMs * 2, MAX_RELOAD_BACKOFF_MS));
+  }
+}
+
+void scheduleReload(ACTIVE_RELOAD_MS);

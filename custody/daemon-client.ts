@@ -46,6 +46,7 @@ export type DaemonQueuePaymentResult = {
   route: string[];
   mode: 'direct' | 'htlc';
   description?: string;
+  startedAtMs?: number;
   secret?: string;
   hashlock?: string;
 };
@@ -225,6 +226,7 @@ export class DaemonRpcClient {
     tokenId: number;
     amount: string;
     description?: string;
+    startedAtMs?: number;
     route?: string[];
     mode?: 'direct' | 'htlc';
   }): Promise<DaemonQueuePaymentResult> {

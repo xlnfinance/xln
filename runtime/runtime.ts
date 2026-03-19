@@ -769,6 +769,20 @@ const hubNeedsPeriodicWake = (replica: EntityReplica): boolean => {
   return false;
 };
 
+const hasUnsafePendingAccountStateForCheckpoint = (env: Env): boolean => {
+  if (!env.eReplicas || env.eReplicas.size === 0) return false;
+  for (const replica of env.eReplicas.values()) {
+    const accounts = replica.state?.accounts;
+    if (!accounts || accounts.size === 0) continue;
+    for (const accountMachine of accounts.values()) {
+      if (accountMachine.pendingFrame || accountMachine.pendingAccountInput) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
 /**
  * Check if any entity has scheduled hooks or due periodic tasks.
  * Used by the runtime loop to wake up idle entities at the right time.
@@ -3551,7 +3565,9 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     // Persist a durable checkpoint snapshot every N runtime frames.
     // Restore is always: checkpoint snapshot + contiguous WAL replay on top.
     const CHECKPOINT_INTERVAL = ensureRuntimeConfig(env).snapshotIntervalFrames ?? DEFAULT_SNAPSHOT_INTERVAL_FRAMES;
-    const shouldCheckpoint = env.height <= 1 || env.height % CHECKPOINT_INTERVAL === 0;
+    const checkpointDue = env.height <= 1 || env.height % CHECKPOINT_INTERVAL === 0;
+    const checkpointBlockedByPendingAccountState = checkpointDue && hasUnsafePendingAccountStateForCheckpoint(env);
+    const shouldCheckpoint = checkpointDue && !checkpointBlockedByPendingAccountState;
     if (shouldCheckpoint) {
       const snapshotSerializeStartedAt = getPerfMs();
       const snapshotPayload = {
@@ -3564,6 +3580,10 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       ops.push(
         { key: makeDbKey(dbNamespace, `snapshot:${env.height}`), value: Buffer.from(snapshot) },
         { key: makeDbKey(dbNamespace, 'latest_checkpoint_height'), value: Buffer.from(String(env.height)) },
+      );
+    } else if (checkpointBlockedByPendingAccountState) {
+      console.warn(
+        `[PERSIST] checkpoint skipped at frame=${env.height} due to pending bilateral account state; keeping previous safe checkpoint`,
       );
     }
 

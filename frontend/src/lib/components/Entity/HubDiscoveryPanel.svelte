@@ -162,7 +162,7 @@
             // best-effort refresh only
           });
         }
-        await new Promise(resolve => setTimeout(resolve, 250));
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
 
       const currentEnv = env;
@@ -287,7 +287,7 @@
       if (accountEntry && !accountEntry.account?.pendingFrame) {
         return true;
       }
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
     return false;
   }

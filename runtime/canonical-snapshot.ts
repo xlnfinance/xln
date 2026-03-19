@@ -10,6 +10,7 @@ import type {
   RoutedEntityInput,
   RuntimeInput,
 } from './types';
+import { cloneJBatch } from './j-batch';
 
 const cloneHankoWitness = (
   hankoWitness?: EntityReplica['hankoWitness'],
@@ -179,6 +180,18 @@ const buildCanonicalEntityStateSnapshot = (entityState: EntityState): EntityStat
   if (entityState.prevFrameHash) snapshot.prevFrameHash = entityState.prevFrameHash;
   if (entityState.crontabState) snapshot.crontabState = structuredClone(entityState.crontabState);
   if (entityState.debts) snapshot.debts = structuredClone(entityState.debts);
+  if (entityState.jBatchState) {
+    snapshot.jBatchState = {
+      ...structuredClone(entityState.jBatchState),
+      batch: cloneJBatch(entityState.jBatchState.batch),
+      sentBatch: entityState.jBatchState.sentBatch
+        ? {
+            ...structuredClone(entityState.jBatchState.sentBatch),
+            batch: cloneJBatch(entityState.jBatchState.sentBatch.batch),
+          }
+        : undefined,
+    };
+  }
   if (Array.isArray(entityState.batchHistory) && entityState.batchHistory.length > 0) {
     snapshot.batchHistory = structuredClone(entityState.batchHistory);
   }

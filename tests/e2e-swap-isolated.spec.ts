@@ -101,7 +101,7 @@ async function faucetOffchain(
       },
     });
     lastBody = await response.json().catch(() => ({} as Record<string, unknown>));
-    ok = response.ok();
+    ok = response.status() === 200;
     if (ok) return;
 
     const code = String(lastBody.code || '');
@@ -110,6 +110,7 @@ async function faucetOffchain(
       response.status() === 202 ||
       response.status() === 409 ||
       response.status() === 503 ||
+      code === 'FAUCET_TOKEN_SURFACE_NOT_READY' ||
       code === 'FAUCET_CHANNEL_NOT_READY' ||
       status === 'channel_opening' ||
       status === 'channel_not_ready';

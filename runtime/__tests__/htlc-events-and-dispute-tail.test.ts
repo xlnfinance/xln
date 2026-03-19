@@ -103,7 +103,8 @@ describe('htlc event contract and dispute tail', () => {
       amount: 10n,
       tokenId: 1,
       jurisdictionId: 'simnet',
-      description: 'invoice tsms:1000000000',
+      description: 'invoice',
+      startedAtMs: 1000000000,
       receivedAtMs: 1000000250,
     });
     expect(received).toMatchObject({
@@ -118,7 +119,6 @@ describe('htlc event contract and dispute tail', () => {
       startedAtMs: 1000000000,
       receivedAtMs: 1000000250,
       elapsedMs: 250,
-      finalizedInMs: 250,
     });
 
     const finalized = buildHtlcFinalizedEventPayload({
@@ -130,7 +130,8 @@ describe('htlc event contract and dispute tail', () => {
       amount: 10n,
       tokenId: 1,
       jurisdictionId: 'simnet',
-      description: 'invoice tsms:1000000000',
+      description: 'invoice',
+      startedAtMs: 1000000000,
       finalizedAtMs: 1000000300,
     });
     expect(finalized).toMatchObject({

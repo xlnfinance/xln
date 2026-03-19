@@ -338,7 +338,7 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
         data: { userEntityId: entityId, userRuntimeId: runtimeId, hubEntityId, tokenId: 1, amount: '100' },
       });
       const data = await resp.json().catch(() => ({}));
-      result = { ok: resp.ok(), status: resp.status(), data };
+      result = { ok: resp.status() === 200, status: resp.status(), data };
     } catch (e: any) {
       result = { ok: false, status: 0, data: { error: e?.message || String(e) } };
     }
@@ -348,6 +348,7 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
     const transient =
       result.status === 202 ||
       result.status === 409 ||
+      code === 'FAUCET_TOKEN_SURFACE_NOT_READY' ||
       code === 'FAUCET_CHANNEL_NOT_READY' ||
       status === 'channel_opening' ||
       status === 'channel_not_ready';
@@ -371,7 +372,7 @@ async function faucetViaBrowserFetch(page: Page, entityId: string, hubEntityId: 
         body: JSON.stringify({ userEntityId: eid, userRuntimeId: runtimeId, hubEntityId, tokenId: 1, amount: '100' }),
       });
       const data = await resp.json().catch(() => ({}));
-      return { ok: resp.ok, status: resp.status, data };
+      return { ok: resp.status === 200, status: resp.status, data };
     } catch (e: any) {
       return { ok: false, status: 0, data: { error: e?.message || String(e) } };
     }

@@ -332,7 +332,7 @@ export async function connectRuntimeToHub(
     },
   ).toBe(true);
 
-  for (const tokenId of DEFAULT_TOKEN_IDS.slice(1)) {
+  for (const tokenId of DEFAULT_TOKEN_IDS) {
     const tokenActive = await page.evaluate(
       ({ entityId, signerId, hubId, tokenId }) => {
         const env = (window as typeof window & {
@@ -357,7 +357,7 @@ export async function connectRuntimeToHub(
       },
       { entityId: identity.entityId, signerId: identity.signerId, hubId, tokenId },
     );
-    if (!tokenActive) {
+    if (!tokenActive && tokenId !== 1) {
       await addTokenToAccount(page, hubId, tokenId);
     }
     await extendCreditToken(page, hubId, tokenId, DEFAULT_CREDIT_AMOUNT_DISPLAY);
