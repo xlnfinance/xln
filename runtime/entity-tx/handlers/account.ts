@@ -1019,49 +1019,67 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         const skippedReplayAccountInputs =
           (((env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] as Set<string> | undefined) ??
             new Set<string>());
-        (env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] = skippedReplayAccountInputs;
-        if (input.prevHanko && !input.newAccountFrame && Number.isFinite(Number(input.height ?? 0)) && Number(input.height ?? 0) > 0) {
-          skippedReplayAccountInputs.add(
-            [
-              replayRuntimeFrameHeight,
-              normalizeEntityRef(state.entityId),
-              normalizeEntityRef(counterpartyId),
-              Number(input.height ?? 0),
-              'ack',
-            ].join(':'),
-          );
-        }
-        if (input.newAccountFrame && Number.isFinite(Number(input.newAccountFrame.height ?? 0)) && Number(input.newAccountFrame.height ?? 0) > 0) {
-          skippedReplayAccountInputs.add(
-            [
-              replayRuntimeFrameHeight,
-              normalizeEntityRef(state.entityId),
-              normalizeEntityRef(counterpartyId),
-              Number(input.newAccountFrame.height ?? 0),
-              'newframe',
-            ].join(':'),
-          );
-        }
+        const currentHeight = Number(accountMachine?.currentHeight ?? 0);
+        const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
+        const inputHeight = Number(input.height ?? 0);
+        const newFrameHeight = Number(input.newAccountFrame?.height ?? 0);
+        const ackAlreadyApplied =
+          input.prevHanko &&
+          !input.newAccountFrame &&
+          Number.isFinite(inputHeight) &&
+          inputHeight > 0 &&
+          !accountMachine?.pendingFrame &&
+          currentHeight >= inputHeight;
+        const newFrameAlreadyApplied =
+          Boolean(input.newAccountFrame) &&
+          Number.isFinite(newFrameHeight) &&
+          newFrameHeight > 0 &&
+          (currentHeight >= newFrameHeight || pendingHeight === newFrameHeight);
         const replayFailureDebug = {
           entityId: state.entityId,
           counterpartyId,
-          inputHeight: Number(input.height ?? 0),
+          inputHeight,
           hasPrevHanko: Boolean(input.prevHanko),
-          newFrameHeight: Number(input.newAccountFrame?.height ?? 0),
+          newFrameHeight,
           newFramePrevFrameHash: input.newAccountFrame?.prevFrameHash ?? null,
           newFrameStateHash: input.newAccountFrame?.stateHash ?? null,
-          currentHeight: Number(accountMachine?.currentHeight ?? 0),
+          currentHeight,
           currentHash: accountMachine?.currentFrame?.stateHash ?? null,
-          pendingHeight: Number(accountMachine?.pendingFrame?.height ?? 0),
+          pendingHeight,
           pendingHash: accountMachine?.pendingFrame?.stateHash ?? null,
           mempoolSize: Number(accountMachine?.mempool?.length ?? 0),
+          ackAlreadyApplied,
+          newFrameAlreadyApplied,
           error: result.error ?? 'unknown',
         };
         console.warn(`[REPLAY][ACCOUNT-HANDLER] failed frame consensus ${JSON.stringify(replayFailureDebug)}`);
-        // During replay, stale/duplicate frames are expected (e.g. cross-entity frame
-        // stored in a runtime frame that was already applied from another entity's
-        // perspective). Skip gracefully instead of crashing the entire restore.
-        console.warn(`[REPLAY] Skipping failed frame consensus: ${result.error}`);
+        if (ackAlreadyApplied) {
+          (env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] = skippedReplayAccountInputs;
+          skippedReplayAccountInputs.add(
+            [
+              replayRuntimeFrameHeight,
+              normalizeEntityRef(state.entityId),
+              normalizeEntityRef(counterpartyId),
+              inputHeight,
+              'ack',
+            ].join(':'),
+          );
+          console.warn(`[REPLAY] Skipping duplicate ACK already reflected in current frame: ${result.error}`);
+        } else if (newFrameAlreadyApplied) {
+          (env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] = skippedReplayAccountInputs;
+          skippedReplayAccountInputs.add(
+            [
+              replayRuntimeFrameHeight,
+              normalizeEntityRef(state.entityId),
+              normalizeEntityRef(counterpartyId),
+              newFrameHeight,
+              'newframe',
+            ].join(':'),
+          );
+          console.warn(`[REPLAY] Skipping duplicate frame already reflected in current/pending state: ${result.error}`);
+        } else {
+          throw new Error(`REPLAY_FRAME_CONSENSUS_FAILED: ${result.error ?? 'unknown'}`);
+        }
       } else {
         addMessage(newState, `❌ ${result.error}`);
         env.emit('PaymentFailed', {

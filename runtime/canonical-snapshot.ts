@@ -150,16 +150,10 @@ const buildCanonicalEntityStateSnapshot = (entityState: EntityState): EntityStat
     height: entityState.height,
     timestamp: entityState.timestamp,
     nonces: new Map(Array.from(entityState.nonces.entries())),
-    messages: [...entityState.messages],
-    proposals: new Map(
-      Array.from(entityState.proposals.entries()).map(([proposalId, proposal]) => [
-        proposalId,
-        {
-          ...structuredClone(proposal),
-          votes: new Map(Array.from(proposal.votes.entries()).map(([voter, vote]) => [voter, structuredClone(vote)])),
-        },
-      ]),
-    ),
+    // UI/debug message tape and in-flight entity proposals are not finalized financial state.
+    // Persisting them increases replay drift surface without helping restore balances/accounts.
+    messages: [],
+    proposals: new Map(),
     config: structuredClone(entityState.config),
     reserves: new Map(Array.from(entityState.reserves.entries()).map(([tokenId, amount]) => [tokenId, BigInt(amount)])),
     accounts: new Map(
@@ -185,6 +179,9 @@ const buildCanonicalEntityStateSnapshot = (entityState: EntityState): EntityStat
   if (entityState.prevFrameHash) snapshot.prevFrameHash = entityState.prevFrameHash;
   if (entityState.crontabState) snapshot.crontabState = structuredClone(entityState.crontabState);
   if (entityState.debts) snapshot.debts = structuredClone(entityState.debts);
+  if (Array.isArray(entityState.batchHistory) && entityState.batchHistory.length > 0) {
+    snapshot.batchHistory = structuredClone(entityState.batchHistory);
+  }
   if (entityState.orderbookExt) snapshot.orderbookExt = buildCanonicalOrderbookSnapshot(entityState);
   if (entityState.swapTradingPairs) snapshot.swapTradingPairs = structuredClone(entityState.swapTradingPairs);
   if (entityState.pendingSwapFillRatios) {
