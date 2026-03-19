@@ -97,28 +97,34 @@
 
   // Initialize runtime on mount
   onMount(() => {
+    let disposed = false;
+    let releaseLock: (() => void) | null = null;
+
     const handleLocationChange = () => {
       syncModeFromLocation();
     };
     window.addEventListener('hashchange', handleLocationChange);
-    if (embeddedPayMode) {
+    void (async () => {
+      releaseLock = await initializeActiveTabLock(async () => {
+        await deactivateThisTab();
+      });
+      if (disposed) return;
       hasActiveTabLock = true;
       activeTabLockReady = true;
-      void bootApp();
-      return () => {
-        window.removeEventListener('hashchange', handleLocationChange);
-      };
-    }
-
-    const releaseLock = initializeActiveTabLock(async () => {
-      await deactivateThisTab();
+      await bootApp();
+    })().catch((err) => {
+      if (disposed) return;
+      console.error('❌ Failed to initialize active tab lock:', err);
+      error.set((err as Error)?.message || 'Active tab lock initialization failed');
+      activeTabLockReady = true;
+      hasActiveTabLock = false;
+      isLoading.set(false);
     });
-    hasActiveTabLock = true;
-    activeTabLockReady = true;
-    void bootApp();
+
     return () => {
+      disposed = true;
       window.removeEventListener('hashchange', handleLocationChange);
-      releaseLock();
+      releaseLock?.();
     };
   });
 </script>

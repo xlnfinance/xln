@@ -641,6 +641,15 @@ const getEntityOutCapacity = (
   return deriveDelta(delta, account.leftEntity === ownerEntityId).outCapacity;
 };
 
+const isAccountConsensusReady = (account: AccountMachine | null): boolean => {
+  if (!account) return false;
+  if (!account.currentFrame) return false;
+  if (Number(account.currentHeight ?? 0) <= 0) return false;
+  if (account.pendingFrame) return false;
+  if ((account.mempool?.length ?? 0) > 0) return false;
+  return true;
+};
+
 const ensurePairMutualCreditForToken = async (
   env: Env,
   leftEntityId: string,
@@ -657,9 +666,7 @@ const ensurePairMutualCreditForToken = async (
     const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
     const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
     if (!leftAccount || !rightAccount) return false;
-    if (leftAccount.pendingFrame || rightAccount.pendingFrame) return false;
-    if ((leftAccount.mempool?.length ?? 0) > 0 || (rightAccount.mempool?.length ?? 0) > 0) return false;
-    return true;
+    return isAccountConsensusReady(leftAccount) && isAccountConsensusReady(rightAccount);
   }, 180, RUNTIME_SETTLE_POLL_MS);
   if (!pairReady) return false;
 
@@ -1492,14 +1499,18 @@ const ensureHubPairMeshCredit = async (env: Env, leftEntityId: string, rightEnti
       await settleRuntimeFor(env, 35);
     }
 
-    const hasBothAccounts = await waitUntil(
-      () => hasAccount(env, leftEntityId, rightEntityId) && hasAccount(env, rightEntityId, leftEntityId),
+    const hasReadyPair = await waitUntil(
+      () => {
+        const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
+        const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
+        return isAccountConsensusReady(leftAccount) && isAccountConsensusReady(rightAccount);
+      },
       120,
       120,
     );
-    if (!hasBothAccounts) {
+    if (!hasReadyPair) {
       console.warn(
-        `[XLN] Hub mesh account open timed out: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}.. (attempt ${attempt}/${MAX_ATTEMPTS})`,
+        `[XLN] Hub mesh account open timed out before bilateral readiness: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}.. (attempt ${attempt}/${MAX_ATTEMPTS})`,
       );
       continue;
     }

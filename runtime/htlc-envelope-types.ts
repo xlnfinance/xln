@@ -21,6 +21,8 @@
 import type { CryptoProvider } from './crypto-provider';
 import { safeStringify } from './serialization-utils';
 
+const MAX_ENVELOPE_SERIALIZED_BYTES = 2048;
+
 export interface HtlcEnvelope {
   nextHop?: string;           // Next entity to forward to (undefined if final)
   finalRecipient?: boolean;   // Is this the last hop?
@@ -121,6 +123,9 @@ export async function createOnionEnvelopes(
     ...(description ? { description } : {}),
     ...(startedAtMs !== undefined ? { startedAtMs } : {}),
   });
+  if (finalPayload.length > MAX_ENVELOPE_SERIALIZED_BYTES) {
+    throw new Error(`Final HTLC envelope exceeds ${MAX_ENVELOPE_SERIALIZED_BYTES} bytes`);
+  }
   let encryptedBlob = await crypto.encrypt(finalPayload, finalRecipientKey);
 
   // Step 2: Wrap each hop's layer (from final backwards to first)
@@ -143,6 +148,9 @@ export async function createOnionEnvelopes(
         ? { forwardAmount: hopForwardAmounts.get(currentHop)!.toString() }
         : {})
     });
+    if (layerPayload.length > MAX_ENVELOPE_SERIALIZED_BYTES) {
+      throw new Error(`Intermediary HTLC envelope exceeds ${MAX_ENVELOPE_SERIALIZED_BYTES} bytes`);
+    }
 
     const currentHopKey = entityPubKeys.get(currentHop);
     if (!currentHopKey) {
@@ -185,6 +193,10 @@ export function unwrapEnvelope(encoded: string): HtlcEnvelope {
  * @returns true if valid, throws if invalid
  */
 export function validateEnvelope(envelope: HtlcEnvelope): boolean {
+  const serialized = safeStringify(envelope);
+  if (serialized.length > MAX_ENVELOPE_SERIALIZED_BYTES) {
+    throw new Error(`Envelope exceeds ${MAX_ENVELOPE_SERIALIZED_BYTES} bytes`);
+  }
   if (envelope.description !== undefined && envelope.description.length > 256) {
     throw new Error('Envelope description exceeds 256 characters');
   }

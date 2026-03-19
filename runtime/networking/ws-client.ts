@@ -34,6 +34,53 @@ function isNodeWebSocket(ws: WebSocketLike): ws is NodeWebSocket {
   return 'on' in ws && typeof (ws as NodeWebSocket).on === 'function';
 }
 
+const waitForSocketClose = async (ws: WebSocketLike | null, timeoutMs = 1_000): Promise<void> => {
+  if (!ws) return;
+  const readyState = 'readyState' in ws && typeof ws.readyState === 'number' ? ws.readyState : undefined;
+  if (readyState === undefined || readyState >= 2) return;
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+
+    if (isNodeWebSocket(ws)) {
+      ws.on('close', () => {
+        clearTimeout(timer);
+        finish();
+      });
+      try {
+        ws.close();
+      } catch {
+        clearTimeout(timer);
+        finish();
+      }
+      return;
+    }
+
+    const browserWs = ws as BrowserWebSocket;
+    const prevOnClose = browserWs.onclose;
+    browserWs.onclose = (event) => {
+      clearTimeout(timer);
+      try {
+        prevOnClose?.call(browserWs as unknown as WebSocket, event);
+      } finally {
+        finish();
+      }
+    };
+    try {
+      browserWs.close();
+    } catch {
+      clearTimeout(timer);
+      finish();
+    }
+  });
+};
+
 export type RuntimeWsClientOptions = {
   url: string;
   runtimeId: string;
@@ -128,9 +175,10 @@ export class RuntimeWsClient {
 
     // Close any stale WS before creating new one
     if (this.ws) {
+      const staleWs = this.ws;
       this.suppressNextClose = true;
-      try { this.ws.close(); } catch {}
       this.ws = null;
+      await waitForSocketClose(staleWs);
     }
 
     this.ws = await createWs(this.options.url);

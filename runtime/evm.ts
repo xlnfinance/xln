@@ -266,20 +266,20 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
 // Debug function to fund entity reserves for testing
 export const debugFundReserves = async (jurisdiction: JurisdictionConfig, entityId: string, tokenId: number, amount: string) => {
   try {
-    console.log(`💰 DEBUG: Funding entity ${entityId.slice(0, 10)} with ${amount} of token ${tokenId}...`);
+    if (DEBUG) console.log(`💰 DEBUG: Funding entity ${entityId.slice(0, 10)} with ${amount} of token ${tokenId}...`);
     
     const { depository } = await connectToEthereum(jurisdiction);
     
     // Fund the entity's reserves for testing
     const tx = await depository['debugFundReserves']!(entityId, tokenId, amount);
-    console.log(`📡 Debug funding transaction: ${tx.hash}`);
+    if (DEBUG) console.log(`📡 Debug funding transaction: ${tx.hash}`);
     
     const receipt = await tx.wait();
-    console.log(`✅ Debug funding confirmed in block ${receipt.blockNumber}`);
+    if (DEBUG) console.log(`✅ Debug funding confirmed in block ${receipt.blockNumber}`);
     
     // Check new balance
     const newBalance = await depository['_reserves']!(entityId, tokenId);
-    console.log(`💰 Entity ${entityId.slice(0, 10)} now has ${newBalance.toString()} of token ${tokenId}`);
+    if (DEBUG) console.log(`💰 Entity ${entityId.slice(0, 10)} now has ${newBalance.toString()} of token ${tokenId}`);
     
     return { transaction: tx, receipt, newBalance };
   } catch (error) {
@@ -679,10 +679,10 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
 
     if (!isBrowser && typeof process !== 'undefined') {
       // Node.js environment - use centralized loader
-      console.log('🔍 JURISDICTION SOURCE: Using centralized jurisdiction-loader');
+      if (DEBUG) console.log('🔍 JURISDICTION SOURCE: Using centralized jurisdiction-loader');
       config = loadJurisdictions();
-      console.log('🔍 JURISDICTION DEBUG: Loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
-      console.log('✅ Loaded jurisdictions from centralized loader (cached)');
+      if (DEBUG) console.log('🔍 JURISDICTION DEBUG: Loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
+      if (DEBUG) console.log('✅ Loaded jurisdictions from centralized loader (cached)');
     } else {
       // Browser environment - fetch from runtime with timeout (prevents indefinite hang in BrowserVM mode)
       const controller = new AbortController();
@@ -699,8 +699,8 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
           throw new Error(`Failed to fetch /api/jurisdictions: ${response.status} ${response.statusText}`);
         }
         config = await response.json();
-        console.log('🔍 JURISDICTION DEBUG: Browser loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
-        console.log('✅ Loaded jurisdictions from runtime');
+        if (DEBUG) console.log('🔍 JURISDICTION DEBUG: Browser loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
+        if (DEBUG) console.log('✅ Loaded jurisdictions from runtime');
       } catch (fetchError: unknown) {
         clearTimeout(timeoutId);
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {

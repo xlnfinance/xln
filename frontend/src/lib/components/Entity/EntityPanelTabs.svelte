@@ -33,6 +33,7 @@
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { resolveEntityName } from '$lib/utils/entityNaming';
+  import { formatEntityId } from '$lib/utils/format';
 
   // Icons
   import {

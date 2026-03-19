@@ -20,7 +20,7 @@ const ENABLE_HTTPS = (() => {
   return HOST === 'localhost';
 })();
 const CUSTODY_NAME = String(process.env.CUSTODY_PROFILE_NAME || 'Custody').trim() || 'Custody';
-const CUSTODY_JURISDICTION = String(process.env.CUSTODY_JURISDICTION_ID || process.env.CUSTODY_JURISDICTION || 'arrakis').trim();
+const CUSTODY_JURISDICTION = String(process.env.CUSTODY_JURISDICTION_ID || process.env.CUSTODY_JURISDICTION || '').trim();
 const CUSTODY_ENTITY_ID = String(process.env.CUSTODY_ENTITY_ID || '').trim().toLowerCase();
 const CUSTODY_SIGNER_ID = String(process.env.CUSTODY_SIGNER_ID || '').trim().toLowerCase() || undefined;
 const CUSTODY_DB_PATH = process.env.CUSTODY_DB_PATH || './db-tmp/custody.sqlite';
@@ -32,6 +32,9 @@ const JOURNAL_ERROR_SYNC_MS = 5000;
 
 if (!CUSTODY_ENTITY_ID) {
   throw new Error('CUSTODY_ENTITY_ID is required');
+}
+if (!CUSTODY_JURISDICTION) {
+  throw new Error('CUSTODY_JURISDICTION_ID is required');
 }
 
 const TOKENS = DEFAULT_TOKENS.map((token, index) => ({
@@ -464,7 +467,11 @@ const server = Bun.serve({
           amount?: string;
         };
         const targetEntityId = String(body.targetEntityId || '').trim().toLowerCase();
-        const tokenId = Number(body.tokenId ?? 1);
+        const rawTokenId = body.tokenId;
+        if (rawTokenId === undefined || rawTokenId === null) {
+          return json({ ok: false, error: 'tokenId is required' }, { status: 400 }, setCookie);
+        }
+        const tokenId = Number(rawTokenId);
         const amount = String(body.amount || '').trim();
         if (!/^0x[0-9a-f]{64}$/i.test(targetEntityId)) {
           return json({ ok: false, error: 'targetEntityId must be a 32-byte entity id' }, { status: 400 }, setCookie);
