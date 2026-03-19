@@ -113,7 +113,7 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
       });
     }
   } catch (error) {
-    console.error('❌ Failed to load jurisdictions:', error);
+    console.warn('⚠️ Failed to load jurisdictions:', error);
   }
 
   return jurisdictions;

@@ -419,12 +419,27 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
                 // Decrypt if encrypted (base64), or use cleartext (JSON starts with '{')
                 const isCleartext1 = envelopeData.trimStart().startsWith('{');
-                if (newState.entityEncPrivKey && !isCleartext1) {
+                if (isCleartext1) {
+                  env.error('network', 'MISSING_CRYPTO_KEY', {
+                    lockId: lock.lockId,
+                    reason: 'cleartext_direct_envelope',
+                    fromEntityId: input.fromEntityId,
+                    toEntityId: input.toEntityId,
+                  }, state.entityId);
+                  throw new Error(`MISSING_CRYPTO_KEY:${lock.lockId}`);
+                }
+                if (newState.entityEncPrivKey) {
                   const crypto = new NobleCryptoProvider();
                   envelopeData = await crypto.decrypt(envelope as string, newState.entityEncPrivKey);
                   console.log(`🔓 Decryption successful`);
-                } else if (isCleartext1) {
-                  console.log(`🔓 Envelope is cleartext JSON — skipping decrypt`);
+                } else {
+                  env.error('network', 'MISSING_CRYPTO_KEY', {
+                    lockId: lock.lockId,
+                    reason: 'missing_entity_encryption_key',
+                    fromEntityId: input.fromEntityId,
+                    toEntityId: input.toEntityId,
+                  }, state.entityId);
+                  throw new Error(`MISSING_CRYPTO_KEY:${lock.lockId}`);
                 }
 
                 // Unwrap decrypted envelope
@@ -439,8 +454,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   fromEntityId: input.fromEntityId,
                   toEntityId: input.toEntityId,
                 }, state.entityId);
-                console.log(`🧅 ═════════════════════════════════════════════════════════════`);
-                continue;
+                throw new Error(`ENVELOPE_DECRYPT_FAIL:${lock.lockId}`);
               }
             }
             // Case 2: Envelope has innerEnvelope (plaintext wrapper)
@@ -451,12 +465,27 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
                 // Decrypt if encrypted (base64), or use cleartext (JSON starts with '{')
                 const isCleartext2 = envelopeData.trimStart().startsWith('{');
-                if (newState.entityEncPrivKey && !isCleartext2) {
+                if (isCleartext2) {
+                  env.error('network', 'MISSING_CRYPTO_KEY', {
+                    lockId: lock.lockId,
+                    reason: 'cleartext_inner_envelope',
+                    fromEntityId: input.fromEntityId,
+                    toEntityId: input.toEntityId,
+                  }, state.entityId);
+                  throw new Error(`MISSING_CRYPTO_KEY:${lock.lockId}`);
+                }
+                if (newState.entityEncPrivKey) {
                   const crypto = new NobleCryptoProvider();
                   envelopeData = await crypto.decrypt(envelope.innerEnvelope, newState.entityEncPrivKey);
                   console.log(`🔓 Decryption successful`);
-                } else if (isCleartext2) {
-                  console.log(`🔓 InnerEnvelope is cleartext JSON — skipping decrypt`);
+                } else {
+                  env.error('network', 'MISSING_CRYPTO_KEY', {
+                    lockId: lock.lockId,
+                    reason: 'missing_entity_encryption_key',
+                    fromEntityId: input.fromEntityId,
+                    toEntityId: input.toEntityId,
+                  }, state.entityId);
+                  throw new Error(`MISSING_CRYPTO_KEY:${lock.lockId}`);
                 }
 
                 // Unwrap decrypted envelope - THIS is our actual routing instruction
@@ -471,8 +500,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   fromEntityId: input.fromEntityId,
                   toEntityId: input.toEntityId,
                 }, state.entityId);
-                console.log(`🧅 ═════════════════════════════════════════════════════════════`);
-                continue;
+                throw new Error(`ENVELOPE_DECRYPT_FAIL:${lock.lockId}`);
               }
             }
 
@@ -542,6 +570,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                     amount: lock.amount,
                     tokenId: lock.tokenId,
                     ...(paymentDescription ? { description: paymentDescription } : {}),
+                    ...(typeof envelope.startedAtMs === 'number' ? { startedAtMs: envelope.startedAtMs } : {}),
                     ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
                     receivedAtMs: newState.timestamp,
                   }),
@@ -586,6 +615,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 hashlock: lock.hashlock,
                 tokenId: lock.tokenId,
                 amount: lock.amount,
+                ...(typeof envelope.startedAtMs === 'number' ? { startedAtMs: envelope.startedAtMs } : {}),
                 inboundEntity,
                 inboundLockId: lock.lockId,
                 outboundEntity: nextHop,
@@ -910,6 +940,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 ...(eventAmount !== undefined ? { amount: eventAmount } : {}),
                 ...(eventTokenId !== undefined ? { tokenId: eventTokenId } : {}),
                 ...(finalizedDescription ? { description: finalizedDescription } : {}),
+                ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
                 ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
                 finalizedAtMs: newState.timestamp,
               }),
@@ -983,7 +1014,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       }
     } else {
       console.error(`❌ Frame consensus failed: ${result.error}`);
-      addMessage(newState, `❌ ${result.error}`);
       if (replayMode) {
         const replayRuntimeFrameHeight = Number(env.height ?? 0) + 1;
         const skippedReplayAccountInputs =
@@ -1033,6 +1063,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         // perspective). Skip gracefully instead of crashing the entire restore.
         console.warn(`[REPLAY] Skipping failed frame consensus: ${result.error}`);
       } else {
+        addMessage(newState, `❌ ${result.error}`);
         env.emit('PaymentFailed', {
           entityId: state.entityId,
           fromEntityId: input.fromEntityId,

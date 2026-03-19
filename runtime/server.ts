@@ -35,7 +35,7 @@ import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
 import { DEFAULT_SPREAD_DISTRIBUTION, ORDERBOOK_PRICE_SCALE } from './orderbook';
-import { buildDefaultEntitySwapPairs, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenInfo } from './account-utils';
+import { buildDefaultEntitySwapPairs, deriveDelta, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenInfo } from './account-utils';
 import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -593,9 +593,13 @@ const hasPairMutualCredit = (
   tokenId: number,
   amount: bigint,
 ): boolean => {
-  const delta = getAccountDelta(env, leftEntityId, rightEntityId, tokenId);
-  if (!delta) return false;
-  return (delta.leftCreditLimit ?? 0n) >= amount && (delta.rightCreditLimit ?? 0n) >= amount;
+  const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
+  const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
+  if (!leftAccount || !rightAccount) return false;
+  return (
+    getEntityOutCapacity(leftAccount, leftEntityId, tokenId) >= amount &&
+    getEntityOutCapacity(rightAccount, rightEntityId, tokenId) >= amount
+  );
 };
 
 const hasAccount = (env: Env, entityId: string, counterpartyId: string): boolean => {
@@ -626,17 +630,87 @@ const getAccountMachine = (env: Env, entityId: string, counterpartyId: string): 
   return null;
 };
 
-const getCreditGrantedByEntity = (
-  account: AccountMachine,
+const getEntityOutCapacity = (
+  account: AccountMachine | null,
   ownerEntityId: string,
   tokenId: number,
 ): bigint => {
+  if (!account) return 0n;
   const delta = account.deltas.get(tokenId);
   if (!delta) return 0n;
-  const owner = String(ownerEntityId || '').toLowerCase();
-  const left = String(account?.leftEntity || '').toLowerCase();
-  const isOwnerLeft = owner.length > 0 && owner === left;
-  return BigInt(isOwnerLeft ? (delta.rightCreditLimit ?? 0n) : (delta.leftCreditLimit ?? 0n));
+  return deriveDelta(delta, account.leftEntity === ownerEntityId).outCapacity;
+};
+
+const ensurePairMutualCreditForToken = async (
+  env: Env,
+  leftEntityId: string,
+  leftSignerId: string,
+  rightEntityId: string,
+  rightSignerId: string,
+  tokenId: number,
+  amount: bigint,
+): Promise<boolean> => {
+  if (hasPairMutualCredit(env, leftEntityId, rightEntityId, tokenId, amount)) return true;
+  if (!hasAccount(env, leftEntityId, rightEntityId) || !hasAccount(env, rightEntityId, leftEntityId)) return false;
+
+  const pairReady = await waitUntil(() => {
+    const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
+    const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
+    if (!leftAccount || !rightAccount) return false;
+    if (leftAccount.pendingFrame || rightAccount.pendingFrame) return false;
+    if ((leftAccount.mempool?.length ?? 0) > 0 || (rightAccount.mempool?.length ?? 0) > 0) return false;
+    return true;
+  }, 180, RUNTIME_SETTLE_POLL_MS);
+  if (!pairReady) return false;
+
+  const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
+  const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
+  if (!leftAccount || !rightAccount) return false;
+
+  const entityInputs: EntityInput[] = [];
+  const leftOutCapacity = getEntityOutCapacity(leftAccount, leftEntityId, tokenId);
+  const rightOutCapacity = getEntityOutCapacity(rightAccount, rightEntityId, tokenId);
+
+  if (leftOutCapacity < amount) {
+    entityInputs.push({
+      entityId: rightEntityId,
+      signerId: rightSignerId,
+      entityTxs: [{
+        type: 'extendCredit',
+        data: {
+          counterpartyEntityId: leftEntityId,
+          tokenId,
+          amount,
+        },
+      }],
+    });
+  }
+
+  if (rightOutCapacity < amount) {
+    entityInputs.push({
+      entityId: leftEntityId,
+      signerId: leftSignerId,
+      entityTxs: [{
+        type: 'extendCredit',
+        data: {
+          counterpartyEntityId: rightEntityId,
+          tokenId,
+          amount,
+        },
+      }],
+    });
+  }
+
+  if (entityInputs.length === 0) {
+    return hasPairMutualCredit(env, leftEntityId, rightEntityId, tokenId, amount);
+  }
+
+  enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs });
+  return await waitUntil(
+    () => hasPairMutualCredit(env, leftEntityId, rightEntityId, tokenId, amount),
+    180,
+    RUNTIME_SETTLE_POLL_MS,
+  );
 };
 
 const getHubMeshHealth = (env: Env | null) => {
@@ -653,8 +727,8 @@ const getHubMeshHealth = (env: Env | null) => {
         requiredCredit: string;
         leftHasAccount: boolean;
         rightHasAccount: boolean;
-        leftCreditLimit: string;
-        rightCreditLimit: string;
+        leftOutCapacity: string;
+        rightOutCapacity: string;
         ok: boolean;
       }>,
       ok: false,
@@ -668,8 +742,8 @@ const getHubMeshHealth = (env: Env | null) => {
     requiredCredit: string;
     leftHasAccount: boolean;
     rightHasAccount: boolean;
-    leftCreditLimit: string;
-    rightCreditLimit: string;
+    leftOutCapacity: string;
+    rightOutCapacity: string;
     ok: boolean;
   }> = [];
 
@@ -677,18 +751,17 @@ const getHubMeshHealth = (env: Env | null) => {
     for (let j = i + 1; j < hubIds.length; j++) {
       const left = hubIds[i]!;
       const right = hubIds[j]!;
-      const leftDelta = getAccountDelta(env, left, right, HUB_MESH_TOKEN_ID);
-      const rightDelta = getAccountDelta(env, right, left, HUB_MESH_TOKEN_ID);
+      const leftAccount = getAccountMachine(env, left, right);
+      const rightAccount = getAccountMachine(env, right, left);
       const leftHasAccount = hasAccount(env, left, right);
       const rightHasAccount = hasAccount(env, right, left);
-      const delta = leftDelta ?? rightDelta;
-      const leftCreditLimit = BigInt(delta?.leftCreditLimit ?? 0n);
-      const rightCreditLimit = BigInt(delta?.rightCreditLimit ?? 0n);
+      const leftOutCapacity = getEntityOutCapacity(leftAccount, left, HUB_MESH_TOKEN_ID);
+      const rightOutCapacity = getEntityOutCapacity(rightAccount, right, HUB_MESH_TOKEN_ID);
       const ok =
         leftHasAccount &&
         rightHasAccount &&
-        leftCreditLimit >= HUB_MESH_CREDIT_AMOUNT &&
-        rightCreditLimit >= HUB_MESH_CREDIT_AMOUNT;
+        leftOutCapacity >= HUB_MESH_CREDIT_AMOUNT &&
+        rightOutCapacity >= HUB_MESH_CREDIT_AMOUNT;
 
       pairStatuses.push({
         left,
@@ -697,8 +770,8 @@ const getHubMeshHealth = (env: Env | null) => {
         requiredCredit: HUB_MESH_CREDIT_AMOUNT.toString(),
         leftHasAccount,
         rightHasAccount,
-        leftCreditLimit: leftCreditLimit.toString(),
-        rightCreditLimit: rightCreditLimit.toString(),
+        leftOutCapacity: leftOutCapacity.toString(),
+        rightOutCapacity: rightOutCapacity.toString(),
         ok,
       });
     }
@@ -798,7 +871,10 @@ const getBootstrapReserveHealth = async (env: Env | null): Promise<BootstrapRese
     const role: 'hub' | 'market-maker' =
       marketMakerEntityId && entityId === marketMakerEntityId.toLowerCase() ? 'market-maker' : 'hub';
     const tokens = bootstrapTokens.map<BootstrapReserveTokenHealth>((token) => {
-      const current = replica?.state?.reserves?.get(token.tokenId) ?? 0n;
+      const current = replica?.state?.reserves?.get(token.tokenId);
+      if (current === undefined) {
+        throw new Error(`bootstrap reserve missing for token ${String(token.tokenId)} on ${entityId}`);
+      }
       const expectedMin = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(token.decimals);
       return {
         tokenId: token.tokenId,
@@ -1120,27 +1196,10 @@ const ensureMarketMakerHubConnectivity = async (
 
     for (const tokenId of tokenIds) {
       if (hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)) continue;
-      const mmGranted = getCreditGrantedByEntity(mmAccount, mmEntityId, tokenId);
-      const hubGranted = getCreditGrantedByEntity(hubAccount, hubEntityId, tokenId);
+      const mmOutCapacity = getEntityOutCapacity(mmAccount, mmEntityId, tokenId);
+      const hubOutCapacity = getEntityOutCapacity(hubAccount, hubEntityId, tokenId);
 
-      if (mmGranted < MARKET_MAKER_CREDIT_AMOUNT) {
-        const input = creditInputsByEntity.get(mmEntityId) ?? {
-          entityId: mmEntityId,
-          signerId: mmSignerId,
-          entityTxs: [],
-        };
-        input.entityTxs.push({
-          type: 'extendCredit',
-          data: {
-            counterpartyEntityId: hubEntityId,
-            tokenId,
-            amount: MARKET_MAKER_CREDIT_AMOUNT,
-          },
-        });
-        creditInputsByEntity.set(mmEntityId, input);
-      }
-
-      if (hubGranted < MARKET_MAKER_CREDIT_AMOUNT) {
+      if (mmOutCapacity < MARKET_MAKER_CREDIT_AMOUNT) {
         const input = creditInputsByEntity.get(hubEntityId) ?? {
           entityId: hubEntityId,
           signerId: hubSignerId,
@@ -1155,6 +1214,23 @@ const ensureMarketMakerHubConnectivity = async (
           },
         });
         creditInputsByEntity.set(hubEntityId, input);
+      }
+
+      if (hubOutCapacity < MARKET_MAKER_CREDIT_AMOUNT) {
+        const input = creditInputsByEntity.get(mmEntityId) ?? {
+          entityId: mmEntityId,
+          signerId: mmSignerId,
+          entityTxs: [],
+        };
+        input.entityTxs.push({
+          type: 'extendCredit',
+          data: {
+            counterpartyEntityId: hubEntityId,
+            tokenId,
+            amount: MARKET_MAKER_CREDIT_AMOUNT,
+          },
+        });
+        creditInputsByEntity.set(mmEntityId, input);
       }
     }
   }
@@ -1436,27 +1512,10 @@ const ensureHubPairMeshCredit = async (env: Env, leftEntityId: string, rightEnti
     if (!leftAccount || !rightAccount) continue;
 
     const queuedByEntity = new Map<string, EntityInput>();
-    const leftGranted = getCreditGrantedByEntity(leftAccount, leftEntityId, HUB_MESH_TOKEN_ID);
-    const rightGranted = getCreditGrantedByEntity(rightAccount, rightEntityId, HUB_MESH_TOKEN_ID);
+    const leftOutCapacity = getEntityOutCapacity(leftAccount, leftEntityId, HUB_MESH_TOKEN_ID);
+    const rightOutCapacity = getEntityOutCapacity(rightAccount, rightEntityId, HUB_MESH_TOKEN_ID);
 
-    if (leftGranted < HUB_MESH_CREDIT_AMOUNT) {
-      queuedByEntity.set(leftEntityId, {
-        entityId: leftEntityId,
-        signerId: leftSignerId,
-        entityTxs: [
-          {
-            type: 'extendCredit',
-            data: {
-              counterpartyEntityId: rightEntityId,
-              tokenId: HUB_MESH_TOKEN_ID,
-              amount: HUB_MESH_CREDIT_AMOUNT,
-            },
-          },
-        ],
-      });
-    }
-
-    if (rightGranted < HUB_MESH_CREDIT_AMOUNT) {
+    if (leftOutCapacity < HUB_MESH_CREDIT_AMOUNT) {
       queuedByEntity.set(rightEntityId, {
         entityId: rightEntityId,
         signerId: rightSignerId,
@@ -1465,6 +1524,23 @@ const ensureHubPairMeshCredit = async (env: Env, leftEntityId: string, rightEnti
             type: 'extendCredit',
             data: {
               counterpartyEntityId: leftEntityId,
+              tokenId: HUB_MESH_TOKEN_ID,
+              amount: HUB_MESH_CREDIT_AMOUNT,
+            },
+          },
+        ],
+      });
+    }
+
+    if (rightOutCapacity < HUB_MESH_CREDIT_AMOUNT) {
+      queuedByEntity.set(leftEntityId, {
+        entityId: leftEntityId,
+        signerId: leftSignerId,
+        entityTxs: [
+          {
+            type: 'extendCredit',
+            data: {
+              counterpartyEntityId: rightEntityId,
               tokenId: HUB_MESH_TOKEN_ID,
               amount: HUB_MESH_CREDIT_AMOUNT,
             },
@@ -3248,6 +3324,7 @@ type ControlEntitySummary = {
   runtimeId: string | null;
   accountCount: number;
   publicAccountCount: number;
+  accountEntityIds: string[];
 };
 
 const requireDaemonControlAuth = (req: Request): Response | null => {
@@ -3306,6 +3383,9 @@ const listLocalControlEntities = (env: Env): ControlEntitySummary[] => {
       publicAccountCount: Array.isArray(replica?.state?.profile?.publicAccounts)
         ? replica.state.profile.publicAccounts.length
         : 0,
+      accountEntityIds: replica?.state?.accounts instanceof Map
+        ? Array.from(replica.state.accounts.keys()).map(value => String(value).toLowerCase()).sort()
+        : [],
     });
   }
   entities.sort((left, right) => left.name.localeCompare(right.name));
@@ -4601,18 +4681,15 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const amountWei = ethers.parseUnits(amount, 18);
       const accountMachine = getAccountMachine(env, hubEntityId, normalizedUserEntityId);
       const hasHubAccount = hasAccount(env, hubEntityId, normalizedUserEntityId) || !!accountMachine;
-      const accountPending = hasHubAccount ? !!accountMachine?.pendingFrame : false;
       const accountPresence = hubs.map(hub => ({
         hubEntityId: hub.entityId,
         hasAccount: hasAccount(env, hub.entityId, normalizedUserEntityId),
       }));
-      const autoOpenAccount = false;
 
-      // Pending bilateral state is non-blocking for faucet enqueue:
-      // directPayment is appended to account mempool and proposed after ACK resolves pending frame.
-
-      // Explicit invariant: faucet never opens accounts on behalf of user.
-      // User must create/open account first via regular bilateral flow.
+      // Explicit invariant:
+      // faucet is a one-way enqueue endpoint, not a synchronous settlement oracle.
+      // It never tries to "repair" credit/sync state and never waits for the
+      // counterparty side to materialize locally inside serverEnv.
       if (!hasHubAccount) {
         pushDebugEvent(relayStore, {
           event: 'error',
@@ -4640,6 +4717,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           { status: 409, headers },
         );
       }
+      const currentOutCapacity = getEntityOutCapacity(accountMachine, hubEntityId, tokenId);
 
       // Single-writer invariant: enqueue only; runtime loop applies.
       try {
@@ -4695,9 +4773,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           tokenId,
           from: hubEntityId.slice(0, 16) + '...',
           to: normalizedUserEntityId.slice(0, 16) + '...',
-          accountReady: hasHubAccount,
-          accountPending,
-          autoOpenAccount: false,
+          accountReady: true,
+          senderOutCapacity: currentOutCapacity.toString(),
           accountPresence,
         }),
         { headers },
@@ -4769,16 +4846,15 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const approvedAmount = requestedAmount > getRequestCreditCap(tokenId)
         ? getRequestCreditCap(tokenId)
         : requestedAmount;
-      const currentGranted = getCreditGrantedByEntity(accountMachine, hubEntityId, tokenId);
-      const nextGranted = currentGranted > approvedAmount ? currentGranted : approvedAmount;
-      if (nextGranted === currentGranted) {
+      const currentOutCapacity = getEntityOutCapacity(accountMachine, hubEntityId, tokenId);
+      if (currentOutCapacity >= approvedAmount) {
         return new Response(
           JSON.stringify({
             success: true,
             hubEntityId,
             userEntityId,
             tokenId,
-            approvedAmount: nextGranted.toString(),
+            approvedAmount: currentOutCapacity.toString(),
           }),
           { status: 200, headers },
         );
@@ -4806,7 +4882,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
                 data: {
                   counterpartyEntityId: userEntityId,
                   tokenId,
-                  amount: nextGranted,
+                  amount: approvedAmount,
                 },
               },
             ],
@@ -4820,7 +4896,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           hubEntityId,
           userEntityId,
           tokenId,
-          approvedAmount: nextGranted.toString(),
+          approvedAmount: approvedAmount.toString(),
         }),
         { status: 200, headers },
       );

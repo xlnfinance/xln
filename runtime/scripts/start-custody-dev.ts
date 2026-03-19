@@ -11,18 +11,40 @@ const RELAY_URL = process.env.DEV_RELAY_URL || 'ws://127.0.0.1:8082/relay';
 const WALLET_PORT = Number(process.env.VITE_DEV_PORT || process.env.DEV_WALLET_PORT || '8080');
 const WALLET_BASE_URL = process.env.DEV_WALLET_BASE_URL || `https://localhost:${WALLET_PORT}`;
 const WALLET_URL = process.env.DEV_WALLET_URL || new URL('/app', WALLET_BASE_URL).toString();
-const CUSTODY_HTTPS = !/^(0|false|no)$/i.test(process.env.CUSTODY_HTTPS ?? '1');
+const isFalseLike = (raw: string | undefined, defaultValue = false): boolean => {
+  const value = String(raw ?? '').trim().toLowerCase();
+  if (!value) return defaultValue;
+  return value === '0' || value === 'false' || value === 'no';
+};
+
+const isTrueLike = (raw: string | undefined, defaultValue = false): boolean => {
+  const value = String(raw ?? '').trim().toLowerCase();
+  if (!value) return defaultValue;
+  return value === '1' || value === 'true' || value === 'yes';
+};
+
+const CUSTODY_HTTPS = !isFalseLike(process.env.CUSTODY_HTTPS, false);
 const DAEMON_PORT = Number(process.env.DEV_CUSTODY_DAEMON_PORT || '8088');
 const CUSTODY_PORT = Number(process.env.DEV_CUSTODY_PORT || '8087');
 const CUSTODY_BASE_URL = `${CUSTODY_HTTPS ? 'https' : 'http'}://localhost:${CUSTODY_PORT}`;
 const DB_ROOT = resolve(process.env.DEV_CUSTODY_DB_ROOT || './db/dev/custody');
+const RESET_DB_ON_START = isTrueLike(process.env.DEV_CUSTODY_RESET, false);
 const SEED = process.env.DEV_CUSTODY_SEED || 'xln-dev-custody-seed';
 const SIGNER_LABEL = process.env.DEV_CUSTODY_SIGNER_LABEL || 'custody-dev-1';
 const PROFILE_NAME = process.env.DEV_CUSTODY_NAME || 'Custody';
-const VERBOSE = /^(1|true)$/i.test(process.env.DEV_VERBOSE ?? '');
+const VERBOSE = isTrueLike(process.env.DEV_VERBOSE, false);
 
 let shuttingDown = false;
 let restartingCustody = false;
+let healthWatchdog: ReturnType<typeof setInterval> | null = null;
+let consecutiveHealthFailures = 0;
+
+type MainApiHealthPayload = {
+  system?: {
+    runtime?: boolean;
+    relay?: boolean;
+  };
+};
 
 const mirrorChildLogs = (prefix: string, child: { proc: { stdout: NodeJS.ReadableStream; stderr: NodeJS.ReadableStream } }): void => {
   child.proc.stdout.on('data', (chunk: Buffer | string) => {
@@ -34,7 +56,9 @@ const mirrorChildLogs = (prefix: string, child: { proc: { stdout: NodeJS.Readabl
 };
 
 const main = async (): Promise<void> => {
-  await rm(DB_ROOT, { recursive: true, force: true });
+  if (RESET_DB_ON_START) {
+    await rm(DB_ROOT, { recursive: true, force: true });
+  }
   await mkdir(DB_ROOT, { recursive: true });
 
   console.log(`[dev-custody] waiting for shared dev API ${API_BASE_URL}`);
@@ -106,6 +130,76 @@ const main = async (): Promise<void> => {
 
   const serverWatcher = watch(resolve('custody', 'server.ts'), () => queueRestart('server.ts changed'));
 
+  const probe = async (url: string): Promise<boolean> => {
+    try {
+      const previous = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      const response = await fetch(url);
+      if (previous === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previous;
+      return response.ok;
+    } catch {
+      return false;
+    }
+  };
+
+  const readMainApiHealth = async (): Promise<MainApiHealthPayload | null> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/health`);
+      if (!response.ok) return null;
+      return await response.json() as MainApiHealthPayload;
+    } catch {
+      return null;
+    }
+  };
+
+  const isMainApiReady = (payload: MainApiHealthPayload | null): boolean => {
+    return payload?.system?.runtime === true && payload?.system?.relay === true;
+  };
+
+  healthWatchdog = setInterval(() => {
+    void (async () => {
+      if (shuttingDown || restartingCustody) return;
+      const mainApiHealth = await readMainApiHealth();
+      if (!isMainApiReady(mainApiHealth)) {
+        consecutiveHealthFailures += 1;
+        if (consecutiveHealthFailures < 5) {
+          console.warn(
+            `[dev-custody] main API not ready streak=${String(consecutiveHealthFailures)}`,
+          );
+          return;
+        }
+        console.error(
+          `[dev-custody] main API readiness assertion failed streak=${String(consecutiveHealthFailures)}`,
+        );
+        await shutdown('main-api-health-assert');
+        process.exit(1);
+      }
+      const [dashboardOk, daemonOk] = await Promise.all([
+        probe(`${CUSTODY_BASE_URL}/api/me`),
+        probe(`http://127.0.0.1:${DAEMON_PORT}/api/health`),
+      ]);
+      if (dashboardOk && daemonOk) {
+        consecutiveHealthFailures = 0;
+        return;
+      }
+      consecutiveHealthFailures += 1;
+      if (consecutiveHealthFailures < 5) {
+        console.warn(
+          `[dev-custody] transient health miss dashboard=${String(dashboardOk)} daemon=${String(daemonOk)} streak=${String(consecutiveHealthFailures)}`,
+        );
+        return;
+      }
+      console.error(
+        `[dev-custody] health assertion failed dashboard=${String(dashboardOk)} daemon=${String(daemonOk)} streak=${String(consecutiveHealthFailures)}`,
+      );
+      await shutdown('health-assert');
+      process.exit(1);
+    })().catch(error => {
+      console.error(`[dev-custody] watchdog failed: ${(error as Error).stack || (error as Error).message}`);
+    });
+  }, 2000);
+
   console.log('[dev-custody] ready');
   console.log(`[dev-custody] wallet ${WALLET_URL}`);
   console.log(`[dev-custody] custody dashboard ${CUSTODY_BASE_URL}`);
@@ -120,6 +214,7 @@ const main = async (): Promise<void> => {
     restartingCustody = false;
     serverWatcher.close();
     if (restartTimer) clearTimeout(restartTimer);
+    if (healthWatchdog) clearInterval(healthWatchdog);
     console.log(`[dev-custody] shutting down on ${signal}`);
     await stopManagedChild(support.custodyChild);
     await stopManagedChild(support.daemonChild);

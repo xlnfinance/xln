@@ -28,8 +28,8 @@ const LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS = (() => {
   return Math.floor(parsed);
 })();
 const DEFAULT_SNAPSHOT_INTERVAL_FRAMES = (() => {
-  const parsed = Number(readRuntimeEnv('XLN_SNAPSHOT_INTERVAL_FRAMES') ?? '5');
-  if (!Number.isFinite(parsed) || parsed < 1) return 5;
+  const parsed = Number(readRuntimeEnv('XLN_SNAPSHOT_INTERVAL_FRAMES') ?? '25');
+  if (!Number.isFinite(parsed) || parsed < 1) return 25;
   return Math.floor(parsed);
 })();
 
@@ -166,7 +166,8 @@ import {
   createDemoDelta,
   getDefaultCreditLimit,
 } from './account-utils';
-import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
+import { computeSwapPriceTicks, createOrderbookExtState, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
+import { processOrderbookSwaps } from './entity-tx/handlers/account';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import {
   formatTokenAmount as formatTokenAmountEthers,
@@ -2844,6 +2845,30 @@ const normalizeReplicaMap = (raw: unknown): Map<string, EntityReplica> => {
     if (!replica.signerId && signerIdFromKey) {
       (replica as EntityReplica).signerId = signerIdFromKey;
     }
+    const accounts = replica.state?.accounts;
+    const normalizeAccountPendingSignatures = (account: unknown): void => {
+      if (!account || typeof account !== 'object') return;
+      if (!Array.isArray((account as { pendingSignatures?: unknown }).pendingSignatures)) {
+        // pendingSignatures is transient signer-round state. It is intentionally not
+        // persisted and must be reconstructed as empty on restore before validation.
+        (account as { pendingSignatures: string[] }).pendingSignatures = [];
+      }
+    };
+    if (accounts instanceof Map) {
+      for (const [, account] of accounts.entries()) {
+        normalizeAccountPendingSignatures(account);
+      }
+    } else if (Array.isArray(accounts)) {
+      for (const entry of accounts) {
+        if (Array.isArray(entry) && entry.length >= 2) {
+          normalizeAccountPendingSignatures(entry[1]);
+        }
+      }
+    } else if (accounts && typeof accounts === 'object') {
+      for (const account of Object.values(accounts as Record<string, unknown>)) {
+        normalizeAccountPendingSignatures(account);
+      }
+    }
     map.set(key, replica);
   }
   return map;
@@ -3037,8 +3062,14 @@ const buildPersistedEnvSnapshot = (env: Env): Record<string, unknown> => {
   return buildCanonicalRuntimeStateSnapshot(env);
 };
 
+const buildPersistedEnvHashInput = (snapshot: Record<string, unknown>): Record<string, unknown> => {
+  return {
+    eReplicas: snapshot.eReplicas,
+  };
+};
+
 const computePersistedEnvStateHash = (snapshot: Record<string, unknown>): string => {
-  return ethers.keccak256(ethers.toUtf8Bytes(safeStringify(snapshot)));
+  return ethers.keccak256(ethers.toUtf8Bytes(safeStringify(buildPersistedEnvHashInput(snapshot))));
 };
 
 const requirePersistedContractAddress = (
@@ -3707,6 +3738,83 @@ function rebuildEntitySwapBookFromAccounts(env: Env): void {
   }
 }
 
+function rebuildEntityLockBookFromAccounts(env: Env): void {
+  for (const replica of env.eReplicas.values()) {
+    const rebuiltLockBook = new Map<string, Record<string, unknown>>();
+    for (const [accountId, account] of replica.state.accounts.entries()) {
+      if (!(account?.locks instanceof Map)) continue;
+      const iAmLeft = replica.entityId === account.leftEntity;
+      for (const [lockId, lock] of account.locks.entries()) {
+        const direction =
+          (lock.senderIsLeft && iAmLeft) || (!lock.senderIsLeft && !iAmLeft)
+            ? 'outgoing'
+            : 'incoming';
+        rebuiltLockBook.set(lockId, {
+          lockId,
+          accountId: String(accountId),
+          tokenId: Number(lock.tokenId),
+          amount: BigInt(lock.amount),
+          hashlock: String(lock.hashlock),
+          timelock: BigInt(lock.timelock),
+          direction,
+          createdAt: BigInt(lock.createdTimestamp),
+        });
+      }
+    }
+    replica.state.lockBook = rebuiltLockBook as typeof replica.state.lockBook;
+  }
+}
+
+function rebuildEntityOrderbookExtFromAccounts(env: Env): void {
+  for (const replica of env.eReplicas.values()) {
+    const snapshotExt = replica.state.orderbookExt as
+      | {
+          hubProfile?: Record<string, unknown>;
+          books?: Map<string, unknown>;
+          referrals?: Map<string, unknown>;
+        }
+      | undefined;
+    if (!snapshotExt?.hubProfile) continue;
+
+    const rebuiltExt = createOrderbookExtState(structuredClone(snapshotExt.hubProfile as never));
+    replica.state.orderbookExt = rebuiltExt as typeof replica.state.orderbookExt;
+
+    const swapOffers = Array.from(replica.state.accounts.entries())
+      .sort((left, right) => left[0].localeCompare(right[0]))
+      .flatMap(([accountId, account]) =>
+        Array.from(account.swapOffers.entries())
+          .sort((left, right) => {
+            const heightDiff = Number(left[1].createdHeight) - Number(right[1].createdHeight);
+            if (heightDiff !== 0) return heightDiff;
+            return String(left[0]).localeCompare(String(right[0]));
+          })
+          .map(([offerId, offer]) => ({
+            offerId: String(offerId),
+            makerIsLeft: offer.makerIsLeft,
+            fromEntity: account.leftEntity,
+            toEntity: account.rightEntity,
+            accountId: String(accountId),
+            giveTokenId: Number(offer.giveTokenId),
+            giveAmount: BigInt(offer.giveAmount),
+            wantTokenId: Number(offer.wantTokenId),
+            wantAmount: BigInt(offer.wantAmount),
+            minFillRatio: Number(offer.minFillRatio),
+          })),
+      );
+
+    if (swapOffers.length === 0) continue;
+    const result = processOrderbookSwaps(replica.state, swapOffers);
+    if (result.mempoolOps.length > 0) {
+      throw new Error(
+        `ORDERBOOK_REHYDRATE_INVARIANT_FAILED: entity=${replica.entityId} generated ${result.mempoolOps.length} mempool ops during rebuild`,
+      );
+    }
+    for (const update of result.bookUpdates) {
+      rebuiltExt.books.set(update.pairId, update.book);
+    }
+  }
+}
+
 export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: string | null): Promise<Env | null> => {
   const isDbNotFound = (error: unknown): boolean => {
     if (!error || typeof error !== 'object') return false;
@@ -3783,6 +3891,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       );
 
       const data = deserializeTaggedJson<any>(snapshotBufferToUse.toString());
+      normalizeSnapshotInPlace(data);
       const persistedSnapshotStateHash =
         typeof data?.runtimeStateHash === 'string' ? data.runtimeStateHash : undefined;
 
@@ -3815,6 +3924,11 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
         validateEntityState(replica.state, `loadEnvFromDB.eReplicas[${String(replica.entityId)}].state`);
         replica.state.config = mergeRuntimeJurisdictionConfig(replica.state.config, env);
       }
+      // Derived entity indexes are intentionally not persisted. Rebuild them before WAL
+      // replay so replay handlers observe the same swap/lock views they had in live mode.
+      rebuildEntitySwapBookFromAccounts(env);
+      rebuildEntityLockBookFromAccounts(env);
+      rebuildEntityOrderbookExtFromAccounts(env);
       env.history = [];
       if (selectedSnapshotHeight > 0) {
         env.history.push(
@@ -4138,6 +4252,8 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
         normalizeEntitySwapTradingPairs(replica.state);
       }
       rebuildEntitySwapBookFromAccounts(env);
+      rebuildEntityLockBookFromAccounts(env);
+      rebuildEntityOrderbookExtFromAccounts(env);
       (env as any).__replayMeta = {
         namespace: dbNamespace,
         latestHeight,

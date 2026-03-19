@@ -18,7 +18,6 @@ import { deriveDelta } from '../../account-utils';
 import { NobleCryptoProvider } from '../../crypto-noble';
 import { createOnionEnvelopes } from '../../htlc-envelope-types';
 
-const PAYMENT_TS_MARKER_RE = /(?:^|\s)tsms:(\d{10,})(?=$|\s)/i;
 const formatEntityId = (id: string) => id.slice(-4);
 const addMessage = (state: EntityState, message: string) => state.messages.push(message);
 const logError = (context: string, message: string) => console.error(`[${context}] ${message}`);
@@ -44,13 +43,33 @@ const getRuntimeJurisdictionHeight = async (env: Env, fallbackHeight: number): P
   return best;
 };
 
+const isHexChar = (char: string): boolean => {
+  const code = char.charCodeAt(0);
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 70) ||
+    (code >= 97 && code <= 102)
+  );
+};
+
+const isHexValue = (value: string, expectedBytes: number): boolean => {
+  const expectedLength = 2 + expectedBytes * 2;
+  if (value.length !== expectedLength || !value.startsWith('0x')) return false;
+  for (let index = 2; index < value.length; index += 1) {
+    if (!isHexChar(value[index]!)) return false;
+  }
+  return true;
+};
+
 export async function handleHtlcPayment(
   entityState: EntityState,
   entityTx: Extract<any, { type: 'htlcPayment' }>,
   env: Env
-): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps?: Array<{ accountId: string; tx: any }> }> {
-  console.log(`🔒 HTLC-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`);
-  console.log(`   Amount: ${entityTx.data.amount}, Route: ${entityTx.data.route?.map((r: string) => r.slice(-4)).join('→') || 'none'}`);
+): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: Array<{ accountId: string; tx: any }> }> {
+  if (env.quietRuntimeLogs !== true) {
+    console.log(`🔒 HTLC-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`);
+    console.log(`   Amount: ${entityTx.data.amount}, Route: ${entityTx.data.route?.map((r: string) => r.slice(-4)).join('→') || 'none'}`);
+  }
 
   // Emit HTLC initiation event
   env.emit('HtlcPaymentInitiated', {
@@ -68,6 +87,8 @@ export async function handleHtlcPayment(
   // Extract payment details
   let { targetEntityId, tokenId, amount, route, description, secret, hashlock } = entityTx.data;
   const desiredRecipientAmount = amount;
+  const paymentStartedAtMs =
+    typeof entityTx.data.startedAtMs === 'number' ? entityTx.data.startedAtMs : newState.timestamp;
 
   // Validate secret/hashlock - MUST be provided in tx (determinism requirement)
   if (!secret && !hashlock) {
@@ -134,26 +155,26 @@ export async function handleHtlcPayment(
   // Validate route starts with current entity
   if (route.length < 1 || route[0] !== entityState.entityId) {
     logError("HTLC_PAYMENT", `❌ Invalid route: doesn't start with current entity`);
-    return { newState: entityState, outputs: [] };
+    return { newState: entityState, outputs: [], mempoolOps: [] };
   }
 
   // Validate route ends with targetEntityId
   if (route[route.length - 1] !== targetEntityId) {
     logError("HTLC_PAYMENT", `❌ Invalid route: end doesn't match targetEntityId`);
-    return { newState: entityState, outputs: [] };
+    return { newState: entityState, outputs: [], mempoolOps: [] };
   }
 
   // Check if we're the final destination
   if (route.length === 1 && route[0] === targetEntityId) {
     addMessage(newState, `💰 Received HTLC payment of ${amount} (token ${tokenId})`);
-    return { newState, outputs: [] };
+    return { newState, outputs: [], mempoolOps: [] };
   }
 
   // Determine next hop
   const nextHop = route[1];
   if (!nextHop) {
     logError("HTLC_PAYMENT", `❌ Invalid route: no next hop`);
-    return { newState, outputs: [] };
+    return { newState, outputs: [], mempoolOps: [] };
   }
 
   // Check if we have an account with next hop
@@ -161,7 +182,7 @@ export async function handleHtlcPayment(
   if (!newState.accounts.has(nextHop)) {
     logError("HTLC_PAYMENT", `❌ No account with next hop: ${nextHop.slice(-4)}`);
     addMessage(newState, `❌ HTLC payment failed: No account with ${formatEntityId(nextHop)}`);
-    return { newState, outputs: [] };
+    return { newState, outputs: [], mempoolOps: [] };
   }
 
   const preparedSenderLockRaw = entityTx.data.preparedSenderLockAmount;
@@ -265,7 +286,7 @@ export async function handleHtlcPayment(
         ? preparedTimelockRaw
         : BigInt(String(preparedTimelockRaw));
       revealBeforeHeight = Number(preparedRevealBeforeHeightRaw);
-      if (!lockId || !/^0x[0-9a-f]{64}$/i.test(lockId)) {
+      if (!lockId || !isHexValue(lockId, 32)) {
         throw new Error(`invalid lockId=${String(preparedLockIdRaw)}`);
       }
       if (timelock <= 0n || !Number.isFinite(revealBeforeHeight) || revealBeforeHeight <= 0) {
@@ -321,15 +342,14 @@ export async function handleHtlcPayment(
     hashlock,
     tokenId,
     amount,
+    startedAtMs: paymentStartedAtMs,
     outboundEntity: nextHop,
     outboundLockId: lockId,
     createdTimestamp: newState.timestamp
   });
 
   const rawPaymentDescription = typeof description === 'string' ? description.trim() : '';
-  const paymentDescription = PAYMENT_TS_MARKER_RE.test(rawPaymentDescription)
-    ? rawPaymentDescription
-    : `${rawPaymentDescription ? `${rawPaymentDescription} ` : ''}tsms:${newState.timestamp}`;
+  const paymentDescription = rawPaymentDescription;
   if (paymentDescription) {
     if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map<HtlcNoteKey, string>();
     newState.htlcNotes.set(`hashlock:${hashlock}`, paymentDescription);
@@ -346,15 +366,29 @@ export async function handleHtlcPayment(
       const trimmed = raw.trim();
       if (!trimmed) return null;
       const prefixed = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
-      return /^0x[0-9a-fA-F]{64}$/.test(prefixed) ? prefixed.toLowerCase() : null;
+      return isHexValue(prefixed, 32) ? prefixed.toLowerCase() : null;
     };
     const normalizeX25519Base64 = (raw: unknown): string | null => {
       if (typeof raw !== 'string') return null;
       const trimmed = raw.trim();
       if (!trimmed) return null;
-      // Strict base64 gate to avoid decoding arbitrary hex/signature strings.
       if (trimmed.length % 4 !== 0) return null;
-      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(trimmed)) return null;
+      let paddingStarted = false;
+      let paddingCount = 0;
+      for (const char of trimmed) {
+        const code = char.charCodeAt(0);
+        const isUpper = code >= 65 && code <= 90;
+        const isLower = code >= 97 && code <= 122;
+        const isDigit = code >= 48 && code <= 57;
+        const isBase64 = isUpper || isLower || isDigit || char === '+' || char === '/';
+        if (char === '=') {
+          paddingStarted = true;
+          paddingCount += 1;
+          if (paddingCount > 2) return null;
+          continue;
+        }
+        if (!isBase64 || paddingStarted) return null;
+      }
       try {
         const bytes = typeof atob === 'function'
           ? Uint8Array.from(atob(trimmed), (c) => c.charCodeAt(0))
@@ -414,14 +448,22 @@ export async function handleHtlcPayment(
     }
     const keyDebug = hops.map((entityId) => {
       const key = entityPubKeys.get(entityId) || '';
-      const isHex = /^0x[0-9a-f]{64}$/i.test(key);
+      const isHex = isHexValue(key, 32);
       const source = keySources.get(entityId) || 'unknown';
       return `${formatEntityId(entityId)}:${isHex ? 'hex32' : 'b64'}:len=${key.length}:src=${source}`;
     }).join(' | ');
     console.log(`🧅 HTLC-KEYS: ${keyDebug}`);
     const crypto = new NobleCryptoProvider();
 
-    envelope = await createOnionEnvelopes(route, secret, entityPubKeys, crypto, hopForwardAmounts, paymentDescription || undefined);
+    envelope = await createOnionEnvelopes(
+      route,
+      secret,
+      entityPubKeys,
+      crypto,
+      hopForwardAmounts,
+      paymentDescription || undefined,
+      paymentStartedAtMs,
+    );
     console.log(`🧅 ENVELOPE: ${crypto ? 'ENCRYPTED' : 'CLEARTEXT'} | hops=${hops.length} keys=${entityPubKeys.size} missing=[${missingKeys.map(e => formatEntityId(e))}]`);
 
     // Persist deterministic payload for WAL replay.

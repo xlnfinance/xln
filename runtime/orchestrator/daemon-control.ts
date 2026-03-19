@@ -15,7 +15,7 @@ const DEFAULT_REBALANCE_GAS_FEE = 0n;
 const DEFAULT_REBALANCE_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_ORDERBOOK_MIN_TRADE_SIZE = 10n * 10n ** 18n;
 const DEFAULT_ORDERBOOK_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
-const DEFAULT_CUSTODY_CREDIT_AMOUNT = 10_000n * 10n ** 18n;
+const DEFAULT_CUSTODY_CREDIT_AMOUNT = 100_000_000_000n * 10n ** 18n;
 const DEFAULT_CUSTODY_CREDIT_TOKEN_IDS = [1, 2, 3] as const;
 
 export type ControlEntitySummary = {
@@ -26,6 +26,7 @@ export type ControlEntitySummary = {
   runtimeId: string | null;
   accountCount: number;
   publicAccountCount: number;
+  accountEntityIds: string[];
 };
 
 export type ControlQueueResponse = {
@@ -78,7 +79,11 @@ export type DaemonControlClientOptions = {
   timeoutMs?: number;
 };
 
-const normalizeBaseUrl = (value: string): string => value.replace(/\/+$/, '');
+const normalizeBaseUrl = (value: string): string => {
+  let normalized = value;
+  while (normalized.endsWith('/')) normalized = normalized.slice(0, -1);
+  return normalized;
+};
 
 const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
@@ -273,6 +278,7 @@ const buildEnableRoutingEntityInput = (
 const buildCustodyConnectivityInput = (
   identity: ManagedEntityIdentity,
   config: SetupCustodyConfig,
+  missingHubEntityIds: readonly string[],
 ): RuntimeInput | null => {
   const hubEntityIds = (config.hubEntityIds || []).map(id => id.trim().toLowerCase()).filter(Boolean);
   if (hubEntityIds.length === 0) return null;
@@ -284,11 +290,13 @@ const buildCustodyConnectivityInput = (
     .map(value => Number(value))
     .filter(value => Number.isFinite(value) && value > 0);
   const entityTxs: RuntimeInput['entityInputs'][number]['entityTxs'] = [];
-  for (const hubEntityId of hubEntityIds) {
+  for (const hubEntityId of missingHubEntityIds) {
     entityTxs.push({
       type: 'openAccount',
       data: { targetEntityId: hubEntityId },
     });
+  }
+  for (const hubEntityId of hubEntityIds) {
     for (const tokenId of creditTokenIds) {
       entityTxs.push({
         type: 'extendCredit',
@@ -351,9 +359,36 @@ export const setupCustody = async (
   config: SetupCustodyConfig,
 ): Promise<ManagedEntityIdentity> => {
   const identity = await ensureManagedEntity(client, config);
-  const connectivityInput = buildCustodyConnectivityInput(identity, config);
-  if (connectivityInput) {
-    await client.queueRuntimeInput(connectivityInput);
+  const hubEntityIds = (config.hubEntityIds || []).map(id => id.trim().toLowerCase()).filter(Boolean);
+  if (hubEntityIds.length > 0) {
+    const entities = await client.listEntities();
+    const custodySummary = entities.find(entity => entity.entityId.toLowerCase() === identity.entityId.toLowerCase());
+    const existingAccountEntityIds = new Set(
+      Array.isArray(custodySummary?.accountEntityIds)
+        ? custodySummary.accountEntityIds.map(value => String(value).toLowerCase())
+        : [],
+    );
+    const missingHubEntityIds = hubEntityIds.filter(hubEntityId => !existingAccountEntityIds.has(hubEntityId));
+    const connectivityInput = buildCustodyConnectivityInput(identity, config, missingHubEntityIds);
+    if (connectivityInput) {
+      await client.queueRuntimeInput(connectivityInput);
+      if (missingHubEntityIds.length > 0) {
+        const deadline = Date.now() + 15_000;
+        while (Date.now() < deadline) {
+          const refreshedEntities = await client.listEntities();
+          const refreshedSummary = refreshedEntities.find(entity => entity.entityId.toLowerCase() === identity.entityId.toLowerCase());
+          const refreshedAccountEntityIds = new Set(
+            Array.isArray(refreshedSummary?.accountEntityIds)
+              ? refreshedSummary.accountEntityIds.map(value => String(value).toLowerCase())
+              : [],
+          );
+          if (hubEntityIds.every(hubEntityId => refreshedAccountEntityIds.has(hubEntityId))) {
+            break;
+          }
+          await sleep(250);
+        }
+      }
+    }
   }
   if (config.routingEnabled) {
     await enableRouting(client, {

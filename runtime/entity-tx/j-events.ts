@@ -278,8 +278,17 @@ function applyKnownHtlcSecret(
  */
 export const handleJEvent = async (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> => {
   const { from: signerId, observedAt, blockNumber, blockHash } = entityTxData;
-  // j-watcher now sends batched events - use 'events' array, fallback to single 'event'
-  const rawEvents = (entityTxData as any).events || [entityTxData.event];
+  type RawJEventBatchData = JEventEntityTxData & {
+    events?: unknown[];
+    event?: unknown;
+    transactionHash?: string;
+  };
+  const batchData = entityTxData as RawJEventBatchData;
+  const rawEvents = Array.isArray(batchData.events)
+    ? batchData.events
+    : batchData.event !== undefined
+      ? [batchData.event]
+      : [];
 
   const entityShort = entityState.entityId.slice(-4);
   console.log(`🏛️ [2/3] E-MACHINE: ${entityShort} ← ${rawEvents.length} events (block ${blockNumber})`);
@@ -311,7 +320,10 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
       ...(raw || {}),
       blockNumber,
       blockHash,
-      transactionHash: (raw as any)?.transactionHash ?? entityTxData.transactionHash,
+      transactionHash:
+        (typeof raw === 'object' && raw !== null && 'transactionHash' in raw && typeof (raw as { transactionHash?: unknown }).transactionHash === 'string')
+          ? (raw as { transactionHash: string }).transactionHash
+          : batchData.transactionHash,
     });
     if (!normalized) {
       console.warn(`⚠️ Dropping malformed j-event payload at block ${blockNumber}: ${safeStringify(raw)}`);

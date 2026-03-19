@@ -1,16 +1,4 @@
-import type { EntityState } from './types';
-
-const PAYMENT_TS_MARKER_RE = /(?:^|\s)tsms:(\d{10,})(?=$|\s)/i;
-
-export const extractStartedAtMs = (description?: string): number | null => {
-  const match = String(description || '').match(PAYMENT_TS_MARKER_RE);
-  if (!match) return null;
-  const parsed = Number(match[1]);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-};
-
-export const buildHtlcReceivedTimingFields = (description: string | undefined, receivedAtMs: number) => {
-  const startedAtMs = extractStartedAtMs(description);
+export const buildHtlcReceivedTimingFields = (startedAtMs: number | undefined, receivedAtMs: number) => {
   if (!startedAtMs) {
     return { receivedAtMs };
   }
@@ -19,12 +7,10 @@ export const buildHtlcReceivedTimingFields = (description: string | undefined, r
     startedAtMs,
     receivedAtMs,
     elapsedMs,
-    finalizedInMs: elapsedMs,
   };
 };
 
-export const buildHtlcFinalizedTimingFields = (description: string | undefined, finalizedAtMs: number) => {
-  const startedAtMs = extractStartedAtMs(description);
+export const buildHtlcFinalizedTimingFields = (startedAtMs: number | undefined, finalizedAtMs: number) => {
   if (!startedAtMs) {
     return { finalizedAtMs };
   }
@@ -47,6 +33,7 @@ type CommonHtlcEventArgs = {
   tokenId?: number;
   jurisdictionId?: string;
   description?: string;
+  startedAtMs?: number;
 };
 
 export const buildHtlcReceivedEventPayload = (
@@ -61,7 +48,7 @@ export const buildHtlcReceivedEventPayload = (
   ...(args.tokenId !== undefined ? { tokenId: args.tokenId } : {}),
   ...(args.jurisdictionId ? { jurisdictionId: args.jurisdictionId } : {}),
   ...(args.description ? { description: args.description } : {}),
-  ...buildHtlcReceivedTimingFields(args.description, args.receivedAtMs),
+  ...buildHtlcReceivedTimingFields(args.startedAtMs, args.receivedAtMs),
 });
 
 export const buildHtlcFinalizedEventPayload = (
@@ -77,6 +64,5 @@ export const buildHtlcFinalizedEventPayload = (
   ...(args.tokenId !== undefined ? { tokenId: args.tokenId } : {}),
   ...(args.jurisdictionId ? { jurisdictionId: args.jurisdictionId } : {}),
   ...(args.description ? { description: args.description } : {}),
-  ...buildHtlcFinalizedTimingFields(args.description, args.finalizedAtMs),
+  ...buildHtlcFinalizedTimingFields(args.startedAtMs, args.finalizedAtMs),
 });
-

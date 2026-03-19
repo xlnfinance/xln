@@ -26,6 +26,7 @@ export interface HtlcEnvelope {
   finalRecipient?: boolean;   // Is this the last hop?
   secret?: string;            // Only in final recipient's envelope
   description?: string;       // Optional payment note (final recipient envelope only)
+  startedAtMs?: number;       // Sender-side first lock timestamp
   innerEnvelope?: string;     // Encoded envelope for next hop (encrypted or JSON)
   forwardAmount?: string;     // Exact amount this hop must forward to next hop
 }
@@ -65,7 +66,8 @@ export async function createOnionEnvelopes(
   entityPubKeys?: Map<string, string>,
   crypto?: CryptoProvider,
   hopForwardAmounts?: Map<string, bigint>,
-  description?: string
+  description?: string,
+  startedAtMs?: number,
 ): Promise<HtlcEnvelope> {
   if (route.length < 2) {
     throw new Error('Route must have at least sender and recipient');
@@ -106,28 +108,20 @@ export async function createOnionEnvelopes(
   if (!finalRecipient) {
     throw new Error('Route must have at least one recipient');
   }
-  let encryptedBlob = '';
-
-  if (crypto && entityPubKeys) {
-    const finalRecipientKey = entityPubKeys.get(finalRecipient);
-    if (finalRecipientKey) {
-      const finalPayload = safeStringify({
-        finalRecipient: true,
-        secret,
-        ...(description ? { description } : {}),
-      });
-      encryptedBlob = await crypto.encrypt(finalPayload, finalRecipientKey);
-    }
+  if (!crypto || !entityPubKeys) {
+    throw new Error('Onion envelope encryption requires crypto provider and recipient keys');
   }
-
-  if (!encryptedBlob) {
-    // Fallback: no encryption available, use cleartext
-    encryptedBlob = safeStringify({
-      finalRecipient: true,
-      secret,
-      ...(description ? { description } : {}),
-    });
+  const finalRecipientKey = entityPubKeys.get(finalRecipient);
+  if (!finalRecipientKey) {
+    throw new Error(`Missing encryption key for final recipient ${finalRecipient}`);
   }
+  const finalPayload = safeStringify({
+    finalRecipient: true,
+    secret,
+    ...(description ? { description } : {}),
+    ...(startedAtMs !== undefined ? { startedAtMs } : {}),
+  });
+  let encryptedBlob = await crypto.encrypt(finalPayload, finalRecipientKey);
 
   // Step 2: Wrap each hop's layer (from final backwards to first)
   // Each hop encrypts: {nextHop: X, encryptedBlob: Y} FOR themselves
@@ -150,14 +144,11 @@ export async function createOnionEnvelopes(
         : {})
     });
 
-    if (crypto && entityPubKeys) {
-      const currentHopKey = entityPubKeys.get(currentHop);
-      if (currentHopKey) {
-        encryptedBlob = await crypto.encrypt(layerPayload, currentHopKey);
-      }
-    } else {
-      encryptedBlob = layerPayload;
+    const currentHopKey = entityPubKeys.get(currentHop);
+    if (!currentHopKey) {
+      throw new Error(`Missing encryption key for hop ${currentHop}`);
     }
+    encryptedBlob = await crypto.encrypt(layerPayload, currentHopKey);
   }
 
   // Step 3: Build final envelope for first hop (cleartext wrapper)
@@ -194,6 +185,9 @@ export function unwrapEnvelope(encoded: string): HtlcEnvelope {
  * @returns true if valid, throws if invalid
  */
 export function validateEnvelope(envelope: HtlcEnvelope): boolean {
+  if (envelope.description !== undefined && envelope.description.length > 256) {
+    throw new Error('Envelope description exceeds 256 characters');
+  }
   if (envelope.finalRecipient) {
     if (!envelope.secret) {
       throw new Error('Final recipient envelope must have secret');
@@ -201,12 +195,20 @@ export function validateEnvelope(envelope: HtlcEnvelope): boolean {
     if (envelope.description !== undefined && typeof envelope.description !== 'string') {
       throw new Error('Final recipient envelope description must be string');
     }
+    if (envelope.startedAtMs !== undefined) {
+      if (!Number.isFinite(envelope.startedAtMs) || envelope.startedAtMs <= 0) {
+        throw new Error('Final recipient envelope startedAtMs must be positive number');
+      }
+    }
     if (envelope.nextHop || envelope.innerEnvelope) {
       throw new Error('Final recipient envelope must not have nextHop or innerEnvelope');
     }
   } else {
     if (envelope.description !== undefined) {
       throw new Error('Intermediary envelope must not contain description');
+    }
+    if (envelope.startedAtMs !== undefined) {
+      throw new Error('Intermediary envelope must not contain startedAtMs');
     }
     if (!envelope.nextHop) {
       throw new Error('Intermediary envelope must have nextHop');

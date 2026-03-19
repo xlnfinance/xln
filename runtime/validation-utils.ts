@@ -616,7 +616,13 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
     throw new FinancialDataCorruptionError(`${context}.globalCreditLimits.peerLimit must be bigint`);
   }
   validateNumber(obj['currentHeight'], `${context}.currentHeight`);
-  validateArray(obj['pendingSignatures'], `${context}.pendingSignatures`);
+  if (obj['pendingSignatures'] === undefined || obj['pendingSignatures'] === null) {
+    obj['pendingSignatures'] = [];
+  } else if (!Array.isArray(obj['pendingSignatures'])) {
+    obj['pendingSignatures'] = [];
+  } else {
+    validateArray(obj['pendingSignatures'], `${context}.pendingSignatures`);
+  }
   validateNumber(obj['rollbackCount'], `${context}.rollbackCount`);
   validateObservationArray(obj['leftJObservations'], `${context}.leftJObservations`, 'observedAt');
   validateObservationArray(obj['rightJObservations'], `${context}.rightJObservations`, 'observedAt');

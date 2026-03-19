@@ -1,5 +1,15 @@
-import { cloneEntityState } from './state-helpers';
-import type { EntityReplica, Env, EnvSnapshot, JReplica, Profile, RoutedEntityInput, RuntimeInput } from './types';
+import type {
+  AccountMachine,
+  AccountTx,
+  EntityReplica,
+  EntityState,
+  Env,
+  EnvSnapshot,
+  JReplica,
+  Profile,
+  RoutedEntityInput,
+  RuntimeInput,
+} from './types';
 
 const cloneHankoWitness = (
   hankoWitness?: EntityReplica['hankoWitness'],
@@ -34,12 +44,156 @@ const cloneNestedBigIntMap = <V>(
 export const buildCanonicalEntityReplicaSnapshot = (replica: EntityReplica): EntityReplica => ({
   entityId: replica.entityId,
   signerId: replica.signerId,
-  state: cloneEntityState(replica.state, true),
+  state: buildCanonicalEntityStateSnapshot(replica.state),
   mempool: [],
   isProposer: replica.isProposer,
   ...(replica.position ? { position: { ...replica.position } } : {}),
   ...(cloneHankoWitness(replica.hankoWitness) ? { hankoWitness: cloneHankoWitness(replica.hankoWitness) } : {}),
 });
+
+const cloneAccountTxs = (txs: AccountTx[]): AccountTx[] => txs.map((tx) => structuredClone(tx));
+
+const cloneAccountMachineSnapshot = (account: AccountMachine): AccountMachine => {
+  const snapshot: AccountMachine = {
+    leftEntity: account.leftEntity,
+    rightEntity: account.rightEntity,
+    status: account.status,
+    mempool: [],
+    currentFrame: structuredClone(account.currentFrame),
+    deltas: new Map(Array.from(account.deltas.entries()).map(([tokenId, delta]) => [tokenId, structuredClone(delta)])),
+    locks: new Map(Array.from(account.locks.entries()).map(([lockId, lock]) => [lockId, structuredClone(lock)])),
+    swapOffers: new Map(
+      Array.from(account.swapOffers.entries()).map(([offerId, offer]) => [offerId, structuredClone(offer)]),
+    ),
+    globalCreditLimits: structuredClone(account.globalCreditLimits),
+    currentHeight: account.currentHeight,
+    rollbackCount: account.rollbackCount,
+    leftJObservations: structuredClone(account.leftJObservations),
+    rightJObservations: structuredClone(account.rightJObservations),
+    jEventChain: structuredClone(account.jEventChain),
+    lastFinalizedJHeight: account.lastFinalizedJHeight,
+    proofHeader: structuredClone(account.proofHeader),
+    proofBody: structuredClone(account.proofBody),
+    disputeConfig: structuredClone(account.disputeConfig),
+    onChainSettlementNonce: account.onChainSettlementNonce,
+    frameHistory: [],
+    pendingWithdrawals: new Map(
+      Array.from(account.pendingWithdrawals.entries()).map(([requestId, entry]) => [requestId, structuredClone(entry)]),
+    ),
+    requestedRebalance: new Map(
+      Array.from(account.requestedRebalance.entries()).map(([tokenId, amount]) => [tokenId, BigInt(amount)]),
+    ),
+    requestedRebalanceFeeState: new Map(
+      Array.from(account.requestedRebalanceFeeState.entries()).map(([tokenId, entry]) => [
+        tokenId,
+        structuredClone(entry),
+      ]),
+    ),
+    rebalancePolicy: new Map(
+      Array.from(account.rebalancePolicy.entries()).map(([tokenId, entry]) => [tokenId, structuredClone(entry)]),
+    ),
+  };
+
+  if (account.lastRollbackFrameHash) snapshot.lastRollbackFrameHash = account.lastRollbackFrameHash;
+  if (account.abiProofBody) snapshot.abiProofBody = structuredClone(account.abiProofBody);
+  if (account.currentFrameHanko) snapshot.currentFrameHanko = account.currentFrameHanko;
+  if (account.counterpartyFrameHanko) snapshot.counterpartyFrameHanko = account.counterpartyFrameHanko;
+  if (account.currentDisputeProofHanko) snapshot.currentDisputeProofHanko = account.currentDisputeProofHanko;
+  if (account.currentDisputeProofNonce !== undefined) snapshot.currentDisputeProofNonce = account.currentDisputeProofNonce;
+  if (account.currentDisputeProofBodyHash) snapshot.currentDisputeProofBodyHash = account.currentDisputeProofBodyHash;
+  if (account.currentDisputeHash) snapshot.currentDisputeHash = account.currentDisputeHash;
+  if (account.counterpartyDisputeProofHanko) {
+    snapshot.counterpartyDisputeProofHanko = account.counterpartyDisputeProofHanko;
+  }
+  if (account.counterpartyDisputeProofNonce !== undefined) {
+    snapshot.counterpartyDisputeProofNonce = account.counterpartyDisputeProofNonce;
+  }
+  if (account.counterpartyDisputeProofBodyHash) {
+    snapshot.counterpartyDisputeProofBodyHash = account.counterpartyDisputeProofBodyHash;
+  }
+  if (account.counterpartyDisputeHash) snapshot.counterpartyDisputeHash = account.counterpartyDisputeHash;
+  if (account.counterpartySettlementHanko) snapshot.counterpartySettlementHanko = account.counterpartySettlementHanko;
+  if (account.disputeProofNoncesByHash) {
+    snapshot.disputeProofNoncesByHash = structuredClone(account.disputeProofNoncesByHash);
+  }
+  if (account.disputeProofBodiesByHash) {
+    snapshot.disputeProofBodiesByHash = structuredClone(account.disputeProofBodiesByHash);
+  }
+  if (account.settlementWorkspace) snapshot.settlementWorkspace = structuredClone(account.settlementWorkspace);
+  if (account.activeDispute) snapshot.activeDispute = structuredClone(account.activeDispute);
+  if (account.hankoSignature) snapshot.hankoSignature = account.hankoSignature;
+  if (account.pendingForward) snapshot.pendingForward = structuredClone(account.pendingForward);
+  if (account.counterpartyRebalanceFeePolicy) {
+    snapshot.counterpartyRebalanceFeePolicy = structuredClone(account.counterpartyRebalanceFeePolicy);
+  }
+  if (account.activeRebalanceQuote) snapshot.activeRebalanceQuote = structuredClone(account.activeRebalanceQuote);
+  if (account.pendingRebalanceRequest) {
+    snapshot.pendingRebalanceRequest = structuredClone(account.pendingRebalanceRequest);
+  }
+
+  return snapshot;
+};
+
+const buildCanonicalOrderbookSnapshot = (entityState: EntityState): EntityState['orderbookExt'] | undefined => {
+  const ext = entityState.orderbookExt;
+  if (!ext || !ext.hubProfile) return undefined;
+  return {
+    books: new Map(),
+    referrals: new Map(),
+    hubProfile: structuredClone(ext.hubProfile),
+  };
+};
+
+const buildCanonicalEntityStateSnapshot = (entityState: EntityState): EntityState => {
+  const snapshot: EntityState = {
+    entityId: entityState.entityId,
+    height: entityState.height,
+    timestamp: entityState.timestamp,
+    nonces: new Map(Array.from(entityState.nonces.entries())),
+    messages: [...entityState.messages],
+    proposals: new Map(
+      Array.from(entityState.proposals.entries()).map(([proposalId, proposal]) => [
+        proposalId,
+        {
+          ...structuredClone(proposal),
+          votes: new Map(Array.from(proposal.votes.entries()).map(([voter, vote]) => [voter, structuredClone(vote)])),
+        },
+      ]),
+    ),
+    config: structuredClone(entityState.config),
+    reserves: new Map(Array.from(entityState.reserves.entries()).map(([tokenId, amount]) => [tokenId, BigInt(amount)])),
+    accounts: new Map(
+      Array.from(entityState.accounts.entries()).map(([accountId, account]) => [
+        accountId,
+        cloneAccountMachineSnapshot(account),
+      ]),
+    ),
+    lastFinalizedJHeight: entityState.lastFinalizedJHeight,
+    jBlockObservations: structuredClone(entityState.jBlockObservations),
+    jBlockChain: structuredClone(entityState.jBlockChain),
+    entityEncPubKey: entityState.entityEncPubKey,
+    entityEncPrivKey: entityState.entityEncPrivKey,
+    profile: structuredClone(entityState.profile),
+    htlcRoutes: new Map(
+      Array.from(entityState.htlcRoutes.entries()).map(([hashlock, route]) => [hashlock, structuredClone(route)]),
+    ),
+    htlcFeesEarned: BigInt(entityState.htlcFeesEarned),
+    swapBook: new Map(),
+    lockBook: new Map(),
+  };
+
+  if (entityState.prevFrameHash) snapshot.prevFrameHash = entityState.prevFrameHash;
+  if (entityState.crontabState) snapshot.crontabState = structuredClone(entityState.crontabState);
+  if (entityState.debts) snapshot.debts = structuredClone(entityState.debts);
+  if (entityState.orderbookExt) snapshot.orderbookExt = buildCanonicalOrderbookSnapshot(entityState);
+  if (entityState.swapTradingPairs) snapshot.swapTradingPairs = structuredClone(entityState.swapTradingPairs);
+  if (entityState.pendingSwapFillRatios) {
+    snapshot.pendingSwapFillRatios = new Map(Array.from(entityState.pendingSwapFillRatios.entries()));
+  }
+  if (entityState.hubRebalanceConfig) snapshot.hubRebalanceConfig = structuredClone(entityState.hubRebalanceConfig);
+
+  return snapshot;
+};
 
 export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   name: jr.name,
@@ -194,6 +348,6 @@ export const buildCanonicalEnvSnapshot = (
           },
         }
       : {}),
-    ...(logs ? { logs, frameLogs: logs } : {}),
-  } as EnvSnapshot & { frameLogs?: Env['frameLogs'] };
+    ...(logs ? { logs } : {}),
+  };
 };
