@@ -1123,9 +1123,28 @@
       }
       const prepared = prepareCanonicalOrder(giveAmount, wantAmount);
       if (!prepared) throw new Error('Order does not fit canonical lot/tick constraints');
-      const effectiveGiveAmount = prepared.effectiveGive;
-      const effectiveWantAmount = prepared.effectiveWant;
-      const canonicalPriceTicks = prepared.priceTicks;
+      let effectiveGiveAmount = prepared.effectiveGive;
+      let effectiveWantAmount = prepared.effectiveWant;
+      let canonicalPriceTicks = prepared.priceTicks;
+
+      // When user clicked an orderbook level, use the exact price from the book
+      // to avoid rounding drift from amounts→price→amounts round-trip.
+      // Recompute amounts at the exact book price so the order crosses correctly.
+      if (selectedOrderLevel && selectedOrderLevel.priceTicks > 0n) {
+        const exactTicks = selectedOrderLevel.priceTicks;
+        const LOT_SCALE = 10n ** 12n;
+        const side = tradeSide === 'sell-base' ? 1 : 0;
+        const rawBase = side === 1 ? giveAmount : wantAmount;
+        const quantizedBase = (rawBase / LOT_SCALE) * LOT_SCALE;
+        if (quantizedBase > 0n) {
+          const quantizedQuote = (quantizedBase * exactTicks) / ORDERBOOK_PRICE_SCALE;
+          if (quantizedQuote > 0n) {
+            effectiveGiveAmount = side === 1 ? quantizedBase : quantizedQuote;
+            effectiveWantAmount = side === 1 ? quantizedQuote : quantizedBase;
+            canonicalPriceTicks = exactTicks;
+          }
+        }
+      }
       if (effectiveGiveAmount <= 0n || effectiveWantAmount <= 0n) {
         throw new Error('Quantized order too small');
       }

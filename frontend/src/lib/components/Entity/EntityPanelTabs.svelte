@@ -2263,7 +2263,7 @@
 
   function formatTime(ms: number): string {
     if (!Number.isFinite(ms) || ms <= 0) return '-';
-    return new Date(ms).toLocaleTimeString();
+    return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 } as Intl.DateTimeFormatOptions);
   }
 
   function entityTxTypeLabel(type: string): string {
@@ -3365,7 +3365,9 @@
                           <span class="entity-frame-time">{formatTime(row.timestamp)}</span>
                         </div>
                         <div class="entity-frame-row-meta">
-                          <span class="entity-frame-status">{row.statusLabel}</span>
+                          {#if row.kind !== 'confirmed'}
+                            <span class="entity-frame-status">{row.statusLabel}</span>
+                          {/if}
                           <span class="entity-frame-count">{row.txCount} tx</span>
                         </div>
                       </div>

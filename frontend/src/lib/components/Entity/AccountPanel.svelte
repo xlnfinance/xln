@@ -33,6 +33,7 @@
     frameLabel: string;
     timestamp: number;
     statusLabel: string;
+    byLeft?: boolean;
     txs: AccountTx[];
   };
 
@@ -114,12 +115,17 @@
   $: activityRows = (() => {
     const rows: ActivityRow[] = [];
     if (account.pendingFrame) {
+      const pendingByLeft = account.pendingFrame.byLeft;
+      const pendingIsYou = pendingByLeft !== undefined ? (pendingByLeft === iAmLeft) : undefined;
       rows.push({
         id: `pending-${account.pendingFrame.height}`,
         kind: 'pending',
         frameLabel: `Pending Frame #${account.pendingFrame.height}`,
         timestamp: Number(account.pendingFrame.timestamp || 0),
-        statusLabel: 'Awaiting Consensus',
+        statusLabel: pendingIsYou !== undefined
+          ? (pendingIsYou ? `You (${iAmLeft ? 'L' : 'R'})` : `Peer (${iAmLeft ? 'R' : 'L'})`)
+          : 'Pending',
+        byLeft: pendingByLeft,
         txs: Array.isArray(account.pendingFrame.accountTxs) ? account.pendingFrame.accountTxs : [],
       });
     }
@@ -135,12 +141,17 @@
     }
     const historicalFrames = Array.isArray(account.frameHistory) ? account.frameHistory.slice(-12).reverse() : [];
     for (const frame of historicalFrames) {
+      const fByLeft = frame.byLeft;
+      const isYou = fByLeft !== undefined ? (fByLeft === iAmLeft) : undefined;
       rows.push({
         id: `confirmed-${frame.height}`,
         kind: 'confirmed',
         frameLabel: `Frame #${frame.height}`,
         timestamp: Number(frame.timestamp || 0),
-        statusLabel: 'Confirmed',
+        statusLabel: isYou !== undefined
+          ? (isYou ? `You (${iAmLeft ? 'L' : 'R'})` : `Peer (${iAmLeft ? 'R' : 'L'})`)
+          : 'Confirmed',
+        byLeft: fByLeft,
         txs: Array.isArray(frame.accountTxs) ? frame.accountTxs : [],
       });
     }
@@ -164,7 +175,9 @@
     .filter((row) => row.filteredTxs.length > 0);
 
   function formatTimestamp(ms: number): string {
-    return new Date(ms).toLocaleTimeString();
+    if (!ms) return '';
+    const d = new Date(ms);
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 } as Intl.DateTimeFormatOptions);
   }
 
   function txTypeLabel(type: string): string {
@@ -650,10 +663,10 @@
       <div class="frame-history">
         {#if filteredActivityRows.length > 0}
           {#each filteredActivityRows as row (row.id)}
-            <div class="frame-item {row.kind}">
+            <div class="frame-item {row.kind} {row.byLeft !== undefined ? (row.byLeft === iAmLeft ? 'author-you' : 'author-peer') : ''}">
               <div class="frame-header">
                 <span class="frame-id">{row.frameLabel}</span>
-                <span class="frame-status {row.kind}">{row.statusLabel}</span>
+                <span class="frame-status {row.kind} {row.byLeft !== undefined ? (row.byLeft === iAmLeft ? 'is-you' : 'is-peer') : ''}">{row.statusLabel}</span>
                 <span class="frame-timestamp">{formatTimestamp(row.timestamp)}</span>
               </div>
               <div class="tx-cards">
@@ -1239,6 +1252,22 @@
 
   .frame-status.confirmed {
     color: #34d399;
+  }
+
+  .frame-status.is-you {
+    color: #60a5fa;
+  }
+
+  .frame-status.is-peer {
+    color: #c084fc;
+  }
+
+  .frame-item.author-you {
+    border-left: 3px solid #60a5fa;
+  }
+
+  .frame-item.author-peer {
+    border-left: 3px solid #c084fc;
   }
 
   .frame-id,

@@ -15,7 +15,7 @@ import { deriveDelta, getSwapPairPolicyByBaseQuote } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { formatEntityId } from '../../utils';
 import { canonicalAccountKey } from '../../state-helpers';
-import { deriveSide, SWAP_LOT_SCALE, prepareSwapOrder } from '../../orderbook';
+import { deriveSide, SWAP_LOT_SCALE, ORDERBOOK_PRICE_SCALE, prepareSwapOrder } from '../../orderbook';
 import { FINANCIAL } from '../../constants';
 
 export async function handleSwapOffer(
@@ -85,7 +85,7 @@ export async function handleSwapOffer(
   if (!prepared) {
     return { success: false, error: `Invalid price ratio or order too small after canonical quantization`, events };
   }
-  const priceTicks = prepared.priceTicks;
+  let priceTicks = prepared.priceTicks;
   if (inputPriceTicks !== undefined) {
     if (inputPriceTicks <= 0n) {
       return { success: false, error: `Invalid explicit priceTicks: ${inputPriceTicks}`, events };
@@ -99,16 +99,27 @@ export async function handleSwapOffer(
         events,
       };
     }
-    if (inputPriceTicks !== priceTicks) {
+    // Allow ±1 step tolerance: amounts derived from exact priceTicks can
+    // round-trip with 1 tick drift due to integer division truncation.
+    // When within tolerance, use the explicit price (preserves user's click intent).
+    const tickDrift = inputPriceTicks > priceTicks
+      ? inputPriceTicks - priceTicks
+      : priceTicks - inputPriceTicks;
+    if (tickDrift > stepTicks) {
       return {
         success: false,
-        error: `Price mismatch after deterministic quantization: expected ${priceTicks.toString()}, got ${inputPriceTicks.toString()}`,
+        error: `Price mismatch after deterministic quantization: expected ${priceTicks.toString()}, got ${inputPriceTicks.toString()} (drift ${tickDrift} > step ${stepTicks})`,
         events,
       };
     }
+    // Adopt explicit price — this is the exact book level the user clicked
+    priceTicks = inputPriceTicks;
   }
-  const effectiveGiveAmount = prepared.effectiveGive;
-  const effectiveWantAmount = prepared.effectiveWant;
+  // Recompute effective amounts at the (possibly adopted) price
+  const quantizedBaseAmount = prepared.quantizedBaseAmount;
+  const recomputedQuote = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+  const effectiveGiveAmount = side === 1 ? quantizedBaseAmount : recomputedQuote;
+  const effectiveWantAmount = side === 1 ? recomputedQuote : quantizedBaseAmount;
   if (effectiveGiveAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || effectiveGiveAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
     return {
       success: false,
