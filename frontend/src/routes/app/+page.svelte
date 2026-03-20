@@ -9,7 +9,11 @@
   import { tabOperations } from '$lib/stores/tabStore';
   import { timeOperations } from '$lib/stores/timeStore';
   import { vaultOperations } from '$lib/stores/vaultStore';
-  import { initializeActiveTabLock } from '$lib/utils/activeTabLock';
+  import {
+    clearInactiveTabStandby,
+    initializeActiveTabLock,
+    isInactiveTabStandby,
+  } from '$lib/utils/activeTabLock';
 
   let embedMode = false;
   let embeddedPayMode = false;
@@ -105,6 +109,13 @@
     };
     window.addEventListener('hashchange', handleLocationChange);
     void (async () => {
+      if (isInactiveTabStandby()) {
+        hasActiveTabLock = false;
+        activeTabLockReady = true;
+        isLoading.set(false);
+        error.set(null);
+        return;
+      }
       releaseLock = await initializeActiveTabLock(async () => {
         await deactivateThisTab();
       });
@@ -137,7 +148,14 @@
   <div class="inactive-tab-screen">
     <h2>Inactive Tab</h2>
     <p>This wallet tab lost the active lock to a newer tab.</p>
-    <button on:click={() => window.location.reload()}>Reload to acquire active lock</button>
+    <button
+      on:click={() => {
+        clearInactiveTabStandby();
+        window.location.reload();
+      }}
+    >
+      Reload to acquire active lock
+    </button>
   </div>
 {:else if embeddedPayMode}
   <div class="embedded-pay-screen">

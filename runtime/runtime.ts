@@ -489,6 +489,8 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
     env.runtimeState = {
       loopActive: false,
       stopLoop: null,
+      wakeLoop: null,
+      wakeRequested: false,
       lastFrameAt: undefined,
       p2p: null,
       pendingP2PConfig: null,
@@ -500,6 +502,49 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
     env.runtimeState.entityRuntimeHints = new Map();
   }
   return env.runtimeState;
+};
+
+const requestRuntimeLoopWake = (env: Env): void => {
+  const state = ensureRuntimeState(env);
+  const wakeLoop = state.wakeLoop;
+  if (wakeLoop) {
+    state.wakeLoop = null;
+    wakeLoop();
+    return;
+  }
+  state.wakeRequested = true;
+};
+
+const waitForRuntimeLoopWakeOrTimeout = async (env: Env, timeoutMs: number): Promise<void> => {
+  const state = ensureRuntimeState(env);
+  if (timeoutMs <= 0) {
+    if (state.wakeRequested) state.wakeRequested = false;
+    await sleep(0);
+    return;
+  }
+  if (state.wakeRequested) {
+    state.wakeRequested = false;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      if (state.wakeLoop === wake) {
+        state.wakeLoop = null;
+      }
+      resolve();
+    };
+    const wake = () => {
+      state.wakeRequested = false;
+      finish();
+    };
+    state.wakeLoop = wake;
+    timeoutId = setTimeout(finish, timeoutMs);
+  });
 };
 
 const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
@@ -633,6 +678,7 @@ const enqueueRuntimeInputs = (env: Env, inputs?: RoutedEntityInput[], runtimeTxs
     if (mempool.queuedAt === undefined) {
       mempool.queuedAt = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
     }
+    requestRuntimeLoopWake(env);
   }
 };
 
@@ -989,19 +1035,24 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
           // best-effort diagnostics
         }
       }
-      if (tickDelayMs > 0) {
-        await sleep(tickDelayMs);
-      } else {
-        // yield to event loop even with 0 delay (let network/UI callbacks run)
+      if (!running) break;
+      if (hasRuntimeWork(env)) {
+        // Drain chained outputs/ACKs immediately instead of paying the production idle
+        // poll delay after every intermediate hop.
         await sleep(0);
+        continue;
       }
+      await waitForRuntimeLoopWakeOrTimeout(env, tickDelayMs);
     }
     state.loopActive = false;
+    state.wakeLoop = null;
+    state.wakeRequested = false;
   };
 
   loop(); // fire-and-forget — single async chain, never overlaps
   state.stopLoop = () => {
     running = false;
+    requestRuntimeLoopWake(env);
   };
   return state.stopLoop;
 }
