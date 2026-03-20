@@ -27,6 +27,7 @@
   let activeTab: Tab = 'wallet';
 
   let seedCopied = false;
+  let mnemonic12Copied = false;
 
   // J-Machines tab state
   let enabledChains = new Set<number>();
@@ -115,8 +116,8 @@ function copySeed() {
 function copyMnemonic12() {
   if ($activeVault?.mnemonic12) {
     navigator.clipboard.writeText($activeVault.mnemonic12);
-    seedCopied = true;
-    setTimeout(() => seedCopied = false, 2000);
+    mnemonic12Copied = true;
+    setTimeout(() => mnemonic12Copied = false, 2000);
   }
 }
 
@@ -292,7 +293,7 @@ function copyMnemonic12() {
                 <div class="seed-subhead">
                   <span>12 words</span>
                   <button class="copy-btn" on:click={copyMnemonic12}>
-                    {#if seedCopied}
+                    {#if mnemonic12Copied}
                       <Check size={14} />
                     {:else}
                       <Copy size={14} />

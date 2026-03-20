@@ -14,7 +14,7 @@
  */
 
 import type { Env, EntityInput, EntityReplica, Delta, AccountMachine } from '../types';
-import { getProcess, getApplyRuntimeInput, usd, ensureSignerKeysFromSeed } from './helpers';
+import { getProcess, getApplyRuntimeInput, usd, ensureSignerKeysFromSeed, converge as _converge } from './helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta } from '../account-utils';
 import { isLeftEntity } from '../entity-id-utils';
@@ -47,23 +47,7 @@ function findReplica(env: Env, entityId: string): [string, EntityReplica] {
   return entry as [string, EntityReplica];
 }
 
-async function converge(env: Env, maxCycles = 15): Promise<void> {
-  const process = await getProcess();
-  for (let i = 0; i < maxCycles; i++) {
-    await process(env);
-    let hasWork = false;
-    for (const [, replica] of env.eReplicas) {
-      for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame) {
-          hasWork = true;
-          break;
-        }
-      }
-      if (hasWork) break;
-    }
-    if (!hasWork) return;
-  }
-}
+const converge = (env: Env, maxCycles = 15) => _converge(env, maxCycles);
 
 async function processJEvents(env: Env): Promise<void> {
   const process = await getProcess();

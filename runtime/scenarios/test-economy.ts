@@ -206,27 +206,9 @@ export async function connectEconomy(
   console.log(`\n   ✅ Economy connected!\n`);
 }
 
-/**
- * Helper: converge (copied from swap.ts pattern)
- */
 async function converge(env: Env, maxCycles = 10): Promise<void> {
-  const { getProcess } = await import('./helpers');
-  const process = await getProcess();
-
-  for (let i = 0; i < maxCycles; i++) {
-    await process(env);
-    let hasWork = false;
-    for (const [, replica] of env.eReplicas) {
-      for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame) {
-          hasWork = true;
-          break;
-        }
-      }
-      if (hasWork) break;
-    }
-    if (!hasWork) return;
-  }
+  const { converge: helperConverge } = await import('./helpers');
+  return helperConverge(env, maxCycles);
 }
 
 /**

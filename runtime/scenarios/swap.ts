@@ -24,7 +24,7 @@ import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdiction
 import type { JAdapter } from '../jadapter/types';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime, formatEntity } from '../runtime-ascii';
-import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
+import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
 
 // Lazy-loaded runtime functions
@@ -57,26 +57,6 @@ const getApplyRuntimeInput = async () => {
   }
   return _applyRuntimeInput;
 };
-
-// Helper: Process until no outputs generated (convergence)
-async function converge(env: Env, maxCycles = 10): Promise<void> {
-  const process = await getProcess();
-  for (let i = 0; i < maxCycles; i++) {
-    await process(env);
-    // Check if all mempools are empty and no pending frames
-    let hasWork = false;
-    for (const [, replica] of env.eReplicas) {
-      for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame) {
-          hasWork = true;
-          break;
-        }
-      }
-      if (hasWork) break;
-    }
-    if (!hasWork) return;
-  }
-}
 
 async function processJEvents(env: Env): Promise<void> {
   // RPC watcher is polling-based; force immediate poll in scenarios to avoid
