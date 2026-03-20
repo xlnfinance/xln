@@ -83,6 +83,21 @@ export const HTLC = {
 } as const;
 
 // ═══════════════════════════════════════════════════════════════
+// SWAP / ORDERBOOK
+// ═══════════════════════════════════════════════════════════════
+
+export const SWAP = {
+  /** Soft warning: limit price deviates >10% from best available */
+  PRICE_WARN_BPS: 1000, // 10%
+
+  /** Hard reject: limit price deviates >25% from best available */
+  PRICE_REJECT_BPS: 2500, // 25%
+
+  /** BPS base (10000 = 100%) */
+  BPS_BASE: 10000,
+} as const;
+
+// ═══════════════════════════════════════════════════════════════
 // TIMING & SYNCHRONIZATION
 // ═══════════════════════════════════════════════════════════════
 

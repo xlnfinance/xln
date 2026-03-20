@@ -37,7 +37,7 @@ import { getPerfMs, getWallClockMs } from './utils';
 import { setDeltaTransformerAddress } from './proof-builder';
 import {
   buildCanonicalEnvSnapshot,
-} from './canonical-snapshot';
+} from './wal/snapshot';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { isLeftEntity } from './entity-id-utils';
 import type { JAdapter } from './jadapter';
@@ -217,10 +217,23 @@ import {
 } from './utils';
 import { logError } from './logger';
 import {
+  buildPersistedFrameWriteOps,
   buildRuntimeCheckpointSnapshot,
   computePersistedEnvStateHash,
+  decodePersistedFrameJournal,
+  encodePersistedFrameJournal,
+  readPersistedCheckpointHeight,
+  readPersistedFrameJournalBuffer,
+  readPersistedLatestHeight,
+  readPersistedSchemaVersion,
+  readPersistedSnapshotBuffer,
+  replayFromSnapshotBuffer,
   selectReplayRetryFromGenesis,
   selectReplayStart,
+  type PersistedFrameJournal,
+  verifyPersistedFrameWrite,
+  writePersistedWalOps,
+  writePersistedWalOpsSequential,
 } from './wal';
 
 if (isBrowser && typeof globalThis.process === 'undefined') {
@@ -3563,7 +3576,7 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     const persistedSnapshot = buildRuntimeCheckpointSnapshot(env);
     const runtimeStateHash = computePersistedEnvStateHash(persistedSnapshot);
     const frameSerializeStartedAt = getPerfMs();
-    const frameJournal = serializeTaggedJson({
+    const frameJournal = encodePersistedFrameJournal({
       height: env.height,
       timestamp: env.timestamp,
       // Always persist a frame record so replay has a contiguous frame timeline.
@@ -3573,41 +3586,35 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     });
     frameSerializeMs = getPerfMs() - frameSerializeStartedAt;
     frameJournalBytes = Buffer.byteLength(frameJournal);
-    const ops: Array<{ key: Buffer; value: Buffer }> = [
-      {
-        key: makeDbKey(dbNamespace, 'persistence_schema_version'),
-        value: Buffer.from(String(PERSISTENCE_SCHEMA_VERSION)),
-      },
-      { key: makeDbKey(dbNamespace, `frame_input:${env.height}`), value: Buffer.from(frameJournal) },
-    ];
-
     // Persist a durable checkpoint snapshot every N runtime frames.
     // Restore is always: checkpoint snapshot + contiguous WAL replay on top.
     const CHECKPOINT_INTERVAL = ensureRuntimeConfig(env).snapshotIntervalFrames ?? DEFAULT_SNAPSHOT_INTERVAL_FRAMES;
     const checkpointDue = env.height <= 1 || env.height % CHECKPOINT_INTERVAL === 0;
     const checkpointBlockedByPendingAccountState = checkpointDue && hasUnsafePendingAccountStateForCheckpoint(env);
     const shouldCheckpoint = checkpointDue && !checkpointBlockedByPendingAccountState;
+    let checkpointSnapshot: string | undefined;
     if (shouldCheckpoint) {
       const snapshotSerializeStartedAt = getPerfMs();
       const snapshotPayload = {
         ...persistedSnapshot,
         runtimeStateHash,
       };
-      const snapshot = serializeTaggedJson(snapshotPayload);
+      checkpointSnapshot = serializeTaggedJson(snapshotPayload);
       snapshotSerializeMs = getPerfMs() - snapshotSerializeStartedAt;
-      snapshotBytes = Buffer.byteLength(snapshot);
-      ops.push(
-        { key: makeDbKey(dbNamespace, `snapshot:${env.height}`), value: Buffer.from(snapshot) },
-        { key: makeDbKey(dbNamespace, 'latest_checkpoint_height'), value: Buffer.from(String(env.height)) },
-      );
+      snapshotBytes = Buffer.byteLength(checkpointSnapshot);
     } else if (checkpointBlockedByPendingAccountState) {
       console.warn(
         `[PERSIST] checkpoint skipped at frame=${env.height} due to pending bilateral account state; keeping previous safe checkpoint`,
       );
     }
 
-    // Write pointer last so latest_height is only advanced after all frame data is durable.
-    ops.push({ key: makeDbKey(dbNamespace, 'latest_height'), value: Buffer.from(String(env.height)) });
+    const ops = buildPersistedFrameWriteOps({
+      namespace: dbNamespace,
+      schemaVersion: PERSISTENCE_SCHEMA_VERSION,
+      height: env.height,
+      frameJournal,
+      checkpointSnapshot,
+    });
 
     // NOTE: Browser Level polyfill has shown flaky behavior with db.batch(ops[]) on binary keys.
     // Use chained batch API first, then fail over to sequential puts if needed.
@@ -3615,20 +3622,14 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     const writeStartedAt = getPerfMs();
     let wrote = false;
     try {
-      const batch = db.batch();
-      for (const op of ops) {
-        batch.put(op.key, op.value);
-      }
-      await batch.write();
+      await writePersistedWalOps(db, ops);
       wrote = true;
     } catch (batchError) {
       console.warn('⚠️ db.batch().write() failed, falling back to sequential put:', batchError);
     }
     if (!wrote) {
       try {
-        for (const op of ops) {
-          await db.put(op.key, op.value);
-        }
+        await writePersistedWalOpsSequential(db, ops);
       } catch (putError) {
         if ((state.persistencePaused || ensureRuntimeState(env).db !== db) && isDbUnavailableError(putError)) {
           console.warn(`⚠️ DB write aborted during reset/pause: frame ${env.height}`);
@@ -3647,12 +3648,10 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     if (!verifySkipped) {
       const verifyStartedAt = getPerfMs();
       try {
-        await db.get(makeDbKey(dbNamespace, `frame_input:${env.height}`));
-        const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
-        const latestHeight = Number.parseInt(latestHeightBuffer.toString(), 10);
+        const latestHeight = await verifyPersistedFrameWrite(db, dbNamespace, env.height);
         if (!Number.isFinite(latestHeight) || latestHeight !== env.height) {
           throw new Error(
-            `PERSISTENCE_FATAL: latest_height mismatch after write: expected=${env.height} actual=${String(latestHeightBuffer.toString())}`,
+            `PERSISTENCE_FATAL: latest_height mismatch after write: expected=${env.height} actual=${String(latestHeight)}`,
           );
         }
       } catch (verifyError) {
@@ -3692,22 +3691,13 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
   }
 };
 
-export type PersistedFrameJournal = {
-  height: number;
-  timestamp: number;
-  runtimeInput: RuntimeInput;
-  runtimeStateHash?: string;
-  logs: FrameLogEntry[];
-};
-
 export const getPersistedLatestHeight = async (env: Env): Promise<number> => {
   const dbReady = await tryOpenDb(env);
   if (!dbReady) return 0;
   const dbNamespace = resolveDbNamespace({ env });
   const db = getRuntimeDb(env);
   try {
-    const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
-    const latestHeight = Number.parseInt(latestHeightBuffer.toString(), 10);
+    const latestHeight = await readPersistedLatestHeight(db, dbNamespace);
     return Number.isFinite(latestHeight) && latestHeight > 0 ? latestHeight : 0;
   } catch (error) {
     if (isDbUnavailableError(error)) return 0;
@@ -3723,24 +3713,8 @@ export const readPersistedFrameJournal = async (env: Env, height: number): Promi
   const dbNamespace = resolveDbNamespace({ env });
   const db = getRuntimeDb(env);
   try {
-    const frameBuffer = await db.get(makeDbKey(dbNamespace, `frame_input:${targetHeight}`));
-    const decoded = deserializeTaggedJson<PersistedFrameJournal>(frameBuffer.toString());
-    if (!decoded || typeof decoded !== 'object') return null;
-    const runtimeInput =
-      decoded.runtimeInput && typeof decoded.runtimeInput === 'object'
-        ? decoded.runtimeInput
-        : { runtimeTxs: [], entityInputs: [] };
-    const logs = Array.isArray(decoded.logs) ? decoded.logs : [];
-    return {
-      height:
-        Number.isFinite(Number(decoded.height)) && Number(decoded.height) > 0
-          ? Math.floor(Number(decoded.height))
-          : targetHeight,
-      timestamp: Number.isFinite(Number(decoded.timestamp)) ? Number(decoded.timestamp) : 0,
-      runtimeInput,
-      runtimeStateHash: typeof decoded.runtimeStateHash === 'string' ? decoded.runtimeStateHash : undefined,
-      logs,
-    };
+    const frameBuffer = await readPersistedFrameJournalBuffer(db, dbNamespace, targetHeight);
+    return decodePersistedFrameJournal(frameBuffer.toString(), targetHeight);
   } catch (error) {
     if (isDbUnavailableError(error)) return null;
     const code = String((error as { code?: unknown })?.code ?? '');
@@ -3896,14 +3870,13 @@ export const loadEnvFromDB = async (
     const db = getRuntimeDb(tempEnv);
     let latestHeightBuffer: Buffer;
     try {
-      const schemaVersionBuffer = await db.get(makeDbKey(dbNamespace, 'persistence_schema_version'));
-      const schemaVersion = Number.parseInt(schemaVersionBuffer.toString(), 10);
+      const schemaVersion = await readPersistedSchemaVersion(db, dbNamespace);
       if (!Number.isFinite(schemaVersion) || schemaVersion !== PERSISTENCE_SCHEMA_VERSION) {
         throw new Error(
           `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=n/a latest=n/a restored=n/a reason=Unsupported persistence schema (${schemaVersion})`,
         );
       }
-      latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
+      latestHeightBuffer = Buffer.from(String(await readPersistedLatestHeight(db, dbNamespace)));
     } catch (error) {
       if (isDbNotFound(error)) {
         return null;
@@ -3914,8 +3887,7 @@ export const loadEnvFromDB = async (
     let checkpointHeight = 0;
     let checkpointBuffer: Buffer;
     try {
-      const checkpointHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_checkpoint_height'));
-      checkpointHeight = parseInt(checkpointHeightBuffer.toString());
+      checkpointHeight = await readPersistedCheckpointHeight(db, dbNamespace);
     } catch (error) {
       const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       throw new Error(
@@ -3934,7 +3906,7 @@ export const loadEnvFromDB = async (
     }
     console.log(`[loadEnvFromDB] namespace=${dbNamespace} latest=${latestHeight} checkpoint=${checkpointHeight}`);
     try {
-      checkpointBuffer = await db.get(makeDbKey(dbNamespace, `snapshot:${checkpointHeight}`));
+      checkpointBuffer = await readPersistedSnapshotBuffer(db, dbNamespace, checkpointHeight);
     } catch (error) {
       const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       throw new Error(
@@ -3947,396 +3919,40 @@ export const loadEnvFromDB = async (
       selectedSnapshotLabel: string,
       snapshotBufferToUse: Buffer,
     ): Promise<Env> => {
-      console.log(
-        `[loadEnvFromDB] snapshot selection checkpoint=${checkpointHeight} selected=${selectedSnapshotHeight} source=${selectedSnapshotLabel}`,
-      );
-
-      const data = deserializeTaggedJson<any>(snapshotBufferToUse.toString());
-      normalizeSnapshotInPlace(data);
-      const persistedSnapshotStateHash =
-        typeof data?.runtimeStateHash === 'string' ? data.runtimeStateHash : undefined;
-
-      // Hydrate Maps/BigInts
-      const runtimeSeedRaw = Array.isArray(data.runtimeSeed)
-        ? new TextDecoder().decode(new Uint8Array(data.runtimeSeed))
-        : data.runtimeSeed;
-      const env = createEmptyEnv(runtimeSeedRaw ?? null);
-      env.height = Number(data.height || 0);
-      env.timestamp = Number(data.timestamp || 0);
-      env.dbNamespace = data.dbNamespace ?? dbNamespace;
-      env.activeJurisdiction = typeof data.activeJurisdiction === 'string' ? data.activeJurisdiction : undefined;
-      if (data.browserVMState) {
-        env.browserVMState = data.browserVMState;
-      }
-      if (data.runtimeId) {
-        env.runtimeId = data.runtimeId;
-      } else if (runtimeSeedRaw !== undefined && runtimeSeedRaw !== null) {
-        try {
-          env.runtimeId = deriveSignerAddressSync(runtimeSeedRaw, '1');
-        } catch (error) {
-          console.warn('⚠️ Failed to derive runtimeId from DB snapshot:', error);
-        }
-      }
-      // Support both old (replicas) and new (eReplicas) format
-      env.eReplicas = normalizeReplicaMap(data.eReplicas || data.replicas || []);
-      env.jReplicas = normalizeJReplicaMap(data.jReplicas || []);
-      assertPersistedContractConfigReady(env, `snapshot=${selectedSnapshotHeight} source=${selectedSnapshotLabel}`);
-      for (const replica of env.eReplicas.values()) {
-        validateEntityState(replica.state, `loadEnvFromDB.eReplicas[${String(replica.entityId)}].state`);
-      }
-      // Derived entity indexes are intentionally not persisted. Rebuild them before WAL
-      // replay so replay handlers observe the same swap/lock views they had in live mode.
-      rebuildEntitySwapBookFromAccounts(env);
-      rebuildEntityLockBookFromAccounts(env);
-      rebuildEntityOrderbookExtFromAccounts(env);
-      env.history = [];
-      if (selectedSnapshotHeight > 0) {
-        env.history.push(
-          buildCanonicalEnvSnapshot(env, {
-            runtimeInput: env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
-            runtimeOutputs: env.pendingOutputs ?? [],
-            description: `Frame ${selectedSnapshotHeight}`,
-            meta: { title: `Frame ${selectedSnapshotHeight}` },
-            logs: env.frameLogs,
-            gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
-          }) as any,
-        );
-      }
-      if (persistedSnapshotStateHash) {
-        const actualSnapshotStateHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
-        if (actualSnapshotStateHash !== persistedSnapshotStateHash) {
-          throw new Error(
-            `SNAPSHOT_STATE_HASH_MISMATCH: snapshot=${selectedSnapshotHeight} expected=${persistedSnapshotStateHash} actual=${actualSnapshotStateHash}`,
-          );
-        }
-      }
-      if (env.jReplicas.size > 0) {
-        for (const [name, jr] of env.jReplicas.entries()) {
-          if ((jr as any).stateRoot) {
-            env.jReplicas.set(name, {
-              ...jr,
-              stateRoot: new Uint8Array((jr as any).stateRoot),
-            });
-          }
-        }
-      }
-      const envState = ensureRuntimeState(env);
-      const tempState = ensureRuntimeState(tempEnv);
-      envState.db = tempState.db;
-      envState.dbOpenPromise = tempState.dbOpenPromise;
-
-      // Replay frame journal from snapshot+1 to latest.
-      if (latestHeight > selectedSnapshotHeight) {
-        const missingFrames: number[] = [];
-        for (let h = selectedSnapshotHeight + 1; h <= latestHeight; h++) {
-          try {
-            await db.get(makeDbKey(dbNamespace, `frame_input:${h}`));
-          } catch (error) {
-            if (isDbNotFound(error)) {
-              missingFrames.push(h);
-              continue;
-            }
-            throw error;
-          }
-        }
-        if (missingFrames.length > 0) {
-          const sample = missingFrames.slice(0, 8).join(',');
-          throw new Error(
-            `REPLAY_INVARIANT_FAILED: frame=${missingFrames[0]} checkpoint=${selectedSnapshotHeight} latest=${latestHeight} restored=${selectedSnapshotHeight} reason=Missing WAL frames (${sample}${missingFrames.length > 8 ? ',…' : ''})`,
-          );
-        }
-      }
-      let lastGoodHeight = selectedSnapshotHeight;
-      const isLegacyNoopFrame = (input: RuntimeInput | undefined): boolean => {
-        if (!input) return false;
-        const hasRuntimeTxs = (input.runtimeTxs?.length ?? 0) > 0;
-        const hasJInputs = (input.jInputs?.length ?? 0) > 0;
-        const hasMeaningfulEntityInputs = (input.entityInputs ?? []).some((entityInput) => {
-          const hasEntityTxs = (entityInput.entityTxs?.length ?? 0) > 0;
-          const hasProposal = !!entityInput.proposedFrame;
-          const hasHashPrecommits = !!entityInput.hashPrecommits && entityInput.hashPrecommits.size > 0;
-          return hasEntityTxs || hasProposal || hasHashPrecommits;
-        });
-        return !hasRuntimeTxs && !hasJInputs && !hasMeaningfulEntityInputs;
-      };
-      const runtimeEnv = env as Record<PropertyKey, unknown>;
-      const originalLog = env.log;
-      const originalInfo = env.info;
-      const originalWarn = env.warn;
-      const originalError = env.error;
-      const originalEmit = env.emit;
-      const replayNoop = () => {};
-      const assertReplayNoSideEffects = (frame: number): void => {
-        const pendingOutputs = env.pendingOutputs?.length ?? 0;
-        const pendingNetworkOutputs = env.pendingNetworkOutputs?.length ?? 0;
-        const networkInbox = env.networkInbox?.length ?? 0;
-        if (pendingOutputs > 0 || pendingNetworkOutputs > 0 || networkInbox > 0) {
-          throw new Error(
-            `REPLAY_SIDE_EFFECT_DETECTED: frame=${frame} pendingOutputs=${pendingOutputs} pendingNetworkOutputs=${pendingNetworkOutputs} networkInbox=${networkInbox}`,
-          );
-        }
-      };
-
-      runtimeEnv[ENV_REPLAY_MODE_KEY] = true;
-      env.log = replayNoop;
-      env.info = replayNoop;
-      env.warn = replayNoop;
-      env.error = replayNoop;
-      env.emit = replayNoop;
-      try {
-        for (let h = selectedSnapshotHeight + 1; h <= latestHeight; h++) {
-          try {
-            const frameBuffer = await db.get(makeDbKey(dbNamespace, `frame_input:${h}`));
-            const frame = deserializeTaggedJson<{
-              height: number;
-              timestamp: number;
-              runtimeInput: RuntimeInput;
-              runtimeStateHash?: string;
-              logs?: FrameLogEntry[];
-            }>(frameBuffer.toString());
-            const replayRuntimeTxs = frame?.runtimeInput?.runtimeTxs?.length ?? 0;
-            const replayEntityInputs = frame?.runtimeInput?.entityInputs?.length ?? 0;
-            const replayJInputs = frame?.runtimeInput?.jInputs?.length ?? 0;
-            console.log(
-              `[loadEnvFromDB] replay frame=${h} runtimeTxs=${replayRuntimeTxs} entityInputs=${replayEntityInputs} jInputs=${replayJInputs}`,
-            );
-            if (Number(frame?.height) !== h) {
-              throw new Error(`Frame height mismatch: key=${h} payload=${String(frame?.height)}`);
-            }
-            if (!frame?.runtimeInput) {
-              throw new Error(`Missing runtimeInput at frame ${h}`);
-            }
-            for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
-              for (const tx of entityInput.entityTxs ?? []) {
-                if (tx.type !== 'accountInput') continue;
-                const data = tx.data as Record<string, unknown> | undefined;
-                const inputHeight = Number(data?.height ?? 0);
-                const newFrameHeight = Number((data?.newAccountFrame as { height?: number } | undefined)?.height ?? 0);
-                const hasPrev = Boolean(data?.prevHanko);
-                const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-                console.log(
-                  `[loadEnvFromDB] frame=${h} accountInput from=${fromEntityId.slice(-8)} ` +
-                    `height=${inputHeight} hasPrev=${hasPrev} newFrame=${newFrameHeight || 'none'}`,
-                );
-              }
-            }
-            env.height = h - 1;
-            env.timestamp = Number(frame.timestamp ?? env.timestamp);
-            runtimeEnv[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] = new Set<string>();
-            runtimeEnv[ENV_APPLY_ALLOWED_KEY] = true;
-            await applyRuntimeInput(env, frame.runtimeInput);
-            runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
-            if (typeof frame.runtimeStateHash === 'string' && frame.runtimeStateHash.length > 0) {
-              const actualRuntimeStateHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
-              if (actualRuntimeStateHash !== frame.runtimeStateHash) {
-                throw new Error(
-                  `REPLAY_STATE_HASH_MISMATCH: frame=${h} expected=${frame.runtimeStateHash} actual=${actualRuntimeStateHash}`,
-                );
-              }
-            }
-            assertReplayNoSideEffects(h);
-            for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
-              const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
-              for (const tx of entityInput.entityTxs ?? []) {
-                if (tx.type !== 'accountInput') continue;
-                const data = tx.data as Record<string, unknown> | undefined;
-                const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-                if (!fromEntityId) continue;
-                for (const replica of env.eReplicas.values()) {
-                  if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
-                  const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
-                  console.log(
-                    `[loadEnvFromDB] frame=${h} POST-APPLY entity=${String(entityInput.entityId).slice(-8)} ` +
-                      `from=${fromEntityId.slice(-8)} current=${Number(accountMachine?.currentHeight ?? 0)} ` +
-                      `pending=${Number(accountMachine?.pendingFrame?.height ?? 0)} mempool=${Number(accountMachine?.mempool?.length ?? 0)}`,
-                  );
-                }
-              }
-            }
-            if (env.height !== h) {
-              const canAdvanceLegacyNoop =
-                env.height === h - 1 && isLegacyNoopFrame(frame.runtimeInput);
-              if (canAdvanceLegacyNoop) {
-                console.warn(
-                  `[loadEnvFromDB] frame=${h} legacy no-op WAL frame detected; advancing replay height without state mutation`,
-                );
-                env.height = h;
-              } else {
-                throw new Error(`Replay height mismatch after apply: expected=${h} actual=${env.height}`);
-              }
-            }
-            for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
-              for (const tx of entityInput.entityTxs ?? []) {
-                if (tx.type !== 'accountInput') continue;
-                const data = tx.data as Record<string, unknown> | undefined;
-                const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-                const newAccountFrame = data?.newAccountFrame as Record<string, unknown> | undefined;
-                const hasPrevHanko = Boolean(data?.prevHanko);
-                const inputHeightRaw = data?.height;
-                const inputHeight = Number(inputHeightRaw ?? 0);
-                if (hasPrevHanko && !newAccountFrame && fromEntityId && Number.isFinite(inputHeight) && inputHeight > 0) {
-                  const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
-                  for (const replica of env.eReplicas.values()) {
-                    if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
-                    const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
-                    const currentHeight = Number(accountMachine?.currentHeight ?? 0);
-                    const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
-                    console.log(
-                      `[loadEnvFromDB] frame=${h} ACK-check entity=${String(entityInput.entityId).slice(-8)} ` +
-                        `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} inputHeight=${inputHeight}`,
-                    );
-                    if (currentHeight < inputHeight || pendingHeight === inputHeight) {
-                      const skippedReplayAccountInputs =
-                        ((runtimeEnv[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] as Set<string> | undefined) ?? new Set<string>());
-                      const skippedReplayAckKey = buildSkippedReplayAckKey(
-                        h,
-                        entityIdNorm,
-                        fromEntityId,
-                        inputHeight,
-                        data?.prevHanko,
-                      );
-                      if (skippedReplayAccountInputs.has(skippedReplayAckKey)) {
-                        console.warn(
-                          `[loadEnvFromDB] frame=${h} ACK-check skipping replay-stale ack entity=${String(entityInput.entityId).slice(-8)} ` +
-                            `from=${fromEntityId.slice(-8)} inputHeight=${inputHeight}`,
-                        );
-                        continue;
-                      }
-                      throw new Error(
-                        `REPLAY_ACK_NOT_APPLIED: frame=${h} ackHeight=${inputHeight} currentHeight=${currentHeight} pendingHeight=${pendingHeight} ` +
-                          `entity=${String(entityInput.entityId).slice(0, 12)} from=${fromEntityId.slice(0, 12)}`,
-                      );
-                    }
-                  }
-                }
-                const expectedHeight = Number(newAccountFrame?.height ?? 0);
-                if (!fromEntityId || !Number.isFinite(expectedHeight) || expectedHeight <= 0) continue;
-                const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
-                let applied = false;
-                for (const replica of env.eReplicas.values()) {
-                  if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
-                  const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
-                  const currentHeight = Number(accountMachine?.currentHeight ?? 0);
-                  const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
-                  console.log(
-                    `[loadEnvFromDB] frame=${h} NEWFRAME-check entity=${String(entityInput.entityId).slice(-8)} ` +
-                      `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} expected=${expectedHeight}`,
-                  );
-                  if (currentHeight >= expectedHeight || pendingHeight === expectedHeight) {
-                    applied = true;
-                    break;
-                  }
-                }
-                if (!applied) {
-                  const skippedReplayAccountInputs =
-                    ((runtimeEnv[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] as Set<string> | undefined) ?? new Set<string>());
-                  const skippedReplayNewFrameKey = buildSkippedReplayNewFrameKey(
-                    h,
-                    entityIdNorm,
-                    fromEntityId,
-                    expectedHeight,
-                    newAccountFrame?.stateHash,
-                    newAccountFrame?.prevFrameHash,
-                  );
-                  if (skippedReplayAccountInputs.has(skippedReplayNewFrameKey)) {
-                    console.warn(
-                      `[loadEnvFromDB] frame=${h} NEWFRAME-check skipping replay-stale frame entity=${String(entityInput.entityId).slice(-8)} ` +
-                        `from=${fromEntityId.slice(-8)} expected=${expectedHeight}`,
-                    );
-                    continue;
-                  }
-                  const replayDebug = Array.from(env.eReplicas.values())
-                    .filter(replica => String(replica?.entityId || '').toLowerCase() === entityIdNorm)
-                    .map(replica => {
-                      const am = replica?.state?.accounts?.get?.(fromEntityId);
-                      return {
-                        replicaKey: `${String(replica.entityId).slice(0, 10)}...:${String(replica.signerId).slice(0, 10)}...`,
-                        currentHeight: Number(am?.currentHeight ?? 0),
-                        currentHash: am?.currentFrame?.stateHash ?? null,
-                        currentPrev: am?.currentFrame?.prevFrameHash ?? null,
-                        pendingFrame: Number(am?.pendingFrame?.height ?? 0),
-                        pendingHash: am?.pendingFrame?.stateHash ?? null,
-                        pendingPrev: am?.pendingFrame?.prevFrameHash ?? null,
-                        mempoolSize: Number(am?.mempool?.length ?? 0),
-                        frameHistorySize: Number(am?.frameHistory?.length ?? 0),
-                        frameHistoryTail: (am?.frameHistory ?? []).slice(-3).map((frame) => ({
-                          height: Number(frame?.height ?? 0),
-                          stateHash: frame?.stateHash ?? null,
-                          prevFrameHash: frame?.prevFrameHash ?? null,
-                        })),
-                      };
-                    });
-                  console.warn(
-                    `[loadEnvFromDB] frame=${h} REPLAY_ACCOUNT_FRAME_NOT_APPLIED entity=${String(entityInput.entityId).slice(-8)} ` +
-                      `from=${fromEntityId.slice(-8)} expected=${expectedHeight} debug=${safeStringify(replayDebug)}`,
-                  );
-                  throw new Error(
-                    `REPLAY_ACCOUNT_FRAME_NOT_APPLIED: frame=${h} expected=${expectedHeight} actual=${JSON.stringify(replayDebug)}`,
-                  );
-                }
-              }
-            }
-            env.frameLogs = Array.isArray(frame.logs)
-              ? frame.logs.map((entry): FrameLogEntry => ({ ...entry }))
-              : [];
-            env.history.push(
-              buildCanonicalEnvSnapshot(env, {
-                runtimeInput: env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
-                runtimeOutputs: env.pendingOutputs ?? [],
-                description: `Frame ${h}`,
-                meta: { title: `Frame ${h}` },
-                logs: env.frameLogs,
-                gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
-              }) as any,
-            );
-            env.frameLogs = [];
-            delete runtimeEnv[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY];
-            lastGoodHeight = h;
-          } catch (error) {
-            runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
-            delete runtimeEnv[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY];
-            const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-            throw new Error(
-              `REPLAY_INVARIANT_FAILED: frame=${h} checkpoint=${selectedSnapshotHeight} latest=${latestHeight} restored=${lastGoodHeight} reason=${message}`,
-            );
-          }
-        }
-      } finally {
-        runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
-        runtimeEnv[ENV_REPLAY_MODE_KEY] = false;
-        env.log = originalLog;
-        env.info = originalInfo;
-        env.warn = originalWarn;
-        env.error = originalError;
-        env.emit = originalEmit;
-      }
-      env.height = lastGoodHeight;
-      if (lastGoodHeight !== latestHeight) {
-        throw new Error(
-          `REPLAY_INVARIANT_FAILED: replay completed at ${lastGoodHeight}, expected latest ${latestHeight}`,
-        );
-      }
-      console.log(
-        `[loadEnvFromDB] replay complete latest=${latestHeight} restored=${lastGoodHeight} history=${env.history?.length ?? 0}`,
-      );
-
-      for (const replica of env.eReplicas.values()) {
-        normalizeEntitySwapTradingPairs(replica.state);
-      }
-      rebuildEntitySwapBookFromAccounts(env);
-      rebuildEntityLockBookFromAccounts(env);
-      rebuildEntityOrderbookExtFromAccounts(env);
-      (env as any).__replayMeta = {
-        namespace: dbNamespace,
+      return replayFromSnapshotBuffer({
+        db,
+        dbNamespace,
+        tempEnv,
         latestHeight,
-        checkpointHeight: selectedSnapshotHeight,
-        requestedFromGenesis: options?.fromGenesis === true,
+        checkpointHeight,
+        selectedSnapshotHeight,
         selectedSnapshotLabel,
-        restoredHeight: lastGoodHeight,
-        recoveredHistoryFrames: env.history?.length ?? 0,
-      };
-      (env as any).__replayMeta.recoveredHistoryFrames = env.history?.length ?? 0;
-      return env;
+        requestedFromGenesis: options?.fromGenesis === true,
+        snapshotBuffer: snapshotBufferToUse,
+        deps: {
+          normalizeSnapshotInPlace,
+          createEmptyEnv,
+          deriveRuntimeIdFromSeed: (seed: string) => deriveSignerAddressSync(seed, '1'),
+          normalizeReplicaMap: (raw) => normalizeReplicaMap(raw),
+          normalizeJReplicaMap: (raw) => normalizeJReplicaMap(raw),
+          assertPersistedContractConfigReady,
+          validateEntityState,
+          rebuildEntitySwapBookFromAccounts,
+          rebuildEntityLockBookFromAccounts,
+          rebuildEntityOrderbookExtFromAccounts,
+          buildCanonicalEnvSnapshot,
+          ensureRuntimeState,
+          applyRuntimeInput,
+          buildSkippedReplayAckKey,
+          buildSkippedReplayNewFrameKey,
+          safeStringify,
+          normalizeEntitySwapTradingPairs,
+          isDbNotFound,
+          replayModeKey: ENV_REPLAY_MODE_KEY,
+          replaySkippedAccountInputsKey: ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY,
+          applyAllowedKey: ENV_APPLY_ALLOWED_KEY,
+        },
+      });
     };
 
     let latestEnv: Env;
@@ -4344,7 +3960,7 @@ export const loadEnvFromDB = async (
     if (replayStart.source === 'forced-genesis') {
       let genesisSnapshotBuffer: Buffer;
       try {
-        genesisSnapshotBuffer = await db.get(makeDbKey(dbNamespace, 'snapshot:1'));
+        genesisSnapshotBuffer = await readPersistedSnapshotBuffer(db, dbNamespace, 1);
       } catch (genesisError) {
         const message = genesisError instanceof Error ? `${genesisError.name}: ${genesisError.message}` : String(genesisError);
         throw new Error(
@@ -4368,7 +3984,7 @@ export const loadEnvFromDB = async (
       );
       let genesisSnapshotBuffer: Buffer;
       try {
-        genesisSnapshotBuffer = await db.get(makeDbKey(dbNamespace, 'snapshot:1'));
+        genesisSnapshotBuffer = await readPersistedSnapshotBuffer(db, dbNamespace, 1);
       } catch (genesisError) {
         const message = genesisError instanceof Error ? `${genesisError.name}: ${genesisError.message}` : String(genesisError);
         throw new Error(

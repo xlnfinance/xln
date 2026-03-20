@@ -273,6 +273,38 @@ export const p2pState = writable<P2PState>({
 
 let p2pPollTimer: ReturnType<typeof setInterval> | null = null;
 
+const areP2PQueuesEqual = (
+  left: P2PState['queue'],
+  right: P2PState['queue'],
+): boolean => {
+  if (
+    left.targetCount !== right.targetCount ||
+    left.totalMessages !== right.totalMessages ||
+    left.oldestEntryAge !== right.oldestEntryAge
+  ) {
+    return false;
+  }
+  const leftKeys = Object.keys(left.perTarget);
+  const rightKeys = Object.keys(right.perTarget);
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (const key of leftKeys) {
+    if (left.perTarget[key] !== right.perTarget[key]) return false;
+  }
+  return true;
+};
+
+const areP2PStatesEqual = (left: P2PState, right: P2PState): boolean => {
+  const reconnectEqual =
+    left.reconnect === right.reconnect ||
+    (
+      left.reconnect !== null &&
+      right.reconnect !== null &&
+      left.reconnect.attempt === right.reconnect.attempt &&
+      left.reconnect.nextAt === right.reconnect.nextAt
+    );
+  return left.connected === right.connected && reconnectEqual && areP2PQueuesEqual(left.queue, right.queue);
+};
+
 function startP2PPoll() {
   if (p2pPollTimer) return;
   const poll = () => {
@@ -281,7 +313,12 @@ function startP2PPoll() {
     if (!env) return;
     try {
       const state = XLN.getP2PState(env);
-      if (state) p2pState.set(state);
+      if (state) {
+        const previous = get(p2pState);
+        if (!areP2PStatesEqual(previous, state)) {
+          p2pState.set(state);
+        }
+      }
     } catch {
       /* ignore if not available */
     }
@@ -426,9 +463,6 @@ export async function initializeXLN(): Promise<Env> {
     // Set all stores immediately (no derived timing races)
     onEnvChange(env);
 
-    // Sync to runtimeStore (local runtime)
-    runtimeOperations.updateLocalEnv(env);
-
     // Extract positions from initial load as well
     // Positions are RELATIVE to j-machine - store jReplica reference for world position calculation
     if (env?.eReplicas) {
@@ -510,7 +544,7 @@ export async function enqueueAndProcess(env: Env, input: RuntimeInput): Promise<
 
 // === FRONTEND UTILITY FUNCTIONS ===
 // Derived store that provides utility functions for components
-export const xlnFunctions = derived([xlnEnvironment, xlnInstance, settings], ([, $xlnInstance, $settings]): FrontendXlnFunctions => {
+export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $settings]): FrontendXlnFunctions => {
   const clampPrecision = (value: number): number => Math.max(2, Math.min(18, Math.floor(Number(value) || 2)));
   const settingPrecision = clampPrecision(Number($settings?.tokenPrecision ?? 6));
   const formatRawAmount = (rawAmount: bigint, decimals: number, precisionLimit: number): string => {
