@@ -162,3 +162,65 @@ export const verifyPersistedFrameWrite = async (
   await readPersistedFrameJournalBuffer(db, namespace, height);
   return readPersistedLatestHeight(db, namespace);
 };
+
+export const getPersistedLatestHeightFromDb = async (
+  db: RuntimeWalDb,
+  namespace: string,
+  isDbUnavailableError: (error: unknown) => boolean,
+): Promise<number> => {
+  try {
+    const latestHeight = await readPersistedLatestHeight(db, namespace);
+    return Number.isFinite(latestHeight) && latestHeight > 0 ? latestHeight : 0;
+  } catch (error) {
+    if (isDbUnavailableError(error)) return 0;
+    throw error;
+  }
+};
+
+export const readPersistedFrameJournalFromDb = async (
+  db: RuntimeWalDb,
+  namespace: string,
+  height: number,
+  isDbUnavailableError: (error: unknown) => boolean,
+): Promise<PersistedFrameJournal | null> => {
+  const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
+  if (targetHeight <= 0) return null;
+  try {
+    const frameBuffer = await readPersistedFrameJournalBuffer(db, namespace, targetHeight);
+    return decodePersistedFrameJournal(frameBuffer.toString(), targetHeight);
+  } catch (error) {
+    if (isDbUnavailableError(error)) return null;
+    const code = String((error as { code?: unknown })?.code ?? '');
+    const name = String((error as { name?: unknown })?.name ?? '');
+    if (code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError') return null;
+    throw error;
+  }
+};
+
+export const readPersistedFrameJournalsFromDb = async (
+  db: RuntimeWalDb,
+  namespace: string,
+  isDbUnavailableError: (error: unknown) => boolean,
+  opts?: {
+    fromHeight?: number;
+    toHeight?: number;
+    limit?: number;
+  },
+): Promise<PersistedFrameJournal[]> => {
+  const latestHeight = await getPersistedLatestHeightFromDb(db, namespace, isDbUnavailableError);
+  if (latestHeight <= 0) return [];
+
+  const fromHeight = Math.max(1, Math.floor(opts?.fromHeight ?? 1));
+  const boundedToHeight = Math.max(fromHeight, Math.floor(opts?.toHeight ?? latestHeight));
+  const toHeight = Math.min(latestHeight, boundedToHeight);
+  const limit = Math.max(1, Math.min(1000, Math.floor(opts?.limit ?? 200)));
+  const startHeight = Math.max(fromHeight, toHeight - limit + 1);
+  const receipts: PersistedFrameJournal[] = [];
+
+  for (let height = startHeight; height <= toHeight; height++) {
+    const receipt = await readPersistedFrameJournalFromDb(db, namespace, height, isDbUnavailableError);
+    if (receipt) receipts.push(receipt);
+  }
+
+  return receipts;
+};
