@@ -348,7 +348,7 @@ describe('price improvement', () => {
       const executionQuoteAmount = ticksLotsToWei(totalCost);
       const limitQuoteAmount = ticksLotsToWei(360n);
       const spread = limitQuoteAmount - executionQuoteAmount;
-      const rebateAmount = (spread * 8000n) / 10000n; // 80% to taker
+      const rebateAmount = spread;
       const offerId = 'buy-offer';
 
       const offer: SwapOffer = {
@@ -385,7 +385,7 @@ describe('price improvement', () => {
       expect(-limitQuoteAmount + rebateAmount).toBeGreaterThan(-limitQuoteAmount);
       // Rebate tracked
       expect(accountMachine.totalRebates?.get(1)).toBe(rebateAmount);
-      console.log(`BUY rebate: ${rebateAmount} of ${spread} spread (${Number(rebateAmount * 10000n / spread) / 100}%)`);
+      console.log(`BUY rebate: ${rebateAmount} of ${spread} spread (100%)`);
     });
 
     test('SELL taker gets price improvement with exact settlement', () => {
@@ -435,7 +435,7 @@ describe('price improvement', () => {
       const executionQuoteAmount = ticksLotsToWei(totalCost);
       const limitQuoteAmount = ticksLotsToWei(8700n);
       const spread = executionQuoteAmount - limitQuoteAmount; // seller got more
-      const rebateAmount = (spread * 8000n) / 10000n; // 80% to taker
+      const rebateAmount = spread;
       const offerId = 'sell-offer';
 
       const offer: SwapOffer = {
@@ -473,7 +473,43 @@ describe('price improvement', () => {
       expect(limitQuoteAmount + rebateAmount).toBeGreaterThan(limitQuoteAmount);
       // Rebate tracked
       expect(accountMachine.totalRebates?.get(1)).toBe(rebateAmount);
-      console.log(`SELL rebate: ${rebateAmount} of ${spread} spread (${Number(rebateAmount * 10000n / spread) / 100}%)`);
+      console.log(`SELL rebate: ${rebateAmount} of ${spread} spread (100%)`);
+    });
+
+    test('handleSwapResolve rejects rebate when counterparty cannot fund fill plus rebate', async () => {
+      const executionBaseAmount = 3n * LOT_SCALE;
+      const limitQuoteAmount = ticksLotsToWei(8700n);
+      const rebateAmount = ticksLotsToWei(300n);
+      const offerId = 'sell-capacity-offer';
+
+      const offer: SwapOffer = {
+        offerId,
+        giveTokenId: 2,
+        giveAmount: executionBaseAmount,
+        wantTokenId: 1,
+        wantAmount: limitQuoteAmount,
+        makerIsLeft: true,
+        minFillRatio: 0,
+        createdHeight: 0,
+        quantizedGive: executionBaseAmount,
+        quantizedWant: limitQuoteAmount,
+      };
+      const accountMachine = makeAccountMachine(offer);
+      accountMachine.deltas.get(1)!.rightCreditLimit = limitQuoteAmount;
+      const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
+        type: 'swap_resolve',
+        data: {
+          offerId,
+          fillRatio: 65535,
+          cancelRemainder: true,
+          rebateAmount,
+          rebateTokenId: 1,
+        },
+      };
+
+      const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
+      expect(resolveResult.success).toBe(false);
+      expect(resolveResult.error).toContain('Counterparty insufficient capacity');
     });
   });
 });

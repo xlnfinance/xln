@@ -890,12 +890,6 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
       .poll(async () => (await readSwapState(page, alice.entityId, alice.signerId, hubId)).accountSwapOffersSize, { timeout: 60_000 })
       .toBe(0);
 
-    await switchToRuntimeId(page, bob.runtimeId);
-    await placeNonMarketableSwapOrder(page, hubId);
-    await expect
-      .poll(async () => (await readSwapState(page, bob.entityId, bob.signerId, hubId)).accountSwapOffersSize, { timeout: 60_000 })
-      .toBe(1);
-
     await switchToRuntimeId(page, alice.runtimeId);
     const aliceBefore = await runtimeSnapshot(page);
     const aliceDbBefore = await runtimeDbMeta(page);

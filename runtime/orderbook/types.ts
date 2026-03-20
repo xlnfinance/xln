@@ -226,11 +226,11 @@ export function validateSpreadDistribution(dist: SpreadDistribution): boolean {
   return total === BPS_BASE;
 }
 
-/** Default: 80% to taker (price improvement), 20% hub revenue */
+/** Default: 100% to taker so limit orders always get full market price improvement */
 export const DEFAULT_SPREAD_DISTRIBUTION: SpreadDistribution = {
   makerBps: 0,
-  takerBps: 8000,
-  hubBps: 2000,
+  takerBps: 10000,
+  hubBps: 0,
   makerReferrerBps: 0,
   takerReferrerBps: 0,
 };

@@ -3155,11 +3155,30 @@ const requirePersistedContractAddress = (
   throw new Error(`MISSING_${contractName.toUpperCase()}_ADDRESS: ${label}`);
 };
 
+const findPersistedContractAddress = (
+  jReplicas: Map<string, JReplica>,
+  contractName: 'depository' | 'entityProvider' | 'deltaTransformer',
+): string => {
+  for (const [, jReplica] of jReplicas.entries()) {
+    const rawAddress =
+      contractName === 'depository'
+        ? jReplica.depositoryAddress ?? jReplica.contracts?.depository
+        : contractName === 'entityProvider'
+          ? jReplica.entityProviderAddress ?? jReplica.contracts?.entityProvider
+          : jReplica.contracts?.deltaTransformer;
+    const restoredAddress = String(rawAddress ?? '').trim();
+    if (restoredAddress && ethers.isAddress(restoredAddress)) {
+      return restoredAddress;
+    }
+  }
+  return '';
+};
+
 const assertPersistedContractConfigReady = (env: Env, label: string): void => {
   if (env.jReplicas && env.jReplicas.size > 0) {
     requirePersistedContractAddress(env.jReplicas, label, 'depository');
     requirePersistedContractAddress(env.jReplicas, label, 'entityProvider');
-    setDeltaTransformerAddress(requirePersistedContractAddress(env.jReplicas, label, 'deltaTransformer'));
+    setDeltaTransformerAddress(findPersistedContractAddress(env.jReplicas, 'deltaTransformer'));
   }
 };
 

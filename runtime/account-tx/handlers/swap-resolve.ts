@@ -25,7 +25,7 @@ import type { AccountMachine, AccountTx } from '../../types';
 import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL } from '../../constants';
-import { computeSwapPriceTicks, requantizeRemainingSwapAtPrice, SWAP_LOT_SCALE } from '../../orderbook/types';
+import { canonicalPair, computeSwapPriceTicks, requantizeRemainingSwapAtPrice, SWAP_LOT_SCALE } from '../../orderbook/types';
 
 const MAX_FILL_RATIO = 65535;
 
@@ -105,6 +105,10 @@ export async function handleSwapResolve(
     if (rebateTokenId !== offer.giveTokenId && rebateTokenId !== offer.wantTokenId) {
       return { success: false, error: `Rebate token ${rebateTokenId} not in swap pair`, events };
     }
+    const { quote } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
+    if (rebateTokenId !== quote) {
+      return { success: false, error: `Rebate token ${rebateTokenId} must be quote token ${quote}`, events };
+    }
     if (rebateAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
       return { success: false, error: `Rebate amount out of bounds: ${rebateAmount}`, events };
     }
@@ -129,12 +133,34 @@ export async function handleSwapResolve(
   wantDelta.leftHold ??= 0n;
   wantDelta.rightHold ??= 0n;
 
-  // 5b. AUDIT FIX: Check taker has capacity to give wantToken
+  // 5b. Check counterparty capacity for the full outgoing bundle.
+  // swap_resolve is proposed by the counterparty/hub, so they must be able to fund:
+  // - the canonical fill on offer.wantTokenId
+  // - any quote-side rebate
+  const counterpartyIsLeft = !offer.makerIsLeft;
+  const counterpartyOutgoing = new Map<number, bigint>();
   if (filledWant > 0n) {
-    const takerIsLeft = !offer.makerIsLeft;
-    const takerDerived = deriveDelta(wantDelta, takerIsLeft);
-    if (filledWant > takerDerived.outCapacity) {
-      return { success: false, error: `Taker insufficient capacity: needs ${filledWant}, has ${takerDerived.outCapacity}`, events };
+    counterpartyOutgoing.set(offer.wantTokenId, filledWant);
+  }
+  if (hasRebate) {
+    const current = counterpartyOutgoing.get(rebateTokenId!) ?? 0n;
+    counterpartyOutgoing.set(rebateTokenId!, current + rebateAmount!);
+  }
+  for (const [tokenId, requiredAmount] of counterpartyOutgoing) {
+    if (requiredAmount <= 0n) continue;
+    const deltaForCapacity =
+      tokenId === offer.wantTokenId
+        ? wantDelta
+        : tokenId === offer.giveTokenId
+          ? giveDelta
+          : createDefaultDelta(tokenId);
+    const counterpartyDerived = deriveDelta(deltaForCapacity, counterpartyIsLeft);
+    if (requiredAmount > counterpartyDerived.outCapacity) {
+      return {
+        success: false,
+        error: `Counterparty insufficient capacity on token ${tokenId}: needs ${requiredAmount}, has ${counterpartyDerived.outCapacity}`,
+        events,
+      };
     }
   }
 
