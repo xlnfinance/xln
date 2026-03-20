@@ -139,6 +139,16 @@ const GOSSIP_POLL_MS = 1000; // Keep every runtime synced to relay at least once
 const PROFILE_ANNOUNCE_DEBOUNCE_MS = 25;
 const PROFILE_HEARTBEAT_MS = 15_000;
 const GOSSIP_FETCH_RETRY_DELAYS_MS = [40, 80, 160];
+const INACTIVE_TAB_STANDBY_KEY = 'xln-inactive-tab-standby';
+
+const isInactiveTabStandby = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  try {
+    return sessionStorage.getItem(INACTIVE_TAB_STANDBY_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
 
 export class RuntimeP2P {
   private env: Env;
@@ -405,6 +415,10 @@ export class RuntimeP2P {
     if (typeof document === 'undefined') return;
     if (this.visibilityHandler) return;
     const resume = () => {
+      if (isInactiveTabStandby()) {
+        console.log('[P2P] Tab is in standby; suppressing visibility-triggered reconnect');
+        return;
+      }
       const activeClient = !!this.getActiveClient();
       console.log(
         `[P2P] visibilitychange state=${document.visibilityState} activeClient=${activeClient ? 1 : 0} ` +

@@ -9,6 +9,7 @@ import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/o
 import { writeOnboardingComplete } from '$lib/utils/onboardingState';
 import { clearAllPersistentClientState, resetEverything } from '$lib/utils/resetEverything';
 import { tabOperations } from './tabStore';
+import { isInactiveTabStandby } from '$lib/utils/activeTabLock';
 
 // Types
 export interface Signer {
@@ -1099,6 +1100,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
 function registerRuntimeResumeListener(): void {
   if (resumeListenerRegistered || typeof window === 'undefined' || typeof document === 'undefined') return;
   const triggerRefresh = () => {
+    if (isInactiveTabStandby()) return;
     if (document.visibilityState !== 'visible') return;
     void vaultOperations.refreshActiveRuntimeFromDbIfBehind().catch((error) => {
       console.warn('[VaultStore] Resume refresh failed:', error);
@@ -1109,6 +1111,7 @@ function registerRuntimeResumeListener(): void {
   if (typeof BroadcastChannel !== 'undefined') {
     runtimeSyncChannel = new BroadcastChannel('xln-runtime-sync');
     runtimeSyncChannel.onmessage = (event: MessageEvent<{ runtimeId?: string; height?: number }>) => {
+      if (isInactiveTabStandby()) return;
       const runtimeId = normalizeRuntimeId(event.data?.runtimeId);
       const height = Number(event.data?.height ?? 0);
       if (!runtimeId || !Number.isFinite(height) || height <= 0) return;

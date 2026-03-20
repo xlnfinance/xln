@@ -2,6 +2,7 @@ import { writable } from 'svelte/store';
 
 const ACTIVE_TAB_LOCK_KEY = 'xln-active-tab-lock';
 const ACTIVE_TAB_CHANNEL_NAME = 'xln-active-tab-lock';
+const INACTIVE_TAB_STANDBY_KEY = 'xln-inactive-tab-standby';
 const TAKEOVER_APPROVAL_TIMEOUT_MS = 3000;
 
 type ActiveTabLockRecord = {
@@ -56,6 +57,33 @@ let installed = false;
 let onLoseLockHandler: (() => void | Promise<void>) | null = null;
 let lockLost = false;
 const approvalWaiters = new Map<string, Set<() => void>>();
+
+export function isInactiveTabStandby(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return sessionStorage.getItem(INACTIVE_TAB_STANDBY_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function enterInactiveTabStandby(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(INACTIVE_TAB_STANDBY_KEY, '1');
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function clearInactiveTabStandby(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.removeItem(INACTIVE_TAB_STANDBY_KEY);
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function getOrCreateTabId(): string {
   if (currentTabId) return currentTabId;
@@ -146,6 +174,7 @@ async function handleExternalOwner(ownerTabId: string): Promise<void> {
   activeTabLock.set({ tabId, ownerTabId, isOwner: false });
   if (lockLost) return;
   lockLost = true;
+  enterInactiveTabStandby();
   try {
     await onLoseLockHandler?.();
   } finally {
@@ -203,6 +232,7 @@ export async function initializeActiveTabLock(onLoseLock: () => void | Promise<v
   const previousOwnerTabId = previousOwner?.tabId && previousOwner.tabId !== tabId ? previousOwner.tabId : null;
   onLoseLockHandler = onLoseLock;
   lockLost = false;
+  clearInactiveTabStandby();
 
   if (!installed) {
     installed = true;

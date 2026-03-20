@@ -1827,6 +1827,8 @@ export interface Env {
   runtimeState?: {
     loopActive?: boolean;
     stopLoop?: (() => void) | null;
+    wakeLoop?: (() => void) | null;
+    wakeRequested?: boolean;
     persistencePaused?: boolean;
     lastFrameAt?: number;
     processingPromise?: Promise<void> | null;
