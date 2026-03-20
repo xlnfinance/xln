@@ -27,6 +27,7 @@ import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallbac
 import {
   computeAccountKey,
   entityIdToAddress,
+  getWatcherStartBlock,
   setupContractEventListeners,
   processEventBatch,
   type EventBatchCounter,
@@ -1418,12 +1419,15 @@ export async function createRpcAdapter(
         return;
       }
       watcherEnv = env;
-      lastSyncedBlock = 0;
       txCounter.value = 0;
       txCounter._seenLogs = { set: new Set<string>(), order: [] as string[] };
       const watchPollMs = resolveWatcherPollMs(!!env?.scenarioMode);
       const confirmationDepth = resolveFinalityDepth(!!env?.scenarioMode);
-      console.log(`🔭 [JAdapter:rpc] Starting event watcher (${watchPollMs}ms polling, depth=${confirmationDepth})...`);
+      const startBlock = getWatcherStartBlock(env);
+      lastSyncedBlock = Math.max(0, startBlock - 1);
+      console.log(
+        `🔭 [JAdapter:rpc] Starting event watcher (${watchPollMs}ms polling, depth=${confirmationDepth}, fromBlock=${startBlock})...`,
+      );
 
       // Depository ABI for queryFilter — must match CANONICAL_J_EVENTS
       const depositoryABI = [

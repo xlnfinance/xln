@@ -127,6 +127,31 @@ export type EventBatchCounter = {
   };
 };
 
+const normalizeLowerId = (value: unknown): string => String(value ?? '').toLowerCase();
+
+export function getSelfSignerFinalizedJHeight(env: Env): number {
+  const runtimeId = normalizeLowerId(env?.runtimeId);
+  if (!runtimeId || !env?.eReplicas) return 0;
+
+  let found = false;
+  let minFinalizedHeight = Number.POSITIVE_INFINITY;
+  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    const signerId = normalizeLowerId(replica?.signerId ?? String(replicaKey).split(':')[1] ?? '');
+    if (!signerId || signerId !== runtimeId) continue;
+    const finalizedHeight = Number(replica?.state?.lastFinalizedJHeight ?? 0);
+    if (!Number.isFinite(finalizedHeight)) continue;
+    found = true;
+    minFinalizedHeight = Math.min(minFinalizedHeight, Math.max(0, Math.floor(finalizedHeight)));
+  }
+
+  if (!found || !Number.isFinite(minFinalizedHeight)) return 0;
+  return minFinalizedHeight;
+}
+
+export function getWatcherStartBlock(env: Env): number {
+  return Math.max(1, getSelfSignerFinalizedJHeight(env) + 1);
+}
+
 /**
  * Check if a raw event is a canonical j-event.
  */
