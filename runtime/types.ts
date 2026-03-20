@@ -1031,6 +1031,7 @@ export interface AccountMachine {
 
   // Swap offers (limit orders)
   swapOffers: Map<string, SwapOffer>; // offerId → offer details
+  totalRebates?: Map<number, bigint>; // tokenId → cumulative price improvement rebates received
 
   // Global credit limits (in reference currency - USDC)
   globalCreditLimits: {
@@ -1453,8 +1454,8 @@ export type AccountTx =
         offerId: string;
         fillRatio: number;        // 0-65535 (uint16)
         cancelRemainder: boolean; // true = fill + cancel, false = fill + keep open
-        executionBaseAmount?: bigint;   // Exact base amount filled (orderbook match)
-        executionQuoteAmount?: bigint;  // Exact quote amount paid/received (orderbook match)
+        rebateAmount?: bigint;    // Price improvement rebate (quote token, after SpreadDistribution)
+        rebateTokenId?: number;   // Token for rebate (always quote side)
       };
     }
   // === SETTLEMENT HOLD TYPES (ring-fencing via bilateral consensus) ===

@@ -226,13 +226,13 @@ export function validateSpreadDistribution(dist: SpreadDistribution): boolean {
   return total === BPS_BASE;
 }
 
-/** Default: equal 20% split to all parties */
+/** Default: 80% to taker (price improvement), 20% hub revenue */
 export const DEFAULT_SPREAD_DISTRIBUTION: SpreadDistribution = {
-  makerBps: 2000,
-  takerBps: 2000,
+  makerBps: 0,
+  takerBps: 8000,
   hubBps: 2000,
-  makerReferrerBps: 2000,
-  takerReferrerBps: 2000,
+  makerReferrerBps: 0,
+  takerReferrerBps: 0,
 };
 
 /**

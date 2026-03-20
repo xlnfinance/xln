@@ -1,12 +1,6 @@
 import { ethers } from 'ethers';
 
-import { buildCanonicalRuntimeStateSnapshot } from '../canonical-snapshot';
-import type { Env } from '../types';
 import { safeStringify } from '../serialization-utils';
-
-export const buildRuntimeCheckpointSnapshot = (env: Env): Record<string, unknown> => {
-  return buildCanonicalRuntimeStateSnapshot(env);
-};
 
 export const buildPersistedEnvHashInput = (snapshot: Record<string, unknown>): Record<string, unknown> => {
   const eReplicas = Array.isArray(snapshot.eReplicas)

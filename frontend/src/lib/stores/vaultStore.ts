@@ -1170,10 +1170,6 @@ export const vaultOperations = {
       });
       registerRuntimeEnvChange(runtimeId, refreshedEnv, xln);
 
-      if (normalizeRuntimeId(get(activeRuntimeId) || '') === runtimeId) {
-        setXlnEnvironment(refreshedEnv);
-      }
-
       return true;
     })();
 
@@ -1666,9 +1662,6 @@ export const vaultOperations = {
     }
 
     activeRuntimeId.set(resolvedRuntimeId);
-    if (runtime?.env) {
-      setXlnEnvironment(runtime.env);
-    }
     this.syncRuntime(runtime || null);
   },
 

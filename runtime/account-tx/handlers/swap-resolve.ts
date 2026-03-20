@@ -2,39 +2,30 @@
  * Swap Resolve Handler
  * Hub (counterparty) fills and/or cancels user's offer
  *
- * The hub owns the "option" on the swap:
- * - Can fill 0% to 100% (via fillRatio: 0-65535)
- * - Can keep remainder open or cancel it
+ * Settlement: ALWAYS at offer's limit price (maker's terms).
+ * Price improvement delivered as rebate: hub matched at better prices,
+ * returns the spread to maker (taker in exchange terms) minus hub's cut.
  *
  * Flow:
  * 1. Find offer by offerId
  * 2. Validate caller is NOT the maker (is the counterparty/hub)
  * 3. Validate fillRatio >= offer.minFillRatio (unless cancelling all)
- * 4. Calculate fill amounts using uint16 ratio
+ * 4. Calculate fill amounts at LIMIT PRICE (offer ratio)
  * 5. Update deltas atomically (both tokens)
- * 6. Release proportional hold
- * 7. If cancelRemainder: remove offer; else: update remaining amount
+ * 6. Apply rebate if present (price improvement refund to maker)
+ * 7. Release proportional hold
+ * 8. If cancelRemainder: remove offer; else: update remaining amount
  *
  * Delta rules (same as HTLC):
  * - Left gives → offdelta decreases (negative)
  * - Right gives → offdelta increases (positive)
- *
- * TODO(liquidation): Add solvency check after delta updates
- * If abs(offdelta) > collateral for either party, trigger forced liquidation:
- * - Clear all open orders for insolvent party
- * - Seize collateral proportionally
- * - Emit LIQUIDATION event for on-chain settlement
- *
- * TODO(fees): Add fee collection on matched trades
- * - Hub takes spread (e.g., 0.1% of filledWant)
- * - Fee accrues to hub's delta, incentivizes market making
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
 import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL } from '../../constants';
-import { canonicalPair, computeSwapPriceTicks, requantizeRemainingSwapAtPrice, SWAP_LOT_SCALE } from '../../orderbook/types';
+import { computeSwapPriceTicks, requantizeRemainingSwapAtPrice, SWAP_LOT_SCALE } from '../../orderbook/types';
 
 const MAX_FILL_RATIO = 65535;
 
@@ -49,8 +40,8 @@ export async function handleSwapResolve(
     offerId,
     fillRatio,
     cancelRemainder,
-    executionBaseAmount,
-    executionQuoteAmount,
+    rebateAmount,
+    rebateTokenId,
   } = accountTx.data;
   const events: string[] = [];
 
@@ -80,68 +71,16 @@ export async function handleSwapResolve(
     return { success: false, error: `Fill ratio ${fillRatio} below minimum ${offer.minFillRatio}`, events };
   }
 
-  // 4. Calculate fill amounts
-  // Use quantized amounts if available (set by orderbook) for exact lot-to-wei consistency
-  // This ensures fill ratios computed from lots match settlement amounts exactly
+  // 4. Calculate fill amounts at LIMIT PRICE (offer ratio)
   const effectiveGive = offer.quantizedGive ?? offer.giveAmount;
   const effectiveWant = offer.quantizedWant ?? offer.wantAmount;
-  const hasExecutionBaseAmount = executionBaseAmount !== undefined;
-  const hasExecutionQuoteAmount = executionQuoteAmount !== undefined;
-  if (hasExecutionBaseAmount !== hasExecutionQuoteAmount) {
-    return { success: false, error: 'Exact execution amounts must be provided together', events };
-  }
 
-  let filledGive: bigint;
-  let filledWant: bigint;
-  if (hasExecutionBaseAmount && hasExecutionQuoteAmount) {
-    const exactBaseAmount = executionBaseAmount;
-    const exactQuoteAmount = executionQuoteAmount;
-    if (fillRatio === 0 && (exactBaseAmount !== 0n || exactQuoteAmount !== 0n)) {
-      return { success: false, error: 'Exact execution amounts must be zero for zero fill', events };
-    }
-    if (fillRatio > 0 && (exactBaseAmount <= 0n || exactQuoteAmount <= 0n)) {
-      return { success: false, error: 'Exact execution amounts must be positive when fillRatio > 0', events };
-    }
-    if (exactBaseAmount % SWAP_LOT_SCALE !== 0n) {
-      return { success: false, error: 'Exact base execution amount must be lot-aligned', events };
-    }
-
-    const { base: baseTokenId } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
-    const makerSellsBase = offer.giveTokenId === baseTokenId;
-    const expectedBaseAmount = makerSellsBase
-      ? (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO)
-      : (effectiveWant * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
-    if (exactBaseAmount !== expectedBaseAmount) {
-      return {
-        success: false,
-        error: `Exact base amount ${exactBaseAmount} does not match fillRatio-derived amount ${expectedBaseAmount}`,
-        events,
-      };
-    }
-
-    if (makerSellsBase) {
-      filledGive = exactBaseAmount;
-      filledWant = exactQuoteAmount;
-    } else {
-      const maximumQuoteAmount = (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
-      if (exactQuoteAmount > maximumQuoteAmount) {
-        return {
-          success: false,
-          error: `Exact quote amount ${exactQuoteAmount} exceeds maker max spend ${maximumQuoteAmount}`,
-          events,
-        };
-      }
-      filledGive = exactQuoteAmount;
-      filledWant = exactBaseAmount;
-    }
-  } else {
-    // filledGive anchors the fill, filledWant derived using ceil() to protect maker.
-    // Maker must receive at least their limit price; taker pays any dust.
-    filledGive = (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
-    filledWant = effectiveGive > 0n
-      ? (filledGive * effectiveWant + effectiveGive - 1n) / effectiveGive
-      : 0n;
-  }
+  // filledGive anchors the fill, filledWant derived using ceil() to protect maker.
+  // Maker must receive at least their limit price; taker pays any dust.
+  const filledGive = (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
+  const filledWant = effectiveGive > 0n
+    ? (filledGive * effectiveWant + effectiveGive - 1n) / effectiveGive
+    : 0n;
 
   if (fillRatio > 0) {
     if (filledGive < FINANCIAL.MIN_PAYMENT_AMOUNT || filledGive > FINANCIAL.MAX_PAYMENT_AMOUNT) {
@@ -157,6 +96,17 @@ export async function handleSwapResolve(
         error: `Filled want amount out of bounds: ${filledWant} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
         events,
       };
+    }
+  }
+
+  // Validate rebate
+  const hasRebate = rebateAmount !== undefined && rebateAmount > 0n && rebateTokenId !== undefined;
+  if (hasRebate) {
+    if (rebateTokenId !== offer.giveTokenId && rebateTokenId !== offer.wantTokenId) {
+      return { success: false, error: `Rebate token ${rebateTokenId} not in swap pair`, events };
+    }
+    if (rebateAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+      return { success: false, error: `Rebate amount out of bounds: ${rebateAmount}`, events };
     }
   }
 
@@ -180,7 +130,6 @@ export async function handleSwapResolve(
   wantDelta.rightHold ??= 0n;
 
   // 5b. AUDIT FIX: Check taker has capacity to give wantToken
-  // Use deriveDelta for consistency (accounts for collateral, allowances, ondelta)
   if (filledWant > 0n) {
     const takerIsLeft = !offer.makerIsLeft;
     const takerDerived = deriveDelta(wantDelta, takerIsLeft);
@@ -189,30 +138,51 @@ export async function handleSwapResolve(
     }
   }
 
-  // 6. Update deltas atomically if filling
+  // 6. Update deltas atomically if filling (at LIMIT PRICE)
   if (filledGive > 0n) {
-    // Maker gives giveToken, receives wantToken
-    // Taker (counterparty) gives wantToken, receives giveToken
-    //
-    // CANONICAL Delta semantics (from direct-payment.ts):
-    // - Positive offdelta = Right owes Left
-    // - Negative offdelta = Left owes Right
+    // CANONICAL Delta semantics:
     // - Left pays → offdelta DECREASES
     // - Right pays → offdelta INCREASES
 
     if (offer.makerIsLeft) {
-      // Maker (Left) gives giveToken → Left pays → offdelta decreases
-      // Maker (Left) receives wantToken → Right pays → offdelta increases
       giveDelta.offdelta -= filledGive;
       wantDelta.offdelta += filledWant;
     } else {
-      // Maker (Right) gives giveToken → Right pays → offdelta INCREASES
-      // Maker (Right) receives wantToken → Left pays → offdelta DECREASES
       giveDelta.offdelta += filledGive;
       wantDelta.offdelta -= filledWant;
     }
 
     events.push(`💱 Swap filled: ${filledGive} token${offer.giveTokenId} for ${filledWant} token${offer.wantTokenId}`);
+  }
+
+  // 6b. Apply rebate (price improvement refund to maker/offer-creator)
+  // Hub matched at better prices, returns portion of spread to maker
+  if (hasRebate) {
+    let rebateDelta = accountMachine.deltas.get(rebateTokenId!);
+    if (!rebateDelta) {
+      rebateDelta = createDefaultDelta(rebateTokenId!);
+      accountMachine.deltas.set(rebateTokenId!, rebateDelta);
+    }
+    rebateDelta.leftHold ??= 0n;
+    rebateDelta.rightHold ??= 0n;
+
+    // Rebate = hub pays maker. Hub is counterparty (opposite of makerIsLeft).
+    if (offer.makerIsLeft) {
+      // Hub (right) pays maker (left) → offdelta INCREASES
+      rebateDelta.offdelta += rebateAmount!;
+    } else {
+      // Hub (left) pays maker (right) → offdelta DECREASES
+      rebateDelta.offdelta -= rebateAmount!;
+    }
+
+    // Track cumulative rebates
+    if (!accountMachine.totalRebates) {
+      accountMachine.totalRebates = new Map();
+    }
+    const prevRebate = accountMachine.totalRebates.get(rebateTokenId!) ?? 0n;
+    accountMachine.totalRebates.set(rebateTokenId!, prevRebate + rebateAmount!);
+
+    events.push(`💰 Rebate: ${rebateAmount} token${rebateTokenId} (price improvement)`);
   }
 
   // 7. Release hold proportionally (with underflow guard)
@@ -236,9 +206,6 @@ export async function handleSwapResolve(
   }
 
   // 8. Handle remainder
-  // AUDIT FIX (CRITICAL-3): Use counterparty ID format, not canonical pair format
-  // This ensures orderbook cancellation finds the correct entry
-  // The maker is who created this offer (makerIsLeft determines left vs right)
   const makerId = offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity;
   let swapOfferCancelled: { offerId: string; accountId: string } | undefined;
 
@@ -246,7 +213,6 @@ export async function handleSwapResolve(
     // Cancel or fully filled - remove offer and notify orderbook
     const remainingHold = effectiveGive - filledGive;
     if (remainingHold > 0n) {
-      // Release remaining hold (with underflow guard)
       if (offer.makerIsLeft) {
         const currentHold = giveDelta.leftHold || 0n;
         if (currentHold < remainingHold) {
@@ -271,7 +237,6 @@ export async function handleSwapResolve(
   } else {
     // Partial fill - requantize remainder so subsequent fills stay lot-aligned.
     const remainingGiveRaw = effectiveGive - filledGive;
-    const remainingWantRaw = effectiveWant - filledWant;
     const offerPriceTicks = offer.priceTicks ?? computeSwapPriceTicks(
       offer.giveTokenId,
       offer.wantTokenId,

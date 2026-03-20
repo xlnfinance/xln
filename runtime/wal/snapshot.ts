@@ -9,8 +9,8 @@ import type {
   Profile,
   RoutedEntityInput,
   RuntimeInput,
-} from './types';
-import { cloneJBatch } from './j-batch';
+} from '../types';
+import { cloneJBatch } from '../j-batch';
 
 const cloneHankoWitness = (
   hankoWitness?: EntityReplica['hankoWitness'],
@@ -51,8 +51,6 @@ export const buildCanonicalEntityReplicaSnapshot = (replica: EntityReplica): Ent
   ...(replica.position ? { position: { ...replica.position } } : {}),
   ...(cloneHankoWitness(replica.hankoWitness) ? { hankoWitness: cloneHankoWitness(replica.hankoWitness) } : {}),
 });
-
-const cloneAccountTxs = (txs: AccountTx[]): AccountTx[] => txs.map((tx) => structuredClone(tx));
 
 const cloneAccountMachineSnapshot = (account: AccountMachine): AccountMachine => {
   const snapshot: AccountMachine = {
@@ -151,8 +149,6 @@ const buildCanonicalEntityStateSnapshot = (entityState: EntityState): EntityStat
     height: entityState.height,
     timestamp: entityState.timestamp,
     nonces: new Map(Array.from(entityState.nonces.entries())),
-    // UI/debug message tape and in-flight entity proposals are not finalized financial state.
-    // Persisting them increases replay drift surface without helping restore balances/accounts.
     messages: [],
     proposals: new Map(),
     config: structuredClone(entityState.config),
@@ -313,6 +309,10 @@ export const buildCanonicalRuntimeStateSnapshot = (
     buildCanonicalJReplicaSnapshot(jr),
   ]),
 });
+
+export const buildRuntimeCheckpointSnapshot = (env: Env): Record<string, unknown> => {
+  return buildCanonicalRuntimeStateSnapshot(env);
+};
 
 export const buildCanonicalEnvSnapshot = (
   env: Env,

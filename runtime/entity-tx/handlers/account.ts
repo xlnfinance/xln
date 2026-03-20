@@ -7,12 +7,14 @@ import {
   canonicalPair,
   computeSwapPriceTicks,
   deriveSide,
+  getBestAsk,
+  getBestBid,
   ORDERBOOK_PRICE_SCALE,
   SWAP_LOT_SCALE,
   type BookState,
   type OrderbookExtState,
 } from '../../orderbook';
-import { HTLC } from '../../constants';
+import { HTLC, SWAP as SWAP_CONSTANTS } from '../../constants';
 import { getSwapPairPolicyByBaseQuote } from '../../account-utils';
 import { formatEntityId, HEAVY_LOGS } from '../../utils';
 import { isLeftEntity } from '../../entity-id-utils';
@@ -1291,6 +1293,31 @@ export function processOrderbookSwaps(
       continue;
     }
 
+    // Price deviation guard: reject orders that cross too far from best available
+    const bestBid = getBestBid(book);
+    const bestAsk = getBestAsk(book);
+    const priceNum = Number(priceTicks);
+    const REJECT_BPS = SWAP_CONSTANTS.PRICE_REJECT_BPS;
+    const BPS_BASE = SWAP_CONSTANTS.BPS_BASE;
+    if (side === 0 && bestAsk !== null) {
+      // BUY: reject if limit price > bestAsk * (1 + REJECT_BPS/BPS_BASE)
+      const maxAllowed = bestAsk + Math.floor(bestAsk * REJECT_BPS / BPS_BASE);
+      if (priceNum > maxAllowed) {
+        console.warn(`⚠️ ORDERBOOK: BUY price ${priceNum} exceeds ${REJECT_BPS/100}% above best ask ${bestAsk} — rejecting offer=${offer.offerId}`);
+        mempoolOps.push({ accountId, tx: { type: 'swap_resolve', data: { offerId: offer.offerId, fillRatio: 0, cancelRemainder: true } } });
+        continue;
+      }
+    }
+    if (side === 1 && bestBid !== null) {
+      // SELL: reject if limit price < bestBid * (1 - REJECT_BPS/BPS_BASE)
+      const minAllowed = bestBid - Math.floor(bestBid * REJECT_BPS / BPS_BASE);
+      if (priceNum < minAllowed) {
+        console.warn(`⚠️ ORDERBOOK: SELL price ${priceNum} below ${REJECT_BPS/100}% under best bid ${bestBid} — rejecting offer=${offer.offerId}`);
+        mempoolOps.push({ accountId, tx: { type: 'swap_resolve', data: { offerId: offer.offerId, fillRatio: 0, cancelRemainder: true } } });
+        continue;
+      }
+    }
+
     const makerId = offer.makerIsLeft ? offer.fromEntity : offer.toEntity;
     const namespacedOrderId = `${accountId}:${offer.offerId}`;
     console.log(`📊 ORDERBOOK ADD: maker=${formatEntityId(makerId)}, orderId=${namespacedOrderId.slice(-20)}, side=${side}, price=${priceTicks}, qty=${qtyLots}`);
@@ -1383,8 +1410,47 @@ export function processOrderbookSwaps(
       const fillRatio = originalBig > 0n
         ? Number((filledBig * BigInt(MAX_FILL_RATIO)) / originalBig)
         : 0;
-      const executionBaseAmount = filledBig * SWAP_LOT_SCALE;
-      const executionQuoteAmount = (weightedCost * SWAP_LOT_SCALE) / ORDERBOOK_PRICE_SCALE;
+      const executionQuoteWei = (weightedCost * SWAP_LOT_SCALE) / ORDERBOOK_PRICE_SCALE;
+
+      // Compute rebate: spread between limit price and execution price
+      // Find the offer to determine limit-price quote cost
+      const account = hubState.accounts.get(accountId);
+      const swapOffer = account?.swapOffers?.get(offerId);
+      let rebateAmount: bigint | undefined;
+      let rebateTokenId: number | undefined;
+      if (swapOffer && fillRatio > 0) {
+        const effGive = swapOffer.quantizedGive ?? swapOffer.giveAmount;
+        const effWant = swapOffer.quantizedWant ?? swapOffer.wantAmount;
+        const offerSide = deriveSide(swapOffer.giveTokenId, swapOffer.wantTokenId);
+        // Limit-price quote amount for this fill
+        const filledGiveAtLimit = (effGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
+        const filledWantAtLimit = effGive > 0n
+          ? (filledGiveAtLimit * effWant + effGive - 1n) / effGive
+          : 0n;
+        // For BUY (side=0): maker gives quote, limit cost = filledGive, exec cost = executionQuoteWei
+        // For SELL (side=1): maker gives base, limit proceeds = filledWant (quote), exec proceeds = executionQuoteWei
+        let spread = 0n;
+        if (offerSide === 0) {
+          // BUY: spread = limitCost - executionCost (maker overpaid, gets refund)
+          spread = filledGiveAtLimit > executionQuoteWei ? filledGiveAtLimit - executionQuoteWei : 0n;
+          rebateTokenId = swapOffer.giveTokenId; // quote token (what they overpaid in)
+        } else {
+          // SELL: spread = executionProceeds - limitProceeds (maker got more than minimum)
+          spread = executionQuoteWei > filledWantAtLimit ? executionQuoteWei - filledWantAtLimit : 0n;
+          rebateTokenId = swapOffer.wantTokenId; // quote token (what they receive extra in)
+        }
+        if (spread > 0n) {
+          // SpreadDistribution: taker gets takerBps of spread
+          const dist = ext?.hubProfile?.spreadDistribution;
+          const takerBps = dist?.takerBps ?? 8000; // default 80% to taker
+          const BPS_BASE = 10000;
+          rebateAmount = (spread * BigInt(takerBps)) / BigInt(BPS_BASE);
+          if (rebateAmount <= 0n) {
+            rebateAmount = undefined;
+            rebateTokenId = undefined;
+          }
+        }
+      }
 
       const orderStillInBook = book.orderIdToIdx.has(namespacedOrderId) &&
         book.orderActive[book.orderIdToIdx.get(namespacedOrderId)!];
@@ -1397,12 +1463,12 @@ export function processOrderbookSwaps(
             offerId,
             fillRatio: Math.min(fillRatio, MAX_FILL_RATIO),
             cancelRemainder: !orderStillInBook,
-            executionBaseAmount,
-            executionQuoteAmount,
+            ...(rebateAmount !== undefined && rebateTokenId !== undefined && { rebateAmount, rebateTokenId }),
           }
         }
       });
-      console.log(`📤 ORDERBOOK: Queued swap_resolve for ${offerId.slice(-8)}, fill=${(fillRatio/MAX_FILL_RATIO*100).toFixed(1)}%, cancel=${!orderStillInBook}`);
+      const rebateStr = rebateAmount ? `, rebate=${rebateAmount} token${rebateTokenId}` : '';
+      console.log(`📤 ORDERBOOK: Queued swap_resolve for ${offerId.slice(-8)}, fill=${(fillRatio/MAX_FILL_RATIO*100).toFixed(1)}%, cancel=${!orderStillInBook}${rebateStr}`);
     }
   }
 
