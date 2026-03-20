@@ -42,6 +42,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { Wallet, ethers } from 'ethers';
 import { resetProdServer as resetSharedProdServer } from './utils/e2e-baseline';
 import { APP_BASE_URL, API_BASE_URL } from './utils/e2e-baseline';
+import { timedStep } from './utils/e2e-timing';
 import {
   createRuntimeIdentity,
   gotoApp,
@@ -490,22 +491,24 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
       // 2. Get sender balance BEFORE + send payment
       await switchToRuntime(page, senderName);
       const senderBefore = await outCap(page, sender.entityId, senderHub);
-      await pay(page, sender.entityId, sender.signerId, receiver.entityId, route, wei);
 
-      // 3. Wait for receiver to get funds
-      await switchToRuntime(page, receiverName);
       const timeoutMs = 30_000 + hubs.length * 15_000;
-      const receiverAfter = await waitOutCapDelta(page, receiver.entityId, receiverHub, receiverBefore, wei, timeoutMs);
+      const receiverAfter = await timedStep(`${tcName}.send_to_receiver_delta`, async () => {
+        await pay(page, sender.entityId, sender.signerId, receiver.entityId, route, wei);
+        await switchToRuntime(page, receiverName);
+        return waitOutCapDelta(page, receiver.entityId, receiverHub, receiverBefore, wei, timeoutMs);
+      });
       const receiverGot = receiverAfter - receiverBefore;
 
       // 4. HARD ASSERT: receiver gets EXACT amount
       expect(receiverGot, `${tcName}: ${receiverName} must receive exactly ${formatUsd(wei)}`).toBe(wei);
 
       // 5. Get sender balance AFTER (payment fully resolved by now)
-      await switchToRuntime(page, senderName);
-      // Wait briefly for sender state to settle
-      await page.waitForTimeout(1000);
-      const senderAfter = await outCap(page, sender.entityId, senderHub);
+      const senderAfter = await timedStep(`${tcName}.receiver_delta_to_sender_settle`, async () => {
+        await switchToRuntime(page, senderName);
+        await page.waitForTimeout(1000);
+        return outCap(page, sender.entityId, senderHub);
+      });
       const senderPaid = senderBefore - senderAfter;
 
       // 6. HARD ASSERT: sender paid >= expected (includes fees)

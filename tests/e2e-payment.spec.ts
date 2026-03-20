@@ -18,6 +18,7 @@ import { connectHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { getRenderedPrimaryOutbound } from './utils/e2e-account-ui';
 import { getPersistedReceiptCursor, waitForPersistedFrameEvent, waitForPersistedFrameEventMatch } from './utils/e2e-runtime-receipts';
+import { timedStep } from './utils/e2e-timing';
 
 const CONSENSUS_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
@@ -164,30 +165,40 @@ test.describe('E2E HTLC Payment Flow', () => {
     await amountInput.fill('25');
 
     // Find Routes
-    const findRoutesBtn = page.getByRole('button', { name: 'Find Routes' });
-    await expect(findRoutesBtn).toBeEnabled({ timeout: 5000 });
-    await findRoutesBtn.click();
-    await expect(page.locator('text=/1 hop|route/i').first()).toBeVisible({ timeout: 10_000 });
+    await timedStep('payment.find_routes', async () => {
+      const findRoutesBtn = page.getByRole('button', { name: 'Find Routes' });
+      await expect(findRoutesBtn).toBeEnabled({ timeout: 5000 });
+      await findRoutesBtn.click();
+      await expect(page.locator('text=/1 hop|route/i').first()).toBeVisible({ timeout: 10_000 });
+    });
 
     // Send Payment — capture HTLC-specific console logs
     const paymentCursor = await getPersistedReceiptCursor(page);
     const htlcSecretP = console.waitFor(/\[Send\] Hashlock secret=/);
-    const sendPaymentBtn = page.getByRole('button', { name: 'Pay Now' });
-    await expect(sendPaymentBtn).toBeEnabled({ timeout: 5000 });
-    await sendPaymentBtn.click();
+    const finalizedEvent = await timedStep('payment.send_to_finalize', async () => {
+      const sendPaymentBtn = page.getByRole('button', { name: 'Pay Now' });
+      await expect(sendPaymentBtn).toBeEnabled({ timeout: 5000 });
+      await sendPaymentBtn.click();
 
-    // Wait for HTLC secret generation (proves htlcPayment was used, not directPayment)
+      // Wait for HTLC secret generation (proves htlcPayment was used, not directPayment)
+      const htlcLog = await htlcSecretP;
+      process.stdout.write(`  ${htlcLog}\n`);
+      expect(htlcLog).toContain('Hashlock secret=');
+      expect(htlcLog).toContain('hashlock=');
+
+      return waitForPersistedFrameEventMatch(page, {
+        cursor: paymentCursor,
+        eventName: 'HtlcFinalized',
+        entityId: alice.entityId,
+        timeoutMs: CONSENSUS_TIMEOUT,
+      });
+    });
+
+    // Re-check the already awaited secret log so the narrative stays intact.
     const htlcLog = await htlcSecretP;
     process.stdout.write(`  ${htlcLog}\n`);
     expect(htlcLog).toContain('Hashlock secret=');
     expect(htlcLog).toContain('hashlock=');
-
-    const finalizedEvent = await waitForPersistedFrameEventMatch(page, {
-      cursor: paymentCursor,
-      eventName: 'HtlcFinalized',
-      entityId: alice.entityId,
-      timeoutMs: CONSENSUS_TIMEOUT,
-    });
     expect(String(finalizedEvent.data?.amount || ''), 'sender finalized event should include amount').toBe('25000000000000000000');
     expect(String(finalizedEvent.data?.fromEntity || '').toLowerCase(), 'sender finalized event should include fromEntity').toBe(alice.entityId.toLowerCase());
     expect(String(finalizedEvent.data?.toEntity || '').toLowerCase(), 'sender finalized event should include toEntity').toBe(String(connectedHubId || '').toLowerCase());
@@ -200,11 +211,16 @@ test.describe('E2E HTLC Payment Flow', () => {
     expect(Number(finalizedEvent.data?.finalizedInMs || 0), 'sender finalized event should include finalizedInMs').toBeGreaterThan(0);
 
     let outboundAfterPayment = outboundBeforePayment;
-    await expect.poll(async () => {
-      outboundAfterPayment = await getRenderedPrimaryOutbound(page);
-      return outboundAfterPayment;
-    }, { timeout: CONSENSUS_TIMEOUT }).toBeLessThan(outboundBeforePayment);
+    await timedStep('payment.send_to_ui_delta', async () => {
+      await expect.poll(async () => {
+        outboundAfterPayment = await getRenderedPrimaryOutbound(page);
+        return outboundAfterPayment;
+      }, { timeout: CONSENSUS_TIMEOUT }).toBeLessThan(outboundBeforePayment);
+    });
     const persistedHeightBeforeReload = (await getPersistedReceiptCursor(page)).nextHeight - 1;
+    process.stdout.write(
+      `  HTLC finalizedInMs=${Number(finalizedEvent.data?.finalizedInMs || 0)} elapsedMs=${Number(finalizedEvent.data?.elapsedMs || 0)}\n`,
+    );
 
     // Verify HTLC handler was invoked (browser-side logs)
     const htlcHandlerLog = console.find(/HTLC-PAYMENT HANDLER/);

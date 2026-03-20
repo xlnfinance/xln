@@ -24,6 +24,7 @@ import {
   switchToRuntime,
 } from './utils/e2e-demo-users';
 import { getPersistedReceiptCursor, waitForPersistedFrameEvent, waitForPersistedFrameEventMatch } from './utils/e2e-runtime-receipts';
+import { timedStep } from './utils/e2e-timing';
 
 const INIT_TIMEOUT = 30_000;
 const SETTLE_MS = 10_000;
@@ -1343,9 +1344,11 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] Self route selected: ${selfRoute.map(r => r.slice(0, 10)).join(' -> ')}`);
 
     const selfBefore = await outCap(page, alice!.entityId, hubId);
-    await pay(page, alice!.entityId, alice!.signerId, alice!.entityId, selfRoute, toWei(1));
-    await page.waitForTimeout(5000);
-    const selfAfter = await outCap(page, alice!.entityId, hubId);
+    const selfAfter = await timedStep(`ahb.self_route_${selfRoute.length - 2}_hops.send_to_outcap`, async () => {
+      await pay(page, alice!.entityId, alice!.signerId, alice!.entityId, selfRoute, toWei(1));
+      await page.waitForTimeout(5000);
+      return outCap(page, alice!.entityId, hubId);
+    });
     console.log(`[E2E] Self-pay OUT via hub: ${selfBefore} → ${selfAfter}`);
     expect(selfAfter, 'Self-pay should not increase outbound unexpectedly').toBeLessThanOrEqual(selfBefore);
 
