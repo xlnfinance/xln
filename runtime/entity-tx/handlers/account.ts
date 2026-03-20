@@ -1440,15 +1440,10 @@ export function processOrderbookSwaps(
           rebateTokenId = swapOffer.wantTokenId; // quote token (what they receive extra in)
         }
         if (spread > 0n) {
-          // SpreadDistribution: taker gets takerBps of spread
-          const dist = ext?.hubProfile?.spreadDistribution;
-          const takerBps = dist?.takerBps ?? 8000; // default 80% to taker
-          const BPS_BASE = 10000;
-          rebateAmount = (spread * BigInt(takerBps)) / BigInt(BPS_BASE);
-          if (rebateAmount <= 0n) {
-            rebateAmount = undefined;
-            rebateTokenId = undefined;
-          }
+          // Limit orders must always settle at the best market execution available.
+          // Hub monetization must be explicit elsewhere, not hidden by keeping part
+          // of the price improvement inside swap settlement.
+          rebateAmount = spread;
         }
       }
 

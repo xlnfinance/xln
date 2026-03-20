@@ -199,6 +199,12 @@ export async function lockAhb(env: Env): Promise<void> {
       (jReplica as any).jadapter = jadapter;
       (jReplica as any).depositoryAddress = jadapter.addresses.depository;
       (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+      (jReplica as any).contracts = {
+        depository: jadapter.addresses.depository,
+        entityProvider: jadapter.addresses.entityProvider,
+        account: jadapter.addresses.account,
+        deltaTransformer: jadapter.addresses.deltaTransformer,
+      };
       jadapter.startWatching(env);
       jurisdiction = createJurisdictionConfig(
         jReplicaName,
@@ -957,6 +963,9 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log('🏃 FRAME 19: Hub ACKs Alice');
     await process(env);
     logPending();
+
+    env = await drainRuntime(env);
+    assertRuntimeIdle(env, 'HTLC AHB mid-payment drain');
 
     // Verify total shift with recipient-exact HTLC:
     // A-H includes sender gross for payment1 + direct payment2; H-B tracks recipient net.
