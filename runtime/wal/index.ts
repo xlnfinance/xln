@@ -1,4 +1,5 @@
 export {
+  normalizePersistedSnapshotInPlace,
   buildRuntimeCheckpointSnapshot,
 } from './snapshot';
 export {
@@ -17,9 +18,12 @@ export type {
   ReplayStartSelection,
 } from './replay';
 export {
+  getPersistedLatestHeightFromDb,
   buildPersistedFrameWriteOps,
   decodePersistedFrameJournal,
   encodePersistedFrameJournal,
+  readPersistedFrameJournalFromDb,
+  readPersistedFrameJournalsFromDb,
   readPersistedCheckpointHeight,
   readPersistedFrameJournalBuffer,
   readPersistedLatestHeight,
@@ -35,3 +39,10 @@ export type {
   RuntimeWalDb,
   RuntimeWalWritableDb,
 } from './store';
+export {
+  getPersistedLatestHeight,
+  loadRuntimeEnvFromWal,
+  readPersistedFrameJournal,
+  readPersistedFrameJournals,
+  saveRuntimeFrameToWal,
+} from './runtime';

@@ -64,15 +64,11 @@ async function discoverHub(page: Page) {
 async function connectHub(page: Page, entityId: string, signerId: string, hubId: string) {
   let opened = false;
   let lastError = '';
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      await connectRuntimeToSharedHub(page, { entityId, signerId }, hubId);
-      opened = true;
-      break;
-    } catch (error: any) {
-      lastError = error?.message || String(error);
-      await page.waitForTimeout(800);
-    }
+  try {
+    await connectRuntimeToSharedHub(page, { entityId, signerId }, hubId);
+    opened = true;
+  } catch (error: any) {
+    lastError = error?.message || String(error);
   }
 
   const debugState = await page.evaluate(({ entityId, hubId }) => {

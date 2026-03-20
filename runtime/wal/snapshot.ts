@@ -361,3 +361,23 @@ export const buildCanonicalEnvSnapshot = (
     ...(logs ? { logs } : {}),
   };
 };
+
+export const normalizePersistedSnapshotInPlace = (
+  snapshot: any,
+  deps: {
+    normalizeReplicaMap: (raw: unknown) => Map<string, unknown>;
+    normalizeJReplicaMap: (raw: unknown) => Map<string, unknown>;
+  },
+): void => {
+  if (!snapshot || typeof snapshot !== 'object') return;
+  if (snapshot.eReplicas) {
+    snapshot.eReplicas = deps.normalizeReplicaMap(snapshot.eReplicas);
+  }
+  if (snapshot.jReplicas) {
+    const jMap = deps.normalizeJReplicaMap(snapshot.jReplicas);
+    snapshot.jReplicas = Array.from(jMap.values()).map(jr => ({
+      ...jr,
+      stateRoot: jr.stateRoot ? new Uint8Array(jr.stateRoot as any) : jr.stateRoot,
+    }));
+  }
+};
