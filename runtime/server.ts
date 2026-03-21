@@ -325,7 +325,6 @@ const RUNTIME_SETTLE_POLL_MS = Math.max(
 );
 const INCLUDE_MARKET_MAKER_BY_DEFAULT = !/^(0|false)$/i.test(process.env.XLN_INCLUDE_MARKET_MAKER ?? '1');
 const SKIP_SERVER_BOOTSTRAP = /^(1|true)$/i.test(process.env.XLN_SKIP_SERVER_BOOTSTRAP ?? '');
-const EARLY_HTTP_BIND = /^(1|true)$/i.test(process.env.XLN_EARLY_HTTP_BIND ?? '');
 const MARKET_MAKER_SIGNER_LABEL = process.env.MARKET_MAKER_SIGNER_LABEL ?? 'mm-1';
 const MARKET_MAKER_SEED = process.env.MARKET_MAKER_SEED ?? `${HUB_SEED}:market-maker`;
 const MARKET_MAKER_NAME = process.env.MARKET_MAKER_NAME ?? 'MM1';
@@ -2117,6 +2116,11 @@ const resolveAdvertisedRelayUrl = (port?: number): string => {
 // ============================================================================
 
 let relayStore = createRelayStore(DEFAULT_OPTIONS.serverId ?? 'xln-server');
+type ServerBootPhase = 'starting' | 'runtime' | 'bootstrap' | 'ready' | 'failed';
+let serverBootPhase: ServerBootPhase = 'starting';
+let serverBootError: string | null = null;
+let serverBootStartedAt = 0;
+let serverBootCompletedAt: number | null = null;
 
 type MarketSideLevel = { price: number; size: number; total: number };
 type MarketSnapshotPayload = {
@@ -3975,6 +3979,12 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     return new Response(
       JSON.stringify({
         ...health,
+        boot: {
+          phase: serverBootPhase,
+          startedAt: serverBootStartedAt || null,
+          completedAt: serverBootCompletedAt,
+          error: serverBootError,
+        },
         hubMesh: getHubMeshHealth(env),
         marketMaker: getMarketMakerHealth(env),
         bootstrapReserves,
@@ -5071,24 +5081,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   }
   const advertisedRelayUrl = resolveAdvertisedRelayUrl(options.port);
   const internalRelayUrl = resolveConfiguredRelayUrl(options.port);
+  serverBootStartedAt = Date.now();
+  serverBootCompletedAt = null;
+  serverBootPhase = 'starting';
+  serverBootError = null;
 
-  // Always initialize runtime - every node needs it
-  console.log('[XLN] Initializing runtime...');
-  const env = await main(SERVER_RUNTIME_SEED);
-  serverEnv = env;
-  console.log('[XLN] Runtime initialized ✓');
-  const verboseRuntimeLogs = /^(1|true)$/i.test(process.env.RUNTIME_VERBOSE_LOGS ?? '');
-  env.quietRuntimeLogs = !verboseRuntimeLogs;
-  console.log(
-    `[XLN] Runtime log mode: ${env.quietRuntimeLogs ? 'quiet' : 'verbose'} (set RUNTIME_VERBOSE_LOGS=1 for verbose)`,
-  );
-  env.runtimeState = env.runtimeState ?? {};
-  env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input) =>
-    sendEntityInputDirectViaRelaySocket(env, targetRuntimeId, input);
-  startRuntimeLoop(env);
-  console.log('[XLN] Runtime event loop started ✓');
-
+  let env: Env | null = null;
   let routerConfig: RelayRouterConfig | null = null;
+
   const createHttpServer = () => Bun.serve({
     port: options.port,
     hostname: options.host,
@@ -5247,21 +5247,38 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       },
     },
   });
-  let server = EARLY_HTTP_BIND ? createHttpServer() : null;
+  const server = createHttpServer();
 
-  // Initialize J-adapter (anvil for testnet, browserVM for local)
-  const useAnvil = process.env.USE_ANVIL === 'true';
-  const anvilRpc = useAnvil ? resolveRequiredAnvilRpc() : '';
+  try {
+    serverBootPhase = 'runtime';
+    console.log('[XLN] Initializing runtime...');
+    env = await main(SERVER_RUNTIME_SEED);
+    serverEnv = env;
+    console.log('[XLN] Runtime initialized ✓');
+    const verboseRuntimeLogs = /^(1|true)$/i.test(process.env.RUNTIME_VERBOSE_LOGS ?? '');
+    env.quietRuntimeLogs = !verboseRuntimeLogs;
+    console.log(
+      `[XLN] Runtime log mode: ${env.quietRuntimeLogs ? 'quiet' : 'verbose'} (set RUNTIME_VERBOSE_LOGS=1 for verbose)`,
+    );
+    env.runtimeState = env.runtimeState ?? {};
+    env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input) =>
+      sendEntityInputDirectViaRelaySocket(env, targetRuntimeId, input);
+    startRuntimeLoop(env);
+    console.log('[XLN] Runtime event loop started ✓');
 
-  console.log('[XLN] J-adapter mode check:');
-  console.log('  USE_ANVIL =', useAnvil);
-  console.log('  ANVIL_RPC =', anvilRpc);
+    // Initialize J-adapter (anvil for testnet, browserVM for local)
+    const useAnvil = process.env.USE_ANVIL === 'true';
+    const anvilRpc = useAnvil ? resolveRequiredAnvilRpc() : '';
 
-  let activeJName: string | null = null;
+    console.log('[XLN] J-adapter mode check:');
+    console.log('  USE_ANVIL =', useAnvil);
+    console.log('  ANVIL_RPC =', anvilRpc);
 
-  if (useAnvil) {
-    console.log('[XLN] Connecting to Anvil testnet...');
-    const usePredeployedAddresses = process.env.XLN_USE_PREDEPLOYED_ADDRESSES === 'true';
+    let activeJName: string | null = null;
+
+    if (useAnvil) {
+      console.log('[XLN] Connecting to Anvil testnet...');
+      const usePredeployedAddresses = process.env.XLN_USE_PREDEPLOYED_ADDRESSES === 'true';
 
     // Optional: reuse addresses from jurisdictions.json (disabled by default).
     const fs = await import('fs/promises');
@@ -5407,94 +5424,100 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       if (!env.activeJurisdiction) env.activeJurisdiction = jName;
       activeJName = jName;
     }
-  } else {
-    console.log('[XLN] Using BrowserVM (local mode)');
-    globalJAdapter = await createJAdapter({
-      mode: 'browservm',
-      chainId: 31337,
-    });
-    await globalJAdapter.deployStack();
-    if (globalJAdapter && env) {
-      if (!env.jReplicas) env.jReplicas = new Map();
-      const jName = 'local';
-      if (!env.jReplicas.has(jName)) {
-        env.jReplicas.set(jName, {
-          name: jName,
-          blockNumber: 0n,
-          stateRoot: new Uint8Array(32),
-          mempool: [],
-          blockDelayMs: 300,
-          lastBlockTimestamp: env.timestamp,
-          position: { x: 0, y: 50, z: 0 },
-          depositoryAddress: globalJAdapter.addresses.depository,
-          entityProviderAddress: globalJAdapter.addresses.entityProvider,
-          contracts: globalJAdapter.addresses,
-          rpcs: [],
-          chainId: globalJAdapter.chainId,
-          jadapter: globalJAdapter,
-        });
-        console.log(`[XLN] J-replica "${jName}" registered in env`);
-      }
-      if (!env.activeJurisdiction) env.activeJurisdiction = jName;
-      activeJName = jName;
-    }
-  }
-
-  // Start J-event watcher now that env + jReplica are wired.
-  // Without this, AccountSettled/ReserveUpdated never enter runtimeInput.
-  if (globalJAdapter && env) {
-    try {
-      globalJAdapter.startWatching(env);
-      console.log(`[XLN] J-event watcher started (${activeJName || env.activeJurisdiction || 'unknown'})`);
-    } catch (err) {
-      console.error('[XLN] Failed to start J-event watcher:', err);
-    }
-  }
-
-  const hubEntityIds = SKIP_SERVER_BOOTSTRAP
-    ? (() => {
-        console.log('[XLN] Skipping server bootstrap (XLN_SKIP_SERVER_BOOTSTRAP=1)');
-        relayStore.activeHubEntityIds = [];
-        stopMarketMakerLoop();
-        return [] as string[];
-      })()
-    : await bootstrapServerHubsAndReserves(env, options, advertisedRelayUrl, anvilRpc, {
-        includeMarketMaker: INCLUDE_MARKET_MAKER_BY_DEFAULT,
+    } else {
+      console.log('[XLN] Using BrowserVM (local mode)');
+      globalJAdapter = await createJAdapter({
+        mode: 'browservm',
+        chainId: 31337,
       });
-
-  // Wire relay-router + local delivery
-  const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
-  routerConfig = {
-    store: relayStore,
-    localRuntimeId: env.runtimeId,
-    localDeliver,
-    send: (ws, data) => ws.send(data),
-    onGossipStore: profile => {
-      try {
-        env.gossip?.announce?.(profile);
-      } catch {
-        /* best effort */
+      await globalJAdapter.deployStack();
+      if (globalJAdapter && env) {
+        if (!env.jReplicas) env.jReplicas = new Map();
+        const jName = 'local';
+        if (!env.jReplicas.has(jName)) {
+          env.jReplicas.set(jName, {
+            name: jName,
+            blockNumber: 0n,
+            stateRoot: new Uint8Array(32),
+            mempool: [],
+            blockDelayMs: 300,
+            lastBlockTimestamp: env.timestamp,
+            position: { x: 0, y: 50, z: 0 },
+            depositoryAddress: globalJAdapter.addresses.depository,
+            entityProviderAddress: globalJAdapter.addresses.entityProvider,
+            contracts: globalJAdapter.addresses,
+            rpcs: [],
+            chainId: globalJAdapter.chainId,
+            jadapter: globalJAdapter,
+          });
+          console.log(`[XLN] J-replica "${jName}" registered in env`);
+        }
+        if (!env.activeJurisdiction) env.activeJurisdiction = jName;
+        activeJName = jName;
       }
-    },
-  };
+    }
 
-  if (!server) {
-    server = createHttpServer();
+    // Start J-event watcher now that env + jReplica are wired.
+    // Without this, AccountSettled/ReserveUpdated never enter runtimeInput.
+    if (globalJAdapter && env) {
+      try {
+        globalJAdapter.startWatching(env);
+        console.log(`[XLN] J-event watcher started (${activeJName || env.activeJurisdiction || 'unknown'})`);
+      } catch (err) {
+        console.error('[XLN] Failed to start J-event watcher:', err);
+      }
+    }
+
+    serverBootPhase = 'bootstrap';
+    const hubEntityIds = SKIP_SERVER_BOOTSTRAP
+      ? (() => {
+          console.log('[XLN] Skipping server bootstrap (XLN_SKIP_SERVER_BOOTSTRAP=1)');
+          relayStore.activeHubEntityIds = [];
+          stopMarketMakerLoop();
+          return [] as string[];
+        })()
+      : await bootstrapServerHubsAndReserves(env, options, advertisedRelayUrl, anvilRpc, {
+          includeMarketMaker: INCLUDE_MARKET_MAKER_BY_DEFAULT,
+        });
+
+    // Wire relay-router + local delivery
+    const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
+    routerConfig = {
+      store: relayStore,
+      localRuntimeId: env.runtimeId,
+      localDeliver,
+      send: (ws, data) => ws.send(data),
+      onGossipStore: profile => {
+        try {
+          env.gossip?.announce?.(profile);
+        } catch {
+          /* best effort */
+        }
+      },
+    };
+
+    // Start P2P overlay after WS /relay is actually listening.
+    // Plain daemons stay connected even before they own a routing entity;
+    // routing capability is an entity-level setting announced later.
+    const advertisedEntityIds = [
+      ...hubEntityIds,
+      ...(marketMakerEntityId ? [marketMakerEntityId.toLowerCase()] : []),
+    ];
+    startP2P(env, {
+      relayUrls: [internalRelayUrl],
+      ...(advertisedEntityIds.length > 0 ? { advertiseEntityIds: advertisedEntityIds } : {}),
+      isHub: hubEntityIds.length > 0,
+      gossipPollMs: 1000,
+    });
+    serverBootPhase = 'ready';
+    serverBootCompletedAt = Date.now();
+  } catch (error) {
+    serverBootPhase = 'failed';
+    serverBootCompletedAt = Date.now();
+    serverBootError = (error as Error)?.message || String(error);
+    console.error('[XLN] Startup failed after HTTP bind:', error);
+    return;
   }
-
-  // Start P2P overlay after WS /relay is actually listening.
-  // Plain daemons stay connected even before they own a routing entity;
-  // routing capability is an entity-level setting announced later.
-  const advertisedEntityIds = [
-    ...hubEntityIds,
-    ...(marketMakerEntityId ? [marketMakerEntityId.toLowerCase()] : []),
-  ];
-  startP2P(env, {
-    relayUrls: [internalRelayUrl],
-    ...(advertisedEntityIds.length > 0 ? { advertiseEntityIds: advertisedEntityIds } : {}),
-    isHub: hubEntityIds.length > 0,
-    gossipPollMs: 1000,
-  });
 
   console.log(`
 ╔══════════════════════════════════════════════════════════════════╗
@@ -5549,7 +5572,14 @@ if (import.meta.main) {
 
   startXlnServer(options)
     .then(() => {
-      console.log('[XLN] Server started successfully');
+      if (serverBootPhase === 'ready') {
+        console.log('[XLN] Server started successfully');
+        return;
+      }
+      console.warn(
+        `[XLN] Server HTTP is listening but startup is ${serverBootPhase}` +
+          (serverBootError ? `: ${serverBootError}` : ''),
+      );
     })
     .catch(error => {
       console.error('[XLN] Server failed:', error);
