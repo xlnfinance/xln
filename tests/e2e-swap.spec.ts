@@ -438,30 +438,108 @@ async function ensureDeterministicSwapAccount(page: Page): Promise<{
     signerId: identity!.signerId,
   }, hubId!);
 
-  const faucetResponse = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
-    data: {
-      userEntityId: identity!.entityId,
-      userRuntimeId: identity!.runtimeId,
-      hubEntityId: hubId!,
-      tokenId: 1,
-      amount: '100',
-    },
-  });
-  const faucetBody = await faucetResponse.json().catch(() => ({}));
-  expect(
-    faucetResponse.ok(),
-    `swap faucet failed: ${JSON.stringify(faucetBody)}`,
-  ).toBe(true);
+  for (const funding of [
+    { tokenId: 1, amount: '100' },
+    { tokenId: 2, amount: '1' },
+  ]) {
+    const faucetResponse = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
+      data: {
+        userEntityId: identity!.entityId,
+        userRuntimeId: identity!.runtimeId,
+        hubEntityId: hubId!,
+        tokenId: funding.tokenId,
+        amount: funding.amount,
+      },
+    });
+    const faucetBody = await faucetResponse.json().catch(() => ({}));
+    expect(
+      faucetResponse.ok(),
+      `swap faucet failed for token ${funding.tokenId}: ${JSON.stringify(faucetBody)}`,
+    ).toBe(true);
+  }
 
   await expect.poll(async () => {
     return await getRenderedOutboundForAccount(page, hubId!);
   }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(0);
+
+  await expect.poll(async () => {
+    return await readAccountTokenOutCapacity(page, identity!.entityId, identity!.signerId, hubId!, 2);
+  }, { timeout: 60_000, intervals: [250, 500, 1000] }).toBeGreaterThan(0);
 
   return {
     entityId: identity!.entityId,
     signerId: identity!.signerId,
     counterpartyId: hubId!,
   };
+}
+
+async function readAccountTokenOutCapacity(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+  tokenId: number,
+): Promise<number> {
+  return await page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
+    const nonNegative = (x: bigint): bigint => (x < 0n ? 0n : x);
+    const normalize = (value: string) => String(value || '').trim().toLowerCase();
+    const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) return 0;
+    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+      const [eid, sid] = String(k).split(':');
+      return normalize(eid) === normalize(entityId) && normalize(sid) === normalize(signerId);
+    });
+    const replica = key ? env.eReplicas.get(key) : null;
+    if (!replica?.state?.accounts || !(replica.state.accounts instanceof Map)) return 0;
+
+    let account: any = null;
+    for (const [accountKey, candidate] of replica.state.accounts.entries()) {
+      if (normalize(String(accountKey || '')) === normalize(counterpartyId)) {
+        account = candidate;
+        break;
+      }
+      const left = normalize(String(candidate?.leftEntity || ''));
+      const right = normalize(String(candidate?.rightEntity || ''));
+      const owner = normalize(entityId);
+      const cp = normalize(counterpartyId);
+      if ((left === owner && right === cp) || (left === cp && right === owner)) {
+        account = candidate;
+        break;
+      }
+    }
+    if (!account?.deltas || !(account.deltas instanceof Map)) return 0;
+    const delta = account.deltas.get(tokenId);
+    if (!delta) return 0;
+
+    const totalDelta = BigInt(delta.ondelta || 0n) + BigInt(delta.offdelta || 0n);
+    const collateral = nonNegative(BigInt(delta.collateral || 0n));
+    const ownCreditLimit = BigInt(delta.leftCreditLimit || 0n);
+    const peerCreditLimit = BigInt(delta.rightCreditLimit || 0n);
+    let outCollateral = totalDelta > 0n ? (totalDelta > collateral ? collateral : totalDelta) : 0n;
+    let inOwnCredit = nonNegative(-totalDelta);
+    if (inOwnCredit > ownCreditLimit) inOwnCredit = ownCreditLimit;
+    let outPeerCredit = nonNegative(totalDelta - collateral);
+    if (outPeerCredit > peerCreditLimit) outPeerCredit = peerCreditLimit;
+    const outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
+    const outAllowance = BigInt(delta.leftAllowance || 0n);
+    const leftHold = BigInt(delta.leftHold || 0n);
+    const leftEntity = normalize(String(account.leftEntity || ''));
+    const isLeft = leftEntity === normalize(entityId);
+    let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowance);
+    outCapacity = nonNegative(outCapacity - leftHold);
+
+    if (!isLeft) {
+      let inCollateral = totalDelta > 0n ? nonNegative(collateral - totalDelta) : collateral;
+      let inAllowance = BigInt(delta.rightAllowance || 0n);
+      let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
+      let rightHold = BigInt(delta.rightHold || 0n);
+      let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowance);
+      inCapacity = nonNegative(inCapacity - rightHold);
+      outCapacity = inCapacity;
+    }
+
+    return Number(outCapacity) / 1e18;
+  }, { entityId, signerId, counterpartyId, tokenId });
 }
 
 async function listSharedHubIds(page: Page): Promise<string[]> {
@@ -720,9 +798,7 @@ async function openSwapWorkspace(page: Page): Promise<void> {
 }
 
 async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string): Promise<void> {
-  const createSelect = page.getByTestId('swap-create-account-select').first();
-  const createVisible = await createSelect.isVisible({ timeout: 1500 }).catch(() => false);
-  const select = createVisible ? createSelect : page.getByTestId('swap-account-select').first();
+  const select = page.getByTestId('swap-account-select').first();
   const hasSelector = await select.isVisible({ timeout: 1500 }).catch(() => false);
   if (!hasSelector) return;
   const values = await select.locator('option').evaluateAll((options) =>
@@ -732,8 +808,7 @@ async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string)
   const preferredAccount = normalizedPreferred
     ? values.find((option) => String(option.value || '').trim().toLowerCase() === normalizedPreferred)
     : null;
-  const targetAccount = preferredAccount
-    || values.find((option) => option.value && option.value !== '__aggregated__');
+  const targetAccount = preferredAccount || values.find((option) => option.value);
   if (!targetAccount) return;
   await select.evaluate((node, value) => {
     const element = node as HTMLSelectElement;
@@ -752,6 +827,10 @@ function parseFirstNumber(text: string): number {
 function formatDecimalForInput(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0';
   return value.toFixed(6).replace(/\.?0+$/, '');
+}
+
+function normalizeDisplayedPriceText(value: string): string {
+  return String(value || '').replace(/,/g, '').trim();
 }
 
 async function prepareExecutableOrder(page: Page): Promise<number> {
@@ -860,7 +939,7 @@ async function prepareExecutableOrder(page: Page): Promise<number> {
 async function executeOrderbookClickFill(
   page: Page,
   accountRef: { entityId: string; signerId: string; counterpartyId: string },
-  clickTarget: 'lowest-ask' | 'mid-price',
+  clickTarget: 'lowest-ask' | 'highest-bid' | 'mid-price',
 ): Promise<void> {
   const orderbookLogs: string[] = [];
   const onConsole = (msg: { text(): string }) => {
@@ -874,7 +953,7 @@ async function executeOrderbookClickFill(
   const readOrderbookDebug = async () => await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
     const accountSelect = document.querySelector('[data-testid="swap-account-select"]') as HTMLSelectElement | null;
-    const createAccountSelect = document.querySelector('[data-testid="swap-create-account-select"]') as HTMLSelectElement | null;
+    const scopeToggle = document.querySelector('[data-testid="swap-scope-toggle"]') as HTMLButtonElement | null;
     const pairSelect = document.querySelector('[data-testid="swap-pair-select"]') as HTMLSelectElement | null;
     const amountInput = document.querySelector('[data-testid="swap-order-amount"]') as HTMLInputElement | null;
     const priceInput = document.querySelector('[data-testid="swap-order-price"]') as HTMLInputElement | null;
@@ -920,11 +999,12 @@ async function executeOrderbookClickFill(
     const bestBidIdx = Number(book?.bestBidIdx ?? -1);
     return {
       selectedAccountId: accountSelect?.value || '',
-      createOrderAccountId: createAccountSelect?.value || '',
+      scopeMode: scopeToggle?.innerText?.trim() || '',
       selectedPairId: pairSelect?.value || '',
       amountInput: amountInput?.value || '',
       priceInput: priceInput?.value || '',
       formError,
+      swapDebug: (window as any).__swapDebug ?? null,
       swapResolveCount,
       positiveSwapResolveCount,
       localOffer: offer ? {
@@ -960,9 +1040,15 @@ async function executeOrderbookClickFill(
     await page.waitForTimeout(250);
 
     const buySideButton = page.getByTestId('swap-side-buy').first();
+    const sellSideButton = page.getByTestId('swap-side-sell').first();
     const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
     await expect(buySideButton).toBeVisible({ timeout: 20_000 });
-    await buySideButton.click();
+    await expect(sellSideButton).toBeVisible({ timeout: 20_000 });
+    if (clickTarget === 'highest-bid') {
+      await sellSideButton.click();
+    } else {
+      await buySideButton.click();
+    }
     await page.waitForTimeout(120);
 
     const resolveCountBefore = await readPositiveSwapResolveCount(
@@ -972,19 +1058,42 @@ async function executeOrderbookClickFill(
       accountRef.counterpartyId,
     );
 
+    let clickedDisplayedPrice = '';
     if (clickTarget === 'lowest-ask') {
       const asks = page.locator('.swap-panel .orderbook-panel .asks-section .row.clickable');
       await expect(asks.last()).toBeVisible({ timeout: 20_000 });
+      clickedDisplayedPrice = String(await asks.last().locator('.price').textContent() || '').trim();
       await asks.last().click();
+    } else if (clickTarget === 'highest-bid') {
+      const bids = page.locator('.swap-panel .orderbook-panel .bids-section .row.clickable');
+      await expect(bids.first()).toBeVisible({ timeout: 20_000 });
+      clickedDisplayedPrice = String(await bids.first().locator('.price').textContent() || '').trim();
+      await bids.first().click();
     } else {
       const mid = page.locator('.swap-panel .orderbook-panel .spread-indicator').first();
       await expect(mid).toBeVisible({ timeout: 20_000 });
+      clickedDisplayedPrice = String(await mid.locator('.mid-price').textContent() || '').trim();
       await mid.click();
     }
 
     await expect(
       page.locator('.swap-panel .size-hint').filter({ hasText: /Filled from book level/i }).first(),
     ).toContainText(/Filled from book level/i, { timeout: 10_000 });
+    const priceInput = page.getByTestId('swap-order-price').first();
+    await expect(priceInput).toBeVisible({ timeout: 10_000 });
+    if (clickedDisplayedPrice) {
+      await expect.poll(async () => String(await priceInput.inputValue()).trim(), {
+        timeout: 10_000,
+        intervals: [50, 100, 200],
+      }).toBe(normalizeDisplayedPriceText(clickedDisplayedPrice));
+    }
+    const scopeToggle = page.getByTestId('swap-scope-toggle').first();
+    const selectedHub = page.getByTestId('swap-account-select').first();
+    await expect(scopeToggle).toHaveText('Selected', { timeout: 10_000 });
+    await expect.poll(async () => String(await selectedHub.inputValue()).trim(), {
+      timeout: 10_000,
+      intervals: [50, 100, 200],
+    }).toBe(accountRef.counterpartyId);
     await expect(placeButton).toBeEnabled({ timeout: 10_000 });
     await placeButton.click();
 
@@ -1031,10 +1140,12 @@ async function executeOrderbookClickFill(
 
 async function expectAllCanonicalSwapPairsHaveLiquidity(page: Page): Promise<void> {
   const pairSelect = page.getByTestId('swap-pair-select').first();
-  const scopeSelect = page.getByTestId('swap-account-select').first();
+  const scopeToggle = page.getByTestId('swap-scope-toggle').first();
   await expect(pairSelect).toBeVisible({ timeout: 20_000 });
-  await expect(scopeSelect).toBeVisible({ timeout: 20_000 });
-  await scopeSelect.selectOption('__aggregated__');
+  await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
+  if (String(await scopeToggle.textContent() || '').trim() !== 'Aggregated') {
+    await scopeToggle.click();
+  }
   const expectedPairs = CANONICAL_SWAP_PAIR_LABELS;
 
   for (const pairLabel of expectedPairs) {
@@ -1153,18 +1264,23 @@ test.describe('E2E Swap Flow', () => {
     const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
     const buySide = page.getByTestId('swap-side-buy').first();
     const sellSide = page.getByTestId('swap-side-sell').first();
-    const createAccountSelect = page.getByTestId('swap-create-account-select').first();
+    const accountSelect = page.getByTestId('swap-account-select').first();
+    const scopeToggle = page.getByTestId('swap-scope-toggle').first();
     await expect(buySide).toBeVisible({ timeout: 20_000 });
     await expect(sellSide).toBeVisible({ timeout: 20_000 });
-    await expect(createAccountSelect).toBeVisible({ timeout: 20_000 });
+    await expect(accountSelect).toBeVisible({ timeout: 20_000 });
+    await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
+    if (String(await scopeToggle.textContent() || '').trim() !== 'Selected') {
+      await scopeToggle.click();
+    }
 
-    const accountValues = await createAccountSelect.locator('option').evaluateAll((options) =>
+    const accountValues = await accountSelect.locator('option').evaluateAll((options) =>
       options.map((option) => String((option as HTMLOptionElement).value || '')).filter((value) => value.length > 0),
     );
     let configured = false;
     let chosenCreateAccountValue: string | null = null;
     for (const accountValue of accountValues) {
-      await createAccountSelect.selectOption(accountValue);
+      await accountSelect.selectOption(accountValue);
       await page.waitForTimeout(150);
 
       await buySide.click();
@@ -1241,7 +1357,12 @@ test.describe('E2E Swap Flow', () => {
       await openSwapWorkspace(page);
       await selectCounterpartyInSwap(page, accountRef.counterpartyId);
       if (chosenCreateAccountValue) {
-        await createAccountSelect.selectOption(chosenCreateAccountValue);
+        const accountSelectAfterReload = page.getByTestId('swap-account-select').first();
+        const scopeToggleAfterReload = page.getByTestId('swap-scope-toggle').first();
+        if (String(await scopeToggleAfterReload.textContent() || '').trim() !== 'Selected') {
+          await scopeToggleAfterReload.click();
+        }
+        await accountSelectAfterReload.selectOption(chosenCreateAccountValue);
       }
     });
     await timedStep('swap_auto.reload_assert_offer_persisted', async () => {
@@ -1381,6 +1502,14 @@ test.describe('E2E Swap Flow', () => {
 
     await timedStep('swap_click.lowest_ask_fills', () =>
       executeOrderbookClickFill(page, accountRef, 'lowest-ask'),
+    );
+  });
+
+  test('swap orderbook highest bid click fills immediately at displayed book price', async ({ page }) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+
+    await timedStep('swap_click.highest_bid_fills', () =>
+      executeOrderbookClickFill(page, accountRef, 'highest-bid'),
     );
   });
 

@@ -142,6 +142,7 @@ export interface SwapOfferEvent {
   giveAmount: bigint;
   wantTokenId: number;
   wantAmount: bigint;
+  priceTicks?: bigint;
   timeInForce?: 0 | 1 | 2;
   minFillRatio: number;
 }
@@ -1311,20 +1312,22 @@ export function processOrderbookSwaps(
       });
     }
 
-    const bookTick = Math.max(1, book.params.tick);
-    const bookTickBig = BigInt(bookTick);
-    if (isSellBase) {
-      priceTicks = ((priceTicks + bookTickBig - 1n) / bookTickBig) * bookTickBig;
-    } else {
-      priceTicks = (priceTicks / bookTickBig) * bookTickBig;
-    }
-    if (priceTicks <= 0n) {
-      console.warn(`⚠️ ORDERBOOK: book-tick rounding produced zero price — skipping offer=${offer.offerId}`);
-      continue;
-    }
-    if (priceTicks > MAX_LOTS) {
-      console.warn(`⚠️ ORDERBOOK: rounded price exceeds max tick range — skipping offer=${offer.offerId}`);
-      continue;
+    if (!explicitPriceTicks || explicitPriceTicks <= 0n) {
+      const bookTick = Math.max(1, book.params.tick);
+      const bookTickBig = BigInt(bookTick);
+      if (isSellBase) {
+        priceTicks = ((priceTicks + bookTickBig - 1n) / bookTickBig) * bookTickBig;
+      } else {
+        priceTicks = (priceTicks / bookTickBig) * bookTickBig;
+      }
+      if (priceTicks <= 0n) {
+        console.warn(`⚠️ ORDERBOOK: book-tick rounding produced zero price — skipping offer=${offer.offerId}`);
+        continue;
+      }
+      if (priceTicks > MAX_LOTS) {
+        console.warn(`⚠️ ORDERBOOK: rounded price exceeds max tick range — skipping offer=${offer.offerId}`);
+        continue;
+      }
     }
 
     // Price deviation guard: reject orders that cross too far from best available
