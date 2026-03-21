@@ -48,8 +48,8 @@ export type RuntimeWsServerOptions = {
   port: number;
   serverId: string;
   serverRuntimeId?: string;  // If set, messages to this runtimeId use local delivery
-  onRuntimeInput?: (from: string, input: RuntimeInput) => Promise<void> | void;
-  onEntityInput?: (from: string, input: RoutedEntityInput) => Promise<void> | void;
+  onRuntimeInput?: (from: string, input: RuntimeInput, timestamp?: number) => Promise<void> | void;
+  onEntityInput?: (from: string, input: RoutedEntityInput, timestamp?: number) => Promise<void> | void;
   maxQueuePerRuntime?: number;
   queueTtlMs?: number;
   requireAuth?: boolean;
@@ -297,7 +297,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     if (msg.type === 'entity_input' && options.onEntityInput && msg.from && useLocalDelivery) {
       const payload = msg.payload as RoutedEntityInput;
       try {
-        await options.onEntityInput(msg.from, payload);
+        await options.onEntityInput(msg.from, payload, typeof msg.timestamp === 'number' ? msg.timestamp : undefined);
         return;
       } catch (error) {
         // Fall through to queueing
@@ -307,7 +307,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     if (msg.type === 'runtime_input' && options.onRuntimeInput && msg.from && useLocalDelivery) {
       const payload = msg.payload as RuntimeInput;
       try {
-        await options.onRuntimeInput(msg.from, payload);
+        await options.onRuntimeInput(msg.from, payload, typeof msg.timestamp === 'number' ? msg.timestamp : undefined);
         return;
       } catch (error) {
         // Fall through to queueing

@@ -90,8 +90,8 @@ export type RuntimeWsClientOptions = {
   encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onPeerEncryptionKey?: (runtimeId: string, pubKeyHex: string) => void;
-  onRuntimeInput?: (from: string, input: RuntimeInput) => Promise<void> | void;
-  onEntityInput?: (from: string, input: RoutedEntityInput) => Promise<void> | void;
+  onRuntimeInput?: (from: string, input: RuntimeInput, timestamp?: number) => Promise<void> | void;
+  onEntityInput?: (from: string, input: RoutedEntityInput, timestamp?: number) => Promise<void> | void;
   onGossipRequest?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipResponse?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipAnnounce?: (from: string, payload: unknown) => Promise<void> | void;
@@ -376,7 +376,11 @@ export class RuntimeWsClient {
     }
 
     if (msg.type === 'runtime_input' && msg.payload && msg.from) {
-      await this.options.onRuntimeInput?.(msg.from, msg.payload as RuntimeInput);
+      await this.options.onRuntimeInput?.(
+        msg.from,
+        msg.payload as RuntimeInput,
+        typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
+      );
       return;
     }
     if (msg.type === 'entity_input' && msg.payload && msg.from) {
@@ -424,7 +428,7 @@ export class RuntimeWsClient {
         return;
       }
 
-      await this.options.onEntityInput?.(msg.from, entityInput);
+      await this.options.onEntityInput?.(msg.from, entityInput, typeof msg.timestamp === 'number' ? msg.timestamp : undefined);
       return;
     }
     if (msg.type === 'gossip_request' && msg.payload && msg.from) {

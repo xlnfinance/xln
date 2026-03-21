@@ -9,7 +9,7 @@
  *    account timeouts, batch broadcasts, rebalancing, HTLC polling.
  *
  * 2. SCHEDULED HOOKS (setTimeout-like)
- *    Fire once at a specific wall-clock time. For point-in-time events:
+ *    Fire once at a specific logical entity/runtime time. For point-in-time events:
  *    HTLC lock expiry, dispute deadlines, settlement windows.
  * ═══════════════════════════════════════════════════════════════════════
  *
@@ -18,7 +18,7 @@
  *   // Schedule: "wake this entity at time T to run security check"
  *   scheduleHook(crontabState, {
  *     id: `htlc-timeout:${lockId}`,   // Unique — prevents duplicates
- *     triggerAt: Number(lock.timelock), // Wall-clock ms
+ *     triggerAt: Number(lock.timelock), // Logical unix-ms carried by proposer timestamp
  *     type: 'htlc_timeout',            // Routes to correct handler
  *     data: { accountId, lockId }       // Payload for the handler
  *   });
@@ -38,10 +38,9 @@
  *   'settlement_window'  — Auto-execute approved settlements
  *   'watchdog'           — Detect unresponsive counterparties
  *
- * DETERMINISM: Hooks use wall-clock time for scheduling, but processing
- * happens through entity consensus (deterministic). Both sides see the
- * same hook fire at the same logical time because the proposer's
- * env.timestamp is used for the frame.
+ * DETERMINISM: Hooks use logical timestamps carried through runtime/entity
+ * consensus. Both sides see the same hook fire at the same logical time
+ * because the proposer's env.timestamp is used for the frame.
  *
  * PERSISTENCE: crontabState is part of entity state, but it stays declarative:
  * task method names, schedule data, and hook payloads. Runtime code rebinds the
@@ -139,7 +138,7 @@ const CRONTAB_TASK_HANDLERS: Record<CrontabTaskMethod, CrontabTaskHandler> = {
 // Scheduled Hooks API (setTimeout-like)
 // ═══════════════════════════════════════════════════════════════════════
 
-/** Schedule a one-shot hook at a specific wall-clock time */
+/** Schedule a one-shot hook at a specific logical timestamp */
 export function scheduleHook(state: CrontabState, hook: ScheduledHook): void {
   if (!state.hooks) state.hooks = new Map();
   state.hooks.set(hook.id, hook);

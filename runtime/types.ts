@@ -240,6 +240,7 @@ export interface RuntimeInput {
   runtimeTxs: RuntimeTx[];
   entityInputs: RoutedEntityInput[];
   jInputs?: JInput[]; // J-layer inputs (queue to J-mempool)
+  timestamp?: number; // External ingress timestamp seed (ms) for this runtime input batch
   queuedAt?: number; // When first queued into runtime mempool (ms)
 }
 
@@ -1832,6 +1833,7 @@ export interface Env {
     stopLoop?: (() => void) | null;
     wakeLoop?: (() => void) | null;
     wakeRequested?: boolean;
+    clockPrimed?: boolean;
     persistencePaused?: boolean;
     lastFrameAt?: number;
     processingPromise?: Promise<void> | null;
