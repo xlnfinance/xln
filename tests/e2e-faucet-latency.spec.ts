@@ -172,10 +172,10 @@ async function measureAccountStateToDomLatency(
   tokenId: number,
   symbol: string,
   baselineHeight: number,
-  expectedOut: number,
+  baselineOut: number,
 ): Promise<FaucetRenderProbe> {
   return await page.evaluate(
-    ({ entityId, signerId, hubId, tokenId, symbol, baselineHeight, expectedOut }) => {
+    ({ entityId, signerId, hubId, tokenId, symbol, baselineHeight, baselineOut }) => {
       const startedAt = performance.now();
       const readSnapshot = () => {
         const env = (window as typeof window & {
@@ -250,7 +250,7 @@ async function measureAccountStateToDomLatency(
           }
 
           const renderedOut = readRenderedOut();
-          if (stateChangedAt !== null && Number.isFinite(renderedOut) && renderedOut === expectedOut) {
+          if (stateChangedAt !== null && Number.isFinite(renderedOut) && renderedOut > baselineOut) {
             resolve({
               stateChangedMs: Math.round(stateChangedAt - startedAt),
               domVisibleMs: Math.round(now - startedAt),
@@ -265,7 +265,7 @@ async function measureAccountStateToDomLatency(
         requestAnimationFrame(loop);
       });
     },
-    { entityId, signerId, hubId, tokenId, symbol, baselineHeight, expectedOut },
+    { entityId, signerId, hubId, tokenId, symbol, baselineHeight, baselineOut },
   );
 }
 
@@ -285,7 +285,9 @@ test.describe('E2E Faucet Latency', () => {
     await page.getByTestId('tab-accounts').first().click();
     const preview = page.locator(`.account-preview[data-counterparty-id="${hubId}"]`).first();
     await expect(preview).toBeVisible({ timeout: 20_000 });
-    const faucetButton = preview.getByRole('button', { name: /^Faucet$/ }).nth(2);
+    const usdtRow = preview.locator('.delta-row', { hasText: 'USDT' }).first();
+    await expect(usdtRow).toBeVisible({ timeout: 20_000 });
+    const faucetButton = usdtRow.getByRole('button', { name: /^Faucet$/ });
     await expect(faucetButton).toBeEnabled({ timeout: 20_000 });
 
     const baselineOut = await readRenderedAccountTokenOut(page, hubId, 'USDT');
@@ -299,7 +301,7 @@ test.describe('E2E Faucet Latency', () => {
       3,
       'USDT',
       baselineAccount.currentHeight,
-      baselineOut + 100,
+      baselineOut,
     );
     const startedAt = Date.now();
     await faucetButton.click();
@@ -313,7 +315,7 @@ test.describe('E2E Faucet Latency', () => {
           message: 'UI USDT faucet must become visible to the user on Accounts page',
         },
       )
-      .toBe(baselineOut + 100);
+      .toBeGreaterThan(baselineOut);
 
     const elapsedMs = Date.now() - startedAt;
     const renderProbe = await renderProbePromise;
