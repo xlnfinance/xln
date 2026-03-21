@@ -163,6 +163,8 @@ function spawnAnvil(
     '--host', '127.0.0.1',
     '--port', String(port),
     '--chain-id', '31337',
+    '--block-gas-limit', '60000000',
+    '--code-size-limit', '65536',
     '--silent',
   ], {
     stdio: ['ignore', 'pipe', 'pipe'],
