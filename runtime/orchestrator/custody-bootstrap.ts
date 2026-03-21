@@ -294,12 +294,8 @@ const isEntityRouteableAcrossHubs = (
   hubEntityIds: string[],
   tokenIds: readonly number[],
 ): boolean => {
-  const publicAccounts = Array.isArray(entry.publicAccounts)
-    ? entry.publicAccounts.map(value => toLowerId(value)).filter(Boolean)
-    : [];
   for (const hubEntityId of hubEntityIds) {
     const hubNorm = hubEntityId.toLowerCase();
-    if (!publicAccounts.includes(hubNorm)) return false;
     let tokenReady = false;
     for (const tokenId of tokenIds) {
       if (hasAccountCapacityForToken(entry, hubNorm, tokenId)) {
@@ -384,6 +380,7 @@ export const startCustodySupport = async (
     ['runtime/server.ts', '--port', String(options.daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${options.daemonPort}`],
     {
       USE_ANVIL: 'true',
+      XLN_USE_PREDEPLOYED_ADDRESSES: 'true',
       BOOTSTRAP_LOCAL_HUBS: '0',
       XLN_SKIP_SERVER_BOOTSTRAP: '1',
       XLN_EARLY_HTTP_BIND: '1',
@@ -420,7 +417,6 @@ export const startCustodySupport = async (
   }
 
   const identity = controlResult.result;
-  await waitForCustodyRouteableState(options.apiBaseUrl, identity.entityId, hubIds);
 
   const custodyChild = spawnBunChild(
     'custody-service',
