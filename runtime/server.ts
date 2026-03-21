@@ -4894,6 +4894,22 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         );
       }
       const currentOutCapacity = getEntityOutCapacity(accountMachine, hubEntityId, tokenId);
+      if (currentOutCapacity < amountWei) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'Selected hub does not have enough outbound capacity for offchain faucet.',
+            code: 'FAUCET_INSUFFICIENT_OUT_CAPACITY',
+            requestId,
+            hubEntityId,
+            userEntityId: normalizedUserEntityId,
+            tokenId,
+            requiredAmount: amountWei.toString(),
+            senderOutCapacity: currentOutCapacity.toString(),
+          }),
+          { status: 409, headers },
+        );
+      }
 
       // Single-writer invariant: enqueue only; runtime loop applies.
       try {

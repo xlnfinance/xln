@@ -45,6 +45,7 @@
     wantAmount?: unknown;
     priceTicks?: unknown;
     createdAt?: unknown;
+    createdHeight?: unknown;
   };
   type ClickedOrderLevel = {
     side: BookSide;
@@ -111,6 +112,7 @@
   let orderbookPairId = '1/2';
   let orderbookViewKey = '';
   let orderPercent = 100;
+  let slippagePct = 0; // 0 = strict limit, 0.1-10 = market order with cap
   let submitError = '';
   let selectedPairValue = '';
   let tradeSide: 'buy-base' | 'sell-base' = 'buy-base';
@@ -160,6 +162,9 @@
   $: if (orderbookScopeMode === 'selected' && selectedBookAccountId) {
     createOrderAccountId = selectedBookAccountId;
   }
+  $: currentHubSelection = orderbookScopeMode === 'aggregated'
+    ? createOrderAccountId
+    : selectedBookAccountId;
   $: activeOrderAccountId = orderbookScopeMode === 'aggregated'
     ? createOrderAccountId
     : selectedBookAccountId;
@@ -398,11 +403,21 @@
   function handlePriceRatioInput(event: Event): void {
     const target = event.currentTarget as HTMLInputElement | null;
     hasUserEditedPriceInput = true;
-    priceRatioInput = normalizeDecimalInput(target?.value || '', PRICE_RATIO_DECIMALS);
+    const normalized = normalizeDecimalInput(target?.value || '', PRICE_RATIO_DECIMALS);
+    if (selectedOrderLevel) {
+      const pinnedPrice = selectedOrderLevel.displayPrice
+        ? normalizeDisplayPriceForInput(selectedOrderLevel.displayPrice)
+        : formatPriceTicks(selectedOrderLevel.inputPriceTicks > 0n ? selectedOrderLevel.inputPriceTicks : selectedOrderLevel.priceTicks);
+      if (normalizeDisplayPriceForInput(normalized) !== pinnedPrice) {
+        selectedOrderLevel = null;
+        orderPercent = 100;
+      }
+    }
+    priceRatioInput = normalized;
   }
 
-  // Open orders use entity swapBook for immediate UX. Restore path rebuilds swapBook
-  // from authoritative account.swapOffers to avoid stale rows after reload.
+  // Open orders use entity swapBook for immediate UX. Cancel resolves the real
+  // bilateral owner account lazily to avoid stale accountId mismatches.
   $: activeOffers = replica?.state?.swapBook
     ? Array.from(replica.state.swapBook.values()) as SwapOfferLike[]
     : [];
@@ -774,9 +789,12 @@
 
   function handleSelectedHubChange(event: Event): void {
     const nextValue = String((event.currentTarget as HTMLSelectElement | null)?.value || '');
-    selectedBookAccountId = nextValue;
-    createOrderAccountId = nextValue;
-    orderbookScopeMode = 'selected';
+    if (orderbookScopeMode === 'aggregated') {
+      createOrderAccountId = nextValue;
+    } else {
+      selectedBookAccountId = nextValue;
+      createOrderAccountId = nextValue;
+    }
     selectedOrderLevel = null;
     orderPercent = 100;
   }
@@ -818,9 +836,12 @@
       submitError = 'Pick a priced level from a connected account.';
       return;
     }
-    selectedBookAccountId = clickedAccountId;
-    createOrderAccountId = clickedAccountId;
-    orderbookScopeMode = 'selected';
+    if (orderbookScopeMode === 'aggregated') {
+      createOrderAccountId = clickedAccountId;
+    } else {
+      selectedBookAccountId = clickedAccountId;
+      createOrderAccountId = clickedAccountId;
+    }
 
     const priceTicks = parsedPriceTicks;
     const sizeBaseWei = lotsToBaseWei(rawSize);
@@ -1013,8 +1034,8 @@
     const aDust = isDustOpenOffer(a);
     const bDust = isDustOpenOffer(b);
     if (aDust !== bDust) return aDust ? 1 : -1;
-    const aCreated = toBigIntSafe(a?.createdAt) ?? 0n;
-    const bCreated = toBigIntSafe(b?.createdAt) ?? 0n;
+    const aCreated = toBigIntSafe(a?.createdAt) ?? toBigIntSafe(a?.createdHeight) ?? 0n;
+    const bCreated = toBigIntSafe(b?.createdAt) ?? toBigIntSafe(b?.createdHeight) ?? 0n;
     if (aCreated === bCreated) return String(a?.offerId || '').localeCompare(String(b?.offerId || ''));
     return aCreated > bCreated ? -1 : 1;
   });
@@ -1025,6 +1046,17 @@
       accountId: String(accountId),
       account,
     }));
+  }
+
+  function resolveOfferAccountId(offerId: string, fallbackAccountId: string): string {
+    const normalizedOfferId = String(offerId || '').trim();
+    if (!normalizedOfferId) return String(fallbackAccountId || '');
+    for (const { accountId, account } of accountMachines()) {
+      if (account?.swapOffers instanceof Map && account.swapOffers.has(normalizedOfferId)) {
+        return accountId;
+      }
+    }
+    return String(fallbackAccountId || '');
   }
 
   function txDataAsRecord(tx: AccountTx): Record<string, unknown> {
@@ -1312,6 +1344,7 @@
       const signerId = resolveSignerId(tab.entityId);
       if (!signerId) throw new Error('No signer available for selected entity');
 
+      const resolvedAccountId = resolveOfferAccountId(offerId, accountId);
       await enqueueEntityInputs(env, [{
         entityId: tab.entityId,
         signerId,
@@ -1319,7 +1352,7 @@
           type: 'proposeCancelSwap',
           data: {
             offerId,
-            counterpartyEntityId: accountId, // accountId is the counterparty entity ID
+            counterpartyEntityId: resolvedAccountId,
           }
         }]
       }]);
@@ -1422,7 +1455,7 @@
         </div>
         <div class="toolbar-select toolbar-select-account">
           <select
-            bind:value={selectedBookAccountId}
+            value={currentHubSelection}
             data-testid="swap-account-select"
             aria-label="Swap hub selection"
             on:change={handleSelectedHubChange}
@@ -1507,6 +1540,24 @@
             class="readonly-input"
           />
         </label>
+      </div>
+
+      <div class="slippage-row">
+        <div class="slippage-labels">
+          <span class="slippage-label-left" class:active={slippagePct === 0}>Limit</span>
+          <span class="slippage-value">{slippagePct === 0 ? 'Exact price' : `Market ±${slippagePct.toFixed(1)}%`}</span>
+          <span class="slippage-label-right" class:active={slippagePct >= 5}>10%</span>
+        </div>
+        <input
+          class="slippage-slider"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value={slippagePct * 10}
+          on:input={(e) => { slippagePct = Number((e.currentTarget as HTMLInputElement).value) / 10; }}
+          data-testid="swap-slippage-slider"
+        />
       </div>
 
       <div class="slider-inline">
