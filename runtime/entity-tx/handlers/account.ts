@@ -142,6 +142,7 @@ export interface SwapOfferEvent {
   giveAmount: bigint;
   wantTokenId: number;
   wantAmount: bigint;
+  timeInForce?: 0 | 1 | 2;
   minFillRatio: number;
 }
 
@@ -1262,12 +1263,15 @@ export function processOrderbookSwaps(
       continue;
     }
 
-    priceTicks = computeSwapPriceTicks(
-      offer.giveTokenId,
-      offer.wantTokenId,
-      offer.giveAmount,
-      offer.wantAmount,
-    );
+    const explicitPriceTicks = typeof offer.priceTicks === 'bigint' ? offer.priceTicks : undefined;
+    priceTicks = explicitPriceTicks && explicitPriceTicks > 0n
+      ? explicitPriceTicks
+      : computeSwapPriceTicks(
+          offer.giveTokenId,
+          offer.wantTokenId,
+          offer.giveAmount,
+          offer.wantAmount,
+        );
     if (priceTicks <= 0n) {
       console.warn(`⚠️ ORDERBOOK: price rounded to zero — skipping offer=${offer.offerId}`);
       continue;
@@ -1357,7 +1361,7 @@ export function processOrderbookSwaps(
       ownerId: makerId,
       orderId: namespacedOrderId,
       side,
-      tif: 0,
+      tif: offer.timeInForce ?? 0,
       postOnly: false,
       priceTicks: Number(priceTicks),
       qtyLots: Number(qtyLots),
@@ -1368,6 +1372,30 @@ export function processOrderbookSwaps(
     // AUDIT FIX (CRITICAL-5): Cache updated book for next offer in same batch
     bookCache.set(bookKey, book);
     bookUpdates.push({ pairId: bookKey, book });
+
+    const rejectEvents = result.events.filter(
+      (event) => event.type === 'REJECT' && event.orderId === namespacedOrderId,
+    );
+    const offerRejectedWithoutFill = rejectEvents.length > 0;
+    if (offerRejectedWithoutFill) {
+      const rejectReasons = rejectEvents.map((event) => event.reason).filter(Boolean).join(', ');
+      console.warn(
+        `⚠️ ORDERBOOK REJECT: offer=${offer.offerId} account=${accountId.slice(-8)} side=${side} price=${priceTicks.toString()} qty=${qtyLots.toString()} bestBid=${String(bestBid)} bestAsk=${String(bestAsk)} reason=${rejectReasons || 'unknown'}`,
+      );
+      mempoolOps.push({
+        accountId,
+        tx: {
+          type: 'swap_resolve',
+          data: {
+            offerId: offer.offerId,
+            fillRatio: 0,
+            cancelRemainder: true,
+          },
+        },
+      });
+      console.log(`📤 ORDERBOOK: Queued swap_resolve(cancelRemainder) for rejected offer ${offer.offerId.slice(-8)}`);
+      continue;
+    }
 
     // Process trade events
     const fillsPerOrder = new Map<string, {

@@ -207,8 +207,11 @@ function copyMnemonic12() {
   }
 
   // General settings
+  let selectedTheme: ThemeName = 'dark';
+  $: selectedTheme = $settings.theme;
+
   function handleThemeChange(event: Event) {
-    const target = event.target as HTMLSelectElement;
+    const target = event.currentTarget as HTMLSelectElement;
     settingsOperations.setTheme(target.value as ThemeName);
   }
 
@@ -462,7 +465,7 @@ function copyMnemonic12() {
 
         <label class="setting-row">
           <span>Theme</span>
-          <select value={$settings.theme} on:change={handleThemeChange}>
+          <select bind:value={selectedTheme} on:change={handleThemeChange} data-testid="settings-theme-select">
             {#each Object.entries(THEME_DEFINITIONS) as [key, theme]}
               <option value={key}>{theme.name}</option>
             {/each}

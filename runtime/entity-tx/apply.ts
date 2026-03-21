@@ -1129,7 +1129,7 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, minFillRatio } =
+      const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, timeInForce, minFillRatio } =
         entityTx.data;
 
       // Use canonical key for account lookup
@@ -1142,7 +1142,7 @@ export const applyEntityTx = async (
 
       const accountTx: AccountTx = {
         type: 'swap_offer',
-        data: { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, minFillRatio },
+        data: { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, timeInForce, minFillRatio },
       };
 
       // Pure: return mempoolOp instead of mutating directly

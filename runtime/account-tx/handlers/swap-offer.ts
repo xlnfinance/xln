@@ -24,8 +24,8 @@ export async function handleSwapOffer(
   byLeft: boolean,
   currentHeight: number,
   isValidation: boolean = false
-): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: { offerId: string; makerIsLeft: boolean; fromEntity: string; toEntity: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; minFillRatio: number } }> {
-  const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, minFillRatio } = accountTx.data;
+): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: { offerId: string; makerIsLeft: boolean; fromEntity: string; toEntity: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; timeInForce?: 0 | 1 | 2; minFillRatio: number } }> {
+  const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, timeInForce, minFillRatio } = accountTx.data;
   const events: string[] = [];
   const LOT_SCALE = SWAP_LOT_SCALE;
 
@@ -63,6 +63,9 @@ export async function handleSwapOffer(
   }
   if (minFillRatio < 0 || minFillRatio > 65535) {
     return { success: false, error: `Invalid minFillRatio: ${minFillRatio}`, events };
+  }
+  if (timeInForce !== undefined && timeInForce !== 0 && timeInForce !== 1 && timeInForce !== 2) {
+    return { success: false, error: `Invalid timeInForce: ${String(timeInForce)}`, events };
   }
 
   // 3. Determine maker perspective (Channel.ts: byLeft = frame proposer = maker)
@@ -164,6 +167,7 @@ export async function handleSwapOffer(
     wantTokenId,
     wantAmount: effectiveWantAmount,
     priceTicks,
+    ...(timeInForce !== undefined ? { timeInForce } : {}),
     minFillRatio,
     makerIsLeft,
     createdHeight: currentHeight,
@@ -203,6 +207,7 @@ export async function handleSwapOffer(
       giveAmount: effectiveGiveAmount,
       wantTokenId,
       wantAmount: effectiveWantAmount,
+      ...(timeInForce !== undefined ? { timeInForce } : {}),
       minFillRatio,
     },
   };

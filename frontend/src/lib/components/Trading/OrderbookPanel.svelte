@@ -26,6 +26,7 @@
   export let compactHeader: boolean = false;
   export let priceScale: number = 1;
   export let sizeDisplayScale: number = 1;
+  export let preferredClickSide: BookSide = 'ask';
   export let envStore: Readable<any> = xlnEnvironment;
 
   type BookSide = 'bid' | 'ask';
@@ -617,6 +618,12 @@
     });
   }
 
+  function emitMidPriceClick() {
+    const preferredLevel = preferredClickSide === 'bid' ? bids[0] : asks[0];
+    if (!preferredLevel) return;
+    emitLevelClick(preferredClickSide === 'bid' ? 'bid' : 'ask', preferredLevel);
+  }
+
   function labelForSource(sourceId: string): string {
     return sourceLabels[sourceId] || formatEntityId(sourceId || '');
   }
@@ -874,7 +881,19 @@
     </div>
 
     <!-- Spread indicator -->
-    <div class="spread-indicator">
+    <div
+      class="spread-indicator"
+      class:clickable={Boolean((preferredClickSide === 'bid' ? bids[0] : asks[0]))}
+      role="button"
+      tabindex="0"
+      on:click={emitMidPriceClick}
+      on:keydown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          emitMidPriceClick();
+        }
+      }}
+    >
       {#if spread !== null}
         <span class="mid-price">{formatPrice((bids[0]?.price || 0) + (spread / 2))}</span>
       {/if}
@@ -1103,6 +1122,14 @@
     border-top: 1px solid var(--border-color, #333);
     border-bottom: 1px solid var(--border-color, #333);
     margin: 3px 0;
+  }
+
+  .spread-indicator.clickable {
+    cursor: pointer;
+  }
+
+  .spread-indicator.clickable:hover {
+    background: rgba(255, 255, 255, 0.03);
   }
 
   .mid-price {
