@@ -5,6 +5,7 @@ import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
 } from '../htlc-events';
+import { applyCommittedAccountFrameFollowups } from '../entity-tx/handlers/account';
 import { createEmptyEnv } from '../runtime';
 import type { AccountMachine, EntityReplica } from '../types';
 
@@ -205,5 +206,66 @@ describe('htlc event contract and dispute tail', () => {
         },
       },
     ]);
+  });
+
+  test('clears secretAckPending route when committed ACK frame finalizes htlc_resolve(secret)', () => {
+    const entityId = `0x${'11'.repeat(32)}`;
+    const counterpartyId = `0x${'22'.repeat(32)}`;
+    const inboundLockId = 'lock-inbound';
+    const hashlock = `0x${'66'.repeat(32)}`;
+    const replica = makeReplica(entityId, counterpartyId);
+    const account = replica.state.accounts.get(counterpartyId)!;
+    account.locks.set(inboundLockId, {
+      lockId: inboundLockId,
+      hashlock,
+      tokenId: 1,
+      amount: 10n,
+      timelock: 100000n,
+      revealBeforeHeight: 10,
+    });
+    replica.state.htlcRoutes.set(hashlock, {
+      hashlock,
+      tokenId: 1,
+      amount: 10n,
+      inboundEntity: counterpartyId,
+      inboundLockId,
+      createdTimestamp: replica.state.timestamp - 1000,
+      secret: `0x${'55'.repeat(32)}`,
+      secretAckPending: true,
+      secretAckStartedAt: replica.state.timestamp - 500,
+      secretAckDeadlineAt: replica.state.timestamp + 30_000,
+    });
+    scheduleHook(replica.state.crontabState!, {
+      id: `htlc-secret-ack:${hashlock}`,
+      triggerAt: replica.state.timestamp + 30_000,
+      type: 'htlc_secret_ack_timeout',
+      data: {
+        hashlock,
+        counterpartyEntityId: counterpartyId,
+        inboundLockId,
+      },
+    });
+
+    applyCommittedAccountFrameFollowups(replica.state, counterpartyId, {
+      height: 1,
+      timestamp: replica.state.timestamp,
+      jHeight: 0,
+      accountTxs: [{
+        type: 'htlc_resolve',
+        data: {
+          lockId: inboundLockId,
+          outcome: 'secret',
+          secret: `0x${'55'.repeat(32)}`,
+        },
+      }],
+      prevFrameHash: '',
+      tokenIds: [],
+      deltas: [],
+      stateHash: '',
+      byLeft: true,
+    });
+
+    expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
+    expect(replica.state.crontabState?.hooks.has(`htlc-secret-ack:${hashlock}`)).toBe(false);
   });
 });
