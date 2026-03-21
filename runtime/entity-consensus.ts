@@ -946,14 +946,16 @@ export const applyEntityInput = async (
 
   // Auto-propose logic: ONLY proposer can propose (BFT requirement)
   if (workingReplica.isProposer && workingReplica.mempool.length > 0 && !workingReplica.proposal) {
-    console.log(`🔥 ALICE-PROPOSES: Alice auto-propose triggered!`);
-    console.log(
-      `🔥 ALICE-PROPOSES: mempool=${workingReplica.mempool.length}, isProposer=${workingReplica.isProposer}, hasProposal=${!!workingReplica.proposal}`,
-    );
-    console.log(
-      `🔥 ALICE-PROPOSES: Mempool transaction types:`,
-      workingReplica.mempool.map(tx => tx.type),
-    );
+    if (!quietRuntimeLogs) {
+      console.log(`🔥 ALICE-PROPOSES: Alice auto-propose triggered!`);
+      console.log(
+        `🔥 ALICE-PROPOSES: mempool=${workingReplica.mempool.length}, isProposer=${workingReplica.isProposer}, hasProposal=${!!workingReplica.proposal}`,
+      );
+      console.log(
+        `🔥 ALICE-PROPOSES: Mempool transaction types:`,
+        workingReplica.mempool.map(tx => tx.type),
+      );
+    }
 
     // Check if this is a single signer entity (threshold = 1, only 1 validator)
     const isSingleSigner =
@@ -1565,12 +1567,16 @@ export const applyEntityFrame = async (
       const { counterparty: cpId } = accountMachine ? getAccountPerspective(accountMachine, currentEntityState.entityId) : { counterparty: 'unknown' };
       if (HEAVY_LOGS) console.log(`🔍 [Frame ${env.height}] BEFORE-PROPOSE: Getting account for ${cpId.slice(-4)}`);
       if (accountMachine) {
-        console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME for ${cpId.slice(-4)}: mempool=${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
-        console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: leftJObs=${accountMachine.leftJObservations?.length || 0}, rightJObs=${accountMachine.rightJObservations?.length || 0}`);
-        console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: Full mempool details:`, accountMachine.mempool.map((tx, i) => `${i}:${tx.type}`).join(', '));
+        if (env.quietRuntimeLogs !== true) {
+          console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME for ${cpId.slice(-4)}: mempool=${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
+          console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: leftJObs=${accountMachine.leftJObservations?.length || 0}, rightJObs=${accountMachine.rightJObservations?.length || 0}`);
+          console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: Full mempool details:`, accountMachine.mempool.map((tx, i) => `${i}:${tx.type}`).join(', '));
+        }
         const proposal = await proposeAccountFrame(env, accountMachine, false, currentEntityState.lastFinalizedJHeight);
 
-        console.log(`📤 PROPOSE-RESULT for ${cpId.slice(-4)}: success=${proposal.success}, hasAccountInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
+        if (env.quietRuntimeLogs !== true) {
+          console.log(`📤 PROPOSE-RESULT for ${cpId.slice(-4)}: success=${proposal.success}, hasAccountInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
+        }
 
         // Collect hashes from proposal (multi-signer support)
         if (proposal.hashesToSign) {
@@ -1622,7 +1628,9 @@ export const applyEntityFrame = async (
           };
           allOutputs.push(outputEntityInput);
 
-          console.log(`📮 ACCOUNT-FRAME-OUTPUT: frame ${proposal.accountInput.height} → Entity ${proposal.accountInput.toEntityId.slice(-4)} (${accountKey.slice(-8)} account)`);
+          if (env.quietRuntimeLogs !== true) {
+            console.log(`📮 ACCOUNT-FRAME-OUTPUT: frame ${proposal.accountInput.height} → Entity ${proposal.accountInput.toEntityId.slice(-4)} (${accountKey.slice(-8)} account)`);
+          }
 
           // Add events to entity messages with size limiting
           addMessages(currentEntityState, proposal.events);

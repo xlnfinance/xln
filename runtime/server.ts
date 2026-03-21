@@ -4664,9 +4664,9 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         );
       }
       const normalizedUserEntityId = String(userEntityId).toLowerCase();
-      const allProfiles = env.gossip?.getProfiles() || [];
       let normalizedUserRuntimeId = normalizeRuntimeKey(userRuntimeId);
       if (!normalizedUserRuntimeId) {
+        const allProfiles = env.gossip?.getProfiles() || [];
         const userProfile = allProfiles.find(
           (p: any) => String(p?.entityId || '').toLowerCase() === normalizedUserEntityId,
         );
@@ -4687,10 +4687,9 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         );
       }
       const normalizedRuntimeKey = normalizeRuntimeKey(normalizedUserRuntimeId);
-      const activeRelayClients = Array.from(relayStore.clients.keys());
       console.log(
         `[FAUCET/OFFCHAIN] req=${requestId} user=${normalizedUserEntityId.slice(-8)} runtime=${normalizedUserRuntimeId.slice(0, 10)} ` +
-          `clients=${activeRelayClients.length} activeHubs=${relayStore.activeHubEntityIds.length}`,
+          `clients=${relayStore.clients.size} activeHubs=${relayStore.activeHubEntityIds.length}`,
       );
       // Important: local relay client registry is authoritative only when faucet API
       // and relay endpoint are the same node. With external relay (e.g. wss://xln.finance/relay),
@@ -4699,6 +4698,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const runtimeSeenLocally = relayStore.clients.has(normalizedRuntimeKey);
       const runtimePubKey = relayStore.runtimeEncryptionKeys.get(normalizedRuntimeKey);
       if (!runtimeSeenLocally || !runtimePubKey) {
+        const activeRelayClients = Array.from(relayStore.clients.keys());
         console.warn(
           `[FAUCET/OFFCHAIN] runtime-local-miss req=${requestId} runtime=${normalizedUserRuntimeId.slice(0, 10)} ` +
             `seen=${runtimeSeenLocally ? 1 : 0} pubKey=${runtimePubKey ? 1 : 0}`,
@@ -4718,22 +4718,15 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         });
       }
       // Get hub from server-authoritative hub set + gossip
-      const userSuffix = normalizedUserEntityId.slice(-8);
-      console.log(`[FAUCET/OFFCHAIN] profiles=${allProfiles.length} user=${userSuffix}`);
-      for (const p of allProfiles) {
-        const entityId = typeof p?.entityId === 'string' ? p.entityId : 'unknown';
-        console.log(
-          `  profile: ${entityId === 'unknown' ? entityId : entityId.slice(-8)} isHub=${p?.metadata.isHub === true}`,
-        );
-      }
-      const gossipHubs = getFaucetHubProfiles(env);
       const activeHubCandidates = relayStore.activeHubEntityIds
         .map(entityId => ({ entityId }))
         .filter(hub => !!hub.entityId);
       // Server authority first: if hubs are active on this server, faucet can always target them
       // without depending on client gossip freshness.
+      const gossipHubs = activeHubCandidates.length > 0 ? [] : getFaucetHubProfiles(env);
       const hubs = activeHubCandidates.length > 0 ? activeHubCandidates : gossipHubs;
       if (hubs.length === 0) {
+        const allProfiles = env.gossip?.getProfiles() || [];
         pushDebugEvent(relayStore, {
           event: 'error',
           status: 'rejected',
@@ -4832,7 +4825,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const amountWei = ethers.parseUnits(amount, 18);
       const accountMachine = getAccountMachine(env, hubEntityId, normalizedUserEntityId);
       const hasHubAccount = hasAccount(env, hubEntityId, normalizedUserEntityId) || !!accountMachine;
-      const accountPresence = hubs.map(hub => ({
+      const buildAccountPresence = () => hubs.map(hub => ({
         hubEntityId: hub.entityId,
         hasAccount: hasAccount(env, hub.entityId, normalizedUserEntityId),
       }));
@@ -4851,9 +4844,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             hubEntityId,
             userEntityId: normalizedUserEntityId,
             requestedHubEntityId: requestedHubId || null,
-            accountPresence,
+            accountPresence: buildAccountPresence(),
           },
         });
+        const accountPresence = buildAccountPresence();
         return new Response(
           JSON.stringify({
             success: false,
@@ -4926,7 +4920,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           to: normalizedUserEntityId.slice(0, 16) + '...',
           accountReady: true,
           senderOutCapacity: currentOutCapacity.toString(),
-          accountPresence,
         }),
         { headers },
       );

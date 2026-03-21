@@ -97,7 +97,12 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
   try { size = JSON.stringify(msg).length; } catch { size = 0; }
 
   // Log non-gossip messages
-  if (type !== 'gossip_request' && type !== 'gossip_response' && type !== 'gossip_announce') {
+  if (
+    process.env.RELAY_VERBOSE_LOGS === '1'
+    && type !== 'gossip_request'
+    && type !== 'gossip_response'
+    && type !== 'gossip_announce'
+  ) {
     console.log(`[RELAY-MSG] type=${type} from=${from || 'none'} to=${to || 'none'}`);
   }
 
