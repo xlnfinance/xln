@@ -1,4 +1,4 @@
-import type { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
+import type { AccountFrame, AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
 import {
@@ -75,6 +75,47 @@ const buildSkippedReplayNewFrameKey = (
 const getJurisdictionId = (state: EntityState, env: Env): string => {
   return String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 };
+
+export function applyCommittedAccountFrameFollowups(
+  newState: EntityState,
+  counterpartyId: string,
+  committedFrame: AccountFrame,
+): void {
+  if (HEAVY_LOGS) {
+    console.log(
+      `🔍 FRAME-COMMIT-FOLLOWUPS: height=${committedFrame.height}, txs=${committedFrame.accountTxs.length}`,
+    );
+  }
+
+  for (const accountTx of committedFrame.accountTxs) {
+    if (HEAVY_LOGS) console.log(`🔍 FRAME-COMMIT-FOLLOWUPS: tx type=${accountTx.type}`);
+
+    // Keep lockBook aligned with finalized account-level HTLC lifecycle.
+    if (accountTx.type === 'htlc_resolve') {
+      newState.lockBook.delete(accountTx.data.lockId);
+      if (newState.crontabState) {
+        cancelScheduledHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
+      }
+      if (accountTx.data.outcome === 'secret') {
+        for (const [hashlock, route] of newState.htlcRoutes.entries()) {
+          if (route.inboundLockId !== accountTx.data.lockId) continue;
+          console.log(`✅ HTLC: secret ACK confirmed for hashlock ${route.hashlock.slice(0, 16)}...`);
+          terminateHtlcRoute(newState, hashlock, newState.timestamp);
+        }
+      }
+    }
+
+    if (accountTx.type === 'j_event_claim') continue;
+
+    if (accountTx.type === 'swap_resolve') {
+      const key = `${counterpartyId}:${accountTx.data.offerId}`;
+      if (newState.pendingSwapFillRatios?.delete(key)) {
+        console.log(`📉 Cleared pending fillRatio for ${key.slice(-12)}`);
+      }
+    }
+  }
+}
+
 const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counterpartyId: string): string | null => {
   const target = normalizeEntityRef(counterpartyId);
   for (const key of accounts.keys()) {
@@ -326,6 +367,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   if (input.height !== undefined || input.newAccountFrame) {
     console.log(`🤝 Processing frame from ${input.fromEntityId.slice(-4)}, accountMachine.pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}`);
 
+    const currentHeightBefore = accountMachine.currentHeight;
+    const pendingFrameBefore = accountMachine.pendingFrame;
     const result = await processAccountInput(env, accountMachine, input);
     if (replayMode) {
       console.log(
@@ -379,46 +422,33 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       }
 
       // === HTLC LOCK PROCESSING: Check if we need to forward ===
-      // CRITICAL: Only process NEW locks (prevent replay on re-processing same frame)
-      // Check if this is a NEW frame (just committed) by comparing heights
-      const justCommittedFrame = input.newAccountFrame;
-      const isNewFrame = Boolean(justCommittedFrame && justCommittedFrame.height > (accountMachine.currentHeight - 1));
+      // CRITICAL: process committed-frame side effects for both:
+      // 1) receiver-side newAccountFrame commits
+      // 2) proposer-side pendingFrame commits on ACK (prevHanko)
+      const justCommittedFrame =
+        input.newAccountFrame && input.newAccountFrame.height > currentHeightBefore
+          ? input.newAccountFrame
+          : input.prevHanko && pendingFrameBefore && accountMachine.currentHeight > currentHeightBefore
+            ? pendingFrameBefore
+            : undefined;
+      const isNewFrame = Boolean(justCommittedFrame && input.newAccountFrame);
 
       if (isNewFrame && justCommittedFrame?.accountTxs) {
         if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: isNewFrame=${isNewFrame}, inputHeight=${justCommittedFrame.height}, currentHeight=${accountMachine.currentHeight}`);
         if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: accountMachine.locks.size=${accountMachine.locks.size}`);
         if (HEAVY_LOGS) console.log(`🔍 FRAME-TXS: ${justCommittedFrame.accountTxs.length} txs in frame:`, justCommittedFrame.accountTxs.map(tx => tx.type));
+      }
+
+      if (justCommittedFrame?.accountTxs) {
+        applyCommittedAccountFrameFollowups(newState, counterpartyId, justCommittedFrame);
+      }
+
+      if (isNewFrame && justCommittedFrame?.accountTxs) {
         for (const accountTx of justCommittedFrame.accountTxs) {
           if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
 
-          // Keep lockBook aligned with finalized account-level HTLC lifecycle.
-          if (accountTx.type === 'htlc_resolve') {
-            newState.lockBook.delete(accountTx.data.lockId);
-            // Cancel any scheduled timeout hook once resolve is finalized in committed frame.
-            if (newState.crontabState) {
-              cancelScheduledHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
-            }
-            // Secret-return ACK received from inbound counterparty: clear pending ACK timer.
-            if (accountTx.data.outcome === 'secret') {
-              for (const [hashlock, route] of newState.htlcRoutes.entries()) {
-                if (route.inboundLockId !== accountTx.data.lockId) continue;
-                console.log(`✅ HTLC: secret ACK confirmed for hashlock ${route.hashlock.slice(0, 16)}...`);
-                terminateHtlcRoute(newState, hashlock, newState.timestamp);
-              }
-            }
-          }
-
-          // j_event_claim is fully handled in account-consensus/processAccountTx on commit.
-          // Re-processing here duplicates observations and creates stale leftovers.
-          if (accountTx.type === 'j_event_claim') {
+          if (accountTx.type === 'htlc_resolve' || accountTx.type === 'j_event_claim' || accountTx.type === 'swap_resolve') {
             continue;
-          }
-
-          if (accountTx.type === 'swap_resolve') {
-            const key = `${counterpartyId}:${accountTx.data.offerId}`;
-            if (newState.pendingSwapFillRatios?.delete(key)) {
-              console.log(`📉 Cleared pending fillRatio for ${key.slice(-12)}`);
-            }
           }
 
           if (accountTx.type === 'htlc_lock') {

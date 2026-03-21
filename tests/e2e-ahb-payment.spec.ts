@@ -1346,7 +1346,18 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const selfBefore = await outCap(page, alice!.entityId, hubId);
     const selfAfter = await timedStep(`ahb.self_route_${selfRoute.length - 2}_hops.send_to_outcap`, async () => {
       await pay(page, alice!.entityId, alice!.signerId, alice!.entityId, selfRoute, toWei(1));
-      await page.waitForTimeout(5000);
+      await expect.poll(async () => {
+        const info = await page.evaluate((eid) => {
+          const env = (window as any).isolatedEnv;
+          for (const [k, rep] of (env?.eReplicas || new Map()).entries()) {
+            if (String(k).startsWith(eid + ':')) {
+              return rep?.state?.lockBook?.size || 0;
+            }
+          }
+          return -1;
+        }, alice!.entityId);
+        return info;
+      }, { timeout: 15_000, intervals: [50, 100, 250, 500, 1000] }).toBe(0);
       return outCap(page, alice!.entityId, hubId);
     });
     console.log(`[E2E] Self-pay OUT via hub: ${selfBefore} → ${selfAfter}`);

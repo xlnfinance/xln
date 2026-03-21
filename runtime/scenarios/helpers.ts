@@ -36,7 +36,7 @@ export function requireRuntimeSeed(env: Env, label: string): string {
     ? (process.env['XLN_RUNTIME_SEED'] || process.env['RUNTIME_SEED'] || null)
     : null;
   const seed = envSeed ?? processSeed;
-  if (seed === null || seed === undefined) {
+  if (!seed) {
     throw new Error(`${label}: runtimeSeed missing - unlock vault or set XLN_RUNTIME_SEED`);
   }
   if (env.runtimeSeed === undefined || env.runtimeSeed === null) {
