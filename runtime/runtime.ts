@@ -491,6 +491,7 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
       stopLoop: null,
       wakeLoop: null,
       wakeRequested: false,
+      clockPrimed: false,
       lastFrameAt: undefined,
       p2p: null,
       pendingP2PConfig: null,
@@ -502,6 +503,16 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
     env.runtimeState.entityRuntimeHints = new Map();
   }
   return env.runtimeState;
+};
+
+const hasMeaningfulEnqueuedWork = (inputs?: RoutedEntityInput[], runtimeTxs?: RuntimeTx[]): boolean => {
+  if ((runtimeTxs?.length ?? 0) > 0) return true;
+  return (inputs ?? []).some((input) => {
+    const hasEntityTxs = (input.entityTxs?.length ?? 0) > 0;
+    const hasProposal = !!input.proposedFrame;
+    const hasHashPrecommits = !!input.hashPrecommits && input.hashPrecommits.size > 0;
+    return hasEntityTxs || hasProposal || hasHashPrecommits;
+  });
 };
 
 const requestRuntimeLoopWake = (env: Env): void => {
@@ -648,13 +659,31 @@ const ensureRuntimeMempool = (env: Env): RuntimeInput => {
   return env.runtimeMempool;
 };
 
-const enqueueRuntimeInputs = (env: Env, inputs?: RoutedEntityInput[], runtimeTxs?: RuntimeTx[]): void => {
+const normalizeIngressTimestamp = (env: Env, explicitTimestamp?: number): number => {
+  if (typeof explicitTimestamp === 'number' && Number.isFinite(explicitTimestamp) && explicitTimestamp > 0) {
+    return Math.floor(explicitTimestamp);
+  }
+  return env.timestamp ?? 0;
+};
+
+const enqueueRuntimeInputs = (
+  env: Env,
+  inputs?: RoutedEntityInput[],
+  runtimeTxs?: RuntimeTx[],
+  jInputs?: JInput[],
+  explicitTimestamp?: number,
+): void => {
   const mempool = ensureRuntimeMempool(env);
+  const runtimeState = ensureRuntimeState(env);
+  const normalizedTimestamp = normalizeIngressTimestamp(env, explicitTimestamp);
   if (runtimeTxs && runtimeTxs.length > 0) {
     mempool.runtimeTxs.push(...runtimeTxs);
   }
   if (inputs && inputs.length > 0) {
     mempool.entityInputs.push(...inputs);
+  }
+  if (jInputs && jInputs.length > 0) {
+    mempool.jInputs = [...(mempool.jInputs ?? []), ...jInputs];
   }
   const interestingEntityInputs = (inputs || [])
     .map((input) => ({
@@ -674,12 +703,35 @@ const enqueueRuntimeInputs = (env: Env, inputs?: RoutedEntityInput[], runtimeTxs
       })}`,
     );
   }
-  if (inputs?.length || runtimeTxs?.length) {
-    if (mempool.queuedAt === undefined) {
-      mempool.queuedAt = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  if (inputs?.length || runtimeTxs?.length || jInputs?.length) {
+    const targetQueuedAt = env.scenarioMode ? (env.timestamp ?? 0) : normalizedTimestamp;
+    mempool.queuedAt =
+      mempool.queuedAt === undefined
+        ? targetQueuedAt
+        : Math.max(mempool.queuedAt, targetQueuedAt);
+    if (hasMeaningfulEnqueuedWork(inputs, runtimeTxs) || (jInputs?.length ?? 0) > 0) {
+      runtimeState.clockPrimed = true;
     }
     requestRuntimeLoopWake(env);
   }
+};
+
+const buildClockAdvanceEntityPings = (env: Env): RoutedEntityInput[] => {
+  if (!env.eReplicas || env.eReplicas.size === 0) return [];
+  const pings: RoutedEntityInput[] = [];
+  for (const [key, replica] of env.eReplicas) {
+    if (!replica?.isProposer) continue;
+    const crontab = replica.state?.crontabState;
+    if (!crontab) continue;
+    const hasHooks = (crontab.hooks?.size ?? 0) > 0;
+    const hasPeriodicWork = hubNeedsPeriodicWake(replica) && (crontab.tasks?.size ?? 0) > 0;
+    if (!hasHooks && !hasPeriodicWork) continue;
+    const entityId = replica.entityId || String(key).split(':')[0];
+    const signerId = replica.state?.config?.validators?.[0] || String(key).split(':')[1];
+    if (!entityId || !signerId) continue;
+    pings.push({ entityId, signerId, entityTxs: [] });
+  }
+  return pings;
 };
 
 export async function tryOpenInfraDb(env: Env): Promise<boolean> {
@@ -800,7 +852,16 @@ const clearInfraGossipProfiles = async (env: Env): Promise<void> => {
 };
 
 export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void => {
-  enqueueRuntimeInputs(env, runtimeInput.entityInputs, runtimeInput.runtimeTxs);
+  const ingressTimestamp = env.scenarioMode
+    ? (runtimeInput.timestamp ?? env.timestamp ?? 0)
+    : (runtimeInput.timestamp ?? getWallClockMs());
+  enqueueRuntimeInputs(
+    env,
+    runtimeInput.entityInputs,
+    runtimeInput.runtimeTxs,
+    runtimeInput.jInputs,
+    ingressTimestamp,
+  );
 };
 
 const buildRouteOutputKey = (output: RoutedEntityInput): string => {
@@ -827,10 +888,12 @@ const buildRouteOutputKey = (output: RoutedEntityInput): string => {
 const hasRuntimeWork = (env: Env): boolean => {
   const mempool = ensureRuntimeMempool(env);
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return true;
+  if ((mempool.jInputs?.length ?? 0) > 0) return true;
+  if ((mempool.queuedAt ?? 0) > (env.timestamp ?? 0)) return true;
   if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
   if (env.networkInbox && env.networkInbox.length > 0) return true;
   if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
-    const nowMs = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    const nowMs = getRuntimeNowMs(env);
     const deferredMeta = ensureRuntimeState(env).deferredNetworkMeta;
     for (const output of env.pendingNetworkOutputs) {
       const retryAt = deferredMeta?.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
@@ -890,7 +953,8 @@ const hasUnsafePendingAccountStateForCheckpoint = (env: Env): boolean => {
  */
 const hasDueEntityHooks = (env: Env): boolean => {
   if (!env.eReplicas || env.eReplicas.size === 0) return false;
-  const nowMs = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return false;
+  const nowMs = getRuntimeNowMs(env);
   for (const [, replica] of env.eReplicas) {
     const crontab = replica.state?.crontabState;
     if (!crontab) continue;
@@ -924,7 +988,8 @@ const hasDueEntityHooks = (env: Env): boolean => {
  */
 const generateHookPings = (env: Env): void => {
   if (!env.eReplicas || env.eReplicas.size === 0) return;
-  const nowMs = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return;
+  const nowMs = getRuntimeNowMs(env);
   const mempool = ensureRuntimeMempool(env);
 
   for (const [key, replica] of env.eReplicas) {
@@ -967,6 +1032,9 @@ const generateHookPings = (env: Env): void => {
 
     // Inject empty entityInput ping — just enough to trigger crontab
     mempool.entityInputs.push({ entityId, signerId, entityTxs: [] });
+    if (mempool.queuedAt === undefined) {
+      mempool.queuedAt = env.timestamp ?? 0;
+    }
   }
 };
 
@@ -1043,6 +1111,16 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
         continue;
       }
       await waitForRuntimeLoopWakeOrTimeout(env, tickDelayMs);
+      if (!running) break;
+      if (!hasRuntimeWork(env) && runtimeNeedsClockTicks(env)) {
+        const wallClockNow = getWallClockMs();
+        if (wallClockNow > (env.timestamp ?? 0)) {
+          const pings = buildClockAdvanceEntityPings(env);
+          if (pings.length > 0) {
+            enqueueRuntimeInputs(env, pings, undefined, undefined, wallClockNow);
+          }
+        }
+      }
     }
     state.loopActive = false;
     state.wakeLoop = null;
@@ -1249,7 +1327,23 @@ const getDeferredNetworkMeta = (env: Env): Map<string, { attempts: number; nextR
   return state.deferredNetworkMeta;
 };
 
-const getRuntimeNowMs = (env: Env): number => (env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs());
+const getRuntimeNowMs = (env: Env): number => env.timestamp ?? 0;
+
+const runtimeNeedsClockTicks = (env: Env): boolean => {
+  if (env.scenarioMode) return false;
+  if (!ensureRuntimeState(env).clockPrimed) return false;
+  if ((env.pendingNetworkOutputs?.length ?? 0) > 0) return true;
+  if (!env.eReplicas || env.eReplicas.size === 0) return false;
+
+  for (const replica of env.eReplicas.values()) {
+    const crontab = replica.state?.crontabState;
+    if (!crontab) continue;
+    if ((crontab.hooks?.size ?? 0) > 0) return true;
+    if (hubNeedsPeriodicWake(replica) && (crontab.tasks?.size ?? 0) > 0) return true;
+  }
+
+  return false;
+};
 
 const toDeliverableEntityInput = (
   output: RoutedEntityInput,
@@ -1491,7 +1585,7 @@ export const sendEntityInput = (
   const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan);
   env.pendingNetworkOutputs = [];
   if (localOutputs.length > 0) {
-    enqueueRuntimeInputs(env, localOutputs);
+    enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.timestamp);
   }
   const deferred = dispatchEntityOutputs(env, remoteOutputs);
   const remainingDeferred = [...deferredOutputs, ...deferred];
@@ -1567,7 +1661,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     advertiseEntityIds: config.advertiseEntityIds,
     isHub: config.isHub,
     gossipPollMs: config.gossipPollMs,
-    onEntityInput: (from, input) => {
+    onEntityInput: (from, input, ingressTimestamp) => {
       const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
       console.log(`📨 P2P-RECEIVE: from=${from} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
       const targetEntityId = String(input.entityId || '').toLowerCase();
@@ -1593,7 +1687,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
       for (const hintedEntityId of collectSenderEntityHints(input)) {
         registerEntityRuntimeHint(env, hintedEntityId, from);
       }
-      enqueueRuntimeInputs(env, [input]);
+      enqueueRuntimeInputs(env, [input], undefined, undefined, ingressTimestamp);
       console.log(`📥 RUNTIME-MEMPOOL: Added inbound, size=${ensureRuntimeMempool(env).entityInputs.length}`);
       env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
     },
@@ -2739,13 +2833,19 @@ export const queueEntityInput = async (
   signerId: string,
   txData: { type: string; [key: string]: any },
 ): Promise<void> => {
-  enqueueRuntimeInputs(env, [
-    {
-      entityId,
-      signerId,
-      entityTxs: [{ type: txData.type, data: txData }],
-    },
-  ]);
+  enqueueRuntimeInputs(
+    env,
+    [
+      {
+        entityId,
+        signerId,
+        entityTxs: [{ type: txData.type, data: txData }],
+      },
+    ],
+    undefined,
+    undefined,
+    env.timestamp,
+  );
 };
 
 export {
@@ -3248,20 +3348,32 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     }
 
     if (inputs && inputs.length > 0) {
-      enqueueRuntimeInputs(env, inputs);
+      enqueueRuntimeInputs(env, inputs, undefined, undefined, env.timestamp);
     }
     if (env.pendingOutputs && env.pendingOutputs.length > 0) {
-      enqueueRuntimeInputs(env, env.pendingOutputs);
+      enqueueRuntimeInputs(env, env.pendingOutputs, undefined, undefined, env.timestamp);
       env.pendingOutputs = [];
     }
     if (env.networkInbox && env.networkInbox.length > 0) {
-      enqueueRuntimeInputs(env, env.networkInbox);
+      enqueueRuntimeInputs(env, env.networkInbox, undefined, undefined, env.timestamp);
       env.networkInbox = [];
     }
 
     if (!hasRuntimeWork(env)) return env;
 
-    const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    const runtimeState = ensureRuntimeState(env);
+    const mempoolBeforeTick = ensureRuntimeMempool(env);
+    const queuedAtBeforeTick = mempoolBeforeTick.queuedAt;
+    const shouldAdvanceLogicalTime =
+      !env.scenarioMode &&
+      typeof queuedAtBeforeTick === 'number' &&
+      Number.isFinite(queuedAtBeforeTick) &&
+      queuedAtBeforeTick > (env.timestamp ?? 0);
+    const now = env.scenarioMode
+      ? (env.timestamp ?? 0)
+      : shouldAdvanceLogicalTime || runtimeState.clockPrimed
+        ? Math.max(env.timestamp ?? 0, queuedAtBeforeTick ?? (env.timestamp ?? 0))
+        : (env.timestamp ?? 0);
     if (!isRuntimeFrameReady(env, now, runtimeDelay)) {
       return env;
     }
@@ -3272,8 +3384,8 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
 
     if (env.scenarioMode) {
       env.timestamp = (env.timestamp ?? 0) + 100;
-    } else {
-      env.timestamp = getWallClockMs();
+    } else if (shouldAdvanceLogicalTime || runtimeState.clockPrimed) {
+      env.timestamp = Math.max(env.timestamp ?? 0, queuedAtBeforeTick ?? (env.timestamp ?? 0));
     }
     getBrowserVMInstance(env)?.setBlockTimestamp?.(env.timestamp);
 
@@ -3387,7 +3499,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
           mempool.jInputs = [...runtimeInput.jInputs, ...(mempool.jInputs ?? [])];
         }
         if (mempool.queuedAt === undefined) {
-          mempool.queuedAt = mempoolQueuedAt ?? (env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs());
+          mempool.queuedAt = mempoolQueuedAt ?? (env.timestamp ?? 0);
         }
         throw error;
       } finally {
@@ -3405,7 +3517,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan);
     env.pendingNetworkOutputs = [];
     if (localOutputs.length > 0) {
-      enqueueRuntimeInputs(env, localOutputs);
+      enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.timestamp);
       if (!quietRuntimeLogs) {
         console.log(
           `📤 TICK: ${localOutputs.length} local outputs queued for next tick → [${localOutputs.map(o => o.entityId.slice(-4)).join(',')}]`,
@@ -3503,21 +3615,27 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
             if (jTx.type !== 'batch') return;
             const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId : undefined;
             const compactReason = String(reason || 'unknown').slice(0, 240);
-            enqueueRuntimeInputs(env, [
-              {
-                entityId: jTx.entityId,
-                ...(signerId ? { signerId } : {}),
-                entityTxs: [
-                  {
-                    type: 'j_abort_sent_batch',
-                    data: {
-                      requeueToCurrent: true,
-                      reason: `submit_failed:${compactReason}`,
+            enqueueRuntimeInputs(
+              env,
+              [
+                {
+                  entityId: jTx.entityId,
+                  ...(signerId ? { signerId } : {}),
+                  entityTxs: [
+                    {
+                      type: 'j_abort_sent_batch',
+                      data: {
+                        requeueToCurrent: true,
+                        reason: `submit_failed:${compactReason}`,
+                      },
                     },
-                  },
-                ],
-              },
-            ]);
+                  ],
+                },
+              ],
+              undefined,
+              undefined,
+              env.timestamp,
+            );
             console.warn(
               `⚠️ [J-SUBMIT] queued j_abort_sent_batch for ${jTx.entityId.slice(-4)} after failed batch submission`,
             );

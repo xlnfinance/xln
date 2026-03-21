@@ -60,7 +60,7 @@ type RuntimeP2POptions = {
   seedRuntimeIds?: string[];
   advertiseEntityIds?: string[];
   gossipPollMs?: number;
-  onEntityInput: (from: string, input: RoutedEntityInput) => void;
+  onEntityInput: (from: string, input: RoutedEntityInput, timestamp?: number) => void;
   onGossipProfiles: (from: string, profiles: Profile[]) => void;
 };
 
@@ -158,7 +158,7 @@ export class RuntimeP2P {
   private seedRuntimeIds: string[];
   private advertiseEntityIds: string[] | null;
   private gossipPollMs: number;
-  private onEntityInput: (from: string, input: RoutedEntityInput) => void;
+  private onEntityInput: (from: string, input: RoutedEntityInput, timestamp?: number) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
   private clients: RuntimeWsClient[] = [];
   private pendingByRuntime = new Map<string, { input: RoutedEntityInput, enqueuedAt: number }[]>();
@@ -313,7 +313,7 @@ export class RuntimeP2P {
           this.requestSeedGossip('full');
           this.announceLocalProfiles();
         },
-        onEntityInput: async (from, input) => {
+        onEntityInput: async (from, input, timestamp) => {
           // Collect all entity IDs that need profiles before we can process
           const entitiesToCheck = new Set<string>();
 
@@ -345,7 +345,7 @@ export class RuntimeP2P {
             });
           }
 
-          this.onEntityInput(from, input);
+          this.onEntityInput(from, input, timestamp);
         },
         onGossipRequest: (from, payload) => this.handleGossipRequest(from, payload),
         onGossipResponse: (from, payload) => this.handleGossipResponse(from, payload),
