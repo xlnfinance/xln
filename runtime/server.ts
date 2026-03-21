@@ -163,6 +163,27 @@ const resolveReserveWaitPollMs = (): number => {
   return 300;
 };
 
+const STARTUP_STEP_TIMEOUT_MS = Math.max(
+  5_000,
+  Math.floor(Number(process.env.XLN_STARTUP_STEP_TIMEOUT_MS ?? '20000')),
+);
+
+const withStartupStepTimeout = async <T>(label: string, work: Promise<T>, timeoutMs = STARTUP_STEP_TIMEOUT_MS): Promise<T> => {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((_resolve, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(`[XLN] Startup step timed out: ${label} after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+};
+
 const oneShotLogs = new Map<string, number>();
 const ONE_SHOT_TTL_MS = 60_000;
 const logOneShot = (key: string, message: string) => {
@@ -5358,22 +5379,28 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       }
     }
 
-    globalJAdapter = await createJAdapter({
-      mode: 'rpc',
-      chainId: detectedChainId,
-      rpcUrl: anvilRpc,
-      fromReplica,
-    });
+    globalJAdapter = await withStartupStepTimeout(
+      'createJAdapter(rpc)',
+      createJAdapter({
+        mode: 'rpc',
+        chainId: detectedChainId,
+        rpcUrl: anvilRpc,
+        fromReplica,
+      }),
+    );
 
     const deployFreshLocalStack = async (reason: string): Promise<void> => {
       console.warn(`[XLN] Existing anvil contract stack is incompatible (${reason}). Deploying fresh stack...`);
       await globalJAdapter?.close().catch(() => undefined);
-      globalJAdapter = await createJAdapter({
-        mode: 'rpc',
-        chainId: detectedChainId,
-        rpcUrl: anvilRpc,
-      });
-      await globalJAdapter.deployStack();
+      globalJAdapter = await withStartupStepTimeout(
+        'createJAdapter(rpc:fresh)',
+        createJAdapter({
+          mode: 'rpc',
+          chainId: detectedChainId,
+          rpcUrl: anvilRpc,
+        }),
+      );
+      await withStartupStepTimeout('deployStack', globalJAdapter.deployStack(), Math.max(STARTUP_STEP_TIMEOUT_MS, 60_000));
       console.log('[XLN] Contracts deployed');
     };
 
@@ -5382,7 +5409,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       console.log('[XLN] Deploying contracts to anvil (missing addresses)...');
       await deployFreshLocalStack('MISSING_ADDRESSES');
     } else {
-      const compatibility = await probeLocalAnvilContractStack(globalJAdapter);
+      const compatibility = await withStartupStepTimeout(
+        'probeLocalAnvilContractStack',
+        probeLocalAnvilContractStack(globalJAdapter),
+      );
       if (!compatibility.ok) {
         await deployFreshLocalStack(compatibility.reason);
       } else if (fromReplica) {
@@ -5392,11 +5422,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       }
     }
 
-    const block = await globalJAdapter.provider.getBlockNumber();
+    const block = await withStartupStepTimeout('provider.getBlockNumber', globalJAdapter.provider.getBlockNumber());
     console.log(`[XLN] Anvil connected (block: ${block})`);
 
     if (globalJAdapter.addresses?.depository && globalJAdapter.addresses?.entityProvider) {
-      await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId);
+      await withStartupStepTimeout(
+        'updateJurisdictionsJson',
+        updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId),
+      );
     }
 
     // Ensure env has a J-replica for this RPC jurisdiction (required for j_broadcast → j-mempool)
@@ -5426,11 +5459,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     }
     } else {
       console.log('[XLN] Using BrowserVM (local mode)');
-      globalJAdapter = await createJAdapter({
-        mode: 'browservm',
-        chainId: 31337,
-      });
-      await globalJAdapter.deployStack();
+      globalJAdapter = await withStartupStepTimeout(
+        'createJAdapter(browservm)',
+        createJAdapter({
+          mode: 'browservm',
+          chainId: 31337,
+        }),
+      );
+      await withStartupStepTimeout('deployStack(browservm)', globalJAdapter.deployStack(), Math.max(STARTUP_STEP_TIMEOUT_MS, 60_000));
       if (globalJAdapter && env) {
         if (!env.jReplicas) env.jReplicas = new Map();
         const jName = 'local';
