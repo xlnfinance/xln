@@ -11,6 +11,7 @@ import { isLeftEntity } from '../../entity-id-utils';
 import { safeStringify } from '../../serialization-utils';
 import { getAccountPerspective } from '../../state-helpers';
 import { decodeRebalancePolicyMemo } from '../../rebalance-policy';
+import { HEAVY_LOGS } from '../../utils';
 
 export function handleDirectPayment(
   accountMachine: AccountMachine,
@@ -35,12 +36,18 @@ export function handleDirectPayment(
 
   // Get or create delta
   let delta = accountMachine.deltas.get(tokenId);
-  console.log(`🔍 DIRECT-PAYMENT: accountMachine.deltas.has(${tokenId})=${accountMachine.deltas.has(tokenId)}`);
+  if (HEAVY_LOGS) {
+    console.log(`🔍 DIRECT-PAYMENT: accountMachine.deltas.has(${tokenId})=${accountMachine.deltas.has(tokenId)}`);
+  }
   if (delta) {
-    console.log(`🔍 DIRECT-PAYMENT: delta.collateral=${delta.collateral}, ondelta=${delta.ondelta}, offdelta=${delta.offdelta}`);
+    if (HEAVY_LOGS) {
+      console.log(`🔍 DIRECT-PAYMENT: delta.collateral=${delta.collateral}, ondelta=${delta.ondelta}, offdelta=${delta.offdelta}`);
+    }
   }
   if (!delta) {
-    console.log(`🔍 DIRECT-PAYMENT: Creating NEW delta (collateral will be 0!)`);
+    if (HEAVY_LOGS) {
+      console.log(`🔍 DIRECT-PAYMENT: Creating NEW delta (collateral will be 0!)`);
+    }
     const defaultCreditLimit = getDefaultCreditLimit(tokenId);
     delta = {
       tokenId,
@@ -82,9 +89,11 @@ export function handleDirectPayment(
   const senderIsLeft = paymentFromEntity === leftEntity;
 
   // DEBUG: Log delta values before deriveDelta
-  console.log(`🔍 PAYMENT-DEBUG: ${paymentFromEntity.slice(-4)}→${paymentToEntity.slice(-4)}`);
-  console.log(`   delta: collateral=${delta.collateral}, ondelta=${delta.ondelta}, offdelta=${delta.offdelta}`);
-  console.log(`   senderIsLeft=${senderIsLeft}`);
+  if (HEAVY_LOGS) {
+    console.log(`🔍 PAYMENT-DEBUG: ${paymentFromEntity.slice(-4)}→${paymentToEntity.slice(-4)}`);
+    console.log(`   delta: collateral=${delta.collateral}, ondelta=${delta.ondelta}, offdelta=${delta.offdelta}`);
+    console.log(`   senderIsLeft=${senderIsLeft}`);
+  }
 
   // Derive capacity from sender's perspective
   const senderDerived = deriveDelta(delta, senderIsLeft);

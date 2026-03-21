@@ -746,9 +746,11 @@ export async function proposeAccountFrame(
       events,
     };
   }
-  console.log(
-    `✅ Frame size: ${frameSize} bytes (${((frameSize / MAX_FRAME_SIZE_BYTES) * 100).toFixed(2)}% of 1MB limit)`,
-  );
+  if (!quiet) {
+    console.log(
+      `✅ Frame size: ${frameSize} bytes (${((frameSize / MAX_FRAME_SIZE_BYTES) * 100).toFixed(2)}% of 1MB limit)`,
+    );
+  }
 
   // Generate HANKO signature - CRITICAL: Use signerId, not entityId
   // For single-signer entities, build hanko with single EOA signature
@@ -762,7 +764,9 @@ export async function proposeAccountFrame(
     return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events };
   }
 
-  console.log(`🔐 HANKO-SIGN: entityId=${signingEntityId.slice(-4)} → signerId=${signingSignerId.slice(-4)}`);
+  if (!quiet) {
+    console.log(`🔐 HANKO-SIGN: entityId=${signingEntityId.slice(-4)} → signerId=${signingSignerId.slice(-4)}`);
+  }
 
   // Build hanko for account frame
   const { signHashesAsSingleEntity } = await import('./hanko-signing');
@@ -805,14 +809,18 @@ export async function proposeAccountFrame(
   let proofResult: ReturnType<typeof buildAccountProofBody>;
   let disputeHash: string;
   try {
-    console.log(
-      `🔐 DISPUTE-SIGN: depositoryAddress=${depositoryAddress}, counterparty=${accountMachine.proofHeader.toEntity.slice(-4)}`,
-    );
+    if (!quiet) {
+      console.log(
+        `🔐 DISPUTE-SIGN: depositoryAddress=${depositoryAddress}, counterparty=${accountMachine.proofHeader.toEntity.slice(-4)}`,
+      );
+    }
     proofResult = buildAccountProofBody(clonedMachine);
     disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash, depositoryAddress);
-    console.log(
-      `🔐 DISPUTE-SIGN: disputeHash=${disputeHash.slice(0, 18)}..., proofBodyHash=${proofResult.proofBodyHash.slice(0, 18)}...`,
-    );
+    if (!quiet) {
+      console.log(
+        `🔐 DISPUTE-SIGN: disputeHash=${disputeHash.slice(0, 18)}..., proofBodyHash=${proofResult.proofBodyHash.slice(0, 18)}...`,
+      );
+    }
   } catch (error) {
     accountMachine.mempool = [];
     delete accountMachine.pendingFrame;

@@ -685,9 +685,13 @@ export class RuntimeP2P {
       await this.fetchProfilesWithRetry(missingEntityIds);
     }
 
+    const hubCountBeforeFullFetch = this.env.gossip?.getHubs?.().length || 0;
     // Route-finding needs the structural hub graph, not just the target profile.
-    // Pull one bounded default batch so callers do not continue with a half-filled cache.
-    await this.fetchProfilesWithRetry([]);
+    // But once the target is resolved and we already have hubs in cache, avoid
+    // forcing an extra full-batch fetch on every sender-side payment attempt.
+    if (missingEntityIds.length > 0 || hubCountBeforeFullFetch === 0) {
+      await this.fetchProfilesWithRetry([]);
+    }
 
     requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
     missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));

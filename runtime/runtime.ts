@@ -1459,9 +1459,11 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
       deferredOutputs.push(output);
       continue;
     }
-    console.log(
-      `📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`,
-    );
+    if (env.quietRuntimeLogs !== true) {
+      console.log(
+        `📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`,
+      );
+    }
     try {
       p2p.enqueueEntityInput(targetRuntimeId, output);
     } catch (error) {

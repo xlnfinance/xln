@@ -631,13 +631,16 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'directPayment') {
-      console.log(`💸 ═════════════════════════════════════════════════════════════`);
-      console.log(
-        `💸 DIRECT-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`,
-      );
-      console.log(`💸 Amount: ${entityTx.data.amount}, TokenId: ${entityTx.data.tokenId}`);
-      console.log(`💸 Route: ${entityTx.data.route?.map(r => r.slice(-4)).join('→') || 'NONE (will calculate)'}`);
-      console.log(`💸 Description: ${entityTx.data.description || 'none'}`);
+      const verbose = env.quietRuntimeLogs !== true;
+      if (verbose) {
+        console.log(`💸 ═════════════════════════════════════════════════════════════`);
+        console.log(
+          `💸 DIRECT-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`,
+        );
+        console.log(`💸 Amount: ${entityTx.data.amount}, TokenId: ${entityTx.data.tokenId}`);
+        console.log(`💸 Route: ${entityTx.data.route?.map(r => r.slice(-4)).join('→') || 'NONE (will calculate)'}`);
+        console.log(`💸 Description: ${entityTx.data.description || 'none'}`);
+      }
 
       // Emit payment initiation event
       env.emit('PaymentInitiated', {
@@ -651,7 +654,7 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
-      console.log(`💸 Initialized: outputs=[], mempoolOps=[]`);
+      if (verbose) console.log(`💸 Initialized: outputs=[], mempoolOps=[]`);
 
       // Extract payment details
       let { targetEntityId, tokenId, amount, route, description } = entityTx.data;
@@ -669,11 +672,11 @@ export const applyEntityTx = async (
         // Check if we have a direct account with target
         // Account keyed by counterparty ID
         if (newState.accounts.has(targetEntityId)) {
-          console.log(`💸 Direct account exists with ${formatEntityId(targetEntityId)}`);
+          if (verbose) console.log(`💸 Direct account exists with ${formatEntityId(targetEntityId)}`);
           route = [entityState.entityId, targetEntityId];
         } else {
           // Find route through network using gossip
-          console.log(`💸 No direct account, finding route to ${formatEntityId(targetEntityId)}`);
+          if (verbose) console.log(`💸 No direct account, finding route to ${formatEntityId(targetEntityId)}`);
 
           // Try to find a route through the network
           if (env.gossip) {
@@ -683,7 +686,7 @@ export const applyEntityTx = async (
             if (paths.length > 0) {
               // Use the shortest path
               route = paths[0].path;
-              console.log(`💸 Found route: ${route.map(e => formatEntityId(e)).join(' → ')}`);
+              if (verbose) console.log(`💸 Found route: ${route.map(e => formatEntityId(e)).join(' → ')}`);
             } else {
               logError('ENTITY_TX', `❌ No route found to ${formatEntityId(targetEntityId)}`);
               addMessage(newState, `❌ Payment failed: No route to ${formatEntityId(targetEntityId)}`);
@@ -763,18 +766,20 @@ export const applyEntityTx = async (
       if (accountMachine) {
         // Pure: return mempoolOp instead of mutating directly
         mempoolOps.push({ accountId: nextHop, tx: accountTx });
-        console.log(`💸 QUEUED TO MEMPOOL: account=${formatEntityId(nextHop)}`);
-        console.log(`💸   AccountTx type: ${accountTx.type}`);
-        console.log(`💸   Amount: ${accountTx.data.amount}`);
-        console.log(`💸   From: ${accountTx.data.fromEntityId?.slice(-4)}`);
-        console.log(`💸   To: ${accountTx.data.toEntityId?.slice(-4)}`);
-        console.log(
-          `💸   Route after slice: [${accountTx.data.route?.map((r: string) => r.slice(-4)).join(',') || 'none'}]`,
-        );
-        console.log(`💸 mempoolOps.length: ${mempoolOps.length}`);
+        if (verbose) {
+          console.log(`💸 QUEUED TO MEMPOOL: account=${formatEntityId(nextHop)}`);
+          console.log(`💸   AccountTx type: ${accountTx.type}`);
+          console.log(`💸   Amount: ${accountTx.data.amount}`);
+          console.log(`💸   From: ${accountTx.data.fromEntityId?.slice(-4)}`);
+          console.log(`💸   To: ${accountTx.data.toEntityId?.slice(-4)}`);
+          console.log(
+            `💸   Route after slice: [${accountTx.data.route?.map((r: string) => r.slice(-4)).join(',') || 'none'}]`,
+          );
+          console.log(`💸 mempoolOps.length: ${mempoolOps.length}`);
+        }
 
         const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-        console.log(`💸 Account state: isLeft=${isLeft}, hasPendingFrame=${!!accountMachine.pendingFrame}`);
+        if (verbose) console.log(`💸 Account state: isLeft=${isLeft}, hasPendingFrame=${!!accountMachine.pendingFrame}`);
 
         // Message about payment initiation
         addMessage(
@@ -784,8 +789,10 @@ export const applyEntityTx = async (
 
         // The payment is now queued for entity-level orchestration
         // Entity-consensus will apply mempoolOps and add to proposableAccounts
-        console.log(`💸 Payment queued for bilateral consensus with ${formatEntityId(nextHop)}`);
-        console.log(`💸 Account ${formatEntityId(nextHop)} will be added to proposableAccounts`);
+        if (verbose) {
+          console.log(`💸 Payment queued for bilateral consensus with ${formatEntityId(nextHop)}`);
+          console.log(`💸 Account ${formatEntityId(nextHop)} will be added to proposableAccounts`);
+        }
 
         // Return a trigger output to ensure process() continues
         // This ensures the AUTO-PROPOSE logic runs to process the payment
@@ -796,10 +803,12 @@ export const applyEntityTx = async (
             signerId: firstValidator,
             entityTxs: [], // Empty transaction array - just triggers processing
           });
-          console.log(`💸 Added processing trigger: outputs.length=${outputs.length}`);
+          if (verbose) console.log(`💸 Added processing trigger: outputs.length=${outputs.length}`);
         }
-        console.log(`💸 DIRECT-PAYMENT COMPLETE: mempoolOps=${mempoolOps.length}, outputs=${outputs.length}`);
-        console.log(`💸 ═════════════════════════════════════════════════════════════`);
+        if (verbose) {
+          console.log(`💸 DIRECT-PAYMENT COMPLETE: mempoolOps=${mempoolOps.length}, outputs=${outputs.length}`);
+          console.log(`💸 ═════════════════════════════════════════════════════════════`);
+        }
       }
 
       return { newState, outputs, mempoolOps };
