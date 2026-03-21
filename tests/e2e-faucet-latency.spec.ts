@@ -28,6 +28,12 @@ type FaucetAccountSnapshot = {
   outCapacity: string;
 };
 
+type FaucetRenderProbe = {
+  stateChangedMs: number;
+  domVisibleMs: number;
+  stateToDomMs: number;
+};
+
 async function getPrimaryHubId(page: Page): Promise<string> {
   const health = await getHealth(page, API_BASE_URL);
   const hubId = health?.hubMesh?.hubIds?.[0];
@@ -158,6 +164,111 @@ async function readRenderedAccountTokenOut(page: Page, hubId: string, symbol: st
   }, { hubId, symbol });
 }
 
+async function measureAccountStateToDomLatency(
+  page: Page,
+  entityId: string,
+  signerId: string | null,
+  hubId: string,
+  tokenId: number,
+  symbol: string,
+  baselineHeight: number,
+  expectedOut: number,
+): Promise<FaucetRenderProbe> {
+  return await page.evaluate(
+    ({ entityId, signerId, hubId, tokenId, symbol, baselineHeight, expectedOut }) => {
+      const startedAt = performance.now();
+      const readSnapshot = () => {
+        const env = (window as typeof window & {
+          isolatedEnv?: {
+            eReplicas?: Map<string, {
+              state?: {
+                accounts?: Map<string, {
+                  currentHeight?: number;
+                  deltas?: Map<number | string, unknown>;
+                }>;
+              };
+            }>;
+          };
+        }).isolatedEnv;
+        if (!env?.eReplicas) return null;
+        for (const [replicaKey, replica] of env.eReplicas.entries()) {
+          const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
+          if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
+          if (signerId && String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
+          const account = replica.state?.accounts?.get?.(hubId);
+          if (!account) return null;
+          const delta = account.deltas?.get?.(tokenId) ?? account.deltas?.get?.(String(tokenId));
+          return {
+            currentHeight: Number(account.currentHeight || 0),
+            deltaJson: JSON.stringify(delta, (_, value) => typeof value === 'bigint' ? value.toString() : value),
+          };
+        }
+        return null;
+      };
+
+      const readRenderedOut = (): number => {
+        const preview = document.querySelector(`.account-preview[data-counterparty-id="${hubId}"]`);
+        if (!preview) return Number.NaN;
+        const rows = Array.from(preview.querySelectorAll('.delta-row'));
+        for (const row of rows) {
+          const symbolEl = row.querySelector('.token-symbol');
+          if (String(symbolEl?.textContent || '').trim().toUpperCase() !== String(symbol || '').trim().toUpperCase()) {
+            continue;
+          }
+          const valueEl = row.querySelector('.compact-out-value');
+          if (!valueEl) return Number.NaN;
+          const amountEl = Array.from(valueEl.children).find((child) =>
+            !(child instanceof HTMLElement) || !child.classList.contains('usd-hint'),
+          );
+          const text = String((amountEl?.textContent || valueEl.textContent || '')).replace(/,/g, '').trim();
+          const numeric = Number(text.replace(/[^0-9.-]/g, ''));
+          return Number.isFinite(numeric) ? numeric : Number.NaN;
+        }
+        return Number.NaN;
+      };
+
+      const baseline = readSnapshot();
+      const baselineDeltaJson = baseline?.deltaJson || '';
+
+      return new Promise<FaucetRenderProbe>((resolve, reject) => {
+        const deadline = performance.now() + 15_000;
+        let stateChangedAt: number | null = null;
+        const loop = () => {
+          const now = performance.now();
+          if (now > deadline) {
+            reject(new Error('Timed out waiting for account state/render transition'));
+            return;
+          }
+
+          const snapshot = readSnapshot();
+          if (!stateChangedAt && snapshot) {
+            const heightAdvanced = snapshot.currentHeight > baselineHeight;
+            const deltaChanged = snapshot.deltaJson !== baselineDeltaJson;
+            if (heightAdvanced || deltaChanged) {
+              stateChangedAt = now;
+            }
+          }
+
+          const renderedOut = readRenderedOut();
+          if (stateChangedAt !== null && Number.isFinite(renderedOut) && renderedOut === expectedOut) {
+            resolve({
+              stateChangedMs: Math.round(stateChangedAt - startedAt),
+              domVisibleMs: Math.round(now - startedAt),
+              stateToDomMs: Math.round(now - stateChangedAt),
+            });
+            return;
+          }
+
+          requestAnimationFrame(loop);
+        };
+
+        requestAnimationFrame(loop);
+      });
+    },
+    { entityId, signerId, hubId, tokenId, symbol, baselineHeight, expectedOut },
+  );
+}
+
 test.describe('E2E Faucet Latency', () => {
   test('demo account single-hub UI USDT faucet finalizes as fast as possible', async ({ page }) => {
     test.setTimeout(LONG_E2E ? 180_000 : 90_000);
@@ -179,6 +290,17 @@ test.describe('E2E Faucet Latency', () => {
 
     const baselineOut = await readRenderedAccountTokenOut(page, hubId, 'USDT');
     expect(Number.isFinite(baselineOut), 'rendered USDT out capacity must be readable').toBe(true);
+    const baselineAccount = await readFaucetAccountSnapshot(page, alice.entityId, alice.signerId, hubId, 3);
+    const renderProbePromise = measureAccountStateToDomLatency(
+      page,
+      alice.entityId,
+      alice.signerId,
+      hubId,
+      3,
+      'USDT',
+      baselineAccount.currentHeight,
+      baselineOut + 100,
+    );
     const startedAt = Date.now();
     await faucetButton.click();
 
@@ -194,7 +316,11 @@ test.describe('E2E Faucet Latency', () => {
       .toBe(baselineOut + 100);
 
     const elapsedMs = Date.now() - startedAt;
+    const renderProbe = await renderProbePromise;
     console.log(`[E2E-TIMING] faucet.ui_usdt_single_hub.finalized ${elapsedMs}ms`);
+    console.log(
+      `[E2E-TIMING] faucet.ui_usdt_single_hub.state_to_dom state=${renderProbe.stateChangedMs}ms dom=${renderProbe.domVisibleMs}ms delta=${renderProbe.stateToDomMs}ms`,
+    );
     expect(elapsedMs, 'single-hub offchain faucet should stay comfortably below timeout').toBeLessThan(5_000);
   });
 });

@@ -731,6 +731,7 @@ export type EntityTx =
         // Explicit limit price in ORDERBOOK_PRICE_SCALE ticks (quote per 1 base).
         // Sent together with give/want for deterministic cross-checking.
         priceTicks?: bigint;
+        timeInForce?: 0 | 1 | 2; // 0 = GTC, 1 = IOC, 2 = FOK
         minFillRatio: number; // 0-65535
       };
     }
@@ -971,6 +972,7 @@ export interface SwapOffer {
   wantTokenId: number;          // Token maker wants in return
   wantAmount: bigint;           // Corresponding want amount (maintains ratio)
   priceTicks?: bigint;          // Canonical limit price used for requantization after partial fills
+  timeInForce?: 0 | 1 | 2;      // 0 = GTC, 1 = IOC, 2 = FOK
   minFillRatio: number;         // 0-65535, minimum acceptable fill
   makerIsLeft: boolean;         // Who created this offer (canonical direction)
   createdHeight: number;        // AccountFrame height when created
@@ -1344,7 +1346,7 @@ export interface DerivedDelta {
  */
 export type AccountEvent =
   | { type: 'htlc_revealed'; hashlock: string; secret: string }
-  | { type: 'swap_offer_created'; offerId: string; makerId: string; accountId: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; minFillRatio: number }
+  | { type: 'swap_offer_created'; offerId: string; makerId: string; accountId: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; timeInForce?: 0 | 1 | 2; minFillRatio: number }
   | { type: 'swap_offer_cancelled'; offerId: string; accountId: string };
 
 // Account transaction types
@@ -1431,6 +1433,7 @@ export type AccountTx =
         // Explicit limit price in ORDERBOOK_PRICE_SCALE ticks (quote per 1 base).
         // Kept optional for backwards compatibility with older scenarios.
         priceTicks?: bigint;
+        timeInForce?: 0 | 1 | 2;  // 0 = GTC, 1 = IOC, 2 = FOK
         minFillRatio: number;     // 0-65535 (uint16), minimum partial fill
       };
     }

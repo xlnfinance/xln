@@ -7,7 +7,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
-import { APP_BASE_URL, ensureE2EBaseline, getHealth } from './utils/e2e-baseline';
+import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth } from './utils/e2e-baseline';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 import {
   gotoApp as gotoSharedApp,
@@ -438,7 +438,7 @@ async function ensureDeterministicSwapAccount(page: Page): Promise<{
     signerId: identity!.signerId,
   }, hubId!);
 
-  const faucetResponse = await page.request.post('/api/faucet/offchain', {
+  const faucetResponse = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
     data: {
       userEntityId: identity!.entityId,
       userRuntimeId: identity!.runtimeId,
@@ -465,7 +465,7 @@ async function ensureDeterministicSwapAccount(page: Page): Promise<{
 }
 
 async function listSharedHubIds(page: Page): Promise<string[]> {
-  const response = await page.request.get('/api/health');
+  const response = await page.request.get(`${API_BASE_URL}/api/health`);
   expect(response.ok(), 'health endpoint must be available').toBe(true);
   const body = await response.json() as {
     hubMesh?: { hubIds?: string[] };
@@ -662,6 +662,53 @@ async function readSwapResolveCount(
   }, { entityId, signerId, counterpartyId });
 }
 
+async function readPositiveSwapResolveCount(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+): Promise<number> {
+  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+    const findAccount = (accounts: any, ownerId: string, cpId: string) => {
+      if (!(accounts instanceof Map)) return null;
+      const owner = String(ownerId || '').toLowerCase();
+      const cp = String(cpId || '').toLowerCase();
+      for (const [accountKey, account] of accounts.entries()) {
+        if (String(accountKey || '').toLowerCase() === cp) return account;
+        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
+          ? String(account.counterpartyEntityId).toLowerCase()
+          : '';
+        if (canonicalCp === cp) return account;
+        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
+        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
+      }
+      return null;
+    };
+
+    const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) return 0;
+    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+      const [eid, sid] = String(k).split(':');
+      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+    });
+    const rep = key ? env.eReplicas.get(key) : null;
+    const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
+    if (!account) return 0;
+
+    let count = 0;
+    for (const frame of account.frameHistory || []) {
+      for (const tx of frame?.accountTxs || []) {
+        if (tx?.type !== 'swap_resolve') continue;
+        const fillRatio = Number(tx?.data?.fillRatio || 0);
+        if (fillRatio > 0) count += 1;
+      }
+    }
+    return count;
+  }, { entityId, signerId, counterpartyId });
+}
+
 async function openSwapWorkspace(page: Page): Promise<void> {
   const accountsTab = page.getByTestId('tab-accounts').first();
   await expect(accountsTab).toBeVisible({ timeout: 20_000 });
@@ -808,6 +855,178 @@ async function prepareExecutableOrder(page: Page): Promise<number> {
   }
 
   throw new Error(`No preferred WETH pair is executable${lastFormError ? ` (${lastFormError})` : ''}`);
+}
+
+async function executeOrderbookClickFill(
+  page: Page,
+  accountRef: { entityId: string; signerId: string; counterpartyId: string },
+  clickTarget: 'lowest-ask' | 'mid-price',
+): Promise<void> {
+  const orderbookLogs: string[] = [];
+  const onConsole = (msg: { text(): string }) => {
+    const text = msg.text();
+    if (text.includes('ORDERBOOK') || text.includes('Swap offer placed') || text.includes('Failed to place swap')) {
+      orderbookLogs.push(text);
+      if (orderbookLogs.length > 40) orderbookLogs.shift();
+    }
+  };
+  page.on('console', onConsole as any);
+  const readOrderbookDebug = async () => await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+    const env = (window as any).isolatedEnv;
+    const accountSelect = document.querySelector('[data-testid="swap-account-select"]') as HTMLSelectElement | null;
+    const createAccountSelect = document.querySelector('[data-testid="swap-create-account-select"]') as HTMLSelectElement | null;
+    const pairSelect = document.querySelector('[data-testid="swap-pair-select"]') as HTMLSelectElement | null;
+    const amountInput = document.querySelector('[data-testid="swap-order-amount"]') as HTMLInputElement | null;
+    const priceInput = document.querySelector('[data-testid="swap-order-price"]') as HTMLInputElement | null;
+    const formError = (document.querySelector('.swap-panel .form-error') as HTMLElement | null)?.innerText || '';
+    if (!env?.eReplicas) return null;
+    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+      const [eid, sid] = String(k).split(':');
+      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+    });
+    const rep = key ? env.eReplicas.get(key) : null;
+    const account = rep?.state?.accounts?.get?.(counterpartyId);
+    const offer = account?.swapOffers instanceof Map ? Array.from(account.swapOffers.values())[0] : null;
+    let swapResolveCount = 0;
+    let positiveSwapResolveCount = 0;
+    for (const frame of account?.frameHistory || []) {
+      for (const tx of frame?.accountTxs || []) {
+        if (tx?.type !== 'swap_resolve') continue;
+        swapResolveCount += 1;
+        if (Number(tx?.data?.fillRatio || 0) > 0) positiveSwapResolveCount += 1;
+      }
+    }
+    const hubRepKey = Array.from(env.eReplicas.keys()).find((k: string) => String(k).split(':')[0]?.toLowerCase() === String(counterpartyId).toLowerCase());
+    const hubRep = hubRepKey ? env.eReplicas.get(hubRepKey) : null;
+    const book = hubRep?.state?.orderbookExt?.books?.get?.('1/2');
+    const readLevels = (headArray: any, nextArray: any, priceIdx: any, qtyLots: any, ownerIdx: any, owners: any, active: any, startIdx: number) => {
+      const out = [];
+      let idx = startIdx;
+      while (idx !== -1 && out.length < 5) {
+        if (active?.[idx]) {
+          out.push({
+            idx,
+            owner: owners?.[ownerIdx?.[idx]],
+            qtyLots: qtyLots?.[idx],
+            priceIdx: priceIdx?.[idx],
+          });
+        }
+        idx = nextArray?.[idx] ?? -1;
+      }
+      return out;
+    };
+    const bestAskIdx = Number(book?.bestAskIdx ?? -1);
+    const bestBidIdx = Number(book?.bestBidIdx ?? -1);
+    return {
+      selectedAccountId: accountSelect?.value || '',
+      createOrderAccountId: createAccountSelect?.value || '',
+      selectedPairId: pairSelect?.value || '',
+      amountInput: amountInput?.value || '',
+      priceInput: priceInput?.value || '',
+      formError,
+      swapResolveCount,
+      positiveSwapResolveCount,
+      localOffer: offer ? {
+        offerId: offer.offerId,
+        giveTokenId: String(offer.giveTokenId),
+        wantTokenId: String(offer.wantTokenId),
+        giveAmount: String(offer.giveAmount),
+        wantAmount: String(offer.wantAmount),
+        priceTicks: String(offer.priceTicks ?? ''),
+        timeInForce: offer.timeInForce ?? null,
+        makerIsLeft: offer.makerIsLeft,
+        fromEntity: offer.fromEntity,
+        toEntity: offer.toEntity,
+      } : null,
+      hubBook: book ? {
+        bestAskIdx,
+        bestBidIdx,
+        bestAskHead: bestAskIdx >= 0 ? Number(book.levelHeadAsk?.[bestAskIdx] ?? -1) : -1,
+        bestBidHead: bestBidIdx >= 0 ? Number(book.levelHeadBid?.[bestBidIdx] ?? -1) : -1,
+        askTop: bestAskIdx >= 0
+          ? readLevels(book.levelHeadAsk, book.orderNext, book.orderPriceIdx, book.orderQtyLots, book.orderOwnerIdx, book.owners, book.orderActive, Number(book.levelHeadAsk?.[bestAskIdx] ?? -1))
+          : [],
+        bidTop: bestBidIdx >= 0
+          ? readLevels(book.levelHeadBid, book.orderNext, book.orderPriceIdx, book.orderQtyLots, book.orderOwnerIdx, book.owners, book.orderActive, Number(book.levelHeadBid?.[bestBidIdx] ?? -1))
+          : [],
+      } : null,
+    };
+  }, accountRef);
+  const pairSelect = page.getByTestId('swap-pair-select').first();
+  try {
+    await expect(pairSelect).toBeVisible({ timeout: 20_000 });
+    await pairSelect.selectOption({ label: 'WETH/USDC' });
+    await page.waitForTimeout(250);
+
+    const buySideButton = page.getByTestId('swap-side-buy').first();
+    const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+    await expect(buySideButton).toBeVisible({ timeout: 20_000 });
+    await buySideButton.click();
+    await page.waitForTimeout(120);
+
+    const resolveCountBefore = await readPositiveSwapResolveCount(
+      page,
+      accountRef.entityId,
+      accountRef.signerId,
+      accountRef.counterpartyId,
+    );
+
+    if (clickTarget === 'lowest-ask') {
+      const asks = page.locator('.swap-panel .orderbook-panel .asks-section .row.clickable');
+      await expect(asks.last()).toBeVisible({ timeout: 20_000 });
+      await asks.last().click();
+    } else {
+      const mid = page.locator('.swap-panel .orderbook-panel .spread-indicator').first();
+      await expect(mid).toBeVisible({ timeout: 20_000 });
+      await mid.click();
+    }
+
+    await expect(
+      page.locator('.swap-panel .size-hint').filter({ hasText: /Filled from book level/i }).first(),
+    ).toContainText(/Filled from book level/i, { timeout: 10_000 });
+    await expect(placeButton).toBeEnabled({ timeout: 10_000 });
+    await placeButton.click();
+
+    await expect
+      .poll(
+        async () => await readPositiveSwapResolveCount(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
+        { timeout: 30_000, intervals: [100, 250, 500, 1000] },
+      )
+      .toBeGreaterThan(resolveCountBefore);
+
+    await expect
+      .poll(
+        async () => {
+          const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+          return {
+            accountSwapOffersSize: state.accountSwapOffersSize,
+            accountHasSwapOfferInMempool: state.accountHasSwapOfferInMempool,
+            accountHasSwapOfferInPendingFrame: state.accountHasSwapOfferInPendingFrame,
+          };
+        },
+        { timeout: 30_000, intervals: [100, 250, 500, 1000] },
+      )
+      .toEqual({
+        accountSwapOffersSize: 0,
+        accountHasSwapOfferInMempool: false,
+        accountHasSwapOfferInPendingFrame: false,
+      });
+
+    await expect
+      .poll(async () => await page.locator('.swap-panel .orders-table tbody tr').count(), {
+        timeout: 15_000,
+        intervals: [100, 250, 500],
+      })
+      .toBe(0);
+  } catch (error) {
+    const debugState = await readOrderbookDebug().catch(() => null);
+    console.error(`[E2E-ORDERBOOK-DEBUG] ${clickTarget} recent logs:\n${orderbookLogs.join('\n')}`);
+    console.error(`[E2E-ORDERBOOK-STATE] ${clickTarget} ${JSON.stringify(debugState, null, 2)}`);
+    throw error;
+  } finally {
+    page.off('console', onConsole as any);
+  }
 }
 
 async function expectAllCanonicalSwapPairsHaveLiquidity(page: Page): Promise<void> {
@@ -1139,6 +1358,37 @@ test.describe('E2E Swap Flow', () => {
         timeout: 60_000,
       }).toBe(0);
     });
+  });
+
+  async function prepareOrderbookClickTest(page: Page): Promise<{
+    entityId: string;
+    signerId: string;
+    counterpartyId: string;
+  }> {
+    await timedStep('swap_click.goto_app', () => gotoApp(page));
+    await timedStep('swap_click.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('swap_click.create_runtime', () => createDemoRuntime(page, `swap-click-${Date.now()}`, randomMnemonic()));
+    const accountRef = await timedStep('swap_click.ensure_hub_account', () => ensureDeterministicSwapAccount(page));
+
+    await timedStep('swap_click.open_workspace', () => openSwapWorkspace(page));
+    await timedStep('swap_click.select_counterparty', () => selectCounterpartyInSwap(page, accountRef.counterpartyId));
+    await expect(page.getByTestId('swap-orderbook')).toBeVisible({ timeout: 20_000 });
+    return accountRef;
+  }
+
+  test('swap orderbook lowest ask click fills immediately at displayed book price', async ({ page }) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+
+    await timedStep('swap_click.lowest_ask_fills', () =>
+      executeOrderbookClickFill(page, accountRef, 'lowest-ask'),
+    );
+  });
+
+  test('swap orderbook mid price click fills immediately at displayed book price', async ({ page }) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+    await timedStep('swap_click.mid_price_fills', () =>
+      executeOrderbookClickFill(page, accountRef, 'mid-price'),
+    );
   });
 
 });

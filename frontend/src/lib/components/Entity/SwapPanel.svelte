@@ -744,6 +744,71 @@
     orderbookSnapshot = event.detail;
   }
 
+  function readCurrentHubBestPriceTicks(side: BookSide, hubEntityId: string): bigint | null {
+    if (!activeEnv?.eReplicas || !hubEntityId) return null;
+    const normalizedHubId = String(hubEntityId).trim().toLowerCase();
+    if (!normalizedHubId) return null;
+    for (const [key, replica] of activeEnv.eReplicas.entries()) {
+      const entityId = String(key || '').split(':')[0]?.trim().toLowerCase();
+      if (entityId !== normalizedHubId) continue;
+      const book = replica?.state?.orderbookExt?.books?.get?.(orderbookPairId);
+      if (!book) return null;
+      const params = book.params || {};
+      const pmin = Number(params.pmin || 0);
+      const tick = Number(params.tick || 1);
+      const idx = side === 'ask'
+        ? Number(book.bestAskIdx ?? -1)
+        : Number(book.bestBidIdx ?? -1);
+      if (!Number.isFinite(pmin) || !Number.isFinite(tick) || !Number.isFinite(idx) || idx < 0) return null;
+      const price = pmin + idx * tick;
+      if (!Number.isFinite(price) || price <= 0) return null;
+      return BigInt(price);
+    }
+    return null;
+  }
+
+  function resolveCurrentBookClickPriceTicks(): bigint | null {
+    if (!selectedOrderLevel) return null;
+    const snapshotPairId = String(orderbookSnapshot?.pairId || '').trim();
+    const currentPairId = String(orderbookPairId || '').trim();
+    const clickedTicks = selectedOrderLevel.priceTicks > 0n ? selectedOrderLevel.priceTicks : null;
+    if (!clickedTicks) return null;
+    if (!snapshotPairId || !currentPairId || snapshotPairId !== currentPairId) return clickedTicks;
+
+    const clickBufferTicks = (() => {
+      const scaled = clickedTicks / 1_000_000n;
+      return scaled > 8n ? scaled : 8n;
+    })();
+
+    if (tradeSide === 'buy-base' && selectedOrderLevel.side === 'ask') {
+      const bestAskTicks = readCurrentHubBestPriceTicks('ask', selectedOrderLevel.accountId)
+        ?? (() => {
+          const bestAsk = Number(orderbookSnapshot.asks?.[0]?.price || 0);
+          return Number.isFinite(bestAsk) && bestAsk > 0 ? BigInt(bestAsk) : null;
+        })();
+      const marketableAskTicks = clickedTicks + clickBufferTicks;
+      if (bestAskTicks && bestAskTicks > 0n) {
+        return bestAskTicks > marketableAskTicks ? bestAskTicks : marketableAskTicks;
+      }
+      return marketableAskTicks;
+    }
+
+    if (tradeSide === 'sell-base' && selectedOrderLevel.side === 'bid') {
+      const bestBidTicks = readCurrentHubBestPriceTicks('bid', selectedOrderLevel.accountId)
+        ?? (() => {
+          const bestBid = Number(orderbookSnapshot.bids?.[0]?.price || 0);
+          return Number.isFinite(bestBid) && bestBid > 0 ? BigInt(bestBid) : null;
+        })();
+      const marketableBidTicks = clickedTicks > clickBufferTicks ? clickedTicks - clickBufferTicks : 1n;
+      if (bestBidTicks && bestBidTicks > 0n) {
+        return bestBidTicks < marketableBidTicks ? bestBidTicks : marketableBidTicks;
+      }
+      return marketableBidTicks;
+    }
+
+    return clickedTicks;
+  }
+
   function handleAccountViewChange(event: Event): void {
     const nextValue = String((event.currentTarget as HTMLSelectElement | null)?.value || AGGREGATED_ACCOUNT_VALUE);
     accountViewValue = nextValue;
@@ -1131,7 +1196,7 @@
       // to avoid rounding drift from amounts→price→amounts round-trip.
       // Recompute amounts at the exact book price so the order crosses correctly.
       if (selectedOrderLevel && selectedOrderLevel.priceTicks > 0n) {
-        const exactTicks = selectedOrderLevel.priceTicks;
+        const exactTicks = resolveCurrentBookClickPriceTicks() ?? selectedOrderLevel.priceTicks;
         const LOT_SCALE = 10n ** 12n;
         const side = tradeSide === 'sell-base' ? 1 : 0;
         const rawBase = side === 1 ? giveAmount : wantAmount;
@@ -1205,6 +1270,7 @@
           wantTokenId: wantToken,
           wantAmount: effectiveWantAmount,
           priceTicks: canonicalPriceTicks,
+          ...(selectedOrderLevel ? { timeInForce: 1 as const } : {}),
           minFillRatio,
         },
       });
@@ -1329,6 +1395,7 @@
               compactHeader={true}
               priceScale={Number(ORDERBOOK_PRICE_SCALE)}
               sizeDisplayScale={orderbookSizeDisplayScale}
+              preferredClickSide={tradeSide === 'buy-base' ? 'ask' : 'bid'}
               on:levelclick={handleOrderbookLevelClick}
               on:snapshot={handleOrderbookSnapshot}
             />
