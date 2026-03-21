@@ -30,7 +30,7 @@
   export let envStore: Readable<any> = xlnEnvironment;
 
   type BookSide = 'bid' | 'ask';
-  type LevelClickDetail = { side: BookSide; priceTicks: string; size: number; accountIds: string[] };
+  type LevelClickDetail = { side: BookSide; priceTicks: string; displayPrice: string; size: number; accountIds: string[] };
   type SnapshotDetail = {
     pairId: string;
     bids: Array<{ price: number; size: number; total: number }>;
@@ -583,17 +583,19 @@
     return price / scale;
   }
 
+  function priceDisplayDecimals(): number {
+    const scale = Number.isFinite(priceScale) && priceScale > 0 ? Math.trunc(priceScale) : 1;
+    const text = String(scale);
+    if (!/^10*$/.test(text)) return 4;
+    return Math.max(0, text.length - 1);
+  }
+
   function formatPrice(price: number): string {
     const value = scaledPrice(price);
     if (!Number.isFinite(value)) return '-';
-    const abs = Math.abs(value);
-    if (abs >= 100) {
-      return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-    if (abs >= 1) {
-      return value.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 });
-    }
-    return value.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+    const decimals = priceDisplayDecimals();
+    const fixed = value.toFixed(decimals);
+    return fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed;
   }
 
   function scaledSize(size: number): number {
@@ -613,6 +615,7 @@
     dispatch('levelclick', {
       side,
       priceTicks: String(level.price),
+      displayPrice: formatPrice(level.price),
       size: level.size,
       accountIds: Array.isArray(level.accountIds) ? level.accountIds : [],
     });
@@ -621,7 +624,13 @@
   function emitMidPriceClick() {
     const preferredLevel = preferredClickSide === 'bid' ? bids[0] : asks[0];
     if (!preferredLevel) return;
-    emitLevelClick(preferredClickSide === 'bid' ? 'bid' : 'ask', preferredLevel);
+    dispatch('levelclick', {
+      side: preferredClickSide === 'bid' ? 'bid' : 'ask',
+      priceTicks: String(preferredLevel.price),
+      displayPrice: formatPrice(preferredLevel.price),
+      size: preferredLevel.size,
+      accountIds: Array.isArray(preferredLevel.accountIds) ? preferredLevel.accountIds : [],
+    });
   }
 
   function labelForSource(sourceId: string): string {
@@ -895,7 +904,7 @@
       }}
     >
       {#if spread !== null}
-        <span class="mid-price">{formatPrice((bids[0]?.price || 0) + (spread / 2))}</span>
+        <span class="mid-price">{formatPrice((preferredClickSide === 'bid' ? bids[0]?.price : asks[0]?.price) || 0)}</span>
       {/if}
     </div>
 

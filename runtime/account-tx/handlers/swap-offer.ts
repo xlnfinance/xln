@@ -24,7 +24,7 @@ export async function handleSwapOffer(
   byLeft: boolean,
   currentHeight: number,
   isValidation: boolean = false
-): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: { offerId: string; makerIsLeft: boolean; fromEntity: string; toEntity: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; timeInForce?: 0 | 1 | 2; minFillRatio: number } }> {
+): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: { offerId: string; makerIsLeft: boolean; fromEntity: string; toEntity: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; priceTicks?: bigint; timeInForce?: 0 | 1 | 2; minFillRatio: number } }> {
   const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, timeInForce, minFillRatio } = accountTx.data;
   const events: string[] = [];
   const LOT_SCALE = SWAP_LOT_SCALE;
@@ -207,6 +207,7 @@ export async function handleSwapOffer(
       giveAmount: effectiveGiveAmount,
       wantTokenId,
       wantAmount: effectiveWantAmount,
+      priceTicks,
       ...(timeInForce !== undefined ? { timeInForce } : {}),
       minFillRatio,
     },

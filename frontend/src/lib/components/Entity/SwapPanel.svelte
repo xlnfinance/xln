@@ -13,8 +13,7 @@
 
   // Props
   export let counterpartyId: string = '';
-  const AGGREGATED_ACCOUNT_VALUE = '__aggregated__';
-  let accountViewValue = AGGREGATED_ACCOUNT_VALUE;
+  let orderbookScopeMode: 'aggregated' | 'selected' = 'aggregated';
   let createOrderAccountId = '';
   let selectedBookAccountId = '';
   let activeOrderAccountId = '';
@@ -50,6 +49,8 @@
   type ClickedOrderLevel = {
     side: BookSide;
     priceTicks: bigint;
+    displayPrice: string;
+    inputPriceTicks: bigint;
     sizeBaseWei: bigint;
     baseTokenId: number;
     quoteTokenId: number;
@@ -113,6 +114,8 @@
   let submitError = '';
   let selectedPairValue = '';
   let tradeSide: 'buy-base' | 'sell-base' = 'buy-base';
+  let hasAutoSuggestedInitialPrice = false;
+  let hasUserEditedPriceInput = false;
   let selectedPair: PairOption | null = null;
   let giveTokenId = '1';
   let wantTokenId = '2';
@@ -146,31 +149,27 @@
   })();
   $: cappedAccountIds = accountIds.slice(0, 10);
   $: hiddenAccountCount = Math.max(0, accountIds.length - cappedAccountIds.length);
-  $: if (accountViewValue !== AGGREGATED_ACCOUNT_VALUE && !cappedAccountIds.includes(accountViewValue)) {
-    accountViewValue = counterpartyId && cappedAccountIds.includes(counterpartyId)
+  $: if (!selectedBookAccountId || !cappedAccountIds.includes(selectedBookAccountId)) {
+    selectedBookAccountId = counterpartyId && cappedAccountIds.includes(counterpartyId)
       ? counterpartyId
-      : AGGREGATED_ACCOUNT_VALUE;
+      : (cappedAccountIds[0] || '');
   }
-  $: selectedBookAccountId = accountViewValue === AGGREGATED_ACCOUNT_VALUE ? '' : accountViewValue;
-  $: if (accountViewValue === AGGREGATED_ACCOUNT_VALUE) {
-    if (!createOrderAccountId || !cappedAccountIds.includes(createOrderAccountId)) {
-      createOrderAccountId = counterpartyId && cappedAccountIds.includes(counterpartyId)
-        ? counterpartyId
-        : (cappedAccountIds[0] || '');
-    }
-  } else {
+  $: if (!createOrderAccountId || !cappedAccountIds.includes(createOrderAccountId)) {
+    createOrderAccountId = selectedBookAccountId || '';
+  }
+  $: if (orderbookScopeMode === 'selected' && selectedBookAccountId) {
     createOrderAccountId = selectedBookAccountId;
   }
-  $: activeOrderAccountId = accountViewValue === AGGREGATED_ACCOUNT_VALUE
+  $: activeOrderAccountId = orderbookScopeMode === 'aggregated'
     ? createOrderAccountId
     : selectedBookAccountId;
-  $: orderbookHubIds = accountViewValue === AGGREGATED_ACCOUNT_VALUE
+  $: orderbookHubIds = orderbookScopeMode === 'aggregated'
     ? cappedAccountIds
     : (selectedBookAccountId ? [selectedBookAccountId] : []);
-  $: orderbookDepth = accountViewValue === AGGREGATED_ACCOUNT_VALUE
+  $: orderbookDepth = orderbookScopeMode === 'aggregated'
     ? AGGREGATED_ORDERBOOK_DEPTH
     : SELECTED_ORDERBOOK_DEPTH;
-  $: orderbookViewKey = `${orderbookPairId}|${accountViewValue}|${orderbookHubIds.join(',')}`;
+  $: orderbookViewKey = `${orderbookPairId}|${orderbookScopeMode}|${selectedBookAccountId}|${orderbookHubIds.join(',')}`;
 
   function resolveCounterpartyId(input: string): string {
     const normalized = String(input || '').trim().toLowerCase();
@@ -182,11 +181,7 @@
     const resolved = resolveEntityName(accountIdValue, activeEnv);
     return resolved || formatEntityId(accountIdValue);
   }
-  $: accountViewOptions = [
-    { value: AGGREGATED_ACCOUNT_VALUE, label: 'Aggregated' },
-    ...cappedAccountIds.map((id) => ({ value: id, label: accountLabel(id) })),
-  ];
-  $: placementAccountOptions = cappedAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
+  $: selectedHubOptions = cappedAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
   $: orderbookSourceLabels = Object.fromEntries(
     cappedAccountIds.map((id) => [id, accountLabel(id)]),
   );
@@ -402,6 +397,7 @@
 
   function handlePriceRatioInput(event: Event): void {
     const target = event.currentTarget as HTMLInputElement | null;
+    hasUserEditedPriceInput = true;
     priceRatioInput = normalizeDecimalInput(target?.value || '', PRICE_RATIO_DECIMALS);
   }
 
@@ -689,7 +685,7 @@
     }
     return '';
   })();
-  $: if (selectedOrderLevel && accountViewValue !== AGGREGATED_ACCOUNT_VALUE && selectedOrderLevel.accountId !== selectedBookAccountId) {
+  $: if (selectedOrderLevel && orderbookScopeMode !== 'aggregated' && selectedOrderLevel.accountId !== selectedBookAccountId) {
     selectedOrderLevel = null;
     orderPercent = 100;
   }
@@ -725,13 +721,16 @@
       : selectedOrderLevel.sizeBaseWei;
     const maxFillGive = levelGiveCapacity < maxFillGiveByBook ? levelGiveCapacity : maxFillGiveByBook;
     const rawGive = (maxFillGive * BigInt(clamped)) / 100n;
-    const rawWant = tradeSide === 'sell-base'
-      ? quoteFromBase(rawGive, priceScaled, levelBaseDecimals, levelQuoteDecimals)
-      : baseFromQuote(rawGive, priceScaled, levelBaseDecimals, levelQuoteDecimals);
-    const fillGive = prepareCanonicalOrder(rawGive, rawWant)?.effectiveGive ?? 0n;
+    const explicitPriceTicks = selectedOrderLevel.inputPriceTicks > 0n
+      ? selectedOrderLevel.inputPriceTicks
+      : selectedOrderLevel.priceTicks;
+    const requantized = requantizeAtLimitPrice(rawGive, explicitPriceTicks);
+    const fillGive = requantized?.effectiveGive ?? 0n;
 
     orderAmountInput = formatAmountForInput(fillGive, levelGiveTokenId);
-    priceRatioInput = formatPriceTicks(selectedOrderLevel.priceTicks);
+    priceRatioInput = selectedOrderLevel.displayPrice
+      ? normalizeDisplayPriceForInput(selectedOrderLevel.displayPrice)
+      : formatPriceTicks(selectedOrderLevel.priceTicks);
   }
 
   function handleOrderPercentInput(event: Event) {
@@ -767,57 +766,17 @@
     return null;
   }
 
-  function resolveCurrentBookClickPriceTicks(): bigint | null {
-    if (!selectedOrderLevel) return null;
-    const snapshotPairId = String(orderbookSnapshot?.pairId || '').trim();
-    const currentPairId = String(orderbookPairId || '').trim();
-    const clickedTicks = selectedOrderLevel.priceTicks > 0n ? selectedOrderLevel.priceTicks : null;
-    if (!clickedTicks) return null;
-    if (!snapshotPairId || !currentPairId || snapshotPairId !== currentPairId) return clickedTicks;
-
-    const clickBufferTicks = (() => {
-      const scaled = clickedTicks / 1_000_000n;
-      return scaled > 8n ? scaled : 8n;
-    })();
-
-    if (tradeSide === 'buy-base' && selectedOrderLevel.side === 'ask') {
-      const bestAskTicks = readCurrentHubBestPriceTicks('ask', selectedOrderLevel.accountId)
-        ?? (() => {
-          const bestAsk = Number(orderbookSnapshot.asks?.[0]?.price || 0);
-          return Number.isFinite(bestAsk) && bestAsk > 0 ? BigInt(bestAsk) : null;
-        })();
-      const marketableAskTicks = clickedTicks + clickBufferTicks;
-      if (bestAskTicks && bestAskTicks > 0n) {
-        return bestAskTicks > marketableAskTicks ? bestAskTicks : marketableAskTicks;
-      }
-      return marketableAskTicks;
-    }
-
-    if (tradeSide === 'sell-base' && selectedOrderLevel.side === 'bid') {
-      const bestBidTicks = readCurrentHubBestPriceTicks('bid', selectedOrderLevel.accountId)
-        ?? (() => {
-          const bestBid = Number(orderbookSnapshot.bids?.[0]?.price || 0);
-          return Number.isFinite(bestBid) && bestBid > 0 ? BigInt(bestBid) : null;
-        })();
-      const marketableBidTicks = clickedTicks > clickBufferTicks ? clickedTicks - clickBufferTicks : 1n;
-      if (bestBidTicks && bestBidTicks > 0n) {
-        return bestBidTicks < marketableBidTicks ? bestBidTicks : marketableBidTicks;
-      }
-      return marketableBidTicks;
-    }
-
-    return clickedTicks;
-  }
-
-  function handleAccountViewChange(event: Event): void {
-    const nextValue = String((event.currentTarget as HTMLSelectElement | null)?.value || AGGREGATED_ACCOUNT_VALUE);
-    accountViewValue = nextValue;
+  function toggleOrderbookScope(): void {
+    orderbookScopeMode = orderbookScopeMode === 'aggregated' ? 'selected' : 'aggregated';
     selectedOrderLevel = null;
     orderPercent = 100;
   }
 
-  function handleCreateOrderAccountChange(event: Event): void {
-    createOrderAccountId = String((event.currentTarget as HTMLSelectElement | null)?.value || '');
+  function handleSelectedHubChange(event: Event): void {
+    const nextValue = String((event.currentTarget as HTMLSelectElement | null)?.value || '');
+    selectedBookAccountId = nextValue;
+    createOrderAccountId = nextValue;
+    orderbookScopeMode = 'selected';
     selectedOrderLevel = null;
     orderPercent = 100;
   }
@@ -852,22 +811,24 @@
     const availableAccountIds = Array.isArray(event.detail?.accountIds)
       ? event.detail.accountIds.map((id) => String(id || '').trim()).filter(Boolean)
       : [];
-    const clickedAccountId = accountViewValue === AGGREGATED_ACCOUNT_VALUE
+    const clickedAccountId = orderbookScopeMode === 'aggregated'
       ? String(availableAccountIds.find((id) => cappedAccountIds.includes(id)) || activeOrderAccountId || '')
       : String(selectedBookAccountId || availableAccountIds.find((id) => cappedAccountIds.includes(id)) || '');
     if (!clickedAccountId) {
       submitError = 'Pick a priced level from a connected account.';
       return;
     }
-    if (accountViewValue === AGGREGATED_ACCOUNT_VALUE && createOrderAccountId !== clickedAccountId) {
-      createOrderAccountId = clickedAccountId;
-    }
+    selectedBookAccountId = clickedAccountId;
+    createOrderAccountId = clickedAccountId;
+    orderbookScopeMode = 'selected';
 
     const priceTicks = parsedPriceTicks;
     const sizeBaseWei = lotsToBaseWei(rawSize);
     selectedOrderLevel = {
       side,
       priceTicks,
+      displayPrice: String(event.detail?.displayPrice || ''),
+      inputPriceTicks: parseDisplayPriceTicks(String(event.detail?.displayPrice || ''), priceTicks),
       sizeBaseWei,
       baseTokenId: pair.baseTokenId,
       quoteTokenId: pair.quoteTokenId,
@@ -877,6 +838,30 @@
 
     tradeSide = side === 'ask' ? 'buy-base' : 'sell-base';
     applyOrderPercent(100);
+  }
+
+  function resolveSuggestedInitialPriceTicks(): bigint | null {
+    if (selectedOrderLevel) return null;
+    if (String(orderbookSnapshot?.pairId || '').trim() !== String(orderbookPairId || '').trim()) return null;
+    if (tradeSide === 'buy-base') {
+      const ask = Number(orderbookSnapshot.asks?.[0]?.price || 0);
+      return Number.isFinite(ask) && ask > 0 ? BigInt(ask) : null;
+    }
+    const bid = Number(orderbookSnapshot.bids?.[0]?.price || 0);
+    return Number.isFinite(bid) && bid > 0 ? BigInt(bid) : null;
+  }
+
+  $: if (
+    !hasAutoSuggestedInitialPrice
+    && !hasUserEditedPriceInput
+    && !priceRatioInput
+    && orderbookSnapshot.updatedAt > 0
+  ) {
+    const suggestedTicks = resolveSuggestedInitialPriceTicks();
+    if (suggestedTicks && suggestedTicks > 0n) {
+      priceRatioInput = formatPriceTicks(suggestedTicks);
+      hasAutoSuggestedInitialPrice = true;
+    }
   }
 
   function resolveSignerId(entityId: string): string {
@@ -912,6 +897,15 @@
     if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0) return null;
     if (rawGiveAmount <= 0n || rawWantAmount <= 0n) return null;
     try {
+      const explicitPriceTicks = selectedOrderLevel?.inputPriceTicks && selectedOrderLevel.inputPriceTicks > 0n
+        ? selectedOrderLevel.inputPriceTicks
+        : limitPriceTicks;
+      if (explicitPriceTicks && explicitPriceTicks > 0n) {
+        const requantized = requantizeAtLimitPrice(rawGiveAmount, explicitPriceTicks);
+        if (requantized && requantized.effectiveGive > 0n && requantized.effectiveWant > 0n) {
+          return requantized;
+        }
+      }
       return activeXlnFunctions.prepareSwapOrder(giveToken, wantToken, rawGiveAmount, rawWantAmount);
     } catch {
       return null;
@@ -961,6 +955,25 @@
   $: canonicalGiveAmount = preparedOrder?.effectiveGive ?? 0n;
   $: canonicalWantAmount = preparedOrder?.effectiveWant ?? 0n;
   $: giveAmountLeftover = preparedOrder?.unspentGiveAmount ?? 0n;
+  $: if (typeof window !== 'undefined') {
+    (window as typeof window & { __swapDebug?: unknown }).__swapDebug = {
+      tradeSide,
+      priceRatioInput,
+      giveAmount: String(giveAmount),
+      wantAmount: String(wantAmount),
+      limitPriceTicks: String(limitPriceTicks ?? ''),
+      preparedOrderPriceTicks: String(preparedOrder?.priceTicks ?? ''),
+      selectedOrderLevel: selectedOrderLevel
+        ? {
+            side: selectedOrderLevel.side,
+            priceTicks: String(selectedOrderLevel.priceTicks),
+            inputPriceTicks: String(selectedOrderLevel.inputPriceTicks),
+            displayPrice: selectedOrderLevel.displayPrice,
+            accountId: selectedOrderLevel.accountId,
+          }
+        : null,
+    };
+  }
   function offerSideLabel(offer: SwapOfferLike): 'Ask' | 'Bid' {
     const give = Number(offer?.giveTokenId || 0);
     const want = Number(offer?.wantTokenId || 0);
@@ -1186,30 +1199,19 @@
       if (giveAmount <= 0n || wantAmount <= 0n) {
         throw new Error('Enter amount and limit price');
       }
-      const prepared = prepareCanonicalOrder(giveAmount, wantAmount);
+      const clickedPrepared = selectedOrderLevel
+        ? requantizeAtLimitPrice(giveAmount, selectedOrderLevel.inputPriceTicks || selectedOrderLevel.priceTicks)
+        : null;
+      const prepared = clickedPrepared ?? prepareCanonicalOrder(giveAmount, wantAmount);
       if (!prepared) throw new Error('Order does not fit canonical lot/tick constraints');
       let effectiveGiveAmount = prepared.effectiveGive;
       let effectiveWantAmount = prepared.effectiveWant;
-      let canonicalPriceTicks = prepared.priceTicks;
+      const explicitSubmitPriceTicks = parseDisplayPriceTicks(
+        priceRatioInput,
+        selectedOrderLevel?.inputPriceTicks || prepared.priceTicks,
+      );
+      let canonicalPriceTicks = explicitSubmitPriceTicks;
 
-      // When user clicked an orderbook level, use the exact price from the book
-      // to avoid rounding drift from amounts→price→amounts round-trip.
-      // Recompute amounts at the exact book price so the order crosses correctly.
-      if (selectedOrderLevel && selectedOrderLevel.priceTicks > 0n) {
-        const exactTicks = resolveCurrentBookClickPriceTicks() ?? selectedOrderLevel.priceTicks;
-        const LOT_SCALE = 10n ** 12n;
-        const side = tradeSide === 'sell-base' ? 1 : 0;
-        const rawBase = side === 1 ? giveAmount : wantAmount;
-        const quantizedBase = (rawBase / LOT_SCALE) * LOT_SCALE;
-        if (quantizedBase > 0n) {
-          const quantizedQuote = (quantizedBase * exactTicks) / ORDERBOOK_PRICE_SCALE;
-          if (quantizedQuote > 0n) {
-            effectiveGiveAmount = side === 1 ? quantizedBase : quantizedQuote;
-            effectiveWantAmount = side === 1 ? quantizedQuote : quantizedBase;
-            canonicalPriceTicks = exactTicks;
-          }
-        }
-      }
       if (effectiveGiveAmount <= 0n || effectiveWantAmount <= 0n) {
         throw new Error('Quantized order too small');
       }
@@ -1349,6 +1351,47 @@
     const frac = full.slice(dotIndex + 1, dotIndex + 1 + maxDecimals).replace(/0+$/, '');
     return frac.length > 0 ? `${whole}.${frac}` : whole;
   }
+
+  function normalizeDisplayPriceForInput(value: string): string {
+    return String(value || '').replace(/,/g, '').trim();
+  }
+
+  function requantizeAtLimitPrice(remainingGiveAmount: bigint, priceTicks: bigint): PreparedSwapOrderLike | null {
+    if (remainingGiveAmount <= 0n || priceTicks <= 0n) return null;
+    const side = tradeSide === 'sell-base' ? 1 : 0;
+    if (side === 1) {
+      const quantizedBaseAmount = (remainingGiveAmount / ORDERBOOK_LOT_SCALE) * ORDERBOOK_LOT_SCALE;
+      if (quantizedBaseAmount <= 0n) return null;
+      const quantizedQuoteAmount = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+      if (quantizedQuoteAmount <= 0n) return null;
+      return {
+        side,
+        priceTicks,
+        effectiveGive: quantizedBaseAmount,
+        effectiveWant: quantizedQuoteAmount,
+        unspentGiveAmount: remainingGiveAmount - quantizedBaseAmount,
+      };
+    }
+    const quantizedBaseAmount = ((remainingGiveAmount * ORDERBOOK_PRICE_SCALE) / priceTicks / ORDERBOOK_LOT_SCALE) * ORDERBOOK_LOT_SCALE;
+    if (quantizedBaseAmount <= 0n) return null;
+    const quantizedQuoteAmount = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+    if (quantizedQuoteAmount <= 0n) return null;
+    return {
+      side,
+      priceTicks,
+      effectiveGive: quantizedQuoteAmount,
+      effectiveWant: quantizedBaseAmount,
+      unspentGiveAmount: remainingGiveAmount > quantizedQuoteAmount ? remainingGiveAmount - quantizedQuoteAmount : 0n,
+    };
+  }
+
+  function parseDisplayPriceTicks(displayPrice: string, fallbackPriceTicks: bigint): bigint {
+    const normalized = normalizeDisplayPriceForInput(displayPrice);
+    const scaled = parseDecimalAmountToBigInt(normalized, PRICE_RATIO_DECIMALS);
+    if (scaled <= 0n) return fallbackPriceTicks;
+    const ticks = (scaled * ORDERBOOK_PRICE_SCALE) / PRICE_RATIO_SCALE;
+    return ticks > 0n ? ticks : fallbackPriceTicks;
+  }
 </script>
 
 <div class="swap-panel">
@@ -1367,14 +1410,24 @@
             {/each}
           </select>
         </div>
+        <div class="toolbar-scope">
+          <button
+            type="button"
+            class="scope-btn scope-mode-btn"
+            data-testid="swap-scope-toggle"
+            on:click={toggleOrderbookScope}
+          >
+            {orderbookScopeMode === 'aggregated' ? 'Aggregated' : 'Selected'}
+          </button>
+        </div>
         <div class="toolbar-select toolbar-select-account">
           <select
-            bind:value={accountViewValue}
+            bind:value={selectedBookAccountId}
             data-testid="swap-account-select"
-            aria-label="Swap orderbook scope"
-            on:change={handleAccountViewChange}
+            aria-label="Swap hub selection"
+            on:change={handleSelectedHubChange}
           >
-            {#each accountViewOptions as option (option.value)}
+            {#each selectedHubOptions as option (option.value)}
               <option value={option.value}>{option.label}</option>
             {/each}
           </select>
@@ -1407,22 +1460,6 @@
     </div>
     <div class="section section-order">
       <div class="order-side-row">
-        <div
-          class="toolbar-select toolbar-select-create-account"
-          class:is-hidden={accountViewValue !== AGGREGATED_ACCOUNT_VALUE}
-        >
-          <select
-            bind:value={createOrderAccountId}
-            data-testid="swap-create-account-select"
-            aria-label="Create swap order on account"
-            disabled={accountViewValue !== AGGREGATED_ACCOUNT_VALUE}
-            on:change={handleCreateOrderAccountChange}
-          >
-            {#each placementAccountOptions as option (option.value)}
-              <option value={option.value}>{option.label}</option>
-            {/each}
-          </select>
-        </div>
         <div class="side-toggle-group">
           <button
             type="button"
@@ -1498,7 +1535,7 @@
         </div>
         {#if selectedOrderLevel}
           <p class="size-hint">
-            Filled from book level: {selectedOrderLevel.side.toUpperCase()} @ {formatPriceTicks(selectedOrderLevel.priceTicks)}
+            Filled from book level: {selectedOrderLevel.side.toUpperCase()} @ {selectedOrderLevel.displayPrice || formatPriceTicks(selectedOrderLevel.priceTicks)}
             (max {formatAmount(selectedOrderLevel.sizeBaseWei, selectedOrderLevel.baseTokenId)} {tokenSymbol(selectedOrderLevel.baseTokenId)})
           </p>
         {:else}
@@ -1742,6 +1779,10 @@
     flex: 0 0 220px;
   }
 
+  .toolbar-scope {
+    flex: 0 0 auto;
+  }
+
   .toolbar-select-account {
     flex: 0 0 170px;
   }
@@ -1799,6 +1840,11 @@
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
+  }
+
+  .scope-mode-btn {
+    height: 48px;
+    min-width: 110px;
   }
 
   .scope-btn.active {

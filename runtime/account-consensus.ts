@@ -518,6 +518,7 @@ export async function proposeAccountFrame(
     giveAmount: bigint;
     wantTokenId: number;
     wantAmount: bigint;
+    priceTicks?: bigint;
     minFillRatio: number;
   }> = [];
   const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
@@ -1522,6 +1523,7 @@ export async function handleAccountInput(
       giveAmount: bigint;
       wantTokenId: number;
       wantAmount: bigint;
+      priceTicks?: bigint;
       minFillRatio: number;
     }> = [];
     const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
