@@ -151,14 +151,44 @@ async function openWorkspaceTab(page: Page, label: RegExp): Promise<void> {
   await tab.click();
 }
 
+function compactEntityLabel(entityId: string): string {
+  return `${entityId.slice(0, 10)}...${entityId.slice(-6)}`;
+}
+
+async function resolveHubCardLabel(page: Page, hubId: string): Promise<string> {
+  const resolved = await page.evaluate((targetHubId) => {
+    const view = window as typeof window & {
+      isolatedEnv?: {
+        gossip?: {
+          getProfiles?: () => Array<{ entityId?: string; metadata?: { name?: string }; name?: string }>;
+        };
+      };
+    };
+    const profiles = view.isolatedEnv?.gossip?.getProfiles?.() || [];
+    const match = profiles.find((profile) => String(profile?.entityId || '').toLowerCase() === String(targetHubId || '').toLowerCase());
+    return String(match?.metadata?.name || match?.name || '').trim();
+  }, hubId);
+  return resolved || compactEntityLabel(hubId);
+}
+
 async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
   await openWorkspaceTab(page, /Open Account/i);
   const panel = page.locator('.hub-panel').first();
   await expect(panel).toBeVisible({ timeout: 20_000 });
-  const hubCard = panel.locator('.hub-card').filter({ hasText: hubId }).first();
+  const hubCardLabel = await resolveHubCardLabel(page, hubId);
+  const hubCard = panel.locator('.hub-card').filter({ hasText: hubCardLabel }).first();
   const refresh = panel.getByRole('button', { name: /^Refresh$/ }).first();
+  const detailsButtons = panel.locator('.expand-toggle');
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (await hubCard.isVisible().catch(() => false)) return;
+    const count = await detailsButtons.count();
+    for (let index = 0; index < count; index += 1) {
+      const button = detailsButtons.nth(index);
+      if (await button.isVisible().catch(() => false)) {
+        await button.click().catch(() => {});
+      }
+    }
     if (await hubCard.isVisible().catch(() => false)) return;
     await expect(refresh).toBeVisible({ timeout: 10_000 });
     await refresh.click();
@@ -170,7 +200,8 @@ async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
 
 async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
   await ensureHubCardVisible(page, hubId);
-  const hubCard = page.locator('.hub-card').filter({ hasText: hubId }).first();
+  const hubCardLabel = await resolveHubCardLabel(page, hubId);
+  const hubCard = page.locator('.hub-card').filter({ hasText: hubCardLabel }).first();
   const connectButton = hubCard.getByRole('button', { name: /Connect/i }).first();
   if (await connectButton.isVisible().catch(() => false)) {
     await connectButton.click();

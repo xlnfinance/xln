@@ -23,7 +23,7 @@
   export let embedded = false;
 
   // Tabs
-  type Tab = 'wallet' | 'jmachines' | 'general';
+  type Tab = 'wallet' | 'appearance' | 'network' | 'advanced';
   let activeTab: Tab = 'wallet';
 
   let seedCopied = false;
@@ -233,27 +233,10 @@ function copyMnemonic12() {
 
   <!-- Tabs -->
   <div class="tabs">
-    <button
-      class="tab"
-      class:active={activeTab === 'wallet'}
-      on:click={() => activeTab = 'wallet'}
-    >
-      Wallet
-    </button>
-    <button
-      class="tab"
-      class:active={activeTab === 'jmachines'}
-      on:click={() => activeTab = 'jmachines'}
-    >
-      J-Machines
-    </button>
-    <button
-      class="tab"
-      class:active={activeTab === 'general'}
-      on:click={() => activeTab = 'general'}
-    >
-      General
-    </button>
+    <button class="tab" class:active={activeTab === 'wallet'} on:click={() => activeTab = 'wallet'}>Wallet</button>
+    <button class="tab" class:active={activeTab === 'appearance'} on:click={() => activeTab = 'appearance'}>Appearance</button>
+    <button class="tab" class:active={activeTab === 'network'} on:click={() => activeTab = 'network'}>Network</button>
+    <button class="tab" class:active={activeTab === 'advanced'} on:click={() => activeTab = 'advanced'}>Advanced</button>
   </div>
 
   <!-- Content -->
@@ -327,8 +310,64 @@ function copyMnemonic12() {
         {/if}
       </div>
 
-    {:else if activeTab === 'jmachines'}
-      <!-- J-Machines Tab -->
+    {:else if activeTab === 'appearance'}
+      <!-- Appearance Tab -->
+      <div class="section">
+        <h3>Theme</h3>
+        <label class="setting-row">
+          <span>Color Theme</span>
+          <select bind:value={selectedTheme} on:change={handleThemeChange} data-testid="settings-theme-select">
+            {#each Object.entries(THEME_DEFINITIONS) as [key, theme]}
+              <option value={key}>{theme.name}</option>
+            {/each}
+          </select>
+        </label>
+        <label class="setting-row">
+          <span>Bar Colors</span>
+          <select value={$settings.barColorMode} on:change={(e) => settingsOperations.setBarColorMode(e.currentTarget.value)}>
+            <option value="rgy">Traffic Light (RGY)</option>
+            <option value="theme">Match Theme</option>
+            <option value="token">Per-Token Color</option>
+          </select>
+        </label>
+        <div class="bar-legend-mini">
+          <span class="legend-swatch" style="background: {barLegendColors.credit}; opacity: 0.5"></span> Credit
+          <span class="legend-swatch" style="background: {barLegendColors.collateral}"></span> Collateral
+          <span class="legend-swatch" style="background: {barLegendColors.debt}"></span> Debt
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Display</h3>
+        <label class="setting-row">
+          <span>Token Precision</span>
+          <div class="slider-row">
+            <input type="range" min="2" max="18" step="1" value={$settings.tokenPrecision} on:input={(e) => settingsOperations.setTokenPrecision(Number(e.currentTarget.value))} />
+            <span class="slider-value">{$settings.tokenPrecision === 18 ? 'full' : `${$settings.tokenPrecision}d`}</span>
+          </div>
+        </label>
+        <label class="setting-row">
+          <span>Show Token Icons</span>
+          <input type="checkbox" checked={$settings.showTokenIcons} on:change={(e) => settingsOperations.setShowTokenIcons((e.currentTarget as HTMLInputElement).checked)} />
+        </label>
+        <label class="setting-row">
+          <span>Account Delta View</span>
+          <select value={$settings.accountDeltaViewMode} on:change={(e) => settingsOperations.setAccountDeltaViewMode(e.currentTarget.value as 'per-token' | 'aggregated')}>
+            <option value="per-token">Per token</option>
+            <option value="aggregated">Aggregated</option>
+          </select>
+        </label>
+        <label class="setting-row">
+          <span>Portfolio Scale</span>
+          <div class="slider-row">
+            <input type="range" min="1000" max="10000" step="500" value={$settings.portfolioScale} on:input={(e) => settingsOperations.setPortfolioScale(Number(e.currentTarget.value))} />
+            <span class="slider-value">${$settings.portfolioScale.toLocaleString()}</span>
+          </div>
+        </label>
+      </div>
+
+    {:else if activeTab === 'network'}
+      <!-- Network Tab -->
       <div class="section">
         <h3>Popular Networks</h3>
         <p class="section-desc">Enable networks to create entities and transact</p>
@@ -458,86 +497,38 @@ function copyMnemonic12() {
         </div>
       </div>
 
-    {:else if activeTab === 'general'}
-      <!-- General Tab -->
+    {:else if activeTab === 'advanced'}
+      <!-- Advanced Tab -->
       <div class="section">
-        <h3>Appearance</h3>
+        <h3>Runtime</h3>
 
         <label class="setting-row">
-          <span>Theme</span>
-          <select bind:value={selectedTheme} on:change={handleThemeChange} data-testid="settings-theme-select">
-            {#each Object.entries(THEME_DEFINITIONS) as [key, theme]}
-              <option value={key}>{theme.name}</option>
-            {/each}
-          </select>
-        </label>
-
-        <label class="setting-row">
-          <span>Bar Colors</span>
-          <select value={$settings.barColorMode} on:change={(e) => settingsOperations.setBarColorMode(e.currentTarget.value)}>
-            <option value="rgy">Traffic Light (RGY)</option>
-            <option value="theme">Match Theme</option>
-            <option value="token">Per-Token Color</option>
-          </select>
-        </label>
-        <label class="setting-row">
-          <span>Token Precision</span>
+          <span>Frame Delay</span>
           <div class="slider-row">
             <input
               type="range"
-              min="2"
-              max="18"
-              step="1"
-              value={$settings.tokenPrecision}
-              on:input={(e) => settingsOperations.setTokenPrecision(Number(e.currentTarget.value))}
+              min="0"
+              max="2000"
+              step="10"
+              value={$settings.runtimeDelay}
+              on:input={(e) => {
+                const val = Math.max(0, Math.min(2000, Number(e.currentTarget.value) || 0));
+                settingsOperations.setRuntimeDelay(val);
+                const env = $xlnEnvironment;
+                if (env) {
+                  if (!env.runtimeConfig) env.runtimeConfig = { minFrameDelayMs: val, loopIntervalMs: 25 };
+                  else env.runtimeConfig.minFrameDelayMs = val;
+                }
+              }}
+              data-testid="settings-runtime-delay"
             />
-            <span class="slider-value">{$settings.tokenPrecision === 18 ? 'full' : `${$settings.tokenPrecision}d`}</span>
+            <span class="slider-value">{$settings.runtimeDelay === 0 ? 'instant' : `${$settings.runtimeDelay}ms`}</span>
           </div>
         </label>
+        <p class="setting-hint">Artificial delay between runtime frames. 0 = fastest. Higher = easier to observe state transitions.</p>
 
         <label class="setting-row">
-          <span>Show Token Icons</span>
-          <input
-            type="checkbox"
-            checked={$settings.showTokenIcons}
-            on:change={(e) => settingsOperations.setShowTokenIcons((e.currentTarget as HTMLInputElement).checked)}
-          />
-        </label>
-
-        <label class="setting-row">
-          <span>Account Delta View</span>
-          <select value={$settings.accountDeltaViewMode} on:change={(e) => settingsOperations.setAccountDeltaViewMode(e.currentTarget.value as 'per-token' | 'aggregated')}>
-            <option value="per-token">Per token (default)</option>
-            <option value="aggregated">Aggregated</option>
-          </select>
-        </label>
-        <div class="bar-legend-mini">
-          <span class="legend-swatch" style="background: {barLegendColors.credit}; opacity: 0.5"></span> Credit
-          <span class="legend-swatch" style="background: {barLegendColors.collateral}"></span> Collateral
-          <span class="legend-swatch" style="background: {barLegendColors.debt}"></span> Debt
-        </div>
-
-        <label class="setting-row">
-          <span>Portfolio Scale</span>
-          <div class="slider-row">
-            <input
-              type="range"
-              min="1000"
-              max="10000"
-              step="500"
-              value={$settings.portfolioScale}
-              on:input={(e) => settingsOperations.setPortfolioScale(Number(e.currentTarget.value))}
-            />
-            <span class="slider-value">${$settings.portfolioScale.toLocaleString()}</span>
-          </div>
-        </label>
-      </div>
-
-      <div class="section">
-        <h3>Developer</h3>
-
-        <label class="setting-row">
-          <span>Last process() entry</span>
+          <span>Last process() tick</span>
           <span class="mono-value">{processLivenessLabel}</span>
         </label>
       </div>
@@ -548,6 +539,7 @@ function copyMnemonic12() {
         <button class="btn danger" on:click={() => resetEverything()}>
           Clear All Data
         </button>
+        <p class="setting-hint">Removes all wallets, accounts, and runtime state. Cannot be undone.</p>
       </div>
     {/if}
   </div>
@@ -560,10 +552,11 @@ function copyMnemonic12() {
     width: 100%;
     max-width: 600px;
     max-height: 80vh;
-    background: linear-gradient(180deg, rgba(20, 18, 15, 0.98) 0%, rgba(10, 8, 5, 0.99) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--theme-bg-gradient, linear-gradient(180deg, rgba(20, 18, 15, 0.98) 0%, rgba(10, 8, 5, 0.99) 100%));
+    border: 1px solid var(--theme-glass-border, rgba(255, 255, 255, 0.08));
     border-radius: 16px;
     overflow: hidden;
+    color: var(--theme-text-primary, rgba(255, 255, 255, 0.95));
   }
 
   .wallet-settings.embedded {
@@ -577,14 +570,14 @@ function copyMnemonic12() {
     justify-content: space-between;
     align-items: center;
     padding: 16px 20px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--theme-border, rgba(255, 255, 255, 0.06));
   }
 
   .header h2 {
     margin: 0;
     font-size: 18px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.95);
+    color: var(--theme-text-primary, rgba(255, 255, 255, 0.95));
   }
 
   .close-btn {
@@ -593,23 +586,23 @@ function copyMnemonic12() {
     justify-content: center;
     width: 32px;
     height: 32px;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--theme-surface-hover, rgba(255, 255, 255, 0.04));
     border: none;
     border-radius: 8px;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--theme-text-secondary, rgba(255, 255, 255, 0.6));
     cursor: pointer;
     transition: all 0.15s;
   }
 
   .close-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.9);
+    background: var(--theme-surface, rgba(255, 255, 255, 0.08));
+    color: var(--theme-text-primary, rgba(255, 255, 255, 0.9));
   }
 
   /* Tabs */
   .tabs {
     display: flex;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--theme-border, rgba(255, 255, 255, 0.06));
   }
 
   .tab {
@@ -618,7 +611,7 @@ function copyMnemonic12() {
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--theme-text-secondary, rgba(255, 255, 255, 0.5));
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
@@ -626,13 +619,13 @@ function copyMnemonic12() {
   }
 
   .tab:hover {
-    color: rgba(255, 255, 255, 0.8);
-    background: rgba(255, 255, 255, 0.02);
+    color: var(--theme-text-primary, rgba(255, 255, 255, 0.8));
+    background: var(--theme-surface-hover, rgba(255, 255, 255, 0.02));
   }
 
   .tab.active {
-    color: rgba(255, 200, 100, 1);
-    border-bottom-color: rgba(255, 200, 100, 0.8);
+    color: var(--theme-accent, rgba(255, 200, 100, 1));
+    border-bottom-color: var(--theme-accent, rgba(255, 200, 100, 0.8));
   }
 
   /* Content */
@@ -650,7 +643,7 @@ function copyMnemonic12() {
     margin: 0 0 8px 0;
     font-size: 14px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.9);
+    color: var(--theme-text-primary, rgba(255, 255, 255, 0.9));
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
@@ -658,19 +651,19 @@ function copyMnemonic12() {
   .section h3.subsection {
     margin-top: 24px;
     padding-top: 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid var(--theme-border, rgba(255, 255, 255, 0.06));
   }
 
   .section-desc {
     margin: 0 0 16px 0;
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--theme-text-muted, rgba(255, 255, 255, 0.4));
   }
 
   /* Info Card */
   .info-card {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--theme-surface, rgba(255, 255, 255, 0.03));
+    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.06));
     border-radius: 10px;
     padding: 12px;
   }
@@ -680,7 +673,7 @@ function copyMnemonic12() {
     justify-content: space-between;
     align-items: center;
     padding: 8px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid var(--theme-border, rgba(255, 255, 255, 0.04));
   }
 
   .info-row:last-child {
@@ -689,12 +682,12 @@ function copyMnemonic12() {
 
   .info-row .label {
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--theme-text-secondary, rgba(255, 255, 255, 0.5));
   }
 
   .info-row .value {
     font-size: 13px;
-    color: rgba(255, 255, 255, 0.9);
+    color: var(--theme-text-primary, rgba(255, 255, 255, 0.9));
   }
 
   .info-row .value.mono {
@@ -1159,6 +1152,13 @@ function copyMnemonic12() {
     color: rgba(255, 255, 255, 0.82);
     font-family: monospace;
     text-align: right;
+  }
+
+  .setting-hint {
+    margin: 4px 0 12px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.3);
+    line-height: 1.4;
   }
 
   /* Empty State */

@@ -1,74 +1,146 @@
 <script lang="ts">
-  import { fade, scale } from 'svelte/transition';
+  import { fade, fly } from 'svelte/transition';
   import { paymentSpotlight, type PaymentSpotlight } from '$lib/stores/paymentSpotlightStore';
 
   let spotlight: PaymentSpotlight | null = null;
   paymentSpotlight.subscribe((value) => spotlight = value);
+
+  function dismiss() {
+    paymentSpotlight.clear();
+  }
 </script>
 
 {#if spotlight}
-  <div class="payment-spotlight-backdrop" in:fade={{ duration: 140 }} out:fade={{ duration: 140 }}>
-    <div class="payment-spotlight-card" in:scale={{ duration: 180, start: 0.96 }} out:scale={{ duration: 140, start: 1 }}>
-      <div class="payment-spotlight-kicker">{spotlight.kicker || 'Payment Received'}</div>
-      <h2>{spotlight.title}</h2>
-      <div class="payment-spotlight-amount">{spotlight.amountLine}</div>
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <div class="receipt-backdrop" in:fade={{ duration: 150 }} out:fade={{ duration: 120 }} on:click={dismiss} role="presentation">
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <div class="receipt-card" in:fly={{ y: 30, duration: 250 }} out:fly={{ y: -20, duration: 150 }} on:click|stopPropagation role="dialog">
+      <div class="receipt-check">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+          <circle cx="24" cy="24" r="24" fill="rgba(74, 222, 128, 0.12)" />
+          <circle cx="24" cy="24" r="18" fill="rgba(74, 222, 128, 0.2)" />
+          <path d="M16 24L22 30L34 18" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+
+      <div class="receipt-kicker">{spotlight.kicker || 'Payment Sent'}</div>
+
+      <div class="receipt-amount">{spotlight.amountLine}</div>
+
+      <div class="receipt-title">{spotlight.title}</div>
+
       {#if spotlight.detail}
-        <div class="payment-spotlight-detail">{spotlight.detail}</div>
+        <div class="receipt-detail">{spotlight.detail}</div>
       {/if}
+
+      <div class="receipt-divider"></div>
+
+      <div class="receipt-meta">
+        <span class="receipt-time">{new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+        <span class="receipt-status">Confirmed</span>
+      </div>
+
+      <button class="receipt-dismiss" on:click={dismiss}>Done</button>
     </div>
   </div>
 {/if}
 
 <style>
-  .payment-spotlight-backdrop {
+  .receipt-backdrop {
     position: fixed;
     inset: 0;
     z-index: 12000;
     display: grid;
     place-items: center;
-    background: rgba(5, 8, 14, 0.48);
-    backdrop-filter: blur(10px);
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(8px);
     padding: 24px;
   }
 
-  .payment-spotlight-card {
-    width: min(640px, calc(100vw - 32px));
-    padding: 36px 34px 32px;
-    border-radius: 28px;
-    background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.94));
-    border: 1px solid rgba(110, 231, 183, 0.24);
-    box-shadow: 0 30px 90px rgba(15, 23, 42, 0.45);
-    color: #f8fafc;
+  .receipt-card {
+    width: min(380px, calc(100vw - 48px));
+    padding: 32px 28px 24px;
+    border-radius: 20px;
+    background: #1a1a1e;
+    border: 1px solid #2f2f35;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
     text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
   }
 
-  .payment-spotlight-kicker {
-    margin-bottom: 12px;
-    color: #6ee7b7;
-    font-size: 13px;
+  .receipt-check {
+    margin-bottom: 16px;
+  }
+
+  .receipt-kicker {
+    color: #4ade80;
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
+    margin-bottom: 8px;
   }
 
-  h2 {
-    margin: 0;
-    font-size: clamp(34px, 6vw, 56px);
-    line-height: 0.98;
-    letter-spacing: -0.04em;
+  .receipt-amount {
+    font-size: clamp(28px, 5vw, 40px);
+    font-weight: 700;
+    color: #f3f4f6;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin-bottom: 6px;
   }
 
-  .payment-spotlight-amount {
-    margin-top: 14px;
-    color: rgba(248, 250, 252, 0.92);
-    font-size: clamp(18px, 2.6vw, 24px);
+  .receipt-title {
+    color: #9ca3af;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+
+  .receipt-detail {
+    color: #6b7280;
+    font-size: 12px;
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+
+  .receipt-divider {
+    width: 100%;
+    height: 1px;
+    background: #27272a;
+    margin: 18px 0 12px;
+  }
+
+  .receipt-meta {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    color: #52525b;
+    font-size: 11px;
+    margin-bottom: 18px;
+  }
+
+  .receipt-status {
+    color: #4ade80;
     font-weight: 600;
   }
 
-  .payment-spotlight-detail {
-    margin-top: 16px;
-    color: rgba(226, 232, 240, 0.84);
-    font-size: 15px;
-    line-height: 1.45;
+  .receipt-dismiss {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    border: none;
+    background: rgba(74, 222, 128, 0.1);
+    color: #4ade80;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s ease;
   }
- </style>
+
+  .receipt-dismiss:hover {
+    background: rgba(74, 222, 128, 0.18);
+  }
+</style>

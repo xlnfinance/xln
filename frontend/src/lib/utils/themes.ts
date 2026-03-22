@@ -443,4 +443,12 @@ export function applyThemeToDocument(themeName: ThemeName): void {
 
   // Set data attribute for theme-specific selectors
   root.setAttribute('data-theme', themeName);
+
+  const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeColorMeta) {
+    themeColorMeta.setAttribute('content', theme.background);
+  }
+
+  document.body?.style.setProperty('background', theme.backgroundGradient);
+  document.body?.style.setProperty('color', theme.textPrimary);
 }

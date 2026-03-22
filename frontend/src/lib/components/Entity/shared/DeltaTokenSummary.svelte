@@ -75,11 +75,6 @@
           <span class="token-name">{compactName}</span>
         </div>
       </div>
-      {#if actionLabel}
-        <button class="summary-action compact-token-action" on:click={emitAction} disabled={actionDisabled}>
-          {actionLabel}
-        </button>
-      {/if}
       <div class="compact-metrics compact-metrics-wide">
         <div class="compact-metric compact-out" aria-label="Out capacity">
           {#if showMetricLabels}<span class="metric-label">Out</span>{/if}
@@ -87,12 +82,17 @@
             <span>{outAmountCompact}</span>
             {#if outUsdHint}<span class="usd-hint">{outUsdHint}</span>{/if}
           </span>
+          {#if actionLabel}
+            <button class="summary-action-inline" on:click={emitAction} disabled={actionDisabled}>
+              {actionLabel}
+            </button>
+          {/if}
         </div>
         <span class="metric-divider" aria-hidden="true"></span>
         <div class="compact-metric compact-in" aria-label="In capacity">
           {#if showMetricLabels}<span class="metric-label">In</span>{/if}
           <span class="compact-in-value">
-            <span class="inbound-arrow" aria-hidden="true">←</span>
+            <span class="inbound-label">Inbound</span>
             <span>{inAmountCompact}</span>
           </span>
         </div>
@@ -320,6 +320,31 @@
     background: transparent;
   }
 
+  .summary-action-inline {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #3f3f46;
+    background: transparent;
+    color: #71717a;
+    cursor: pointer;
+    margin-left: 6px;
+    transition: all 0.15s ease;
+    line-height: 1.2;
+  }
+  .summary-action-inline:hover:not(:disabled) {
+    border-color: #fbbf24;
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.08);
+  }
+  .summary-action-inline:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
   .delta-summary.compact .summary-head {
     min-height: 36px;
   }
@@ -446,11 +471,13 @@
     gap: 6px;
   }
 
-  .inbound-arrow {
-    color: #9ca3af;
-    font-size: 12px;
+  .inbound-label {
+    color: #52525b;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     line-height: 1;
-    transform: translateY(-1px);
   }
 
   @media (max-width: 1100px) {
