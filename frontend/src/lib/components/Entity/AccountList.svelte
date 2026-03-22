@@ -1,10 +1,13 @@
 <script lang="ts">
   import type { EntityReplica } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
-  import { replicas, xlnFunctions } from '../../stores/xlnStore';
+  import { replicas, xlnFunctions, xlnEnvironment } from '../../stores/xlnStore';
   import AccountPreview from './AccountPreview.svelte';
 
   export let replica: EntityReplica | null;
+
+  $: entityHeight = Number(replica?.state?.height ?? 0);
+  $: runtimeHeight = Number($xlnEnvironment?.height ?? 0);
 
   const dispatch = createEventDispatcher();
   let showAllAccounts = false;
@@ -173,6 +176,8 @@
               account={entry.account}
               counterpartyId={entry.counterpartyId}
               entityId={replica?.entityId || ''}
+              {entityHeight}
+              {runtimeHeight}
               lockSummary={getLockSummary(entry.counterpartyId)}
               isSelected={false}
               on:select={selectAccount}

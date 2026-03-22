@@ -1315,7 +1315,7 @@ test.describe('Rebalance E2E', () => {
     expect(snapshot.lastFinalizedJHeight, `jHeight must finalize (>0)\n${debugDump}`).toBeGreaterThan(0);
 
     // UI assertion + final screenshot artifact
-    const readyIndicator = page.locator('.account-preview .status-pill.ready').first();
+    const readyIndicator = page.locator('.account-preview .status-indicator.green').first();
     await timedStep('rebalance.wait_ready_indicator', async () => {
       await expect(readyIndicator).toBeVisible({ timeout: 30_000 });
     });

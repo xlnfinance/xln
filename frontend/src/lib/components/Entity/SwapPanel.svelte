@@ -1244,6 +1244,33 @@
       );
       let canonicalPriceTicks = explicitSubmitPriceTicks;
 
+      // Apply slippage: if > 0%, adjust price to guarantee crossing
+      // BUY: price UP by slippage% (willing to pay more)
+      // SELL: price DOWN by slippage% (willing to receive less)
+      if (slippagePct > 0 && canonicalPriceTicks > 0n) {
+        const slipBps = BigInt(Math.round(slippagePct * 100)); // 1% = 100bps
+        if (tradeSide === 'buy-base') {
+          canonicalPriceTicks = canonicalPriceTicks + (canonicalPriceTicks * slipBps) / 10000n;
+        } else {
+          const reduction = (canonicalPriceTicks * slipBps) / 10000n;
+          canonicalPriceTicks = canonicalPriceTicks > reduction ? canonicalPriceTicks - reduction : 1n;
+        }
+        // Recompute amounts at slippage-adjusted price
+        const LOT_SCALE = 10n ** 12n;
+        const rawBase = tradeSide === 'sell-base' ? giveAmount : wantAmount;
+        const quantizedBase = (rawBase / LOT_SCALE) * LOT_SCALE;
+        if (quantizedBase > 0n) {
+          const adjustedQuote = (quantizedBase * canonicalPriceTicks) / ORDERBOOK_PRICE_SCALE;
+          if (adjustedQuote > 0n) {
+            effectiveGiveAmount = tradeSide === 'sell-base' ? quantizedBase : adjustedQuote;
+            effectiveWantAmount = tradeSide === 'sell-base' ? adjustedQuote : quantizedBase;
+          }
+        }
+      }
+
+      // IOC when using slippage (market order behavior)
+      const useIOC = slippagePct > 0 || !!selectedOrderLevel;
+
       if (effectiveGiveAmount <= 0n || effectiveWantAmount <= 0n) {
         throw new Error('Quantized order too small');
       }
@@ -1304,7 +1331,7 @@
           wantTokenId: wantToken,
           wantAmount: effectiveWantAmount,
           priceTicks: canonicalPriceTicks,
-          ...(selectedOrderLevel ? { timeInForce: 1 as const } : {}),
+          ...(useIOC ? { timeInForce: 1 as const } : {}),
           minFillRatio,
         },
       });

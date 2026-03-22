@@ -9,6 +9,7 @@
   import { tabOperations } from '$lib/stores/tabStore';
   import { timeOperations } from '$lib/stores/timeStore';
   import { vaultOperations } from '$lib/stores/vaultStore';
+  import { resetEverything } from '$lib/utils/resetEverything';
   import {
     clearInactiveTabStandby,
     initializeActiveTabLock,
@@ -21,6 +22,25 @@
   let hasActiveTabLock = false;
   let activeTabLockReady = false;
   let embedBootReady = false;
+
+  function isResetHashActive(): boolean {
+    if (!browser) return false;
+    const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    const route = rawHash.split('?')[0]?.trim().toLowerCase() || '';
+    return route === 'reset';
+  }
+
+  async function maybeHandleResetHash(): Promise<boolean> {
+    if (!isResetHashActive()) return false;
+    const confirmed = window.confirm('reset everything');
+    if (confirmed) {
+      history.replaceState(null, '', '/app');
+      await resetEverything('hash-reset');
+      return true;
+    }
+    history.replaceState(null, '', '/app');
+    return false;
+  }
 
   function syncModeFromLocation(): void {
     if (!browser) return;
@@ -106,9 +126,11 @@
 
     const handleLocationChange = () => {
       syncModeFromLocation();
+      void maybeHandleResetHash();
     };
     window.addEventListener('hashchange', handleLocationChange);
     void (async () => {
+      if (await maybeHandleResetHash()) return;
       if (isInactiveTabStandby()) {
         hasActiveTabLock = false;
         activeTabLockReady = true;
@@ -198,8 +220,8 @@
     align-items: center;
     justify-content: center;
     height: 100vh;
-    background: #0a0a0a;
-    color: #e8e8e8;
+    background: var(--theme-bg-gradient, #0a0a0a);
+    color: var(--theme-text-primary, #e8e8e8);
   }
 
   .loading-spinner {
@@ -216,7 +238,7 @@
   .loading-screen p {
     margin-top: 24px;
     font-size: 18px;
-    color: #00d9ff;
+    color: var(--theme-accent, #00d9ff);
   }
 
   .error-screen {
@@ -237,22 +259,22 @@
 
   .inactive-tab-screen h2 {
     font-size: 32px;
-    color: #f2e7c8;
+    color: var(--theme-text-primary, #f2e7c8);
     margin: 0;
   }
 
   .inactive-tab-screen p {
     margin: 0;
-    color: rgba(232, 232, 232, 0.72);
+    color: var(--theme-text-secondary, rgba(232, 232, 232, 0.72));
     font-size: 16px;
   }
 
   .inactive-tab-screen button,
   .error-screen button {
     appearance: none;
-    border: 1px solid rgba(217, 179, 58, 0.45);
-    background: rgba(38, 30, 18, 0.96);
-    color: #f2d37a;
+    border: 1px solid var(--theme-input-border, rgba(217, 179, 58, 0.45));
+    background: var(--theme-surface, rgba(38, 30, 18, 0.96));
+    color: var(--theme-accent, #f2d37a);
     border-radius: 12px;
     padding: 12px 18px;
     font-size: 15px;

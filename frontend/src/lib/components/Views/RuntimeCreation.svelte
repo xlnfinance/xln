@@ -7,6 +7,7 @@
   import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import type { Tab } from '$lib/types/ui';
   import ContextSwitcher from '$lib/components/Entity/ContextSwitcher.svelte';
+  import { resetEverything } from '$lib/utils/resetEverything';
   import { Copy, Check } from 'lucide-svelte';
   import {
     BRAINVAULT_V1,
@@ -186,6 +187,14 @@
 
   let inputMode: InputMode = 'brainvault';
   let phase: Phase = 'input';
+
+  $: hasAnyPersistedState = typeof localStorage !== 'undefined' && (localStorage.length > 0 || typeof indexedDB !== 'undefined');
+
+  async function handleResetEverything() {
+    if (confirm('This will clear all wallets, accounts, and runtime state. Continue?')) {
+      await resetEverything('manual-reset');
+    }
+  }
   let createLoginType: 'manual' | 'demo' = 'manual';
   let showSuccessHeader = true;
   let successHeaderTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1192,6 +1201,14 @@
           >
             {t('vault.derive')}
           </button>
+          {#if hasAnyPersistedState}
+            <button
+              class="reset-link"
+              on:click={handleResetEverything}
+            >
+              Reset everything
+            </button>
+          {/if}
         {/if}
 
         {#if phase === 'deriving'}
@@ -2550,6 +2567,21 @@
 
   .derive-btn:hover:not(:disabled)::before {
     left: 100%;
+  }
+
+  .reset-link {
+    display: block;
+    margin: 12px auto 0;
+    padding: 6px 12px;
+    background: none;
+    border: none;
+    color: #52525b;
+    font-size: 11px;
+    cursor: pointer;
+    transition: color 0.15s ease;
+  }
+  .reset-link:hover {
+    color: #f43f5e;
   }
 
   .derive-btn:hover:not(:disabled) {

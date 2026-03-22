@@ -467,7 +467,6 @@
               <img src={hub.identicon} alt="" class="hub-identicon" />
               <div class="hub-title">
                 <span class="hub-name">{hub.name}</span>
-                <span class="hub-id mono">{hub.entityId}</span>
               </div>
             </button>
             <div class="hub-actions">
@@ -513,6 +512,10 @@
                 <div class="detail">
                   <span class="label">Peers</span>
                   <span class="value">{hub.metadata.peerCount}</span>
+                </div>
+                <div class="detail">
+                  <span class="label">Entity ID</span>
+                  <span class="value mono">{hub.entityId.slice(0, 10)}...{hub.entityId.slice(-6)}</span>
                 </div>
                 <div class="detail">
                   <span class="label">Runtime ID</span>

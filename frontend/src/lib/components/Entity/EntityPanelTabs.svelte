@@ -2636,13 +2636,6 @@
         <div class="hero-right">
           <div class="hero-networth">{formatCompact(netWorth)}</div>
           <div class="hero-label">Net Worth</div>
-          <div class="hero-breakdown">
-            <span>External {formatCompact(externalTotal)}</span>
-            <span>+</span>
-            <span>Reserve {formatCompact(reservesTotal)}</span>
-            <span>+</span>
-            <span>Accounts {formatCompact(accountsData.total)}</span>
-          </div>
         </div>
       </section>
 
@@ -2711,7 +2704,6 @@
                   </span>
                   <div class="asset-name-block">
                     <span class="token-name">{row.symbol}</span>
-                    <span class="asset-kind">{row.isNative ? 'Native gas' : 'ERC20 / reserve'}</span>
                   </div>
                 </div>
                 <div class="col-balance asset-balance-block">
@@ -2759,23 +2751,23 @@
               <button class="account-workspace-tab" data-testid="asset-tab-faucet" class:active={assetWorkspaceTab === 'faucet'} on:click={() => assetWorkspaceTab = 'faucet'}>
                 <span>Faucet</span>
               </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-deposit" class:active={assetWorkspaceTab === 'e2r'} on:click={() => assetWorkspaceTab = 'e2r'}>
-                <span>External → Reserve</span>
+              <button class="account-workspace-tab" data-testid="asset-tab-deposit" class:active={assetWorkspaceTab === 'e2r'} on:click={() => assetWorkspaceTab = 'e2r'} title="External → Reserve">
+                <span>E→R</span>
               </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-r2c" class:active={assetWorkspaceTab === 'r2c'} on:click={() => assetWorkspaceTab = 'r2c'}>
-                <span>Reserve → Collateral</span>
+              <button class="account-workspace-tab" data-testid="asset-tab-r2c" class:active={assetWorkspaceTab === 'r2c'} on:click={() => assetWorkspaceTab = 'r2c'} title="Reserve → Collateral">
+                <span>R→C</span>
               </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-c2r" class:active={assetWorkspaceTab === 'c2r'} on:click={() => assetWorkspaceTab = 'c2r'}>
-                <span>Collateral → Reserve</span>
+              <button class="account-workspace-tab" data-testid="asset-tab-c2r" class:active={assetWorkspaceTab === 'c2r'} on:click={() => assetWorkspaceTab = 'c2r'} title="Collateral → Reserve">
+                <span>C→R</span>
               </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-withdraw" class:active={assetWorkspaceTab === 'r2e'} on:click={() => assetWorkspaceTab = 'r2e'}>
-                <span>Reserve → External</span>
+              <button class="account-workspace-tab" data-testid="asset-tab-withdraw" class:active={assetWorkspaceTab === 'r2e'} on:click={() => assetWorkspaceTab = 'r2e'} title="Reserve → External">
+                <span>R→E</span>
               </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-send" class:active={assetWorkspaceTab === 'send'} on:click={() => assetWorkspaceTab = 'send'}>
-                <span>External Send</span>
+              <button class="account-workspace-tab" data-testid="asset-tab-send" class:active={assetWorkspaceTab === 'send'} on:click={() => assetWorkspaceTab = 'send'} title="Send ERC20">
+                <span>Send</span>
               </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-allow" class:active={assetWorkspaceTab === 'allow'} on:click={() => assetWorkspaceTab = 'allow'}>
-                <span>External Allow</span>
+              <button class="account-workspace-tab" data-testid="asset-tab-allow" class:active={assetWorkspaceTab === 'allow'} on:click={() => assetWorkspaceTab = 'allow'} title="Approve ERC20">
+                <span>Allow</span>
               </button>
           </nav>
 
@@ -3729,11 +3721,10 @@
     background: #4a2408;
   }
 
-  /* Main Scroll - SINGLE SCROLLBAR */
+  /* Main content - NO own scrollbar, parent .panel-content scrolls */
   .main-scroll {
     flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: visible;
     padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
   }
 
@@ -5471,11 +5462,19 @@
 
   .asset-ledger-header,
   .asset-ledger-row {
-    grid-template-columns: minmax(120px, 180px) repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(90px, 140px) repeat(3, minmax(0, 1fr));
+  }
+
+  @media (max-width: 520px) {
+    .asset-ledger-header,
+    .asset-ledger-row {
+      grid-template-columns: minmax(70px, 1fr) repeat(3, minmax(60px, 1fr));
+      font-size: 11px;
+    }
   }
 
   .asset-ledger-table {
-    overflow-x: auto;
+    overflow-x: hidden;
   }
 
   .asset-ledger-total {
@@ -5513,6 +5512,7 @@
 
   .asset-workspace-tabs {
     margin-top: 16px;
+    flex-wrap: wrap;
   }
 
   .asset-action-card {

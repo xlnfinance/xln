@@ -622,6 +622,7 @@
     z-index: 1;
     padding: 0;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
   /* Inline Panels - NO POPUPS! */

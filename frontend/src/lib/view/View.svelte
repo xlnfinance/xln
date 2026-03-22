@@ -24,6 +24,30 @@
   import GossipPanel from './panels/GossipPanel.svelte';
   import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
   import UserModePanel from './UserModePanel.svelte';
+  import CommandPalette from '../components/shared/CommandPalette.svelte';
+
+  let commandPaletteOpen = false;
+
+  function handlePaletteCommand(event: CustomEvent<{ type: string; args: Record<string, unknown> }>) {
+    const { type, args } = event.detail;
+    commandPaletteOpen = false;
+
+    if (type === 'navigate') {
+      const tab = String(args.tab || '');
+      if (tab) panelBridge.emit('settings:update', { key: 'activeTab', value: tab });
+    } else if (type === 'pay') {
+      panelBridge.emit('settings:update', { key: 'activeTab', value: 'accounts' });
+      panelBridge.emit('settings:update', { key: 'payPrefill', value: args });
+    } else if (type === 'swap') {
+      panelBridge.emit('settings:update', { key: 'activeTab', value: 'accounts' });
+      panelBridge.emit('settings:update', { key: 'swapPrefill', value: args });
+    } else if (type === 'open') {
+      panelBridge.emit('settings:update', { key: 'activeTab', value: 'accounts' });
+    } else if (type === 'explore') {
+      const entityId = String(args.entityId || '');
+      if (entityId) panelBridge.emit('openEntityOperations', { entityId, entityName: '' });
+    }
+  }
   import PaymentSpotlight from '$lib/components/PaymentSpotlight.svelte';
   import { parseURLHash } from './utils/stateCodec';
   // REMOVED PANELS:
@@ -798,6 +822,7 @@
 </script>
 
 <div class="view-wrapper" class:embed-mode={embedMode} class:user-mode={userMode}>
+  <CommandPalette bind:isOpen={commandPaletteOpen} on:command={handlePaletteCommand} on:close={() => commandPaletteOpen = false} />
   <PaymentSpotlight />
   <!-- Always render both, toggle visibility via CSS -->
   <div class="user-mode-container" class:hidden={!userMode}>
@@ -861,7 +886,8 @@
     width: 100%;
     height: 100dvh;
     min-height: 100dvh;
-    background: #0a0a0a;
+    background: var(--theme-bg-gradient, #0a0a0a);
+    color: var(--theme-text-primary, #e4e4e7);
     display: flex;
     flex-direction: column;
   }
@@ -872,7 +898,7 @@
     height: 100%;
     overflow: visible; /* Dropdowns must overlay - scroll is in panel-content */
     padding-bottom: 0;
-    background: #0a0a0a;
+    background: var(--theme-bg-gradient, #0a0a0a);
   }
 
   .user-mode-container.hidden {
@@ -931,17 +957,24 @@
   }
 
   :global(.dockview-theme-dark .dockview-tab) {
-    background: #2d2d30;
-    color: #ccc;
+    background: var(--theme-surface, #2d2d30);
+    color: var(--theme-text-secondary, #ccc);
   }
 
   :global(.dockview-theme-dark .dockview-tab.active) {
-    background: #1e1e1e;
-    color: #fff;
+    background: var(--theme-header-bg, #1e1e1e);
+    color: var(--theme-text-primary, #fff);
   }
 
   :global(.dockview-theme-dark .dockview-separator) {
-    background: #007acc;
+    background: var(--theme-accent, #007acc);
+  }
+
+  :global(.dockview-theme-dark .dockview-groupview),
+  :global(.dockview-theme-dark .dockview-groupcontrol),
+  :global(.dockview-theme-dark .dv-groupview) {
+    background: var(--theme-background, #09090b);
+    color: var(--theme-text-primary, #e4e4e7);
   }
 
   /* TimeMachine Bar - always visible at bottom like YouTube progress bar */
@@ -952,7 +985,8 @@
     right: 0;
     height: 48px;
     z-index: 1000;
-    background: rgba(30, 30, 30, 0.95);
+    background: color-mix(in srgb, var(--theme-surface, #1e1e1e) 92%, transparent);
+    border-top: 1px solid var(--theme-border, rgba(255, 255, 255, 0.08));
   }
 
   .time-machine-bar.collapsed {
@@ -981,10 +1015,10 @@
     z-index: 200;
     width: 28px;
     height: 48px;
-    background: rgba(0, 0, 0, 0.7);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: color-mix(in srgb, var(--theme-surface, #111) 82%, transparent);
+    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.2));
     border-radius: 4px;
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--theme-text-secondary, rgba(255, 255, 255, 0.7));
     cursor: pointer;
     font-size: 14px;
     display: flex;
@@ -995,9 +1029,9 @@
   }
 
   .embed-sidebar-toggle:hover {
-    background: rgba(0, 122, 255, 0.3);
-    border-color: rgba(0, 122, 255, 0.5);
-    color: white;
+    background: color-mix(in srgb, var(--theme-accent, #007aff) 24%, transparent);
+    border-color: color-mix(in srgb, var(--theme-accent, #007aff) 50%, transparent);
+    color: var(--theme-text-primary, white);
   }
 
   .embed-sidebar-toggle.sidebar-visible {

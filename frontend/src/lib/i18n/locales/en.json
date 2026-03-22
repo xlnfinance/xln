@@ -50,11 +50,11 @@
       "title": "Derivation Shards",
       "empty": "Enter credentials to begin derivation"
     },
-    "derive": "Open Vault",
+    "derive": "Open Wallet",
     "deriving": "Opening...",
-    "warning": "This is permanent. Name + passphrase + factor = your vault forever.",
+    "warning": "This is permanent. Name + passphrase + factor = your wallet forever.",
     "result": {
-      "title": "Vault Opened",
+      "title": "Wallet Opened",
       "address": "Address",
       "mnemonic": "Mnemonic",
       "privateKey": "Private Key",

@@ -15,6 +15,8 @@
   export let counterpartyId: string;
   export let entityId: string;
   export let isSelected: boolean = false;
+  export let entityHeight: number = 0;
+  export let runtimeHeight: number = 0;
   export let lockSummary: {
     incomingCount: number;
     incomingAmount: bigint;
@@ -195,6 +197,14 @@
   $: hasCommittedFrame = Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
   $: showDeltaRows = hasCommittedFrame && hasAnyDeltas;
 
+  $: isDevnet = (() => {
+    if (!activeEnv?.jReplicas) return false;
+    for (const [, jr] of activeEnv.jReplicas) {
+      if (jr?.chainId === 31337) return true;
+    }
+    return false;
+  })();
+  $: faucetLabel = isDevnet ? 'Faucet' : '';
   $: uiStatus = getAccountUiStatus(account);
   $: isPending = uiStatus === 'sent';
   $: hasActiveDispute = uiStatus === 'disputed';
@@ -304,45 +314,75 @@
   data-counterparty-id={counterpartyId}
   data-owner-entity-id={entityId}
 >
-  <!-- Row 1: Entity + status -->
+  <!-- Row 1: Entity name + status dot -->
   <div class="row-header">
     <div class="entity-col">
-      <EntityIdentity entityId={counterpartyId} name={counterpartyName} size={30} clickable={false} compact={false} copyable={false} showAddress={true} />
+      <EntityIdentity entityId={counterpartyId} name={counterpartyName} size={30} clickable={false} compact={false} copyable={false} showAddress={false} />
     </div>
     <div class="status-col">
-      <span class="conn-dot {connState}"></span>
-      <div class="consensus-chip-wrap">
+      <div class="status-dot-wrap">
         <button
-          class="consensus-chip status-pill"
-          class:ready={uiStatus === 'ready'}
-          class:sent={uiStatus === 'sent'}
-          class:disputed={uiStatus === 'disputed'}
-          class:finalized_disputed={uiStatus === 'finalized_disputed'}
+          class="status-indicator"
+          class:green={uiStatus === 'ready' && connState === 'connected'}
+          class:amber={uiStatus === 'sent'}
+          class:orange={connState === 'disconnected' || connState === 'queued'}
+          class:red={uiStatus === 'disputed' || uiStatus === 'finalized_disputed'}
+          class:gray={uiStatus !== 'ready' && uiStatus !== 'sent' && uiStatus !== 'disputed' && uiStatus !== 'finalized_disputed' && connState !== 'disconnected' && connState !== 'queued'}
           type="button"
-          title="Account and jurisdiction frame details"
+          title="Account status"
         >
-          <span class="consensus-chip-status">{statusLabel}</span>
-          <span class="consensus-chip-separator">·</span>
-          <span class="consensus-chip-frame">A#{accountHeight}</span>
-          <span class="consensus-chip-frame">J#{jFinalizedHeight}{jPendingSideSuffix}</span>
+          <span class="status-dot-inner"></span>
+          <span class="status-frame">#{accountHeight}</span>
         </button>
         <div class="consensus-popover" role="tooltip">
-          <div class="consensus-popover-head">Status: {statusLabel}</div>
-          <div class="consensus-popover-row">
-            <span>Account Frame</span>
-            <strong>#{accountHeight}</strong>
-          </div>
-          <div class="consensus-popover-row">
-            <span>Jurisdiction Frame</span>
-            <strong>#{jFinalizedHeight}{jPendingSideSuffix}</strong>
+          <div class="consensus-popover-head">
+            {#if uiStatus === 'ready' && connState === 'connected'}
+              <span class="popover-dot green"></span> Active — Online
+            {:else if uiStatus === 'sent'}
+              <span class="popover-dot yellow"></span> Pending — Awaiting ACK
+            {:else if connState === 'disconnected' || connState === 'queued'}
+              <span class="popover-dot yellow"></span> Active — Offline
+            {:else if uiStatus === 'disputed' || uiStatus === 'finalized_disputed'}
+              <span class="popover-dot red"></span> Dispute Active
+            {:else}
+              <span class="popover-dot gray"></span> Inactive
+            {/if}
           </div>
           <div class="consensus-popover-row">
             <span>Counterparty</span>
             <strong>{counterpartyName}</strong>
           </div>
+          <div class="consensus-popover-row dim">
+            <span>ID</span>
+            <strong class="mono">{counterpartyId.slice(0, 10)}...{counterpartyId.slice(-6)}</strong>
+          </div>
+          <div class="consensus-popover-section">Channel</div>
+          <div class="consensus-popover-row">
+            <span>Account</span>
+            <strong>#{accountHeight}</strong>
+          </div>
+          {#if account.pendingFrame}
+            <div class="consensus-popover-row pending">
+              <span>Pending</span>
+              <strong>#{account.pendingFrame.height}</strong>
+            </div>
+          {/if}
+          <div class="consensus-popover-row">
+            <span>Jurisdiction</span>
+            <strong>#{jFinalizedHeight}{jPendingSideSuffix}</strong>
+          </div>
           <div class="consensus-popover-row">
             <span>Updated</span>
             <strong>{formatDetailTimestamp(consensusUpdatedAt)}</strong>
+          </div>
+          <div class="consensus-popover-section">General</div>
+          <div class="consensus-popover-row">
+            <span>Entity</span>
+            <strong>#{entityHeight}</strong>
+          </div>
+          <div class="consensus-popover-row">
+            <span>Runtime</span>
+            <strong>#{runtimeHeight}</strong>
           </div>
           {#if hasActiveDispute}
             <div class="consensus-popover-row dispute">
@@ -350,11 +390,11 @@
               <strong>{disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left · {disputeRole}</strong>
             </div>
           {/if}
+          <button class="popover-explore-btn" on:click={handleClick}>
+            Explore Account →
+          </button>
         </div>
       </div>
-      <button class="btn-explore" on:click={handleClick}>
-        Explore
-      </button>
     </div>
   </div>
 
@@ -432,10 +472,12 @@
     --delta-sep-w: 12px;
     background: #18181b;
     border: 1px solid #27272a;
+    border-left: none;
     border-radius: 12px;
     padding: 14px 16px 12px;
     transition: all 0.15s ease;
   }
+  /* Status indicated by dot only — no border coloring */
   .account-preview:hover {
     border-color: #3f3f46;
     background: #1c1c20;
@@ -469,6 +511,22 @@
     color: #94a3b8;
     line-height: 1.15;
   }
+
+  .meta-line {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 2px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #71717a;
+  }
+  .meta-status { text-transform: uppercase; font-weight: 600; letter-spacing: 0.03em; }
+  .meta-status.ready { color: #4ade80; }
+  .meta-status.sent { color: #fbbf24; }
+  .meta-status.disputed { color: #f43f5e; }
+  .meta-sep { color: #3f3f46; }
+  .meta-frame { color: #52525b; }
   .status-col {
     display: flex;
     align-items: center;
@@ -478,82 +536,61 @@
     row-gap: 6px;
   }
 
-  .conn-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-  .conn-dot.connected { background: #4ade80; box-shadow: 0 0 4px rgba(74, 222, 128, 0.4); }
-  .conn-dot.queued { background: #fbbf24; animation: pulse 2s infinite; box-shadow: 0 0 4px rgba(251, 191, 36, 0.4); }
-  .conn-dot.disconnected { background: #3f3f46; }
-  .conn-dot.unknown { background: transparent; border: 1px solid #3f3f46; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
-  .consensus-chip-wrap {
+  .status-dot-wrap {
     position: relative;
     display: inline-flex;
     align-items: center;
   }
 
-  .consensus-chip {
+  .status-indicator {
     display: inline-flex;
     align-items: center;
-    gap: 9px;
-    height: 32px;
-    padding: 0 12px;
-    border-radius: 8px;
-    border: 1px solid #292524;
-    background: #121216;
-    color: #e7e5e4;
+    gap: 5px;
+    border: none;
+    background: none;
+    padding: 2px 4px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.15s ease;
+  }
+  .status-indicator:hover { background: rgba(255,255,255,0.05); }
+
+  .status-dot-inner {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .status-indicator.green .status-dot-inner { background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.5); }
+  .status-indicator.amber .status-dot-inner { background: #fbbf24; box-shadow: 0 0 6px rgba(251, 191, 36, 0.5); animation: pulse 2s infinite; }
+  .status-indicator.orange .status-dot-inner { background: #f97316; box-shadow: 0 0 6px rgba(249, 115, 22, 0.4); }
+  .status-indicator.red .status-dot-inner { background: #f43f5e; box-shadow: 0 0 6px rgba(244, 63, 94, 0.5); animation: pulse 1.5s infinite; }
+  .status-indicator.gray .status-dot-inner { background: #3f3f46; }
+
+  .status-frame {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1;
-    cursor: default;
-    box-sizing: border-box;
+    font-size: 10px;
+    color: #52525b;
+    font-weight: 600;
   }
+  .status-indicator.green .status-frame { color: #6ee7b7; }
+  .status-indicator.amber .status-frame { color: #fcd34d; }
+  .status-indicator.red .status-frame { color: #fda4af; }
 
-  .consensus-chip-status {
-    font-family: Inter, sans-serif;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+  .popover-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
   }
-
-  .consensus-chip-separator {
-    color: #71717a;
-  }
-
-  .consensus-chip-frame {
-    color: #e5e7eb;
-  }
-
-  .consensus-chip.ready {
-    color: #4ade80;
-    background: rgba(34, 197, 94, 0.1);
-    border-color: rgba(74, 222, 128, 0.18);
-  }
-
-  .consensus-chip.ready .consensus-chip-frame {
-    color: #dcfce7;
-  }
-
-  .consensus-chip.sent {
-    color: #fbbf24;
-    background: rgba(251, 191, 36, 0.1);
-    border-color: rgba(251, 191, 36, 0.2);
-  }
-
-  .consensus-chip.sent .consensus-chip-frame {
-    color: #fef3c7;
-  }
-
-  .consensus-chip.disputed,
-  .consensus-chip.finalized_disputed {
-    color: #fecdd3;
-    background: rgba(244, 63, 94, 0.16);
-    border-color: rgba(244, 63, 94, 0.28);
-  }
-
-  .consensus-chip.disputed .consensus-chip-frame,
-  .consensus-chip.finalized_disputed .consensus-chip-frame {
-    color: #ffe4e6;
-  }
+  .popover-dot.green { background: #4ade80; }
+  .popover-dot.yellow { background: #fbbf24; }
+  .popover-dot.red { background: #f43f5e; }
+  .popover-dot.gray { background: #3f3f46; }
 
   .consensus-popover {
     position: absolute;
@@ -570,8 +607,8 @@
     backdrop-filter: blur(10px);
   }
 
-  .consensus-chip-wrap:hover .consensus-popover,
-  .consensus-chip-wrap:focus-within .consensus-popover {
+  .status-dot-wrap:hover .consensus-popover,
+  .status-dot-wrap:focus-within .consensus-popover {
     display: block;
   }
 
@@ -602,28 +639,56 @@
     color: #fecdd3;
   }
 
-  .btn-explore {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 32px;
-    padding: 0 12px;
-    border-radius: 7px;
-    border: 1px solid #3f3f46;
-    background: transparent;
-    color: #a1a1aa;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: all 0.15s ease;
+  .consensus-popover-row.dim {
+    opacity: 0.6;
   }
 
-  .btn-explore:hover {
-    border-color: #fbbf24;
+  .consensus-popover-row.dim strong.mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+  }
+
+  .consensus-popover-row.pending strong {
     color: #fbbf24;
-    background: rgba(251, 191, 36, 0.08);
+  }
+
+  .consensus-popover-section {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #52525b;
+    margin-top: 8px;
+    margin-bottom: 2px;
+    padding-top: 6px;
+    border-top: 1px solid #27272a;
+  }
+  .consensus-popover-section:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .popover-explore-btn {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 8px 0;
+    border-radius: 8px;
+    border: 1px solid #3f3f46;
+    background: rgba(251, 191, 36, 0.06);
+    color: #fbbf24;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: center;
+  }
+
+  .popover-explore-btn:hover {
+    border-color: #fbbf24;
+    background: rgba(251, 191, 36, 0.14);
   }
 
   .locks-row {
