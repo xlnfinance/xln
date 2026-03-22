@@ -1864,7 +1864,7 @@ export interface Env {
       runtimeId: string;
       seenAt: number;
     }>;
-    directEntityInputDispatch?: ((targetRuntimeId: string, input: DeliverableEntityInput) => boolean) | null;
+    directEntityInputDispatch?: ((targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number) => boolean) | null;
   };
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: GossipLayer;

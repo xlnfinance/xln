@@ -62,6 +62,8 @@ import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
 let serverEnv: Env | null = null;
+let serverStartupBarrier: Promise<void> = Promise.resolve();
+let resolveServerStartupBarrier: (() => void) | null = null;
 // Server encryption keypair now managed by relay-local-delivery.ts
 const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
 let coldResetRebuildInFlight: Promise<void> | null = null;
@@ -183,6 +185,9 @@ const withStartupStepTimeout = async <T>(label: string, work: Promise<T>, timeou
     if (timeoutHandle) clearTimeout(timeoutHandle);
   }
 };
+
+const isServerBootInProgress = (): boolean =>
+  serverBootPhase === 'starting' || serverBootPhase === 'runtime' || serverBootPhase === 'bootstrap';
 
 const oneShotLogs = new Map<string, number>();
 const ONE_SHOT_TTL_MS = 60_000;
@@ -2172,7 +2177,12 @@ const RPC_MARKET_PUBLISH_MS = 1000;
 const RPC_MARKET_MAX_DEPTH = 100;
 const RPC_MARKET_DEFAULT_DEPTH = 20;
 
-const sendEntityInputDirectViaRelaySocket = (env: Env, targetRuntimeId: string, input: DeliverableEntityInput): boolean => {
+const sendEntityInputDirectViaRelaySocket = (
+  env: Env,
+  targetRuntimeId: string,
+  input: DeliverableEntityInput,
+  ingressTimestamp?: number,
+): boolean => {
   const fromRuntimeId = String(env.runtimeId || '');
   if (!fromRuntimeId) return false;
   const targetKey = normalizeRuntimeKey(targetRuntimeId);
@@ -2193,7 +2203,10 @@ const sendEntityInputDirectViaRelaySocket = (env: Env, targetRuntimeId: string, 
       id: `srv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
       from: fromRuntimeId,
       to: target?.runtimeId || targetRuntimeId,
-      timestamp: nextWsTimestamp(relayStore),
+      timestamp:
+        typeof ingressTimestamp === 'number' && Number.isFinite(ingressTimestamp)
+          ? ingressTimestamp
+          : nextWsTimestamp(relayStore),
       payload,
       encrypted: true,
     };
@@ -4320,6 +4333,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     // Keep server alive by default (local dev/e2e). Supervisor restart is opt-in via exit=1.
     const shouldExit = url.searchParams.get('exit') === '1';
 
+    if (isServerBootInProgress()) {
+      await serverStartupBarrier;
+    }
+
     const result = await triggerColdReset(env, {
       resetRpc,
       clearDb: clearDbState,
@@ -5122,6 +5139,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   serverBootCompletedAt = null;
   serverBootPhase = 'starting';
   serverBootError = null;
+  serverStartupBarrier = new Promise<void>(resolve => {
+    resolveServerStartupBarrier = resolve;
+  });
 
   let env: Env | null = null;
   let routerConfig: RelayRouterConfig | null = null;
@@ -5298,8 +5318,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       `[XLN] Runtime log mode: ${env.quietRuntimeLogs ? 'quiet' : 'verbose'} (set RUNTIME_VERBOSE_LOGS=1 for verbose)`,
     );
     env.runtimeState = env.runtimeState ?? {};
-    env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input) =>
-      sendEntityInputDirectViaRelaySocket(env, targetRuntimeId, input);
+    env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
+      sendEntityInputDirectViaRelaySocket(env, targetRuntimeId, input, ingressTimestamp);
     startRuntimeLoop(env);
     console.log('[XLN] Runtime event loop started ✓');
 
@@ -5569,6 +5589,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     serverBootError = (error as Error)?.message || String(error);
     console.error('[XLN] Startup failed after HTTP bind:', error);
     return;
+  } finally {
+    resolveServerStartupBarrier?.();
+    resolveServerStartupBarrier = null;
   }
 
   console.log(`

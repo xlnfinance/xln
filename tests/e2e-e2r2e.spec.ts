@@ -15,6 +15,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+import { Interface, Wallet, formatUnits, parseUnits } from 'ethers';
 import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL, waitForNamedHubs } from './utils/e2e-baseline';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic, switchToRuntimeId } from './utils/e2e-demo-users';
 import { connectRuntimeToHub } from './utils/e2e-connect';
@@ -48,11 +49,49 @@ type RelayDebugEvent = {
   };
 };
 
+type ApiTokenEntry = {
+  address?: string;
+  symbol?: string;
+  decimals?: number;
+};
+
+const ERC20_BALANCE_OF = new Interface([
+  'function balanceOf(address owner) view returns (uint256)',
+]);
+const ERC20_TRANSFER = new Interface([
+  'function transfer(address to, uint256 amount) returns (bool)',
+]);
+const DEPOSITORY_RESERVES = new Interface([
+  'function _reserves(bytes32 entity, uint256 tokenId) view returns (uint256)',
+]);
+
 async function openAssetsTab(page: Page): Promise<void> {
   const tab = page.getByTestId('tab-assets').first();
   await expect(tab).toBeVisible({ timeout: 20_000 });
   await tab.click();
   await expect(page.getByTestId('asset-ledger-refresh').first()).toBeVisible({ timeout: 20_000 });
+}
+
+async function openMoveTab(page: Page): Promise<void> {
+  await openAssetsTab(page);
+  await page.getByTestId('asset-tab-move').first().click();
+  await expect(page.getByTestId('move-route-summary').first()).toBeVisible({ timeout: 20_000 });
+}
+
+async function chooseMoveRoute(page: Page, from: 'external' | 'reserve' | 'account', to: 'external' | 'reserve' | 'account'): Promise<void> {
+  await page.getByTestId('move-from').first().selectOption(from);
+  await page.getByTestId('move-to').first().selectOption(to);
+}
+
+async function dragMoveRoute(page: Page, from: 'external' | 'reserve' | 'account', to: 'external' | 'reserve' | 'account'): Promise<void> {
+  await page.evaluate(({ from, to }) => {
+    const source = document.querySelector(`[data-testid="move-source-${from}"]`) as HTMLElement | null;
+    const target = document.querySelector(`[data-testid="move-target-${to}"]`) as HTMLElement | null;
+    if (!source || !target) throw new Error(`missing drag nodes for ${from} -> ${to}`);
+    source.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10 }));
+    target.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, clientX: 20, clientY: 20 }));
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 20, clientY: 20 }));
+  }, { from, to });
 }
 
 async function openSettleWorkspace(page: Page): Promise<void> {
@@ -149,6 +188,96 @@ async function refreshExternalBalance(page: Page, symbol: string): Promise<numbe
   return getRenderedExternalBalance(page, symbol);
 }
 
+async function getRpcExternalBalance(page: Page, symbol: string, holder: string): Promise<number> {
+  const tokens = await getApiTokens(page);
+  const token = tokens.find((entry) => String(entry.symbol || '').toUpperCase() === symbol.toUpperCase());
+  expect(token?.address, `Missing ${symbol} token address`).toBeTruthy();
+  const decimals = typeof token?.decimals === 'number' ? token.decimals : 18;
+  const raw = await rpcCall<string>(page, 'eth_call', [
+    {
+      to: token!.address,
+      data: ERC20_BALANCE_OF.encodeFunctionData('balanceOf', [holder]),
+    },
+    'latest',
+  ]);
+  return Number(formatUnits(BigInt(raw), decimals));
+}
+
+async function getApiTokens(page: Page): Promise<ApiTokenEntry[]> {
+  const tokensResponse = await page.request.get(`${API_BASE_URL}/api/tokens`);
+  expect(tokensResponse.ok()).toBe(true);
+  const body = await tokensResponse.json().catch(() => ({}));
+  return Array.isArray(body?.tokens) ? body.tokens as ApiTokenEntry[] : [];
+}
+
+async function rpcCall<T>(page: Page, method: string, params: unknown[]): Promise<T> {
+  const response = await page.request.post(`${API_BASE_URL}/rpc`, {
+    data: {
+      jsonrpc: '2.0',
+      id: 1,
+      method,
+      params,
+    },
+  });
+  expect(response.ok()).toBe(true);
+  const body = await response.json().catch(() => ({}));
+  if (body?.error) {
+    throw new Error(`${method} failed: ${JSON.stringify(body.error)}`);
+  }
+  return body?.result as T;
+}
+
+async function waitForRpcReceipt(page: Page, txHash: string, timeoutMs = ROUTE_TIMEOUT_MS): Promise<void> {
+  await expect
+    .poll(async () => {
+      const receipt = await rpcCall<Record<string, unknown> | null>(page, 'eth_getTransactionReceipt', [txHash]);
+      return receipt !== null;
+    }, { timeout: timeoutMs })
+    .toBe(true);
+}
+
+async function seedExternalWallet(page: Page, recipient: string, symbol: string, amount: string): Promise<void> {
+  const tokens = await getApiTokens(page);
+  const token = tokens.find((entry) => String(entry.symbol || '').toUpperCase() === symbol.toUpperCase());
+  expect(token?.address, `Missing ${symbol} token address`).toBeTruthy();
+  const decimals = typeof token?.decimals === 'number' ? token.decimals : 18;
+  const accounts = await rpcCall<string[]>(page, 'eth_accounts', []);
+  const source = String(accounts[0] || '').trim();
+  expect(source.length, 'Missing unlocked RPC source account').toBeGreaterThan(0);
+
+  const gasTopupTx = await rpcCall(page, 'eth_sendTransaction', [{
+    from: source,
+    to: recipient,
+    value: `0x${parseUnits('0.1', 18).toString(16)}`,
+  }]);
+  await waitForRpcReceipt(page, gasTopupTx);
+
+  const tokenTx = await rpcCall(page, 'eth_sendTransaction', [{
+    from: source,
+    to: token!.address,
+    data: ERC20_TRANSFER.encodeFunctionData('transfer', [recipient, parseUnits(amount, decimals)]),
+  }]);
+  await waitForRpcReceipt(page, tokenTx);
+}
+
+async function getOnchainReserveBalance(page: Page, entityId: string, tokenId: number): Promise<number> {
+  const jurisdictionsResponse = await page.request.get(`${API_BASE_URL}/api/jurisdictions`);
+  expect(jurisdictionsResponse.ok()).toBe(true);
+  const body = await jurisdictionsResponse.json().catch(() => ({}));
+  const jurisdictionMap = body?.jurisdictions && typeof body.jurisdictions === 'object' ? body.jurisdictions : {};
+  const firstJurisdiction = Object.values(jurisdictionMap)[0] as { contracts?: { depository?: string } } | undefined;
+  const depositoryAddress = String(firstJurisdiction?.contracts?.depository || '').trim();
+  expect(depositoryAddress, 'Missing depository address').toMatch(/^0x[a-fA-F0-9]{40}$/);
+  const raw = await rpcCall<string>(page, 'eth_call', [
+    {
+      to: depositoryAddress,
+      data: DEPOSITORY_RESERVES.encodeFunctionData('_reserves', [entityId, BigInt(tokenId)]),
+    },
+    'latest',
+  ]);
+  return Number(formatUnits(BigInt(raw || '0x0'), 18));
+}
+
 async function refreshReserveBalance(page: Page, symbol: string): Promise<number> {
   await openAssetsTab(page);
   await page.getByTestId('asset-ledger-refresh').first().click();
@@ -172,6 +301,20 @@ async function getActiveRuntimeId(page: Page): Promise<string> {
   });
   expect(runtimeId.length, 'Runtime must expose isolatedEnv.runtimeId').toBeGreaterThan(0);
   return runtimeId;
+}
+
+async function getVisibleEoaAddress(page: Page): Promise<string> {
+  await openAssetsTab(page);
+  return await page.evaluate(() => {
+    const labels = Array.from(document.querySelectorAll('.wallet-label'));
+    const eoaLabel = labels.find((node) => String(node.textContent || '').trim() === 'EOA');
+    const card = eoaLabel?.parentElement;
+    const paragraphs = card ? Array.from(card.querySelectorAll('p')) : [];
+    const value = paragraphs
+      .map((node) => String(node.textContent || '').trim())
+      .find((text) => /^0x[a-fA-F0-9]{40}$/.test(text));
+    return String(value || '');
+  });
 }
 
 async function readRelayDebugEvents(
@@ -437,6 +580,182 @@ test.describe('E2R2E External Reserve Route', () => {
       const externalAfterWithdraw = await refreshExternalBalance(page, symbol);
       expect(externalAfterWithdraw).toBeGreaterThan(externalAfterDeposit);
     });
+  });
+
+  test('move tab covers asset route matrix through one form', async ({ page }) => {
+    test.setTimeout(LONG_E2E ? 240_000 : 180_000);
+
+    page.on('console', (message) => {
+      const text = message.text();
+      if (
+        text.includes('Move failed') ||
+        text.includes('Deposit failed') ||
+        text.includes('Deposited') ||
+        text.includes('Approved exact allowance') ||
+        text.includes('externalTokenToReserve')
+      ) {
+        console.log(`[MOVE][console] ${text}`);
+      }
+    });
+
+    await timedStep('move.baseline', async () => {
+      await ensureE2EBaseline(page, {
+        timeoutMs: LONG_E2E ? 240_000 : 120_000,
+        requireHubMesh: true,
+        requireMarketMaker: false,
+        minHubCount: 3,
+        forceReset: true,
+      });
+    });
+
+    let alice: { entityId: string; signerId: string; runtimeId: string } | null = null;
+    const bobSignerId = Wallet.fromPhrase(selectDemoMnemonic('bob')).address.toLowerCase();
+    await timedStep('move.runtimes', async () => {
+      await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+      await page.evaluate((apiBaseUrl: string) => {
+        (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__ = apiBaseUrl;
+        localStorage.setItem('xln-api-base-url', apiBaseUrl);
+      }, API_BASE_URL);
+      alice = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
+      await switchToRuntimeId(page, alice.runtimeId);
+    });
+
+    const hubsByName = await waitForNamedHubs(page, ['H1'], { timeoutMs: ROUTE_TIMEOUT_MS });
+    await timedStep('move.open-account', async () => {
+      await connectRuntimeToHub(page, { entityId: alice!.entityId, signerId: alice!.signerId }, hubsByName.h1);
+    });
+
+    const symbol = 'USDC';
+    const eoaAddress = await getVisibleEoaAddress(page);
+    expect(eoaAddress, 'visible EOA address must exist').toMatch(/^0x[a-fA-F0-9]{40}$/);
+    await timedStep('move.seed-wallet', async () => {
+      await seedExternalWallet(page, eoaAddress, symbol, '100');
+      await expect
+        .poll(async () => getRpcExternalBalance(page, symbol, eoaAddress), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(0);
+      await expect
+        .poll(async () => refreshExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(0);
+    });
+
+    await timedStep('move.route-matrix-ui', async () => {
+      await openMoveTab(page);
+      await page.getByTestId('move-asset-symbol').selectOption(symbol);
+      await page.getByTestId('move-amount').fill('5');
+
+      await chooseMoveRoute(page, 'reserve', 'reserve');
+      await expect(page.getByTestId('move-confirm').first()).toBeDisabled();
+
+      await chooseMoveRoute(page, 'account', 'account');
+      await expect(page.getByTestId('move-go-pay').first()).toBeVisible({ timeout: 20_000 });
+
+      await openMoveTab(page);
+      await page.getByTestId('move-asset-symbol').selectOption(symbol);
+      await dragMoveRoute(page, 'external', 'reserve');
+      await expect(page.getByTestId('move-route-summary').first()).toContainText('External → Reserve');
+    });
+
+    let reserveAfterE2R = 0;
+    let accountAfterR2A = 0;
+    let reserveAfterA2R = 0;
+    let accountAfterE2A = 0;
+    let externalAfterA2E = 0;
+    const moveEntityId = alice!.entityId;
+
+    await timedStep('move.execute-e2r', async () => {
+      const beforeReserve = await refreshReserveBalance(page, symbol);
+      const beforeOnchainReserve = await getOnchainReserveBalance(page, moveEntityId, 1);
+      await openMoveTab(page);
+      await page.getByTestId('move-asset-symbol').selectOption(symbol);
+      await page.getByTestId('move-amount').fill('15');
+      await dragMoveRoute(page, 'external', 'reserve');
+      await page.getByTestId('move-confirm').first().click();
+      await expect
+        .poll(async () => getOnchainReserveBalance(page, moveEntityId, 1), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(beforeOnchainReserve);
+      await expect
+        .poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(beforeReserve);
+      reserveAfterE2R = await refreshReserveBalance(page, symbol);
+    });
+
+    await timedStep('move.execute-r2a', async () => {
+      const beforeAccount = await refreshAccountSpendableBalance(page, symbol);
+      await openMoveTab(page);
+      await page.getByTestId('move-asset-symbol').selectOption(symbol);
+      await page.getByTestId('move-amount').fill('5');
+      await chooseMoveRoute(page, 'reserve', 'account');
+      await page.getByTestId('move-confirm').first().click();
+      await expect
+        .poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(beforeAccount);
+      accountAfterR2A = await refreshAccountSpendableBalance(page, symbol);
+    });
+
+    await timedStep('move.execute-a2r', async () => {
+      const beforeReserve = await refreshReserveBalance(page, symbol);
+      await openMoveTab(page);
+      await page.getByTestId('move-asset-symbol').selectOption(symbol);
+      await page.getByTestId('move-amount').fill('2');
+      await chooseMoveRoute(page, 'account', 'reserve');
+      await page.getByTestId('move-confirm').first().click();
+      await expect
+        .poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(beforeReserve);
+      reserveAfterA2R = await refreshReserveBalance(page, symbol);
+      expect(reserveAfterA2R).toBeGreaterThan(beforeReserve);
+    });
+
+    await timedStep('move.execute-e2a', async () => {
+      const beforeAccount = await refreshAccountSpendableBalance(page, symbol);
+
+      await openMoveTab(page);
+      await page.getByTestId('move-asset-symbol').selectOption(symbol);
+      await page.getByTestId('move-amount').fill('3');
+      await chooseMoveRoute(page, 'external', 'account');
+      await page.getByTestId('move-confirm').first().click();
+      await expect
+        .poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(beforeAccount);
+      accountAfterE2A = await refreshAccountSpendableBalance(page, symbol);
+    });
+
+    await timedStep('move.execute-a2e', async () => {
+      const beforeExternal = await getRpcExternalBalance(page, symbol, eoaAddress);
+      await openMoveTab(page);
+      await page.getByTestId('move-asset-symbol').selectOption(symbol);
+      await page.getByTestId('move-amount').fill('1');
+      await chooseMoveRoute(page, 'account', 'external');
+      await page.getByTestId('move-confirm').first().click();
+      await expect
+        .poll(async () => getRpcExternalBalance(page, symbol, eoaAddress), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(beforeExternal);
+      externalAfterA2E = await getRpcExternalBalance(page, symbol, eoaAddress);
+      expect(externalAfterA2E).toBeGreaterThan(beforeExternal);
+    });
+
+    await timedStep('move.execute-e2e', async () => {
+      const aliceBefore = await getRpcExternalBalance(page, symbol, eoaAddress);
+      const bobBefore = await getRpcExternalBalance(page, symbol, bobSignerId);
+      await openMoveTab(page);
+      await page.getByTestId('move-asset-symbol').selectOption(symbol);
+      await page.getByTestId('move-amount').fill('1');
+      await chooseMoveRoute(page, 'external', 'external');
+      await page.getByTestId('move-external-recipient').fill(bobSignerId);
+      await page.getByTestId('move-confirm').first().click();
+      await expect
+        .poll(async () => getRpcExternalBalance(page, symbol, eoaAddress), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeLessThan(aliceBefore);
+      await expect
+        .poll(async () => getRpcExternalBalance(page, symbol, bobSignerId), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(bobBefore);
+    });
+
+    expect(reserveAfterE2R).toBeGreaterThan(0);
+    expect(accountAfterR2A).toBeGreaterThan(0);
+    expect(reserveAfterA2R).toBeGreaterThan(0);
+    expect(accountAfterE2A).toBeGreaterThan(0);
+    expect(externalAfterA2E).toBeGreaterThan(0);
   });
 
   test('manual settle queues R2C and C2R into local draft batch before broadcast', async ({ page }) => {

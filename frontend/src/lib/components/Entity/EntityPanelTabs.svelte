@@ -90,7 +90,7 @@
   type ViewTab = 'assets' | 'accounts' | 'more' | 'settings';
   type MoreTab = 'consensus' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance';
   type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'settle' | 'configure' | 'appearance';
-  type AssetWorkspaceTab = 'faucet' | 'e2r' | 'r2c' | 'c2r' | 'r2e' | 'send' | 'allow';
+  type AssetWorkspaceTab = 'faucet' | 'move' | 'e2r' | 'r2c' | 'c2r' | 'r2e' | 'send' | 'allow';
   type ConfigureWorkspaceTab = 'extend-credit' | 'request-credit' | 'collateral' | 'token';
 
   // Set initial tab based on action
@@ -377,6 +377,140 @@
     return { entityId, signerId, entityTxs };
   }
 
+  const MOVE_ENDPOINT_LABEL: Record<MoveEndpoint, string> = {
+    external: 'External',
+    reserve: 'Reserve',
+    account: 'Account',
+  };
+  const MOVE_ENDPOINTS: MoveEndpoint[] = ['external', 'reserve', 'account'];
+
+  function setMoveNodeRef(side: 'from' | 'to', endpoint: MoveEndpoint, node: HTMLButtonElement | null): void {
+    const key = `${side}:${endpoint}`;
+    if (node) {
+      moveNodeRefs.set(key, node);
+    } else {
+      moveNodeRefs.delete(key);
+    }
+  }
+
+  function moveNodeAction(
+    node: HTMLButtonElement,
+    params: { side: 'from' | 'to'; endpoint: MoveEndpoint },
+  ): { update: (next: { side: 'from' | 'to'; endpoint: MoveEndpoint }) => void; destroy: () => void } {
+    setMoveNodeRef(params.side, params.endpoint, node);
+    return {
+      update(next) {
+        setMoveNodeRef(params.side, params.endpoint, null);
+        setMoveNodeRef(next.side, next.endpoint, node);
+        params = next;
+      },
+      destroy() {
+        setMoveNodeRef(params.side, params.endpoint, null);
+      },
+    };
+  }
+
+  function getMoveNodeCenter(side: 'from' | 'to', endpoint: MoveEndpoint): { x: number; y: number } | null {
+    const rootRect = moveVisualRoot?.getBoundingClientRect();
+    const nodeRect = moveNodeRefs.get(`${side}:${endpoint}`)?.getBoundingClientRect();
+    if (!rootRect || !nodeRect) return null;
+    return {
+      x: nodeRect.left - rootRect.left + (nodeRect.width / 2),
+      y: nodeRect.top - rootRect.top + (nodeRect.height / 2),
+    };
+  }
+
+  function beginMoveDrag(endpoint: MoveEndpoint, event: PointerEvent): void {
+    moveDragSource = endpoint;
+    moveDragHoverTarget = null;
+    moveSelectedSource = endpoint;
+    moveDragPointer = { x: event.clientX, y: event.clientY };
+  }
+
+  function completeMoveSelection(target: MoveEndpoint): void {
+    const source = moveDragSource ?? moveSelectedSource;
+    if (!source) return;
+    moveFromEndpoint = source;
+    moveToEndpoint = target;
+    moveSelectedSource = source;
+    moveDragHoverTarget = null;
+    moveDragSource = null;
+  }
+
+  function setMoveTarget(endpoint: MoveEndpoint): void {
+    if (!moveSelectedSource) {
+      moveSelectedSource = endpoint;
+      moveFromEndpoint = endpoint;
+      return;
+    }
+    moveFromEndpoint = moveSelectedSource;
+    moveToEndpoint = endpoint;
+  }
+
+  function clearMoveDrag(): void {
+    moveDragSource = null;
+    moveDragHoverTarget = null;
+  }
+
+  function getMoveRouteKey(from: MoveEndpoint, to: MoveEndpoint): string {
+    return `${from}->${to}`;
+  }
+
+  function isMoveRouteSupported(from: MoveEndpoint, to: MoveEndpoint): boolean {
+    if (from === 'reserve' && to === 'reserve') return false;
+    return true;
+  }
+
+  function isMoveRouteRedirectOnly(from: MoveEndpoint, to: MoveEndpoint): boolean {
+    return from === 'account' && to === 'account';
+  }
+
+  function moveRouteSteps(from: MoveEndpoint, to: MoveEndpoint): string[] {
+    switch (getMoveRouteKey(from, to)) {
+      case 'external->reserve':
+        return ['Deposit to reserve'];
+      case 'reserve->account':
+        return ['Fund account from reserve'];
+      case 'account->reserve':
+        return ['Settle account back to reserve'];
+      case 'reserve->external':
+        return ['Withdraw reserve to wallet'];
+      case 'external->external':
+        return ['Send ERC20/native on-chain'];
+      case 'external->account':
+        return ['Deposit to reserve', 'Fund account from reserve'];
+      case 'account->external':
+        return ['Settle account back to reserve', 'Withdraw reserve to wallet'];
+      case 'account->account':
+        return ['Use Accounts -> Pay'];
+      default:
+        return ['Route not available'];
+    }
+  }
+
+  function moveRouteExecutionLabel(from: MoveEndpoint, to: MoveEndpoint): string {
+    switch (getMoveRouteKey(from, to)) {
+      case 'external->reserve':
+      case 'reserve->account':
+      case 'account->reserve':
+      case 'reserve->external':
+      case 'external->external':
+        return 'Single route';
+      case 'external->account':
+        return '2-step route';
+      case 'account->external':
+        return '2-step route';
+      case 'account->account':
+        return 'Off-chain payment';
+      default:
+        return 'Unavailable';
+    }
+  }
+
+  function moveNeedsExternalRecipient(from: MoveEndpoint, to: MoveEndpoint): boolean {
+    return from === 'external' && to === 'external';
+  }
+
   function getP2PRelayUrls(env: Env | null | undefined): string[] {
     const relayUrls = env?.runtimeState?.p2p?.relayUrls;
     return Array.isArray(relayUrls) ? relayUrls : [];
@@ -648,6 +782,19 @@
   let allowAssetSymbol = 'USDC';
   let allowAssetAmount = '';
   let allowAssetSpender = '';
+  type MoveEndpoint = 'external' | 'reserve' | 'account';
+  let moveFromEndpoint: MoveEndpoint = 'external';
+  let moveToEndpoint: MoveEndpoint = 'reserve';
+  let moveAssetSymbol = 'USDC';
+  let moveAmount = '';
+  let moveExternalRecipient = '';
+  let moveExecuting = false;
+  let moveSelectedSource: MoveEndpoint | null = null;
+  let moveDragSource: MoveEndpoint | null = null;
+  let moveDragHoverTarget: MoveEndpoint | null = null;
+  let moveDragPointer = { x: 0, y: 0 };
+  let moveVisualRoot: HTMLDivElement | null = null;
+  const moveNodeRefs = new Map<string, HTMLButtonElement>();
   let externalToReserveAmount = '';
   let reserveToCollateralAmount = '';
   let collateralToReserveAmount = '';
@@ -679,6 +826,9 @@
   let selectedReserveToExternalToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedSendAssetToken: ExternalToken | null = null;
   let selectedAllowAssetToken: ExternalToken | null = null;
+  let moveAssetOptions: ExternalToken[] = [];
+  let selectedMoveExternalToken: ExternalToken | null = null;
+  let selectedMoveTransferToken: (ExternalToken & { tokenId: number }) | null = null;
 
   type AssetLedgerRow = {
     symbol: string;
@@ -715,7 +865,24 @@
   }
 
   function sortExternalTokens(tokens: ExternalToken[]): ExternalToken[] {
-    return [...tokens].sort((left, right) => compareTokenSymbols(left.symbol, right.symbol));
+    const deduped = new Map<string, ExternalToken>();
+    for (const token of tokens) {
+      const key = String(token.symbol || '').trim().toUpperCase();
+      if (!key) continue;
+      const existing = deduped.get(key);
+      if (!existing) {
+        deduped.set(key, token);
+        continue;
+      }
+      deduped.set(key, {
+        ...existing,
+        address: existing.address || token.address,
+        decimals: existing.decimals ?? token.decimals,
+        tokenId: existing.tokenId ?? token.tokenId,
+        balance: existing.balance > token.balance ? existing.balance : token.balance,
+      });
+    }
+    return [...deduped.values()].sort((left, right) => compareTokenSymbols(left.symbol, right.symbol));
   }
 
   function choosePreferredAssetSymbol(tokens: ExternalToken[]): string {
@@ -1162,6 +1329,11 @@
   $: selectedReserveToExternalToken = findReserveTransferTokenBySymbol(reserveToExternalSymbol);
   $: selectedSendAssetToken = findExternalTokenBySymbol(sendAssetSymbol);
   $: selectedAllowAssetToken = findExternalTokenBySymbol(allowAssetSymbol);
+  $: moveAssetOptions = moveFromEndpoint === 'external' && moveToEndpoint === 'external'
+    ? externalTokens
+    : transferableAssetOptions;
+  $: selectedMoveExternalToken = findExternalTokenBySymbol(moveAssetSymbol);
+  $: selectedMoveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
   $: workspaceAccount = (() => {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
     if (!entityId || !workspaceAccountId || !replica?.state?.accounts) return null;
@@ -1280,6 +1452,14 @@
       ?? transferableAssetOptions[0]?.symbol
       ?? preferred;
     if (!findReserveTransferTokenBySymbol(allowAssetSymbol)) allowAssetSymbol = approvePreferred;
+    const movePreferred = moveFromEndpoint === 'external' && moveToEndpoint === 'external'
+      ? choosePreferredAssetSymbol(externalTokens)
+      : choosePreferredAssetSymbol(transferableAssetOptions);
+    if (
+      !moveAssetOptions.some((token) => token.symbol.toUpperCase() === String(moveAssetSymbol || '').trim().toUpperCase())
+    ) {
+      moveAssetSymbol = movePreferred;
+    }
   }
 
   $: if (pendingReserveFaucets.length > 0) {
@@ -1621,6 +1801,123 @@
     }
   }
 
+  function getMoveEndpointBalance(endpoint: MoveEndpoint): bigint {
+    switch (endpoint) {
+      case 'external':
+        return selectedMoveExternalToken?.balance ?? 0n;
+      case 'reserve':
+        return selectedMoveTransferToken ? (onchainReserves.get(selectedMoveTransferToken.tokenId) ?? 0n) : 0n;
+      case 'account':
+        return selectedMoveTransferToken ? getWorkspaceWithdrawableCollateral(selectedMoveTransferToken.tokenId) : 0n;
+      default:
+        return 0n;
+    }
+  }
+
+  function getMoveEndpointSubtitle(endpoint: MoveEndpoint): string {
+    if (endpoint === 'account') {
+      return workspaceAccountId ? resolveEntityName(workspaceAccountId, contacts) : 'Select account';
+    }
+    return endpoint === 'external' ? 'Signer wallet' : 'Entity reserve';
+  }
+
+  async function waitForMoveCondition(
+    predicate: () => boolean,
+    label: string,
+    timeoutMs = 20_000,
+    pollMs = 100,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate()) return;
+      await sleep(pollMs);
+    }
+    throw new Error(`${label} did not complete in time`);
+  }
+
+  async function executeMovePlan(): Promise<void> {
+    if (!isMoveRouteSupported(moveFromEndpoint, moveToEndpoint)) {
+      throw new Error('Selected route is not available');
+    }
+    if (isMoveRouteRedirectOnly(moveFromEndpoint, moveToEndpoint)) {
+      activeTab = 'accounts';
+      accountWorkspaceTab = 'send';
+      toasts.info('Use Accounts → Pay for off-chain account transfers');
+      return;
+    }
+
+    if (!moveAmount.trim()) {
+      throw new Error('Enter amount first');
+    }
+
+    if ((moveFromEndpoint === 'account' || moveToEndpoint === 'account') && !workspaceAccountId) {
+      throw new Error('Select account first');
+    }
+
+    moveExecuting = true;
+    try {
+      const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
+      if (routeKey === 'external->external') {
+        const token = requireExternalTokenBySymbol(moveAssetSymbol);
+        const recipient = moveExternalRecipient.trim();
+        if (!isAddress(recipient)) throw new Error('Recipient must be a valid EOA address');
+        sendAssetSymbol = moveAssetSymbol;
+        sendAssetAmount = moveAmount;
+        sendAssetRecipient = recipient;
+        await sendExternalAsset();
+        moveAmount = '';
+        moveExternalRecipient = '';
+        return;
+      }
+
+      const token = findReserveTransferTokenBySymbol(moveAssetSymbol);
+      if (!token) {
+        throw new Error('Select reserve-compatible asset first');
+      }
+      const amount = parsePositiveAssetAmount(moveAmount, token);
+      const reserveBefore = onchainReserves.get(token.tokenId) ?? 0n;
+
+      switch (routeKey) {
+        case 'external->reserve':
+          await depositToReserve(token, amount);
+          break;
+        case 'reserve->account':
+          await reserveToCollateral(token.tokenId, amount);
+          break;
+        case 'account->reserve':
+          await collateralToReserve(token.tokenId, amount);
+          break;
+        case 'reserve->external':
+          await withdrawReserveToExternal(token.tokenId, amount);
+          break;
+        case 'external->account':
+          await depositToReserve(token, amount);
+          await waitForMoveCondition(
+            () => (onchainReserves.get(token.tokenId) ?? 0n) >= reserveBefore + amount,
+            'External → Reserve',
+          );
+          await reserveToCollateral(token.tokenId, amount);
+          break;
+        case 'account->external':
+          await collateralToReserve(token.tokenId, amount);
+          await waitForMoveCondition(
+            () => (onchainReserves.get(token.tokenId) ?? 0n) >= reserveBefore + amount,
+            'Account → Reserve',
+            30_000,
+          );
+          await withdrawReserveToExternal(token.tokenId, amount);
+          break;
+        default:
+          throw new Error('Route not implemented');
+      }
+
+      moveAmount = '';
+      toasts.success(`Queued ${MOVE_ENDPOINT_LABEL[moveFromEndpoint]} → ${MOVE_ENDPOINT_LABEL[moveToEndpoint]}`);
+    } finally {
+      moveExecuting = false;
+    }
+  }
+
   // Reserve → Collateral (deposit reserves into selected bilateral account)
   async function reserveToCollateral(tokenId: number, amountOverride?: bigint) {
     const entityId = replica?.state?.entityId || tab.entityId;
@@ -1868,10 +2165,31 @@
     refreshBalances();
     applyDeepLinkViewFromUrl();
 
+    const handleMovePointer = (event: PointerEvent) => {
+      if (!moveDragSource) return;
+      moveDragPointer = { x: event.clientX, y: event.clientY };
+      const hovered = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-move-side="to"]');
+      const endpoint = hovered?.getAttribute?.('data-move-endpoint');
+      moveDragHoverTarget = endpoint === 'external' || endpoint === 'reserve' || endpoint === 'account'
+        ? endpoint
+        : null;
+    };
+    const handleMovePointerUp = () => {
+      if (moveDragSource && moveDragHoverTarget) {
+        completeMoveSelection(moveDragHoverTarget);
+      } else {
+        clearMoveDrag();
+      }
+    };
+
     const handleUrlNavigation = () => applyDeepLinkViewFromUrl();
+    window.addEventListener('pointermove', handleMovePointer);
+    window.addEventListener('pointerup', handleMovePointerUp);
     window.addEventListener('hashchange', handleUrlNavigation);
     window.addEventListener('popstate', handleUrlNavigation);
     return () => {
+      window.removeEventListener('pointermove', handleMovePointer);
+      window.removeEventListener('pointerup', handleMovePointerUp);
       window.removeEventListener('hashchange', handleUrlNavigation);
       window.removeEventListener('popstate', handleUrlNavigation);
     };
@@ -2748,6 +3066,9 @@
             </div>
           </div>
           <nav class="account-workspace-tabs asset-workspace-tabs" aria-label="Asset workspace">
+              <button class="account-workspace-tab" data-testid="asset-tab-move" class:active={assetWorkspaceTab === 'move'} on:click={() => assetWorkspaceTab = 'move'}>
+                <span>Move</span>
+              </button>
               <button class="account-workspace-tab" data-testid="asset-tab-faucet" class:active={assetWorkspaceTab === 'faucet'} on:click={() => assetWorkspaceTab = 'faucet'}>
                 <span>Faucet</span>
               </button>
@@ -2769,10 +3090,205 @@
               <button class="account-workspace-tab" data-testid="asset-tab-allow" class:active={assetWorkspaceTab === 'allow'} on:click={() => assetWorkspaceTab = 'allow'} title="Approve ERC20">
                 <span>Allow</span>
               </button>
-          </nav>
+            </nav>
 
             <section class="asset-action-card">
-              {#if assetWorkspaceTab === 'faucet'}
+              {#if assetWorkspaceTab === 'move'}
+                <h4 class="section-head">Move</h4>
+                <p class="muted">Drag from one balance bucket to another, review the route, then confirm.</p>
+                <div class="move-route-builder">
+                  <div class="move-form-grid">
+                    <label class="asset-field">
+                      <span>Asset</span>
+                      <select bind:value={moveAssetSymbol} data-testid="move-asset-symbol">
+                        {#each moveAssetOptions as token}
+                          <option value={token.symbol}>{token.symbol}</option>
+                        {/each}
+                      </select>
+                    </label>
+                    <label class="asset-field">
+                      <span>Amount</span>
+                      <input type="text" bind:value={moveAmount} placeholder="0.00" data-testid="move-amount" />
+                    </label>
+                  </div>
+
+                  <div class="move-selectors">
+                    <label class="asset-field">
+                      <span>From</span>
+                      <select bind:value={moveFromEndpoint} data-testid="move-from">
+                        <option value="external">External</option>
+                        <option value="reserve">Reserve</option>
+                        <option value="account">Account</option>
+                      </select>
+                    </label>
+                    <label class="asset-field">
+                      <span>To</span>
+                      <select bind:value={moveToEndpoint} data-testid="move-to">
+                        <option value="external">External</option>
+                        <option value="reserve">Reserve</option>
+                        <option value="account">Account</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  {#if moveFromEndpoint === 'account' || moveToEndpoint === 'account'}
+                    <div class="asset-field asset-field-wide">
+                      <EntityInput
+                        label="Account"
+                        value={workspaceAccountId}
+                        entities={workspaceAccountIds}
+                        {contacts}
+                        excludeId={replica?.state?.entityId || tab.entityId}
+                        placeholder="Select account..."
+                        disabled={!activeIsLive || workspaceAccountIds.length === 0}
+                        on:change={handleWorkspaceAccountChange}
+                      />
+                    </div>
+                  {/if}
+
+                  {#if moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint)}
+                    <label class="asset-field asset-field-wide">
+                      <span>Recipient EOA</span>
+                      <input type="text" bind:value={moveExternalRecipient} placeholder="0x..." data-testid="move-external-recipient" />
+                    </label>
+                  {/if}
+
+                  <div class="move-visual" bind:this={moveVisualRoot}>
+                    <div class="move-column">
+                      <div class="move-column-head">From</div>
+                      {#each MOVE_ENDPOINTS as endpoint}
+                        <button
+                          type="button"
+                          class="move-node"
+                          class:selected={moveFromEndpoint === endpoint}
+                          class:dragging={moveDragSource === endpoint}
+                          data-testid={`move-source-${endpoint}`}
+                          data-move-side="from"
+                          data-move-endpoint={endpoint}
+                          use:moveNodeAction={{ side: 'from', endpoint }}
+                          on:pointerdown={(event) => beginMoveDrag(endpoint, event)}
+                          on:click={() => {
+                            moveSelectedSource = endpoint;
+                            moveFromEndpoint = endpoint;
+                          }}
+                        >
+                          <span class="move-node-label">{MOVE_ENDPOINT_LABEL[endpoint]}</span>
+                          <span class="move-node-balance">
+                            {#if endpoint === 'external' && selectedMoveExternalToken}
+                              {formatAmount(getMoveEndpointBalance(endpoint), selectedMoveExternalToken.decimals)}
+                            {:else if selectedMoveTransferToken}
+                              {formatAmount(getMoveEndpointBalance(endpoint), selectedMoveTransferToken.decimals)}
+                            {:else}
+                              —
+                            {/if}
+                          </span>
+                          <span class="move-node-meta">{getMoveEndpointSubtitle(endpoint)}</span>
+                        </button>
+                      {/each}
+                    </div>
+
+                    <div class="move-column">
+                      <div class="move-column-head">To</div>
+                      {#each MOVE_ENDPOINTS as endpoint}
+                        <button
+                          type="button"
+                          class="move-node target"
+                          class:selected={moveToEndpoint === endpoint}
+                          class:hover-target={moveDragHoverTarget === endpoint}
+                          class:blocked={!isMoveRouteSupported(moveSelectedSource || moveFromEndpoint, endpoint)}
+                          data-testid={`move-target-${endpoint}`}
+                          data-move-side="to"
+                          data-move-endpoint={endpoint}
+                          use:moveNodeAction={{ side: 'to', endpoint }}
+                          on:pointerenter={() => {
+                            if (moveDragSource) moveDragHoverTarget = endpoint;
+                          }}
+                          on:pointerleave={() => {
+                            if (moveDragHoverTarget === endpoint) moveDragHoverTarget = null;
+                          }}
+                          on:pointerup={() => completeMoveSelection(endpoint)}
+                          on:click={() => setMoveTarget(endpoint)}
+                        >
+                          <span class="move-node-label">{MOVE_ENDPOINT_LABEL[endpoint]}</span>
+                          <span class="move-node-balance">
+                            {#if endpoint === 'external' && selectedMoveExternalToken}
+                              {formatAmount(getMoveEndpointBalance(endpoint), selectedMoveExternalToken.decimals)}
+                            {:else if selectedMoveTransferToken}
+                              {formatAmount(getMoveEndpointBalance(endpoint), selectedMoveTransferToken.decimals)}
+                            {:else}
+                              —
+                            {/if}
+                          </span>
+                          <span class="move-node-meta">{getMoveEndpointSubtitle(endpoint)}</span>
+                        </button>
+                      {/each}
+                    </div>
+
+                    {#if moveDragSource}
+                      {@const start = getMoveNodeCenter('from', moveDragSource)}
+                      {@const end = moveDragHoverTarget ? getMoveNodeCenter('to', moveDragHoverTarget) : (moveVisualRoot ? { x: moveDragPointer.x - moveVisualRoot.getBoundingClientRect().left, y: moveDragPointer.y - moveVisualRoot.getBoundingClientRect().top } : null)}
+                      {#if start && end}
+                        <svg class="move-drag-layer" aria-hidden="true">
+                          <defs>
+                            <marker id="move-arrowhead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+                              <path d="M0,0 L8,4 L0,8 Z" fill="rgba(251, 191, 36, 0.9)"></path>
+                            </marker>
+                          </defs>
+                          <line x1={start.x} y1={start.y} x2={end.x} y2={end.y} marker-end="url(#move-arrowhead)"></line>
+                        </svg>
+                      {/if}
+                    {/if}
+                  </div>
+
+                  <div class="move-summary" data-testid="move-route-summary">
+                    <div class="move-summary-pill">
+                      {MOVE_ENDPOINT_LABEL[moveFromEndpoint]} → {MOVE_ENDPOINT_LABEL[moveToEndpoint]}
+                    </div>
+                    <div class="move-summary-title">{moveRouteExecutionLabel(moveFromEndpoint, moveToEndpoint)}</div>
+                    <ol class="move-steps">
+                      {#each moveRouteSteps(moveFromEndpoint, moveToEndpoint) as step}
+                        <li>{step}</li>
+                      {/each}
+                    </ol>
+                  </div>
+
+                  <div class="asset-action-row">
+                    {#if isMoveRouteRedirectOnly(moveFromEndpoint, moveToEndpoint)}
+                      <button
+                        class="btn-table-action deposit"
+                        data-testid="move-go-pay"
+                        on:click={() => {
+                          activeTab = 'accounts';
+                          accountWorkspaceTab = 'send';
+                        }}
+                      >
+                        Go to Accounts → Pay
+                      </button>
+                    {:else}
+                      <button
+                        class="btn-table-action deposit"
+                        data-testid="move-confirm"
+                        on:click={async () => {
+                          try {
+                            await executeMovePlan();
+                          } catch (err) {
+                            toasts.error(`Move failed: ${toErrorMessage(err, 'Unknown error')}`);
+                          }
+                        }}
+                        disabled={
+                          moveExecuting ||
+                          !isMoveRouteSupported(moveFromEndpoint, moveToEndpoint) ||
+                          !moveAmount.trim() ||
+                          ((moveFromEndpoint === 'account' || moveToEndpoint === 'account') && !workspaceAccountId) ||
+                          (moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !moveExternalRecipient.trim())
+                        }
+                      >
+                        {moveExecuting ? 'Moving...' : 'Confirm Move'}
+                      </button>
+                    {/if}
+                  </div>
+                </div>
+              {:else if assetWorkspaceTab === 'faucet'}
                 <h4 class="section-head">Faucet</h4>
                 <p class="muted">Top up your EOA, reserve, or first available account for fast testing.</p>
                 <div class="asset-form-grid">
@@ -5523,6 +6039,144 @@
     border-radius: 10px;
   }
 
+  .move-route-builder {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 12px;
+  }
+
+  .move-selectors {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .move-visual {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    padding: 16px;
+    border: 1px solid rgba(251, 191, 36, 0.16);
+    border-radius: 14px;
+    background: radial-gradient(circle at top, rgba(251, 191, 36, 0.05), transparent 55%), rgba(12, 10, 9, 0.88);
+    overflow: hidden;
+  }
+
+  .move-column {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .move-column-head {
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #a8a29e;
+  }
+
+  .move-node {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-height: 88px;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(120, 113, 108, 0.34);
+    background: linear-gradient(180deg, rgba(28, 25, 23, 0.95), rgba(17, 15, 13, 0.95));
+    color: #fafaf9;
+    text-align: left;
+    cursor: grab;
+    transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+  }
+
+  .move-node:hover,
+  .move-node.selected,
+  .move-node.hover-target {
+    border-color: rgba(251, 191, 36, 0.55);
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.18), 0 10px 24px rgba(0, 0, 0, 0.25);
+    transform: translateY(-1px);
+  }
+
+  .move-node.dragging {
+    cursor: grabbing;
+  }
+
+  .move-node.blocked {
+    opacity: 0.45;
+  }
+
+  .move-node-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #f5f5f4;
+  }
+
+  .move-node-balance {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 16px;
+    color: #fbbf24;
+  }
+
+  .move-node-meta {
+    font-size: 11px;
+    color: #a8a29e;
+  }
+
+  .move-drag-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .move-drag-layer line {
+    stroke: rgba(251, 191, 36, 0.88);
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-dasharray: 8 6;
+  }
+
+  .move-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(120, 113, 108, 0.2);
+    background: rgba(12, 10, 9, 0.55);
+  }
+
+  .move-summary-pill {
+    align-self: flex-start;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(251, 191, 36, 0.08);
+    color: #fbbf24;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .move-summary-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fafaf9;
+  }
+
+  .move-steps {
+    margin: 0;
+    padding-left: 18px;
+    color: #d6d3d1;
+    font-size: 12px;
+    display: grid;
+    gap: 4px;
+  }
+
   .asset-form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5911,6 +6565,11 @@
     }
 
     .asset-form-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .move-selectors,
+    .move-visual {
       grid-template-columns: 1fr;
     }
 

@@ -52,7 +52,7 @@ async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string
   await page.getByRole('button', { name: /Custom/i }).click();
   await page.locator('#shards').fill(String(shards));
 
-  const openVaultButton = page.getByRole('button', { name: 'Open Vault', exact: true });
+  const openVaultButton = page.getByRole('button', { name: /Open (Wallet|Vault)/, exact: false });
   await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
   await openVaultButton.click();
 
