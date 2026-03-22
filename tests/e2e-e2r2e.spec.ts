@@ -78,9 +78,21 @@ async function openMoveTab(page: Page): Promise<void> {
   await expect(page.getByTestId('move-route-summary').first()).toBeVisible({ timeout: 20_000 });
 }
 
-async function chooseMoveRoute(page: Page, from: 'external' | 'reserve' | 'account', to: 'external' | 'reserve' | 'account'): Promise<void> {
-  await page.getByTestId('move-from').first().selectOption(from);
-  await page.getByTestId('move-to').first().selectOption(to);
+async function chooseMoveRoute(
+  page: Page,
+  from: 'external' | 'reserve' | 'account',
+  to: 'external' | 'reserve' | 'account',
+  order: 'source-first' | 'target-first' = 'source-first',
+): Promise<void> {
+  const source = page.getByTestId(`move-source-${from}`).first();
+  const target = page.getByTestId(`move-target-${to}`).first();
+  if (order === 'target-first') {
+    await target.click();
+    await source.click();
+    return;
+  }
+  await source.click();
+  await target.click();
 }
 
 async function dragMoveRoute(page: Page, from: 'external' | 'reserve' | 'account', to: 'external' | 'reserve' | 'account'): Promise<void> {
@@ -88,9 +100,16 @@ async function dragMoveRoute(page: Page, from: 'external' | 'reserve' | 'account
     const source = document.querySelector(`[data-testid="move-source-${from}"]`) as HTMLElement | null;
     const target = document.querySelector(`[data-testid="move-target-${to}"]`) as HTMLElement | null;
     if (!source || !target) throw new Error(`missing drag nodes for ${from} -> ${to}`);
-    source.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10 }));
-    target.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, clientX: 20, clientY: 20 }));
-    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 20, clientY: 20 }));
+    const sourceRect = source.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const startX = sourceRect.left + sourceRect.width / 2;
+    const startY = sourceRect.top + sourceRect.height / 2;
+    const endX = targetRect.left + targetRect.width / 2;
+    const endY = targetRect.top + targetRect.height / 2;
+    source.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: startX, clientY: startY }));
+    window.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: endX, clientY: endY }));
+    target.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX: endX, clientY: endY }));
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: endX, clientY: endY }));
   }, { from, to });
 }
 
@@ -646,10 +665,11 @@ test.describe('E2R2E External Reserve Route', () => {
       await chooseMoveRoute(page, 'reserve', 'reserve');
       await expect(page.getByTestId('move-confirm').first()).toBeDisabled();
 
-      await chooseMoveRoute(page, 'account', 'account');
+      await chooseMoveRoute(page, 'account', 'account', 'target-first');
       await expect(page.getByTestId('move-go-pay').first()).toBeVisible({ timeout: 20_000 });
 
       await openMoveTab(page);
+      await page.getByTestId('move-source-external').first().click();
       await page.getByTestId('move-asset-symbol').selectOption(symbol);
       await dragMoveRoute(page, 'external', 'reserve');
       await expect(page.getByTestId('move-route-summary').first()).toContainText('External → Reserve');
@@ -684,7 +704,7 @@ test.describe('E2R2E External Reserve Route', () => {
       await openMoveTab(page);
       await page.getByTestId('move-asset-symbol').selectOption(symbol);
       await page.getByTestId('move-amount').fill('5');
-      await chooseMoveRoute(page, 'reserve', 'account');
+      await chooseMoveRoute(page, 'reserve', 'account', 'target-first');
       await page.getByTestId('move-confirm').first().click();
       await expect
         .poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
