@@ -420,36 +420,68 @@
     };
   }
 
-  function beginMoveDrag(endpoint: MoveEndpoint, event: PointerEvent): void {
+  function beginMoveDrag(endpoint: MoveEndpoint, event: PointerEvent | MouseEvent): void {
+    event.preventDefault();
     moveDragSource = endpoint;
     moveDragHoverTarget = null;
     moveSelectedSource = endpoint;
     moveDragPointer = { x: event.clientX, y: event.clientY };
   }
 
+  function applyMoveRoute(from: MoveEndpoint, to: MoveEndpoint): void {
+    moveFromEndpoint = from;
+    moveToEndpoint = to;
+    moveSelectedSource = null;
+    moveSelectedTarget = null;
+    clearMoveDrag();
+  }
+
+  function setMoveSource(endpoint: MoveEndpoint): void {
+    if (moveSelectedTarget) {
+      if (isMoveRouteSupported(endpoint, moveSelectedTarget)) {
+        applyMoveRoute(endpoint, moveSelectedTarget);
+        return;
+      }
+      moveToEndpoint = moveSelectedTarget;
+    }
+    moveFromEndpoint = endpoint;
+    moveSelectedSource = endpoint;
+  }
+
   function completeMoveSelection(target: MoveEndpoint): void {
     const source = moveDragSource ?? moveSelectedSource;
     if (!source) return;
-    moveFromEndpoint = source;
     moveToEndpoint = target;
+    if (isMoveRouteSupported(source, target)) {
+      applyMoveRoute(source, target);
+      return;
+    }
     moveSelectedSource = source;
-    moveDragHoverTarget = null;
-    moveDragSource = null;
+    moveSelectedTarget = target;
+    clearMoveDrag();
   }
 
   function setMoveTarget(endpoint: MoveEndpoint): void {
-    if (!moveSelectedSource) {
-      moveSelectedSource = endpoint;
-      moveFromEndpoint = endpoint;
+    if (moveSelectedSource && isMoveRouteSupported(moveSelectedSource, endpoint)) {
+      applyMoveRoute(moveSelectedSource, endpoint);
       return;
     }
-    moveFromEndpoint = moveSelectedSource;
     moveToEndpoint = endpoint;
+    moveSelectedTarget = endpoint;
   }
 
   function clearMoveDrag(): void {
     moveDragSource = null;
     moveDragHoverTarget = null;
+  }
+
+  function resetMoveRoute(): void {
+    moveFromEndpoint = 'external';
+    moveToEndpoint = 'reserve';
+    moveSelectedSource = null;
+    moveSelectedTarget = null;
+    moveExternalRecipient = '';
+    clearMoveDrag();
   }
 
   function getMoveRouteKey(from: MoveEndpoint, to: MoveEndpoint): string {
@@ -790,6 +822,7 @@
   let moveExternalRecipient = '';
   let moveExecuting = false;
   let moveSelectedSource: MoveEndpoint | null = null;
+  let moveSelectedTarget: MoveEndpoint | null = null;
   let moveDragSource: MoveEndpoint | null = null;
   let moveDragHoverTarget: MoveEndpoint | null = null;
   let moveDragPointer = { x: 0, y: 0 };
@@ -1818,7 +1851,17 @@
     if (endpoint === 'account') {
       return workspaceAccountId ? resolveEntityName(workspaceAccountId, contacts) : 'Select account';
     }
-    return endpoint === 'external' ? 'Signer wallet' : 'Entity reserve';
+    return endpoint === 'external' ? 'Wallet' : 'Reserve';
+  }
+
+  function fillMoveMax(): void {
+    if (moveFromEndpoint === 'external' && selectedMoveExternalToken) {
+      moveAmount = formatTokenInputAmount(selectedMoveExternalToken.balance, selectedMoveExternalToken.decimals);
+      return;
+    }
+    if (selectedMoveTransferToken) {
+      moveAmount = formatTokenInputAmount(getMoveEndpointBalance(moveFromEndpoint), selectedMoveTransferToken.decimals);
+    }
   }
 
   async function waitForMoveCondition(
@@ -2165,7 +2208,7 @@
     refreshBalances();
     applyDeepLinkViewFromUrl();
 
-    const handleMovePointer = (event: PointerEvent) => {
+    const handleMovePointer = (event: PointerEvent | MouseEvent) => {
       if (!moveDragSource) return;
       moveDragPointer = { x: event.clientX, y: event.clientY };
       const hovered = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-move-side="to"]');
@@ -2185,11 +2228,15 @@
     const handleUrlNavigation = () => applyDeepLinkViewFromUrl();
     window.addEventListener('pointermove', handleMovePointer);
     window.addEventListener('pointerup', handleMovePointerUp);
+    window.addEventListener('mousemove', handleMovePointer);
+    window.addEventListener('mouseup', handleMovePointerUp);
     window.addEventListener('hashchange', handleUrlNavigation);
     window.addEventListener('popstate', handleUrlNavigation);
     return () => {
       window.removeEventListener('pointermove', handleMovePointer);
       window.removeEventListener('pointerup', handleMovePointerUp);
+      window.removeEventListener('mousemove', handleMovePointer);
+      window.removeEventListener('mouseup', handleMovePointerUp);
       window.removeEventListener('hashchange', handleUrlNavigation);
       window.removeEventListener('popstate', handleUrlNavigation);
     };
@@ -3094,47 +3141,42 @@
 
             <section class="asset-action-card">
               {#if assetWorkspaceTab === 'move'}
-                <h4 class="section-head">Move</h4>
-                <p class="muted">Drag from one balance bucket to another, review the route, then confirm.</p>
                 <div class="move-route-builder">
-                  <div class="move-form-grid">
-                    <label class="asset-field">
-                      <span>Asset</span>
-                      <select bind:value={moveAssetSymbol} data-testid="move-asset-symbol">
-                        {#each moveAssetOptions as token}
-                          <option value={token.symbol}>{token.symbol}</option>
-                        {/each}
-                      </select>
-                    </label>
-                    <label class="asset-field">
-                      <span>Amount</span>
+                  <div class="move-topline">
+                    <div class="asset-amount-shell move-amount-shell">
                       <input type="text" bind:value={moveAmount} placeholder="0.00" data-testid="move-amount" />
-                    </label>
-                  </div>
-
-                  <div class="move-selectors">
-                    <label class="asset-field">
-                      <span>From</span>
-                      <select bind:value={moveFromEndpoint} data-testid="move-from">
-                        <option value="external">External</option>
-                        <option value="reserve">Reserve</option>
-                        <option value="account">Account</option>
-                      </select>
-                    </label>
-                    <label class="asset-field">
-                      <span>To</span>
-                      <select bind:value={moveToEndpoint} data-testid="move-to">
-                        <option value="external">External</option>
-                        <option value="reserve">Reserve</option>
-                        <option value="account">Account</option>
-                      </select>
-                    </label>
+                      <div class="asset-inline-controls">
+                        <button
+                          type="button"
+                          class="asset-max-hint text-link"
+                          on:click={fillMoveMax}
+                          disabled={
+                            moveFromEndpoint === 'external'
+                              ? !selectedMoveExternalToken || selectedMoveExternalToken.balance <= 0n
+                              : !selectedMoveTransferToken || getMoveEndpointBalance(moveFromEndpoint) <= 0n
+                          }
+                        >
+                          {#if moveFromEndpoint === 'external' && selectedMoveExternalToken}
+                            {formatInlineFillAmount(selectedMoveExternalToken.balance, selectedMoveExternalToken.decimals)}
+                          {:else if selectedMoveTransferToken}
+                            {formatInlineFillAmount(getMoveEndpointBalance(moveFromEndpoint), selectedMoveTransferToken.decimals)}
+                          {:else}
+                            0
+                          {/if}
+                        </button>
+                        <select class="asset-token-select-inline compact move-token-select" bind:value={moveAssetSymbol} data-testid="move-asset-symbol">
+                          {#each moveAssetOptions as token}
+                            <option value={token.symbol}>{token.symbol}</option>
+                          {/each}
+                        </select>
+                      </div>
+                    </div>
                   </div>
 
                   {#if moveFromEndpoint === 'account' || moveToEndpoint === 'account'}
                     <div class="asset-field asset-field-wide">
                       <EntityInput
-                        label="Account"
+                        label={moveFromEndpoint === 'account' ? 'Source account' : 'Target account'}
                         value={workspaceAccountId}
                         entities={workspaceAccountIds}
                         {contacts}
@@ -3148,7 +3190,7 @@
 
                   {#if moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint)}
                     <label class="asset-field asset-field-wide">
-                      <span>Recipient EOA</span>
+                      <span>EOA</span>
                       <input type="text" bind:value={moveExternalRecipient} placeholder="0x..." data-testid="move-external-recipient" />
                     </label>
                   {/if}
@@ -3161,16 +3203,15 @@
                           type="button"
                           class="move-node"
                           class:selected={moveFromEndpoint === endpoint}
+                          class:pending={moveSelectedSource === endpoint}
                           class:dragging={moveDragSource === endpoint}
                           data-testid={`move-source-${endpoint}`}
                           data-move-side="from"
                           data-move-endpoint={endpoint}
                           use:moveNodeAction={{ side: 'from', endpoint }}
                           on:pointerdown={(event) => beginMoveDrag(endpoint, event)}
-                          on:click={() => {
-                            moveSelectedSource = endpoint;
-                            moveFromEndpoint = endpoint;
-                          }}
+                          on:mousedown={(event) => beginMoveDrag(endpoint, event)}
+                          on:click={() => setMoveSource(endpoint)}
                         >
                           <span class="move-node-label">{MOVE_ENDPOINT_LABEL[endpoint]}</span>
                           <span class="move-node-balance">
@@ -3194,6 +3235,7 @@
                           type="button"
                           class="move-node target"
                           class:selected={moveToEndpoint === endpoint}
+                          class:pending={moveSelectedTarget === endpoint}
                           class:hover-target={moveDragHoverTarget === endpoint}
                           class:blocked={!isMoveRouteSupported(moveSelectedSource || moveFromEndpoint, endpoint)}
                           data-testid={`move-target-${endpoint}`}
@@ -3203,10 +3245,17 @@
                           on:pointerenter={() => {
                             if (moveDragSource) moveDragHoverTarget = endpoint;
                           }}
+                          on:mouseenter={() => {
+                            if (moveDragSource) moveDragHoverTarget = endpoint;
+                          }}
                           on:pointerleave={() => {
                             if (moveDragHoverTarget === endpoint) moveDragHoverTarget = null;
                           }}
+                          on:mouseleave={() => {
+                            if (moveDragHoverTarget === endpoint) moveDragHoverTarget = null;
+                          }}
                           on:pointerup={() => completeMoveSelection(endpoint)}
+                          on:mouseup={() => completeMoveSelection(endpoint)}
                           on:click={() => setMoveTarget(endpoint)}
                         >
                           <span class="move-node-label">{MOVE_ENDPOINT_LABEL[endpoint]}</span>
@@ -3223,6 +3272,21 @@
                         </button>
                       {/each}
                     </div>
+
+                    {#if !moveDragSource}
+                      {@const committedStart = getMoveNodeCenter('from', moveFromEndpoint)}
+                      {@const committedEnd = getMoveNodeCenter('to', moveToEndpoint)}
+                      {#if committedStart && committedEnd}
+                        <svg class="move-drag-layer committed" aria-hidden="true">
+                          <defs>
+                            <marker id="move-arrowhead-committed" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+                              <path d="M0,0 L8,4 L0,8 Z" fill="rgba(245, 158, 11, 0.92)"></path>
+                            </marker>
+                          </defs>
+                          <line x1={committedStart.x} y1={committedStart.y} x2={committedEnd.x} y2={committedEnd.y} marker-end="url(#move-arrowhead-committed)"></line>
+                        </svg>
+                      {/if}
+                    {/if}
 
                     {#if moveDragSource}
                       {@const start = getMoveNodeCenter('from', moveDragSource)}
@@ -3245,11 +3309,11 @@
                       {MOVE_ENDPOINT_LABEL[moveFromEndpoint]} → {MOVE_ENDPOINT_LABEL[moveToEndpoint]}
                     </div>
                     <div class="move-summary-title">{moveRouteExecutionLabel(moveFromEndpoint, moveToEndpoint)}</div>
-                    <ol class="move-steps">
+                    <div class="move-steps">
                       {#each moveRouteSteps(moveFromEndpoint, moveToEndpoint) as step}
-                        <li>{step}</li>
+                        <span class="move-step-chip">{step}</span>
                       {/each}
-                    </ol>
+                    </div>
                   </div>
 
                   <div class="asset-action-row">
@@ -3265,6 +3329,14 @@
                         Go to Accounts → Pay
                       </button>
                     {:else}
+                      <button
+                        class="btn-table-action"
+                        type="button"
+                        data-testid="move-reset"
+                        on:click={resetMoveRoute}
+                      >
+                        Clear
+                      </button>
                       <button
                         class="btn-table-action deposit"
                         data-testid="move-confirm"
@@ -3283,7 +3355,7 @@
                           (moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !moveExternalRecipient.trim())
                         }
                       >
-                        {moveExecuting ? 'Moving...' : 'Confirm Move'}
+                        {moveExecuting ? 'Broadcasting...' : 'Sign & Broadcast'}
                       </button>
                     {/if}
                   </div>
@@ -6042,22 +6114,30 @@
   .move-route-builder {
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    margin-top: 12px;
+    gap: 12px;
   }
 
-  .move-selectors {
+  .move-topline {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .move-amount-shell {
+    min-height: 52px;
+    border-radius: 14px;
+  }
+
+  .move-token-select {
+    min-width: 92px;
   }
 
   .move-visual {
     position: relative;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
-    padding: 16px;
+    gap: 14px;
+    padding: 14px;
     border: 1px solid rgba(251, 191, 36, 0.16);
     border-radius: 14px;
     background: radial-gradient(circle at top, rgba(251, 191, 36, 0.05), transparent 55%), rgba(12, 10, 9, 0.88);
@@ -6067,7 +6147,7 @@
   .move-column {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     position: relative;
     z-index: 1;
   }
@@ -6076,16 +6156,16 @@
     font-size: 10px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #a8a29e;
+    color: #78716c;
   }
 
   .move-node {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 4px;
-    min-height: 88px;
-    padding: 14px;
+    gap: 3px;
+    min-height: 76px;
+    padding: 12px;
     border-radius: 12px;
     border: 1px solid rgba(120, 113, 108, 0.34);
     background: linear-gradient(180deg, rgba(28, 25, 23, 0.95), rgba(17, 15, 13, 0.95));
@@ -6093,10 +6173,13 @@
     text-align: left;
     cursor: grab;
     transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+    user-select: none;
+    touch-action: none;
   }
 
   .move-node:hover,
   .move-node.selected,
+  .move-node.pending,
   .move-node.hover-target {
     border-color: rgba(251, 191, 36, 0.55);
     box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.18), 0 10px 24px rgba(0, 0, 0, 0.25);
@@ -6142,6 +6225,12 @@
     stroke-dasharray: 8 6;
   }
 
+  .move-drag-layer.committed line {
+    stroke: rgba(245, 158, 11, 0.35);
+    stroke-width: 2.5;
+    stroke-dasharray: none;
+  }
+
   .move-summary {
     display: flex;
     flex-direction: column;
@@ -6169,12 +6258,18 @@
   }
 
   .move-steps {
-    margin: 0;
-    padding-left: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .move-step-chip {
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(120, 113, 108, 0.22);
+    background: rgba(28, 25, 23, 0.72);
     color: #d6d3d1;
     font-size: 12px;
-    display: grid;
-    gap: 4px;
   }
 
   .asset-form-grid {
@@ -6568,7 +6663,6 @@
       grid-template-columns: 1fr;
     }
 
-    .move-selectors,
     .move-visual {
       grid-template-columns: 1fr;
     }
