@@ -292,7 +292,7 @@ export async function createRuntime(page: Page, label: string, mnemonic: string)
     const mnemonicInput = page.locator('#mnemonic');
     await expect(mnemonicInput).toBeVisible({ timeout: 15_000 });
     await mnemonicInput.fill(normalizeMnemonic(mnemonic));
-    const openVaultButton = page.getByRole('button', { name: 'Open Vault', exact: true });
+    const openVaultButton = page.getByRole('button', { name: /Open (Wallet|Vault)/, exact: false });
     await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
     await openVaultButton.click();
     await waitForRuntimeReady(page, runtimeId);

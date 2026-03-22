@@ -161,7 +161,7 @@ export class RuntimeP2P {
   private onEntityInput: (from: string, input: RoutedEntityInput, timestamp?: number) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
   private clients: RuntimeWsClient[] = [];
-  private pendingByRuntime = new Map<string, { input: RoutedEntityInput, enqueuedAt: number }[]>();
+  private pendingByRuntime = new Map<string, { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[]>();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private retryInterval: ReturnType<typeof setInterval> | null = null;
   private visibilityHandler: (() => void) | null = null;
@@ -504,7 +504,7 @@ export class RuntimeP2P {
     this.connect();
   }
 
-  enqueueEntityInput(targetRuntimeId: string, input: RoutedEntityInput) {
+  enqueueEntityInput(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number) {
     try {
       failfastAssert(typeof targetRuntimeId === 'string' && targetRuntimeId.length > 0, 'P2P_TARGET_RUNTIME_INVALID', 'targetRuntimeId is required');
       failfastAssert(typeof input?.entityId === 'string' && input.entityId.length > 0, 'P2P_ENTITY_INPUT_INVALID', 'entity_input missing entityId', { targetRuntimeId });
@@ -532,7 +532,7 @@ export class RuntimeP2P {
     const client = this.getActiveClient();
     if (client && client.isOpen()) {
       try {
-        const sent = client.sendEntityInput(normalizedTargetRuntimeId, input);
+        const sent = client.sendEntityInput(normalizedTargetRuntimeId, input, ingressTimestamp);
         console.log(
           `[P2P] enqueueEntityInput attempt target=${normalizedTargetRuntimeId} entity=${input.entityId.slice(-4)} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
         );
@@ -564,7 +564,7 @@ export class RuntimeP2P {
     }
 
     const queue = this.pendingByRuntime.get(normalizedTargetRuntimeId) || [];
-    queue.push({ input, enqueuedAt: Date.now() });
+    queue.push({ input, enqueuedAt: Date.now(), ingressTimestamp });
     // Enforce queue size limit to prevent memory exhaustion
     while (queue.length > MAX_QUEUE_PER_RUNTIME) queue.shift();
     if (queue.length >= MAX_QUEUE_PER_RUNTIME) {
@@ -617,10 +617,10 @@ export class RuntimeP2P {
     const client = this.getActiveClient();
     if (!client || !client.isOpen()) return;
     for (const [targetRuntimeId, queue] of this.pendingByRuntime.entries()) {
-      const remaining: { input: RoutedEntityInput, enqueuedAt: number }[] = [];
+      const remaining: { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[] = [];
       for (const entry of queue) {
         try {
-          const sent = client.sendEntityInput(targetRuntimeId, entry.input);
+          const sent = client.sendEntityInput(targetRuntimeId, entry.input, entry.ingressTimestamp);
           console.log(
             `[P2P] flushPending target=${targetRuntimeId} entity=${entry.input.entityId.slice(-4)} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
           );

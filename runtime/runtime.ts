@@ -716,24 +716,6 @@ const enqueueRuntimeInputs = (
   }
 };
 
-const buildClockAdvanceEntityPings = (env: Env): RoutedEntityInput[] => {
-  if (!env.eReplicas || env.eReplicas.size === 0) return [];
-  const pings: RoutedEntityInput[] = [];
-  for (const [key, replica] of env.eReplicas) {
-    if (!replica?.isProposer) continue;
-    const crontab = replica.state?.crontabState;
-    if (!crontab) continue;
-    const hasHooks = (crontab.hooks?.size ?? 0) > 0;
-    const hasPeriodicWork = hubNeedsPeriodicWake(replica) && (crontab.tasks?.size ?? 0) > 0;
-    if (!hasHooks && !hasPeriodicWork) continue;
-    const entityId = replica.entityId || String(key).split(':')[0];
-    const signerId = replica.state?.config?.validators?.[0] || String(key).split(':')[1];
-    if (!entityId || !signerId) continue;
-    pings.push({ entityId, signerId, entityTxs: [] });
-  }
-  return pings;
-};
-
 export async function tryOpenInfraDb(env: Env): Promise<boolean> {
   const state = ensureRuntimeState(env);
   if (!state.infraDbOpenPromise) {
@@ -979,6 +961,42 @@ const hasDueEntityHooks = (env: Env): boolean => {
   return false;
 };
 
+const getEarliestWallClockDueTimestamp = (env: Env): number | null => {
+  if (!env.eReplicas || env.eReplicas.size === 0) return null;
+  if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return null;
+  const logicalNow = getRuntimeNowMs(env);
+  const wallClockNow = getWallClockMs();
+  let earliestDue = Infinity;
+
+  for (const [, replica] of env.eReplicas) {
+    const crontab = replica.state?.crontabState;
+    if (!crontab) continue;
+
+    const hooks = crontab.hooks;
+    if (hooks && hooks.size > 0) {
+      for (const hook of hooks.values()) {
+        if (hook.triggerAt > logicalNow && hook.triggerAt <= wallClockNow) {
+          earliestDue = Math.min(earliestDue, hook.triggerAt);
+        }
+      }
+    }
+
+    if (hubNeedsPeriodicWake(replica)) {
+      const tasks = crontab.tasks;
+      if (tasks && tasks.size > 0) {
+        for (const task of tasks.values()) {
+          const dueAt = task.lastRun + task.intervalMs;
+          if (dueAt > logicalNow && dueAt <= wallClockNow) {
+            earliestDue = Math.min(earliestDue, dueAt);
+          }
+        }
+      }
+    }
+  }
+
+  return Number.isFinite(earliestDue) ? earliestDue : null;
+};
+
 /**
  * Generate entity input pings for entities with due hooks OR periodic tasks.
  * Injects empty entityInputs so applyEntityInput runs → crontab fires → hooks/tasks execute.
@@ -986,11 +1004,11 @@ const hasDueEntityHooks = (env: Env): boolean => {
  * Critical for hub rebalance: after faucet payment creates uncollateralized debt,
  * hubRebalanceHandler (periodic) needs to fire even with no external inputs.
  */
-const generateHookPings = (env: Env): void => {
+const generateHookPings = (env: Env, nowMs = getRuntimeNowMs(env), queuedAt = env.timestamp ?? 0): void => {
   if (!env.eReplicas || env.eReplicas.size === 0) return;
   if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return;
-  const nowMs = getRuntimeNowMs(env);
   const mempool = ensureRuntimeMempool(env);
+  const pings: RoutedEntityInput[] = [];
 
   for (const [key, replica] of env.eReplicas) {
     const crontab = replica.state?.crontabState;
@@ -1030,11 +1048,11 @@ const generateHookPings = (env: Env): void => {
     const alreadyQueued = mempool.entityInputs.some(ei => ei.entityId === entityId);
     if (alreadyQueued) continue;
 
-    // Inject empty entityInput ping — just enough to trigger crontab
-    mempool.entityInputs.push({ entityId, signerId, entityTxs: [] });
-    if (mempool.queuedAt === undefined) {
-      mempool.queuedAt = env.timestamp ?? 0;
-    }
+    pings.push({ entityId, signerId, entityTxs: [] });
+  }
+
+  if (pings.length > 0) {
+    enqueueRuntimeInputs(env, pings, undefined, undefined, queuedAt);
   }
 };
 
@@ -1112,13 +1130,10 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
       }
       await waitForRuntimeLoopWakeOrTimeout(env, tickDelayMs);
       if (!running) break;
-      if (!hasRuntimeWork(env) && runtimeNeedsClockTicks(env)) {
-        const wallClockNow = getWallClockMs();
-        if (wallClockNow > (env.timestamp ?? 0)) {
-          const pings = buildClockAdvanceEntityPings(env);
-          if (pings.length > 0) {
-            enqueueRuntimeInputs(env, pings, undefined, undefined, wallClockNow);
-          }
+      if (!hasRuntimeWork(env)) {
+        const dueTimestamp = getEarliestWallClockDueTimestamp(env);
+        if (dueTimestamp !== null) {
+          generateHookPings(env, dueTimestamp, dueTimestamp);
         }
       }
     }
@@ -1329,22 +1344,6 @@ const getDeferredNetworkMeta = (env: Env): Map<string, { attempts: number; nextR
 
 const getRuntimeNowMs = (env: Env): number => env.timestamp ?? 0;
 
-const runtimeNeedsClockTicks = (env: Env): boolean => {
-  if (env.scenarioMode) return false;
-  if (!ensureRuntimeState(env).clockPrimed) return false;
-  if ((env.pendingNetworkOutputs?.length ?? 0) > 0) return true;
-  if (!env.eReplicas || env.eReplicas.size === 0) return false;
-
-  for (const replica of env.eReplicas.values()) {
-    const crontab = replica.state?.crontabState;
-    if (!crontab) continue;
-    if ((crontab.hooks?.size ?? 0) > 0) return true;
-    if (hubNeedsPeriodicWake(replica) && (crontab.tasks?.size ?? 0) > 0) return true;
-  }
-
-  return false;
-};
-
 const toDeliverableEntityInput = (
   output: RoutedEntityInput,
   targetRuntimeId: string,
@@ -1540,7 +1539,7 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
   const deferredOutputs: RoutedEntityInput[] = [];
   for (const { output, targetRuntimeId } of batchedOutputs) {
     if (directDispatch) {
-      const deliveredDirect = directDispatch(targetRuntimeId, output);
+      const deliveredDirect = directDispatch(targetRuntimeId, output, env.timestamp);
       if (deliveredDirect) {
         continue;
       }
@@ -1559,7 +1558,7 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
       );
     }
     try {
-      p2p.enqueueEntityInput(targetRuntimeId, output);
+      p2p.enqueueEntityInput(targetRuntimeId, output, env.timestamp);
     } catch (error) {
       env.warn('network', 'ROUTE_DEFER_SEND_FAILED', {
         entityId: output.entityId,
@@ -3524,6 +3523,10 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
         );
       }
     }
+    // Re-check due crontab work after apply. Hooks scheduled at the current
+    // logical timestamp should run on the next tick without importing wall
+    // clock time into runtime consensus.
+    generateHookPings(env);
     // BrowserVM trie is NOT serialized per-frame — it's J-layer state.
     // Only serialized on shutdown/page-unload for reload recovery.
 
