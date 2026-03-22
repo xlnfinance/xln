@@ -383,6 +383,7 @@
     account: 'Account',
   };
   const MOVE_ENDPOINTS: MoveEndpoint[] = ['external', 'reserve', 'account'];
+  let moveNodeLayoutVersion = 0;
 
   function setMoveNodeRef(side: 'from' | 'to', endpoint: MoveEndpoint, node: HTMLButtonElement | null): void {
     const key = `${side}:${endpoint}`;
@@ -391,6 +392,7 @@
     } else {
       moveNodeRefs.delete(key);
     }
+    moveNodeLayoutVersion += 1;
   }
 
   function moveNodeAction(
@@ -410,14 +412,43 @@
     };
   }
 
-  function getMoveNodeCenter(side: 'from' | 'to', endpoint: MoveEndpoint): { x: number; y: number } | null {
+  function getMoveNodeAnchor(side: 'from' | 'to', endpoint: MoveEndpoint): { x: number; y: number } | null {
     const rootRect = moveVisualRoot?.getBoundingClientRect();
-    const nodeRect = moveNodeRefs.get(`${side}:${endpoint}`)?.getBoundingClientRect();
-    if (!rootRect || !nodeRect) return null;
+    const effectiveWidth = rootRect?.width ?? 1200;
+    const effectiveHeight = rootRect?.height ?? 360;
+    const endpointIndex = Math.max(0, MOVE_ENDPOINTS.indexOf(endpoint));
+    const topInset = 96;
+    const bottomInset = 64;
+    const availableHeight = Math.max(180, effectiveHeight - topInset - bottomInset);
+    const rowHeight = availableHeight / MOVE_ENDPOINTS.length;
+    const fallbackAnchor = {
+      x: side === 'from'
+        ? (effectiveWidth * 0.485)
+        : (effectiveWidth * 0.515),
+      y: topInset + (rowHeight * endpointIndex) + (rowHeight / 2),
+    };
+    const node = moveNodeRefs.get(`${side}:${endpoint}`)
+      || moveVisualRoot?.querySelector<HTMLButtonElement>(`[data-move-side="${side}"][data-move-endpoint="${endpoint}"]`)
+      || null;
+    const nodeRect = node?.getBoundingClientRect();
+    if (!rootRect || !nodeRect) return fallbackAnchor;
     return {
-      x: nodeRect.left - rootRect.left + (nodeRect.width / 2),
+      x: side === 'from'
+        ? nodeRect.right - rootRect.left - 2
+        : nodeRect.left - rootRect.left + 2,
       y: nodeRect.top - rootRect.top + (nodeRect.height / 2),
     };
+  }
+
+  function buildMoveArrowPath(
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+  ): string {
+    const distance = Math.abs(end.x - start.x);
+    const curve = Math.max(22, Math.min(68, distance * 0.2));
+    const control1X = start.x + curve;
+    const control2X = end.x - curve;
+    return `M ${start.x} ${start.y} C ${control1X} ${start.y} ${control2X} ${end.y} ${end.x} ${end.y}`;
   }
 
   function beginMoveDrag(endpoint: MoveEndpoint, event: PointerEvent | MouseEvent): void {
@@ -425,7 +456,6 @@
     moveDragSource = endpoint;
     moveDragHoverTarget = null;
     moveSelectedSource = endpoint;
-    moveDragPointer = { x: event.clientX, y: event.clientY };
   }
 
   function applyMoveRoute(from: MoveEndpoint, to: MoveEndpoint): void {
@@ -481,6 +511,11 @@
     moveSelectedSource = null;
     moveSelectedTarget = null;
     moveExternalRecipient = '';
+    moveReserveRecipientEntityId = resolveSelfEntityId();
+    moveSourceAccountId = workspaceAccountId || workspaceAccountIds[0] || '';
+    moveTargetEntityId = resolveSelfEntityId();
+    moveTargetHubEntityId = workspaceAccountId || moveHubEntityOptions[0] || '';
+    moveProgressLabel = '';
     clearMoveDrag();
   }
 
@@ -489,32 +524,55 @@
   }
 
   function isMoveRouteSupported(from: MoveEndpoint, to: MoveEndpoint): boolean {
-    if (from === 'reserve' && to === 'reserve') return false;
     return true;
   }
 
-  function isMoveRouteRedirectOnly(from: MoveEndpoint, to: MoveEndpoint): boolean {
-    return from === 'account' && to === 'account';
-  }
-
   function moveRouteSteps(from: MoveEndpoint, to: MoveEndpoint): string[] {
+    const targetEntity = getCurrentMoveTargetEntityId();
+    const targetHub = getCurrentMoveTargetHubId();
+    const targetEntityLabel = targetEntity ? formatAddress(targetEntity) : 'recipient';
+    const targetHubLabel = targetHub ? formatAddress(targetHub) : 'hub';
+    const reserveRecipientLabel = moveReserveRecipientEntityId
+      ? formatAddress(moveReserveRecipientEntityId)
+      : 'recipient reserve';
     switch (getMoveRouteKey(from, to)) {
       case 'external->reserve':
-        return ['Deposit to reserve'];
+        return moveReserveRecipientEntityId && moveReserveRecipientEntityId !== resolveSelfEntityId()
+          ? [
+            '1. Deposit from wallet into your reserve',
+            `2. Transfer reserve balance to ${reserveRecipientLabel}`,
+          ]
+          : ['1. Deposit from wallet into your reserve'];
+      case 'reserve->reserve':
+        return [`1. Transfer reserve balance to ${reserveRecipientLabel}`];
       case 'reserve->account':
-        return ['Fund account from reserve'];
+        return [`1. Deposit from your reserve into ${targetEntityLabel} via hub ${targetHubLabel}`];
       case 'account->reserve':
-        return ['Settle account back to reserve'];
+        return moveReserveRecipientEntityId && moveReserveRecipientEntityId !== resolveSelfEntityId()
+          ? [
+            '1. Get hub proof and settle collateral back into your reserve',
+            `2. Transfer reserve balance to ${reserveRecipientLabel}`,
+          ]
+          : ['1. Get hub proof and settle collateral back into your reserve'];
       case 'reserve->external':
-        return ['Withdraw reserve to wallet'];
+        return ['1. Withdraw from your reserve to recipient EOA'];
       case 'external->external':
-        return ['Send ERC20/native on-chain'];
+        return ['1. Send token directly from wallet to recipient EOA'];
       case 'external->account':
-        return ['Deposit to reserve', 'Fund account from reserve'];
+        return [
+          '1. Deposit from wallet into your reserve',
+          `2. Deposit from your reserve into ${targetEntityLabel} via hub ${targetHubLabel}`,
+        ];
       case 'account->external':
-        return ['Settle account back to reserve', 'Withdraw reserve to wallet'];
+        return [
+          '1. Get hub proof and settle collateral back into your reserve',
+          '2. Withdraw from your reserve to recipient EOA',
+        ];
       case 'account->account':
-        return ['Use Accounts -> Pay'];
+        return [
+          '1. Get hub proof and settle collateral back into your reserve',
+          `2. Deposit from your reserve into ${targetEntityLabel} via hub ${targetHubLabel}`,
+        ];
       default:
         return ['Route not available'];
     }
@@ -524,23 +582,170 @@
     switch (getMoveRouteKey(from, to)) {
       case 'external->reserve':
       case 'reserve->account':
-      case 'account->reserve':
       case 'reserve->external':
       case 'external->external':
-        return 'Single route';
+        return '1 on-chain batch';
+      case 'reserve->reserve':
       case 'external->account':
-        return '2-step route';
+      case 'account->reserve':
       case 'account->external':
-        return '2-step route';
       case 'account->account':
-        return 'Off-chain payment';
+        return '2-step route';
       default:
         return 'Unavailable';
     }
   }
 
+  function moveRouteMeta(from: MoveEndpoint, to: MoveEndpoint): string {
+    const reserveRemote = moveNeedsReserveRecipient(from, to) && moveReserveRecipientEntityId.trim() && moveReserveRecipientEntityId !== resolveSelfEntityId();
+    switch (getMoveRouteKey(from, to)) {
+      case 'external->reserve':
+        return reserveRemote ? '1 wallet tx + 1 reserve batch • ~300k gas' : '1 wallet tx • ~140k gas';
+      case 'reserve->reserve':
+        return '1 reserve batch • ~160k gas';
+      case 'reserve->account':
+        return '1 reserve batch • ~180k gas';
+      case 'account->reserve':
+        return reserveRemote ? 'hub proof + 1 reserve batch • ~200k gas' : 'hub proof + 1 reserve batch • ~120k gas';
+      case 'reserve->external':
+        return '1 reserve batch • ~140k gas';
+      case 'external->external':
+        return '1 wallet tx';
+      case 'external->account':
+        return '1 wallet tx + 1 reserve batch • ~320k gas';
+      case 'account->external':
+        return 'hub proof + 1 reserve batch • ~260k gas';
+      case 'account->account':
+        return 'hub proof + 1 reserve batch • ~300k gas';
+      default:
+        return '';
+    }
+  }
+
   function moveNeedsExternalRecipient(from: MoveEndpoint, to: MoveEndpoint): boolean {
-    return from === 'external' && to === 'external';
+    return to === 'external';
+  }
+
+  function moveNeedsReserveRecipient(from: MoveEndpoint, to: MoveEndpoint): boolean {
+    return to === 'reserve';
+  }
+
+  function resolveSelfEoaAddress(): string {
+    const signerId = String(tab.signerId || '').trim();
+    if (isAddress(signerId)) return signerId;
+    const vaultId = String($activeVault?.id || '').trim();
+    if (isAddress(vaultId)) return vaultId;
+    return '';
+  }
+
+  function fillMoveSelfEoa(): void {
+    const own = resolveSelfEoaAddress();
+    if (own) moveExternalRecipient = own;
+  }
+
+  function resolveSelfEntityId(): string {
+    return String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+  }
+
+  function fillMoveSelfEntityId(): void {
+    const own = resolveSelfEntityId();
+    if (own) moveReserveRecipientEntityId = own;
+  }
+
+  function handleMoveReserveRecipientChange(event: CustomEvent<{ value?: string }>) {
+    moveReserveRecipientEntityId = String(event.detail?.value || '').trim().toLowerCase();
+  }
+
+  function normalizeMoveAccountId(raw: string): string {
+    const nextRaw = String(raw || '').trim();
+    const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextRaw.toLowerCase());
+    return matched || nextRaw;
+  }
+
+  function handleMoveSourceAccountChange(event: CustomEvent<{ value?: string }>) {
+    moveSourceAccountId = normalizeMoveAccountId(String(event.detail?.value || ''));
+  }
+
+  function handleMoveTargetEntityChange(event: CustomEvent<{ value?: string }>) {
+    const next = String(event.detail?.value || '').trim().toLowerCase();
+    if (next !== moveTargetEntityId) {
+      moveTargetCounterpartyManualOverride = false;
+      moveTargetHubEntityId = '';
+    }
+    moveTargetEntityId = next;
+  }
+
+  function handleMoveTargetHubChange(event: CustomEvent<{ value?: string }>) {
+    const next = String(event.detail?.value || '').trim().toLowerCase();
+    if (!next) {
+      moveTargetHubEntityId = '';
+      moveTargetCounterpartyManualOverride = false;
+      return;
+    }
+    const supported = moveHubEntityOptions.map((id) => String(id).trim().toLowerCase());
+    if (!supported.includes(next)) {
+      const confirmed = typeof window === 'undefined'
+        ? true
+        : window.confirm('This counterparty is not listed in the recipient profile. Funds may be lost if they do not support this account. Continue?');
+      if (!confirmed) return;
+      moveTargetCounterpartyManualOverride = true;
+    } else {
+      moveTargetCounterpartyManualOverride = false;
+    }
+    moveTargetHubEntityId = next;
+  }
+
+  function getCurrentMoveSourceAccountId(): string {
+    return String(moveSourceAccountId || workspaceAccountId || selectedAccountId || '').trim();
+  }
+
+  function getCurrentMoveTargetEntityId(): string {
+    return String(moveTargetEntityId || resolveSelfEntityId() || '').trim().toLowerCase();
+  }
+
+  function getCurrentMoveTargetHubId(): string {
+    return String(moveTargetHubEntityId || workspaceAccountId || selectedAccountId || '').trim().toLowerCase();
+  }
+
+  function getMoveAccountBalance(counterpartyEntityId: string): bigint {
+    if (!selectedMoveTransferToken || !counterpartyEntityId) return 0n;
+    return getAccountWithdrawableCollateral(counterpartyEntityId, selectedMoveTransferToken.tokenId);
+  }
+
+  function getMoveAggregateAccountBalance(): bigint {
+    if (!selectedMoveTransferToken) return 0n;
+    return workspaceAccountIds.reduce((total, accountId) => (
+      total + getAccountWithdrawableCollateral(accountId, selectedMoveTransferToken.tokenId)
+    ), 0n);
+  }
+
+  function getMoveLedgerRow(): AssetLedgerRow | null {
+    const symbol = String(moveAssetSymbol || '').trim().toUpperCase();
+    if (!symbol) return null;
+    return assetLedgerRows.find((row) => String(row.symbol || '').trim().toUpperCase() === symbol) ?? null;
+  }
+
+  function getMoveDisplayBalance(endpoint: MoveEndpoint): bigint {
+    const row = getMoveLedgerRow();
+    if (!row) return 0n;
+    switch (endpoint) {
+      case 'external':
+        return row.externalBalance ?? 0n;
+      case 'reserve':
+        return row.reserveBalance ?? 0n;
+      case 'account':
+        return row.accountBalance ?? 0n;
+      default:
+        return 0n;
+    }
+  }
+
+  function getMoveDisplayDecimals(): number {
+    const row = getMoveLedgerRow();
+    if (typeof row?.decimals === 'number' && row.decimals >= 0) return row.decimals;
+    if (typeof selectedMoveExternalToken?.decimals === 'number') return selectedMoveExternalToken.decimals;
+    if (typeof selectedMoveTransferToken?.decimals === 'number') return selectedMoveTransferToken.decimals;
+    return 18;
   }
 
   function getP2PRelayUrls(env: Env | null | undefined): string[] {
@@ -685,6 +890,73 @@
   $: if (!workspaceAccountId || !workspaceAccountIds.includes(workspaceAccountId)) {
     workspaceAccountId = workspaceAccountIds[0] || '';
   }
+  $: if (assetWorkspaceTab === 'move' && workspaceAccountIds.length > 0) {
+    const tokenId = selectedMoveTransferToken?.tokenId;
+    const requestedAmount = tokenId ? (() => {
+      try {
+        return moveAmount.trim() ? parsePositiveAssetAmount(moveAmount, selectedMoveTransferToken!) : 0n;
+      } catch {
+        return 0n;
+      }
+    })() : 0n;
+    const currentSourceOk = moveSourceAccountId && workspaceAccountIds.includes(moveSourceAccountId)
+      ? (
+          moveFromEndpoint !== 'account'
+          || !tokenId
+          || getAccountWithdrawableCollateral(moveSourceAccountId, tokenId) >= requestedAmount
+          || (requestedAmount <= 0n && getAccountWithdrawableCollateral(moveSourceAccountId, tokenId) > 0n)
+        )
+      : false;
+    if (moveFromEndpoint === 'account' && !currentSourceOk) {
+      const preferred = tokenId
+        ? (
+            workspaceAccountIds.find((id) => getAccountWithdrawableCollateral(id, tokenId) >= requestedAmount && requestedAmount > 0n)
+            || workspaceAccountIds.find((id) => getAccountWithdrawableCollateral(id, tokenId) > 0n)
+            || workspaceAccountIds[0]
+          )
+        : workspaceAccountIds[0];
+      moveSourceAccountId = preferred || '';
+    }
+  }
+  $: if (assetWorkspaceTab === 'move' && moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !moveExternalRecipient.trim()) {
+    moveExternalRecipient = resolveSelfEoaAddress();
+  }
+  $: if (assetWorkspaceTab === 'move' && moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint) && !moveReserveRecipientEntityId.trim()) {
+    moveReserveRecipientEntityId = resolveSelfEntityId();
+  }
+  $: if (assetWorkspaceTab === 'move' && moveToEndpoint === 'account' && !moveTargetEntityId.trim()) {
+    moveTargetEntityId = resolveSelfEntityId();
+  }
+  $: moveHubEntityOptions = (() => {
+    const ids = new Map<string, string>();
+    const add = (candidate: unknown) => {
+      const raw = String(candidate || '').trim();
+      if (!isFullEntityId(raw)) return;
+      const normalized = raw.toLowerCase();
+      if (!ids.has(normalized)) ids.set(normalized, normalized);
+    };
+    const recipientEntityId = String(moveTargetEntityId || resolveSelfEntityId() || '').trim().toLowerCase();
+    const recipientProfile = getGossipProfiles(activeEnv).find(
+      (profile: GossipProfile) => String(profile.entityId || '').trim().toLowerCase() === recipientEntityId,
+    );
+    for (const account of Array.isArray(recipientProfile?.accounts) ? recipientProfile!.accounts : []) {
+      add(account?.counterpartyId);
+    }
+    if (recipientEntityId === resolveSelfEntityId()) {
+      for (const id of workspaceAccountIds) add(id);
+    }
+    return Array.from(ids.values()).sort();
+  })();
+  $: if (assetWorkspaceTab === 'move' && moveToEndpoint === 'account') {
+    const normalizedTargetHub = String(moveTargetHubEntityId || '').trim().toLowerCase();
+    if (!normalizedTargetHub) {
+      moveTargetHubEntityId = workspaceAccountId || moveHubEntityOptions[0] || '';
+    } else if (!moveTargetCounterpartyManualOverride && moveHubEntityOptions.length > 0 && !moveHubEntityOptions.includes(normalizedTargetHub)) {
+      moveTargetHubEntityId = workspaceAccountId && moveHubEntityOptions.includes(workspaceAccountId)
+        ? workspaceAccountId
+        : moveHubEntityOptions[0] || '';
+    }
+  }
   $: configureTokenOptions = (() => {
     const ids = new Set<number>([1, 2, 3]);
     for (const tokenId of replica?.state?.reserves?.keys?.() || []) {
@@ -726,6 +998,8 @@
   let newContactName = '';
   let newContactId = '';
   let openAccountEntityOptions: string[] = [];
+  let moveEntityOptions: string[] = [];
+  let moveHubEntityOptions: string[] = [];
 
   function isFullEntityId(value: string): boolean {
     return /^0x[0-9a-fA-F]{64}$/.test(String(value || '').trim());
@@ -757,6 +1031,21 @@
     for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add(profile.entityId);
     for (const contact of contacts) add(contact.entityId);
     return Array.from(ids.values()).sort();
+  })();
+
+  $: moveEntityOptions = (() => {
+    const ids = new Map<string, string>();
+    const selfId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    const add = (candidate: unknown) => {
+      const raw = String(candidate || '').trim();
+      if (!isFullEntityId(raw)) return;
+      const normalized = raw.toLowerCase();
+      if (!ids.has(normalized)) ids.set(normalized, normalized);
+    };
+
+    if (selfId) add(selfId);
+    for (const id of openAccountEntityOptions) add(id);
+    return Array.from(ids.values());
   })();
 
   // Governance/Profile settings (REA flow: profile-update entityTx)
@@ -820,13 +1109,19 @@
   let moveAssetSymbol = 'USDC';
   let moveAmount = '';
   let moveExternalRecipient = '';
+  let moveReserveRecipientEntityId = '';
+  let moveSourceAccountId = '';
+  let moveTargetEntityId = '';
+  let moveTargetHubEntityId = '';
+  let moveTargetCounterpartyManualOverride = false;
   let moveExecuting = false;
+  let moveProgressLabel = '';
   let moveSelectedSource: MoveEndpoint | null = null;
   let moveSelectedTarget: MoveEndpoint | null = null;
   let moveDragSource: MoveEndpoint | null = null;
   let moveDragHoverTarget: MoveEndpoint | null = null;
-  let moveDragPointer = { x: 0, y: 0 };
   let moveVisualRoot: HTMLDivElement | null = null;
+  let previousMoveVisualRoot: HTMLDivElement | null = null;
   const moveNodeRefs = new Map<string, HTMLButtonElement>();
   let externalToReserveAmount = '';
   let reserveToCollateralAmount = '';
@@ -844,10 +1139,18 @@
     baselineReserve: bigint;
   } | null = null;
   let resolvingAssetBridgeSync = false;
+  type MovePostSettleOp =
+    | { type: 'none' }
+    | { type: 'reserve_to_reserve'; recipientEntityId: string }
+    | { type: 'reserve_to_external'; recipientEoa: string }
+    | { type: 'reserve_to_collateral'; targetEntityId: string; counterpartyEntityId: string };
   let pendingAssetAutoC2R: {
     counterpartyEntityId: string;
     tokenId: number;
     symbol: string;
+    amount: bigint;
+    postSettleOp: MovePostSettleOp;
+    broadcast: boolean;
   } | null = null;
   let resolvingAssetAutoC2R = false;
   let externalFetchSeq = 0;
@@ -862,6 +1165,11 @@
   let moveAssetOptions: ExternalToken[] = [];
   let selectedMoveExternalToken: ExternalToken | null = null;
   let selectedMoveTransferToken: (ExternalToken & { tokenId: number }) | null = null;
+
+  $: if (moveVisualRoot !== previousMoveVisualRoot) {
+    previousMoveVisualRoot = moveVisualRoot;
+    moveNodeLayoutVersion += 1;
+  }
 
   type AssetLedgerRow = {
     symbol: string;
@@ -950,18 +1258,29 @@
     return parsed;
   }
 
-  function getWorkspaceDerivedDelta(tokenId: number) {
-    const account = workspaceAccount;
+  function getDerivedDeltaForAccount(counterpartyEntityId: string, tokenId: number) {
+    const account = counterpartyEntityId ? findLocalAccountByCounterparty(String(replica?.state?.entityId || tab.entityId || ''), replica?.state?.accounts, counterpartyEntityId) : null;
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
-    const counterpartyId = String(workspaceAccountId || '').trim().toLowerCase();
+    const counterpartyId = String(counterpartyEntityId || '').trim().toLowerCase();
     if (!account || !entityId || !counterpartyId || !activeXlnFunctions?.deriveDelta) return null;
     const delta = account.deltas?.get?.(tokenId);
     if (!delta) return null;
     return activeXlnFunctions.deriveDelta(delta, entityId < counterpartyId);
   }
 
+  function getWorkspaceDerivedDelta(tokenId: number) {
+    return getDerivedDeltaForAccount(workspaceAccountId, tokenId);
+  }
+
   function getWorkspaceWithdrawableCollateral(tokenId: number): bigint {
     const derived = getWorkspaceDerivedDelta(tokenId);
+    if (!derived) return 0n;
+    const hold = derived.outTotalHold ?? 0n;
+    return derived.outCollateral > hold ? derived.outCollateral - hold : 0n;
+  }
+
+  function getAccountWithdrawableCollateral(counterpartyEntityId: string, tokenId: number): bigint {
+    const derived = getDerivedDeltaForAccount(counterpartyEntityId, tokenId);
     if (!derived) return 0n;
     const hold = derived.outTotalHold ?? 0n;
     return derived.outCollateral > hold ? derived.outCollateral - hold : 0n;
@@ -1023,7 +1342,7 @@
     return new EthersWallet(hexlify(privKey)).address;
   }
 
-  async function withdrawReserveToExternal(tokenId: number, amountOverride?: bigint): Promise<void> {
+  async function withdrawReserveToExternal(tokenId: number, amountOverride?: bigint, recipientEoaOverride?: string): Promise<void> {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
     if (!activeIsLive) {
@@ -1038,7 +1357,7 @@
       if (!env) throw new Error('Environment not ready');
       const signerId = requireSignerIdForEntity(env, entityId, 'reserve-to-external');
       const amount = amountOverride ?? parsePositiveReserveExternalAmount(tokenId);
-      const externalAddress = await resolveCurrentExternalAddress();
+      const externalAddress = recipientEoaOverride || await resolveCurrentExternalAddress();
       const receivingEntity = zeroPadValue(externalAddress, 32).toLowerCase();
 
       await enqueueEntityInputs(env, [{
@@ -1073,6 +1392,36 @@
       withdrawingExternalToken = null;
     } finally {
     }
+  }
+
+  async function reserveToReserve(tokenId: number, amount: bigint, recipientEntityIdOverride?: string): Promise<void> {
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    if (!entityId) return;
+    if (!activeIsLive) throw new Error('Reserve transfer requires LIVE mode');
+    const recipientEntityId = String(recipientEntityIdOverride || moveReserveRecipientEntityId || '').trim().toLowerCase();
+    if (!recipientEntityId) throw new Error('Select recipient entity');
+    if (recipientEntityId === entityId) throw new Error('Recipient entity must be different from self');
+    const env = activeEnv;
+    if (!env) throw new Error('Environment not ready');
+    const signerId = requireSignerIdForEntity(env, entityId, 'reserve-to-reserve');
+    await enqueueEntityInputs(env, [{
+      entityId,
+      signerId,
+      entityTxs: [
+        {
+          type: 'reserve_to_reserve',
+          data: {
+            toEntityId: recipientEntityId,
+            tokenId,
+            amount,
+          },
+        },
+        {
+          type: 'j_broadcast',
+          data: {},
+        },
+      ],
+    }]);
   }
 
   async function faucetReserves(tokenId: number = 1, symbolHint?: string) {
@@ -1329,19 +1678,14 @@
             if (!env || !entityId) throw new Error('Environment not ready');
             const signerId = resolveEntitySigner(entityId, 'asset-c2r-auto-execute');
             await enqueueEntityInputs(env, [
-              buildEntityInput(entityId, signerId, [
-                {
-                  type: 'settle_execute' as const,
-                  data: { counterpartyEntityId: pending.counterpartyEntityId },
-                },
-                {
-                  type: 'j_broadcast' as const,
-                  data: {},
-                },
-              ]),
+              buildEntityInput(entityId, signerId, buildMovePostSettleTxs(entityId, pending)),
             ]);
             collateralToReserveAmount = '';
-            toasts.info(`Collateral → Reserve submitted for ${pending.symbol}. Waiting for on-chain update...`);
+            toasts.info(
+              pending.broadcast
+                ? `Collateral → Reserve submitted for ${pending.symbol}. Waiting for on-chain update...`
+                : `Collateral → Reserve added to draft batch for ${pending.symbol}.`,
+            );
           } catch (err) {
             console.error('[EntityPanel] Asset C→R auto-execute failed:', err);
             toasts.error(`Collateral → Reserve failed: ${toErrorMessage(err, 'Unknown error')}`);
@@ -1768,9 +2112,15 @@
     }
   }
 
-  async function collateralToReserve(tokenId: number, amount: bigint): Promise<void> {
+  async function collateralToReserve(
+    tokenId: number,
+    amount: bigint,
+    counterpartyEntityIdOverride?: string,
+    postSettleOp: MovePostSettleOp = { type: 'none' },
+    broadcast = true,
+  ): Promise<void> {
     const entityId = replica?.state?.entityId || tab.entityId;
-    const counterpartyEntityId = String(workspaceAccountId || '').trim();
+    const counterpartyEntityId = String(counterpartyEntityIdOverride || workspaceAccountId || '').trim();
     if (!entityId) return;
     if (!counterpartyEntityId) {
       toasts.error('Select an account first');
@@ -1809,6 +2159,9 @@
         counterpartyEntityId,
         tokenId,
         symbol: info.symbol,
+        amount,
+        postSettleOp,
+        broadcast,
       };
       collateralFundingToken = info.symbol;
       toasts.info(`Collateral → Reserve proposed for ${info.symbol}. Waiting for counterparty signature...`);
@@ -1841,27 +2194,23 @@
       case 'reserve':
         return selectedMoveTransferToken ? (onchainReserves.get(selectedMoveTransferToken.tokenId) ?? 0n) : 0n;
       case 'account':
-        return selectedMoveTransferToken ? getWorkspaceWithdrawableCollateral(selectedMoveTransferToken.tokenId) : 0n;
+        return getMoveAccountBalance(getCurrentMoveSourceAccountId());
       default:
         return 0n;
     }
   }
 
-  function getMoveEndpointSubtitle(endpoint: MoveEndpoint): string {
-    if (endpoint === 'account') {
-      return workspaceAccountId ? resolveEntityName(workspaceAccountId, contacts) : 'Select account';
-    }
-    return endpoint === 'external' ? 'Wallet' : 'Reserve';
+  function fillMoveMax(): void {
+    const decimals = getMoveDisplayDecimals();
+    moveAmount = formatTokenInputAmount(getMoveDisplayBalance(moveFromEndpoint), decimals);
   }
 
-  function fillMoveMax(): void {
-    if (moveFromEndpoint === 'external' && selectedMoveExternalToken) {
-      moveAmount = formatTokenInputAmount(selectedMoveExternalToken.balance, selectedMoveExternalToken.decimals);
-      return;
-    }
-    if (selectedMoveTransferToken) {
-      moveAmount = formatTokenInputAmount(getMoveEndpointBalance(moveFromEndpoint), selectedMoveTransferToken.decimals);
-    }
+  function clearMoveComposer(): void {
+    resetMoveRoute();
+  }
+
+  function setMoveProgress(label: string): void {
+    moveProgressLabel = label;
   }
 
   async function waitForMoveCondition(
@@ -1870,6 +2219,7 @@
     timeoutMs = 20_000,
     pollMs = 100,
   ): Promise<void> {
+    setMoveProgress(label);
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (predicate()) return;
@@ -1878,38 +2228,275 @@
     throw new Error(`${label} did not complete in time`);
   }
 
+  function buildMovePostSettleTxs(entityId: string, pending: NonNullable<typeof pendingAssetAutoC2R>): EntityTx[] {
+    const entityTxs: EntityTx[] = [
+      {
+        type: 'settle_execute' as const,
+        data: { counterpartyEntityId: pending.counterpartyEntityId },
+      },
+    ];
+    if (pending.postSettleOp.type === 'reserve_to_reserve') {
+      entityTxs.push({
+        type: 'reserve_to_reserve' as const,
+        data: {
+          toEntityId: pending.postSettleOp.recipientEntityId,
+          tokenId: pending.tokenId,
+          amount: pending.amount,
+        },
+      });
+    }
+    if (pending.postSettleOp.type === 'reserve_to_external') {
+      entityTxs.push({
+        type: 'reserve_to_external' as const,
+        data: {
+          receivingEntity: zeroPadValue(pending.postSettleOp.recipientEoa, 32).toLowerCase(),
+          tokenId: pending.tokenId,
+          amount: pending.amount,
+        },
+      });
+    }
+    if (pending.postSettleOp.type === 'reserve_to_collateral') {
+      entityTxs.push({
+        type: 'deposit_collateral' as const,
+        data: {
+          counterpartyId: pending.postSettleOp.counterpartyEntityId,
+          ...(pending.postSettleOp.targetEntityId !== String(entityId).trim().toLowerCase()
+            ? { receivingEntityId: pending.postSettleOp.targetEntityId }
+            : {}),
+          tokenId: pending.tokenId,
+          amount: pending.amount,
+        },
+      });
+    }
+    if (pending.broadcast) {
+      entityTxs.push({
+        type: 'j_broadcast' as const,
+        data: {},
+      });
+    }
+    return entityTxs;
+  }
+
+  function canAddMoveToExistingBatch(): boolean {
+    const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
+    return routeKey === 'reserve->reserve'
+      || routeKey === 'reserve->external'
+      || routeKey === 'reserve->account'
+      || routeKey === 'account->reserve'
+      || routeKey === 'account->external'
+      || routeKey === 'account->account';
+  }
+
+  async function queueReserveToReserveDraft(
+    tokenId: number,
+    amount: bigint,
+    recipientEntityIdOverride?: string,
+  ): Promise<void> {
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    if (!entityId) return;
+    if (!activeIsLive) throw new Error('Add to batch requires LIVE mode');
+    const recipientEntityId = String(recipientEntityIdOverride || moveReserveRecipientEntityId || '').trim().toLowerCase();
+    if (!recipientEntityId) throw new Error('Select recipient entity');
+    if (recipientEntityId === entityId) throw new Error('Recipient entity must be different from self');
+    const env = activeEnv;
+    if (!env) throw new Error('Environment not ready');
+    const signerId = requireSignerIdForEntity(env, entityId, 'move-reserve-to-reserve-draft');
+    await enqueueEntityInputs(env, [{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'reserve_to_reserve' as const,
+        data: {
+          toEntityId: recipientEntityId,
+          tokenId,
+          amount,
+        },
+      }],
+    }]);
+  }
+
+  async function queueReserveToExternalDraft(
+    tokenId: number,
+    amount: bigint,
+    recipientEoaOverride?: string,
+  ): Promise<void> {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    if (!entityId) return;
+    if (!activeIsLive) throw new Error('Add to batch requires LIVE mode');
+    const env = activeEnv;
+    if (!env) throw new Error('Environment not ready');
+    const signerId = requireSignerIdForEntity(env, entityId, 'move-reserve-to-external-draft');
+    const externalAddress = recipientEoaOverride || await resolveCurrentExternalAddress();
+    if (!isAddress(externalAddress)) throw new Error('Recipient must be a valid EOA address');
+    const receivingEntity = zeroPadValue(externalAddress, 32).toLowerCase();
+    await enqueueEntityInputs(env, [{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'reserve_to_external' as const,
+        data: {
+          receivingEntity,
+          tokenId,
+          amount,
+        },
+      }],
+    }]);
+  }
+
+  async function queueReserveToCollateralDraft(
+    tokenId: number,
+    amount: bigint,
+    counterpartyEntityIdOverride?: string,
+    receivingEntityIdOverride?: string,
+  ): Promise<void> {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const signerId = resolveEntitySigner(entityId, 'move-reserve-to-account-draft');
+    const counterpartyEntityId = String(counterpartyEntityIdOverride || getCurrentMoveTargetHubId() || workspaceAccountId || selectedAccountId || '').trim();
+    const receivingEntityId = String(receivingEntityIdOverride || entityId || '').trim().toLowerCase();
+    if (!entityId || !signerId) return;
+    if (!counterpartyEntityId) throw new Error('Select account first');
+    if (!activeIsLive) throw new Error('Add to batch requires LIVE mode');
+
+    const accounts = replica?.state?.accounts;
+    if (receivingEntityId === String(entityId).trim().toLowerCase() && (!accounts || !findLocalAccountByCounterparty(entityId, accounts, counterpartyEntityId))) {
+      throw new Error('No account found for selected counterparty');
+    }
+
+    const env = activeEnv;
+    if (!env) throw new Error('Environment not ready');
+    await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
+      type: 'deposit_collateral' as const,
+      data: {
+        counterpartyId: counterpartyEntityId,
+        ...(receivingEntityId !== String(entityId).trim().toLowerCase() ? { receivingEntityId } : {}),
+        tokenId,
+        amount,
+      },
+    }])]);
+  }
+
+  async function addMoveToExistingBatch(): Promise<void> {
+    if (!canAddMoveToExistingBatch()) {
+      throw new Error('Add to batch is only available for Reserve ↔ Account routes');
+    }
+    if (!moveAmount.trim()) {
+      throw new Error('Enter amount first');
+    }
+    const moveSourceAccount = getCurrentMoveSourceAccountId();
+    const moveTargetAccount = getCurrentMoveTargetHubId();
+    const moveTargetEntity = getCurrentMoveTargetEntityId();
+    if ((moveFromEndpoint === 'account' && !moveSourceAccount) || (moveToEndpoint === 'account' && !moveTargetAccount)) {
+      throw new Error('Select account first');
+    }
+    const token = findReserveTransferTokenBySymbol(moveAssetSymbol);
+    if (!token) throw new Error('Select reserve-compatible asset first');
+    const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
+    if (routeKey === 'reserve->reserve') {
+      const reserveAmount = onchainReserves.get(token.tokenId) ?? 0n;
+      const amount = parsePositiveAssetAmount(moveAmount, token, reserveAmount);
+      await queueReserveToReserveDraft(token.tokenId, amount, moveReserveRecipientEntityId);
+      moveAmount = '';
+      toasts.success('Added to existing draft batch');
+      return;
+    }
+    if (routeKey === 'reserve->external') {
+      const reserveAmount = onchainReserves.get(token.tokenId) ?? 0n;
+      const amount = parsePositiveAssetAmount(moveAmount, token, reserveAmount);
+      const recipient = moveExternalRecipient.trim();
+      if (!isAddress(recipient)) throw new Error('Recipient must be a valid EOA address');
+      await queueReserveToExternalDraft(token.tokenId, amount, recipient);
+      moveAmount = '';
+      toasts.success('Added to existing draft batch');
+      return;
+    }
+    if (routeKey === 'reserve->account') {
+      const reserveAmount = onchainReserves.get(token.tokenId) ?? 0n;
+      const amount = parsePositiveAssetAmount(moveAmount, token, reserveAmount);
+      await queueReserveToCollateralDraft(token.tokenId, amount, moveTargetAccount, moveTargetEntity);
+      moveAmount = '';
+      toasts.success('Added to existing draft batch');
+      return;
+    }
+    if (routeKey === 'account->reserve') {
+      const withdrawable = getAccountWithdrawableCollateral(moveSourceAccount, token.tokenId);
+      const amount = parsePositiveAssetAmount(moveAmount, token, withdrawable);
+      await collateralToReserve(token.tokenId, amount, moveSourceAccount, { type: 'none' }, false);
+      moveAmount = '';
+      toasts.info('Queued for counterparty signature, then added to draft batch');
+      return;
+    }
+    if (routeKey === 'account->external') {
+      const withdrawable = getAccountWithdrawableCollateral(moveSourceAccount, token.tokenId);
+      const amount = parsePositiveAssetAmount(moveAmount, token, withdrawable);
+      const recipient = moveExternalRecipient.trim();
+      if (!isAddress(recipient)) throw new Error('Recipient must be a valid EOA address');
+      await collateralToReserve(
+        token.tokenId,
+        amount,
+        moveSourceAccount,
+        { type: 'reserve_to_external', recipientEoa: recipient },
+        false,
+      );
+      moveAmount = '';
+      toasts.info('Queued for counterparty signature, then added to draft batch');
+      return;
+    }
+    if (routeKey === 'account->account') {
+      const withdrawable = getAccountWithdrawableCollateral(moveSourceAccount, token.tokenId);
+      const amount = parsePositiveAssetAmount(moveAmount, token, withdrawable);
+      await collateralToReserve(
+        token.tokenId,
+        amount,
+        moveSourceAccount,
+        {
+          type: 'reserve_to_collateral',
+          targetEntityId: moveTargetEntity,
+          counterpartyEntityId: moveTargetAccount,
+        },
+        false,
+      );
+      moveAmount = '';
+      toasts.info('Queued for counterparty signature, then added to draft batch');
+      return;
+    }
+  }
+
   async function executeMovePlan(): Promise<void> {
     if (!isMoveRouteSupported(moveFromEndpoint, moveToEndpoint)) {
       throw new Error('Selected route is not available');
     }
-    if (isMoveRouteRedirectOnly(moveFromEndpoint, moveToEndpoint)) {
-      activeTab = 'accounts';
-      accountWorkspaceTab = 'send';
-      toasts.info('Use Accounts → Pay for off-chain account transfers');
-      return;
-    }
-
     if (!moveAmount.trim()) {
       throw new Error('Enter amount first');
     }
 
-    if ((moveFromEndpoint === 'account' || moveToEndpoint === 'account') && !workspaceAccountId) {
+    const moveSourceAccount = getCurrentMoveSourceAccountId();
+    const moveTargetAccount = getCurrentMoveTargetHubId();
+    const moveTargetEntity = getCurrentMoveTargetEntityId();
+    const moveReserveRecipient = String(moveReserveRecipientEntityId || '').trim().toLowerCase();
+    if ((moveFromEndpoint === 'account' && !moveSourceAccount) || (moveToEndpoint === 'account' && !moveTargetAccount)) {
       throw new Error('Select account first');
+    }
+    if (moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint) && !moveReserveRecipient) {
+      throw new Error('Select recipient entity');
+    }
+    if (moveToEndpoint === 'account' && (!moveTargetEntity || !moveTargetAccount)) {
+      throw new Error('Select recipient entity and counterparty hub');
     }
 
     moveExecuting = true;
+    moveProgressLabel = '';
     try {
       const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
       if (routeKey === 'external->external') {
         const token = requireExternalTokenBySymbol(moveAssetSymbol);
         const recipient = moveExternalRecipient.trim();
         if (!isAddress(recipient)) throw new Error('Recipient must be a valid EOA address');
+        setMoveProgress('Signing wallet transfer');
         sendAssetSymbol = moveAssetSymbol;
         sendAssetAmount = moveAmount;
         sendAssetRecipient = recipient;
         await sendExternalAsset();
         moveAmount = '';
-        moveExternalRecipient = '';
         return;
       }
 
@@ -1919,53 +2506,103 @@
       }
       const amount = parsePositiveAssetAmount(moveAmount, token);
       const reserveBefore = onchainReserves.get(token.tokenId) ?? 0n;
+      const selfEntityId = resolveSelfEntityId();
+      const reserveRecipientIsSelf = !moveReserveRecipient || moveReserveRecipient === selfEntityId;
 
       switch (routeKey) {
         case 'external->reserve':
+          setMoveProgress('Depositing from wallet into your reserve');
           await depositToReserve(token, amount);
+          if (!reserveRecipientIsSelf) {
+            await waitForMoveCondition(
+              () => (onchainReserves.get(token.tokenId) ?? 0n) >= reserveBefore + amount,
+              'Waiting for reserve balance update',
+            );
+            setMoveProgress(`Transferring reserve balance to ${formatAddress(moveReserveRecipient)}`);
+            await reserveToReserve(token.tokenId, amount, moveReserveRecipient);
+          }
+          break;
+        case 'reserve->reserve':
+          setMoveProgress(`Transferring reserve balance to ${formatAddress(moveReserveRecipient)}`);
+          await reserveToReserve(token.tokenId, amount, moveReserveRecipient);
           break;
         case 'reserve->account':
-          await reserveToCollateral(token.tokenId, amount);
+          setMoveProgress(`Funding ${formatAddress(moveTargetEntity)} via hub ${formatAddress(moveTargetAccount)}`);
+          await reserveToCollateral(token.tokenId, amount, moveTargetAccount, moveTargetEntity);
           break;
         case 'account->reserve':
-          await collateralToReserve(token.tokenId, amount);
+          setMoveProgress('Requesting hub proof and settling account back to your reserve');
+          await collateralToReserve(
+            token.tokenId,
+            amount,
+            moveSourceAccount,
+            reserveRecipientIsSelf
+              ? { type: 'none' }
+              : { type: 'reserve_to_reserve', recipientEntityId: moveReserveRecipient },
+          );
           break;
         case 'reserve->external':
-          await withdrawReserveToExternal(token.tokenId, amount);
+          setMoveProgress('Withdrawing from your reserve to recipient EOA');
+          await withdrawReserveToExternal(token.tokenId, amount, moveExternalRecipient.trim());
           break;
         case 'external->account':
+          setMoveProgress('Depositing from wallet into your reserve');
           await depositToReserve(token, amount);
           await waitForMoveCondition(
             () => (onchainReserves.get(token.tokenId) ?? 0n) >= reserveBefore + amount,
-            'External → Reserve',
+            'Waiting for reserve balance update',
           );
-          await reserveToCollateral(token.tokenId, amount);
+          setMoveProgress(`Funding ${formatAddress(moveTargetEntity)} via hub ${formatAddress(moveTargetAccount)}`);
+          await reserveToCollateral(token.tokenId, amount, moveTargetAccount, moveTargetEntity);
           break;
         case 'account->external':
-          await collateralToReserve(token.tokenId, amount);
-          await waitForMoveCondition(
-            () => (onchainReserves.get(token.tokenId) ?? 0n) >= reserveBefore + amount,
-            'Account → Reserve',
-            30_000,
+          setMoveProgress('Requesting hub proof and settling account back to your reserve');
+          await collateralToReserve(
+            token.tokenId,
+            amount,
+            moveSourceAccount,
+            { type: 'reserve_to_external', recipientEoa: moveExternalRecipient.trim() },
           );
-          await withdrawReserveToExternal(token.tokenId, amount);
+          break;
+        case 'account->account':
+          setMoveProgress('Requesting hub proof and settling account back to your reserve');
+          await collateralToReserve(
+            token.tokenId,
+            amount,
+            moveSourceAccount,
+            {
+              type: 'reserve_to_collateral',
+              targetEntityId: moveTargetEntity,
+              counterpartyEntityId: moveTargetAccount,
+            },
+          );
           break;
         default:
           throw new Error('Route not implemented');
       }
 
       moveAmount = '';
+      moveProgressLabel = '';
       toasts.success(`Queued ${MOVE_ENDPOINT_LABEL[moveFromEndpoint]} → ${MOVE_ENDPOINT_LABEL[moveToEndpoint]}`);
+    } catch (err) {
+      moveProgressLabel = '';
+      throw err;
     } finally {
       moveExecuting = false;
     }
   }
 
   // Reserve → Collateral (deposit reserves into selected bilateral account)
-  async function reserveToCollateral(tokenId: number, amountOverride?: bigint) {
+  async function reserveToCollateral(
+    tokenId: number,
+    amountOverride?: bigint,
+    counterpartyEntityIdOverride?: string,
+    receivingEntityIdOverride?: string,
+  ) {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'reserve-to-collateral');
-    const counterpartyEntityId = String(workspaceAccountId || selectedAccountId || '').trim();
+    const counterpartyEntityId = String(counterpartyEntityIdOverride || workspaceAccountId || selectedAccountId || '').trim();
+    const receivingEntityId = String(receivingEntityIdOverride || entityId || '').trim().toLowerCase();
     if (!entityId || !signerId) return;
 
     if (!counterpartyEntityId) {
@@ -1985,7 +2622,7 @@
     }
 
     const accounts = replica?.state?.accounts;
-    if (!accounts || !findLocalAccountByCounterparty(entityId, accounts, counterpartyEntityId)) {
+    if (receivingEntityId === String(entityId).trim().toLowerCase() && (!accounts || !findLocalAccountByCounterparty(entityId, accounts, counterpartyEntityId))) {
       toasts.error('No account found for selected counterparty');
       return;
     }
@@ -2001,6 +2638,7 @@
             type: 'deposit_collateral' as const,
             data: {
               counterpartyId: counterpartyEntityId,
+              ...(receivingEntityId !== String(entityId).trim().toLowerCase() ? { receivingEntityId } : {}),
               tokenId,
               amount,
             },
@@ -2057,6 +2695,26 @@
     } catch (err) {
       console.error('[EntityPanel] Open account failed:', err);
       toasts.error(`Open account failed: ${(err as Error).message}`);
+    }
+  }
+
+  async function handleDisputeFromList(event: CustomEvent<{ counterpartyId: string }>) {
+    const counterpartyEntityId = event.detail.counterpartyId;
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const env = activeEnv;
+    const signerId = resolveEntitySigner(entityId, 'dispute-start');
+    if (!entityId || !signerId) return;
+    if (!activeIsLive) { toasts.error('Dispute requires LIVE mode'); return; }
+    try {
+      if (!env) throw new Error('Environment not ready');
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
+        type: 'disputeStart' as const,
+        data: { counterpartyEntityId, description: 'dispute-from-popover' },
+      }])]);
+      toasts.success('Dispute queued — will be submitted on next batch broadcast');
+    } catch (err) {
+      console.error('[EntityPanel] Dispute start failed:', err);
+      toasts.error(`Dispute failed: ${(err as Error).message}`);
     }
   }
 
@@ -2210,7 +2868,6 @@
 
     const handleMovePointer = (event: PointerEvent | MouseEvent) => {
       if (!moveDragSource) return;
-      moveDragPointer = { x: event.clientX, y: event.clientY };
       const hovered = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-move-side="to"]');
       const endpoint = hovered?.getAttribute?.('data-move-endpoint');
       moveDragHoverTarget = endpoint === 'external' || endpoint === 'reserve' || endpoint === 'account'
@@ -2224,7 +2881,6 @@
         clearMoveDrag();
       }
     };
-
     const handleUrlNavigation = () => applyDeepLinkViewFromUrl();
     window.addEventListener('pointermove', handleMovePointer);
     window.addEventListener('pointerup', handleMovePointerUp);
@@ -3151,18 +3807,10 @@
                           class="asset-max-hint text-link"
                           on:click={fillMoveMax}
                           disabled={
-                            moveFromEndpoint === 'external'
-                              ? !selectedMoveExternalToken || selectedMoveExternalToken.balance <= 0n
-                              : !selectedMoveTransferToken || getMoveEndpointBalance(moveFromEndpoint) <= 0n
+                            getMoveDisplayBalance(moveFromEndpoint) <= 0n
                           }
                         >
-                          {#if moveFromEndpoint === 'external' && selectedMoveExternalToken}
-                            {formatInlineFillAmount(selectedMoveExternalToken.balance, selectedMoveExternalToken.decimals)}
-                          {:else if selectedMoveTransferToken}
-                            {formatInlineFillAmount(getMoveEndpointBalance(moveFromEndpoint), selectedMoveTransferToken.decimals)}
-                          {:else}
-                            0
-                          {/if}
+                          {formatInlineFillAmount(getMoveDisplayBalance(moveFromEndpoint), getMoveDisplayDecimals())}
                         </button>
                         <select class="asset-token-select-inline compact move-token-select" bind:value={moveAssetSymbol} data-testid="move-asset-symbol">
                           {#each moveAssetOptions as token}
@@ -3173,28 +3821,6 @@
                     </div>
                   </div>
 
-                  {#if moveFromEndpoint === 'account' || moveToEndpoint === 'account'}
-                    <div class="asset-field asset-field-wide">
-                      <EntityInput
-                        label={moveFromEndpoint === 'account' ? 'Source account' : 'Target account'}
-                        value={workspaceAccountId}
-                        entities={workspaceAccountIds}
-                        {contacts}
-                        excludeId={replica?.state?.entityId || tab.entityId}
-                        placeholder="Select account..."
-                        disabled={!activeIsLive || workspaceAccountIds.length === 0}
-                        on:change={handleWorkspaceAccountChange}
-                      />
-                    </div>
-                  {/if}
-
-                  {#if moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint)}
-                    <label class="asset-field asset-field-wide">
-                      <span>EOA</span>
-                      <input type="text" bind:value={moveExternalRecipient} placeholder="0x..." data-testid="move-external-recipient" />
-                    </label>
-                  {/if}
-
                   <div class="move-visual" bind:this={moveVisualRoot}>
                     <div class="move-column">
                       <div class="move-column-head">From</div>
@@ -3202,6 +3828,7 @@
                         <button
                           type="button"
                           class="move-node"
+                          class:source-active={moveFromEndpoint === endpoint}
                           class:selected={moveFromEndpoint === endpoint}
                           class:pending={moveSelectedSource === endpoint}
                           class:dragging={moveDragSource === endpoint}
@@ -3215,17 +3842,24 @@
                         >
                           <span class="move-node-label">{MOVE_ENDPOINT_LABEL[endpoint]}</span>
                           <span class="move-node-balance">
-                            {#if endpoint === 'external' && selectedMoveExternalToken}
-                              {formatAmount(getMoveEndpointBalance(endpoint), selectedMoveExternalToken.decimals)}
-                            {:else if selectedMoveTransferToken}
-                              {formatAmount(getMoveEndpointBalance(endpoint), selectedMoveTransferToken.decimals)}
-                            {:else}
-                              —
-                            {/if}
+                            {formatAmount(getMoveDisplayBalance(endpoint), getMoveDisplayDecimals())}
                           </span>
-                          <span class="move-node-meta">{getMoveEndpointSubtitle(endpoint)}</span>
                         </button>
                       {/each}
+                      {#if moveFromEndpoint === 'account'}
+                        <div class="move-account-slot" data-testid="move-source-account-field">
+                          <EntityInput
+                            label="From account"
+                            value={moveSourceAccountId}
+                            entities={workspaceAccountIds}
+                            {contacts}
+                            excludeId={replica?.state?.entityId || tab.entityId}
+                            placeholder="Select source account..."
+                            disabled={!activeIsLive || workspaceAccountIds.length === 0}
+                            on:change={handleMoveSourceAccountChange}
+                          />
+                        </div>
+                      {/if}
                     </div>
 
                     <div class="move-column">
@@ -3234,6 +3868,7 @@
                         <button
                           type="button"
                           class="move-node target"
+                          class:target-active={moveToEndpoint === endpoint}
                           class:selected={moveToEndpoint === endpoint}
                           class:pending={moveSelectedTarget === endpoint}
                           class:hover-target={moveDragHoverTarget === endpoint}
@@ -3259,46 +3894,71 @@
                           on:click={() => setMoveTarget(endpoint)}
                         >
                           <span class="move-node-label">{MOVE_ENDPOINT_LABEL[endpoint]}</span>
-                          <span class="move-node-balance">
-                            {#if endpoint === 'external' && selectedMoveExternalToken}
-                              {formatAmount(getMoveEndpointBalance(endpoint), selectedMoveExternalToken.decimals)}
-                            {:else if selectedMoveTransferToken}
-                              {formatAmount(getMoveEndpointBalance(endpoint), selectedMoveTransferToken.decimals)}
-                            {:else}
-                              —
-                            {/if}
-                          </span>
-                          <span class="move-node-meta">{getMoveEndpointSubtitle(endpoint)}</span>
+                          <span class="move-node-target-hint">Drop here</span>
                         </button>
                       {/each}
+                      {#if moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint)}
+                        <div class="move-account-slot" data-testid="move-reserve-recipient-field">
+                          <EntityInput
+                            label="To reserve entity"
+                            value={moveReserveRecipientEntityId}
+                            entities={moveEntityOptions}
+                            {contacts}
+                            placeholder="Recipient entity..."
+                            preferredId={resolveSelfEntityId()}
+                            on:change={handleMoveReserveRecipientChange}
+                          />
+                        </div>
+                      {/if}
+                      {#if moveToEndpoint === 'account'}
+                        <div class="move-account-slot" data-testid="move-target-entity-field">
+                          <EntityInput
+                            label="Recipient"
+                            value={moveTargetEntityId}
+                            entities={moveEntityOptions}
+                            {contacts}
+                            placeholder="Recipient entity..."
+                            preferredId={resolveSelfEntityId()}
+                            on:change={handleMoveTargetEntityChange}
+                          />
+                        </div>
+                        <div class="move-account-slot" data-testid="move-target-counterparty-field">
+                          <EntityInput
+                            label="Counterparty"
+                            value={moveTargetHubEntityId}
+                            entities={moveHubEntityOptions}
+                            {contacts}
+                            placeholder="Counterparty entity..."
+                            on:change={handleMoveTargetHubChange}
+                          />
+                        </div>
+                      {/if}
+                      {#if moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint)}
+                        <label class="asset-field move-account-slot" data-testid="move-external-recipient-field">
+                          <span class="asset-field-head">
+                            <span>Recipient EOA</span>
+                          </span>
+                          <input type="text" bind:value={moveExternalRecipient} placeholder="0x..." data-testid="move-external-recipient" />
+                        </label>
+                      {/if}
                     </div>
 
                     {#if !moveDragSource}
-                      {@const committedStart = getMoveNodeCenter('from', moveFromEndpoint)}
-                      {@const committedEnd = getMoveNodeCenter('to', moveToEndpoint)}
+                      {@const _moveLayoutTick = moveNodeLayoutVersion}
+                      {@const committedStart = getMoveNodeAnchor('from', moveFromEndpoint)}
+                      {@const committedEnd = getMoveNodeAnchor('to', moveToEndpoint)}
                       {#if committedStart && committedEnd}
-                        <svg class="move-drag-layer committed" aria-hidden="true">
-                          <defs>
-                            <marker id="move-arrowhead-committed" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-                              <path d="M0,0 L8,4 L0,8 Z" fill="rgba(245, 158, 11, 0.92)"></path>
-                            </marker>
-                          </defs>
-                          <line x1={committedStart.x} y1={committedStart.y} x2={committedEnd.x} y2={committedEnd.y} marker-end="url(#move-arrowhead-committed)"></line>
+                        <svg class="move-drag-layer committed" data-testid="move-committed-line" aria-hidden="true">
+                          <path d={buildMoveArrowPath(committedStart, committedEnd)}></path>
                         </svg>
                       {/if}
-                    {/if}
-
-                    {#if moveDragSource}
-                      {@const start = getMoveNodeCenter('from', moveDragSource)}
-                      {@const end = moveDragHoverTarget ? getMoveNodeCenter('to', moveDragHoverTarget) : (moveVisualRoot ? { x: moveDragPointer.x - moveVisualRoot.getBoundingClientRect().left, y: moveDragPointer.y - moveVisualRoot.getBoundingClientRect().top } : null)}
-                      {#if start && end}
-                        <svg class="move-drag-layer" aria-hidden="true">
-                          <defs>
-                            <marker id="move-arrowhead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-                              <path d="M0,0 L8,4 L0,8 Z" fill="rgba(251, 191, 36, 0.9)"></path>
-                            </marker>
-                          </defs>
-                          <line x1={start.x} y1={start.y} x2={end.x} y2={end.y} marker-end="url(#move-arrowhead)"></line>
+                    {:else}
+                      {@const _moveLayoutTick = moveNodeLayoutVersion}
+                      {@const dragStart = getMoveNodeAnchor('from', moveDragSource)}
+                      {@const dragEnd = getMoveNodeAnchor('to', moveDragHoverTarget || moveToEndpoint)}
+                      {#if dragStart && dragEnd}
+                        <svg class="move-drag-layer" data-testid="move-drag-line" aria-hidden="true">
+                          <path d={buildMoveArrowPath(dragStart, dragEnd)}></path>
                         </svg>
                       {/if}
                     {/if}
@@ -3309,6 +3969,13 @@
                       {MOVE_ENDPOINT_LABEL[moveFromEndpoint]} → {MOVE_ENDPOINT_LABEL[moveToEndpoint]}
                     </div>
                     <div class="move-summary-title">{moveRouteExecutionLabel(moveFromEndpoint, moveToEndpoint)}</div>
+                    <div class="move-summary-meta">{moveRouteMeta(moveFromEndpoint, moveToEndpoint)}</div>
+                    {#if moveProgressLabel}
+                      <div class="move-summary-progress">{moveProgressLabel}</div>
+                    {/if}
+                    {#if canAddMoveToExistingBatch()}
+                      <div class="move-summary-batch">Uses existing draft batch</div>
+                    {/if}
                     <div class="move-steps">
                       {#each moveRouteSteps(moveFromEndpoint, moveToEndpoint) as step}
                         <span class="move-step-chip">{step}</span>
@@ -3317,47 +3984,57 @@
                   </div>
 
                   <div class="asset-action-row">
-                    {#if isMoveRouteRedirectOnly(moveFromEndpoint, moveToEndpoint)}
-                      <button
-                        class="btn-table-action deposit"
-                        data-testid="move-go-pay"
-                        on:click={() => {
-                          activeTab = 'accounts';
-                          accountWorkspaceTab = 'send';
-                        }}
-                      >
-                        Go to Accounts → Pay
-                      </button>
-                    {:else}
-                      <button
-                        class="btn-table-action"
-                        type="button"
-                        data-testid="move-reset"
-                        on:click={resetMoveRoute}
-                      >
-                        Clear
-                      </button>
-                      <button
-                        class="btn-table-action deposit"
-                        data-testid="move-confirm"
-                        on:click={async () => {
-                          try {
-                            await executeMovePlan();
-                          } catch (err) {
-                            toasts.error(`Move failed: ${toErrorMessage(err, 'Unknown error')}`);
-                          }
-                        }}
-                        disabled={
-                          moveExecuting ||
-                          !isMoveRouteSupported(moveFromEndpoint, moveToEndpoint) ||
-                          !moveAmount.trim() ||
-                          ((moveFromEndpoint === 'account' || moveToEndpoint === 'account') && !workspaceAccountId) ||
-                          (moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !moveExternalRecipient.trim())
+                    <button
+                      class="btn-table-action"
+                      type="button"
+                      data-testid="move-reset"
+                      on:click={clearMoveComposer}
+                    >
+                      Clear
+                    </button>
+                    <button
+                      class="btn-table-action"
+                      type="button"
+                      data-testid="move-add-batch"
+                      on:click={async () => {
+                        try {
+                          await addMoveToExistingBatch();
+                        } catch (err) {
+                          toasts.error(`Move failed: ${toErrorMessage(err, 'Unknown error')}`);
                         }
-                      >
-                        {moveExecuting ? 'Broadcasting...' : 'Sign & Broadcast'}
-                      </button>
-                    {/if}
+                      }}
+                      disabled={
+                        moveExecuting ||
+                        !canAddMoveToExistingBatch() ||
+                        !moveAmount.trim() ||
+                        ((moveFromEndpoint === 'account' && !getCurrentMoveSourceAccountId()) || (moveToEndpoint === 'account' && (!getCurrentMoveTargetEntityId() || !getCurrentMoveTargetHubId()))) ||
+                        (moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint) && !moveReserveRecipientEntityId.trim()) ||
+                        (moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !moveExternalRecipient.trim())
+                      }
+                    >
+                      Add to Batch
+                    </button>
+                    <button
+                      class="btn-table-action deposit"
+                      data-testid="move-confirm"
+                      on:click={async () => {
+                        try {
+                          await executeMovePlan();
+                        } catch (err) {
+                          toasts.error(`Move failed: ${toErrorMessage(err, 'Unknown error')}`);
+                        }
+                      }}
+                      disabled={
+                        moveExecuting ||
+                        !isMoveRouteSupported(moveFromEndpoint, moveToEndpoint) ||
+                        !moveAmount.trim() ||
+                        ((moveFromEndpoint === 'account' && !getCurrentMoveSourceAccountId()) || (moveToEndpoint === 'account' && (!getCurrentMoveTargetEntityId() || !getCurrentMoveTargetHubId()))) ||
+                        (moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint) && !moveReserveRecipientEntityId.trim()) ||
+                        (moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !moveExternalRecipient.trim())
+                      }
+                    >
+                      {moveExecuting ? 'Broadcasting...' : 'Sign & Broadcast'}
+                    </button>
                   </div>
                 </div>
               {:else if assetWorkspaceTab === 'faucet'}
@@ -3692,6 +4369,7 @@
             on:select={handleAccountSelect}
             on:faucet={handleAccountFaucet}
             on:settleApprove={handleQuickSettleApprove}
+            on:dispute={handleDisputeFromList}
           />
 
           <nav class="account-workspace-tabs" aria-label="Account workspace">
@@ -3865,6 +4543,50 @@
                       on:input={setAccountBarScale}
                     />
                   </div>
+                </div>
+
+                <div class="appearance-card">
+                  <div class="appearance-head">
+                    <div>
+                      <h4 class="section-head">Bar Effects</h4>
+                      <p class="muted">Visual effects for capacity bars. Toggle each on/off.</p>
+                    </div>
+                  </div>
+
+                  <label class="appearance-switch-row">
+                    <span class="appearance-label">Credit Gradient</span>
+                    <span class="appearance-hint">Fade out large credit segments after 300px</span>
+                    <input type="checkbox" class="appearance-checkbox" checked={$settings.barCreditGradient}
+                      on:change={(e) => settingsOperations.update({ barCreditGradient: e.currentTarget.checked })} />
+                  </label>
+
+                  <label class="appearance-switch-row">
+                    <span class="appearance-label">Width Transition</span>
+                    <span class="appearance-hint">Smooth animation when bar segments resize</span>
+                    <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimTransition}
+                      on:change={(e) => settingsOperations.update({ barAnimTransition: e.currentTarget.checked })} />
+                  </label>
+
+                  <label class="appearance-switch-row">
+                    <span class="appearance-label">Sweep Effect</span>
+                    <span class="appearance-hint">Bright line sweeps across bar on change</span>
+                    <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimSweep}
+                      on:change={(e) => settingsOperations.update({ barAnimSweep: e.currentTarget.checked })} />
+                  </label>
+
+                  <label class="appearance-switch-row">
+                    <span class="appearance-label">Glow Pulse</span>
+                    <span class="appearance-hint">Brightness pulse on bar update</span>
+                    <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimGlow}
+                      on:change={(e) => settingsOperations.update({ barAnimGlow: e.currentTarget.checked })} />
+                  </label>
+
+                  <label class="appearance-switch-row">
+                    <span class="appearance-label">Delta Flash</span>
+                    <span class="appearance-hint">Show +/- amount text on capacity change</span>
+                    <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimDeltaFlash}
+                      on:change={(e) => settingsOperations.update({ barAnimDeltaFlash: e.currentTarget.checked })} />
+                  </label>
                 </div>
               </section>
 
@@ -5382,6 +6104,35 @@
     box-shadow: 0 4px 14px rgba(251, 191, 36, 0.35);
   }
 
+  .appearance-switch-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .appearance-switch-row .appearance-label {
+    flex: 0 0 auto;
+    min-width: 110px;
+  }
+
+  .appearance-hint {
+    flex: 1;
+    font-size: 11px;
+    color: #71717a;
+  }
+
+  .appearance-checkbox {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    accent-color: #fbbf24;
+    cursor: pointer;
+  }
+
   .configure-token-row {
     display: flex;
     gap: 10px;
@@ -6141,7 +6892,7 @@
     border: 1px solid rgba(251, 191, 36, 0.16);
     border-radius: 14px;
     background: radial-gradient(circle at top, rgba(251, 191, 36, 0.05), transparent 55%), rgba(12, 10, 9, 0.88);
-    overflow: hidden;
+    overflow: visible;
   }
 
   .move-column {
@@ -6150,6 +6901,44 @@
     gap: 8px;
     position: relative;
     z-index: 1;
+  }
+
+  .move-account-slot {
+    margin-top: 2px;
+  }
+
+  .move-inline-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 4px;
+  }
+
+  .move-drag-layer {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    overflow: visible;
+    pointer-events: none;
+    z-index: 3;
+  }
+
+  .move-drag-layer path {
+    stroke: rgba(251, 191, 36, 0.96);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+    stroke-dasharray: 8 6;
+    filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.28));
+  }
+
+  .move-drag-layer.committed path {
+    stroke: rgba(245, 158, 11, 0.78);
+    stroke-width: 2.25;
+    stroke-dasharray: none;
+    filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.2));
   }
 
   .move-column-head {
@@ -6178,16 +6967,36 @@
   }
 
   .move-node:hover,
-  .move-node.selected,
-  .move-node.pending,
   .move-node.hover-target {
     border-color: rgba(251, 191, 36, 0.55);
     box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.18), 0 10px 24px rgba(0, 0, 0, 0.25);
     transform: translateY(-1px);
   }
 
+  .move-node.selected,
+  .move-node.source-active,
+  .move-node.target-active {
+    border-color: rgba(251, 191, 36, 0.92);
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.32), 0 16px 36px rgba(0, 0, 0, 0.3);
+    transform: translateY(-1px);
+  }
+
+  .move-node.source-active {
+    background: linear-gradient(180deg, rgba(66, 32, 6, 0.96), rgba(28, 25, 23, 0.96));
+  }
+
+  .move-node.target-active {
+    background: linear-gradient(180deg, rgba(39, 32, 18, 0.96), rgba(28, 25, 23, 0.96));
+  }
+
+  .move-node.pending {
+    border-color: rgba(250, 204, 21, 0.7);
+    box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.35);
+  }
+
   .move-node.dragging {
     cursor: grabbing;
+    opacity: 0.92;
   }
 
   .move-node.blocked {
@@ -6206,29 +7015,14 @@
     color: #fbbf24;
   }
 
+  .move-node-target-hint {
+    font-size: 11px;
+    color: #78716c;
+  }
+
   .move-node-meta {
     font-size: 11px;
     color: #a8a29e;
-  }
-
-  .move-drag-layer {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-  }
-
-  .move-drag-layer line {
-    stroke: rgba(251, 191, 36, 0.88);
-    stroke-width: 3;
-    stroke-linecap: round;
-    stroke-dasharray: 8 6;
-  }
-
-  .move-drag-layer.committed line {
-    stroke: rgba(245, 158, 11, 0.35);
-    stroke-width: 2.5;
-    stroke-dasharray: none;
   }
 
   .move-summary {
@@ -6255,6 +7049,21 @@
     font-size: 14px;
     font-weight: 700;
     color: #fafaf9;
+  }
+
+  .move-summary-meta {
+    font-size: 12px;
+    color: #a8a29e;
+  }
+
+  .move-summary-progress {
+    font-size: 12px;
+    color: #fbbf24;
+  }
+
+  .move-summary-batch {
+    font-size: 12px;
+    color: #fbbf24;
   }
 
   .move-steps {
