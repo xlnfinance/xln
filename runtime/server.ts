@@ -5400,11 +5400,16 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     }
 
     if (fromReplica?.depositoryAddress && fromReplica?.entityProviderAddress) {
+      console.log('[XLN] Pre-checking predeployed contract code...');
       const probeProvider = new ethers.JsonRpcProvider(anvilRpc);
-      const [depositoryCode, entityProviderCode] = await Promise.all([
-        probeProvider.getCode(fromReplica.depositoryAddress),
-        probeProvider.getCode(fromReplica.entityProviderAddress),
-      ]);
+      const [depositoryCode, entityProviderCode] = await withStartupStepTimeout(
+        'precheckPredeployedCode',
+        Promise.all([
+          probeProvider.getCode(fromReplica.depositoryAddress),
+          probeProvider.getCode(fromReplica.entityProviderAddress),
+        ]),
+      );
+      console.log('[XLN] Predeployed contract code pre-check complete');
       if (depositoryCode === '0x' || entityProviderCode === '0x') {
         console.warn(
           `[XLN] Ignoring stale jurisdictions addresses with no on-chain code: ` +
