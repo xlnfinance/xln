@@ -76,6 +76,7 @@ async function openMoveTab(page: Page): Promise<void> {
   await openAssetsTab(page);
   await page.getByTestId('asset-tab-move').first().click();
   await expect(page.getByTestId('move-route-summary').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('move-committed-line').first()).toBeVisible({ timeout: 20_000 });
 }
 
 async function chooseMoveRoute(
@@ -111,6 +112,43 @@ async function dragMoveRoute(page: Page, from: 'external' | 'reserve' | 'account
     target.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX: endX, clientY: endY }));
     target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: endX, clientY: endY }));
   }, { from, to });
+}
+
+async function selectMoveEntityField(page: Page, testId: string, entityId: string): Promise<void> {
+  const field = page.getByTestId(testId).first();
+  await expect(field).toBeVisible({ timeout: 20_000 });
+  const trigger = field.locator('.closed-trigger, input').first();
+  await trigger.click();
+  const option = page.locator('.dropdown-item').filter({ hasText: entityId }).first();
+  await expect(option).toBeVisible({ timeout: 20_000 });
+  await option.click();
+}
+
+async function waitForRecipientCounterpartyProfile(
+  page: Page,
+  recipientEntityId: string,
+  counterpartyEntityId: string,
+): Promise<void> {
+  const recipient = recipientEntityId.toLowerCase();
+  const counterparty = counterpartyEntityId.toLowerCase();
+  await expect
+    .poll(async () => page.evaluate(({ recipient, counterparty }) => {
+      const env = (window as typeof window & {
+        isolatedEnv?: {
+          gossip?: {
+            getProfiles?: () => Array<{
+              entityId?: string;
+              accounts?: Array<{ counterpartyId?: string }>;
+            }>;
+          };
+        };
+      }).isolatedEnv;
+      const profiles = env?.gossip?.getProfiles?.() || [];
+      const profile = profiles.find((item) => String(item?.entityId || '').toLowerCase() === recipient);
+      return Array.isArray(profile?.accounts)
+        && profile.accounts.some((account) => String(account?.counterpartyId || '').toLowerCase() === counterparty);
+    }, { recipient, counterparty }), { timeout: ROUTE_TIMEOUT_MS })
+    .toBe(true);
 }
 
 async function openSettleWorkspace(page: Page): Promise<void> {
@@ -601,21 +639,8 @@ test.describe('E2R2E External Reserve Route', () => {
     });
   });
 
-  test('move tab covers asset route matrix through one form', async ({ page }) => {
-    test.setTimeout(LONG_E2E ? 240_000 : 180_000);
-
-    page.on('console', (message) => {
-      const text = message.text();
-      if (
-        text.includes('Move failed') ||
-        text.includes('Deposit failed') ||
-        text.includes('Deposited') ||
-        text.includes('Approved exact allowance') ||
-        text.includes('externalTokenToReserve')
-      ) {
-        console.log(`[MOVE][console] ${text}`);
-      }
-    });
+  test('move tab covers all routed paths on isolated runtimes', async ({ page, browser }) => {
+    test.setTimeout(LONG_E2E ? 360_000 : 240_000);
 
     await timedStep('move.baseline', async () => {
       await ensureE2EBaseline(page, {
@@ -627,9 +652,165 @@ test.describe('E2R2E External Reserve Route', () => {
       });
     });
 
+    const bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
+    const bobPage = await bobContext.newPage();
+    try {
+      let alice: { entityId: string; signerId: string; runtimeId: string } | null = null;
+      let bob: { entityId: string; signerId: string; runtimeId: string } | null = null;
+
+      await timedStep('move.runtimes', async () => {
+        await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+        await page.evaluate((apiBaseUrl: string) => {
+          (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__ = apiBaseUrl;
+          localStorage.setItem('xln-api-base-url', apiBaseUrl);
+        }, API_BASE_URL);
+        alice = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
+        await switchToRuntimeId(page, alice.runtimeId);
+
+        await gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+        await bobPage.evaluate((apiBaseUrl: string) => {
+          (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__ = apiBaseUrl;
+          localStorage.setItem('xln-api-base-url', apiBaseUrl);
+        }, API_BASE_URL);
+        bob = await createRuntimeIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));
+        await switchToRuntimeId(bobPage, bob.runtimeId);
+      });
+
+      const hubs = await waitForNamedHubs(page, ['H1', 'H2'], { timeoutMs: ROUTE_TIMEOUT_MS });
+      await timedStep('move.open-accounts', async () => {
+        await connectRuntimeToHub(page, { entityId: alice!.entityId, signerId: alice!.signerId }, hubs.h1);
+        await connectRuntimeToHub(bobPage, { entityId: bob!.entityId, signerId: bob!.signerId }, hubs.h2);
+      });
+
+      const symbol = 'USDC';
+      const aliceEoa = await getVisibleEoaAddress(page);
+      expect(aliceEoa).toMatch(/^0x[a-fA-F0-9]{40}$/);
+
+      await timedStep('move.seed-wallet', async () => {
+        await seedExternalWallet(page, aliceEoa, symbol, '120');
+        await expect
+          .poll(async () => refreshExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
+          .toBeGreaterThan(0);
+      });
+
+      await timedStep('move.wait-bob-profile-on-alice', async () => {
+        await waitForRecipientCounterpartyProfile(page, bob!.entityId, hubs.h2);
+      });
+
+      await timedStep('move.e2r', async () => {
+        const beforeReserve = await refreshReserveBalance(page, symbol);
+        await openMoveTab(page);
+        await page.getByTestId('move-asset-symbol').selectOption(symbol);
+        await page.getByTestId('move-amount').fill('20');
+        await chooseMoveRoute(page, 'external', 'reserve');
+        await page.getByTestId('move-confirm').first().click();
+        await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeReserve);
+      });
+
+      await timedStep('move.r2a-self', async () => {
+        const beforeAccount = await refreshAccountSpendableBalance(page, symbol);
+        await openMoveTab(page);
+        await page.getByTestId('move-asset-symbol').selectOption(symbol);
+        await page.getByTestId('move-amount').fill('8');
+        await chooseMoveRoute(page, 'reserve', 'account');
+        await page.getByTestId('move-confirm').first().click();
+        await expect.poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeAccount);
+      });
+
+      await timedStep('move.a2r-self', async () => {
+        const beforeReserve = await refreshReserveBalance(page, symbol);
+        const beforeAccount = await refreshAccountSpendableBalance(page, symbol);
+        await openMoveTab(page);
+        await page.getByTestId('move-asset-symbol').selectOption(symbol);
+        await page.getByTestId('move-amount').fill('3');
+        await chooseMoveRoute(page, 'account', 'reserve');
+        await page.getByTestId('move-confirm').first().click();
+        await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeReserve);
+        await expect.poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeAccount);
+      });
+
+      await timedStep('move.r2e', async () => {
+        const beforeReserve = await refreshReserveBalance(page, symbol);
+        const beforeExternal = await getRpcExternalBalance(page, symbol, aliceEoa);
+        await openMoveTab(page);
+        await page.getByTestId('move-asset-symbol').selectOption(symbol);
+        await page.getByTestId('move-amount').fill('2');
+        await chooseMoveRoute(page, 'reserve', 'external');
+        await page.getByTestId('move-confirm').first().click();
+        await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeReserve);
+        await expect.poll(async () => getRpcExternalBalance(page, symbol, aliceEoa), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeExternal);
+      });
+
+      await timedStep('move.r2r-remote', async () => {
+        const beforeAliceReserve = await refreshReserveBalance(page, symbol);
+        const beforeBobReserve = await refreshReserveBalance(bobPage, symbol);
+        await openMoveTab(page);
+        await page.getByTestId('move-asset-symbol').selectOption(symbol);
+        await page.getByTestId('move-amount').fill('4');
+        await chooseMoveRoute(page, 'reserve', 'reserve');
+        await selectMoveEntityField(page, 'move-reserve-recipient-field', bob!.entityId);
+        await page.getByTestId('move-confirm').first().click();
+        await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeAliceReserve);
+        await expect.poll(async () => refreshReserveBalance(bobPage, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeBobReserve);
+      });
+
+      await timedStep('move.e2a-remote', async () => {
+        const beforeBobAccount = await refreshAccountSpendableBalance(bobPage, symbol);
+        await openMoveTab(page);
+        await page.getByTestId('move-asset-symbol').selectOption(symbol);
+        await page.getByTestId('move-amount').fill('5');
+        await chooseMoveRoute(page, 'external', 'account');
+        await selectMoveEntityField(page, 'move-target-entity-field', bob!.entityId);
+        await selectMoveEntityField(page, 'move-target-counterparty-field', hubs.h2);
+        await page.getByTestId('move-confirm').first().click();
+        await expect.poll(async () => refreshAccountSpendableBalance(bobPage, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeBobAccount);
+      });
+
+      await timedStep('move.a2e', async () => {
+        const beforeAccount = await refreshAccountSpendableBalance(page, symbol);
+        const beforeExternal = await getRpcExternalBalance(page, symbol, aliceEoa);
+        await openMoveTab(page);
+        await page.getByTestId('move-asset-symbol').selectOption(symbol);
+        await page.getByTestId('move-amount').fill('1');
+        await chooseMoveRoute(page, 'account', 'external');
+        await page.getByTestId('move-confirm').first().click();
+        await expect.poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeAccount);
+        await expect.poll(async () => getRpcExternalBalance(page, symbol, aliceEoa), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeExternal);
+      });
+
+      await timedStep('move.a2a-remote', async () => {
+        const beforeAliceAccount = await refreshAccountSpendableBalance(page, symbol);
+        const beforeBobAccount = await refreshAccountSpendableBalance(bobPage, symbol);
+        await openMoveTab(page);
+        await page.getByTestId('move-asset-symbol').selectOption(symbol);
+        await page.getByTestId('move-amount').fill('2');
+        await chooseMoveRoute(page, 'account', 'account');
+        await selectMoveEntityField(page, 'move-target-entity-field', bob!.entityId);
+        await selectMoveEntityField(page, 'move-target-counterparty-field', hubs.h2);
+        await page.getByTestId('move-confirm').first().click();
+        await expect.poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeAliceAccount);
+        await expect.poll(async () => refreshAccountSpendableBalance(bobPage, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeBobAccount);
+      });
+    } finally {
+      await bobContext.close();
+    }
+  });
+
+  test('move external to external sends directly from signer wallet', async ({ page }) => {
+    test.setTimeout(LONG_E2E ? 180_000 : 120_000);
+
+    await timedStep('move-direct.baseline', async () => {
+      await ensureE2EBaseline(page, {
+        timeoutMs: LONG_E2E ? 240_000 : 120_000,
+        requireHubMesh: true,
+        requireMarketMaker: false,
+        minHubCount: 3,
+        forceReset: true,
+      });
+    });
+
     let alice: { entityId: string; signerId: string; runtimeId: string } | null = null;
-    const bobSignerId = Wallet.fromPhrase(selectDemoMnemonic('bob')).address.toLowerCase();
-    await timedStep('move.runtimes', async () => {
+    await timedStep('move-direct.runtime', async () => {
       await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
       await page.evaluate((apiBaseUrl: string) => {
         (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__ = apiBaseUrl;
@@ -639,143 +820,24 @@ test.describe('E2R2E External Reserve Route', () => {
       await switchToRuntimeId(page, alice.runtimeId);
     });
 
-    const hubsByName = await waitForNamedHubs(page, ['H1'], { timeoutMs: ROUTE_TIMEOUT_MS });
-    await timedStep('move.open-account', async () => {
-      await connectRuntimeToHub(page, { entityId: alice!.entityId, signerId: alice!.signerId }, hubsByName.h1);
-    });
-
     const symbol = 'USDC';
-    const eoaAddress = await getVisibleEoaAddress(page);
-    expect(eoaAddress, 'visible EOA address must exist').toMatch(/^0x[a-fA-F0-9]{40}$/);
-    await timedStep('move.seed-wallet', async () => {
-      await seedExternalWallet(page, eoaAddress, symbol, '100');
-      await expect
-        .poll(async () => getRpcExternalBalance(page, symbol, eoaAddress), { timeout: ROUTE_TIMEOUT_MS })
-        .toBeGreaterThan(0);
-      await expect
-        .poll(async () => refreshExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
-        .toBeGreaterThan(0);
-    });
+    const aliceEoa = await getVisibleEoaAddress(page);
+    const bobSignerId = Wallet.fromPhrase(selectDemoMnemonic('bob')).address.toLowerCase();
+    await seedExternalWallet(page, aliceEoa, symbol, '20');
+    await expect.poll(async () => refreshExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(0);
 
-    await timedStep('move.route-matrix-ui', async () => {
-      await openMoveTab(page);
-      await page.getByTestId('move-asset-symbol').selectOption(symbol);
-      await page.getByTestId('move-amount').fill('5');
+    const aliceBefore = await getRpcExternalBalance(page, symbol, aliceEoa);
+    const bobBefore = await getRpcExternalBalance(page, symbol, bobSignerId);
 
-      await chooseMoveRoute(page, 'reserve', 'reserve');
-      await expect(page.getByTestId('move-confirm').first()).toBeDisabled();
+    await openMoveTab(page);
+    await page.getByTestId('move-asset-symbol').selectOption(symbol);
+    await page.getByTestId('move-amount').fill('1');
+    await chooseMoveRoute(page, 'external', 'external');
+    await page.getByTestId('move-external-recipient').fill(bobSignerId);
+    await page.getByTestId('move-confirm').first().click();
 
-      await chooseMoveRoute(page, 'account', 'account', 'target-first');
-      await expect(page.getByTestId('move-go-pay').first()).toBeVisible({ timeout: 20_000 });
-
-      await openMoveTab(page);
-      await page.getByTestId('move-source-external').first().click();
-      await page.getByTestId('move-asset-symbol').selectOption(symbol);
-      await dragMoveRoute(page, 'external', 'reserve');
-      await expect(page.getByTestId('move-route-summary').first()).toContainText('External → Reserve');
-    });
-
-    let reserveAfterE2R = 0;
-    let accountAfterR2A = 0;
-    let reserveAfterA2R = 0;
-    let accountAfterE2A = 0;
-    let externalAfterA2E = 0;
-    const moveEntityId = alice!.entityId;
-
-    await timedStep('move.execute-e2r', async () => {
-      const beforeReserve = await refreshReserveBalance(page, symbol);
-      const beforeOnchainReserve = await getOnchainReserveBalance(page, moveEntityId, 1);
-      await openMoveTab(page);
-      await page.getByTestId('move-asset-symbol').selectOption(symbol);
-      await page.getByTestId('move-amount').fill('15');
-      await dragMoveRoute(page, 'external', 'reserve');
-      await page.getByTestId('move-confirm').first().click();
-      await expect
-        .poll(async () => getOnchainReserveBalance(page, moveEntityId, 1), { timeout: ROUTE_TIMEOUT_MS })
-        .toBeGreaterThan(beforeOnchainReserve);
-      await expect
-        .poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
-        .toBeGreaterThan(beforeReserve);
-      reserveAfterE2R = await refreshReserveBalance(page, symbol);
-    });
-
-    await timedStep('move.execute-r2a', async () => {
-      const beforeAccount = await refreshAccountSpendableBalance(page, symbol);
-      await openMoveTab(page);
-      await page.getByTestId('move-asset-symbol').selectOption(symbol);
-      await page.getByTestId('move-amount').fill('5');
-      await chooseMoveRoute(page, 'reserve', 'account', 'target-first');
-      await page.getByTestId('move-confirm').first().click();
-      await expect
-        .poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
-        .toBeGreaterThan(beforeAccount);
-      accountAfterR2A = await refreshAccountSpendableBalance(page, symbol);
-    });
-
-    await timedStep('move.execute-a2r', async () => {
-      const beforeReserve = await refreshReserveBalance(page, symbol);
-      await openMoveTab(page);
-      await page.getByTestId('move-asset-symbol').selectOption(symbol);
-      await page.getByTestId('move-amount').fill('2');
-      await chooseMoveRoute(page, 'account', 'reserve');
-      await page.getByTestId('move-confirm').first().click();
-      await expect
-        .poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
-        .toBeGreaterThan(beforeReserve);
-      reserveAfterA2R = await refreshReserveBalance(page, symbol);
-      expect(reserveAfterA2R).toBeGreaterThan(beforeReserve);
-    });
-
-    await timedStep('move.execute-e2a', async () => {
-      const beforeAccount = await refreshAccountSpendableBalance(page, symbol);
-
-      await openMoveTab(page);
-      await page.getByTestId('move-asset-symbol').selectOption(symbol);
-      await page.getByTestId('move-amount').fill('3');
-      await chooseMoveRoute(page, 'external', 'account');
-      await page.getByTestId('move-confirm').first().click();
-      await expect
-        .poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
-        .toBeGreaterThan(beforeAccount);
-      accountAfterE2A = await refreshAccountSpendableBalance(page, symbol);
-    });
-
-    await timedStep('move.execute-a2e', async () => {
-      const beforeExternal = await getRpcExternalBalance(page, symbol, eoaAddress);
-      await openMoveTab(page);
-      await page.getByTestId('move-asset-symbol').selectOption(symbol);
-      await page.getByTestId('move-amount').fill('1');
-      await chooseMoveRoute(page, 'account', 'external');
-      await page.getByTestId('move-confirm').first().click();
-      await expect
-        .poll(async () => getRpcExternalBalance(page, symbol, eoaAddress), { timeout: ROUTE_TIMEOUT_MS })
-        .toBeGreaterThan(beforeExternal);
-      externalAfterA2E = await getRpcExternalBalance(page, symbol, eoaAddress);
-      expect(externalAfterA2E).toBeGreaterThan(beforeExternal);
-    });
-
-    await timedStep('move.execute-e2e', async () => {
-      const aliceBefore = await getRpcExternalBalance(page, symbol, eoaAddress);
-      const bobBefore = await getRpcExternalBalance(page, symbol, bobSignerId);
-      await openMoveTab(page);
-      await page.getByTestId('move-asset-symbol').selectOption(symbol);
-      await page.getByTestId('move-amount').fill('1');
-      await chooseMoveRoute(page, 'external', 'external');
-      await page.getByTestId('move-external-recipient').fill(bobSignerId);
-      await page.getByTestId('move-confirm').first().click();
-      await expect
-        .poll(async () => getRpcExternalBalance(page, symbol, eoaAddress), { timeout: ROUTE_TIMEOUT_MS })
-        .toBeLessThan(aliceBefore);
-      await expect
-        .poll(async () => getRpcExternalBalance(page, symbol, bobSignerId), { timeout: ROUTE_TIMEOUT_MS })
-        .toBeGreaterThan(bobBefore);
-    });
-
-    expect(reserveAfterE2R).toBeGreaterThan(0);
-    expect(accountAfterR2A).toBeGreaterThan(0);
-    expect(reserveAfterA2R).toBeGreaterThan(0);
-    expect(accountAfterE2A).toBeGreaterThan(0);
-    expect(externalAfterA2E).toBeGreaterThan(0);
+    await expect.poll(async () => getRpcExternalBalance(page, symbol, aliceEoa), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(aliceBefore);
+    await expect.poll(async () => getRpcExternalBalance(page, symbol, bobSignerId), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(bobBefore);
   });
 
   test('manual settle queues R2C and C2R into local draft batch before broadcast', async ({ page }) => {

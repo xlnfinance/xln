@@ -5,6 +5,8 @@
  * This is the ONLY place that clears storage. All other code calls this.
  */
 
+import { safeStringify } from './safeStringify';
+
 const FATAL_PATTERNS = [
   'FRAME_CONSENSUS_FAILED',
   'Frame chain broken',
@@ -32,6 +34,8 @@ type ResetSignal = {
 let installedResetListeners = false;
 let resetChannel: BroadcastChannel | null = null;
 let activeResetPromise: Promise<void> | null = null;
+let lastFatalDumpFingerprint = '';
+let lastFatalDumpPromise: Promise<void> | null = null;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -93,7 +97,43 @@ export function isFatalRuntimeError(error: unknown): boolean {
 }
 
 /** Collect debug dump for shipping to server before reset */
-function collectDebugDump(triggerError?: unknown): string {
+async function collectPersistedWalDump(): Promise<Record<string, unknown> | null> {
+  try {
+    const xln = (window as any).__xln_instance;
+    const env = (window as any).__xln_env;
+    if (!xln || !env) return null;
+    if (typeof xln.getPersistedLatestHeight !== 'function' || typeof xln.readPersistedFrameJournals !== 'function') {
+      return null;
+    }
+
+    const latestHeight = Number(await xln.getPersistedLatestHeight(env).catch(() => 0));
+    if (!Number.isFinite(latestHeight) || latestHeight <= 0) {
+      return {
+        dbNamespace: env.dbNamespace ?? null,
+        latestHeight: 0,
+        journals: [],
+      };
+    }
+
+    const journals: unknown[] = [];
+    for (let fromHeight = 1; fromHeight <= latestHeight; fromHeight += 250) {
+      const toHeight = Math.min(latestHeight, fromHeight + 249);
+      const chunk = await xln.readPersistedFrameJournals(env, { fromHeight, toHeight, limit: 250 }).catch(() => []);
+      if (Array.isArray(chunk)) journals.push(...chunk);
+    }
+
+    return {
+      dbNamespace: env.dbNamespace ?? null,
+      latestHeight,
+      journals,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Collect debug dump for shipping to server before reset */
+async function collectDebugDump(triggerError?: unknown): Promise<string> {
   const dump: Record<string, unknown> = {
     timestamp: new Date().toISOString(),
     url: window.location.href,
@@ -145,10 +185,29 @@ function collectDebugDump(triggerError?: unknown): string {
         }
       }
       dump.accounts = accounts;
+      dump.frameLogs = Array.isArray(env.frameLogs) ? env.frameLogs : [];
+      dump.cleanLogs = Array.isArray(env.runtimeState?.cleanLogs) ? env.runtimeState.cleanLogs : [];
+      dump.historyTail = Array.isArray(env.history) ? env.history.slice(-8) : [];
+      dump.liveRuntimeSnapshot = safeStringify(env, 2);
     }
   } catch { /* corrupted state — that's why we're resetting */ }
 
-  return JSON.stringify(dump, null, 2);
+  try {
+    const walDump = await collectPersistedWalDump();
+    if (walDump) dump.persistedWal = walDump;
+  } catch { /* */ }
+
+  try {
+    const estimate = await navigator.storage?.estimate?.();
+    if (estimate) {
+      dump.storageEstimate = {
+        quota: estimate.quota ?? null,
+        usage: estimate.usage ?? null,
+      };
+    }
+  } catch { /* */ }
+
+  return safeStringify(dump, 2);
 }
 
 /** Ship debug dump — log + best-effort ship without keeping client persistence */
@@ -156,13 +215,28 @@ async function shipDebugDump(dump: string): Promise<void> {
   // 1. Console (always visible in F12)
   console.log('[RESET] Debug dump:\n', dump);
 
-  // 2. Ship to server relay (best effort, may fail if disconnected)
+  // 2. Ship full dump to debug server (best effort)
+  try {
+    await fetch('/api/debug/dumps', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: dump,
+      keepalive: true,
+    });
+  } catch { /* */ }
+
+  // 3. Emit compact crash marker to relay timeline (best effort)
   try {
     const p2p = (window as any).__xln_env?.runtimeState?.p2p;
     if (p2p && typeof p2p.sendDebugEvent === 'function') {
       p2p.sendDebugEvent({ level: 'error', code: 'CRASH_DUMP', dump: dump.slice(0, 4000) });
     }
   } catch { /* */ }
+}
+
+async function collectAndShipDebugDump(triggerError?: unknown): Promise<void> {
+  const dump = await collectDebugDump(triggerError);
+  await shipDebugDump(dump);
 }
 
 /** Clear all IndexedDB databases (best-effort) */
@@ -321,7 +395,12 @@ async function stopRuntimeBeforeReset(): Promise<void> {
   }
 }
 
-async function performReset(triggerError: unknown, signal: ResetSignal, initiatedHere: boolean): Promise<void> {
+async function performReset(
+  triggerError: unknown,
+  signal: ResetSignal,
+  initiatedHere: boolean,
+  options?: { skipDebugDump?: boolean },
+): Promise<void> {
   if (activeResetPromise) return activeResetPromise;
 
   activeResetPromise = (async () => {
@@ -331,8 +410,9 @@ async function performReset(triggerError: unknown, signal: ResetSignal, initiate
     }, RESET_FORCE_NAVIGATION_MS);
 
     if (initiatedHere) {
-      const dump = collectDebugDump(triggerError);
-      await shipDebugDump(dump);
+      if (!options?.skipDebugDump) {
+        await collectAndShipDebugDump(triggerError);
+      }
       console.log('[RESET] Starting coordinated reset across all tabs...');
       announceReset(signal);
       await sleep(RESET_PREPARATION_DELAY_MS);
@@ -423,6 +503,15 @@ export function installFatalErrorInterceptor(): void {
 
   let prompted = false; // prevent multiple dialogs
 
+  const queueFatalDump = (error: unknown) => {
+    const key = error instanceof Error
+      ? `${error.name}:${error.message}:${error.stack || ''}`
+      : String(error ?? '');
+    if (key && key === lastFatalDumpFingerprint) return;
+    lastFatalDumpFingerprint = key;
+    void collectDebugDump(error).then(shipDebugDump).catch(() => {});
+  };
+
   const handleFatal = (error: unknown) => {
     if (prompted || !isFatalRuntimeError(error)) return;
     prompted = true;
@@ -431,9 +520,16 @@ export function installFatalErrorInterceptor(): void {
     const shortMsg = msg.length > 120 ? msg.slice(0, 120) + '...' : msg;
 
     // Use setTimeout to escape the current call stack (error may be in a catch)
-    setTimeout(() => {
+    setTimeout(async () => {
+      try {
+        lastFatalDumpPromise = queueFatalDump(error);
+        await lastFatalDumpPromise;
+      } catch {
+        // best effort only
+      }
       if (confirm(`Runtime error: ${shortMsg}\n\nReset everything to recover?`)) {
-        resetEverything(error);
+        const signal = createResetSignal(error);
+        await performReset(error, signal, true, { skipDebugDump: true });
       } else {
         prompted = false; // allow re-prompting if user declines
       }

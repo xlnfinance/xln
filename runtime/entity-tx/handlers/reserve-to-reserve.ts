@@ -13,7 +13,7 @@
 
 import type { EntityState, EntityTx, EntityInput } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { initJBatch, batchAddReserveToReserve } from '../../j-batch';
+import { initJBatch, batchAddReserveToReserve, getEffectiveDraftReserveBalance } from '../../j-batch';
 
 export async function handleReserveToReserve(
   entityState: EntityState,
@@ -24,7 +24,12 @@ export async function handleReserveToReserve(
   const outputs: EntityInput[] = [];
 
   // Validate: Do we have enough reserve?
-  const currentReserve = entityState.reserves.get(tokenId) || 0n;
+  const currentReserve = getEffectiveDraftReserveBalance(
+    entityState.entityId,
+    entityState.reserves.get(tokenId) || 0n,
+    entityState.jBatchState?.batch,
+    tokenId,
+  );
   if (currentReserve < amount) {
     const msg = `❌ Insufficient reserve: have ${currentReserve}, need ${amount} token ${tokenId}`;
     addMessage(newState, msg);

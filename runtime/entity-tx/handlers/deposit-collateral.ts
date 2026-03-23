@@ -19,6 +19,7 @@
 import type { EntityState, EntityTx, EntityInput, AccountTx } from '../../types';
 import { QUOTE_EXPIRY_MS } from '../../types';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../../state-helpers';
+import { getEffectiveDraftReserveBalance } from '../../j-batch';
 
 type MempoolOp = { accountId: string; tx: AccountTx };
 
@@ -27,14 +28,21 @@ export async function handleDepositCollateral(
   entityTx: Extract<EntityTx, { type: 'deposit_collateral' }>,
   currentTimestamp: number = 0
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: any[]; mempoolOps?: MempoolOp[] }> {
-  const { counterpartyId, tokenId, amount, rebalanceQuoteId, rebalanceFeeTokenId, rebalanceFeeAmount } = entityTx.data;
-  console.log(`🔍 deposit_collateral: counterpartyId=${counterpartyId}, tokenId=${tokenId}, amount=${amount}, quoteId=${rebalanceQuoteId}`);
+  const { counterpartyId, receivingEntityId, tokenId, amount, rebalanceQuoteId, rebalanceFeeTokenId, rebalanceFeeAmount } = entityTx.data;
+  const receivingEntity = String(receivingEntityId || entityState.entityId || '').trim().toLowerCase();
+  const isLocalReceivingEntity = receivingEntity === String(entityState.entityId || '').trim().toLowerCase();
+  console.log(`🔍 deposit_collateral: counterpartyId=${counterpartyId}, receivingEntity=${receivingEntity.slice(-4)}, tokenId=${tokenId}, amount=${amount}, quoteId=${rebalanceQuoteId}`);
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
 
   // Validate: Do we have enough reserve?
-  const currentReserve = entityState.reserves.get(tokenId) || 0n;
+  const currentReserve = getEffectiveDraftReserveBalance(
+    entityState.entityId,
+    entityState.reserves.get(tokenId) || 0n,
+    entityState.jBatchState?.batch,
+    tokenId,
+  );
   if (currentReserve < amount) {
     console.log(`❌ deposit_collateral: Insufficient reserve ${currentReserve} < ${amount}`);
     addMessage(newState,
@@ -44,7 +52,7 @@ export async function handleDepositCollateral(
   }
 
   // Validate: Does account exist?
-  if (!entityState.accounts.has(counterpartyId)) {
+  if (isLocalReceivingEntity && !entityState.accounts.has(counterpartyId)) {
     console.log(`❌ deposit_collateral: No account with ${counterpartyId}`);
     addMessage(newState,
       `❌ Cannot deposit collateral: no account with ${counterpartyId?.slice(-4)}`
@@ -54,6 +62,10 @@ export async function handleDepositCollateral(
 
   // Validate rebalance fee if present
   if (rebalanceQuoteId !== undefined) {
+    if (!isLocalReceivingEntity) {
+      addMessage(newState, '❌ Rebalance fee unsupported for remote reserve → account deposits');
+      return { newState, outputs };
+    }
     const account = newState.accounts.get(counterpartyId);
     const quote = account?.activeRebalanceQuote;
     console.log(`🔍 deposit_collateral: quote validation - hasAccount=${!!account}, quote=${JSON.stringify(quote ? { quoteId: quote.quoteId, accepted: quote.accepted, feeAmount: String(quote.feeAmount) } : null)}`);
@@ -124,14 +136,14 @@ export async function handleDepositCollateral(
   const { batchAddReserveToCollateral } = await import('../../j-batch');
   batchAddReserveToCollateral(
     newState.jBatchState,
-    entityState.entityId,
+    receivingEntity,
     counterpartyId,
     tokenId,
     amount
   );
 
   addMessage(newState,
-    `📦 Queued R→C: ${amount} token ${tokenId} to account with ${counterpartyId.slice(-4)} (use j_broadcast to commit)`
+    `📦 Queued R→C: ${amount} token ${tokenId} to ${receivingEntity.slice(-4)}↔${counterpartyId.slice(-4)} (use j_broadcast to commit)`
   );
 
   console.log(`✅ deposit_collateral: Added to jBatch for ${entityState.entityId.slice(-4)}`);

@@ -61,6 +61,51 @@ const _abi = [
   {
     inputs: [
       {
+        components: [
+          {
+            internalType: "bytes32",
+            name: "entity",
+            type: "bytes32",
+          },
+          {
+            internalType: "address",
+            name: "contractAddress",
+            type: "address",
+          },
+          {
+            internalType: "uint96",
+            name: "externalTokenId",
+            type: "uint96",
+          },
+          {
+            internalType: "uint8",
+            name: "tokenType",
+            type: "uint8",
+          },
+          {
+            internalType: "uint256",
+            name: "internalTokenId",
+            type: "uint256",
+          },
+          {
+            internalType: "uint256",
+            name: "amount",
+            type: "uint256",
+          },
+        ],
+        internalType: "struct ExternalTokenToReserve",
+        name: "params",
+        type: "tuple",
+      },
+    ],
+    name: "adminRegisterExternalToken",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      {
         internalType: "bytes32",
         name: "leftEntity",
         type: "bytes32",
@@ -161,112 +206,27 @@ const _abi = [
   {
     inputs: [
       {
-        internalType: "bytes32",
-        name: "counterpartyEntity",
-        type: "bytes32",
+        internalType: "bytes",
+        name: "encodedBatch",
+        type: "bytes",
+      },
+      {
+        internalType: "address",
+        name: "entityProviderAddr",
+        type: "address",
+      },
+      {
+        internalType: "bytes",
+        name: "hankoData",
+        type: "bytes",
       },
       {
         internalType: "uint256",
-        name: "tokenId",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "amount",
+        name: "nonce",
         type: "uint256",
       },
     ],
-    name: "prefundAccount",
-    outputs: [
-      {
-        internalType: "bool",
-        name: "",
-        type: "bool",
-      },
-    ],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "bytes32",
-        name: "from",
-        type: "bytes32",
-      },
-      {
-        internalType: "bytes32",
-        name: "to",
-        type: "bytes32",
-      },
-      {
-        internalType: "uint256",
-        name: "tokenId",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "amount",
-        type: "uint256",
-      },
-    ],
-    name: "reserveToReserve",
-    outputs: [
-      {
-        internalType: "bool",
-        name: "",
-        type: "bool",
-      },
-    ],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "bytes32",
-        name: "leftEntity",
-        type: "bytes32",
-      },
-      {
-        internalType: "bytes32",
-        name: "rightEntity",
-        type: "bytes32",
-      },
-      {
-        components: [
-          {
-            internalType: "uint256",
-            name: "tokenId",
-            type: "uint256",
-          },
-          {
-            internalType: "int256",
-            name: "leftDiff",
-            type: "int256",
-          },
-          {
-            internalType: "int256",
-            name: "rightDiff",
-            type: "int256",
-          },
-          {
-            internalType: "int256",
-            name: "collateralDiff",
-            type: "int256",
-          },
-          {
-            internalType: "int256",
-            name: "ondeltaDiff",
-            type: "int256",
-          },
-        ],
-        internalType: "struct IDepository.SettlementDiff[]",
-        name: "diffs",
-        type: "tuple[]",
-      },
-    ],
-    name: "settle",
+    name: "processBatch",
     outputs: [
       {
         internalType: "bool",

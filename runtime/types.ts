@@ -619,6 +619,7 @@ export type EntityTx =
       type: 'deposit_collateral';
       data: {
         counterpartyId: string; // Which account to add collateral to
+        receivingEntityId?: string; // Optional target entity for remote reserve->account funding
         tokenId: number;
         amount: bigint;
         // Optional: rebalance fee collection (atomic with deposit)

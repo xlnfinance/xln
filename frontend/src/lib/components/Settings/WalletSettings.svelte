@@ -210,6 +210,76 @@ function copyMnemonic12() {
   let selectedTheme: ThemeName = 'dark';
   $: selectedTheme = $settings.theme;
 
+  let checkpointHeights: number[] = [];
+  let checkpointRuntimeKey = '';
+  let selectedCheckpointHeight = '';
+  let checkpointLoadError = '';
+  let verifyLoading = false;
+  let verifyResult:
+    | null
+    | {
+        latestHeight: number;
+        checkpointHeight: number;
+        selectedSnapshotHeight: number;
+        restoredHeight: number;
+      } = null;
+  let verifyError = '';
+
+  async function loadCheckpointHeights() {
+    const env = $xlnEnvironment;
+    const runtimeId = String(env?.runtimeId || '').toLowerCase();
+    if (!env || !runtimeId) {
+      checkpointHeights = [];
+      checkpointRuntimeKey = '';
+      selectedCheckpointHeight = '';
+      return;
+    }
+    if (checkpointRuntimeKey === runtimeId && checkpointHeights.length > 0) return;
+    checkpointLoadError = '';
+    try {
+      const heights = await vaultOperations.listPersistedCheckpointHeights(env);
+      checkpointHeights = heights;
+      checkpointRuntimeKey = runtimeId;
+      if (!selectedCheckpointHeight || !heights.includes(Number(selectedCheckpointHeight))) {
+        selectedCheckpointHeight = heights.length > 0 ? String(heights[heights.length - 1]) : '';
+      }
+    } catch (error) {
+      checkpointHeights = [];
+      checkpointRuntimeKey = runtimeId;
+      checkpointLoadError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  async function verifyRuntimeChainNow() {
+    const env = $xlnEnvironment;
+    const runtimeId = String(env?.runtimeId || '').trim() || null;
+    const runtimeSeed = $activeVault?.seed || null;
+    if (!runtimeId || !runtimeSeed) return;
+    verifyLoading = true;
+    verifyError = '';
+    verifyResult = null;
+    try {
+      const selectedHeight = Number(selectedCheckpointHeight || 0);
+      const result = await vaultOperations.verifyRuntimeChain(runtimeId, runtimeSeed, {
+        fromSnapshotHeight: Number.isFinite(selectedHeight) && selectedHeight > 0 ? selectedHeight : undefined,
+      });
+      verifyResult = {
+        latestHeight: result.latestHeight,
+        checkpointHeight: result.checkpointHeight,
+        selectedSnapshotHeight: result.selectedSnapshotHeight,
+        restoredHeight: result.restoredHeight,
+      };
+    } catch (error) {
+      verifyError = error instanceof Error ? error.message : String(error);
+    } finally {
+      verifyLoading = false;
+    }
+  }
+
+  $: if (activeTab === 'advanced' && $xlnEnvironment?.runtimeId) {
+    void loadCheckpointHeights();
+  }
+
   function handleThemeChange(event: Event) {
     const target = event.currentTarget as HTMLSelectElement;
     settingsOperations.setTheme(target.value as ThemeName);
@@ -540,6 +610,52 @@ function copyMnemonic12() {
           Clear All Data
         </button>
         <p class="setting-hint">Removes all wallets, accounts, and runtime state. Cannot be undone.</p>
+      </div>
+
+      <div class="section">
+        <h3>Runtime Verify</h3>
+
+        <label class="setting-row">
+          <span>Start from snapshot</span>
+          <select
+            bind:value={selectedCheckpointHeight}
+            on:focus={() => void loadCheckpointHeights()}
+            data-testid="settings-verify-checkpoint"
+          >
+            {#if checkpointHeights.length === 0}
+              <option value="">No snapshots</option>
+            {:else}
+              {#each checkpointHeights as height}
+                <option value={String(height)}>
+                  {height === 1 ? 'Genesis snapshot (frame 1)' : `Snapshot ${height}`}
+                </option>
+              {/each}
+            {/if}
+          </select>
+        </label>
+        <p class="setting-hint">Runs isolated replay from the selected snapshot to latest frame and compares the final state hash. Live runtime is untouched.</p>
+
+        <button
+          class="btn"
+          on:click={verifyRuntimeChainNow}
+          disabled={verifyLoading || checkpointHeights.length === 0 || !$xlnEnvironment?.runtimeId || !$activeVault?.seed}
+          data-testid="settings-verify-runtime-chain"
+        >
+          {verifyLoading ? 'Verifying...' : 'Verify Chain'}
+        </button>
+
+        {#if checkpointLoadError}
+          <p class="setting-hint error-text">{checkpointLoadError}</p>
+        {/if}
+        {#if verifyError}
+          <p class="setting-hint error-text">{verifyError}</p>
+        {/if}
+        {#if verifyResult}
+          <p class="setting-hint">
+            Verified through frame {verifyResult.latestHeight} from {verifyResult.selectedSnapshotHeight === 1 ? 'genesis snapshot' : `snapshot ${verifyResult.selectedSnapshotHeight}`}.
+            Restored height {verifyResult.restoredHeight}.
+          </p>
+        {/if}
       </div>
     {/if}
   </div>
@@ -1137,6 +1253,36 @@ function copyMnemonic12() {
 
   .slider-row input[type="range"] {
     width: 120px;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 2px;
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.7), rgba(113, 113, 122, 0.3));
+    border-radius: 1px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  .slider-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #fbbf24;
+    border: 2px solid #0d0e12;
+    border-radius: 2px;
+    transform: rotate(45deg);
+    cursor: pointer;
+    box-shadow: 0 0 4px rgba(251, 191, 36, 0.3);
+  }
+
+  .slider-row input[type="range"]::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: #fbbf24;
+    border: 2px solid #0d0e12;
+    border-radius: 2px;
+    transform: rotate(45deg);
+    cursor: pointer;
+    box-shadow: 0 0 4px rgba(251, 191, 36, 0.3);
   }
 
   .slider-value {
@@ -1159,6 +1305,10 @@ function copyMnemonic12() {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.3);
     line-height: 1.4;
+  }
+
+  .setting-hint.error-text {
+    color: rgba(255, 120, 120, 0.9);
   }
 
   /* Empty State */

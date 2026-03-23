@@ -44,7 +44,7 @@ export type {
   EntityInput,
   RoutedEntityInput,
 } from './types';
-export type { PersistedFrameJournal } from './wal';
+export type { PersistedFrameJournal } from './wal/store';
 
 export type { Profile, GossipLayer } from './networking/gossip';
 export type { PaymentRoute } from './routing/pathfinding';
@@ -95,14 +95,24 @@ import type {
   RoutedEntityInput,
 } from './types';
 import type { JAdapter } from './jadapter/types';
-import type { PersistedFrameJournal } from './wal';
+import type { PersistedFrameJournal } from './wal/store';
 
 export type QueueEntityInputPayload = {
   type: string;
 } & Record<string, unknown>;
 
 export type LoadEnvFromDbOptions = {
-  fromGenesis?: boolean;
+  fromSnapshotHeight?: number;
+};
+
+export type VerifyRuntimeChainResult = {
+  ok: true;
+  latestHeight: number;
+  checkpointHeight: number;
+  selectedSnapshotHeight: number;
+  restoredHeight: number;
+  expectedStateHash: string;
+  actualStateHash: string;
 };
 
 export type BrowserVMOverride = BrowserVMInstance | { browserVM?: BrowserVMInstance | null } | null;
@@ -179,7 +189,7 @@ export type BrowserVMInstance = {
   }>;
   syncAllCollaterals?: (
     accountPairs: Array<{ entityId: string; counterpartyId: string }>,
-    tokenId: number
+    tokenIds: readonly number[]
   ) => Promise<Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>>;
   getBlockHeight?: () => bigint;
   // Debug helpers
@@ -350,6 +360,7 @@ export interface XLNModule {
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>;
   enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
   startP2P: (env: Env, config?: P2PConfig) => unknown;
+  startJurisdictionWatchers: (env: Env) => void;
   stopP2P: (env: Env) => void;
   getP2P: (env: Env) => unknown;
   getP2PState: (env: Env) => { connected: boolean; reconnect: { attempt: number; nextAt: number } | null; queue: { targetCount: number; totalMessages: number; oldestEntryAge: number; perTarget: Record<string, number> } };
@@ -387,6 +398,12 @@ export interface XLNModule {
     options?: LoadEnvFromDbOptions,
   ) => Promise<Env | null>;
   getPersistedLatestHeight: (env: Env) => Promise<number>;
+  listPersistedCheckpointHeights: (env: Env) => Promise<number[]>;
+  verifyRuntimeChain: (
+    runtimeId?: string | null,
+    runtimeSeed?: string | null,
+    options?: { fromSnapshotHeight?: number },
+  ) => Promise<VerifyRuntimeChainResult>;
   readPersistedFrameJournal: (env: Env, height: number) => Promise<PersistedFrameJournal | null>;
   readPersistedFrameJournals: (
     env: Env,

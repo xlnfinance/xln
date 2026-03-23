@@ -76,7 +76,7 @@
             <!-- Accounts -->
             <div class="field">
               <div class="field-label">Accounts</div>
-              <div class="field-value">{profile.accounts.length} bilateral channels</div>
+              <div class="field-value">{profile.accounts.length} bilateral accounts</div>
             </div>
 
             <!-- Full Metadata (expandable) -->

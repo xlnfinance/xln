@@ -21,13 +21,13 @@ const ERC20_TRANSFER = new Interface([
   'function transfer(address to, uint256 amount) returns (bool)',
 ]);
 
-async function timedMicros<T>(label: string, fn: () => Promise<T>): Promise<T> {
+async function timedMillis<T>(label: string, fn: () => Promise<T>): Promise<T> {
   const started = process.hrtime.bigint();
   try {
     return await fn();
   } finally {
-    const elapsedMicros = (process.hrtime.bigint() - started) / 1000n;
-    console.log(`[E2E-TIMING-US] ${label} ${elapsedMicros.toString()}us`);
+    const elapsedMillis = Number(process.hrtime.bigint() - started) / 1_000_000;
+    console.log(`[E2E-TIMING-MS] ${label} ${elapsedMillis.toFixed(3)}ms`);
   }
 }
 
@@ -59,6 +59,17 @@ async function openMoveTab(page: Page): Promise<void> {
   await page.getByTestId('asset-tab-move').first().click();
   await expect(page.getByTestId('move-route-summary').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('move-committed-line').first()).toBeVisible({ timeout: 20_000 });
+}
+
+async function waitForMoveReady(page: Page): Promise<void> {
+  const confirm = page.getByTestId('move-confirm').first();
+  await expect
+    .poll(async () => {
+      if (!(await confirm.isDisabled())) return 'enabled';
+      const error = await page.locator('.move-summary-progress.error').first().textContent().catch(() => '');
+      return String(error || 'disabled').trim() || 'disabled';
+    }, { timeout: 10_000 })
+    .toBe('enabled');
 }
 
 async function chooseMoveRoute(
@@ -188,12 +199,13 @@ test('move external to external sends directly from signer wallet', async ({ pag
   const aliceBefore = await getRpcExternalBalance(page, symbol, aliceEoa);
   const bobBefore = await getRpcExternalBalance(page, symbol, bobSignerId);
 
-  await timedMicros('move.direct-e2e', async () => {
+  await timedMillis('move.direct-e2e', async () => {
     await openMoveTab(page);
     await page.getByTestId('move-asset-symbol').selectOption(symbol);
     await page.getByTestId('move-amount').fill('1');
     await chooseMoveRoute(page, 'external', 'external');
     await page.getByTestId('move-external-recipient').fill(bobSignerId);
+    await waitForMoveReady(page);
     await page.getByTestId('move-confirm').first().click();
 
     await expect.poll(async () => getRpcExternalBalanceRaw(page, symbol, aliceEoa), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(aliceBeforeRaw);

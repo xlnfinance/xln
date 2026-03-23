@@ -33,9 +33,9 @@
   type LevelClickDetail = { side: BookSide; priceTicks: string; displayPrice: string; size: number; accountIds: string[] };
   type SnapshotDetail = {
     pairId: string;
-    bids: Array<{ price: number; size: number; total: number }>;
-    asks: Array<{ price: number; size: number; total: number }>;
-    spread: number | null;
+    bids: Array<{ price: bigint; size: number; total: number }>;
+    asks: Array<{ price: bigint; size: number; total: number }>;
+    spread: bigint | null;
     spreadPercent: string;
     sourceCount: number;
     updatedAt: number;
@@ -44,9 +44,9 @@
     hubEntityId: string;
     pairId: string;
     depth: number;
-    bids: Array<{ price: number; size: number; total: number }>;
-    asks: Array<{ price: number; size: number; total: number }>;
-    spread: number | null;
+    bids: Array<{ price: bigint | string; size: number; total: number }>;
+    asks: Array<{ price: bigint | string; size: number; total: number }>;
+    spread: bigint | string | null;
     spreadPercent: string;
     hubUpdatedAt?: number;
     updatedAt: number;
@@ -56,19 +56,15 @@
     payload?: MarketSnapshotPayload;
   };
   const dispatch = createEventDispatcher<{ levelclick: LevelClickDetail; snapshot: SnapshotDetail }>();
-  const MAX_SAFE_TICKS = Number.MAX_SAFE_INTEGER;
-
   interface OrderLevel {
-    // Price is in integer ticks and intentionally stored as JS number.
-    // Assumption: price ticks stay within MAX_SAFE_TICKS (2^53 - 1).
-    price: number;
+    price: bigint;
     size: number;
     total: number;
     owners?: string[];
     accountIds?: string[];
   }
   interface RawSourceLevel {
-    price: number;
+    price: bigint;
     size: number;
     sourceId: string;
     owners?: string[];
@@ -76,11 +72,17 @@
 
   let bids: OrderLevel[] = [];
   let asks: OrderLevel[] = [];
-  let spread: number | null = null;
+  let spread: bigint | null = null;
   let spreadPercent: string = '-';
   let lastUpdate = 0;
   let sourceCount = 0;
   let sourceLabel = 'None';
+
+  // Cumulative hover: index of hovered row (-1 = none).
+  // For asks (reversed display): hovering row i highlights rows [i..last] (toward center).
+  // For bids: hovering row i highlights rows [0..i] (from center down).
+  let hoverAskDisplayIdx = -1;
+  let hoverBidIdx = -1;
 
   let pollInterval: number | null = null;
   const POLL_MS = 1000;
@@ -164,12 +166,21 @@
     return `${protocol}//${window.location.host}/relay`;
   }
 
-  function toSafePriceTicks(value: unknown): number | null {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return null;
-    if (!Number.isInteger(n)) return null;
-    if (Math.abs(n) > MAX_SAFE_TICKS) return null;
-    return n;
+  function toPriceTicks(value: unknown): bigint | null {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value) || !Number.isInteger(value)) return null;
+      return BigInt(value);
+    }
+    if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
+      return BigInt(value.trim());
+    }
+    return null;
+  }
+
+  function readBookTickValue(value: unknown, fallback: bigint): bigint {
+    const parsed = toPriceTicks(value);
+    return parsed && parsed > 0n ? parsed : fallback;
   }
 
   function wsMessageId(prefix: string): string {
@@ -203,13 +214,14 @@
     book: any,
     sourceHubId: string,
     side: 'bid' | 'ask',
-    sideSizes: Map<number, number>,
-    sideOwners: Map<number, Set<string>>,
-    sideSources: Map<number, Set<string>>,
+    sideSizes: Map<bigint, number>,
+    sideOwners: Map<bigint, Set<string>>,
+    sideSources: Map<bigint, Set<string>>,
     rawLevels?: RawSourceLevel[],
   ) {
     const { orderQtyLots, orderOwnerIdx, orderNext, orderActive, owners, params } = book;
-    const { pmin, tick } = params || { pmin: 0, tick: 1 };
+    const pmin = readBookTickValue(params?.pmin, 0n);
+    const tick = readBookTickValue(params?.tick, 1n);
     const levelHead = side === 'bid' ? (book.levelHeadBid || []) : (book.levelHeadAsk || []);
     const bitmap = side === 'bid' ? (book.bitmapBid || []) : (book.bitmapAsk || []);
     const levels = Number(book.levels || 0);
@@ -235,7 +247,7 @@
       }
 
       if (levelSize > 0) {
-        const price = toSafePriceTicks(Number(pmin) + idx * Number(tick));
+        const price = toPriceTicks(pmin + (BigInt(idx) * tick));
         if (price === null) {
           continue;
         }
@@ -263,13 +275,17 @@
   }
 
   function buildOrderLevels(
-    sideSizes: Map<number, number>,
-    sideOwners: Map<number, Set<string>>,
-    sideSources: Map<number, Set<string>>,
+    sideSizes: Map<bigint, number>,
+    sideOwners: Map<bigint, Set<string>>,
+    sideSources: Map<bigint, Set<string>>,
     side: 'bid' | 'ask'
   ): OrderLevel[] {
     const sorted = Array.from(sideSizes.entries())
-      .sort((a, b) => side === 'bid' ? b[0] - a[0] : a[0] - b[0])
+      .sort((a, b) => {
+        if (a[0] === b[0]) return 0;
+        if (side === 'bid') return a[0] > b[0] ? -1 : 1;
+        return a[0] < b[0] ? -1 : 1;
+      })
       .slice(0, depth);
 
     let cumulative = 0;
@@ -288,9 +304,9 @@
     const sorted = [...levels]
       .sort((a, b) => {
         if (side === 'bid') {
-          if (b.price !== a.price) return b.price - a.price;
+          if (b.price !== a.price) return b.price > a.price ? 1 : -1;
         } else if (a.price !== b.price) {
-          return a.price - b.price;
+          return a.price < b.price ? -1 : 1;
         }
         return a.sourceId.localeCompare(b.sourceId);
       })
@@ -309,35 +325,35 @@
     });
   }
 
-  function getSelectedPriceStepTicks(): number {
+  function getSelectedPriceStepTicks(): bigint {
     const scale = Number.isFinite(priceScale) && priceScale > 0 ? priceScale : 1;
     const selected = Number(selectedPriceStep);
     const stepDisplay = Number.isFinite(selected) && selected > 0 ? selected : 1;
-    return Math.max(1, Math.round(stepDisplay * scale));
+    return BigInt(Math.max(1, Math.round(stepDisplay * scale)));
   }
 
-  function getBestPrice(sideSizes: Map<number, number>, side: 'bid' | 'ask'): number | null {
-    let best: number | null = null;
+  function getBestPrice(sideSizes: Map<bigint, number>, side: 'bid' | 'ask'): bigint | null {
+    let best: bigint | null = null;
     for (const [price, size] of sideSizes.entries()) {
-      if (!Number.isFinite(price) || !Number.isFinite(size) || size <= 0) continue;
+      if (!Number.isFinite(size) || size <= 0) continue;
       if (best === null) best = price;
-      else if (side === 'bid') best = Math.max(best, price);
-      else best = Math.min(best, price);
+      else if (side === 'bid') best = best > price ? best : price;
+      else best = best < price ? best : price;
     }
     return best;
   }
 
-  function computeSmartStep(rawBestBid: number | null, rawBestAsk: number | null): string {
+  function computeSmartStep(rawBestBid: bigint | null, rawBestAsk: bigint | null): string {
     const numericSteps = PRICE_STEP_OPTIONS.map(Number);
     if (canonicalPairId() === '1/3') {
       return '0.0001';
     }
-    if (!Number.isFinite(rawBestBid || NaN) || !Number.isFinite(rawBestAsk || NaN) || !rawBestBid || !rawBestAsk || rawBestAsk <= rawBestBid) {
+    if (rawBestBid === null || rawBestAsk === null || rawBestAsk <= rawBestBid) {
       return '1';
     }
     const scale = Number.isFinite(priceScale) && priceScale > 0 ? priceScale : 1;
-    const spreadDisplay = (rawBestAsk - rawBestBid) / scale;
-    const midDisplay = ((rawBestAsk + rawBestBid) / 2) / scale;
+    const spreadDisplay = Number(rawBestAsk - rawBestBid) / scale;
+    const midDisplay = Number(rawBestAsk + rawBestBid) / 2 / scale;
 
     let smart = midDisplay >= 1000 ? 1 : midDisplay >= 100 ? 0.1 : 0.01;
     smart = Math.max(numericSteps[0] || 0.01, smart);
@@ -373,24 +389,24 @@
   }
 
   function aggregateSideLevels(
-    sideSizes: Map<number, number>,
-    sideOwners: Map<number, Set<string>>,
-    sideSources: Map<number, Set<string>>,
+    sideSizes: Map<bigint, number>,
+    sideOwners: Map<bigint, Set<string>>,
+    sideSources: Map<bigint, Set<string>>,
     side: 'bid' | 'ask',
-  ): { sizes: Map<number, number>; owners: Map<number, Set<string>>; sources: Map<number, Set<string>> } {
+  ): { sizes: Map<bigint, number>; owners: Map<bigint, Set<string>>; sources: Map<bigint, Set<string>> } {
     const stepTicks = getSelectedPriceStepTicks();
     if (stepTicks <= 1) {
       return { sizes: sideSizes, owners: sideOwners, sources: sideSources };
     }
 
-    const aggregatedSizes = new Map<number, number>();
-    const aggregatedOwners = new Map<number, Set<string>>();
-    const aggregatedSources = new Map<number, Set<string>>();
+    const aggregatedSizes = new Map<bigint, number>();
+    const aggregatedOwners = new Map<bigint, Set<string>>();
+    const aggregatedSources = new Map<bigint, Set<string>>();
 
     for (const [price, size] of sideSizes.entries()) {
       const bucketPrice = side === 'bid'
-        ? Math.floor(price / stepTicks) * stepTicks
-        : Math.ceil(price / stepTicks) * stepTicks;
+        ? (price / stepTicks) * stepTicks
+        : (((price + stepTicks - 1n) / stepTicks) * stepTicks);
       aggregatedSizes.set(bucketPrice, (aggregatedSizes.get(bucketPrice) || 0) + size);
       if (showOwners) {
         const srcOwners = sideOwners.get(price);
@@ -426,7 +442,7 @@
     const bestAsk = asks[0];
     if (bestBid && bestAsk) {
       spread = bestAsk.price - bestBid.price;
-      spreadPercent = ((spread / bestAsk.price) * 100).toFixed(3);
+      spreadPercent = formatPercent3(spread, bestAsk.price);
     } else {
       spread = null;
       spreadPercent = '-';
@@ -446,14 +462,22 @@
     });
   }
 
+  function formatPercent3(numerator: bigint, denominator: bigint): string {
+    if (numerator <= 0n || denominator <= 0n) return '0.000';
+    const scaled = (numerator * 100_000n) / denominator;
+    const whole = scaled / 1_000n;
+    const frac = (scaled % 1_000n).toString().padStart(3, '0');
+    return `${whole.toString()}.${frac}`;
+  }
+
   function applyStreamOrderbookIfFresh(sources: string[], pair: string): boolean {
     if (Date.now() > streamFreshUntil) return false;
-    const bidSizes = new Map<number, number>();
-    const askSizes = new Map<number, number>();
-    const bidOwners = new Map<number, Set<string>>();
-    const askOwners = new Map<number, Set<string>>();
-    const bidSources = new Map<number, Set<string>>();
-    const askSources = new Map<number, Set<string>>();
+      const bidSizes = new Map<bigint, number>();
+      const askSizes = new Map<bigint, number>();
+      const bidOwners = new Map<bigint, Set<string>>();
+      const askOwners = new Map<bigint, Set<string>>();
+      const bidSources = new Map<bigint, Set<string>>();
+      const askSources = new Map<bigint, Set<string>>();
     const rawBidLevels: RawSourceLevel[] = [];
     const rawAskLevels: RawSourceLevel[] = [];
     let found = 0;
@@ -469,7 +493,7 @@
         newestHubUpdate = hubUpdatedAt;
       }
       for (const level of snapshot.bids || []) {
-        const price = toSafePriceTicks(level.price);
+        const price = toPriceTicks(level.price);
         const size = Number(level.size || 0);
         if (price === null || !Number.isFinite(size) || size <= 0) continue;
         hasAnyLevel = true;
@@ -480,7 +504,7 @@
         bidSources.set(price, sourcesSet);
       }
       for (const level of snapshot.asks || []) {
-        const price = toSafePriceTicks(level.price);
+        const price = toPriceTicks(level.price);
         const size = Number(level.size || 0);
         if (price === null || !Number.isFinite(size) || size <= 0) continue;
         hasAnyLevel = true;
@@ -523,12 +547,12 @@
 
     const env = $envStore;
     if (!env) return;
-    const bidSizes = new Map<number, number>();
-    const askSizes = new Map<number, number>();
-    const bidOwners = new Map<number, Set<string>>();
-    const askOwners = new Map<number, Set<string>>();
-    const bidSources = new Map<number, Set<string>>();
-    const askSources = new Map<number, Set<string>>();
+    const bidSizes = new Map<bigint, number>();
+    const askSizes = new Map<bigint, number>();
+    const bidOwners = new Map<bigint, Set<string>>();
+    const askOwners = new Map<bigint, Set<string>>();
+    const bidSources = new Map<bigint, Set<string>>();
+    const askSources = new Map<bigint, Set<string>>();
     const rawBidLevels: RawSourceLevel[] = [];
     const rawAskLevels: RawSourceLevel[] = [];
     let newestHubUpdate = 0;
@@ -578,11 +602,6 @@
     return -1;
   }
 
-  function scaledPrice(price: number): number {
-    const scale = Number.isFinite(priceScale) && priceScale > 0 ? priceScale : 1;
-    return price / scale;
-  }
-
   function priceDisplayDecimals(): number {
     const scale = Number.isFinite(priceScale) && priceScale > 0 ? Math.trunc(priceScale) : 1;
     const text = String(scale);
@@ -590,12 +609,13 @@
     return Math.max(0, text.length - 1);
   }
 
-  function formatPrice(price: number): string {
-    const value = scaledPrice(price);
-    if (!Number.isFinite(value)) return '-';
+  function formatPrice(price: bigint): string {
     const decimals = priceDisplayDecimals();
-    const fixed = value.toFixed(decimals);
-    return fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed;
+    const scale = 10n ** BigInt(decimals);
+    const whole = price / scale;
+    const frac = price % scale;
+    if (frac === 0n) return whole.toString();
+    return `${whole.toString()}.${frac.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
   }
 
   function scaledSize(size: number): number {
@@ -611,7 +631,7 @@
   }
 
   function emitLevelClick(side: BookSide, level: OrderLevel) {
-    if (!Number.isFinite(level.price) || !Number.isFinite(level.size)) return;
+    if (!Number.isFinite(level.size)) return;
     dispatch('levelclick', {
       side,
       priceTicks: String(level.price),
@@ -672,6 +692,7 @@
     streamFreshUntil = 0;
     requestMarketSnapshot();
     extractOrderbook();
+    lastUpdate = Date.now();
   }
 
   function handlePriceStepChange(): void {
@@ -843,13 +864,17 @@
     </div>
 
     <!-- Asks (sells) - shown in reverse order, lowest ask at bottom -->
-    <div class="asks-section">
+    <div class="asks-section" on:mouseleave={() => { hoverAskDisplayIdx = -1; }}>
       {#each [...asks].reverse() as ask, i}
         <div
           class="row ask-row clickable"
           class:with-sources={showSources}
+          class:cumulative-highlight={hoverAskDisplayIdx >= 0 && i >= hoverAskDisplayIdx}
+          class:cumulative-first={hoverAskDisplayIdx >= 0 && i === hoverAskDisplayIdx}
+          class:cumulative-last={hoverAskDisplayIdx >= 0 && i >= hoverAskDisplayIdx && i === asks.length - 1}
           role="button"
           tabindex="0"
+          on:mouseenter={() => { hoverAskDisplayIdx = i; }}
           on:click={() => emitLevelClick('ask', ask)}
           on:keydown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -904,18 +929,22 @@
       }}
     >
       {#if spread !== null}
-        <span class="mid-price">{formatPrice((preferredClickSide === 'bid' ? bids[0]?.price : asks[0]?.price) || 0)}</span>
+        <span class="mid-price">{formatPrice((preferredClickSide === 'bid' ? bids[0]?.price : asks[0]?.price) || 0n)}</span>
       {/if}
     </div>
 
     <!-- Bids (buys) -->
-    <div class="bids-section">
+    <div class="bids-section" on:mouseleave={() => { hoverBidIdx = -1; }}>
       {#each bids as bid, i}
         <div
           class="row bid-row clickable"
           class:with-sources={showSources}
+          class:cumulative-highlight={hoverBidIdx >= 0 && i <= hoverBidIdx}
+          class:cumulative-first={hoverBidIdx >= 0 && i === 0}
+          class:cumulative-last={hoverBidIdx >= 0 && i === hoverBidIdx}
           role="button"
           tabindex="0"
+          on:mouseenter={() => { hoverBidIdx = i; }}
           on:click={() => emitLevelClick('bid', bid)}
           on:keydown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -966,28 +995,28 @@
   </div>
 
   <div class="footer">
-    <span class="hub-label">{sourceLabel}</span>
-    <button
-      class="update-time refresh-link"
-      type="button"
+    <span
+      class="update-label"
       on:click={refreshOrderbookNow}
-      title="Request fresh orderbook snapshot"
-      aria-label="Refresh orderbook"
-    >
-      Updated: {formatUpdatedAt(lastUpdate)}
-    </button>
+      on:keydown={(e) => e.key === 'Enter' && refreshOrderbookNow()}
+      role="button"
+      tabindex="0"
+      title="Click to refresh orderbook"
+    >Updated: {formatUpdatedAt(lastUpdate)}</span>
   </div>
 </div>
 
 <style>
   .orderbook-panel {
-    background: var(--bg-secondary, #1a1a2e);
-    border: 1px solid var(--border-color, #333);
-    border-radius: 8px;
-    padding: 12px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 12px;
-    min-width: 280px;
+    font-size: 11px;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
   }
 
   .header {
@@ -1098,19 +1127,19 @@
 
   .columns-row {
     display: grid;
-    grid-template-columns: 1fr 90px 110px;
-    gap: 8px;
-    padding: 2px 6px 5px;
+    grid-template-columns: 1fr 80px 80px;
+    gap: 6px;
+    padding: 2px 6px 3px;
     color: var(--text-tertiary, #666);
-    font-size: 10px;
+    font-size: 9px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    margin-bottom: 2px;
+    margin-bottom: 1px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
 
   .columns-row.with-sources {
-    grid-template-columns: 52px 1fr 90px 110px;
+    grid-template-columns: 32px 1fr 80px 80px;
   }
 
   .head-label:nth-last-child(2),
@@ -1122,12 +1151,13 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
+    position: relative;
   }
 
   .spread-indicator {
     display: flex;
     justify-content: center;
-    padding: 5px 0;
+    padding: 3px 0;
     border-top: 1px solid var(--border-color, #333);
     border-bottom: 1px solid var(--border-color, #333);
     margin: 3px 0;
@@ -1148,16 +1178,17 @@
 
   .row {
     display: grid;
-    grid-template-columns: 1fr 90px 110px;
-    gap: 8px;
-    padding: 2px 6px;
+    grid-template-columns: 1fr 80px 80px;
+    gap: 6px;
+    padding: 1px 6px;
     position: relative;
     align-items: center;
-    min-height: 26px;
+    min-height: 18px;
+    font-size: 11px;
   }
 
   .row.with-sources {
-    grid-template-columns: 52px 1fr 90px 110px;
+    grid-template-columns: 32px 1fr 80px 80px;
   }
 
   .sources-cell {
@@ -1169,12 +1200,12 @@
   }
 
   .source-icon {
-    width: 18px;
-    height: 18px;
+    width: 14px;
+    height: 14px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 6px;
+    border-radius: 4px;
     border: 1px solid rgba(251, 191, 36, 0.16);
     background: rgba(251, 191, 36, 0.06);
     overflow: hidden;
@@ -1200,7 +1231,32 @@
   }
 
   .row.clickable:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .row.cumulative-highlight {
+    background: rgba(255, 255, 255, 0.03);
+    border-left: 1px dashed rgba(255, 255, 255, 0.12);
+    border-right: 1px dashed rgba(255, 255, 255, 0.12);
+    border-top: none;
+    border-bottom: none;
+    border-radius: 0;
+  }
+
+  .row.cumulative-highlight.cumulative-first {
+    border-top: 1px dashed rgba(255, 255, 255, 0.12);
+    border-top-left-radius: 3px;
+    border-top-right-radius: 3px;
+  }
+
+  .row.cumulative-highlight.cumulative-last {
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.12);
+    border-bottom-left-radius: 3px;
+    border-bottom-right-radius: 3px;
+  }
+
+  .row.cumulative-highlight:hover {
+    background: rgba(255, 255, 255, 0.06);
   }
 
   .row.clickable:focus-visible {
@@ -1260,34 +1316,21 @@
 
   .footer {
     display: flex;
-    justify-content: space-between;
-    margin-top: 8px;
-    padding-top: 8px;
+    justify-content: flex-end;
+    margin-top: 4px;
+    padding-top: 4px;
     border-top: 1px solid var(--border-color, #333);
     font-size: 10px;
     color: var(--text-tertiary, #555);
   }
 
-  .refresh-link {
-    border: none;
-    background: transparent;
-    color: inherit;
-    font-family: inherit;
-    font-size: inherit;
+  .update-label {
     cursor: pointer;
-    padding: 0;
+    color: var(--text-tertiary, #555);
   }
 
-  .refresh-link:hover {
+  .update-label:hover {
     color: var(--text-secondary, #aaa);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-
-  .refresh-link:focus-visible {
-    outline: 1px solid rgba(251, 191, 36, 0.8);
-    outline-offset: 2px;
-    border-radius: 4px;
   }
 
   .ratio-row {

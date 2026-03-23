@@ -411,7 +411,7 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {
     const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
     await approveTx.wait();
 
-    const registerTx = await jadapter.depository.connect(signer).externalTokenToReserve({
+    const registerTx = await (jadapter.depository.connect(signer) as any).adminRegisterExternalToken({
       entity: ethers.ZeroHash,
       contractAddress: tokenAddress,
       externalTokenId: 0,

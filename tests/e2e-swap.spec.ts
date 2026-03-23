@@ -1128,6 +1128,10 @@ async function executeOrderbookClickFill(
         intervals: [100, 250, 500],
       })
       .toBe(0);
+    const fillModal = page.locator('.swap-modal').first();
+    await expect(fillModal).toBeVisible({ timeout: 10_000 });
+    await expect(fillModal).toContainText(/Swap Filled/i, { timeout: 10_000 });
+    await fillModal.getByRole('button', { name: /Close/i }).click();
   } catch (error) {
     const debugState = await readOrderbookDebug().catch(() => null);
     console.error(`[E2E-ORDERBOOK-DEBUG] ${clickTarget} recent logs:\n${orderbookLogs.join('\n')}`);
@@ -1594,6 +1598,33 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
         intervals: [100, 250, 500, 1000],
       })
       .toBe(0);
+  });
+
+  test('swap rejects price beyond 30% from current orderbook', async ({ page }) => {
+    const accountRef = await prepareOrderbookClickTest(page);
+    const pairSelect = page.getByTestId('swap-pair-select').first();
+    await expect(pairSelect).toBeVisible({ timeout: 20_000 });
+    await pairSelect.selectOption({ label: 'WETH/USDC' });
+    await page.waitForTimeout(250);
+
+    const buySideButton = page.getByTestId('swap-side-buy').first();
+    const amountInput = page.getByTestId('swap-order-amount').first();
+    const priceInput = page.getByTestId('swap-order-price').first();
+    const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+    await buySideButton.click();
+
+    const asks = page.locator('.swap-panel .orderbook-panel .asks-section .row.clickable');
+    await expect(asks.last()).toBeVisible({ timeout: 20_000 });
+    const bestAskText = String(await asks.last().locator('.price').textContent() || '').trim();
+    const bestAsk = Number.parseFloat(normalizeDisplayedPriceText(bestAskText));
+    expect(Number.isFinite(bestAsk) && bestAsk > 0, `best ask missing: ${bestAskText}`).toBe(true);
+
+    await amountInput.fill('10');
+    await priceInput.fill(String((bestAsk * 1.4).toFixed(4)));
+    await expect(placeButton).toBeDisabled({ timeout: 10_000 });
+    await expect(page.locator('.swap-panel .form-error').first()).toContainText(/within 30% of the current orderbook/i, {
+      timeout: 10_000,
+    });
   });
 
 });

@@ -181,8 +181,8 @@ export async function handleSwapResolve(
     events.push(`💱 Swap filled: ${filledGive} token${offer.giveTokenId} for ${filledWant} token${offer.wantTokenId}`);
   }
 
-  // 6b. Apply rebate (price improvement refund to maker/offer-creator)
-  // Hub matched at better prices, returns portion of spread to maker
+  // 6b. Apply rebate (price improvement refund to the offer creator / aggressive taker)
+  // The hub matched against a better resting book price and returns the full spread improvement.
   if (hasRebate) {
     let rebateDelta = accountMachine.deltas.get(rebateTokenId!);
     if (!rebateDelta) {
@@ -192,7 +192,7 @@ export async function handleSwapResolve(
     rebateDelta.leftHold ??= 0n;
     rebateDelta.rightHold ??= 0n;
 
-    // Rebate = hub pays maker. Hub is counterparty (opposite of makerIsLeft).
+    // Rebate = hub pays the offer creator. Hub is counterparty (opposite of makerIsLeft).
     if (offer.makerIsLeft) {
       // Hub (right) pays maker (left) → offdelta INCREASES
       rebateDelta.offdelta += rebateAmount!;

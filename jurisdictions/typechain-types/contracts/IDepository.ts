@@ -9,6 +9,7 @@ import type {
   Result,
   Interface,
   EventFragment,
+  AddressLike,
   ContractRunner,
   ContractMethod,
   Listener,
@@ -22,6 +23,31 @@ import type {
   TypedContractMethod,
 } from "../common";
 
+export type ExternalTokenToReserveStruct = {
+  entity: BytesLike;
+  contractAddress: AddressLike;
+  externalTokenId: BigNumberish;
+  tokenType: BigNumberish;
+  internalTokenId: BigNumberish;
+  amount: BigNumberish;
+};
+
+export type ExternalTokenToReserveStructOutput = [
+  entity: string,
+  contractAddress: string,
+  externalTokenId: bigint,
+  tokenType: bigint,
+  internalTokenId: bigint,
+  amount: bigint
+] & {
+  entity: string;
+  contractAddress: string;
+  externalTokenId: bigint;
+  tokenType: bigint;
+  internalTokenId: bigint;
+  amount: bigint;
+};
+
 export declare namespace IDepository {
   export type ReserveMintStruct = {
     entity: BytesLike;
@@ -34,41 +60,18 @@ export declare namespace IDepository {
     tokenId: bigint,
     amount: bigint
   ] & { entity: string; tokenId: bigint; amount: bigint };
-
-  export type SettlementDiffStruct = {
-    tokenId: BigNumberish;
-    leftDiff: BigNumberish;
-    rightDiff: BigNumberish;
-    collateralDiff: BigNumberish;
-    ondeltaDiff: BigNumberish;
-  };
-
-  export type SettlementDiffStructOutput = [
-    tokenId: bigint,
-    leftDiff: bigint,
-    rightDiff: bigint,
-    collateralDiff: bigint,
-    ondeltaDiff: bigint
-  ] & {
-    tokenId: bigint;
-    leftDiff: bigint;
-    rightDiff: bigint;
-    collateralDiff: bigint;
-    ondeltaDiff: bigint;
-  };
 }
 
 export interface IDepositoryInterface extends Interface {
   getFunction(
     nameOrSignature:
       | "_reserves"
+      | "adminRegisterExternalToken"
       | "getCollateral"
       | "getTokensLength"
       | "mintToReserve"
       | "mintToReserveBatch"
-      | "prefundAccount"
-      | "reserveToReserve"
-      | "settle"
+      | "processBatch"
   ): FunctionFragment;
 
   getEvent(nameOrSignatureOrTopic: "ReserveUpdated"): EventFragment;
@@ -76,6 +79,10 @@ export interface IDepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "_reserves",
     values: [BytesLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "adminRegisterExternalToken",
+    values: [ExternalTokenToReserveStruct]
   ): string;
   encodeFunctionData(
     functionFragment: "getCollateral",
@@ -94,19 +101,15 @@ export interface IDepositoryInterface extends Interface {
     values: [IDepository.ReserveMintStruct[]]
   ): string;
   encodeFunctionData(
-    functionFragment: "prefundAccount",
-    values: [BytesLike, BigNumberish, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "reserveToReserve",
-    values: [BytesLike, BytesLike, BigNumberish, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "settle",
-    values: [BytesLike, BytesLike, IDepository.SettlementDiffStruct[]]
+    functionFragment: "processBatch",
+    values: [BytesLike, AddressLike, BytesLike, BigNumberish]
   ): string;
 
   decodeFunctionResult(functionFragment: "_reserves", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "adminRegisterExternalToken",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "getCollateral",
     data: BytesLike
@@ -124,14 +127,9 @@ export interface IDepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "prefundAccount",
+    functionFragment: "processBatch",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(
-    functionFragment: "reserveToReserve",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(functionFragment: "settle", data: BytesLike): Result;
 }
 
 export namespace ReserveUpdatedEvent {
@@ -205,6 +203,12 @@ export interface IDepository extends BaseContract {
     "view"
   >;
 
+  adminRegisterExternalToken: TypedContractMethod<
+    [params: ExternalTokenToReserveStruct],
+    [void],
+    "nonpayable"
+  >;
+
   getCollateral: TypedContractMethod<
     [leftEntity: BytesLike, rightEntity: BytesLike, tokenId: BigNumberish],
     [[bigint, bigint] & { collateral: bigint; ondelta: bigint }],
@@ -225,32 +229,12 @@ export interface IDepository extends BaseContract {
     "nonpayable"
   >;
 
-  prefundAccount: TypedContractMethod<
+  processBatch: TypedContractMethod<
     [
-      counterpartyEntity: BytesLike,
-      tokenId: BigNumberish,
-      amount: BigNumberish
-    ],
-    [boolean],
-    "nonpayable"
-  >;
-
-  reserveToReserve: TypedContractMethod<
-    [
-      from: BytesLike,
-      to: BytesLike,
-      tokenId: BigNumberish,
-      amount: BigNumberish
-    ],
-    [boolean],
-    "nonpayable"
-  >;
-
-  settle: TypedContractMethod<
-    [
-      leftEntity: BytesLike,
-      rightEntity: BytesLike,
-      diffs: IDepository.SettlementDiffStruct[]
+      encodedBatch: BytesLike,
+      entityProviderAddr: AddressLike,
+      hankoData: BytesLike,
+      nonce: BigNumberish
     ],
     [boolean],
     "nonpayable"
@@ -266,6 +250,13 @@ export interface IDepository extends BaseContract {
     [entity: BytesLike, tokenId: BigNumberish],
     [bigint],
     "view"
+  >;
+  getFunction(
+    nameOrSignature: "adminRegisterExternalToken"
+  ): TypedContractMethod<
+    [params: ExternalTokenToReserveStruct],
+    [void],
+    "nonpayable"
   >;
   getFunction(
     nameOrSignature: "getCollateral"
@@ -292,35 +283,13 @@ export interface IDepository extends BaseContract {
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "prefundAccount"
+    nameOrSignature: "processBatch"
   ): TypedContractMethod<
     [
-      counterpartyEntity: BytesLike,
-      tokenId: BigNumberish,
-      amount: BigNumberish
-    ],
-    [boolean],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "reserveToReserve"
-  ): TypedContractMethod<
-    [
-      from: BytesLike,
-      to: BytesLike,
-      tokenId: BigNumberish,
-      amount: BigNumberish
-    ],
-    [boolean],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "settle"
-  ): TypedContractMethod<
-    [
-      leftEntity: BytesLike,
-      rightEntity: BytesLike,
-      diffs: IDepository.SettlementDiffStruct[]
+      encodedBatch: BytesLike,
+      entityProviderAddr: AddressLike,
+      hankoData: BytesLike,
+      nonce: BigNumberish
     ],
     [boolean],
     "nonpayable"

@@ -126,9 +126,6 @@ contract Depository is ReentrancyGuardLite {
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
   event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret);
 
-  // Debug events (remove in production)
-  event DebugSettleStart(bytes32 leftEntity, bytes32 rightEntity, uint256 sigLen, address entityProvider);
-
   //event ChannelUpdated(address indexed receiver, address indexed addr, uint tokenId);
 
 
@@ -270,7 +267,8 @@ contract Depository is ReentrancyGuardLite {
 
   /**
    * @notice Mint new reserves to an entity (admin only).
-   * @dev In production, minting would be gated by governance. For testnet/demo, admin can mint freely.
+   * @dev TESTNET/DEV ONLY helper.
+   *      In production, minting would be gated by governance. For testnet/demo, admin can mint freely.
    *      Emits both ReserveMinted (for j-watchers tracking mint events) and ReserveUpdated (for balance sync).
    * @param entity The entity receiving the minted reserves.
    * @param tokenId The internal token ID.
@@ -297,7 +295,7 @@ contract Depository is ReentrancyGuardLite {
 
   /**
    * @notice Mint reserves for multiple entity/token pairs in a single admin tx.
-   * @dev Testnet/dev helper for deterministic bootstrap. Emits canonical ReserveUpdated per op.
+   * @dev TESTNET/DEV ONLY helper for deterministic bootstrap. Emits canonical ReserveUpdated per op.
    */
   function mintToReserveBatch(ReserveMint[] calldata mints) external onlyAdmin {
     uint len = mints.length;
@@ -314,6 +312,7 @@ contract Depository is ReentrancyGuardLite {
 
 
   /// @notice UNSAFE batch processing - entity or admin can call
+  /// @dev TESTNET/DEV ONLY escape hatch.
   /// @dev Use processBatch() (Hanko) in production. This is for explicit unsafe/admin flows.
   /// @dev Settlements still require counterparty signatures (cooperative proof)
   function unsafeProcessBatch(bytes32 entity, Batch calldata batch) public whenNotPaused nonReentrant returns (bool completeSuccess) {
@@ -327,73 +326,6 @@ contract Depository is ReentrancyGuardLite {
     return _processBatch(entity, batch);
   }
 
-
-  // ========== DIRECT R2R FUNCTION ==========
-  /// @notice Simple reserve-to-reserve transfer - fromEntity or admin can call
-  /// @dev For multi-sig/Hanko auth, use processBatch() instead
-  function reserveToReserve(
-    bytes32 fromEntity,
-    bytes32 toEntity,
-    uint tokenId,
-    uint amount
-  ) public whenNotPaused nonReentrant returns (bool) {
-    // fromEntity itself OR admin can call
-    require(
-      msg.sender == address(uint160(uint256(fromEntity))) || msg.sender == admin,
-      "E2: caller must be fromEntity or admin"
-    );
-    if (fromEntity == toEntity) revert E2();
-    if (amount == 0) revert E1();
-    enforceDebts(fromEntity, tokenId);
-    if (_reserves[fromEntity][tokenId] < amount) revert E3();
-
-    _reserves[fromEntity][tokenId] -= amount;
-    _reserves[toEntity][tokenId] += amount;
-
-    emit ReserveUpdated(fromEntity, tokenId, _reserves[fromEntity][tokenId]);
-    emit ReserveUpdated(toEntity, tokenId, _reserves[toEntity][tokenId]);
-
-    return true;
-  }
-
-  // ========== SETTLE FUNCTION ==========
-  /// @notice External settle with signature verification
-  /// @dev Counterparty signature REQUIRED when there are changes
-  function settle(
-    bytes32 leftEntity,
-    bytes32 rightEntity,
-    SettlementDiff[] memory diffs,
-    uint[] memory forgiveDebtsInTokenIds,
-    bytes memory sig
-  ) public whenNotPaused nonReentrant returns (bool) {
-    emit DebugSettleStart(leftEntity, rightEntity, sig.length, entityProvider);
-    // Caller is assumed to be leftEntity for signature verification
-    bytes32 caller = leftEntity;
-
-    Settlement[] memory settlements = new Settlement[](1);
-    settlements[0] = Settlement({
-      leftEntity: leftEntity,
-      rightEntity: rightEntity,
-      diffs: diffs,
-      forgiveDebtsInTokenIds: forgiveDebtsInTokenIds,
-      sig: sig,
-      entityProvider: entityProvider,  // Use Depository's entityProvider for Hanko verification
-      hankoData: "",
-      nonce: 0
-    });
-
-    // Process diffs via Account library (signature validation skipped if no sig provided)
-    if (!Account.processSettlements(_reserves, _accounts, _collaterals, caller, settlements)) {
-      return false;
-    }
-    // Handle debt forgiveness in Depository
-    for (uint i = 0; i < forgiveDebtsInTokenIds.length; i++) {
-      uint tokenId = forgiveDebtsInTokenIds[i];
-      _forgiveDebtsBetweenEntities(leftEntity, rightEntity, tokenId);
-      _forgiveDebtsBetweenEntities(rightEntity, leftEntity, tokenId);
-    }
-    return true;
-  }
 
   function _processBatch(bytes32 entityId, Batch memory batch) private returns (bool completeSuccess) {
     // SECURITY FIX: Aggregate flashloans by tokenId (prevent duplicate tokenId exploit)
@@ -434,16 +366,14 @@ contract Depository is ReentrancyGuardLite {
 
     completeSuccess = true;
 
-    // Process external token deposits (increases reserves)
-    // msg.sender must have approved tokens before calling processBatch
+    // Process external token deposits (increases reserves).
+    // params.entity == 0 means "credit batch initiator"; otherwise the
+    // signer explicitly authorises depositing into another entity reserve.
     for (uint i = 0; i < batch.externalTokenToReserve.length; i++) {
       ExternalTokenToReserve memory params = batch.externalTokenToReserve[i];
-      // If entity is not specified, default to batch initiator
       if (params.entity == bytes32(0)) {
         params.entity = entityId;
       }
-      // Security: entity must be the batch initiator (can't credit others arbitrarily)
-      if (params.entity != entityId) revert E2();
       _externalTokenToReserve(params);
     }
 
@@ -461,7 +391,7 @@ contract Depository is ReentrancyGuardLite {
       
       
       
-      reserveToReserve(entityId, batch.reserveToReserve[i]);
+      _reserveToReserve(entityId, batch.reserveToReserve[i]);
     }
 
     // C2R shortcut: direct processing (no Settlement[] allocation)
@@ -489,7 +419,7 @@ contract Depository is ReentrancyGuardLite {
     }
 
     if (batch.disputeStarts.length > 0) {
-      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, entityProvider)) {
+      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, _disputeDelayFor(entityId), entityProvider)) {
         completeSuccess = false;
       }
     }
@@ -639,8 +569,8 @@ contract Depository is ReentrancyGuardLite {
   // registerHub removed for size reduction
 
   // ExternalTokenToReserve struct is in Types.sol
-  // Public entry point with reentrancy guard for standalone calls
-  function externalTokenToReserve(ExternalTokenToReserve memory params) public nonReentrant {
+  // TESTNET/DEV ONLY bootstrap helper. User deposits must go through processBatch().
+  function adminRegisterExternalToken(ExternalTokenToReserve memory params) external onlyAdmin nonReentrant {
     _externalTokenToReserve(params);
   }
 
@@ -702,7 +632,7 @@ contract Depository is ReentrancyGuardLite {
     }
   }
   // ReserveToReserve struct is in Types.sol
-  function reserveToReserve(bytes32 entity, ReserveToReserve memory params) internal {
+  function _reserveToReserve(bytes32 entity, ReserveToReserve memory params) internal {
     
     
     
@@ -860,8 +790,8 @@ contract Depository is ReentrancyGuardLite {
     uint[] memory forgiveDebtsInTokenIds
   ) public view returns (bytes32 hash, uint256 nonce, uint256 encodedMsgLength) {
     bytes memory ch_key = accountKey(leftEntity, rightEntity);
-    nonce = _accounts[ch_key].nonce;
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, ch_key, nonce, diffs, forgiveDebtsInTokenIds);
+    nonce = _accounts[ch_key].nonce + 1;
+    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), ch_key, nonce, diffs, forgiveDebtsInTokenIds);
     hash = keccak256(encoded_msg);
     encodedMsgLength = encoded_msg.length;
   }
@@ -946,20 +876,9 @@ contract Depository is ReentrancyGuardLite {
     emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
   }
 
-
-  // ========== DISPUTE FUNCTIONS ==========
-  /// @notice Start dispute - uses Account library
-  function disputeStart(InitialDisputeProof memory params) public nonReentrant returns (bool) {
-    bytes32 caller = bytes32(uint256(uint160(msg.sender)));
-    InitialDisputeProof[] memory starts = new InitialDisputeProof[](1);
-    starts[0] = params;
-    return Account.processDisputeStarts(_accounts, caller, starts, defaultDisputeDelay, entityProvider);
-  }
-
-  /// @notice Finalize dispute - stays in Depository due to storage complexity
-  function disputeFinalize(FinalDisputeProof memory params) public nonReentrant returns (bool) {
-    bytes32 caller = bytes32(uint256(uint160(msg.sender)));
-    return _disputeFinalizeInternal(caller, params);
+  function _disputeDelayFor(bytes32 entityId) internal view returns (uint256) {
+    uint256 perEntity = entityDisputeDelays[entityId];
+    return perEntity == 0 ? defaultDisputeDelay : perEntity;
   }
 
   /// @notice Internal dispute finalize with full storage access

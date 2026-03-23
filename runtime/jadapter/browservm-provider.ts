@@ -27,6 +27,8 @@ import {
 import { safeStringify } from '../serialization-utils.js';
 import { deriveSignerKeySync, getCachedSignerPrivateKey } from '../account-crypto.js';
 import { isLeftEntity, normalizeEntityId } from '../entity-id-utils';
+import { batchAddReserveToReserve, batchAddSettlement, createEmptyBatch } from '../j-batch';
+import { buildSingleSignerHanko, prepareSignedBatch } from './batch-helpers';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, DEFAULT_SIGNER_FAUCET, TOKEN_REGISTRATION_AMOUNT } from './default-tokens';
 
 const BLOCK_GAS_LIMIT = 200_000_000n; // Simnet headroom for large deploys/batches
@@ -575,22 +577,16 @@ export class BrowserVMProvider {
     const externalTokenIdRaw = options?.externalTokenId ?? 0n;
     const externalTokenId = typeof externalTokenIdRaw === 'bigint' ? externalTokenIdRaw : BigInt(externalTokenIdRaw);
     const internalTokenId = options?.internalTokenId ?? 0;
-    const callData = this.depositoryInterface!.encodeFunctionData('externalTokenToReserve', [{
+    const batch = createEmptyBatch();
+    batch.externalTokenToReserve.push({
       entity: entityId,
       contractAddress: tokenAddress,
       externalTokenId,
       tokenType,
       internalTokenId,
       amount,
-    }]);
-
-    const result = await this.executeTx({
-      to: this.depositoryAddress!.toString(),
-      data: callData,
-      gasLimit: 1_000_000n,
-    }, privKey, { emitEvents: true });
-
-    return result.events || [];
+    });
+    return this.processEntityBatch(entityId, batch, privKey, privKey);
   }
 
   async executeTx(
@@ -835,35 +831,15 @@ export class BrowserVMProvider {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
-
-    // Use ethers Interface for ABI encoding (same as mainnet)
-    const callData = this.depositoryInterface.encodeFunctionData('reserveToReserve', [from, to, tokenId, amount]);
-
-    // Always query nonce from VM
-    const currentNonce = await this.getCurrentNonce();
-
-    const tx = createLegacyTx({
-      to: this.depositoryAddress,
-      gasLimit: 1000000n,
-      gasPrice: 10n,
-      data: hexToBytes(callData as `0x${string}`),
-      nonce: currentNonce,
-    }, { common: this.common }).sign(this.deployerPrivKey);
-
-    const result = await this.runTxInBlock(tx);
-
-    if (result.execResult.exceptionError) {
-      const err = result.execResult.exceptionError;
-      const errMsg = typeof err === 'object' ? (err.error || err.message || JSON.stringify(err)) : String(err);
-      console.error(`[BrowserVM] R2R FAILED: from=${from}, to=${to}, tokenId=${tokenId}, amount=${amount}`);
-      console.error(`[BrowserVM] R2R error details:`, err);
-      throw new Error(`reserveToReserve failed: ${errMsg}`);
-    }
-
-    console.log(`[BrowserVM] R2R SUCCESS: ${amount} token${tokenId} from ${from.slice(0, 10)}... to ${to.slice(0, 10)}...`);
-
-    // Emit events to j-watcher subscribers
-    return this.emitEvents(result.execResult.logs || []);
+    const batch = createEmptyBatch();
+    batchAddReserveToReserve(
+      { batch, jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0, status: 'empty' },
+      to,
+      tokenId,
+      amount,
+    );
+    const signerWallet = this.getSigningWallet(from);
+    return this.processEntityBatch(from, batch, ethers.getBytes(signerWallet.privateKey));
   }
 
   /** Get contract address */
@@ -916,35 +892,7 @@ export class BrowserVMProvider {
     // Generate counterparty signature (REQUIRED)
     const sig = await this.signSettlement(entityId, counterpartyId, diffs, [], []);
 
-    const callData = this.depositoryInterface.encodeFunctionData('settle', [
-      leftEntity,
-      rightEntity,
-      diffs,
-      [], // forgiveDebtsInTokenIds
-      sig,
-    ]);
-
-    const currentNonce = await this.getCurrentNonce();
-    const tx = createLegacyTx({
-      to: this.depositoryAddress,
-      gasLimit: 1000000n,
-      gasPrice: 10n,
-      data: hexToBytes(callData as `0x${string}`),
-      nonce: currentNonce,
-    }, { common: this.common }).sign(this.deployerPrivKey);
-
-    const result = await this.runTxInBlock(tx);
-    if (result.execResult.exceptionError) {
-      const err = result.execResult.exceptionError;
-      const errMsg = typeof err === 'object' ? (err.error || err.message || JSON.stringify(err)) : String(err);
-      console.error(`[BrowserVM] R2C FAILED: entity=${entityId}, counterparty=${counterpartyId}, tokenId=${tokenId}, amount=${amount}`);
-      console.error(`[BrowserVM] R2C error details:`, err);
-      throw new Error(`R2C failed: ${errMsg}`);
-    }
-    console.log(`[BrowserVM] R2C SUCCESS: ${amount} from ${entityId.slice(0, 10)}... → account with ${counterpartyId.slice(0, 10)}...`);
-    console.log(`[BrowserVM] R2C: logs=${result.execResult.logs?.length || 0}`);
-
-    return this.emitEvents(result.execResult.logs || []);
+    return this.settle(leftEntity, rightEntity, diffs, [], sig);
   }
 
   /** Get collateral for an account */
@@ -1092,30 +1040,7 @@ export class BrowserVMProvider {
   }
 
   private buildSingleSignerHanko(entityId: string, hash: string, wallet: ethers.Wallet): string {
-    const hashBytes = ethers.getBytes(hash);
-    const signature = wallet.signingKey.sign(hashBytes);
-    const vBit = signature.v === 28 ? 1 : 0;
-    const packedSig = ethers.concat([signature.r, signature.s, ethers.toBeHex(vBit, 1)]);
-
-    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-    const entityIdHex = entityId.startsWith('0x') ? entityId : `0x${entityId}`;
-    const paddedEntityId = ethers.zeroPadValue(entityIdHex, 32);
-
-    return abiCoder.encode(
-      ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
-      [[
-        [], // placeholders
-        packedSig, // packed signatures (single signer)
-        [
-          [
-            paddedEntityId, // entityId
-            [0], // entityIndexes
-            [1], // weights
-            1, // threshold
-          ],
-        ],
-      ]]
-    );
+    return buildSingleSignerHanko(entityId, hash, wallet.privateKey);
   }
 
   /**
@@ -1157,7 +1082,7 @@ export class BrowserVMProvider {
   ): Promise<string> {
     // Get current nonce from chain
     const accountInfo = await this.getAccountInfo(initiatorEntityId, counterpartyEntityId);
-    const onChainNonce = accountInfo.nonce;
+    const onChainNonce = accountInfo.nonce + 1n;
 
     // Determine canonical left/right order
     const isLeft = isLeftEntity(initiatorEntityId, counterpartyEntityId);
@@ -1323,6 +1248,16 @@ export class BrowserVMProvider {
 
   /** Process batch (Hanko) - calls Depository.processBatch() directly (no TS logic duplication) */
   async processBatch(encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint): Promise<EVMEvent[]> {
+    return this.processBatchWithSigner(encodedBatch, entityProvider, hankoData, nonce, this.deployerPrivKey);
+  }
+
+  private async processBatchWithSigner(
+    encodedBatch: string,
+    entityProvider: string,
+    hankoData: string,
+    nonce: bigint,
+    txPrivKey: Uint8Array,
+  ): Promise<EVMEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
@@ -1333,14 +1268,14 @@ export class BrowserVMProvider {
     // Call Depository.processBatch() - ALL logic in Solidity (single source of truth)
     const callData = this.depositoryInterface.encodeFunctionData('processBatch', [encodedBatch, entityProvider, hankoData, nonce]);
 
-    const currentNonce = await this.getCurrentNonce();
+    const currentNonce = await this.getNonceForAddress(createAddressFromPrivateKey(txPrivKey));
     const tx = createLegacyTx({
       to: this.depositoryAddress,
       gasLimit: 10000000n,
       gasPrice: 10n,
       data: hexToBytes(callData as `0x${string}`),
       nonce: currentNonce,
-    }, { common: this.common }).sign(this.deployerPrivKey);
+    }, { common: this.common }).sign(txPrivKey);
 
     const result = await this.runTxInBlock(tx);
 
@@ -1417,6 +1352,33 @@ export class BrowserVMProvider {
     events.forEach(e => console.log(`   - ${e.name}`));
 
     return events;
+  }
+
+  private async processEntityBatch(
+    entityId: string,
+    batch: import('../j-batch').JBatch,
+    hankoPrivKey: Uint8Array,
+    txPrivKey: Uint8Array = this.deployerPrivKey,
+  ): Promise<EVMEvent[]> {
+    if (!this.depositoryAddress || !this.entityProviderAddress) {
+      throw new Error('Depository not deployed');
+    }
+    const currentEntityNonce = await this.getEntityNonce(entityId);
+    const { encodedBatch, hankoData, nextNonce } = prepareSignedBatch(
+      batch,
+      entityId,
+      hankoPrivKey,
+      BigInt(this.common.chainId()),
+      this.depositoryAddress.toString(),
+      currentEntityNonce,
+    );
+    return this.processBatchWithSigner(
+      encodedBatch,
+      this.entityProviderAddress.toString(),
+      hankoData,
+      nextNonce,
+      txPrivKey,
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1499,126 +1461,28 @@ export class BrowserVMProvider {
     forgiveDebtsInTokenIds: number[] = [],
     sig?: string
   ): Promise<any[]> {
-    if (!this.depositoryAddress || !this.depositoryInterface) {
-      throw new Error('Depository not deployed');
-    }
-
     const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0;
-    let finalSig = sig || '';
-    console.log(`[BrowserVM] settle: input sig length=${sig?.length || 0}, diffs=${diffs.length}`);
-    if (hasChanges && (!finalSig || finalSig === '0x')) {
+    const finalSig = sig || '0x';
+    if (hasChanges && finalSig === '0x') {
       throw new Error('Settlement signature required for settle');
     }
-    if (!finalSig) {
-      finalSig = '0x';
-    }
 
-    console.log(`[BrowserVM] settle call params:`);
-    console.log(`  leftEntity: ${leftEntity}`);
-    console.log(`  rightEntity: ${rightEntity}`);
-    console.log(`  diffs: ${JSON.stringify(diffs.map(d => ({ tokenId: d.tokenId, leftDiff: d.leftDiff.toString(), rightDiff: d.rightDiff.toString(), collateralDiff: d.collateralDiff.toString(), ondeltaDiff: d.ondeltaDiff.toString() })))}`);
-    console.log(`  finalSig length: ${finalSig.length}`);
-
-    const callData = this.depositoryInterface.encodeFunctionData('settle', [
+    const accountInfo = await this.getAccountInfo(leftEntity, rightEntity);
+    const settlementNonce = Number(accountInfo.nonce + 1n);
+    const batch = createEmptyBatch();
+    batchAddSettlement(
+      { batch, jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0, status: 'empty' },
       leftEntity,
       rightEntity,
       diffs,
       forgiveDebtsInTokenIds,
       finalSig,
-    ]);
-    console.log(`[BrowserVM] settle calldata length: ${(callData.length - 2) / 2} bytes`);
-    console.log(`[BrowserVM] settle calldata selector: ${callData.slice(0, 10)}`);
-
-    // Debug: verify calldata can be decoded back
-    try {
-      const decoded = this.depositoryInterface.decodeFunctionData('settle', callData);
-      console.log(`[BrowserVM] Calldata decode check: decoded ${decoded.length} params`);
-      console.log(`  [0] leftEntity: ${decoded[0]}`);
-      console.log(`  [1] rightEntity: ${decoded[1]}`);
-      console.log(`  [2] diffs count: ${decoded[2].length}`);
-      console.log(`  [5] sig length: ${decoded[5].length} bytes`);
-      if (decoded[2].length > 0) {
-        const d = decoded[2][0];
-        console.log(`  [2][0] diff: tokenId=${d[0]}, leftDiff=${d[1]}, rightDiff=${d[2]}, collateralDiff=${d[3]}, ondeltaDiff=${d[4]}`);
-      }
-      // Debug: Dump first 200 bytes of sig
-      const sigHex = decoded[5] as string;
-      console.log(`  [5] sig first 200 chars: ${sigHex.slice(0, 200)}`);
-    } catch (e: any) {
-      console.error(`[BrowserVM] Calldata decode ERROR: ${e.message}`);
-    }
-
-    // Try with different gas limits to isolate the gas hog
-    const gasLimit = finalSig.length > 100 ? 30000000n : 2000000n;  // More gas for Hanko
-    console.log(`[BrowserVM] Using gas limit: ${gasLimit}`);
-    const currentNonce = await this.getCurrentNonce();
-    const tx = createLegacyTx({
-      to: this.depositoryAddress,
-      gasLimit,
-      gasPrice: 10n,
-      data: hexToBytes(callData as `0x${string}`),
-      nonce: currentNonce,
-    }, { common: this.common }).sign(this.deployerPrivKey);
-
-    const result = await this.runTxInBlock(tx);
-
-    if (result.execResult.exceptionError) {
-      console.error('[BrowserVM] settle failed:', result.execResult.exceptionError);
-      console.error('[BrowserVM] returnValue length:', result.execResult.returnValue?.length || 0);
-      console.error('[BrowserVM] gasUsed:', result.execResult.executionGasUsed?.toString());
-      console.error('[BrowserVM] exceptionError type:', typeof result.execResult.exceptionError);
-      if (result.execResult.exceptionError.error) {
-        console.error('[BrowserVM] exceptionError.error:', result.execResult.exceptionError.error);
-      }
-
-      // Log any events that were emitted before revert (helps debugging)
-      const logsBeforeRevert = result.execResult.logs || [];
-      if (logsBeforeRevert.length > 0) {
-        console.log('[BrowserVM] Events before revert:', logsBeforeRevert.length);
-        const events = this.parseLogs(logsBeforeRevert);
-        for (const ev of events) {
-          console.log(`   Event: ${ev.name}`, JSON.stringify(ev.args, (k, v) => typeof v === 'bigint' ? v.toString() : v));
-        }
-      } else {
-        console.log('[BrowserVM] No events emitted before revert');
-      }
-
-      // Try to decode revert reason
-      if (result.execResult.returnValue && result.execResult.returnValue.length > 0) {
-        const returnData = bytesToHex(result.execResult.returnValue);
-        console.error('[BrowserVM] Revert data:', returnData);
-
-        // Try to decode as Error(string) or custom error
-        try {
-          if (returnData.startsWith('0x08c379a0')) {
-            // Error(string) selector
-            const errorMsg = ethers.AbiCoder.defaultAbiCoder().decode(['string'], '0x' + returnData.slice(10))[0];
-            console.error('[BrowserVM] Revert reason:', errorMsg);
-          } else if (returnData.startsWith('0x')) {
-            // Could be custom error
-            const selectors: Record<string, string> = {
-              '0xb2f59f24': 'E1 - Invalid operation',
-              '0xf7d3f792': 'E2 - Nonce mismatch',
-              '0x735e8e8e': 'E3 - Overflow',
-              '0xa3f72b95': 'E4 - Invalid signature',
-            };
-            const errorSel = returnData.slice(0, 10);
-            if (selectors[errorSel]) {
-              console.error('[BrowserVM] Custom error:', selectors[errorSel]);
-            }
-          }
-        } catch { /* ignore decode errors */ }
-      }
-
-      return [];
-    }
-
-    // Parse and emit logs to j-watcher subscribers
-    const logs = this.emitEvents(result.execResult.logs || []);
-
-    console.log(`[BrowserVM] Settle completed: ${diffs.length} diffs`);
-
-    return logs;
+      this.entityProviderAddress?.toString() || ethers.ZeroAddress,
+      '0x',
+      settlementNonce,
+    );
+    const signerWallet = this.getSigningWallet(leftEntity);
+    return this.processEntityBatch(leftEntity, batch, ethers.getBytes(signerWallet.privateKey));
   }
 
   /** Parse EVM logs into decoded events with block info for JBlock consensus.
@@ -1983,23 +1847,25 @@ export class BrowserVMProvider {
   /** Sync all collaterals from BrowserVM for given account pairs */
   async syncAllCollaterals(
     accountPairs: Array<{ entityId: string; counterpartyId: string }>,
-    tokenId: number
+    tokenIds: readonly number[]
   ): Promise<Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>> {
     const collaterals = new Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>();
+    const normalizedTokenIds = Array.from(new Set(tokenIds.filter((tokenId) => Number.isFinite(tokenId) && tokenId > 0)));
 
     for (const { entityId, counterpartyId } of accountPairs) {
       const accountKey = `${entityId}:${counterpartyId}`;
-      const data = await this.getCollateral(entityId, counterpartyId, tokenId);
-
-      if (data.collateral > 0n || data.ondelta !== 0n) {
-        if (!collaterals.has(accountKey)) {
-          collaterals.set(accountKey, new Map());
+      for (const tokenId of normalizedTokenIds) {
+        const data = await this.getCollateral(entityId, counterpartyId, tokenId);
+        if (data.collateral > 0n || data.ondelta !== 0n) {
+          if (!collaterals.has(accountKey)) {
+            collaterals.set(accountKey, new Map());
+          }
+          collaterals.get(accountKey)!.set(tokenId, data);
         }
-        collaterals.get(accountKey)!.set(tokenId, data);
       }
     }
 
-    this.log(`[BrowserVM] Synced collaterals for ${accountPairs.length} accounts`);
+    this.log(`[BrowserVM] Synced collaterals for ${accountPairs.length} accounts across ${normalizedTokenIds.length} token(s)`);
     return collaterals;
   }
 

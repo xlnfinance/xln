@@ -1,5 +1,5 @@
 ﻿# XLN: Bilateral Ethereum + Bank-Grade Credit + Instant Settlement
-# ~298k tokens | Generated: 2026-03-18 14:41:51 | Git: 07ae1c3
+# ~292k tokens | Generated: 2026-03-22 23:56:58 | Git: 4d33cf3
 
 **TL;DR**: Banks without bailouts. Lightning without the inbound capacity wall.
 
@@ -144,7 +144,7 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 - "What happens if counterparty disappears?" -> On-chain settlement with your collateral
 - "What's the worst case?" -> Lose credit limit you extended, nothing more
 
-## Token Budget Guide (~298k tokens total)
+## Token Budget Guide (~292k tokens total)
 
 **Critical path (read first, ~30min):**
 - intro.md (3min) - High-signal overview
@@ -166,48 +166,48 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 xln/
   jurisdictions/contracts/
     Types.sol                  187 lines - Shared types: Diff, BatchArgs, InsuranceReg
-    Depository.sol             1161 lines - enforceDebts() FIFO, collateral + credit (INVARIANT: L+R+C=0)
+    Depository.sol             1078 lines - enforceDebts() FIFO, collateral + credit (INVARIANT: L+R+C=0)
     EntityProvider.sol         1181 lines - Hanko sigs, Control/Dividend, governance
     Account.sol                384 lines - A-machine on-chain: bilateral accounts, settlements
     DeltaTransformer.sol       194 lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
-    types.ts                     2300 lines - All TypeScript interfaces (START HERE)
+    types.ts                     2315 lines - All TypeScript interfaces (START HERE)
     ids.ts                       515 lines - Identity system: EntityId, SignerId, JId, ReplicaKey
-    runtime.ts                   4320 lines - Main coordinator, 100ms ticks, R->E->A routing
-    entity-consensus.ts          1870 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    account-consensus.ts         2132 lines - Bilateral consensus, left/right perspective
+    runtime.ts                   3901 lines - Main coordinator, 100ms ticks, R->E->A routing
+    entity-consensus.ts          1878 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    account-consensus.ts         2151 lines - Bilateral consensus, left/right perspective
     account-consensus-state.ts   168 lines - Bilateral state machine
-    j-batch.ts                   1034 lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
+    j-batch.ts                   1094 lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
     account-utils.ts             389 lines - deriveDelta() RCPAN calculation
     serialization-utils.ts       258 lines - BigInt serialization
     account-crypto.ts            558 lines - Signature verification
 
     entity-tx/
       index.ts                   7 lines - Entity transaction types
-      apply.ts                   1386 lines - Entity tx dispatcher
+      apply.ts                   1395 lines - Entity tx dispatcher
       validation.ts              37 lines - Transaction validation
       financial.ts               33 lines - Financial accounting
       proposals.ts               35 lines - Proposal logic
-      j-events.ts                1457 lines - Jurisdiction events
-      handlers/account.ts              1315 lines - Account operations
-      handlers/deposit-collateral.ts   143 lines - R2C deposits
-      handlers/htlc-payment.ts         481 lines - HTLC routing
+      j-events.ts                1473 lines - Jurisdiction events
+      handlers/account.ts              1595 lines - Account operations
+      handlers/deposit-collateral.ts   155 lines - R2C deposits
+      handlers/htlc-payment.ts         529 lines - HTLC routing
       handlers/create-settlement.ts    65 lines - Settlement creation
       handlers/mint-reserves.ts        53 lines - Reserve minting
 
     account-tx/
       index.ts                   10 lines - Account transaction types
-      apply.ts                   268 lines - Account tx dispatcher
+      apply.ts                   259 lines - Account tx dispatcher
       handlers/add-delta.ts      41 lines - Delta addition
 
     routing/
       graph.ts                   141 lines - Network graph
       pathfinding.ts             269 lines - Dijkstra routing
 
-    state-helpers.ts             829 lines - Pure state management
+    state-helpers.ts             588 lines - Pure state management
     snapshot-coder.ts            20 lines - Deterministic RLP serialization
-    evm.ts                       1011 lines - Blockchain integration
+    evm.ts                       1010 lines - Blockchain integration
 
   docs/
     intro.md                           53 lines - * 5-min overview (new reader onramp)
@@ -367,7 +367,7 @@ struct EntityAmount {
 }
 
 struct ExternalTokenToReserve {
-  bytes32 entity; // The entity to credit. If bytes32(0), defaults to msg.sender
+  bytes32 entity; // Entity to credit. If bytes32(0), defaults to batch initiator / caller self
   address contractAddress;
   uint96 externalTokenId;
   uint8 tokenType;
@@ -420,7 +420,7 @@ enum MessageType {
 }
 
 
-//jurisdictions/contracts/Depository.sol (1161 lines)
+//jurisdictions/contracts/Depository.sol (1078 lines)
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
@@ -548,9 +548,6 @@ contract Depository is ReentrancyGuardLite {
    */
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
   event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret);
-
-  // Debug events (remove in production)
-  event DebugSettleStart(bytes32 leftEntity, bytes32 rightEntity, uint256 sigLen, address entityProvider);
 
   //event ChannelUpdated(address indexed receiver, address indexed addr, uint tokenId);
 
@@ -751,73 +748,6 @@ contract Depository is ReentrancyGuardLite {
   }
 
 
-  // ========== DIRECT R2R FUNCTION ==========
-  /// @notice Simple reserve-to-reserve transfer - fromEntity or admin can call
-  /// @dev For multi-sig/Hanko auth, use processBatch() instead
-  function reserveToReserve(
-    bytes32 fromEntity,
-    bytes32 toEntity,
-    uint tokenId,
-    uint amount
-  ) public whenNotPaused nonReentrant returns (bool) {
-    // fromEntity itself OR admin can call
-    require(
-      msg.sender == address(uint160(uint256(fromEntity))) || msg.sender == admin,
-      "E2: caller must be fromEntity or admin"
-    );
-    if (fromEntity == toEntity) revert E2();
-    if (amount == 0) revert E1();
-    enforceDebts(fromEntity, tokenId);
-    if (_reserves[fromEntity][tokenId] < amount) revert E3();
-
-    _reserves[fromEntity][tokenId] -= amount;
-    _reserves[toEntity][tokenId] += amount;
-
-    emit ReserveUpdated(fromEntity, tokenId, _reserves[fromEntity][tokenId]);
-    emit ReserveUpdated(toEntity, tokenId, _reserves[toEntity][tokenId]);
-
-    return true;
-  }
-
-  // ========== SETTLE FUNCTION ==========
-  /// @notice External settle with signature verification
-  /// @dev Counterparty signature REQUIRED when there are changes
-  function settle(
-    bytes32 leftEntity,
-    bytes32 rightEntity,
-    SettlementDiff[] memory diffs,
-    uint[] memory forgiveDebtsInTokenIds,
-    bytes memory sig
-  ) public whenNotPaused nonReentrant returns (bool) {
-    emit DebugSettleStart(leftEntity, rightEntity, sig.length, entityProvider);
-    // Caller is assumed to be leftEntity for signature verification
-    bytes32 caller = leftEntity;
-
-    Settlement[] memory settlements = new Settlement[](1);
-    settlements[0] = Settlement({
-      leftEntity: leftEntity,
-      rightEntity: rightEntity,
-      diffs: diffs,
-      forgiveDebtsInTokenIds: forgiveDebtsInTokenIds,
-      sig: sig,
-      entityProvider: entityProvider,  // Use Depository's entityProvider for Hanko verification
-      hankoData: "",
-      nonce: 0
-    });
-
-    // Process diffs via Account library (signature validation skipped if no sig provided)
-    if (!Account.processSettlements(_reserves, _accounts, _collaterals, caller, settlements)) {
-      return false;
-    }
-    // Handle debt forgiveness in Depository
-    for (uint i = 0; i < forgiveDebtsInTokenIds.length; i++) {
-      uint tokenId = forgiveDebtsInTokenIds[i];
-      _forgiveDebtsBetweenEntities(leftEntity, rightEntity, tokenId);
-      _forgiveDebtsBetweenEntities(rightEntity, leftEntity, tokenId);
-    }
-    return true;
-  }
-
   function _processBatch(bytes32 entityId, Batch memory batch) private returns (bool completeSuccess) {
     // SECURITY FIX: Aggregate flashloans by tokenId (prevent duplicate tokenId exploit)
     uint256[] memory flashloanTokenIds = new uint256[](batch.flashloans.length);
@@ -857,16 +787,14 @@ contract Depository is ReentrancyGuardLite {
 
     completeSuccess = true;
 
-    // Process external token deposits (increases reserves)
-    // msg.sender must have approved tokens before calling processBatch
+    // Process external token deposits (increases reserves).
+    // params.entity == 0 means "credit batch initiator"; otherwise the
+    // signer explicitly authorises depositing into another entity reserve.
     for (uint i = 0; i < batch.externalTokenToReserve.length; i++) {
       ExternalTokenToReserve memory params = batch.externalTokenToReserve[i];
-      // If entity is not specified, default to batch initiator
       if (params.entity == bytes32(0)) {
         params.entity = entityId;
       }
-      // Security: entity must be the batch initiator (can't credit others arbitrarily)
-      if (params.entity != entityId) revert E2();
       _externalTokenToReserve(params);
     }
 
@@ -884,7 +812,7 @@ contract Depository is ReentrancyGuardLite {
       
       
       
-      reserveToReserve(entityId, batch.reserveToReserve[i]);
+      _reserveToReserve(entityId, batch.reserveToReserve[i]);
     }
 
     // C2R shortcut: direct processing (no Settlement[] allocation)
@@ -912,7 +840,7 @@ contract Depository is ReentrancyGuardLite {
     }
 
     if (batch.disputeStarts.length > 0) {
-      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, entityProvider)) {
+      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, _disputeDelayFor(entityId), entityProvider)) {
         completeSuccess = false;
       }
     }
@@ -1062,8 +990,8 @@ contract Depository is ReentrancyGuardLite {
   // registerHub removed for size reduction
 
   // ExternalTokenToReserve struct is in Types.sol
-  // Public entry point with reentrancy guard for standalone calls
-  function externalTokenToReserve(ExternalTokenToReserve memory params) public nonReentrant {
+  // Admin-only bootstrap helper. User deposits must go through processBatch().
+  function adminRegisterExternalToken(ExternalTokenToReserve memory params) external onlyAdmin nonReentrant {
     _externalTokenToReserve(params);
   }
 
@@ -1125,7 +1053,7 @@ contract Depository is ReentrancyGuardLite {
     }
   }
   // ReserveToReserve struct is in Types.sol
-  function reserveToReserve(bytes32 entity, ReserveToReserve memory params) internal {
+  function _reserveToReserve(bytes32 entity, ReserveToReserve memory params) internal {
     
     
     
@@ -1283,8 +1211,8 @@ contract Depository is ReentrancyGuardLite {
     uint[] memory forgiveDebtsInTokenIds
   ) public view returns (bytes32 hash, uint256 nonce, uint256 encodedMsgLength) {
     bytes memory ch_key = accountKey(leftEntity, rightEntity);
-    nonce = _accounts[ch_key].nonce;
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, ch_key, nonce, diffs, forgiveDebtsInTokenIds);
+    nonce = _accounts[ch_key].nonce + 1;
+    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), ch_key, nonce, diffs, forgiveDebtsInTokenIds);
     hash = keccak256(encoded_msg);
     encodedMsgLength = encoded_msg.length;
   }
@@ -1369,20 +1297,9 @@ contract Depository is ReentrancyGuardLite {
     emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
   }
 
-
-  // ========== DISPUTE FUNCTIONS ==========
-  /// @notice Start dispute - uses Account library
-  function disputeStart(InitialDisputeProof memory params) public nonReentrant returns (bool) {
-    bytes32 caller = bytes32(uint256(uint160(msg.sender)));
-    InitialDisputeProof[] memory starts = new InitialDisputeProof[](1);
-    starts[0] = params;
-    return Account.processDisputeStarts(_accounts, caller, starts, defaultDisputeDelay, entityProvider);
-  }
-
-  /// @notice Finalize dispute - stays in Depository due to storage complexity
-  function disputeFinalize(FinalDisputeProof memory params) public nonReentrant returns (bool) {
-    bytes32 caller = bytes32(uint256(uint160(msg.sender)));
-    return _disputeFinalizeInternal(caller, params);
+  function _disputeDelayFor(bytes32 entityId) internal view returns (uint256) {
+    uint256 perEntity = entityDisputeDelays[entityId];
+    return perEntity == 0 ? defaultDisputeDelay : perEntity;
   }
 
   /// @notice Internal dispute finalize with full storage access
@@ -3348,7 +3265,7 @@ contract DeltaTransformer is Console {
 }
 
 
-//runtime/types.ts (2300 lines)
+//runtime/types.ts (2315 lines)
 /**
  * XLN Type Definitions
  * All interfaces and type definitions used across the XLN system
@@ -3591,6 +3508,7 @@ export interface RuntimeInput {
   runtimeTxs: RuntimeTx[];
   entityInputs: RoutedEntityInput[];
   jInputs?: JInput[]; // J-layer inputs (queue to J-mempool)
+  timestamp?: number; // External ingress timestamp seed (ms) for this runtime input batch
   queuedAt?: number; // When first queued into runtime mempool (ms)
 }
 
@@ -3905,6 +3823,7 @@ export type EntityTx =
         amount: bigint;
         route: string[]; // Full path from source to target
         description?: string;
+        startedAtMs?: number;
         secret?: string;   // Optional - generated if not provided
         hashlock?: string; // Optional - generated if not provided
         // Deterministic replay payload captured on first execution.
@@ -3968,6 +3887,7 @@ export type EntityTx =
       type: 'deposit_collateral';
       data: {
         counterpartyId: string; // Which account to add collateral to
+        receivingEntityId?: string; // Optional target entity for remote reserve->account funding
         tokenId: number;
         amount: bigint;
         // Optional: rebalance fee collection (atomic with deposit)
@@ -4081,6 +4001,7 @@ export type EntityTx =
         // Explicit limit price in ORDERBOOK_PRICE_SCALE ticks (quote per 1 base).
         // Sent together with give/want for deterministic cross-checking.
         priceTicks?: bigint;
+        timeInForce?: 0 | 1 | 2; // 0 = GTC, 1 = IOC, 2 = FOK
         minFillRatio: number; // 0-65535
       };
     }
@@ -4321,6 +4242,7 @@ export interface SwapOffer {
   wantTokenId: number;          // Token maker wants in return
   wantAmount: bigint;           // Corresponding want amount (maintains ratio)
   priceTicks?: bigint;          // Canonical limit price used for requantization after partial fills
+  timeInForce?: 0 | 1 | 2;      // 0 = GTC, 1 = IOC, 2 = FOK
   minFillRatio: number;         // 0-65535, minimum acceptable fill
   makerIsLeft: boolean;         // Who created this offer (canonical direction)
   createdHeight: number;        // AccountFrame height when created
@@ -4336,6 +4258,9 @@ export interface SwapOffer {
  */
 export interface HtlcRoute {
   hashlock: string;
+  tokenId?: number;
+  amount?: bigint;
+  startedAtMs?: number;
 
   // Inbound hop (who sent us this HTLC)
   inboundEntity?: string;
@@ -4378,6 +4303,7 @@ export interface AccountMachine {
 
   // Swap offers (limit orders)
   swapOffers: Map<string, SwapOffer>; // offerId → offer details
+  totalRebates?: Map<number, bigint>; // tokenId → cumulative price improvement rebates received
 
   // Global credit limits (in reference currency - USDC)
   globalCreditLimits: {
@@ -4690,7 +4616,7 @@ export interface DerivedDelta {
  */
 export type AccountEvent =
   | { type: 'htlc_revealed'; hashlock: string; secret: string }
-  | { type: 'swap_offer_created'; offerId: string; makerId: string; accountId: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; minFillRatio: number }
+  | { type: 'swap_offer_created'; offerId: string; makerId: string; accountId: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; timeInForce?: 0 | 1 | 2; minFillRatio: number }
   | { type: 'swap_offer_cancelled'; offerId: string; accountId: string };
 
 // Account transaction types
@@ -4777,6 +4703,7 @@ export type AccountTx =
         // Explicit limit price in ORDERBOOK_PRICE_SCALE ticks (quote per 1 base).
         // Kept optional for backwards compatibility with older scenarios.
         priceTicks?: bigint;
+        timeInForce?: 0 | 1 | 2;  // 0 = GTC, 1 = IOC, 2 = FOK
         minFillRatio: number;     // 0-65535 (uint16), minimum partial fill
       };
     }
@@ -4800,6 +4727,8 @@ export type AccountTx =
         offerId: string;
         fillRatio: number;        // 0-65535 (uint16)
         cancelRemainder: boolean; // true = fill + cancel, false = fill + keep open
+        rebateAmount?: bigint;    // Price improvement rebate (quote token, after SpreadDistribution)
+        rebateTokenId?: number;   // Token for rebate (always quote side)
       };
     }
   // === SETTLEMENT HOLD TYPES (ring-fencing via bilateral consensus) ===
@@ -5171,6 +5100,9 @@ export interface Env {
   runtimeState?: {
     loopActive?: boolean;
     stopLoop?: (() => void) | null;
+    wakeLoop?: (() => void) | null;
+    wakeRequested?: boolean;
+    clockPrimed?: boolean;
     persistencePaused?: boolean;
     lastFrameAt?: number;
     processingPromise?: Promise<void> | null;
@@ -5201,7 +5133,7 @@ export interface Env {
       runtimeId: string;
       seenAt: number;
     }>;
-    directEntityInputDispatch?: ((targetRuntimeId: string, input: DeliverableEntityInput) => boolean) | null;
+    directEntityInputDispatch?: ((targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number) => boolean) | null;
   };
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: GossipLayer;
@@ -5372,17 +5304,19 @@ export interface EnvSnapshot {
   gossip?: {
     profiles: Profile[];
   };
-  // Interactive storytelling narrative
-  title?: string; // Short headline (e.g., "Bank Run Begins")
-  narrative?: string; // Detailed explanation of what's happening in this frame
-  // Fed Chair educational subtitles (AHB demo)
-  subtitle?: {
-    title: string;           // Technical summary (e.g., "Reserve-to-Reserve Transfer")
-    what?: string;           // What's happening (optional)
-    why?: string;            // Why it matters (optional)
-    tradfiParallel?: string; // Traditional finance equivalent (optional)
-    keyMetrics?: string[];   // Bullet points of key numbers
+  meta?: {
+    title?: string; // Short headline (e.g., "Bank Run Begins")
+    subtitle?: {
+      title: string;           // Technical summary (e.g., "Reserve-to-Reserve Transfer")
+      what?: string;           // What's happening (optional)
+      why?: string;            // Why it matters (optional)
+      tradfiParallel?: string; // Traditional finance equivalent (optional)
+      keyMetrics?: string[];   // Bullet points of key numbers
+    };
+    displayMs?: number; // Display duration hint for time-travel visualization
   };
+  // Interactive storytelling narrative
+  narrative?: string; // Detailed explanation of what's happening in this frame
   // Cinematic view state for scenario playback
   viewState?: {
     camera?: 'orbital' | 'overview' | 'follow' | 'free';
@@ -5395,8 +5329,6 @@ export interface EnvSnapshot {
   };
   // Frame-specific structured logs
   logs?: FrameLogEntry[];
-  // Display duration hint for time-travel visualization (default: 100ms)
-  displayMs?: number;
 }
 
 // Entity types - canonical definition in ids.ts
@@ -6167,7 +6099,7 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 };
 
 
-//runtime/runtime.ts (4320 lines)
+//runtime/runtime.ts (3901 lines)
 // for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
@@ -6175,6 +6107,7 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 // Import utilities and types
 // High-level database using Level polyfill (works in both Node.js and browser)
 import { Level } from 'level';
+import { ethers } from 'ethers';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
 const RUNTIME_BUILD_ID = '2026-03-10-03:40Z';
@@ -6203,6 +6136,10 @@ const DEFAULT_SNAPSHOT_INTERVAL_FRAMES = (() => {
 })();
 
 import { getPerfMs, getWallClockMs } from './utils';
+import { setDeltaTransformerAddress } from './proof-builder';
+import {
+  buildCanonicalEnvSnapshot,
+} from './wal/snapshot';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { isLeftEntity } from './entity-id-utils';
 import type { JAdapter } from './jadapter';
@@ -6341,7 +6278,7 @@ import {
   BigIntMath,
   FINANCIAL_CONSTANTS,
 } from './financial-utils';
-import { captureSnapshot, cloneEntityReplica, resolveEntityProposerId } from './state-helpers';
+import { cloneEntityReplica, resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
 import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
 import {
@@ -6358,12 +6295,10 @@ import { mergeRuntimeJurisdictionConfig } from './jurisdiction-runtime';
 import type {
   DeliverableEntityInput,
   EntityInput,
-  EntityReplica,
   EntityState,
   Env,
   FrameLogEntry,
   JInput,
-  JReplica,
   RoutedEntityInput,
   RuntimeInput,
 } from './types';
@@ -6380,6 +6315,17 @@ import {
   log,
 } from './utils';
 import { logError } from './logger';
+import type { PersistedFrameJournal } from './wal/store';
+import {
+  getPersistedLatestHeight as getPersistedLatestHeightWal,
+  listPersistedCheckpointHeights as listPersistedCheckpointHeightsWal,
+  readPersistedFrameJournal as readPersistedFrameJournalWal,
+  readPersistedFrameJournals as readPersistedFrameJournalsWal,
+  saveRuntimeFrameToWal,
+  type VerifyRuntimeChainResult,
+} from './wal/runtime';
+import { rehydrateRestoredRuntimeInfra } from './runtime-infra';
+import { loadRuntimeStateFromDb, verifyPersistedRuntimeState } from './wal/state-restore';
 
 if (isBrowser && typeof globalThis.process === 'undefined') {
   const nowMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
@@ -6467,37 +6413,7 @@ const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
 const dbRootPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
 
 const DEFAULT_DB_NAMESPACE = 'default';
-const PERSISTENCE_SCHEMA_VERSION = 3;
-const PERSISTENCE_SNAPSHOT_EXCLUDE_KEYS = new Set([
-  'history',
-  'browserVM',
-  'gossip',
-  'log',
-  'info',
-  'warn',
-  'error',
-  'emit',
-  'jadapter',
-  'jAdapter',
-  'evms',
-  'runtimeState',
-  'runtimeMempool',
-  'runtimeInput',
-  'runtimeConfig',
-  'frameLogs',
-  'pendingOutputs',
-  'pendingNetworkOutputs',
-  'networkInbox',
-  'lastProcessEnteredAt',
-  'extra',
-  'scenarioMode',
-  'quietRuntimeLogs',
-  'scenarioLogLevel',
-  'strictScenario',
-  'strictScenarioLabel',
-  'stopAtFrame',
-  'frameDisplayMs',
-]);
+const PERSISTENCE_SCHEMA_VERSION = 4;
 
 const normalizeDbNamespace = (value: string): string => value.trim().toLowerCase();
 type RuntimeDbKind = 'core' | 'infra';
@@ -6538,6 +6454,13 @@ const isDbUnavailableError = (error: unknown): boolean => {
     message.includes('not open') ||
     message.includes('closing')
   );
+};
+
+const isDbNotFound = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const code = String((error as { code?: unknown }).code ?? '');
+  const name = String((error as { name?: unknown }).name ?? '');
+  return code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError';
 };
 
 const captureEntityJHeights = (env: Env): Record<string, number> => {
@@ -6656,7 +6579,7 @@ const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
   if (!env.runtimeConfig) {
     env.runtimeConfig = {
       minFrameDelayMs: 0,
-      loopIntervalMs: 25,
+      loopIntervalMs: isProductionRuntime ? 25 : 0,
       snapshotIntervalFrames: DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
     };
   }
@@ -6672,6 +6595,9 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
     env.runtimeState = {
       loopActive: false,
       stopLoop: null,
+      wakeLoop: null,
+      wakeRequested: false,
+      clockPrimed: false,
       lastFrameAt: undefined,
       p2p: null,
       pendingP2PConfig: null,
@@ -6685,9 +6611,101 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   return env.runtimeState;
 };
 
+const hasMeaningfulEnqueuedWork = (inputs?: RoutedEntityInput[], runtimeTxs?: RuntimeTx[]): boolean => {
+  if ((runtimeTxs?.length ?? 0) > 0) return true;
+  return (inputs ?? []).some((input) => {
+    const hasEntityTxs = (input.entityTxs?.length ?? 0) > 0;
+    const hasProposal = !!input.proposedFrame;
+    const hasHashPrecommits = !!input.hashPrecommits && input.hashPrecommits.size > 0;
+    return hasEntityTxs || hasProposal || hasHashPrecommits;
+  });
+};
+
+const requestRuntimeLoopWake = (env: Env): void => {
+  const state = ensureRuntimeState(env);
+  const wakeLoop = state.wakeLoop;
+  if (wakeLoop) {
+    state.wakeLoop = null;
+    wakeLoop();
+    return;
+  }
+  state.wakeRequested = true;
+};
+
+const waitForRuntimeLoopWakeOrTimeout = async (env: Env, timeoutMs: number): Promise<void> => {
+  const state = ensureRuntimeState(env);
+  if (timeoutMs <= 0) {
+    if (state.wakeRequested) state.wakeRequested = false;
+    await sleep(0);
+    return;
+  }
+  if (state.wakeRequested) {
+    state.wakeRequested = false;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      if (state.wakeLoop === wake) {
+        state.wakeLoop = null;
+      }
+      resolve();
+    };
+    const wake = () => {
+      state.wakeRequested = false;
+      finish();
+    };
+    state.wakeLoop = wake;
+    timeoutId = setTimeout(finish, timeoutMs);
+  });
+};
+
 const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
 const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
 const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
+const ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY = Symbol.for('xln.runtime.env.replay.skippedAccountInputs');
+const replayHankoFingerprint = (value: unknown): string => {
+  const normalized = typeof value === 'string' ? value : '';
+  if (!normalized) return 'none';
+  if (normalized.length <= 36) return normalized;
+  return `${normalized.slice(0, 18)}:${normalized.slice(-18)}`;
+};
+const buildSkippedReplayAckKey = (
+  runtimeFrameHeight: number,
+  entityId: string,
+  counterpartyId: string,
+  inputHeight: number,
+  prevHanko: unknown,
+): string =>
+  [
+    runtimeFrameHeight,
+    String(entityId || '').toLowerCase(),
+    String(counterpartyId || '').toLowerCase(),
+    inputHeight,
+    replayHankoFingerprint(prevHanko),
+    'ack',
+  ].join(':');
+const buildSkippedReplayNewFrameKey = (
+  runtimeFrameHeight: number,
+  entityId: string,
+  counterpartyId: string,
+  frameHeight: number,
+  stateHash: unknown,
+  prevFrameHash: unknown,
+): string =>
+  [
+    runtimeFrameHeight,
+    String(entityId || '').toLowerCase(),
+    String(counterpartyId || '').toLowerCase(),
+    frameHeight,
+    typeof stateHash === 'string' ? stateHash : 'none',
+    typeof prevFrameHash === 'string' ? prevFrameHash : 'none',
+    'newframe',
+  ].join(':');
 
 const failfastAssert = (
   condition: unknown,
@@ -6747,13 +6765,31 @@ const ensureRuntimeMempool = (env: Env): RuntimeInput => {
   return env.runtimeMempool;
 };
 
-const enqueueRuntimeInputs = (env: Env, inputs?: RoutedEntityInput[], runtimeTxs?: RuntimeTx[]): void => {
+const normalizeIngressTimestamp = (env: Env, explicitTimestamp?: number): number => {
+  if (typeof explicitTimestamp === 'number' && Number.isFinite(explicitTimestamp) && explicitTimestamp > 0) {
+    return Math.floor(explicitTimestamp);
+  }
+  return env.timestamp ?? 0;
+};
+
+const enqueueRuntimeInputs = (
+  env: Env,
+  inputs?: RoutedEntityInput[],
+  runtimeTxs?: RuntimeTx[],
+  jInputs?: JInput[],
+  explicitTimestamp?: number,
+): void => {
   const mempool = ensureRuntimeMempool(env);
+  const runtimeState = ensureRuntimeState(env);
+  const normalizedTimestamp = normalizeIngressTimestamp(env, explicitTimestamp);
   if (runtimeTxs && runtimeTxs.length > 0) {
     mempool.runtimeTxs.push(...runtimeTxs);
   }
   if (inputs && inputs.length > 0) {
     mempool.entityInputs.push(...inputs);
+  }
+  if (jInputs && jInputs.length > 0) {
+    mempool.jInputs = [...(mempool.jInputs ?? []), ...jInputs];
   }
   const interestingEntityInputs = (inputs || [])
     .map((input) => ({
@@ -6773,10 +6809,16 @@ const enqueueRuntimeInputs = (env: Env, inputs?: RoutedEntityInput[], runtimeTxs
       })}`,
     );
   }
-  if (inputs?.length || runtimeTxs?.length) {
-    if (mempool.queuedAt === undefined) {
-      mempool.queuedAt = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  if (inputs?.length || runtimeTxs?.length || jInputs?.length) {
+    const targetQueuedAt = env.scenarioMode ? (env.timestamp ?? 0) : normalizedTimestamp;
+    mempool.queuedAt =
+      mempool.queuedAt === undefined
+        ? targetQueuedAt
+        : Math.max(mempool.queuedAt, targetQueuedAt);
+    if (hasMeaningfulEnqueuedWork(inputs, runtimeTxs) || (jInputs?.length ?? 0) > 0) {
+      runtimeState.clockPrimed = true;
     }
+    requestRuntimeLoopWake(env);
   }
 };
 
@@ -6811,6 +6853,11 @@ export async function tryOpenInfraDb(env: Env): Promise<boolean> {
 
 const INFRA_GOSSIP_INDEX_KEY = 'gossip:index';
 const makeInfraGossipProfileKey = (entityId: string): string => `gossip:profile:${String(entityId).toLowerCase()}`;
+const runtimeProcessEnv =
+  typeof globalThis === 'object'
+    ? (globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env
+    : undefined;
+const isProductionRuntime = runtimeProcessEnv?.NODE_ENV === 'production';
 
 const readInfraStringArray = async (db: Level<Buffer, Buffer>, key: string): Promise<string[]> => {
   try {
@@ -6893,7 +6940,16 @@ const clearInfraGossipProfiles = async (env: Env): Promise<void> => {
 };
 
 export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void => {
-  enqueueRuntimeInputs(env, runtimeInput.entityInputs, runtimeInput.runtimeTxs);
+  const ingressTimestamp = env.scenarioMode
+    ? (runtimeInput.timestamp ?? env.timestamp ?? 0)
+    : (runtimeInput.timestamp ?? getWallClockMs());
+  enqueueRuntimeInputs(
+    env,
+    runtimeInput.entityInputs,
+    runtimeInput.runtimeTxs,
+    runtimeInput.jInputs,
+    ingressTimestamp,
+  );
 };
 
 const buildRouteOutputKey = (output: RoutedEntityInput): string => {
@@ -6920,10 +6976,12 @@ const buildRouteOutputKey = (output: RoutedEntityInput): string => {
 const hasRuntimeWork = (env: Env): boolean => {
   const mempool = ensureRuntimeMempool(env);
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return true;
+  if ((mempool.jInputs?.length ?? 0) > 0) return true;
+  if ((mempool.queuedAt ?? 0) > (env.timestamp ?? 0)) return true;
   if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
   if (env.networkInbox && env.networkInbox.length > 0) return true;
   if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
-    const nowMs = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    const nowMs = getRuntimeNowMs(env);
     const deferredMeta = ensureRuntimeState(env).deferredNetworkMeta;
     for (const output of env.pendingNetworkOutputs) {
       const retryAt = deferredMeta?.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
@@ -6961,6 +7019,20 @@ const hubNeedsPeriodicWake = (replica: EntityReplica): boolean => {
   return false;
 };
 
+const hasUnsafePendingAccountStateForCheckpoint = (env: Env): boolean => {
+  if (!env.eReplicas || env.eReplicas.size === 0) return false;
+  for (const replica of env.eReplicas.values()) {
+    const accounts = replica.state?.accounts;
+    if (!accounts || accounts.size === 0) continue;
+    for (const accountMachine of accounts.values()) {
+      if (accountMachine.pendingFrame || accountMachine.pendingAccountInput) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
 /**
  * Check if any entity has scheduled hooks or due periodic tasks.
  * Used by the runtime loop to wake up idle entities at the right time.
@@ -6969,7 +7041,8 @@ const hubNeedsPeriodicWake = (replica: EntityReplica): boolean => {
  */
 const hasDueEntityHooks = (env: Env): boolean => {
   if (!env.eReplicas || env.eReplicas.size === 0) return false;
-  const nowMs = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return false;
+  const nowMs = getRuntimeNowMs(env);
   for (const [, replica] of env.eReplicas) {
     const crontab = replica.state?.crontabState;
     if (!crontab) continue;
@@ -6994,6 +7067,42 @@ const hasDueEntityHooks = (env: Env): boolean => {
   return false;
 };
 
+const getEarliestWallClockDueTimestamp = (env: Env): number | null => {
+  if (!env.eReplicas || env.eReplicas.size === 0) return null;
+  if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return null;
+  const logicalNow = getRuntimeNowMs(env);
+  const wallClockNow = getWallClockMs();
+  let earliestDue = Infinity;
+
+  for (const [, replica] of env.eReplicas) {
+    const crontab = replica.state?.crontabState;
+    if (!crontab) continue;
+
+    const hooks = crontab.hooks;
+    if (hooks && hooks.size > 0) {
+      for (const hook of hooks.values()) {
+        if (hook.triggerAt > logicalNow && hook.triggerAt <= wallClockNow) {
+          earliestDue = Math.min(earliestDue, hook.triggerAt);
+        }
+      }
+    }
+
+    if (hubNeedsPeriodicWake(replica)) {
+      const tasks = crontab.tasks;
+      if (tasks && tasks.size > 0) {
+        for (const task of tasks.values()) {
+          const dueAt = task.lastRun + task.intervalMs;
+          if (dueAt > logicalNow && dueAt <= wallClockNow) {
+            earliestDue = Math.min(earliestDue, dueAt);
+          }
+        }
+      }
+    }
+  }
+
+  return Number.isFinite(earliestDue) ? earliestDue : null;
+};
+
 /**
  * Generate entity input pings for entities with due hooks OR periodic tasks.
  * Injects empty entityInputs so applyEntityInput runs → crontab fires → hooks/tasks execute.
@@ -7001,10 +7110,11 @@ const hasDueEntityHooks = (env: Env): boolean => {
  * Critical for hub rebalance: after faucet payment creates uncollateralized debt,
  * hubRebalanceHandler (periodic) needs to fire even with no external inputs.
  */
-const generateHookPings = (env: Env): void => {
+const generateHookPings = (env: Env, nowMs = getRuntimeNowMs(env), queuedAt = env.timestamp ?? 0): void => {
   if (!env.eReplicas || env.eReplicas.size === 0) return;
-  const nowMs = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return;
   const mempool = ensureRuntimeMempool(env);
+  const pings: RoutedEntityInput[] = [];
 
   for (const [key, replica] of env.eReplicas) {
     const crontab = replica.state?.crontabState;
@@ -7044,8 +7154,11 @@ const generateHookPings = (env: Env): void => {
     const alreadyQueued = mempool.entityInputs.some(ei => ei.entityId === entityId);
     if (alreadyQueued) continue;
 
-    // Inject empty entityInput ping — just enough to trigger crontab
-    mempool.entityInputs.push({ entityId, signerId, entityTxs: [] });
+    pings.push({ entityId, signerId, entityTxs: [] });
+  }
+
+  if (pings.length > 0) {
+    enqueueRuntimeInputs(env, pings, undefined, undefined, queuedAt);
   }
 };
 
@@ -7076,7 +7189,9 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
   const state = ensureRuntimeState(env);
   if (state.loopActive) return state.stopLoop ?? (() => {});
 
-  const tickDelayMs = config?.tickDelayMs ?? ensureRuntimeConfig(env).loopIntervalMs ?? 25;
+  const tickDelayMs = config?.tickDelayMs
+    ?? ensureRuntimeConfig(env).loopIntervalMs
+    ?? (isProductionRuntime ? 25 : 0);
   let running = true;
   state.loopActive = true;
 
@@ -7112,22 +7227,43 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
           // best-effort diagnostics
         }
       }
-      if (tickDelayMs > 0) {
-        await sleep(tickDelayMs);
-      } else {
-        // yield to event loop even with 0 delay (let network/UI callbacks run)
+      if (!running) break;
+      if (hasRuntimeWork(env)) {
+        // Drain chained outputs/ACKs immediately instead of paying the production idle
+        // poll delay after every intermediate hop.
         await sleep(0);
+        continue;
+      }
+      await waitForRuntimeLoopWakeOrTimeout(env, tickDelayMs);
+      if (!running) break;
+      if (!hasRuntimeWork(env)) {
+        const dueTimestamp = getEarliestWallClockDueTimestamp(env);
+        if (dueTimestamp !== null) {
+          generateHookPings(env, dueTimestamp, dueTimestamp);
+        }
       }
     }
     state.loopActive = false;
+    state.wakeLoop = null;
+    state.wakeRequested = false;
   };
 
   loop(); // fire-and-forget — single async chain, never overlaps
   state.stopLoop = () => {
     running = false;
+    requestRuntimeLoopWake(env);
   };
   return state.stopLoop;
 }
+
+export const startJurisdictionWatchers = (env: Env): void => {
+  if (!env.jReplicas || env.jReplicas.size === 0) return;
+  for (const [name, jReplica] of env.jReplicas.entries()) {
+    if (!jReplica.jadapter) continue;
+    jReplica.jadapter.startWatching(env);
+    console.log(`✅ JAdapter watcher started for jReplica "${name}"`);
+  }
+};
 
 /**
  * Identity function for env (no module-level env exists).
@@ -7321,7 +7457,7 @@ const getDeferredNetworkMeta = (env: Env): Map<string, { attempts: number; nextR
   return state.deferredNetworkMeta;
 };
 
-const getRuntimeNowMs = (env: Env): number => (env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs());
+const getRuntimeNowMs = (env: Env): number => env.timestamp ?? 0;
 
 const toDeliverableEntityInput = (
   output: RoutedEntityInput,
@@ -7518,7 +7654,7 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
   const deferredOutputs: RoutedEntityInput[] = [];
   for (const { output, targetRuntimeId } of batchedOutputs) {
     if (directDispatch) {
-      const deliveredDirect = directDispatch(targetRuntimeId, output);
+      const deliveredDirect = directDispatch(targetRuntimeId, output, env.timestamp);
       if (deliveredDirect) {
         continue;
       }
@@ -7531,11 +7667,13 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
       deferredOutputs.push(output);
       continue;
     }
-    console.log(
-      `📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`,
-    );
+    if (env.quietRuntimeLogs !== true) {
+      console.log(
+        `📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`,
+      );
+    }
     try {
-      p2p.enqueueEntityInput(targetRuntimeId, output);
+      p2p.enqueueEntityInput(targetRuntimeId, output, env.timestamp);
     } catch (error) {
       env.warn('network', 'ROUTE_DEFER_SEND_FAILED', {
         entityId: output.entityId,
@@ -7561,7 +7699,7 @@ export const sendEntityInput = (
   const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan);
   env.pendingNetworkOutputs = [];
   if (localOutputs.length > 0) {
-    enqueueRuntimeInputs(env, localOutputs);
+    enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.timestamp);
   }
   const deferred = dispatchEntityOutputs(env, remoteOutputs);
   const remainingDeferred = [...deferredOutputs, ...deferred];
@@ -7637,7 +7775,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     advertiseEntityIds: config.advertiseEntityIds,
     isHub: config.isHub,
     gossipPollMs: config.gossipPollMs,
-    onEntityInput: (from, input) => {
+    onEntityInput: (from, input, ingressTimestamp) => {
       const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
       console.log(`📨 P2P-RECEIVE: from=${from} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
       const targetEntityId = String(input.entityId || '').toLowerCase();
@@ -7663,7 +7801,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
       for (const hintedEntityId of collectSenderEntityHints(input)) {
         registerEntityRuntimeHint(env, hintedEntityId, from);
       }
-      enqueueRuntimeInputs(env, [input]);
+      enqueueRuntimeInputs(env, [input], undefined, undefined, ingressTimestamp);
       console.log(`📥 RUNTIME-MEMPOOL: Added inbound, size=${ensureRuntimeMempool(env).entityInputs.length}`);
       env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
     },
@@ -7993,9 +8131,15 @@ const applyRuntimeInput = async (
 
           const resolvedDepositoryAddress = jadapter.addresses.depository || '';
           const resolvedEntityProviderAddress = jadapter.addresses.entityProvider || '';
+          const resolvedAccountAddress =
+            jadapter.addresses.account || runtimeTx.data.contracts?.account || '';
+          const resolvedDeltaTransformerAddress =
+            jadapter.addresses.deltaTransformer || runtimeTx.data.contracts?.deltaTransformer || '';
           const resolvedContracts = {
+            account: resolvedAccountAddress,
             depository: resolvedDepositoryAddress,
             entityProvider: resolvedEntityProviderAddress,
+            deltaTransformer: resolvedDeltaTransformerAddress,
           };
 
           if (!resolvedDepositoryAddress || !resolvedEntityProviderAddress) {
@@ -8532,17 +8676,27 @@ const applyRuntimeInput = async (
         try {
           // Collect all account pairs from all entities
           const accountPairs: Array<{ entityId: string; counterpartyId: string }> = [];
+          const tokenIds = new Set<number>();
           for (const [replicaKey, replica] of env.eReplicas.entries()) {
+            for (const tokenId of replica.state.reserves.keys()) {
+              if (Number.isFinite(tokenId) && tokenId > 0) tokenIds.add(tokenId);
+            }
             if (replica.state.accounts) {
-              for (const [counterpartyId, _account] of replica.state.accounts) {
+              for (const [counterpartyId, account] of replica.state.accounts) {
                 const entityId = replicaKey.split(':')[0];
                 accountPairs.push({ entityId, counterpartyId });
+                for (const tokenId of account.deltas.keys()) {
+                  if (Number.isFinite(tokenId) && tokenId > 0) tokenIds.add(tokenId);
+                }
               }
             }
           }
+          const browserVmTokenIds = browserVM.getTokenRegistry?.().map((token) => Number(token.tokenId)) ?? [];
+          for (const tokenId of browserVmTokenIds) {
+            if (Number.isFinite(tokenId) && tokenId > 0) tokenIds.add(tokenId);
+          }
 
-          // Sync all collaterals from BrowserVM (for now, just tokenId 1 = USDC)
-          const collaterals = await browserVM.syncAllCollaterals(accountPairs, 1);
+          const collaterals = await browserVM.syncAllCollaterals(accountPairs, Array.from(tokenIds).sort((a, b) => a - b));
 
           // Get current block height from BrowserVM
           const blockHeight = browserVM.getBlockHeight ? browserVM.getBlockHeight() : 0;
@@ -8671,7 +8825,11 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
 
   attachEventEmitters(env);
   if (!restoredFromCoreDb) {
-    await loadGossipProfilesFromInfraDb(env);
+    try {
+      await loadGossipProfilesFromInfraDb(env);
+    } catch (error) {
+      console.warn('[main] skipped infra gossip restore:', error instanceof Error ? error.message : String(error));
+    }
   }
 
   if (!env.runtimeId && env.runtimeSeed) {
@@ -8691,7 +8849,7 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
     }
   }
 
-  // J-event watching is handled by JAdapter.startWatching() per-jReplica
+  startJurisdictionWatchers(env);
 
   // Start the runtime event loop (single async while-loop, never re-enters)
   if (isBrowser) {
@@ -8803,13 +8961,19 @@ export const queueEntityInput = async (
   signerId: string,
   txData: { type: string; [key: string]: any },
 ): Promise<void> => {
-  enqueueRuntimeInputs(env, [
-    {
-      entityId,
-      signerId,
-      entityTxs: [{ type: txData.type, data: txData }],
-    },
-  ]);
+  enqueueRuntimeInputs(
+    env,
+    [
+      {
+        entityId,
+        signerId,
+        entityTxs: [{ type: txData.type, data: txData }],
+      },
+    ],
+    undefined,
+    undefined,
+    env.timestamp,
+  );
 };
 
 export {
@@ -8998,131 +9162,6 @@ const demoCompleteHanko = async (): Promise<void> => {
 
 // Demo wrapper removed - use scenarios.ahb(env) or scenarios.grid(env) instead
 
-// === ENVIRONMENT UTILITIES ===
-
-const isEntryArray = (value: unknown): value is Array<[unknown, unknown]> =>
-  Array.isArray(value) && value.length > 0 && Array.isArray(value[0]) && value[0].length === 2;
-
-const normalizeReplicaMap = (raw: unknown): Map<string, EntityReplica> => {
-  let map: Map<string, EntityReplica>;
-  if (raw instanceof Map) {
-    map = raw as Map<string, EntityReplica>;
-  } else if (Array.isArray(raw)) {
-    if (raw.length === 0) return new Map();
-    if (isEntryArray(raw)) {
-      map = new Map(raw as Array<[string, EntityReplica]>);
-    } else {
-      throw new Error('Invalid eReplicas array format in snapshot');
-    }
-  } else if (raw && typeof raw === 'object') {
-    map = new Map(Object.entries(raw as Record<string, EntityReplica>));
-  } else {
-    throw new Error('Invalid eReplicas format in snapshot');
-  }
-
-  // Recovery safety: ensure signer/entity identity fields exist even if older
-  // snapshots only had them in the replica map key ("entityId:signerId").
-  for (const [key, replica] of map.entries()) {
-    if (!replica || typeof replica !== 'object') continue;
-    const [entityIdFromKey, signerIdFromKey] = String(key).split(':');
-    if (!replica.entityId && entityIdFromKey) {
-      (replica as EntityReplica).entityId = entityIdFromKey;
-    }
-    if (!replica.signerId && signerIdFromKey) {
-      (replica as EntityReplica).signerId = signerIdFromKey;
-    }
-    map.set(key, replica);
-  }
-  return map;
-};
-
-const normalizeContractAddress = (value: unknown): string | undefined => {
-  if (typeof value === 'string') return value;
-  if (value && typeof value === 'object') {
-    const maybeAddress = (value as { address?: unknown }).address;
-    if (typeof maybeAddress === 'string') return maybeAddress;
-    if (typeof (value as { toString?: () => string }).toString === 'function') {
-      return (value as { toString: () => string }).toString();
-    }
-  }
-  return undefined;
-};
-
-const hasLiveJAdapter = (value: unknown): value is JAdapter => {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<JAdapter>;
-  return (
-    typeof candidate.startWatching === 'function' &&
-    typeof candidate.stopWatching === 'function' &&
-    typeof candidate.submitTx === 'function'
-  );
-};
-
-const normalizeJReplica = (jr: JReplica): JReplica => {
-  const { jadapter: rawJAdapter, ...rest } = jr as JReplica & { jadapter?: unknown };
-  if (!jr?.contracts) {
-    return {
-      ...rest,
-      ...(hasLiveJAdapter(rawJAdapter) ? { jadapter: rawJAdapter } : {}),
-    };
-  }
-  const depository = normalizeContractAddress(
-    jr.contracts.depository || (jr.contracts as { depositoryAddress?: unknown }).depositoryAddress,
-  );
-  const entityProvider = normalizeContractAddress(
-    jr.contracts.entityProvider || (jr.contracts as { entityProviderAddress?: unknown }).entityProviderAddress,
-  );
-  return {
-    ...rest,
-    ...(hasLiveJAdapter(rawJAdapter) ? { jadapter: rawJAdapter } : {}),
-    contracts: {
-      ...jr.contracts,
-      ...(depository ? { depository } : {}),
-      ...(entityProvider ? { entityProvider } : {}),
-    },
-  };
-};
-
-const normalizeJReplicaMap = (raw: unknown): Map<string, JReplica> => {
-  if (raw instanceof Map) return raw as Map<string, JReplica>;
-  if (Array.isArray(raw)) {
-    if (raw.length === 0) return new Map();
-    if (isEntryArray(raw)) {
-      const map = new Map(raw as Array<[string, JReplica]>);
-      for (const [name, jr] of map.entries()) {
-        map.set(name, normalizeJReplica(jr));
-      }
-      return map;
-    }
-    const first = raw[0] as any;
-    if (first && typeof first === 'object' && typeof first.name === 'string') {
-      return new Map((raw as JReplica[]).map(jr => [jr.name, normalizeJReplica(jr)]));
-    }
-  }
-  if (raw && typeof raw === 'object') {
-    const map = new Map(Object.entries(raw as Record<string, JReplica>));
-    for (const [name, jr] of map.entries()) {
-      map.set(name, normalizeJReplica(jr));
-    }
-    return map;
-  }
-  return new Map();
-};
-
-const normalizeSnapshotInPlace = (snapshot: any): void => {
-  if (!snapshot || typeof snapshot !== 'object') return;
-  if (snapshot.eReplicas) {
-    snapshot.eReplicas = normalizeReplicaMap(snapshot.eReplicas);
-  }
-  if (snapshot.jReplicas) {
-    const jMap = normalizeJReplicaMap(snapshot.jReplicas);
-    snapshot.jReplicas = Array.from(jMap.values()).map(jr => ({
-      ...jr,
-      stateRoot: jr.stateRoot ? new Uint8Array(jr.stateRoot as any) : jr.stateRoot,
-    }));
-  }
-};
-
 export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   const normalizedSeed = Array.isArray(seed) ? new Uint8Array(seed) : seed;
   const seedText =
@@ -9214,33 +9253,51 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   return env;
 };
 
-const buildRuntimeHistorySnapshot = (env: Env, title?: string): any => {
-  const frameLogs = Array.isArray(env.frameLogs)
-    ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
-    : [];
-  return {
-    height: env.height,
-    frame: env.height,
-    timestamp: env.timestamp,
-    ...(env.runtimeSeed !== undefined && env.runtimeSeed !== null ? { runtimeSeed: env.runtimeSeed } : {}),
-    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
-    eReplicas: new Map(env.eReplicas),
-    jReplicas: env.jReplicas
-      ? Array.from(env.jReplicas.values()).map(jr => {
-          const { jadapter: _jadapter, ...jrSnapshot } = jr as JReplica & { jadapter?: unknown };
-          return {
-            ...jrSnapshot,
-            mempool: [...jr.mempool],
-            stateRoot: new Uint8Array(jr.stateRoot),
-          };
-        })
-      : [],
-    runtimeInput: env.runtimeInput,
-    runtimeOutputs: env.pendingOutputs || [],
-    frameLogs,
-    logs: frameLogs,
-    title: title ?? `Frame ${env.height}`,
-  };
+const requirePersistedContractAddress = (
+  jReplicas: Map<string, JReplica>,
+  label: string,
+  contractName: 'depository' | 'entityProvider' | 'deltaTransformer',
+): string => {
+  for (const [, jReplica] of jReplicas.entries()) {
+    const rawAddress =
+      contractName === 'depository'
+        ? jReplica.depositoryAddress ?? jReplica.contracts?.depository
+        : contractName === 'entityProvider'
+          ? jReplica.entityProviderAddress ?? jReplica.contracts?.entityProvider
+          : jReplica.contracts?.deltaTransformer;
+    const restoredAddress = String(rawAddress ?? '').trim();
+    if (restoredAddress && ethers.isAddress(restoredAddress)) {
+      return restoredAddress;
+    }
+  }
+  throw new Error(`MISSING_${contractName.toUpperCase()}_ADDRESS: ${label}`);
+};
+
+const findPersistedContractAddress = (
+  jReplicas: Map<string, JReplica>,
+  contractName: 'depository' | 'entityProvider' | 'deltaTransformer',
+): string => {
+  for (const [, jReplica] of jReplicas.entries()) {
+    const rawAddress =
+      contractName === 'depository'
+        ? jReplica.depositoryAddress ?? jReplica.contracts?.depository
+        : contractName === 'entityProvider'
+          ? jReplica.entityProviderAddress ?? jReplica.contracts?.entityProvider
+          : jReplica.contracts?.deltaTransformer;
+    const restoredAddress = String(rawAddress ?? '').trim();
+    if (restoredAddress && ethers.isAddress(restoredAddress)) {
+      return restoredAddress;
+    }
+  }
+  return '';
+};
+
+const assertPersistedContractConfigReady = (env: Env, label: string): void => {
+  if (env.jReplicas && env.jReplicas.size > 0) {
+    requirePersistedContractAddress(env.jReplicas, label, 'depository');
+    requirePersistedContractAddress(env.jReplicas, label, 'entityProvider');
+    setDeltaTransformerAddress(findPersistedContractAddress(env.jReplicas, 'deltaTransformer'));
+  }
 };
 
 // === CONSENSUS PROCESSING ===
@@ -9278,20 +9335,32 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     }
 
     if (inputs && inputs.length > 0) {
-      enqueueRuntimeInputs(env, inputs);
+      enqueueRuntimeInputs(env, inputs, undefined, undefined, env.timestamp);
     }
     if (env.pendingOutputs && env.pendingOutputs.length > 0) {
-      enqueueRuntimeInputs(env, env.pendingOutputs);
+      enqueueRuntimeInputs(env, env.pendingOutputs, undefined, undefined, env.timestamp);
       env.pendingOutputs = [];
     }
     if (env.networkInbox && env.networkInbox.length > 0) {
-      enqueueRuntimeInputs(env, env.networkInbox);
+      enqueueRuntimeInputs(env, env.networkInbox, undefined, undefined, env.timestamp);
       env.networkInbox = [];
     }
 
     if (!hasRuntimeWork(env)) return env;
 
-    const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    const runtimeState = ensureRuntimeState(env);
+    const mempoolBeforeTick = ensureRuntimeMempool(env);
+    const queuedAtBeforeTick = mempoolBeforeTick.queuedAt;
+    const shouldAdvanceLogicalTime =
+      !env.scenarioMode &&
+      typeof queuedAtBeforeTick === 'number' &&
+      Number.isFinite(queuedAtBeforeTick) &&
+      queuedAtBeforeTick > (env.timestamp ?? 0);
+    const now = env.scenarioMode
+      ? (env.timestamp ?? 0)
+      : shouldAdvanceLogicalTime || runtimeState.clockPrimed
+        ? Math.max(env.timestamp ?? 0, queuedAtBeforeTick ?? (env.timestamp ?? 0))
+        : (env.timestamp ?? 0);
     if (!isRuntimeFrameReady(env, now, runtimeDelay)) {
       return env;
     }
@@ -9302,8 +9371,8 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
 
     if (env.scenarioMode) {
       env.timestamp = (env.timestamp ?? 0) + 100;
-    } else {
-      env.timestamp = getWallClockMs();
+    } else if (shouldAdvanceLogicalTime || runtimeState.clockPrimed) {
+      env.timestamp = Math.max(env.timestamp ?? 0, queuedAtBeforeTick ?? (env.timestamp ?? 0));
     }
     getBrowserVMInstance(env)?.setBlockTimestamp?.(env.timestamp);
 
@@ -9326,7 +9395,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       runtimeInput.runtimeTxs.length > 0 ||
       runtimeInput.entityInputs.length > 0 ||
       (runtimeInput.jInputs?.length ?? 0) > 0;
-    (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput = undefined;
+    let appliedRuntimeInputForPersistence: RuntimeInput | undefined;
 
     let entityOutbox: RoutedEntityInput[] = [];
     let jOutbox: JInput[] = [];
@@ -9392,8 +9461,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
         }
         entityOutbox = result.entityOutbox;
         jOutbox = result.jOutbox;
-        (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput =
-          result.appliedRuntimeInput;
+        appliedRuntimeInputForPersistence = result.appliedRuntimeInput;
         for (const runtimeTx of runtimeInput.runtimeTxs) {
           if (runtimeTx.type === 'importReplica') {
             changedEntityIds.add(runtimeTx.entityId.toLowerCase());
@@ -9418,7 +9486,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
           mempool.jInputs = [...runtimeInput.jInputs, ...(mempool.jInputs ?? [])];
         }
         if (mempool.queuedAt === undefined) {
-          mempool.queuedAt = mempoolQueuedAt ?? (env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs());
+          mempool.queuedAt = mempoolQueuedAt ?? (env.timestamp ?? 0);
         }
         throw error;
       } finally {
@@ -9436,34 +9504,43 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan);
     env.pendingNetworkOutputs = [];
     if (localOutputs.length > 0) {
-      enqueueRuntimeInputs(env, localOutputs);
+      enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.timestamp);
       if (!quietRuntimeLogs) {
         console.log(
           `📤 TICK: ${localOutputs.length} local outputs queued for next tick → [${localOutputs.map(o => o.entityId.slice(-4)).join(',')}]`,
         );
       }
     }
+    // Re-check due crontab work after apply. Hooks scheduled at the current
+    // logical timestamp should run on the next tick without importing wall
+    // clock time into runtime consensus.
+    generateHookPings(env);
     // BrowserVM trie is NOT serialized per-frame — it's J-layer state.
     // Only serialized on shutdown/page-unload for reload recovery.
 
     const frameAdvanced = env.height !== frameHeightBeforeTick;
     if (frameAdvanced) {
-      const snapshot: any = buildRuntimeHistorySnapshot(env, `Frame ${env.height}`);
-
-      if (env.extra) {
-        const { subtitle, description } = env.extra;
-        if (subtitle) {
-          snapshot.subtitle = subtitle;
-          snapshot.title = subtitle.title || snapshot.title;
-        }
-        if (description) snapshot.description = description;
-      }
+      const committedFrameLogs = Array.isArray(env.frameLogs)
+        ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
+        : [];
+      const snapshot = buildCanonicalEnvSnapshot(env, {
+        runtimeInput: env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+        runtimeOutputs: env.pendingOutputs ?? [],
+        description: env.extra?.description ?? `Frame ${env.height}`,
+        meta: {
+          title: env.extra?.subtitle?.title ?? `Frame ${env.height}`,
+          ...(env.extra?.subtitle ? { subtitle: env.extra.subtitle } : {}),
+          ...(env.frameDisplayMs !== undefined ? { displayMs: env.frameDisplayMs } : {}),
+        },
+        logs: committedFrameLogs,
+        gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
+      });
 
       if (!env.history) env.history = [];
-      env.history.push(snapshot);
+      env.history.push(snapshot as any);
 
       if (!quietRuntimeLogs) {
-        console.log(`📸 Snapshot: ${snapshot.title} (${env.history.length} total)`);
+        console.log(`📸 Snapshot: ${snapshot.meta?.title ?? `Frame ${env.height}`} (${env.history.length} total)`);
       }
     }
     env.extra = undefined;
@@ -9476,9 +9553,8 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       if (!quietRuntimeLogs) {
         console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
       }
-      await saveEnvToDB(env);
+      await saveEnvToDB(env, appliedRuntimeInputForPersistence);
       env.frameLogs = [];
-      (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput = undefined;
       if (!quietRuntimeLogs) {
         console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
       }
@@ -9530,21 +9606,27 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
             if (jTx.type !== 'batch') return;
             const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId : undefined;
             const compactReason = String(reason || 'unknown').slice(0, 240);
-            enqueueRuntimeInputs(env, [
-              {
-                entityId: jTx.entityId,
-                ...(signerId ? { signerId } : {}),
-                entityTxs: [
-                  {
-                    type: 'j_abort_sent_batch',
-                    data: {
-                      requeueToCurrent: true,
-                      reason: `submit_failed:${compactReason}`,
+            enqueueRuntimeInputs(
+              env,
+              [
+                {
+                  entityId: jTx.entityId,
+                  ...(signerId ? { signerId } : {}),
+                  entityTxs: [
+                    {
+                      type: 'j_abort_sent_batch',
+                      data: {
+                        requeueToCurrent: true,
+                        reason: `submit_failed:${compactReason}`,
+                      },
                     },
-                  },
-                ],
-              },
-            ]);
+                  ],
+                },
+              ],
+              undefined,
+              undefined,
+              env.timestamp,
+            );
             console.warn(
               `⚠️ [J-SUBMIT] queued j_abort_sent_batch for ${jTx.entityId.slice(-4)} after failed batch submission`,
             );
@@ -9616,211 +9698,93 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
 };
 
 // === LEVELDB PERSISTENCE ===
-export const saveEnvToDB = async (env: Env): Promise<void> => {
+export const saveEnvToDB = async (env: Env, currentFrameInput?: RuntimeInput): Promise<void> => {
   if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
-  const state = ensureRuntimeState(env);
-  if (state.persistencePaused) {
-    return;
-  }
-  try {
-    const persistStartedAt = getPerfMs();
-    let openMs = 0;
-    let frameSerializeMs = 0;
-    let snapshotSerializeMs = 0;
-    let writeMs = 0;
-    let verifyMs = 0;
-    let frameJournalBytes = 0;
-    let snapshotBytes = 0;
-
-    const openStartedAt = getPerfMs();
-    const dbReady = await tryOpenDb(env);
-    openMs = getPerfMs() - openStartedAt;
-    if (!dbReady) return;
-    const dbNamespace = resolveDbNamespace({ env });
-    const db = getRuntimeDb(env);
-    const committedFrameLogs = Array.isArray(env.frameLogs)
-      ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
-      : [];
-
-    // Persist compact per-frame runtime input for replay from checkpoint.
-    // This WAL record doubles as the frame receipt: inputs + committed logs.
-    const currentFrameInput = (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput;
-    const frameSerializeStartedAt = getPerfMs();
-    const frameJournal = serializeTaggedJson({
+  await saveRuntimeFrameToWal({
+    env,
+    currentFrameInput,
+    persistenceSchemaVersion: PERSISTENCE_SCHEMA_VERSION,
+    defaultSnapshotIntervalFrames: DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
+    tryOpenDb,
+    getRuntimeDb,
+    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
+    ensureRuntimeState,
+    ensureRuntimeConfig,
+    hasUnsafePendingAccountStateForCheckpoint,
+    assertPersistedContractConfigReady,
+    isDbUnavailableError,
+    getPerfMs,
+    formatPerfMs,
+  });
+  if (isBrowser && typeof BroadcastChannel !== 'undefined' && typeof env.runtimeId === 'string' && env.runtimeId.length > 0) {
+    const runtimeSyncChannel = new BroadcastChannel('xln-runtime-sync');
+    runtimeSyncChannel.postMessage({
+      runtimeId: env.runtimeId,
       height: env.height,
-      timestamp: env.timestamp,
-      // Always persist a frame record so replay has a contiguous frame timeline.
-      runtimeInput: currentFrameInput ?? { runtimeTxs: [], entityInputs: [] },
-      logs: committedFrameLogs,
     });
-    frameSerializeMs = getPerfMs() - frameSerializeStartedAt;
-    frameJournalBytes = Buffer.byteLength(frameJournal);
-    const ops: Array<{ key: Buffer; value: Buffer }> = [
-      {
-        key: makeDbKey(dbNamespace, 'persistence_schema_version'),
-        value: Buffer.from(String(PERSISTENCE_SCHEMA_VERSION)),
-      },
-      { key: makeDbKey(dbNamespace, `frame_input:${env.height}`), value: Buffer.from(frameJournal) },
-    ];
-
-    // Persist a durable checkpoint snapshot every N runtime frames.
-    // Restore is always: checkpoint snapshot + contiguous WAL replay on top.
-    const CHECKPOINT_INTERVAL = ensureRuntimeConfig(env).snapshotIntervalFrames ?? DEFAULT_SNAPSHOT_INTERVAL_FRAMES;
-    const shouldCheckpoint = env.height <= 1 || env.height % CHECKPOINT_INTERVAL === 0;
-    if (shouldCheckpoint) {
-      const snapshotSerializeStartedAt = getPerfMs();
-      const snapshotPayload = { ...env };
-      const snapshot = serializeTaggedJson(snapshotPayload, PERSISTENCE_SNAPSHOT_EXCLUDE_KEYS);
-      snapshotSerializeMs = getPerfMs() - snapshotSerializeStartedAt;
-      snapshotBytes = Buffer.byteLength(snapshot);
-      ops.push(
-        { key: makeDbKey(dbNamespace, `snapshot:${env.height}`), value: Buffer.from(snapshot) },
-        { key: makeDbKey(dbNamespace, 'latest_checkpoint_height'), value: Buffer.from(String(env.height)) },
-      );
-    }
-
-    // Write pointer last so latest_height is only advanced after all frame data is durable.
-    ops.push({ key: makeDbKey(dbNamespace, 'latest_height'), value: Buffer.from(String(env.height)) });
-
-    // NOTE: Browser Level polyfill has shown flaky behavior with db.batch(ops[]) on binary keys.
-    // Use chained batch API first, then fail over to sequential puts if needed.
-    if (state.persistencePaused) return;
-    const writeStartedAt = getPerfMs();
-    let wrote = false;
-    try {
-      const batch = db.batch();
-      for (const op of ops) {
-        batch.put(op.key, op.value);
-      }
-      await batch.write();
-      wrote = true;
-    } catch (batchError) {
-      console.warn('⚠️ db.batch().write() failed, falling back to sequential put:', batchError);
-    }
-    if (!wrote) {
-      try {
-        for (const op of ops) {
-          await db.put(op.key, op.value);
-        }
-      } catch (putError) {
-        if ((state.persistencePaused || ensureRuntimeState(env).db !== db) && isDbUnavailableError(putError)) {
-          console.warn(`⚠️ DB write aborted during reset/pause: frame ${env.height}`);
-          return;
-        }
-        throw putError;
-      }
-    }
-    writeMs = getPerfMs() - writeStartedAt;
-
-    // Verify write succeeded before exposing the frame as durable to the UI.
-    let verifySkipped = false;
-    if (state.persistencePaused || ensureRuntimeState(env).db !== db) {
-      verifySkipped = true;
-    }
-    if (!verifySkipped) {
-      const verifyStartedAt = getPerfMs();
-      try {
-        await db.get(makeDbKey(dbNamespace, `frame_input:${env.height}`));
-        const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
-        const latestHeight = Number.parseInt(latestHeightBuffer.toString(), 10);
-        if (!Number.isFinite(latestHeight) || latestHeight !== env.height) {
-          throw new Error(
-            `PERSISTENCE_FATAL: latest_height mismatch after write: expected=${env.height} actual=${String(latestHeightBuffer.toString())}`,
-          );
-        }
-      } catch (verifyError) {
-        if ((state.persistencePaused || ensureRuntimeState(env).db !== db) && isDbUnavailableError(verifyError)) {
-          console.warn(`⚠️ DB verify aborted during reset/pause: frame ${env.height}`);
-          return;
-        }
-        throw new Error(`PERSISTENCE_FATAL: write verification failed at frame ${env.height}: ${String(verifyError)}`);
-      }
-      verifyMs = getPerfMs() - verifyStartedAt;
-    }
-
-    const totalMs = getPerfMs() - persistStartedAt;
-    console.log(
-      `[PERSIST] frame=${env.height} checkpoint=${shouldCheckpoint ? 1 : 0} ` +
-        `logs=${committedFrameLogs.length} ops=${ops.length} ` +
-        `bytes(frame=${frameJournalBytes},snapshot=${snapshotBytes}) ` +
-        `ms(open=${formatPerfMs(openMs)},frame=${formatPerfMs(frameSerializeMs)},snapshot=${formatPerfMs(snapshotSerializeMs)},` +
-        `write=${formatPerfMs(writeMs)},verify=${verifySkipped ? 'skip' : formatPerfMs(verifyMs)},total=${formatPerfMs(totalMs)})`,
-    );
-    if (isBrowser && typeof BroadcastChannel !== 'undefined' && typeof env.runtimeId === 'string' && env.runtimeId.length > 0) {
-      const runtimeSyncChannel = new BroadcastChannel('xln-runtime-sync');
-      runtimeSyncChannel.postMessage({
-        runtimeId: env.runtimeId,
-        height: env.height,
-      });
-      runtimeSyncChannel.close();
-    }
-  } catch (err) {
-    const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-    if (state.persistencePaused && isDbUnavailableError(err)) {
-      console.warn(`⚠️ DB save aborted during reset/pause: ${reason}`);
-      return;
-    }
-    console.error('❌ Failed to save to LevelDB:', err);
-    throw new Error(`PERSISTENCE_FATAL: ${reason}`);
+    runtimeSyncChannel.close();
   }
-};
-
-export type PersistedFrameJournal = {
-  height: number;
-  timestamp: number;
-  runtimeInput: RuntimeInput;
-  logs: FrameLogEntry[];
 };
 
 export const getPersistedLatestHeight = async (env: Env): Promise<number> => {
-  const dbReady = await tryOpenDb(env);
-  if (!dbReady) return 0;
-  const dbNamespace = resolveDbNamespace({ env });
-  const db = getRuntimeDb(env);
-  try {
-    const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
-    const latestHeight = Number.parseInt(latestHeightBuffer.toString(), 10);
-    return Number.isFinite(latestHeight) && latestHeight > 0 ? latestHeight : 0;
-  } catch (error) {
-    if (isDbUnavailableError(error)) return 0;
-    throw error;
-  }
+  return getPersistedLatestHeightWal(env, {
+    tryOpenDb,
+    getRuntimeDb,
+    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
+    isDbUnavailableError,
+  });
+};
+
+export const listPersistedCheckpointHeights = async (env: Env): Promise<number[]> => {
+  return listPersistedCheckpointHeightsWal(env, {
+    tryOpenDb,
+    getRuntimeDb,
+    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
+    isDbUnavailableError,
+    isDbNotFound,
+  });
+};
+
+export const verifyRuntimeChain = async (
+  runtimeId?: string | null,
+  runtimeSeed?: string | null,
+  options?: { fromSnapshotHeight?: number },
+): Promise<VerifyRuntimeChainResult> => {
+  return verifyPersistedRuntimeState({
+    runtimeId,
+    runtimeSeed,
+    fromSnapshotHeight: options?.fromSnapshotHeight,
+    persistenceSchemaVersion: PERSISTENCE_SCHEMA_VERSION,
+    createEmptyEnv,
+    tryOpenDb,
+    getRuntimeDb,
+    resolveDbNamespace,
+    isDbNotFound,
+    deriveRuntimeIdFromSeed: (seed: string) => deriveSignerAddressSync(seed, '1'),
+    assertPersistedContractConfigReady,
+    validateEntityState,
+    buildCanonicalEnvSnapshot,
+    ensureRuntimeState,
+    applyRuntimeInput,
+    buildSkippedReplayAckKey,
+    buildSkippedReplayNewFrameKey,
+    safeStringify,
+    normalizeEntitySwapTradingPairs,
+    replayModeKey: ENV_REPLAY_MODE_KEY,
+    replaySkippedAccountInputsKey: ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY,
+    applyAllowedKey: ENV_APPLY_ALLOWED_KEY,
+  });
 };
 
 export const readPersistedFrameJournal = async (env: Env, height: number): Promise<PersistedFrameJournal | null> => {
-  const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
-  if (targetHeight <= 0) return null;
-  const dbReady = await tryOpenDb(env);
-  if (!dbReady) return null;
-  const dbNamespace = resolveDbNamespace({ env });
-  const db = getRuntimeDb(env);
-  try {
-    const frameBuffer = await db.get(makeDbKey(dbNamespace, `frame_input:${targetHeight}`));
-    const decoded = deserializeTaggedJson<PersistedFrameJournal>(frameBuffer.toString());
-    if (!decoded || typeof decoded !== 'object') return null;
-    const runtimeInput =
-      decoded.runtimeInput && typeof decoded.runtimeInput === 'object'
-        ? decoded.runtimeInput
-        : { runtimeTxs: [], entityInputs: [] };
-    const logs = Array.isArray(decoded.logs) ? decoded.logs : [];
-    return {
-      height:
-        Number.isFinite(Number(decoded.height)) && Number(decoded.height) > 0
-          ? Math.floor(Number(decoded.height))
-          : targetHeight,
-      timestamp: Number.isFinite(Number(decoded.timestamp)) ? Number(decoded.timestamp) : 0,
-      runtimeInput,
-      logs,
-    };
-  } catch (error) {
-    if (isDbUnavailableError(error)) return null;
-    const code = String((error as { code?: unknown })?.code ?? '');
-    const name = String((error as { name?: unknown })?.name ?? '');
-    if (code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError') return null;
-    throw error;
-  }
+  return readPersistedFrameJournalWal(env, height, {
+    tryOpenDb,
+    getRuntimeDb,
+    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
+    isDbUnavailableError,
+  });
 };
 
 export const readPersistedFrameJournals = async (
@@ -9831,507 +9795,54 @@ export const readPersistedFrameJournals = async (
     limit?: number;
   },
 ): Promise<PersistedFrameJournal[]> => {
-  const latestHeight = await getPersistedLatestHeight(env);
-  if (latestHeight <= 0) return [];
-
-  const fromHeight = Math.max(1, Math.floor(opts?.fromHeight ?? 1));
-  const boundedToHeight = Math.max(fromHeight, Math.floor(opts?.toHeight ?? latestHeight));
-  const toHeight = Math.min(latestHeight, boundedToHeight);
-  const limit = Math.max(1, Math.min(1000, Math.floor(opts?.limit ?? 200)));
-  const startHeight = Math.max(fromHeight, toHeight - limit + 1);
-  const receipts: PersistedFrameJournal[] = [];
-
-  for (let height = startHeight; height <= toHeight; height++) {
-    const receipt = await readPersistedFrameJournal(env, height);
-    if (receipt) receipts.push(receipt);
-  }
-
-  return receipts;
+  return readPersistedFrameJournalsWal(env, opts, {
+    tryOpenDb,
+    getRuntimeDb,
+    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
+    isDbUnavailableError,
+  });
 };
 
-export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: string | null): Promise<Env | null> => {
-  const isDbNotFound = (error: unknown): boolean => {
-    if (!error || typeof error !== 'object') return false;
-    const code = String((error as { code?: unknown }).code ?? '');
-    const name = String((error as { name?: unknown }).name ?? '');
-    return code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError';
-  };
+export const loadEnvFromDB = async (
+  runtimeId?: string | null,
+  runtimeSeed?: string | null,
+  options?: { fromSnapshotHeight?: number },
+): Promise<Env | null> => {
   try {
-    const tempEnv = createEmptyEnv(runtimeSeed ?? null);
-    if (runtimeId) {
-      tempEnv.runtimeId = runtimeId;
-      tempEnv.dbNamespace = normalizeDbNamespace(runtimeId);
-    }
-    const dbReady = await tryOpenDb(tempEnv);
-    if (!dbReady) return null;
+    const latestEnv = await loadRuntimeStateFromDb({
+      runtimeId,
+      runtimeSeed,
+      fromSnapshotHeight: Number.isFinite(options?.fromSnapshotHeight)
+        ? Math.floor(Number(options?.fromSnapshotHeight))
+        : undefined,
+      persistenceSchemaVersion: PERSISTENCE_SCHEMA_VERSION,
+      createEmptyEnv,
+      tryOpenDb,
+      getRuntimeDb,
+      resolveDbNamespace,
+      isDbNotFound,
+      deriveRuntimeIdFromSeed: (seed: string) => deriveSignerAddressSync(seed, '1'),
+      assertPersistedContractConfigReady,
+      validateEntityState,
+      buildCanonicalEnvSnapshot,
+      ensureRuntimeState,
+      applyRuntimeInput,
+      buildSkippedReplayAckKey,
+      buildSkippedReplayNewFrameKey,
+      safeStringify,
+      normalizeEntitySwapTradingPairs,
+      replayModeKey: ENV_REPLAY_MODE_KEY,
+      replaySkippedAccountInputsKey: ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY,
+      applyAllowedKey: ENV_APPLY_ALLOWED_KEY,
+    });
 
-    const dbNamespace = resolveDbNamespace({ runtimeId, runtimeSeed, env: tempEnv });
-    const db = getRuntimeDb(tempEnv);
-    let latestHeightBuffer: Buffer;
-    try {
-      const schemaVersionBuffer = await db.get(makeDbKey(dbNamespace, 'persistence_schema_version'));
-      const schemaVersion = Number.parseInt(schemaVersionBuffer.toString(), 10);
-      if (!Number.isFinite(schemaVersion) || schemaVersion !== PERSISTENCE_SCHEMA_VERSION) {
-        throw new Error(
-          `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=n/a latest=n/a restored=n/a reason=Unsupported persistence schema (${schemaVersion})`,
-        );
-      }
-      latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
-    } catch (error) {
-      if (isDbNotFound(error)) {
-        return null;
-      }
-      throw error;
-    }
-    const latestHeight = parseInt(latestHeightBuffer.toString());
-    let checkpointHeight = 0;
-    let checkpointBuffer: Buffer;
-    try {
-      const checkpointHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_checkpoint_height'));
-      checkpointHeight = parseInt(checkpointHeightBuffer.toString());
-    } catch (error) {
-      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      throw new Error(
-        `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=n/a latest=${latestHeight} restored=n/a reason=Missing latest_checkpoint_height pointer (${message})`,
-      );
-    }
-    if (!Number.isFinite(checkpointHeight) || checkpointHeight < 0 || checkpointHeight > latestHeight) {
-      throw new Error(
-        `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=${String(checkpointHeight)} latest=${latestHeight} restored=n/a reason=Invalid checkpoint pointer`,
-      );
-    }
-    if (latestHeight > 0 && checkpointHeight < 1) {
-      throw new Error(
-        `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=${String(checkpointHeight)} latest=${latestHeight} restored=n/a reason=Missing durable checkpoint`,
-      );
-    }
-    console.log(`[loadEnvFromDB] namespace=${dbNamespace} latest=${latestHeight} checkpoint=${checkpointHeight}`);
-    try {
-      checkpointBuffer = await db.get(makeDbKey(dbNamespace, `snapshot:${checkpointHeight}`));
-    } catch (error) {
-      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      throw new Error(
-        `REPLAY_INVARIANT_FAILED: frame=${checkpointHeight} checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing checkpoint snapshot (${message})`,
-      );
-    }
-
-    // Restore from latest checkpoint + replay WAL tail.
-    // Previous design always replayed from genesis (snapshot:1) which was O(N) on total frames
-    // and made any replay nondeterminism fatal. Checkpoints are already written and verified.
-    const selectedSnapshotHeight = checkpointHeight;
-    const selectedSnapshotLabel = `checkpoint:${checkpointHeight}`;
-    const snapshotBufferToUse = checkpointBuffer;
-    console.log(
-      `[loadEnvFromDB] snapshot selection checkpoint=${checkpointHeight} selected=${selectedSnapshotHeight} source=${selectedSnapshotLabel}`,
-    );
-
-    const data = deserializeTaggedJson<any>(snapshotBufferToUse.toString());
-
-    // Hydrate Maps/BigInts
-    const runtimeSeedRaw = Array.isArray(data.runtimeSeed)
-      ? new TextDecoder().decode(new Uint8Array(data.runtimeSeed))
-      : data.runtimeSeed;
-    const env = createEmptyEnv(runtimeSeedRaw ?? null);
-    env.height = Number(data.height || 0);
-    env.timestamp = Number(data.timestamp || 0);
-    env.dbNamespace = data.dbNamespace ?? dbNamespace;
-    env.activeJurisdiction = typeof data.activeJurisdiction === 'string' ? data.activeJurisdiction : undefined;
-    if (data.browserVMState) {
-      env.browserVMState = data.browserVMState;
-    }
-    if (data.runtimeId) {
-      env.runtimeId = data.runtimeId;
-    } else if (runtimeSeedRaw !== undefined && runtimeSeedRaw !== null) {
-      try {
-        env.runtimeId = deriveSignerAddressSync(runtimeSeedRaw, '1');
-      } catch (error) {
-        console.warn('⚠️ Failed to derive runtimeId from DB snapshot:', error);
-      }
-    }
-    // Support both old (replicas) and new (eReplicas) format
-    env.eReplicas = normalizeReplicaMap(data.eReplicas || data.replicas || []);
-    env.jReplicas = normalizeJReplicaMap(data.jReplicas || []);
-    for (const replica of env.eReplicas.values()) {
-      validateEntityState(replica.state, `loadEnvFromDB.eReplicas[${String(replica.entityId)}].state`);
-      replica.state.config = mergeRuntimeJurisdictionConfig(replica.state.config, env);
-    }
-    env.history = [];
-    if (selectedSnapshotHeight > 0) {
-      env.history.push(buildRuntimeHistorySnapshot(env, `Frame ${selectedSnapshotHeight}`));
-    }
-    if (env.jReplicas.size > 0) {
-      for (const [name, jr] of env.jReplicas.entries()) {
-        if ((jr as any).stateRoot) {
-          env.jReplicas.set(name, {
-            ...jr,
-            stateRoot: new Uint8Array((jr as any).stateRoot),
-          });
-        }
-      }
-    }
-    const envState = ensureRuntimeState(env);
-    const tempState = ensureRuntimeState(tempEnv);
-    envState.db = tempState.db;
-    envState.dbOpenPromise = tempState.dbOpenPromise;
-
-    // Replay frame journal from checkpoint+1 to latest.
-    // STRICT MODE: any missing/corrupt frame is fatal (deterministic replay invariant).
-    if (latestHeight > checkpointHeight) {
-      const missingFrames: number[] = [];
-      for (let h = checkpointHeight + 1; h <= latestHeight; h++) {
-        try {
-          await db.get(makeDbKey(dbNamespace, `frame_input:${h}`));
-        } catch (error) {
-          if (isDbNotFound(error)) {
-            missingFrames.push(h);
-            continue;
-          }
-          throw error;
-        }
-      }
-      if (missingFrames.length > 0) {
-        const sample = missingFrames.slice(0, 8).join(',');
-        throw new Error(
-          `REPLAY_INVARIANT_FAILED: frame=${missingFrames[0]} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${checkpointHeight} reason=Missing WAL frames (${sample}${missingFrames.length > 8 ? ',…' : ''})`,
-        );
-      }
-    }
-    let lastGoodHeight = selectedSnapshotHeight;
-    const isLegacyNoopFrame = (input: RuntimeInput | undefined): boolean => {
-      if (!input) return false;
-      const hasRuntimeTxs = (input.runtimeTxs?.length ?? 0) > 0;
-      const hasJInputs = (input.jInputs?.length ?? 0) > 0;
-      const hasMeaningfulEntityInputs = (input.entityInputs ?? []).some((entityInput) => {
-        const hasEntityTxs = (entityInput.entityTxs?.length ?? 0) > 0;
-        const hasProposal = !!entityInput.proposedFrame;
-        const hasHashPrecommits = !!entityInput.hashPrecommits && entityInput.hashPrecommits.size > 0;
-        return hasEntityTxs || hasProposal || hasHashPrecommits;
-      });
-      return !hasRuntimeTxs && !hasJInputs && !hasMeaningfulEntityInputs;
-    };
-    const runtimeEnv = env as Record<PropertyKey, unknown>;
-    const originalLog = env.log;
-    const originalInfo = env.info;
-    const originalWarn = env.warn;
-    const originalError = env.error;
-    const originalEmit = env.emit;
-    const replayNoop = () => {};
-    const assertReplayNoSideEffects = (frame: number): void => {
-      const pendingOutputs = env.pendingOutputs?.length ?? 0;
-      const pendingNetworkOutputs = env.pendingNetworkOutputs?.length ?? 0;
-      const networkInbox = env.networkInbox?.length ?? 0;
-      if (pendingOutputs > 0 || pendingNetworkOutputs > 0 || networkInbox > 0) {
-        throw new Error(
-          `REPLAY_SIDE_EFFECT_DETECTED: frame=${frame} pendingOutputs=${pendingOutputs} pendingNetworkOutputs=${pendingNetworkOutputs} networkInbox=${networkInbox}`,
-        );
-      }
-    };
-
-    runtimeEnv[ENV_REPLAY_MODE_KEY] = true;
-    env.log = replayNoop;
-    env.info = replayNoop;
-    env.warn = replayNoop;
-    env.error = replayNoop;
-    env.emit = replayNoop;
-    try {
-      for (let h = selectedSnapshotHeight + 1; h <= latestHeight; h++) {
-        try {
-          const frameBuffer = await db.get(makeDbKey(dbNamespace, `frame_input:${h}`));
-          const frame = deserializeTaggedJson<{
-            height: number;
-            timestamp: number;
-            runtimeInput: RuntimeInput;
-            logs?: FrameLogEntry[];
-          }>(frameBuffer.toString());
-          const replayRuntimeTxs = frame?.runtimeInput?.runtimeTxs?.length ?? 0;
-          const replayEntityInputs = frame?.runtimeInput?.entityInputs?.length ?? 0;
-          const replayJInputs = frame?.runtimeInput?.jInputs?.length ?? 0;
-          console.log(
-            `[loadEnvFromDB] replay frame=${h} runtimeTxs=${replayRuntimeTxs} entityInputs=${replayEntityInputs} jInputs=${replayJInputs}`,
-          );
-          if (Number(frame?.height) !== h) {
-            throw new Error(`Frame height mismatch: key=${h} payload=${String(frame?.height)}`);
-          }
-          if (!frame?.runtimeInput) {
-            throw new Error(`Missing runtimeInput at frame ${h}`);
-          }
-          for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
-            for (const tx of entityInput.entityTxs ?? []) {
-              if (tx.type !== 'accountInput') continue;
-              const data = tx.data as Record<string, unknown> | undefined;
-              const inputHeight = Number(data?.height ?? 0);
-              const newFrameHeight = Number((data?.newAccountFrame as { height?: number } | undefined)?.height ?? 0);
-              const hasPrev = Boolean(data?.prevHanko);
-              const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-              console.log(
-                `[loadEnvFromDB] frame=${h} accountInput from=${fromEntityId.slice(-8)} ` +
-                  `height=${inputHeight} hasPrev=${hasPrev} newFrame=${newFrameHeight || 'none'}`,
-              );
-            }
-          }
-          // Keep replay semantics identical to process():
-          // applyRuntimeInput increments env.height once per applied frame.
-          // Therefore env.height must be h-1 before applying frame h.
-          env.height = h - 1;
-          env.timestamp = Number(frame.timestamp ?? env.timestamp);
-          runtimeEnv[ENV_APPLY_ALLOWED_KEY] = true;
-          await applyRuntimeInput(env, frame.runtimeInput);
-          runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
-          assertReplayNoSideEffects(h);
-          // Replay diagnostics: show bilateral account heights after each frame
-          // for all accountInput txs seen in this frame.
-          for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
-            const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
-            for (const tx of entityInput.entityTxs ?? []) {
-              if (tx.type !== 'accountInput') continue;
-              const data = tx.data as Record<string, unknown> | undefined;
-              const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-              if (!fromEntityId) continue;
-              for (const replica of env.eReplicas.values()) {
-                if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
-                const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
-                console.log(
-                  `[loadEnvFromDB] frame=${h} POST-APPLY entity=${String(entityInput.entityId).slice(-8)} ` +
-                    `from=${fromEntityId.slice(-8)} current=${Number(accountMachine?.currentHeight ?? 0)} ` +
-                    `pending=${Number(accountMachine?.pendingFrame?.height ?? 0)} mempool=${Number(accountMachine?.mempool?.length ?? 0)}`,
-                );
-              }
-            }
-          }
-          if (env.height !== h) {
-            const canAdvanceLegacyNoop =
-              env.height === h - 1 && isLegacyNoopFrame(frame.runtimeInput);
-            if (canAdvanceLegacyNoop) {
-              console.warn(
-                `[loadEnvFromDB] frame=${h} legacy no-op WAL frame detected; advancing replay height without state mutation`,
-              );
-              env.height = h;
-            } else {
-              throw new Error(`Replay height mismatch after apply: expected=${h} actual=${env.height}`);
-            }
-          }
-          // Fail-fast replay invariant: if frame carries accountInput(newAccountFrame),
-          // replay MUST materialize that account frame in restored state.
-          for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
-            for (const tx of entityInput.entityTxs ?? []) {
-              if (tx.type !== 'accountInput') continue;
-              const data = tx.data as Record<string, unknown> | undefined;
-              const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-              const newAccountFrame = data?.newAccountFrame as Record<string, unknown> | undefined;
-              const hasPrevHanko = Boolean(data?.prevHanko);
-              const inputHeightRaw = data?.height;
-              const inputHeight = Number(inputHeightRaw ?? 0);
-              if (hasPrevHanko && !newAccountFrame && fromEntityId && Number.isFinite(inputHeight) && inputHeight > 0) {
-                const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
-                for (const replica of env.eReplicas.values()) {
-                  if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
-                  const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
-                  const currentHeight = Number(accountMachine?.currentHeight ?? 0);
-                  const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
-                  console.log(
-                    `[loadEnvFromDB] frame=${h} ACK-check entity=${String(entityInput.entityId).slice(-8)} ` +
-                      `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} inputHeight=${inputHeight}`,
-                  );
-                  if (currentHeight < inputHeight || pendingHeight === inputHeight) {
-                    throw new Error(
-                      `REPLAY_ACK_NOT_APPLIED: frame=${h} ackHeight=${inputHeight} currentHeight=${currentHeight} pendingHeight=${pendingHeight} ` +
-                        `entity=${String(entityInput.entityId).slice(0, 12)} from=${fromEntityId.slice(0, 12)}`,
-                    );
-                  }
-                }
-              }
-              const expectedHeight = Number(newAccountFrame?.height ?? 0);
-              if (!fromEntityId || !Number.isFinite(expectedHeight) || expectedHeight <= 0) continue;
-              const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
-              let applied = false;
-              for (const replica of env.eReplicas.values()) {
-                if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
-                const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
-                const currentHeight = Number(accountMachine?.currentHeight ?? 0);
-                const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
-                console.log(
-                  `[loadEnvFromDB] frame=${h} NEWFRAME-check entity=${String(entityInput.entityId).slice(-8)} ` +
-                    `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} expected=${expectedHeight}`,
-                );
-                // Same-height simultaneous proposals are a valid intermediate replay state:
-                // our local frame can stay pending while the peer's competing frame is ignored
-                // until the later ACK resolves the tie. Requiring currentHeight>=expectedHeight
-                // here incorrectly rejects that legitimate bilateral state.
-                if (currentHeight >= expectedHeight || pendingHeight === expectedHeight) {
-                  applied = true;
-                  break;
-                }
-              }
-              if (!applied) {
-                const replayDebug = Array.from(env.eReplicas.values())
-                  .filter(replica => String(replica?.entityId || '').toLowerCase() === entityIdNorm)
-                  .map(replica => {
-                    const am = replica?.state?.accounts?.get?.(fromEntityId);
-                    return {
-                      replicaKey: `${String(replica.entityId).slice(0, 10)}...:${String(replica.signerId).slice(0, 10)}...`,
-                      currentHeight: Number(am?.currentHeight ?? 0),
-                      currentHash: am?.currentFrame?.stateHash ?? null,
-                      currentPrev: am?.currentFrame?.prevFrameHash ?? null,
-                      pendingFrame: Number(am?.pendingFrame?.height ?? 0),
-                      pendingHash: am?.pendingFrame?.stateHash ?? null,
-                      pendingPrev: am?.pendingFrame?.prevFrameHash ?? null,
-                      mempoolSize: Number(am?.mempool?.length ?? 0),
-                      frameHistorySize: Number(am?.frameHistory?.length ?? 0),
-                      frameHistoryTail: (am?.frameHistory ?? []).slice(-3).map((frame) => ({
-                        height: Number(frame?.height ?? 0),
-                        stateHash: frame?.stateHash ?? null,
-                        prevFrameHash: frame?.prevFrameHash ?? null,
-                      })),
-                    };
-                  });
-                console.warn(
-                  `[loadEnvFromDB] frame=${h} REPLAY_ACCOUNT_FRAME_NOT_APPLIED entity=${String(entityInput.entityId).slice(-8)} ` +
-                    `from=${fromEntityId.slice(-8)} expected=${expectedHeight} debug=${safeStringify(replayDebug)}`,
-                );
-                throw new Error(
-                  `REPLAY_ACCOUNT_FRAME_NOT_APPLIED: frame=${h} expected=${expectedHeight} actual=${JSON.stringify(replayDebug)}`,
-                );
-              }
-            }
-          }
-          env.frameLogs = Array.isArray(frame.logs)
-            ? frame.logs.map((entry): FrameLogEntry => ({ ...entry }))
-            : [];
-          env.history.push(buildRuntimeHistorySnapshot(env, `Frame ${h}`));
-          env.frameLogs = [];
-          lastGoodHeight = h;
-        } catch (error) {
-          runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
-          const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-          throw new Error(
-            `REPLAY_INVARIANT_FAILED: frame=${h} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${lastGoodHeight} reason=${message}`,
-          );
-        }
-      }
-    } finally {
-      runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
-      runtimeEnv[ENV_REPLAY_MODE_KEY] = false;
-      env.log = originalLog;
-      env.info = originalInfo;
-      env.warn = originalWarn;
-      env.error = originalError;
-      env.emit = originalEmit;
-    }
-    env.height = lastGoodHeight;
-    if (lastGoodHeight !== latestHeight) {
-      throw new Error(
-        `REPLAY_INVARIANT_FAILED: replay completed at ${lastGoodHeight}, expected latest ${latestHeight}`,
-      );
-    }
-    console.log(
-      `[loadEnvFromDB] replay complete latest=${latestHeight} restored=${lastGoodHeight} history=${env.history?.length ?? 0}`,
-    );
-
-    const latestEnv = env;
-    for (const replica of latestEnv.eReplicas.values()) {
-      replica.state.config = mergeRuntimeJurisdictionConfig(replica.state.config, latestEnv);
-      normalizeEntitySwapTradingPairs(replica.state);
-    }
-    (latestEnv as any).__replayMeta = {
-      namespace: dbNamespace,
-      latestHeight,
-      checkpointHeight,
-      restoredHeight: lastGoodHeight,
-      recoveredHistoryFrames: latestEnv.history?.length ?? 0,
-    };
     if (latestEnv) {
-      (latestEnv as any).__replayMeta.recoveredHistoryFrames = latestEnv.history?.length ?? 0;
-      await loadGossipProfilesFromInfraDb(latestEnv);
-
-      // Restore BrowserVM if state was persisted
-      let restoredBrowserVM: any = null;
-      if (latestEnv.browserVMState && isBrowser) {
-        try {
-          const { BrowserVMProvider } = await import('./jadapter');
-          const browserVM = new BrowserVMProvider();
-          await browserVM.init();
-          await browserVM.restoreState(latestEnv.browserVMState);
-          latestEnv.browserVM = browserVM;
-          restoredBrowserVM = browserVM;
-          setBrowserVMJurisdiction(latestEnv, browserVM.getDepositoryAddress(), browserVM);
-          if (typeof window !== 'undefined') {
-            (window as any).__xlnBrowserVM = browserVM;
-          }
-          console.log('✅ BrowserVM restored from loadEnvFromDB');
-        } catch (error) {
-          console.warn('⚠️ Failed to restore BrowserVM state (loadEnvFromDB):', error);
-        }
-      }
-
-      // Derive JAdapters for all jReplicas (they are not serialized — runtime objects)
-      if (latestEnv.jReplicas && latestEnv.jReplicas.size > 0) {
-        const { createJAdapter } = await import('./jadapter');
-        const { createBrowserVMAdapter } = await import('./jadapter/browservm');
-
-        for (const [name, jReplica] of latestEnv.jReplicas.entries()) {
-          if (jReplica.jadapter && !hasLiveJAdapter(jReplica.jadapter)) {
-            delete (jReplica as JReplica & { jadapter?: unknown }).jadapter;
-          }
-          if (jReplica.jadapter) continue; // Already has a live adapter
-
-          try {
-            const hasRpcs = jReplica.rpcs && jReplica.rpcs.length > 0 && jReplica.rpcs[0] !== '';
-            const chainId = jReplica.chainId ?? 31337;
-
-            if (!hasRpcs && restoredBrowserVM) {
-              // BrowserVM mode: wrap restored VM in JAdapter
-              const jadapter = await createJAdapter({
-                mode: 'browservm',
-                chainId,
-                browserVMState: undefined, // VM already restored above
-              });
-              // Replace the inner browserVM with the already-restored one
-              const inner = jadapter.getBrowserVM();
-              if (inner && restoredBrowserVM) {
-                // The VM was already initialized fresh in createJAdapter.
-                // We need to use the restored VM instead. Re-create with it.
-                const { BrowserVMEthersProvider } = await import('./jadapter/browservm-ethers-provider');
-                const provider = new BrowserVMEthersProvider(restoredBrowserVM);
-                const { ethers } = await import('ethers');
-                const { DEFAULT_PRIVATE_KEY } = await import('./jadapter/helpers');
-                const signer = new ethers.Wallet(DEFAULT_PRIVATE_KEY, provider);
-                const adapter = await createBrowserVMAdapter(
-                  { mode: 'browservm', chainId },
-                  provider,
-                  signer,
-                  restoredBrowserVM,
-                );
-                jReplica.jadapter = adapter;
-              } else {
-                jReplica.jadapter = jadapter;
-              }
-            } else if (hasRpcs) {
-              // RPC mode: connect using stored rpcs + addresses
-              const jadapter = await createJAdapter({
-                mode: 'rpc',
-                chainId,
-                rpcUrl: jReplica.rpcs![0],
-                fromReplica: jReplica as any, // Pass addresses for connect-only mode
-              });
-              if (!jadapter.addresses?.depository || !jadapter.addresses?.entityProvider) {
-                throw new Error(
-                  `RESTORE_JADAPTER_ADDRESSES_MISSING: name=${name} ` +
-                    `depository=${jadapter.addresses?.depository || 'none'} ` +
-                    `entityProvider=${jadapter.addresses?.entityProvider || 'none'}`,
-                );
-              }
-              jReplica.jadapter = jadapter;
-            }
-
-            if (jReplica.jadapter) {
-              jReplica.jadapter.startWatching(latestEnv);
-              console.log(`✅ JAdapter derived for jReplica "${name}" (${hasRpcs ? 'rpc' : 'browservm'})`);
-            }
-          } catch (error) {
-            console.warn(`⚠️ Failed to derive JAdapter for jReplica "${name}":`, error);
-          }
-        }
-      }
+      await rehydrateRestoredRuntimeInfra(latestEnv, {
+        isBrowser,
+        loadGossipProfiles: loadGossipProfilesFromInfraDb,
+        assertPersistedContractConfigReady,
+        setBrowserVMJurisdiction,
+      });
     }
 
     return latestEnv;
@@ -10471,6 +9982,8 @@ export function getActiveJAdapter(env: Env): JAdapter | null {
   return jReplica?.jadapter || null;
 }
 
+export { setDeltaTransformerAddress } from './proof-builder';
+
 // Entity ID utilities - universal parsing, provider-scoping, comparison
 export {
   normalizeEntityId,
@@ -10489,7 +10002,7 @@ export type { ParsedEntityId } from './entity-id-utils';
 export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from './runtime-ascii';
 
 
-//runtime/entity-consensus.ts (1870 lines)
+//runtime/entity-consensus.ts (1878 lines)
 /**
  * XLN Entity Consensus and State Management
  * Core entity processing logic, consensus, proposals, and state transitions
@@ -11438,14 +10951,16 @@ export const applyEntityInput = async (
 
   // Auto-propose logic: ONLY proposer can propose (BFT requirement)
   if (workingReplica.isProposer && workingReplica.mempool.length > 0 && !workingReplica.proposal) {
-    console.log(`🔥 ALICE-PROPOSES: Alice auto-propose triggered!`);
-    console.log(
-      `🔥 ALICE-PROPOSES: mempool=${workingReplica.mempool.length}, isProposer=${workingReplica.isProposer}, hasProposal=${!!workingReplica.proposal}`,
-    );
-    console.log(
-      `🔥 ALICE-PROPOSES: Mempool transaction types:`,
-      workingReplica.mempool.map(tx => tx.type),
-    );
+    if (!quietRuntimeLogs) {
+      console.log(`🔥 ALICE-PROPOSES: Alice auto-propose triggered!`);
+      console.log(
+        `🔥 ALICE-PROPOSES: mempool=${workingReplica.mempool.length}, isProposer=${workingReplica.isProposer}, hasProposal=${!!workingReplica.proposal}`,
+      );
+      console.log(
+        `🔥 ALICE-PROPOSES: Mempool transaction types:`,
+        workingReplica.mempool.map(tx => tx.type),
+      );
+    }
 
     // Check if this is a single signer entity (threshold = 1, only 1 validator)
     const isSingleSigner =
@@ -12057,12 +11572,16 @@ export const applyEntityFrame = async (
       const { counterparty: cpId } = accountMachine ? getAccountPerspective(accountMachine, currentEntityState.entityId) : { counterparty: 'unknown' };
       if (HEAVY_LOGS) console.log(`🔍 [Frame ${env.height}] BEFORE-PROPOSE: Getting account for ${cpId.slice(-4)}`);
       if (accountMachine) {
-        console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME for ${cpId.slice(-4)}: mempool=${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
-        console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: leftJObs=${accountMachine.leftJObservations?.length || 0}, rightJObs=${accountMachine.rightJObservations?.length || 0}`);
-        console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: Full mempool details:`, accountMachine.mempool.map((tx, i) => `${i}:${tx.type}`).join(', '));
+        if (env.quietRuntimeLogs !== true) {
+          console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME for ${cpId.slice(-4)}: mempool=${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
+          console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: leftJObs=${accountMachine.leftJObservations?.length || 0}, rightJObs=${accountMachine.rightJObservations?.length || 0}`);
+          console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: Full mempool details:`, accountMachine.mempool.map((tx, i) => `${i}:${tx.type}`).join(', '));
+        }
         const proposal = await proposeAccountFrame(env, accountMachine, false, currentEntityState.lastFinalizedJHeight);
 
-        console.log(`📤 PROPOSE-RESULT for ${cpId.slice(-4)}: success=${proposal.success}, hasAccountInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
+        if (env.quietRuntimeLogs !== true) {
+          console.log(`📤 PROPOSE-RESULT for ${cpId.slice(-4)}: success=${proposal.success}, hasAccountInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
+        }
 
         // Collect hashes from proposal (multi-signer support)
         if (proposal.hashesToSign) {
@@ -12114,7 +11633,9 @@ export const applyEntityFrame = async (
           };
           allOutputs.push(outputEntityInput);
 
-          console.log(`📮 ACCOUNT-FRAME-OUTPUT: frame ${proposal.accountInput.height} → Entity ${proposal.accountInput.toEntityId.slice(-4)} (${accountKey.slice(-8)} account)`);
+          if (env.quietRuntimeLogs !== true) {
+            console.log(`📮 ACCOUNT-FRAME-OUTPUT: frame ${proposal.accountInput.height} → Entity ${proposal.accountInput.toEntityId.slice(-4)} (${accountKey.slice(-8)} account)`);
+          }
 
           // Add events to entity messages with size limiting
           addMessages(currentEntityState, proposal.events);
@@ -12361,7 +11882,7 @@ export const handleEmptyMempoolProposer = (): void => {
 };
 
 
-//runtime/account-consensus.ts (2132 lines)
+//runtime/account-consensus.ts (2151 lines)
 /**
  * XLN Account Consensus System
  *
@@ -12475,9 +11996,8 @@ function getDepositoryAddress(env: Env): string {
     return browserVMAddress;
   }
 
-  // Last resort: return zero address (will fail verification but won't crash)
-  console.warn('[account-consensus] ⚠️ No depositoryAddress found in env - using zero address (signatures will fail!)');
-  return '0x0000000000000000000000000000000000000000';
+  console.warn('[account-consensus] ❌ No depositoryAddress found in env');
+  return '';
 }
 const MAX_FRAME_TIMESTAMP_DRIFT_MS = 300000; // 5 minutes
 const MAX_FRAME_SIZE_BYTES = 1048576; // 1MB frame size limit (Bitcoin block size standard)
@@ -12883,6 +12403,7 @@ export async function proposeAccountFrame(
     giveAmount: bigint;
     wantTokenId: number;
     wantAmount: bigint;
+    priceTicks?: bigint;
     minFillRatio: number;
   }> = [];
   const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
@@ -13073,7 +12594,7 @@ export async function proposeAccountFrame(
   frameData.stateHash = await createFrameHash(frameData as AccountFrame);
 
   // Debug: log what's being hashed at creation time
-  if (HEAVY_LOGS) {
+  if (HEAVY_LOGS && !quiet) {
     console.log(`[HASH-DEBUG] Frame creation for ${accountMachine.proofHeader.toEntity.slice(-4)}:`);
     console.log(`  height: ${frameData.height}`);
     console.log(`  timestamp: ${frameData.timestamp}`);
@@ -13111,9 +12632,11 @@ export async function proposeAccountFrame(
       events,
     };
   }
-  console.log(
-    `✅ Frame size: ${frameSize} bytes (${((frameSize / MAX_FRAME_SIZE_BYTES) * 100).toFixed(2)}% of 1MB limit)`,
-  );
+  if (!quiet) {
+    console.log(
+      `✅ Frame size: ${frameSize} bytes (${((frameSize / MAX_FRAME_SIZE_BYTES) * 100).toFixed(2)}% of 1MB limit)`,
+    );
+  }
 
   // Generate HANKO signature - CRITICAL: Use signerId, not entityId
   // For single-signer entities, build hanko with single EOA signature
@@ -13127,7 +12650,9 @@ export async function proposeAccountFrame(
     return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events };
   }
 
-  console.log(`🔐 HANKO-SIGN: entityId=${signingEntityId.slice(-4)} → signerId=${signingSignerId.slice(-4)}`);
+  if (!quiet) {
+    console.log(`🔐 HANKO-SIGN: entityId=${signingEntityId.slice(-4)} → signerId=${signingSignerId.slice(-4)}`);
+  }
 
   // Build hanko for account frame
   const { signHashesAsSingleEntity } = await import('./hanko-signing');
@@ -13155,23 +12680,33 @@ export async function proposeAccountFrame(
   }
 
   const { buildAccountProofBody, createDisputeProofHash } = await import('./proof-builder');
-  let depositoryAddress = getDepositoryAddress(env);
+  const depositoryAddress = getDepositoryAddress(env);
   if (!isAddress20(depositoryAddress)) {
-    console.warn(`[account-consensus] ⚠️ Invalid depositoryAddress "${depositoryAddress}", using zero address`);
-    depositoryAddress = '0x0000000000000000000000000000000000000000';
+    accountMachine.mempool = [];
+    delete accountMachine.pendingFrame;
+    delete accountMachine.pendingAccountInput;
+    return {
+      success: false,
+      error: `DISPUTE_PROOF_BUILD_FAILED: MISSING_DEPOSITORY_ADDRESS`,
+      events,
+    };
   }
 
   let proofResult: ReturnType<typeof buildAccountProofBody>;
   let disputeHash: string;
   try {
-    console.log(
-      `🔐 DISPUTE-SIGN: depositoryAddress=${depositoryAddress}, counterparty=${accountMachine.proofHeader.toEntity.slice(-4)}`,
-    );
+    if (!quiet) {
+      console.log(
+        `🔐 DISPUTE-SIGN: depositoryAddress=${depositoryAddress}, counterparty=${accountMachine.proofHeader.toEntity.slice(-4)}`,
+      );
+    }
     proofResult = buildAccountProofBody(clonedMachine);
     disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash, depositoryAddress);
-    console.log(
-      `🔐 DISPUTE-SIGN: disputeHash=${disputeHash.slice(0, 18)}..., proofBodyHash=${proofResult.proofBodyHash.slice(0, 18)}...`,
-    );
+    if (!quiet) {
+      console.log(
+        `🔐 DISPUTE-SIGN: disputeHash=${disputeHash.slice(0, 18)}..., proofBodyHash=${proofResult.proofBodyHash.slice(0, 18)}...`,
+      );
+    }
   } catch (error) {
     accountMachine.mempool = [];
     delete accountMachine.pendingFrame;
@@ -13294,6 +12829,7 @@ export async function handleAccountInput(
     return { success: false, error: `Invalid account input height: ${String(input.height)}`, events: [] };
   }
   const replayMode = (env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true;
+  const quiet = env.quietRuntimeLogs === true;
   console.log(
     `📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`,
   );
@@ -13360,8 +12896,8 @@ export async function handleAccountInput(
 
   // Handle pending frame confirmation
   if (accountMachine.pendingFrame && ackHeight === accountMachine.pendingFrame.height && input.prevHanko) {
-    console.log(`✅ Received confirmation for pending frame ${ackHeight}`);
-    console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}`);
+    if (!quiet) console.log(`✅ Received confirmation for pending frame ${ackHeight}`);
+    if (HEAVY_LOGS) console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}`);
 
     const frameHash = accountMachine.pendingFrame.stateHash;
 
@@ -13872,6 +13408,7 @@ export async function handleAccountInput(
       giveAmount: bigint;
       wantTokenId: number;
       wantAmount: bigint;
+      priceTicks?: bigint;
       minFillRatio: number;
     }> = [];
     const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
@@ -14214,6 +13751,9 @@ export async function handleAccountInput(
     // Build dispute proof hanko for ACK response (always include current state's dispute proof)
     const { buildAccountProofBody: buildProof, createDisputeProofHash: createHash } = await import('./proof-builder');
     const ackDepositoryAddress = getDepositoryAddress(env);
+    if (!isAddress20(ackDepositoryAddress)) {
+      return { success: false, error: 'ACK_DISPUTE_PROOF_BUILD_FAILED: MISSING_DEPOSITORY_ADDRESS', events };
+    }
     const ackProofResult = buildProof(accountMachine);
     const ackDisputeHash = createHash(accountMachine, ackProofResult.proofBodyHash, ackDepositoryAddress);
     const ackDisputeHankos = await signHashesAsSingleEntity(env, ackEntityId, ackSignerId, [ackDisputeHash]);
@@ -14665,7 +14205,7 @@ export function getAccountBarVisual(
 }
 
 
-//runtime/j-batch.ts (1034 lines)
+//runtime/j-batch.ts (1094 lines)
 /**
  * J-Batch Aggregator System
  *
@@ -15025,6 +14565,66 @@ export function preflightBatchForE2(
   }
 
   return issues;
+}
+
+/**
+ * Compute the net reserve delta already queued in the current draft batch for one entity/token.
+ * Earlier incoming ops in the same batch must be spendable by later outgoing ops.
+ */
+export function getDraftBatchReserveDelta(
+  entityId: string,
+  batch: JBatch | null | undefined,
+  tokenId: number,
+): bigint {
+  if (!batch) return 0n;
+
+  const normalizedEntityId = normalizeEntityId(entityId);
+  let delta = 0n;
+
+  for (const op of batch.externalTokenToReserve) {
+    const target = op.entity ? normalizeEntityId(op.entity) : normalizedEntityId;
+    if (target === normalizedEntityId && op.internalTokenId === tokenId) {
+      delta += op.amount;
+    }
+  }
+
+  for (const op of batch.collateralToReserve) {
+    if (op.tokenId === tokenId) {
+      delta += op.amount;
+    }
+  }
+
+  for (const op of batch.reserveToReserve) {
+    if (op.tokenId !== tokenId) continue;
+    delta -= op.amount;
+    if (normalizeEntityId(op.receivingEntity) === normalizedEntityId) {
+      delta += op.amount;
+    }
+  }
+
+  for (const op of batch.reserveToExternalToken) {
+    if (op.tokenId === tokenId) {
+      delta -= op.amount;
+    }
+  }
+
+  for (const op of batch.reserveToCollateral) {
+    if (op.tokenId !== tokenId) continue;
+    for (const pair of op.pairs) {
+      delta -= pair.amount;
+    }
+  }
+
+  return delta;
+}
+
+export function getEffectiveDraftReserveBalance(
+  entityId: string,
+  currentReserve: bigint,
+  batch: JBatch | null | undefined,
+  tokenId: number,
+): bigint {
+  return currentReserve + getDraftBatchReserveDelta(entityId, batch, tokenId);
 }
 
 export function computeBatchHankoHash(
@@ -16361,7 +15961,7 @@ export * from './proposals';
 export * from './validation';
 
 
-//runtime/entity-tx/apply.ts (1386 lines)
+//runtime/entity-tx/apply.ts (1395 lines)
 import { calculateQuorumPower } from '../entity-consensus';
 import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
@@ -16995,16 +16595,19 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'directPayment') {
-      console.log(`💸 ═════════════════════════════════════════════════════════════`);
-      console.log(
-        `💸 DIRECT-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`,
-      );
-      console.log(`💸 Amount: ${entityTx.data.amount}, TokenId: ${entityTx.data.tokenId}`);
-      console.log(`💸 Route: ${entityTx.data.route?.map(r => r.slice(-4)).join('→') || 'NONE (will calculate)'}`);
-      console.log(`💸 Description: ${entityTx.data.description || 'none'}`);
+      const verbose = env.quietRuntimeLogs !== true;
+      if (verbose) {
+        console.log(`💸 ═════════════════════════════════════════════════════════════`);
+        console.log(
+          `💸 DIRECT-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`,
+        );
+        console.log(`💸 Amount: ${entityTx.data.amount}, TokenId: ${entityTx.data.tokenId}`);
+        console.log(`💸 Route: ${entityTx.data.route?.map(r => r.slice(-4)).join('→') || 'NONE (will calculate)'}`);
+        console.log(`💸 Description: ${entityTx.data.description || 'none'}`);
+      }
 
       // Emit payment initiation event
-      env.emit('PaymentInitiated', {
+      env.emit('HtlcInitiated', {
         fromEntity: entityState.entityId,
         toEntity: entityTx.data.targetEntityId,
         tokenId: entityTx.data.tokenId,
@@ -17015,7 +16618,7 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
-      console.log(`💸 Initialized: outputs=[], mempoolOps=[]`);
+      if (verbose) console.log(`💸 Initialized: outputs=[], mempoolOps=[]`);
 
       // Extract payment details
       let { targetEntityId, tokenId, amount, route, description } = entityTx.data;
@@ -17033,11 +16636,11 @@ export const applyEntityTx = async (
         // Check if we have a direct account with target
         // Account keyed by counterparty ID
         if (newState.accounts.has(targetEntityId)) {
-          console.log(`💸 Direct account exists with ${formatEntityId(targetEntityId)}`);
+          if (verbose) console.log(`💸 Direct account exists with ${formatEntityId(targetEntityId)}`);
           route = [entityState.entityId, targetEntityId];
         } else {
           // Find route through network using gossip
-          console.log(`💸 No direct account, finding route to ${formatEntityId(targetEntityId)}`);
+          if (verbose) console.log(`💸 No direct account, finding route to ${formatEntityId(targetEntityId)}`);
 
           // Try to find a route through the network
           if (env.gossip) {
@@ -17047,7 +16650,7 @@ export const applyEntityTx = async (
             if (paths.length > 0) {
               // Use the shortest path
               route = paths[0].path;
-              console.log(`💸 Found route: ${route.map(e => formatEntityId(e)).join(' → ')}`);
+              if (verbose) console.log(`💸 Found route: ${route.map(e => formatEntityId(e)).join(' → ')}`);
             } else {
               logError('ENTITY_TX', `❌ No route found to ${formatEntityId(targetEntityId)}`);
               addMessage(newState, `❌ Payment failed: No route to ${formatEntityId(targetEntityId)}`);
@@ -17127,18 +16730,20 @@ export const applyEntityTx = async (
       if (accountMachine) {
         // Pure: return mempoolOp instead of mutating directly
         mempoolOps.push({ accountId: nextHop, tx: accountTx });
-        console.log(`💸 QUEUED TO MEMPOOL: account=${formatEntityId(nextHop)}`);
-        console.log(`💸   AccountTx type: ${accountTx.type}`);
-        console.log(`💸   Amount: ${accountTx.data.amount}`);
-        console.log(`💸   From: ${accountTx.data.fromEntityId?.slice(-4)}`);
-        console.log(`💸   To: ${accountTx.data.toEntityId?.slice(-4)}`);
-        console.log(
-          `💸   Route after slice: [${accountTx.data.route?.map((r: string) => r.slice(-4)).join(',') || 'none'}]`,
-        );
-        console.log(`💸 mempoolOps.length: ${mempoolOps.length}`);
+        if (verbose) {
+          console.log(`💸 QUEUED TO MEMPOOL: account=${formatEntityId(nextHop)}`);
+          console.log(`💸   AccountTx type: ${accountTx.type}`);
+          console.log(`💸   Amount: ${accountTx.data.amount}`);
+          console.log(`💸   From: ${accountTx.data.fromEntityId?.slice(-4)}`);
+          console.log(`💸   To: ${accountTx.data.toEntityId?.slice(-4)}`);
+          console.log(
+            `💸   Route after slice: [${accountTx.data.route?.map((r: string) => r.slice(-4)).join(',') || 'none'}]`,
+          );
+          console.log(`💸 mempoolOps.length: ${mempoolOps.length}`);
+        }
 
         const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-        console.log(`💸 Account state: isLeft=${isLeft}, hasPendingFrame=${!!accountMachine.pendingFrame}`);
+        if (verbose) console.log(`💸 Account state: isLeft=${isLeft}, hasPendingFrame=${!!accountMachine.pendingFrame}`);
 
         // Message about payment initiation
         addMessage(
@@ -17148,8 +16753,10 @@ export const applyEntityTx = async (
 
         // The payment is now queued for entity-level orchestration
         // Entity-consensus will apply mempoolOps and add to proposableAccounts
-        console.log(`💸 Payment queued for bilateral consensus with ${formatEntityId(nextHop)}`);
-        console.log(`💸 Account ${formatEntityId(nextHop)} will be added to proposableAccounts`);
+        if (verbose) {
+          console.log(`💸 Payment queued for bilateral consensus with ${formatEntityId(nextHop)}`);
+          console.log(`💸 Account ${formatEntityId(nextHop)} will be added to proposableAccounts`);
+        }
 
         // Return a trigger output to ensure process() continues
         // This ensures the AUTO-PROPOSE logic runs to process the payment
@@ -17160,10 +16767,12 @@ export const applyEntityTx = async (
             signerId: firstValidator,
             entityTxs: [], // Empty transaction array - just triggers processing
           });
-          console.log(`💸 Added processing trigger: outputs.length=${outputs.length}`);
+          if (verbose) console.log(`💸 Added processing trigger: outputs.length=${outputs.length}`);
         }
-        console.log(`💸 DIRECT-PAYMENT COMPLETE: mempoolOps=${mempoolOps.length}, outputs=${outputs.length}`);
-        console.log(`💸 ═════════════════════════════════════════════════════════════`);
+        if (verbose) {
+          console.log(`💸 DIRECT-PAYMENT COMPLETE: mempoolOps=${mempoolOps.length}, outputs=${outputs.length}`);
+          console.log(`💸 ═════════════════════════════════════════════════════════════`);
+        }
       }
 
       return { newState, outputs, mempoolOps };
@@ -17484,7 +17093,7 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, minFillRatio } =
+      const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, timeInForce, minFillRatio } =
         entityTx.data;
 
       // Use canonical key for account lookup
@@ -17497,7 +17106,7 @@ export const applyEntityTx = async (
 
       const accountTx: AccountTx = {
         type: 'swap_offer',
-        data: { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, minFillRatio },
+        data: { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, timeInForce, minFillRatio },
       };
 
       // Pure: return mempoolOp instead of mutating directly
@@ -17860,7 +17469,7 @@ export const executeProposal = (entityState: EntityState, proposal: Proposal): E
 };
 
 
-//runtime/entity-tx/j-events.ts (1457 lines)
+//runtime/entity-tx/j-events.ts (1473 lines)
 import type { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env } from '../types';
 import { ethers } from 'ethers';
 import { DEBUG } from '../utils';
@@ -18141,8 +17750,17 @@ function applyKnownHtlcSecret(
  */
 export const handleJEvent = async (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> => {
   const { from: signerId, observedAt, blockNumber, blockHash } = entityTxData;
-  // j-watcher now sends batched events - use 'events' array, fallback to single 'event'
-  const rawEvents = (entityTxData as any).events || [entityTxData.event];
+  type RawJEventBatchData = JEventEntityTxData & {
+    events?: unknown[];
+    event?: unknown;
+    transactionHash?: string;
+  };
+  const batchData = entityTxData as RawJEventBatchData;
+  const rawEvents = Array.isArray(batchData.events)
+    ? batchData.events
+    : batchData.event !== undefined
+      ? [batchData.event]
+      : [];
 
   const entityShort = entityState.entityId.slice(-4);
   console.log(`🏛️ [2/3] E-MACHINE: ${entityShort} ← ${rawEvents.length} events (block ${blockNumber})`);
@@ -18174,7 +17792,10 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
       ...(raw || {}),
       blockNumber,
       blockHash,
-      transactionHash: (raw as any)?.transactionHash ?? entityTxData.transactionHash,
+      transactionHash:
+        (typeof raw === 'object' && raw !== null && 'transactionHash' in raw && typeof (raw as { transactionHash?: unknown }).transactionHash === 'string')
+          ? (raw as { transactionHash: string }).transactionHash
+          : batchData.transactionHash,
     });
     if (!normalized) {
       console.warn(`⚠️ Dropping malformed j-event payload at block ${blockNumber}: ${safeStringify(raw)}`);
@@ -18999,9 +18620,13 @@ async function applyFinalizedJEvent(
 
       if (newState.crontabState) {
         const kickoffDelayMs = weAreStarter ? 1 : 5000;
+        const logicalTimestamp =
+          Number.isFinite(Number(newState.timestamp)) && Number(newState.timestamp) >= 0
+            ? Number(newState.timestamp)
+            : 0;
         scheduleCrontabHook(newState.crontabState, {
           id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
-          triggerAt: Number(newState.timestamp || Date.now()) + kickoffDelayMs,
+          triggerAt: logicalTimestamp + kickoffDelayMs,
           type: 'dispute_deadline',
           data: { accountId: counterpartyId },
         });
@@ -19319,8 +18944,8 @@ async function applyFinalizedJEvent(
 }
 
 
-//runtime/entity-tx/handlers/account.ts (1315 lines)
-import type { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
+//runtime/entity-tx/handlers/account.ts (1595 lines)
+import type { AccountFrame, AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
 import {
@@ -19329,11 +18954,14 @@ import {
   canonicalPair,
   computeSwapPriceTicks,
   deriveSide,
+  getBestAsk,
+  getBestBid,
   ORDERBOOK_PRICE_SCALE,
+  SWAP_LOT_SCALE,
   type BookState,
   type OrderbookExtState,
 } from '../../orderbook';
-import { HTLC } from '../../constants';
+import { HTLC, SWAP as SWAP_CONSTANTS } from '../../constants';
 import { getSwapPairPolicyByBaseQuote } from '../../account-utils';
 import { formatEntityId, HEAVY_LOGS } from '../../utils';
 import { isLeftEntity } from '../../entity-id-utils';
@@ -19346,8 +18974,95 @@ import {
 import { NobleCryptoProvider } from '../../crypto-noble';
 import { unwrapEnvelope, validateEnvelope } from '../../htlc-envelope-types';
 import { terminateHtlcRoute } from '../htlc-route-lifecycle';
+import {
+  buildHtlcFinalizedEventPayload,
+  buildHtlcReceivedEventPayload,
+} from '../../htlc-events';
 
+const ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY = Symbol.for('xln.runtime.env.replay.skippedAccountInputs');
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const replayHankoFingerprint = (value: unknown): string => {
+  const normalized = typeof value === 'string' ? value : '';
+  if (!normalized) return 'none';
+  if (normalized.length <= 36) return normalized;
+  return `${normalized.slice(0, 18)}:${normalized.slice(-18)}`;
+};
+const buildSkippedReplayAckKey = (
+  runtimeFrameHeight: number,
+  entityId: string,
+  counterpartyId: string,
+  inputHeight: number,
+  prevHanko: unknown,
+): string =>
+  [
+    runtimeFrameHeight,
+    normalizeEntityRef(entityId),
+    normalizeEntityRef(counterpartyId),
+    inputHeight,
+    replayHankoFingerprint(prevHanko),
+    'ack',
+  ].join(':');
+const buildSkippedReplayNewFrameKey = (
+  runtimeFrameHeight: number,
+  entityId: string,
+  counterpartyId: string,
+  frameHeight: number,
+  stateHash: unknown,
+  prevFrameHash: unknown,
+): string =>
+  [
+    runtimeFrameHeight,
+    normalizeEntityRef(entityId),
+    normalizeEntityRef(counterpartyId),
+    frameHeight,
+    typeof stateHash === 'string' ? stateHash : 'none',
+    typeof prevFrameHash === 'string' ? prevFrameHash : 'none',
+    'newframe',
+  ].join(':');
+const getJurisdictionId = (state: EntityState, env: Env): string => {
+  return String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
+};
+
+export function applyCommittedAccountFrameFollowups(
+  newState: EntityState,
+  counterpartyId: string,
+  committedFrame: AccountFrame,
+): void {
+  if (HEAVY_LOGS) {
+    console.log(
+      `🔍 FRAME-COMMIT-FOLLOWUPS: height=${committedFrame.height}, txs=${committedFrame.accountTxs.length}`,
+    );
+  }
+
+  for (const accountTx of committedFrame.accountTxs) {
+    if (HEAVY_LOGS) console.log(`🔍 FRAME-COMMIT-FOLLOWUPS: tx type=${accountTx.type}`);
+
+    // Keep lockBook aligned with finalized account-level HTLC lifecycle.
+    if (accountTx.type === 'htlc_resolve') {
+      newState.lockBook.delete(accountTx.data.lockId);
+      if (newState.crontabState) {
+        cancelScheduledHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
+      }
+      if (accountTx.data.outcome === 'secret') {
+        for (const [hashlock, route] of newState.htlcRoutes.entries()) {
+          if (route.inboundLockId !== accountTx.data.lockId) continue;
+          console.log(`✅ HTLC: secret ACK confirmed for hashlock ${route.hashlock.slice(0, 16)}...`);
+          terminateHtlcRoute(newState, hashlock, newState.timestamp);
+        }
+      }
+    }
+
+    if (accountTx.type === 'j_event_claim') continue;
+
+    if (accountTx.type === 'swap_resolve') {
+      const key = `${counterpartyId}:${accountTx.data.offerId}`;
+      if (newState.pendingSwapFillRatios?.delete(key)) {
+        console.log(`📉 Cleared pending fillRatio for ${key.slice(-12)}`);
+      }
+    }
+  }
+}
+
 const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counterpartyId: string): string | null => {
   const target = normalizeEntityRef(counterpartyId);
   for (const key of accounts.keys()) {
@@ -19374,6 +19089,8 @@ export interface SwapOfferEvent {
   giveAmount: bigint;
   wantTokenId: number;
   wantAmount: bigint;
+  priceTicks?: bigint;
+  timeInForce?: 0 | 1 | 2;
   minFillRatio: number;
 }
 
@@ -19599,6 +19316,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   if (input.height !== undefined || input.newAccountFrame) {
     console.log(`🤝 Processing frame from ${input.fromEntityId.slice(-4)}, accountMachine.pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}`);
 
+    const currentHeightBefore = accountMachine.currentHeight;
+    const pendingFrameBefore = accountMachine.pendingFrame;
     const result = await processAccountInput(env, accountMachine, input);
     if (replayMode) {
       console.log(
@@ -19652,46 +19371,33 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       }
 
       // === HTLC LOCK PROCESSING: Check if we need to forward ===
-      // CRITICAL: Only process NEW locks (prevent replay on re-processing same frame)
-      // Check if this is a NEW frame (just committed) by comparing heights
-      const justCommittedFrame = input.newAccountFrame;
-      const isNewFrame = Boolean(justCommittedFrame && justCommittedFrame.height > (accountMachine.currentHeight - 1));
+      // CRITICAL: process committed-frame side effects for both:
+      // 1) receiver-side newAccountFrame commits
+      // 2) proposer-side pendingFrame commits on ACK (prevHanko)
+      const justCommittedFrame =
+        input.newAccountFrame && input.newAccountFrame.height > currentHeightBefore
+          ? input.newAccountFrame
+          : input.prevHanko && pendingFrameBefore && accountMachine.currentHeight > currentHeightBefore
+            ? pendingFrameBefore
+            : undefined;
+      const isNewFrame = Boolean(justCommittedFrame && input.newAccountFrame);
 
       if (isNewFrame && justCommittedFrame?.accountTxs) {
         if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: isNewFrame=${isNewFrame}, inputHeight=${justCommittedFrame.height}, currentHeight=${accountMachine.currentHeight}`);
         if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: accountMachine.locks.size=${accountMachine.locks.size}`);
         if (HEAVY_LOGS) console.log(`🔍 FRAME-TXS: ${justCommittedFrame.accountTxs.length} txs in frame:`, justCommittedFrame.accountTxs.map(tx => tx.type));
+      }
+
+      if (justCommittedFrame?.accountTxs) {
+        applyCommittedAccountFrameFollowups(newState, counterpartyId, justCommittedFrame);
+      }
+
+      if (isNewFrame && justCommittedFrame?.accountTxs) {
         for (const accountTx of justCommittedFrame.accountTxs) {
           if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
 
-          // Keep lockBook aligned with finalized account-level HTLC lifecycle.
-          if (accountTx.type === 'htlc_resolve') {
-            newState.lockBook.delete(accountTx.data.lockId);
-            // Cancel any scheduled timeout hook once resolve is finalized in committed frame.
-            if (newState.crontabState) {
-              cancelScheduledHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
-            }
-            // Secret-return ACK received from inbound counterparty: clear pending ACK timer.
-            if (accountTx.data.outcome === 'secret') {
-              for (const [hashlock, route] of newState.htlcRoutes.entries()) {
-                if (route.inboundLockId !== accountTx.data.lockId) continue;
-                console.log(`✅ HTLC: secret ACK confirmed for hashlock ${route.hashlock.slice(0, 16)}...`);
-                terminateHtlcRoute(newState, hashlock, newState.timestamp);
-              }
-            }
-          }
-
-          // j_event_claim is fully handled in account-consensus/processAccountTx on commit.
-          // Re-processing here duplicates observations and creates stale leftovers.
-          if (accountTx.type === 'j_event_claim') {
+          if (accountTx.type === 'htlc_resolve' || accountTx.type === 'j_event_claim' || accountTx.type === 'swap_resolve') {
             continue;
-          }
-
-          if (accountTx.type === 'swap_resolve') {
-            const key = `${counterpartyId}:${accountTx.data.offerId}`;
-            if (newState.pendingSwapFillRatios?.delete(key)) {
-              console.log(`📉 Cleared pending fillRatio for ${key.slice(-12)}`);
-            }
           }
 
           if (accountTx.type === 'htlc_lock') {
@@ -19733,12 +19439,27 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
                 // Decrypt if encrypted (base64), or use cleartext (JSON starts with '{')
                 const isCleartext1 = envelopeData.trimStart().startsWith('{');
-                if (newState.entityEncPrivKey && !isCleartext1) {
+                if (isCleartext1) {
+                  env.error('network', 'MISSING_CRYPTO_KEY', {
+                    lockId: lock.lockId,
+                    reason: 'cleartext_direct_envelope',
+                    fromEntityId: input.fromEntityId,
+                    toEntityId: input.toEntityId,
+                  }, state.entityId);
+                  throw new Error(`MISSING_CRYPTO_KEY:${lock.lockId}`);
+                }
+                if (newState.entityEncPrivKey) {
                   const crypto = new NobleCryptoProvider();
                   envelopeData = await crypto.decrypt(envelope as string, newState.entityEncPrivKey);
                   console.log(`🔓 Decryption successful`);
-                } else if (isCleartext1) {
-                  console.log(`🔓 Envelope is cleartext JSON — skipping decrypt`);
+                } else {
+                  env.error('network', 'MISSING_CRYPTO_KEY', {
+                    lockId: lock.lockId,
+                    reason: 'missing_entity_encryption_key',
+                    fromEntityId: input.fromEntityId,
+                    toEntityId: input.toEntityId,
+                  }, state.entityId);
+                  throw new Error(`MISSING_CRYPTO_KEY:${lock.lockId}`);
                 }
 
                 // Unwrap decrypted envelope
@@ -19753,8 +19474,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   fromEntityId: input.fromEntityId,
                   toEntityId: input.toEntityId,
                 }, state.entityId);
-                console.log(`🧅 ═════════════════════════════════════════════════════════════`);
-                continue;
+                throw new Error(`ENVELOPE_DECRYPT_FAIL:${lock.lockId}`);
               }
             }
             // Case 2: Envelope has innerEnvelope (plaintext wrapper)
@@ -19765,12 +19485,27 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
                 // Decrypt if encrypted (base64), or use cleartext (JSON starts with '{')
                 const isCleartext2 = envelopeData.trimStart().startsWith('{');
-                if (newState.entityEncPrivKey && !isCleartext2) {
+                if (isCleartext2) {
+                  env.error('network', 'MISSING_CRYPTO_KEY', {
+                    lockId: lock.lockId,
+                    reason: 'cleartext_inner_envelope',
+                    fromEntityId: input.fromEntityId,
+                    toEntityId: input.toEntityId,
+                  }, state.entityId);
+                  throw new Error(`MISSING_CRYPTO_KEY:${lock.lockId}`);
+                }
+                if (newState.entityEncPrivKey) {
                   const crypto = new NobleCryptoProvider();
                   envelopeData = await crypto.decrypt(envelope.innerEnvelope, newState.entityEncPrivKey);
                   console.log(`🔓 Decryption successful`);
-                } else if (isCleartext2) {
-                  console.log(`🔓 InnerEnvelope is cleartext JSON — skipping decrypt`);
+                } else {
+                  env.error('network', 'MISSING_CRYPTO_KEY', {
+                    lockId: lock.lockId,
+                    reason: 'missing_entity_encryption_key',
+                    fromEntityId: input.fromEntityId,
+                    toEntityId: input.toEntityId,
+                  }, state.entityId);
+                  throw new Error(`MISSING_CRYPTO_KEY:${lock.lockId}`);
                 }
 
                 // Unwrap decrypted envelope - THIS is our actual routing instruction
@@ -19785,8 +19520,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   fromEntityId: input.fromEntityId,
                   toEntityId: input.toEntityId,
                 }, state.entityId);
-                console.log(`🧅 ═════════════════════════════════════════════════════════════`);
-                continue;
+                throw new Error(`ENVELOPE_DECRYPT_FAIL:${lock.lockId}`);
               }
             }
 
@@ -19845,15 +19579,35 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               console.log(`🎯 HTLC-ROUTING: WE ARE FINAL RECIPIENT!`);
               // Final recipient - reveal immediately
               if (envelope.secret) {
+                const inboundEntity = newState.entityId === accountMachine.leftEntity
+                  ? accountMachine.rightEntity
+                  : accountMachine.leftEntity;
                 const paymentDescription = typeof envelope.description === 'string' ? envelope.description.trim() : '';
+                if (!newState.htlcRoutes.has(lock.hashlock)) {
+                  newState.htlcRoutes.set(lock.hashlock, {
+                    hashlock: lock.hashlock,
+                    tokenId: lock.tokenId,
+                    amount: lock.amount,
+                    ...(typeof envelope.startedAtMs === 'number' ? { startedAtMs: envelope.startedAtMs } : {}),
+                    inboundEntity,
+                    inboundLockId: lock.lockId,
+                    createdTimestamp: newState.timestamp,
+                  });
+                }
                 env.emit('HtlcReceived', {
-                  entityId: state.entityId,
-                  fromEntity: input.fromEntityId,
-                  hashlock: lock.hashlock,
-                  lockId: lock.lockId,
-                  amount: lock.amount.toString(),
-                  tokenId: lock.tokenId,
-                  ...(paymentDescription ? { description: paymentDescription } : {}),
+                  ...buildHtlcReceivedEventPayload({
+                    entityId: state.entityId,
+                    fromEntity: input.fromEntityId,
+                    toEntity: state.entityId,
+                    hashlock: lock.hashlock,
+                    lockId: lock.lockId,
+                    amount: lock.amount,
+                    tokenId: lock.tokenId,
+                    ...(paymentDescription ? { description: paymentDescription } : {}),
+                    ...(typeof envelope.startedAtMs === 'number' ? { startedAtMs: envelope.startedAtMs } : {}),
+                    ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
+                    receivedAtMs: newState.timestamp,
+                  }),
                 });
                 if (paymentDescription) {
                   if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map<HtlcNoteKey, string>();
@@ -19893,6 +19647,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               // Create route object (typed as HtlcRoute for pendingFee)
               const htlcRoute: HtlcRoute = {
                 hashlock: lock.hashlock,
+                tokenId: lock.tokenId,
+                amount: lock.amount,
+                ...(typeof envelope.startedAtMs === 'number' ? { startedAtMs: envelope.startedAtMs } : {}),
                 inboundEntity,
                 inboundLockId: lock.lockId,
                 outboundEntity: nextHop,
@@ -20108,7 +19865,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           } else {
             // We're the origin — payment failed, notify via event
             console.log(`❌ HTLC: Payment failed (we initiated), hashlock=${timedOutHashlock.slice(0,16)}...`);
-            env.emit('PaymentFailed', {
+            env.emit('HtlcFailed', {
               hashlock: timedOutHashlock,
               reason: 'timeout',
               entityId: state.entityId,
@@ -20148,6 +19905,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           const outboundLock = route.outboundLockId ? newState.lockBook.get(route.outboundLockId) : undefined;
           const inboundLock = route.inboundLockId ? newState.lockBook.get(route.inboundLockId) : undefined;
           const eventLock = inboundLock ?? outboundLock;
+          const eventAmount = eventLock?.amount ?? route.amount;
+          const eventTokenId = eventLock?.tokenId ?? route.tokenId;
+          const eventLockId = eventLock?.lockId ?? route.inboundLockId ?? route.outboundLockId;
           const finalizedDescription =
             (eventLock && newState.htlcNotes?.get(`lock:${eventLock.lockId}` as HtlcNoteKey))
             ?? newState.htlcNotes?.get(`hashlock:${hashlock}` as HtlcNoteKey)
@@ -20203,27 +19963,23 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           } else {
             console.log(`✅ HTLC: Payment complete (we initiated)`);
             terminateHtlcRoute(newState, hashlock, newState.timestamp);
-          }
-          if (isFinalRecipient) {
-            env.emit('HtlcReceived', {
-              hashlock,
-              secret,
-              fromEntity: route.inboundEntity,
-              entityId: state.entityId,
-              ...(eventLock ? { amount: eventLock.amount.toString(), tokenId: eventLock.tokenId, lockId: eventLock.lockId } : {}),
-              ...(finalizedDescription ? { description: finalizedDescription } : {}),
+            env.emit('HtlcFinalized', {
+              ...buildHtlcFinalizedEventPayload({
+                entityId: state.entityId,
+                fromEntity: state.entityId,
+                ...(route.outboundEntity ? { toEntity: route.outboundEntity } : {}),
+                hashlock,
+                secret,
+                ...(eventLockId ? { lockId: eventLockId } : {}),
+                ...(eventAmount !== undefined ? { amount: eventAmount } : {}),
+                ...(eventTokenId !== undefined ? { tokenId: eventTokenId } : {}),
+                ...(finalizedDescription ? { description: finalizedDescription } : {}),
+                ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
+                ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
+                finalizedAtMs: newState.timestamp,
+              }),
             });
           }
-          env.emit('PaymentFinalized', {
-            hashlock,
-            secret,
-            inboundEntity: route.inboundEntity,
-            outboundEntity: route.outboundEntity,
-            entityId: state.entityId,
-            finalRecipient: isFinalRecipient,
-            ...(eventLock ? { amount: eventLock.amount.toString(), tokenId: eventLock.tokenId, lockId: eventLock.lockId } : {}),
-            ...(finalizedDescription ? { description: finalizedDescription } : {}),
-          });
         } else {
           console.log(`⚠️ HTLC: No route found for hashlock ${hashlock.slice(0,16)}...`);
         }
@@ -20276,30 +20032,72 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       }
     } else {
       console.error(`❌ Frame consensus failed: ${result.error}`);
-      addMessage(newState, `❌ ${result.error}`);
       if (replayMode) {
+        const replayRuntimeFrameHeight = Number(env.height ?? 0) + 1;
+        const skippedReplayAccountInputs =
+          (((env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] as Set<string> | undefined) ??
+            new Set<string>());
+        const currentHeight = Number(accountMachine?.currentHeight ?? 0);
+        const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
+        const inputHeight = Number(input.height ?? 0);
+        const newFrameHeight = Number(input.newAccountFrame?.height ?? 0);
+        const ackAlreadyApplied =
+          input.prevHanko &&
+          !input.newAccountFrame &&
+          Number.isFinite(inputHeight) &&
+          inputHeight > 0 &&
+          !accountMachine?.pendingFrame &&
+          currentHeight >= inputHeight;
+        const newFrameAlreadyApplied =
+          Boolean(input.newAccountFrame) &&
+          Number.isFinite(newFrameHeight) &&
+          newFrameHeight > 0 &&
+          (currentHeight >= newFrameHeight || pendingHeight === newFrameHeight);
         const replayFailureDebug = {
           entityId: state.entityId,
           counterpartyId,
-          inputHeight: Number(input.height ?? 0),
+          inputHeight,
           hasPrevHanko: Boolean(input.prevHanko),
-          newFrameHeight: Number(input.newAccountFrame?.height ?? 0),
+          newFrameHeight,
           newFramePrevFrameHash: input.newAccountFrame?.prevFrameHash ?? null,
           newFrameStateHash: input.newAccountFrame?.stateHash ?? null,
-          currentHeight: Number(accountMachine?.currentHeight ?? 0),
+          currentHeight,
           currentHash: accountMachine?.currentFrame?.stateHash ?? null,
-          pendingHeight: Number(accountMachine?.pendingFrame?.height ?? 0),
+          pendingHeight,
           pendingHash: accountMachine?.pendingFrame?.stateHash ?? null,
           mempoolSize: Number(accountMachine?.mempool?.length ?? 0),
+          ackAlreadyApplied,
+          newFrameAlreadyApplied,
           error: result.error ?? 'unknown',
         };
         console.warn(`[REPLAY][ACCOUNT-HANDLER] failed frame consensus ${JSON.stringify(replayFailureDebug)}`);
-        // During replay, stale/duplicate frames are expected (e.g. cross-entity frame
-        // stored in a runtime frame that was already applied from another entity's
-        // perspective). Skip gracefully instead of crashing the entire restore.
-        console.warn(`[REPLAY] Skipping failed frame consensus: ${result.error}`);
+        if (ackAlreadyApplied) {
+          (env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] = skippedReplayAccountInputs;
+          skippedReplayAccountInputs.add(buildSkippedReplayAckKey(
+            replayRuntimeFrameHeight,
+            state.entityId,
+            counterpartyId,
+            inputHeight,
+            input.prevHanko,
+          ));
+          console.warn(`[REPLAY] Skipping duplicate ACK already reflected in current frame: ${result.error}`);
+        } else if (newFrameAlreadyApplied) {
+          (env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] = skippedReplayAccountInputs;
+          skippedReplayAccountInputs.add(buildSkippedReplayNewFrameKey(
+            replayRuntimeFrameHeight,
+            state.entityId,
+            counterpartyId,
+            newFrameHeight,
+            input.newAccountFrame?.stateHash,
+            input.newAccountFrame?.prevFrameHash,
+          ));
+          console.warn(`[REPLAY] Skipping duplicate frame already reflected in current/pending state: ${result.error}`);
+        } else {
+          throw new Error(`REPLAY_FRAME_CONSENSUS_FAILED: ${result.error ?? 'unknown'}`);
+        }
       } else {
-        env.emit('PaymentFailed', {
+        addMessage(newState, `❌ ${result.error}`);
+        env.emit('HtlcFailed', {
           entityId: state.entityId,
           fromEntityId: input.fromEntityId,
           toEntityId: input.toEntityId,
@@ -20411,12 +20209,15 @@ export function processOrderbookSwaps(
       continue;
     }
 
-    priceTicks = computeSwapPriceTicks(
-      offer.giveTokenId,
-      offer.wantTokenId,
-      offer.giveAmount,
-      offer.wantAmount,
-    );
+    const explicitPriceTicks = typeof offer.priceTicks === 'bigint' ? offer.priceTicks : undefined;
+    priceTicks = explicitPriceTicks && explicitPriceTicks > 0n
+      ? explicitPriceTicks
+      : computeSwapPriceTicks(
+          offer.giveTokenId,
+          offer.wantTokenId,
+          offer.giveAmount,
+          offer.wantAmount,
+        );
     if (priceTicks <= 0n) {
       console.warn(`⚠️ ORDERBOOK: price rounded to zero — skipping offer=${offer.offerId}`);
       continue;
@@ -20456,20 +20257,47 @@ export function processOrderbookSwaps(
       });
     }
 
-    const bookTick = Math.max(1, book.params.tick);
-    const bookTickBig = BigInt(bookTick);
-    if (isSellBase) {
-      priceTicks = ((priceTicks + bookTickBig - 1n) / bookTickBig) * bookTickBig;
-    } else {
-      priceTicks = (priceTicks / bookTickBig) * bookTickBig;
+    if (!explicitPriceTicks || explicitPriceTicks <= 0n) {
+      const bookTick = Math.max(1, book.params.tick);
+      const bookTickBig = BigInt(bookTick);
+      if (isSellBase) {
+        priceTicks = ((priceTicks + bookTickBig - 1n) / bookTickBig) * bookTickBig;
+      } else {
+        priceTicks = (priceTicks / bookTickBig) * bookTickBig;
+      }
+      if (priceTicks <= 0n) {
+        console.warn(`⚠️ ORDERBOOK: book-tick rounding produced zero price — skipping offer=${offer.offerId}`);
+        continue;
+      }
+      if (priceTicks > MAX_LOTS) {
+        console.warn(`⚠️ ORDERBOOK: rounded price exceeds max tick range — skipping offer=${offer.offerId}`);
+        continue;
+      }
     }
-    if (priceTicks <= 0n) {
-      console.warn(`⚠️ ORDERBOOK: book-tick rounding produced zero price — skipping offer=${offer.offerId}`);
-      continue;
+
+    // Price deviation guard: reject orders that cross too far from best available
+    const bestBid = getBestBid(book);
+    const bestAsk = getBestAsk(book);
+    const priceNum = Number(priceTicks);
+    const REJECT_BPS = SWAP_CONSTANTS.PRICE_REJECT_BPS;
+    const BPS_BASE = SWAP_CONSTANTS.BPS_BASE;
+    if (side === 0 && bestAsk !== null) {
+      // BUY: reject if limit price > bestAsk * (1 + REJECT_BPS/BPS_BASE)
+      const maxAllowed = bestAsk + Math.floor(bestAsk * REJECT_BPS / BPS_BASE);
+      if (priceNum > maxAllowed) {
+        console.warn(`⚠️ ORDERBOOK: BUY price ${priceNum} exceeds ${REJECT_BPS/100}% above best ask ${bestAsk} — rejecting offer=${offer.offerId}`);
+        mempoolOps.push({ accountId, tx: { type: 'swap_resolve', data: { offerId: offer.offerId, fillRatio: 0, cancelRemainder: true } } });
+        continue;
+      }
     }
-    if (priceTicks > MAX_LOTS) {
-      console.warn(`⚠️ ORDERBOOK: rounded price exceeds max tick range — skipping offer=${offer.offerId}`);
-      continue;
+    if (side === 1 && bestBid !== null) {
+      // SELL: reject if limit price < bestBid * (1 - REJECT_BPS/BPS_BASE)
+      const minAllowed = bestBid - Math.floor(bestBid * REJECT_BPS / BPS_BASE);
+      if (priceNum < minAllowed) {
+        console.warn(`⚠️ ORDERBOOK: SELL price ${priceNum} below ${REJECT_BPS/100}% under best bid ${bestBid} — rejecting offer=${offer.offerId}`);
+        mempoolOps.push({ accountId, tx: { type: 'swap_resolve', data: { offerId: offer.offerId, fillRatio: 0, cancelRemainder: true } } });
+        continue;
+      }
     }
 
     const makerId = offer.makerIsLeft ? offer.fromEntity : offer.toEntity;
@@ -20481,7 +20309,7 @@ export function processOrderbookSwaps(
       ownerId: makerId,
       orderId: namespacedOrderId,
       side,
-      tif: 0,
+      tif: offer.timeInForce ?? 0,
       postOnly: false,
       priceTicks: Number(priceTicks),
       qtyLots: Number(qtyLots),
@@ -20493,8 +20321,36 @@ export function processOrderbookSwaps(
     bookCache.set(bookKey, book);
     bookUpdates.push({ pairId: bookKey, book });
 
+    const rejectEvents = result.events.filter(
+      (event) => event.type === 'REJECT' && event.orderId === namespacedOrderId,
+    );
+    const offerRejectedWithoutFill = rejectEvents.length > 0;
+    if (offerRejectedWithoutFill) {
+      const rejectReasons = rejectEvents.map((event) => event.reason).filter(Boolean).join(', ');
+      console.warn(
+        `⚠️ ORDERBOOK REJECT: offer=${offer.offerId} account=${accountId.slice(-8)} side=${side} price=${priceTicks.toString()} qty=${qtyLots.toString()} bestBid=${String(bestBid)} bestAsk=${String(bestAsk)} reason=${rejectReasons || 'unknown'}`,
+      );
+      mempoolOps.push({
+        accountId,
+        tx: {
+          type: 'swap_resolve',
+          data: {
+            offerId: offer.offerId,
+            fillRatio: 0,
+            cancelRemainder: true,
+          },
+        },
+      });
+      console.log(`📤 ORDERBOOK: Queued swap_resolve(cancelRemainder) for rejected offer ${offer.offerId.slice(-8)}`);
+      continue;
+    }
+
     // Process trade events
-    const fillsPerOrder = new Map<string, { filledLots: number; originalLots: number }>();
+    const fillsPerOrder = new Map<string, {
+      filledLots: number;
+      originalLots: number;
+      weightedCost: bigint;
+    }>();
 
     for (const event of result.events) {
       if (event.type === 'TRADE') {
@@ -20502,19 +20358,30 @@ export function processOrderbookSwaps(
           const lastColon = namespacedId.lastIndexOf(':');
           return lastColon >= 0 ? namespacedId.slice(lastColon + 1) : namespacedId;
         };
+        const tradeCost = BigInt(event.price) * BigInt(event.qty);
 
         const makerEntry = fillsPerOrder.get(event.makerOrderId);
         if (!makerEntry) {
-          fillsPerOrder.set(event.makerOrderId, { filledLots: event.qty, originalLots: event.makerQtyBefore });
+          fillsPerOrder.set(event.makerOrderId, {
+            filledLots: event.qty,
+            originalLots: event.makerQtyBefore,
+            weightedCost: tradeCost,
+          });
         } else {
           makerEntry.filledLots += event.qty;
+          makerEntry.weightedCost += tradeCost;
         }
 
         const takerEntry = fillsPerOrder.get(event.takerOrderId);
         if (!takerEntry) {
-          fillsPerOrder.set(event.takerOrderId, { filledLots: event.qty, originalLots: event.takerQtyTotal });
+          fillsPerOrder.set(event.takerOrderId, {
+            filledLots: event.qty,
+            originalLots: event.takerQtyTotal,
+            weightedCost: tradeCost,
+          });
         } else {
           takerEntry.filledLots += event.qty;
+          takerEntry.weightedCost += tradeCost;
         }
 
         console.log(`📊 ORDERBOOK TRADE: ${extractOfferId(event.makerOrderId)} ↔ ${extractOfferId(event.takerOrderId)} @ ${event.price}, qty=${event.qty}`);
@@ -20524,7 +20391,7 @@ export function processOrderbookSwaps(
     // Emit swap_resolve for each filled order
     const MAX_FILL_RATIO = 65535;
 
-    for (const [namespacedOrderId, { filledLots, originalLots }] of fillsPerOrder) {
+    for (const [namespacedOrderId, { filledLots, originalLots, weightedCost }] of fillsPerOrder) {
       // Parse namespacedOrderId format: "counterpartyId:offerId"
       // counterpartyId is the Map key used to store the account
       const lastColon = namespacedOrderId.lastIndexOf(':');
@@ -20549,6 +20416,42 @@ export function processOrderbookSwaps(
       const fillRatio = originalBig > 0n
         ? Number((filledBig * BigInt(MAX_FILL_RATIO)) / originalBig)
         : 0;
+      const executionQuoteWei = (weightedCost * SWAP_LOT_SCALE) / ORDERBOOK_PRICE_SCALE;
+
+      // Compute rebate: spread between limit price and execution price
+      // Find the offer to determine limit-price quote cost
+      const account = hubState.accounts.get(accountId);
+      const swapOffer = account?.swapOffers?.get(offerId);
+      let rebateAmount: bigint | undefined;
+      let rebateTokenId: number | undefined;
+      if (swapOffer && fillRatio > 0) {
+        const effGive = swapOffer.quantizedGive ?? swapOffer.giveAmount;
+        const effWant = swapOffer.quantizedWant ?? swapOffer.wantAmount;
+        const offerSide = deriveSide(swapOffer.giveTokenId, swapOffer.wantTokenId);
+        // Limit-price quote amount for this fill
+        const filledGiveAtLimit = (effGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
+        const filledWantAtLimit = effGive > 0n
+          ? (filledGiveAtLimit * effWant + effGive - 1n) / effGive
+          : 0n;
+        // For BUY (side=0): maker gives quote, limit cost = filledGive, exec cost = executionQuoteWei
+        // For SELL (side=1): maker gives base, limit proceeds = filledWant (quote), exec proceeds = executionQuoteWei
+        let spread = 0n;
+        if (offerSide === 0) {
+          // BUY: spread = limitCost - executionCost (maker overpaid, gets refund)
+          spread = filledGiveAtLimit > executionQuoteWei ? filledGiveAtLimit - executionQuoteWei : 0n;
+          rebateTokenId = swapOffer.giveTokenId; // quote token (what they overpaid in)
+        } else {
+          // SELL: spread = executionProceeds - limitProceeds (maker got more than minimum)
+          spread = executionQuoteWei > filledWantAtLimit ? executionQuoteWei - filledWantAtLimit : 0n;
+          rebateTokenId = swapOffer.wantTokenId; // quote token (what they receive extra in)
+        }
+        if (spread > 0n) {
+          // Limit orders must always settle at the best market execution available.
+          // Hub monetization must be explicit elsewhere, not hidden by keeping part
+          // of the price improvement inside swap settlement.
+          rebateAmount = spread;
+        }
+      }
 
       const orderStillInBook = book.orderIdToIdx.has(namespacedOrderId) &&
         book.orderActive[book.orderIdToIdx.get(namespacedOrderId)!];
@@ -20561,10 +20464,12 @@ export function processOrderbookSwaps(
             offerId,
             fillRatio: Math.min(fillRatio, MAX_FILL_RATIO),
             cancelRemainder: !orderStillInBook,
+            ...(rebateAmount !== undefined && rebateTokenId !== undefined && { rebateAmount, rebateTokenId }),
           }
         }
       });
-      console.log(`📤 ORDERBOOK: Queued swap_resolve for ${offerId.slice(-8)}, fill=${(fillRatio/MAX_FILL_RATIO*100).toFixed(1)}%, cancel=${!orderStillInBook}`);
+      const rebateStr = rebateAmount ? `, rebate=${rebateAmount} token${rebateTokenId}` : '';
+      console.log(`📤 ORDERBOOK: Queued swap_resolve for ${offerId.slice(-8)}, fill=${(fillRatio/MAX_FILL_RATIO*100).toFixed(1)}%, cancel=${!orderStillInBook}${rebateStr}`);
     }
   }
 
@@ -20636,7 +20541,7 @@ export function processOrderbookCancels(
 }
 
 
-//runtime/entity-tx/handlers/deposit-collateral.ts (143 lines)
+//runtime/entity-tx/handlers/deposit-collateral.ts (155 lines)
 /**
  * Deposit Collateral Handler
  *
@@ -20658,6 +20563,7 @@ export function processOrderbookCancels(
 import type { EntityState, EntityTx, EntityInput, AccountTx } from '../../types';
 import { QUOTE_EXPIRY_MS } from '../../types';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../../state-helpers';
+import { getEffectiveDraftReserveBalance } from '../../j-batch';
 
 type MempoolOp = { accountId: string; tx: AccountTx };
 
@@ -20666,14 +20572,21 @@ export async function handleDepositCollateral(
   entityTx: Extract<EntityTx, { type: 'deposit_collateral' }>,
   currentTimestamp: number = 0
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: any[]; mempoolOps?: MempoolOp[] }> {
-  const { counterpartyId, tokenId, amount, rebalanceQuoteId, rebalanceFeeTokenId, rebalanceFeeAmount } = entityTx.data;
-  console.log(`🔍 deposit_collateral: counterpartyId=${counterpartyId}, tokenId=${tokenId}, amount=${amount}, quoteId=${rebalanceQuoteId}`);
+  const { counterpartyId, receivingEntityId, tokenId, amount, rebalanceQuoteId, rebalanceFeeTokenId, rebalanceFeeAmount } = entityTx.data;
+  const receivingEntity = String(receivingEntityId || entityState.entityId || '').trim().toLowerCase();
+  const isLocalReceivingEntity = receivingEntity === String(entityState.entityId || '').trim().toLowerCase();
+  console.log(`🔍 deposit_collateral: counterpartyId=${counterpartyId}, receivingEntity=${receivingEntity.slice(-4)}, tokenId=${tokenId}, amount=${amount}, quoteId=${rebalanceQuoteId}`);
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
 
   // Validate: Do we have enough reserve?
-  const currentReserve = entityState.reserves.get(tokenId) || 0n;
+  const currentReserve = getEffectiveDraftReserveBalance(
+    entityState.entityId,
+    entityState.reserves.get(tokenId) || 0n,
+    entityState.jBatchState?.batch,
+    tokenId,
+  );
   if (currentReserve < amount) {
     console.log(`❌ deposit_collateral: Insufficient reserve ${currentReserve} < ${amount}`);
     addMessage(newState,
@@ -20683,7 +20596,7 @@ export async function handleDepositCollateral(
   }
 
   // Validate: Does account exist?
-  if (!entityState.accounts.has(counterpartyId)) {
+  if (isLocalReceivingEntity && !entityState.accounts.has(counterpartyId)) {
     console.log(`❌ deposit_collateral: No account with ${counterpartyId}`);
     addMessage(newState,
       `❌ Cannot deposit collateral: no account with ${counterpartyId?.slice(-4)}`
@@ -20693,6 +20606,10 @@ export async function handleDepositCollateral(
 
   // Validate rebalance fee if present
   if (rebalanceQuoteId !== undefined) {
+    if (!isLocalReceivingEntity) {
+      addMessage(newState, '❌ Rebalance fee unsupported for remote reserve → account deposits');
+      return { newState, outputs };
+    }
     const account = newState.accounts.get(counterpartyId);
     const quote = account?.activeRebalanceQuote;
     console.log(`🔍 deposit_collateral: quote validation - hasAccount=${!!account}, quote=${JSON.stringify(quote ? { quoteId: quote.quoteId, accepted: quote.accepted, feeAmount: String(quote.feeAmount) } : null)}`);
@@ -20763,14 +20680,14 @@ export async function handleDepositCollateral(
   const { batchAddReserveToCollateral } = await import('../../j-batch');
   batchAddReserveToCollateral(
     newState.jBatchState,
-    entityState.entityId,
+    receivingEntity,
     counterpartyId,
     tokenId,
     amount
   );
 
   addMessage(newState,
-    `📦 Queued R→C: ${amount} token ${tokenId} to account with ${counterpartyId.slice(-4)} (use j_broadcast to commit)`
+    `📦 Queued R→C: ${amount} token ${tokenId} to ${receivingEntity.slice(-4)}↔${counterpartyId.slice(-4)} (use j_broadcast to commit)`
   );
 
   console.log(`✅ deposit_collateral: Added to jBatch for ${entityState.entityId.slice(-4)}`);
@@ -20781,7 +20698,7 @@ export async function handleDepositCollateral(
 }
 
 
-//runtime/entity-tx/handlers/htlc-payment.ts (481 lines)
+//runtime/entity-tx/handlers/htlc-payment.ts (529 lines)
 /**
  * HTLC Payment Handler (Entity-level)
  * Creates conditional payment with hashlock, routes through network
@@ -20827,16 +20744,36 @@ const getRuntimeJurisdictionHeight = async (env: Env, fallbackHeight: number): P
   return best;
 };
 
+const isHexChar = (char: string): boolean => {
+  const code = char.charCodeAt(0);
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 70) ||
+    (code >= 97 && code <= 102)
+  );
+};
+
+const isHexValue = (value: string, expectedBytes: number): boolean => {
+  const expectedLength = 2 + expectedBytes * 2;
+  if (value.length !== expectedLength || !value.startsWith('0x')) return false;
+  for (let index = 2; index < value.length; index += 1) {
+    if (!isHexChar(value[index]!)) return false;
+  }
+  return true;
+};
+
 export async function handleHtlcPayment(
   entityState: EntityState,
   entityTx: Extract<any, { type: 'htlcPayment' }>,
   env: Env
-): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps?: Array<{ accountId: string; tx: any }> }> {
-  console.log(`🔒 HTLC-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`);
-  console.log(`   Amount: ${entityTx.data.amount}, Route: ${entityTx.data.route?.map((r: string) => r.slice(-4)).join('→') || 'none'}`);
+): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: Array<{ accountId: string; tx: any }> }> {
+  if (env.quietRuntimeLogs !== true) {
+    console.log(`🔒 HTLC-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`);
+    console.log(`   Amount: ${entityTx.data.amount}, Route: ${entityTx.data.route?.map((r: string) => r.slice(-4)).join('→') || 'none'}`);
+  }
 
   // Emit HTLC initiation event
-  env.emit('HtlcPaymentInitiated', {
+  env.emit('HtlcInitiated', {
     fromEntity: entityState.entityId,
     toEntity: entityTx.data.targetEntityId,
     tokenId: entityTx.data.tokenId,
@@ -20851,6 +20788,8 @@ export async function handleHtlcPayment(
   // Extract payment details
   let { targetEntityId, tokenId, amount, route, description, secret, hashlock } = entityTx.data;
   const desiredRecipientAmount = amount;
+  const paymentStartedAtMs =
+    typeof entityTx.data.startedAtMs === 'number' ? entityTx.data.startedAtMs : newState.timestamp;
 
   // Validate secret/hashlock - MUST be provided in tx (determinism requirement)
   if (!secret && !hashlock) {
@@ -20917,26 +20856,26 @@ export async function handleHtlcPayment(
   // Validate route starts with current entity
   if (route.length < 1 || route[0] !== entityState.entityId) {
     logError("HTLC_PAYMENT", `❌ Invalid route: doesn't start with current entity`);
-    return { newState: entityState, outputs: [] };
+    return { newState: entityState, outputs: [], mempoolOps: [] };
   }
 
   // Validate route ends with targetEntityId
   if (route[route.length - 1] !== targetEntityId) {
     logError("HTLC_PAYMENT", `❌ Invalid route: end doesn't match targetEntityId`);
-    return { newState: entityState, outputs: [] };
+    return { newState: entityState, outputs: [], mempoolOps: [] };
   }
 
   // Check if we're the final destination
   if (route.length === 1 && route[0] === targetEntityId) {
     addMessage(newState, `💰 Received HTLC payment of ${amount} (token ${tokenId})`);
-    return { newState, outputs: [] };
+    return { newState, outputs: [], mempoolOps: [] };
   }
 
   // Determine next hop
   const nextHop = route[1];
   if (!nextHop) {
     logError("HTLC_PAYMENT", `❌ Invalid route: no next hop`);
-    return { newState, outputs: [] };
+    return { newState, outputs: [], mempoolOps: [] };
   }
 
   // Check if we have an account with next hop
@@ -20944,7 +20883,7 @@ export async function handleHtlcPayment(
   if (!newState.accounts.has(nextHop)) {
     logError("HTLC_PAYMENT", `❌ No account with next hop: ${nextHop.slice(-4)}`);
     addMessage(newState, `❌ HTLC payment failed: No account with ${formatEntityId(nextHop)}`);
-    return { newState, outputs: [] };
+    return { newState, outputs: [], mempoolOps: [] };
   }
 
   const preparedSenderLockRaw = entityTx.data.preparedSenderLockAmount;
@@ -21048,7 +20987,7 @@ export async function handleHtlcPayment(
         ? preparedTimelockRaw
         : BigInt(String(preparedTimelockRaw));
       revealBeforeHeight = Number(preparedRevealBeforeHeightRaw);
-      if (!lockId || !/^0x[0-9a-f]{64}$/i.test(lockId)) {
+      if (!lockId || !isHexValue(lockId, 32)) {
         throw new Error(`invalid lockId=${String(preparedLockIdRaw)}`);
       }
       if (timelock <= 0n || !Number.isFinite(revealBeforeHeight) || revealBeforeHeight <= 0) {
@@ -21102,12 +21041,16 @@ export async function handleHtlcPayment(
   // Store routing info (like 2024 hashlockMap)
   newState.htlcRoutes.set(hashlock, {
     hashlock,
+    tokenId,
+    amount,
+    startedAtMs: paymentStartedAtMs,
     outboundEntity: nextHop,
     outboundLockId: lockId,
     createdTimestamp: newState.timestamp
   });
 
-  const paymentDescription = typeof description === 'string' ? description.trim() : '';
+  const rawPaymentDescription = typeof description === 'string' ? description.trim() : '';
+  const paymentDescription = rawPaymentDescription;
   if (paymentDescription) {
     if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map<HtlcNoteKey, string>();
     newState.htlcNotes.set(`hashlock:${hashlock}`, paymentDescription);
@@ -21124,15 +21067,29 @@ export async function handleHtlcPayment(
       const trimmed = raw.trim();
       if (!trimmed) return null;
       const prefixed = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
-      return /^0x[0-9a-fA-F]{64}$/.test(prefixed) ? prefixed.toLowerCase() : null;
+      return isHexValue(prefixed, 32) ? prefixed.toLowerCase() : null;
     };
     const normalizeX25519Base64 = (raw: unknown): string | null => {
       if (typeof raw !== 'string') return null;
       const trimmed = raw.trim();
       if (!trimmed) return null;
-      // Strict base64 gate to avoid decoding arbitrary hex/signature strings.
       if (trimmed.length % 4 !== 0) return null;
-      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(trimmed)) return null;
+      let paddingStarted = false;
+      let paddingCount = 0;
+      for (const char of trimmed) {
+        const code = char.charCodeAt(0);
+        const isUpper = code >= 65 && code <= 90;
+        const isLower = code >= 97 && code <= 122;
+        const isDigit = code >= 48 && code <= 57;
+        const isBase64 = isUpper || isLower || isDigit || char === '+' || char === '/';
+        if (char === '=') {
+          paddingStarted = true;
+          paddingCount += 1;
+          if (paddingCount > 2) return null;
+          continue;
+        }
+        if (!isBase64 || paddingStarted) return null;
+      }
       try {
         const bytes = typeof atob === 'function'
           ? Uint8Array.from(atob(trimmed), (c) => c.charCodeAt(0))
@@ -21192,14 +21149,22 @@ export async function handleHtlcPayment(
     }
     const keyDebug = hops.map((entityId) => {
       const key = entityPubKeys.get(entityId) || '';
-      const isHex = /^0x[0-9a-f]{64}$/i.test(key);
+      const isHex = isHexValue(key, 32);
       const source = keySources.get(entityId) || 'unknown';
       return `${formatEntityId(entityId)}:${isHex ? 'hex32' : 'b64'}:len=${key.length}:src=${source}`;
     }).join(' | ');
     console.log(`🧅 HTLC-KEYS: ${keyDebug}`);
     const crypto = new NobleCryptoProvider();
 
-    envelope = await createOnionEnvelopes(route, secret, entityPubKeys, crypto, hopForwardAmounts, paymentDescription || undefined);
+    envelope = await createOnionEnvelopes(
+      route,
+      secret,
+      entityPubKeys,
+      crypto,
+      hopForwardAmounts,
+      paymentDescription || undefined,
+      paymentStartedAtMs,
+    );
     console.log(`🧅 ENVELOPE: ${crypto ? 'ENCRYPTED' : 'CLEARTEXT'} | hops=${hops.length} keys=${entityPubKeys.size} missing=[${missingKeys.map(e => formatEntityId(e))}]`);
 
     // Persist deterministic payload for WAL replay.
@@ -21398,7 +21363,7 @@ export { handleSetCreditLimit } from './handlers/set-credit-limit';
 export { handleDirectPayment } from './handlers/direct-payment';
 
 
-//runtime/account-tx/apply.ts (268 lines)
+//runtime/account-tx/apply.ts (259 lines)
 /**
  * Account Transaction Dispatcher
  * Routes AccountTx to appropriate handlers (like entity-tx/apply.ts pattern)
@@ -21608,15 +21573,6 @@ export async function processAccountTx(
       if (resolveResult.amount !== undefined) ret.amount = resolveResult.amount;
       if (resolveResult.tokenId !== undefined) ret.tokenId = resolveResult.tokenId;
       if (resolveResult.outcome === 'error' && resolveResult.hashlock) ret.timedOutHashlock = resolveResult.hashlock;
-      if (resolveResult.outcome === 'secret' && resolveResult.finalRecipient === true && env && !isValidation) {
-        env.emit('HtlcReceived', {
-          entityId: myEntityId,
-          fromEntity: counterparty,
-          hashlock: resolveResult.hashlock,
-          amount: resolveResult.amount?.toString(),
-          tokenId: resolveResult.tokenId,
-        });
-      }
       return ret;
     }
 
@@ -22685,18 +22641,16 @@ export function validateAccountSignatures(
 }
 
 
-//runtime/state-helpers.ts (829 lines)
+//runtime/state-helpers.ts (588 lines)
 /**
  * XLN State Management Helpers
  * Utilities for entity replica cloning, snapshots, and state persistence
  */
 
-import { encode } from './snapshot-coder';
-import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica, LogCategory, BrowserVMState } from './types';
-import type { Profile } from './networking/gossip';
+import type { EntityReplica, EntityState, Env, RuntimeInput, AccountMachine, JReplica, LogCategory } from './types';
 import { DEBUG, HEAVY_LOGS } from './utils';
 import { validateEntityState } from './validation-utils';
-import { safeStringify, safeParse } from './serialization-utils';
+import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { cloneJBatch, type CompletedBatch } from './j-batch';
 import type { CrontabState } from './crontab-types';
@@ -23092,245 +23046,6 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
   };
 };
 
-export const captureSnapshot = async (
-  env: Env,
-  envHistory: EnvSnapshot[],
-  db: any,
-  runtimeInput: RuntimeInput,
-  runtimeOutputs: EntityInput[],
-  description: string,
-): Promise<void> => {
-  // Snapshots ALWAYS happen - they're essential for time-travel debugging
-  // Use env.frameDisplayMs to hint how long to display important frames
-
-  // Solvency check if set (from scenarios)
-  if (env.extra?.expectedSolvency !== undefined) {
-    const { checkSolvency } = await import('./scenarios/solvency-check');
-    checkSolvency(env, env.extra.expectedSolvency, `Frame ${envHistory.length}`);
-  }
-
-  const gossipProfiles = env.gossip?.getProfiles
-    ? env.gossip.getProfiles().map((profile: Profile) => {
-        try {
-          // structuredClone keeps nested data without mutating live gossip state
-          return structuredClone(profile);
-        } catch (error) {
-          try {
-            return safeParse(safeStringify(profile));
-          } catch {
-            return profile;
-          }
-        }
-      })
-    : [];
-
-  // Capture fresh stateRoot from BrowserVM for time-travel (if available)
-  let freshStateRoot: Uint8Array | null = null;
-  let browserVMState: BrowserVMState | null = null;
-  if (env.jReplicas) {
-    try {
-      const { getBrowserVMInstance } = await import('./evm');
-      const browserVM = getBrowserVMInstance(env);
-      if (browserVM?.captureStateRoot) {
-        freshStateRoot = await browserVM.captureStateRoot();
-        // Update live jReplicas so next snapshot has correct base
-        for (const [, jReplica] of env.jReplicas.entries()) {
-          jReplica.stateRoot = freshStateRoot;
-        }
-      }
-      if (browserVM?.serializeState) {
-        browserVMState = await browserVM.serializeState() as unknown as BrowserVMState;
-      }
-    } catch {
-      // Silent fail - stateRoot capture is optional
-    }
-  }
-
-  // Clone jReplicas (J-layer state) + SYNC reserves/collaterals from eReplicas for time travel
-  const jReplicas: JReplica[] = env.jReplicas
-    ? Array.from(env.jReplicas.values()).map(jr => {
-        // Sync reserves from eReplicas into JReplica snapshot
-        const reserves = new Map<string, Map<number, bigint>>();
-        const registeredEntities = new Map<string, { name: string; quorum: string[]; threshold: number }>();
-        // Collaterals: accountKey → tokenId → { collateral, ondelta }
-        const collaterals = new Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>();
-
-        // Aggregate reserves and collaterals from all entity replicas
-        for (const [key, replica] of env.eReplicas.entries()) {
-          const entityId = key.split(':')[0] || key; // fallback to full key if no separator
-          if (replica.state?.reserves) {
-            const tokenMap = new Map<number, bigint>();
-            // Handle both Map and plain object
-            for (const [tokenId, amount] of replica.state.reserves.entries()) {
-              tokenMap.set(tokenId, amount);
-            }
-            if (tokenMap.size > 0) {
-              reserves.set(entityId, tokenMap);
-            }
-          }
-
-          // Extract collaterals from bilateral accounts (only for LEFT entity to avoid duplicates)
-          if (replica.state?.accounts) {
-            for (const [counterpartyId, account] of replica.state.accounts.entries()) {
-              // Only capture from LEFT entity (smaller ID) to avoid duplicates
-              if (isLeftEntity(entityId, counterpartyId) && account.deltas) {
-                // Create account key: LEFT-RIGHT (canonical ordering)
-                const accountKey = `${entityId.slice(-4)}-${counterpartyId.slice(-4)}`;
-                const tokenMap = new Map<number, { collateral: bigint; ondelta: bigint }>();
-
-                for (const [tokenId, delta] of account.deltas.entries()) {
-                  if (delta.collateral > 0n || delta.ondelta !== 0n) {
-                    tokenMap.set(Number(tokenId), {
-                      collateral: delta.collateral,
-                      ondelta: delta.ondelta,
-                    });
-                  }
-                }
-
-                if (tokenMap.size > 0) {
-                  collaterals.set(accountKey, tokenMap);
-                }
-              }
-            }
-          }
-
-          // Add entity to registeredEntities
-          if (!registeredEntities.has(entityId)) {
-            registeredEntities.set(entityId, {
-              name: `E${entityId.slice(-4)}`,
-              quorum: replica.state.config?.validators || [],
-              threshold: Number(replica.state.config?.threshold || 1n),
-            });
-          }
-        }
-
-        return {
-          name: jr.name,
-          blockNumber: jr.blockNumber,
-          stateRoot: freshStateRoot ? new Uint8Array(freshStateRoot) : new Uint8Array(jr.stateRoot),
-          mempool: [...jr.mempool],
-          blockDelayMs: jr.blockDelayMs || 300,
-          lastBlockTimestamp: jr.lastBlockTimestamp || 0,
-          position: { ...jr.position },
-          ...(jr.rpcs && { rpcs: [...jr.rpcs] }),
-          ...(jr.chainId !== undefined && { chainId: jr.chainId }),
-          ...(jr.depositoryAddress && { depositoryAddress: jr.depositoryAddress }),
-          ...(jr.entityProviderAddress && { entityProviderAddress: jr.entityProviderAddress }),
-          ...(jr.contracts && { contracts: { ...jr.contracts } }),
-          reserves,
-          collaterals,  // Collateral state from bilateral accounts
-          registeredEntities,
-        };
-      })
-    : [];
-
-  // Capture and reset frame logs
-  const frameLogs = env.frameLogs ? [...env.frameLogs] : [];
-  if (frameLogs.length > 0) {
-    console.log(`📋 Capturing ${frameLogs.length} frame events into snapshot`);
-  }
-  if (env.frameLogs) {
-    env.frameLogs = [];
-  }
-
-  const snapshot: EnvSnapshot = {
-    height: env.height,
-    timestamp: env.timestamp,
-    ...(env.runtimeSeed !== undefined && env.runtimeSeed !== null ? { runtimeSeed: env.runtimeSeed } : {}),
-    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
-    eReplicas: new Map(Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica, true)])), // forSnapshot=true excludes clonedForValidation
-    jReplicas,
-    ...(browserVMState ? { browserVMState } : {}),
-    runtimeInput: {
-      runtimeTxs: [...runtimeInput.runtimeTxs],
-      entityInputs: runtimeInput.entityInputs.map(input => ({
-        entityId: input.entityId,
-        signerId: input.signerId,
-        ...(input.entityTxs && { entityTxs: [...input.entityTxs] }),
-        ...(input.hashPrecommits && { hashPrecommits: new Map(Array.from(input.hashPrecommits.entries()).map(([k, v]) => [k, [...v]])) }),
-        ...(input.proposedFrame && { proposedFrame: input.proposedFrame }),
-      })),
-    },
-    runtimeOutputs: runtimeOutputs.map(output => ({
-      entityId: output.entityId,
-      signerId: output.signerId,
-      ...(output.entityTxs && { entityTxs: [...output.entityTxs] }),
-      ...(output.hashPrecommits && { hashPrecommits: new Map(Array.from(output.hashPrecommits.entries()).map(([k, v]) => [k, [...v]])) }),
-      ...(output.proposedFrame && { proposedFrame: output.proposedFrame }),
-    })),
-    description: env.extra?.description || description,
-    gossip: { profiles: gossipProfiles },
-    logs: frameLogs,
-    ...(env.frameDisplayMs && { displayMs: env.frameDisplayMs }),
-    ...(env.extra?.subtitle && { subtitle: { ...env.extra.subtitle } }),
-  };
-
-  // Clear consumed extras
-  delete env.frameDisplayMs;
-  delete env.extra;
-
-  envHistory.push(snapshot);
-
-  // --- SNAPSHOT SIZE MONITORING ---
-  const snapshotBuffer = encode(snapshot);
-  const snapshotSize = snapshotBuffer.length;
-  const sizeMB = (snapshotSize / 1024 / 1024).toFixed(2);
-
-  // Alert if snapshot exceeds 1MB threshold
-  if (snapshotSize > 1_000_000) {
-    console.warn(`📦 LARGE SNAPSHOT: ${sizeMB}MB at height ${snapshot.height}`);
-    console.warn(`   E-Replicas: ${snapshot.eReplicas.size}, J-Replicas: ${snapshot.jReplicas.length}`);
-
-    // Log per-entity diagnostics
-    for (const [key, replica] of snapshot.eReplicas) {
-      const msgCount = replica.state.messages?.length || 0;
-      const accountCount = replica.state.accounts?.size || 0;
-      if (msgCount > 20 || accountCount > 10) {
-        console.warn(`   ${key.slice(0,25)}...: ${msgCount} msgs, ${accountCount} accounts`);
-      }
-    }
-  }
-
-  // --- PERSISTENCE WITH BATCH OPERATIONS ---
-  // Try to save, but gracefully handle IndexedDB unavailable (incognito mode, etc)
-  try {
-    const batch = db.batch();
-    batch.put(Buffer.from(`snapshot:${snapshot.height}`), snapshotBuffer);
-    batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
-    batch.write();
-  } catch (error) {
-    // Silent fail - IndexedDB unavailable (incognito) or full - continue anyway
-  }
-
-  if (DEBUG) {
-    console.log(`📸 Snapshot ${snapshot.height}: ${sizeMB}MB - "${description}" (total: ${envHistory.length})`);
-    if (runtimeInput.runtimeTxs.length > 0) {
-      console.log(`    🖥️  RuntimeTxs: ${runtimeInput.runtimeTxs.length}`);
-      runtimeInput.runtimeTxs.forEach((tx, i) => {
-        if (tx.type === 'importReplica') {
-          console.log(
-            `      ${i + 1}. ${tx.type} ${tx.entityId}:${tx.signerId} (${tx.data.isProposer ? 'proposer' : 'validator'})`,
-          );
-        } else if (tx.type === 'importJ') {
-          console.log(
-            `      ${i + 1}. ${tx.type} ${tx.data.name} (chain ${tx.data.chainId})`,
-          );
-        }
-      });
-    }
-    if (runtimeInput.entityInputs.length > 0) {
-      console.log(`    📨 EntityInputs: ${runtimeInput.entityInputs.length}`);
-      runtimeInput.entityInputs.forEach((input, i) => {
-        const parts = [];
-        if (input.entityTxs?.length) parts.push(`${input.entityTxs.length} txs`);
-        if (input.hashPrecommits?.size) parts.push(`${input.hashPrecommits.size} precommits`);
-        if (input.proposedFrame) parts.push(`frame: ${input.proposedFrame.hash.slice(0, 10)}...`);
-        console.log(`      ${i + 1}. ${input.entityId}:${input.signerId} (${parts.join(', ') || 'empty'})`);
-      });
-    }
-  }
-};
-
 // === ACCOUNT MACHINE HELPERS ===
 
 /**
@@ -23538,7 +23253,7 @@ export const decodeAsync = async <T>(buffer: Buffer): Promise<T> => decode<T>(bu
 export { USE_MSGPACK };
 
 
-//runtime/evm.ts (1011 lines)
+//runtime/evm.ts (1010 lines)
 /**
  * XLN EVM Integration
  * Handles blockchain interactions, jurisdictions, and smart contract operations
@@ -23656,14 +23371,13 @@ export const ENTITY_PROVIDER_ABI = [
 export const DEPOSITORY_ABI = [
   'function mintToReserve(bytes32 entity, uint256 tokenId, uint256 amount) external',
   'function mintToReserveBatch((bytes32 entity, uint256 tokenId, uint256 amount)[] mints) external',
+  'function adminRegisterExternalToken((bytes32 entity,address contractAddress,uint96 externalTokenId,uint8 tokenType,uint256 internalTokenId,uint256 amount) params) external',
   'function debugFundReserves(bytes32 entity, uint256 tokenId, uint256 amount) external',
   'function debugBulkFundEntities() external',
-  'function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint256 tokenId, uint256 amount) external returns (bool)',
   'function processBatch(bytes encodedBatch, address entityProvider, bytes hankoData, uint256 nonce) external returns (bool)',
   'function unsafeProcessBatch(bytes32 entity, tuple(tuple(uint256 tokenId, uint256 amount)[] flashloans, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements, tuple(bytes32 counterentity, uint256 nonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts, tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations, tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(address transformer, bytes32 secret)[] revealSecrets, uint256 hub_id) batch) external returns (bool)',
   'function entityNonces(address) view returns (uint256)',
   'function prefundAccount(bytes32 fundingEntity, bytes32 counterpartyEntity, uint256 tokenId, uint256 amount) external returns (bool)',
-  'function settle(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig) external returns (bool)',
   'function _reserves(bytes32 entity, uint256 tokenId) external view returns (uint256)',
   // Canonical J-Events (must match CANONICAL_J_EVENTS in jadapter/helpers.ts)
   'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
@@ -23807,20 +23521,20 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
 // Debug function to fund entity reserves for testing
 export const debugFundReserves = async (jurisdiction: JurisdictionConfig, entityId: string, tokenId: number, amount: string) => {
   try {
-    console.log(`💰 DEBUG: Funding entity ${entityId.slice(0, 10)} with ${amount} of token ${tokenId}...`);
+    if (DEBUG) console.log(`💰 DEBUG: Funding entity ${entityId.slice(0, 10)} with ${amount} of token ${tokenId}...`);
     
     const { depository } = await connectToEthereum(jurisdiction);
     
     // Fund the entity's reserves for testing
     const tx = await depository['debugFundReserves']!(entityId, tokenId, amount);
-    console.log(`📡 Debug funding transaction: ${tx.hash}`);
+    if (DEBUG) console.log(`📡 Debug funding transaction: ${tx.hash}`);
     
     const receipt = await tx.wait();
-    console.log(`✅ Debug funding confirmed in block ${receipt.blockNumber}`);
+    if (DEBUG) console.log(`✅ Debug funding confirmed in block ${receipt.blockNumber}`);
     
     // Check new balance
     const newBalance = await depository['_reserves']!(entityId, tokenId);
-    console.log(`💰 Entity ${entityId.slice(0, 10)} now has ${newBalance.toString()} of token ${tokenId}`);
+    if (DEBUG) console.log(`💰 Entity ${entityId.slice(0, 10)} now has ${newBalance.toString()} of token ${tokenId}`);
     
     return { transaction: tx, receipt, newBalance };
   } catch (error) {
@@ -24220,10 +23934,10 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
 
     if (!isBrowser && typeof process !== 'undefined') {
       // Node.js environment - use centralized loader
-      console.log('🔍 JURISDICTION SOURCE: Using centralized jurisdiction-loader');
+      if (DEBUG) console.log('🔍 JURISDICTION SOURCE: Using centralized jurisdiction-loader');
       config = loadJurisdictions();
-      console.log('🔍 JURISDICTION DEBUG: Loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
-      console.log('✅ Loaded jurisdictions from centralized loader (cached)');
+      if (DEBUG) console.log('🔍 JURISDICTION DEBUG: Loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
+      if (DEBUG) console.log('✅ Loaded jurisdictions from centralized loader (cached)');
     } else {
       // Browser environment - fetch from runtime with timeout (prevents indefinite hang in BrowserVM mode)
       const controller = new AbortController();
@@ -24240,8 +23954,8 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
           throw new Error(`Failed to fetch /api/jurisdictions: ${response.status} ${response.statusText}`);
         }
         config = await response.json();
-        console.log('🔍 JURISDICTION DEBUG: Browser loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
-        console.log('✅ Loaded jurisdictions from runtime');
+        if (DEBUG) console.log('🔍 JURISDICTION DEBUG: Browser loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
+        if (DEBUG) console.log('✅ Loaded jurisdictions from runtime');
       } catch (fetchError: unknown) {
         clearTimeout(timeoutId);
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {

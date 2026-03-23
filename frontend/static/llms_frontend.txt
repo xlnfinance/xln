@@ -13797,7 +13797,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`💸 Description: ${entityTx.data.description || 'none'}`);
 
       // Emit payment initiation event
-      env.emit('PaymentInitiated', {
+      env.emit('HtlcInitiated', {
         fromEntity: entityState.entityId,
         toEntity: entityTx.data.targetEntityId,
         tokenId: entityTx.data.tokenId,
@@ -16307,7 +16307,7 @@ export async function handleHtlcPayment(
   console.log(`   Amount: ${entityTx.data.amount}, Route: ${entityTx.data.route?.map((r: string) => r.slice(-4)).join('→') || 'none'}`);
 
   // Emit HTLC initiation event
-  env.emit('HtlcPaymentInitiated', {
+  env.emit('HtlcInitiated', {
     fromEntity: entityState.entityId,
     toEntity: entityTx.data.targetEntityId,
     tokenId: entityTx.data.tokenId,
@@ -35679,4 +35679,3 @@ export class EntityManager {
     }
   }
 }
-

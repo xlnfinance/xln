@@ -120,6 +120,14 @@
              uncollateralized, totalCollateral, totalDebt };
   })();
 
+  $: coveragePct = (() => {
+    const denom = agg.totalCollateral + agg.totalDebt;
+    if (denom === 0n) return null;
+    return Number((agg.totalCollateral * 10000n) / denom) / 100;
+  })();
+  $: coverageCollFmt = (activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.totalCollateral) ?? '0').replace(/\s+\S+$/, '');
+  $: coverageDenomFmt = (activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.totalCollateral + agg.totalDebt) ?? '0').replace(/\s+\S+$/, '');
+
   $: primaryTokenInfo = activeXlnFunctions?.getTokenInfo?.(agg.primaryTokenId) || {
     symbol: String(agg.primarySymbol || '?'),
     name: String(agg.primarySymbol || 'Token'),
@@ -306,6 +314,12 @@
     e.stopPropagation();
     dispatch('settleApprove', { counterpartyId });
   }
+
+  function handleDispute(e: MouseEvent) {
+    e.stopPropagation();
+    if (!confirm(`Start on-chain dispute with ${counterpartyName}?\n\nThis will submit a dispute transaction to the blockchain.`)) return;
+    dispatch('dispute', { counterpartyId });
+  }
 </script>
 
 <div
@@ -333,6 +347,9 @@
         >
           <span class="status-dot-inner"></span>
           <span class="status-frame">#{accountHeight}</span>
+          {#if coveragePct !== null}
+            <span class="status-coverage" class:cov-warn={coveragePct < 40} class:cov-caution={coveragePct >= 40 && coveragePct < 75} class:cov-good={coveragePct >= 75}>{coveragePct.toFixed(0)}%</span>
+          {/if}
         </button>
         <div class="consensus-popover" role="tooltip">
           <div class="consensus-popover-head">
@@ -356,7 +373,6 @@
             <span>ID</span>
             <strong class="mono">{counterpartyId.slice(0, 10)}...{counterpartyId.slice(-6)}</strong>
           </div>
-          <div class="consensus-popover-section">Channel</div>
           <div class="consensus-popover-row">
             <span>Account</span>
             <strong>#{accountHeight}</strong>
@@ -375,7 +391,15 @@
             <span>Updated</span>
             <strong>{formatDetailTimestamp(consensusUpdatedAt)}</strong>
           </div>
-          <div class="consensus-popover-section">General</div>
+          {#if coveragePct !== null}
+            <div class="consensus-popover-row" class:coverage-warn={coveragePct < 40} class:coverage-caution={coveragePct >= 40 && coveragePct < 75}>
+              <span>Coverage</span>
+              <strong>
+                <span class="coverage-pct">{coveragePct.toFixed(0)}%</span>
+                <span class="coverage-detail">{coverageCollFmt} / {coverageDenomFmt}</span>
+              </strong>
+            </div>
+          {/if}
           <div class="consensus-popover-row">
             <span>Entity</span>
             <strong>#{entityHeight}</strong>
@@ -389,6 +413,11 @@
               <span>Dispute</span>
               <strong>{disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left · {disputeRole}</strong>
             </div>
+          {/if}
+          {#if !hasActiveDispute && !isFinalizedDisputed}
+            <button class="popover-dispute-btn" on:click={handleDispute}>
+              Dispute Account
+            </button>
           {/if}
           <button class="popover-explore-btn" on:click={handleClick}>
             Explore Account →
@@ -433,7 +462,7 @@
         inAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}
         derived={aggDerived}
         decimals={Number(primaryTokenInfo.decimals ?? 18)}
-        barHeight={4}
+        barHeight={8}
         visualScale={aggregateVisualScale}
         actionLabel="Faucet"
         actionTokenId={agg.primaryTokenId}
@@ -443,7 +472,7 @@
       <DeltaTokenList
         rows={tokenSummaries}
         barLayout={$settings.barLayout ?? 'center'}
-        barHeight={4}
+        barHeight={8}
         showMetricLabels={false}
         showHeader={false}
         mode="plain"
@@ -579,6 +608,18 @@
   .status-indicator.amber .status-frame { color: #fcd34d; }
   .status-indicator.red .status-frame { color: #fda4af; }
 
+  .status-coverage {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    margin-left: 2px;
+  }
+  .status-coverage.cov-good { color: #4ade80; background: rgba(34, 197, 94, 0.12); }
+  .status-coverage.cov-caution { color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
+  .status-coverage.cov-warn { color: #f87171; background: rgba(239, 68, 68, 0.15); }
+
   .popover-dot {
     display: inline-block;
     width: 8px;
@@ -689,6 +730,44 @@
   .popover-explore-btn:hover {
     border-color: #fbbf24;
     background: rgba(251, 191, 36, 0.14);
+  }
+
+  .coverage-pct {
+    color: #4ade80;
+    font-weight: 700;
+    margin-right: 4px;
+  }
+  .consensus-popover-row.coverage-caution .coverage-pct { color: #fbbf24; }
+  .consensus-popover-row.coverage-warn .coverage-pct { color: #f43f5e; }
+  .coverage-detail {
+    color: #52525b;
+    font-size: 9px;
+    font-weight: 400;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .status-dot-wrap .consensus-popover .popover-dispute-btn {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+    padding: 9px 0;
+    border-radius: 8px;
+    border: 2px solid #dc2626;
+    background: #dc2626;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    text-transform: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: center;
+    box-shadow: 0 0 12px rgba(220, 38, 38, 0.4);
+  }
+  .status-dot-wrap .consensus-popover .popover-dispute-btn:hover {
+    background: #b91c1c;
+    border-color: #b91c1c;
+    box-shadow: 0 0 18px rgba(220, 38, 38, 0.6);
   }
 
   .locks-row {

@@ -11,10 +11,18 @@
   const CENTER_GAP_PX = 50;
   const SIDES_GAP_PX = 14;
   const MIN_VISIBLE_SIDE_PX = 0;
+  const CREDIT_GRADIENT_MAX_PX = 300;
 
   $: outTotal = derived.outOwnCredit + derived.outCollateral + derived.outPeerCredit;
   $: inTotal = derived.inOwnCredit + derived.inCollateral + derived.inPeerCredit;
   $: halfMax = outTotal > inTotal ? outTotal : inTotal;
+
+  // Settings flags
+  $: creditGradient = $settings.barCreditGradient ?? true;
+  $: animTransition = $settings.barAnimTransition ?? true;
+  $: animSweep = $settings.barAnimSweep ?? false;
+  $: animGlow = $settings.barAnimGlow ?? false;
+  $: animRipple = $settings.barAnimRipple ?? false;
 
   $: outVisualOwnUsd = visualScale?.outOwnCreditUsd ?? 0;
   $: outVisualCollUsd = visualScale?.outCollateralUsd ?? 0;
@@ -54,23 +62,81 @@
   function segmentWidthStyle(widthPx: number): string {
     return `width:${Math.max(0, widthPx)}px`;
   }
+
+  function creditSegStyle(widthPx: number): string {
+    const w = Math.max(0, widthPx);
+    if (creditGradient && w > CREDIT_GRADIENT_MAX_PX) {
+      return `width:${CREDIT_GRADIENT_MAX_PX}px;-webkit-mask-image:linear-gradient(to right,black 80%,transparent 100%);mask-image:linear-gradient(to right,black 80%,transparent 100%)`;
+    }
+    return `width:${w}px`;
+  }
+
+  function creditPctStyle(pct: number): string {
+    if (creditGradient && pct > 60) {
+      return `width:${pct}%;-webkit-mask-image:linear-gradient(to right,black 70%,transparent 100%);mask-image:linear-gradient(to right,black 70%,transparent 100%)`;
+    }
+    return `width:${pct}%`;
+  }
+
+  // Sweep animation: trigger on capacity change (right-to-left = inbound from hub)
+  let sweepActive = false;
+  let prevOutCap = 0n;
+  let prevInCap = 0n;
+  $: {
+    const curOut = derived.outCapacity;
+    const curIn = derived.inCapacity;
+    if (animSweep && (prevOutCap !== 0n || prevInCap !== 0n) && (curOut !== prevOutCap || curIn !== prevInCap)) {
+      sweepActive = true;
+      setTimeout(() => { sweepActive = false; }, 700);
+    }
+    prevOutCap = curOut;
+    prevInCap = curIn;
+  }
+
+  // Glow animation: trigger on capacity change
+  let glowActive = false;
+  let glowCounter = 0;
+  $: {
+    const curOut = derived.outCapacity;
+    const curIn = derived.inCapacity;
+    if (animGlow && (prevOutCap !== 0n || prevInCap !== 0n) && (curOut !== prevOutCap || curIn !== prevInCap)) {
+      glowCounter += 1;
+      glowActive = true;
+      setTimeout(() => { glowActive = false; }, 600);
+    }
+  }
+
+  // Ripple animation: expanding ring from center
+  let rippleActive = false;
+  $: {
+    const curOut = derived.outCapacity;
+    const curIn = derived.inCapacity;
+    if (animRipple && (prevOutCap !== 0n || prevInCap !== 0n) && (curOut !== prevOutCap || curIn !== prevInCap)) {
+      rippleActive = true;
+      setTimeout(() => { rippleActive = false; }, 800);
+    }
+  }
 </script>
 
 <div
   class="delta-capacity-bar"
   class:visual-center={hasVisualScale && layout === 'center'}
   class:visual-sides={hasVisualScale && layout === 'sides'}
+  class:anim-transition={animTransition}
+  class:anim-glow={glowActive}
   style={`--bar-h:${heightPx}px; --center-gap:${CENTER_GAP_PX}px; --sides-gap:${SIDES_GAP_PX}px;`}
 >
   {#if hasVisualScale}
     <div class="track"></div>
+    {#if sweepActive}<div class="sweep-line"></div>{/if}
+    {#if rippleActive}<div class="ripple-ring"></div>{/if}
 
     {#if layout === 'center'}
       <div class="axis"></div>
 
       {#if outWidthPx > 0}
         <div class="shell out center-shell" style={outCenterWidthStyle}>
-          {#if outOwnWidthPx > 0}<div class="seg credit" style={segmentWidthStyle(outOwnWidthPx)}></div>{/if}
+          {#if outOwnWidthPx > 0}<div class="seg credit" style={creditSegStyle(outOwnWidthPx)}></div>{/if}
           {#if outCollWidthPx > 0}<div class="seg coll" style={segmentWidthStyle(outCollWidthPx)}></div>{/if}
           {#if outVisualDebtUsd > 0}
             <div
@@ -87,13 +153,13 @@
         <div class="shell in center-shell" style={inCenterWidthStyle}>
           {#if inOwnWidthPx > 0}<div class="seg debt" style={segmentWidthStyle(inOwnWidthPx)}></div>{/if}
           {#if inCollWidthPx > 0}<div class="seg coll" style={segmentWidthStyle(inCollWidthPx)}></div>{/if}
-          {#if inCreditWidthPx > 0}<div class="seg credit" style={segmentWidthStyle(inCreditWidthPx)}></div>{/if}
+          {#if inCreditWidthPx > 0}<div class="seg credit" style={creditSegStyle(inCreditWidthPx)}></div>{/if}
         </div>
       {/if}
     {:else}
       {#if outWidthPx > 0}
         <div class="shell out side-shell" style={outSideWidthStyle}>
-          {#if outOwnWidthPx > 0}<div class="seg credit" style={segmentWidthStyle(outOwnWidthPx)}></div>{/if}
+          {#if outOwnWidthPx > 0}<div class="seg credit" style={creditSegStyle(outOwnWidthPx)}></div>{/if}
           {#if outCollWidthPx > 0}<div class="seg coll" style={segmentWidthStyle(outCollWidthPx)}></div>{/if}
           {#if outVisualDebtUsd > 0}
             <div
@@ -110,7 +176,7 @@
         <div class="shell in side-shell" style={inSideWidthStyle}>
           {#if inOwnWidthPx > 0}<div class="seg debt" style={segmentWidthStyle(inOwnWidthPx)}></div>{/if}
           {#if inCollWidthPx > 0}<div class="seg coll" style={segmentWidthStyle(inCollWidthPx)}></div>{/if}
-          {#if inCreditWidthPx > 0}<div class="seg credit" style={segmentWidthStyle(inCreditWidthPx)}></div>{/if}
+          {#if inCreditWidthPx > 0}<div class="seg credit" style={creditSegStyle(inCreditWidthPx)}></div>{/if}
         </div>
       {/if}
     {/if}
@@ -118,7 +184,7 @@
     <div class="bar empty"></div>
   {:else if layout === 'sides'}
     <div class="bar one-sided">
-      {#if derived.outOwnCredit > 0n}<div class="seg credit" style={`width:${pctOf(derived.outOwnCredit, outTotal + inTotal)}%`}></div>{/if}
+      {#if derived.outOwnCredit > 0n}<div class="seg credit" style={creditPctStyle(pctOf(derived.outOwnCredit, outTotal + inTotal))}></div>{/if}
       {#if derived.outCollateral > 0n}<div class="seg coll" style={`width:${pctOf(derived.outCollateral, outTotal + inTotal)}%`}></div>{/if}
       {#if derived.outPeerCredit > 0n}
         <div
@@ -131,7 +197,7 @@
 
       {#if derived.inOwnCredit > 0n}<div class="seg debt" style={`width:${pctOf(derived.inOwnCredit, outTotal + inTotal)}%`}></div>{/if}
       {#if derived.inCollateral > 0n}<div class="seg coll" style={`width:${pctOf(derived.inCollateral, outTotal + inTotal)}%`}></div>{/if}
-      {#if derived.inPeerCredit > 0n}<div class="seg credit" style={`width:${pctOf(derived.inPeerCredit, outTotal + inTotal)}%`}></div>{/if}
+      {#if derived.inPeerCredit > 0n}<div class="seg credit" style={creditPctStyle(pctOf(derived.inPeerCredit, outTotal + inTotal))}></div>{/if}
 
       {#if outTotal > 0n && inTotal > 0n}
         <div class="mid one-sided-sep" style={`left:${pctOf(outTotal, outTotal + inTotal)}%`}></div>
@@ -140,7 +206,7 @@
   {:else}
     <div class="bar center legacy-center">
       <div class="half out">
-        {#if derived.outOwnCredit > 0n}<div class="seg credit" style={`width:${pctOf(derived.outOwnCredit, halfMax)}%`}></div>{/if}
+        {#if derived.outOwnCredit > 0n}<div class="seg credit" style={creditPctStyle(pctOf(derived.outOwnCredit, halfMax))}></div>{/if}
         {#if derived.outCollateral > 0n}<div class="seg coll" style={`width:${pctOf(derived.outCollateral, halfMax)}%`}></div>{/if}
         {#if derived.outPeerCredit > 0n}
           <div
@@ -155,7 +221,7 @@
       <div class="half in">
         {#if derived.inOwnCredit > 0n}<div class="seg debt" style={`width:${pctOf(derived.inOwnCredit, halfMax)}%`}></div>{/if}
         {#if derived.inCollateral > 0n}<div class="seg coll" style={`width:${pctOf(derived.inCollateral, halfMax)}%`}></div>{/if}
-        {#if derived.inPeerCredit > 0n}<div class="seg credit" style={`width:${pctOf(derived.inPeerCredit, halfMax)}%`}></div>{/if}
+        {#if derived.inPeerCredit > 0n}<div class="seg credit" style={creditPctStyle(pctOf(derived.inPeerCredit, halfMax))}></div>{/if}
       </div>
     </div>
   {/if}
@@ -171,8 +237,8 @@
     width: 100%;
     height: var(--bar-h);
     border-radius: 999px;
-    background: transparent;
-    box-shadow: none;
+    background: rgba(39, 39, 42, 0.9);
+    box-shadow: inset 0 0 0 0.5px rgba(82, 82, 91, 0.35);
   }
 
   .axis,
@@ -202,16 +268,16 @@
 
   .bar.empty {
     border-radius: 999px;
-    background: transparent;
-    box-shadow: inset 0 0 0 1px rgba(82, 82, 91, 0.2);
+    background: rgba(39, 39, 42, 0.9);
+    box-shadow: inset 0 0 0 0.5px rgba(82, 82, 91, 0.35);
     opacity: 0.45;
   }
 
   .bar.one-sided {
     border-radius: 999px;
     overflow: hidden;
-    background: transparent;
-    box-shadow: none;
+    background: rgba(39, 39, 42, 0.9);
+    box-shadow: inset 0 0 0 0.5px rgba(82, 82, 91, 0.35);
     display: flex;
     align-items: stretch;
   }
@@ -232,6 +298,13 @@
     background: transparent;
     box-shadow: none;
     z-index: 2;
+  }
+
+  /* Smooth width transition when enabled */
+  .anim-transition .shell,
+  .anim-transition .seg,
+  .anim-transition .half {
+    transition: width 0.4s ease-out;
   }
 
   .visual-center .shell.out.center-shell {
@@ -294,16 +367,19 @@
     opacity: 0.92;
   }
 
+  /* credit = bright white — peer credit promise */
   .seg.credit {
-    background: linear-gradient(180deg, rgba(241, 245, 249, 0.94), rgba(203, 213, 225, 0.98));
+    background: rgba(255, 255, 255, 0.75);
   }
 
+  /* coll = electric green — hard collateral */
   .seg.coll {
-    background: linear-gradient(180deg, rgba(52, 211, 153, 0.92), rgba(16, 185, 129, 0.96));
+    background: #22c55e;
   }
 
+  /* debt = hot red — uncollateralized exposure */
   .seg.debt {
-    background: linear-gradient(180deg, rgba(251, 113, 133, 0.94), rgba(244, 63, 94, 0.98));
+    background: #ef4444;
   }
 
   .seg.debt.striped {
@@ -321,6 +397,55 @@
   .seg.debt.settling {
     background: linear-gradient(180deg, #fbbf24, #f59e0b);
     animation: settling-pulse 1s ease-in-out infinite;
+  }
+
+  /* ── Glow animation ── */
+  .anim-glow .shell,
+  .anim-glow .bar:not(.empty) {
+    animation: bar-glow 0.6s ease-out;
+  }
+
+  @keyframes bar-glow {
+    0% { filter: brightness(1.8) drop-shadow(0 0 8px rgba(34, 197, 94, 0.5)); }
+    100% { filter: brightness(1) drop-shadow(0 0 0 transparent); }
+  }
+
+  /* ── Sweep animation (right-to-left = inbound from hub to user) ── */
+  .sweep-line {
+    position: absolute;
+    top: -1px;
+    bottom: -1px;
+    width: 30px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), rgba(251, 191, 36, 0.3), transparent);
+    z-index: 10;
+    animation: sweep-rtl 0.7s ease-out forwards;
+    pointer-events: none;
+  }
+
+  @keyframes sweep-rtl {
+    0% { right: -30px; opacity: 1; }
+    100% { right: 100%; opacity: 0; }
+  }
+
+  /* ── Ripple animation (expanding ring from center) ── */
+  .ripple-ring {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid rgba(251, 191, 36, 0.6);
+    transform: translate(-50%, -50%);
+    z-index: 10;
+    animation: ripple-expand 0.8s ease-out forwards;
+    pointer-events: none;
+  }
+
+  @keyframes ripple-expand {
+    0% { width: 10px; height: 10px; opacity: 1; border-width: 2px; }
+    100% { width: 200px; height: 40px; opacity: 0; border-width: 1px; }
   }
 
   @keyframes stripe-scroll {

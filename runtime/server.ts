@@ -58,6 +58,8 @@ import { createLocalDeliveryHandler } from './relay-local-delivery';
 import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
+import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
+import { join } from 'path';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -83,6 +85,7 @@ const JSON_HEADERS = {
   'Access-Control-Allow-Headers': '*',
   'Content-Type': 'application/json',
 } as const;
+const DEBUG_DUMPS_DIR = join(process.cwd(), '.logs', 'debug-dumps');
 const formatTimingMs = (value: number): string => value.toFixed(2);
 const stringifyBootstrapDebug = (value: unknown): string =>
   JSON.stringify(value, (_key, nested) => (typeof nested === 'bigint' ? nested.toString() : nested));
@@ -93,6 +96,20 @@ const resolveRequiredAnvilRpc = (): string => {
     throw new Error('ANVIL_RPC is required for server RPC operations');
   }
   return rpcUrl;
+};
+
+const ensureDebugDumpDir = async (): Promise<void> => {
+  await mkdir(DEBUG_DUMPS_DIR, { recursive: true });
+};
+
+const buildDebugDumpFileName = (reason: string | undefined, runtimeId: string | undefined): string => {
+  const iso = new Date().toISOString().replace(/[:.]/g, '-');
+  const reasonPart = String(reason || 'dump')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .slice(0, 48) || 'dump';
+  const runtimePart = String(runtimeId || 'runtime').replace(/[^a-zA-Z0-9_-]+/g, '').slice(-16) || 'runtime';
+  return `${iso}-${reasonPart}-${runtimePart}.json`;
 };
 
 const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: boolean; reason: string }> => {
@@ -1814,7 +1831,7 @@ const deployDefaultTokensOnRpc = async (): Promise<void> => {
     const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
     await approveTx.wait();
 
-    const registerTx = await depository.connect(signer as any).externalTokenToReserve({
+    const registerTx = await (depository.connect(signer as any) as any).adminRegisterExternalToken({
       entity: ethers.ZeroHash,
       contractAddress: tokenAddress,
       externalTokenId: 0,
@@ -4251,6 +4268,89 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         runtimeId: runtimeId ?? null,
         entityId: entityId ?? null,
         phase: phase ?? null,
+      }),
+      { headers },
+    );
+  }
+
+  if (pathname === '/api/debug/dumps' && req.method === 'GET') {
+    await ensureDebugDumpDir();
+    const limit = Math.max(1, Math.min(200, Number(new URL(req.url).searchParams.get('last') || '50')));
+    const files = (await readdir(DEBUG_DUMPS_DIR).catch(() => []))
+      .filter((name) => name.endsWith('.json'))
+      .sort()
+      .slice(-limit)
+      .reverse();
+    return new Response(
+      safeStringify({
+        ok: true,
+        dir: DEBUG_DUMPS_DIR,
+        files,
+      }),
+      { headers },
+    );
+  }
+
+  if (pathname === '/api/debug/dumps' && req.method === 'POST') {
+    await ensureDebugDumpDir();
+    const rawBody = await req.text().catch(() => '');
+    const parsed = rawBody
+      ? deserializeTaggedJson<Record<string, unknown>>(rawBody)
+      : null;
+    const payload = parsed && typeof parsed === 'object'
+      ? parsed
+      : { rawBody };
+    const trigger = payload?.trigger && typeof payload.trigger === 'object'
+      ? payload.trigger as Record<string, unknown>
+      : undefined;
+    const reason = typeof trigger?.message === 'string'
+      ? trigger.message
+      : typeof payload?.reason === 'string'
+        ? payload.reason
+        : 'debug-dump';
+    const runtimeId = typeof payload?.runtimeState === 'object' && payload.runtimeState
+      && typeof (payload.runtimeState as Record<string, unknown>).runtimeId === 'string'
+      ? String((payload.runtimeState as Record<string, unknown>).runtimeId)
+      : undefined;
+    const fileName = buildDebugDumpFileName(reason, runtimeId);
+    const filePath = join(DEBUG_DUMPS_DIR, fileName);
+    await writeFile(filePath, safeStringify(payload, 2), 'utf8');
+
+    let preview: unknown = undefined;
+    try {
+      preview = JSON.parse(await readFile(filePath, 'utf8'));
+    } catch {
+      preview = undefined;
+    }
+
+    pushDebugEvent(relayStore, {
+      event: 'consensus_dump',
+      status: 'stored',
+      runtimeId,
+      reason: String(reason).slice(0, 240),
+      details: {
+        file: fileName,
+        trigger: trigger ?? null,
+        height: typeof payload?.runtimeState === 'object' && payload.runtimeState
+          ? (payload.runtimeState as Record<string, unknown>).height
+          : null,
+        persistedLatestHeight: typeof payload?.persistedWal === 'object' && payload.persistedWal
+          ? (payload.persistedWal as Record<string, unknown>).latestHeight
+          : null,
+        preview: preview && typeof preview === 'object'
+          ? {
+              timestamp: (preview as Record<string, unknown>).timestamp ?? null,
+              url: (preview as Record<string, unknown>).url ?? null,
+            }
+          : null,
+      },
+    });
+
+    return new Response(
+      safeStringify({
+        ok: true,
+        file: fileName,
+        path: filePath,
       }),
       { headers },
     );

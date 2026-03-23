@@ -1148,9 +1148,13 @@ async function applyFinalizedJEvent(
 
       if (newState.crontabState) {
         const kickoffDelayMs = weAreStarter ? 1 : 5000;
+        const logicalTimestamp =
+          Number.isFinite(Number(newState.timestamp)) && Number(newState.timestamp) >= 0
+            ? Number(newState.timestamp)
+            : 0;
         scheduleCrontabHook(newState.crontabState, {
           id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
-          triggerAt: Number(newState.timestamp || Date.now()) + kickoffDelayMs,
+          triggerAt: logicalTimestamp + kickoffDelayMs,
           type: 'dispute_deadline',
           data: { accountId: counterpartyId },
         });

@@ -249,58 +249,6 @@ export interface HubProfile {
 }
 
 /**
- * Calculated spread allocation for a single trade
- * Amounts in reference token (quote currency)
- */
-export interface SpreadAllocation {
-  totalSpread: bigint;       // taker_limit - maker_price
-  makerBonus: bigint;        // Added to maker's execution price
-  takerRebate: bigint;       // Returned to taker
-  hubRevenue: bigint;        // Hub keeps
-  makerReferrerFee: bigint;  // DirectPayment to maker's referrer
-  takerReferrerFee: bigint;  // DirectPayment to taker's referrer
-}
-
-/**
- * Calculate spread allocation based on distribution rules
- */
-export function calculateSpreadAllocation(
-  spread: bigint,
-  distribution: SpreadDistribution
-): SpreadAllocation {
-  if (spread <= 0n) {
-    return {
-      totalSpread: 0n,
-      makerBonus: 0n,
-      takerRebate: 0n,
-      hubRevenue: 0n,
-      makerReferrerFee: 0n,
-      takerReferrerFee: 0n,
-    };
-  }
-
-  const base = BigInt(BPS_BASE);
-
-  // Calculate each portion, rounding down
-  const makerBonus = (spread * BigInt(distribution.makerBps)) / base;
-  const takerRebate = (spread * BigInt(distribution.takerBps)) / base;
-  const makerReferrerFee = (spread * BigInt(distribution.makerReferrerBps)) / base;
-  const takerReferrerFee = (spread * BigInt(distribution.takerReferrerBps)) / base;
-
-  // Hub gets remainder (avoids rounding dust loss)
-  const hubRevenue = spread - makerBonus - takerRebate - makerReferrerFee - takerReferrerFee;
-
-  return {
-    totalSpread: spread,
-    makerBonus,
-    takerRebate,
-    hubRevenue,
-    makerReferrerFee,
-    takerReferrerFee,
-  };
-}
-
-/**
  * Referrer tracking for an entity
  */
 export interface EntityReferral {

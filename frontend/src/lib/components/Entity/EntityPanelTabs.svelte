@@ -384,6 +384,43 @@
   };
   const MOVE_ENDPOINTS: MoveEndpoint[] = ['external', 'reserve', 'account'];
   let moveNodeLayoutVersion = 0;
+  let moveNodeLayoutRaf: number | null = null;
+  let moveNodeLayoutSettleRaf: number | null = null;
+  let moveLineReady = false;
+
+  function bumpMoveNodeLayout(): void {
+    moveNodeLayoutVersion += 1;
+    if (typeof requestAnimationFrame !== 'function') {
+      moveLineReady = true;
+      return;
+    }
+    moveLineReady = false;
+    if (moveNodeLayoutRaf !== null) cancelAnimationFrame(moveNodeLayoutRaf);
+    if (moveNodeLayoutSettleRaf !== null) cancelAnimationFrame(moveNodeLayoutSettleRaf);
+
+    // Wait for child node refs to be available before measuring.
+    // First RAF: layout pass. Second RAF: paint pass.
+    // Third RAF: guarantees all Svelte action bindings (setMoveNodeRef) have fired.
+    moveNodeLayoutRaf = requestAnimationFrame(() => {
+      moveNodeLayoutRaf = null;
+      moveNodeLayoutSettleRaf = requestAnimationFrame(() => {
+        moveNodeLayoutSettleRaf = null;
+        // Only show line when both anchor nodes are actually in DOM
+        const hasFrom = moveNodeRefs.has(`from:${moveFromEndpoint}`);
+        const hasTo = moveNodeRefs.has(`to:${moveToEndpoint}`);
+        if (hasFrom && hasTo) {
+          moveNodeLayoutVersion += 1;
+          moveLineReady = true;
+        } else {
+          // Nodes not ready yet — retry one more frame
+          requestAnimationFrame(() => {
+            moveNodeLayoutVersion += 1;
+            moveLineReady = true;
+          });
+        }
+      });
+    });
+  }
 
   function setMoveNodeRef(side: 'from' | 'to', endpoint: MoveEndpoint, node: HTMLButtonElement | null): void {
     const key = `${side}:${endpoint}`;
@@ -392,7 +429,7 @@
     } else {
       moveNodeRefs.delete(key);
     }
-    moveNodeLayoutVersion += 1;
+    bumpMoveNodeLayout();
   }
 
   function moveNodeAction(
@@ -434,8 +471,8 @@
     if (!rootRect || !nodeRect) return fallbackAnchor;
     return {
       x: side === 'from'
-        ? nodeRect.right - rootRect.left - 2
-        : nodeRect.left - rootRect.left + 2,
+        ? nodeRect.right - rootRect.left
+        : nodeRect.left - rootRect.left,
       y: nodeRect.top - rootRect.top + (nodeRect.height / 2),
     };
   }
@@ -459,11 +496,23 @@
   }
 
   function applyMoveRoute(from: MoveEndpoint, to: MoveEndpoint): void {
+    const selfEntityId = resolveSelfEntityId();
+    const selfEoa = resolveSelfEoaAddress();
     moveFromEndpoint = from;
     moveToEndpoint = to;
+    if (to === 'reserve' && !moveReserveRecipientEntityId.trim()) {
+      moveReserveRecipientEntityId = selfEntityId;
+    }
+    if (to === 'account' && !moveTargetEntityId.trim()) {
+      moveTargetEntityId = selfEntityId;
+    }
+    if (to === 'external' && !moveExternalRecipient.trim() && selfEoa) {
+      moveExternalRecipient = selfEoa;
+    }
     moveSelectedSource = null;
     moveSelectedTarget = null;
     clearMoveDrag();
+    bumpMoveNodeLayout();
   }
 
   function setMoveSource(endpoint: MoveEndpoint): void {
@@ -492,6 +541,10 @@
   }
 
   function setMoveTarget(endpoint: MoveEndpoint): void {
+    if (moveDragSource) {
+      completeMoveSelection(endpoint);
+      return;
+    }
     if (moveSelectedSource && isMoveRouteSupported(moveSelectedSource, endpoint)) {
       applyMoveRoute(moveSelectedSource, endpoint);
       return;
@@ -517,6 +570,7 @@
     moveTargetHubEntityId = workspaceAccountId || moveHubEntityOptions[0] || '';
     moveProgressLabel = '';
     clearMoveDrag();
+    bumpMoveNodeLayout();
   }
 
   function getMoveRouteKey(from: MoveEndpoint, to: MoveEndpoint): string {
@@ -524,7 +578,20 @@
   }
 
   function isMoveRouteSupported(from: MoveEndpoint, to: MoveEndpoint): boolean {
-    return true;
+    switch (getMoveRouteKey(from, to)) {
+      case 'external->external':
+      case 'external->reserve':
+      case 'external->account':
+      case 'reserve->external':
+      case 'reserve->reserve':
+      case 'reserve->account':
+      case 'account->external':
+      case 'account->reserve':
+      case 'account->account':
+        return true;
+      default:
+        return false;
+    }
   }
 
   function moveRouteSteps(from: MoveEndpoint, to: MoveEndpoint): string[] {
@@ -628,6 +695,169 @@
 
   function moveNeedsReserveRecipient(from: MoveEndpoint, to: MoveEndpoint): boolean {
     return to === 'reserve';
+  }
+
+  function isMoveAwaitingCounterparty(): boolean {
+    return pendingAssetAutoC2Rs.length > 0 || resolvingAssetAutoC2R;
+  }
+
+  function refreshPendingCollateralFundingToken(): void {
+    collateralFundingToken = pendingAssetAutoC2Rs[0]?.symbol ?? null;
+  }
+
+  function getMoveDraftReserveDelta(tokenId: number): bigint {
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    const batch = replica?.state?.jBatchState?.batch;
+    if (!entityId || !batch) return 0n;
+
+    let delta = 0n;
+
+    for (const op of batch.externalTokenToReserve || []) {
+      const target = String(op?.entity || entityId).trim().toLowerCase();
+      if (target === entityId && Number(op?.internalTokenId) === tokenId) {
+        delta += BigInt(op?.amount || 0);
+      }
+    }
+
+    for (const op of batch.collateralToReserve || []) {
+      if (Number(op?.tokenId) === tokenId) {
+        delta += BigInt(op?.amount || 0);
+      }
+    }
+
+    for (const op of batch.reserveToReserve || []) {
+      if (Number(op?.tokenId) !== tokenId) continue;
+      const amount = BigInt(op?.amount || 0);
+      delta -= amount;
+      if (String(op?.receivingEntity || '').trim().toLowerCase() === entityId) {
+        delta += amount;
+      }
+    }
+
+    for (const op of batch.reserveToExternalToken || []) {
+      if (Number(op?.tokenId) === tokenId) {
+        delta -= BigInt(op?.amount || 0);
+      }
+    }
+
+    for (const op of batch.reserveToCollateral || []) {
+      if (Number(op?.tokenId) !== tokenId) continue;
+      for (const pair of op?.pairs || []) {
+        delta -= BigInt(pair?.amount || 0);
+      }
+    }
+
+    return delta;
+  }
+
+  function getMoveMaxAmount(
+    from: MoveEndpoint,
+    reserveToken: (ExternalToken & { tokenId: number }) | null,
+    externalToken: ExternalToken | null,
+    sourceAccountId: string,
+  ): bigint | null {
+    switch (from) {
+      case 'external':
+        return externalToken?.balance ?? 0n;
+      case 'reserve':
+        return reserveToken
+          ? (onchainReserves.get(reserveToken.tokenId) ?? 0n) + getMoveDraftReserveDelta(reserveToken.tokenId)
+          : 0n;
+      case 'account':
+        return reserveToken && sourceAccountId
+          ? getAccountWithdrawableCollateral(sourceAccountId, reserveToken.tokenId)
+          : 0n;
+      default:
+        return null;
+    }
+  }
+
+  function getMoveValidationError(mode: 'draft' | 'broadcast'): string | null {
+    if (!isMoveRouteSupported(moveFromEndpoint, moveToEndpoint)) {
+      return 'Selected route is not available';
+    }
+    if (moveExecuting) return 'Move already in progress';
+    if ((moveFromEndpoint === 'account' || moveToEndpoint === 'account') && isMoveAwaitingCounterparty()) {
+      return 'Wait for the current account settlement to finish';
+    }
+    if (!moveAmount.trim()) return 'Enter amount first';
+    if (mode === 'draft' && !canAddMoveToExistingBatch()) {
+      return 'Add to batch is not available for this route';
+    }
+
+    const sourceAccountId = getCurrentMoveSourceAccountId();
+    const targetEntityId = getCurrentMoveTargetEntityId();
+    const targetHubId = getCurrentMoveTargetHubId();
+    const selfEntityId = resolveSelfEntityId();
+    const selfEoa = resolveSelfEoaAddress().toLowerCase();
+    const reserveRecipient = String(moveReserveRecipientEntityId || '').trim().toLowerCase();
+    const externalRecipient = String(moveExternalRecipient || '').trim().toLowerCase();
+
+    if (moveFromEndpoint === 'account' && !sourceAccountId) return 'Select source account';
+    if (moveToEndpoint === 'account' && (!targetEntityId || !targetHubId)) return 'Select recipient and counterparty';
+    if (moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint) && !reserveRecipient) return 'Select recipient entity';
+    if (moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !externalRecipient) return 'Enter recipient EOA';
+    if (moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !isAddress(externalRecipient)) {
+      return 'Recipient must be a valid EOA address';
+    }
+    if (
+      moveFromEndpoint === 'account' &&
+      moveToEndpoint === 'account' &&
+      sourceAccountId &&
+      targetEntityId === selfEntityId &&
+      targetHubId.toLowerCase() === sourceAccountId.toLowerCase()
+    ) {
+      return 'Cannot transfer to same account';
+    }
+    if (moveFromEndpoint === 'reserve' && moveToEndpoint === 'reserve' && reserveRecipient === selfEntityId) {
+      return 'Reserve → Reserve to self is meaningless';
+    }
+    if (moveFromEndpoint === 'external' && moveToEndpoint === 'external' && externalRecipient === selfEoa) {
+      return 'External → External to self is meaningless';
+    }
+
+    const reserveToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
+    const externalToken = findExternalTokenBySymbol(moveAssetSymbol);
+    if (moveFromEndpoint === 'external' && moveToEndpoint === 'external') {
+      if (!externalToken) return 'Select external asset first';
+    } else if (!reserveToken) {
+      return 'Select reserve-compatible asset first';
+    }
+
+    try {
+      const maxAmount = getMoveMaxAmount(moveFromEndpoint, reserveToken, externalToken, sourceAccountId);
+      parsePositiveAssetAmount(moveAmount, moveFromEndpoint === 'external' && moveToEndpoint === 'external'
+        ? (externalToken as { decimals: number })
+        : (reserveToken as { decimals: number }), maxAmount ?? undefined);
+    } catch (error) {
+      return toErrorMessage(error, 'Invalid move amount');
+    }
+
+    return null;
+  }
+
+  $: moveValidationSignature = [
+    moveFromEndpoint,
+    moveToEndpoint,
+    moveAmount,
+    moveAssetSymbol,
+    moveExternalRecipient,
+    moveReserveRecipientEntityId,
+    moveSourceAccountId,
+    moveTargetEntityId,
+    moveTargetHubEntityId,
+    moveExecuting ? '1' : '0',
+    pendingAssetAutoC2Rs.length > 0 ? String(pendingAssetAutoC2Rs.length) : '0',
+    resolvingAssetAutoC2R ? '1' : '0',
+    workspaceAccountId,
+    selectedAccountId || '',
+    selectedMoveTransferToken?.tokenId ?? '',
+    selectedMoveExternalToken?.address ?? '',
+  ].join('|');
+  $: {
+    void moveValidationSignature;
+    moveDraftError = getMoveValidationError('draft');
+    moveBroadcastError = getMoveValidationError('broadcast');
   }
 
   function resolveSelfEoaAddress(): string {
@@ -1116,6 +1346,10 @@
   let moveTargetCounterpartyManualOverride = false;
   let moveExecuting = false;
   let moveProgressLabel = '';
+  let moveLayoutSignature = '';
+  let moveValidationSignature = '';
+  let moveDraftError: string | null = null;
+  let moveBroadcastError: string | null = null;
   let moveSelectedSource: MoveEndpoint | null = null;
   let moveSelectedTarget: MoveEndpoint | null = null;
   let moveDragSource: MoveEndpoint | null = null;
@@ -1144,18 +1378,20 @@
     | { type: 'reserve_to_reserve'; recipientEntityId: string }
     | { type: 'reserve_to_external'; recipientEoa: string }
     | { type: 'reserve_to_collateral'; targetEntityId: string; counterpartyEntityId: string };
-  let pendingAssetAutoC2R: {
+  type PendingAssetAutoC2R = {
     counterpartyEntityId: string;
     tokenId: number;
     symbol: string;
     amount: bigint;
     postSettleOp: MovePostSettleOp;
     broadcast: boolean;
-  } | null = null;
+  };
+  let pendingAssetAutoC2Rs: PendingAssetAutoC2R[] = [];
   let resolvingAssetAutoC2R = false;
   let externalFetchSeq = 0;
   let externalFetchStartedAt = 0;
   let externalFetchInFlight: Promise<void> | null = null;
+  let lastExternalFetchKey = '';
   let selectedExternalToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedReserveToCollateralToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedCollateralToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
@@ -1168,7 +1404,21 @@
 
   $: if (moveVisualRoot !== previousMoveVisualRoot) {
     previousMoveVisualRoot = moveVisualRoot;
-    moveNodeLayoutVersion += 1;
+    bumpMoveNodeLayout();
+  }
+  $: moveLayoutSignature = [
+    assetWorkspaceTab,
+    moveFromEndpoint,
+    moveToEndpoint,
+    moveSelectedSource || '',
+    moveSelectedTarget || '',
+    moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint) ? 'reserve-recipient' : '',
+    moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) ? 'external-recipient' : '',
+    moveToEndpoint === 'account' ? 'target-account' : '',
+  ].join('|');
+  $: if (assetWorkspaceTab === 'move') {
+    void moveLayoutSignature;
+    bumpMoveNodeLayout();
   }
 
   type AssetLedgerRow = {
@@ -1651,10 +1901,10 @@
     }
   }
   $: {
-    if (!pendingAssetAutoC2R || resolvingAssetAutoC2R) {
+    const pending = pendingAssetAutoC2Rs[0];
+    if (!pending || resolvingAssetAutoC2R) {
       // no-op
     } else {
-      const pending = pendingAssetAutoC2R;
       const currentAccount =
         workspaceAccountId &&
         workspaceAccountId.toLowerCase() === pending.counterpartyEntityId.toLowerCase()
@@ -1666,9 +1916,9 @@
             );
       const sentBatchPending = !!replica?.state?.jBatchState?.sentBatch;
       if (currentAccount?.settlementWorkspace?.status === 'submitted') {
-        pendingAssetAutoC2R = null;
+        pendingAssetAutoC2Rs = pendingAssetAutoC2Rs.filter((entry) => entry !== pending);
         resolvingAssetAutoC2R = false;
-        collateralFundingToken = null;
+        refreshPendingCollateralFundingToken();
       } else if (!sentBatchPending && isLocalExecutorForWorkspace(pending.counterpartyEntityId, currentAccount)) {
         resolvingAssetAutoC2R = true;
         void (async () => {
@@ -1690,9 +1940,9 @@
             console.error('[EntityPanel] Asset C→R auto-execute failed:', err);
             toasts.error(`Collateral → Reserve failed: ${toErrorMessage(err, 'Unknown error')}`);
           } finally {
-            pendingAssetAutoC2R = null;
+            pendingAssetAutoC2Rs = pendingAssetAutoC2Rs.filter((entry) => entry !== pending);
             resolvingAssetAutoC2R = false;
-            collateralFundingToken = null;
+            refreshPendingCollateralFundingToken();
           }
         })();
       }
@@ -1880,12 +2130,15 @@
 
   // Fetch external tokens (ERC20 balances for signer) - works for both BrowserVM and RPC modes
   async function fetchExternalTokens() {
-    if (externalFetchInFlight) return externalFetchInFlight;
     const waitMs = Math.max(0, 100 - (Date.now() - externalFetchStartedAt));
     externalFetchInFlight = (async () => {
       if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
       externalFetchStartedAt = Date.now();
-      const signerId = tab.signerId;
+      const signerId = String(tab.signerId || '').trim();
+      const runtimeId = getRuntimeId(activeEnv);
+      const jurisdiction = String(activeEnv?.activeJurisdiction || '');
+      const fetchKey = `${signerId}|${runtimeId}|${jurisdiction}`;
+      lastExternalFetchKey = fetchKey;
       const fetchSeq = ++externalFetchSeq;
       externalTokensLoading = true;
       if (!signerId) {
@@ -1897,7 +2150,8 @@
         const xln = await getXLN();
         // External balances are read directly from the active J-adapter/provider.
         // Never derive them from cached UI state; the wallet EOA is the source of truth.
-        const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
+        const envAtStart = activeEnv;
+        const jadapter = xln.getActiveJAdapter?.(envAtStart ?? null);
 
         const tokenList = await getTokenList(jadapter);
         let nativeToken: ExternalToken | null = null;
@@ -1949,7 +2203,10 @@
           }
         }
 
-        if (fetchSeq === externalFetchSeq) {
+        const runtimeIdNow = getRuntimeId(activeEnv);
+        const jurisdictionNow = String(activeEnv?.activeJurisdiction || '');
+        const currentKey = `${String(tab.signerId || '').trim()}|${runtimeIdNow}|${jurisdictionNow}`;
+        if (fetchSeq === externalFetchSeq && currentKey === fetchKey && lastExternalFetchKey === fetchKey) {
           externalTokens = sortExternalTokens(nativeToken ? [nativeToken, ...tokenList] : tokenList);
           externalTokensLoading = false;
         }
@@ -1960,7 +2217,17 @@
     })().finally(() => {
       externalFetchInFlight = null;
     });
-    return externalFetchInFlight;
+    try {
+      return await externalFetchInFlight;
+    } finally {
+      externalFetchInFlight = null;
+      const runtimeIdNow = getRuntimeId(activeEnv);
+      const jurisdictionNow = String(activeEnv?.activeJurisdiction || '');
+      const desiredKey = `${String(tab.signerId || '').trim()}|${runtimeIdNow}|${jurisdictionNow}`;
+      if (desiredKey && desiredKey !== lastExternalFetchKey) {
+        void fetchExternalTokens();
+      }
+    }
   }
 
   // Deposit ERC20 token to entity reserve
@@ -2008,6 +2275,7 @@
       const message = err instanceof Error ? err.message : String(err);
       toasts.error(`Deposit failed: ${message}`);
       depositingToken = null;
+      void fetchExternalTokens();
     } finally {
     }
   }
@@ -2130,7 +2398,6 @@
       toasts.error('Collateral → Reserve requires LIVE mode');
       return;
     }
-
     try {
       const env = activeEnv;
       if (!env) throw new Error('Environment not ready');
@@ -2155,15 +2422,15 @@
         },
       ])]);
 
-      pendingAssetAutoC2R = {
+      pendingAssetAutoC2Rs = [...pendingAssetAutoC2Rs, {
         counterpartyEntityId,
         tokenId,
         symbol: info.symbol,
         amount,
         postSettleOp,
         broadcast,
-      };
-      collateralFundingToken = info.symbol;
+      }];
+      refreshPendingCollateralFundingToken();
       toasts.info(`Collateral → Reserve proposed for ${info.symbol}. Waiting for counterparty signature...`);
     } catch (err) {
       console.error('[EntityPanel] Collateral → Reserve failed:', err);
@@ -2184,19 +2451,6 @@
       collateralToReserveAmount = '';
     } catch (err) {
       toasts.error(`Collateral → Reserve failed: ${toErrorMessage(err, 'Unknown error')}`);
-    }
-  }
-
-  function getMoveEndpointBalance(endpoint: MoveEndpoint): bigint {
-    switch (endpoint) {
-      case 'external':
-        return selectedMoveExternalToken?.balance ?? 0n;
-      case 'reserve':
-        return selectedMoveTransferToken ? (onchainReserves.get(selectedMoveTransferToken.tokenId) ?? 0n) : 0n;
-      case 'account':
-        return getMoveAccountBalance(getCurrentMoveSourceAccountId());
-      default:
-        return 0n;
     }
   }
 
@@ -2228,7 +2482,7 @@
     throw new Error(`${label} did not complete in time`);
   }
 
-  function buildMovePostSettleTxs(entityId: string, pending: NonNullable<typeof pendingAssetAutoC2R>): EntityTx[] {
+  function buildMovePostSettleTxs(entityId: string, pending: PendingAssetAutoC2R): EntityTx[] {
     const entityTxs: EntityTx[] = [
       {
         type: 'settle_execute' as const,
@@ -2376,18 +2630,11 @@
   }
 
   async function addMoveToExistingBatch(): Promise<void> {
-    if (!canAddMoveToExistingBatch()) {
-      throw new Error('Add to batch is only available for Reserve ↔ Account routes');
-    }
-    if (!moveAmount.trim()) {
-      throw new Error('Enter amount first');
-    }
+    const validationError = getMoveValidationError('draft');
+    if (validationError) throw new Error(validationError);
     const moveSourceAccount = getCurrentMoveSourceAccountId();
     const moveTargetAccount = getCurrentMoveTargetHubId();
     const moveTargetEntity = getCurrentMoveTargetEntityId();
-    if ((moveFromEndpoint === 'account' && !moveSourceAccount) || (moveToEndpoint === 'account' && !moveTargetAccount)) {
-      throw new Error('Select account first');
-    }
     const token = findReserveTransferTokenBySymbol(moveAssetSymbol);
     if (!token) throw new Error('Select reserve-compatible asset first');
     const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
@@ -2462,26 +2709,13 @@
   }
 
   async function executeMovePlan(): Promise<void> {
-    if (!isMoveRouteSupported(moveFromEndpoint, moveToEndpoint)) {
-      throw new Error('Selected route is not available');
-    }
-    if (!moveAmount.trim()) {
-      throw new Error('Enter amount first');
-    }
+    const validationError = getMoveValidationError('broadcast');
+    if (validationError) throw new Error(validationError);
 
     const moveSourceAccount = getCurrentMoveSourceAccountId();
     const moveTargetAccount = getCurrentMoveTargetHubId();
     const moveTargetEntity = getCurrentMoveTargetEntityId();
     const moveReserveRecipient = String(moveReserveRecipientEntityId || '').trim().toLowerCase();
-    if ((moveFromEndpoint === 'account' && !moveSourceAccount) || (moveToEndpoint === 'account' && !moveTargetAccount)) {
-      throw new Error('Select account first');
-    }
-    if (moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint) && !moveReserveRecipient) {
-      throw new Error('Select recipient entity');
-    }
-    if (moveToEndpoint === 'account' && (!moveTargetEntity || !moveTargetAccount)) {
-      throw new Error('Select recipient entity and counterparty hub');
-    }
 
     moveExecuting = true;
     moveProgressLabel = '';
@@ -2504,7 +2738,8 @@
       if (!token) {
         throw new Error('Select reserve-compatible asset first');
       }
-      const amount = parsePositiveAssetAmount(moveAmount, token);
+      const maxAmount = getMoveMaxAmount(moveFromEndpoint, token, findExternalTokenBySymbol(moveAssetSymbol), moveSourceAccount);
+      const amount = parsePositiveAssetAmount(moveAmount, token, maxAmount ?? undefined);
       const reserveBefore = onchainReserves.get(token.tokenId) ?? 0n;
       const selfEntityId = resolveSelfEntityId();
       const reserveRecipientIsSelf = !moveReserveRecipient || moveReserveRecipient === selfEntityId;
@@ -2839,10 +3074,18 @@
 
   let lastEntityId = '';
   let lastSignerId = '';
+  let lastRuntimeBalanceKey = '';
   $: if (tab.entityId !== lastEntityId || tab.signerId !== lastSignerId) {
     lastEntityId = tab.entityId || '';
     lastSignerId = tab.signerId || '';
     refreshBalances();
+  }
+  $: {
+    const runtimeBalanceKey = `${getRuntimeId(activeEnv)}|${String(activeEnv?.activeJurisdiction || '')}`;
+    if (runtimeBalanceKey !== lastRuntimeBalanceKey) {
+      lastRuntimeBalanceKey = runtimeBalanceKey;
+      refreshBalances();
+    }
   }
 
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -3889,8 +4132,6 @@
                           on:mouseleave={() => {
                             if (moveDragHoverTarget === endpoint) moveDragHoverTarget = null;
                           }}
-                          on:pointerup={() => completeMoveSelection(endpoint)}
-                          on:mouseup={() => completeMoveSelection(endpoint)}
                           on:click={() => setMoveTarget(endpoint)}
                         >
                           <span class="move-node-label">{MOVE_ENDPOINT_LABEL[endpoint]}</span>
@@ -3900,6 +4141,7 @@
                       {#if moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint)}
                         <div class="move-account-slot" data-testid="move-reserve-recipient-field">
                           <EntityInput
+                            testId="move-reserve-recipient-picker"
                             label="To reserve entity"
                             value={moveReserveRecipientEntityId}
                             entities={moveEntityOptions}
@@ -3913,6 +4155,7 @@
                       {#if moveToEndpoint === 'account'}
                         <div class="move-account-slot" data-testid="move-target-entity-field">
                           <EntityInput
+                            testId="move-target-entity-picker"
                             label="Recipient"
                             value={moveTargetEntityId}
                             entities={moveEntityOptions}
@@ -3924,6 +4167,7 @@
                         </div>
                         <div class="move-account-slot" data-testid="move-target-counterparty-field">
                           <EntityInput
+                            testId="move-target-counterparty-picker"
                             label="Counterparty"
                             value={moveTargetHubEntityId}
                             entities={moveHubEntityOptions}
@@ -3947,7 +4191,7 @@
                       {@const _moveLayoutTick = moveNodeLayoutVersion}
                       {@const committedStart = getMoveNodeAnchor('from', moveFromEndpoint)}
                       {@const committedEnd = getMoveNodeAnchor('to', moveToEndpoint)}
-                      {#if committedStart && committedEnd}
+                      {#if moveLineReady && committedStart && committedEnd}
                         <svg class="move-drag-layer committed" data-testid="move-committed-line" aria-hidden="true">
                           <path d={buildMoveArrowPath(committedStart, committedEnd)}></path>
                         </svg>
@@ -3956,7 +4200,7 @@
                       {@const _moveLayoutTick = moveNodeLayoutVersion}
                       {@const dragStart = getMoveNodeAnchor('from', moveDragSource)}
                       {@const dragEnd = getMoveNodeAnchor('to', moveDragHoverTarget || moveToEndpoint)}
-                      {#if dragStart && dragEnd}
+                      {#if moveLineReady && dragStart && dragEnd}
                         <svg class="move-drag-layer" data-testid="move-drag-line" aria-hidden="true">
                           <path d={buildMoveArrowPath(dragStart, dragEnd)}></path>
                         </svg>
@@ -3973,8 +4217,11 @@
                     {#if moveProgressLabel}
                       <div class="move-summary-progress">{moveProgressLabel}</div>
                     {/if}
-                    {#if canAddMoveToExistingBatch()}
+                    {#if canAddMoveToExistingBatch() && !moveDraftError}
                       <div class="move-summary-batch">Uses existing draft batch</div>
+                    {/if}
+                    {#if moveBroadcastError}
+                      <div class="move-summary-progress error">{moveBroadcastError}</div>
                     {/if}
                     <div class="move-steps">
                       {#each moveRouteSteps(moveFromEndpoint, moveToEndpoint) as step}
@@ -4003,14 +4250,7 @@
                           toasts.error(`Move failed: ${toErrorMessage(err, 'Unknown error')}`);
                         }
                       }}
-                      disabled={
-                        moveExecuting ||
-                        !canAddMoveToExistingBatch() ||
-                        !moveAmount.trim() ||
-                        ((moveFromEndpoint === 'account' && !getCurrentMoveSourceAccountId()) || (moveToEndpoint === 'account' && (!getCurrentMoveTargetEntityId() || !getCurrentMoveTargetHubId()))) ||
-                        (moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint) && !moveReserveRecipientEntityId.trim()) ||
-                        (moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !moveExternalRecipient.trim())
-                      }
+                      disabled={!!moveDraftError}
                     >
                       Add to Batch
                     </button>
@@ -4024,14 +4264,7 @@
                           toasts.error(`Move failed: ${toErrorMessage(err, 'Unknown error')}`);
                         }
                       }}
-                      disabled={
-                        moveExecuting ||
-                        !isMoveRouteSupported(moveFromEndpoint, moveToEndpoint) ||
-                        !moveAmount.trim() ||
-                        ((moveFromEndpoint === 'account' && !getCurrentMoveSourceAccountId()) || (moveToEndpoint === 'account' && (!getCurrentMoveTargetEntityId() || !getCurrentMoveTargetHubId()))) ||
-                        (moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint) && !moveReserveRecipientEntityId.trim()) ||
-                        (moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !moveExternalRecipient.trim())
-                      }
+                      disabled={!!moveBroadcastError}
                     >
                       {moveExecuting ? 'Broadcasting...' : 'Sign & Broadcast'}
                     </button>
@@ -4500,26 +4733,26 @@
                   <div class="appearance-head">
                     <div>
                       <h4 class="section-head">Account Bars</h4>
-                      <p class="muted">Control how account capacity bars are laid out and scaled inside Accounts.</p>
+                      <p class="muted">Layout and scale for capacity bars.</p>
                     </div>
                   </div>
 
                   <div class="appearance-block">
                     <span class="appearance-label">Layout</span>
-                    <div class="appearance-toggle-group" role="tablist" aria-label="Account bar layout">
+                    <div class="appearance-pill-group" role="tablist" aria-label="Account bar layout">
                       <button
-                        class="appearance-toggle"
+                        class="appearance-pill"
                         class:active={$settings.barLayout === 'center'}
                         on:click={() => settingsOperations.setBarLayout('center')}
                       >
-                        Center
+                        <span class="pill-icon">&#9646;&#9646;</span> Center
                       </button>
                       <button
-                        class="appearance-toggle"
+                        class="appearance-pill"
                         class:active={$settings.barLayout === 'sides'}
                         on:click={() => settingsOperations.setBarLayout('sides')}
                       >
-                        Sides
+                        <span class="pill-icon">&#9664;&#9654;</span> Sides
                       </button>
                     </div>
                   </div>
@@ -4530,18 +4763,20 @@
                       <div class="appearance-scale-meta">
                         <span class="appearance-scale-bound">$10</span>
                         <strong class="appearance-scale-value">100px = ${accountBarUsdPer100Px.toLocaleString('en-US')}</strong>
-                        <span class="appearance-scale-bound">$10,000</span>
+                        <span class="appearance-scale-bound">$10k</span>
                       </div>
                     </div>
-                    <input
-                      class="appearance-slider"
-                      type="range"
-                      min={ACCOUNT_BAR_USD_PER_100PX_MIN}
-                      max={ACCOUNT_BAR_USD_PER_100PX_MAX}
-                      step="10"
-                      value={accountBarUsdPer100Px}
-                      on:input={setAccountBarScale}
-                    />
+                    <div class="slider-container">
+                      <input
+                        class="appearance-slider"
+                        type="range"
+                        min={ACCOUNT_BAR_USD_PER_100PX_MIN}
+                        max={ACCOUNT_BAR_USD_PER_100PX_MAX}
+                        step="10"
+                        value={accountBarUsdPer100Px}
+                        on:input={setAccountBarScale}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -4549,43 +4784,50 @@
                   <div class="appearance-head">
                     <div>
                       <h4 class="section-head">Bar Effects</h4>
-                      <p class="muted">Visual effects for capacity bars. Toggle each on/off.</p>
+                      <p class="muted">Toggle visual effects on capacity bars.</p>
                     </div>
                   </div>
 
                   <label class="appearance-switch-row">
                     <span class="appearance-label">Credit Gradient</span>
-                    <span class="appearance-hint">Fade out large credit segments after 300px</span>
+                    <span class="appearance-hint">Cap credit segments with fade-out</span>
                     <input type="checkbox" class="appearance-checkbox" checked={$settings.barCreditGradient}
                       on:change={(e) => settingsOperations.update({ barCreditGradient: e.currentTarget.checked })} />
                   </label>
 
                   <label class="appearance-switch-row">
-                    <span class="appearance-label">Width Transition</span>
-                    <span class="appearance-hint">Smooth animation when bar segments resize</span>
+                    <span class="appearance-label">Smooth Resize</span>
+                    <span class="appearance-hint">Animate bar width changes</span>
                     <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimTransition}
                       on:change={(e) => settingsOperations.update({ barAnimTransition: e.currentTarget.checked })} />
                   </label>
 
                   <label class="appearance-switch-row">
-                    <span class="appearance-label">Sweep Effect</span>
-                    <span class="appearance-hint">Bright line sweeps across bar on change</span>
+                    <span class="appearance-label">Sweep</span>
+                    <span class="appearance-hint">Light beam sweeps right-to-left on update</span>
                     <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimSweep}
                       on:change={(e) => settingsOperations.update({ barAnimSweep: e.currentTarget.checked })} />
                   </label>
 
                   <label class="appearance-switch-row">
-                    <span class="appearance-label">Glow Pulse</span>
-                    <span class="appearance-hint">Brightness pulse on bar update</span>
+                    <span class="appearance-label">Glow</span>
+                    <span class="appearance-hint">Brightness pulse on bar change</span>
                     <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimGlow}
                       on:change={(e) => settingsOperations.update({ barAnimGlow: e.currentTarget.checked })} />
                   </label>
 
                   <label class="appearance-switch-row">
                     <span class="appearance-label">Delta Flash</span>
-                    <span class="appearance-hint">Show +/- amount text on capacity change</span>
+                    <span class="appearance-hint">Show +/- amount text overlay</span>
                     <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimDeltaFlash}
                       on:change={(e) => settingsOperations.update({ barAnimDeltaFlash: e.currentTarget.checked })} />
+                  </label>
+
+                  <label class="appearance-switch-row">
+                    <span class="appearance-label">Ripple</span>
+                    <span class="appearance-hint">Expanding ring from bar center</span>
+                    <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimRipple}
+                      on:change={(e) => settingsOperations.update({ barAnimRipple: e.currentTarget.checked })} />
                   </label>
                 </div>
               </section>
@@ -5999,40 +6241,52 @@
     color: #a1a1aa;
   }
 
-  .appearance-toggle-group {
+  .appearance-pill-group {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px;
+    gap: 0;
+    padding: 3px;
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.04);
-    backdrop-filter: blur(12px);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
     width: fit-content;
   }
 
-  .appearance-toggle {
-    min-width: 88px;
-    padding: 8px 12px;
-    border: 1px solid transparent;
-    border-radius: 999px;
+  .appearance-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 100px;
+    padding: 7px 14px;
+    border: none;
+    border-radius: 8px;
     background: transparent;
-    color: #9ca3af;
+    color: #71717a;
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all 0.2s ease;
   }
 
-  .appearance-toggle:hover {
-    color: #e5e7eb;
+  .pill-icon {
+    font-size: 10px;
+    letter-spacing: -2px;
+    opacity: 0.6;
   }
 
-  .appearance-toggle.active {
-    color: #f5f5f4;
-    border-color: rgba(255, 255, 255, 0.08);
-    background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.08));
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 6px 18px rgba(0,0,0,0.18);
+  .appearance-pill:hover {
+    color: #d4d4d8;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .appearance-pill.active {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.12);
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.2) inset;
+  }
+
+  .appearance-pill.active .pill-icon {
+    opacity: 1;
   }
 
   .appearance-scale-row {
@@ -6063,45 +6317,58 @@
     font-family: 'JetBrains Mono', monospace;
   }
 
+  .slider-container {
+    padding: 0 10px;
+    overflow: visible;
+  }
+
   .appearance-slider {
     width: 100%;
     -webkit-appearance: none;
     appearance: none;
-    height: 18px;
+    height: 22px;
     background: transparent;
+    cursor: pointer;
   }
 
   .appearance-slider::-webkit-slider-runnable-track {
-    height: 6px;
-    border-radius: 999px;
-    background: linear-gradient(90deg, rgba(251, 191, 36, 0.9), rgba(113, 113, 122, 0.45));
+    height: 2px;
+    border-radius: 1px;
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.7), rgba(113, 113, 122, 0.3));
   }
 
   .appearance-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 18px;
-    height: 18px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    border: 2px solid #0d0e12;
     background: #fbbf24;
-    box-shadow: 0 4px 14px rgba(251, 191, 36, 0.35);
-    margin-top: -6px;
+    box-shadow: 0 0 4px rgba(251, 191, 36, 0.3);
+    margin-top: -5px;
+    transform: rotate(45deg);
+    transition: box-shadow 0.15s ease;
+  }
+
+  .appearance-slider::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
   }
 
   .appearance-slider::-moz-range-track {
-    height: 6px;
-    border-radius: 999px;
-    background: linear-gradient(90deg, rgba(251, 191, 36, 0.9), rgba(113, 113, 122, 0.45));
+    height: 2px;
+    border-radius: 1px;
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.7), rgba(113, 113, 122, 0.3));
   }
 
   .appearance-slider::-moz-range-thumb {
-    width: 18px;
-    height: 18px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    border: 2px solid #0d0e12;
     background: #fbbf24;
-    box-shadow: 0 4px 14px rgba(251, 191, 36, 0.35);
+    box-shadow: 0 0 4px rgba(251, 191, 36, 0.3);
+    transform: rotate(45deg);
   }
 
   .appearance-switch-row {
@@ -7059,6 +7326,10 @@
   .move-summary-progress {
     font-size: 12px;
     color: #fbbf24;
+  }
+
+  .move-summary-progress.error {
+    color: #fca5a5;
   }
 
   .move-summary-batch {

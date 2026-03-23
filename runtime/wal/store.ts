@@ -3,6 +3,12 @@ import type { FrameLogEntry, RuntimeInput } from '../types';
 
 export type RuntimeWalDb = {
   get: (key: Buffer) => Promise<Buffer>;
+  keys?: (options?: {
+    gte?: Buffer;
+    gt?: Buffer;
+    lte?: Buffer;
+    lt?: Buffer;
+  }) => AsyncIterable<Buffer | Uint8Array | string>;
 };
 
 export type RuntimeWalBatch = {
@@ -89,6 +95,46 @@ export const readPersistedSnapshotBuffer = async (
   return db.get(makeDbKey(namespace, `snapshot:${height}`));
 };
 
+export const listPersistedSnapshotHeightsFromDb = async (
+  db: RuntimeWalDb,
+  namespace: string,
+  latestHeight: number,
+  isDbNotFound: (error: unknown) => boolean,
+): Promise<number[]> => {
+  if (typeof db.keys === 'function') {
+    const prefix = `${namespace}:snapshot:`;
+    const start = Buffer.from(prefix);
+    const end = Buffer.from(`${prefix}\xff`);
+    const heights: number[] = [];
+    for await (const rawKey of db.keys({ gte: start, lt: end })) {
+      const key = Buffer.isBuffer(rawKey)
+        ? rawKey.toString()
+        : rawKey instanceof Uint8Array
+          ? Buffer.from(rawKey).toString()
+          : String(rawKey);
+      const heightRaw = key.slice(prefix.length);
+      const height = Number.parseInt(heightRaw, 10);
+      if (Number.isFinite(height) && height > 0 && height <= latestHeight) {
+        heights.push(height);
+      }
+    }
+    heights.sort((left, right) => left - right);
+    return heights;
+  }
+
+  const heights: number[] = [];
+  for (let height = 1; height <= latestHeight; height += 1) {
+    try {
+      await readPersistedSnapshotBuffer(db, namespace, height);
+      heights.push(height);
+    } catch (error) {
+      if (isDbNotFound(error)) continue;
+      throw error;
+    }
+  }
+  return heights;
+};
+
 export const readPersistedFrameJournalBuffer = async (
   db: RuntimeWalDb,
   namespace: string,
@@ -145,15 +191,6 @@ export const writePersistedWalOps = async (
   await batch.write();
 };
 
-export const writePersistedWalOpsSequential = async (
-  db: RuntimeWalWritableDb,
-  ops: RuntimeWalPutOp[],
-): Promise<void> => {
-  for (const op of ops) {
-    await db.put(op.key, op.value);
-  }
-};
-
 export const verifyPersistedFrameWrite = async (
   db: RuntimeWalDb,
   namespace: string,
@@ -195,32 +232,4 @@ export const readPersistedFrameJournalFromDb = async (
     if (code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError') return null;
     throw error;
   }
-};
-
-export const readPersistedFrameJournalsFromDb = async (
-  db: RuntimeWalDb,
-  namespace: string,
-  isDbUnavailableError: (error: unknown) => boolean,
-  opts?: {
-    fromHeight?: number;
-    toHeight?: number;
-    limit?: number;
-  },
-): Promise<PersistedFrameJournal[]> => {
-  const latestHeight = await getPersistedLatestHeightFromDb(db, namespace, isDbUnavailableError);
-  if (latestHeight <= 0) return [];
-
-  const fromHeight = Math.max(1, Math.floor(opts?.fromHeight ?? 1));
-  const boundedToHeight = Math.max(fromHeight, Math.floor(opts?.toHeight ?? latestHeight));
-  const toHeight = Math.min(latestHeight, boundedToHeight);
-  const limit = Math.max(1, Math.min(1000, Math.floor(opts?.limit ?? 200)));
-  const startHeight = Math.max(fromHeight, toHeight - limit + 1);
-  const receipts: PersistedFrameJournal[] = [];
-
-  for (let height = startHeight; height <= toHeight; height++) {
-    const receipt = await readPersistedFrameJournalFromDb(db, namespace, height, isDbUnavailableError);
-    if (receipt) receipts.push(receipt);
-  }
-
-  return receipts;
 };

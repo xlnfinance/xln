@@ -746,26 +746,6 @@ function isRuntimePersistenceContractFailure(error: unknown): boolean {
     || message.includes('SNAPSHOT_STATE_HASH_MISMATCH');
 }
 
-function shouldForceGenesisReplayFromHash(): boolean {
-  if (typeof window === 'undefined') return false;
-  const searchParams = new URLSearchParams(window.location.search);
-  if (searchParams.has('nosnapshot')) {
-    const searchValue = String(searchParams.get('nosnapshot') || '').trim().toLowerCase();
-    if (searchValue === '' || searchValue === '1' || searchValue === 'true' || searchValue === 'yes') {
-      return true;
-    }
-  }
-  const rawHashValue = String(window.location.hash || '');
-  const rawHash = rawHashValue.startsWith('#') ? rawHashValue.slice(1) : rawHashValue;
-  if (!rawHash) return false;
-  const queryIndex = rawHash.indexOf('?');
-  const query = queryIndex >= 0 ? rawHash.slice(queryIndex + 1) : rawHash;
-  const params = new URLSearchParams(query);
-  if (!params.has('nosnapshot')) return false;
-  const value = String(params.get('nosnapshot') || '').trim().toLowerCase();
-  return value === '' || value === '1' || value === 'true' || value === 'yes';
-}
-
 async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strictRestore = false): Promise<Env> {
   const runtimeIdLower = normalizeRuntimeId(runtime.id);
   if (!runtimeIdLower) {
@@ -791,9 +771,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   try {
     if (xln.loadEnvFromDB) {
       console.log('[VaultStore] Loading env from DB namespace:', runtimeIdLower);
-      env = await xln.loadEnvFromDB(runtimeIdLower, runtimeSeed, {
-        fromGenesis: shouldForceGenesisReplayFromHash(),
-      });
+      env = await xln.loadEnvFromDB(runtimeIdLower, runtimeSeed);
     }
   } catch (error) {
     if (strictRestore) {
@@ -1086,6 +1064,10 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     }
   }
 
+  if (xln.startJurisdictionWatchers) {
+    xln.startJurisdictionWatchers(env);
+  }
+
   if (xln.startP2P) {
     const { resolveRelayUrls } = await import('./xlnStore');
     xln.startP2P(env, {
@@ -1197,6 +1179,22 @@ export const vaultOperations = {
     const { getXLN } = await import('./xlnStore');
     const xln = await getXLN();
     return xln.getPersistedLatestHeight(env);
+  },
+
+  async listPersistedCheckpointHeights(env: Env): Promise<number[]> {
+    const { getXLN } = await import('./xlnStore');
+    const xln = await getXLN();
+    return xln.listPersistedCheckpointHeights(env);
+  },
+
+  async verifyRuntimeChain(
+    runtimeId?: string | null,
+    runtimeSeed?: string | null,
+    options?: { fromSnapshotHeight?: number },
+  ) {
+    const { getXLN } = await import('./xlnStore');
+    const xln = await getXLN();
+    return xln.verifyRuntimeChain(runtimeId, runtimeSeed, options);
   },
 
   async readPersistedFrameJournal(env: Env, height: number): Promise<PersistedFrameJournal | null> {

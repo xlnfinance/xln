@@ -10,14 +10,15 @@
  *   const jAdapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
  *   await jAdapter.deployStack();
  *
- * Deprecated functions → JAdapter equivalents:
- *   - submitSettle → jAdapter.settle()
- *   - submitProcessBatch → use j-batch.ts broadcastBatch()
+ * Deprecated functions → modern equivalents:
+ *   - entity-authenticated writes → processBatch() via j-batch.ts / JAdapter.processBatch()
  *   - debugFundReserves → jAdapter.debugFundReserves()
  *   - registerNumberedEntityOnChain → jAdapter.registerNumberedEntity()
  *   - registerNumberedEntitiesBatchOnChain → jAdapter.registerNumberedEntitiesBatch()
- *   - submitReserveToReserve → jAdapter.reserveToReserve()
  *   - getNextEntityNumber → jAdapter.getNextEntityNumber()
+ *
+ * Direct settle/reserve helper entrypoints are legacy convenience flows only.
+ * Production runtime paths should go through processBatch().
  *
  * Jurisdiction management functions (getAvailableJurisdictions, setBrowserVMJurisdiction)
  * remain in this file as they handle multi-jurisdiction orchestration.
@@ -115,14 +116,13 @@ export const ENTITY_PROVIDER_ABI = [
 export const DEPOSITORY_ABI = [
   'function mintToReserve(bytes32 entity, uint256 tokenId, uint256 amount) external',
   'function mintToReserveBatch((bytes32 entity, uint256 tokenId, uint256 amount)[] mints) external',
+  'function adminRegisterExternalToken((bytes32 entity,address contractAddress,uint96 externalTokenId,uint8 tokenType,uint256 internalTokenId,uint256 amount) params) external',
   'function debugFundReserves(bytes32 entity, uint256 tokenId, uint256 amount) external',
   'function debugBulkFundEntities() external',
-  'function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint256 tokenId, uint256 amount) external returns (bool)',
   'function processBatch(bytes encodedBatch, address entityProvider, bytes hankoData, uint256 nonce) external returns (bool)',
   'function unsafeProcessBatch(bytes32 entity, tuple(tuple(uint256 tokenId, uint256 amount)[] flashloans, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements, tuple(bytes32 counterentity, uint256 nonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts, tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations, tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(address transformer, bytes32 secret)[] revealSecrets, uint256 hub_id) batch) external returns (bool)',
   'function entityNonces(address) view returns (uint256)',
   'function prefundAccount(bytes32 fundingEntity, bytes32 counterpartyEntity, uint256 tokenId, uint256 amount) external returns (bool)',
-  'function settle(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig) external returns (bool)',
   'function _reserves(bytes32 entity, uint256 tokenId) external view returns (uint256)',
   // Canonical J-Events (must match CANONICAL_J_EVENTS in jadapter/helpers.ts)
   'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',

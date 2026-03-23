@@ -373,7 +373,7 @@ bun custody/server.ts</pre>
         </div>
         <div class="integration-step">
           <div class="step-title">5. Withdrawal</div>
-          <div class="activity-sub">Backend reserves balance, calls <code>queue_payment</code>, finalizes or restores when <code>PaymentFinalized</code> or <code>PaymentFailed</code> events appear.</div>
+          <div class="activity-sub">Backend reserves balance, calls <code>queue_payment</code>, finalizes or restores when <code>HtlcFinalized</code> or <code>HtlcFailed</code> events appear.</div>
         </div>
       </div>
     </section>

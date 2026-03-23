@@ -36,8 +36,14 @@ import {
 } from './helpers';
 import { CANONICAL_J_EVENTS } from './helpers';
 import { DEV_CHAIN_IDS } from './index';
-import { preflightBatchForE2 } from '../j-batch';
+import {
+  batchAddReserveToReserve,
+  batchAddSettlement,
+  createEmptyBatch,
+  preflightBatchForE2,
+} from '../j-batch';
 import { setDeltaTransformerAddress } from '../proof-builder';
+import { getEntityNonceAddress, prepareSignedBatch } from './batch-helpers';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
@@ -190,6 +196,81 @@ export async function createRpcAdapter(
       }
     }
     return events;
+  };
+
+  const getBatchSignerPrivateKey = (): string => {
+    if (config.privateKey) return config.privateKey;
+    const signerPrivateKey = (signer as ethers.Wallet | { privateKey?: string }).privateKey;
+    if (typeof signerPrivateKey === 'string' && signerPrivateKey.startsWith('0x')) {
+      return signerPrivateKey;
+    }
+    throw new Error('[JAdapter:rpc] processBatch requires a signer private key for Hanko signing');
+  };
+
+  const processSignedBatch = async (
+    entityId: string,
+    batch: import('../j-batch').JBatch,
+    txSigner?: Signer,
+    batchSignerPrivateKey?: string,
+  ): Promise<JBatchReceipt> => {
+    const chainId = BigInt(config.chainId);
+    const depositoryAddress = await depository.getAddress();
+    const entityAddress = getEntityNonceAddress(entityId);
+    const currentNonce = await depository.entityNonces(entityAddress);
+    const { encodedBatch, hankoData, nextNonce } = prepareSignedBatch(
+      batch,
+      entityId,
+      batchSignerPrivateKey ?? getBatchSignerPrivateKey(),
+      chainId,
+      depositoryAddress,
+      currentNonce,
+    );
+
+    const activeSigner = txSigner ?? signer;
+    const depositoryWithSigner = txSigner ? depository.connect(txSigner as any) : depository;
+    const gasLimit = await estimateGasWithHeadroom(
+      () => depositoryWithSigner.processBatch.estimateGas(encodedBatch, addresses.entityProvider, hankoData, nextNonce),
+      DEFAULT_PROCESS_BATCH_GAS,
+    );
+    const feeOverrides = await buildFeeOverrides();
+    const signerAddress = await activeSigner.getAddress();
+    const txNonce = Math.max(
+      await provider.getTransactionCount(signerAddress, 'latest'),
+      await provider.getTransactionCount(signerAddress, 'pending'),
+    );
+
+    const tx = await depositoryWithSigner.processBatch(encodedBatch, addresses.entityProvider, hankoData, nextNonce, {
+      gasLimit,
+      nonce: txNonce,
+      ...feeOverrides,
+    });
+    const receipt = await waitForReceipt(tx as any, 'processBatch');
+    const events = parseDepositoryReceiptEvents(receipt);
+
+    for (const log of receipt.logs) {
+      try {
+        const parsed = entityProvider.interface.parseLog(log);
+        if (parsed) {
+          events.push({
+            name: parsed.name,
+            args: Object.fromEntries(
+              parsed.fragment.inputs.map((input, i) => [input.name, parsed.args[i]]),
+            ),
+            blockNumber: receipt.blockNumber,
+            blockHash: receipt.blockHash,
+            transactionHash: receipt.hash,
+          });
+        }
+      } catch {
+        // skip non-EntityProvider logs
+      }
+    }
+
+    return {
+      txHash: receipt.hash,
+      blockNumber: receipt.blockNumber,
+      events,
+    };
   };
 
   const estimateGasWithHeadroom = async (estimate: () => Promise<bigint>, fallback: bigint): Promise<bigint> => {
@@ -468,7 +549,7 @@ export async function createRpcAdapter(
       const tokenRegistrationAmount = 1_000_000n;
       const approveTx = await erc20Contract.approve(addresses.depository, tokenRegistrationAmount, await buildFeeOverrides());
       await waitForReceipt(approveTx as any, 'erc20.approve');
-      const registerTx = await depository.externalTokenToReserve({
+      const registerTx = await (depository as any).adminRegisterExternalToken({
         entity: ethers.ZeroHash,
         contractAddress: erc20Address,
         externalTokenId: 0,
@@ -774,31 +855,25 @@ export async function createRpcAdapter(
         collateralDiff: d.collateralDiff,
         ondeltaDiff: d.ondeltaDiff ?? 0n,
       }));
+      const accountInfo = await adapter.getAccountInfo(leftEntity, rightEntity);
+      const settlementNonce = Number(accountInfo.nonce + 1n);
 
-      const tx = await depository.settle(
+      const batch = createEmptyBatch();
+      batchAddSettlement(
+        { batch, jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0, status: 'empty' },
         leftEntity,
         rightEntity,
         normalizedDiffs,
         forgiveDebtsInTokenIds,
         finalSig,
-        {
-          gasLimit: await estimateGasWithHeadroom(
-            () => depository.settle.estimateGas(
-              leftEntity,
-              rightEntity,
-              normalizedDiffs,
-              forgiveDebtsInTokenIds,
-              finalSig,
-            ),
-            DEFAULT_SETTLE_GAS,
-          ),
-          ...(await buildFeeOverrides()),
-        },
+        addresses.entityProvider,
+        '0x',
+        settlementNonce,
       );
-      const receipt = await waitForReceipt(tx as any, 'settle');
+      const receipt = await processSignedBatch(leftEntity, batch);
 
       return {
-        txHash: receipt.hash,
+        txHash: receipt.txHash,
         blockNumber: receipt.blockNumber,
       };
     },
@@ -943,29 +1018,15 @@ export async function createRpcAdapter(
     },
 
     async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
-      const tx = await depository.reserveToReserve(from, to, tokenId, amount, await buildFeeOverrides());
-      const receipt = await waitForReceipt(tx as any, 'reserveToReserve');
-
-      const events: JEvent[] = [];
-      for (const log of receipt.logs) {
-        try {
-          const parsed = depository.interface.parseLog(log);
-          if (parsed) {
-            events.push({
-              name: parsed.name,
-              args: Object.fromEntries(
-                parsed.fragment.inputs.map((input: { name: string }, i: number) => [input.name, parsed.args[i]])
-              ),
-              blockNumber: receipt.blockNumber,
-              blockHash: receipt.blockHash,
-              transactionHash: receipt.hash,
-            });
-          }
-        } catch {
-          // Skip
-        }
-      }
-      return events;
+      const batch = createEmptyBatch();
+      batchAddReserveToReserve(
+        { batch, jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0, status: 'empty' },
+        to,
+        tokenId,
+        amount,
+      );
+      const receipt = await processSignedBatch(from, batch);
+      return receipt.events;
     },
 
     async externalTokenToReserve(
@@ -996,9 +1057,23 @@ export async function createRpcAdapter(
       }
 
       const erc20 = new ethers.Contract(tokenAddress, [
+        'function balanceOf(address owner) view returns (uint256)',
         'function approve(address spender, uint256 amount) returns (bool)',
         'function allowance(address owner, address spender) view returns (uint256)',
       ], signerWallet);
+
+      const tokenCode = await provider.getCode(tokenAddress);
+      if (!tokenCode || tokenCode === '0x') {
+        throw new Error(`ERC20 token not deployed at ${tokenAddress}`);
+      }
+
+      const balanceFn = erc20.getFunction('balanceOf') as (owner: string) => Promise<bigint>;
+      const externalBalance = await balanceFn(signerAddress);
+      if (externalBalance < amount) {
+        throw new Error(
+          `Insufficient external token balance: have ${externalBalance}, need ${amount} at ${tokenAddress}`,
+        );
+      }
 
       // Step 1: Approve Depository to spend tokens (max allowance for smoother UX)
       const allowanceFn = erc20.getFunction('allowance') as (owner: string, spender: string) => Promise<bigint>;
@@ -1029,41 +1104,19 @@ export async function createRpcAdapter(
         console.log(`[JAdapter:rpc] Approved exact allowance=${amount} for Depository`);
       }
 
-      // Step 3: Call externalTokenToReserve
-      // Connect depository with signer's wallet
-      const depositoryWithSigner = depository.connect(signerWallet as any) as typeof depository;
-      const depositTx = await depositoryWithSigner.externalTokenToReserve({
+      const batch = createEmptyBatch();
+      batch.externalTokenToReserve.push({
         entity: entityId,
         contractAddress: tokenAddress,
         externalTokenId,
         tokenType,
-        internalTokenId, // Auto-detect from registry when 0
-        amount: amount,
-      }, {
-        ...(await buildFeeOverrides()),
-        nonce: nextNonce,
+        internalTokenId,
+        amount,
       });
-      const receipt = await waitForReceipt(depositTx as any, 'externalTokenToReserve');
-
-      // Parse events
-      const events: JEvent[] = [];
-      for (const log of receipt.logs) {
-        try {
-          const parsed = depository.interface.parseLog({ topics: log.topics as string[], data: log.data });
-          if (parsed) {
-            events.push({
-              name: parsed.name,
-              args: Object.fromEntries(Object.entries(parsed.args)),
-              blockNumber: receipt.blockNumber,
-              blockHash: receipt.blockHash,
-              transactionHash: receipt.hash,
-            });
-          }
-        } catch { }
-      }
+      const receipt = await processSignedBatch(entityId, batch, signerWallet as any, signerWallet.privateKey);
 
       console.log(`[JAdapter:rpc] Deposited ${amount} tokens to entity ${entityId.slice(0, 16)}...`);
-      return events;
+      return receipt.events;
     },
 
     async getErc20Allowance(tokenAddress: string, owner: string, spender: string): Promise<bigint> {
