@@ -1,18 +1,19 @@
 import { serializeTaggedJson } from '../serialization-utils';
 import type { Env, FrameLogEntry, RuntimeInput } from '../types';
 import { computePersistedEnvStateHash } from './hash';
-import { replayFromSnapshotBuffer, selectReplayRetryFromGenesis, selectReplayStart, type ReplaySnapshotDeps } from './replay';
+import { replayFromSnapshotBuffer, selectReplayStart, type ReplaySnapshotDeps } from './replay';
 import { buildRuntimeCheckpointSnapshot } from './snapshot';
 import {
   buildPersistedFrameWriteOps,
   getPersistedLatestHeightFromDb,
+  listPersistedSnapshotHeightsFromDb,
+  readPersistedFrameJournalFromDb,
   readPersistedCheckpointHeight,
   readPersistedLatestHeight,
   readPersistedSchemaVersion,
   readPersistedSnapshotBuffer,
   verifyPersistedFrameWrite,
   writePersistedWalOps,
-  writePersistedWalOpsSequential,
   type PersistedFrameJournal,
   type RuntimeWalDb,
   type RuntimeWalWritableDb,
@@ -122,23 +123,14 @@ export const saveRuntimeFrameToWal = async (options: SaveRuntimeFrameToWalOption
 
     if (state.persistencePaused) return;
     const writeStartedAt = getPerfMs();
-    let wrote = false;
     try {
       await writePersistedWalOps(db, ops);
-      wrote = true;
     } catch (batchError) {
-      console.warn('⚠️ db.batch().write() failed, falling back to sequential put:', batchError);
-    }
-    if (!wrote) {
-      try {
-        await writePersistedWalOpsSequential(db, ops);
-      } catch (putError) {
-        if ((state.persistencePaused || ensureRuntimeState(env).db !== db) && isDbUnavailableError(putError)) {
-          console.warn(`⚠️ DB write aborted during reset/pause: frame ${env.height}`);
-          return;
-        }
-        throw putError;
+      if ((state.persistencePaused || ensureRuntimeState(env).db !== db) && isDbUnavailableError(batchError)) {
+        console.warn(`⚠️ DB batch write aborted during reset/pause: frame ${env.height}`);
+        return;
       }
+      throw batchError;
     }
     writeMs = getPerfMs() - writeStartedAt;
 
@@ -187,7 +179,7 @@ export const saveRuntimeFrameToWal = async (options: SaveRuntimeFrameToWalOption
 export type LoadRuntimeEnvFromWalOptions = {
   runtimeId?: string | null;
   runtimeSeed?: string | null;
-  fromGenesis?: boolean;
+  fromSnapshotHeight?: number;
   persistenceSchemaVersion: number;
   createEmptyEnv: (seed?: Uint8Array | string | null) => Env;
   tryOpenDb: (env: Env) => Promise<boolean>;
@@ -201,7 +193,7 @@ export const loadRuntimeEnvFromWal = async (options: LoadRuntimeEnvFromWalOption
   const {
     runtimeId,
     runtimeSeed,
-    fromGenesis,
+    fromSnapshotHeight,
     persistenceSchemaVersion,
     createEmptyEnv,
     tryOpenDb,
@@ -280,65 +272,111 @@ export const loadRuntimeEnvFromWal = async (options: LoadRuntimeEnvFromWalOption
       checkpointHeight,
       selectedSnapshotHeight,
       selectedSnapshotLabel,
-      requestedFromGenesis: fromGenesis === true,
       snapshotBuffer,
       deps: replayDeps,
     });
   };
 
-  const replayStart = selectReplayStart(fromGenesis === true ? 'force-genesis' : 'default', checkpointHeight);
-  if (replayStart.source === 'forced-genesis') {
-    let genesisSnapshotBuffer: Buffer;
+  const replayStart = selectReplayStart(checkpointHeight, fromSnapshotHeight);
+  if (replayStart.snapshotHeight !== checkpointHeight) {
+    let selectedSnapshotBuffer: Buffer;
     try {
-      genesisSnapshotBuffer = await readPersistedSnapshotBuffer(db, dbNamespace, 1);
-    } catch (genesisError) {
-      const message = genesisError instanceof Error ? `${genesisError.name}: ${genesisError.message}` : String(genesisError);
+      selectedSnapshotBuffer = await readPersistedSnapshotBuffer(db, dbNamespace, replayStart.snapshotHeight);
+    } catch (selectedSnapshotError) {
+      const message =
+        selectedSnapshotError instanceof Error
+          ? `${selectedSnapshotError.name}: ${selectedSnapshotError.message}`
+          : String(selectedSnapshotError);
       throw new Error(
-        `REPLAY_INVARIANT_FAILED: frame=1 checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing genesis snapshot (${message})`,
+        `REPLAY_INVARIANT_FAILED: frame=${replayStart.snapshotHeight} checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing selected snapshot (${message})`,
       );
     }
-    const latestEnv = await replayFromSnapshot(replayStart.snapshotHeight, replayStart.snapshotLabel, genesisSnapshotBuffer);
-    console.warn(
-      `[loadEnvFromDB] forced genesis replay requested; ignored checkpoint=${checkpointHeight} latest=${latestHeight}`,
-    );
-    return latestEnv;
+    return replayFromSnapshot(replayStart.snapshotHeight, replayStart.snapshotLabel, selectedSnapshotBuffer);
   }
 
-  try {
-    return await replayFromSnapshot(replayStart.snapshotHeight, replayStart.snapshotLabel, checkpointBuffer);
-  } catch (checkpointReplayError) {
-    const checkpointMessage =
-      checkpointReplayError instanceof Error ? checkpointReplayError.message : String(checkpointReplayError);
-    if (checkpointHeight <= 1) {
-      throw checkpointReplayError;
-    }
-    console.warn(
-      `[loadEnvFromDB] checkpoint replay failed at h=${checkpointHeight}; retrying from genesis snapshot. reason=${checkpointMessage}`,
-    );
-    let genesisSnapshotBuffer: Buffer;
-    try {
-      genesisSnapshotBuffer = await readPersistedSnapshotBuffer(db, dbNamespace, 1);
-    } catch (genesisError) {
-      const message = genesisError instanceof Error ? `${genesisError.name}: ${genesisError.message}` : String(genesisError);
-      throw new Error(
-        `REPLAY_INVARIANT_FAILED: frame=1 checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing genesis snapshot (${message})`,
-      );
-    }
-    const retryReplayStart = selectReplayRetryFromGenesis();
-    try {
-      return await replayFromSnapshot(
-        retryReplayStart.snapshotHeight,
-        retryReplayStart.snapshotLabel,
-        genesisSnapshotBuffer,
-      );
-    } catch (genesisReplayError) {
-      const genesisMessage =
-        genesisReplayError instanceof Error ? genesisReplayError.message : String(genesisReplayError);
-      throw new Error(
-        `REPLAY_INVARIANT_FAILED: checkpoint_retry_failed checkpoint_reason=${checkpointMessage} genesis_reason=${genesisMessage}`,
-      );
-    }
+  return replayFromSnapshot(replayStart.snapshotHeight, replayStart.snapshotLabel, checkpointBuffer);
+};
+
+export const listPersistedCheckpointHeights = async (
+  env: Env,
+  options: {
+    tryOpenDb: (env: Env) => Promise<boolean>;
+    getRuntimeDb: (env: Env) => RuntimeWalDb;
+    resolveDbNamespace: (options: { env: Env }) => string;
+    isDbUnavailableError: (error: unknown) => boolean;
+    isDbNotFound: (error: unknown) => boolean;
+  },
+): Promise<number[]> => {
+  const dbReady = await options.tryOpenDb(env);
+  if (!dbReady) return [];
+  const dbNamespace = options.resolveDbNamespace({ env });
+  const db = options.getRuntimeDb(env);
+  const latestHeight = await getPersistedLatestHeightFromDb(db, dbNamespace, options.isDbUnavailableError);
+  if (latestHeight <= 0) return [];
+  return listPersistedSnapshotHeightsFromDb(db, dbNamespace, latestHeight, options.isDbNotFound);
+};
+
+export type VerifyRuntimeChainResult = {
+  ok: true;
+  latestHeight: number;
+  checkpointHeight: number;
+  selectedSnapshotHeight: number;
+  restoredHeight: number;
+  expectedStateHash: string;
+  actualStateHash: string;
+};
+
+export const verifyRuntimeChainFromWal = async (
+  options: LoadRuntimeEnvFromWalOptions & {
+    fromSnapshotHeight?: number;
+  },
+): Promise<VerifyRuntimeChainResult> => {
+  const env = await loadRuntimeEnvFromWal(options);
+  if (!env) {
+    throw new Error('REPLAY_INVARIANT_FAILED: no persisted runtime state');
   }
+
+  const tempEnv = options.createEmptyEnv(options.runtimeSeed ?? null);
+  if (options.runtimeId) {
+    tempEnv.runtimeId = options.runtimeId;
+    tempEnv.dbNamespace = options.runtimeId;
+  }
+  const dbReady = await options.tryOpenDb(tempEnv);
+  if (!dbReady) {
+    throw new Error('REPLAY_INVARIANT_FAILED: runtime DB unavailable');
+  }
+
+  const dbNamespace = options.resolveDbNamespace({
+    runtimeId: options.runtimeId,
+    runtimeSeed: options.runtimeSeed,
+    env: tempEnv,
+  });
+  const db = options.getRuntimeDb(tempEnv);
+  const latestHeight = await readPersistedLatestHeight(db, dbNamespace);
+  const checkpointHeight = await readPersistedCheckpointHeight(db, dbNamespace);
+  const latestFrame = await readPersistedFrameJournalFromDb(db, dbNamespace, latestHeight, options.isDbNotFound);
+  if (!latestFrame?.runtimeStateHash) {
+    throw new Error(`REPLAY_INVARIANT_FAILED: missing runtimeStateHash at frame ${latestHeight}`);
+  }
+
+  const actualStateHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
+  if (actualStateHash !== latestFrame.runtimeStateHash) {
+    throw new Error(
+      `REPLAY_INVARIANT_FAILED: frame=${latestHeight} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${env.height} reason=State hash mismatch expected=${latestFrame.runtimeStateHash} actual=${actualStateHash}`,
+    );
+  }
+
+  return {
+    ok: true,
+    latestHeight,
+    checkpointHeight,
+    selectedSnapshotHeight: Number.isFinite(options.fromSnapshotHeight)
+      ? Math.floor(Number(options.fromSnapshotHeight))
+      : checkpointHeight,
+    restoredHeight: env.height,
+    expectedStateHash: latestFrame.runtimeStateHash,
+    actualStateHash,
+  };
 };
 
 export const getPersistedLatestHeight = async (
@@ -365,19 +403,13 @@ export const readPersistedFrameJournal = async (
     getRuntimeDb: (env: Env) => RuntimeWalDb;
     resolveDbNamespace: (options: { env: Env }) => string;
     isDbUnavailableError: (error: unknown) => boolean;
-    readPersistedFrameJournalFromDb: (
-      db: RuntimeWalDb,
-      namespace: string,
-      height: number,
-      isDbUnavailableError: (error: unknown) => boolean,
-    ) => Promise<PersistedFrameJournal | null>;
   },
 ): Promise<PersistedFrameJournal | null> => {
   const dbReady = await options.tryOpenDb(env);
   if (!dbReady) return null;
   const dbNamespace = options.resolveDbNamespace({ env });
   const db = options.getRuntimeDb(env);
-  return options.readPersistedFrameJournalFromDb(db, dbNamespace, height, options.isDbUnavailableError);
+  return readPersistedFrameJournalFromDb(db, dbNamespace, height, options.isDbUnavailableError);
 };
 
 export const readPersistedFrameJournals = async (
@@ -392,17 +424,26 @@ export const readPersistedFrameJournals = async (
     getRuntimeDb: (env: Env) => RuntimeWalDb;
     resolveDbNamespace: (options: { env: Env }) => string;
     isDbUnavailableError: (error: unknown) => boolean;
-    readPersistedFrameJournalsFromDb: (
-      db: RuntimeWalDb,
-      namespace: string,
-      isDbUnavailableError: (error: unknown) => boolean,
-      opts?: { fromHeight?: number; toHeight?: number; limit?: number },
-    ) => Promise<PersistedFrameJournal[]>;
   },
 ): Promise<PersistedFrameJournal[]> => {
   const dbReady = await options.tryOpenDb(env);
   if (!dbReady) return [];
   const dbNamespace = options.resolveDbNamespace({ env });
   const db = options.getRuntimeDb(env);
-  return options.readPersistedFrameJournalsFromDb(db, dbNamespace, options.isDbUnavailableError, frameOptions);
+  const latestHeight = await getPersistedLatestHeightFromDb(db, dbNamespace, options.isDbUnavailableError);
+  if (latestHeight <= 0) return [];
+
+  const fromHeight = Math.max(1, Math.floor(frameOptions?.fromHeight ?? 1));
+  const boundedToHeight = Math.max(fromHeight, Math.floor(frameOptions?.toHeight ?? latestHeight));
+  const toHeight = Math.min(latestHeight, boundedToHeight);
+  const limit = Math.max(1, Math.min(1000, Math.floor(frameOptions?.limit ?? 200)));
+  const startHeight = Math.max(fromHeight, toHeight - limit + 1);
+  const receipts: PersistedFrameJournal[] = [];
+
+  for (let height = startHeight; height <= toHeight; height += 1) {
+    const receipt = await readPersistedFrameJournalFromDb(db, dbNamespace, height, options.isDbUnavailableError);
+    if (receipt) receipts.push(receipt);
+  }
+
+  return receipts;
 };

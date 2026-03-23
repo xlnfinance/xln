@@ -4,37 +4,28 @@ import { computePersistedEnvStateHash } from './hash';
 import { buildRuntimeCheckpointSnapshot } from './snapshot';
 import { readPersistedFrameJournalBuffer, type RuntimeWalDb } from './store';
 
-export type ReplayStartMode = 'default' | 'force-genesis';
-
 export type ReplayStartSelection = {
   snapshotHeight: number;
   snapshotLabel: string;
-  source: 'checkpoint' | 'forced-genesis' | 'retry-genesis';
+  source: 'checkpoint' | 'override';
 };
 
 export const selectReplayStart = (
-  mode: ReplayStartMode,
   checkpointHeight: number,
+  fromSnapshotHeight?: number,
 ): ReplayStartSelection => {
-  if (mode === 'force-genesis') {
+  if (Number.isFinite(fromSnapshotHeight) && Number(fromSnapshotHeight) > 0) {
+    const snapshotHeight = Math.floor(Number(fromSnapshotHeight));
     return {
-      snapshotHeight: 1,
-      snapshotLabel: 'forced-genesis:1',
-      source: 'forced-genesis',
+      snapshotHeight,
+      snapshotLabel: snapshotHeight === 1 ? 'genesis:1' : `snapshot:${snapshotHeight}`,
+      source: 'override',
     };
   }
   return {
     snapshotHeight: checkpointHeight,
     snapshotLabel: `checkpoint:${checkpointHeight}`,
     source: 'checkpoint',
-  };
-};
-
-export const selectReplayRetryFromGenesis = (): ReplayStartSelection => {
-  return {
-    snapshotHeight: 1,
-    snapshotLabel: 'genesis:1',
-    source: 'retry-genesis',
   };
 };
 
@@ -98,7 +89,6 @@ export type ReplayFromSnapshotOptions = {
   checkpointHeight: number;
   selectedSnapshotHeight: number;
   selectedSnapshotLabel: string;
-  requestedFromGenesis: boolean;
   snapshotBuffer: Buffer;
   deps: ReplaySnapshotDeps;
 };
@@ -125,7 +115,6 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
     checkpointHeight,
     selectedSnapshotHeight,
     selectedSnapshotLabel,
-    requestedFromGenesis,
     snapshotBuffer,
     deps,
   } = options;
@@ -203,27 +192,6 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
   const tempState = deps.ensureRuntimeState(tempEnv);
   envState.db = tempState.db;
   envState.dbOpenPromise = tempState.dbOpenPromise;
-
-  if (latestHeight > selectedSnapshotHeight) {
-    const missingFrames: number[] = [];
-    for (let h = selectedSnapshotHeight + 1; h <= latestHeight; h++) {
-      try {
-        await readPersistedFrameJournalBuffer(db, dbNamespace, h);
-      } catch (error) {
-        if (deps.isDbNotFound(error)) {
-          missingFrames.push(h);
-          continue;
-        }
-        throw error;
-      }
-    }
-    if (missingFrames.length > 0) {
-      const sample = missingFrames.slice(0, 8).join(',');
-      throw new Error(
-        `REPLAY_INVARIANT_FAILED: frame=${missingFrames[0]} checkpoint=${selectedSnapshotHeight} latest=${latestHeight} restored=${selectedSnapshotHeight} reason=Missing WAL frames (${sample}${missingFrames.length > 8 ? ',…' : ''})`,
-      );
-    }
-  }
 
   let lastGoodHeight = selectedSnapshotHeight;
   const runtimeEnv = env as Record<PropertyKey, unknown>;
@@ -496,7 +464,6 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
     namespace: dbNamespace,
     latestHeight,
     checkpointHeight: selectedSnapshotHeight,
-    requestedFromGenesis,
     selectedSnapshotLabel,
     restoredHeight: lastGoodHeight,
     recoveredHistoryFrames: env.history?.length ?? 0,

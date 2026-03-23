@@ -111,7 +111,7 @@ Perform **forensic-level analysis** of the Alice-Hub-Bob scenario and underlying
    - JBlockFinalized
    - ReserveUpdated (with old/new/delta)
    - AccountOpening
-   - PaymentInitiated
+   - HtlcInitiated
 
    **Verify:** Events stored in `env.frameLogs[]`, travel with snapshots.
 

@@ -14,7 +14,7 @@
 
 <svelte:head>
   <title>xln - cross-local network</title>
-  <meta name="description" content="The first credible alternative to TradFi/CEX custody. Credit-extended payment channels with mechanical enforcement. Δ ≤ R + C" />
+  <meta name="description" content="The first credible alternative to TradFi/CEX custody. Credit-extended bilateral accounts with mechanical enforcement. Δ ≤ R + C" />
 
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website" />
@@ -27,7 +27,7 @@
   <meta property="twitter:card" content="summary_large_image" />
   <meta property="twitter:url" content="https://xln.finance/" />
   <meta property="twitter:title" content="xln - cross-local network" />
-  <meta property="twitter:description" content="The first credible alternative to TradFi/CEX custody. Δ ≤ R + C — Credit-extended payment channels with mechanical enforcement." />
+  <meta property="twitter:description" content="The first credible alternative to TradFi/CEX custody. Δ ≤ R + C — Credit-extended bilateral accounts with mechanical enforcement." />
   <meta property="twitter:image" content="https://xln.finance/img/preview.png" />
   <meta property="twitter:site" content="@xlnfinance" />
 </svelte:head>

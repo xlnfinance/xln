@@ -632,7 +632,21 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               console.log(`🎯 HTLC-ROUTING: WE ARE FINAL RECIPIENT!`);
               // Final recipient - reveal immediately
               if (envelope.secret) {
+                const inboundEntity = newState.entityId === accountMachine.leftEntity
+                  ? accountMachine.rightEntity
+                  : accountMachine.leftEntity;
                 const paymentDescription = typeof envelope.description === 'string' ? envelope.description.trim() : '';
+                if (!newState.htlcRoutes.has(lock.hashlock)) {
+                  newState.htlcRoutes.set(lock.hashlock, {
+                    hashlock: lock.hashlock,
+                    tokenId: lock.tokenId,
+                    amount: lock.amount,
+                    ...(typeof envelope.startedAtMs === 'number' ? { startedAtMs: envelope.startedAtMs } : {}),
+                    inboundEntity,
+                    inboundLockId: lock.lockId,
+                    createdTimestamp: newState.timestamp,
+                  });
+                }
                 env.emit('HtlcReceived', {
                   ...buildHtlcReceivedEventPayload({
                     entityId: state.entityId,
@@ -904,7 +918,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           } else {
             // We're the origin — payment failed, notify via event
             console.log(`❌ HTLC: Payment failed (we initiated), hashlock=${timedOutHashlock.slice(0,16)}...`);
-            env.emit('PaymentFailed', {
+            env.emit('HtlcFailed', {
               hashlock: timedOutHashlock,
               reason: 'timeout',
               entityId: state.entityId,
@@ -1019,22 +1033,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               }),
             });
           }
-          env.emit('PaymentFinalized', {
-            hashlock,
-            secret,
-            inboundEntity: route.inboundEntity,
-            outboundEntity: route.outboundEntity,
-            entityId: state.entityId,
-            finalRecipient: isFinalRecipient,
-            ...((eventAmount !== undefined && eventTokenId !== undefined)
-              ? {
-                  amount: eventAmount.toString(),
-                  tokenId: eventTokenId,
-                  ...(eventLockId ? { lockId: eventLockId } : {}),
-                }
-              : {}),
-            ...(finalizedDescription ? { description: finalizedDescription } : {}),
-          });
         } else {
           console.log(`⚠️ HTLC: No route found for hashlock ${hashlock.slice(0,16)}...`);
         }
@@ -1152,7 +1150,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         }
       } else {
         addMessage(newState, `❌ ${result.error}`);
-        env.emit('PaymentFailed', {
+        env.emit('HtlcFailed', {
           entityId: state.entityId,
           fromEntityId: input.fromEntityId,
           toEntityId: input.toEntityId,
@@ -1288,19 +1286,19 @@ export function processOrderbookSwaps(
     // AUDIT FIX (CRITICAL-5): Use cached book if available, otherwise load from ext.books
     let book = bookCache.get(bookKey) || ext.books.get(bookKey);
     if (!book) {
-      const center = Number(priceTicks);
-      const halfRange = Math.max(
-        policyTick * 50,
-        Math.floor((center * pairPolicy.bookRangeBps) / 10_000),
-      );
-      let priceTick = policyTick;
-      let pmin = Math.max(1, center - halfRange);
-      let pmax = center + halfRange;
-      let levels = Math.floor((pmax - pmin) / priceTick) + 1;
+      let priceTick = BigInt(Math.max(1, policyTick));
+      const halfRange = ((priceTicks * BigInt(pairPolicy.bookRangeBps)) / 10_000n) > (priceTick * 50n)
+        ? (priceTicks * BigInt(pairPolicy.bookRangeBps)) / 10_000n
+        : (priceTick * 50n);
+      let pmin = priceTicks > halfRange ? priceTicks - halfRange : 1n;
+      if (pmin <= 0n) pmin = 1n;
+      let pmax = priceTicks + halfRange;
+      let levels = Number(((pmax - pmin) / priceTick) + 1n);
       if (levels > MAX_BOOK_LEVELS) {
-        priceTick = Math.max(1, Math.ceil((pmax - pmin) / (MAX_BOOK_LEVELS - 1)));
-        levels = Math.floor((pmax - pmin) / priceTick) + 1;
-        pmax = pmin + priceTick * Math.max(1, levels - 1);
+        priceTick = ((pmax - pmin) + BigInt(MAX_BOOK_LEVELS - 2)) / BigInt(MAX_BOOK_LEVELS - 1);
+        if (priceTick <= 0n) priceTick = 1n;
+        levels = Number(((pmax - pmin) / priceTick) + 1n);
+        pmax = pmin + (priceTick * BigInt(Math.max(1, levels - 1)));
       }
 
       book = createBook({
@@ -1313,8 +1311,7 @@ export function processOrderbookSwaps(
     }
 
     if (!explicitPriceTicks || explicitPriceTicks <= 0n) {
-      const bookTick = Math.max(1, book.params.tick);
-      const bookTickBig = BigInt(bookTick);
+      const bookTickBig = book.params.tick > 0n ? book.params.tick : 1n;
       if (isSellBase) {
         priceTicks = ((priceTicks + bookTickBig - 1n) / bookTickBig) * bookTickBig;
       } else {
@@ -1333,23 +1330,22 @@ export function processOrderbookSwaps(
     // Price deviation guard: reject orders that cross too far from best available
     const bestBid = getBestBid(book);
     const bestAsk = getBestAsk(book);
-    const priceNum = Number(priceTicks);
     const REJECT_BPS = SWAP_CONSTANTS.PRICE_REJECT_BPS;
     const BPS_BASE = SWAP_CONSTANTS.BPS_BASE;
     if (side === 0 && bestAsk !== null) {
       // BUY: reject if limit price > bestAsk * (1 + REJECT_BPS/BPS_BASE)
-      const maxAllowed = bestAsk + Math.floor(bestAsk * REJECT_BPS / BPS_BASE);
-      if (priceNum > maxAllowed) {
-        console.warn(`⚠️ ORDERBOOK: BUY price ${priceNum} exceeds ${REJECT_BPS/100}% above best ask ${bestAsk} — rejecting offer=${offer.offerId}`);
+      const maxAllowed = bestAsk + ((bestAsk * BigInt(REJECT_BPS)) / BigInt(BPS_BASE));
+      if (priceTicks > maxAllowed) {
+        console.warn(`⚠️ ORDERBOOK: BUY price ${priceTicks.toString()} exceeds ${REJECT_BPS/100}% above best ask ${bestAsk.toString()} — rejecting offer=${offer.offerId}`);
         mempoolOps.push({ accountId, tx: { type: 'swap_resolve', data: { offerId: offer.offerId, fillRatio: 0, cancelRemainder: true } } });
         continue;
       }
     }
     if (side === 1 && bestBid !== null) {
       // SELL: reject if limit price < bestBid * (1 - REJECT_BPS/BPS_BASE)
-      const minAllowed = bestBid - Math.floor(bestBid * REJECT_BPS / BPS_BASE);
-      if (priceNum < minAllowed) {
-        console.warn(`⚠️ ORDERBOOK: SELL price ${priceNum} below ${REJECT_BPS/100}% under best bid ${bestBid} — rejecting offer=${offer.offerId}`);
+      const minAllowed = bestBid - ((bestBid * BigInt(REJECT_BPS)) / BigInt(BPS_BASE));
+      if (priceTicks < minAllowed) {
+        console.warn(`⚠️ ORDERBOOK: SELL price ${priceTicks.toString()} below ${REJECT_BPS/100}% under best bid ${bestBid.toString()} — rejecting offer=${offer.offerId}`);
         mempoolOps.push({ accountId, tx: { type: 'swap_resolve', data: { offerId: offer.offerId, fillRatio: 0, cancelRemainder: true } } });
         continue;
       }
@@ -1366,7 +1362,7 @@ export function processOrderbookSwaps(
       side,
       tif: offer.timeInForce ?? 0,
       postOnly: false,
-      priceTicks: Number(priceTicks),
+      priceTicks,
       qtyLots: Number(qtyLots),
       minFillRatio: offer.minFillRatio ?? 0,
     });
@@ -1413,7 +1409,7 @@ export function processOrderbookSwaps(
           const lastColon = namespacedId.lastIndexOf(':');
           return lastColon >= 0 ? namespacedId.slice(lastColon + 1) : namespacedId;
         };
-        const tradeCost = BigInt(event.price) * BigInt(event.qty);
+        const tradeCost = event.price * BigInt(event.qty);
 
         const makerEntry = fillsPerOrder.get(event.makerOrderId);
         if (!makerEntry) {

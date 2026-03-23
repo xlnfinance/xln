@@ -643,7 +643,7 @@ export const applyEntityTx = async (
       }
 
       // Emit payment initiation event
-      env.emit('PaymentInitiated', {
+      env.emit('HtlcInitiated', {
         fromEntity: entityState.entityId,
         toEntity: entityTx.data.targetEntityId,
         tokenId: entityTx.data.tokenId,

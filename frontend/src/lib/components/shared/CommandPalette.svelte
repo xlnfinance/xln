@@ -55,7 +55,7 @@
             id: `pay-${m.id}`,
             icon: '↗',
             label: `Pay ${amount} ${token} to ${m.name}`,
-            sublabel: `Send via bilateral channel`,
+            sublabel: `Send via bilateral account`,
             action: () => dispatch('command', { type: 'pay', args: { amount, token, recipientId: m.id, recipientName: m.name } }),
           });
         }

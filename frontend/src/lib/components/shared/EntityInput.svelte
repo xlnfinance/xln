@@ -22,6 +22,7 @@
   export let disabled: boolean = false;
   export let label: string = '';
   export let preferredId: string = '';
+  export let testId: string = '';
 
   const dispatch = createEventDispatcher();
   $: activeFunctions = $xlnFunctions;
@@ -29,6 +30,13 @@
 
   function normalizeEntityId(id: string | null | undefined): string {
     return String(id || '').trim().toLowerCase();
+  }
+
+  function optionTestId(id: string): string | undefined {
+    const base = testId.trim();
+    const normalized = normalizeEntityId(id);
+    if (!base || !normalized) return undefined;
+    return `${base}-option-${normalized}`;
   }
 
   function getGossipProfiles(): GossipProfile[] {
@@ -303,7 +311,7 @@
   $: selectedIsPreferred = selectedOption ? normalizeEntityId(selectedOption.id) === preferredNorm : false;
 </script>
 
-<div class="entity-input" class:disabled>
+<div class="entity-input" class:disabled data-testid={testId || undefined}>
   {#if label}
     <label class="input-label">{label}</label>
   {/if}
@@ -374,6 +382,7 @@
           class="dropdown-item pinned"
           class:contact={pinnedOption.isContact}
           class:selected={pinnedOption.id === value}
+          data-testid={optionTestId(pinnedOption.id)}
           on:mousedown|preventDefault={() => selectEntity(pinnedOption.id)}
         >
           {#if pinnedOption.avatarUrl}
@@ -409,6 +418,7 @@
             class="dropdown-item"
             class:contact={opt.isContact}
             class:selected={opt.id === value}
+            data-testid={optionTestId(opt.id)}
             on:mousedown|preventDefault={() => selectEntity(opt.id)}
           >
             {#if opt.avatarUrl}

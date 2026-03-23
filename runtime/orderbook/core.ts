@@ -25,21 +25,21 @@ export type TIF = 0 | 1 | 2;     // 0 = GTC, 1 = IOC, 2 = FOK
 export const MAX_FILL_RATIO = 65535;
 
 export type OrderCmd =
-  | { kind: 0; ownerId: string; orderId: string; side: Side; tif: TIF; postOnly: boolean; priceTicks: number; qtyLots: number; minFillRatio?: number }
+  | { kind: 0; ownerId: string; orderId: string; side: Side; tif: TIF; postOnly: boolean; priceTicks: bigint; qtyLots: number; minFillRatio?: number }
   | { kind: 1; ownerId: string; orderId: string }  // CANCEL
-  | { kind: 2; ownerId: string; orderId: string; newPriceTicks: number | null; qtyDeltaLots: number };  // REPLACE
+  | { kind: 2; ownerId: string; orderId: string; newPriceTicks: bigint | null; qtyDeltaLots: number };  // REPLACE
 
 export type BookEvent =
   | { type: 'ACK'; orderId: string; ownerId: string }
   | { type: 'REJECT'; orderId: string; ownerId: string; reason: string }
-  | { type: 'TRADE'; price: number; qty: number; makerOwnerId: string; takerOwnerId: string; makerOrderId: string; takerOrderId: string; makerQtyBefore: number; takerQtyTotal: number }
+  | { type: 'TRADE'; price: bigint; qty: number; makerOwnerId: string; takerOwnerId: string; makerOrderId: string; takerOrderId: string; makerQtyBefore: number; takerQtyTotal: number }
   | { type: 'REDUCED'; orderId: string; ownerId: string; delta: number; remain: number }
   | { type: 'CANCELED'; orderId: string; ownerId: string };
 
 export interface BookParams {
-  tick: number;
-  pmin: number;
-  pmax: number;
+  tick: bigint;
+  pmin: bigint;
+  pmax: bigint;
   maxOrders: number;
   stpPolicy: 0 | 1 | 2;  // 0=off, 1=cancel taker, 2=reduce maker
 }
@@ -100,11 +100,13 @@ const PRIME = 0x1_0000_01n;
 export function createBook(params: BookParams): BookState {
   const { tick, pmin, pmax, maxOrders } = params;
 
-  if (tick <= 0) throw new Error('tick must be positive');
+  if (tick <= 0n) throw new Error('tick must be positive');
   if (pmax <= pmin) throw new Error('pmax must be > pmin');
 
-  const levels = Math.floor((pmax - pmin) / tick) + 1;
-  if (levels <= 0) throw new Error('invalid price grid');
+  const levelsBig = ((pmax - pmin) / tick) + 1n;
+  if (levelsBig <= 0n) throw new Error('invalid price grid');
+  if (levelsBig > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('price grid too large');
+  const levels = Number(levelsBig);
 
   const bitmapSize = Math.ceil(levels / BITWORD);
 
@@ -338,8 +340,10 @@ export function applyCommand(
   }
 
   // Hash update
-  function bumpHash(tag: number, a: number, b: number): void {
-    m.eventHash = (m.eventHash * PRIME + BigInt((tag * 2654435761 >>> 0) ^ a ^ (b << 7))) & 0x1fffffffffffffn;
+  function bumpHash(tag: number, a: number | bigint, b: number | bigint): void {
+    const a32 = Number((typeof a === 'bigint' ? a : BigInt(a)) & 0xffffffffn);
+    const b32 = Number((typeof b === 'bigint' ? b : BigInt(b)) & 0xffffffffn);
+    m.eventHash = (m.eventHash * PRIME + BigInt((tag * 2654435761 >>> 0) ^ a32 ^ (b32 << 7))) & 0x1fffffffffffffn;
   }
 
   // Fill against resting orders
@@ -393,7 +397,7 @@ export function applyCommand(
 
       const makerQty = m.orderQtyLots[headIdx]!;
       const tradeQty = Math.min(makerQty, remaining);
-      const pxTicks = pmin + levelIdx * tick;
+      const pxTicks = pmin + (BigInt(levelIdx) * tick);
 
       m.orderQtyLots[headIdx] = m.orderQtyLots[headIdx]! - tradeQty;
       remaining -= tradeQty;
@@ -441,7 +445,7 @@ export function applyCommand(
       return { state, events };
     }
 
-    const levelIdx = Math.floor((priceTicks - pmin) / tick);
+    const levelIdx = Number((priceTicks - pmin) / tick);
     if (levelIdx < 0 || levelIdx >= levels) {
       events.push({ type: 'REJECT', orderId, ownerId, reason: 'price out of range' });
       return { state, events };
@@ -626,7 +630,7 @@ export function applyCommand(
       events.push({ type: 'CANCELED', orderId, ownerId });
     } else if (newPriceTicks !== null) {
       // Price change - CANCEL old, then match+post new order (proper replace semantics)
-      const newLevelIdx = Math.floor((newPriceTicks - pmin) / tick);
+      const newLevelIdx = Number((newPriceTicks - pmin) / tick);
       if (newLevelIdx < 0 || newLevelIdx >= levels) {
         events.push({ type: 'REJECT', orderId, ownerId, reason: 'new price out of range' });
         return { state, events };
@@ -717,17 +721,17 @@ export function applyCommand(
 // Getters
 // ============================================================================
 
-export function getBestBid(state: BookState): number | null {
+export function getBestBid(state: BookState): bigint | null {
   if (state.bestBidIdx === EMPTY) return null;
-  return state.params.pmin + state.bestBidIdx * state.params.tick;
+  return state.params.pmin + (BigInt(state.bestBidIdx) * state.params.tick);
 }
 
-export function getBestAsk(state: BookState): number | null {
+export function getBestAsk(state: BookState): bigint | null {
   if (state.bestAskIdx === EMPTY) return null;
-  return state.params.pmin + state.bestAskIdx * state.params.tick;
+  return state.params.pmin + (BigInt(state.bestAskIdx) * state.params.tick);
 }
 
-export function getSpread(state: BookState): number | null {
+export function getSpread(state: BookState): bigint | null {
   const bid = getBestBid(state);
   const ask = getBestAsk(state);
   if (bid === null || ask === null) return null;
@@ -778,7 +782,7 @@ export function renderAscii(state: BookState, depth = 10, perLevelOrders = 10, l
   };
 
   // Collect bids (descending price)
-  const bids: { px: number; orders: string }[] = [];
+  const bids: { px: bigint; orders: string }[] = [];
   let bidIdx = bestBidIdx;
   while (bidIdx !== EMPTY && bids.length < depth) {
     let cur = levelHeadBid[bidIdx]!;
@@ -792,12 +796,12 @@ export function renderAscii(state: BookState, depth = 10, perLevelOrders = 10, l
       }
       cur = orderNext[cur]!;
     }
-    if (parts.length) bids.push({ px: pmin + bidIdx * tick, orders: parts.join(',') });
+    if (parts.length) bids.push({ px: pmin + (BigInt(bidIdx) * tick), orders: parts.join(',') });
     bidIdx = findPrevBid(bidIdx - 1);
   }
 
   // Collect asks (ascending price)
-  const asks: { px: number; orders: string }[] = [];
+  const asks: { px: bigint; orders: string }[] = [];
   let askIdx = bestAskIdx;
   while (askIdx !== EMPTY && asks.length < depth) {
     let cur = levelHeadAsk[askIdx]!;
@@ -811,7 +815,7 @@ export function renderAscii(state: BookState, depth = 10, perLevelOrders = 10, l
       }
       cur = orderNext[cur]!;
     }
-    if (parts.length) asks.push({ px: pmin + askIdx * tick, orders: parts.join(',') });
+    if (parts.length) asks.push({ px: pmin + (BigInt(askIdx) * tick), orders: parts.join(',') });
     askIdx = findNextAsk(askIdx + 1);
   }
 

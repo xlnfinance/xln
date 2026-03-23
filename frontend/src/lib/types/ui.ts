@@ -71,6 +71,13 @@ export interface Settings {
   componentStates: ComponentState;
   compactNumbers: boolean;
   verboseLogging: boolean;
+  // Bar visual effects (Appearance tab)
+  barCreditGradient: boolean;
+  barAnimTransition: boolean;
+  barAnimSweep: boolean;
+  barAnimGlow: boolean;
+  barAnimDeltaFlash: boolean;
+  barAnimRipple: boolean;
 }
 
 // Time machine

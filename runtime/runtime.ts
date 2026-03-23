@@ -28,8 +28,8 @@ const LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS = (() => {
   return Math.floor(parsed);
 })();
 const DEFAULT_SNAPSHOT_INTERVAL_FRAMES = (() => {
-  const parsed = Number(readRuntimeEnv('XLN_SNAPSHOT_INTERVAL_FRAMES') ?? '25');
-  if (!Number.isFinite(parsed) || parsed < 1) return 25;
+  const parsed = Number(readRuntimeEnv('XLN_SNAPSHOT_INTERVAL_FRAMES') ?? '5');
+  if (!Number.isFinite(parsed) || parsed < 1) return 5;
   return Math.floor(parsed);
 })();
 
@@ -165,8 +165,7 @@ import {
   createDemoDelta,
   getDefaultCreditLimit,
 } from './account-utils';
-import { computeSwapPriceTicks, createOrderbookExtState, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
-import { processOrderbookSwaps } from './entity-tx/handlers/account';
+import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import {
   formatTokenAmount as formatTokenAmountEthers,
@@ -194,12 +193,10 @@ import { mergeRuntimeJurisdictionConfig } from './jurisdiction-runtime';
 import type {
   DeliverableEntityInput,
   EntityInput,
-  EntityReplica,
   EntityState,
   Env,
   FrameLogEntry,
   JInput,
-  JReplica,
   RoutedEntityInput,
   RuntimeInput,
 } from './types';
@@ -216,17 +213,17 @@ import {
   log,
 } from './utils';
 import { logError } from './logger';
+import type { PersistedFrameJournal } from './wal/store';
 import {
   getPersistedLatestHeight as getPersistedLatestHeightWal,
-  loadRuntimeEnvFromWal,
-  normalizePersistedSnapshotInPlace,
-  type PersistedFrameJournal,
+  listPersistedCheckpointHeights as listPersistedCheckpointHeightsWal,
   readPersistedFrameJournal as readPersistedFrameJournalWal,
   readPersistedFrameJournals as readPersistedFrameJournalsWal,
-  readPersistedFrameJournalFromDb,
-  readPersistedFrameJournalsFromDb,
   saveRuntimeFrameToWal,
-} from './wal';
+  type VerifyRuntimeChainResult,
+} from './wal/runtime';
+import { rehydrateRestoredRuntimeInfra } from './runtime-infra';
+import { loadRuntimeStateFromDb, verifyPersistedRuntimeState } from './wal/state-restore';
 
 if (isBrowser && typeof globalThis.process === 'undefined') {
   const nowMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
@@ -355,6 +352,13 @@ const isDbUnavailableError = (error: unknown): boolean => {
     message.includes('not open') ||
     message.includes('closing')
   );
+};
+
+const isDbNotFound = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const code = String((error as { code?: unknown }).code ?? '');
+  const name = String((error as { name?: unknown }).name ?? '');
+  return code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError';
 };
 
 const captureEntityJHeights = (env: Env): Record<string, number> => {
@@ -1149,6 +1153,15 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
   };
   return state.stopLoop;
 }
+
+export const startJurisdictionWatchers = (env: Env): void => {
+  if (!env.jReplicas || env.jReplicas.size === 0) return;
+  for (const [name, jReplica] of env.jReplicas.entries()) {
+    if (!jReplica.jadapter) continue;
+    jReplica.jadapter.startWatching(env);
+    console.log(`✅ JAdapter watcher started for jReplica "${name}"`);
+  }
+};
 
 /**
  * Identity function for env (no module-level env exists).
@@ -2545,14 +2558,20 @@ const applyRuntimeInput = async (
       // CRITICAL: Update JReplica stateRoots from BrowserVM BEFORE snapshot
       // Without this, time-travel shows stale EVM state from xlnomy creation
       const browserVM = getBrowserVMInstance(env);
-      if (browserVM?.captureStateRoot && env.jReplicas) {
-        try {
-          const freshStateRoot = await browserVM.captureStateRoot();
-          for (const [name, jReplica] of env.jReplicas.entries()) {
-            jReplica.stateRoot = freshStateRoot;
+      if (env.jReplicas) {
+        for (const [name, jReplica] of env.jReplicas.entries()) {
+          const replicaBrowserVM =
+            jReplica.jadapter?.getBrowserVM?.()
+            ?? (browserVM && name === env.activeJurisdiction ? browserVM : null);
+          if (!replicaBrowserVM?.captureStateRoot) continue;
+          try {
+            jReplica.stateRoot = await replicaBrowserVM.captureStateRoot();
+          } catch (error) {
+            console.warn(
+              `[runtime] captureStateRoot failed for ${name}:`,
+              error instanceof Error ? error.message : String(error),
+            );
           }
-        } catch (e) {
-          // Silent fail - stateRoot capture is optional for time-travel
         }
       }
 
@@ -2561,17 +2580,27 @@ const applyRuntimeInput = async (
         try {
           // Collect all account pairs from all entities
           const accountPairs: Array<{ entityId: string; counterpartyId: string }> = [];
+          const tokenIds = new Set<number>();
           for (const [replicaKey, replica] of env.eReplicas.entries()) {
+            for (const tokenId of replica.state.reserves.keys()) {
+              if (Number.isFinite(tokenId) && tokenId > 0) tokenIds.add(tokenId);
+            }
             if (replica.state.accounts) {
-              for (const [counterpartyId, _account] of replica.state.accounts) {
+              for (const [counterpartyId, account] of replica.state.accounts) {
                 const entityId = replicaKey.split(':')[0];
                 accountPairs.push({ entityId, counterpartyId });
+                for (const tokenId of account.deltas.keys()) {
+                  if (Number.isFinite(tokenId) && tokenId > 0) tokenIds.add(tokenId);
+                }
               }
             }
           }
+          const browserVmTokenIds = browserVM.getTokenRegistry?.().map((token) => Number(token.tokenId)) ?? [];
+          for (const tokenId of browserVmTokenIds) {
+            if (Number.isFinite(tokenId) && tokenId > 0) tokenIds.add(tokenId);
+          }
 
-          // Sync all collaterals from BrowserVM (for now, just tokenId 1 = USDC)
-          const collaterals = await browserVM.syncAllCollaterals(accountPairs, 1);
+          const collaterals = await browserVM.syncAllCollaterals(accountPairs, Array.from(tokenIds).sort((a, b) => a - b));
 
           // Get current block height from BrowserVM
           const blockHeight = browserVM.getBlockHeight ? browserVM.getBlockHeight() : 0;
@@ -2700,7 +2729,11 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
 
   attachEventEmitters(env);
   if (!restoredFromCoreDb) {
-    await loadGossipProfilesFromInfraDb(env);
+    try {
+      await loadGossipProfilesFromInfraDb(env);
+    } catch (error) {
+      console.warn('[main] skipped infra gossip restore:', error instanceof Error ? error.message : String(error));
+    }
   }
 
   if (!env.runtimeId && env.runtimeSeed) {
@@ -2720,7 +2753,7 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
     }
   }
 
-  // J-event watching is handled by JAdapter.startWatching() per-jReplica
+  startJurisdictionWatchers(env);
 
   // Start the runtime event loop (single async while-loop, never re-enters)
   if (isBrowser) {
@@ -3032,147 +3065,6 @@ const demoCompleteHanko = async (): Promise<void> => {
 };
 
 // Demo wrapper removed - use scenarios.ahb(env) or scenarios.grid(env) instead
-
-// === ENVIRONMENT UTILITIES ===
-
-const isEntryArray = (value: unknown): value is Array<[unknown, unknown]> =>
-  Array.isArray(value) && value.length > 0 && Array.isArray(value[0]) && value[0].length === 2;
-
-const normalizeReplicaMap = (raw: unknown): Map<string, EntityReplica> => {
-  let map: Map<string, EntityReplica>;
-  if (raw instanceof Map) {
-    map = raw as Map<string, EntityReplica>;
-  } else if (Array.isArray(raw)) {
-    if (raw.length === 0) return new Map();
-    if (isEntryArray(raw)) {
-      map = new Map(raw as Array<[string, EntityReplica]>);
-    } else {
-      throw new Error('Invalid eReplicas array format in snapshot');
-    }
-  } else if (raw && typeof raw === 'object') {
-    map = new Map(Object.entries(raw as Record<string, EntityReplica>));
-  } else {
-    throw new Error('Invalid eReplicas format in snapshot');
-  }
-
-  // Recovery safety: ensure signer/entity identity fields exist even if older
-  // snapshots only had them in the replica map key ("entityId:signerId").
-  for (const [key, replica] of map.entries()) {
-    if (!replica || typeof replica !== 'object') continue;
-    const [entityIdFromKey, signerIdFromKey] = String(key).split(':');
-    if (!replica.entityId && entityIdFromKey) {
-      (replica as EntityReplica).entityId = entityIdFromKey;
-    }
-    if (!replica.signerId && signerIdFromKey) {
-      (replica as EntityReplica).signerId = signerIdFromKey;
-    }
-    const accounts = replica.state?.accounts;
-    const normalizeAccountPendingSignatures = (account: unknown): void => {
-      if (!account || typeof account !== 'object') return;
-      if (!Array.isArray((account as { pendingSignatures?: unknown }).pendingSignatures)) {
-        // pendingSignatures is transient signer-round state. It is intentionally not
-        // persisted and must be reconstructed as empty on restore before validation.
-        (account as { pendingSignatures: string[] }).pendingSignatures = [];
-      }
-    };
-    if (accounts instanceof Map) {
-      for (const [, account] of accounts.entries()) {
-        normalizeAccountPendingSignatures(account);
-      }
-    } else if (Array.isArray(accounts)) {
-      for (const entry of accounts) {
-        if (Array.isArray(entry) && entry.length >= 2) {
-          normalizeAccountPendingSignatures(entry[1]);
-        }
-      }
-    } else if (accounts && typeof accounts === 'object') {
-      for (const account of Object.values(accounts as Record<string, unknown>)) {
-        normalizeAccountPendingSignatures(account);
-      }
-    }
-    map.set(key, replica);
-  }
-  return map;
-};
-
-const normalizeContractAddress = (value: unknown): string | undefined => {
-  if (typeof value === 'string') return value;
-  if (value && typeof value === 'object') {
-    const maybeAddress = (value as { address?: unknown }).address;
-    if (typeof maybeAddress === 'string') return maybeAddress;
-    if (typeof (value as { toString?: () => string }).toString === 'function') {
-      return (value as { toString: () => string }).toString();
-    }
-  }
-  return undefined;
-};
-
-const hasLiveJAdapter = (value: unknown): value is JAdapter => {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<JAdapter>;
-  return (
-    typeof candidate.startWatching === 'function' &&
-    typeof candidate.stopWatching === 'function' &&
-    typeof candidate.submitTx === 'function'
-  );
-};
-
-const normalizeJReplica = (jr: JReplica): JReplica => {
-  const { jadapter: rawJAdapter, ...rest } = jr as JReplica & { jadapter?: unknown };
-  if (!jr?.contracts) {
-    return {
-      ...rest,
-      ...(hasLiveJAdapter(rawJAdapter) ? { jadapter: rawJAdapter } : {}),
-    };
-  }
-  const depository = normalizeContractAddress(
-    jr.contracts.depository ?? (jr.contracts as { depositoryAddress?: unknown }).depositoryAddress,
-  );
-  const entityProvider = normalizeContractAddress(
-    jr.contracts.entityProvider ?? (jr.contracts as { entityProviderAddress?: unknown }).entityProviderAddress,
-  );
-  const account = normalizeContractAddress(jr.contracts.account);
-  const deltaTransformer = normalizeContractAddress(jr.contracts.deltaTransformer);
-  return {
-    ...rest,
-    ...(depository ? { depositoryAddress: depository } : {}),
-    ...(entityProvider ? { entityProviderAddress: entityProvider } : {}),
-    ...(hasLiveJAdapter(rawJAdapter) ? { jadapter: rawJAdapter } : {}),
-    contracts: {
-      ...jr.contracts,
-      ...(depository ? { depository } : {}),
-      ...(entityProvider ? { entityProvider } : {}),
-      ...(account ? { account } : {}),
-      ...(deltaTransformer ? { deltaTransformer } : {}),
-    },
-  };
-};
-
-const normalizeJReplicaMap = (raw: unknown): Map<string, JReplica> => {
-  if (raw instanceof Map) return raw as Map<string, JReplica>;
-  if (Array.isArray(raw)) {
-    if (raw.length === 0) return new Map();
-    if (isEntryArray(raw)) {
-      const map = new Map(raw as Array<[string, JReplica]>);
-      for (const [name, jr] of map.entries()) {
-        map.set(name, normalizeJReplica(jr));
-      }
-      return map;
-    }
-    const first = raw[0] as any;
-    if (first && typeof first === 'object' && typeof first.name === 'string') {
-      return new Map((raw as JReplica[]).map(jr => [jr.name, normalizeJReplica(jr)]));
-    }
-  }
-  if (raw && typeof raw === 'object') {
-    const map = new Map(Object.entries(raw as Record<string, JReplica>));
-    for (const [name, jr] of map.entries()) {
-      map.set(name, normalizeJReplica(jr));
-    }
-    return map;
-  }
-  return new Map();
-};
 
 export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   const normalizedSeed = Array.isArray(seed) ? new Uint8Array(seed) : seed;
@@ -3749,13 +3641,53 @@ export const getPersistedLatestHeight = async (env: Env): Promise<number> => {
   });
 };
 
+export const listPersistedCheckpointHeights = async (env: Env): Promise<number[]> => {
+  return listPersistedCheckpointHeightsWal(env, {
+    tryOpenDb,
+    getRuntimeDb,
+    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
+    isDbUnavailableError,
+    isDbNotFound,
+  });
+};
+
+export const verifyRuntimeChain = async (
+  runtimeId?: string | null,
+  runtimeSeed?: string | null,
+  options?: { fromSnapshotHeight?: number },
+): Promise<VerifyRuntimeChainResult> => {
+  return verifyPersistedRuntimeState({
+    runtimeId,
+    runtimeSeed,
+    fromSnapshotHeight: options?.fromSnapshotHeight,
+    persistenceSchemaVersion: PERSISTENCE_SCHEMA_VERSION,
+    createEmptyEnv,
+    tryOpenDb,
+    getRuntimeDb,
+    resolveDbNamespace,
+    isDbNotFound,
+    deriveRuntimeIdFromSeed: (seed: string) => deriveSignerAddressSync(seed, '1'),
+    assertPersistedContractConfigReady,
+    validateEntityState,
+    buildCanonicalEnvSnapshot,
+    ensureRuntimeState,
+    applyRuntimeInput,
+    buildSkippedReplayAckKey,
+    buildSkippedReplayNewFrameKey,
+    safeStringify,
+    normalizeEntitySwapTradingPairs,
+    replayModeKey: ENV_REPLAY_MODE_KEY,
+    replaySkippedAccountInputsKey: ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY,
+    applyAllowedKey: ENV_APPLY_ALLOWED_KEY,
+  });
+};
+
 export const readPersistedFrameJournal = async (env: Env, height: number): Promise<PersistedFrameJournal | null> => {
   return readPersistedFrameJournalWal(env, height, {
     tryOpenDb,
     getRuntimeDb,
     resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
     isDbUnavailableError,
-    readPersistedFrameJournalFromDb,
   });
 };
 
@@ -3772,254 +3704,49 @@ export const readPersistedFrameJournals = async (
     getRuntimeDb,
     resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
     isDbUnavailableError,
-    readPersistedFrameJournalsFromDb,
   });
 };
-
-function rebuildEntitySwapBookFromAccounts(env: Env): void {
-  for (const replica of env.eReplicas.values()) {
-    const rebuiltSwapBook = new Map<string, Record<string, unknown>>();
-    for (const [accountId, account] of replica.state.accounts.entries()) {
-      if (!(account?.swapOffers instanceof Map)) continue;
-      for (const [offerId, offer] of account.swapOffers.entries()) {
-        const swapBookKey = `${String(accountId)}:${String(offerId)}`;
-        rebuiltSwapBook.set(swapBookKey, {
-          ...(offer as Record<string, unknown>),
-          offerId: String((offer as { offerId?: unknown })?.offerId || offerId || ''),
-          accountId: String(accountId),
-        });
-      }
-    }
-    replica.state.swapBook = rebuiltSwapBook as typeof replica.state.swapBook;
-  }
-}
-
-function rebuildEntityLockBookFromAccounts(env: Env): void {
-  for (const replica of env.eReplicas.values()) {
-    const rebuiltLockBook = new Map<string, Record<string, unknown>>();
-    for (const [accountId, account] of replica.state.accounts.entries()) {
-      if (!(account?.locks instanceof Map)) continue;
-      const iAmLeft = replica.entityId === account.leftEntity;
-      for (const [lockId, lock] of account.locks.entries()) {
-      const direction =
-          (lock.senderIsLeft && iAmLeft) || (!lock.senderIsLeft && !iAmLeft)
-            ? 'outgoing'
-            : 'incoming';
-        if (direction !== 'outgoing') continue;
-        rebuiltLockBook.set(lockId, {
-          lockId,
-          accountId: String(accountId),
-          tokenId: Number(lock.tokenId),
-          amount: BigInt(lock.amount),
-          hashlock: String(lock.hashlock),
-          timelock: BigInt(lock.timelock),
-          direction,
-          createdAt: BigInt(lock.createdTimestamp),
-        });
-      }
-    }
-    replica.state.lockBook = rebuiltLockBook as typeof replica.state.lockBook;
-  }
-}
-
-function rebuildEntityOrderbookExtFromAccounts(env: Env): void {
-  for (const replica of env.eReplicas.values()) {
-    const snapshotExt = replica.state.orderbookExt as
-      | {
-          hubProfile?: Record<string, unknown>;
-          books?: Map<string, unknown>;
-          referrals?: Map<string, unknown>;
-        }
-      | undefined;
-    if (!snapshotExt?.hubProfile) continue;
-
-    const rebuiltExt = createOrderbookExtState(structuredClone(snapshotExt.hubProfile as never));
-    replica.state.orderbookExt = rebuiltExt as typeof replica.state.orderbookExt;
-
-    const swapOffers = Array.from(replica.state.accounts.entries())
-      .sort((left, right) => left[0].localeCompare(right[0]))
-      .flatMap(([accountId, account]) =>
-        Array.from(account.swapOffers.entries())
-          .sort((left, right) => {
-            const heightDiff = Number(left[1].createdHeight) - Number(right[1].createdHeight);
-            if (heightDiff !== 0) return heightDiff;
-            return String(left[0]).localeCompare(String(right[0]));
-          })
-          .map(([offerId, offer]) => ({
-            offerId: String(offerId),
-            makerIsLeft: offer.makerIsLeft,
-            fromEntity: account.leftEntity,
-            toEntity: account.rightEntity,
-            accountId: String(accountId),
-            giveTokenId: Number(offer.giveTokenId),
-            giveAmount: BigInt(offer.giveAmount),
-            wantTokenId: Number(offer.wantTokenId),
-            wantAmount: BigInt(offer.wantAmount),
-            minFillRatio: Number(offer.minFillRatio),
-          })),
-      );
-
-    if (swapOffers.length === 0) continue;
-    const result = processOrderbookSwaps(replica.state, swapOffers);
-    if (result.mempoolOps.length > 0) {
-      throw new Error(
-        `ORDERBOOK_REHYDRATE_INVARIANT_FAILED: entity=${replica.entityId} generated ${result.mempoolOps.length} mempool ops during rebuild`,
-      );
-    }
-    for (const update of result.bookUpdates) {
-      rebuiltExt.books.set(update.pairId, update.book);
-    }
-  }
-}
 
 export const loadEnvFromDB = async (
   runtimeId?: string | null,
   runtimeSeed?: string | null,
-  options?: { fromGenesis?: boolean },
+  options?: { fromSnapshotHeight?: number },
 ): Promise<Env | null> => {
-  const isDbNotFound = (error: unknown): boolean => {
-    if (!error || typeof error !== 'object') return false;
-    const code = String((error as { code?: unknown }).code ?? '');
-    const name = String((error as { name?: unknown }).name ?? '');
-    return code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError';
-  };
   try {
-    const latestEnv = await loadRuntimeEnvFromWal({
+    const latestEnv = await loadRuntimeStateFromDb({
       runtimeId,
       runtimeSeed,
-      fromGenesis: options?.fromGenesis === true,
+      fromSnapshotHeight: Number.isFinite(options?.fromSnapshotHeight)
+        ? Math.floor(Number(options?.fromSnapshotHeight))
+        : undefined,
       persistenceSchemaVersion: PERSISTENCE_SCHEMA_VERSION,
       createEmptyEnv,
       tryOpenDb,
       getRuntimeDb,
       resolveDbNamespace,
       isDbNotFound,
-      replayDeps: {
-        normalizeSnapshotInPlace: (snapshot) =>
-          normalizePersistedSnapshotInPlace(snapshot, {
-            normalizeReplicaMap: (raw) => normalizeReplicaMap(raw),
-            normalizeJReplicaMap: (raw) => normalizeJReplicaMap(raw),
-          }),
-        createEmptyEnv,
-        deriveRuntimeIdFromSeed: (seed: string) => deriveSignerAddressSync(seed, '1'),
-        normalizeReplicaMap: (raw) => normalizeReplicaMap(raw),
-        normalizeJReplicaMap: (raw) => normalizeJReplicaMap(raw),
-        assertPersistedContractConfigReady,
-        validateEntityState,
-        rebuildEntitySwapBookFromAccounts,
-        rebuildEntityLockBookFromAccounts,
-        rebuildEntityOrderbookExtFromAccounts,
-        buildCanonicalEnvSnapshot,
-        ensureRuntimeState,
-        applyRuntimeInput,
-        buildSkippedReplayAckKey,
-        buildSkippedReplayNewFrameKey,
-        safeStringify,
-        normalizeEntitySwapTradingPairs,
-        isDbNotFound,
-        replayModeKey: ENV_REPLAY_MODE_KEY,
-        replaySkippedAccountInputsKey: ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY,
-        applyAllowedKey: ENV_APPLY_ALLOWED_KEY,
-      },
+      deriveRuntimeIdFromSeed: (seed: string) => deriveSignerAddressSync(seed, '1'),
+      assertPersistedContractConfigReady,
+      validateEntityState,
+      buildCanonicalEnvSnapshot,
+      ensureRuntimeState,
+      applyRuntimeInput,
+      buildSkippedReplayAckKey,
+      buildSkippedReplayNewFrameKey,
+      safeStringify,
+      normalizeEntitySwapTradingPairs,
+      replayModeKey: ENV_REPLAY_MODE_KEY,
+      replaySkippedAccountInputsKey: ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY,
+      applyAllowedKey: ENV_APPLY_ALLOWED_KEY,
     });
 
     if (latestEnv) {
-      await loadGossipProfilesFromInfraDb(latestEnv);
-
-      // Restore the global proof-builder transformer address before any live inputs arrive.
-      // JAdapters reconnect asynchronously after DB load, but dispute/payment proof building
-      // may happen immediately during replay or inbound processing.
-      assertPersistedContractConfigReady(latestEnv, 'loadEnvFromDB post-replay');
-
-      // Restore BrowserVM if state was persisted
-      let restoredBrowserVM: any = null;
-      if (latestEnv.browserVMState && isBrowser) {
-        try {
-          const { BrowserVMProvider } = await import('./jadapter');
-          const browserVM = new BrowserVMProvider();
-          await browserVM.init();
-          await browserVM.restoreState(latestEnv.browserVMState);
-          latestEnv.browserVM = browserVM;
-          restoredBrowserVM = browserVM;
-          setBrowserVMJurisdiction(latestEnv, browserVM.getDepositoryAddress(), browserVM);
-          if (typeof window !== 'undefined') {
-            (window as any).__xlnBrowserVM = browserVM;
-          }
-          console.log('✅ BrowserVM restored from loadEnvFromDB');
-        } catch (error) {
-          console.warn('⚠️ Failed to restore BrowserVM state (loadEnvFromDB):', error);
-        }
-      }
-
-      // Derive JAdapters for all jReplicas (they are not serialized — runtime objects)
-      if (latestEnv.jReplicas && latestEnv.jReplicas.size > 0) {
-        const { createJAdapter } = await import('./jadapter');
-        const { createBrowserVMAdapter } = await import('./jadapter/browservm');
-
-        for (const [name, jReplica] of latestEnv.jReplicas.entries()) {
-          if (jReplica.jadapter && !hasLiveJAdapter(jReplica.jadapter)) {
-            delete (jReplica as JReplica & { jadapter?: unknown }).jadapter;
-          }
-          if (jReplica.jadapter) continue; // Already has a live adapter
-
-          try {
-            const hasRpcs = jReplica.rpcs && jReplica.rpcs.length > 0 && jReplica.rpcs[0] !== '';
-            const chainId = jReplica.chainId ?? 31337;
-
-            if (!hasRpcs && restoredBrowserVM) {
-              // BrowserVM mode: wrap restored VM in JAdapter
-              const jadapter = await createJAdapter({
-                mode: 'browservm',
-                chainId,
-                browserVMState: undefined, // VM already restored above
-              });
-              // Replace the inner browserVM with the already-restored one
-              const inner = jadapter.getBrowserVM();
-              if (inner && restoredBrowserVM) {
-                // The VM was already initialized fresh in createJAdapter.
-                // We need to use the restored VM instead. Re-create with it.
-                const { BrowserVMEthersProvider } = await import('./jadapter/browservm-ethers-provider');
-                const provider = new BrowserVMEthersProvider(restoredBrowserVM);
-                const { ethers } = await import('ethers');
-                const { DEFAULT_PRIVATE_KEY } = await import('./jadapter/helpers');
-                const signer = new ethers.Wallet(DEFAULT_PRIVATE_KEY, provider);
-                const adapter = await createBrowserVMAdapter(
-                  { mode: 'browservm', chainId },
-                  provider,
-                  signer,
-                  restoredBrowserVM,
-                );
-                jReplica.jadapter = adapter;
-              } else {
-                jReplica.jadapter = jadapter;
-              }
-            } else if (hasRpcs) {
-              // RPC mode: connect using stored rpcs + addresses
-              const jadapter = await createJAdapter({
-                mode: 'rpc',
-                chainId,
-                rpcUrl: jReplica.rpcs![0],
-                fromReplica: jReplica as any, // Pass addresses for connect-only mode
-              });
-              if (!jadapter.addresses?.depository || !jadapter.addresses?.entityProvider) {
-                throw new Error(
-                  `RESTORE_JADAPTER_ADDRESSES_MISSING: name=${name} ` +
-                    `depository=${jadapter.addresses?.depository || 'none'} ` +
-                    `entityProvider=${jadapter.addresses?.entityProvider || 'none'}`,
-                );
-              }
-              jReplica.jadapter = jadapter;
-            }
-
-            if (jReplica.jadapter) {
-              jReplica.jadapter.startWatching(latestEnv);
-              console.log(`✅ JAdapter derived for jReplica "${name}" (${hasRpcs ? 'rpc' : 'browservm'})`);
-            }
-          } catch (error) {
-            console.warn(`⚠️ Failed to derive JAdapter for jReplica "${name}":`, error);
-          }
-        }
-      }
+      await rehydrateRestoredRuntimeInfra(latestEnv, {
+        isBrowser,
+        loadGossipProfiles: loadGossipProfilesFromInfraDb,
+        assertPersistedContractConfigReady,
+        setBrowserVMJurisdiction,
+      });
     }
 
     return latestEnv;

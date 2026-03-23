@@ -8,7 +8,7 @@
 
 import type { EntityInput, EntityState, EntityTx } from '../../types';
 import { addMessage, cloneEntityState } from '../../state-helpers';
-import { batchAddReserveToExternal, initJBatch } from '../../j-batch';
+import { batchAddReserveToExternal, getEffectiveDraftReserveBalance, initJBatch } from '../../j-batch';
 
 export async function handleReserveToExternal(
   entityState: EntityState,
@@ -18,7 +18,12 @@ export async function handleReserveToExternal(
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
-  const currentReserve = entityState.reserves.get(tokenId) || 0n;
+  const currentReserve = getEffectiveDraftReserveBalance(
+    entityState.entityId,
+    entityState.reserves.get(tokenId) || 0n,
+    entityState.jBatchState?.batch,
+    tokenId,
+  );
   if (currentReserve < amount) {
     const message = `❌ Insufficient reserve: have ${currentReserve}, need ${amount} token ${tokenId}`;
     addMessage(newState, message);

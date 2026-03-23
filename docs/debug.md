@@ -128,10 +128,10 @@ REA metadata path:
   - frame proposal failed
   - ACK timeout
   - validation failure
-- Payment lifecycle:
-  - `PaymentInitiated`
-  - `PaymentFinalized`
-  - `PaymentFailed`
+- HTLC lifecycle:
+  - `HtlcInitiated`
+  - `HtlcFinalized`
+  - `HtlcFailed`
 
 ## Coding Pattern
 
@@ -149,7 +149,7 @@ env.error('network', 'ENVELOPE_DECRYPT_FAIL', {
 Do:
 
 ```ts
-env.emit('PaymentFinalized', {
+env.emit('HtlcFinalized', {
   hashlock,
   secret,
   inboundEntity,
@@ -242,7 +242,7 @@ bun run scenario:ah1-3b
 All three must pass in the same run window:
 
 1. No `error` events in `/api/debug/events` attributable to the scenario window.
-2. Payment lifecycle includes `PaymentInitiated` and `PaymentFinalized`.
+2. HTLC lifecycle includes `HtlcInitiated` and `HtlcFinalized`.
 3. No stuck `AWAITING CONSENSUS` accounts after scenario completion.
 4. No lingering unresolved HTLC locks for the scenario entities.
 

@@ -359,6 +359,66 @@ export function preflightBatchForE2(
   return issues;
 }
 
+/**
+ * Compute the net reserve delta already queued in the current draft batch for one entity/token.
+ * Earlier incoming ops in the same batch must be spendable by later outgoing ops.
+ */
+export function getDraftBatchReserveDelta(
+  entityId: string,
+  batch: JBatch | null | undefined,
+  tokenId: number,
+): bigint {
+  if (!batch) return 0n;
+
+  const normalizedEntityId = normalizeEntityId(entityId);
+  let delta = 0n;
+
+  for (const op of batch.externalTokenToReserve) {
+    const target = op.entity ? normalizeEntityId(op.entity) : normalizedEntityId;
+    if (target === normalizedEntityId && op.internalTokenId === tokenId) {
+      delta += op.amount;
+    }
+  }
+
+  for (const op of batch.collateralToReserve) {
+    if (op.tokenId === tokenId) {
+      delta += op.amount;
+    }
+  }
+
+  for (const op of batch.reserveToReserve) {
+    if (op.tokenId !== tokenId) continue;
+    delta -= op.amount;
+    if (normalizeEntityId(op.receivingEntity) === normalizedEntityId) {
+      delta += op.amount;
+    }
+  }
+
+  for (const op of batch.reserveToExternalToken) {
+    if (op.tokenId === tokenId) {
+      delta -= op.amount;
+    }
+  }
+
+  for (const op of batch.reserveToCollateral) {
+    if (op.tokenId !== tokenId) continue;
+    for (const pair of op.pairs) {
+      delta -= pair.amount;
+    }
+  }
+
+  return delta;
+}
+
+export function getEffectiveDraftReserveBalance(
+  entityId: string,
+  currentReserve: bigint,
+  batch: JBatch | null | undefined,
+  tokenId: number,
+): bigint {
+  return currentReserve + getDraftBatchReserveDelta(entityId, batch, tokenId);
+}
+
 export function computeBatchHankoHash(
   chainId: bigint,
   depositoryAddress: string,

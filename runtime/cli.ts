@@ -11,6 +11,7 @@ import * as readline from 'readline';
 import { createJAdapter, type JAdapter } from './jadapter';
 import { ethers } from 'ethers';
 import { createProviderScopedEntityId, normalizeEntityId } from './entity-id-utils';
+import { createEmptyBatch, batchAddReserveToReserve, encodeJBatch } from './j-batch';
 
 const REMOTE_RPC = 'https://xln.finance/rpc/arrakis';
 const LOCAL_RPC = 'http://127.0.0.1:8545';
@@ -67,7 +68,15 @@ async function init(remote: boolean) {
       const providerAddr = options.entityProvider || CONTRACTS.entityProvider;
       const fromAddr = createProviderScopedEntityId(providerAddr, normalizeEntityId(from));
       const toAddr = createProviderScopedEntityId(providerAddr, normalizeEntityId(to));
-      const tx = await depository.reserveToReserve(fromAddr, toAddr, tokenId, amount, providerAddr, options.hankoData, options.nonce);
+      const batch = createEmptyBatch();
+      batchAddReserveToReserve(
+        { batch, jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0, status: 'empty' },
+        toAddr,
+        tokenId,
+        amount,
+      );
+      const encodedBatch = encodeJBatch(batch);
+      const tx = await depository.processBatch(encodedBatch, providerAddr, options.hankoData, options.nonce);
       await tx.wait();
       return [];
     },

@@ -754,7 +754,36 @@
 
   .threshold-selector input[type="range"] {
     flex: 1;
-    accent-color: #fbbf24;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 2px;
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.7), rgba(113, 113, 122, 0.3));
+    border-radius: 1px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  .threshold-selector input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #fbbf24;
+    border: 2px solid #0d0e12;
+    border-radius: 2px;
+    transform: rotate(45deg);
+    cursor: pointer;
+    box-shadow: 0 0 4px rgba(251, 191, 36, 0.3);
+  }
+
+  .threshold-selector input[type="range"]::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: #fbbf24;
+    border: 2px solid #0d0e12;
+    border-radius: 2px;
+    transform: rotate(45deg);
+    cursor: pointer;
+    box-shadow: 0 0 4px rgba(251, 191, 36, 0.3);
   }
 
   .threshold-display {

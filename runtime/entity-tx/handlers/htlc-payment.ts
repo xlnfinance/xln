@@ -72,7 +72,7 @@ export async function handleHtlcPayment(
   }
 
   // Emit HTLC initiation event
-  env.emit('HtlcPaymentInitiated', {
+  env.emit('HtlcInitiated', {
     fromEntity: entityState.entityId,
     toEntity: entityTx.data.targetEntityId,
     tokenId: entityTx.data.tokenId,

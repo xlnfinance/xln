@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import { settings } from '$lib/stores/settingsStore';
   import DeltaCapacityBar from './DeltaCapacityBar.svelte';
   import type { DeltaParts, DeltaVisualScale } from './delta-types';
   import { buildTokenVisualScale } from './delta-visual';
@@ -63,6 +64,25 @@
   function emitAction(): void {
     dispatch('action', { tokenId: actionTokenId });
   }
+
+  // Delta flash: show "+100" / "-50" on capacity change
+  let deltaFlashText = '';
+  let deltaFlashPositive = true;
+  let deltaFlashVisible = false;
+  let prevOutCapacity = 0n;
+  $: {
+    const cur = derived.outCapacity;
+    if (($settings.barAnimDeltaFlash ?? false) && prevOutCapacity !== 0n && cur !== prevOutCapacity) {
+      const diff = cur - prevOutCapacity;
+      const sign = diff > 0n ? '+' : '';
+      const raw = Number(diff) / (10 ** decimals);
+      deltaFlashText = `${sign}${raw.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+      deltaFlashPositive = diff > 0n;
+      deltaFlashVisible = true;
+      setTimeout(() => { deltaFlashVisible = false; }, 1500);
+    }
+    prevOutCapacity = cur;
+  }
 </script>
 
 <div class="delta-summary" class:compact>
@@ -81,6 +101,9 @@
           <span class="compact-out-value">
             <span>{outAmountCompact}</span>
             {#if outUsdHint}<span class="usd-hint">{outUsdHint}</span>{/if}
+            {#if deltaFlashVisible}
+              <span class="delta-flash" class:positive={deltaFlashPositive} class:negative={!deltaFlashPositive}>{deltaFlashText}</span>
+            {/if}
           </span>
           {#if actionLabel}
             <button class="summary-action-inline" on:click={emitAction} disabled={actionDisabled}>
@@ -88,7 +111,6 @@
             </button>
           {/if}
         </div>
-        <span class="metric-divider" aria-hidden="true"></span>
         <div class="compact-metric compact-in" aria-label="In capacity">
           {#if showMetricLabels}<span class="metric-label">In</span>{/if}
           <span class="compact-in-value">
@@ -285,16 +307,17 @@
   }
 
   .summary-action {
-    font-size: 11px;
-    padding: 0 12px;
-    height: 32px;
-    border-radius: 7px;
-    border: 1px solid rgba(134, 239, 172, 0.34);
-    background: rgba(34, 197, 94, 0.18);
-    color: #dcfce7;
+    font-size: 7px;
+    padding: 1px 5px;
+    height: auto;
+    border-radius: 3px;
+    border: 1px solid #3f3f46;
+    background: transparent;
+    color: #52525b;
     cursor: pointer;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    font-weight: 600;
     transition: all 0.15s;
     display: inline-flex;
     align-items: center;
@@ -321,17 +344,17 @@
   }
 
   .summary-action-inline {
-    font-size: 9px;
+    font-size: 7px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: 1px 4px;
+    border-radius: 3px;
     border: 1px solid #3f3f46;
     background: transparent;
-    color: #71717a;
+    color: #52525b;
     cursor: pointer;
-    margin-left: 6px;
+    margin-left: 5px;
     transition: all 0.15s ease;
     line-height: 1.2;
   }
@@ -544,5 +567,21 @@
     .compact-in-value {
       font-size: 19px;
     }
+  }
+
+  /* Delta flash animation */
+  .delta-flash {
+    font-size: 0.65em;
+    font-weight: 700;
+    margin-left: 6px;
+    animation: flash-fade 1.5s ease-out forwards;
+    pointer-events: none;
+  }
+  .delta-flash.positive { color: #22c55e; }
+  .delta-flash.negative { color: #ef4444; }
+  @keyframes flash-fade {
+    0% { opacity: 1; transform: translateY(0); }
+    70% { opacity: 0.8; transform: translateY(-4px); }
+    100% { opacity: 0; transform: translateY(-8px); }
   }
 </style>

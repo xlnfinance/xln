@@ -362,7 +362,7 @@ async function waitForDaemonReceiptEvent(
       fromHeight,
       limit: 250,
       entityId: targetEntityId,
-      eventNames: ['HtlcReceived', 'PaymentFinalized', 'PaymentFailed'],
+      eventNames: ['HtlcReceived', 'HtlcFinalized', 'HtlcFailed'],
     });
 
     for (const receipt of response.receipts) {
@@ -604,7 +604,7 @@ async function getDaemonReceiptCursor(
     fromHeight: 1,
     limit: 250,
     entityId: targetEntityId,
-    eventNames: ['HtlcReceived', 'PaymentFinalized', 'PaymentFailed'],
+    eventNames: ['HtlcReceived', 'HtlcFinalized', 'HtlcFailed'],
   });
   let nextHeight = 1;
   for (const receipt of response.receipts) {

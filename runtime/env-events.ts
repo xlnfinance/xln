@@ -41,10 +41,8 @@ const addCleanLog = (env: Env, level: string, msg: string): void => {
 };
 
 const HIGH_SIGNAL_EVENTS = new Set([
-  'PaymentInitiated',
-  'PaymentFinalized',
-  'PaymentFailed',
-  'HtlcPaymentInitiated',
+  'HtlcInitiated',
+  'HtlcFailed',
   'HtlcReceived',
   'HtlcFinalized',
   // J-event ingress is the canonical source-of-truth signal that an on-chain event

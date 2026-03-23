@@ -317,17 +317,11 @@ const processFrameLog = (height: number, log: DaemonFrameLog): void => {
     return;
   }
 
-  if (log.message === 'PaymentFinalized') {
+  if (log.message === 'HtlcFinalized') {
     const data = log.data || {};
     const entityId = getLogString(data.entityId).toLowerCase();
     if (entityId !== CUSTODY_ENTITY_ID) return;
     const hashlock = getLogString(data.hashlock);
-    const finalRecipient = data.finalRecipient === true;
-    if (finalRecipient) {
-      creditDepositFromLog(height, log);
-      return;
-    }
-
     if (hashlock) {
       store.finalizeWithdrawalByHashlock({
         hashlock,
@@ -338,7 +332,7 @@ const processFrameLog = (height: number, log: DaemonFrameLog): void => {
     return;
   }
 
-  if (log.message === 'PaymentFailed') {
+  if (log.message === 'HtlcFailed') {
     const data = log.data || {};
     const entityId = getLogString(data.entityId).toLowerCase();
     if (entityId !== CUSTODY_ENTITY_ID) return;
@@ -363,7 +357,7 @@ const syncJournal = async (): Promise<void> => {
       fromHeight,
       limit: 250,
       entityId: CUSTODY_ENTITY_ID,
-      eventNames: ['HtlcReceived', 'PaymentFinalized', 'PaymentFailed'],
+      eventNames: ['HtlcReceived', 'HtlcFinalized', 'HtlcFailed'],
     });
 
     for (const receipt of response.receipts) {
@@ -413,8 +407,7 @@ const server = Bun.serve({
     const pathname = url.pathname;
 
     if (pathname === '/') {
-      const { setCookie } = ensureSession(req);
-      return html(Bun.file(new URL('./index.html', staticDir)), setCookie);
+      return html(Bun.file(new URL('./index.html', staticDir)));
     }
 
     if (pathname === '/app.js') {

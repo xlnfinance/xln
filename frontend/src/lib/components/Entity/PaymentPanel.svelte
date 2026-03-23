@@ -1353,7 +1353,7 @@
         if (String(data.hashlock || '').trim() !== hashlock) continue;
         const eventEntityNorm = normalizeEntityId(String(data.entityId || ''));
         if (eventEntityNorm && eventEntityNorm !== entityNorm) continue;
-        if (message === 'PaymentFailed') {
+        if (message === 'HtlcFailed') {
           throw new Error(String(data.reason || 'Payment failed'));
         }
         if (message === 'HtlcFinalized') {

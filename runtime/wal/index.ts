@@ -8,13 +8,11 @@ export {
 } from './hash';
 export {
   replayFromSnapshotBuffer,
-  selectReplayRetryFromGenesis,
   selectReplayStart,
 } from './replay';
 export type {
   ReplayFromSnapshotOptions,
   ReplaySnapshotDeps,
-  ReplayStartMode,
   ReplayStartSelection,
 } from './replay';
 export {
@@ -22,8 +20,8 @@ export {
   buildPersistedFrameWriteOps,
   decodePersistedFrameJournal,
   encodePersistedFrameJournal,
+  listPersistedSnapshotHeightsFromDb,
   readPersistedFrameJournalFromDb,
-  readPersistedFrameJournalsFromDb,
   readPersistedCheckpointHeight,
   readPersistedFrameJournalBuffer,
   readPersistedLatestHeight,
@@ -31,7 +29,6 @@ export {
   readPersistedSnapshotBuffer,
   verifyPersistedFrameWrite,
   writePersistedWalOps,
-  writePersistedWalOpsSequential,
 } from './store';
 export type {
   PersistedFrameJournal,
@@ -41,8 +38,11 @@ export type {
 } from './store';
 export {
   getPersistedLatestHeight,
+  listPersistedCheckpointHeights,
   loadRuntimeEnvFromWal,
   readPersistedFrameJournal,
   readPersistedFrameJournals,
   saveRuntimeFrameToWal,
+  verifyRuntimeChainFromWal,
 } from './runtime';
+export type { VerifyRuntimeChainResult } from './runtime';

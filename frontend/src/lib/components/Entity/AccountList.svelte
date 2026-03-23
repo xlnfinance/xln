@@ -105,6 +105,10 @@
     dispatch('settleApprove', event.detail);
   }
 
+  function forwardDispute(event: CustomEvent) {
+    dispatch('dispute', event.detail);
+  }
+
   function normalizeId(id: string): string {
     return String(id || '').toLowerCase();
   }
@@ -183,6 +187,7 @@
               on:select={selectAccount}
               on:faucet={forwardFaucet}
               on:settleApprove={forwardSettleApprove}
+              on:dispute={forwardDispute}
             />
           {/each}
         </div>

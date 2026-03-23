@@ -2,6 +2,7 @@
     import type { AccountMachine, AccountTx, EntityReplica, Tab } from '$lib/types/ui';
   import { enqueueEntityInputs, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
+  import { toasts } from '../../stores/toastStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { amountToUsd } from '$lib/utils/assetPricing';
   import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
@@ -33,8 +34,7 @@
     return /^10*$/.test(s) ? Math.max(0, s.length - 1) : 0;
   }
   const ORDERBOOK_PRICE_DECIMALS = decimalPlacesFromScale(ORDERBOOK_PRICE_SCALE);
-  const PRICE_RATIO_DECIMALS = 6;
-  const PRICE_RATIO_SCALE = 10n ** BigInt(PRICE_RATIO_DECIMALS);
+  const MAX_PRICE_DEVIATION_BPS = 3000n; // 30%
   type BookSide = 'bid' | 'ask';
   type SwapOfferLike = {
     offerId?: string;
@@ -58,18 +58,24 @@
     accountId: string;
     accountIds: string[];
   };
-  type SnapshotLevel = { price: number; size: number; total: number };
+  type SnapshotLevel = { price: bigint; size: number; total: number };
   type OrderbookSnapshot = {
     pairId: string;
     bids: SnapshotLevel[];
     asks: SnapshotLevel[];
-    spread: number | null;
+    spread: bigint | null;
     spreadPercent: string;
     sourceCount: number;
     updatedAt: number;
   };
   type ClosedOrderStatus = 'filled' | 'partial' | 'canceled' | 'closed';
-  type ResolveRecord = { fillRatio: number; cancelRemainder: boolean; timestamp: number };
+  type ResolveRecord = {
+    fillRatio: number;
+    cancelRemainder: boolean;
+    timestamp: number;
+    rebateAmount: bigint;
+    rebateTokenId: number | null;
+  };
   type OfferLifecycle = {
     offerId: string;
     accountId: string;
@@ -95,9 +101,22 @@
     filledGiveAmount: bigint;
     filledWantAmount: bigint;
     filledPercent: number;
+    rebateAmount: bigint;
+    rebateTokenId: number | null;
     status: ClosedOrderStatus;
     createdAt: number;
     closedAt: number;
+  };
+  type SwapCompletionModal = {
+    offerId: string;
+    side: 'Ask' | 'Bid';
+    pairLabel: string;
+    filledGiveAmount: bigint;
+    filledWantAmount: bigint;
+    giveTokenId: number;
+    wantTokenId: number;
+    rebateAmount: bigint;
+    rebateTokenId: number | null;
   };
   let selectedOrderLevel: ClickedOrderLevel | null = null;
   let orderbookSnapshot: OrderbookSnapshot = {
@@ -113,7 +132,11 @@
   let orderbookViewKey = '';
   let orderPercent = 100;
   let slippagePct = 0; // 0 = strict limit, 0.1-10 = market order with cap
+  let orderType: 'market' | 'limit' = 'limit';
+  const MARKET_SLIPPAGE_PCT = 5; // Market orders use ±5% from best price
   let submitError = '';
+  let pendingSwapFeedbackOfferId = '';
+  let swapCompletionModal: SwapCompletionModal | null = null;
   let selectedPairValue = '';
   let tradeSide: 'buy-base' | 'sell-base' = 'buy-base';
   let hasAutoSuggestedInitialPrice = false;
@@ -129,7 +152,6 @@
   let parsedOrderbookPair: { baseTokenId: number; quoteTokenId: number } | null = null;
   let orderMode: 'buy-base' | 'sell-base' | 'none' = 'none';
   let limitPriceTicks: bigint | null = null;
-  let priceRatioScaled = 0n;
   let orderListTab: 'open' | 'closed' = 'open';
   let closedOrderStatusFilter: 'all' | ClosedOrderStatus = 'all';
   const MIN_ORDER_NOTIONAL_USD = 10;
@@ -328,7 +350,6 @@
   function setTradeSide(next: 'buy-base' | 'sell-base'): void {
     tradeSide = next;
     selectedOrderLevel = null;
-    orderPercent = 100;
   }
 
   $: if (selectedPair) {
@@ -378,15 +399,6 @@
     return whole * scale + frac;
   }
 
-  function formatScaled(value: bigint, decimals: number): string {
-    if (value <= 0n) return '0';
-    const scale = 10n ** BigInt(Math.max(0, decimals));
-    const whole = value / scale;
-    const frac = value % scale;
-    if (frac === 0n) return whole.toString();
-    return `${whole.toString()}.${frac.toString().padStart(Math.max(0, decimals), '0').replace(/0+$/, '')}`;
-  }
-
   function normalizeDecimalInput(raw: string, maxDecimals: number): string {
     const prepared = String(raw || '').replace(',', '.').replace(/[^\d.]/g, '');
     if (!prepared) return '';
@@ -403,14 +415,13 @@
   function handlePriceRatioInput(event: Event): void {
     const target = event.currentTarget as HTMLInputElement | null;
     hasUserEditedPriceInput = true;
-    const normalized = normalizeDecimalInput(target?.value || '', PRICE_RATIO_DECIMALS);
+    const normalized = normalizeDecimalInput(target?.value || '', ORDERBOOK_PRICE_DECIMALS);
     if (selectedOrderLevel) {
       const pinnedPrice = selectedOrderLevel.displayPrice
         ? normalizeDisplayPriceForInput(selectedOrderLevel.displayPrice)
         : formatPriceTicks(selectedOrderLevel.inputPriceTicks > 0n ? selectedOrderLevel.inputPriceTicks : selectedOrderLevel.priceTicks);
       if (normalizeDisplayPriceForInput(normalized) !== pinnedPrice) {
         selectedOrderLevel = null;
-        orderPercent = 100;
       }
     }
     priceRatioInput = normalized;
@@ -540,7 +551,7 @@
   $: formattedAvailableWantIn = Number.isFinite(wantToken) && wantToken > 0
     ? `${formatAmount(availableWantInCapacity, wantToken)} ${wantTokenSymbol}`
     : availableWantInCapacity.toString();
-  $: estimatedPrice = priceRatioScaled > 0n ? formatScaled(priceRatioScaled, PRICE_RATIO_DECIMALS) : 'n/a';
+  $: estimatedPrice = limitPriceTicks && limitPriceTicks > 0n ? formatPriceTicks(limitPriceTicks) : 'n/a';
   $: estimatedReceiveLabel = Number.isFinite(wantToken) && wantToken > 0
     ? `${formatAmount(canonicalWantAmount, wantToken)} ${wantTokenSymbol}`
     : canonicalWantAmount.toString();
@@ -565,7 +576,6 @@
     giveToken: number;
     wantToken: number;
     giveAmount: bigint;
-    priceRatioScaled: bigint;
     limitPriceTicks: bigint | null;
     wantAmount: bigint;
     wantTokenPresentInAccount: boolean;
@@ -574,7 +584,29 @@
     formattedAvailableGive: string;
     formattedAvailableWantIn: string;
     notionalUsd: number;
+    referencePriceTicks: bigint | null;
   };
+
+  function formatRebateAmount(amount: bigint, tokenIdValue: number | null): string {
+    if (!tokenIdValue || amount <= 0n) return '—';
+    return `${formatAmount(amount, tokenIdValue)} ${tokenSymbol(tokenIdValue)}`;
+  }
+
+  function resolveReferencePriceTicks(): bigint | null {
+    if (String(orderbookSnapshot?.pairId || '').trim() === String(orderbookPairId || '').trim()) {
+      const level = tradeSide === 'buy-base' ? orderbookSnapshot.asks?.[0] : orderbookSnapshot.bids?.[0];
+      const price = level?.price ?? 0n;
+      if (price > 0n) return price;
+    }
+    const bookSide: BookSide = tradeSide === 'buy-base' ? 'ask' : 'bid';
+    return readCurrentHubBestPriceTicks(bookSide, activeOrderAccountId);
+  }
+
+  function computePriceDeviationBps(limitTicks: bigint, referenceTicks: bigint): bigint {
+    if (limitTicks <= 0n || referenceTicks <= 0n) return 0n;
+    const delta = limitTicks > referenceTicks ? limitTicks - referenceTicks : referenceTicks - limitTicks;
+    return (delta * 10_000n) / referenceTicks;
+  }
 
   function validateSwapForm(input: SwapFormValidationInput): string {
     if (!input.isLive) return 'Switch to LIVE mode to place swap orders.';
@@ -589,8 +621,13 @@
     }
     if (input.giveToken === input.wantToken) return 'Sell token and Buy token must be different.';
     if (input.giveAmount <= 0n) return 'Enter amount to sell.';
-    if (input.priceRatioScaled <= 0n) return 'Enter valid price.';
     if (!input.limitPriceTicks || input.limitPriceTicks <= 0n) return 'Price is too small.';
+    if (input.referencePriceTicks && input.referencePriceTicks > 0n) {
+      const deviationBps = computePriceDeviationBps(input.limitPriceTicks, input.referencePriceTicks);
+      if (deviationBps > MAX_PRICE_DEVIATION_BPS) {
+        return 'Price must stay within 30% of the current orderbook.';
+      }
+    }
     if (input.wantAmount <= 0n) return 'Amount to receive is too small for selected price.';
     if (input.notionalUsd < MIN_ORDER_NOTIONAL_USD) {
       return `Minimum order size is ~$${MIN_ORDER_NOTIONAL_USD}.`;
@@ -629,7 +666,6 @@
     candidateWantToken: number,
     candidateGiveAmount: bigint,
     candidateWantAmount: bigint,
-    candidatePriceRatioScaled: bigint,
     candidateLimitPriceTicks: bigint | null,
   ): SwapFormValidationInput {
     const liveWantTokenPresentInAccount = hasTokenInAccount(candidateCounterpartyId, candidateWantToken);
@@ -649,7 +685,6 @@
       giveToken: candidateGiveToken,
       wantToken: candidateWantToken,
       giveAmount: candidateGiveAmount,
-      priceRatioScaled: candidatePriceRatioScaled,
       limitPriceTicks: candidateLimitPriceTicks,
       wantAmount: candidateWantAmount,
       wantTokenPresentInAccount: liveWantTokenPresentInAccount,
@@ -658,12 +693,14 @@
       formattedAvailableGive: liveFormattedAvailableGive,
       formattedAvailableWantIn: liveFormattedAvailableWantIn,
       notionalUsd: computeOrderNotionalUsd(orderMode, candidateGiveToken, candidateWantToken, candidateGiveAmount, candidateWantAmount),
+      referencePriceTicks: resolveReferencePriceTicks(),
     };
   }
 
   $: swapPreparationError = (
     giveAmount > 0n
-    && priceRatioScaled > 0n
+    && limitPriceTicks !== null
+    && limitPriceTicks > 0n
     && parsedOrderbookPair
     && !preparedOrder
   ) ? 'Order does not fit canonical lot/tick constraints.' : '';
@@ -674,7 +711,6 @@
       wantToken,
       canonicalGiveAmount,
       canonicalWantAmount,
-      priceRatioScaled,
       canonicalPriceTicks,
     ),
   );
@@ -702,7 +738,6 @@
   })();
   $: if (selectedOrderLevel && orderbookScopeMode !== 'aggregated' && selectedOrderLevel.accountId !== selectedBookAccountId) {
     selectedOrderLevel = null;
-    orderPercent = 100;
   }
 
   function applyOrderPercent(percent: number) {
@@ -712,8 +747,8 @@
     if (!selectedOrderLevel) {
       const rawGive = (currentGiveCapacity * BigInt(clamped)) / 100n;
       const rawWant = orderMode === 'sell-base'
-        ? quoteFromBase(rawGive, priceRatioScaled, baseTokenDecimals, quoteTokenDecimals)
-        : baseFromQuote(rawGive, priceRatioScaled, baseTokenDecimals, quoteTokenDecimals);
+        ? quoteFromBase(rawGive, limitPriceTicks ?? 0n, baseTokenDecimals, quoteTokenDecimals)
+        : baseFromQuote(rawGive, limitPriceTicks ?? 0n, baseTokenDecimals, quoteTokenDecimals);
       const fillGive = prepareCanonicalOrder(rawGive, rawWant)?.effectiveGive ?? 0n;
       orderAmountInput = formatAmountForInput(fillGive, giveToken);
       return;
@@ -727,12 +762,11 @@
       || selectedBookAccountId
       || selectedOrderLevel.accountIds[0]
       || '';
-    const priceScaled = (selectedOrderLevel.priceTicks * PRICE_RATIO_SCALE) / ORDERBOOK_PRICE_SCALE;
     const levelBaseDecimals = getTokenDecimals(selectedOrderLevel.baseTokenId);
     const levelQuoteDecimals = getTokenDecimals(selectedOrderLevel.quoteTokenId);
     const levelGiveCapacity = readOutCapacity(selectedLevelAccountId, levelGiveTokenId);
     const maxFillGiveByBook = selectedOrderLevel.side === 'ask'
-      ? quoteFromBase(selectedOrderLevel.sizeBaseWei, priceScaled, levelBaseDecimals, levelQuoteDecimals)
+      ? quoteFromBase(selectedOrderLevel.sizeBaseWei, selectedOrderLevel.priceTicks, levelBaseDecimals, levelQuoteDecimals)
       : selectedOrderLevel.sizeBaseWei;
     const maxFillGive = levelGiveCapacity < maxFillGiveByBook ? levelGiveCapacity : maxFillGiveByBook;
     const rawGive = (maxFillGive * BigInt(clamped)) / 100n;
@@ -768,15 +802,14 @@
       const book = replica?.state?.orderbookExt?.books?.get?.(orderbookPairId);
       if (!book) return null;
       const params = book.params || {};
-      const pmin = Number(params.pmin || 0);
-      const tick = Number(params.tick || 1);
       const idx = side === 'ask'
         ? Number(book.bestAskIdx ?? -1)
         : Number(book.bestBidIdx ?? -1);
-      if (!Number.isFinite(pmin) || !Number.isFinite(tick) || !Number.isFinite(idx) || idx < 0) return null;
-      const price = pmin + idx * tick;
-      if (!Number.isFinite(price) || price <= 0) return null;
-      return BigInt(price);
+      if (!Number.isFinite(idx) || idx < 0) return null;
+      const pmin = toBigIntSafe(params.pmin) ?? 0n;
+      const tick = toBigIntSafe(params.tick) ?? 1n;
+      const price = pmin + (BigInt(idx) * tick);
+      return price > 0n ? price : null;
     }
     return null;
   }
@@ -784,7 +817,6 @@
   function toggleOrderbookScope(): void {
     orderbookScopeMode = orderbookScopeMode === 'aggregated' ? 'selected' : 'aggregated';
     selectedOrderLevel = null;
-    orderPercent = 100;
   }
 
   function handleSelectedHubChange(event: Event): void {
@@ -796,12 +828,10 @@
       createOrderAccountId = nextValue;
     }
     selectedOrderLevel = null;
-    orderPercent = 100;
   }
 
   function handlePairChange(): void {
     selectedOrderLevel = null;
-    orderPercent = 100;
     submitError = '';
   }
 
@@ -865,11 +895,11 @@
     if (selectedOrderLevel) return null;
     if (String(orderbookSnapshot?.pairId || '').trim() !== String(orderbookPairId || '').trim()) return null;
     if (tradeSide === 'buy-base') {
-      const ask = Number(orderbookSnapshot.asks?.[0]?.price || 0);
-      return Number.isFinite(ask) && ask > 0 ? BigInt(ask) : null;
+      const ask = orderbookSnapshot.asks?.[0]?.price ?? 0n;
+      return ask > 0n ? ask : null;
     }
-    const bid = Number(orderbookSnapshot.bids?.[0]?.price || 0);
-    return Number.isFinite(bid) && bid > 0 ? BigInt(bid) : null;
+    const bid = orderbookSnapshot.bids?.[0]?.price ?? 0n;
+    return bid > 0n ? bid : null;
   }
 
   $: if (
@@ -882,6 +912,19 @@
     if (suggestedTicks && suggestedTicks > 0n) {
       priceRatioInput = formatPriceTicks(suggestedTicks);
       hasAutoSuggestedInitialPrice = true;
+    }
+  }
+
+  // Market mode: auto-set price to bestAsk+5% (buy) or bestBid-5% (sell)
+  // Price already includes the buffer — slippagePct stays 0, IOC is forced via orderType.
+  $: if (orderType === 'market') {
+    const refTicks = resolveReferencePriceTicks();
+    if (refTicks && refTicks > 0n) {
+      const adjustment = (refTicks * BigInt(MARKET_SLIPPAGE_PCT * 100)) / 10000n;
+      const marketTicks = tradeSide === 'buy-base'
+        ? refTicks + adjustment
+        : (refTicks > adjustment ? refTicks - adjustment : 1n);
+      priceRatioInput = formatPriceTicks(marketTicks);
     }
   }
 
@@ -899,18 +942,18 @@
     return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
   }
 
-  function quoteFromBase(baseAmount: bigint, priceScaled: bigint, baseDecimals: number, quoteDecimals: number): bigint {
-    if (baseAmount <= 0n || priceScaled <= 0n) return 0n;
+  function quoteFromBase(baseAmount: bigint, priceTicks: bigint, baseDecimals: number, quoteDecimals: number): bigint {
+    if (baseAmount <= 0n || priceTicks <= 0n) return 0n;
     const baseScale = 10n ** BigInt(Math.max(0, baseDecimals));
     const quoteScale = 10n ** BigInt(Math.max(0, quoteDecimals));
-    return (baseAmount * priceScaled * quoteScale) / (PRICE_RATIO_SCALE * baseScale);
+    return (baseAmount * priceTicks * quoteScale) / (ORDERBOOK_PRICE_SCALE * baseScale);
   }
 
-  function baseFromQuote(quoteAmount: bigint, priceScaled: bigint, baseDecimals: number, quoteDecimals: number): bigint {
-    if (quoteAmount <= 0n || priceScaled <= 0n) return 0n;
+  function baseFromQuote(quoteAmount: bigint, priceTicks: bigint, baseDecimals: number, quoteDecimals: number): bigint {
+    if (quoteAmount <= 0n || priceTicks <= 0n) return 0n;
     const baseScale = 10n ** BigInt(Math.max(0, baseDecimals));
     const quoteScale = 10n ** BigInt(Math.max(0, quoteDecimals));
-    return (quoteAmount * PRICE_RATIO_SCALE * baseScale) / (priceScaled * quoteScale);
+    return (quoteAmount * ORDERBOOK_PRICE_SCALE * baseScale) / (priceTicks * quoteScale);
   }
 
   function prepareCanonicalOrder(rawGiveAmount: bigint, rawWantAmount: bigint): PreparedSwapOrderLike | null {
@@ -958,16 +1001,15 @@
   $: quoteTokenDecimals = getTokenDecimals(quoteTokenId);
   $: orderbookSizeDisplayScale = baseTokenDecimals > 12 ? 10 ** Math.max(0, baseTokenDecimals - 12) : 1;
   $: giveTokenDecimals = getTokenDecimals(giveToken);
-  $: priceRatioScaled = parseDecimalAmountToBigInt(priceRatioInput, PRICE_RATIO_DECIMALS);
-  $: limitPriceTicks = priceRatioScaled > 0n ? (priceRatioScaled * ORDERBOOK_PRICE_SCALE) / PRICE_RATIO_SCALE : null;
+  $: limitPriceTicks = parseDisplayPriceTicks(priceRatioInput, 0n);
   $: giveAmount = parseDecimalAmountToBigInt(orderAmountInput, giveTokenDecimals);
   $: wantAmount = (() => {
-    if (giveAmount <= 0n || priceRatioScaled <= 0n || !parsedOrderbookPair) return 0n;
+    if (giveAmount <= 0n || !limitPriceTicks || limitPriceTicks <= 0n || !parsedOrderbookPair) return 0n;
     if (orderMode === 'sell-base') {
-      return quoteFromBase(giveAmount, priceRatioScaled, baseTokenDecimals, quoteTokenDecimals);
+      return quoteFromBase(giveAmount, limitPriceTicks, baseTokenDecimals, quoteTokenDecimals);
     }
     if (orderMode === 'buy-base') {
-      return baseFromQuote(giveAmount, priceRatioScaled, baseTokenDecimals, quoteTokenDecimals);
+      return baseFromQuote(giveAmount, limitPriceTicks, baseTokenDecimals, quoteTokenDecimals);
     }
     return 0n;
   })();
@@ -1106,12 +1148,16 @@
             if (!offerId) continue;
             const fillRatio = Number(data.fillRatio || 0);
             const cancelRemainder = Boolean(data.cancelRemainder);
+            const rebateAmount = toBigIntSafe(data.rebateAmount) ?? 0n;
+            const rawRebateTokenId = Number(data.rebateTokenId || 0);
             const prev = lifecycles.get(offerId);
             if (!prev) continue;
             prev.resolves.push({
               fillRatio: Number.isFinite(fillRatio) ? fillRatio : 0,
               cancelRemainder,
               timestamp: frameTs,
+              rebateAmount,
+              rebateTokenId: Number.isFinite(rawRebateTokenId) && rawRebateTokenId > 0 ? rawRebateTokenId : null,
             });
             continue;
           }
@@ -1139,6 +1185,17 @@
       if (resolve.cancelRemainder) break;
     }
     return 1_000_000n - remainingPpm;
+  }
+
+  function sumRebates(resolves: ResolveRecord[]): { amount: bigint; tokenId: number | null } {
+    let total = 0n;
+    let tokenId: number | null = null;
+    for (const resolve of resolves) {
+      if (resolve.rebateAmount <= 0n) continue;
+      total += resolve.rebateAmount;
+      if (!tokenId && resolve.rebateTokenId) tokenId = resolve.rebateTokenId;
+    }
+    return { amount: total, tokenId };
   }
 
   function classifyClosedStatus(lifecycle: OfferLifecycle): ClosedOrderStatus {
@@ -1184,6 +1241,7 @@
       const filledPpm = computeFilledPpm(offer.resolves);
       const filledGiveAmount = (offer.giveAmount * filledPpm) / 1_000_000n;
       const filledWantAmount = (offer.wantAmount * filledPpm) / 1_000_000n;
+      const rebate = sumRebates(offer.resolves);
       const filledPercent = filledPpm >= FILLED_DISPLAY_PPM_THRESHOLD
         ? 100
         : Number((filledPpm * 10_000n) / 1_000_000n) / 100;
@@ -1201,6 +1259,8 @@
         filledGiveAmount,
         filledWantAmount,
         filledPercent,
+        rebateAmount: rebate.amount,
+        rebateTokenId: rebate.tokenId,
         status: classifyClosedStatus(offer),
         createdAt: offer.createdAt,
         closedAt: latestResolveTs,
@@ -1210,6 +1270,56 @@
   $: filteredClosedOrderViews = closedOrderStatusFilter === 'all'
     ? closedOrderViews
     : closedOrderViews.filter((order) => order.status === closedOrderStatusFilter);
+  $: offerRebateById = (() => {
+    const map = new Map<string, { amount: bigint; tokenId: number | null }>();
+    for (const lifecycle of collectOfferLifecycles()) {
+      map.set(lifecycle.offerId, sumRebates(lifecycle.resolves));
+    }
+    return map;
+  })();
+  $: totalRebateSummary = (() => {
+    const totals = new Map<number, bigint>();
+    for (const { account } of accountMachines()) {
+      if (!(account?.totalRebates instanceof Map)) continue;
+      for (const [tokenIdValue, amountValue] of account.totalRebates.entries()) {
+        const tokenId = Number(tokenIdValue);
+        const amount = toBigIntSafe(amountValue) ?? 0n;
+        if (!Number.isFinite(tokenId) || tokenId <= 0 || amount <= 0n) continue;
+        totals.set(tokenId, (totals.get(tokenId) ?? 0n) + amount);
+      }
+    }
+    const parts = Array.from(totals.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([tokenId, amount]) => `${formatAmount(amount, tokenId)} ${tokenSymbol(tokenId)}`);
+    return parts.length > 0 ? parts.join(' · ') : '';
+  })();
+  $: if (pendingSwapFeedbackOfferId) {
+    const closed = closedOrderViews.find((order) => order.offerId === pendingSwapFeedbackOfferId);
+    if (closed) {
+      if (closed.status === 'filled' && closed.filledPercent >= 99.99) {
+        swapCompletionModal = {
+          offerId: closed.offerId,
+          side: closed.side,
+          pairLabel: closed.pairLabel,
+          filledGiveAmount: closed.filledGiveAmount,
+          filledWantAmount: closed.filledWantAmount,
+          giveTokenId: closed.giveTokenId,
+          wantTokenId: closed.wantTokenId,
+          rebateAmount: closed.rebateAmount,
+          rebateTokenId: closed.rebateTokenId,
+        };
+        toasts.success('Swap fully filled');
+      } else if (closed.status === 'partial') {
+        const rebateNote = closed.rebateAmount > 0n
+          ? ` Rebate: ${formatRebateAmount(closed.rebateAmount, closed.rebateTokenId)}.`
+          : '';
+        toasts.info(`Swap partially filled (${closed.filledPercent.toFixed(2)}%) and canceled the remainder.${rebateNote}`);
+      } else if (closed.status === 'canceled') {
+        toasts.info('Swap was canceled without a fill.');
+      }
+      pendingSwapFeedbackOfferId = '';
+    }
+  }
 
   async function placeSwapOffer() {
     submitError = '';
@@ -1269,7 +1379,7 @@
       }
 
       // IOC when using slippage (market order behavior)
-      const useIOC = slippagePct > 0 || !!selectedOrderLevel;
+      const useIOC = orderType === 'market' || slippagePct > 0 || !!selectedOrderLevel;
 
       if (effectiveGiveAmount <= 0n || effectiveWantAmount <= 0n) {
         throw new Error('Quantized order too small');
@@ -1289,7 +1399,6 @@
         wantToken,
         effectiveGiveAmount,
         effectiveWantAmount,
-        priceRatioScaled,
         canonicalPriceTicks,
       );
       const liveValidationReason = validateSwapForm(liveValidation);
@@ -1343,11 +1452,13 @@
       }]);
 
       console.log('📊 Swap offer placed:', offerId);
+      pendingSwapFeedbackOfferId = offerId;
       if (shouldAutoPrepareInbound) {
         console.log(
           `🛠️ Auto-prepared inbound capacity: token=${wantToken} creditLimit=${requiredInboundCreditLimit?.toString() || '0'}`,
         );
       }
+      toasts.success('Swap offer submitted');
 
       // Reset form
       orderPercent = 100;
@@ -1385,9 +1496,12 @@
       }]);
 
       console.log('📨 Swap cancel requested:', offerId);
+      toasts.info('Cancel request sent');
     } catch (error) {
       console.error('Failed to cancel swap:', error);
-      alert(`Failed to cancel: ${(error as Error)?.message || 'Unknown error'}`);
+      const message = (error as Error)?.message || 'Unknown error';
+      submitError = `Failed to cancel: ${message}`;
+      toasts.error(`Cancel failed: ${message}`);
     }
   }
 
@@ -1447,10 +1561,28 @@
 
   function parseDisplayPriceTicks(displayPrice: string, fallbackPriceTicks: bigint): bigint {
     const normalized = normalizeDisplayPriceForInput(displayPrice);
-    const scaled = parseDecimalAmountToBigInt(normalized, PRICE_RATIO_DECIMALS);
-    if (scaled <= 0n) return fallbackPriceTicks;
-    const ticks = (scaled * ORDERBOOK_PRICE_SCALE) / PRICE_RATIO_SCALE;
+    const ticks = parseDecimalAmountToBigInt(normalized, ORDERBOOK_PRICE_DECIMALS);
+    if (ticks <= 0n) return fallbackPriceTicks;
     return ticks > 0n ? ticks : fallbackPriceTicks;
+  }
+
+  function stepPrice(direction: 1 | -1): void {
+    if (orderType === 'market') return;
+    const current = parseDecimalAmountToBigInt(priceRatioInput || '0', ORDERBOOK_PRICE_DECIMALS);
+    const step = 1n; // 1 tick = 0.0001
+    const next = current + BigInt(direction) * step;
+    if (next <= 0n) return;
+    priceRatioInput = formatPriceTicks(next);
+    hasUserEditedPriceInput = true;
+    selectedOrderLevel = null;
+  }
+
+  function stepAmount(direction: 1 | -1): void {
+    const current = parseDecimalAmountToBigInt(orderAmountInput || '0', giveTokenDecimals);
+    const step = giveTokenDecimals >= 6 ? 10n ** BigInt(Math.max(0, giveTokenDecimals - 4)) : 1n;
+    const next = current + BigInt(direction) * step;
+    if (next <= 0n && direction < 0) return;
+    orderAmountInput = formatAmountForInput(next > 0n ? next : 0n, giveToken);
   }
 </script>
 
@@ -1470,28 +1602,14 @@
             {/each}
           </select>
         </div>
-        <div class="toolbar-scope">
-          <button
-            type="button"
-            class="scope-btn scope-mode-btn"
-            data-testid="swap-scope-toggle"
-            on:click={toggleOrderbookScope}
-          >
-            {orderbookScopeMode === 'aggregated' ? 'Aggregated' : 'Selected'}
-          </button>
-        </div>
-        <div class="toolbar-select toolbar-select-account">
-          <select
-            value={currentHubSelection}
-            data-testid="swap-account-select"
-            aria-label="Swap hub selection"
-            on:change={handleSelectedHubChange}
-          >
-            {#each selectedHubOptions as option (option.value)}
-              <option value={option.value}>{option.label}</option>
-            {/each}
-          </select>
-        </div>
+        <span
+          class="scope-text-toggle"
+          data-testid="swap-scope-toggle"
+          on:click={toggleOrderbookScope}
+          on:keydown={(e) => e.key === 'Enter' && toggleOrderbookScope()}
+          role="button"
+          tabindex="0"
+        >{orderbookScopeMode === 'aggregated' ? 'Aggregated' : 'Selected'}</span>
       </div>
       {#if orderbookHubIds.length > 0}
         <div class="orderbook-wrap" data-testid="swap-orderbook">
@@ -1519,36 +1637,62 @@
       {/if}
     </div>
     <div class="section section-order">
-      <div class="order-side-row">
-        <div class="side-toggle-group">
-          <button
-            type="button"
-            class="scope-btn"
+      <div class="order-form-header">
+        <div class="side-toggle-row">
+          <span
+            class="side-tab"
             class:active={tradeSide === 'buy-base'}
-            data-testid="swap-side-buy"
             on:click={() => setTradeSide('buy-base')}
-          >
-            Buy {baseTokenSymbol}
-          </button>
-          <button
-            type="button"
-            class="scope-btn"
+            on:keydown={(e) => e.key === 'Enter' && setTradeSide('buy-base')}
+            role="button"
+            tabindex="0"
+          >Buy</span>
+          <span
+            class="side-tab"
             class:active={tradeSide === 'sell-base'}
-            data-testid="swap-side-sell"
             on:click={() => setTradeSide('sell-base')}
-          >
-            Sell {baseTokenSymbol}
-          </button>
+            on:keydown={(e) => e.key === 'Enter' && setTradeSide('sell-base')}
+            role="button"
+            tabindex="0"
+          >Sell</span>
         </div>
+        <div class="order-type-toggle">
+          <span
+            class="type-tab-text"
+            class:active={orderType === 'limit'}
+            on:click={() => { orderType = 'limit'; slippagePct = 0; }}
+            on:keydown={(e) => e.key === 'Enter' && (orderType = 'limit')}
+            role="button"
+            tabindex="0"
+          >Limit</span>
+          <span
+            class="type-tab-text"
+            class:active={orderType === 'market'}
+            on:click={() => { orderType = 'market'; slippagePct = 0; }}
+            on:keydown={(e) => e.key === 'Enter' && (orderType = 'market')}
+            role="button"
+            tabindex="0"
+          >Market</span>
+        </div>
+        {#if selectedHubOptions.length > 0}
+          <select
+            class="hub-select-inline"
+            value={createOrderAccountId}
+            on:change={handleSelectedHubChange}
+            data-testid="swap-hub-select"
+          >
+            {#each selectedHubOptions as hub (hub.value)}
+              <option value={hub.value}>{hub.label}</option>
+            {/each}
+          </select>
+        {/if}
       </div>
 
-      <div class="order-entry-row">
-        <label class="order-field order-field-amount">
-          {tradeSide === 'buy-base' ? 'Amount to Spend' : 'Amount to Sell'} ({giveTokenSymbol})
-          <input type="text" bind:value={orderAmountInput} inputmode="decimal" data-testid="swap-order-amount" aria-label="Swap order amount" />
-        </label>
-        <label class="order-field order-field-price">
-          Price ({quoteTokenSymbol} per {baseTokenSymbol})
+      <div class="order-input-row">
+        <span class="input-label">Price</span>
+        {#if orderType === 'market'}
+          <input type="text" readonly value="{priceRatioInput || '—'}" class="readonly-input market-price-input" data-testid="swap-order-price" title="Best {tradeSide === 'buy-base' ? 'ask' : 'bid'} ±{MARKET_SLIPPAGE_PCT}%" />
+        {:else}
           <input
             type="text"
             bind:value={priceRatioInput}
@@ -1557,73 +1701,61 @@
             aria-label="Swap order price"
             on:input={handlePriceRatioInput}
           />
-        </label>
-        <label class="order-field order-field-receive">
-          Amount to Receive ({wantTokenSymbol})
-          <input
-            type="text"
-            readonly
-            value={`${formatAmount(wantAmount, wantToken)} ${wantTokenSymbol}`}
-            class="readonly-input"
-          />
-        </label>
+        {/if}
+        <span class="input-suffix">{orderType === 'market' ? `±${MARKET_SLIPPAGE_PCT}%` : quoteTokenSymbol}</span>
+        {#if orderType === 'limit'}
+          <div class="input-steppers">
+            <button type="button" class="step-btn" on:click={() => stepPrice(1)}>▲</button>
+            <button type="button" class="step-btn" on:click={() => stepPrice(-1)}>▼</button>
+          </div>
+        {/if}
       </div>
 
-      <div class="slippage-row">
-        <div class="slippage-labels">
-          <span class="slippage-label-left" class:active={slippagePct === 0}>Limit</span>
-          <span class="slippage-value">{slippagePct === 0 ? 'Exact price' : `Market ±${slippagePct.toFixed(1)}%`}</span>
-          <span class="slippage-label-right" class:active={slippagePct >= 5}>10%</span>
+      <div class="order-input-row">
+        <span class="input-label">Amount</span>
+        <input type="text" bind:value={orderAmountInput} inputmode="decimal" data-testid="swap-order-amount" aria-label="Swap order amount" />
+        <span class="input-suffix">{giveTokenSymbol}</span>
+        <div class="input-steppers">
+          <button type="button" class="step-btn" on:click={() => stepAmount(1)}>▲</button>
+          <button type="button" class="step-btn" on:click={() => stepAmount(-1)}>▼</button>
         </div>
-        <input
-          class="slippage-slider"
-          type="range"
-          min="0"
-          max="100"
-          step="1"
-          value={slippagePct * 10}
-          on:input={(e) => { slippagePct = Number((e.currentTarget as HTMLInputElement).value) / 10; }}
-          data-testid="swap-slippage-slider"
-        />
       </div>
 
-      <div class="slider-inline">
+      <div class="size-slider-row">
         <input
-          class="size-slider"
           type="range"
+          class="diamond-slider"
           min="0"
           max="100"
           step="1"
+          style="--fill: {orderPercent}%"
           value={orderPercent}
-          on:input={handleOrderPercentInput}
+          on:input={(e) => applyOrderPercent(Number((e.currentTarget).value))}
         />
-        <span class="slider-value">{orderPercent}%</span>
+        <div class="slider-marks">
+          {#each [0, 25, 50, 75, 100] as mark}
+            <span
+              class="slider-mark-group"
+              class:filled={orderPercent >= mark}
+              on:click={() => applyOrderPercent(mark)}
+              on:keydown={(e) => e.key === 'Enter' && applyOrderPercent(mark)}
+              role="button"
+              tabindex="0"
+            ><span class="slider-diamond">&#9671;</span><span class="slider-pct">{mark}%</span></span>
+          {/each}
+        </div>
       </div>
 
-      <div class="size-tools">
-        <div class="size-top">
-          <span class="size-title">Order Sizing</span>
-          <span class="size-min-fill">Min Fill: 0%</span>
-        </div>
-        <div class="size-stats">
-          <span>Available: <strong>{formattedAvailableGive}</strong></span>
-          <span>Inbound Capacity: <strong>{formattedAvailableWantIn}</strong></span>
-          <span>Estimate: <strong>{estimatedSpendLabel} → {estimatedReceiveLabel}</strong></span>
-          <span>Pair Price: <strong>{estimatedPrice}</strong></span>
-        </div>
-        {#if selectedOrderLevel}
-          <p class="size-hint">
-            Filled from book level: {selectedOrderLevel.side.toUpperCase()} @ {selectedOrderLevel.displayPrice || formatPriceTicks(selectedOrderLevel.priceTicks)}
-            (max {formatAmount(selectedOrderLevel.sizeBaseWei, selectedOrderLevel.baseTokenId)} {tokenSymbol(selectedOrderLevel.baseTokenId)})
-          </p>
-        {:else}
-          <p class="size-hint">Click any orderbook row to prefill price and max executable size.</p>
-        {/if}
+      <label class="order-input-row">
+        <span class="input-label">Total</span>
+        <input type="text" readonly value={orderType === 'market' ? `~ ${formatAmount(wantAmount, wantToken)}` : formatAmount(wantAmount, wantToken)} class="readonly-input" />
+        <span class="input-suffix">{wantTokenSymbol}</span>
+      </label>
+
+      <div class="avbl-row">
+        <span>Avbl: <strong>{formattedAvailableGive}</strong></span>
         {#if capacityWarning}
-          <p class="size-warning">{capacityWarning}</p>
-        {/if}
-        {#if leftoverGiveNote}
-          <p class="size-hint">{leftoverGiveNote}</p>
+          <span class="capacity-warn">{capacityWarning}</span>
         {/if}
       </div>
 
@@ -1631,8 +1763,14 @@
         <p class="auto-capacity-note" data-testid="swap-auto-capacity-note">{autoCapacityNote}</p>
       {/if}
 
-      <button class="primary-btn" on:click={placeSwapOffer} disabled={Boolean(swapActionDisabledReason)}>
-        Place Swap Offer
+      <button
+        class="primary-btn"
+        class:buy-action={tradeSide === 'buy-base'}
+        class:sell-action={tradeSide === 'sell-base'}
+        on:click={placeSwapOffer}
+        disabled={Boolean(swapActionDisabledReason)}
+      >
+        {tradeSide === 'buy-base' ? `Buy ${baseTokenSymbol.replace(/^W/, '')}` : `Sell ${baseTokenSymbol.replace(/^W/, '')}`}
       </button>
       {#if swapActionDisabledReason || submitError}
         <p class="form-error">{submitError || swapActionDisabledReason}</p>
@@ -1641,26 +1779,26 @@
   </div>
 
   <div class="section section-orders">
-    <div class="orders-title">
-      <h4>Orders</h4>
-      <span>{orderListTab === 'open' ? openOrders.length : filteredClosedOrderViews.length}</span>
-    </div>
     <div class="orders-toolbar">
-      <div class="orders-tabs">
-        <button
-          class="scope-btn"
+      <div class="orders-header-left">
+        <h4 class="orders-inline-title">Orders</h4>
+        <span class="orders-count">{orderListTab === 'open' ? openOrders.length : filteredClosedOrderViews.length}</span>
+        <span
+          class="orders-tab-text"
           class:active={orderListTab === 'open'}
           on:click={() => (orderListTab = 'open')}
-        >
-          Open
-        </button>
-        <button
-          class="scope-btn"
+          on:keydown={(e) => e.key === 'Enter' && (orderListTab = 'open')}
+          role="button"
+          tabindex="0"
+        >Open</span>
+        <span
+          class="orders-tab-text"
           class:active={orderListTab === 'closed'}
           on:click={() => (orderListTab = 'closed')}
-        >
-          Closed
-        </button>
+          on:keydown={(e) => e.key === 'Enter' && (orderListTab = 'closed')}
+          role="button"
+          tabindex="0"
+        >Closed</span>
       </div>
       {#if orderListTab === 'closed'}
         <label class="closed-status-filter">
@@ -1675,6 +1813,9 @@
         </label>
       {/if}
     </div>
+    {#if totalRebateSummary}
+      <p class="rebate-summary">Total rebates received: <strong>{totalRebateSummary}</strong></p>
+    {/if}
 
     {#if orderListTab === 'open'}
       {#if openOrders.length === 0}
@@ -1688,6 +1829,7 @@
                 <th>Pair</th>
                 <th>Price</th>
                 <th>Remaining</th>
+                <th>Rebate</th>
                 <th>Hub</th>
                 <th></th>
               </tr>
@@ -1698,6 +1840,7 @@
                 {@const pairView = resolvePairOrientation(offer.giveTokenId, offer.wantTokenId)}
                 {@const isDust = isDustOpenOffer(offer)}
                 {@const remainingUsd = remainingOfferUsd(offer)}
+                {@const offerRebate = offerRebateById.get(String(offer.offerId || '')) || { amount: 0n, tokenId: null }}
                 <tr>
                   <td>
                     <span class:side-ask={side === 'Ask'} class:side-bid={side === 'Bid'} class="side-badge">{side}</span>
@@ -1719,6 +1862,7 @@
                       {formatAmount(toBigIntSafe(offer.giveAmount) ?? 0n, Number(offer.giveTokenId || 0))} {tokenSymbol(Number(offer.giveTokenId || 0))}
                     {/if}
                   </td>
+                  <td>{formatRebateAmount(offerRebate.amount, offerRebate.tokenId)}</td>
                   <td>{String(offer.accountId || '').slice(0, 10)}...</td>
                   <td>
                     <button class="cancel-btn" on:click={() => cancelSwapOffer(String(offer.offerId || ''), String(offer.accountId || ''))}>
@@ -1743,6 +1887,7 @@
                 <th>Pair</th>
                 <th>Price</th>
                 <th>Filled</th>
+                <th>Rebate</th>
                 <th>Closed At</th>
                 <th>Hub</th>
               </tr>
@@ -1761,6 +1906,7 @@
                     {order.filledPercent.toFixed(2)}%
                     ({formatAmount(order.filledGiveAmount, order.giveTokenId)} {tokenSymbol(order.giveTokenId)})
                   </td>
+                  <td>{formatRebateAmount(order.rebateAmount, order.rebateTokenId)}</td>
                   <td>{formatOrderTime(order.closedAt)}</td>
                   <td>{order.accountId.slice(0, 10)}...</td>
                 </tr>
@@ -1771,6 +1917,25 @@
       {/if}
     {/if}
   </div>
+
+  {#if swapCompletionModal}
+    <div class="swap-modal-overlay" on:click={() => (swapCompletionModal = null)}>
+      <div class="swap-modal" on:click|stopPropagation>
+        <div class="swap-modal-kicker">Swap Filled</div>
+        <h3>{swapCompletionModal.side} {swapCompletionModal.pairLabel}</h3>
+        <p class="swap-modal-copy">
+          {formatAmount(swapCompletionModal.filledGiveAmount, swapCompletionModal.giveTokenId)} {tokenSymbol(swapCompletionModal.giveTokenId)}
+          → {formatAmount(swapCompletionModal.filledWantAmount, swapCompletionModal.wantTokenId)} {tokenSymbol(swapCompletionModal.wantTokenId)}
+        </p>
+        <p class="swap-modal-rebate">
+          Rebate: <strong>{formatRebateAmount(swapCompletionModal.rebateAmount, swapCompletionModal.rebateTokenId)}</strong>
+        </p>
+        <div class="swap-modal-actions">
+          <button class="scope-btn active" on:click={() => (swapCompletionModal = null)}>Close</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -1794,16 +1959,16 @@
   }
 
   .section {
-    margin-bottom: 24px;
-    padding: 14px;
+    margin-bottom: 0;
+    padding: 10px;
     background: #131419;
-    border-radius: 10px;
-    border: 1px solid #2b2f39;
+    border-radius: 6px;
+    border: 1px solid #1e2028;
   }
 
   .trade-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.45fr) minmax(340px, 1fr);
+    grid-template-columns: 1fr 1fr;
     gap: 14px;
     align-items: start;
   }
@@ -1818,11 +1983,19 @@
   }
 
   .section-market,
-  .section-depth,
+  .section-depth {
+    height: 100%;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
   .section-order {
     height: 100%;
     min-width: 0;
-    overflow: hidden;
+    max-width: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .section-orders {
@@ -1833,13 +2006,13 @@
     display: flex;
     gap: 8px;
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: 4px;
   }
 
   .toolbar-select {
     position: relative;
     border: 1px solid #2d313b;
-    border-radius: 12px;
+    border-radius: 6px;
     background: linear-gradient(180deg, rgba(34, 35, 42, 0.96), rgba(24, 25, 31, 0.96));
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   }
@@ -1854,11 +2027,25 @@
   }
 
   .toolbar-select-pair {
-    flex: 0 0 220px;
+    flex: 0 1 auto;
+    min-width: 120px;
   }
 
-  .toolbar-scope {
-    flex: 0 0 auto;
+  .scope-text-toggle {
+    font-size: 12px;
+    color: #9ca3af;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    padding: 4px 8px;
+    border: 1px solid #2d313b;
+    border-radius: 4px;
+    background: #111217;
+  }
+
+  .scope-text-toggle:hover {
+    color: #fbbf24;
+    border-color: #fbbf24;
   }
 
   .toolbar-select-account {
@@ -1878,35 +2065,277 @@
 
   .toolbar-select select {
     width: 100%;
-    height: 48px;
+    height: 36px;
     border: 0;
     background: transparent;
-    padding: 0 14px;
-    font-size: 14px;
+    padding: 0 12px;
+    font-size: 13px;
     font-weight: 600;
     color: #f3f4f6;
   }
 
-  .order-side-row {
+  .order-form-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+
+  .order-type-toggle {
+    display: flex;
+    gap: 12px;
+  }
+
+  .type-tab-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: #4b5563;
+    cursor: pointer;
+    user-select: none;
+    transition: color 100ms;
+  }
+
+  .type-tab-text.active {
+    color: #fbbf24;
+  }
+
+  .type-tab-text:hover {
+    color: #9ca3af;
+  }
+
+  .hub-select-inline {
+    background: #111217;
+    border: 1px solid #1e2028;
+    border-radius: 4px;
+    color: #9ca3af;
+    font-size: 11px;
+    padding: 4px 8px;
+    cursor: pointer;
+    max-width: 120px;
+  }
+
+  .side-toggle-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 10px;
+  }
+
+  .side-tab {
+    font-size: 13px;
+    font-weight: 600;
+    color: #4b5563;
+    cursor: pointer;
+    padding: 4px 0;
+    transition: color 100ms;
+    user-select: none;
+  }
+
+  .side-tab.active {
+    color: #16a34a;
+  }
+
+  .side-tab:last-child.active {
+    color: #dc2626;
+  }
+
+  .side-tab:hover {
+    color: #9ca3af;
+  }
+
+  .order-input-row {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 8px;
+    padding: 0 10px;
+    height: 40px;
+    background: #111217 !important;
+    border: 1px solid #1e2028 !important;
+    border-radius: 6px;
+    font-size: 13px;
+    box-sizing: border-box;
+  }
+
+  .order-input-row:focus-within {
+    border-color: rgba(251, 191, 36, 0.5);
+  }
+
+  .input-label {
+    color: #6b7280;
+    font-size: 12px;
+    font-weight: 500;
+    min-width: 48px;
+    flex-shrink: 0;
+  }
+
+  .order-input-row input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: none;
+    padding: 0 8px;
+    height: 100%;
+    font-size: 14px;
+    text-align: right;
+  }
+
+  .order-input-row input:focus {
+    outline: none;
+    border: none;
+  }
+
+  .input-suffix {
+    color: #6b7280;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+    min-width: 40px;
+    text-align: right;
+  }
+
+  .input-steppers {
+    display: flex;
+    flex-direction: column;
+    margin-left: 4px;
+    flex-shrink: 0;
+  }
+
+  .step-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid #1e2028 !important;
+    background: #181a20 !important;
+    color: #6b7280;
+    font-size: 8px;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .step-btn:first-child {
+    border-radius: 3px 3px 0 0;
+    border-bottom: none;
+  }
+
+  .step-btn:last-child {
+    border-radius: 0 0 3px 3px;
+  }
+
+  .step-btn:hover {
+    color: #f3f4f6;
+    background: #252830 !important;
+  }
+
+  .step-btn:active {
+    background: #353842 !important;
+  }
+
+  .market-price-input {
+    color: #9ca3af;
+    font-style: normal;
+    font-size: 13px;
+  }
+
+  .size-slider-row {
+    position: relative;
+    margin-bottom: 10px;
+    padding: 6px 6px 0;
+  }
+
+  .diamond-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(to right, #fbbf24 var(--fill, 100%), #1e2028 var(--fill, 100%));
+    border-radius: 1px;
+    outline: none;
+    cursor: pointer;
+    margin: 0;
+  }
+
+  .diamond-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    background: url('/img/logo.png') center/contain no-repeat;
+    border: none;
+    border-radius: 0;
+    cursor: pointer;
+    filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.4));
+  }
+
+  .diamond-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: url('/img/logo.png') center/contain no-repeat;
+    border: none;
+    border-radius: 0;
+    cursor: pointer;
+    filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.4));
+  }
+
+  .slider-marks {
     display: flex;
     justify-content: space-between;
-    gap: 10px;
-    align-items: center;
-    margin-bottom: 12px;
-    flex-wrap: wrap;
+    margin-top: 4px;
+    pointer-events: none;
+    padding: 0;
   }
 
-  .order-side-row .scope-btn {
-    min-width: 108px;
-    height: 36px;
-  }
-
-  .side-toggle-group {
+  .slider-mark-group {
     display: flex;
-    gap: 8px;
+    flex-direction: column;
     align-items: center;
-    flex-wrap: nowrap;
-    margin-left: auto;
+    cursor: pointer;
+    pointer-events: auto;
+    user-select: none;
+    gap: 1px;
+  }
+
+  .slider-diamond {
+    font-size: 9px;
+    color: #353942;
+    line-height: 1;
+    transition: color 100ms;
+  }
+
+  .slider-pct {
+    font-size: 8px;
+    color: #4b5563;
+    line-height: 1;
+    transition: color 100ms;
+  }
+
+  .slider-mark-group.filled .slider-diamond {
+    color: #fbbf24;
+  }
+
+  .slider-mark-group.filled .slider-pct {
+    color: #fbbf24;
+  }
+
+  .avbl-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 12px;
+    padding: 0 2px;
+  }
+
+  .avbl-row strong {
+    color: #d1d5db;
+  }
+
+  .capacity-warn {
+    color: #f59e0b;
+    font-size: 11px;
   }
 
   .scope-btn {
@@ -2035,70 +2464,18 @@
     border-color: rgba(251, 191, 36, 0.65);
   }
 
-  .order-entry-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr) minmax(0, 1fr);
-    gap: 12px;
-    align-items: start;
-    margin-bottom: 10px;
-  }
 
-  .order-field {
-    margin: 0;
-    padding: 9px 10px 10px;
-    border: 1px solid #2f343f;
-    border-radius: 12px;
-    background: linear-gradient(180deg, rgba(18, 19, 24, 0.96), rgba(14, 15, 20, 0.96));
-    gap: 8px;
-    color: #a1a1aa;
-    font-size: 11px;
-    font-weight: 600;
-  }
-
-  .order-field-amount {
-    grid-column: 1;
-  }
-
-  .order-field-price {
-    grid-column: 2;
-  }
-
-  .order-field-receive {
-    grid-column: 3;
-  }
-
-  .order-field input {
-    height: 42px;
-    padding: 0 12px;
-    background: #17181d;
-    border-color: #333844;
-    font-size: 14px;
-  }
-
-  .slider-inline {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 8px;
-    margin: 0 0 12px;
-    padding: 8px 10px;
-    border: 1px solid #2f343f;
-    border-radius: 12px;
-    background: #101116;
-  }
 
   .readonly-input {
-    background: #0a0b0f;
-    border-style: dashed;
-    color: #cbd5e1;
-    cursor: not-allowed;
+    color: #9ca3af;
+    cursor: default;
   }
 
   .primary-btn {
     width: 100%;
     padding: 10px;
-    background: linear-gradient(180deg, rgba(251, 191, 36, 0.18), rgba(217, 119, 6, 0.12));
-    border: 1px solid rgba(251, 191, 36, 0.55);
+    background: linear-gradient(180deg, rgba(251, 191, 36, 0.18), rgba(217, 119, 6, 0.12)) !important;
+    border: 1px solid rgba(251, 191, 36, 0.55) !important;
     border-radius: 8px;
     color: #fde68a;
     font-size: 13px;
@@ -2107,110 +2484,33 @@
     transition: all 0.2s;
   }
 
-  @media (max-width: 980px) {
-    .order-side-row {
-      justify-content: flex-start;
-    }
-
-    .side-toggle-group {
-      margin-left: 0;
-    }
+  .primary-btn.buy-action {
+    background: #16a34a !important;
+    border-color: #16a34a !important;
+    color: #fff;
   }
 
-  .primary-btn:hover {
-    background: linear-gradient(180deg, rgba(251, 191, 36, 0.28), rgba(217, 119, 6, 0.2));
-    border-color: rgba(251, 191, 36, 0.75);
+  .primary-btn.buy-action:hover {
+    background: #15803d !important;
+  }
+
+  .primary-btn.sell-action {
+    background: #dc2626 !important;
+    border-color: #dc2626 !important;
+    color: #fff;
+  }
+
+  .primary-btn.sell-action:hover {
+    background: #b91c1c !important;
   }
 
   .primary-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
-  .size-tools {
-    margin: 0 0 14px;
-    padding: 10px;
-    border: 1px solid #2f343f;
-    border-radius: 8px;
-    background: #101116;
-  }
 
-  .size-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-  }
 
-  .size-title {
-    color: #d1d5db;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-  }
-
-  .size-min-fill {
-    color: #9ca3af;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .size-stats {
-    margin-top: 8px;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-    gap: 6px 12px;
-    font-size: 12px;
-    color: #9ca3af;
-  }
-
-  .size-stats strong {
-    color: #f3f4f6;
-    font-weight: 600;
-  }
-
-  .size-slider {
-    width: 100%;
-    accent-color: #f59e0b;
-    appearance: none;
-    -webkit-appearance: none;
-    height: 6px;
-    border-radius: 999px;
-    background: linear-gradient(180deg, #fbbf24, #d97706);
-    outline: none;
-  }
-
-  .size-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 999px;
-    background: #fbbf24;
-    border: 2px solid #111217;
-    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.7);
-    cursor: pointer;
-  }
-
-  .size-slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border-radius: 999px;
-    background: #fbbf24;
-    border: 2px solid #111217;
-    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.7);
-    cursor: pointer;
-  }
-
-  .slider-value {
-    min-width: 44px;
-    text-align: right;
-    color: #fbbf24;
-    font-size: 12px;
-    font-weight: 700;
-    font-family: 'JetBrains Mono', monospace;
-  }
 
   .size-hint {
     margin: 8px 0 0;
@@ -2240,30 +2540,47 @@
     line-height: 1.4;
   }
 
-  .orders-title {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-  }
-
-  .orders-title span {
-    color: #9ca3af;
-    font-size: 12px;
-  }
-
   .orders-toolbar {
     display: flex;
     justify-content: space-between;
-    align-items: flex-end;
+    align-items: center;
     gap: 10px;
-    margin-bottom: 10px;
+    margin-bottom: 6px;
     flex-wrap: wrap;
   }
 
-  .orders-tabs {
-    display: inline-flex;
-    gap: 8px;
+  .orders-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .orders-inline-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e5e7eb;
+    margin: 0;
+  }
+
+  .orders-count {
+    color: #9ca3af;
+    font-size: 11px;
+  }
+
+  .orders-tab-text {
+    font-size: 12px;
+    color: #6b7280;
+    cursor: pointer;
+    user-select: none;
+    transition: color 100ms;
+  }
+
+  .orders-tab-text:hover {
+    color: #d1d5db;
+  }
+
+  .orders-tab-text.active {
+    color: #fbbf24;
   }
 
   .closed-status-filter {
@@ -2386,6 +2703,68 @@
     border-color: rgba(239, 68, 68, 0.6);
   }
 
+  .rebate-summary {
+    margin: 0 0 12px;
+    color: #c7b27a;
+    font-size: 12px;
+  }
+
+  .rebate-summary strong {
+    color: #f3d17a;
+    font-weight: 700;
+  }
+
+  .swap-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(6, 8, 12, 0.78);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 50;
+    backdrop-filter: blur(8px);
+  }
+
+  .swap-modal {
+    width: min(420px, 100%);
+    border-radius: 16px;
+    border: 1px solid rgba(243, 209, 122, 0.24);
+    background:
+      radial-gradient(circle at top, rgba(243, 209, 122, 0.14), transparent 45%),
+      #121317;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.38);
+    padding: 20px;
+  }
+
+  .swap-modal-kicker {
+    color: #f3d17a;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .swap-modal-copy,
+  .swap-modal-rebate {
+    margin: 0;
+    color: #d7d9df;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .swap-modal-rebate {
+    margin-top: 10px;
+    color: #c7b27a;
+  }
+
+  .swap-modal-actions {
+    margin-top: 18px;
+    display: flex;
+    justify-content: flex-end;
+  }
+
   @media (max-width: 1480px) {
     .trade-grid.with-depth {
       grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
@@ -2404,7 +2783,7 @@
     }
 
     .section-orders {
-      margin-top: 12px;
+      margin-top: 6px;
     }
   }
 

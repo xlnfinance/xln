@@ -41,7 +41,13 @@ const defaultSettings: Settings = {
   portfolioScale: 5000, // Default scale: $5000 max for portfolio bars
   componentStates: {},
   compactNumbers: true, // Display 1.2K instead of 1,234
-  verboseLogging: false // Quiet by default
+  verboseLogging: false, // Quiet by default
+  barCreditGradient: true,
+  barAnimTransition: true,
+  barAnimSweep: false,
+  barAnimGlow: false,
+  barAnimDeltaFlash: false,
+  barAnimRipple: false,
 };
 
 // Settings store

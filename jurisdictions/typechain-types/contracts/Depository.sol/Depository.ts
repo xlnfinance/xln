@@ -64,134 +64,6 @@ export type AccountSettlementStructOutput = [
   nonce: bigint;
 };
 
-export type SettlementDiffStruct = {
-  tokenId: BigNumberish;
-  leftDiff: BigNumberish;
-  rightDiff: BigNumberish;
-  collateralDiff: BigNumberish;
-  ondeltaDiff: BigNumberish;
-};
-
-export type SettlementDiffStructOutput = [
-  tokenId: bigint,
-  leftDiff: bigint,
-  rightDiff: bigint,
-  collateralDiff: bigint,
-  ondeltaDiff: bigint
-] & {
-  tokenId: bigint;
-  leftDiff: bigint;
-  rightDiff: bigint;
-  collateralDiff: bigint;
-  ondeltaDiff: bigint;
-};
-
-export type AllowanceStruct = {
-  deltaIndex: BigNumberish;
-  rightAllowance: BigNumberish;
-  leftAllowance: BigNumberish;
-};
-
-export type AllowanceStructOutput = [
-  deltaIndex: bigint,
-  rightAllowance: bigint,
-  leftAllowance: bigint
-] & { deltaIndex: bigint; rightAllowance: bigint; leftAllowance: bigint };
-
-export type TransformerClauseStruct = {
-  transformerAddress: AddressLike;
-  encodedBatch: BytesLike;
-  allowances: AllowanceStruct[];
-};
-
-export type TransformerClauseStructOutput = [
-  transformerAddress: string,
-  encodedBatch: string,
-  allowances: AllowanceStructOutput[]
-] & {
-  transformerAddress: string;
-  encodedBatch: string;
-  allowances: AllowanceStructOutput[];
-};
-
-export type ProofBodyStruct = {
-  offdeltas: BigNumberish[];
-  tokenIds: BigNumberish[];
-  transformers: TransformerClauseStruct[];
-};
-
-export type ProofBodyStructOutput = [
-  offdeltas: bigint[],
-  tokenIds: bigint[],
-  transformers: TransformerClauseStructOutput[]
-] & {
-  offdeltas: bigint[];
-  tokenIds: bigint[];
-  transformers: TransformerClauseStructOutput[];
-};
-
-export type FinalDisputeProofStruct = {
-  counterentity: BytesLike;
-  initialNonce: BigNumberish;
-  finalNonce: BigNumberish;
-  initialProofbodyHash: BytesLike;
-  finalProofbody: ProofBodyStruct;
-  finalArguments: BytesLike;
-  initialArguments: BytesLike;
-  sig: BytesLike;
-  startedByLeft: boolean;
-  disputeUntilBlock: BigNumberish;
-  cooperative: boolean;
-};
-
-export type FinalDisputeProofStructOutput = [
-  counterentity: string,
-  initialNonce: bigint,
-  finalNonce: bigint,
-  initialProofbodyHash: string,
-  finalProofbody: ProofBodyStructOutput,
-  finalArguments: string,
-  initialArguments: string,
-  sig: string,
-  startedByLeft: boolean,
-  disputeUntilBlock: bigint,
-  cooperative: boolean
-] & {
-  counterentity: string;
-  initialNonce: bigint;
-  finalNonce: bigint;
-  initialProofbodyHash: string;
-  finalProofbody: ProofBodyStructOutput;
-  finalArguments: string;
-  initialArguments: string;
-  sig: string;
-  startedByLeft: boolean;
-  disputeUntilBlock: bigint;
-  cooperative: boolean;
-};
-
-export type InitialDisputeProofStruct = {
-  counterentity: BytesLike;
-  nonce: BigNumberish;
-  proofbodyHash: BytesLike;
-  sig: BytesLike;
-  initialArguments: BytesLike;
-};
-
-export type InitialDisputeProofStructOutput = [
-  counterentity: string,
-  nonce: bigint,
-  proofbodyHash: string,
-  sig: string,
-  initialArguments: string
-] & {
-  counterentity: string;
-  nonce: bigint;
-  proofbodyHash: string;
-  sig: string;
-  initialArguments: string;
-};
-
 export type ExternalTokenToReserveStruct = {
   entity: BytesLike;
   contractAddress: AddressLike;
@@ -215,6 +87,28 @@ export type ExternalTokenToReserveStructOutput = [
   tokenType: bigint;
   internalTokenId: bigint;
   amount: bigint;
+};
+
+export type SettlementDiffStruct = {
+  tokenId: BigNumberish;
+  leftDiff: BigNumberish;
+  rightDiff: BigNumberish;
+  collateralDiff: BigNumberish;
+  ondeltaDiff: BigNumberish;
+};
+
+export type SettlementDiffStructOutput = [
+  tokenId: bigint,
+  leftDiff: bigint,
+  rightDiff: bigint,
+  collateralDiff: bigint,
+  ondeltaDiff: bigint
+] & {
+  tokenId: bigint;
+  leftDiff: bigint;
+  rightDiff: bigint;
+  collateralDiff: bigint;
+  ondeltaDiff: bigint;
 };
 
 export type FlashloanStruct = { tokenId: BigNumberish; amount: BigNumberish };
@@ -312,6 +206,112 @@ export type SettlementStructOutput = [
   nonce: bigint;
 };
 
+export type InitialDisputeProofStruct = {
+  counterentity: BytesLike;
+  nonce: BigNumberish;
+  proofbodyHash: BytesLike;
+  sig: BytesLike;
+  initialArguments: BytesLike;
+};
+
+export type InitialDisputeProofStructOutput = [
+  counterentity: string,
+  nonce: bigint,
+  proofbodyHash: string,
+  sig: string,
+  initialArguments: string
+] & {
+  counterentity: string;
+  nonce: bigint;
+  proofbodyHash: string;
+  sig: string;
+  initialArguments: string;
+};
+
+export type AllowanceStruct = {
+  deltaIndex: BigNumberish;
+  rightAllowance: BigNumberish;
+  leftAllowance: BigNumberish;
+};
+
+export type AllowanceStructOutput = [
+  deltaIndex: bigint,
+  rightAllowance: bigint,
+  leftAllowance: bigint
+] & { deltaIndex: bigint; rightAllowance: bigint; leftAllowance: bigint };
+
+export type TransformerClauseStruct = {
+  transformerAddress: AddressLike;
+  encodedBatch: BytesLike;
+  allowances: AllowanceStruct[];
+};
+
+export type TransformerClauseStructOutput = [
+  transformerAddress: string,
+  encodedBatch: string,
+  allowances: AllowanceStructOutput[]
+] & {
+  transformerAddress: string;
+  encodedBatch: string;
+  allowances: AllowanceStructOutput[];
+};
+
+export type ProofBodyStruct = {
+  offdeltas: BigNumberish[];
+  tokenIds: BigNumberish[];
+  transformers: TransformerClauseStruct[];
+};
+
+export type ProofBodyStructOutput = [
+  offdeltas: bigint[],
+  tokenIds: bigint[],
+  transformers: TransformerClauseStructOutput[]
+] & {
+  offdeltas: bigint[];
+  tokenIds: bigint[];
+  transformers: TransformerClauseStructOutput[];
+};
+
+export type FinalDisputeProofStruct = {
+  counterentity: BytesLike;
+  initialNonce: BigNumberish;
+  finalNonce: BigNumberish;
+  initialProofbodyHash: BytesLike;
+  finalProofbody: ProofBodyStruct;
+  finalArguments: BytesLike;
+  initialArguments: BytesLike;
+  sig: BytesLike;
+  startedByLeft: boolean;
+  disputeUntilBlock: BigNumberish;
+  cooperative: boolean;
+};
+
+export type FinalDisputeProofStructOutput = [
+  counterentity: string,
+  initialNonce: bigint,
+  finalNonce: bigint,
+  initialProofbodyHash: string,
+  finalProofbody: ProofBodyStructOutput,
+  finalArguments: string,
+  initialArguments: string,
+  sig: string,
+  startedByLeft: boolean,
+  disputeUntilBlock: bigint,
+  cooperative: boolean
+] & {
+  counterentity: string;
+  initialNonce: bigint;
+  finalNonce: bigint;
+  initialProofbodyHash: string;
+  finalProofbody: ProofBodyStructOutput;
+  finalArguments: string;
+  initialArguments: string;
+  sig: string;
+  startedByLeft: boolean;
+  disputeUntilBlock: bigint;
+  cooperative: boolean;
+};
+
 export type ReserveToExternalTokenStruct = {
   receivingEntity: BytesLike;
   tokenId: BigNumberish;
@@ -402,11 +402,10 @@ export interface DepositoryInterface extends Interface {
       | "accountKey"
       | "addEntityProvider"
       | "admin"
+      | "adminRegisterExternalToken"
       | "approvedEntityProviders"
       | "computeSettlementHash"
       | "defaultDisputeDelay"
-      | "disputeFinalize"
-      | "disputeStart"
       | "emergencyPause"
       | "enforceDebts"
       | "enforceDebtsLarge"
@@ -414,7 +413,6 @@ export interface DepositoryInterface extends Interface {
       | "entityNonces"
       | "entityProvider"
       | "entityProvidersList"
-      | "externalTokenToReserve"
       | "getApprovedProviders"
       | "getTokenMetadata"
       | "getTokensLength"
@@ -425,11 +423,9 @@ export interface DepositoryInterface extends Interface {
       | "packTokenReference"
       | "processBatch"
       | "removeEntityProvider"
-      | "reserveToReserve"
       | "setDefaultDisputeDelay"
       | "setEmergencyPause"
       | "setEntityDisputeDelay"
-      | "settle"
       | "tokenToId"
       | "unpackTokenReference"
       | "unsafeProcessBatch"
@@ -442,7 +438,6 @@ export interface DepositoryInterface extends Interface {
       | "DebtCreated"
       | "DebtEnforced"
       | "DebtForgiven"
-      | "DebugSettleStart"
       | "DisputeFinalized"
       | "DisputeStarted"
       | "EmergencyPauseToggled"
@@ -495,6 +490,10 @@ export interface DepositoryInterface extends Interface {
   ): string;
   encodeFunctionData(functionFragment: "admin", values?: undefined): string;
   encodeFunctionData(
+    functionFragment: "adminRegisterExternalToken",
+    values: [ExternalTokenToReserveStruct]
+  ): string;
+  encodeFunctionData(
     functionFragment: "approvedEntityProviders",
     values: [AddressLike]
   ): string;
@@ -505,14 +504,6 @@ export interface DepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "defaultDisputeDelay",
     values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "disputeFinalize",
-    values: [FinalDisputeProofStruct]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "disputeStart",
-    values: [InitialDisputeProofStruct]
   ): string;
   encodeFunctionData(
     functionFragment: "emergencyPause",
@@ -541,10 +532,6 @@ export interface DepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "entityProvidersList",
     values: [BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "externalTokenToReserve",
-    values: [ExternalTokenToReserveStruct]
   ): string;
   encodeFunctionData(
     functionFragment: "getApprovedProviders",
@@ -593,10 +580,6 @@ export interface DepositoryInterface extends Interface {
     values: [AddressLike]
   ): string;
   encodeFunctionData(
-    functionFragment: "reserveToReserve",
-    values: [BytesLike, BytesLike, BigNumberish, BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "setDefaultDisputeDelay",
     values: [BigNumberish]
   ): string;
@@ -607,16 +590,6 @@ export interface DepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "setEntityDisputeDelay",
     values: [BytesLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "settle",
-    values: [
-      BytesLike,
-      BytesLike,
-      SettlementDiffStruct[],
-      BigNumberish[],
-      BytesLike
-    ]
   ): string;
   encodeFunctionData(
     functionFragment: "tokenToId",
@@ -655,6 +628,10 @@ export interface DepositoryInterface extends Interface {
   ): Result;
   decodeFunctionResult(functionFragment: "admin", data: BytesLike): Result;
   decodeFunctionResult(
+    functionFragment: "adminRegisterExternalToken",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "approvedEntityProviders",
     data: BytesLike
   ): Result;
@@ -664,14 +641,6 @@ export interface DepositoryInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "defaultDisputeDelay",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "disputeFinalize",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "disputeStart",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -700,10 +669,6 @@ export interface DepositoryInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "entityProvidersList",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "externalTokenToReserve",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -747,10 +712,6 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "reserveToReserve",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "setDefaultDisputeDelay",
     data: BytesLike
   ): Result;
@@ -762,7 +723,6 @@ export interface DepositoryInterface extends Interface {
     functionFragment: "setEntityDisputeDelay",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(functionFragment: "settle", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "tokenToId", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "unpackTokenReference",
@@ -888,31 +848,6 @@ export namespace DebtForgivenEvent {
     tokenId: bigint;
     amountForgiven: bigint;
     debtIndex: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace DebugSettleStartEvent {
-  export type InputTuple = [
-    leftEntity: BytesLike,
-    rightEntity: BytesLike,
-    sigLen: BigNumberish,
-    entityProvider: AddressLike
-  ];
-  export type OutputTuple = [
-    leftEntity: string,
-    rightEntity: string,
-    sigLen: bigint,
-    entityProvider: string
-  ];
-  export interface OutputObject {
-    leftEntity: string;
-    rightEntity: string;
-    sigLen: bigint;
-    entityProvider: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -1190,6 +1125,12 @@ export interface Depository extends BaseContract {
 
   admin: TypedContractMethod<[], [string], "view">;
 
+  adminRegisterExternalToken: TypedContractMethod<
+    [params: ExternalTokenToReserveStruct],
+    [void],
+    "nonpayable"
+  >;
+
   approvedEntityProviders: TypedContractMethod<
     [arg0: AddressLike],
     [boolean],
@@ -1215,18 +1156,6 @@ export interface Depository extends BaseContract {
 
   defaultDisputeDelay: TypedContractMethod<[], [bigint], "view">;
 
-  disputeFinalize: TypedContractMethod<
-    [params: FinalDisputeProofStruct],
-    [boolean],
-    "nonpayable"
-  >;
-
-  disputeStart: TypedContractMethod<
-    [params: InitialDisputeProofStruct],
-    [boolean],
-    "nonpayable"
-  >;
-
   emergencyPause: TypedContractMethod<[], [boolean], "view">;
 
   enforceDebts: TypedContractMethod<
@@ -1251,12 +1180,6 @@ export interface Depository extends BaseContract {
     [arg0: BigNumberish],
     [string],
     "view"
-  >;
-
-  externalTokenToReserve: TypedContractMethod<
-    [params: ExternalTokenToReserveStruct],
-    [void],
-    "nonpayable"
   >;
 
   getApprovedProviders: TypedContractMethod<[], [string[]], "view">;
@@ -1338,17 +1261,6 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
 
-  reserveToReserve: TypedContractMethod<
-    [
-      fromEntity: BytesLike,
-      toEntity: BytesLike,
-      tokenId: BigNumberish,
-      amount: BigNumberish
-    ],
-    [boolean],
-    "nonpayable"
-  >;
-
   setDefaultDisputeDelay: TypedContractMethod<
     [delayBlocks: BigNumberish],
     [void],
@@ -1364,18 +1276,6 @@ export interface Depository extends BaseContract {
   setEntityDisputeDelay: TypedContractMethod<
     [entity: BytesLike, delayBlocks: BigNumberish],
     [void],
-    "nonpayable"
-  >;
-
-  settle: TypedContractMethod<
-    [
-      leftEntity: BytesLike,
-      rightEntity: BytesLike,
-      diffs: SettlementDiffStruct[],
-      forgiveDebtsInTokenIds: BigNumberish[],
-      sig: BytesLike
-    ],
-    [boolean],
     "nonpayable"
   >;
 
@@ -1473,6 +1373,13 @@ export interface Depository extends BaseContract {
     nameOrSignature: "admin"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
+    nameOrSignature: "adminRegisterExternalToken"
+  ): TypedContractMethod<
+    [params: ExternalTokenToReserveStruct],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
     nameOrSignature: "approvedEntityProviders"
   ): TypedContractMethod<[arg0: AddressLike], [boolean], "view">;
   getFunction(
@@ -1496,20 +1403,6 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "defaultDisputeDelay"
   ): TypedContractMethod<[], [bigint], "view">;
-  getFunction(
-    nameOrSignature: "disputeFinalize"
-  ): TypedContractMethod<
-    [params: FinalDisputeProofStruct],
-    [boolean],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "disputeStart"
-  ): TypedContractMethod<
-    [params: InitialDisputeProofStruct],
-    [boolean],
-    "nonpayable"
-  >;
   getFunction(
     nameOrSignature: "emergencyPause"
   ): TypedContractMethod<[], [boolean], "view">;
@@ -1539,13 +1432,6 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "entityProvidersList"
   ): TypedContractMethod<[arg0: BigNumberish], [string], "view">;
-  getFunction(
-    nameOrSignature: "externalTokenToReserve"
-  ): TypedContractMethod<
-    [params: ExternalTokenToReserveStruct],
-    [void],
-    "nonpayable"
-  >;
   getFunction(
     nameOrSignature: "getApprovedProviders"
   ): TypedContractMethod<[], [string[]], "view">;
@@ -1632,18 +1518,6 @@ export interface Depository extends BaseContract {
     nameOrSignature: "removeEntityProvider"
   ): TypedContractMethod<[provider: AddressLike], [void], "nonpayable">;
   getFunction(
-    nameOrSignature: "reserveToReserve"
-  ): TypedContractMethod<
-    [
-      fromEntity: BytesLike,
-      toEntity: BytesLike,
-      tokenId: BigNumberish,
-      amount: BigNumberish
-    ],
-    [boolean],
-    "nonpayable"
-  >;
-  getFunction(
     nameOrSignature: "setDefaultDisputeDelay"
   ): TypedContractMethod<[delayBlocks: BigNumberish], [void], "nonpayable">;
   getFunction(
@@ -1654,19 +1528,6 @@ export interface Depository extends BaseContract {
   ): TypedContractMethod<
     [entity: BytesLike, delayBlocks: BigNumberish],
     [void],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "settle"
-  ): TypedContractMethod<
-    [
-      leftEntity: BytesLike,
-      rightEntity: BytesLike,
-      diffs: SettlementDiffStruct[],
-      forgiveDebtsInTokenIds: BigNumberish[],
-      sig: BytesLike
-    ],
-    [boolean],
     "nonpayable"
   >;
   getFunction(
@@ -1727,13 +1588,6 @@ export interface Depository extends BaseContract {
     DebtForgivenEvent.InputTuple,
     DebtForgivenEvent.OutputTuple,
     DebtForgivenEvent.OutputObject
-  >;
-  getEvent(
-    key: "DebugSettleStart"
-  ): TypedContractEvent<
-    DebugSettleStartEvent.InputTuple,
-    DebugSettleStartEvent.OutputTuple,
-    DebugSettleStartEvent.OutputObject
   >;
   getEvent(
     key: "DisputeFinalized"
@@ -1846,17 +1700,6 @@ export interface Depository extends BaseContract {
       DebtForgivenEvent.InputTuple,
       DebtForgivenEvent.OutputTuple,
       DebtForgivenEvent.OutputObject
-    >;
-
-    "DebugSettleStart(bytes32,bytes32,uint256,address)": TypedContractEvent<
-      DebugSettleStartEvent.InputTuple,
-      DebugSettleStartEvent.OutputTuple,
-      DebugSettleStartEvent.OutputObject
-    >;
-    DebugSettleStart: TypedContractEvent<
-      DebugSettleStartEvent.InputTuple,
-      DebugSettleStartEvent.OutputTuple,
-      DebugSettleStartEvent.OutputObject
     >;
 
     "DisputeFinalized(bytes32,bytes32,uint256,bytes32,bytes32)": TypedContractEvent<
