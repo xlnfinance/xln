@@ -8,81 +8,39 @@
    * - General: Theme, UI preferences
    */
 
-  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount, type ComponentType } from 'svelte';
+  import { ethers } from 'ethers';
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
+  import { jmachineConfigs, jmachineOperations, parseJMachineConfigJson, stringifyJMachineConfig, type JMachineConfig } from '$lib/stores/jmachineStore';
   import { settings, settingsOperations } from '$lib/stores/settingsStore';
   import { xlnEnvironment } from '$lib/stores/xlnStore';
   import { resetEverything } from '$lib/utils/resetEverything';
-  import { POPULAR_NETWORKS, BROWSERVM_CHAIN_START, type NetworkConfig } from '$lib/config/networks';
   import { THEME_DEFINITIONS } from '$lib/utils/themes';
   import { getBarColors } from '$lib/utils/bar-colors';
   import type { ThemeName, BarColorMode } from '$lib/types/ui';
   import { X, Copy, Check, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-svelte';
+  import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
 
   const dispatch = createEventDispatcher();
   export let embedded = false;
 
   // Tabs
-  type Tab = 'wallet' | 'appearance' | 'network' | 'advanced';
+  type Tab = 'wallet' | 'appearance' | 'network' | 'storage' | 'advanced';
   let activeTab: Tab = 'wallet';
+  let IndexedDbInspectorComponent: ComponentType | null = null;
+  let indexedDbInspectorLoading = false;
+  let indexedDbInspectorError = '';
 
   let seedCopied = false;
   let mnemonic12Copied = false;
 
   // J-Machines tab state
-  let enabledChains = new Set<number>();
-  let customRpcs = new Map<number, string[]>();
-  let editingChainId: number | null = null;
-  let editRpcs: string[] = [];
-  let showCustomForm = false;
-  let browserVmCount = 0;
-
-  // Custom J-machine form
-  let customForm = {
-    chainId: '',
-    name: '',
-    ticker: 'ETH',
-    rpcs: '',
-  };
-
-  // Load saved J-machine settings
-  const JMACHINE_STORAGE_KEY = 'xln-jmachines';
-
-  interface JMachineSettings {
-    enabled: number[];
-    customRpcs: Record<number, string[]>;
-    browserVmCount: number;
-  }
-
-  function loadJMachineSettings() {
-    try {
-      const saved = localStorage.getItem(JMACHINE_STORAGE_KEY);
-      if (saved) {
-        const data: JMachineSettings = JSON.parse(saved);
-        enabledChains = new Set(data.enabled || []);
-        customRpcs = new Map(Object.entries(data.customRpcs || {}).map(([k, v]) => [Number(k), v]));
-        browserVmCount = data.browserVmCount || 0;
-      }
-    } catch (e) {
-      console.warn('[WalletSettings] Failed to load J-machine settings:', e);
-    }
-  }
-
-  function saveJMachineSettings() {
-    try {
-      const data: JMachineSettings = {
-        enabled: Array.from(enabledChains),
-        customRpcs: Object.fromEntries(customRpcs),
-        browserVmCount,
-      };
-      localStorage.setItem(JMACHINE_STORAGE_KEY, JSON.stringify(data));
-    } catch (e) {
-      console.warn('[WalletSettings] Failed to save J-machine settings:', e);
-    }
-  }
-
-  // Initialize
-  loadJMachineSettings();
+  let showAddJMachine = false;
+  let editingJMachineName: string | null = null;
+  let editMachineDraft: JMachineConfig | null = null;
+  let editMachineJson = '';
+  let editMachineError = '';
+  let rpcTestStatus = new Map<string, string>();
 
   let nowMs = Date.now();
   let livenessTimer: ReturnType<typeof setInterval> | null = null;
@@ -126,84 +84,110 @@ function copyMnemonic12() {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   }
 
-  // J-Machine functions
-  async function toggleNetwork(chainId: number, enabled: boolean) {
-    if (enabled) {
-      enabledChains.add(chainId);
-      await importJMachine(chainId);
-    } else {
-      enabledChains.delete(chainId);
-      // TODO: Remove J-machine from runtime
-    }
-    enabledChains = enabledChains; // Trigger reactivity
-    saveJMachineSettings();
+  function openEditJMachine(config: JMachineConfig) {
+    editingJMachineName = config.name;
+    editMachineDraft = structuredClone(config);
+    editMachineJson = stringifyJMachineConfig(config);
+    editMachineError = '';
   }
 
-  async function importJMachine(chainId: number) {
-    const network = POPULAR_NETWORKS.find(n => n.chainId === chainId);
-    if (!network) return;
-
-    const rpcs = customRpcs.get(chainId) || network.rpcs;
-
-    console.log(`[WalletSettings] Importing J-machine: ${network.name} (${chainId})`);
-    // TODO: Call runtime.apply({ runtimeTxs: [{ type: 'importJ', ... }] })
+  function cancelEditJMachine() {
+    editingJMachineName = null;
+    editMachineDraft = null;
+    editMachineJson = '';
+    editMachineError = '';
   }
 
-  function startEditRpcs(network: NetworkConfig) {
-    editingChainId = network.chainId;
-    editRpcs = [...(customRpcs.get(network.chainId) || network.rpcs)];
+  function syncJsonFromDraft() {
+    if (!editMachineDraft) return;
+    editMachineJson = stringifyJMachineConfig(editMachineDraft);
   }
 
-  function saveRpcs() {
-    if (editingChainId !== null) {
-      customRpcs.set(editingChainId, editRpcs.filter(r => r.trim()));
-      customRpcs = customRpcs;
-      saveJMachineSettings();
-      editingChainId = null;
+  function applyJsonToDraft() {
+    try {
+      const parsed = parseJMachineConfigJson(editMachineJson);
+      editMachineDraft = parsed;
+      editMachineError = '';
+    } catch (error) {
+      editMachineError = error instanceof Error ? error.message : String(error);
     }
   }
 
-  function cancelEditRpcs() {
-    editingChainId = null;
-    editRpcs = [];
+  function saveEditedJMachine() {
+    if (!editMachineDraft || !editingJMachineName) return;
+    try {
+      const normalized = parseJMachineConfigJson(editMachineJson || stringifyJMachineConfig(editMachineDraft));
+      if (normalized.name.toLowerCase() !== editingJMachineName.toLowerCase()) {
+        jmachineOperations.remove(editingJMachineName);
+      }
+      jmachineOperations.upsert(normalized);
+      cancelEditJMachine();
+    } catch (error) {
+      editMachineError = error instanceof Error ? error.message : String(error);
+    }
   }
 
-  function addRpcField() {
-    editRpcs = [...editRpcs, ''];
-  }
-
-  function removeRpcField(index: number) {
-    editRpcs = editRpcs.filter((_, i) => i !== index);
-  }
-
-  async function addBrowserVM() {
-    browserVmCount++;
-    const chainId = BROWSERVM_CHAIN_START + browserVmCount - 1; // 1001, 1002, 1003...
-
-    console.log(`[WalletSettings] Adding BrowserVM: Simnet ${browserVmCount} (chain ${chainId})`);
-    // TODO: Call runtime.apply({ runtimeTxs: [{ type: 'importJ', name: `Simnet ${browserVmCount}`, chainId, ticker: 'SIM', rpcs: [] }] })
-
-    saveJMachineSettings();
-  }
-
-  function submitCustomJMachine() {
-    const chainId = parseInt(customForm.chainId);
-    if (isNaN(chainId) || !customForm.name || !customForm.rpcs) {
+  async function testJMachineRpc(config: JMachineConfig) {
+    const key = config.name;
+    if (config.mode === 'browservm') {
+      rpcTestStatus.set(key, 'BrowserVM local jurisdiction');
+      rpcTestStatus = new Map(rpcTestStatus);
       return;
     }
+    const rpcUrl = config.rpcs[0];
+    if (!rpcUrl) {
+      rpcTestStatus.set(key, 'No RPC URL configured');
+      rpcTestStatus = new Map(rpcTestStatus);
+      return;
+    }
+    rpcTestStatus.set(key, 'Testing...');
+    rpcTestStatus = new Map(rpcTestStatus);
+    try {
+      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const network = await provider.getNetwork();
+      const chainId = Number(network.chainId);
+      let message = `Reachable: chain ${chainId}`;
+      if (chainId !== config.chainId) {
+        message += ` (expected ${config.chainId})`;
+      }
+      if (config.contracts?.depository && ethers.isAddress(config.contracts.depository)) {
+        const code = await provider.getCode(config.contracts.depository);
+        message += code && code !== '0x' ? ' • depository ok' : ' • depository missing';
+      }
+      rpcTestStatus.set(key, message);
+    } catch (error) {
+      rpcTestStatus.set(key, error instanceof Error ? error.message : String(error));
+    }
+    rpcTestStatus = new Map(rpcTestStatus);
+  }
 
-    const rpcs = customForm.rpcs.split('\n').map(r => r.trim()).filter(Boolean);
+  async function importConfiguredJMachine(config: JMachineConfig) {
+    try {
+      const imported = await vaultOperations.importJMachine(config);
+      jmachineOperations.upsert(imported);
+      rpcTestStatus.set(config.name, 'Imported into active runtime');
+      rpcTestStatus = new Map(rpcTestStatus);
+    } catch (error) {
+      rpcTestStatus.set(config.name, error instanceof Error ? error.message : String(error));
+      rpcTestStatus = new Map(rpcTestStatus);
+    }
+  }
 
-    console.log(`[WalletSettings] Adding custom J-machine:`, { chainId, name: customForm.name, rpcs });
-    // TODO: Call runtime.apply({ runtimeTxs: [{ type: 'importJ', ... }] })
-
-    customRpcs.set(chainId, rpcs);
-    enabledChains.add(chainId);
-    saveJMachineSettings();
-
-    // Reset form
-    showCustomForm = false;
-    customForm = { chainId: '', name: '', ticker: 'ETH', rpcs: '' };
+  async function handleJMachineCreate(event: CustomEvent<{
+    name: string;
+    mode: 'browservm' | 'rpc';
+    chainId: number;
+    rpcs: string[];
+    ticker: string;
+    contracts?: JMachineConfig['contracts'];
+  }>) {
+    const config: JMachineConfig = {
+      ...event.detail,
+      createdAt: Date.now(),
+    };
+    jmachineOperations.upsert(config);
+    showAddJMachine = false;
+    await importConfiguredJMachine(config);
   }
 
   // General settings
@@ -280,6 +264,28 @@ function copyMnemonic12() {
     void loadCheckpointHeights();
   }
 
+  $: preferredIndexedDbNames = Array.from(new Set([
+    $xlnEnvironment?.dbNamespace ? `level-js-db-${$xlnEnvironment.dbNamespace}` : '',
+    $xlnEnvironment?.dbNamespace ? `level-js-db-${$xlnEnvironment.dbNamespace}-infra` : '',
+    'level-js-db-default',
+    'level-js-db-default-infra',
+  ].filter(Boolean)));
+
+  $: if (activeTab === 'storage' && !IndexedDbInspectorComponent && !indexedDbInspectorLoading) {
+    indexedDbInspectorLoading = true;
+    indexedDbInspectorError = '';
+    void import('$lib/components/Settings/IndexedDbInspector.svelte')
+      .then((module) => {
+        IndexedDbInspectorComponent = module.default;
+      })
+      .catch((error) => {
+        indexedDbInspectorError = error instanceof Error ? error.message : String(error);
+      })
+      .finally(() => {
+        indexedDbInspectorLoading = false;
+      });
+  }
+
   function handleThemeChange(event: Event) {
     const target = event.currentTarget as HTMLSelectElement;
     settingsOperations.setTheme(target.value as ThemeName);
@@ -287,6 +293,12 @@ function copyMnemonic12() {
 
   function close() {
     dispatch('close');
+  }
+
+  function confirmResetAllData() {
+    const confirmed = confirm('Clear all local XLN data? This resets wallets, runtime state, and caches.');
+    if (!confirmed) return;
+    void resetEverything();
   }
 </script>
 
@@ -306,6 +318,7 @@ function copyMnemonic12() {
     <button class="tab" class:active={activeTab === 'wallet'} on:click={() => activeTab = 'wallet'}>Wallet</button>
     <button class="tab" class:active={activeTab === 'appearance'} on:click={() => activeTab = 'appearance'}>Appearance</button>
     <button class="tab" class:active={activeTab === 'network'} on:click={() => activeTab = 'network'}>Network</button>
+    <button class="tab" class:active={activeTab === 'storage'} on:click={() => activeTab = 'storage'}>Storage</button>
     <button class="tab" class:active={activeTab === 'advanced'} on:click={() => activeTab = 'advanced'}>Advanced</button>
   </div>
 
@@ -437,134 +450,149 @@ function copyMnemonic12() {
       </div>
 
     {:else if activeTab === 'network'}
-      <!-- Network Tab -->
       <div class="section">
-        <h3>Popular Networks</h3>
-        <p class="section-desc">Enable networks to create entities and transact</p>
+        <h3>Jurisdictions</h3>
+        <p class="section-desc">Manage imported jurisdictions for the active runtime. Basic fields stay visible; full config is available through advanced JSON.</p>
 
         <div class="network-list">
-          {#each POPULAR_NETWORKS.filter(n => !n.testnet) as network}
+          {#each $jmachineConfigs as machine}
             <div class="network-row">
               <div class="network-info">
-                <span class="network-icon">{network.icon}</span>
+                <span class="network-icon">{machine.mode === 'browservm' ? '🖥️' : '🌐'}</span>
                 <div class="network-details">
-                  <span class="network-name">{network.name}</span>
-                  <span class="network-meta">Chain {network.chainId} · {network.ticker}</span>
+                  <span class="network-name">{machine.name}</span>
+                  <span class="network-meta">Chain {machine.chainId} · {machine.ticker} · {machine.mode === 'browservm' ? 'BrowserVM' : (machine.rpcs[0] || 'no-rpc')}</span>
                 </div>
               </div>
               <div class="network-actions">
-                <button class="edit-btn" on:click={() => startEditRpcs(network)}>
+                <button class="edit-btn" on:click={() => openEditJMachine(machine)}>
                   Edit
                 </button>
-                <label class="toggle">
-                  <input
-                    type="checkbox"
-                    checked={enabledChains.has(network.chainId)}
-                    on:change={(e) => toggleNetwork(network.chainId, e.currentTarget.checked)}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
+                <button class="edit-btn" on:click={() => void testJMachineRpc(machine)}>
+                  Test RPC
+                </button>
+                <button class="edit-btn" on:click={() => void importConfiguredJMachine(machine)}>
+                  Import
+                </button>
+                <button class="remove-btn" on:click={() => jmachineOperations.remove(machine.name)}>
+                  <Trash2 size={14} />
+                </button>
               </div>
             </div>
 
-            {#if editingChainId === network.chainId}
+            {#if rpcTestStatus.get(machine.name)}
+              <p class="setting-hint">{rpcTestStatus.get(machine.name)}</p>
+            {/if}
+
+            {#if editingJMachineName === machine.name && editMachineDraft}
               <div class="rpc-editor">
-                <h4>RPC Endpoints for {network.name}</h4>
-                {#each editRpcs as rpc, i}
-                  <div class="rpc-row">
-                    <input
-                      type="text"
-                      bind:value={editRpcs[i]}
-                      placeholder="https://..."
-                    />
-                    <button class="remove-btn" on:click={() => removeRpcField(i)}>
-                      <Trash2 size={14} />
-                    </button>
+                <div class="form-row">
+                  <label>
+                    Name
+                    <input type="text" bind:value={editMachineDraft.name} on:input={syncJsonFromDraft} />
+                  </label>
+                  <label>
+                    Chain ID
+                    <input type="number" bind:value={editMachineDraft.chainId} on:input={syncJsonFromDraft} />
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>
+                    Ticker
+                    <input type="text" bind:value={editMachineDraft.ticker} on:input={syncJsonFromDraft} />
+                  </label>
+                  <label>
+                    Mode
+                    <select bind:value={editMachineDraft.mode} on:change={syncJsonFromDraft}>
+                      <option value="rpc">RPC</option>
+                      <option value="browservm">BrowserVM</option>
+                    </select>
+                  </label>
+                </div>
+                <label>
+                  Primary RPC
+                  <input
+                    type="text"
+                    value={editMachineDraft.rpcs[0] || ''}
+                    on:input={(e) => {
+                      editMachineDraft = {
+                        ...editMachineDraft!,
+                        rpcs: e.currentTarget.value.trim() ? [e.currentTarget.value.trim()] : [],
+                      };
+                      syncJsonFromDraft();
+                    }}
+                    placeholder="https://rpc.example.com"
+                  />
+                </label>
+
+                <details class="testnets" open>
+                  <summary>Advanced JSON</summary>
+                  <textarea bind:value={editMachineJson} rows="12"></textarea>
+                  <div class="rpc-actions">
+                    <button class="btn secondary" on:click={applyJsonToDraft}>Apply JSON</button>
+                    <button class="btn secondary" on:click={syncJsonFromDraft}>Format</button>
                   </div>
-                {/each}
-                <button class="add-rpc-btn" on:click={addRpcField}>
-                  <Plus size={14} /> Add RPC
-                </button>
+                </details>
+
+                {#if editMachineError}
+                  <p class="setting-hint error-text">{editMachineError}</p>
+                {/if}
+
                 <div class="rpc-actions">
-                  <button class="btn secondary" on:click={cancelEditRpcs}>Cancel</button>
-                  <button class="btn primary" on:click={saveRpcs}>Save</button>
+                  <button class="btn secondary" on:click={cancelEditJMachine}>Cancel</button>
+                  <button class="btn primary" on:click={saveEditedJMachine}>Save</button>
                 </div>
               </div>
             {/if}
           {/each}
         </div>
 
-        <!-- Testnets -->
-        <h3 class="subsection">Testnets</h3>
-        <div class="network-list">
-          {#each POPULAR_NETWORKS.filter(n => n.testnet) as network}
-            <div class="network-row">
-              <div class="network-info">
-                <span class="network-icon">{network.icon}</span>
-                <div class="network-details">
-                  <span class="network-name">{network.name}</span>
-                  <span class="network-meta">Chain {network.chainId} · {network.ticker}</span>
-                </div>
-              </div>
-              <div class="network-actions">
-                <button class="edit-btn" on:click={() => startEditRpcs(network)}>
-                  Edit
-                </button>
-                <label class="toggle">
-                  <input
-                    type="checkbox"
-                    checked={enabledChains.has(network.chainId)}
-                    on:change={(e) => toggleNetwork(network.chainId, e.currentTarget.checked)}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-            </div>
-          {/each}
-        </div>
+        {#if $jmachineConfigs.length === 0}
+          <p class="setting-hint">No jurisdictions configured yet.</p>
+        {/if}
 
-        <!-- Local/Custom Section -->
         <div class="local-section">
-          <button class="add-btn browservm" on:click={addBrowserVM}>
-            <Plus size={16} />
-            Add BrowserVM (Local Test)
-          </button>
-
-          <button class="add-btn custom" on:click={() => showCustomForm = !showCustomForm}>
-            {#if showCustomForm}
+          <button
+            class="add-btn custom"
+            on:click={() => showAddJMachine = !showAddJMachine}
+            data-testid="settings-network-add-jmachine-toggle"
+          >
+            {#if showAddJMachine}
               <ChevronUp size={16} />
             {:else}
               <ChevronDown size={16} />
             {/if}
-            Add Custom J-Machine
+            Add Custom Jurisdiction
           </button>
 
-          {#if showCustomForm}
+          {#if showAddJMachine}
             <div class="custom-form">
-              <div class="form-row">
-                <label>
-                  Chain ID
-                  <input type="number" bind:value={customForm.chainId} placeholder="e.g. 31337" />
-                </label>
-                <label>
-                  Ticker
-                  <input type="text" bind:value={customForm.ticker} placeholder="ETH" />
-                </label>
-              </div>
-              <label>
-                Network Name
-                <input type="text" bind:value={customForm.name} placeholder="My Network" />
-              </label>
-              <label>
-                RPC URLs (one per line)
-                <textarea bind:value={customForm.rpcs} rows="3" placeholder="https://rpc.example.com"></textarea>
-              </label>
-              <button class="btn primary" on:click={submitCustomJMachine}>
-                Add Network
-              </button>
+              <AddJMachine
+                on:create={handleJMachineCreate}
+                on:cancel={() => showAddJMachine = false}
+              />
             </div>
           {/if}
         </div>
+      </div>
+
+    {:else if activeTab === 'storage'}
+      <div class="section">
+        <h3>IndexedDB</h3>
+        <p class="section-desc">Inspect core and infra LevelDB blobs directly in the browser. This viewer is frontend-only and loads lazily.</p>
+
+        {#if indexedDbInspectorError}
+          <p class="setting-hint error-text">{indexedDbInspectorError}</p>
+        {:else if indexedDbInspectorLoading || !IndexedDbInspectorComponent}
+          <p class="setting-hint">Loading inspector...</p>
+        {:else}
+          <svelte:component
+            this={IndexedDbInspectorComponent}
+            databaseNames={preferredIndexedDbNames}
+            databaseNamePrefixes={['level-js-db-']}
+            pageSize={40}
+          />
+        {/if}
       </div>
 
     {:else if activeTab === 'advanced'}
@@ -606,7 +634,7 @@ function copyMnemonic12() {
       <div class="section">
         <h3>Data</h3>
 
-        <button class="btn danger" on:click={() => resetEverything()}>
+        <button class="btn danger" on:click={confirmResetAllData}>
           Clear All Data
         </button>
         <p class="setting-hint">Removes all wallets, accounts, and runtime state. Cannot be undone.</p>

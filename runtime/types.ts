@@ -1459,6 +1459,10 @@ export type AccountTx =
         offerId: string;
         fillRatio: number;        // 0-65535 (uint16)
         cancelRemainder: boolean; // true = fill + cancel, false = fill + keep open
+        // Optional exact execution amounts from orderbook fills. If present,
+        // settlement uses these amounts directly (before any rebate).
+        executionGiveAmount?: bigint;
+        executionWantAmount?: bigint;
         rebateAmount?: bigint;    // Price improvement rebate (quote token, after SpreadDistribution)
         rebateTokenId?: number;   // Token for rebate (always quote side)
       };
@@ -1968,18 +1972,6 @@ export interface JReplica {
     account?: string;
     deltaTransformer?: string;
   };
-
-  // === SYNCED FROM DEPOSITORY.SOL ===
-  // mapping(bytes32 => mapping(uint => uint)) _reserves
-  reserves?: Map<string, Map<number, bigint>>;  // entityId -> tokenId -> amount
-
-  // mapping(bytes => mapping(uint => AccountCollateral)) _collaterals
-  collaterals?: Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>; // accountKey -> tokenId -> {collateral, ondelta}
-
-
-  // === SYNCED FROM ENTITYPROVIDER.SOL ===
-  // mapping(bytes32 => Entity) entities
-  registeredEntities?: Map<string, { name: string; quorum: string[]; threshold: number }>;
 }
 
 /** J-Machine transaction (settlement layer) */

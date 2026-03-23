@@ -10,6 +10,7 @@
   } from '$lib/utils/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
+  import { amountToUsd } from '$lib/utils/assetPricing';
 
   $: activeXlnFunctions = $xlnFunctions;
   $: activeEnv = $xlnEnvironment;
@@ -25,27 +26,74 @@
   let collateralAmount = 0n;
   let lastPrefillKey = '';
   let lastAutoMax = 0n;
+  let overCollateralMinutes = 30;
+
+  const OVERCOLLATERAL_RENT_RATE_USD_PER_100_PER_HOUR = 1;
+  const usdFormatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
   $: effectiveCounterparty = counterpartyId || selectedCounterparty;
   $: tokenList = [1, 2, 3].map(id => {
     const info = activeXlnFunctions?.getTokenInfo?.(id);
     return { id, symbol: info?.symbol || `TKN${id}` };
   });
+  $: userDerivedDelta = (() => {
+    if (!activeEnv || !effectiveCounterparty || !activeXlnFunctions) return null;
+    const accountEntry = getCounterpartyAccount(activeEnv, entityId, effectiveCounterparty);
+    const delta = accountEntry?.account.deltas?.get?.(selectedTokenId);
+    if (!delta) return null;
+
+    const isUserLeft =
+      normalizeEntityId(entityId) < normalizeEntityId(effectiveCounterparty);
+    try {
+      return activeXlnFunctions.deriveDelta(delta, isUserLeft);
+    } catch {
+      return null;
+    }
+  })();
   $: selectedTokenDecimals = (() => {
     const info = activeXlnFunctions?.getTokenInfo?.(selectedTokenId);
     const decimals = Number(info?.decimals);
     return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
   })();
   $: maxCollateralNeeded = (() => {
-    if (!activeEnv || !effectiveCounterparty || !activeXlnFunctions) return 0n;
-    const accountEntry = getCounterpartyAccount(activeEnv, entityId, effectiveCounterparty);
-    const delta = accountEntry?.account.deltas?.get?.(selectedTokenId);
-    if (!delta) return 0n;
-    const derived = activeXlnFunctions.deriveDelta(delta, entityId < effectiveCounterparty);
-    return derived.outPeerCredit > derived.outCollateral
-      ? (derived.outPeerCredit - derived.outCollateral)
+    if (!userDerivedDelta) return 0n;
+    return userDerivedDelta.outPeerCredit > userDerivedDelta.outCollateral
+      ? (userDerivedDelta.outPeerCredit - userDerivedDelta.outCollateral)
       : 0n;
   })();
+  $: maxCollateralRequest = (() => {
+    if (!userDerivedDelta) return 0n;
+    return userDerivedDelta.outPeerCredit;
+  })();
+  $: overCollateralAmount = collateralAmount > maxCollateralRequest ? collateralAmount - maxCollateralRequest : 0n;
+
+  function tokenSymbol(tokenId: number): string {
+    const info = activeXlnFunctions?.getTokenInfo?.(tokenId);
+    return String(info?.symbol || `Token #${tokenId}`).trim();
+  }
+
+  function formatUsd(value: number): string {
+    if (!Number.isFinite(value)) return '$0.00';
+    return usdFormatter.format(value);
+  }
+
+  function formatTokenAmount(amount: bigint): string {
+    if (amount === 0n) return '0';
+    return activeXlnFunctions?.formatTokenAmount?.(selectedTokenId, amount) || amount.toString();
+  }
+
+  $: overCollateralUsd = amountToUsd(
+    overCollateralAmount,
+    selectedTokenDecimals,
+    tokenSymbol(selectedTokenId),
+  );
+  $: overCollateralRentRateUsdPerHour = overCollateralUsd * (OVERCOLLATERAL_RENT_RATE_USD_PER_100_PER_HOUR / 100);
+  $: overCollateralRentCostUsd = overCollateralRentRateUsdPerHour * (overCollateralMinutes / 60);
   $: {
     const key = `${normalizeEntityId(effectiveCounterparty)}:${selectedTokenId}`;
     if (key !== lastPrefillKey) {
@@ -186,6 +234,14 @@
     collateralAmount = maxCollateralNeeded;
     lastAutoMax = maxCollateralNeeded;
   }
+
+  function onMinutesChange(event: Event) {
+    const target = event.currentTarget as HTMLInputElement | null;
+    const next = Number(target?.value || 0);
+    if (Number.isFinite(next)) {
+      overCollateralMinutes = Math.max(1, Math.min(100, Math.round(next)));
+    }
+  }
 </script>
 
 <div class="action-card">
@@ -220,6 +276,31 @@
   <div class="max-hint">
     Suggested max: {activeXlnFunctions?.formatTokenAmount(selectedTokenId, maxCollateralNeeded) || '0'}
   </div>
+
+  {#if overCollateralAmount > 0n}
+    <div class="over-collateral-note">
+      <div>
+        Вы запрашиваете оверколлатеризацию на {formatTokenAmount(overCollateralAmount)} {tokenSymbol(selectedTokenId)}.
+        Лимит принятия хаба: {formatTokenAmount(maxCollateralRequest)} {tokenSymbol(selectedTokenId)}.
+      </div>
+      <div>
+        Цена аренды: $1 за $100 в час (примерно). На {overCollateralMinutes} мин: {formatUsd(overCollateralRentCostUsd)}.
+      </div>
+      <div class="over-collateral-slider-row">
+        <label for="over-collateral-minutes">Аренда оверколлатеризации, мин:</label>
+        <input
+          id="over-collateral-minutes"
+          class="over-collateral-slider"
+          type="range"
+          min="1"
+          max="100"
+          value={overCollateralMinutes}
+          on:input={onMinutesChange}
+        />
+        <span>{overCollateralMinutes}</span>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -303,5 +384,58 @@
     font-size: 11px;
     font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
     font-variant-numeric: tabular-nums;
+  }
+
+  .over-collateral-note {
+    margin-top: 10px;
+    padding: 8px;
+    border: 1px solid #3b3f4c;
+    border-radius: 8px;
+    background: #111216;
+    color: #d1d5db;
+    font-size: 11px;
+    line-height: 1.35;
+    display: grid;
+    row-gap: 8px;
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .over-collateral-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #9ca3af;
+  }
+
+  .over-collateral-slider {
+    flex: 1;
+    appearance: none;
+    height: 2px;
+    background: #27272a;
+    border-radius: 2px;
+    outline: none;
+    margin: 0;
+  }
+
+  .over-collateral-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #fbbf24;
+    border: 2px solid #f59e0b;
+    border-radius: 0;
+    transform: rotate(45deg);
+    cursor: pointer;
+  }
+
+  .over-collateral-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: #fbbf24;
+    border: 2px solid #f59e0b;
+    border-radius: 0;
+    transform: rotate(45deg);
+    cursor: pointer;
   }
 </style>

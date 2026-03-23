@@ -32,6 +32,7 @@ import {
   parseReceiptLogsToJEvents,
   setupContractEventListeners,
   processEventBatch,
+  updateWatcherJurisdictionCursor,
   type EventBatchCounter,
   type RawJEvent,
   type RawJEventArgs,
@@ -1376,7 +1377,7 @@ export async function createRpcAdapter(
       txCounter._seenLogs = { set: new Set<string>(), order: [] as string[] };
       const watchPollMs = resolveWatcherPollMs(!!env?.scenarioMode);
       const confirmationDepth = resolveFinalityDepth(!!env?.scenarioMode);
-      const startBlock = getWatcherStartBlock(env);
+      const startBlock = getWatcherStartBlock(env, addresses.depository);
       lastSyncedBlock = Math.max(0, startBlock - 1);
       console.log(
         `🔭 [JAdapter:rpc] Starting event watcher (${watchPollMs}ms polling, depth=${confirmationDepth}, fromBlock=${startBlock})...`,
@@ -1418,6 +1419,7 @@ export async function createRpcAdapter(
           if (lastSyncedBlock >= safeToBlock) return;
 
           const fromBlock = lastSyncedBlock + 1;
+          updateWatcherJurisdictionCursor(activeEnv, safeToBlock, addresses.depository);
           const filter = { address: await getLiveDepositoryAddress(), fromBlock, toBlock: safeToBlock };
           const logs = await provider.getLogs(filter);
 

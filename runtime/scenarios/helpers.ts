@@ -509,6 +509,16 @@ export const dai = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
  */
 export async function syncChain(env: Env, rounds = 3): Promise<void> {
   const process = await getProcess();
+  const localRpcAdapters = Array.from(env.jReplicas?.values?.() || [])
+    .map((jReplica) => (jReplica as { jadapter?: JAdapter }).jadapter)
+    .filter((ja): ja is JAdapter => Boolean(ja && ja.mode === 'rpc' && Number(ja.chainId) === 31337));
+
+  // Local RPC scenarios can briefly hide logs on the newest submitted block.
+  // Mine at most one empty block per syncChain call so watchers read a stable tail
+  // without artificially fast-forwarding timeout logic by N extra blocks.
+  for (const ja of localRpcAdapters) {
+    await ja.processBlock();
+  }
 
   // Poll every round, not just once.
   // Scenario J-adapters are polling-based, so a single poll can miss the tail
@@ -518,12 +528,6 @@ export async function syncChain(env: Env, rounds = 3): Promise<void> {
     for (const [, jReplica] of env.jReplicas) {
       const ja = (jReplica as { jadapter?: JAdapter }).jadapter;
       if (!ja) continue;
-      // Local RPC scenarios can briefly hide logs on the newest mined block.
-      // Mine one empty block before polling so the watcher reads from a stable tail
-      // instead of a just-submitted batch block that some providers expose late.
-      if (ja.mode === 'rpc' && Number(ja.chainId) === 31337) {
-        await ja.processBlock();
-      }
       if (ja.pollNow) await ja.pollNow();
       try {
         const blockNumber = await ja.provider.getBlockNumber();

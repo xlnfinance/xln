@@ -39,6 +39,20 @@ type CreateRuntimeOptions = {
   mnemonic12?: string;
 };
 
+type ImportedJMachineConfig = {
+  name: string;
+  mode: 'browservm' | 'rpc';
+  chainId: number;
+  ticker: string;
+  rpcs: string[];
+  contracts?: {
+    depository?: string;
+    entityProvider?: string;
+    account?: string;
+    deltaTransformer?: string;
+  };
+};
+
 const requireContractAddress = (value: string | null | undefined, label: string): string => {
   const raw = String(value || '').trim();
   if (!raw) {
@@ -1172,6 +1186,87 @@ export const vaultOperations = {
   async enqueueRuntimeInput(env: Env, input: RuntimeInput): Promise<Env> {
     const { enqueueAndProcess } = await import('./xlnStore');
     return enqueueAndProcess(env, input);
+  },
+
+  async importJMachine(config: ImportedJMachineConfig): Promise<ImportedJMachineConfig> {
+    const runtimeId = normalizeRuntimeId(get(activeRuntimeId));
+    if (!runtimeId) throw new Error('No active runtime selected');
+
+    const state = get(runtimesState);
+    const runtime = state.runtimes[runtimeId];
+    if (!runtime) throw new Error(`Runtime not found: ${runtimeId}`);
+
+    const { getXLN } = await import('./xlnStore');
+    const xln = await getXLN();
+    await registerRuntimeSignerKeys(runtime, xln);
+
+    let env = get(runtimes).get(runtimeId)?.env as Env | undefined;
+    if (!env) {
+      env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+      runtimes.update((currentRuntimes) => {
+        currentRuntimes.set(runtimeId, runtimeToEntry(runtime, env!));
+        return currentRuntimes;
+      });
+      registerRuntimeEnvChange(runtimeId, env, xln);
+    }
+
+    if (env.jReplicas?.has(config.name)) {
+      const existing = env.jReplicas.get(config.name);
+      return {
+        ...config,
+        contracts: {
+          depository: String(existing?.depositoryAddress || existing?.contracts?.depository || config.contracts?.depository || ''),
+          entityProvider: String(existing?.entityProviderAddress || existing?.contracts?.entityProvider || config.contracts?.entityProvider || ''),
+          account: String(existing?.contracts?.account || config.contracts?.account || ''),
+          deltaTransformer: String(existing?.contracts?.deltaTransformer || config.contracts?.deltaTransformer || ''),
+        },
+      };
+    }
+
+    ensureRuntimeLoopRunning(env, xln, `import-jmachine:${config.name}`);
+    await enqueueAndAwait(
+      xln,
+      env,
+      {
+        runtimeTxs: [{
+          type: 'importJ',
+          data: {
+            name: config.name,
+            chainId: config.chainId,
+            ticker: config.ticker,
+            rpcs: config.mode === 'browservm' ? [] : config.rpcs,
+            ...(config.contracts ? { contracts: config.contracts } : {}),
+          }
+        }],
+        entityInputs: []
+      },
+      () => hasConnectedJurisdictionAdapter(env?.jReplicas?.get?.(config.name)),
+      `importJ(${config.name})`,
+      45_000,
+    );
+    await waitForCondition(
+      () => hasRuntimeJurisdictionAddresses(env?.jReplicas?.get?.(config.name)),
+      `importJ(${config.name}).addresses`,
+      45_000,
+    );
+
+    runtimes.update((currentRuntimes) => {
+      currentRuntimes.set(runtimeId, runtimeToEntry(runtime, env!));
+      return currentRuntimes;
+    });
+    if (normalizeRuntimeId(get(activeRuntimeId)) === runtimeId) {
+      setXlnEnvironment(env);
+    }
+    const imported = env.jReplicas?.get(config.name);
+    return {
+      ...config,
+      contracts: {
+        depository: String(imported?.depositoryAddress || imported?.contracts?.depository || config.contracts?.depository || ''),
+        entityProvider: String(imported?.entityProviderAddress || imported?.contracts?.entityProvider || config.contracts?.entityProvider || ''),
+        account: String(imported?.contracts?.account || config.contracts?.account || ''),
+        deltaTransformer: String(imported?.contracts?.deltaTransformer || config.contracts?.deltaTransformer || ''),
+      },
+    };
   },
 
   async enqueueEntityInputs(env: Env, inputs: RoutedEntityInput[]): Promise<Env> {

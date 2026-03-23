@@ -28,6 +28,8 @@ const compareNumericKey = (
   return String(left).localeCompare(String(right));
 };
 
+const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ENTITY FRAME HASH - Cryptographic commitment to entity state
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1451,7 +1453,10 @@ export const applyEntityFrame = async (
       // The counterparty is whoever is NOT Hub in this account
       // Since we're Hub and we're processing, accountId = whichever entity is NOT us
       const hubId = currentEntityState.entityId;
-      const counterparty = offer.fromEntity === hubId ? offer.toEntity : offer.fromEntity;
+      const hubEntity = normalizeEntityRef(hubId);
+      const fromEntity = normalizeEntityRef(offer.fromEntity);
+      const toEntity = normalizeEntityRef(offer.toEntity);
+      const counterparty = fromEntity === hubEntity ? toEntity : fromEntity;
       return { ...offer, accountId: counterparty };
     });
     console.log(`📊 ENTITY-ORCHESTRATOR: Enriched ${enrichedOffers.length} offers with accountId`);

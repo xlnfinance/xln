@@ -4599,6 +4599,7 @@
 
           <AccountList
             {replica}
+            {selectedAccountId}
             on:select={handleAccountSelect}
             on:faucet={handleAccountFaucet}
             on:settleApprove={handleQuickSettleApprove}

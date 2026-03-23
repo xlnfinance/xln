@@ -1655,7 +1655,7 @@
             class="hub-select-inline"
             value={createOrderAccountId}
             on:change={handleSelectedHubChange}
-            data-testid="swap-hub-select"
+            data-testid="swap-account-select"
           >
             {#each selectedHubOptions as hub (hub.value)}
               <option value={hub.value}>{hub.label}</option>
@@ -1728,8 +1728,8 @@
         <span class="input-suffix">{wantTokenSymbol}</span>
       </label>
 
-      <div class="avbl-row">
-        <span>Avbl: <strong>{formattedAvailableGive}</strong></span>
+      <div class="avbl-row size-stats">
+        <span>Available: <strong>{formattedAvailableGive}</strong></span>
         {#if capacityWarning}
           <span class="capacity-warn">{capacityWarning}</span>
         {/if}

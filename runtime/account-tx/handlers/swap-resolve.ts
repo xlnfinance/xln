@@ -26,7 +26,12 @@ import type { AccountMachine, AccountTx } from '../../types';
 import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL } from '../../constants';
-import { canonicalPair, computeSwapPriceTicks, requantizeRemainingSwapAtPrice, SWAP_LOT_SCALE } from '../../orderbook/types';
+import {
+  canonicalPair,
+  computeSwapPriceTicks,
+  requantizeRemainingSwapAtPrice,
+  SWAP_LOT_SCALE,
+} from '../../orderbook/types';
 
 const MAX_FILL_RATIO = 65535;
 
@@ -41,6 +46,8 @@ export async function handleSwapResolve(
     offerId,
     fillRatio,
     cancelRemainder,
+    executionGiveAmount,
+    executionWantAmount,
     rebateAmount,
     rebateTokenId,
   } = accountTx.data;
@@ -72,16 +79,44 @@ export async function handleSwapResolve(
     return { success: false, error: `Fill ratio ${fillRatio} below minimum ${offer.minFillRatio}`, events };
   }
 
-  // 4. Calculate fill amounts at LIMIT PRICE (offer ratio)
+  // 4. Calculate fill amounts
   const effectiveGive = offer.quantizedGive ?? offer.giveAmount;
   const effectiveWant = offer.quantizedWant ?? offer.wantAmount;
+  const executionProvided = executionGiveAmount !== undefined || executionWantAmount !== undefined;
+  if (executionProvided && (executionGiveAmount === undefined || executionWantAmount === undefined)) {
+    return {
+      success: false,
+      error: `executionGiveAmount and executionWantAmount must both be provided`,
+      events,
+    };
+  }
 
-  // filledGive anchors the fill, filledWant derived using ceil() to protect maker.
-  // Maker must receive at least their limit price; taker pays any dust.
-  const filledGive = (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
-  const filledWant = effectiveGive > 0n
-    ? (filledGive * effectiveWant + effectiveGive - 1n) / effectiveGive
+  // Legacy settlement path (no explicit execution): use offer ratio and protect maker with ceil().
+  const limitFilledGive = (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
+  const limitFilledWant = effectiveGive > 0n
+    ? (limitFilledGive * effectiveWant + effectiveGive - 1n) / effectiveGive
     : 0n;
+
+  const filledGive = executionProvided ? executionGiveAmount! : limitFilledGive;
+  const filledWant = executionProvided ? executionWantAmount! : limitFilledWant;
+
+  // For explicit execution amounts, ensure they match the offer's absolute limits.
+  if (executionProvided && fillRatio > 0) {
+    if (filledGive > effectiveGive) {
+      return {
+        success: false,
+        error: `Execution give amount ${filledGive} exceeds offer limit ${effectiveGive}`,
+        events,
+      };
+    }
+    if (filledWant > effectiveWant) {
+      return {
+        success: false,
+        error: `Execution want amount ${filledWant} exceeds offer limit ${effectiveWant}`,
+        events,
+      };
+    }
+  }
 
   if (fillRatio > 0) {
     if (filledGive < FINANCIAL.MIN_PAYMENT_AMOUNT || filledGive > FINANCIAL.MAX_PAYMENT_AMOUNT) {

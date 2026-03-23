@@ -10,9 +10,9 @@ type JsonPrimitive = string | number | boolean | null;
 type TaggedBigInt = { __xlnType: 'BigInt'; value: string };
 type TaggedMap = { __xlnType: 'Map'; value: Array<[TaggedJsonValue, TaggedJsonValue]> };
 type TaggedSet = { __xlnType: 'Set'; value: TaggedJsonValue[] };
-type TaggedUint8Array = { __xlnType: 'Uint8Array'; value: number[] };
 type TaggedBuffer = { __xlnType: 'Buffer'; value: number[] };
 type TaggedDate = { __xlnType: 'Date'; value: string };
+type TaggedTypedArray = { __xlnType: 'TypedArray'; kind: TypedArrayKind; value: string };
 
 type TaggedJsonRecord = { [key: string]: TaggedJsonValue };
 
@@ -21,17 +21,54 @@ export type TaggedJsonValue =
   | TaggedBigInt
   | TaggedMap
   | TaggedSet
-  | TaggedUint8Array
+  | TaggedTypedArray
   | TaggedBuffer
   | TaggedDate
   | TaggedJsonValue[]
   | TaggedJsonRecord;
 
-type TaggedEnvelope = TaggedBigInt | TaggedMap | TaggedSet | TaggedUint8Array | TaggedBuffer | TaggedDate;
+type TaggedEnvelope = TaggedBigInt | TaggedMap | TaggedSet | TaggedTypedArray | TaggedBuffer | TaggedDate;
 
 type SerializeOptions = {
   excludeKeys?: ReadonlySet<string>;
   space?: number;
+};
+
+type TypedArrayCtor =
+  | typeof Uint8Array
+  | typeof Int8Array
+  | typeof Uint16Array
+  | typeof Int16Array
+  | typeof Uint32Array
+  | typeof Int32Array
+  | typeof Float32Array
+  | typeof Float64Array
+  | typeof BigInt64Array
+  | typeof BigUint64Array;
+
+type TypedArrayKind =
+  | 'Uint8Array'
+  | 'Int8Array'
+  | 'Uint16Array'
+  | 'Int16Array'
+  | 'Uint32Array'
+  | 'Int32Array'
+  | 'Float32Array'
+  | 'Float64Array'
+  | 'BigInt64Array'
+  | 'BigUint64Array';
+
+const TYPED_ARRAY_CTORS: Record<TypedArrayKind, TypedArrayCtor> = {
+  Uint8Array,
+  Int8Array,
+  Uint16Array,
+  Int16Array,
+  Uint32Array,
+  Int32Array,
+  Float32Array,
+  Float64Array,
+  BigInt64Array,
+  BigUint64Array,
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -46,8 +83,8 @@ const isTaggedEnvelope = (value: unknown): value is TaggedEnvelope => {
       return Array.isArray(value['value']);
     case 'Set':
       return Array.isArray(value['value']);
-    case 'Uint8Array':
-      return Array.isArray(value['value']);
+    case 'TypedArray':
+      return typeof value['kind'] === 'string' && typeof value['value'] === 'string';
     case 'Buffer':
       return Array.isArray(value['value']);
     case 'Date':
@@ -59,6 +96,39 @@ const isTaggedEnvelope = (value: unknown): value is TaggedEnvelope => {
 
 const isBufferValue = (value: unknown): value is Buffer =>
   typeof Buffer !== 'undefined' && Buffer.isBuffer(value);
+
+const isTypedArrayView = (value: unknown): value is Exclude<ArrayBufferView, DataView> =>
+  ArrayBuffer.isView(value) && !(value instanceof DataView);
+
+const toUint8Bytes = (view: ArrayBufferView): Uint8Array =>
+  new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, Math.min(index + chunkSize, bytes.length));
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+};
+
+const base64ToBytes = (base64: string): Uint8Array => {
+  if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(base64, 'base64'));
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+};
+
+const cloneArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
+  const copy = new Uint8Array(bytes.length);
+  copy.set(bytes);
+  return copy.buffer;
+};
 
 const stableString = (value: TaggedJsonValue): string => JSON.stringify(value);
 
@@ -101,8 +171,15 @@ const normalizeSerializableValue = (
   if (isBufferValue(input)) {
     return { __xlnType: 'Buffer', value: Array.from(input.values()) };
   }
-  if (input instanceof Uint8Array) {
-    return { __xlnType: 'Uint8Array', value: Array.from(input) };
+  if (isTypedArrayView(input)) {
+    const kind = input.constructor.name as TypedArrayKind;
+    if (kind in TYPED_ARRAY_CTORS) {
+      return {
+        __xlnType: 'TypedArray',
+        kind,
+        value: bytesToBase64(toUint8Bytes(input)),
+      };
+    }
   }
 
   const objectRef = input as object;
@@ -166,8 +243,11 @@ const decodeTaggedJson = (value: unknown): unknown => {
       return new Map(value.value);
     case 'Set':
       return new Set(value.value);
-    case 'Uint8Array':
-      return new Uint8Array(value.value);
+    case 'TypedArray': {
+      const ctor = TYPED_ARRAY_CTORS[value.kind as TypedArrayKind];
+      if (!ctor) return value;
+      return new ctor(cloneArrayBuffer(base64ToBytes(value.value)));
+    }
     case 'Buffer':
       return Buffer.from(value.value);
     case 'Date':

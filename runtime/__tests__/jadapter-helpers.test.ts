@@ -1,73 +1,37 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getSelfSignerFinalizedJHeight, getWatcherStartBlock } from '../jadapter/helpers';
+import { getWatcherStartBlock } from '../jadapter/helpers';
 
 describe('jadapter helper cursors', () => {
-  test('uses self-signer finalized J height as watcher cursor source', () => {
+  test('uses matching jReplica blockNumber as watcher cursor source', () => {
     const env = {
-      runtimeId: '0xsigner-self',
-      eReplicas: new Map([
-        [
-          '0xentity-a:0xsigner-self',
-          {
-            signerId: '0xsigner-self',
-            state: { lastFinalizedJHeight: 17 },
-          },
-        ],
-        [
-          '0xentity-b:0xsigner-peer',
-          {
-            signerId: '0xsigner-peer',
-            state: { lastFinalizedJHeight: 44 },
-          },
-        ],
+      activeJurisdiction: 'Arrakis',
+      jReplicas: new Map([
+        ['Arrakis', { name: 'Arrakis', blockNumber: 17n, depositoryAddress: '0xaaa' }],
+        ['Wakanda', { name: 'Wakanda', blockNumber: 44n, depositoryAddress: '0xbbb' }],
       ]),
     } as any;
 
-    expect(getSelfSignerFinalizedJHeight(env)).toBe(17);
-    expect(getWatcherStartBlock(env)).toBe(18);
+    expect(getWatcherStartBlock(env, '0xaaa')).toBe(18);
   });
 
-  test('chooses the minimum finalized height when multiple self-signer replicas exist', () => {
+  test('falls back to active jurisdiction block when no depository address is provided', () => {
     const env = {
-      runtimeId: '0xsigner-self',
-      eReplicas: new Map([
-        [
-          '0xentity-a:0xsigner-self',
-          {
-            signerId: '0xsigner-self',
-            state: { lastFinalizedJHeight: 22 },
-          },
-        ],
-        [
-          '0xentity-b:0xsigner-self',
-          {
-            signerId: '0xsigner-self',
-            state: { lastFinalizedJHeight: 19 },
-          },
-        ],
+      activeJurisdiction: 'Wakanda',
+      jReplicas: new Map([
+        ['Arrakis', { name: 'Arrakis', blockNumber: 22n, depositoryAddress: '0xaaa' }],
+        ['Wakanda', { name: 'Wakanda', blockNumber: 19n, depositoryAddress: '0xbbb' }],
       ]),
     } as any;
 
-    expect(getSelfSignerFinalizedJHeight(env)).toBe(19);
     expect(getWatcherStartBlock(env)).toBe(20);
   });
 
-  test('falls back to genesis when no self-signer replica is present', () => {
+  test('falls back to genesis when no jurisdiction replica is present', () => {
     const env = {
-      runtimeId: '0xsigner-self',
-      eReplicas: new Map([
-        [
-          '0xentity-a:0xsigner-peer',
-          {
-            signerId: '0xsigner-peer',
-            state: { lastFinalizedJHeight: 91 },
-          },
-        ],
-      ]),
+      jReplicas: new Map(),
     } as any;
 
-    expect(getSelfSignerFinalizedJHeight(env)).toBe(0);
     expect(getWatcherStartBlock(env)).toBe(1);
   });
 });

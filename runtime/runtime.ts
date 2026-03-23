@@ -1024,6 +1024,18 @@ const isRuntimeFrameReady = (env: Env, now: number, overrideDelayMs?: number): b
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
+const emitRuntimeLoopError = (
+  env: Env,
+  code: 'RUNTIME_LOOP_ERROR' | 'RUNTIME_LOOP_HALTED',
+  payload: Record<string, unknown>,
+): void => {
+  try {
+    env.error?.('system', code, payload, env.runtimeId);
+  } catch (reportError) {
+    console.error(`[RUNTIME_LOOP] failed to report ${code}:`, reportError);
+  }
+};
+
 /**
  * Start the single runtime event loop. Called once on init.
  * Async while-loop — no re-entry possible by construction.
@@ -1047,59 +1059,61 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
   state.loopActive = true;
 
   const loop = async () => {
-    while (running) {
-      try {
-        if (hasRuntimeWork(env)) {
-          await process(env);
-        }
-      } catch (error) {
-        console.error('❌ Runtime loop error:', error);
-        const message = error instanceof Error ? error.message : String(error);
-        const stack = error instanceof Error ? error.stack : undefined;
-        env.error?.(
-          'system',
-          'RUNTIME_LOOP_ERROR',
-          {
-            message,
-            ...(stack ? { stack } : {}),
-          },
-          env.runtimeId,
-        );
-        // Fail-fast: stop runtime loop on any unhandled runtime error.
-        running = false;
+    let haltedMessage: string | null = null;
+    try {
+      while (running) {
         try {
-          env.error?.(
-            'system',
-            'RUNTIME_LOOP_HALTED',
-            { message },
-            env.runtimeId,
+          if (hasRuntimeWork(env)) {
+            await process(env);
+          }
+        } catch (error) {
+          console.error('❌ Runtime loop error:', error);
+          const message = error instanceof Error ? error.message : String(error);
+          const stack = error instanceof Error ? error.stack : undefined;
+          emitRuntimeLoopError(
+            env,
+            'RUNTIME_LOOP_ERROR',
+            {
+              message,
+              ...(stack ? { stack } : {}),
+            },
           );
-        } catch {
-          // best-effort diagnostics
+          // Fail-fast: stop runtime loop on any unhandled runtime error.
+          haltedMessage = message;
+          running = false;
+        }
+        if (!running) break;
+        if (hasRuntimeWork(env)) {
+          // Drain chained outputs/ACKs immediately instead of paying the production idle
+          // poll delay after every intermediate hop.
+          await sleep(0);
+          continue;
+        }
+        await waitForRuntimeLoopWakeOrTimeout(env, tickDelayMs);
+        if (!running) break;
+        if (!hasRuntimeWork(env)) {
+          const dueTimestamp = getEarliestWallClockDueTimestamp(env);
+          if (dueTimestamp !== null) {
+            generateHookPings(env, dueTimestamp, dueTimestamp);
+          }
         }
       }
-      if (!running) break;
-      if (hasRuntimeWork(env)) {
-        // Drain chained outputs/ACKs immediately instead of paying the production idle
-        // poll delay after every intermediate hop.
-        await sleep(0);
-        continue;
+    } finally {
+      if (haltedMessage) {
+        emitRuntimeLoopError(
+          env,
+          'RUNTIME_LOOP_HALTED',
+          { message: haltedMessage },
+        );
       }
-      await waitForRuntimeLoopWakeOrTimeout(env, tickDelayMs);
-      if (!running) break;
-      if (!hasRuntimeWork(env)) {
-        const dueTimestamp = getEarliestWallClockDueTimestamp(env);
-        if (dueTimestamp !== null) {
-          generateHookPings(env, dueTimestamp, dueTimestamp);
-        }
-      }
+      state.loopActive = false;
+      state.stopLoop = null;
+      state.wakeLoop = null;
+      state.wakeRequested = false;
     }
-    state.loopActive = false;
-    state.wakeLoop = null;
-    state.wakeRequested = false;
   };
 
-  loop(); // fire-and-forget — single async chain, never overlaps
+  void loop(); // fire-and-forget — single async chain, never overlaps
   state.stopLoop = () => {
     running = false;
     requestRuntimeLoopWake(env);
@@ -2455,89 +2469,6 @@ const applyRuntimeInput = async (
         runtimeTxs: [...mergedRuntimeTxs],
         entityInputs: [...appliedEntityInputs], // Persist only successfully applied inputs
       };
-
-      // CRITICAL: Update JReplica stateRoots from JAdapter BEFORE snapshot.
-      if (env.jReplicas) {
-        for (const [name, jReplica] of env.jReplicas.entries()) {
-          if (!jReplica.jadapter?.captureStateRoot) continue;
-          try {
-            const stateRoot = await jReplica.jadapter.captureStateRoot();
-            if (stateRoot) jReplica.stateRoot = stateRoot;
-          } catch (error) {
-            console.warn(
-              `[runtime] captureStateRoot failed for ${name}:`,
-              error instanceof Error ? error.message : String(error),
-            );
-          }
-        }
-      }
-
-      // CRITICAL: Sync collaterals and blockNumber from JAdapter BEFORE snapshot.
-      if (env.jReplicas && env.eReplicas) {
-        try {
-          const syncAdapters = Array.from(env.jReplicas.values())
-            .map((jReplica) => jReplica.jadapter)
-            .filter((jadapter): jadapter is NonNullable<typeof jadapter> => !!jadapter?.syncRuntimeState);
-          if (syncAdapters.length === 0) {
-            throw new Error('skip-sync-runtime-state');
-          }
-
-          // Collect all account pairs from all entities
-          const accountPairs: Array<{ entityId: string; counterpartyId: string }> = [];
-          const tokenIds = new Set<number>();
-          for (const [replicaKey, replica] of env.eReplicas.entries()) {
-            for (const tokenId of replica.state.reserves.keys()) {
-              if (Number.isFinite(tokenId) && tokenId > 0) tokenIds.add(tokenId);
-            }
-            if (replica.state.accounts) {
-              for (const [counterpartyId, account] of replica.state.accounts) {
-                const entityId = replicaKey.split(':')[0];
-                accountPairs.push({ entityId, counterpartyId });
-                for (const tokenId of account.deltas.keys()) {
-                  if (Number.isFinite(tokenId) && tokenId > 0) tokenIds.add(tokenId);
-                }
-              }
-            }
-          }
-          for (const jadapter of syncAdapters) {
-            const adapterTokenIds = (await jadapter.getTokenRegistry?.() ?? []).map((token) => Number(token.tokenId));
-            for (const tokenId of adapterTokenIds) {
-              if (Number.isFinite(tokenId) && tokenId > 0) tokenIds.add(tokenId);
-            }
-          }
-
-          let syncedState:
-            | {
-                collaterals: Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>;
-                blockNumber: bigint;
-              }
-            | null = null;
-          for (const jadapter of syncAdapters) {
-            syncedState = await jadapter.syncRuntimeState?.(accountPairs, Array.from(tokenIds).sort((a, b) => a - b)) ?? null;
-            if (syncedState) break;
-          }
-
-          if (!syncedState) {
-            throw new Error('skip-sync-runtime-state');
-          }
-
-          // Update JReplica with synced data
-          for (const jReplica of env.jReplicas.values()) {
-            jReplica.collaterals = syncedState.collaterals;
-            jReplica.blockNumber = syncedState.blockNumber;
-          }
-
-          // IMPORTANT: never mutate account shared deltas here.
-          // collateral/ondelta are updated only via account consensus
-          // (j_event_claim bilateral finalization).
-        } catch (e) {
-          if (e instanceof Error && e.message === 'skip-sync-runtime-state') {
-            // Optional path; most RPC runs have no adapter-backed local state to snapshot.
-          } else {
-            console.warn('[Runtime] Failed to sync JAdapter state:', e);
-          }
-        }
-      }
 
       // NOTE: Snapshot creation moved to process() - single entry point
       // applyRuntimeInput just processes inputs, process() handles snapshotting

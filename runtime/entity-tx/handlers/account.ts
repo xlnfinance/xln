@@ -1310,42 +1310,37 @@ export function processOrderbookSwaps(
       const filledBig = BigInt(filledLots);
       const originalBig = BigInt(originalLots);
       const fillRatio = originalBig > 0n
-        ? Number((filledBig * BigInt(MAX_FILL_RATIO)) / originalBig)
+        ? Number((filledBig * BigInt(MAX_FILL_RATIO) + originalBig - 1n) / originalBig)
         : 0;
+      const executionBaseWei = filledBig * SWAP_LOT_SCALE;
       const executionQuoteWei = (weightedCost * SWAP_LOT_SCALE) / ORDERBOOK_PRICE_SCALE;
 
-      // Compute rebate: spread between limit price and execution price
-      // Find the offer to determine limit-price quote cost
+      // Compute execution amounts from real maker price fills.
+      // These can be used to settle at best-market execution instead of offer limit.
       const account = hubState.accounts.get(accountId);
       const swapOffer = account?.swapOffers?.get(offerId);
+      const offerForExecution = swapOffer ?? offer;
+      let executionGiveAmount: bigint | undefined;
+      let executionWantAmount: bigint | undefined;
       let rebateAmount: bigint | undefined;
       let rebateTokenId: number | undefined;
-      if (swapOffer && fillRatio > 0) {
-        const effGive = swapOffer.quantizedGive ?? swapOffer.giveAmount;
-        const effWant = swapOffer.quantizedWant ?? swapOffer.wantAmount;
-        const offerSide = deriveSide(swapOffer.giveTokenId, swapOffer.wantTokenId);
-        // Limit-price quote amount for this fill
-        const filledGiveAtLimit = (effGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
-        const filledWantAtLimit = effGive > 0n
-          ? (filledGiveAtLimit * effWant + effGive - 1n) / effGive
-          : 0n;
-        // For BUY (side=0): maker gives quote, limit cost = filledGive, exec cost = executionQuoteWei
-        // For SELL (side=1): maker gives base, limit proceeds = filledWant (quote), exec proceeds = executionQuoteWei
-        let spread = 0n;
+
+      if (fillRatio > 0) {
+        const offerSide = deriveSide(offerForExecution.giveTokenId, offerForExecution.wantTokenId);
+
+        // For BUY (side=0): maker gives quote, receives base.
+        // For SELL (side=1): maker gives base, receives quote.
         if (offerSide === 0) {
-          // BUY: spread = limitCost - executionCost (maker overpaid, gets refund)
-          spread = filledGiveAtLimit > executionQuoteWei ? filledGiveAtLimit - executionQuoteWei : 0n;
-          rebateTokenId = swapOffer.giveTokenId; // quote token (what they overpaid in)
+          executionGiveAmount = executionQuoteWei;
+          executionWantAmount = executionBaseWei;
         } else {
-          // SELL: spread = executionProceeds - limitProceeds (maker got more than minimum)
-          spread = executionQuoteWei > filledWantAtLimit ? executionQuoteWei - filledWantAtLimit : 0n;
-          rebateTokenId = swapOffer.wantTokenId; // quote token (what they receive extra in)
+          executionGiveAmount = executionBaseWei;
+          executionWantAmount = executionQuoteWei;
         }
-        if (spread > 0n) {
-          // Limit orders must always settle at the best market execution available.
-          // Hub monetization must be explicit elsewhere, not hidden by keeping part
-          // of the price improvement inside swap settlement.
-          rebateAmount = spread;
+        if (executionGiveAmount > 0n && executionWantAmount > 0n) {
+          // Optional spread distribution is now carried separately from execution path.
+          rebateAmount = undefined;
+          rebateTokenId = undefined;
         }
       }
 
@@ -1360,6 +1355,9 @@ export function processOrderbookSwaps(
             offerId,
             fillRatio: Math.min(fillRatio, MAX_FILL_RATIO),
             cancelRemainder: !orderStillInBook,
+            ...(executionGiveAmount !== undefined && executionWantAmount !== undefined
+              ? { executionGiveAmount, executionWantAmount }
+              : {}),
             ...(rebateAmount !== undefined && rebateTokenId !== undefined && { rebateAmount, rebateTokenId }),
           }
         }
