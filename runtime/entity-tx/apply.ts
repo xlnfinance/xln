@@ -1074,21 +1074,7 @@ export const applyEntityTx = async (
         return { newState: entityState, outputs: [] };
       }
 
-      let onChainNonce = Number(entityTx.data.onChainNonce ?? accountMachine.onChainSettlementNonce ?? 0);
-      const jurisdictionName = newState.config.jurisdiction?.name || env.activeJurisdiction;
-      const jadapter = jurisdictionName ? env.jReplicas?.get(jurisdictionName)?.jadapter : undefined;
-      if (jadapter && typeof jadapter.getAccountInfo === 'function') {
-        try {
-          const info = await jadapter.getAccountInfo(newState.entityId, counterpartyEntityId);
-          onChainNonce = Math.max(onChainNonce, Number(info.nonce));
-          accountMachine.onChainSettlementNonce = Number(info.nonce);
-        } catch (error) {
-          console.warn(
-            `⚠️ reopenDisputedAccount: failed to read on-chain nonce for ${counterpartyEntityId.slice(-4)}: ` +
-            `${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-      }
+      const onChainNonce = Number(entityTx.data.onChainNonce ?? accountMachine.onChainSettlementNonce ?? 0);
 
       const accountTx: AccountTx = {
         type: 'reopen_disputed',

@@ -8,11 +8,10 @@ import { Level } from 'level';
 import { ethers } from 'ethers';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
-const RUNTIME_BUILD_ID = '2026-03-10-03:40Z';
+const RUNTIME_BUILD_ID = '2026-03-23-19:35Z';
 // Bump this only on breaking persistence/replay format or invariants.
-export const RUNTIME_SCHEMA_VERSION = 3;
+export const RUNTIME_SCHEMA_VERSION = 5;
 export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
-const LOCAL_DEV_CHAIN_ID = 31337;
 const readRuntimeEnv = (name: string): string | undefined => {
   try {
     const proc = (globalThis as any)?.process;
@@ -22,11 +21,6 @@ const readRuntimeEnv = (name: string): string | undefined => {
     return undefined;
   }
 };
-const LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS = (() => {
-  const parsed = Number(readRuntimeEnv('XLN_LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS') ?? '5');
-  if (!Number.isFinite(parsed) || parsed < 1) return 5;
-  return Math.floor(parsed);
-})();
 const DEFAULT_SNAPSHOT_INTERVAL_FRAMES = (() => {
   const parsed = Number(readRuntimeEnv('XLN_SNAPSHOT_INTERVAL_FRAMES') ?? '5');
   if (!Number.isFinite(parsed) || parsed < 1) return 5;
@@ -67,6 +61,7 @@ import {
   submitProcessBatch,
   transferNameBetweenEntities,
 } from './jadapter';
+import { ensureLocalDisputeDelayConfigured } from './jadapter/local-config';
 import { getAvailableJurisdictions } from './jurisdiction-config';
 import { canonicalizeProfile, createGossipLayer, parseProfile } from './networking/gossip';
 import { attachEventEmitters } from './env-events';
@@ -210,6 +205,7 @@ import {
 } from './utils';
 import { logError } from './logger';
 import type { PersistedFrameJournal } from './wal/store';
+import { readPersistedSnapshotBuffer } from './wal/store';
 import {
   getPersistedLatestHeight as getPersistedLatestHeightWal,
   listPersistedCheckpointHeights as listPersistedCheckpointHeightsWal,
@@ -1792,52 +1788,6 @@ export const processJBlockEvents = async (env: Env): Promise<void> => {
 
 // === UTILITY FUNCTIONS ===
 
-const readDefaultDisputeDelay = async (jadapter: JAdapter): Promise<number | null> => {
-  try {
-    const delay = await jadapter.depository.defaultDisputeDelay();
-    const asNumber = Number(delay);
-    return Number.isFinite(asNumber) ? asNumber : null;
-  } catch {
-    return null;
-  }
-};
-
-const maybeConfigureLocalDisputeDelay = async (
-  jadapter: JAdapter,
-  jurisdictionName: string,
-): Promise<void> => {
-  if (Number(jadapter.chainId) !== LOCAL_DEV_CHAIN_ID) return;
-
-  const currentDelay = await readDefaultDisputeDelay(jadapter);
-  if (!Number.isFinite(currentDelay) || currentDelay === null) {
-    console.warn(
-      `[Runtime] ${jurisdictionName}: unable to read Depository.defaultDisputeDelay (keeping chain value)`,
-    );
-    return;
-  }
-
-  if (currentDelay === LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS) {
-    console.log(
-      `[Runtime] ${jurisdictionName}: defaultDisputeDelay=${currentDelay} (source: contract)`,
-    );
-    return;
-  }
-
-  try {
-    const tx = await jadapter.depository.setDefaultDisputeDelay(LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS);
-    await tx.wait();
-    const updatedDelay = await readDefaultDisputeDelay(jadapter);
-    console.log(
-      `[Runtime] ${jurisdictionName}: defaultDisputeDelay ${currentDelay} -> ${updatedDelay ?? LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS}`,
-    );
-  } catch (error) {
-    console.warn(
-      `[Runtime] ${jurisdictionName}: failed to set defaultDisputeDelay=${LOCAL_DEFAULT_DISPUTE_DELAY_BLOCKS} ` +
-      `(current=${currentDelay}): ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-};
-
 const applyRuntimeInput = async (
   env: Env,
   runtimeInput: RuntimeInput,
@@ -1969,7 +1919,7 @@ const applyRuntimeInput = async (
           if (!fromReplica) {
             await jadapter.deployStack();
           }
-          await maybeConfigureLocalDisputeDelay(jadapter, runtimeTx.data.name);
+          const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(jadapter, runtimeTx.data.name);
 
           // For BrowserVM, set as default jurisdiction in env
           if (isBrowserVM) {
@@ -2021,6 +1971,7 @@ const applyRuntimeInput = async (
             contracts: resolvedContracts,
             rpcs: runtimeTx.data.rpcs,
             chainId: runtimeTx.data.chainId,
+            ...(defaultDisputeDelayBlocks ? { defaultDisputeDelayBlocks } : {}),
             jadapter, // Store for balance queries, faucets, etc
           };
           env.jReplicas.set(runtimeTx.data.name, jReplica);
@@ -3669,6 +3620,25 @@ export const readPersistedFrameJournals = async (
     resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
     isDbUnavailableError,
   });
+};
+
+export const readPersistedCheckpointSnapshot = async (
+  env: Env,
+  height: number,
+): Promise<Record<string, unknown> | null> => {
+  const dbReady = await tryOpenDb(env);
+  if (!dbReady) return null;
+  const dbNamespace = resolveDbNamespace({ env });
+  const db = getRuntimeDb(env);
+  const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
+  if (targetHeight <= 0) return null;
+  try {
+    const snapshotBuffer = await readPersistedSnapshotBuffer(db, dbNamespace, targetHeight);
+    return deserializeTaggedJson<Record<string, unknown>>(snapshotBuffer.toString());
+  } catch (error) {
+    if (isDbNotFound(error) || isDbUnavailableError(error)) return null;
+    throw error;
+  }
 };
 
 export const loadEnvFromDB = async (

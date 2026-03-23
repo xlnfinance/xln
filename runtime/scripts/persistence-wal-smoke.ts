@@ -39,6 +39,23 @@ async function main() {
 
   const entityA = generateLazyEntityId([signer1], 1n).toLowerCase();
   const entityB = generateLazyEntityId([signer2], 1n).toLowerCase();
+  const jurisdiction = {
+    name: 'persistence-smoke',
+    depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+    entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+    chainId: 31337,
+  };
+  env.activeJurisdiction = jurisdiction.name;
+  env.jReplicas.set(jurisdiction.name, {
+    name: jurisdiction.name,
+    depositoryAddress: jurisdiction.depositoryAddress,
+    entityProviderAddress: jurisdiction.entityProviderAddress,
+    chainId: jurisdiction.chainId,
+    contracts: {
+      depository: jurisdiction.depositoryAddress,
+      entityProvider: jurisdiction.entityProviderAddress,
+    },
+  } as any);
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [
@@ -53,6 +70,7 @@ async function main() {
             threshold: 1n,
             validators: [signer1],
             shares: { [signer1]: 1n },
+            jurisdiction,
           },
         },
       },
@@ -67,6 +85,7 @@ async function main() {
             threshold: 1n,
             validators: [signer2],
             shares: { [signer2]: 1n },
+            jurisdiction,
           },
         },
       },

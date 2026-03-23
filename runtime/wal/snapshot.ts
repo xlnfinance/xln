@@ -56,6 +56,7 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   mempool: [],
   blockDelayMs: jr.blockDelayMs,
   lastBlockTimestamp: jr.lastBlockTimestamp,
+  ...(jr.defaultDisputeDelayBlocks !== undefined ? { defaultDisputeDelayBlocks: jr.defaultDisputeDelayBlocks } : {}),
   ...(jr.blockReady !== undefined ? { blockReady: jr.blockReady } : {}),
   ...(jr.rpcs ? { rpcs: [...jr.rpcs] } : {}),
   ...(jr.chainId !== undefined ? { chainId: jr.chainId } : {}),
@@ -72,20 +73,17 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
         },
       }
     : {}),
-  ...(cloneNestedBigIntMap(jr.reserves, (leaf) => BigInt(leaf as bigint))
-    ? { reserves: cloneNestedBigIntMap(jr.reserves, (leaf) => BigInt(leaf as bigint)) }
-    : {}),
-  ...(cloneNestedBigIntMap(jr.collaterals, (leaf) => ({
+  ...(() => {
+    const reserves = cloneNestedBigIntMap(jr.reserves, (leaf) => BigInt(leaf as bigint));
+    return reserves ? { reserves } : {};
+  })(),
+  ...(() => {
+    const collaterals = cloneNestedBigIntMap(jr.collaterals, (leaf) => ({
       collateral: BigInt((leaf as { collateral: bigint }).collateral),
       ondelta: BigInt((leaf as { ondelta: bigint }).ondelta),
-    }))
-    ? {
-        collaterals: cloneNestedBigIntMap(jr.collaterals, (leaf) => ({
-          collateral: BigInt((leaf as { collateral: bigint }).collateral),
-          ondelta: BigInt((leaf as { ondelta: bigint }).ondelta),
-        })),
-      }
-    : {}),
+    }));
+    return collaterals ? { collaterals } : {};
+  })(),
   ...(jr.registeredEntities
     ? {
         registeredEntities: new Map(

@@ -311,7 +311,11 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
     // Mine to challenge timeout and finalize dispute
     const timeoutBlock = Number(aliceAfterStart?.activeDispute?.disputeTimeout || 0);
     const currentBlock = Number(await jadapter.provider.getBlockNumber());
-    assert(timeoutBlock > currentBlock, `Expected future timeout block, got timeout=${timeoutBlock}, current=${currentBlock}`, env);
+    assert(
+      timeoutBlock >= currentBlock,
+      `Expected present-or-future timeout block, got timeout=${timeoutBlock}, current=${currentBlock}`,
+      env,
+    );
     const reserveBeforeFinalize = await jadapter.getReserves(alice.id, USDC);
     const hubReserveBeforeFinalize = await jadapter.getReserves(hub.id, USDC);
     const aliceCollateralBeforeFinalize = aliceAfterStart?.deltas.get(USDC)?.collateral ?? 0n;

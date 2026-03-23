@@ -1951,6 +1951,8 @@ export interface JReplica {
   rpcs?: string[];
   // Chain id (optional, prefer jadapter.chainId when available)
   chainId?: number;
+  // Persisted local view of depository.defaultDisputeDelay for deterministic handlers.
+  defaultDisputeDelayBlocks?: number;
 
   // Visual position (for 3D rendering)
   position: { x: number; y: number; z: number };

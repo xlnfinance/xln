@@ -403,6 +403,7 @@ export interface XLNModule {
       limit?: number;
     },
   ) => Promise<PersistedFrameJournal[]>;
+  readPersistedCheckpointSnapshot: (env: Env, height: number) => Promise<Record<string, unknown> | null>;
 
   // Blockchain operations
   submitProcessBatch: (env: Env, jurisdiction: JurisdictionConfig, entityId: string, batch: unknown, signerId?: string) => Promise<{ transaction: unknown; receipt: unknown }>;
