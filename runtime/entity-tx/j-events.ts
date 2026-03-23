@@ -1,13 +1,13 @@
-import type { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env } from '../types';
+import type { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env, AccountMachine } from '../types';
 import { ethers } from 'ethers';
 import { DEBUG } from '../utils';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
 import { getTokenInfo } from '../account-utils';
 import { safeStringify } from '../serialization-utils';
-import { CANONICAL_J_EVENTS, computeAccountKey } from '../jadapter/helpers';
+import { CANONICAL_J_EVENTS } from '../jadapter/helpers';
 import { hashHtlcSecret } from '../htlc-utils';
 import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from '../entity-crontab';
-import type { JAdapter } from '../jadapter/types';
+import { getRuntimeJurisdictionDefaultDisputeDelayBlocks } from '../j-height';
 import {
   canonicalJurisdictionEventKey,
   normalizeJurisdictionEvent,
@@ -57,16 +57,6 @@ const getTokenSymbol = (tokenId: number): string => {
 const getTokenDecimals = (tokenId: number): number => {
   return getTokenInfo(tokenId).decimals;
 };
-
-function getEnvJAdapter(env: Env): JAdapter | null {
-  if (!env.jReplicas || env.jReplicas.size === 0) return null;
-  const active = env.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction) : undefined;
-  if (active?.jadapter) return active.jadapter;
-  for (const jr of env.jReplicas.values()) {
-    if (jr.jadapter) return jr.jadapter;
-  }
-  return null;
-}
 
 function emptyOpBreakdown() {
   return {
@@ -1059,30 +1049,28 @@ async function applyFinalizedJEvent(
 
     if (account) {
       account.status = 'disputed';
-      // Query on-chain account state via adapter (works for both RPC and BrowserVM backends).
-      const jadapter = getEnvJAdapter(env);
-      if (!jadapter || typeof jadapter.getAccountInfo !== 'function') {
-        console.warn(`⚠️ DisputeStarted: No JAdapter account-info reader available`);
-        return { newState, mempoolOps };
-      }
-      const accountInfo = await jadapter.getAccountInfo(newState.entityId, counterpartyId);
-
       const weAreStarter = senderStr === entityIdNorm;
-      const hasCounterpartySig = Boolean(account.counterpartyDisputeProofHanko);
+      const disputeTimeout =
+        Number(event.data.disputeTimeout ?? 0) ||
+        (
+          Number(blockNumber || 0) +
+          getRuntimeJurisdictionDefaultDisputeDelayBlocks(env, newState.config.jurisdiction?.name, 5)
+        );
+      const onChainNonce = Number(event.data.onChainNonce ?? nonce);
 
-      // Store dispute state from event + on-chain (source of truth)
+      // Store dispute state from event payload only.
       // Unified nonce: initialNonce = the nonce used in disputeStart (from event)
-      // onChainNonce = the nonce stored on-chain at time of dispute
+      // onChainNonce defaults to the dispute nonce when no richer event payload exists.
       account.activeDispute = {
         startedByLeft: senderStr < counterentityStr,
         initialProofbodyHash: String(proofbodyHash),  // From event (committed on-chain)
         initialNonce: Number(nonce),
-        disputeTimeout: Number(accountInfo.disputeTimeout),  // From on-chain
-        onChainNonce: Number(accountInfo.nonce),
+        disputeTimeout,
+        onChainNonce,
         initialArguments: event.data.initialArguments || '0x',
         finalizeQueued: false,
       };
-      account.onChainSettlementNonce = Number(accountInfo.nonce);
+      account.onChainSettlementNonce = Math.max(Number(account.onChainSettlementNonce ?? 0), onChainNonce);
 
       // ASSERTION: Our local proof hash should match on-chain committed hash
       const { buildAccountProofBody } = await import('../proof-builder');
@@ -1187,18 +1175,12 @@ async function applyFinalizedJEvent(
 
     if (account) {
       const weAreFinalizer = senderStr === entityIdNorm;
-      const jadapter = getEnvJAdapter(env);
-      if (jadapter && typeof jadapter.getAccountInfo === 'function') {
-        try {
-          const accountInfo = await jadapter.getAccountInfo(newState.entityId, counterpartyId);
-          account.onChainSettlementNonce = Number(accountInfo.nonce);
-        } catch (error) {
-          console.warn(
-            `⚠️ DisputeFinalized nonce sync failed for ${counterpartyId.slice(-4)}: ` +
-            `${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-      }
+      const finalProofbodyHash = String(event.data.finalProofbodyHash || '0x');
+      const finalizedOnChainNonce = Math.max(
+        Number(account.onChainSettlementNonce ?? 0),
+        Number(initialNonce || 0),
+      );
+      account.onChainSettlementNonce = finalizedOnChainNonce;
       if (account.activeDispute) {
         delete account.activeDispute;
         addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialNonce)})`);
@@ -1210,7 +1192,6 @@ async function applyFinalizedJEvent(
         console.warn(`⚠️ DisputeFinalized: No activeDispute for ${counterpartyId.slice(-4)}`);
       }
       // Dispute completed on-chain: keep finalized-disputed until explicit reopen.
-      const finalizedOnChainNonce = Number(account.onChainSettlementNonce ?? 0);
       if (account.proofHeader.nonce <= finalizedOnChainNonce) {
         account.proofHeader.nonce = finalizedOnChainNonce + 1;
       }
@@ -1293,41 +1274,40 @@ async function applyFinalizedJEvent(
         }
       }
 
-      // DisputeFinalized is authoritative on-chain settlement.
-      // Sync local deltas from Depository storage and clear consumed off-chain component.
-      if (jadapter?.depository) {
-        const accountKey = computeAccountKey(account.leftEntity, account.rightEntity);
+      // DisputeFinalized is authoritative. Clear the off-chain component and transient holds
+      // using locally stored proof-body knowledge only.
+      const finalizedProofBody = finalProofbodyHash ? account.disputeProofBodiesByHash?.[finalProofbodyHash] : undefined;
+      if (finalizedProofBody && Array.isArray(finalizedProofBody.tokenIds) && Array.isArray(finalizedProofBody.offdeltas)) {
+        for (let i = 0; i < finalizedProofBody.tokenIds.length; i += 1) {
+          const tokenId = Number(finalizedProofBody.tokenIds[i]);
+          const delta = account.deltas.get(tokenId);
+          if (!delta) continue;
+          const prevOffdelta = delta.offdelta;
+          delta.offdelta = 0n;
+          delta.leftHold = 0n;
+          delta.rightHold = 0n;
+          delta.leftAllowance = 0n;
+          delta.rightAllowance = 0n;
+          if (prevOffdelta !== 0n) {
+            console.log(
+              `💰 DisputeFinalized local sync: ${counterpartyId.slice(-4)} token=${tokenId} offdelta ${prevOffdelta}→0`,
+            );
+          }
+        }
+      } else {
+        console.warn(
+          `⚠️ DisputeFinalized local sync missing proof body for ${counterpartyId.slice(-4)}; clearing all token deltas conservatively`,
+        );
         for (const [tokenId, delta] of account.deltas.entries()) {
-          try {
-            const chain = await jadapter.depository._collaterals(accountKey, Number(tokenId));
-            const nextCollateral = BigInt(chain?.collateral ?? 0n);
-            const nextOndelta = BigInt(chain?.ondelta ?? 0n);
-            const prevCollateral = delta.collateral;
-            const prevOndelta = delta.ondelta;
-            const prevOffdelta = delta.offdelta;
-
-            delta.collateral = nextCollateral;
-            delta.ondelta = nextOndelta;
-            delta.offdelta = 0n;
-            delta.leftHold = 0n;
-            delta.rightHold = 0n;
-            delta.leftAllowance = 0n;
-            delta.rightAllowance = 0n;
-
-            if (
-              prevCollateral !== nextCollateral ||
-              prevOndelta !== nextOndelta ||
-              prevOffdelta !== 0n
-            ) {
-              console.log(
-                `💰 DisputeFinalized sync: ${counterpartyId.slice(-4)} token=${tokenId} ` +
-                `coll ${prevCollateral}→${nextCollateral}, ondelta ${prevOndelta}→${nextOndelta}, offdelta ${prevOffdelta}→0`,
-              );
-            }
-          } catch (error) {
-            console.warn(
-              `⚠️ DisputeFinalized delta sync failed token=${tokenId} ` +
-              `for ${counterpartyId.slice(-4)}: ${error instanceof Error ? error.message : String(error)}`,
+          const prevOffdelta = delta.offdelta;
+          delta.offdelta = 0n;
+          delta.leftHold = 0n;
+          delta.rightHold = 0n;
+          delta.leftAllowance = 0n;
+          delta.rightAllowance = 0n;
+          if (prevOffdelta !== 0n) {
+            console.log(
+              `💰 DisputeFinalized local sync: ${counterpartyId.slice(-4)} token=${tokenId} offdelta ${prevOffdelta}→0`,
             );
           }
         }

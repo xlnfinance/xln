@@ -7,6 +7,7 @@ import type { Env, JurisdictionConfig } from '../types';
 import type { JAdapter, JAdapterMode } from '../jadapter/types';
 import { ethers } from 'ethers';
 import { getCachedSignerPrivateKey } from '../account-crypto';
+import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
 import { ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge } from './helpers';
 
 export type { JAdapterMode };
@@ -251,12 +252,16 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
   ensureSignerKeysFromSeed(env, config.signerIds, config.name);
 
   // 3. Create JAdapter (creates BrowserVM or connects to RPC)
+  const jReplicaName = config.jurisdictionName ?? `${config.name} Demo`;
   const jadapter = await ensureJAdapter(env, config.mode, { deployStack: true });
+  const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(jadapter, jReplicaName);
 
   // 4. Create jReplica
-  const jReplicaName = config.jurisdictionName ?? `${config.name} Demo`;
   const position = config.position ?? { x: 0, y: 600, z: 0 };
   const jReplica = createJReplica(env, jReplicaName, jadapter.addresses.depository, position);
+  if (defaultDisputeDelayBlocks) {
+    (jReplica as any).defaultDisputeDelayBlocks = defaultDisputeDelayBlocks;
+  }
 
   // 5. Attach jadapter to jReplica (all 4 contract addresses)
   (jReplica as any).jadapter = jadapter;

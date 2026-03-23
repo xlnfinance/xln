@@ -1739,6 +1739,15 @@
         <p class="auto-capacity-note" data-testid="swap-auto-capacity-note">{autoCapacityNote}</p>
       {/if}
 
+      {#if selectedOrderLevel}
+        <p class="size-hint">
+          Filled from book level at {formatPriceTicks(selectedOrderLevel.inputPriceTicks > 0n
+            ? selectedOrderLevel.inputPriceTicks
+            : selectedOrderLevel.priceTicks)}
+          from {accountLabel(selectedOrderLevel.accountId)}
+        </p>
+      {/if}
+
       <button
         class="primary-btn"
         class:buy-action={tradeSide === 'buy-base'}

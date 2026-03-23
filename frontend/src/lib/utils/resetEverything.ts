@@ -23,6 +23,7 @@ const RESET_PREPARATION_DELAY_MS = 180;
 const RESET_DB_DELETE_RETRIES = 8;
 const RESET_DB_DELETE_RETRY_DELAY_MS = 250;
 const RESET_FORCE_NAVIGATION_MS = 1500;
+const VAULT_STORAGE_KEY = 'xln-vaults';
 
 type ResetSignal = {
   type: 'begin-reset';
@@ -99,33 +100,102 @@ export function isFatalRuntimeError(error: unknown): boolean {
 /** Collect debug dump for shipping to server before reset */
 async function collectPersistedWalDump(): Promise<Record<string, unknown> | null> {
   try {
-    const xln = (window as any).__xln_instance;
-    const env = (window as any).__xln_env;
-    if (!xln || !env) return null;
-    if (typeof xln.getPersistedLatestHeight !== 'function' || typeof xln.readPersistedFrameJournals !== 'function') {
+    let xln = (window as any).__xln_instance;
+    if (!xln && typeof window !== 'undefined') {
+      const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
+      xln = await import(/* @vite-ignore */ runtimeUrl).catch(() => null);
+      if (xln) {
+        (window as any).__xln_instance = xln;
+      }
+    }
+    if (!xln) return null;
+    if (
+      typeof xln.createEmptyEnv !== 'function' ||
+      typeof xln.getPersistedLatestHeight !== 'function' ||
+      typeof xln.readPersistedFrameJournals !== 'function'
+    ) {
       return null;
     }
 
-    const latestHeight = Number(await xln.getPersistedLatestHeight(env).catch(() => 0));
-    if (!Number.isFinite(latestHeight) || latestHeight <= 0) {
-      return {
-        dbNamespace: env.dbNamespace ?? null,
-        latestHeight: 0,
-        journals: [],
-      };
+    const activeEnv = (window as any).__xln_env;
+    const runtimes: Array<{ runtimeId: string; seed: string | null; label: string | null }> = [];
+    const seen = new Set<string>();
+    const pushRuntime = (runtimeIdRaw: unknown, seedRaw?: unknown, labelRaw?: unknown) => {
+      const runtimeId = String(runtimeIdRaw || '').trim().toLowerCase();
+      if (!runtimeId || seen.has(runtimeId)) return;
+      seen.add(runtimeId);
+      runtimes.push({
+        runtimeId,
+        seed: typeof seedRaw === 'string' && seedRaw.trim().length > 0 ? seedRaw : null,
+        label: typeof labelRaw === 'string' && labelRaw.trim().length > 0 ? labelRaw : null,
+      });
+    };
+
+    if (activeEnv?.runtimeId) {
+      pushRuntime(activeEnv.runtimeId, activeEnv.runtimeSeed, 'active-env');
     }
 
-    const journals: unknown[] = [];
-    for (let fromHeight = 1; fromHeight <= latestHeight; fromHeight += 250) {
-      const toHeight = Math.min(latestHeight, fromHeight + 249);
-      const chunk = await xln.readPersistedFrameJournals(env, { fromHeight, toHeight, limit: 250 }).catch(() => []);
-      if (Array.isArray(chunk)) journals.push(...chunk);
+    try {
+      const saved = localStorage.getItem(VAULT_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as {
+          runtimes?: Record<string, { id?: string; seed?: string | null; label?: string | null }>;
+        };
+        for (const [rawKey, runtime] of Object.entries(parsed?.runtimes || {})) {
+          pushRuntime(runtime?.id || rawKey, runtime?.seed, runtime?.label);
+        }
+      }
+    } catch {
+      // ignore broken localStorage here; dump should still continue with active env if present
     }
 
     return {
-      dbNamespace: env.dbNamespace ?? null,
-      latestHeight,
-      journals,
+      runtimes: await Promise.all(runtimes.map(async (runtime) => {
+        const tempEnv = xln.createEmptyEnv(runtime.seed ?? null);
+        tempEnv.runtimeId = runtime.runtimeId;
+        tempEnv.dbNamespace = runtime.runtimeId;
+        tempEnv.runtimeSeed = runtime.seed;
+
+        const latestHeight = Number(await xln.getPersistedLatestHeight(tempEnv).catch(() => 0));
+        const checkpointHeights = typeof xln.listPersistedCheckpointHeights === 'function'
+          ? await xln.listPersistedCheckpointHeights(tempEnv).catch(() => [])
+          : [];
+        const journals: unknown[] = [];
+        if (Number.isFinite(latestHeight) && latestHeight > 0) {
+          for (let fromHeight = 1; fromHeight <= latestHeight; fromHeight += 250) {
+            const toHeight = Math.min(latestHeight, fromHeight + 249);
+            const chunk = await xln.readPersistedFrameJournals(tempEnv, { fromHeight, toHeight, limit: 250 }).catch(() => []);
+            if (Array.isArray(chunk)) journals.push(...chunk);
+          }
+        }
+
+        const checkpoints = typeof xln.readPersistedCheckpointSnapshot === 'function'
+          ? await Promise.all(
+              (Array.isArray(checkpointHeights) ? checkpointHeights : []).map(async (height: number) => ({
+                height,
+                snapshot: await xln.readPersistedCheckpointSnapshot(tempEnv, height).catch(() => null),
+              })),
+            )
+          : [];
+
+        const verify =
+          typeof xln.verifyRuntimeChain === 'function'
+            ? await xln.verifyRuntimeChain(runtime.runtimeId, runtime.seed, {}).catch((error: unknown) => ({
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              }))
+            : null;
+
+        return {
+          runtimeId: runtime.runtimeId,
+          label: runtime.label,
+          latestHeight,
+          checkpointHeights,
+          checkpoints,
+          verify,
+          journals,
+        };
+      })),
     };
   } catch {
     return null;

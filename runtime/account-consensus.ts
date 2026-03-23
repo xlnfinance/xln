@@ -857,11 +857,12 @@ export async function proposeAccountFrame(
 
   events.push(`🚀 Proposed frame ${newFrame.height} with ${newFrame.accountTxs.length} transactions`);
 
+  const outboundFrame = cloneAccountFrame(newFrame);
   const accountInput: AccountInput = {
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
     height: newFrame.height,
-    newAccountFrame: newFrame,
+    newAccountFrame: outboundFrame,
     newHanko: frameHanko, // Hanko on frame stateHash
     newDisputeHanko: disputeHanko, // Hanko on dispute proof hash
     newDisputeHash: disputeHash, // Full dispute hash (key in hankoWitness for quorum lookup)
@@ -870,7 +871,7 @@ export async function proposeAccountFrame(
     disputeProofNonce: accountMachine.proofHeader.nonce, // nonce at which dispute proof was signed (before increment)
   };
   if (!skipNonceIncrement) ++accountMachine.proofHeader.nonce;
-  accountMachine.pendingAccountInput = accountInput;
+  accountMachine.pendingAccountInput = structuredClone(accountInput);
 
   // Collect hashes for entity-quorum signing (multi-signer support)
   const hashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [

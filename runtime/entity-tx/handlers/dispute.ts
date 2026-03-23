@@ -19,7 +19,7 @@ import type { ProofBodyStruct } from '../../typechain/Depository';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddRevealSecret } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
-import { getRuntimeJurisdictionHeight } from '../../j-height';
+import { getRuntimeJurisdictionDefaultDisputeDelayBlocks, getRuntimeJurisdictionHeight } from '../../j-height';
 import {
   buildAccountProofBody,
   createDisputeProofHash,
@@ -212,102 +212,11 @@ function collectHtlcSecrets(entityState: EntityState, counterpartyEntityId: stri
   return secrets;
 }
 
-function getEnvJAdapter(env: Env) {
-  if (!env.jReplicas || env.jReplicas.size === 0) return null;
-  const active = env.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction) : undefined;
-  if (active?.jadapter) return active.jadapter;
-  for (const replica of env.jReplicas.values()) {
-    if (replica.jadapter) return replica.jadapter;
-  }
+function resolveDepositoryAddress(entityState: EntityState): string | null {
+  const address = entityState.config.jurisdiction?.depositoryAddress || '';
+  if (ethers.isAddress(address) && !/^0x0{40}$/i.test(address)) return address;
   return null;
 }
-
-async function resolveDepositoryAddress(entityState: EntityState, env: Env): Promise<string> {
-  const browserVmAddress =
-    env.browserVM?.getDepositoryAddress?.() ||
-    env.browserVM?.browserVM?.getDepositoryAddress?.();
-
-  // Active J-replica is the canonical domain separator for live disputes.
-  if (env.activeJurisdiction) {
-    const activeReplica = env.jReplicas?.get(env.activeJurisdiction);
-    if (activeReplica?.jadapter?.addresses?.depository) {
-      if (browserVmAddress && browserVmAddress !== activeReplica.jadapter.addresses.depository) {
-        console.warn(
-          `[dispute] browserVM depository ${browserVmAddress} ignored in favor of active jurisdiction ` +
-            `${env.activeJurisdiction}=${activeReplica.jadapter.addresses.depository}`,
-        );
-      }
-      return activeReplica.jadapter.addresses.depository;
-    }
-    if (activeReplica?.depositoryAddress) {
-      if (browserVmAddress && browserVmAddress !== activeReplica.depositoryAddress) {
-        console.warn(
-          `[dispute] browserVM depository ${browserVmAddress} ignored in favor of active jurisdiction ` +
-            `${env.activeJurisdiction}=${activeReplica.depositoryAddress}`,
-        );
-      }
-      return activeReplica.depositoryAddress;
-    }
-    if (activeReplica?.contracts?.depository) {
-      if (browserVmAddress && browserVmAddress !== activeReplica.contracts.depository) {
-        console.warn(
-          `[dispute] browserVM depository ${browserVmAddress} ignored in favor of active jurisdiction ` +
-            `${env.activeJurisdiction}=${activeReplica.contracts.depository}`,
-        );
-      }
-      return activeReplica.contracts.depository;
-    }
-  }
-
-  for (const jReplica of env.jReplicas?.values?.() || []) {
-    if (jReplica?.jadapter?.addresses?.depository) {
-      return jReplica.jadapter.addresses.depository;
-    }
-    if (jReplica?.depositoryAddress) {
-      return jReplica.depositoryAddress;
-    }
-    if (jReplica?.contracts?.depository) {
-      return jReplica.contracts.depository;
-    }
-  }
-
-  if (browserVmAddress && !/^0x0{40}$/i.test(browserVmAddress)) {
-    return browserVmAddress;
-  }
-
-  if (entityState.config.jurisdiction?.depositoryAddress) {
-    return entityState.config.jurisdiction.depositoryAddress;
-  }
-
-  const jadapter = getEnvJAdapter(env);
-  const adapterAddress = jadapter?.getDepositoryAddress?.();
-  if (adapterAddress && !/^0x0{40}$/i.test(adapterAddress)) {
-    return adapterAddress;
-  }
-
-  try {
-    const { getJurisdictionByName, getAvailableJurisdictions } = await import('../../jurisdiction-config');
-    const activeName = entityState.config.jurisdiction?.name || env.activeJurisdiction || '';
-    const byName = activeName ? await getJurisdictionByName(activeName) : undefined;
-    if (byName?.depositoryAddress && !/^0x0{40}$/i.test(byName.depositoryAddress)) {
-      return byName.depositoryAddress;
-    }
-    const available = await getAvailableJurisdictions();
-    if (available.length === 1 && available[0]?.depositoryAddress && !/^0x0{40}$/i.test(available[0].depositoryAddress)) {
-      return available[0].depositoryAddress;
-    }
-  } catch {
-    // Keep zero-address fallback below; caller turns this into explicit local failure.
-  }
-
-  return '0x0000000000000000000000000000000000000000';
-}
-
-const ZERO_HASH_32 = `0x${'0'.repeat(64)}`;
-const hasActiveDisputeHash = (hash: unknown): boolean => {
-  const normalized = String(hash ?? '').toLowerCase();
-  return normalized !== '' && normalized !== '0x' && normalized !== '0x0' && normalized !== ZERO_HASH_32;
-};
 
 function hasQueuedDisputeStart(state: EntityState, counterpartyEntityId: string): boolean {
   const target = String(counterpartyEntityId || '').toLowerCase();
@@ -447,32 +356,13 @@ export async function handleDisputeStart(
     return { newState, outputs };
   }
 
-  let onChainNonce = Number(account.onChainSettlementNonce ?? 0);
+  const onChainNonce = Number(account.onChainSettlementNonce ?? 0);
   let currentJBlock = getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight ?? 0);
-  let defaultDisputeDelayBlocks = 5;
-  const jadapter = getEnvJAdapter(env);
-  if (jadapter && typeof jadapter.getAccountInfo === 'function') {
-    try {
-      const accountInfo = await jadapter.getAccountInfo(entityState.entityId, counterpartyEntityId);
-      onChainNonce = Number(accountInfo.nonce);
-      account.onChainSettlementNonce = onChainNonce;
-    } catch (error) {
-      console.warn(
-        `⚠️ disputeStart: failed to read on-chain nonce for ${counterpartyEntityId.slice(-4)}: ` +
-        `${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-  if (jadapter?.depository && typeof jadapter.depository.defaultDisputeDelay === 'function') {
-    try {
-      const delay = Number(await jadapter.depository.defaultDisputeDelay());
-      if (Number.isFinite(delay) && delay > 0) {
-        defaultDisputeDelayBlocks = Math.floor(delay);
-      }
-    } catch {
-      // Keep default fallback.
-    }
-  }
+  const defaultDisputeDelayBlocks = getRuntimeJurisdictionDefaultDisputeDelayBlocks(
+    env,
+    entityState.config.jurisdiction?.name,
+    5,
+  );
 
   console.log(`   signedNonce=${signedNonce} (source=${nonceSource}), onChainNonce=${onChainNonce}`);
 
@@ -485,8 +375,8 @@ export async function handleDisputeStart(
     return { newState, outputs };
   }
 
-  const depositoryAddress = await resolveDepositoryAddress(entityState, env);
-  if (ethers.isAddress(depositoryAddress) && !/^0x0{40}$/i.test(depositoryAddress)) {
+  const depositoryAddress = resolveDepositoryAddress(entityState);
+  if (depositoryAddress) {
     const exactDisputeHash =
       storedDisputeHash && storedDisputeHash.startsWith('0x')
         ? storedDisputeHash
@@ -569,10 +459,8 @@ export async function handleDisputeStart(
       return { newState, outputs };
     }
   } else {
-    console.warn(
-      `⚠️ disputeStart preflight skipped: missing depositoryAddress ` +
-      `entity=${entityState.entityId.slice(-4)} counterparty=${counterpartyEntityId.slice(-4)}`,
-    );
+    addMessage(newState, `❌ disputeStart blocked: missing jurisdiction depository address`);
+    return { newState, outputs };
   }
 
   // The signed nonce is passed directly to the contract. Solidity requires:
@@ -701,39 +589,6 @@ export async function handleDisputeFinalize(
       `ℹ️ disputeFinalize already present in batch lifecycle for ${counterpartyEntityId.slice(-4)}`,
     );
     return { newState, outputs };
-  }
-
-  const jadapter = getEnvJAdapter(env);
-  if (jadapter?.getAccountInfo) {
-    try {
-      const onchain = await jadapter.getAccountInfo(newState.entityId, counterpartyEntityId);
-      if (!hasActiveDisputeHash(onchain.disputeHash)) {
-        account.activeDispute = undefined;
-        if (account.status === 'disputed') account.status = 'active';
-        addMessage(
-          newState,
-          `ℹ️ disputeFinalize skipped: no on-chain active dispute with ${counterpartyEntityId.slice(-4)} (stale local state cleared)`,
-        );
-        console.warn(
-          `⚠️ disputeFinalize skipped: on-chain dispute missing for ${newState.entityId.slice(-4)}↔${counterpartyEntityId.slice(-4)}`,
-        );
-        return { newState, outputs };
-      }
-      const onchainTimeout = Number(onchain.disputeTimeout ?? 0n);
-      if (Number.isFinite(onchainTimeout) && onchainTimeout > 0) {
-        account.activeDispute.disputeTimeout = onchainTimeout;
-      }
-    } catch (error) {
-      addMessage(
-        newState,
-        `⚠️ disputeFinalize skipped: failed to read on-chain account state for ${counterpartyEntityId.slice(-4)} (will retry)`,
-      );
-      console.warn(
-        `⚠️ disputeFinalize: failed to read on-chain account info for ${counterpartyEntityId.slice(-4)}:`,
-        error,
-      );
-      return { newState, outputs };
-    }
   }
 
   if (cooperativeRequested) {

@@ -23,7 +23,6 @@ let XLN: XLNModule | null = null;
 let xlnLoadPromise: Promise<XLNModule> | null = null;
 export const xlnInstance = writable<XLNModule | null>(null);
 let unregisterEnvChange: (() => void) | null = null;
-const REQUIRED_RUNTIME_SCHEMA_VERSION = 3;
 const DEV_SESSION_STORAGE_KEY = 'xln-dev-session-id';
 const RESET_NOTICE_STORAGE_KEY = 'xln-reset-notice';
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
@@ -91,13 +90,16 @@ async function getXLN(): Promise<XLNModule> {
     const loaded = (await import(/* @vite-ignore */ runtimeUrl)) as XLNModule;
     const runtimeMeta = loaded as XLNModule & { RUNTIME_SCHEMA_VERSION?: number };
     const loadedSchema = Number(runtimeMeta.RUNTIME_SCHEMA_VERSION ?? NaN);
-    if (!Number.isFinite(loadedSchema) || loadedSchema !== REQUIRED_RUNTIME_SCHEMA_VERSION) {
+    if (!Number.isFinite(loadedSchema) || loadedSchema < 1) {
       throw new Error(
-        `RUNTIME_VERSION_MISMATCH: expected schema=${REQUIRED_RUNTIME_SCHEMA_VERSION} got=${String(runtimeMeta.RUNTIME_SCHEMA_VERSION ?? 'undefined')}`,
+        `RUNTIME_VERSION_MISMATCH: invalid runtime schema=${String(runtimeMeta.RUNTIME_SCHEMA_VERSION ?? 'undefined')}`,
       );
     }
     XLN = loaded;
     xlnInstance.set(XLN);
+    if (typeof window !== 'undefined') {
+      (window as any).__xln_instance = XLN;
+    }
     return XLN;
   })();
 
@@ -154,6 +156,9 @@ export const xlnEnvironment = derived(
 
 export function setXlnEnvironment(env: Env | null): void {
   bootstrapEnvironment.set(env);
+  if (typeof window !== 'undefined') {
+    (window as any).__xln_env = env;
+  }
   if (!env) return;
 
   const selectedRuntimeId = String(get(activeRuntimeId) || '').toLowerCase();

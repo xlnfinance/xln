@@ -928,8 +928,14 @@ export const applyEntityInput = async (
     }
   }
 
-  const isSingleSigner =
-    workingReplica.state.config.validators.length === 1 && workingReplica.state.config.threshold === BigInt(1);
+  const isSingleSigner = (() => {
+    if (workingReplica.state.config.validators.length !== 1) return false;
+    try {
+      return BigInt(workingReplica.state.config.threshold ?? 0) === 1n;
+    } catch {
+      return false;
+    }
+  })();
 
   // Single-signer entities must replay through the exact same direct-execution path as live mode.
   if (workingReplica.isProposer && workingReplica.mempool.length > 0 && !workingReplica.proposal && isSingleSigner) {
@@ -1050,6 +1056,7 @@ export const applyEntityInput = async (
 
   // Auto-propose logic: ONLY proposer can propose (BFT requirement)
   if (
+    !isSingleSigner &&
     workingReplica.isProposer &&
     workingReplica.mempool.length > 0 &&
     !workingReplica.proposal
