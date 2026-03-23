@@ -55,6 +55,7 @@ import { resolveEntityProposerId } from './state-helpers';
 import { normalizeRebalanceMatchingStrategy } from './rebalance-policy';
 import { DEFAULT_SOFT_LIMIT } from './types';
 import { terminateHtlcRoute } from './entity-tx/htlc-route-lifecycle';
+import { getRuntimeJurisdictionHeight } from './j-height';
 
 // Configuration constants
 export const ACCOUNT_TIMEOUT_MS = 30000; // 30 seconds (configurable)
@@ -66,22 +67,6 @@ export const HUB_PENDING_BROADCAST_STALE_MS = 120000; // 2 minutes without final
 export const HUB_SUBMITTED_REQUEST_STALE_MS = 5 * 60 * 1000; // 5 minutes since jBatch handoff => mark as stale/manual
 export const HUB_MAX_R2C_PER_TICK = 10;
 export const HUB_MAX_C2R_PER_TICK = 10;
-
-function getEnvJAdapter(env: Env) {
-  if (!env.jReplicas || env.jReplicas.size === 0) return null;
-  const active = env.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction) : undefined;
-  if (active?.jadapter) return active.jadapter;
-  for (const replica of env.jReplicas.values()) {
-    if (replica.jadapter) return replica.jadapter;
-  }
-  return null;
-}
-
-const ZERO_HASH_32 = `0x${'0'.repeat(64)}`;
-const hasActiveDisputeHash = (hash: unknown): boolean => {
-  const normalized = String(hash ?? '').toLowerCase();
-  return normalized !== '' && normalized !== '0x' && normalized !== '0x0' && normalized !== ZERO_HASH_32;
-};
 
 type CrontabExecutionContext = {
   manualBroadcastInInput: boolean;
@@ -193,7 +178,7 @@ export async function executeCrontab(
 
     if (dueHooks.length > 0) {
       console.log(`⏰ HOOKS: ${dueHooks.length} hooks fired (entity ${replica.entityId.slice(-4)}, timestamp=${now})`);
-      const hookOutputs = await processDueHooks(dueHooks, env, replica, context);
+      const hookOutputs = await processDueHooks(env, dueHooks, replica, context);
       allOutputs.push(...hookOutputs);
     }
   }
@@ -227,21 +212,14 @@ export async function executeCrontab(
  * Each hook type maps to a specific security/protocol action.
  */
 async function processDueHooks(
-  hooks: ScheduledHook[],
   env: Env,
+  hooks: ScheduledHook[],
   replica: EntityReplica,
   context: CrontabExecutionContext,
 ): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
   const firstValidator = replica.state.config.validators?.[0];
   if (!firstValidator) return outputs;
-  const jadapter = getEnvJAdapter(env);
-  const canAutoAdvanceLocalJBlock =
-    !!jadapter &&
-    jadapter.mode === 'rpc' &&
-    Number(jadapter.chainId) === 31337 &&
-    typeof jadapter.processBlock === 'function';
-  let triedAutoAdvanceThisTick = false;
 
   // Group expired locks by type for batch processing
   const htlcTimeoutLocks: Array<{ accountId: string; lockId: string }> = [];
@@ -249,14 +227,7 @@ async function processDueHooks(
   const disputeFinalizeCounterparties = new Set<string>();
   let shouldBroadcastQueuedDisputeFinalizations = false;
 
-  let currentJBlock = Number(replica.state.lastFinalizedJHeight || 0);
-  try {
-    if (jadapter?.provider && typeof jadapter.provider.getBlockNumber === 'function') {
-      currentJBlock = Math.max(currentJBlock, Number(await jadapter.provider.getBlockNumber()));
-    }
-  } catch {
-    // Fallback to lastFinalizedJHeight if provider read fails.
-  }
+  const currentJBlock = getRuntimeJurisdictionHeight(env, replica.state.lastFinalizedJHeight || 0);
 
   for (const hook of hooks) {
     console.log(`⏰ HOOK FIRED: type=${hook.type} id=${hook.id.slice(0, 24)}...`);
@@ -286,25 +257,7 @@ async function processDueHooks(
           const weAreLeft = account.leftEntity === replica.state.entityId;
           const weAreStarter = weAreLeft === account.activeDispute.startedByLeft;
 
-          let timeoutBlock = Number(account.activeDispute.disputeTimeout || 0);
-          if (
-            jadapter &&
-            weAreStarter &&
-            timeoutBlock &&
-            currentJBlock < timeoutBlock &&
-            canAutoAdvanceLocalJBlock &&
-            !triedAutoAdvanceThisTick
-          ) {
-            triedAutoAdvanceThisTick = true;
-            try {
-              await jadapter.processBlock();
-              if (jadapter.provider && typeof jadapter.provider.getBlockNumber === 'function') {
-                currentJBlock = Math.max(currentJBlock, Number(await jadapter.provider.getBlockNumber()));
-              }
-            } catch {
-              // Keep retry path below.
-            }
-          }
+          const timeoutBlock = Number(account.activeDispute.disputeTimeout || 0);
 
           if (weAreStarter && (!timeoutBlock || currentJBlock < timeoutBlock)) {
             const retryMs = 1000;
@@ -321,40 +274,6 @@ async function processDueHooks(
               `(current=${currentJBlock}, timeout=${timeoutBlock}, retryMs=${retryMs})`,
             );
             break;
-          }
-
-          if (jadapter?.getAccountInfo) {
-            try {
-              const onchain = await jadapter.getAccountInfo(replica.state.entityId, accountId);
-              if (!hasActiveDisputeHash(onchain.disputeHash)) {
-                account.activeDispute = undefined;
-                if (account.status === 'disputed') account.status = 'active';
-                console.warn(
-                  `⏰ HOOK: dispute_deadline stale local dispute cleared for ${accountId.slice(-4)} (no on-chain active dispute)`,
-                );
-                break;
-              }
-              const onchainTimeout = Number(onchain.disputeTimeout ?? 0n);
-              if (Number.isFinite(onchainTimeout) && onchainTimeout > 0) {
-                timeoutBlock = onchainTimeout;
-                account.activeDispute.disputeTimeout = onchainTimeout;
-              }
-            } catch (error) {
-              const retryMs = 1000;
-              if (replica.state.crontabState) {
-                scheduleHook(replica.state.crontabState, {
-                  id: hook.id,
-                  triggerAt: replica.state.timestamp + retryMs,
-                  type: 'dispute_deadline',
-                  data: { accountId },
-                });
-              }
-              console.warn(
-                `⏰ HOOK: dispute_deadline on-chain check failed for ${accountId.slice(-4)}; retry in ${retryMs}ms`,
-                error
-              );
-              break;
-            }
           }
 
           const accountIdNorm = accountId.toLowerCase();
@@ -800,17 +719,6 @@ async function hubRebalanceHandler(
     replica.state.jBatchState = initJBatch();
   }
 
-  const resolveJAdapter = () => {
-    if (_env.activeJurisdiction) {
-      const active = _env.jReplicas?.get(_env.activeJurisdiction);
-      if (active?.jadapter) return active.jadapter;
-    }
-    for (const j of _env.jReplicas?.values?.() || []) {
-      if (j?.jadapter) return j.jadapter;
-    }
-    return null;
-  };
-
   // Pending broadcast blocks direct jBatch mutations (R→C/C→R execute), but we can still
   // prepare C→R settlement proposals that only touch account consensus.
   let canTouchBatch = true;
@@ -824,43 +732,11 @@ async function hubRebalanceHandler(
       );
       canTouchBatch = false;
     } else {
-      // Safety: before clearing stale latch, cross-check on-chain nonce.
-      // If chain nonce already advanced beyond local, we must NOT retry submit
-      // with stale nonce (would revert E2). Wait for watcher/event sync instead.
-      const jadapter = resolveJAdapter();
-      if (jadapter && typeof jadapter.getEntityNonce === 'function') {
-        try {
-          const chainNonce = Number(await jadapter.getEntityNonce(hubId));
-          const localNonce = Number(replica.state.jBatchState.entityNonce || 0);
-          if (chainNonce > localNonce) {
-            replica.state.jBatchState.entityNonce = chainNonce;
-            canTouchBatch = false;
-            console.warn(
-              `⏳ Hub rebalance stale latch guarded: on-chain nonce ${chainNonce} > local ${localNonce}; ` +
-              `waiting for HankoBatchProcessed sync before retry`,
-            );
-          } else {
-            console.warn(
-              `⚠️ Hub rebalance stale sentBatch (${ageMs}ms) - queueing persisted abort ` +
-              `(nonce local=${localNonce}, chain=${chainNonce})`,
-            );
-            abortStaleSentBatchReason = 'stale-hub-rebalance-latch';
-            canTouchBatch = false;
-          }
-        } catch (error) {
-          canTouchBatch = false;
-          console.warn(
-            `⏳ Hub rebalance stale latch: nonce check failed, keeping sentBatch pending ` +
-            `(${error instanceof Error ? error.message : String(error)})`,
-          );
-        }
-      } else {
-        console.warn(
-          `⚠️ Hub rebalance stale sentBatch (${ageMs}ms) - queueing persisted abort (no jadapter nonce check available)`,
-        );
-        abortStaleSentBatchReason = 'stale-hub-rebalance-latch-no-jadapter';
-        canTouchBatch = false;
-      }
+      console.warn(
+        `⚠️ Hub rebalance stale sentBatch (${ageMs}ms) - queueing persisted abort (manual recovery path)`,
+      );
+      abortStaleSentBatchReason = 'stale-hub-rebalance-latch';
+      canTouchBatch = false;
     }
   }
 

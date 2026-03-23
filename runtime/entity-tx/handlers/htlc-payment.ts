@@ -17,32 +17,11 @@ import { getTokenCapacity } from '../../routing/capacity';
 import { deriveDelta } from '../../account-utils';
 import { NobleCryptoProvider } from '../../crypto-noble';
 import { createOnionEnvelopes } from '../../htlc-envelope-types';
+import { getRuntimeJurisdictionHeight } from '../../j-height';
 
 const formatEntityId = (id: string) => id.slice(-4);
 const addMessage = (state: EntityState, message: string) => state.messages.push(message);
 const logError = (context: string, message: string) => console.error(`[${context}] ${message}`);
-const getRuntimeJurisdictionHeight = async (env: Env, fallbackHeight: number): Promise<number> => {
-  const active = env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined;
-  const candidates = active ? [active, ...Array.from(env.jReplicas?.values?.() || [])] : Array.from(env.jReplicas?.values?.() || []);
-  let best = Number.isFinite(fallbackHeight) ? Math.max(0, Math.floor(fallbackHeight)) : 0;
-  for (const replica of candidates) {
-    const blockNumber = Number(replica?.blockNumber ?? 0n);
-    if (Number.isFinite(blockNumber) && blockNumber > best) best = Math.floor(blockNumber);
-    const provider = (replica?.jadapter as { provider?: { getBlockNumber?: () => Promise<number> } } | undefined)?.provider;
-    if (typeof provider?.getBlockNumber === 'function') {
-      try {
-        const liveBlockNumber = Number(await provider.getBlockNumber());
-        if (Number.isFinite(liveBlockNumber) && liveBlockNumber > best) {
-          best = Math.floor(liveBlockNumber);
-        }
-      } catch {
-        // Fall back to watched replica height when live RPC read is unavailable.
-      }
-    }
-  }
-  return best;
-};
-
 const isHexChar = (char: string): boolean => {
   const code = char.charCodeAt(0);
   return (
@@ -314,7 +293,7 @@ export async function handleHtlcPayment(
     const minExpiryMs = totalHops * HTLC.MIN_TIMELOCK_DELTA_MS + HTLC.MIN_FORWARD_TIMELOCK_MS;
     // Use much longer expiry for test scenarios (100+ frames × 100ms = 10s+ elapsed)
     const expiryMs = Math.max(120_000, minExpiryMs);
-    const runtimeJHeight = await getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight || 0);
+    const runtimeJHeight = getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight || 0);
     const baseTimelock = BigInt(newState.timestamp + expiryMs);
     const baseHeight = runtimeJHeight + 50;
 

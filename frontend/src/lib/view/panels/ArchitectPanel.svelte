@@ -245,7 +245,7 @@
     }
 
     const jadapter = await getJAdapterFromEnv();
-    if (!jadapter?.reserveToReserve || !jadapter?.getReserves) {
+    if (!jadapter?.getReserves) {
       lastAction = '⚠️ JAdapter not available';
       return;
     }
@@ -266,14 +266,29 @@
         throw new Error(`Insufficient reserves: have ${fromReserve}, need ${amount}`);
       }
 
-      // Call Depository.sol reserveToReserve() directly via BrowserVM
-      console.log(`[Architect] Calling reserveToReserve: ${r2rFromEntity} → ${r2rToEntity}, amount=${amount}`);
+      const replicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find((key) => key.startsWith(`${r2rFromEntity}:`));
+      const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
+      const signerId = replica?.signerId;
+      if (!signerId) {
+        throw new Error(`Missing signer for ${shortAddress(r2rFromEntity)}`);
+      }
 
-      const events = await jadapter.reserveToReserve(r2rFromEntity, r2rToEntity, 1, amount);
-      console.log(`[Architect] R2R emitted ${events.length} events`);
-
-      // Process the environment to create a new frame with the J-events
-      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [] });
+      console.log(`[Architect] Queueing reserve_to_reserve: ${r2rFromEntity} → ${r2rToEntity}, amount=${amount}`);
+      XLN.enqueueRuntimeInput($isolatedEnv, {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId: r2rFromEntity,
+          signerId,
+          entityTxs: [{
+            type: 'reserve_to_reserve',
+            data: {
+              toEntityId: r2rToEntity,
+              tokenId: 1,
+              amount,
+            },
+          }],
+        }],
+      });
 
       lastAction = `✅ R2R sent: ${r2rAmount} units (on-chain)`;
 

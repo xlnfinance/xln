@@ -196,7 +196,7 @@ export async function ensureJAdapter(
   options?: { deployStack?: boolean },
 ): Promise<JAdapter> {
   const { createJAdapter } = await import('../jadapter');
-  const { setBrowserVMJurisdiction } = await import('../evm');
+  const { setBrowserVMJurisdiction } = await import('../jadapter');
 
   const actualMode = mode ?? getJAdapterMode();
   const rpcUrl = process.env.ANVIL_RPC || getDefaultAnvilRpcUrl();
@@ -408,53 +408,6 @@ export function getScenarioJAdapter(env: Env): JAdapter {
     if ((jr as any).jadapter) return (jr as any).jadapter;
   }
   throw new Error('No JAdapter found on env — call bootScenario() first');
-}
-
-// ============================================================================
-// LEGACY (kept for backward compat during migration)
-// ============================================================================
-
-/**
- * Attach a BrowserVM-backed JAdapter to an existing jReplica and start watching.
- * @deprecated Use bootScenario() instead.
- */
-export async function attachBrowserVMAdapter(
-  env: Env,
-  jReplicaName: string,
-  browserVM: any,
-): Promise<void> {
-  const jReplica = env.jReplicas?.get(jReplicaName);
-  if (!jReplica) throw new Error(`jReplica "${jReplicaName}" not found`);
-
-  const { createBrowserVMAdapter } = await import('../jadapter/browservm');
-  const { ethers } = await import('ethers');
-  const { BrowserVMEthersProvider } = await import('../jadapter/browservm-ethers-provider');
-
-  const bvmProvider = new BrowserVMEthersProvider(browserVM);
-  const bvmSigner = new ethers.Wallet(
-    '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-    bvmProvider as any,
-  );
-
-  const jadapter = await createBrowserVMAdapter(
-    { mode: 'browservm', chainId: 31337 },
-    bvmProvider as any,
-    bvmSigner as any,
-    browserVM,
-  );
-
-  (jReplica as any).jadapter = jadapter;
-  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
-  (jReplica as any).contracts = {
-    depository: jadapter.addresses.depository,
-    entityProvider: jadapter.addresses.entityProvider,
-    account: jadapter.addresses.account,
-    deltaTransformer: jadapter.addresses.deltaTransformer,
-  };
-
-  jadapter.startWatching(env);
-  console.log(`[JAdapter] BrowserVM adapter attached to "${jReplicaName}" + watching started`);
 }
 
 // ============================================================================

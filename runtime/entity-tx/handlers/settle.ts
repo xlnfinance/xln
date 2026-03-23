@@ -17,7 +17,7 @@ import { initJBatch, batchAddSettlement } from '../../j-batch';
 import { isLeftEntity } from '../../entity-id-utils';
 import type { Env, HankoString } from '../../types';
 import { createSettlementHashWithNonce, createDisputeProofHashWithNonce, buildAccountProofBody } from '../../proof-builder';
-import { signHashesAsSingleEntity } from '../../hanko-signing';
+import { signHashesAsSingleEntity } from '../../hanko/signing';
 import { compileOps, userAutoApprove as userAutoApproveByDiff } from '../../settlement-ops';
 
 import type { AccountMachine } from '../../types';

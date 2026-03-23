@@ -243,26 +243,9 @@ type BuildRuntimeReplayDepsOptions = {
   ) => unknown;
   ensureRuntimeState: (env: Env) => { db?: unknown; dbOpenPromise?: unknown };
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<void>;
-  buildSkippedReplayAckKey: (
-    runtimeFrameHeight: number,
-    entityId: string,
-    counterpartyId: string,
-    inputHeight: number,
-    prevHanko: unknown,
-  ) => string;
-  buildSkippedReplayNewFrameKey: (
-    runtimeFrameHeight: number,
-    entityId: string,
-    counterpartyId: string,
-    frameHeight: number,
-    stateHash: unknown,
-    prevFrameHash: unknown,
-  ) => string;
-  safeStringify: (value: unknown) => string;
   normalizeEntitySwapTradingPairs: (state: unknown) => void;
   isDbNotFound: (error: unknown) => boolean;
   replayModeKey: symbol;
-  replaySkippedAccountInputsKey: symbol;
   applyAllowedKey: symbol;
 };
 
@@ -284,13 +267,9 @@ const createRuntimeReplayDeps = (options: BuildRuntimeReplayDepsOptions) => ({
   buildCanonicalEnvSnapshot: options.buildCanonicalEnvSnapshot,
   ensureRuntimeState: options.ensureRuntimeState,
   applyRuntimeInput: options.applyRuntimeInput,
-  buildSkippedReplayAckKey: options.buildSkippedReplayAckKey,
-  buildSkippedReplayNewFrameKey: options.buildSkippedReplayNewFrameKey,
-  safeStringify: options.safeStringify,
   normalizeEntitySwapTradingPairs: options.normalizeEntitySwapTradingPairs,
   isDbNotFound: options.isDbNotFound,
   replayModeKey: options.replayModeKey,
-  replaySkippedAccountInputsKey: options.replaySkippedAccountInputsKey,
   applyAllowedKey: options.applyAllowedKey,
 });
 

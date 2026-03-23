@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { type Writable, type Readable } from 'svelte/store';
   import type { XLNModule } from '@xln/runtime/xln-api';
-  import type { JAdapter, BrowserVMProvider } from '@xln/runtime/jadapter';
+  import type { JAdapter } from '@xln/runtime/jadapter';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import { panelBridge } from '../utils/panelBridge';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
@@ -41,7 +41,9 @@
   let timeTravelNonce = 0;
   let cachedXLN: XLNModule | null = null;
 
-  async function getBrowserVMFromEnv(envValue: any): Promise<BrowserVMProvider | null> {
+  type BrowserVMHandle = NonNullable<ReturnType<JAdapter['getBrowserVM']>>;
+
+  async function getBrowserVMFromEnv(envValue: any): Promise<BrowserVMHandle | null> {
     if (!envValue) return null;
     const xln = cachedXLN ?? await getXLN();
     cachedXLN = xln;

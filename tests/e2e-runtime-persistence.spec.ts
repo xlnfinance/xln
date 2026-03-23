@@ -210,22 +210,21 @@ async function readPairProgress(page: Page, counterpartyId: string) {
       const account = rep?.state?.accounts?.get?.(counterpartyId);
       if (!account) continue;
       const history = Array.isArray(account.frameHistory) ? account.frameHistory : [];
+      const pendingTxs = Array.isArray(account?.pendingFrame?.accountTxs) ? account.pendingFrame.accountTxs : [];
+      const htlcFrames = [...history.slice(-80), ...(pendingTxs.length > 0 ? [{ accountTxs: pendingTxs }] : [])];
       return {
         currentHeight: Number(account.currentHeight || 0),
         pendingHeight: Number(account?.pendingFrame?.height || 0),
-        recentHtlcHashlocks: history
-          .slice(-80)
+        recentHtlcHashlocks: htlcFrames
           .flatMap((frame: any) => (Array.isArray(frame?.accountTxs) ? frame.accountTxs : []))
           .filter((tx: any) => tx?.type === 'htlc_lock' || tx?.type === 'htlc_resolve')
           .map((tx: any) => String(tx?.data?.hashlock || ''))
           .filter((hash: string) => hash.startsWith('0x') && hash.length > 10),
-        recentHtlcResolveCount: history
-          .slice(-80)
+        recentHtlcResolveCount: htlcFrames
           .flatMap((frame: any) => (Array.isArray(frame?.accountTxs) ? frame.accountTxs : []))
           .filter((tx: any) => tx?.type === 'htlc_resolve')
           .length,
-        recentHtlcLockCount: history
-          .slice(-80)
+        recentHtlcLockCount: htlcFrames
           .flatMap((frame: any) => (Array.isArray(frame?.accountTxs) ? frame.accountTxs : []))
           .filter((tx: any) => tx?.type === 'htlc_lock')
           .length,
@@ -519,7 +518,7 @@ async function placeNonMarketableSwapOrder(page: Page, counterpartyId: string): 
   await amountInput.fill(formatDecimalForInput(orderAmount));
   await priceInput.fill('2000');
   await page.waitForTimeout(200);
-  const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+  const placeButton = page.getByTestId('swap-submit-order').first();
   await expect(placeButton).toBeEnabled({ timeout: 20_000 });
   await placeButton.click();
   await expect(page.getByTestId('swap-open-orders')).toBeVisible({ timeout: 60_000 });

@@ -1065,12 +1065,12 @@
   }
 
   .price-step select {
-    min-width: 72px;
-    height: 28px;
-    border-radius: 8px;
-    border: 1px solid rgba(251, 191, 36, 0.35);
-    background: rgba(15, 15, 21, 0.92);
-    color: var(--text-primary, #fff);
+    min-width: 80px;
+    height: 26px;
+    border-radius: 4px;
+    border: 1px solid #3f3f46;
+    background: #111217;
+    color: #e5e7eb;
     font-family: inherit;
     font-size: 12px;
     padding: 0 8px;
@@ -1083,10 +1083,10 @@
   }
 
   .step-auto-btn {
-    height: 28px;
-    border-radius: 8px;
-    border: 1px solid rgba(148, 163, 184, 0.35);
-    background: rgba(15, 15, 21, 0.92);
+    height: 26px;
+    border-radius: 4px;
+    border: 1px solid #3f3f46;
+    background: #111217;
     color: #a1a1aa;
     font-family: inherit;
     font-size: 11px;

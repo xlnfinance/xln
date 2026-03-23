@@ -856,7 +856,7 @@ async function prepareExecutableOrder(page: Page): Promise<number> {
     throw new Error('No executable WETH/* pair is available in swap pair options');
   }
 
-  const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+  const placeButton = page.getByTestId('swap-submit-order').first();
   const amountInput = page.getByTestId('swap-order-amount').first();
   const priceInput = page.getByTestId('swap-order-price').first();
   const buySideButton = page.getByTestId('swap-side-buy').first();
@@ -1041,7 +1041,7 @@ async function executeOrderbookClickFill(
 
     const buySideButton = page.getByTestId('swap-side-buy').first();
     const sellSideButton = page.getByTestId('swap-side-sell').first();
-    const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+    const placeButton = page.getByTestId('swap-submit-order').first();
     await expect(buySideButton).toBeVisible({ timeout: 20_000 });
     await expect(sellSideButton).toBeVisible({ timeout: 20_000 });
     if (clickTarget === 'highest-bid') {
@@ -1265,7 +1265,7 @@ test.describe('E2E Swap Flow', () => {
     await expect(amountInput).toBeVisible({ timeout: 20_000 });
     const priceInput = page.getByTestId('swap-order-price').first();
     await expect(priceInput).toBeVisible({ timeout: 20_000 });
-    const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+    const placeButton = page.getByTestId('swap-submit-order').first();
     const buySide = page.getByTestId('swap-side-buy').first();
     const sellSide = page.getByTestId('swap-side-sell').first();
     const accountSelect = page.getByTestId('swap-account-select').first();
@@ -1416,7 +1416,7 @@ test.describe('E2E Swap Flow', () => {
     await priceInput.fill('2000');
     await page.waitForTimeout(200);
 
-    const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+    const placeButton = page.getByTestId('swap-submit-order').first();
     await expect(placeButton).toBeEnabled({ timeout: 20_000 });
     await timedStep('swap.place_offer', async () => {
       await placeButton.click();
@@ -1567,7 +1567,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
 
     const buySideButton = page.getByTestId('swap-side-buy').first();
     const priceInput = page.getByTestId('swap-order-price').first();
-    const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+    const placeButton = page.getByTestId('swap-submit-order').first();
     await expect(buySideButton).toBeVisible({ timeout: 20_000 });
     await buySideButton.click();
     await page.waitForTimeout(120);
@@ -1610,7 +1610,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     const buySideButton = page.getByTestId('swap-side-buy').first();
     const amountInput = page.getByTestId('swap-order-amount').first();
     const priceInput = page.getByTestId('swap-order-price').first();
-    const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+    const placeButton = page.getByTestId('swap-submit-order').first();
     await buySideButton.click();
 
     const asks = page.locator('.swap-panel .orderbook-panel .asks-section .row.clickable');

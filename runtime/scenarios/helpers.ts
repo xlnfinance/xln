@@ -525,6 +525,12 @@ export async function syncChain(env: Env, rounds = 3): Promise<void> {
         await ja.processBlock();
       }
       if (ja.pollNow) await ja.pollNow();
+      try {
+        const blockNumber = await ja.provider.getBlockNumber();
+        jReplica.blockNumber = BigInt(blockNumber);
+      } catch {
+        // Keep last known tip if adapter/provider cannot report current height.
+      }
     }
     advanceScenarioTime(env, 350);
     await process(env);

@@ -43,6 +43,7 @@ export type {
   RuntimeInput,
   EntityInput,
   RoutedEntityInput,
+  SettlementDiff,
 } from './types';
 export type { PersistedFrameJournal } from './wal/store';
 
@@ -242,17 +243,6 @@ export interface FinancialConstants {
 }
 
 /**
- * Settlement diff structure matching contract
- */
-export interface SettlementDiff {
-  tokenId: number;
-  leftDiff: bigint;
-  rightDiff: bigint;
-  collateralDiff: bigint;
-  ondeltaDiff?: bigint;
-}
-
-/**
  * BigInt math utilities
  */
 export interface BigIntMathUtils {
@@ -415,17 +405,7 @@ export interface XLNModule {
   ) => Promise<PersistedFrameJournal[]>;
 
   // Blockchain operations
-  submitSettle: (
-    jurisdiction: JurisdictionConfig,
-    leftEntity: string,
-    rightEntity: string,
-    diffs: SettlementDiff[],
-    forgiveDebtsInTokenIds?: number[],
-    sig?: string
-  ) => Promise<{ txHash: string }>;
-  submitReserveToReserve: (jurisdiction: JurisdictionConfig, fromEntity: string, toEntity: string, tokenId: number, amount: string) => Promise<{ txHash: string }>;
   submitProcessBatch: (env: Env, jurisdiction: JurisdictionConfig, entityId: string, batch: unknown, signerId?: string) => Promise<{ transaction: unknown; receipt: unknown }>;
-  submitPrefundAccount: (env: Env, entityId: string, tokenAddress: string, amount: bigint) => Promise<Env>;
   debugFundReserves: (env: Env, entityId: string, tokenAddress: string, amount: bigint) => Promise<Env>;
 
   // History and snapshots
@@ -452,7 +432,6 @@ export interface XLNModule {
 
   // Blockchain registration
   registerNumberedEntityOnChain: (env: Env, entityId: string) => Promise<Env>;
-  connectToEthereum: (jurisdiction: JurisdictionConfig) => Promise<unknown>;
   setBrowserVMJurisdiction: (env: Env, depositoryAddress: string, browserVMInstance?: BrowserVMOverride) => void;
   getBrowserVMInstance: (env?: Env) => BrowserVMInstance | null;
 

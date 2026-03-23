@@ -500,9 +500,8 @@ const ensureHubWalletFunding = async (
 
   if (globalJAdapter.mode === 'browservm') {
     if (options.ensureEth !== false) {
-      const browserVM = globalJAdapter.getBrowserVM();
-      if (browserVM?.fundSignerWallet) {
-        await browserVM.fundSignerWallet(await hub.wallet.getAddress(), HUB_WALLET_ETH_TARGET);
+      if (globalJAdapter.fundSignerWallet) {
+        await globalJAdapter.fundSignerWallet(await hub.wallet.getAddress(), HUB_WALLET_ETH_TARGET);
       }
     }
     return hub;
@@ -557,10 +556,8 @@ const externalWalletApi = createExternalWalletApi({
     pushDebugEvent(relayStore, entry);
   },
   fundBrowserVmWallet: async (address: string, amount: bigint): Promise<boolean> => {
-    if (!globalJAdapter) return false;
-    const browserVM = globalJAdapter.getBrowserVM();
-    if (!browserVM?.fundSignerWallet) return false;
-    await browserVM.fundSignerWallet(address, amount);
+    if (!globalJAdapter?.fundSignerWallet) return false;
+    await globalJAdapter.fundSignerWallet(address, amount);
     return true;
   },
 });

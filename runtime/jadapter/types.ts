@@ -97,13 +97,6 @@ export interface JAdapter {
 
   // Writes - Core Operations
   processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt>;
-  settle(
-    leftEntity: string,
-    rightEntity: string,
-    diffs: SettlementDiff[],
-    forgiveDebtsInTokenIds?: number[],
-    sig?: string
-  ): Promise<JTxReceipt>;
 
   // Writes - Entity Management
   registerNumberedEntity(boardHash: string): Promise<{ entityNumber: number; txHash: string }>;
@@ -113,7 +106,6 @@ export interface JAdapter {
   // Writes - Testing/Debug (may be no-op on mainnet)
   debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]>;
   debugFundReservesBatch(mints: JReserveMint[]): Promise<JEvent[]>;
-  reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<JEvent[]>;
 
   // Writes - Deposits (user deposits ERC20 to their entity reserves)
   externalTokenToReserve(
@@ -144,6 +136,7 @@ export interface JAdapter {
     to: string,
     amount: bigint,
   ): Promise<string>;
+  fundSignerWallet?(address: string, amount?: bigint): Promise<void>;
 
   // === High-level J-tx submission (unified interface for all modes) ===
   // Handles encoding, signing, and execution. Events arrive via j-watcher → next frame.
@@ -163,6 +156,16 @@ export interface JAdapter {
   // BrowserVM-specific (returns null for RPC mode)
   getBrowserVM(): BrowserVMProvider | null;
   setBlockTimestamp(timestamp: number): void;
+  setQuietLogs?(quiet: boolean): void;
+  registerEntityWallet?(entityId: string, privateKey: string): void;
+  captureStateRoot?(): Promise<Uint8Array | null>;
+  syncRuntimeState?(
+    accountPairs: Array<{ entityId: string; counterpartyId: string }>,
+    tokenIds: number[],
+  ): Promise<{
+    collaterals: Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>;
+    blockNumber: bigint;
+  } | null>;
 
   // Cleanup
   close(): Promise<void>;
@@ -194,12 +197,6 @@ export interface JBatchReceipt {
   events: JEvent[];
 }
 
-// Receipt for general transactions
-export interface JTxReceipt {
-  txHash: string;
-  blockNumber: number;
-}
-
 // Forward declare BrowserVMProvider (avoid circular import)
 export interface BrowserVMProvider {
   processBatch(encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint): Promise<any[]>;
@@ -208,7 +205,6 @@ export interface BrowserVMProvider {
   getEntityProviderAddress(): string;
   getAccountAddress(): string;
   debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<any[]>;
-  reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<any[]>;
   getNextEntityNumber(): Promise<number>;
   registerNumberedEntitiesBatch(boardHashes: string[]): Promise<{ entityNumbers: number[]; txHash: string }>;
   serializeState(): Promise<any>;
@@ -227,11 +223,4 @@ export interface BrowserVMProvider {
     diffs: SettlementDiff[],
     forgiveDebtsInTokenIds?: number[]
   ): Promise<string>;
-  settle(
-    leftEntity: string,
-    rightEntity: string,
-    diffs: SettlementDiff[],
-    forgiveDebtsInTokenIds?: number[],
-    sig?: string
-  ): Promise<any[]>;
 }

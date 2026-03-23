@@ -11,7 +11,7 @@
  */
 
 import { ethers, keccak256 } from 'ethers';
-import { buildRealHanko, recoverHankoEntities, packRealSignatures } from '../hanko';
+import { buildRealHanko, recoverHankoEntities, packRealSignatures } from '../hanko/core';
 import { createHash, randomBytes } from '../utils';
 
 // Test wallet generation

@@ -111,269 +111,6 @@ export type SettlementDiffStructOutput = [
   ondeltaDiff: bigint;
 };
 
-export type FlashloanStruct = { tokenId: BigNumberish; amount: BigNumberish };
-
-export type FlashloanStructOutput = [tokenId: bigint, amount: bigint] & {
-  tokenId: bigint;
-  amount: bigint;
-};
-
-export type ReserveToReserveStruct = {
-  receivingEntity: BytesLike;
-  tokenId: BigNumberish;
-  amount: BigNumberish;
-};
-
-export type ReserveToReserveStructOutput = [
-  receivingEntity: string,
-  tokenId: bigint,
-  amount: bigint
-] & { receivingEntity: string; tokenId: bigint; amount: bigint };
-
-export type EntityAmountStruct = { entity: BytesLike; amount: BigNumberish };
-
-export type EntityAmountStructOutput = [entity: string, amount: bigint] & {
-  entity: string;
-  amount: bigint;
-};
-
-export type ReserveToCollateralStruct = {
-  tokenId: BigNumberish;
-  receivingEntity: BytesLike;
-  pairs: EntityAmountStruct[];
-};
-
-export type ReserveToCollateralStructOutput = [
-  tokenId: bigint,
-  receivingEntity: string,
-  pairs: EntityAmountStructOutput[]
-] & {
-  tokenId: bigint;
-  receivingEntity: string;
-  pairs: EntityAmountStructOutput[];
-};
-
-export type CollateralToReserveStruct = {
-  counterparty: BytesLike;
-  tokenId: BigNumberish;
-  amount: BigNumberish;
-  nonce: BigNumberish;
-  sig: BytesLike;
-};
-
-export type CollateralToReserveStructOutput = [
-  counterparty: string,
-  tokenId: bigint,
-  amount: bigint,
-  nonce: bigint,
-  sig: string
-] & {
-  counterparty: string;
-  tokenId: bigint;
-  amount: bigint;
-  nonce: bigint;
-  sig: string;
-};
-
-export type SettlementStruct = {
-  leftEntity: BytesLike;
-  rightEntity: BytesLike;
-  diffs: SettlementDiffStruct[];
-  forgiveDebtsInTokenIds: BigNumberish[];
-  sig: BytesLike;
-  entityProvider: AddressLike;
-  hankoData: BytesLike;
-  nonce: BigNumberish;
-};
-
-export type SettlementStructOutput = [
-  leftEntity: string,
-  rightEntity: string,
-  diffs: SettlementDiffStructOutput[],
-  forgiveDebtsInTokenIds: bigint[],
-  sig: string,
-  entityProvider: string,
-  hankoData: string,
-  nonce: bigint
-] & {
-  leftEntity: string;
-  rightEntity: string;
-  diffs: SettlementDiffStructOutput[];
-  forgiveDebtsInTokenIds: bigint[];
-  sig: string;
-  entityProvider: string;
-  hankoData: string;
-  nonce: bigint;
-};
-
-export type InitialDisputeProofStruct = {
-  counterentity: BytesLike;
-  nonce: BigNumberish;
-  proofbodyHash: BytesLike;
-  sig: BytesLike;
-  initialArguments: BytesLike;
-};
-
-export type InitialDisputeProofStructOutput = [
-  counterentity: string,
-  nonce: bigint,
-  proofbodyHash: string,
-  sig: string,
-  initialArguments: string
-] & {
-  counterentity: string;
-  nonce: bigint;
-  proofbodyHash: string;
-  sig: string;
-  initialArguments: string;
-};
-
-export type AllowanceStruct = {
-  deltaIndex: BigNumberish;
-  rightAllowance: BigNumberish;
-  leftAllowance: BigNumberish;
-};
-
-export type AllowanceStructOutput = [
-  deltaIndex: bigint,
-  rightAllowance: bigint,
-  leftAllowance: bigint
-] & { deltaIndex: bigint; rightAllowance: bigint; leftAllowance: bigint };
-
-export type TransformerClauseStruct = {
-  transformerAddress: AddressLike;
-  encodedBatch: BytesLike;
-  allowances: AllowanceStruct[];
-};
-
-export type TransformerClauseStructOutput = [
-  transformerAddress: string,
-  encodedBatch: string,
-  allowances: AllowanceStructOutput[]
-] & {
-  transformerAddress: string;
-  encodedBatch: string;
-  allowances: AllowanceStructOutput[];
-};
-
-export type ProofBodyStruct = {
-  offdeltas: BigNumberish[];
-  tokenIds: BigNumberish[];
-  transformers: TransformerClauseStruct[];
-};
-
-export type ProofBodyStructOutput = [
-  offdeltas: bigint[],
-  tokenIds: bigint[],
-  transformers: TransformerClauseStructOutput[]
-] & {
-  offdeltas: bigint[];
-  tokenIds: bigint[];
-  transformers: TransformerClauseStructOutput[];
-};
-
-export type FinalDisputeProofStruct = {
-  counterentity: BytesLike;
-  initialNonce: BigNumberish;
-  finalNonce: BigNumberish;
-  initialProofbodyHash: BytesLike;
-  finalProofbody: ProofBodyStruct;
-  finalArguments: BytesLike;
-  initialArguments: BytesLike;
-  sig: BytesLike;
-  startedByLeft: boolean;
-  disputeUntilBlock: BigNumberish;
-  cooperative: boolean;
-};
-
-export type FinalDisputeProofStructOutput = [
-  counterentity: string,
-  initialNonce: bigint,
-  finalNonce: bigint,
-  initialProofbodyHash: string,
-  finalProofbody: ProofBodyStructOutput,
-  finalArguments: string,
-  initialArguments: string,
-  sig: string,
-  startedByLeft: boolean,
-  disputeUntilBlock: bigint,
-  cooperative: boolean
-] & {
-  counterentity: string;
-  initialNonce: bigint;
-  finalNonce: bigint;
-  initialProofbodyHash: string;
-  finalProofbody: ProofBodyStructOutput;
-  finalArguments: string;
-  initialArguments: string;
-  sig: string;
-  startedByLeft: boolean;
-  disputeUntilBlock: bigint;
-  cooperative: boolean;
-};
-
-export type ReserveToExternalTokenStruct = {
-  receivingEntity: BytesLike;
-  tokenId: BigNumberish;
-  amount: BigNumberish;
-};
-
-export type ReserveToExternalTokenStructOutput = [
-  receivingEntity: string,
-  tokenId: bigint,
-  amount: bigint
-] & { receivingEntity: string; tokenId: bigint; amount: bigint };
-
-export type SecretRevealStruct = {
-  transformer: AddressLike;
-  secret: BytesLike;
-};
-
-export type SecretRevealStructOutput = [transformer: string, secret: string] & {
-  transformer: string;
-  secret: string;
-};
-
-export type BatchStruct = {
-  flashloans: FlashloanStruct[];
-  reserveToReserve: ReserveToReserveStruct[];
-  reserveToCollateral: ReserveToCollateralStruct[];
-  collateralToReserve: CollateralToReserveStruct[];
-  settlements: SettlementStruct[];
-  disputeStarts: InitialDisputeProofStruct[];
-  disputeFinalizations: FinalDisputeProofStruct[];
-  externalTokenToReserve: ExternalTokenToReserveStruct[];
-  reserveToExternalToken: ReserveToExternalTokenStruct[];
-  revealSecrets: SecretRevealStruct[];
-  hub_id: BigNumberish;
-};
-
-export type BatchStructOutput = [
-  flashloans: FlashloanStructOutput[],
-  reserveToReserve: ReserveToReserveStructOutput[],
-  reserveToCollateral: ReserveToCollateralStructOutput[],
-  collateralToReserve: CollateralToReserveStructOutput[],
-  settlements: SettlementStructOutput[],
-  disputeStarts: InitialDisputeProofStructOutput[],
-  disputeFinalizations: FinalDisputeProofStructOutput[],
-  externalTokenToReserve: ExternalTokenToReserveStructOutput[],
-  reserveToExternalToken: ReserveToExternalTokenStructOutput[],
-  revealSecrets: SecretRevealStructOutput[],
-  hub_id: bigint
-] & {
-  flashloans: FlashloanStructOutput[];
-  reserveToReserve: ReserveToReserveStructOutput[];
-  reserveToCollateral: ReserveToCollateralStructOutput[];
-  collateralToReserve: CollateralToReserveStructOutput[];
-  settlements: SettlementStructOutput[];
-  disputeStarts: InitialDisputeProofStructOutput[];
-  disputeFinalizations: FinalDisputeProofStructOutput[];
-  externalTokenToReserve: ExternalTokenToReserveStructOutput[];
-  reserveToExternalToken: ReserveToExternalTokenStructOutput[];
-  revealSecrets: SecretRevealStructOutput[];
-  hub_id: bigint;
-};
-
 export declare namespace Depository {
   export type ReserveMintStruct = {
     entity: BytesLike;
@@ -428,7 +165,6 @@ export interface DepositoryInterface extends Interface {
       | "setEntityDisputeDelay"
       | "tokenToId"
       | "unpackTokenReference"
-      | "unsafeProcessBatch"
   ): FunctionFragment;
 
   getEvent(
@@ -599,10 +335,6 @@ export interface DepositoryInterface extends Interface {
     functionFragment: "unpackTokenReference",
     values: [BytesLike]
   ): string;
-  encodeFunctionData(
-    functionFragment: "unsafeProcessBatch",
-    values: [BytesLike, BatchStruct]
-  ): string;
 
   decodeFunctionResult(
     functionFragment: "DOMAIN_SEPARATOR",
@@ -726,10 +458,6 @@ export interface DepositoryInterface extends Interface {
   decodeFunctionResult(functionFragment: "tokenToId", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "unpackTokenReference",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "unsafeProcessBatch",
     data: BytesLike
   ): Result;
 }
@@ -1293,12 +1021,6 @@ export interface Depository extends BaseContract {
     "view"
   >;
 
-  unsafeProcessBatch: TypedContractMethod<
-    [entity: BytesLike, batch: BatchStruct],
-    [boolean],
-    "nonpayable"
-  >;
-
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
   ): T;
@@ -1545,13 +1267,6 @@ export interface Depository extends BaseContract {
       }
     ],
     "view"
-  >;
-  getFunction(
-    nameOrSignature: "unsafeProcessBatch"
-  ): TypedContractMethod<
-    [entity: BytesLike, batch: BatchStruct],
-    [boolean],
-    "nonpayable"
   >;
 
   getEvent(

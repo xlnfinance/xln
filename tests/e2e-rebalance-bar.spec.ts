@@ -682,24 +682,23 @@ async function readPairState(page: Page, counterpartyId: string) {
       const isLeft = String(rep.entityId || '').toLowerCase() < String(counterpartyId).toLowerCase();
       const requested = acc.requestedRebalance?.get?.(1) || 0n;
       const history = Array.isArray(acc.frameHistory) ? acc.frameHistory : [];
+      const pendingTxs = Array.isArray(acc?.pendingFrame?.accountTxs) ? acc.pendingFrame.accountTxs : [];
+      const htlcFrames = [...history.slice(-80), ...(pendingTxs.length > 0 ? [{ accountTxs: pendingTxs }] : [])];
       const recentDirectPaymentDescriptions = history
         .slice(-40)
         .flatMap((frame: any) => (Array.isArray(frame?.accountTxs) ? frame.accountTxs : []))
         .filter((tx: any) => tx?.type === 'direct_payment')
         .map((tx: any) => String(tx?.data?.description || ''));
-      const recentHtlcHashlocks = history
-        .slice(-80)
+      const recentHtlcHashlocks = htlcFrames
         .flatMap((frame: any) => (Array.isArray(frame?.accountTxs) ? frame.accountTxs : []))
         .filter((tx: any) => tx?.type === 'htlc_lock' || tx?.type === 'htlc_resolve')
         .map((tx: any) => String(tx?.data?.hashlock || ''))
         .filter((hash: string) => hash.startsWith('0x') && hash.length > 10);
-      const recentHtlcResolveCount = history
-        .slice(-80)
+      const recentHtlcResolveCount = htlcFrames
         .flatMap((frame: any) => (Array.isArray(frame?.accountTxs) ? frame.accountTxs : []))
         .filter((tx: any) => tx?.type === 'htlc_resolve')
         .length;
-      const recentHtlcLockCount = history
-        .slice(-80)
+      const recentHtlcLockCount = htlcFrames
         .flatMap((frame: any) => (Array.isArray(frame?.accountTxs) ? frame.accountTxs : []))
         .filter((tx: any) => tx?.type === 'htlc_lock')
         .length;

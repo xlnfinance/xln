@@ -8,15 +8,21 @@ import { ethers } from 'ethers';
 import type { Provider, Signer } from 'ethers';
 
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types/index.ts';
-import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types/index.ts';
+import { Account__factory, Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types/index.ts';
 
 import type { BrowserVMState, JTx } from '../types';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, JTokenInfo, JReserveMint } from './types';
-import { computeAccountKey, entityIdToAddress, isCanonicalEvent, processEventBatch, type RawJEvent } from './helpers';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTokenInfo, JReserveMint } from './types';
+import {
+  buildExternalTokenToReserveBatch,
+  computeAccountKey,
+  entityIdToAddress,
+  isCanonicalEvent,
+  normalizeAdapterEvents,
+  processEventBatch,
+  toJEvent,
+  type RawJEvent,
+} from './helpers';
 import type { BrowserVMProvider } from './browservm-provider';
-
-// Re-export BrowserVMProvider for external use
-export { BrowserVMProvider } from './browservm-provider';
 
 export async function createBrowserVMAdapter(
   config: JAdapterConfig,
@@ -33,6 +39,9 @@ export async function createBrowserVMAdapter(
 
   // Get contract instances from browserVM
   // Use any cast to handle ethers version mismatch between root and jurisdictions
+  const account = addresses.account
+    ? Account__factory.connect(addresses.account, signer as any) as Account
+    : null;
   const depository = Depository__factory.connect(addresses.depository, signer as any) as Depository;
   const entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer as any) as EntityProvider;
   const deltaTransformer = addresses.deltaTransformer
@@ -48,13 +57,11 @@ export async function createBrowserVMAdapter(
 
   // Forward events from browserVM
   browserVM.onAny((event: any) => {
-    const jEvent: JEvent = {
-      name: event.name,
-      args: event.args ?? {},
-      blockNumber: event.blockNumber ?? 0,
-      blockHash: event.blockHash ?? '0x',
-      transactionHash: event.transactionHash ?? '0x',
-    };
+    const jEvent = toJEvent(event.name, event.args ?? {}, {
+      blockNumber: event.blockNumber,
+      blockHash: event.blockHash,
+      transactionHash: event.transactionHash,
+    });
     eventCallbacks.get(event.name)?.forEach(cb => cb(jEvent));
     anyCallbacks.forEach(cb => cb(jEvent));
   });
@@ -65,7 +72,12 @@ export async function createBrowserVMAdapter(
     provider,
     signer,
 
-    get account() { return null as unknown as Account; }, // BrowserVM doesn't expose Account library directly
+    get account() {
+      if (!account) {
+        throw new Error('BrowserVM adapter missing Account contract address');
+      }
+      return account;
+    },
     get depository() { return depository; },
     get entityProvider() { return entityProvider; },
     get deltaTransformer() { return deltaTransformer!; },
@@ -196,42 +208,7 @@ export async function createBrowserVMAdapter(
       return {
         txHash: '0x' + 'browservm'.padStart(64, '0'), // BrowserVM doesn't have real tx hashes
         blockNumber: Number(browserVM.getBlockNumber?.() ?? 0),
-        events: events.map((e: any) => ({
-          name: e.name,
-          args: e.args ?? {},
-          blockNumber: e.blockNumber ?? 0,
-          blockHash: e.blockHash ?? '0x',
-          transactionHash: e.transactionHash ?? '0x',
-        })),
-      };
-    },
-
-    async settle(
-      leftEntity: string,
-      rightEntity: string,
-      diffs: SettlementDiff[],
-      forgiveDebtsInTokenIds: number[] = [],
-      sig?: string
-    ): Promise<JTxReceipt> {
-      // BrowserVM settle handles both signed and no-op calls
-      // Ensure ondeltaDiff is set (default to 0n if not provided)
-      const normalizedDiffs = diffs.map(d => ({
-        tokenId: d.tokenId,
-        leftDiff: d.leftDiff,
-        rightDiff: d.rightDiff,
-        collateralDiff: d.collateralDiff,
-        ondeltaDiff: d.ondeltaDiff ?? 0n,
-      }));
-      const events = await browserVM.settle(
-        leftEntity,
-        rightEntity,
-        normalizedDiffs,
-        forgiveDebtsInTokenIds,
-        sig
-      );
-      return {
-        txHash: '0x' + 'browservm-settle'.padStart(64, '0'),
-        blockNumber: Number(browserVM.getBlockNumber?.() ?? 0),
+        events: normalizeAdapterEvents(events),
       };
     },
 
@@ -253,41 +230,16 @@ export async function createBrowserVMAdapter(
 
     async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
       const events = await browserVM.debugFundReserves(entityId, tokenId, amount);
-      return events.map((e: any) => ({
-        name: e.name,
-        args: e.args ?? {},
-        blockNumber: e.blockNumber ?? 0,
-        blockHash: e.blockHash ?? '0x',
-        transactionHash: e.transactionHash ?? '0x',
-      }));
+      return normalizeAdapterEvents(events);
     },
 
     async debugFundReservesBatch(mints: JReserveMint[]): Promise<JEvent[]> {
       const events: JEvent[] = [];
       for (const mint of mints) {
         const batchEvents = await browserVM.debugFundReserves(mint.entityId, mint.tokenId, mint.amount);
-        events.push(
-          ...batchEvents.map((e: any) => ({
-            name: e.name,
-            args: e.args ?? {},
-            blockNumber: e.blockNumber ?? 0,
-            blockHash: e.blockHash ?? '0x',
-            transactionHash: e.transactionHash ?? '0x',
-          })),
-        );
+        events.push(...normalizeAdapterEvents(batchEvents));
       }
       return events;
-    },
-
-    async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
-      const events = await browserVM.reserveToReserve(from, to, tokenId, amount);
-      return events.map((e: any) => ({
-        name: e.name,
-        args: e.args ?? {},
-        blockNumber: e.blockNumber ?? 0,
-        blockHash: e.blockHash ?? '0x',
-        transactionHash: e.transactionHash ?? '0x',
-      }));
     },
 
     async externalTokenToReserve(
@@ -310,18 +262,16 @@ export async function createBrowserVMAdapter(
           await browserVM.approveErc20(signerPrivateKey, tokenAddress, depositoryAddress, (2n ** 256n) - 1n);
         }
       }
-
-      if (!browserVM.externalTokenToReserve) {
-        throw new Error('BrowserVM externalTokenToReserve not available');
-      }
-      const events = await browserVM.externalTokenToReserve(signerPrivateKey, entityId, tokenAddress, amount, options);
-      return events.map((e: any) => ({
-        name: e.name,
-        args: e.args ?? {},
-        blockNumber: e.blockNumber ?? 0,
-        blockHash: e.blockHash ?? '0x',
-        transactionHash: e.transactionHash ?? '0x',
-      }));
+      const batch = buildExternalTokenToReserveBatch({
+        entityId,
+        tokenAddress,
+        amount,
+        tokenType,
+        externalTokenId: options?.externalTokenId ?? 0n,
+        internalTokenId: options?.internalTokenId ?? 0,
+      });
+      const events = await browserVM.processEntityBatch(entityId, batch, signerPrivateKey, signerPrivateKey);
+      return normalizeAdapterEvents(events);
     },
 
     // === High-level J-tx submission ===
@@ -379,7 +329,7 @@ export async function createBrowserVMAdapter(
           const batchHash = computeBatchHankoHash(chainId, depositoryAddr, encodedBatch, nextNonce);
 
           console.log(`🔐 [JAdapter:browservm] Local signing: entity=${normalizedId.slice(-4)} signer=${sid} nonce=${nextNonce} chainId=${chainId}`);
-          const { signHashesAsSingleEntity } = await import('../hanko-signing');
+          const { signHashesAsSingleEntity } = await import('../hanko/signing');
           const hankos = await signHashesAsSingleEntity(env, normalizedId, sid, [batchHash]);
           hankoData = hankos[0]!;
           if (!hankoData) {
@@ -412,13 +362,7 @@ export async function createBrowserVMAdapter(
             success: true,
             txHash: `0x${'browservm-batch'.padStart(64, '0')}`,
             blockNumber: Number((browserVM as any).getBlockNumber?.() ?? 0),
-            events: events.map((e: any) => ({
-              name: e.name,
-              args: e.args ?? {},
-              blockNumber: e.blockNumber ?? 0,
-              blockHash: e.blockHash ?? '0x',
-              transactionHash: e.transactionHash ?? '0x',
-            })),
+            events: normalizeAdapterEvents(events),
           };
         } catch (error) {
           if ((browserVM as any).endJurisdictionBlock) {
@@ -436,7 +380,7 @@ export async function createBrowserVMAdapter(
         try {
           const events = await browserVM.debugFundReserves(entityId, tokenId, amount);
           console.log(`✅ [JAdapter:browservm] Mint ok (${events.length} events)`);
-          return { success: true, events: events.map((e: any) => ({ name: e.name, args: e.args ?? {}, blockNumber: 0, blockHash: '0x', transactionHash: '0x' })) };
+          return { success: true, events: normalizeAdapterEvents(events) };
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           console.error(`❌ [JAdapter:browservm] Mint failed: ${msg}`);
@@ -487,6 +431,13 @@ export async function createBrowserVMAdapter(
       return browserVM.transferNative(signerPrivateKey, to, amount);
     },
 
+    async fundSignerWallet(address: string, amount?: bigint): Promise<void> {
+      if (!browserVM.fundSignerWallet) {
+        throw new Error('BrowserVM fundSignerWallet not available');
+      }
+      await browserVM.fundSignerWallet(address, amount);
+    },
+
     // === J-Watcher integration (uses shared event conversion from helpers.ts) ===
     startWatching(env: any): void {
       if (watcherUnsubscribe) {
@@ -532,6 +483,32 @@ export async function createBrowserVMAdapter(
 
     getBrowserVM(): BrowserVMProvider | null {
       return browserVM;
+    },
+
+    setQuietLogs(quiet: boolean): void {
+      browserVM.setQuietLogs?.(quiet);
+    },
+
+    registerEntityWallet(entityId: string, privateKey: string): void {
+      browserVM.registerEntityWallet?.(entityId, privateKey);
+    },
+
+    async captureStateRoot(): Promise<Uint8Array | null> {
+      if (!browserVM.captureStateRoot) return null;
+      return browserVM.captureStateRoot();
+    },
+
+    async syncRuntimeState(
+      accountPairs: Array<{ entityId: string; counterpartyId: string }>,
+      tokenIds: number[],
+    ): Promise<{
+      collaterals: Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>;
+      blockNumber: bigint;
+    } | null> {
+      if (!browserVM.syncAllCollaterals) return null;
+      const collaterals = await browserVM.syncAllCollaterals(accountPairs, tokenIds);
+      const blockNumber = BigInt(browserVM.getBlockHeight?.() ?? 0);
+      return { collaterals, blockNumber };
     },
 
     setBlockTimestamp(timestamp: number): void {

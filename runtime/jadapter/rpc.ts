@@ -23,11 +23,13 @@ import {
 } from '../../jurisdictions/typechain-types/index.ts';
 
 import type { BrowserVMState, JTx, Env } from '../types';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, BrowserVMProvider, JTokenInfo, JReserveMint } from './types';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, BrowserVMProvider, JTokenInfo, JReserveMint } from './types';
 import {
+  buildExternalTokenToReserveBatch,
   computeAccountKey,
   entityIdToAddress,
   getWatcherStartBlock,
+  parseReceiptLogsToJEvents,
   setupContractEventListeners,
   processEventBatch,
   type EventBatchCounter,
@@ -36,14 +38,9 @@ import {
 } from './helpers';
 import { CANONICAL_J_EVENTS } from './helpers';
 import { DEV_CHAIN_IDS } from './index';
-import {
-  batchAddReserveToReserve,
-  batchAddSettlement,
-  createEmptyBatch,
-  preflightBatchForE2,
-} from '../j-batch';
+import { preflightBatchForE2 } from '../j-batch';
 import { setDeltaTransformerAddress } from '../proof-builder';
-import { getEntityNonceAddress, prepareSignedBatch } from './batch-helpers';
+import { getEntityNonceAddress, prepareSignedBatch } from '../hanko/batch';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
@@ -177,27 +174,6 @@ export async function createRpcAdapter(
     return receipt;
   };
 
-  const parseDepositoryReceiptEvents = (receipt: { logs: Array<{ topics: readonly string[]; data: string }>; blockNumber: number; blockHash: string; hash: string }): JEvent[] => {
-    const events: JEvent[] = [];
-    for (const log of receipt.logs) {
-      try {
-        const parsed = depository.interface.parseLog({ topics: log.topics as string[], data: log.data });
-        if (parsed) {
-          events.push({
-            name: parsed.name,
-            args: Object.fromEntries(Object.entries(parsed.args)),
-            blockNumber: receipt.blockNumber,
-            blockHash: receipt.blockHash,
-            transactionHash: receipt.hash,
-          });
-        }
-      } catch {
-        // Ignore logs from other contracts.
-      }
-    }
-    return events;
-  };
-
   const getBatchSignerPrivateKey = (): string => {
     if (config.privateKey) return config.privateKey;
     const signerPrivateKey = (signer as ethers.Wallet | { privateKey?: string }).privateKey;
@@ -245,26 +221,7 @@ export async function createRpcAdapter(
       ...feeOverrides,
     });
     const receipt = await waitForReceipt(tx as any, 'processBatch');
-    const events = parseDepositoryReceiptEvents(receipt);
-
-    for (const log of receipt.logs) {
-      try {
-        const parsed = entityProvider.interface.parseLog(log);
-        if (parsed) {
-          events.push({
-            name: parsed.name,
-            args: Object.fromEntries(
-              parsed.fragment.inputs.map((input, i) => [input.name, parsed.args[i]]),
-            ),
-            blockNumber: receipt.blockNumber,
-            blockHash: receipt.blockHash,
-            transactionHash: receipt.hash,
-          });
-        }
-      } catch {
-        // skip non-EntityProvider logs
-      }
-    }
+    const events = parseReceiptLogsToJEvents(receipt, [depository, entityProvider]);
 
     return {
       txHash: receipt.hash,
@@ -834,50 +791,6 @@ export async function createRpcAdapter(
       };
     },
 
-    async settle(
-      leftEntity: string,
-      rightEntity: string,
-      diffs: SettlementDiff[],
-      forgiveDebtsInTokenIds: number[] = [],
-      sig?: string
-    ): Promise<JTxReceipt> {
-      const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0;
-      if (hasChanges && (!sig || sig === '0x')) {
-        throw new Error('Settlement signature required');
-      }
-      const finalSig = sig || '0x';
-
-      // Ensure ondeltaDiff is set (default to 0n if not provided)
-      const normalizedDiffs = diffs.map(d => ({
-        tokenId: d.tokenId,
-        leftDiff: d.leftDiff,
-        rightDiff: d.rightDiff,
-        collateralDiff: d.collateralDiff,
-        ondeltaDiff: d.ondeltaDiff ?? 0n,
-      }));
-      const accountInfo = await adapter.getAccountInfo(leftEntity, rightEntity);
-      const settlementNonce = Number(accountInfo.nonce + 1n);
-
-      const batch = createEmptyBatch();
-      batchAddSettlement(
-        { batch, jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0, status: 'empty' },
-        leftEntity,
-        rightEntity,
-        normalizedDiffs,
-        forgiveDebtsInTokenIds,
-        finalSig,
-        addresses.entityProvider,
-        '0x',
-        settlementNonce,
-      );
-      const receipt = await processSignedBatch(leftEntity, batch);
-
-      return {
-        txHash: receipt.txHash,
-        blockNumber: receipt.blockNumber,
-      };
-    },
-
     async registerNumberedEntity(boardHash: string): Promise<{ entityNumber: number; txHash: string }> {
       const tx = await entityProvider.registerNumberedEntity(boardHash, await buildFeeOverrides());
       const receipt = await waitForReceipt(tx as any, 'registerNumberedEntity');
@@ -932,7 +845,7 @@ export async function createRpcAdapter(
         // Use mintToReserve (renamed from debugFundReserves in Depository contract)
         const tx = await depository.mintToReserve(entityId, tokenId, amount, await buildFeeOverrides());
         const receipt = await waitForReceipt(tx as any, 'mintToReserve');
-        return parseDepositoryReceiptEvents(receipt);
+        return parseReceiptLogsToJEvents(receipt, [depository]);
       }
       // Real networks: must use real deposits
       throw new Error('debugFundReserves only available on configured dev chains - use real token deposits');
@@ -1004,7 +917,7 @@ export async function createRpcAdapter(
         const tx = await batchMint.mintToReserveBatch(payload, await buildFeeOverrides());
         console.log(`[JAdapter:rpc] mintToReserveBatch tx=${tx.hash} count=${mints.length}`);
         const receipt = await waitForReceipt(tx as any, 'mintToReserveBatch');
-        return parseDepositoryReceiptEvents(receipt);
+        return parseReceiptLogsToJEvents(receipt, [depository]);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(
@@ -1015,18 +928,6 @@ export async function createRpcAdapter(
         );
         throw error;
       }
-    },
-
-    async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
-      const batch = createEmptyBatch();
-      batchAddReserveToReserve(
-        { batch, jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0, status: 'empty' },
-        to,
-        tokenId,
-        amount,
-      );
-      const receipt = await processSignedBatch(from, batch);
-      return receipt.events;
     },
 
     async externalTokenToReserve(
@@ -1104,14 +1005,13 @@ export async function createRpcAdapter(
         console.log(`[JAdapter:rpc] Approved exact allowance=${amount} for Depository`);
       }
 
-      const batch = createEmptyBatch();
-      batch.externalTokenToReserve.push({
-        entity: entityId,
-        contractAddress: tokenAddress,
-        externalTokenId,
-        tokenType,
-        internalTokenId,
+      const batch = buildExternalTokenToReserveBatch({
+        entityId,
+        tokenAddress,
         amount,
+        tokenType,
+        externalTokenId,
+        internalTokenId,
       });
       const receipt = await processSignedBatch(entityId, batch, signerWallet as any, signerWallet.privateKey);
 
@@ -1267,7 +1167,7 @@ export async function createRpcAdapter(
             const batchHash = computeBatchHankoHash(BigInt(config.chainId), depositoryAddr, encodedBatch, nextNonce);
 
             console.log(`🔐 [JAdapter:rpc] Local signing: entity=${normalizedId.slice(-4)} nonce=${nextNonce}`);
-            const { signHashesAsSingleEntity } = await import('../hanko-signing');
+            const { signHashesAsSingleEntity } = await import('../hanko/signing');
             const hankos = await signHashesAsSingleEntity(env, normalizedId, sid, [batchHash]);
             hankoData = hankos[0]!;
             if (!hankoData) {
@@ -1277,7 +1177,7 @@ export async function createRpcAdapter(
 
           let disputeStartDebug: Array<Record<string, unknown>> = [];
           if ((jTx.data.batch.disputeStarts?.length || 0) > 0) {
-            const { inspectHankoForHash } = await import('../hanko-signing');
+            const { inspectHankoForHash } = await import('../hanko/signing');
             disputeStartDebug = await Promise.all(jTx.data.batch.disputeStarts.map(async (start) => {
               const accountKey = computeAccountKey(normalizedId, start.counterentity);
               const disputeHash = ethers.keccak256(
@@ -1636,7 +1536,23 @@ export async function createRpcAdapter(
     },
 
     setBlockTimestamp(_timestamp: number): void {
-      console.warn('[JAdapter:rpc] setBlockTimestamp not supported in RPC mode');
+      // RPC mode follows chain timestamps from mined blocks; runtime logical time is separate.
+    },
+
+    setQuietLogs(_quiet: boolean): void {
+      // no-op in RPC mode
+    },
+
+    registerEntityWallet(_entityId: string, _privateKey: string): void {
+      // no-op in RPC mode
+    },
+
+    async captureStateRoot(): Promise<Uint8Array | null> {
+      return null;
+    },
+
+    async syncRuntimeState(): Promise<null> {
+      return null;
     },
 
     async close(): Promise<void> {

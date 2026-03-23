@@ -307,7 +307,7 @@ export function getCachedSignerAddress(signerId: string): string | null {
   return address;
 }
 
-// Export for hanko-signing.ts
+// Export for runtime/hanko/signing.ts
 export function getSignerPrivateKey(env: any, signerId: string): Uint8Array {
   const key = signerId.toLowerCase();
   const exactRegistered = getExactRegisteredSignerPrivateKey(key);

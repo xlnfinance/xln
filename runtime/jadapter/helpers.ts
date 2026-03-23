@@ -8,6 +8,7 @@ import { ethers } from 'ethers';
 import type { Depository, EntityProvider } from '../../jurisdictions/typechain-types/index.ts';
 import type { JEvent, JEventCallback } from './types';
 import type { Env } from '../types';
+import { createEmptyBatch, type JBatch } from '../j-batch';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CANONICAL J-EVENTS (Single Source of Truth — must match Depository.sol)
@@ -34,6 +35,69 @@ export function entityIdToAddress(entityId: string): string {
   return ethers.getAddress('0x' + normalized.slice(-40));
 }
 
+const buildParsedLogArgs = (parsed: any): Record<string, unknown> => Object.fromEntries(
+  parsed.fragment.inputs.map((input: { name: string }, index: number) => [input.name, parsed.args[index]]),
+);
+
+export const toJEvent = (name: string, args: Record<string, unknown> | undefined, meta?: { blockNumber?: number; blockHash?: string; transactionHash?: string }): JEvent => ({
+  name,
+  args: args ?? {},
+  blockNumber: meta?.blockNumber ?? 0,
+  blockHash: meta?.blockHash ?? '0x',
+  transactionHash: meta?.transactionHash ?? '0x',
+});
+
+export const normalizeAdapterEvents = (events: Array<{
+  name: string; args?: Record<string, unknown>; blockNumber?: number; blockHash?: string; transactionHash?: string;
+}>, fallbackMeta?: { blockNumber?: number; blockHash?: string; transactionHash?: string }): JEvent[] =>
+  events.map((event) =>
+    toJEvent(event.name, event.args, {
+      blockNumber: event.blockNumber ?? fallbackMeta?.blockNumber,
+      blockHash: event.blockHash ?? fallbackMeta?.blockHash,
+      transactionHash: event.transactionHash ?? fallbackMeta?.transactionHash,
+    }),
+  );
+
+export const parseReceiptLogsToJEvents = (receipt: {
+  logs: Array<{ topics: readonly string[]; data: string }>; blockNumber: number; blockHash: string; hash: string;
+}, carriers: Array<{ interface: ethers.Interface }>): JEvent[] => {
+  const events: JEvent[] = [];
+  for (const log of receipt.logs) {
+    for (const carrier of carriers) {
+      try {
+        const parsed = carrier.interface.parseLog({ topics: [...log.topics], data: log.data });
+        if (!parsed) continue;
+        events.push(
+          toJEvent(parsed.name, buildParsedLogArgs(parsed), {
+            blockNumber: receipt.blockNumber,
+            blockHash: receipt.blockHash,
+            transactionHash: receipt.hash,
+          }),
+        );
+        break;
+      } catch {
+        // Ignore logs belonging to another contract interface.
+      }
+    }
+  }
+  return events;
+};
+
+export const buildExternalTokenToReserveBatch = (params: {
+  entityId: string; tokenAddress: string; amount: bigint; tokenType?: number; externalTokenId?: bigint; internalTokenId?: number;
+}): JBatch => {
+  const batch = createEmptyBatch();
+  batch.externalTokenToReserve.push({
+    entity: params.entityId,
+    contractAddress: params.tokenAddress,
+    externalTokenId: params.externalTokenId ?? 0n,
+    tokenType: params.tokenType ?? 0,
+    internalTokenId: params.internalTokenId ?? 0,
+    amount: params.amount,
+  });
+  return batch;
+};
+
 export function setupContractEventListeners(
   depository: Depository,
   entityProvider: EntityProvider,
@@ -59,13 +123,15 @@ export function setupContractEventListeners(
   for (const eventName of depositoryEvents) {
     (depository as unknown as ContractEventSource).on(eventName, (...args: unknown[]) => {
       const event = readEvent(args);
-      const jEvent: JEvent = {
-        name: eventName,
-        args: event?.args ? Object.fromEntries(event.args.entries()) : {},
-        blockNumber: event?.blockNumber ?? 0,
-        blockHash: event?.blockHash ?? '0x',
-        transactionHash: event?.transactionHash ?? '0x',
-      };
+      const jEvent = toJEvent(
+        eventName,
+        event?.args ? Object.fromEntries(event.args.entries()) : {},
+        {
+          blockNumber: event?.blockNumber,
+          blockHash: event?.blockHash,
+          transactionHash: event?.transactionHash,
+        },
+      );
 
       eventCallbacks.get(eventName)?.forEach(cb => cb(jEvent));
       anyCallbacks.forEach(cb => cb(jEvent));
@@ -82,13 +148,15 @@ export function setupContractEventListeners(
   for (const eventName of entityProviderEvents) {
     (entityProvider as unknown as ContractEventSource).on(eventName, (...args: unknown[]) => {
       const event = readEvent(args);
-      const jEvent: JEvent = {
-        name: eventName,
-        args: event?.args ? Object.fromEntries(event.args.entries()) : {},
-        blockNumber: event?.blockNumber ?? 0,
-        blockHash: event?.blockHash ?? '0x',
-        transactionHash: event?.transactionHash ?? '0x',
-      };
+      const jEvent = toJEvent(
+        eventName,
+        event?.args ? Object.fromEntries(event.args.entries()) : {},
+        {
+          blockNumber: event?.blockNumber,
+          blockHash: event?.blockHash,
+          transactionHash: event?.transactionHash,
+        },
+      );
 
       eventCallbacks.get(eventName)?.forEach(cb => cb(jEvent));
       anyCallbacks.forEach(cb => cb(jEvent));

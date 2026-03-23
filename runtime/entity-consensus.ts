@@ -415,21 +415,14 @@ export const applyEntityInput = async (
     if (HEAVY_LOGS) console.log(`🔍 INPUT-PRECOMMITS: Received hashPrecommits from: ${precommitSigners.join(', ')}`);
   }
 
-  const replayMode = (env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true;
   // SECURITY: Validate all inputs
   if (!validateEntityInput(entityInput)) {
     const detail = `entityId=${entityInput.entityId} txs=${entityInput.entityTxs?.map(tx => tx.type).join(',') || 'none'}`;
     log.error(`❌ Invalid input for ${entityInput.entityId}`);
-    if (replayMode) {
-      throw new Error(`REPLAY_INVALID_ENTITY_INPUT: ${detail}`);
-    }
     return { newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
   }
   if (!validateEntityReplica(workingReplica)) {
     log.error(`❌ Invalid replica state for ${workingReplica.entityId}:${workingReplica.signerId}`);
-    if (replayMode) {
-      throw new Error(`REPLAY_INVALID_ENTITY_REPLICA: ${workingReplica.entityId}:${workingReplica.signerId}`);
-    }
     return { newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
   }
 
@@ -459,9 +452,6 @@ export const applyEntityInput = async (
 
   // Add transactions to mempool (mutable for performance)
   if (entityInput.entityTxs?.length) {
-    if (replayMode) {
-      console.log(`[REPLAY] applyEntityInput entityId=${entityInput.entityId} txs=${entityInput.entityTxs.map(tx => tx.type).join(',')}`);
-    }
     // DEBUG: Track vote transactions specifically
     const voteTransactions = entityInput.entityTxs.filter(tx => tx.type === 'vote');
     if (voteTransactions.length > 0) {
@@ -553,16 +543,6 @@ export const applyEntityInput = async (
       }
       console.log(`✅ All ${frameCollectedSigs.size} signatures validated for frame ${entityInput.proposedFrame.hash.slice(0,10)}`);
 
-      // Emit frame commit event
-      env.emit('EntityFrameCommitted', {
-        entityId: entityInput.entityId,
-        signerId: workingReplica.signerId,
-        height: workingReplica.state.height + 1,
-        frameHash: entityInput.proposedFrame.hash,
-        txCount: entityInput.proposedFrame.txs.length,
-        signatures: frameCollectedSigs.size,
-      });
-
       // Apply the committed frame
       // CATCH-UP FIX: Use proposedFrame.height (not +1 from local) to handle offline validators
       // If validator missed frames (was offline), this brings it to the correct height
@@ -625,10 +605,14 @@ export const applyEntityInput = async (
     // ═══════════════════════════════════════════════════════════════════════════
     // VALIDATOR HASH VERIFICATION (BFT hardening)
     // ═══════════════════════════════════════════════════════════════════════════
-    // Apply txs locally, compute expected hash, reject if mismatch
-    // DETERMINISM: verifyOnly=true skips account frame proposals (timestamp-dependent side effects)
-    // DETERMINISM: Pass proposedFrame.newState.timestamp so validator uses same timestamp as proposer
-    const { newState: validatorComputedState } = await applyEntityFrame(env, workingReplica.state, proposedFrame.txs, true, proposedFrame.newState.timestamp);
+    // Apply txs locally through the exact same frame-building path as the proposer.
+    // The timestamp comes from the proposed frame, so account proposals stay deterministic.
+    const { newState: validatorComputedState } = await applyEntityFrame(
+      env,
+      workingReplica.state,
+      proposedFrame.txs,
+      proposedFrame.newState.timestamp,
+    );
     const validatorNewState = {
       ...validatorComputedState,
       entityId: workingReplica.state.entityId,
@@ -765,7 +749,7 @@ export const applyEntityInput = async (
       // Step 1: Merge collected signatures into quorum hankos
       const committedHankos: HankoString[] = [];
       if (proposal.hashesToSign && proposal.collectedSigs) {
-        const { buildQuorumHanko } = await import('./hanko-signing');
+        const { buildQuorumHanko } = await import('./hanko/signing');
         for (let i = 0; i < proposal.hashesToSign.length; i++) {
           const hashInfo = proposal.hashesToSign[i];
           if (!hashInfo) continue; // Skip if undefined (shouldn't happen)
@@ -944,8 +928,11 @@ export const applyEntityInput = async (
     }
   }
 
-  // Auto-propose logic: ONLY proposer can propose (BFT requirement)
-  if (workingReplica.isProposer && workingReplica.mempool.length > 0 && !workingReplica.proposal) {
+  const isSingleSigner =
+    workingReplica.state.config.validators.length === 1 && workingReplica.state.config.threshold === BigInt(1);
+
+  // Single-signer entities must replay through the exact same direct-execution path as live mode.
+  if (workingReplica.isProposer && workingReplica.mempool.length > 0 && !workingReplica.proposal && isSingleSigner) {
     if (!quietRuntimeLogs) {
       console.log(`🔥 ALICE-PROPOSES: Alice auto-propose triggered!`);
       console.log(
@@ -957,108 +944,125 @@ export const applyEntityInput = async (
       );
     }
 
-    // Check if this is a single signer entity (threshold = 1, only 1 validator)
-    const isSingleSigner =
-      workingReplica.state.config.validators.length === 1 && workingReplica.state.config.threshold === BigInt(1);
+    console.log(`🚀 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
+    // For single signer entities, directly apply transactions without consensus
+    // DETERMINISM: Proposer passes env.timestamp (their local time when creating the frame)
+    const {
+      newState: newEntityState,
+      outputs: frameOutputs,
+      jOutputs: frameJOutputs,
+      collectedHashes,
+    } = await applyEntityFrame(
+      env,
+      workingReplica.state,
+      workingReplica.mempool,
+      env.timestamp,
+    );
+    const newHeight = workingReplica.state.height + 1;
+    const newTimestamp = env.timestamp;
 
-    if (isSingleSigner) {
-      console.log(`🚀 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
-      // For single signer entities, directly apply transactions without consensus
-      // DETERMINISM: Proposer passes env.timestamp (their local time when creating the frame)
-      const {
-        newState: newEntityState,
-        outputs: frameOutputs,
-        jOutputs: frameJOutputs,
-        collectedHashes,
-      } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool, false, env.timestamp);
-      const newHeight = workingReplica.state.height + 1;
-      const newTimestamp = env.timestamp;
+    // Compute frame hash for chain linkage (even single-signer needs deterministic state tracking)
+    const prevFrameHash = getPrevFrameHash(workingReplica.state);
+    const singleSignerNewState = {
+      ...newEntityState,
+      entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId
+      height: newHeight,
+      timestamp: newTimestamp,
+    };
+    const singleSignerFrameHash = await createEntityFrameHash(
+      prevFrameHash,
+      newHeight,
+      newTimestamp,
+      workingReplica.mempool,
+      singleSignerNewState
+    );
 
-      // Compute frame hash for chain linkage (even single-signer needs deterministic state tracking)
-      const prevFrameHash = getPrevFrameHash(workingReplica.state);
-      const singleSignerNewState = {
-        ...newEntityState,
-        entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId
-        height: newHeight,
-        timestamp: newTimestamp,
-      };
-      const singleSignerFrameHash = await createEntityFrameHash(
-        prevFrameHash,
-        newHeight,
-        newTimestamp,
-        workingReplica.mempool,
-        singleSignerNewState
+    const entityFrameHashToSign: import('./types').HashToSign = {
+      hash: singleSignerFrameHash,
+      type: 'entityFrame',
+      context: `entity:${workingReplica.state.entityId.slice(-4)}:frame:${newHeight}`,
+    };
+    const seenHashes = new Set<string>([singleSignerFrameHash]);
+    const additionalHashesToSign: import('./types').HashToSign[] = [];
+    for (const hashInfo of collectedHashes || []) {
+      if (seenHashes.has(hashInfo.hash)) continue;
+      seenHashes.add(hashInfo.hash);
+      additionalHashesToSign.push({
+        hash: hashInfo.hash,
+        type: hashInfo.type as import('./types').HashType,
+        context: hashInfo.context,
+      });
+    }
+    additionalHashesToSign.sort((a, b) => a.hash.localeCompare(b.hash));
+    const hashesToSign: import('./types').HashToSign[] = [entityFrameHashToSign, ...additionalHashesToSign];
+
+    const { signHashesAsSingleEntity } = await import('./hanko/signing');
+    const hankos = await signHashesAsSingleEntity(
+      env,
+      workingReplica.state.entityId,
+      workingReplica.signerId,
+      hashesToSign.map((hashInfo) => hashInfo.hash),
+    );
+
+    if (!workingReplica.hankoWitness) {
+      workingReplica.hankoWitness = new Map();
+    }
+    for (let i = 0; i < hashesToSign.length; i++) {
+      const hashInfo = hashesToSign[i];
+      const hanko = hankos[i];
+      if (!hashInfo || !hanko) continue;
+      workingReplica.hankoWitness.set(hashInfo.hash, {
+        hanko,
+        type: hashInfo.type,
+        entityHeight: newHeight,
+        createdAt: newTimestamp,
+      });
+    }
+    const attachedHankos = attachHankoWitnessToOutputs(
+      frameOutputs,
+      frameJOutputs,
+      workingReplica.hankoWitness as Map<string, HankoWitnessEntry>,
+      newHeight,
+    );
+    if (attachedHankos > 0) {
+      console.log(`🔐 SINGLE-SIGNER: Attached ${attachedHankos} hankos to outputs`);
+    }
+
+    workingReplica.state = {
+      ...singleSignerNewState,
+      prevFrameHash: singleSignerFrameHash, // Chain linkage
+    };
+
+    // Add any outputs generated by entity transactions to the outbox
+    entityOutbox.push(...frameOutputs);
+    jOutbox.push(...frameJOutputs); // CRITICAL: Collect J-outputs!
+
+    // Clear mempool after direct application
+    workingReplica.mempool.length = 0;
+
+    if (DEBUG)
+      console.log(
+        `    ⚡ Single signer entity: transactions applied directly, height: ${workingReplica.state.height}`,
       );
+    console.log(`🔥 SINGLE-SIGNER RETURN: entityOutbox=${entityOutbox.length}, jOutbox=${jOutbox.length}, frameHash=${singleSignerFrameHash.slice(0, 20)}...`);
+    return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica }; // Skip the full consensus process
+  }
 
-      const entityFrameHashToSign: import('./types').HashToSign = {
-        hash: singleSignerFrameHash,
-        type: 'entityFrame',
-        context: `entity:${workingReplica.state.entityId.slice(-4)}:frame:${newHeight}`,
-      };
-      const seenHashes = new Set<string>([singleSignerFrameHash]);
-      const additionalHashesToSign: import('./types').HashToSign[] = [];
-      for (const hashInfo of collectedHashes || []) {
-        if (seenHashes.has(hashInfo.hash)) continue;
-        seenHashes.add(hashInfo.hash);
-        additionalHashesToSign.push({
-          hash: hashInfo.hash,
-          type: hashInfo.type as import('./types').HashType,
-          context: hashInfo.context,
-        });
-      }
-      additionalHashesToSign.sort((a, b) => a.hash.localeCompare(b.hash));
-      const hashesToSign: import('./types').HashToSign[] = [entityFrameHashToSign, ...additionalHashesToSign];
-
-      const { signHashesAsSingleEntity } = await import('./hanko-signing');
-      const hankos = await signHashesAsSingleEntity(
-        env,
-        workingReplica.state.entityId,
-        workingReplica.signerId,
-        hashesToSign.map((hashInfo) => hashInfo.hash),
+  // Auto-propose logic: ONLY proposer can propose (BFT requirement)
+  if (
+    workingReplica.isProposer &&
+    workingReplica.mempool.length > 0 &&
+    !workingReplica.proposal
+  ) {
+    if (!quietRuntimeLogs) {
+      console.log(`🔥 ALICE-PROPOSES: Alice auto-propose triggered!`);
+      console.log(
+        `🔥 ALICE-PROPOSES: mempool=${workingReplica.mempool.length}, isProposer=${workingReplica.isProposer}, hasProposal=${!!workingReplica.proposal}`,
       );
-
-      if (!workingReplica.hankoWitness) {
-        workingReplica.hankoWitness = new Map();
-      }
-      for (let i = 0; i < hashesToSign.length; i++) {
-        const hashInfo = hashesToSign[i];
-        const hanko = hankos[i];
-        if (!hashInfo || !hanko) continue;
-        workingReplica.hankoWitness.set(hashInfo.hash, {
-          hanko,
-          type: hashInfo.type,
-          entityHeight: newHeight,
-          createdAt: newTimestamp,
-        });
-      }
-      const attachedHankos = attachHankoWitnessToOutputs(
-        frameOutputs,
-        frameJOutputs,
-        workingReplica.hankoWitness as Map<string, HankoWitnessEntry>,
-        newHeight,
+      console.log(
+        `🔥 ALICE-PROPOSES: Mempool transaction types:`,
+        workingReplica.mempool.map(tx => tx.type),
       );
-      if (attachedHankos > 0) {
-        console.log(`🔐 SINGLE-SIGNER: Attached ${attachedHankos} hankos to outputs`);
-      }
-
-      workingReplica.state = {
-        ...singleSignerNewState,
-        prevFrameHash: singleSignerFrameHash, // Chain linkage
-      };
-
-      // Add any outputs generated by entity transactions to the outbox
-      entityOutbox.push(...frameOutputs);
-      jOutbox.push(...frameJOutputs); // CRITICAL: Collect J-outputs!
-
-      // Clear mempool after direct application
-      workingReplica.mempool.length = 0;
-
-      if (DEBUG)
-        console.log(
-          `    ⚡ Single signer entity: transactions applied directly, height: ${workingReplica.state.height}`,
-        );
-      console.log(`🔥 SINGLE-SIGNER RETURN: entityOutbox=${entityOutbox.length}, jOutbox=${jOutbox.length}, frameHash=${singleSignerFrameHash.slice(0, 20)}...`);
-      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica }; // Skip the full consensus process
     }
 
     if (DEBUG)
@@ -1067,7 +1071,13 @@ export const applyEntityInput = async (
       );
     // Compute new state once during proposal (outputs stored for commit-time hanko attachment)
     // DETERMINISM: Proposer passes env.timestamp (their local time when creating the frame)
-    const { newState: newEntityState, deterministicState: proposerDeterministicState, outputs: proposalOutputs, jOutputs: proposalJOutputs, collectedHashes } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool, false, env.timestamp);
+    const {
+      newState: newEntityState,
+      deterministicState: proposerDeterministicState,
+      outputs: proposalOutputs,
+      jOutputs: proposalJOutputs,
+      collectedHashes,
+    } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool, env.timestamp);
 
     // CRITICAL: proposalOutputs are stored in the proposal, NOT pushed to entityOutbox yet.
     // At commit time, we use these stored outputs and attach hankos.
@@ -1097,8 +1107,8 @@ export const applyEntityInput = async (
     // ═══════════════════════════════════════════════════════════════════════════
     // CRYPTOGRAPHIC FRAME HASH (replaces weak placeholder)
     // ═══════════════════════════════════════════════════════════════════════════
-    // Hash from deterministicState (before account proposals) so validators can verify
-    // Validators apply txs with verifyOnly=true → get same deterministicState → same hash
+    // Hash from deterministicState (before account proposals) so validators can verify.
+    // Both proposer and validator now derive it through the same applyEntityFrame path.
     const prevFrameHash = getPrevFrameHash(workingReplica.state);
     const frameHash = await createEntityFrameHash(
       prevFrameHash,
@@ -1221,11 +1231,6 @@ export const applyEntityFrame = async (
   env: Env,
   entityState: EntityState,
   entityTxs: EntityTx[],
-  // DETERMINISM: Validators must NOT propose account frames during verification.
-  // Account frame proposals use env.timestamp which differs per-tick, causing
-  // non-deterministic stateHash and entity frame hash mismatch.
-  // Only the proposer (verifyOnly=false) proposes account frames.
-  verifyOnly: boolean = false,
   // DETERMINISM: Validators pass proposedFrame.newState.timestamp to match proposer's lockIds/timelocks.
   // Proposers pass env.timestamp (their local time when creating the frame).
   frameTimestamp?: number,
@@ -1267,11 +1272,6 @@ export const applyEntityFrame = async (
   // Reordering batched txs can change bilateral account state transitions
   // (e.g., openAccount + accountInput ACK in same frame).
   for (const entityTx of entityTxs) {
-    if ((env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true) {
-      console.log(
-        `[REPLAY][E-FRAME] entity=${currentEntityState.entityId.slice(-8)} txType=${entityTx.type}`
-      );
-    }
     const {
       newState,
       outputs,
@@ -1525,13 +1525,6 @@ export const applyEntityFrame = async (
   const deterministicState = cloneEntityState(currentEntityState);
 
   // AUTO-PROPOSE: Propose account frames for touched accounts (Channel.ts pattern)
-  // DETERMINISM: Validators skip account frame proposals during verification.
-  // Account frame proposals use env.timestamp which differs per-tick.
-  // Only the proposer generates proposals; validators just verify the entity state.
-  if (verifyOnly) {
-    return { newState: currentEntityState, deterministicState, outputs: allOutputs, jOutputs: allJOutputs, collectedHashes: [] };
-  }
-
   const { proposeAccountFrame } = await import('./account-consensus');
 
   // CRITICAL: Deterministic ordering

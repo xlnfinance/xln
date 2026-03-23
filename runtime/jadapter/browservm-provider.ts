@@ -2,7 +2,7 @@
  * BrowserVMProvider - In-browser EVM using @ethereumjs/vm
  * Self-contained environment with Depository.sol
  *
- * Uses ethers.js Interface for ABI encoding - same pattern as mainnet evm.ts
+ * Uses ethers.js Interface for ABI encoding - same pattern as the RPC adapter path
  * This ensures browserVM calls are identical to real blockchain calls.
  *
  * @license AGPL-3.0
@@ -28,7 +28,8 @@ import { safeStringify } from '../serialization-utils.js';
 import { deriveSignerKeySync, getCachedSignerPrivateKey } from '../account-crypto.js';
 import { isLeftEntity, normalizeEntityId } from '../entity-id-utils';
 import { batchAddReserveToReserve, batchAddSettlement, createEmptyBatch } from '../j-batch';
-import { buildSingleSignerHanko, prepareSignedBatch } from './batch-helpers';
+import { buildExternalTokenToReserveBatch } from './helpers';
+import { buildSingleSignerHanko, prepareSignedBatch } from '../hanko/batch';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, DEFAULT_SIGNER_FAUCET, TOKEN_REGISTRATION_AMOUNT } from './default-tokens';
 
 const BLOCK_GAS_LIMIT = 200_000_000n; // Simnet headroom for large deploys/batches
@@ -573,18 +574,13 @@ export class BrowserVMProvider {
       internalTokenId?: number;
     }
   ): Promise<EVMEvent[]> {
-    const tokenType = options?.tokenType ?? 0;
-    const externalTokenIdRaw = options?.externalTokenId ?? 0n;
-    const externalTokenId = typeof externalTokenIdRaw === 'bigint' ? externalTokenIdRaw : BigInt(externalTokenIdRaw);
-    const internalTokenId = options?.internalTokenId ?? 0;
-    const batch = createEmptyBatch();
-    batch.externalTokenToReserve.push({
-      entity: entityId,
-      contractAddress: tokenAddress,
-      externalTokenId,
-      tokenType,
-      internalTokenId,
+    const batch = buildExternalTokenToReserveBatch({
+      entityId,
+      tokenAddress,
       amount,
+      tokenType: options?.tokenType ?? 0,
+      externalTokenId: options?.externalTokenId ?? 0n,
+      internalTokenId: options?.internalTokenId ?? 0,
     });
     return this.processEntityBatch(entityId, batch, privKey, privKey);
   }
@@ -826,22 +822,6 @@ export class BrowserVMProvider {
     console.log(`[BrowserVM] Default dispute delay set to ${delayBlocks} blocks`);
   }
 
-  /** Execute R2R transfer - emits ReserveUpdated events */
-  async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<EVMEvent[]> {
-    if (!this.depositoryAddress || !this.depositoryInterface) {
-      throw new Error('Depository not deployed');
-    }
-    const batch = createEmptyBatch();
-    batchAddReserveToReserve(
-      { batch, jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0, status: 'empty' },
-      to,
-      tokenId,
-      amount,
-    );
-    const signerWallet = this.getSigningWallet(from);
-    return this.processEntityBatch(from, batch, ethers.getBytes(signerWallet.privateKey));
-  }
-
   /** Get contract address */
   getAccountAddress(): string {
     return this.accountAddress?.toString() || '0x0';
@@ -1039,10 +1019,6 @@ export class BrowserVMProvider {
       normalized.startsWith('0x0000000000000000000000000000000000000000000000000000');
   }
 
-  private buildSingleSignerHanko(entityId: string, hash: string, wallet: ethers.Wallet): string {
-    return buildSingleSignerHanko(entityId, hash, wallet.privateKey);
-  }
-
   /**
    * Register an existing wallet for an entityId.
    * Use when entityId was created externally but you have the key.
@@ -1117,7 +1093,7 @@ export class BrowserVMProvider {
     console.log(`  MessageType value: ${BrowserVMProvider.MessageType.CooperativeUpdate}`);
 
     const counterpartyWallet = this.getSigningWallet(counterpartyEntityId);
-    const hankoEncoded = this.buildSingleSignerHanko(counterpartyEntityId, hash, counterpartyWallet);
+    const hankoEncoded = buildSingleSignerHanko(counterpartyEntityId, hash, counterpartyWallet.privateKey);
     console.log(`[BrowserVM] Built Hanko signature for entity ${counterpartyEntityId.slice(0, 10)}... (signer=${counterpartyWallet.address.slice(0, 10)}...)`);
     return hankoEncoded;
   }
@@ -1145,7 +1121,7 @@ export class BrowserVMProvider {
 
     const hash = ethers.keccak256(encodedMsg);
     const counterpartyWallet = this.getSigningWallet(counterpartyEntityId);
-    return this.buildSingleSignerHanko(counterpartyEntityId, hash, counterpartyWallet);
+    return buildSingleSignerHanko(counterpartyEntityId, hash, counterpartyWallet.privateKey);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1354,7 +1330,7 @@ export class BrowserVMProvider {
     return events;
   }
 
-  private async processEntityBatch(
+  async processEntityBatch(
     entityId: string,
     batch: import('../j-batch').JBatch,
     hankoPrivKey: Uint8Array,

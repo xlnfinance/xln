@@ -22,7 +22,7 @@ import type {
   Delta,
   EntityReplica,
 } from './types';
-import { cloneAccountMachine, getAccountPerspective } from './state-helpers';
+import { cloneAccountFrame, cloneAccountMachine, getAccountPerspective } from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
 import { cryptoHash as hash, formatEntityId, HEAVY_LOGS } from './utils';
@@ -30,7 +30,6 @@ import { logError } from './logger';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
-import type { Profile } from './networking/gossip';
 // NOTE: Settlements now use SettlementWorkspace flow (see entity-tx/handlers/settle.ts)
 
 // Removed createValidAccountSnapshot - using simplified AccountSnapshot interface
@@ -208,11 +207,6 @@ async function runPostFrameAutoRebalanceCheck(
     const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
     const counterpartyReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === counterpartyEntityId);
     const ourIsHub = !!ourReplica?.state?.hubRebalanceConfig;
-    const counterpartyIdLower = String(counterpartyEntityId || '').toLowerCase();
-    const counterpartyProfile = env.gossip?.getProfiles?.().find(
-      (profile: Profile) => profile.entityId.toLowerCase() === counterpartyIdLower,
-    );
-
     const emitSkip = (reason: string) => {
       console.log(
         `ℹ️ AUTO-REBALANCE: skipped (${reason}) after frame ${frameHeight} ` +
@@ -260,23 +254,19 @@ async function runPostFrameAutoRebalanceCheck(
     const baseFee =
       accountPolicy?.baseFee ??
       parseBigIntMaybe(hubConfig?.rebalanceBaseFee) ??
-      parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceBaseFee) ??
       DEFAULT_REBALANCE_BASE_FEE;
     const liquidityFeeBps =
       accountPolicy?.liquidityFeeBps ??
       parseBigIntMaybe(hubConfig?.rebalanceLiquidityFeeBps) ??
-      parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceLiquidityFeeBps) ??
       parseBigIntMaybe(hubConfig?.minFeeBps) ??
       DEFAULT_REBALANCE_LIQUIDITY_FEE_BPS;
     const gasFee =
       accountPolicy?.gasFee ??
       parseBigIntMaybe(hubConfig?.rebalanceGasFee) ??
-      parseBigIntMaybe(counterpartyProfile?.metadata?.rebalanceGasFee) ??
       DEFAULT_REBALANCE_GAS_FEE;
     const policyVersion =
       accountPolicy?.policyVersion ??
       parseNumberMaybe(hubConfig?.policyVersion) ??
-      parseNumberMaybe(counterpartyProfile?.metadata?.policyVersion) ??
       DEFAULT_REBALANCE_POLICY_VERSION;
 
     const rebalanceTxs = checkAutoRebalance(accountMachine, ourEntityId, counterpartyEntityId, {
@@ -770,7 +760,7 @@ export async function proposeAccountFrame(
   }
 
   // Build hanko for account frame
-  const { signHashesAsSingleEntity } = await import('./hanko-signing');
+  const { signHashesAsSingleEntity } = await import('./hanko/signing');
   // Sign frame hash for bilateral consensus
   const hankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [newFrame.stateHash]);
   const frameHanko = hankos[0];
@@ -943,7 +933,6 @@ export async function handleAccountInput(
   if (normalizedInputHeight !== undefined && !Number.isFinite(normalizedInputHeight)) {
     return { success: false, error: `Invalid account input height: ${String(input.height)}`, events: [] };
   }
-  const replayMode = (env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true;
   const quiet = env.quietRuntimeLogs === true;
   console.log(
     `📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`,
@@ -970,14 +959,6 @@ export async function handleAccountInput(
       prevFrameHash: frame?.prevFrameHash ?? null,
     })),
   });
-  if (replayMode) {
-    console.log(
-      `[REPLAY][A-MACHINE] from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)} ` +
-        `height=${String(normalizedInputHeight ?? 'none')} hasACK=${Boolean(input.prevHanko)} hasNewFrame=${Boolean(input.newAccountFrame)} ` +
-        `currentHeight=${accountMachine.currentHeight} pending=${accountMachine.pendingFrame?.height ?? 0}`,
-    );
-  }
-
   // Replay protection: frame chain (height + prevFrameHash) checked at :836
   // ACK replay protection: pendingFrame cleared on commit, so replayed ACK fails pendingFrame check
 
@@ -1024,7 +1005,7 @@ export async function handleAccountInput(
 
     const expectedAckEntity = accountMachine.proofHeader.toEntity;
     console.log(`🔐 HANKO-ACK-VERIFY: Verifying ACK hanko for our pending frame`);
-    const { verifyHankoForHash } = await import('./hanko-signing');
+    const { verifyHankoForHash } = await import('./hanko/signing');
     const verifyResult = await verifyHankoForHash(ackHanko, frameHash, expectedAckEntity, env);
     const valid = verifyResult.valid;
     const recoveredEntityId = verifyResult.entityId;
@@ -1111,7 +1092,7 @@ export async function handleAccountInput(
             );
           } else {
             // Cryptographic binding: verify hanko actually signs the claimed dispute hash
-            const { verifyHankoForHash } = await import('./hanko-signing');
+            const { verifyHankoForHash } = await import('./hanko/signing');
             const { valid: disputeValid } = await verifyHankoForHash(
               input.newDisputeHanko,
               input.newDisputeHash,
@@ -1144,7 +1125,7 @@ export async function handleAccountInput(
         }
 
         // Add confirmed frame to history
-        accountMachine.frameHistory.push({ ...accountMachine.pendingFrame });
+        accountMachine.frameHistory.push(cloneAccountFrame(accountMachine.pendingFrame));
         // Cap history at 20 frames to prevent snapshot bloat
         if (accountMachine.frameHistory.length > 20) {
           accountMachine.frameHistory.shift();
@@ -1231,6 +1212,16 @@ export async function handleAccountInput(
   // the simultaneous-proposal handler.
   if (input.prevHanko && !ackProcessed && accountMachine.pendingFrame && !isSameHeightSimultaneousProposal) {
     const pending = accountMachine.pendingFrame.height;
+    const staleAck =
+      normalizedInputHeight !== undefined &&
+      Number(normalizedInputHeight) > 0 &&
+      Number(normalizedInputHeight) <= Number(accountMachine.currentHeight ?? 0);
+    if (staleAck) {
+      events.push(
+        `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=${String(pending)})`,
+      );
+      return { success: true, events };
+    }
     return {
       success: false,
       error:
@@ -1244,59 +1235,12 @@ export async function handleAccountInput(
 
   // Handle new frame proposal
   if (input.newAccountFrame) {
-    if (replayMode) {
-      console.log(
-        `[REPLAY][A-MACHINE] new frame path: receivedHeight=${input.newAccountFrame.height} ` +
-          `current=${accountMachine.currentHeight} prev=${String(input.newAccountFrame.prevFrameHash).slice(0, 12)}`,
-      );
-    }
     const receivedFrame = input.newAccountFrame;
-
-    // Replay-only recovery:
-    // If we are one frame behind with a pendingFrame, deterministically commit it first.
-    // This preserves frame-chain continuity when ACK and next frame were split across WAL frames.
-    if (
-      replayMode &&
-      accountMachine.pendingFrame &&
-      Number(receivedFrame.height) === Number(accountMachine.pendingFrame.height) + 1 &&
-      Number(accountMachine.currentHeight) + 1 !== Number(receivedFrame.height)
-    ) {
-      console.warn(
-        `[loadEnvFromDB][A-MACHINE] replay precommit pending frame ` +
-          `pending=${accountMachine.pendingFrame.height} current=${accountMachine.currentHeight} incoming=${receivedFrame.height}`,
+    if (Number(receivedFrame.height) <= Number(accountMachine.currentHeight ?? 0)) {
+      events.push(
+        `ℹ️ Ignored stale frame ${String(receivedFrame.height)} (current=${String(accountMachine.currentHeight ?? 0)})`,
       );
-      const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.currentFrame?.jHeight ?? 0;
-      for (const tx of accountMachine.pendingFrame.accountTxs) {
-        const beforeSettlement = captureSettlementVector(accountMachine);
-        const commitResult = await processAccountTx(
-          accountMachine,
-          tx,
-          accountMachine.pendingFrame.byLeft!,
-          accountMachine.pendingFrame.timestamp,
-          pendingJHeight,
-          false,
-          env,
-        );
-        if (!commitResult.success) {
-          return {
-            success: false,
-            error: `Replay pending commit failed: ${tx.type} - ${commitResult.error}`,
-            events,
-          };
-        }
-        assertNoUnilateralSettlementMutation(accountMachine, beforeSettlement, tx, 'replay/precommit');
-      }
-      accountMachine.currentFrame = structuredClone(accountMachine.pendingFrame);
-      accountMachine.currentHeight = accountMachine.pendingFrame.height;
-      accountMachine.frameHistory.push({ ...accountMachine.pendingFrame });
-      if (accountMachine.frameHistory.length > 20) accountMachine.frameHistory.shift();
-      delete accountMachine.pendingFrame;
-      delete accountMachine.pendingAccountInput;
-      delete accountMachine.clonedForValidation;
-      console.warn(
-        `[loadEnvFromDB][A-MACHINE] replay precommit done ` +
-          `current=${accountMachine.currentHeight} pending=${accountMachine.pendingFrame?.height ?? 0}`,
-      );
+      return { success: true, events };
     }
 
     // Validate frame with timestamp checks (HTLC safety)
@@ -1319,7 +1263,6 @@ export async function handleAccountInput(
         receivedPrevFrameHash: receivedFrame.prevFrameHash ?? null,
         receivedTxTypes: receivedFrame.accountTxs.map((tx) => tx.type),
         expectedPrevFrameHash,
-        replayMode,
         account: describeAccountState(),
       };
       console.warn(`⚠️ FRAME-CHAIN: prevHash mismatch at height ${accountMachine.currentHeight}`);
@@ -1354,17 +1297,6 @@ export async function handleAccountInput(
 
         // EMIT EVENT: Track LEFT wins tiebreaker
         events.push(`📤 LEFT-WINS: Ignored RIGHT's frame ${receivedFrame.height} (waiting for their ACK)`);
-        env.info(
-          'consensus',
-          'LEFT-WINS',
-          {
-            fromEntity: accountMachine.proofHeader.fromEntity,
-            toEntity: accountMachine.proofHeader.toEntity,
-            height: receivedFrame.height,
-          },
-          accountMachine.proofHeader.fromEntity,
-        );
-
         // CRITICAL FIX: Even though we ignore their frame, check mempool and send update if we have new txs
         // This prevents j_event_claims from getting stuck when both sides propose simultaneously
         if (accountMachine.mempool.length > 0) {
@@ -1407,17 +1339,6 @@ export async function handleAccountInput(
             // EMIT EVENT: Track rollback for debugging
             events.push(
               `🔄 ROLLBACK: Discarded our frame ${accountMachine.pendingFrame.height}, restored ${uniqueRestored}/${restoredTxCount} txs to mempool`,
-            );
-            env.info(
-              'consensus',
-              'ROLLBACK',
-              {
-                fromEntity: accountMachine.proofHeader.fromEntity,
-                toEntity: accountMachine.proofHeader.toEntity,
-                height: accountMachine.pendingFrame.height,
-                restoredTxCount: uniqueRestored,
-              },
-              accountMachine.proofHeader.fromEntity,
             );
           }
 
@@ -1472,7 +1393,7 @@ export async function handleAccountInput(
     );
 
     // Verify hanko - CRITICAL: Must verify fromEntityId is the signer with board validation
-    const { verifyHankoForHash } = await import('./hanko-signing');
+    const { verifyHankoForHash } = await import('./hanko/signing');
     const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(
       hankoToVerify,
       receivedFrame.stateHash,
@@ -1703,16 +1624,6 @@ export async function handleAccountInput(
     //    j_event_claims converge and are finalized 2-of-2 in account state.
     // ═══════════════════════════════════════════════════════════════════════════
 
-    // Emit bilateral consensus event - use OUR computed values
-    env.emit('BilateralFrameCommitted', {
-      fromEntity: input.fromEntityId,
-      toEntity: accountMachine.proofHeader.fromEntity,
-      height: receivedFrame.height,
-      txCount: receivedFrame.accountTxs.length,
-      tokenIds: ourFinalTokenIds, // OUR computed tokenIds
-      stateHash: receivedFrame.stateHash,
-    });
-
     // RECEIVER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
     // This eliminates fragile manual field copying
     const { counterparty: cpForCommitLog } = getAccountPerspective(accountMachine, ourEntityId);
@@ -1769,15 +1680,9 @@ export async function handleAccountInput(
     // by our own tx re-execution above.
     accountMachine.currentFrame = structuredClone(receivedFrame);
     accountMachine.currentHeight = receivedFrame.height;
-    if (replayMode) {
-      console.log(
-        `[REPLAY][A-MACHINE] committed frame=${receivedFrame.height} ` +
-          `newCurrentHeight=${accountMachine.currentHeight} accountTxs=${receivedFrame.accountTxs.length}`,
-      );
-    }
     // Store counterparty dispute metadata on COMMIT (verified, frame accepted)
     if (input.newDisputeHanko && !ackProcessed && input.disputeProofNonce !== undefined && input.newDisputeHash) {
-      const { verifyHankoForHash } = await import('./hanko-signing');
+      const { verifyHankoForHash } = await import('./hanko/signing');
       const { valid: disputeValid } = await verifyHankoForHash(
         input.newDisputeHanko,
         input.newDisputeHash,
@@ -1800,7 +1705,7 @@ export async function handleAccountInput(
     }
 
     // Add accepted frame to history
-    accountMachine.frameHistory.push({ ...receivedFrame });
+    accountMachine.frameHistory.push(cloneAccountFrame(receivedFrame));
     // Cap history at 20 frames to prevent snapshot bloat
     if (accountMachine.frameHistory.length > 20) {
       accountMachine.frameHistory.shift();
@@ -1848,7 +1753,7 @@ export async function handleAccountInput(
     console.log(`🔐 HANKO-ACK: entityId=${ackEntityId.slice(-4)} → signerId=${ackSignerId.slice(-4)}`);
 
     // Build ACK hanko
-    const { signHashesAsSingleEntity } = await import('./hanko-signing');
+    const { signHashesAsSingleEntity } = await import('./hanko/signing');
     const ackHankos = await signHashesAsSingleEntity(env, ackEntityId, ackSignerId, [receivedFrame.stateHash]);
     const confirmationHanko = ackHankos[0];
     if (!confirmationHanko) {
@@ -1999,6 +1904,16 @@ export async function handleAccountInput(
   // ACK inputs must never be silently ignored; this causes replay divergence.
   if (input.prevHanko && !ackProcessed && !input.newAccountFrame) {
     const pending = accountMachine.pendingFrame?.height ?? 'none';
+    const staleAck =
+      normalizedInputHeight !== undefined &&
+      Number(normalizedInputHeight) > 0 &&
+      Number(normalizedInputHeight) <= Number(accountMachine.currentHeight ?? 0);
+    if (staleAck) {
+      events.push(
+        `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=${String(pending)})`,
+      );
+      return { success: true, events };
+    }
     return {
       success: false,
       error: `Unmatched ACK: height=${String(normalizedInputHeight ?? 'none')} pending=${String(pending)}`,

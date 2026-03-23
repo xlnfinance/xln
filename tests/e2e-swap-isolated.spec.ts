@@ -393,7 +393,7 @@ async function placeAliceSellOffer(page: Page, amount: string, price: string): P
   await configurePair(page, 'WETH/USDC', 'sell');
   const amountInput = page.getByTestId('swap-order-amount').first();
   const priceInput = page.getByTestId('swap-order-price').first();
-  const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+  const placeButton = page.getByTestId('swap-submit-order').first();
 
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await expect(priceInput).toBeVisible({ timeout: 20_000 });
@@ -409,7 +409,7 @@ async function placeBobMatchingBuyOrder(page: Page, spendAmount: string, price: 
   await configurePair(page, 'WETH/USDC', 'buy');
   const amountInput = page.getByTestId('swap-order-amount').first();
   const priceInput = page.getByTestId('swap-order-price').first();
-  const placeButton = page.locator('.swap-panel .primary-btn').filter({ hasText: /Place Swap Offer/i }).first();
+  const placeButton = page.getByTestId('swap-submit-order').first();
 
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await expect(priceInput).toBeVisible({ timeout: 20_000 });

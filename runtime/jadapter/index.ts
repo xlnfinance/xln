@@ -20,8 +20,17 @@ import { ethers } from 'ethers';
 // Re-export types
 export * from './types';
 export { DEFAULT_PRIVATE_KEY } from './helpers';
-export { BrowserVMProvider } from './browservm-provider';
-export { BrowserVMEthersProvider } from './browservm-ethers-provider';
+export * from './browservm-registry';
+export * from './jurisdiction';
+export {
+  assignNameOnChain,
+  debugFundReserves,
+  getEntityInfoFromChain,
+  getNextEntityNumber,
+  registerNumberedEntityOnChain,
+  submitProcessBatch,
+  transferNameBetweenEntities,
+} from './runtime-api';
 
 /**
  * Set of chain IDs treated as local dev chains.

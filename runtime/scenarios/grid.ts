@@ -16,8 +16,9 @@
  * - Result: O(1) per node - unlimited horizontal scaling
  */
 
-import type { Env } from '../types';
+import type { Env, JTx } from '../types';
 import type { JAdapter } from '../jadapter/types';
+import { createEmptyBatch, batchAddReserveToReserve, getBatchSize } from '../j-batch';
 import {
   ensureJAdapter,
   getScenarioJAdapter,
@@ -61,6 +62,42 @@ async function processJEvents(env: Env): Promise<void> {
     const toProcess = [...pendingInputs];
     env.runtimeInput.entityInputs = [];
     await process(env, toProcess);
+  }
+}
+
+async function submitReserveToReserveBatch(
+  env: Env,
+  jadapter: JAdapter,
+  fromEntityId: string,
+  toEntityId: string,
+  amount: bigint,
+): Promise<void> {
+  const replicaKey = Array.from(env.eReplicas.keys()).find((key) => key.startsWith(`${fromEntityId}:`));
+  const replica = replicaKey ? env.eReplicas.get(replicaKey) : null;
+  const signerId = replica?.signerId;
+  if (!signerId) {
+    throw new Error(`Grid: missing signer for ${fromEntityId.slice(-4)}`);
+  }
+  const batch = createEmptyBatch();
+  batchAddReserveToReserve(
+    { batch, jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0, status: 'empty' },
+    toEntityId,
+    USDC_TOKEN_ID,
+    amount,
+  );
+  const jTx: JTx = {
+    type: 'batch',
+    entityId: fromEntityId,
+    data: {
+      batch,
+      batchSize: getBatchSize(batch),
+      signerId,
+    },
+    timestamp: env.timestamp,
+  };
+  const result = await jadapter.submitTx(jTx, { env, signerId, timestamp: env.timestamp });
+  if (!result.success) {
+    throw new Error(result.error || 'Grid R2R batch failed');
   }
 }
 
@@ -188,7 +225,7 @@ export async function grid(env: Env): Promise<void> {
   // Execute all R2R txs from mempool via JAdapter
   for (const tx of jReplica.mempool) {
     if (tx.type === 'r2r' && tx.from && tx.to && tx.amount) {
-      await jadapter.reserveToReserve(tx.from, tx.to, USDC_TOKEN_ID, tx.amount);
+      await submitReserveToReserveBatch(env, jadapter, tx.from, tx.to, tx.amount);
     }
   }
 

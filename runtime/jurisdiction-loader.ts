@@ -51,7 +51,7 @@ let cachedJurisdictions: JurisdictionsData | null = null;
 export function loadJurisdictions(): JurisdictionsData {
   // Browser compatibility check
   if (isBrowser) {
-    throw new Error('loadJurisdictions() not available in browser - use evm.ts generateJurisdictions() instead');
+    throw new Error('loadJurisdictions() not available in browser - use runtime/jurisdiction-config.ts instead');
   }
 
   // Return cached result if available (Node.js only)

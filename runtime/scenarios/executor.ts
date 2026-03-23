@@ -16,7 +16,7 @@ import type {
 import { mergeAndSortEvents } from './parser.js';
 import { namedParamsToObject, getPositionalParams } from './types.js';
 import { createNumberedEntity } from '../entity-factory.js';
-import { getAvailableJurisdictions } from '../evm.js';
+import { getAvailableJurisdictions } from '../jurisdiction-config.js';
 import { safeStringify } from '../serialization-utils.js';
 import { waitScenario } from './helpers';
 
@@ -222,9 +222,10 @@ async function handleImport(
     throw new Error('Arrakis jurisdiction not found');
   }
 
-  // CRITICAL: Get current max entity number from blockchain
-  const { getNextEntityNumber } = await import('../evm.js');
-  const currentMaxNumber = await getNextEntityNumber(arrakis);
+  // CRITICAL: Get current max entity number from the active jurisdiction adapter
+  const { connectJurisdictionAdapter } = await import('../jadapter');
+  const jadapter = await connectJurisdictionAdapter(arrakis);
+  const currentMaxNumber = await jadapter.getNextEntityNumber();
 
   console.log(`  🔢 Current max entity number: ${currentMaxNumber - 1}, next will be: ${currentMaxNumber}`);
 
