@@ -14,7 +14,7 @@
  * Each frame includes Fed-style subtitles explaining what/why/tradfi-parallel
  */
 
-import type { Env, EntityInput, EntityReplica, Delta } from '../types';
+import type { Env, EntityInput, EntityReplica, Delta, JTx } from '../types';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain } from './helpers';
@@ -23,6 +23,7 @@ import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta, isLeft } from '../account-utils';
 import { createGossipLayer } from '../networking/gossip';
 import { safeStringify } from '../serialization-utils';
+import { createEmptyBatch, batchAddReserveToReserve, getBatchSize } from '../j-batch';
 import { ethers } from 'ethers';
 
 // Lazy-loaded runtime functions to avoid circular dependency (runtime.ts imports this file)
@@ -74,6 +75,38 @@ type RequiredBrowserVM = {
 const ONE_TOKEN = 10n ** DECIMALS;
 
 const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
+
+async function submitReserveToReserveBatch(
+  env: Env,
+  jadapter: JAdapter,
+  signerId: string,
+  fromEntityId: string,
+  toEntityId: string,
+  tokenId: number,
+  amount: bigint,
+): Promise<void> {
+  const batch = createEmptyBatch();
+  batchAddReserveToReserve(
+    { batch, jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0, status: 'empty' },
+    toEntityId,
+    tokenId,
+    amount,
+  );
+  const jTx: JTx = {
+    type: 'batch',
+    entityId: fromEntityId,
+    data: {
+      batch,
+      batchSize: getBatchSize(batch),
+      signerId,
+    },
+    timestamp: env.timestamp,
+  };
+  const result = await jadapter.submitTx(jTx, { env, signerId, timestamp: env.timestamp });
+  if (!result.success) {
+    throw new Error(result.error || 'AHB R2R batch failed');
+  }
+}
 
 // Browser-safe env access (process.env only in Node)
 const isBrowser = typeof window !== 'undefined';
@@ -632,15 +665,15 @@ export async function ahb(env: Env): Promise<void> {
     console.log('\n💳 Prefunding signer wallets (1M each token)...');
     for (const entity of entities) {
       const { wallet } = ensureSignerWallet(entity.signer);
-      if (vm?.fundSignerWallet) {
-        await vm.fundSignerWallet(wallet.address, SIGNER_PREFUND);
+      if (jadapter.fundSignerWallet) {
+        await jadapter.fundSignerWallet(wallet.address, SIGNER_PREFUND);
       }
       console.log(`✅ Prefunded ${entity.name} signer ${entity.signer} (${wallet.address.slice(0, 10)}...)`);
     }
 
     const hubWalletInfo = ensureSignerWallet(hub.signer);
-    if (HUB_INITIAL_RESERVE > SIGNER_PREFUND && vm?.fundSignerWallet) {
-      await vm.fundSignerWallet(hubWalletInfo.wallet.address, HUB_INITIAL_RESERVE);
+    if (HUB_INITIAL_RESERVE > SIGNER_PREFUND && jadapter.fundSignerWallet) {
+      await jadapter.fundSignerWallet(hubWalletInfo.wallet.address, HUB_INITIAL_RESERVE);
       console.log(`✅ Hub signer topped up to ${HUB_INITIAL_RESERVE / ONE_TOKEN} tokens`);
     }
 
@@ -671,25 +704,25 @@ export async function ahb(env: Env): Promise<void> {
     // NOTE: BrowserVM is reset in View.svelte at runtime creation time
     // This ensures fresh state on every page load/HMR
 
-    // REAL deposit flow: ERC20 approve + externalTokenToReserve
+    // REAL deposit flow: ERC20 approve + processBatch(externalTokenToReserve)
     if (vm) {
-      usdcTokenAddress = vm.getTokenAddress('USDC');
+      usdcTokenAddress = (await jadapter.getTokenRegistry()).find((token) => token.symbol === 'USDC')?.address ?? null;
       if (!usdcTokenAddress) {
         throw new Error('USDC token not found in BrowserVM registry');
       }
-      await vm.approveErc20(
+      await jadapter.approveErc20(
         hubWalletInfo.privateKey,
         usdcTokenAddress,
-        vm.getDepositoryAddress(),
+        jadapter.addresses.depository,
         HUB_INITIAL_RESERVE
       );
-      const mintEvents = await vm.externalTokenToReserve(
+      const mintEvents = await jadapter.externalTokenToReserve(
         hubWalletInfo.privateKey,
         hub.id,
         usdcTokenAddress,
         HUB_INITIAL_RESERVE
       );
-      console.log(`✅ Deposited $10M USDC to Hub via ERC20 (events: ${mintEvents.length})`);
+      console.log(`✅ Deposited $10M USDC to Hub via processBatch (events: ${mintEvents.length})`);
     } else {
       await jadapter.debugFundReserves(hub.id, USDC_TOKEN_ID, HUB_INITIAL_RESERVE);
       console.log('✅ Deposited $10M USDC to Hub via debugFundReserves (RPC mode)');
@@ -2244,7 +2277,7 @@ export async function ahb(env: Env): Promise<void> {
   const hubReserveBeforeDrain = await jadapter.getReserves(hub.id, USDC_TOKEN_ID);
   if (hubReserveBeforeDrain > 0n) {
     console.log(`🧹 Draining Hub reserves to force debt: ${hubReserveBeforeDrain}`);
-    await jadapter.reserveToReserve(hub.id, alice.id, USDC_TOKEN_ID, hubReserveBeforeDrain);
+    await submitReserveToReserveBatch(env, jadapter, hub.signer, hub.id, alice.id, USDC_TOKEN_ID, hubReserveBeforeDrain);
     await processJEvents(env);
     await process(env);
     const hubReserveAfterDrain = await jadapter.getReserves(hub.id, USDC_TOKEN_ID);

@@ -213,9 +213,6 @@ export async function lockAhb(env: Env): Promise<void> {
       );
     }
 
-    // BrowserVM handle (for real ERC20 flow — null in RPC mode)
-    const browserVM = jadapter.getBrowserVM();
-
     // Define total system solvency - $10M minted to Hub
     const TOTAL_SOLVENCY = usd(10_000_000);
 
@@ -266,15 +263,15 @@ export async function lockAhb(env: Env): Promise<void> {
     };
 
     // Prefund signer wallets (BrowserVM only — Anvil wallets are pre-funded)
-    if (browserVM) {
+    if (jadapter.fundSignerWallet) {
       console.log('\n💳 Prefunding signer wallets...');
       for (const entity of entities) {
         const { wallet } = ensureSignerWallet(entity.signer);
-        await browserVM.fundSignerWallet(wallet.address, SIGNER_PREFUND);
+        await jadapter.fundSignerWallet(wallet.address, SIGNER_PREFUND);
       }
       const hubWalletInfo = ensureSignerWallet(hub.signer);
       if (HUB_INITIAL_RESERVE > SIGNER_PREFUND) {
-        await browserVM.fundSignerWallet(hubWalletInfo.wallet.address, HUB_INITIAL_RESERVE);
+        await jadapter.fundSignerWallet(hubWalletInfo.wallet.address, HUB_INITIAL_RESERVE);
       }
       console.log('✅ Signer wallets prefunded');
     }
@@ -296,11 +293,11 @@ export async function lockAhb(env: Env): Promise<void> {
 
     const hubWalletInfo = ensureSignerWallet(hub.signer);
 
-    if (browserVM) {
+    if (jadapter.mode === 'browservm') {
       // BrowserVM: Real ERC20 approve + externalTokenToReserve
-      const usdcTokenAddress = browserVM.getTokenAddress('USDC');
+      const usdcTokenAddress = (await jadapter.getTokenRegistry()).find((token) => token.symbol === 'USDC')?.address ?? null;
       if (!usdcTokenAddress) throw new Error('USDC token not found');
-      await browserVM.approveErc20(
+      await jadapter.approveErc20(
         hubWalletInfo.privateKey,
         usdcTokenAddress,
         jadapter.addresses.depository,

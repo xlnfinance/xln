@@ -854,8 +854,12 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     for (const signer of runtime.signers || []) {
       if (!signer?.entityId) continue;
       if (!hasEntityReplica(signer.entityId)) {
+        const restoredEntityKeys = env.eReplicas
+          ? Array.from(env.eReplicas.keys()).map((key) => String(key))
+          : [];
         console.error(
-          `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: missing restored entity ${signer.entityId.slice(0, 12)}; resetting runtime storage`
+          `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: missing restored entity ${signer.entityId.slice(0, 12)}; ` +
+          `restoredKeys=${JSON.stringify(restoredEntityKeys)} replayMeta=${JSON.stringify(getReplayMeta(env))}; resetting runtime storage`
         );
         await resetRuntimePersistence(runtime, xln);
         return buildOrRestoreRuntimeEnv(runtime, xln, false);
@@ -2002,17 +2006,16 @@ export const vaultOperations = {
     try {
       const { getXLN } = await import('./xlnStore');
       const xln = await getXLN();
+      if (!xln.queueEntityInput) return { success: false, error: 'XLN queueEntityInput unavailable' };
       const env = get(xlnEnvironment);
-      const jadapter = xln.getActiveJAdapter?.(env);
-      if (!jadapter?.reserveToReserve) return { success: false, error: 'J-adapter not available' };
+      if (!env) return { success: false, error: 'Runtime env unavailable' };
 
-      // Execute reserve_to_reserve transfer
-      await jadapter.reserveToReserve(signer.entityId, toEntityId, tokenId, amount);
-
-      // Process queued J-events to update runtime state
-      if (xln.processJBlockEvents) {
-        await xln.processJBlockEvents(env);
-      }
+      await xln.queueEntityInput(env, signer.entityId, signer.address, {
+        type: 'reserve_to_reserve',
+        toEntityId,
+        tokenId,
+        amount,
+      });
 
       console.log(`[VaultStore] ✅ Sent ${amount} to ${toEntityId.slice(0, 12)}...`);
       return { success: true };

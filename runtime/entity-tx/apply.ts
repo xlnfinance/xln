@@ -269,28 +269,17 @@ export const applyEntityTx = async (
         jEventData.event?.type ??
         (Array.isArray(jEventData.events) && jEventData.events.length > 0 ? jEventData.events[0]?.type : undefined) ??
         'unknown';
-      // Emit J-event received
       env.emit('JEventReceived', {
         entityId: entityState.entityId,
         eventType: firstEventType,
         blockNumber: jEventData.blockNumber,
         txHash: jEventData.transactionHash,
       });
-
       const { newState, mempoolOps } = await handleJEvent(entityState, entityTx.data, env);
       return { newState, outputs: [], mempoolOps: mempoolOps || [] };
     }
 
     if (entityTx.type === 'accountInput') {
-      if ((env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true) {
-        const data = entityTx.data as Record<string, unknown> | undefined;
-        const frame = data?.newAccountFrame as Record<string, unknown> | undefined;
-        console.log(
-          `[REPLAY] applyEntityTx accountInput from=${String(data?.fromEntityId || '').slice(-8)} ` +
-            `to=${String(data?.toEntityId || '').slice(-8)} height=${String(data?.height ?? '')} ` +
-            `newFrame=${String(frame?.height ?? 'none')}`,
-        );
-      }
       const result = await handleAccountInput(entityState, entityTx.data, env);
       return {
         newState: result.newState,
@@ -326,12 +315,6 @@ export const applyEntityTx = async (
         `💳 OPEN-ACCOUNT: Opening account with ${counterpartyId} (counterparty: ${counterpartyId.slice(-4)})`,
       );
 
-      // Emit account opening event
-      env.emit('AccountOpening', {
-        entityId: entityState.entityId,
-        counterpartyId: targetEntityId,
-      });
-
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
 
@@ -343,6 +326,10 @@ export const applyEntityTx = async (
       const createdLocalAccount = !existingAccountKey;
       const accountKey = existingAccountKey ?? counterpartyId;
       if (createdLocalAccount) {
+        env.emit('AccountOpening', {
+          entityId: entityState.entityId,
+          counterpartyId: targetEntityId,
+        });
         console.log(`💳 LOCAL-ACCOUNT: Creating local account with Entity ${formatEntityId(counterpartyId)}...`);
 
         // CONSENSUS FIX: Start with empty deltas - let all delta creation happen through transactions
@@ -632,6 +619,13 @@ export const applyEntityTx = async (
 
     if (entityTx.type === 'directPayment') {
       const verbose = env.quietRuntimeLogs !== true;
+      env.emit('HtlcInitiated', {
+        fromEntity: entityState.entityId,
+        toEntity: entityTx.data.targetEntityId,
+        tokenId: entityTx.data.tokenId,
+        amount: entityTx.data.amount.toString(),
+        route: entityTx.data.route,
+      });
       if (verbose) {
         console.log(`💸 ═════════════════════════════════════════════════════════════`);
         console.log(
@@ -641,15 +635,6 @@ export const applyEntityTx = async (
         console.log(`💸 Route: ${entityTx.data.route?.map(r => r.slice(-4)).join('→') || 'NONE (will calculate)'}`);
         console.log(`💸 Description: ${entityTx.data.description || 'none'}`);
       }
-
-      // Emit payment initiation event
-      env.emit('HtlcInitiated', {
-        fromEntity: entityState.entityId,
-        toEntity: entityTx.data.targetEntityId,
-        tokenId: entityTx.data.tokenId,
-        amount: entityTx.data.amount.toString(),
-        route: entityTx.data.route,
-      });
 
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
@@ -1384,11 +1369,6 @@ export const applyEntityTx = async (
   } catch (error) {
     console.error(`❌ Transaction execution error:`, error);
     log.error(`❌ Transaction execution error: ${error}`);
-    const replayMode = (env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true;
-    if (replayMode) {
-      // Replay must be strictly deterministic; swallowing tx failures corrupts restore state.
-      throw error;
-    }
     return { newState: entityState, outputs: [], jOutputs: [] }; // Return unchanged state on error
   }
 };

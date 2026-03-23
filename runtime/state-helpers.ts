@@ -3,7 +3,7 @@
  * Utilities for entity replica cloning, snapshots, and state persistence
  */
 
-import type { EntityReplica, EntityState, Env, RuntimeInput, AccountMachine, JReplica, LogCategory } from './types';
+import type { EntityReplica, EntityState, Env, RuntimeInput, AccountMachine, JReplica, LogCategory, AccountFrame } from './types';
 import { DEBUG, HEAVY_LOGS } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify } from './serialization-utils';
@@ -123,6 +123,20 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
 // === CLONING UTILITIES ===
 export const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
 export const cloneArray = <T>(arr: T[]) => [...arr];
+
+export function cloneAccountFrame(frame: AccountFrame): AccountFrame {
+  try {
+    return structuredClone(frame);
+  } catch {
+    return {
+      ...frame,
+      accountTxs: frame.accountTxs.map((tx) => ({ ...tx, data: tx.data ? structuredClone(tx.data) : tx.data })),
+      tokenIds: [...frame.tokenIds],
+      deltas: [...frame.deltas],
+      fullDeltaStates: frame.fullDeltaStates ? frame.fullDeltaStates.map((delta) => ({ ...delta })) : undefined,
+    };
+  }
+}
 
 const cloneBatchHistoryEntry = (entry: CompletedBatch): CompletedBatch => {
   const cloned: CompletedBatch = { ...entry };
@@ -435,31 +449,22 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
  */
 function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidation: boolean = false): AccountMachine {
   const result: AccountMachine = {
-    leftEntity: account.leftEntity,
-    rightEntity: account.rightEntity,
-    status: account.status ?? 'active',
+    ...account,
     mempool: [...account.mempool],
-    currentFrame: {
-      ...account.currentFrame,
-      tokenIds: [...account.currentFrame.tokenIds],
-      deltas: [...account.currentFrame.deltas],
-    },
+    currentFrame: cloneAccountFrame(account.currentFrame),
     deltas: new Map(Array.from(account.deltas.entries()).map(([key, delta]) => [key, { ...delta }])),
     locks: new Map(Array.from(account.locks.entries()).map(([key, lock]) => [key, { ...lock }])),
     swapOffers: new Map(Array.from(account.swapOffers.entries()).map(([key, offer]) => [key, { ...offer }])),
-    globalCreditLimits: { ...account.globalCreditLimits },
-    currentHeight: account.currentHeight,
     pendingSignatures: [...account.pendingSignatures],
-    rollbackCount: account.rollbackCount,
-    ...(account.lastRollbackFrameHash !== undefined && { lastRollbackFrameHash: account.lastRollbackFrameHash }),
-    frameHistory: [...account.frameHistory], // Clone frame history array
+    frameHistory: account.frameHistory.map((frame) => cloneAccountFrame(frame)),
+    globalCreditLimits: { ...account.globalCreditLimits },
     proofHeader: { ...account.proofHeader },
     proofBody: {
       ...account.proofBody,
       tokenIds: [...account.proofBody.tokenIds],
       deltas: [...account.proofBody.deltas],
     },
-    disputeConfig: { ...account.disputeConfig }, // Dispute delay configuration
+    disputeConfig: { ...account.disputeConfig },
     leftJObservations: account.leftJObservations.map(obs => ({
       ...obs,
       events: Array.isArray(obs.events) ? [...obs.events] : [],
@@ -487,18 +492,34 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     pendingRebalanceRequest: account.pendingRebalanceRequest ? { ...account.pendingRebalanceRequest } : undefined,
   };
 
-  // Add optional properties if they exist
   if (account.pendingFrame) {
-    result.pendingFrame = {
-      ...account.pendingFrame,
-      accountTxs: [...account.pendingFrame.accountTxs],
-      tokenIds: [...account.pendingFrame.tokenIds],
-      deltas: [...account.pendingFrame.deltas]
-    };
+    result.pendingFrame = cloneAccountFrame(account.pendingFrame);
+  }
+
+  if (account.pendingAccountInput) {
+    try {
+      result.pendingAccountInput = structuredClone(account.pendingAccountInput);
+    } catch {
+      result.pendingAccountInput = {
+        ...account.pendingAccountInput,
+        settleAction: account.pendingAccountInput.settleAction
+          ? {
+              ...account.pendingAccountInput.settleAction,
+              ops: account.pendingAccountInput.settleAction.ops
+                ? account.pendingAccountInput.settleAction.ops.map((op) => ({ ...op }))
+                : undefined,
+            }
+          : undefined,
+      };
+    }
   }
 
   if (account.clonedForValidation && !skipClonedForValidation) {
     result.clonedForValidation = manualCloneAccountMachine(account.clonedForValidation, true);
+  }
+
+  if (skipClonedForValidation) {
+    delete result.clonedForValidation;
   }
 
   if (account.hankoSignature) {

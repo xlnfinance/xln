@@ -58,26 +58,9 @@ export type ReplaySnapshotDeps = {
   ) => unknown;
   ensureRuntimeState: (env: Env) => ReplayRuntimeStateRef;
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<void>;
-  buildSkippedReplayAckKey: (
-    runtimeFrameHeight: number,
-    entityId: string,
-    counterpartyId: string,
-    inputHeight: number,
-    prevHanko: unknown,
-  ) => string;
-  buildSkippedReplayNewFrameKey: (
-    runtimeFrameHeight: number,
-    entityId: string,
-    counterpartyId: string,
-    frameHeight: number,
-    stateHash: unknown,
-    prevFrameHash: unknown,
-  ) => string;
-  safeStringify: (value: unknown) => string;
   normalizeEntitySwapTradingPairs: (state: unknown) => void;
   isDbNotFound: (error: unknown) => boolean;
   replayModeKey: symbol;
-  replaySkippedAccountInputsKey: symbol;
   applyAllowedKey: symbol;
 };
 
@@ -257,12 +240,12 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
         }
         env.height = h - 1;
         env.timestamp = Number(frame.timestamp ?? env.timestamp);
-        runtimeEnv[deps.replaySkippedAccountInputsKey] = new Set<string>();
         runtimeEnv[deps.applyAllowedKey] = true;
         await deps.applyRuntimeInput(env, frame.runtimeInput);
         runtimeEnv[deps.applyAllowedKey] = false;
         if (typeof frame.runtimeStateHash === 'string' && frame.runtimeStateHash.length > 0) {
-          const actualRuntimeStateHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
+          const actualSnapshot = buildRuntimeCheckpointSnapshot(env);
+          const actualRuntimeStateHash = computePersistedEnvStateHash(actualSnapshot);
           if (actualRuntimeStateHash !== frame.runtimeStateHash) {
             throw new Error(
               `REPLAY_STATE_HASH_MISMATCH: frame=${h} expected=${frame.runtimeStateHash} actual=${actualRuntimeStateHash}`,
@@ -299,117 +282,6 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
             throw new Error(`Replay height mismatch after apply: expected=${h} actual=${env.height}`);
           }
         }
-        for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
-          for (const tx of entityInput.entityTxs ?? []) {
-            if (tx.type !== 'accountInput') continue;
-            const data = tx.data as Record<string, unknown> | undefined;
-            const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-            const newAccountFrame = data?.newAccountFrame as Record<string, unknown> | undefined;
-            const hasPrevHanko = Boolean(data?.prevHanko);
-            const inputHeightRaw = data?.height;
-            const inputHeight = Number(inputHeightRaw ?? 0);
-            if (hasPrevHanko && !newAccountFrame && fromEntityId && Number.isFinite(inputHeight) && inputHeight > 0) {
-              const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
-              for (const replica of env.eReplicas.values()) {
-                if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
-                const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
-                const currentHeight = Number(accountMachine?.currentHeight ?? 0);
-                const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
-                console.log(
-                  `[loadEnvFromDB] frame=${h} ACK-check entity=${String(entityInput.entityId).slice(-8)} ` +
-                    `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} inputHeight=${inputHeight}`,
-                );
-                if (currentHeight < inputHeight || pendingHeight === inputHeight) {
-                  const skippedReplayAccountInputs =
-                    ((runtimeEnv[deps.replaySkippedAccountInputsKey] as Set<string> | undefined) ?? new Set<string>());
-                  const skippedReplayAckKey = deps.buildSkippedReplayAckKey(
-                    h,
-                    entityIdNorm,
-                    fromEntityId,
-                    inputHeight,
-                    data?.prevHanko,
-                  );
-                  if (skippedReplayAccountInputs.has(skippedReplayAckKey)) {
-                    console.warn(
-                      `[loadEnvFromDB] frame=${h} ACK-check skipping replay-stale ack entity=${String(entityInput.entityId).slice(-8)} ` +
-                        `from=${fromEntityId.slice(-8)} inputHeight=${inputHeight}`,
-                    );
-                    continue;
-                  }
-                  throw new Error(
-                    `REPLAY_ACK_NOT_APPLIED: frame=${h} ackHeight=${inputHeight} currentHeight=${currentHeight} pendingHeight=${pendingHeight} ` +
-                      `entity=${String(entityInput.entityId).slice(0, 12)} from=${fromEntityId.slice(0, 12)}`,
-                  );
-                }
-              }
-            }
-            const expectedHeight = Number(newAccountFrame?.height ?? 0);
-            if (!fromEntityId || !Number.isFinite(expectedHeight) || expectedHeight <= 0) continue;
-            const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
-            let applied = false;
-            for (const replica of env.eReplicas.values()) {
-              if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
-              const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
-              const currentHeight = Number(accountMachine?.currentHeight ?? 0);
-              const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
-              console.log(
-                `[loadEnvFromDB] frame=${h} NEWFRAME-check entity=${String(entityInput.entityId).slice(-8)} ` +
-                  `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} expected=${expectedHeight}`,
-              );
-              if (currentHeight >= expectedHeight || pendingHeight === expectedHeight) {
-                applied = true;
-                break;
-              }
-            }
-            if (!applied) {
-              const skippedReplayAccountInputs =
-                ((runtimeEnv[deps.replaySkippedAccountInputsKey] as Set<string> | undefined) ?? new Set<string>());
-              const skippedReplayNewFrameKey = deps.buildSkippedReplayNewFrameKey(
-                h,
-                entityIdNorm,
-                fromEntityId,
-                expectedHeight,
-                newAccountFrame?.stateHash,
-                newAccountFrame?.prevFrameHash,
-              );
-              if (skippedReplayAccountInputs.has(skippedReplayNewFrameKey)) {
-                console.warn(
-                  `[loadEnvFromDB] frame=${h} NEWFRAME-check skipping replay-stale frame entity=${String(entityInput.entityId).slice(-8)} ` +
-                    `from=${fromEntityId.slice(-8)} expected=${expectedHeight}`,
-                );
-                continue;
-              }
-              const replayDebug = Array.from(env.eReplicas.values())
-                .filter(replica => String(replica?.entityId || '').toLowerCase() === entityIdNorm)
-                .map(replica => {
-                  const am = replica?.state?.accounts?.get?.(fromEntityId);
-                  return {
-                    replicaKey: `${String(replica.entityId).slice(0, 10)}...:${String(replica.signerId).slice(0, 10)}...`,
-                    currentHeight: Number(am?.currentHeight ?? 0),
-                    currentHash: am?.currentFrame?.stateHash ?? null,
-                    currentPrev: am?.currentFrame?.prevFrameHash ?? null,
-                    pendingFrame: Number(am?.pendingFrame?.height ?? 0),
-                    pendingHash: am?.pendingFrame?.stateHash ?? null,
-                    pendingPrev: am?.pendingFrame?.prevFrameHash ?? null,
-                    mempoolSize: Number(am?.mempool?.length ?? 0),
-                    frameHistorySize: Number(am?.frameHistory?.length ?? 0),
-                    frameHistoryTail: (am?.frameHistory ?? []).slice(-3).map((frame) => ({
-                      height: Number(frame?.height ?? 0),
-                      stateHash: frame?.stateHash ?? null,
-                      prevFrameHash: frame?.prevFrameHash ?? null,
-                    })),
-                  };
-                });
-              console.warn(
-                `[loadEnvFromDB] frame=${h} REPLAY_ACCOUNT_FRAME_NOT_APPLIED entity=${String(entityInput.entityId).slice(-8)} ` +
-                  `from=${fromEntityId.slice(-8)} expected=${expectedHeight} debug=${deps.safeStringify(replayDebug)}`,
-              );
-              throw new Error(
-                `REPLAY_ACCOUNT_FRAME_NOT_APPLIED: frame=${h} expected=${expectedHeight} actual=${JSON.stringify(replayDebug)}`,
-              );
-            }
-          }
-        }
         env.frameLogs = Array.isArray(frame.logs)
           ? frame.logs.map((entry): FrameLogEntry => ({ ...entry }))
           : [];
@@ -424,11 +296,9 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
           }) as any,
         );
         env.frameLogs = [];
-        delete runtimeEnv[deps.replaySkippedAccountInputsKey];
         lastGoodHeight = h;
       } catch (error) {
         runtimeEnv[deps.applyAllowedKey] = false;
-        delete runtimeEnv[deps.replaySkippedAccountInputsKey];
         const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
         throw new Error(
           `REPLAY_INVARIANT_FAILED: frame=${h} checkpoint=${selectedSnapshotHeight} latest=${latestHeight} restored=${lastGoodHeight} reason=${message}`,

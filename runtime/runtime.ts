@@ -57,21 +57,17 @@ import {
 } from './entity-factory';
 import {
   assignNameOnChain,
-  connectToEthereum,
+  getBrowserVMInstance,
   debugFundReserves,
-  getAvailableJurisdictions,
   getEntityInfoFromChain,
   getJurisdictionByAddress,
   getNextEntityNumber,
   registerNumberedEntityOnChain,
   setBrowserVMJurisdiction,
-  getBrowserVMInstance,
   submitProcessBatch,
-  submitPrefundAccount,
-  submitSettle,
-  submitReserveToReserve,
   transferNameBetweenEntities,
-} from './evm';
+} from './jadapter';
+import { getAvailableJurisdictions } from './jurisdiction-config';
 import { canonicalizeProfile, createGossipLayer, parseProfile } from './networking/gossip';
 import { attachEventEmitters } from './env-events';
 import {
@@ -565,45 +561,6 @@ const waitForRuntimeLoopWakeOrTimeout = async (env: Env, timeoutMs: number): Pro
 const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
 const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
 const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
-const ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY = Symbol.for('xln.runtime.env.replay.skippedAccountInputs');
-const replayHankoFingerprint = (value: unknown): string => {
-  const normalized = typeof value === 'string' ? value : '';
-  if (!normalized) return 'none';
-  if (normalized.length <= 36) return normalized;
-  return `${normalized.slice(0, 18)}:${normalized.slice(-18)}`;
-};
-const buildSkippedReplayAckKey = (
-  runtimeFrameHeight: number,
-  entityId: string,
-  counterpartyId: string,
-  inputHeight: number,
-  prevHanko: unknown,
-): string =>
-  [
-    runtimeFrameHeight,
-    String(entityId || '').toLowerCase(),
-    String(counterpartyId || '').toLowerCase(),
-    inputHeight,
-    replayHankoFingerprint(prevHanko),
-    'ack',
-  ].join(':');
-const buildSkippedReplayNewFrameKey = (
-  runtimeFrameHeight: number,
-  entityId: string,
-  counterpartyId: string,
-  frameHeight: number,
-  stateHash: unknown,
-  prevFrameHash: unknown,
-): string =>
-  [
-    runtimeFrameHeight,
-    String(entityId || '').toLowerCase(),
-    String(counterpartyId || '').toLowerCase(),
-    frameHeight,
-    typeof stateHash === 'string' ? stateHash : 'none',
-    typeof prevFrameHash === 'string' ? prevFrameHash : 'none',
-    'newframe',
-  ].join(':');
 
 const failfastAssert = (
   condition: unknown,
@@ -2016,7 +1973,7 @@ const applyRuntimeInput = async (
 
           // For BrowserVM, set as default jurisdiction in env
           if (isBrowserVM) {
-            const browserVM = (jadapter as any).browserVM;
+            const browserVM = jadapter.getBrowserVM();
             if (browserVM) {
               setBrowserVMJurisdiction(env, jadapter.addresses.depository, browserVM);
             }
@@ -2187,29 +2144,22 @@ const applyRuntimeInput = async (
 
         env.eReplicas.set(replicaKey, replica);
 
-        const browserVM = getBrowserVMInstance(env);
-        if (browserVM) {
-          const validators = runtimeTx.data.config.validators;
-          const threshold = runtimeTx.data.config.threshold;
-          if (validators.length === 1 && threshold === 1n) {
-            const signerId = validators[0];
-            try {
-              const privateKey = getSignerPrivateKey(env, signerId);
-              const privateKeyHex = `0x${Array.from(privateKey)
-                .map(b => b.toString(16).padStart(2, '0'))
-                .join('')}`;
-              if (typeof browserVM.registerEntityWallet === 'function') {
-                browserVM.registerEntityWallet(runtimeTx.entityId, privateKeyHex);
-              } else {
-                console.warn(
-                  `⚠️ BrowserVM missing registerEntityWallet - skipping wallet registration for ${runtimeTx.entityId.slice(0, 10)}...`,
-                );
-              }
-            } catch (error) {
-              console.warn(
-                `⚠️ Cannot derive private key for signer ${signerId} (no env.runtimeSeed), skipping BrowserVM wallet registration`,
-              );
+        const validators = runtimeTx.data.config.validators;
+        const threshold = runtimeTx.data.config.threshold;
+        if (validators.length === 1 && threshold === 1n) {
+          const signerId = validators[0];
+          try {
+            const privateKey = getSignerPrivateKey(env, signerId);
+            const privateKeyHex = `0x${Array.from(privateKey)
+              .map(b => b.toString(16).padStart(2, '0'))
+              .join('')}`;
+            for (const jReplica of env.jReplicas?.values?.() ?? []) {
+              jReplica.jadapter?.registerEntityWallet?.(runtimeTx.entityId, privateKeyHex);
             }
+          } catch (_error) {
+            console.warn(
+              `⚠️ Cannot derive private key for signer ${signerId} (no env.runtimeSeed), skipping entity wallet registration`,
+            );
           }
         }
 
@@ -2555,17 +2505,13 @@ const applyRuntimeInput = async (
         entityInputs: [...appliedEntityInputs], // Persist only successfully applied inputs
       };
 
-      // CRITICAL: Update JReplica stateRoots from BrowserVM BEFORE snapshot
-      // Without this, time-travel shows stale EVM state from xlnomy creation
-      const browserVM = getBrowserVMInstance(env);
+      // CRITICAL: Update JReplica stateRoots from JAdapter BEFORE snapshot.
       if (env.jReplicas) {
         for (const [name, jReplica] of env.jReplicas.entries()) {
-          const replicaBrowserVM =
-            jReplica.jadapter?.getBrowserVM?.()
-            ?? (browserVM && name === env.activeJurisdiction ? browserVM : null);
-          if (!replicaBrowserVM?.captureStateRoot) continue;
+          if (!jReplica.jadapter?.captureStateRoot) continue;
           try {
-            jReplica.stateRoot = await replicaBrowserVM.captureStateRoot();
+            const stateRoot = await jReplica.jadapter.captureStateRoot();
+            if (stateRoot) jReplica.stateRoot = stateRoot;
           } catch (error) {
             console.warn(
               `[runtime] captureStateRoot failed for ${name}:`,
@@ -2575,9 +2521,16 @@ const applyRuntimeInput = async (
         }
       }
 
-      // CRITICAL: Sync collaterals and blockNumber from BrowserVM BEFORE snapshot
-      if (browserVM?.syncAllCollaterals && env.jReplicas && env.eReplicas) {
+      // CRITICAL: Sync collaterals and blockNumber from JAdapter BEFORE snapshot.
+      if (env.jReplicas && env.eReplicas) {
         try {
+          const syncAdapters = Array.from(env.jReplicas.values())
+            .map((jReplica) => jReplica.jadapter)
+            .filter((jadapter): jadapter is NonNullable<typeof jadapter> => !!jadapter?.syncRuntimeState);
+          if (syncAdapters.length === 0) {
+            throw new Error('skip-sync-runtime-state');
+          }
+
           // Collect all account pairs from all entities
           const accountPairs: Array<{ entityId: string; counterpartyId: string }> = [];
           const tokenIds = new Set<number>();
@@ -2595,28 +2548,43 @@ const applyRuntimeInput = async (
               }
             }
           }
-          const browserVmTokenIds = browserVM.getTokenRegistry?.().map((token) => Number(token.tokenId)) ?? [];
-          for (const tokenId of browserVmTokenIds) {
-            if (Number.isFinite(tokenId) && tokenId > 0) tokenIds.add(tokenId);
+          for (const jadapter of syncAdapters) {
+            const adapterTokenIds = (await jadapter.getTokenRegistry?.() ?? []).map((token) => Number(token.tokenId));
+            for (const tokenId of adapterTokenIds) {
+              if (Number.isFinite(tokenId) && tokenId > 0) tokenIds.add(tokenId);
+            }
           }
 
-          const collaterals = await browserVM.syncAllCollaterals(accountPairs, Array.from(tokenIds).sort((a, b) => a - b));
+          let syncedState:
+            | {
+                collaterals: Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>;
+                blockNumber: bigint;
+              }
+            | null = null;
+          for (const jadapter of syncAdapters) {
+            syncedState = await jadapter.syncRuntimeState?.(accountPairs, Array.from(tokenIds).sort((a, b) => a - b)) ?? null;
+            if (syncedState) break;
+          }
 
-          // Get current block height from BrowserVM
-          const blockHeight = browserVM.getBlockHeight ? browserVM.getBlockHeight() : 0;
+          if (!syncedState) {
+            throw new Error('skip-sync-runtime-state');
+          }
 
           // Update JReplica with synced data
-          for (const [name, jReplica] of env.jReplicas.entries()) {
-            jReplica.collaterals = collaterals;
-            jReplica.blockNumber = BigInt(blockHeight);
+          for (const jReplica of env.jReplicas.values()) {
+            jReplica.collaterals = syncedState.collaterals;
+            jReplica.blockNumber = syncedState.blockNumber;
           }
 
           // IMPORTANT: never mutate account shared deltas here.
           // collateral/ondelta are updated only via account consensus
           // (j_event_claim bilateral finalization).
         } catch (e) {
-          // Silent fail - collaterals sync is optional for debugging
-          console.warn('[Runtime] Failed to sync BrowserVM state:', e);
+          if (e instanceof Error && e.message === 'skip-sync-runtime-state') {
+            // Optional path; most RPC runs have no adapter-backed local state to snapshot.
+          } else {
+            console.warn('[Runtime] Failed to sync JAdapter state:', e);
+          }
         }
       }
 
@@ -2888,7 +2856,6 @@ export {
   getAccountBarVisual,
   clearDatabaseAndHistory,
   // Clean logs: getCleanLogs, clearCleanLogs, copyCleanLogs - exported at definition
-  connectToEthereum,
   // Entity creation functions
   createLazyEntity,
   createNumberedEntity,
@@ -2931,9 +2898,6 @@ export {
   getBrowserVMInstance,
   // getEnv, initEnv, processJBlockEvents - already exported inline above
   submitProcessBatch,
-  submitPrefundAccount,
-  submitSettle,
-  submitReserveToReserve,
   debugFundReserves,
   transferNameBetweenEntities,
   // Account utilities (destructured from AccountUtils)
@@ -3133,7 +3097,7 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
     warn: () => {},
     error: () => {},
     emit: () => {},
-    // BrowserVM will be lazily initialized on first use (see evm.ts)
+    // BrowserVM will be lazily initialized on first adapter use
     browserVM: null,
     // EVM instances (unified interface) - use createEVM() to add
     evms: new Map(),
@@ -3271,14 +3235,18 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
 
     const state = ensureRuntimeState(env);
     const quietRuntimeLogs = env.quietRuntimeLogs === true;
-    getBrowserVMInstance(env)?.setQuietLogs?.(quietRuntimeLogs);
+    for (const jReplica of env.jReplicas?.values?.() ?? []) {
+      jReplica.jadapter?.setQuietLogs?.(quietRuntimeLogs);
+    }
 
     if (env.scenarioMode) {
       env.timestamp = (env.timestamp ?? 0) + 100;
     } else if (shouldAdvanceLogicalTime || runtimeState.clockPrimed) {
       env.timestamp = Math.max(env.timestamp ?? 0, queuedAtBeforeTick ?? (env.timestamp ?? 0));
     }
-    getBrowserVMInstance(env)?.setBlockTimestamp?.(env.timestamp);
+    for (const jReplica of env.jReplicas?.values?.() ?? []) {
+      jReplica.jadapter?.setBlockTimestamp(env.timestamp);
+    }
 
     // Inject pings for entities with due scheduled hooks (setTimeout-like)
     generateHookPings(env);
@@ -3672,12 +3640,8 @@ export const verifyRuntimeChain = async (
     buildCanonicalEnvSnapshot,
     ensureRuntimeState,
     applyRuntimeInput,
-    buildSkippedReplayAckKey,
-    buildSkippedReplayNewFrameKey,
-    safeStringify,
     normalizeEntitySwapTradingPairs,
     replayModeKey: ENV_REPLAY_MODE_KEY,
-    replaySkippedAccountInputsKey: ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY,
     applyAllowedKey: ENV_APPLY_ALLOWED_KEY,
   });
 };
@@ -3731,12 +3695,8 @@ export const loadEnvFromDB = async (
       buildCanonicalEnvSnapshot,
       ensureRuntimeState,
       applyRuntimeInput,
-      buildSkippedReplayAckKey,
-      buildSkippedReplayNewFrameKey,
-      safeStringify,
       normalizeEntitySwapTradingPairs,
       replayModeKey: ENV_REPLAY_MODE_KEY,
-      replaySkippedAccountInputsKey: ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY,
       applyAllowedKey: ENV_APPLY_ALLOWED_KEY,
     });
 
@@ -3876,7 +3836,7 @@ const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayIn
 // Avatar functions are already imported and exported above
 
 // JAdapter - Unified J-Machine interface (replaces old evms/ and jurisdiction/)
-export { createJAdapter, BrowserVMProvider } from './jadapter';
+export { createJAdapter } from './jadapter';
 export type { JAdapter, JAdapterConfig, JAdapterMode, JEvent } from './jadapter';
 
 // Get active J-adapter from environment

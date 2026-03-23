@@ -19,13 +19,14 @@ import type { ProofBodyStruct } from '../../typechain/Depository';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddRevealSecret } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
+import { getRuntimeJurisdictionHeight } from '../../j-height';
 import {
   buildAccountProofBody,
   createDisputeProofHash,
   createDisputeProofHashWithNonce,
   buildInitialDisputeProof,
 } from '../../proof-builder';
-import { inspectHankoForHash, verifyHankoForHash } from '../../hanko-signing';
+import { inspectHankoForHash, verifyHankoForHash } from '../../hanko/signing';
 
 // === Delta Transformer Arguments (inlined from transformer-args.ts) ===
 const MAX_FILL_RATIO = 0xffff;
@@ -447,7 +448,7 @@ export async function handleDisputeStart(
   }
 
   let onChainNonce = Number(account.onChainSettlementNonce ?? 0);
-  let currentJBlock = Number(newState.lastFinalizedJHeight ?? 0);
+  let currentJBlock = getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight ?? 0);
   let defaultDisputeDelayBlocks = 5;
   const jadapter = getEnvJAdapter(env);
   if (jadapter && typeof jadapter.getAccountInfo === 'function') {
@@ -460,13 +461,6 @@ export async function handleDisputeStart(
         `⚠️ disputeStart: failed to read on-chain nonce for ${counterpartyEntityId.slice(-4)}: ` +
         `${error instanceof Error ? error.message : String(error)}`,
       );
-    }
-  }
-  if (jadapter?.provider && typeof jadapter.provider.getBlockNumber === 'function') {
-    try {
-      currentJBlock = Math.max(currentJBlock, Number(await jadapter.provider.getBlockNumber()));
-    } catch {
-      // Non-fatal fallback.
     }
   }
   if (jadapter?.depository && typeof jadapter.depository.defaultDisputeDelay === 'function') {
@@ -841,8 +835,8 @@ export async function handleDisputeFinalize(
   // - dispute starter must wait until timeout for unilateral finalize
   // - counterparty may finalize immediately (same-proof path) without waiting
   const callerIsStarter = callerIsLeft === account.activeDispute.startedByLeft;
-  if (callerIsStarter && jadapter?.provider) {
-    const currentJBlock = Number(await jadapter.provider.getBlockNumber());
+  if (callerIsStarter) {
+    const currentJBlock = getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight ?? 0);
     if (currentJBlock < account.activeDispute.disputeTimeout) {
       addMessage(
         newState,

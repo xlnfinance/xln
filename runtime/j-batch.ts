@@ -916,7 +916,7 @@ export async function broadcastBatch(
       const nextNonce = currentNonce + 1n;
       const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
 
-      const { signHashesAsSingleEntity } = await import('./hanko-signing');
+      const { signHashesAsSingleEntity } = await import('./hanko/signing');
       const hankos = await signHashesAsSingleEntity(env, normalizedEntityId, signerId, [batchHash]);
       const hankoData = hankos[0];
       if (!hankoData) {
@@ -972,8 +972,9 @@ export async function broadcastBatch(
     }
 
     // Ethers path - real blockchain RPC
-    const { connectToEthereum } = await import('./evm');
-    const { depository, provider } = await connectToEthereum(jurisdiction);
+    const { connectJurisdictionAdapter } = await import('./jadapter');
+    const jadapter = await connectJurisdictionAdapter(jurisdiction);
+    const { depository, provider } = jadapter;
 
     for (const settlement of jBatchState.batch.settlements) {
       const hasChanges = settlement.diffs.length > 0 || settlement.forgiveDebtsInTokenIds.length > 0;
@@ -1005,7 +1006,7 @@ export async function broadcastBatch(
     const nextNonce = BigInt(currentNonce ?? 0) + 1n;
     const batchHash = computeBatchHankoHash(resolvedChainId, depositoryAddress, encodedBatch, nextNonce);
 
-    const { signHashesAsSingleEntity } = await import('./hanko-signing');
+    const { signHashesAsSingleEntity } = await import('./hanko/signing');
     const hankos = await signHashesAsSingleEntity(env, entityId, signerId, [batchHash]);
     const hankoData = hankos[0];
     if (!hankoData) {

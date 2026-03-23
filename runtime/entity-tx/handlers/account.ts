@@ -32,46 +32,7 @@ import {
   buildHtlcReceivedEventPayload,
 } from '../../htlc-events';
 
-const ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY = Symbol.for('xln.runtime.env.replay.skippedAccountInputs');
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
-const replayHankoFingerprint = (value: unknown): string => {
-  const normalized = typeof value === 'string' ? value : '';
-  if (!normalized) return 'none';
-  if (normalized.length <= 36) return normalized;
-  return `${normalized.slice(0, 18)}:${normalized.slice(-18)}`;
-};
-const buildSkippedReplayAckKey = (
-  runtimeFrameHeight: number,
-  entityId: string,
-  counterpartyId: string,
-  inputHeight: number,
-  prevHanko: unknown,
-): string =>
-  [
-    runtimeFrameHeight,
-    normalizeEntityRef(entityId),
-    normalizeEntityRef(counterpartyId),
-    inputHeight,
-    replayHankoFingerprint(prevHanko),
-    'ack',
-  ].join(':');
-const buildSkippedReplayNewFrameKey = (
-  runtimeFrameHeight: number,
-  entityId: string,
-  counterpartyId: string,
-  frameHeight: number,
-  stateHash: unknown,
-  prevFrameHash: unknown,
-): string =>
-  [
-    runtimeFrameHeight,
-    normalizeEntityRef(entityId),
-    normalizeEntityRef(counterpartyId),
-    frameHeight,
-    typeof stateHash === 'string' ? stateHash : 'none',
-    typeof prevFrameHash === 'string' ? prevFrameHash : 'none',
-    'newframe',
-  ].join(':');
 const getJurisdictionId = (state: EntityState, env: Env): string => {
   return String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 };
@@ -199,15 +160,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   const existingAccountKey = findAccountKeyInsensitive(newState.accounts, counterpartyId);
   let accountMachine = existingAccountKey ? newState.accounts.get(existingAccountKey) : undefined;
   let isNewAccount = false;
-  const replayMode = (env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true;
-  if (replayMode) {
-    console.log(
-      `[REPLAY][ACCOUNT-HANDLER] lookup from=${counterpartyId.slice(-8)} ` +
-      `foundKey=${existingAccountKey ? existingAccountKey.slice(-8) : 'none'} ` +
-      `accounts=${Array.from(newState.accounts.keys()).map((k) => k.slice(-8)).join(',')}`
-    );
-  }
-
   if (!accountMachine) {
     isNewAccount = true;
     console.log(`💳 Creating new account machine for ${counterpartyId.slice(-4)} (counterparty: ${counterpartyId.slice(-4)})`);
@@ -282,9 +234,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
   if (isNewAccount && input.prevHanko && !input.newAccountFrame) {
     const error = `ACCOUNT_INPUT_ACK_FOR_UNKNOWN_ACCOUNT: from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)}`;
-    if (replayMode) {
-      console.error(`[REPLAY][ACCOUNT-HANDLER] ${error}`);
-    }
     throw new Error(error);
   }
 
@@ -311,20 +260,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       `(height=${input.height ?? input.newAccountFrame?.height ?? 'n/a'}, txs=[${frameTxTypes.join(',')}], ack=${!!input.prevHanko})`;
     console.error(dropMsg);
     addMessage(newState, dropMsg);
-    if (!replayMode) {
-      env.error(
-        'consensus',
-        'DISPUTED_ACCOUNT_INPUT_DROPPED',
-        {
-          fromEntityId: input.fromEntityId,
-          toEntityId: input.toEntityId,
-          height: input.height ?? input.newAccountFrame?.height ?? null,
-          txTypes: frameTxTypes,
-          hasAck: !!input.prevHanko,
-        },
-        state.entityId,
-      );
-    }
     return {
       newState,
       outputs,
@@ -372,20 +307,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     const currentHeightBefore = accountMachine.currentHeight;
     const pendingFrameBefore = accountMachine.pendingFrame;
     const result = await processAccountInput(env, accountMachine, input);
-    if (replayMode) {
-      console.log(
-        `[REPLAY][ACCOUNT-HANDLER] result success=${result.success} ` +
-        `currentHeight=${accountMachine.currentHeight} pending=${accountMachine.pendingFrame?.height ?? 0} ` +
-        `error=${result.error || 'none'}`
-      );
-    }
-    if ((env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true) {
-      console.log(
-        `REPLAY_ACCOUNT_RESULT from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)} ` +
-        `height=${input.height} newFrame=${input.newAccountFrame?.height ?? 'none'} ` +
-        `success=${result.success} error=${result.error || 'none'}`
-      );
-    }
 
     if (result.success) {
       addMessages(newState, result.events);
@@ -1085,84 +1006,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       }
     } else {
       console.error(`❌ Frame consensus failed: ${result.error}`);
-      if (replayMode) {
-        const replayRuntimeFrameHeight = Number(env.height ?? 0) + 1;
-        const skippedReplayAccountInputs =
-          (((env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] as Set<string> | undefined) ??
-            new Set<string>());
-        const currentHeight = Number(accountMachine?.currentHeight ?? 0);
-        const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
-        const inputHeight = Number(input.height ?? 0);
-        const newFrameHeight = Number(input.newAccountFrame?.height ?? 0);
-        const ackAlreadyApplied =
-          input.prevHanko &&
-          !input.newAccountFrame &&
-          Number.isFinite(inputHeight) &&
-          inputHeight > 0 &&
-          !accountMachine?.pendingFrame &&
-          currentHeight >= inputHeight;
-        const newFrameAlreadyApplied =
-          Boolean(input.newAccountFrame) &&
-          Number.isFinite(newFrameHeight) &&
-          newFrameHeight > 0 &&
-          (currentHeight >= newFrameHeight || pendingHeight === newFrameHeight);
-        const replayFailureDebug = {
-          entityId: state.entityId,
-          counterpartyId,
-          inputHeight,
-          hasPrevHanko: Boolean(input.prevHanko),
-          newFrameHeight,
-          newFramePrevFrameHash: input.newAccountFrame?.prevFrameHash ?? null,
-          newFrameStateHash: input.newAccountFrame?.stateHash ?? null,
-          currentHeight,
-          currentHash: accountMachine?.currentFrame?.stateHash ?? null,
-          pendingHeight,
-          pendingHash: accountMachine?.pendingFrame?.stateHash ?? null,
-          mempoolSize: Number(accountMachine?.mempool?.length ?? 0),
-          ackAlreadyApplied,
-          newFrameAlreadyApplied,
-          error: result.error ?? 'unknown',
-        };
-        console.warn(`[REPLAY][ACCOUNT-HANDLER] failed frame consensus ${JSON.stringify(replayFailureDebug)}`);
-        if (ackAlreadyApplied) {
-          (env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] = skippedReplayAccountInputs;
-          skippedReplayAccountInputs.add(buildSkippedReplayAckKey(
-            replayRuntimeFrameHeight,
-            state.entityId,
-            counterpartyId,
-            inputHeight,
-            input.prevHanko,
-          ));
-          console.warn(`[REPLAY] Skipping duplicate ACK already reflected in current frame: ${result.error}`);
-        } else if (newFrameAlreadyApplied) {
-          (env as Record<PropertyKey, unknown>)[ENV_REPLAY_SKIPPED_ACCOUNT_INPUTS_KEY] = skippedReplayAccountInputs;
-          skippedReplayAccountInputs.add(buildSkippedReplayNewFrameKey(
-            replayRuntimeFrameHeight,
-            state.entityId,
-            counterpartyId,
-            newFrameHeight,
-            input.newAccountFrame?.stateHash,
-            input.newAccountFrame?.prevFrameHash,
-          ));
-          console.warn(`[REPLAY] Skipping duplicate frame already reflected in current/pending state: ${result.error}`);
-        } else {
-          throw new Error(`REPLAY_FRAME_CONSENSUS_FAILED: ${result.error ?? 'unknown'}`);
-        }
-      } else {
-        addMessage(newState, `❌ ${result.error}`);
-        env.emit('HtlcFailed', {
-          entityId: state.entityId,
-          fromEntityId: input.fromEntityId,
-          toEntityId: input.toEntityId,
-          reason: result.error || 'unknown',
-        });
-        env.error('consensus', 'FRAME_CONSENSUS_FAILED', {
-          reason: result.error || 'unknown',
-          fromEntityId: input.fromEntityId,
-          toEntityId: input.toEntityId,
-        }, state.entityId);
-        throw new Error(`FRAME_CONSENSUS_FAILED: ${result.error || 'unknown'}`);
-      }
+      addMessage(newState, `❌ ${result.error}`);
+      throw new Error(`FRAME_CONSENSUS_FAILED: ${result.error || 'unknown'}`);
     }
   } else if (!input.settleAction) {
     // Only error if there was no settleAction either

@@ -38,8 +38,8 @@
 
 import { ethers } from 'ethers';
 
-import type { HankoBytes, HankoClaim } from './types';
-import { createHash, randomBytes } from './utils';
+import type { HankoBytes, HankoClaim } from '../types';
+import { createHash, randomBytes } from '../utils';
 
 const HANKO_DEBUG =
   typeof process !== 'undefined' &&

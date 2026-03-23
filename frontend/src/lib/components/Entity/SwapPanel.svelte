@@ -1018,25 +1018,6 @@
   $: canonicalGiveAmount = preparedOrder?.effectiveGive ?? 0n;
   $: canonicalWantAmount = preparedOrder?.effectiveWant ?? 0n;
   $: giveAmountLeftover = preparedOrder?.unspentGiveAmount ?? 0n;
-  $: if (typeof window !== 'undefined') {
-    (window as typeof window & { __swapDebug?: unknown }).__swapDebug = {
-      tradeSide,
-      priceRatioInput,
-      giveAmount: String(giveAmount),
-      wantAmount: String(wantAmount),
-      limitPriceTicks: String(limitPriceTicks ?? ''),
-      preparedOrderPriceTicks: String(preparedOrder?.priceTicks ?? ''),
-      selectedOrderLevel: selectedOrderLevel
-        ? {
-            side: selectedOrderLevel.side,
-            priceTicks: String(selectedOrderLevel.priceTicks),
-            inputPriceTicks: String(selectedOrderLevel.inputPriceTicks),
-            displayPrice: selectedOrderLevel.displayPrice,
-            accountId: selectedOrderLevel.accountId,
-          }
-        : null,
-    };
-  }
   function offerSideLabel(offer: SwapOfferLike): 'Ask' | 'Bid' {
     const give = Number(offer?.giveTokenId || 0);
     const want = Number(offer?.wantTokenId || 0);
@@ -1451,13 +1432,7 @@
         entityTxs,
       }]);
 
-      console.log('📊 Swap offer placed:', offerId);
       pendingSwapFeedbackOfferId = offerId;
-      if (shouldAutoPrepareInbound) {
-        console.log(
-          `🛠️ Auto-prepared inbound capacity: token=${wantToken} creditLimit=${requiredInboundCreditLimit?.toString() || '0'}`,
-        );
-      }
       toasts.success('Swap offer submitted');
 
       // Reset form
@@ -1495,7 +1470,6 @@
         }]
       }]);
 
-      console.log('📨 Swap cancel requested:', offerId);
       toasts.info('Cancel request sent');
     } catch (error) {
       console.error('Failed to cancel swap:', error);
@@ -1642,6 +1616,7 @@
           <span
             class="side-tab"
             class:active={tradeSide === 'buy-base'}
+            data-testid="swap-side-buy"
             on:click={() => setTradeSide('buy-base')}
             on:keydown={(e) => e.key === 'Enter' && setTradeSide('buy-base')}
             role="button"
@@ -1650,6 +1625,7 @@
           <span
             class="side-tab"
             class:active={tradeSide === 'sell-base'}
+            data-testid="swap-side-sell"
             on:click={() => setTradeSide('sell-base')}
             on:keydown={(e) => e.key === 'Enter' && setTradeSide('sell-base')}
             role="button"
@@ -1767,6 +1743,7 @@
         class="primary-btn"
         class:buy-action={tradeSide === 'buy-base'}
         class:sell-action={tradeSide === 'sell-base'}
+        data-testid="swap-submit-order"
         on:click={placeSwapOffer}
         disabled={Boolean(swapActionDisabledReason)}
       >
@@ -2032,13 +2009,15 @@
   }
 
   .scope-text-toggle {
-    font-size: 12px;
+    font-size: 11px;
     color: #9ca3af;
     cursor: pointer;
     user-select: none;
     white-space: nowrap;
-    padding: 4px 8px;
-    border: 1px solid #2d313b;
+    height: 28px;
+    line-height: 26px;
+    padding: 0 8px;
+    border: 1px solid #3f3f46;
     border-radius: 4px;
     background: #111217;
   }
@@ -2065,13 +2044,13 @@
 
   .toolbar-select select {
     width: 100%;
-    height: 36px;
+    height: 28px;
     border: 0;
     background: transparent;
-    padding: 0 12px;
-    font-size: 13px;
+    padding: 0 8px;
+    font-size: 12px;
     font-weight: 600;
-    color: #f3f4f6;
+    color: #e5e7eb;
   }
 
   .order-form-header {
@@ -2105,13 +2084,14 @@
 
   .hub-select-inline {
     background: #111217;
-    border: 1px solid #1e2028;
+    border: 1px solid #3f3f46;
     border-radius: 4px;
     color: #9ca3af;
     font-size: 11px;
-    padding: 4px 8px;
+    height: 26px;
+    padding: 0 6px;
     cursor: pointer;
-    max-width: 120px;
+    max-width: 140px;
   }
 
   .side-toggle-row {
@@ -2260,22 +2240,24 @@
 
   .diamond-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 16px;
-    height: 16px;
-    background: url('/img/logo.png') center/contain no-repeat;
-    border: none;
+    width: 12px;
+    height: 12px;
+    background: #fbbf24;
+    border: 2px solid #fbbf24;
     border-radius: 0;
     cursor: pointer;
+    transform: rotate(45deg);
     filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.4));
   }
 
   .diamond-slider::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    background: url('/img/logo.png') center/contain no-repeat;
-    border: none;
+    width: 12px;
+    height: 12px;
+    background: #fbbf24;
+    border: 2px solid #fbbf24;
     border-radius: 0;
     cursor: pointer;
+    transform: rotate(45deg);
     filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.4));
   }
 

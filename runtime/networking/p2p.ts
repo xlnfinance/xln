@@ -29,7 +29,7 @@ import { buildLocalEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../ids';
 import { getSignerPrivateKey, registerSignerPublicKey } from '../account-crypto';
 import { signProfile, verifyProfileSignature } from './profile-signing';
-import { inspectHankoForHash } from '../hanko-signing';
+import { inspectHankoForHash } from '../hanko/signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './runtime-id';

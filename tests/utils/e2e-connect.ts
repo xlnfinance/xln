@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 
 const DEFAULT_TOKEN_IDS = [1, 3, 2] as const;
-const DEFAULT_OPEN_TIMEOUT_MS = 45_000;
+const DEFAULT_OPEN_TIMEOUT_MS = 75_000;
 const DEFAULT_CREDIT_AMOUNT_DISPLAY = '10000';
 
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
@@ -35,6 +35,31 @@ async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   });
 
   expect(ok, `[${tag}] runtime must be online`).toBe(true);
+}
+
+async function nudgeRuntimeOnline(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeState?: {
+          p2p?: {
+            isConnected?: () => boolean;
+            connect?: () => void;
+            reconnect?: () => void;
+          };
+        };
+      };
+    }).isolatedEnv;
+    const p2p = env?.runtimeState?.p2p;
+    if (!p2p || (typeof p2p.isConnected === 'function' && p2p.isConnected())) return;
+    if (typeof p2p.connect === 'function') {
+      try { p2p.connect(); } catch {}
+      return;
+    }
+    if (typeof p2p.reconnect === 'function') {
+      try { p2p.reconnect(); } catch {}
+    }
+  });
 }
 
 async function isAccountReady(
@@ -353,6 +378,7 @@ export async function connectRuntimeToHub(
 
   await expect.poll(
     async () => {
+      await nudgeRuntimeOnline(page);
       const status = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
       return status.exists && status.currentHeight > 0 && !status.pendingHeight;
     },

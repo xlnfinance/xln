@@ -3,7 +3,6 @@ export {
   buildRuntimeCheckpointSnapshot,
 } from './snapshot';
 export {
-  buildPersistedEnvHashInput,
   computePersistedEnvStateHash,
 } from './hash';
 export {

@@ -4,7 +4,8 @@
  *
  * Settlement: ALWAYS at offer's limit price (maker's terms).
  * Price improvement delivered as rebate: hub matched at better prices,
- * returns the spread to maker (taker in exchange terms) minus hub's cut.
+ * returns the spread to the offer creator (aggressive taker in exchange terms)
+ * minus any configured hub cut.
  *
  * Flow:
  * 1. Find offer by offerId
@@ -12,7 +13,7 @@
  * 3. Validate fillRatio >= offer.minFillRatio (unless cancelling all)
  * 4. Calculate fill amounts at LIMIT PRICE (offer ratio)
  * 5. Update deltas atomically (both tokens)
- * 6. Apply rebate if present (price improvement refund to maker)
+ * 6. Apply rebate if present (price improvement refund to offer creator)
  * 7. Release proportional hold
  * 8. If cancelRemainder: remove offer; else: update remaining amount
  *

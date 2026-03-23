@@ -6,6 +6,7 @@
 import { ethers } from 'ethers';
 
 import { getCachedSignerAddress } from './account-crypto';
+import { createJAdapter } from './jadapter';
 import type { ConsensusConfig, EntityType, JurisdictionConfig } from './types';
 import { DEBUG } from './utils';
 
@@ -258,18 +259,23 @@ export const createNumberedEntity = async (
   if (DEBUG) console.log(`   Jurisdiction: ${jurisdiction.name}`);
   if (DEBUG) console.log(`   💸 Gas required for registration`);
 
-  // Get the next entity number from the blockchain
-  const { getNextEntityNumber, registerNumberedEntityOnChain } = await import('./evm');
-
   try {
-    // First, get the next available entity number from the blockchain
-    await getNextEntityNumber(jurisdiction);
+    const jadapter = await createJAdapter({
+      mode: jurisdiction.address.startsWith('browservm://') ? 'browservm' : 'rpc',
+      chainId: jurisdiction.chainId ?? 31337,
+      rpcUrl: jurisdiction.address.startsWith('browservm://') ? undefined : jurisdiction.address,
+      fromReplica: {
+        chainId: jurisdiction.chainId,
+        depositoryAddress: jurisdiction.depositoryAddress,
+        entityProviderAddress: jurisdiction.entityProviderAddress,
+        contracts: {
+          depository: jurisdiction.depositoryAddress,
+          entityProvider: jurisdiction.entityProviderAddress,
+        },
+      } as any,
+    });
 
-    // Register the entity on-chain with its board configuration
-    const { entityNumber } = await registerNumberedEntityOnChain(
-      { mode: 'proposer-based', threshold, validators, shares: validators.reduce((acc, v) => ({ ...acc, [v]: 1n }), {}), jurisdiction },
-      name
-    );
+    const { entityNumber } = await jadapter.registerNumberedEntity(boardHash);
 
     const entityId = generateNumberedEntityId(entityNumber);
 
@@ -319,9 +325,22 @@ export const createNumberedEntitiesBatch = async (
     jurisdiction,
   }));
 
-  // Call batch registration on-chain
-  const { registerNumberedEntitiesBatchOnChain } = await import('./evm');
-  const { entityNumbers } = await registerNumberedEntitiesBatchOnChain(configs, jurisdiction);
+  const boardHashes = configs.map((config) => hashBoard(encodeBoard(config)));
+  const jadapter = await createJAdapter({
+    mode: jurisdiction.address.startsWith('browservm://') ? 'browservm' : 'rpc',
+    chainId: jurisdiction.chainId ?? 31337,
+    rpcUrl: jurisdiction.address.startsWith('browservm://') ? undefined : jurisdiction.address,
+    fromReplica: {
+      chainId: jurisdiction.chainId,
+      depositoryAddress: jurisdiction.depositoryAddress,
+      entityProviderAddress: jurisdiction.entityProviderAddress,
+      contracts: {
+        depository: jurisdiction.depositoryAddress,
+        entityProvider: jurisdiction.entityProviderAddress,
+      },
+    } as any,
+  });
+  const { entityNumbers } = await jadapter.registerNumberedEntitiesBatch(boardHashes);
 
   // Build results
   return entityNumbers.map((entityNumber, i) => {

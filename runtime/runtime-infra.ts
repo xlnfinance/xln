@@ -1,10 +1,6 @@
-import { ethers } from 'ethers';
 import type { Env, JReplica } from './types';
 import type { JAdapter } from './jadapter';
 import { createJAdapter } from './jadapter';
-import { createBrowserVMAdapter } from './jadapter/browservm';
-import { BrowserVMEthersProvider } from './jadapter/browservm-ethers-provider';
-import { DEFAULT_PRIVATE_KEY } from './jadapter/helpers';
 
 const hasLiveJAdapter = (value: unknown): value is JAdapter => {
   if (!value || typeof value !== 'object') return false;
@@ -39,13 +35,17 @@ export const rehydrateRestoredRuntimeInfra = async (
   let restoredBrowserVM: any = null;
   if (env.browserVMState && options.isBrowser) {
     try {
-      const { BrowserVMProvider } = await import('./jadapter');
-      const browserVM = new BrowserVMProvider();
-      await browserVM.init();
-      await browserVM.restoreState(env.browserVMState);
-      env.browserVM = browserVM;
-      restoredBrowserVM = browserVM;
-      options.setBrowserVMJurisdiction(env, browserVM.getDepositoryAddress(), browserVM);
+      const restoredAdapter = await createJAdapter({
+        mode: 'browservm',
+        chainId: 31337,
+        browserVMState: env.browserVMState,
+      });
+      const browserVM = restoredAdapter.getBrowserVM();
+      if (browserVM) {
+        env.browserVM = browserVM;
+        restoredBrowserVM = browserVM;
+        options.setBrowserVMJurisdiction(env, browserVM.getDepositoryAddress(), browserVM);
+      }
       if (typeof window !== 'undefined') {
         (window as any).__xlnBrowserVM = browserVM;
       }
@@ -68,24 +68,11 @@ export const rehydrateRestoredRuntimeInfra = async (
       const chainId = jReplica.chainId ?? 31337;
 
       if (!hasRpcs && restoredBrowserVM) {
-        const jadapter = await createJAdapter({
+        jReplica.jadapter = await createJAdapter({
           mode: 'browservm',
           chainId,
-          browserVMState: undefined,
+          browserVMState: env.browserVMState,
         });
-        const inner = jadapter.getBrowserVM();
-        if (inner && restoredBrowserVM) {
-          const provider = new BrowserVMEthersProvider(restoredBrowserVM);
-          const signer = new ethers.Wallet(DEFAULT_PRIVATE_KEY, provider);
-          jReplica.jadapter = await createBrowserVMAdapter(
-            { mode: 'browservm', chainId },
-            provider,
-            signer,
-            restoredBrowserVM,
-          );
-        } else {
-          jReplica.jadapter = jadapter;
-        }
       } else if (hasRpcs) {
         const jadapter = await createJAdapter({
           mode: 'rpc',

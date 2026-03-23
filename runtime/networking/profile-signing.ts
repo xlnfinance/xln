@@ -19,7 +19,7 @@
 import { keccak256 } from 'ethers';
 import { canonicalizeProfile, getBoardPrimaryPublicKey, type Profile } from './gossip';
 import type { Env, HankoString } from '../types';
-import { inspectHankoForHash, signHashesAsSingleEntity, verifyHankoForHash } from '../hanko-signing';
+import { inspectHankoForHash, signHashesAsSingleEntity, verifyHankoForHash } from '../hanko/signing';
 import { getSignerAddress, getSignerPublicKey } from '../account-crypto';
 import { serializeTaggedJson } from '../serialization-utils';
 

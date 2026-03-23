@@ -249,7 +249,7 @@ contract Depository is ReentrancyGuardLite {
   event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success);
 
   /// @notice Process a batch authorized by entity Hanko.
-  /// @dev Hanko is required; use unsafeProcessBatch only for admin/test flows.
+  /// @dev This is the canonical production write path.
   function processBatch(
     bytes calldata encodedBatch,
     address entityProviderAddr,
@@ -308,22 +308,6 @@ contract Depository is ReentrancyGuardLite {
       _reserves[mint.entity][mint.tokenId] += mint.amount;
       emit ReserveUpdated(mint.entity, mint.tokenId, _reserves[mint.entity][mint.tokenId]);
     }
-  }
-
-
-  /// @notice UNSAFE batch processing - entity or admin can call
-  /// @dev TESTNET/DEV ONLY escape hatch.
-  /// @dev Use processBatch() (Hanko) in production. This is for explicit unsafe/admin flows.
-  /// @dev Settlements still require counterparty signatures (cooperative proof)
-  function unsafeProcessBatch(bytes32 entity, Batch calldata batch) public whenNotPaused nonReentrant returns (bool completeSuccess) {
-    // Entity itself OR admin can call (admin for J-machine execution)
-    // Executes full batch deterministically via _processBatch.
-    // NOTE: Admin path bypasses Hanko authorization; prefer processBatch in production.
-    require(
-      msg.sender == address(uint160(uint256(entity))) || msg.sender == admin,
-      "E2: caller must be entity or admin"
-    );
-    return _processBatch(entity, batch);
   }
 
 

@@ -3,10 +3,10 @@
  * Bridges between account-consensus and hanko.ts library
  */
 
-import type { Env, HankoString } from './types';
-import { buildRealHanko } from './hanko';
+import type { Env, HankoString } from '../types';
+import { buildRealHanko } from './core';
 import { ethers } from 'ethers';
-import { detectEntityType } from './entity-factory';
+import { detectEntityType } from '../entity-factory';
 
 // Browser-compatible Buffer helpers - ALWAYS use manual hex parsing (Node Buffer.from can be broken in some envs)
 const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncoding): Buffer => {
@@ -142,7 +142,7 @@ export async function inspectHankoForHash(
   }>;
 }> {
   const hanko = decodeHankoEnvelope(hankoBytes);
-  const { unpackRealSignatures } = await import('./hanko');
+  const { unpackRealSignatures } = await import('./core');
   const eoaSignatures = unpackRealSignatures(hanko.packedSignatures);
   const hashBuffer = bufferFrom(hash.replace('0x', ''), 'hex');
   const recoveredAddresses: string[] = [];
@@ -204,7 +204,7 @@ export async function signEntityHashes(
   const hankos: HankoString[] = [];
 
   // Get private key for this signer (pass env for pure function)
-  const { getSignerPrivateKey } = await import('./account-crypto');
+  const { getSignerPrivateKey } = await import('../account-crypto');
   const privateKey = getSignerPrivateKey(env, signerId);
 
   // Sign each hash independently (single-signer = simple case)
@@ -293,7 +293,7 @@ export async function buildQuorumHanko(
 ): Promise<HankoString> {
   // Build quorum hanko from signatures
 
-  const { getSignerAddress } = await import('./account-crypto');
+  const { getSignerAddress } = await import('../account-crypto');
 
   // Step 1: Determine which validators signed and which didn't
   const signerSet = new Set(signatures.map(s => s.signerId));
@@ -358,7 +358,7 @@ export async function buildQuorumHanko(
   }
 
   // Pack all signatures
-  const { packRealSignatures } = await import('./hanko');
+  const { packRealSignatures } = await import('./core');
   const packedSignatures = packRealSignatures(sigBuffers);
 
   // Step 4: Build entityIndexes and weights in ORIGINAL BOARD ORDER
@@ -449,12 +449,12 @@ export async function verifyHankoForHash(
     };
 
     // Verify using flashloan governance logic
-    const { recoverHankoEntities } = await import('./hanko');
+    const { recoverHankoEntities } = await import('./core');
     const hashBuffer = bufferFrom(hash.replace('0x', ''), 'hex');
     const recovered = await recoverHankoEntities(hanko, hashBuffer);
 
     // CRITICAL: Require at least 1 EOA signature (prevent pure circular validation)
-    const { unpackRealSignatures } = await import('./hanko');
+    const { unpackRealSignatures } = await import('./core');
     const eoaSignatures = unpackRealSignatures(hanko.packedSignatures);
     if (eoaSignatures.length === 0) {
       console.warn(`❌ Hanko rejected: No EOA signatures (circular claims not allowed in XLN)`);
@@ -525,7 +525,7 @@ export async function verifyHankoForHash(
         const validators = (replica.state?.config?.validators || []) as unknown[];
 
         // Convert validators to addresses (local entity: signerId derivation is allowed)
-        const { getSignerAddress } = await import('./account-crypto');
+        const { getSignerAddress } = await import('../account-crypto');
         expectedAddresses = validators.map((validator) => {
           if (typeof validator !== 'string' || !validator) return null;
           const v = validator.trim();
