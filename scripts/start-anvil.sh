@@ -9,6 +9,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$REPO_ROOT/scripts/lib/port-layout.sh"
 ANVIL_STATE="${ANVIL_STATE:-$REPO_ROOT/data/anvil-state.json}"
 ANVIL_LOG="${ANVIL_LOG:-$REPO_ROOT/logs/anvil.log}"
+ANVIL_BLOCK_TIME="${ANVIL_BLOCK_TIME:-1}"
 ANVIL_PORT="${ANVIL_PORT:-$(xln_rpc_port)}"
 
 kill_by_port() {
@@ -40,6 +41,8 @@ if [ -f "$ANVIL_STATE" ]; then
     echo "📂 Loading state from $ANVIL_STATE"
     anvil --host 0.0.0.0 --port "$ANVIL_PORT" \
           --chain-id 31337 \
+          --mixed-mining \
+          --block-time "$ANVIL_BLOCK_TIME" \
           --block-gas-limit 60000000 \
           --code-size-limit 65536 \
           --load-state "$ANVIL_STATE" \
@@ -49,6 +52,8 @@ else
     echo "🆕 Starting fresh anvil (no state file)"
     anvil --host 0.0.0.0 --port "$ANVIL_PORT" \
           --chain-id 31337 \
+          --mixed-mining \
+          --block-time "$ANVIL_BLOCK_TIME" \
           --block-gas-limit 60000000 \
           --code-size-limit 65536 \
           --dump-state "$ANVIL_STATE" \

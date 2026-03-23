@@ -37,7 +37,81 @@ import { logError } from './logger';
 import { BrowserVMEthersProvider } from './jadapter/browservm-ethers-provider';
 import { parseRebalancePolicyUsd } from './rebalance-policy-usd';
 // BrowserVMProvider is also available via jadapter/browservm-provider
-import type { BrowserVMInstance } from './xln-api';
+type BrowserVMEvent = {
+  name: string;
+  args: Record<string, unknown>;
+  blockNumber?: number;
+  blockHash?: string;
+  timestamp?: number;
+};
+
+type BrowserVMTokenInfo = {
+  symbol: string;
+  name: string;
+  address: string;
+  decimals: number;
+  tokenId: number;
+};
+
+type BrowserVMInstance = {
+  getTokenRegistry: () => BrowserVMTokenInfo[];
+  getTokenAddress: (symbol: string) => string | null;
+  getTokenId: (symbol: string) => number | null;
+  getErc20Balance: (tokenAddress: string, owner: string) => Promise<bigint>;
+  getEthBalance: (owner: string) => Promise<bigint>;
+  getErc20Allowance?: (tokenAddress: string, owner: string, spender: string) => Promise<bigint>;
+  fundSignerWallet: (address: string, amount?: bigint) => Promise<void>;
+  approveErc20?: (privKey: Uint8Array, tokenAddress: string, spender: string, amount: bigint) => Promise<string>;
+  transferErc20?: (privKey: Uint8Array, tokenAddress: string, to: string, amount: bigint) => Promise<string>;
+  transferNative?: (privKey: Uint8Array, to: string, amount: bigint) => Promise<string>;
+  externalTokenToReserve?: (
+    privKey: Uint8Array,
+    entityId: string,
+    tokenAddress: string,
+    amount: bigint,
+    options?: {
+      tokenType?: number;
+      externalTokenId?: bigint;
+      internalTokenId?: number;
+    }
+  ) => Promise<BrowserVMEvent[]>;
+  registerEntityWallet?: (entityId: string, privateKey: string) => void;
+  getAccountInfo?: (entityId: string, counterpartyId: string) => Promise<{ nonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
+  setDefaultDisputeDelay?: (delayBlocks: number) => Promise<void>;
+  setBlockTimestamp?: (timestamp: number) => void;
+  setQuietLogs?: (quiet: boolean) => void;
+  beginJurisdictionBlock?: (timestamp: number) => void;
+  endJurisdictionBlock?: () => void;
+  getChainId?: () => bigint;
+  getBlockNumber?: () => bigint;
+  getBlockHash?: () => string;
+  getEntityNonce?: (entityId: string) => Promise<bigint>;
+  getDepositoryAddress?: () => string;
+  getEntityProviderAddress?: () => string;
+  timeTravel?: (stateRoot: Uint8Array) => Promise<void>;
+  getReserves?: (entityId: string, tokenId: number) => Promise<bigint>;
+  getCollateral?: (entityId: string, counterpartyId: string, tokenId: number) => Promise<{ collateral: bigint; ondelta: bigint }>;
+  getDebts?: (entityId: string, tokenId: number) => Promise<Array<{ amount: bigint; creditor: string }>>;
+  captureStateRoot?: () => Promise<Uint8Array>;
+  serializeState?: () => Promise<{
+    version: number;
+    stateRoot: string;
+    trieData: Array<[string, string]>;
+    nonce: string;
+    addresses: { depository: string; entityProvider: string };
+  }>;
+  syncAllCollaterals?: (
+    accountPairs: Array<{ entityId: string; counterpartyId: string }>,
+    tokenIds: readonly number[]
+  ) => Promise<Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>>;
+  getBlockHeight?: () => bigint;
+  debugFundReserves?: (entityId: string, tokenId: number, amount: bigint) => Promise<BrowserVMEvent[]>;
+  reserveToReserve?: (from: string, to: string, tokenId: number, amount: bigint) => Promise<BrowserVMEvent[]>;
+  processBatch?: (encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint) => Promise<BrowserVMEvent[]>;
+  onAny?: (callback: (events: BrowserVMEvent[]) => void) => () => void;
+  init?: () => Promise<void>;
+  reset?: () => Promise<void>;
+};
 
 const uiLog = (message: string, details?: unknown) => {
   console.log(message, details);

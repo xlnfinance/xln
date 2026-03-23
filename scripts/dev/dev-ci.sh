@@ -62,7 +62,7 @@ mkdir -p pids
 
 echo "🚀 Starting anvil..."
 # Start networks in background with logging
-(anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-gas-limit 60000000 --code-size-limit 65536) > logs/ethereum-8545.log 2>&1 &
+(anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --mixed-mining --block-time ${XLN_ANVIL_BLOCK_TIME:-1} --block-gas-limit 60000000 --code-size-limit 65536) > logs/ethereum-8545.log 2>&1 &
 ETHEREUM_PID=$!
 echo $ETHEREUM_PID > pids/ethereum.pid
 

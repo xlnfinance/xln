@@ -4,7 +4,8 @@
   import { replicas, xlnFunctions, xlnEnvironment } from '../../stores/xlnStore';
   import AccountPreview from './AccountPreview.svelte';
 
-  export let replica: EntityReplica | null;
+export let replica: EntityReplica | null;
+export let selectedAccountId: string | null = null;
 
   $: entityHeight = Number(replica?.state?.height ?? 0);
   $: runtimeHeight = Number($xlnEnvironment?.height ?? 0);
@@ -175,7 +176,7 @@
           </div>
         </div>
         <div class="accounts-list">
-          {#each visibleAccounts as entry (entry.counterpartyId)}
+          {#each visibleAccounts as entry, index (entry.counterpartyId)}
             <AccountPreview
               account={entry.account}
               counterpartyId={entry.counterpartyId}
@@ -183,7 +184,9 @@
               {entityHeight}
               {runtimeHeight}
               lockSummary={getLockSummary(entry.counterpartyId)}
-              isSelected={false}
+              isSelected={selectedAccountId
+                ? String(selectedAccountId).toLowerCase() === String(entry.counterpartyId).toLowerCase()
+                : index === 0}
               on:select={selectAccount}
               on:faucet={forwardFaucet}
               on:settleApprove={forwardSettleApprove}

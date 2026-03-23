@@ -64,6 +64,11 @@ export const saveRuntimeFrameToWal = async (options: SaveRuntimeFrameToWalOption
     let snapshotSerializeMs = 0;
     let writeMs = 0;
     let verifyMs = 0;
+    let logsCloneMs = 0;
+    let contractConfigMs = 0;
+    let checkpointBuildMs = 0;
+    let stateHashMs = 0;
+    let opsBuildMs = 0;
     let frameJournalBytes = 0;
     let snapshotBytes = 0;
 
@@ -74,36 +79,47 @@ export const saveRuntimeFrameToWal = async (options: SaveRuntimeFrameToWalOption
 
     const dbNamespace = resolveDbNamespace({ env });
     const db = getRuntimeDb(env);
+    const logsCloneStartedAt = getPerfMs();
     const committedFrameLogs = Array.isArray(env.frameLogs)
       ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
       : [];
+    logsCloneMs = getPerfMs() - logsCloneStartedAt;
 
+    const contractConfigStartedAt = getPerfMs();
     assertPersistedContractConfigReady(env, `saveEnvToDB frame=${env.height}`);
+    contractConfigMs = getPerfMs() - contractConfigStartedAt;
+
+    const checkpointInterval = ensureRuntimeConfig(env).snapshotIntervalFrames ?? defaultSnapshotIntervalFrames;
+    const checkpointDue = env.height <= 1 || env.height % checkpointInterval === 0;
+    const checkpointBlockedByPendingAccountState = checkpointDue && hasUnsafePendingAccountStateForCheckpoint(env);
+    const shouldCheckpoint = checkpointDue && !checkpointBlockedByPendingAccountState;
+    const checkpointBuildStartedAt = getPerfMs();
     const persistedSnapshot = buildRuntimeCheckpointSnapshot(env);
-    const runtimeStateHash = computePersistedEnvStateHash(persistedSnapshot);
+    checkpointBuildMs = getPerfMs() - checkpointBuildStartedAt;
+    let runtimeStateHash: string | undefined;
+    if (shouldCheckpoint) {
+      const stateHashStartedAt = getPerfMs();
+      runtimeStateHash = computePersistedEnvStateHash(persistedSnapshot);
+      stateHashMs = getPerfMs() - stateHashStartedAt;
+    }
 
     const frameSerializeStartedAt = getPerfMs();
     const frameJournal = serializeTaggedJson({
       height: env.height,
       timestamp: env.timestamp,
       runtimeInput: currentFrameInput ?? { runtimeTxs: [], entityInputs: [] },
-      runtimeStateHash,
+      ...(runtimeStateHash ? { runtimeStateHash } : {}),
       logs: committedFrameLogs,
     } satisfies PersistedFrameJournal);
     frameSerializeMs = getPerfMs() - frameSerializeStartedAt;
     frameJournalBytes = Buffer.byteLength(frameJournal);
-
-    const checkpointInterval = ensureRuntimeConfig(env).snapshotIntervalFrames ?? defaultSnapshotIntervalFrames;
-    const checkpointDue = env.height <= 1 || env.height % checkpointInterval === 0;
-    const checkpointBlockedByPendingAccountState = checkpointDue && hasUnsafePendingAccountStateForCheckpoint(env);
-    const shouldCheckpoint = checkpointDue && !checkpointBlockedByPendingAccountState;
     let checkpointSnapshot: string | undefined;
 
     if (shouldCheckpoint) {
       const snapshotSerializeStartedAt = getPerfMs();
       checkpointSnapshot = serializeTaggedJson({
         ...persistedSnapshot,
-        runtimeStateHash,
+        ...(runtimeStateHash ? { runtimeStateHash } : {}),
       });
       snapshotSerializeMs = getPerfMs() - snapshotSerializeStartedAt;
       snapshotBytes = Buffer.byteLength(checkpointSnapshot);
@@ -113,6 +129,7 @@ export const saveRuntimeFrameToWal = async (options: SaveRuntimeFrameToWalOption
       );
     }
 
+    const opsBuildStartedAt = getPerfMs();
     const ops = buildPersistedFrameWriteOps({
       namespace: dbNamespace,
       schemaVersion: persistenceSchemaVersion,
@@ -120,6 +137,7 @@ export const saveRuntimeFrameToWal = async (options: SaveRuntimeFrameToWalOption
       frameJournal,
       checkpointSnapshot,
     });
+    opsBuildMs = getPerfMs() - opsBuildStartedAt;
 
     if (state.persistencePaused) return;
     const writeStartedAt = getPerfMs();
@@ -162,8 +180,10 @@ export const saveRuntimeFrameToWal = async (options: SaveRuntimeFrameToWalOption
       `[PERSIST] frame=${env.height} checkpoint=${shouldCheckpoint ? 1 : 0} ` +
         `logs=${committedFrameLogs.length} ops=${ops.length} ` +
         `bytes(frame=${frameJournalBytes},snapshot=${snapshotBytes}) ` +
-        `ms(open=${formatPerfMs(openMs)},frame=${formatPerfMs(frameSerializeMs)},snapshot=${formatPerfMs(snapshotSerializeMs)},` +
-        `write=${formatPerfMs(writeMs)},verify=${verifySkipped ? 'skip' : formatPerfMs(verifyMs)},total=${formatPerfMs(totalMs)})`,
+        `ms(open=${formatPerfMs(openMs)},logs=${formatPerfMs(logsCloneMs)},contracts=${formatPerfMs(contractConfigMs)},` +
+        `checkpointBuild=${formatPerfMs(checkpointBuildMs)},stateHash=${formatPerfMs(stateHashMs)},frame=${formatPerfMs(frameSerializeMs)},` +
+        `snapshot=${formatPerfMs(snapshotSerializeMs)},ops=${formatPerfMs(opsBuildMs)},write=${formatPerfMs(writeMs)},` +
+        `verify=${verifySkipped ? 'skip' : formatPerfMs(verifyMs)},total=${formatPerfMs(totalMs)})`,
     );
   } catch (err) {
     const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -355,15 +375,15 @@ export const verifyRuntimeChainFromWal = async (
   const latestHeight = await readPersistedLatestHeight(db, dbNamespace);
   const checkpointHeight = await readPersistedCheckpointHeight(db, dbNamespace);
   const latestFrame = await readPersistedFrameJournalFromDb(db, dbNamespace, latestHeight, options.isDbNotFound);
-  if (!latestFrame?.runtimeStateHash) {
-    throw new Error(`REPLAY_INVARIANT_FAILED: missing runtimeStateHash at frame ${latestHeight}`);
-  }
-
-  const actualStateHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
-  if (actualStateHash !== latestFrame.runtimeStateHash) {
-    throw new Error(
-      `REPLAY_INVARIANT_FAILED: frame=${latestHeight} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${env.height} reason=State hash mismatch expected=${latestFrame.runtimeStateHash} actual=${actualStateHash}`,
-    );
+  const expectedStateHash = latestFrame?.runtimeStateHash ?? '';
+  let actualStateHash = '';
+  if (expectedStateHash) {
+    actualStateHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
+    if (actualStateHash !== expectedStateHash) {
+      throw new Error(
+        `REPLAY_INVARIANT_FAILED: frame=${latestHeight} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${env.height} reason=State hash mismatch expected=${expectedStateHash} actual=${actualStateHash}`,
+      );
+    }
   }
 
   return {
@@ -374,7 +394,7 @@ export const verifyRuntimeChainFromWal = async (
       ? Math.floor(Number(options.fromSnapshotHeight))
       : checkpointHeight,
     restoredHeight: env.height,
-    expectedStateHash: latestFrame.runtimeStateHash,
+    expectedStateHash,
     actualStateHash,
   };
 };

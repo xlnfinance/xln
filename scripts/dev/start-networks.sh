@@ -14,7 +14,7 @@ sleep 1
 
 # Start single Anvil node in background
 echo "📡 Starting Anvil Network (port 8545, chainId=31337)..."
-anvil --host 127.0.0.1 --port 8545 --chain-id 31337 --block-gas-limit 60000000 --code-size-limit 65536 > logs/ethereum-8545.log 2>&1 &
+anvil --host 127.0.0.1 --port 8545 --chain-id 31337 --mixed-mining --block-time ${XLN_ANVIL_BLOCK_TIME:-1} --block-gas-limit 60000000 --code-size-limit 65536 > logs/ethereum-8545.log 2>&1 &
 echo "$!" > pids/ethereum.pid
 
 echo "⏳ Waiting for networks to start..."

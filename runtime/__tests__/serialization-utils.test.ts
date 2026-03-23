@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { deserializeTaggedJson, safeParse, safeStringify, serializeTaggedJson } from '../serialization-utils';
 import { decode, encode } from '../snapshot-coder';
+import { applyCommand, createBook, type BookState } from '../orderbook';
 
 type RoundTripDiff = {
   path: string;
@@ -12,7 +13,7 @@ type RoundTripDiff = {
 const stringifyValue = (value: unknown): string => {
   if (typeof value === 'function') return '[Function]';
   if (typeof value === 'bigint') return `${value}n`;
-  if (value instanceof Uint8Array || Buffer.isBuffer(value)) return JSON.stringify(Array.from(value));
+  if (ArrayBuffer.isView(value) || Buffer.isBuffer(value)) return JSON.stringify(Array.from(value as ArrayLike<number>));
   try {
     return safeStringify(value);
   } catch {
@@ -55,7 +56,7 @@ const collectRoundTripDiffs = (
     }
     return diffs;
   }
-  if (before instanceof Uint8Array && after instanceof Uint8Array) {
+  if (ArrayBuffer.isView(before) && ArrayBuffer.isView(after) && before.constructor === after.constructor) {
     const left = Array.from(before);
     const right = Array.from(after);
     if (left.length !== right.length || left.some((value, index) => value !== right[index])) {
@@ -171,6 +172,8 @@ describe('serialization-utils', () => {
       ]),
       buffer: Buffer.from([9, 8, 7]),
       bytes: new Uint8Array([4, 5, 6]),
+      ints: new Int32Array([-5, 0, 7, 1024]),
+      counts: new Uint32Array([1, 2, 3, 4000]),
     };
 
     const json = serializeTaggedJson(payload);
@@ -180,9 +183,79 @@ describe('serialization-utils', () => {
     expect(restored.index).toEqual(payload.index);
     expect(Buffer.from(restored.buffer)).toEqual(payload.buffer);
     expect(Array.from(restored.bytes)).toEqual(Array.from(payload.bytes));
+    expect(restored.ints).toBeInstanceOf(Int32Array);
+    expect(Array.from(restored.ints)).toEqual(Array.from(payload.ints));
+    expect(restored.counts).toBeInstanceOf(Uint32Array);
+    expect(Array.from(restored.counts)).toEqual(Array.from(payload.counts));
 
     const snapshotRestored = decode<typeof payload>(encode(payload));
     expect(snapshotRestored).toEqual(restored);
+  });
+
+  test('round-trips orderbook state as typed arrays and preserves future matching', () => {
+    let book = createBook({
+      tick: 1n,
+      pmin: 1n,
+      pmax: 1000n,
+      maxOrders: 128,
+      stpPolicy: 0,
+    });
+
+    for (const command of [
+      { kind: 0 as const, ownerId: 'alice', orderId: 'a1', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 110n, qtyLots: 25 },
+      { kind: 0 as const, ownerId: 'bob', orderId: 'b1', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 112n, qtyLots: 30 },
+      { kind: 0 as const, ownerId: 'carol', orderId: 'c1', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 90n, qtyLots: 20 },
+      { kind: 0 as const, ownerId: 'dan', orderId: 'd1', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 88n, qtyLots: 15 },
+      { kind: 2 as const, ownerId: 'dan', orderId: 'd1', newPriceTicks: 89n, qtyDeltaLots: 5 },
+      { kind: 1 as const, ownerId: 'bob', orderId: 'b1' },
+    ]) {
+      book = applyCommand(book, command).state;
+    }
+
+    const restored = decode<BookState>(encode(book));
+    expect(restored.orderPriceIdx).toBeInstanceOf(Int32Array);
+    expect(restored.orderQtyLots).toBeInstanceOf(Uint32Array);
+    expect(restored.levelHeadBid).toBeInstanceOf(Int32Array);
+    expect(restored.bitmapBid).toBeInstanceOf(Uint32Array);
+    expect(restored.bitmapAsk).toBeInstanceOf(Uint32Array);
+    expect(Array.from(restored.orderActive)).toEqual(Array.from(book.orderActive));
+    expect(Array.from(restored.orderPriceIdx)).toEqual(Array.from(book.orderPriceIdx));
+    expect(Array.from(restored.orderQtyLots)).toEqual(Array.from(book.orderQtyLots));
+    expect(Array.from(restored.orderPrev)).toEqual(Array.from(book.orderPrev));
+    expect(Array.from(restored.orderNext)).toEqual(Array.from(book.orderNext));
+    expect(Array.from(restored.levelHeadBid)).toEqual(Array.from(book.levelHeadBid));
+    expect(Array.from(restored.levelHeadAsk)).toEqual(Array.from(book.levelHeadAsk));
+    expect(Array.from(restored.bitmapBid)).toEqual(Array.from(book.bitmapBid));
+    expect(Array.from(restored.bitmapAsk)).toEqual(Array.from(book.bitmapAsk));
+    expect(restored.bestBidIdx).toBe(book.bestBidIdx);
+    expect(restored.bestAskIdx).toBe(book.bestAskIdx);
+    expect(restored.freeHead).toBe(book.freeHead);
+    expect(restored.tradeCount).toBe(book.tradeCount);
+    expect(restored.tradeQtySum).toBe(book.tradeQtySum);
+    expect(restored.eventHash).toBe(book.eventHash);
+
+    const nextOrder = {
+      kind: 0 as const,
+      ownerId: 'erin',
+      orderId: 'e1',
+      side: 0 as const,
+      tif: 0 as const,
+      postOnly: false,
+      priceTicks: 111n,
+      qtyLots: 10,
+    };
+    const afterLive = applyCommand(book, nextOrder);
+    const afterRestored = applyCommand(restored, nextOrder);
+    expect(afterRestored.events).toEqual(afterLive.events);
+    expect(Array.from(afterRestored.state.orderActive)).toEqual(Array.from(afterLive.state.orderActive));
+    expect(Array.from(afterRestored.state.orderQtyLots)).toEqual(Array.from(afterLive.state.orderQtyLots));
+    expect(Array.from(afterRestored.state.levelHeadBid)).toEqual(Array.from(afterLive.state.levelHeadBid));
+    expect(Array.from(afterRestored.state.levelHeadAsk)).toEqual(Array.from(afterLive.state.levelHeadAsk));
+    expect(afterRestored.state.bestBidIdx).toBe(afterLive.state.bestBidIdx);
+    expect(afterRestored.state.bestAskIdx).toBe(afterLive.state.bestAskIdx);
+    expect(afterRestored.state.tradeCount).toBe(afterLive.state.tradeCount);
+    expect(afterRestored.state.tradeQtySum).toBe(afterLive.state.tradeQtySum);
+    expect(afterRestored.state.eventHash).toBe(afterLive.state.eventHash);
   });
 
   test('rejects old legacy bigint string encoding', () => {

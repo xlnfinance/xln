@@ -33,5 +33,6 @@ const serializePersistedEnvHashInput = (snapshot: Record<string, unknown>): stri
   safeStringify(buildPersistedEnvHashInput(snapshot));
 
 export const computePersistedEnvStateHash = (snapshot: Record<string, unknown>): string => {
-  return ethers.keccak256(ethers.toUtf8Bytes(serializePersistedEnvHashInput(snapshot)));
+  const serialized = serializePersistedEnvHashInput(snapshot);
+  return ethers.keccak256(ethers.toUtf8Bytes(serialized));
 };

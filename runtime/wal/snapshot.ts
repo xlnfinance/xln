@@ -27,19 +27,6 @@ const cloneHankoWitness = (
   );
 };
 
-const cloneNestedBigIntMap = <V>(
-  value: Map<string, Map<number, V>> | undefined,
-  cloneLeaf: (leaf: V) => V,
-): Map<string, Map<number, V>> | undefined => {
-  if (!(value instanceof Map) || value.size === 0) return undefined;
-  return new Map(
-    Array.from(value.entries()).map(([outerKey, innerMap]) => [
-      outerKey,
-      new Map(Array.from(innerMap.entries()).map(([innerKey, leaf]) => [innerKey, cloneLeaf(leaf)])),
-    ]),
-  );
-};
-
 export const buildCanonicalEntityReplicaSnapshot = (replica: EntityReplica): EntityReplica => {
   const snapshot = cloneEntityReplica(replica, true);
   const hankoWitness = cloneHankoWitness(replica.hankoWitness);
@@ -71,31 +58,6 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
           ...(jr.contracts.account ? { account: jr.contracts.account } : {}),
           ...(jr.contracts.deltaTransformer ? { deltaTransformer: jr.contracts.deltaTransformer } : {}),
         },
-      }
-    : {}),
-  ...(() => {
-    const reserves = cloneNestedBigIntMap(jr.reserves, (leaf) => BigInt(leaf as bigint));
-    return reserves ? { reserves } : {};
-  })(),
-  ...(() => {
-    const collaterals = cloneNestedBigIntMap(jr.collaterals, (leaf) => ({
-      collateral: BigInt((leaf as { collateral: bigint }).collateral),
-      ondelta: BigInt((leaf as { ondelta: bigint }).ondelta),
-    }));
-    return collaterals ? { collaterals } : {};
-  })(),
-  ...(jr.registeredEntities
-    ? {
-        registeredEntities: new Map(
-          Array.from(jr.registeredEntities.entries()).map(([entityId, value]) => [
-            entityId,
-            {
-              name: value.name,
-              quorum: [...value.quorum],
-              threshold: value.threshold,
-            },
-          ]),
-        ),
       }
     : {}),
 });

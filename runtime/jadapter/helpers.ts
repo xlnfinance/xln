@@ -195,29 +195,45 @@ export type EventBatchCounter = {
   };
 };
 
-const normalizeLowerId = (value: unknown): string => String(value ?? '').toLowerCase();
+const findWatcherJurisdictionReplica = (env: Env, depositoryAddress?: string) => {
+  const replicas = Array.from(env?.jReplicas?.values?.() || []);
+  if (replicas.length === 0) return null;
 
-export function getSelfSignerFinalizedJHeight(env: Env): number {
-  const runtimeId = normalizeLowerId(env?.runtimeId);
-  if (!runtimeId || !env?.eReplicas) return 0;
-
-  let found = false;
-  let minFinalizedHeight = Number.POSITIVE_INFINITY;
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const signerId = normalizeLowerId(replica?.signerId ?? String(replicaKey).split(':')[1] ?? '');
-    if (!signerId || signerId !== runtimeId) continue;
-    const finalizedHeight = Number(replica?.state?.lastFinalizedJHeight ?? 0);
-    if (!Number.isFinite(finalizedHeight)) continue;
-    found = true;
-    minFinalizedHeight = Math.min(minFinalizedHeight, Math.max(0, Math.floor(finalizedHeight)));
+  const normalizedDepository = String(depositoryAddress ?? '').trim().toLowerCase();
+  if (normalizedDepository) {
+    const matched = replicas.find((replica) => {
+      const candidate = String(
+        replica?.depositoryAddress || replica?.contracts?.depository || '',
+      ).trim().toLowerCase();
+      return candidate === normalizedDepository;
+    });
+    if (matched) return matched;
   }
 
-  if (!found || !Number.isFinite(minFinalizedHeight)) return 0;
-  return minFinalizedHeight;
+  if (env.activeJurisdiction) {
+    const active = env.jReplicas?.get(env.activeJurisdiction);
+    if (active) return active;
+  }
+
+  return replicas[0] || null;
+};
+
+export function getWatcherStartBlock(env: Env, depositoryAddress?: string): number {
+  const replica = findWatcherJurisdictionReplica(env, depositoryAddress);
+  const blockNumber = Number(replica?.blockNumber ?? 0n);
+  if (!Number.isFinite(blockNumber) || blockNumber < 0) return 1;
+  return Math.max(1, Math.floor(blockNumber) + 1);
 }
 
-export function getWatcherStartBlock(env: Env): number {
-  return Math.max(1, getSelfSignerFinalizedJHeight(env) + 1);
+export function updateWatcherJurisdictionCursor(
+  env: Env,
+  blockNumber: number,
+  depositoryAddress?: string,
+): void {
+  const replica = findWatcherJurisdictionReplica(env, depositoryAddress);
+  if (!replica) return;
+  if (!Number.isFinite(blockNumber) || blockNumber < 0) return;
+  replica.blockNumber = BigInt(Math.floor(blockNumber));
 }
 
 /**

@@ -10,10 +10,22 @@
 -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import {
+    parseJMachineConfigJson,
+    stringifyJMachineConfig,
+    type JMachineConfig,
+  } from '$lib/stores/jmachineStore';
   import { POPULAR_NETWORKS, isBrowserVMChainId, BROWSERVM_CHAIN_START, type NetworkConfig } from '$lib/config/networks';
 
   const dispatch = createEventDispatcher<{
-    create: { name: string; mode: 'browservm' | 'rpc'; chainId: number; rpcs: string[]; ticker: string };
+    create: {
+      name: string;
+      mode: 'browservm' | 'rpc';
+      chainId: number;
+      rpcs: string[];
+      ticker: string;
+      contracts?: JMachineConfig['contracts'];
+    };
     cancel: void;
   }>();
 
@@ -25,6 +37,10 @@
   let name = '';
   let isCreating = false;
   let error = '';
+  let advancedJson = '';
+  let advancedError = '';
+  let advancedJsonDirty = false;
+  let advancedContracts: JMachineConfig['contracts'] | undefined;
 
   // Separate mainnets and testnets
   $: mainnets = POPULAR_NETWORKS.filter(n => !n.testnet);
@@ -56,6 +72,20 @@
     name = defaultName;
   }
 
+  const buildDraftConfig = (): JMachineConfig => ({
+    name: name.trim() || defaultName,
+    mode,
+    chainId,
+    ticker,
+    rpcs,
+    ...(advancedContracts ? { contracts: advancedContracts } : {}),
+    createdAt: Date.now(),
+  });
+
+  $: if (!advancedJsonDirty) {
+    advancedJson = stringifyJMachineConfig(buildDraftConfig());
+  }
+
   function parseRpcList(text: string): string[] {
     return text
       .split('\n')
@@ -74,15 +104,40 @@
     }
   }
 
+  function applyAdvancedJson() {
+    try {
+      const parsed = parseJMachineConfigJson(advancedJson);
+      mode = parsed.mode;
+      selectedNetworkId = 'custom';
+      customChainId = parsed.chainId;
+      rpcTextarea = parsed.rpcs.join('\n');
+      name = parsed.name;
+      advancedContracts = parsed.contracts;
+      advancedError = '';
+      advancedJsonDirty = false;
+    } catch (err) {
+      advancedError = err instanceof Error ? err.message : 'Invalid jurisdiction JSON';
+    }
+  }
+
   async function handleCreate() {
     error = '';
+    advancedError = '';
+
+    let config: JMachineConfig;
+    try {
+      config = parseJMachineConfigJson(advancedJson);
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Invalid jurisdiction JSON';
+      return;
+    }
 
     // Validation
-    if (mode === 'rpc' && rpcs.length === 0) {
+    if (config.mode === 'rpc' && config.rpcs.length === 0) {
       error = 'At least one RPC URL is required';
       return;
     }
-    if (!name.trim()) {
+    if (!config.name.trim()) {
       error = 'Name is required';
       return;
     }
@@ -90,11 +145,12 @@
     isCreating = true;
     try {
       dispatch('create', {
-        name: name.trim(),
-        mode,
-        chainId,
-        rpcs,
-        ticker,
+        name: config.name,
+        mode: config.mode,
+        chainId: config.chainId,
+        rpcs: config.rpcs,
+        ticker: config.ticker,
+        ...(config.contracts ? { contracts: config.contracts } : {}),
       });
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to create J-Machine';
@@ -114,6 +170,7 @@
         class="mode-btn"
         class:active={mode === 'browservm'}
         on:click={() => mode = 'browservm'}
+        data-testid="add-jmachine-mode-browservm"
       >
         <span class="mode-icon">🖥️</span>
         <span class="mode-label">Browser VM</span>
@@ -123,6 +180,7 @@
         class="mode-btn"
         class:active={mode === 'rpc'}
         on:click={() => mode = 'rpc'}
+        data-testid="add-jmachine-mode-rpc"
       >
         <span class="mode-icon">🌐</span>
         <span class="mode-label">RPC</span>
@@ -150,6 +208,7 @@
           class="network-btn custom"
           class:selected={selectedNetworkId === 'custom'}
           on:click={() => selectNetwork('custom')}
+          data-testid="add-jmachine-network-custom"
         >
           <span class="net-icon">⚙️</span>
           <span class="net-name">Custom</span>
@@ -182,6 +241,7 @@
           type="number"
           bind:value={customChainId}
           placeholder="Chain ID"
+          data-testid="add-jmachine-chain-id"
         />
       {:else}
         <input type="text" value={chainId} disabled />
@@ -195,6 +255,7 @@
         bind:value={rpcTextarea}
         placeholder="https://rpc.example.com&#10;https://backup.example.com"
         rows="4"
+        data-testid="add-jmachine-rpcs"
       ></textarea>
       {#if rpcs.length > 0}
         <span class="rpc-count">{rpcs.length} valid URL{rpcs.length > 1 ? 's' : ''}</span>
@@ -220,8 +281,33 @@
       type="text"
       bind:value={name}
       placeholder="my-jurisdiction"
+      data-testid="add-jmachine-name"
     />
   </div>
+
+  <details class="advanced-json">
+    <summary data-testid="add-jmachine-advanced-toggle">Advanced JSON</summary>
+    <textarea
+      bind:value={advancedJson}
+      rows="10"
+      on:input={() => {
+        advancedJsonDirty = true;
+        advancedError = '';
+      }}
+      data-testid="add-jmachine-json"
+    ></textarea>
+    <div class="actions advanced-actions">
+      <button class="btn secondary" type="button" on:click={applyAdvancedJson} data-testid="add-jmachine-json-apply">
+        Apply JSON
+      </button>
+      <button class="btn secondary" type="button" on:click={() => { advancedJsonDirty = false; advancedError = ''; }}>
+        Format from Fields
+      </button>
+    </div>
+    {#if advancedError}
+      <div class="error">{advancedError}</div>
+    {/if}
+  </details>
 
   {#if error}
     <div class="error">{error}</div>
@@ -232,7 +318,7 @@
     <button class="btn secondary" on:click={() => dispatch('cancel')} disabled={isCreating}>
       Cancel
     </button>
-    <button class="btn primary" on:click={handleCreate} disabled={isCreating}>
+    <button class="btn primary" on:click={handleCreate} disabled={isCreating} data-testid="add-jmachine-create">
       {#if isCreating}
         Creating...
       {:else}
@@ -440,6 +526,25 @@
     margin-top: 1rem;
     padding-top: 1rem;
     border-top: 1px solid var(--border-color, #333);
+  }
+
+  .advanced-json {
+    margin-bottom: 1rem;
+  }
+
+  .advanced-json summary {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #888);
+    cursor: pointer;
+    margin-bottom: 0.4rem;
+  }
+
+  .advanced-json textarea {
+    min-height: 12rem;
+  }
+
+  .advanced-actions {
+    justify-content: flex-start;
   }
 
   .btn {

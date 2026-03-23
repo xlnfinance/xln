@@ -20,6 +20,7 @@ import {
   normalizeAdapterEvents,
   processEventBatch,
   toJEvent,
+  updateWatcherJurisdictionCursor,
   type RawJEvent,
 } from './helpers';
 import type { BrowserVMProvider } from './browservm-provider';
@@ -464,6 +465,11 @@ export async function createBrowserVMAdapter(
 
         const blockNumber = normalized[0]?.blockNumber ?? Number((browserVM as any).getBlockNumber?.() ?? 0n);
         const blockHash = normalized[0]?.blockHash ?? (browserVM as any).getBlockHash?.() ?? '0x0';
+        updateWatcherJurisdictionCursor(
+          watcherEnv,
+          blockNumber,
+          browserVM.getDepositoryAddress?.() ?? addresses.depository,
+        );
 
         // Shared: filter canonical, group by entity, convert, enqueue
         processEventBatch(normalized, watcherEnv, blockNumber, blockHash, txCounter, 'browservm');

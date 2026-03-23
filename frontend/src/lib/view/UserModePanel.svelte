@@ -486,8 +486,20 @@
     activeInlinePanel = 'add-jmachine';
   }
 
-  async function handleJMachineCreate(event: CustomEvent<{ name: string; mode: 'browservm' | 'rpc'; chainId: number; rpcs: string[]; ticker: string }>) {
-    const { name, mode, chainId, rpcs, ticker } = event.detail;
+  async function handleJMachineCreate(event: CustomEvent<{
+    name: string;
+    mode: 'browservm' | 'rpc';
+    chainId: number;
+    rpcs: string[];
+    ticker: string;
+    contracts?: {
+      depository?: string;
+      entityProvider?: string;
+      account?: string;
+      deltaTransformer?: string;
+    };
+  }>) {
+    const { name, mode, chainId, rpcs, ticker, contracts } = event.detail;
     const env = get(isolatedEnv);
     if (!env) return;
 
@@ -497,7 +509,7 @@
       await enqueueAndProcess(env, {
         runtimeTxs: [{
           type: 'importJ',
-          data: { name, chainId, ticker, rpcs }
+          data: { name, chainId, ticker, rpcs, ...(contracts ? { contracts } : {}) }
         }],
         entityInputs: []
       });
@@ -509,6 +521,7 @@
         chainId,
         ticker,
         rpcs,
+        ...(contracts ? { contracts } : {}),
         createdAt: Date.now(),
       });
 
