@@ -62,6 +62,7 @@
     flex-direction: column;
     gap: 10px;
     max-width: 400px;
+    pointer-events: none;
   }
 
   .toast {
@@ -76,6 +77,7 @@
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     font-size: 14px;
     color: #e7e5e4;
+    pointer-events: none;
   }
 
   .toast.success {
@@ -137,6 +139,7 @@
     cursor: pointer;
     opacity: 0.7;
     transition: opacity 0.15s;
+    pointer-events: auto;
   }
 
   .close:hover {

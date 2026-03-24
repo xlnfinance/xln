@@ -1124,6 +1124,21 @@ const waitForSingleHubReady = async (child: HubChild): Promise<void> => {
   throw new Error(`${child.name}_READY_TIMEOUT ${safeStringify(child.lastHealth)}`);
 };
 
+const waitForHubApiReady = async (child: HubChild): Promise<void> => {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    await pollHubHealth(child);
+    if (child.lastInfo || child.lastHealth) {
+      return;
+    }
+    if (child.proc?.exitCode !== null) {
+      throw new Error(`${child.name}_API_EXITED_EARLY code=${String(child.proc?.exitCode)}`);
+    }
+    await delay(250);
+  }
+  throw new Error(`${child.name}_API_READY_TIMEOUT`);
+};
+
 const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
@@ -1181,6 +1196,7 @@ const runReset = async (requestedMarketMaker: boolean): Promise<void> => {
     const spawnH23StartedAt = startTiming('reset_spawn_h23');
     for (const child of h23) {
       spawnHub(child);
+      await waitForHubApiReady(child);
     }
     finishTiming('reset_spawn_h23', spawnH23StartedAt);
 

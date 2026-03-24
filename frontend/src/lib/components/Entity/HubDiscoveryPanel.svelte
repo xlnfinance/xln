@@ -14,6 +14,7 @@
     resolveRelayUrls,
   } from '../../stores/xlnStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
+  import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
   import {
     normalizeEntityId,
     requireSignerIdForEntity,
@@ -383,7 +384,7 @@
   }
 
   async function ensureRuntimeRelay(currentEnv: Env, relayUrl: string, timeoutMs = 12_000): Promise<void> {
-    const desired = String(relayUrl || '').trim();
+    const desired = normalizeWsUrl(String(relayUrl || '').trim() || resolveRelayUrls()[0] || '');
     if (!desired) return;
     const xln = await getXLN();
     const p2p = xln.getP2P?.(currentEnv) as RuntimeP2PView | null | undefined;
@@ -391,14 +392,14 @@
       throw new Error('Create or restore a wallet runtime first. Hub gossip uses the active runtime P2P client.');
     }
     const currentRelays = Array.isArray(p2p.relayUrls) ? p2p.relayUrls : [];
-    if (currentRelays.length !== 1 || currentRelays[0] !== desired) {
+    if (currentRelays.length !== 1 || !sameWsEndpoint(currentRelays[0] || '', desired)) {
       p2p.updateConfig({ relayUrls: [desired] });
     }
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
       const relaysNow = Array.isArray(p2p.relayUrls) ? p2p.relayUrls : [];
       const connected = typeof p2p.isConnected === 'function' ? p2p.isConnected() : false;
-      if (relaysNow.length === 1 && relaysNow[0] === desired && connected) return;
+      if (relaysNow.length === 1 && sameWsEndpoint(relaysNow[0] || '', desired) && connected) return;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     const relaysNow = Array.isArray(p2p.relayUrls) ? p2p.relayUrls.join(',') : 'none';

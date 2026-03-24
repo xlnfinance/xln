@@ -4,6 +4,7 @@ import { settings } from './settingsStore';
 import { activeRuntimeId, runtimes, runtimeOperations } from './runtimeStore';
 import { toasts } from './toastStore';
 import { resetEverything } from '$lib/utils/resetEverything';
+import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 import type {
   XLNModule,
   Env,
@@ -183,9 +184,9 @@ export const error = writable<string | null>(null);
 export function resolveRelayUrls(): string[] {
   if (typeof window === 'undefined') return ['wss://xln.finance/relay'];
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const relay = `${protocol}//${window.location.host}/relay`;
+  const relay = normalizeWsUrl(`${protocol}//${window.location.host}/relay`);
   const configured = get(settings)?.relayUrl;
-  if (configured && configured !== relay) {
+  if (configured && !sameWsEndpoint(configured, relay)) {
     console.error(`[relay] SETTINGS_MISMATCH: forcing single relay ${relay}, ignoring ${configured}`);
   }
   return [relay];

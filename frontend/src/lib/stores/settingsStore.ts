@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store';
 import type { Settings, ThemeName, BarColorMode, BarLayoutMode, AccountDeltaViewMode } from '$lib/types/ui';
 import { applyThemeToDocument } from '../utils/themes';
+import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 
 const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token'] as const;
 const VALID_ACCOUNT_DELTA_VIEW_MODES: readonly AccountDeltaViewMode[] = ['per-token', 'aggregated'] as const;
@@ -21,7 +22,7 @@ function clampAccountBarUsdPerPx(raw: unknown): number {
 const resolveDefaultRelayUrl = (): string => {
   if (typeof window === 'undefined') return 'wss://xln.finance/relay';
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/relay`;
+  return normalizeWsUrl(`${protocol}//${window.location.host}/relay`);
 };
 
 // Default settings
@@ -174,7 +175,7 @@ const settingsOperations = {
 
   setRelayUrl(relayUrl: string) {
     const canonical = resolveDefaultRelayUrl();
-    if (relayUrl !== canonical) {
+    if (!sameWsEndpoint(relayUrl, canonical)) {
       console.error(`[settings] RELAY_OVERRIDE_BLOCKED: one-relay mode forced (${canonical}), requested=${relayUrl}`);
     }
     settings.update(current => ({ ...current, relayUrl: canonical }));
