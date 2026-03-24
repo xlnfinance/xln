@@ -30,6 +30,7 @@ import {
   RPC_MARKET_PUBLISH_MS,
   type MarketSnapshotPayload,
 } from '../market-snapshot';
+import { normalizeLoopbackUrl } from '../loopback-url';
 
 type Args = {
   host: string;
@@ -298,7 +299,7 @@ const parseArgs = (): Args => {
   return {
     host: getArg('--host', '127.0.0.1'),
     port,
-    rpcUrl: getArg('--rpc-url', process.env.ANVIL_RPC || 'http://127.0.0.1:8545'),
+    rpcUrl: normalizeLoopbackUrl(getArg('--rpc-url', process.env.ANVIL_RPC || 'http://127.0.0.1:8545')),
     dbRoot: resolve(getArg('--db-root', join(process.cwd(), '.e2e-mesh-db'))),
     mmEnabled: hasFlag('--mm'),
     resetAllowed: hasFlag('--allow-reset') || process.env.XLN_MESH_RESET_ALLOWED === '1',
