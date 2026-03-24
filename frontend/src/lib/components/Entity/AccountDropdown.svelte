@@ -97,7 +97,6 @@
   </span>
 
   <div slot="menu" class="menu-content">
-    <!-- Back to entity option -->
     {#if selectedAccountId}
       <button class="menu-item back-item" on:click={() => selectAccount(null)}>
         <span class="back-arrow">←</span>

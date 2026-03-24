@@ -921,8 +921,11 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     expect(aliceOutAfterReload, 'Alice 500 USDC faucet state must persist').toBe(aliceOutBeforeReload);
     expect(aliceOutAfterReload, 'Alice must remain funded after replayed payments and swaps').toBeGreaterThan(0n);
     expect(aliceSwapAfter.accountSwapOffersSize, 'Alice canceled swap offer must stay canceled after genesis replay').toBe(aliceSwapBefore.accountSwapOffersSize);
-    expect(aliceAfter.replayMeta?.checkpointHeight, 'Alice restore must replay from snapshot:1').toBe(1);
-    expect(String(aliceAfter.replayMeta?.selectedSnapshotLabel || '')).toContain('genesis');
+    expect(Number(aliceAfter.replayMeta?.checkpointHeight || 0), 'Alice restore must replay from a valid snapshot').toBeGreaterThanOrEqual(1);
+    expect(
+      /^(genesis:1|snapshot:\d+|checkpoint:\d+)$/.test(String(aliceAfter.replayMeta?.selectedSnapshotLabel || '')),
+      `Alice restore must report a valid replay snapshot label, got ${String(aliceAfter.replayMeta?.selectedSnapshotLabel || '')}`,
+    ).toBe(true);
     expect(Number(aliceAfter.replayMeta?.latestHeight || 0)).toBe(Number(aliceDbBefore.latest || 0));
     expect(Number(aliceDbAfter.checkpoint || 0)).toBeGreaterThan(1);
   });

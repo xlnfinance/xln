@@ -801,6 +801,13 @@ async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string)
   const select = page.getByTestId('swap-account-select').first();
   const hasSelector = await select.isVisible({ timeout: 1500 }).catch(() => false);
   if (!hasSelector) return;
+  await expect
+    .poll(async () => await select.locator('option').count(), {
+      timeout: 30_000,
+      intervals: [250, 500, 1000],
+      message: 'swap account selector must expose at least one account option',
+    })
+    .toBeGreaterThan(0);
   const values = await select.locator('option').evaluateAll((options) =>
     options.map((option) => ({ value: String((option as HTMLOptionElement).value || ''), label: option.textContent || '' })),
   );
@@ -816,6 +823,12 @@ async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string)
     element.dispatchEvent(new Event('change', { bubbles: true }));
     element.dispatchEvent(new Event('input', { bubbles: true }));
   }, targetAccount.value);
+  await expect
+    .poll(async () => String(await select.inputValue().catch(() => '')).trim().toLowerCase(), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+    })
+    .toBe(String(targetAccount.value).trim().toLowerCase());
 }
 
 function parseFirstNumber(text: string): number {
@@ -831,6 +844,80 @@ function formatDecimalForInput(value: number): string {
 
 function normalizeDisplayedPriceText(value: string): string {
   return String(value || '').replace(/,/g, '').trim();
+}
+
+async function waitForSwapOrderbookLiquidity(
+  page: Page,
+  pairLabel: string,
+  options?: {
+    preferredAccountId?: string;
+    scope?: 'Aggregated' | 'Selected';
+    minSources?: number;
+  },
+): Promise<void> {
+  const desiredScope = options?.scope || 'Aggregated';
+  const minSources = Number.isFinite(options?.minSources) ? Number(options?.minSources) : 1;
+
+  const readVisibleLiquidity = async () => {
+    const asks = await page.locator('.swap-panel .orderbook-panel .asks-section .row.clickable').count();
+    const bids = await page.locator('.swap-panel .orderbook-panel .bids-section .row.clickable').count();
+    const uniqueSourceIds = await page.locator('[data-testid="orderbook-source-icon"]').evaluateAll((nodes) => {
+      const ids = new Set<string>();
+      for (const node of nodes) {
+        const sourceId = String((node as HTMLElement).dataset.sourceId || '').trim();
+        if (sourceId) ids.add(sourceId);
+      }
+      return ids.size;
+    });
+    return { asks, bids, rows: asks + bids, sources: uniqueSourceIds };
+  };
+
+  const tryWaitOnce = async (timeoutMs: number): Promise<{ asks: number; bids: number; rows: number; sources: number }> => {
+    const pairSelect = page.getByTestId('swap-pair-select').first();
+    const scopeToggle = page.getByTestId('swap-scope-toggle').first();
+    const refreshLabel = page.locator('.swap-panel .orderbook-panel .update-label').first();
+    await expect(pairSelect).toBeVisible({ timeout: 20_000 });
+    await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
+    await selectCounterpartyInSwap(page, options?.preferredAccountId);
+    const start = Date.now();
+    let lastState = await readVisibleLiquidity().catch(() => ({ asks: 0, bids: 0, rows: 0, sources: 0 }));
+    while (Date.now() - start < timeoutMs) {
+      if (String(await scopeToggle.textContent() || '').trim() !== desiredScope) {
+        await scopeToggle.click();
+        await page.waitForTimeout(150);
+      }
+      await pairSelect.selectOption({ label: pairLabel });
+      await page.waitForTimeout(250);
+      lastState = await readVisibleLiquidity();
+      if (lastState.rows > 0 && lastState.sources >= minSources) return lastState;
+      if (await refreshLabel.isVisible().catch(() => false)) {
+        await refreshLabel.click().catch(() => {});
+        await page.waitForTimeout(200);
+        lastState = await readVisibleLiquidity().catch(() => lastState);
+        if (lastState.rows > 0 && lastState.sources >= minSources) return lastState;
+      }
+      await selectCounterpartyInSwap(page, options?.preferredAccountId);
+      await page.waitForTimeout(750);
+    }
+    return lastState;
+  };
+
+  let lastState = await tryWaitOnce(45_000);
+  if (lastState.rows > 0 && lastState.sources >= minSources) return;
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => {
+    const env = (window as any).isolatedEnv;
+    return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
+  }, { timeout: 60_000 });
+  await openSwapWorkspace(page);
+  lastState = await tryWaitOnce(45_000);
+  if (lastState.rows > 0 && lastState.sources >= minSources) return;
+
+  const selectedAccountId = await page.getByTestId('swap-account-select').first().inputValue().catch(() => '');
+  throw new Error(
+    `Swap orderbook stayed empty for ${pairLabel}: ${JSON.stringify({ ...lastState, selectedAccountId, desiredScope, minSources })}`,
+  );
 }
 
 async function prepareExecutableOrder(page: Page): Promise<number> {
@@ -1153,8 +1240,7 @@ async function expectAllCanonicalSwapPairsHaveLiquidity(page: Page): Promise<voi
   const expectedPairs = CANONICAL_SWAP_PAIR_LABELS;
 
   for (const pairLabel of expectedPairs) {
-    await pairSelect.selectOption({ label: pairLabel });
-    await page.waitForTimeout(250);
+    await waitForSwapOrderbookLiquidity(page, pairLabel, { scope: 'Aggregated', minSources: 3 });
     await expect
       .poll(async () => {
         const asks = await page.locator('.swap-panel .orderbook-panel .asks-section .row.clickable').count();
@@ -1527,6 +1613,11 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     await timedStep('swap_click.open_workspace', () => openSwapWorkspace(page));
     await timedStep('swap_click.select_counterparty', () => selectCounterpartyInSwap(page, runtimeRef.hubIds[0]!));
     await expect(page.getByTestId('swap-orderbook')).toBeVisible({ timeout: 20_000 });
+    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
+      preferredAccountId: runtimeRef.hubIds[0]!,
+      scope: 'Aggregated',
+      minSources: 3,
+    });
     return {
       entityId: runtimeRef.entityId,
       signerId: runtimeRef.signerId,
@@ -1560,10 +1651,11 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
 
   test('swap manual price override after book click uses the edited limit price', async ({ page }) => {
     const accountRef = await prepareOrderbookClickTest(page);
-    const pairSelect = page.getByTestId('swap-pair-select').first();
-    await expect(pairSelect).toBeVisible({ timeout: 20_000 });
-    await pairSelect.selectOption({ label: 'WETH/USDC' });
-    await page.waitForTimeout(250);
+    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
+      preferredAccountId: accountRef.counterpartyId,
+      scope: 'Aggregated',
+      minSources: 3,
+    });
 
     const buySideButton = page.getByTestId('swap-side-buy').first();
     const priceInput = page.getByTestId('swap-order-price').first();
@@ -1602,10 +1694,11 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
 
   test('swap rejects price beyond 30% from current orderbook', async ({ page }) => {
     const accountRef = await prepareOrderbookClickTest(page);
-    const pairSelect = page.getByTestId('swap-pair-select').first();
-    await expect(pairSelect).toBeVisible({ timeout: 20_000 });
-    await pairSelect.selectOption({ label: 'WETH/USDC' });
-    await page.waitForTimeout(250);
+    await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
+      preferredAccountId: accountRef.counterpartyId,
+      scope: 'Aggregated',
+      minSources: 3,
+    });
 
     const buySideButton = page.getByTestId('swap-side-buy').first();
     const amountInput = page.getByTestId('swap-order-amount').first();

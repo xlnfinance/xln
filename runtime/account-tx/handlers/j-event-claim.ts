@@ -21,15 +21,6 @@ export function handleJEventClaim(
   if (!accountMachine.jEventChain) accountMachine.jEventChain = [];
   if (accountMachine.lastFinalizedJHeight === undefined) accountMachine.lastFinalizedJHeight = 0;
 
-  const MAX_J_HEIGHT_JUMP = 10000;
-  if (jHeight > accountMachine.lastFinalizedJHeight + MAX_J_HEIGHT_JUMP) {
-    return {
-      success: false,
-      events: [`❌ j_event_claim: jHeight ${jHeight} too far ahead`],
-      error: `Invalid jHeight: jump too large (max ${MAX_J_HEIGHT_JUMP})`,
-    };
-  }
-
   if (jHeight <= accountMachine.lastFinalizedJHeight) {
     console.log(
       `   ℹ️ j_event_claim: jHeight ${jHeight} already finalized (lastFinalized=${accountMachine.lastFinalizedJHeight}) - skipping`,

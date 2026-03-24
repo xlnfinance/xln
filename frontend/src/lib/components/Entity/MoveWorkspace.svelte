@@ -130,6 +130,7 @@
       {#if moveFromEndpoint === 'account'}
         <div class="move-account-slot" data-testid="move-source-account-field">
           <EntityInput
+            testId="move-source-account-picker"
             label="From account"
             value={moveSourceAccountId}
             entities={workspaceAccountIds}

@@ -18,6 +18,15 @@ const buildPersistedEnvHashInput = (snapshot: Record<string, unknown>): Record<s
         if (state && 'batchHistory' in state) {
           delete state.batchHistory;
         }
+        if (state && 'orderbookExt' in state) {
+          delete state.orderbookExt;
+        }
+        if (state && 'swapBook' in state) {
+          delete state.swapBook;
+        }
+        if (state && 'lockBook' in state) {
+          delete state.lockBook;
+        }
         return [
           replicaKey,
           state ? { ...replica, state } : replica,
