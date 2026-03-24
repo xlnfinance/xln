@@ -102,6 +102,11 @@ export async function createRpcAdapter(
   provider: Provider,
   signer: Signer
 ): Promise<JAdapter> {
+  const traceEnabled = process.env.JADAPTER_TRACE === '1';
+  const trace = (phase: string, extra?: Record<string, unknown>): void => {
+    if (!traceEnabled) return;
+    console.log(`[JAdapter:rpc][trace] ${phase}${extra ? ` ${JSON.stringify(extra)}` : ''}`);
+  };
   const PROD_WATCH_POLL_MS = 3000;
   const TEST_WATCH_POLL_MS = (() => {
     const raw = Number(process.env.JADAPTER_TEST_WATCH_POLL_MS ?? '1000');
@@ -133,7 +138,9 @@ export async function createRpcAdapter(
   const DEFAULT_PROCESS_BATCH_GAS = 5_000_000n;
   const DEFAULT_SETTLE_GAS = 2_000_000n;
 
+  trace('provider.getNetwork:start');
   const rpcChainId = Number((await provider.getNetwork()).chainId);
+  trace('provider.getNetwork:done', { rpcChainId, configChainId: Number(config.chainId) });
   if (rpcChainId !== Number(config.chainId)) {
     throw new Error(
       `[JAdapter:rpc] chainId mismatch: config=${config.chainId} rpc=${rpcChainId}. Refusing to sign/submit.`,
@@ -357,12 +364,19 @@ export async function createRpcAdapter(
       );
     }
 
+    trace('fromReplica.getCode:start');
     const [accountCode, depCode, epCode, transformerCode] = await Promise.all([
       provider.getCode(addresses.account),
       provider.getCode(addresses.depository),
       provider.getCode(addresses.entityProvider),
       provider.getCode(addresses.deltaTransformer),
     ]);
+    trace('fromReplica.getCode:done', {
+      accountLen: accountCode.length,
+      depLen: depCode.length,
+      epLen: epCode.length,
+      transformerLen: transformerCode.length,
+    });
 
     if (accountCode === '0x' || depCode === '0x' || epCode === '0x' || transformerCode === '0x') {
       throw new Error(
@@ -373,17 +387,23 @@ export async function createRpcAdapter(
           `deltaTransformer=${addresses.deltaTransformer || 'none'} code=${transformerCode}`,
       );
     } else {
+      trace('fromReplica.connect:start');
       // Use any cast to handle ethers version mismatch between root and jurisdictions
       account = Account__factory.connect(addresses.account, signer as any);
       depository = Depository__factory.connect(addresses.depository, signer as any);
       entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer as any);
       deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer as any);
+      trace('fromReplica.connect:done');
+      trace('fromReplica.getAddress:start');
       addresses.account = await account.getAddress();
       addresses.depository = await depository.getAddress();
       addresses.entityProvider = await entityProvider.getAddress();
       addresses.deltaTransformer = await deltaTransformer.getAddress();
+      trace('fromReplica.getAddress:done', { addresses });
       deployed = true;
+      trace('fromReplica.setDeltaTransformer:start');
       setDeltaTransformerAddress(addresses.deltaTransformer);
+      trace('fromReplica.setDeltaTransformer:done');
       console.log('[JAdapter:rpc] Connected to existing contracts ✓');
     }
   }
@@ -1588,6 +1608,7 @@ export async function createRpcAdapter(
   let lastSyncedBlock = 0;
   const txCounter: EventBatchCounter = { value: 0 };
 
+  trace('return adapter');
   return adapter;
 }
 

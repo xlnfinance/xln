@@ -203,8 +203,10 @@ const parseArgs = (): Args => {
 
 const resolvedArgs = parseArgs();
 const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
-const directWsUrl = String(resolvedArgs.directWsUrl || '').trim()
-  || `ws://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}/ws`;
+const directWsUrl = String(resolvedArgs.directWsUrl || '').trim();
+if (!directWsUrl) {
+  throw new Error('[MESH-MM] Missing required --direct-ws-url');
+}
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig => {
@@ -744,6 +746,7 @@ const run = async (): Promise<void> => {
 
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
+    endpointUrls: [directWsUrl],
     advertiseEntityIds: [mmEntityId],
     gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
   });
@@ -862,7 +865,6 @@ const run = async (): Promise<void> => {
   console.log(
     `[MESH-MM] READY entityId=${mmEntityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
   );
-  p2p.updateConfig({ endpointUrls: [directWsUrl] });
 
   await waitForBootstrapOffers();
 

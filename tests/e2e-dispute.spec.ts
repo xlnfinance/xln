@@ -580,7 +580,8 @@ async function queueFundR2CViaUi(
 
 async function queueWithdrawC2RViaUi(
   page: Page,
-  _sourceAccountId: string,
+  sourceAccountId: string,
+  reserveRecipientEntityId: string,
   amount: string,
 ): Promise<void> {
   await ensureAssetsWorkspaceVisible(page);
@@ -594,6 +595,8 @@ async function queueWithdrawC2RViaUi(
 
   await page.getByTestId('move-source-account').first().click();
   await page.getByTestId('move-target-reserve').first().click();
+  await selectEntityInputValue(page, 'move-source-account-picker', sourceAccountId);
+  await selectEntityInputValue(page, 'move-reserve-recipient-picker', reserveRecipientEntityId);
 
   const amountInput = page.getByTestId('move-amount').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
@@ -670,15 +673,15 @@ async function selectEntityInputValue(
 
   const input = selector.locator('input').first();
   const option = page.getByTestId(`${testId}-option-${target}`).first();
-
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
     await openSelector();
     await expect(input).toBeVisible({ timeout: 20_000 });
     await input.fill('');
     await input.fill(entityId);
 
     if (await option.isVisible().catch(() => false)) {
-      await option.dispatchEvent('mousedown');
+      await option.click({ force: true });
     } else {
       await input.press('Enter');
     }
@@ -686,9 +689,15 @@ async function selectEntityInputValue(
     if (await hasTargetSelection()) {
       return;
     }
+    await page.waitForTimeout(250);
   }
 
-  throw new Error(`Failed to select ${entityId} in ${testId}`);
+  await openSelector().catch(() => undefined);
+  const availableOptions = await selector.locator('.dropdown-item .item-id').allTextContents().catch(() => []);
+  const currentText = String(await selector.textContent().catch(() => ''));
+  throw new Error(
+    `Failed to select ${entityId} in ${testId}; current=${currentText}; options=${availableOptions.join(',')}`,
+  );
 }
 
 async function seedDisputePreconditions(
@@ -1344,7 +1353,12 @@ test.describe('E2E Dispute Flow', () => {
     const c2rPendingBefore = c2rBatchBefore.pendingCollateralToReserve;
     const c2rSentBefore = c2rBatchBefore.sentCollateralToReserve;
     const reserveBeforeC2R = await readOnchainReserveViaAnvil(page, accountRef.entityId);
-    await timedStep('post_dispute.queue_c2r_withdraw', () => queueWithdrawC2RViaUi(page, secondHubId, postDisputeCollateralAmount));
+    await timedStep('post_dispute.queue_c2r_withdraw', () => queueWithdrawC2RViaUi(
+      page,
+      secondHubId,
+      accountRef.entityId,
+      postDisputeCollateralAmount,
+    ));
     await timedStep('post_dispute.wait_c2r_queued', async () => {
       await expect.poll(async () => {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);

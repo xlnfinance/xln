@@ -241,8 +241,10 @@ const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
 const resolvedArgs = parseArgs();
 const supportPeerIdentities = parseSupportPeerIdentities(resolvedArgs.supportPeerIdentitiesJson);
 const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
-const directWsUrl = String(resolvedArgs.directWsUrl || '').trim()
-  || `ws://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}/ws`;
+const directWsUrl = String(resolvedArgs.directWsUrl || '').trim();
+if (!directWsUrl) {
+  throw new Error(`[MESH-HUB] Missing required --direct-ws-url for ${resolvedArgs.name}`);
+}
 
 const timings: TimingMap = {
   runtime_boot: { startedAt: null, completedAt: null, ms: null },
@@ -610,7 +612,7 @@ const ensureBootstrapReserves = async (
   env: Env,
   entityId: string,
   tokenCatalog: JTokenInfo[],
-): Promise<void> => {
+): Promise<LocalHealthResponse['bootstrapReserves']> => {
   const startedAt = startTiming('reserve_funding');
   const jadapter = getActiveJAdapter(env);
   if (!jadapter) {
@@ -619,9 +621,9 @@ const ensureBootstrapReserves = async (
 
   const bootstrapTokens = tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT);
   if (!resolvedArgs.deployTokens) {
-    await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);
+    const reserveHealth = await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);
     finishTiming('reserve_funding', startedAt);
-    return;
+    return reserveHealth;
   }
 
   const mints = bootstrapTokens
@@ -646,9 +648,10 @@ const ensureBootstrapReserves = async (
   }
 
   await settleRuntimeFor(env, 30);
-  await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);
+  const reserveHealth = await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);
 
   finishTiming('reserve_funding', startedAt);
+  return reserveHealth;
 };
 
 const ensurePeerBootstrapReserves = async (
@@ -1095,6 +1098,7 @@ const run = async (): Promise<void> => {
   const p2pConnectStartedAt = startTiming('p2p_connect');
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
+    endpointUrls: [directWsUrl],
     advertiseEntityIds: [bootstrap.entityId],
     isHub: true,
     gossipPollMs: BOOTSTRAP_POLL_MS * 5,
@@ -1102,12 +1106,11 @@ const run = async (): Promise<void> => {
   if (!p2p) throw new Error('P2P_START_FAILED');
   finishTiming('p2p_connect', p2pConnectStartedAt);
 
-  await ensureBootstrapReserves(env, bootstrap.entityId, tokenCatalog);
-
   const totalMeshStartedAt = startTiming('mesh_ready_total');
   let gossipReadyMarked = false;
   let accountsReadyMarked = false;
   let creditReadyMarked = false;
+  let reserveReadyMarked = false;
   let meshLoopInFlight = false;
 
   const driveMeshBootstrap = async (): Promise<void> => {
@@ -1132,11 +1135,6 @@ const run = async (): Promise<void> => {
         identity.entityId !== bootstrap.entityId.toLowerCase() &&
         visibleProfiles.some((profile) => profile.entityId.toLowerCase() === identity.entityId),
       );
-
-      if (gossipReadyMarked && peers.length > 0) {
-        await ensurePeerBootstrapReserves(env, peers.map(peer => peer.entityId), tokenCatalog);
-        await syncReserveSnapshotFromChain(env, bootstrap.entityId, tokenCatalog);
-      }
 
       const openInputs: EntityInput[] = [];
       const creditInputs: EntityInput[] = [];
@@ -1250,7 +1248,14 @@ const run = async (): Promise<void> => {
         finishTiming('mesh_credit', timings.mesh_credit.startedAt ?? startTiming('mesh_credit'));
         creditReadyMarked = true;
       }
-      if (allCreditReady && timings.mesh_ready_total.ms === null) {
+      if (allCreditReady && !reserveReadyMarked) {
+        if (resolvedArgs.deployTokens && peers.length > 0) {
+          await ensurePeerBootstrapReserves(env, peers.map(peer => peer.entityId), tokenCatalog);
+        }
+        const reserveHealth = await ensureBootstrapReserves(env, bootstrap.entityId, tokenCatalog);
+        reserveReadyMarked = reserveHealth.ok;
+      }
+      if (allCreditReady && reserveReadyMarked && timings.mesh_ready_total.ms === null) {
         finishTiming('mesh_ready_total', totalMeshStartedAt);
       }
     } finally {
@@ -1275,7 +1280,6 @@ const run = async (): Promise<void> => {
   console.log(
     `[MESH-HUB] READY name=${resolvedArgs.name} entityId=${bootstrap.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
   );
-  p2p.updateConfig({ endpointUrls: [directWsUrl] });
 
   const shutdown = async () => {
     shuttingDown = true;

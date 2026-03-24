@@ -1165,6 +1165,25 @@ const waitForHubBaseline = async (): Promise<void> => {
   throw new Error(`HUB_BASELINE_TIMEOUT ${safeStringify(computeAggregatedHealth())}`);
 };
 
+const waitForHubProfilesReady = async (): Promise<void> => {
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline) {
+    await pollAllHubHealth();
+    const allVisible = hubChildren.every((child) => {
+      const visibleNames = new Set(child.lastHealth?.gossip?.visibleHubNames ?? []);
+      return HUB_NAMES.every((name) => visibleNames.has(name));
+    });
+    if (allVisible) {
+      return;
+    }
+    if (hubChildren.some((child) => child.proc?.exitCode !== null)) {
+      throw new Error(`HUB_PROFILES_READY_EXIT ${safeStringify(computeAggregatedHealth().hubs)}`);
+    }
+    await delay(250);
+  }
+  throw new Error(`HUB_PROFILES_READY_TIMEOUT ${safeStringify(computeAggregatedHealth())}`);
+};
+
 const waitForMarketMakerReady = async (): Promise<void> => {
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
@@ -1181,23 +1200,26 @@ const waitForMarketMakerReady = async (): Promise<void> => {
   throw new Error(`MM_READY_TIMEOUT ${safeStringify(computeAggregatedHealth().marketMaker)}`);
 };
 
-const waitForSingleHubReady = async (child: HubChild): Promise<void> => {
+const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
     await pollHubHealth(child);
     if (
-      child.lastHealth?.bootstrapReserves?.ok === true &&
       typeof child.lastInfo?.entityId === 'string' &&
-      child.lastInfo.entityId.length > 0
+      child.lastInfo.entityId.length > 0 &&
+      child.lastHealth?.timings?.import_j?.completedAt &&
+      child.lastHealth?.timings?.hub_bootstrap?.completedAt &&
+      child.lastHealth?.timings?.orderbook_init?.completedAt &&
+      child.lastHealth?.timings?.p2p_connect?.completedAt
     ) {
       return;
     }
     if (child.proc?.exitCode !== null) {
-      throw new Error(`${child.name}_EXITED_EARLY code=${String(child.proc?.exitCode)}`);
+      throw new Error(`${child.name}_SELF_READY_EXITED_EARLY code=${String(child.proc?.exitCode)}`);
     }
     await delay(250);
   }
-  throw new Error(`${child.name}_READY_TIMEOUT ${safeStringify(child.lastHealth)}`);
+  throw new Error(`${child.name}_SELF_READY_TIMEOUT ${safeStringify(child.lastHealth)}`);
 };
 
 const waitForHubApiReady = async (child: HubChild): Promise<void> => {
@@ -1265,18 +1287,19 @@ const runReset = async (requestedMarketMaker: boolean): Promise<void> => {
     finishTiming('reset_spawn_h1', spawnH1StartedAt);
 
     const waitH1StartedAt = startTiming('reset_wait_h1');
-    await waitForSingleHubReady(h1);
+    await waitForHubSelfReady(h1);
     finishTiming('reset_wait_h1', waitH1StartedAt);
     await waitForShardJurisdictions(h1);
 
     const spawnH23StartedAt = startTiming('reset_spawn_h23');
     for (const child of h23) {
       spawnHub(child);
-      await waitForHubApiReady(child);
+      await waitForHubSelfReady(child);
     }
     finishTiming('reset_spawn_h23', spawnH23StartedAt);
 
     const waitStartedAt = startTiming('reset_wait_hubs');
+    await waitForHubProfilesReady();
     await waitForHubBaseline();
     finishTiming('reset_wait_hubs', waitStartedAt);
 
