@@ -131,32 +131,23 @@ async function openAccountsWorkspace(page: Page): Promise<void> {
   const accountsTab = page.getByTestId('tab-accounts').first();
   const accountList = page.getByTestId('account-list-wrapper').first();
   const workspaceTabs = page.locator('.account-workspace-tab').first();
+  const backButton = page.locator('.account-panel .back-button, .back-button').first();
   const isAccountsWorkspaceVisible = async () =>
     await accountList.isVisible().catch(() => false)
       || await workspaceTabs.isVisible().catch(() => false);
 
-  if (await isAccountsWorkspaceVisible()) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (await isAccountsWorkspaceVisible()) break;
+    if (await backButton.isVisible().catch(() => false)) {
+      await backButton.click();
+      await page.waitForTimeout(300);
+      continue;
+    }
     if (await accountsTab.isVisible().catch(() => false)) {
       await accountsTab.click();
+      await page.waitForTimeout(300);
+      continue;
     }
-    return;
-  }
-
-  const backButton = page.locator('.back-button').first();
-  if (await backButton.isVisible().catch(() => false)) {
-    await backButton.click();
-    await expect
-      .poll(async () => await isAccountsWorkspaceVisible(), {
-        timeout: 20_000,
-        intervals: [200, 400, 800],
-        message: 'back from focused account must return to accounts workspace',
-      })
-      .toBe(true);
-  }
-
-  if (await accountsTab.isVisible().catch(() => false)) {
-    await accountsTab.click();
-    return;
   }
 
   await expect
@@ -242,24 +233,30 @@ async function focusConfiguredAccount(page: Page, hubId: string): Promise<void> 
 }
 
 async function selectConfigureAccount(page: Page, hubId: string): Promise<void> {
-  const selector = page.locator('.configure-panel .workspace-inline-selector .entity-input').first();
+  const selector = page.getByTestId('configure-account-selector').first();
   await expect(selector).toBeVisible({ timeout: 20_000 });
+  const optionTestId = `configure-account-selector-option-${hubId.toLowerCase()}`;
 
   const closedTrigger = selector.locator('.closed-trigger').first();
   if (await closedTrigger.isVisible().catch(() => false)) {
-    if (await closedTrigger.textContent().then((text) => String(text || '').toLowerCase().includes(hubId.toLowerCase())).catch(() => false)) {
+    if (await closedTrigger.textContent().then((text) => String(text || '').toLowerCase().includes(hubId.toLowerCase().slice(0, 10))).catch(() => false)) {
       return;
     }
     await closedTrigger.click();
-  } else {
-    const input = selector.locator('input').first();
-    await expect(input).toBeVisible({ timeout: 20_000 });
-    await input.click();
   }
 
-  const option = page.locator('.dropdown-item').filter({ hasText: hubId }).first();
-  await expect(option).toBeVisible({ timeout: 20_000 });
-  await option.click();
+  const input = selector.locator('input').first();
+  await expect(input).toBeVisible({ timeout: 20_000 });
+  await input.click();
+  await input.fill(hubId);
+  const option = page.getByTestId(optionTestId).first();
+  if (await option.isVisible().catch(() => false)) {
+    await option.click();
+  } else {
+    const fallbackOption = page.locator('.dropdown-item').filter({ hasText: hubId }).first();
+    await expect(fallbackOption).toBeVisible({ timeout: 20_000 });
+    await fallbackOption.click();
+  }
   await expect(selector.locator('.closed-trigger').first()).toContainText(hubId.slice(0, 10), { timeout: 20_000 });
 }
 
@@ -285,29 +282,81 @@ async function addTokenToAccount(page: Page, hubId: string, tokenId: number): Pr
 }
 
 async function extendCreditToken(page: Page, hubId: string, tokenId: number, amountDisplay: string): Promise<void> {
-  await openConfigureWorkspace(page, hubId);
-  const creditTab = page.locator('.configure-tab').filter({ hasText: /Extend Credit/i }).first();
-  await expect(creditTab).toBeVisible({ timeout: 20_000 });
-  await creditTab.click();
-  const panel = page.locator('.configure-panel .action-card').filter({ hasText: /Extend Credit/i }).first();
-  await expect(panel).toBeVisible({ timeout: 20_000 });
-  const tokenSelect = panel.locator('select.form-select').first();
-  await expect(tokenSelect).toBeVisible({ timeout: 20_000 });
-  await tokenSelect.selectOption(String(tokenId));
-  const amountInput = panel.locator('input[placeholder="Credit amount"]').first();
-  await expect(amountInput).toBeVisible({ timeout: 20_000 });
-  await amountInput.fill(amountDisplay);
-  const submit = panel.getByRole('button', { name: /^Extend Credit$/ }).first();
-  await expect(submit).toBeEnabled({ timeout: 20_000 });
-  await submit.click();
+  const amount = BigInt(amountDisplay) * 10n ** 18n;
+  const queued = await page.evaluate(async ({ hubId, tokenId, amount }) => {
+    const view = window as typeof window & {
+      isolatedEnv?: unknown;
+      __xln_env?: unknown;
+      XLN?: { enqueueRuntimeInput?: (env: unknown, input: unknown) => void };
+      __xln_instance?: { enqueueRuntimeInput?: (env: unknown, input: unknown) => void };
+    };
+    const env = view.isolatedEnv ?? view.__xln_env;
+    const XLN = view.XLN
+      ?? view.__xln_instance
+      ?? await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+    if (!env || !XLN?.enqueueRuntimeInput) return { ok: false, error: 'isolatedEnv/XLN missing' };
+
+    const replicas = (env as { eReplicas?: Map<string, unknown>; runtimeId?: string }).eReplicas;
+    const runtimeId = String((env as { runtimeId?: string }).runtimeId || '').toLowerCase();
+    let identity: { entityId: string; signerId: string } | null = null;
+    if (replicas instanceof Map) {
+      for (const rawKey of replicas.keys()) {
+        const [entityId, signerId] = String(rawKey).split(':');
+        if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
+        if (runtimeId && String(signerId).toLowerCase() !== runtimeId) continue;
+        identity = { entityId, signerId };
+        break;
+      }
+    }
+    if (!identity) return { ok: false, error: 'local identity missing' };
+
+    XLN.enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: identity.entityId,
+        signerId: identity.signerId,
+        entityTxs: [{
+          type: 'extendCredit',
+          data: {
+            counterpartyEntityId: hubId,
+            tokenId,
+            amount,
+          },
+        }],
+      }],
+    });
+    return { ok: true };
+  }, { hubId, tokenId, amount });
+  expect(queued.ok, queued.error || `extendCredit enqueue failed for token ${tokenId}`).toBe(true);
+
   await expect.poll(
-    async () => await amountInput.inputValue(),
-    {
-      timeout: 15_000,
-      intervals: [200, 400, 600],
-      message: `credit amount input should reset after extending token ${tokenId}`,
+    async () => {
+      const runtimeIdentity = await page.evaluate(() => {
+        const env = (window as typeof window & {
+          isolatedEnv?: {
+            runtimeId?: string;
+            eReplicas?: Map<string, unknown>;
+          };
+        }).isolatedEnv;
+        if (!env?.eReplicas) return null;
+        const runtimeId = String(env.runtimeId || '').toLowerCase();
+        for (const rawKey of env.eReplicas.keys()) {
+          const [entityId, signerId] = String(rawKey).split(':');
+          if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
+          if (runtimeId && String(signerId).toLowerCase() !== runtimeId) continue;
+          return { entityId, signerId };
+        }
+        return null;
+      });
+      if (!runtimeIdentity) return false;
+      return await isAccountReady(page, runtimeIdentity.entityId, runtimeIdentity.signerId, hubId, [tokenId], 0);
     },
-  ).toBe('0');
+    {
+      timeout: DEFAULT_OPEN_TIMEOUT_MS,
+      intervals: [250, 500, 750],
+      message: `extendCredit should activate token ${tokenId} for ${hubId.slice(0, 10)}`,
+    },
+  ).toBe(true);
 }
 
 type AccountOpenStatus = {
@@ -390,33 +439,6 @@ export async function connectRuntimeToHub(
   ).toBe(true);
 
   for (const tokenId of DEFAULT_TOKEN_IDS) {
-    const tokenActive = await page.evaluate(
-      ({ entityId, signerId, hubId, tokenId }) => {
-        const env = (window as typeof window & {
-          isolatedEnv?: {
-            eReplicas?: Map<string, {
-              state?: {
-                accounts?: Map<string, {
-                  deltas?: Map<number, unknown>;
-                }>;
-              };
-            }>;
-          };
-        }).isolatedEnv;
-        if (!env?.eReplicas) return false;
-        for (const [replicaKey, replica] of env.eReplicas.entries()) {
-          const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
-          if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
-          if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
-          return Boolean(replica.state?.accounts?.get(hubId)?.deltas?.has(tokenId));
-        }
-        return false;
-      },
-      { entityId: identity.entityId, signerId: identity.signerId, hubId, tokenId },
-    );
-    if (!tokenActive && tokenId !== 1) {
-      await addTokenToAccount(page, hubId, tokenId);
-    }
     await extendCreditToken(page, hubId, tokenId, DEFAULT_CREDIT_AMOUNT_DISPLAY);
   }
 

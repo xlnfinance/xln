@@ -251,22 +251,47 @@ export async function gotoApp(
       // no-op
     }
   }, apiBaseUrl);
-  await page.goto(`${appBaseUrl}/app`);
-  const unlock = page.locator('button:has-text("Unlock")');
-  if (await unlock.isVisible({ timeout: 1500 }).catch(() => false)) {
-    await page.locator('input').first().fill('mml');
-    await unlock.click();
-    await page.waitForURL('**/app', { timeout: 10_000 });
+
+  const waitForAppReady = async (): Promise<boolean> => {
+    const unlock = page.locator('button:has-text("Unlock")');
+    if (await unlock.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await page.locator('input').first().fill('mml');
+      await unlock.click();
+      await page.waitForURL('**/app', { timeout: 10_000 });
+    }
+    try {
+      await page.waitForFunction(() => {
+        const loadingVisible = Boolean(document.querySelector('.loading-screen'));
+        const errorVisible = Boolean(document.querySelector('.error-screen'));
+        const viewVisible = Boolean(document.querySelector('.view-wrapper'));
+        return !loadingVisible &&
+          !errorVisible &&
+          viewVisible;
+      }, { timeout: initTimeoutMs });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await page.goto(`${appBaseUrl}/app`, { waitUntil: 'domcontentloaded' });
+    if (await waitForAppReady()) {
+      if (settleMs > 0) await page.waitForTimeout(settleMs);
+      return;
+    }
+    await page.reload({ waitUntil: 'domcontentloaded' });
   }
-  await page.waitForFunction(() => {
-    const loadingVisible = Boolean(document.querySelector('.loading-screen'));
-    const errorVisible = Boolean(document.querySelector('.error-screen'));
-    const viewVisible = Boolean(document.querySelector('.view-wrapper'));
-    return !loadingVisible &&
-      !errorVisible &&
-      viewVisible;
-  }, { timeout: initTimeoutMs });
-  if (settleMs > 0) await page.waitForTimeout(settleMs);
+
+  const appDiagnostics = await page.evaluate(() => ({
+    href: window.location.href,
+    title: document.title,
+    bodyText: (document.body?.innerText || '').slice(0, 400),
+    hasLoading: Boolean(document.querySelector('.loading-screen')),
+    hasError: Boolean(document.querySelector('.error-screen')),
+    hasView: Boolean(document.querySelector('.view-wrapper')),
+  })).catch(() => null);
+  throw new Error(`gotoApp failed to reach ready view: ${JSON.stringify(appDiagnostics)}`);
 }
 
 export function selectDemoMnemonic(label: DemoUserName): string {

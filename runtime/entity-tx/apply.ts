@@ -372,7 +372,7 @@ export const applyEntityTx = async (
           proofHeader: {
             fromEntity: entityState.entityId, // Perspective-dependent for signing
             toEntity: counterpartyId,
-            nonce: 0, // Unified on-chain nonce
+            nonce: 1, // Next unified on-chain nonce to use
           },
           proofBody: { tokenIds: [], deltas: [] },
           // Dispute configuration (default: 20 blocks = 2 * 10)
