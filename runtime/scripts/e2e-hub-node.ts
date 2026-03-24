@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
+import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
@@ -13,9 +14,11 @@ import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import {
   getActiveJAdapter,
+  getP2PState,
   main,
   process as runtimeProcess,
   enqueueRuntimeInput,
+  handleInboundP2PEntityInput,
   resolveEntityProposerId,
   startP2P,
   startRuntimeLoop,
@@ -23,6 +26,7 @@ import {
 import type { EntityInput, Env } from '../types';
 import {
   applyJEventsToEnv,
+  hasPendingRuntimeWork,
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,
   getAccountMachine,
@@ -53,8 +57,16 @@ type Args = {
   apiPort: number;
   rpcUrl: string;
   meshHubNames: string[];
+  supportPeerIdentitiesJson: string;
   dbPath: string;
   deployTokens: boolean;
+};
+
+type SupportPeerIdentity = {
+  name: string;
+  entityId: string;
+  signerId: string;
+  creditAmount: bigint;
 };
 
 type HubPairHealth = {
@@ -80,7 +92,11 @@ type LocalHealthResponse = {
   entityId: string | null;
   runtimeId: string | null;
   relayUrl: string;
+  directWsUrl?: string;
   apiUrl: string;
+  p2p?: {
+    directPeers: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
+  };
   gossip: {
     visibleHubNames: string[];
     visibleHubIds: string[];
@@ -171,13 +187,12 @@ const parseArgs = (): Args => {
       .split(',')
       .map(part => part.trim())
       .filter(Boolean),
+    supportPeerIdentitiesJson: getArg('--support-peer-identities-json', '[]'),
     dbPath: getArg('--db-path', ''),
     deployTokens: hasFlag('--deploy-tokens'),
   };
 };
 
-const resolvedArgs = parseArgs();
-const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
 const DEFAULT_ANVIL_MNEMONIC = 'test test test test test test test test test test test junk';
 const FAUCET_SIGNER_LABEL = 'faucet-1';
 const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('10');
@@ -197,6 +212,26 @@ const deriveAnvilDevPrivateKey = (index: number): string => {
   const wallet = HDNodeWallet.fromMnemonic(mnemonic, `m/44'/60'/0'/0/${index}`);
   return wallet.privateKey;
 };
+
+const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((entry) => ({
+      name: String(entry?.name || '').trim(),
+      entityId: String(entry?.entityId || '').trim().toLowerCase(),
+      signerId: String(entry?.signerId || '').trim().toLowerCase(),
+      creditAmount: BigInt(String(entry?.creditAmount || HUB_MESH_CREDIT_AMOUNT)),
+    })).filter((entry) => entry.name && entry.entityId && entry.signerId && entry.creditAmount > 0n);
+  } catch {
+    return [];
+  }
+};
+
+const resolvedArgs = parseArgs();
+const supportPeerIdentities = parseSupportPeerIdentities(resolvedArgs.supportPeerIdentitiesJson);
+const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
+const directWsUrl = `ws://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}/ws`;
 
 const timings: TimingMap = {
   runtime_boot: { startedAt: null, completedAt: null, ms: null },
@@ -473,6 +508,49 @@ const ensureOrderbook = async (env: Env, entityId: string, signerId: string): Pr
   finishTiming('orderbook_init', startedAt);
 };
 
+const resolveRuntimeWaitPollMs = (): number => 25;
+const resolveReserveWaitPollMs = (): number => 50;
+
+const waitForRuntimeIdle = async (env: Env, timeoutMs = 5000): Promise<boolean> => {
+  const started = Date.now();
+  const pollMs = resolveRuntimeWaitPollMs();
+  while (Date.now() - started < timeoutMs) {
+    if (!hasPendingRuntimeWork(env)) return true;
+    await sleep(pollMs);
+  }
+  return false;
+};
+
+const waitForJBatchClear = async (env: Env, timeoutMs = 5000): Promise<boolean> => {
+  const started = Date.now();
+  const pollMs = resolveRuntimeWaitPollMs();
+  while (Date.now() - started < timeoutMs) {
+    const pendingJ = Array.from(env.jReplicas?.values?.() || []).some(j => (j.mempool?.length ?? 0) > 0);
+    if (!pendingJ && !hasPendingRuntimeWork(env)) return true;
+    await sleep(pollMs);
+  }
+  return false;
+};
+
+const waitForReserveUpdate = async (
+  jadapter: JAdapter,
+  entityId: string,
+  tokenId: number,
+  expectedMin: bigint,
+  timeoutMs = 10000,
+): Promise<bigint | null> => {
+  const started = Date.now();
+  const pollMs = resolveReserveWaitPollMs();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const current = await jadapter.getReserves(entityId, tokenId);
+      if (current >= expectedMin) return current;
+    } catch {}
+    await sleep(pollMs);
+  }
+  return null;
+};
+
 const getReserveHealth = (env: Env, entityId: string, tokenCatalog: JTokenInfo[]): LocalHealthResponse['bootstrapReserves'] => {
   const replica = getEntityReplicaById(env, entityId);
   const tokens = tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT).map(token => {
@@ -641,7 +719,11 @@ const buildLocalHealth = (
     entityId,
     runtimeId: String(env.runtimeId || '') || null,
     relayUrl: resolvedArgs.relayUrl,
+    directWsUrl,
     apiUrl,
+    p2p: {
+      directPeers: getP2PState(env).directPeers || [],
+    },
     gossip: {
       visibleHubNames: visibleNames,
       visibleHubIds: visibleIds,
@@ -750,6 +832,7 @@ const run = async (): Promise<void> => {
   const p2pConnectStartedAt = startTiming('p2p_connect');
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
+    endpointUrls: [directWsUrl],
     advertiseEntityIds: [bootstrap.entityId],
     isHub: true,
     gossipPollMs: BOOTSTRAP_POLL_MS * 5,
@@ -785,6 +868,11 @@ const run = async (): Promise<void> => {
       }
 
       const peers = requiredHubProfiles.filter(profile => profile.entityId !== bootstrap.entityId.toLowerCase());
+      const visibleProfiles = env.gossip?.getProfiles?.() || [];
+      const visibleSupportPeers = supportPeerIdentities.filter((identity) =>
+        identity.entityId !== bootstrap.entityId.toLowerCase() &&
+        visibleProfiles.some((profile) => profile.entityId.toLowerCase() === identity.entityId),
+      );
       if (gossipReadyMarked && peers.length > 0) {
         await ensurePeerBootstrapReserves(env, peers.map(peer => peer.entityId), tokenCatalog);
         await syncReserveSnapshotFromChain(env, bootstrap.entityId, tokenCatalog);
@@ -839,6 +927,54 @@ const run = async (): Promise<void> => {
                 counterpartyEntityId: peer.entityId,
                 tokenId,
                 amount: HUB_MESH_CREDIT_AMOUNT,
+              },
+            })),
+          });
+        }
+      }
+
+      for (const peer of visibleSupportPeers) {
+        const localAccount = getAccountMachine(env, bootstrap.entityId, peer.entityId);
+        const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
+        if (!hasAccount(env, bootstrap.entityId, peer.entityId) && canWrite) {
+          openInputs.push({
+            entityId: bootstrap.entityId,
+            signerId: bootstrap.signerId,
+            entityTxs: [
+              {
+                type: 'openAccount',
+                data: {
+                  targetEntityId: peer.entityId,
+                  tokenId: HUB_MESH_TOKEN_ID,
+                  creditAmount: peer.creditAmount,
+                },
+              },
+              ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map((tokenId) => ({
+                type: 'extendCredit' as const,
+                data: {
+                  counterpartyEntityId: peer.entityId,
+                  tokenId,
+                  amount: peer.creditAmount,
+                },
+              })),
+            ],
+          });
+          continue;
+        }
+        if (!localAccount || !canWrite) continue;
+        const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter((tokenId) =>
+          getCreditGrantedByEntity(localAccount, bootstrap.entityId, tokenId) < peer.creditAmount
+        );
+        if (missingTokenIds.length > 0) {
+          creditInputs.push({
+            entityId: bootstrap.entityId,
+            signerId: bootstrap.signerId,
+            entityTxs: missingTokenIds.map((tokenId) => ({
+              type: 'extendCredit' as const,
+              data: {
+                counterpartyEntityId: peer.entityId,
+                tokenId,
+                amount: peer.creditAmount,
               },
             })),
           });
@@ -903,13 +1039,24 @@ const run = async (): Promise<void> => {
   }, BOOTSTRAP_POLL_MS);
   void driveMeshBootstrap();
 
+  const directRuntimeWs = createDirectRuntimeWsRoute({
+    runtimeId: String(env.runtimeId || ''),
+    runtimeSeed: resolvedArgs.seed,
+    onEntityInput: async (from, input, ingressTimestamp) => {
+      handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
+    },
+  });
+
   const server = Bun.serve({
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
-    async fetch(request) {
+    async fetch(request, serverRef) {
       const url = new URL(request.url);
       const pathname = url.pathname;
       const headers = JSON_HEADERS;
+
+      const upgraded = directRuntimeWs.maybeUpgrade(request, serverRef);
+      if (upgraded !== undefined) return upgraded;
 
       if (pathname === '/api/info') {
         return new Response(
@@ -919,6 +1066,7 @@ const run = async (): Promise<void> => {
             runtimeId: env.runtimeId,
             apiUrl,
             relayUrl: resolvedArgs.relayUrl,
+            directWsUrl,
           }),
           { headers },
         );
@@ -955,6 +1103,100 @@ const run = async (): Promise<void> => {
 
       if (pathname === '/api/faucet/gas' && request.method === 'POST') {
         return await externalWalletApi.handleGasFaucet(request);
+      }
+
+      if (pathname === '/api/faucet/reserve' && request.method === 'POST') {
+        const body = await request.json() as {
+          userEntityId?: string;
+          tokenId?: number | string;
+          tokenSymbol?: string;
+          amount?: string | number;
+        };
+        const userEntityId = String(body.userEntityId || '').toLowerCase();
+        const rawTokenId = body.tokenId ?? 1;
+        let tokenId = typeof rawTokenId === 'number' ? rawTokenId : Number(rawTokenId);
+        const tokenSymbol = typeof body.tokenSymbol === 'string' ? body.tokenSymbol : undefined;
+        const amount = typeof body.amount === 'string' ? body.amount : String(body.amount ?? '100');
+        if (!userEntityId) {
+          return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
+        }
+        if (!Number.isFinite(tokenId) || tokenId <= 0) {
+          return new Response(JSON.stringify({ error: 'Invalid tokenId' }), { status: 400, headers });
+        }
+
+        const tokenMeta = activeTokenCatalog.find(token =>
+          Number(token.tokenId) === tokenId ||
+          (tokenSymbol ? String(token.symbol || '').toUpperCase() === tokenSymbol.toUpperCase() : false),
+        );
+        if (!tokenMeta) {
+          return new Response(JSON.stringify({ error: 'Unknown token', tokenId, tokenSymbol }), {
+            status: 400,
+            headers,
+          });
+        }
+        tokenId = Number(tokenMeta.tokenId);
+        const decimals = typeof tokenMeta.decimals === 'number' ? tokenMeta.decimals : 18;
+        const amountWei = ethers.parseUnits(amount, decimals);
+        const prevUserReserve = await jadapter.getReserves(userEntityId, tokenId).catch(() => 0n);
+        const hubReplica = getEntityReplicaById(env, bootstrap.entityId);
+        const hubReserve = hubReplica?.state?.reserves?.get(tokenId) ?? 0n;
+        if (hubReserve < amountWei) {
+          return new Response(JSON.stringify({
+            error: 'Hub has insufficient reserves',
+            have: hubReserve.toString(),
+            need: amountWei.toString(),
+          }), {
+            status: 409,
+            headers,
+          });
+        }
+
+        enqueueRuntimeInput(env, {
+          runtimeTxs: [],
+          entityInputs: [{
+            entityId: bootstrap.entityId,
+            signerId: bootstrap.signerId,
+            entityTxs: [
+              {
+                type: 'reserve_to_reserve',
+                data: {
+                  toEntityId: userEntityId,
+                  tokenId,
+                  amount: amountWei,
+                },
+              },
+              {
+                type: 'j_broadcast',
+                data: {},
+              },
+            ],
+          }],
+        });
+
+        await waitForRuntimeIdle(env, 5000);
+        const batchCleared = await waitForJBatchClear(env, 5000);
+        if (!batchCleared) {
+          return new Response(JSON.stringify({ error: 'J-batch did not broadcast in time' }), {
+            status: 504,
+            headers,
+          });
+        }
+        const expectedMin = prevUserReserve + amountWei;
+        const updatedReserve = await waitForReserveUpdate(jadapter, userEntityId, tokenId, expectedMin, 10000);
+        if (updatedReserve === null) {
+          return new Response(JSON.stringify({ error: 'Reserve update not confirmed on-chain' }), {
+            status: 504,
+            headers,
+          });
+        }
+        return new Response(JSON.stringify({
+          success: true,
+          type: 'reserve',
+          amount,
+          tokenId,
+          from: bootstrap.entityId,
+          to: userEntityId,
+        }), { headers });
       }
 
       if (pathname === '/api/faucet/offchain' && request.method === 'POST') {
@@ -1040,6 +1282,7 @@ const run = async (): Promise<void> => {
 
       return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers });
     },
+    websocket: directRuntimeWs.websocket,
   });
 
   console.log(

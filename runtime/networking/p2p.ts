@@ -45,10 +45,12 @@ const MIN_GOSSIP_POLL_MS = 1000;
 
 export type P2PConfig = {
   relayUrls?: string[];
+  endpointUrls?: string[];
   seedRuntimeIds?: string[];
   runtimeId?: string;
   signerId?: string;
   advertiseEntityIds?: string[];
+  isHub?: boolean;
   gossipPollMs?: number;
 };
 
@@ -57,8 +59,10 @@ type RuntimeP2POptions = {
   runtimeId: string;
   signerId?: string;
   relayUrls?: string[];
+  endpointUrls?: string[];
   seedRuntimeIds?: string[];
   advertiseEntityIds?: string[];
+  isHub?: boolean;
   gossipPollMs?: number;
   onEntityInput: (from: string, input: RoutedEntityInput, timestamp?: number) => void;
   onGossipProfiles: (from: string, profiles: Profile[]) => void;
@@ -76,6 +80,10 @@ const normalizeGossipPollMs = (value: number | undefined): number => {
 };
 
 const unique = (items: string[]): string[] => Array.from(new Set(items.filter(Boolean)));
+const normalizeWsUrls = (items: string[] | undefined): string[] =>
+  unique((items || [])
+    .map(item => String(item || '').trim())
+    .filter(item => item.startsWith('ws://') || item.startsWith('wss://')));
 
 const isSameList = (a: string[], b: string[]): boolean => {
   if (a.length !== b.length) return false;
@@ -155,12 +163,15 @@ export class RuntimeP2P {
   private runtimeId: string;
   private signerId: string;
   private relayUrls: string[];
+  private endpointUrls: string[];
   private seedRuntimeIds: string[];
   private advertiseEntityIds: string[] | null;
   private gossipPollMs: number;
   private onEntityInput: (from: string, input: RoutedEntityInput, timestamp?: number) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
   private clients: RuntimeWsClient[] = [];
+  private directClients = new Map<string, RuntimeWsClient>();
+  private directClientUrls = new Map<string, string>();
   private pendingByRuntime = new Map<string, { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[]>();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private retryInterval: ReturnType<typeof setInterval> | null = null;
@@ -178,6 +189,7 @@ export class RuntimeP2P {
     this.runtimeId = normalizeRuntimeId(options.runtimeId);
     this.signerId = options.signerId || '1';
     this.relayUrls = unique(options.relayUrls || [DEFAULT_RELAY_URL]);
+    this.endpointUrls = normalizeWsUrls(options.endpointUrls);
     this.seedRuntimeIds = unique(options.seedRuntimeIds || []);
     this.advertiseEntityIds = options.advertiseEntityIds || null;
     this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
@@ -203,6 +215,13 @@ export class RuntimeP2P {
   updateConfig(config: P2PConfig) {
     if (config.seedRuntimeIds) {
       this.seedRuntimeIds = unique(config.seedRuntimeIds);
+    }
+    if (config.endpointUrls) {
+      const nextUrls = normalizeWsUrls(config.endpointUrls);
+      if (!isSameList(nextUrls, this.endpointUrls)) {
+        this.endpointUrls = nextUrls;
+        this.announceLocalProfiles();
+      }
     }
     if (config.advertiseEntityIds) {
       this.advertiseEntityIds = config.advertiseEntityIds;
@@ -254,64 +273,14 @@ export class RuntimeP2P {
           this.peerRuntimeEncPubKeys.set(normalizedRuntimeId, normalizedKey);
         },
         getTargetEncryptionKey: (targetRuntimeId: string) => {
-          const hintedKey = this.peerRuntimeEncPubKeys.get(normalizeRuntimeId(targetRuntimeId) || '');
-          if (hintedKey) {
-            try {
-              return hexToPubKey(hintedKey);
-            } catch {
-              this.peerRuntimeEncPubKeys.delete(normalizeRuntimeId(targetRuntimeId) || '');
-            }
-          }
-          // Lookup target runtime transport key from gossip.
-          const profiles = this.env.gossip?.getProfiles?.() || [];
-          const targetRuntimeIdNorm = normalizeRuntimeId(targetRuntimeId);
-          if (!targetRuntimeIdNorm) return null;
-          const targetProfiles = profiles.filter((profile) =>
-            normalizeRuntimeId(profile.runtimeId || '') === targetRuntimeIdNorm,
-          );
-          if (targetProfiles.length === 0) return null;
-          // Pick the most common valid key among profiles for this runtimeId; break ties by latest lastUpdated.
-          const keyStats = new Map<string, { count: number; latestTs: number }>();
-          for (const profile of targetProfiles) {
-            const rawKey = profile.runtimeEncPubKey;
-            if (typeof rawKey !== 'string' || rawKey.length === 0) continue;
-            const normalizedKey = rawKey.startsWith('0x') ? rawKey.toLowerCase() : `0x${rawKey.toLowerCase()}`;
-            if (!/^0x[0-9a-f]{64}$/.test(normalizedKey)) continue;
-            const ts = Number(profile?.lastUpdated || 0);
-            const prev = keyStats.get(normalizedKey);
-            if (!prev) {
-              keyStats.set(normalizedKey, { count: 1, latestTs: ts });
-            } else {
-              prev.count += 1;
-              if (ts > prev.latestTs) prev.latestTs = ts;
-            }
-          }
-          if (keyStats.size === 0) return null;
-          let selectedKey: string | null = null;
-          let selectedCount = -1;
-          let selectedTs = -1;
-          for (const [key, stat] of keyStats.entries()) {
-            if (
-              stat.count > selectedCount ||
-              (stat.count === selectedCount && stat.latestTs > selectedTs)
-            ) {
-              selectedKey = key;
-              selectedCount = stat.count;
-              selectedTs = stat.latestTs;
-            }
-          }
-          if (!selectedKey) return null;
-          try {
-            return hexToPubKey(selectedKey);
-          } catch {
-            return null;
-          }
+          return this.resolveTargetEncryptionKey(targetRuntimeId);
         },
         onOpen: () => {
           this.flushPending();
           // ALWAYS request gossip on connect (even if periodic polling is disabled)
           this.requestSeedGossip('full');
           this.announceLocalProfiles();
+          this.syncDirectPeerConnections();
         },
         onEntityInput: async (from, input, timestamp) => {
           // Collect all entity IDs that need profiles before we can process
@@ -375,6 +344,7 @@ export class RuntimeP2P {
     }
     this.pendingAnnounceEntities.clear();
     this.closeClients();
+    this.closeDirectClients();
     this.pendingByRuntime.clear();
   }
 
@@ -504,6 +474,18 @@ export class RuntimeP2P {
     this.connect();
   }
 
+  getDirectPeerState(): Array<{ runtimeId: string; endpoint: string; open: boolean }> {
+    const rows: Array<{ runtimeId: string; endpoint: string; open: boolean }> = [];
+    for (const [runtimeId, client] of this.directClients.entries()) {
+      rows.push({
+        runtimeId,
+        endpoint: this.directClientUrls.get(runtimeId) || client.getUrl(),
+        open: client.isOpen(),
+      });
+    }
+    return rows.sort((left, right) => left.runtimeId.localeCompare(right.runtimeId));
+  }
+
   enqueueEntityInput(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number) {
     try {
       failfastAssert(typeof targetRuntimeId === 'string' && targetRuntimeId.length > 0, 'P2P_TARGET_RUNTIME_INVALID', 'targetRuntimeId is required');
@@ -529,7 +511,11 @@ export class RuntimeP2P {
       'targetRuntimeId must be signer EOA',
       { targetRuntimeId },
     );
-    const client = this.getActiveClient();
+    const directClient = this.getDirectClientForRuntime(normalizedTargetRuntimeId);
+    const client = directClient && directClient.isOpen() ? directClient : this.getActiveClient();
+    if (!directClient) {
+      this.ensureDirectClientForRuntime(normalizedTargetRuntimeId);
+    }
     if (client && client.isOpen()) {
       try {
         const sent = client.sendEntityInput(normalizedTargetRuntimeId, input, ingressTimestamp);
@@ -613,10 +599,22 @@ export class RuntimeP2P {
     return this.clients.find(client => client.isOpen()) || null;
   }
 
+  private getActiveDirectClient(runtimeId: string): RuntimeWsClient | null {
+    const client = this.directClients.get(runtimeId) || null;
+    return client && client.isOpen() ? client : null;
+  }
+
+  private getDirectClientForRuntime(runtimeId: string): RuntimeWsClient | null {
+    return this.getActiveDirectClient(runtimeId);
+  }
+
   private flushPending() {
-    const client = this.getActiveClient();
-    if (!client || !client.isOpen()) return;
     for (const [targetRuntimeId, queue] of this.pendingByRuntime.entries()) {
+      this.ensureDirectClientForRuntime(targetRuntimeId);
+      const directClient = this.getDirectClientForRuntime(targetRuntimeId);
+      const relayClient = this.getActiveClient();
+      const client = directClient && directClient.isOpen() ? directClient : relayClient;
+      if (!client || !client.isOpen()) continue;
       const remaining: { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[] = [];
       for (const entry of queue) {
         try {
@@ -884,10 +882,8 @@ export class RuntimeP2P {
       const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.timestamp);
       const profile = buildLocalEntityProfile(this.env, replica.state, monotonicTimestamp);
       profile.runtimeId = this.runtimeId;
-      if (this.relayUrls.length > 0) {
-        profile.endpoints = this.relayUrls;
-        profile.relays = this.relayUrls;
-      }
+      profile.endpoints = this.endpointUrls;
+      profile.relays = this.relayUrls;
       const firstValidator = replica.state.config.validators[0];
       if (!firstValidator) {
         throw new Error(`P2P_PROFILE_SIGNER_REQUIRED: entity=${entityId}`);
@@ -1032,6 +1028,9 @@ export class RuntimeP2P {
     if (accepted > 0 && this.pendingByRuntime.size > 0) {
       this.flushPending();
     }
+    if (accepted > 0) {
+      this.syncDirectPeerConnections();
+    }
     this.onGossipProfiles(from, acceptedProfiles);
   }
 
@@ -1040,6 +1039,165 @@ export class RuntimeP2P {
       client.close();
     }
     this.clients = [];
+  }
+
+  private closeDirectClients() {
+    for (const client of this.directClients.values()) {
+      client.close();
+    }
+    this.directClients.clear();
+    this.directClientUrls.clear();
+  }
+
+  private getDirectPeerEndpoint(runtimeId: string): string | null {
+    const normalizedTargetRuntimeId = normalizeRuntimeId(runtimeId);
+    if (!normalizedTargetRuntimeId || normalizedTargetRuntimeId === this.runtimeId) return null;
+    const profiles = this.env.gossip?.getProfiles?.() || [];
+    for (const profile of profiles) {
+      if (normalizeRuntimeId(profile.runtimeId || '') !== normalizedTargetRuntimeId) continue;
+      for (const endpoint of normalizeWsUrls(profile.endpoints)) {
+        if (!this.relayUrls.includes(endpoint)) {
+          return endpoint;
+        }
+      }
+    }
+    return null;
+  }
+
+  private resolveTargetEncryptionKey(targetRuntimeId: string): Uint8Array | null {
+    const normalizedTargetRuntimeId = normalizeRuntimeId(targetRuntimeId);
+    if (!normalizedTargetRuntimeId) return null;
+    const hintedKey = this.peerRuntimeEncPubKeys.get(normalizedTargetRuntimeId);
+    if (hintedKey) {
+      try {
+        return hexToPubKey(hintedKey);
+      } catch {
+        this.peerRuntimeEncPubKeys.delete(normalizedTargetRuntimeId);
+      }
+    }
+    const profiles = this.env.gossip?.getProfiles?.() || [];
+    const keyStats = new Map<string, { count: number; latestTs: number }>();
+    for (const profile of profiles) {
+      if (normalizeRuntimeId(profile.runtimeId || '') !== normalizedTargetRuntimeId) continue;
+      const rawKey = profile.runtimeEncPubKey;
+      if (typeof rawKey !== 'string' || rawKey.length === 0) continue;
+      const normalizedKey = rawKey.startsWith('0x') ? rawKey.toLowerCase() : `0x${rawKey.toLowerCase()}`;
+      if (!/^0x[0-9a-f]{64}$/.test(normalizedKey)) continue;
+      const ts = Number(profile.lastUpdated || 0);
+      const prev = keyStats.get(normalizedKey);
+      if (!prev) {
+        keyStats.set(normalizedKey, { count: 1, latestTs: ts });
+      } else {
+        prev.count += 1;
+        if (ts > prev.latestTs) prev.latestTs = ts;
+      }
+    }
+    let selectedKey: string | null = null;
+    let selectedCount = -1;
+    let selectedTs = -1;
+    for (const [key, stat] of keyStats.entries()) {
+      if (
+        stat.count > selectedCount ||
+        (stat.count === selectedCount && stat.latestTs > selectedTs)
+      ) {
+        selectedKey = key;
+        selectedCount = stat.count;
+        selectedTs = stat.latestTs;
+      }
+    }
+    if (!selectedKey) return null;
+    try {
+      return hexToPubKey(selectedKey);
+    } catch {
+      return null;
+    }
+  }
+
+  private ensureDirectClientForRuntime(runtimeId: string): void {
+    const normalizedTargetRuntimeId = normalizeRuntimeId(runtimeId);
+    if (!normalizedTargetRuntimeId || normalizedTargetRuntimeId === this.runtimeId) return;
+    const endpoint = this.getDirectPeerEndpoint(normalizedTargetRuntimeId);
+    if (!endpoint) return;
+    const existing = this.directClients.get(normalizedTargetRuntimeId);
+    const existingUrl = this.directClientUrls.get(normalizedTargetRuntimeId);
+    if (existing && existingUrl === endpoint) {
+      if (!existing.isOpen()) {
+        existing.connect().catch(error => {
+          this.env.warn('network', 'WS_DIRECT_CONNECT_FAILED', {
+            endpoint,
+            targetRuntimeId: normalizedTargetRuntimeId,
+            error: (error as Error).message,
+          });
+        });
+      }
+      return;
+    }
+    if (existing) {
+      existing.close();
+      this.directClients.delete(normalizedTargetRuntimeId);
+      this.directClientUrls.delete(normalizedTargetRuntimeId);
+    }
+    const client = new RuntimeWsClient({
+      url: endpoint,
+      runtimeId: this.runtimeId,
+      signerId: this.signerId,
+      ...(this.env.runtimeSeed ? { seed: this.env.runtimeSeed } : {}),
+      encryptionKeyPair: this.encryptionKeyPair,
+      getTargetEncryptionKey: (targetRuntimeId: string) => {
+        return this.resolveTargetEncryptionKey(targetRuntimeId);
+      },
+      onPeerEncryptionKey: (fromRuntimeId: string, pubKeyHex: string) => {
+        const normalizedRuntimeId = normalizeRuntimeId(fromRuntimeId);
+        const normalizedKey = typeof pubKeyHex === 'string'
+          ? (pubKeyHex.startsWith('0x') ? pubKeyHex.toLowerCase() : `0x${pubKeyHex.toLowerCase()}`)
+          : '';
+        if (!normalizedRuntimeId) return;
+        if (!/^0x[0-9a-f]{64}$/.test(normalizedKey)) return;
+        this.peerRuntimeEncPubKeys.set(normalizedRuntimeId, normalizedKey);
+      },
+      onOpen: () => {
+        this.flushPending();
+      },
+      onEntityInput: async (from, input, timestamp) => {
+        this.onEntityInput(from, input, timestamp);
+      },
+      onError: (error) => {
+        this.env.warn('network', 'WS_DIRECT_ERROR', {
+          endpoint,
+          targetRuntimeId: normalizedTargetRuntimeId,
+          error: error.message,
+        });
+      },
+      maxReconnectAttempts: 0,
+    });
+    this.directClients.set(normalizedTargetRuntimeId, client);
+    this.directClientUrls.set(normalizedTargetRuntimeId, endpoint);
+    client.connect().catch(error => {
+      this.env.warn('network', 'WS_DIRECT_CONNECT_FAILED', {
+        endpoint,
+        targetRuntimeId: normalizedTargetRuntimeId,
+        error: (error as Error).message,
+      });
+    });
+  }
+
+  private syncDirectPeerConnections(): void {
+    const desired = new Map<string, string>();
+    const profiles = this.env.gossip?.getProfiles?.() || [];
+    for (const profile of profiles) {
+      const runtimeId = normalizeRuntimeId(profile.runtimeId || '');
+      if (!runtimeId || runtimeId === this.runtimeId) continue;
+      const endpoint = this.getDirectPeerEndpoint(runtimeId);
+      if (!endpoint) continue;
+      desired.set(runtimeId, endpoint);
+      this.ensureDirectClientForRuntime(runtimeId);
+    }
+    for (const runtimeId of Array.from(this.directClients.keys())) {
+      if (desired.has(runtimeId)) continue;
+      this.directClients.get(runtimeId)?.close();
+      this.directClients.delete(runtimeId);
+      this.directClientUrls.delete(runtimeId);
+    }
   }
 
 }

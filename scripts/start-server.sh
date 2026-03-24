@@ -24,13 +24,24 @@ export XLN_RUNTIME_SEED=${XLN_RUNTIME_SEED:-xln-prod-main-runtime}
 export XLN_DB_PATH=${XLN_DB_PATH:-$REPO_ROOT/db/runtime/prod-main}
 export XLN_USE_PREDEPLOYED_ADDRESSES=${XLN_USE_PREDEPLOYED_ADDRESSES:-true}
 export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-$XLN_DB_PATH/jurisdictions.json}
-# Prod must come up fully bootstrapped or fail fast.
-export BOOTSTRAP_LOCAL_HUBS=${BOOTSTRAP_LOCAL_HUBS:-1}
+export XLN_MESH_DB_ROOT=${XLN_MESH_DB_ROOT:-$REPO_ROOT/db/runtime/prod-mesh}
+export XLN_MESH_CUSTODY_PORT=${XLN_MESH_CUSTODY_PORT:-$(xln_custody_port)}
+export XLN_MESH_CUSTODY_DAEMON_PORT=${XLN_MESH_CUSTODY_DAEMON_PORT:-$(xln_custody_daemon_port)}
 export PATH="${HOME}/.bun/bin:$PATH"
 
 mkdir -p "$XLN_DB_PATH"
+mkdir -p "$XLN_MESH_DB_ROOT"
 xln_ensure_jurisdictions_path "$XLN_JURISDICTIONS_PATH"
 
 xln_kill_by_port "$API_PORT" start-server
 
-exec "${HOME}/.bun/bin/bun" runtime/server.ts --port "$API_PORT"
+exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts \
+  --host 127.0.0.1 \
+  --port "$API_PORT" \
+  --rpc-url "$ANVIL_RPC" \
+  --db-root "$XLN_MESH_DB_ROOT" \
+  --mm \
+  --custody \
+  --custody-port "$XLN_MESH_CUSTODY_PORT" \
+  --custody-daemon-port "$XLN_MESH_CUSTODY_DAEMON_PORT" \
+  --wallet-url "https://xln.finance/app"
