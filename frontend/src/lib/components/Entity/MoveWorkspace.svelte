@@ -326,10 +326,12 @@
     gap: 8px;
     position: relative;
     z-index: 1;
+    min-width: 0;
   }
 
   .move-account-slot {
     margin-top: 2px;
+    min-width: 0;
   }
 
   .move-drag-layer {
@@ -373,6 +375,8 @@
     align-items: flex-start;
     gap: 3px;
     min-height: 76px;
+    width: 100%;
+    min-width: 0;
     padding: 12px;
     border-radius: 12px;
     border: 1px solid rgba(120, 113, 108, 0.34);
@@ -426,17 +430,20 @@
     font-size: 13px;
     font-weight: 700;
     color: #f5f5f4;
+    white-space: nowrap;
   }
 
   .move-node-balance {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 16px;
     color: #fbbf24;
+    white-space: nowrap;
   }
 
   .move-node-target-hint {
     font-size: 11px;
     color: #78716c;
+    white-space: nowrap;
   }
 
   .move-summary {
@@ -643,6 +650,42 @@
   @media (max-width: 900px) {
     .move-visual {
       grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .move-visual {
+      gap: 12px;
+      overflow: hidden;
+    }
+
+    .move-column {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .move-column-head,
+    .move-account-slot {
+      grid-column: 1 / -1;
+    }
+
+    .move-node {
+      min-height: 84px;
+      padding: 10px;
+      border-radius: 10px;
+    }
+
+    .move-node-label,
+    .move-node-balance,
+    .move-node-target-hint {
+      white-space: normal;
+      line-height: 1.12;
+    }
+
+    .move-drag-layer {
+      display: none;
     }
   }
 </style>
