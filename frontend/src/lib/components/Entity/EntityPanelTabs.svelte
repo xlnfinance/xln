@@ -1246,6 +1246,7 @@
   let openAccountEntityOptions: string[] = [];
   let moveEntityOptions: string[] = [];
   let moveHubEntityOptions: string[] = [];
+  let moveSourceAccountOptions: string[] = [];
 
   function isFullEntityId(value: string): boolean {
     return /^0x[0-9a-fA-F]{64}$/.test(String(value || '').trim());
@@ -1291,8 +1292,24 @@
     };
 
     if (selfId) add(selfId);
+    for (const id of accountIds) add(id);
     for (const id of openAccountEntityOptions) add(id);
+    for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
+    for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add(profile.entityId);
+    for (const contact of contacts) add(contact.entityId);
     return Array.from(ids.values());
+  })();
+  $: moveSourceAccountOptions = (() => {
+    const ordered = new Map<string, string>();
+    for (const id of workspaceAccountIds) {
+      const normalized = String(id || '').trim().toLowerCase();
+      if (normalized && !ordered.has(normalized)) ordered.set(normalized, normalized);
+    }
+    for (const id of accountIds) {
+      const normalized = String(id || '').trim().toLowerCase();
+      if (normalized && !ordered.has(normalized)) ordered.set(normalized, normalized);
+    }
+    return Array.from(ordered.values());
   })();
 
   // Governance/Profile settings (REA flow: profile-update entityTx)
@@ -4566,6 +4583,7 @@
                 {moveEntityOptions}
                 {moveHubEntityOptions}
                 {workspaceAccountIds}
+                {moveSourceAccountOptions}
                 reserveRecipientPreferredId={resolveSelfEntityId()}
                 targetEntityPreferredId={resolveSelfEntityId()}
                 entityId={replica?.state?.entityId || tab.entityId}
@@ -4740,6 +4758,7 @@
                 {moveEntityOptions}
                 {moveHubEntityOptions}
                 {workspaceAccountIds}
+                {moveSourceAccountOptions}
                 reserveRecipientPreferredId={resolveSelfEntityId()}
                 targetEntityPreferredId={resolveSelfEntityId()}
                 entityId={replica?.state?.entityId || tab.entityId}

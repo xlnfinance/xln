@@ -649,30 +649,48 @@ async function selectEntityInputValue(
   const selector = page.getByTestId(testId).first();
   await expect(selector).toBeVisible({ timeout: 20_000 });
 
-  const closedTrigger = selector.locator('.closed-trigger').first();
-  if (await closedTrigger.isVisible().catch(() => false)) {
-    const text = await closedTrigger.textContent().catch(() => '');
-    if (String(text || '').toLowerCase().includes(entityId.toLowerCase().slice(0, 10))) {
+  const target = String(entityId || '').trim().toLowerCase();
+  const targetProbe = target.slice(0, 12);
+  const hasTargetSelection = async (): Promise<boolean> => {
+    const text = String(await selector.textContent().catch(() => '')).toLowerCase();
+    return text.includes(targetProbe);
+  };
+
+  if (await hasTargetSelection()) return;
+
+  const openSelector = async (): Promise<void> => {
+    const closedTrigger = selector.locator('.closed-trigger').first();
+    if (await closedTrigger.isVisible().catch(() => false)) {
+      await closedTrigger.click();
       return;
     }
-    await closedTrigger.click();
-  } else {
     const dropdownToggle = selector.locator('.dropdown-toggle').first();
     if (await dropdownToggle.isVisible().catch(() => false)) {
       await dropdownToggle.click();
     }
-  }
+  };
 
   const input = selector.locator('input').first();
-  await expect(input).toBeVisible({ timeout: 20_000 });
-  await input.fill(entityId);
+  const option = page.getByTestId(`${testId}-option-${target}`).first();
 
-  const option = page.getByTestId(`${testId}-option-${entityId.toLowerCase()}`).first();
-  if (await option.isVisible().catch(() => false)) {
-    await option.click();
-  } else {
-    await input.press('Tab');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await openSelector();
+    await expect(input).toBeVisible({ timeout: 20_000 });
+    await input.fill('');
+    await input.fill(entityId);
+
+    if (await option.isVisible().catch(() => false)) {
+      await option.dispatchEvent('mousedown');
+    } else {
+      await input.press('Enter');
+    }
+
+    if (await hasTargetSelection()) {
+      return;
+    }
   }
+
+  throw new Error(`Failed to select ${entityId} in ${testId}`);
 }
 
 async function seedDisputePreconditions(
