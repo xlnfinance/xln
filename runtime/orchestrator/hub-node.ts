@@ -760,53 +760,12 @@ const run = async (): Promise<void> => {
   startRuntimeLoop(env);
   finishTiming('runtime_boot', runtimeBootStartedAt);
 
-  const importJStartedAt = startTiming('import_j');
-  const jurisdiction = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
-  enqueueRuntimeInput(env, {
-    runtimeTxs: [
-      {
-        type: 'importJ',
-        data: {
-          name: jurisdiction.name,
-          chainId: jurisdiction.chainId,
-          ticker: 'XLN',
-          rpcs: [jurisdiction.rpc],
-          ...(resolvedArgs.deployTokens ? {} : { contracts: jurisdiction.contracts }),
-        },
-      },
-    ],
-    entityInputs: [],
-  });
-  await runtimeProcess(env);
-  finishTiming('import_j', importJStartedAt);
-
-  const hubBootstrapStartedAt = startTiming('hub_bootstrap');
-  const bootstrap = await bootstrapHub(env, {
-    name: resolvedArgs.name,
-    region: resolvedArgs.region,
-    signerId: resolvedArgs.signerLabel,
-    seed: resolvedArgs.seed,
-    routingFeePPM: 1,
-    baseFee: 0n,
-    disputeAutoFinalizeMode: resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
-    rebalanceBaseFee: 10n ** 17n,
-    rebalanceLiquidityFeeBps: 1n,
-    rebalanceGasFee: 0n,
-    rebalanceTimeoutMs: 10 * 60 * 1000,
-    relayUrl: resolvedArgs.relayUrl,
-    rpcUrl: jurisdiction.rpc,
-    httpUrl: apiUrl,
-    port: resolvedArgs.apiPort,
-  });
-  if (!bootstrap?.entityId) {
-    throw new Error('HUB_BOOTSTRAP_FAILED');
-  }
-  finishTiming('hub_bootstrap', hubBootstrapStartedAt);
-
-  await ensureOrderbook(env, bootstrap.entityId, bootstrap.signerId);
-
+  let bootstrap: { entityId: string; signerId: string } | null = null;
   let activeJAdapter: JAdapter | null = null;
   let activeTokenCatalog: JTokenInfo[] = [];
+  let meshLoop: ReturnType<typeof setInterval> | null = null;
+  let shuttingDown = false;
+
   const externalWalletApi = createExternalWalletApi({
     getJAdapter: () => activeJAdapter,
     getRuntimeId: () => String(env.runtimeId || ''),
@@ -824,232 +783,6 @@ const run = async (): Promise<void> => {
     emitDebugEvent: () => {},
     fundBrowserVmWallet: async () => false,
   });
-
-  const jadapter = getActiveJAdapter(env);
-  if (!jadapter) {
-    throw new Error('ACTIVE_JADAPTER_MISSING_AFTER_IMPORT');
-  }
-  activeJAdapter = jadapter;
-  await ensureRpcStackReady(env, jadapter);
-
-  const tokenCatalog = resolvedArgs.deployTokens
-    ? await ensureTokenCatalog(jadapter, true)
-    : await waitForTokenCatalog(jadapter);
-  activeTokenCatalog = tokenCatalog;
-  if (resolvedArgs.deployTokens) {
-    await externalWalletApi.provisionFaucetWallet();
-  }
-
-  const p2pConnectStartedAt = startTiming('p2p_connect');
-  const p2p = startP2P(env, {
-    relayUrls: [resolvedArgs.relayUrl],
-    advertiseEntityIds: [bootstrap.entityId],
-    isHub: true,
-    gossipPollMs: BOOTSTRAP_POLL_MS * 5,
-  });
-  if (!p2p) {
-    throw new Error('P2P_START_FAILED');
-  }
-  finishTiming('p2p_connect', p2pConnectStartedAt);
-
-  await ensureBootstrapReserves(env, bootstrap.entityId, tokenCatalog);
-
-  const totalMeshStartedAt = startTiming('mesh_ready_total');
-  let gossipReadyMarked = false;
-  let accountsReadyMarked = false;
-  let creditReadyMarked = false;
-  let meshLoopInFlight = false;
-
-  const driveMeshBootstrap = async (): Promise<void> => {
-    if (meshLoopInFlight) return;
-    meshLoopInFlight = true;
-    try {
-      const visibleHubProfiles = readVisibleHubProfiles(env);
-      const requiredHubProfiles = resolvedArgs.meshHubNames
-        .map(name => visibleHubProfiles.find(profile => profile.name === name) || null)
-        .filter((profile): profile is { name: string; entityId: string } => profile !== null);
-
-      if (!gossipReadyMarked && requiredHubProfiles.length === resolvedArgs.meshHubNames.length) {
-        const startedAt = timings.gossip_ready.startedAt ?? startTiming('gossip_ready');
-        finishTiming('gossip_ready', startedAt);
-        gossipReadyMarked = true;
-      } else if (!gossipReadyMarked) {
-        startTiming('gossip_ready');
-      }
-
-      const peers = requiredHubProfiles.filter(profile => profile.entityId !== bootstrap.entityId.toLowerCase());
-      const visibleProfiles = env.gossip?.getProfiles?.() || [];
-      const visibleSupportPeers = supportPeerIdentities.filter((identity) =>
-        identity.entityId !== bootstrap.entityId.toLowerCase() &&
-        visibleProfiles.some((profile) => profile.entityId.toLowerCase() === identity.entityId),
-      );
-      if (gossipReadyMarked && peers.length > 0) {
-        await ensurePeerBootstrapReserves(env, peers.map(peer => peer.entityId), tokenCatalog);
-        await syncReserveSnapshotFromChain(env, bootstrap.entityId, tokenCatalog);
-      }
-      const openInputs: EntityInput[] = [];
-      const creditInputs: EntityInput[] = [];
-
-      for (const peer of peers) {
-        const localAccount = getAccountMachine(env, bootstrap.entityId, peer.entityId);
-        const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
-
-        if (
-          bootstrap.entityId.toLowerCase() < peer.entityId.toLowerCase() &&
-          !hasAccount(env, bootstrap.entityId, peer.entityId) &&
-          !hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId) &&
-          canWrite
-        ) {
-          openInputs.push({
-            entityId: bootstrap.entityId,
-            signerId: bootstrap.signerId,
-            entityTxs: [
-              {
-                type: 'openAccount',
-                data: {
-                  targetEntityId: peer.entityId,
-                  tokenId: HUB_MESH_TOKEN_ID,
-                  creditAmount: HUB_MESH_CREDIT_AMOUNT,
-                },
-              },
-              ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map((tokenId) => ({
-                type: 'extendCredit' as const,
-                data: {
-                  counterpartyEntityId: peer.entityId,
-                  tokenId,
-                  amount: HUB_MESH_CREDIT_AMOUNT,
-                },
-              })),
-            ],
-          });
-        }
-
-        if (!localAccount || !canWrite) continue;
-        const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter((tokenId) =>
-          getCreditGrantedByEntity(localAccount, bootstrap.entityId, tokenId) < HUB_MESH_CREDIT_AMOUNT
-        );
-        if (missingTokenIds.length > 0) {
-          creditInputs.push({
-            entityId: bootstrap.entityId,
-            signerId: bootstrap.signerId,
-            entityTxs: missingTokenIds.map((tokenId) => ({
-              type: 'extendCredit' as const,
-              data: {
-                counterpartyEntityId: peer.entityId,
-                tokenId,
-                amount: HUB_MESH_CREDIT_AMOUNT,
-              },
-            })),
-          });
-        }
-      }
-
-      for (const peer of visibleSupportPeers) {
-        const localAccount = getAccountMachine(env, bootstrap.entityId, peer.entityId);
-        const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
-        if (!hasAccount(env, bootstrap.entityId, peer.entityId) && canWrite) {
-          if (hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId)) continue;
-          openInputs.push({
-            entityId: bootstrap.entityId,
-            signerId: bootstrap.signerId,
-            entityTxs: [
-              {
-                type: 'openAccount',
-                data: {
-                  targetEntityId: peer.entityId,
-                  tokenId: HUB_MESH_TOKEN_ID,
-                  creditAmount: peer.creditAmount,
-                },
-              },
-              ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map((tokenId) => ({
-                type: 'extendCredit' as const,
-                data: {
-                  counterpartyEntityId: peer.entityId,
-                  tokenId,
-                  amount: peer.creditAmount,
-                },
-              })),
-            ],
-          });
-          continue;
-        }
-        if (!localAccount || !canWrite) continue;
-        const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter((tokenId) =>
-          getCreditGrantedByEntity(localAccount, bootstrap.entityId, tokenId) < peer.creditAmount
-        );
-        if (missingTokenIds.length > 0) {
-          creditInputs.push({
-            entityId: bootstrap.entityId,
-            signerId: bootstrap.signerId,
-            entityTxs: missingTokenIds.map((tokenId) => ({
-              type: 'extendCredit' as const,
-              data: {
-                counterpartyEntityId: peer.entityId,
-                tokenId,
-                amount: peer.creditAmount,
-              },
-            })),
-          });
-        }
-      }
-
-      if (openInputs.length > 0) {
-        startTiming('mesh_accounts');
-        enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: openInputs });
-        await settleRuntimeFor(env, 35);
-      }
-
-      const allAccountsReady =
-        peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
-        peers.every(peer =>
-          hasAccount(env, bootstrap.entityId, peer.entityId) &&
-          DEFAULT_ACCOUNT_TOKEN_IDS.every((tokenId) => Boolean(getAccountMachine(env, bootstrap.entityId, peer.entityId)?.deltas.get(tokenId)))
-        );
-      if (allAccountsReady && !accountsReadyMarked) {
-        const startedAt = timings.mesh_accounts.startedAt ?? startTiming('mesh_accounts');
-        finishTiming('mesh_accounts', startedAt);
-        accountsReadyMarked = true;
-      }
-
-      if (creditInputs.length > 0) {
-        startTiming('mesh_credit');
-        enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: creditInputs });
-        await settleRuntimeFor(env, 45);
-      }
-
-      const allCreditReady =
-        peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
-        peers.every(peer =>
-          hasPairMutualCredits(env, bootstrap.entityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, HUB_MESH_CREDIT_AMOUNT),
-        );
-      if (allCreditReady && !creditReadyMarked) {
-        const startedAt = timings.mesh_credit.startedAt ?? startTiming('mesh_credit');
-        finishTiming('mesh_credit', startedAt);
-        creditReadyMarked = true;
-      }
-
-      if (allCreditReady && timings.mesh_ready_total.ms === null) {
-        finishTiming('mesh_ready_total', totalMeshStartedAt);
-      }
-    } finally {
-      meshLoopInFlight = false;
-    }
-  };
-
-  let shuttingDown = false;
-  const isExpectedMeshBootstrapError = (error: unknown): boolean => {
-    const message = String((error as Error)?.message || error || '');
-    return message.includes('ECONNREFUSED') || message.includes('fetch failed');
-  };
-  const meshLoop = setInterval(() => {
-    if (shuttingDown) return;
-    void driveMeshBootstrap().catch(error => {
-      if (shuttingDown) return;
-      if (isExpectedMeshBootstrapError(error)) return;
-      console.error(`[${resolvedArgs.name}] mesh bootstrap tick failed:`, (error as Error).message);
-    });
-  }, BOOTSTRAP_POLL_MS);
-  void driveMeshBootstrap();
 
   const directRuntimeWs = createDirectRuntimeWsRoute({
     runtimeId: String(env.runtimeId || ''),
@@ -1071,36 +804,52 @@ const run = async (): Promise<void> => {
       if (upgraded !== undefined) return upgraded;
 
       if (pathname === '/api/info') {
-        return new Response(
-          JSON.stringify({
-            name: resolvedArgs.name,
-            entityId: bootstrap.entityId,
-            runtimeId: env.runtimeId,
-            apiUrl,
-            relayUrl: resolvedArgs.relayUrl,
-            directWsUrl,
-          }),
-          { headers },
-        );
+        return new Response(JSON.stringify({
+          name: resolvedArgs.name,
+          entityId: bootstrap?.entityId ?? null,
+          runtimeId: env.runtimeId,
+          apiUrl,
+          relayUrl: resolvedArgs.relayUrl,
+          directWsUrl,
+        }), { headers });
       }
 
       if (pathname === '/api/health') {
-        const health = buildLocalHealth(env, bootstrap.entityId, tokenCatalog);
-        return new Response(JSON.stringify(health), { headers });
+        return new Response(JSON.stringify(buildLocalHealth(env, bootstrap?.entityId ?? null, activeTokenCatalog)), {
+          headers,
+        });
       }
 
       if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
         shuttingDown = true;
-        clearInterval(meshLoop);
+        if (meshLoop) clearInterval(meshLoop);
         stopP2P(env);
         return new Response(JSON.stringify({ ok: true }), { headers });
       }
 
+      if (pathname === '/api/jurisdictions') {
+        const payload = buildRuntimeJurisdictionsPayload(env);
+        if (!payload) {
+          return new Response(JSON.stringify({ error: 'JURISDICTION_PAYLOAD_UNAVAILABLE' }), {
+            status: 503,
+            headers,
+          });
+        }
+        return new Response(payload, {
+          headers: {
+            ...headers,
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+          },
+        });
+      }
+
+      if (!bootstrap || !activeJAdapter) {
+        return new Response(JSON.stringify({ error: 'HUB_NOT_READY' }), { status: 503, headers });
+      }
+
       if (pathname === '/api/market/snapshots' && request.method === 'GET') {
         const pairIds = Array.from(new Set(
-          url.searchParams
-            .getAll('pair')
-            .concat(url.searchParams.getAll('pairId'))
+          url.searchParams.getAll('pair').concat(url.searchParams.getAll('pairId'))
             .map(normalizeMarketPairId)
             .filter((value): value is string => Boolean(value)),
         ));
@@ -1118,25 +867,7 @@ const run = async (): Promise<void> => {
         const snapshots = pairIds.map((pairId) =>
           buildMarketSnapshotForReplica(replica, bootstrap.entityId, pairId, depth),
         );
-        return new Response(JSON.stringify({ hubEntityId: bootstrap.entityId, depth, snapshots }), {
-          headers,
-        });
-      }
-
-      if (pathname === '/api/jurisdictions') {
-        const payload = buildRuntimeJurisdictionsPayload(env);
-        if (!payload) {
-          return new Response(JSON.stringify({ error: 'JURISDICTION_PAYLOAD_UNAVAILABLE' }), {
-            status: 503,
-            headers,
-          });
-        }
-        return new Response(payload, {
-          headers: {
-            ...headers,
-            'Cache-Control': 'no-store, no-cache, must-revalidate',
-          },
-        });
+        return new Response(JSON.stringify({ hubEntityId: bootstrap.entityId, depth, snapshots }), { headers });
       }
 
       if (pathname === '/api/tokens' && request.method === 'GET') {
@@ -1180,10 +911,11 @@ const run = async (): Promise<void> => {
             headers,
           });
         }
+
         tokenId = Number(tokenMeta.tokenId);
-        const decimals = typeof tokenMeta.decimals === 'number' ? tokenMeta.decimals : 18;
+        const decimals = typeof tokenMeta.decimals === 'number' ? Number(tokenMeta.decimals) : 18;
         const amountWei = ethers.parseUnits(amount, decimals);
-        const prevUserReserve = await jadapter.getReserves(userEntityId, tokenId).catch(() => 0n);
+        const prevUserReserve = await activeJAdapter.getReserves(userEntityId, tokenId).catch(() => 0n);
         const hubReplica = getEntityReplicaById(env, bootstrap.entityId);
         const hubReserve = hubReplica?.state?.reserves?.get(tokenId) ?? 0n;
         if (hubReserve < amountWei) {
@@ -1205,16 +937,9 @@ const run = async (): Promise<void> => {
             entityTxs: [
               {
                 type: 'reserve_to_reserve',
-                data: {
-                  toEntityId: userEntityId,
-                  tokenId,
-                  amount: amountWei,
-                },
+                data: { toEntityId: userEntityId, tokenId, amount: amountWei },
               },
-              {
-                type: 'j_broadcast',
-                data: {},
-              },
+              { type: 'j_broadcast', data: {} },
             ],
           }],
         });
@@ -1228,7 +953,7 @@ const run = async (): Promise<void> => {
           });
         }
         const expectedMin = prevUserReserve + amountWei;
-        const updatedReserve = await waitForReserveUpdate(jadapter, userEntityId, tokenId, expectedMin, 10000);
+        const updatedReserve = await waitForReserveUpdate(activeJAdapter, userEntityId, tokenId, expectedMin, 10000);
         if (updatedReserve === null) {
           return new Response(JSON.stringify({ error: 'Reserve update not confirmed on-chain' }), {
             status: 504,
@@ -1248,7 +973,6 @@ const run = async (): Promise<void> => {
       if (pathname === '/api/faucet/offchain' && request.method === 'POST') {
         const body = await request.json() as {
           userEntityId?: string;
-          userRuntimeId?: string;
           tokenId?: number;
           amount?: string;
         };
@@ -1259,41 +983,35 @@ const run = async (): Promise<void> => {
             headers,
           });
         }
-
         if (!hasAccount(env, bootstrap.entityId, userEntityId)) {
-          return new Response(
-            JSON.stringify({
-              success: false,
-              code: 'FAUCET_ACCOUNT_NOT_OPEN',
-              error: 'No bilateral account with this hub. Open account first, then retry faucet.',
-            }),
-            { status: 409, headers },
-          );
+          return new Response(JSON.stringify({
+            success: false,
+            code: 'FAUCET_ACCOUNT_NOT_OPEN',
+            error: 'No bilateral account with this hub. Open account first, then retry faucet.',
+          }), {
+            status: 409,
+            headers,
+          });
         }
 
         const amount = String(body.amount || '100');
         const tokenId = Number(body.tokenId ?? 1);
-        const signerId = resolveEntityProposerId(env, bootstrap.entityId, 'hub-offchain-faucet');
         enqueueRuntimeInput(env, {
           runtimeTxs: [],
-          entityInputs: [
-            {
-              entityId: bootstrap.entityId,
-              signerId,
-              entityTxs: [
-                {
-                  type: 'directPayment',
-                  data: {
-                    targetEntityId: userEntityId,
-                    tokenId,
-                    amount: ethers.parseUnits(amount, 18),
-                    route: [bootstrap.entityId, userEntityId],
-                    description: 'faucet-offchain',
-                  },
-                },
-              ],
-            },
-          ],
+          entityInputs: [{
+            entityId: bootstrap.entityId,
+            signerId: resolveEntityProposerId(env, bootstrap.entityId, 'hub-offchain-faucet'),
+            entityTxs: [{
+              type: 'directPayment',
+              data: {
+                targetEntityId: userEntityId,
+                tokenId,
+                amount: ethers.parseUnits(amount, 18),
+                route: [bootstrap.entityId, userEntityId],
+                description: 'faucet-offchain',
+              },
+            }],
+          }],
         });
         return new Response(JSON.stringify({ success: true, accepted: true }), { headers });
       }
@@ -1307,20 +1025,9 @@ const run = async (): Promise<void> => {
         if (!Number.isInteger(tokenId) || tokenId <= 0) {
           return new Response(JSON.stringify({ error: 'Invalid tokenId' }), { status: 400, headers });
         }
-
-        const jadapter = getActiveJAdapter(env);
-        if (!jadapter) {
-          return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
-        }
-
         try {
-          const reserve = await jadapter.getReserves(entityId, tokenId);
-          return new Response(JSON.stringify({
-            ok: true,
-            entityId,
-            tokenId,
-            reserve: reserve.toString(),
-          }), { headers });
+          const reserve = await activeJAdapter.getReserves(entityId, tokenId);
+          return new Response(JSON.stringify({ ok: true, entityId, tokenId, reserve: reserve.toString() }), { headers });
         } catch (error) {
           return new Response(JSON.stringify({ error: (error as Error).message }), { status: 500, headers });
         }
@@ -1331,6 +1038,240 @@ const run = async (): Promise<void> => {
     websocket: directRuntimeWs.websocket,
   });
 
+  const importJStartedAt = startTiming('import_j');
+  const jurisdiction = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [{
+      type: 'importJ',
+      data: {
+        name: jurisdiction.name,
+        chainId: jurisdiction.chainId,
+        ticker: 'XLN',
+        rpcs: [jurisdiction.rpc],
+        ...(resolvedArgs.deployTokens ? {} : { contracts: jurisdiction.contracts }),
+      },
+    }],
+    entityInputs: [],
+  });
+  await runtimeProcess(env);
+  finishTiming('import_j', importJStartedAt);
+
+  const hubBootstrapStartedAt = startTiming('hub_bootstrap');
+  bootstrap = await bootstrapHub(env, {
+    name: resolvedArgs.name,
+    region: resolvedArgs.region,
+    signerId: resolvedArgs.signerLabel,
+    seed: resolvedArgs.seed,
+    routingFeePPM: 1,
+    baseFee: 0n,
+    disputeAutoFinalizeMode: resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
+    rebalanceBaseFee: 10n ** 17n,
+    rebalanceLiquidityFeeBps: 1n,
+    rebalanceGasFee: 0n,
+    rebalanceTimeoutMs: 10 * 60 * 1000,
+    relayUrl: resolvedArgs.relayUrl,
+    rpcUrl: jurisdiction.rpc,
+    httpUrl: apiUrl,
+    port: resolvedArgs.apiPort,
+  });
+  if (!bootstrap?.entityId) throw new Error('HUB_BOOTSTRAP_FAILED');
+  finishTiming('hub_bootstrap', hubBootstrapStartedAt);
+
+  await ensureOrderbook(env, bootstrap.entityId, bootstrap.signerId);
+
+  const jadapter = getActiveJAdapter(env);
+  if (!jadapter) throw new Error('ACTIVE_JADAPTER_MISSING_AFTER_IMPORT');
+  activeJAdapter = jadapter;
+  await ensureRpcStackReady(env, jadapter);
+
+  const tokenCatalog = resolvedArgs.deployTokens
+    ? await ensureTokenCatalog(jadapter, true)
+    : await waitForTokenCatalog(jadapter);
+  activeTokenCatalog = tokenCatalog;
+  if (resolvedArgs.deployTokens) {
+    await externalWalletApi.provisionFaucetWallet();
+  }
+
+  const p2pConnectStartedAt = startTiming('p2p_connect');
+  const p2p = startP2P(env, {
+    relayUrls: [resolvedArgs.relayUrl],
+    advertiseEntityIds: [bootstrap.entityId],
+    isHub: true,
+    gossipPollMs: BOOTSTRAP_POLL_MS * 5,
+  });
+  if (!p2p) throw new Error('P2P_START_FAILED');
+  finishTiming('p2p_connect', p2pConnectStartedAt);
+
+  await ensureBootstrapReserves(env, bootstrap.entityId, tokenCatalog);
+
+  const totalMeshStartedAt = startTiming('mesh_ready_total');
+  let gossipReadyMarked = false;
+  let accountsReadyMarked = false;
+  let creditReadyMarked = false;
+  let meshLoopInFlight = false;
+
+  const driveMeshBootstrap = async (): Promise<void> => {
+    if (!bootstrap || meshLoopInFlight) return;
+    meshLoopInFlight = true;
+    try {
+      const visibleHubProfiles = readVisibleHubProfiles(env);
+      const requiredHubProfiles = resolvedArgs.meshHubNames
+        .map(name => visibleHubProfiles.find(profile => profile.name === name) || null)
+        .filter((profile): profile is { name: string; entityId: string } => profile !== null);
+
+      if (!gossipReadyMarked && requiredHubProfiles.length === resolvedArgs.meshHubNames.length) {
+        finishTiming('gossip_ready', timings.gossip_ready.startedAt ?? startTiming('gossip_ready'));
+        gossipReadyMarked = true;
+      } else if (!gossipReadyMarked) {
+        startTiming('gossip_ready');
+      }
+
+      const peers = requiredHubProfiles.filter(profile => profile.entityId !== bootstrap.entityId.toLowerCase());
+      const visibleProfiles = env.gossip?.getProfiles?.() || [];
+      const visibleSupportPeers = supportPeerIdentities.filter((identity) =>
+        identity.entityId !== bootstrap.entityId.toLowerCase() &&
+        visibleProfiles.some((profile) => profile.entityId.toLowerCase() === identity.entityId),
+      );
+
+      if (gossipReadyMarked && peers.length > 0) {
+        await ensurePeerBootstrapReserves(env, peers.map(peer => peer.entityId), tokenCatalog);
+        await syncReserveSnapshotFromChain(env, bootstrap.entityId, tokenCatalog);
+      }
+
+      const openInputs: EntityInput[] = [];
+      const creditInputs: EntityInput[] = [];
+
+      for (const peer of peers) {
+        const localAccount = getAccountMachine(env, bootstrap.entityId, peer.entityId);
+        const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
+        if (
+          bootstrap.entityId.toLowerCase() < peer.entityId.toLowerCase() &&
+          !hasAccount(env, bootstrap.entityId, peer.entityId) &&
+          !hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId) &&
+          canWrite
+        ) {
+          openInputs.push({
+            entityId: bootstrap.entityId,
+            signerId: bootstrap.signerId,
+            entityTxs: [
+              {
+                type: 'openAccount',
+                data: { targetEntityId: peer.entityId, tokenId: HUB_MESH_TOKEN_ID, creditAmount: HUB_MESH_CREDIT_AMOUNT },
+              },
+              ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map((tokenId) => ({
+                type: 'extendCredit' as const,
+                data: { counterpartyEntityId: peer.entityId, tokenId, amount: HUB_MESH_CREDIT_AMOUNT },
+              })),
+            ],
+          });
+        }
+        if (!localAccount || !canWrite) continue;
+        const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter((tokenId) =>
+          getCreditGrantedByEntity(localAccount, bootstrap.entityId, tokenId) < HUB_MESH_CREDIT_AMOUNT,
+        );
+        if (missingTokenIds.length > 0) {
+          creditInputs.push({
+            entityId: bootstrap.entityId,
+            signerId: bootstrap.signerId,
+            entityTxs: missingTokenIds.map((tokenId) => ({
+              type: 'extendCredit' as const,
+              data: { counterpartyEntityId: peer.entityId, tokenId, amount: HUB_MESH_CREDIT_AMOUNT },
+            })),
+          });
+        }
+      }
+
+      for (const peer of visibleSupportPeers) {
+        const localAccount = getAccountMachine(env, bootstrap.entityId, peer.entityId);
+        const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
+        if (!hasAccount(env, bootstrap.entityId, peer.entityId) && canWrite) {
+          if (hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId)) continue;
+          openInputs.push({
+            entityId: bootstrap.entityId,
+            signerId: bootstrap.signerId,
+            entityTxs: [
+              {
+                type: 'openAccount',
+                data: { targetEntityId: peer.entityId, tokenId: HUB_MESH_TOKEN_ID, creditAmount: peer.creditAmount },
+              },
+              ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map((tokenId) => ({
+                type: 'extendCredit' as const,
+                data: { counterpartyEntityId: peer.entityId, tokenId, amount: peer.creditAmount },
+              })),
+            ],
+          });
+          continue;
+        }
+        if (!localAccount || !canWrite) continue;
+        const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter((tokenId) =>
+          getCreditGrantedByEntity(localAccount, bootstrap.entityId, tokenId) < peer.creditAmount,
+        );
+        if (missingTokenIds.length > 0) {
+          creditInputs.push({
+            entityId: bootstrap.entityId,
+            signerId: bootstrap.signerId,
+            entityTxs: missingTokenIds.map((tokenId) => ({
+              type: 'extendCredit' as const,
+              data: { counterpartyEntityId: peer.entityId, tokenId, amount: peer.creditAmount },
+            })),
+          });
+        }
+      }
+
+      if (openInputs.length > 0) {
+        startTiming('mesh_accounts');
+        enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: openInputs });
+        await settleRuntimeFor(env, 35);
+      }
+
+      const allAccountsReady =
+        peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
+        peers.every(peer =>
+          hasAccount(env, bootstrap.entityId, peer.entityId) &&
+          DEFAULT_ACCOUNT_TOKEN_IDS.every((tokenId) => Boolean(getAccountMachine(env, bootstrap.entityId, peer.entityId)?.deltas.get(tokenId))),
+        );
+      if (allAccountsReady && !accountsReadyMarked) {
+        finishTiming('mesh_accounts', timings.mesh_accounts.startedAt ?? startTiming('mesh_accounts'));
+        accountsReadyMarked = true;
+      }
+
+      if (creditInputs.length > 0) {
+        startTiming('mesh_credit');
+        enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: creditInputs });
+        await settleRuntimeFor(env, 45);
+      }
+
+      const allCreditReady =
+        peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
+        peers.every(peer =>
+          hasPairMutualCredits(env, bootstrap.entityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, HUB_MESH_CREDIT_AMOUNT),
+        );
+      if (allCreditReady && !creditReadyMarked) {
+        finishTiming('mesh_credit', timings.mesh_credit.startedAt ?? startTiming('mesh_credit'));
+        creditReadyMarked = true;
+      }
+      if (allCreditReady && timings.mesh_ready_total.ms === null) {
+        finishTiming('mesh_ready_total', totalMeshStartedAt);
+      }
+    } finally {
+      meshLoopInFlight = false;
+    }
+  };
+
+  const isExpectedMeshBootstrapError = (error: unknown): boolean => {
+    const message = String((error as Error)?.message || error || '');
+    return message.includes('ECONNREFUSED') || message.includes('fetch failed');
+  };
+
+  meshLoop = setInterval(() => {
+    if (shuttingDown) return;
+    void driveMeshBootstrap().catch(error => {
+      if (shuttingDown || isExpectedMeshBootstrapError(error)) return;
+      console.error(`[${resolvedArgs.name}] mesh bootstrap tick failed:`, (error as Error).message);
+    });
+  }, BOOTSTRAP_POLL_MS);
+  void driveMeshBootstrap();
+
   console.log(
     `[MESH-HUB] READY name=${resolvedArgs.name} entityId=${bootstrap.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
   );
@@ -1338,7 +1279,7 @@ const run = async (): Promise<void> => {
 
   const shutdown = async () => {
     shuttingDown = true;
-    clearInterval(meshLoop);
+    if (meshLoop) clearInterval(meshLoop);
     stopP2P(env);
     server.stop(true);
     process.exit(0);
