@@ -149,6 +149,7 @@ if command -v ufw >/dev/null 2>&1; then
     ufw allow 80/tcp >/dev/null 2>&1
     ufw allow 443/tcp >/dev/null 2>&1
     ufw allow 8080/tcp >/dev/null 2>&1  # For development
+    ufw allow 8090:8093/tcp >/dev/null 2>&1
     ufw --force enable >/dev/null 2>&1
     log_success "Firewall configured (SSH, HTTP, HTTPS, 8080)"
 else
@@ -226,20 +227,75 @@ server {
         proxy_read_timeout 86400;
     }
 
-    location /mesh/ {
-        proxy_pass http://localhost:8080;
+    # Health check endpoint
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+}
+
+server {
+    listen 8090 ssl http2;
+    server_name xln.finance;
+    ssl_certificate /etc/letsencrypt/live/xln.finance/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/xln.finance/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:18090;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_read_timeout 86400;
     }
-    
-    # Health check endpoint
-    location /health {
-        access_log off;
-        return 200 "healthy\n";
-        add_header Content-Type text/plain;
+}
+
+server {
+    listen 8091 ssl http2;
+    server_name xln.finance;
+    ssl_certificate /etc/letsencrypt/live/xln.finance/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/xln.finance/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:18091;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
+    }
+}
+
+server {
+    listen 8092 ssl http2;
+    server_name xln.finance;
+    ssl_certificate /etc/letsencrypt/live/xln.finance/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/xln.finance/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:18092;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
+    }
+}
+
+server {
+    listen 8093 ssl http2;
+    server_name xln.finance;
+    ssl_certificate /etc/letsencrypt/live/xln.finance/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/xln.finance/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:18093;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
     }
 }
 EOF

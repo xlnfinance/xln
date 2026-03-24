@@ -123,6 +123,81 @@ wait_for_custody() {
     "$deadline"
 }
 
+ensure_production_direct_hub_ports() {
+  cat > /etc/nginx/conf.d/xln-direct-ports.conf <<'EOF'
+server {
+  listen 8090 ssl http2;
+  server_name xln.finance;
+  ssl_certificate /etc/letsencrypt/live/xln.finance/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/xln.finance/privkey.pem;
+
+  location / {
+    proxy_pass http://127.0.0.1:18090;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 86400;
+  }
+}
+
+server {
+  listen 8091 ssl http2;
+  server_name xln.finance;
+  ssl_certificate /etc/letsencrypt/live/xln.finance/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/xln.finance/privkey.pem;
+
+  location / {
+    proxy_pass http://127.0.0.1:18091;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 86400;
+  }
+}
+
+server {
+  listen 8092 ssl http2;
+  server_name xln.finance;
+  ssl_certificate /etc/letsencrypt/live/xln.finance/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/xln.finance/privkey.pem;
+
+  location / {
+    proxy_pass http://127.0.0.1:18092;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 86400;
+  }
+}
+
+server {
+  listen 8093 ssl http2;
+  server_name xln.finance;
+  ssl_certificate /etc/letsencrypt/live/xln.finance/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/xln.finance/privkey.pem;
+
+  location / {
+    proxy_pass http://127.0.0.1:18093;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 86400;
+  }
+}
+EOF
+
+  if command -v ufw >/dev/null 2>&1; then
+    ufw allow 8090:8093/tcp >/dev/null 2>&1 || true
+  fi
+
+  nginx -t
+  systemctl reload nginx
+}
+
 ensure_production_host_hygiene() {
   echo "[deploy] enforcing production log and memory hygiene"
 
@@ -208,6 +283,7 @@ run_local_deploy() {
     echo "[deploy] restarting pm2 service"
     if [ "$PRODUCTION" = "1" ]; then
       ensure_production_host_hygiene
+      ensure_production_direct_hub_ports
       echo "[deploy] resetting production anvil + runtime state"
       mkdir -p db/runtime db/custody data logs
       rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody

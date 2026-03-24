@@ -26,6 +26,8 @@ export XLN_DB_PATH=${XLN_DB_PATH:-$REPO_ROOT/db/runtime/prod-main}
 export XLN_USE_PREDEPLOYED_ADDRESSES=${XLN_USE_PREDEPLOYED_ADDRESSES:-true}
 export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-$XLN_DB_PATH/jurisdictions.json}
 export XLN_MESH_DB_ROOT=${XLN_MESH_DB_ROOT:-$REPO_ROOT/db/runtime/prod-mesh}
+export XLN_MESH_API_PORT_BASE=${XLN_MESH_API_PORT_BASE:-18090}
+export XLN_MESH_PUBLIC_PORT_BASE=${XLN_MESH_PUBLIC_PORT_BASE:-8090}
 export XLN_MESH_CUSTODY_PORT=${XLN_MESH_CUSTODY_PORT:-$(xln_custody_port)}
 export XLN_MESH_CUSTODY_DAEMON_PORT=${XLN_MESH_CUSTODY_DAEMON_PORT:-$(xln_custody_daemon_port)}
 export PATH="${HOME}/.bun/bin:$PATH"
@@ -40,6 +42,8 @@ exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts \
   --host 127.0.0.1 \
   --port "$API_PORT" \
   --public-ws-base-url "$PUBLIC_WS_BASE_URL" \
+  --node-api-port-base "$XLN_MESH_API_PORT_BASE" \
+  --node-public-port-base "$XLN_MESH_PUBLIC_PORT_BASE" \
   --rpc-url "$ANVIL_RPC" \
   --db-root "$XLN_MESH_DB_ROOT" \
   --mm \
