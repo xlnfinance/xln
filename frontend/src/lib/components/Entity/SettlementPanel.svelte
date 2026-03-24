@@ -11,6 +11,7 @@
   export let entityId: string;
   export let contacts: Array<{ name: string; entityId: string }> = [];
   export let replica: EntityReplica | null = null;
+  export let historyOnly = false;
   type Action = 'r2c' | 'c2r' | 'transfer' | 'dispute' | 'history';
   type GasPreset = 'standard' | 'fast' | 'urgent' | 'custom';
   type BatchDetailField = { label: string; value: string };
@@ -44,6 +45,10 @@
   let action: Action = 'r2c';
   let amount = '';
   let sending = false;
+
+  $: if (historyOnly && action !== 'history') {
+    action = 'history';
+  }
 
   let gasPreset: GasPreset = 'standard';
   let customMaxFeeGwei = '';
@@ -1110,48 +1115,52 @@
       </div>
     {/if}
 
-    <div class="batch-actions">
-      <button class="btn-clear" data-testid="settle-clear-batch" on:click={clearBatch} disabled={sending || !hasAnyBatch}>Clear</button>
-      {#if hasSentBatch}
-        <button class="btn-sign-broadcast" data-testid="settle-rebroadcast" on:click={rebroadcastSentBatch} disabled={sending}>
-          {sending ? 'Rebroadcasting...' : 'Rebroadcast (+gas bump)'}
-        </button>
-      {/if}
-      <button class="btn-sign-broadcast" data-testid="settle-sign-broadcast" on:click={broadcastBatch} disabled={sending || !canBroadcastDraft}>
-        {#if sending}
-          Signing & Broadcasting...
-        {:else}
-          Sign & Broadcast
+    {#if !historyOnly}
+      <div class="batch-actions">
+        <button class="btn-clear" data-testid="settle-clear-batch" on:click={clearBatch} disabled={sending || !hasAnyBatch}>Clear</button>
+        {#if hasSentBatch}
+          <button class="btn-sign-broadcast" data-testid="settle-rebroadcast" on:click={rebroadcastSentBatch} disabled={sending}>
+            {sending ? 'Rebroadcasting...' : 'Rebroadcast (+gas bump)'}
+          </button>
         {/if}
-      </button>
-    </div>
-    {#if hasSentBatch && hasDraftBatch}
-      <p class="batch-empty">Draft queued. Broadcast unlocks automatically once sent batch finalizes.</p>
+        <button class="btn-sign-broadcast" data-testid="settle-sign-broadcast" on:click={broadcastBatch} disabled={sending || !canBroadcastDraft}>
+          {#if sending}
+            Signing & Broadcasting...
+          {:else}
+            Sign & Broadcast
+          {/if}
+        </button>
+      </div>
+      {#if hasSentBatch && hasDraftBatch}
+        <p class="batch-empty">Draft queued. Broadcast unlocks automatically once sent batch finalizes.</p>
+      {/if}
     {/if}
 
   </div>
 
+  {#if !historyOnly}
     <div class="action-tabs">
-    <button class="tab" class:active={action === 'r2c'} on:click={() => action = 'r2c'} disabled={sending}>Reserve → Collateral</button>
-    <button class="tab" class:active={action === 'c2r'} on:click={() => action = 'c2r'} disabled={sending}>Collateral → Reserve</button>
-    <button class="tab" class:active={action === 'transfer'} on:click={() => action = 'transfer'} disabled={sending}>Reserve → Reserve</button>
-    <button class="tab" class:active={action === 'dispute'} on:click={() => action = 'dispute'} disabled={sending}>Dispute</button>
-    <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History ({batchHistory.length})</button>
-  </div>
+      <button class="tab" class:active={action === 'r2c'} on:click={() => action = 'r2c'} disabled={sending}>Reserve → Collateral</button>
+      <button class="tab" class:active={action === 'c2r'} on:click={() => action = 'c2r'} disabled={sending}>Collateral → Reserve</button>
+      <button class="tab" class:active={action === 'transfer'} on:click={() => action = 'transfer'} disabled={sending}>Reserve → Reserve</button>
+      <button class="tab" class:active={action === 'dispute'} on:click={() => action = 'dispute'} disabled={sending}>Dispute</button>
+      <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History ({batchHistory.length})</button>
+    </div>
 
-  <p class="action-desc">
-    {#if action === 'r2c'}
-      Queue reserve-to-collateral into the current draft batch.
-    {:else if action === 'c2r'}
-      Queue collateral-to-reserve. Once the counterparty signs, it is added to your local draft batch.
-    {:else if action === 'dispute'}
-      Queue dispute start/finalize for selected account.
-    {:else if action === 'history'}
-      Review {batchHistory.length} finalized on-chain batch{batchHistory.length === 1 ? '' : 'es'} for this entity.
-    {:else}
-      Queue reserve-to-reserve transfer to another entity.
-    {/if}
-  </p>
+    <p class="action-desc">
+      {#if action === 'r2c'}
+        Queue reserve-to-collateral into the current draft batch.
+      {:else if action === 'c2r'}
+        Queue collateral-to-reserve. Once the counterparty signs, it is added to your local draft batch.
+      {:else if action === 'dispute'}
+        Queue dispute start/finalize for selected account.
+      {:else if action === 'history'}
+        Review {batchHistory.length} finalized on-chain batch{batchHistory.length === 1 ? '' : 'es'} for this entity.
+      {:else}
+        Queue reserve-to-reserve transfer to another entity.
+      {/if}
+    </p>
+  {/if}
 
   {#if action === 'history'}
     <div class="history-card">

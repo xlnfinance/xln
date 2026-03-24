@@ -108,6 +108,17 @@ async function waitForRuntimeReady(page: Page, runtimeId: string): Promise<void>
   }, { targetRuntimeId: runtimeId }, { timeout: 30_000 });
 }
 
+async function waitForActiveRuntimeId(page: Page, runtimeId: string): Promise<void> {
+  await page.waitForFunction(({ targetRuntimeId }) => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+      };
+    }).isolatedEnv;
+    return String(env?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase();
+  }, { targetRuntimeId: runtimeId }, { timeout: 15_000 });
+}
+
 async function waitForAnyRuntimeReady(page: Page): Promise<string> {
   return await page.waitForFunction(() => {
     const env = (window as typeof window & {
@@ -383,35 +394,41 @@ export async function switchToRuntimeId(page: Page, runtimeId: string): Promise<
     await ensureRuntimeOnline(page, `switch-id-${runtimeId.slice(0, 8)}`);
     return;
   }
-  const switchedViaStorage = await page.evaluate((targetRuntimeId) => {
+  const targetRuntimeLabel = await page.evaluate((targetRuntimeId) => {
     const raw = window.localStorage.getItem('xln-vaults');
-    if (!raw) return false;
+    if (!raw) return '';
     try {
       const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object' || !parsed.runtimes || typeof parsed.runtimes !== 'object') return false;
-      const runtimeKeys = Object.keys(parsed.runtimes);
-      const matchingKey = runtimeKeys.find((key) => key.toLowerCase() === targetRuntimeId);
-      if (!matchingKey) return false;
-      parsed.activeRuntimeId = matchingKey;
-      window.localStorage.setItem('xln-vaults', JSON.stringify(parsed));
-      return true;
+      const runtimes = parsed?.runtimes;
+      if (!runtimes || typeof runtimes !== 'object') return '';
+      for (const [key, value] of Object.entries(runtimes as Record<string, { id?: string; label?: string }>)) {
+        const runtime = value || {};
+        if (String(key || '').toLowerCase() === targetRuntimeId || String(runtime.id || '').toLowerCase() === targetRuntimeId) {
+          return String(runtime.label || '').trim();
+        }
+      }
     } catch {
-      return false;
+      return '';
     }
+    return '';
   }, normalizedRuntimeId);
-  if (switchedViaStorage) {
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await waitForRuntimeReady(page, normalizedRuntimeId);
-    await dismissOnboardingIfVisible(page);
-    await completeProfileOnboardingIfVisible(page, `Runtime ${normalizedRuntimeId.slice(2, 6)}`);
-    await ensureRuntimeOnline(page, `switch-id-${runtimeId.slice(0, 8)}`);
-    return;
-  }
   const shortAddress = `${normalizedRuntimeId.slice(0, 6)}...${normalizedRuntimeId.slice(-4)}`;
-  await openRuntimeDropdown(page);
-  const targetItem = page.locator('.switcher-menu .runtime-main').filter({ hasText: shortAddress }).first();
-  await expect(targetItem, `runtime dropdown must contain ${shortAddress}`).toBeVisible({ timeout: 15_000 });
-  await targetItem.click();
+  const runtimeCardText = targetRuntimeLabel || shortAddress;
+  let switched = false;
+  for (let attempt = 0; attempt < 3 && !switched; attempt += 1) {
+    await openRuntimeDropdown(page);
+    const targetItem = page.locator('.switcher-menu .runtime-main').filter({ hasText: runtimeCardText }).first();
+    await expect(targetItem, `runtime dropdown must contain ${runtimeCardText}`).toBeVisible({ timeout: 15_000 });
+    await targetItem.scrollIntoViewIfNeeded();
+    await targetItem.click();
+    try {
+      await waitForActiveRuntimeId(page, normalizedRuntimeId);
+      switched = true;
+    } catch {
+      // Retry through the real UI instead of falling back to storage mutation.
+    }
+  }
+  expect(switched, `runtime switcher must activate ${runtimeCardText}`).toBe(true);
   await waitForRuntimeReady(page, normalizedRuntimeId);
   await dismissOnboardingIfVisible(page);
   await completeProfileOnboardingIfVisible(page, `Runtime ${normalizedRuntimeId.slice(2, 6)}`);
