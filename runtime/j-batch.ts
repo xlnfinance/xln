@@ -419,6 +419,146 @@ export function getEffectiveDraftReserveBalance(
   return currentReserve + getDraftBatchReserveDelta(entityId, batch, tokenId);
 }
 
+export interface DraftBatchReserveIssue {
+  tokenId: number;
+  opType: 'reserveToReserve' | 'reserveToCollateral' | 'reserveToExternalToken';
+  opIndex: number;
+  requiredAmount: bigint;
+  availableAfterDebt: bigint;
+  debtClaimPaid: bigint;
+  remainingDebtAfterSweep: bigint;
+}
+
+export interface DraftBatchReserveSimulation {
+  issues: DraftBatchReserveIssue[];
+  reservesByToken: Map<number, bigint>;
+  outgoingDebtByToken: Map<number, bigint>;
+}
+
+function readBigIntMapAmount(source: Map<number, bigint> | null | undefined, tokenId: number): bigint {
+  if (!source) return 0n;
+  return source.get(tokenId) ?? 0n;
+}
+
+function writeBigIntMapAmount(target: Map<number, bigint>, tokenId: number, amount: bigint): void {
+  if (amount === 0n) {
+    target.delete(tokenId);
+    return;
+  }
+  target.set(tokenId, amount);
+}
+
+function sweepOutgoingDebtOnce(
+  reservesByToken: Map<number, bigint>,
+  outgoingDebtByToken: Map<number, bigint>,
+  tokenId: number,
+): { availableAfterDebt: bigint; debtClaimPaid: bigint; remainingDebtAfterSweep: bigint } {
+  const reserve = readBigIntMapAmount(reservesByToken, tokenId);
+  const outgoingDebt = readBigIntMapAmount(outgoingDebtByToken, tokenId);
+  if (reserve <= 0n || outgoingDebt <= 0n) {
+    return {
+      availableAfterDebt: reserve,
+      debtClaimPaid: 0n,
+      remainingDebtAfterSweep: outgoingDebt,
+    };
+  }
+
+  const debtClaimPaid = reserve < outgoingDebt ? reserve : outgoingDebt;
+  const availableAfterDebt = reserve - debtClaimPaid;
+  const remainingDebtAfterSweep = outgoingDebt - debtClaimPaid;
+  writeBigIntMapAmount(reservesByToken, tokenId, availableAfterDebt);
+  writeBigIntMapAmount(outgoingDebtByToken, tokenId, remainingDebtAfterSweep);
+  return { availableAfterDebt, debtClaimPaid, remainingDebtAfterSweep };
+}
+
+export function simulateDraftBatchReserveAvailability(
+  entityId: string,
+  currentReserves: Map<number, bigint> | null | undefined,
+  batch: JBatch | null | undefined,
+  outgoingDebtByTokenInput: Map<number, bigint> | null | undefined,
+): DraftBatchReserveSimulation {
+  const reservesByToken = new Map<number, bigint>(currentReserves ? Array.from(currentReserves.entries()) : []);
+  const outgoingDebtByToken = new Map<number, bigint>(outgoingDebtByTokenInput ? Array.from(outgoingDebtByTokenInput.entries()) : []);
+  const issues: DraftBatchReserveIssue[] = [];
+  if (!batch) return { issues, reservesByToken, outgoingDebtByToken };
+
+  const normalizedEntityId = normalizeEntityId(entityId);
+
+  const addReserve = (tokenId: number, amount: bigint): void => {
+    writeBigIntMapAmount(reservesByToken, tokenId, readBigIntMapAmount(reservesByToken, tokenId) + amount);
+  };
+
+  const spendReserve = (
+    tokenId: number,
+    amount: bigint,
+    opType: DraftBatchReserveIssue['opType'],
+    opIndex: number,
+  ): boolean => {
+    const swept = sweepOutgoingDebtOnce(reservesByToken, outgoingDebtByToken, tokenId);
+    if (swept.availableAfterDebt < amount) {
+      issues.push({
+        tokenId,
+        opType,
+        opIndex,
+        requiredAmount: amount,
+        availableAfterDebt: swept.availableAfterDebt,
+        debtClaimPaid: swept.debtClaimPaid,
+        remainingDebtAfterSweep: swept.remainingDebtAfterSweep,
+      });
+      return false;
+    }
+    writeBigIntMapAmount(reservesByToken, tokenId, swept.availableAfterDebt - amount);
+    return true;
+  };
+
+  for (const op of batch.flashloans) {
+    addReserve(op.tokenId, op.amount);
+  }
+
+  for (const op of batch.externalTokenToReserve) {
+    const target = op.entity ? normalizeEntityId(op.entity) : normalizedEntityId;
+    if (target === normalizedEntityId) addReserve(op.internalTokenId, op.amount);
+  }
+
+  for (const [index, op] of batch.reserveToReserve.entries()) {
+    if (!spendReserve(op.tokenId, op.amount, 'reserveToReserve', index)) {
+      return { issues, reservesByToken, outgoingDebtByToken };
+    }
+    if (normalizeEntityId(op.receivingEntity) === normalizedEntityId) {
+      addReserve(op.tokenId, op.amount);
+    }
+  }
+
+  for (const op of batch.collateralToReserve) {
+    addReserve(op.tokenId, op.amount);
+  }
+
+  for (const settlement of batch.settlements) {
+    for (const diff of settlement.diffs) {
+      if (normalizeEntityId(settlement.leftEntity) === normalizedEntityId) {
+        addReserve(diff.tokenId, diff.leftDiff);
+      } else if (normalizeEntityId(settlement.rightEntity) === normalizedEntityId) {
+        addReserve(diff.tokenId, diff.rightDiff);
+      }
+    }
+  }
+
+  for (const [index, op] of batch.reserveToCollateral.entries()) {
+    const totalAmount = op.pairs.reduce((sum, pair) => sum + pair.amount, 0n);
+    if (!spendReserve(op.tokenId, totalAmount, 'reserveToCollateral', index)) {
+      return { issues, reservesByToken, outgoingDebtByToken };
+    }
+  }
+
+  for (const [index, op] of batch.reserveToExternalToken.entries()) {
+    if (!spendReserve(op.tokenId, op.amount, 'reserveToExternalToken', index)) {
+      return { issues, reservesByToken, outgoingDebtByToken };
+    }
+  }
+
+  return { issues, reservesByToken, outgoingDebtByToken };
+}
+
 export function computeBatchHankoHash(
   chainId: bigint,
   depositoryAddress: string,

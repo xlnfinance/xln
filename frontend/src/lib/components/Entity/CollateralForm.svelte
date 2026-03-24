@@ -62,9 +62,7 @@
   })();
   $: maxCollateralNeeded = (() => {
     if (!userDerivedDelta) return 0n;
-    return userDerivedDelta.outPeerCredit > userDerivedDelta.outCollateral
-      ? (userDerivedDelta.outPeerCredit - userDerivedDelta.outCollateral)
-      : 0n;
+    return userDerivedDelta.outPeerCredit > 0n ? userDerivedDelta.outPeerCredit : 0n;
   })();
   $: maxCollateralRequest = (() => {
     if (!userDerivedDelta) return 0n;
@@ -280,14 +278,14 @@
   {#if overCollateralAmount > 0n}
     <div class="over-collateral-note">
       <div>
-        Вы запрашиваете оверколлатеризацию на {formatTokenAmount(overCollateralAmount)} {tokenSymbol(selectedTokenId)}.
-        Лимит принятия хаба: {formatTokenAmount(maxCollateralRequest)} {tokenSymbol(selectedTokenId)}.
+        You are requesting over-collateralization of {formatTokenAmount(overCollateralAmount)} {tokenSymbol(selectedTokenId)}.
+        Hub acceptance cap: {formatTokenAmount(maxCollateralRequest)} {tokenSymbol(selectedTokenId)}.
       </div>
       <div>
-        Цена аренды: $1 за $100 в час (примерно). На {overCollateralMinutes} мин: {formatUsd(overCollateralRentCostUsd)}.
+        Fee estimate: $1 per $100 per hour (approx.). For {overCollateralMinutes} minutes: {formatUsd(overCollateralRentCostUsd)}.
       </div>
       <div class="over-collateral-slider-row">
-        <label for="over-collateral-minutes">Аренда оверколлатеризации, мин:</label>
+        <label for="over-collateral-minutes">Over-collateralization rental, minutes:</label>
         <input
           id="over-collateral-minutes"
           class="over-collateral-slider"

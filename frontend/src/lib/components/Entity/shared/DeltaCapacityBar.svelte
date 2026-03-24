@@ -8,8 +8,8 @@
   export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
   export let visualScale: DeltaVisualScale | null = null;
 
-  const CENTER_GAP_PX = 50;
-  const SIDES_GAP_PX = 14;
+  const CENTER_GAP_PX = 10;
+  const SIDES_GAP_PX = 10;
   const MIN_VISIBLE_SIDE_PX = 0;
   const CREDIT_GRADIENT_MAX_PX = 300;
 
@@ -132,7 +132,9 @@
     {#if rippleActive}<div class="ripple-ring"></div>{/if}
 
     {#if layout === 'center'}
-      <div class="axis"></div>
+      <div class="axis">
+        <div class="delta-cut"></div>
+      </div>
 
       {#if outWidthPx > 0}
         <div class="shell out center-shell" style={outCenterWidthStyle}>
@@ -200,7 +202,9 @@
       {#if derived.inPeerCredit > 0n}<div class="seg credit" style={creditPctStyle(pctOf(derived.inPeerCredit, outTotal + inTotal))}></div>{/if}
 
       {#if outTotal > 0n && inTotal > 0n}
-        <div class="mid one-sided-sep" style={`left:${pctOf(outTotal, outTotal + inTotal)}%`}></div>
+        <div class="mid one-sided-sep" style={`left:${pctOf(outTotal, outTotal + inTotal)}%`}>
+          <div class="delta-cut"></div>
+        </div>
       {/if}
     </div>
   {:else}
@@ -217,7 +221,9 @@
           ></div>
         {/if}
       </div>
-      <div class="mid"></div>
+      <div class="mid">
+        <div class="delta-cut"></div>
+      </div>
       <div class="half in">
         {#if derived.inOwnCredit > 0n}<div class="seg debt" style={`width:${pctOf(derived.inOwnCredit, halfMax)}%`}></div>{/if}
         {#if derived.inCollateral > 0n}<div class="seg coll" style={`width:${pctOf(derived.inCollateral, halfMax)}%`}></div>{/if}
@@ -359,6 +365,21 @@
     width: 12px;
     background: transparent;
     transform: translateX(-6px);
+  }
+
+  /* Delta boundary — subtle cut mark */
+  .delta-cut {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 1.5px;
+    height: calc(var(--bar-h) + 6px);
+    background: #dc6b6b;
+    border-radius: 0;
+    box-shadow: 0 0 3px rgba(220, 107, 107, 0.3);
+    z-index: 5;
+    pointer-events: none;
   }
 
   .seg {

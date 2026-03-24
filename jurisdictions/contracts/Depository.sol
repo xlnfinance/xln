@@ -773,9 +773,9 @@ contract Depository is ReentrancyGuardLite {
     SettlementDiff[] memory diffs,
     uint[] memory forgiveDebtsInTokenIds
   ) public view returns (bytes32 hash, uint256 nonce, uint256 encodedMsgLength) {
-    bytes memory ch_key = accountKey(leftEntity, rightEntity);
-    nonce = _accounts[ch_key].nonce + 1;
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), ch_key, nonce, diffs, forgiveDebtsInTokenIds);
+    bytes memory acct_key = accountKey(leftEntity, rightEntity);
+    nonce = _accounts[acct_key].nonce + 1;
+    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), acct_key, nonce, diffs, forgiveDebtsInTokenIds);
     hash = keccak256(encoded_msg);
     encodedMsgLength = encoded_msg.length;
   }
@@ -791,11 +791,11 @@ contract Depository is ReentrancyGuardLite {
       bytes32 counterentity = params.pairs[i].entity;
       uint amount = params.pairs[i].amount;
 
-      bytes memory ch_key = accountKey(receivingEntity, counterentity);
+      bytes memory acct_key = accountKey(receivingEntity, counterentity);
 
       
       if (_reserves[entity][tokenId] >= amount) {
-        AccountCollateral storage col = _collaterals[ch_key][tokenId];
+        AccountCollateral storage col = _collaterals[acct_key][tokenId];
 
         _reserves[entity][tokenId] -= amount;
         col.collateral += amount;
@@ -867,24 +867,24 @@ contract Depository is ReentrancyGuardLite {
 
   /// @notice Internal dispute finalize with full storage access
   function _disputeFinalizeInternal(bytes32 entityId, FinalDisputeProof memory params) internal returns (bool) {
-    bytes memory ch_key = accountKey(entityId, params.counterentity);
+    bytes memory acct_key = accountKey(entityId, params.counterentity);
 
     if (params.cooperative) {
       // SECURITY: Prevent cooperative finalize on virgin accounts
-      if (_accounts[ch_key].nonce == 0) revert E5();
+      if (_accounts[acct_key].nonce == 0) revert E5();
 
       // NONCE CHECK: signedNonce > storedNonce (strictly greater)
-      if (params.finalNonce <= _accounts[ch_key].nonce) revert E2();
+      if (params.finalNonce <= _accounts[acct_key].nonce) revert E2();
 
       require(params.sig.length > 0, "Signature required for cooperative finalize");
-      if (!Account.verifyCooperativeProofHanko(entityProvider, address(this), ch_key, params.finalNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
+      if (!Account.verifyCooperativeProofHanko(entityProvider, address(this), acct_key, params.finalNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
     } else {
-      bytes32 storedHash = _accounts[ch_key].disputeHash;
+      bytes32 storedHash = _accounts[acct_key].disputeHash;
       if (storedHash == bytes32(0)) revert E5();
 
       bytes32 expectedHash = Account.encodeDisputeHash(
         params.initialNonce, params.startedByLeft,
-        _accounts[ch_key].disputeTimeout, params.initialProofbodyHash, params.initialArguments
+        _accounts[acct_key].disputeTimeout, params.initialProofbodyHash, params.initialArguments
       );
       if (storedHash != expectedHash) revert E9();
 
@@ -892,31 +892,31 @@ contract Depository is ReentrancyGuardLite {
       if (params.sig.length > 0) {
         // Counter-dispute: counterparty provides a NEWER signed proof
         // NONCE CHECK: finalNonce > storedNonce (strictly greater)
-        if (params.finalNonce <= _accounts[ch_key].nonce) revert E2();
+        if (params.finalNonce <= _accounts[acct_key].nonce) revert E2();
         if (params.finalNonce <= params.initialNonce) revert E2();
 
         bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
-        if (!Account.verifyDisputeProofHanko(entityProvider, address(this), ch_key, params.finalNonce, finalProofbodyHash, params.sig, params.counterentity)) revert E4();
+        if (!Account.verifyDisputeProofHanko(entityProvider, address(this), acct_key, params.finalNonce, finalProofbodyHash, params.sig, params.counterentity)) revert E4();
       } else {
         // Unilateral finalization after timeout (no new signature)
         bool senderIsCounterparty = params.startedByLeft != (entityId < params.counterentity);
-        if (!senderIsCounterparty && block.number < _accounts[ch_key].disputeTimeout) revert E2();
+        if (!senderIsCounterparty && block.number < _accounts[acct_key].disputeTimeout) revert E2();
         if (params.initialProofbodyHash != keccak256(abi.encode(params.finalProofbody))) revert E2();
       }
     }
 
-    _accounts[ch_key].disputeHash = bytes32(0);
-    _accounts[ch_key].disputeTimeout = 0;
+    _accounts[acct_key].disputeHash = bytes32(0);
+    _accounts[acct_key].disputeTimeout = 0;
 
     bool ok = _finalizeAccount(entityId, params.counterentity, params.finalProofbody, params.finalArguments, params.initialArguments);
     if (ok) {
       // SET nonce based on finalization path
       if (params.sig.length > 0) {
         // Cooperative or counter-dispute: storedNonce = signedNonce
-        _accounts[ch_key].nonce = params.finalNonce;
+        _accounts[acct_key].nonce = params.finalNonce;
       } else {
         // Unilateral timeout: no new signature, bump by 1
-        _accounts[ch_key].nonce++;
+        _accounts[acct_key].nonce++;
       }
 
       emit DisputeFinalized(
@@ -940,7 +940,7 @@ contract Depository is ReentrancyGuardLite {
     bytes32 rightAddr = entity1 < entity2 ? entity2 : entity1;
     bytes memory leftArgs = entity1 < entity2 ? arguments1 : arguments2;
     bytes memory rightArgs = entity1 < entity2 ? arguments2 : arguments1;
-    bytes memory ch_key = accountKey(leftAddr, rightAddr);
+    bytes memory acct_key = accountKey(leftAddr, rightAddr);
 
     // NOTE: On-chain settlement must apply TOTAL delta (ondelta + offdelta).
     // - `col.ondelta` tracks the on-chain component (e.g., collateral funding events).
@@ -949,7 +949,7 @@ contract Depository is ReentrancyGuardLite {
     int[] memory deltas = new int[](tokenCount);
     for (uint256 i = 0; i < tokenCount; i++) {
       uint256 tokenId = proofbody.tokenIds[i];
-      deltas[i] = _collaterals[ch_key][tokenId].ondelta + proofbody.offdeltas[i];
+      deltas[i] = _collaterals[acct_key][tokenId].ondelta + proofbody.offdeltas[i];
     }
 
     bytes[] memory decodedLeft = leftArgs.length > 0 ? abi.decode(leftArgs, (bytes[])) : new bytes[](0);
@@ -979,7 +979,7 @@ contract Depository is ReentrancyGuardLite {
 
     // Apply deltas
     for (uint256 i = 0; i < proofbody.tokenIds.length; i++) {
-      _applyAccountDelta(ch_key, proofbody.tokenIds[i], leftAddr, rightAddr, deltas[i]);
+      _applyAccountDelta(acct_key, proofbody.tokenIds[i], leftAddr, rightAddr, deltas[i]);
     }
 
     // Nonce update is handled by _disputeFinalizeInternal (caller)
@@ -987,8 +987,8 @@ contract Depository is ReentrancyGuardLite {
   }
 
   /// @notice Apply delta to account collateral and reserves
-  function _applyAccountDelta(bytes memory ch_key, uint256 tokenId, bytes32 leftEntity, bytes32 rightEntity, int delta) internal {
-    AccountCollateral storage col = _collaterals[ch_key][tokenId];
+  function _applyAccountDelta(bytes memory acct_key, uint256 tokenId, bytes32 leftEntity, bytes32 rightEntity, int delta) internal {
+    AccountCollateral storage col = _collaterals[acct_key][tokenId];
     uint256 collateral = col.collateral;
 
     // Δ is LEFT's allocation (ondelta + offdelta), bounded by RCPAN:

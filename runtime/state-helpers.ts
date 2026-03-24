@@ -3,7 +3,7 @@
  * Utilities for entity replica cloning, snapshots, and state persistence
  */
 
-import type { EntityReplica, EntityState, Env, RuntimeInput, AccountMachine, JReplica, LogCategory, AccountFrame } from './types';
+import type { EntityReplica, EntityState, Env, RuntimeInput, AccountMachine, JReplica, LogCategory, AccountFrame, DebtEntry } from './types';
 import { DEBUG, HEAVY_LOGS } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify } from './serialization-utils';
@@ -123,6 +123,25 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
 // === CLONING UTILITIES ===
 export const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
 export const cloneArray = <T>(arr: T[]) => [...arr];
+
+const cloneDebtEntry = (entry: DebtEntry): DebtEntry => ({
+  ...entry,
+  updates: entry.updates.map((update) => ({ ...update })),
+});
+
+const cloneDebtLedger = (
+  ledger: Map<number, Map<string, DebtEntry>> | undefined,
+): Map<number, Map<string, DebtEntry>> | undefined => {
+  if (!ledger) return undefined;
+  return new Map(
+    Array.from(ledger.entries()).map(([tokenId, debtMap]) => [
+      tokenId,
+      new Map(
+        Array.from(debtMap.entries()).map(([debtId, entry]) => [debtId, cloneDebtEntry(entry)]),
+      ),
+    ]),
+  );
+};
 
 export function cloneAccountFrame(frame: AccountFrame): AccountFrame {
   try {
@@ -258,6 +277,8 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     ),
     htlcNotes: new Map(Array.from((entityState.htlcNotes || new Map()).entries())),
     htlcFeesEarned: entityState.htlcFeesEarned || 0n,
+    outDebtsByToken: cloneDebtLedger(entityState.outDebtsByToken),
+    inDebtsByToken: cloneDebtLedger(entityState.inDebtsByToken),
     // Orderbook extension (hub-only, contains TypedArrays)
     // Must manually clone since structuredClone failed (we're in fallback path)
     ...(entityState.orderbookExt && { orderbookExt: cloneOrderbookExt(entityState.orderbookExt) }),

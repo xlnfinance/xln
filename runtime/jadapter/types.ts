@@ -97,6 +97,7 @@ export interface JAdapter {
 
   // Writes - Core Operations
   processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt>;
+  enforceDebts(entityId: string, tokenId: number): Promise<bigint>;
 
   // Writes - Entity Management
   registerNumberedEntity(boardHash: string): Promise<{ entityNumber: number; txHash: string }>;
@@ -200,6 +201,7 @@ export interface JBatchReceipt {
 // Forward declare BrowserVMProvider (avoid circular import)
 export interface BrowserVMProvider {
   processBatch(encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint): Promise<any[]>;
+  enforceDebts(entityId: string, tokenId: number): Promise<bigint>;
   setBlockTimestamp(timestamp: number): void;
   getDepositoryAddress(): string;
   getEntityProviderAddress(): string;

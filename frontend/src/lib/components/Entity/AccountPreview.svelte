@@ -317,7 +317,6 @@
 
   function handleDispute(e: MouseEvent) {
     e.stopPropagation();
-    if (!confirm(`Start on-chain dispute with ${counterpartyName}?\n\nThis will submit a dispute transaction to the blockchain.`)) return;
     dispatch('dispute', { counterpartyId });
   }
 </script>
@@ -462,7 +461,7 @@
         inAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}
         derived={aggDerived}
         decimals={Number(primaryTokenInfo.decimals ?? 18)}
-        barHeight={8}
+        barHeight={6}
         visualScale={aggregateVisualScale}
         actionLabel="Faucet"
         actionTokenId={agg.primaryTokenId}
@@ -472,7 +471,7 @@
       <DeltaTokenList
         rows={tokenSummaries}
         barLayout={$settings.barLayout ?? 'center'}
-        barHeight={8}
+        barHeight={6}
         showMetricLabels={false}
         showHeader={false}
         mode="plain"
@@ -499,22 +498,19 @@
   .account-preview {
     --delta-col-w: clamp(136px, 14vw, 192px);
     --delta-sep-w: 12px;
-    background: #18181b;
-    border: 1px solid #27272a;
-    border-left: none;
-    border-radius: 12px;
+    background: #111113;
+    border: 1px solid #1e1e22;
+    border-radius: 6px;
     padding: 14px 16px 12px;
     transition: all 0.15s ease;
   }
-  /* Status indicated by dot only — no border coloring */
   .account-preview:hover {
-    border-color: #3f3f46;
-    background: #1c1c20;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    border-color: #2a2a2e;
+    background: #141416;
   }
   .account-preview.selected {
-    border-color: #fbbf24;
-    background: linear-gradient(135deg, rgba(251, 191, 36, 0.04) 0%, transparent 100%);
+    border-color: #2a2a2e;
+    background: #141416;
   }
 
   /* ── Header ───────────────────────────────────── */

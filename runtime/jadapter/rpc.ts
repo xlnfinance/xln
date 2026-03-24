@@ -792,6 +792,21 @@ export async function createRpcAdapter(
       };
     },
 
+    async enforceDebts(entityId: string, tokenId: number): Promise<bigint> {
+      const predictedRemaining = await depository.enforceDebts.staticCall(entityId, BigInt(tokenId));
+      const gasLimit = await estimateGasWithHeadroom(
+        () => depository.enforceDebts.estimateGas(entityId, BigInt(tokenId)),
+        500_000n,
+      );
+      maybeResetSignerNonce();
+      const tx = await depository.enforceDebts(entityId, BigInt(tokenId), {
+        gasLimit,
+        ...(await buildFeeOverrides()),
+      });
+      await waitForReceipt(tx as any, 'enforceDebts');
+      return predictedRemaining;
+    },
+
     async registerNumberedEntity(boardHash: string): Promise<{ entityNumber: number; txHash: string }> {
       const tx = await entityProvider.registerNumberedEntity(boardHash, await buildFeeOverrides());
       const receipt = await waitForReceipt(tx as any, 'registerNumberedEntity');
@@ -1392,6 +1407,7 @@ export async function createRpcAdapter(
         'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
         'event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex)',
         'event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex)',
+        'event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex)',
         'event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success)',
       ];
       const depositoryIface = new ethers.Interface(depositoryABI);

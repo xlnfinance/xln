@@ -20,6 +20,11 @@
     RoutedEntityInput,
     EntityTx,
   } from '@xln/runtime/xln-api';
+  import {
+    getDraftBatchReserveDelta,
+    simulateDraftBatchReserveAvailability,
+    type DraftBatchReserveIssue,
+  } from '@xln/runtime/j-batch';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { getXLN, history, resolveConfiguredApiBase, xlnEnvironment } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
@@ -52,6 +57,7 @@
   import SwapPanel from './SwapPanel.svelte';
   import SettlementPanel from './SettlementPanel.svelte';
   import MoveWorkspace from './MoveWorkspace.svelte';
+  import DebtPanel from './DebtPanel.svelte';
   import CreditForm from './CreditForm.svelte';
   import CollateralForm from './CollateralForm.svelte';
   import ChatMessages from './ChatMessages.svelte';
@@ -111,6 +117,7 @@
   let workspaceAccountId = '';
   let configureTokenId = 1;
   let pendingBatchSubmitting = false;
+  let debtEnforcingTokenId: number | null = null;
 
   // State
   let replica: EntityReplica | null = null;
@@ -741,45 +748,19 @@
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
     const batch = replica?.state?.jBatchState?.batch;
     if (!entityId || !batch) return 0n;
+    return getDraftBatchReserveDelta(entityId, batch, tokenId);
+  }
 
-    let delta = 0n;
-
-    for (const op of batch.externalTokenToReserve || []) {
-      const target = String(op?.entity || entityId).trim().toLowerCase();
-      if (target === entityId && Number(op?.internalTokenId) === tokenId) {
-        delta += BigInt(op?.amount || 0);
+  function getOpenOutgoingDebtForToken(tokenId: number): bigint {
+    const bucket = replica?.state?.outDebtsByToken?.get?.(tokenId);
+    if (!bucket) return 0n;
+    let total = 0n;
+    for (const debt of bucket.values()) {
+      if (debt.status === 'open') {
+        total += BigInt(debt.remainingAmount || 0);
       }
     }
-
-    for (const op of batch.collateralToReserve || []) {
-      if (Number(op?.tokenId) === tokenId) {
-        delta += BigInt(op?.amount || 0);
-      }
-    }
-
-    for (const op of batch.reserveToReserve || []) {
-      if (Number(op?.tokenId) !== tokenId) continue;
-      const amount = BigInt(op?.amount || 0);
-      delta -= amount;
-      if (String(op?.receivingEntity || '').trim().toLowerCase() === entityId) {
-        delta += amount;
-      }
-    }
-
-    for (const op of batch.reserveToExternalToken || []) {
-      if (Number(op?.tokenId) === tokenId) {
-        delta -= BigInt(op?.amount || 0);
-      }
-    }
-
-    for (const op of batch.reserveToCollateral || []) {
-      if (Number(op?.tokenId) !== tokenId) continue;
-      for (const pair of op?.pairs || []) {
-        delta -= BigInt(pair?.amount || 0);
-      }
-    }
-
-    return delta;
+    return total;
   }
 
   function getMoveMaxAmount(
@@ -792,9 +773,12 @@
       case 'external':
         return externalToken?.balance ?? 0n;
       case 'reserve':
-        return reserveToken
-          ? (onchainReserves.get(reserveToken.tokenId) ?? 0n) + getMoveDraftReserveDelta(reserveToken.tokenId)
-          : 0n;
+        if (!reserveToken) return 0n;
+        return (() => {
+          const effective = (onchainReserves.get(reserveToken.tokenId) ?? 0n) + getMoveDraftReserveDelta(reserveToken.tokenId);
+          const outgoingDebt = getOpenOutgoingDebtForToken(reserveToken.tokenId);
+          return effective > outgoingDebt ? effective - outgoingDebt : 0n;
+        })();
       case 'account':
         return reserveToken && sourceAccountId
           ? getAccountWithdrawableCollateral(sourceAccountId, reserveToken.tokenId)
@@ -1275,6 +1259,7 @@
     const nextRaw = String(event.detail?.value || '').trim();
     const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextRaw.toLowerCase());
     workspaceAccountId = matched || nextRaw;
+    selectedAccountId = matched || nextRaw || null;
   }
 
   $: openAccountEntityOptions = (() => {
@@ -1824,7 +1809,6 @@
       }
 
       console.log('[EntityPanel] Offchain faucet success:', result);
-      toasts.info('Offchain faucet request accepted.');
     } catch (err) {
       console.error('[EntityPanel] Offchain faucet failed:', err);
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
@@ -3020,7 +3004,32 @@
   }
 
   async function handleDisputeFromList(event: CustomEvent<{ counterpartyId: string }>) {
-    await queueDisputeStart(event.detail.counterpartyId, 'dispute-from-popover');
+    await confirmAndQueueDisputeStart(event.detail.counterpartyId, 'dispute-from-popover');
+  }
+
+  function confirmDisputeAction(
+    kind: 'start' | 'finalize',
+    counterpartyEntityId: string,
+  ): boolean {
+    const label = pendingBatchEntityLabel(counterpartyEntityId);
+    if (kind === 'start') {
+      return confirm(
+        `Start on-chain dispute with ${label}?\n\nThis adds Dispute Start to the pending batch and freezes normal use of this account until resolved.`,
+      );
+    }
+    return confirm(
+      `Finalize on-chain dispute with ${label}?\n\nThis adds Dispute Finalize to the pending batch. Only do this after the dispute timeout has passed.`,
+    );
+  }
+
+  async function confirmAndQueueDisputeStart(counterpartyEntityId: string, description = 'dispute-from-configure') {
+    if (!confirmDisputeAction('start', counterpartyEntityId)) return;
+    await queueDisputeStart(counterpartyEntityId, description);
+  }
+
+  async function confirmAndQueueDisputeFinalize(counterpartyEntityId: string, description = 'dispute-finalize-from-configure') {
+    if (!confirmDisputeAction('finalize', counterpartyEntityId)) return;
+    await queueDisputeFinalize(counterpartyEntityId, description);
   }
 
   async function queueDisputeStart(counterpartyEntityId: string, description = 'dispute-from-configure') {
@@ -3083,6 +3092,35 @@
     } catch (err) {
       console.error('[EntityPanel] Reopen disputed account failed:', err);
       toasts.error(`Reopen failed: ${(err as Error).message}`);
+    }
+  }
+
+  async function enforceOutstandingDebt(tokenId: number): Promise<void> {
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
+    if (!entityId) return;
+    if (!activeIsLive) {
+      toasts.error('Debt enforcement requires LIVE mode');
+      return;
+    }
+    debtEnforcingTokenId = tokenId;
+    try {
+      const xln = await getXLN();
+      const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
+      if (!jadapter?.enforceDebts) throw new Error('J-adapter debt enforcement unavailable');
+      const remainingDebts = await jadapter.enforceDebts(entityId, tokenId);
+      await jadapter.pollNow?.();
+      await xln.processJBlockEvents?.(activeEnv ?? null as never);
+      const tokenLabel = getTokenInfo(tokenId).symbol || `Token #${tokenId}`;
+      toasts.success(
+        remainingDebts > 0n
+          ? `Debt enforcement submitted for ${tokenLabel}. ${remainingDebts.toString()} queue entries still open.`
+          : `Debt enforcement submitted for ${tokenLabel}. Queue cleared.`,
+      );
+    } catch (err) {
+      console.error('[EntityPanel] Enforce debt failed:', err);
+      toasts.error(`Debt enforcement failed: ${(err as Error).message}`);
+    } finally {
+      debtEnforcingTokenId = null;
     }
   }
 
@@ -3838,12 +3876,22 @@
   }
 
   function handleBackToAccounts() {
+    const nextWorkspaceId = String(selectedAccountId || '').trim();
+    if (nextWorkspaceId) {
+      const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextWorkspaceId.toLowerCase());
+      workspaceAccountId = matched || nextWorkspaceId;
+    }
     selectedAccountId = null;
     activeTab = 'accounts';
     accountWorkspaceTab = 'activity';
   }
 
   function handleAccountPanelGoToOpenAccounts() {
+    const nextWorkspaceId = String(selectedAccountId || '').trim();
+    if (nextWorkspaceId) {
+      const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextWorkspaceId.toLowerCase());
+      workspaceAccountId = matched || nextWorkspaceId;
+    }
     selectedAccountId = null;
     activeTab = 'accounts';
     accountWorkspaceTab = 'open';
@@ -3988,9 +4036,64 @@
     return items;
   }
 
+  function buildOpenOutgoingDebtTotals(): {
+    count: number;
+    usdTotal: number;
+    byToken: Map<number, bigint>;
+  } {
+    const byToken = new Map<number, bigint>();
+    let count = 0;
+    let usdTotal = 0;
+    for (const [tokenId, bucket] of replica?.state?.outDebtsByToken?.entries?.() || []) {
+      let tokenTotal = 0n;
+      for (const debt of bucket.values()) {
+        if (debt.status !== 'open') continue;
+        count += 1;
+        tokenTotal += BigInt(debt.remainingAmount || 0);
+        const tokenInfo = activeXlnFunctions?.getTokenInfo?.(tokenId);
+        usdTotal += amountToUsd(
+          BigInt(debt.remainingAmount || 0),
+          Number(tokenInfo?.decimals ?? 18),
+          String(tokenInfo?.symbol || `Token #${tokenId}`),
+        );
+      }
+      if (tokenTotal > 0n) byToken.set(tokenId, tokenTotal);
+    }
+    return { count, usdTotal, byToken };
+  }
+
+  function formatBatchReserveIssue(issue: DraftBatchReserveIssue | null): string | null {
+    if (!issue) return null;
+    const tokenLabel = pendingBatchTokenAmountLabel(issue.tokenId, issue.requiredAmount).replace(/^[\d.,\s]+/, '').trim();
+    const spendable = pendingBatchTokenAmountLabel(issue.tokenId, issue.availableAfterDebt);
+    const debtClaim = pendingBatchTokenAmountLabel(issue.tokenId, issue.debtClaimPaid);
+    if (issue.opType === 'reserveToExternalToken') {
+      return `Reserve withdrawal will fail: debt sweep consumes ${debtClaim} first, leaving only ${spendable} spendable.`;
+    }
+    if (issue.opType === 'reserveToCollateral') {
+      return `Reserve → Account will fail for ${tokenLabel}: debt sweep consumes ${debtClaim} first, leaving only ${spendable}.`;
+    }
+    return `Reserve → Reserve will fail for ${tokenLabel}: debt sweep consumes ${debtClaim} first, leaving only ${spendable}.`;
+  }
+
+  function getPendingBatchReserveIssue(batch: JBatch | null | undefined): DraftBatchReserveIssue | null {
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    if (!entityId || !batch) return null;
+    const simulation = simulateDraftBatchReserveAvailability(
+      entityId,
+      onchainReserves,
+      batch,
+      openOutgoingDebtSummary.byToken,
+    );
+    return simulation.issues[0] ?? null;
+  }
+
+  $: openOutgoingDebtSummary = buildOpenOutgoingDebtTotals();
   $: hasDraftBatch = !!(replica?.state?.jBatchState?.batch && countBatchOps(replica.state.jBatchState.batch) > 0);
   $: hasSentBatch = !!(replica?.state?.jBatchState?.sentBatch?.batch && countBatchOps(replica.state.jBatchState.sentBatch.batch) > 0);
-  $: canBroadcastPendingBatch = hasDraftBatch && !hasSentBatch;
+  $: pendingBatchReserveIssue = getPendingBatchReserveIssue(replica?.state?.jBatchState?.batch);
+  $: pendingBatchReserveIssueText = formatBatchReserveIssue(pendingBatchReserveIssue);
+  $: canBroadcastPendingBatch = hasDraftBatch && !hasSentBatch && !pendingBatchReserveIssue;
 
   async function clearPendingBatch(): Promise<void> {
     if (!pendingBatchCount || pendingBatchSubmitting) return;
@@ -4015,6 +4118,10 @@
   }
 
   async function broadcastPendingBatch(): Promise<void> {
+    if (pendingBatchReserveIssueText) {
+      toasts.error(pendingBatchReserveIssueText);
+      return;
+    }
     if (!canBroadcastPendingBatch || pendingBatchSubmitting) return;
     pendingBatchSubmitting = true;
     try {
@@ -4356,6 +4463,16 @@
             </div>
           </div>
           <section class="asset-action-card">
+            {#if openOutgoingDebtSummary.count > 0}
+              <div class="workspace-debt-warning" data-testid="workspace-debt-warning">
+                <div class="workspace-debt-warning-copy">
+                  <span class="workspace-debt-warning-kicker">Open debts across all tokens</span>
+                  <strong>{openOutgoingDebtSummary.count} open · {formatApproxUsd(openOutgoingDebtSummary.usdTotal)}</strong>
+                </div>
+                <span class="workspace-debt-warning-note">Reserve spends sweep debts first. Enforce or refill before broadcasting risky reserve moves.</span>
+              </div>
+            {/if}
+
             {#if pendingBatchCount > 0}
               <div class="workspace-pending-banner" data-testid="workspace-pending-banner">
                 <div class="workspace-pending-copy">
@@ -4363,6 +4480,9 @@
                     <span class="workspace-pending-kicker">{pendingBatchMode === 'sent' ? 'Sent Batch' : 'Draft Batch'}</span>
                     <span class="workspace-pending-note">What will go on-chain next</span>
                   </div>
+                  {#if pendingBatchReserveIssueText}
+                    <div class="workspace-pending-alert">{pendingBatchReserveIssueText}</div>
+                  {/if}
                   <div class="workspace-pending-list">
                     {#each pendingBatchPreview as item (item.key)}
                       <div class="workspace-pending-chip">
@@ -4487,6 +4607,25 @@
             on:dispute={handleDisputeFromList}
           />
 
+          <DebtPanel
+            entityState={replica?.state || null}
+            sourceEnv={activeEnv}
+            {contacts}
+            canEnforce={activeIsLive}
+            enforcingTokenId={debtEnforcingTokenId}
+            on:enforce={(event) => enforceOutstandingDebt(event.detail.tokenId)}
+          />
+
+          {#if openOutgoingDebtSummary.count > 0}
+            <div class="workspace-debt-warning" data-testid="workspace-debt-warning">
+              <div class="workspace-debt-warning-copy">
+                <span class="workspace-debt-warning-kicker">Open debts across all tokens</span>
+                <strong>{openOutgoingDebtSummary.count} open · {formatApproxUsd(openOutgoingDebtSummary.usdTotal)}</strong>
+              </div>
+              <span class="workspace-debt-warning-note">Reserve spends sweep debts first. Sign & Broadcast stays locked while the draft still overspends after debt collection.</span>
+            </div>
+          {/if}
+
           {#if pendingBatchCount > 0}
             <div class="workspace-pending-banner" data-testid="workspace-pending-banner">
               <div class="workspace-pending-copy">
@@ -4494,6 +4633,9 @@
                   <span class="workspace-pending-kicker">{pendingBatchMode === 'sent' ? 'Sent Batch' : 'Draft Batch'}</span>
                   <span class="workspace-pending-note">What will go on-chain next</span>
                 </div>
+                {#if pendingBatchReserveIssueText}
+                  <div class="workspace-pending-alert">{pendingBatchReserveIssueText}</div>
+                {/if}
                 <div class="workspace-pending-list">
                   {#each pendingBatchPreview as item (item.key)}
                     <div class="workspace-pending-chip">
@@ -4627,6 +4769,7 @@
                     value={workspaceAccountId}
                     entities={workspaceAccountIds}
                     {contacts}
+                    testId="configure-account-selector"
                     excludeId={replica?.state?.entityId || tab.entityId}
                     placeholder="Select account for configure..."
                     disabled={!activeIsLive || workspaceAccountIds.length === 0}
@@ -4713,7 +4856,7 @@
                       <button
                         class="btn-danger-batch"
                         data-testid="configure-dispute-finalize"
-                        on:click={() => queueDisputeFinalize(workspaceAccountId, 'dispute-finalize-from-configure')}
+                        on:click={() => confirmAndQueueDisputeFinalize(workspaceAccountId, 'dispute-finalize-from-configure')}
                         disabled={!activeIsLive}
                       >
                         Add Dispute Finalize To Batch
@@ -4725,7 +4868,7 @@
                       <button
                         class="btn-danger-batch"
                         data-testid="configure-dispute-start"
-                        on:click={() => queueDisputeStart(workspaceAccountId, 'dispute-start-from-configure')}
+                        on:click={() => confirmAndQueueDisputeStart(workspaceAccountId, 'dispute-start-from-configure')}
                         disabled={!activeIsLive}
                       >
                         Add Dispute Start To Batch
@@ -5330,6 +5473,39 @@
     color: rgba(255, 242, 213, 0.96);
   }
 
+  .workspace-debt-warning {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 11px 14px;
+    margin-bottom: 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(248, 113, 113, 0.26);
+    background: rgba(127, 29, 29, 0.16);
+    color: #fee2e2;
+  }
+
+  .workspace-debt-warning-copy {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .workspace-debt-warning-kicker {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #fca5a5;
+  }
+
+  .workspace-debt-warning-note {
+    font-size: 12px;
+    color: rgba(254, 226, 226, 0.84);
+  }
+
   .workspace-pending-copy {
     display: grid;
     gap: 10px;
@@ -5361,6 +5537,16 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .workspace-pending-alert {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(127, 29, 29, 0.28);
+    border: 1px solid rgba(248, 113, 113, 0.22);
+    color: #fecaca;
+    font-size: 12px;
+    line-height: 1.4;
   }
 
   .workspace-pending-actions {

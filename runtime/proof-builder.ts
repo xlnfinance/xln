@@ -405,7 +405,7 @@ export function createSettlementHashWithNonce(
   );
 
   // Match Account.sol CooperativeUpdate encoding exactly:
-  // abi.encode(MessageType.CooperativeUpdate, address(this), ch_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds)
+  // abi.encode(MessageType.CooperativeUpdate, address(this), acct_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds)
   const MESSAGE_TYPE_COOPERATIVE_UPDATE = 0;
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const encodedMsg = abiCoder.encode(

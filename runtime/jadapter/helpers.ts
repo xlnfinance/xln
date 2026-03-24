@@ -15,7 +15,7 @@ import { createEmptyBatch, type JBatch } from '../j-batch';
 // ═══════════════════════════════════════════════════════════════════════════
 export const CANONICAL_J_EVENTS = [
   'ReserveUpdated', 'SecretRevealed', 'AccountSettled',
-  'DisputeStarted', 'DisputeFinalized', 'DebtCreated', 'DebtEnforced', 'HankoBatchProcessed',
+  'DisputeStarted', 'DisputeFinalized', 'DebtCreated', 'DebtEnforced', 'DebtForgiven', 'HankoBatchProcessed',
 ] as const;
 export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
 const CANONICAL_J_EVENT_SET = new Set<string>(CANONICAL_J_EVENTS);
@@ -281,6 +281,9 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
     case 'DebtEnforced':
       return normalize(args.debtor) === normalizedEntity || normalize(args.creditor) === normalizedEntity;
 
+    case 'DebtForgiven':
+      return normalize(args.debtor) === normalizedEntity || normalize(args.creditor) === normalizedEntity;
+
     case 'HankoBatchProcessed':
       return normalize(args.entityId) === normalizedEntity;
 
@@ -403,6 +406,18 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
           amountPaid: (args.amountPaid ?? 0).toString(),
           remainingAmount: (args.remainingAmount ?? 0).toString(),
           newDebtIndex: Number(args.newDebtIndex ?? 0),
+        },
+      }];
+
+    case 'DebtForgiven':
+      return [{
+        type: 'DebtForgiven',
+        data: {
+          debtor: args.debtor,
+          creditor: args.creditor,
+          tokenId: Number(args.tokenId),
+          amountForgiven: (args.amountForgiven ?? 0).toString(),
+          debtIndex: Number(args.debtIndex ?? 0),
         },
       }];
 
