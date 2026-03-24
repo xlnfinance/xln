@@ -76,6 +76,7 @@ nul
 db/
 db-*/
 db-tmp/
+data/anvil-state.json
 
 # Lock files (use bun.lock only)
 package-lock.json

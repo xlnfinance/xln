@@ -1228,6 +1228,23 @@ const deriveLocalEntityCryptoKeys = (
   return deriveEntityCryptoKeyPairHex(signerMaterial);
 };
 
+const resolveReplicaEntityCryptoKeys = (
+  env: Env,
+  entityId: string,
+  signerId: string,
+  existing?: { publicKey?: string; privateKey?: string },
+): { publicKey: string; privateKey: string; isLocal: boolean } => {
+  if (hasLocalSignerKey(env, signerId)) {
+    const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
+    return { ...keys, isLocal: true };
+  }
+  return {
+    publicKey: String(existing?.publicKey || ''),
+    privateKey: String(existing?.privateKey || ''),
+    isLocal: false,
+  };
+};
+
 const assertLocalEntityCryptoKeys = (env: Env): void => {
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const signerId = extractSignerId(replicaKey);
@@ -1304,6 +1321,40 @@ const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
     }
   }
   return [...hints];
+};
+
+export const handleInboundP2PEntityInput = (
+  env: Env,
+  from: string,
+  input: RoutedEntityInput,
+  ingressTimestamp?: number,
+): void => {
+  const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
+  console.log(`📨 P2P-RECEIVE: from=${from} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
+  const targetEntityId = String(input.entityId || '').toLowerCase();
+  const localReplicaExists = Array.from(env.eReplicas.keys()).some(key => {
+    const [entityKey] = String(key).split(':');
+    return String(entityKey || '').toLowerCase() === targetEntityId;
+  });
+  if (!localReplicaExists) {
+    env.warn(
+      'network',
+      'INBOUND_ENTITY_UNKNOWN_TARGET',
+      {
+        fromRuntimeId: from,
+        entityId: input.entityId,
+        txTypes,
+      },
+      input.entityId,
+    );
+    return;
+  }
+  for (const hintedEntityId of collectSenderEntityHints(input)) {
+    registerEntityRuntimeHint(env, hintedEntityId, from);
+  }
+  enqueueRuntimeInputs(env, [input], undefined, undefined, ingressTimestamp);
+  console.log(`📥 RUNTIME-MEMPOOL: Added inbound, size=${ensureRuntimeMempool(env).entityInputs.length}`);
+  env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
 };
 
 type PlannedRemoteOutput = {
@@ -1636,39 +1687,12 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     runtimeId: resolvedRuntimeId,
     signerId: config.signerId,
     relayUrls: config.relayUrls,
+    endpointUrls: (config as P2PConfig & { endpointUrls?: string[] }).endpointUrls,
     seedRuntimeIds: config.seedRuntimeIds,
     advertiseEntityIds: config.advertiseEntityIds,
-    isHub: config.isHub,
     gossipPollMs: config.gossipPollMs,
     onEntityInput: (from, input, ingressTimestamp) => {
-      const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
-      console.log(`📨 P2P-RECEIVE: from=${from} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
-      const targetEntityId = String(input.entityId || '').toLowerCase();
-      const localReplicaExists = Array.from(env.eReplicas.keys()).some(key => {
-        const [entityKey] = String(key).split(':');
-        return String(entityKey || '').toLowerCase() === targetEntityId;
-      });
-      if (!localReplicaExists) {
-        // Drop poison ingress early: this runtime has no local replica for target entity.
-        // Enqueuing would trigger failfast in applyRuntimeInput and loop forever.
-        env.warn(
-          'network',
-          'INBOUND_ENTITY_UNKNOWN_TARGET',
-          {
-            fromRuntimeId: from,
-            entityId: input.entityId,
-            txTypes,
-          },
-          input.entityId,
-        );
-        return;
-      }
-      for (const hintedEntityId of collectSenderEntityHints(input)) {
-        registerEntityRuntimeHint(env, hintedEntityId, from);
-      }
-      enqueueRuntimeInputs(env, [input], undefined, undefined, ingressTimestamp);
-      console.log(`📥 RUNTIME-MEMPOOL: Added inbound, size=${ensureRuntimeMempool(env).entityInputs.length}`);
-      env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
+      handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
     },
     onGossipProfiles: (_from, profiles) => {
       if (profiles.length === 0) return;
@@ -1710,6 +1734,7 @@ export type P2PConnectionState = {
   connected: boolean;
   reconnect: { attempt: number; nextAt: number } | null;
   queue: { targetCount: number; totalMessages: number; oldestEntryAge: number; perTarget: Record<string, number> };
+  directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
 };
 
 export const getP2PState = (env: Env): P2PConnectionState => {
@@ -1719,12 +1744,16 @@ export const getP2PState = (env: Env): P2PConnectionState => {
       connected: false,
       reconnect: null,
       queue: { targetCount: 0, totalMessages: 0, oldestEntryAge: 0, perTarget: {} },
+      directPeers: [],
     };
   }
   return {
     connected: p2p.isConnected(),
     reconnect: p2p.getReconnectState(),
     queue: p2p.getQueueState(),
+    directPeers: typeof (p2p as RuntimeP2P & { getDirectPeerState?: () => Array<{ runtimeId: string; endpoint: string; open: boolean }> }).getDirectPeerState === 'function'
+      ? (p2p as RuntimeP2P & { getDirectPeerState: () => Array<{ runtimeId: string; endpoint: string; open: boolean }> }).getDirectPeerState()
+      : [],
   };
 };
 
@@ -2019,14 +2048,16 @@ const applyRuntimeInput = async (
           if (config) {
             existingReplica.state.config = config;
           }
-          const expectedKeys = deriveLocalEntityCryptoKeys(env, runtimeTx.entityId, runtimeTx.signerId);
-          if (
-            existingReplica.state.entityEncPubKey !== expectedKeys.publicKey ||
-            existingReplica.state.entityEncPrivKey !== expectedKeys.privateKey
-          ) {
-            throw new Error(
-              `ENTITY_CRYPTO_KEY_MISMATCH: entity=${runtimeTx.entityId} signer=${runtimeTx.signerId}`,
-            );
+          if (hasLocalSignerKey(env, runtimeTx.signerId)) {
+            const expectedKeys = deriveLocalEntityCryptoKeys(env, runtimeTx.entityId, runtimeTx.signerId);
+            if (
+              existingReplica.state.entityEncPubKey !== expectedKeys.publicKey ||
+              existingReplica.state.entityEncPrivKey !== expectedKeys.privateKey
+            ) {
+              throw new Error(
+                `ENTITY_CRYPTO_KEY_MISMATCH: entity=${runtimeTx.entityId} signer=${runtimeTx.signerId}`,
+              );
+            }
           }
           normalizeEntitySwapTradingPairs(existingReplica.state);
           env.eReplicas.set(replicaKey, existingReplica);
@@ -2037,7 +2068,7 @@ const applyRuntimeInput = async (
           }
           continue;
         }
-        const localKeys = deriveLocalEntityCryptoKeys(env, runtimeTx.entityId, runtimeTx.signerId);
+        const replicaKeys = resolveReplicaEntityCryptoKeys(env, runtimeTx.entityId, runtimeTx.signerId);
         const replica: EntityReplica = {
           entityId: runtimeTx.entityId,
           signerId: runtimeTx.signerId,
@@ -2067,9 +2098,9 @@ const applyRuntimeInput = async (
             // 📦 J-Batch system - will be initialized on first use
             jBatchState: undefined,
 
-            // 🔐 Deterministic entity encryption keys are mandatory.
-            entityEncPubKey: localKeys.publicKey,
-            entityEncPrivKey: localKeys.privateKey,
+            // Local entities derive deterministic keys; imported remote replicas stay keyless.
+            entityEncPubKey: replicaKeys.publicKey,
+            entityEncPrivKey: replicaKeys.privateKey,
             profile: {
               name:
                 typeof runtimeTx.data.profileName === 'string' && runtimeTx.data.profileName.trim().length > 0
@@ -2134,7 +2165,7 @@ const applyRuntimeInput = async (
         // REPLICA-DEBUG removed
 
         // Broadcast initial profile to gossip layer
-        if (env.gossip && createdReplica) {
+        if (env.gossip && createdReplica && replicaKeys.isLocal) {
           announceLocalEntityProfile(env, createdReplica.state, env.timestamp);
         }
 

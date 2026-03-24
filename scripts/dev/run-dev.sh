@@ -20,10 +20,9 @@ cd "$REPO_ROOT"
 
 exec concurrently \
   --kill-others-on-fail \
-  --names 'ANVIL,API,CUSTODY,RUNTIME,VITE' \
-  -c 'magenta,blue,cyan,yellow,green' \
+  --names 'ANVIL,MESH,RUNTIME,VITE' \
+  -c 'magenta,blue,yellow,green' \
   "anvil --silent --host 0.0.0.0 --port ${RPC_PORT} --chain-id 31337 --mixed-mining --block-time ${ANVIL_BLOCK_TIME} --block-gas-limit 60000000 --code-size-limit 65536" \
-  "USE_ANVIL=true BOOTSTRAP_LOCAL_HUBS=1 XLN_RUNTIME_SEED=xln-dev-main-runtime RUNTIME_VERBOSE_LOGS=${RUNTIME_VERBOSE_LOGS:-0} ANVIL_RPC=http://localhost:${RPC_PORT} bun runtime/server.ts --port ${API_PORT}" \
-  "DEV_VERBOSE=${DEV_VERBOSE:-0} DEV_ANVIL_RPC=http://127.0.0.1:${RPC_PORT} DEV_API_BASE_URL=http://127.0.0.1:${API_PORT} DEV_WALLET_PORT=${WEB_PORT} DEV_WALLET_URL=https://localhost:${WEB_PORT}/app DEV_CUSTODY_PORT=${CUSTODY_PORT} DEV_CUSTODY_DAEMON_PORT=${CUSTODY_DAEMON_PORT} bun runtime/scripts/start-custody-dev.ts" \
+  "USE_ANVIL=true RUNTIME_VERBOSE_LOGS=${RUNTIME_VERBOSE_LOGS:-0} ANVIL_RPC=http://localhost:${RPC_PORT} XLN_MESH_RESET_ALLOWED=1 bun runtime/orchestrator/orchestrator.ts --host 127.0.0.1 --port ${API_PORT} --rpc-url http://127.0.0.1:${RPC_PORT} --db-root ./db/dev/mesh --mm --custody --allow-reset --custody-port ${CUSTODY_PORT} --custody-daemon-port ${CUSTODY_DAEMON_PORT} --wallet-url https://localhost:${WEB_PORT}/app" \
   "bun build runtime/runtime.ts --target=browser --outfile=frontend/static/runtime.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external url --external net --external tls --external os --external util --watch" \
   "cd frontend && VITE_DEV_PORT=${WEB_PORT} VITE_API_PROXY_TARGET=http://127.0.0.1:${API_PORT} vite dev"

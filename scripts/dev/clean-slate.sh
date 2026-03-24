@@ -46,14 +46,17 @@ pm2 stop anvil xln-server xln-custody 2>/dev/null || true
 pkill -9 -f "anvil" 2>/dev/null || true
 pkill -9 -f "bash .*scripts/start-anvil.sh" 2>/dev/null || true
 pkill -9 -f "scripts/start-anvil.sh" 2>/dev/null || true
+pkill -9 -f "bun runtime/orchestrator/orchestrator.ts" 2>/dev/null || true
 pkill -9 -f "bun runtime/server.ts" 2>/dev/null || true
 pkill -9 -f "bun runtime/scripts/start-custody-dev.ts" 2>/dev/null || true
 pkill -9 -f "bun runtime/scripts/start-custody-prod.ts" 2>/dev/null || true
+pkill -9 -f "bun runtime/orchestrator/hub-node.ts" 2>/dev/null || true
+pkill -9 -f "bun runtime/orchestrator/mm-node.ts" 2>/dev/null || true
 pkill -9 -f "bun custody/server.ts" 2>/dev/null || true
 pkill -9 -f "bun build runtime/runtime.ts" 2>/dev/null || true
 pkill -9 -f "vite dev" 2>/dev/null || true
 pkill -9 -f "node .*vite" 2>/dev/null || true
-pkill -9 -f "concurrently --names ANVIL,API,CUSTODY,RUNTIME,VITE" 2>/dev/null || true
+pkill -9 -f "concurrently --names ANVIL,MESH,RUNTIME,VITE" 2>/dev/null || true
 
 kill_by_port "$RPC_PORT"
 kill_by_port "$WEB_PORT"

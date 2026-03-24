@@ -13,7 +13,8 @@ echo "=== Restarting XLN Server ==="
 # Kill existing processes
 echo "[1/4] Stopping existing processes..."
 pm2 delete xln-server 2>/dev/null || true
-pkill -f "bun.*server.ts" 2>/dev/null || true
+pkill -f "bun.*runtime/orchestrator/orchestrator.ts" 2>/dev/null || true
+pkill -f "bun.*runtime/server.ts" 2>/dev/null || true
 sleep 2
 
 # Set environment
@@ -21,7 +22,7 @@ echo "[2/4] Setting environment..."
 export USE_ANVIL=true
 export ANVIL_RPC=http://localhost:8545
 export PUBLIC_RPC=${PUBLIC_RPC:-https://xln.finance/rpc}
-export XLN_RUNTIME_SEED=${XLN_RUNTIME_SEED:-xln-local-main-runtime}
+export XLN_MESH_RESET_ALLOWED=${XLN_MESH_RESET_ALLOWED:-1}
 
 # Check anvil
 echo "[3/4] Checking anvil..."
@@ -33,10 +34,10 @@ if ! pgrep -x anvil > /dev/null; then
     cd ..
 fi
 
-# Start server
-echo "[4/4] Starting XLN server..."
+# Start orchestrator
+echo "[4/4] Starting XLN mesh orchestrator..."
 mkdir -p logs
-nohup bun runtime/server.ts --port 8080 > logs/xln.log 2>&1 &
+nohup bun runtime/orchestrator/orchestrator.ts --host 127.0.0.1 --port 8080 --rpc-url http://127.0.0.1:8545 --db-root ./db/local/mesh --mm --custody --allow-reset --custody-port 8087 --custody-daemon-port 8088 --wallet-url https://localhost:8084/app > logs/xln.log 2>&1 &
 SERVER_PID=$!
 echo "Server started with PID: $SERVER_PID"
 

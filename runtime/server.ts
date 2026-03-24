@@ -2290,6 +2290,12 @@ const bootstrapServerHubsAndReserves = async (
   anvilRpc: string,
   bootstrapOptions: { includeMarketMaker?: boolean } = {},
 ): Promise<string[]> => {
+  void env;
+  void options;
+  void relayUrl;
+  void anvilRpc;
+  void bootstrapOptions;
+  throw new Error('SHARED_HUB_BOOTSTRAP_REMOVED: use runtime/orchestrator/orchestrator.ts');
   const bootstrapStartedAt = Date.now();
   const logStageTiming = (label: string, startedAt: number): void => {
     console.log(`[XLN][BOOTSTRAP-TIMING] ${label} ${Date.now() - startedAt}ms`);
@@ -2307,10 +2313,14 @@ const bootstrapServerHubsAndReserves = async (
   }
 
   const explicitBootstrap = process.env.BOOTSTRAP_LOCAL_HUBS;
-  const bootstrapLocalHubs = explicitBootstrap === '0' ? false : true;
-  if (!bootstrapLocalHubs) {
-    console.log(`[XLN] Hub bootstrap disabled by BOOTSTRAP_LOCAL_HUBS=0 (relayHost="${relayHost || 'unknown'}")`);
+  const bootstrapLocalHubs = false;
+  if (explicitBootstrap === '1') {
+    throw new Error('SHARED_HUB_BOOTSTRAP_REMOVED: use runtime/orchestrator/orchestrator.ts');
   }
+  console.log(
+    `[XLN] Shared hub bootstrap removed; runtime/server.ts stays single-runtime only (relayHost="${relayHost || 'unknown'}")`,
+  );
+  return [];
 
   const hubConfigs = bootstrapLocalHubs
     ? [

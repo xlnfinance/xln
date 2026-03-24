@@ -482,6 +482,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
     await freePort(apiPort + 10, log);
     await freePort(apiPort + 11, log);
     await freePort(apiPort + 12, log);
+    await freePort(apiPort + 13, log);
     markPhase('preflight', preflightStart);
 
     const anvilStart = Date.now();
@@ -500,15 +501,20 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
     markPhase('anvilBoot', anvilStart);
 
     const apiStart = Date.now();
-    api = spawn('bun', ['runtime/server.ts', '--host', '127.0.0.1', '--port', String(apiPort)], {
+    api = spawn('bun', [
+      'runtime/orchestrator/orchestrator.ts',
+      '--host', '127.0.0.1',
+      '--port', String(apiPort),
+      '--rpc-url', rpcUrl,
+      '--db-root', dbPath,
+      '--allow-reset',
+      ...(task.requireMarketMaker ? ['--mm'] : []),
+    ], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: sanitizeChildEnv({
         ...process.env,
         USE_ANVIL: 'true',
         ANVIL_RPC: rpcUrl,
-        XLN_DB_PATH: dbPath,
-        XLN_RUNTIME_SEED: `e2e-isolated-shard-${shard}`,
-        XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
       }),
     });
     api.stdout.on('data', c => log.write(`[api] ${c.toString()}`));

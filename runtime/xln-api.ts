@@ -121,10 +121,12 @@ export type VerifyRuntimeChainResult = {
 
 export type P2PConfig = {
   relayUrls?: string[];
+  endpointUrls?: string[];
   seedRuntimeIds?: string[];
   runtimeId?: string;
   signerId?: string;
   advertiseEntityIds?: string[];
+  isHub?: boolean;
   gossipPollMs?: number;
 };
 

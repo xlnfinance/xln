@@ -1,4 +1,5 @@
 import type { AccountMachine, Delta, EntityInput, Env, JEvent } from '../types';
+import { deriveDelta } from '../account-utils';
 import { enqueueRuntimeInput } from '../runtime.ts';
 
 export const HUB_MESH_TOKEN_ID = 1;
@@ -195,6 +196,26 @@ export const getCreditGrantedByEntity = (
   return BigInt(isOwnerLeft ? (delta.rightCreditLimit ?? 0n) : (delta.leftCreditLimit ?? 0n));
 };
 
+export const getEntityOutCapacity = (
+  account: AccountMachine | null,
+  ownerEntityId: string,
+  tokenId: number,
+): bigint => {
+  if (!account) return 0n;
+  const delta = account.deltas.get(tokenId);
+  if (!delta) return 0n;
+  return deriveDelta(delta, account.leftEntity === ownerEntityId).outCapacity;
+};
+
+export const isAccountConsensusReady = (account: AccountMachine | null): boolean => {
+  if (!account) return false;
+  if (!account.currentFrame) return false;
+  if (Number(account.currentHeight ?? 0) <= 0) return false;
+  if (account.pendingFrame) return false;
+  if ((account.mempool?.length ?? 0) > 0) return false;
+  return true;
+};
+
 export const hasPairMutualCredit = (
   env: Env,
   leftEntityId: string,
@@ -202,11 +223,12 @@ export const hasPairMutualCredit = (
   tokenId: number,
   amount: bigint,
 ): boolean => {
-  const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
-  const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
-  if (!leftAccount || !rightAccount) return false;
-  const grantedByLeft = getCreditGrantedByEntity(leftAccount, leftEntityId, tokenId);
-  const grantedByRight = getCreditGrantedByEntity(rightAccount, rightEntityId, tokenId);
+  const account =
+    getAccountMachine(env, leftEntityId, rightEntityId)
+    ?? getAccountMachine(env, rightEntityId, leftEntityId);
+  if (!isAccountConsensusReady(account)) return false;
+  const grantedByLeft = getCreditGrantedByEntity(account, leftEntityId, tokenId);
+  const grantedByRight = getCreditGrantedByEntity(account, rightEntityId, tokenId);
   return grantedByLeft >= amount && grantedByRight >= amount;
 };
 

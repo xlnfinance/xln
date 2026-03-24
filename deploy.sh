@@ -78,6 +78,7 @@ wait_for_main_stack() {
         payload?.system?.relay === true &&
         payload?.hubMesh?.ok === true &&
         payload?.marketMaker?.ok === true &&
+        payload?.custody?.ok === true &&
         Array.isArray(payload?.hubs) &&
         payload.hubs.length >= 3;
       process.exit(ok ? 0 : 1);
@@ -209,12 +210,11 @@ run_local_deploy() {
       ensure_production_host_hygiene
       echo "[deploy] resetting production anvil + runtime state"
       mkdir -p db/runtime db/custody data logs
-      rm -rf db/runtime/prod-main db/custody/prod db-tmp/prod-custody
+      rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody
       rm -f data/anvil-state.json
 
       lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
       pm2 delete xln-server >/dev/null 2>&1 || true
-      pm2 delete xln-custody >/dev/null 2>&1 || true
       pm2 delete anvil >/dev/null 2>&1 || true
 
       pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
@@ -229,14 +229,6 @@ run_local_deploy() {
       if ! wait_for_main_stack; then
         echo "[deploy] main XLN stack did not become healthy" >&2
         pm2 logs xln-server --lines 160 --nostream || true
-        exit 1
-      fi
-
-      pm2 delete xln-custody >/dev/null 2>&1 || true
-      pm2 start scripts/start-custody.sh --name xln-custody --interpreter bash --max-memory-restart 512M
-      if ! wait_for_custody; then
-        echo "[deploy] custody service did not become healthy" >&2
-        pm2 logs xln-custody --lines 160 --nostream || true
         exit 1
       fi
     else
@@ -257,7 +249,7 @@ if [ -n "$REMOTE_HOST" ]; then
     git push origin main
   fi
 
-  remote_cmd="cd /root/xln 2>/dev/null || cd ~/xln 2>/dev/null || exit 1; PATH=\"\$HOME/.bun/bin:\$PATH\" git fetch origin main && git stash push --include-untracked -m xln-deploy-prepull -- frontend/static/contracts jurisdictions/jurisdictions.json >/dev/null 2>&1 || true && git checkout main && git pull --ff-only origin main && ./deploy.sh"
+  remote_cmd="cd /root/xln 2>/dev/null || cd ~/xln 2>/dev/null || exit 1; PATH=\"\$HOME/.bun/bin:\$PATH\" git fetch origin main && git stash push --include-untracked -m xln-deploy-prepull -- frontend/static/contracts jurisdictions/jurisdictions.json data/anvil-state.json >/dev/null 2>&1 || true && git checkout main && git pull --ff-only origin main && ./deploy.sh"
   if [ "$FRESH" = "1" ]; then
     remote_cmd="$remote_cmd --fresh"
   fi

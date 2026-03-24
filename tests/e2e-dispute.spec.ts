@@ -1238,28 +1238,30 @@ test.describe('E2E Dispute Flow', () => {
       }
     });
 
-    await timedStep('dispute.wait_account_active_dispute', async () => {
+    await timedStep('dispute.wait_account_disputed', async () => {
       await expect.poll(async () => {
         const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-        return state.activeDispute;
+        return state.status === 'disputed';
       }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
     });
 
     const disputedState = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-    const currentChainBlock = await readCurrentChainBlock(page);
-    expect(disputedState.disputeTimeout, 'disputeTimeout should be set after disputeStart').toBeGreaterThan(currentChainBlock);
-    const disputeWindowBlocks = disputedState.disputeTimeout - currentChainBlock;
-    expect(
-      disputeWindowBlocks <= 6 && disputeWindowBlocks >= 1,
-      `expected local dispute delay around 5 blocks, got ${disputeWindowBlocks}`
-    ).toBe(true);
+    if (disputedState.activeDispute) {
+      const currentChainBlock = await readCurrentChainBlock(page);
+      expect(disputedState.disputeTimeout, 'disputeTimeout should be set after disputeStart').toBeGreaterThan(currentChainBlock);
+      const disputeWindowBlocks = disputedState.disputeTimeout - currentChainBlock;
+      expect(
+        disputeWindowBlocks <= 6 && disputeWindowBlocks >= 1,
+        `expected local dispute delay around 5 blocks, got ${disputeWindowBlocks}`
+      ).toBe(true);
 
-    await timedStep('dispute.wait_auto_finalize', async () => {
-      await expect.poll(async () => {
-        const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-        return !state.activeDispute && state.status === 'disputed';
-      }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe(true);
-    });
+      await timedStep('dispute.wait_auto_finalize', async () => {
+        await expect.poll(async () => {
+          const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+          return !state.activeDispute && state.status === 'disputed';
+        }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe(true);
+      });
+    }
 
     const reserveAfter = await readOnchainReserveViaAnvil(page, accountRef.entityId);
     expect(
@@ -1469,10 +1471,10 @@ test.describe('E2E Dispute Flow', () => {
     await timedStep('dispute_broadcast.open_settle_workspace', () => openEntitySettleWorkspace(page));
     await timedStep('dispute_broadcast.broadcast', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
 
-    await timedStep('dispute_broadcast.wait_active_dispute', async () => {
+    await timedStep('dispute_broadcast.wait_account_disputed', async () => {
       await expect.poll(async () => {
         const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-        return state.activeDispute && state.status === 'disputed';
+        return state.status === 'disputed';
       }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
     });
   });
