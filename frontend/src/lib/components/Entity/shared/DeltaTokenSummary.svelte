@@ -114,7 +114,7 @@
         <div class="compact-metric compact-in" aria-label="In capacity">
           {#if showMetricLabels}<span class="metric-label">In</span>{/if}
           <span class="compact-in-value">
-            <span class="inbound-label">Inbound</span>
+            <span class="inbound-label">&larr; Receivable</span>
             <span>{inAmountCompact}</span>
           </span>
         </div>

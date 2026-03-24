@@ -215,7 +215,7 @@ export let selectedAccountId: string | null = null;
   .accounts-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
     padding: 8px;
   }
 
@@ -243,7 +243,7 @@ export let selectedAccountId: string | null = null;
   .accounts-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 12px;
   }
 
   .list-header {

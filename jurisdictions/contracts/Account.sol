@@ -83,13 +83,13 @@ library Account {
   function verifyDisputeProofHanko(
     address entityProvider,
     address depository,
-    bytes memory ch_key,
+    bytes memory acct_key,
     uint nonce,
     bytes32 proofbodyHash,
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, depository, ch_key, nonce, proofbodyHash);
+    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, depository, acct_key, nonce, proofbodyHash);
     bytes32 hash = keccak256(encoded_msg);
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
@@ -99,12 +99,12 @@ library Account {
   function verifyFinalDisputeProofHanko(
     address entityProvider,
     address depository,
-    bytes memory ch_key,
+    bytes memory acct_key,
     uint finalNonce,
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, depository, ch_key, finalNonce);
+    bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, depository, acct_key, finalNonce);
     bytes32 hash = keccak256(encoded_msg);
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
@@ -114,14 +114,14 @@ library Account {
   function verifyCooperativeProofHanko(
     address entityProvider,
     address depository,
-    bytes memory ch_key,
+    bytes memory acct_key,
     uint nonce,
     bytes32 proofbodyHash,
     bytes32 initialArgumentsHash,
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, depository, ch_key, nonce, proofbodyHash, initialArgumentsHash);
+    bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, depository, acct_key, nonce, proofbodyHash, initialArgumentsHash);
     bytes32 hash = keccak256(encoded_msg);
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
@@ -157,10 +157,10 @@ library Account {
     bool isLeft = entityId < c2r.counterparty;
     bytes32 leftEntity = isLeft ? entityId : c2r.counterparty;
     bytes32 rightEntity = isLeft ? c2r.counterparty : entityId;
-    bytes memory ch_key = _accountKey(leftEntity, rightEntity);
+    bytes memory acct_key = _accountKey(leftEntity, rightEntity);
 
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
-    if (c2r.nonce <= _accounts[ch_key].nonce) revert E2();
+    if (c2r.nonce <= _accounts[acct_key].nonce) revert E2();
 
     // Reconstruct diffs for signature verification (C2R is a calldata shortcut)
     SettlementDiff[] memory diffs = new SettlementDiff[](1);
@@ -176,7 +176,7 @@ library Account {
     bytes memory encoded_msg = abi.encode(
       MessageType.CooperativeUpdate,
       address(this),
-      ch_key,
+      acct_key,
       c2r.nonce,
       diffs,
       new uint[](0)
@@ -191,7 +191,7 @@ library Account {
     // Apply diffs
     uint tokenId = c2r.tokenId;
     uint amount = c2r.amount;
-    AccountCollateral storage col = _collaterals[ch_key][tokenId];
+    AccountCollateral storage col = _collaterals[acct_key][tokenId];
     if (col.collateral < amount) revert E3();
 
     _reserves[entityId][tokenId] += amount;
@@ -201,7 +201,7 @@ library Account {
     }
 
     // SET nonce (not increment)
-    _accounts[ch_key].nonce = c2r.nonce;
+    _accounts[acct_key].nonce = c2r.nonce;
 
     // Emit unionified AccountSettled
     TokenSettlement[] memory tokens = new TokenSettlement[](1);
@@ -217,7 +217,7 @@ library Account {
       left: leftEntity,
       right: rightEntity,
       tokens: tokens,
-      nonce: _accounts[ch_key].nonce
+      nonce: _accounts[acct_key].nonce
     });
     emit AccountSettled(settled);
 
@@ -254,17 +254,17 @@ library Account {
     if (leftEntity == rightEntity || leftEntity >= rightEntity) revert E2();
     if (initiator != leftEntity && initiator != rightEntity) revert E7();
 
-    bytes memory ch_key = _accountKey(leftEntity, rightEntity);
+    bytes memory acct_key = _accountKey(leftEntity, rightEntity);
     bytes32 counterparty = (initiator == leftEntity) ? rightEntity : leftEntity;
 
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
-    if (s.nonce <= _accounts[ch_key].nonce) revert E2();
+    if (s.nonce <= _accounts[acct_key].nonce) revert E2();
 
     // Counterparty signature REQUIRED for any state changes
     if (s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0) {
       require(s.sig.length > 0, "Signature required for settlement");
       // Hash includes signedNonce (from settlement struct), not storedNonce
-      bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), ch_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds);
+      bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), acct_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds);
       bytes32 hash = keccak256(encoded_msg);
 
       address ep = s.entityProvider;
@@ -299,7 +299,7 @@ library Account {
         _reserves[rightEntity][tokenId] += uint(diff.rightDiff);
       }
 
-      AccountCollateral storage col = _collaterals[ch_key][tokenId];
+      AccountCollateral storage col = _collaterals[acct_key][tokenId];
       if (diff.collateralDiff < 0) {
         if (col.collateral < uint(-diff.collateralDiff)) revert E3();
         col.collateral -= uint(-diff.collateralDiff);
@@ -310,14 +310,14 @@ library Account {
     }
 
     // SET nonce = signedNonce (not +1)
-    _accounts[ch_key].nonce = s.nonce;
+    _accounts[acct_key].nonce = s.nonce;
 
     // Emit unionified AccountSettled (one entry per account, all tokens grouped)
     if (s.diffs.length > 0) {
       TokenSettlement[] memory tokens = new TokenSettlement[](s.diffs.length);
       for (uint i = 0; i < s.diffs.length; i++) {
         uint tokenId = s.diffs[i].tokenId;
-        AccountCollateral storage col = _collaterals[ch_key][tokenId];
+        AccountCollateral storage col = _collaterals[acct_key][tokenId];
         tokens[i] = TokenSettlement({
           tokenId: tokenId,
           leftReserve: _reserves[leftEntity][tokenId],
@@ -331,7 +331,7 @@ library Account {
         left: leftEntity,
         right: rightEntity,
         tokens: tokens,
-        nonce: _accounts[ch_key].nonce
+        nonce: _accounts[acct_key].nonce
       });
       emit AccountSettled(settled);
     }
@@ -348,29 +348,29 @@ library Account {
     uint256 defaultDelay,
     address entityProvider
   ) internal returns (bool) {
-    bytes memory ch_key = _accountKey(entityId, params.counterentity);
+    bytes memory acct_key = _accountKey(entityId, params.counterentity);
 
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
-    if (params.nonce <= _accounts[ch_key].nonce) revert E2();
+    if (params.nonce <= _accounts[acct_key].nonce) revert E2();
 
     require(params.sig.length > 0, "Signature required for dispute");
 
-    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, address(this), ch_key, params.nonce, params.proofbodyHash);
+    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, address(this), acct_key, params.nonce, params.proofbodyHash);
     bytes32 hash = keccak256(encoded_msg);
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
     if (!valid || recoveredEntity != params.counterentity) revert E4();
 
-    if (_accounts[ch_key].disputeHash != bytes32(0)) revert E6();
+    if (_accounts[acct_key].disputeHash != bytes32(0)) revert E6();
 
     uint256 timeout = block.number + defaultDelay;
-    _accounts[ch_key].disputeHash = _encodeDisputeHash(
+    _accounts[acct_key].disputeHash = _encodeDisputeHash(
       params.nonce, entityId < params.counterentity,
       timeout, params.proofbodyHash, params.initialArguments
     );
-    _accounts[ch_key].disputeTimeout = timeout;
+    _accounts[acct_key].disputeTimeout = timeout;
 
     // SET nonce = signedNonce (any settlement signed at ≤ this nonce is now dead)
-    _accounts[ch_key].nonce = params.nonce;
+    _accounts[acct_key].nonce = params.nonce;
 
     emit DisputeStarted(entityId, params.counterentity, params.nonce, params.proofbodyHash, params.initialArguments);
     return true;

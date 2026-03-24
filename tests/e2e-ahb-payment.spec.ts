@@ -811,10 +811,7 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
       message.includes('pending') ||
       message.includes('FAUCET_ACCOUNT_MISSING') ||
       message.includes('No hub account with target entity') ||
-      code === 'FAUCET_TOKEN_SURFACE_NOT_READY' ||
-      code === 'FAUCET_CHANNEL_NOT_READY' ||
-      status === 'channel_opening' ||
-      status === 'channel_not_ready';
+      code === 'FAUCET_TOKEN_SURFACE_NOT_READY';
     if (!transient || attempt === 6) break;
     await page.waitForTimeout(1500);
   }

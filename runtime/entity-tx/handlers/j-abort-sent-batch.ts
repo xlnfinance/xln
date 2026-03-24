@@ -31,6 +31,31 @@ export async function handleJAbortSentBatch(
     if (!newState.jBatchState.batch) {
       newState.jBatchState.batch = createEmptyBatch();
     }
+    // Drop stale C2R ops whose signed nonce is now <= on-chain nonce (would revert E2).
+    if (sent.batch.collateralToReserve?.length) {
+      const before = sent.batch.collateralToReserve.length;
+      sent.batch.collateralToReserve = sent.batch.collateralToReserve.filter(c2r => {
+        const cpId = String(c2r.counterparty).toLowerCase();
+        const account = [...newState.accounts.entries()].find(
+          ([k]) => k.toLowerCase() === cpId,
+        )?.[1];
+        const onChainNonce = account?.onChainSettlementNonce ?? 0;
+        if (c2r.nonce <= onChainNonce) {
+          console.warn(
+            `🗑️ Dropping stale C2R for ${cpId.slice(-4)}: signed nonce ${c2r.nonce} <= onChain ${onChainNonce}`,
+          );
+          // Also clear the workspace so user can re-propose
+          if (account?.settlementWorkspace) {
+            delete account.settlementWorkspace;
+          }
+          return false;
+        }
+        return true;
+      });
+      if (before !== sent.batch.collateralToReserve.length) {
+        console.log(`🧹 Filtered ${before - sent.batch.collateralToReserve.length} stale C2R ops from requeue`);
+      }
+    }
     mergeBatchOps(newState.jBatchState.batch, sent.batch);
   }
 

@@ -21,7 +21,7 @@ Subcontracts - Programmable Delta Transformers
   First in history: Lightning only has HTLCs hardcoded. You're generalizing it - arbitrary logic can transform delta arrays. The applySwap() function (line
    105) shows fillRatio execution (0-100% fill of limit order).
 
-  This is DeFi within bilateral channels. Genuinely new.
+  This is DeFi within bilateral accounts. Genuinely new.
   */
 contract DeltaTransformer is Console {
   mapping(bytes32 => uint) public hashToBlock;

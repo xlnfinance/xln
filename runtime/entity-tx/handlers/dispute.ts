@@ -464,7 +464,7 @@ export async function handleDisputeStart(
   }
 
   // The signed nonce is passed directly to the contract. Solidity requires:
-  //   nonce > _accounts[ch_key].nonce  (Account.sol:354)
+  //   nonce > _accounts[acct_key].nonce  (Account.sol:354)
   // On-chain nonce starts at 0 and increments via settlements/disputes.
   // signedNonce must be strictly greater than latest on-chain nonce.
   // CRITICAL: Do NOT add +1 — the hanko was signed over this exact nonce.

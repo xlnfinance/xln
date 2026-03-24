@@ -1,4 +1,4 @@
-import type { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env, AccountMachine } from '../types';
+import type { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env, AccountMachine, DebtEntry, DebtEventType } from '../types';
 import { ethers } from 'ethers';
 import { DEBUG } from '../utils';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
@@ -23,8 +23,8 @@ import {
  * - ReserveUpdated  → entity.reserves[tokenId] = newBalance
  * - AccountSettled  → entity.accounts[counterparty].deltas[tokenId] = { collateral, ondelta }
  *
- * Future J-Events (when added to Solidity):
- * - DebtCreated, DebtEnforced
+ * Debt J-Events:
+ * - DebtCreated, DebtEnforced, DebtForgiven
  *
  * Design: One event = One state change. No redundant handlers.
  * ═══════════════════════════════════════════════════════════════════════════
@@ -87,6 +87,206 @@ function appendBatchHistory(state: EntityState, entry: Record<string, any>): voi
   if (state.batchHistory.length > 40) {
     state.batchHistory = state.batchHistory.slice(-40);
   }
+}
+
+const normalizeDebtEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+function ensureDebtMaps(state: EntityState, direction: 'out' | 'in'): Map<number, Map<string, DebtEntry>> {
+  const key = direction === 'out' ? 'outDebtsByToken' : 'inDebtsByToken';
+  if (!state[key]) {
+    state[key] = new Map();
+  }
+  return state[key]!;
+}
+
+function ensureDebtBucket(
+  state: EntityState,
+  direction: 'out' | 'in',
+  tokenId: number,
+): Map<string, DebtEntry> {
+  const ledger = ensureDebtMaps(state, direction);
+  const existing = ledger.get(tokenId);
+  if (existing) return existing;
+  const created = new Map<string, DebtEntry>();
+  ledger.set(tokenId, created);
+  return created;
+}
+
+function buildDebtId(
+  debtor: string,
+  tokenId: number,
+  createdDebtIndex: number,
+  createdAtBlock: number,
+  createdTxHash: string,
+): string {
+  return `${normalizeDebtEntityId(debtor)}:${tokenId}:${createdDebtIndex}:${createdAtBlock}:${String(createdTxHash || '').toLowerCase()}`;
+}
+
+function appendDebtEntry(state: EntityState, direction: 'out' | 'in', entry: DebtEntry): void {
+  ensureDebtBucket(state, direction, entry.tokenId).set(entry.debtId, entry);
+}
+
+function findEarliestOutstandingDebt(
+  state: EntityState,
+  direction: 'out' | 'in',
+  tokenId: number,
+  debtor: string,
+  creditor: string,
+  preferredDebtIndex?: number | null,
+): DebtEntry | null {
+  const bucket = (direction === 'out' ? state.outDebtsByToken : state.inDebtsByToken)?.get(tokenId);
+  if (!bucket) return null;
+
+  const normalizedDebtor = normalizeDebtEntityId(debtor);
+  const normalizedCreditor = normalizeDebtEntityId(creditor);
+  const candidates = Array.from(bucket.values()).filter((entry) =>
+    entry.status === 'open' &&
+    normalizeDebtEntityId(entry.debtor) === normalizedDebtor &&
+    normalizeDebtEntityId(entry.creditor) === normalizedCreditor,
+  );
+
+  if (preferredDebtIndex != null) {
+    const preferred = candidates.find((entry) => Number(entry.currentDebtIndex ?? -1) === preferredDebtIndex);
+    if (preferred) return preferred;
+  }
+
+  candidates.sort((left, right) =>
+    left.createdDebtIndex - right.createdDebtIndex ||
+    left.createdAtBlock - right.createdAtBlock ||
+    left.debtId.localeCompare(right.debtId),
+  );
+  return candidates[0] ?? null;
+}
+
+function noteDebtLedgerDivergence(
+  state: EntityState,
+  kind: DebtEventType,
+  debtor: string,
+  creditor: string,
+  tokenId: number,
+  detail: string,
+): void {
+  const message = `⚠️ DEBT_LEDGER_DIVERGENCE ${kind} token=${tokenId} debtor=${debtor.slice(-8)} creditor=${creditor.slice(-8)} ${detail}`;
+  console.warn(message);
+  addMessage(state, message);
+}
+
+function applyDebtCreated(state: EntityState, event: Extract<JurisdictionEvent, { type: 'DebtCreated' }>): void {
+  const { debtor, creditor, tokenId, amount, debtIndex } = event.data;
+  const debtAmount = BigInt(amount);
+  const block = Number(event.blockNumber || 0);
+  const txHash = String(event.transactionHash || '');
+  const debtId = buildDebtId(debtor, tokenId, debtIndex, block, txHash);
+  const entityId = normalizeDebtEntityId(state.entityId);
+  if (entityId !== normalizeDebtEntityId(debtor) && entityId !== normalizeDebtEntityId(creditor)) return;
+
+  const direction = entityId === normalizeDebtEntityId(debtor) ? 'out' : 'in';
+  const counterparty = direction === 'out' ? creditor : debtor;
+  const bucket = ensureDebtBucket(state, direction, tokenId);
+  if (bucket.has(debtId)) return;
+
+  appendDebtEntry(state, direction, {
+    debtId,
+    tokenId,
+    debtor,
+    creditor,
+    counterparty,
+    direction,
+    createdAmount: debtAmount,
+    paidAmount: 0n,
+    remainingAmount: debtAmount,
+    forgivenAmount: 0n,
+    createdDebtIndex: debtIndex,
+    currentDebtIndex: debtIndex,
+    status: 'open',
+    createdAtBlock: block,
+    createdTxHash: txHash,
+    lastUpdatedBlock: block,
+    lastUpdatedTxHash: txHash,
+    lastEventType: 'DebtCreated',
+    updates: [{
+      eventType: 'DebtCreated',
+      blockNumber: block,
+      transactionHash: txHash,
+      amountDelta: debtAmount,
+      remainingAmount: debtAmount,
+    }],
+  });
+}
+
+function applyDebtEnforced(state: EntityState, event: Extract<JurisdictionEvent, { type: 'DebtEnforced' }>): void {
+  const { debtor, creditor, tokenId, amountPaid, remainingAmount, newDebtIndex } = event.data;
+  const entityId = normalizeDebtEntityId(state.entityId);
+  if (entityId !== normalizeDebtEntityId(debtor) && entityId !== normalizeDebtEntityId(creditor)) return;
+
+  const direction = entityId === normalizeDebtEntityId(debtor) ? 'out' : 'in';
+  const debt = findEarliestOutstandingDebt(state, direction, tokenId, debtor, creditor);
+  if (!debt) {
+    noteDebtLedgerDivergence(state, 'DebtEnforced', debtor, creditor, tokenId, `missing-open-debt amountPaid=${amountPaid} remaining=${remainingAmount}`);
+    return;
+  }
+
+  const paidDelta = BigInt(amountPaid);
+  const nextRemaining = BigInt(remainingAmount);
+  const block = Number(event.blockNumber || 0);
+  const txHash = String(event.transactionHash || '');
+  debt.paidAmount += paidDelta;
+  debt.remainingAmount = nextRemaining;
+  debt.currentDebtIndex = nextRemaining > 0n ? newDebtIndex : null;
+  debt.status = nextRemaining === 0n ? 'paid' : 'open';
+  debt.lastUpdatedBlock = block;
+  debt.lastUpdatedTxHash = txHash;
+  debt.lastEventType = 'DebtEnforced';
+  debt.updates.push({
+    eventType: 'DebtEnforced',
+    blockNumber: block,
+    transactionHash: txHash,
+    amountDelta: paidDelta,
+    remainingAmount: nextRemaining,
+  });
+}
+
+function applyDebtForgiven(state: EntityState, event: Extract<JurisdictionEvent, { type: 'DebtForgiven' }>): void {
+  const { debtor, creditor, tokenId, amountForgiven, debtIndex } = event.data;
+  const entityId = normalizeDebtEntityId(state.entityId);
+  if (entityId !== normalizeDebtEntityId(debtor) && entityId !== normalizeDebtEntityId(creditor)) return;
+
+  const direction = entityId === normalizeDebtEntityId(debtor) ? 'out' : 'in';
+  const debt = findEarliestOutstandingDebt(state, direction, tokenId, debtor, creditor, debtIndex);
+  if (!debt) {
+    noteDebtLedgerDivergence(state, 'DebtForgiven', debtor, creditor, tokenId, `missing-open-debt forgiven=${amountForgiven} debtIndex=${debtIndex}`);
+    return;
+  }
+
+  const requestedForgiven = BigInt(amountForgiven);
+  const forgivenDelta = debt.remainingAmount;
+  if (requestedForgiven !== debt.remainingAmount) {
+    noteDebtLedgerDivergence(
+      state,
+      'DebtForgiven',
+      debtor,
+      creditor,
+      tokenId,
+      `forgive-mismatch requested=${requestedForgiven} remaining=${debt.remainingAmount} debtIndex=${debtIndex}`,
+    );
+  }
+  const nextRemaining = 0n;
+  const block = Number(event.blockNumber || 0);
+  const txHash = String(event.transactionHash || '');
+  debt.forgivenAmount += forgivenDelta;
+  debt.remainingAmount = nextRemaining;
+  debt.currentDebtIndex = nextRemaining > 0n ? debtIndex : null;
+  debt.status = nextRemaining === 0n ? 'forgiven' : 'open';
+  debt.lastUpdatedBlock = block;
+  debt.lastUpdatedTxHash = txHash;
+  debt.lastEventType = 'DebtForgiven';
+  debt.updates.push({
+    eventType: 'DebtForgiven',
+    blockNumber: block,
+    transactionHash: txHash,
+    amountDelta: forgivenDelta,
+    remainingAmount: nextRemaining,
+  });
 }
 
 function findAccountByCounterparty(state: EntityState, counterpartyEntityId: string) {
@@ -513,9 +713,15 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
           }
         }
 
-        // NOTE: Do NOT increment nonce here!
-        // R2C also emits AccountSettled but doesn't increment on-chain nonce.
-        // Nonce is incremented in tryFinalizeAccountJEvents when workspace status is 'ready_to_submit'.
+        // Always sync onChainSettlementNonce from event — keep it accurate
+        const eventNonce = event.data.nonce;
+        if (eventNonce != null) {
+          const eventNonceNum = Number(eventNonce);
+          const prev = account.onChainSettlementNonce ?? 0;
+          if (eventNonceNum > prev) {
+            account.onChainSettlementNonce = eventNonceNum;
+          }
+        }
         console.log(`   💰 BILATERAL-APPLIED for ${counterpartyId.slice(-4)}: coll ${oldColl}→${delta.collateral}, ondelta=${delta.ondelta}`);
         console.log(
           `[REB][5][FINALIZED_IN_ACCOUNT] cp=${counterpartyId.slice(-8)} token=${tokenIdNum} collateral=${delta.collateral} ondelta=${delta.ondelta} jHeight=${jHeight}`,
@@ -981,7 +1187,7 @@ async function applyFinalizedJEvent(
     addMessage(newState, `⚖️ OBSERVED: ${tokenSymbol} ${cpShort} | coll=${collDisplay} | j-block ${blockNumber} (awaiting 2-of-2)`);
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // FUTURE J-EVENTS (when added to Solidity - handlers ready)
+  // DEBT J-EVENTS
   // ═══════════════════════════════════════════════════════════════════════════
 
   } else if (event.type === 'DebtCreated') {
@@ -989,19 +1195,7 @@ async function applyFinalizedJEvent(
     const tokenSymbol = getTokenSymbol(tokenId as number);
     const decimals = getTokenDecimals(tokenId as number);
     const amountDisplay = (Number(amount) / (10 ** decimals)).toFixed(4);
-
-    if (!newState.debts) {
-      newState.debts = [];
-    }
-
-    if (debtor === entityState.entityId) {
-      newState.debts.push({
-        creditor: creditor as string,
-        tokenId: tokenId as number,
-        amount: BigInt(amount as string | number | bigint),
-        index: debtIndex as number,
-      });
-    }
+    applyDebtCreated(newState, event);
 
     addMessage(newState, `🔴 DEBT: ${(debtor as string).slice(-8)} owes ${amountDisplay} ${tokenSymbol} to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
 
@@ -1010,18 +1204,18 @@ async function applyFinalizedJEvent(
     const tokenSymbol = getTokenSymbol(tokenId as number);
     const decimals = getTokenDecimals(tokenId as number);
     const paidDisplay = (Number(amountPaid) / (10 ** decimals)).toFixed(4);
-
-    if (debtor === entityState.entityId && newState.debts) {
-      const debt = newState.debts.find(
-        d => d.creditor === creditor && d.tokenId === tokenId
-      );
-      if (debt) {
-        debt.amount = BigInt(remainingAmount as string | number | bigint);
-        debt.index = newDebtIndex as number;
-      }
-    }
+    applyDebtEnforced(newState, event);
 
     addMessage(newState, `✅ DEBT PAID: ${paidDisplay} ${tokenSymbol} to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
+
+  } else if (event.type === 'DebtForgiven') {
+    const { debtor, creditor, tokenId, amountForgiven, debtIndex } = event.data;
+    const tokenSymbol = getTokenSymbol(tokenId as number);
+    const decimals = getTokenDecimals(tokenId as number);
+    const forgivenDisplay = (Number(amountForgiven) / (10 ** decimals)).toFixed(4);
+    applyDebtForgiven(newState, event);
+
+    addMessage(newState, `🩶 DEBT FORGIVEN: ${forgivenDisplay} ${tokenSymbol} between ${(debtor as string).slice(-8)} and ${(creditor as string).slice(-8)} | Block ${blockNumber} · debt #${debtIndex}`);
 
   } else if (event.type === 'DisputeStarted') {
     console.log(`🔍 DISPUTE-EVENT HANDLER: entityId=${newState.entityId.slice(-4)}`);

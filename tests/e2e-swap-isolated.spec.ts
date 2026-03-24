@@ -110,10 +110,7 @@ async function faucetOffchain(
       response.status() === 202 ||
       response.status() === 409 ||
       response.status() === 503 ||
-      code === 'FAUCET_TOKEN_SURFACE_NOT_READY' ||
-      code === 'FAUCET_CHANNEL_NOT_READY' ||
-      status === 'channel_opening' ||
-      status === 'channel_not_ready';
+      code === 'FAUCET_TOKEN_SURFACE_NOT_READY';
     if (!transient) break;
     await page.waitForTimeout(1000);
   }

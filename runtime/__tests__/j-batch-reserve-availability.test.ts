@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createEmptyBatch, getDraftBatchReserveDelta, getEffectiveDraftReserveBalance } from '../j-batch';
+import {
+  createEmptyBatch,
+  getDraftBatchReserveDelta,
+  getEffectiveDraftReserveBalance,
+  simulateDraftBatchReserveAvailability,
+} from '../j-batch';
 
 describe('j-batch draft reserve availability', () => {
   test('counts same-batch collateral-to-reserve as spendable by later reserve ops', () => {
@@ -61,5 +66,61 @@ describe('j-batch draft reserve availability', () => {
 
     expect(getDraftBatchReserveDelta(entityId, batch, 1)).toBe(8n);
     expect(getEffectiveDraftReserveBalance(entityId, 2n, batch, 1)).toBe(10n);
+  });
+
+  test('treats outgoing debts as senior claim before reserve withdrawal', () => {
+    const entityId = `0x${'99'.repeat(32)}`;
+    const batch = createEmptyBatch();
+    batch.reserveToExternalToken.push({
+      receivingEntity: `0x${'12'.repeat(32)}`,
+      tokenId: 1,
+      amount: 60n,
+    });
+
+    const simulation = simulateDraftBatchReserveAvailability(
+      entityId,
+      new Map([[1, 100n]]),
+      batch,
+      new Map([[1, 50n]]),
+    );
+
+    expect(simulation.issues).toHaveLength(1);
+    expect(simulation.issues[0]).toMatchObject({
+      tokenId: 1,
+      opType: 'reserveToExternalToken',
+      requiredAmount: 60n,
+      availableAfterDebt: 50n,
+      debtClaimPaid: 50n,
+      remainingDebtAfterSweep: 0n,
+    });
+  });
+
+  test('allows same-batch reserve inflow to cover debt then later spend', () => {
+    const entityId = `0x${'aa'.repeat(32)}`;
+    const batch = createEmptyBatch();
+    batch.externalTokenToReserve.push({
+      entity: entityId,
+      contractAddress: `0x${'bb'.repeat(20)}`,
+      externalTokenId: 0n,
+      tokenType: 0,
+      internalTokenId: 1,
+      amount: 100n,
+    });
+    batch.reserveToExternalToken.push({
+      receivingEntity: `0x${'cc'.repeat(32)}`,
+      tokenId: 1,
+      amount: 15n,
+    });
+
+    const simulation = simulateDraftBatchReserveAvailability(
+      entityId,
+      new Map([[1, 0n]]),
+      batch,
+      new Map([[1, 80n]]),
+    );
+
+    expect(simulation.issues).toHaveLength(0);
+    expect(simulation.reservesByToken.get(1)).toBe(5n);
+    expect(simulation.outgoingDebtByToken.get(1) ?? 0n).toBe(0n);
   });
 });

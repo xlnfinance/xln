@@ -213,6 +213,11 @@ export async function createBrowserVMAdapter(
       };
     },
 
+    async enforceDebts(entityId: string, tokenId: number): Promise<bigint> {
+      if (!browserVM.enforceDebts) throw new Error('BrowserVM debt enforcement unavailable');
+      return browserVM.enforceDebts(entityId, tokenId);
+    },
+
     async registerNumberedEntity(boardHash: string): Promise<{ entityNumber: number; txHash: string }> {
       const result = await browserVM.registerNumberedEntitiesBatch([boardHash]);
       return {

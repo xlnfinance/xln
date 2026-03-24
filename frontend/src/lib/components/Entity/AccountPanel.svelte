@@ -475,7 +475,7 @@
 <div class="account-panel">
   <div class="panel-header">
     <div class="header-row-top">
-      <button class="back-button" on:click={handleBackToEntity}>←</button>
+      <button class="back-button" on:click={handleBackToEntity}>← Back to Entity</button>
 
       <div class="header-identity">
         <EntityIdentity

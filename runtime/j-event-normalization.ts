@@ -192,6 +192,18 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
     return { ...meta, type, data: { debtor, creditor, tokenId, amountPaid, remainingAmount, newDebtIndex } };
   }
 
+  if (type === 'DebtForgiven') {
+    const debtor = normalizeEntity(data.debtor);
+    const creditor = normalizeEntity(data.creditor);
+    const tokenId = normalizeInt(data.tokenId);
+    const amountForgiven = normalizeBigNumberish(data.amountForgiven);
+    const debtIndex = normalizeInt(data.debtIndex);
+    if (!debtor || !creditor || tokenId === null || amountForgiven === null || debtIndex === null) {
+      return null;
+    }
+    return { ...meta, type, data: { debtor, creditor, tokenId, amountForgiven, debtIndex } };
+  }
+
   if (type === 'HankoBatchProcessed') {
     const entityId = normalizeEntity(data.entityId);
     const nonce = normalizeInt(data.nonce);

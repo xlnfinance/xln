@@ -442,6 +442,16 @@ export type JurisdictionEvent =
         remainingAmount: string;
         newDebtIndex: number;
       };
+    })
+  | (JEventMetadata & {
+      type: 'DebtForgiven';
+      data: {
+        debtor: string;
+        creditor: string;
+        tokenId: number;
+        amountForgiven: string;
+        debtIndex: number;
+      };
     });
 
 /**
@@ -1612,13 +1622,9 @@ export interface EntityState {
   htlcFeesEarned: bigint; // Running total of HTLC routing fees collected
   htlcNotes?: Map<HtlcNoteKey, string>; // local UI notes; recipient note comes from final encrypted envelope only
 
-  // 💳 Debts - amounts owed to creditors (from FIFO queue)
-  debts?: Array<{
-    creditor: string;
-    tokenId: number;
-    amount: bigint;
-    index: number;
-  }>;
+  // 💳 Debt ledger — mirrored on both debtor and creditor sides from canonical j-events.
+  outDebtsByToken?: Map<number, Map<string, DebtEntry>>;
+  inDebtsByToken?: Map<number, Map<string, DebtEntry>>;
 
   // 📊 Orderbook Extension - Hub matching engine (typed in orderbook/types.ts)
   orderbookExt?: any; // OrderbookExtState - avoid circular import
@@ -1637,6 +1643,40 @@ export interface EntityState {
 
   // 🔄 Rebalance Configuration - Hub-level matching strategy
   hubRebalanceConfig?: HubRebalanceConfig;
+}
+
+export type DebtStatus = 'open' | 'paid' | 'forgiven';
+
+export type DebtEventType = 'DebtCreated' | 'DebtEnforced' | 'DebtForgiven';
+
+export interface DebtUpdate {
+  eventType: DebtEventType;
+  blockNumber: number;
+  transactionHash: string;
+  amountDelta: bigint;
+  remainingAmount: bigint;
+}
+
+export interface DebtEntry {
+  debtId: string;
+  tokenId: number;
+  debtor: string;
+  creditor: string;
+  counterparty: string;
+  direction: 'out' | 'in';
+  createdAmount: bigint;
+  paidAmount: bigint;
+  remainingAmount: bigint;
+  forgivenAmount: bigint;
+  createdDebtIndex: number;
+  currentDebtIndex?: number | null;
+  status: DebtStatus;
+  createdAtBlock: number;
+  createdTxHash: string;
+  lastUpdatedBlock: number;
+  lastUpdatedTxHash: string;
+  lastEventType: DebtEventType;
+  updates: DebtUpdate[];
 }
 
 /** Hub-level config: rebalance strategy + routing fees. Set via setHubConfig EntityTx. */

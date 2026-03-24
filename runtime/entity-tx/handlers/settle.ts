@@ -323,12 +323,13 @@ export async function handleSettleApprove(
   workspace.compiledDiffs = diffs;
   workspace.compiledForgiveTokenIds = forgiveTokenIds;
 
-  // Sign with on-chain nonce + 1
+  // Sign with max(onChainNonce, proofNonce) + 1 — cuts off ALL older proofs on-chain
   const onChainNonce = account.onChainSettlementNonce ?? 0;
-  const signedNonce = onChainNonce + 1;
+  const proofNonce = account.proofHeader?.nonce ?? 0;
+  const signedNonce = Math.max(onChainNonce, proofNonce) + 1;
   workspace.nonceAtSign = signedNonce;
 
-  console.log(`⚖️ Using settlement nonce: ${signedNonce} (onChain=${onChainNonce})`);
+  console.log(`⚖️ Using settlement nonce: ${signedNonce} (onChain=${onChainNonce}, proof=${proofNonce})`);
 
   const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction) throw new Error('No jurisdiction configured');

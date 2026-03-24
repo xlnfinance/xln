@@ -48,6 +48,19 @@ const DEV_PORT_RAW = Number(process.env['VITE_DEV_PORT'] || '8080');
 const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(DEV_PORT_RAW) : 8080;
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
 const VITE_CACHE_DIR = process.env['VITE_CACHE_DIR'] || 'node_modules/.vite';
+const ENABLE_HMR = (() => {
+  const value = String(process.env['VITE_ENABLE_HMR'] || '').toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
+})();
+const hmrConfig = ENABLE_HMR ? {
+	overlay: false,
+	...(hasCerts && {
+		protocol: 'wss',
+		host: 'localhost',
+		port: DEV_PORT,
+		clientPort: DEV_PORT
+	})
+} : false;
 
 const proxyConfig = {
 	'/reset': {
@@ -177,15 +190,7 @@ export default defineConfig(async ({ command }) => {
 		watch: {
 			usePolling: false,  // Use native file watching (faster)
 		},
-		hmr: {
-			overlay: false,
-			...(hasCerts && {
-				protocol: 'wss',
-				host: 'localhost',
-				port: DEV_PORT,
-				clientPort: DEV_PORT
-			})
-		},
+		hmr: hmrConfig,
 		// API/Relay proxy
 		proxy: proxyConfig,
 		// Force no-cache headers for static files

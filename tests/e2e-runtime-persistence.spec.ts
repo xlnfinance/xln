@@ -703,10 +703,7 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
     const transient =
       result.status === 202 ||
       result.status === 409 ||
-      code === 'FAUCET_TOKEN_SURFACE_NOT_READY' ||
-      code === 'FAUCET_CHANNEL_NOT_READY' ||
-      status === 'channel_opening' ||
-      status === 'channel_not_ready';
+      code === 'FAUCET_TOKEN_SURFACE_NOT_READY';
     if (!transient || attempt === 15) break;
     await page.waitForTimeout(1000);
   }

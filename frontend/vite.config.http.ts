@@ -1,6 +1,11 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
+const ENABLE_HMR = (() => {
+	const value = String(process.env['VITE_ENABLE_HMR'] || '').toLowerCase();
+	return value === '1' || value === 'true' || value === 'yes';
+})();
+
 /**
  * HTTP-only vite config for port 8081
  * Use alongside main HTTPS server on 8080
@@ -19,13 +24,15 @@ export default defineConfig({
 		watch: {
 			usePolling: false,
 		},
-		hmr: {
-			overlay: false,
-			protocol: 'ws',
-			host: 'localhost',
-			port: 8081,
-			clientPort: 8081
-		},
+		hmr: ENABLE_HMR
+			? {
+				overlay: false,
+				protocol: 'ws',
+				host: 'localhost',
+				port: 8081,
+				clientPort: 8081
+			}
+			: false,
 		// RPC Proxy - same single-path design as main config
 		proxy: {
 			'/rpc': {
