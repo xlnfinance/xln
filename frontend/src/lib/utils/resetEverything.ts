@@ -22,7 +22,6 @@ const RESET_MARKER_KEY = 'xln-reset-marker';
 const RESET_PREPARATION_DELAY_MS = 180;
 const RESET_DB_DELETE_RETRIES = 8;
 const RESET_DB_DELETE_RETRY_DELAY_MS = 250;
-const RESET_FORCE_NAVIGATION_MS = 1500;
 const VAULT_STORAGE_KEY = 'xln-vaults';
 
 type ResetSignal = {
@@ -310,8 +309,8 @@ async function collectAndShipDebugDump(triggerError?: unknown): Promise<void> {
 }
 
 /** Clear all IndexedDB databases (best-effort) */
-async function clearAllIndexedDB(): Promise<void> {
-  if (typeof indexedDB === 'undefined') return;
+async function clearAllIndexedDB(): Promise<string[]> {
+  if (typeof indexedDB === 'undefined') return [];
 
   let dbNames: string[] = [];
   try {
@@ -349,6 +348,27 @@ async function clearAllIndexedDB(): Promise<void> {
       // best effort
     }
   }
+
+  return dbNames;
+}
+
+async function waitForIndexedDbDeletion(dbNames: string[]): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
+  if (!dbNames.length) return;
+  const idb = indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> };
+  if (typeof idb.databases !== 'function') return;
+
+  const normalizedTargets = new Set(dbNames.map((name) => String(name || '').trim()).filter(Boolean));
+  for (let attempt = 0; attempt < RESET_DB_DELETE_RETRIES; attempt += 1) {
+    const remaining = await idb.databases().catch(() => []);
+    const stillPresent = remaining.some((entry) => {
+      const name = String(entry?.name || '').trim();
+      return !!name && normalizedTargets.has(name);
+    });
+    if (!stillPresent) return;
+    await sleep(RESET_DB_DELETE_RETRY_DELAY_MS * (attempt + 1));
+  }
+  throw new Error(`IndexedDB wipe incomplete for: ${Array.from(normalizedTargets).join(', ')}`);
 }
 
 function hardNavigateAfterReset(): void {
@@ -359,13 +379,21 @@ function hardNavigateAfterReset(): void {
   }
   const targetPath = '/app';
   if (window.location.pathname === targetPath) {
-    window.location.href = targetPath;
-    setTimeout(() => {
-      window.location.reload();
-    }, 30);
+    window.location.reload();
     return;
   }
   window.location.replace(targetPath);
+  setTimeout(() => {
+    try {
+      if (window.location.pathname === targetPath) {
+        window.location.reload();
+      } else {
+        window.location.assign(targetPath);
+      }
+    } catch {
+      window.location.href = targetPath;
+    }
+  }, 80);
 }
 
 async function clearCacheStorage(): Promise<void> {
@@ -433,6 +461,7 @@ function clearAllCookies(): void {
 }
 
 export async function clearAllPersistentClientState(): Promise<void> {
+  let deletedDbNames: string[] = [];
   try { window.name = ''; } catch { /* */ }
   try { localStorage.clear(); } catch { /* */ }
   try { sessionStorage.clear(); } catch { /* */ }
@@ -440,13 +469,15 @@ export async function clearAllPersistentClientState(): Promise<void> {
   await unregisterServiceWorkers();
   await clearCacheStorage();
   await clearOriginPrivateFileSystem();
-  await clearAllIndexedDB();
+  deletedDbNames = await clearAllIndexedDB();
+  await waitForIndexedDbDeletion(deletedDbNames);
 }
 
 async function stopRuntimeBeforeReset(): Promise<void> {
+  const xln = (window as any).__xln_instance;
+  const env = (window as any).__xln_env;
+
   try {
-    const xln = (window as any).__xln_instance;
-    const env = (window as any).__xln_env;
     if (xln?.stopP2P && env) {
       await xln.stopP2P(env);
     }
@@ -455,13 +486,34 @@ async function stopRuntimeBeforeReset(): Promise<void> {
   }
 
   try {
-    const xln = (window as any).__xln_instance;
-    const env = (window as any).__xln_env;
     if (xln?.clearDB) {
       await xln.clearDB(env);
     }
   } catch (e) {
     console.warn('[RESET] Runtime clearDB failed (expected if corrupted):', e);
+  }
+
+  try {
+    if (xln?.closeRuntimeDb && env) {
+      await xln.closeRuntimeDb(env);
+    }
+  } catch (e) {
+    console.warn('[RESET] closeRuntimeDb failed:', e);
+  }
+
+  try {
+    if (xln?.closeInfraDb && env) {
+      await xln.closeInfraDb(env);
+    }
+  } catch (e) {
+    console.warn('[RESET] closeInfraDb failed:', e);
+  }
+
+  try {
+    (window as any).__xln_env = null;
+    (window as any).__xln_instance = null;
+  } catch {
+    // best effort
   }
 }
 
@@ -474,11 +526,6 @@ async function performReset(
   if (activeResetPromise) return activeResetPromise;
 
   activeResetPromise = (async () => {
-    const forceNavigationTimer = window.setTimeout(() => {
-      console.warn('[RESET] Cleanup watchdog fired; forcing navigation');
-      hardNavigateAfterReset();
-    }, RESET_FORCE_NAVIGATION_MS);
-
     if (initiatedHere) {
       if (!options?.skipDebugDump) {
         await collectAndShipDebugDump(triggerError);
@@ -490,16 +537,11 @@ async function performReset(
       console.log('[RESET] External reset signal received. Clearing local tab state...');
     }
 
+    await stopRuntimeBeforeReset();
     try {
-      await Promise.race([
-        (async () => {
-          await stopRuntimeBeforeReset();
-          await clearAllPersistentClientState();
-        })(),
-        sleep(RESET_FORCE_NAVIGATION_MS - 100),
-      ]);
-    } finally {
-      clearTimeout(forceNavigationTimer);
+      await clearAllPersistentClientState();
+    } catch (error) {
+      console.warn('[RESET] Persistent-state wipe verification failed; continuing with reload:', error);
     }
 
     try {

@@ -2,6 +2,7 @@ import { get } from 'svelte/store';
 import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
 import type { Env } from '@xln/runtime/xln-api';
 import { getXLN, xlnEnvironment } from '../stores/xlnStore';
+import { formatEntityId } from './format';
 
 type GossipSource = {
   gossip?: {
@@ -83,4 +84,34 @@ export function getGossipProfile(entityId: string, source: GossipSource): Gossip
 export function resolveEntityName(entityId: string, source: GossipSource): string {
   const profile = getGossipProfile(entityId, source);
   return profile ? profile.name.trim() : '';
+}
+
+type EntityNameOptions = {
+  source: GossipSource;
+  selfEntityId?: string | null;
+  contacts?: Array<{ name: string; entityId: string }> | null;
+  selfLabel?: string;
+  fallback?: string;
+};
+
+export function getEntityDisplayName(entityId: string, options: EntityNameOptions): string {
+  const raw = String(entityId || '').trim();
+  if (!raw) return options.fallback || 'Unknown';
+  const normalized = normalizeId(raw);
+
+  const selfEntityId = String(options.selfEntityId || '').trim();
+  if (selfEntityId && normalized === normalizeId(selfEntityId)) {
+    return options.selfLabel || 'You';
+  }
+
+  for (const contact of options.contacts || []) {
+    const contactId = String(contact?.entityId || '').trim();
+    const contactName = String(contact?.name || '').trim();
+    if (!contactId || !contactName) continue;
+    if (normalizeId(contactId) === normalized) return contactName;
+  }
+
+  const resolved = resolveEntityName(raw, options.source).trim();
+  if (resolved) return resolved;
+  return formatEntityId(raw);
 }

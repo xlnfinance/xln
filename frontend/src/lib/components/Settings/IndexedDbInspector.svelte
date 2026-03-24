@@ -44,6 +44,13 @@
 
   const normalizeName = (value: string): string => value.trim();
 
+  const formatBytes = (byteLength: number): string => {
+    if (!Number.isFinite(byteLength) || byteLength < 0) return '-';
+    if (byteLength < 1024) return `${byteLength}b`;
+    if (byteLength < 1024 * 1024) return `${(byteLength / 1024).toFixed(1)}KB`;
+    return `${(byteLength / (1024 * 1024)).toFixed(2)}MB`;
+  };
+
   const bytesToHex = (bytes: Uint8Array, maxBytes = 64): string => {
     const slice = bytes.slice(0, maxBytes);
     const hex = Array.from(slice, (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -364,15 +371,16 @@
                 <summary>
                   <span class="entry-index">#{entry.index}</span>
                   <span class="entry-key">{entry.key.label}</span>
-                  <span class="entry-bytes">{entry.value.byteLength}b</span>
+                  <span class="entry-bytes">K {formatBytes(entry.key.byteLength)}</span>
+                  <span class="entry-bytes">V {formatBytes(entry.value.byteLength)}</span>
                 </summary>
                 <div class="entry-body">
                   <div class="entry-block">
-                    <h5>Key</h5>
+                    <h5>Key <span class="block-bytes">{formatBytes(entry.key.byteLength)}</span></h5>
                     <pre>{entry.key.pretty || entry.key.preview}</pre>
                   </div>
                   <div class="entry-block">
-                    <h5>Value</h5>
+                    <h5>Value <span class="block-bytes">{formatBytes(entry.value.byteLength)}</span></h5>
                     <pre>{entry.value.pretty || entry.value.preview}</pre>
                   </div>
                 </div>
@@ -524,7 +532,7 @@
 
   .entry-card summary {
     display: grid;
-    grid-template-columns: 56px minmax(0, 1fr) auto;
+    grid-template-columns: 56px minmax(0, 1fr) auto auto;
     gap: 10px;
     align-items: center;
     list-style: none;
@@ -540,6 +548,13 @@
   .entry-bytes {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+  }
+
+  .block-bytes {
+    color: rgba(255, 255, 255, 0.45);
+    font-weight: 400;
+    font-size: 11px;
   }
 
   .entry-key {

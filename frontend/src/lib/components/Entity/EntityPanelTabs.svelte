@@ -32,7 +32,7 @@
   import { toasts } from '../../stores/toastStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
-  import { resolveEntityName } from '$lib/utils/entityNaming';
+  import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming';
   import { formatEntityId } from '$lib/utils/format';
 
   // Icons
@@ -51,6 +51,7 @@
   import ReceivePanel from './ReceivePanel.svelte';
   import SwapPanel from './SwapPanel.svelte';
   import SettlementPanel from './SettlementPanel.svelte';
+  import MoveWorkspace from './MoveWorkspace.svelte';
   import CreditForm from './CreditForm.svelte';
   import CollateralForm from './CollateralForm.svelte';
   import ChatMessages from './ChatMessages.svelte';
@@ -89,9 +90,9 @@
   // Tab types
   type ViewTab = 'assets' | 'accounts' | 'more' | 'settings';
   type MoreTab = 'consensus' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance';
-  type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'settle' | 'configure' | 'appearance';
-  type AssetWorkspaceTab = 'faucet' | 'move' | 'e2r' | 'r2c' | 'c2r' | 'r2e' | 'send' | 'allow';
-  type ConfigureWorkspaceTab = 'extend-credit' | 'request-credit' | 'collateral' | 'token';
+  type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'move' | 'history' | 'configure' | 'appearance';
+  type AssetWorkspaceTab = 'move' | 'history';
+  type ConfigureWorkspaceTab = 'extend-credit' | 'request-credit' | 'collateral' | 'token' | 'dispute';
 
   // Set initial tab based on action
   function getInitialTab(): ViewTab {
@@ -99,16 +100,17 @@
   }
   function getInitialAccountWorkspaceTab(): AccountWorkspaceTab {
     if (initialAction === 'r2r') return 'send';
-    if (initialAction === 'r2c') return 'settle';
+    if (initialAction === 'r2c') return 'move';
     return 'open';
   }
   let activeTab: ViewTab = getInitialTab();
   let moreTab: MoreTab = 'consensus';
   let accountWorkspaceTab: AccountWorkspaceTab = getInitialAccountWorkspaceTab();
-  let assetWorkspaceTab: AssetWorkspaceTab = 'faucet';
+  let assetWorkspaceTab: AssetWorkspaceTab = 'move';
   let configureWorkspaceTab: ConfigureWorkspaceTab = 'extend-credit';
   let workspaceAccountId = '';
   let configureTokenId = 1;
+  let pendingBatchSubmitting = false;
 
   // State
   let replica: EntityReplica | null = null;
@@ -201,10 +203,6 @@
       case 'activity':
         activeTab = 'accounts';
         accountWorkspaceTab = 'activity';
-        break;
-      case 'settle':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'settle';
         break;
       case 'configure':
         activeTab = 'accounts';
@@ -387,16 +385,42 @@
   let moveNodeLayoutRaf: number | null = null;
   let moveNodeLayoutSettleRaf: number | null = null;
   let moveLineReady = false;
+  let moveCommittedLineReady = false;
+  let moveCommittedLinePrimed = false;
+  let moveCommittedLineTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function scheduleMoveCommittedLineReady(): void {
+    if (moveCommittedLineTimeout) clearTimeout(moveCommittedLineTimeout);
+    if (moveDragSource) return;
+    if (moveCommittedLinePrimed) {
+      moveNodeLayoutVersion += 1;
+      moveCommittedLineReady = true;
+      return;
+    }
+    moveCommittedLineReady = false;
+    moveCommittedLineTimeout = setTimeout(() => {
+      moveCommittedLineTimeout = null;
+      moveNodeLayoutVersion += 1;
+      moveCommittedLineReady = true;
+      moveCommittedLinePrimed = true;
+    }, 200);
+  }
 
   function bumpMoveNodeLayout(): void {
     moveNodeLayoutVersion += 1;
     if (typeof requestAnimationFrame !== 'function') {
       moveLineReady = true;
+      scheduleMoveCommittedLineReady();
       return;
     }
     moveLineReady = false;
+    if (!moveCommittedLinePrimed) moveCommittedLineReady = false;
     if (moveNodeLayoutRaf !== null) cancelAnimationFrame(moveNodeLayoutRaf);
     if (moveNodeLayoutSettleRaf !== null) cancelAnimationFrame(moveNodeLayoutSettleRaf);
+    if (moveCommittedLineTimeout) {
+      clearTimeout(moveCommittedLineTimeout);
+      moveCommittedLineTimeout = null;
+    }
 
     // Wait for child node refs to be available before measuring.
     // First RAF: layout pass. Second RAF: paint pass.
@@ -411,11 +435,13 @@
         if (hasFrom && hasTo) {
           moveNodeLayoutVersion += 1;
           moveLineReady = true;
+          scheduleMoveCommittedLineReady();
         } else {
           // Nodes not ready yet — retry one more frame
           requestAnimationFrame(() => {
             moveNodeLayoutVersion += 1;
             moveLineReady = true;
+            scheduleMoveCommittedLineReady();
           });
         }
       });
@@ -493,6 +519,11 @@
     moveDragSource = endpoint;
     moveDragHoverTarget = null;
     moveSelectedSource = endpoint;
+    moveCommittedLineReady = false;
+    if (moveCommittedLineTimeout) {
+      clearTimeout(moveCommittedLineTimeout);
+      moveCommittedLineTimeout = null;
+    }
   }
 
   function applyMoveRoute(from: MoveEndpoint, to: MoveEndpoint): void {
@@ -556,6 +587,7 @@
   function clearMoveDrag(): void {
     moveDragSource = null;
     moveDragHoverTarget = null;
+    if (moveLineReady) scheduleMoveCommittedLineReady();
   }
 
   function resetMoveRoute(): void {
@@ -2463,6 +2495,41 @@
     resetMoveRoute();
   }
 
+  function openAssetMoveWorkspace(): void {
+    assetWorkspaceTab = 'move';
+    moveFromEndpoint = 'external';
+    moveToEndpoint = 'reserve';
+    if (!moveExternalRecipient.trim()) moveExternalRecipient = resolveSelfEoaAddress();
+    if (!moveReserveRecipientEntityId.trim()) moveReserveRecipientEntityId = resolveSelfEntityId();
+    bumpMoveNodeLayout();
+  }
+
+  function openAccountMoveWorkspace(): void {
+    accountWorkspaceTab = 'move';
+    moveFromEndpoint = 'account';
+    moveToEndpoint = 'account';
+    if (!moveSourceAccountId || !workspaceAccountIds.includes(moveSourceAccountId)) {
+      moveSourceAccountId = workspaceAccountId || workspaceAccountIds[0] || '';
+    }
+    if (!moveTargetEntityId.trim()) moveTargetEntityId = resolveSelfEntityId();
+    if (!moveTargetCounterpartyManualOverride || !moveTargetHubEntityId.trim()) {
+      moveTargetHubEntityId = workspaceAccountId || moveHubEntityOptions[0] || '';
+    }
+    bumpMoveNodeLayout();
+  }
+
+  function openAssetHistoryWorkspace(): void {
+    assetWorkspaceTab = 'history';
+  }
+
+  function openAccountHistoryWorkspace(): void {
+    accountWorkspaceTab = 'history';
+  }
+
+  function handleMoveWorkspaceError(err: unknown): void {
+    toasts.error(`Move failed: ${toErrorMessage(err, 'Unknown error')}`);
+  }
+
   function setMoveProgress(label: string): void {
     moveProgressLabel = label;
   }
@@ -2708,6 +2775,25 @@
     }
   }
 
+  function isDirectMoveRoute(from: MoveEndpoint, to: MoveEndpoint): boolean {
+    return from === 'external' || getMoveRouteKey(from, to) === 'external->external';
+  }
+
+  function getMovePrimaryActionLabel(): string {
+    if (moveFromEndpoint === 'external' && moveToEndpoint === 'reserve') return 'Deposit Now';
+    if (moveFromEndpoint === 'external' && moveToEndpoint === 'account') return 'Fund Now';
+    if (isDirectMoveRoute(moveFromEndpoint, moveToEndpoint)) return 'Send Direct';
+    return 'Add to Batch';
+  }
+
+  async function submitMovePrimaryAction(): Promise<void> {
+    if (isDirectMoveRoute(moveFromEndpoint, moveToEndpoint)) {
+      await executeMovePlan();
+      return;
+    }
+    await addMoveToExistingBatch();
+  }
+
   async function executeMovePlan(): Promise<void> {
     const validationError = getMoveValidationError('broadcast');
     if (validationError) throw new Error(validationError);
@@ -2934,7 +3020,10 @@
   }
 
   async function handleDisputeFromList(event: CustomEvent<{ counterpartyId: string }>) {
-    const counterpartyEntityId = event.detail.counterpartyId;
+    await queueDisputeStart(event.detail.counterpartyId, 'dispute-from-popover');
+  }
+
+  async function queueDisputeStart(counterpartyEntityId: string, description = 'dispute-from-configure') {
     const entityId = replica?.state?.entityId || tab.entityId;
     const env = activeEnv;
     const signerId = resolveEntitySigner(entityId, 'dispute-start');
@@ -2944,12 +3033,34 @@
       if (!env) throw new Error('Environment not ready');
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
         type: 'disputeStart' as const,
-        data: { counterpartyEntityId, description: 'dispute-from-popover' },
+        data: { counterpartyEntityId, description },
       }])]);
       toasts.success('Dispute queued — will be submitted on next batch broadcast');
     } catch (err) {
       console.error('[EntityPanel] Dispute start failed:', err);
       toasts.error(`Dispute failed: ${(err as Error).message}`);
+    }
+  }
+
+  async function queueDisputeFinalize(counterpartyEntityId: string, description = 'dispute-finalize-from-configure') {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const env = activeEnv;
+    const signerId = resolveEntitySigner(entityId, 'dispute-finalize');
+    if (!entityId || !signerId) return;
+    if (!activeIsLive) {
+      toasts.error('Dispute finalize requires LIVE mode');
+      return;
+    }
+    try {
+      if (!env) throw new Error('Environment not ready');
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
+        type: 'disputeFinalize' as const,
+        data: { counterpartyEntityId, description },
+      }])]);
+      toasts.success('Dispute finalize queued — will be submitted on next batch broadcast');
+    } catch (err) {
+      console.error('[EntityPanel] Dispute finalize failed:', err);
+      toasts.error(`Dispute finalize failed: ${(err as Error).message}`);
     }
   }
 
@@ -3099,6 +3210,7 @@
 
   onDestroy(() => {
     if (refreshTimer) clearInterval(refreshTimer);
+    if (moveCommittedLineTimeout) clearTimeout(moveCommittedLineTimeout);
   });
 
   onMount(() => {
@@ -3755,6 +3867,195 @@
            (batch.revealSecrets?.length || 0);
   }
 
+  type PendingBatchPreviewItem = {
+    key: string;
+    title: string;
+    subtitle: string;
+  };
+
+  function pendingBatchEntityLabel(entityId: string): string {
+    const raw = String(entityId || '').trim();
+    return getEntityDisplayName(raw, {
+      source: activeEnv,
+      selfEntityId: replica?.state?.entityId || tab.entityId,
+      contacts,
+      fallback: 'Unknown',
+    });
+  }
+
+  function pendingBatchTokenAmountLabel(tokenIdRaw: unknown, amountRaw: unknown): string {
+    const tokenId = Number(tokenIdRaw || 0);
+    const amount = typeof amountRaw === 'bigint'
+      ? amountRaw
+      : (() => {
+          try {
+            return BigInt(String(amountRaw ?? 0));
+          } catch {
+            return 0n;
+          }
+        })();
+    if (tokenId > 0 && activeXlnFunctions?.formatTokenAmount) {
+      return activeXlnFunctions.formatTokenAmount(tokenId, amount);
+    }
+    return `${amount.toString()} ${tokenId > 0 ? `Token #${tokenId}` : 'token'}`;
+  }
+
+  function pendingBatchShortHex(value: unknown): string {
+    const text = String(value || '');
+    if (!text) return '—';
+    if (text.length <= 18) return text;
+    return `${text.slice(0, 10)}...${text.slice(-6)}`;
+  }
+
+  function buildPendingBatchPreview(batch: JBatch | null | undefined): PendingBatchPreviewItem[] {
+    if (!batch) return [];
+    const items: PendingBatchPreviewItem[] = [];
+
+    for (const [index, op] of (batch.externalTokenToReserve || []).entries()) {
+      items.push({
+        key: `e2r-${index}`,
+        title: 'External → Reserve',
+        subtitle: `${pendingBatchTokenAmountLabel(op.internalTokenId, op.amount)} to ${pendingBatchEntityLabel(String(op.entity || resolveSelfEntityId()))}`,
+      });
+    }
+
+    for (const [index, op] of (batch.reserveToReserve || []).entries()) {
+      items.push({
+        key: `r2r-${index}`,
+        title: 'Reserve → Reserve',
+        subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount)} to ${pendingBatchEntityLabel(String(op.receivingEntity || ''))}`,
+      });
+    }
+
+    for (const [index, op] of (batch.reserveToCollateral || []).entries()) {
+      for (const [pairIndex, pair] of (op.pairs || []).entries()) {
+        items.push({
+          key: `r2c-${index}-${pairIndex}`,
+          title: 'Reserve → Account',
+          subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, pair.amount)} to ${pendingBatchEntityLabel(String(op.receivingEntity || ''))} via ${pendingBatchEntityLabel(String(pair.entity || ''))}`,
+        });
+      }
+    }
+
+    for (const [index, op] of (batch.collateralToReserve || []).entries()) {
+      items.push({
+        key: `c2r-${index}`,
+        title: 'Account → Reserve',
+        subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount)} from ${pendingBatchEntityLabel(String(op.counterparty || ''))}`,
+      });
+    }
+
+    for (const [index, op] of (batch.reserveToExternalToken || []).entries()) {
+      items.push({
+        key: `r2e-${index}`,
+        title: 'Reserve → External',
+        subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount)} to ${pendingBatchEntityLabel(String(op.receivingEntity || resolveSelfEntityId()))}`,
+      });
+    }
+
+    for (const [index, op] of (batch.settlements || []).entries()) {
+      items.push({
+        key: `settle-${index}`,
+        title: 'Settlement',
+        subtitle: `${pendingBatchEntityLabel(String(op.leftEntity || ''))} ↔ ${pendingBatchEntityLabel(String(op.rightEntity || ''))}`,
+      });
+    }
+
+    for (const [index, op] of (batch.disputeStarts || []).entries()) {
+      items.push({
+        key: `dstart-${index}`,
+        title: 'Dispute Start',
+        subtitle: `Lock account with ${pendingBatchEntityLabel(String(op.counterentity || ''))}`,
+      });
+    }
+
+    for (const [index, op] of (batch.disputeFinalizations || []).entries()) {
+      items.push({
+        key: `dfinal-${index}`,
+        title: 'Dispute Finalize',
+        subtitle: `Finalize against ${pendingBatchEntityLabel(String(op.counterentity || ''))}`,
+      });
+    }
+
+    for (const [index, op] of (batch.revealSecrets || []).entries()) {
+      items.push({
+        key: `secret-${index}`,
+        title: 'Reveal Secret',
+        subtitle: pendingBatchShortHex(op.secret),
+      });
+    }
+
+    return items;
+  }
+
+  $: hasDraftBatch = !!(replica?.state?.jBatchState?.batch && countBatchOps(replica.state.jBatchState.batch) > 0);
+  $: hasSentBatch = !!(replica?.state?.jBatchState?.sentBatch?.batch && countBatchOps(replica.state.jBatchState.sentBatch.batch) > 0);
+  $: canBroadcastPendingBatch = hasDraftBatch && !hasSentBatch;
+
+  async function clearPendingBatch(): Promise<void> {
+    if (!pendingBatchCount || pendingBatchSubmitting) return;
+    if (!confirm('Clear current draft and any sent batch state?')) return;
+    pendingBatchSubmitting = true;
+    try {
+      const entityId = replica?.state?.entityId || tab.entityId;
+      const env = activeEnv;
+      if (!env) throw new Error('Environment not ready');
+      if (!activeIsLive) throw new Error('Batch actions require LIVE mode');
+      const signerId = resolveEntitySigner(entityId, 'global-clear-batch');
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
+        type: 'j_clear_batch',
+        data: { reason: 'global-batch-bar-clear' },
+      }])]);
+      toasts.success('Batch cleared');
+    } catch (error) {
+      toasts.error(`Batch clear failed: ${toErrorMessage(error, 'Unknown error')}`);
+    } finally {
+      pendingBatchSubmitting = false;
+    }
+  }
+
+  async function broadcastPendingBatch(): Promise<void> {
+    if (!canBroadcastPendingBatch || pendingBatchSubmitting) return;
+    pendingBatchSubmitting = true;
+    try {
+      const entityId = replica?.state?.entityId || tab.entityId;
+      const env = activeEnv;
+      if (!env) throw new Error('Environment not ready');
+      if (!activeIsLive) throw new Error('Batch actions require LIVE mode');
+      const signerId = resolveEntitySigner(entityId, 'global-batch-broadcast');
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
+        type: 'j_broadcast',
+        data: {},
+      }])]);
+      toasts.success('Batch queued for broadcast');
+    } catch (error) {
+      toasts.error(`Batch broadcast failed: ${toErrorMessage(error, 'Unknown error')}`);
+    } finally {
+      pendingBatchSubmitting = false;
+    }
+  }
+
+  async function rebroadcastPendingBatch(): Promise<void> {
+    if (!hasSentBatch || pendingBatchSubmitting) return;
+    pendingBatchSubmitting = true;
+    try {
+      const entityId = replica?.state?.entityId || tab.entityId;
+      const env = activeEnv;
+      if (!env) throw new Error('Environment not ready');
+      if (!activeIsLive) throw new Error('Batch actions require LIVE mode');
+      const signerId = resolveEntitySigner(entityId, 'global-batch-rebroadcast');
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
+        type: 'j_rebroadcast',
+        data: { gasBumpBps: 1000 },
+      }])]);
+      toasts.success('Sent batch queued for rebroadcast');
+    } catch (error) {
+      toasts.error(`Rebroadcast failed: ${toErrorMessage(error, 'Unknown error')}`);
+    } finally {
+      pendingBatchSubmitting = false;
+    }
+  }
+
   // Tab config
   // Pending batch count for Accounts tab badge
   $: pendingBatchCount = (() => {
@@ -3764,10 +4065,18 @@
     const sent = countBatchOps(jBatchState?.sentBatch?.batch);
     return draft > 0 ? draft : sent;
   })();
+  $: pendingBatchMode = replica?.state?.jBatchState?.batch && countBatchOps(replica.state.jBatchState.batch) > 0
+    ? 'draft'
+    : (replica?.state?.jBatchState?.sentBatch?.batch && countBatchOps(replica.state.jBatchState.sentBatch.batch) > 0 ? 'sent' : null);
+  $: pendingBatchPreview = buildPendingBatchPreview(
+    pendingBatchMode === 'draft'
+      ? (replica?.state?.jBatchState?.batch || null)
+      : (replica?.state?.jBatchState?.sentBatch?.batch || null),
+  );
 
   const tabs: IconBadgeTabConfig<ViewTab>[] = [
     { id: 'assets', icon: Landmark, label: 'Assets' },
-    { id: 'accounts', icon: Users, label: 'Accounts', showBadge: true, badgeType: 'pending' },
+    { id: 'accounts', icon: Users, label: 'Accounts' },
     { id: 'more', icon: MoreHorizontal, label: 'More' },
     { id: 'settings', icon: SettingsIcon, label: 'Settings' },
   ];
@@ -3786,12 +4095,15 @@
     { id: 'send', icon: ArrowUpRight, label: 'Pay' },
     { id: 'receive', icon: ArrowDownLeft, label: 'Receive' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
+    { id: 'move', icon: Landmark, label: 'Move' },
+    { id: 'history', icon: Activity, label: 'History' },
     { id: 'configure', icon: SettingsIcon, label: 'Configure' },
-    { id: 'appearance', icon: SlidersHorizontal, label: 'Appearance' },
     { id: 'activity', icon: Activity, label: 'Activity' },
-    { id: 'settle', icon: Landmark, label: 'Settle', showPendingBatch: true },
+    { id: 'appearance', icon: SlidersHorizontal, label: 'Appearance' },
   ];
   $: hasWorkspaceAccounts = workspaceAccountIds.length > 0;
+  $: faucetSupportsReserve = !!findReserveTransferTokenBySymbol(faucetAssetSymbol);
+  $: canShowAccountFaucet = faucetSupportsReserve && hasWorkspaceAccounts;
   $: visibleAccountWorkspaceTabs = hasWorkspaceAccounts
     ? accountWorkspaceTabs
     : accountWorkspaceTabs.filter((tabConfig) => tabConfig.id === 'open');
@@ -3927,7 +4239,7 @@
           <div class="tab-header-row">
             <div class="asset-title-block">
               <h4 class="section-head" style="margin: 0;">Assets</h4>
-              <p class="muted asset-ledger-note">External wallet, reserves, and spendable account capacity in one ledger.</p>
+              <p class="muted asset-ledger-note">Wallet, reserve, and account balances.</p>
             </div>
             <div class="header-actions">
               <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 15000} on:change={updateBalanceRefresh}>
@@ -3940,14 +4252,46 @@
               </button>
             </div>
           </div>
+          <section class="faucet-inline-card">
+            <div class="faucet-inline-row">
+              <span class="faucet-inline-label">Faucet</span>
+              <select class="faucet-inline-token" bind:value={faucetAssetSymbol} data-testid="asset-faucet-symbol">
+                {#each externalTokens as token}
+                  <option value={token.symbol}>{token.symbol}</option>
+                {/each}
+              </select>
+              <button class="btn-table-action faucet" data-testid={`external-faucet-${faucetAssetSymbol}`} on:click={() => submitAssetFaucet('external')}>
+                Wallet
+              </button>
+              <button
+                class="btn-table-action deposit"
+                data-testid={`reserve-faucet-${faucetAssetSymbol}`}
+                on:click={() => submitAssetFaucet('reserve')}
+                disabled={!faucetSupportsReserve}
+                title={!faucetSupportsReserve ? 'Reserve faucet supports ERC20 assets only' : 'Faucet reserve'}
+              >
+                Reserve
+              </button>
+              {#if canShowAccountFaucet}
+              <button
+                class="btn-table-action faucet"
+                data-testid={`account-faucet-${faucetAssetSymbol}`}
+                on:click={() => submitAssetFaucet('account')}
+                title="Faucet first account"
+              >
+                  Account
+              </button>
+              {/if}
+            </div>
+          </section>
           <div class="asset-ledger-meta">
             <div class="wallet-meta-block">
-              <p class="muted wallet-label">EOA</p>
+              <p class="muted wallet-label">External</p>
               <p class="wallet-meta-value">{tab.signerId || '-'}</p>
               <p class="muted wallet-meta-help">Native ETH and ERC20 wallet address.</p>
             </div>
             <div class="wallet-meta-block">
-              <p class="muted wallet-label">Entity</p>
+              <p class="muted wallet-label">Entity:</p>
               <p class="wallet-meta-value">{replica?.state?.entityId || tab.entityId}</p>
               <p class="muted wallet-meta-help">XLN identity for reserves, accounts, and consensus.</p>
             </div>
@@ -4011,581 +4355,118 @@
               </div>
             </div>
           </div>
-          <nav class="account-workspace-tabs asset-workspace-tabs" aria-label="Asset workspace">
-              <button class="account-workspace-tab" data-testid="asset-tab-move" class:active={assetWorkspaceTab === 'move'} on:click={() => assetWorkspaceTab = 'move'}>
+          <section class="asset-action-card">
+            {#if pendingBatchCount > 0}
+              <div class="workspace-pending-banner" data-testid="workspace-pending-banner">
+                <div class="workspace-pending-copy">
+                  <div class="workspace-pending-head">
+                    <span class="workspace-pending-kicker">{pendingBatchMode === 'sent' ? 'Sent Batch' : 'Draft Batch'}</span>
+                    <span class="workspace-pending-note">What will go on-chain next</span>
+                  </div>
+                  <div class="workspace-pending-list">
+                    {#each pendingBatchPreview as item (item.key)}
+                      <div class="workspace-pending-chip">
+                        <strong>{item.title}</strong>
+                        <span>{item.subtitle}</span>
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+                <div class="workspace-pending-actions">
+                  <button class="btn-table-action" type="button" on:click={openAssetHistoryWorkspace}>History</button>
+                  <button class="btn-table-action" type="button" data-testid="settle-clear-batch" on:click={clearPendingBatch} disabled={pendingBatchSubmitting}>Clear Batch</button>
+                  {#if hasSentBatch}
+                    <button class="btn-table-action deposit" type="button" data-testid="settle-rebroadcast" on:click={rebroadcastPendingBatch} disabled={pendingBatchSubmitting}>
+                      {pendingBatchSubmitting ? 'Working...' : 'Rebroadcast'}
+                    </button>
+                  {:else}
+                    <button class="btn-table-action deposit" type="button" data-testid="settle-sign-broadcast" on:click={broadcastPendingBatch} disabled={!canBroadcastPendingBatch || pendingBatchSubmitting}>
+                      {pendingBatchSubmitting ? 'Working...' : 'Sign & Broadcast'}
+                    </button>
+                  {/if}
+                </div>
+              </div>
+            {/if}
+
+            <nav class="account-workspace-tabs asset-workspace-tabs" aria-label="Asset workspace">
+              <button class="account-workspace-tab" data-testid="asset-tab-move" class:active={assetWorkspaceTab === 'move'} on:click={openAssetMoveWorkspace}>
                 <span>Move</span>
               </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-faucet" class:active={assetWorkspaceTab === 'faucet'} on:click={() => assetWorkspaceTab = 'faucet'}>
-                <span>Faucet</span>
-              </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-deposit" class:active={assetWorkspaceTab === 'e2r'} on:click={() => assetWorkspaceTab = 'e2r'} title="External → Reserve">
-                <span>E→R</span>
-              </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-r2c" class:active={assetWorkspaceTab === 'r2c'} on:click={() => assetWorkspaceTab = 'r2c'} title="Reserve → Collateral">
-                <span>R→C</span>
-              </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-c2r" class:active={assetWorkspaceTab === 'c2r'} on:click={() => assetWorkspaceTab = 'c2r'} title="Collateral → Reserve">
-                <span>C→R</span>
-              </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-withdraw" class:active={assetWorkspaceTab === 'r2e'} on:click={() => assetWorkspaceTab = 'r2e'} title="Reserve → External">
-                <span>R→E</span>
-              </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-send" class:active={assetWorkspaceTab === 'send'} on:click={() => assetWorkspaceTab = 'send'} title="Send ERC20">
-                <span>Send</span>
-              </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-allow" class:active={assetWorkspaceTab === 'allow'} on:click={() => assetWorkspaceTab = 'allow'} title="Approve ERC20">
-                <span>Allow</span>
+              <button class="account-workspace-tab" data-testid="asset-tab-history" class:active={assetWorkspaceTab === 'history'} on:click={openAssetHistoryWorkspace}>
+                <span>History</span>
               </button>
             </nav>
 
-            <section class="asset-action-card">
-              {#if assetWorkspaceTab === 'move'}
-                <div class="move-route-builder">
-                  <div class="move-topline">
-                    <div class="asset-amount-shell move-amount-shell">
-                      <input type="text" bind:value={moveAmount} placeholder="0.00" data-testid="move-amount" />
-                      <div class="asset-inline-controls">
-                        <button
-                          type="button"
-                          class="asset-max-hint text-link"
-                          on:click={fillMoveMax}
-                          disabled={
-                            getMoveDisplayBalance(moveFromEndpoint) <= 0n
-                          }
-                        >
-                          {formatInlineFillAmount(getMoveDisplayBalance(moveFromEndpoint), getMoveDisplayDecimals())}
-                        </button>
-                        <select class="asset-token-select-inline compact move-token-select" bind:value={moveAssetSymbol} data-testid="move-asset-symbol">
-                          {#each moveAssetOptions as token}
-                            <option value={token.symbol}>{token.symbol}</option>
-                          {/each}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="move-visual" bind:this={moveVisualRoot}>
-                    <div class="move-column">
-                      <div class="move-column-head">From</div>
-                      {#each MOVE_ENDPOINTS as endpoint}
-                        <button
-                          type="button"
-                          class="move-node"
-                          class:source-active={moveFromEndpoint === endpoint}
-                          class:selected={moveFromEndpoint === endpoint}
-                          class:pending={moveSelectedSource === endpoint}
-                          class:dragging={moveDragSource === endpoint}
-                          data-testid={`move-source-${endpoint}`}
-                          data-move-side="from"
-                          data-move-endpoint={endpoint}
-                          use:moveNodeAction={{ side: 'from', endpoint }}
-                          on:pointerdown={(event) => beginMoveDrag(endpoint, event)}
-                          on:mousedown={(event) => beginMoveDrag(endpoint, event)}
-                          on:click={() => setMoveSource(endpoint)}
-                        >
-                          <span class="move-node-label">{MOVE_ENDPOINT_LABEL[endpoint]}</span>
-                          <span class="move-node-balance">
-                            {formatAmount(getMoveDisplayBalance(endpoint), getMoveDisplayDecimals())}
-                          </span>
-                        </button>
-                      {/each}
-                      {#if moveFromEndpoint === 'account'}
-                        <div class="move-account-slot" data-testid="move-source-account-field">
-                          <EntityInput
-                            label="From account"
-                            value={moveSourceAccountId}
-                            entities={workspaceAccountIds}
-                            {contacts}
-                            excludeId={replica?.state?.entityId || tab.entityId}
-                            placeholder="Select source account..."
-                            disabled={!activeIsLive || workspaceAccountIds.length === 0}
-                            on:change={handleMoveSourceAccountChange}
-                          />
-                        </div>
-                      {/if}
-                    </div>
-
-                    <div class="move-column">
-                      <div class="move-column-head">To</div>
-                      {#each MOVE_ENDPOINTS as endpoint}
-                        <button
-                          type="button"
-                          class="move-node target"
-                          class:target-active={moveToEndpoint === endpoint}
-                          class:selected={moveToEndpoint === endpoint}
-                          class:pending={moveSelectedTarget === endpoint}
-                          class:hover-target={moveDragHoverTarget === endpoint}
-                          class:blocked={!isMoveRouteSupported(moveSelectedSource || moveFromEndpoint, endpoint)}
-                          data-testid={`move-target-${endpoint}`}
-                          data-move-side="to"
-                          data-move-endpoint={endpoint}
-                          use:moveNodeAction={{ side: 'to', endpoint }}
-                          on:pointerenter={() => {
-                            if (moveDragSource) moveDragHoverTarget = endpoint;
-                          }}
-                          on:mouseenter={() => {
-                            if (moveDragSource) moveDragHoverTarget = endpoint;
-                          }}
-                          on:pointerleave={() => {
-                            if (moveDragHoverTarget === endpoint) moveDragHoverTarget = null;
-                          }}
-                          on:mouseleave={() => {
-                            if (moveDragHoverTarget === endpoint) moveDragHoverTarget = null;
-                          }}
-                          on:click={() => setMoveTarget(endpoint)}
-                        >
-                          <span class="move-node-label">{MOVE_ENDPOINT_LABEL[endpoint]}</span>
-                          <span class="move-node-target-hint">Drop here</span>
-                        </button>
-                      {/each}
-                      {#if moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint)}
-                        <div class="move-account-slot" data-testid="move-reserve-recipient-field">
-                          <EntityInput
-                            testId="move-reserve-recipient-picker"
-                            label="To reserve entity"
-                            value={moveReserveRecipientEntityId}
-                            entities={moveEntityOptions}
-                            {contacts}
-                            placeholder="Recipient entity..."
-                            preferredId={resolveSelfEntityId()}
-                            on:change={handleMoveReserveRecipientChange}
-                          />
-                        </div>
-                      {/if}
-                      {#if moveToEndpoint === 'account'}
-                        <div class="move-account-slot" data-testid="move-target-entity-field">
-                          <EntityInput
-                            testId="move-target-entity-picker"
-                            label="Recipient"
-                            value={moveTargetEntityId}
-                            entities={moveEntityOptions}
-                            {contacts}
-                            placeholder="Recipient entity..."
-                            preferredId={resolveSelfEntityId()}
-                            on:change={handleMoveTargetEntityChange}
-                          />
-                        </div>
-                        <div class="move-account-slot" data-testid="move-target-counterparty-field">
-                          <EntityInput
-                            testId="move-target-counterparty-picker"
-                            label="Counterparty"
-                            value={moveTargetHubEntityId}
-                            entities={moveHubEntityOptions}
-                            {contacts}
-                            placeholder="Counterparty entity..."
-                            on:change={handleMoveTargetHubChange}
-                          />
-                        </div>
-                      {/if}
-                      {#if moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint)}
-                        <label class="asset-field move-account-slot" data-testid="move-external-recipient-field">
-                          <span class="asset-field-head">
-                            <span>Recipient EOA</span>
-                          </span>
-                          <input type="text" bind:value={moveExternalRecipient} placeholder="0x..." data-testid="move-external-recipient" />
-                        </label>
-                      {/if}
-                    </div>
-
-                    {#if !moveDragSource}
-                      {@const _moveLayoutTick = moveNodeLayoutVersion}
-                      {@const committedStart = getMoveNodeAnchor('from', moveFromEndpoint)}
-                      {@const committedEnd = getMoveNodeAnchor('to', moveToEndpoint)}
-                      {#if moveLineReady && committedStart && committedEnd}
-                        <svg class="move-drag-layer committed" data-testid="move-committed-line" aria-hidden="true">
-                          <path d={buildMoveArrowPath(committedStart, committedEnd)}></path>
-                        </svg>
-                      {/if}
-                    {:else}
-                      {@const _moveLayoutTick = moveNodeLayoutVersion}
-                      {@const dragStart = getMoveNodeAnchor('from', moveDragSource)}
-                      {@const dragEnd = getMoveNodeAnchor('to', moveDragHoverTarget || moveToEndpoint)}
-                      {#if moveLineReady && dragStart && dragEnd}
-                        <svg class="move-drag-layer" data-testid="move-drag-line" aria-hidden="true">
-                          <path d={buildMoveArrowPath(dragStart, dragEnd)}></path>
-                        </svg>
-                      {/if}
-                    {/if}
-                  </div>
-
-                  <div class="move-summary" data-testid="move-route-summary">
-                    <div class="move-summary-pill">
-                      {MOVE_ENDPOINT_LABEL[moveFromEndpoint]} → {MOVE_ENDPOINT_LABEL[moveToEndpoint]}
-                    </div>
-                    <div class="move-summary-title">{moveRouteExecutionLabel(moveFromEndpoint, moveToEndpoint)}</div>
-                    <div class="move-summary-meta">{moveRouteMeta(moveFromEndpoint, moveToEndpoint)}</div>
-                    {#if moveProgressLabel}
-                      <div class="move-summary-progress">{moveProgressLabel}</div>
-                    {/if}
-                    {#if canAddMoveToExistingBatch() && !moveDraftError}
-                      <div class="move-summary-batch">Uses existing draft batch</div>
-                    {/if}
-                    {#if moveBroadcastError}
-                      <div class="move-summary-progress error">{moveBroadcastError}</div>
-                    {/if}
-                    <div class="move-steps">
-                      {#each moveRouteSteps(moveFromEndpoint, moveToEndpoint) as step}
-                        <span class="move-step-chip">{step}</span>
-                      {/each}
-                    </div>
-                  </div>
-
-                  <div class="asset-action-row">
-                    <button
-                      class="btn-table-action"
-                      type="button"
-                      data-testid="move-reset"
-                      on:click={clearMoveComposer}
-                    >
-                      Clear
-                    </button>
-                    <button
-                      class="btn-table-action"
-                      type="button"
-                      data-testid="move-add-batch"
-                      on:click={async () => {
-                        try {
-                          await addMoveToExistingBatch();
-                        } catch (err) {
-                          toasts.error(`Move failed: ${toErrorMessage(err, 'Unknown error')}`);
-                        }
-                      }}
-                      disabled={!!moveDraftError}
-                    >
-                      Add to Batch
-                    </button>
-                    <button
-                      class="btn-table-action deposit"
-                      data-testid="move-confirm"
-                      on:click={async () => {
-                        try {
-                          await executeMovePlan();
-                        } catch (err) {
-                          toasts.error(`Move failed: ${toErrorMessage(err, 'Unknown error')}`);
-                        }
-                      }}
-                      disabled={!!moveBroadcastError}
-                    >
-                      {moveExecuting ? 'Broadcasting...' : 'Sign & Broadcast'}
-                    </button>
-                  </div>
-                </div>
-              {:else if assetWorkspaceTab === 'faucet'}
-                <h4 class="section-head">Faucet</h4>
-                <p class="muted">Top up your EOA, reserve, or first available account for fast testing.</p>
-                <div class="asset-form-grid">
-                  <label class="asset-field">
-                    <span>Asset</span>
-                    <select bind:value={faucetAssetSymbol} data-testid="asset-faucet-symbol">
-                      {#each externalTokens as token}
-                        <option value={token.symbol}>{token.symbol}</option>
-                      {/each}
-                    </select>
-                  </label>
-                </div>
-                <div class="asset-action-row">
-                  <button class="btn-table-action faucet" data-testid={`external-faucet-${faucetAssetSymbol}`} on:click={() => submitAssetFaucet('external')}>
-                    Faucet External
-                  </button>
-                  <button
-                    class="btn-table-action deposit"
-                    data-testid={`reserve-faucet-${faucetAssetSymbol}`}
-                    on:click={() => submitAssetFaucet('reserve')}
-                    disabled={!findReserveTransferTokenBySymbol(faucetAssetSymbol)}
-                    title={!findReserveTransferTokenBySymbol(faucetAssetSymbol) ? 'Reserve faucet supports ERC20 assets only' : 'Faucet reserve'}
-                  >
-                    Faucet Reserve
-                  </button>
-                  <button
-                    class="btn-table-action faucet"
-                    data-testid={`account-faucet-${faucetAssetSymbol}`}
-                    on:click={() => submitAssetFaucet('account')}
-                    disabled={!findReserveTransferTokenBySymbol(faucetAssetSymbol) || workspaceAccountIds.length === 0}
-                    title={workspaceAccountIds.length === 0 ? 'Open an account first' : 'Faucet first available account'}
-                  >
-                    Faucet Account
-                  </button>
-                </div>
-              {:else if assetWorkspaceTab === 'e2r'}
-                <h4 class="section-head">External → Reserve</h4>
-                <p class="muted">Deposit ERC20 from your signer wallet into entity reserves.</p>
-                <label class="asset-field asset-field-wide">
-                  <span>Amount</span>
-                  <div class="asset-amount-shell combined">
-                    <input
-                      type="text"
-                      bind:value={externalToReserveAmount}
-                      placeholder="0.00"
-                      data-testid="external-to-reserve-amount"
-                    />
-                    <div class="asset-inline-controls">
-                      <button
-                        type="button"
-                        class="asset-max-hint text-link"
-                        on:click={fillExternalToReserveMax}
-                        disabled={!selectedExternalToReserveToken || selectedExternalToReserveToken.balance <= 0n}
-                      >
-                        {selectedExternalToReserveToken ? formatInlineFillAmount(selectedExternalToReserveToken.balance, selectedExternalToReserveToken.decimals) : '0'}
-                      </button>
-                      <select class="asset-token-select-inline compact" bind:value={externalToReserveSymbol} data-testid="external-to-reserve-symbol">
-                        {#each transferableAssetOptions as token}
-                          <option value={token.symbol}>{token.symbol}</option>
-                        {/each}
-                      </select>
-                    </div>
-                  </div>
-                </label>
-                <div class="asset-action-row">
-                  <button
-                    class="btn-table-action deposit"
-                    data-testid={`external-deposit-${externalToReserveSymbol}`}
-                    on:click={submitExternalToReserve}
-                    disabled={depositingToken === externalToReserveSymbol || !externalToReserveAmount.trim()}
-                  >
-                    {depositingToken === externalToReserveSymbol ? 'Moving...' : 'Move To Reserve'}
-                  </button>
-                </div>
-              {:else if assetWorkspaceTab === 'r2c'}
-                <h4 class="section-head">Reserve → Collateral</h4>
-                <p class="muted">Move reserve balance into one selected bilateral account.</p>
-                <div class="asset-form-grid">
-                  <div class="asset-field asset-field-wide">
-                    <EntityInput
-                      label="Account"
-                      value={workspaceAccountId}
-                      entities={workspaceAccountIds}
-                      {contacts}
-                      excludeId={replica?.state?.entityId || tab.entityId}
-                      placeholder="Select account..."
-                      disabled={!activeIsLive || workspaceAccountIds.length === 0}
-                      on:change={handleWorkspaceAccountChange}
-                    />
-                  </div>
-                </div>
-                <label class="asset-field asset-field-wide">
-                  <span>Amount</span>
-                  <div class="asset-amount-shell combined">
-                    <input
-                      type="text"
-                      bind:value={reserveToCollateralAmount}
-                      placeholder="0.00"
-                      data-testid="reserve-to-collateral-amount"
-                    />
-                    <div class="asset-inline-controls">
-                      <button
-                        type="button"
-                        class="asset-max-hint text-link"
-                        on:click={fillReserveToCollateralMax}
-                        disabled={!selectedReserveToCollateralToken || (onchainReserves.get(selectedReserveToCollateralToken.tokenId) ?? 0n) <= 0n}
-                      >
-                        {#if selectedReserveToCollateralToken}{formatInlineFillAmount(onchainReserves.get(selectedReserveToCollateralToken.tokenId) ?? 0n, selectedReserveToCollateralToken.decimals)}{:else}0{/if}
-                      </button>
-                      <select class="asset-token-select-inline compact" bind:value={reserveToCollateralSymbol} data-testid="reserve-to-collateral-symbol">
-                        {#each transferableAssetOptions as token}
-                          <option value={token.symbol}>{token.symbol}</option>
-                        {/each}
-                      </select>
-                    </div>
-                  </div>
-                </label>
-                <div class="asset-action-row">
-                  <button
-                    class="btn-table-action deposit"
-                    data-testid={`reserve-to-collateral-${reserveToCollateralSymbol}`}
-                    on:click={submitReserveToCollateral}
-                    disabled={collateralFundingToken === reserveToCollateralSymbol || !workspaceAccountId || !reserveToCollateralAmount.trim()}
-                  >
-                    {collateralFundingToken === reserveToCollateralSymbol ? 'Moving...' : 'Move To Collateral'}
-                  </button>
-                </div>
-              {:else if assetWorkspaceTab === 'c2r'}
-                <h4 class="section-head">Collateral → Reserve</h4>
-                <p class="muted">Move settled collateral from one selected bilateral account back into reserve.</p>
-                <div class="asset-form-grid">
-                  <div class="asset-field asset-field-wide">
-                    <EntityInput
-                      label="Account"
-                      value={workspaceAccountId}
-                      entities={workspaceAccountIds}
-                      {contacts}
-                      excludeId={replica?.state?.entityId || tab.entityId}
-                      placeholder="Select account..."
-                      disabled={!activeIsLive || workspaceAccountIds.length === 0}
-                      on:change={handleWorkspaceAccountChange}
-                    />
-                  </div>
-                </div>
-                <label class="asset-field asset-field-wide">
-                  <span>Amount</span>
-                  <div class="asset-amount-shell combined">
-                    <input
-                      type="text"
-                      bind:value={collateralToReserveAmount}
-                      placeholder="0.00"
-                      data-testid="collateral-to-reserve-amount"
-                    />
-                    <div class="asset-inline-controls">
-                      <button
-                        type="button"
-                        class="asset-max-hint text-link"
-                        on:click={fillCollateralToReserveMax}
-                        disabled={!selectedCollateralToReserveToken || getWorkspaceWithdrawableCollateral(selectedCollateralToReserveToken.tokenId) <= 0n}
-                      >
-                        {#if selectedCollateralToReserveToken}{formatInlineFillAmount(getWorkspaceWithdrawableCollateral(selectedCollateralToReserveToken.tokenId), selectedCollateralToReserveToken.decimals)}{:else}0{/if}
-                      </button>
-                      <select class="asset-token-select-inline compact" bind:value={collateralToReserveSymbol} data-testid="collateral-to-reserve-symbol">
-                        {#each transferableAssetOptions as token}
-                          <option value={token.symbol}>{token.symbol}</option>
-                        {/each}
-                      </select>
-                    </div>
-                  </div>
-                </label>
-                <div class="asset-action-row">
-                  <button
-                    class="btn-table-action deposit"
-                    data-testid={`collateral-to-reserve-${collateralToReserveSymbol}`}
-                    on:click={submitCollateralToReserve}
-                    disabled={!workspaceAccountId || !collateralToReserveAmount.trim()}
-                  >
-                    Move To Reserve
-                  </button>
-                </div>
-              {:else if assetWorkspaceTab === 'r2e'}
-                <h4 class="section-head">Reserve → External</h4>
-                <p class="muted">Withdraw ERC20 from reserve back to your signer wallet.</p>
-                <label class="asset-field asset-field-wide">
-                  <span>Amount</span>
-                  <div class="asset-amount-shell combined">
-                    <input
-                      type="text"
-                      bind:value={reserveToExternalAmount}
-                      placeholder="0.00"
-                      data-testid={`reserve-withdraw-input-${reserveToExternalSymbol}`}
-                    />
-                    <div class="asset-inline-controls">
-                      <button
-                        type="button"
-                        class="asset-max-hint text-link"
-                        on:click={fillReserveToExternalMax}
-                        disabled={!selectedReserveToExternalToken || (onchainReserves.get(selectedReserveToExternalToken.tokenId) ?? 0n) <= 0n}
-                      >
-                        {#if selectedReserveToExternalToken}{formatInlineFillAmount(onchainReserves.get(selectedReserveToExternalToken.tokenId) ?? 0n, selectedReserveToExternalToken.decimals)}{:else}0{/if}
-                      </button>
-                      <select class="asset-token-select-inline compact" bind:value={reserveToExternalSymbol} data-testid="reserve-to-external-symbol">
-                        {#each transferableAssetOptions as token}
-                          <option value={token.symbol}>{token.symbol}</option>
-                        {/each}
-                      </select>
-                    </div>
-                  </div>
-                </label>
-                <div class="asset-action-row">
-                  <button
-                    class="btn-table-action deposit"
-                    data-testid={`reserve-withdraw-${reserveToExternalSymbol}`}
-                    on:click={submitReserveToExternal}
-                    disabled={withdrawingExternalToken === reserveToExternalSymbol || !reserveToExternalAmount.trim()}
-                  >
-                    {withdrawingExternalToken === reserveToExternalSymbol ? 'Moving...' : 'Move To External'}
-                  </button>
-                </div>
-              {:else if assetWorkspaceTab === 'send'}
-                <h4 class="section-head">External Send</h4>
-                <p class="muted">Transfer native ETH or ERC20 directly from your signer EOA.</p>
-                <label class="asset-field asset-field-wide">
-                  <span>Amount</span>
-                  <div class="asset-amount-shell combined">
-                    <input type="text" bind:value={sendAssetAmount} placeholder="0.00" data-testid="asset-send-amount" />
-                    <div class="asset-inline-controls">
-                      <button
-                        type="button"
-                        class="asset-max-hint text-link"
-                        on:click={fillSendAssetMax}
-                        disabled={!selectedSendAssetToken || selectedSendAssetToken.balance <= 0n}
-                      >
-                        {selectedSendAssetToken ? formatInlineFillAmount(selectedSendAssetToken.balance, selectedSendAssetToken.decimals) : '0'}
-                      </button>
-                      <select class="asset-token-select-inline compact" bind:value={sendAssetSymbol} data-testid="asset-send-symbol">
-                        {#each externalTokens as token}
-                          <option value={token.symbol}>{token.symbol}</option>
-                        {/each}
-                      </select>
-                    </div>
-                  </div>
-                </label>
-                <div class="asset-form-grid">
-                  <label class="asset-field asset-field-wide">
-                    <span>Recipient EOA</span>
-                    <input type="text" bind:value={sendAssetRecipient} placeholder="0x..." data-testid="asset-send-recipient" />
-                  </label>
-                </div>
-                <div class="asset-action-row">
-                  <button
-                    class="btn-table-action deposit"
-                    data-testid={`asset-send-${sendAssetSymbol}`}
-                    on:click={async () => {
-                      try {
-                        await sendExternalAsset();
-                      } catch (err) {
-                        toasts.error(`Send failed: ${toErrorMessage(err, 'Unknown error')}`);
-                      }
-                    }}
-                    disabled={sendingExternalToken === sendAssetSymbol || !sendAssetAmount.trim() || !sendAssetRecipient.trim()}
-                  >
-                    {sendingExternalToken === sendAssetSymbol ? 'Sending...' : 'Send Asset'}
-                  </button>
-                </div>
-              {:else}
-                <h4 class="section-head">External Allow</h4>
-                <p class="muted">Approve an ERC20 allowance for another contract or protocol.</p>
-                <div class="asset-form-grid">
-                  <label class="asset-field asset-field-wide">
-                    <span>Amount</span>
-                    <div class="asset-amount-shell combined">
-                      <input type="text" bind:value={allowAssetAmount} placeholder="0.00" data-testid="asset-allow-amount" />
-                      <div class="asset-inline-controls">
-                        <button
-                          type="button"
-                          class="asset-max-hint text-link"
-                          on:click={fillAllowAssetMax}
-                          disabled={!selectedAllowAssetToken || selectedAllowAssetToken.balance <= 0n}
-                        >
-                          {selectedAllowAssetToken ? formatInlineFillAmount(selectedAllowAssetToken.balance, selectedAllowAssetToken.decimals) : '0'}
-                        </button>
-                        <select bind:value={allowAssetSymbol} class="asset-token-select-inline compact" data-testid="asset-allow-symbol">
-                          {#each transferableAssetOptions as token}
-                            <option value={token.symbol}>{token.symbol}</option>
-                          {/each}
-                        </select>
-                      </div>
-                    </div>
-                  </label>
-                </div>
-                <div class="asset-form-grid">
-                  <label class="asset-field asset-field-wide">
-                    <span>Spender</span>
-                    <input type="text" bind:value={allowAssetSpender} placeholder="0x..." data-testid="asset-allow-spender" />
-                  </label>
-                </div>
-                <div class="asset-action-row">
-                  <button
-                    class="btn-table-action deposit"
-                    data-testid={`asset-allow-${allowAssetSymbol}`}
-                    on:click={async () => {
-                      try {
-                        await approveExternalAsset();
-                      } catch (err) {
-                        toasts.error(`Approve failed: ${toErrorMessage(err, 'Unknown error')}`);
-                      }
-                    }}
-                    disabled={approvingExternalToken === allowAssetSymbol || !allowAssetAmount.trim() || !allowAssetSpender.trim()}
-                  >
-                    {approvingExternalToken === allowAssetSymbol ? 'Approving...' : 'Approve Allowance'}
-                  </button>
-                </div>
-              {/if}
-            </section>
+            {#if assetWorkspaceTab === 'move'}
+              <MoveWorkspace
+                mode="assets"
+                {contacts}
+                bind:moveAmount
+                bind:moveAssetSymbol
+                bind:moveFromEndpoint
+                bind:moveToEndpoint
+                bind:moveExternalRecipient
+                bind:moveReserveRecipientEntityId
+                bind:moveSourceAccountId
+                bind:moveTargetEntityId
+                bind:moveTargetHubEntityId
+                {moveExecuting}
+                {moveProgressLabel}
+                {moveDraftError}
+                {moveBroadcastError}
+                {moveSelectedSource}
+                {moveSelectedTarget}
+                {moveDragSource}
+                {moveDragHoverTarget}
+                {moveLineReady}
+                {moveCommittedLineReady}
+                {moveNodeLayoutVersion}
+                {moveNeedsReserveRecipient}
+                {moveNeedsExternalRecipient}
+                {isMoveRouteSupported}
+                {getMoveDisplayBalance}
+                {getMoveDisplayDecimals}
+                {fillMoveMax}
+                {setMoveSource}
+                {setMoveTarget}
+                {beginMoveDrag}
+                {getMoveNodeAnchor}
+                {buildMoveArrowPath}
+                {moveRouteExecutionLabel}
+                {moveRouteMeta}
+                {moveRouteSteps}
+                {canAddMoveToExistingBatch}
+                {addMoveToExistingBatch}
+                {submitMovePrimaryAction}
+                {handleMoveSourceAccountChange}
+                {handleMoveReserveRecipientChange}
+                {handleMoveTargetEntityChange}
+                {handleMoveTargetHubChange}
+                {moveNodeAction}
+                {moveEntityOptions}
+                {moveHubEntityOptions}
+                {workspaceAccountIds}
+                reserveRecipientPreferredId={resolveSelfEntityId()}
+                targetEntityPreferredId={resolveSelfEntityId()}
+                entityId={replica?.state?.entityId || tab.entityId}
+                moveAssetOptions={moveAssetOptions}
+                moveEndpointLabels={MOVE_ENDPOINT_LABEL}
+                moveEndpoints={MOVE_ENDPOINTS}
+                {formatAmount}
+                {formatInlineFillAmount}
+                movePrimaryActionLabel={getMovePrimaryActionLabel()}
+                onMoveVisualRoot={(node) => moveVisualRoot = node}
+                toastMoveError={handleMoveWorkspaceError}
+              />
+            {:else}
+              <SettlementPanel
+                entityId={replica.state?.entityId || tab.entityId}
+                {replica}
+                {contacts}
+                historyOnly={true}
+              />
+            {/if}
+          </section>
         {:else if activeTab === 'accounts'}
           {#if accountIds.length > 5}
             <div class="accounts-selector-row">
@@ -4606,18 +4487,51 @@
             on:dispute={handleDisputeFromList}
           />
 
+          {#if pendingBatchCount > 0}
+            <div class="workspace-pending-banner" data-testid="workspace-pending-banner">
+              <div class="workspace-pending-copy">
+                <div class="workspace-pending-head">
+                  <span class="workspace-pending-kicker">{pendingBatchMode === 'sent' ? 'Sent Batch' : 'Draft Batch'}</span>
+                  <span class="workspace-pending-note">What will go on-chain next</span>
+                </div>
+                <div class="workspace-pending-list">
+                  {#each pendingBatchPreview as item (item.key)}
+                    <div class="workspace-pending-chip">
+                      <strong>{item.title}</strong>
+                      <span>{item.subtitle}</span>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+              <div class="workspace-pending-actions">
+                <button class="btn-table-action" type="button" on:click={openAccountHistoryWorkspace}>History</button>
+                <button class="btn-table-action" type="button" data-testid="settle-clear-batch" on:click={clearPendingBatch} disabled={pendingBatchSubmitting}>Clear Batch</button>
+                {#if hasSentBatch}
+                  <button class="btn-table-action deposit" type="button" data-testid="settle-rebroadcast" on:click={rebroadcastPendingBatch} disabled={pendingBatchSubmitting}>
+                    {pendingBatchSubmitting ? 'Working...' : 'Rebroadcast'}
+                  </button>
+                {:else}
+                  <button class="btn-table-action deposit" type="button" data-testid="settle-sign-broadcast" on:click={broadcastPendingBatch} disabled={!canBroadcastPendingBatch || pendingBatchSubmitting}>
+                    {pendingBatchSubmitting ? 'Working...' : 'Sign & Broadcast'}
+                  </button>
+                {/if}
+              </div>
+            </div>
+          {/if}
+
           <nav class="account-workspace-tabs" aria-label="Account workspace">
             {#each visibleAccountWorkspaceTabs as t}
               <button
                 class="account-workspace-tab"
                 class:active={accountWorkspaceTab === t.id}
-                on:click={() => accountWorkspaceTab = t.id}
+                on:click={() => {
+                  if (t.id === 'move') openAccountMoveWorkspace();
+                  else if (t.id === 'history') openAccountHistoryWorkspace();
+                  else accountWorkspaceTab = t.id;
+                }}
               >
                 <svelte:component this={t.icon} size={14} />
                 <span>{t.label}</span>
-                {#if t.showPendingBatch && pendingBatchCount > 0}
-                  <span class="workspace-badge pending">{pendingBatchCount}</span>
-                {/if}
               </button>
             {/each}
           </nav>
@@ -4633,6 +4547,76 @@
               <SwapPanel
                 {replica}
                 {tab}
+              />
+
+            {:else if accountWorkspaceTab === 'move'}
+              <MoveWorkspace
+                mode="accounts"
+                {contacts}
+                bind:moveAmount
+                bind:moveAssetSymbol
+                bind:moveFromEndpoint
+                bind:moveToEndpoint
+                bind:moveExternalRecipient
+                bind:moveReserveRecipientEntityId
+                bind:moveSourceAccountId
+                bind:moveTargetEntityId
+                bind:moveTargetHubEntityId
+                {moveExecuting}
+                {moveProgressLabel}
+                {moveDraftError}
+                {moveBroadcastError}
+                {moveSelectedSource}
+                {moveSelectedTarget}
+                {moveDragSource}
+                {moveDragHoverTarget}
+                {moveLineReady}
+                {moveCommittedLineReady}
+                {moveNodeLayoutVersion}
+                {moveNeedsReserveRecipient}
+                {moveNeedsExternalRecipient}
+                {isMoveRouteSupported}
+                {getMoveDisplayBalance}
+                {getMoveDisplayDecimals}
+                {fillMoveMax}
+                {setMoveSource}
+                {setMoveTarget}
+                {beginMoveDrag}
+                {getMoveNodeAnchor}
+                {buildMoveArrowPath}
+                {moveRouteExecutionLabel}
+                {moveRouteMeta}
+                {moveRouteSteps}
+                {canAddMoveToExistingBatch}
+                {addMoveToExistingBatch}
+                {submitMovePrimaryAction}
+                {handleMoveSourceAccountChange}
+                {handleMoveReserveRecipientChange}
+                {handleMoveTargetEntityChange}
+                {handleMoveTargetHubChange}
+                {moveNodeAction}
+                {moveEntityOptions}
+                {moveHubEntityOptions}
+                {workspaceAccountIds}
+                reserveRecipientPreferredId={resolveSelfEntityId()}
+                targetEntityPreferredId={resolveSelfEntityId()}
+                entityId={replica?.state?.entityId || tab.entityId}
+                moveAssetOptions={moveAssetOptions}
+                moveEndpointLabels={MOVE_ENDPOINT_LABEL}
+                moveEndpoints={MOVE_ENDPOINTS}
+                {formatAmount}
+                {formatInlineFillAmount}
+                movePrimaryActionLabel={getMovePrimaryActionLabel()}
+                onMoveVisualRoot={(node) => moveVisualRoot = node}
+                toastMoveError={handleMoveWorkspaceError}
+              />
+
+            {:else if accountWorkspaceTab === 'history'}
+              <SettlementPanel
+                entityId={replica.state?.entityId || tab.entityId}
+                {replica}
+                {contacts}
+                historyOnly={true}
               />
 
             {:else if accountWorkspaceTab === 'configure'}
@@ -4678,6 +4662,13 @@
                   >
                     Add Token
                   </button>
+                  <button
+                    class="configure-tab danger"
+                    class:active={configureWorkspaceTab === 'dispute'}
+                    on:click={() => configureWorkspaceTab = 'dispute'}
+                  >
+                    Dispute
+                  </button>
                 </nav>
 
                 {#if !workspaceAccountId}
@@ -4708,6 +4699,39 @@
                     counterpartyId={workspaceAccountId}
                     accountIds={workspaceAccountIds}
                   />
+                {:else if configureWorkspaceTab === 'dispute'}
+                  {@const configureAccount = replica?.state?.accounts?.get?.(workspaceAccountId)}
+                  <div class="configure-token-card danger-card">
+                    <h4 class="section-head">Dispute Account</h4>
+                    <p class="muted">
+                      This queues a dispute operation into the pending batch. Once broadcast and finalized, this account becomes unusable until reopened.
+                    </p>
+                    {#if configureAccount?.activeDispute}
+                      <p class="danger-note">
+                        Active dispute in progress. Finalize only after the timeout passes on-chain.
+                      </p>
+                      <button
+                        class="btn-danger-batch"
+                        data-testid="configure-dispute-finalize"
+                        on:click={() => queueDisputeFinalize(workspaceAccountId, 'dispute-finalize-from-configure')}
+                        disabled={!activeIsLive}
+                      >
+                        Add Dispute Finalize To Batch
+                      </button>
+                    {:else}
+                      <p class="danger-note">
+                        Starting a dispute freezes normal use of this account and should only be used for recovery or adversarial settlement.
+                      </p>
+                      <button
+                        class="btn-danger-batch"
+                        data-testid="configure-dispute-start"
+                        on:click={() => queueDisputeStart(workspaceAccountId, 'dispute-start-from-configure')}
+                        disabled={!activeIsLive}
+                      >
+                        Add Dispute Start To Batch
+                      </button>
+                    {/if}
+                  </div>
                 {:else}
                   <div class="configure-token-card">
                     <h4 class="section-head">Add Token To Account</h4>
@@ -4932,27 +4956,6 @@
                 </div>
               {/if}
 
-            {:else if accountWorkspaceTab === 'settle'}
-              {#if !activeIsLive}
-                <div class="live-required">
-                  <AlertTriangle size={20} />
-                  <p>On-chain actions require LIVE mode</p>
-                  <button class="btn-live" on:click={goToLive}>Go to LIVE</button>
-                </div>
-              {:else}
-                {#if !replica?.state?.accounts || replica.state.accounts.size === 0}
-                  <div class="live-required" style="margin-bottom: 12px;">
-                    <AlertTriangle size={20} />
-                    <p>No accounts yet. Open one in Accounts.</p>
-                    <button class="btn-live" on:click={() => accountWorkspaceTab = 'open'}>Open Accounts</button>
-                  </div>
-                {/if}
-                <SettlementPanel
-                  entityId={replica.state?.entityId || tab.entityId}
-                  {replica}
-                  {contacts}
-                />
-              {/if}
             {/if}
           </section>
 
@@ -5272,6 +5275,121 @@
 
   .history-warning:hover {
     background: #4a2408;
+  }
+
+  .faucet-inline-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    border: 1px solid rgba(120, 113, 108, 0.22);
+    border-radius: 14px;
+    background: rgba(23, 20, 18, 0.58);
+  }
+
+  .faucet-inline-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .faucet-inline-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #fbbf24;
+    white-space: nowrap;
+  }
+
+  .faucet-inline-token {
+    min-width: 112px;
+    max-width: 144px;
+    min-height: 34px;
+    padding: 6px 28px 6px 10px;
+    border-radius: 10px;
+    background: rgba(17, 13, 11, 0.92);
+    border: 1px solid rgba(120, 113, 108, 0.32);
+    color: #f5f5f4;
+  }
+
+  .workspace-pending-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(236, 179, 55, 0.35);
+    background: rgba(236, 179, 55, 0.08);
+    color: rgba(255, 242, 213, 0.96);
+  }
+
+  .workspace-pending-copy {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .workspace-pending-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: baseline;
+  }
+
+  .workspace-pending-kicker {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #ffd56a;
+  }
+
+  .workspace-pending-note {
+    font-size: 12px;
+    color: rgba(255, 242, 213, 0.82);
+  }
+
+  .workspace-pending-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .workspace-pending-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .workspace-pending-chip {
+    display: grid;
+    gap: 3px;
+    min-width: 160px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(8, 10, 14, 0.36);
+    border: 1px solid rgba(236, 179, 55, 0.18);
+  }
+
+  .workspace-pending-chip strong {
+    font-size: 12px;
+    color: #fff5d9;
+  }
+
+  .workspace-pending-chip span {
+    font-size: 11px;
+    line-height: 1.35;
+    color: rgba(255, 242, 213, 0.74);
   }
 
   /* Main content - NO own scrollbar, parent .panel-content scrolls */
@@ -6196,6 +6314,18 @@
     background: rgba(251, 191, 36, 0.08);
   }
 
+  .configure-tab.danger {
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.4);
+  }
+
+  .configure-tab.danger:hover,
+  .configure-tab.danger.active {
+    color: #fecaca;
+    border-color: rgba(239, 68, 68, 0.8);
+    background: rgba(127, 29, 29, 0.25);
+  }
+
   .configure-empty {
     margin: 0;
   }
@@ -6205,6 +6335,18 @@
     border-radius: 10px;
     padding: 14px;
     background: #16171c;
+  }
+
+  .danger-card {
+    border-color: rgba(239, 68, 68, 0.35);
+    background: linear-gradient(180deg, rgba(60, 15, 18, 0.92), rgba(24, 10, 12, 0.96));
+  }
+
+  .danger-note {
+    margin: 10px 0 14px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: #fecaca;
   }
 
   .account-appearance-panel {
@@ -6436,6 +6578,28 @@
   }
 
   .btn-add-token:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-danger-batch {
+    padding: 10px 14px;
+    border-radius: 9px;
+    border: 1px solid rgba(248, 113, 113, 0.6);
+    background: linear-gradient(180deg, rgba(185, 28, 28, 0.34), rgba(127, 29, 29, 0.22));
+    color: #fee2e2;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .btn-danger-batch:hover:not(:disabled) {
+    border-color: rgba(252, 165, 165, 0.95);
+    color: #fff1f2;
+  }
+
+  .btn-danger-batch:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }

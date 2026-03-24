@@ -454,6 +454,14 @@ function copyMnemonic12() {
         <h3>Jurisdictions</h3>
         <p class="section-desc">Manage imported jurisdictions for the active runtime. Basic fields stay visible; full config is available through advanced JSON.</p>
 
+        <details class="testnets">
+          <summary>Local Dev: second anvil</summary>
+          <div class="setting-hint">
+            Run <code>bun run dev:anvil2</code> to start a second local jurisdiction with a full XLN stack.
+            The script prints an import-ready JSON config you can paste into a custom jurisdiction entry below.
+          </div>
+        </details>
+
         <div class="network-list">
           {#each $jmachineConfigs as machine}
             <div class="network-row">

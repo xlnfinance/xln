@@ -77,6 +77,13 @@ async function waitForMoveReady(page: Page): Promise<void> {
     .toBe('enabled');
 }
 
+async function broadcastDraftBatch(page: Page): Promise<void> {
+  const broadcast = page.getByTestId('settle-sign-broadcast').first();
+  await expect(broadcast).toBeVisible({ timeout: 20_000 });
+  await expect(broadcast).toBeEnabled({ timeout: 20_000 });
+  await broadcast.click();
+}
+
 async function chooseMoveRoute(
   page: Page,
   from: 'external' | 'reserve' | 'account',
@@ -223,7 +230,10 @@ async function getVisibleEoaAddress(page: Page): Promise<string> {
   await openAssetsTab(page);
   return await page.evaluate(() => {
     const labels = Array.from(document.querySelectorAll('.wallet-label'));
-    const eoaLabel = labels.find((node) => String(node.textContent || '').trim() === 'EOA');
+    const eoaLabel = labels.find((node) => {
+      const text = String(node.textContent || '').trim();
+      return text === 'EOA' || text === 'External';
+    });
     const card = eoaLabel?.parentElement;
     const paragraphs = card ? Array.from(card.querySelectorAll('p')) : [];
     const value = paragraphs
@@ -323,6 +333,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await chooseMoveRoute(page, 'reserve', 'account');
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await broadcastDraftBatch(page);
         await expect.poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeAccount);
       });
       const afterAccount = await refreshAccountSpendableBalance(page, symbol);
@@ -339,6 +350,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await chooseMoveRoute(page, 'account', 'reserve');
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await broadcastDraftBatch(page);
         await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeReserve);
         await expect.poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeAccount);
       });
@@ -358,6 +370,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await broadcastDraftBatch(page);
         await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeReserve);
         await expect.poll(async () => getRpcExternalBalanceRaw(page, symbol, aliceEoa), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeExternalRaw);
       });
@@ -377,6 +390,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await selectMoveEntityField(page, 'move-reserve-recipient-field', bob!.entityId);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await broadcastDraftBatch(page);
         await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeAliceReserve);
         await expect.poll(async () => refreshReserveBalance(bobPage, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeBobReserve);
       });
@@ -413,6 +427,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await broadcastDraftBatch(page);
         await expect.poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeAccount);
         await expect.poll(async () => getRpcExternalBalanceRaw(page, symbol, aliceEoa), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeExternalRaw);
       });
@@ -433,6 +448,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await selectMoveEntityField(page, 'move-target-counterparty-field', hubs.h2);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await broadcastDraftBatch(page);
         await expect.poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeAliceAccount);
         await expect.poll(async () => refreshAccountSpendableBalance(bobPage, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeBobAccount);
       });
@@ -454,6 +470,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await broadcastDraftBatch(page);
         await expect.poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeAliceAccount);
         await expect.poll(async () => getRpcExternalBalanceRaw(page, symbol, aliceEoa), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeAliceExternalRaw);
       });

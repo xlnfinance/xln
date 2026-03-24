@@ -617,22 +617,26 @@ async function queueFundR2CViaUi(
   await expect(assetsTab).toBeVisible({ timeout: 20_000 });
   await assetsTab.click();
 
-  const fundTab = page.getByTestId('asset-tab-r2c').first();
-  await expect(fundTab).toBeVisible({ timeout: 20_000 });
-  await fundTab.click();
+  const moveTab = page.getByTestId('asset-tab-move').first();
+  await expect(moveTab).toBeVisible({ timeout: 20_000 });
+  await moveTab.click();
 
-  const accountPicker = page.locator('.asset-action-card .entity-input .closed-trigger, .asset-action-card .entity-input input').first();
-  await expect(accountPicker).toBeVisible({ timeout: 20_000 });
-  await accountPicker.click();
-  const accountOption = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();
-  await expect(accountOption).toBeVisible({ timeout: 20_000 });
-  await accountOption.click();
+  await page.getByTestId('move-source-reserve').first().click();
+  await page.getByTestId('move-target-account').first().click();
 
-  const amountInput = page.getByTestId('reserve-to-collateral-amount').first();
+  const counterpartyField = page.getByTestId('move-target-counterparty-field').first();
+  await expect(counterpartyField).toBeVisible({ timeout: 20_000 });
+  const counterpartyPicker = counterpartyField.locator('.closed-trigger, input').first();
+  await counterpartyPicker.click();
+  const counterpartyOption = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();
+  await expect(counterpartyOption).toBeVisible({ timeout: 20_000 });
+  await counterpartyOption.click();
+
+  const amountInput = page.getByTestId('move-amount').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await amountInput.fill(amount);
 
-  const fundButton = page.getByTestId('reserve-to-collateral-USDC').first();
+  const fundButton = page.getByTestId('move-confirm').first();
   await expect(fundButton).toBeEnabled({ timeout: 20_000 });
   await fundButton.click();
 }
@@ -647,22 +651,26 @@ async function queueWithdrawC2RViaUi(
   await expect(assetsTab).toBeVisible({ timeout: 20_000 });
   await assetsTab.click();
 
-  const withdrawTab = page.getByTestId('asset-tab-c2r').first();
-  await expect(withdrawTab).toBeVisible({ timeout: 20_000 });
-  await withdrawTab.click();
+  const moveTab = page.getByTestId('asset-tab-move').first();
+  await expect(moveTab).toBeVisible({ timeout: 20_000 });
+  await moveTab.click();
 
-  const accountPicker = page.locator('.asset-action-card .entity-input .closed-trigger, .asset-action-card .entity-input input').first();
-  await expect(accountPicker).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('move-source-account').first().click();
+  await page.getByTestId('move-target-reserve').first().click();
+
+  const accountField = page.getByTestId('move-source-account-field').first();
+  await expect(accountField).toBeVisible({ timeout: 20_000 });
+  const accountPicker = accountField.locator('.closed-trigger, input').first();
   await accountPicker.click();
   const accountOption = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();
   await expect(accountOption).toBeVisible({ timeout: 20_000 });
   await accountOption.click();
 
-  const amountInput = page.getByTestId('collateral-to-reserve-amount').first();
+  const amountInput = page.getByTestId('move-amount').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await amountInput.fill(amount);
 
-  const withdrawButton = page.getByTestId('collateral-to-reserve-USDC').first();
+  const withdrawButton = page.getByTestId('move-confirm').first();
   await expect(withdrawButton).toBeEnabled({ timeout: 20_000 });
   await withdrawButton.click();
 }
@@ -854,13 +862,11 @@ async function openEntitySettleWorkspace(page: Page, counterpartyId?: string, en
   const accountsTab = page.getByTestId('tab-accounts').first();
   await expect(accountsTab).toBeVisible({ timeout: 15_000 });
   await accountsTab.click();
-
-  const settleWorkspaceButton = page.locator('.account-workspace-tab').filter({ hasText: /Settle/i }).first();
-  const settleVisible = await settleWorkspaceButton.isVisible({ timeout: 3_000 }).catch(() => false);
-  if (!settleVisible) {
-    return;
+  const historyWorkspaceButton = page.locator('.account-workspace-tab').filter({ hasText: /^History$/i }).first();
+  const historyVisible = await historyWorkspaceButton.isVisible({ timeout: 3_000 }).catch(() => false);
+  if (historyVisible) {
+    await historyWorkspaceButton.click();
   }
-  await settleWorkspaceButton.click();
 }
 
 async function assertBatchHistoryVisible(page: Page): Promise<void> {
@@ -878,20 +884,22 @@ async function startDisputeFromEntitySettle(
   signerId: string,
   counterpartyId: string,
 ): Promise<void> {
-  await openEntitySettleWorkspace(page, counterpartyId, entityId);
+  await ensureAccountWorkspaceVisible(page, counterpartyId, entityId);
+  await returnToEntityShell(page);
 
-  const disputeTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Dispute$/ }).first();
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  await expect(accountsTab).toBeVisible({ timeout: 15_000 });
+  await accountsTab.click();
+
+  const configureWorkspaceButton = page.locator('.account-workspace-tab').filter({ hasText: /^Configure$/i }).first();
+  await expect(configureWorkspaceButton).toBeVisible({ timeout: 15_000 });
+  await configureWorkspaceButton.click();
+
+  const disputeTab = page.locator('.configure-tab').filter({ hasText: /^Dispute$/ }).first();
   await expect(disputeTab).toBeVisible({ timeout: 15_000 });
   await disputeTab.click();
 
-  const disputePicker = page.locator('.dispute-inline .entity-input .closed-trigger, .dispute-inline .entity-input input').first();
-  await expect(disputePicker).toBeVisible({ timeout: 15_000 });
-  await disputePicker.click();
-  const disputeOption = page.locator('.dropdown-item').filter({ hasText: counterpartyId }).first();
-  await expect(disputeOption).toBeVisible({ timeout: 15_000 });
-  await disputeOption.click();
-
-  const disputeButton = page.getByTestId('settle-dispute-start').first();
+  const disputeButton = page.getByTestId('configure-dispute-start').first();
   await expect(disputeButton).toBeVisible({ timeout: 15_000 });
   await expect(disputeButton).toBeEnabled({ timeout: 15_000 });
 

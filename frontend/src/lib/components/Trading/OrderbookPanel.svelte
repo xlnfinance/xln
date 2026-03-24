@@ -94,6 +94,7 @@
   let streamFreshUntil = 0;
   const STREAM_STALE_MS = 3000;
   const STREAM_RETRY_MS = 2000;
+  const UI_BOOK_DEPTH = 10;
   const streamSnapshots = new Map<string, MarketSnapshotPayload>();
   const PRICE_STEP_OPTIONS = ['0.0001', '0.001', '0.01', '0.1', '1', '10', '50', '100'] as const;
   const PRICE_STEP_STORAGE_KEY = 'xln.orderbook.price-step-overrides.v1';
@@ -158,6 +159,10 @@
     if (sources.length === 1) return `Hub: ${formatEntityId(sources[0] || '')}`;
     if (sources.length > 1) return `Sources: ${sources.length}`;
     return 'Sources: 0';
+  }
+
+  function visibleDepth(): number {
+    return Math.max(1, Math.min(depth, UI_BOOK_DEPTH));
   }
 
   function relayWsUrl(): string | null {
@@ -228,7 +233,8 @@
 
     let idx = side === 'bid' ? Number(book.bestBidIdx ?? -1) : Number(book.bestAskIdx ?? -1);
     let visitedLevels = 0;
-    const maxLevelsPerBook = Math.max(depth * 6, depth);
+    const effectiveDepth = visibleDepth();
+    const maxLevelsPerBook = Math.max(effectiveDepth * 6, effectiveDepth);
 
     while (idx !== -1 && visitedLevels < maxLevelsPerBook) {
       visitedLevels += 1;
@@ -286,7 +292,7 @@
         if (side === 'bid') return a[0] > b[0] ? -1 : 1;
         return a[0] < b[0] ? -1 : 1;
       })
-      .slice(0, depth);
+      .slice(0, visibleDepth());
 
     let cumulative = 0;
     return sorted.map(([price, size]) => {
@@ -310,7 +316,7 @@
         }
         return a.sourceId.localeCompare(b.sourceId);
       })
-      .slice(0, depth);
+      .slice(0, visibleDepth());
 
     let cumulative = 0;
     return sorted.map((level) => {
@@ -677,9 +683,9 @@
       replace,
       hubEntityIds: sources,
       pairs: [pair],
-      depth,
+      depth: visibleDepth(),
     }));
-    marketSubKey = `${pair}|${depth}|${sources.join(',')}`;
+    marketSubKey = `${pair}|${visibleDepth()}|${sources.join(',')}`;
   }
 
   function requestMarketSnapshot(): void {
@@ -781,7 +787,7 @@
   $: {
     const sources = uniqueSourceHubIds();
     const pair = canonicalPairId();
-    const nextKey = `${pair}|${depth}|${sources.join(',')}`;
+    const nextKey = `${pair}|${visibleDepth()}|${sources.join(',')}`;
     if (typeof window !== 'undefined' && marketWs && marketWs.readyState === 1 && nextKey !== marketSubKey) {
       streamFreshUntil = 0;
       streamSnapshots.clear();

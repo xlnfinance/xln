@@ -371,24 +371,36 @@ const SKIP_SERVER_BOOTSTRAP = /^(1|true)$/i.test(process.env.XLN_SKIP_SERVER_BOO
 const MARKET_MAKER_SIGNER_LABEL = process.env.MARKET_MAKER_SIGNER_LABEL ?? 'mm-1';
 const MARKET_MAKER_SEED = process.env.MARKET_MAKER_SEED ?? `${HUB_SEED}:market-maker`;
 const MARKET_MAKER_NAME = process.env.MARKET_MAKER_NAME ?? 'MM1';
-const MARKET_MAKER_CREDIT_AMOUNT = 10_000_000n * 10n ** 18n;
+const MARKET_MAKER_CREDIT_AMOUNT = 50_000_000n * 10n ** 18n;
 const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env.MARKET_MAKER_QUOTE_LOOP_MS || '30000'));
 const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
-  4,
-  Number(process.env.MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK || '10'),
+  10,
+  Number(process.env.MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK || '30'),
 );
-const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 6, 12, 20, 32] as const;
+const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
   120n * 10n ** 18n,
+  140n * 10n ** 18n,
+  160n * 10n ** 18n,
   180n * 10n ** 18n,
+  210n * 10n ** 18n,
   240n * 10n ** 18n,
+  270n * 10n ** 18n,
   300n * 10n ** 18n,
   360n * 10n ** 18n,
+  420n * 10n ** 18n,
+  500n * 10n ** 18n,
+  600n * 10n ** 18n,
+  720n * 10n ** 18n,
+  840n * 10n ** 18n,
+  960n * 10n ** 18n,
 ] as const;
-const MARKET_MAKER_STABLE_LEVEL_OFFSETS_BPS = [1, 2, 4, 6, 9, 12, 16, 20, 28, 36] as const;
+const MARKET_MAKER_STABLE_LEVEL_OFFSETS_BPS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 28, 36, 48] as const;
 const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
   120n * 10n ** 18n,
+  140n * 10n ** 18n,
   180n * 10n ** 18n,
+  210n * 10n ** 18n,
   240n * 10n ** 18n,
   300n * 10n ** 18n,
   360n * 10n ** 18n,
@@ -397,6 +409,9 @@ const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
   560n * 10n ** 18n,
   640n * 10n ** 18n,
   720n * 10n ** 18n,
+  800n * 10n ** 18n,
+  900n * 10n ** 18n,
+  1_000n * 10n ** 18n,
 ] as const;
 type MarketMakerLevelProfile = {
   offsetsBps: readonly number[];
@@ -1533,7 +1548,7 @@ const bootstrapMarketMakerLiquidity = async (
   }, MARKET_MAKER_QUOTE_LOOP_MS);
 
   console.log(
-    `[XLN] MM bootstrap ready: ${targetHubs.length} hubs, target=${expectedOffersPerHub} resting offers/hub (5 levels x both sides x 3 pairs)`,
+    `[XLN] MM bootstrap ready: ${targetHubs.length} hubs, target=${expectedOffersPerHub} resting offers/hub`,
   );
   console.log(
     `[XLN][MM-TIMING] total=${Date.now() - marketMakerBootstrapStartedAt}ms ticks=${bootstrapTicks} ` +
@@ -5318,11 +5333,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         const msgStr = message.toString();
         try {
           const msg = JSON.parse(msgStr);
-          if (data.type === 'relay') {
-            if (isMarketMessageType(msg?.type)) {
-              handleMarketMessage(ws, msg, env);
-              return;
-            }
+          const routeRelayMessage = () => {
             if (!routerConfig) {
               ws.send(safeStringify({ type: 'error', error: 'Runtime transport not ready' }));
               return;
@@ -5346,6 +5357,23 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
                 // Socket may already be closed; ignore.
               }
             });
+          };
+          if (data.type === 'relay') {
+            if (isMarketMessageType(msg?.type)) {
+              handleMarketMessage(ws, msg, env);
+              return;
+            }
+            if (!routerConfig) {
+              if (isServerBootInProgress()) {
+                void serverStartupBarrier.then(() => {
+                  routeRelayMessage();
+                });
+                return;
+              }
+              ws.send(safeStringify({ type: 'error', error: 'Runtime transport not ready' }));
+              return;
+            }
+            routeRelayMessage();
           } else if (data.type === 'rpc') {
             Promise.resolve(handleRpcMessage(ws, msg, env)).catch(error => {
               const reason = (error as Error).message || 'rpc handler error';
@@ -5642,19 +5670,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       }
     }
 
-    serverBootPhase = 'bootstrap';
-    const hubEntityIds = SKIP_SERVER_BOOTSTRAP
-      ? (() => {
-          console.log('[XLN] Skipping server bootstrap (XLN_SKIP_SERVER_BOOTSTRAP=1)');
-          relayStore.activeHubEntityIds = [];
-          stopMarketMakerLoop();
-          return [] as string[];
-        })()
-      : await bootstrapServerHubsAndReserves(env, options, advertisedRelayUrl, anvilRpc, {
-          includeMarketMaker: INCLUDE_MARKET_MAKER_BY_DEFAULT,
-        });
-
-    // Wire relay-router + local delivery
+    // Wire relay-router + local delivery as soon as env exists.
+    // Relay WS can receive early hello/gossip traffic during bootstrap.
     const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
     routerConfig = {
       store: relayStore,
@@ -5669,6 +5686,18 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         }
       },
     };
+
+    serverBootPhase = 'bootstrap';
+    const hubEntityIds = SKIP_SERVER_BOOTSTRAP
+      ? (() => {
+          console.log('[XLN] Skipping server bootstrap (XLN_SKIP_SERVER_BOOTSTRAP=1)');
+          relayStore.activeHubEntityIds = [];
+          stopMarketMakerLoop();
+          return [] as string[];
+        })()
+      : await bootstrapServerHubsAndReserves(env, options, advertisedRelayUrl, anvilRpc, {
+          includeMarketMaker: INCLUDE_MARKET_MAKER_BY_DEFAULT,
+        });
 
     // Start P2P overlay after WS /relay is actually listening.
     // Plain daemons stay connected even before they own a routing entity;
