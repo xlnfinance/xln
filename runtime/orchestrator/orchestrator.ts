@@ -390,7 +390,7 @@ const finishTiming = (stage: keyof typeof timings, startedAt: number): void => {
   const completedAt = Date.now();
   timings[stage].completedAt = completedAt;
   timings[stage].ms = completedAt - startedAt;
-  console.log(`[E2E-TIMING] ${stage} ${timings[stage].ms}ms`);
+  console.log(`[MESH-TIMING] ${stage} ${timings[stage].ms}ms`);
 };
 
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -448,6 +448,21 @@ const fetchText = async (url: string, timeoutMs = 2_000): Promise<string | null>
     return await response.text();
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const postJson = async (url: string, timeoutMs = 1_000): Promise<void> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fetch(url, {
+      method: 'POST',
+      signal: controller.signal,
+    });
+  } catch {
+    // best effort before hard stop
   } finally {
     clearTimeout(timer);
   }
@@ -769,7 +784,7 @@ const spawnHub = (child: HubChild): void => {
     child.exitedAt = Date.now();
     child.exitCode = code;
     if (!resetState.inProgress && code !== 0) {
-      console.error(`[E2E-MESH] ${child.name} exited unexpectedly with code=${String(code)}`);
+      console.error(`[MESH] ${child.name} exited unexpectedly with code=${String(code)}`);
     }
   });
 };
@@ -821,19 +836,28 @@ const spawnMarketMaker = (): void => {
 };
 
 const stopAllChildren = async (): Promise<void> => {
-  await Promise.all(hubChildren.map(async child => {
+  await Promise.all([
+    ...hubChildren.map((child) => postJson(`http://${args.host}:${child.apiPort}/api/control/p2p/stop`)),
+    postJson(`http://${args.host}:${marketMakerChild.apiPort}/api/control/p2p/stop`),
+  ]);
+  await delay(150);
+
+  const hubProcs = hubChildren.map((child) => {
     const proc = child.proc;
     child.proc = null;
-    await stopProcess(proc);
-  }));
+    return proc;
+  });
   const mmProc = marketMakerChild.proc;
   marketMakerChild.proc = null;
-  await stopProcess(mmProc);
-  if (custodySupport) {
-    await stopManagedChild(custodySupport.custodyChild);
-    await stopManagedChild(custodySupport.daemonChild);
-    custodySupport = null;
-  }
+  const currentCustody = custodySupport;
+  custodySupport = null;
+
+  await Promise.all([
+    ...hubProcs.map((proc) => stopProcess(proc)),
+    stopProcess(mmProc),
+    currentCustody ? stopManagedChild(currentCustody.custodyChild) : Promise.resolve(),
+    currentCustody ? stopManagedChild(currentCustody.daemonChild) : Promise.resolve(),
+  ]);
 };
 
 const computeAggregatedHealth = (): AggregatedHealth => {

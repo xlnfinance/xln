@@ -17,6 +17,7 @@ import {
   enqueueRuntimeInput,
   handleInboundP2PEntityInput,
   startP2P,
+  stopP2P,
   startRuntimeLoop,
 } from '../runtime.ts';
 import type { EntityInput, Env } from '../types';
@@ -29,11 +30,12 @@ import {
   getCreditGrantedByEntity,
   getEntityOutCapacity,
   getEntityReplicaById,
+  hasQueuedOpenAccount,
   hasPairMutualCredit,
   isAccountConsensusReady,
   settleRuntimeFor,
   sleep,
-} from '../e2e/mesh-common';
+} from './mesh-common';
 import { buildDefaultEntitySwapPairs, getSwapPairPolicyByBaseQuote } from '../account-utils';
 import { ORDERBOOK_PRICE_SCALE } from '../orderbook';
 
@@ -442,7 +444,7 @@ const ensureMarketMakerHubConnectivity = async (
     const hasPendingConsensus =
       Boolean(mmAccount?.pendingFrame) ||
       Number(mmAccount?.mempool?.length || 0) > 0;
-    if (!mmAccount && !hasPendingConsensus) {
+    if (!mmAccount && !hasPendingConsensus && !hasQueuedOpenAccount(env, mmEntityId, hubEntityId)) {
       accountOpenInputs.push({
         entityId: mmEntityId,
         signerId: mmSignerId,
@@ -837,6 +839,15 @@ const run = async (): Promise<void> => {
         return new Response(JSON.stringify(health), { headers: JSON_HEADERS });
       }
 
+      if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
+        shuttingDown = true;
+        clearInterval(loop);
+        stopP2P(env);
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: JSON_HEADERS,
+        });
+      }
+
       return new Response(JSON.stringify({ error: 'Not found' }), {
         status: 404,
         headers: JSON_HEADERS,
@@ -855,6 +866,7 @@ const run = async (): Promise<void> => {
   const shutdown = async (): Promise<void> => {
     shuttingDown = true;
     clearInterval(loop);
+    stopP2P(env);
     server.stop(true);
     process.exit(0);
   };

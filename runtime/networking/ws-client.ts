@@ -162,11 +162,9 @@ export class RuntimeWsClient {
   async connect(): Promise<void> {
     // Guard: no concurrent connections
     if (this.connecting) {
-      console.warn(`[WS] Already connecting to ${this.options.url} — skipping`);
       return;
     }
     if (this.isOpen()) {
-      console.warn(`[WS] Already connected to ${this.options.url} — skipping`);
       return;
     }
 
@@ -583,6 +581,10 @@ export class RuntimeWsClient {
 
   isOpen(): boolean {
     return !!this.ws && 'readyState' in this.ws && this.ws.readyState === 1;
+  }
+
+  isConnecting(): boolean {
+    return this.connecting;
   }
 
   pause() {

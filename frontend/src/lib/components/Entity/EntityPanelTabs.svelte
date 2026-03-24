@@ -4395,10 +4395,10 @@
             <div class="wallet-meta-block">
               <p class="muted wallet-label">External</p>
               <p class="wallet-meta-value">{tab.signerId || '-'}</p>
-              <p class="muted wallet-meta-help">External ETH and ERC20 address.</p>
+              <p class="muted wallet-meta-help">External ETH and ERC20 endpoint.</p>
             </div>
             <div class="wallet-meta-block">
-              <p class="muted wallet-label">Entity:</p>
+              <p class="muted wallet-label">Entity</p>
               <p class="wallet-meta-value">{replica?.state?.entityId || tab.entityId}</p>
               <p class="muted wallet-meta-help">XLN identity for reserves, accounts, and consensus.</p>
             </div>
