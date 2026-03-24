@@ -60,6 +60,7 @@
   export let moveEntityOptions: string[] = [];
   export let moveHubEntityOptions: string[] = [];
   export let workspaceAccountIds: string[] = [];
+  export let moveSourceAccountOptions: string[] = [];
   export let reserveRecipientPreferredId = '';
   export let targetEntityPreferredId = '';
   export let entityId = '';
@@ -133,11 +134,11 @@
             testId="move-source-account-picker"
             label="From account"
             value={moveSourceAccountId}
-            entities={workspaceAccountIds}
+            entities={moveSourceAccountOptions}
             {contacts}
             excludeId={entityId}
             placeholder="Select source account..."
-            disabled={workspaceAccountIds.length === 0}
+            disabled={moveSourceAccountOptions.length === 0}
             on:change={handleMoveSourceAccountChange}
           />
         </div>
