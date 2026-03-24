@@ -22,6 +22,14 @@ import {
   type RelayStore,
 } from '../relay-store';
 import { relayRoute, type RelayRouterConfig } from '../relay-router';
+import {
+  normalizeMarketEntityId,
+  normalizeMarketPairId,
+  RPC_MARKET_DEFAULT_DEPTH,
+  RPC_MARKET_MAX_DEPTH,
+  RPC_MARKET_PUBLISH_MS,
+  type MarketSnapshotPayload,
+} from '../market-snapshot';
 
 type Args = {
   host: string;
@@ -176,6 +184,13 @@ type MarketMakerHealthPayload = {
 
 type MarketMakerInfoPayload = HubInfoPayload;
 
+type RpcMarketSubscription = {
+  hubIds: Set<string>;
+  pairIds: Set<string>;
+  depth: number;
+  seq: number;
+};
+
 type AggregatedHealth = {
   timestamp: number;
   reset: ResetState;
@@ -197,7 +212,12 @@ type AggregatedHealth = {
     ok: boolean;
     entityId: string | null;
     expectedOffersPerHub: number;
-    hubs: Array<{ hubEntityId: string; offers: number; ready: boolean }>;
+    hubs: Array<{
+      hubEntityId: string;
+      offers: number;
+      ready: boolean;
+      pairs: Array<{ pairId: string; offers: number; ready: boolean }>;
+    }>;
   };
   custody: {
     enabled: boolean;
@@ -352,6 +372,9 @@ const marketMakerChild: MarketMakerChild = {
 };
 
 let custodySupport: CustodySupportState | null = null;
+const rpcMarketSubscriptions = new Map<any, RpcMarketSubscription>();
+let rpcMarketPublisherTimer: ReturnType<typeof setInterval> | null = null;
+let rpcMarketPublisherInFlight = false;
 
 let resetPromise: Promise<void> | null = null;
 
@@ -427,6 +450,201 @@ const fetchText = async (url: string, timeoutMs = 2_000): Promise<string | null>
     return null;
   } finally {
     clearTimeout(timer);
+  }
+};
+
+const getHubChildByEntityId = (hubEntityId: string): HubChild | null => {
+  const normalized = String(hubEntityId || '').trim().toLowerCase();
+  if (!normalized) return null;
+  return hubChildren.find((child) =>
+    String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim().toLowerCase() === normalized
+  ) || null;
+};
+
+const fetchHubMarketSnapshots = async (
+  child: HubChild,
+  pairIds: string[],
+  depth: number,
+): Promise<MarketSnapshotPayload[]> => {
+  const params = new URLSearchParams();
+  params.set('depth', String(depth));
+  for (const pairId of pairIds) params.append('pair', pairId);
+  const response = await fetchJson<{ snapshots?: MarketSnapshotPayload[] }>(
+    `http://${args.host}:${child.apiPort}/api/market/snapshots?${params.toString()}`,
+    2_000,
+  );
+  return Array.isArray(response?.snapshots) ? response!.snapshots : [];
+};
+
+const cleanupRpcMarketSubscription = (ws: any): void => {
+  rpcMarketSubscriptions.delete(ws);
+  if (rpcMarketSubscriptions.size > 0) return;
+  if (!rpcMarketPublisherTimer) return;
+  clearInterval(rpcMarketPublisherTimer);
+  rpcMarketPublisherTimer = null;
+};
+
+const sendRpcMarketSnapshot = async (
+  ws: any,
+  subscription: RpcMarketSubscription,
+): Promise<boolean> => {
+  let sentAny = false;
+  const pairIds = Array.from(subscription.pairIds);
+  for (const hubEntityId of subscription.hubIds) {
+    const child = getHubChildByEntityId(hubEntityId);
+    if (!child) continue;
+    const snapshots = await fetchHubMarketSnapshots(child, pairIds, subscription.depth);
+    for (const payload of snapshots) {
+      subscription.seq += 1;
+      ws.send(
+        safeStringify({
+          type: 'market_snapshot',
+          id: `market_${Date.now()}_${subscription.seq}`,
+          timestamp: Date.now(),
+          payload,
+        }),
+      );
+      sentAny = true;
+    }
+  }
+  return sentAny;
+};
+
+const publishRpcMarketSnapshots = async (): Promise<void> => {
+  if (rpcMarketPublisherInFlight || rpcMarketSubscriptions.size === 0) return;
+  rpcMarketPublisherInFlight = true;
+  try {
+    for (const [ws, subscription] of rpcMarketSubscriptions.entries()) {
+      try {
+        await sendRpcMarketSnapshot(ws, subscription);
+      } catch {
+        cleanupRpcMarketSubscription(ws);
+      }
+    }
+  } finally {
+    rpcMarketPublisherInFlight = false;
+  }
+};
+
+const ensureRpcMarketPublisher = (): void => {
+  if (rpcMarketPublisherTimer) return;
+  rpcMarketPublisherTimer = setInterval(() => {
+    void publishRpcMarketSnapshots();
+  }, RPC_MARKET_PUBLISH_MS);
+};
+
+const isMarketMessageType = (type: unknown): type is 'market_subscribe' | 'market_unsubscribe' | 'market_snapshot_request' =>
+  type === 'market_subscribe' || type === 'market_unsubscribe' || type === 'market_snapshot_request';
+
+const handleMarketMessage = async (ws: any, msg: any): Promise<void> => {
+  const { type, id } = msg;
+  if (!isMarketMessageType(type)) return;
+
+  if (type === 'market_subscribe') {
+    const hubValues = Array.isArray(msg?.hubEntityIds)
+      ? msg.hubEntityIds
+      : msg?.hubEntityId
+        ? [msg.hubEntityId]
+        : [];
+    const pairValues = Array.isArray(msg?.pairs)
+      ? msg.pairs
+      : msg?.pairId
+        ? [msg.pairId]
+        : [];
+    const hubIds = Array.from(new Set(hubValues.map(normalizeMarketEntityId).filter(Boolean))) as string[];
+    const pairIds = Array.from(new Set(pairValues.map(normalizeMarketPairId).filter(Boolean))) as string[];
+    if (hubIds.length === 0 || pairIds.length === 0) {
+      ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'market_subscribe requires valid hubEntityId(s) and pair(s)' }));
+      return;
+    }
+
+    const replace = msg?.replace === true;
+    const depthRaw = Number(msg?.depth);
+    const depth = Number.isFinite(depthRaw)
+      ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
+      : RPC_MARKET_DEFAULT_DEPTH;
+    const subscription = rpcMarketSubscriptions.get(ws) || {
+      hubIds: new Set<string>(),
+      pairIds: new Set<string>(),
+      depth,
+      seq: 0,
+    };
+    if (replace) {
+      subscription.hubIds.clear();
+      subscription.pairIds.clear();
+    }
+    for (const hubEntityId of hubIds) subscription.hubIds.add(hubEntityId);
+    for (const pairId of pairIds) subscription.pairIds.add(pairId);
+    subscription.depth = depth;
+    rpcMarketSubscriptions.set(ws, subscription);
+    ensureRpcMarketPublisher();
+
+    ws.send(
+      safeStringify({
+        type: 'ack',
+        inReplyTo: id,
+        status: 'market_subscribed',
+        data: {
+          hubEntityIds: Array.from(subscription.hubIds),
+          pairs: Array.from(subscription.pairIds),
+          depth: subscription.depth,
+          intervalMs: RPC_MARKET_PUBLISH_MS,
+        },
+      }),
+    );
+
+    try {
+      await sendRpcMarketSnapshot(ws, subscription);
+    } catch {
+      cleanupRpcMarketSubscription(ws);
+    }
+    return;
+  }
+
+  if (type === 'market_unsubscribe') {
+    const existing = rpcMarketSubscriptions.get(ws);
+    if (!existing) {
+      ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
+      return;
+    }
+
+    const hubValues = Array.isArray(msg?.hubEntityIds)
+      ? msg.hubEntityIds
+      : msg?.hubEntityId
+        ? [msg.hubEntityId]
+        : [];
+    const pairValues = Array.isArray(msg?.pairs)
+      ? msg.pairs
+      : msg?.pairId
+        ? [msg.pairId]
+        : [];
+    const hubIds = Array.from(new Set(hubValues.map(normalizeMarketEntityId).filter(Boolean))) as string[];
+    const pairIds = Array.from(new Set(pairValues.map(normalizeMarketPairId).filter(Boolean))) as string[];
+    if (hubIds.length === 0 && pairIds.length === 0) {
+      cleanupRpcMarketSubscription(ws);
+      ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
+      return;
+    }
+    for (const hubEntityId of hubIds) existing.hubIds.delete(hubEntityId);
+    for (const pairId of pairIds) existing.pairIds.delete(pairId);
+    if (existing.hubIds.size === 0 || existing.pairIds.size === 0) {
+      cleanupRpcMarketSubscription(ws);
+    }
+    ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
+    return;
+  }
+
+  const existing = rpcMarketSubscriptions.get(ws);
+  if (!existing) {
+    ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'No active market subscription' }));
+    return;
+  }
+  try {
+    await sendRpcMarketSnapshot(ws, existing);
+    ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_snapshot_sent' }));
+  } catch {
+    cleanupRpcMarketSubscription(ws);
+    ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'Failed to send market snapshot' }));
   }
 };
 
@@ -678,7 +896,12 @@ const computeAggregatedHealth = (): AggregatedHealth => {
 
   const mmEntityId = String(marketMakerChild.lastInfo?.entityId || marketMakerChild.lastHealth?.entityId || '').trim() || null;
   const mmExpectedOffersPerHub = Number(marketMakerChild.lastHealth?.marketMaker?.expectedOffersPerHub || 0);
-  const mmHubsById = new Map<string, { hubEntityId: string; offers: number; ready: boolean }>();
+  const mmHubsById = new Map<string, {
+    hubEntityId: string;
+    offers: number;
+    ready: boolean;
+    pairs: Array<{ pairId: string; offers: number; ready: boolean }>;
+  }>();
   for (const hub of marketMakerChild.lastHealth?.marketMaker?.hubs ?? []) {
     const hubEntityId = String(hub.hubEntityId || '').toLowerCase();
     if (!hubEntityId) continue;
@@ -686,6 +909,13 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       hubEntityId,
       offers: Number(hub.offers || 0),
       ready: hub.ready === true,
+      pairs: Array.isArray(hub.pairs)
+        ? hub.pairs.map((pair) => ({
+            pairId: String(pair.pairId || ''),
+            offers: Number(pair.offers || 0),
+            ready: pair.ready === true,
+          }))
+        : [],
     });
   }
   const mmHubs = hubIds.map((hubEntityId) => {
@@ -694,6 +924,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       hubEntityId,
       offers: existing?.offers ?? 0,
       ready: existing?.ready === true || (!!mmExpectedOffersPerHub && (existing?.offers ?? 0) >= mmExpectedOffersPerHub),
+      pairs: existing?.pairs ?? [],
     };
   });
   const mmOk = !resetState.requestedMarketMaker
@@ -1465,6 +1696,20 @@ const server = Bun.serve({
       const msgStr = raw.toString();
       try {
         const msg = JSON.parse(msgStr);
+        if (isMarketMessageType(msg?.type)) {
+          Promise.resolve(handleMarketMessage(ws, msg)).catch(error => {
+            const reason = serializeError(error);
+            pushDebugEvent(relayStore, {
+              event: 'error',
+              reason: 'MARKET_HANDLER_EXCEPTION',
+              details: { error: reason, msgType: msg?.type },
+            });
+            try {
+              ws.send(safeStringify({ type: 'error', error: reason }));
+            } catch {}
+          });
+          return;
+        }
         Promise.resolve(relayRoute(routerConfig, ws, msg)).catch(error => {
           const reason = serializeError(error);
           pushDebugEvent(relayStore, {
@@ -1488,6 +1733,7 @@ const server = Bun.serve({
       }
     },
     close(ws) {
+      cleanupRpcMarketSubscription(ws);
       removeClient(relayStore, ws);
     },
   },

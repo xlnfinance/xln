@@ -385,12 +385,6 @@ function expectRenderedDeltaClose(actualDelta: number, expectedDelta: number, la
 
 async function openPayWorkspace(page: Page): Promise<void> {
   const accountsTab = page.getByTestId('tab-accounts').first();
-  if (!await accountsTab.isVisible().catch(() => false)) {
-    const backButton = page.locator('.account-panel .back-button').first();
-    if (await backButton.isVisible().catch(() => false)) {
-      await backButton.click();
-    }
-  }
   await expect(accountsTab).toBeVisible({ timeout: 20_000 });
   await accountsTab.click();
   const workspaceTabs = page.locator('.account-workspace-tabs').first();

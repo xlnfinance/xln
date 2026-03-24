@@ -130,19 +130,13 @@ async function openAccountsWorkspace(page: Page): Promise<void> {
   await dismissOnboardingIfVisible(page);
   const accountsTab = page.getByTestId('tab-accounts').first();
   const accountList = page.getByTestId('account-list-wrapper').first();
-  const workspaceTabs = page.locator('.account-workspace-tab').first();
-  const backButton = page.locator('.account-panel .back-button, .back-button').first();
+  const workspaceTabs = page.locator('nav[aria-label="Account workspace"]').first();
   const isAccountsWorkspaceVisible = async () =>
     await accountList.isVisible().catch(() => false)
       || await workspaceTabs.isVisible().catch(() => false);
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
     if (await isAccountsWorkspaceVisible()) break;
-    if (await backButton.isVisible().catch(() => false)) {
-      await backButton.click();
-      await page.waitForTimeout(300);
-      continue;
-    }
     if (await accountsTab.isVisible().catch(() => false)) {
       await accountsTab.click();
       await page.waitForTimeout(300);
@@ -224,12 +218,44 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
   }
 }
 
-async function focusConfiguredAccount(page: Page, hubId: string): Promise<void> {
-  await openAccountsWorkspace(page);
-  const preview = page.locator(`.account-preview[data-counterparty-id="${hubId}"]`).first();
-  if (await preview.isVisible().catch(() => false)) {
-    return;
-  }
+async function enqueueOpenAccount(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  hubId: string,
+): Promise<void> {
+  const queued = await page.evaluate(async ({ entityId, signerId, hubId }) => {
+    const view = window as typeof window & {
+      isolatedEnv?: unknown;
+      __xln_env?: unknown;
+      XLN?: { enqueueRuntimeInput?: (env: unknown, input: unknown) => void };
+      __xln_instance?: { enqueueRuntimeInput?: (env: unknown, input: unknown) => void };
+    };
+    const env = view.isolatedEnv ?? view.__xln_env;
+    const XLN = view.XLN
+      ?? view.__xln_instance
+      ?? await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+    if (!env || !XLN?.enqueueRuntimeInput) return { ok: false, error: 'isolatedEnv/XLN missing' };
+
+    XLN.enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'openAccount',
+          data: {
+            targetEntityId: hubId,
+            creditAmount: 10_000n * 10n ** 18n,
+            tokenId: 1,
+          },
+        }],
+      }],
+    });
+    return { ok: true };
+  }, { entityId, signerId, hubId });
+
+  expect(queued.ok, queued.error || `openAccount enqueue failed for ${hubId.slice(0, 10)}`).toBe(true);
 }
 
 async function selectConfigureAccount(page: Page, hubId: string): Promise<void> {
@@ -261,7 +287,6 @@ async function selectConfigureAccount(page: Page, hubId: string): Promise<void> 
 }
 
 async function openConfigureWorkspace(page: Page, hubId: string): Promise<void> {
-  await focusConfiguredAccount(page, hubId);
   await openWorkspaceTab(page, /Configure/i);
   await expect(page.locator('.configure-panel').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.configure-empty').first()).not.toBeVisible({ timeout: 20_000 });
@@ -422,7 +447,7 @@ export async function connectRuntimeToHub(
   const initialStatus = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
 
   if (!initialStatus.exists) {
-    await connectHubThroughUi(page, hubId);
+    await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId);
   }
 
   await expect.poll(

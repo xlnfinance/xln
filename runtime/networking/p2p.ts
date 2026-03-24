@@ -79,16 +79,66 @@ const normalizeGossipPollMs = (value: number | undefined): number => {
   return Math.max(MIN_GOSSIP_POLL_MS, Math.floor(Number(value)));
 };
 
-const unique = (items: string[]): string[] => Array.from(new Set(items.filter(Boolean)));
+const normalizeLoopbackHost = (host: string): string => {
+  const normalized = String(host || '').trim().toLowerCase();
+  if (normalized === '127.0.0.1' || normalized === '[::1]' || normalized === '::1') {
+    return 'localhost';
+  }
+  return normalized;
+};
+
+const parseWsUrl = (value: string): URL | null => {
+  try {
+    const parsed = new URL(String(value || '').trim());
+    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const getWsUrlKey = (value: string, ignoreProtocol = false): string | null => {
+  const parsed = parseWsUrl(value);
+  if (!parsed) return null;
+  const host = normalizeLoopbackHost(parsed.hostname);
+  const port = parsed.port || (parsed.protocol === 'wss:' ? '443' : '80');
+  const pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+  return `${ignoreProtocol ? 'ws*' : parsed.protocol}//${host}:${port}${pathname}`;
+};
+
+const unique = (items: string[]): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of items) {
+    const trimmed = String(item || '').trim();
+    if (!trimmed) continue;
+    const key = getWsUrlKey(trimmed) || trimmed;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+};
+
 const normalizeWsUrls = (items: string[] | undefined): string[] =>
   unique((items || [])
     .map(item => String(item || '').trim())
     .filter(item => item.startsWith('ws://') || item.startsWith('wss://')));
 
+const isDirectRuntimeEndpoint = (endpoint: string, relayUrls: string[]): boolean => {
+  const endpointUrl = parseWsUrl(endpoint);
+  if (!endpointUrl) return false;
+  const endpointPath = endpointUrl.pathname.replace(/\/+$/, '') || '/';
+  if (endpointPath !== '/ws') return false;
+  const endpointKey = getWsUrlKey(endpoint, true);
+  if (!endpointKey) return false;
+  return !relayUrls.some((relayUrl) => getWsUrlKey(relayUrl, true) === endpointKey);
+};
+
 const isSameList = (a: string[], b: string[]): boolean => {
   if (a.length !== b.length) return false;
-  const aSorted = [...a].sort();
-  const bSorted = [...b].sort();
+  const aSorted = [...a].map(value => getWsUrlKey(value) || value).sort();
+  const bSorted = [...b].map(value => getWsUrlKey(value) || value).sort();
   return aSorted.every((value, index) => value === bSorted[index]);
 };
 
@@ -1056,7 +1106,7 @@ export class RuntimeP2P {
     for (const profile of profiles) {
       if (normalizeRuntimeId(profile.runtimeId || '') !== normalizedTargetRuntimeId) continue;
       for (const endpoint of normalizeWsUrls(profile.endpoints)) {
-        if (!this.relayUrls.includes(endpoint)) {
+        if (isDirectRuntimeEndpoint(endpoint, this.relayUrls)) {
           return endpoint;
         }
       }

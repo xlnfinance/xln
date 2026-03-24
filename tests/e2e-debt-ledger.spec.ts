@@ -43,10 +43,6 @@ async function readFirstHubId(page: Page): Promise<string> {
 }
 
 async function openAccountsWorkspace(page: Page): Promise<void> {
-  const backToEntity = page.getByRole('button', { name: /Back to Entity/i }).first();
-  if (await backToEntity.isVisible().catch(() => false)) {
-    await backToEntity.click();
-  }
   const accountsTab = page.getByTestId('tab-accounts').first();
   if (await accountsTab.isVisible().catch(() => false)) {
     await accountsTab.click();
@@ -66,20 +62,6 @@ async function openWorkspaceTab(page: Page, label: RegExp): Promise<void> {
   const tab = page.locator('.account-workspace-tab').filter({ hasText: label }).first();
   await expect(tab).toBeVisible({ timeout: 20_000 });
   await tab.click();
-}
-
-async function focusWorkspaceAccount(page: Page, counterpartyId: string): Promise<void> {
-  await openAccountsWorkspace(page);
-  const preview = page.locator(`.account-preview[data-counterparty-id="${counterpartyId}"]`).first();
-  await expect(preview).toBeVisible({ timeout: 20_000 });
-  const statusIndicator = preview.locator('.status-indicator').first();
-  await expect(statusIndicator).toBeVisible({ timeout: 20_000 });
-  await statusIndicator.hover();
-  const exploreButton = preview.locator('.popover-explore-btn').first();
-  await expect(exploreButton).toBeVisible({ timeout: 20_000 });
-  await exploreButton.click();
-  await expect(page.getByRole('button', { name: /Back to Entity/i }).first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('.account-panel .header-identity').filter({ hasText: counterpartyId }).first()).toBeVisible({ timeout: 20_000 });
 }
 
 async function readAccountProgress(

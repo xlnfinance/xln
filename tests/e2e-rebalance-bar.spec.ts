@@ -828,16 +828,12 @@ async function sendDirectPaymentToHub(
   void signerId;
 
   const accountsTab = page.getByTestId('tab-accounts').first();
-  if (!await accountsTab.isVisible().catch(() => false)) {
-    const backButton = page.locator('.account-panel .back-button').first();
-    if (await backButton.isVisible().catch(() => false)) {
-      await backButton.click();
-    }
-  }
   await expect(accountsTab).toBeVisible({ timeout: 20_000 });
   await accountsTab.click();
 
-  const payTab = page.locator('.account-workspace-tab').filter({ hasText: /Pay/i }).first();
+  const workspaceTabs = page.locator('nav[aria-label="Account workspace"]').first();
+  await expect(workspaceTabs).toBeVisible({ timeout: 20_000 });
+  const payTab = workspaceTabs.getByRole('button', { name: /Pay/i }).first();
   await expect(payTab).toBeVisible({ timeout: 20_000 });
   await payTab.click();
 
