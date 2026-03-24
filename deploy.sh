@@ -215,6 +215,7 @@ run_local_deploy() {
 
       lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
       pm2 delete xln-server >/dev/null 2>&1 || true
+      pm2 delete xln-custody >/dev/null 2>&1 || true
       pm2 delete anvil >/dev/null 2>&1 || true
 
       pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
