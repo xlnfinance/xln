@@ -1171,7 +1171,7 @@ export class RuntimeP2P {
     const existing = this.directClients.get(normalizedTargetRuntimeId);
     const existingUrl = this.directClientUrls.get(normalizedTargetRuntimeId);
     if (existing && existingUrl === endpoint) {
-      if (!existing.isOpen()) {
+      if (!existing.isOpen() && !existing.isConnecting()) {
         existing.connect().catch(error => {
           this.env.warn('network', 'WS_DIRECT_CONNECT_FAILED', {
             endpoint,

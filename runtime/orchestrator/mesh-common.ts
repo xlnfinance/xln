@@ -88,6 +88,7 @@ export const applyJEventsToEnv = async (env: Env, events: JEvent[], label = 'J-E
   const observedAt = Date.now();
   const entityInputs: EntityInput[] = [];
   for (const [entityId, entry] of grouped.entries()) {
+    if (!getEntityReplicaById(env, entityId)) continue;
     entityInputs.push({
       entityId,
       signerId: 'j-event',
@@ -154,6 +155,27 @@ export const hasAccount = (env: Env, entityId: string, counterpartyId: string): 
     if (typeof key === 'string' && key.toLowerCase() === needle) return true;
     if (accountMatchesCounterparty(account, entityId, counterpartyId)) return true;
   }
+  return false;
+};
+
+export const hasQueuedOpenAccount = (
+  env: Env,
+  entityId: string,
+  counterpartyId: string,
+): boolean => {
+  const replica = getEntityReplicaById(env, entityId);
+  if (!replica) return false;
+  const target = String(counterpartyId || '').toLowerCase();
+  const containsOpenAccount = (
+    txs: Array<{ type?: string; data?: { targetEntityId?: string } }> | undefined,
+  ): boolean => Array.isArray(txs) && txs.some((tx) =>
+    tx?.type === 'openAccount' &&
+    String(tx?.data?.targetEntityId || '').toLowerCase() === target,
+  );
+
+  if (containsOpenAccount(replica.mempool)) return true;
+  if (containsOpenAccount(replica.proposal?.txs)) return true;
+  if (containsOpenAccount(replica.lockedFrame?.txs)) return true;
   return false;
 };
 

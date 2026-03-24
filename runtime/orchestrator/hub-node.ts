@@ -27,6 +27,7 @@ import {
   handleInboundP2PEntityInput,
   resolveEntityProposerId,
   startP2P,
+  stopP2P,
   startRuntimeLoop,
 } from '../runtime.ts';
 import type { EntityInput, Env } from '../types';
@@ -45,13 +46,14 @@ import {
   HUB_REQUIRED_TOKEN_COUNT,
   HUB_RESERVE_TARGET_UNITS,
   hasAccount,
+  hasQueuedOpenAccount,
   hasPairMutualCredit,
   hasPairMutualCredits,
   serializeReserves,
   settleRuntimeFor,
   sleep,
   waitUntil,
-} from '../e2e/mesh-common';
+} from './mesh-common';
 
 type Args = {
   name: string;
@@ -892,6 +894,7 @@ const run = async (): Promise<void> => {
         if (
           bootstrap.entityId.toLowerCase() < peer.entityId.toLowerCase() &&
           !hasAccount(env, bootstrap.entityId, peer.entityId) &&
+          !hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId) &&
           canWrite
         ) {
           openInputs.push({
@@ -942,6 +945,7 @@ const run = async (): Promise<void> => {
         const localAccount = getAccountMachine(env, bootstrap.entityId, peer.entityId);
         const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
         if (!hasAccount(env, bootstrap.entityId, peer.entityId) && canWrite) {
+          if (hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId)) continue;
           openInputs.push({
             entityId: bootstrap.entityId,
             signerId: bootstrap.signerId,
@@ -1080,6 +1084,13 @@ const run = async (): Promise<void> => {
       if (pathname === '/api/health') {
         const health = buildLocalHealth(env, bootstrap.entityId, tokenCatalog);
         return new Response(JSON.stringify(health), { headers });
+      }
+
+      if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
+        shuttingDown = true;
+        clearInterval(meshLoop);
+        stopP2P(env);
+        return new Response(JSON.stringify({ ok: true }), { headers });
       }
 
       if (pathname === '/api/market/snapshots' && request.method === 'GET') {
@@ -1318,13 +1329,14 @@ const run = async (): Promise<void> => {
   });
 
   console.log(
-    `[E2E-HUB] READY name=${resolvedArgs.name} entityId=${bootstrap.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
+    `[MESH-HUB] READY name=${resolvedArgs.name} entityId=${bootstrap.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
   );
   p2p.updateConfig({ endpointUrls: [directWsUrl] });
 
   const shutdown = async () => {
     shuttingDown = true;
     clearInterval(meshLoop);
+    stopP2P(env);
     server.stop(true);
     process.exit(0);
   };
@@ -1336,6 +1348,6 @@ const run = async (): Promise<void> => {
 };
 
 run().catch(error => {
-  console.error(`[E2E-HUB] FAILED ${resolvedArgs.name}:`, (error as Error).stack || (error as Error).message);
+  console.error(`[MESH-HUB] FAILED ${resolvedArgs.name}:`, (error as Error).stack || (error as Error).message);
   process.exit(1);
 });
