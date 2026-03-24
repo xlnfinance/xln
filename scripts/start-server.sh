@@ -15,7 +15,7 @@ RPC_PORT="${ANVIL_PORT:-$(xln_rpc_port)}"
 API_PORT="${XLN_SERVER_PORT:-$(xln_web_port)}"
 
 export USE_ANVIL=true
-export ANVIL_RPC="http://localhost:${RPC_PORT}"
+export ANVIL_RPC="http://127.0.0.1:${RPC_PORT}"
 export PUBLIC_RPC=${PUBLIC_RPC:-https://xln.finance/rpc}
 export INTERNAL_RELAY_URL=${INTERNAL_RELAY_URL:-ws://127.0.0.1:${API_PORT}/relay}
 export PUBLIC_RELAY_URL=${PUBLIC_RELAY_URL:-wss://xln.finance/relay}

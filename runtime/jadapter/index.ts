@@ -42,6 +42,7 @@ import type { JAdapter, JAdapterConfig } from './types';
 import { DEFAULT_PRIVATE_KEY } from './helpers';
 import { createBrowserVMAdapter } from './browservm';
 import { createRpcAdapter } from './rpc';
+import { normalizeLoopbackUrl } from '../loopback-url';
 
 /**
  * NonceTrackingWallet - Wallet that tracks nonce locally to avoid race conditions
@@ -101,9 +102,10 @@ export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> 
   if (!config.rpcUrl) {
     throw new Error('rpcUrl required for anvil/rpc mode');
   }
-  const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+  const rpcUrl = normalizeLoopbackUrl(config.rpcUrl);
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
   // Use NonceTrackingWallet for rapid sequential txs (anvil deploys many contracts)
   const signer = new NonceTrackingWallet(privateKey, provider);
 
-  return createRpcAdapter(config, provider, signer);
+  return createRpcAdapter({ ...config, rpcUrl }, provider, signer);
 }
