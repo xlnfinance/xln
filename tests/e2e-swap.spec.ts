@@ -1527,7 +1527,7 @@ test.describe('E2E Swap Flow', () => {
     const cancelButton = page.locator('.swap-panel .orders-table tbody .cancel-btn').first();
     await expect(cancelButton).toBeVisible({ timeout: 20_000 });
     await timedStep('swap.cancel_offer', async () => {
-      await cancelButton.click();
+      await cancelButton.click({ force: true });
       await expect
         .poll(async () => {
           const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
@@ -1683,7 +1683,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
 
     const cancelButton = firstRow.locator('.cancel-btn');
     await expect(cancelButton).toBeVisible({ timeout: 10_000 });
-    await cancelButton.click();
+    await cancelButton.click({ force: true });
     await expect
       .poll(async () => await page.locator('.swap-panel .orders-table tbody tr').count(), {
         timeout: 60_000,

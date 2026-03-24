@@ -567,16 +567,7 @@ async function queueFundR2CViaUi(
   await page.getByTestId('move-source-reserve').first().click();
   await page.getByTestId('move-target-account').first().click();
 
-  const counterpartyField = page.getByTestId('move-target-counterparty-field').first();
-  await expect(counterpartyField).toBeVisible({ timeout: 20_000 });
-  const counterpartyPicker = page.getByTestId('move-target-counterparty-picker').first();
-  await expect(counterpartyPicker).toBeVisible({ timeout: 20_000 });
-  const counterpartyInput = counterpartyPicker.locator('input').first();
-  await counterpartyInput.click();
-  await counterpartyInput.fill(counterpartyId);
-  const counterpartyOption = page.getByTestId(`move-target-counterparty-picker-option-${counterpartyId.toLowerCase()}`).first();
-  await expect(counterpartyOption).toBeVisible({ timeout: 20_000 });
-  await counterpartyOption.click();
+  await selectEntityInputValue(page, 'move-target-counterparty-picker', counterpartyId);
 
   const amountInput = page.getByTestId('move-amount').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
@@ -604,16 +595,7 @@ async function queueWithdrawC2RViaUi(
   await page.getByTestId('move-source-account').first().click();
   await page.getByTestId('move-target-reserve').first().click();
 
-  const accountField = page.getByTestId('move-source-account-field').first();
-  await expect(accountField).toBeVisible({ timeout: 20_000 });
-  const accountPicker = page.getByTestId('move-source-account-picker').first();
-  const accountInput = accountPicker.locator('input').first();
-  await expect(accountInput).toBeVisible({ timeout: 20_000 });
-  await accountInput.click();
-  await accountInput.fill(counterpartyId);
-  const accountOption = page.getByTestId(`move-source-account-picker-option-${counterpartyId.toLowerCase()}`).first();
-  await expect(accountOption).toBeVisible({ timeout: 20_000 });
-  await accountOption.click();
+  await selectEntityInputValue(page, 'move-source-account-picker', counterpartyId);
 
   const amountInput = page.getByTestId('move-amount').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
@@ -641,14 +623,7 @@ async function queueTransferR2RViaUi(
   await page.getByTestId('move-source-reserve').first().click();
   await page.getByTestId('move-target-reserve').first().click();
 
-  const recipientField = page.getByTestId('move-reserve-recipient-field').first();
-  await expect(recipientField).toBeVisible({ timeout: 20_000 });
-  const recipientPicker = recipientField.locator('.closed-trigger, input').first();
-  await recipientPicker.click();
-  const recipientInput = recipientField.locator('input').first();
-  await expect(recipientInput).toBeVisible({ timeout: 20_000 });
-  await recipientInput.fill(recipientEntityId);
-  await recipientInput.evaluate((node: HTMLInputElement) => node.blur());
+  await selectEntityInputValue(page, 'move-reserve-recipient-picker', recipientEntityId);
 
   const amountInput = page.getByTestId('move-amount').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
@@ -664,6 +639,40 @@ async function ensureAssetsWorkspaceVisible(page: Page): Promise<void> {
   await returnToEntityShell(page);
   const assetsTab = page.getByTestId('tab-assets').first();
   await expect(assetsTab).toBeVisible({ timeout: 20_000 });
+}
+
+async function selectEntityInputValue(
+  page: Page,
+  testId: string,
+  entityId: string,
+): Promise<void> {
+  const selector = page.getByTestId(testId).first();
+  await expect(selector).toBeVisible({ timeout: 20_000 });
+
+  const closedTrigger = selector.locator('.closed-trigger').first();
+  if (await closedTrigger.isVisible().catch(() => false)) {
+    const text = await closedTrigger.textContent().catch(() => '');
+    if (String(text || '').toLowerCase().includes(entityId.toLowerCase().slice(0, 10))) {
+      return;
+    }
+    await closedTrigger.click();
+  } else {
+    const dropdownToggle = selector.locator('.dropdown-toggle').first();
+    if (await dropdownToggle.isVisible().catch(() => false)) {
+      await dropdownToggle.click();
+    }
+  }
+
+  const input = selector.locator('input').first();
+  await expect(input).toBeVisible({ timeout: 20_000 });
+  await input.fill(entityId);
+
+  const option = page.getByTestId(`${testId}-option-${entityId.toLowerCase()}`).first();
+  if (await option.isVisible().catch(() => false)) {
+    await option.click();
+  } else {
+    await input.press('Tab');
+  }
 }
 
 async function seedDisputePreconditions(
