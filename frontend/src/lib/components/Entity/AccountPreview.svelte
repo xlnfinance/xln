@@ -28,6 +28,15 @@
     outgoingCount: 0,
     outgoingAmount: 0n,
   };
+  export let activeFlows: Array<{
+    id: string;
+    direction: 'incoming' | 'outgoing';
+    tokenId: number;
+    amount: bigint;
+    title: string;
+    subtitle: string;
+  }> = [];
+  export let activeFlowOverflowCount = 0;
 
   const dispatch = createEventDispatcher();
 
@@ -319,6 +328,12 @@
     e.stopPropagation();
     dispatch('dispute', { counterpartyId });
   }
+
+  function formatFlowAmount(tokenId: number, amount: bigint): string {
+    return activeXlnFunctions?.formatTokenAmount
+      ? activeXlnFunctions.formatTokenAmount(tokenId, amount)
+      : amount.toString();
+  }
 </script>
 
 <div
@@ -426,26 +441,48 @@
     </div>
   </div>
 
-  {#if lockSummary.incomingCount > 0 || lockSummary.outgoingCount > 0}
+  {#if activeFlows.length > 0 || lockSummary.incomingCount > 0 || lockSummary.outgoingCount > 0}
     <div class="locks-row">
-      <div class="lock-badge incoming" class:empty={lockSummary.incomingCount === 0}>
-        {#if lockSummary.incomingCount > 0}
-          <span class="lock-dir">←</span>
-          <span class="lock-count">{lockSummary.incomingCount} lock{lockSummary.incomingCount !== 1 ? 's' : ''}</span>
-          <span class="lock-amount">{activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, lockSummary.incomingAmount)}</span>
-        {:else}
-          <span>← 0 locks</span>
+      {#if activeFlows.length > 0}
+        {#each activeFlows as flow (flow.id)}
+          <div class="flow-chip" class:incoming={flow.direction === 'incoming'} class:outgoing={flow.direction === 'outgoing'}>
+            <div class="flow-chip-head">
+              <span class="flow-chip-dir">{flow.direction === 'incoming' ? '←' : '→'}</span>
+              <span class="flow-chip-title">{flow.title}</span>
+              <strong class="flow-chip-amount">{formatFlowAmount(flow.tokenId, flow.amount)}</strong>
+            </div>
+            <div class="flow-chip-subtitle">{flow.subtitle}</div>
+          </div>
+        {/each}
+        {#if activeFlowOverflowCount > 0}
+          <div class="flow-chip more">
+            <div class="flow-chip-head">
+              <span class="flow-chip-title">More active flows</span>
+              <strong class="flow-chip-amount">+{activeFlowOverflowCount}</strong>
+            </div>
+            <div class="flow-chip-subtitle">Open account to inspect the rest</div>
+          </div>
         {/if}
-      </div>
-      <div class="lock-badge outgoing" class:empty={lockSummary.outgoingCount === 0}>
-        {#if lockSummary.outgoingCount > 0}
-          <span class="lock-dir">→</span>
-          <span class="lock-count">{lockSummary.outgoingCount} lock{lockSummary.outgoingCount !== 1 ? 's' : ''}</span>
-          <span class="lock-amount">{activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, lockSummary.outgoingAmount)}</span>
-        {:else}
-          <span>→ 0 locks</span>
-        {/if}
-      </div>
+      {:else}
+        <div class="lock-badge incoming" class:empty={lockSummary.incomingCount === 0}>
+          {#if lockSummary.incomingCount > 0}
+            <span class="lock-dir">←</span>
+            <span class="lock-count">{lockSummary.incomingCount} lock{lockSummary.incomingCount !== 1 ? 's' : ''}</span>
+            <span class="lock-amount">{activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, lockSummary.incomingAmount)}</span>
+          {:else}
+            <span>← 0 locks</span>
+          {/if}
+        </div>
+        <div class="lock-badge outgoing" class:empty={lockSummary.outgoingCount === 0}>
+          {#if lockSummary.outgoingCount > 0}
+            <span class="lock-dir">→</span>
+            <span class="lock-count">{lockSummary.outgoingCount} lock{lockSummary.outgoingCount !== 1 ? 's' : ''}</span>
+            <span class="lock-amount">{activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, lockSummary.outgoingAmount)}</span>
+          {:else}
+            <span>→ 0 locks</span>
+          {/if}
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -767,10 +804,71 @@
   }
 
   .locks-row {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
     gap: 8px;
     margin-bottom: 10px;
+  }
+
+  .flow-chip {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(113, 113, 122, 0.18);
+    background: rgba(24, 24, 27, 0.74);
+    min-width: 0;
+  }
+
+  .flow-chip.incoming {
+    border-color: rgba(16, 185, 129, 0.24);
+    background: rgba(6, 78, 59, 0.18);
+  }
+
+  .flow-chip.outgoing {
+    border-color: rgba(244, 114, 182, 0.2);
+    background: rgba(76, 5, 25, 0.18);
+  }
+
+  .flow-chip.more {
+    border-style: dashed;
+    background: rgba(24, 24, 27, 0.4);
+  }
+
+  .flow-chip-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .flow-chip-dir {
+    font-family: 'JetBrains Mono','SF Mono','Monaco','Menlo',monospace;
+    font-size: 11px;
+    color: #fbbf24;
+    flex-shrink: 0;
+  }
+
+  .flow-chip-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #f5f5f4;
+    min-width: 0;
+  }
+
+  .flow-chip-amount {
+    margin-left: auto;
+    font-size: 11px;
+    color: #fbbf24;
+    white-space: nowrap;
+  }
+
+  .flow-chip-subtitle {
+    font-size: 10px;
+    color: #a8a29e;
+    line-height: 1.35;
+    word-break: break-word;
   }
 
   .lock-badge {

@@ -645,10 +645,10 @@
       case 'external->reserve':
         return moveReserveRecipientEntityId && moveReserveRecipientEntityId !== resolveSelfEntityId()
           ? [
-            '1. Deposit from wallet into your reserve',
+            '1. Deposit from external into your reserve',
             `2. Transfer reserve balance to ${reserveRecipientLabel}`,
           ]
-          : ['1. Deposit from wallet into your reserve'];
+          : ['1. Deposit from external into your reserve'];
       case 'reserve->reserve':
         return [`1. Transfer reserve balance to ${reserveRecipientLabel}`];
       case 'reserve->account':
@@ -663,10 +663,10 @@
       case 'reserve->external':
         return ['1. Withdraw from your reserve to recipient EOA'];
       case 'external->external':
-        return ['1. Send token directly from wallet to recipient EOA'];
+        return ['1. Send token directly from external to recipient EOA'];
       case 'external->account':
         return [
-          '1. Deposit from wallet into your reserve',
+          '1. Deposit from external into your reserve',
           `2. Deposit from your reserve into ${targetEntityLabel} via hub ${targetHubLabel}`,
         ];
       case 'account->external':
@@ -706,7 +706,7 @@
     const reserveRemote = moveNeedsReserveRecipient(from, to) && moveReserveRecipientEntityId.trim() && moveReserveRecipientEntityId !== resolveSelfEntityId();
     switch (getMoveRouteKey(from, to)) {
       case 'external->reserve':
-        return reserveRemote ? '1 wallet tx + 1 reserve batch • ~300k gas' : '1 wallet tx • ~140k gas';
+        return reserveRemote ? '1 external tx + 1 reserve batch • ~300k gas' : '1 external tx • ~140k gas';
       case 'reserve->reserve':
         return '1 reserve batch • ~160k gas';
       case 'reserve->account':
@@ -716,9 +716,9 @@
       case 'reserve->external':
         return '1 reserve batch • ~140k gas';
       case 'external->external':
-        return '1 wallet tx';
+        return '1 external tx';
       case 'external->account':
-        return '1 wallet tx + 1 reserve batch • ~320k gas';
+        return '1 external tx + 1 reserve batch • ~320k gas';
       case 'account->external':
         return 'hub proof + 1 reserve batch • ~260k gas';
       case 'account->account':
@@ -2795,7 +2795,7 @@
         const token = requireExternalTokenBySymbol(moveAssetSymbol);
         const recipient = moveExternalRecipient.trim();
         if (!isAddress(recipient)) throw new Error('Recipient must be a valid EOA address');
-        setMoveProgress('Signing wallet transfer');
+        setMoveProgress('Signing external transfer');
         sendAssetSymbol = moveAssetSymbol;
         sendAssetAmount = moveAmount;
         sendAssetRecipient = recipient;
@@ -2816,7 +2816,7 @@
 
       switch (routeKey) {
         case 'external->reserve':
-          setMoveProgress('Depositing from wallet into your reserve');
+          setMoveProgress('Depositing from external into your reserve');
           await depositToReserve(token, amount);
           if (!reserveRecipientIsSelf) {
             await waitForMoveCondition(
@@ -2851,7 +2851,7 @@
           await withdrawReserveToExternal(token.tokenId, amount, moveExternalRecipient.trim());
           break;
         case 'external->account':
-          setMoveProgress('Depositing from wallet into your reserve');
+          setMoveProgress('Depositing from external into your reserve');
           await depositToReserve(token, amount);
           await waitForMoveCondition(
             () => (onchainReserves.get(token.tokenId) ?? 0n) >= reserveBefore + amount,
@@ -3186,7 +3186,7 @@
       }
 
       console.log('[EntityPanel] External faucet success:', result);
-      toasts.success(`Received ${amount} ${tokenSymbol} in wallet!`);
+      toasts.success(`Received ${amount} ${tokenSymbol} in external!`);
 
       void fetchExternalTokens();
     } catch (err) {
@@ -4346,7 +4346,7 @@
           <div class="tab-header-row">
             <div class="asset-title-block">
               <h4 class="section-head" style="margin: 0;">Assets</h4>
-              <p class="muted asset-ledger-note">Wallet, reserve, and account balances.</p>
+              <p class="muted asset-ledger-note">External, reserve, and account balances.</p>
             </div>
             <div class="header-actions">
               <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 15000} on:change={updateBalanceRefresh}>
@@ -4368,7 +4368,7 @@
                 {/each}
               </select>
               <button class="btn-table-action faucet" data-testid={`external-faucet-${faucetAssetSymbol}`} on:click={() => submitAssetFaucet('external')}>
-                Wallet
+                External
               </button>
               <button
                 class="btn-table-action deposit"
@@ -4395,7 +4395,7 @@
             <div class="wallet-meta-block">
               <p class="muted wallet-label">External</p>
               <p class="wallet-meta-value">{tab.signerId || '-'}</p>
-              <p class="muted wallet-meta-help">Native ETH and ERC20 wallet address.</p>
+              <p class="muted wallet-meta-help">External ETH and ERC20 address.</p>
             </div>
             <div class="wallet-meta-block">
               <p class="muted wallet-label">Entity:</p>

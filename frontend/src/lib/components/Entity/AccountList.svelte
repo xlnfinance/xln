@@ -3,6 +3,7 @@
   import { createEventDispatcher } from 'svelte';
   import { replicas, xlnFunctions, xlnEnvironment } from '../../stores/xlnStore';
   import AccountPreview from './AccountPreview.svelte';
+  import { getEntityDisplayName } from '$lib/utils/entityNaming';
 
 export let replica: EntityReplica | null;
 export let selectedAccountId: string | null = null;
@@ -27,9 +28,31 @@ export let selectedAccountId: string | null = null;
   type LockDirection = 'incoming' | 'outgoing';
 
   type LockBookEntryView = {
+    lockId?: string;
     accountId: string;
+    tokenId?: number;
     amount: bigint;
+    hashlock?: string;
     direction: LockDirection;
+    createdAt?: bigint;
+  };
+
+  type HtlcRouteView = {
+    hashlock?: string;
+    inboundEntity?: string;
+    inboundLockId?: string;
+    outboundEntity?: string;
+    outboundLockId?: string;
+    secretAckPending?: boolean;
+  };
+
+  type ActiveFlowSummary = {
+    id: string;
+    direction: LockDirection;
+    tokenId: number;
+    amount: bigint;
+    title: string;
+    subtitle: string;
   };
 
   const isLockBookEntryView = (value: unknown): value is LockBookEntryView => {
@@ -39,6 +62,16 @@ export let selectedAccountId: string | null = null;
       typeof candidate.accountId === 'string' &&
       typeof candidate.amount === 'bigint' &&
       (candidate.direction === 'incoming' || candidate.direction === 'outgoing')
+    );
+  };
+
+  const isHtlcRouteView = (value: unknown): value is HtlcRouteView => {
+    if (typeof value !== 'object' || value === null) return false;
+    const candidate = value as Partial<HtlcRouteView>;
+    return (
+      typeof candidate.hashlock === 'string' ||
+      typeof candidate.inboundLockId === 'string' ||
+      typeof candidate.outboundLockId === 'string'
     );
   };
 
@@ -114,6 +147,10 @@ export let selectedAccountId: string | null = null;
     return String(id || '').toLowerCase();
   }
 
+  function shortHash(value: string): string {
+    return value.length > 18 ? `${value.slice(0, 10)}...${value.slice(-4)}` : value;
+  }
+
   function getLockSummary(counterpartyId: string): {
     incomingCount: number;
     incomingAmount: bigint;
@@ -147,6 +184,79 @@ export let selectedAccountId: string | null = null;
     return summary;
   }
 
+  function getActiveFlowSummary(counterpartyId: string): { items: ActiveFlowSummary[]; overflowCount: number } {
+    const items: Array<ActiveFlowSummary & { createdAt: number }> = [];
+    const lockBook = replica?.state?.lockBook;
+    const notes = replica?.state?.htlcNotes;
+    const routes = replica?.state?.htlcRoutes;
+    if (!lockBook || typeof lockBook.values !== 'function') return { items: [], overflowCount: 0 };
+
+    const cpNorm = normalizeId(counterpartyId);
+    for (const lock of lockBook.values()) {
+      if (!isLockBookEntryView(lock)) continue;
+      if (normalizeId(lock.accountId) !== cpNorm) continue;
+
+      const tokenId = Number(lock.tokenId ?? 0);
+      if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
+
+      let matchedRoute: HtlcRouteView | null = null;
+      if (routes && typeof routes.values === 'function') {
+        for (const route of routes.values()) {
+          if (!isHtlcRouteView(route)) continue;
+          if (
+            (typeof route.outboundLockId === 'string' && route.outboundLockId === lock.lockId) ||
+            (typeof route.inboundLockId === 'string' && route.inboundLockId === lock.lockId) ||
+            (typeof route.hashlock === 'string' && route.hashlock === lock.hashlock)
+          ) {
+            matchedRoute = route;
+            break;
+          }
+        }
+      }
+
+      const paymentNote = typeof notes?.get === 'function'
+        ? (() => {
+            const lockKey = typeof lock.lockId === 'string' ? notes.get(`lock:${lock.lockId}`) : '';
+            if (typeof lockKey === 'string' && lockKey.trim()) return lockKey.trim();
+            const hashKey = typeof lock.hashlock === 'string' ? notes.get(`hashlock:${lock.hashlock}`) : '';
+            return typeof hashKey === 'string' ? hashKey.trim() : '';
+          })()
+        : '';
+
+      const peerEntityId = lock.direction === 'incoming'
+        ? String(matchedRoute?.inboundEntity || counterpartyId)
+        : String(matchedRoute?.outboundEntity || counterpartyId);
+      const peerName = getEntityDisplayName(peerEntityId, {
+        source: $xlnEnvironment,
+        selfEntityId: replica?.entityId || '',
+        selfLabel: 'You',
+      });
+
+      const subtitle = paymentNote
+        || (matchedRoute?.secretAckPending
+          ? 'Awaiting secret ACK'
+          : lock.direction === 'incoming'
+            ? `From ${peerName}`
+            : `To ${peerName}`);
+
+      items.push({
+        id: String(lock.lockId || lock.hashlock || `${counterpartyId}-${items.length}`),
+        direction: lock.direction,
+        tokenId,
+        amount: lock.amount,
+        title: lock.direction === 'incoming' ? 'Incoming HTLC' : 'Outgoing HTLC',
+        subtitle: subtitle || `Hash ${shortHash(String(lock.hashlock || ''))}`,
+        createdAt: typeof lock.createdAt === 'bigint' ? Number(lock.createdAt) : 0,
+      });
+    }
+
+    items.sort((left, right) => right.createdAt - left.createdAt || left.id.localeCompare(right.id));
+    return {
+      items: items.slice(0, 3),
+      overflowCount: Math.max(0, items.length - 3),
+    };
+  }
+
 
 
 </script>
@@ -177,6 +287,7 @@ export let selectedAccountId: string | null = null;
         </div>
         <div class="accounts-list">
           {#each visibleAccounts as entry, index (entry.counterpartyId)}
+            {@const activeFlowSummary = getActiveFlowSummary(entry.counterpartyId)}
             <AccountPreview
               account={entry.account}
               counterpartyId={entry.counterpartyId}
@@ -184,6 +295,8 @@ export let selectedAccountId: string | null = null;
               {entityHeight}
               {runtimeHeight}
               lockSummary={getLockSummary(entry.counterpartyId)}
+              activeFlows={activeFlowSummary.items}
+              activeFlowOverflowCount={activeFlowSummary.overflowCount}
               isSelected={selectedAccountId
                 ? String(selectedAccountId).toLowerCase() === String(entry.counterpartyId).toLowerCase()
                 : index === 0}

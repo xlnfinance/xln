@@ -212,8 +212,11 @@
       requestId: 'Request ID',
       approved: 'Approved',
       counterpartyEntityId: 'Counterparty',
+      fromEntityId: 'From',
+      toEntityId: 'To',
       jHeight: 'J Height',
       blockNumber: 'J Block',
+      jBlockHash: 'J Block Hash',
       transactionHash: 'Tx Hash',
       workspaceVersion: 'Workspace',
       onChainNonce: 'Nonce',
@@ -221,6 +224,8 @@
       feeAmount: 'Fee',
       events: 'Events',
       observedAt: 'Observed',
+      description: 'Description',
+      route: 'Route',
       revealBeforeHeight: 'Reveal Before',
       hashlock: 'Hashlock',
       lockId: 'Lock ID',
@@ -284,20 +289,48 @@
 
   function formatDataValue(key: string, value: unknown, data: Record<string, unknown>): ActionParam {
     const label = formatKeyLabel(key);
-    if (key === 'counterpartyEntityId') {
+    if (key === 'counterpartyEntityId' || key === 'fromEntityId' || key === 'toEntityId') {
       return { label, value: entityLabel(value) };
     }
-    if (key === 'transactionHash') {
+    if (key === 'transactionHash' || key === 'jBlockHash') {
       const hash = String(value || '');
       return { label, value: hash.length > 18 ? `${hash.slice(0, 12)}...${hash.slice(-6)}` : hash || '-' };
+    }
+    if (key === 'route' && Array.isArray(value)) {
+      const path = value
+        .map((hop) => String(hop || '').trim())
+        .filter(Boolean)
+        .map((hop) => entityLabel(hop));
+      return { label, value: path.length > 0 ? path.join(' → ') : '-' };
+    }
+    if (key === 'observedAt') {
+      const observedAt = toNumberSafe(value);
+      if (observedAt === null || observedAt <= 0) return { label, value: '-' };
+      return {
+        label,
+        value: new Date(observedAt).toLocaleString(undefined, {
+          month: 'short',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+      };
+    }
+    if (key === 'description') {
+      const text = String(value || '').trim();
+      return { label, value: text || '-' };
     }
     if (key === 'offerId' || key === 'requestId' || key === 'lockId') {
       return { label, value: String(value || '-') };
     }
     if (key === 'events' && Array.isArray(value)) {
-      const preview = value.slice(0, 2).map((ev) => String((ev as { type?: unknown })?.type || 'event')).join(', ');
-      const suffix = value.length > 2 ? ', ...' : '';
-      return { label, value: `${value.length} (${preview}${suffix})` };
+      const preview = value
+        .slice(0, 3)
+        .map((ev) => String((ev as { type?: unknown })?.type || 'event').replace(/_/g, ' '))
+        .join(', ');
+      const suffix = value.length > 3 ? ', ...' : '';
+      return { label, value: `${value.length} · ${preview}${suffix}` };
     }
     if (key.endsWith('TokenId') || key === 'tokenId' || key === 'feeTokenId') {
       const tokenId = toTokenIdSafe(value);
@@ -349,12 +382,16 @@
     const orderedKeys = [
       'offerId',
       'counterpartyEntityId',
+      'fromEntityId',
+      'toEntityId',
       'tokenId',
       'giveTokenId',
       'wantTokenId',
       'amount',
       'giveAmount',
       'wantAmount',
+      'description',
+      'route',
       'priceTicks',
       'minFillRatio',
       'fillRatio',
@@ -368,6 +405,8 @@
       'maxAcceptableFee',
       'workspaceVersion',
       'jHeight',
+      'jBlockHash',
+      'observedAt',
       'events',
       'blockNumber',
       'transactionHash',

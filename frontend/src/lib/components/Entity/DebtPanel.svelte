@@ -153,11 +153,11 @@
   <details class="debt-panel" data-testid="debt-panel">
     <summary class="debt-summary">
       <div class="debt-summary-copy">
-        <span class="debt-summary-title">Debts</span>
+        <span class="debt-summary-title">Debts {formatUsd(totalOutstandingUsd)}</span>
         <span class="debt-summary-meta">{totalOpenDebtCount} open · {totalDebtEntries} entries</span>
       </div>
       <div class="debt-summary-total">
-        <span>Total Debts</span>
+        <span>Total debts</span>
         <strong>{formatUsd(totalOutstandingUsd)}</strong>
       </div>
     </summary>
