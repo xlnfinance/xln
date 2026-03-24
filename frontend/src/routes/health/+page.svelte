@@ -4,8 +4,8 @@
 
   type HealthData = {
     timestamp: number;
-    uptime: number;
-    jMachines: Array<{
+    uptime?: number | null;
+    jMachines?: Array<{
       name: string;
       chainId: number;
       rpc: string[];
@@ -37,9 +37,21 @@
     };
     system: {
       runtime: boolean;
-      p2p: boolean;
-      database: boolean;
+      p2p?: boolean;
+      database?: boolean;
       relay: boolean;
+    };
+    hubMesh?: {
+      ok?: boolean;
+      direct?: {
+        openLinkCount?: number;
+      };
+    };
+    custody?: {
+      ok?: boolean;
+    };
+    bootstrapReserves?: {
+      ok?: boolean;
     };
   };
 
@@ -139,6 +151,44 @@
   function formatLatency(ms?: number): string {
     if (typeof ms !== 'number') return 'N/A';
     return `${ms}ms`;
+  }
+
+  function normalizeHealthData(raw: unknown): HealthData {
+    const input = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
+    const rawSystem = (input.system && typeof input.system === 'object') ? input.system as Record<string, unknown> : {};
+    const rawHubs = Array.isArray(input.hubs) ? input.hubs as HealthData['hubs'] : [];
+    const activeClientIds = Array.from(new Set(
+      rawHubs.flatMap((hub) => Array.isArray(hub?.activeClients) ? hub.activeClients : [])
+    ));
+    const relay = (input.relay && typeof input.relay === 'object') ? input.relay as HealthData['relay'] : undefined;
+    const hubMesh = (input.hubMesh && typeof input.hubMesh === 'object') ? input.hubMesh as HealthData['hubMesh'] : undefined;
+    const bootstrapReserves = (input.bootstrapReserves && typeof input.bootstrapReserves === 'object')
+      ? input.bootstrapReserves as HealthData['bootstrapReserves']
+      : undefined;
+    const custody = (input.custody && typeof input.custody === 'object') ? input.custody as HealthData['custody'] : undefined;
+
+    return {
+      timestamp: typeof input.timestamp === 'number' ? input.timestamp : Date.now(),
+      uptime: typeof input.uptime === 'number' ? input.uptime : null,
+      jMachines: Array.isArray(input.jMachines) ? input.jMachines as HealthData['jMachines'] : [],
+      hubs: rawHubs,
+      relay: {
+        activeClients: relay?.activeClients ?? activeClientIds,
+        activeClientCount: typeof relay?.activeClientCount === 'number' ? relay.activeClientCount : activeClientIds.length,
+        clientsDetailed: relay?.clientsDetailed ?? [],
+      },
+      system: {
+        runtime: Boolean(rawSystem.runtime),
+        relay: Boolean(rawSystem.relay),
+        p2p: typeof rawSystem.p2p === 'boolean' ? rawSystem.p2p : Boolean(hubMesh?.ok),
+        database: typeof rawSystem.database === 'boolean'
+          ? rawSystem.database
+          : Boolean(rawSystem.runtime) && (bootstrapReserves?.ok ?? true) && (custody?.ok ?? true),
+      },
+      hubMesh,
+      custody,
+      bootstrapReserves,
+    };
   }
 
   function short(id?: string, len = 10): string {
@@ -263,7 +313,7 @@
       if (!dRes.ok) throw new Error(`debug HTTP ${dRes.status}`);
       if (!eRes.ok) throw new Error(`entities HTTP ${eRes.status}`);
 
-      health = (await hRes.json()) as HealthData;
+      health = normalizeHealthData(await hRes.json());
       const debugData = (await dRes.json()) as DebugResponse;
       const entitiesData = (await eRes.json()) as DebugEntitiesResponse;
       events = Array.isArray(debugData.events) ? debugData.events : [];

@@ -35,6 +35,7 @@ import { normalizeLoopbackUrl } from '../loopback-url';
 type Args = {
   host: string;
   port: number;
+  publicWsBaseUrl: string;
   rpcUrl: string;
   dbRoot: string;
   mmEnabled: boolean;
@@ -291,14 +292,31 @@ const getArg = (name: string, fallback = ''): string => {
 
 const hasFlag = (name: string): boolean => argsRaw.includes(name);
 
+const normalizeWsBaseUrl = (raw: string, fallbackHost: string, fallbackPort: number): string => {
+  const fallback = `ws://${fallbackHost}:${fallbackPort}`;
+  const value = String(raw || '').trim() || fallback;
+  const parsed = new URL(value);
+  if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
+  if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
+  if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+    throw new Error(`Invalid --public-ws-base-url: ${value}`);
+  }
+  parsed.pathname = '';
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString().replace(/\/+$/, '');
+};
+
 const parseArgs = (): Args => {
   const port = Number(getArg('--port', '20002'));
   if (!Number.isFinite(port) || port <= 0) {
     throw new Error(`Invalid --port: ${String(port)}`);
   }
+  const host = getArg('--host', '127.0.0.1');
   return {
-    host: getArg('--host', '127.0.0.1'),
+    host,
     port,
+    publicWsBaseUrl: normalizeWsBaseUrl(getArg('--public-ws-base-url', ''), host, port),
     rpcUrl: normalizeLoopbackUrl(getArg('--rpc-url', process.env.ANVIL_RPC || 'http://127.0.0.1:8545')),
     dbRoot: resolve(getArg('--db-root', join(process.cwd(), '.e2e-mesh-db'))),
     mmEnabled: hasFlag('--mm'),
@@ -371,6 +389,32 @@ const marketMakerChild: MarketMakerChild = {
   lastHealth: null,
   lastInfo: null,
 };
+
+const normalizeMeshNodeKey = (value: string): string =>
+  String(value || '').trim().toLowerCase();
+
+const buildPublicDirectWsUrl = (nodeName: string): string =>
+  `${args.publicWsBaseUrl}/mesh/${normalizeMeshNodeKey(nodeName)}/ws`;
+
+const getMeshProxyTargetUrl = (nodeKey: string): string | null => {
+  const normalized = normalizeMeshNodeKey(nodeKey);
+  const hubChild = hubChildren.find((child) => normalizeMeshNodeKey(child.name) === normalized);
+  if (hubChild) {
+    return `ws://127.0.0.1:${hubChild.apiPort}/ws`;
+  }
+  if (normalizeMeshNodeKey(marketMakerChild.name) === normalized) {
+    return `ws://127.0.0.1:${marketMakerChild.apiPort}/ws`;
+  }
+  return null;
+};
+
+type MeshProxySession = {
+  targetUrl: string;
+  upstream: WebSocket | null;
+  pendingOutbound: Array<string | ArrayBuffer | Uint8Array>;
+};
+
+const meshProxySessions = new WeakMap<any, MeshProxySession>();
 
 let custodySupport: CustodySupportState | null = null;
 const rpcMarketSubscriptions = new Map<any, RpcMarketSubscription>();
@@ -753,6 +797,7 @@ const spawnHub = (child: HubChild): void => {
     '--relay-url', relayUrl,
     '--api-host', args.host,
     '--api-port', String(child.apiPort),
+    '--direct-ws-url', buildPublicDirectWsUrl(child.name),
     '--rpc-url', args.rpcUrl,
     '--mesh-hub-names', getHubSpecsArg(),
     '--support-peer-identities-json', JSON.stringify([getMarketMakerIdentity()]),
@@ -800,6 +845,7 @@ const spawnMarketMaker = (): void => {
     '--relay-url', relayUrl,
     '--api-host', args.host,
     '--api-port', String(marketMakerChild.apiPort),
+    '--direct-ws-url', buildPublicDirectWsUrl(marketMakerChild.name),
     '--rpc-url', args.rpcUrl,
     '--mesh-hub-names', getHubSpecsArg(),
     '--mesh-hub-identities-json', getMeshHubIdentitiesArg(),
@@ -1495,6 +1541,17 @@ const server = Bun.serve({
       return new Response(null, { headers });
     }
 
+    const meshWsMatch = pathname.match(/^\/mesh\/([^/]+)\/ws$/i);
+    if (request.headers.get('upgrade') === 'websocket' && meshWsMatch) {
+      const targetUrl = getMeshProxyTargetUrl(meshWsMatch[1] || '');
+      if (!targetUrl) {
+        return new Response('Unknown mesh node', { status: 404 });
+      }
+      const upgraded = serverRef.upgrade(request, { data: { type: 'mesh-proxy', targetUrl } });
+      if (upgraded) return undefined;
+      return new Response('WebSocket upgrade failed', { status: 400 });
+    }
+
     if (request.headers.get('upgrade') === 'websocket' && pathname === '/relay') {
       const upgraded = serverRef.upgrade(request, { data: { type: 'relay' } });
       if (upgraded) return undefined;
@@ -1727,13 +1784,59 @@ const server = Bun.serve({
     });
   },
   websocket: {
-    open() {
+    open(ws) {
+      const wsType = String((ws as { data?: { type?: string } }).data?.type || 'relay');
+      if (wsType === 'mesh-proxy') {
+        const targetUrl = String((ws as { data?: { targetUrl?: string } }).data?.targetUrl || '').trim();
+        if (!targetUrl) {
+          try { ws.close(1011, 'mesh-target-missing'); } catch {}
+          return;
+        }
+        const upstream = new WebSocket(targetUrl);
+        const session: MeshProxySession = {
+          targetUrl,
+          upstream,
+          pendingOutbound: [],
+        };
+        upstream.binaryType = 'arraybuffer';
+        upstream.onopen = () => {
+          for (const chunk of session.pendingOutbound.splice(0)) {
+            upstream.send(chunk);
+          }
+        };
+        upstream.onmessage = (event) => {
+          try {
+            ws.send(event.data as string | ArrayBuffer | Uint8Array);
+          } catch {}
+        };
+        upstream.onerror = () => {
+          try { ws.close(1011, 'mesh-upstream-error'); } catch {}
+        };
+        upstream.onclose = () => {
+          try { ws.close(1000, 'mesh-upstream-closed'); } catch {}
+        };
+        meshProxySessions.set(ws, session);
+        return;
+      }
       pushDebugEvent(relayStore, {
         event: 'ws_open',
         details: { wsType: 'relay' },
       });
     },
     message(ws, raw) {
+      const meshProxy = meshProxySessions.get(ws);
+      if (meshProxy) {
+        const upstream = meshProxy.upstream;
+        if (!upstream) {
+          return;
+        }
+        if (upstream.readyState === WebSocket.OPEN) {
+          upstream.send(raw as string | ArrayBuffer | Uint8Array);
+        } else if (upstream.readyState === WebSocket.CONNECTING) {
+          meshProxy.pendingOutbound.push(raw as string | ArrayBuffer | Uint8Array);
+        }
+        return;
+      }
       const msgStr = raw.toString();
       try {
         const msg = JSON.parse(msgStr);
@@ -1774,6 +1877,14 @@ const server = Bun.serve({
       }
     },
     close(ws) {
+      const meshProxy = meshProxySessions.get(ws);
+      if (meshProxy) {
+        try {
+          meshProxy.upstream?.close();
+        } catch {}
+        meshProxySessions.delete(ws);
+        return;
+      }
       cleanupRpcMarketSubscription(ws);
       removeClient(relayStore, ws);
     },

@@ -46,6 +46,7 @@ type Args = {
   relayUrl: string;
   apiHost: string;
   apiPort: number;
+  directWsUrl: string;
   rpcUrl: string;
   meshHubNames: string[];
   meshHubIdentitiesJson: string;
@@ -189,6 +190,7 @@ const parseArgs = (): Args => {
     relayUrl: getArg('--relay-url', 'ws://127.0.0.1:20002/relay'),
     apiHost: getArg('--api-host', '127.0.0.1'),
     apiPort,
+    directWsUrl: getArg('--direct-ws-url', ''),
     rpcUrl: getArg('--rpc-url', ''),
     meshHubNames: getArg('--mesh-hub-names', 'H1,H2,H3')
       .split(',')
@@ -201,7 +203,8 @@ const parseArgs = (): Args => {
 
 const resolvedArgs = parseArgs();
 const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
-const directWsUrl = `ws://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}/ws`;
+const directWsUrl = String(resolvedArgs.directWsUrl || '').trim()
+  || `ws://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}/ws`;
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig => {

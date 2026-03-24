@@ -19,6 +19,7 @@ export ANVIL_RPC="http://127.0.0.1:${RPC_PORT}"
 export PUBLIC_RPC=${PUBLIC_RPC:-https://xln.finance/rpc}
 export INTERNAL_RELAY_URL=${INTERNAL_RELAY_URL:-ws://127.0.0.1:${API_PORT}/relay}
 export PUBLIC_RELAY_URL=${PUBLIC_RELAY_URL:-wss://xln.finance/relay}
+export PUBLIC_WS_BASE_URL=${PUBLIC_WS_BASE_URL:-wss://xln.finance}
 export RELAY_URL=${RELAY_URL:-$INTERNAL_RELAY_URL}
 export XLN_RUNTIME_SEED=${XLN_RUNTIME_SEED:-xln-prod-main-runtime}
 export XLN_DB_PATH=${XLN_DB_PATH:-$REPO_ROOT/db/runtime/prod-main}
@@ -38,6 +39,7 @@ xln_kill_by_port "$API_PORT" start-server
 exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts \
   --host 127.0.0.1 \
   --port "$API_PORT" \
+  --public-ws-base-url "$PUBLIC_WS_BASE_URL" \
   --rpc-url "$ANVIL_RPC" \
   --db-root "$XLN_MESH_DB_ROOT" \
   --mm \
