@@ -128,8 +128,6 @@ const normalizeWsUrls = (items: string[] | undefined): string[] =>
 const isDirectRuntimeEndpoint = (endpoint: string, relayUrls: string[]): boolean => {
   const endpointUrl = parseWsUrl(endpoint);
   if (!endpointUrl) return false;
-  const endpointPath = endpointUrl.pathname.replace(/\/+$/, '') || '/';
-  if (endpointPath !== '/ws') return false;
   const endpointKey = getWsUrlKey(endpoint, true);
   if (!endpointKey) return false;
   return !relayUrls.some((relayUrl) => getWsUrlKey(relayUrl, true) === endpointKey);

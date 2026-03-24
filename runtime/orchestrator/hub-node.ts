@@ -63,6 +63,7 @@ type Args = {
   relayUrl: string;
   apiHost: string;
   apiPort: number;
+  directWsUrl: string;
   rpcUrl: string;
   meshHubNames: string[];
   supportPeerIdentitiesJson: string;
@@ -190,6 +191,7 @@ const parseArgs = (): Args => {
     relayUrl: getArg('--relay-url', 'ws://127.0.0.1:20002/relay'),
     apiHost: getArg('--api-host', '127.0.0.1'),
     apiPort,
+    directWsUrl: getArg('--direct-ws-url', ''),
     rpcUrl: getArg('--rpc-url', ''),
     meshHubNames: getArg('--mesh-hub-names', 'H1,H2,H3')
       .split(',')
@@ -239,7 +241,8 @@ const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
 const resolvedArgs = parseArgs();
 const supportPeerIdentities = parseSupportPeerIdentities(resolvedArgs.supportPeerIdentitiesJson);
 const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
-const directWsUrl = `ws://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}/ws`;
+const directWsUrl = String(resolvedArgs.directWsUrl || '').trim()
+  || `ws://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}/ws`;
 
 const timings: TimingMap = {
   runtime_boot: { startedAt: null, completedAt: null, ms: null },

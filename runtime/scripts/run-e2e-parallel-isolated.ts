@@ -505,6 +505,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
       'runtime/orchestrator/orchestrator.ts',
       '--host', '127.0.0.1',
       '--port', String(apiPort),
+      '--public-ws-base-url', `ws://127.0.0.1:${apiPort}`,
       '--rpc-url', rpcUrl,
       '--db-root', dbPath,
       '--allow-reset',

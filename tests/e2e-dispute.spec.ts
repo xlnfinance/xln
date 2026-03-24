@@ -580,7 +580,7 @@ async function queueFundR2CViaUi(
 
 async function queueWithdrawC2RViaUi(
   page: Page,
-  counterpartyId: string,
+  reserveRecipientId: string,
   amount: string,
 ): Promise<void> {
   await ensureAssetsWorkspaceVisible(page);
@@ -594,8 +594,7 @@ async function queueWithdrawC2RViaUi(
 
   await page.getByTestId('move-source-account').first().click();
   await page.getByTestId('move-target-reserve').first().click();
-
-  await selectEntityInputValue(page, 'move-source-account-picker', counterpartyId);
+  await selectEntityInputValue(page, 'move-reserve-recipient-picker', reserveRecipientId);
 
   const amountInput = page.getByTestId('move-amount').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });

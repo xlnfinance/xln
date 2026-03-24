@@ -37,7 +37,7 @@ fi
 # Start orchestrator
 echo "[4/4] Starting XLN mesh orchestrator..."
 mkdir -p logs
-nohup bun runtime/orchestrator/orchestrator.ts --host 127.0.0.1 --port 8080 --rpc-url http://127.0.0.1:8545 --db-root ./db/local/mesh --mm --custody --allow-reset --custody-port 8087 --custody-daemon-port 8088 --wallet-url https://localhost:8084/app > logs/xln.log 2>&1 &
+nohup bun runtime/orchestrator/orchestrator.ts --host 127.0.0.1 --port 8080 --public-ws-base-url ws://127.0.0.1:8080 --rpc-url http://127.0.0.1:8545 --db-root ./db/local/mesh --mm --custody --allow-reset --custody-port 8087 --custody-daemon-port 8088 --wallet-url https://localhost:8084/app > logs/xln.log 2>&1 &
 SERVER_PID=$!
 echo "Server started with PID: $SERVER_PID"
 
