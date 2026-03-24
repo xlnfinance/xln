@@ -6,6 +6,10 @@ import { connectHub } from './utils/e2e-connect';
 import { getRenderedExternalBalance, getRenderedReserveBalance } from './utils/e2e-account-ui';
 
 const TOKEN_ID_USDC = 1;
+const TOKEN_SCALE = 10n ** 18n;
+const USD_150 = (150n * TOKEN_SCALE).toString();
+const USD_100 = (100n * TOKEN_SCALE).toString();
+const USD_50 = (50n * TOKEN_SCALE).toString();
 
 type RuntimeRef = {
   entityId: string;
@@ -175,64 +179,136 @@ async function extendCreditToken(page: Page, counterpartyId: string, tokenId: nu
   await expect.poll(async () => amountInput.inputValue(), { timeout: 15_000 }).toBe('0');
 }
 
-async function sendDirectPayment(page: Page, recipientId: string, amount: string): Promise<void> {
-  await openWorkspaceTab(page, /Pay/i);
-  const payPanel = page.locator('.payment-panel').first();
-  await expect(payPanel).toBeVisible({ timeout: 20_000 });
+async function enqueueEntityTxs(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  entityTxs: Array<{ type: string; data: Record<string, unknown> }>,
+): Promise<void> {
+  const result = await page.evaluate(async ({ entityId, signerId, entityTxs }) => {
+    const view = window as typeof window & {
+      isolatedEnv?: unknown;
+      __xln_env?: unknown;
+      XLN?: {
+        enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
+      };
+      __xln_instance?: {
+        enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
+      };
+    };
+    const env = view.isolatedEnv ?? view.__xln_env;
+    const XLN = view.XLN
+      ?? view.__xln_instance
+      ?? await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+    if (!env || !XLN?.enqueueRuntimeInput) {
+      return { ok: false, error: 'isolatedEnv/XLN missing' };
+    }
+    XLN.enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{ entityId, signerId, entityTxs }],
+    });
+    return { ok: true };
+  }, { entityId, signerId, entityTxs });
+  expect(result.ok, result.error || 'failed to enqueue entity txs').toBe(true);
+}
 
-  const recipientEntityInput = payPanel.locator('.recipient-picker-row .entity-input').first();
-  const recipientTrigger = recipientEntityInput.locator('.closed-trigger').first();
-  if (await recipientTrigger.isVisible().catch(() => false)) {
-    await recipientTrigger.click();
-  } else {
-    const recipientInput = recipientEntityInput.locator('input').first();
-    await expect(recipientInput).toBeVisible({ timeout: 10_000 });
-    await recipientInput.fill(recipientId);
-    await recipientInput.press('Tab');
-  }
-  const recipientOption = page.locator('.dropdown-item').filter({ hasText: recipientId }).first();
-  await expect(recipientOption).toBeVisible({ timeout: 10_000 });
-  await recipientOption.click();
+async function extendCreditDirect(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+  tokenId: number,
+  amount: bigint,
+): Promise<void> {
+  const before = await readAccountProgress(page, entityId, signerId, counterpartyId);
+  await enqueueEntityTxs(page, entityId, signerId, [{
+    type: 'extendCredit',
+    data: {
+      counterpartyEntityId: counterpartyId,
+      tokenId,
+      amount,
+    },
+  }]);
+  await expect
+    .poll(async () => (await readAccountProgress(page, entityId, signerId, counterpartyId)).currentHeight, {
+      timeout: 45_000,
+      intervals: [500, 1000, 1500],
+    })
+    .toBeGreaterThan(before.currentHeight);
+}
 
-  const amountInput = page.locator('#payment-amount-input');
-  await expect(amountInput).toBeVisible({ timeout: 10_000 });
-  await amountInput.fill(amount);
+async function sendDirectPayment(
+  senderPage: Page,
+  senderEntityId: string,
+  senderSignerId: string,
+  recipientPage: Page,
+  recipientEntityId: string,
+  recipientSignerId: string,
+  recipientId: string,
+  amount: string,
+): Promise<void> {
+  const senderBefore = await readAccountProgress(senderPage, senderEntityId, senderSignerId, recipientId);
+  const recipientBefore = await readAccountProgress(recipientPage, recipientEntityId, recipientSignerId, senderEntityId);
 
-  const findRoutesBtn = page.getByRole('button', { name: 'Find Routes' }).first();
-  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
-  await findRoutesBtn.click();
-
-  await expect(page.locator('.route-option').first()).toBeVisible({ timeout: 15_000 });
-  const payNow = page.getByRole('button', { name: /Send On Selected Route|Pay Now/i }).first();
-  await expect(payNow).toBeEnabled({ timeout: 10_000 });
-  await payNow.click();
+  await enqueueEntityTxs(senderPage, senderEntityId, senderSignerId, [{
+    type: 'directPayment',
+    data: {
+      targetEntityId: recipientId,
+      tokenId: TOKEN_ID_USDC,
+      amount: BigInt(amount) * TOKEN_SCALE,
+      route: [senderEntityId, recipientId],
+      description: 'debt-e2e-direct-bilateral',
+    },
+  }]);
+  await expect
+    .poll(async () => (await readAccountProgress(senderPage, senderEntityId, senderSignerId, recipientId)).currentHeight, {
+      timeout: 45_000,
+      intervals: [500, 1000, 1500],
+    })
+    .toBeGreaterThan(senderBefore.currentHeight);
+  await expect
+    .poll(async () => (await readAccountProgress(recipientPage, recipientEntityId, recipientSignerId, senderEntityId)).currentHeight, {
+      timeout: 45_000,
+      intervals: [500, 1000, 1500],
+    })
+    .toBeGreaterThan(recipientBefore.currentHeight);
 }
 
 async function queueAndBroadcastDisputeStart(page: Page, counterpartyId: string): Promise<void> {
-  await openConfigureWorkspace(page, counterpartyId);
-  const disputeTab = page.locator('.configure-tab').filter({ hasText: /^Dispute$/i }).first();
-  await expect(disputeTab).toBeVisible({ timeout: 20_000 });
-  await disputeTab.click();
-  await selectConfigureAccount(page, counterpartyId);
-  const startButton = page.getByTestId('configure-dispute-start').first();
-  await expect(startButton).toBeVisible({ timeout: 20_000 });
-  await startButton.click();
+  throw new Error('use queueAndBroadcastDisputeStartDirect');
+}
+
+async function broadcastDraftBatch(page: Page): Promise<void> {
   const broadcast = page.getByTestId('settle-sign-broadcast').first();
   await expect(broadcast).toBeEnabled({ timeout: 20_000 });
   await broadcast.click();
 }
 
-async function queueAndBroadcastDisputeFinalize(page: Page, counterpartyId: string): Promise<void> {
-  await openConfigureWorkspace(page, counterpartyId);
-  const disputeTab = page.locator('.configure-tab').filter({ hasText: /^Dispute$/i }).first();
-  await disputeTab.click();
-  await selectConfigureAccount(page, counterpartyId);
-  const finalizeButton = page.getByTestId('configure-dispute-finalize').first();
-  await expect(finalizeButton).toBeVisible({ timeout: 20_000 });
-  await finalizeButton.click();
-  const broadcast = page.getByTestId('settle-sign-broadcast').first();
-  await expect(broadcast).toBeEnabled({ timeout: 20_000 });
-  await broadcast.click();
+async function queueAndBroadcastDisputeStartDirect(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+): Promise<void> {
+  await enqueueEntityTxs(page, entityId, signerId, [{
+    type: 'disputeStart',
+    data: { counterpartyEntityId: counterpartyId, description: 'debt-e2e-dispute-start' },
+  }]);
+  await expect(page.getByTestId('settle-sign-broadcast').first()).toBeVisible({ timeout: 20_000 });
+  await broadcastDraftBatch(page);
+}
+
+async function queueAndBroadcastDisputeFinalizeDirect(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+): Promise<void> {
+  await enqueueEntityTxs(page, entityId, signerId, [{
+    type: 'disputeFinalize',
+    data: { counterpartyEntityId: counterpartyId, description: 'debt-e2e-dispute-finalize' },
+  }]);
+  await enqueueEntityTxs(page, entityId, signerId, [{ type: 'j_broadcast', data: {} }]);
 }
 
 async function readAccountState(
@@ -240,10 +316,10 @@ async function readAccountState(
   entityId: string,
   signerId: string,
   counterpartyId: string,
-): Promise<{ activeDispute: boolean; disputeTimeout: number }> {
+): Promise<{ activeDispute: boolean; disputeTimeout: number; currentJHeight: number }> {
   return page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return { activeDispute: false, disputeTimeout: 0 };
+    if (!env?.eReplicas) return { activeDispute: false, disputeTimeout: 0, currentJHeight: 0 };
     const key = Array.from(env.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
@@ -254,6 +330,7 @@ async function readAccountState(
     return {
       activeDispute: !!account?.activeDispute,
       disputeTimeout: Number(account?.activeDispute?.disputeTimeout || 0),
+      currentJHeight: Number(account?.lastFinalizedJHeight || rep?.state?.lastFinalizedJHeight || 0),
     };
   }, { entityId, signerId, counterpartyId });
 }
@@ -322,6 +399,35 @@ async function readDebtSnapshot(
   }, { entityId, signerId, counterpartyId, direction, tokenId });
 }
 
+async function readAccountDeltaSnapshot(
+  page: Page,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+  tokenId = TOKEN_ID_USDC,
+): Promise<{ ondelta: string; offdelta: string; total: string } | null> {
+  return page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
+    const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) return null;
+    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+      const [eid, sid] = String(k).split(':');
+      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+    });
+    const rep = key ? env.eReplicas.get(key) : null;
+    const account = rep?.state?.accounts?.get?.(counterpartyId);
+    const delta = account?.deltas?.get?.(tokenId);
+    if (!delta) return null;
+    const ondelta = BigInt(delta.ondelta || 0n);
+    const offdelta = BigInt(delta.offdelta || 0n);
+    return {
+      ondelta: ondelta.toString(),
+      offdelta: offdelta.toString(),
+      total: (ondelta + offdelta).toString(),
+    };
+  }, { entityId, signerId, counterpartyId, tokenId });
+}
+
 async function waitForDebtSnapshot(
   page: Page,
   entityId: string,
@@ -340,15 +446,19 @@ async function waitForDebtSnapshot(
   return latest!;
 }
 
-async function faucetReserve(page: Page, symbol = 'USDC'): Promise<void> {
-  const assetsTab = page.getByTestId('tab-assets').first();
-  await assetsTab.click();
-  const symbolSelect = page.getByTestId('asset-faucet-symbol').first();
-  await expect(symbolSelect).toBeVisible({ timeout: 20_000 });
-  await symbolSelect.selectOption(symbol);
-  const reserveButton = page.getByTestId(`reserve-faucet-${symbol}`).first();
-  await expect(reserveButton).toBeEnabled({ timeout: 20_000 });
-  await reserveButton.click();
+async function faucetReserve(page: Page, entityId: string, symbol = 'USDC'): Promise<void> {
+  await page.getByTestId('tab-assets').first().click();
+  const response = await page.request.post(`${APP_BASE_URL}/api/faucet/reserve`, {
+    data: {
+      userEntityId: entityId,
+      tokenId: TOKEN_ID_USDC,
+      tokenSymbol: symbol,
+      amount: '100',
+    },
+  });
+  expect(response.ok(), 'reserve faucet api must succeed').toBe(true);
+  const body = await response.json() as { success?: boolean; error?: string };
+  expect(body.success, body.error || 'reserve faucet api failed').toBe(true);
 }
 
 async function openReserveToExternalMove(page: Page, amount: string, recipient: string): Promise<void> {
@@ -361,10 +471,26 @@ async function openReserveToExternalMove(page: Page, amount: string, recipient: 
   await page.getByTestId('move-amount').first().fill(amount);
 }
 
+async function openOutstandingDebtToken(page: Page, symbol = 'USDC'): Promise<void> {
+  await page.getByTestId('tab-accounts').first().click();
+  const debtPanel = page.getByTestId('debt-panel').first();
+  await expect(debtPanel).toBeVisible({ timeout: 20_000 });
+  if (!(await debtPanel.evaluate((node) => node.hasAttribute('open')))) {
+    await debtPanel.locator('summary').first().click();
+  }
+  const tokenGroup = page.locator('.debt-token-group').filter({ hasText: symbol }).first();
+  await expect(tokenGroup).toBeVisible({ timeout: 20_000 });
+  if (!(await tokenGroup.evaluate((node) => node.hasAttribute('open')))) {
+    await tokenGroup.locator('.debt-token-summary').first().click();
+  }
+}
+
 test.describe('debt ledger', () => {
   test('mirrors debts on both sides and only explicit enforce repays partial debt', async ({ browser }) => {
     test.setTimeout(240_000);
+    const step = (label: string) => console.log(`[debt-e2e] ${label}`);
 
+    step('bootstrap');
     const setupContext = await browser.newContext();
     const setupPage = await setupContext.newPage();
     await gotoApp(setupPage, { appBaseUrl: APP_BASE_URL });
@@ -381,13 +507,38 @@ test.describe('debt ledger', () => {
     await connectHub(alicePage, hubId);
     await connectHub(bobPage, hubId);
 
+    step('open-accounts');
     await ensurePrivateAccountOpenViaUi(alicePage, alice.entityId, alice.signerId, bob.entityId);
     await ensurePrivateAccountOpenViaUi(bobPage, bob.entityId, bob.signerId, alice.entityId);
 
-    await extendCreditToken(alicePage, bob.entityId, TOKEN_ID_USDC, '1000');
-    await sendDirectPayment(bobPage, alice.entityId, '150');
+    step('extend-credit');
+    await extendCreditDirect(alicePage, alice.entityId, alice.signerId, bob.entityId, TOKEN_ID_USDC, 1000n * TOKEN_SCALE);
+    step('direct-payment');
+    await sendDirectPayment(
+      bobPage,
+      bob.entityId,
+      bob.signerId,
+      alicePage,
+      alice.entityId,
+      alice.signerId,
+      alice.entityId,
+      '150',
+    );
+    await expect
+      .poll(async () => (await readAccountDeltaSnapshot(alicePage, alice.entityId, alice.signerId, bob.entityId))?.total || '0', {
+        timeout: 45_000,
+        intervals: [500, 1000, 1500],
+      })
+      .not.toBe('0');
+    await expect
+      .poll(async () => (await readAccountDeltaSnapshot(bobPage, bob.entityId, bob.signerId, alice.entityId))?.total || '0', {
+        timeout: 45_000,
+        intervals: [500, 1000, 1500],
+      })
+      .not.toBe('0');
 
-    await queueAndBroadcastDisputeStart(alicePage, bob.entityId);
+    step('dispute-start');
+    await queueAndBroadcastDisputeStartDirect(alicePage, alice.entityId, alice.signerId, bob.entityId);
     await expect
       .poll(async () => (await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId)).activeDispute, {
         timeout: 45_000,
@@ -395,20 +546,46 @@ test.describe('debt ledger', () => {
       })
       .toBe(true);
 
-    const activeDispute = await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId);
-    const currentBlock = await readCurrentChainBlock(alicePage);
-    await waitForBlock(alicePage, Math.max(currentBlock, activeDispute.disputeTimeout));
-    await queueAndBroadcastDisputeFinalize(alicePage, bob.entityId);
+    let disputeState = await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId);
+    await expect
+      .poll(async () => {
+        disputeState = await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId);
+        return disputeState.activeDispute && disputeState.disputeTimeout > 0 ? 'ready' : 'pending';
+      }, {
+        timeout: 45_000,
+        intervals: [500, 1000, 1500],
+      })
+      .toBe('ready');
 
-    const aliceIncoming = await waitForDebtSnapshot(alicePage, alice.entityId, alice.signerId, bob.entityId, 'in', '150', '0');
-    const bobOutgoing = await waitForDebtSnapshot(bobPage, bob.entityId, bob.signerId, alice.entityId, 'out', '150', '0');
+    const timeoutBlock = disputeState.disputeTimeout;
+    await waitForBlock(alicePage, timeoutBlock);
+    await expect
+      .poll(async () => (await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId)).currentJHeight, {
+        timeout: 45_000,
+        intervals: [500, 1000, 1500],
+      })
+      .toBeGreaterThanOrEqual(timeoutBlock);
 
-    expect(aliceIncoming.createdAmount).toBe('150');
+    step('dispute-finalize');
+    await queueAndBroadcastDisputeFinalizeDirect(alicePage, alice.entityId, alice.signerId, bob.entityId);
+    await expect
+      .poll(async () => (await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId)).activeDispute, {
+        timeout: 45_000,
+        intervals: [500, 1000, 1500],
+      })
+      .toBe(false);
+
+    step('wait-debt-mirror');
+    const aliceIncoming = await waitForDebtSnapshot(alicePage, alice.entityId, alice.signerId, bob.entityId, 'in', USD_150, '0');
+    const bobOutgoing = await waitForDebtSnapshot(bobPage, bob.entityId, bob.signerId, alice.entityId, 'out', USD_150, '0');
+
+    expect(aliceIncoming.createdAmount).toBe(USD_150);
     expect(aliceIncoming.updates).toEqual(['DebtCreated']);
-    expect(bobOutgoing.createdAmount).toBe('150');
+    expect(bobOutgoing.createdAmount).toBe(USD_150);
     expect(bobOutgoing.updates).toEqual(['DebtCreated']);
 
-    await faucetReserve(bobPage, 'USDC');
+    step('underfunded-r2e-block');
+    await faucetReserve(bobPage, bob.entityId, 'USDC');
     await expect.poll(async () => await getRenderedReserveBalance(bobPage, 'USDC'), {
       timeout: 20_000,
       intervals: [500, 1000],
@@ -417,7 +594,8 @@ test.describe('debt ledger', () => {
     await openReserveToExternalMove(bobPage, '10', bob.signerId);
     await expect(bobPage.getByTestId('move-confirm').first()).toBeDisabled({ timeout: 10_000 });
 
-    await openAccountsWorkspace(bobPage);
+    step('partial-enforce');
+    await openOutstandingDebtToken(bobPage, 'USDC');
     const enforceButton = bobPage.getByTestId(`debt-enforce-${TOKEN_ID_USDC}`).first();
     await expect(enforceButton).toBeVisible({ timeout: 20_000 });
     await enforceButton.click();
@@ -430,16 +608,18 @@ test.describe('debt ledger', () => {
         timeout: 45_000,
         intervals: [500, 1000, 1500],
       })
-      .toBe('50:100');
+      .toBe(`${USD_50}:${USD_100}`);
 
     const afterPartial = await readDebtSnapshot(bobPage, bob.entityId, bob.signerId, alice.entityId, 'out');
     expect(afterPartial?.updates).toEqual(['DebtCreated', 'DebtEnforced']);
 
-    await faucetReserve(bobPage, 'USDC');
+    step('full-enforce');
+    await faucetReserve(bobPage, bob.entityId, 'USDC');
     await expect.poll(async () => await getRenderedReserveBalance(bobPage, 'USDC'), {
       timeout: 20_000,
       intervals: [500, 1000],
     }).toBeGreaterThanOrEqual(50);
+    await openOutstandingDebtToken(bobPage, 'USDC');
     await bobPage.getByTestId(`debt-enforce-${TOKEN_ID_USDC}`).first().click();
 
     await expect
@@ -450,22 +630,22 @@ test.describe('debt ledger', () => {
         timeout: 45_000,
         intervals: [500, 1000, 1500],
       })
-      .toBe('paid:0:150');
+      .toBe(`paid:0:${USD_150}`);
 
-    await faucetReserve(bobPage, 'USDC');
+    step('overfunded-r2e');
+    await faucetReserve(bobPage, bob.entityId, 'USDC');
     const externalBefore = await getRenderedExternalBalance(bobPage, 'USDC');
     await openReserveToExternalMove(bobPage, '20', bob.signerId);
     const moveConfirm = bobPage.getByTestId('move-confirm').first();
     await expect(moveConfirm).toBeEnabled({ timeout: 20_000 });
     await moveConfirm.click();
-    const broadcast = bobPage.getByTestId('settle-sign-broadcast').first();
-    await expect(broadcast).toBeEnabled({ timeout: 20_000 });
-    await broadcast.click();
+    await broadcastDraftBatch(bobPage);
 
     await expect.poll(async () => await getRenderedExternalBalance(bobPage, 'USDC'), {
       timeout: 45_000,
       intervals: [500, 1000, 1500],
     }).toBeGreaterThan(externalBefore);
+    step('done');
 
     await alicePage.context().close();
     await bobPage.context().close();

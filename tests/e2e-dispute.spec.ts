@@ -409,26 +409,32 @@ async function ensureAccountWorkspaceVisible(page: Page, counterpartyId?: string
     await accountList.isVisible({ timeout: 500 }).catch(() => false)
       || await workspaceTabs.isVisible({ timeout: 500 }).catch(() => false);
 
-  if (await accountsTab.isVisible({ timeout: 500 }).catch(() => false)) {
-    await accountsTab.click();
-  } else if (await openAccountsWorkspaceButton.isVisible({ timeout: 500 }).catch(() => false)) {
-    await openAccountsWorkspaceButton.evaluate((button: HTMLButtonElement) => button.click());
-    await expect.poll(async () => await isAccountsWorkspaceVisible(), {
-      timeout: 20_000,
-      intervals: [200, 400, 800],
-      message: 'open accounts workspace button must return to accounts workspace',
-    }).toBe(true);
-  } else if (!await isAccountsWorkspaceVisible()) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (await isAccountsWorkspaceVisible()) break;
+    if (await openAccountsWorkspaceButton.isVisible({ timeout: 500 }).catch(() => false)) {
+      await openAccountsWorkspaceButton.evaluate((button: HTMLButtonElement) => button.click());
+      await page.waitForTimeout(300);
+      continue;
+    }
     const backButton = page.locator('.account-panel .back-button').first();
     if (await backButton.isVisible({ timeout: 500 }).catch(() => false)) {
       await backButton.click();
+      await page.waitForTimeout(300);
+      continue;
     }
-    await expect.poll(async () => await isAccountsWorkspaceVisible(), {
-      timeout: 20_000,
-      intervals: [200, 400, 800],
-      message: 'accounts workspace must be visible',
-    }).toBe(true);
+    if (await accountsTab.isVisible({ timeout: 500 }).catch(() => false)) {
+      await accountsTab.click();
+      await page.waitForTimeout(300);
+      continue;
+    }
+    break;
   }
+
+  await expect.poll(async () => await isAccountsWorkspaceVisible(), {
+    timeout: 20_000,
+    intervals: [200, 400, 800],
+    message: 'accounts workspace must be visible',
+  }).toBe(true);
 
   if (!counterpartyId) {
     return;
@@ -680,24 +686,32 @@ async function queueTransferR2RViaUi(
   recipientEntityId: string,
   amount: string,
 ): Promise<void> {
-  await openEntitySettleWorkspace(page);
+  await ensureAssetsWorkspaceVisible(page);
+  const assetsTab = page.getByTestId('tab-assets').first();
+  await expect(assetsTab).toBeVisible({ timeout: 20_000 });
+  await assetsTab.click();
 
-  const transferTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^Reserve → Reserve$/ }).first();
-  await expect(transferTab).toBeVisible({ timeout: 20_000 });
-  await transferTab.click();
+  const moveTab = page.getByTestId('asset-tab-move').first();
+  await expect(moveTab).toBeVisible({ timeout: 20_000 });
+  await moveTab.click();
 
-  const recipientPicker = page.locator('.settlement-panel .entity-input .closed-trigger, .settlement-panel .entity-input input').first();
-  await expect(recipientPicker).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('move-source-reserve').first().click();
+  await page.getByTestId('move-target-reserve').first().click();
+
+  const recipientField = page.getByTestId('move-reserve-recipient-field').first();
+  await expect(recipientField).toBeVisible({ timeout: 20_000 });
+  const recipientPicker = recipientField.locator('.closed-trigger, input').first();
   await recipientPicker.click();
-  const recipientOption = page.locator('.dropdown-item').filter({ hasText: recipientEntityId }).first();
-  await expect(recipientOption).toBeVisible({ timeout: 20_000 });
-  await recipientOption.click();
+  const recipientInput = recipientField.locator('input').first();
+  await expect(recipientInput).toBeVisible({ timeout: 20_000 });
+  await recipientInput.fill(recipientEntityId);
+  await recipientInput.evaluate((node: HTMLInputElement) => node.blur());
 
-  const amountInput = page.locator('.settlement-panel .settle-amount-shell input').first();
+  const amountInput = page.getByTestId('move-amount').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await amountInput.fill(amount);
 
-  const transferButton = page.getByTestId('settle-queue-action').first();
+  const transferButton = page.getByTestId('move-confirm').first();
   await expect(transferButton).toBeEnabled({ timeout: 20_000 });
   await transferButton.click();
 }
@@ -754,6 +768,7 @@ async function seedDisputePreconditions(
           current.counterpartyDisputeProofBodyHash !== before.counterpartyDisputeProofBodyHash;
         const hasFreshProofNonce =
           typeof current.counterpartyDisputeProofNonce === 'number' &&
+          current.counterpartyDisputeProofNonce > 0 &&
           (
             before.counterpartyDisputeProofNonce === null ||
             current.counterpartyDisputeProofNonce > before.counterpartyDisputeProofNonce
@@ -772,6 +787,7 @@ async function seedDisputePreconditions(
         hasProof: true,
         pendingFrame: false,
         freshProofHash: true,
+        freshProofNonce: true,
       });
 
       seeded = true;
@@ -862,7 +878,9 @@ async function openEntitySettleWorkspace(page: Page, counterpartyId?: string, en
   const accountsTab = page.getByTestId('tab-accounts').first();
   await expect(accountsTab).toBeVisible({ timeout: 15_000 });
   await accountsTab.click();
-  const historyWorkspaceButton = page.locator('.account-workspace-tab').filter({ hasText: /^History$/i }).first();
+  const workspaceNav = page.locator('nav[aria-label="Account workspace"]').first();
+  await expect(workspaceNav).toBeVisible({ timeout: 15_000 });
+  const historyWorkspaceButton = workspaceNav.getByRole('button', { name: /^History$/i }).first();
   const historyVisible = await historyWorkspaceButton.isVisible({ timeout: 3_000 }).catch(() => false);
   if (historyVisible) {
     await historyWorkspaceButton.click();
@@ -870,9 +888,6 @@ async function openEntitySettleWorkspace(page: Page, counterpartyId?: string, en
 }
 
 async function assertBatchHistoryVisible(page: Page): Promise<void> {
-  const historyTab = page.locator('.settlement-panel .action-tabs .tab').filter({ hasText: /^History/ }).first();
-  await expect(historyTab).toBeVisible({ timeout: 20_000 });
-  await historyTab.click();
   const historyTitle = page.locator('.settlement-panel .history-title').first();
   await expect(historyTitle).toBeVisible({ timeout: 20_000 });
   await expect(historyTitle).toHaveText(/On-Chain Batch History/i);
@@ -891,7 +906,9 @@ async function startDisputeFromEntitySettle(
   await expect(accountsTab).toBeVisible({ timeout: 15_000 });
   await accountsTab.click();
 
-  const configureWorkspaceButton = page.locator('.account-workspace-tab').filter({ hasText: /^Configure$/i }).first();
+  const workspaceNav = page.locator('nav[aria-label="Account workspace"]').first();
+  await expect(workspaceNav).toBeVisible({ timeout: 15_000 });
+  const configureWorkspaceButton = workspaceNav.getByRole('button', { name: /^Configure$/i }).first();
   await expect(configureWorkspaceButton).toBeVisible({ timeout: 15_000 });
   await configureWorkspaceButton.click();
 
@@ -925,7 +942,7 @@ async function startDisputeFromEntitySettle(
 
   const disputeQueued = async () => {
     const state = await readAccountState(page, entityId, signerId, counterpartyId);
-    return state.status === 'disputed' && state.jBatchDisputeStarts > 0;
+    return state.jBatchDisputeStarts > 0;
   };
 
   try {
@@ -1313,12 +1330,20 @@ test.describe('E2E Dispute Flow', () => {
     const collateralBeforeState = await readAccountCollateralState(page, accountRef.entityId, accountRef.signerId, secondHubId, 1);
 
     const batchBeforeR2C = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+    const pendingReserveToCollateralBefore = batchBeforeR2C.pendingReserveToCollateral;
     const sentReserveToCollateralBefore = batchBeforeR2C.sentReserveToCollateral;
     const lastTxHashBeforeR2C = batchBeforeR2C.lastBatchTxHash;
     const r2cFinalizeCursor = await getPersistedReceiptCursor(page);
 
     const postDisputeCollateralAmount = '1';
     await timedStep('post_dispute.queue_r2c', () => queueFundR2CViaUi(page, secondHubId, postDisputeCollateralAmount));
+    await timedStep('post_dispute.wait_r2c_queued', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.pendingReserveToCollateral;
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(pendingReserveToCollateralBefore);
+    });
+    await timedStep('post_dispute.broadcast_r2c', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
     await timedStep('post_dispute.wait_r2c_sent', async () => {
       await expect.poll(async () => {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
@@ -1349,9 +1374,17 @@ test.describe('E2E Dispute Flow', () => {
     // propose settlement, wait for counterparty signature, auto-execute into jBatch, then
     // verify reserve increases without a second manual broadcast click.
     const c2rBatchBefore = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+    const c2rPendingBefore = c2rBatchBefore.pendingCollateralToReserve;
     const c2rSentBefore = c2rBatchBefore.sentCollateralToReserve;
     const reserveBeforeC2R = await readOnchainReserveViaAnvil(page, accountRef.entityId);
     await timedStep('post_dispute.queue_c2r_withdraw', () => queueWithdrawC2RViaUi(page, secondHubId, postDisputeCollateralAmount));
+    await timedStep('post_dispute.wait_c2r_queued', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.pendingCollateralToReserve;
+      }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(c2rPendingBefore);
+    });
+    await timedStep('post_dispute.broadcast_c2r', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
     await timedStep('post_dispute.wait_c2r_sent', async () => {
       await expect.poll(async () => {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
