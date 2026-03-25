@@ -222,4 +222,58 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(result.mempoolOps).toHaveLength(0);
     expect(result.bookUpdates.length).toBeGreaterThan(0);
   });
+
+  test('preserves exact aligned price when creating a bounded book window', () => {
+    const priceTicks = 24_999_992n;
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['alice', { swapOffers: new Map([['offer-a', {}]]) }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: ['1/2'],
+        },
+        books: new Map(),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const offer = {
+      offerId: 'offer-a',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'alice',
+      accountId: 'alice',
+      createdHeight: 1,
+      giveTokenId: 2,
+      giveAmount: 30_000n * SWAP_LOT_SCALE,
+      wantTokenId: 1,
+      wantAmount: (30_000n * SWAP_LOT_SCALE * priceTicks) / 10_000n,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks,
+    };
+
+    const result = processOrderbookSwaps(entityState, [offer] as any);
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    expect(finalBook).toBeDefined();
+
+    const orderIdx = finalBook!.orderIdToIdx.get('alice:offer-a');
+    expect(typeof orderIdx).toBe('number');
+    const levelIdx = finalBook!.orderPriceIdx[orderIdx!];
+    const storedPrice = finalBook!.params.pmin + (BigInt(levelIdx) * finalBook!.params.tick);
+    expect(storedPrice).toBe(priceTicks);
+  });
 });

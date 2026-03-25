@@ -4,7 +4,7 @@
  * These tests prove that a disputed bilateral account can be started from the UI, finalized into reserve,
  * extended with post-dispute settlement actions, and restored after reload without losing batch history.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { APP_BASE_URL, resetProdServer } from './utils/e2e-baseline';
@@ -498,6 +498,21 @@ async function faucetReserve(page: Page, entityId: string, amount: string = '10'
   expect(body.success, body.error || 'reserve faucet api failed').toBe(true);
 }
 
+async function getVisibleAssetMoveWorkspace(page: Page): Promise<Locator> {
+  await ensureAssetsWorkspaceVisible(page);
+  const assetsTab = page.getByTestId('tab-assets').first();
+  await expect(assetsTab).toBeVisible({ timeout: 20_000 });
+  await assetsTab.click();
+
+  const moveTab = page.getByTestId('asset-tab-move').first();
+  await expect(moveTab).toBeVisible({ timeout: 20_000 });
+  await moveTab.click();
+
+  const workspace = page.locator('[data-testid="move-workspace-assets"]:visible').first();
+  await expect(workspace).toBeVisible({ timeout: 20_000 });
+  return workspace;
+}
+
 async function pickSecondaryHubEntityId(page: Page, excludeCounterpartyId: string): Promise<string> {
   const secondary = await page.evaluate(({ excludeCounterpartyId }) => {
     const env = (window as any).isolatedEnv;
@@ -555,25 +570,17 @@ async function queueFundR2CViaUi(
   counterpartyId: string,
   amount: string,
 ): Promise<void> {
-  await ensureAssetsWorkspaceVisible(page);
-  const assetsTab = page.getByTestId('tab-assets').first();
-  await expect(assetsTab).toBeVisible({ timeout: 20_000 });
-  await assetsTab.click();
+  const workspace = await getVisibleAssetMoveWorkspace(page);
+  await workspace.getByTestId('move-source-reserve').click();
+  await workspace.getByTestId('move-target-account').click();
 
-  const moveTab = page.getByTestId('asset-tab-move').first();
-  await expect(moveTab).toBeVisible({ timeout: 20_000 });
-  await moveTab.click();
+  await selectEntityInputValue(workspace, 'move-target-counterparty-picker', counterpartyId);
 
-  await page.getByTestId('move-source-reserve').first().click();
-  await page.getByTestId('move-target-account').first().click();
-
-  await selectEntityInputValue(page, 'move-target-counterparty-picker', counterpartyId);
-
-  const amountInput = page.getByTestId('move-amount').first();
+  const amountInput = workspace.getByTestId('move-amount');
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await amountInput.fill(amount);
 
-  const fundButton = page.getByTestId('move-confirm').first();
+  const fundButton = workspace.getByTestId('move-confirm');
   await expect(fundButton).toBeEnabled({ timeout: 20_000 });
   await fundButton.click();
 }
@@ -584,25 +591,17 @@ async function queueWithdrawC2RViaUi(
   reserveRecipientEntityId: string,
   amount: string,
 ): Promise<void> {
-  await ensureAssetsWorkspaceVisible(page);
-  const assetsTab = page.getByTestId('tab-assets').first();
-  await expect(assetsTab).toBeVisible({ timeout: 20_000 });
-  await assetsTab.click();
+  const workspace = await getVisibleAssetMoveWorkspace(page);
+  await workspace.getByTestId('move-source-account').click();
+  await workspace.getByTestId('move-target-reserve').click();
+  await selectEntityInputValue(workspace, 'move-source-account-picker', sourceAccountId);
+  await selectEntityInputValue(workspace, 'move-reserve-recipient-picker', reserveRecipientEntityId);
 
-  const moveTab = page.getByTestId('asset-tab-move').first();
-  await expect(moveTab).toBeVisible({ timeout: 20_000 });
-  await moveTab.click();
-
-  await page.getByTestId('move-source-account').first().click();
-  await page.getByTestId('move-target-reserve').first().click();
-  await selectEntityInputValue(page, 'move-source-account-picker', sourceAccountId);
-  await selectEntityInputValue(page, 'move-reserve-recipient-picker', reserveRecipientEntityId);
-
-  const amountInput = page.getByTestId('move-amount').first();
+  const amountInput = workspace.getByTestId('move-amount');
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await amountInput.fill(amount);
 
-  const withdrawButton = page.getByTestId('move-confirm').first();
+  const withdrawButton = workspace.getByTestId('move-confirm');
   await expect(withdrawButton).toBeEnabled({ timeout: 20_000 });
   await withdrawButton.click();
 }
@@ -612,25 +611,18 @@ async function queueTransferR2RViaUi(
   recipientEntityId: string,
   amount: string,
 ): Promise<void> {
-  await ensureAssetsWorkspaceVisible(page);
-  const assetsTab = page.getByTestId('tab-assets').first();
-  await expect(assetsTab).toBeVisible({ timeout: 20_000 });
-  await assetsTab.click();
+  const workspace = await getVisibleAssetMoveWorkspace(page);
+  await workspace.getByTestId('move-source-reserve').click();
+  await workspace.getByTestId('move-target-reserve').click();
 
-  const moveTab = page.getByTestId('asset-tab-move').first();
-  await expect(moveTab).toBeVisible({ timeout: 20_000 });
-  await moveTab.click();
+  await selectEntityInputValue(workspace, 'move-reserve-recipient-picker', recipientEntityId);
 
-  await page.getByTestId('move-source-reserve').first().click();
-  await page.getByTestId('move-target-reserve').first().click();
-
-  await selectEntityInputValue(page, 'move-reserve-recipient-picker', recipientEntityId);
-
-  const amountInput = page.getByTestId('move-amount').first();
+  const amountInput = workspace.getByTestId('move-amount');
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await amountInput.fill(amount);
 
-  const transferButton = page.getByTestId('move-confirm').first();
+  await expect(workspace.getByTestId('move-route-summary')).toContainText('Reserve → Reserve', { timeout: 20_000 });
+  const transferButton = workspace.getByTestId('move-confirm');
   await expect(transferButton).toBeEnabled({ timeout: 20_000 });
   await transferButton.click();
 }
@@ -643,11 +635,11 @@ async function ensureAssetsWorkspaceVisible(page: Page): Promise<void> {
 }
 
 async function selectEntityInputValue(
-  page: Page,
+  root: Page | Locator,
   testId: string,
   entityId: string,
 ): Promise<void> {
-  const selector = page.getByTestId(testId).first();
+  const selector = root.getByTestId(testId).first();
   await expect(selector).toBeVisible({ timeout: 20_000 });
 
   const target = String(entityId || '').trim().toLowerCase();
@@ -676,7 +668,7 @@ async function selectEntityInputValue(
   };
 
   const input = selector.locator('input').first();
-  const option = page.getByTestId(`${testId}-option-${target}`).first();
+  const option = selector.getByTestId(`${testId}-option-${target}`).first();
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     await openSelector();
@@ -688,23 +680,20 @@ async function selectEntityInputValue(
       return;
     }
 
-    await input.press('Tab').catch(() => undefined);
-    await page.waitForTimeout(100);
-    if (await hasTargetSelection()) {
-      return;
-    }
-
     if (await option.isVisible().catch(() => false)) {
       await option.dispatchEvent('mousedown', { buttons: 1 });
+      await expect.poll(hasTargetSelection, {
+        timeout: 3_000,
+        intervals: [100, 250, 500],
+      }).toBe(true);
     } else {
       await input.press('Enter');
+      await expect.poll(hasTargetSelection, {
+        timeout: 3_000,
+        intervals: [100, 250, 500],
+      }).toBe(true);
     }
-
-    await page.waitForTimeout(100);
-    if (await hasTargetSelection()) {
-      return;
-    }
-    await page.waitForTimeout(250);
+    if (await hasTargetSelection()) return;
   }
 
   await openSelector().catch(() => undefined);
@@ -1274,7 +1263,10 @@ test.describe('E2E Dispute Flow', () => {
     await timedStep('dispute.ensure_no_sent_batch_latch', () => ensureNoSentBatchLatch(page, accountRef.entityId, accountRef.signerId));
 
     await timedStep('post_dispute.refund_reserve', async () => {
-      await faucetReserve(page, accountRef.entityId, '10');
+      await faucetReserve(page, accountRef.entityId, '500');
+      await expect.poll(async () => {
+        return await readReserveBalanceUi(page, 'USDC');
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThanOrEqual(500);
       await expect.poll(async () => {
         return await readOnchainReserveViaAnvil(page, accountRef.entityId);
       }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(0n);
