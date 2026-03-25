@@ -1221,19 +1221,26 @@ export function processOrderbookSwaps(
     // AUDIT FIX (CRITICAL-5): Use cached book if available, otherwise load from ext.books
     let book = bookCache.get(bookKey) || ext.books.get(bookKey);
     if (!book) {
-      let priceTick = BigInt(Math.max(1, policyTick));
+      const priceTick = BigInt(Math.max(1, policyTick));
       const halfRange = ((priceTicks * BigInt(pairPolicy.bookRangeBps)) / 10_000n) > (priceTick * 50n)
         ? (priceTicks * BigInt(pairPolicy.bookRangeBps)) / 10_000n
         : (priceTick * 50n);
       let pmin = priceTicks > halfRange ? priceTicks - halfRange : 1n;
-      if (pmin <= 0n) pmin = 1n;
+      if (pmin <= 0n) pmin = priceTick;
       let pmax = priceTicks + halfRange;
       let levels = Number(((pmax - pmin) / priceTick) + 1n);
       if (levels > MAX_BOOK_LEVELS) {
-        priceTick = ((pmax - pmin) + BigInt(MAX_BOOK_LEVELS - 2)) / BigInt(MAX_BOOK_LEVELS - 1);
-        if (priceTick <= 0n) priceTick = 1n;
+        const halfWindowLevels = BigInt(Math.floor(MAX_BOOK_LEVELS / 2));
+        const maxSpan = priceTick * BigInt(Math.max(1, MAX_BOOK_LEVELS - 1));
+        pmin = priceTicks > (halfWindowLevels * priceTick)
+          ? priceTicks - (halfWindowLevels * priceTick)
+          : priceTick;
+        pmax = pmin + maxSpan;
+        if (priceTicks > pmax) {
+          pmax = priceTicks;
+          pmin = pmax > maxSpan ? pmax - maxSpan : priceTick;
+        }
         levels = Number(((pmax - pmin) / priceTick) + 1n);
-        pmax = pmin + (priceTick * BigInt(Math.max(1, levels - 1)));
       }
 
       book = createBook({
