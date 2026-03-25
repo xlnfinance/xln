@@ -944,6 +944,11 @@ type BootstrapReserveHealth = {
   entities: BootstrapReserveEntityHealth[];
 };
 
+const compareText = (left: string, right: string): number => {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+};
+
 const serializeReserveMap = (reserves: ReadonlyMap<string | number, bigint>): Record<string, string> => {
   const entries = Array.from(reserves.entries())
     .map(([tokenId, amount]) => [String(tokenId), amount.toString()] as const)
@@ -953,7 +958,7 @@ const serializeReserveMap = (reserves: ReadonlyMap<string | number, bigint>): Re
       if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
         return leftNum - rightNum;
       }
-      return left.localeCompare(right);
+      return compareText(left, right);
     });
   return Object.fromEntries(entries);
 };
@@ -3210,7 +3215,7 @@ const listLocalControlEntities = (env: Env): ControlEntitySummary[] => {
         : [],
     });
   }
-  entities.sort((left, right) => left.name.localeCompare(right.name));
+  entities.sort((left, right) => compareText(left.name, right.name));
   return entities;
 };
 
@@ -3797,7 +3802,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         const leftName = String(left.name || '');
         const rightName = String(right.name || '');
         if (leftName && rightName && leftName !== rightName) {
-          return leftName.localeCompare(rightName);
+          return compareText(leftName, rightName);
         }
         return Number(right.lastUpdated || 0) - Number(left.lastUpdated || 0);
       });
