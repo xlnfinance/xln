@@ -474,7 +474,7 @@ export function assertBilateralSync(
 export async function processJEvents(env: Env): Promise<void> {
   // Poll all JAdapters first (required for RPC mode where events are fetched, not pushed).
   for (const [, jReplica] of env.jReplicas) {
-    const ja = (jReplica as any).jadapter;
+    const ja = jReplica.jadapter;
     if (ja?.pollNow) await ja.pollNow();
   }
 
@@ -552,6 +552,24 @@ export const formatUSD = (amount: bigint): string => {
   return `$${whole.toLocaleString()}.${frac.toString().padStart(2, '0')}`;
 };
 
+const isMeaningfulScenarioEntityInput = (input: EntityInput): boolean => {
+  const entityTxCount = input.entityTxs?.length ?? 0;
+  const hasProposal = Boolean(input.proposedFrame);
+  const hasHashPrecommits = Boolean(input.hashPrecommits) && input.hashPrecommits.size > 0;
+  return entityTxCount > 0 || hasProposal || hasHashPrecommits;
+};
+
+const pruneIdleScenarioEntityInputs = (env: Env): void => {
+  const currentInputs = env.runtimeInput?.entityInputs;
+  if (!currentInputs || currentInputs.length === 0) return;
+  const meaningfulInputs = currentInputs.filter(isMeaningfulScenarioEntityInput);
+  if (meaningfulInputs.length === currentInputs.length) return;
+  env.runtimeInput.entityInputs = meaningfulInputs;
+  if (env.runtimeMempool) {
+    env.runtimeMempool.entityInputs = meaningfulInputs;
+  }
+};
+
 /**
  * Drain runtime - keep processing until all pending work is done
  * Used before assertRuntimeIdle to ensure everything is flushed
@@ -561,6 +579,7 @@ export async function drainRuntime(env: Env, maxIterations: number = 20): Promis
   let iterations = 0;
 
   while (iterations < maxIterations) {
+    pruneIdleScenarioEntityInputs(env);
     const pendingOutputs = env.pendingOutputs?.length || 0;
     const pendingInputs = env.runtimeInput?.entityInputs?.length || 0;
     const pendingInbox = env.networkInbox?.length || 0;
@@ -577,6 +596,7 @@ export async function drainRuntime(env: Env, maxIterations: number = 20): Promis
 }
 
 export function assertRuntimeIdle(env: Env, label: string = 'runtime'): void {
+  pruneIdleScenarioEntityInputs(env);
   const errors: string[] = [];
 
   const pendingOutputs = env.pendingOutputs?.length || 0;

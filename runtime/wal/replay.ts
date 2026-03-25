@@ -1,5 +1,5 @@
 import { deserializeTaggedJson } from '../serialization-utils';
-import type { Env, FrameLogEntry, RuntimeInput } from '../types';
+import type { Env, EnvSnapshot, FrameLogEntry, JReplica, RuntimeInput } from '../types';
 import { computePersistedEnvStateHash } from './hash';
 import { buildRuntimeCheckpointSnapshot } from './snapshot';
 import { readPersistedFrameJournalBuffer, type RuntimeWalDb } from './store';
@@ -34,6 +34,68 @@ type ReplayRuntimeStateRef = {
   dbOpenPromise?: unknown;
 };
 
+type ReplayMeta = {
+  namespace: string;
+  latestHeight: number;
+  checkpointHeight: number;
+  selectedSnapshotLabel: string;
+  restoredHeight: number;
+  recoveredHistoryFrames: number;
+};
+
+type ReplayFrameRecord = {
+  height: number;
+  timestamp: number;
+  runtimeInput: RuntimeInput;
+  runtimeStateHash?: string;
+  logs?: FrameLogEntry[];
+};
+
+type ReplaySnapshotRecord = {
+  height: number;
+  timestamp: number;
+  dbNamespace?: string;
+  activeJurisdiction?: string;
+  browserVMState?: Env['browserVMState'];
+  runtimeId?: string;
+  runtimeSeed?: string | number[];
+  runtimeStateHash?: string;
+  eReplicas?: unknown;
+  replicas?: unknown;
+  jReplicas?: unknown;
+};
+
+type ReplayAccountInputData = {
+  height?: unknown;
+  newAccountFrame?: { height?: unknown };
+  prevHanko?: unknown;
+  fromEntityId?: unknown;
+};
+
+const EMPTY_RUNTIME_INPUT: RuntimeInput = { runtimeTxs: [], entityInputs: [], jInputs: [] };
+
+const getReplayAccountInputData = (value: unknown): ReplayAccountInputData => {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+  return value as ReplayAccountInputData;
+};
+
+const getReplayStateRoot = (replica: JReplica): Uint8Array | null => {
+  const stateRoot = Reflect.get(replica as object, 'stateRoot');
+  if (stateRoot instanceof Uint8Array) return stateRoot;
+  if (Array.isArray(stateRoot)) return new Uint8Array(stateRoot);
+  return null;
+};
+
+const setReplayMeta = (env: Env, meta: ReplayMeta): void => {
+  Object.defineProperty(env, '__replayMeta', {
+    value: meta,
+    writable: true,
+    configurable: true,
+  });
+};
+
 export type ReplaySnapshotDeps = {
   normalizeSnapshotInPlace: (snapshot: unknown) => void;
   createEmptyEnv: (seed?: Uint8Array | string | null) => Env;
@@ -54,7 +116,7 @@ export type ReplaySnapshotDeps = {
       logs: FrameLogEntry[] | undefined;
       gossipProfiles: unknown[];
     },
-  ) => unknown;
+  ) => EnvSnapshot;
   ensureRuntimeState: (env: Env) => ReplayRuntimeStateRef;
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<void>;
   normalizeEntitySwapTradingPairs: (state: unknown) => void;
@@ -105,10 +167,10 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
     `[loadEnvFromDB] snapshot selection checkpoint=${checkpointHeight} selected=${selectedSnapshotHeight} source=${selectedSnapshotLabel}`,
   );
 
-  const data = deserializeTaggedJson<any>(snapshotBuffer.toString());
+  const data = deserializeTaggedJson<ReplaySnapshotRecord>(snapshotBuffer.toString());
   deps.normalizeSnapshotInPlace(data);
   const persistedSnapshotStateHash =
-    typeof data?.runtimeStateHash === 'string' ? data.runtimeStateHash : undefined;
+    typeof data.runtimeStateHash === 'string' ? data.runtimeStateHash : undefined;
 
   const runtimeSeedRaw = Array.isArray(data.runtimeSeed)
     ? new TextDecoder().decode(new Uint8Array(data.runtimeSeed))
@@ -145,13 +207,13 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
   if (selectedSnapshotHeight > 0) {
     env.history.push(
       deps.buildCanonicalEnvSnapshot(env, {
-        runtimeInput: env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+        runtimeInput: env.runtimeInput ?? EMPTY_RUNTIME_INPUT,
         runtimeOutputs: env.pendingOutputs ?? [],
         description: `Frame ${selectedSnapshotHeight}`,
         meta: { title: `Frame ${selectedSnapshotHeight}` },
         logs: env.frameLogs,
         gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
-      }) as any,
+      }),
     );
   }
   if (persistedSnapshotStateHash) {
@@ -164,11 +226,9 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
   }
   if (env.jReplicas.size > 0) {
     for (const [name, jr] of env.jReplicas.entries()) {
-      if ((jr as any).stateRoot) {
-        env.jReplicas.set(name, {
-          ...jr,
-          stateRoot: new Uint8Array((jr as any).stateRoot),
-        });
+      const replayStateRoot = getReplayStateRoot(jr);
+      if (replayStateRoot) {
+        env.jReplicas.set(name, { ...jr, stateRoot: replayStateRoot });
       }
     }
   }
@@ -206,33 +266,27 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
     for (let h = selectedSnapshotHeight + 1; h <= latestHeight; h++) {
       try {
         const frameBuffer = await readPersistedFrameJournalBuffer(db, dbNamespace, h);
-        const frame = deserializeTaggedJson<{
-          height: number;
-          timestamp: number;
-          runtimeInput: RuntimeInput;
-          runtimeStateHash?: string;
-          logs?: FrameLogEntry[];
-        }>(frameBuffer.toString());
-        const replayRuntimeTxs = frame?.runtimeInput?.runtimeTxs?.length ?? 0;
-        const replayEntityInputs = frame?.runtimeInput?.entityInputs?.length ?? 0;
-        const replayJInputs = frame?.runtimeInput?.jInputs?.length ?? 0;
+        const frame = deserializeTaggedJson<ReplayFrameRecord>(frameBuffer.toString());
+        const replayRuntimeTxs = frame.runtimeInput.runtimeTxs?.length ?? 0;
+        const replayEntityInputs = frame.runtimeInput.entityInputs?.length ?? 0;
+        const replayJInputs = frame.runtimeInput.jInputs?.length ?? 0;
         console.log(
           `[loadEnvFromDB] replay frame=${h} runtimeTxs=${replayRuntimeTxs} entityInputs=${replayEntityInputs} jInputs=${replayJInputs}`,
         );
-        if (Number(frame?.height) !== h) {
-          throw new Error(`Frame height mismatch: key=${h} payload=${String(frame?.height)}`);
+        if (Number(frame.height) !== h) {
+          throw new Error(`Frame height mismatch: key=${h} payload=${String(frame.height)}`);
         }
-        if (!frame?.runtimeInput) {
+        if (!frame.runtimeInput) {
           throw new Error(`Missing runtimeInput at frame ${h}`);
         }
         for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
           for (const tx of entityInput.entityTxs ?? []) {
             if (tx.type !== 'accountInput') continue;
-            const data = tx.data as Record<string, unknown> | undefined;
-            const inputHeight = Number(data?.height ?? 0);
-            const newFrameHeight = Number((data?.newAccountFrame as { height?: number } | undefined)?.height ?? 0);
-            const hasPrev = Boolean(data?.prevHanko);
-            const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
+            const data = getReplayAccountInputData(tx.data);
+            const inputHeight = Number(data.height ?? 0);
+            const newFrameHeight = Number(data.newAccountFrame?.height ?? 0);
+            const hasPrev = Boolean(data.prevHanko);
+            const fromEntityId = typeof data.fromEntityId === 'string' ? data.fromEntityId : '';
             console.log(
               `[loadEnvFromDB] frame=${h} accountInput from=${fromEntityId.slice(-8)} ` +
                 `height=${inputHeight} hasPrev=${hasPrev} newFrame=${newFrameHeight || 'none'}`,
@@ -258,8 +312,8 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
           const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
           for (const tx of entityInput.entityTxs ?? []) {
             if (tx.type !== 'accountInput') continue;
-            const data = tx.data as Record<string, unknown> | undefined;
-            const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
+            const data = getReplayAccountInputData(tx.data);
+            const fromEntityId = typeof data.fromEntityId === 'string' ? data.fromEntityId : '';
             if (!fromEntityId) continue;
             for (const replica of env.eReplicas.values()) {
               if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
@@ -288,13 +342,13 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
           : [];
         env.history.push(
           deps.buildCanonicalEnvSnapshot(env, {
-            runtimeInput: env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+            runtimeInput: env.runtimeInput ?? EMPTY_RUNTIME_INPUT,
             runtimeOutputs: env.pendingOutputs ?? [],
             description: `Frame ${h}`,
             meta: { title: `Frame ${h}` },
             logs: env.frameLogs,
             gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
-          }) as any,
+          }),
         );
         env.frameLogs = [];
         lastGoodHeight = h;
@@ -329,7 +383,7 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
     deps.normalizeEntitySwapTradingPairs(replica.state);
   }
   deps.rebuildEntityLockBookFromAccounts(env);
-  (env as any).__replayMeta = {
+  const replayMeta: ReplayMeta = {
     namespace: dbNamespace,
     latestHeight,
     checkpointHeight: selectedSnapshotHeight,
@@ -337,6 +391,6 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
     restoredHeight: lastGoodHeight,
     recoveredHistoryFrames: env.history?.length ?? 0,
   };
-  (env as any).__replayMeta.recoveredHistoryFrames = env.history?.length ?? 0;
+  setReplayMeta(env, replayMeta);
   return env;
 };
