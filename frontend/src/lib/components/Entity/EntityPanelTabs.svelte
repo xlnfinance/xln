@@ -38,6 +38,7 @@
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming';
+  import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
   import { formatEntityId } from '$lib/utils/format';
 
   // Icons
@@ -1018,14 +1019,7 @@
   }
 
   // Get avatar URL without tripping early boot fail-fast guards.
-  $: avatarUrl = (() => {
-    if (!activeXlnFunctions?.isReady) return '';
-    try {
-      return activeXlnFunctions.generateEntityAvatar?.(tab.entityId) || '';
-    } catch {
-      return '';
-    }
-  })();
+  $: avatar = resolveEntityAvatar(activeXlnFunctions, tab.entityId);
 
   // Resolve entity name from gossip profiles
   $: gossipName = (() => {
@@ -1350,6 +1344,19 @@
     balance: bigint;
     decimals: number;
     tokenId: number | undefined;
+  }
+
+  function normalizeOptionalTokenId(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+    if (typeof value === 'bigint') {
+      const numeric = Number(value);
+      return Number.isSafeInteger(numeric) && numeric >= 0 ? numeric : undefined;
+    }
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const numeric = Number(value.trim());
+      return Number.isSafeInteger(numeric) && numeric >= 0 ? numeric : undefined;
+    }
+    return undefined;
   }
   let externalTokens: ExternalToken[] = [];
   let externalTokensLoading = true;
@@ -1876,7 +1883,7 @@
           address: t.address,
           balance: 0n,
           decimals: typeof t.decimals === 'number' ? t.decimals : 18,
-          tokenId: typeof t.tokenId === 'number' ? t.tokenId : undefined,
+          tokenId: normalizeOptionalTokenId(t.tokenId),
         }));
       }
     }
@@ -2159,7 +2166,7 @@
         address: t.address,
         balance: 0n,
         decimals: typeof t.decimals === 'number' ? t.decimals : 18,
-        tokenId: typeof t.tokenId === 'number' ? t.tokenId : undefined,
+        tokenId: normalizeOptionalTokenId(t.tokenId),
       }));
     } catch {
       return [];
@@ -4283,8 +4290,8 @@
       <section class="hero">
         <div class="hero-left" class:user-mode={userModeHeader}>
           {#if !userModeHeader}
-            {#if avatarUrl}
-              <img src={avatarUrl} alt="Entity avatar" class="hero-avatar" />
+            {#if avatar}
+              <img src={avatar} alt="Entity avatar" class="hero-avatar" />
             {:else}
               <div class="hero-avatar placeholder">
                 {activeXlnFunctions?.getEntityShortId?.(tab.entityId)?.slice(0,2) || '??'}
