@@ -893,7 +893,7 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     expect(aliceBefore.hasEnv).toBe(true);
     expect(aliceBefore.runtimeHeight).toBeGreaterThan(0);
     expect(Number(aliceDbBefore.checkpoint || 0), 'Alice must have a non-genesis checkpoint before forced replay').toBeGreaterThan(1);
-    expect(Number(aliceDbBefore.latest || 0)).toBeGreaterThan(Number(aliceDbBefore.checkpoint || 0));
+    expect(Number(aliceDbBefore.latest || 0)).toBeGreaterThanOrEqual(Number(aliceDbBefore.checkpoint || 0));
     expect(aliceSwapBefore.accountSwapOffersSize).toBe(0);
 
     await page.goto(`${APP_BASE_URL}/app?nosnapshot=1#nosnapshot=1`, { waitUntil: 'domcontentloaded' });

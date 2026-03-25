@@ -82,6 +82,8 @@ type HubChild = HubProcessSpec & {
   startedAt: number | null;
   exitedAt: number | null;
   exitCode: number | null;
+  restartTimer: ReturnType<typeof setTimeout> | null;
+  restartCount: number;
   lastHealth: HubHealthPayload | null;
   lastInfo: HubInfoPayload | null;
 };
@@ -270,6 +272,8 @@ type MarketMakerChild = {
   startedAt: number | null;
   exitedAt: number | null;
   exitCode: number | null;
+  restartTimer: ReturnType<typeof setTimeout> | null;
+  restartCount: number;
   lastHealth: MarketMakerHealthPayload | null;
   lastInfo: MarketMakerInfoPayload | null;
 };
@@ -283,6 +287,7 @@ type CustodySupportState = {
 
 const HUB_NAMES = ['H1', 'H2', 'H3'] as const;
 const HUB_REQUIRED_TOKEN_COUNT = 3;
+const UNEXPECTED_EXIT_RESTART_MS = 1_000;
 
 const argsRaw = process.argv.slice(2);
 
@@ -393,6 +398,8 @@ const hubChildren: HubChild[] = HUB_NAMES.map((name, index) => ({
   startedAt: null,
   exitedAt: null,
   exitCode: null,
+  restartTimer: null,
+  restartCount: 0,
   lastHealth: null,
   lastInfo: null,
 }));
@@ -408,6 +415,8 @@ const marketMakerChild: MarketMakerChild = {
   startedAt: null,
   exitedAt: null,
   exitCode: null,
+  restartTimer: null,
+  restartCount: 0,
   lastHealth: null,
   lastInfo: null,
 };
@@ -791,8 +800,35 @@ const sanitizeChildEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   return next;
 };
 
+const clearChildRestartTimer = (child: { restartTimer: ReturnType<typeof setTimeout> | null }): void => {
+  if (!child.restartTimer) return;
+  clearTimeout(child.restartTimer);
+  child.restartTimer = null;
+};
+
+const scheduleHubRestart = (child: HubChild): void => {
+  if (resetState.inProgress || child.restartTimer) return;
+  child.restartTimer = setTimeout(() => {
+    child.restartTimer = null;
+    if (resetState.inProgress || (child.proc && child.proc.exitCode === null)) return;
+    console.warn(`[MESH] restarting ${child.name} after unexpected exit`);
+    spawnHub(child);
+  }, UNEXPECTED_EXIT_RESTART_MS);
+};
+
+const scheduleMarketMakerRestart = (): void => {
+  if (resetState.inProgress || marketMakerChild.restartTimer) return;
+  marketMakerChild.restartTimer = setTimeout(() => {
+    marketMakerChild.restartTimer = null;
+    if (resetState.inProgress || (marketMakerChild.proc && marketMakerChild.proc.exitCode === null)) return;
+    console.warn('[MESH] restarting MM after unexpected exit');
+    spawnMarketMaker();
+  }, UNEXPECTED_EXIT_RESTART_MS);
+};
+
 const spawnHub = (child: HubChild): void => {
   mkdirSync(child.dbPath, { recursive: true });
+  clearChildRestartTimer(child);
   const cmd = [
     'runtime/orchestrator/hub-node.ts',
     '--name', child.name,
@@ -812,6 +848,7 @@ const spawnHub = (child: HubChild): void => {
   child.startedAt = Date.now();
   child.exitedAt = null;
   child.exitCode = null;
+  child.restartCount += 1;
   child.lastHealth = null;
   child.lastInfo = null;
   child.proc = spawn('bun', cmd, {
@@ -836,12 +873,14 @@ const spawnHub = (child: HubChild): void => {
     child.exitCode = code;
     if (!resetState.inProgress && code !== 0) {
       console.error(`[MESH] ${child.name} exited unexpectedly with code=${String(code)}`);
+      scheduleHubRestart(child);
     }
   });
 };
 
 const spawnMarketMaker = (): void => {
   mkdirSync(marketMakerChild.dbPath, { recursive: true });
+  clearChildRestartTimer(marketMakerChild);
   const cmd = [
     'runtime/orchestrator/mm-node.ts',
     '--name', marketMakerChild.name,
@@ -859,6 +898,7 @@ const spawnMarketMaker = (): void => {
   marketMakerChild.startedAt = Date.now();
   marketMakerChild.exitedAt = null;
   marketMakerChild.exitCode = null;
+  marketMakerChild.restartCount += 1;
   marketMakerChild.lastHealth = null;
   marketMakerChild.lastInfo = null;
   marketMakerChild.proc = spawn('bun', cmd, {
@@ -883,11 +923,14 @@ const spawnMarketMaker = (): void => {
     marketMakerChild.exitCode = code;
     if (!resetState.inProgress && code !== 0) {
       console.error(`[MESH] MM exited unexpectedly with code=${String(code)}`);
+      scheduleMarketMakerRestart();
     }
   });
 };
 
 const stopAllChildren = async (): Promise<void> => {
+  for (const child of hubChildren) clearChildRestartTimer(child);
+  clearChildRestartTimer(marketMakerChild);
   await Promise.all([
     ...hubChildren.map((child) => postJson(`http://${args.host}:${child.apiPort}/api/control/p2p/stop`)),
     postJson(`http://${args.host}:${marketMakerChild.apiPort}/api/control/p2p/stop`),

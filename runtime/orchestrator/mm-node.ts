@@ -342,7 +342,7 @@ const collectOfferIdsForAccount = (
 
 const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]): MarketMakerOfferSpec[] => {
   const specs: MarketMakerOfferSpec[] = [];
-  const pairs = buildDefaultEntitySwapPairs(tokenIds);
+  const defaultPairs = buildDefaultEntitySwapPairs(tokenIds);
   const hubSkewBps = (hubEntityId: string, pairIndex: number): number => {
     const tail = hubEntityId.slice(-6);
     let hash = 0;
@@ -353,9 +353,8 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
   };
   for (const hubEntityId of hubEntityIds) {
     const hubSuffix = hubEntityId.slice(-6).toLowerCase();
-    const pairs = buildDefaultEntitySwapPairs(tokenIds);
-    for (let pairIndex = 0; pairIndex < pairs.length; pairIndex += 1) {
-      const pair = pairs[pairIndex]!;
+    for (let pairIndex = 0; pairIndex < defaultPairs.length; pairIndex += 1) {
+      const pair = defaultPairs[pairIndex]!;
       const pairPolicy = getSwapPairPolicyByBaseQuote(pair.baseTokenId, pair.quoteTokenId);
       const levelProfile = getMarketMakerLevelProfile(pair.baseTokenId, pair.quoteTokenId);
       const skewBps = hubSkewBps(hubEntityId, pairIndex);
