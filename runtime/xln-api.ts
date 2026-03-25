@@ -28,6 +28,7 @@ export type {
   EnvSnapshot,
   EntityReplica,
   EntityState,
+  SwapBookEntry,
   EntityTx,
   AccountMachine,
   AccountFrame,
@@ -221,6 +222,7 @@ export interface XLNModule {
   isLiquidSwapToken: (tokenId: number) => boolean;
   getSwapPairOrientation: (tokenA: number, tokenB: number) => { baseTokenId: number; quoteTokenId: number; pairId: string };
   getDefaultSwapTradingPairs: () => Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }>;
+  listOpenSwapOffers: (state: Pick<EntityState, 'accounts'>) => import('./types').SwapBookEntry[];
   computeSwapPriceTicks: (giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => bigint;
   prepareSwapOrder: (giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => import('./orderbook').PreparedSwapOrder | null;
   quantizeSwapOrder: (giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => { effectiveGive: bigint; effectiveWant: bigint; priceTicks: bigint } | null;

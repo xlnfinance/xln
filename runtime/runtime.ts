@@ -28,6 +28,7 @@ const DEFAULT_SNAPSHOT_INTERVAL_FRAMES = (() => {
 })();
 
 import { getPerfMs, getWallClockMs } from './utils';
+import { listOpenSwapOffers } from './open-swap-offers';
 import { setDeltaTransformerAddress } from './proof-builder';
 import {
   buildCanonicalEnvSnapshot,
@@ -2818,6 +2819,7 @@ export {
   isLiquidSwapToken,
   getSwapPairOrientation,
   getDefaultSwapTradingPairs,
+  listOpenSwapOffers,
   computeSwapPriceTicks,
   prepareSwapOrder,
   quantizeSwapOrder,

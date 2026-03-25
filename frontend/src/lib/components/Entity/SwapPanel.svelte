@@ -1,5 +1,6 @@
   <script lang="ts">
     import type { AccountMachine, AccountTx, EntityReplica, Tab } from '$lib/types/ui';
+  import type { SwapBookEntry } from '@xln/runtime/xln-api';
   import { enqueueEntityInputs, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
   import { toasts } from '../../stores/toastStore';
@@ -36,17 +37,7 @@
   const ORDERBOOK_PRICE_DECIMALS = decimalPlacesFromScale(ORDERBOOK_PRICE_SCALE);
   const MAX_PRICE_DEVIATION_BPS = 3000n; // 30%
   type BookSide = 'bid' | 'ask';
-  type SwapOfferLike = {
-    offerId: string;
-    accountId: string;
-    giveTokenId: unknown;
-    wantTokenId: unknown;
-    giveAmount: unknown;
-    wantAmount: unknown;
-    priceTicks: unknown;
-    createdAt: unknown;
-    createdHeight: unknown;
-  };
+  type SwapOfferLike = SwapBookEntry;
   type ClickedOrderLevel = {
     side: BookSide;
     priceTicks: bigint;
@@ -427,29 +418,7 @@
     priceRatioInput = normalized;
   }
 
-  function listActiveOffers(): SwapOfferLike[] {
-    if (!(replica?.state?.accounts instanceof Map)) return [];
-    const offers: SwapOfferLike[] = [];
-    for (const [accountId, account] of replica.state.accounts.entries()) {
-      if (!(account?.swapOffers instanceof Map)) continue;
-      for (const [offerId, offer] of account.swapOffers.entries()) {
-        offers.push({
-          offerId: String(offerId),
-          accountId: String(accountId),
-          giveTokenId: offer.giveTokenId,
-          wantTokenId: offer.wantTokenId,
-          giveAmount: offer.giveAmount,
-          wantAmount: offer.wantAmount,
-          priceTicks: offer.priceTicks ?? 0n,
-          createdAt: BigInt(Math.max(0, Number(offer.createdHeight))),
-          createdHeight: Number(offer.createdHeight),
-        });
-      }
-    }
-    return offers;
-  }
-
-  $: activeOffers = listActiveOffers();
+  $: activeOffers = replica ? activeXlnFunctions.listOpenSwapOffers(replica.state) : [];
 
   function readOutCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
     if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return 0n;
@@ -1075,8 +1044,8 @@
     const aDust = isDustOpenOffer(a);
     const bDust = isDustOpenOffer(b);
     if (aDust !== bDust) return aDust ? 1 : -1;
-    const aCreated = toBigIntSafe(a.createdAt) ?? toBigIntSafe(a.createdHeight) ?? 0n;
-    const bCreated = toBigIntSafe(b.createdAt) ?? toBigIntSafe(b.createdHeight) ?? 0n;
+    const aCreated = BigInt(a.createdHeight);
+    const bCreated = BigInt(b.createdHeight);
     if (aCreated === bCreated) return String(a.offerId).localeCompare(String(b.offerId));
     return aCreated > bCreated ? -1 : 1;
   });

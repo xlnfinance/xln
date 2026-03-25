@@ -17,6 +17,7 @@ import type {
   SignerDisplayInfo,
   BigIntMathUtils,
   FinancialConstants,
+  SwapBookEntry,
 } from '@xln/runtime/xln-api';
 
 // Direct import of XLN runtime module (no wrapper boilerplate needed)
@@ -44,6 +45,7 @@ export interface FrontendXlnFunctions {
   isLiquidSwapToken: XLNModule['isLiquidSwapToken'];
   getSwapPairOrientation: XLNModule['getSwapPairOrientation'];
   getDefaultSwapTradingPairs: XLNModule['getDefaultSwapTradingPairs'];
+  listOpenSwapOffers: XLNModule['listOpenSwapOffers'];
   computeSwapPriceTicks: XLNModule['computeSwapPriceTicks'];
   prepareSwapOrder: XLNModule['prepareSwapOrder'];
   quantizeSwapOrder: XLNModule['quantizeSwapOrder'];
@@ -587,6 +589,7 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       isLiquidSwapToken: failFn('isLiquidSwapToken'),
       getSwapPairOrientation: failFn('getSwapPairOrientation'),
       getDefaultSwapTradingPairs: failFn('getDefaultSwapTradingPairs'),
+      listOpenSwapOffers: failFn('listOpenSwapOffers'),
       computeSwapPriceTicks: failFn('computeSwapPriceTicks'),
       prepareSwapOrder: failFn('prepareSwapOrder'),
       quantizeSwapOrder: failFn('quantizeSwapOrder'),
@@ -643,6 +646,7 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     isLiquidSwapToken: $xlnInstance.isLiquidSwapToken,
     getSwapPairOrientation: $xlnInstance.getSwapPairOrientation,
     getDefaultSwapTradingPairs: $xlnInstance.getDefaultSwapTradingPairs,
+    listOpenSwapOffers: $xlnInstance.listOpenSwapOffers,
     computeSwapPriceTicks: $xlnInstance.computeSwapPriceTicks,
     prepareSwapOrder: $xlnInstance.prepareSwapOrder,
     quantizeSwapOrder: $xlnInstance.quantizeSwapOrder,
