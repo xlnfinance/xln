@@ -102,9 +102,13 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
           send(ws, { type: 'error', error: 'Direct entity_input must be encrypted' });
           return;
         }
-        const fromRuntimeId = normalizeRuntimeId(msg.from || session.runtimeId || '');
+        const fromRuntimeId = normalizeRuntimeId(session.runtimeId || '');
         if (!fromRuntimeId) {
           send(ws, { type: 'error', error: 'Missing source runtimeId' });
+          return;
+        }
+        if (msg.from && normalizeRuntimeId(msg.from) !== fromRuntimeId) {
+          send(ws, { type: 'error', error: 'Direct source runtimeId mismatch' });
           return;
         }
         try {

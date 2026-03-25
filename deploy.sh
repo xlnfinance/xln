@@ -90,6 +90,52 @@ wait_for_main_stack() {
   return 1
 }
 
+wait_for_public_ws() {
+  local ws_url="$1"
+  local deadline="$2"
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if bun -e "
+      const url = process.argv[1];
+      const timeoutMs = 5000;
+      const ws = new WebSocket(url);
+      const timer = setTimeout(() => {
+        try { ws.close(); } catch {}
+        process.exit(1);
+      }, timeoutMs);
+      ws.onopen = () => {
+        clearTimeout(timer);
+        try { ws.close(); } catch {}
+        process.exit(0);
+      };
+      ws.onerror = () => {
+        clearTimeout(timer);
+        process.exit(1);
+      };
+    " "$ws_url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_for_public_direct_mesh() {
+  local deadline=$((SECONDS + 120))
+  local endpoints=(
+    "wss://xln.finance:8090/ws"
+    "wss://xln.finance:8091/ws"
+    "wss://xln.finance:8092/ws"
+    "wss://xln.finance:8093/ws"
+  )
+  for endpoint in "${endpoints[@]}"; do
+    if ! wait_for_public_ws "$endpoint" "$deadline"; then
+      echo "[deploy] public direct ws not reachable: $endpoint" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
 wait_for_http_json_field() {
   local url="$1"
   local js_expr="$2"
@@ -306,6 +352,11 @@ run_local_deploy() {
       if ! wait_for_main_stack; then
         echo "[deploy] main XLN stack did not become healthy" >&2
         pm2 logs xln-server --lines 160 --nostream || true
+        exit 1
+      fi
+      if ! wait_for_public_direct_mesh; then
+        echo "[deploy] public direct ws mesh did not become reachable" >&2
+        pm2 logs xln-server --lines 200 --nostream || true
         exit 1
       fi
     else
