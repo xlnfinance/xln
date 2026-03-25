@@ -1137,6 +1137,10 @@ export function processOrderbookSwaps(
   if (!ext) return { mempoolOps, bookUpdates, quarantinedOffers };
   const rehydrateOnly = options.rehydrateOnly === true;
   const minTradeSize = ext.hubProfile?.minTradeSize ?? 0n;
+  const quarantineOffer = (accountId: string, offerId: string, reason: string): true => {
+    quarantinedOffers.push({ accountId, offerId, reason });
+    return true;
+  };
 
   // AUDIT FIX (CRITICAL-5): Cache book updates within batch to avoid stale snapshots
   // Without this, same-tick offers don't see each other's fills
@@ -1170,6 +1174,7 @@ export function processOrderbookSwaps(
       console.warn(
         `⚠️ ORDERBOOK: Invalid token direction for offer=${offer.offerId} give=${offer.giveTokenId} want=${offer.wantTokenId} base=${base} quote=${quote}`,
       );
+      if (rehydrateOnly && quarantineOffer(accountId, offer.offerId, 'invalid-direction')) continue;
       continue;
     }
 
@@ -1177,6 +1182,7 @@ export function processOrderbookSwaps(
     const quoteAmount = isSellBase ? offer.wantAmount : offer.giveAmount;
     if (baseAmount <= 0n || quoteAmount <= 0n) {
       console.warn(`⚠️ ORDERBOOK: Zero amount in offer=${offer.offerId}, base=${baseAmount}, quote=${quoteAmount}`);
+      if (rehydrateOnly && quarantineOffer(accountId, offer.offerId, 'zero-amount')) continue;
       continue;
     }
     if (minTradeSize > 0n && quoteAmount < minTradeSize) {
@@ -1185,11 +1191,7 @@ export function processOrderbookSwaps(
         (rehydrateOnly ? '; quarantined during rehydrate' : '; cancelling remainder'),
       );
       if (rehydrateOnly) {
-        quarantinedOffers.push({
-          offerId: offer.offerId,
-          accountId,
-          reason: `below-minTradeSize:${quoteAmount.toString()}`,
-        });
+        quarantineOffer(accountId, offer.offerId, `below-minTradeSize:${quoteAmount.toString()}`);
         continue;
       }
       mempoolOps.push({
@@ -1209,6 +1211,7 @@ export function processOrderbookSwaps(
       console.warn(
         `⚠️ ORDERBOOK: base amount not aligned to LOT_SCALE — skipping offer=${offer.offerId}, amount=${baseAmount}`,
       );
+      if (rehydrateOnly && quarantineOffer(accountId, offer.offerId, `lot-misaligned:${baseAmount.toString()}`)) continue;
       continue;
     }
 
@@ -1218,6 +1221,7 @@ export function processOrderbookSwaps(
 
     if (qtyLots === 0n || qtyLots > MAX_LOTS || priceTicks <= 0n || priceTicks > MAX_LOTS) {
       console.warn(`⚠️ ORDERBOOK: Invalid order — skipping offer=${offer.offerId}, qty=${qtyLots}, price=${priceTicks}`);
+      if (rehydrateOnly && quarantineOffer(accountId, offer.offerId, `invalid-order:${qtyLots.toString()}:${priceTicks.toString()}`)) continue;
       continue;
     }
 
@@ -1256,10 +1260,12 @@ export function processOrderbookSwaps(
     priceTicks = snappedPriceTicks;
     if (priceTicks <= 0n) {
       console.warn(`⚠️ ORDERBOOK: book-tick rounding produced zero price — skipping offer=${offer.offerId}`);
+      if (rehydrateOnly && quarantineOffer(accountId, offer.offerId, 'book-tick-zero-price')) continue;
       continue;
     }
     if (priceTicks > MAX_LOTS) {
       console.warn(`⚠️ ORDERBOOK: rounded price exceeds max tick range — skipping offer=${offer.offerId}`);
+      if (rehydrateOnly && quarantineOffer(accountId, offer.offerId, `book-tick-overflow:${priceTicks.toString()}`)) continue;
       continue;
     }
 
@@ -1282,11 +1288,7 @@ export function processOrderbookSwaps(
       if (!requantizedOffer) {
         console.warn(`⚠️ ORDERBOOK: book-grid repricing dropped offer to zero — skipping offer=${offer.offerId}`);
         if (rehydrateOnly) {
-          quarantinedOffers.push({
-            offerId: offer.offerId,
-            accountId,
-            reason: `book-grid-reprice-zero:${priceTicks.toString()}`,
-          });
+          quarantineOffer(accountId, offer.offerId, `book-grid-reprice-zero:${priceTicks.toString()}`);
           continue;
         }
       } else {
@@ -1312,11 +1314,7 @@ export function processOrderbookSwaps(
       if (priceTicks > maxAllowed) {
         console.warn(`⚠️ ORDERBOOK: BUY price ${priceTicks.toString()} exceeds ${REJECT_BPS/100}% above best ask ${bestAsk.toString()} — rejecting offer=${offer.offerId}`);
         if (rehydrateOnly) {
-          quarantinedOffers.push({
-            offerId: offer.offerId,
-            accountId,
-            reason: `buy-price-above-band:${priceTicks.toString()}`,
-          });
+          quarantineOffer(accountId, offer.offerId, `buy-price-above-band:${priceTicks.toString()}`);
           continue;
         }
         mempoolOps.push({ accountId, tx: { type: 'swap_resolve', data: { offerId: offer.offerId, fillRatio: 0, cancelRemainder: true } } });
@@ -1329,11 +1327,7 @@ export function processOrderbookSwaps(
       if (priceTicks < minAllowed) {
         console.warn(`⚠️ ORDERBOOK: SELL price ${priceTicks.toString()} below ${REJECT_BPS/100}% under best bid ${bestBid.toString()} — rejecting offer=${offer.offerId}`);
         if (rehydrateOnly) {
-          quarantinedOffers.push({
-            offerId: offer.offerId,
-            accountId,
-            reason: `sell-price-below-band:${priceTicks.toString()}`,
-          });
+          quarantineOffer(accountId, offer.offerId, `sell-price-below-band:${priceTicks.toString()}`);
           continue;
         }
         mempoolOps.push({ accountId, tx: { type: 'swap_resolve', data: { offerId: offer.offerId, fillRatio: 0, cancelRemainder: true } } });
@@ -1372,11 +1366,7 @@ export function processOrderbookSwaps(
         `⚠️ ORDERBOOK REJECT: offer=${offer.offerId} account=${accountId.slice(-8)} side=${side} price=${priceTicks.toString()} qty=${qtyLots.toString()} bestBid=${String(bestBid)} bestAsk=${String(bestAsk)} reason=${rejectReasons || 'unknown'}`,
       );
       if (rehydrateOnly) {
-        quarantinedOffers.push({
-          offerId: offer.offerId,
-          accountId,
-          reason: `post-only-reject:${rejectReasons || 'unknown'}`,
-        });
+        quarantineOffer(accountId, offer.offerId, `post-only-reject:${rejectReasons || 'unknown'}`);
         continue;
       }
       mempoolOps.push({
