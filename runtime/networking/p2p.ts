@@ -559,16 +559,19 @@ export class RuntimeP2P {
       'targetRuntimeId must be signer EOA',
       { targetRuntimeId },
     );
-    const directClient = this.getDirectClientForRuntime(normalizedTargetRuntimeId);
-    const client = directClient && directClient.isOpen() ? directClient : this.getActiveClient();
-    if (!directClient) {
+    const requireDirect = this.hasDirectPeerEndpoint(normalizedTargetRuntimeId);
+    if (requireDirect) {
       this.ensureDirectClientForRuntime(normalizedTargetRuntimeId);
     }
+    const client = requireDirect
+      ? this.getDirectClientForRuntime(normalizedTargetRuntimeId)
+      : this.getActiveClient();
     if (client && client.isOpen()) {
       try {
         const sent = client.sendEntityInput(normalizedTargetRuntimeId, input, ingressTimestamp);
         console.log(
-          `[P2P] enqueueEntityInput attempt target=${normalizedTargetRuntimeId} entity=${input.entityId.slice(-4)} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
+          `[P2P] enqueueEntityInput attempt target=${normalizedTargetRuntimeId} entity=${input.entityId.slice(-4)} ` +
+            `transport=${requireDirect ? 'direct' : 'relay'} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
         );
         if (sent) return;
         console.warn(`P2P-SEND-FAILED: Client.send returned false for ${normalizedTargetRuntimeId}`);
@@ -594,7 +597,9 @@ export class RuntimeP2P {
         }
       }
     } else {
-      console.warn(`P2P-NO-CLIENT: No active relay connection, queueing for ${normalizedTargetRuntimeId}`);
+      console.warn(
+        `P2P-NO-CLIENT: No active ${requireDirect ? 'direct' : 'relay'} connection, queueing for ${normalizedTargetRuntimeId}`,
+      );
     }
 
     const queue = this.pendingByRuntime.get(normalizedTargetRuntimeId) || [];
@@ -656,19 +661,27 @@ export class RuntimeP2P {
     return this.getActiveDirectClient(runtimeId);
   }
 
+  private hasDirectPeerEndpoint(runtimeId: string): boolean {
+    return !!this.getDirectPeerEndpoint(runtimeId);
+  }
+
   private flushPending() {
     for (const [targetRuntimeId, queue] of this.pendingByRuntime.entries()) {
-      this.ensureDirectClientForRuntime(targetRuntimeId);
-      const directClient = this.getDirectClientForRuntime(targetRuntimeId);
-      const relayClient = this.getActiveClient();
-      const client = directClient && directClient.isOpen() ? directClient : relayClient;
+      const requireDirect = this.hasDirectPeerEndpoint(targetRuntimeId);
+      if (requireDirect) {
+        this.ensureDirectClientForRuntime(targetRuntimeId);
+      }
+      const client = requireDirect
+        ? this.getDirectClientForRuntime(targetRuntimeId)
+        : this.getActiveClient();
       if (!client || !client.isOpen()) continue;
       const remaining: { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[] = [];
       for (const entry of queue) {
         try {
           const sent = client.sendEntityInput(targetRuntimeId, entry.input, entry.ingressTimestamp);
           console.log(
-            `[P2P] flushPending target=${targetRuntimeId} entity=${entry.input.entityId.slice(-4)} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
+            `[P2P] flushPending target=${targetRuntimeId} entity=${entry.input.entityId.slice(-4)} ` +
+              `transport=${requireDirect ? 'direct' : 'relay'} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
           );
           if (!sent) remaining.push(entry);
         } catch {
