@@ -371,7 +371,7 @@ const logProfile = (label: string, profile: any) => {
   console.log(`[P2P_DEBUG] ${label}`, {
     entityId: profile.entityId,
     runtimeId: profile.runtimeId,
-    endpoints: profile.endpoints || [],
+    wsUrl: profile.wsUrl || null,
     accounts: (profile.accounts || []).map((acct: any) => acct.counterpartyId?.slice(-4)).filter(Boolean),
     boardSize,
     hasPublicKey: typeof profile.metadata?.board?.validators?.[0]?.publicKey === 'string',

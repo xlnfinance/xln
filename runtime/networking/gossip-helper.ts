@@ -149,7 +149,7 @@ export function buildEntityProfile(
     website: entityState.profile.website,
     lastUpdated: timestamp,
     publicAccounts,
-    endpoints: [],
+    wsUrl: null,
     relays: [],
     metadata: {
       isHub,

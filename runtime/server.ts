@@ -4102,7 +4102,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           name: profile.name,
           bio: profile.bio || null,
           website: profile.website || null,
-          endpoints: profile.endpoints || [],
+          wsUrl: profile.wsUrl || null,
           publicAccounts: profile.publicAccounts || [],
           metadata: profile.metadata,
           lastUpdated: profile.lastUpdated,

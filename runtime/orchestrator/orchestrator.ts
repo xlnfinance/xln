@@ -1068,7 +1068,7 @@ const buildPublicHubDiscoveryPayload = (): {
     name: string;
     bio: null;
     website: null;
-    endpoints: string[];
+    wsUrl: string | null;
     publicAccounts: [];
     metadata: { isHub: true };
     lastUpdated: number;
@@ -1088,7 +1088,7 @@ const buildPublicHubDiscoveryPayload = (): {
         name: child.name,
         bio: null,
         website: null,
-        endpoints: directWsUrl ? [directWsUrl] : [],
+        wsUrl: directWsUrl || null,
         publicAccounts: [] as [],
         metadata: { isHub: true as const },
         lastUpdated: serverTime,

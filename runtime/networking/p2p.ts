@@ -45,7 +45,7 @@ const MIN_GOSSIP_POLL_MS = 1000;
 
 export type P2PConfig = {
   relayUrls?: string[];
-  endpointUrls?: string[];
+  wsUrl?: string | null;
   seedRuntimeIds?: string[];
   runtimeId?: string;
   signerId?: string;
@@ -59,7 +59,7 @@ type RuntimeP2POptions = {
   runtimeId: string;
   signerId?: string;
   relayUrls?: string[];
-  endpointUrls?: string[];
+  wsUrl?: string | null;
   seedRuntimeIds?: string[];
   advertiseEntityIds?: string[];
   isHub?: boolean;
@@ -120,17 +120,17 @@ const unique = (items: string[]): string[] => {
   return result;
 };
 
-const normalizeWsUrls = (items: string[] | undefined): string[] =>
-  unique((items || [])
-    .map(item => String(item || '').trim())
-    .filter(item => item.startsWith('ws://') || item.startsWith('wss://')));
+const normalizeOptionalWsUrl = (value: string | null | undefined): string | null => {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return null;
+  const parsed = parseWsUrl(trimmed);
+  return parsed ? trimmed : null;
+};
 
-const isDirectRuntimeEndpoint = (endpoint: string, relayUrls: string[]): boolean => {
-  const endpointUrl = parseWsUrl(endpoint);
-  if (!endpointUrl) return false;
-  const endpointKey = getWsUrlKey(endpoint, true);
-  if (!endpointKey) return false;
-  return !relayUrls.some((relayUrl) => getWsUrlKey(relayUrl, true) === endpointKey);
+const sameWsUrl = (left: string | null, right: string | null): boolean => {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  return getWsUrlKey(left) === getWsUrlKey(right);
 };
 
 const isSameList = (a: string[], b: string[]): boolean => {
@@ -211,7 +211,7 @@ export class RuntimeP2P {
   private runtimeId: string;
   private signerId: string;
   private relayUrls: string[];
-  private endpointUrls: string[];
+  private wsUrl: string | null;
   private seedRuntimeIds: string[];
   private advertiseEntityIds: string[] | null;
   private gossipPollMs: number;
@@ -237,7 +237,7 @@ export class RuntimeP2P {
     this.runtimeId = normalizeRuntimeId(options.runtimeId);
     this.signerId = options.signerId || '1';
     this.relayUrls = unique(options.relayUrls || [DEFAULT_RELAY_URL]);
-    this.endpointUrls = normalizeWsUrls(options.endpointUrls);
+    this.wsUrl = normalizeOptionalWsUrl(options.wsUrl);
     this.seedRuntimeIds = unique(options.seedRuntimeIds || []);
     this.advertiseEntityIds = options.advertiseEntityIds || null;
     this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
@@ -264,10 +264,10 @@ export class RuntimeP2P {
     if (config.seedRuntimeIds) {
       this.seedRuntimeIds = unique(config.seedRuntimeIds);
     }
-    if (config.endpointUrls) {
-      const nextUrls = normalizeWsUrls(config.endpointUrls);
-      if (!isSameList(nextUrls, this.endpointUrls)) {
-        this.endpointUrls = nextUrls;
+    if (Object.prototype.hasOwnProperty.call(config, 'wsUrl')) {
+      const nextUrl = normalizeOptionalWsUrl(config.wsUrl);
+      if (!sameWsUrl(nextUrl, this.wsUrl)) {
+        this.wsUrl = nextUrl;
         this.announceLocalProfiles();
       }
     }
@@ -943,7 +943,7 @@ export class RuntimeP2P {
       const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.timestamp);
       const profile = buildLocalEntityProfile(this.env, replica.state, monotonicTimestamp);
       profile.runtimeId = this.runtimeId;
-      profile.endpoints = this.endpointUrls;
+      profile.wsUrl = this.wsUrl;
       profile.relays = this.relayUrls;
       const firstValidator = replica.state.config.validators[0];
       if (!firstValidator) {
@@ -1116,11 +1116,8 @@ export class RuntimeP2P {
     const profiles = this.env.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
       if (normalizeRuntimeId(profile.runtimeId || '') !== normalizedTargetRuntimeId) continue;
-      for (const endpoint of normalizeWsUrls(profile.endpoints)) {
-        if (isDirectRuntimeEndpoint(endpoint, this.relayUrls)) {
-          return endpoint;
-        }
-      }
+      const endpoint = normalizeOptionalWsUrl(profile.wsUrl);
+      if (endpoint) return endpoint;
     }
     return null;
   }
