@@ -19,6 +19,7 @@ import { describe, expect, test } from 'bun:test';
 import { createBook, applyCommand, type BookState, type BookEvent } from '../orderbook/core';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, computeSwapPriceTicks, deriveSide } from '../orderbook/types';
 import { handleSwapResolve } from '../account-tx/handlers/swap-resolve';
+import { deriveCanonicalSwapFillRatio } from '../swap-execution';
 import type { AccountMachine, AccountTx, SwapOffer } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 
@@ -368,8 +369,10 @@ describe('price improvement', () => {
         type: 'swap_resolve',
         data: {
           offerId,
-          fillRatio: 65535,
+          fillRatio: deriveCanonicalSwapFillRatio(limitQuoteAmount, executionQuoteAmount),
           cancelRemainder: true,
+          executionGiveAmount: executionQuoteAmount,
+          executionWantAmount: executionBaseAmount,
           rebateAmount,
           rebateTokenId: 1, // quote token (USDC)
         },
@@ -378,8 +381,8 @@ describe('price improvement', () => {
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
       expect(resolveResult.success).toBe(true);
       expect(accountMachine.swapOffers.has(offerId)).toBe(false);
-      // Settlement at limit: -limitQuoteAmount + rebate
-      expect(accountMachine.deltas.get(1)?.offdelta).toBe(-limitQuoteAmount + rebateAmount);
+      // Settlement at exact execution on give side plus rebate on quote side
+      expect(accountMachine.deltas.get(1)?.offdelta).toBe(-executionQuoteAmount + rebateAmount);
       expect(accountMachine.deltas.get(2)?.offdelta).toBe(executionBaseAmount);
       // Net cost = limitQuote - rebate < limitQuote
       expect(-limitQuoteAmount + rebateAmount).toBeGreaterThan(-limitQuoteAmount);
@@ -457,6 +460,8 @@ describe('price improvement', () => {
           offerId,
           fillRatio: 65535,
           cancelRemainder: true,
+          executionGiveAmount: executionBaseAmount,
+          executionWantAmount: executionQuoteAmount,
           rebateAmount,
           rebateTokenId: 1, // quote token (USDC) — seller gets more proceeds
         },
@@ -467,8 +472,8 @@ describe('price improvement', () => {
       expect(accountMachine.swapOffers.has(offerId)).toBe(false);
       // Settlement at limit price for give side
       expect(accountMachine.deltas.get(2)?.offdelta).toBe(-executionBaseAmount);
-      // Settlement at limit price for want side + rebate
-      expect(accountMachine.deltas.get(1)?.offdelta).toBe(limitQuoteAmount + rebateAmount);
+      // Settlement at exact execution proceeds plus rebate
+      expect(accountMachine.deltas.get(1)?.offdelta).toBe(executionQuoteAmount + rebateAmount);
       // Net proceeds > limit proceeds
       expect(limitQuoteAmount + rebateAmount).toBeGreaterThan(limitQuoteAmount);
       // Rebate tracked
@@ -502,6 +507,8 @@ describe('price improvement', () => {
           offerId,
           fillRatio: 65535,
           cancelRemainder: true,
+          executionGiveAmount: executionBaseAmount,
+          executionWantAmount: limitQuoteAmount,
           rebateAmount,
           rebateTokenId: 1,
         },
@@ -510,6 +517,37 @@ describe('price improvement', () => {
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
       expect(resolveResult.success).toBe(false);
       expect(resolveResult.error).toContain('Counterparty insufficient capacity');
+    });
+
+    test('handleSwapResolve rejects non-zero fill without exact execution amounts', async () => {
+      const offerId = 'legacy-fill-offer';
+      const giveAmount = 3n * LOT_SCALE;
+      const wantAmount = ticksLotsToWei(8700n);
+      const offer: SwapOffer = {
+        offerId,
+        giveTokenId: 2,
+        giveAmount,
+        wantTokenId: 1,
+        wantAmount,
+        makerIsLeft: true,
+        minFillRatio: 0,
+        createdHeight: 0,
+        quantizedGive: giveAmount,
+        quantizedWant: wantAmount,
+      };
+      const accountMachine = makeAccountMachine(offer);
+      const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
+        type: 'swap_resolve',
+        data: {
+          offerId,
+          fillRatio: 65535,
+          cancelRemainder: true,
+        },
+      };
+
+      const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
+      expect(resolveResult.success).toBe(false);
+      expect(resolveResult.error).toContain('required for non-zero fills');
     });
   });
 });

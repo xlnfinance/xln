@@ -389,7 +389,6 @@ function cloneBookState(book: any): any {
     owners: [...(book.owners || [])],
     orderIds: [...(book.orderIds || [])],
     orderIdToIdx: new Map(book.orderIdToIdx || []),
-    ownerToIdx: new Map(book.ownerToIdx || []),
   };
 }
 

@@ -12,7 +12,8 @@ import { logError } from './logger';
 import { addMessages, cloneEntityReplica, cloneEntityState, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from './state-helpers';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
-import { processOrderbookSwaps, processOrderbookCancels } from './entity-tx/handlers/account';
+import { normalizeSwapOfferForOrderbook, processOrderbookSwaps, processOrderbookCancels } from './entity-tx/handlers/account';
+import { swapKey } from './swap-execution';
 import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
 import { ethers } from 'ethers';
 
@@ -1457,17 +1458,11 @@ export const applyEntityFrame = async (
       const fromEntity = normalizeEntityRef(offer.fromEntity);
       const toEntity = normalizeEntityRef(offer.toEntity);
       const counterparty = fromEntity === hubEntity ? toEntity : fromEntity;
-      return { ...offer, accountId: counterparty };
+      return normalizeSwapOfferForOrderbook(offer, counterparty);
     });
     console.log(`📊 ENTITY-ORCHESTRATOR: Enriched ${enrichedOffers.length} offers with accountId`);
 
-    let matchResult: ReturnType<typeof processOrderbookSwaps>;
-    try {
-      matchResult = processOrderbookSwaps(currentEntityState, enrichedOffers);
-    } catch (e) {
-      logError("FRAME_CONSENSUS", `❌ processOrderbookSwaps threw — skipping batch: ${(e as Error).message}`);
-      matchResult = { mempoolOps: [], bookUpdates: [] };
-    }
+    const matchResult = processOrderbookSwaps(currentEntityState, enrichedOffers);
 
     // Orderbook matching returns pure mempoolOps/book updates. Applying the
     // returned account txs here is still orchestrator-owned mutation of the
@@ -1482,7 +1477,7 @@ export const applyEntityFrame = async (
 
       if (tx.type === 'swap_resolve') {
         currentEntityState.pendingSwapFillRatios ||= new Map();
-        const key = `${accountId}:${tx.data.offerId}`;
+        const key = swapKey(accountId, tx.data.offerId);
         currentEntityState.pendingSwapFillRatios.set(key, tx.data.fillRatio);
       }
     }

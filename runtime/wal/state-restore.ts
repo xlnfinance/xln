@@ -1,5 +1,5 @@
 import { isLeftEntity } from '../entity-id-utils';
-import { processOrderbookSwaps } from '../entity-tx/handlers/account';
+import { collectOpenSwapOffersForOrderbook, processOrderbookSwaps } from '../entity-tx/handlers/account';
 import { createOrderbookExtState } from '../orderbook';
 import type { Env, EntityReplica, EntityState, JReplica, RuntimeInput } from '../types';
 import type { FrameLogEntry } from '../types';
@@ -189,34 +189,20 @@ const rebuildEntityOrderbookExtFromAccounts = (env: Env): void => {
     const rebuiltExt = createOrderbookExtState(structuredClone(snapshotExt.hubProfile as never));
     replica.state.orderbookExt = rebuiltExt as typeof replica.state.orderbookExt;
 
-    const swapOffers = Array.from(replica.state.accounts.entries())
-      .sort((left, right) => left[0].localeCompare(right[0]))
-      .flatMap(([accountId, account]) =>
-        Array.from(account.swapOffers.entries())
-          .sort((left, right) => {
-            const heightDiff = Number(left[1].createdHeight) - Number(right[1].createdHeight);
-            if (heightDiff !== 0) return heightDiff;
-            return String(left[0]).localeCompare(String(right[0]));
-          })
-          .map(([offerId, offer]) => ({
-            offerId: String(offerId),
-            makerIsLeft: offer.makerIsLeft,
-            fromEntity: account.leftEntity,
-            toEntity: account.rightEntity,
-            accountId: String(accountId),
-            giveTokenId: Number(offer.giveTokenId),
-            giveAmount: BigInt(offer.giveAmount),
-            wantTokenId: Number(offer.wantTokenId),
-            wantAmount: BigInt(offer.wantAmount),
-            minFillRatio: Number(offer.minFillRatio),
-          })),
-      );
+    const swapOffers = collectOpenSwapOffersForOrderbook(replica.state);
 
     if (swapOffers.length === 0) continue;
-    const result = processOrderbookSwaps(replica.state, swapOffers);
+    const result = processOrderbookSwaps(replica.state, swapOffers, { rehydrateOnly: true });
+    if (result.quarantinedOffers.length > 0) {
+      console.warn(
+        `[ORDERBOOK-REHYDRATE] entity=${replica.entityId} quarantined ${result.quarantinedOffers.length} offers: ` +
+        result.quarantinedOffers.map((offer) => `${offer.accountId}:${offer.offerId}:${offer.reason}`).join(', '),
+      );
+    }
     if (result.mempoolOps.length > 0) {
-      throw new Error(
-        `ORDERBOOK_REHYDRATE_INVARIANT_FAILED: entity=${replica.entityId} generated ${result.mempoolOps.length} mempool ops during rebuild`,
+      console.warn(
+        `[ORDERBOOK-REHYDRATE] entity=${replica.entityId} generated ${result.mempoolOps.length} stale ops; ` +
+        `quarantined during restore`,
       );
     }
     for (const update of result.bookUpdates) {

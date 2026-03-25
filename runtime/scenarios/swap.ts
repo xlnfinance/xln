@@ -387,6 +387,7 @@ export async function swap(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   console.log('💱 Hub: swap_resolve (50% fill)');
+  const partialFill = computeFilledAmounts(eth(TRADE_ETH), usdc(TRADE_USDC_MAIN_UNITS), FILL_50);
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,
@@ -397,6 +398,8 @@ export async function swap(env: Env): Promise<void> {
         offerId: offerId1,
         fillRatio: FILL_50,
         cancelRemainder: false, // Keep remainder open
+        executionGiveAmount: partialFill.filledGive,
+        executionWantAmount: partialFill.filledWant,
       },
     }],
   }]);
@@ -441,6 +444,7 @@ export async function swap(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   console.log('💱 Hub: swap_resolve (100% fill, complete)');
+  assert(offer2, 'Offer remainder exists before final resolve');
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,
@@ -451,6 +455,8 @@ export async function swap(env: Env): Promise<void> {
         offerId: offerId1,
         fillRatio: FULL_FILL, // Fill 100% of remaining
         cancelRemainder: false,
+        executionGiveAmount: offer2!.giveAmount,
+        executionWantAmount: offer2!.wantAmount,
       },
     }],
   }]);
@@ -592,6 +598,7 @@ export async function swap(env: Env): Promise<void> {
 
   // Hub tries to fill only 50% - should fail
   console.log('💱 Hub: swap_resolve (50% fill - should fail)');
+  const belowMinFill = computeFilledAmounts(eth(TRADE_ETH_HALF), usdc(TRADE_USDC_HALF_UNITS), FILL_50);
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,
@@ -602,6 +609,8 @@ export async function swap(env: Env): Promise<void> {
         offerId: offerId3,
         fillRatio: FILL_50, // 50% < 75% min
         cancelRemainder: false,
+        executionGiveAmount: belowMinFill.filledGive,
+        executionWantAmount: belowMinFill.filledWant,
       },
     }],
   }]);
@@ -616,6 +625,7 @@ export async function swap(env: Env): Promise<void> {
   // Hub fills 80% - should succeed
   const FILL_80_PERCENT = FILL_80;
   console.log('💱 Hub: swap_resolve (80% fill - should succeed)');
+  const allowedFill = computeFilledAmounts(eth(TRADE_ETH_HALF), usdc(TRADE_USDC_HALF_UNITS), FILL_80_PERCENT);
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,
@@ -626,6 +636,8 @@ export async function swap(env: Env): Promise<void> {
         offerId: offerId3,
         fillRatio: FILL_80_PERCENT,
         cancelRemainder: true, // Cancel remainder
+        executionGiveAmount: allowedFill.filledGive,
+        executionWantAmount: allowedFill.filledWant,
       },
     }],
   }]);

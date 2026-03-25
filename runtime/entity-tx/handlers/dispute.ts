@@ -185,7 +185,7 @@ function buildPendingSwapFillRatios(
 
   const ratios = new Map<string, number>();
   for (const offerId of account.swapOffers.keys()) {
-    const key = `${counterpartyEntityId}:${offerId}`;
+    const key = swapKey(counterpartyEntityId, offerId);
     const ratio = pending.get(key);
     if (ratio !== undefined) {
       ratios.set(offerId, ratio);
@@ -715,3 +715,4 @@ export async function handleDisputeFinalize(
 
   return { newState, outputs };
 }
+import { swapKey } from '../../swap-execution';

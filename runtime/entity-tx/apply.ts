@@ -1150,7 +1150,16 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, offerId, fillRatio, cancelRemainder } = entityTx.data;
+      const {
+        counterpartyEntityId,
+        offerId,
+        fillRatio,
+        cancelRemainder,
+        executionGiveAmount,
+        executionWantAmount,
+        rebateAmount,
+        rebateTokenId,
+      } = entityTx.data;
 
       // Use canonical key for account lookup
       // Account keyed by counterparty ID
@@ -1162,43 +1171,20 @@ export const applyEntityTx = async (
 
       const accountTx: AccountTx = {
         type: 'swap_resolve',
-        data: { offerId, fillRatio, cancelRemainder },
+        data: {
+          offerId,
+          fillRatio,
+          cancelRemainder,
+          ...(executionGiveAmount !== undefined ? { executionGiveAmount } : {}),
+          ...(executionWantAmount !== undefined ? { executionWantAmount } : {}),
+          ...(rebateAmount !== undefined ? { rebateAmount } : {}),
+          ...(rebateTokenId !== undefined ? { rebateTokenId } : {}),
+        },
       };
 
       // Pure: return mempoolOp instead of mutating directly (keyed by counterparty)
       mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
       console.log(`💱 Added swap_resolve to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
-
-      const firstValidator = entityState.config.validators[0];
-      if (firstValidator) {
-        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
-      }
-
-      return { newState, outputs, mempoolOps };
-    }
-
-    if (entityTx.type === 'fillSwapOffer') {
-      // Alias for swap fill/resolve
-      console.log(`💱 FILL-SWAP-OFFER: ${entityState.entityId.slice(-4)} filling offer`);
-
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-      const { offerId, counterpartyId, fillRatio } = entityTx.data;
-
-      const accountMachine = newState.accounts.get(counterpartyId);
-      if (!accountMachine) {
-        console.error(`❌ No account with ${counterpartyId.slice(-4)}`);
-        return { newState: entityState, outputs: [] };
-      }
-
-      // Create swap_resolve AccountTx
-      const accountTx: AccountTx = {
-        type: 'swap_resolve',
-        data: { offerId, fillRatio, cancelRemainder: false },
-      };
-
-      mempoolOps.push({ accountId: counterpartyId, tx: accountTx });
 
       const firstValidator = entityState.config.validators[0];
       if (firstValidator) {
