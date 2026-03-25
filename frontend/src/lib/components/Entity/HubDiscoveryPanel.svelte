@@ -495,7 +495,7 @@
                   <span class="value">{hub.metadata.website || '-'}</span>
                 </div>
                 <div class="detail">
-                  <span class="label">Endpoints</span>
+                  <span class="label">Direct WS</span>
                   <span class="value mono">{hub.wsUrl || '-'}</span>
                 </div>
                 <div class="detail">
