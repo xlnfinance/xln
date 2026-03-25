@@ -8,6 +8,7 @@
   import { visibleReplicas } from '../../stores/timeStore';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import type { EntityReplica, Tab } from '$lib/types/ui';
+  import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
   import { resolveEntityName, scheduleGossipProfileFetch } from '$lib/utils/entityNaming';
 
   export let tab: Tab;
@@ -32,7 +33,7 @@
   interface SignerNode {
     signerId: string;
     address: string;
-    avatarUrl: string;
+    avatar: string;
     entities: EntityNode[];
   }
 
@@ -40,7 +41,7 @@
     entityId: string;
     name: string;
     shortId: string;
-    avatarUrl: string;
+    avatar: string;
     signerId: string;
   }
 
@@ -73,8 +74,9 @@
   function buildSignerTree(
     replicas: Map<string, EntityReplica> | null | undefined,
     xlnFuncs: {
+      hashToAvatar: (seed: string, size?: number) => string;
+      isReady: boolean;
       generateEntityAvatar?: (entityId: string) => string;
-      generateSignerAvatar?: (signerId: string) => string;
     } | null,
     search: string,
   ): SignerNode[] {
@@ -114,17 +116,19 @@
           entityId,
           name: displayName,
           shortId,
-          avatarUrl: xlnFuncs.isReady ? xlnFuncs.generateEntityAvatar?.(entityId) || '' : '',
+          avatar: entityAvatar(xlnFuncs, entityId),
           signerId
         });
       }
 
       if (entities.length === 0) continue;
 
+      const leadEntity = entities[0];
+
       nodes.push({
         signerId,
         address: signerId, // signerId IS the EOA address now
-        avatarUrl: xlnFuncs.generateSignerAvatar?.(signerId) || '',
+        avatar: preferredAvatar(xlnFuncs, leadEntity?.entityId || '', signerId, 32),
         entities
       });
     }
@@ -244,10 +248,10 @@
       {:else}
         {#each signerTree as signer (signer.signerId)}
           <div class="entity-group">
-            <!-- Signer header (with identicon, truncated address) -->
+            <!-- Signer header (with avatar, truncated address) -->
             <div class="entity-header">
-              {#if signer.avatarUrl}
-                <img src={signer.avatarUrl} alt="" class="avatar" />
+              {#if signer.avatar}
+                <img src={signer.avatar} alt="" class="avatar" />
               {/if}
               <span class="entity-name" title={signer.address}>
                 {signer.address.slice(0, 6)}...{signer.address.slice(-4)}
@@ -262,8 +266,8 @@
                 on:click={() => selectEntity(entity.signerId, entity.entityId)}
               >
                 <span class="tree-branch">{i === signer.entities.length - 1 ? '└─' : '├─'}</span>
-                {#if entity.avatarUrl}
-                  <img src={entity.avatarUrl} alt="" class="avatar-sm" />
+                {#if entity.avatar}
+                  <img src={entity.avatar} alt="" class="avatar-sm" />
                 {/if}
                 <span class="signer-addr">{entity.name}</span>
               </button>

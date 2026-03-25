@@ -181,6 +181,8 @@ export interface XLNModule {
   registerEnvChangeCallback: (env: Env, callback: (env: Env) => void) => (() => void);
   getEnv: (env?: Env | null) => Env | null;
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
+  submitExternalTokenToReserve: (env: Env, signerId: string, entityId: string, tokenAddress: string, amount: bigint) => Promise<void>;
+  submitDebtEnforcement: (env: Env, entityId: string, tokenId: number) => Promise<void>;
   processJBlockEvents?: (env: Env) => Promise<void>;
   queueEntityInput?: (entityId: string, signerId: string, txData: QueueEntityInputPayload) => Promise<void>;
   setDeltaTransformerAddress?: (address: string) => void;
@@ -203,6 +205,7 @@ export interface XLNModule {
   formatEntityDisplay: (entityId: EntityId) => string;
 
   // Avatar generation
+  hashToAvatar: (seed: string, size?: number) => string;
   generateEntityAvatar: (entityId: string) => string;
   generateSignerAvatar: (signerId: string) => string;
   getEntityDisplayInfo: (entityId: string) => EntityDisplayInfo;
@@ -338,7 +341,6 @@ export interface XLNModule {
   // Entity detection
   detectEntityType: (entityId: string) => string;
   isEntityRegistered: (env: Env, entityId: string) => boolean;
-  getNextEntityNumber: (jId: string) => Promise<number>;
   getEntityInfoFromChain: (entityId: string) => Promise<unknown>;
 
   // Name operations
@@ -349,8 +351,6 @@ export interface XLNModule {
   assignNameOnChain: (env: Env, entityId: string, name: string) => Promise<Env>;
   transferNameBetweenEntities: (env: Env, name: string, fromEntityId: string, toEntityId: string) => Promise<Env>;
 
-  // Blockchain registration
-  registerNumberedEntityOnChain: (env: Env, entityId: string) => Promise<Env>;
   setBrowserVMJurisdiction: (env: Env, depositoryAddress: string, browserVMInstance?: unknown) => void;
   getBrowserVMInstance: (env?: Env) => unknown | null;
 

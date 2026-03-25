@@ -4,7 +4,6 @@ pragma solidity ^0.8.24;
 import "./Token.sol";
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "./ECDSA.sol";
-import "hardhat/console.sol";
 
 contract EntityProvider is ERC1155 { 
   struct Entity {
@@ -78,9 +77,6 @@ contract EntityProvider is ERC1155 {
   event BoardActivated(bytes32 indexed entityId, bytes32 newBoardHash);
   event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId);
 
-  // DEBUG events (remove after debugging)
-  event DebugValidateEntity(bytes32 entityId, bytes32 computedHash, bytes32 storedHash, bool isLazy);
-  event DebugComputeBoard(uint256 threshold, bytes32 entityId0, bytes32 computedHash);
   event ProposalCancelled(bytes32 indexed entityId, ProposerType cancelledBy);
 
   constructor() ERC1155("https://xln.com/entity/{id}.json") {
@@ -460,9 +456,8 @@ contract EntityProvider is ERC1155 {
    * @param boardHash The board hash for validation
    * @return isLazy Whether this is a lazy entity
    */
-  function _validateEntity(bytes32 entityId, bytes32 boardHash) internal returns (bool isLazy) {
+  function _validateEntity(bytes32 entityId, bytes32 boardHash) internal view returns (bool isLazy) {
     bool isLazyEntity = entities[entityId].currentBoardHash == bytes32(0);
-    emit DebugValidateEntity(entityId, boardHash, entities[entityId].currentBoardHash, isLazyEntity);
 
     if (isLazyEntity) {
       // Lazy entity: entityId must equal boardHash
@@ -549,9 +544,6 @@ contract EntityProvider is ERC1155 {
   }
   
   // Events
-  event HankoVerified(bytes32 indexed entityId, bytes32 indexed hash);
-  event HankoClaimProcessed(bytes32 indexed entityId, bool success, uint256 votingPower);
-
   /**
    * @notice Detect signature count from packed signatures length
    * @dev DESIGN CHOICE: Signature count embedded in byte length, not explicit field
@@ -642,7 +634,7 @@ contract EntityProvider is ERC1155 {
     HankoBytes memory hanko,
     address[] memory actualSigners,
     HankoClaim memory claim
-  ) internal returns (bytes32 boardHash) {
+  ) internal pure returns (bytes32 boardHash) {
     // entityIndexes and weights must match (one entry per board member)
     require(claim.entityIndexes.length == claim.weights.length, "Claim indexes/weights length mismatch");
 
@@ -695,8 +687,6 @@ contract EntityProvider is ERC1155 {
     // Hash the reconstructed board (same as entity registration)
     boardHash = keccak256(abi.encode(reconstructedBoard));
 
-    // DEBUG: emit computed board hash
-    emit DebugComputeBoard(claim.threshold, entityIds.length > 0 ? entityIds[0] : bytes32(0), boardHash);
   }
 
   /* Hanko Signatures - Ephemeral Entity Registration
@@ -722,11 +712,6 @@ contract EntityProvider is ERC1155 {
    matches. Unregistered entities can still sign via claims.
    */
 
-  // DEBUG events for tracing verifyHankoSignature
-  event DebugHankoEntry(uint256 dataLen, bytes32 hash, uint256 gasLeft);
-  event DebugHankoDecode(uint256 placeholders, uint256 packedLen, uint256 claims);
-  event DebugRecoverSigner(bytes32 hash, address recovered, uint256 sigLength);
-
   /**
    * @notice Verify hanko signature with flashloan governance (optimistic verification)
    * @param hankoData ABI-encoded hanko bytes
@@ -737,10 +722,8 @@ contract EntityProvider is ERC1155 {
   function verifyHankoSignature(
     bytes calldata hankoData,
     bytes32 hash
-  ) external returns (bytes32 entityId, bool success) {
-    emit DebugHankoEntry(hankoData.length, hash, gasleft());
+  ) external view returns (bytes32 entityId, bool success) {
     HankoBytes memory hanko = abi.decode(hankoData, (HankoBytes));
-    emit DebugHankoDecode(hanko.placeholders.length, hanko.packedSignatures.length, hanko.claims.length);
 
     // Unpack signatures (with automatic count detection)
     bytes[] memory signatures = _unpackSignatures(hanko.packedSignatures);
@@ -762,7 +745,6 @@ contract EntityProvider is ERC1155 {
     for (uint256 i = 0; i < signatures.length; i++) {
       if (signatures[i].length == 65) {
         address signer = _recoverSigner(hash, signatures[i]);
-        emit DebugRecoverSigner(hash, signer, signatures[i].length);
         if (signer != address(0)) {
           actualSigners[validSignerCount] = signer;
           validSignerCount++;
@@ -868,7 +850,7 @@ contract EntityProvider is ERC1155 {
   function batchVerifyHankoSignatures(
     bytes[] calldata hankoDataArray,
     bytes32[] calldata hashes
-  ) external returns (bytes32[] memory entityIds, bool[] memory results) {
+  ) external view returns (bytes32[] memory entityIds, bool[] memory results) {
     require(hankoDataArray.length == hashes.length, "Array length mismatch");
     
     entityIds = new bytes32[](hankoDataArray.length);

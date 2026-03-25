@@ -319,7 +319,7 @@ function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
   for (const arg of argArray) {
     if (!arg || arg === '0x') continue;
     try {
-      const [, decodedSecrets] = abiCoder.decode(['uint32[]', 'bytes32[]'], arg) as [Array<bigint>, Array<string>];
+      const [, decodedSecrets] = abiCoder.decode(['uint16[]', 'bytes32[]'], arg) as [Array<bigint>, Array<string>];
       for (const secret of decodedSecrets) {
         if (ethers.isHexString(secret, 32)) {
           secrets.add(String(secret).toLowerCase());

@@ -109,7 +109,7 @@ export async function runRebalanceScenario(): Promise<void> {
   // SETUP: JAdapter (BrowserVM or RPC)
   // ══════════════════════════════════════════════════════════════
   const jMode = getJAdapterMode();
-  const rpcUrl = globalThis.process?.env?.ANVIL_RPC || 'http://127.0.0.1:8545';
+  const rpcUrl = globalThis.process?.env?.ANVIL_RPC || 'http://localhost:8545';
   const transportLabel = jMode === 'browservm' ? 'browservm' : `rpc → ${rpcUrl}`;
   console.log(`\n📦 Setting up JAdapter (${transportLabel})...`);
 
@@ -135,7 +135,13 @@ export async function runRebalanceScenario(): Promise<void> {
     };
     boardHashes.push(hashBoard(encodeBoard(config)));
   }
-  const { entityNumbers } = await jadapter.registerNumberedEntitiesBatch(boardHashes);
+  const nextEntityNumber = await jadapter.entityProvider.nextNumber();
+  const registerTx = await jadapter.entityProvider.registerNumberedEntitiesBatch(boardHashes);
+  const registerReceipt = await registerTx.wait();
+  if (!registerReceipt || registerReceipt.status === 0) {
+    throw new Error('registerNumberedEntitiesBatch failed');
+  }
+  const entityNumbers = boardHashes.map((_, index) => Number(nextEntityNumber) + index);
   console.log(`✅ Registered entities on-chain: [${entityNumbers.join(', ')}]`);
 
   // Create jReplica + attach jadapter

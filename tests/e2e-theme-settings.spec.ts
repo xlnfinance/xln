@@ -39,7 +39,7 @@ test('settings theme select updates document theme and persists selected option'
   await createSharedRuntime(page, `theme-${Date.now()}`, randomMnemonic());
 
   await page.getByTestId('tab-settings').click();
-  await page.getByRole('button', { name: 'Appearance' }).click();
+  await page.getByRole('button', { name: 'Display' }).click();
   const select = page.getByTestId('settings-theme-select');
   await expect(select).toBeVisible({ timeout: 20_000 });
 

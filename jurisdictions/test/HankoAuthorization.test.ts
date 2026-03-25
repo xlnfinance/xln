@@ -1,7 +1,7 @@
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
 import { expect } from "chai";
 import hre from "hardhat";
-import { ethers } from "hardhat";
+const { ethers } = hre;
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers.js";
 import type { Depository, EntityProvider } from "../typechain-types/index.js";
 
@@ -26,6 +26,7 @@ describe("Hanko Authorization", function () {
     ')'
   ];
   const HANKO_ABI = ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'];
+  const BATCH_DOMAIN_SEPARATOR = ethers.keccak256(ethers.toUtf8Bytes("XLN_DEPOSITORY_HANKO_V1"));
   let depository: Depository;
   let entityProvider: EntityProvider;
   let admin: HardhatEthersSigner;
@@ -59,8 +60,6 @@ describe("Hanko Authorization", function () {
 
   const deriveHardhatPrivateKey = (index: number): string =>
     ethers.HDNodeWallet.fromPhrase(DEFAULT_MNEMONIC, undefined, `m/44'/60'/0'/0/${index}`).privateKey;
-  const getEntityNonceAddress = (entityId: string): string =>
-    ethers.getAddress(`0x${entityId.replace(/^0x/, '').padStart(64, '0').slice(-40)}`);
   const encodeBatch = (batch: unknown): string =>
     ethers.AbiCoder.defaultAbiCoder().encode(BATCH_ABI, [batch]);
   const buildSingleSignerHanko = (entityId: string, hash: string, privateKey: string): string => {
@@ -94,7 +93,7 @@ describe("Hanko Authorization", function () {
     );
 
     await expect(
-      depository.processBatch("0x", await entityProvider.getAddress(), emptyHanko, 1)
+      depository.processBatch("0x", emptyHanko, 1)
     ).to.be.revertedWithCustomError(depository, "E4");
   });
 
@@ -125,15 +124,18 @@ describe("Hanko Authorization", function () {
 
     const encodedBatch = encodeBatch(batch);
     const chainId = BigInt((await hre.ethers.provider.getNetwork()).chainId);
-    const entityNonce = await depository.entityNonces(getEntityNonceAddress(entity1Id));
+    const entityNonce = await depository.entityNonces(entity1Id);
     const nextNonce = entityNonce + 1n;
-    const batchHash = await depository.computeBatchHankoHash(encodedBatch, nextNonce);
+    const batchHash = ethers.keccak256(ethers.solidityPacked(
+      ['bytes32', 'uint256', 'address', 'bytes', 'uint256'],
+      [BATCH_DOMAIN_SEPARATOR, chainId, await depository.getAddress(), encodedBatch, nextNonce]
+    ));
     const hankoData = buildSingleSignerHanko(entity1Id, batchHash, deriveHardhatPrivateKey(1));
 
     await expect(
       depository
         .connect(entity1)
-        .processBatch(encodedBatch, await entityProvider.getAddress(), hankoData, nextNonce)
+        .processBatch(encodedBatch, hankoData, nextNonce)
     ).to.not.be.reverted;
 
     const entity1Balance = await depository._reserves(entity1Id, tokenId);

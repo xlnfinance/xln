@@ -195,6 +195,7 @@ import {
   DEBUG,
   formatEntityDisplay,
   formatSignerDisplay,
+  hashToAvatar,
   generateEntityAvatar,
   generateSignerAvatar,
   getEntityDisplayInfo,
@@ -1015,10 +1016,25 @@ const generateHookPings = (env: Env, nowMs = getRuntimeNowMs(env), queuedAt = en
 const isRuntimeFrameReady = (env: Env, now: number, overrideDelayMs?: number): boolean => {
   if (env.scenarioMode) return true; // deterministic scenarios advance manually
   const config = ensureRuntimeConfig(env);
-  const delayMs = overrideDelayMs !== undefined ? overrideDelayMs : (config.minFrameDelayMs ?? 0);
+  const rawDelayMs = overrideDelayMs !== undefined ? overrideDelayMs : (config.minFrameDelayMs ?? 0);
+  if (!Number.isFinite(rawDelayMs) || rawDelayMs <= 0) return true;
+  const delayMs = Math.max(0, Math.floor(rawDelayMs));
   const state = ensureRuntimeState(env);
-  if (!state.lastFrameAt) return true;
-  return now - state.lastFrameAt >= delayMs;
+  const lastFrameAt = state.lastFrameAt;
+  if (typeof lastFrameAt !== 'number' || !Number.isFinite(lastFrameAt) || lastFrameAt <= 0) return true;
+  return Math.max(0, now - lastFrameAt) >= delayMs;
+};
+
+const getRemainingRuntimeFrameDelayMs = (env: Env, overrideDelayMs?: number): number => {
+  if (env.scenarioMode) return 0;
+  const wallClockNow = getWallClockMs();
+  const config = ensureRuntimeConfig(env);
+  const rawDelayMs = overrideDelayMs !== undefined ? overrideDelayMs : (config.minFrameDelayMs ?? 0);
+  if (!Number.isFinite(rawDelayMs) || rawDelayMs <= 0) return 0;
+  const delayMs = Math.max(0, Math.floor(rawDelayMs));
+  const lastFrameAt = ensureRuntimeState(env).lastFrameAt;
+  if (typeof lastFrameAt !== 'number' || !Number.isFinite(lastFrameAt) || lastFrameAt <= 0) return 0;
+  return Math.max(0, delayMs - Math.max(0, wallClockNow - lastFrameAt));
 };
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -1063,6 +1079,11 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
       while (running) {
         try {
           if (hasRuntimeWork(env)) {
+            const remainingDelayMs = getRemainingRuntimeFrameDelayMs(env);
+            if (remainingDelayMs > 0) {
+              await waitForRuntimeLoopWakeOrTimeout(env, remainingDelayMs);
+              continue;
+            }
             await process(env);
           }
         } catch (error) {
@@ -1083,9 +1104,14 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
         }
         if (!running) break;
         if (hasRuntimeWork(env)) {
-          // Drain chained outputs/ACKs immediately instead of paying the production idle
-          // poll delay after every intermediate hop.
-          await sleep(0);
+          const remainingDelayMs = getRemainingRuntimeFrameDelayMs(env);
+          if (remainingDelayMs > 0) {
+            await waitForRuntimeLoopWakeOrTimeout(env, remainingDelayMs);
+          } else {
+            // Drain chained outputs/ACKs immediately instead of paying the production idle
+            // poll delay after every intermediate hop.
+            await sleep(0);
+          }
           continue;
         }
         await waitForRuntimeLoopWakeOrTimeout(env, tickDelayMs);
@@ -2781,6 +2807,7 @@ export {
   // Display and avatar functions
   formatEntityDisplay,
   formatSignerDisplay,
+  hashToAvatar,
   generateEntityAvatar,
   // Entity utility functions
   generateLazyEntityId,
@@ -3136,12 +3163,8 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       typeof queuedAtBeforeTick === 'number' &&
       Number.isFinite(queuedAtBeforeTick) &&
       queuedAtBeforeTick > (env.timestamp ?? 0);
-    const now = env.scenarioMode
-      ? (env.timestamp ?? 0)
-      : shouldAdvanceLogicalTime || runtimeState.clockPrimed
-        ? Math.max(env.timestamp ?? 0, queuedAtBeforeTick ?? (env.timestamp ?? 0))
-        : (env.timestamp ?? 0);
-    if (!isRuntimeFrameReady(env, now, runtimeDelay)) {
+    const frameGateNow = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    if (!isRuntimeFrameReady(env, frameGateNow, runtimeDelay)) {
       return env;
     }
 
@@ -3466,7 +3489,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       }
     }
 
-    state.lastFrameAt = env.timestamp;
+    state.lastFrameAt = getWallClockMs();
 
     if (env.strictScenario) {
       const { assertRuntimeStateStrict } = await import('./strict-assertions');

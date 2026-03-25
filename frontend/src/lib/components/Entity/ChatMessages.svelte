@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount, afterUpdate } from 'svelte';
   import type { EntityReplica, Tab } from '$lib/types/ui';
-  import { getXLN } from '../../stores/xlnStore';
-  import { Send } from 'lucide-svelte';
 
   export let replica: EntityReplica | null;
   export let tab: Tab;
@@ -12,35 +10,6 @@
   let shouldAutoScroll = true;
   let lastMessageCount = 0;
   let isAtCurrentTime = true;
-  let newMessage = '';
-  let sending = false;
-
-  async function sendMessage() {
-    if (!tab.entityId || !tab.signerId || !newMessage.trim() || sending) return;
-
-    sending = true;
-    try {
-      const xln = await getXLN();
-      if (!xln.queueEntityInput) throw new Error('XLN queueEntityInput is not available');
-
-      await xln.queueEntityInput(tab.entityId, tab.signerId, {
-        type: 'chat',
-        message: newMessage.trim()
-      });
-      newMessage = '';
-    } catch (err) {
-      console.error('Failed to send message:', err);
-    } finally {
-      sending = false;
-    }
-  }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  }
 
   // Track if we're viewing current time or historical state
   $: isAtCurrentTime = currentTimeIndex === -1;
@@ -88,7 +57,10 @@
         return {
           type: 'j-event',
           content: `${observer} observed J-event: ${eventType}`,
-          details: { block, tx: tx?.slice(0, 10) + '...' || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })() }
+          details: {
+            block: String(block),
+            tx: `${String(tx).slice(0, 10)}...`,
+          }
         };
       }
     }
@@ -102,7 +74,7 @@
           type: 'reserve-update',
           content: `Reserve Updated: Token ${token}`,
           details: { 
-            entity: entity?.slice(0, 10) + '...' || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })(),
+            entity: `${String(entity).slice(0, 10)}...`,
             balance: (Number(balance) / 1e18).toFixed(4) + ' ETH'
           }
         };
@@ -131,7 +103,7 @@
   
   {#if !isAtCurrentTime}
     <div class="time-machine-indicator">
-      🕰️ Viewing historical state - auto-scroll disabled
+      Viewing historical state. Auto-scroll is disabled.
     </div>
   {/if}
   
@@ -170,22 +142,8 @@
       </div>
     {/each}
   {:else}
-    <div class="empty-state">No messages yet</div>
+    <div class="empty-state">No log entries yet</div>
   {/if}
-</div>
-
-<!-- Send Message Input -->
-<div class="chat-input">
-  <input
-    type="text"
-    bind:value={newMessage}
-    on:keydown={handleKeydown}
-    placeholder="Type a message..."
-    disabled={sending || !isAtCurrentTime}
-  />
-  <button on:click={sendMessage} disabled={sending || !newMessage.trim() || !isAtCurrentTime}>
-    <Send size={16} />
-  </button>
 </div>
 
 <style>
@@ -193,7 +151,10 @@
     min-height: 220px;
     max-height: 40vh;
     overflow-y: auto;
-    padding: 8px;
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 60%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 55%, transparent);
   }
 
   .scrollable-component::-webkit-scrollbar {
@@ -201,92 +162,93 @@
   }
 
   .scrollable-component::-webkit-scrollbar-track {
-    background: #1e1e1e;
+    background: color-mix(in srgb, var(--theme-background, #09090b) 65%, transparent);
   }
 
   .scrollable-component::-webkit-scrollbar-thumb {
-    background: #555;
+    background: var(--theme-scrollbar, #27272a);
     border-radius: 3px;
   }
 
   .time-machine-indicator {
-    background: rgba(255, 165, 0, 0.1);
-    border: 1px solid rgba(255, 165, 0, 0.3);
-    border-radius: 4px;
-    padding: 6px 8px;
-    margin-bottom: 8px;
-    font-size: 0.8em;
-    color: #ffa500;
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-accent, #fbbf24) 30%, transparent);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: var(--theme-accent, #fbbf24);
     text-align: center;
   }
 
   .empty-state {
     text-align: center;
-    color: #666;
+    color: var(--theme-text-muted, #71717a);
     font-style: italic;
     padding: 20px;
-    font-size: 0.9em;
+    font-size: 12px;
   }
 
   .chat-message {
-    background: #2d2d2d;
-    border-radius: 4px;
-    padding: 8px;
-    margin-bottom: 6px;
-    border-left: 3px solid #007acc;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
+    border-radius: 10px;
+    padding: 10px;
+    margin-bottom: 8px;
+    border-left: 3px solid var(--theme-entity, #007acc);
     font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
   }
 
   .chat-message.j-event {
-    border-left-color: #00ff88;
-    background: rgba(0, 255, 136, 0.05);
+    border-left-color: var(--theme-credit, #4ade80);
+    background: color-mix(in srgb, var(--theme-credit, #4ade80) 8%, var(--theme-surface, #18181b));
   }
 
   .chat-message.reserve-update {
-    border-left-color: #ffa500;
-    background: rgba(255, 165, 0, 0.05);
+    border-left-color: var(--theme-accent, #fbbf24);
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 8%, var(--theme-surface, #18181b));
   }
 
   .chat-meta {
-    font-size: 0.7em;
-    color: #9d9d9d;
+    font-size: 11px;
+    color: var(--theme-text-secondary, #a1a1aa);
     margin-bottom: 6px;
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
   }
 
   .message-number {
-    color: #666;
+    color: var(--theme-text-muted, #71717a);
   }
 
   .signer-id {
-    color: #007acc;
+    color: var(--theme-entity, #007acc);
     font-weight: 500;
   }
 
   .event-type {
-    background: #007acc;
-    color: white;
-    padding: 2px 4px;
-    border-radius: 2px;
+    background: color-mix(in srgb, var(--theme-entity, #007acc) 18%, transparent);
+    color: var(--theme-entity, #007acc);
+    padding: 2px 6px;
+    border-radius: 999px;
     font-weight: bold;
-    font-size: 0.9em;
+    font-size: 10px;
   }
 
   .j-event .event-type {
-    background: #00ff88;
-    color: #000;
+    background: color-mix(in srgb, var(--theme-credit, #4ade80) 18%, transparent);
+    color: var(--theme-credit, #4ade80);
   }
 
   .reserve-update .event-type {
-    background: #ffa500;
-    color: #000;
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 18%, transparent);
+    color: var(--theme-accent, #fbbf24);
   }
 
   .chat-content {
-    color: #d4d4d4;
-    font-size: 0.8em;
+    color: var(--theme-text-primary, #e4e4e7);
+    font-size: 12px;
     line-height: 1.4;
   }
 
@@ -299,58 +261,14 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    font-size: 0.9em;
-    color: #aaa;
+    font-size: 11px;
+    color: var(--theme-text-secondary, #a1a1aa);
   }
 
   .detail-item {
-    background: rgba(0, 0, 0, 0.3);
-    padding: 2px 6px;
-    border-radius: 3px;
+    background: color-mix(in srgb, var(--theme-background, #09090b) 70%, transparent);
+    padding: 3px 8px;
+    border-radius: 999px;
     white-space: nowrap;
   }
-
-  /* Chat Input */
-  .chat-input {
-    display: flex;
-    gap: 8px;
-    padding: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(0, 0, 0, 0.2);
-  }
-
-  .chat-input input {
-    flex: 1;
-    padding: 8px 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 6px;
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 13px;
-  }
-
-  .chat-input input:disabled {
-    opacity: 0.5;
-  }
-
-  .chat-input button {
-    padding: 8px 12px;
-    background: rgba(255, 200, 100, 0.15);
-    border: 1px solid rgba(255, 200, 100, 0.3);
-    border-radius: 6px;
-    color: rgba(255, 200, 100, 1);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-  }
-
-  .chat-input button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .chat-input button:hover:not(:disabled) {
-    background: rgba(255, 200, 100, 0.25);
-  }
-
 </style>

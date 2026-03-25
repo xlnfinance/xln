@@ -27,7 +27,6 @@ interface IDepository {
   function mintToReserveBatch(ReserveMint[] calldata mints) external;
   function processBatch(
     bytes calldata encodedBatch,
-    address entityProviderAddr,
     bytes calldata hankoData,
     uint256 nonce
   ) external returns (bool);

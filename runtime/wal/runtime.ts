@@ -252,6 +252,10 @@ export const loadRuntimeEnvFromWal = async (options: LoadRuntimeEnvFromWalOption
   try {
     checkpointHeight = await readPersistedCheckpointHeight(db, dbNamespace);
   } catch (error) {
+    // Fail fast by design: if the durable checkpoint pointer itself is missing,
+    // the persisted chain is considered corrupt/incomplete. We do not silently
+    // fall back to genesis here because that would mask storage damage and make
+    // operators reason about two different recovery modes.
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     throw new Error(
       `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=n/a latest=${latestHeight} restored=n/a reason=Missing latest_checkpoint_height pointer (${message})`,
@@ -271,6 +275,9 @@ export const loadRuntimeEnvFromWal = async (options: LoadRuntimeEnvFromWalOption
   console.log(`[loadEnvFromDB] namespace=${dbNamespace} latest=${latestHeight} checkpoint=${checkpointHeight}`);
   let checkpointBuffer: Buffer;
   try {
+    // Same policy as above: a persisted latest/checkpoint pointer must resolve
+    // to a real snapshot. Missing checkpoint data is treated as DB corruption,
+    // not as a cue to auto-recover from another source.
     checkpointBuffer = await readPersistedSnapshotBuffer(db, dbNamespace, checkpointHeight);
   } catch (error) {
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);

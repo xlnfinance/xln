@@ -102,7 +102,7 @@ export interface IDepositoryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "processBatch",
-    values: [BytesLike, AddressLike, BytesLike, BigNumberish]
+    values: [BytesLike, BytesLike, BigNumberish]
   ): string;
 
   decodeFunctionResult(functionFragment: "_reserves", data: BytesLike): Result;
@@ -230,12 +230,7 @@ export interface IDepository extends BaseContract {
   >;
 
   processBatch: TypedContractMethod<
-    [
-      encodedBatch: BytesLike,
-      entityProviderAddr: AddressLike,
-      hankoData: BytesLike,
-      nonce: BigNumberish
-    ],
+    [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
     [boolean],
     "nonpayable"
   >;
@@ -285,12 +280,7 @@ export interface IDepository extends BaseContract {
   getFunction(
     nameOrSignature: "processBatch"
   ): TypedContractMethod<
-    [
-      encodedBatch: BytesLike,
-      entityProviderAddr: AddressLike,
-      hankoData: BytesLike,
-      nonce: BigNumberish
-    ],
+    [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
     [boolean],
     "nonpayable"
   >;

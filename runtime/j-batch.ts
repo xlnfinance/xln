@@ -959,7 +959,7 @@ export function getBatchSize(batch: JBatch): number {
  * Matches frontend/src/lib/view/utils/browserVMProvider.ts
  */
 export interface BrowserVMBatchProcessor {
-  processBatch(encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint): Promise<any[]>;
+  processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<any[]>;
   setBlockTimestamp?: (timestamp: number) => void;
   signSettlement?: (
     initiatorEntityId: string,
@@ -1086,7 +1086,7 @@ export async function broadcastBatch(
 
       // Pass batch to contract with hanko authorization
       console.log(`📦 Calling Depository.processBatch() with full batch (${getBatchSize(jBatchState.batch)} ops)...`);
-      const events = await browserVM.processBatch(encodedBatch, entityProviderAddress, hankoData, nextNonce);
+      const events = await browserVM.processBatch(encodedBatch, hankoData, nextNonce);
       console.log(`   ✅ BrowserVM: ${events.length} events`);
 
       // NOTE: j-events are queued in env.runtimeInput.entityInputs by j-watcher
@@ -1141,8 +1141,7 @@ export async function broadcastBatch(
 
     const encodedBatch = encodeJBatch(jBatchState.batch);
     const normalizedEntityId = normalizeEntityId(entityId);
-    const entityAddress = ethers.getAddress(`0x${normalizedEntityId.slice(-40)}`);
-    const currentNonce = await depository['entityNonces']?.(entityAddress);
+    const currentNonce = await depository['entityNonces']?.(normalizedEntityId);
     const nextNonce = BigInt(currentNonce ?? 0) + 1n;
     const batchHash = computeBatchHankoHash(resolvedChainId, depositoryAddress, encodedBatch, nextNonce);
 
@@ -1154,7 +1153,7 @@ export async function broadcastBatch(
     }
 
     // Submit to Depository.processBatch (Hanko)
-    const tx = await depository['processBatch']!(encodedBatch, entityProviderAddress, hankoData, nextNonce, {
+    const tx = await depository['processBatch']!(encodedBatch, hankoData, nextNonce, {
       gasLimit: 5000000, // High limit for complex batches
     });
 

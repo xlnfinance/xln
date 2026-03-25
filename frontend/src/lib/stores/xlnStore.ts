@@ -27,7 +27,7 @@ export const xlnInstance = writable<XLNModule | null>(null);
 let unregisterEnvChange: (() => void) | null = null;
 const DEV_SESSION_STORAGE_KEY = 'xln-dev-session-id';
 const RESET_NOTICE_STORAGE_KEY = 'xln-reset-notice';
-const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
+const LOCAL_DEV_HOSTS = new Set(['localhost']);
 let devSessionMonitor: ReturnType<typeof setInterval> | null = null;
 
 type FrontendEntitySummary = {
@@ -66,6 +66,7 @@ export interface FrontendXlnFunctions {
   getEntityNumber: (entityId: string) => string;
   formatEntityDisplay: XLNModule['formatEntityDisplay'];
   formatShortEntityId: XLNModule['formatShortEntityId'];
+  hashToAvatar: XLNModule['hashToAvatar'];
   generateEntityAvatar: XLNModule['generateEntityAvatar'];
   generateSignerAvatar: XLNModule['generateSignerAvatar'];
   getEntityDisplayInfo: XLNModule['getEntityDisplayInfo'];
@@ -611,6 +612,7 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       formatEntityDisplay: failFn('formatEntityDisplay'),
       formatShortEntityId: failFn('formatShortEntityId'),
       // Display-only helpers must not crash early boot paths like /app#pay deep links.
+      hashToAvatar: (() => '') as FrontendXlnFunctions['hashToAvatar'],
       generateEntityAvatar: (() => '') as FrontendXlnFunctions['generateEntityAvatar'],
       generateSignerAvatar: (() => '') as FrontendXlnFunctions['generateSignerAvatar'],
       getEntityDisplayInfo: failFn('getEntityDisplayInfo'),
@@ -709,6 +711,13 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     formatShortEntityId: $xlnInstance.formatShortEntityId,
 
     // Avatar generation (using XLN instance functions)
+    hashToAvatar: (seed: string, size: number = 40): string => {
+      if (typeof $xlnInstance.hashToAvatar !== 'function') {
+        throw new Error('XLN_RUNTIME_MISSING_FN:hashToAvatar');
+      }
+      return $xlnInstance.hashToAvatar(seed, size);
+    },
+
     generateEntityAvatar: (entityId: string): string => {
       if (typeof $xlnInstance.generateEntityAvatar !== 'function') {
         throw new Error('XLN_RUNTIME_MISSING_FN:generateEntityAvatar');

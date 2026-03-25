@@ -5,6 +5,7 @@
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
   import { vaultOperations, activeVault, activeSigner, allVaults, type Runtime as Vault, type Signer } from '$lib/stores/vaultStore';
   import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
+  import { xlnFunctions } from '$lib/stores/xlnStore';
   import type { Tab } from '$lib/types/ui';
   import ContextSwitcher from '$lib/components/Entity/ContextSwitcher.svelte';
   import { resetEverything } from '$lib/utils/resetEverything';
@@ -43,65 +44,8 @@
     { factor: 4, shards: 1000, time: '50min', tier: 'Strong' },
     { factor: 5, shards: 10000, time: '8hr', tier: 'Maximum' },
   ];
-  // ============================================================================
-  // IDENTICON GENERATOR (Ethereum Blockies-style)
-  // ============================================================================
-
-  function generateIdenticon(address: string, size = 8): string {
-    // Simple hash function for seed
-    const seed = address.toLowerCase().replace('0x', '');
-    let seedInt = 0;
-    for (let i = 0; i < seed.length; i++) {
-      seedInt = ((seedInt << 5) - seedInt + seed.charCodeAt(i)) | 0;
-    }
-
-    // PRNG based on seed
-    const rand = () => {
-      const x = Math.sin(seedInt++) * 10000;
-      return x - Math.floor(x);
-    };
-
-    // Generate colors from seed
-    const hue = Math.floor(rand() * 360);
-    const sat = 50 + Math.floor(rand() * 30);
-    const colors = [
-      `hsl(${hue}, ${sat}%, 65%)`,
-      `hsl(${(hue + 120) % 360}, ${sat}%, 35%)`,
-      `hsl(${(hue + 240) % 360}, ${sat}%, 50%)`
-    ];
-
-    // Generate pattern (symmetric)
-    const pattern: number[][] = [];
-    for (let y = 0; y < size; y++) {
-      const row: number[] = [];
-      pattern[y] = row;
-      for (let x = 0; x < Math.ceil(size / 2); x++) {
-        const v = Math.floor(rand() * 3);
-        row[x] = v;
-        row[size - 1 - x] = v; // Mirror
-      }
-    }
-
-    // Render to SVG
-    const cellSize = 10;
-    let svg = `<svg width="${size * cellSize}" height="${size * cellSize}" viewBox="0 0 ${size * cellSize} ${size * cellSize}" xmlns="http://www.w3.org/2000/svg">`;
-    svg += `<rect width="100%" height="100%" fill="${colors[0]}"/>`;
-    for (let y = 0; y < size; y++) {
-      const row = pattern[y];
-      if (!row) continue;
-      for (let x = 0; x < size; x++) {
-        const val = row[x] ?? 0;
-        if (val > 0) {
-          svg += `<rect x="${x * cellSize}" y="${y * cellSize}" width="${cellSize}" height="${cellSize}" fill="${colors[val]}"/>`;
-        }
-      }
-    }
-    svg += '</svg>';
-    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-  }
-
-  // Reactive identicon
-  $: identiconSrc = ethereumAddress ? generateIdenticon(ethereumAddress) : '';
+  $: avatarFns = $xlnFunctions;
+  $: avatar = ethereumAddress ? avatarFns.hashToAvatar(ethereumAddress, 80) : '';
 
   const FAQ_ITEMS = [
     {
@@ -436,7 +380,7 @@
   }) satisfies Tab;
 
   // Identicon for current signer
-  $: currentSignerIdenticon = currentSignerAddress ? generateIdenticon(currentSignerAddress) : identiconSrc;
+  $: currentSignerAvatar = currentSignerAddress ? avatarFns.hashToAvatar(currentSignerAddress, 80) : avatar;
   $: recoveryMnemonic24 = (mnemonic24 || currentVault?.seed || '').trim().split(/\s+/).join(' ');
   $: recoveryMnemonic12 = (mnemonic12 || currentVault?.mnemonic12 || '').trim().split(/\s+/).join(' ');
 
@@ -1322,7 +1266,7 @@
                     class="context-trigger pill"
                     on:click|stopPropagation={() => { vaultDropdownOpen = !vaultDropdownOpen; }}
                   >
-                    <img src={currentSignerIdenticon} alt="" class="context-identicon" />
+                    <img src={currentSignerAvatar} alt="" class="context-avatar" />
                     <div class="context-info">
                       <span class="context-vault-name">{currentVault?.id || 'Vault'}</span>
                       <span class="context-signer-name">{currentSigner?.name || 'Signer 1'}</span>
@@ -1346,7 +1290,7 @@
                                 class:active={signer.index === currentSigner?.index}
                                 on:click={() => switchSigner(signer.index)}
                               >
-                                <img src={generateIdenticon(signer.address)} alt="" class="menu-item-identicon" />
+                                <img src={avatarFns.hashToAvatar(signer.address, 80)} alt="" class="menu-item-avatar" />
                                 <div class="menu-item-info">
                                   <span class="menu-item-label">{signer.name}</span>
                                   <code class="menu-item-addr">{signer.address.slice(0, 6)}...{signer.address.slice(-4)}</code>
@@ -1398,7 +1342,7 @@
           <section class="recovery-card">
             <div class="recovery-head">
               <div class="recovery-identity">
-                <img src={currentSignerIdenticon} alt="" class="context-identicon" />
+                <img src={currentSignerAvatar} alt="" class="context-avatar" />
                 <div>
                   <h3>Recovery</h3>
                   <p class="muted-tight">Entity {entityId}</p>
@@ -2715,7 +2659,7 @@
     border-color: rgba(180, 140, 80, 0.4);
   }
 
-  .context-identicon {
+  .context-avatar {
     width: 28px;
     height: 28px;
     border-radius: 50%;
@@ -2939,7 +2883,7 @@
     text-align: center;
   }
 
-  .menu-item-identicon {
+  .menu-item-avatar {
     width: 24px;
     height: 24px;
     border-radius: 50%;
@@ -3013,7 +2957,7 @@
     border-radius: 10px;
   }
 
-  .address-identicon {
+  .address-avatar {
     width: 32px;
     height: 32px;
     border-radius: 50%;
@@ -3617,37 +3561,17 @@
     display: flex;
     align-items: center;
     gap: 10px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .speed-slider {
     flex: 1;
-    height: 28px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: linear-gradient(90deg, rgba(100, 150, 255, 0.2), rgba(255, 200, 100, 0.3));
-    border-radius: 6px;
+    min-width: 0;
+    max-width: 100%;
     cursor: pointer;
-  }
-
-  .speed-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 20px;
-    height: 28px;
-    background: linear-gradient(180deg, #f5d78e 0%, #c9a346 100%);
-    border-radius: 5px;
-    cursor: pointer;
-    box-shadow: 0 0 12px rgba(255, 200, 100, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-  }
-
-  .speed-slider::-moz-range-thumb {
-    width: 20px;
-    height: 28px;
-    background: linear-gradient(180deg, #f5d78e 0%, #c9a346 100%);
-    border-radius: 5px;
-    cursor: pointer;
-    box-shadow: 0 0 12px rgba(255, 200, 100, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.2);
   }
 
   .speed-details {
@@ -3768,32 +3692,9 @@
 
   .thread-slider {
     flex: 1;
-    height: 24px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
+    min-width: 0;
+    max-width: 100%;
     cursor: pointer;
-  }
-
-  .thread-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 16px;
-    height: 24px;
-    background: #fff;
-    border-radius: 3px;
-    cursor: pointer;
-    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
-  }
-
-  .thread-slider::-moz-range-thumb {
-    width: 16px;
-    height: 24px;
-    background: #fff;
-    border: none;
-    border-radius: 3px;
-    cursor: pointer;
-    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
   }
 
   .sound-select {
@@ -3977,36 +3878,16 @@
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 6px;
     padding: 4px 12px;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .parallelism-slider {
     width: 60px;
-    height: 4px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 2px;
+    min-width: 0;
+    max-width: 100%;
     cursor: pointer;
-  }
-
-  .parallelism-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 14px;
-    height: 14px;
-    background: linear-gradient(135deg, #a855f7, #06b6d4);
-    border-radius: 50%;
-    cursor: pointer;
-    box-shadow: 0 0 8px rgba(168, 85, 247, 0.5);
-  }
-
-  .parallelism-slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    background: linear-gradient(135deg, #a855f7, #06b6d4);
-    border-radius: 50%;
-    cursor: pointer;
-    border: none;
-    box-shadow: 0 0 8px rgba(168, 85, 247, 0.5);
   }
 
   .parallelism-label {
@@ -4400,13 +4281,13 @@
     font-size: 13px;
   }
 
-  .result-box.address.with-identicon {
+  .result-box.address.with-avatar {
     display: flex;
     align-items: center;
     gap: 12px;
   }
 
-  .identicon {
+  .avatar {
     width: 48px;
     height: 48px;
     border-radius: 8px;
@@ -4903,7 +4784,7 @@
     border-color: rgba(255, 255, 255, 0.2);
   }
 
-  .signer-trigger .signer-identicon {
+  .signer-trigger .signer-avatar {
     width: 24px;
     height: 24px;
     border-radius: 6px;
@@ -4974,7 +4855,7 @@
     color: rgba(255, 200, 100, 1);
   }
 
-  .signer-item .signer-identicon {
+  .signer-item .signer-avatar {
     width: 28px;
     height: 28px;
     border-radius: 6px;

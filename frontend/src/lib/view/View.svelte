@@ -211,7 +211,7 @@
   // Localhost-only legacy debug surface while E2E helpers migrate off globals.
   if (
     typeof window !== 'undefined' &&
-    ['localhost', '127.0.0.1', '0.0.0.0'].includes(window.location.hostname)
+    window.location.hostname === 'localhost'
   ) {
     Object.defineProperty(window, 'isolatedEnv', {
       get() {

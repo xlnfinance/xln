@@ -23,6 +23,7 @@ const RESET_PREPARATION_DELAY_MS = 180;
 const RESET_DB_DELETE_RETRIES = 8;
 const RESET_DB_DELETE_RETRY_DELAY_MS = 250;
 const VAULT_STORAGE_KEY = 'xln-vaults';
+const FALLBACK_DB_NAMES = ['db', 'level-js-db', 'level-db', 'xln-db', '_pouch_db'];
 
 type ResetSignal = {
   type: 'begin-reset';
@@ -308,48 +309,71 @@ async function collectAndShipDebugDump(triggerError?: unknown): Promise<void> {
   await shipDebugDump(dump);
 }
 
+async function listIndexedDbNames(): Promise<string[]> {
+  if (typeof indexedDB === 'undefined') return [];
+  try {
+    const idb = indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> };
+    if (typeof idb.databases !== 'function') return [];
+    const dbs = await idb.databases();
+    const names = new Set<string>();
+    for (const entry of dbs) {
+      const name = String(entry && typeof entry.name === 'string' ? entry.name : '').trim();
+      if (!name) continue;
+      names.add(name);
+    }
+    return Array.from(names.values()).sort((left, right) => left.localeCompare(right));
+  } catch {
+    return [];
+  }
+}
+
 /** Clear all IndexedDB databases (best-effort) */
 async function clearAllIndexedDB(): Promise<string[]> {
   if (typeof indexedDB === 'undefined') return [];
 
-  let dbNames: string[] = [];
-  try {
-    const idb = indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> };
-    if (typeof idb.databases === 'function') {
-      const dbs = await idb.databases();
-      dbNames = dbs.flatMap(db => (typeof db.name === 'string' && db.name.length > 0 ? [db.name] : []));
+  const attemptedNames = new Set<string>();
+  for (let pass = 0; pass < RESET_DB_DELETE_RETRIES; pass += 1) {
+    let dbNames = await listIndexedDbNames();
+    if (dbNames.length === 0 && attemptedNames.size === 0) {
+      dbNames = [...FALLBACK_DB_NAMES];
     }
-  } catch { /* databases() not supported */ }
+    if (dbNames.length === 0) {
+      return Array.from(attemptedNames.values());
+    }
 
-  if (dbNames.length === 0) {
-    dbNames = ['db', 'level-js-db', 'level-db', 'xln-db', '_pouch_db'];
-  }
-
-  for (const name of dbNames) {
-    try {
-      let deleted = false;
-      for (let attempt = 0; attempt < RESET_DB_DELETE_RETRIES; attempt += 1) {
-        const status = await new Promise<'success' | 'error' | 'blocked'>((resolve) => {
-          const req = indexedDB.deleteDatabase(name);
-          req.onsuccess = () => resolve('success');
-          req.onerror = () => resolve('error');
-          req.onblocked = () => resolve('blocked');
-        });
-        if (status === 'success' || status === 'error') {
-          deleted = true;
-          break;
+    for (const name of dbNames) {
+      attemptedNames.add(name);
+      try {
+        let deleted = false;
+        for (let attempt = 0; attempt < RESET_DB_DELETE_RETRIES; attempt += 1) {
+          const status = await new Promise<'success' | 'error' | 'blocked'>((resolve) => {
+            const req = indexedDB.deleteDatabase(name);
+            req.onsuccess = () => resolve('success');
+            req.onerror = () => resolve('error');
+            req.onblocked = () => resolve('blocked');
+          });
+          if (status === 'success' || status === 'error') {
+            deleted = true;
+            break;
+          }
+          await sleep(RESET_DB_DELETE_RETRY_DELAY_MS * (attempt + 1));
         }
-        await sleep(RESET_DB_DELETE_RETRY_DELAY_MS * (attempt + 1));
+        if (!deleted) {
+          console.warn(`[RESET] IndexedDB delete remained blocked: ${name}`);
+        }
+      } catch {
+        // best effort
       }
-      if (!deleted) {
-        console.warn(`[RESET] IndexedDB delete remained blocked: ${name}`);
-      }
-    } catch {
-      // best effort
     }
+
+    const remaining = await listIndexedDbNames();
+    if (remaining.length === 0) {
+      return Array.from(attemptedNames.values());
+    }
+    await sleep(RESET_DB_DELETE_RETRY_DELAY_MS * (pass + 1));
   }
 
-  return dbNames;
+  return Array.from(attemptedNames.values());
 }
 
 async function waitForIndexedDbDeletion(dbNames: string[]): Promise<void> {
@@ -471,42 +495,85 @@ export async function clearAllPersistentClientState(): Promise<void> {
   await clearOriginPrivateFileSystem();
   deletedDbNames = await clearAllIndexedDB();
   await waitForIndexedDbDeletion(deletedDbNames);
+  const remainingDbNames = await listIndexedDbNames();
+  if (remainingDbNames.length > 0) {
+    throw new Error(`IndexedDB wipe incomplete; remaining databases: ${remainingDbNames.join(', ')}`);
+  }
 }
 
-async function stopRuntimeBeforeReset(): Promise<void> {
-  const xln = (window as any).__xln_instance;
-  const env = (window as any).__xln_env;
+async function collectRuntimeEnvs(): Promise<unknown[]> {
+  const envs: unknown[] = [];
+  const seenKeys = new Set<string>();
+
+  const pushEnv = (candidate: unknown): void => {
+    if (!candidate || typeof candidate !== 'object') return;
+    const runtimeId =
+      typeof (candidate as { runtimeId?: unknown }).runtimeId === 'string'
+        ? (candidate as { runtimeId: string }).runtimeId.trim().toLowerCase()
+        : '';
+    const dbNamespace =
+      typeof (candidate as { dbNamespace?: unknown }).dbNamespace === 'string'
+        ? (candidate as { dbNamespace: string }).dbNamespace.trim().toLowerCase()
+        : '';
+    const key = `${runtimeId}|${dbNamespace}`;
+    if (key !== '|' && seenKeys.has(key)) return;
+    if (key !== '|') seenKeys.add(key);
+    envs.push(candidate);
+  };
+
+  pushEnv((window as any).__xln_env);
 
   try {
-    if (xln?.stopP2P && env) {
-      await xln.stopP2P(env);
+    const runtimeStoreModule = await import('../stores/runtimeStore');
+    const operations = runtimeStoreModule.runtimeOperations;
+    if (operations && typeof operations.getAllRuntimes === 'function') {
+      const runtimes = operations.getAllRuntimes();
+      for (const runtime of runtimes) {
+        if (runtime && runtime.connection) {
+          try {
+            runtime.connection.close();
+          } catch {
+            // best effort
+          }
+        }
+        pushEnv(runtime && 'env' in runtime ? runtime.env : null);
+      }
     }
   } catch {
     // best effort
   }
 
-  try {
-    if (xln?.clearDB) {
-      await xln.clearDB(env);
-    }
-  } catch (e) {
-    console.warn('[RESET] Runtime clearDB failed (expected if corrupted):', e);
-  }
+  return envs;
+}
 
-  try {
-    if (xln?.closeRuntimeDb && env) {
-      await xln.closeRuntimeDb(env);
-    }
-  } catch (e) {
-    console.warn('[RESET] closeRuntimeDb failed:', e);
-  }
+async function stopRuntimeBeforeReset(): Promise<void> {
+  const xln = (window as any).__xln_instance;
+  const envs = await collectRuntimeEnvs();
 
-  try {
-    if (xln?.closeInfraDb && env) {
-      await xln.closeInfraDb(env);
+  for (const env of envs) {
+    try {
+      if (xln && typeof xln.stopP2P === 'function') {
+        await xln.stopP2P(env);
+      }
+    } catch {
+      // best effort
     }
-  } catch (e) {
-    console.warn('[RESET] closeInfraDb failed:', e);
+
+    try {
+      if (xln && typeof xln.closeRuntimeDb === 'function') {
+        await xln.closeRuntimeDb(env);
+      }
+    } catch (e) {
+      console.warn('[RESET] closeRuntimeDb failed:', e);
+    }
+
+    try {
+      if (xln && typeof xln.closeInfraDb === 'function') {
+        await xln.closeInfraDb(env);
+      }
+    } catch (e) {
+      console.warn('[RESET] closeInfraDb failed:', e);
+    }
   }
 
   try {
@@ -525,7 +592,7 @@ async function performReset(
 ): Promise<void> {
   if (activeResetPromise) return activeResetPromise;
 
-  activeResetPromise = (async () => {
+  const resetPromise = (async () => {
     if (initiatedHere) {
       if (!options?.skipDebugDump) {
         await collectAndShipDebugDump(triggerError);
@@ -538,14 +605,10 @@ async function performReset(
     }
 
     await stopRuntimeBeforeReset();
-    try {
-      await clearAllPersistentClientState();
-    } catch (error) {
-      console.warn('[RESET] Persistent-state wipe verification failed; continuing with reload:', error);
-    }
+    await clearAllPersistentClientState();
 
     try {
-      resetChannel?.close();
+      if (resetChannel) resetChannel.close();
     } catch {
       // ignore
     }
@@ -555,7 +618,17 @@ async function performReset(
     hardNavigateAfterReset();
   })();
 
-  return activeResetPromise;
+  activeResetPromise = resetPromise;
+
+  try {
+    await resetPromise;
+  } catch (error) {
+    activeResetPromise = null;
+    console.error('[RESET] Full wipe failed:', error);
+    throw error;
+  }
+
+  return resetPromise;
 }
 
 /**

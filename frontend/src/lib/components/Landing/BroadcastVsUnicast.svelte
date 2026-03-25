@@ -516,8 +516,10 @@
   }
 
   .tps-control {
-    flex: 1;
-    min-width: 300px;
+    flex: 1 1 280px;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .tps-control label {
@@ -526,38 +528,15 @@
     gap: 0.5rem;
     font-size: 0.9rem;
     color: rgba(255, 255, 255, 0.7);
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .tps-value {
     font-weight: 600;
     color: #4fd18b;
     font-family: 'JetBrains Mono', monospace;
-  }
-
-  .tps-slider {
-    width: 100%;
-    height: 6px;
-    border-radius: 3px;
-    background: rgba(255, 255, 255, 0.1);
-    outline: none;
-    cursor: pointer;
-  }
-
-  .tps-slider::-webkit-slider-thumb {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: #4fd18b;
-    cursor: pointer;
-  }
-
-  .tps-slider::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: #4fd18b;
-    cursor: pointer;
-    border: none;
   }
 
   .play-btn {

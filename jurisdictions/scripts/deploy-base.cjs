@@ -68,7 +68,7 @@ async function main() {
   console.log("\n─── Step 3: Deploying Depository ───");
 
   const Depository = await hre.ethers.getContractFactory("Depository");
-  const depository = await Depository.deploy();
+  const depository = await Depository.deploy(entityProviderAddress);
   await depository.waitForDeployment();
   const depositoryAddress = await depository.getAddress();
   console.log(`   ✅ Depository deployed: ${depositoryAddress}`);
@@ -78,10 +78,7 @@ async function main() {
   // ═══════════════════════════════════════════════════════════════════
   console.log("\n─── Step 4: Configuring Depository ───");
 
-  // Add EntityProvider as approved provider
-  const tx1 = await depository.addEntityProvider(entityProviderAddress);
-  await tx1.wait();
-  console.log(`   ✅ Added EntityProvider to approved list`);
+  console.log(`   ✅ Depository bound to immutable EntityProvider at deploy time`);
 
   // Register USDC token
   // Token ID 0 is reserved for ETH, so USDC gets ID 1

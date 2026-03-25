@@ -239,9 +239,8 @@ const settingsOperations = {
     if (current.componentStates[componentId] !== undefined) {
       return current.componentStates[componentId];
     }
-    
-    // Default states: consensus and chat expanded, others collapsed
-    return componentId.includes('consensus-') || componentId.includes('chat-');
+
+    return false;
   },
 
   // Set component state

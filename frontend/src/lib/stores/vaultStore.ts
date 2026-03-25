@@ -373,7 +373,7 @@ const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
       if (parsed.pathname.startsWith('/rpc/')) {
         return `${parsed.origin}/rpc`;
       }
-      const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '0.0.0.0';
+      const isLocal = parsed.hostname === 'localhost';
       if (isLocal) {
         // Route localhost RPC through same-origin RPC bridge.
         const origin = baseOrigin ?? window.location.origin;

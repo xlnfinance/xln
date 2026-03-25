@@ -211,11 +211,6 @@ const _abi = [
         type: "bytes",
       },
       {
-        internalType: "address",
-        name: "entityProviderAddr",
-        type: "address",
-      },
-      {
         internalType: "bytes",
         name: "hankoData",
         type: "bytes",

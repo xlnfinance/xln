@@ -268,6 +268,14 @@ export async function createRpcAdapter(
     return waitForReceipt(tx as any, label);
   };
 
+  const readSignerTxNonce = async (): Promise<number> => {
+    const signerAddress = await signer.getAddress();
+    return Math.max(
+      await provider.getTransactionCount(signerAddress, 'latest'),
+      await provider.getTransactionCount(signerAddress, 'pending'),
+    );
+  };
+
   const resolveWatcherPollMs = (scenarioMode: boolean): number => {
     if (scenarioMode) return TEST_WATCH_POLL_MS;
     if (config.watchPollMs && Number.isFinite(config.watchPollMs)) {
@@ -290,6 +298,7 @@ export async function createRpcAdapter(
   // One signer submits all on-chain txs for this adapter, so queue must be global,
   // not per-entity, to avoid EOA nonce races across concurrent entity batches.
   let batchSubmitQueue: Promise<unknown> = Promise.resolve();
+  let nextSerializedSignerNonce: number | null = null;
   const runSerializedBatch = async <T>(work: () => Promise<T>): Promise<T> => {
     const previous = batchSubmitQueue;
     const next = previous
@@ -315,6 +324,20 @@ export async function createRpcAdapter(
         // Best-effort only.
       }
     }
+  };
+
+  const resetSerializedSignerNonce = (): void => {
+    nextSerializedSignerNonce = null;
+    maybeResetSignerNonce();
+  };
+
+  const allocateSerializedSignerNonce = async (): Promise<number> => {
+    if (nextSerializedSignerNonce === null) {
+      nextSerializedSignerNonce = await readSignerTxNonce();
+    }
+    const nonce = nextSerializedSignerNonce;
+    nextSerializedSignerNonce += 1;
+    return nonce;
   };
 
   type ErrorWithMessage = {
@@ -801,32 +824,46 @@ export async function createRpcAdapter(
     },
 
     async enforceDebts(entityId: string, tokenId: number): Promise<void> {
-      await sendTypedTx(
-        'enforceDebts',
-        depository.enforceDebts,
-        [entityId, BigInt(tokenId), 100n],
-        {
-          gasFallback: 500_000n,
-          txNonce: null,
-          resetSignerNonce: true,
-        },
-      );
+      await runSerializedBatch(async () => {
+        try {
+          await sendTypedTx(
+            'enforceDebts',
+            depository.enforceDebts,
+            [entityId, BigInt(tokenId), 100n],
+            {
+              gasFallback: 500_000n,
+              txNonce: await allocateSerializedSignerNonce(),
+              resetSignerNonce: false,
+            },
+          );
+        } catch (error) {
+          resetSerializedSignerNonce();
+          throw error;
+        }
+      });
     },
 
     async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
       // For dev chains (anvil), allow debug funding for testnet
       if (DEV_CHAIN_IDS.has(config.chainId)) {
-        const receipt = await sendTypedTx(
-          'mintToReserve',
-          depository.mintToReserve,
-          [entityId, tokenId, amount],
-          {
-            gasFallback: 1_000_000n,
-            txNonce: null,
-            resetSignerNonce: true,
-          },
-        );
-        return parseReceiptLogsToJEvents(receipt, [depository]);
+        return runSerializedBatch(async () => {
+          try {
+            const receipt = await sendTypedTx(
+              'mintToReserve',
+              depository.mintToReserve,
+              [entityId, tokenId, amount],
+              {
+                gasFallback: 1_000_000n,
+                txNonce: await allocateSerializedSignerNonce(),
+                resetSignerNonce: false,
+              },
+            );
+            return parseReceiptLogsToJEvents(receipt, [depository]);
+          } catch (error) {
+            resetSerializedSignerNonce();
+            throw error;
+          }
+        });
       }
       // Real networks: must use real deposits
       throw new Error('debugFundReserves only available on configured dev chains - use real token deposits');
@@ -871,17 +908,24 @@ export async function createRpcAdapter(
           `count=${mints.length} ` +
           `first=${formatReserveMintDebug(mints[0])}`,
       );
-      const receipt = await sendTypedTx(
-        'mintToReserveBatch',
-        depository.mintToReserveBatch,
-        [payload],
-        {
-          gasFallback: 5_000_000n,
-          txNonce: null,
-          resetSignerNonce: true,
-        },
-      );
-      return parseReceiptLogsToJEvents(receipt, [depository]);
+      return runSerializedBatch(async () => {
+        try {
+          const receipt = await sendTypedTx(
+            'mintToReserveBatch',
+            depository.mintToReserveBatch,
+            [payload],
+            {
+              gasFallback: 5_000_000n,
+              txNonce: await allocateSerializedSignerNonce(),
+              resetSignerNonce: false,
+            },
+          );
+          return parseReceiptLogsToJEvents(receipt, [depository]);
+        } catch (error) {
+          resetSerializedSignerNonce();
+          throw error;
+        }
+      });
     },
 
     async externalTokenToReserve(

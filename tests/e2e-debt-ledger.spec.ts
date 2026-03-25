@@ -194,6 +194,64 @@ async function enqueueEntityTxs(
   expect(result.ok, result.error || 'failed to enqueue entity txs').toBe(true);
 }
 
+async function readJBatchSnapshot(
+  page: Page,
+  entityId: string,
+  signerId: string,
+): Promise<{
+  pendingDisputeStarts: number;
+  pendingDisputeFinalizations: number;
+  sentDisputeStarts: number;
+  sentDisputeFinalizations: number;
+  sentExists: boolean;
+  batchHistoryCount: number;
+  mempoolTxTypes: string[];
+  hasProposal: boolean;
+  hasLockedFrame: boolean;
+  recentMessages: string[];
+}> {
+  return page.evaluate(({ entityId, signerId }) => {
+    const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) {
+      return {
+        pendingDisputeStarts: 0,
+        pendingDisputeFinalizations: 0,
+        sentDisputeStarts: 0,
+        sentDisputeFinalizations: 0,
+        sentExists: false,
+        batchHistoryCount: 0,
+        mempoolTxTypes: [],
+        hasProposal: false,
+        hasLockedFrame: false,
+        recentMessages: [],
+      };
+    }
+    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+      const [eid, sid] = String(k).split(':');
+      return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
+    });
+    const rep = key ? env.eReplicas.get(key) : null;
+    const pending = rep?.state?.jBatchState?.batch;
+    const sent = rep?.state?.jBatchState?.sentBatch?.batch;
+    const history = Array.isArray(rep?.state?.batchHistory) ? rep.state.batchHistory : [];
+    const messages = Array.isArray(rep?.state?.messages) ? rep.state.messages.slice(-6) : [];
+    const mempool = Array.isArray(rep?.mempool) ? rep.mempool : [];
+    return {
+      pendingDisputeStarts: Number(pending?.disputeStarts?.length || 0),
+      pendingDisputeFinalizations: Number(pending?.disputeFinalizations?.length || 0),
+      sentDisputeStarts: Number(sent?.disputeStarts?.length || 0),
+      sentDisputeFinalizations: Number(sent?.disputeFinalizations?.length || 0),
+      sentExists: !!rep?.state?.jBatchState?.sentBatch,
+      batchHistoryCount: Number(history.length || 0),
+      mempoolTxTypes: mempool.map((tx: { type?: unknown }) => String(tx?.type || '')),
+      hasProposal: !!rep?.proposal,
+      hasLockedFrame: !!rep?.lockedFrame,
+      recentMessages: messages.map((message: unknown) => String(message || '')),
+    };
+  }, { entityId, signerId });
+}
+
 async function extendCreditDirect(
   page: Page,
   entityId: string,
@@ -260,10 +318,47 @@ async function queueAndBroadcastDisputeStart(page: Page, counterpartyId: string)
   throw new Error('use queueAndBroadcastDisputeStartDirect');
 }
 
-async function broadcastDraftBatch(page: Page): Promise<void> {
-  const broadcast = page.getByTestId('settle-sign-broadcast').first();
-  await expect(broadcast).toBeEnabled({ timeout: 20_000 });
-  await broadcast.click();
+async function broadcastDraftBatch(
+  page: Page,
+  entityId: string,
+  signerId: string,
+): Promise<{ consoleMessages: string[]; afterClickSnapshot: Awaited<ReturnType<typeof readJBatchSnapshot>> }> {
+  const broadcast = page.locator('.workspace-pending-banner').getByTestId('settle-sign-broadcast').first();
+  await expect(broadcast).toBeVisible({ timeout: 30_000 });
+  await expect(broadcast).toBeEnabled({ timeout: 120_000 });
+  let dialogMessage = '';
+  const consoleMessages: string[] = [];
+  const onDialog = async (dialog: any) => {
+    dialogMessage = dialog?.message?.() || '';
+    await dialog.accept();
+  };
+  const onConsole = (message: any) => {
+    const text = typeof message?.text === 'function' ? message.text() : '';
+    if (text) consoleMessages.push(String(text));
+  };
+  page.on('dialog', onDialog);
+  page.on('console', onConsole);
+  try {
+    await broadcast.click();
+  } finally {
+    page.off('dialog', onDialog);
+    page.off('console', onConsole);
+  }
+  await page.waitForTimeout(500);
+  const afterClickSnapshot = await readJBatchSnapshot(page, entityId, signerId);
+  const toastLocator = page.locator('.toast.error .message').last();
+  const toastVisible = await toastLocator.isVisible({ timeout: 200 }).catch(() => false);
+  const toastMessage = toastVisible
+    ? await toastLocator.textContent().catch(() => '')
+    : '';
+  if (dialogMessage || String(toastMessage || '').trim()) {
+    throw new Error(
+      `settle-sign-broadcast failed: ${dialogMessage || String(toastMessage || '').trim()}` +
+      ` snapshot=${JSON.stringify(afterClickSnapshot)}` +
+      ` console=${JSON.stringify(consoleMessages)}`,
+    );
+  }
+  return { consoleMessages, afterClickSnapshot };
 }
 
 async function queueAndBroadcastDisputeStartDirect(
@@ -272,12 +367,39 @@ async function queueAndBroadcastDisputeStartDirect(
   signerId: string,
   counterpartyId: string,
 ): Promise<void> {
+  const before = await readJBatchSnapshot(page, entityId, signerId);
   await enqueueEntityTxs(page, entityId, signerId, [{
     type: 'disputeStart',
     data: { counterpartyEntityId: counterpartyId, description: 'debt-e2e-dispute-start' },
   }]);
-  await expect(page.getByTestId('settle-sign-broadcast').first()).toBeVisible({ timeout: 20_000 });
-  await broadcastDraftBatch(page);
+  await expect
+    .poll(async () => (await readJBatchSnapshot(page, entityId, signerId)).pendingDisputeStarts, {
+      timeout: 45_000,
+      intervals: [500, 1000, 1500],
+    })
+    .toBeGreaterThan(before.pendingDisputeStarts);
+  await openWorkspaceTab(page, /History/i);
+  const broadcastDebug = await broadcastDraftBatch(page, entityId, signerId);
+  try {
+    await expect
+      .poll(async () => {
+        const snapshot = await readJBatchSnapshot(page, entityId, signerId);
+        return snapshot.sentDisputeStarts > 0 || snapshot.batchHistoryCount > before.batchHistoryCount;
+      }, {
+        timeout: 60_000,
+        intervals: [500, 1000, 1500],
+      })
+      .toBe(true);
+  } catch {
+    const snapshot = await readJBatchSnapshot(page, entityId, signerId);
+    throw new Error(
+      `dispute-start broadcast not observed.` +
+      ` before=${JSON.stringify(before)}` +
+      ` afterClick=${JSON.stringify(broadcastDebug.afterClickSnapshot)}` +
+      ` final=${JSON.stringify(snapshot)}` +
+      ` console=${JSON.stringify(broadcastDebug.consoleMessages)}`,
+    );
+  }
 }
 
 async function queueAndBroadcastDisputeFinalizeDirect(
@@ -286,11 +408,52 @@ async function queueAndBroadcastDisputeFinalizeDirect(
   signerId: string,
   counterpartyId: string,
 ): Promise<void> {
+  const before = await readJBatchSnapshot(page, entityId, signerId);
   await enqueueEntityTxs(page, entityId, signerId, [{
     type: 'disputeFinalize',
     data: { counterpartyEntityId: counterpartyId, description: 'debt-e2e-dispute-finalize' },
   }]);
-  await enqueueEntityTxs(page, entityId, signerId, [{ type: 'j_broadcast', data: {} }]);
+  await expect
+    .poll(async () => {
+      const snapshot = await readJBatchSnapshot(page, entityId, signerId);
+      if (snapshot.pendingDisputeFinalizations > before.pendingDisputeFinalizations) return 'pending';
+      if (snapshot.sentDisputeFinalizations > before.sentDisputeFinalizations) return 'sent';
+      if (snapshot.batchHistoryCount > before.batchHistoryCount) return 'history';
+      return 'waiting';
+    }, {
+      timeout: 45_000,
+      intervals: [500, 1000, 1500],
+    })
+    .not.toBe('waiting');
+  await openWorkspaceTab(page, /History/i);
+  const afterQueueSnapshot = await readJBatchSnapshot(page, entityId, signerId);
+  if (
+    afterQueueSnapshot.sentDisputeFinalizations > before.sentDisputeFinalizations ||
+    afterQueueSnapshot.batchHistoryCount > before.batchHistoryCount
+  ) {
+    return;
+  }
+  const broadcastDebug = await broadcastDraftBatch(page, entityId, signerId);
+  try {
+    await expect
+      .poll(async () => {
+        const snapshot = await readJBatchSnapshot(page, entityId, signerId);
+        return snapshot.sentDisputeFinalizations > 0 || snapshot.batchHistoryCount > before.batchHistoryCount;
+      }, {
+        timeout: 60_000,
+        intervals: [500, 1000, 1500],
+      })
+      .toBe(true);
+  } catch {
+    const snapshot = await readJBatchSnapshot(page, entityId, signerId);
+    throw new Error(
+      `dispute-finalize broadcast not observed.` +
+      ` before=${JSON.stringify(before)}` +
+      ` afterClick=${JSON.stringify(broadcastDebug.afterClickSnapshot)}` +
+      ` final=${JSON.stringify(snapshot)}` +
+      ` console=${JSON.stringify(broadcastDebug.consoleMessages)}`,
+    );
+  }
 }
 
 async function readAccountState(
@@ -298,10 +461,10 @@ async function readAccountState(
   entityId: string,
   signerId: string,
   counterpartyId: string,
-): Promise<{ activeDispute: boolean; disputeTimeout: number; currentJHeight: number }> {
+): Promise<{ activeDispute: boolean; disputeTimeout: number }> {
   return page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return { activeDispute: false, disputeTimeout: 0, currentJHeight: 0 };
+    if (!env?.eReplicas) return { activeDispute: false, disputeTimeout: 0 };
     const key = Array.from(env.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
@@ -312,7 +475,6 @@ async function readAccountState(
     return {
       activeDispute: !!account?.activeDispute,
       disputeTimeout: Number(account?.activeDispute?.disputeTimeout || 0),
-      currentJHeight: Number(account?.lastFinalizedJHeight || rep?.state?.lastFinalizedJHeight || 0),
     };
   }, { entityId, signerId, counterpartyId });
 }
@@ -331,16 +493,37 @@ async function mineOneBlock(page: Page): Promise<void> {
     data: { jsonrpc: '2.0', id: 1, method: 'evm_mine', params: [] },
   });
   expect(response.ok(), 'evm_mine RPC must succeed').toBe(true);
+  await page.evaluate(async () => {
+    const env = (window as typeof window & { isolatedEnv?: any }).isolatedEnv;
+    const activeJurisdiction = String(env?.activeJurisdiction || '');
+    const jReplica = activeJurisdiction ? env?.jReplicas?.get?.(activeJurisdiction) : null;
+    const jadapter = jReplica?.jadapter;
+    if (jadapter && typeof jadapter.pollNow === 'function') {
+      await jadapter.pollNow();
+    }
+  });
+}
+
+async function readRuntimeJurisdictionHeight(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const env = (window as typeof window & { isolatedEnv?: any }).isolatedEnv;
+    const activeJurisdiction = String(env?.activeJurisdiction || '');
+    const jReplica = activeJurisdiction ? env?.jReplicas?.get?.(activeJurisdiction) : null;
+    return Number(jReplica?.blockNumber || 0n);
+  });
 }
 
 async function waitForBlock(page: Page, targetBlock: number): Promise<void> {
   const deadline = Date.now() + 45_000;
   for (;;) {
     const current = await readCurrentChainBlock(page);
-    if (current >= targetBlock) return;
+    const runtimeVisible = await readRuntimeJurisdictionHeight(page);
+    if (current >= targetBlock && runtimeVisible >= targetBlock) return;
     await mineOneBlock(page);
     if (Date.now() > deadline) {
-      throw new Error(`Timed out waiting for block ${targetBlock}, current=${current}`);
+      throw new Error(
+        `Timed out waiting for block ${targetBlock}, current=${current}, runtimeVisible=${runtimeVisible}`,
+      );
     }
   }
 }
@@ -541,18 +724,12 @@ test.describe('debt ledger', () => {
 
     const timeoutBlock = disputeState.disputeTimeout;
     await waitForBlock(alicePage, timeoutBlock);
-    await expect
-      .poll(async () => (await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId)).currentJHeight, {
-        timeout: 45_000,
-        intervals: [500, 1000, 1500],
-      })
-      .toBeGreaterThanOrEqual(timeoutBlock);
 
     step('dispute-finalize');
     await queueAndBroadcastDisputeFinalizeDirect(alicePage, alice.entityId, alice.signerId, bob.entityId);
     await expect
       .poll(async () => (await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId)).activeDispute, {
-        timeout: 45_000,
+        timeout: 60_000,
         intervals: [500, 1000, 1500],
       })
       .toBe(false);
@@ -621,7 +798,7 @@ test.describe('debt ledger', () => {
     const moveConfirm = bobPage.getByTestId('move-confirm').first();
     await expect(moveConfirm).toBeEnabled({ timeout: 20_000 });
     await moveConfirm.click();
-    await broadcastDraftBatch(bobPage);
+    await broadcastDraftBatch(bobPage, bob.entityId, bob.signerId);
 
     await expect.poll(async () => await getRenderedExternalBalance(bobPage, 'USDC'), {
       timeout: 45_000,

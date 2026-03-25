@@ -2,6 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+  import { entityAvatar } from '$lib/utils/avatar';
   import { getGossipProfiles, resolveEntityName, scheduleGossipProfileFetch } from '../../utils/entityNaming';
 
   export let value: string = '';
@@ -45,7 +46,7 @@
   $: optionViews = options.map((id) => ({
     id,
     name: getOptionName(id),
-    avatarUrl: activeXlnFunctions?.isReady ? activeXlnFunctions.generateEntityAvatar?.(id) || '' : '',
+    avatar: entityAvatar(activeXlnFunctions, id),
   }));
   $: selectedOption = optionViews.find((opt) => opt.id === value) || null;
 
@@ -73,8 +74,8 @@
 <div class="entity-select">
   <button class="es-trigger" class:open on:click|stopPropagation={() => open = !open}>
     {#if selectedOption}
-      {#if selectedOption.avatarUrl}
-        <img class="es-avatar" src={selectedOption.avatarUrl} alt="" />
+      {#if selectedOption.avatar}
+        <img class="es-avatar" src={selectedOption.avatar} alt="" />
       {:else}
         <span class="es-avatar placeholder">?</span>
       {/if}
@@ -92,8 +93,8 @@
     <div class="es-panel" on:click|stopPropagation>
       {#each optionViews as option (option.id)}
         <div class="es-option" class:selected={option.id === value} on:click={() => select(option.id)} on:keydown={() => {}} role="option" aria-selected={option.id === value} tabindex="0">
-          {#if option.avatarUrl}
-            <img class="es-avatar" src={option.avatarUrl} alt="" />
+          {#if option.avatar}
+            <img class="es-avatar" src={option.avatar} alt="" />
           {:else}
             <span class="es-avatar placeholder">?</span>
           {/if}

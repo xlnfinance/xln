@@ -97,12 +97,7 @@ export interface JAdapter {
 
   // Writes - Core Operations
   processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt>;
-  enforceDebts(entityId: string, tokenId: number): Promise<bigint>;
-
-  // Writes - Entity Management
-  registerNumberedEntity(boardHash: string): Promise<{ entityNumber: number; txHash: string }>;
-  registerNumberedEntitiesBatch(boardHashes: string[]): Promise<{ entityNumbers: number[]; txHash: string }>;
-  getNextEntityNumber(): Promise<number>;
+  enforceDebts(entityId: string, tokenId: number): Promise<void>;
 
   // Writes - Testing/Debug (may be no-op on mainnet)
   debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]>;
@@ -200,15 +195,13 @@ export interface JBatchReceipt {
 
 // Forward declare BrowserVMProvider (avoid circular import)
 export interface BrowserVMProvider {
-  processBatch(encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint): Promise<any[]>;
-  enforceDebts(entityId: string, tokenId: number): Promise<bigint>;
+  processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<any[]>;
+  enforceDebts(entityId: string, tokenId: number): Promise<void>;
   setBlockTimestamp(timestamp: number): void;
   getDepositoryAddress(): string;
   getEntityProviderAddress(): string;
   getAccountAddress(): string;
   debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<any[]>;
-  getNextEntityNumber(): Promise<number>;
-  registerNumberedEntitiesBatch(boardHashes: string[]): Promise<{ entityNumbers: number[]; txHash: string }>;
   serializeState(): Promise<any>;
   restoreState(state: any): Promise<void>;
   onAny(callback: (events: any[]) => void): () => void;

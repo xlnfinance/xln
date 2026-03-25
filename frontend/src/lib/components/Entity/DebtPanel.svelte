@@ -8,7 +8,6 @@
 
   export let entityState: EntityState | null = null;
   export let sourceEnv: Env | null = null;
-  export let contacts: Array<{ name: string; entityId: string }> = [];
   export let canEnforce: boolean = false;
   export let enforcingTokenId: number | null = null;
 
@@ -82,7 +81,6 @@
     return getEntityDisplayName(entityId, {
       source: sourceEnv,
       selfEntityId: entityState?.entityId || '',
-      contacts,
       selfLabel: 'You',
       fallback: 'Unknown',
     });

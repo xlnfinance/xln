@@ -11,6 +11,7 @@
   import type { Env } from '@xln/runtime/xln-api';
   import { enqueueEntityInputs, getEnv, xlnFunctions } from '../../stores/xlnStore';
   import { activeVault } from '../../stores/vaultStore';
+  import { entityAvatar } from '../../utils/avatar';
   import {
     type HubJoinPreference,
     hydrateJurisdictionPolicyDefaults,
@@ -40,7 +41,7 @@
   let submitting = false;
   let error = '';
   let hasPersistedPolicy = false;
-  let avatarUrl = '';
+  let avatar = '';
 
   const HUB_JOIN_OPTIONS: Array<{ value: HubJoinPreference; label: string }> = [
     { value: 'manual', label: 'Join hubs manually' },
@@ -91,7 +92,7 @@
     return '';
   };
 
-  $: avatarUrl = $xlnFunctions?.isReady ? ($xlnFunctions.generateEntityAvatar?.(entityId) || '') : '';
+  $: avatar = entityAvatar($xlnFunctions, entityId);
 
   $: canFinish =
     termsAccepted &&
@@ -293,8 +294,8 @@
       />
       <p class="form-hint compact">Visible in gossip, account lists, and routing flows.</p>
       <div class="profile-preview-card">
-        {#if avatarUrl}
-          <img src={avatarUrl} alt="Entity avatar" class="profile-preview-avatar" />
+        {#if avatar}
+          <img src={avatar} alt="Entity avatar" class="profile-preview-avatar" />
         {:else}
           <div class="profile-preview-avatar placeholder">?</div>
         {/if}

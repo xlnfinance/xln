@@ -9,7 +9,7 @@ pragma solidity ^0.8.24;
 // ========== ACCOUNT STATE ==========
 
 struct AccountInfo {
-  uint nonce;              // Unified nonce: increments on settlement OR dispute start
+  uint nonce;              // Unified monotonic nonce: signed nonce must be strictly greater than stored nonce
   bytes32 disputeHash;
   uint256 disputeTimeout;
 }
@@ -43,7 +43,7 @@ struct AccountSettlement {
   bytes32 left;
   bytes32 right;
   TokenSettlement[] tokens;
-  uint nonce;  // Post-increment nonce for watcher correlation
+  uint nonce;  // Post-update nonce for watcher correlation
 }
 
 // ========== DEBT ==========
@@ -93,7 +93,7 @@ struct FinalDisputeProof {
   bytes initialArguments;
   bytes sig;
   bool startedByLeft;
-  uint disputeUntilBlock;
+  uint disputeUntilBlock;  // Legacy/off-chain field; on-chain finalize uses stored account timeout
   bool cooperative;        // if true, skip timeout (mutual agreement)
 }
 
@@ -105,8 +105,8 @@ struct Settlement {
   SettlementDiff[] diffs;
   uint[] forgiveDebtsInTokenIds;
   bytes sig;
-  address entityProvider;
-  bytes hankoData;
+  address entityProvider;  // Legacy ABI field; Depository now uses its immutable provider
+  bytes hankoData;         // Reserved for off-chain tooling/debug payloads
   uint256 nonce;
 }
 
@@ -173,7 +173,7 @@ struct Batch {
   ExternalTokenToReserve[] externalTokenToReserve;
   ReserveToExternalToken[] reserveToExternalToken;
   SecretReveal[] revealSecrets;
-  uint hub_id;
+  uint hub_id;  // Reserved for runtime/off-chain metadata
 }
 
 // ========== ENUMS ==========

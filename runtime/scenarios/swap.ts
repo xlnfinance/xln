@@ -1172,7 +1172,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
 
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const [argArray] = abiCoder.decode(['bytes[]'], finalArgs) as [string[]];
-  const [ratios] = abiCoder.decode(['uint32[]', 'bytes32[]'], argArray[0]) as [Array<bigint>, Array<string>];
+  const [ratios] = abiCoder.decode(['uint16[]', 'bytes32[]'], argArray[0]) as [Array<bigint>, Array<string>];
   const ratioValue = Number(ratios[0] || 0n);
   assert(ratioValue === pendingRatio, `fillRatio matches pending (${pendingRatio})`);
 

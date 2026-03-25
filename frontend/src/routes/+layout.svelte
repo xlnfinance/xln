@@ -4,12 +4,19 @@
 	import { page } from '$app/stores';
 	import Topbar from '$lib/components/Topbar.svelte';
 	import Toast from '$lib/components/Toast.svelte';
+	import { installRangeSliderProgress } from '$lib/utils/rangeSliderProgress';
 	import { installFatalErrorInterceptor } from '$lib/utils/resetEverything';
 	import '$lib/styles/apple-glass.css';
+	import '$lib/styles/range-sliders.css';
 	let { children } = $props();
 
 	onMount(() => {
-		if (browser) installFatalErrorInterceptor();
+		if (!browser) return;
+		installFatalErrorInterceptor();
+		const disposeRangeSliderProgress = installRangeSliderProgress();
+		return () => {
+			disposeRangeSliderProgress();
+		};
 	});
 
 	// Check for embed mode from URL
@@ -41,7 +48,8 @@
 	:global(body) {
 		margin: 0;
 		padding: 0;
-		background: #000;
+		background: var(--theme-background, #000);
+		color: var(--theme-text-primary, #e4e4e7);
 	}
 
 	main.with-topbar {

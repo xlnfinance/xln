@@ -19,15 +19,12 @@ async function deployDirect() {
   
   console.log('🔧 Deploying Depository...');
   const Depository = await ethers.getContractFactory("Depository");
-  const depository = await Depository.deploy(); // Constructor will run debugBulkFundEntities!
+  const depository = await Depository.deploy(epAddress);
   await depository.waitForDeployment();
   const depAddress = await depository.getAddress();
   console.log(`✅ Depository: ${depAddress}`);
   
-  console.log('🔧 Adding EntityProvider to Depository...');
-  const tx = await depository.addEntityProvider(epAddress);
-  await tx.wait();
-  console.log('✅ EntityProvider approved');
+  console.log('✅ Depository bound to immutable EntityProvider');
   
   // TEST: Check if our function works
   console.log('🔍 Testing our debug function...');

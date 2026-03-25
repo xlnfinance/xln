@@ -275,7 +275,13 @@ export const createNumberedEntity = async (
       } as any,
     });
 
-    const { entityNumber } = await jadapter.registerNumberedEntity(boardHash);
+    const nextEntityNumber = await jadapter.entityProvider.nextNumber();
+    const tx = await jadapter.entityProvider.registerNumberedEntity(boardHash);
+    const receipt = await tx.wait();
+    if (!receipt || receipt.status === 0) {
+      throw new Error('registerNumberedEntity failed');
+    }
+    const entityNumber = Number(nextEntityNumber);
 
     const entityId = generateNumberedEntityId(entityNumber);
 
@@ -340,7 +346,13 @@ export const createNumberedEntitiesBatch = async (
       },
     } as any,
   });
-  const { entityNumbers } = await jadapter.registerNumberedEntitiesBatch(boardHashes);
+  const nextEntityNumber = await jadapter.entityProvider.nextNumber();
+  const tx = await jadapter.entityProvider.registerNumberedEntitiesBatch(boardHashes);
+  const receipt = await tx.wait();
+  if (!receipt || receipt.status === 0) {
+    throw new Error('registerNumberedEntitiesBatch failed');
+  }
+  const entityNumbers = boardHashes.map((_, index) => Number(nextEntityNumber) + index);
 
   // Build results
   return entityNumbers.map((entityNumber, i) => {

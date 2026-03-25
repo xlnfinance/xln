@@ -8,6 +8,7 @@
   import DeltaTokenList from './shared/DeltaTokenList.svelte';
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
   import { buildTokenVisualScale, sumVisualScales } from './shared/delta-visual';
+  import { amountToUsdMicros } from '$lib/utils/assetPricing';
   import { getGossipProfile, resolveEntityName } from '$lib/utils/entityNaming';
   import { getAccountUiStatus, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
 
@@ -72,7 +73,7 @@
       return { outCap: 0n, inCap: 0n, outCredit: 0n, outColl: 0n, outDebt: 0n,
                inCredit: 0n, inColl: 0n, inDebt: 0n, outTotal: 0n, inTotal: 0n,
                outHold: 0n, inHold: 0n, tokenCount: 0, primaryTokenId: 1, primarySymbol: '?',
-               uncollateralized: 0n, totalCollateral: 0n, totalDebt: 0n };
+               totalCollateralUsdMicros: 0n, totalDebtUsdMicros: 0n };
     }
 
     const isLeft = entityId < counterpartyId;
@@ -80,6 +81,8 @@
     let outCredit = 0n, outColl = 0n, outDebt = 0n;
     let inCredit = 0n, inColl = 0n, inDebt = 0n;
     let outHold = 0n, inHold = 0n;
+    let totalCollateralUsdMicros = 0n;
+    let totalDebtUsdMicros = 0n;
     let primaryTokenId = 1;
     let primarySymbol = '?';
     let bestPrimaryOut = -1n;
@@ -98,6 +101,10 @@
       outHold += (typeof d.outTotalHold === 'bigint' ? d.outTotalHold : 0n);
       inHold += (typeof d.inTotalHold === 'bigint' ? d.inTotalHold : 0n);
       const info = activeXlnFunctions.getTokenInfo(tokenId);
+      const symbol = String(info?.symbol || `T${tokenId}`);
+      const decimals = Number(info?.decimals ?? 18);
+      totalCollateralUsdMicros += amountToUsdMicros(d.outCollateral, decimals, symbol);
+      totalDebtUsdMicros += amountToUsdMicros(d.outPeerCredit, decimals, symbol);
       if (
         info?.symbol &&
         (d.outCapacity > bestPrimaryOut || (d.outCapacity === bestPrimaryOut && d.inCapacity > bestPrimaryIn))
@@ -112,30 +119,31 @@
     const outTotal = outCredit + outColl + outDebt;
     const inTotal = inDebt + inColl + inCredit;
 
-    // Compute rebalance risk strictly from derived perspective fields.
-    // Do not recalculate from raw ondelta/offdelta here.
-    let totalDebt = 0n;
-    let totalCollateral = 0n;
-    for (const [, delta] of account.deltas.entries()) {
-      const d = activeXlnFunctions.deriveDelta(delta, isLeft);
-      totalDebt += d.outPeerCredit;
-      totalCollateral += d.outCollateral;
-    }
-    const uncollateralized = totalDebt > totalCollateral ? totalDebt - totalCollateral : 0n;
-
     return { outCap, inCap, outCredit, outColl, outDebt,
              inCredit, inColl, inDebt, outTotal, inTotal, outHold, inHold,
              tokenCount: account.deltas.size, primaryTokenId, primarySymbol,
-             uncollateralized, totalCollateral, totalDebt };
+             totalCollateralUsdMicros, totalDebtUsdMicros };
   })();
 
   $: coveragePct = (() => {
-    const denom = agg.totalCollateral + agg.totalDebt;
-    if (denom === 0n) return null;
-    return Number((agg.totalCollateral * 10000n) / denom) / 100;
+    const denom = agg.totalCollateralUsdMicros + agg.totalDebtUsdMicros;
+    if (denom <= 0n) return null;
+    return Number((agg.totalCollateralUsdMicros * 10000n) / denom) / 100;
   })();
-  $: coverageCollFmt = (activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.totalCollateral) ?? '0').replace(/\s+\S+$/, '');
-  $: coverageDenomFmt = (activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.totalCollateral + agg.totalDebt) ?? '0').replace(/\s+\S+$/, '');
+  function formatCoverageUsd(usdMicros: bigint): string {
+    if (usdMicros <= 0n) return '$0';
+    const whole = usdMicros / 1_000_000n;
+    const fraction = usdMicros % 1_000_000n;
+    if (whole >= 1000n) return `$${whole.toLocaleString('en-US')}`;
+    if (whole >= 1n) {
+      const cents = fraction / 10_000n;
+      return `$${whole.toString()}.${cents.toString().padStart(2, '0')}`;
+    }
+    const tenThousandths = fraction / 100n;
+    return `$0.${tenThousandths.toString().padStart(4, '0')}`;
+  }
+  $: coverageCollFmt = formatCoverageUsd(agg.totalCollateralUsdMicros);
+  $: coverageDenomFmt = formatCoverageUsd(agg.totalCollateralUsdMicros + agg.totalDebtUsdMicros);
 
   $: primaryTokenInfo = activeXlnFunctions?.getTokenInfo?.(agg.primaryTokenId) || {
     symbol: String(agg.primarySymbol || '?'),
@@ -535,19 +543,29 @@
   .account-preview {
     --delta-col-w: clamp(136px, 14vw, 192px);
     --delta-sep-w: 12px;
-    background: #111113;
-    border: 1px solid #1e1e22;
+    --account-preview-bg: color-mix(in srgb, var(--theme-surface, #18181b) 94%, transparent);
+    --account-preview-bg-hover: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 96%, transparent);
+    --account-preview-border: color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
+    --account-preview-border-strong: color-mix(in srgb, var(--theme-border, #27272a) 88%, white 12%);
+    --account-preview-text: var(--theme-text-primary, #e4e4e7);
+    --account-preview-text-secondary: var(--theme-text-secondary, #a1a1aa);
+    --account-preview-text-muted: var(--theme-text-muted, #71717a);
+    --account-preview-accent: var(--theme-accent, #fbbf24);
+    --account-preview-credit: var(--theme-credit, #4ade80);
+    --account-preview-debit: var(--theme-debit, #f43f5e);
+    background: var(--account-preview-bg);
+    border: 1px solid var(--account-preview-border);
     border-radius: 6px;
     padding: 14px 16px 12px;
     transition: all 0.15s ease;
   }
   .account-preview:hover {
-    border-color: #2a2a2e;
-    background: #141416;
+    border-color: var(--account-preview-border-strong);
+    background: var(--account-preview-bg-hover);
   }
   .account-preview.selected {
-    border-color: #2a2a2e;
-    background: #141416;
+    border-color: var(--account-preview-border-strong);
+    background: var(--account-preview-bg-hover);
   }
 
   /* ── Header ───────────────────────────────────── */
@@ -565,12 +583,12 @@
   .entity-col :global(.name) {
     font-size: 18px;
     font-weight: 700;
-    color: #f3f4f6;
+    color: var(--account-preview-text);
     line-height: 1.15;
   }
   .entity-col :global(.address) {
     font-size: 12px;
-    color: #94a3b8;
+    color: var(--account-preview-text-secondary);
     line-height: 1.15;
   }
 
@@ -581,14 +599,14 @@
     margin-top: 2px;
     font-size: 11px;
     font-family: 'JetBrains Mono', monospace;
-    color: #71717a;
+    color: var(--account-preview-text-muted);
   }
   .meta-status { text-transform: uppercase; font-weight: 600; letter-spacing: 0.03em; }
-  .meta-status.ready { color: #4ade80; }
-  .meta-status.sent { color: #fbbf24; }
-  .meta-status.disputed { color: #f43f5e; }
-  .meta-sep { color: #3f3f46; }
-  .meta-frame { color: #52525b; }
+  .meta-status.ready { color: var(--account-preview-credit); }
+  .meta-status.sent { color: var(--account-preview-accent); }
+  .meta-status.disputed { color: var(--account-preview-debit); }
+  .meta-sep { color: color-mix(in srgb, var(--account-preview-text-muted) 62%, transparent); }
+  .meta-frame { color: color-mix(in srgb, var(--account-preview-text-muted) 80%, transparent); }
   .status-col {
     display: flex;
     align-items: center;
@@ -617,7 +635,7 @@
     border-radius: 6px;
     transition: background 0.15s ease;
   }
-  .status-indicator:hover { background: rgba(255,255,255,0.05); }
+  .status-indicator:hover { background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 72%, transparent); }
 
   .status-dot-inner {
     width: 8px;
@@ -625,21 +643,21 @@
     border-radius: 50%;
     flex-shrink: 0;
   }
-  .status-indicator.green .status-dot-inner { background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.5); }
-  .status-indicator.amber .status-dot-inner { background: #fbbf24; box-shadow: 0 0 6px rgba(251, 191, 36, 0.5); animation: pulse 2s infinite; }
+  .status-indicator.green .status-dot-inner { background: var(--account-preview-credit); box-shadow: 0 0 6px color-mix(in srgb, var(--account-preview-credit) 50%, transparent); }
+  .status-indicator.amber .status-dot-inner { background: var(--account-preview-accent); box-shadow: 0 0 6px color-mix(in srgb, var(--account-preview-accent) 50%, transparent); animation: pulse 2s infinite; }
   .status-indicator.orange .status-dot-inner { background: #f97316; box-shadow: 0 0 6px rgba(249, 115, 22, 0.4); }
-  .status-indicator.red .status-dot-inner { background: #f43f5e; box-shadow: 0 0 6px rgba(244, 63, 94, 0.5); animation: pulse 1.5s infinite; }
-  .status-indicator.gray .status-dot-inner { background: #3f3f46; }
+  .status-indicator.red .status-dot-inner { background: var(--account-preview-debit); box-shadow: 0 0 6px color-mix(in srgb, var(--account-preview-debit) 50%, transparent); animation: pulse 1.5s infinite; }
+  .status-indicator.gray .status-dot-inner { background: color-mix(in srgb, var(--account-preview-text-muted) 58%, transparent); }
 
   .status-frame {
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
-    color: #52525b;
+    color: color-mix(in srgb, var(--account-preview-text-muted) 80%, transparent);
     font-weight: 600;
   }
-  .status-indicator.green .status-frame { color: #6ee7b7; }
-  .status-indicator.amber .status-frame { color: #fcd34d; }
-  .status-indicator.red .status-frame { color: #fda4af; }
+  .status-indicator.green .status-frame { color: color-mix(in srgb, var(--account-preview-credit) 76%, white 24%); }
+  .status-indicator.amber .status-frame { color: color-mix(in srgb, var(--account-preview-accent) 76%, white 24%); }
+  .status-indicator.red .status-frame { color: color-mix(in srgb, var(--account-preview-debit) 68%, white 32%); }
 
   .status-coverage {
     font-family: 'JetBrains Mono', monospace;
@@ -649,9 +667,9 @@
     border-radius: 3px;
     margin-left: 2px;
   }
-  .status-coverage.cov-good { color: #4ade80; background: rgba(34, 197, 94, 0.12); }
-  .status-coverage.cov-caution { color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
-  .status-coverage.cov-warn { color: #f87171; background: rgba(239, 68, 68, 0.15); }
+  .status-coverage.cov-good { color: var(--account-preview-credit); background: color-mix(in srgb, var(--account-preview-credit) 12%, transparent); }
+  .status-coverage.cov-caution { color: var(--account-preview-accent); background: color-mix(in srgb, var(--account-preview-accent) 12%, transparent); }
+  .status-coverage.cov-warn { color: color-mix(in srgb, var(--account-preview-debit) 72%, white 28%); background: color-mix(in srgb, var(--account-preview-debit) 15%, transparent); }
 
   .popover-dot {
     display: inline-block;
@@ -661,21 +679,22 @@
     margin-right: 6px;
     vertical-align: middle;
   }
-  .popover-dot.green { background: #4ade80; }
-  .popover-dot.yellow { background: #fbbf24; }
-  .popover-dot.red { background: #f43f5e; }
-  .popover-dot.gray { background: #3f3f46; }
+  .popover-dot.green { background: var(--account-preview-credit); }
+  .popover-dot.yellow { background: var(--account-preview-accent); }
+  .popover-dot.red { background: var(--account-preview-debit); }
+  .popover-dot.gray { background: color-mix(in srgb, var(--account-preview-text-muted) 58%, transparent); }
 
   .consensus-popover {
     position: absolute;
     right: 0;
     top: calc(100% + 8px);
-    min-width: 260px;
+    min-width: 0;
+    width: min(320px, calc(100vw - 24px));
     padding: 10px 12px;
     border-radius: 10px;
-    border: 1px solid #2f2f35;
-    background: rgba(12, 12, 16, 0.97);
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+    border: 1px solid color-mix(in srgb, var(--account-preview-border) 90%, transparent);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 96%, transparent);
+    box-shadow: 0 18px 48px color-mix(in srgb, var(--theme-background, #09090b) 32%, transparent);
     display: none;
     z-index: 12;
     backdrop-filter: blur(10px);
@@ -687,7 +706,7 @@
   }
 
   .consensus-popover-head {
-    color: #f5f5f4;
+    color: var(--account-preview-text);
     font-size: 12px;
     font-weight: 700;
     margin-bottom: 8px;
@@ -697,20 +716,20 @@
     display: flex;
     justify-content: space-between;
     gap: 16px;
-    color: #a8a29e;
+    color: var(--account-preview-text-secondary);
     font-size: 11px;
     line-height: 1.35;
     padding: 3px 0;
   }
 
   .consensus-popover-row strong {
-    color: #f3f4f6;
+    color: var(--account-preview-text);
     font-weight: 600;
     text-align: right;
   }
 
   .consensus-popover-row.dispute strong {
-    color: #fecdd3;
+    color: color-mix(in srgb, var(--account-preview-debit) 48%, white 52%);
   }
 
   .consensus-popover-row.dim {
@@ -723,7 +742,7 @@
   }
 
   .consensus-popover-row.pending strong {
-    color: #fbbf24;
+    color: var(--account-preview-accent);
   }
 
   .consensus-popover-section {
@@ -731,11 +750,11 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #52525b;
+    color: color-mix(in srgb, var(--account-preview-text-muted) 80%, transparent);
     margin-top: 8px;
     margin-bottom: 2px;
     padding-top: 6px;
-    border-top: 1px solid #27272a;
+    border-top: 1px solid color-mix(in srgb, var(--account-preview-border) 88%, transparent);
   }
   .consensus-popover-section:first-child {
     margin-top: 0;
@@ -749,9 +768,9 @@
     margin-top: 10px;
     padding: 8px 0;
     border-radius: 8px;
-    border: 1px solid #3f3f46;
-    background: rgba(251, 191, 36, 0.06);
-    color: #fbbf24;
+    border: 1px solid color-mix(in srgb, var(--account-preview-border) 86%, transparent);
+    background: color-mix(in srgb, var(--account-preview-accent) 8%, transparent);
+    color: var(--account-preview-accent);
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.03em;
@@ -761,19 +780,19 @@
   }
 
   .popover-explore-btn:hover {
-    border-color: #fbbf24;
-    background: rgba(251, 191, 36, 0.14);
+    border-color: color-mix(in srgb, var(--account-preview-accent) 70%, transparent);
+    background: color-mix(in srgb, var(--account-preview-accent) 16%, transparent);
   }
 
   .coverage-pct {
-    color: #4ade80;
+    color: var(--account-preview-credit);
     font-weight: 700;
     margin-right: 4px;
   }
-  .consensus-popover-row.coverage-caution .coverage-pct { color: #fbbf24; }
-  .consensus-popover-row.coverage-warn .coverage-pct { color: #f43f5e; }
+  .consensus-popover-row.coverage-caution .coverage-pct { color: var(--account-preview-accent); }
+  .consensus-popover-row.coverage-warn .coverage-pct { color: var(--account-preview-debit); }
   .coverage-detail {
-    color: #52525b;
+    color: color-mix(in srgb, var(--account-preview-text-muted) 80%, transparent);
     font-size: 9px;
     font-weight: 400;
     font-family: 'JetBrains Mono', monospace;
@@ -816,8 +835,8 @@
     gap: 4px;
     padding: 8px 10px;
     border-radius: 10px;
-    border: 1px solid rgba(113, 113, 122, 0.18);
-    background: rgba(24, 24, 27, 0.74);
+    border: 1px solid color-mix(in srgb, var(--account-preview-border) 74%, transparent);
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 78%, transparent);
     min-width: 0;
   }
 
@@ -833,7 +852,7 @@
 
   .flow-chip.more {
     border-style: dashed;
-    background: rgba(24, 24, 27, 0.4);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 58%, transparent);
   }
 
   .flow-chip-head {
@@ -846,27 +865,27 @@
   .flow-chip-dir {
     font-family: 'JetBrains Mono','SF Mono','Monaco','Menlo',monospace;
     font-size: 11px;
-    color: #fbbf24;
+    color: var(--account-preview-accent);
     flex-shrink: 0;
   }
 
   .flow-chip-title {
     font-size: 11px;
     font-weight: 700;
-    color: #f5f5f4;
+    color: var(--account-preview-text);
     min-width: 0;
   }
 
   .flow-chip-amount {
     margin-left: auto;
     font-size: 11px;
-    color: #fbbf24;
+    color: var(--account-preview-accent);
     white-space: nowrap;
   }
 
   .flow-chip-subtitle {
     font-size: 10px;
-    color: #a8a29e;
+    color: var(--account-preview-text-secondary);
     line-height: 1.35;
     word-break: break-word;
   }
@@ -885,9 +904,9 @@
   }
 
   .lock-badge.incoming {
-    color: #d6d3d1;
-    background: rgba(113, 113, 122, 0.16);
-    border-color: rgba(113, 113, 122, 0.28);
+    color: var(--account-preview-text-secondary);
+    background: color-mix(in srgb, var(--account-preview-text-muted) 16%, transparent);
+    border-color: color-mix(in srgb, var(--account-preview-text-muted) 28%, transparent);
   }
 
   .lock-badge.outgoing {
@@ -914,7 +933,7 @@
   }
 
   /* ── Misc ──────────────────────────────────────── */
-  .empty { font-size:0.65em; color:#52525b; padding:4px 0; font-style: italic; }
+  .empty { font-size:0.65em; color:color-mix(in srgb, var(--account-preview-text-muted) 80%, transparent); padding:4px 0; font-style: italic; }
 
   .settle {
     display: inline-block;
@@ -925,13 +944,13 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     font-weight: 600;
-    color: #71717a;
-    background: rgba(113,113,122,0.08);
-    border: 1px solid rgba(113,113,122,0.1);
+    color: var(--account-preview-text-muted);
+    background: color-mix(in srgb, var(--account-preview-text-muted) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--account-preview-text-muted) 14%, transparent);
   }
-  .settle.awaiting_counterparty { color:#fbbf24; background:rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.12); }
-  .settle.ready_to_submit { color:#4ade80; background:rgba(74,222,128,0.08); border-color: rgba(74,222,128,0.12); }
-  .settle.submitted { color:#fbbf24; background:rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.12); }
+  .settle.awaiting_counterparty { color:var(--account-preview-accent); background:color-mix(in srgb, var(--account-preview-accent) 10%, transparent); border-color: color-mix(in srgb, var(--account-preview-accent) 16%, transparent); }
+  .settle.ready_to_submit { color:var(--account-preview-credit); background:color-mix(in srgb, var(--account-preview-credit) 10%, transparent); border-color: color-mix(in srgb, var(--account-preview-credit) 16%, transparent); }
+  .settle.submitted { color:var(--account-preview-accent); background:color-mix(in srgb, var(--account-preview-accent) 10%, transparent); border-color: color-mix(in srgb, var(--account-preview-accent) 16%, transparent); }
 
   .settle-row {
     margin-top: 6px;
@@ -941,9 +960,9 @@
   }
 
   .btn-sign-settle {
-    background: rgba(251, 191, 36, 0.18);
-    color: #fbbf24;
-    border: 1px solid rgba(251, 191, 36, 0.35);
+    background: color-mix(in srgb, var(--account-preview-accent) 18%, transparent);
+    color: var(--account-preview-accent);
+    border: 1px solid color-mix(in srgb, var(--account-preview-accent) 35%, transparent);
     border-radius: 7px;
     font-size: 0.72em;
     font-weight: 700;
@@ -955,7 +974,7 @@
   }
 
   .btn-sign-settle:hover {
-    background: rgba(251, 191, 36, 0.26);
-    border-color: rgba(251, 191, 36, 0.55);
+    background: color-mix(in srgb, var(--account-preview-accent) 26%, transparent);
+    border-color: color-mix(in srgb, var(--account-preview-accent) 55%, transparent);
   }
 </style>

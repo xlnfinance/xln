@@ -664,7 +664,7 @@
 
   {#if checkoutEntityId && appReadyForPaymentPanel}
     <div class="hidden-payment-panel" aria-hidden="true">
-      <PaymentPanel bind:this={paymentPanelRef} entityId={checkoutEntityId} contacts={[]} />
+      <PaymentPanel bind:this={paymentPanelRef} entityId={checkoutEntityId} />
     </div>
   {/if}
 </div>

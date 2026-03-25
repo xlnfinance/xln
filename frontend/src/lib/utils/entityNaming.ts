@@ -89,7 +89,6 @@ export function resolveEntityName(entityId: string, source: GossipSource): strin
 type EntityNameOptions = {
   source: GossipSource;
   selfEntityId?: string | null;
-  contacts?: Array<{ name: string; entityId: string }> | null;
   selfLabel?: string;
   fallback?: string;
 };
@@ -102,13 +101,6 @@ export function getEntityDisplayName(entityId: string, options: EntityNameOption
   const selfEntityId = String(options.selfEntityId || '').trim();
   if (selfEntityId && normalized === normalizeId(selfEntityId)) {
     return options.selfLabel || 'You';
-  }
-
-  for (const contact of options.contacts || []) {
-    const contactId = String(contact?.entityId || '').trim();
-    const contactName = String(contact?.name || '').trim();
-    if (!contactId || !contactName) continue;
-    if (normalizeId(contactId) === normalized) return contactName;
   }
 
   const resolved = resolveEntityName(raw, options.source).trim();

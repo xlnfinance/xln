@@ -961,6 +961,10 @@
 
   .setting-group input[type="range"] {
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    display: block;
+    box-sizing: border-box;
     cursor: pointer;
   }
 

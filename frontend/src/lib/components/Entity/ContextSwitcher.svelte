@@ -6,6 +6,7 @@
   import { resetEverything } from '$lib/utils/resetEverything';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
   import type { Tab, EntityReplica } from '$lib/types/ui';
+  import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
   import { resolveEntityName } from '$lib/utils/entityNaming';
 
   export let tab: Tab;
@@ -22,7 +23,7 @@
     runtimeLabel: string;
     signerId: string;
     status: 'connected' | 'syncing' | 'disconnected' | 'error' | 'inactive';
-    signerAvatarUrl: string;
+    avatar: string;
     selfEntity: EntitySummary | null;
     derivedEntities: EntitySummary[];
   };
@@ -30,7 +31,7 @@
   type EntitySummary = {
     entityId: string;
     name: string;
-    avatarUrl: string;
+    avatar: string;
     isSelf: boolean;
   };
 
@@ -39,7 +40,7 @@
   $: runtimeGroups = buildRuntimeGroups();
   $: currentGroup = runtimeGroups.find((group) => group.runtimeId === $activeVault?.id) || null;
   $: currentEntity = resolveCurrentEntity();
-  $: currentAvatar = currentEntity?.avatarUrl || currentGroup?.signerAvatarUrl || '';
+  $: currentAvatar = currentEntity?.avatar || currentGroup?.avatar || '';
   $: currentTitle = resolveCurrentTitle();
   $: currentSubtitle = currentEntity?.entityId
     ? truncateMiddle(currentEntity.entityId)
@@ -59,20 +60,18 @@
       const selfEntityId = normalizeId(signer?.entityId);
       const selfEntity = selfEntityId ? entityMap.find((entity) => normalizeId(entity.entityId) === selfEntityId) || null : null;
       const derivedEntities = entityMap.filter((entity) => !selfEntity || normalizeId(entity.entityId) !== normalizeId(selfEntity.entityId));
+      const runtimeAvatar = preferredAvatar(activeXlnFunctions, signer?.entityId || '', signerId, 32);
 
       groups.push({
         runtimeId: runtime.id,
         runtimeLabel: runtime.label || runtime.id,
         signerId,
         status,
-        signerAvatarUrl: signerId ? activeXlnFunctions?.generateSignerAvatar?.(signerId) || '' : '',
+        avatar: selfEntity?.avatar || runtimeAvatar,
         selfEntity: selfEntity || (selfEntityId ? {
           entityId: signer?.entityId || '',
           name: signer?.entityId || 'Entity',
-          avatarUrl:
-            signer?.entityId && activeXlnFunctions?.isReady
-              ? activeXlnFunctions.generateEntityAvatar?.(signer.entityId) || ''
-              : '',
+          avatar: entityAvatar(activeXlnFunctions, signer?.entityId || ''),
           isSelf: true
         } : null),
         derivedEntities,
@@ -107,7 +106,7 @@
       entities.push({
         entityId,
         name: getEntityLabel(entityId, env, replica),
-        avatarUrl: activeXlnFunctions?.isReady ? activeXlnFunctions.generateEntityAvatar?.(entityId) || '' : '',
+        avatar: entityAvatar(activeXlnFunctions, entityId),
         isSelf: normalizedEntityId === normalizeId(selfEntityId),
       });
     }
@@ -221,8 +220,8 @@
         <section class="runtime-group" class:active={group.runtimeId === $activeVault?.id}>
           <div class="runtime-row">
             <button class="runtime-main" on:click={() => selectRuntimeSelf(group)}>
-              {#if group.signerAvatarUrl}
-                <img src={group.signerAvatarUrl} alt="" class="runtime-avatar" />
+              {#if group.avatar}
+                <img src={group.avatar} alt="" class="runtime-avatar" />
               {:else}
                 <span class="runtime-avatar placeholder">◎</span>
               {/if}
@@ -251,8 +250,8 @@
             <div class="derived-list">
               {#each group.derivedEntities as entity (entity.entityId)}
                 <button class="entity-row" on:click={() => selectRuntimeEntity(group.runtimeId, group.signerId, entity.entityId)}>
-                  {#if entity.avatarUrl}
-                    <img src={entity.avatarUrl} alt="" class="entity-avatar" />
+                  {#if entity.avatar}
+                    <img src={entity.avatar} alt="" class="entity-avatar" />
                   {:else}
                     <span class="entity-avatar placeholder">◌</span>
                   {/if}

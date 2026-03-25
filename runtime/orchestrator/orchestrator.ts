@@ -336,7 +336,7 @@ const parseArgs = (): Args => {
     publicWsBaseUrl: normalizeWsBaseUrl(getArg('--public-ws-base-url', ''), host, port),
     nodeApiPortBase,
     nodePublicPortBase,
-    rpcUrl: normalizeLoopbackUrl(getArg('--rpc-url', process.env.ANVIL_RPC || 'http://127.0.0.1:8545')),
+    rpcUrl: normalizeLoopbackUrl(getArg('--rpc-url', process.env.ANVIL_RPC || 'http://localhost:8545')),
     dbRoot: resolve(getArg('--db-root', join(process.cwd(), '.e2e-mesh-db'))),
     mmEnabled: hasFlag('--mm'),
     resetAllowed: hasFlag('--allow-reset') || process.env.XLN_MESH_RESET_ALLOWED === '1',

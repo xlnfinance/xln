@@ -402,38 +402,19 @@
   .over-collateral-slider-row {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     color: #9ca3af;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .over-collateral-slider {
-    flex: 1;
-    appearance: none;
-    height: 2px;
-    background: #27272a;
-    border-radius: 2px;
-    outline: none;
+    flex: 1 1 220px;
+    min-width: 0;
+    max-width: 100%;
     margin: 0;
-  }
-
-  .over-collateral-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 12px;
-    height: 12px;
-    background: #fbbf24;
-    border: 2px solid #f59e0b;
-    border-radius: 0;
-    transform: rotate(45deg);
-    cursor: pointer;
-  }
-
-  .over-collateral-slider::-moz-range-thumb {
-    width: 12px;
-    height: 12px;
-    background: #fbbf24;
-    border: 2px solid #f59e0b;
-    border-radius: 0;
-    transform: rotate(45deg);
-    cursor: pointer;
   }
 </style>
