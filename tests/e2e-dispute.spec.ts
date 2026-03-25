@@ -653,7 +653,9 @@ async function selectEntityInputValue(
   const target = String(entityId || '').trim().toLowerCase();
   const targetProbe = target.slice(0, 12);
   const hasTargetSelection = async (): Promise<boolean> => {
-    const text = String(await selector.textContent().catch(() => '')).toLowerCase();
+    const closedTrigger = selector.locator('.closed-trigger').first();
+    if (!(await closedTrigger.isVisible().catch(() => false))) return false;
+    const text = String(await closedTrigger.textContent().catch(() => '')).toLowerCase();
     return text.includes(targetProbe);
   };
 
@@ -680,12 +682,23 @@ async function selectEntityInputValue(
     await input.fill('');
     await input.fill(entityId);
 
+    if (await hasTargetSelection()) {
+      return;
+    }
+
+    await input.press('Tab').catch(() => undefined);
+    await page.waitForTimeout(100);
+    if (await hasTargetSelection()) {
+      return;
+    }
+
     if (await option.isVisible().catch(() => false)) {
-      await option.dispatchEvent('mousedown');
+      await option.dispatchEvent('mousedown', { buttons: 1 });
     } else {
       await input.press('Enter');
     }
 
+    await page.waitForTimeout(100);
     if (await hasTargetSelection()) {
       return;
     }
