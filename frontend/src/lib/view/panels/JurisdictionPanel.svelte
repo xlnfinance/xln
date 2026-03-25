@@ -65,6 +65,10 @@
   let debtsLoading = $state(false);
   let debtsRequestId = 0;
 
+  function isBrowserVMDebugAdapter(adapter: unknown): adapter is { mode: 'browservm'; timeTravel?: (stateRoot: Uint8Array) => Promise<void> } {
+    return !!adapter && typeof adapter === 'object' && 'mode' in adapter && (adapter as { mode?: string }).mode === 'browservm';
+  }
+
   // Helper to safely convert serialized BigInt objects from snapshots
   function toBigInt(value: any): bigint {
     if (typeof value === 'bigint') return value;
@@ -456,7 +460,7 @@
       return;
     }
     const jadapter = xln.getActiveJAdapter(env);
-    if (!jadapter?.getErc20Balance) {
+    if (!jadapter?.getErc20Balance || !isBrowserVMDebugAdapter(jadapter)) {
       externalBalances = [];
       externalBalancesLoading = false;
       externalBalancesError = null;
@@ -471,7 +475,7 @@
       try {
         // Time travel to historical state if not live
         const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && jadapter.timeTravel) {
+        if (stateRoot && isBrowserVMDebugAdapter(jadapter) && jadapter.timeTravel) {
           await jadapter.timeTravel(stateRoot);
         }
 
@@ -519,7 +523,7 @@
       return;
     }
     const jadapter = xln.getActiveJAdapter(env);
-    if (!jadapter?.getEthBalance) {
+    if (!jadapter?.getEthBalance || !isBrowserVMDebugAdapter(jadapter)) {
       externalEthBalances = [];
       externalEthBalancesLoading = false;
       externalEthBalancesError = null;
@@ -534,7 +538,7 @@
       try {
         // Time travel to historical state if not live
         const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && jadapter.timeTravel) {
+        if (stateRoot && isBrowserVMDebugAdapter(jadapter) && jadapter.timeTravel) {
           await jadapter.timeTravel(stateRoot);
         }
 
@@ -582,7 +586,7 @@
       return;
     }
     const jadapter = xln.getActiveJAdapter(env);
-    if (!jadapter || !jadapter.getDebts || tokenId === null) {
+    if (!jadapter || !jadapter.getDebts || tokenId === null || !isBrowserVMDebugAdapter(jadapter)) {
       entityDebts = [];
       debtsLoading = false;
       return;
@@ -614,7 +618,7 @@
       try {
         // Time travel to historical state if not live
         const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && jadapter.timeTravel) {
+        if (stateRoot && isBrowserVMDebugAdapter(jadapter) && jadapter.timeTravel) {
           await jadapter.timeTravel(stateRoot);
         }
 
