@@ -154,6 +154,36 @@ function scanRegex(files: string[], ruleId: string, severity: Severity, message:
   return matches.length > 0 ? { ruleId, severity, message, matches } : null;
 }
 
+function scanOrderbookWeakTypes(files: string[]): Finding | null {
+  const matches: Finding['matches'] = [];
+  const weakTypeRegex = /:\s*any\b|\bas any\b|<any>/;
+  const orderbookContextRegex = /\b(orderbook|swap|offer|fillRatio|book)\b/i;
+
+  for (const file of files) {
+    const lines = readLines(file);
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i]!;
+      if (!weakTypeRegex.test(line)) continue;
+      if (
+        (file.endsWith('runtime/types.ts') || file.endsWith('runtime/entity-consensus.ts')) &&
+        !orderbookContextRegex.test(line)
+      ) {
+        continue;
+      }
+      pushFindingMatch(matches, file, i + 1, line);
+    }
+  }
+
+  return matches.length > 0
+    ? {
+        ruleId: 'any-keyword',
+        severity: 'warn',
+        message: 'Raw `any` still exists in orderbook-relevant target code.',
+        matches,
+      }
+    : null;
+}
+
 function scanRehydrateContinues(files: string[]): Finding | null {
   const matches: Finding['matches'] = [];
   for (const file of files) {
@@ -238,6 +268,7 @@ function mappedTestsForProfile(profile: string): Array<{ label: string; command:
           'test',
           'runtime/__tests__/price-improvement.test.ts',
           'runtime/__tests__/orderbook-matching-fallback.test.ts',
+          'runtime/__tests__/orderbook-validity.test.ts',
           'runtime/__tests__/serialization-utils.test.ts',
         ],
       },
@@ -252,7 +283,10 @@ function collectFindings(files: string[], profile: string): Finding[] {
   const todoFinding = scanRegex(files, 'todo-markers', 'warn', 'TODO/FIXME/HACK markers remain in target.', /\b(TODO|FIXME|HACK)\b/);
   if (todoFinding) findings.push(todoFinding);
 
-  const anyFinding = scanRegex(files, 'any-keyword', 'warn', 'Raw `any` still exists in target.', /:\s*any\b|\bas any\b|<any>/);
+  const anyFinding =
+    profile === 'orderbook'
+      ? scanOrderbookWeakTypes(files)
+      : scanRegex(files, 'any-keyword', 'warn', 'Raw `any` still exists in target.', /:\s*any\b|\bas any\b|<any>/);
   if (anyFinding) findings.push(anyFinding);
 
   if (profile === 'orderbook') {
