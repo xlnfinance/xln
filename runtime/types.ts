@@ -748,13 +748,18 @@ export type EntityTx =
       };
     }
   | {
-      // Resolve swap offer in bilateral account (hub → user)
+      // Resolve or cancel a swap offer in bilateral account (hub → user).
+      // Non-zero fills must carry exact execution amounts.
       type: 'resolveSwap';
       data: {
         counterpartyEntityId: string; // User who placed the offer
         offerId: string;
         fillRatio: number; // 0-65535
         cancelRemainder: boolean;
+        executionGiveAmount?: bigint;
+        executionWantAmount?: bigint;
+        rebateAmount?: bigint;
+        rebateTokenId?: number;
       };
     }
   | {
@@ -895,15 +900,6 @@ export type EntityTx =
   // ═══════════════════════════════════════════════════════════════
   // SWAP OPERATIONS (ALIASES)
   // ═══════════════════════════════════════════════════════════════
-  | {
-      // Fill swap offer (alias for resolveSwap)
-      type: 'fillSwapOffer';
-      data: {
-        counterpartyId: string;
-        offerId: string;
-        fillRatio: number;
-      };
-    }
   | {
       // Cancel swap offer (alias for cancelSwap)
       type: 'cancelSwapOffer';
@@ -1631,7 +1627,7 @@ export interface EntityState {
 
   // 📖 Aggregated Books - E-Machine view of all A-Machine positions
   // Mirrors A-Machine state for easy UI access, updated on frame commits
-  swapBook: Map<string, SwapBookEntry>;  // offerId → entry
+  swapBook: Map<string, SwapBookEntry>;  // accountId:offerId → entry
   lockBook: Map<string, LockBookEntry>;  // lockId → entry
 
   // 💱 Swap market config

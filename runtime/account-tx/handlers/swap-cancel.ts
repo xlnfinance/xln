@@ -19,7 +19,7 @@ export async function handleSwapCancelRequest(
   byLeft: boolean,
   _currentHeight: number,
   isValidation: boolean = false
-): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelRequested?: { offerId: string; accountId: string } }> {
+): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelRequested?: { offerId: string } }> {
   const { offerId } = accountTx.data;
   const events: string[] = [];
 
@@ -40,15 +40,13 @@ export async function handleSwapCancelRequest(
   }
 
   // 3. Emit request event (used by hub orderbook cancel flow)
-  const makerId = offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity;
-  const accountId = makerId;
   events.push(`📨 Swap cancel requested: ${offerId.slice(0, 8)}...`);
   if (isValidation) {
     console.log(`📊 VALIDATION: swap_cancel_request accepted, offerId=${offerId.slice(0, 8)}`);
   } else {
     console.log(`📊 COMMIT: swap_cancel_request accepted, offerId=${offerId.slice(0, 8)}`);
   }
-  return { success: true, events, swapOfferCancelRequested: { offerId, accountId } };
+  return { success: true, events, swapOfferCancelRequested: { offerId } };
 }
 
 // Legacy export for older imports.

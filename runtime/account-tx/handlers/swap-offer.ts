@@ -203,6 +203,7 @@ export async function handleSwapOffer(
       makerIsLeft,
       fromEntity: leftEntity,   // Canonical entities (same on both sides)
       toEntity: rightEntity,
+      createdHeight: currentHeight,
       giveTokenId,
       giveAmount: effectiveGiveAmount,
       wantTokenId,

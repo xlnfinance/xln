@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createBook, applyCommand } from '../orderbook/core';
 import { SWAP_LOT_SCALE } from '../orderbook/types';
 import { processOrderbookSwaps } from '../entity-tx/handlers/account';
+import { deriveCanonicalSwapFillRatio } from '../swap-execution';
 
 describe('orderbook matching fallback execution mapping', () => {
   test('generates execution amounts even when account state does not contain the offer yet', () => {
@@ -48,6 +49,7 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: quoteAmount,
       wantTokenId: 4,
       wantAmount: baseQty,
+      createdHeight: 1,
       minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1100n,
@@ -82,8 +84,142 @@ describe('orderbook matching fallback execution mapping', () => {
     const op = result.mempoolOps.find((item) => item.tx.type === 'swap_resolve');
 
     expect(op).toBeDefined();
-    expect(op!.tx.data.fillRatio).toBe(65_535);
+    expect(op!.tx.data.fillRatio).toBe(deriveCanonicalSwapFillRatio(quoteAmount, 210_000_000_000n));
     expect(op!.tx.data.executionGiveAmount).toBe(210_000_000_000n);
     expect(op!.tx.data.executionWantAmount).toBe(baseQty);
+  });
+
+  test('sorts live offers canonically before inserting into the book', () => {
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['alice', { swapOffers: new Map([['offer-a', {}]]) }],
+        ['bob', { swapOffers: new Map([['offer-b', {}]]) }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 2,
+          supportedPairs: ['4/6'],
+        },
+        books: new Map(),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const offers = [
+      {
+        offerId: 'offer-b',
+        makerIsLeft: false,
+        fromEntity: 'hub-entity',
+        toEntity: 'bob',
+        accountId: 'bob',
+        createdHeight: 7,
+        giveTokenId: 4,
+        giveAmount: SWAP_LOT_SCALE,
+        wantTokenId: 6,
+        wantAmount: 1000n * SWAP_LOT_SCALE / 10_000n,
+        minFillRatio: 0,
+        timeInForce: 0,
+        priceTicks: 1000n,
+      },
+      {
+        offerId: 'offer-a',
+        makerIsLeft: false,
+        fromEntity: 'hub-entity',
+        toEntity: 'alice',
+        accountId: 'alice',
+        createdHeight: 3,
+        giveTokenId: 4,
+        giveAmount: SWAP_LOT_SCALE,
+        wantTokenId: 6,
+        wantAmount: 1000n * SWAP_LOT_SCALE / 10_000n,
+        minFillRatio: 0,
+        timeInForce: 0,
+        priceTicks: 1000n,
+      },
+    ];
+
+    const result = processOrderbookSwaps(entityState, offers as any);
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    expect(finalBook).toBeDefined();
+    expect(finalBook!.bestAskIdx).toBeGreaterThanOrEqual(0);
+
+    const headOrderIdx = finalBook!.levelHeadAsk[finalBook!.bestAskIdx];
+    expect(finalBook!.orderIds[headOrderIdx]).toBe('alice:offer-a');
+  });
+
+  test('rehydrate rebuild inserts open offers without emitting swap_resolve side effects', () => {
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['alice', { swapOffers: new Map([['offer-a', {}]]) }],
+        ['bob', { swapOffers: new Map([['offer-b', {}]]) }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 2,
+          supportedPairs: ['4/6'],
+        },
+        books: new Map(),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const offers = [
+      {
+        offerId: 'offer-a',
+        makerIsLeft: false,
+        fromEntity: 'hub-entity',
+        toEntity: 'alice',
+        accountId: 'alice',
+        createdHeight: 1,
+        giveTokenId: 4,
+        giveAmount: SWAP_LOT_SCALE,
+        wantTokenId: 6,
+        wantAmount: 1000n * SWAP_LOT_SCALE / 10_000n,
+        minFillRatio: 0,
+        timeInForce: 0,
+        priceTicks: 1000n,
+      },
+      {
+        offerId: 'offer-b',
+        makerIsLeft: false,
+        fromEntity: 'hub-entity',
+        toEntity: 'bob',
+        accountId: 'bob',
+        createdHeight: 2,
+        giveTokenId: 6,
+        giveAmount: 1000n * SWAP_LOT_SCALE / 10_000n,
+        wantTokenId: 4,
+        wantAmount: SWAP_LOT_SCALE,
+        minFillRatio: 0,
+        timeInForce: 0,
+        priceTicks: 1000n,
+      },
+    ];
+
+    const result = processOrderbookSwaps(entityState, offers as any, { rehydrateOnly: true });
+    expect(result.mempoolOps).toHaveLength(0);
+    expect(result.bookUpdates.length).toBeGreaterThan(0);
   });
 });

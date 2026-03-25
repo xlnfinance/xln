@@ -2,16 +2,16 @@
  * Swap Resolve Handler
  * Hub (counterparty) fills and/or cancels user's offer
  *
- * Settlement: ALWAYS at offer's limit price (maker's terms).
- * Price improvement delivered as rebate: hub matched at better prices,
- * returns the spread to the offer creator (aggressive taker in exchange terms)
- * minus any configured hub cut.
+ * Settlement:
+ * - non-zero fills MUST carry exact execution amounts from matcher/manual caller
+ * - rebate remains a separate quote-side adjustment on top of exact execution
+ * - cancel-only path is still fillRatio=0 with no execution amounts
  *
  * Flow:
  * 1. Find offer by offerId
  * 2. Validate caller is NOT the maker (is the counterparty/hub)
  * 3. Validate fillRatio >= offer.minFillRatio (unless cancelling all)
- * 4. Calculate fill amounts at LIMIT PRICE (offer ratio)
+ * 4. Validate exact execution amounts for fills
  * 5. Update deltas atomically (both tokens)
  * 6. Apply rebate if present (price improvement refund to offer creator)
  * 7. Release proportional hold
@@ -26,14 +26,12 @@ import type { AccountMachine, AccountTx } from '../../types';
 import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL } from '../../constants';
+import { deriveCanonicalSwapFillRatio, MAX_SWAP_FILL_RATIO } from '../../swap-execution';
 import {
   canonicalPair,
-  computeSwapPriceTicks,
   requantizeRemainingSwapAtPrice,
   SWAP_LOT_SCALE,
 } from '../../orderbook/types';
-
-const MAX_FILL_RATIO = 65535;
 
 export async function handleSwapResolve(
   accountMachine: AccountMachine,
@@ -71,12 +69,8 @@ export async function handleSwapResolve(
   }
 
   // 3. Validate fillRatio
-  if (fillRatio < 0 || fillRatio > MAX_FILL_RATIO) {
+  if (fillRatio < 0 || fillRatio > MAX_SWAP_FILL_RATIO) {
     return { success: false, error: `Invalid fillRatio: ${fillRatio}`, events };
-  }
-  // If filling (not just cancelling), must meet minFillRatio
-  if (fillRatio > 0 && fillRatio < offer.minFillRatio) {
-    return { success: false, error: `Fill ratio ${fillRatio} below minimum ${offer.minFillRatio}`, events };
   }
 
   // 4. Calculate fill amounts
@@ -90,18 +84,45 @@ export async function handleSwapResolve(
       events,
     };
   }
+  if (fillRatio > 0 && !executionProvided) {
+    return {
+      success: false,
+      error: `executionGiveAmount and executionWantAmount required for non-zero fills`,
+      events,
+    };
+  }
 
-  // Legacy settlement path (no explicit execution): use offer ratio and protect maker with ceil().
-  const limitFilledGive = (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
+  const limitFilledGive = (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_SWAP_FILL_RATIO);
   const limitFilledWant = effectiveGive > 0n
     ? (limitFilledGive * effectiveWant + effectiveGive - 1n) / effectiveGive
     : 0n;
 
   const filledGive = executionProvided ? executionGiveAmount! : limitFilledGive;
   const filledWant = executionProvided ? executionWantAmount! : limitFilledWant;
+  const canonicalFillRatio = executionProvided
+    ? deriveCanonicalSwapFillRatio(effectiveGive, filledGive)
+    : fillRatio;
+
+  if (executionProvided) {
+    const hasExecutionFill = filledGive > 0n || filledWant > 0n;
+    if (hasExecutionFill && (filledGive <= 0n || filledWant <= 0n)) {
+      return {
+        success: false,
+        error: `Execution amounts must both be positive for a fill`,
+        events,
+      };
+    }
+    if (fillRatio !== canonicalFillRatio) {
+      return {
+        success: false,
+        error: `fillRatio ${fillRatio} does not match canonical execution ratio ${canonicalFillRatio}`,
+        events,
+      };
+    }
+  }
 
   // For explicit execution amounts, ensure they match the offer's absolute limits.
-  if (executionProvided && fillRatio > 0) {
+  if (executionProvided && (filledGive > 0n || filledWant > 0n)) {
     if (filledGive > effectiveGive) {
       return {
         success: false,
@@ -109,16 +130,24 @@ export async function handleSwapResolve(
         events,
       };
     }
-    if (filledWant > effectiveWant) {
+    if (filledWant * effectiveGive < filledGive * effectiveWant) {
       return {
         success: false,
-        error: `Execution want amount ${filledWant} exceeds offer limit ${effectiveWant}`,
+        error: `Execution violates maker limit price`,
         events,
       };
     }
   }
 
-  if (fillRatio > 0) {
+  if (canonicalFillRatio > 0 && canonicalFillRatio < offer.minFillRatio) {
+    return {
+      success: false,
+      error: `Fill ratio ${canonicalFillRatio} below minimum ${offer.minFillRatio}`,
+      events,
+    };
+  }
+
+  if (canonicalFillRatio > 0) {
     if (filledGive < FINANCIAL.MIN_PAYMENT_AMOUNT || filledGive > FINANCIAL.MAX_PAYMENT_AMOUNT) {
       return {
         success: false,
@@ -271,7 +300,7 @@ export async function handleSwapResolve(
   const makerId = offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity;
   let swapOfferCancelled: { offerId: string; accountId: string } | undefined;
 
-  if (cancelRemainder || fillRatio === MAX_FILL_RATIO) {
+  if (cancelRemainder || canonicalFillRatio === MAX_SWAP_FILL_RATIO) {
     // Cancel or fully filled - remove offer and notify orderbook
     const remainingHold = effectiveGive - filledGive;
     if (remainingHold > 0n) {
@@ -295,7 +324,7 @@ export async function handleSwapResolve(
     }
     accountMachine.swapOffers.delete(offerId);
     swapOfferCancelled = { offerId, accountId: makerId };
-    events.push(`📊 Swap offer ${offerId.slice(0,8)}... ${fillRatio === MAX_FILL_RATIO ? 'fully filled' : 'cancelled'}`);
+    events.push(`📊 Swap offer ${offerId.slice(0,8)}... ${canonicalFillRatio === MAX_SWAP_FILL_RATIO ? 'fully filled' : 'cancelled'}`);
   } else {
     // Partial fill - requantize remainder so subsequent fills stay lot-aligned.
     const remainingGiveRaw = effectiveGive - filledGive;

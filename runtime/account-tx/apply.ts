@@ -52,13 +52,16 @@ export async function processAccountTx(
     makerIsLeft: boolean;
     fromEntity: string;
     toEntity: string;
+    createdHeight?: number;
     giveTokenId: number;
     giveAmount: bigint;
     wantTokenId: number;
     wantAmount: bigint;
+    priceTicks?: bigint;
+    timeInForce?: 0 | 1 | 2;
     minFillRatio: number;
   };
-  swapOfferCancelRequested?: { offerId: string; accountId: string };
+  swapOfferCancelRequested?: { offerId: string };
   swapOfferCancelled?: { offerId: string; accountId: string; makerId?: string };
 }> {
   // Derive counterparty from canonical left/right using proofHeader's fromEntity as "me"
