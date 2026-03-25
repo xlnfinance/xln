@@ -2117,8 +2117,6 @@ const applyRuntimeInput = async (
             htlcFeesEarned: 0n,
             htlcNotes: new Map(),
 
-            // 📖 Aggregated books (E-Machine view of A-Machine positions)
-            swapBook: new Map(),
             lockBook: new Map(),
             swapTradingPairs: buildDefaultEntitySwapPairs(),
             pendingSwapFillRatios: new Map(),

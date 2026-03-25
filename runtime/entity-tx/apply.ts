@@ -38,7 +38,6 @@ import { logError } from '../logger';
 import { FINANCIAL } from '../constants';
 import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
 import { handleReserveToExternal } from './handlers/reserve-to-external';
-import { swapKey } from '../swap-execution';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -1120,20 +1119,6 @@ export const applyEntityTx = async (
       // Pure: return mempoolOp instead of mutating directly
       mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
       console.log(`📊 Added swap_offer to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
-
-      // AUDIT FIX (CRITICAL-6): Use namespaced key to prevent offerId collisions across accounts
-      // Key format: accountId:offerId (same as orderbook uses)
-      const swapBookKey = swapKey(counterpartyEntityId, offerId);
-      newState.swapBook.set(swapBookKey, {
-        offerId,
-        accountId: counterpartyEntityId,
-        giveTokenId,
-        giveAmount,
-        wantTokenId,
-        wantAmount,
-        minFillRatio: minFillRatio ?? 0,
-        createdAt: BigInt(newState.timestamp), // Entity-level timestamp for determinism
-      });
 
       const firstValidator = entityState.config.validators[0];
       if (firstValidator) {

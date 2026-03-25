@@ -1070,15 +1070,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       if (swapOffersCancelled.length > 0) {
         console.log(`📊 SWAP-EVENTS: Collected ${swapOffersCancelled.length} swap cancels`);
         // Normalize to local counterparty key for this account machine.
-        // swapBook keys are always `${counterpartyId}:${offerId}` in local entity perspective.
         const normalizedCancels = swapOffersCancelled.map(({ offerId }) => ({ offerId, accountId: counterpartyId }));
         allSwapOffersCancelled.push(...normalizedCancels);
-        // Update E-Machine swapBook immediately (this is entity state, not mempool)
-        // AUDIT FIX (CRITICAL-6): Use namespaced key for swapBook delete
-        for (const { offerId, accountId } of normalizedCancels) {
-          const swapBookKey = swapKey(accountId, offerId);
-          newState.swapBook.delete(swapBookKey);
-        }
       }
 
       // Send response (ACK + optional new frame)

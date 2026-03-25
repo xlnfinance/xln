@@ -583,7 +583,7 @@ export async function proposeAccountFrame(
       swapCancelRequests.push(result.swapOfferCancelRequested);
     }
 
-    // Collect finalized cancellations for swapBook/orderbook cleanup
+    // Collect finalized cancellations for open-offer/orderbook cleanup
     if (result.swapOfferCancelled) {
       if (!quiet) console.log(`📊 Collected swap cancel: ${result.swapOfferCancelled.offerId}`);
       swapOffersCancelled.push(result.swapOfferCancelled);

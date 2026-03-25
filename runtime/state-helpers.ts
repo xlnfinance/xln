@@ -282,13 +282,6 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     // Orderbook extension (hub-only, contains TypedArrays)
     // Must manually clone since structuredClone failed (we're in fallback path)
     ...(entityState.orderbookExt && { orderbookExt: cloneOrderbookExt(entityState.orderbookExt) }),
-    // Aggregated books (E-Machine view of A-Machine positions)
-    swapBook: new Map(
-      Array.from((entityState.swapBook || new Map()).entries()).map(([id, entry]) => [
-        id,
-        { ...entry }
-      ])
-    ),
     lockBook: new Map(
       Array.from((entityState.lockBook || new Map()).entries()).map(([id, entry]) => [
         id,

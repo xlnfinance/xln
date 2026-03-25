@@ -94,7 +94,6 @@ const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): E
       }),
       books: new Map([['4/6', book]]),
     },
-    swapBook: new Map(),
     lockBook: new Map(),
   }) as EntityState;
 

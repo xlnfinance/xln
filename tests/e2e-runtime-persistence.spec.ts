@@ -180,7 +180,12 @@ async function runtimeSnapshot(page: Page) {
         entities.push({
           key: String(k),
           accountCount: Number(rep?.state?.accounts?.size || 0),
-          swapBookSize: Number(rep?.state?.swapBook?.size || 0),
+          openOfferCount: Number(
+            Array.from(rep?.state?.accounts?.values?.() || []).reduce(
+              (count: number, account: any) => count + Number(account?.swapOffers?.size || 0),
+              0,
+            ),
+          ),
           accounts,
         });
       }
@@ -474,7 +479,7 @@ async function readSwapState(page: Page, entityId: string, signerId: string, cou
     const env = (window as any).isolatedEnv;
     if (!env?.eReplicas) {
       return {
-        swapBookSize: 0,
+        openOfferCount: 0,
         accountSwapOffersSize: 0,
         accountHasSwapOfferInMempool: false,
         accountHasSwapOfferInPendingFrame: false,
@@ -490,7 +495,12 @@ async function readSwapState(page: Page, entityId: string, signerId: string, cou
     const rep = key ? env.eReplicas.get(key) : null;
     const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
     return {
-      swapBookSize: Number(rep?.state?.swapBook?.size || 0),
+      openOfferCount: Number(
+        Array.from(rep?.state?.accounts?.values?.() || []).reduce(
+          (count: number, account: any) => count + Number(account?.swapOffers?.size || 0),
+          0,
+        ),
+      ),
       accountSwapOffersSize: Number(account?.swapOffers?.size || 0),
       accountHasSwapOfferInMempool: !!(account?.mempool || []).find((tx: any) => tx?.type === 'swap_offer'),
       accountHasSwapOfferInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find((tx: any) => tx?.type === 'swap_offer'),

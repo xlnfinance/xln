@@ -144,12 +144,6 @@ export async function createEntityFrameHash(
             .sort((a, b) => compareCanonicalText(String(a[0]), String(b[0])))
         )))
       : null,
-    swapBookHash: newState.swapBook.size > 0
-      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
-          Array.from(newState.swapBook.entries())
-            .sort((a, b) => compareCanonicalText(String(a[0]), String(b[0])))
-        )))
-      : null,
     // Orderbook extension hash (if hub)
     orderbookHash: newState.orderbookExt
       ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(newState.orderbookExt)))

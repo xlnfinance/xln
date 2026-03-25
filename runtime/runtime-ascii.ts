@@ -10,6 +10,7 @@
 
 import type { Env, EntityState, AccountMachine, Delta } from './types';
 import { getWallClockMs } from './utils';
+import { listOpenSwapOffers } from './open-swap-offers';
 
 export interface FormatOptions {
   maxAccounts?: number;
@@ -280,7 +281,8 @@ export function formatEntity(entity: EntityState, options?: FormatOptions): stri
   }
 
   // Swap stats
-  const swapCount = entity.swapBook?.size || 0;
+  const openSwapOffers = listOpenSwapOffers(entity);
+  const swapCount = openSwapOffers.length;
   if (swapCount > 0) {
     summary.push(`Swaps: ${swapCount} offers`);
   }
@@ -335,12 +337,11 @@ export function formatEntity(entity: EntityState, options?: FormatOptions): stri
   }
 
   // Swap detail (offers + orderbook if hub)
-  if (!opts.showReservesOnly && swapCount > 0 && entity.swapBook) {
+  if (!opts.showReservesOnly && swapCount > 0) {
     output.push('');
     output.push(' '.repeat(indent) + `  Swap Offers (${swapCount}):`);
 
-    const swaps = Array.from(entity.swapBook.values())
-      .slice(0, opts.maxSwaps);
+    const swaps = openSwapOffers.slice(0, opts.maxSwaps);
 
     for (const swap of swaps) {
       const giveSymbol = swap.giveTokenId === 1 ? 'USDC' : 'ETH';
@@ -348,8 +349,8 @@ export function formatEntity(entity: EntityState, options?: FormatOptions): stri
       output.push(' '.repeat(indent) + `    ${formatBigInt(swap.giveAmount)} ${giveSymbol} → ${formatBigInt(swap.wantAmount)} ${wantSymbol} | min=${swap.minFillRatio}/65535`);
     }
 
-    if (entity.swapBook.size > (opts.maxSwaps || 10)) {
-      output.push(' '.repeat(indent) + `    ... and ${entity.swapBook.size - (opts.maxSwaps || 10)} more`);
+    if (swapCount > (opts.maxSwaps || 10)) {
+      output.push(' '.repeat(indent) + `    ... and ${swapCount - (opts.maxSwaps || 10)} more`);
     }
   }
 
