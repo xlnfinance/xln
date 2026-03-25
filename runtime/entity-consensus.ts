@@ -13,7 +13,8 @@ import { addMessages, cloneEntityReplica, cloneEntityState, canonicalAccountKey,
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
 import { normalizeSwapOfferForOrderbook, processOrderbookSwaps, processOrderbookCancels } from './entity-tx/handlers/account';
-import { swapKey } from './swap-execution';
+import { compareCanonicalText, swapKey } from './swap-execution';
+import type { OrderbookExtState } from './orderbook';
 import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
 import { ethers } from 'ethers';
 
@@ -26,7 +27,7 @@ const compareNumericKey = (
   if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
     return leftNum - rightNum;
   }
-  return String(left).localeCompare(String(right));
+  return compareCanonicalText(String(left), String(right));
 };
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
@@ -81,7 +82,7 @@ export async function createEntityFrameHash(
 ): Promise<string> {
   // DEBUG: Log hash inputs for determinism debugging
   const accountSnapshot = Array.from(newState.accounts.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
+    .sort((a, b) => compareCanonicalText(a[0], b[0]))
     .map(([cpId, acct]) => ({
       cpId: cpId.slice(-8),
       height: acct.currentHeight,
@@ -116,7 +117,7 @@ export async function createEntityFrameHash(
     // Account state: use A-machine frame hashes (not full state - too large)
     // Sorted by counterparty ID for determinism
     accountHashes: Array.from(newState.accounts.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
+      .sort((a, b) => compareCanonicalText(a[0], b[0]))
       .map(([cpId, acct]) => ({
         cpId,
         height: acct.currentHeight,
@@ -126,7 +127,7 @@ export async function createEntityFrameHash(
     htlcRoutesHash: newState.htlcRoutes.size > 0
       ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
           Array.from(newState.htlcRoutes.entries())
-            .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+            .sort((a, b) => compareCanonicalText(String(a[0]), String(b[0])))
         )))
       : null,
     htlcFeesEarned: newState.htlcFeesEarned.toString(),
@@ -134,13 +135,13 @@ export async function createEntityFrameHash(
     lockBookHash: newState.lockBook.size > 0
       ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
           Array.from(newState.lockBook.entries())
-            .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+            .sort((a, b) => compareCanonicalText(String(a[0]), String(b[0])))
         )))
       : null,
     swapBookHash: newState.swapBook.size > 0
       ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
           Array.from(newState.swapBook.entries())
-            .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+            .sort((a, b) => compareCanonicalText(String(a[0]), String(b[0])))
         )))
       : null,
     // Orderbook extension hash (if hub)
@@ -157,7 +158,7 @@ export async function createEntityFrameHash(
           .sort((a, b) => {
             if (a.quoteTokenId !== b.quoteTokenId) return a.quoteTokenId - b.quoteTokenId;
             if (a.baseTokenId !== b.baseTokenId) return a.baseTokenId - b.baseTokenId;
-            return a.pairId.localeCompare(b.pairId);
+            return compareCanonicalText(a.pairId, b.pairId);
           })
       : [],
   };
@@ -1002,7 +1003,7 @@ export const applyEntityInput = async (
         context: hashInfo.context,
       });
     }
-    additionalHashesToSign.sort((a, b) => a.hash.localeCompare(b.hash));
+    additionalHashesToSign.sort((a, b) => compareCanonicalText(a.hash, b.hash));
     const hashesToSign: import('./types').HashToSign[] = [entityFrameHashToSign, ...additionalHashesToSign];
 
     const { signHashesAsSingleEntity } = await import('./hanko/signing');
@@ -1152,7 +1153,7 @@ export const applyEntityInput = async (
         }
       }
       // Sort additional hashes by hash value for determinism
-      additionalHashesToSign.sort((a, b) => a.hash.localeCompare(b.hash));
+      additionalHashesToSign.sort((a, b) => compareCanonicalText(a.hash, b.hash));
     }
 
     const hashesToSign: import('./types').HashToSign[] = [entityFrameHashToSign, ...additionalHashesToSign];
@@ -1483,7 +1484,7 @@ export const applyEntityFrame = async (
     }
 
     // Apply book updates
-    const ext = currentEntityState.orderbookExt as any;
+    const ext = currentEntityState.orderbookExt as OrderbookExtState;
     for (const { pairId, book } of matchResult.bookUpdates) {
       ext.books.set(pairId, book);
     }
@@ -1505,7 +1506,7 @@ export const applyEntityFrame = async (
         console.log(`📊   → ${accountId.slice(-8)}: ${tx.type} (cancel-request resolution)`);
       }
 
-      const ext = currentEntityState.orderbookExt as any;
+      const ext = currentEntityState.orderbookExt as OrderbookExtState;
       for (const { pairId, book } of cancelResult.bookUpdates) {
         ext.books.set(pairId, book);
       }

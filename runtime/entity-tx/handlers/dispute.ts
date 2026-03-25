@@ -27,6 +27,7 @@ import {
   buildInitialDisputeProof,
 } from '../../proof-builder';
 import { inspectHankoForHash, verifyHankoForHash } from '../../hanko/signing';
+import { compareCanonicalText, swapKey } from '../../swap-execution';
 
 // === Delta Transformer Arguments (inlined from transformer-args.ts) ===
 const MAX_FILL_RATIO = 0xffff;
@@ -149,7 +150,7 @@ function buildDeltaTransformerArguments(
   const leftFillRatios: number[] = [];
   const rightFillRatios: number[] = [];
   const sortedSwaps = Array.from(accountMachine.swapOffers.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]));
+    .sort((a, b) => compareCanonicalText(a[0], b[0]));
 
   for (const [offerId, offer] of sortedSwaps) {
     const ratio = options.fillRatiosByOfferId?.get(offerId) ?? 0;

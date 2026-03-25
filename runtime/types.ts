@@ -1,3 +1,5 @@
+import type { OrderbookExtState } from './orderbook';
+
 /**
  * XLN Type Definitions
  * All interfaces and type definitions used across the XLN system
@@ -1623,7 +1625,7 @@ export interface EntityState {
   inDebtsByToken?: Map<number, Map<string, DebtEntry>>;
 
   // 📊 Orderbook Extension - Hub matching engine (typed in orderbook/types.ts)
-  orderbookExt?: any; // OrderbookExtState - avoid circular import
+  orderbookExt?: OrderbookExtState;
 
   // 📖 Aggregated Books - E-Machine view of all A-Machine positions
   // Mirrors A-Machine state for easy UI access, updated on frame commits

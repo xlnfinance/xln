@@ -1076,7 +1076,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         // Update E-Machine swapBook immediately (this is entity state, not mempool)
         // AUDIT FIX (CRITICAL-6): Use namespaced key for swapBook delete
         for (const { offerId, accountId } of normalizedCancels) {
-          const swapBookKey = `${accountId}:${offerId}`;
+          const swapBookKey = swapKey(accountId, offerId);
           newState.swapBook.delete(swapBookKey);
         }
       }
