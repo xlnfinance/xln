@@ -86,6 +86,22 @@
     return xln.getActiveJAdapter?.($isolatedEnv) ?? null;
   }
 
+  async function requireBrowserVMDebugAdapter(action: string): Promise<JAdapter> {
+    const jadapter = await getJAdapterFromEnv();
+    if (!jadapter || jadapter.mode !== 'browservm' || !jadapter.debugFundReservesBatch) {
+      throw new Error(`${action} requires BrowserVM debug mode`);
+    }
+    return jadapter;
+  }
+
+  async function debugFundReservesBatch(
+    mints: Array<{ entityId: string; tokenId: number; amount: bigint }>
+  ): Promise<void> {
+    if (mints.length === 0) return;
+    const jadapter = await requireBrowserVMDebugAdapter('Reserve funding');
+    await jadapter.debugFundReservesBatch(mints);
+  }
+
   async function ingressRuntimeInput(XLN: any, input: { runtimeTxs: any[]; entityInputs: any[] }): Promise<void> {
     XLN.enqueueRuntimeInput($isolatedEnv, input);
   }
@@ -198,22 +214,9 @@
     lastAction = `Minting ${mintAmount} to ${shortAddress(selectedEntityForMint)}...`;
 
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
-
-      const jadapter = await getJAdapterFromEnv();
-      if (!jadapter?.debugFundReserves) {
-        throw new Error('JAdapter not available');
-      }
-
-      // Mint via REAL BrowserVM call (emits ReserveUpdated event)
       const amount = BigInt(mintAmount);
-      console.log(`[Architect] Calling debugFundReserves: entity=${selectedEntityForMint}, tokenId=1, amount=${amount}`);
-      const events = await jadapter.debugFundReserves(selectedEntityForMint, 1, amount);
-      console.log(`[Architect] Mint emitted ${events.length} events`);
-
-      // Process to capture the J-events and create a new frame
-      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [] });
+      console.log(`[Architect] Calling debugFundReservesBatch: entity=${selectedEntityForMint}, tokenId=1, amount=${amount}`);
+      await debugFundReservesBatch([{ entityId: selectedEntityForMint, tokenId: 1, amount }]);
 
       lastAction = `✅ Minted ${mintAmount} to entity (on-chain)`;
 
@@ -1029,40 +1032,13 @@
     lastAction = `Funding ${entityIds.length} entities...`;
 
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
-
-      for (const entityId of entityIds) {
-        const replicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(entityId + ':'));
-        const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
-
-        if (replica) {
-          XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
-            entityId,
-            signerId: replica.signerId,
-            entityTxs: [{
-              type: 'j_event',
-              data: {
-                from: replica.signerId,
-                event: {
-                  type: 'ReserveUpdated',
-                  data: {
-                    entity: entityId,
-                    tokenId: 1,
-                    newBalance: '1000000',
-                    name: 'USDC',
-                    symbol: 'USDC',
-                    decimals: 6
-                  }
-                },
-                observedAt: Date.now(),
-                blockNumber: 1,
-                transactionHash: '0x' + Array(64).fill('0').join('')
-              }
-            }]
-          }] });
-        }
-      }
+      await debugFundReservesBatch(
+        entityIds.map((entityId) => ({
+          entityId,
+          tokenId: 1,
+          amount: 1_000_000n,
+        })),
+      );
 
       lastAction = ` Funded all ${entityIds.length} entities with $1M`;
 
@@ -1588,48 +1564,21 @@
 
     // PERF FIX: Batch all funding into ONE process() call instead of 1 per entity
     console.log('[createEntities] Batching funding for all entities...');
-    const fundingInputs = [];
+    const fundingMints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
     for (const layer of topology.layers) {
       const ids = layerEntityIds.get(layer.name) || [];
 
       for (const entityId of ids) {
-        const replicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(entityId + ':'));
-        const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
-
-        if (replica) {
-          fundingInputs.push({
-            entityId,
-            signerId: replica.signerId,
-            entityTxs: [{
-              type: 'j_event',
-              data: {
-                from: replica.signerId,
-                event: {
-                  type: 'ReserveUpdated',
-                  data: {
-                    entity: entityId,
-                    tokenId: 1,
-                    newBalance: layer.initialReserves.toString(),
-                    name: 'USD',
-                    symbol: 'USD',
-                    decimals: 2
-                  }
-                },
-                observedAt: Date.now(),
-                blockNumber: 1,
-                transactionHash: '0x' + Array(64).fill('0').join('')
-              }
-            }]
-          });
-        }
+        fundingMints.push({
+          entityId,
+          tokenId: 1,
+          amount: BigInt(layer.initialReserves),
+        });
       }
     }
 
-    // Single batch: all entities funded in ONE frame
-    if (fundingInputs.length > 0) {
-      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: fundingInputs });
-      console.log('[createEntities]  Funded', fundingInputs.length, 'entities in 1 frame');
-    }
+    await debugFundReservesBatch(fundingMints);
+    console.log('[createEntities]  Funded', fundingMints.length, 'entities through BrowserVM watcher');
 
     // PERF + REALISM: Proximity-based account creation (not all-to-all)
     console.log('[createEntities] Batching account openings (proximity-based)...');
@@ -1848,35 +1797,14 @@
         entityInputs: []
       });
 
+      const fundingMints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
+
       // FUNDING TIER 1: Fed Reserve with $100M (base money)
       const fedReplicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(fedEntityId + ':'));
       const fedReplica = fedReplicaKey ? $isolatedEnv.eReplicas.get(fedReplicaKey) : null;
 
       if (fedReplica) {
-        XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
-          entityId: fedEntityId,
-          signerId: fedReplica.signerId,
-          entityTxs: [{
-            type: 'j_event',
-            data: {
-              from: fedReplica.signerId,
-              event: {
-                type: 'ReserveUpdated',
-                data: {
-                  entity: fedEntityId,
-                  tokenId: 1,
-                  newBalance: '100000000', // $100M base money
-                  name: 'USD',
-                  symbol: 'USD',
-                  decimals: 2
-                }
-              },
-              observedAt: Date.now(),
-              blockNumber: 1,
-              transactionHash: '0x' + Array(64).fill('0').join('')
-            }
-          }]
-        }] });
+        fundingMints.push({ entityId: fedEntityId, tokenId: 1, amount: 100_000_000n });
       }
 
       // FUNDING TIER 2: Banks with $1M each
@@ -1885,30 +1813,7 @@
         const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
         if (replica) {
-          XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
-            entityId: bankData.entityId,
-            signerId: replica.signerId,
-            entityTxs: [{
-              type: 'j_event',
-              data: {
-                from: replica.signerId,
-                event: {
-                  type: 'ReserveUpdated',
-                  data: {
-                    entity: bankData.entityId,
-                    tokenId: 1,
-                    newBalance: '1000000', // $1M
-                    name: 'USD',
-                    symbol: 'USD',
-                    decimals: 2
-                  }
-                },
-                observedAt: Date.now(),
-                blockNumber: 1,
-                transactionHash: '0x' + Array(64).fill('0').join('')
-              }
-            }]
-          }] });
+          fundingMints.push({ entityId: bankData.entityId, tokenId: 1, amount: 1_000_000n });
         }
       }
 
@@ -1920,32 +1825,11 @@
         const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
         if (replica) {
-          XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
-            entityId: entity.entityId,
-            signerId: replica.signerId,
-            entityTxs: [{
-              type: 'j_event',
-              data: {
-                from: replica.signerId,
-                event: {
-                  type: 'ReserveUpdated',
-                  data: {
-                    entity: entity.entityId,
-                    tokenId: 1,
-                    newBalance: '10000', // $10K
-                    name: 'USD',
-                    symbol: 'USD',
-                    decimals: 2
-                  }
-                },
-                observedAt: Date.now(),
-                blockNumber: 1,
-                transactionHash: '0x' + Array(64).fill('0').join('')
-              }
-            }]
-          }] });
+          fundingMints.push({ entityId: entity.entityId, tokenId: 1, amount: 10_000n });
         }
       }
+
+      await debugFundReservesBatch(fundingMints);
 
       // CREDIT LINES TIER 1: Fed → Banks ($10M limit each)
       for (const bankData of bankEntityIds) {
@@ -2088,33 +1972,7 @@
       const fedReplica = fedKey ? $isolatedEnv.eReplicas.get(fedKey) : null;
 
       if (fedReplica) {
-        const currentReserves = fedReplica.state?.reserves?.get(0) || 0n;
-        const newBalance = BigInt(currentReserves) + mintAmount;
-
-        XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
-          entityId: fedId,
-          signerId: fedReplica.signerId,
-          entityTxs: [{
-            type: 'j_event',
-            data: {
-              from: fedReplica.signerId,
-              event: {
-                type: 'ReserveUpdated',
-                data: {
-                  entity: fedId,
-                  tokenId: 1,
-                  newBalance: newBalance.toString(),
-                  name: 'USD',
-                  symbol: 'USD',
-                  decimals: 2
-                }
-              },
-              observedAt: Date.now(),
-              blockNumber: 1,
-              transactionHash: '0x' + Array(64).fill('0').join('')
-            }
-          }]
-        }] });
+        await debugFundReservesBatch([{ entityId: fedId, tokenId: 1, amount: mintAmount }]);
 
         console.log(`[Smart QE] 💵 Fed printed $${(Number(mintAmount)/1000).toFixed(0)}K (avg: $${(Number(averageReserves)/1000).toFixed(0)}K → target: $${(Number(targetAverage)/1000).toFixed(0)}K)`);
       }

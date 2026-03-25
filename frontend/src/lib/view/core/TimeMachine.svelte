@@ -48,6 +48,7 @@
     const xln = cachedXLN ?? await getXLN();
     cachedXLN = xln;
     const jadapter: JAdapter | null = xln.getActiveJAdapter?.(envValue) ?? null;
+    if (!jadapter || jadapter.mode !== 'browservm') return null;
     return jadapter?.getBrowserVM?.() ?? null;
   }
 
