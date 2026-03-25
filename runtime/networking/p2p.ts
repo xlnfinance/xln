@@ -331,37 +331,7 @@ export class RuntimeP2P {
           this.syncDirectPeerConnections();
         },
         onEntityInput: async (from, input, timestamp) => {
-          // Collect all entity IDs that need profiles before we can process
-          const entitiesToCheck = new Set<string>();
-
-          // Target entity
-          if (input.entityId) entitiesToCheck.add(input.entityId);
-
-          // Extract sender entities from accountInput and openAccount transactions
-          if (input.entityTxs) {
-            for (const tx of input.entityTxs) {
-              if (tx.type === 'accountInput' && tx.data) {
-                const accountInput = tx.data as { fromEntityId?: string; toEntityId?: string };
-                if (accountInput.fromEntityId) entitiesToCheck.add(accountInput.fromEntityId);
-                if (accountInput.toEntityId) entitiesToCheck.add(accountInput.toEntityId);
-              }
-              // CRITICAL: openAccount response needs sender's profile to route ACK back
-              if (tx.type === 'openAccount' && tx.data) {
-                const openAccount = tx.data as { targetEntityId?: string };
-                if (openAccount.targetEntityId) entitiesToCheck.add(openAccount.targetEntityId);
-              }
-            }
-          }
-
-          // Fetch profiles for any missing entities
-          const missingEntities = Array.from(entitiesToCheck).filter(e => !this.hasProfileForEntity(e));
-          if (missingEntities.length > 0) {
-            console.log(`P2P_FETCH_PROFILE: ${missingEntities.map(e => e.slice(-4)).join(',')} (not in cache)`);
-            void this.ensureProfiles(missingEntities).catch(error => {
-              console.warn(`P2P_FETCH_PROFILE_FAILED: ${(error as Error).message}`);
-            });
-          }
-
+          this.prefetchProfilesForInput(input);
           this.onEntityInput(from, input, timestamp);
         },
         onGossipRequest: (from, payload) => this.handleGossipRequest(from, payload),
@@ -712,6 +682,32 @@ export class RuntimeP2P {
     // Single-relay mode: never auto-discover/switch relays from gossip profiles.
     // This prevents split-brain routing where different entities publish different relay hints.
     void entityId;
+  }
+
+  private prefetchProfilesForInput(input: RoutedEntityInput): void {
+    const entitiesToCheck = new Set<string>();
+    if (input.entityId) entitiesToCheck.add(input.entityId);
+
+    if (input.entityTxs) {
+      for (const tx of input.entityTxs) {
+        if (tx.type === 'accountInput' && tx.data) {
+          const accountInput = tx.data as { fromEntityId?: string; toEntityId?: string };
+          if (accountInput.fromEntityId) entitiesToCheck.add(accountInput.fromEntityId);
+          if (accountInput.toEntityId) entitiesToCheck.add(accountInput.toEntityId);
+        }
+        if (tx.type === 'openAccount' && tx.data) {
+          const openAccount = tx.data as { targetEntityId?: string };
+          if (openAccount.targetEntityId) entitiesToCheck.add(openAccount.targetEntityId);
+        }
+      }
+    }
+
+    const missingEntities = Array.from(entitiesToCheck).filter(entityId => !this.hasProfileForEntity(entityId));
+    if (missingEntities.length === 0) return;
+    console.log(`P2P_FETCH_PROFILE: ${missingEntities.map(entityId => entityId.slice(-4)).join(',')} (not in cache)`);
+    void this.ensureProfiles(missingEntities).catch(error => {
+      console.warn(`P2P_FETCH_PROFILE_FAILED: ${(error as Error).message}`);
+    });
   }
 
   // Call this to refresh profiles from relay
@@ -1217,6 +1213,7 @@ export class RuntimeP2P {
         this.flushPending();
       },
       onEntityInput: async (from, input, timestamp) => {
+        this.prefetchProfilesForInput(input);
         this.onEntityInput(from, input, timestamp);
       },
       onError: (error) => {

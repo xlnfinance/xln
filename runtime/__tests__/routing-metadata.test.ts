@@ -44,6 +44,64 @@ function profile(
 }
 
 describe('Routing metadata hard requirements', () => {
+  test('rejects legacy profile endpoints field', () => {
+    expect(() => parseProfile({
+      entityId: ALICE,
+      runtimeId: ALICE.slice(0, 42),
+      name: 'Alice',
+      avatar: '',
+      bio: '',
+      website: '',
+      lastUpdated: 1,
+      runtimeEncPubKey: `0x${'aa'.repeat(32)}`,
+      publicAccounts: [],
+      wsUrl: null,
+      endpoints: ['wss://xln.finance:8090/ws'],
+      relays: [],
+      metadata: {
+        entityEncPubKey: `0x${'ab'.repeat(32)}`,
+        routingFeePPM: 10_000,
+        baseFee: '0',
+        isHub: false,
+        board: {
+          threshold: 1,
+          validators: [{ signer: ALICE.slice(0, 42), signerId: ALICE.slice(0, 42), weight: 1, publicKey: 'board:alice' }],
+        },
+      },
+      accounts: [],
+    })).toThrow(/GOSSIP_PROFILE_UNKNOWN_FIELD/);
+  });
+
+  test('accepts canonical wsUrl field', () => {
+    const parsed = parseProfile({
+      entityId: H1,
+      runtimeId: H1.slice(0, 42),
+      name: 'H1',
+      avatar: '',
+      bio: '',
+      website: '',
+      lastUpdated: 1,
+      runtimeEncPubKey: `0x${'11'.repeat(32)}`,
+      publicAccounts: [],
+      wsUrl: 'wss://xln.finance:8090/ws',
+      relays: ['wss://xln.finance/relay'],
+      metadata: {
+        entityEncPubKey: `0x${'12'.repeat(32)}`,
+        routingFeePPM: 10_000,
+        baseFee: '0',
+        isHub: true,
+        board: {
+          threshold: 1,
+          validators: [{ signer: H1.slice(0, 42), signerId: H1.slice(0, 42), weight: 1, publicKey: 'board:h1' }],
+        },
+      },
+      accounts: [],
+    });
+
+    expect(parsed.wsUrl).toBe('wss://xln.finance:8090/ws');
+    expect(parsed.relays).toEqual(['wss://xln.finance/relay']);
+  });
+
   test('rejects dead legacy metadata.position field', () => {
     expect(() => parseProfile({
       entityId: ALICE,
