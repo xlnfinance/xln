@@ -109,7 +109,7 @@ async function selectMoveEntityField(page: Page, testId: string, optionText: str
   await trigger.click();
   const option = picker.getByTestId(/-option-/).filter({ hasText: optionText }).first();
   await expect(option).toBeVisible({ timeout: 20_000 });
-  await option.click();
+  await option.dispatchEvent('mousedown');
 }
 
 async function waitForRecipientCounterpartyProfile(
