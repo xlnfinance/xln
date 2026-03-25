@@ -68,14 +68,10 @@
   import ContextSwitcher from './ContextSwitcher.svelte';
 
   export let tab: Tab;
-  export let isLast: boolean = false;
   export let hideHeader: boolean = false;
   export let showJurisdiction: boolean = true;
   export let userModeHeader: boolean = false;
   export let selectedJurisdiction: string | null = null;
-  export let jurisdictionFilter: string | null = null;
-  export let allowHeaderAddEntity: boolean = false;
-  export let allowHeaderAddJurisdiction: boolean = false;
   export let allowHeaderAddRuntime: boolean = false;
   export let allowHeaderDeleteRuntime: boolean = false;
   export let headerRuntimeAddLabel: string = '+ Add Runtime';
@@ -306,6 +302,16 @@
     return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
   }
 
+  function getRuntimeEnv(env: Env | EnvSnapshot | null | undefined): Env | null {
+    return isRuntimeEnv(env) ? env : null;
+  }
+
+  function requireRuntimeEnv(env: Env | EnvSnapshot | null | undefined, context: string): Env {
+    const runtimeEnv = getRuntimeEnv(env);
+    if (!runtimeEnv) throw new Error(`${context} requires live runtime environment`);
+    return runtimeEnv;
+  }
+
   async function readJsonResponse<T = unknown>(response: Response): Promise<T | null> {
     const raw = await response.text();
     if (!raw) return null;
@@ -355,13 +361,24 @@
 
   type JTokenRegistryItem = Awaited<ReturnType<JAdapter['getTokenRegistry']>>[number];
 
-  function getRuntimeId(env: Env | null | undefined): string | null {
+  function getRuntimeId(env: Env | EnvSnapshot | null | undefined): string | null {
     const runtimeId = env?.runtimeId;
     return typeof runtimeId === 'string' && runtimeId.length > 0 ? runtimeId : null;
   }
 
-  function getGossipProfiles(env: Env | null | undefined): GossipProfile[] {
-    return env?.gossip?.getProfiles?.() ?? [];
+  function getActiveJurisdictionName(env: Env | EnvSnapshot | null | undefined): string | null {
+    if (!env || !('activeJurisdiction' in env)) return null;
+    return typeof env.activeJurisdiction === 'string' && env.activeJurisdiction.length > 0
+      ? env.activeJurisdiction
+      : null;
+  }
+
+  function getGossipProfiles(env: Env | EnvSnapshot | null | undefined): GossipProfile[] {
+    if (!env?.gossip) return [];
+    if ('getProfiles' in env.gossip && typeof env.gossip.getProfiles === 'function') {
+      return env.gossip.getProfiles();
+    }
+    return Array.isArray(env.gossip.profiles) ? env.gossip.profiles : [];
   }
 
   function isHubProfile(profile: GossipProfile | undefined): boolean {
@@ -388,6 +405,15 @@
     return null;
   }
 
+  function isAccountLeftPerspective(entityId: string, account: AccountMachine): boolean {
+    const owner = String(entityId || '').trim().toLowerCase();
+    const left = String(account.leftEntity || '').trim().toLowerCase();
+    const right = String(account.rightEntity || '').trim().toLowerCase();
+    if (owner === left) return true;
+    if (owner === right) return false;
+    throw new Error(`Account perspective mismatch: owner=${entityId} left=${account.leftEntity} right=${account.rightEntity}`);
+  }
+
   function buildEntityInput(entityId: string, signerId: string, entityTxs: EntityTx[]): RoutedEntityInput {
     return { entityId, signerId, entityTxs };
   }
@@ -406,6 +432,26 @@
   let moveCommittedLineReady = false;
   let moveCommittedLinePrimed = false;
   let moveCommittedLineTimeout: ReturnType<typeof setTimeout> | null = null;
+  let moveHubEntityOptions: string[] = [];
+  let moveValidationSignature = '';
+
+  function resetMoveLineMeasurement(): void {
+    moveLineReady = false;
+    moveCommittedLineReady = false;
+    moveCommittedLinePrimed = false;
+    if (moveNodeLayoutRaf !== null) {
+      cancelAnimationFrame(moveNodeLayoutRaf);
+      moveNodeLayoutRaf = null;
+    }
+    if (moveNodeLayoutSettleRaf !== null) {
+      cancelAnimationFrame(moveNodeLayoutSettleRaf);
+      moveNodeLayoutSettleRaf = null;
+    }
+    if (moveCommittedLineTimeout) {
+      clearTimeout(moveCommittedLineTimeout);
+      moveCommittedLineTimeout = null;
+    }
+  }
 
   function scheduleMoveCommittedLineReady(): void {
     if (moveCommittedLineTimeout) clearTimeout(moveCommittedLineTimeout);
@@ -435,7 +481,7 @@
       return;
     }
     moveLineReady = false;
-    if (!moveCommittedLinePrimed) moveCommittedLineReady = false;
+    moveCommittedLineReady = false;
     if (moveNodeLayoutRaf !== null) cancelAnimationFrame(moveNodeLayoutRaf);
     if (moveNodeLayoutSettleRaf !== null) cancelAnimationFrame(moveNodeLayoutSettleRaf);
     if (moveCommittedLineTimeout) {
@@ -522,9 +568,10 @@
   }
 
   function buildMoveArrowPath(
-    start: { x: number; y: number },
-    end: { x: number; y: number },
+    start: { x: number; y: number } | null,
+    end: { x: number; y: number } | null,
   ): string {
+    if (!start || !end) return '';
     const distance = Math.abs(end.x - start.x);
     const curve = Math.max(22, Math.min(68, distance * 0.2));
     const control1X = start.x + curve;
@@ -656,29 +703,29 @@
       case 'external->reserve':
         return moveReserveRecipientEntityId && moveReserveRecipientEntityId !== resolveSelfEntityId()
           ? [
-            '1. Deposit from external into your reserve',
-            `2. Transfer reserve balance to ${reserveRecipientLabel}`,
+            '1. Submit external deposit batch into your reserve',
+            `2. Broadcast reserve batch to ${reserveRecipientLabel}`,
           ]
-          : ['1. Deposit from external into your reserve'];
+          : ['1. Submit external deposit batch into your reserve'];
       case 'reserve->reserve':
-        return [`1. Transfer reserve balance to ${reserveRecipientLabel}`];
+        return [`1. Broadcast reserve batch to ${reserveRecipientLabel}`];
       case 'reserve->account':
-        return [`1. Deposit from your reserve into ${targetEntityLabel} via hub ${targetHubLabel}`];
+        return [`1. Broadcast reserve batch into ${targetEntityLabel} via hub ${targetHubLabel}`];
       case 'account->reserve':
         return moveReserveRecipientEntityId && moveReserveRecipientEntityId !== resolveSelfEntityId()
           ? [
             '1. Get hub proof and settle collateral back into your reserve',
-            `2. Transfer reserve balance to ${reserveRecipientLabel}`,
+            `2. Broadcast reserve batch to ${reserveRecipientLabel}`,
           ]
           : ['1. Get hub proof and settle collateral back into your reserve'];
       case 'reserve->external':
-        return ['1. Withdraw from your reserve to recipient EOA'];
+        return ['1. Broadcast reserve withdrawal batch to recipient EOA'];
       case 'external->external':
         return ['1. Send token directly from external to recipient EOA'];
       case 'external->account':
         return [
-          '1. Deposit from external into your reserve',
-          `2. Deposit from your reserve into ${targetEntityLabel} via hub ${targetHubLabel}`,
+          '1. Submit external deposit batch into your reserve',
+          `2. Broadcast reserve batch into ${targetEntityLabel} via hub ${targetHubLabel}`,
         ];
       case 'account->external':
         return [
@@ -698,12 +745,15 @@
   function moveRouteExecutionLabel(from: MoveEndpoint, to: MoveEndpoint): string {
     switch (getMoveRouteKey(from, to)) {
       case 'external->reserve':
-      case 'reserve->account':
+        return '1 external-signer batch';
       case 'reserve->external':
+      case 'reserve->account':
+        return '1 reserve batch';
       case 'external->external':
-        return '1 on-chain batch';
-      case 'reserve->reserve':
+        return '1 external transfer';
       case 'external->account':
+        return '1 external-signer batch + 1 reserve batch';
+      case 'reserve->reserve':
       case 'account->reserve':
       case 'account->external':
       case 'account->account':
@@ -717,7 +767,7 @@
     const reserveRemote = moveNeedsReserveRecipient(from, to) && moveReserveRecipientEntityId.trim() && moveReserveRecipientEntityId !== resolveSelfEntityId();
     switch (getMoveRouteKey(from, to)) {
       case 'external->reserve':
-        return reserveRemote ? '1 external tx + 1 reserve batch • ~300k gas' : '1 external tx • ~140k gas';
+        return reserveRemote ? '1 external-signer batch + 1 reserve batch • ~300k gas' : '1 external-signer batch • ~140k gas';
       case 'reserve->reserve':
         return '1 reserve batch • ~160k gas';
       case 'reserve->account':
@@ -729,7 +779,7 @@
       case 'external->external':
         return '1 external tx';
       case 'external->account':
-        return '1 external tx + 1 reserve batch • ~320k gas';
+        return '1 external-signer batch + 1 reserve batch • ~320k gas';
       case 'account->external':
         return 'hub proof + 1 reserve batch • ~260k gas';
       case 'account->account':
@@ -970,9 +1020,10 @@
   }
 
   function getMoveAggregateAccountBalance(): bigint {
-    if (!selectedMoveTransferToken) return 0n;
+    const tokenId = selectedMoveTransferToken?.tokenId;
+    if (!tokenId) return 0n;
     return workspaceAccountIds.reduce((total, accountId) => (
-      total + getAccountWithdrawableCollateral(accountId, selectedMoveTransferToken.tokenId)
+      total + getAccountWithdrawableCollateral(accountId, tokenId)
     ), 0n);
   }
 
@@ -1005,8 +1056,11 @@
     return 18;
   }
 
-  function getP2PRelayUrls(env: Env | null | undefined): string[] {
-    const relayUrls = env?.runtimeState?.p2p?.relayUrls;
+  function getP2PRelayUrls(env: Env | EnvSnapshot | null | undefined): string[] {
+    const p2p = isRuntimeEnv(env)
+      ? (env.runtimeState?.p2p as { relayUrls?: string[] } | null | undefined)
+      : null;
+    const relayUrls = p2p?.relayUrls;
     return Array.isArray(relayUrls) ? relayUrls : [];
   }
 
@@ -1038,7 +1092,7 @@
   $: gossipName = (() => {
     const entityId = (replica?.state?.entityId || tab.entityId || '').toLowerCase();
     if (!entityId) return '';
-    const profiles = activeEnv?.gossip?.getProfiles?.() || [];
+    const profiles = getGossipProfiles(activeEnv);
     const profile = profiles.find((p: GossipProfile) => p.entityId.toLowerCase() === entityId);
     return profile?.name || '';
   })();
@@ -1074,11 +1128,11 @@
   $: activeIsLive = isLiveOverride ?? $isLive;
 
   function resolveEntitySigner(entityId: string, reason: string): string {
-    const env = activeEnv;
+    const env = getRuntimeEnv(activeEnv);
     if (env && activeXlnFunctions?.resolveEntityProposerId) {
       return activeXlnFunctions.resolveEntityProposerId(env, entityId, reason);
     }
-    return requireSignerIdForEntity(env, entityId, reason);
+    return requireSignerIdForEntity(requireRuntimeEnv(activeEnv, reason), entityId, reason);
   }
 
   function findReplicaForTab(
@@ -1242,13 +1296,12 @@
 
   $: {
     if (showJurisdiction && availableJurisdictions.length > 0 && !selectedJurisdictionName) {
-      selectedJurisdictionName = activeEnv?.activeJurisdiction ?? availableJurisdictions[0]?.name ?? null;
+      selectedJurisdictionName = getActiveJurisdictionName(activeEnv) ?? availableJurisdictions[0]?.name ?? null;
     }
   }
 
   let openAccountEntityOptions: string[] = [];
   let moveEntityOptions: string[] = [];
-  let moveHubEntityOptions: string[] = [];
   let moveSourceAccountOptions: string[] = [];
 
   function isFullEntityId(value: string): boolean {
@@ -1279,7 +1332,7 @@
     };
 
     for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
-    for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add(profile.entityId);
+    for (const profile of getGossipProfiles(activeEnv)) add(profile.entityId);
     return Array.from(ids.values()).sort();
   })();
 
@@ -1297,7 +1350,7 @@
     for (const id of accountIds) add(id);
     for (const id of openAccountEntityOptions) add(id);
     for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
-    for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add(profile.entityId);
+    for (const profile of getGossipProfiles(activeEnv)) add(profile.entityId);
     return Array.from(ids.values());
   })();
   $: moveSourceAccountOptions = (() => {
@@ -1375,7 +1428,6 @@
   let moveExecuting = false;
   let moveProgressLabel = '';
   let moveLayoutSignature = '';
-  let moveValidationSignature = '';
   let moveDraftError: string | null = null;
   let moveBroadcastError: string | null = null;
   let moveSelectedSource: MoveEndpoint | null = null;
@@ -1393,6 +1445,8 @@
   let approvingExternalToken: string | null = null;
   let transferableAssetOptions: Array<ExternalToken & { tokenId: number }> = [];
   let assetLedgerRows: AssetLedgerRow[] = [];
+  let moveDisplayBalances: Record<MoveEndpoint, bigint> = { external: 0n, reserve: 0n, account: 0n };
+  let moveDisplayDecimals = 18;
   let accountSpendableByToken = new Map<number, bigint>();
   let pendingAssetBridgeSync: {
     tokenId: number;
@@ -1433,6 +1487,7 @@
   $: if (moveVisualRoot !== previousMoveVisualRoot) {
     moveVisualResizeObserver?.disconnect();
     moveVisualResizeObserver = null;
+    resetMoveLineMeasurement();
     previousMoveVisualRoot = moveVisualRoot;
     if (moveVisualRoot && typeof ResizeObserver === 'function') {
       moveVisualResizeObserver = new ResizeObserver(() => {
@@ -1556,7 +1611,7 @@
     if (!account || !entityId || !counterpartyId || !activeXlnFunctions?.deriveDelta) return null;
     const delta = account.deltas?.get?.(tokenId);
     if (!delta) return null;
-    return activeXlnFunctions.deriveDelta(delta, entityId < counterpartyId);
+    return activeXlnFunctions.deriveDelta(delta, isAccountLeftPerspective(entityId, account));
   }
 
   function getWorkspaceDerivedDelta(tokenId: number) {
@@ -1582,7 +1637,7 @@
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
     const counterparty = String(counterpartyEntityId || '').trim().toLowerCase();
     if (!workspace || workspace.status !== 'ready_to_submit' || !entityId || !counterparty) return false;
-    return workspace.executorIsLeft === (entityId < counterparty);
+    return workspace.executorIsLeft === isAccountLeftPerspective(entityId, account);
   }
 
   // Faucet: fund entity reserves with test tokens
@@ -1618,9 +1673,9 @@
     return `${whole.toString()}.${frac.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
   }
 
-  function formatInlineFillAmount(amount: bigint, decimals: number): string {
+  function formatInlineFillAmount(amount: bigint, decimals?: number): string {
     if (amount <= 0n) return '0';
-    return formatTokenInputAmount(amount, decimals);
+    return formatTokenInputAmount(amount, Math.max(0, Math.floor(Number(decimals ?? getMoveDisplayDecimals()) || 0)));
   }
 
   async function resolveCurrentExternalAddress(): Promise<string> {
@@ -1644,10 +1699,13 @@
     const info = resolveReserveTokenMeta(tokenId);
     withdrawingExternalToken = info.symbol;
     try {
-      const env = activeEnv;
-      if (!env) throw new Error('Environment not ready');
+      const env = requireRuntimeEnv(activeEnv, 'reserve-to-external');
       const signerId = requireSignerIdForEntity(env, entityId, 'reserve-to-external');
-      const amount = amountOverride ?? parsePositiveReserveExternalAmount(tokenId);
+      const amount = amountOverride ?? parsePositiveAssetAmount(
+        reserveToExternalAmount,
+        info,
+        onchainReserves.get(tokenId) ?? 0n,
+      );
       const externalAddress = recipientEoaOverride || await resolveCurrentExternalAddress();
       const receivingEntity = zeroPadValue(externalAddress, 32).toLowerCase();
 
@@ -1692,8 +1750,7 @@
     const recipientEntityId = String(recipientEntityIdOverride || moveReserveRecipientEntityId || '').trim().toLowerCase();
     if (!recipientEntityId) throw new Error('Select recipient entity');
     if (recipientEntityId === entityId) throw new Error('Recipient entity must be different from self');
-    const env = activeEnv;
-    if (!env) throw new Error('Environment not ready');
+    const env = requireRuntimeEnv(activeEnv, 'reserve-to-reserve');
     const signerId = requireSignerIdForEntity(env, entityId, 'reserve-to-reserve');
     await enqueueEntityInputs(env, [{
       entityId,
@@ -1852,8 +1909,7 @@
     }
 
     try {
-      const env = activeEnv;
-      if (!env) throw new Error('Environment not ready');
+      const env = requireRuntimeEnv(activeEnv, 'quick-settle-approve');
       const signerId = resolveEntitySigner(entityId, 'quick-settle-approve');
       if (!signerId) throw new Error('No signer available');
 
@@ -1963,9 +2019,9 @@
         resolvingAssetAutoC2R = true;
         void (async () => {
           try {
-            const env = activeEnv;
+            const env = requireRuntimeEnv(activeEnv, 'asset-c2r-auto-execute');
             const entityId = replica?.state?.entityId || tab.entityId;
-            if (!env || !entityId) throw new Error('Environment not ready');
+            if (!entityId) throw new Error('Environment not ready');
             const signerId = resolveEntitySigner(entityId, 'asset-c2r-auto-execute');
             await enqueueEntityInputs(env, [
               buildEntityInput(entityId, signerId, buildMovePostSettleTxs(entityId, pending)),
@@ -2106,6 +2162,15 @@
     { externalUsd: 0, reserveUsd: 0, accountUsd: 0 },
   );
   $: assetLedgerGrandTotal = assetLedgerTotals.externalUsd + assetLedgerTotals.reserveUsd + assetLedgerTotals.accountUsd;
+  $: {
+    const row = getMoveLedgerRow();
+    moveDisplayBalances = {
+      external: row?.externalBalance ?? 0n,
+      reserve: row?.reserveBalance ?? 0n,
+      account: row?.accountBalance ?? 0n,
+    };
+    moveDisplayDecimals = getMoveDisplayDecimals();
+  }
 
   $: {
     const preferred = choosePreferredAssetSymbol(externalTokens);
@@ -2176,7 +2241,7 @@
       externalFetchStartedAt = Date.now();
       const signerId = String(tab.signerId || '').trim();
       const runtimeId = getRuntimeId(activeEnv);
-      const jurisdiction = String(activeEnv?.activeJurisdiction || '');
+      const jurisdiction = String(getActiveJurisdictionName(activeEnv) || '');
       const fetchKey = `${signerId}|${runtimeId}|${jurisdiction}`;
       lastExternalFetchKey = fetchKey;
       const fetchSeq = ++externalFetchSeq;
@@ -2190,7 +2255,7 @@
         const xln = await getXLN();
         // External balances are read directly from the active J-adapter/provider.
         // Never derive them from cached UI state; the wallet EOA is the source of truth.
-        const envAtStart = activeEnv;
+        const envAtStart = getRuntimeEnv(activeEnv);
         const jadapter = xln.getActiveJAdapter?.(envAtStart ?? null);
 
         const tokenList = await getTokenList(jadapter);
@@ -2244,7 +2309,7 @@
         }
 
         const runtimeIdNow = getRuntimeId(activeEnv);
-        const jurisdictionNow = String(activeEnv?.activeJurisdiction || '');
+        const jurisdictionNow = String(getActiveJurisdictionName(activeEnv) || '');
         const currentKey = `${String(tab.signerId || '').trim()}|${runtimeIdNow}|${jurisdictionNow}`;
         if (fetchSeq === externalFetchSeq && currentKey === fetchKey && lastExternalFetchKey === fetchKey) {
           externalTokens = sortExternalTokens(nativeToken ? [nativeToken, ...tokenList] : tokenList);
@@ -2262,7 +2327,7 @@
     } finally {
       externalFetchInFlight = null;
       const runtimeIdNow = getRuntimeId(activeEnv);
-      const jurisdictionNow = String(activeEnv?.activeJurisdiction || '');
+      const jurisdictionNow = String(getActiveJurisdictionName(activeEnv) || '');
       const desiredKey = `${String(tab.signerId || '').trim()}|${runtimeIdNow}|${jurisdictionNow}`;
       if (desiredKey && desiredKey !== lastExternalFetchKey) {
         void fetchExternalTokens();
@@ -2284,7 +2349,13 @@
     depositingToken = token.symbol;
     try {
       const xln = await getXLN();
-      await xln.submitExternalTokenToReserve(activeEnv, signerId, entityId, token.address, amount);
+      await xln.submitExternalTokenToReserve(
+        requireRuntimeEnv(activeEnv, 'external-token-to-reserve'),
+        signerId,
+        entityId,
+        token.address,
+        amount,
+      );
       if (typeof token.tokenId === 'number' && token.tokenId > 0) {
         pendingAssetBridgeSync = {
           tokenId: token.tokenId,
@@ -2322,7 +2393,7 @@
     if (!isAddress(recipient)) throw new Error('Recipient must be a valid EOA address');
     const amount = parsePositiveAssetAmount(sendAssetAmount, token, token.balance);
     const xln = await getXLN();
-    const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
+    const jadapter = xln.getActiveJAdapter?.(requireRuntimeEnv(activeEnv, 'send-external-asset'));
     if (!jadapter) throw new Error('J-adapter not available');
     const privKey = await getActiveSignerPrivateKey();
     sendingExternalToken = token.symbol;
@@ -2347,7 +2418,7 @@
     if (!isAddress(spender)) throw new Error('Spender must be a valid address');
     const amount = parsePositiveAssetAmount(allowAssetAmount, token);
     const xln = await getXLN();
-    const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
+    const jadapter = xln.getActiveJAdapter?.(requireRuntimeEnv(activeEnv, 'approve-external-asset'));
     if (!jadapter) throw new Error('J-adapter not available');
     const privKey = await getActiveSignerPrivateKey();
     approvingExternalToken = token.symbol;
@@ -2426,8 +2497,7 @@
       return;
     }
     try {
-      const env = activeEnv;
-      if (!env) throw new Error('Environment not ready');
+      const env = requireRuntimeEnv(activeEnv, 'collateral-to-reserve');
       const signerId = resolveEntitySigner(entityId, 'collateral-to-reserve');
       const info = getTokenInfo(tokenId);
 
@@ -2496,6 +2566,7 @@
     moveToEndpoint = 'reserve';
     if (!moveExternalRecipient.trim()) moveExternalRecipient = resolveSelfEoaAddress();
     if (!moveReserveRecipientEntityId.trim()) moveReserveRecipientEntityId = resolveSelfEntityId();
+    resetMoveLineMeasurement();
     bumpMoveNodeLayout();
   }
 
@@ -2510,6 +2581,7 @@
     if (!moveTargetCounterpartyManualOverride || !moveTargetHubEntityId.trim()) {
       moveTargetHubEntityId = workspaceAccountId || moveHubEntityOptions[0] || '';
     }
+    resetMoveLineMeasurement();
     bumpMoveNodeLayout();
   }
 
@@ -2614,8 +2686,7 @@
     const recipientEntityId = String(recipientEntityIdOverride || moveReserveRecipientEntityId || '').trim().toLowerCase();
     if (!recipientEntityId) throw new Error('Select recipient entity');
     if (recipientEntityId === entityId) throw new Error('Recipient entity must be different from self');
-    const env = activeEnv;
-    if (!env) throw new Error('Environment not ready');
+    const env = requireRuntimeEnv(activeEnv, 'move-reserve-to-reserve-draft');
     const signerId = requireSignerIdForEntity(env, entityId, 'move-reserve-to-reserve-draft');
     await enqueueEntityInputs(env, [{
       entityId,
@@ -2639,8 +2710,7 @@
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
     if (!activeIsLive) throw new Error('Add to batch requires LIVE mode');
-    const env = activeEnv;
-    if (!env) throw new Error('Environment not ready');
+    const env = requireRuntimeEnv(activeEnv, 'move-reserve-to-external-draft');
     const signerId = requireSignerIdForEntity(env, entityId, 'move-reserve-to-external-draft');
     const externalAddress = recipientEoaOverride || await resolveCurrentExternalAddress();
     if (!isAddress(externalAddress)) throw new Error('Recipient must be a valid EOA address');
@@ -2678,8 +2748,7 @@
       throw new Error('No account found for selected counterparty');
     }
 
-    const env = activeEnv;
-    if (!env) throw new Error('Environment not ready');
+    const env = requireRuntimeEnv(activeEnv, 'move-reserve-to-account-draft');
     await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
       type: 'deposit_collateral' as const,
       data: {
@@ -2770,19 +2839,24 @@
     }
   }
 
-  function isDirectMoveRoute(from: MoveEndpoint, to: MoveEndpoint): boolean {
-    return from === 'external' || getMoveRouteKey(from, to) === 'external->external';
+  function isExternalTransferMoveRoute(from: MoveEndpoint, to: MoveEndpoint): boolean {
+    return getMoveRouteKey(from, to) === 'external->external';
+  }
+
+  function isImmediateMoveExecutionRoute(from: MoveEndpoint, to: MoveEndpoint): boolean {
+    const routeKey = getMoveRouteKey(from, to);
+    return routeKey === 'external->external' || routeKey === 'external->reserve' || routeKey === 'external->account';
   }
 
   function getMovePrimaryActionLabel(): string {
-    if (moveFromEndpoint === 'external' && moveToEndpoint === 'reserve') return 'Deposit Now';
-    if (moveFromEndpoint === 'external' && moveToEndpoint === 'account') return 'Fund Now';
-    if (isDirectMoveRoute(moveFromEndpoint, moveToEndpoint)) return 'Send Direct';
+    if (moveFromEndpoint === 'external' && moveToEndpoint === 'reserve') return 'Submit External Batch';
+    if (moveFromEndpoint === 'external' && moveToEndpoint === 'account') return 'Run Deposit Route';
+    if (isExternalTransferMoveRoute(moveFromEndpoint, moveToEndpoint)) return 'Send Direct';
     return 'Add to Batch';
   }
 
   async function submitMovePrimaryAction(): Promise<void> {
-    if (isDirectMoveRoute(moveFromEndpoint, moveToEndpoint)) {
+    if (isImmediateMoveExecutionRoute(moveFromEndpoint, moveToEndpoint)) {
       await executeMovePlan();
       return;
     }
@@ -2946,8 +3020,7 @@
     const info = getTokenInfo(tokenId);
     collateralFundingToken = info.symbol;
     try {
-      const env = activeEnv;
-      if (!env) throw new Error('Environment not ready');
+      const env = requireRuntimeEnv(activeEnv, 'reserve-to-collateral');
 
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
           {
@@ -2976,7 +3049,6 @@
 
   async function openAccountWithFullId(targetEntityId: string) {
     const entityId = replica?.state?.entityId || tab.entityId;
-    const env = activeEnv;
     const signerId = resolveEntitySigner(entityId, 'open-account');
     const trimmed = targetEntityId.trim().toLowerCase();
     if (!entityId || !signerId) return;
@@ -2997,7 +3069,7 @@
       return;
     }
     try {
-      if (!env) throw new Error('Environment not ready');
+      const env = requireRuntimeEnv(activeEnv, 'open-account');
       const rebalancePolicy = getOpenAccountRebalancePolicyData();
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
           type: 'openAccount' as const,
@@ -3045,12 +3117,11 @@
 
   async function queueDisputeStart(counterpartyEntityId: string, description = 'dispute-from-configure') {
     const entityId = replica?.state?.entityId || tab.entityId;
-    const env = activeEnv;
     const signerId = resolveEntitySigner(entityId, 'dispute-start');
     if (!entityId || !signerId) return;
     if (!activeIsLive) { toasts.error('Dispute requires LIVE mode'); return; }
     try {
-      if (!env) throw new Error('Environment not ready');
+      const env = requireRuntimeEnv(activeEnv, 'dispute-start');
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
         type: 'disputeStart' as const,
         data: { counterpartyEntityId, description },
@@ -3064,7 +3135,6 @@
 
   async function queueDisputeFinalize(counterpartyEntityId: string, description = 'dispute-finalize-from-configure') {
     const entityId = replica?.state?.entityId || tab.entityId;
-    const env = activeEnv;
     const signerId = resolveEntitySigner(entityId, 'dispute-finalize');
     if (!entityId || !signerId) return;
     if (!activeIsLive) {
@@ -3072,7 +3142,7 @@
       return;
     }
     try {
-      if (!env) throw new Error('Environment not ready');
+      const env = requireRuntimeEnv(activeEnv, 'dispute-finalize');
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
         type: 'disputeFinalize' as const,
         data: { counterpartyEntityId, description },
@@ -3086,7 +3156,6 @@
 
   async function reopenDisputedAccount(counterpartyEntityId: string) {
     const entityId = replica?.state?.entityId || tab.entityId;
-    const env = activeEnv;
     const signerId = resolveEntitySigner(entityId, 'reopen-disputed-account');
     if (!entityId || !signerId) return;
     if (!activeIsLive) {
@@ -3094,7 +3163,7 @@
       return;
     }
     try {
-      if (!env) throw new Error('Environment not ready');
+      const env = requireRuntimeEnv(activeEnv, 'reopen-disputed-account');
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
           type: 'reopenDisputedAccount' as const,
           data: { counterpartyEntityId },
@@ -3116,7 +3185,7 @@
     debtEnforcingTokenId = tokenId;
     try {
       const xln = await getXLN();
-      await xln.submitDebtEnforcement(activeEnv, entityId, tokenId);
+      await xln.submitDebtEnforcement(requireRuntimeEnv(activeEnv, 'debt-enforcement'), entityId, tokenId);
       const tokenLabel = getTokenInfo(tokenId).symbol || `Token #${tokenId}`;
       toasts.success(`Debt enforcement submitted for ${tokenLabel}.`);
     } catch (err) {
@@ -3129,7 +3198,6 @@
 
   async function addTokenToAccount() {
     const entityId = replica?.state?.entityId || tab.entityId;
-    const env = activeEnv;
     const signerId = resolveEntitySigner(entityId, 'add-token-to-account');
     const counterpartyEntityId = String(workspaceAccountId || '').trim();
     if (!entityId || !signerId) return;
@@ -3146,7 +3214,7 @@
       return;
     }
     try {
-      if (!env) throw new Error('Environment not ready');
+      const env = requireRuntimeEnv(activeEnv, 'add-token-to-account');
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
           type: 'extendCredit' as const,
           data: {
@@ -3245,7 +3313,7 @@
     refreshBalances();
   }
   $: {
-    const runtimeBalanceKey = `${getRuntimeId(activeEnv)}|${String(activeEnv?.activeJurisdiction || '')}`;
+    const runtimeBalanceKey = `${getRuntimeId(activeEnv)}|${String(getActiveJurisdictionName(activeEnv) || '')}`;
     if (runtimeBalanceKey !== lastRuntimeBalanceKey) {
       lastRuntimeBalanceKey = runtimeBalanceKey;
       refreshBalances();
@@ -3263,7 +3331,7 @@
 
   onDestroy(() => {
     if (refreshTimer) clearInterval(refreshTimer);
-    if (moveCommittedLineTimeout) clearTimeout(moveCommittedLineTimeout);
+    resetMoveLineMeasurement();
     moveVisualResizeObserver?.disconnect();
   });
 
@@ -3309,8 +3377,8 @@
     return activeXlnFunctions?.getTokenInfo(tokenId) ?? { symbol: 'UNK', decimals: 18 };
   }
 
-  function formatAmount(amount: bigint, decimals: number): string {
-    const precision = Math.max(0, Math.min(18, Math.floor(Number($settings?.tokenPrecision ?? 6))));
+  function formatAmount(amount: bigint, decimals = 18): string {
+    const precision = Math.max(0, Math.min(18, Math.floor(Number($settings?.tokenPrecision ?? 4))));
     const negative = amount < 0n;
     const abs = negative ? -amount : amount;
     const divisor = BigInt(10) ** BigInt(decimals);
@@ -3677,7 +3745,7 @@
   }
 
   function handleJurisdictionSelect(event: CustomEvent<{ selected: string | null }>) {
-    const next = event.detail?.selected ?? event.detail?.name ?? null;
+    const next = event.detail?.selected ?? null;
     dispatch('jurisdictionSelect', next ? { name: next } : { name: null });
     if (next) selectedJurisdictionName = next;
   }
@@ -3780,7 +3848,13 @@
     return !!selfEntityId && !!candidate && selfEntityId === candidate;
   }
 
-  function pendingBatchSettlementReserveDelta(settlement: any): bigint {
+  type PendingBatchSettlementLike = {
+    leftEntity?: unknown;
+    rightEntity?: unknown;
+    diffs?: Array<{ leftDiff?: unknown; rightDiff?: unknown }>;
+  };
+
+  function pendingBatchSettlementReserveDelta(settlement: PendingBatchSettlementLike | null | undefined): bigint {
     const leftIsSelf = pendingBatchIsSelfEntity(settlement?.leftEntity);
     const rightIsSelf = pendingBatchIsSelfEntity(settlement?.rightEntity);
     if (!leftIsSelf && !rightIsSelf) return 0n;
@@ -3806,6 +3880,14 @@
       else if (phase === 'decrease') reserveDecreaseItems.push(item);
       else neutralItems.push(item);
     };
+
+    for (const [index, op] of (batch.flashloans || []).entries()) {
+      pushItem('increase', {
+        key: `flash-${index}`,
+        title: 'Flashloan',
+        subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount)} temporary reserve liquidity`,
+      });
+    }
 
     for (const [index, op] of (batch.externalTokenToReserve || []).entries()) {
       pushItem('increase', {
@@ -3953,8 +4035,7 @@
     pendingBatchSubmitting = true;
     try {
       const entityId = replica?.state?.entityId || tab.entityId;
-      const env = activeEnv;
-      if (!env) throw new Error('Environment not ready');
+      const env = requireRuntimeEnv(activeEnv, 'global-clear-batch');
       if (!activeIsLive) throw new Error('Batch actions require LIVE mode');
       const signerId = resolveEntitySigner(entityId, 'global-clear-batch');
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
@@ -3978,8 +4059,7 @@
     pendingBatchSubmitting = true;
     try {
       const entityId = replica?.state?.entityId || tab.entityId;
-      const env = activeEnv;
-      if (!env) throw new Error('Environment not ready');
+      const env = requireRuntimeEnv(activeEnv, 'global-batch-broadcast');
       if (!activeIsLive) throw new Error('Batch actions require LIVE mode');
       const signerId = resolveEntitySigner(entityId, 'global-batch-broadcast');
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
@@ -3999,8 +4079,7 @@
     pendingBatchSubmitting = true;
     try {
       const entityId = replica?.state?.entityId || tab.entityId;
-      const env = activeEnv;
-      if (!env) throw new Error('Environment not ready');
+      const env = requireRuntimeEnv(activeEnv, 'global-batch-rebroadcast');
       if (!activeIsLive) throw new Error('Batch actions require LIVE mode');
       const signerId = resolveEntitySigner(entityId, 'global-batch-rebroadcast');
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
@@ -4088,10 +4167,10 @@
 
   <!-- Historical Mode Warning -->
   {#if !activeIsLive}
-    <div class="history-warning" on:click={goToLive}>
+    <button type="button" class="history-warning" on:click={goToLive}>
       <AlertTriangle size={14} />
       <span>Viewing historical state. Click to go LIVE.</span>
-    </div>
+    </button>
   {/if}
 
   <!-- Main Content - SINGLE SCROLL -->
@@ -4114,7 +4193,6 @@
           counterpartyId={selectedAccountId}
           entityId={tab.entityId}
           {replica}
-          {tab}
           on:back={handleBackToAccounts}
           on:faucet={handleAccountFaucet}
           on:goToOpenAccounts={handleAccountPanelGoToOpenAccounts}
@@ -4405,8 +4483,8 @@
                 {moveNeedsReserveRecipient}
                 {moveNeedsExternalRecipient}
                 {isMoveRouteSupported}
-                {getMoveDisplayBalance}
-                {getMoveDisplayDecimals}
+                {moveDisplayBalances}
+                {moveDisplayDecimals}
                 {fillMoveMax}
                 {setMoveSource}
                 {setMoveTarget}
@@ -4417,7 +4495,6 @@
                 {moveRouteMeta}
                 {moveRouteSteps}
                 {canAddMoveToExistingBatch}
-                {addMoveToExistingBatch}
                 {submitMovePrimaryAction}
                 {handleMoveSourceAccountChange}
                 {handleMoveReserveRecipientChange}
@@ -4426,7 +4503,6 @@
                 {moveNodeAction}
                 {moveEntityOptions}
                 {moveHubEntityOptions}
-                {workspaceAccountIds}
                 {moveSourceAccountOptions}
                 reserveRecipientPreferredId={resolveSelfEntityId()}
                 targetEntityPreferredId={resolveSelfEntityId()}
@@ -4470,7 +4546,7 @@
 
           <DebtPanel
             entityState={replica?.state || null}
-            sourceEnv={activeEnv}
+            sourceEnv={getRuntimeEnv(activeEnv)}
             canEnforce={activeIsLive}
             enforcingTokenId={debtEnforcingTokenId}
             on:enforce={(event) => enforceOutstandingDebt(event.detail.tokenId)}
@@ -4577,8 +4653,8 @@
                 {moveNeedsReserveRecipient}
                 {moveNeedsExternalRecipient}
                 {isMoveRouteSupported}
-                {getMoveDisplayBalance}
-                {getMoveDisplayDecimals}
+                {moveDisplayBalances}
+                {moveDisplayDecimals}
                 {fillMoveMax}
                 {setMoveSource}
                 {setMoveTarget}
@@ -4589,7 +4665,6 @@
                 {moveRouteMeta}
                 {moveRouteSteps}
                 {canAddMoveToExistingBatch}
-                {addMoveToExistingBatch}
                 {submitMovePrimaryAction}
                 {handleMoveSourceAccountChange}
                 {handleMoveReserveRecipientChange}
@@ -4598,7 +4673,6 @@
                 {moveNodeAction}
                 {moveEntityOptions}
                 {moveHubEntityOptions}
-                {workspaceAccountIds}
                 {moveSourceAccountOptions}
                 reserveRecipientPreferredId={resolveSelfEntityId()}
                 targetEntityPreferredId={resolveSelfEntityId()}
@@ -4987,7 +5061,7 @@
     width: min(100%, 1220px);
     height: 100%;
     margin: 0 auto;
-    background: var(--theme-background, #09090b);
+    background: var(--theme-bg-gradient, var(--theme-background, #09090b));
     color: var(--theme-text-primary, #e4e4e7);
     font-family: 'Inter', -apple-system, sans-serif;
     font-size: 13px;
@@ -4999,8 +5073,9 @@
     align-items: center;
     gap: 8px;
     padding: 10px 12px;
-    background: color-mix(in srgb, var(--theme-header-bg, #151316) 88%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 68%, transparent);
+    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-header-bg, #151316)) 96%, var(--theme-background, #09090b));
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 88%, transparent);
+    box-shadow: 0 10px 28px color-mix(in srgb, var(--theme-background, #09090b) 8%, transparent);
     flex-shrink: 0;
   }
 
@@ -5009,38 +5084,21 @@
     padding: 10px var(--panel-gutter-x);
     background: linear-gradient(
       180deg,
-      color-mix(in srgb, var(--theme-header-bg, #151316) 92%, transparent) 0%,
-      color-mix(in srgb, var(--theme-background, #09090b) 96%, transparent) 100%
+      color-mix(in srgb, var(--theme-card-bg, var(--theme-header-bg, #151316)) 98%, var(--theme-background, #09090b)) 0%,
+      color-mix(in srgb, var(--theme-background, #09090b) 100%, transparent) 100%
     );
   }
 
   .header :global(select),
   .header :global(button),
   .header :global(.dropdown-trigger) {
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 72%, transparent);
+    background: color-mix(in srgb, var(--theme-input-bg, var(--theme-card-bg, #18181b)) 96%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-input-border, var(--theme-card-border, #27272a)) 86%, transparent);
     border-radius: 6px;
     color: var(--theme-text-secondary, #a1a1aa);
     font-size: 12px;
     padding: 6px 10px;
     cursor: pointer;
-  }
-
-  .header-slot {
-    min-width: 0;
-  }
-
-  .header-slot-runtime {
-    flex: 0 1 260px;
-  }
-
-  .header-slot-entity {
-    flex: 1 1 auto;
-  }
-
-  .header-slot-context {
-    flex: 1 1 420px;
-    max-width: 720px;
   }
 
   /* History Warning */
@@ -5054,8 +5112,10 @@
     border-bottom: 1px solid color-mix(in srgb, var(--theme-accent, #fbbf24) 34%, transparent);
     color: var(--theme-accent, #fbbf24);
     font-size: 12px;
-    cursor: pointer;
     flex-shrink: 0;
+    border: 0;
+    width: 100%;
+    cursor: pointer;
   }
 
   .history-warning:hover {
@@ -5299,10 +5359,11 @@
     padding: var(--space-3) var(--panel-gutter-x);
     background: linear-gradient(
       180deg,
-      color-mix(in srgb, var(--theme-surface, #18181b) 96%, transparent) 0%,
-      color-mix(in srgb, var(--theme-background, #09090b) 96%, transparent) 100%
+      color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, var(--theme-background, #09090b)) 0%,
+      color-mix(in srgb, var(--theme-background, #09090b) 100%, transparent) 100%
     );
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 70%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 86%, transparent);
+    box-shadow: 0 12px 28px color-mix(in srgb, var(--theme-background, #09090b) 7%, transparent);
   }
 
   .hero-left {
@@ -5386,415 +5447,12 @@
     font-weight: 500;
   }
 
-  .hero-breakdown {
-    display: flex;
-    justify-content: flex-end;
-    gap: 14px;
-    flex-wrap: wrap;
-    margin-top: 8px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--theme-text-secondary, #a1a1aa);
-  }
-
-  .hero-breakdown span {
-    white-space: nowrap;
-  }
-
-  /* Portfolio - legacy, keep btn-faucet for tab content */
-  .portfolio {
-    padding: 20px 16px;
-    text-align: center;
-    border-bottom: 1px solid #1c1917;
-  }
-
-  .total-value {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 32px;
-    font-weight: 600;
-    color: #fafaf9;
-  }
-
-  .total-value.dim {
-    color: #57534e;
-  }
-
-  .total-label {
-    font-size: 11px;
-    color: #78716c;
-    margin-top: 2px;
-    margin-bottom: 16px;
-  }
-
-  .btn-faucet {
-    margin: 8px 8px 0;
-    padding: 10px 16px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 6px;
-    color: #a8a29e;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s;
-    text-align: left;
-  }
-
-  .btn-faucet:hover:not(:disabled) {
-    border-color: #fbbf24;
-    color: #fbbf24;
-  }
-
-  .btn-faucet:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  /* External Tokens */
-  .external-tokens {
-    padding: 12px 16px;
-    border-bottom: 1px solid #1c1917;
-  }
-
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-  }
-
-  .section-header h4 {
-    margin: 0;
-    font-size: 11px;
-    font-weight: 600;
-    color: #78716c;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .signer-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #57534e;
-  }
-
-  .ext-loading {
-    font-size: 12px;
-    color: #57534e;
-    text-align: center;
-    padding: 12px;
-  }
-
-  .ext-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .ext-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 10px;
-    background: #1c1917;
-    border-radius: 6px;
-  }
-
-  .ext-symbol {
-    font-weight: 600;
-    font-size: 12px;
-    width: 50px;
-  }
-
-  .ext-symbol.eth { color: #627eea; }
-  .ext-symbol.usd { color: #2775ca; }
-
-  .ext-amount {
-    flex: 1;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: #a8a29e;
-  }
-
-  .btn-deposit {
-    padding: 4px 10px;
-    background: linear-gradient(135deg, #16a34a, #15803d);
-    border: none;
-    border-radius: 4px;
-    color: #f0fdf4;
-    font-size: 11px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .btn-deposit:hover:not(:disabled) {
-    background: linear-gradient(135deg, #22c55e, #16a34a);
-  }
-
-  .btn-deposit:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .ext-empty {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 12px;
-    background: #1c1917;
-    border-radius: 6px;
-    font-size: 12px;
-    color: #57534e;
-  }
-
-  .btn-faucet-small {
-    padding: 4px 10px;
-    background: linear-gradient(135deg, #0ea5e9, #0284c7);
-    border: none;
-    border-radius: 4px;
-    color: #f0f9ff;
-    font-size: 11px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .btn-faucet-small:hover:not(:disabled) {
-    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
-  }
-
-  .btn-faucet-small:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .token-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    max-width: 400px;
-    margin: 0 auto;
-  }
-
-  .token-row {
-    display: grid;
-    grid-template-columns: 50px 1fr 80px 60px;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-  }
-
-  .t-symbol {
-    font-weight: 600;
-    text-align: left;
-  }
-
-  .t-symbol.eth { color: #627eea; }
-  .t-symbol.usd { color: #2775ca; }
-
-  .t-amount {
-    font-family: 'JetBrains Mono', monospace;
-    color: #a8a29e;
-    text-align: right;
-  }
-
-  .t-bar {
-    height: 4px;
-    background: #1c1917;
-    border-radius: 2px;
-    overflow: hidden;
-  }
-
-  .t-fill {
-    height: 100%;
-    background: #fbbf24;
-    border-radius: 2px;
-  }
-
-  .t-value {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #57534e;
-    text-align: right;
-  }
-
-  /* Token List Grid - Beautiful card layout */
-  .wallet-address {
-    margin-bottom: 16px;
-  }
-
-  .token-list-loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    padding: 40px 20px;
-    color: #78716c;
-  }
-
-  .loading-spinner {
-    width: 20px;
-    height: 20px;
-    border: 2px solid #292524;
-    border-top-color: #fbbf24;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .token-list-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .token-card {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 16px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 12px;
-    transition: all 0.15s;
-  }
-
-  .token-card:hover {
-    border-color: #44403c;
-  }
-
-  .token-card.has-balance {
-    border-color: #365314;
-    background: linear-gradient(135deg, #1c1917 0%, #1a2e05 100%);
-  }
-
-  .token-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .token-icon {
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    font-weight: 700;
-    font-size: 16px;
-    color: white;
-    background: #44403c;
-  }
-
-  .token-icon.usdc {
-    background: linear-gradient(135deg, #2775ca, #1e5aa8);
-  }
-
-  .token-icon.weth {
-    background: linear-gradient(135deg, #627eea, #4c62c7);
-  }
-
-  .token-icon.usdt {
-    background: linear-gradient(135deg, #26a17b, #1e8a69);
-  }
-
-  .token-symbol {
-    font-weight: 600;
-    font-size: 15px;
-    color: #fafaf9;
-  }
-
-  .token-balance {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .balance-amount {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 22px;
-    font-weight: 600;
-    color: #fafaf9;
-  }
-
-  .balance-value {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: #78716c;
-  }
-
-  .balance-zero {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 22px;
-    font-weight: 600;
-    color: #44403c;
-  }
-
-  .token-actions {
-    margin-top: 4px;
-  }
-
-  .btn-token-action {
-    width: 100%;
-    padding: 10px 16px;
-    border: none;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .btn-token-action.deposit {
-    background: linear-gradient(135deg, #16a34a, #15803d);
-    color: #f0fdf4;
-  }
-
-  .btn-token-action.deposit:hover:not(:disabled) {
-    background: linear-gradient(135deg, #22c55e, #16a34a);
-  }
-
-  .btn-token-action.faucet {
-    background: linear-gradient(135deg, #0ea5e9, #0284c7);
-    color: #f0f9ff;
-  }
-
-  .btn-token-action.faucet:hover:not(:disabled) {
-    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
-  }
-
-  .btn-token-action:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .token-status {
-    font-size: 11px;
-    color: #57534e;
-    font-style: italic;
-  }
-
-  .hint-text {
-    text-align: center;
-    font-size: 12px;
-    color: #57534e;
-    margin-top: 16px;
-    padding: 12px;
-    background: #1c1917;
-    border-radius: 8px;
-  }
-
   /* Tabs */
   .tabs {
     display: flex;
     padding: 0 var(--panel-gutter-x);
-    background: color-mix(in srgb, var(--theme-background, #09090b) 96%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 60%, transparent);
+    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-background, #09090b)) 96%, var(--theme-background, #09090b));
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 84%, transparent);
     overflow-x: auto;
     flex-shrink: 0;
     gap: 4px;
@@ -5832,16 +5490,6 @@
     background: color-mix(in srgb, var(--theme-accent, #fbbf24) 8%, transparent);
   }
 
-  .tab-clear {
-    margin-left: auto;
-    color: var(--theme-text-muted, #71717a);
-    border-bottom-color: transparent;
-  }
-  .tab-clear:hover {
-    color: #fca5a5;
-    background: rgba(127, 29, 29, 0.15);
-  }
-
   .badge {
     background: #dc2626;
     color: white;
@@ -5869,17 +5517,18 @@
   .accounts-selector-row {
     margin-bottom: 10px;
     padding: 10px;
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 86%, transparent);
     border-radius: 10px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 78%, transparent);
+    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent);
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-background, #09090b) 7%, transparent);
   }
 
   .accounts-selector-row :global(.dropdown-trigger) {
     width: 100%;
     min-height: 42px;
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-input-border, var(--theme-card-border, #27272a)) 86%, transparent);
     border-radius: 8px;
-    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent);
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 96%, transparent);
     color: var(--theme-text-primary, #e4e4e7);
   }
 
@@ -5892,10 +5541,11 @@
     gap: 8px;
     margin-top: var(--space-3);
     padding: 10px;
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 86%, transparent);
     border-radius: 10px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 78%, transparent);
+    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent);
     overflow-x: auto;
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-background, #09090b) 7%, transparent);
   }
 
   .account-workspace-tabs::-webkit-scrollbar {
@@ -5923,28 +5573,14 @@
 
   .account-workspace-tab:hover {
     color: var(--theme-text-primary, #e4e4e7);
-    border-color: color-mix(in srgb, var(--theme-border, #27272a) 80%, white 20%);
-    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 92%, transparent);
+    border-color: color-mix(in srgb, var(--theme-card-hover-border, var(--theme-border, #27272a)) 82%, transparent);
+    background: color-mix(in srgb, var(--theme-surface-hover, var(--theme-card-bg, #1c1c20)) 96%, transparent);
   }
 
   .account-workspace-tab.active {
     color: var(--theme-accent, #fbbf24);
     border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 65%, transparent);
     background: color-mix(in srgb, var(--theme-accent, #fbbf24) 10%, transparent);
-  }
-
-  .workspace-badge {
-    margin-left: 4px;
-    min-width: 18px;
-    padding: 1px 6px;
-    border-radius: 999px;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1.4;
-    text-align: center;
-    color: #fee2e2;
-    background: #b91c1c;
-    box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.4) inset;
   }
 
   .account-workspace-content {
@@ -5954,16 +5590,18 @@
   .workspace-inline-selector {
     margin-bottom: 10px;
     padding: 12px;
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 86%, transparent);
     border-radius: 10px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 78%, transparent);
+    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent);
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-background, #09090b) 6%, transparent);
   }
 
   .configure-panel {
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 86%, transparent);
     border-radius: 10px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 78%, transparent);
+    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent);
     padding: 10px;
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-background, #09090b) 6%, transparent);
   }
 
   .configure-tabs {
@@ -6266,47 +5904,6 @@
     margin: 0 0 12px;
   }
 
-  /* Activity */
-  .activity-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px;
-    background: #1c1917;
-    border-radius: 6px;
-    margin-bottom: 6px;
-  }
-
-  .a-icon {
-    font-size: 10px;
-    padding: 4px 6px;
-    background: #292524;
-    border-radius: 4px;
-    color: #78716c;
-  }
-
-  .a-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .a-title {
-    font-size: 12px;
-    color: #e7e5e4;
-  }
-
-  .a-sub {
-    font-size: 10px;
-    color: #57534e;
-  }
-
-  .a-amt {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #a8a29e;
-  }
-
   .entity-activity-list {
     display: flex;
     flex-direction: column;
@@ -6484,73 +6081,6 @@
     cursor: pointer;
   }
 
-  /* Settings */
-  .setting-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px;
-    background: #1c1917;
-    border-radius: 6px;
-    margin-bottom: 8px;
-  }
-
-  .toggle {
-    padding: 4px 12px;
-    background: #292524;
-    border: none;
-    border-radius: 4px;
-    color: #78716c;
-    font-size: 11px;
-    cursor: pointer;
-  }
-
-  .toggle.on {
-    background: #422006;
-    color: #fbbf24;
-  }
-
-  .setting-block {
-    padding: 12px;
-    background: #1c1917;
-    border-radius: 6px;
-    margin-bottom: 8px;
-  }
-
-  .setting-block label {
-    display: block;
-    font-size: 10px;
-    color: #57534e;
-    margin-bottom: 6px;
-  }
-
-  .setting-block code {
-    display: block;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #a8a29e;
-    background: #0c0a09;
-    padding: 8px;
-    border-radius: 4px;
-    word-break: break-all;
-  }
-
-  .setting-block input:not([type="range"]) {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 10px;
-    border-radius: 6px;
-    border: 1px solid #292524;
-    background: #0c0a09;
-    color: #e7e5e4;
-    font-size: 13px;
-  }
-
-  .setting-block input:not([type="range"]):focus {
-    outline: none;
-    border-color: #fbbf24;
-  }
-
   /* Live Required */
   .live-required {
     display: flex;
@@ -6566,20 +6096,6 @@
   .live-required p {
     margin: 0;
     font-size: 13px;
-  }
-
-  .btn-live {
-    padding: 10px 20px;
-    background: #422006;
-    border: 1px solid #713f12;
-    border-radius: 6px;
-    color: #fbbf24;
-    font-weight: 500;
-    cursor: pointer;
-  }
-
-  .btn-live:hover {
-    background: #4a2408;
   }
 
   /* Override child component styling */
@@ -6750,16 +6266,6 @@
     max-width: 40ch;
   }
 
-  .loading-row {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 20px;
-    color: #57534e;
-    font-size: 12px;
-  }
-
   /* Table Header */
   .token-table-header {
     display: grid;
@@ -6824,12 +6330,6 @@
     text-align: right;
   }
 
-  .col-value {
-    text-align: right;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-  }
-
   .asset-ledger-header,
   .asset-ledger-row {
     grid-template-columns: minmax(90px, 140px) repeat(3, minmax(0, 1fr));
@@ -6844,7 +6344,8 @@
   }
 
   .asset-ledger-table {
-    overflow-x: hidden;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .asset-ledger-total {
@@ -6895,384 +6396,6 @@
     );
     border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 72%, transparent);
     border-radius: 10px;
-  }
-
-  .move-route-builder {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .move-topline {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
-  }
-
-  .move-amount-shell {
-    min-height: 52px;
-    border-radius: 14px;
-  }
-
-  .move-token-select {
-    min-width: 92px;
-  }
-
-  .move-visual {
-    position: relative;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 14px;
-    padding: 14px;
-    border: 1px solid rgba(251, 191, 36, 0.16);
-    border-radius: 14px;
-    background: radial-gradient(circle at top, rgba(251, 191, 36, 0.05), transparent 55%), rgba(12, 10, 9, 0.88);
-    overflow: visible;
-  }
-
-  .move-column {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    position: relative;
-    z-index: 1;
-  }
-
-  .move-account-slot {
-    margin-top: 2px;
-  }
-
-  .move-inline-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 4px;
-  }
-
-  .move-drag-layer {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    display: block;
-    overflow: visible;
-    pointer-events: none;
-    z-index: 3;
-  }
-
-  .move-drag-layer path {
-    stroke: rgba(251, 191, 36, 0.96);
-    stroke-width: 2.5;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    fill: none;
-    stroke-dasharray: 8 6;
-    filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.28));
-  }
-
-  .move-drag-layer.committed path {
-    stroke: rgba(245, 158, 11, 0.78);
-    stroke-width: 2.25;
-    stroke-dasharray: none;
-    filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.2));
-  }
-
-  .move-column-head {
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #78716c;
-  }
-
-  .move-node {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 3px;
-    min-height: 76px;
-    padding: 12px;
-    border-radius: 12px;
-    border: 1px solid rgba(120, 113, 108, 0.34);
-    background: linear-gradient(180deg, rgba(28, 25, 23, 0.95), rgba(17, 15, 13, 0.95));
-    color: #fafaf9;
-    text-align: left;
-    cursor: grab;
-    transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
-    user-select: none;
-    touch-action: none;
-  }
-
-  .move-node:hover,
-  .move-node.hover-target {
-    border-color: rgba(251, 191, 36, 0.55);
-    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.18), 0 10px 24px rgba(0, 0, 0, 0.25);
-    transform: translateY(-1px);
-  }
-
-  .move-node.selected,
-  .move-node.source-active,
-  .move-node.target-active {
-    border-color: rgba(251, 191, 36, 0.92);
-    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.32), 0 16px 36px rgba(0, 0, 0, 0.3);
-    transform: translateY(-1px);
-  }
-
-  .move-node.source-active {
-    background: linear-gradient(180deg, rgba(66, 32, 6, 0.96), rgba(28, 25, 23, 0.96));
-  }
-
-  .move-node.target-active {
-    background: linear-gradient(180deg, rgba(39, 32, 18, 0.96), rgba(28, 25, 23, 0.96));
-  }
-
-  .move-node.pending {
-    border-color: rgba(250, 204, 21, 0.7);
-    box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.35);
-  }
-
-  .move-node.dragging {
-    cursor: grabbing;
-    opacity: 0.92;
-  }
-
-  .move-node.blocked {
-    opacity: 0.45;
-  }
-
-  .move-node-label {
-    font-size: 13px;
-    font-weight: 700;
-    color: #f5f5f4;
-  }
-
-  .move-node-balance {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 16px;
-    color: #fbbf24;
-  }
-
-  .move-node-target-hint {
-    font-size: 11px;
-    color: #78716c;
-  }
-
-  .move-node-meta {
-    font-size: 11px;
-    color: #a8a29e;
-  }
-
-  .move-summary {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 14px;
-    border-radius: 12px;
-    border: 1px solid rgba(120, 113, 108, 0.2);
-    background: rgba(12, 10, 9, 0.55);
-  }
-
-  .move-summary-pill {
-    align-self: flex-start;
-    padding: 4px 8px;
-    border-radius: 999px;
-    background: rgba(251, 191, 36, 0.08);
-    color: #fbbf24;
-    font-size: 11px;
-    font-weight: 700;
-  }
-
-  .move-summary-title {
-    font-size: 14px;
-    font-weight: 700;
-    color: #fafaf9;
-  }
-
-  .move-summary-meta {
-    font-size: 12px;
-    color: #a8a29e;
-  }
-
-  .move-summary-progress {
-    font-size: 12px;
-    color: #fbbf24;
-  }
-
-  .move-summary-progress.error {
-    color: #fca5a5;
-  }
-
-  .move-summary-batch {
-    font-size: 12px;
-    color: #fbbf24;
-  }
-
-  .move-steps {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .move-step-chip {
-    padding: 6px 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(120, 113, 108, 0.22);
-    background: rgba(28, 25, 23, 0.72);
-    color: #d6d3d1;
-    font-size: 12px;
-  }
-
-  .asset-form-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    margin-top: 12px;
-  }
-
-  .asset-amount-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 188px;
-    gap: 12px;
-    margin-top: 12px;
-    align-items: end;
-  }
-
-  .asset-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .asset-field-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .asset-field-wide {
-    grid-column: 1 / -1;
-  }
-
-  .asset-amount-field,
-  .asset-token-field {
-    min-width: 0;
-  }
-
-  .asset-field span {
-    font-size: 10px;
-    color: #78716c;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .asset-amount-shell {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 48px;
-    padding: 0 8px 0 12px;
-    border: 1px solid #322821;
-    border-radius: 12px;
-    background: #110d0b;
-  }
-
-  .asset-amount-shell:focus-within {
-    border-color: #fbbf24;
-    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.12);
-  }
-
-  .asset-amount-shell input {
-    flex: 1;
-    min-width: 0;
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: #f5f5f4;
-    font-size: 15px;
-  }
-
-  .asset-amount-shell input:focus {
-    outline: none;
-  }
-
-  .asset-inline-controls {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: auto;
-    min-width: 0;
-    flex: 0 0 auto;
-    padding-left: 8px;
-    align-self: stretch;
-  }
-
-  .asset-max-hint {
-    border: none;
-    background: transparent;
-    padding: 0 2px;
-    color: #8d857d;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: none;
-    letter-spacing: 0;
-    cursor: pointer;
-    white-space: nowrap;
-    text-align: right;
-    max-width: 72px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: inline-flex;
-    align-items: center;
-    min-height: 32px;
-  }
-
-  .asset-max-hint.text-link {
-    min-width: 0;
-  }
-
-  .asset-max-hint:hover:not(:disabled) {
-    color: #f5f5f4;
-  }
-
-  .asset-max-hint:disabled {
-    color: #57534e;
-    cursor: default;
-  }
-
-  .asset-token-select-inline {
-    min-height: 36px;
-    min-width: 94px;
-  }
-
-  .asset-token-select-inline.compact {
-    min-height: 36px;
-    padding: 0 18px 0 2px;
-    border-radius: 0;
-    background: transparent;
-    border: none;
-    color: #e7e5e4;
-    align-self: stretch;
-  }
-
-  .asset-action-row {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-top: 14px;
-  }
-
-  .col-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: flex-end;
-  }
-
-  .reserve-collateral-editor {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 6px;
-    width: 100%;
   }
 
   /* Token Icon (small) */
@@ -7352,34 +6475,9 @@
     background: linear-gradient(135deg, #22c55e, #16a34a);
   }
 
-  .btn-table-action.collateral {
-    background: linear-gradient(135deg, #f59e0b, #d97706);
-    color: #fffbeb;
-  }
-
-  .btn-table-action.collateral:hover:not(:disabled) {
-    background: linear-gradient(135deg, #fbbf24, #f59e0b);
-  }
-
-  .btn-table-action.collateral.partial {
-    background: linear-gradient(135deg, #f97316, #ea580c);
-  }
-
-  .btn-table-action.collateral.partial:hover:not(:disabled) {
-    background: linear-gradient(135deg, #fb923c, #f97316);
-  }
-
   .btn-table-action:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-
-  .quick-actions-section {
-    margin-bottom: 16px;
-    padding: 12px;
-    background: rgba(251, 191, 36, 0.02);
-    border: 1px solid rgba(251, 191, 36, 0.1);
-    border-radius: 10px;
   }
 
   .account-open-sections {
@@ -7471,16 +6569,15 @@
     }
 
     .hero {
+      flex-direction: column;
       align-items: flex-start;
       gap: 12px;
     }
 
     .hero-right {
+      width: 100%;
       min-width: 0;
-    }
-
-    .hero-inline-metrics {
-      justify-content: flex-start;
+      text-align: left;
     }
 
     .tab-header-row {
@@ -7504,19 +6601,7 @@
 
     .asset-ledger-header,
     .asset-ledger-row {
-      min-width: 620px;
-    }
-
-    .asset-form-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .move-visual {
-      grid-template-columns: 1fr;
-    }
-
-    .asset-amount-row {
-      grid-template-columns: 1fr;
+      min-width: 560px;
     }
 
     .account-workspace-tabs {
@@ -7533,12 +6618,6 @@
     .header.user-mode-header {
       flex-direction: column;
       align-items: stretch;
-    }
-
-    .header-slot-runtime,
-    .header-slot-entity,
-    .header-slot-context {
-      flex: 1 1 auto;
     }
   }
 </style>

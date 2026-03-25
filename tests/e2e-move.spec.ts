@@ -452,6 +452,9 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-amount').fill('20');
         await chooseMoveRoute(page, 'external', 'reserve');
         await waitForMoveReady(page);
+        await expect(page.getByTestId('move-route-summary')).toContainText('1 external-signer batch');
+        await expect(page.getByTestId('move-route-summary')).toContainText('Submit external deposit batch into your reserve');
+        await expect(page.getByTestId('move-confirm').first()).toHaveText(/Submit External Batch/i);
         await page.getByTestId('move-confirm').first().click();
         await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeReserve);
       });
@@ -504,6 +507,9 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await chooseMoveRoute(page, 'reserve', 'external');
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
+        await expect(page.getByTestId('move-route-summary')).toContainText('1 reserve batch');
+        await expect(page.getByTestId('move-route-summary')).toContainText('Broadcast reserve withdrawal batch to recipient EOA');
+        await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await page.getByTestId('move-confirm').first().click();
         await broadcastDraftBatch(page);
         await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeReserve);
