@@ -1482,11 +1482,16 @@
     return index >= 0 ? index : TOKEN_UI_ORDER.length + 100;
   }
 
+  function compareText(left: string, right: string): number {
+    if (left === right) return 0;
+    return left < right ? -1 : 1;
+  }
+
   function compareTokenSymbols(left: string, right: string): number {
     const leftRank = getTokenUiRank(left);
     const rightRank = getTokenUiRank(right);
     if (leftRank !== rightRank) return leftRank - rightRank;
-    return left.localeCompare(right);
+    return compareText(left, right);
   }
 
   function sortExternalTokens(tokens: ExternalToken[]): ExternalToken[] {
@@ -2277,21 +2282,7 @@
     depositingToken = token.symbol;
     try {
       const xln = await getXLN();
-      // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
-      const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
-      if (!jadapter?.externalTokenToReserve) {
-        throw new Error('J-adapter deposit not available');
-      }
-
-      // Reserve deposits must use the exact registered signer key for this runtime signer.
-      // Never derive a new key by signerId here: signerId is already the canonical EOA address.
-      const privKey = xln.getCachedSignerPrivateKey?.(signerId);
-      if (!privKey) throw new Error(`No registered signer key for ${signerId}`);
-
-      // Deposit all available balance
-      await jadapter.externalTokenToReserve(privKey, entityId, token.address, amount);
-
-      console.log(`[EntityPanel] Deposited ${token.symbol} to entity reserves`);
+      await xln.submitExternalTokenToReserve(activeEnv, signerId, entityId, token.address, amount);
       if (typeof token.tokenId === 'number' && token.tokenId > 0) {
         pendingAssetBridgeSync = {
           tokenId: token.tokenId,
@@ -2309,6 +2300,7 @@
       toasts.error(`Deposit failed: ${message}`);
       depositingToken = null;
       void fetchExternalTokens();
+      throw err instanceof Error ? err : new Error(message);
     } finally {
     }
   }
@@ -3122,17 +3114,9 @@
     debtEnforcingTokenId = tokenId;
     try {
       const xln = await getXLN();
-      const jadapter = xln.getActiveJAdapter?.(activeEnv ?? null);
-      if (!jadapter?.enforceDebts) throw new Error('J-adapter debt enforcement unavailable');
-      const remainingDebts = await jadapter.enforceDebts(entityId, tokenId);
-      await jadapter.pollNow?.();
-      await xln.processJBlockEvents?.(activeEnv ?? null as never);
+      await xln.submitDebtEnforcement(activeEnv, entityId, tokenId);
       const tokenLabel = getTokenInfo(tokenId).symbol || `Token #${tokenId}`;
-      toasts.success(
-        remainingDebts > 0n
-          ? `Debt enforcement submitted for ${tokenLabel}. ${remainingDebts.toString()} queue entries still open.`
-          : `Debt enforcement submitted for ${tokenLabel}. Queue cleared.`,
-      );
+      toasts.success(`Debt enforcement submitted for ${tokenLabel}.`);
     } catch (err) {
       console.error('[EntityPanel] Enforce debt failed:', err);
       toasts.error(`Debt enforcement failed: ${(err as Error).message}`);
@@ -3671,7 +3655,7 @@
       if (!isFinalizedDisputed) continue;
       out.push({ counterpartyId: String(counterpartyId), status: 'disputed' });
     }
-    return out.sort((a, b) => a.counterpartyId.localeCompare(b.counterpartyId));
+    return out.sort((a, b) => compareText(a.counterpartyId, b.counterpartyId));
   })();
 
   $: netWorth = externalTotal + reservesTotal + accountsData.total;
@@ -3838,7 +3822,7 @@
     return rows.sort((a, b) => {
       if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
       if (a.height !== b.height) return b.height - a.height;
-      return a.accountLabel.localeCompare(b.accountLabel);
+      return compareText(a.accountLabel, b.accountLabel);
     });
   })();
 

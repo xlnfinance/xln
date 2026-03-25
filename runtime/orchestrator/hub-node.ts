@@ -18,6 +18,7 @@ import {
   RPC_MARKET_DEFAULT_DEPTH,
   RPC_MARKET_MAX_DEPTH,
 } from '../market-snapshot';
+import { toPublicRpcUrl } from '../loopback-url';
 import {
   getActiveJAdapter,
   getP2PState,
@@ -298,6 +299,7 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
   if (!jadapter.addresses?.depository || !jadapter.addresses?.entityProvider) {
     throw new Error('JURISDICTION_WRITE_ADDRESSES_MISSING');
   }
+  const publicRpcUrl = toPublicRpcUrl(rpcUrl);
   const updatedAt = new Date().toISOString();
   for (const filePath of resolveJurisdictionPaths()) {
     const parent = dirname(filePath);
@@ -312,7 +314,7 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
       ...previous,
       name: previous.name ?? 'Arrakis (Shared Anvil)',
       chainId: Number(jadapter.chainId || 31337),
-      rpc: rpcUrl,
+      rpc: publicRpcUrl,
       explorer: previous.explorer ?? '',
       currency: previous.currency ?? 'USD',
       status: previous.status ?? 'active',
@@ -400,7 +402,7 @@ const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
       arrakis: {
         name: String(replica.name || activeName || 'Arrakis (Shared Anvil)'),
         chainId: Number(replica.chainId || 31337),
-        rpc: String(replica.rpcs?.[0] || resolvedArgs.rpcUrl || '/rpc'),
+        rpc: toPublicRpcUrl(String(replica.rpcs?.[0] || resolvedArgs.rpcUrl || '/rpc')),
         contracts: {
           account: String(addresses.account || replica.contracts?.account || ''),
           depository,
@@ -540,6 +542,25 @@ const waitForJBatchClear = async (env: Env, timeoutMs = 5000): Promise<boolean> 
   while (Date.now() - started < timeoutMs) {
     const pendingJ = Array.from(env.jReplicas?.values?.() || []).some(j => (j.mempool?.length ?? 0) > 0);
     if (!pendingJ && !hasPendingRuntimeWork(env)) return true;
+    await sleep(pollMs);
+  }
+  return false;
+};
+
+const hasEntitySentBatchPending = (env: Env, entityId: string): boolean => {
+  const replica = getEntityReplicaById(env, entityId);
+  return Boolean(replica?.state?.jBatchState?.sentBatch);
+};
+
+const waitForEntityBroadcastWindow = async (
+  env: Env,
+  entityId: string,
+  timeoutMs = 10000,
+): Promise<boolean> => {
+  const started = Date.now();
+  const pollMs = resolveRuntimeWaitPollMs();
+  while (Date.now() - started < timeoutMs) {
+    if (!hasEntitySentBatchPending(env, entityId)) return true;
     await sleep(pollMs);
   }
   return false;
@@ -932,23 +953,45 @@ const run = async (): Promise<void> => {
           });
         }
 
-        enqueueRuntimeInput(env, {
-          runtimeTxs: [],
-          entityInputs: [{
-            entityId: bootstrap.entityId,
-            signerId: bootstrap.signerId,
-            entityTxs: [
-              {
-                type: 'reserve_to_reserve',
-                data: { toEntityId: userEntityId, tokenId, amount: amountWei },
-              },
-              { type: 'j_broadcast', data: {} },
-            ],
-          }],
-        });
+        const enqueueReserveTransfer = (): void => {
+          enqueueRuntimeInput(env, {
+            runtimeTxs: [],
+            entityInputs: [{
+              entityId: bootstrap.entityId,
+              signerId: bootstrap.signerId,
+              entityTxs: [
+                {
+                  type: 'reserve_to_reserve',
+                  data: { toEntityId: userEntityId, tokenId, amount: amountWei },
+                },
+              ],
+            }],
+          });
+        };
 
+        const enqueueBatchBroadcast = (): void => {
+          enqueueRuntimeInput(env, {
+            runtimeTxs: [],
+            entityInputs: [{
+              entityId: bootstrap.entityId,
+              signerId: bootstrap.signerId,
+              entityTxs: [{ type: 'j_broadcast', data: {} }],
+            }],
+          });
+        };
+
+        enqueueReserveTransfer();
         await waitForRuntimeIdle(env, 5000);
-        const batchCleared = await waitForJBatchClear(env, 5000);
+        const broadcastWindowReady = await waitForEntityBroadcastWindow(env, bootstrap.entityId, 10000);
+        if (!broadcastWindowReady) {
+          return new Response(JSON.stringify({ error: 'Hub sentBatch did not clear in time' }), {
+            status: 504,
+            headers,
+          });
+        }
+        enqueueBatchBroadcast();
+        await waitForRuntimeIdle(env, 5000);
+        const batchCleared = await waitForJBatchClear(env, 10000);
         if (!batchCleared) {
           return new Response(JSON.stringify({ error: 'J-batch did not broadcast in time' }), {
             status: 504,

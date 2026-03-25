@@ -51,18 +51,15 @@ contract Depository is ReentrancyGuardLite {
   // Immutable EntityProvider (set in constructor, gas-efficient static calls)
   address public immutable entityProvider;
 
-  // Multi-provider support (legacy - will be removed)
-  mapping(address => bool) public approvedEntityProviders;
-  address[] public entityProvidersList;
-  
   mapping (bytes32 => mapping (uint => uint)) public _reserves;
 
   mapping (bytes => AccountInfo) public _accounts;
   mapping (bytes => mapping(uint => AccountCollateral)) public _collaterals;
 
-  // Configurable dispute delays (block count) - lower for hubs, higher for end users
-  uint256 public defaultDisputeDelay = 20; // ~5 min at 15s blocks
-  mapping (bytes32 => uint256) public entityDisputeDelays; // per-entity override 
+  // Immutable dispute timeout policy.
+  // Delay selection is agreed off-chain and baked into the deployed jurisdiction,
+  // not tuned via mutable admin setters.
+  uint256 public constant defaultDisputeDelay = 5; // fixed dispute window policy
   
 
   mapping (bytes32 => mapping (uint => Debt[])) public _debts;
@@ -73,23 +70,14 @@ contract Depository is ReentrancyGuardLite {
 
 
   address public immutable admin;
-  bool public emergencyPause;
-
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
-  event EmergencyPauseToggled(bool isPaused);
 
   modifier onlyAdmin() {
     if (msg.sender != admin) revert E2();
     _;
   }
-
-  modifier whenNotPaused() {
-    if (emergencyPause) revert E2();
-    _;
-  }
-
 
   // EntityScore tracking removed for size reduction
   // Hub tracking removed for size reduction
@@ -144,84 +132,12 @@ contract Depository is ReentrancyGuardLite {
   // Efficient token lookup: packedToken -> internalTokenId
   mapping(bytes32 => uint256) public tokenToId;
 
-  // === MULTI-PROVIDER MANAGEMENT ===
-  
-  event EntityProviderAdded(address indexed provider);
-  event EntityProviderRemoved(address indexed provider);
-  
-  modifier onlyApprovedProvider(address provider) {
-    require(approvedEntityProviders[provider], "!provider");
-    _;
-  }
-  
-  /**
-   * @notice Add an EntityProvider to approved list
-   * @param provider EntityProvider contract address
-   */
-  function addEntityProvider(address provider) external onlyAdmin {
-    require(provider != address(0), "!addr");
-    require(!approvedEntityProviders[provider], "exists");
-    approvedEntityProviders[provider] = true;
-    entityProvidersList.push(provider);
-    emit EntityProviderAdded(provider);
-  }
-  
-  /**
-   * @notice Remove an EntityProvider from approved list  
-   * @param provider EntityProvider contract address
-   */
-  function removeEntityProvider(address provider) external onlyAdmin {
-    require(provider != address(0), "!addr");
-    require(approvedEntityProviders[provider], "!ok");
-    approvedEntityProviders[provider] = false;
-    
-    // Remove from list
-    for (uint i = 0; i < entityProvidersList.length; i++) {
-      if (entityProvidersList[i] == provider) {
-        entityProvidersList[i] = entityProvidersList[entityProvidersList.length - 1];
-        entityProvidersList.pop();
-        break;
-      }
-    }
-    emit EntityProviderRemoved(provider);
-  }
-  
-  /**
-   * @notice Get all approved EntityProviders
-   */
-  function getApprovedProviders() external view returns (address[] memory) {
-    return entityProvidersList;
-  }
-
   constructor(address _entityProvider) {
     require(_entityProvider != address(0), "EntityProvider cannot be zero address");
     entityProvider = _entityProvider;
-    approvedEntityProviders[_entityProvider] = true;
-    entityProvidersList.push(_entityProvider);
     admin = msg.sender;
     _tokens.push(TokenMetadata({ contractAddress: address(0), externalTokenId: 0, tokenType: TypeERC20 }));
   }
-
-  function setEmergencyPause(bool isPaused) external onlyAdmin {
-    if (emergencyPause == isPaused) {
-      return;
-    }
-    emergencyPause = isPaused;
-    emit EmergencyPauseToggled(isPaused);
-  }
-
-  /// @notice Set dispute delay for an entity (0 = use default)
-  /// @dev Hubs get shorter delays, end users get longer delays
-  function setEntityDisputeDelay(bytes32 entity, uint256 delayBlocks) external onlyAdmin {
-    entityDisputeDelays[entity] = delayBlocks;
-  }
-
-  /// @notice Set default dispute delay for entities without custom setting
-  function setDefaultDisputeDelay(uint256 delayBlocks) external onlyAdmin {
-    require(delayBlocks > 0, "!delay");
-    defaultDisputeDelay = delayBlocks;
-  }
-
 
   function getTokensLength() public view returns (uint) {
     return _tokens.length;
@@ -241,7 +157,7 @@ contract Depository is ReentrancyGuardLite {
   // === HANKO INTEGRATION ===
 
   /// @notice Sequential nonce for each entity authorising batches via Hanko.
-  mapping(address => uint256) public entityNonces;
+  mapping(bytes32 => uint256) public entityNonces;
 
   /// @notice Domain separator used when hashing Hanko payloads for verification.
   bytes32 public constant DOMAIN_SEPARATOR = keccak256("XLN_DEPOSITORY_HANKO_V1");
@@ -250,17 +166,20 @@ contract Depository is ReentrancyGuardLite {
 
   /// @notice Process a batch authorized by entity Hanko.
   /// @dev This is the canonical production write path.
+  ///      Depository is bound to a single immutable EntityProvider at deploy time.
   function processBatch(
     bytes calldata encodedBatch,
-    address entityProviderAddr,
     bytes calldata hankoData,
     uint256 nonce
-  ) external whenNotPaused nonReentrant onlyApprovedProvider(entityProviderAddr) returns (bool completeSuccess) {
-    (bytes32 entityId, bool hankoValid) = EntityProvider(entityProviderAddr).verifyHankoSignature(hankoData, Account.computeBatchHankoHash(DOMAIN_SEPARATOR, block.chainid, address(this), encodedBatch, nonce));
+  ) external nonReentrant returns (bool completeSuccess) {
+    (bytes32 entityId, bool hankoValid) =
+      EntityProvider(entityProvider).verifyHankoSignature(
+        hankoData,
+        Account.computeBatchHankoHash(DOMAIN_SEPARATOR, block.chainid, address(this), encodedBatch, nonce)
+      );
     if (!hankoValid || entityId == bytes32(0)) revert E4();
-    address ea = address(uint160(uint256(entityId)));
-    if (nonce != entityNonces[ea] + 1) revert E2();
-    entityNonces[ea] = nonce;
+    if (nonce != entityNonces[entityId] + 1) revert E2();
+    entityNonces[entityId] = nonce;
     completeSuccess = _processBatch(entityId, abi.decode(encodedBatch, (Batch)));
     emit HankoBatchProcessed(entityId, keccak256(hankoData), nonce, completeSuccess);
   }
@@ -388,7 +307,7 @@ contract Depository is ReentrancyGuardLite {
 
     // Delegate settlement diffs to Account library, handle debt forgiveness in Depository
     if (batch.settlements.length > 0) {
-      if (!Account.processSettlements(_reserves, _accounts, _collaterals, entityId, batch.settlements)) {
+      if (!Account.processSettlements(_reserves, _accounts, _collaterals, entityId, batch.settlements, entityProvider)) {
         completeSuccess = false;
       }
       // Handle debt forgiveness (not in Account due to stack limits)
@@ -403,7 +322,7 @@ contract Depository is ReentrancyGuardLite {
     }
 
     if (batch.disputeStarts.length > 0) {
-      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, _disputeDelayFor(entityId), entityProvider)) {
+      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, entityProvider)) {
         completeSuccess = false;
       }
     }
@@ -424,7 +343,7 @@ contract Depository is ReentrancyGuardLite {
     }
 
     for (uint i = 0; i < batch.reserveToCollateral.length; i++) {
-      if(!(reserveToCollateral(entityId, batch.reserveToCollateral[i]))){
+      if(!(_reserveToCollateral(entityId, batch.reserveToCollateral[i]))){
         completeSuccess = false;
       }
     }
@@ -432,7 +351,7 @@ contract Depository is ReentrancyGuardLite {
     // Process external token withdrawals (decreases reserves)
     // Security: batch initiator can only withdraw from their own reserves
     for (uint i = 0; i < batch.reserveToExternalToken.length; i++) {
-      reserveToExternalToken(entityId, batch.reserveToExternalToken[i]);
+      _reserveToExternalToken(entityId, batch.reserveToExternalToken[i]);
     }
 
     // SECURITY FIX: Check aggregated flashloan return + burn
@@ -477,61 +396,11 @@ contract Depository is ReentrancyGuardLite {
     emit DebtCreated(debtor, creditor, tokenId, amount, index);
   }
 
-  function _afterDebtCleared(bytes32 entity, bool) internal {
+  function _afterDebtCleared(bytes32 entity) internal {
     if (_activeDebts[entity] > 0) {
       unchecked {
         _activeDebts[entity]--;
       }
-    }
-  }
-
-
-  function _clearDebtAtIndex(bytes32 entity, uint256 tokenId, uint256 index, bool isRepayment) internal returns (uint256 amountCleared, bytes32 creditor) {
-    Debt storage debt = _debts[entity][tokenId][index];
-    amountCleared = debt.amount;
-    creditor = debt.creditor;
-
-    if (amountCleared > 0) {
-      _afterDebtCleared(entity, isRepayment);
-    }
-
-    delete _debts[entity][tokenId][index];
-  }
-
-  function _countRemainingDebts(Debt[] storage queue, uint256 cursor) internal view returns (uint256 count) {
-    uint256 length = queue.length;
-    if (cursor >= length) {
-      return 0;
-    }
-    for (uint256 i = cursor; i < length; i++) {
-      if (queue[i].amount > 0) {
-        count++;
-      }
-    }
-  }
-
-  function _syncDebtIndex(bytes32 entity, uint256 tokenId) internal {
-    Debt[] storage queue = _debts[entity][tokenId];
-    uint256 length = queue.length;
-    if (length == 0) {
-      _debtIndex[entity][tokenId] = 0;
-      return;
-    }
-
-    uint256 cursor = _debtIndex[entity][tokenId];
-    if (cursor >= length) {
-      cursor = 0;
-    }
-
-    while (cursor < length && queue[cursor].amount == 0) {
-      cursor++;
-    }
-
-    if (cursor >= length) {
-      _debtIndex[entity][tokenId] = 0;
-      delete _debts[entity][tokenId];
-    } else {
-      _debtIndex[entity][tokenId] = cursor;
     }
   }
 
@@ -592,20 +461,16 @@ contract Depository is ReentrancyGuardLite {
       IERC1155(params.contractAddress).safeTransferFrom(msg.sender, address(this), uint(params.externalTokenId), params.amount, "");
     }
 
-    _reserves[targetEntity][params.internalTokenId] += params.amount;
-    emit ReserveUpdated(targetEntity, params.internalTokenId, _reserves[targetEntity][params.internalTokenId]);
+    _increaseReserve(targetEntity, params.internalTokenId, params.amount);
   }
 
 
   // ReserveToExternalToken struct is in Types.sol
-  function reserveToExternalToken(bytes32 entity, ReserveToExternalToken memory params) internal {
-    enforceDebts(entity, params.tokenId);
+  function _reserveToExternalToken(bytes32 entity, ReserveToExternalToken memory params) internal {
+    enforceDebts(entity, params.tokenId, 0);
 
     TokenMetadata memory meta = _tokens[params.tokenId];
-    if (_reserves[entity][params.tokenId] < params.amount) revert E3();
-
-    _reserves[entity][params.tokenId] -= params.amount;
-    emit ReserveUpdated(entity, params.tokenId, _reserves[entity][params.tokenId]);
+    _decreaseReserve(entity, params.tokenId, params.amount);
 
     if (meta.tokenType == TypeERC20) {
       if (!IERC20(meta.contractAddress).transfer(address(uint160(uint256(params.receivingEntity))), params.amount)) revert E3();
@@ -629,7 +494,7 @@ contract Depository is ReentrancyGuardLite {
     
     
 
-    enforceDebts(entity, params.tokenId);
+    enforceDebts(entity, params.tokenId, 0);
 
     
     if (_reserves[entity][params.tokenId] >= params.amount) {
@@ -645,18 +510,14 @@ contract Depository is ReentrancyGuardLite {
     if (_reserves[entity][params.tokenId] < params.amount) revert E3();
     
     
-    _reserves[entity][params.tokenId] -= params.amount;
-    _reserves[params.receivingEntity][params.tokenId] += params.amount;
+    _decreaseReserve(entity, params.tokenId, params.amount);
+    _increaseReserve(params.receivingEntity, params.tokenId, params.amount);
     
     
     
     
     
     
-    
-    // Single canonical event per entity whose reserve changed
-    emit ReserveUpdated(entity, params.tokenId, _reserves[entity][params.tokenId]);
-    emit ReserveUpdated(params.receivingEntity, params.tokenId, _reserves[params.receivingEntity][params.tokenId]);
     
   }
 
@@ -668,28 +529,14 @@ contract Depository is ReentrancyGuardLite {
   
   // getDebts moved to DepositoryView.sol
 
-  // FIFO debt enforcement - enforces chronological payment order
-  // SECURITY: Fixed iteration limit prevents DoS via debt spam
-  // If entity has >100 debts, call multiple times or use enforceDebtsLarge()
-  function enforceDebts(bytes32 entity, uint tokenId) public returns (uint256) {
-    return _enforceDebts(entity, tokenId, 100); // Max 100 iterations per call
-  }
-
-  // For entities with large debt queues (admin or entity itself can call)
-  function enforceDebtsLarge(bytes32 entity, uint tokenId) public returns (uint256) {
-    require(
-      msg.sender == address(uint160(uint256(entity))) || msg.sender == admin,
-      "Only entity or admin can use large batch"
-    );
-    return _enforceDebts(entity, tokenId, 1000); // Max 1000 for authorized callers
-  }
-
-  function _enforceDebts(bytes32 entity, uint256 tokenId, uint256 maxIterations) internal returns (uint256 totalDebts) {
+  // FIFO debt enforcement - enforces chronological payment order.
+  // `maxIterations == 0` means "drain as much as current reserve allows".
+  function enforceDebts(bytes32 entity, uint256 tokenId, uint256 maxIterations) public {
     Debt[] storage queue = _debts[entity][tokenId];
     uint256 length = queue.length;
     if (length == 0) {
       _debtIndex[entity][tokenId] = 0;
-      return 0;
+      return;
     }
 
     uint256 cursor = _debtIndex[entity][tokenId];
@@ -703,14 +550,7 @@ contract Depository is ReentrancyGuardLite {
 
     if (available == 0) {
       _debtIndex[entity][tokenId] = cursor;
-      _syncDebtIndex(entity, tokenId);
-
-      Debt[] storage untouchedQueue = _debts[entity][tokenId];
-      if (untouchedQueue.length == 0) {
-        return 0;
-      }
-
-      return _countRemainingDebts(untouchedQueue, _debtIndex[entity][tokenId]);
+      return;
     }
 
     while (cursor < length && available > 0 && iterations < iterationCap) {
@@ -726,7 +566,7 @@ contract Depository is ReentrancyGuardLite {
 
       // Pay from reserves first
       if (payableAmount > 0) {
-        _reserves[creditor][tokenId] += payableAmount;
+        _increaseReserve(creditor, tokenId, payableAmount);
         available -= payableAmount;
         amount -= payableAmount;
       }
@@ -737,7 +577,7 @@ contract Depository is ReentrancyGuardLite {
       if (amount == 0) {
         debt.amount = 0;
         emit DebtEnforced(entity, creditor, tokenId, totalPaid, 0, cursor + 1);
-        _afterDebtCleared(entity, true);
+        _afterDebtCleared(entity);
         delete queue[cursor];
         cursor++;
       } else {
@@ -749,15 +589,22 @@ contract Depository is ReentrancyGuardLite {
     }
 
     _reserves[entity][tokenId] = available;
-    _debtIndex[entity][tokenId] = cursor;
-    _syncDebtIndex(entity, tokenId);
-
-    Debt[] storage refreshedQueue = _debts[entity][tokenId];
-    if (refreshedQueue.length == 0) {
-      return 0;
+    if (cursor >= length) {
+      _debtIndex[entity][tokenId] = 0;
+      delete _debts[entity][tokenId];
+      return;
     }
 
-    return _countRemainingDebts(refreshedQueue, _debtIndex[entity][tokenId]);
+    while (cursor < length && queue[cursor].amount == 0) {
+      cursor++;
+    }
+
+    if (cursor >= length) {
+      _debtIndex[entity][tokenId] = 0;
+      delete _debts[entity][tokenId];
+    } else {
+      _debtIndex[entity][tokenId] = cursor;
+    }
   }
 
 
@@ -766,26 +613,12 @@ contract Depository is ReentrancyGuardLite {
     return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
   }
 
-  // DEBUG: Compute settlement hash for comparison with TypeScript
-  function computeSettlementHash(
-    bytes32 leftEntity,
-    bytes32 rightEntity,
-    SettlementDiff[] memory diffs,
-    uint[] memory forgiveDebtsInTokenIds
-  ) public view returns (bytes32 hash, uint256 nonce, uint256 encodedMsgLength) {
-    bytes memory acct_key = accountKey(leftEntity, rightEntity);
-    nonce = _accounts[acct_key].nonce + 1;
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), acct_key, nonce, diffs, forgiveDebtsInTokenIds);
-    hash = keccak256(encoded_msg);
-    encodedMsgLength = encoded_msg.length;
-  }
-
-  function reserveToCollateral(bytes32 entity, ReserveToCollateral memory params) internal returns (bool completeSuccess) {
+  function _reserveToCollateral(bytes32 entity, ReserveToCollateral memory params) internal returns (bool completeSuccess) {
     uint tokenId = params.tokenId;
     bytes32 receivingEntity = params.receivingEntity;
    
     // debts must be paid before any transfers from reserve 
-    enforceDebts(entity, tokenId);
+    enforceDebts(entity, tokenId, 0);
 
     for (uint i = 0; i < params.pairs.length; i++) {
       bytes32 counterentity = params.pairs[i].entity;
@@ -843,15 +676,28 @@ contract Depository is ReentrancyGuardLite {
     uint256 idx = _debtIndex[debtor][tokenId];
     Debt[] storage queue = _debts[debtor][tokenId];
     uint256 len = queue.length;
+    uint256 nextLive = type(uint256).max;
     for (uint256 j = idx; j < len; j++) {
-      if (queue[j].creditor == creditor && queue[j].amount > 0) {
-        uint256 amt = queue[j].amount;
+      uint256 amount = queue[j].amount;
+      if (amount == 0) {
+        continue;
+      }
+      if (queue[j].creditor == creditor) {
         queue[j].amount = 0;
-        if (_activeDebts[debtor] > 0) _activeDebts[debtor]--;
-        emit DebtForgiven(debtor, creditor, tokenId, amt, j);
+        _afterDebtCleared(debtor);
+        emit DebtForgiven(debtor, creditor, tokenId, amount, j);
+      } else if (nextLive == type(uint256).max) {
+        nextLive = j;
       }
     }
-    _syncDebtIndex(debtor, tokenId);
+    if (idx < len && queue[idx].amount == 0) {
+      if (nextLive == type(uint256).max) {
+        _debtIndex[debtor][tokenId] = 0;
+        delete _debts[debtor][tokenId];
+      } else {
+        _debtIndex[debtor][tokenId] = nextLive;
+      }
+    }
   }
 
   function _increaseReserve(bytes32 entity, uint256 tokenId, uint256 amount) internal {
@@ -860,9 +706,11 @@ contract Depository is ReentrancyGuardLite {
     emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
   }
 
-  function _disputeDelayFor(bytes32 entityId) internal view returns (uint256) {
-    uint256 perEntity = entityDisputeDelays[entityId];
-    return perEntity == 0 ? defaultDisputeDelay : perEntity;
+  function _decreaseReserve(bytes32 entity, uint256 tokenId, uint256 amount) internal {
+    if (amount == 0) return;
+    if (_reserves[entity][tokenId] < amount) revert E3();
+    _reserves[entity][tokenId] -= amount;
+    emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
   }
 
   /// @notice Internal dispute finalize with full storage access
@@ -949,6 +797,9 @@ contract Depository is ReentrancyGuardLite {
     int[] memory deltas = new int[](tokenCount);
     for (uint256 i = 0; i < tokenCount; i++) {
       uint256 tokenId = proofbody.tokenIds[i];
+      for (uint256 j = 0; j < i; j++) {
+        if (proofbody.tokenIds[j] == tokenId) revert E8();
+      }
       deltas[i] = _collaterals[acct_key][tokenId].ondelta + proofbody.offdeltas[i];
     }
 
@@ -970,6 +821,7 @@ contract Depository is ReentrancyGuardLite {
 
       for (uint256 j = 0; j < tc.allowances.length; j++) {
         Allowance memory allow = tc.allowances[j];
+        if (allow.deltaIndex >= deltas.length) revert E2();
         int diff = newDeltas[allow.deltaIndex] - deltas[allow.deltaIndex];
         if (diff > 0 && uint256(diff) > allow.leftAllowance) revert E2();
         if (diff < 0 && uint256(-diff) > allow.rightAllowance) revert E2();
@@ -1024,15 +876,13 @@ contract Depository is ReentrancyGuardLite {
     uint256 available = _reserves[debtor][tokenId];
     uint256 payAmount = available >= amount ? amount : available;
     if (payAmount > 0) {
-      _reserves[debtor][tokenId] -= payAmount;
-      emit ReserveUpdated(debtor, tokenId, _reserves[debtor][tokenId]);
+      _decreaseReserve(debtor, tokenId, payAmount);
       _increaseReserve(creditor, tokenId, payAmount);
     }
 
     uint256 remaining = amount - payAmount;
     if (remaining > 0) {
       _addDebt(debtor, tokenId, creditor, remaining);
-      _syncDebtIndex(debtor, tokenId);
     }
   }
 

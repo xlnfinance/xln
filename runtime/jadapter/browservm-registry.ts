@@ -1,4 +1,5 @@
 import type { Env, JurisdictionConfig } from '../types';
+import { requireUsableContractAddress } from '../contract-address';
 import type { BrowserVMProvider } from './types';
 
 let registeredBrowserVMJurisdiction: JurisdictionConfig | null = null;
@@ -32,13 +33,13 @@ export const setBrowserVMJurisdiction = (
     (env as Env & { browserVM?: BrowserVMProvider | null }).browserVM = browserVM;
   }
 
-  const entityProviderAddress =
-    browserVM?.getEntityProviderAddress?.() ||
-    env?.browserVM?.getEntityProviderAddress?.() ||
-    '0x0000000000000000000000000000000000000000';
+  const entityProviderAddress = requireUsableContractAddress(
+    'entity_provider',
+    browserVM?.getEntityProviderAddress?.() || env?.browserVM?.getEntityProviderAddress?.(),
+  );
 
   registeredBrowserVMJurisdiction = buildBrowserVMJurisdiction(
-    depositoryAddress,
+    requireUsableContractAddress('depository', depositoryAddress),
     entityProviderAddress,
   );
 };

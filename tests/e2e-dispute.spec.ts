@@ -648,9 +648,12 @@ async function selectEntityInputValue(
     const selectedIds = await selector.locator('.dropdown-item.selected .item-id').allTextContents().catch(() => []);
     if (selectedIds.some((value) => String(value || '').trim().toLowerCase() === target)) return true;
     const closedTrigger = selector.locator('.closed-trigger').first();
-    if (!(await closedTrigger.isVisible().catch(() => false))) return false;
-    const text = String(await closedTrigger.textContent().catch(() => '')).toLowerCase();
-    return text.includes(targetProbe);
+    if (await closedTrigger.isVisible().catch(() => false)) {
+      const text = String(await closedTrigger.textContent().catch(() => '')).toLowerCase();
+      if (text.includes(targetProbe)) return true;
+    }
+    const selectorText = String(await selector.textContent().catch(() => '')).toLowerCase();
+    return selectorText.includes(targetProbe);
   };
 
   if (await hasTargetSelection()) return;

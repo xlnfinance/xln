@@ -56,8 +56,6 @@ import {
   debugFundReserves,
   getEntityInfoFromChain,
   getJurisdictionByAddress,
-  getNextEntityNumber,
-  registerNumberedEntityOnChain,
   setBrowserVMJurisdiction,
   submitProcessBatch,
   transferNameBetweenEntities,
@@ -2487,7 +2485,11 @@ const applyRuntimeInput = async (
         outputs: entityOutbox.length,
       });
 
-      // Update env (mutable)
+      // Update env in-place first.
+      // This is intentional blockchain-style execution semantics: we execute the
+      // next frame against one mutable working state, then persist the resulting
+      // post-state as the committed frame below. That is simpler and safer than
+      // trying to keep a separate pre-commit shadow env in lockstep.
       env.height++;
       // IMPORTANT: Do NOT mutate env.timestamp here.
       // process() sets a single frame timestamp before applyRuntimeInput(),
@@ -2792,15 +2794,12 @@ export {
   getEntityInfoFromChain,
   getHistory,
   getJurisdictionByAddress,
-  getNextEntityNumber,
   getSignerDisplayInfo,
   getSnapshot,
   hashBoard,
   isEntityRegistered,
   main,
   resolveEntityProposerId,
-  // Blockchain registration functions
-  registerNumberedEntityOnChain,
   requestNamedEntity,
   resolveEntityIdentifier,
   resolveEntityName,
@@ -3264,7 +3263,9 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
           }
         }
       } catch (error) {
-        // Restore runtime mempool on failure (WAL safety)
+        // Failed apply never becomes durable. We restore ingress back to the
+        // mempool and abort this tick; only saveEnvToDB() below makes a frame
+        // restartable / committed.
         mempool.runtimeTxs = [...runtimeInput.runtimeTxs, ...mempool.runtimeTxs];
         mempool.entityInputs = [...runtimeInput.entityInputs, ...mempool.entityInputs];
         if (runtimeInput.jInputs) {
@@ -3322,6 +3323,9 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       });
 
       if (!env.history) env.history = [];
+      // History is a local/debug timeline, not the durable source of truth.
+      // If the process crashes before WAL save, this in-memory tail is expected
+      // to disappear; replay always trusts persisted frames, not env.history.
       env.history.push(snapshot as any);
 
       if (!quietRuntimeLogs) {
@@ -3334,6 +3338,15 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     // Persist only when a new runtime frame was actually applied.
     // Side-effect-only ticks (e.g. deferred network retries) must never
     // overwrite WAL entries for the current height.
+    //
+    // Why this ordering exists:
+    // 1. applyRuntimeInput() computes the post-state for frame N in memory
+    // 2. saveEnvToDB() makes frame N durable / replayable
+    // 3. only after that do we treat downstream effects as safe to emit
+    //
+    // That keeps execution, hashing, and recovery aligned around one exact
+    // post-state. A crash before save loses only the uncommitted in-memory
+    // tail, just like a block that executed locally but was never committed.
     if (frameAdvanced) {
       if (!quietRuntimeLogs) {
         console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
@@ -3427,17 +3440,6 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
               console.log(
                 `✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`,
               );
-              if (typeof jAdapter.pollNow === 'function') {
-                try {
-                  await jAdapter.pollNow();
-                  console.log(`🔄 [J-SUBMIT] pollNow synced ${jInput.jurisdictionName} after ${jTx.type}`);
-                } catch (pollError) {
-                  console.warn(
-                    `⚠️ [J-SUBMIT] pollNow failed after ${jTx.type} from ${jTx.entityId.slice(-4)}:`,
-                    pollError instanceof Error ? pollError.message : String(pollError),
-                  );
-                }
-              }
             } else {
               console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
               if (!env.scenarioMode) {
@@ -3776,6 +3778,36 @@ export function getActiveJAdapter(env: Env): JAdapter | null {
   if (!env.activeJurisdiction) return null;
   const jReplica = env.jReplicas?.get(env.activeJurisdiction);
   return jReplica?.jadapter || null;
+}
+
+export async function submitExternalTokenToReserve(
+  env: Env,
+  signerId: string,
+  entityId: string,
+  tokenAddress: string,
+  amount: bigint,
+): Promise<void> {
+  const jAdapter = getActiveJAdapter(env);
+  if (!jAdapter) {
+    throw new Error('ACTIVE_JADAPTER_UNAVAILABLE');
+  }
+  const privateKey = getCachedSignerPrivateKey(signerId);
+  if (!privateKey) {
+    throw new Error(`MISSING_SIGNER_KEY:${signerId}`);
+  }
+  await jAdapter.externalTokenToReserve(privateKey, entityId, tokenAddress, amount);
+}
+
+export async function submitDebtEnforcement(
+  env: Env,
+  entityId: string,
+  tokenId: number,
+): Promise<void> {
+  const jAdapter = getActiveJAdapter(env);
+  if (!jAdapter) {
+    throw new Error('ACTIVE_JADAPTER_UNAVAILABLE');
+  }
+  await jAdapter.enforceDebts(entityId, tokenId);
 }
 
 export { setDeltaTransformerAddress } from './proof-builder';

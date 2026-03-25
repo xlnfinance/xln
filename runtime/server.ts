@@ -40,6 +40,7 @@ import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
 import { hashHtlcSecret } from './htlc-utils';
+import { isLoopbackUrl, toPublicRpcUrl } from './loopback-url';
 import {
   type RelayStore,
   createRelayStore,
@@ -309,6 +310,25 @@ const waitForJBatchClear = async (env: Env, timeoutMs = 5000): Promise<boolean> 
   while (Date.now() - started < timeoutMs) {
     const pendingJ = Array.from(env.jReplicas?.values?.() || []).some(j => (j.mempool?.length ?? 0) > 0);
     if (!pendingJ && !hasPendingRuntimeWork(env)) return true;
+    await new Promise(resolve => setTimeout(resolve, pollMs));
+  }
+  return false;
+};
+
+const hasEntitySentBatchPending = (env: Env, entityId: string): boolean => {
+  const replica = getEntityReplicaById(env, entityId);
+  return Boolean(replica?.state?.jBatchState?.sentBatch);
+};
+
+const waitForEntityBroadcastWindow = async (
+  env: Env,
+  entityId: string,
+  timeoutMs = 10000,
+): Promise<boolean> => {
+  const started = Date.now();
+  const pollMs = resolveRuntimeWaitPollMs();
+  while (Date.now() - started < timeoutMs) {
+    if (!hasEntitySentBatchPending(env, entityId)) return true;
     await new Promise(resolve => setTimeout(resolve, pollMs));
   }
   return false;
@@ -1981,7 +2001,7 @@ const updateJurisdictionsJson = async (
     const fs = await import('fs/promises');
     const path = await import('path');
     const canonicalPath = resolveJurisdictionsJsonPath();
-    const publicRpc = process.env.PUBLIC_RPC ?? rpcUrl ?? '/rpc';
+    const publicRpc = toPublicRpcUrl(String(process.env.PUBLIC_RPC || rpcUrl || '/rpc'));
     await fs.mkdir(path.dirname(canonicalPath), { recursive: true });
 
     let data: any = {};
@@ -2083,7 +2103,7 @@ const buildRuntimeJurisdictionsJson = (env?: Env | null): string | null => {
       arrakis: {
         name: String(replica.name || jurisdictionName || 'Testnet'),
         chainId: Number(replica.chainId || 31337),
-        rpc: String(process.env.PUBLIC_RPC || replica.rpcs?.[0] || '/rpc'),
+        rpc: toPublicRpcUrl(String(process.env.PUBLIC_RPC || replica.rpcs?.[0] || '/rpc')),
         contracts: {
           account: String(addresses.account || replica.contracts?.account || ''),
           depository,
@@ -3600,7 +3620,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     const explicitUpstream = process.env.RPC_UPSTREAM_URL || process.env.PUBLIC_RPC_URL || process.env.ANVIL_RPC;
     const jMachineRpc = env?.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction)?.rpcUrl : undefined;
     const upstream = explicitUpstream || jMachineRpc || '';
-    const isLocal = upstream.includes('localhost') || upstream.includes('127.0.0.1') || upstream.includes('0.0.0.0');
+    const isLocal = isLoopbackUrl(upstream);
 
     if (!upstream) {
       pushDebugEvent(relayStore, {
@@ -4343,31 +4363,42 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         );
       }
 
-      // Use entity txs (R2R + j_broadcast) instead of direct admin call.
-      // Single-writer invariant: enqueue only; runtime loop applies.
-      enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [
-          {
-            entityId: hubEntityId,
-            signerId: hubSignerId,
-            entityTxs: [
-              {
-                type: 'reserve_to_reserve',
-                data: {
-                  toEntityId: userEntityId,
-                  tokenId,
-                  amount: amountWei,
+      const enqueueReserveTransfer = (): void => {
+        enqueueRuntimeInput(env, {
+          runtimeTxs: [],
+          entityInputs: [
+            {
+              entityId: hubEntityId,
+              signerId: hubSignerId,
+              entityTxs: [
+                {
+                  type: 'reserve_to_reserve',
+                  data: {
+                    toEntityId: userEntityId,
+                    tokenId,
+                    amount: amountWei,
+                  },
                 },
-              },
-              {
-                type: 'j_broadcast',
-                data: {},
-              },
-            ],
-          },
-        ],
-      });
+              ],
+            },
+          ],
+        });
+      };
+
+      const enqueueBatchBroadcast = (): void => {
+        enqueueRuntimeInput(env, {
+          runtimeTxs: [],
+          entityInputs: [
+            {
+              entityId: hubEntityId,
+              signerId: hubSignerId,
+              entityTxs: [{ type: 'j_broadcast', data: {} }],
+            },
+          ],
+        });
+      };
+
+      enqueueReserveTransfer();
       // Log hub jBatchState summary after queuing
       hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
       hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
@@ -4386,7 +4417,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           }
         }
       }
-      console.log(`[${logPrefix}] R2R + j_broadcast queued (waiting for J-event sync)`);
+      console.log(`[${logPrefix}] R2R queued (waiting for broadcast window)`);
       const runtimeIdleStartedAt = Date.now();
       const runtimeIdle = await waitForRuntimeIdle(env, 5000);
       const runtimeIdleMs = Date.now() - runtimeIdleStartedAt;
@@ -4396,8 +4427,32 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         );
       }
 
+      const broadcastWindowStartedAt = Date.now();
+      const broadcastWindowReady = await waitForEntityBroadcastWindow(env, hubEntityId, 10000);
+      const broadcastWindowMs = Date.now() - broadcastWindowStartedAt;
+      if (!broadcastWindowReady) {
+        faucetLock.release();
+        return new Response(
+          JSON.stringify({
+            error: 'Hub sentBatch did not clear in time',
+            requestId,
+          }),
+          { status: 504, headers },
+        );
+      }
+
+      enqueueBatchBroadcast();
+      const broadcastIdleStartedAt = Date.now();
+      const broadcastIdle = await waitForRuntimeIdle(env, 5000);
+      const broadcastIdleMs = Date.now() - broadcastIdleStartedAt;
+      if (!broadcastIdle) {
+        console.warn(
+          `[${logPrefix}] runtime idle after broadcast timed out after ${broadcastIdleMs}ms (poll=${resolveRuntimeWaitPollMs()}ms)`,
+        );
+      }
+
       const jBatchClearStartedAt = Date.now();
-      const jBatchCleared = await waitForJBatchClear(env, 5000);
+      const jBatchCleared = await waitForJBatchClear(env, 10000);
       const jBatchClearMs = Date.now() - jBatchClearStartedAt;
       if (!jBatchCleared) {
         faucetLock.release();
@@ -4426,7 +4481,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }
       const totalMs = Date.now() - requestStartedAt;
       console.log(
-        `[${logPrefix}] timings ms(runtimeIdle=${formatTimingMs(runtimeIdleMs)},jBatchClear=${formatTimingMs(jBatchClearMs)},reserve=${formatTimingMs(reserveWaitMs)},total=${formatTimingMs(totalMs)}) ` +
+        `[${logPrefix}] timings ms(runtimeIdle=${formatTimingMs(runtimeIdleMs)},broadcastWindow=${formatTimingMs(broadcastWindowMs)},broadcastIdle=${formatTimingMs(broadcastIdleMs)},jBatchClear=${formatTimingMs(jBatchClearMs)},reserve=${formatTimingMs(reserveWaitMs)},total=${formatTimingMs(totalMs)}) ` +
           `polls(runtime=${resolveRuntimeWaitPollMs()}ms,reserve=${resolveReserveWaitPollMs()}ms) prevReserve=${prevUserReserve.toString()} updatedReserve=${updatedReserve.toString()}`,
       );
 

@@ -10,6 +10,7 @@
  */
 
 import type { JurisdictionConfig } from './types';
+import { isUsableContractAddress } from './contract-address';
 import { loadJurisdictions } from './jurisdiction-loader';
 import { parseRebalancePolicyUsd } from './rebalance-policy-usd';
 import { isBrowser } from './utils';
@@ -95,20 +96,30 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
         rpcUrl = `${window.location.origin}${rpcUrl}`;
       } else if (isBrowser && rpcUrl?.startsWith(':')) {
         const port = parseInt(rpcUrl.slice(1));
-        const isLocalhost = window.location.hostname.match(/localhost|127\.0\.0\.1/);
-        const actualPort = isLocalhost ? port : port + 10000;
-        rpcUrl = `${window.location.protocol}//${window.location.hostname}:${actualPort}`;
+        const isLocalhost = window.location.hostname === 'localhost';
+        if (isLocalhost) {
+          rpcUrl = new URL('/rpc', window.location.origin).toString();
+        } else {
+          const actualPort = port + 10000;
+          rpcUrl = `${window.location.protocol}//${window.location.hostname}:${actualPort}`;
+        }
       } else if (!isBrowser && rpcUrl?.startsWith(':')) {
         rpcUrl = `http://localhost${rpcUrl}`;
       }
 
       const rebalancePolicyUsd = parseRebalancePolicyUsd(jData['rebalancePolicyUsd']) ?? globalRebalancePolicyUsd;
+      const entityProviderAddress = contracts?.['entityProvider'];
+      const depositoryAddress = contracts?.['depository'];
+      if (!isUsableContractAddress(entityProviderAddress) || !isUsableContractAddress(depositoryAddress)) {
+        continue;
+      }
+
       jurisdictions.set(key, {
         name: jData['name'] as string,
         chainId: jData['chainId'] as number,
         address: rpcUrl,
-        entityProviderAddress: contracts?.['entityProvider'] ?? '',
-        depositoryAddress: contracts?.['depository'] ?? '',
+        entityProviderAddress,
+        depositoryAddress,
         ...(rebalancePolicyUsd ? { rebalancePolicyUsd } : {}),
       });
     }

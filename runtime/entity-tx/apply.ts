@@ -1,4 +1,5 @@
 import { calculateQuorumPower } from '../entity-consensus';
+import { requireUsableContractAddress } from '../contract-address';
 import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
 import { normalizeEntityName } from '../networking/gossip';
@@ -1277,6 +1278,10 @@ export const applyEntityTx = async (
       if (!newState.jBatchState) {
         newState.jBatchState = initJBatch();
       }
+      const entityProviderAddress = requireUsableContractAddress(
+        'entity_provider',
+        jurisdiction.entityProviderAddress,
+      );
       batchAddSettlement(
         newState.jBatchState,
         leftEntity,
@@ -1285,7 +1290,7 @@ export const applyEntityTx = async (
         [],
         [],
         sig,
-        jurisdiction.entityProviderAddress ?? '0x0000000000000000000000000000000000000000',
+        entityProviderAddress,
         '0x',
         0,
         entityState.entityId,
