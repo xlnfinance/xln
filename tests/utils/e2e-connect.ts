@@ -277,11 +277,11 @@ async function selectConfigureAccount(page: Page, hubId: string): Promise<void> 
   await input.fill(hubId);
   const option = page.getByTestId(optionTestId).first();
   if (await option.isVisible().catch(() => false)) {
-    await option.click();
+    await option.dispatchEvent('mousedown');
   } else {
     const fallbackOption = page.locator('.dropdown-item').filter({ hasText: hubId }).first();
     await expect(fallbackOption).toBeVisible({ timeout: 20_000 });
-    await fallbackOption.click();
+    await fallbackOption.dispatchEvent('mousedown');
   }
   await expect(selector.locator('.closed-trigger').first()).toContainText(hubId.slice(0, 10), { timeout: 20_000 });
 }

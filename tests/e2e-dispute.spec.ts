@@ -681,7 +681,7 @@ async function selectEntityInputValue(
     await input.fill(entityId);
 
     if (await option.isVisible().catch(() => false)) {
-      await option.click({ force: true });
+      await option.dispatchEvent('mousedown');
     } else {
       await input.press('Enter');
     }

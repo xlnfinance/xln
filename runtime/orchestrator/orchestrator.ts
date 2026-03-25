@@ -1058,6 +1058,54 @@ const computeAggregatedHealth = (): AggregatedHealth => {
   };
 };
 
+const buildPublicHubDiscoveryPayload = (): {
+  ok: true;
+  count: number;
+  serverTime: number;
+  hubs: Array<{
+    entityId: string;
+    runtimeId: string | null;
+    name: string;
+    bio: null;
+    website: null;
+    endpoints: string[];
+    publicAccounts: [];
+    metadata: { isHub: true };
+    lastUpdated: number;
+    online: boolean;
+  }>;
+} => {
+  const serverTime = Date.now();
+  const hubs = hubChildren
+    .map((child) => {
+      const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim();
+      if (!entityId) return null;
+      const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').trim();
+      const directWsUrl = String(child.lastHealth?.directWsUrl || '').trim();
+      return {
+        entityId,
+        runtimeId: runtimeId || null,
+        name: child.name,
+        bio: null,
+        website: null,
+        endpoints: directWsUrl ? [directWsUrl] : [],
+        publicAccounts: [] as [],
+        metadata: { isHub: true as const },
+        lastUpdated: serverTime,
+        online: child.proc?.exitCode === null && Boolean(child.lastHealth),
+      };
+    })
+    .filter((hub): hub is NonNullable<typeof hub> => Boolean(hub))
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  return {
+    ok: true,
+    count: hubs.length,
+    serverTime,
+    hubs,
+  };
+};
+
 const getDebugEntityEntries = (requestUrl: URL): Array<{
   entityId: string;
   runtimeId?: string;
@@ -1594,6 +1642,11 @@ const server = Bun.serve({
       await pollAllHubHealth();
       await pollMarketMakerHealth();
       return new Response(safeStringify(computeAggregatedHealth()), { headers });
+    }
+
+    if (pathname === '/api/hubs') {
+      await pollAllHubHealth();
+      return new Response(safeStringify(buildPublicHubDiscoveryPayload()), { headers });
     }
 
     if (pathname === '/api/debug/entities') {
