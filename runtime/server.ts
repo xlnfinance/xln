@@ -359,12 +359,12 @@ const HUB_MESH_ASSERT_TIMEOUT_MS = 20_000;
 const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
 const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** 18n;
 const BOOTSTRAP_POLL_MS = Math.max(
-  0,
-  Number(process.env.BOOTSTRAP_POLL_MS || (process.env.NODE_ENV === 'production' ? '40' : '0')),
+  10,
+  Number(process.env.BOOTSTRAP_POLL_MS || (process.env.NODE_ENV === 'production' ? '40' : '50')),
 );
 const RUNTIME_SETTLE_POLL_MS = Math.max(
-  0,
-  Number(process.env.RUNTIME_SETTLE_POLL_MS || (process.env.NODE_ENV === 'production' ? '25' : '0')),
+  5,
+  Number(process.env.RUNTIME_SETTLE_POLL_MS || (process.env.NODE_ENV === 'production' ? '25' : '10')),
 );
 const INCLUDE_MARKET_MAKER_BY_DEFAULT = !/^(0|false)$/i.test(process.env.XLN_INCLUDE_MARKET_MAKER ?? '1');
 const SKIP_SERVER_BOOTSTRAP = /^(1|true)$/i.test(process.env.XLN_SKIP_SERVER_BOOTSTRAP ?? '');
