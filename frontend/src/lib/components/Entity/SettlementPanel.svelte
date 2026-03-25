@@ -5,11 +5,11 @@
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import type { EntityReplica, EntityTx, AccountMachine, EntityState } from '$lib/types/ui';
   import type { Env } from '$types';
+  import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
 
   export let entityId: string;
-  export let contacts: Array<{ name: string; entityId: string }> = [];
   export let replica: EntityReplica | null = null;
   export let historyOnly = false;
   type Action = 'r2c' | 'c2r' | 'transfer' | 'dispute' | 'history';
@@ -170,11 +170,6 @@
     if (!canonical) return 'Unknown';
     const normalized = normalizeEntityId(canonical);
     if (normalized === normalizeEntityId(entityId)) return 'You';
-    for (const contact of contacts || []) {
-      if (normalizeEntityId(contact.entityId) === normalized && String(contact.name || '').trim()) {
-        return String(contact.name).trim();
-      }
-    }
     const profiles = activeEnv?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
       if (normalizeEntityId(profile.entityId) !== normalized) continue;
@@ -188,7 +183,7 @@
   function entityAvatar(entity: string): string {
     const canonical = String(entity || '').trim();
     if (!canonical) return '';
-    return activeXlnFunctions?.isReady ? (activeXlnFunctions.generateEntityAvatar?.(canonical) || '') : '';
+    return resolveEntityAvatar(activeXlnFunctions, canonical);
   }
 
   function uniqueEntities(values: Array<unknown>): string[] {
@@ -202,6 +197,27 @@
       out.push(value);
     }
     return out;
+  }
+
+  function isSelfEntity(entity: unknown): boolean {
+    const canonical = normalizeEntityId(String(entity || '').trim());
+    return !!canonical && canonical === normalizeEntityId(entityId);
+  }
+
+  function settlementReserveDelta(op: any): bigint {
+    const leftIsSelf = isSelfEntity(op?.leftEntity);
+    const rightIsSelf = isSelfEntity(op?.rightEntity);
+    if (!leftIsSelf && !rightIsSelf) return 0n;
+
+    let delta = 0n;
+    for (const diff of Array.isArray(op?.diffs) ? op.diffs : []) {
+      if (leftIsSelf) {
+        delta += toBigInt(diff?.leftDiff);
+      } else if (rightIsSelf) {
+        delta += toBigInt(diff?.rightDiff);
+      }
+    }
+    return delta;
   }
 
   function makeBatchDetailOp(
@@ -220,46 +236,69 @@
 
   function buildBatchDetailOps(batch: BatchShape | undefined | null): BatchDetailOp[] {
     if (!batch || typeof batch !== 'object') return [];
-    const ops: BatchDetailOp[] = [];
+    const reserveIncreaseOps: BatchDetailOp[] = [];
+    const reserveDecreaseOps: BatchDetailOp[] = [];
+    const neutralOps: BatchDetailOp[] = [];
+    const pushOp = (phase: 'increase' | 'decrease' | 'neutral', op: BatchDetailOp): void => {
+      if (phase === 'increase') reserveIncreaseOps.push(op);
+      else if (phase === 'decrease') reserveDecreaseOps.push(op);
+      else neutralOps.push(op);
+    };
 
-    for (const [index, op] of (Array.isArray(batch.reserveToCollateral) ? batch.reserveToCollateral : []).entries()) {
+    for (const [index, op] of (Array.isArray(batch.flashloans) ? batch.flashloans : []).entries()) {
+      pushOp(
+        'increase',
+        makeBatchDetailOp(
+          `flashloans-${index}`,
+          'Flashloan',
+          [entityId],
+          [
+            { label: 'Token', value: tokenLabel(op?.tokenId) },
+            { label: 'Amount', value: tokenAmountLabel(op?.tokenId, op?.amount) },
+          ],
+        ),
+      );
+    }
+
+    for (const [index, op] of (Array.isArray(batch.externalTokenToReserve) ? batch.externalTokenToReserve : []).entries()) {
+      pushOp(
+        'increase',
+        makeBatchDetailOp(
+          `externalTokenToReserve-${index}`,
+          'ExternalTokenToReserve',
+          [op?.entity],
+          [
+            { label: 'Entity', value: entityName(String(op?.entity || '')) },
+            { label: 'Contract', value: shortHex(op?.contractAddress) },
+            { label: 'Internal Token', value: tokenLabel(op?.internalTokenId) },
+            { label: 'Amount', value: tokenAmountLabel(op?.internalTokenId, op?.amount) },
+          ],
+        ),
+      );
+    }
+
+    for (const [index, op] of (Array.isArray(batch.reserveToReserve) ? batch.reserveToReserve : []).entries()) {
       const token = Number(op?.tokenId || 0);
-      const pairs = Array.isArray(op?.pairs) ? op.pairs : [];
-      if (pairs.length === 0) {
-        ops.push(
-          makeBatchDetailOp(
-            `reserveToCollateral-${index}-empty`,
-            'ReserveToCollateral',
-            [op?.receivingEntity],
-            [
-              { label: 'Token', value: tokenLabel(token) },
-              { label: 'Receiving Entity', value: entityName(String(op?.receivingEntity || '')) },
-              { label: 'Pairs', value: 'None' },
-            ],
-          ),
-        );
-      } else {
-        for (const [pairIndex, pair] of pairs.entries()) {
-          ops.push(
-            makeBatchDetailOp(
-              `reserveToCollateral-${index}-${pairIndex}`,
-              'ReserveToCollateral',
-              [op?.receivingEntity, pair?.entity],
-              [
-                { label: 'Token', value: tokenLabel(token) },
-                { label: 'Amount', value: tokenAmountLabel(token, pair?.amount) },
-                { label: 'Receiving Entity', value: entityName(String(op?.receivingEntity || '')) },
-                { label: 'Counterparty', value: entityName(String(pair?.entity || '')) },
-              ],
-            ),
-          );
-        }
-      }
+      const isIncrease = isSelfEntity(op?.receivingEntity);
+      pushOp(
+        isIncrease ? 'increase' : 'decrease',
+        makeBatchDetailOp(
+          `reserveToReserve-${index}`,
+          isIncrease ? 'ReserveToReserve (Inbound)' : 'ReserveToReserve',
+          [entityId, op?.receivingEntity],
+          [
+            { label: 'Token', value: tokenLabel(token) },
+            { label: 'Amount', value: tokenAmountLabel(token, op?.amount) },
+            { label: 'Receiving Entity', value: entityName(String(op?.receivingEntity || '')) },
+          ],
+        ),
+      );
     }
 
     for (const [index, op] of (Array.isArray(batch.collateralToReserve) ? batch.collateralToReserve : []).entries()) {
       const token = Number(op?.tokenId || 0);
-      ops.push(
+      pushOp(
+        'increase',
         makeBatchDetailOp(
           `collateralToReserve-${index}`,
           'CollateralToReserve',
@@ -270,22 +309,6 @@
             { label: 'Counterparty', value: entityName(String(op?.counterparty || '')) },
             { label: 'Nonce', value: String(Number(op?.nonce || 0)) },
             { label: 'Signature', value: shortHex(op?.sig) },
-          ],
-        ),
-      );
-    }
-
-    for (const [index, op] of (Array.isArray(batch.reserveToReserve) ? batch.reserveToReserve : []).entries()) {
-      const token = Number(op?.tokenId || 0);
-      ops.push(
-        makeBatchDetailOp(
-          `reserveToReserve-${index}`,
-          'ReserveToReserve',
-          [entityId, op?.receivingEntity],
-          [
-            { label: 'Token', value: tokenLabel(token) },
-            { label: 'Amount', value: tokenAmountLabel(token, op?.amount) },
-            { label: 'Receiving Entity', value: entityName(String(op?.receivingEntity || '')) },
           ],
         ),
       );
@@ -303,10 +326,18 @@
           return `${tokenLabel(token)} left=${left} right=${right} collateral=${collateral} ondelta=${ondelta}`;
         })
         .join(' | ');
-      ops.push(
+      const reserveDelta = settlementReserveDelta(op);
+      const phase = reserveDelta > 0n ? 'increase' : reserveDelta < 0n ? 'decrease' : 'neutral';
+      const operation = reserveDelta > 0n
+        ? 'Settlement (+Reserve)'
+        : reserveDelta < 0n
+          ? 'Settlement (-Reserve)'
+          : 'Settlement';
+      pushOp(
+        phase,
         makeBatchDetailOp(
           `settlements-${index}`,
-          'Settlement',
+          operation,
           [op?.leftEntity, op?.rightEntity],
           [
             { label: 'Left Entity', value: entityName(String(op?.leftEntity || '')) },
@@ -319,8 +350,46 @@
       );
     }
 
+    for (const [index, op] of (Array.isArray(batch.reserveToCollateral) ? batch.reserveToCollateral : []).entries()) {
+      const token = Number(op?.tokenId || 0);
+      const pairs = Array.isArray(op?.pairs) ? op.pairs : [];
+      if (pairs.length === 0) {
+        pushOp(
+          'decrease',
+          makeBatchDetailOp(
+            `reserveToCollateral-${index}-empty`,
+            'ReserveToCollateral',
+            [op?.receivingEntity],
+            [
+              { label: 'Token', value: tokenLabel(token) },
+              { label: 'Receiving Entity', value: entityName(String(op?.receivingEntity || '')) },
+              { label: 'Pairs', value: 'None' },
+            ],
+          ),
+        );
+      } else {
+        for (const [pairIndex, pair] of pairs.entries()) {
+          pushOp(
+            'decrease',
+            makeBatchDetailOp(
+              `reserveToCollateral-${index}-${pairIndex}`,
+              'ReserveToCollateral',
+              [op?.receivingEntity, pair?.entity],
+              [
+                { label: 'Token', value: tokenLabel(token) },
+                { label: 'Amount', value: tokenAmountLabel(token, pair?.amount) },
+                { label: 'Receiving Entity', value: entityName(String(op?.receivingEntity || '')) },
+                { label: 'Counterparty', value: entityName(String(pair?.entity || '')) },
+              ],
+            ),
+          );
+        }
+      }
+    }
+
     for (const [index, op] of (Array.isArray(batch.disputeStarts) ? batch.disputeStarts : []).entries()) {
-      ops.push(
+      pushOp(
+        'neutral',
         makeBatchDetailOp(
           `disputeStarts-${index}`,
           'DisputeStart',
@@ -336,7 +405,8 @@
     }
 
     for (const [index, op] of (Array.isArray(batch.disputeFinalizations) ? batch.disputeFinalizations : []).entries()) {
-      ops.push(
+      pushOp(
+        'neutral',
         makeBatchDetailOp(
           `disputeFinalizations-${index}`,
           'DisputeFinalize',
@@ -353,24 +423,9 @@
       );
     }
 
-    for (const [index, op] of (Array.isArray(batch.externalTokenToReserve) ? batch.externalTokenToReserve : []).entries()) {
-      ops.push(
-        makeBatchDetailOp(
-          `externalTokenToReserve-${index}`,
-          'ExternalTokenToReserve',
-          [op?.entity],
-          [
-            { label: 'Entity', value: entityName(String(op?.entity || '')) },
-            { label: 'Contract', value: shortHex(op?.contractAddress) },
-            { label: 'Internal Token', value: tokenLabel(op?.internalTokenId) },
-            { label: 'Amount', value: tokenAmountLabel(op?.internalTokenId, op?.amount) },
-          ],
-        ),
-      );
-    }
-
     for (const [index, op] of (Array.isArray(batch.reserveToExternalToken) ? batch.reserveToExternalToken : []).entries()) {
-      ops.push(
+      pushOp(
+        'decrease',
         makeBatchDetailOp(
           `reserveToExternalToken-${index}`,
           'ReserveToExternalToken',
@@ -385,7 +440,8 @@
     }
 
     for (const [index, op] of (Array.isArray(batch.revealSecrets) ? batch.revealSecrets : []).entries()) {
-      ops.push(
+      pushOp(
+        'neutral',
         makeBatchDetailOp(
           `revealSecrets-${index}`,
           'RevealSecret',
@@ -398,21 +454,7 @@
       );
     }
 
-    for (const [index, op] of (Array.isArray(batch.flashloans) ? batch.flashloans : []).entries()) {
-      ops.push(
-        makeBatchDetailOp(
-          `flashloans-${index}`,
-          'Flashloan',
-          [entityId],
-          [
-            { label: 'Token', value: tokenLabel(op?.tokenId) },
-            { label: 'Amount', value: tokenAmountLabel(op?.tokenId, op?.amount) },
-          ],
-        ),
-      );
-    }
-
-    return ops;
+    return [...reserveIncreaseOps, ...reserveDecreaseOps, ...neutralOps];
   }
 
   function formatWeiToGwei(wei: bigint): string {
@@ -543,14 +585,14 @@
   function batchSummary(batch: BatchShape | undefined | null): Array<{ label: string; count: number }> {
     return [
       { label: 'Flashloan', count: Number(batch?.flashloans?.length || 0) },
-      { label: 'ReserveToCollateral', count: Number(batch?.reserveToCollateral?.length || 0) },
+      { label: 'ExternalTokenToReserve', count: Number(batch?.externalTokenToReserve?.length || 0) },
       { label: 'CollateralToReserve', count: Number(batch?.collateralToReserve?.length || 0) },
       { label: 'Settlement', count: Number(batch?.settlements?.length || 0) },
       { label: 'ReserveToReserve', count: Number(batch?.reserveToReserve?.length || 0) },
+      { label: 'ReserveToCollateral', count: Number(batch?.reserveToCollateral?.length || 0) },
+      { label: 'ReserveToExternalToken', count: Number(batch?.reserveToExternalToken?.length || 0) },
       { label: 'DisputeStart', count: Number(batch?.disputeStarts?.length || 0) },
       { label: 'DisputeFinalize', count: Number(batch?.disputeFinalizations?.length || 0) },
-      { label: 'ExternalTokenToReserve', count: Number(batch?.externalTokenToReserve?.length || 0) },
-      { label: 'ReserveToExternalToken', count: Number(batch?.reserveToExternalToken?.length || 0) },
       { label: 'RevealSecret', count: Number(batch?.revealSecrets?.length || 0) },
     ].filter((entry) => entry.count > 0);
   }
@@ -581,14 +623,14 @@
     if (operations && typeof operations === 'object') {
       return [
         { label: 'Flashloan', count: Number(operations.flashloans || 0) },
-        { label: 'ReserveToCollateral', count: Number(operations.reserveToCollateral || 0) },
+        { label: 'ExternalTokenToReserve', count: Number(operations.externalTokenToReserve || 0) },
         { label: 'CollateralToReserve', count: Number(operations.collateralToReserve || 0) },
         { label: 'Settlement', count: Number(operations.settlements || 0) },
         { label: 'ReserveToReserve', count: Number(operations.reserveToReserve || 0) },
+        { label: 'ReserveToCollateral', count: Number(operations.reserveToCollateral || 0) },
+        { label: 'ReserveToExternalToken', count: Number(operations.reserveToExternalToken || 0) },
         { label: 'DisputeStart', count: Number(operations.disputeStarts || 0) },
         { label: 'DisputeFinalize', count: Number(operations.disputeFinalizations || 0) },
-        { label: 'ExternalTokenToReserve', count: Number(operations.externalTokenToReserve || 0) },
-        { label: 'ReserveToExternalToken', count: Number(operations.reserveToExternalToken || 0) },
         { label: 'RevealSecret', count: Number(operations.revealSecrets || 0) },
       ].filter((entry) => entry.count > 0);
     }
@@ -1045,11 +1087,11 @@
                       id: String(opEntityId || ''),
                       short: formatShortId(String(opEntityId || '')),
                       name: entityName(String(opEntityId || '')),
-                      avatarUrl: entityAvatar(String(opEntityId || '')),
+                      avatar: entityAvatar(String(opEntityId || '')),
                     }}
                     <div class="entity-chip" title={identity.id}>
-                      {#if identity.avatarUrl}
-                        <img class="entity-chip-avatar" src={identity.avatarUrl} alt="" />
+                      {#if identity.avatar}
+                        <img class="entity-chip-avatar" src={identity.avatar} alt="" />
                       {:else}
                         <span class="entity-chip-avatar placeholder">{identity.name.slice(0, 1).toUpperCase()}</span>
                       {/if}
@@ -1214,11 +1256,11 @@
                                 id: String(opEntityId || ''),
                                 short: formatShortId(String(opEntityId || '')),
                                 name: entityName(String(opEntityId || '')),
-                                avatarUrl: entityAvatar(String(opEntityId || '')),
+                                avatar: entityAvatar(String(opEntityId || '')),
                               }}
                               <div class="entity-chip" title={identity.id}>
-                                {#if identity.avatarUrl}
-                                  <img class="entity-chip-avatar" src={identity.avatarUrl} alt="" />
+                                {#if identity.avatar}
+                                  <img class="entity-chip-avatar" src={identity.avatar} alt="" />
                                 {:else}
                                   <span class="entity-chip-avatar placeholder">{identity.name.slice(0, 1).toUpperCase()}</span>
                                 {/if}
@@ -1258,7 +1300,6 @@
         label="Account"
         value={counterpartyEntityId}
         entities={accountEntityIds}
-        {contacts}
         excludeId={entityId}
         disabled={sending}
         on:change={handleAccountChange}
@@ -1295,7 +1336,6 @@
       label="Account"
       value={counterpartyEntityId}
       entities={accountEntityIds}
-      {contacts}
       excludeId={entityId}
       disabled={sending}
       on:change={handleAccountChange}
@@ -1348,7 +1388,6 @@
       label="Recipient"
       value={recipientEntityId}
       entities={transferEntityOptions}
-      {contacts}
       excludeId={entityId}
       disabled={sending}
       on:change={handleRecipientChange}

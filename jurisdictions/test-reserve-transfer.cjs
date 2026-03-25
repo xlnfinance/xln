@@ -5,7 +5,9 @@ async function main() {
 
   // Deploy Depository contract
   const Depository = await hre.ethers.getContractFactory("Depository");
-  const depository = await Depository.deploy();
+  const entityProvider = await (await hre.ethers.getContractFactory("EntityProvider")).deploy();
+  await entityProvider.waitForDeployment();
+  const depository = await Depository.deploy(await entityProvider.getAddress());
   await depository.waitForDeployment();
   
   console.log("✅ Depository deployed to:", await depository.getAddress());

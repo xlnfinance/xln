@@ -89,28 +89,6 @@ export type ExternalTokenToReserveStructOutput = [
   amount: bigint;
 };
 
-export type SettlementDiffStruct = {
-  tokenId: BigNumberish;
-  leftDiff: BigNumberish;
-  rightDiff: BigNumberish;
-  collateralDiff: BigNumberish;
-  ondeltaDiff: BigNumberish;
-};
-
-export type SettlementDiffStructOutput = [
-  tokenId: bigint,
-  leftDiff: bigint,
-  rightDiff: bigint,
-  collateralDiff: bigint,
-  ondeltaDiff: bigint
-] & {
-  tokenId: bigint;
-  leftDiff: bigint;
-  rightDiff: bigint;
-  collateralDiff: bigint;
-  ondeltaDiff: bigint;
-};
-
 export declare namespace Depository {
   export type ReserveMintStruct = {
     entity: BytesLike;
@@ -137,20 +115,12 @@ export interface DepositoryInterface extends Interface {
       | "_reserves"
       | "_tokens"
       | "accountKey"
-      | "addEntityProvider"
       | "admin"
       | "adminRegisterExternalToken"
-      | "approvedEntityProviders"
-      | "computeSettlementHash"
       | "defaultDisputeDelay"
-      | "emergencyPause"
       | "enforceDebts"
-      | "enforceDebtsLarge"
-      | "entityDisputeDelays"
       | "entityNonces"
       | "entityProvider"
-      | "entityProvidersList"
-      | "getApprovedProviders"
       | "getTokenMetadata"
       | "getTokensLength"
       | "mintToReserve"
@@ -159,10 +129,6 @@ export interface DepositoryInterface extends Interface {
       | "onERC1155Received"
       | "packTokenReference"
       | "processBatch"
-      | "removeEntityProvider"
-      | "setDefaultDisputeDelay"
-      | "setEmergencyPause"
-      | "setEntityDisputeDelay"
       | "tokenToId"
       | "unpackTokenReference"
   ): FunctionFragment;
@@ -176,9 +142,6 @@ export interface DepositoryInterface extends Interface {
       | "DebtForgiven"
       | "DisputeFinalized"
       | "DisputeStarted"
-      | "EmergencyPauseToggled"
-      | "EntityProviderAdded"
-      | "EntityProviderRemoved"
       | "HankoBatchProcessed"
       | "ReserveUpdated"
       | "SecretRevealed"
@@ -220,57 +183,25 @@ export interface DepositoryInterface extends Interface {
     functionFragment: "accountKey",
     values: [BytesLike, BytesLike]
   ): string;
-  encodeFunctionData(
-    functionFragment: "addEntityProvider",
-    values: [AddressLike]
-  ): string;
   encodeFunctionData(functionFragment: "admin", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "adminRegisterExternalToken",
     values: [ExternalTokenToReserveStruct]
   ): string;
   encodeFunctionData(
-    functionFragment: "approvedEntityProviders",
-    values: [AddressLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "computeSettlementHash",
-    values: [BytesLike, BytesLike, SettlementDiffStruct[], BigNumberish[]]
-  ): string;
-  encodeFunctionData(
     functionFragment: "defaultDisputeDelay",
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "emergencyPause",
-    values?: undefined
-  ): string;
-  encodeFunctionData(
     functionFragment: "enforceDebts",
-    values: [BytesLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "enforceDebtsLarge",
-    values: [BytesLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "entityDisputeDelays",
-    values: [BytesLike]
+    values: [BytesLike, BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "entityNonces",
-    values: [AddressLike]
+    values: [BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "entityProvider",
-    values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "entityProvidersList",
-    values: [BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "getApprovedProviders",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -309,23 +240,7 @@ export interface DepositoryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "processBatch",
-    values: [BytesLike, AddressLike, BytesLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "removeEntityProvider",
-    values: [AddressLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "setDefaultDisputeDelay",
-    values: [BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "setEmergencyPause",
-    values: [boolean]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "setEntityDisputeDelay",
-    values: [BytesLike, BigNumberish]
+    values: [BytesLike, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "tokenToId",
@@ -354,21 +269,9 @@ export interface DepositoryInterface extends Interface {
   decodeFunctionResult(functionFragment: "_reserves", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "_tokens", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "accountKey", data: BytesLike): Result;
-  decodeFunctionResult(
-    functionFragment: "addEntityProvider",
-    data: BytesLike
-  ): Result;
   decodeFunctionResult(functionFragment: "admin", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "adminRegisterExternalToken",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "approvedEntityProviders",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "computeSettlementHash",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -376,19 +279,7 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "emergencyPause",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "enforceDebts",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "enforceDebtsLarge",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "entityDisputeDelays",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -397,14 +288,6 @@ export interface DepositoryInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "entityProvider",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "entityProvidersList",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "getApprovedProviders",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -437,22 +320,6 @@ export interface DepositoryInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "processBatch",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "removeEntityProvider",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "setDefaultDisputeDelay",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "setEmergencyPause",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "setEntityDisputeDelay",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "tokenToId", data: BytesLike): Result;
@@ -639,42 +506,6 @@ export namespace DisputeStartedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace EmergencyPauseToggledEvent {
-  export type InputTuple = [isPaused: boolean];
-  export type OutputTuple = [isPaused: boolean];
-  export interface OutputObject {
-    isPaused: boolean;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace EntityProviderAddedEvent {
-  export type InputTuple = [provider: AddressLike];
-  export type OutputTuple = [provider: string];
-  export interface OutputObject {
-    provider: string;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace EntityProviderRemovedEvent {
-  export type InputTuple = [provider: AddressLike];
-  export type OutputTuple = [provider: string];
-  export interface OutputObject {
-    provider: string;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
 export namespace HankoBatchProcessedEvent {
   export type InputTuple = [
     entityId: BytesLike,
@@ -845,12 +676,6 @@ export interface Depository extends BaseContract {
     "view"
   >;
 
-  addEntityProvider: TypedContractMethod<
-    [provider: AddressLike],
-    [void],
-    "nonpayable"
-  >;
-
   admin: TypedContractMethod<[], [string], "view">;
 
   adminRegisterExternalToken: TypedContractMethod<
@@ -859,58 +684,17 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
 
-  approvedEntityProviders: TypedContractMethod<
-    [arg0: AddressLike],
-    [boolean],
-    "view"
-  >;
-
-  computeSettlementHash: TypedContractMethod<
-    [
-      leftEntity: BytesLike,
-      rightEntity: BytesLike,
-      diffs: SettlementDiffStruct[],
-      forgiveDebtsInTokenIds: BigNumberish[]
-    ],
-    [
-      [string, bigint, bigint] & {
-        hash: string;
-        nonce: bigint;
-        encodedMsgLength: bigint;
-      }
-    ],
-    "view"
-  >;
-
   defaultDisputeDelay: TypedContractMethod<[], [bigint], "view">;
 
-  emergencyPause: TypedContractMethod<[], [boolean], "view">;
-
   enforceDebts: TypedContractMethod<
-    [entity: BytesLike, tokenId: BigNumberish],
-    [bigint],
+    [entity: BytesLike, tokenId: BigNumberish, maxIterations: BigNumberish],
+    [void],
     "nonpayable"
   >;
 
-  enforceDebtsLarge: TypedContractMethod<
-    [entity: BytesLike, tokenId: BigNumberish],
-    [bigint],
-    "nonpayable"
-  >;
-
-  entityDisputeDelays: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
-
-  entityNonces: TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
+  entityNonces: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   entityProvider: TypedContractMethod<[], [string], "view">;
-
-  entityProvidersList: TypedContractMethod<
-    [arg0: BigNumberish],
-    [string],
-    "view"
-  >;
-
-  getApprovedProviders: TypedContractMethod<[], [string[]], "view">;
 
   getTokenMetadata: TypedContractMethod<
     [tokenId: BigNumberish],
@@ -973,37 +757,8 @@ export interface Depository extends BaseContract {
   >;
 
   processBatch: TypedContractMethod<
-    [
-      encodedBatch: BytesLike,
-      entityProviderAddr: AddressLike,
-      hankoData: BytesLike,
-      nonce: BigNumberish
-    ],
+    [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
     [boolean],
-    "nonpayable"
-  >;
-
-  removeEntityProvider: TypedContractMethod<
-    [provider: AddressLike],
-    [void],
-    "nonpayable"
-  >;
-
-  setDefaultDisputeDelay: TypedContractMethod<
-    [delayBlocks: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-
-  setEmergencyPause: TypedContractMethod<
-    [isPaused: boolean],
-    [void],
-    "nonpayable"
-  >;
-
-  setEntityDisputeDelay: TypedContractMethod<
-    [entity: BytesLike, delayBlocks: BigNumberish],
-    [void],
     "nonpayable"
   >;
 
@@ -1089,9 +844,6 @@ export interface Depository extends BaseContract {
     nameOrSignature: "accountKey"
   ): TypedContractMethod<[e1: BytesLike, e2: BytesLike], [string], "view">;
   getFunction(
-    nameOrSignature: "addEntityProvider"
-  ): TypedContractMethod<[provider: AddressLike], [void], "nonpayable">;
-  getFunction(
     nameOrSignature: "admin"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
@@ -1102,61 +854,21 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "approvedEntityProviders"
-  ): TypedContractMethod<[arg0: AddressLike], [boolean], "view">;
-  getFunction(
-    nameOrSignature: "computeSettlementHash"
-  ): TypedContractMethod<
-    [
-      leftEntity: BytesLike,
-      rightEntity: BytesLike,
-      diffs: SettlementDiffStruct[],
-      forgiveDebtsInTokenIds: BigNumberish[]
-    ],
-    [
-      [string, bigint, bigint] & {
-        hash: string;
-        nonce: bigint;
-        encodedMsgLength: bigint;
-      }
-    ],
-    "view"
-  >;
-  getFunction(
     nameOrSignature: "defaultDisputeDelay"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
-    nameOrSignature: "emergencyPause"
-  ): TypedContractMethod<[], [boolean], "view">;
-  getFunction(
     nameOrSignature: "enforceDebts"
   ): TypedContractMethod<
-    [entity: BytesLike, tokenId: BigNumberish],
-    [bigint],
+    [entity: BytesLike, tokenId: BigNumberish, maxIterations: BigNumberish],
+    [void],
     "nonpayable"
   >;
-  getFunction(
-    nameOrSignature: "enforceDebtsLarge"
-  ): TypedContractMethod<
-    [entity: BytesLike, tokenId: BigNumberish],
-    [bigint],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "entityDisputeDelays"
-  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "entityNonces"
-  ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
+  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "entityProvider"
   ): TypedContractMethod<[], [string], "view">;
-  getFunction(
-    nameOrSignature: "entityProvidersList"
-  ): TypedContractMethod<[arg0: BigNumberish], [string], "view">;
-  getFunction(
-    nameOrSignature: "getApprovedProviders"
-  ): TypedContractMethod<[], [string[]], "view">;
   getFunction(
     nameOrSignature: "getTokenMetadata"
   ): TypedContractMethod<
@@ -1227,29 +939,8 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "processBatch"
   ): TypedContractMethod<
-    [
-      encodedBatch: BytesLike,
-      entityProviderAddr: AddressLike,
-      hankoData: BytesLike,
-      nonce: BigNumberish
-    ],
+    [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
     [boolean],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "removeEntityProvider"
-  ): TypedContractMethod<[provider: AddressLike], [void], "nonpayable">;
-  getFunction(
-    nameOrSignature: "setDefaultDisputeDelay"
-  ): TypedContractMethod<[delayBlocks: BigNumberish], [void], "nonpayable">;
-  getFunction(
-    nameOrSignature: "setEmergencyPause"
-  ): TypedContractMethod<[isPaused: boolean], [void], "nonpayable">;
-  getFunction(
-    nameOrSignature: "setEntityDisputeDelay"
-  ): TypedContractMethod<
-    [entity: BytesLike, delayBlocks: BigNumberish],
-    [void],
     "nonpayable"
   >;
   getFunction(
@@ -1317,27 +1008,6 @@ export interface Depository extends BaseContract {
     DisputeStartedEvent.InputTuple,
     DisputeStartedEvent.OutputTuple,
     DisputeStartedEvent.OutputObject
-  >;
-  getEvent(
-    key: "EmergencyPauseToggled"
-  ): TypedContractEvent<
-    EmergencyPauseToggledEvent.InputTuple,
-    EmergencyPauseToggledEvent.OutputTuple,
-    EmergencyPauseToggledEvent.OutputObject
-  >;
-  getEvent(
-    key: "EntityProviderAdded"
-  ): TypedContractEvent<
-    EntityProviderAddedEvent.InputTuple,
-    EntityProviderAddedEvent.OutputTuple,
-    EntityProviderAddedEvent.OutputObject
-  >;
-  getEvent(
-    key: "EntityProviderRemoved"
-  ): TypedContractEvent<
-    EntityProviderRemovedEvent.InputTuple,
-    EntityProviderRemovedEvent.OutputTuple,
-    EntityProviderRemovedEvent.OutputObject
   >;
   getEvent(
     key: "HankoBatchProcessed"
@@ -1437,39 +1107,6 @@ export interface Depository extends BaseContract {
       DisputeStartedEvent.InputTuple,
       DisputeStartedEvent.OutputTuple,
       DisputeStartedEvent.OutputObject
-    >;
-
-    "EmergencyPauseToggled(bool)": TypedContractEvent<
-      EmergencyPauseToggledEvent.InputTuple,
-      EmergencyPauseToggledEvent.OutputTuple,
-      EmergencyPauseToggledEvent.OutputObject
-    >;
-    EmergencyPauseToggled: TypedContractEvent<
-      EmergencyPauseToggledEvent.InputTuple,
-      EmergencyPauseToggledEvent.OutputTuple,
-      EmergencyPauseToggledEvent.OutputObject
-    >;
-
-    "EntityProviderAdded(address)": TypedContractEvent<
-      EntityProviderAddedEvent.InputTuple,
-      EntityProviderAddedEvent.OutputTuple,
-      EntityProviderAddedEvent.OutputObject
-    >;
-    EntityProviderAdded: TypedContractEvent<
-      EntityProviderAddedEvent.InputTuple,
-      EntityProviderAddedEvent.OutputTuple,
-      EntityProviderAddedEvent.OutputObject
-    >;
-
-    "EntityProviderRemoved(address)": TypedContractEvent<
-      EntityProviderRemovedEvent.InputTuple,
-      EntityProviderRemovedEvent.OutputTuple,
-      EntityProviderRemovedEvent.OutputObject
-    >;
-    EntityProviderRemoved: TypedContractEvent<
-      EntityProviderRemovedEvent.InputTuple,
-      EntityProviderRemovedEvent.OutputTuple,
-      EntityProviderRemovedEvent.OutputObject
     >;
 
     "HankoBatchProcessed(bytes32,bytes32,uint256,bool)": TypedContractEvent<

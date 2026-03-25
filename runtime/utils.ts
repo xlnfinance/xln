@@ -353,38 +353,38 @@ export const getSignerAddress = (signerId: string): string => {
 // === AVATAR GENERATION ===
 
 /**
- * Generate identicon avatar for entity
+ * Generate avatar from arbitrary seed
  * @param entityId - The entity ID to generate avatar for
  * @returns Base64 encoded SVG avatar
  */
-export const generateEntityAvatar = (entityId: string): string => {
+export const hashToAvatar = (seed: string, size: number = 40): string => {
   try {
-    // Canonicalize seed so the same entity always maps to the same identicon.
-    const canonicalSeed = String(entityId || '').trim().toLowerCase();
-    const svg = toSvg(canonicalSeed, 40); // 40px size
+    const canonicalSeed = String(seed || '').trim().toLowerCase();
+    const svg = toSvg(canonicalSeed, size);
     // Convert SVG to data URL (browser-compatible)
     return `data:image/svg+xml,${encodeURIComponent(svg)}`;
   } catch (error) {
-    // Fallback: simple colored circle
-    return generateFallbackAvatar(entityId);
+    return generateFallbackAvatar(seed, size);
   }
 };
 
 /**
- * Generate identicon avatar for signer
+ * Generate canonical avatar for entity
+ * @param entityId - The entity ID to generate avatar for
+ * @returns Base64 encoded SVG avatar
+ */
+export const generateEntityAvatar = (entityId: string): string => {
+  return hashToAvatar(entityId, 40);
+};
+
+/**
+ * Generate canonical avatar for signer
  * @param signerId - The signer ID to generate avatar for
  * @returns Base64 encoded SVG avatar
  */
 export const generateSignerAvatar = (signerId: string): string => {
-  try {
-    // Use signer address for avatar generation
-    const address = String(getSignerAddress(signerId) || '').trim().toLowerCase();
-    const svg = toSvg(address, 32); // 32px size for signers
-    // Convert SVG to data URL (browser-compatible)
-    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-  } catch (error) {
-    return generateFallbackAvatar(signerId);
-  }
+  const address = String(getSignerAddress(signerId) || '').trim().toLowerCase();
+  return hashToAvatar(address, 32);
 };
 
 /**
@@ -392,7 +392,7 @@ export const generateSignerAvatar = (signerId: string): string => {
  * @param seed - String to generate color from
  * @returns SVG data URL
  */
-const generateFallbackAvatar = (seed: string): string => {
+const generateFallbackAvatar = (seed: string, size: number = 32): string => {
   // Simple hash to generate color
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
@@ -404,8 +404,9 @@ const generateFallbackAvatar = (seed: string): string => {
   const saturation = 70;
   const lightness = 50;
 
-  const svg = `<svg width="32" height="32" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="16" cy="16" r="16" fill="hsl(${hue}, ${saturation}%, ${lightness}%)"/>
+  const radius = Math.floor(size / 2);
+  const svg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="${radius}" cy="${radius}" r="${radius}" fill="hsl(${hue}, ${saturation}%, ${lightness}%)"/>
   </svg>`;
 
   const base64 = Buffer.from(svg).toString('base64');

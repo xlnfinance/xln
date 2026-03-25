@@ -49,6 +49,8 @@ const makeReplica = (entityId: string, timestamp: number): EntityReplica =>
   }) as EntityReplica;
 
 describe('runtime ingress timestamp', () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
   test('restored runtime does not fire future hooks without new ingress timestamp', async () => {
     const env = createEmptyEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
@@ -212,4 +214,66 @@ describe('runtime ingress timestamp', () => {
     const updatedReplica = env.eReplicas.get(`${entityId}:1`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:idle-loop-due-after-wall-clock')).toBe(false);
   });
+
+  test('runtime loop waits for minFrameDelayMs between processed cycles', async () => {
+    const env = createEmptyEnv('runtime-frame-delay-seed');
+    env.quietRuntimeLogs = true;
+
+    const signerId = `0x${'ab'.repeat(20)}`;
+    const firstEntityId = `0x${'91'.repeat(32)}`;
+    const delayedEntityId = `0x${'92'.repeat(32)}`;
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId: firstEntityId,
+        signerId,
+        data: {
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signerId],
+            shares: { [signerId]: 1n },
+          },
+          isProposer: false,
+          profileName: 'First Replica',
+        },
+      }],
+      entityInputs: [],
+    });
+
+    await process(env);
+    env.runtimeConfig = { minFrameDelayMs: 60, loopIntervalMs: 1 };
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId: delayedEntityId,
+        signerId,
+        data: {
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signerId],
+            shares: { [signerId]: 1n },
+          },
+          isProposer: false,
+          profileName: 'Delayed Replica',
+        },
+      }],
+      entityInputs: [],
+    });
+
+    const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
+    try {
+      await sleep(20);
+      expect(env.eReplicas.get(`${delayedEntityId}:${signerId}`)).toBeUndefined();
+
+      await sleep(100);
+      expect(env.eReplicas.get(`${delayedEntityId}:${signerId}`)).toBeDefined();
+    } finally {
+      stop();
+    }
+  });
+
 });

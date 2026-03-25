@@ -8,9 +8,6 @@ const HANKO_ABI = ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint
 const toPrivateKeyHex = (privateKey: string | Uint8Array): string =>
   typeof privateKey === 'string' ? privateKey : ethers.hexlify(privateKey);
 
-export const getEntityNonceAddress = (entityId: string): string =>
-  ethers.getAddress(`0x${normalizeEntityId(entityId).slice(-40)}`);
-
 export function buildSingleSignerHanko(
   entityId: string,
   hash: string,

@@ -59,6 +59,69 @@ async function openAssetsTab(page: Page): Promise<void> {
   await expect(page.getByTestId('asset-ledger-refresh').first()).toBeVisible({ timeout: 20_000 });
 }
 
+async function selectAssetFaucetToken(page: Page, symbol: string): Promise<void> {
+  await openAssetsTab(page);
+  const select = page.getByTestId('asset-faucet-symbol').first();
+  await expect(select).toBeVisible({ timeout: 20_000 });
+  await select.selectOption(symbol);
+  await expect(select).toHaveValue(symbol, { timeout: 20_000 });
+}
+
+async function expectFaucetModes(
+  page: Page,
+  symbol: string,
+  expected: {
+    reserveVisible: boolean;
+    reserveEnabled: boolean;
+    accountVisible: boolean;
+  },
+): Promise<void> {
+  await selectAssetFaucetToken(page, symbol);
+  const externalButton = page.getByTestId(`external-faucet-${symbol}`).first();
+  const reserveButton = page.getByTestId(`reserve-faucet-${symbol}`).first();
+  const accountButton = page.getByTestId(`account-faucet-${symbol}`).first();
+
+  await expect(externalButton).toBeVisible({ timeout: 20_000 });
+  await expect(externalButton).toBeEnabled({ timeout: 20_000 });
+  if (expected.reserveVisible) {
+    await expect(reserveButton).toBeVisible({ timeout: 20_000 });
+  } else {
+    await expect(reserveButton).toHaveCount(0);
+  }
+  if (expected.reserveVisible && expected.reserveEnabled) {
+    await expect(reserveButton).toBeEnabled({ timeout: 20_000 });
+  } else if (expected.reserveVisible) {
+    await expect(reserveButton).toBeDisabled({ timeout: 20_000 });
+  }
+
+  if (expected.accountVisible) {
+    await expect(accountButton).toBeVisible({ timeout: 20_000 });
+    await expect(accountButton).toBeEnabled({ timeout: 20_000 });
+  } else {
+    await expect(accountButton).toHaveCount(0);
+  }
+}
+
+async function clickExternalFaucet(page: Page, symbol: string): Promise<void> {
+  await selectAssetFaucetToken(page, symbol);
+  await page.getByTestId(`external-faucet-${symbol}`).first().click();
+}
+
+async function clickReserveFaucet(page: Page, symbol: string): Promise<void> {
+  await selectAssetFaucetToken(page, symbol);
+  const button = page.getByTestId(`reserve-faucet-${symbol}`).first();
+  await expect(button).toBeEnabled({ timeout: 20_000 });
+  await button.click();
+}
+
+async function clickAccountFaucet(page: Page, symbol: string): Promise<void> {
+  await selectAssetFaucetToken(page, symbol);
+  const button = page.getByTestId(`account-faucet-${symbol}`).first();
+  await expect(button).toBeVisible({ timeout: 20_000 });
+  await expect(button).toBeEnabled({ timeout: 20_000 });
+  await button.click();
+}
+
 async function openMoveTab(page: Page): Promise<void> {
   await openAssetsTab(page);
   await page.getByTestId('asset-tab-move').first().click();
@@ -250,6 +313,78 @@ async function getRpcExternalBalance(page: Page, symbol: string, holder: string)
   const decimals = typeof token?.decimals === 'number' ? token.decimals : 18;
   return Number(formatUnits(await getRpcExternalBalanceRaw(page, symbol, holder), decimals));
 }
+
+test('asset faucet exposes correct modes and funds every supported token', async ({ page }) => {
+  test.setTimeout(LONG_E2E ? 240_000 : 180_000);
+
+  await timedStep('faucet.baseline', async () => {
+    await ensureE2EBaseline(page, {
+      timeoutMs: LONG_E2E ? 240_000 : 120_000,
+      requireHubMesh: true,
+      requireMarketMaker: false,
+      minHubCount: 3,
+      forceReset: true,
+    });
+  });
+
+  let alice: { entityId: string; signerId: string; runtimeId: string } | null = null;
+  await timedStep('faucet.runtime', async () => {
+    await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+    await page.evaluate((apiBaseUrl: string) => {
+      (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__ = apiBaseUrl;
+      localStorage.setItem('xln-api-base-url', apiBaseUrl);
+    }, API_BASE_URL);
+    alice = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
+    await switchToRuntimeId(page, alice.runtimeId);
+  });
+
+  const hubs = await waitForNamedHubs(page, ['H1'], { timeoutMs: ROUTE_TIMEOUT_MS });
+  await timedStep('faucet.open-account', async () => {
+    await connectRuntimeToHub(page, { entityId: alice!.entityId, signerId: alice!.signerId }, hubs.h1);
+  });
+
+  await timedStep('faucet.mode-matrix', async () => {
+    await openAssetsTab(page);
+    const selectorOptions = await page.getByTestId('asset-faucet-symbol').first().locator('option').evaluateAll(
+      (nodes) => nodes.map((node) => String((node as HTMLOptionElement).value || '').trim()).filter((value) => value.length > 0),
+    );
+    expect(selectorOptions).toEqual(expect.arrayContaining(['ETH', 'WETH', 'USDT', 'USDC']));
+
+    for (const symbol of selectorOptions) {
+      if (symbol === 'ETH') {
+        await expectFaucetModes(page, symbol, { reserveVisible: false, reserveEnabled: false, accountVisible: false });
+        continue;
+      }
+      await expectFaucetModes(page, symbol, { reserveVisible: true, reserveEnabled: true, accountVisible: true });
+    }
+  });
+
+  await timedStep('faucet.eth.external', async () => {
+    const beforeExternal = await refreshExternalBalance(page, 'ETH');
+    await clickExternalFaucet(page, 'ETH');
+    await expect.poll(async () => refreshExternalBalance(page, 'ETH'), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeExternal);
+  });
+
+  for (const symbol of ['WETH', 'USDT', 'USDC'] as const) {
+    await timedStep(`faucet.${symbol}.external`, async () => {
+      const beforeExternal = await refreshExternalBalance(page, symbol);
+      await clickExternalFaucet(page, symbol);
+      await expect.poll(async () => refreshExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeExternal);
+    });
+
+    await timedStep(`faucet.${symbol}.reserve`, async () => {
+      const beforeReserve = await refreshReserveBalance(page, symbol);
+      await clickReserveFaucet(page, symbol);
+      await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeReserve);
+    });
+
+    await timedStep(`faucet.${symbol}.account`, async () => {
+      const beforeAccount = await refreshAccountSpendableBalance(page, symbol);
+      await clickAccountFaucet(page, symbol);
+      await expect.poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeAccount);
+    });
+  }
+});
 
 test('move tab covers all routed paths on isolated runtimes', async ({ page, browser }) => {
   test.setTimeout(LONG_E2E ? 360_000 : 240_000);

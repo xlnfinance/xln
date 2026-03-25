@@ -9,10 +9,6 @@ function addressToEntity(addr: string): string {
   return ethers.zeroPadValue(addr, 32);
 }
 
-function entityToAddress(entity: string): string {
-  return ethers.getAddress(ethers.dataSlice(entity, 12));
-}
-
 async function deployDepositoryFixture() {
   const [admin, user1, user2] = await ethers.getSigners();
 
@@ -27,14 +23,14 @@ async function deployDepositoryFixture() {
       Account: await account.getAddress()
     }
   });
-  const depository = await Depository.deploy();
-  await depository.waitForDeployment();
 
   const MockEntityProvider = await ethers.getContractFactory("MockEntityProvider");
   const entityId = addressToEntity(admin.address);
   const mockProvider = await MockEntityProvider.deploy(entityId);
   await mockProvider.waitForDeployment();
 
+  const depository = await Depository.deploy(await mockProvider.getAddress());
+  await depository.waitForDeployment();
   return { depository, mockProvider, admin, user1, user2, entityId };
 }
 
@@ -50,7 +46,6 @@ describe.skip("Depository integration", function () {
       const senderEntity = entityId;
       const receiverEntity = addressToEntity(user1.address);
 
-      await depository.addEntityProvider(await mockProvider.getAddress());
       await depository.debugFundReserves(senderEntity, tokenId, 1_000n);
 
       const BatchType =
@@ -94,7 +89,7 @@ describe.skip("Depository integration", function () {
       expect(remainingSender).to.equal(1_000n - amount);
       expect(receiverBalance).to.equal(amount);
 
-      const storedNonce = await depository.entityNonces(entityToAddress(senderEntity));
+      const storedNonce = await depository.entityNonces(senderEntity);
       expect(storedNonce).to.equal(1n);
     });
   });
@@ -112,7 +107,7 @@ describe.skip("Depository integration", function () {
       await depository.createDebt(debtor, creditorA, tokenId, 70n);
       await depository.createDebt(debtor, creditorB, tokenId, 50n);
 
-      await depository["enforceDebts(bytes32,uint256,uint256)"](debtor, tokenId, 1);
+      await depository.enforceDebts(debtor, tokenId, 1);
 
       expect(await depository._reserves(creditorA, tokenId)).to.equal(70n);
       expect(await depository._reserves(debtor, tokenId)).to.equal(30n);
@@ -121,7 +116,7 @@ describe.skip("Depository integration", function () {
       expect(currentDebtIndex).to.equal(1n);
 
       await depository.debugFundReserves(debtor, tokenId, 40n);
-      await depository["enforceDebts(bytes32,uint256)"](debtor, tokenId);
+      await depository.enforceDebts(debtor, tokenId, 100);
 
       expect(await depository._reserves(creditorB, tokenId)).to.equal(50n);
       expect(await depository._reserves(debtor, tokenId)).to.equal(20n);

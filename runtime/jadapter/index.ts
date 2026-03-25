@@ -50,7 +50,21 @@ class NonceTrackingWallet extends ethers.Wallet {
   private _managedNonce: number = -1;
 
   override async populateTransaction(tx: ethers.TransactionRequest): Promise<ethers.TransactionLike<string>> {
-    // Manually track nonce to avoid race conditions with pending txs
+    const explicitNonce =
+      typeof tx.nonce === 'number'
+        ? tx.nonce
+        : typeof tx.nonce === 'bigint'
+          ? Number(tx.nonce)
+          : null;
+
+    if (explicitNonce !== null) {
+      if (this._managedNonce < explicitNonce + 1) {
+        this._managedNonce = explicitNonce + 1;
+      }
+      return super.populateTransaction({ ...tx, nonce: explicitNonce });
+    }
+
+    // Manually track nonce to avoid race conditions with pending txs.
     if (this._managedNonce === -1) {
       const address = await this.getAddress();
       this._managedNonce = await this.provider!.getTransactionCount(address, 'pending');

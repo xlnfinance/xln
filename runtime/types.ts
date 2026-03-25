@@ -1876,7 +1876,7 @@ export interface Env {
     wakeRequested?: boolean;
     clockPrimed?: boolean;
     persistencePaused?: boolean;
-    lastFrameAt?: number;
+    lastFrameAt?: number; // Wall-clock timestamp of the most recent processed runtime cycle
     processingPromise?: Promise<void> | null;
     p2p?: any;
     pendingP2PConfig?: any;
@@ -2152,7 +2152,7 @@ export interface HankoContext {
 export interface EntityProfile {
   entityId: string;
   name: string; // Human-readable name e.g., "Alice Corp", "Bob's DAO"
-  avatar?: string; // Custom avatar URL (fallback to generated identicon)
+  avatar?: string; // Custom avatar URL (fallback to generated avatar)
   bio?: string; // Short description
   website?: string; // Optional website URL
   lastUpdated: number; // Timestamp of last update

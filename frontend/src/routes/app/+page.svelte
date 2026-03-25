@@ -22,6 +22,7 @@
   let hasActiveTabLock = false;
   let activeTabLockReady = false;
   let embedBootReady = false;
+  let resettingEverything = false;
 
   function isResetHashActive(): boolean {
     if (!browser) return false;
@@ -40,6 +41,18 @@
     }
     history.replaceState(null, '', '/app');
     return false;
+  }
+
+  async function handleResetEverything(): Promise<void> {
+    if (resettingEverything) return;
+    const confirmed = window.confirm('Reset ALL local XLN data? Wallets, runtimes, settings, and IndexedDB databases will be deleted.');
+    if (!confirmed) return;
+    resettingEverything = true;
+    try {
+      await resetEverything('loading-screen');
+    } finally {
+      resettingEverything = false;
+    }
   }
 
   function syncModeFromLocation(): void {
@@ -185,8 +198,26 @@
   </div>
 {:else if !activeTabLockReady || $isLoading || !$xlnFunctions.isReady}
   <div class="loading-screen">
-    <img src="/img/finis.png" alt="Loading" class="loading-spinner" />
-    <p>Loading xln runtime...</p>
+    <div class="loading-shell">
+      <div class="loading-mark">
+        <div class="loading-halo"></div>
+        <img src="/img/finis.png" alt="XLN Runtime" class="loading-emblem" />
+      </div>
+      <div class="loading-copy">
+        <span class="loading-kicker">Secure Local Runtime</span>
+        <h1>Booting XLN</h1>
+        <p>Restoring vaults, ledgers, replicas, and local chain state.</p>
+      </div>
+      <div class="loading-status">
+        <span class="loading-dot"></span>
+        <span>Loading runtime modules and persistent state</span>
+      </div>
+      <div class="loading-actions">
+        <button class="loading-reset" type="button" on:click={handleResetEverything} disabled={resettingEverything}>
+          {resettingEverything ? 'Resetting...' : 'Reset Everything'}
+        </button>
+      </div>
+    </div>
   </div>
 {:else if $error}
   <div class="error-screen">
@@ -220,25 +251,145 @@
     align-items: center;
     justify-content: center;
     height: 100vh;
-    background: var(--theme-bg-gradient, #0a0a0a);
+    background:
+      radial-gradient(circle at top, rgba(250, 204, 21, 0.08), transparent 32%),
+      radial-gradient(circle at bottom, rgba(251, 191, 36, 0.05), transparent 28%),
+      linear-gradient(180deg, #0d0d10 0%, #09090b 100%);
     color: var(--theme-text-primary, #e8e8e8);
   }
 
-  .loading-spinner {
-    width: 320px;
-    height: 320px;
-    animation: spin 2s linear infinite;
+  .loading-shell {
+    width: min(420px, calc(100vw - 40px));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    padding: 36px 28px 30px;
+    border: 1px solid rgba(251, 191, 36, 0.16);
+    border-radius: 28px;
+    background:
+      linear-gradient(180deg, rgba(24, 24, 27, 0.94), rgba(10, 10, 12, 0.96));
+    box-shadow:
+      0 28px 80px rgba(0, 0, 0, 0.42),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
   }
 
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+  .loading-mark {
+    position: relative;
+    width: 196px;
+    height: 196px;
+    display: grid;
+    place-items: center;
   }
 
-  .loading-screen p {
-    margin-top: 24px;
-    font-size: 18px;
-    color: var(--theme-accent, #00d9ff);
+  .loading-halo {
+    position: absolute;
+    inset: 20px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(250, 204, 21, 0.14), transparent 70%);
+    filter: blur(10px);
+    animation: pulse 2.8s ease-in-out infinite;
+  }
+
+  .loading-emblem {
+    position: relative;
+    width: 172px;
+    height: 172px;
+    object-fit: contain;
+    filter: drop-shadow(0 18px 34px rgba(0, 0, 0, 0.42));
+    animation: drift 4.8s ease-in-out infinite;
+  }
+
+  .loading-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    text-align: center;
+  }
+
+  .loading-kicker {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(250, 204, 21, 0.76);
+  }
+
+  .loading-copy h1 {
+    margin: 0;
+    font-size: clamp(28px, 4vw, 36px);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: #fafaf9;
+  }
+
+  .loading-copy p {
+    margin: 0;
+    max-width: 32ch;
+    font-size: 14px;
+    line-height: 1.55;
+    color: rgba(231, 229, 228, 0.74);
+  }
+
+  .loading-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: rgba(231, 229, 228, 0.76);
+    font-size: 12px;
+  }
+
+  .loading-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #facc15;
+    box-shadow: 0 0 14px rgba(250, 204, 21, 0.66);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+
+  .loading-actions {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .loading-reset {
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(239, 68, 68, 0.22);
+    background: linear-gradient(180deg, rgba(69, 10, 10, 0.94), rgba(28, 12, 12, 0.96));
+    color: #fca5a5;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  }
+
+  .loading-reset:hover:not(:disabled) {
+    transform: translateY(-1px);
+    color: #fecaca;
+    border-color: rgba(248, 113, 113, 0.44);
+  }
+
+  .loading-reset:disabled {
+    opacity: 0.55;
+    cursor: wait;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 0.72; transform: scale(0.98); }
+    50% { opacity: 1; transform: scale(1.03); }
+  }
+
+  @keyframes drift {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
   }
 
   .error-screen {

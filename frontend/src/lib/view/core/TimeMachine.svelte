@@ -494,7 +494,7 @@
       max={maxTimeIndex}
       value={$timeIndex}
       on:input={handleSliderInput}
-      style="--progress: {progressPercent}%"
+      style="--xln-slider-progress: {progressPercent}%"
       disabled={$history.length === 0}
     />
     <span class="time-label end">{totalTime}</span>
@@ -569,7 +569,9 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    min-width: 200px;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .frame-info {
@@ -676,86 +678,9 @@
   /* Progress Scrubber */
   .scrubber {
     flex: 1;
-    height: 4px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 2px;
+    min-width: 0;
+    max-width: 100%;
     cursor: pointer;
-    outline: none;
-  }
-
-  /* WebKit (Chrome/Safari) */
-  .scrubber::-webkit-slider-track {
-    width: 100%;
-    height: 4px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 2px;
-  }
-
-  .scrubber::-webkit-slider-runnable-track {
-    width: 100%;
-    height: 4px;
-    background: linear-gradient(
-      to right,
-      rgba(0, 122, 255, 0.8) 0%,
-      rgba(0, 122, 255, 0.8) var(--progress, 0%),
-      rgba(255, 255, 255, 0.1) var(--progress, 0%),
-      rgba(255, 255, 255, 0.1) 100%
-    );
-    border-radius: 2px;
-  }
-
-  .scrubber::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 12px;
-    height: 12px;
-    margin-top: -4px;
-    border-radius: 50%;
-    background: white;
-    border: 2px solid rgba(0, 122, 255, 1);
-    cursor: grab;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-    transition: transform 0.15s;
-  }
-
-  .scrubber:active::-webkit-slider-thumb {
-    cursor: grabbing;
-    transform: scale(1.15);
-  }
-
-  /* Firefox */
-  .scrubber::-moz-range-track {
-    width: 100%;
-    height: 4px;
-    background: linear-gradient(
-      to right,
-      rgba(0, 122, 255, 0.8) 0%,
-      rgba(0, 122, 255, 0.8) var(--progress, 0%),
-      rgba(255, 255, 255, 0.1) var(--progress, 0%),
-      rgba(255, 255, 255, 0.1) 100%
-    );
-    border-radius: 2px;
-  }
-
-  .scrubber::-moz-range-progress {
-    height: 4px;
-    background: rgba(0, 122, 255, 0.8);
-    border-radius: 2px 0 0 2px;
-  }
-
-  .scrubber::-moz-range-thumb {
-    width: 12px;
-    height: 12px;
-    border: 2px solid rgba(0, 122, 255, 1);
-    border-radius: 50%;
-    background: white;
-    cursor: grab;
-  }
-
-  .scrubber:active::-moz-range-thumb {
-    cursor: grabbing;
   }
 
   .scrubber:disabled {

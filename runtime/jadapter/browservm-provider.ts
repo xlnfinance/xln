@@ -427,7 +427,7 @@ export class BrowserVMProvider {
     const packedToken = await this.packTokenReference(0, tokenAddress, 0);
     await this.approveErc20(this.deployerPrivKey, tokenAddress, this.depositoryAddress!.toString(), TOKEN_REGISTRATION_AMOUNT);
 
-    const callData = this.depositoryInterface!.encodeFunctionData('externalTokenToReserve', [{
+    const callData = this.depositoryInterface!.encodeFunctionData('adminRegisterExternalToken', [{
       entity: ethers.ZeroHash,
       contractAddress: tokenAddress,
       externalTokenId: 0,
@@ -448,7 +448,7 @@ export class BrowserVMProvider {
     const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
-      throw new Error(`externalTokenToReserve failed: ${result.execResult.exceptionError}`);
+      throw new Error(`adminRegisterExternalToken failed: ${result.execResult.exceptionError}`);
     }
 
     const tokenId = await this.lookupTokenId(packedToken);
@@ -797,29 +797,6 @@ export class BrowserVMProvider {
 
     // Emit events to j-watcher subscribers
     return this.emitEvents(result.execResult.logs || []);
-  }
-
-  /** Admin: Set default dispute delay (blocks) */
-  async setDefaultDisputeDelay(delayBlocks: number): Promise<void> {
-    if (!this.depositoryAddress || !this.depositoryInterface) {
-      throw new Error('Depository not deployed');
-    }
-
-    const callData = this.depositoryInterface.encodeFunctionData('setDefaultDisputeDelay', [delayBlocks]);
-    const currentNonce = await this.getCurrentNonce();
-    const tx = createLegacyTx({
-      to: this.depositoryAddress,
-      gasLimit: 500000n,
-      gasPrice: 10n,
-      data: hexToBytes(callData as `0x${string}`),
-      nonce: currentNonce,
-    }, { common: this.common }).sign(this.deployerPrivKey);
-
-    const result = await this.runTxInBlock(tx);
-    if (result.execResult.exceptionError) {
-      throw new Error(`setDefaultDisputeDelay failed: ${result.execResult.exceptionError}`);
-    }
-    console.log(`[BrowserVM] Default dispute delay set to ${delayBlocks} blocks`);
   }
 
   /** Get contract address */
@@ -1191,11 +1168,11 @@ export class BrowserVMProvider {
   }
 
   /** Enforce debts (FIFO) */
-  async enforceDebts(entityId: string, tokenId: number): Promise<bigint> {
+  async enforceDebts(entityId: string, tokenId: number): Promise<void> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
     // Use ethers Interface for ABI encoding (same as mainnet)
-    const callData = this.depositoryInterface.encodeFunctionData('enforceDebts', [entityId, tokenId]);
+    const callData = this.depositoryInterface.encodeFunctionData('enforceDebts', [entityId, tokenId, 100n]);
 
     const currentNonce = await this.getCurrentNonce();
     const tx = createLegacyTx({
@@ -1210,26 +1187,18 @@ export class BrowserVMProvider {
 
     if (result.execResult.exceptionError) {
       console.error(`[BrowserVM] enforceDebts failed:`, result.execResult.exceptionError);
-      return 0n;
+      throw new Error(`enforceDebts failed: ${String(result.execResult.exceptionError)}`);
     }
-
-    try {
-      const decoded = this.depositoryInterface.decodeFunctionResult('enforceDebts', result.execResult.returnValue);
-      console.log(`[BrowserVM] Enforced debts for ${entityId.slice(0, 10)}..., remaining: ${decoded[0]}`);
-      return decoded[0];
-    } catch {
-      return 0n;
-    }
+    console.log(`[BrowserVM] Enforced debts for ${entityId.slice(0, 10)}...`);
   }
 
   /** Process batch (Hanko) - calls Depository.processBatch() directly (no TS logic duplication) */
-  async processBatch(encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint): Promise<EVMEvent[]> {
-    return this.processBatchWithSigner(encodedBatch, entityProvider, hankoData, nonce, this.deployerPrivKey);
+  async processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<EVMEvent[]> {
+    return this.processBatchWithSigner(encodedBatch, hankoData, nonce, this.deployerPrivKey);
   }
 
   private async processBatchWithSigner(
     encodedBatch: string,
-    entityProvider: string,
     hankoData: string,
     nonce: bigint,
     txPrivKey: Uint8Array,
@@ -1242,7 +1211,7 @@ export class BrowserVMProvider {
 
     // BrowserVM submits as admin to mirror J-machine execution (Hanko still enforced on-chain).
     // Call Depository.processBatch() - ALL logic in Solidity (single source of truth)
-    const callData = this.depositoryInterface.encodeFunctionData('processBatch', [encodedBatch, entityProvider, hankoData, nonce]);
+    const callData = this.depositoryInterface.encodeFunctionData('processBatch', [encodedBatch, hankoData, nonce]);
 
     const currentNonce = await this.getNonceForAddress(createAddressFromPrivateKey(txPrivKey));
     const tx = createLegacyTx({
@@ -1350,7 +1319,6 @@ export class BrowserVMProvider {
     );
     return this.processBatchWithSigner(
       encodedBatch,
-      this.entityProviderAddress.toString(),
       hankoData,
       nextNonce,
       txPrivKey,
@@ -1396,8 +1364,7 @@ export class BrowserVMProvider {
       throw new Error('Depository not deployed');
     }
     const normalizedEntityId = normalizeEntityId(entityId);
-    const entityAddress = ethers.getAddress(`0x${normalizedEntityId.slice(-40)}`);
-    const callData = this.depositoryInterface.encodeFunctionData('entityNonces', [entityAddress]);
+    const callData = this.depositoryInterface.encodeFunctionData('entityNonces', [normalizedEntityId]);
     const result = await this.vm.evm.runCall({
       to: this.depositoryAddress,
       caller: this.deployerAddress,

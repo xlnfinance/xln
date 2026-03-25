@@ -8,6 +8,7 @@
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { EntityReplica, AccountMachine } from '$lib/types/ui';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
+  import { entityAvatar } from '$lib/utils/avatar';
   import { resolveEntityName, scheduleGossipProfileFetch } from '$lib/utils/entityNaming';
   import { getAccountUiStatus, getAccountUiStatusLabel, type AccountUiStatus } from '$lib/utils/accountStatus';
 
@@ -25,7 +26,7 @@
     id: string;
     name: string;
     shortId: string;
-    avatarUrl: string;
+    avatar: string;
     status: AccountUiStatus;
     statusLabel: string;
     pendingCount: number;
@@ -54,7 +55,7 @@
         id: counterpartyId,
         name: profileName || counterpartyId,
         shortId: counterpartyId,
-        avatarUrl: xlnFuncs?.isReady ? xlnFuncs.generateEntityAvatar?.(counterpartyId) || '' : '',
+        avatar: entityAvatar(xlnFuncs, counterpartyId),
         status,
         statusLabel: getAccountUiStatusLabel(status),
         pendingCount: acc.mempool?.length || 0
@@ -89,8 +90,8 @@
 
 <Dropdown bind:open={isOpen} minWidth={180} maxWidth={300}>
   <span slot="trigger" class="trigger-content">
-    {#if selectedAccount?.avatarUrl}
-      <img src={selectedAccount.avatarUrl} alt="" class="trigger-avatar" />
+    {#if selectedAccount?.avatar}
+      <img src={selectedAccount.avatar} alt="" class="trigger-avatar" />
     {/if}
     <span class="trigger-text">{displayText}</span>
     <span class="trigger-arrow" class:open={isOpen}>▼</span>
@@ -121,8 +122,8 @@
           class:selected={account.id === selectedAccountId}
           on:click={() => selectAccount(account.id)}
         >
-          {#if account.avatarUrl}
-            <img src={account.avatarUrl} alt="" class="account-avatar" />
+          {#if account.avatar}
+            <img src={account.avatar} alt="" class="account-avatar" />
           {/if}
           <span class="account-meta">
             <span class="account-name">{account.name}</span>

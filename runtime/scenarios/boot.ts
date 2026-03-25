@@ -8,6 +8,7 @@ import type { JAdapter, JAdapterMode } from '../jadapter/types';
 import { ethers } from 'ethers';
 import { getCachedSignerPrivateKey } from '../account-crypto';
 import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
+import { isLoopbackUrl } from '../loopback-url';
 import { ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge } from './helpers';
 
 export type { JAdapterMode };
@@ -16,10 +17,8 @@ const IS_BROWSER_RUNTIME = typeof window !== 'undefined' && typeof document !== 
 const IS_NODE_RUNTIME = !IS_BROWSER_RUNTIME;
 
 const getDefaultAnvilRpcUrl = (): string => {
-  if (!IS_BROWSER_RUNTIME) return 'http://127.0.0.1:8545';
-  const protocol = window.location.protocol || 'http:';
-  const host = window.location.host || 'localhost:8080';
-  return `${protocol}//${host}/rpc`;
+  if (!IS_BROWSER_RUNTIME) return 'http://localhost:8545';
+  return new URL('/rpc', window.location.origin).toString();
 };
 
 type ManagedAnvilProcess = {
@@ -44,9 +43,7 @@ const readRpcChainId = async (rpcUrl: string): Promise<number | null> => {
 
 const isLocalRpcUrl = (rpcUrl: string): boolean => {
   try {
-    const parsed = new URL(rpcUrl);
-    const host = parsed.hostname.toLowerCase();
-    return host === '127.0.0.1' || host === 'localhost';
+    return isLoopbackUrl(rpcUrl);
   } catch {
     return false;
   }
@@ -341,7 +338,13 @@ export async function registerEntities(
 
   // 1. Compute board hashes and register on-chain
   const boardHashes = entities.map(e => computeBoardHash(e.signer));
-  const { entityNumbers } = await jadapter.registerNumberedEntitiesBatch(boardHashes);
+  const nextEntityNumber = await jadapter.entityProvider.nextNumber();
+  const registerTx = await jadapter.entityProvider.registerNumberedEntitiesBatch(boardHashes);
+  const registerReceipt = await registerTx.wait();
+  if (!registerReceipt || registerReceipt.status === 0) {
+    throw new Error('registerNumberedEntitiesBatch failed');
+  }
+  const entityNumbers = boardHashes.map((_, index) => Number(nextEntityNumber) + index);
 
   // 2. Build entity info from returned numbers
   const result: RegisteredEntity[] = entities.map((e, i) => ({

@@ -3,6 +3,9 @@
   import { getXLN, xlnEnvironment } from '$lib/stores/xlnStore';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
+  import { isCounterpartyBlockedByDispute } from '$lib/utils/entityReplica';
+
+  export let currentEntityId: string = '';
 
   $: activeEnv = $xlnEnvironment;
 
@@ -20,6 +23,7 @@
 
   $: normalizedSearch = search.trim().toLowerCase();
   $: filtered = profiles.filter((p) => {
+    if (currentEntityId && isCounterpartyBlockedByDispute(activeEnv, currentEntityId, p.entityId)) return false;
     if (!normalizedSearch) return true;
     const name = String(p.name || '').toLowerCase();
     const id = String(p.entityId || '').toLowerCase();
@@ -177,9 +181,9 @@
   }
 
   .btn-clear {
-    border: 1px solid #3a2b2c;
-    background: #1d1213;
-    color: #d7a8ac;
+    border: 1px solid rgba(248, 113, 113, 0.28);
+    background: rgba(127, 29, 29, 0.12);
+    color: #fca5a5;
     padding: 7px 10px;
     border-radius: 8px;
     font-size: 12px;
@@ -193,9 +197,9 @@
 
   .search-row input {
     width: 100%;
-    background: #0f141c;
-    color: #d7dce6;
-    border: 1px solid #262f3d;
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent);
+    color: var(--theme-text-primary, #e4e4e7);
+    border: 1px solid color-mix(in srgb, var(--theme-input-border, #27272a) 76%, transparent);
     border-radius: 8px;
     height: 34px;
     padding: 0 10px;
@@ -216,15 +220,19 @@
     justify-content: space-between;
     gap: 10px;
     align-items: center;
-    border: 1px solid #1d2734;
-    background: #0b1118;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 68%, transparent);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 86%, transparent);
     border-radius: 10px;
     padding: 10px;
   }
 
   .row.hub {
-    border-color: #4f3b20;
-    background: linear-gradient(180deg, #161109 0%, #0d1118 100%);
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 40%, transparent);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--theme-accent, #fbbf24) 10%, var(--theme-surface, #18181b)) 0%,
+      color-mix(in srgb, var(--theme-surface, #18181b) 92%, transparent) 100%
+    );
   }
 
   .meta {
@@ -235,9 +243,9 @@
   }
 
   .chip {
-    border: 1px solid #273242;
-    background: #111925;
-    color: #8ea1b9;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 72%, transparent);
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 76%, transparent);
+    color: var(--theme-text-secondary, #a1a1aa);
     border-radius: 999px;
     padding: 2px 8px;
     font-size: 11px;
@@ -245,9 +253,9 @@
   }
 
   .error {
-    border: 1px solid #5a2c32;
-    background: #221116;
-    color: #ffb6bf;
+    border: 1px solid rgba(248, 113, 113, 0.32);
+    background: rgba(127, 29, 29, 0.14);
+    color: #fecaca;
     border-radius: 8px;
     padding: 8px 10px;
     font-size: 12px;

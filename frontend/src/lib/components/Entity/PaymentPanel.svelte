@@ -13,7 +13,7 @@
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
   import { routePreview } from '../../stores/routePreviewStore';
-  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
+  import { isCounterpartyBlockedByDispute, requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { toasts } from '$lib/stores/toastStore';
   import { keccak256, AbiCoder, hexlify } from 'ethers';
   import EntityInput from '../shared/EntityInput.svelte';
@@ -31,7 +31,6 @@
   } from './payment-routing';
 
   export let entityId: string;
-  export let contacts: Array<{ name: string; entityId: string }> = [];
 
   // Form state
   let targetEntityId = '';
@@ -73,10 +72,9 @@
   let payMaxAmount = 0n;
   let payMaxUsd = 0;
   let serverEntityNames = new Map<string, string>();
-  let paymentPanelEl: HTMLDivElement | null = null;
-  let routesPanelEl: HTMLDivElement | null = null;
   let refreshingRecipientOptions = false;
   let seededDefaultTarget = false;
+  let canPayNow = false;
   const REPEAT_OPTIONS = [
     { value: 0, label: 'No repeat' },
     { value: 1_000, label: 'Repeat 1s' },
@@ -350,50 +348,6 @@
     return Array.from(ids.values()).sort();
   })();
 
-  // Contacts for selector: self first, then known names from gossip, then parent-provided contacts.
-  $: selectorContacts = (() => {
-    const byEntity = new Map<string, { name: string; entityId: string }>();
-    const put = (rawEntityId: string, name: string) => {
-      const canonical = String(rawEntityId || '').trim();
-      const norm = normalizeEntityId(canonical);
-      if (!norm || byEntity.has(norm)) return;
-      byEntity.set(norm, { name, entityId: canonical });
-    };
-    if (entityId) {
-      const selfNorm = normalizeEntityId(entityId);
-      let selfReplica: EntityReplica | null = null;
-      if (currentReplicas) {
-        for (const replica of currentReplicas.values()) {
-          if (normalizeEntityId(replica.entityId) === selfNorm) {
-            selfReplica = replica;
-            break;
-          }
-        }
-      }
-      const selfProfile = (currentEnv?.gossip?.getProfiles?.() || []).find((profile) => normalizeEntityId(profile.entityId) === selfNorm) ?? null;
-      const selfName = selfReplica?.state?.profile?.name?.trim()
-        || selfProfile?.name?.trim()
-        || contacts.find((contact) => normalizeEntityId(contact.entityId) === selfNorm)?.name?.trim()
-        || 'Self';
-      put(entityId, `${selfName} (self)`);
-    }
-    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
-    for (const profile of profiles) {
-      const id = profile.entityId.trim();
-      if (!id) continue;
-      const name = profile.name.trim();
-      if (name) put(id, name);
-    }
-    for (const contact of contacts) {
-      if (!contact?.entityId) continue;
-      put(contact.entityId, contact.name);
-    }
-    const self = entityId ? byEntity.get(normalizeEntityId(entityId)) : null;
-    const rest = Array.from(byEntity.values())
-      .filter((c) => normalizeEntityId(c.entityId) !== normalizeEntityId(entityId))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    return self ? [self, ...rest] : rest;
-  })();
   $: if (!seededDefaultTarget && entityId) {
     if (!targetEntityId) targetEntityId = entityId;
     seededDefaultTarget = true;
@@ -450,12 +404,7 @@
   function getEntityName(id: string): string {
     if (!id) return 'Unknown';
     const norm = normalizeEntityId(id);
-    if (norm === normalizeEntityId(entityId)) {
-      const selfLabel = selectorContacts.find((contact) => normalizeEntityId(contact.entityId) === norm)?.name;
-      return selfLabel && selfLabel.trim() ? selfLabel.trim() : 'Self';
-    }
-    const contact = selectorContacts.find((c) => normalizeEntityId(c.entityId) === norm);
-    if (contact?.name) return contact.name;
+    if (norm === normalizeEntityId(entityId)) return 'Self';
     const serverName = serverEntityNames.get(norm);
     if (serverName) return serverName;
     const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === norm);
@@ -510,7 +459,7 @@
   function fillMaxPaymentAmount(): void {
     const maxAmount = computeLocalPayMax(tokenId);
     if (maxAmount <= 0n) return;
-    amount = formatTokenNumberOnly(maxAmount);
+    amount = formatTokenInputValue(tokenId, maxAmount);
   }
 
   $: payMaxAmount = computeLocalPayMax(tokenId);
@@ -519,6 +468,7 @@
   function isRouteableIntermediary(entity: string): boolean {
     // Routeability is a transport/security property, not a display-metadata property.
     // A hop is routeable iff we can encrypt for it and it is hub-like when profile exists.
+    if (currentEnv && entityId && isCounterpartyBlockedByDispute(currentEnv, entityId, entity)) return false;
     if (!extractEntityEncPubKey(currentReplicas, getGossipProfiles(), entity)) return false;
     const profile = getGossipProfileByEntityId(entity);
     if (!profile) return true; // allow local+gossip mixed discovery; key coverage is enforced above
@@ -544,6 +494,37 @@
       return raw.slice(0, raw.length - symbol.length).trimEnd();
     }
     return raw.trim();
+  }
+
+  function formatTokenInputValue(tokenIdValue: number, value: bigint): string {
+    const decimals = getTokenDecimals(tokenIdValue);
+    const negative = value < 0n;
+    const abs = negative ? -value : value;
+    const base = 10n ** BigInt(decimals);
+    const whole = abs / base;
+    const frac = abs % base;
+    let body = whole.toString();
+    if (frac > 0n) {
+      const fracText = frac.toString().padStart(decimals, '0').replace(/0+$/, '');
+      if (fracText.length > 0) body = `${body}.${fracText}`;
+    }
+    return `${negative ? '-' : ''}${body}`;
+  }
+
+  function formatCompactRouteFee(tokenIdValue: number, value: bigint): string {
+    const decimals = getTokenDecimals(tokenIdValue);
+    const negative = value < 0n;
+    const abs = negative ? -value : value;
+    const base = 10n ** BigInt(decimals);
+    const whole = abs / base;
+    const frac = abs % base;
+    let body = whole.toString();
+    if (frac > 0n) {
+      const fracRaw = frac.toString().padStart(decimals, '0');
+      const fracTrimmed = fracRaw.slice(0, 8).replace(/0+$/, '');
+      if (fracTrimmed.length > 0) body = `${body}.${fracTrimmed}`;
+    }
+    return `${negative ? '-' : ''}${body}`;
   }
 
   // Generate HTLC secret/hashlock pair (browser-side, outside consensus)
@@ -1113,6 +1094,7 @@
   async function findRoutes(preserveRepeatTimer = false, silent = false): Promise<boolean> {
     if (!targetEntityId || !amount) return;
 
+    const viewportY = typeof window === 'undefined' ? 0 : window.scrollY;
     findingRoutes = true;
     routes = [];
     selectedRouteIndex = -1;
@@ -1293,6 +1275,10 @@
       }
 
       if (routes.length > 0) selectedRouteIndex = 0;
+      await tick();
+      if (typeof window !== 'undefined' && window.scrollY !== viewportY) {
+        window.scrollTo(window.scrollX, viewportY);
+      }
       return routes.length > 0;
     } catch (error) {
       console.error('[Send] Route finding failed:', error);
@@ -1381,6 +1367,10 @@
     return buildEmbeddedRouteLabel(routes[0]!);
   }
 
+  function hasSelectedRoute(): boolean {
+    return selectedRouteIndex >= 0 && !!routes[selectedRouteIndex];
+  }
+
   async function payNowCheapest() {
     if (sendingPayment || findingRoutes) return;
     if (isSelfRecipient) return;
@@ -1388,6 +1378,15 @@
     if (routes.length === 0) return;
     selectedRouteIndex = 0; // routes are sorted by cheapest fee by default
     await sendPayment(true);
+  }
+
+  async function payUsingCurrentIntent(): Promise<void> {
+    if (sendingPayment || findingRoutes) return;
+    if (hasSelectedRoute()) {
+      await sendPayment(true);
+      return;
+    }
+    await payNowCheapest();
   }
 
   export async function embeddedPayUsingFirstRoute(): Promise<void> {
@@ -1575,6 +1574,14 @@
     repeatStoppedReason = '';
   }
 
+  $: canPayNow =
+    !!targetEntityId &&
+    !!amount &&
+    activeIsLive &&
+    !findingRoutes &&
+    !sendingPayment &&
+    (!isSelfRecipient || hasSelectedRoute());
+
   onMount(() => {
     applyPaymentPrefillFromURL();
     void refreshServerEntityNames();
@@ -1591,7 +1598,7 @@
   });
 </script>
 
-<div bind:this={paymentPanelEl} class="payment-panel">
+<div class="payment-panel">
   <div class="invoice-entry">
     <div class="invoice-label-row">
       <label for="payment-invoice-input">Invoice</label>
@@ -1638,7 +1645,6 @@
         label="Entity"
         value={targetEntityId}
         entities={allEntities}
-        contacts={selectorContacts}
         preferredId={entityId}
         disabled={invoiceLocked || findingRoutes || sendingPayment}
         on:change={handleTargetChange}
@@ -1684,7 +1690,7 @@
             on:click={fillMaxPaymentAmount}
             disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
           >
-            {formatTokenNumberOnly(payMaxAmount)} {getTokenSymbol(tokenId)} ({formatUsdHint(payMaxUsd)})
+            {formatTokenInputValue(tokenId, payMaxAmount)} {getTokenSymbol(tokenId)} ({formatUsdHint(payMaxUsd)})
           </button>
           <div class="inline-token-select">
             <TokenSelect
@@ -1715,23 +1721,6 @@
     {/if}
   </div>
 
-  <div class="payment-actions">
-    <button
-      class="btn-pay-now"
-      on:click={payNowCheapest}
-      disabled={!targetEntityId || !amount || findingRoutes || sendingPayment || !activeIsLive || isSelfRecipient}
-    >
-      {sendingPayment ? 'Sending...' : (findingRoutes ? 'Finding Routes...' : 'Pay Now')}
-    </button>
-    <button
-      class="btn-find"
-      on:click={() => void findRoutes(false)}
-      disabled={!targetEntityId || !amount || findingRoutes || sendingPayment}
-    >
-      {findingRoutes ? 'Finding Routes...' : 'Find Routes'}
-    </button>
-  </div>
-
   {#if isSelfRecipient}
     <div class="payment-note">
       Self-payment needs an explicit route. Use <strong>Find Routes</strong> first instead of auto-pay.
@@ -1739,7 +1728,7 @@
   {/if}
 
   {#if routes.length > 0}
-    <div bind:this={routesPanelEl} class="routes">
+    <div class="routes">
       <div class="routes-header">
         <h4>Routes ({routes.length})</h4>
       </div>
@@ -1752,6 +1741,7 @@
               value={index}
               disabled={sendingPayment}
             />
+            <span class="route-marker" aria-hidden="true"></span>
             <div class="route-info">
               <div class="route-cards">
                 {#each route.path as hopId, hopIndex}
@@ -1763,59 +1753,45 @@
                       clickable={false}
                       copyable={false}
                       showAddress={false}
-                      size={24}
+                      size={20}
                     />
                   </div>
                   {#if hopIndex < route.path.length - 1}
                     <span class="hop-arrow">→</span>
-                    {#if route.hops[hopIndex] && route.hops[hopIndex].fee > 0n}
-                      <span class="hop-fee">({formatTokenNumberOnly(route.hops[hopIndex].fee)})</span>
-                    {/if}
                   {/if}
                 {/each}
               </div>
               <span class="route-meta">
-                {route.hops.length} hop{route.hops.length !== 1 ? 's' : ''}
-              </span>
-              <span class="route-meta">
-                Fee: {formatTokenNumberOnly(route.totalFee)}
+                Fee {formatCompactRouteFee(tokenId, route.totalFee)} {getTokenSymbol(tokenId)}
               </span>
             </div>
           </label>
         {/each}
       </div>
     </div>
+  {/if}
+
+  <div class="payment-actions">
     <div class="send-controls">
       <button
-        class="btn-send"
-        on:click={() => sendPayment(true)}
-        disabled={selectedRouteIndex < 0 || sendingPayment}
+        class="btn-pay-now"
+        on:click={() => void payUsingCurrentIntent()}
+        disabled={!canPayNow}
       >
-        {sendingPayment ? 'Sending...' : 'Send On Selected Route'}
+        {sendingPayment ? 'Sending...' : (findingRoutes ? 'Finding Routes...' : 'Pay Now')}
       </button>
-      <label class="repeat-control">
-        <span>Repeat</span>
-        <select value={repeatIntervalMs} on:change={handleRepeatChange} disabled={sendingPayment}>
-          {#each REPEAT_OPTIONS as option}
-            <option value={option.value}>{option.label}</option>
-          {/each}
-        </select>
-      </label>
+      <button
+        class="btn-find"
+        on:click={() => void findRoutes(false)}
+        disabled={!targetEntityId || !amount || findingRoutes || sendingPayment}
+      >
+        {findingRoutes ? 'Finding Routes...' : 'Find Routes'}
+      </button>
     </div>
-    {#if repeatIntervalMs > 0}
-      <div class="repeat-status">
-        {#if repeatTimer}
-        Auto-send every {repeatIntervalMs >= 60000 ? `${Math.floor(repeatIntervalMs / 60000)}m` : `${Math.floor(repeatIntervalMs / 1000)}s`}
-        {:else}
-        Repeat armed. Starts after the next successful payment.
-        {/if}
-      </div>
-    {:else if repeatStoppedReason}
-      <div class="repeat-status repeat-stopped">
-        Auto-repeat stopped: {repeatStoppedReason}
-      </div>
-    {/if}
-  {/if}
+    <!-- Repeat controls intentionally hidden for now. Keep timer wiring for later re-enable. -->
+  </div>
+
+  <!-- Repeat status intentionally hidden with repeat controls. -->
 
 </div>
 
@@ -2102,8 +2078,8 @@
   }
 
   .payment-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 12px;
   }
 
@@ -2220,11 +2196,15 @@
   }
 
   .send-controls {
-    margin-top: 12px;
     display: grid;
     grid-template-columns: 1fr auto;
     gap: 12px;
     align-items: end;
+  }
+
+  .send-controls-secondary {
+    grid-template-columns: auto;
+    justify-content: end;
   }
 
   .repeat-control {
@@ -2277,6 +2257,26 @@
   .routes-scroll {
     max-height: 360px;
     overflow-y: auto;
+    scrollbar-color: var(--theme-scrollbar-thumb, #27272a) transparent;
+  }
+
+  .routes-scroll::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  .routes-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .routes-scroll::-webkit-scrollbar-thumb {
+    background: var(--theme-scrollbar-thumb, #27272a);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .routes-scroll::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--theme-scrollbar-thumb, #27272a) 82%, white 18%);
   }
 
   .routes-header {
@@ -2296,9 +2296,9 @@
 
   .route-option {
     display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 10px;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
     background: #1c1917;
     border: 1px solid #292524;
     border-radius: 8px;
@@ -2317,15 +2317,35 @@
   }
 
   .route-option input[type="radio"] {
-    width: auto;
-    margin-top: 2px;
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    width: 0;
+    height: 0;
+    margin: 0;
+  }
+
+  .route-marker {
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    border: 2px solid rgba(255, 255, 255, 0.7);
+    background: transparent;
+    flex: 0 0 auto;
+    margin-top: 1px;
+  }
+
+  .route-option.selected .route-marker {
+    border-color: #f8fafc;
+    background: radial-gradient(circle at center, #3b82f6 0 40%, transparent 45%);
   }
 
   .route-info {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 1px;
+    min-width: 0;
   }
 
   .route-path {
@@ -2338,12 +2358,22 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .route-cards :global(.entity-identity) {
     gap: 6px;
   }
 
+  .route-cards :global(.name) {
+    font-size: 9px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
   .hop-card {
-    padding: 4px 6px;
-    border-radius: 8px;
+    padding: 2px 5px;
+    border-radius: 7px;
     border: 1px solid #2a2623;
     background: #171311;
     min-width: 0;
@@ -2351,18 +2381,14 @@
 
   .hop-arrow {
     color: #7c7168;
-    font-size: 13px;
-  }
-
-  .hop-fee {
-    color: #a8a29e;
     font-size: 10px;
-    font-family: 'JetBrains Mono', monospace;
   }
 
   .route-meta {
-    font-size: 10px;
+    font-size: 8px;
     color: #71717a;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
   @media (max-width: 900px) {
@@ -2378,10 +2404,6 @@
   }
 
   @media (max-width: 900px) {
-    .payment-actions {
-      grid-template-columns: 1fr;
-    }
-
     .routes-scroll {
       max-height: none;
       overflow: visible;

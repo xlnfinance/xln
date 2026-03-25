@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
-pragma experimental ABIEncoderV2;
-
 import "./Token.sol";
 
 import "./ECDSA.sol";
-import "./console.sol";
-import "hardhat/console.sol";
 /* 
 Subcontracts - Programmable Delta Transformers
   function applyBatch(int[] memory deltas, bytes calldata encodedBatch,
@@ -23,9 +19,10 @@ Subcontracts - Programmable Delta Transformers
 
   This is DeFi within bilateral accounts. Genuinely new.
   */
-contract DeltaTransformer is Console {
+contract DeltaTransformer {
+  error InvalidDeltaIndex();
   mapping(bytes32 => uint) public hashToBlock;
-  uint MAX_FILL_RATIO = type(uint16).max;
+  uint256 constant MAX_FILL_RATIO = type(uint16).max;
 
   constructor() {
     revealSecret(bytes32(0));
@@ -54,15 +51,6 @@ contract DeltaTransformer is Console {
     uint subAmount;
   }
 
-  // https://en.wikipedia.org/wiki/Credit_default_swap
-  struct CreditDefaultSwap {
-    uint deltaIndex;
-    int amount;
-    address referenceEntity;
-    uint tokenId;
-    uint exerciseUntilBlock;
-  }
-
   function encodeBatch (Batch memory b) public pure returns (bytes memory) {
     return abi.encode(b);
   }
@@ -75,24 +63,24 @@ contract DeltaTransformer is Console {
     bytes calldata encodedBatch,
     bytes calldata leftArguments,
     bytes calldata rightArguments
-  ) public returns (int[] memory) {
+  ) public view returns (int[] memory) {
 
     Batch memory decodedBatch = abi.decode(encodedBatch, (Batch));
 
-    uint32[] memory lFillRatios;
-    uint32[] memory rFillRatios;
+    uint16[] memory lFillRatios;
+    uint16[] memory rFillRatios;
     bytes32[] memory lSecrets;
     bytes32[] memory rSecrets;
     if (leftArguments.length > 0) {
-      (lFillRatios, lSecrets) = abi.decode(leftArguments, (uint32[], bytes32[]));
+      (lFillRatios, lSecrets) = abi.decode(leftArguments, (uint16[], bytes32[]));
     } else {
-      lFillRatios = new uint32[](0);
+      lFillRatios = new uint16[](0);
       lSecrets = new bytes32[](0);
     }
     if (rightArguments.length > 0) {
-      (rFillRatios, rSecrets) = abi.decode(rightArguments, (uint32[], bytes32[]));
+      (rFillRatios, rSecrets) = abi.decode(rightArguments, (uint16[], bytes32[]));
     } else {
-      rFillRatios = new uint32[](0);
+      rFillRatios = new uint16[](0);
       rSecrets = new bytes32[](0);
     }
     
@@ -107,7 +95,7 @@ contract DeltaTransformer is Console {
 
       // Counterparty chooses fill ratio (maker doesn't).
       // Left-owned swap -> use right arguments; Right-owned swap -> use left arguments.
-      uint32 fillRatio = 0;
+      uint16 fillRatio = 0;
       if (swap.ownerIsLeft) {
         if (rightSwaps < rFillRatios.length) fillRatio = rFillRatios[rightSwaps];
         rightSwaps++;
@@ -123,7 +111,7 @@ contract DeltaTransformer is Console {
     return deltas;
   }
 
-  function applyPayment(int[] memory deltas, Payment memory payment, bytes32[] memory lSecrets, bytes32[] memory rSecrets) private {
+  function applyPayment(int[] memory deltas, Payment memory payment, bytes32[] memory lSecrets, bytes32[] memory rSecrets) private view {
     // Apply amount to delta if revealed on time.
     // Runtime default: secrets are passed in `lSecrets/rSecrets` via dispute arguments (calldata path).
     // Storage registry (`hashToBlock`) is kept as compatibility/debug fallback only.
@@ -138,10 +126,9 @@ contract DeltaTransformer is Console {
       }
     }
     if (!revealed) return;
+    if (payment.deltaIndex >= deltas.length) revert InvalidDeltaIndex();
 
-    logDeltas("Before payment", deltas);
     deltas[payment.deltaIndex] += payment.amount;
-    logDeltas("After payment", deltas);
   }
 
   function matchesSecret(bytes32 hashlock, bytes32[] memory secrets) private pure returns (bool) {
@@ -153,11 +140,10 @@ contract DeltaTransformer is Console {
     return false;
   }
 
-  function applySwap(int[] memory deltas, Swap memory swap, uint32 fillRatio) private {
-    logDeltas("Before swap", deltas);
+  function applySwap(int[] memory deltas, Swap memory swap, uint16 fillRatio) private pure {
+    if (swap.addDeltaIndex >= deltas.length || swap.subDeltaIndex >= deltas.length) revert InvalidDeltaIndex();
     deltas[swap.addDeltaIndex] += int(swap.addAmount * fillRatio / MAX_FILL_RATIO);
     deltas[swap.subDeltaIndex] -= int(swap.subAmount * fillRatio / MAX_FILL_RATIO);
-    logDeltas("After swap", deltas);
   }
 
 
@@ -167,9 +153,6 @@ contract DeltaTransformer is Console {
   function revealSecret(bytes32 secret) public {
     // Compatibility/debug helper: writes hash reveal into on-chain registry.
     // Current runtime payment/dispute flow does not require this for normal settlement.
-    console.log("Revealing HTLC secret:");
-    console.logBytes32(secret);
-    console.logBytes32(keccak256(abi.encode(secret)));
     hashToBlock[keccak256(abi.encode(secret))] = block.number;
   }
   
@@ -179,15 +162,4 @@ contract DeltaTransformer is Console {
       delete hashToBlock[hash];
     }
   }
-
-  function logDeltas(string memory _msg, int[] memory deltas) public pure {
-    console.log(_msg);
-    for (uint i = 0; i < deltas.length; i++) {
-      console.logInt(deltas[i]);
-    }
-    console.log('====================');
-  }
-
-
-
 }

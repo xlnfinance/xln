@@ -135,11 +135,12 @@ library Account {
     mapping(bytes => AccountInfo) storage _accounts,
     mapping(bytes => mapping(uint256 => AccountCollateral)) storage _collaterals,
     bytes32 entityId,
-    Settlement[] memory settlements
+    Settlement[] memory settlements,
+    address entityProvider
   ) external returns (bool completeSuccess) {
     completeSuccess = true;
     for (uint i = 0; i < settlements.length; i++) {
-      if (!_settleDiffs(_reserves, _accounts, _collaterals, entityId, settlements[i])) {
+      if (!_settleDiffs(_reserves, _accounts, _collaterals, entityId, settlements[i], entityProvider)) {
         completeSuccess = false;
       }
     }
@@ -247,7 +248,8 @@ library Account {
     mapping(bytes => AccountInfo) storage _accounts,
     mapping(bytes => mapping(uint256 => AccountCollateral)) storage _collaterals,
     bytes32 initiator,
-    Settlement memory s
+    Settlement memory s,
+    address entityProvider
   ) internal returns (bool) {
     bytes32 leftEntity = s.leftEntity;
     bytes32 rightEntity = s.rightEntity;
@@ -267,10 +269,7 @@ library Account {
       bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), acct_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds);
       bytes32 hash = keccak256(encoded_msg);
 
-      address ep = s.entityProvider;
-      require(ep != address(0), "EP_ZERO");
-
-      try IEntityProvider(ep).verifyHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
+      try IEntityProvider(entityProvider).verifyHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
         if (!valid || recoveredEntity != counterparty) {
           return false;
         }
@@ -349,6 +348,12 @@ library Account {
     address entityProvider
   ) internal returns (bool) {
     bytes memory acct_key = _accountKey(entityId, params.counterentity);
+
+    // Intentionally no explicit self-dispute reject here.
+    // If an entity signs a dispute against itself, that is treated as a
+    // self-inflicted/degenerate workflow rather than a protocol safety issue.
+    // We keep the account-key semantics uniform and prefer not to add another
+    // branch unless self-dispute becomes a real operational problem.
 
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
     if (params.nonce <= _accounts[acct_key].nonce) revert E2();

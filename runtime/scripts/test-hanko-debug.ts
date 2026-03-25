@@ -322,41 +322,6 @@ async function main() {
     // Skip empty settlement test - it changes nonce which breaks subsequent tests
     console.log('\n📦 Skipping empty settlement test (would change nonce)...');
 
-    // Compare hash computation between TypeScript and Solidity
-    console.log('\n🔍 Comparing hash computation...');
-    const depInterface = new ethers.Interface([
-      'function computeSettlementHash(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256,int256,int256,int256,int256)[] diffs, uint256[] forgiveDebtsInTokenIds) view returns (bytes32 hash, uint256 nonce, uint256 encodedMsgLength)'
-    ]);
-    const hashCallData = depInterface.encodeFunctionData('computeSettlementHash', [
-      leftEntity,
-      rightEntity,
-      diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
-      [],
-    ]);
-    const hashResult = await browserVM.executeTx({
-      to: browserVM.getDepositoryAddress(),
-      data: hashCallData,
-      gasLimit: 500000n,
-      value: 0n
-    });
-    // Since executeTx returns txHash not returnValue, we need vm.evm.runCall
-    // Let's use a raw call instead
-    const rawHashResult = await (browserVM as any).vm.evm.runCall({
-      to: (browserVM as any).depositoryAddress,
-      caller: (browserVM as any).deployerAddress,
-      data: ethers.getBytes(hashCallData),
-      gasLimit: 500000n,
-    });
-    if (!rawHashResult.execResult.exceptionError) {
-      const decoded = depInterface.decodeFunctionResult('computeSettlementHash', rawHashResult.execResult.returnValue);
-      console.log(`   Solidity hash: ${decoded[0]}`);
-      console.log(`   Solidity nonce: ${decoded[1]}`);
-      console.log(`   Solidity encodedMsgLength: ${decoded[2]}`);
-      console.log(`   TS hash (from sig): ${sig ? 'check signSettlement output above' : 'N/A'}`);
-    } else {
-      console.log(`   Hash call failed: ${rawHashResult.execResult.exceptionError}`);
-    }
-
     // ===============================================
     // HANKO TEST - RUN FIRST before nonce changes!
     // ===============================================

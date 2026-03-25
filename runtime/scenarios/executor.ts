@@ -225,7 +225,7 @@ async function handleImport(
   // CRITICAL: Get current max entity number from the active jurisdiction adapter
   const { connectJurisdictionAdapter } = await import('../jadapter');
   const jadapter = await connectJurisdictionAdapter(arrakis);
-  const currentMaxNumber = await jadapter.getNextEntityNumber();
+  const currentMaxNumber = Number(await jadapter.entityProvider.nextNumber());
 
   console.log(`  🔢 Current max entity number: ${currentMaxNumber - 1}, next will be: ${currentMaxNumber}`);
 

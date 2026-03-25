@@ -1,5 +1,6 @@
 <script lang="ts">
   import { xlnFunctions } from '$lib/stores/xlnStore';
+  import { entityAvatar } from '$lib/utils/avatar';
 
   export let entityId: string;
   export let name: string = '';
@@ -16,9 +17,7 @@
   $: hasRealName = (name || '').trim().length > 0;
   $: displayName = hasRealName ? (name || '').trim() : (safeEntityId || 'Unknown');
   $: detailAddress = safeEntityId;
-  $: identiconSvg = safeEntityId
-    ? (activeXlnFunctions?.isReady ? (activeXlnFunctions.generateEntityAvatar?.(safeEntityId) || '') : '')
-    : '';
+  $: avatar = entityAvatar(activeXlnFunctions, safeEntityId);
   $: href = safeEntityId ? `/address/${encodeURIComponent(safeEntityId)}` : '#';
 
   async function copyAddress(event: MouseEvent): Promise<void> {
@@ -36,49 +35,37 @@
   }
 </script>
 
-{#if clickable}
-  <a class="entity-identity" href={href} title={safeEntityId}>
-    <img class="avatar" src={identiconSvg} alt="" width={size} height={size} />
-    <div class="text">
-      {#if hasRealName}
+<div class="entity-identity" title={safeEntityId}>
+  <img class="avatar" src={avatar} alt="" width={size} height={size} />
+  <div class="text">
+    {#if hasRealName}
+      <div class="name-row">
         <div class="name">{displayName}</div>
-      {/if}
-      {#if showAddress}
-        <div class="address-wrap">
-          <code class="address">{detailAddress}</code>
-          {#if copyable}
-            <button class="copy" type="button" onclick={copyAddress}>{copied ? 'copied' : 'copy'}</button>
-          {/if}
-        </div>
-      {:else if !hasRealName}
-        <div class="address-wrap">
-          <code class="address">{detailAddress}</code>
-        </div>
-      {/if}
-    </div>
-  </a>
-{:else}
-  <div class="entity-identity" title={safeEntityId}>
-    <img class="avatar" src={identiconSvg} alt="" width={size} height={size} />
-    <div class="text">
-      {#if hasRealName}
-        <div class="name">{displayName}</div>
-      {/if}
-      {#if showAddress}
-        <div class="address-wrap">
-          <code class="address">{detailAddress}</code>
-          {#if copyable}
-            <button class="copy" type="button" onclick={copyAddress}>{copied ? 'copied' : 'copy'}</button>
-          {/if}
-        </div>
-      {:else if !hasRealName}
-        <div class="address-wrap">
-          <code class="address">{detailAddress}</code>
-        </div>
-      {/if}
-    </div>
+        {#if clickable && !showAddress}
+          <a class="open-link" href={href}>Address →</a>
+        {/if}
+      </div>
+    {/if}
+    {#if showAddress}
+      <div class="address-wrap">
+        <code class="address">{detailAddress}</code>
+        {#if copyable}
+          <button class="copy" type="button" onclick={copyAddress}>{copied ? 'copied' : 'copy'}</button>
+        {/if}
+        {#if clickable}
+          <a class="open-link" href={href}>Address →</a>
+        {/if}
+      </div>
+    {:else if !hasRealName}
+      <div class="address-wrap">
+        <code class="address">{detailAddress}</code>
+        {#if clickable}
+          <a class="open-link" href={href}>Address →</a>
+        {/if}
+      </div>
+    {/if}
   </div>
-{/if}
+</div>
 
 <style>
   .entity-identity {
@@ -100,6 +87,13 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+
+  .name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
   }
 
   .name {
@@ -138,6 +132,19 @@
     cursor: pointer;
     text-transform: uppercase;
     letter-spacing: 0.3px;
+  }
+
+  .open-link {
+    color: #bba36a;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+
+  .open-link:hover {
+    color: #f0c86a;
   }
 
   .entity-identity:hover .name {

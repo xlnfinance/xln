@@ -6,7 +6,6 @@
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
   import { resolveEntityName } from '$lib/utils/entityNaming';
-  import { getAccountUiStatus, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
@@ -44,12 +43,7 @@
   };
 
   $: iAmLeft = entityId < counterpartyId;
-  $: mempoolCount = Number(account.mempool?.length || 0);
-  $: hasPendingConsensus = Boolean(account.pendingFrame);
-  $: hasQueuedMempool = mempoolCount > 0;
   $: activeDispute = account.activeDispute ?? null;
-  $: uiStatus = getAccountUiStatus(account);
-  $: uiStatusLabel = getAccountUiStatusLabel(uiStatus);
   $: disputeTimeoutBlock = Number(activeDispute?.disputeTimeout ?? 0);
   $: currentJHeight = Math.max(
     Number(account.lastFinalizedJHeight ?? 0),
@@ -120,11 +114,11 @@
       rows.push({
         id: `pending-${account.pendingFrame.height}`,
         kind: 'pending',
-        frameLabel: `Pending Frame #${account.pendingFrame.height}`,
+        frameLabel: `Draft A#${account.pendingFrame.height}`,
         timestamp: Number(account.pendingFrame.timestamp || 0),
         statusLabel: pendingIsYou !== undefined
-          ? (pendingIsYou ? `You (${iAmLeft ? 'L' : 'R'})` : `Peer (${iAmLeft ? 'R' : 'L'})`)
-          : 'Pending',
+          ? (pendingIsYou ? `You (${iAmLeft ? 'L' : 'R'})` : `Counterparty (${iAmLeft ? 'R' : 'L'})`)
+          : 'Draft',
         byLeft: pendingByLeft,
         txs: Array.isArray(account.pendingFrame.accountTxs) ? account.pendingFrame.accountTxs : [],
       });
@@ -133,7 +127,7 @@
       rows.push({
         id: `mempool-${account.currentHeight}`,
         kind: 'mempool',
-        frameLabel: 'Mempool Queue',
+        frameLabel: 'Queued Broadcast',
         timestamp: Number(account.currentFrame?.timestamp || 0),
         statusLabel: `${account.mempool.length} queued`,
         txs: account.mempool,
@@ -146,10 +140,10 @@
       rows.push({
         id: `confirmed-${frame.height}`,
         kind: 'confirmed',
-        frameLabel: `Frame #${frame.height}`,
+        frameLabel: `A#${frame.height}`,
         timestamp: Number(frame.timestamp || 0),
         statusLabel: isYou !== undefined
-          ? (isYou ? `You (${iAmLeft ? 'L' : 'R'})` : `Peer (${iAmLeft ? 'R' : 'L'})`)
+          ? (isYou ? `You (${iAmLeft ? 'L' : 'R'})` : `Counterparty (${iAmLeft ? 'R' : 'L'})`)
           : 'Confirmed',
         byLeft: fByLeft,
         txs: Array.isArray(frame.accountTxs) ? frame.accountTxs : [],
@@ -527,29 +521,7 @@
 
       <div class="relay-status">
         <span class="conn-dot {relayStatus}"></span>
-        {#if reconnectCountdown}
-          <span class="reconnect-label">reconnect {reconnectCountdown.seconds}s</span>
-        {/if}
       </div>
-    </div>
-
-    <div class="header-row-bottom">
-      <span class="frame-badge">Frame #{account.currentFrame?.height ?? account.currentHeight ?? 0}</span>
-      <span class="jheight-badge">J#{currentJHeight}</span>
-      <span class="status-badge {uiStatus}">
-        {#if uiStatus === 'disputed'}
-          {uiStatusLabel} · {disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left
-        {:else if uiStatus === 'sent'}
-          {uiStatusLabel}{hasQueuedMempool ? ` · ${mempoolCount}` : ''}
-        {:else}
-          {uiStatusLabel}
-        {/if}
-      </span>
-      {#if account.hankoSignature}
-        <span class="trust-indicator verified" title="Cryptographically verified account state">🔒</span>
-      {:else}
-        <span class="trust-indicator pending" title="Awaiting cryptographic verification">⏳</span>
-      {/if}
     </div>
   </div>
 
@@ -739,16 +711,32 @@
 <style>
   .account-panel {
     min-height: 100%;
+    --account-panel-bg: color-mix(in srgb, var(--theme-background, #09090b) 96%, transparent);
+    --account-panel-surface: color-mix(in srgb, var(--theme-surface, #18181b) 92%, transparent);
+    --account-panel-surface-hover: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 92%, transparent);
+    --account-panel-border: color-mix(in srgb, var(--theme-border, #27272a) 80%, transparent);
+    --account-panel-border-strong: color-mix(in srgb, var(--theme-border, #27272a) 88%, white 12%);
+    --account-panel-text: var(--theme-text-primary, #e4e4e7);
+    --account-panel-text-secondary: var(--theme-text-secondary, #a1a1aa);
+    --account-panel-text-muted: var(--theme-text-muted, #71717a);
+    --account-panel-accent: var(--theme-accent, #fbbf24);
+    --account-panel-credit: var(--theme-credit, #4ade80);
+    --account-panel-debit: var(--theme-debit, #f43f5e);
     display: flex;
     flex-direction: column;
-    background: #0c0a09;
+    background: var(--account-panel-bg);
+    color: var(--account-panel-text);
   }
 
   .panel-header {
     display: flex;
     flex-direction: column;
-    border-bottom: 1px solid #292524;
-    background: linear-gradient(180deg, #1c1917 0%, #151310 100%);
+    border-bottom: 1px solid var(--account-panel-border);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--theme-header-bg, #151316) 90%, transparent) 0%,
+      color-mix(in srgb, var(--theme-background, #09090b) 96%, transparent) 100%
+    );
   }
 
   .header-row-top {
@@ -758,19 +746,11 @@
     padding: 12px 16px 8px;
   }
 
-  .header-row-bottom {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 16px 10px;
-    padding-left: 52px;
-  }
-
   .back-button {
     padding: 6px 10px;
     background: transparent;
-    border: 1px solid #3f3f46;
-    color: #a1a1aa;
+    border: 1px solid var(--account-panel-border);
+    color: var(--account-panel-text-secondary);
     border-radius: 8px;
     cursor: pointer;
     font-size: 14px;
@@ -778,9 +758,9 @@
   }
 
   .back-button:hover {
-    background: #27272a;
-    border-color: #52525b;
-    color: #fbbf24;
+    background: var(--account-panel-surface-hover);
+    border-color: var(--account-panel-border-strong);
+    color: var(--account-panel-accent);
   }
 
   .header-identity {
@@ -801,86 +781,16 @@
   }
 
   .conn-dot.connected {
-    background: #4ade80;
-    box-shadow: 0 0 4px rgba(74, 222, 128, 0.5);
+    background: var(--account-panel-credit);
+    box-shadow: 0 0 4px color-mix(in srgb, var(--account-panel-credit) 50%, transparent);
   }
 
   .conn-dot.reconnecting {
-    background: #fbbf24;
+    background: var(--account-panel-accent);
   }
 
   .conn-dot.disconnected {
-    background: #57534e;
-  }
-
-  .reconnect-label {
-    font-size: 0.65em;
-    color: #fbbf24;
-    font-family: monospace;
-  }
-
-  .frame-badge,
-  .jheight-badge {
-    padding: 3px 10px;
-    border-radius: 6px;
-    font-size: 0.75em;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .frame-badge {
-    background: #18181b;
-    border: 1px solid #27272a;
-    color: #a1a1aa;
-  }
-
-  .jheight-badge {
-    background: #18181b;
-    border: 1px solid #292524;
-    color: #d6d3d1;
-  }
-
-  .status-badge {
-    font-size: 0.72em;
-    padding: 3px 10px;
-    border-radius: 6px;
-    font-weight: 500;
-    text-transform: uppercase;
-  }
-
-  .status-badge.ready {
-    color: #4ade80;
-    background: rgba(74, 222, 128, 0.1);
-    border: 1px solid rgba(74, 222, 128, 0.15);
-  }
-
-  .status-badge.sent {
-    color: #fbbf24;
-    background: rgba(251, 191, 36, 0.1);
-    border: 1px solid rgba(251, 191, 36, 0.15);
-  }
-
-  .status-badge.disputed {
-    color: #fb7185;
-    background: rgba(244, 63, 94, 0.12);
-    border: 1px solid rgba(244, 63, 94, 0.3);
-  }
-
-  .status-badge.finalized_disputed {
-    color: #fca5a5;
-    background: rgba(153, 27, 27, 0.24);
-    border: 1px solid rgba(248, 113, 113, 0.32);
-  }
-
-  .trust-indicator {
-    font-size: 0.85em;
-  }
-
-  .trust-indicator.verified {
-    color: #4ade80;
-  }
-
-  .trust-indicator.pending {
-    color: #a8a29e;
+    background: color-mix(in srgb, var(--account-panel-text-muted) 58%, transparent);
   }
 
   .panel-content {
@@ -894,27 +804,27 @@
   .proof-card,
   .action-card,
   .frame-item {
-    background: #18181b;
-    border: 1px solid #292524;
+    background: var(--account-panel-surface);
+    border: 1px solid var(--account-panel-border);
     border-radius: 10px;
     padding: 12px;
   }
 
   .empty-token-state {
-    background: #18181b;
-    border: 1px solid #292524;
+    background: var(--account-panel-surface);
+    border: 1px solid var(--account-panel-border);
     border-radius: 10px;
     padding: 14px 12px;
-    color: #9ca3af;
+    color: var(--account-panel-text-secondary);
     font-size: 12px;
     font-style: italic;
   }
 
   .delta-expand,
   .delta-faucet {
-    border: 1px solid #3f3f46;
+    border: 1px solid var(--account-panel-border);
     background: transparent;
-    color: #d1d5db;
+    color: var(--account-panel-text);
     border-radius: 8px;
     padding: 5px 10px;
     cursor: pointer;
@@ -924,7 +834,7 @@
 
   .delta-details {
     margin-top: 8px;
-    border-top: 1px solid #292524;
+    border-top: 1px solid var(--account-panel-border);
     padding-top: 10px;
     display: flex;
     flex-direction: column;
@@ -932,20 +842,20 @@
   }
 
   .detail-section {
-    border: 1px solid rgba(63, 63, 70, 0.32);
+    border: 1px solid color-mix(in srgb, var(--account-panel-border) 68%, transparent);
     border-radius: 10px;
-    background: rgba(24, 24, 27, 0.55);
+    background: color-mix(in srgb, var(--account-panel-surface) 72%, transparent);
     padding: 10px;
   }
 
   .detail-section.canonical {
-    border-color: rgba(120, 113, 108, 0.45);
-    background: rgba(20, 20, 22, 0.72);
+    border-color: color-mix(in srgb, var(--account-panel-border-strong) 72%, transparent);
+    background: color-mix(in srgb, var(--account-panel-surface-hover) 84%, transparent);
   }
 
   .detail-section-title {
     margin: 0 0 8px;
-    color: #a1a1aa;
+    color: var(--account-panel-text-secondary);
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -963,20 +873,20 @@
     grid-template-columns: minmax(180px, 240px) minmax(140px, 1fr) minmax(140px, 1fr);
     gap: 8px;
     align-items: center;
-    border: 1px solid rgba(63, 63, 70, 0.28);
+    border: 1px solid color-mix(in srgb, var(--account-panel-border) 62%, transparent);
     border-radius: 8px;
-    background: rgba(12, 10, 9, 0.6);
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 68%, transparent);
     padding: 7px 9px;
   }
 
   .detail-head {
     margin-bottom: 4px;
     border-style: dashed;
-    background: rgba(24, 24, 27, 0.9);
+    background: color-mix(in srgb, var(--account-panel-surface) 90%, transparent);
   }
 
   .detail-header {
-    color: #9ca3af;
+    color: var(--account-panel-text-secondary);
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -990,7 +900,7 @@
 
   .detail-label,
   .detail-label-cell {
-    color: #9ca3af;
+    color: var(--account-panel-text-secondary);
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -999,7 +909,7 @@
 
   .detail-value,
   .detail-value-cell {
-    color: #e7e5e4;
+    color: var(--account-panel-text);
     font-size: 14px;
     font-family: 'JetBrains Mono', monospace;
     line-height: 1.2;
@@ -1013,19 +923,19 @@
   }
 
   .detail-value.coll {
-    color: #34d399;
+    color: var(--account-panel-credit);
   }
 
   .detail-value-cell.coll {
-    color: #34d399;
+    color: var(--account-panel-credit);
   }
 
   .detail-value.debt {
-    color: #fb7185;
+    color: color-mix(in srgb, var(--account-panel-debit) 72%, white 28%);
   }
 
   .detail-value-cell.debt {
-    color: #fb7185;
+    color: color-mix(in srgb, var(--account-panel-debit) 72%, white 28%);
   }
 
   .detail-list {
@@ -1035,9 +945,9 @@
   }
 
   .detail-line {
-    border: 1px solid rgba(63, 63, 70, 0.28);
+    border: 1px solid color-mix(in srgb, var(--account-panel-border) 62%, transparent);
     border-radius: 8px;
-    background: rgba(12, 10, 9, 0.6);
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 68%, transparent);
     padding: 7px 9px;
     display: flex;
     align-items: baseline;
@@ -1050,21 +960,21 @@
     align-items: center;
     gap: 8px;
     font-size: 12px;
-    color: #9ca3af;
+    color: var(--account-panel-text-secondary);
     flex-wrap: wrap;
   }
 
   .proof-header code {
     font-family: 'JetBrains Mono', monospace;
-    color: #d1d5db;
+    color: var(--account-panel-text);
   }
 
   .proof-ok {
-    color: #34d399;
+    color: var(--account-panel-credit);
   }
 
   .proof-pending {
-    color: #f59e0b;
+    color: var(--account-panel-accent);
   }
 
   .tx-cards {
@@ -1074,8 +984,8 @@
   }
 
   .tx-action-card {
-    background: rgba(24, 24, 27, 0.85);
-    border: 1px solid #34302c;
+    background: color-mix(in srgb, var(--account-panel-surface-hover) 88%, transparent);
+    border: 1px solid var(--account-panel-border);
     border-radius: 10px;
     padding: 10px;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
@@ -1093,17 +1003,17 @@
     display: inline-flex;
     align-items: center;
     border-radius: 999px;
-    border: 1px solid #3f3f46;
+    border: 1px solid var(--account-panel-border);
     padding: 3px 9px;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.02em;
-    color: #e7e5e4;
+    color: var(--account-panel-text);
   }
 
   .tx-type.tone-neutral {
-    border-color: #44403c;
-    color: #e7e5e4;
+    border-color: var(--account-panel-border-strong);
+    color: var(--account-panel-text);
     background: rgba(68, 64, 60, 0.2);
   }
 
@@ -1115,7 +1025,7 @@
 
   .tx-type.tone-warn {
     border-color: rgba(245, 158, 11, 0.45);
-    color: #fbbf24;
+    color: var(--account-panel-accent);
     background: rgba(245, 158, 11, 0.13);
   }
 
@@ -1126,7 +1036,7 @@
   }
 
   .tx-idx {
-    color: #78716c;
+    color: var(--account-panel-text-muted);
     font-size: 11px;
     font-family: 'JetBrains Mono', monospace;
   }
@@ -1138,10 +1048,10 @@
   }
 
   .tx-param {
-    border: 1px solid #312d2a;
+    border: 1px solid color-mix(in srgb, var(--account-panel-border) 66%, transparent);
     border-radius: 8px;
     padding: 6px 8px;
-    background: rgba(12, 10, 9, 0.65);
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 72%, transparent);
     display: flex;
     flex-direction: column;
     gap: 3px;
@@ -1149,7 +1059,7 @@
   }
 
   .tx-param-label {
-    color: #9ca3af;
+    color: var(--account-panel-text-secondary);
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -1157,7 +1067,7 @@
   }
 
   .tx-param-value {
-    color: #e7e5e4;
+    color: var(--account-panel-text);
     font-size: 12px;
     font-family: 'JetBrains Mono', monospace;
     line-height: 1.25;
@@ -1171,7 +1081,7 @@
   }
 
   .tx-param-value.tone-warn {
-    color: #fbbf24;
+    color: var(--account-panel-accent);
   }
 
   .tx-param-value.tone-danger {
@@ -1180,22 +1090,22 @@
 
   .management-card h4 {
     margin: 0 0 6px;
-    color: #f3f4f6;
+    color: var(--account-panel-text);
     font-size: 13px;
   }
 
   .dispute-status {
     margin: 0;
     font-size: 12px;
-    color: #fda4af;
+    color: color-mix(in srgb, var(--account-panel-debit) 68%, white 32%);
   }
 
   .dispute-status.queued {
-    color: #fb7185;
+    color: color-mix(in srgb, var(--account-panel-debit) 78%, white 22%);
   }
 
   .dispute-status.idle {
-    color: #9ca3af;
+    color: var(--account-panel-text-secondary);
   }
 
   .management-buttons {
@@ -1208,25 +1118,25 @@
   .action-button {
     border-radius: 8px;
     padding: 8px 12px;
-    border: 1px solid #3f3f46;
-    background: #18181b;
-    color: #f3f4f6;
+    border: 1px solid var(--account-panel-border);
+    background: var(--account-panel-surface);
+    color: var(--account-panel-text);
     cursor: pointer;
   }
 
   .action-button.settle {
-    border-color: #f59e0b;
-    color: #fbbf24;
+    border-color: color-mix(in srgb, var(--account-panel-accent) 60%, transparent);
+    color: var(--account-panel-accent);
   }
 
   .action-button.open {
-    border-color: #52525b;
-    color: #d6d3d1;
+    border-color: var(--account-panel-border-strong);
+    color: var(--account-panel-text-secondary);
   }
 
   .section h3 {
     margin: 4px 0 8px;
-    color: #9ca3af;
+    color: var(--account-panel-text-secondary);
     font-size: 0.8em;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -1243,23 +1153,23 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    color: #a8a29e;
+    color: var(--account-panel-text-secondary);
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
 
   .activity-filters select {
-    border: 1px solid #3f3f46;
+    border: 1px solid var(--account-panel-border);
     border-radius: 8px;
-    background: #111113;
-    color: #e7e5e4;
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 90%, transparent);
+    color: var(--account-panel-text);
     font-size: 12px;
     padding: 7px 8px;
   }
 
   .activity-filters select:focus-visible {
-    outline: 1px solid rgba(251, 191, 36, 0.7);
+    outline: 1px solid color-mix(in srgb, var(--account-panel-accent) 70%, transparent);
     outline-offset: 1px;
   }
 
@@ -1278,7 +1188,7 @@
   }
 
   .frame-status.pending {
-    color: #f59e0b;
+    color: var(--account-panel-accent);
   }
 
   .frame-status.mempool {
@@ -1286,11 +1196,11 @@
   }
 
   .frame-status.historical {
-    color: #34d399;
+    color: var(--account-panel-credit);
   }
 
   .frame-status.confirmed {
-    color: #34d399;
+    color: var(--account-panel-credit);
   }
 
   .frame-status.is-you {
@@ -1311,18 +1221,18 @@
 
   .frame-id,
   .frame-timestamp {
-    color: #9ca3af;
+    color: var(--account-panel-text-secondary);
   }
 
   .frame-empty {
     margin-top: 8px;
-    color: #6b7280;
+    color: var(--account-panel-text-muted);
     font-size: 11px;
   }
 
   .no-frames {
-    border: 1px dashed #3f3f46;
-    color: #78716c;
+    border: 1px dashed var(--account-panel-border);
+    color: var(--account-panel-text-muted);
     border-radius: 8px;
     padding: 10px;
     text-align: center;
@@ -1330,11 +1240,6 @@
   }
 
   @media (max-width: 768px) {
-    .header-row-bottom {
-      padding-left: 16px;
-      flex-wrap: wrap;
-    }
-
     .detail-grid-three {
       grid-template-columns: 1fr;
       gap: 3px;

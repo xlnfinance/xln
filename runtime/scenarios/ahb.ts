@@ -69,8 +69,7 @@ type RequiredBrowserVM = {
   debugFundReserves?: (entityId: string, tokenId: number, amount: bigint) => Promise<any[]>;
   captureStateRoot?: () => Promise<Uint8Array>;
   timeTravel?: (stateRoot: Uint8Array) => Promise<void>;
-  setDefaultDisputeDelay?: (delayBlocks: number) => Promise<void>;
-  processBatch?: (encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint) => Promise<any[]>;
+  processBatch?: (encodedBatch: string, hankoData: string, nonce: bigint) => Promise<any[]>;
 };
 const ONE_TOKEN = 10n ** DECIMALS;
 
@@ -2282,10 +2281,6 @@ export async function ahb(env: Env): Promise<void> {
     await process(env);
     const hubReserveAfterDrain = await jadapter.getReserves(hub.id, USDC_TOKEN_ID);
     assert(hubReserveAfterDrain === 0n, `PHASE 7: Hub reserve not fully drained (${hubReserveAfterDrain})`);
-  }
-
-  if (vm?.setDefaultDisputeDelay) {
-    await vm.setDefaultDisputeDelay(3);
   }
 
   const [, bobRepDispute] = findReplica(env, bob.id);

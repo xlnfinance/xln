@@ -72,11 +72,6 @@
   const signerWalletPrivateKey = $derived(
     signer ? vaultOperations.getSignerPrivateKey(0) : null
   );
-  const signerWalletIdenticon = $derived(
-    signerWalletAddress && xlnReady && activeXlnFunctions?.generateSignerAvatar
-      ? activeXlnFunctions.generateSignerAvatar(signerWalletAddress)
-      : ''
-  );
 
   // Active runtime (optional for multi-runtime setups)
   const activeRuntime = $derived.by(() => $runtimes.get($activeRuntimeId));
@@ -621,8 +616,8 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    background: #0a0a0a;
-    color: #e5e5e5;
+    background: var(--theme-background, #0a0a0a);
+    color: var(--theme-text-primary, #e5e5e5);
   }
 
   /* Content - below nav z-index so dropdowns overlay */
@@ -651,8 +646,8 @@
     align-items: center;
     gap: 12px;
     padding: 12px 16px;
-    background: rgba(255, 255, 255, 0.03);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 84%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 72%, transparent);
     position: sticky;
     top: 0;
     z-index: 10;
@@ -662,7 +657,7 @@
     margin: 0;
     font-size: 1rem;
     font-weight: 600;
-    color: var(--text-primary, #e6edf3);
+    color: var(--theme-text-primary, #e6edf3);
   }
 
   .panel-content :global(.entity-panel) {
@@ -680,19 +675,19 @@
     align-items: center;
     gap: 4px;
     padding: 6px 12px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
     border-radius: 6px;
-    color: var(--text-secondary, #8b949e);
+    color: var(--theme-text-secondary, #8b949e);
     font-size: 13px;
     cursor: pointer;
     transition: all 0.15s;
   }
 
   .back-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--text-primary, #e6edf3);
-    border-color: rgba(255, 255, 255, 0.2);
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 92%, transparent);
+    color: var(--theme-text-primary, #e6edf3);
+    border-color: color-mix(in srgb, var(--theme-border, #27272a) 86%, white 14%);
   }
 
   @media (max-width: 768px) {

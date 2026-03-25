@@ -12,11 +12,15 @@
   // Internal string representation for display
   let displayValue: string = '';
 
+  function decimalScale(decimals: number): bigint {
+    return 10n ** BigInt(decimals);
+  }
+
   // Convert BigInt to decimal string for display
   function bigintToDecimal(amount: bigint, decimals: number): string {
     if (amount === 0n) return '0';
 
-    const divisor = BigInt(10 ** decimals);
+    const divisor = decimalScale(decimals);
     const wholePart = amount / divisor;
     const fractionalPart = amount % divisor;
 
@@ -38,7 +42,7 @@
     const fractionalPart = parts[1] || '';
     const paddedFractional = fractionalPart.padEnd(decimals, '0').slice(0, decimals);
 
-    return wholePart * BigInt(10 ** decimals) + BigInt(paddedFractional || '0');
+    return wholePart * decimalScale(decimals) + BigInt(paddedFractional || '0');
   }
 
   // Initialize display value

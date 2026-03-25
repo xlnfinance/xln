@@ -8,6 +8,7 @@ import { ethers } from 'ethers';
 import type { Provider, Signer } from 'ethers';
 
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types/index.ts';
+import type { TypedContractMethod } from '../../jurisdictions/typechain-types/common.ts';
 import { Account__factory, Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types/index.ts';
 
 import type { BrowserVMState, JTx } from '../types';
@@ -18,6 +19,7 @@ import {
   entityIdToAddress,
   isCanonicalEvent,
   normalizeAdapterEvents,
+  parseReceiptLogsToJEvents,
   processEventBatch,
   toJEvent,
   updateWatcherJurisdictionCursor,
@@ -51,6 +53,39 @@ export async function createBrowserVMAdapter(
 
   const eventCallbacks = new Map<string, Set<JEventCallback>>();
   const anyCallbacks = new Set<JEventCallback>();
+  type NonPayableMethod<TArgs extends Array<any>, TResult> = TypedContractMethod<TArgs, [TResult], 'nonpayable'>;
+
+  const sendTypedTx = async <TArgs extends Array<any>, TResult>(
+    label: string,
+    method: NonPayableMethod<TArgs, TResult>,
+    args: [...TArgs],
+    gasLimit: bigint,
+    carriers: Array<{ interface: ethers.Interface }>,
+  ): Promise<{ receipt: any; events: JEvent[] }> => {
+    const tx = await method(...args, { gasLimit });
+    const receipt = await tx.wait();
+    if (!receipt || receipt.status === 0) {
+      throw new Error(`${label} failed`);
+    }
+    return {
+      receipt,
+      events: parseReceiptLogsToJEvents(receipt, carriers),
+    };
+  };
+
+  const beginJurisdictionBlock = (timestamp: number): void => {
+    browserVM.setBlockTimestamp(timestamp);
+    if ((browserVM as any).beginJurisdictionBlock) {
+      (browserVM as any).beginJurisdictionBlock(timestamp);
+      console.log(`🔨 [JAdapter:browservm] beginJurisdictionBlock(ts=${timestamp})`);
+    }
+  };
+
+  const endJurisdictionBlock = (): void => {
+    if ((browserVM as any).endJurisdictionBlock) {
+      (browserVM as any).endJurisdictionBlock();
+    }
+  };
 
   // Store snapshots for revert functionality
   const snapshots = new Map<string, any>();
@@ -164,7 +199,7 @@ export async function createBrowserVMAdapter(
     },
 
     async getEntityNonce(entityId: string): Promise<bigint> {
-      return depository.entityNonces(entityIdToAddress(entityId));
+      return depository.entityNonces(entityId);
     },
 
     async isEntityRegistered(entityId: string): Promise<boolean> {
@@ -204,47 +239,54 @@ export async function createBrowserVMAdapter(
     // === WRITE METHODS ===
 
     async processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt> {
-      const entityProviderAddr = browserVM.getEntityProviderAddress();
-      const events = await browserVM.processBatch(encodedBatch, entityProviderAddr, hankoData, nonce);
+      const { receipt, events } = await sendTypedTx(
+        'processBatch',
+        depository.processBatch,
+        [encodedBatch, hankoData, nonce],
+        10_000_000n,
+        [depository, entityProvider],
+      );
       return {
-        txHash: '0x' + 'browservm'.padStart(64, '0'), // BrowserVM doesn't have real tx hashes
-        blockNumber: Number(browserVM.getBlockNumber?.() ?? 0),
-        events: normalizeAdapterEvents(events),
+        txHash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        events,
       };
     },
 
-    async enforceDebts(entityId: string, tokenId: number): Promise<bigint> {
-      if (!browserVM.enforceDebts) throw new Error('BrowserVM debt enforcement unavailable');
-      return browserVM.enforceDebts(entityId, tokenId);
-    },
-
-    async registerNumberedEntity(boardHash: string): Promise<{ entityNumber: number; txHash: string }> {
-      const result = await browserVM.registerNumberedEntitiesBatch([boardHash]);
-      return {
-        entityNumber: result.entityNumbers[0] ?? 0,
-        txHash: result.txHash,
-      };
-    },
-
-    async registerNumberedEntitiesBatch(boardHashes: string[]): Promise<{ entityNumbers: number[]; txHash: string }> {
-      return browserVM.registerNumberedEntitiesBatch(boardHashes);
-    },
-
-    async getNextEntityNumber(): Promise<number> {
-      return browserVM.getNextEntityNumber();
+    async enforceDebts(entityId: string, tokenId: number): Promise<void> {
+      await sendTypedTx(
+        'enforceDebts',
+        depository.enforceDebts,
+        [entityId, BigInt(tokenId), 100n],
+        2_000_000n,
+        [depository],
+      );
     },
 
     async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
-      const events = await browserVM.debugFundReserves(entityId, tokenId, amount);
-      return normalizeAdapterEvents(events);
+      const { events } = await sendTypedTx(
+        'mintToReserve',
+        depository.mintToReserve,
+        [entityId, tokenId, amount],
+        1_000_000n,
+        [depository],
+      );
+      return events;
     },
 
     async debugFundReservesBatch(mints: JReserveMint[]): Promise<JEvent[]> {
-      const events: JEvent[] = [];
-      for (const mint of mints) {
-        const batchEvents = await browserVM.debugFundReserves(mint.entityId, mint.tokenId, mint.amount);
-        events.push(...normalizeAdapterEvents(batchEvents));
-      }
+      const payload = mints.map((mint) => ({
+        entity: mint.entityId,
+        tokenId: BigInt(mint.tokenId),
+        amount: mint.amount,
+      }));
+      const { events } = await sendTypedTx(
+        'mintToReserveBatch',
+        depository.mintToReserveBatch,
+        [payload],
+        5_000_000n,
+        [depository],
+      );
       return events;
     },
 
@@ -349,44 +391,40 @@ export async function createBrowserVMAdapter(
           return { success: false, error: `Preflight failed: ${issues.join('; ')}` };
         }
 
-        browserVM.setBlockTimestamp(ts);
-        if ((browserVM as any).beginJurisdictionBlock) {
-          (browserVM as any).beginJurisdictionBlock(ts);
-          console.log(`🔨 [JAdapter:browservm] beginJurisdictionBlock(ts=${ts})`);
-        }
+        beginJurisdictionBlock(ts);
 
         try {
           console.log(`📦 [JAdapter:browservm] processBatch (${getBatchSize(jTx.data.batch)} ops) nonce=${nextNonce}`);
-          const events = await browserVM.processBatch(encodedBatch, entityProviderAddr, hankoData, nextNonce);
-
-          if ((browserVM as any).endJurisdictionBlock) {
-            (browserVM as any).endJurisdictionBlock();
-          }
-
+          const { receipt, events } = await sendTypedTx(
+            'processBatch',
+            depository.processBatch,
+            [encodedBatch, hankoData, nextNonce],
+            10_000_000n,
+            [depository, entityProvider],
+          );
+          endJurisdictionBlock();
           console.log(`✅ [JAdapter:browservm] Batch executed: ${events.length} events`);
           return {
             success: true,
-            txHash: `0x${'browservm-batch'.padStart(64, '0')}`,
-            blockNumber: Number((browserVM as any).getBlockNumber?.() ?? 0),
-            events: normalizeAdapterEvents(events),
+            txHash: receipt.hash,
+            blockNumber: receipt.blockNumber,
+            events,
           };
         } catch (error) {
-          if ((browserVM as any).endJurisdictionBlock) {
-            (browserVM as any).endJurisdictionBlock();
-          }
+          endJurisdictionBlock();
           const msg = error instanceof Error ? error.message : String(error);
           console.error(`❌ [JAdapter:browservm] processBatch failed: ${msg}`);
           return { success: false, error: msg };
         }
       }
 
-      if (jTx.type === 'mint' && jTx.data && browserVM.debugFundReserves) {
+      if (jTx.type === 'mint' && jTx.data) {
         const { entityId, tokenId, amount } = jTx.data as any;
         console.log(`💰 [JAdapter:browservm] Minting ${amount} token ${tokenId} to ${entityId.slice(-4)}`);
         try {
-          const events = await browserVM.debugFundReserves(entityId, tokenId, amount);
+          const events = await adapter.debugFundReserves(entityId, tokenId, amount);
           console.log(`✅ [JAdapter:browservm] Mint ok (${events.length} events)`);
-          return { success: true, events: normalizeAdapterEvents(events) };
+          return { success: true, events };
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           console.error(`❌ [JAdapter:browservm] Mint failed: ${msg}`);

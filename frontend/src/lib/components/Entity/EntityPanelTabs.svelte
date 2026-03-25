@@ -29,9 +29,7 @@
   import { getXLN, history, resolveConfiguredApiBase, xlnEnvironment } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
-  import { getAvailableThemes, THEME_DEFINITIONS } from '../../utils/themes';
   import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
-  import type { ThemeName } from '$lib/types/ui';
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
   import { xlnFunctions, entityPositions, enqueueEntityInputs, p2pState } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
@@ -40,12 +38,13 @@
   import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming';
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
   import { formatEntityId } from '$lib/utils/format';
+  import { resetEverything } from '$lib/utils/resetEverything';
 
   // Icons
   import {
     ArrowUpRight, ArrowDownLeft, Repeat, Landmark, Users, Activity,
-    MessageCircle, Settings as SettingsIcon, BookUser,
-    ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check, Scale, Globe, Trash2, MoreHorizontal, SlidersHorizontal
+    Settings as SettingsIcon,
+    ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check, Trash2, SlidersHorizontal
   } from 'lucide-svelte';
 
   // Child components
@@ -61,15 +60,10 @@
   import DebtPanel from './DebtPanel.svelte';
   import CreditForm from './CreditForm.svelte';
   import CollateralForm from './CollateralForm.svelte';
-  import ChatMessages from './ChatMessages.svelte';
-  import ConsensusState from './ConsensusState.svelte';
-  import ProposalsList from './ProposalsList.svelte';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
-  import FormationPanel from './FormationPanel.svelte';
   import HubDiscoveryPanel from './HubDiscoveryPanel.svelte';
-  import GossipPanel from './GossipPanel.svelte';
   import EntityInput from '../shared/EntityInput.svelte';
-  import WalletSettings from '$lib/components/Settings/WalletSettings.svelte';
+  import EntitySettingsPanel from '$lib/components/Settings/EntitySettingsPanel.svelte';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
   import ContextSwitcher from './ContextSwitcher.svelte';
 
@@ -95,8 +89,8 @@
   const dispatch = createEventDispatcher();
 
   // Tab types
-  type ViewTab = 'assets' | 'accounts' | 'more' | 'settings';
-  type MoreTab = 'consensus' | 'chat' | 'contacts' | 'create' | 'gossip' | 'governance';
+  type ViewTab = 'assets' | 'accounts' | 'settings';
+  type SettingsSubview = 'wallet' | 'display' | 'network' | 'data' | 'log' | 'entity';
   type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'move' | 'history' | 'configure' | 'appearance';
   type AssetWorkspaceTab = 'move' | 'history';
   type ConfigureWorkspaceTab = 'extend-credit' | 'request-credit' | 'collateral' | 'token' | 'dispute';
@@ -111,7 +105,7 @@
     return 'open';
   }
   let activeTab: ViewTab = getInitialTab();
-  let moreTab: MoreTab = 'consensus';
+  let settingsSubview: SettingsSubview = 'wallet';
   let accountWorkspaceTab: AccountWorkspaceTab = getInitialAccountWorkspaceTab();
   let assetWorkspaceTab: AssetWorkspaceTab = 'move';
   let configureWorkspaceTab: ConfigureWorkspaceTab = 'extend-credit';
@@ -124,8 +118,11 @@
   let replica: EntityReplica | null = null;
   let selectedAccountId: string | null = null;
   let selectedJurisdictionName: string | null = null;
-  let addressCopied = false;
+  let copiedMetaField = '';
+  let resettingEverything = false;
   let openAccountEntityId = '';
+  let currentEntityValue = '';
+  let currentExternalEoaValue = '';
 
   $: if (userModeHeader) {
     selectedJurisdictionName = selectedJurisdiction;
@@ -187,7 +184,6 @@
       case 'external':
       case 'reserves':
       case 'accounts':
-      case 'more':
       case 'settings':
         activeTab = (view === 'external' || view === 'reserves') ? 'assets' : view;
         break;
@@ -220,24 +216,37 @@
         activeTab = 'accounts';
         accountWorkspaceTab = 'appearance';
         break;
-      case 'consensus':
+      case 'wallet':
+      case 'display':
+      case 'network':
+      case 'data':
+      case 'log':
+      case 'entity':
+        activeTab = 'settings';
+        settingsSubview = view as SettingsSubview;
+        break;
       case 'chat':
-      case 'contacts':
-      case 'create':
+        activeTab = 'settings';
+        settingsSubview = 'log';
+        break;
       case 'gossip':
+        activeTab = 'settings';
+        settingsSubview = 'network';
+        break;
       case 'governance':
-        activeTab = 'more';
-        moreTab = view as MoreTab;
+      case 'create':
+        activeTab = 'settings';
+        settingsSubview = 'entity';
         break;
       default:
         break;
     }
 
-    if (view === 'more' && subview) {
-      const nextMoreTab = ['consensus', 'chat', 'contacts', 'create', 'gossip', 'governance'].includes(subview)
-        ? subview as MoreTab
+    if (view === 'settings' && subview) {
+      const nextSettingsSubview = ['wallet', 'display', 'network', 'data', 'log', 'entity'].includes(subview)
+        ? subview as SettingsSubview
         : null;
-      if (nextMoreTab) moreTab = nextMoreTab;
+      if (nextSettingsSubview) settingsSubview = nextSettingsSubview;
     }
 
     if (view === 'configure' && subview) {
@@ -392,6 +401,7 @@
   let moveNodeLayoutVersion = 0;
   let moveNodeLayoutRaf: number | null = null;
   let moveNodeLayoutSettleRaf: number | null = null;
+  let moveVisualResizeObserver: ResizeObserver | null = null;
   let moveLineReady = false;
   let moveCommittedLineReady = false;
   let moveCommittedLinePrimed = false;
@@ -417,8 +427,11 @@
   function bumpMoveNodeLayout(): void {
     moveNodeLayoutVersion += 1;
     if (typeof requestAnimationFrame !== 'function') {
-      moveLineReady = true;
-      scheduleMoveCommittedLineReady();
+      const hasAnchors =
+        !!getMoveNodeAnchor('from', moveFromEndpoint)
+        && !!getMoveNodeAnchor('to', moveToEndpoint);
+      moveLineReady = hasAnchors;
+      if (hasAnchors) scheduleMoveCommittedLineReady();
       return;
     }
     moveLineReady = false;
@@ -437,16 +450,17 @@
       moveNodeLayoutRaf = null;
       moveNodeLayoutSettleRaf = requestAnimationFrame(() => {
         moveNodeLayoutSettleRaf = null;
-        // Only show line when both anchor nodes are actually in DOM
-        const hasFrom = moveNodeRefs.has(`from:${moveFromEndpoint}`);
-        const hasTo = moveNodeRefs.has(`to:${moveToEndpoint}`);
-        if (hasFrom && hasTo) {
+        const fromAnchor = getMoveNodeAnchor('from', moveFromEndpoint);
+        const toAnchor = getMoveNodeAnchor('to', moveToEndpoint);
+        if (fromAnchor && toAnchor) {
           moveNodeLayoutVersion += 1;
           moveLineReady = true;
           scheduleMoveCommittedLineReady();
         } else {
-          // Nodes not ready yet — retry one more frame
           requestAnimationFrame(() => {
+            const retryFromAnchor = getMoveNodeAnchor('from', moveFromEndpoint);
+            const retryToAnchor = getMoveNodeAnchor('to', moveToEndpoint);
+            if (!retryFromAnchor || !retryToAnchor) return;
             moveNodeLayoutVersion += 1;
             moveLineReady = true;
             scheduleMoveCommittedLineReady();
@@ -485,24 +499,20 @@
 
   function getMoveNodeAnchor(side: 'from' | 'to', endpoint: MoveEndpoint): { x: number; y: number } | null {
     const rootRect = moveVisualRoot?.getBoundingClientRect();
-    const effectiveWidth = rootRect?.width ?? 1200;
-    const effectiveHeight = rootRect?.height ?? 360;
-    const endpointIndex = Math.max(0, MOVE_ENDPOINTS.indexOf(endpoint));
-    const topInset = 96;
-    const bottomInset = 64;
-    const availableHeight = Math.max(180, effectiveHeight - topInset - bottomInset);
-    const rowHeight = availableHeight / MOVE_ENDPOINTS.length;
-    const fallbackAnchor = {
-      x: side === 'from'
-        ? (effectiveWidth * 0.485)
-        : (effectiveWidth * 0.515),
-      y: topInset + (rowHeight * endpointIndex) + (rowHeight / 2),
-    };
     const node = moveNodeRefs.get(`${side}:${endpoint}`)
       || moveVisualRoot?.querySelector<HTMLButtonElement>(`[data-move-side="${side}"][data-move-endpoint="${endpoint}"]`)
       || null;
     const nodeRect = node?.getBoundingClientRect();
-    if (!rootRect || !nodeRect) return fallbackAnchor;
+    if (
+      !rootRect
+      || !nodeRect
+      || rootRect.width <= 0
+      || rootRect.height <= 0
+      || nodeRect.width <= 0
+      || nodeRect.height <= 0
+    ) {
+      return null;
+    }
     return {
       x: side === 'from'
         ? nodeRect.right - rootRect.left
@@ -1005,14 +1015,15 @@
     return fallback;
   }
 
-  // Copy address to clipboard
-  async function copyAddress() {
-    const entityId = replica?.state?.entityId || tab.entityId;
-    if (!entityId) return;
+  async function copyMetaValue(value: string, field: 'entity' | 'external'): Promise<void> {
+    const normalizedValue = String(value || '').trim();
+    if (!normalizedValue) return;
     try {
-      await navigator.clipboard.writeText(entityId);
-      addressCopied = true;
-      setTimeout(() => addressCopied = false, 2000);
+      await navigator.clipboard.writeText(normalizedValue);
+      copiedMetaField = field;
+      setTimeout(() => {
+        if (copiedMetaField === field) copiedMetaField = '';
+      }, 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
     }
@@ -1020,6 +1031,8 @@
 
   // Get avatar URL without tripping early boot fail-fast guards.
   $: avatar = resolveEntityAvatar(activeXlnFunctions, tab.entityId);
+  $: currentEntityValue = String(replica && replica.state ? (replica.state.entityId || tab.entityId || '') : (tab.entityId || '')).trim();
+  $: currentExternalEoaValue = String(tab.signerId || '').trim();
 
   // Resolve entity name from gossip profiles
   $: gossipName = (() => {
@@ -1233,10 +1246,6 @@
     }
   }
 
-  // Contacts (persisted in localStorage)
-  let contacts: Array<{ name: string; entityId: string }> = [];
-  let newContactName = '';
-  let newContactId = '';
   let openAccountEntityOptions: string[] = [];
   let moveEntityOptions: string[] = [];
   let moveHubEntityOptions: string[] = [];
@@ -1271,7 +1280,6 @@
 
     for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
     for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add(profile.entityId);
-    for (const contact of contacts) add(contact.entityId);
     return Array.from(ids.values()).sort();
   })();
 
@@ -1290,7 +1298,6 @@
     for (const id of openAccountEntityOptions) add(id);
     for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
     for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add(profile.entityId);
-    for (const contact of contacts) add(contact.entityId);
     return Array.from(ids.values());
   })();
   $: moveSourceAccountOptions = (() => {
@@ -1305,26 +1312,6 @@
     }
     return Array.from(ordered.values());
   })();
-
-  // Governance/Profile settings (REA flow: profile-update entityTx)
-  let governanceName = '';
-  let governanceBio = '';
-  let governanceWebsite = '';
-  let governanceSaving = false;
-  let governanceLoadedForEntity = '';
-
-  // Hub config settings (setHubConfig entityTx)
-  let hubConfigLoadedForEntity = '';
-  let hubConfigSaving = false;
-  let hubMatchingStrategy: 'amount' | 'time' | 'fee' = 'amount';
-  let hubRoutingFeePPM = '1';
-  let hubBaseFee = '0';
-  let hubMinCollateralThreshold = '0';
-  let hubRebalanceBaseFee = '0.1';
-  let hubRebalanceLiquidityFeeBps = '1';
-  let hubRebalanceGasFee = '0';
-  let hubRebalanceTimeoutSeconds = '600';
-  let hubPolicyVersion = '';
 
   // On-chain reserves are derived directly from replica.state.reserves.
   let onchainReserves: Map<number, bigint> = new Map();
@@ -1444,7 +1431,15 @@
   let selectedMoveTransferToken: (ExternalToken & { tokenId: number }) | null = null;
 
   $: if (moveVisualRoot !== previousMoveVisualRoot) {
+    moveVisualResizeObserver?.disconnect();
+    moveVisualResizeObserver = null;
     previousMoveVisualRoot = moveVisualRoot;
+    if (moveVisualRoot && typeof ResizeObserver === 'function') {
+      moveVisualResizeObserver = new ResizeObserver(() => {
+        bumpMoveNodeLayout();
+      });
+      moveVisualResizeObserver.observe(moveVisualRoot);
+    }
     bumpMoveNodeLayout();
   }
   $: moveLayoutSignature = [
@@ -3229,6 +3224,18 @@
     fetchExternalTokens();
   }
 
+  async function handleResetEverything(): Promise<void> {
+    if (resettingEverything) return;
+    const confirmed = window.confirm('Reset ALL local XLN data? Wallets, runtimes, settings, and IndexedDB databases will be deleted.');
+    if (!confirmed) return;
+    resettingEverything = true;
+    try {
+      await resetEverything('entity-empty-state');
+    } finally {
+      resettingEverything = false;
+    }
+  }
+
   let lastEntityId = '';
   let lastSignerId = '';
   let lastRuntimeBalanceKey = '';
@@ -3257,12 +3264,10 @@
   onDestroy(() => {
     if (refreshTimer) clearInterval(refreshTimer);
     if (moveCommittedLineTimeout) clearTimeout(moveCommittedLineTimeout);
+    moveVisualResizeObserver?.disconnect();
   });
 
   onMount(() => {
-    const saved = localStorage.getItem('xln-contacts');
-    if (saved) contacts = JSON.parse(saved);
-
     // Fetch reserves and external tokens on mount
     refreshBalances();
     applyDeepLinkViewFromUrl();
@@ -3298,212 +3303,6 @@
       window.removeEventListener('popstate', handleUrlNavigation);
     };
   });
-
-  $: if (activeTab === 'more' && moreTab === 'governance') {
-    loadGovernanceProfileFromGossip();
-  }
-  $: if (activeTab === 'settings') {
-    loadHubConfigFromState();
-  }
-
-  function saveContact() {
-    if (!newContactName.trim() || !newContactId.trim()) return;
-    contacts = [...contacts, { name: newContactName.trim(), entityId: newContactId.trim() }];
-    localStorage.setItem('xln-contacts', JSON.stringify(contacts));
-    newContactName = '';
-    newContactId = '';
-  }
-
-  function deleteContact(idx: number) {
-    contacts = contacts.filter((_, i) => i !== idx);
-    localStorage.setItem('xln-contacts', JSON.stringify(contacts));
-  }
-
-  function loadGovernanceProfileFromGossip() {
-    const currentEntityId = (replica?.state?.entityId || tab.entityId || '').toLowerCase();
-    if (!currentEntityId || governanceLoadedForEntity === currentEntityId) return;
-    governanceLoadedForEntity = currentEntityId;
-    const profiles = (activeEnv?.gossip?.getProfiles?.() || []) as Array<{
-      entityId?: string;
-      name?: string;
-      bio?: string;
-      website?: string;
-    }>;
-    const profile = profiles.find((p) => String(p?.entityId || '').toLowerCase() === currentEntityId);
-    governanceName = String(profile?.name || '');
-    governanceBio = String(profile?.bio || '');
-    governanceWebsite = String(profile?.website || '');
-  }
-
-  async function saveGovernanceProfile() {
-    const entityId = replica?.state?.entityId || tab.entityId;
-    const signerId = resolveEntitySigner(entityId, 'governance-profile-update');
-    const env = activeEnv;
-    if (!entityId || !signerId) {
-      toasts.error('Entity/signer is required for governance profile update');
-      return;
-    }
-    if (!isRuntimeEnv(env) || !activeIsLive) {
-      toasts.error('Governance profile updates require LIVE mode');
-      return;
-    }
-
-    governanceSaving = true;
-    try {
-      const profileUpdateInput = {
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'profile-update' as const,
-          data: {
-            profile: {
-              entityId,
-              name: governanceName.trim(),
-              bio: governanceBio.trim(),
-              website: governanceWebsite.trim(),
-              hankoSignature: '',
-            },
-          },
-        }],
-      };
-      await enqueueEntityInputs(env, [profileUpdateInput]);
-      toasts.success('Governance profile update submitted');
-      governanceLoadedForEntity = '';
-      loadGovernanceProfileFromGossip();
-    } catch (err) {
-      toasts.error(`Governance profile update failed: ${(err as Error).message}`);
-    } finally {
-      governanceSaving = false;
-    }
-  }
-
-  function formatFixed18(value: bigint): string {
-    const base = 10n ** 18n;
-    const whole = value / base;
-    const frac = value % base;
-    if (frac === 0n) return whole.toString();
-    const fracRaw = frac.toString().padStart(18, '0').replace(/0+$/, '');
-    return `${whole.toString()}.${fracRaw}`;
-  }
-
-  function parseFixed18(raw: string): bigint | null {
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    if (!/^\d+(\.\d{0,18})?$/.test(trimmed)) return null;
-    const [wholePart, fracPartRaw = ''] = trimmed.split('.');
-    const whole = BigInt(wholePart || '0');
-    const frac = BigInt((fracPartRaw + '0'.repeat(18)).slice(0, 18));
-    return whole * (10n ** 18n) + frac;
-  }
-
-  function loadHubConfigFromState() {
-    const currentEntityId = (replica?.state?.entityId || tab.entityId || '').toLowerCase();
-    if (!currentEntityId || hubConfigLoadedForEntity === currentEntityId) return;
-    hubConfigLoadedForEntity = currentEntityId;
-
-    const config = replica?.state?.hubRebalanceConfig;
-    hubMatchingStrategy = (config?.matchingStrategy === 'time' || config?.matchingStrategy === 'fee')
-      ? config.matchingStrategy
-      : 'amount';
-    hubRoutingFeePPM = String(config?.routingFeePPM ?? 1);
-    hubBaseFee = formatFixed18(config?.baseFee ?? 0n);
-    hubMinCollateralThreshold = formatFixed18(config?.minCollateralThreshold ?? 0n);
-    hubRebalanceBaseFee = formatFixed18(config?.rebalanceBaseFee ?? (10n ** 17n));
-    hubRebalanceLiquidityFeeBps = String(config?.rebalanceLiquidityFeeBps ?? config?.minFeeBps ?? 1n);
-    hubRebalanceGasFee = formatFixed18(config?.rebalanceGasFee ?? 0n);
-    hubRebalanceTimeoutSeconds = String(Math.floor((config?.rebalanceTimeoutMs ?? (10 * 60 * 1000)) / 1000));
-    hubPolicyVersion = config?.policyVersion ? String(config.policyVersion) : '';
-  }
-
-  async function saveHubConfig() {
-    const entityId = replica?.state?.entityId || tab.entityId;
-    const signerId = resolveEntitySigner(entityId, 'hub-config-update');
-    const env = activeEnv;
-    if (!entityId || !signerId) {
-      toasts.error('Entity/signer is required for hub config update');
-      return;
-    }
-    if (!isRuntimeEnv(env) || !activeIsLive) {
-      toasts.error('Hub config updates require LIVE mode');
-      return;
-    }
-
-    const routingFeePPM = Number(hubRoutingFeePPM);
-    if (!Number.isFinite(routingFeePPM) || routingFeePPM < 0) {
-      toasts.error('Routing fee PPM must be a non-negative number');
-      return;
-    }
-    const rebalanceTimeoutSeconds = Number(hubRebalanceTimeoutSeconds);
-    if (!Number.isFinite(rebalanceTimeoutSeconds) || rebalanceTimeoutSeconds < 1) {
-      toasts.error('Timeout must be at least 1 second');
-      return;
-    }
-
-    const baseFee = parseFixed18(hubBaseFee);
-    const minCollateralThreshold = parseFixed18(hubMinCollateralThreshold);
-    const rebalanceBaseFee = parseFixed18(hubRebalanceBaseFee);
-    const rebalanceGasFee = parseFixed18(hubRebalanceGasFee);
-    let rebalanceLiquidityFeeBps: bigint;
-    try {
-      rebalanceLiquidityFeeBps = BigInt(hubRebalanceLiquidityFeeBps.trim());
-    } catch {
-      toasts.error('Liquidity fee bps must be an integer');
-      return;
-    }
-    if (
-      baseFee === null ||
-      minCollateralThreshold === null ||
-      rebalanceBaseFee === null ||
-      rebalanceGasFee === null
-    ) {
-      toasts.error('Fee/threshold fields must be valid decimal numbers');
-      return;
-    }
-
-    let explicitPolicyVersion: number | undefined;
-    if (hubPolicyVersion.trim()) {
-      const n = Number(hubPolicyVersion.trim());
-      if (!Number.isFinite(n) || n < 1) {
-        toasts.error('Policy version must be a positive integer');
-        return;
-      }
-      explicitPolicyVersion = Math.floor(n);
-    }
-
-    hubConfigSaving = true;
-    try {
-      const txData: Extract<EntityTx, { type: 'setHubConfig' }>['data'] = {
-        matchingStrategy: hubMatchingStrategy,
-        routingFeePPM: Math.floor(routingFeePPM),
-        baseFee,
-        minCollateralThreshold,
-        rebalanceBaseFee,
-        rebalanceLiquidityFeeBps,
-        rebalanceGasFee,
-        rebalanceTimeoutMs: Math.floor(rebalanceTimeoutSeconds * 1000),
-      };
-      if (explicitPolicyVersion !== undefined) {
-        txData.policyVersion = explicitPolicyVersion;
-      }
-
-      await enqueueEntityInputs(env, [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'setHubConfig' as const,
-          data: txData,
-        }],
-      }]);
-
-      toasts.success('Hub config update submitted');
-      hubConfigLoadedForEntity = '';
-      loadHubConfigFromState();
-    } catch (err) {
-      toasts.error(`Hub config update failed: ${(err as Error).message}`);
-    } finally {
-      hubConfigSaving = false;
-    }
-  }
 
   // Formatting
   function getTokenInfo(tokenId: number) {
@@ -3934,7 +3733,6 @@
     return getEntityDisplayName(raw, {
       source: activeEnv,
       selfEntityId: replica?.state?.entityId || tab.entityId,
-      contacts,
       fallback: 'Unknown',
     });
   }
@@ -3963,12 +3761,54 @@
     return `${text.slice(0, 10)}...${text.slice(-6)}`;
   }
 
+  function pendingBatchToBigInt(value: unknown): bigint {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.trunc(value));
+    if (typeof value === 'string' && value.trim()) {
+      try {
+        return BigInt(value);
+      } catch {
+        return 0n;
+      }
+    }
+    return 0n;
+  }
+
+  function pendingBatchIsSelfEntity(value: unknown): boolean {
+    const selfEntityId = String(resolveSelfEntityId() || '').trim().toLowerCase();
+    const candidate = String(value || '').trim().toLowerCase();
+    return !!selfEntityId && !!candidate && selfEntityId === candidate;
+  }
+
+  function pendingBatchSettlementReserveDelta(settlement: any): bigint {
+    const leftIsSelf = pendingBatchIsSelfEntity(settlement?.leftEntity);
+    const rightIsSelf = pendingBatchIsSelfEntity(settlement?.rightEntity);
+    if (!leftIsSelf && !rightIsSelf) return 0n;
+
+    let delta = 0n;
+    for (const diff of Array.isArray(settlement?.diffs) ? settlement.diffs : []) {
+      if (leftIsSelf) {
+        delta += pendingBatchToBigInt(diff?.leftDiff);
+      } else if (rightIsSelf) {
+        delta += pendingBatchToBigInt(diff?.rightDiff);
+      }
+    }
+    return delta;
+  }
+
   function buildPendingBatchPreview(batch: JBatch | null | undefined): PendingBatchPreviewItem[] {
     if (!batch) return [];
-    const items: PendingBatchPreviewItem[] = [];
+    const reserveIncreaseItems: PendingBatchPreviewItem[] = [];
+    const reserveDecreaseItems: PendingBatchPreviewItem[] = [];
+    const neutralItems: PendingBatchPreviewItem[] = [];
+    const pushItem = (phase: 'increase' | 'decrease' | 'neutral', item: PendingBatchPreviewItem): void => {
+      if (phase === 'increase') reserveIncreaseItems.push(item);
+      else if (phase === 'decrease') reserveDecreaseItems.push(item);
+      else neutralItems.push(item);
+    };
 
     for (const [index, op] of (batch.externalTokenToReserve || []).entries()) {
-      items.push({
+      pushItem('increase', {
         key: `e2r-${index}`,
         title: 'External → Reserve',
         subtitle: `${pendingBatchTokenAmountLabel(op.internalTokenId, op.amount)} to ${pendingBatchEntityLabel(String(op.entity || resolveSelfEntityId()))}`,
@@ -3976,16 +3816,36 @@
     }
 
     for (const [index, op] of (batch.reserveToReserve || []).entries()) {
-      items.push({
+      const isIncrease = pendingBatchIsSelfEntity(op.receivingEntity);
+      pushItem(isIncrease ? 'increase' : 'decrease', {
         key: `r2r-${index}`,
-        title: 'Reserve → Reserve',
+        title: isIncrease ? 'Reserve ← Reserve' : 'Reserve → Reserve',
         subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount)} to ${pendingBatchEntityLabel(String(op.receivingEntity || ''))}`,
+      });
+    }
+
+    for (const [index, op] of (batch.collateralToReserve || []).entries()) {
+      pushItem('increase', {
+        key: `c2r-${index}`,
+        title: 'Account → Reserve',
+        subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount)} from ${pendingBatchEntityLabel(String(op.counterparty || ''))}`,
+      });
+    }
+
+    for (const [index, op] of (batch.settlements || []).entries()) {
+      const reserveDelta = pendingBatchSettlementReserveDelta(op);
+      const phase = reserveDelta > 0n ? 'increase' : reserveDelta < 0n ? 'decrease' : 'neutral';
+      const reserveLabel = reserveDelta > 0n ? 'Settlement (+Reserve)' : reserveDelta < 0n ? 'Settlement (-Reserve)' : 'Settlement';
+      pushItem(phase, {
+        key: `settle-${index}`,
+        title: reserveLabel,
+        subtitle: `${pendingBatchEntityLabel(String(op.leftEntity || ''))} ↔ ${pendingBatchEntityLabel(String(op.rightEntity || ''))}`,
       });
     }
 
     for (const [index, op] of (batch.reserveToCollateral || []).entries()) {
       for (const [pairIndex, pair] of (op.pairs || []).entries()) {
-        items.push({
+        pushItem('decrease', {
           key: `r2c-${index}-${pairIndex}`,
           title: 'Reserve → Account',
           subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, pair.amount)} to ${pendingBatchEntityLabel(String(op.receivingEntity || ''))} via ${pendingBatchEntityLabel(String(pair.entity || ''))}`,
@@ -3993,32 +3853,16 @@
       }
     }
 
-    for (const [index, op] of (batch.collateralToReserve || []).entries()) {
-      items.push({
-        key: `c2r-${index}`,
-        title: 'Account → Reserve',
-        subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount)} from ${pendingBatchEntityLabel(String(op.counterparty || ''))}`,
-      });
-    }
-
     for (const [index, op] of (batch.reserveToExternalToken || []).entries()) {
-      items.push({
+      pushItem('decrease', {
         key: `r2e-${index}`,
         title: 'Reserve → External',
         subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount)} to ${pendingBatchEntityLabel(String(op.receivingEntity || resolveSelfEntityId()))}`,
       });
     }
 
-    for (const [index, op] of (batch.settlements || []).entries()) {
-      items.push({
-        key: `settle-${index}`,
-        title: 'Settlement',
-        subtitle: `${pendingBatchEntityLabel(String(op.leftEntity || ''))} ↔ ${pendingBatchEntityLabel(String(op.rightEntity || ''))}`,
-      });
-    }
-
     for (const [index, op] of (batch.disputeStarts || []).entries()) {
-      items.push({
+      pushItem('neutral', {
         key: `dstart-${index}`,
         title: 'Dispute Start',
         subtitle: `Lock account with ${pendingBatchEntityLabel(String(op.counterentity || ''))}`,
@@ -4026,7 +3870,7 @@
     }
 
     for (const [index, op] of (batch.disputeFinalizations || []).entries()) {
-      items.push({
+      pushItem('neutral', {
         key: `dfinal-${index}`,
         title: 'Dispute Finalize',
         subtitle: `Finalize against ${pendingBatchEntityLabel(String(op.counterentity || ''))}`,
@@ -4034,14 +3878,14 @@
     }
 
     for (const [index, op] of (batch.revealSecrets || []).entries()) {
-      items.push({
+      pushItem('neutral', {
         key: `secret-${index}`,
         title: 'Reveal Secret',
         subtitle: pendingBatchShortHex(op.secret),
       });
     }
 
-    return items;
+    return [...reserveIncreaseItems, ...reserveDecreaseItems, ...neutralItems];
   }
 
   function buildOpenOutgoingDebtTotals(): {
@@ -4192,17 +4036,7 @@
   const tabs: IconBadgeTabConfig<ViewTab>[] = [
     { id: 'assets', icon: Landmark, label: 'Assets' },
     { id: 'accounts', icon: Users, label: 'Accounts' },
-    { id: 'more', icon: MoreHorizontal, label: 'More' },
     { id: 'settings', icon: SettingsIcon, label: 'Settings' },
-  ];
-
-  const moreTabs: IconTabConfig<MoreTab>[] = [
-    { id: 'consensus', icon: Activity, label: 'Consensus' },
-    { id: 'chat', icon: MessageCircle, label: 'Chat' },
-    { id: 'contacts', icon: BookUser, label: 'Contacts' },
-    { id: 'create', icon: PlusCircle, label: 'Create' },
-    { id: 'gossip', icon: Globe, label: 'Gossip' },
-    { id: 'governance', icon: Scale, label: 'Governance' },
   ];
 
   const accountWorkspaceTabs: IconPendingTabConfig<AccountWorkspaceTab>[] = [
@@ -4267,6 +4101,9 @@
         <Wallet size={40} />
         <h3>Select Entity</h3>
         <p>{userModeHeader ? 'Choose from the context pill above' : 'Choose from the dropdown above'}</p>
+        <button class="empty-state-reset" type="button" on:click={handleResetEverything} disabled={resettingEverything}>
+          {resettingEverything ? 'Resetting...' : 'Reset Everything'}
+        </button>
       </div>
 
     {:else if isAccountFocused && selectedAccount && selectedAccountId}
@@ -4314,14 +4151,23 @@
             {:else}
               <span class="hero-name">{heroDisplayName}</span>
             {/if}
-            <button class="hero-address" on:click={copyAddress} title="Copy full address">
-              <span>{replica?.state?.entityId || tab.entityId}</span>
-              {#if addressCopied}
-                <Check size={10} />
-              {:else}
-                <Copy size={10} />
-              {/if}
-            </button>
+            <div class="wallet-meta-block hero-meta-block">
+              <p class="muted wallet-label">Entity</p>
+              <button
+                class="wallet-meta-copy"
+                type="button"
+                title="Copy entity id"
+                on:click={() => copyMetaValue(currentEntityValue, 'entity')}
+              >
+                <span class="wallet-meta-value">{currentEntityValue}</span>
+                {#if copiedMetaField === 'entity'}
+                  <Check size={12} />
+                {:else}
+                  <Copy size={12} />
+                {/if}
+              </button>
+              <p class="muted wallet-meta-help">XLN identity for reserves, accounts, and consensus.</p>
+            </div>
           </div>
         </div>
         <div class="hero-right">
@@ -4378,37 +4224,45 @@
               <button class="btn-table-action faucet" data-testid={`external-faucet-${faucetAssetSymbol}`} on:click={() => submitAssetFaucet('external')}>
                 External
               </button>
-              <button
-                class="btn-table-action deposit"
-                data-testid={`reserve-faucet-${faucetAssetSymbol}`}
-                on:click={() => submitAssetFaucet('reserve')}
-                disabled={!faucetSupportsReserve}
-                title={!faucetSupportsReserve ? 'Reserve faucet supports ERC20 assets only' : 'Faucet reserve'}
-              >
-                Reserve
-              </button>
+              {#if faucetSupportsReserve}
+                <button
+                  class="btn-table-action deposit"
+                  data-testid={`reserve-faucet-${faucetAssetSymbol}`}
+                  on:click={() => submitAssetFaucet('reserve')}
+                  title="Faucet reserve"
+                >
+                  Reserve
+                </button>
+              {/if}
               {#if canShowAccountFaucet}
-              <button
-                class="btn-table-action faucet"
-                data-testid={`account-faucet-${faucetAssetSymbol}`}
-                on:click={() => submitAssetFaucet('account')}
-                title="Faucet first account"
-              >
+                <button
+                  class="btn-table-action faucet"
+                  data-testid={`account-faucet-${faucetAssetSymbol}`}
+                  on:click={() => submitAssetFaucet('account')}
+                  title="Faucet first account"
+                >
                   Account
-              </button>
+                </button>
               {/if}
             </div>
           </section>
           <div class="asset-ledger-meta">
             <div class="wallet-meta-block">
-              <p class="muted wallet-label">External</p>
-              <p class="wallet-meta-value">{tab.signerId || '-'}</p>
+              <p class="muted wallet-label">External EOA</p>
+              <button
+                class="wallet-meta-copy"
+                type="button"
+                title="Copy external EOA"
+                on:click={() => copyMetaValue(currentExternalEoaValue, 'external')}
+              >
+                <span class="wallet-meta-value">{currentExternalEoaValue || '-'}</span>
+                {#if copiedMetaField === 'external'}
+                  <Check size={12} />
+                {:else}
+                  <Copy size={12} />
+                {/if}
+              </button>
               <p class="muted wallet-meta-help">External ETH and ERC20 endpoint.</p>
-            </div>
-            <div class="wallet-meta-block">
-              <p class="muted wallet-label">Entity</p>
-              <p class="wallet-meta-value">{replica?.state?.entityId || tab.entityId}</p>
-              <p class="muted wallet-meta-help">XLN identity for reserves, accounts, and consensus.</p>
             </div>
           </div>
 
@@ -4528,7 +4382,6 @@
             {#if assetWorkspaceTab === 'move'}
               <MoveWorkspace
                 mode="assets"
-                {contacts}
                 bind:moveAmount
                 bind:moveAssetSymbol
                 bind:moveFromEndpoint
@@ -4591,7 +4444,6 @@
               <SettlementPanel
                 entityId={replica.state?.entityId || tab.entityId}
                 {replica}
-                {contacts}
                 historyOnly={true}
               />
             {/if}
@@ -4619,7 +4471,6 @@
           <DebtPanel
             entityState={replica?.state || null}
             sourceEnv={activeEnv}
-            {contacts}
             canEnforce={activeIsLive}
             enforcingTokenId={debtEnforcingTokenId}
             on:enforce={(event) => enforceOutstandingDebt(event.detail.tokenId)}
@@ -4689,7 +4540,7 @@
 
           <section class="account-workspace-content">
             {#if accountWorkspaceTab === 'send'}
-              <PaymentPanel entityId={replica.state?.entityId || tab.entityId} {contacts} />
+              <PaymentPanel entityId={replica.state?.entityId || tab.entityId} />
 
             {:else if accountWorkspaceTab === 'receive'}
               <ReceivePanel entityId={replica.state?.entityId || tab.entityId} />
@@ -4703,7 +4554,6 @@
             {:else if accountWorkspaceTab === 'move'}
               <MoveWorkspace
                 mode="accounts"
-                {contacts}
                 bind:moveAmount
                 bind:moveAssetSymbol
                 bind:moveFromEndpoint
@@ -4767,7 +4617,6 @@
               <SettlementPanel
                 entityId={replica.state?.entityId || tab.entityId}
                 {replica}
-                {contacts}
                 historyOnly={true}
               />
 
@@ -4778,7 +4627,6 @@
                     label="Configure Account"
                     value={workspaceAccountId}
                     entities={workspaceAccountIds}
-                    {contacts}
                     testId="configure-account-selector"
                     excludeId={replica?.state?.entityId || tab.entityId}
                     placeholder="Select account for configure..."
@@ -5026,7 +4874,6 @@
                       label="Entity"
                       value={openAccountEntityId}
                       entities={openAccountEntityOptions}
-                      {contacts}
                       excludeId={replica?.state?.entityId || tab.entityId}
                       placeholder="Select entity or paste full ID..."
                       disabled={!activeIsLive}
@@ -5112,235 +4959,16 @@
             {/if}
           </section>
 
-        {:else if activeTab === 'more'}
-          <nav class="more-tabs" aria-label="More tools">
-            {#each moreTabs as m}
-              <button
-                class="more-tab"
-                class:active={moreTab === m.id}
-                on:click={() => moreTab = m.id}
-              >
-                <svelte:component this={m.icon} size={14} />
-                <span>{m.label}</span>
-              </button>
-            {/each}
-          </nav>
-
-          {#if moreTab === 'consensus'}
-            <div class="consensus-summary">
-              <h4 class="section-head" style="margin-top: 0;">Consensus</h4>
-              <div class="consensus-height-badges">
-                <span class="consensus-height-badge">E#{entityHeightBadge}</span>
-                <span class="consensus-height-badge">J#{finalizedJHeightBadge}</span>
-              </div>
-            </div>
-            <ConsensusState {replica} />
-            <h4 class="section-head">Proposals</h4>
-            <ProposalsList {replica} {tab} />
-
-          {:else if moreTab === 'chat'}
-            <ChatMessages {replica} {tab} currentTimeIndex={activeTimeIndex ?? -1} />
-
-          {:else if moreTab === 'contacts'}
-            <h4 class="section-head">Saved Contacts</h4>
-            {#if contacts.length === 0}
-              <p class="muted">No contacts saved yet</p>
-            {:else}
-              {#each contacts as contact, idx}
-                <div class="contact-row">
-                  <div class="c-info">
-                    <span class="c-name">{contact.name}</span>
-                    <span class="c-id">{contact.entityId}</span>
-                  </div>
-                  <button class="c-delete" on:click={() => deleteContact(idx)}>x</button>
-                </div>
-              {/each}
-            {/if}
-
-            <h4 class="section-head">Add Contact</h4>
-            <div class="add-contact">
-              <input type="text" placeholder="Name" bind:value={newContactName} />
-              <input type="text" placeholder="Full Entity ID (0x...)" bind:value={newContactId} />
-              <button class="btn-add" on:click={saveContact}>Add</button>
-            </div>
-
-          {:else if moreTab === 'create'}
-            <FormationPanel />
-
-          {:else if moreTab === 'gossip'}
-            <GossipPanel />
-
-          {:else if moreTab === 'governance'}
-            <h4 class="section-head">Entity Governance Profile</h4>
-            <p class="muted">Updates are submitted through REA as `profile-update` entity transactions.</p>
-            <div class="setting-block">
-              <label>Display Name</label>
-              <input
-                type="text"
-                bind:value={governanceName}
-                placeholder="Entity name"
-                maxlength="64"
-              />
-            </div>
-            <div class="setting-block">
-              <label>Bio</label>
-              <input
-                type="text"
-                bind:value={governanceBio}
-                placeholder="Short description"
-                maxlength="180"
-              />
-            </div>
-            <div class="setting-block">
-              <label>Website</label>
-              <input
-                type="url"
-                bind:value={governanceWebsite}
-                placeholder="https://"
-                maxlength="160"
-              />
-            </div>
-            <button class="btn-add" on:click={saveGovernanceProfile} disabled={governanceSaving}>
-              {governanceSaving ? 'Submitting...' : 'Save Governance Profile'}
-            </button>
-          {/if}
-
         {:else if activeTab === 'settings'}
-          <h4 class="section-head">Wallet</h4>
-          <WalletSettings embedded={true} />
-
-          <h4 class="section-head">Appearance</h4>
-          <div class="theme-grid">
-            {#each getAvailableThemes() as theme}
-              {@const colors = THEME_DEFINITIONS[theme.id]}
-              <button
-                class="theme-swatch"
-                class:active={$settings.theme === theme.id}
-                on:click={() => settingsOperations.setTheme(theme.id)}
-                title={theme.name}
-              >
-                <div class="swatch-preview" style="background: {colors.background}; border-color: {colors.surfaceBorder};">
-                  <div class="swatch-bar" style="background: {colors.barCollateral}; width: 60%;"></div>
-                  <div class="swatch-bar" style="background: {colors.barDebt}; width: 30%;"></div>
-                  <div class="swatch-text" style="color: {colors.textPrimary};">Aa</div>
-                  <div class="swatch-accent" style="background: {colors.accentColor};"></div>
-                </div>
-                <span class="swatch-label" class:active={$settings.theme === theme.id}>{theme.name}</span>
-              </button>
-            {/each}
-          </div>
-
-          <h4 class="section-head">Display</h4>
-          <div class="setting-row">
-            <span>Compact Numbers</span>
-            <button class="toggle" class:on={$settings.compactNumbers}
-              on:click={() => settingsOperations.setCompactNumbers(!$settings.compactNumbers)}>
-              {$settings.compactNumbers ? 'On' : 'Off'}
-            </button>
-          </div>
-          <div class="setting-row">
-            <span>Verbose Logging</span>
-            <button class="toggle" class:on={$settings.verboseLogging}
-              on:click={() => settingsOperations.setVerboseLogging(!$settings.verboseLogging)}>
-              {$settings.verboseLogging ? 'On' : 'Off'}
-            </button>
-          </div>
-          <div class="setting-row">
-            <span>Time Machine</span>
-            <button
-              class="toggle"
-              class:on={$settings.showTimeMachine}
-              on:click={() => settingsOperations.setShowTimeMachine(!$settings.showTimeMachine)}
-            >
-              {$settings.showTimeMachine ? 'On' : 'Off'}
-            </button>
-          </div>
-          <div class="setting-row">
-            <span>Frame Delay</span>
-            <input
-              type="number"
-              min="0"
-              max="10000"
-              step="1"
-              value={$settings.runtimeDelay}
-              on:input={(e) => {
-                const val = Math.max(0, Math.min(10000, Number(e.currentTarget.value) || 0));
-                settingsOperations.setRuntimeDelay(val);
-                const env = activeEnv;
-                if (env) {
-                  if (!env.runtimeConfig) env.runtimeConfig = { minFrameDelayMs: val, loopIntervalMs: 25 };
-                  else env.runtimeConfig.minFrameDelayMs = val;
-                }
-              }}
-              style="width:72px"
-            />
-            <span class="muted">ms</span>
-          </div>
-
-          <h4 class="section-head">Hub Rebalance</h4>
-          <div class="setting-block">
-            <label>Policy Version (optional override)</label>
-            <input type="number" min="1" bind:value={hubPolicyVersion} placeholder="Auto if empty" />
-            <div class="muted" style="margin-top: 4px;">
-              Leave empty to auto-bump only when rebalance fee policy changes.
-            </div>
-          </div>
-          <div class="setting-block">
-            <label>Matching Strategy</label>
-            <select bind:value={hubMatchingStrategy}>
-              <option value="amount">amount</option>
-              <option value="time">time</option>
-              <option value="fee">fee</option>
-            </select>
-          </div>
-          <div class="setting-block">
-            <label>Routing Fee (PPM)</label>
-            <input type="number" min="0" bind:value={hubRoutingFeePPM} />
-          </div>
-          <div class="setting-block">
-            <label>Base Fee (token units)</label>
-            <input type="text" bind:value={hubBaseFee} placeholder="e.g. 0.0" />
-          </div>
-          <div class="setting-block">
-            <label>Min Collateral Threshold (token units)</label>
-            <input type="text" bind:value={hubMinCollateralThreshold} placeholder="e.g. 0" />
-          </div>
-          <div class="setting-block">
-            <label>Rebalance Base Fee (token units)</label>
-            <input type="text" bind:value={hubRebalanceBaseFee} placeholder="e.g. 0.1" />
-          </div>
-          <div class="setting-block">
-            <label>Rebalance Liquidity Fee (bps)</label>
-            <input type="number" min="0" bind:value={hubRebalanceLiquidityFeeBps} />
-          </div>
-          <div class="setting-block">
-            <label>Rebalance Gas Fee (token units)</label>
-            <input type="text" bind:value={hubRebalanceGasFee} placeholder="e.g. 0.0" />
-          </div>
-          <div class="setting-block">
-            <label>Rebalance Timeout (seconds)</label>
-            <input type="number" min="1" bind:value={hubRebalanceTimeoutSeconds} />
-          </div>
-          <button class="btn-add" on:click={saveHubConfig} disabled={hubConfigSaving || !activeIsLive}>
-            {hubConfigSaving ? 'Submitting...' : 'Save Hub Config'}
-          </button>
-          {#if !activeIsLive}
-            <div class="muted" style="margin-top: 6px;">Hub config updates require LIVE mode.</div>
-          {/if}
-
-          <h4 class="section-head">Identity</h4>
-          <div class="setting-block">
-            <label>Entity ID</label>
-            <code>{tab.entityId}</code>
-          </div>
-          <div class="setting-block">
-            <label>Signer ID</label>
-            <code>{tab.signerId}</code>
-          </div>
-          <div class="setting-block">
-            <label>Jurisdiction</label>
-            <code>{selectedJurisdictionName || 'None'}</code>
-          </div>
+          <EntitySettingsPanel
+            embedded={true}
+            {replica}
+            {activeIsLive}
+            currentTimeIndex={activeTimeIndex ?? -1}
+            jurisdictionLabel={selectedJurisdictionName || ''}
+            requestedTab={settingsSubview}
+            tab={tab}
+          />
         {/if}
       </section>
     {/if}
@@ -5359,8 +4987,8 @@
     width: min(100%, 1220px);
     height: 100%;
     margin: 0 auto;
-    background: #0a0a0a;
-    color: #e5e5e5;
+    background: var(--theme-background, #09090b);
+    color: var(--theme-text-primary, #e4e4e7);
     font-family: 'Inter', -apple-system, sans-serif;
     font-size: 13px;
   }
@@ -5371,24 +4999,28 @@
     align-items: center;
     gap: 8px;
     padding: 10px 12px;
-    background: #171412;
-    border-bottom: 1px solid #292524;
+    background: color-mix(in srgb, var(--theme-header-bg, #151316) 88%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 68%, transparent);
     flex-shrink: 0;
   }
 
   .header.user-mode-header {
     gap: 10px;
     padding: 10px var(--panel-gutter-x);
-    background: linear-gradient(180deg, #171412 0%, #12100f 100%);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--theme-header-bg, #151316) 92%, transparent) 0%,
+      color-mix(in srgb, var(--theme-background, #09090b) 96%, transparent) 100%
+    );
   }
 
   .header :global(select),
   .header :global(button),
   .header :global(.dropdown-trigger) {
-    background: #1c1917;
-    border: 1px solid #292524;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 72%, transparent);
     border-radius: 6px;
-    color: #a8a29e;
+    color: var(--theme-text-secondary, #a1a1aa);
     font-size: 12px;
     padding: 6px 10px;
     cursor: pointer;
@@ -5418,16 +5050,16 @@
     justify-content: center;
     gap: 8px;
     padding: 8px;
-    background: #422006;
-    border-bottom: 1px solid #713f12;
-    color: #fbbf24;
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 14%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-accent, #fbbf24) 34%, transparent);
+    color: var(--theme-accent, #fbbf24);
     font-size: 12px;
     cursor: pointer;
     flex-shrink: 0;
   }
 
   .history-warning:hover {
-    background: #4a2408;
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 18%, transparent);
   }
 
   .faucet-inline-card {
@@ -5604,7 +5236,7 @@
   }
 
   .main-scroll::-webkit-scrollbar-thumb {
-    background: #27272a;
+    background: var(--theme-scrollbar, #27272a);
     border-radius: 3px;
   }
 
@@ -5615,19 +5247,43 @@
     align-items: center;
     justify-content: center;
     height: 300px;
-    color: #78716c;
+    color: var(--theme-text-muted, #71717a);
     gap: 12px;
   }
 
   .empty-state h3 {
     margin: 0;
     font-size: 16px;
-    color: #a8a29e;
+    color: var(--theme-text-primary, #e4e4e7);
   }
 
   .empty-state p {
     margin: 0;
     font-size: 12px;
+  }
+
+  .empty-state-reset {
+    margin-top: 8px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(239, 68, 68, 0.28);
+    background: linear-gradient(180deg, rgba(69, 10, 10, 0.94), rgba(31, 12, 12, 0.96));
+    color: #fca5a5;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  }
+
+  .empty-state-reset:hover:not(:disabled) {
+    border-color: rgba(248, 113, 113, 0.52);
+    color: #fecaca;
+    transform: translateY(-1px);
+  }
+
+  .empty-state-reset:disabled {
+    opacity: 0.55;
+    cursor: wait;
   }
 
   /* Focused Account View */
@@ -5641,8 +5297,12 @@
     justify-content: space-between;
     align-items: center;
     padding: var(--space-3) var(--panel-gutter-x);
-    background: linear-gradient(180deg, #18181b 0%, #09090b 100%);
-    border-bottom: 1px solid #27272a;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--theme-surface, #18181b) 96%, transparent) 0%,
+      color-mix(in srgb, var(--theme-background, #09090b) 96%, transparent) 100%
+    );
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 70%, transparent);
   }
 
   .hero-left {
@@ -5686,6 +5346,11 @@
     gap: 8px;
   }
 
+  .hero-meta-block {
+    margin-top: 2px;
+    max-width: min(820px, 100%);
+  }
+
   .hero-context-switcher {
     max-width: min(360px, 100%);
     width: fit-content;
@@ -5694,37 +5359,9 @@
   .hero-name {
     font-size: 15px;
     font-weight: 600;
-    color: #fafaf9;
+    color: var(--theme-text-primary, #e4e4e7);
     letter-spacing: -0.01em;
     word-break: break-all;
-  }
-
-  .hero-address {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    width: fit-content;
-    max-width: 100%;
-    padding: 3px 0;
-    margin-left: 0;
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #71717a;
-    cursor: pointer;
-    transition: all 0.15s;
-    text-align: left;
-  }
-
-  .hero-address span {
-    word-break: break-all;
-  }
-
-  .hero-address:hover {
-    background: #27272a;
-    color: #a1a1aa;
   }
 
   .hero-right {
@@ -5735,14 +5372,14 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 30px;
     font-weight: 700;
-    color: #fafaf9;
+    color: var(--theme-text-primary, #e4e4e7);
     letter-spacing: -0.5px;
     line-height: 1;
   }
 
   .hero-label {
     font-size: 10px;
-    color: #71717a;
+    color: var(--theme-text-muted, #71717a);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     margin-top: 4px;
@@ -5757,7 +5394,7 @@
     margin-top: 8px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #a1a1aa;
+    color: var(--theme-text-secondary, #a1a1aa);
   }
 
   .hero-breakdown span {
@@ -6152,89 +5789,12 @@
     border-radius: 8px;
   }
 
-  /* Theme picker */
-  .theme-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-    gap: 10px;
-    margin-bottom: 16px;
-  }
-
-  .theme-swatch {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    padding: 0;
-    background: none;
-    border: 2px solid transparent;
-    border-radius: 10px;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .theme-swatch:hover {
-    transform: translateY(-1px);
-  }
-
-  .theme-swatch.active {
-    border-color: var(--theme-accent, #fbbf24);
-  }
-
-  .swatch-preview {
-    width: 100%;
-    aspect-ratio: 1.4;
-    border-radius: 8px;
-    border: 1px solid;
-    padding: 6px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    overflow: hidden;
-    position: relative;
-  }
-
-  .swatch-bar {
-    height: 3px;
-    border-radius: 2px;
-    opacity: 0.9;
-  }
-
-  .swatch-text {
-    font-size: 11px;
-    font-weight: 700;
-    font-family: 'JetBrains Mono', monospace;
-    line-height: 1;
-  }
-
-  .swatch-accent {
-    position: absolute;
-    bottom: 6px;
-    right: 6px;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-  }
-
-  .swatch-label {
-    font-size: 9px;
-    color: var(--theme-text-secondary, #a1a1aa);
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .swatch-label.active {
-    color: var(--theme-accent, #fbbf24);
-    font-weight: 600;
-  }
-
   /* Tabs */
   .tabs {
     display: flex;
     padding: 0 var(--panel-gutter-x);
-    background: #09090b;
-    border-bottom: 1px solid #18181b;
+    background: color-mix(in srgb, var(--theme-background, #09090b) 96%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 60%, transparent);
     overflow-x: auto;
     flex-shrink: 0;
     gap: 4px;
@@ -6253,7 +5813,7 @@
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
-    color: #52525b;
+    color: var(--theme-text-muted, #71717a);
     font-size: 11px;
     font-weight: 500;
     cursor: pointer;
@@ -6263,18 +5823,18 @@
   }
 
   .tab:hover {
-    color: #a1a1aa;
+    color: var(--theme-text-secondary, #a1a1aa);
   }
 
   .tab.active {
-    color: #fbbf24;
-    border-bottom-color: #fbbf24;
-    background: rgba(251, 191, 36, 0.04);
+    color: var(--theme-accent, #fbbf24);
+    border-bottom-color: var(--theme-accent, #fbbf24);
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 8%, transparent);
   }
 
   .tab-clear {
     margin-left: auto;
-    color: #52525b;
+    color: var(--theme-text-muted, #71717a);
     border-bottom-color: transparent;
   }
   .tab-clear:hover {
@@ -6309,66 +5869,22 @@
   .accounts-selector-row {
     margin-bottom: 10px;
     padding: 10px;
-    border: 1px solid #27272a;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 70%, transparent);
     border-radius: 10px;
-    background: #0f1014;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 78%, transparent);
   }
 
   .accounts-selector-row :global(.dropdown-trigger) {
     width: 100%;
     min-height: 42px;
-    border: 1px solid #2f3138;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
     border-radius: 8px;
-    background: #111216;
-    color: #d4d4d8;
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent);
+    color: var(--theme-text-primary, #e4e4e7);
   }
 
   .accounts-selector-row :global(.trigger-text) {
     font-size: 13px;
-  }
-
-  .more-tabs {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 12px;
-    padding: 8px;
-    border: 1px solid #27272a;
-    border-radius: 10px;
-    background: #101114;
-    overflow-x: auto;
-  }
-
-  .more-tabs::-webkit-scrollbar {
-    display: none;
-  }
-
-  .more-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 38px;
-    padding: 8px 12px;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    background: transparent;
-    color: #71717a;
-    font-size: 12px;
-    font-weight: 600;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .more-tab:hover {
-    color: #d4d4d8;
-    border-color: #3f3f46;
-    background: #18181b;
-  }
-
-  .more-tab.active {
-    color: #fbbf24;
-    border-color: #fbbf24;
-    background: rgba(251, 191, 36, 0.08);
   }
 
   .account-workspace-tabs {
@@ -6376,9 +5892,9 @@
     gap: 8px;
     margin-top: var(--space-3);
     padding: 10px;
-    border: 1px solid #27272a;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 70%, transparent);
     border-radius: 10px;
-    background: #111114;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 78%, transparent);
     overflow-x: auto;
   }
 
@@ -6396,7 +5912,7 @@
     border: 1px solid transparent;
     border-radius: 8px;
     background: transparent;
-    color: #71717a;
+    color: var(--theme-text-secondary, #a1a1aa);
     font-size: 12px;
     font-weight: 650;
     white-space: nowrap;
@@ -6406,15 +5922,15 @@
   }
 
   .account-workspace-tab:hover {
-    color: #d4d4d8;
-    border-color: #3f3f46;
-    background: #18181b;
+    color: var(--theme-text-primary, #e4e4e7);
+    border-color: color-mix(in srgb, var(--theme-border, #27272a) 80%, white 20%);
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 92%, transparent);
   }
 
   .account-workspace-tab.active {
-    color: #fbbf24;
-    border-color: #fbbf24;
-    background: rgba(251, 191, 36, 0.08);
+    color: var(--theme-accent, #fbbf24);
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 65%, transparent);
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 10%, transparent);
   }
 
   .workspace-badge {
@@ -6435,48 +5951,18 @@
     margin-top: var(--space-3);
   }
 
-  .consensus-summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 8px;
-  }
-
-  .consensus-height-badges {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .consensus-height-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 24px;
-    padding: 0 9px;
-    border-radius: 999px;
-    border: 1px solid #2f3138;
-    background: #121318;
-    color: #d4d4d8;
-    font-size: 11px;
-    font-weight: 700;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
   .workspace-inline-selector {
     margin-bottom: 10px;
     padding: 12px;
-    border: 1px solid #27272a;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 70%, transparent);
     border-radius: 10px;
-    background: #0f1014;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 78%, transparent);
   }
 
   .configure-panel {
-    border: 1px solid #27272a;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 70%, transparent);
     border-radius: 10px;
-    background: #101114;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 78%, transparent);
     padding: 10px;
   }
 
@@ -6489,10 +5975,10 @@
 
   .configure-tab {
     padding: 8px 12px;
-    border: 1px solid #2f3138;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 75%, transparent);
     border-radius: 8px;
-    background: #111216;
-    color: #9ca3af;
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent);
+    color: var(--theme-text-secondary, #a1a1aa);
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
@@ -6500,14 +5986,14 @@
   }
 
   .configure-tab:hover {
-    color: #d1d5db;
-    border-color: #4b5563;
+    color: var(--theme-text-primary, #e4e4e7);
+    border-color: color-mix(in srgb, var(--theme-border, #27272a) 85%, white 15%);
   }
 
   .configure-tab.active {
-    color: #fbbf24;
-    border-color: #fbbf24;
-    background: rgba(251, 191, 36, 0.08);
+    color: var(--theme-accent, #fbbf24);
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 65%, transparent);
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 10%, transparent);
   }
 
   .configure-tab.danger {
@@ -6634,6 +6120,9 @@
     gap: 12px;
     align-items: center;
     flex-wrap: wrap;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .appearance-scale-meta {
@@ -6642,6 +6131,9 @@
     gap: 12px;
     flex-wrap: wrap;
     justify-content: flex-end;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .appearance-scale-value {
@@ -6657,57 +6149,11 @@
   }
 
   .slider-container {
-    padding: 0 10px;
-    overflow: visible;
-  }
-
-  .appearance-slider {
     width: 100%;
-    -webkit-appearance: none;
-    appearance: none;
-    height: 22px;
-    background: transparent;
-    cursor: pointer;
-  }
-
-  .appearance-slider::-webkit-slider-runnable-track {
-    height: 2px;
-    border-radius: 1px;
-    background: linear-gradient(90deg, rgba(251, 191, 36, 0.7), rgba(113, 113, 122, 0.3));
-  }
-
-  .appearance-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 12px;
-    height: 12px;
-    border-radius: 2px;
-    border: 2px solid #0d0e12;
-    background: #fbbf24;
-    box-shadow: 0 0 4px rgba(251, 191, 36, 0.3);
-    margin-top: -5px;
-    transform: rotate(45deg);
-    transition: box-shadow 0.15s ease;
-  }
-
-  .appearance-slider::-webkit-slider-thumb:hover {
-    box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
-  }
-
-  .appearance-slider::-moz-range-track {
-    height: 2px;
-    border-radius: 1px;
-    background: linear-gradient(90deg, rgba(251, 191, 36, 0.7), rgba(113, 113, 122, 0.3));
-  }
-
-  .appearance-slider::-moz-range-thumb {
-    width: 12px;
-    height: 12px;
-    border-radius: 2px;
-    border: 2px solid #0d0e12;
-    background: #fbbf24;
-    box-shadow: 0 0 4px rgba(251, 191, 36, 0.3);
-    transform: rotate(45deg);
+    min-width: 0;
+    max-width: 100%;
+    padding: 0;
+    box-sizing: border-box;
   }
 
   .appearance-switch-row {
@@ -7028,67 +6474,6 @@
     }
   }
 
-  /* Contacts */
-  .contact-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px;
-    background: #1c1917;
-    border-radius: 6px;
-    margin-bottom: 6px;
-  }
-
-  .c-info {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .c-name {
-    font-size: 13px;
-    color: #e7e5e4;
-  }
-
-  .c-id {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #57534e;
-  }
-
-  .c-delete {
-    width: 24px;
-    height: 24px;
-    background: #292524;
-    border: none;
-    border-radius: 4px;
-    color: #78716c;
-    cursor: pointer;
-  }
-
-  .add-contact {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .add-contact input {
-    padding: 10px 12px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 6px;
-    color: #e7e5e4;
-    font-size: 13px;
-  }
-
-  .add-contact input::placeholder {
-    color: #57534e;
-  }
-
-  .add-contact input:focus {
-    outline: none;
-    border-color: #fbbf24;
-  }
-
   .btn-add {
     padding: 10px;
     background: linear-gradient(135deg, #92400e, #78350f);
@@ -7150,7 +6535,7 @@
     word-break: break-all;
   }
 
-  .setting-block input {
+  .setting-block input:not([type="range"]) {
     width: 100%;
     box-sizing: border-box;
     padding: 10px;
@@ -7161,7 +6546,7 @@
     font-size: 13px;
   }
 
-  .setting-block input:focus {
+  .setting-block input:not([type="range"]):focus {
     outline: none;
     border-color: #fbbf24;
   }
@@ -7209,31 +6594,31 @@
     overflow: visible !important;
   }
 
-  .content :global(input),
+  .content :global(input:not([type="range"])),
   .content :global(select) {
-    background: #1c1917 !important;
-    border: 1px solid #292524 !important;
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent) !important;
+    border: 1px solid color-mix(in srgb, var(--theme-input-border, #27272a) 82%, transparent) !important;
     border-radius: 6px !important;
-    color: #e7e5e4 !important;
+    color: var(--theme-text-primary, #e4e4e7) !important;
     padding: 10px 12px !important;
     font-size: 13px !important;
   }
 
-  .content :global(input:focus),
+  .content :global(input:not([type="range"]):focus),
   .content :global(select:focus) {
     outline: none !important;
-    border-color: #fbbf24 !important;
+    border-color: var(--theme-input-focus, #fbbf24) !important;
   }
 
   .content :global(input::placeholder) {
-    color: #57534e !important;
+    color: var(--theme-text-muted, #71717a) !important;
   }
 
   .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete):not(.account-workspace-tab):not(.configure-tab):not(.btn-add-token):not(.scope-btn):not(.primary-btn):not(.cancel-btn):not(.summary-action):not(.summary-action-inline):not(.delta-faucet):not(.delta-expand):not(.step-btn):not(.step-auto-btn)) {
-    background: #1c1917 !important;
-    border: 1px solid #292524 !important;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent) !important;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent) !important;
     border-radius: 6px !important;
-    color: #a8a29e !important;
+    color: var(--theme-text-secondary, #a1a1aa) !important;
     padding: 10px 14px !important;
     font-size: 12px !important;
     cursor: pointer !important;
@@ -7242,7 +6627,7 @@
   .content :global(h3),
   .content :global(h4),
   .content :global(label) {
-    color: #a8a29e !important;
+    color: var(--theme-text-secondary, #a1a1aa) !important;
   }
 
   /* ============================================
@@ -7276,35 +6661,35 @@
 
   .auto-refresh-select {
     padding: 5px 8px;
-    background: #18181b;
-    border: 1px solid #27272a;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
     border-radius: 6px;
-    color: #71717a;
+    color: var(--theme-text-secondary, #a1a1aa);
     font-size: 10px;
     cursor: pointer;
     transition: border-color 0.15s;
   }
 
   .auto-refresh-select:focus {
-    border-color: #fbbf24;
+    border-color: var(--theme-input-focus, #fbbf24);
     outline: none;
   }
 
   .btn-refresh-small {
     padding: 5px 10px;
-    background: #18181b;
-    border: 1px solid #27272a;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
     border-radius: 6px;
-    color: #71717a;
+    color: var(--theme-text-secondary, #a1a1aa);
     font-size: 11px;
     cursor: pointer;
     transition: all 0.15s;
   }
 
   .btn-refresh-small:hover:not(:disabled) {
-    border-color: #3f3f46;
-    color: #a1a1aa;
-    background: #1c1c20;
+    border-color: color-mix(in srgb, var(--theme-border, #27272a) 85%, white 15%);
+    color: var(--theme-text-primary, #e4e4e7);
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 92%, transparent);
   }
 
   .btn-refresh-small:disabled {
@@ -7332,6 +6717,24 @@
     flex-direction: column;
     gap: 2px;
     min-width: 0;
+  }
+
+  .wallet-meta-copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    width: fit-content;
+    max-width: 100%;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .wallet-meta-copy:hover .wallet-meta-value {
+    color: #f5f5f4;
   }
 
   .wallet-meta-value {
@@ -7485,8 +6888,12 @@
   .asset-action-card {
     margin-top: 12px;
     padding: 16px;
-    background: linear-gradient(180deg, rgba(28, 25, 23, 0.96), rgba(20, 18, 16, 0.96));
-    border: 1px solid #292524;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--theme-surface, #18181b) 92%, transparent),
+      color-mix(in srgb, var(--theme-background, #09090b) 94%, transparent)
+    );
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 72%, transparent);
     border-radius: 10px;
   }
 

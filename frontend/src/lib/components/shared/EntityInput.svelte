@@ -4,7 +4,6 @@
   Features:
   - Dropdown with known entities from gossip profiles
   - Universal entity ID parsing (numbered, named, short ID, provider-scoped)
-  - Contact integration
   - Auto profile lookup from gossip cache
 -->
 <script lang="ts">
@@ -12,12 +11,12 @@
   import { createEventDispatcher } from 'svelte';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { xlnFunctions, xlnEnvironment } from '../../stores/xlnStore';
+  import { entityAvatar } from '../../utils/avatar';
   import { getGossipProfile, getGossipProfiles as getProfilesFromSource, scheduleGossipProfileFetch } from '../../utils/entityNaming';
 
   export let value: string = '';
   export let placeholder: string = 'Select or enter entity...';
   export let entities: string[] = [];
-  export let contacts: Array<{ name: string; entityId: string }> = [];
   export let excludeId: string = ''; // Exclude current entity
   export let disabled: boolean = false;
   export let label: string = '';
@@ -46,8 +45,6 @@
   function getKnownEntityName(id: string): string {
     const norm = normalizeEntityId(id);
     if (!norm) return '';
-    const contact = contacts.find((c) => normalizeEntityId(c.entityId) === norm);
-    if (contact?.name?.trim()) return contact.name.trim();
     const profile = getGossipProfile(norm, activeEnv);
     if (!profile) {
       scheduleGossipProfileFetch([norm]);
@@ -127,11 +124,6 @@
       if (found) {
         return { entityId: found, shortId: name, resolved: true };
       }
-      // Check contacts
-      const contact = contacts.find(c => c.name.toLowerCase() === name);
-      if (contact) {
-        return { entityId: contact.entityId, shortId: name, resolved: true };
-      }
       return { entityId: '', shortId: name, resolved: false };
     }
 
@@ -173,7 +165,7 @@
     return id || '';
   }
 
-  // Get display name for entity (contact name or short ID)
+  // Get display name for entity using gossip metadata when available.
   function getDisplayName(id: string): string {
     const canonical = String(id || '').trim();
     if (!canonical) return '';
@@ -187,18 +179,7 @@
     .map(id => ({
       id,
       displayName: getKnownEntityName(id) || formatShortId(id),
-      isContact: contacts.some(c => normalizeEntityId(c.entityId) === normalizeEntityId(id)),
-      avatarUrl: activeFunctions?.isReady ? activeFunctions.generateEntityAvatar?.(id) || '' : ''
-    }));
-
-  // Contact-only options (for entities not in the network)
-  $: contactOnlyOptions = contacts
-    .filter(c => !entities.includes(c.entityId) && c.entityId !== excludeId)
-    .map(c => ({
-      id: c.entityId,
-      displayName: c.name,
-      isContact: true,
-      avatarUrl: activeFunctions?.isReady ? activeFunctions.generateEntityAvatar?.(c.entityId) || '' : ''
+      avatar: entityAvatar(activeFunctions, id)
     }));
 
   $: missingEntityProfiles = entities.filter((id) => {
@@ -210,8 +191,8 @@
   }
 
   function compareOptionPriority(
-    left: { id: string; displayName: string; isContact: boolean },
-    right: { id: string; displayName: string; isContact: boolean },
+    left: { id: string; displayName: string },
+    right: { id: string; displayName: string },
   ): number {
     const leftNorm = normalizeEntityId(left.id);
     const rightNorm = normalizeEntityId(right.id);
@@ -220,12 +201,11 @@
       if (leftNorm === preferredNorm && rightNorm !== preferredNorm) return -1;
       if (rightNorm === preferredNorm && leftNorm !== preferredNorm) return 1;
     }
-    if (left.isContact !== right.isContact) return left.isContact ? -1 : 1;
     return left.displayName.localeCompare(right.displayName);
   }
 
   // All options
-  $: allOptions = [...filteredEntities, ...contactOnlyOptions].sort(compareOptionPriority);
+  $: allOptions = [...filteredEntities].sort(compareOptionPriority);
 
   // Filter by search
   $: visibleOptions = inputValue
@@ -324,8 +304,8 @@
         on:click={openPicker}
         {disabled}
       >
-        {#if selectedOption.avatarUrl}
-          <img class="item-avatar" src={selectedOption.avatarUrl} alt="" />
+        {#if selectedOption.avatar}
+          <img class="item-avatar" src={selectedOption.avatar} alt="" />
         {:else}
           <span class="item-avatar placeholder">?</span>
         {/if}
@@ -380,13 +360,12 @@
         <div class="dropdown-section-label">Self</div>
         <button
           class="dropdown-item pinned"
-          class:contact={pinnedOption.isContact}
           class:selected={pinnedOption.id === value}
           data-testid={optionTestId(pinnedOption.id)}
           on:mousedown|preventDefault={() => selectEntity(pinnedOption.id)}
         >
-          {#if pinnedOption.avatarUrl}
-            <img class="item-avatar" src={pinnedOption.avatarUrl} alt="" />
+          {#if pinnedOption.avatar}
+            <img class="item-avatar" src={pinnedOption.avatar} alt="" />
           {:else}
             <span class="item-avatar placeholder">?</span>
           {/if}
@@ -416,24 +395,18 @@
         {#each remainingOptions as opt}
           <button
             class="dropdown-item"
-            class:contact={opt.isContact}
             class:selected={opt.id === value}
             data-testid={optionTestId(opt.id)}
             on:mousedown|preventDefault={() => selectEntity(opt.id)}
           >
-            {#if opt.avatarUrl}
-              <img class="item-avatar" src={opt.avatarUrl} alt="" />
+            {#if opt.avatar}
+              <img class="item-avatar" src={opt.avatar} alt="" />
             {:else}
               <span class="item-avatar placeholder">?</span>
             {/if}
             <span class="item-meta">
               <span class="item-name">{opt.displayName}</span>
               <span class="item-id">{opt.id}</span>
-            </span>
-            <span class="item-right">
-              {#if opt.isContact}
-                <span class="contact-badge">Contact</span>
-              {/if}
             </span>
           </button>
         {/each}
@@ -681,20 +654,6 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
     flex-shrink: 0;
-  }
-
-  .item-right {
-    flex-shrink: 0;
-  }
-
-  .contact-badge {
-    font-size: 9px;
-    color: #22c55e;
-    background: rgba(34, 197, 94, 0.15);
-    padding: 2px 5px;
-    border-radius: 3px;
-    text-transform: uppercase;
-    font-weight: 600;
   }
 
   .dropdown-section-label {

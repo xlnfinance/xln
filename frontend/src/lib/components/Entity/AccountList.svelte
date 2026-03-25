@@ -317,6 +317,7 @@ export let selectedAccountId: string | null = null;
     height: 100%;
     display: flex;
     flex-direction: column;
+    color: var(--theme-text-primary, #e4e4e7);
   }
 
   .accounts-list-view {
@@ -339,18 +340,18 @@ export let selectedAccountId: string | null = null;
     align-items: center;
     padding: 30px 20px;
     text-align: center;
-    background: rgba(108, 117, 125, 0.1);
-    border: 1px solid rgba(108, 117, 125, 0.3);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 72%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 72%, transparent);
     border-radius: 6px;
   }
 
   .no-accounts p {
     margin: 0 0 8px 0;
-    color: #d4d4d4;
+    color: var(--theme-text-primary, #d4d4d4);
   }
 
   .no-accounts small {
-    color: #9d9d9d;
+    color: var(--theme-text-muted, #9d9d9d);
   }
 
   .accounts-list {
@@ -374,9 +375,9 @@ export let selectedAccountId: string | null = null;
 
   .list-toggle {
     background: transparent;
-    border: 1px solid #292524;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
     border-radius: 999px;
-    color: #a8a29e;
+    color: var(--theme-text-secondary, #a8a29e);
     font-size: 0.72em;
     cursor: pointer;
     padding: 5px 10px;
@@ -384,7 +385,7 @@ export let selectedAccountId: string | null = null;
   }
 
   .list-toggle:hover {
-    border-color: #57534e;
-    color: #e7e5e4;
+    border-color: color-mix(in srgb, var(--theme-border, #27272a) 84%, white 16%);
+    color: var(--theme-text-primary, #e7e5e4);
   }
 </style>

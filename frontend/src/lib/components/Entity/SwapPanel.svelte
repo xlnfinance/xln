@@ -1679,7 +1679,7 @@
           min="0"
           max="100"
           step="1"
-          style="--fill: {orderPercent}%"
+          style="--xln-slider-progress: {orderPercent}%"
           value={orderPercent}
           on:input={(e) => applyOrderPercent(Number((e.currentTarget).value))}
         />
@@ -2207,42 +2207,19 @@
   .size-slider-row {
     position: relative;
     margin-bottom: 10px;
-    padding: 6px 6px 0;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 6px 0 0;
+    box-sizing: border-box;
   }
 
   .diamond-slider {
-    -webkit-appearance: none;
-    appearance: none;
     width: 100%;
-    height: 2px;
-    background: linear-gradient(to right, #fbbf24 var(--fill, 100%), #1e2028 var(--fill, 100%));
-    border-radius: 1px;
-    outline: none;
+    min-width: 0;
+    max-width: 100%;
     cursor: pointer;
     margin: 0;
-  }
-
-  .diamond-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 12px;
-    height: 12px;
-    background: #fbbf24;
-    border: 2px solid #fbbf24;
-    border-radius: 0;
-    cursor: pointer;
-    transform: rotate(45deg);
-    filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.4));
-  }
-
-  .diamond-slider::-moz-range-thumb {
-    width: 12px;
-    height: 12px;
-    background: #fbbf24;
-    border: 2px solid #fbbf24;
-    border-radius: 0;
-    cursor: pointer;
-    transform: rotate(45deg);
-    filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.4));
   }
 
   .slider-marks {
@@ -2251,6 +2228,9 @@
     margin-top: 4px;
     pointer-events: none;
     padding: 0;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .slider-mark-group {
@@ -2412,7 +2392,7 @@
     color: #9ca3af;
   }
 
-  select, input {
+  select, input:not([type="range"]) {
     padding: 8px;
     width: 100%;
     min-width: 0;
@@ -2425,7 +2405,7 @@
     font-family: 'JetBrains Mono', monospace;
   }
 
-  select:focus, input:focus {
+  select:focus, input:not([type="range"]):focus {
     outline: none;
     border-color: rgba(251, 191, 36, 0.65);
   }

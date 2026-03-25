@@ -14,6 +14,7 @@
     resolveRelayUrls,
   } from '../../stores/xlnStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
+  import { entityAvatar } from '$lib/utils/avatar';
   import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
   import {
     normalizeEntityId,
@@ -21,6 +22,7 @@
     hasCounterpartyAccount,
     getCounterpartyAccount,
     getConnectedCounterpartyIds,
+    isCounterpartyBlockedByDispute,
   } from '$lib/utils/entityReplica';
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle } from 'lucide-svelte';
 
@@ -55,7 +57,7 @@
     isConnected: boolean;
     lastSeen: number;
     raw: string;
-    identicon: string;
+    avatar: string;
   }
 
   let hubs: Hub[] = [];
@@ -87,11 +89,6 @@
     isConnected?: () => boolean;
     updateConfig?: (cfg: { relayUrls: string[] }) => void;
   };
-
-  function generateIdenticon(entityId: string): string {
-    const canonicalId = String(entityId || '').trim().toLowerCase();
-    return activeFunctions?.isReady ? (activeFunctions.generateEntityAvatar?.(canonicalId) || '') : '';
-  }
 
   $: connectedHubIds = getConnectedCounterpartyIds(env, entityId);
 
@@ -198,7 +195,7 @@
             isConnected: false,
             lastSeen: Number(hub.lastUpdated || 0),
             raw: formatRawProfile(hub),
-            identicon: generateIdenticon(fullEntityId),
+            avatar: entityAvatar(activeFunctions, fullEntityId),
           } satisfies Hub;
         });
     } catch {
@@ -258,10 +255,12 @@
         }
       }
 
-      hubs = fetchedHubs.map((hub) => ({
-        ...hub,
-        isConnected: currentEnv ? hasCounterpartyAccount(currentEnv, entityId, hub.entityId) : false,
-      }));
+      hubs = fetchedHubs
+        .filter((hub) => !currentEnv || !entityId || !isCounterpartyBlockedByDispute(currentEnv, entityId, hub.entityId))
+        .map((hub) => ({
+          ...hub,
+          isConnected: currentEnv ? hasCounterpartyAccount(currentEnv, entityId, hub.entityId) : false,
+        }));
       if (hubs.length === 0) {
         error = 'No public hubs discovered yet. Try Refresh; if it persists, check relay connectivity.';
       }
@@ -429,7 +428,7 @@
         <article class="hub-card" class:connected={hub.isConnected}>
           <div class="hub-card-top">
             <button class="hub-primary" on:click={() => toggleExpand(hub.entityId)}>
-              <img src={hub.identicon} alt="" class="hub-identicon" />
+              <img src={hub.avatar} alt="" class="hub-avatar" />
               <div class="hub-title">
                 <span class="hub-name">{hub.name}</span>
               </div>
@@ -652,7 +651,7 @@
     text-align: left;
   }
 
-  .hub-identicon {
+  .hub-avatar {
     width: 26px;
     height: 26px;
     border-radius: 6px;

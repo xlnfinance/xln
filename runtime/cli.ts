@@ -14,7 +14,7 @@ import { createProviderScopedEntityId, normalizeEntityId } from './entity-id-uti
 import { createEmptyBatch, batchAddReserveToReserve, encodeJBatch } from './j-batch';
 
 const REMOTE_RPC = 'https://xln.finance/rpc/arrakis';
-const LOCAL_RPC = 'http://127.0.0.1:8545';
+const LOCAL_RPC = 'http://localhost:8545';
 const CHAIN_ID = 31337;
 
 // Contract addresses from jurisdictions.json (deployed 2025-01-29)
@@ -76,14 +76,9 @@ async function init(remote: boolean) {
         amount,
       );
       const encodedBatch = encodeJBatch(batch);
-      const tx = await depository.processBatch(encodedBatch, providerAddr, options.hankoData, options.nonce);
+      const tx = await depository.processBatch(encodedBatch, options.hankoData, options.nonce);
       await tx.wait();
       return [];
-    },
-    async registerNumberedEntity(boardHash: string) {
-      const tx = await entityProvider.registerNumberedEntity(boardHash);
-      const receipt = await tx.wait();
-      return { entityNumber: 0, txHash: receipt?.hash || '' };
     },
   } as any;
 
@@ -102,7 +97,6 @@ Commands:
   status                     - Show connection info
   reserves <entityId>        - Get reserves for entity
   r2r <from> <to> <amount> <nonce> <hankoData> [provider]   - Reserve to reserve transfer (Hanko)
-  register <name>            - Register new entity
   nonce <entityId>           - Get entity nonce
   help                       - Show this help
   exit                       - Exit CLI
@@ -134,13 +128,6 @@ Commands:
       console.log(`R2R: ${fromId.slice(0,10)}... -> ${toId.slice(0,10)}... : ${amountStr} USDC`);
       const events = await jAdapter.reserveToReserve(fromId, toId, 1, amount, { entityProvider: provider, hankoData: hankoData!, nonce });
       console.log(`Done. Events: ${events.length}`);
-      break;
-
-    case 'register':
-      if (!args[0]) { console.log('Usage: register <name>'); break; }
-      const boardHash = ethers.keccak256(ethers.toUtf8Bytes(args[0]));
-      const result = await jAdapter.registerNumberedEntity(boardHash);
-      console.log(`Registered entity #${result.entityNumber}, tx: ${result.txHash}`);
       break;
 
     case 'nonce':

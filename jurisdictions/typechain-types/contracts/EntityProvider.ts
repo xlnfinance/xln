@@ -95,15 +95,8 @@ export interface EntityProviderInterface extends Interface {
       | "BoardActivated"
       | "BoardProposed"
       | "ControlSharesReleased"
-      | "DebugComputeBoard"
-      | "DebugHankoDecode"
-      | "DebugHankoEntry"
-      | "DebugRecoverSigner"
-      | "DebugValidateEntity"
       | "EntityRegistered"
       | "GovernanceEnabled"
-      | "HankoClaimProcessed"
-      | "HankoVerified"
       | "NameAssigned"
       | "NameTransferred"
       | "ProposalCancelled"
@@ -513,115 +506,6 @@ export namespace ControlSharesReleasedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace DebugComputeBoardEvent {
-  export type InputTuple = [
-    threshold: BigNumberish,
-    entityId0: BytesLike,
-    computedHash: BytesLike
-  ];
-  export type OutputTuple = [
-    threshold: bigint,
-    entityId0: string,
-    computedHash: string
-  ];
-  export interface OutputObject {
-    threshold: bigint;
-    entityId0: string;
-    computedHash: string;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace DebugHankoDecodeEvent {
-  export type InputTuple = [
-    placeholders: BigNumberish,
-    packedLen: BigNumberish,
-    claims: BigNumberish
-  ];
-  export type OutputTuple = [
-    placeholders: bigint,
-    packedLen: bigint,
-    claims: bigint
-  ];
-  export interface OutputObject {
-    placeholders: bigint;
-    packedLen: bigint;
-    claims: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace DebugHankoEntryEvent {
-  export type InputTuple = [
-    dataLen: BigNumberish,
-    hash: BytesLike,
-    gasLeft: BigNumberish
-  ];
-  export type OutputTuple = [dataLen: bigint, hash: string, gasLeft: bigint];
-  export interface OutputObject {
-    dataLen: bigint;
-    hash: string;
-    gasLeft: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace DebugRecoverSignerEvent {
-  export type InputTuple = [
-    hash: BytesLike,
-    recovered: AddressLike,
-    sigLength: BigNumberish
-  ];
-  export type OutputTuple = [
-    hash: string,
-    recovered: string,
-    sigLength: bigint
-  ];
-  export interface OutputObject {
-    hash: string;
-    recovered: string;
-    sigLength: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace DebugValidateEntityEvent {
-  export type InputTuple = [
-    entityId: BytesLike,
-    computedHash: BytesLike,
-    storedHash: BytesLike,
-    isLazy: boolean
-  ];
-  export type OutputTuple = [
-    entityId: string,
-    computedHash: string,
-    storedHash: string,
-    isLazy: boolean
-  ];
-  export interface OutputObject {
-    entityId: string;
-    computedHash: string;
-    storedHash: string;
-    isLazy: boolean;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
 export namespace EntityRegisteredEvent {
   export type InputTuple = [
     entityId: BytesLike,
@@ -659,41 +543,6 @@ export namespace GovernanceEnabledEvent {
     entityId: string;
     controlTokenId: bigint;
     dividendTokenId: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace HankoClaimProcessedEvent {
-  export type InputTuple = [
-    entityId: BytesLike,
-    success: boolean,
-    votingPower: BigNumberish
-  ];
-  export type OutputTuple = [
-    entityId: string,
-    success: boolean,
-    votingPower: bigint
-  ];
-  export interface OutputObject {
-    entityId: string;
-    success: boolean;
-    votingPower: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace HankoVerifiedEvent {
-  export type InputTuple = [entityId: BytesLike, hash: BytesLike];
-  export type OutputTuple = [entityId: string, hash: string];
-  export interface OutputObject {
-    entityId: string;
-    hash: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -908,7 +757,7 @@ export interface EntityProvider extends BaseContract {
   batchVerifyHankoSignatures: TypedContractMethod<
     [hankoDataArray: BytesLike[], hashes: BytesLike[]],
     [[string[], boolean[]] & { entityIds: string[]; results: boolean[] }],
-    "nonpayable"
+    "view"
   >;
 
   cancelBoardProposal: TypedContractMethod<
@@ -1120,7 +969,7 @@ export interface EntityProvider extends BaseContract {
   verifyHankoSignature: TypedContractMethod<
     [hankoData: BytesLike, hash: BytesLike],
     [[string, boolean] & { entityId: string; success: boolean }],
-    "nonpayable"
+    "view"
   >;
 
   getFunction<T extends ContractMethod = ContractMethod>(
@@ -1180,7 +1029,7 @@ export interface EntityProvider extends BaseContract {
   ): TypedContractMethod<
     [hankoDataArray: BytesLike[], hashes: BytesLike[]],
     [[string[], boolean[]] & { entityIds: string[]; results: boolean[] }],
-    "nonpayable"
+    "view"
   >;
   getFunction(
     nameOrSignature: "cancelBoardProposal"
@@ -1407,7 +1256,7 @@ export interface EntityProvider extends BaseContract {
   ): TypedContractMethod<
     [hankoData: BytesLike, hash: BytesLike],
     [[string, boolean] & { entityId: string; success: boolean }],
-    "nonpayable"
+    "view"
   >;
 
   getEvent(
@@ -1439,41 +1288,6 @@ export interface EntityProvider extends BaseContract {
     ControlSharesReleasedEvent.OutputObject
   >;
   getEvent(
-    key: "DebugComputeBoard"
-  ): TypedContractEvent<
-    DebugComputeBoardEvent.InputTuple,
-    DebugComputeBoardEvent.OutputTuple,
-    DebugComputeBoardEvent.OutputObject
-  >;
-  getEvent(
-    key: "DebugHankoDecode"
-  ): TypedContractEvent<
-    DebugHankoDecodeEvent.InputTuple,
-    DebugHankoDecodeEvent.OutputTuple,
-    DebugHankoDecodeEvent.OutputObject
-  >;
-  getEvent(
-    key: "DebugHankoEntry"
-  ): TypedContractEvent<
-    DebugHankoEntryEvent.InputTuple,
-    DebugHankoEntryEvent.OutputTuple,
-    DebugHankoEntryEvent.OutputObject
-  >;
-  getEvent(
-    key: "DebugRecoverSigner"
-  ): TypedContractEvent<
-    DebugRecoverSignerEvent.InputTuple,
-    DebugRecoverSignerEvent.OutputTuple,
-    DebugRecoverSignerEvent.OutputObject
-  >;
-  getEvent(
-    key: "DebugValidateEntity"
-  ): TypedContractEvent<
-    DebugValidateEntityEvent.InputTuple,
-    DebugValidateEntityEvent.OutputTuple,
-    DebugValidateEntityEvent.OutputObject
-  >;
-  getEvent(
     key: "EntityRegistered"
   ): TypedContractEvent<
     EntityRegisteredEvent.InputTuple,
@@ -1486,20 +1300,6 @@ export interface EntityProvider extends BaseContract {
     GovernanceEnabledEvent.InputTuple,
     GovernanceEnabledEvent.OutputTuple,
     GovernanceEnabledEvent.OutputObject
-  >;
-  getEvent(
-    key: "HankoClaimProcessed"
-  ): TypedContractEvent<
-    HankoClaimProcessedEvent.InputTuple,
-    HankoClaimProcessedEvent.OutputTuple,
-    HankoClaimProcessedEvent.OutputObject
-  >;
-  getEvent(
-    key: "HankoVerified"
-  ): TypedContractEvent<
-    HankoVerifiedEvent.InputTuple,
-    HankoVerifiedEvent.OutputTuple,
-    HankoVerifiedEvent.OutputObject
   >;
   getEvent(
     key: "NameAssigned"
@@ -1589,61 +1389,6 @@ export interface EntityProvider extends BaseContract {
       ControlSharesReleasedEvent.OutputObject
     >;
 
-    "DebugComputeBoard(uint256,bytes32,bytes32)": TypedContractEvent<
-      DebugComputeBoardEvent.InputTuple,
-      DebugComputeBoardEvent.OutputTuple,
-      DebugComputeBoardEvent.OutputObject
-    >;
-    DebugComputeBoard: TypedContractEvent<
-      DebugComputeBoardEvent.InputTuple,
-      DebugComputeBoardEvent.OutputTuple,
-      DebugComputeBoardEvent.OutputObject
-    >;
-
-    "DebugHankoDecode(uint256,uint256,uint256)": TypedContractEvent<
-      DebugHankoDecodeEvent.InputTuple,
-      DebugHankoDecodeEvent.OutputTuple,
-      DebugHankoDecodeEvent.OutputObject
-    >;
-    DebugHankoDecode: TypedContractEvent<
-      DebugHankoDecodeEvent.InputTuple,
-      DebugHankoDecodeEvent.OutputTuple,
-      DebugHankoDecodeEvent.OutputObject
-    >;
-
-    "DebugHankoEntry(uint256,bytes32,uint256)": TypedContractEvent<
-      DebugHankoEntryEvent.InputTuple,
-      DebugHankoEntryEvent.OutputTuple,
-      DebugHankoEntryEvent.OutputObject
-    >;
-    DebugHankoEntry: TypedContractEvent<
-      DebugHankoEntryEvent.InputTuple,
-      DebugHankoEntryEvent.OutputTuple,
-      DebugHankoEntryEvent.OutputObject
-    >;
-
-    "DebugRecoverSigner(bytes32,address,uint256)": TypedContractEvent<
-      DebugRecoverSignerEvent.InputTuple,
-      DebugRecoverSignerEvent.OutputTuple,
-      DebugRecoverSignerEvent.OutputObject
-    >;
-    DebugRecoverSigner: TypedContractEvent<
-      DebugRecoverSignerEvent.InputTuple,
-      DebugRecoverSignerEvent.OutputTuple,
-      DebugRecoverSignerEvent.OutputObject
-    >;
-
-    "DebugValidateEntity(bytes32,bytes32,bytes32,bool)": TypedContractEvent<
-      DebugValidateEntityEvent.InputTuple,
-      DebugValidateEntityEvent.OutputTuple,
-      DebugValidateEntityEvent.OutputObject
-    >;
-    DebugValidateEntity: TypedContractEvent<
-      DebugValidateEntityEvent.InputTuple,
-      DebugValidateEntityEvent.OutputTuple,
-      DebugValidateEntityEvent.OutputObject
-    >;
-
     "EntityRegistered(bytes32,uint256,bytes32)": TypedContractEvent<
       EntityRegisteredEvent.InputTuple,
       EntityRegisteredEvent.OutputTuple,
@@ -1664,28 +1409,6 @@ export interface EntityProvider extends BaseContract {
       GovernanceEnabledEvent.InputTuple,
       GovernanceEnabledEvent.OutputTuple,
       GovernanceEnabledEvent.OutputObject
-    >;
-
-    "HankoClaimProcessed(bytes32,bool,uint256)": TypedContractEvent<
-      HankoClaimProcessedEvent.InputTuple,
-      HankoClaimProcessedEvent.OutputTuple,
-      HankoClaimProcessedEvent.OutputObject
-    >;
-    HankoClaimProcessed: TypedContractEvent<
-      HankoClaimProcessedEvent.InputTuple,
-      HankoClaimProcessedEvent.OutputTuple,
-      HankoClaimProcessedEvent.OutputObject
-    >;
-
-    "HankoVerified(bytes32,bytes32)": TypedContractEvent<
-      HankoVerifiedEvent.InputTuple,
-      HankoVerifiedEvent.OutputTuple,
-      HankoVerifiedEvent.OutputObject
-    >;
-    HankoVerified: TypedContractEvent<
-      HankoVerifiedEvent.InputTuple,
-      HankoVerifiedEvent.OutputTuple,
-      HankoVerifiedEvent.OutputObject
     >;
 
     "NameAssigned(string,uint256)": TypedContractEvent<

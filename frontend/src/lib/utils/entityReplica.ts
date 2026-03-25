@@ -93,6 +93,18 @@ export function hasCounterpartyAccount(
   return !!getCounterpartyAccount(envLike, ownerEntityId, counterpartyEntityId);
 }
 
+export function isCounterpartyBlockedByDispute(
+  envLike: EnvLike,
+  ownerEntityId: string,
+  counterpartyEntityId: string,
+): boolean {
+  const entry = getCounterpartyAccount(envLike, ownerEntityId, counterpartyEntityId);
+  if (!entry) return false;
+  const account = entry.account;
+  if (Boolean(account.activeDispute)) return true;
+  return String(account.status || '').trim().toLowerCase() === 'disputed';
+}
+
 export function getConnectedCounterpartyIds(envLike: EnvLike, ownerEntityId: string): Set<string> {
   const connected = new Set<string>();
   const replica = getReplicaForEntity(envLike, ownerEntityId);

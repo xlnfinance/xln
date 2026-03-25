@@ -10,7 +10,6 @@
   ) => { update?: (next: { side: 'from' | 'to'; endpoint: MoveEndpoint }) => void; destroy?: () => void } | void;
 
   export let mode: 'assets' | 'accounts' = 'assets';
-  export let contacts: Array<{ name: string; entityId: string }> = [];
   export let moveAmount = '';
   export let moveAssetSymbol = 'USDC';
   export let moveFromEndpoint: MoveEndpoint = 'external';
@@ -135,7 +134,6 @@
             label="From account"
             value={moveSourceAccountId}
             entities={moveSourceAccountOptions}
-            {contacts}
             excludeId={entityId}
             placeholder="Select source account..."
             disabled={moveSourceAccountOptions.length === 0}
@@ -185,7 +183,6 @@
             label="To reserve entity"
             value={moveReserveRecipientEntityId}
             entities={moveEntityOptions}
-            {contacts}
             placeholder="Recipient entity..."
             preferredId={reserveRecipientPreferredId}
             on:change={handleMoveReserveRecipientChange}
@@ -199,7 +196,6 @@
             label="Recipient"
             value={moveTargetEntityId}
             entities={moveEntityOptions}
-            {contacts}
             placeholder="Recipient entity..."
             preferredId={targetEntityPreferredId}
             on:change={handleMoveTargetEntityChange}
@@ -211,7 +207,6 @@
             label="Counterparty"
             value={moveTargetHubEntityId}
             entities={moveHubEntityOptions}
-            {contacts}
             placeholder="Counterparty entity..."
             on:change={handleMoveTargetHubChange}
           />
@@ -290,6 +285,15 @@
 
 <style>
   .move-route-builder {
+    --move-accent: var(--theme-accent, #fbbf24);
+    --move-border: color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
+    --move-border-strong: color-mix(in srgb, var(--move-accent) 68%, transparent);
+    --move-surface: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
+    --move-surface-hover: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 92%, transparent);
+    --move-input-bg: color-mix(in srgb, var(--theme-input-bg, #09090b) 90%, transparent);
+    --move-text: var(--theme-text-primary, #e4e4e7);
+    --move-text-secondary: var(--theme-text-secondary, #a1a1aa);
+    --move-text-muted: var(--theme-text-muted, #71717a);
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -316,9 +320,11 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
     padding: 14px;
-    border: 1px solid rgba(251, 191, 36, 0.16);
+    border: 1px solid color-mix(in srgb, var(--move-accent) 28%, var(--move-border));
     border-radius: 14px;
-    background: radial-gradient(circle at top, rgba(251, 191, 36, 0.05), transparent 55%), rgba(12, 10, 9, 0.88);
+    background:
+      radial-gradient(circle at top, color-mix(in srgb, var(--move-accent) 10%, transparent), transparent 55%),
+      color-mix(in srgb, var(--move-surface) 96%, transparent);
     overflow: visible;
   }
 
@@ -348,27 +354,27 @@
   }
 
   .move-drag-layer path {
-    stroke: rgba(251, 191, 36, 0.96);
+    stroke: color-mix(in srgb, var(--move-accent) 96%, transparent);
     stroke-width: 2.5;
     stroke-linecap: round;
     stroke-linejoin: round;
     fill: none;
     stroke-dasharray: 8 6;
-    filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.28));
+    filter: drop-shadow(0 0 4px color-mix(in srgb, var(--move-accent) 28%, transparent));
   }
 
   .move-drag-layer.committed path {
-    stroke: rgba(245, 158, 11, 0.78);
+    stroke: color-mix(in srgb, var(--move-accent) 78%, transparent);
     stroke-width: 2.25;
     stroke-dasharray: none;
-    filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.2));
+    filter: drop-shadow(0 0 3px color-mix(in srgb, var(--move-accent) 20%, transparent));
   }
 
   .move-column-head {
     font-size: 10px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #78716c;
+    color: var(--move-text-muted);
   }
 
   .move-node {
@@ -381,9 +387,13 @@
     min-width: 0;
     padding: 12px;
     border-radius: 12px;
-    border: 1px solid rgba(120, 113, 108, 0.34);
-    background: linear-gradient(180deg, rgba(28, 25, 23, 0.95), rgba(17, 15, 13, 0.95));
-    color: #fafaf9;
+    border: 1px solid color-mix(in srgb, var(--move-border) 84%, transparent);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--move-surface-hover) 96%, transparent),
+      color-mix(in srgb, var(--move-input-bg) 96%, transparent)
+    );
+    color: var(--move-text);
     text-align: left;
     cursor: grab;
     transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
@@ -393,30 +403,42 @@
 
   .move-node:hover,
   .move-node.hover-target {
-    border-color: rgba(251, 191, 36, 0.55);
-    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.18), 0 10px 24px rgba(0, 0, 0, 0.25);
+    border-color: color-mix(in srgb, var(--move-accent) 55%, var(--move-border));
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--move-accent) 18%, transparent),
+      0 10px 24px color-mix(in srgb, var(--theme-background, #09090b) 28%, transparent);
     transform: translateY(-1px);
   }
 
   .move-node.selected,
   .move-node.source-active,
   .move-node.target-active {
-    border-color: rgba(251, 191, 36, 0.92);
-    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.32), 0 16px 36px rgba(0, 0, 0, 0.3);
+    border-color: color-mix(in srgb, var(--move-accent) 92%, transparent);
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--move-accent) 32%, transparent),
+      0 16px 36px color-mix(in srgb, var(--theme-background, #09090b) 30%, transparent);
     transform: translateY(-1px);
   }
 
   .move-node.source-active {
-    background: linear-gradient(180deg, rgba(66, 32, 6, 0.96), rgba(28, 25, 23, 0.96));
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--move-accent) 14%, var(--move-surface-hover)),
+      color-mix(in srgb, var(--move-surface) 96%, transparent)
+    );
   }
 
   .move-node.target-active {
-    background: linear-gradient(180deg, rgba(39, 32, 18, 0.96), rgba(28, 25, 23, 0.96));
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--theme-credit, #4ade80) 10%, var(--move-surface-hover)),
+      color-mix(in srgb, var(--move-surface) 96%, transparent)
+    );
   }
 
   .move-node.pending {
-    border-color: rgba(250, 204, 21, 0.7);
-    box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.35);
+    border-color: color-mix(in srgb, var(--move-accent) 70%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--move-accent) 35%, transparent);
   }
 
   .move-node.dragging {
@@ -431,20 +453,20 @@
   .move-node-label {
     font-size: 13px;
     font-weight: 700;
-    color: #f5f5f4;
+    color: var(--move-text);
     white-space: nowrap;
   }
 
   .move-node-balance {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 16px;
-    color: #fbbf24;
+    color: var(--move-accent);
     white-space: nowrap;
   }
 
   .move-node-target-hint {
     font-size: 11px;
-    color: #78716c;
+    color: var(--move-text-muted);
     white-space: nowrap;
   }
 
@@ -454,16 +476,16 @@
     gap: 8px;
     padding: 14px;
     border-radius: 12px;
-    border: 1px solid rgba(120, 113, 108, 0.2);
-    background: rgba(12, 10, 9, 0.55);
+    border: 1px solid color-mix(in srgb, var(--move-border) 74%, transparent);
+    background: color-mix(in srgb, var(--move-surface) 82%, transparent);
   }
 
   .move-summary-pill {
     align-self: flex-start;
     padding: 4px 8px;
     border-radius: 999px;
-    background: rgba(251, 191, 36, 0.08);
-    color: #fbbf24;
+    background: color-mix(in srgb, var(--move-accent) 10%, transparent);
+    color: var(--move-accent);
     font-size: 11px;
     font-weight: 700;
   }
@@ -471,26 +493,26 @@
   .move-summary-title {
     font-size: 14px;
     font-weight: 700;
-    color: #fafaf9;
+    color: var(--move-text);
   }
 
   .move-summary-meta {
     font-size: 12px;
-    color: #a8a29e;
+    color: var(--move-text-secondary);
   }
 
   .move-summary-progress {
     font-size: 12px;
-    color: #fbbf24;
+    color: var(--move-accent);
   }
 
   .move-summary-progress.error {
-    color: #fca5a5;
+    color: color-mix(in srgb, var(--theme-debit, #f43f5e) 68%, white 32%);
   }
 
   .move-summary-batch {
     font-size: 12px;
-    color: #fbbf24;
+    color: var(--move-accent);
   }
 
   .move-steps {
@@ -502,9 +524,9 @@
   .move-step-chip {
     padding: 6px 10px;
     border-radius: 999px;
-    border: 1px solid rgba(120, 113, 108, 0.22);
-    background: rgba(28, 25, 23, 0.72);
-    color: #d6d3d1;
+    border: 1px solid color-mix(in srgb, var(--move-border) 70%, transparent);
+    background: color-mix(in srgb, var(--move-surface-hover) 82%, transparent);
+    color: var(--move-text-secondary);
     font-size: 12px;
   }
 
@@ -523,7 +545,7 @@
 
   .asset-field span {
     font-size: 10px;
-    color: #78716c;
+    color: var(--move-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
@@ -534,14 +556,14 @@
     gap: 6px;
     min-height: 48px;
     padding: 0 8px 0 12px;
-    border: 1px solid #322821;
+    border: 1px solid color-mix(in srgb, var(--move-border) 82%, transparent);
     border-radius: 12px;
-    background: #110d0b;
+    background: var(--move-input-bg);
   }
 
   .asset-amount-shell:focus-within {
-    border-color: #fbbf24;
-    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.12);
+    border-color: color-mix(in srgb, var(--move-accent) 70%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--move-accent) 18%, transparent);
   }
 
   .asset-amount-shell input {
@@ -550,7 +572,7 @@
     padding: 0;
     border: none;
     background: transparent;
-    color: #f5f5f4;
+    color: var(--move-text);
     font-size: 15px;
   }
 
@@ -573,7 +595,7 @@
     border: none;
     background: transparent;
     padding: 0 2px;
-    color: #8d857d;
+    color: var(--move-text-muted);
     font-size: 11px;
     font-weight: 600;
     text-transform: none;
@@ -594,11 +616,11 @@
   }
 
   .asset-max-hint:hover:not(:disabled) {
-    color: #f5f5f4;
+    color: var(--move-text);
   }
 
   .asset-max-hint:disabled {
-    color: #57534e;
+    color: var(--move-text-muted);
     cursor: default;
   }
 
@@ -613,7 +635,7 @@
     border-radius: 0;
     background: transparent;
     border: none;
-    color: #e7e5e4;
+    color: var(--move-text);
     align-self: stretch;
   }
 
