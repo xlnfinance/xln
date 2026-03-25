@@ -63,12 +63,17 @@ Why it stays:
 Exit:
 - RPC J-side state commitment is captured and usable for replay/dispute/debug parity.
 
-8. Gossip freshness / encrypted routing fallback audit.
+8. Runtime transport operational cleanup.
 Status: open.
 Why it stays:
-- old MVP note about stale gossip leading to degraded routing/encryption behavior was never explicitly closed with a targeted test.
+- direct/public transport is now working and prod-safe, but operational semantics are still noisy:
+- reconnect policy is still too eager/infinite in places
+- health does not expose transport readiness as cleanly as it should
+- deploy/setup surface still has stale helpers and duplicate assumptions
 Exit:
-- targeted test proves peer keys refresh in bounded time and onion/encrypted path is used without cleartext fallback in the intended flow.
+- reconnect is bounded/intentional
+- health clearly reports transport readiness
+- one deployment path remains, with public WS preflight
 
 9. `reserve -> collateral` UI simplification.
 Status: open.
@@ -83,6 +88,15 @@ Status: open.
 Task:
 - decide whether this stays a direct on-chain `submitReserveToReserve`
 - or moves behind entity-tx + quorum flow for consistency with the rest of the product.
+
+11. Activity / account-card UI polish.
+Status: open.
+Why it stays:
+- activity cards are improved, but still not as structured as they should be for `j_event_claim` and routing context
+- account cards still need richer HTLC/payment-transformer state instead of minimal lock counters
+Exit:
+- activity rows show the important routing/parties/block context cleanly
+- account cards show active HTLC/payment-transformer state with useful amounts and recipients
 
 ## Multisigner-First
 
@@ -140,3 +154,9 @@ Status: open.
 - `NEXT-SESSION.md` is now historical, not canonical.
 - `docs/next.md` still contains useful audit debt, but `docs/todo.md` should be treated as the active list.
 - `ai/todo.md` still exists as a local workspace note, but its open items are mirrored above.
+- Closed and intentionally removed from the canonical TODO:
+  - unified orchestrator rollout across dev/e2e/prod
+  - isolated `H1/H2/H3/MM/custody` runtime processes
+  - public direct hub discovery via `/api/hubs`
+  - active transport contract cleanup to `wsUrl + relays`
+  - hub-to-hub and user-to-hub direct WS on prod
