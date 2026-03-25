@@ -5,14 +5,20 @@
 
 import { applyEntityTx } from './entity-tx';
 import { isLeftEntity } from './entity-id-utils';
-import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, JInput, RoutedEntityInput } from './types';
+import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, JInput, JurisdictionEvent, JurisdictionEventData, RoutedEntityInput } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
 import { addMessages, cloneEntityReplica, cloneEntityState, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from './state-helpers';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
-import { normalizeSwapOfferForOrderbook, processOrderbookSwaps, processOrderbookCancels } from './entity-tx/handlers/account';
+import {
+  normalizeSwapOfferForOrderbook,
+  processOrderbookSwaps,
+  processOrderbookCancels,
+  type SwapCancelRequestEvent,
+  type SwapOfferEvent,
+} from './entity-tx/handlers/account';
 import { compareCanonicalText, swapKey } from './swap-execution';
 import type { OrderbookExtState } from './orderbook';
 import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
@@ -1276,8 +1282,8 @@ export const applyEntityFrame = async (
   const proposableAccounts = new Set<string>();
 
   // === AGGREGATE PURE EVENTS FROM ALL HANDLERS ===
-  const allSwapOffersCreated: Array<any> = [];
-  const allSwapCancelRequests: Array<any> = [];
+  const allSwapOffersCreated: SwapOfferEvent[] = [];
+  const allSwapCancelRequests: SwapCancelRequestEvent[] = [];
 
   // Preserve WAL transaction order exactly during live processing and replay.
   // Reordering batched txs can change bilateral account state transitions
@@ -1298,7 +1304,7 @@ export const applyEntityFrame = async (
     if (entityTx.type === 'j_event') {
       for (const [cpId, acct] of currentEntityState.accounts) {
         if (acct.mempool.length > 0) {
-          if (HEAVY_LOGS) console.log(`🔍 [Frame ${env.height}] AFTER-ENTITY-TX(j_event): Account ${cpId.slice(-4)} mempool:`, acct.mempool.map((tx: any) => tx.type));
+          if (HEAVY_LOGS) console.log(`🔍 [Frame ${env.height}] AFTER-ENTITY-TX(j_event): Account ${cpId.slice(-4)} mempool:`, acct.mempool.map((tx) => tx.type));
         }
       }
     }
@@ -1400,7 +1406,7 @@ export const applyEntityFrame = async (
       if (HEAVY_LOGS) console.log(`🔍 DIRECT-PAYMENT-SCAN: Entity ${currentEntityState.entityId.slice(-4)} has ${currentEntityState.accounts.size} accounts`);
       for (const [counterpartyId, accountMachine] of currentEntityState.accounts) {
         const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-        if (HEAVY_LOGS) console.log(`🔍 Checking account ${counterpartyId.slice(-10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map((t: any) => t.type).join(',')}]`);
+        if (HEAVY_LOGS) console.log(`🔍 Checking account ${counterpartyId.slice(-10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map((tx) => tx.type).join(',')}]`);
         if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(counterpartyId);
           console.log(`🔄 ✅ Added ${counterpartyId.slice(-10)} to proposableAccounts (has ${accountMachine.mempool.length} mempool items)`);
@@ -1700,7 +1706,7 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
       continue;
     }
 
-    const data = tx.data as any;
+    const data = tx.data as JurisdictionEventData;
     const blockNumber = data.blockNumber;
     const blockHash = data.blockHash;
 
@@ -1708,8 +1714,8 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
       candidate =>
         candidate.type === 'j_event' &&
         candidate.data &&
-        (candidate.data as any).blockNumber === blockNumber &&
-        (candidate.data as any).blockHash === blockHash,
+        candidate.data.blockNumber === blockNumber &&
+        candidate.data.blockHash === blockHash,
     );
 
     if (!existing || !existing.data) {
@@ -1717,12 +1723,12 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
       continue;
     }
 
-    const existingData = existing.data as any;
+    const existingData = existing.data as JurisdictionEventData;
     const existingEvents = existingData.events || (existingData.event ? [existingData.event] : []);
     const incomingEvents = data.events || (data.event ? [data.event] : []);
 
     const seen = new Set<string>();
-    const mergedEvents: any[] = [];
+    const mergedEvents: JurisdictionEvent[] = [];
     for (const event of [...existingEvents, ...incomingEvents]) {
       const key = `${event?.type ?? 'unknown'}:${safeStringify(event?.data ?? event)}`;
       if (seen.has(key)) continue;

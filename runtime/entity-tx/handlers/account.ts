@@ -741,7 +741,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               if (nextAccount) {
                 // Calculate forwarded amounts/timelocks with safety checks
                 const localEntityId = String(newState.entityId || '').toLowerCase();
-                const localProfile = env.gossip?.getProfiles?.()?.find((p: any) =>
+                const localProfile = env.gossip?.getProfiles?.()?.find((p: { entityId?: unknown; metadata?: { baseFee?: bigint } } | undefined) =>
                   String(p?.entityId || '').toLowerCase() === localEntityId
                 );
                 const baseFee = sanitizeBaseFee(localProfile?.metadata?.baseFee ?? 0n);
@@ -1496,8 +1496,9 @@ export function processOrderbookCancels(
 ): MatchResult {
   const mempoolOps: MempoolOp[] = [];
   const bookUpdates: { pairId: string; book: BookState }[] = [];
+  const quarantinedOffers: MatchResult['quarantinedOffers'] = [];
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) return { mempoolOps, bookUpdates };
+  if (!ext) return { mempoolOps, bookUpdates, quarantinedOffers };
 
   for (const { offerId, accountId } of cancels) {
     const accountMachine = hubState.accounts.get(accountId);
@@ -1548,5 +1549,5 @@ export function processOrderbookCancels(
     }
   }
 
-  return { mempoolOps, bookUpdates };
+  return { mempoolOps, bookUpdates, quarantinedOffers };
 }

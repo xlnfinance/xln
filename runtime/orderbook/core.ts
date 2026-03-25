@@ -5,7 +5,7 @@
  * All functions are pure - state is passed in, new state returned.
  * Designed for integration into RJEA flow.
  *
- * TODO(snapshot-perf): TypedArray serialization degrades after JSON round-trip
+ * NOTE(snapshot-perf): TypedArray serialization degrades after JSON round-trip
  * Current: Int32Array/Uint32Array serialize to number[] via JSON.stringify
  * Impact: After snapshot restore, arrays become regular JS arrays (slower iteration)
  * Fix: Update snapshot-coder.ts to detect and restore TypedArray types:
