@@ -20,6 +20,7 @@
 import type { Env, EntityInput, JurisdictionConfig } from '../types';
 import { ethers } from 'ethers';
 import { getBestAsk } from '../orderbook/core';
+import { getOpenSwapOfferEntries } from '../open-swap-offers';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { canonicalAccountKey } from '../state-helpers';
@@ -365,14 +366,15 @@ export async function swap(env: Env): Promise<void> {
   assert(offer1?.giveAmount === eth(TRADE_ETH), `Offer giveAmount = ${TRADE_ETH} ETH`);
   assert(offer1?.wantAmount === usdc(TRADE_USDC_MAIN_UNITS), `Offer wantAmount = ${TRADE_USDC_MAIN_UNITS} USDC`);
 
-  // Verify offer was added to E-Machine swapBook (using namespaced key)
-  const swapBookKey1 = `${hub.id}:${offerId1}`;
-  assert(aliceRep1.state.swapBook.has(swapBookKey1), 'Offer added to E-Machine swapBook');
-  const swapBookEntry1 = aliceRep1.state.swapBook.get(swapBookKey1);
-  assert(swapBookEntry1?.accountId === hub.id, 'swapBook entry accountId = canonical(alice, hub)');
-  assert(swapBookEntry1?.giveAmount === eth(TRADE_ETH), `swapBook giveAmount = ${TRADE_ETH} ETH`);
-  assert(swapBookEntry1?.wantAmount === usdc(TRADE_USDC_MAIN_UNITS), `swapBook wantAmount = ${TRADE_USDC_MAIN_UNITS} USDC`);
-  console.log('  ✅ E-Machine swapBook updated');
+  // Verify offer was added to derived entity open-offers view
+  const swapOffers1 = getOpenSwapOfferEntries(aliceRep1.state);
+  const openOfferKey1 = `${hub.id}:${offerId1}`;
+  assert(swapOffers1.has(openOfferKey1), 'Offer visible in derived open-offers view');
+  const openOfferEntry1 = swapOffers1.get(openOfferKey1);
+  assert(openOfferEntry1?.accountId === hub.id, 'Open-offer entry accountId = canonical(alice, hub)');
+  assert(openOfferEntry1?.giveAmount === eth(TRADE_ETH), `Open-offer giveAmount = ${TRADE_ETH} ETH`);
+  assert(openOfferEntry1?.wantAmount === usdc(TRADE_USDC_MAIN_UNITS), `Open-offer wantAmount = ${TRADE_USDC_MAIN_UNITS} USDC`);
+  console.log('  ✅ Derived entity open-offers updated');
 
   // Check hold was applied
   const ethDelta1 = aliceHubAccount1?.deltas.get(ETH_TOKEN_ID);
@@ -517,8 +519,8 @@ export async function swap(env: Env): Promise<void> {
   const [, aliceRep4] = findReplica(env, alice.id);
   const account4 = aliceRep4.state.accounts.get(hub.id);
   assert(account4?.swapOffers?.has(offerId2), 'Order 2 created in A-Machine');
-  const swapBookKey2 = `${hub.id}:${offerId2}`;
-  assert(aliceRep4.state.swapBook.has(swapBookKey2), 'Order 2 in E-Machine swapBook');
+  const openOfferKey2 = `${hub.id}:${offerId2}`;
+  assert(getOpenSwapOfferEntries(aliceRep4.state).has(openOfferKey2), 'Order 2 in derived open-offers view');
 
   // Alice requests cancel (maker cannot self-cancel directly)
   console.log('📊 Alice: proposeCancelSwap');
@@ -557,13 +559,13 @@ export async function swap(env: Env): Promise<void> {
   const [, aliceRep5] = findReplica(env, alice.id);
   const account5 = aliceRep5.state.accounts.get(hub.id);
   assert(!account5?.swapOffers?.has(offerId2), 'Order 2 cancelled in A-Machine by hub resolve');
-  assert(!aliceRep5.state.swapBook.has(swapBookKey2), 'Order 2 removed from E-Machine swapBook after hub resolve');
+  assert(!getOpenSwapOfferEntries(aliceRep5.state).has(openOfferKey2), 'Order 2 removed from derived open-offers view after hub resolve');
 
   // Verify hold released
   const ethDelta5 = account5?.deltas.get(ETH_TOKEN_ID);
   assert(ethDelta5?.leftHold === 0n, 'Hold released after cancel');
 
-  console.log('  ✅ Cancel request resolved by hub, swapBook cleaned, hold released\n');
+  console.log('  ✅ Cancel request resolved by hub, open-offers cleaned, hold released\n');
 
   // ============================================================================
   // TEST 5: minFillRatio enforcement

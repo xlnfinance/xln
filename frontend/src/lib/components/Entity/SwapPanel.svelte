@@ -37,15 +37,15 @@
   const MAX_PRICE_DEVIATION_BPS = 3000n; // 30%
   type BookSide = 'bid' | 'ask';
   type SwapOfferLike = {
-    offerId?: string;
-    accountId?: string;
-    giveTokenId?: unknown;
-    wantTokenId?: unknown;
-    giveAmount?: unknown;
-    wantAmount?: unknown;
-    priceTicks?: unknown;
-    createdAt?: unknown;
-    createdHeight?: unknown;
+    offerId: string;
+    accountId: string;
+    giveTokenId: unknown;
+    wantTokenId: unknown;
+    giveAmount: unknown;
+    wantAmount: unknown;
+    priceTicks: unknown;
+    createdAt: unknown;
+    createdHeight: unknown;
   };
   type ClickedOrderLevel = {
     side: BookSide;
@@ -427,11 +427,29 @@
     priceRatioInput = normalized;
   }
 
-  // Open orders use entity swapBook for immediate UX. Cancel resolves the real
-  // bilateral owner account lazily to avoid stale accountId mismatches.
-  $: activeOffers = replica?.state?.swapBook
-    ? Array.from(replica.state.swapBook.values()) as SwapOfferLike[]
-    : [];
+  function listActiveOffers(): SwapOfferLike[] {
+    if (!(replica?.state?.accounts instanceof Map)) return [];
+    const offers: SwapOfferLike[] = [];
+    for (const [accountId, account] of replica.state.accounts.entries()) {
+      if (!(account?.swapOffers instanceof Map)) continue;
+      for (const [offerId, offer] of account.swapOffers.entries()) {
+        offers.push({
+          offerId: String(offerId),
+          accountId: String(accountId),
+          giveTokenId: offer.giveTokenId,
+          wantTokenId: offer.wantTokenId,
+          giveAmount: offer.giveAmount,
+          wantAmount: offer.wantAmount,
+          priceTicks: offer.priceTicks ?? 0n,
+          createdAt: BigInt(Math.max(0, Number(offer.createdHeight))),
+          createdHeight: Number(offer.createdHeight),
+        });
+      }
+    }
+    return offers;
+  }
+
+  $: activeOffers = listActiveOffers();
 
   function readOutCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
     if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return 0n;
@@ -1019,19 +1037,19 @@
   $: canonicalWantAmount = preparedOrder?.effectiveWant ?? 0n;
   $: giveAmountLeftover = preparedOrder?.unspentGiveAmount ?? 0n;
   function offerSideLabel(offer: SwapOfferLike): 'Ask' | 'Bid' {
-    const give = Number(offer?.giveTokenId || 0);
-    const want = Number(offer?.wantTokenId || 0);
+    const give = Number(offer.giveTokenId || 0);
+    const want = Number(offer.wantTokenId || 0);
     const pair = resolvePairOrientation(give, want);
     return give === pair.baseTokenId ? 'Ask' : 'Bid';
   }
 
   function offerPriceTicks(offer: SwapOfferLike): bigint {
-    const explicitPriceTicks = toBigIntSafe(offer?.priceTicks);
+    const explicitPriceTicks = toBigIntSafe(offer.priceTicks);
     if (explicitPriceTicks && explicitPriceTicks > 0n) return explicitPriceTicks;
-    const giveToken = Number(offer?.giveTokenId || 0);
-    const wantToken = Number(offer?.wantTokenId || 0);
-    const give = toBigIntSafe(offer?.giveAmount) ?? 0n;
-    const want = toBigIntSafe(offer?.wantAmount) ?? 0n;
+    const giveToken = Number(offer.giveTokenId || 0);
+    const wantToken = Number(offer.wantTokenId || 0);
+    const give = toBigIntSafe(offer.giveAmount) ?? 0n;
+    const want = toBigIntSafe(offer.wantAmount) ?? 0n;
     if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken)) return 0n;
     if (giveToken <= 0 || wantToken <= 0) return 0n;
     if (give <= 0n || want <= 0n) return 0n;
@@ -1039,8 +1057,8 @@
   }
 
   function remainingOfferUsd(offer: SwapOfferLike): number {
-    const giveToken = Number(offer?.giveTokenId || 0);
-    const giveAmountValue = toBigIntSafe(offer?.giveAmount) ?? 0n;
+    const giveToken = Number(offer.giveTokenId || 0);
+    const giveAmountValue = toBigIntSafe(offer.giveAmount) ?? 0n;
     if (!Number.isFinite(giveToken) || giveToken <= 0 || giveAmountValue <= 0n) return 0;
     const info = activeXlnFunctions?.getTokenInfo?.(giveToken);
     const decimals = Number(info?.decimals ?? 18);
@@ -1057,9 +1075,9 @@
     const aDust = isDustOpenOffer(a);
     const bDust = isDustOpenOffer(b);
     if (aDust !== bDust) return aDust ? 1 : -1;
-    const aCreated = toBigIntSafe(a?.createdAt) ?? toBigIntSafe(a?.createdHeight) ?? 0n;
-    const bCreated = toBigIntSafe(b?.createdAt) ?? toBigIntSafe(b?.createdHeight) ?? 0n;
-    if (aCreated === bCreated) return String(a?.offerId || '').localeCompare(String(b?.offerId || ''));
+    const aCreated = toBigIntSafe(a.createdAt) ?? toBigIntSafe(a.createdHeight) ?? 0n;
+    const bCreated = toBigIntSafe(b.createdAt) ?? toBigIntSafe(b.createdHeight) ?? 0n;
+    if (aCreated === bCreated) return String(a.offerId).localeCompare(String(b.offerId));
     return aCreated > bCreated ? -1 : 1;
   });
 
@@ -1069,17 +1087,6 @@
       accountId: String(accountId),
       account,
     }));
-  }
-
-  function resolveOfferAccountId(offerId: string, fallbackAccountId: string): string {
-    const normalizedOfferId = String(offerId || '').trim();
-    if (!normalizedOfferId) return String(fallbackAccountId || '');
-    for (const { accountId, account } of accountMachines()) {
-      if (account?.swapOffers instanceof Map && account.swapOffers.has(normalizedOfferId)) {
-        return accountId;
-      }
-    }
-    return String(fallbackAccountId || '');
   }
 
   function txDataAsRecord(tx: AccountTx): Record<string, unknown> {
@@ -1457,7 +1464,6 @@
       const signerId = resolveSignerId(tab.entityId);
       if (!signerId) throw new Error('No signer available for selected entity');
 
-      const resolvedAccountId = resolveOfferAccountId(offerId, accountId);
       await enqueueEntityInputs(env, [{
         entityId: tab.entityId,
         signerId,
@@ -1465,7 +1471,7 @@
           type: 'proposeCancelSwap',
           data: {
             offerId,
-            counterpartyEntityId: resolvedAccountId,
+            counterpartyEntityId: accountId,
           }
         }]
       }]);

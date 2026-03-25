@@ -1,7 +1,6 @@
 import { isLeftEntity } from '../entity-id-utils';
 import { collectOpenSwapOffersForOrderbook, processOrderbookSwaps } from '../entity-tx/handlers/account';
 import { createOrderbookExtState } from '../orderbook';
-import { swapKey } from '../swap-execution';
 import type { Env, EntityReplica, EntityState, JReplica, RuntimeInput } from '../types';
 import type { FrameLogEntry } from '../types';
 import {
@@ -136,24 +135,6 @@ const normalizeJReplicaMap = (raw: unknown): Map<string, JReplica> => {
   return new Map();
 };
 
-const rebuildEntitySwapBookFromAccounts = (env: Env): void => {
-  for (const replica of env.eReplicas.values()) {
-    const rebuiltSwapBook = new Map<string, Record<string, unknown>>();
-    for (const [accountId, account] of replica.state.accounts.entries()) {
-      if (!(account?.swapOffers instanceof Map)) continue;
-      for (const [offerId, offer] of account.swapOffers.entries()) {
-        const swapBookKey = swapKey(String(accountId), String(offerId));
-        rebuiltSwapBook.set(swapBookKey, {
-          ...(offer as Record<string, unknown>),
-          offerId: String((offer as { offerId?: unknown })?.offerId || offerId || ''),
-          accountId: String(accountId),
-        });
-      }
-    }
-    replica.state.swapBook = rebuiltSwapBook as typeof replica.state.swapBook;
-  }
-};
-
 const rebuildEntityLockBookFromAccounts = (env: Env): void => {
   for (const replica of env.eReplicas.values()) {
     const rebuiltLockBook = new Map<string, Record<string, unknown>>();
@@ -248,7 +229,6 @@ const createRuntimeReplayDeps = (options: BuildRuntimeReplayDepsOptions) => ({
   normalizeJReplicaMap,
   assertPersistedContractConfigReady: options.assertPersistedContractConfigReady,
   validateEntityState: options.validateEntityState,
-  rebuildEntitySwapBookFromAccounts,
   rebuildEntityLockBookFromAccounts,
   rebuildEntityOrderbookExtFromAccounts,
   buildCanonicalEnvSnapshot: options.buildCanonicalEnvSnapshot,

@@ -1627,9 +1627,6 @@ export interface EntityState {
   // 📊 Orderbook Extension - Hub matching engine (typed in orderbook/types.ts)
   orderbookExt?: OrderbookExtState;
 
-  // 📖 Aggregated Books - E-Machine view of all A-Machine positions
-  // Mirrors A-Machine state for easy UI access, updated on frame commits
-  swapBook: Map<string, SwapBookEntry>;  // accountId:offerId → entry
   lockBook: Map<string, LockBookEntry>;  // lockId → entry
 
   // 💱 Swap market config
@@ -1729,7 +1726,7 @@ export const DEFAULT_HARD_LIMIT = 10_000n * 10n ** 18n;           // $10,000 max
 export const DEFAULT_MAX_FEE = 15n * 10n ** 18n;                  // $15 max acceptable fee
 export const QUOTE_EXPIRY_MS = 300_000;                           // 5 minutes
 
-/** Aggregated swap order entry at E-Machine level */
+/** Derived open swap order entry for UI/debug projections */
 export interface SwapBookEntry {
   offerId: string;
   accountId: string;        // counterparty entity ID where order lives
@@ -1739,6 +1736,8 @@ export interface SwapBookEntry {
   wantAmount: bigint;       // remaining want
   minFillRatio: number;
   createdAt: bigint;
+  createdHeight: number;
+  priceTicks: bigint;
 }
 
 /** Aggregated HTLC lock entry at E-Machine level */

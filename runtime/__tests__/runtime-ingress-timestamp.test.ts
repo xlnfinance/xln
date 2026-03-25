@@ -41,7 +41,6 @@ const makeReplica = (entityId: string, timestamp: number): EntityReplica =>
       htlcRoutes: new Map(),
       htlcFeesEarned: 0n,
       htlcNotes: new Map(),
-      swapBook: new Map(),
       lockBook: new Map(),
       swapTradingPairs: [],
       pendingSwapFillRatios: new Map(),

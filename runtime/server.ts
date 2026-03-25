@@ -2339,7 +2339,6 @@ const resetServerDebugState = (
         state.proposals = new Map();
         state.deferredAccountProposals = new Map();
         state.lockBook = new Map();
-        state.swapBook = new Map();
         state.htlcRoutes = new Map();
         state.htlcNotes = new Map();
         state.pendingSwapFillRatios = new Map();
