@@ -1,6 +1,5 @@
 import type { ConsensusConfig, Env, JReplica, JurisdictionConfig } from './types';
-
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+import { firstUsableContractAddress } from './contract-address';
 
 type BrowserVmLike = {
   getDepositoryAddress?: () => string;
@@ -9,19 +8,9 @@ type BrowserVmLike = {
   browserVM?: BrowserVmLike;
 };
 
-const isRealAddress = (value: unknown): value is string =>
-  typeof value === 'string' && value.length === 42 && value !== ZERO_ADDRESS;
-
 const firstDefined = <T>(...values: Array<T | undefined>): T | undefined => {
   for (const value of values) {
     if (value !== undefined) return value;
-  }
-  return undefined;
-};
-
-const firstAddress = (...values: Array<unknown>): string | undefined => {
-  for (const value of values) {
-    if (isRealAddress(value)) return value;
   }
   return undefined;
 };
@@ -47,14 +36,14 @@ export function resolveRuntimeJurisdictionConfig(
   const browserVm = browserVmContainer?.browserVM ?? browserVmContainer;
   const replica = getCandidateReplica(env, current);
 
-  const depositoryAddress = firstAddress(
+  const depositoryAddress = firstUsableContractAddress(
     replica?.jadapter?.addresses?.depository,
     replica?.depositoryAddress,
     replica?.contracts?.depository,
     current?.depositoryAddress,
     browserVm?.getDepositoryAddress?.(),
   );
-  const entityProviderAddress = firstAddress(
+  const entityProviderAddress = firstUsableContractAddress(
     replica?.jadapter?.addresses?.entityProvider,
     replica?.entityProviderAddress,
     replica?.contracts?.entityProvider,

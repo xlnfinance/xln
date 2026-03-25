@@ -1,11 +1,9 @@
-import { ethers } from 'ethers';
-
-import { encodeBoard, hashBoard, detectEntityType, extractNumberFromEntityId } from '../entity-factory';
-import { normalizeEntityId } from '../entity-id-utils';
+import { requireUsableContractAddress } from '../contract-address';
+import { detectEntityType, extractNumberFromEntityId } from '../entity-factory';
 import { encodeJBatch, computeBatchHankoHash, type JBatch } from '../j-batch';
+import { normalizeEntityId } from '../entity-id-utils';
 import { signHashesAsSingleEntity } from '../hanko/signing';
-import type { ConsensusConfig, Env, JurisdictionConfig } from '../types';
-import { getEntityNonceAddress } from '../hanko/batch';
+import type { Env, JurisdictionConfig } from '../types';
 import { connectJurisdictionAdapter, connectJurisdictionContracts } from './jurisdiction';
 
 export const debugFundReserves = async (
@@ -31,15 +29,11 @@ export const submitProcessBatch = async (
   }
 
   const { jadapter, provider, depository } = await connectJurisdictionContracts(jurisdiction);
-  const entityProviderAddress = jurisdiction.entityProviderAddress;
-  if (!entityProviderAddress || entityProviderAddress === ethers.ZeroAddress) {
-    throw new Error('Jurisdiction missing entityProviderAddress');
-  }
+  requireUsableContractAddress('entity_provider', jurisdiction.entityProviderAddress);
 
   const encodedBatch = encodeJBatch(batch);
   const chainId = BigInt((await provider.getNetwork()).chainId);
-  const entityNonceAddress = getEntityNonceAddress(entityId);
-  const currentNonce = await depository.entityNonces(entityNonceAddress);
+  const currentNonce = await depository.entityNonces(normalizeEntityId(entityId));
   const nextNonce = BigInt(currentNonce ?? 0n) + 1n;
   const batchHash = computeBatchHankoHash(
     chainId,
@@ -58,19 +52,6 @@ export const submitProcessBatch = async (
     transaction: { hash: receipt.txHash },
     receipt: { hash: receipt.txHash, blockNumber: receipt.blockNumber, events: receipt.events },
   };
-};
-
-export const registerNumberedEntityOnChain = async (
-  config: ConsensusConfig,
-  _name: string,
-): Promise<{ txHash: string; entityNumber: number }> => {
-  if (!config.jurisdiction) {
-    throw new Error('Jurisdiction required for on-chain registration');
-  }
-  const jadapter = await connectJurisdictionAdapter(config.jurisdiction);
-  const boardHash = hashBoard(encodeBoard(config));
-  const result = await jadapter.registerNumberedEntity(boardHash);
-  return { txHash: result.txHash, entityNumber: result.entityNumber };
 };
 
 export const assignNameOnChain = async (
@@ -116,11 +97,6 @@ export const getEntityInfoFromChain = async (
   } catch {
     return { exists: false };
   }
-};
-
-export const getNextEntityNumber = async (jurisdiction: JurisdictionConfig): Promise<number> => {
-  const jadapter = await connectJurisdictionAdapter(jurisdiction);
-  return jadapter.getNextEntityNumber();
 };
 
 export const transferNameBetweenEntities = async (

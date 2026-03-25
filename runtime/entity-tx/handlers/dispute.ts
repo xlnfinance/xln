@@ -16,6 +16,7 @@
 import { ethers } from 'ethers';
 import type { EntityState, EntityTx, EntityInput, Env, AccountMachine } from '../../types';
 import type { ProofBodyStruct } from '../../typechain/Depository';
+import { isUsableContractAddress, requireUsableContractAddress } from '../../contract-address';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddRevealSecret } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
@@ -77,7 +78,7 @@ const requireBytesLike = (value: unknown, label: string): string => {
 };
 
 const requireAddressLike = (value: unknown, label: string): string => {
-  if (typeof value !== 'string' || !value.startsWith('0x') || value.length !== 42) {
+  if (!isUsableContractAddress(value)) {
     throw new Error(`DISPUTE_FINALIZE_PROOFBODY_ADDRESS_INVALID:${label}`);
   }
   return value;
@@ -129,7 +130,7 @@ function clampFillRatio(value: number): number {
 function encodeDeltaTransformerArgs(fillRatios: number[], secrets: string[]): string {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const ratios = fillRatios.map(r => BigInt(clampFillRatio(r)));
-  return abiCoder.encode(['uint32[]', 'bytes32[]'], [ratios, secrets]);
+  return abiCoder.encode(['uint16[]', 'bytes32[]'], [ratios, secrets]);
 }
 
 function wrapTransformerArgs(args: string): string {
@@ -215,7 +216,7 @@ function collectHtlcSecrets(entityState: EntityState, counterpartyEntityId: stri
 
 function resolveDepositoryAddress(entityState: EntityState): string | null {
   const address = entityState.config.jurisdiction?.depositoryAddress || '';
-  if (ethers.isAddress(address) && !/^0x0{40}$/i.test(address)) return address;
+  if (isUsableContractAddress(address)) return address;
   return null;
 }
 
@@ -675,12 +676,11 @@ export async function handleDisputeFinalize(
   // Optional fallback: on-chain HTLC registry (Sprites-style)
   if (entityTx.data.useOnchainRegistry) {
     const transformerAddress = getDeltaTransformerAddress();
-    if (transformerAddress !== '0x0000000000000000000000000000000000000000') {
-      for (const secret of htlcSecrets) {
-        batchAddRevealSecret(newState.jBatchState, transformerAddress, secret);
-      }
-    } else {
-      console.warn('⚠️ disputeFinalize: DeltaTransformer address not set - skipping on-chain HTLC reveals');
+    if (!isUsableContractAddress(transformerAddress)) {
+      throw new Error('DISPUTE_FINALIZE_MISSING_DELTA_TRANSFORMER_ADDRESS');
+    }
+    for (const secret of htlcSecrets) {
+      batchAddRevealSecret(newState.jBatchState, transformerAddress, secret);
     }
   }
 

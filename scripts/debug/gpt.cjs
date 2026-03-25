@@ -325,8 +325,6 @@ xln/
 
     state-helpers.ts             ${fileSizes['runtime/state-helpers.ts'] || '?'} lines - Pure state management
     snapshot-coder.ts            ${fileSizes['runtime/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
-    evm.ts                       ${fileSizes['runtime/evm.ts'] || '?'} lines - Blockchain integration
-
   docs/
     intro.md                           ${fileSizes['docs/intro.md'] || '?'} lines - * 5-min overview (new reader onramp)
     essay.md                            ${fileSizes['docs/essay.md'] || '?'} lines - * Core philosophy and vision (CRITICAL PATH)

@@ -26,8 +26,6 @@ export {
   assignNameOnChain,
   debugFundReserves,
   getEntityInfoFromChain,
-  getNextEntityNumber,
-  registerNumberedEntityOnChain,
   submitProcessBatch,
   transferNameBetweenEntities,
 } from './runtime-api';

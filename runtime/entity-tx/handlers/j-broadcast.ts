@@ -14,6 +14,7 @@
  */
 
 import type { EntityState, EntityTx, EntityInput, Env, JTx, JInput, HashType } from '../../types';
+import { requireUsableContractAddress } from '../../contract-address';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import {
   isBatchEmpty, getBatchSize, cloneJBatch, encodeJBatch,
@@ -77,25 +78,9 @@ export async function handleJBroadcast(
     jurisdiction,
   };
 
-  const depositoryAddress = jurisdiction.depositoryAddress;
+  const depositoryAddress = requireUsableContractAddress('depository', jurisdiction.depositoryAddress);
+  const entityProviderAddress = requireUsableContractAddress('entity_provider', jurisdiction.entityProviderAddress);
   const chainId = BigInt(jurisdiction.chainId ?? 0);
-  if (!depositoryAddress || depositoryAddress === '0x0000000000000000000000000000000000000000') {
-    const jReplicaSummary = Array.from(env.jReplicas?.values?.() || []).map((replica) => ({
-      name: replica.name,
-      depositoryAddress: replica.depositoryAddress || replica.contracts?.depository || '',
-      entityProviderAddress: replica.entityProviderAddress || replica.contracts?.entityProvider || '',
-      chainId: replica.chainId ?? replica.jadapter?.chainId ?? 0,
-    }));
-    const debugMessage =
-      `❌ Missing depository address ` +
-      `[resolved=${String(depositoryAddress || 'none')}] ` +
-      `[jurisdiction=${jurisdiction.name}:${String(jurisdiction.depositoryAddress || 'none')}:${String(jurisdiction.entityProviderAddress || 'none')}:${String(jurisdiction.chainId ?? 'none')}] ` +
-      `[active=${String(env.activeJurisdiction || 'none')}] ` +
-      `[jReplicas=${JSON.stringify(jReplicaSummary)}]`;
-    addMessage(newState, debugMessage);
-    console.error(`[j_broadcast] ${debugMessage}`);
-    return { newState, outputs, jOutputs };
-  }
   if (!chainId) {
     addMessage(newState, '❌ Missing chainId');
     return { newState, outputs, jOutputs };
@@ -115,7 +100,6 @@ export async function handleJBroadcast(
   const nextNonce = currentEntityNonce + 1n;
 
   // Set entityProvider on settlements before encoding
-  const entityProviderAddress = jurisdiction.entityProviderAddress;
   for (const settlement of newState.jBatchState.batch.settlements) {
     if (settlement.diffs.length > 0 || settlement.forgiveDebtsInTokenIds.length > 0) {
       settlement.entityProvider = entityProviderAddress;
