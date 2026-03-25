@@ -29,7 +29,7 @@ const buildProfile = (
   lastUpdated: 1,
   runtimeEncPubKey,
   publicAccounts: [],
-  endpoints: [],
+  wsUrl: null,
   relays: [],
   metadata: {
     entityEncPubKey: runtimeEncPubKey,

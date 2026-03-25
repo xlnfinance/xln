@@ -58,7 +58,7 @@ export type Profile = {
   runtimeId: string; // Runtime identity (usually signer1 address)
   runtimeEncPubKey: string;
   publicAccounts: string[]; // direct peers with inbound capacity
-  endpoints: string[]; // websocket endpoints for this runtime
+  wsUrl: string | null; // public direct websocket endpoint for this runtime
   relays: string[]; // preferred relay runtimes
   metadata: ProfileMetadata;
   accounts: ProfileAccount[];
@@ -125,7 +125,7 @@ const ALLOWED_PROFILE_KEYS = [
   'runtimeId',
   'runtimeEncPubKey',
   'publicAccounts',
-  'endpoints',
+  'wsUrl',
   'relays',
   'metadata',
   'accounts',
@@ -225,6 +225,19 @@ const normalizeStringArray = (raw: unknown): string[] => {
     result.push(normalized);
   }
   return result;
+};
+
+const normalizeWsUrl = (raw: unknown): string | null => {
+  if (raw == null) return null;
+  if (typeof raw !== 'string') {
+    throw new Error('GOSSIP_PROFILE_WS_URL_INVALID');
+  }
+  const normalized = raw.trim();
+  if (!normalized) return null;
+  if (!normalized.startsWith('ws://') && !normalized.startsWith('wss://')) {
+    throw new Error('GOSSIP_PROFILE_WS_URL_INVALID');
+  }
+  return normalized;
 };
 
 const parsePositiveTimestamp = (raw: unknown, entityId: string): number => {
@@ -399,7 +412,7 @@ export const parseProfile = (raw: unknown): Profile => {
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ID_REQUIRED: entity=${entityId}`);
   }
   const publicAccounts = normalizeStringArray(raw.publicAccounts);
-  const endpoints = normalizeStringArray(raw.endpoints);
+  const wsUrl = normalizeWsUrl(raw.wsUrl);
   const relays = normalizeStringArray(raw.relays);
   const board = parseBoardMetadata(metadataRaw.board, entityId);
   getBoardPrimaryPublicKey(board, entityId);
@@ -441,7 +454,7 @@ export const parseProfile = (raw: unknown): Profile => {
     runtimeId,
     runtimeEncPubKey,
     publicAccounts,
-    endpoints,
+    wsUrl,
     relays,
     metadata,
     accounts: parseProfileAccounts(raw.accounts, entityId),
@@ -494,7 +507,7 @@ export const canonicalizeProfile = (
   }
 
   const publicAccounts = normalizeStringArray(profile.publicAccounts);
-  const endpoints = normalizeStringArray(profile.endpoints);
+  const wsUrl = normalizeWsUrl(profile.wsUrl);
   const relays = normalizeStringArray(profile.relays);
   const board = parseBoardMetadata(metadata.board, entityId);
   getBoardPrimaryPublicKey(board, entityId);
@@ -511,7 +524,7 @@ export const canonicalizeProfile = (
     runtimeId: normalizedRuntimeId,
     runtimeEncPubKey: normalizedRuntimeEncPubKey,
     publicAccounts,
-    endpoints,
+    wsUrl,
     relays,
     accounts: profile.accounts.map((account) => ({
       counterpartyId: account.counterpartyId,

@@ -49,7 +49,7 @@
       peerCount: number;
     };
     runtimeId: string;
-    endpoints: string[];
+    wsUrl: string | null;
     verified: boolean;
     creditScore: number;
     isConnected: boolean;
@@ -69,7 +69,7 @@
       name?: string;
       bio?: string | null;
       website?: string | null;
-      endpoints?: string[];
+      wsUrl?: string | null;
       publicAccounts?: string[];
       metadata?: {
         isHub?: boolean;
@@ -174,7 +174,7 @@
               name: hub.name || hub.entityId,
               bio: hub.bio || '',
               website: hub.website || undefined,
-              endpoints: hub.endpoints || [],
+              wsUrl: hub.wsUrl || null,
               publicAccounts: hub.publicAccounts || [],
               metadata: {
                 isHub: true,
@@ -192,7 +192,7 @@
               peerCount,
             },
             runtimeId: hub.runtimeId || '',
-            endpoints: hub.endpoints || [],
+            wsUrl: hub.wsUrl || null,
             verified: true,
             creditScore: computeCreditScore(hub.entityId, feePpm, peerCount),
             isConnected: false,
@@ -270,6 +270,7 @@
 
       for (const profile of gossipProfiles) {
         if (normalizeEntityId(profile.entityId) === normalizeEntityId(entityId)) continue;
+        if (discoveredByEntity.has(normalizeEntityId(profile.entityId))) continue;
 
         const isConnected = hasCounterpartyAccount(currentEnv, entityId, profile.entityId);
         const feePpm = profile.metadata.routingFeePPM;
@@ -286,7 +287,7 @@
             fee: feePpm,
             peerCount,
           },
-          endpoints: profile.endpoints,
+          wsUrl: profile.wsUrl,
           verified: profile.metadata.isHub === true,
           creditScore: computeCreditScore(profile.entityId, feePpm, peerCount),
           isConnected,
@@ -532,7 +533,7 @@
                 </div>
                 <div class="detail">
                   <span class="label">Endpoints</span>
-                  <span class="value mono">{hub.endpoints?.join(', ') || '-'}</span>
+                  <span class="value mono">{hub.wsUrl || '-'}</span>
                 </div>
                 <div class="detail">
                   <span class="label">Last Seen</span>

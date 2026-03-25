@@ -36,7 +36,7 @@ function profile(
     lastUpdated: 1,
     runtimeEncPubKey: `0x${entityId.slice(2, 66)}`,
     publicAccounts: accounts.map((account) => account.counterpartyId),
-    endpoints: [],
+    wsUrl: null,
     relays: [],
     metadata,
     accounts,
@@ -55,7 +55,7 @@ describe('Routing metadata hard requirements', () => {
       lastUpdated: 1,
       runtimeEncPubKey: `0x${'aa'.repeat(32)}`,
       publicAccounts: [],
-      endpoints: [],
+      wsUrl: null,
       relays: [],
       metadata: {
         entityEncPubKey: `0x${'ab'.repeat(32)}`,
@@ -87,7 +87,7 @@ describe('Routing metadata hard requirements', () => {
           lastUpdated: 1,
           runtimeEncPubKey: `0x${'aa'.repeat(32)}`,
           publicAccounts: [H1],
-          endpoints: [],
+          wsUrl: null,
           relays: [],
           metadata: {
             entityEncPubKey: `0x${'ab'.repeat(32)}`,
@@ -176,7 +176,7 @@ describe('Routing metadata hard requirements', () => {
           lastUpdated: 1,
           runtimeEncPubKey: `0x${'bb'.repeat(32)}`,
           publicAccounts: [],
-          endpoints: [],
+          wsUrl: null,
           relays: [],
           metadata: {
             entityEncPubKey: `0x${'bc'.repeat(32)}`,

@@ -1687,7 +1687,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     runtimeId: resolvedRuntimeId,
     signerId: config.signerId,
     relayUrls: config.relayUrls,
-    endpointUrls: (config as P2PConfig & { endpointUrls?: string[] }).endpointUrls,
+    wsUrl: (config as P2PConfig & { wsUrl?: string | null }).wsUrl,
     seedRuntimeIds: config.seedRuntimeIds,
     advertiseEntityIds: config.advertiseEntityIds,
     gossipPollMs: config.gossipPollMs,

@@ -1098,7 +1098,7 @@ const run = async (): Promise<void> => {
   const p2pConnectStartedAt = startTiming('p2p_connect');
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
-    endpointUrls: [directWsUrl],
+    wsUrl: directWsUrl,
     advertiseEntityIds: [bootstrap.entityId],
     isHub: true,
     gossipPollMs: BOOTSTRAP_POLL_MS * 5,

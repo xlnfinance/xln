@@ -746,7 +746,7 @@ const run = async (): Promise<void> => {
 
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
-    endpointUrls: [directWsUrl],
+    wsUrl: directWsUrl,
     advertiseEntityIds: [mmEntityId],
     gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
   });
