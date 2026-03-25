@@ -29,6 +29,8 @@ import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body-types.js';
 type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader'>;
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+const PROOF_BODY_PARAM = ethers.ParamType.from(PROOF_BODY_ABI);
+const DELTA_BATCH_PARAM = ethers.ParamType.from(BATCH_ABI);
 
 const isUsableContractAddress = (address: string | null | undefined): address is string =>
   typeof address === 'string' && ethers.isAddress(address) && address !== ZERO_ADDRESS;
@@ -183,7 +185,7 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
 
   // Encode ProofBody struct
   const encodedProofBody = abiCoder.encode(
-    [PROOF_BODY_ABI as any],
+    [PROOF_BODY_PARAM],
     [proofBodyStruct]
   );
 
@@ -222,7 +224,7 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
       })),
     };
 
-    const encodedBatch = abiCoder.encode([BATCH_ABI as any], [batchStruct]);
+    const encodedBatch = abiCoder.encode([DELTA_BATCH_PARAM], [batchStruct]);
 
     return {
       transformerAddress: t.transformerAddress,

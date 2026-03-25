@@ -14,7 +14,7 @@
 import { ethers } from 'ethers';
 import type { ProofBodyStruct } from './typechain/Depository.js';
 import { isLeftEntity, normalizeEntityId, compareEntityIds } from './entity-id-utils';
-import type { JurisdictionConfig } from './types';
+import type { Env, JurisdictionConfig } from './types';
 import { safeStringify } from './serialization-utils';
 
 /**
@@ -265,19 +265,20 @@ const DEPOSITORY_BATCH_ABI =
     'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
     'uint256 hub_id' +
   ')';
+const DEPOSITORY_BATCH_PARAM = ethers.ParamType.from(DEPOSITORY_BATCH_ABI);
 
 const BATCH_DOMAIN_SEPARATOR = ethers.keccak256(ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1'));
 
 export function encodeJBatch(batch: JBatch): string {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   // Always encode with full ABI (includes collateralToReserve, even if empty)
-  return abiCoder.encode([DEPOSITORY_BATCH_ABI as any], [batch]);
+  return abiCoder.encode([DEPOSITORY_BATCH_PARAM], [batch]);
 }
 
 export function decodeJBatch(encodedBatch: string): JBatch {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  const decoded = abiCoder.decode([DEPOSITORY_BATCH_ABI as any], encodedBatch);
-  return decoded[0] as JBatch;
+  const decoded = abiCoder.decode([DEPOSITORY_BATCH_PARAM], encodedBatch);
+  return decoded[0] as unknown as JBatch;
 }
 
 export function summarizeBatch(batch: JBatch): Record<string, unknown> {
@@ -959,7 +960,7 @@ export function getBatchSize(batch: JBatch): number {
  * Matches frontend/src/lib/view/utils/browserVMProvider.ts
  */
 export interface BrowserVMBatchProcessor {
-  processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<any[]>;
+  processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<unknown[]>;
   setBlockTimestamp?: (timestamp: number) => void;
   signSettlement?: (
     initiatorEntityId: string,
@@ -984,14 +985,14 @@ export interface BrowserVMBatchProcessor {
  * Reference: 2019src.txt lines 3384-3399
  */
 export async function broadcastBatch(
-  env: any,
+  env: Env,
   entityId: string,
   jBatchState: JBatchState,
-  jurisdiction: any, // JurisdictionConfig
+  jurisdiction: JurisdictionConfig | null | undefined,
   browserVM: BrowserVMBatchProcessor | undefined,
   timestamp: number,
   signerId?: string
-): Promise<{ success: boolean; txHash?: string; events?: any[]; error?: string }> {
+): Promise<{ success: boolean; txHash?: string; events?: unknown[]; error?: string }> {
   if (isBatchEmpty(jBatchState.batch)) {
     console.log('📦 jBatch: Empty batch, skipping broadcast');
     return { success: true };
@@ -1001,15 +1002,15 @@ export async function broadcastBatch(
   const b = jBatchState.batch;
   console.log(`📤 BATCH: ${entityId.slice(-4)} | ${batchSize} ops | R→C=${b.reserveToCollateral.length} C→R=${b.collateralToReserve.length} S=${b.settlements.length} R→R=${b.reserveToReserve.length}`);
   const entityProviderAddress =
-    (browserVM as any)?.getEntityProviderAddress?.() ||
+    browserVM?.getEntityProviderAddress?.() ||
     jurisdiction?.entityProviderAddress ||
     '0x0000000000000000000000000000000000000000';
   const depositoryAddress =
-    (browserVM as any)?.getDepositoryAddress?.() ||
+    browserVM?.getDepositoryAddress?.() ||
     jurisdiction?.depositoryAddress ||
     '0x0000000000000000000000000000000000000000';
   const chainId =
-    (browserVM as any)?.getChainId?.() ??
+    browserVM?.getChainId?.() ??
     (jurisdiction?.chainId !== undefined ? BigInt(jurisdiction.chainId) : 0n);
 
   try {

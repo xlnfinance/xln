@@ -1,6 +1,6 @@
 import { isLeftEntity } from '../entity-id-utils';
 import { validateEntityOrderbooks } from '../orderbook/validity';
-import type { Env, EntityReplica, EntityState, JReplica, RuntimeInput } from '../types';
+import type { Env, EntityReplica, EntityState, EnvSnapshot, JReplica, RuntimeInput } from '../types';
 import type { FrameLogEntry } from '../types';
 import {
   loadRuntimeEnvFromWal,
@@ -199,7 +199,7 @@ type BuildRuntimeReplayDepsOptions = {
       logs: FrameLogEntry[] | undefined;
       gossipProfiles: unknown[];
     },
-  ) => unknown;
+  ) => EnvSnapshot;
   ensureRuntimeState: (env: Env) => { db?: unknown; dbOpenPromise?: unknown };
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<void>;
   normalizeEntitySwapTradingPairs: (state: unknown) => void;
