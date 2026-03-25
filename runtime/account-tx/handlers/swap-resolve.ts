@@ -229,6 +229,17 @@ export async function handleSwapResolve(
     }
   }
 
+  const currentMakerHold = offer.makerIsLeft
+    ? (giveDelta.leftHold || 0n)
+    : (giveDelta.rightHold || 0n);
+  if (currentMakerHold < effectiveGive) {
+    return {
+      success: false,
+      error: `Hold underflow: current=${currentMakerHold} < required=${effectiveGive}`,
+      events,
+    };
+  }
+
   // 6. Update deltas atomically if filling (at LIMIT PRICE)
   if (filledGive > 0n) {
     // CANONICAL Delta semantics:
@@ -276,24 +287,14 @@ export async function handleSwapResolve(
     events.push(`💰 Rebate: ${rebateAmount} token${rebateTokenId} (price improvement)`);
   }
 
-  // 7. Release hold proportionally (with underflow guard)
+  // 7. Release hold proportionally
   const holdRelease = filledGive;
   if (offer.makerIsLeft) {
     const currentHold = giveDelta.leftHold || 0n;
-    if (currentHold < holdRelease) {
-      console.error(`⚠️ Swap resolve hold underflow! leftHold=${currentHold} < holdRelease=${holdRelease}`);
-      giveDelta.leftHold = 0n;
-    } else {
-      giveDelta.leftHold = currentHold - holdRelease;
-    }
+    giveDelta.leftHold = currentHold - holdRelease;
   } else {
     const currentHold = giveDelta.rightHold || 0n;
-    if (currentHold < holdRelease) {
-      console.error(`⚠️ Swap resolve hold underflow! rightHold=${currentHold} < holdRelease=${holdRelease}`);
-      giveDelta.rightHold = 0n;
-    } else {
-      giveDelta.rightHold = currentHold - holdRelease;
-    }
+    giveDelta.rightHold = currentHold - holdRelease;
   }
 
   // 8. Handle remainder
@@ -306,20 +307,10 @@ export async function handleSwapResolve(
     if (remainingHold > 0n) {
       if (offer.makerIsLeft) {
         const currentHold = giveDelta.leftHold || 0n;
-        if (currentHold < remainingHold) {
-          console.error(`⚠️ Swap remainder hold underflow! leftHold=${currentHold} < remainingHold=${remainingHold}`);
-          giveDelta.leftHold = 0n;
-        } else {
-          giveDelta.leftHold = currentHold - remainingHold;
-        }
+        giveDelta.leftHold = currentHold - remainingHold;
       } else {
         const currentHold = giveDelta.rightHold || 0n;
-        if (currentHold < remainingHold) {
-          console.error(`⚠️ Swap remainder hold underflow! rightHold=${currentHold} < remainingHold=${remainingHold}`);
-          giveDelta.rightHold = 0n;
-        } else {
-          giveDelta.rightHold = currentHold - remainingHold;
-        }
+        giveDelta.rightHold = currentHold - remainingHold;
       }
     }
     accountMachine.swapOffers.delete(offerId);
@@ -345,10 +336,10 @@ export async function handleSwapResolve(
       if (remainingGiveRaw > 0n) {
         if (offer.makerIsLeft) {
           const currentHold = giveDelta.leftHold || 0n;
-          giveDelta.leftHold = currentHold > remainingGiveRaw ? currentHold - remainingGiveRaw : 0n;
+          giveDelta.leftHold = currentHold - remainingGiveRaw;
         } else {
           const currentHold = giveDelta.rightHold || 0n;
-          giveDelta.rightHold = currentHold > remainingGiveRaw ? currentHold - remainingGiveRaw : 0n;
+          giveDelta.rightHold = currentHold - remainingGiveRaw;
         }
       }
       accountMachine.swapOffers.delete(offerId);
@@ -359,10 +350,10 @@ export async function handleSwapResolve(
       if (releasedGiveDust > 0n) {
         if (offer.makerIsLeft) {
           const currentHold = giveDelta.leftHold || 0n;
-          giveDelta.leftHold = currentHold > releasedGiveDust ? currentHold - releasedGiveDust : 0n;
+          giveDelta.leftHold = currentHold - releasedGiveDust;
         } else {
           const currentHold = giveDelta.rightHold || 0n;
-          giveDelta.rightHold = currentHold > releasedGiveDust ? currentHold - releasedGiveDust : 0n;
+          giveDelta.rightHold = currentHold - releasedGiveDust;
         }
       }
 

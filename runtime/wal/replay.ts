@@ -42,6 +42,7 @@ export type ReplaySnapshotDeps = {
   normalizeJReplicaMap: (raw: unknown) => Map<string, unknown>;
   assertPersistedContractConfigReady: (env: Env, label: string) => void;
   validateEntityState: (state: unknown, label: string) => void;
+  verifyEntityOrderbooksOnRestore: (state: unknown, label: string) => void;
   rebuildEntityLockBookFromAccounts: (env: Env) => void;
   buildCanonicalEnvSnapshot: (
     env: Env,
@@ -134,6 +135,10 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
   deps.assertPersistedContractConfigReady(env, `snapshot=${selectedSnapshotHeight} source=${selectedSnapshotLabel}`);
   for (const replica of env.eReplicas.values()) {
     deps.validateEntityState(replica.state, `loadEnvFromDB.eReplicas[${String(replica.entityId)}].state`);
+    deps.verifyEntityOrderbooksOnRestore(
+      replica.state,
+      `loadEnvFromDB.eReplicas[${String(replica.entityId)}].orderbook`,
+    );
   }
   deps.rebuildEntityLockBookFromAccounts(env);
   env.history = [];

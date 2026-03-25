@@ -1,4 +1,5 @@
 import { isLeftEntity } from '../entity-id-utils';
+import { validateEntityOrderbooks } from '../orderbook/validity';
 import type { Env, EntityReplica, EntityState, JReplica, RuntimeInput } from '../types';
 import type { FrameLogEntry } from '../types';
 import {
@@ -161,6 +162,28 @@ const rebuildEntityLockBookFromAccounts = (env: Env): void => {
   }
 };
 
+const shouldVerifyEntityOrderbooksOnRestore = (): boolean =>
+  /^(1|true)$/i.test(String(process.env.XLN_ORDERBOOK_VERIFY_ON_RESTORE || '').trim());
+
+const verifyEntityOrderbooksOnRestore = (state: unknown, label: string): void => {
+  if (!shouldVerifyEntityOrderbooksOnRestore()) return;
+  const report = validateEntityOrderbooks(state as EntityState);
+  if (report.ok) return;
+  const structureIssues = Object.entries(report.structure)
+    .filter(([, value]) => !value.ok)
+    .map(([pairId, value]) => `${pairId}:${value.errors.join('|')}`);
+  const mediumIssues = [
+    ...report.medium.invalidOffers.map((value) => `invalid:${value.swapKey}:${value.reason}`),
+    ...report.medium.missingInBook.map((value) => `missing:${value}`),
+    ...report.medium.orphanedInBook.map((value) => `orphaned:${value}`),
+    ...report.medium.mismatched.map((value) => `mismatch:${value.swapKey}:${value.field}`),
+  ];
+  const issues = [...structureIssues, ...mediumIssues];
+  throw new Error(
+    `${label} ORDERBOOK_VERIFY_ON_RESTORE_FAILED: ${issues.slice(0, 20).join(', ') || 'unknown'}`,
+  );
+};
+
 type BuildRuntimeReplayDepsOptions = {
   createEmptyEnv: (seed?: Uint8Array | string | null) => Env;
   deriveRuntimeIdFromSeed: (seed: string) => string;
@@ -197,6 +220,7 @@ const createRuntimeReplayDeps = (options: BuildRuntimeReplayDepsOptions) => ({
   normalizeJReplicaMap,
   assertPersistedContractConfigReady: options.assertPersistedContractConfigReady,
   validateEntityState: options.validateEntityState,
+  verifyEntityOrderbooksOnRestore,
   rebuildEntityLockBookFromAccounts,
   buildCanonicalEnvSnapshot: options.buildCanonicalEnvSnapshot,
   ensureRuntimeState: options.ensureRuntimeState,
