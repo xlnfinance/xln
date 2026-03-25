@@ -58,6 +58,7 @@
     "check:derive-delta-invariants": "bun tests/scripts/check-derive-delta-invariants.ts",
     "check:no-manual-delta-math": "bun runtime/scripts/check-no-manual-delta-math.ts",
     "check:no-active-infra-in-state-machine": "bun runtime/scripts/check-no-active-infra-in-state-machine.ts",
+    "soundcheck": "bun tools/soundcheck.ts",
     "build:tsc": "tsc",
     "watch": "tsc --watch",
     "env:build": "cd ./jurisdictions && npx hardhat compile",
