@@ -43,7 +43,6 @@ export type ReplaySnapshotDeps = {
   assertPersistedContractConfigReady: (env: Env, label: string) => void;
   validateEntityState: (state: unknown, label: string) => void;
   rebuildEntityLockBookFromAccounts: (env: Env) => void;
-  rebuildEntityOrderbookExtFromAccounts: (env: Env) => void;
   buildCanonicalEnvSnapshot: (
     env: Env,
     options: {
@@ -137,7 +136,6 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
     deps.validateEntityState(replica.state, `loadEnvFromDB.eReplicas[${String(replica.entityId)}].state`);
   }
   deps.rebuildEntityLockBookFromAccounts(env);
-  deps.rebuildEntityOrderbookExtFromAccounts(env);
   env.history = [];
   if (selectedSnapshotHeight > 0) {
     env.history.push(
@@ -326,7 +324,6 @@ export const replayFromSnapshotBuffer = async (options: ReplayFromSnapshotOption
     deps.normalizeEntitySwapTradingPairs(replica.state);
   }
   deps.rebuildEntityLockBookFromAccounts(env);
-  deps.rebuildEntityOrderbookExtFromAccounts(env);
   (env as any).__replayMeta = {
     namespace: dbNamespace,
     latestHeight,

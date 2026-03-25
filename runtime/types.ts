@@ -1735,7 +1735,6 @@ export interface SwapBookEntry {
   wantTokenId: number;
   wantAmount: bigint;       // remaining want
   minFillRatio: number;
-  createdAt: bigint;
   createdHeight: number;
   priceTicks: bigint;
 }

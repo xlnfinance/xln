@@ -1,6 +1,4 @@
 import { isLeftEntity } from '../entity-id-utils';
-import { collectOpenSwapOffersForOrderbook, processOrderbookSwaps } from '../entity-tx/handlers/account';
-import { createOrderbookExtState } from '../orderbook';
 import type { Env, EntityReplica, EntityState, JReplica, RuntimeInput } from '../types';
 import type { FrameLogEntry } from '../types';
 import {
@@ -163,36 +161,6 @@ const rebuildEntityLockBookFromAccounts = (env: Env): void => {
   }
 };
 
-const rebuildEntityOrderbookExtFromAccounts = (env: Env): void => {
-  for (const replica of env.eReplicas.values()) {
-    const snapshotExt = replica.state.orderbookExt as { hubProfile?: Record<string, unknown> } | undefined;
-    if (!snapshotExt?.hubProfile) continue;
-
-    const rebuiltExt = createOrderbookExtState(structuredClone(snapshotExt.hubProfile as never));
-    replica.state.orderbookExt = rebuiltExt as typeof replica.state.orderbookExt;
-
-    const swapOffers = collectOpenSwapOffersForOrderbook(replica.state);
-
-    if (swapOffers.length === 0) continue;
-    const result = processOrderbookSwaps(replica.state, swapOffers, { rehydrateOnly: true });
-    if (result.quarantinedOffers.length > 0) {
-      console.warn(
-        `[ORDERBOOK-REHYDRATE] entity=${replica.entityId} quarantined ${result.quarantinedOffers.length} offers: ` +
-        result.quarantinedOffers.map((offer) => `${offer.accountId}:${offer.offerId}:${offer.reason}`).join(', '),
-      );
-    }
-    if (result.mempoolOps.length > 0) {
-      console.warn(
-        `[ORDERBOOK-REHYDRATE] entity=${replica.entityId} generated ${result.mempoolOps.length} stale ops; ` +
-        `quarantined during restore`,
-      );
-    }
-    for (const update of result.bookUpdates) {
-      rebuiltExt.books.set(update.pairId, update.book);
-    }
-  }
-};
-
 type BuildRuntimeReplayDepsOptions = {
   createEmptyEnv: (seed?: Uint8Array | string | null) => Env;
   deriveRuntimeIdFromSeed: (seed: string) => string;
@@ -230,7 +198,6 @@ const createRuntimeReplayDeps = (options: BuildRuntimeReplayDepsOptions) => ({
   assertPersistedContractConfigReady: options.assertPersistedContractConfigReady,
   validateEntityState: options.validateEntityState,
   rebuildEntityLockBookFromAccounts,
-  rebuildEntityOrderbookExtFromAccounts,
   buildCanonicalEnvSnapshot: options.buildCanonicalEnvSnapshot,
   ensureRuntimeState: options.ensureRuntimeState,
   applyRuntimeInput: options.applyRuntimeInput,

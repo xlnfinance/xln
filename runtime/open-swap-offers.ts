@@ -15,7 +15,6 @@ export function listOpenSwapOffers(state: Pick<EntityState, 'accounts'>): SwapBo
         wantTokenId: offer.wantTokenId,
         wantAmount: offer.wantAmount,
         minFillRatio: offer.minFillRatio,
-        createdAt: BigInt(createdHeight),
         createdHeight,
         priceTicks: offer.priceTicks ?? 0n,
       });
