@@ -276,4 +276,70 @@ describe('orderbook matching fallback execution mapping', () => {
     const storedPrice = finalBook!.params.pmin + (BigInt(levelIdx) * finalBook!.params.tick);
     expect(storedPrice).toBe(priceTicks);
   });
+
+  test('accepts wide volatile pair levels by widening the first book tick around the anchor price', () => {
+    const anchorPriceTicks = 25_015_002n;
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['alice', { swapOffers: new Map([['offer-a', {}], ['offer-b', {}], ['offer-c', {}]]) }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: ['1/2'],
+        },
+        books: new Map(),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const makeOffer = (offerId: string, priceTicks: bigint, size: bigint) => ({
+      offerId,
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'alice',
+      accountId: 'alice',
+      createdHeight: 1,
+      giveTokenId: 2,
+      giveAmount: size,
+      wantTokenId: 1,
+      wantAmount: (size * priceTicks) / 10_000n,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks,
+    });
+
+    const offers = [
+      makeOffer('offer-a', anchorPriceTicks, 210n * SWAP_LOT_SCALE),
+      makeOffer('offer-b', 25_137_562n, 600n * SWAP_LOT_SCALE),
+      makeOffer('offer-c', 25_262_625n, 960n * SWAP_LOT_SCALE),
+    ];
+
+    const result = processOrderbookSwaps(entityState, offers as any);
+    expect(result.mempoolOps).toHaveLength(0);
+
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    expect(finalBook).toBeDefined();
+    expect(finalBook!.params.tick).toBeGreaterThan(1n);
+
+    const anchorOrderIdx = finalBook!.orderIdToIdx.get('alice:offer-a');
+    expect(typeof anchorOrderIdx).toBe('number');
+    const anchorLevelIdx = finalBook!.orderPriceIdx[anchorOrderIdx!];
+    const storedAnchorPrice = finalBook!.params.pmin + (BigInt(anchorLevelIdx) * finalBook!.params.tick);
+    expect(storedAnchorPrice).toBe(anchorPriceTicks);
+
+    expect(finalBook!.orderIdToIdx.has('alice:offer-b')).toBe(true);
+    expect(finalBook!.orderIdToIdx.has('alice:offer-c')).toBe(true);
+  });
 });
