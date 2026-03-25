@@ -652,9 +652,9 @@ async function selectEntityInputValue(
 
   const target = String(entityId || '').trim().toLowerCase();
   const targetProbe = target.slice(0, 12);
-  const selectedOption = selector.locator('.dropdown-item.selected').filter({ has: selector.locator('.item-id', { hasText: entityId }) }).first();
   const hasTargetSelection = async (): Promise<boolean> => {
-    if (await selectedOption.isVisible().catch(() => false)) return true;
+    const selectedIds = await selector.locator('.dropdown-item.selected .item-id').allTextContents().catch(() => []);
+    if (selectedIds.some((value) => String(value || '').trim().toLowerCase() === target)) return true;
     const closedTrigger = selector.locator('.closed-trigger').first();
     if (!(await closedTrigger.isVisible().catch(() => false))) return false;
     const text = String(await closedTrigger.textContent().catch(() => '')).toLowerCase();

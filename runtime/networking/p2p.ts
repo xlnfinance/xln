@@ -529,19 +529,13 @@ export class RuntimeP2P {
       'targetRuntimeId must be signer EOA',
       { targetRuntimeId },
     );
-    const requireDirect = this.hasDirectPeerEndpoint(normalizedTargetRuntimeId);
-    if (requireDirect) {
-      this.ensureDirectClientForRuntime(normalizedTargetRuntimeId);
-    }
-    const client = requireDirect
-      ? this.getDirectClientForRuntime(normalizedTargetRuntimeId)
-      : this.getActiveClient();
+    const { client, transport } = this.resolveTransportClient(normalizedTargetRuntimeId);
     if (client && client.isOpen()) {
       try {
         const sent = client.sendEntityInput(normalizedTargetRuntimeId, input, ingressTimestamp);
         console.log(
           `[P2P] enqueueEntityInput attempt target=${normalizedTargetRuntimeId} entity=${input.entityId.slice(-4)} ` +
-            `transport=${requireDirect ? 'direct' : 'relay'} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
+            `transport=${transport} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
         );
         if (sent) return;
         console.warn(`P2P-SEND-FAILED: Client.send returned false for ${normalizedTargetRuntimeId}`);
@@ -568,7 +562,7 @@ export class RuntimeP2P {
       }
     } else {
       console.warn(
-        `P2P-NO-CLIENT: No active ${requireDirect ? 'direct' : 'relay'} connection, queueing for ${normalizedTargetRuntimeId}`,
+        `P2P-NO-CLIENT: No active ${transport} connection, queueing for ${normalizedTargetRuntimeId}`,
       );
     }
 
@@ -635,15 +629,23 @@ export class RuntimeP2P {
     return !!this.getDirectPeerEndpoint(runtimeId);
   }
 
+  private resolveTransportClient(runtimeId: string): {
+    client: RuntimeWsClient | null;
+    transport: 'direct' | 'relay';
+  } {
+    const requireDirect = this.hasDirectPeerEndpoint(runtimeId);
+    if (requireDirect) {
+      this.ensureDirectClientForRuntime(runtimeId);
+    }
+    return {
+      client: requireDirect ? this.getDirectClientForRuntime(runtimeId) : this.getActiveClient(),
+      transport: requireDirect ? 'direct' : 'relay',
+    };
+  }
+
   private flushPending() {
     for (const [targetRuntimeId, queue] of this.pendingByRuntime.entries()) {
-      const requireDirect = this.hasDirectPeerEndpoint(targetRuntimeId);
-      if (requireDirect) {
-        this.ensureDirectClientForRuntime(targetRuntimeId);
-      }
-      const client = requireDirect
-        ? this.getDirectClientForRuntime(targetRuntimeId)
-        : this.getActiveClient();
+      const { client, transport } = this.resolveTransportClient(targetRuntimeId);
       if (!client || !client.isOpen()) continue;
       const remaining: { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[] = [];
       for (const entry of queue) {
@@ -651,7 +653,7 @@ export class RuntimeP2P {
           const sent = client.sendEntityInput(targetRuntimeId, entry.input, entry.ingressTimestamp);
           console.log(
             `[P2P] flushPending target=${targetRuntimeId} entity=${entry.input.entityId.slice(-4)} ` +
-              `transport=${requireDirect ? 'direct' : 'relay'} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
+              `transport=${transport} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
           );
           if (!sent) remaining.push(entry);
         } catch {
