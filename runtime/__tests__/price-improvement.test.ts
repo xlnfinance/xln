@@ -549,5 +549,40 @@ describe('price improvement', () => {
       expect(resolveResult.success).toBe(false);
       expect(resolveResult.error).toContain('required for non-zero fills');
     });
+
+    test('handleSwapResolve rejects hold underflow instead of clamping', async () => {
+      const offerId = 'hold-underflow-offer';
+      const giveAmount = 3n * LOT_SCALE;
+      const wantAmount = ticksLotsToWei(8700n);
+      const offer: SwapOffer = {
+        offerId,
+        giveTokenId: 2,
+        giveAmount,
+        wantTokenId: 1,
+        wantAmount,
+        makerIsLeft: true,
+        minFillRatio: 0,
+        createdHeight: 0,
+        quantizedGive: giveAmount,
+        quantizedWant: wantAmount,
+      };
+      const accountMachine = makeAccountMachine(offer);
+      accountMachine.deltas.get(2)!.leftHold = giveAmount - 1n;
+      const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
+        type: 'swap_resolve',
+        data: {
+          offerId,
+          fillRatio: 65535,
+          cancelRemainder: true,
+          executionGiveAmount: giveAmount,
+          executionWantAmount: wantAmount,
+        },
+      };
+
+      const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
+      expect(resolveResult.success).toBe(false);
+      expect(resolveResult.error).toContain('Hold underflow');
+      expect(accountMachine.swapOffers.has(offerId)).toBe(true);
+    });
   });
 });

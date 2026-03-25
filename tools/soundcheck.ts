@@ -355,8 +355,8 @@ function buildSoundness(findings: Finding[], tscOk: boolean, tests: TestRun[]): 
       name: 'restore',
       status: categoryStatus('rehydrate-quarantine-total'),
       detail: hasRule('rehydrate-quarantine-total')
-        ? 'Rehydrate still has non-quarantined early-exit paths.'
-        : 'Rehydrate quarantine checks passed.',
+        ? 'Restore/debug rehydrate still has non-quarantined early-exit paths.'
+        : 'Persisted-book restore checks passed.',
     },
     {
       name: 'state-model',
