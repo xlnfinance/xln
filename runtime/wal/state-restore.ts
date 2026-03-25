@@ -1,6 +1,7 @@
 import { isLeftEntity } from '../entity-id-utils';
 import { collectOpenSwapOffersForOrderbook, processOrderbookSwaps } from '../entity-tx/handlers/account';
 import { createOrderbookExtState } from '../orderbook';
+import { swapKey } from '../swap-execution';
 import type { Env, EntityReplica, EntityState, JReplica, RuntimeInput } from '../types';
 import type { FrameLogEntry } from '../types';
 import {
@@ -141,7 +142,7 @@ const rebuildEntitySwapBookFromAccounts = (env: Env): void => {
     for (const [accountId, account] of replica.state.accounts.entries()) {
       if (!(account?.swapOffers instanceof Map)) continue;
       for (const [offerId, offer] of account.swapOffers.entries()) {
-        const swapBookKey = `${String(accountId)}:${String(offerId)}`;
+        const swapBookKey = swapKey(String(accountId), String(offerId));
         rebuiltSwapBook.set(swapBookKey, {
           ...(offer as Record<string, unknown>),
           offerId: String((offer as { offerId?: unknown })?.offerId || offerId || ''),

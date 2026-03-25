@@ -38,6 +38,7 @@ import { logError } from '../logger';
 import { FINANCIAL } from '../constants';
 import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
 import { handleReserveToExternal } from './handlers/reserve-to-external';
+import { swapKey } from '../swap-execution';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -1122,7 +1123,7 @@ export const applyEntityTx = async (
 
       // AUDIT FIX (CRITICAL-6): Use namespaced key to prevent offerId collisions across accounts
       // Key format: accountId:offerId (same as orderbook uses)
-      const swapBookKey = `${counterpartyEntityId}:${offerId}`;
+      const swapBookKey = swapKey(counterpartyEntityId, offerId);
       newState.swapBook.set(swapBookKey, {
         offerId,
         accountId: counterpartyEntityId,
