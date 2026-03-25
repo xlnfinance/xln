@@ -240,65 +240,28 @@
     error = '';
 
     try {
-      const discoveredByEntity = new Map<string, Hub>();
-      for (const hub of await fetchPublicHubs()) {
-        discoveredByEntity.set(normalizeEntityId(hub.entityId), hub);
-      }
       const currentEnv = env;
-      if (!currentEnv) throw new Error('Environment not ready');
-      const relayReady = await ensureRuntimeRelay(currentEnv, relaySelection)
-        .then(() => true)
-        .catch(() => false);
+      const fetchedHubs = await fetchPublicHubs();
       if (refreshGossip) {
-        const xln = await getXLN();
-        if (relayReady && xln.refreshGossip) {
-          await Promise.race([
-            Promise.resolve(xln.refreshGossip(currentEnv)),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('gossip refresh timeout')), DISCOVERY_TIMEOUT_MS)),
-          ]).catch(() => {
-            // best-effort refresh only
-          });
-          await new Promise(resolve => setTimeout(resolve, 50));
+        try {
+          const xln = await getXLN();
+          if (currentEnv && xln.refreshGossip) {
+            await ensureRuntimeRelay(currentEnv, relaySelection);
+            await Promise.race([
+              Promise.resolve(xln.refreshGossip(currentEnv)),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('gossip refresh timeout')), DISCOVERY_TIMEOUT_MS)),
+            ]);
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+        } catch {
+          // Discovery stays server-authoritative; local gossip refresh is best-effort only.
         }
       }
 
-      const gossipProfiles: GossipProfile[] = typeof currentEnv.gossip?.getHubs === 'function'
-        ? currentEnv.gossip.getHubs()
-        : (currentEnv.gossip?.getProfiles?.() || []).filter(
-            (profile: GossipProfile) => profile.metadata.isHub === true,
-          );
-
-      for (const profile of gossipProfiles) {
-        if (normalizeEntityId(profile.entityId) === normalizeEntityId(entityId)) continue;
-        if (discoveredByEntity.has(normalizeEntityId(profile.entityId))) continue;
-
-        const isConnected = hasCounterpartyAccount(currentEnv, entityId, profile.entityId);
-        const feePpm = profile.metadata.routingFeePPM;
-        const fullEntityId = profile.entityId.startsWith('0x') ? profile.entityId : `0x${profile.entityId}`;
-        const peerCount = profile.publicAccounts.length;
-
-        discoveredByEntity.set(normalizeEntityId(profile.entityId), {
-          profile,
-          entityId: profile.entityId,
-          name: profile.name,
-          metadata: {
-            description: profile.bio || 'Payment hub',
-            ...(profile.website ? { website: profile.website } : {}),
-            fee: feePpm,
-            peerCount,
-          },
-          wsUrl: profile.wsUrl,
-          verified: profile.metadata.isHub === true,
-          creditScore: computeCreditScore(profile.entityId, feePpm, peerCount),
-          isConnected,
-          lastSeen: profile.lastUpdated,
-          raw: formatRawProfile(profile),
-          identicon: generateIdenticon(fullEntityId),
-          runtimeId: profile.runtimeId,
-        });
-      }
-
-      hubs = Array.from(discoveredByEntity.values());
+      hubs = fetchedHubs.map((hub) => ({
+        ...hub,
+        isConnected: currentEnv ? hasCounterpartyAccount(currentEnv, entityId, hub.entityId) : false,
+      }));
       if (hubs.length === 0) {
         error = 'No public hubs discovered yet. Try Refresh; if it persists, check relay connectivity.';
       }
