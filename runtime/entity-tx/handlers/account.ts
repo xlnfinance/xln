@@ -1138,11 +1138,186 @@ export function processOrderbookSwaps(
   // AUDIT FIX (CRITICAL-5): Cache book updates within batch to avoid stale snapshots
   // Without this, same-tick offers don't see each other's fills
   const bookCache = new Map<string, BookState>();
+  const orderbookOfferMeta = new Map<string, NormalizedOrderbookOffer>();
   const MAX_BOOK_LEVELS = 40_000;
 
+  const synthesizeOfferFromMissingBookLookup = (
+    takerSide: 0 | 1,
+    baseTokenId: number,
+    quoteTokenId: number,
+    originalLots: number,
+    filledLots: number,
+    weightedCost: bigint,
+  ): { giveTokenId: number; wantTokenId: number; giveAmount: bigint; quantizedGive: bigint } => {
+    const originalLotsBig = BigInt(Math.max(0, originalLots));
+    const filledLotsBig = BigInt(Math.max(0, filledLots));
+    if (originalLotsBig <= 0n || filledLotsBig <= 0n) {
+      throw new Error(`ORDERBOOK_FILL_LOOKUP_FAILED: invalid lots original=${originalLots} filled=${filledLots}`);
+    }
+
+    if (weightedCost <= 0n || weightedCost % filledLotsBig !== 0n) {
+      throw new Error(
+        `ORDERBOOK_FILL_LOOKUP_FAILED: non-integral maker price weightedCost=${weightedCost.toString()} filledLots=${filledLotsBig.toString()}`,
+      );
+    }
+
+    const makerSide = takerSide === 0 ? 1 : 0;
+    const priceTicks = weightedCost / filledLotsBig;
+    const baseAmount = originalLotsBig * SWAP_LOT_SCALE;
+    const quoteAmount = (baseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+    if (baseAmount <= 0n || quoteAmount <= 0n) {
+      throw new Error(
+        `ORDERBOOK_FILL_LOOKUP_FAILED: synthesized maker offer is zero base=${baseAmount.toString()} quote=${quoteAmount.toString()}`,
+      );
+    }
+
+    if (makerSide === 1) {
+      return {
+        giveTokenId: baseTokenId,
+        wantTokenId: quoteTokenId,
+        giveAmount: baseAmount,
+        quantizedGive: baseAmount,
+      };
+    }
+
+    return {
+      giveTokenId: quoteTokenId,
+      wantTokenId: baseTokenId,
+      giveAmount: quoteAmount,
+      quantizedGive: quoteAmount,
+    };
+  };
+
+  const createBoundedBookForObservedPrices = (
+    observedPrices: bigint[],
+    policyTick: number,
+    bookRangeBps: number,
+  ): BookState => {
+    const sortedPrices = observedPrices.filter((price) => price > 0n).sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+    if (sortedPrices.length === 0) {
+      throw new Error('ORDERBOOK_REBUILD_FAILED: no observed prices');
+    }
+    const anchorPrice = sortedPrices[sortedPrices.length - 1]!;
+    const minObserved = sortedPrices[0]!;
+    const maxObserved = sortedPrices[sortedPrices.length - 1]!;
+
+    let priceTick = BigInt(Math.max(1, policyTick));
+    const halfRange = ((anchorPrice * BigInt(bookRangeBps)) / 10_000n) > (priceTick * 50n)
+      ? (anchorPrice * BigInt(bookRangeBps)) / 10_000n
+      : (priceTick * 50n);
+    let pmin = anchorPrice > halfRange ? anchorPrice - halfRange : 1n;
+    if (pmin <= 0n) pmin = priceTick;
+    let pmax = anchorPrice + halfRange;
+    if (minObserved < pmin) pmin = minObserved;
+    if (maxObserved > pmax) pmax = maxObserved;
+    if (pmax <= pmin) pmax = pmin + priceTick;
+
+    let levels = Number(((pmax - pmin) / priceTick) + 1n);
+    if (levels > MAX_BOOK_LEVELS) {
+      const maxLevels = BigInt(Math.max(1, MAX_BOOK_LEVELS - 1));
+      const desiredSpan = pmax - pmin;
+      const minTickForSpan = (desiredSpan + maxLevels - 1n) / maxLevels;
+      const policyTickBig = BigInt(Math.max(1, policyTick));
+      priceTick = ((minTickForSpan + policyTickBig - 1n) / policyTickBig) * policyTickBig;
+      const maxSpan = priceTick * maxLevels;
+      pmin = minObserved;
+      pmax = pmin + maxSpan;
+      if (maxObserved > pmax) {
+        pmax = maxObserved;
+        pmin = pmax > maxSpan ? pmax - maxSpan : priceTick;
+      }
+      levels = Number(((pmax - pmin) / priceTick) + 1n);
+    }
+
+    return createBook({
+      tick: priceTick,
+      pmin,
+      pmax,
+      maxOrders: LIMITS.MAX_ORDERBOOK_ORDERS_PER_PAIR,
+      stpPolicy: 1,
+    });
+  };
+
+  const materializeOfferAtBookState = (
+    meta: NormalizedOrderbookOffer,
+    priceTicks: bigint,
+    qtyLots: number,
+  ): NormalizedOrderbookOffer => {
+    const baseAmount = BigInt(qtyLots) * SWAP_LOT_SCALE;
+    const side = deriveSide(meta.giveTokenId, meta.wantTokenId);
+    const quoteAmount = (baseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+    return side === 1
+      ? {
+          ...meta,
+          priceTicks,
+          giveAmount: baseAmount,
+          wantAmount: quoteAmount,
+        }
+      : {
+          ...meta,
+          priceTicks,
+          giveAmount: quoteAmount,
+          wantAmount: baseAmount,
+        };
+  };
+
+  const rebuildBookAroundPrice = (
+    pairId: string,
+    currentPriceTicks: bigint,
+    policyTick: number,
+    bookRangeBps: number,
+  ): BookState => {
+    const previousBook = bookCache.get(pairId) || ext.books.get(pairId);
+    const activeOffers: NormalizedOrderbookOffer[] = [];
+    const observedPrices: bigint[] = [currentPriceTicks];
+
+    if (previousBook) {
+      for (const [orderId, orderIdx] of previousBook.orderIdToIdx.entries()) {
+        if (!previousBook.orderActive[orderIdx]) continue;
+        const meta = orderbookOfferMeta.get(orderId);
+        if (!meta) {
+          throw new Error(`ORDERBOOK_REBUILD_FAILED: missing offer meta for ${orderId}`);
+        }
+        const levelIdx = previousBook.orderPriceIdx[orderIdx];
+        if (levelIdx < 0) continue;
+        const price = previousBook.params.pmin + (BigInt(levelIdx) * previousBook.params.tick);
+        const qtyLots = previousBook.orderQtyLots[orderIdx];
+        observedPrices.push(price);
+        activeOffers.push(materializeOfferAtBookState(meta, price, qtyLots));
+      }
+    }
+
+    let rebuiltBook = createBoundedBookForObservedPrices(observedPrices, policyTick, bookRangeBps);
+    for (const activeOffer of sortSwapOffersForOrderbook(activeOffers)) {
+      const activeSide = deriveSide(activeOffer.giveTokenId, activeOffer.wantTokenId);
+      const activeBaseAmount = activeSide === 1 ? activeOffer.giveAmount : activeOffer.wantAmount;
+      const activeQtyLots = activeBaseAmount / SWAP_LOT_SCALE;
+      const activeMakerId = activeOffer.makerIsLeft ? activeOffer.fromEntity : activeOffer.toEntity;
+      const activeOrderId = `${activeOffer.accountId}:${activeOffer.offerId}`;
+      const rebuildResult = applyCommand(rebuiltBook, {
+        kind: 0,
+        ownerId: activeMakerId,
+        orderId: activeOrderId,
+        side: activeSide,
+        tif: activeOffer.timeInForce,
+        postOnly: true,
+        priceTicks: activeOffer.priceTicks,
+        qtyLots: Number(activeQtyLots),
+        minFillRatio: activeOffer.minFillRatio,
+      });
+      const reject = rebuildResult.events.find((event) => event.type === 'REJECT');
+      if (reject) {
+        throw new Error(`ORDERBOOK_REBUILD_FAILED: ${activeOrderId} rejected: ${reject.reason}`);
+      }
+      rebuiltBook = rebuildResult.state;
+    }
+
+    return rebuiltBook;
+  };
+
   for (const offer of sortSwapOffersForOrderbook(swapOffers)) {
-    const accountId = offer.accountId;
-    console.log(`📊 ORDERBOOK-PROCESS: offerId=${offer.offerId}, accountId=${accountId.slice(-8)}`);
+    const currentAccountId = offer.accountId;
+    console.log(`📊 ORDERBOOK-PROCESS: offerId=${offer.offerId}, accountId=${currentAccountId.slice(-8)}`);
 
     const { pairId, base, quote } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
     const bookKey = pairId;
@@ -1167,7 +1342,7 @@ export function processOrderbookSwaps(
       console.warn(
         `⚠️ ORDERBOOK: Invalid token direction for offer=${offer.offerId} give=${offer.giveTokenId} want=${offer.wantTokenId} base=${base} quote=${quote}`,
       );
-      if (rehydrateOnly && quarantineOffer(accountId, offer.offerId, 'invalid-direction')) continue;
+      if (rehydrateOnly && quarantineOffer(currentAccountId, offer.offerId, 'invalid-direction')) continue;
       continue;
     }
 
@@ -1175,7 +1350,7 @@ export function processOrderbookSwaps(
     const quoteAmount = isSellBase ? offer.wantAmount : offer.giveAmount;
     if (baseAmount <= 0n || quoteAmount <= 0n) {
       console.warn(`⚠️ ORDERBOOK: Zero amount in offer=${offer.offerId}, base=${baseAmount}, quote=${quoteAmount}`);
-      if (rehydrateOnly && quarantineOffer(accountId, offer.offerId, 'zero-amount')) continue;
+      if (rehydrateOnly && quarantineOffer(currentAccountId, offer.offerId, 'zero-amount')) continue;
       continue;
     }
     if (minTradeSize > 0n && quoteAmount < minTradeSize) {
@@ -1184,11 +1359,11 @@ export function processOrderbookSwaps(
         (rehydrateOnly ? '; quarantined during rehydrate' : '; cancelling remainder'),
       );
       if (rehydrateOnly) {
-        quarantineOffer(accountId, offer.offerId, `below-minTradeSize:${quoteAmount.toString()}`);
+        quarantineOffer(currentAccountId, offer.offerId, `below-minTradeSize:${quoteAmount.toString()}`);
         continue;
       }
       mempoolOps.push({
-        accountId,
+        accountId: currentAccountId,
         tx: {
           type: 'swap_resolve',
           data: {
@@ -1204,7 +1379,7 @@ export function processOrderbookSwaps(
       console.warn(
         `⚠️ ORDERBOOK: base amount not aligned to LOT_SCALE — skipping offer=${offer.offerId}, amount=${baseAmount}`,
       );
-      if (rehydrateOnly && quarantineOffer(accountId, offer.offerId, `lot-misaligned:${baseAmount.toString()}`)) continue;
+      if (rehydrateOnly && quarantineOffer(currentAccountId, offer.offerId, `lot-misaligned:${baseAmount.toString()}`)) continue;
       continue;
     }
 
@@ -1214,7 +1389,7 @@ export function processOrderbookSwaps(
 
     if (qtyLots === 0n || qtyLots > MAX_LOTS || priceTicks <= 0n || priceTicks > MAX_LOTS) {
       console.warn(`⚠️ ORDERBOOK: Invalid order — skipping offer=${offer.offerId}, qty=${qtyLots}, price=${priceTicks}`);
-      if (rehydrateOnly && quarantineOffer(accountId, offer.offerId, `invalid-order:${qtyLots.toString()}:${priceTicks.toString()}`)) continue;
+      if (rehydrateOnly && quarantineOffer(currentAccountId, offer.offerId, `invalid-order:${qtyLots.toString()}:${priceTicks.toString()}`)) continue;
       continue;
     }
 
@@ -1263,18 +1438,27 @@ export function processOrderbookSwaps(
       ? bookPmin
       : bookPmin + (((priceTicks - bookPmin) / bookTickBig) * bookTickBig);
     priceTicks = snappedPriceTicks;
+    if (priceTicks < book.params.pmin || priceTicks > book.params.pmax) {
+      console.log(
+        `📚 ORDERBOOK REBUILD: pair=${bookKey} price=${priceTicks.toString()} outside ` +
+        `[${book.params.pmin.toString()}, ${book.params.pmax.toString()}], rebuilding window`,
+      );
+      book = rebuildBookAroundPrice(bookKey, priceTicks, policyTick, pairPolicy.bookRangeBps);
+      bookCache.set(bookKey, book);
+      bookUpdates.push({ pairId: bookKey, book });
+    }
     if (priceTicks <= 0n) {
       console.warn(`⚠️ ORDERBOOK: book-tick rounding produced zero price — skipping offer=${offer.offerId}`);
-      if (rehydrateOnly && quarantineOffer(accountId, offer.offerId, 'book-tick-zero-price')) continue;
+      if (rehydrateOnly && quarantineOffer(currentAccountId, offer.offerId, 'book-tick-zero-price')) continue;
       continue;
     }
     if (priceTicks > MAX_LOTS) {
       console.warn(`⚠️ ORDERBOOK: rounded price exceeds max tick range — skipping offer=${offer.offerId}`);
-      if (rehydrateOnly && quarantineOffer(accountId, offer.offerId, `book-tick-overflow:${priceTicks.toString()}`)) continue;
+      if (rehydrateOnly && quarantineOffer(currentAccountId, offer.offerId, `book-tick-overflow:${priceTicks.toString()}`)) continue;
       continue;
     }
 
-    const liveAccount = hubState.accounts.get(accountId);
+    const liveAccount = hubState.accounts.get(currentAccountId);
     const liveSwapOffer = liveAccount?.swapOffers?.get(offer.offerId);
     const hasConcreteLiveOffer =
       !!liveSwapOffer &&
@@ -1293,7 +1477,7 @@ export function processOrderbookSwaps(
       if (!requantizedOffer) {
         console.warn(`⚠️ ORDERBOOK: book-grid repricing dropped offer to zero — skipping offer=${offer.offerId}`);
         if (rehydrateOnly) {
-          quarantineOffer(accountId, offer.offerId, `book-grid-reprice-zero:${priceTicks.toString()}`);
+          quarantineOffer(currentAccountId, offer.offerId, `book-grid-reprice-zero:${priceTicks.toString()}`);
           continue;
         }
       } else {
@@ -1308,48 +1492,70 @@ export function processOrderbookSwaps(
       }
     }
 
-    // Price deviation guard: reject orders that cross too far from best available
     const bestBid = getBestBid(book);
     const bestAsk = getBestAsk(book);
     const REJECT_BPS = SWAP_CONSTANTS.PRICE_REJECT_BPS;
+    const WARN_BPS = SWAP_CONSTANTS.PRICE_WARN_BPS;
     const BPS_BASE = SWAP_CONSTANTS.BPS_BASE;
-    if (side === 0 && bestAsk !== null) {
-      // BUY: reject if limit price > bestAsk * (1 + REJECT_BPS/BPS_BASE)
-      const maxAllowed = bestAsk + ((bestAsk * BigInt(REJECT_BPS)) / BigInt(BPS_BASE));
-      if (priceTicks > maxAllowed) {
-        console.warn(`⚠️ ORDERBOOK: BUY price ${priceTicks.toString()} exceeds ${REJECT_BPS/100}% above best ask ${bestAsk.toString()} — rejecting offer=${offer.offerId}`);
+    const marketAnchor = bestBid ?? bestAsk;
+    if (marketAnchor !== null) {
+      const minAllowed = marketAnchor - ((marketAnchor * BigInt(REJECT_BPS)) / BigInt(BPS_BASE));
+      const maxAllowed = marketAnchor + ((marketAnchor * BigInt(REJECT_BPS)) / BigInt(BPS_BASE));
+      if (priceTicks < minAllowed || priceTicks > maxAllowed) {
+        console.warn(
+          `⚠️ ORDERBOOK: price ${priceTicks.toString()} is outside ±${REJECT_BPS / 100}% band ` +
+          `around anchor ${marketAnchor.toString()} — auto-canceling offer=${offer.offerId}`,
+        );
         if (rehydrateOnly) {
-          quarantineOffer(accountId, offer.offerId, `buy-price-above-band:${priceTicks.toString()}`);
+          quarantineOffer(currentAccountId, offer.offerId, `outside-anchor-band:${priceTicks.toString()}`);
           continue;
         }
-        mempoolOps.push({ accountId, tx: { type: 'swap_resolve', data: { offerId: offer.offerId, fillRatio: 0, cancelRemainder: true } } });
+        mempoolOps.push({
+          accountId: currentAccountId,
+          tx: {
+            type: 'swap_resolve',
+            data: {
+              offerId: offer.offerId,
+              fillRatio: 0,
+              cancelRemainder: true,
+            },
+          },
+        });
         continue;
       }
     }
+    if (side === 0 && bestAsk !== null) {
+      const warnAbove = bestAsk + ((bestAsk * BigInt(WARN_BPS)) / BigInt(BPS_BASE));
+      if (priceTicks > warnAbove) {
+        console.warn(
+          `⚠️ ORDERBOOK: BUY price ${priceTicks.toString()} is ${WARN_BPS / 100}%+ above best ask ${bestAsk.toString()} — allowing match/rest`,
+        );
+      }
+    }
     if (side === 1 && bestBid !== null) {
-      // SELL: reject if limit price < bestBid * (1 - REJECT_BPS/BPS_BASE)
-      const minAllowed = bestBid - ((bestBid * BigInt(REJECT_BPS)) / BigInt(BPS_BASE));
-      if (priceTicks < minAllowed) {
-        console.warn(`⚠️ ORDERBOOK: SELL price ${priceTicks.toString()} below ${REJECT_BPS/100}% under best bid ${bestBid.toString()} — rejecting offer=${offer.offerId}`);
-        if (rehydrateOnly) {
-          quarantineOffer(accountId, offer.offerId, `sell-price-below-band:${priceTicks.toString()}`);
-          continue;
-        }
-        mempoolOps.push({ accountId, tx: { type: 'swap_resolve', data: { offerId: offer.offerId, fillRatio: 0, cancelRemainder: true } } });
-        continue;
+      const warnBelow = bestBid - ((bestBid * BigInt(WARN_BPS)) / BigInt(BPS_BASE));
+      if (priceTicks < warnBelow) {
+        console.warn(
+          `⚠️ ORDERBOOK: SELL price ${priceTicks.toString()} is ${WARN_BPS / 100}%+ below best bid ${bestBid.toString()} — allowing match/rest`,
+        );
       }
     }
 
     const makerId = offer.makerIsLeft ? offer.fromEntity : offer.toEntity;
-    const namespacedOrderId = `${accountId}:${offer.offerId}`;
-    console.log(`📊 ORDERBOOK ADD: maker=${formatEntityId(makerId)}, orderId=${namespacedOrderId.slice(-20)}, side=${side}, price=${priceTicks}, qty=${qtyLots}`);
+    const currentNamespacedOrderId = `${currentAccountId}:${offer.offerId}`;
+    orderbookOfferMeta.set(currentNamespacedOrderId, {
+      ...offer,
+      accountId: currentAccountId,
+      priceTicks,
+    });
+    console.log(`📊 ORDERBOOK ADD: maker=${formatEntityId(makerId)}, orderId=${currentNamespacedOrderId.slice(-20)}, side=${side}, price=${priceTicks}, qty=${qtyLots}`);
 
     let result: ReturnType<typeof applyCommand>;
     try {
       result = applyCommand(book, {
         kind: 0,
         ownerId: makerId,
-        orderId: namespacedOrderId,
+        orderId: currentNamespacedOrderId,
         side,
         tif: offer.timeInForce,
         postOnly: rehydrateOnly,
@@ -1361,14 +1567,14 @@ export function processOrderbookSwaps(
       const message = error instanceof Error ? error.message : String(error);
       if (message === 'Out of order slots') {
         console.warn(
-          `⚠️ ORDERBOOK FULL: pair=${bookKey} maxOrders=${book.params.maxOrders} offer=${offer.offerId} account=${accountId.slice(-8)}`,
+          `⚠️ ORDERBOOK FULL: pair=${bookKey} maxOrders=${book.params.maxOrders} offer=${offer.offerId} account=${currentAccountId.slice(-8)}`,
         );
         if (rehydrateOnly) {
-          quarantineOffer(accountId, offer.offerId, `book-full:${book.params.maxOrders}`);
+          quarantineOffer(currentAccountId, offer.offerId, `book-full:${book.params.maxOrders}`);
           continue;
         }
         mempoolOps.push({
-          accountId,
+          accountId: currentAccountId,
           tx: {
             type: 'swap_resolve',
             data: {
@@ -1390,20 +1596,20 @@ export function processOrderbookSwaps(
     bookUpdates.push({ pairId: bookKey, book });
 
     const rejectEvents = result.events.filter(
-      (event) => event.type === 'REJECT' && event.orderId === namespacedOrderId,
+      (event) => event.type === 'REJECT' && event.orderId === currentNamespacedOrderId,
     );
     const offerRejectedWithoutFill = rejectEvents.length > 0;
     if (offerRejectedWithoutFill) {
       const rejectReasons = rejectEvents.map((event) => event.reason).filter(Boolean).join(', ');
       console.warn(
-        `⚠️ ORDERBOOK REJECT: offer=${offer.offerId} account=${accountId.slice(-8)} side=${side} price=${priceTicks.toString()} qty=${qtyLots.toString()} bestBid=${String(bestBid)} bestAsk=${String(bestAsk)} reason=${rejectReasons || 'unknown'}`,
+        `⚠️ ORDERBOOK REJECT: offer=${offer.offerId} account=${currentAccountId.slice(-8)} side=${side} price=${priceTicks.toString()} qty=${qtyLots.toString()} bestBid=${String(bestBid)} bestAsk=${String(bestAsk)} reason=${rejectReasons || 'unknown'}`,
       );
       if (rehydrateOnly) {
-        quarantineOffer(accountId, offer.offerId, `post-only-reject:${rejectReasons || 'unknown'}`);
+        quarantineOffer(currentAccountId, offer.offerId, `post-only-reject:${rejectReasons || 'unknown'}`);
         continue;
       }
       mempoolOps.push({
-        accountId,
+        accountId: currentAccountId,
         tx: {
           type: 'swap_resolve',
           data: {
@@ -1491,9 +1697,17 @@ export function processOrderbookSwaps(
 
       const account = hubState.accounts.get(accountId);
       const swapOffer = account?.swapOffers?.get(offerId);
-      const offerForExecution = swapOffer ?? offer;
+      const offerForExecution = swapOffer
+        ?? (namespacedOrderId === currentNamespacedOrderId
+          ? offer
+          : synthesizeOfferFromMissingBookLookup(side, base, quote, originalLots, filledLots, weightedCost));
       const orderStillInBook = book.orderIdToIdx.has(namespacedOrderId) &&
         book.orderActive[book.orderIdToIdx.get(namespacedOrderId)!];
+      const offerSource = swapOffer
+        ? 'live-account-offer'
+        : namespacedOrderId === currentNamespacedOrderId
+          ? 'current-taker-offer'
+          : 'synthesized-from-book-fill';
       const resolveData = buildSwapResolveDataFromOrderbookFill(
         offerForExecution,
         executionBaseWei,
@@ -1512,8 +1726,27 @@ export function processOrderbookSwaps(
         },
       });
       console.log(
-        `📤 ORDERBOOK: Queued swap_resolve for ${offerId.slice(-8)}, fill=${(resolveData.fillRatio / MAX_SWAP_FILL_RATIO * 100).toFixed(1)}%, cancel=${!orderStillInBook}`,
+        `📤 ORDERBOOK: Queued swap_resolve for ${offerId.slice(-8)}, fill=${(resolveData.fillRatio / MAX_SWAP_FILL_RATIO * 100).toFixed(1)}%, cancel=${!orderStillInBook}, source=${offerSource}`,
       );
+      console.log('📤 ORDERBOOK RESOLVE DETAIL', {
+        accountId,
+        offerId,
+        namespacedOrderId,
+        offerSource,
+        side,
+        baseTokenId: base,
+        quoteTokenId: quote,
+        originalLots,
+        filledLots,
+        weightedCost: weightedCost.toString(),
+        executionBaseWei: executionBaseWei.toString(),
+        executionQuoteWei: executionQuoteWei.toString(),
+        orderStillInBook,
+        offerGiveTokenId: offerForExecution.giveTokenId,
+        offerWantTokenId: offerForExecution.wantTokenId,
+        offerGiveAmount: offerForExecution.giveAmount.toString(),
+        offerQuantizedGive: (offerForExecution.quantizedGive ?? offerForExecution.giveAmount).toString(),
+      });
     }
   }
 

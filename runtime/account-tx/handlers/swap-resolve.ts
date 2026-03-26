@@ -127,9 +127,31 @@ export async function handleSwapResolve(
       };
     }
     if (filledWant * effectiveGive < filledGive * effectiveWant) {
+      const limitLhs = filledWant * effectiveGive;
+      const limitRhs = filledGive * effectiveWant;
+      console.error('❌ SWAP-RESOLVE MAKER LIMIT VIOLATION', {
+        offerId,
+        byLeft,
+        makerIsLeft: offer.makerIsLeft,
+        giveTokenId: offer.giveTokenId,
+        wantTokenId: offer.wantTokenId,
+        effectiveGive: effectiveGive.toString(),
+        effectiveWant: effectiveWant.toString(),
+        filledGive: filledGive.toString(),
+        filledWant: filledWant.toString(),
+        fillRatio,
+        canonicalFillRatio,
+        limitLhs: limitLhs.toString(),
+        limitRhs: limitRhs.toString(),
+      });
       return {
         success: false,
-        error: `Execution violates maker limit price`,
+        error:
+          `Execution violates maker limit price: ` +
+          `offer=${offerId} makerIsLeft=${offer.makerIsLeft} ` +
+          `effectiveGive=${effectiveGive} effectiveWant=${effectiveWant} ` +
+          `filledGive=${filledGive} filledWant=${filledWant} ` +
+          `lhs=${limitLhs} rhs=${limitRhs}`,
         events,
       };
     }
