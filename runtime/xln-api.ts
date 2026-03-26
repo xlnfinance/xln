@@ -55,7 +55,7 @@ export type { Profile, GossipLayer } from './networking/gossip';
 export type { PaymentRoute } from './routing/pathfinding';
 export type { CompletedBatch, JBatch, JBatchState } from './j-batch';
 export type { JAdapter } from './jadapter/types';
-export type { PreparedSwapOrder } from './orderbook';
+export type { BookState, OrderbookExtState, PreparedSwapOrder } from './orderbook';
 
 // Re-export identity functions types
 export {

@@ -13,6 +13,7 @@
   import type { Readable } from 'svelte/store';
   import { xlnEnvironment } from '$lib/stores/xlnStore';
   import { formatEntityId } from '$lib/utils/format';
+  import type { BookState, EntityReplica, Env, EnvSnapshot } from '@xln/runtime/xln-api';
 
   export let hubId: string = '';
   export let hubIds: string[] = [];
@@ -27,7 +28,8 @@
   export let priceScale: number = 1;
   export let sizeDisplayScale: number = 1;
   export let preferredClickSide: BookSide = 'ask';
-  export let envStore: Readable<any> = xlnEnvironment;
+  type RuntimeEnv = Env | EnvSnapshot;
+  export let envStore: Readable<RuntimeEnv | null> = xlnEnvironment;
 
   type BookSide = 'bid' | 'ask';
   type LevelClickDetail = { side: BookSide; priceTicks: string; displayPrice: string; size: number; accountIds: string[] };
@@ -96,9 +98,11 @@
   const STREAM_RETRY_MS = 2000;
   const UI_BOOK_DEPTH = 10;
   const streamSnapshots = new Map<string, MarketSnapshotPayload>();
-  const PRICE_STEP_OPTIONS = ['0.0001', '0.001', '0.01', '0.1', '1', '10', '50', '100'] as const;
+  const NUMERIC_PRICE_STEP_OPTIONS = ['0.0001', '0.001', '0.01', '0.1', '1', '10', '50', '100'] as const;
+  const PRICE_STEP_OPTIONS = ['auto', ...NUMERIC_PRICE_STEP_OPTIONS] as const;
   const PRICE_STEP_STORAGE_KEY = 'xln.orderbook.price-step-overrides.v1';
-  let selectedPriceStep = '1';
+  let selectedPriceStep: (typeof PRICE_STEP_OPTIONS)[number] = 'auto';
+  let autoResolvedPriceStep: (typeof NUMERIC_PRICE_STEP_OPTIONS)[number] = '1';
   let priceStepOverrides: Record<string, string> = {};
 
   function normalizePairId(value: string): string | null {
@@ -206,7 +210,7 @@
     return `${hubEntityId}:${streamPairId}`;
   }
 
-  function findHubReplica(env: any, sourceHubId: string): any | null {
+  function findHubReplica(env: RuntimeEnv, sourceHubId: string): EntityReplica | null {
     for (const [key, replica] of env.eReplicas || []) {
       if (String(key || '').toLowerCase().startsWith(sourceHubId + ':')) {
         return replica;
@@ -216,7 +220,7 @@
   }
 
   function accumulateBookSide(
-    book: any,
+    book: BookState,
     sourceHubId: string,
     side: 'bid' | 'ask',
     sideSizes: Map<bigint, number>,
@@ -225,11 +229,11 @@
     rawLevels?: RawSourceLevel[],
   ) {
     const { orderQtyLots, orderOwnerIdx, orderNext, orderActive, owners, params } = book;
-    const pmin = readBookTickValue(params?.pmin, 0n);
-    const tick = readBookTickValue(params?.tick, 1n);
-    const levelHead = side === 'bid' ? (book.levelHeadBid || []) : (book.levelHeadAsk || []);
-    const bitmap = side === 'bid' ? (book.bitmapBid || []) : (book.bitmapAsk || []);
-    const levels = Number(book.levels || 0);
+    const pmin = params.pmin;
+    const tick = params.tick;
+    const levelHead = side === 'bid' ? book.levelHeadBid : book.levelHeadAsk;
+    const bitmap = side === 'bid' ? book.bitmapBid : book.bitmapAsk;
+    const levels = book.levels;
 
     let idx = side === 'bid' ? Number(book.bestBidIdx ?? -1) : Number(book.bestAskIdx ?? -1);
     let visitedLevels = 0;
@@ -238,25 +242,22 @@
 
     while (idx !== -1 && visitedLevels < maxLevelsPerBook) {
       visitedLevels += 1;
-      let headIdx = levelHead[idx];
+      let headIdx = Number(levelHead[idx] ?? -1);
       let levelSize = 0;
       const levelOwnerSet = new Set<string>();
 
       while (headIdx !== -1) {
-        if (orderActive[headIdx]) {
+        if (Boolean(orderActive[headIdx])) {
           levelSize += Number(orderQtyLots[headIdx] || 0);
           if (showOwners) {
             levelOwnerSet.add(String(owners[orderOwnerIdx[headIdx]] || '?').slice(-4));
           }
         }
-        headIdx = orderNext[headIdx];
+        headIdx = Number(orderNext[headIdx] ?? -1);
       }
 
       if (levelSize > 0) {
-        const price = toPriceTicks(pmin + (BigInt(idx) * tick));
-        if (price === null) {
-          continue;
-        }
+        const price = pmin + (BigInt(idx) * tick);
         sideSizes.set(price, (sideSizes.get(price) || 0) + levelSize);
         if (showOwners) {
           const ownersSet = sideOwners.get(price) || new Set<string>();
@@ -270,7 +271,7 @@
           price,
           size: levelSize,
           sourceId: sourceHubId,
-          owners: showOwners ? Array.from(levelOwnerSet) : undefined,
+          ...(showOwners ? { owners: Array.from(levelOwnerSet) } : {}),
         });
       }
 
@@ -325,7 +326,7 @@
         price: level.price,
         size: level.size,
         total: cumulative,
-        owners: level.owners,
+        ...(level.owners ? { owners: level.owners } : {}),
         accountIds: [level.sourceId],
       };
     });
@@ -333,7 +334,8 @@
 
   function getSelectedPriceStepTicks(): bigint {
     const scale = Number.isFinite(priceScale) && priceScale > 0 ? priceScale : 1;
-    const selected = Number(selectedPriceStep);
+    const resolvedStep = selectedPriceStep === 'auto' ? autoResolvedPriceStep : selectedPriceStep;
+    const selected = Number(resolvedStep);
     const stepDisplay = Number.isFinite(selected) && selected > 0 ? selected : 1;
     return BigInt(Math.max(1, Math.round(stepDisplay * scale)));
   }
@@ -350,7 +352,7 @@
   }
 
   function computeSmartStep(rawBestBid: bigint | null, rawBestAsk: bigint | null): string {
-    const numericSteps = PRICE_STEP_OPTIONS.map(Number);
+    const numericSteps = NUMERIC_PRICE_STEP_OPTIONS.map(Number);
     if (canonicalPairId() === '1/3') {
       return '0.0001';
     }
@@ -380,15 +382,16 @@
     }
 
     const fallback = String(smart);
-    return PRICE_STEP_OPTIONS.includes(fallback as (typeof PRICE_STEP_OPTIONS)[number]) ? fallback : '1';
+    return NUMERIC_PRICE_STEP_OPTIONS.includes(fallback as (typeof NUMERIC_PRICE_STEP_OPTIONS)[number]) ? fallback : '1';
   }
 
-  function applySmartOrSavedStep(rawBestBid: number | null, rawBestAsk: number | null): void {
+  function applySmartOrSavedStep(rawBestBid: bigint | null, rawBestAsk: bigint | null): void {
     const pair = canonicalPairId();
     const saved = priceStepOverrides[pair];
-    const next = saved && PRICE_STEP_OPTIONS.includes(saved as (typeof PRICE_STEP_OPTIONS)[number])
-      ? saved
-      : computeSmartStep(rawBestBid, rawBestAsk);
+    autoResolvedPriceStep = computeSmartStep(rawBestBid, rawBestAsk) as (typeof NUMERIC_PRICE_STEP_OPTIONS)[number];
+    const next = saved && NUMERIC_PRICE_STEP_OPTIONS.includes(saved as (typeof NUMERIC_PRICE_STEP_OPTIONS)[number])
+      ? (saved as (typeof NUMERIC_PRICE_STEP_OPTIONS)[number])
+      : 'auto';
     if (selectedPriceStep !== next) {
       selectedPriceStep = next;
     }
@@ -478,12 +481,12 @@
 
   function applyStreamOrderbookIfFresh(sources: string[], pair: string): boolean {
     if (Date.now() > streamFreshUntil) return false;
-      const bidSizes = new Map<bigint, number>();
-      const askSizes = new Map<bigint, number>();
-      const bidOwners = new Map<bigint, Set<string>>();
-      const askOwners = new Map<bigint, Set<string>>();
-      const bidSources = new Map<bigint, Set<string>>();
-      const askSources = new Map<bigint, Set<string>>();
+    const bidSizes = new Map<bigint, number>();
+    const askSizes = new Map<bigint, number>();
+    const bidOwners = new Map<bigint, Set<string>>();
+    const askOwners = new Map<bigint, Set<string>>();
+    const bidSources = new Map<bigint, Set<string>>();
+    const askSources = new Map<bigint, Set<string>>();
     const rawBidLevels: RawSourceLevel[] = [];
     const rawAskLevels: RawSourceLevel[] = [];
     let found = 0;
@@ -704,16 +707,11 @@
   function handlePriceStepChange(): void {
     const pair = canonicalPairId();
     if (normalizePairId(pair)) {
-      priceStepOverrides[pair] = selectedPriceStep;
-      savePriceStepOverrides();
-    }
-    extractOrderbook();
-  }
-
-  function resetPriceStepAuto(): void {
-    const pair = canonicalPairId();
-    if (priceStepOverrides[pair]) {
-      delete priceStepOverrides[pair];
+      if (selectedPriceStep === 'auto') {
+        delete priceStepOverrides[pair];
+      } else {
+        priceStepOverrides[pair] = selectedPriceStep;
+      }
       savePriceStepOverrides();
     }
     extractOrderbook();
@@ -837,18 +835,9 @@
         {/if}
         <select bind:value={selectedPriceStep} on:change={handlePriceStepChange}>
           {#each PRICE_STEP_OPTIONS as step}
-            <option value={step}>{step}</option>
+            <option value={step}>{step === 'auto' ? `Auto · ${autoResolvedPriceStep}` : step}</option>
           {/each}
         </select>
-        <button
-          type="button"
-          class="step-auto-btn"
-          class:active={!priceStepOverrides[canonicalPairId()]}
-          on:click={resetPriceStepAuto}
-          title="Use smart auto step for current pair"
-        >
-          Auto
-        </button>
       </label>
     </div>
   </div>
@@ -870,7 +859,7 @@
     </div>
 
     <!-- Asks (sells) - shown in reverse order, lowest ask at bottom -->
-    <div class="asks-section" on:mouseleave={() => { hoverAskDisplayIdx = -1; }}>
+    <div class="asks-section">
       {#each [...asks].reverse() as ask, i}
         <div
           class="row ask-row clickable"
@@ -881,6 +870,7 @@
           role="button"
           tabindex="0"
           on:mouseenter={() => { hoverAskDisplayIdx = i; }}
+          on:mouseleave={() => { hoverAskDisplayIdx = -1; }}
           on:click={() => emitLevelClick('ask', ask)}
           on:keydown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -940,7 +930,7 @@
     </div>
 
     <!-- Bids (buys) -->
-    <div class="bids-section" on:mouseleave={() => { hoverBidIdx = -1; }}>
+    <div class="bids-section">
       {#each bids as bid, i}
         <div
           class="row bid-row clickable"
@@ -951,6 +941,7 @@
           role="button"
           tabindex="0"
           on:mouseenter={() => { hoverBidIdx = i; }}
+          on:mouseleave={() => { hoverBidIdx = -1; }}
           on:click={() => emitLevelClick('bid', bid)}
           on:keydown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -1072,7 +1063,7 @@
   }
 
   .price-step select {
-    min-width: 80px;
+    min-width: 110px;
     height: 28px;
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1089,30 +1080,6 @@
   .price-step select:focus-visible {
     border-color: rgba(251, 191, 36, 0.85);
     box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.15);
-  }
-
-  .step-auto-btn {
-    height: 28px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: #111217;
-    color: #a1a1aa;
-    font-family: inherit;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 0 8px;
-    cursor: pointer;
-  }
-
-  .step-auto-btn.active {
-    border-color: rgba(251, 191, 36, 0.75);
-    color: #fbbf24;
-    background: rgba(251, 191, 36, 0.1);
-  }
-
-  .step-auto-btn:focus-visible {
-    outline: 1px solid rgba(251, 191, 36, 0.8);
-    outline-offset: 2px;
   }
 
   .spread-row {
@@ -1217,8 +1184,7 @@
     background: linear-gradient(90deg, rgba(255, 255, 255, 0.12), transparent);
   }
 
-  .price-step select option,
-  .price-step select optgroup {
+  .price-step select option {
     background: #0f1117;
     color: #f3f4f6;
   }
@@ -1429,11 +1395,7 @@
     }
 
     .price-step select {
-      min-width: 64px;
-      height: 28px;
-    }
-
-    .step-auto-btn {
+      min-width: 100px;
       height: 28px;
     }
 
