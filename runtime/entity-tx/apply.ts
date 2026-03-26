@@ -805,6 +805,11 @@ export const applyEntityTx = async (
       return await handleDepositCollateral(entityState, entityTx, env.timestamp);
     }
 
+    if (entityTx.type === 'external_to_reserve') {
+      const { handleExternalToReserve } = await import('./handlers/external-to-reserve');
+      return await handleExternalToReserve(entityState, entityTx);
+    }
+
     if (entityTx.type === 'reserve_to_reserve') {
       const { handleReserveToReserve } = await import('./handlers/reserve-to-reserve');
       return await handleReserveToReserve(entityState, entityTx);

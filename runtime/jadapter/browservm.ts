@@ -323,7 +323,7 @@ export async function createBrowserVMAdapter(
     },
 
     // === High-level J-tx submission ===
-    async submitTx(jTx: JTx, options: { env: any; signerId?: string; timestamp?: number }): Promise<JSubmitResult> {
+    async submitTx(jTx: JTx, options: { env: any; signerId?: string; signerPrivateKey?: Uint8Array; timestamp?: number }): Promise<JSubmitResult> {
       const { env, signerId, timestamp } = options;
       const ts = timestamp ?? env.timestamp ?? 0;
 

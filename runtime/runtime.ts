@@ -3453,9 +3453,12 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
             );
           };
           try {
+            const submitSignerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId : undefined;
+            const submitSignerPrivateKey = submitSignerId ? getCachedSignerPrivateKey(submitSignerId) : null;
             const result = await jAdapter.submitTx(jTx, {
               env,
-              signerId: jTx.data?.signerId,
+              ...(submitSignerId ? { signerId: submitSignerId } : {}),
+              ...(submitSignerPrivateKey ? { signerPrivateKey: submitSignerPrivateKey } : {}),
               timestamp: jTx.timestamp ?? env.timestamp,
             });
 

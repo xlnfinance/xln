@@ -646,6 +646,18 @@ export type EntityTx =
       };
     }
   | {
+      // External-token-to-reserve: queue ERC20 deposit into entity jBatch.
+      // On broadcast, the batch must be submitted by the entity signer EOA.
+      type: 'external_to_reserve';
+      data: {
+        contractAddress: string;
+        tokenType?: number;
+        externalTokenId?: bigint;
+        internalTokenId?: number;
+        amount: bigint;
+      };
+    }
+  | {
       type: 'deposit_collateral';
       data: {
         counterpartyId: string; // Which account to add collateral to
