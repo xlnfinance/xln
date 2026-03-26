@@ -1150,11 +1150,14 @@ export async function createRpcAdapter(
 
       console.log(`📤 [JAdapter:rpc] submitTx type=${jTx.type} entity=${jTx.entityId.slice(-4)}`);
 
-      if (jTx.type === 'batch' && jTx.data?.batch) {
+      if (jTx.type === 'batch') {
         const { encodeJBatch, computeBatchHankoHash, isBatchEmpty, getBatchSize } = await import('../j-batch');
         const { normalizeEntityId } = await import('../entity-id-utils');
+        const batchData = jTx.data;
+        const batch = batchData.batch;
+        const effectiveTimestamp = typeof timestamp === 'number' ? timestamp : env.timestamp;
 
-        if (isBatchEmpty(jTx.data.batch)) {
+        if (isBatchEmpty(batch)) {
           console.log(`📦 [JAdapter:rpc] Empty batch, skipping`);
           return { success: true };
         }
@@ -1162,8 +1165,8 @@ export async function createRpcAdapter(
         const normalizedId = normalizeEntityId(jTx.entityId);
         const preflightIssues = preflightBatchForE2(
           normalizedId,
-          jTx.data.batch,
-          Math.floor(Number(timestamp ?? env?.timestamp ?? 0) / 1000),
+          batch,
+          Math.floor(Number(effectiveTimestamp) / 1000),
         );
         if (preflightIssues.length > 0) {
           console.warn(
@@ -1172,11 +1175,11 @@ export async function createRpcAdapter(
         }
 
         // Validate settlement signatures + entityProvider
-        for (const settlement of jTx.data.batch.settlements ?? []) {
+        for (const settlement of batch.settlements) {
           if (!settlement.entityProvider || settlement.entityProvider === '0x0000000000000000000000000000000000000000') {
             settlement.entityProvider = await getLiveEntityProviderAddress();
           }
-          if (settlement.diffs?.length > 0 && (!settlement.sig || settlement.sig === '0x')) {
+          if (settlement.diffs.length > 0 && settlement.sig === '0x') {
             return { success: false, error: `Settlement missing hanko sig` };
           }
         }
@@ -1189,15 +1192,19 @@ export async function createRpcAdapter(
           let hankoData: string;
           let nextNonce: bigint;
 
-          if (jTx.data.hankoSignature && jTx.data.encodedBatch && jTx.data.entityNonce) {
+          if (
+            batchData.hankoSignature &&
+            batchData.encodedBatch &&
+            typeof batchData.entityNonce === 'number'
+          ) {
             // Entity consensus already signed — use pre-provided hanko
-            encodedBatch = jTx.data.encodedBatch;
-            hankoData = jTx.data.hankoSignature;
-            nextNonce = BigInt(jTx.data.entityNonce);
+            encodedBatch = batchData.encodedBatch;
+            hankoData = batchData.hankoSignature;
+            nextNonce = BigInt(batchData.entityNonce);
             console.log(`🔐 [JAdapter:rpc] Using consensus hanko: nonce=${nextNonce}`);
           } else {
             // Fallback: single-signer sign locally
-            const sid = signerId ?? jTx.data.signerId;
+            const sid = signerId || batchData.signerId;
             if (!sid) {
               return { success: false, error: `Missing signerId for batch from ${jTx.entityId.slice(-4)}` };
             }
@@ -1213,8 +1220,8 @@ export async function createRpcAdapter(
               };
             }
 
-            encodedBatch = encodeJBatch(jTx.data.batch);
-            const currentNonce = await depository['entityNonces']?.(normalizedId) ?? 0n;
+            encodedBatch = encodeJBatch(batch);
+            const currentNonce = await depository.entityNonces(normalizedId);
             nextNonce = BigInt(currentNonce) + 1n;
             const batchHash = computeBatchHankoHash(BigInt(config.chainId), depositoryAddr, encodedBatch, nextNonce);
 
@@ -1228,9 +1235,9 @@ export async function createRpcAdapter(
           }
 
           let disputeStartDebug: Array<Record<string, unknown>> = [];
-          if ((jTx.data.batch.disputeStarts?.length || 0) > 0) {
+          if (batch.disputeStarts.length > 0) {
             const { inspectHankoForHash } = await import('../hanko/signing');
-            disputeStartDebug = await Promise.all(jTx.data.batch.disputeStarts.map(async (start) => {
+            disputeStartDebug = await Promise.all(batch.disputeStarts.map(async (start) => {
               const accountKey = computeAccountKey(normalizedId, start.counterentity);
               const disputeHash = ethers.keccak256(
                 ethers.AbiCoder.defaultAbiCoder().encode(
@@ -1248,10 +1255,10 @@ export async function createRpcAdapter(
                 counterentity: start.counterentity,
                 nonce: start.nonce,
                 proofbodyHash: start.proofbodyHash,
-                initialArgumentsBytes: Math.max((start.initialArguments?.length || 2) - 2, 0) / 2,
+                initialArgumentsBytes: Math.max(start.initialArguments.length - 2, 0) / 2,
                 disputeHash,
                 accountKey,
-                sigBytes: Math.max((start.sig?.length || 2) - 2, 0) / 2,
+                sigBytes: Math.max(start.sig.length - 2, 0) / 2,
                 recoveredAddresses: hankoDebug.recoveredAddresses,
                 matchingClaim: matchingClaim
                   ? {
@@ -1272,13 +1279,13 @@ export async function createRpcAdapter(
           }
 
           try {
-            console.log(`📦 [JAdapter:rpc] processBatch (${getBatchSize(jTx.data.batch)} ops) nonce=${nextNonce}`);
+            console.log(`📦 [JAdapter:rpc] processBatch (${getBatchSize(batch)} ops) nonce=${nextNonce}`);
             const gasLimit = await estimateGasWithHeadroom(
               () => depository.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
               DEFAULT_PROCESS_BATCH_GAS,
             );
             const resolvedFeeOverrides = await buildFeeOverrides();
-            const requestedFeeOverrides = jTx.data.feeOverrides;
+            const requestedFeeOverrides = batchData.feeOverrides;
             if (requestedFeeOverrides?.maxFeePerGasWei) {
               resolvedFeeOverrides.maxFeePerGas = BigInt(requestedFeeOverrides.maxFeePerGasWei);
             }
@@ -1396,7 +1403,7 @@ export async function createRpcAdapter(
       if (jTx.type === 'mint') {
         const entityId = String(jTx.data.entityId || jTx.entityId || '');
         const tokenId = Number(jTx.data.tokenId);
-        const amount = BigInt(jTx.data.amount ?? 0n);
+        const amount = jTx.data.amount;
         if (!entityId || !Number.isFinite(tokenId) || amount <= 0n) {
           return { success: false, error: 'Invalid mint payload' };
         }
