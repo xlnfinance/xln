@@ -10,6 +10,8 @@
   import { onMount, onDestroy, mount } from 'svelte';
   import { writable, get } from 'svelte/store';
   import { formatUnits } from 'ethers';
+  import type { Env } from '@xln/runtime/xln-api';
+  import type { EnvSnapshot } from '$types';
   import { toasts } from '$lib/stores/toastStore';
   import { paymentSpotlight } from '$lib/stores/paymentSpotlightStore';
   import { DockviewComponent } from 'dockview';
@@ -33,7 +35,7 @@
     commandPaletteOpen = false;
 
     if (type === 'navigate') {
-      const tab = String(args.tab || '');
+      const tab = String(args['tab'] || '');
       if (tab) panelBridge.emit('settings:update', { key: 'activeTab', value: tab });
     } else if (type === 'pay') {
       panelBridge.emit('settings:update', { key: 'activeTab', value: 'accounts' });
@@ -44,7 +46,7 @@
     } else if (type === 'open') {
       panelBridge.emit('settings:update', { key: 'activeTab', value: 'accounts' });
     } else if (type === 'explore') {
-      const entityId = String(args.entityId || '');
+      const entityId = String(args['entityId'] || '');
       if (entityId) panelBridge.emit('openEntityOperations', { entityId, entityName: '' });
     }
   }
@@ -87,6 +89,11 @@
     updatePanelsForMode(userMode);
   }
 
+  $: if (typeof document !== 'undefined') {
+    document.documentElement.classList.toggle('xln-user-mode', userMode);
+    document.body.classList.toggle('xln-user-mode', userMode);
+  }
+
   // TimeMachine draggable state
   let timeMachinePosition: 'bottom' | 'top' | 'left' | 'right' = 'bottom';
   let collapsed = false;
@@ -94,9 +101,21 @@
   // Embed mode: hide sidebar by default, show on toggle
   let showSidebarInEmbed = false;
 
+  type RuntimeLogEntry = {
+    id?: number;
+    level?: string;
+    message?: string;
+    data?: Record<string, unknown>;
+  };
+  type EntityPanelSeed = { entityId: string; entityName: string; signerId: string; action?: 'r2r' | 'r2c' };
+  type DockviewInitParams = { api: { id: string; close?: () => void } };
+  type DockviewWindow = Window & { __dockview_instance?: DockviewComponent };
+  type ActivePanelRef = { id?: string; api?: { id?: string } } | undefined;
+  type MountedComponent = Record<string, unknown> | null;
+
   // Isolated XLN environment for this View instance (passed to ALL panels + TimeMachine)
-  const localEnvStore = writable<any>(null);
-  const localHistoryStore = writable<any[]>([]);
+  const localEnvStore = writable<Env | null>(null);
+  const localHistoryStore = writable<EnvSnapshot[]>([]);
   const localTimeIndex = writable<number>(0);  // real frame index, auto-advanced when isLive
   const localIsLive = writable<boolean>(true);
   const graphInitSignal = writable<boolean>(embedMode);
@@ -126,7 +145,7 @@
     }
   };
 
-  const shouldSurfaceLogAsToast = (entry: any): boolean => {
+  const shouldSurfaceLogAsToast = (entry: RuntimeLogEntry): boolean => {
     const level = String(entry?.level || '').toLowerCase();
     const message = String(entry?.message || '').toLowerCase();
     if (level === 'error') return true;
@@ -151,32 +170,32 @@
     const isInitialPass = lastSeen < 0;
     let newLastSeen = lastSeen;
 
-    for (const entry of env.frameLogs as any[]) {
+    for (const entry of env.frameLogs as RuntimeLogEntry[]) {
       const id = Number(entry?.id);
       if (!Number.isFinite(id) || id <= lastSeen) continue;
       if (id > newLastSeen) newLastSeen = id;
       const message = String(entry?.message || '').trim();
       const entryData = entry?.data || {};
       if (!isInitialPass && (message === 'HtlcReceived' || message === 'HtlcFinalized')) {
-        const hashlock = String(entryData.hashlock || id);
-        const dedupeKey = `${runtimeKey}:${message}:${hashlock}`;
-        const now = Date.now();
-        const lastShownAt = lastPaymentSpotlightAtByKey.get(dedupeKey) ?? 0;
-        if (now - lastShownAt >= PAYMENT_SPOTLIGHT_COOLDOWN_MS) {
-          const isSender = message === 'HtlcFinalized';
-          const elapsedMsRaw = Number(entryData.finalizedInMs ?? entryData.elapsedMs ?? 0);
-          const elapsedMs = Number.isFinite(elapsedMsRaw) && elapsedMsRaw > 0 ? Math.max(1, Math.floor(elapsedMsRaw)) : null;
-          lastPaymentSpotlightAtByKey.set(dedupeKey, now);
-          paymentSpotlight.show({
-            kicker: isSender ? 'Payment Sent' : 'Payment Received',
-            title: elapsedMs
-              ? `${isSender ? 'Paid' : 'Received'} in ${elapsedMs}ms`
-              : (isSender ? 'Paid' : 'Received'),
-            amountLine: formatSpotlightAmount(entryData.tokenId, entryData.amount),
-            ...(String(entryData.description || '').trim() ? { detail: String(entryData.description || '').trim() } : {}),
-            duration: 4200,
-          });
-        }
+          const hashlock = String(entryData['hashlock'] || id);
+          const dedupeKey = `${runtimeKey}:${message}:${hashlock}`;
+          const now = Date.now();
+          const lastShownAt = lastPaymentSpotlightAtByKey.get(dedupeKey) ?? 0;
+          if (now - lastShownAt >= PAYMENT_SPOTLIGHT_COOLDOWN_MS) {
+            const isSender = message === 'HtlcFinalized';
+            const elapsedMsRaw = Number(entryData['finalizedInMs'] ?? entryData['elapsedMs'] ?? 0);
+            const elapsedMs = Number.isFinite(elapsedMsRaw) && elapsedMsRaw > 0 ? Math.max(1, Math.floor(elapsedMsRaw)) : null;
+            lastPaymentSpotlightAtByKey.set(dedupeKey, now);
+            paymentSpotlight.show({
+              kicker: isSender ? 'Payment Sent' : 'Payment Received',
+              title: elapsedMs
+                ? `${isSender ? 'Paid' : 'Received'} in ${elapsedMs}ms`
+                : (isSender ? 'Paid' : 'Received'),
+              amountLine: formatSpotlightAmount(entryData['tokenId'], entryData['amount']),
+              ...(String(entryData['description'] || '').trim() ? { detail: String(entryData['description'] || '').trim() } : {}),
+              duration: 4200,
+            });
+          }
       }
       if (!shouldSurfaceLogAsToast(entry)) continue;
 
@@ -227,16 +246,18 @@
   let unsubActiveRuntime: (() => void) | null = null;
 
   // Pending entity data - bypasses Dockview params timing
-  const pendingEntityData = new Map<string, {entityId: string, entityName: string, signerId: string, action?: 'r2r' | 'r2c'}>();
+  const pendingEntityData = new Map<string, EntityPanelSeed>();
 
   const resolveEntityPanelData = (panelId: string) => {
     if (!panelId.startsWith('entity-')) return null;
     const entityId = panelId.slice('entity-'.length);
     const env = get(localEnvStore);
-    const entries = env?.eReplicas ? Array.from(env.eReplicas.entries()) : [];
-    const entry = entries.find((e: any) => e[0].startsWith(`${entityId}:`));
+    const entries = env?.eReplicas
+      ? Array.from(env.eReplicas.entries()) as Array<[string, { name?: string }]>
+      : [];
+    const entry = entries.find(([replicaKey]) => replicaKey.startsWith(`${entityId}:`));
     if (!entry) return null;
-    const [replicaKey, replica] = entry as [string, any];
+    const [replicaKey, replica] = entry;
     const signerId = replicaKey.split(':')[1] || entityId;
     return {
       entityId,
@@ -278,9 +299,9 @@
         env.quietRuntimeLogs = true;
 
         // Restore jurisdictions + entities
-        env.jReplicas = urlImport.state.x;
+        env.jReplicas = urlImport.state.x as unknown as typeof env.jReplicas;
         env.activeJurisdiction = urlImport.state.a;
-        env.eReplicas = urlImport.state.e;
+        env.eReplicas = urlImport.state.e as unknown as typeof env.eReplicas;
 
         console.log('[View] ✅ Imported:', {
           jReplicas: env.jReplicas.size,
@@ -298,7 +319,7 @@
         }
       }
 
-      const registerEnvChanges = (envToRegister: any) => {
+      const registerEnvChanges = (envToRegister: Env | null) => {
         if (!envToRegister || !XLN.registerEnvChangeCallback) return;
         const runtimeKey = envToRegister.runtimeId || null;
         if (envChangeRegisteredFor === runtimeKey) return;
@@ -306,7 +327,7 @@
           unregisterEnvChange();
           unregisterEnvChange = null;
         }
-        unregisterEnvChange = XLN.registerEnvChangeCallback(envToRegister, (nextEnv: any) => {
+        unregisterEnvChange = XLN.registerEnvChangeCallback(envToRegister, (nextEnv: Env) => {
           localEnvStore.set(nextEnv);
           localHistoryStore.set(nextEnv.history || []);
         });
@@ -377,7 +398,7 @@
         div.style.width = '100%';
         div.style.height = '100%';
 
-        let component: any;
+        let component: MountedComponent = null;
 
         // Mount Svelte 5 components - pass SAME shared stores to ALL panels
         if (options.name === 'graph3d') {
@@ -463,7 +484,7 @@
         // Return Dockview-compatible API
         return {
           element: div,
-          init: (parameters: any) => {
+          init: (parameters: DockviewInitParams) => {
             // ENTITY PANEL: Mount in init() with data from Map
             if (options.name === 'entity-panel') {
               const panelId = parameters.api.id;
@@ -510,7 +531,7 @@
 
     // Expose dockview to window for Settings panel access
     if (typeof window !== 'undefined') {
-      (window as any).__dockview_instance = dockview;
+      (window as DockviewWindow).__dockview_instance = dockview;
     }
 
     // Try to restore saved layout from localStorage
@@ -530,7 +551,7 @@
     }
 
     // Dev mode: Full layout (user mode already returned early)
-    const ensurePanel = (config: any) => {
+    const ensurePanel = (config: Parameters<DockviewComponent['addPanel']>[0]) => {
       const existing = dockview.getPanel(config.id);
       if (existing) return existing;
       return dockview.addPanel(config);
@@ -643,8 +664,7 @@
       }, 100);
     }
 
-    activePanelDisposable = dockview.onDidActivePanelChange((event: any) => {
-      const panel = event?.panel ?? event;
+    activePanelDisposable = dockview.onDidActivePanelChange((panel: ActivePanelRef) => {
       const panelId = panel?.id || panel?.api?.id;
       if (panelId === 'graph3d') {
         graphInitSignal.set(true);
@@ -656,7 +676,7 @@
     // which doesn't exist in Svelte 5. Need to implement custom serialization.
     // For now: Use default layout on every reload.
 
-    // TODO: Custom layout serialization that doesn't use fromJSON/toJSON
+    // Custom layout serialization should avoid fromJSON/toJSON in Svelte 5.
     // Save panel IDs, positions, sizes manually and recreate on mount
 
     // Auto-save layout on ANY change (debounced)
@@ -689,7 +709,7 @@
       if (existingPanel) {
         console.log('[View] Focusing existing entity panel:', entityId);
         existingPanel.api.setActive();
-        // TODO: If action passed, switch tab in existing panel
+        // Existing panel focus is handled here; action routing can be layered on later.
         return;
       }
 
@@ -782,6 +802,10 @@
   }
 
   onDestroy(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.remove('xln-user-mode');
+      document.body.classList.remove('xln-user-mode');
+    }
     if (unregisterEnvChange) {
       unregisterEnvChange();
       unregisterEnvChange = null;
@@ -898,7 +922,7 @@
     height: 100%;
     overflow: visible; /* Dropdowns must overlay - scroll is in panel-content */
     padding-bottom: 0;
-    background: var(--theme-bg-gradient, #0a0a0a);
+    background: transparent;
   }
 
   .user-mode-container.hidden {
@@ -935,16 +959,18 @@
 
   .view-wrapper.user-mode {
     display: flex;
-    height: 100dvh;
+    height: auto;
     min-height: 100dvh;
+    overflow: visible;
   }
 
   .view-wrapper.user-mode .user-mode-container {
     display: block;
     flex: 1;
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
+    height: auto;
+    min-height: 100%;
+    min-height: 100dvh;
+    overflow: visible;
   }
 
   .view-wrapper.embed-mode :global(.dockview-tabs-container),

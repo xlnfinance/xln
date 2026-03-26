@@ -402,7 +402,7 @@
   }
 
   .delta-summary.compact .token-symbol {
-    font-size: clamp(17px, 1vw, 19px);
+    font-size: clamp(15px, 1vw, 18px);
     line-height: 1;
     letter-spacing: -0.018em;
   }
@@ -449,7 +449,7 @@
   }
 
   .compact-out-value {
-    font-size: clamp(15px, 0.9vw, 17px);
+    font-size: clamp(14px, 0.9vw, 16px);
     line-height: 1;
     font-weight: 650;
     letter-spacing: -0.02em;
@@ -482,7 +482,7 @@
   }
 
   .compact-in-value {
-    font-size: clamp(15px, 0.9vw, 17px);
+    font-size: clamp(14px, 0.9vw, 16px);
     line-height: 1;
     font-weight: 650;
     letter-spacing: -0.02em;
@@ -565,7 +565,56 @@
 
     .compact-out-value,
     .compact-in-value {
-      font-size: 19px;
+      font-size: 16px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .compact-metrics {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+    }
+
+    .compact-out,
+    .compact-in {
+      width: 100%;
+      margin: 0;
+      justify-content: space-between;
+      text-align: left;
+    }
+
+    .compact-in {
+      justify-content: flex-start;
+    }
+
+    .compact-out-value,
+    .compact-in-value {
+      font-size: 15px;
+      flex-wrap: wrap;
+      gap: 4px;
+      justify-content: flex-start;
+    }
+
+    .inbound-label {
+      display: inline-flex;
+      font-size: 9px;
+    }
+
+    .delta-summary.compact .token-icon {
+      width: 16px;
+      height: 16px;
+      font-size: 9px;
+    }
+
+    .delta-summary.compact .token-name {
+      font-size: 10px;
+    }
+
+    .summary-action-inline {
+      font-size: 6px;
+      padding: 1px 3px;
+      margin-left: 3px;
     }
   }
 

@@ -48,6 +48,15 @@
     return getGossipProfile(id, activeEnv);
   }
 
+  function isAccountLeftPerspective(ownerEntityId: string, currentAccount: AccountMachine): boolean {
+    const owner = String(ownerEntityId || '').trim().toLowerCase();
+    const left = String(currentAccount.leftEntity || '').trim().toLowerCase();
+    const right = String(currentAccount.rightEntity || '').trim().toLowerCase();
+    if (owner === left) return true;
+    if (owner === right) return false;
+    throw new Error(`Account perspective mismatch: owner=${ownerEntityId} left=${currentAccount.leftEntity} right=${currentAccount.rightEntity}`);
+  }
+
   $: counterpartyProfile = getProfile(counterpartyId);
   $: counterpartyName = resolveEntityName(counterpartyId, activeEnv);
 
@@ -76,7 +85,7 @@
                totalCollateralUsdMicros: 0n, totalDebtUsdMicros: 0n };
     }
 
-    const isLeft = entityId < counterpartyId;
+    const isLeft = isAccountLeftPerspective(entityId, account);
     let outCap = 0n, inCap = 0n;
     let outCredit = 0n, outColl = 0n, outDebt = 0n;
     let inCredit = 0n, inColl = 0n, inDebt = 0n;
@@ -165,7 +174,7 @@
   $: accountDeltaViewMode = $settings.accountDeltaViewMode ?? 'per-token';
   $: tokenSummaries = (() => {
     if (!account.deltas || account.deltas.size === 0 || !activeXlnFunctions) return [];
-    const isLeft = entityId < counterpartyId;
+    const isLeft = isAccountLeftPerspective(entityId, account);
     const rows: Array<{
       tokenId: number;
       symbol: string;
@@ -178,6 +187,7 @@
       inTotal: bigint;
       pendingOutDebtMode: 'none' | 'pending' | 'settling';
       visualScale: ReturnType<typeof buildTokenVisualScale>;
+      actionLabel?: string;
     }> = [];
     for (const [tokenId, delta] of account.deltas.entries()) {
       const derived = activeXlnFunctions.deriveDelta(delta, isLeft);
@@ -294,7 +304,7 @@
   $: hasPendingBatch = account.settlementWorkspace?.status === 'submitted';
 
   $: workspace = account.settlementWorkspace;
-  $: iAmLeft = entityId < counterpartyId;
+  $: iAmLeft = isAccountLeftPerspective(entityId, account);
   $: disputeStartedByLeft = Boolean(account.activeDispute?.startedByLeft);
   $: disputeRole = hasActiveDispute ? (disputeStartedByLeft === iAmLeft ? 'starter' : 'counterparty') : '';
   $: iAmProposer = workspace ? workspace.lastModifiedByLeft === iAmLeft : false;
@@ -543,10 +553,10 @@
   .account-preview {
     --delta-col-w: clamp(136px, 14vw, 192px);
     --delta-sep-w: 12px;
-    --account-preview-bg: color-mix(in srgb, var(--theme-surface, #18181b) 94%, transparent);
-    --account-preview-bg-hover: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 96%, transparent);
-    --account-preview-border: color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
-    --account-preview-border-strong: color-mix(in srgb, var(--theme-border, #27272a) 88%, white 12%);
+    --account-preview-bg: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent);
+    --account-preview-bg-hover: color-mix(in srgb, var(--theme-surface-hover, var(--theme-card-bg, #1c1c20)) 96%, transparent);
+    --account-preview-border: color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 88%, transparent);
+    --account-preview-border-strong: color-mix(in srgb, var(--theme-card-hover-border, var(--theme-border, #27272a)) 84%, transparent);
     --account-preview-text: var(--theme-text-primary, #e4e4e7);
     --account-preview-text-secondary: var(--theme-text-secondary, #a1a1aa);
     --account-preview-text-muted: var(--theme-text-muted, #71717a);
@@ -554,10 +564,12 @@
     --account-preview-credit: var(--theme-credit, #4ade80);
     --account-preview-debit: var(--theme-debit, #f43f5e);
     background: var(--account-preview-bg);
-    border: 1px solid var(--account-preview-border);
-    border-radius: 6px;
-    padding: 14px 16px 12px;
+    border: 1px solid color-mix(in srgb, var(--account-preview-border) 56%, transparent);
+    border-radius: 14px;
+    padding: 12px 13px 10px;
     transition: all 0.15s ease;
+    box-shadow: 0 6px 14px color-mix(in srgb, var(--theme-background, #09090b) 4%, transparent);
+    max-width: 100%;
   }
   .account-preview:hover {
     border-color: var(--account-preview-border-strong);
@@ -573,15 +585,15 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     gap: 10px;
   }
   .entity-col { min-width: 0; flex: 1; }
   .entity-col :global(.entity-identity) {
-    gap: 12px;
+    gap: 10px;
   }
   .entity-col :global(.name) {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 700;
     color: var(--account-preview-text);
     line-height: 1.15;
@@ -635,7 +647,7 @@
     border-radius: 6px;
     transition: background 0.15s ease;
   }
-  .status-indicator:hover { background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 72%, transparent); }
+  .status-indicator:hover { background: color-mix(in srgb, var(--theme-surface-hover, var(--theme-card-bg, #1c1c20)) 88%, transparent); }
 
   .status-dot-inner {
     width: 8px;
@@ -645,7 +657,7 @@
   }
   .status-indicator.green .status-dot-inner { background: var(--account-preview-credit); box-shadow: 0 0 6px color-mix(in srgb, var(--account-preview-credit) 50%, transparent); }
   .status-indicator.amber .status-dot-inner { background: var(--account-preview-accent); box-shadow: 0 0 6px color-mix(in srgb, var(--account-preview-accent) 50%, transparent); animation: pulse 2s infinite; }
-  .status-indicator.orange .status-dot-inner { background: #f97316; box-shadow: 0 0 6px rgba(249, 115, 22, 0.4); }
+  .status-indicator.orange .status-dot-inner { background: color-mix(in srgb, var(--account-preview-accent) 74%, #f97316); box-shadow: 0 0 6px color-mix(in srgb, var(--account-preview-accent) 34%, transparent); }
   .status-indicator.red .status-dot-inner { background: var(--account-preview-debit); box-shadow: 0 0 6px color-mix(in srgb, var(--account-preview-debit) 50%, transparent); animation: pulse 1.5s infinite; }
   .status-indicator.gray .status-dot-inner { background: color-mix(in srgb, var(--account-preview-text-muted) 58%, transparent); }
 
@@ -693,7 +705,7 @@
     padding: 10px 12px;
     border-radius: 10px;
     border: 1px solid color-mix(in srgb, var(--account-preview-border) 90%, transparent);
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 96%, transparent);
+    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 100%, transparent);
     box-shadow: 0 18px 48px color-mix(in srgb, var(--theme-background, #09090b) 32%, transparent);
     display: none;
     z-index: 12;
@@ -804,8 +816,8 @@
     margin-top: 8px;
     padding: 9px 0;
     border-radius: 8px;
-    border: 2px solid #dc2626;
-    background: #dc2626;
+    border: 2px solid color-mix(in srgb, var(--account-preview-debit) 78%, transparent);
+    background: color-mix(in srgb, var(--account-preview-debit) 84%, transparent);
     color: #ffffff;
     font-size: 11px;
     font-weight: 600;
@@ -817,42 +829,42 @@
     box-shadow: 0 0 12px rgba(220, 38, 38, 0.4);
   }
   .status-dot-wrap .consensus-popover .popover-dispute-btn:hover {
-    background: #b91c1c;
-    border-color: #b91c1c;
-    box-shadow: 0 0 18px rgba(220, 38, 38, 0.6);
+    background: color-mix(in srgb, var(--account-preview-debit) 92%, black 8%);
+    border-color: color-mix(in srgb, var(--account-preview-debit) 92%, black 8%);
+    box-shadow: 0 0 18px color-mix(in srgb, var(--account-preview-debit) 44%, transparent);
   }
 
   .locks-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
     gap: 8px;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
 
   .flow-chip {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    border: 1px solid color-mix(in srgb, var(--account-preview-border) 74%, transparent);
-    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 78%, transparent);
+    padding: 7px 9px;
+    border-radius: 9px;
+    border: 1px solid color-mix(in srgb, var(--account-preview-border) 56%, transparent);
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 62%, transparent);
     min-width: 0;
   }
 
   .flow-chip.incoming {
-    border-color: rgba(16, 185, 129, 0.24);
-    background: rgba(6, 78, 59, 0.18);
+    border-color: color-mix(in srgb, var(--account-preview-credit) 30%, transparent);
+    background: color-mix(in srgb, var(--account-preview-credit) 12%, transparent);
   }
 
   .flow-chip.outgoing {
-    border-color: rgba(244, 114, 182, 0.2);
-    background: rgba(76, 5, 25, 0.18);
+    border-color: color-mix(in srgb, var(--account-preview-debit) 24%, transparent);
+    background: color-mix(in srgb, var(--account-preview-debit) 10%, transparent);
   }
 
   .flow-chip.more {
     border-style: dashed;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 58%, transparent);
+    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 92%, transparent);
   }
 
   .flow-chip-head {
@@ -910,9 +922,9 @@
   }
 
   .lock-badge.outgoing {
-    color: #fda4af;
-    background: rgba(244, 63, 94, 0.1);
-    border-color: rgba(244, 63, 94, 0.22);
+    color: color-mix(in srgb, var(--account-preview-debit) 72%, white 28%);
+    background: color-mix(in srgb, var(--account-preview-debit) 10%, transparent);
+    border-color: color-mix(in srgb, var(--account-preview-debit) 24%, transparent);
   }
 
   .lock-badge.empty {
@@ -976,5 +988,75 @@
   .btn-sign-settle:hover {
     background: color-mix(in srgb, var(--account-preview-accent) 26%, transparent);
     border-color: color-mix(in srgb, var(--account-preview-accent) 55%, transparent);
+  }
+
+  @media (max-width: 720px) {
+    .account-preview {
+      padding: 10px 11px;
+      border-radius: 12px;
+    }
+
+    .row-header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .entity-col :global(.entity-identity) {
+      gap: 9px;
+    }
+
+    .entity-col :global(.name) {
+      font-size: 15px;
+    }
+
+    .entity-col :global(.address) {
+      font-size: 11px;
+    }
+
+    .status-col {
+      width: 100%;
+      justify-content: flex-start;
+      gap: 6px;
+    }
+
+    .status-indicator {
+      padding: 1px 2px;
+    }
+
+    .consensus-popover {
+      left: 0;
+      right: auto;
+      width: min(320px, calc(100vw - 32px));
+    }
+
+    .locks-row {
+      grid-template-columns: 1fr;
+    }
+
+    .flow-chip-head {
+      flex-wrap: wrap;
+      gap: 4px 6px;
+    }
+
+    .flow-chip-amount {
+      margin-left: 0;
+    }
+
+    .settle-row {
+      flex-wrap: wrap;
+      justify-content: space-between;
+    }
+
+    .account-preview :global(.delta-summary.compact) {
+      gap: 6px;
+    }
+
+    .account-preview :global(.summary-action-inline) {
+      font-size: 6px;
+      padding: 1px 3px;
+      margin-left: 4px;
+    }
   }
 </style>

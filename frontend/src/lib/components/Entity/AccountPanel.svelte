@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AccountMachine, AccountTx, EntityReplica, Tab } from '$lib/types/ui';
+  import type { AccountMachine, AccountTx, EntityReplica } from '$lib/types/ui';
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { p2pState, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { settings } from '../../stores/settingsStore';
@@ -11,7 +11,6 @@
   export let counterpartyId: string;
   export let entityId: string;
   export let replica: EntityReplica | null = null;
-  export let tab: Tab | null = null;
 
   const dispatch = createEventDispatcher();
 
@@ -42,7 +41,16 @@
     tone?: 'default' | 'good' | 'warn' | 'danger';
   };
 
-  $: iAmLeft = entityId < counterpartyId;
+  function isAccountLeftPerspective(ownerEntityId: string, currentAccount: AccountMachine): boolean {
+    const owner = String(ownerEntityId || '').trim().toLowerCase();
+    const left = String(currentAccount.leftEntity || '').trim().toLowerCase();
+    const right = String(currentAccount.rightEntity || '').trim().toLowerCase();
+    if (owner === left) return true;
+    if (owner === right) return false;
+    throw new Error(`Account perspective mismatch: owner=${ownerEntityId} left=${currentAccount.leftEntity} right=${currentAccount.rightEntity}`);
+  }
+
+  $: iAmLeft = isAccountLeftPerspective(entityId, account);
   $: activeDispute = account.activeDispute ?? null;
   $: disputeTimeoutBlock = Number(activeDispute?.disputeTimeout ?? 0);
   $: currentJHeight = Math.max(
@@ -119,7 +127,7 @@
         statusLabel: pendingIsYou !== undefined
           ? (pendingIsYou ? `You (${iAmLeft ? 'L' : 'R'})` : `Counterparty (${iAmLeft ? 'R' : 'L'})`)
           : 'Draft',
-        byLeft: pendingByLeft,
+        ...(pendingByLeft !== undefined ? { byLeft: pendingByLeft } : {}),
         txs: Array.isArray(account.pendingFrame.accountTxs) ? account.pendingFrame.accountTxs : [],
       });
     }
@@ -145,7 +153,7 @@
         statusLabel: isYou !== undefined
           ? (isYou ? `You (${iAmLeft ? 'L' : 'R'})` : `Counterparty (${iAmLeft ? 'R' : 'L'})`)
           : 'Confirmed',
-        byLeft: fByLeft,
+        ...(fByLeft !== undefined ? { byLeft: fByLeft } : {}),
         txs: Array.isArray(frame.accountTxs) ? frame.accountTxs : [],
       });
     }
@@ -711,11 +719,11 @@
 <style>
   .account-panel {
     min-height: 100%;
-    --account-panel-bg: color-mix(in srgb, var(--theme-background, #09090b) 96%, transparent);
-    --account-panel-surface: color-mix(in srgb, var(--theme-surface, #18181b) 92%, transparent);
-    --account-panel-surface-hover: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 92%, transparent);
-    --account-panel-border: color-mix(in srgb, var(--theme-border, #27272a) 80%, transparent);
-    --account-panel-border-strong: color-mix(in srgb, var(--theme-border, #27272a) 88%, white 12%);
+    --account-panel-bg: color-mix(in srgb, var(--theme-background, #09090b) 100%, transparent);
+    --account-panel-surface: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent);
+    --account-panel-surface-hover: color-mix(in srgb, var(--theme-surface-hover, var(--theme-card-bg, #1c1c20)) 96%, transparent);
+    --account-panel-border: color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 88%, transparent);
+    --account-panel-border-strong: color-mix(in srgb, var(--theme-card-hover-border, var(--theme-border, #27272a)) 82%, transparent);
     --account-panel-text: var(--theme-text-primary, #e4e4e7);
     --account-panel-text-secondary: var(--theme-text-secondary, #a1a1aa);
     --account-panel-text-muted: var(--theme-text-muted, #71717a);
@@ -734,9 +742,10 @@
     border-bottom: 1px solid var(--account-panel-border);
     background: linear-gradient(
       180deg,
-      color-mix(in srgb, var(--theme-header-bg, #151316) 90%, transparent) 0%,
-      color-mix(in srgb, var(--theme-background, #09090b) 96%, transparent) 100%
+      color-mix(in srgb, var(--theme-card-bg, var(--theme-header-bg, #151316)) 98%, var(--theme-background, #09090b)) 0%,
+      color-mix(in srgb, var(--theme-background, #09090b) 100%, transparent) 100%
     );
+    box-shadow: 0 12px 28px color-mix(in srgb, var(--theme-background, #09090b) 7%, transparent);
   }
 
   .header-row-top {
@@ -798,6 +807,8 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+    min-width: 0;
+    overflow-x: hidden;
   }
 
   .delta-card,
@@ -808,6 +819,7 @@
     border: 1px solid var(--account-panel-border);
     border-radius: 10px;
     padding: 12px;
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-background, #09090b) 7%, transparent);
   }
 
   .empty-token-state {
@@ -964,11 +976,6 @@
     flex-wrap: wrap;
   }
 
-  .proof-header code {
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--account-panel-text);
-  }
-
   .proof-ok {
     color: var(--account-panel-credit);
   }
@@ -1019,8 +1026,8 @@
 
   .tx-type.tone-good {
     border-color: rgba(16, 185, 129, 0.4);
-    color: #86efac;
-    background: rgba(16, 185, 129, 0.12);
+    color: var(--account-panel-credit);
+    background: color-mix(in srgb, var(--account-panel-credit) 12%, transparent);
   }
 
   .tx-type.tone-warn {
@@ -1031,8 +1038,8 @@
 
   .tx-type.tone-danger {
     border-color: rgba(244, 63, 94, 0.5);
-    color: #fda4af;
-    background: rgba(244, 63, 94, 0.16);
+    color: color-mix(in srgb, var(--account-panel-debit) 72%, white 28%);
+    background: color-mix(in srgb, var(--account-panel-debit) 14%, transparent);
   }
 
   .tx-idx {
@@ -1077,7 +1084,7 @@
   }
 
   .tx-param-value.tone-good {
-    color: #86efac;
+    color: var(--account-panel-credit);
   }
 
   .tx-param-value.tone-warn {
@@ -1085,7 +1092,7 @@
   }
 
   .tx-param-value.tone-danger {
-    color: #fda4af;
+    color: color-mix(in srgb, var(--account-panel-debit) 72%, white 28%);
   }
 
   .management-card h4 {
@@ -1192,7 +1199,7 @@
   }
 
   .frame-status.mempool {
-    color: #f97316;
+    color: color-mix(in srgb, var(--account-panel-accent) 78%, #b45309);
   }
 
   .frame-status.historical {
@@ -1240,6 +1247,15 @@
   }
 
   @media (max-width: 768px) {
+    .header-row-top {
+      flex-wrap: wrap;
+      align-items: flex-start;
+    }
+
+    .panel-content {
+      padding: 14px;
+    }
+
     .detail-grid-three {
       grid-template-columns: 1fr;
       gap: 3px;

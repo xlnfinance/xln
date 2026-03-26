@@ -38,8 +38,8 @@ export function formatTokenAmount(
     const integerPart = amountStr.slice(0, -decimals) || '0';
     const fractionalPart = amountStr.slice(-decimals);
 
-    // Remove trailing zeros from fractional part
-    const trimmedFractional = fractionalPart.replace(/0+$/, '');
+    // Default UI precision is 4 decimal digits unless a richer formatter is used upstream.
+    const trimmedFractional = fractionalPart.slice(0, Math.min(decimals, 4)).replace(/0+$/, '');
 
     // Construct result
     const sign = isNegative ? '-' : '';

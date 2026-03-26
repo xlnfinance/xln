@@ -30,6 +30,11 @@
   type FeeOverrides = { gasBumpBps?: number; maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string };
   type RuntimeJReplica = RuntimeEnv['jReplicas'] extends Map<string, infer Replica> ? Replica : never;
   type PendingSettleEntityTx = Extract<EntityTx, { type: 'reserve_to_reserve' }>;
+  type SettlementLike = {
+    leftEntity?: unknown;
+    rightEntity?: unknown;
+    diffs?: Array<{ leftDiff?: unknown; rightDiff?: unknown }>;
+  };
 
   $: activeReplicas = $replicas;
   $: activeXlnFunctions = $xlnFunctions;
@@ -58,6 +63,8 @@
   let gasLoading = false;
   let autoExecuteWorkspaceKey = '';
   let autoExecutingWorkspaceKey = '';
+  let expandedHistoryKeys = new Set<string>();
+  let historyExpansionInitialized = false;
 
   let liveJHeight = 0;
   let liveJTimer: ReturnType<typeof setInterval> | null = null;
@@ -204,7 +211,7 @@
     return !!canonical && canonical === normalizeEntityId(entityId);
   }
 
-  function settlementReserveDelta(op: any): bigint {
+  function settlementReserveDelta(op: SettlementLike | null | undefined): bigint {
     const leftIsSelf = isSelfEntity(op?.leftEntity);
     const rightIsSelf = isSelfEntity(op?.rightEntity);
     if (!leftIsSelf && !rightIsSelf) return 0n;
@@ -618,6 +625,20 @@
     details: buildBatchDetailOps(entry?.batch),
     key: String(entry?.txHash || `${entry?.batchHash || 'batch'}-${index}`),
   }));
+  $: {
+    const validKeys = new Set(batchHistoryRows.map((row) => row.key));
+    const nextExpandedKeys = new Set(Array.from(expandedHistoryKeys).filter((key) => validKeys.has(key)));
+    if (!historyExpansionInitialized && batchHistoryRows[0]?.key) {
+      nextExpandedKeys.add(batchHistoryRows[0].key);
+      historyExpansionInitialized = true;
+    }
+    const changed =
+      nextExpandedKeys.size !== expandedHistoryKeys.size
+      || Array.from(nextExpandedKeys).some((key) => !expandedHistoryKeys.has(key));
+    if (changed) {
+      expandedHistoryKeys = nextExpandedKeys;
+    }
+  }
   function historySummary(entry: CompletedBatch | null | undefined): Array<{ label: string; count: number }> {
     const operations = entry?.operations;
     if (operations && typeof operations === 'object') {
@@ -641,6 +662,14 @@
   function historyOriginLabel(entry: CompletedBatch | null | undefined): string {
     if (entry?.source === 'counterparty-event') return 'Counterparty Event';
     return 'Self Batch';
+  }
+
+  function handleHistoryToggle(key: string, open: boolean): void {
+    const nextExpandedKeys = new Set(expandedHistoryKeys);
+    if (open) nextExpandedKeys.add(key);
+    else nextExpandedKeys.delete(key);
+    expandedHistoryKeys = nextExpandedKeys;
+    historyExpansionInitialized = true;
   }
 
   $: selectedAccount = counterpartyEntityId ? currentReplica?.state?.accounts?.get?.(counterpartyEntityId) : null;
@@ -1013,11 +1042,11 @@
 
   $: {
     const workspace = selectedAccount?.settlementWorkspace;
-    const workspaceKey = getWorkspaceAutoExecuteKey(counterpartyEntityId, selectedAccount);
+    const workspaceKey = getWorkspaceAutoExecuteKey(counterpartyEntityId, selectedAccount ?? null);
     if (!workspace || workspace.status !== 'ready_to_submit') {
       autoExecuteWorkspaceKey = '';
     } else if (
-      isLocalExecutorForWorkspace(counterpartyEntityId, selectedAccount)
+      isLocalExecutorForWorkspace(counterpartyEntityId, selectedAccount ?? null)
       && workspaceKey
       && workspaceKey !== autoExecuteWorkspaceKey
       && workspaceKey !== autoExecutingWorkspaceKey
@@ -1217,7 +1246,12 @@
         <div class="history-list">
           {#each batchHistoryRows as row, index (row.key)}
             {@const entry = row.entry}
-            <details class="history-item" data-testid="settle-history-item" open={index === 0}>
+            <details
+              class="history-item"
+              data-testid="settle-history-item"
+              open={expandedHistoryKeys.has(row.key)}
+              on:toggle={(event) => handleHistoryToggle(row.key, (event.currentTarget as HTMLDetailsElement).open)}
+            >
               <summary>
                 <span class="history-status {entry.status === 'failed' ? 'failed' : 'confirmed'}">
                   {entry.status === 'failed' ? 'Failed' : 'Confirmed'}
@@ -1422,7 +1456,7 @@
       data-testid="settle-queue-action"
       class="btn-submit"
       on:click={submitAction}
-      disabled={sending || !amount || !recipientEntityId || isSelfTransfer}
+      disabled={sending || !amount || !recipientEntityId || Boolean(isSelfTransfer)}
     >
       {#if sending}
         Processing...

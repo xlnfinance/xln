@@ -555,7 +555,7 @@ export async function enqueueAndProcess(env: Env, input: RuntimeInput): Promise<
 // Derived store that provides utility functions for components
 export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $settings]): FrontendXlnFunctions => {
   const clampPrecision = (value: number): number => Math.max(2, Math.min(18, Math.floor(Number(value) || 2)));
-  const settingPrecision = clampPrecision(Number($settings?.tokenPrecision ?? 6));
+  const settingPrecision = clampPrecision(Number($settings?.tokenPrecision ?? 4));
   const formatRawAmount = (rawAmount: bigint, decimals: number, precisionLimit: number): string => {
     const safeDecimals = Math.max(0, Math.floor(Number(decimals) || 18));
     const negative = rawAmount < 0n;

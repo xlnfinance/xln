@@ -36,12 +36,8 @@
     initialAction?: 'r2r' | 'r2c';
   } = $props();
 
-  // Create a synthetic tab for EntityPanel
-  let tabId = $derived(`entity-${entityId.slice(0, 8)}`);
-
-  // Local tab state (mutable for EntityPanel)
-  let localTab: Tab = $state({
-    id: tabId,
+  const localTab: Tab = $derived({
+    id: `entity-${entityId.slice(0, 8)}`,
     title: entityName || entityId,
     entityId,
     signerId: signerId || entityId,
@@ -55,7 +51,7 @@
 
 <div class="entity-panel-wrapper">
   <!-- Entity panel content only - time machine is in global TimeMachine bar -->
-  <EntityPanelTabs tab={localTab} isLast={false} {initialAction} />
+  <EntityPanelTabs tab={localTab} {initialAction} />
 </div>
 
 <style>
@@ -66,13 +62,6 @@
     height: 100%;
     overflow: hidden;
     background: #1e1e1e;
-  }
-
-  .panel-header {
-    flex-shrink: 0;
-    padding: 6px 8px;
-    background: #252526;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   /* Override EntityPanelTabs styles for Dockview context */

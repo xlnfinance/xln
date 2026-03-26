@@ -130,7 +130,8 @@
     ? `${new Date(processEnteredAt).toLocaleTimeString()} (${Math.round((processLagMs || 0) / 1000)}s ago)`
     : 'never';
   $: networkRelayUrls = (() => {
-    const relayUrls = $xlnEnvironment?.runtimeState?.p2p?.relayUrls;
+    const p2p = $xlnEnvironment?.runtimeState?.p2p as { relayUrls?: string[] } | null | undefined;
+    const relayUrls = p2p?.relayUrls;
     return Array.isArray(relayUrls) ? relayUrls : [];
   })();
   $: networkRelayUrl = String(networkRelayUrls[0] || $settings.relayUrl || '').trim() || 'n/a';
@@ -1353,10 +1354,11 @@
     display: flex;
     gap: 8px;
     margin: 0;
-    padding: 10px;
-    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.08));
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
+    padding: 6px 0 2px;
+    border: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 56%, transparent);
+    border-radius: 0;
+    background: transparent;
     overflow-x: auto;
   }
 
@@ -1371,7 +1373,7 @@
     min-height: 44px;
     padding: 10px 16px;
     border: 1px solid transparent;
-    border-radius: 10px;
+    border-radius: 12px 12px 0 0;
     background: transparent;
     color: var(--theme-text-secondary, #a1a1aa);
     font-size: 12px;
@@ -1384,14 +1386,15 @@
 
   .settings-tab:hover {
     color: var(--theme-text-primary, #e4e4e7);
-    border-color: color-mix(in srgb, var(--theme-border, #27272a) 80%, white 20%);
-    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 92%, transparent);
+    border-color: transparent;
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 66%, transparent);
   }
 
   .settings-tab.active {
-    color: var(--theme-accent, #fbbf24);
-    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 70%, transparent);
-    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 12%, transparent);
+    color: var(--theme-text-primary, #e4e4e7);
+    border-color: color-mix(in srgb, var(--theme-border, #27272a) 48%, transparent);
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 10%, transparent);
+    box-shadow: inset 0 2px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 78%, transparent);
   }
 
   .settings-content {
@@ -1401,9 +1404,9 @@
 
   .section-card {
     padding: 16px;
-    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.08));
+    border: 1px solid color-mix(in srgb, var(--theme-border, rgba(255, 255, 255, 0.08)) 58%, transparent);
     border-radius: 16px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 94%, transparent);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 90%, transparent);
   }
 
   .danger-card {
@@ -1921,6 +1924,24 @@
   }
 
   @media (max-width: 900px) {
+    .settings-tabs {
+      gap: 6px;
+      padding: 0;
+      border-bottom: none;
+      overflow: visible;
+      flex-wrap: wrap;
+    }
+
+    .settings-tab {
+      flex: 1 1 calc(33.333% - 6px);
+      min-width: 92px;
+      min-height: 40px;
+      padding: 9px 12px;
+      border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 50%, transparent);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--theme-surface, #18181b) 72%, transparent);
+    }
+
     .section-card {
       padding: 14px;
     }
