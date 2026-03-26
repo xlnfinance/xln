@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { browser } from '$app/environment';
+  import { page } from '$app/stores';
   import EmbeddedPayButton from '$lib/components/Embed/EmbeddedPayButton.svelte';
   import { appState } from '$lib/stores/appStateStore';
   import {
@@ -31,6 +32,7 @@
   let resettingEverything = $state(false);
   let bootGeneration = $state(0);
   let lockTestMode = $state(false);
+  const pageSearch = $derived(browser ? $page.url.search : '');
 
   function isResetHashActive(): boolean {
     if (!browser) return false;
@@ -65,11 +67,16 @@
     }
   }
 
+  function canUseLockTestMode(): boolean {
+    if (!browser) return false;
+    const hostname = window.location.hostname;
+    return hostname === 'localhost' || hostname === '127.0.0.1';
+  }
+
   function syncEmbeddedPayMode(): void {
     if (!browser) return;
     const params = new URLSearchParams(window.location.search);
     const hasEmbedQuery = params.get('embed') === '1' || params.has('e');
-    lockTestMode = params.get('locktest') === '1';
     const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
     const qIndex = rawHash.indexOf('?');
     const hashRoute = qIndex >= 0 ? rawHash.slice(0, qIndex).trim().toLowerCase() : rawHash.trim().toLowerCase();
@@ -84,6 +91,12 @@
         hashParams.get('embed') === 'true'
       );
   }
+
+  $effect(() => {
+    if (!browser) return;
+    const params = new URLSearchParams(pageSearch);
+    lockTestMode = params.get('locktest') === '1' && canUseLockTestMode();
+  });
 
   async function deactivateThisTab(): Promise<void> {
     hasActiveTabLock = false;
@@ -205,6 +218,12 @@
   </div>
 {:else if lockTestMode}
   <div data-testid="app-runtime-ready"></div>
+{:else if $error}
+  <div class="error-screen">
+    <h2>❌ Initialization Failed</h2>
+    <p class="error-msg">{$error}</p>
+    <button on:click={() => initializeXLN()}>Retry</button>
+  </div>
 {:else if !activeTabLockReady || $isLoading || !$xlnFunctions.isReady}
   <div class="loading-screen" data-testid="app-loading-screen">
     <div class="loading-shell">
@@ -227,12 +246,6 @@
         </button>
       </div>
     </div>
-  </div>
-{:else if $error}
-  <div class="error-screen">
-    <h2>❌ Initialization Failed</h2>
-    <p class="error-msg">{$error}</p>
-    <button on:click={() => initializeXLN()}>Retry</button>
   </div>
 {:else}
   <div data-testid="app-runtime-ready">
