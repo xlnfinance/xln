@@ -314,14 +314,14 @@ export let selectedAccountId: string | null = null;
 
 <style>
   .account-list-wrapper {
-    height: 100%;
+    height: auto;
     display: flex;
     flex-direction: column;
     color: var(--theme-text-primary, #e4e4e7);
   }
 
   .accounts-list-view {
-    height: 100%;
+    height: auto;
     display: flex;
     flex-direction: column;
   }
@@ -329,8 +329,8 @@ export let selectedAccountId: string | null = null;
   .accounts-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 8px;
+    gap: 10px;
+    padding: 6px 0;
   }
 
 
@@ -340,9 +340,10 @@ export let selectedAccountId: string | null = null;
     align-items: center;
     padding: 30px 20px;
     text-align: center;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 72%, transparent);
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 72%, transparent);
+    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 88%, transparent);
     border-radius: 6px;
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-background, #09090b) 6%, transparent);
   }
 
   .no-accounts p {
@@ -375,7 +376,7 @@ export let selectedAccountId: string | null = null;
 
   .list-toggle {
     background: transparent;
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 86%, transparent);
     border-radius: 999px;
     color: var(--theme-text-secondary, #a8a29e);
     font-size: 0.72em;
@@ -385,7 +386,24 @@ export let selectedAccountId: string | null = null;
   }
 
   .list-toggle:hover {
-    border-color: color-mix(in srgb, var(--theme-border, #27272a) 84%, white 16%);
+    border-color: color-mix(in srgb, var(--theme-card-hover-border, var(--theme-border, #27272a)) 82%, transparent);
     color: var(--theme-text-primary, #e7e5e4);
+  }
+
+  @media (max-width: 760px) {
+    .accounts-list {
+      gap: 10px;
+      padding: 4px 0;
+    }
+
+    .list-header {
+      padding: 0 0 6px;
+    }
+
+    .list-toggle {
+      width: 100%;
+      min-height: 34px;
+      font-size: 11px;
+    }
   }
 </style>

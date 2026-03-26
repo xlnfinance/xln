@@ -64,10 +64,11 @@
     fillRatio: number;
     cancelRemainder: boolean;
     timestamp: number;
-    rebateAmount: bigint;
-    rebateTokenId: number | null;
+    executionGiveAmount: bigint | null;
+    executionWantAmount: bigint | null;
   };
   type OfferLifecycle = {
+    key: string;
     offerId: string;
     accountId: string;
     giveTokenId: number;
@@ -91,9 +92,11 @@
     wantAmount: bigint;
     filledGiveAmount: bigint;
     filledWantAmount: bigint;
+    filledBaseAmount: bigint;
+    targetBaseAmount: bigint;
     filledPercent: number;
-    rebateAmount: bigint;
-    rebateTokenId: number | null;
+    priceImprovementAmount: bigint;
+    priceImprovementTokenId: number | null;
     status: ClosedOrderStatus;
     createdAt: number;
     closedAt: number;
@@ -106,8 +109,8 @@
     filledWantAmount: bigint;
     giveTokenId: number;
     wantTokenId: number;
-    rebateAmount: bigint;
-    rebateTokenId: number | null;
+    priceImprovementAmount: bigint;
+    priceImprovementTokenId: number | null;
   };
   let selectedOrderLevel: ClickedOrderLevel | null = null;
   let orderbookSnapshot: OrderbookSnapshot = {
@@ -574,7 +577,7 @@
     referencePriceTicks: bigint | null;
   };
 
-  function formatRebateAmount(amount: bigint, tokenIdValue: number | null): string {
+  function formatPriceImprovement(amount: bigint, tokenIdValue: number | null): string {
     if (!tokenIdValue || amount <= 0n) return '—';
     return `${formatAmount(amount, tokenIdValue)} ${tokenSymbol(tokenIdValue)}`;
   }
@@ -1064,6 +1067,104 @@
     return data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
   }
 
+  function offerLifecycleKey(accountId: string, offerId: string): string {
+    return `${String(accountId || '').trim()}:${String(offerId || '').trim()}`;
+  }
+
+  function computeFilledPpmFromRatios(resolves: ResolveRecord[]): bigint {
+    let remainingPpm = 1_000_000n;
+    for (const resolve of resolves) {
+      const ratio = BigInt(Math.max(0, Math.min(65535, Math.round(resolve.fillRatio || 0))));
+      const filledThisStep = (remainingPpm * ratio) / 65535n;
+      remainingPpm = remainingPpm - filledThisStep;
+      if (remainingPpm < 0n) remainingPpm = 0n;
+      if (resolve.cancelRemainder) break;
+    }
+    return 1_000_000n - remainingPpm;
+  }
+
+  function isBuyLifecycle(lifecycle: OfferLifecycle): boolean {
+    return offerSideLabel(lifecycle) === 'Bid';
+  }
+
+  function computeOfferExecutionSummary(lifecycle: OfferLifecycle): {
+    filledGiveAmount: bigint;
+    filledWantAmount: bigint;
+    filledBaseAmount: bigint;
+    targetBaseAmount: bigint;
+    filledPpm: bigint;
+    priceImprovementAmount: bigint;
+    priceImprovementTokenId: number | null;
+  } {
+    const pair = resolvePairOrientation(lifecycle.giveTokenId, lifecycle.wantTokenId);
+    const isBuy = isBuyLifecycle(lifecycle);
+    const baseDecimals = getTokenDecimals(pair.baseTokenId);
+    const quoteDecimals = getTokenDecimals(pair.quoteTokenId);
+    const targetBaseAmount = isBuy ? lifecycle.wantAmount : lifecycle.giveAmount;
+    let filledGiveAmount = 0n;
+    let filledWantAmount = 0n;
+    let filledBaseAmount = 0n;
+    let priceImprovementAmount = 0n;
+    let sawExactExecution = false;
+
+    for (const resolve of lifecycle.resolves) {
+      const executionGiveAmount = resolve.executionGiveAmount;
+      const executionWantAmount = resolve.executionWantAmount;
+      if (executionGiveAmount === null || executionWantAmount === null) continue;
+      if (executionGiveAmount <= 0n || executionWantAmount <= 0n) continue;
+
+      sawExactExecution = true;
+      filledGiveAmount += executionGiveAmount;
+      filledWantAmount += executionWantAmount;
+
+      const filledBaseThisStep = isBuy ? executionWantAmount : executionGiveAmount;
+      const actualQuoteThisStep = isBuy ? executionGiveAmount : executionWantAmount;
+      filledBaseAmount += filledBaseThisStep;
+
+      const limitQuoteThisStep = quoteFromBase(
+        filledBaseThisStep,
+        lifecycle.priceTicks,
+        baseDecimals,
+        quoteDecimals,
+      );
+      if (isBuy) {
+        const saved = limitQuoteThisStep - actualQuoteThisStep;
+        if (saved > 0n) priceImprovementAmount += saved;
+      } else {
+        const gained = actualQuoteThisStep - limitQuoteThisStep;
+        if (gained > 0n) priceImprovementAmount += gained;
+      }
+    }
+
+    if (!sawExactExecution) {
+      const filledPpm = computeFilledPpmFromRatios(lifecycle.resolves);
+      return {
+        filledGiveAmount: (lifecycle.giveAmount * filledPpm) / 1_000_000n,
+        filledWantAmount: (lifecycle.wantAmount * filledPpm) / 1_000_000n,
+        filledBaseAmount: (targetBaseAmount * filledPpm) / 1_000_000n,
+        targetBaseAmount,
+        filledPpm,
+        priceImprovementAmount: 0n,
+        priceImprovementTokenId: null,
+      };
+    }
+
+    const boundedFilledBase = filledBaseAmount > targetBaseAmount ? targetBaseAmount : filledBaseAmount;
+    const filledPpm = targetBaseAmount > 0n
+      ? ((boundedFilledBase * 1_000_000n) / targetBaseAmount)
+      : 0n;
+
+    return {
+      filledGiveAmount,
+      filledWantAmount,
+      filledBaseAmount: boundedFilledBase,
+      targetBaseAmount,
+      filledPpm: filledPpm > 1_000_000n ? 1_000_000n : filledPpm,
+      priceImprovementAmount,
+      priceImprovementTokenId: priceImprovementAmount > 0n ? pair.quoteTokenId : null,
+    };
+  }
+
   function collectOfferLifecycles(): OfferLifecycle[] {
     const lifecycles = new Map<string, OfferLifecycle>();
     for (const { accountId, account } of accountMachines()) {
@@ -1076,6 +1177,7 @@
             const data = txDataAsRecord(tx);
             const offerId = String(data.offerId || '');
             if (!offerId) continue;
+            const key = offerLifecycleKey(accountId, offerId);
             const giveToken = Number(data.giveTokenId || 0);
             const wantToken = Number(data.wantTokenId || 0);
             if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0) continue;
@@ -1085,7 +1187,8 @@
               ?? (activeXlnFunctions?.computeSwapPriceTicks
                 ? activeXlnFunctions.computeSwapPriceTicks(giveToken, wantToken, give, want)
                 : 0n);
-            lifecycles.set(offerId, {
+            lifecycles.set(key, {
+              key,
               offerId,
               accountId,
               giveTokenId: giveToken,
@@ -1103,18 +1206,19 @@
             const data = txDataAsRecord(tx);
             const offerId = String(data.offerId || '');
             if (!offerId) continue;
+            const key = offerLifecycleKey(accountId, offerId);
             const fillRatio = Number(data.fillRatio || 0);
             const cancelRemainder = Boolean(data.cancelRemainder);
-            const rebateAmount = toBigIntSafe(data.rebateAmount) ?? 0n;
-            const rawRebateTokenId = Number(data.rebateTokenId || 0);
-            const prev = lifecycles.get(offerId);
+            const executionGiveAmount = toBigIntSafe(data.executionGiveAmount);
+            const executionWantAmount = toBigIntSafe(data.executionWantAmount);
+            const prev = lifecycles.get(key);
             if (!prev) continue;
             prev.resolves.push({
               fillRatio: Number.isFinite(fillRatio) ? fillRatio : 0,
               cancelRemainder,
               timestamp: frameTs,
-              rebateAmount,
-              rebateTokenId: Number.isFinite(rawRebateTokenId) && rawRebateTokenId > 0 ? rawRebateTokenId : null,
+              executionGiveAmount,
+              executionWantAmount,
             });
             continue;
           }
@@ -1122,7 +1226,7 @@
             const data = txDataAsRecord(tx);
             const offerId = String(data.offerId || '');
             if (!offerId) continue;
-            const prev = lifecycles.get(offerId);
+            const prev = lifecycles.get(offerLifecycleKey(accountId, offerId));
             if (!prev) continue;
             prev.cancelRequested = true;
           }
@@ -1132,33 +1236,11 @@
     return Array.from(lifecycles.values());
   }
 
-  function computeFilledPpm(resolves: ResolveRecord[]): bigint {
-    let remainingPpm = 1_000_000n;
-    for (const resolve of resolves) {
-      const ratio = BigInt(Math.max(0, Math.min(65535, Math.round(resolve.fillRatio || 0))));
-      const filledThisStep = (remainingPpm * ratio) / 65535n;
-      remainingPpm = remainingPpm - filledThisStep;
-      if (remainingPpm < 0n) remainingPpm = 0n;
-      if (resolve.cancelRemainder) break;
-    }
-    return 1_000_000n - remainingPpm;
-  }
-
-  function sumRebates(resolves: ResolveRecord[]): { amount: bigint; tokenId: number | null } {
-    let total = 0n;
-    let tokenId: number | null = null;
-    for (const resolve of resolves) {
-      if (resolve.rebateAmount <= 0n) continue;
-      total += resolve.rebateAmount;
-      if (!tokenId && resolve.rebateTokenId) tokenId = resolve.rebateTokenId;
-    }
-    return { amount: total, tokenId };
-  }
-
   function classifyClosedStatus(lifecycle: OfferLifecycle): ClosedOrderStatus {
-    const filledPpm = computeFilledPpm(lifecycle.resolves);
+    const summary = computeOfferExecutionSummary(lifecycle);
+    const filledPpm = summary.filledPpm;
     if (filledPpm >= FILLED_DISPLAY_PPM_THRESHOLD) return 'filled';
-    const hasFill = lifecycle.resolves.some((resolve) => resolve.fillRatio > 0);
+    const hasFill = summary.filledBaseAmount > 0n;
     const hasCancelResolve = lifecycle.resolves.some((resolve) => resolve.cancelRemainder);
     if (hasCancelResolve && hasFill) return 'partial';
     if (hasCancelResolve || lifecycle.cancelRequested) return 'canceled';
@@ -1184,21 +1266,21 @@
     return 'neutral';
   }
 
+  $: offerLifecycles = collectOfferLifecycles();
+
   $: openOfferIdSet = new Set(
     openOrders
-      .map((offer) => String(offer.offerId || '').trim())
+      .map((offer) => offerLifecycleKey(String(offer.accountId || ''), String(offer.offerId || '')))
       .filter(Boolean),
   );
-  $: closedOrderViews = collectOfferLifecycles()
-    .filter((offer) => !openOfferIdSet.has(offer.offerId))
+  $: closedOrderViews = offerLifecycles
+    .filter((offer) => !openOfferIdSet.has(offer.key))
     .map((offer) => {
       const side = offerSideLabel(offer);
       const pair = resolvePairOrientation(offer.giveTokenId, offer.wantTokenId);
       const pairLabel = `${tokenSymbol(pair.baseTokenId)}/${tokenSymbol(pair.quoteTokenId)}`;
-      const filledPpm = computeFilledPpm(offer.resolves);
-      const filledGiveAmount = (offer.giveAmount * filledPpm) / 1_000_000n;
-      const filledWantAmount = (offer.wantAmount * filledPpm) / 1_000_000n;
-      const rebate = sumRebates(offer.resolves);
+      const summary = computeOfferExecutionSummary(offer);
+      const filledPpm = summary.filledPpm;
       const filledPercent = filledPpm >= FILLED_DISPLAY_PPM_THRESHOLD
         ? 100
         : Number((filledPpm * 10_000n) / 1_000_000n) / 100;
@@ -1213,11 +1295,13 @@
         wantTokenId: offer.wantTokenId,
         giveAmount: offer.giveAmount,
         wantAmount: offer.wantAmount,
-        filledGiveAmount,
-        filledWantAmount,
+        filledGiveAmount: summary.filledGiveAmount,
+        filledWantAmount: summary.filledWantAmount,
+        filledBaseAmount: summary.filledBaseAmount,
+        targetBaseAmount: summary.targetBaseAmount,
         filledPercent,
-        rebateAmount: rebate.amount,
-        rebateTokenId: rebate.tokenId,
+        priceImprovementAmount: summary.priceImprovementAmount,
+        priceImprovementTokenId: summary.priceImprovementTokenId,
         status: classifyClosedStatus(offer),
         createdAt: offer.createdAt,
         closedAt: latestResolveTs,
@@ -1227,23 +1311,25 @@
   $: filteredClosedOrderViews = closedOrderStatusFilter === 'all'
     ? closedOrderViews
     : closedOrderViews.filter((order) => order.status === closedOrderStatusFilter);
-  $: offerRebateById = (() => {
+  $: offerPriceImprovementByKey = (() => {
     const map = new Map<string, { amount: bigint; tokenId: number | null }>();
-    for (const lifecycle of collectOfferLifecycles()) {
-      map.set(lifecycle.offerId, sumRebates(lifecycle.resolves));
+    for (const lifecycle of offerLifecycles) {
+      const summary = computeOfferExecutionSummary(lifecycle);
+      map.set(lifecycle.key, {
+        amount: summary.priceImprovementAmount,
+        tokenId: summary.priceImprovementTokenId,
+      });
     }
     return map;
   })();
-  $: totalRebateSummary = (() => {
+  $: totalPriceImprovementSummary = (() => {
     const totals = new Map<number, bigint>();
-    for (const { account } of accountMachines()) {
-      if (!(account?.totalRebates instanceof Map)) continue;
-      for (const [tokenIdValue, amountValue] of account.totalRebates.entries()) {
-        const tokenId = Number(tokenIdValue);
-        const amount = toBigIntSafe(amountValue) ?? 0n;
-        if (!Number.isFinite(tokenId) || tokenId <= 0 || amount <= 0n) continue;
-        totals.set(tokenId, (totals.get(tokenId) ?? 0n) + amount);
-      }
+    for (const lifecycle of offerLifecycles) {
+      const summary = computeOfferExecutionSummary(lifecycle);
+      const tokenId = summary.priceImprovementTokenId;
+      const amount = summary.priceImprovementAmount;
+      if (!tokenId || amount <= 0n) continue;
+      totals.set(tokenId, (totals.get(tokenId) ?? 0n) + amount);
     }
     const parts = Array.from(totals.entries())
       .sort((a, b) => a[0] - b[0])
@@ -1262,15 +1348,18 @@
           filledWantAmount: closed.filledWantAmount,
           giveTokenId: closed.giveTokenId,
           wantTokenId: closed.wantTokenId,
-          rebateAmount: closed.rebateAmount,
-          rebateTokenId: closed.rebateTokenId,
+          priceImprovementAmount: closed.priceImprovementAmount,
+          priceImprovementTokenId: closed.priceImprovementTokenId,
         };
-        toasts.success('Swap fully filled');
-      } else if (closed.status === 'partial') {
-        const rebateNote = closed.rebateAmount > 0n
-          ? ` Rebate: ${formatRebateAmount(closed.rebateAmount, closed.rebateTokenId)}.`
+        const improvementNote = closed.priceImprovementAmount > 0n
+          ? ` with ${formatPriceImprovement(closed.priceImprovementAmount, closed.priceImprovementTokenId)} price improvement`
           : '';
-        toasts.info(`Swap partially filled (${closed.filledPercent.toFixed(2)}%) and canceled the remainder.${rebateNote}`);
+        toasts.success(`Swap fully filled${improvementNote}`);
+      } else if (closed.status === 'partial') {
+        const improvementNote = closed.priceImprovementAmount > 0n
+          ? ` Price improvement: ${formatPriceImprovement(closed.priceImprovementAmount, closed.priceImprovementTokenId)}.`
+          : '';
+        toasts.info(`Swap partially filled (${closed.filledPercent.toFixed(2)}%) and closed the remainder.${improvementNote}`);
       } else if (closed.status === 'canceled') {
         toasts.info('Swap was canceled without a fill.');
       }
@@ -1744,22 +1833,20 @@
       <div class="orders-header-left">
         <h4 class="orders-inline-title">Orders</h4>
         <span class="orders-count">{orderListTab === 'open' ? openOrders.length : filteredClosedOrderViews.length}</span>
-        <span
+        <button
+          type="button"
           class="orders-tab-text"
           class:active={orderListTab === 'open'}
+          data-testid="swap-orders-tab-open"
           on:click={() => (orderListTab = 'open')}
-          on:keydown={(e) => e.key === 'Enter' && (orderListTab = 'open')}
-          role="button"
-          tabindex="0"
-        >Open</span>
-        <span
+        >Open</button>
+        <button
+          type="button"
           class="orders-tab-text"
           class:active={orderListTab === 'closed'}
+          data-testid="swap-orders-tab-closed"
           on:click={() => (orderListTab = 'closed')}
-          on:keydown={(e) => e.key === 'Enter' && (orderListTab = 'closed')}
-          role="button"
-          tabindex="0"
-        >Closed</span>
+        >Closed</button>
       </div>
       {#if orderListTab === 'closed'}
         <label class="closed-status-filter">
@@ -1774,8 +1861,8 @@
         </label>
       {/if}
     </div>
-    {#if totalRebateSummary}
-      <p class="rebate-summary">Total rebates received: <strong>{totalRebateSummary}</strong></p>
+    {#if totalPriceImprovementSummary}
+      <p class="improvement-summary">Total price improvement: <strong>{totalPriceImprovementSummary}</strong></p>
     {/if}
 
     {#if orderListTab === 'open'}
@@ -1790,18 +1877,18 @@
                 <th>Pair</th>
                 <th>Price</th>
                 <th>Remaining</th>
-                <th>Rebate</th>
+                <th>Price Improvement</th>
                 <th>Hub</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {#each openOrders as offer}
+              {#each openOrders as offer (offerLifecycleKey(String(offer.accountId || ''), String(offer.offerId || '')))}
                 {@const side = offerSideLabel(offer)}
                 {@const pairView = resolvePairOrientation(offer.giveTokenId, offer.wantTokenId)}
                 {@const isDust = isDustOpenOffer(offer)}
                 {@const remainingUsd = remainingOfferUsd(offer)}
-                {@const offerRebate = offerRebateById.get(String(offer.offerId || '')) || { amount: 0n, tokenId: null }}
+                {@const offerImprovement = offerPriceImprovementByKey.get(offerLifecycleKey(String(offer.accountId || ''), String(offer.offerId || ''))) || { amount: 0n, tokenId: null }}
                 <tr>
                   <td>
                     <span class:side-ask={side === 'Ask'} class:side-bid={side === 'Bid'} class="side-badge">{side}</span>
@@ -1823,7 +1910,7 @@
                       {formatAmount(toBigIntSafe(offer.giveAmount) ?? 0n, Number(offer.giveTokenId || 0))} {tokenSymbol(Number(offer.giveTokenId || 0))}
                     {/if}
                   </td>
-                  <td>{formatRebateAmount(offerRebate.amount, offerRebate.tokenId)}</td>
+                  <td>{formatPriceImprovement(offerImprovement.amount, offerImprovement.tokenId)}</td>
                   <td>{String(offer.accountId || '').slice(0, 10)}...</td>
                   <td>
                     <button class="cancel-btn" on:click={() => cancelSwapOffer(String(offer.offerId || ''), String(offer.accountId || ''))}>
@@ -1848,13 +1935,14 @@
                 <th>Pair</th>
                 <th>Price</th>
                 <th>Filled</th>
-                <th>Rebate</th>
+                <th>Price Improvement</th>
                 <th>Closed At</th>
                 <th>Hub</th>
               </tr>
             </thead>
             <tbody>
-              {#each filteredClosedOrderViews as order}
+              {#each filteredClosedOrderViews as order (offerLifecycleKey(order.accountId, order.offerId))}
+                {@const pairView = resolvePairOrientation(order.giveTokenId, order.wantTokenId)}
                 <tr>
                   <td>
                     <span class:side-ask={closedOrderStatusTone(order.status) === 'ask'} class:side-bid={closedOrderStatusTone(order.status) === 'bid'} class="side-badge">
@@ -1865,9 +1953,9 @@
                   <td>{formatPriceTicks(order.priceTicks)}</td>
                   <td>
                     {order.filledPercent.toFixed(2)}%
-                    ({formatAmount(order.filledGiveAmount, order.giveTokenId)} {tokenSymbol(order.giveTokenId)})
+                    ({formatAmount(order.filledBaseAmount, pairView.baseTokenId)} {tokenSymbol(pairView.baseTokenId)})
                   </td>
-                  <td>{formatRebateAmount(order.rebateAmount, order.rebateTokenId)}</td>
+                  <td>{formatPriceImprovement(order.priceImprovementAmount, order.priceImprovementTokenId)}</td>
                   <td>{formatOrderTime(order.closedAt)}</td>
                   <td>{order.accountId.slice(0, 10)}...</td>
                 </tr>
@@ -1888,9 +1976,11 @@
           {formatAmount(swapCompletionModal.filledGiveAmount, swapCompletionModal.giveTokenId)} {tokenSymbol(swapCompletionModal.giveTokenId)}
           → {formatAmount(swapCompletionModal.filledWantAmount, swapCompletionModal.wantTokenId)} {tokenSymbol(swapCompletionModal.wantTokenId)}
         </p>
-        <p class="swap-modal-rebate">
-          Rebate: <strong>{formatRebateAmount(swapCompletionModal.rebateAmount, swapCompletionModal.rebateTokenId)}</strong>
-        </p>
+        {#if swapCompletionModal.priceImprovementAmount > 0n}
+          <p class="swap-modal-improvement">
+            Price Improvement: <strong>{formatPriceImprovement(swapCompletionModal.priceImprovementAmount, swapCompletionModal.priceImprovementTokenId)}</strong>
+          </p>
+        {/if}
         <div class="swap-modal-actions">
           <button class="scope-btn active" on:click={() => (swapCompletionModal = null)}>Close</button>
         </div>
@@ -2514,6 +2604,9 @@
   }
 
   .orders-tab-text {
+    border: none;
+    background: none;
+    padding: 0;
     font-size: 12px;
     color: #6b7280;
     cursor: pointer;
@@ -2649,13 +2742,13 @@
     border-color: rgba(239, 68, 68, 0.6);
   }
 
-  .rebate-summary {
+  .improvement-summary {
     margin: 0 0 12px;
     color: #c7b27a;
     font-size: 12px;
   }
 
-  .rebate-summary strong {
+  .improvement-summary strong {
     color: #f3d17a;
     font-weight: 700;
   }
@@ -2693,14 +2786,14 @@
   }
 
   .swap-modal-copy,
-  .swap-modal-rebate {
+  .swap-modal-improvement {
     margin: 0;
     color: #d7d9df;
     font-size: 13px;
     line-height: 1.5;
   }
 
-  .swap-modal-rebate {
+  .swap-modal-improvement {
     margin-top: 10px;
     color: #c7b27a;
   }

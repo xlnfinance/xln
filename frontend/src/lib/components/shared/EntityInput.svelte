@@ -22,6 +22,7 @@
   export let label: string = '';
   export let preferredId: string = '';
   export let testId: string = '';
+  export let variant: 'default' | 'move' = 'default';
 
   const dispatch = createEventDispatcher();
   $: activeFunctions = $xlnFunctions;
@@ -291,9 +292,9 @@
   $: selectedIsPreferred = selectedOption ? normalizeEntityId(selectedOption.id) === preferredNorm : false;
 </script>
 
-<div class="entity-input" class:disabled data-testid={testId || undefined}>
+<div class="entity-input" class:disabled class:move-variant={variant === 'move'} data-testid={testId || undefined}>
   {#if label}
-    <label class="input-label">{label}</label>
+    <div class="input-label">{label}</div>
   {/if}
 
   <div class="input-wrapper">
@@ -326,10 +327,12 @@
       </button>
     {:else}
       <input
+        class="entity-input-field"
         bind:this={inputRef}
         type="text"
         value={showDropdown ? inputValue : displayValue}
         {placeholder}
+        aria-label={label || placeholder || 'Entity input'}
         {disabled}
         on:focus={handleFocus}
         on:blur={handleBlur}
@@ -344,6 +347,7 @@
       <button
         class="dropdown-toggle"
         type="button"
+        aria-label={label ? `Open ${label} picker` : 'Open entity picker'}
         on:click={openPicker}
         {disabled}
       >
@@ -421,8 +425,30 @@
 
 <style>
   .entity-input {
+    --entity-accent: var(--theme-accent, #fbbf24);
+    --entity-border: color-mix(in srgb, var(--theme-input-border, var(--theme-border, #27272a)) 84%, transparent);
+    --entity-border-hover: color-mix(in srgb, var(--entity-accent) 42%, var(--entity-border));
+    --entity-border-active: color-mix(in srgb, var(--entity-accent) 82%, transparent);
+    --entity-surface: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent);
+    --entity-input-bg: color-mix(in srgb, var(--theme-input-bg, var(--theme-card-bg, #09090b)) 98%, transparent);
+    --entity-elevated: color-mix(in srgb, var(--theme-surface-hover, var(--theme-card-bg, #1c1c20)) 94%, transparent);
+    --entity-text: var(--theme-text-primary, #e4e4e7);
+    --entity-text-secondary: var(--theme-text-secondary, #a1a1aa);
+    --entity-text-muted: var(--theme-text-muted, #71717a);
+    --entity-shadow: 0 18px 40px color-mix(in srgb, var(--theme-background, #09090b) 18%, transparent);
+    --entity-radius: 12px;
+    --entity-control-height: 50px;
     position: relative;
     width: 100%;
+    min-width: 0;
+  }
+
+  .entity-input.move-variant {
+    --entity-radius: 14px;
+    --entity-control-height: 54px;
+    --entity-surface: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 96%, transparent);
+    --entity-input-bg: color-mix(in srgb, var(--theme-input-bg, var(--theme-card-bg, #09090b)) 92%, transparent);
+    --entity-shadow: 0 24px 48px color-mix(in srgb, var(--theme-background, #09090b) 16%, transparent);
   }
 
   .entity-input.disabled {
@@ -433,55 +459,68 @@
   .input-label {
     display: block;
     font-size: 11px;
-    font-weight: 500;
-    color: #78716c;
-    margin-bottom: 6px;
+    font-weight: 700;
+    color: var(--entity-text-muted) !important;
+    margin-bottom: 8px;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.08em;
   }
 
   .input-wrapper {
     position: relative;
     display: flex;
     align-items: center;
+    min-width: 0;
   }
 
-  input {
+  .entity-input-field {
     width: 100%;
-    padding: 12px 80px 12px 14px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 8px;
-    color: #e7e5e4;
+    min-width: 0;
+    min-height: var(--entity-control-height);
+    padding: 13px 54px 13px 15px !important;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--entity-surface) 94%, transparent),
+      color-mix(in srgb, var(--entity-input-bg) 100%, transparent)
+    ) !important;
+    border: 1px solid color-mix(in srgb, var(--entity-border) 92%, transparent) !important;
+    border-radius: var(--entity-radius) !important;
+    color: var(--entity-text) !important;
     font-size: 14px;
     font-family: inherit;
-    transition: border-color 0.15s;
+    line-height: 1.2;
+    box-sizing: border-box;
+    transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
   }
 
-  input:focus {
+  .entity-input-field:focus {
     outline: none;
-    border-color: #fbbf24;
+    border-color: var(--entity-border-active) !important;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--entity-accent) 24%, transparent),
+      0 12px 28px color-mix(in srgb, var(--theme-background, #09090b) 12%, transparent);
   }
 
-  input::placeholder {
-    color: #57534e;
+  .entity-input-field::placeholder {
+    color: var(--entity-text-muted) !important;
   }
 
   .selected-badge {
     position: absolute;
-    right: 36px;
+    right: 48px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #fbbf24;
-    background: #422006;
-    padding: 2px 6px;
-    border-radius: 4px;
+    color: var(--entity-accent);
+    background: color-mix(in srgb, var(--entity-accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--entity-accent) 18%, transparent);
+    padding: 3px 7px;
+    border-radius: 999px;
   }
 
   .selected-badge.unresolved {
-    color: #f97316;
-    background: #431407;
-    border: 1px dashed #c2410c;
+    color: color-mix(in srgb, var(--theme-debit, #f97316) 78%, white 22%);
+    background: color-mix(in srgb, var(--theme-debit, #f97316) 12%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--theme-debit, #f97316) 38%, transparent);
   }
 
   .closed-trigger {
@@ -489,50 +528,63 @@
     align-items: center;
     gap: 10px;
     width: 100%;
-    min-height: 46px;
-    padding: 8px 12px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 8px;
-    color: #e7e5e4;
+    min-height: var(--entity-control-height);
+    min-width: 0;
+    padding: 9px 14px !important;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--entity-surface) 96%, transparent),
+      color-mix(in srgb, var(--entity-input-bg) 100%, transparent)
+    ) !important;
+    border: 1px solid color-mix(in srgb, var(--entity-border) 92%, transparent) !important;
+    border-radius: var(--entity-radius) !important;
+    color: var(--entity-text) !important;
     cursor: pointer;
     text-align: left;
-    transition: border-color 0.15s;
+    box-sizing: border-box;
+    transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
   }
 
   .closed-trigger:hover {
-    border-color: #3f3f46;
+    border-color: var(--entity-border-hover) !important;
+    box-shadow: 0 12px 26px color-mix(in srgb, var(--theme-background, #09090b) 12%, transparent);
+    transform: translateY(-1px);
   }
 
   .closed-trigger:focus-visible {
     outline: none;
-    border-color: #fbbf24;
+    border-color: var(--entity-border-active) !important;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--entity-accent) 24%, transparent),
+      0 12px 28px color-mix(in srgb, var(--theme-background, #09090b) 12%, transparent);
   }
 
   .closed-trigger-arrow {
     margin-left: auto;
-    color: #78716c;
+    color: var(--entity-text-muted);
     flex-shrink: 0;
   }
 
   .dropdown-toggle {
     position: absolute;
-    right: 4px;
-    width: 28px;
-    height: 28px;
+    right: 8px;
+    width: 34px;
+    height: 34px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: transparent;
-    border: none;
-    color: #78716c;
+    background: color-mix(in srgb, var(--entity-surface) 72%, transparent) !important;
+    border: 1px solid transparent !important;
+    color: var(--entity-text-muted) !important;
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: 10px !important;
+    transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
   }
 
   .dropdown-toggle:hover {
-    background: #292524;
-    color: #a8a29e;
+    background: color-mix(in srgb, var(--entity-elevated) 100%, transparent) !important;
+    border-color: color-mix(in srgb, var(--entity-accent) 16%, transparent) !important;
+    color: var(--entity-text-secondary) !important;
   }
 
   .dropdown {
@@ -540,14 +592,19 @@
     top: 100%;
     left: 0;
     right: 0;
-    margin-top: 4px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    margin-top: 8px;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--entity-surface) 98%, transparent),
+      color-mix(in srgb, var(--entity-input-bg) 100%, transparent)
+    );
+    border: 1px solid color-mix(in srgb, var(--entity-border) 96%, transparent);
+    border-radius: calc(var(--entity-radius) + 2px);
+    box-shadow: var(--entity-shadow);
     z-index: 100;
-    max-height: 240px;
+    max-height: 280px;
     overflow-y: auto;
+    backdrop-filter: blur(14px);
   }
 
   .dropdown::-webkit-scrollbar {
@@ -555,14 +612,14 @@
   }
 
   .dropdown::-webkit-scrollbar-thumb {
-    background: #44403c;
+    background: color-mix(in srgb, var(--entity-text-muted) 50%, transparent);
     border-radius: 2px;
   }
 
   .dropdown-empty {
     padding: 16px;
     text-align: center;
-    color: #57534e;
+    color: var(--entity-text-muted);
     font-size: 13px;
   }
 
@@ -571,32 +628,34 @@
     align-items: center;
     gap: 8px;
     width: 100%;
-    padding: 10px 14px;
-    background: none;
-    border: none;
-    color: #e7e5e4;
+    min-width: 0;
+    padding: 11px 14px !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    color: var(--entity-text) !important;
     font-size: 13px;
     text-align: left;
     cursor: pointer;
-    transition: background 0.1s;
+    transition: background 0.12s ease, color 0.12s ease;
   }
 
   .dropdown-item:hover {
-    background: #292524;
+    background: color-mix(in srgb, var(--entity-elevated) 90%, transparent) !important;
   }
 
   .dropdown-item.selected {
-    background: #422006;
+    background: color-mix(in srgb, var(--entity-accent) 10%, transparent) !important;
   }
 
   .dropdown-item.pinned {
-    background: rgba(251, 191, 36, 0.08);
+    background: color-mix(in srgb, var(--entity-accent) 10%, transparent) !important;
   }
 
   .item-name {
-    color: #e7e5e4;
+    color: var(--entity-text);
     font-size: 12px;
-    font-weight: 500;
+    font-weight: 600;
     line-height: 1.2;
   }
 
@@ -608,7 +667,7 @@
   }
 
   .item-id {
-    color: #78716c;
+    color: var(--entity-text-muted);
     font-size: 10px;
     font-family: 'JetBrains Mono', monospace;
     white-space: nowrap;
@@ -619,8 +678,8 @@
   .item-avatar {
     width: 18px;
     height: 18px;
-    border-radius: 4px;
-    border: 1px solid #292524;
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--entity-border) 90%, transparent);
     flex-shrink: 0;
   }
 
@@ -628,8 +687,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: #292524;
-    color: #a8a29e;
+    background: color-mix(in srgb, var(--entity-elevated) 100%, transparent);
+    color: var(--entity-text-secondary);
     font-size: 10px;
   }
 
@@ -646,9 +705,9 @@
     align-items: center;
     padding: 1px 7px;
     border-radius: 999px;
-    background: rgba(34, 197, 94, 0.12);
-    border: 1px solid rgba(34, 197, 94, 0.2);
-    color: #86efac;
+    background: color-mix(in srgb, var(--theme-credit, #22c55e) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-credit, #22c55e) 18%, transparent);
+    color: color-mix(in srgb, var(--theme-credit, #22c55e) 70%, white 30%);
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.06em;
@@ -658,7 +717,7 @@
 
   .dropdown-section-label {
     padding: 8px 14px 6px;
-    color: #78716c;
+    color: var(--entity-text-muted);
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -667,14 +726,14 @@
 
   .dropdown-divider {
     height: 1px;
-    background: #292524;
+    background: color-mix(in srgb, var(--entity-border) 92%, transparent);
     margin: 4px 0;
   }
 
   .dropdown-hint {
     padding: 8px 14px;
-    border-top: 1px solid #292524;
+    border-top: 1px solid color-mix(in srgb, var(--entity-border) 92%, transparent);
     font-size: 11px;
-    color: #57534e;
+    color: var(--entity-text-muted);
   }
 </style>

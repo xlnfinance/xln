@@ -32,7 +32,7 @@ const defaultSettings: Settings = {
   barLayout: 'center',
   accountBarUsdPerPx: ACCOUNT_BAR_USD_PER_100PX_DEFAULT / 100,
   accountDeltaViewMode: 'per-token',
-  tokenPrecision: 8, // 2..18 digits after decimal for token amounts (18 = full)
+  tokenPrecision: 4, // 2..18 digits after decimal for token amounts (18 = full)
   showTokenIcons: true,
   showTimeMachine: false, // Off by default to reduce visual noise in wallet mode
   dropdownMode: 'signer-first',

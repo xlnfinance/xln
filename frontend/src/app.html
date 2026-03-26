@@ -72,6 +72,19 @@
 			}
 			/* Prevent iOS elastic bounce / white flash on overscroll */
 			body { position: fixed; width: 100%; }
+			html.xln-user-mode,
+			body.xln-user-mode {
+				height: auto;
+				min-height: 100%;
+				overflow-x: hidden;
+				overflow-y: auto;
+				overscroll-behavior-y: auto;
+				background: var(--theme-bg-gradient, #0a0a0c);
+			}
+			body.xln-user-mode {
+				position: static;
+				width: auto;
+			}
 		</style>
 	</body>
 </html>

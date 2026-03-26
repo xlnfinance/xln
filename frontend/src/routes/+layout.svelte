@@ -45,14 +45,25 @@
 <Toast />
 
 <style>
-	:global(body) {
-		margin: 0;
-		padding: 0;
-		background: var(--theme-background, #000);
+	:global(html) {
+		background: var(--theme-bg-gradient, var(--theme-background, #000));
 		color: var(--theme-text-primary, #e4e4e7);
 	}
 
+	:global(body) {
+		margin: 0;
+		padding: 0;
+		background: var(--theme-bg-gradient, var(--theme-background, #000));
+		color: var(--theme-text-primary, #e4e4e7);
+	}
+
+	main {
+		min-height: 100dvh;
+		background: var(--theme-bg-gradient, var(--theme-background, #000));
+		color: inherit;
+	}
+
 	main.with-topbar {
-		/* No padding - topbar is sticky (stays in flow) */
+		min-height: calc(100dvh - 56px);
 	}
 </style>

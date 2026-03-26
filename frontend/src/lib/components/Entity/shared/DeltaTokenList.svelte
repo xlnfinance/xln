@@ -145,4 +145,14 @@
       padding: 10px;
     }
   }
+
+  @media (max-width: 640px) {
+    .delta-token-list.plain {
+      gap: 4px;
+    }
+
+    .delta-token-list.sheet .delta-row {
+      padding: 8px;
+    }
+  }
 </style>

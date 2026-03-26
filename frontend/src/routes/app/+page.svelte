@@ -236,7 +236,7 @@
 {/if}
 
 <style>
-  :global(body) {
+  :global(body:not(.xln-user-mode)) {
     margin: 0;
     overflow: hidden;
     height: 100vh;

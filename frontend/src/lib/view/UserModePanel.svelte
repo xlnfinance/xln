@@ -18,6 +18,8 @@
   import { runtimes, activeRuntimeId } from '$lib/stores/runtimeStore';
   import { showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import type { Tab } from '$lib/types/ui';
+  import type { Env } from '@xln/runtime/xln-api';
+  import type { EnvSnapshot, EntityReplica } from '$types';
   import { createSelfEntity } from '$lib/utils/entityFactory';
   import { readOnboardingComplete, writeOnboardingComplete } from '$lib/utils/onboardingState';
 
@@ -29,9 +31,26 @@
   import FormationPanel from '$lib/components/Entity/FormationPanel.svelte';
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
 
+  type RuntimeFrame = Env | EnvSnapshot;
+  type JurisdictionLike = { name: string };
+  type JurisdictionEntry = { name?: string; rpcs?: string[] };
+  type JMachineCreateDetail = {
+    name: string;
+    mode: 'browservm' | 'rpc';
+    chainId: number;
+    rpcs: string[];
+    ticker: string;
+    contracts?: {
+      depository?: string;
+      entityProvider?: string;
+      account?: string;
+      deltaTransformer?: string;
+    } | undefined;
+  };
+
   interface Props {
-    isolatedEnv: Writable<any>;
-    isolatedHistory?: Writable<any[]>;
+    isolatedEnv: Writable<Env | null>;
+    isolatedHistory?: Writable<EnvSnapshot[]>;
     isolatedTimeIndex?: Writable<number>;
     isolatedIsLive?: Writable<boolean>;
   }
@@ -118,14 +137,14 @@
   });
 
   // Current frame (time-aware)
-  const currentFrame = $derived.by(() => {
+  const currentFrame: RuntimeFrame | null = $derived.by((): RuntimeFrame | null => {
     const timeIdx = $isolatedTimeIndex;
     const hist = $isolatedHistory;
     const env = $isolatedEnv;
 
     if (timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
       const idx = Math.min(timeIdx, hist.length - 1);
-      return hist[idx];
+      return hist[idx] ?? null;
     }
     return env;
   });
@@ -135,13 +154,18 @@
     const frame = currentFrame;
     if (!frame?.jReplicas) return [];
     if (frame.jReplicas instanceof Map) {
-      return Array.from(frame.jReplicas.values());
+      return Array.from(frame.jReplicas.values()) as JurisdictionLike[];
     }
     if (Array.isArray(frame.jReplicas)) {
-      return frame.jReplicas;
+      return frame.jReplicas as JurisdictionLike[];
     }
-    return Object.values(frame.jReplicas || {});
+    return Object.values(frame.jReplicas || {}) as JurisdictionLike[];
   });
+
+  function getFrameActiveJurisdiction(frame: RuntimeFrame | null | undefined): string | null {
+    if (!frame || !('activeJurisdiction' in frame)) return null;
+    return typeof frame.activeJurisdiction === 'string' ? frame.activeJurisdiction : null;
+  }
 
   // Auto-select jurisdiction when available (but NOT when entity is selected)
   $effect(() => {
@@ -149,23 +173,23 @@
     // Don't auto-set jurisdiction if user has selected an entity
     if (selectedEntityId) return;
     if (!selectedJurisdictionName) {
-      const active = (currentFrame as any)?.activeJurisdiction || availableJurisdictions[0]?.name;
+      const active = getFrameActiveJurisdiction(currentFrame) || availableJurisdictions[0]?.name;
       if (active) selectedJurisdictionName = active;
       return;
     }
-    if (!availableJurisdictions.find((j: any) => j.name === selectedJurisdictionName)) {
+    if (!availableJurisdictions.find((j) => j.name === selectedJurisdictionName)) {
       selectedJurisdictionName = availableJurisdictions[0]?.name || null;
     }
   });
 
   // Get replica for selected entity
-  const selectedReplica = $derived.by(() => {
+  const selectedReplica = $derived.by<EntityReplica | null>(() => {
     if (!selectedEntityId || !selectedSignerId || !currentFrame?.eReplicas) {
       return null;
     }
     const replicas = currentFrame.eReplicas instanceof Map
       ? currentFrame.eReplicas
-      : new Map(Object.entries(currentFrame.eReplicas || {}));
+      : new Map<string, EntityReplica>(Object.entries(currentFrame.eReplicas || {}) as Array<[string, EntityReplica]>);
     const selectedEntityLower = selectedEntityId.toLowerCase();
     const selectedSignerLower = selectedSignerId.toLowerCase();
     for (const [key, replica] of replicas.entries()) {
@@ -200,18 +224,18 @@
     return selectedReplica.state?.accounts?.get(selectedAccountId) || null;
   });
 
-  function listJMachineNames(env: any): string[] {
+  function listJMachineNames(env: RuntimeFrame | null | undefined): string[] {
     const jReplicas = env?.jReplicas;
     if (!jReplicas) return [];
     if (jReplicas instanceof Map) return Array.from(jReplicas.keys());
-    if (Array.isArray(jReplicas)) return jReplicas.map((jr: any) => jr?.name).filter(Boolean);
+    if (Array.isArray(jReplicas)) return jReplicas.map((jr) => jr?.name).filter(Boolean);
     return Object.keys(jReplicas || {});
   }
 
-  function findReplicaBySigner(env: any, signerId: string) {
+  function findReplicaBySigner(env: RuntimeFrame | null | undefined, signerId: string): EntityReplica | null {
     const reps = env?.eReplicas;
     if (!reps) return null;
-    const replicas = reps instanceof Map ? reps : new Map(Object.entries(reps || {}));
+    const replicas = reps instanceof Map ? reps : new Map<string, EntityReplica>(Object.entries(reps || {}) as Array<[string, EntityReplica]>);
     const signerLower = signerId.toLowerCase();
     for (const [key, replica] of replicas) {
       const [, signerFromKey] = String(key).split(':');
@@ -223,7 +247,7 @@
     return null;
   }
 
-  async function createJMachineInEnv(env: any): Promise<string | null> {
+  async function createJMachineInEnv(env: Env | null): Promise<string | null> {
     if (!env || isCreatingJMachine) return null;
 
     isCreatingJMachine = true; // Never reset on failure - no retries
@@ -276,9 +300,9 @@
       return; // Don't auto-create xlnomy1
     }
 
-    let jurisdiction = selectedJurisdictionName && names.includes(selectedJurisdictionName)
+    let jurisdiction: string | null = selectedJurisdictionName && names.includes(selectedJurisdictionName)
       ? selectedJurisdictionName
-      : env.activeJurisdiction;
+      : (env.activeJurisdiction ?? null);
     if (!jurisdiction) {
       jurisdiction = names[0] || null;
     }
@@ -331,7 +355,7 @@
           continue;
         }
 
-        const entityId = await createSelfEntity(env, signerAddress, jurisdiction || undefined);
+        const entityId = await createSelfEntity(env, signerAddress, jurisdiction ?? undefined);
         if (runEpoch !== ensureSelfEntitiesEpoch) return;
         if (entityId) {
           // Resolve canonical entity by signer after create to prevent duplicate/late-selection drift.
@@ -366,9 +390,18 @@
   });
 
   const signerNetworkEnabled = $derived.by(() => {
-    const rpc = selectedReplica?.state?.config?.jurisdiction?.rpc || '';
-    if (!rpc) return false;
-    return !rpc.startsWith('browservm://');
+    const jurisdictionName =
+      selectedReplica?.state?.config?.jurisdiction?.name
+      || selectedJurisdictionName
+      || null;
+    if (!jurisdictionName || !currentFrame?.jReplicas) return false;
+    const replicas: JurisdictionEntry[] = currentFrame.jReplicas instanceof Map
+      ? Array.from(currentFrame.jReplicas.values())
+      : Array.isArray(currentFrame.jReplicas)
+        ? currentFrame.jReplicas
+        : Object.values(currentFrame.jReplicas || {});
+    const match = replicas.find((replica) => replica?.name === jurisdictionName);
+    return Array.isArray(match?.rpcs) && match.rpcs.some((rpc: string) => !rpc.startsWith('browservm://'));
   });
 
   const hasSigner = $derived(!!signer?.address);
@@ -481,19 +514,7 @@
     activeInlinePanel = 'add-jmachine';
   }
 
-  async function handleJMachineCreate(event: CustomEvent<{
-    name: string;
-    mode: 'browservm' | 'rpc';
-    chainId: number;
-    rpcs: string[];
-    ticker: string;
-    contracts?: {
-      depository?: string;
-      entityProvider?: string;
-      account?: string;
-      deltaTransformer?: string;
-    };
-  }>) {
+  async function handleJMachineCreate(event: CustomEvent<JMachineCreateDetail>) {
     const { name, mode, chainId, rpcs, ticker, contracts } = event.detail;
     const env = get(isolatedEnv);
     if (!env) return;
@@ -560,10 +581,10 @@
           <button class="back-btn" onclick={() => activeInlinePanel = 'none'}>← Back</button>
           <h3>Add Jurisdiction</h3>
         </div>
-        <AddJMachine
-          on:create={handleJMachineCreate}
-          on:cancel={() => activeInlinePanel = 'none'}
-        />
+          <AddJMachine
+            on:create={(event) => void handleJMachineCreate(event)}
+            on:cancel={() => activeInlinePanel = 'none'}
+          />
       </div>
     {:else if showVaultPanelVisible}
       <RuntimeCreation embedded={true} />
@@ -576,13 +597,9 @@
     {:else if viewMode === 'entity'}
       <EntityPanelTabs
         tab={entityTab}
-        isLast={true}
         userModeHeader={true}
         showJurisdiction={false}
         selectedJurisdiction={selectedJurisdictionName}
-        jurisdictionFilter={selectedJurisdictionName}
-        allowHeaderAddEntity={true}
-        allowHeaderAddJurisdiction={true}
         allowHeaderAddRuntime={true}
         allowHeaderDeleteRuntime={true}
         headerRuntimeAddLabel="+ Add Runtime"
@@ -614,23 +631,20 @@
   .user-panel {
     display: flex;
     flex-direction: column;
-    height: 100%;
-    min-height: 0;
-    background: var(--theme-background, #0a0a0a);
+    height: auto;
+    min-height: 100dvh;
+    background: transparent;
     color: var(--theme-text-primary, #e5e5e5);
   }
 
   /* Content - below nav z-index so dropdowns overlay */
   .panel-content {
     flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: visible;
     min-height: 0;
     position: relative;
     z-index: 1;
     padding: 0;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
   }
 
   /* Inline Panels - NO POPUPS! */
@@ -646,8 +660,9 @@
     align-items: center;
     gap: 12px;
     padding: 12px 16px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 84%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 72%, transparent);
+    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, var(--theme-background, #0a0a0a));
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 88%, transparent);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--theme-background, #0a0a0a) 7%, transparent);
     position: sticky;
     top: 0;
     z-index: 10;
@@ -675,8 +690,8 @@
     align-items: center;
     gap: 4px;
     padding: 6px 12px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
+    background: color-mix(in srgb, var(--theme-input-bg, var(--theme-card-bg, #18181b)) 96%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-input-border, var(--theme-card-border, #27272a)) 86%, transparent);
     border-radius: 6px;
     color: var(--theme-text-secondary, #8b949e);
     font-size: 13px;
@@ -685,9 +700,9 @@
   }
 
   .back-btn:hover {
-    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 92%, transparent);
+    background: color-mix(in srgb, var(--theme-surface-hover, var(--theme-card-bg, #1c1c20)) 96%, transparent);
     color: var(--theme-text-primary, #e6edf3);
-    border-color: color-mix(in srgb, var(--theme-border, #27272a) 86%, white 14%);
+    border-color: color-mix(in srgb, var(--theme-card-hover-border, var(--theme-border, #27272a)) 82%, transparent);
   }
 
   @media (max-width: 768px) {

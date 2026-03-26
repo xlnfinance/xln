@@ -702,7 +702,7 @@
   }
 
   function formatEthAmount(amount: bigint): string {
-    const precision = Math.max(0, Math.min(18, Math.floor(Number($settings?.tokenPrecision ?? 6))));
+    const precision = Math.max(0, Math.min(18, Math.floor(Number($settings?.tokenPrecision ?? 4))));
     const negative = amount < 0n;
     const abs = negative ? -amount : amount;
     const divisor = 10n ** 18n;
