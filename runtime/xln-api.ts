@@ -181,7 +181,6 @@ export interface XLNModule {
   registerEnvChangeCallback: (env: Env, callback: (env: Env) => void) => (() => void);
   getEnv: (env?: Env | null) => Env | null;
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
-  submitExternalTokenToReserve: (env: Env, signerId: string, entityId: string, tokenAddress: string, amount: bigint) => Promise<void>;
   submitDebtEnforcement: (env: Env, entityId: string, tokenId: number) => Promise<void>;
   processJBlockEvents?: (env: Env) => Promise<void>;
   queueEntityInput?: (entityId: string, signerId: string, txData: QueueEntityInputPayload) => Promise<void>;
