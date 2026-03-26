@@ -479,7 +479,7 @@ const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean): Pro
   if (current.length >= HUB_REQUIRED_TOKEN_COUNT) return current;
   if (allowDeploy) {
     await deployDefaultTokensOnRpc(jadapter);
-    return await jadapter.getTokenRegistry().catch(() => []);
+    return await waitForTokenCatalog(jadapter);
   }
   return [];
 };
@@ -487,10 +487,10 @@ const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean): Pro
 const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTokenInfo[]> => {
   for (let i = 0; i < rounds; i += 1) {
     const tokens = await jadapter.getTokenRegistry().catch(() => []);
-    if (tokens.length > 0) return tokens;
+    if (tokens.length >= HUB_REQUIRED_TOKEN_COUNT) return tokens;
     await sleep(250);
   }
-  throw new Error('TOKEN_CATALOG_EMPTY');
+  throw new Error(`TOKEN_CATALOG_INCOMPLETE required=${HUB_REQUIRED_TOKEN_COUNT}`);
 };
 
 const ensureOrderbook = async (env: Env, entityId: string, signerId: string): Promise<void> => {

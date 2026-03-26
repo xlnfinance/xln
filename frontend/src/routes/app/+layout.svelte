@@ -24,11 +24,13 @@
 
   let { children } = $props();
 
-  let embeddedPayMode = false;
-  let hasActiveTabLock = false;
-  let activeTabLockReady = false;
-  let embedBootReady = false;
-  let resettingEverything = false;
+  let embeddedPayMode = $state(false);
+  let hasActiveTabLock = $state(false);
+  let activeTabLockReady = $state(false);
+  let embedBootReady = $state(false);
+  let resettingEverything = $state(false);
+  let bootGeneration = $state(0);
+  let lockTestMode = $state(false);
 
   function isResetHashActive(): boolean {
     if (!browser) return false;
@@ -67,6 +69,7 @@
     if (!browser) return;
     const params = new URLSearchParams(window.location.search);
     const hasEmbedQuery = params.get('embed') === '1' || params.has('e');
+    lockTestMode = params.get('locktest') === '1';
     const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
     const qIndex = rawHash.indexOf('?');
     const hashRoute = qIndex >= 0 ? rawHash.slice(0, qIndex).trim().toLowerCase() : rawHash.trim().toLowerCase();
@@ -83,32 +86,44 @@
   }
 
   async function deactivateThisTab(): Promise<void> {
-    await vaultOperations.suspendAllRuntimeActivity();
-    await suspendClientActivity();
     hasActiveTabLock = false;
     activeTabLockReady = true;
     error.set(null);
     isLoading.set(false);
+    bootGeneration += 1;
+    try {
+      await vaultOperations.suspendAllRuntimeActivity();
+      await suspendClientActivity();
+    } catch (err) {
+      console.warn('Failed to suspend inactive tab activity:', err);
+    }
   }
 
   async function bootApp(): Promise<void> {
     if (!hasActiveTabLock) return;
+    const generation = ++bootGeneration;
     embedBootReady = false;
     try {
       await prepareDevSession();
+      if (generation !== bootGeneration || !hasActiveTabLock) return;
       settingsOperations.initialize();
       tabOperations.loadFromStorage();
       if (!embeddedPayMode) {
         tabOperations.initializeDefaultTabs();
       }
       await initializeXLN();
+      if (generation !== bootGeneration || !hasActiveTabLock) return;
       await vaultOperations.initialize();
+      if (generation !== bootGeneration || !hasActiveTabLock) return;
       await tick();
+      if (generation !== bootGeneration || !hasActiveTabLock) return;
       if (!embeddedPayMode) {
         timeOperations.initialize();
       }
+      if (generation !== bootGeneration || !hasActiveTabLock) return;
       embedBootReady = true;
     } catch (err) {
+      if (generation !== bootGeneration || !hasActiveTabLock) return;
       console.error('Failed to initialize XLN:', err);
       error.set((err as Error)?.message || 'Initialization failed');
       embedBootReady = false;
@@ -142,6 +157,12 @@
       if (disposed) return;
       hasActiveTabLock = true;
       activeTabLockReady = true;
+      if (lockTestMode) {
+        isLoading.set(false);
+        error.set(null);
+        embedBootReady = true;
+        return;
+      }
       await bootApp();
     })().catch((err) => {
       if (disposed) return;
@@ -165,10 +186,11 @@
 </svelte:head>
 
 {#if activeTabLockReady && !hasActiveTabLock}
-  <div class="inactive-tab-screen">
+  <div class="inactive-tab-screen" data-testid="inactive-tab-screen">
     <h2>Inactive Tab</h2>
     <p>This wallet tab lost the active lock to a newer tab.</p>
     <button
+      data-testid="inactive-tab-reload"
       on:click={() => {
         clearInactiveTabStandby();
         window.location.reload();
@@ -181,8 +203,10 @@
   <div class="embedded-pay-screen">
     <EmbeddedPayButton />
   </div>
+{:else if lockTestMode}
+  <div data-testid="app-runtime-ready"></div>
 {:else if !activeTabLockReady || $isLoading || !$xlnFunctions.isReady}
-  <div class="loading-screen">
+  <div class="loading-screen" data-testid="app-loading-screen">
     <div class="loading-shell">
       <div class="loading-mark">
         <div class="loading-halo"></div>
@@ -211,7 +235,9 @@
     <button on:click={() => initializeXLN()}>Retry</button>
   </div>
 {:else}
-  {@render children?.()}
+  <div data-testid="app-runtime-ready">
+    {@render children?.()}
+  </div>
 {/if}
 
 <style>

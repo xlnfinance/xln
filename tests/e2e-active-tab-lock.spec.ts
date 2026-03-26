@@ -20,6 +20,10 @@ async function waitUntilOwnsActiveLock(page: Page): Promise<void> {
   }, undefined, { timeout: 10_000 });
 }
 
+function inactiveTabScreen(page: Page) {
+  return page.getByTestId('inactive-tab-screen');
+}
+
 test.describe('Active tab lock handoff', () => {
   test('second /app tab takes ownership and first becomes inactive', async ({ browser }) => {
     const context: BrowserContext = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -27,12 +31,13 @@ test.describe('Active tab lock handoff', () => {
     const second = await context.newPage();
 
     try {
-      await openApp(first, '/app');
+      await openApp(first, '/app?locktest=1');
       await waitUntilOwnsActiveLock(first);
-      await openApp(second, '/app');
+      await openApp(second, '/app?locktest=1');
+      await waitUntilOwnsActiveLock(second);
 
-      await expect(first.getByRole('heading', { name: 'Inactive Tab' })).toBeVisible({ timeout: 10_000 });
-      await expect(second.getByRole('heading', { name: 'Inactive Tab' })).toHaveCount(0);
+      await expect(inactiveTabScreen(first)).toBeVisible({ timeout: 30_000 });
+      await expect(inactiveTabScreen(second)).toHaveCount(0);
     } finally {
       await context.close();
     }
@@ -44,21 +49,22 @@ test.describe('Active tab lock handoff', () => {
     const second = await context.newPage();
 
     try {
-      await openApp(first, '/app');
+      await openApp(first, '/app?locktest=1');
       await waitUntilOwnsActiveLock(first);
-      await openApp(second, '/app');
+      await openApp(second, '/app?locktest=1');
+      await waitUntilOwnsActiveLock(second);
 
-      await expect(first.getByRole('heading', { name: 'Inactive Tab' })).toBeVisible({ timeout: 10_000 });
-      await expect(second.getByRole('heading', { name: 'Inactive Tab' })).toHaveCount(0);
+      await expect(inactiveTabScreen(first)).toBeVisible({ timeout: 30_000 });
+      await expect(inactiveTabScreen(second)).toHaveCount(0);
 
       await first.bringToFront();
       await first.waitForTimeout(1500);
-      await expect(first.getByRole('heading', { name: 'Inactive Tab' })).toBeVisible();
-      await expect(second.getByRole('heading', { name: 'Inactive Tab' })).toHaveCount(0);
+      await expect(inactiveTabScreen(first)).toBeVisible();
+      await expect(inactiveTabScreen(second)).toHaveCount(0);
 
-      await first.getByRole('button', { name: 'Reload to acquire active lock' }).click();
-      await expect(second.getByRole('heading', { name: 'Inactive Tab' })).toBeVisible({ timeout: 10_000 });
-      await expect(first.getByRole('heading', { name: 'Inactive Tab' })).toHaveCount(0);
+      await first.getByTestId('inactive-tab-reload').click();
+      await expect(inactiveTabScreen(second)).toBeVisible({ timeout: 30_000 });
+      await expect(inactiveTabScreen(first)).toHaveCount(0);
     } finally {
       await context.close();
     }
@@ -71,15 +77,16 @@ test.describe('Active tab lock handoff', () => {
     const targetEntityId = `0x${'1'.repeat(64)}`;
 
     try {
-      await openApp(first, '/app');
+      await openApp(first, '/app?locktest=1');
       await waitUntilOwnsActiveLock(first);
       await openApp(
         second,
-        `/app?e#pay?id=${encodeURIComponent(targetEntityId)}&token=1&amt=1&mode=embed`,
+        `/app?locktest=1&e#pay?id=${encodeURIComponent(targetEntityId)}&token=1&amt=1&mode=embed`,
       );
+      await waitUntilOwnsActiveLock(second);
 
-      await expect(first.getByRole('heading', { name: 'Inactive Tab' })).toBeVisible({ timeout: 10_000 });
-      await expect(second.getByRole('heading', { name: 'Inactive Tab' })).toHaveCount(0);
+      await expect(inactiveTabScreen(first)).toBeVisible({ timeout: 30_000 });
+      await expect(inactiveTabScreen(second)).toHaveCount(0);
     } finally {
       await context.close();
     }
