@@ -1300,8 +1300,7 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
       child.lastInfo.entityId.length > 0 &&
       child.lastHealth?.timings?.import_j?.completedAt &&
       child.lastHealth?.timings?.hub_bootstrap?.completedAt &&
-      child.lastHealth?.timings?.orderbook_init?.completedAt &&
-      child.lastHealth?.timings?.p2p_connect?.completedAt
+      child.lastHealth?.timings?.orderbook_init?.completedAt
     ) {
       return;
     }
