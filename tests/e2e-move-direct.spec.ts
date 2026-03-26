@@ -66,8 +66,9 @@ async function waitForMoveReady(page: Page): Promise<void> {
   await expect
     .poll(async () => {
       if (!(await confirm.isDisabled())) return 'enabled';
-      const error = await page.locator('.move-summary-progress.error').first().textContent().catch(() => '');
-      return String(error || 'disabled').trim() || 'disabled';
+      const statuses = await page.getByTestId('move-status').allTextContents().catch(() => []);
+      const text = statuses.map((entry) => String(entry || '').trim()).filter(Boolean).join(' | ');
+      return text || 'disabled';
     }, { timeout: 10_000 })
     .toBe('enabled');
 }

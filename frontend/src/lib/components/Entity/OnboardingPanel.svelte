@@ -551,9 +551,6 @@
 
   .checkbox-row input[type='checkbox'] {
     margin-top: 2px;
-    width: 18px;
-    height: 18px;
-    accent-color: #fbbf24;
     flex-shrink: 0;
   }
 
