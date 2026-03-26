@@ -422,7 +422,7 @@ export const startCustodySupport = async (
     'custody-service',
     ['custody/server.ts'],
     {
-      CUSTODY_HOST: 'localhost',
+      CUSTODY_HOST: '127.0.0.1',
       CUSTODY_PORT: String(options.custodyPort),
       CUSTODY_HTTPS: '1',
       CUSTODY_DAEMON_WS: `ws://127.0.0.1:${options.daemonPort}/rpc`,
@@ -433,7 +433,7 @@ export const startCustodySupport = async (
       CUSTODY_DB_PATH: `${options.dbRoot}/custody.sqlite`,
     },
   );
-  await waitForHttpReady(`https://localhost:${options.custodyPort}/api/me`, custodyChild);
+  await waitForHttpReady(`https://127.0.0.1:${options.custodyPort}/api/me`, custodyChild);
 
   return {
     daemonChild,
