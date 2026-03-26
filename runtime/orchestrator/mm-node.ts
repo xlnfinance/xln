@@ -13,7 +13,6 @@ import {
   getActiveJAdapter,
   getP2PState,
   main,
-  process as runtimeProcess,
   enqueueRuntimeInput,
   handleInboundP2PEntityInput,
   startP2P,
@@ -35,6 +34,7 @@ import {
   isAccountConsensusReady,
   settleRuntimeFor,
   sleep,
+  waitUntil,
 } from './mesh-common';
 import { buildDefaultEntitySwapPairs, getSwapPairPolicyByBaseQuote } from '../account-utils';
 import { LIMITS } from '../constants';
@@ -238,6 +238,23 @@ const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTo
   throw new Error('TOKEN_CATALOG_EMPTY');
 };
 
+const waitForActiveJAdapter = async (env: Env, rounds = 200): Promise<JAdapter> => {
+  for (let i = 0; i < rounds; i += 1) {
+    const jadapter = getActiveJAdapter(env);
+    if (jadapter) return jadapter;
+    await settleRuntimeFor(env, 5);
+    await sleep(50);
+  }
+  throw new Error('ACTIVE_JADAPTER_NOT_READY');
+};
+
+const waitForReplicaReady = async (env: Env, entityId: string, rounds = 200): Promise<void> => {
+  const ready = await waitUntil(() => Boolean(getEntityReplicaById(env, entityId)), rounds, BOOTSTRAP_POLL_MS);
+  if (!ready) {
+    throw new Error(`MM_REPLICA_NOT_READY entityId=${entityId}`);
+  }
+};
+
 const ensureJurisdictionReplica = (env: Env, jadapter: JAdapter, rpcUrl: string): void => {
   const activeName = env.activeJurisdiction || Array.from(env.jReplicas?.keys?.() || [])[0];
   if (!activeName) return;
@@ -322,7 +339,11 @@ const normalizeTokenIdsForMm = (tokenCatalog: JTokenInfo[]): number[] => {
     .map(token => Number(token.tokenId))
     .filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
     .sort((a, b) => a - b);
-  return Array.from(new Set(ids)).slice(0, 3);
+  const unique = Array.from(new Set(ids)).slice(0, 3);
+  if (unique.length >= HUB_REQUIRED_TOKEN_COUNT) {
+    return unique;
+  }
+  return [...DEFAULT_ACCOUNT_TOKEN_IDS];
 };
 
 const collectOfferIdsForAccount = (
@@ -699,8 +720,92 @@ const run = async (): Promise<void> => {
 
   const env = await main(resolvedArgs.seed);
   startRuntimeLoop(env);
+  let startupPhase = 'boot';
+  let activeMmEntityId: string | null = null;
 
   const jurisdiction = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
+  console.log(`[MESH-MM] startup phase=${startupPhase}`);
+
+  const directRuntimeWs = createDirectRuntimeWsRoute({
+    runtimeId: String(env.runtimeId || ''),
+    runtimeSeed: resolvedArgs.seed,
+    onEntityInput: async (from, input, ingressTimestamp) => {
+      handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
+    },
+  });
+
+  const server = Bun.serve({
+    hostname: resolvedArgs.apiHost,
+    port: resolvedArgs.apiPort,
+    async fetch(request, serverRef) {
+      const url = new URL(request.url);
+      const pathname = url.pathname;
+
+      const upgraded = directRuntimeWs.maybeUpgrade(request, serverRef);
+      if (upgraded !== undefined) return upgraded;
+
+      if (pathname === '/api/info') {
+        return new Response(JSON.stringify({
+          name: resolvedArgs.name,
+          entityId: activeMmEntityId,
+          runtimeId: env.runtimeId,
+          apiUrl,
+          relayUrl: resolvedArgs.relayUrl,
+          directWsUrl,
+          startupPhase,
+        }), { headers: JSON_HEADERS });
+      }
+
+      if (pathname === '/api/health') {
+        const visibleHubs = readVisibleHubProfiles(env);
+        const activeEntityId = activeMmEntityId;
+        const health = {
+          ok: visibleHubs.length === resolvedArgs.meshHubNames.length,
+          name: resolvedArgs.name,
+          entityId: activeEntityId,
+          runtimeId: String(env.runtimeId || '') || null,
+          relayUrl: resolvedArgs.relayUrl,
+          directWsUrl,
+          apiUrl,
+          startupPhase,
+          p2p: {
+            directPeers: getP2PState(env).directPeers || [],
+          },
+          gossip: {
+            visibleHubNames: visibleHubs.map(profile => profile.name),
+            visibleHubIds: visibleHubs.map(profile => profile.entityId),
+            ready: visibleHubs.length === resolvedArgs.meshHubNames.length,
+          },
+          marketMaker: activeEntityId
+            ? getMarketMakerHealth(env, activeEntityId, visibleHubs.map(profile => profile.entityId), normalizeTokenIdsForMm([]))
+            : {
+                enabled: true,
+                ok: false,
+                entityId: null,
+                expectedOffersPerHub: 0,
+                expectedOffersPerPair: 0,
+                hubs: [],
+              },
+        };
+        return new Response(JSON.stringify(health), { headers: JSON_HEADERS });
+      }
+
+      if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
+        stopP2P(env);
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: JSON_HEADERS,
+        });
+      }
+
+      return new Response(JSON.stringify({ error: 'Not found' }), {
+        status: 404,
+        headers: JSON_HEADERS,
+      });
+    },
+    websocket: directRuntimeWs.websocket,
+  });
+
+  startupPhase = 'import-jurisdiction';
   enqueueRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importJ',
@@ -714,11 +819,11 @@ const run = async (): Promise<void> => {
     }],
     entityInputs: [],
   });
-  await runtimeProcess(env);
+  await settleRuntimeFor(env, 35);
 
-  const jadapter = getActiveJAdapter(env);
-  if (!jadapter) throw new Error('ACTIVE_JADAPTER_MISSING_AFTER_IMPORT');
+  const jadapter = await waitForActiveJAdapter(env);
   ensureJurisdictionReplica(env, jadapter, resolvedArgs.rpcUrl);
+  startupPhase = 'token-catalog';
   const tokenCatalog = await waitForTokenCatalog(jadapter);
   const tokenIds = normalizeTokenIdsForMm(tokenCatalog);
   const meshHubIdentities = parseMeshHubIdentities(resolvedArgs.meshHubIdentitiesJson);
@@ -743,7 +848,9 @@ const run = async (): Promise<void> => {
     },
   };
   const mmEntityId = hashBoard(encodeBoard(consensusConfig)).toLowerCase();
+  activeMmEntityId = mmEntityId;
   if (!getEntityReplicaById(env, mmEntityId)) {
+    startupPhase = 'import-replica';
     enqueueRuntimeInput(env, {
       runtimeTxs: [{
         type: 'importReplica',
@@ -759,8 +866,10 @@ const run = async (): Promise<void> => {
       entityInputs: [],
     });
     await settleRuntimeFor(env, 35);
+    await waitForReplicaReady(env, mmEntityId);
   }
 
+  startupPhase = 'start-p2p';
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
     wsUrl: directWsUrl,
@@ -809,76 +918,7 @@ const run = async (): Promise<void> => {
     });
   }, MARKET_MAKER_QUOTE_LOOP_MS);
   void driveQuotes();
-
-  const directRuntimeWs = createDirectRuntimeWsRoute({
-    runtimeId: String(env.runtimeId || ''),
-    runtimeSeed: resolvedArgs.seed,
-    onEntityInput: async (from, input, ingressTimestamp) => {
-      handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
-    },
-  });
-
-  const server = Bun.serve({
-    hostname: resolvedArgs.apiHost,
-    port: resolvedArgs.apiPort,
-    async fetch(request, serverRef) {
-      const url = new URL(request.url);
-      const pathname = url.pathname;
-
-      const upgraded = directRuntimeWs.maybeUpgrade(request, serverRef);
-      if (upgraded !== undefined) return upgraded;
-
-      if (pathname === '/api/info') {
-        return new Response(JSON.stringify({
-          name: resolvedArgs.name,
-          entityId: mmEntityId,
-          runtimeId: env.runtimeId,
-          apiUrl,
-          relayUrl: resolvedArgs.relayUrl,
-          directWsUrl,
-        }), { headers: JSON_HEADERS });
-      }
-
-      if (pathname === '/api/health') {
-        const visibleHubs = readVisibleHubProfiles(env);
-        const health = {
-          ok: visibleHubs.length === resolvedArgs.meshHubNames.length,
-          name: resolvedArgs.name,
-          entityId: mmEntityId,
-          runtimeId: String(env.runtimeId || '') || null,
-          relayUrl: resolvedArgs.relayUrl,
-          directWsUrl,
-          apiUrl,
-          p2p: {
-            directPeers: getP2PState(env).directPeers || [],
-          },
-          gossip: {
-            visibleHubNames: visibleHubs.map(profile => profile.name),
-            visibleHubIds: visibleHubs.map(profile => profile.entityId),
-            ready: visibleHubs.length === resolvedArgs.meshHubNames.length,
-          },
-          marketMaker: getMarketMakerHealth(env, mmEntityId, visibleHubs.map(profile => profile.entityId), tokenIds),
-        };
-        return new Response(JSON.stringify(health), { headers: JSON_HEADERS });
-      }
-
-      if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
-        shuttingDown = true;
-        clearInterval(loop);
-        stopP2P(env);
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: JSON_HEADERS,
-        });
-      }
-
-      return new Response(JSON.stringify({ error: 'Not found' }), {
-        status: 404,
-        headers: JSON_HEADERS,
-      });
-    },
-    websocket: directRuntimeWs.websocket,
-  });
-
+  startupPhase = 'ready';
   console.log(
     `[MESH-MM] READY entityId=${mmEntityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
   );
