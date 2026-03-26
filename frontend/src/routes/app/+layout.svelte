@@ -217,7 +217,7 @@
     <EmbeddedPayButton />
   </div>
 {:else if lockTestMode}
-  <div data-testid="app-runtime-ready"></div>
+  <main class="app-shell-ready app-shell-ready--empty" data-testid="app-runtime-ready"></main>
 {:else if $error}
   <div class="error-screen">
     <h2>❌ Initialization Failed</h2>
@@ -248,9 +248,7 @@
     </div>
   </div>
 {:else}
-  <div data-testid="app-runtime-ready">
-    {@render children?.()}
-  </div>
+  {@render children?.()}
 {/if}
 
 <style>
@@ -268,12 +266,16 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 100vh;
+    min-height: 100dvh;
     background:
-      radial-gradient(circle at top, rgba(250, 204, 21, 0.08), transparent 32%),
-      radial-gradient(circle at bottom, rgba(251, 191, 36, 0.05), transparent 28%),
-      linear-gradient(180deg, #0d0d10 0%, #09090b 100%);
+      radial-gradient(circle at top, color-mix(in srgb, var(--theme-accent, #facc15) 12%, transparent), transparent 32%),
+      radial-gradient(circle at bottom, color-mix(in srgb, var(--theme-accent, #facc15) 7%, transparent), transparent 28%),
+      var(--theme-bg-gradient, linear-gradient(180deg, #0d0d10 0%, #09090b 100%));
     color: var(--theme-text-primary, #e8e8e8);
+  }
+
+  .app-shell-ready {
+    display: contents;
   }
 
   .loading-shell {
@@ -283,13 +285,17 @@
     align-items: center;
     gap: 20px;
     padding: 36px 28px 30px;
-    border: 1px solid rgba(251, 191, 36, 0.16);
+    border: 1px solid color-mix(in srgb, var(--theme-accent, #facc15) 18%, transparent);
     border-radius: 28px;
     background:
-      linear-gradient(180deg, rgba(24, 24, 27, 0.94), rgba(10, 10, 12, 0.96));
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--theme-surface, var(--theme-card-bg, #18181b)) 94%, var(--theme-background, #09090b)),
+        color-mix(in srgb, var(--theme-background, #09090b) 96%, black)
+      );
     box-shadow:
-      0 28px 80px rgba(0, 0, 0, 0.42),
-      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      0 28px 80px color-mix(in srgb, black 42%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--theme-text-primary, white) 4%, transparent);
   }
 
   .loading-mark {
@@ -304,7 +310,7 @@
     position: absolute;
     inset: 20px;
     border-radius: 999px;
-    background: radial-gradient(circle, rgba(250, 204, 21, 0.14), transparent 70%);
+    background: radial-gradient(circle, color-mix(in srgb, var(--theme-accent, #facc15) 16%, transparent), transparent 70%);
     filter: blur(10px);
     animation: pulse 2.8s ease-in-out infinite;
   }
@@ -331,7 +337,7 @@
     font-weight: 700;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: rgba(250, 204, 21, 0.76);
+    color: color-mix(in srgb, var(--theme-accent, #facc15) 76%, var(--theme-text-primary, white));
   }
 
   .loading-copy h1 {
@@ -339,7 +345,7 @@
     font-size: clamp(28px, 4vw, 36px);
     font-weight: 800;
     letter-spacing: -0.03em;
-    color: #fafaf9;
+    color: var(--theme-text-primary, #fafaf9);
   }
 
   .loading-copy p {
@@ -347,7 +353,7 @@
     max-width: 32ch;
     font-size: 14px;
     line-height: 1.55;
-    color: rgba(231, 229, 228, 0.74);
+    color: color-mix(in srgb, var(--theme-text-secondary, #a1a1aa) 88%, transparent);
   }
 
   .loading-status {
@@ -356,9 +362,9 @@
     gap: 10px;
     padding: 10px 14px;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    color: rgba(231, 229, 228, 0.76);
+    background: color-mix(in srgb, var(--theme-surface, var(--theme-card-bg, #18181b)) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, rgba(255, 255, 255, 0.12)) 72%, transparent);
+    color: color-mix(in srgb, var(--theme-text-secondary, #a1a1aa) 88%, transparent);
     font-size: 12px;
   }
 
@@ -366,8 +372,8 @@
     width: 8px;
     height: 8px;
     border-radius: 999px;
-    background: #facc15;
-    box-shadow: 0 0 14px rgba(250, 204, 21, 0.66);
+    background: var(--theme-accent, #facc15);
+    box-shadow: 0 0 14px color-mix(in srgb, var(--theme-accent, #facc15) 66%, transparent);
     animation: pulse 1.6s ease-in-out infinite;
   }
 
@@ -380,9 +386,13 @@
   .loading-reset {
     padding: 10px 14px;
     border-radius: 12px;
-    border: 1px solid rgba(239, 68, 68, 0.22);
-    background: linear-gradient(180deg, rgba(69, 10, 10, 0.94), rgba(28, 12, 12, 0.96));
-    color: #fca5a5;
+    border: 1px solid color-mix(in srgb, var(--theme-danger, #ef4444) 24%, transparent);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--theme-danger, #ef4444) 18%, var(--theme-surface, var(--theme-card-bg, #18181b))),
+      color-mix(in srgb, var(--theme-danger, #ef4444) 10%, var(--theme-background, #09090b))
+    );
+    color: color-mix(in srgb, var(--theme-danger, #ef4444) 62%, white);
     font-size: 12px;
     font-weight: 700;
     cursor: pointer;
@@ -391,8 +401,8 @@
 
   .loading-reset:hover:not(:disabled) {
     transform: translateY(-1px);
-    color: #fecaca;
-    border-color: rgba(248, 113, 113, 0.44);
+    color: color-mix(in srgb, var(--theme-danger, #ef4444) 48%, white);
+    border-color: color-mix(in srgb, var(--theme-danger, #ef4444) 44%, transparent);
   }
 
   .loading-reset:disabled {
@@ -442,9 +452,13 @@
   .error-screen button {
     padding: 12px 18px;
     border-radius: 12px;
-    border: 1px solid rgba(251, 191, 36, 0.22);
-    background: linear-gradient(180deg, rgba(69, 56, 10, 0.94), rgba(34, 27, 8, 0.96));
-    color: #fde68a;
+    border: 1px solid color-mix(in srgb, var(--theme-accent, #facc15) 24%, transparent);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--theme-accent, #facc15) 18%, var(--theme-surface, var(--theme-card-bg, #18181b))),
+      color-mix(in srgb, var(--theme-accent, #facc15) 10%, var(--theme-background, #09090b))
+    );
+    color: color-mix(in srgb, var(--theme-accent, #facc15) 58%, white);
     font-weight: 700;
     cursor: pointer;
   }
@@ -452,7 +466,7 @@
   .error-msg {
     max-width: 560px;
     margin: 0;
-    color: rgba(248, 113, 113, 0.86);
+    color: color-mix(in srgb, var(--theme-danger, #ef4444) 78%, var(--theme-text-primary, white));
     text-align: center;
   }
 </style>

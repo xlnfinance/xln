@@ -79,16 +79,6 @@
   let activePanelDisposable: { dispose: () => void } | null = null;
   let saveLayoutTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Track mode changes to update panel visibility
-  let currentMode = userMode;
-
-  // Reactive: Update panel visibility when userMode changes (preserve layout)
-  $: if (dockview && currentMode !== userMode) {
-    console.log(`[View] 🔄 Mode changed: ${currentMode ? 'user' : 'dev'} → ${userMode ? 'user' : 'dev'}`);
-    currentMode = userMode;
-    updatePanelsForMode(userMode);
-  }
-
   $: if (typeof document !== 'undefined') {
     document.documentElement.classList.toggle('xln-user-mode', userMode);
     document.body.classList.toggle('xln-user-mode', userMode);
@@ -779,28 +769,6 @@
     }
   }
 
-  // Function to update panel visibility when mode toggles (preserves layout)
-  function updatePanelsForMode(isUserMode: boolean) {
-    if (!dockview) return;
-
-    console.log(`[View] 🔄 Updating panels for ${isUserMode ? 'user' : 'dev'} mode...`);
-
-    // Keep dockview panels alive across mode switches to avoid duplicate IDs/races.
-    // User mode hides the dockview container; dev mode shows it again.
-    if (!isUserMode) {
-      requestAnimationFrame(() => {
-        const width = container?.clientWidth || window.innerWidth;
-        const height = container?.clientHeight || window.innerHeight;
-        dockview.layout(width, height);
-        const graph3dApi = dockview.getPanel('graph3d');
-        if (graph3dApi) {
-          const widthPercent = embedMode ? 1.0 : 0.70;
-          graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
-        }
-      });
-    }
-  }
-
   onDestroy(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.classList.remove('xln-user-mode');
@@ -848,15 +816,14 @@
 <div class="view-wrapper" class:embed-mode={embedMode} class:user-mode={userMode}>
   <CommandPalette bind:isOpen={commandPaletteOpen} on:command={handlePaletteCommand} on:close={() => commandPaletteOpen = false} />
   <PaymentSpotlight />
-  <!-- Always render both, toggle visibility via CSS -->
-  <div class="user-mode-container" class:hidden={!userMode}>
+  {#if userMode}
     <UserModePanel
       isolatedEnv={localEnvStore}
       isolatedHistory={localHistoryStore}
       isolatedTimeIndex={localTimeIndex}
       isolatedIsLive={localIsLive}
     />
-  </div>
+  {/if}
 
   <div
     class="view-container"
@@ -916,19 +883,6 @@
     flex-direction: column;
   }
 
-  .user-mode-container {
-    flex: 1;
-    width: 100%;
-    height: 100%;
-    overflow: visible; /* Dropdowns must overlay - scroll is in panel-content */
-    padding-bottom: 0;
-    background: transparent;
-  }
-
-  .user-mode-container.hidden {
-    display: none;
-  }
-
   .view-container {
     flex: 1;
     width: 100%;
@@ -959,14 +913,6 @@
 
   .view-wrapper.user-mode {
     display: block;
-    height: auto;
-    min-height: 0;
-    overflow: visible;
-  }
-
-  .view-wrapper.user-mode .user-mode-container {
-    display: contents;
-    flex: 0 0 auto;
     height: auto;
     min-height: 0;
     overflow: visible;

@@ -562,89 +562,81 @@
 
 </script>
 
-<div class="user-panel">
-  <!-- Content - panel owns header + main scroll -->
-  <main class="panel-content">
-    {#if activeInlinePanel === 'formation'}
-      <!-- Inline: Entity Formation -->
-      <div class="inline-panel">
-        <div class="inline-panel-header">
-          <button class="back-btn" onclick={handleEntityFormationClose}>← Back</button>
-          <h3>Create Entity</h3>
-        </div>
-        <FormationPanel onCreated={() => { activeInlinePanel = 'none'; }} />
+<main class="panel-content">
+  {#if activeInlinePanel === 'formation'}
+    <!-- Inline: Entity Formation -->
+    <div class="inline-panel">
+      <div class="inline-panel-header">
+        <button class="back-btn" onclick={handleEntityFormationClose}>← Back</button>
+        <h3>Create Entity</h3>
       </div>
-    {:else if activeInlinePanel === 'add-jmachine'}
-      <!-- Inline: Add Jurisdiction -->
-      <div class="inline-panel">
-        <div class="inline-panel-header">
-          <button class="back-btn" onclick={() => activeInlinePanel = 'none'}>← Back</button>
-          <h3>Add Jurisdiction</h3>
-        </div>
-          <AddJMachine
-            on:create={(event) => void handleJMachineCreate(event)}
-            on:cancel={() => activeInlinePanel = 'none'}
-          />
+      <FormationPanel onCreated={() => { activeInlinePanel = 'none'; }} />
+    </div>
+  {:else if activeInlinePanel === 'add-jmachine'}
+    <!-- Inline: Add Jurisdiction -->
+    <div class="inline-panel">
+      <div class="inline-panel-header">
+        <button class="back-btn" onclick={() => activeInlinePanel = 'none'}>← Back</button>
+        <h3>Add Jurisdiction</h3>
       </div>
-    {:else if showVaultPanelVisible}
-      <RuntimeCreation embedded={true} />
-    {:else if viewMode === 'entity' && selectedEntityId && selectedSignerId && !onboardingComplete}
-      <OnboardingPanel
-        entityId={selectedEntityId}
-        signerId={selectedSignerId}
-        on:complete={handleOnboardingComplete}
-      />
-    {:else if viewMode === 'entity'}
-      <EntityPanelTabs
-        tab={entityTab}
-        userModeHeader={true}
-        showJurisdiction={false}
-        selectedJurisdiction={selectedJurisdictionName}
-        allowHeaderAddRuntime={true}
-        allowHeaderDeleteRuntime={true}
-        headerRuntimeAddLabel="+ Add Runtime"
-        replicasOverride={currentFrame?.eReplicas instanceof Map ? currentFrame.eReplicas : null}
-        envOverride={$isolatedEnv}
-        historyOverride={$isolatedHistory}
-        timeIndexOverride={$isolatedTimeIndex}
-        isLiveOverride={$isolatedIsLive}
-        on:signerSelect={handleSignerSelect}
-        on:addSigner={handleAddSigner}
-        on:entitySelect={handleEntitySelect}
-        on:jurisdictionSelect={handleJurisdictionSelect}
-        on:addJurisdiction={handleAddJurisdiction}
-        on:addEntity={handleAddEntity}
-        on:addRuntime={handleAddRuntime}
-        on:deleteRuntime={handleRemoveRuntime}
-      />
-    {:else if viewMode === 'jurisdiction'}
-      <JurisdictionPanel
-        {isolatedEnv}
-        {isolatedHistory}
-        {isolatedTimeIndex}
-      />
-    {/if}
-  </main>
-</div>
+        <AddJMachine
+          on:create={(event) => void handleJMachineCreate(event)}
+          on:cancel={() => activeInlinePanel = 'none'}
+        />
+    </div>
+  {:else if showVaultPanelVisible}
+    <RuntimeCreation embedded={true} />
+  {:else if viewMode === 'entity' && selectedEntityId && selectedSignerId && !onboardingComplete}
+    <OnboardingPanel
+      entityId={selectedEntityId}
+      signerId={selectedSignerId}
+      on:complete={handleOnboardingComplete}
+    />
+  {:else if viewMode === 'entity'}
+    <EntityPanelTabs
+      tab={entityTab}
+      userModeHeader={true}
+      showJurisdiction={false}
+      selectedJurisdiction={selectedJurisdictionName}
+      allowHeaderAddRuntime={true}
+      allowHeaderDeleteRuntime={true}
+      headerRuntimeAddLabel="+ Add Runtime"
+      replicasOverride={currentFrame?.eReplicas instanceof Map ? currentFrame.eReplicas : null}
+      envOverride={$isolatedEnv}
+      historyOverride={$isolatedHistory}
+      timeIndexOverride={$isolatedTimeIndex}
+      isLiveOverride={$isolatedIsLive}
+      on:signerSelect={handleSignerSelect}
+      on:addSigner={handleAddSigner}
+      on:entitySelect={handleEntitySelect}
+      on:jurisdictionSelect={handleJurisdictionSelect}
+      on:addJurisdiction={handleAddJurisdiction}
+      on:addEntity={handleAddEntity}
+      on:addRuntime={handleAddRuntime}
+      on:deleteRuntime={handleRemoveRuntime}
+    />
+  {:else if viewMode === 'jurisdiction'}
+    <JurisdictionPanel
+      {isolatedEnv}
+      {isolatedHistory}
+      {isolatedTimeIndex}
+    />
+  {/if}
+</main>
 
 <style>
-  .user-panel {
+  .panel-content {
     display: flex;
     flex-direction: column;
-    height: auto;
-    min-height: 0;
-    background: transparent;
-    color: var(--theme-text-primary, #e5e5e5);
-  }
-
-  /* Content - below nav z-index so dropdowns overlay */
-  .panel-content {
     flex: 1;
+    height: auto;
     overflow: visible;
     min-height: 0;
     position: relative;
     z-index: 1;
     padding: 0;
+    background: transparent;
+    color: var(--theme-text-primary, #e5e5e5);
   }
 
   /* Inline Panels - NO POPUPS! */
