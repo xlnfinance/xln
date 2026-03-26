@@ -29,10 +29,14 @@
 	// Landing page gets transparent topbar
 	let isLandingPage = $derived($page.url.pathname === '/');
 
-	const isAppRoute = $derived($page.url.pathname.startsWith('/app'));
+	type ChromeMode = 'site' | 'app' | 'hidden';
 
-	// Show topbar on ALL pages except embed mode and app workspace
-	let showTopbar = $derived(!isEmbed && !isAppRoute);
+	let chromeMode = $derived.by<ChromeMode>(() => {
+		const value = (($page.data as Record<string, unknown> | undefined)?.chrome ?? 'site');
+		return value === 'app' || value === 'hidden' ? value : 'site';
+	});
+
+	let showTopbar = $derived(!isEmbed && chromeMode === 'site');
 </script>
 
 {#if showTopbar}
