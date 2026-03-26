@@ -1145,8 +1145,8 @@ export async function createRpcAdapter(
     },
 
     // === High-level J-tx submission ===
-    async submitTx(jTx: JTx, options: { env: Env; signerId?: string; timestamp?: number }): Promise<JSubmitResult> {
-      const { env, signerId, timestamp } = options;
+    async submitTx(jTx: JTx, options: { env: Env; signerId?: string; signerPrivateKey?: Uint8Array; timestamp?: number }): Promise<JSubmitResult> {
+      const { env, signerId, signerPrivateKey, timestamp } = options;
 
       console.log(`📤 [JAdapter:rpc] submitTx type=${jTx.type} entity=${jTx.entityId.slice(-4)}`);
 
@@ -1187,6 +1187,16 @@ export async function createRpcAdapter(
         return runSerializedBatch(async () => {
           const entityProviderAddr = await getLiveEntityProviderAddress();
           const depositoryAddr = await getLiveDepositoryAddress();
+          const batchRequiresExternalSubmitter = batch.externalTokenToReserve.length > 0;
+          const externalSubmitterWallet = batchRequiresExternalSubmitter
+            ? (() => {
+                if (!signerPrivateKey) {
+                  throw new Error(`Missing signer private key for externalTokenToReserve batch from ${jTx.entityId.slice(-4)}`);
+                }
+                return new ethers.Wallet(`0x${Buffer.from(signerPrivateKey).toString('hex')}`, provider);
+              })()
+            : null;
+          const submitterDepository = externalSubmitterWallet ? depository.connect(externalSubmitterWallet) : depository;
           // Use pre-provided encoded batch + hanko (from entity consensus) or sign locally
           let encodedBatch: string;
           let hankoData: string;
@@ -1280,8 +1290,39 @@ export async function createRpcAdapter(
 
           try {
             console.log(`📦 [JAdapter:rpc] processBatch (${getBatchSize(batch)} ops) nonce=${nextNonce}`);
+            if (externalSubmitterWallet) {
+              for (const op of batch.externalTokenToReserve) {
+                const tokenContract = new ethers.Contract(op.contractAddress, [
+                  'function allowance(address owner, address spender) view returns (uint256)',
+                  'function approve(address spender, uint256 amount) returns (bool)',
+                ], externalSubmitterWallet);
+                const tokenOwner = externalSubmitterWallet.address;
+                const allowanceFn = tokenContract.getFunction('allowance') as (owner: string, spender: string) => Promise<bigint>;
+                const approveFn = tokenContract.getFunction('approve') as (
+                  spender: string,
+                  amount: bigint,
+                  overrides?: Record<string, bigint | number>
+                ) => Promise<{ wait: (confirms?: number, timeout?: number) => Promise<unknown>; hash: string }>;
+                const currentAllowance = await allowanceFn(tokenOwner, depositoryAddr);
+                if (currentAllowance >= op.amount) continue;
+                let nextExternalNonce = await provider.getTransactionCount(tokenOwner, 'pending');
+                if (currentAllowance > 0n) {
+                  const clearTx = await approveFn(depositoryAddr, 0n, {
+                    ...(await buildFeeOverrides()),
+                    nonce: nextExternalNonce,
+                  });
+                  nextExternalNonce += 1;
+                  await waitForReceipt(clearTx, 'erc20ApproveReset');
+                }
+                const approveTx = await approveFn(depositoryAddr, op.amount, {
+                  ...(await buildFeeOverrides()),
+                  nonce: nextExternalNonce,
+                });
+                await waitForReceipt(approveTx, 'erc20ApproveExact');
+              }
+            }
             const gasLimit = await estimateGasWithHeadroom(
-              () => depository.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
+              () => submitterDepository.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
               DEFAULT_PROCESS_BATCH_GAS,
             );
             const resolvedFeeOverrides = await buildFeeOverrides();
@@ -1306,7 +1347,7 @@ export async function createRpcAdapter(
 
             // Pre-flight: staticCall to decode revert reason before sending real tx
             try {
-              await depository.processBatch.staticCall(encodedBatch, hankoData, nextNonce, {
+              await submitterDepository.processBatch.staticCall(encodedBatch, hankoData, nextNonce, {
                 gasLimit,
               });
             } catch (simErr: unknown) {
@@ -1371,15 +1412,21 @@ export async function createRpcAdapter(
                   await resetSerializedSignerNonce();
                   console.warn(`⚠️ [JAdapter:rpc] retrying processBatch after nonce sync (attempt ${attempt}/2)`);
                 }
-                const tx = await depository.processBatch(encodedBatch, hankoData, nextNonce, {
-                  gasLimit,
-                  nonce: await allocateSerializedSignerNonce(),
-                  ...resolvedFeeOverrides,
-                });
-                const receipt = await waitForReceipt(tx, 'submitTx:processBatch');
-                const txHash = receipt.hash ?? tx.hash;
-                const blockNum = receipt.blockNumber ?? 0;
-                console.log(`✅ [JAdapter:rpc] Batch executed: block=${blockNum} gas=${receipt.gasUsed}`);
+                const tx = externalSubmitterWallet
+                  ? await submitterDepository.processBatch(encodedBatch, hankoData, nextNonce, {
+                      gasLimit,
+                      nonce: await provider.getTransactionCount(externalSubmitterWallet.address, 'pending'),
+                      ...resolvedFeeOverrides,
+                    })
+                  : await depository.processBatch(encodedBatch, hankoData, nextNonce, {
+                      gasLimit,
+                      nonce: await allocateSerializedSignerNonce(),
+                      ...resolvedFeeOverrides,
+                    });
+                const minedReceipt = await waitForReceipt(tx, 'submitTx:processBatch');
+                const txHash = minedReceipt.hash ?? tx.hash;
+                const blockNum = minedReceipt.blockNumber ?? 0;
+                console.log(`✅ [JAdapter:rpc] Batch executed: block=${blockNum} gas=${minedReceipt.gasUsed}`);
                 return { success: true, txHash, blockNumber: blockNum };
               } catch (error) {
                 if (attempt < 2 && isNonceSyncError(error)) {

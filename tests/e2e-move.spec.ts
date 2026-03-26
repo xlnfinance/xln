@@ -455,8 +455,9 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await waitForMoveReady(page);
         await expect(page.getByTestId('move-route-summary')).toContainText('1 external-signer batch');
         await expect(page.getByTestId('move-route-summary')).toContainText('Submit external deposit batch into your reserve');
-        await expect(page.getByTestId('move-confirm').first()).toHaveText(/Submit External Batch/i);
+        await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await page.getByTestId('move-confirm').first().click();
+        await broadcastDraftBatch(page);
         await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeReserve);
       });
       const afterReserve = await refreshReserveBalance(page, symbol);
@@ -510,7 +511,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await waitForMoveReady(page);
         await expect(page.getByTestId('move-route-summary')).toContainText('1 reserve batch');
         await expect(page.getByTestId('move-route-summary')).toContainText('Broadcast reserve withdrawal batch to recipient EOA');
-        await expect(page.getByTestId('move-confirm').first()).toHaveText(/Submit External Batch/i);
+        await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await page.getByTestId('move-confirm').first().click();
         await broadcastDraftBatch(page);
         await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeReserve);
@@ -551,7 +552,9 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await selectMoveEntityField(page, 'move-target-entity-field', bob!.entityId);
         await selectMoveEntityField(page, 'move-target-counterparty-field', hubs.h2);
         await waitForMoveReady(page);
+        await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await page.getByTestId('move-confirm').first().click();
+        await broadcastDraftBatch(page);
         await expect.poll(async () => refreshAccountSpendableBalance(bobPage, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeBobAccount);
       });
       const afterBobAccount = await refreshAccountSpendableBalance(bobPage, symbol);
@@ -628,7 +631,9 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await selectMoveEntityField(page, 'move-target-entity-field', bob!.entityId);
         await selectMoveEntityField(page, 'move-target-counterparty-field', hubs.h2);
         await waitForMoveReady(page);
+        await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await page.getByTestId('move-confirm').first().click();
+        await broadcastDraftBatch(page);
         await expect.poll(async () => getRpcExternalBalanceRaw(page, symbol, aliceEoa), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(midAliceExternalRaw);
         await expect.poll(async () => refreshAccountSpendableBalance(bobPage, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeBobAccount);
       });

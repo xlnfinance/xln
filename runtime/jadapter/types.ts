@@ -139,6 +139,7 @@ export interface JAdapter {
   submitTx(jTx: JTx, options: {
     env: Env;           // Runtime env (for hanko signing)
     signerId?: string;  // Which signer to use for hanko
+    signerPrivateKey?: Uint8Array;
     timestamp?: number; // Block timestamp (scenarioMode)
   }): Promise<JSubmitResult>;
 

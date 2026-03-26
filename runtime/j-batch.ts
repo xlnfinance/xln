@@ -894,6 +894,34 @@ export function batchAddReserveToReserve(
 }
 
 /**
+ * Add external token → reserve deposit to batch.
+ * Execution still happens on Depository.processBatch, but submission must come from the external EOA.
+ */
+export function batchAddExternalTokenToReserve(
+  jBatchState: JBatchState,
+  entityId: string,
+  contractAddress: string,
+  amount: bigint,
+  tokenType: number = 0,
+  externalTokenId: bigint = 0n,
+  internalTokenId: number = 0,
+): void {
+  assertBatchNotPending(jBatchState, 'E2R');
+
+  jBatchState.batch.externalTokenToReserve.push({
+    entity: entityId,
+    contractAddress,
+    externalTokenId,
+    tokenType,
+    internalTokenId,
+    amount,
+  });
+
+  if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
+  console.log(`📦 jBatch: Added E→R ${amount} via ${contractAddress.slice(0, 10)}... for ${entityId.slice(-4)}`);
+}
+
+/**
  * Add reserve → external withdrawal to batch.
  * receivingEntity must already be the bytes32-encoded destination address.
  */

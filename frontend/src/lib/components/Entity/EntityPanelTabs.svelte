@@ -2742,7 +2742,9 @@
 
   function canAddMoveToExistingBatch(): boolean {
     const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
-    return routeKey === 'reserve->reserve'
+    return routeKey === 'external->reserve'
+      || routeKey === 'external->account'
+      || routeKey === 'reserve->reserve'
       || routeKey === 'reserve->external'
       || routeKey === 'reserve->account'
       || routeKey === 'account->reserve'
@@ -2835,15 +2837,64 @@
     }])]);
   }
 
+  async function queueExternalToReserveDraft(
+    tokenAddress: string,
+    amount: bigint,
+  ): Promise<void> {
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    if (!entityId) return;
+    if (!activeIsLive) throw new Error('Add to batch requires LIVE mode');
+    if (!isAddress(tokenAddress) || tokenAddress === ZeroAddress) {
+      throw new Error('Select ERC20 asset first');
+    }
+    const env = requireRuntimeEnv(activeEnv, 'move-external-to-reserve-draft');
+    const signerId = requireSignerIdForEntity(env, entityId, 'move-external-to-reserve-draft');
+    await enqueueEntityInputs(env, [{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'external_to_reserve' as const,
+        data: {
+          contractAddress: tokenAddress,
+          amount,
+        },
+      }],
+    }]);
+  }
+
   async function addMoveToExistingBatch(): Promise<void> {
     const validationError = getMoveValidationError('draft');
     if (validationError) throw new Error(validationError);
     const moveSourceAccount = getCurrentMoveSourceAccountId();
     const moveTargetAccount = getCurrentMoveTargetHubId();
     const moveTargetEntity = getCurrentMoveTargetEntityId();
-    const token = findReserveTransferTokenBySymbol(moveAssetSymbol);
-    if (!token) throw new Error('Select reserve-compatible asset first');
     const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
+    const externalToken = findExternalTokenBySymbol(moveAssetSymbol);
+    const reserveToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
+    if (routeKey === 'external->reserve') {
+      if (!externalToken || !isAddress(externalToken.address) || externalToken.address === ZeroAddress) {
+        throw new Error('Select ERC20 asset first');
+      }
+      const amount = parsePositiveAssetAmount(moveAmount, externalToken, externalToken.balance);
+      await queueExternalToReserveDraft(externalToken.address, amount);
+      moveAmount = '';
+      toasts.success('Added to existing draft batch');
+      return;
+    }
+    if (routeKey === 'external->account') {
+      if (!externalToken || !isAddress(externalToken.address) || externalToken.address === ZeroAddress) {
+        throw new Error('Select ERC20 asset first');
+      }
+      if (!reserveToken) throw new Error('Select reserve-compatible asset first');
+      const amount = parsePositiveAssetAmount(moveAmount, externalToken, externalToken.balance);
+      await queueExternalToReserveDraft(externalToken.address, amount);
+      await queueReserveToCollateralDraft(reserveToken.tokenId, amount, moveTargetAccount, moveTargetEntity);
+      moveAmount = '';
+      toasts.success('Added to existing draft batch');
+      return;
+    }
+    const token = reserveToken;
+    if (!token) throw new Error('Select reserve-compatible asset first');
     if (routeKey === 'reserve->reserve') {
       const reserveAmount = onchainReserves.get(token.tokenId) ?? 0n;
       const amount = parsePositiveAssetAmount(moveAmount, token, reserveAmount);
@@ -2919,13 +2970,10 @@
   }
 
   function isImmediateMoveExecutionRoute(from: MoveEndpoint, to: MoveEndpoint): boolean {
-    const routeKey = getMoveRouteKey(from, to);
-    return routeKey === 'external->external' || routeKey === 'external->reserve' || routeKey === 'external->account';
+    return getMoveRouteKey(from, to) === 'external->external';
   }
 
   function getMovePrimaryActionLabel(): string {
-    if (moveFromEndpoint === 'external' && moveToEndpoint === 'reserve') return 'Submit External Batch';
-    if (moveFromEndpoint === 'external' && moveToEndpoint === 'account') return 'Run Deposit Route';
     if (isExternalTransferMoveRoute(moveFromEndpoint, moveToEndpoint)) return 'Send Direct';
     return 'Add to Batch';
   }
