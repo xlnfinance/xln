@@ -22,7 +22,7 @@ const VALID_DENSITY: readonly UIDensityMode[] = ['compact', 'comfortable', 'room
 const VALID_RADIUS: readonly UIRadiusMode[] = ['sharp', 'soft', 'pill'] as const;
 const VALID_BORDERS: readonly UIBorderMode[] = ['minimal', 'subtle', 'strong'] as const;
 const VALID_SHADOWS: readonly UIShadowMode[] = ['flat', 'soft', 'float'] as const;
-const VALID_TABS: readonly UITabStyle[] = ['underline', 'pill', 'segmented'] as const;
+const VALID_TABS: readonly UITabStyle[] = ['minimal', 'underline', 'rail', 'pill', 'segmented', 'floating'] as const;
 const VALID_BUTTONS: readonly UIButtonStyle[] = ['minimal', 'soft', 'solid'] as const;
 const VALID_CARDS: readonly UICardStyle[] = ['flat', 'filled', 'striped'] as const;
 const VALID_INPUTS: readonly UIInputStyle[] = ['minimal', 'outlined', 'filled'] as const;
@@ -34,7 +34,7 @@ export const DEFAULT_UI_STYLE: UIStyleSettings = {
   radius: 'soft',
   borders: 'subtle',
   shadows: 'soft',
-  tabs: 'underline',
+  tabs: 'rail',
   buttons: 'soft',
   cards: 'filled',
   inputs: 'outlined',

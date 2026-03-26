@@ -24,6 +24,8 @@
   import FormationPanel from '$lib/components/Entity/FormationPanel.svelte';
   import GossipPanel from '$lib/components/Entity/GossipPanel.svelte';
   import ChatMessages from '$lib/components/Entity/ChatMessages.svelte';
+  import TabStylePicker from '$lib/components/Settings/TabStylePicker.svelte';
+  import { TAB_STYLE_OPTIONS, UI_STYLE_OPTIONS } from '$lib/utils/ui-style-options';
 
   export let embedded = false;
   export let replica: EntityReplica | null = null;
@@ -46,116 +48,9 @@
     { id: 'entity', label: 'Entity' },
   ];
 
-  const UI_STYLE_OPTIONS: Array<{
-    key: keyof UIStyleSettings;
-    label: string;
-    description: string;
-    options: Array<{ value: UIStyleSettings[keyof UIStyleSettings]; label: string }>;
-  }> = [
-    {
-      key: 'density',
-      label: 'Density',
-      description: 'Overall spacing and control height.',
-      options: [
-        { value: 'compact', label: 'Compact' },
-        { value: 'comfortable', label: 'Comfortable' },
-        { value: 'roomy', label: 'Roomy' },
-      ],
-    },
-    {
-      key: 'radius',
-      label: 'Radius',
-      description: 'How sharp or rounded controls should feel.',
-      options: [
-        { value: 'sharp', label: 'Sharp' },
-        { value: 'soft', label: 'Soft' },
-        { value: 'pill', label: 'Pill' },
-      ],
-    },
-    {
-      key: 'borders',
-      label: 'Borders',
-      description: 'Visible framing around cards and controls.',
-      options: [
-        { value: 'minimal', label: 'Minimal' },
-        { value: 'subtle', label: 'Subtle' },
-        { value: 'strong', label: 'Strong' },
-      ],
-    },
-    {
-      key: 'shadows',
-      label: 'Shadows',
-      description: 'Surface lift and depth.',
-      options: [
-        { value: 'flat', label: 'Flat' },
-        { value: 'soft', label: 'Soft' },
-        { value: 'float', label: 'Float' },
-      ],
-    },
-    {
-      key: 'tabs',
-      label: 'Tabs',
-      description: 'Tab rail treatment.',
-      options: [
-        { value: 'underline', label: 'Underline' },
-        { value: 'pill', label: 'Pill' },
-        { value: 'segmented', label: 'Segmented' },
-      ],
-    },
-    {
-      key: 'buttons',
-      label: 'Buttons',
-      description: 'Primary and secondary action style.',
-      options: [
-        { value: 'minimal', label: 'Minimal' },
-        { value: 'soft', label: 'Soft' },
-        { value: 'solid', label: 'Solid' },
-      ],
-    },
-    {
-      key: 'cards',
-      label: 'Cards',
-      description: 'Surface density and striping.',
-      options: [
-        { value: 'flat', label: 'Flat' },
-        { value: 'filled', label: 'Filled' },
-        { value: 'striped', label: 'Striped' },
-      ],
-    },
-    {
-      key: 'inputs',
-      label: 'Inputs',
-      description: 'Field framing style.',
-      options: [
-        { value: 'minimal', label: 'Minimal' },
-        { value: 'outlined', label: 'Outlined' },
-        { value: 'filled', label: 'Filled' },
-      ],
-    },
-    {
-      key: 'accent',
-      label: 'Accent',
-      description: 'How strongly accent color appears.',
-      options: [
-        { value: 'quiet', label: 'Quiet' },
-        { value: 'normal', label: 'Normal' },
-        { value: 'bold', label: 'Bold' },
-      ],
-    },
-    {
-      key: 'typography',
-      label: 'Type Scale',
-      description: 'Global text density.',
-      options: [
-        { value: 'sm', label: 'Small' },
-        { value: 'md', label: 'Normal' },
-        { value: 'lg', label: 'Large' },
-      ],
-    },
-  ];
-
   const ACCOUNT_BAR_USD_PER_100PX_MIN = 10;
   const ACCOUNT_BAR_USD_PER_100PX_MAX = 10_000;
+  const BUILD_UI_OPTIONS = UI_STYLE_OPTIONS.filter((group) => group.key !== 'tabs');
 
   let activeTab: SettingsTab = requestedTab ?? 'wallet';
   let lastRequestedTab: SettingsTab | null = requestedTab;
@@ -967,6 +862,18 @@
             <span class="legend-swatch" style={`background:${barLegendColors.debt};`}></span> Debt
           </div>
         </label>
+
+        <div class="appearance-block tab-groups-block">
+          <div class="style-group-head">
+            <span class="setting-title">Tab Groups</span>
+            <span class="helper-note">Choose how workspace tabs, segmented controls, and filter rails look across the wallet.</span>
+          </div>
+          <TabStylePicker
+            value={$settings.uiStyle.tabs}
+            options={TAB_STYLE_OPTIONS}
+            on:change={(event) => setUiStyleValue('tabs', event.detail)}
+          />
+        </div>
       </section>
 
       <section class="section-card">
@@ -979,7 +886,7 @@
         </div>
 
         <div class="style-grid">
-          {#each UI_STYLE_OPTIONS as group}
+          {#each BUILD_UI_OPTIONS as group}
             <div class="style-group">
               <div class="style-group-head">
                 <span class="setting-title">{group.label}</span>
@@ -1616,13 +1523,12 @@
 
   .settings-tabs {
     display: flex;
-    gap: 18px;
+    gap: 6px;
     margin: 0;
-    padding: 0 0 2px;
-    border: none;
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 56%), transparent);
-    border-radius: 0;
-    background: transparent;
+    padding: 4px;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 52%), transparent);
+    border-radius: var(--ui-radius-large, 16px);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 68%, transparent);
     overflow-x: auto;
   }
 
@@ -1634,32 +1540,32 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 38px;
-    padding: 0 2px 12px;
-    border: none !important;
-    border-radius: 0 !important;
+    min-height: calc(var(--ui-control-height, 44px) - 6px);
+    padding: 0 14px;
+    border: 1px solid transparent !important;
+    border-radius: calc(var(--ui-radius-base, 12px) - 2px) !important;
     background: transparent !important;
     color: var(--theme-text-secondary, #a1a1aa) !important;
     font-size: calc(12px * var(--ui-font-scale, 1));
     font-weight: 650;
     white-space: nowrap;
     cursor: pointer;
-    box-shadow: inset 0 -2px 0 transparent;
-    transition: color 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: none;
+    transition: color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background 0.15s ease;
     touch-action: manipulation;
   }
 
   .settings-tab:hover {
     color: var(--theme-text-primary, #e4e4e7) !important;
-    border-color: transparent !important;
-    background: transparent !important;
+    border-color: color-mix(in srgb, var(--theme-border, #27272a) 56%, transparent) !important;
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 82%, transparent) !important;
   }
 
   .settings-tab.active {
     color: var(--theme-text-primary, #e4e4e7) !important;
-    border-color: transparent !important;
-    background: transparent !important;
-    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 88%, transparent);
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 14%, transparent) !important;
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 96%, transparent) !important;
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 86%, transparent);
   }
 
   .settings-content {
@@ -2251,8 +2157,45 @@
     line-height: 1.5;
   }
 
+  :global(html[data-ui-tabs='minimal']) .settings-tabs,
+  :global(html[data-ui-tabs='underline']) .settings-tabs {
+    padding: 0 0 2px;
+    border: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 56%), transparent);
+    border-radius: 0;
+    background: transparent;
+    gap: 18px;
+  }
+
+  :global(html[data-ui-tabs='minimal']) .settings-tab,
+  :global(html[data-ui-tabs='underline']) .settings-tab {
+    min-height: 38px;
+    padding: 0 2px 12px;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
+
+  :global(html[data-ui-tabs='minimal']) .settings-tab:hover,
+  :global(html[data-ui-tabs='underline']) .settings-tab:hover {
+    border-color: transparent !important;
+    background: transparent !important;
+  }
+
+  :global(html[data-ui-tabs='minimal']) .settings-tab.active {
+    color: var(--theme-accent, #fbbf24) !important;
+    box-shadow: none;
+  }
+
+  :global(html[data-ui-tabs='underline']) .settings-tab.active {
+    border-color: transparent !important;
+    background: transparent !important;
+    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 88%, transparent);
+  }
+
   :global(html[data-ui-tabs='pill']) .settings-tabs,
-  :global(html[data-ui-tabs='segmented']) .settings-tabs {
+  :global(html[data-ui-tabs='segmented']) .settings-tabs,
+  :global(html[data-ui-tabs='floating']) .settings-tabs {
     padding: 0;
     border-bottom: none;
     gap: 8px;
@@ -2287,6 +2230,25 @@
   :global(html[data-ui-tabs='segmented']) .settings-tab.active {
     background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 96%, transparent);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-border-mix, 22%), transparent);
+  }
+
+  :global(html[data-ui-tabs='floating']) .settings-tabs {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  :global(html[data-ui-tabs='floating']) .settings-tab {
+    border-color: color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 56%), transparent) !important;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 70%, transparent) !important;
+    box-shadow: 0 10px 22px color-mix(in srgb, var(--theme-background, #09090b) 8%, transparent);
+  }
+
+  :global(html[data-ui-tabs='floating']) .settings-tab.active {
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-border-mix, 20%), transparent) !important;
+    box-shadow:
+      inset 0 -1px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 82%, transparent),
+      0 14px 30px color-mix(in srgb, var(--theme-background, #09090b) 10%, transparent);
   }
 
   :global(html[data-ui-buttons='minimal']) .compact-btn,
