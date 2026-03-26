@@ -31,6 +31,7 @@ import {
   type MarketSnapshotPayload,
 } from '../market-snapshot';
 import { normalizeLoopbackUrl } from '../loopback-url';
+import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
 
 type Args = {
   host: string;
@@ -205,6 +206,7 @@ type AggregatedHealth = {
     runtime: boolean;
     relay: boolean;
   };
+  storage: StorageHealth;
   hubMesh: {
     ok: boolean;
     hubIds: string[];
@@ -956,6 +958,7 @@ const stopAllChildren = async (): Promise<void> => {
 };
 
 const computeAggregatedHealth = (): AggregatedHealth => {
+  const storage = getStorageHealthSnapshotSync();
   const hubs = hubChildren.map((child) => {
     const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '');
     const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '');
@@ -1057,6 +1060,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       runtime: true,
       relay: true,
     },
+    storage,
     hubMesh: {
       ok:
         hubIds.length === HUB_NAMES.length &&
@@ -1681,6 +1685,7 @@ const server = Bun.serve({
     }
 
     if (pathname === '/api/health') {
+      await getStorageHealth();
       await pollAllHubHealth();
       await pollMarketMakerHealth();
       return new Response(safeStringify(computeAggregatedHealth()), { headers });
@@ -1961,6 +1966,8 @@ process.on('SIGINT', () => { void shutdown(); });
 console.log(
   `[MESH] CONTROL ready host=${args.host} port=${args.port} relay=${relayUrl} rpc=${args.rpcUrl} mm=${args.mmEnabled ? 'on' : 'off'} custody=${args.custodyEnabled ? 'on' : 'off'} reset=${args.resetAllowed ? 'on' : 'off'}`,
 );
+
+assertMinDiskFree();
 
 void ensureReset(args.mmEnabled).catch(error => {
   console.error('[MESH] initial reset failed:', serializeError(error));
