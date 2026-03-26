@@ -125,19 +125,134 @@
 		font-size: calc(13px * var(--ui-font-scale, 1)) !important;
 	}
 
-	:global(html[data-ui-tabs='pill'] body.xln-user-mode .account-workspace-tabs),
-	:global(html[data-ui-tabs='pill'] body.xln-user-mode .configure-tabs),
-	:global(html[data-ui-tabs='pill'] body.xln-user-mode .settings-tabs) {
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .account-workspace-tabs),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .configure-tabs),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .settings-tabs),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .appearance-pill-group),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .side-toggle-row),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .order-type-toggle),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .account-workspace-tabs),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .configure-tabs),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .settings-tabs),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .appearance-pill-group),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .side-toggle-row),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .order-type-toggle) {
+		padding: 0 0 2px !important;
+		gap: 14px !important;
+		border: none !important;
+		border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 56%), transparent) !important;
+		border-radius: 0 !important;
+		background: transparent !important;
+	}
+
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .account-workspace-tab),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .configure-tab),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .settings-tab),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .appearance-pill),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .side-tab),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .type-tab-text),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .account-workspace-tab),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .configure-tab),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .settings-tab),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .appearance-pill),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .side-tab),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .type-tab-text) {
+		min-height: calc(var(--ui-control-height, 44px) - 10px) !important;
+		padding: 0 2px 10px !important;
+		border: none !important;
+		border-radius: 0 !important;
+		background: transparent !important;
+		box-shadow: none !important;
+	}
+
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .account-workspace-tab.active),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .configure-tab.active),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .settings-tab.active),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .appearance-pill.active),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .side-tab.active),
+	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .type-tab-text.active) {
+		color: var(--theme-accent, #fbbf24) !important;
+		box-shadow: none !important;
+	}
+
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .account-workspace-tab.active),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .configure-tab.active),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .settings-tab.active),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .appearance-pill.active),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .side-tab.active),
+	:global(html[data-ui-tabs='underline'] body.xln-user-mode .type-tab-text.active) {
+		box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 88%, transparent) !important;
+	}
+
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .account-workspace-tabs),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .configure-tabs),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .settings-tabs),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .appearance-pill-group),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .side-toggle-row),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .order-type-toggle) {
 		padding: 4px !important;
-		border-bottom: none !important;
+		gap: 6px !important;
+		border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 52%), transparent) !important;
 		border-radius: var(--ui-radius-large, 16px) !important;
 		background: color-mix(in srgb, var(--theme-surface, #18181b) 68%, transparent) !important;
 	}
 
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .account-workspace-tab),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .configure-tab),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .settings-tab),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .appearance-pill),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .side-tab),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .type-tab-text) {
+		border: 1px solid transparent !important;
+		border-radius: calc(var(--ui-radius-base, 12px) - 2px) !important;
+		background: transparent !important;
+		box-shadow: none !important;
+	}
+
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .account-workspace-tab.active),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .configure-tab.active),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .settings-tab.active),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .appearance-pill.active),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .side-tab.active),
+	:global(html[data-ui-tabs='rail'] body.xln-user-mode .type-tab-text.active) {
+		border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 12%, transparent) !important;
+		background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 96%, transparent) !important;
+		box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 86%, transparent) !important;
+	}
+
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .account-workspace-tabs),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .configure-tabs),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .settings-tabs),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .appearance-pill-group),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .side-toggle-row),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .order-type-toggle) {
+		padding: 0 !important;
+		gap: 8px !important;
+		border: none !important;
+		border-radius: 0 !important;
+		background: transparent !important;
+	}
+
 	:global(html[data-ui-tabs='pill'] body.xln-user-mode .account-workspace-tab),
 	:global(html[data-ui-tabs='pill'] body.xln-user-mode .configure-tab),
-	:global(html[data-ui-tabs='pill'] body.xln-user-mode .settings-tab) {
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .settings-tab),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .appearance-pill),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .side-tab),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .type-tab-text) {
 		border-radius: var(--ui-radius-pill, 999px) !important;
+		border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 56%), transparent) !important;
+		background: color-mix(in srgb, var(--theme-surface, #18181b) 70%, transparent) !important;
+		box-shadow: none !important;
+	}
+
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .account-workspace-tab.active),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .configure-tab.active),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .settings-tab.active),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .appearance-pill.active),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .side-tab.active),
+	:global(html[data-ui-tabs='pill'] body.xln-user-mode .type-tab-text.active) {
+		border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-border-mix, 22%), transparent) !important;
+		background: color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-soft-mix, 10%), transparent) !important;
 	}
 
 	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .account-workspace-tabs),
@@ -161,6 +276,54 @@
 	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .type-tab-text) {
 		flex: 1 1 auto;
 		border-radius: calc(var(--ui-radius-base, 12px) - 2px) !important;
+	}
+
+	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .account-workspace-tab.active),
+	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .configure-tab.active),
+	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .settings-tab.active),
+	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .appearance-pill.active),
+	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .side-tab.active),
+	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .type-tab-text.active) {
+		background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 96%, transparent) !important;
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-border-mix, 22%), transparent) !important;
+	}
+
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .account-workspace-tabs),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .configure-tabs),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .settings-tabs),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .appearance-pill-group),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .side-toggle-row),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .order-type-toggle) {
+		padding: 0 !important;
+		gap: 8px !important;
+		border: none !important;
+		border-radius: 0 !important;
+		background: transparent !important;
+	}
+
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .account-workspace-tab),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .configure-tab),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .settings-tab),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .appearance-pill),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .side-tab),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .type-tab-text) {
+		border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 56%), transparent) !important;
+		border-radius: var(--ui-radius-base, 12px) !important;
+		background: color-mix(in srgb, var(--theme-surface, #18181b) 70%, transparent) !important;
+		box-shadow: 0 10px 22px color-mix(in srgb, var(--theme-background, #09090b) 8%, transparent) !important;
+	}
+
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .account-workspace-tab.active),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .configure-tab.active),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .settings-tab.active),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .appearance-pill.active),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .side-tab.active),
+	:global(html[data-ui-tabs='floating'] body.xln-user-mode .type-tab-text.active) {
+		border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-border-mix, 20%), transparent) !important;
+		background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 92%, transparent) !important;
+		box-shadow:
+			inset 0 -1px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 82%, transparent),
+			0 14px 30px color-mix(in srgb, var(--theme-background, #09090b) 10%, transparent) !important;
 	}
 
 	:global(html[data-ui-buttons='minimal'] body.xln-user-mode .compact-btn),
