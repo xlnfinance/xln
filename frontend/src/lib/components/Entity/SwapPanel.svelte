@@ -826,6 +826,11 @@
     submitError = '';
   }
 
+  function setOrderListTab(nextTab: 'open' | 'closed'): void {
+    if (orderListTab === nextTab) return;
+    orderListTab = nextTab;
+  }
+
   function handleOrderbookLevelClick(event: CustomEvent<{ side: BookSide; priceTicks: string; size: number; accountIds: string[] }>) {
     submitError = '';
     const pair = selectedPair;
@@ -1784,33 +1789,35 @@
       <div class="orders-header-left">
         <h4 class="orders-inline-title">Orders</h4>
         <span class="orders-count">{orderListTab === 'open' ? openOrders.length : filteredClosedOrderViews.length}</span>
-        <button
-          type="button"
-          class="orders-tab-text"
-          class:active={orderListTab === 'open'}
-          data-testid="swap-orders-tab-open"
-          on:click={() => (orderListTab = 'open')}
-        >Open</button>
-        <button
-          type="button"
-          class="orders-tab-text"
-          class:active={orderListTab === 'closed'}
-          data-testid="swap-orders-tab-closed"
-          on:click={() => (orderListTab = 'closed')}
-        >Closed</button>
+        <div class="orders-tabs" role="tablist" aria-label="Swap orders">
+          <button
+            type="button"
+            class="orders-tab-text"
+            class:active={orderListTab === 'open'}
+            aria-pressed={orderListTab === 'open'}
+            data-testid="swap-orders-tab-open"
+            on:click={() => setOrderListTab('open')}
+          >Open</button>
+          <button
+            type="button"
+            class="orders-tab-text"
+            class:active={orderListTab === 'closed'}
+            aria-pressed={orderListTab === 'closed'}
+            data-testid="swap-orders-tab-closed"
+            on:click={() => setOrderListTab('closed')}
+          >Closed</button>
+        </div>
       </div>
-      {#if orderListTab === 'closed'}
-        <label class="closed-status-filter">
-          Status
-          <select bind:value={closedOrderStatusFilter}>
-            <option value="all">All</option>
-            <option value="filled">Filled</option>
-            <option value="partial">Partial</option>
-            <option value="canceled">Canceled</option>
-            <option value="closed">Closed</option>
-          </select>
-        </label>
-      {/if}
+      <label class="closed-status-filter" class:is-hidden={orderListTab !== 'closed'}>
+        <span>Status</span>
+        <select bind:value={closedOrderStatusFilter} disabled={orderListTab !== 'closed'}>
+          <option value="all">All</option>
+          <option value="filled">Filled</option>
+          <option value="partial">Partial</option>
+          <option value="canceled">Canceled</option>
+          <option value="closed">Closed</option>
+        </select>
+      </label>
     </div>
     {#if totalPriceImprovementSummary}
       <p class="improvement-summary">Total price improvement: <strong>{totalPriceImprovementSummary}</strong></p>
@@ -2207,7 +2214,7 @@
     font-size: 12px;
   }
 
-  select, input:not([type="range"]) {
+  select, input:not([type="range"]):not([type="checkbox"]) {
     padding: 8px;
     width: 100%;
     min-width: 0;
@@ -2229,7 +2236,7 @@
     color: #f3f4f6;
   }
 
-  select:focus, input:not([type="range"]):focus {
+  select:focus, input:not([type="range"]):not([type="checkbox"]):focus {
     outline: none;
     border-color: rgba(251, 191, 36, 0.65);
   }
@@ -2337,15 +2344,28 @@
     font-size: 11px;
   }
 
+  .orders-tabs {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
   .orders-tab-text {
-    border: none;
-    background: none;
-    padding: 0;
+    min-width: 58px;
+    min-height: 30px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
     font-size: 12px;
     color: #6b7280;
     cursor: pointer;
     user-select: none;
-    transition: color 100ms;
+    transition: color 100ms, border-color 100ms, background 100ms;
   }
 
   .orders-tab-text:hover {
@@ -2353,7 +2373,9 @@
   }
 
   .orders-tab-text.active {
-    color: #fbbf24;
+    color: #e5e7eb;
+    border-color: rgba(251, 191, 36, 0.22);
+    background: rgba(251, 191, 36, 0.08);
   }
 
   .closed-status-filter {
@@ -2364,17 +2386,26 @@
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+    min-width: 148px;
+    transition: opacity 120ms ease;
+  }
+
+  .closed-status-filter.is-hidden {
+    opacity: 0;
+    pointer-events: none;
   }
 
   .closed-status-filter select {
-    min-width: 130px;
-    height: 32px;
-    border-radius: 8px;
-    border: 1px solid #353942;
+    min-width: 148px;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     background: #111217;
     color: #f3f4f6;
+    font-family: inherit;
     font-size: 12px;
-    padding: 0 8px;
+    font-weight: 600;
+    padding: 0 10px;
   }
 
   .orders-empty {

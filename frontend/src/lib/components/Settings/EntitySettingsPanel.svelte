@@ -1616,9 +1616,9 @@
 
   .settings-tabs {
     display: flex;
-    gap: 8px;
+    gap: 18px;
     margin: 0;
-    padding: 6px 0 2px;
+    padding: 0 0 2px;
     border: none;
     border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 56%), transparent);
     border-radius: 0;
@@ -1634,31 +1634,32 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: var(--ui-control-height, 44px);
-    padding: 10px 16px;
-    border: 1px solid transparent !important;
-    border-radius: var(--ui-radius-base, 12px) var(--ui-radius-base, 12px) 0 0 !important;
+    min-height: 38px;
+    padding: 0 2px 12px;
+    border: none !important;
+    border-radius: 0 !important;
     background: transparent !important;
     color: var(--theme-text-secondary, #a1a1aa) !important;
     font-size: calc(12px * var(--ui-font-scale, 1));
     font-weight: 650;
     white-space: nowrap;
     cursor: pointer;
-    transition: all 0.15s ease;
+    box-shadow: inset 0 -2px 0 transparent;
+    transition: color 0.15s ease, box-shadow 0.15s ease;
     touch-action: manipulation;
   }
 
   .settings-tab:hover {
     color: var(--theme-text-primary, #e4e4e7) !important;
     border-color: transparent !important;
-    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 66%, transparent) !important;
+    background: transparent !important;
   }
 
   .settings-tab.active {
     color: var(--theme-text-primary, #e4e4e7) !important;
-    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 24%, transparent) !important;
-    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 16%, transparent) !important;
-    box-shadow: inset 0 2px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 78%, transparent);
+    border-color: transparent !important;
+    background: transparent !important;
+    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 88%, transparent);
   }
 
   .settings-content {
@@ -1864,7 +1865,7 @@
     background: color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-soft-mix, 10%), transparent);
   }
 
-  input:not([type="range"]),
+  input:not([type="range"]):not([type="checkbox"]),
   select,
   textarea {
     width: 100%;
@@ -1878,7 +1879,7 @@
     box-sizing: border-box;
   }
 
-  input:not([type="range"]):focus,
+  input:not([type="range"]):not([type="checkbox"]):focus,
   select:focus,
   textarea:focus {
     outline: none;
@@ -1888,6 +1889,10 @@
 
   textarea {
     resize: vertical;
+  }
+
+  .setting-row > input[type="checkbox"] {
+    margin-left: auto;
   }
 
   .slider-row {
@@ -2311,14 +2316,14 @@
       color-mix(in srgb, var(--theme-surface, #18181b) var(--ui-card-fill-mix, 90%), transparent);
   }
 
-  :global(html[data-ui-inputs='minimal']) input:not([type="range"]),
+  :global(html[data-ui-inputs='minimal']) input:not([type="range"]):not([type="checkbox"]),
   :global(html[data-ui-inputs='minimal']) select,
   :global(html[data-ui-inputs='minimal']) textarea {
     background: color-mix(in srgb, var(--theme-input-bg, #09090b) 54%, transparent);
     border-color: color-mix(in srgb, var(--theme-input-border, rgba(255, 255, 255, 0.12)) 40%, transparent);
   }
 
-  :global(html[data-ui-inputs='filled']) input:not([type="range"]),
+  :global(html[data-ui-inputs='filled']) input:not([type="range"]):not([type="checkbox"]),
   :global(html[data-ui-inputs='filled']) select,
   :global(html[data-ui-inputs='filled']) textarea {
     background: color-mix(in srgb, var(--theme-input-bg, #09090b) 96%, transparent);
@@ -2326,7 +2331,7 @@
 
   @media (max-width: 900px) {
     .settings-tabs {
-      gap: 6px;
+      gap: 8px;
       padding: 0;
       border-bottom: none;
       overflow: visible;
