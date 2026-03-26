@@ -1185,7 +1185,22 @@ export function processOrderbookSwaps(
       wantTokenId: baseTokenId,
       giveAmount: quoteAmount,
       quantizedGive: quoteAmount,
-    };
+      };
+  };
+
+  const resolveOrderbookBandAnchor = (
+    side: 0 | 1,
+    bestBid: bigint | null,
+    bestAsk: bigint | null,
+  ): { anchor: bigint | null; label: string } => {
+    if (side === 0) {
+      if (bestAsk !== null) return { anchor: bestAsk, label: 'bestAsk' };
+      if (bestBid !== null) return { anchor: bestBid, label: 'bestBid-fallback' };
+      return { anchor: null, label: 'empty-book' };
+    }
+    if (bestBid !== null) return { anchor: bestBid, label: 'bestBid' };
+    if (bestAsk !== null) return { anchor: bestAsk, label: 'bestAsk-fallback' };
+    return { anchor: null, label: 'empty-book' };
   };
 
   const createBoundedBookForObservedPrices = (
@@ -1315,7 +1330,8 @@ export function processOrderbookSwaps(
     return rebuiltBook;
   };
 
-  for (const offer of sortSwapOffersForOrderbook(swapOffers)) {
+  for (const rawOffer of sortSwapOffersForOrderbook(swapOffers)) {
+    let offer = rawOffer;
     const currentAccountId = offer.accountId;
     console.log(`📊 ORDERBOOK-PROCESS: offerId=${offer.offerId}, accountId=${currentAccountId.slice(-8)}`);
 
@@ -1480,15 +1496,89 @@ export function processOrderbookSwaps(
           quarantineOffer(currentAccountId, offer.offerId, `book-grid-reprice-zero:${priceTicks.toString()}`);
           continue;
         }
+        mempoolOps.push({
+          accountId: currentAccountId,
+          tx: {
+            type: 'swap_resolve',
+            data: {
+              offerId: offer.offerId,
+              fillRatio: 0,
+              cancelRemainder: true,
+            },
+          },
+        });
+        console.log(`📤 ORDERBOOK: Queued swap_resolve(cancelRemainder) for zeroed repriced offer ${offer.offerId.slice(-8)}`);
+        continue;
       } else {
-        liveSwapOffer.priceTicks = priceTicks;
-        liveSwapOffer.giveAmount = requantizedOffer.effectiveGive;
-        liveSwapOffer.wantAmount = requantizedOffer.effectiveWant;
-        liveSwapOffer.quantizedGive = requantizedOffer.effectiveGive;
-        liveSwapOffer.quantizedWant = requantizedOffer.effectiveWant;
-        offer.priceTicks = priceTicks;
-        offer.giveAmount = requantizedOffer.effectiveGive;
-        offer.wantAmount = requantizedOffer.effectiveWant;
+        offer = {
+          ...offer,
+          priceTicks,
+          giveAmount: requantizedOffer.effectiveGive,
+          wantAmount: requantizedOffer.effectiveWant,
+        };
+        const requantizedBaseAmount = side === 1 ? offer.giveAmount : offer.wantAmount;
+        const requantizedQuoteAmount = side === 1 ? offer.wantAmount : offer.giveAmount;
+        if (requantizedBaseAmount <= 0n || requantizedQuoteAmount <= 0n) {
+          console.warn(`⚠️ ORDERBOOK: repriced offer collapsed to zero base/quote — canceling offer=${offer.offerId}`);
+          if (rehydrateOnly) {
+            quarantineOffer(currentAccountId, offer.offerId, `repriced-zero:${priceTicks.toString()}`);
+            continue;
+          }
+          mempoolOps.push({
+            accountId: currentAccountId,
+            tx: {
+              type: 'swap_resolve',
+              data: {
+                offerId: offer.offerId,
+                fillRatio: 0,
+                cancelRemainder: true,
+              },
+            },
+          });
+          continue;
+        }
+        if (minTradeSize > 0n && requantizedQuoteAmount < minTradeSize) {
+          console.warn(
+            `⚠️ ORDERBOOK: repriced offer fell below minTradeSize=${minTradeSize.toString()} quote=${requantizedQuoteAmount.toString()} offer=${offer.offerId}` +
+            (rehydrateOnly ? '; quarantined during rehydrate' : '; cancelling remainder'),
+          );
+          if (rehydrateOnly) {
+            quarantineOffer(currentAccountId, offer.offerId, `repriced-below-minTradeSize:${requantizedQuoteAmount.toString()}`);
+            continue;
+          }
+          mempoolOps.push({
+            accountId: currentAccountId,
+            tx: {
+              type: 'swap_resolve',
+              data: {
+                offerId: offer.offerId,
+                fillRatio: 0,
+                cancelRemainder: true,
+              },
+            },
+          });
+          continue;
+        }
+        qtyLots = requantizedBaseAmount / LOT_SCALE;
+        if (qtyLots === 0n || qtyLots > MAX_LOTS) {
+          console.warn(`⚠️ ORDERBOOK: repriced offer invalid after requantize qty=${qtyLots} offer=${offer.offerId}`);
+          if (rehydrateOnly) {
+            quarantineOffer(currentAccountId, offer.offerId, `repriced-invalid-lots:${qtyLots.toString()}`);
+            continue;
+          }
+          mempoolOps.push({
+            accountId: currentAccountId,
+            tx: {
+              type: 'swap_resolve',
+              data: {
+                offerId: offer.offerId,
+                fillRatio: 0,
+                cancelRemainder: true,
+              },
+            },
+          });
+          continue;
+        }
       }
     }
 
@@ -1497,14 +1587,15 @@ export function processOrderbookSwaps(
     const REJECT_BPS = SWAP_CONSTANTS.PRICE_REJECT_BPS;
     const WARN_BPS = SWAP_CONSTANTS.PRICE_WARN_BPS;
     const BPS_BASE = SWAP_CONSTANTS.BPS_BASE;
-    const marketAnchor = bestBid ?? bestAsk;
+    const { anchor: marketAnchor, label: marketAnchorLabel } = resolveOrderbookBandAnchor(side, bestBid, bestAsk);
     if (marketAnchor !== null) {
       const minAllowed = marketAnchor - ((marketAnchor * BigInt(REJECT_BPS)) / BigInt(BPS_BASE));
       const maxAllowed = marketAnchor + ((marketAnchor * BigInt(REJECT_BPS)) / BigInt(BPS_BASE));
       if (priceTicks < minAllowed || priceTicks > maxAllowed) {
         console.warn(
           `⚠️ ORDERBOOK: price ${priceTicks.toString()} is outside ±${REJECT_BPS / 100}% band ` +
-          `around anchor ${marketAnchor.toString()} — auto-canceling offer=${offer.offerId}`,
+          `around ${marketAnchorLabel} ${marketAnchor.toString()} (bestBid=${String(bestBid)} bestAsk=${String(bestAsk)}) ` +
+          `— auto-canceling offer=${offer.offerId}`,
         );
         if (rehydrateOnly) {
           quarantineOffer(currentAccountId, offer.offerId, `outside-anchor-band:${priceTicks.toString()}`);
