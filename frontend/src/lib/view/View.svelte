@@ -958,18 +958,17 @@
   }
 
   .view-wrapper.user-mode {
-    display: flex;
+    display: block;
     height: auto;
-    min-height: 100dvh;
+    min-height: 0;
     overflow: visible;
   }
 
   .view-wrapper.user-mode .user-mode-container {
-    display: block;
-    flex: 1;
+    display: contents;
+    flex: 0 0 auto;
     height: auto;
-    min-height: 100%;
-    min-height: 100dvh;
+    min-height: 0;
     overflow: visible;
   }
 

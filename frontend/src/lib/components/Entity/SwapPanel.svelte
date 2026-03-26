@@ -1988,18 +1988,17 @@
   }
 
   .section-market {
-    height: 100%;
+    height: auto;
     min-width: 0;
     max-width: 100%;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .section-order {
-    height: 100%;
+    height: auto;
     min-width: 0;
     max-width: 100%;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: visible;
   }
 
   .section-orders {
