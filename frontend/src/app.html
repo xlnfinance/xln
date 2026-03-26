@@ -94,18 +94,24 @@
 			html, body {
 				margin: 0;
 				padding: 0;
-				height: 100%;
-				overflow: hidden;
-				overscroll-behavior: none;
+				min-height: 100%;
 				-webkit-overflow-scrolling: touch;
 				background: var(--theme-bg-gradient, #0a0a0c);
 				color: var(--theme-text-primary, #e4e4e7);
 				transition: background 140ms ease, color 140ms ease;
 			}
-			/* Prevent iOS elastic bounce / white flash on overscroll */
-			body { position: fixed; width: 100%; }
-			html.xln-user-mode,
-			body.xln-user-mode {
+			html:not(.xln-user-mode),
+			body:not(.xln-user-mode) {
+				height: 100%;
+				overflow: hidden;
+				overscroll-behavior: none;
+			}
+			/* Prevent iOS elastic bounce / white flash on overscroll in dock/dev mode only */
+			body:not(.xln-user-mode) {
+				position: fixed;
+				width: 100%;
+			}
+			html.xln-user-mode {
 				height: auto;
 				min-height: 100%;
 				overflow-x: hidden;
@@ -114,8 +120,11 @@
 				background: var(--theme-bg-gradient, #0a0a0c);
 			}
 			body.xln-user-mode {
+				min-height: 100%;
+				overflow: visible;
 				position: static;
 				width: auto;
+				background: var(--theme-bg-gradient, #0a0a0c);
 			}
 		</style>
 	</body>

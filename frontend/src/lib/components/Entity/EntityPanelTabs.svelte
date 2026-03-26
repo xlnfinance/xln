@@ -5155,7 +5155,7 @@
     flex-direction: column;
     width: 100%;
     max-width: 1220px;
-    min-height: 100%;
+    min-height: 0;
     height: auto;
     margin: 0 auto;
     background: transparent;
@@ -5445,7 +5445,7 @@
 
   /* Focused Account View */
   .focused-view {
-    min-height: 100%;
+    min-height: 0;
   }
 
   /* Hero Section - Entity + Net Worth */

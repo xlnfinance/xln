@@ -632,7 +632,7 @@
     display: flex;
     flex-direction: column;
     height: auto;
-    min-height: 100dvh;
+    min-height: 0;
     background: transparent;
     color: var(--theme-text-primary, #e5e5e5);
   }
@@ -650,7 +650,7 @@
   /* Inline Panels - NO POPUPS! */
   .inline-panel {
     display: block;
-    min-height: 100%;
+    min-height: 0;
     height: auto;
     overflow: visible;
   }
@@ -676,13 +676,14 @@
   }
 
   .panel-content :global(.entity-panel) {
-    min-height: 100dvh;
+    min-height: 0;
     height: auto;
   }
 
   .panel-content :global(.main-scroll) {
     flex: 0 0 auto;
     overflow: visible;
+    min-height: 0;
   }
 
   .back-btn {
