@@ -262,6 +262,97 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(finalBook!.orderActive[takerOrderIdx!]).toBe(1);
   });
 
+  test('anchors buy-side price band to best ask when both sides of the book exist', () => {
+    const lot = SWAP_LOT_SCALE;
+    const makerBid = {
+      offerId: 'maker-bid',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'bid-maker',
+      accountId: 'bid-maker-account',
+      giveTokenId: 6,
+      giveAmount: 1000n * lot / 10_000n,
+      wantTokenId: 4,
+      wantAmount: lot,
+      createdHeight: 1,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1000n,
+    };
+
+    const makerAsk = {
+      offerId: 'maker-ask',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'ask-maker',
+      accountId: 'ask-maker-account',
+      giveTokenId: 4,
+      giveAmount: lot,
+      wantTokenId: 6,
+      wantAmount: 1200n * lot / 10_000n,
+      createdHeight: 2,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1200n,
+    };
+
+    const takerBuy = {
+      offerId: 'taker-buy-between-sides',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'taker',
+      accountId: 'taker-account',
+      giveTokenId: 6,
+      giveAmount: (1500n * 2n * lot) / 10_000n,
+      wantTokenId: 4,
+      wantAmount: 2n * lot,
+      createdHeight: 3,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1500n,
+    };
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['bid-maker-account', { swapOffers: new Map() }],
+        ['ask-maker-account', { swapOffers: new Map() }],
+        ['taker-account', { swapOffers: new Map() }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 2,
+          supportedPairs: ['4/6'],
+        },
+        books: new Map(),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processOrderbookSwaps(entityState, [makerBid, makerAsk, takerBuy]);
+    const takerResolve = result.mempoolOps.find(
+      (item) => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'taker-buy-between-sides',
+    );
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    const takerOrderIdx = finalBook?.orderIdToIdx.get('taker-account:taker-buy-between-sides');
+
+    expect(takerResolve).toBeDefined();
+    expect(takerResolve!.tx.data.cancelRemainder).toBe(false);
+    expect(finalBook).toBeDefined();
+    expect(typeof takerOrderIdx).toBe('number');
+    expect(finalBook!.orderActive[takerOrderIdx!]).toBe(1);
+  });
+
   test('auto-cancels prices outside the 30% anchor band instead of resting them', () => {
     const lot = SWAP_LOT_SCALE;
     const makerBaseQty = lot;
