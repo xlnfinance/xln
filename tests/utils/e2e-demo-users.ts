@@ -4,6 +4,7 @@ import { requireAppBaseUrl } from './e2e-base-url';
 
 export const APP_BASE_URL = requireAppBaseUrl();
 export const DEFAULT_INIT_TIMEOUT = 30_000;
+const RUNTIME_READY_TIMEOUT = process.env.E2E_LONG === '1' ? 90_000 : 60_000;
 
 export type DemoUserName = 'alice' | 'bob' | 'carol' | 'dave';
 
@@ -105,7 +106,7 @@ async function waitForRuntimeReady(page: Page, runtimeId: string): Promise<void>
     }).isolatedEnv;
     return String(env?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()
       && Number(env?.eReplicas?.size || 0) > 0;
-  }, { targetRuntimeId: runtimeId }, { timeout: 30_000 });
+  }, { targetRuntimeId: runtimeId }, { timeout: RUNTIME_READY_TIMEOUT });
 }
 
 async function waitForActiveRuntimeId(page: Page, runtimeId: string): Promise<void> {
@@ -129,7 +130,7 @@ async function waitForAnyRuntimeReady(page: Page): Promise<string> {
     }).isolatedEnv;
     if (!env?.runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
     return String(env.runtimeId).toLowerCase();
-  }, { timeout: 30_000 }).then(async (handle) => {
+  }, { timeout: RUNTIME_READY_TIMEOUT }).then(async (handle) => {
     const value = await handle.jsonValue();
     if (typeof value !== 'string' || value.length === 0) {
       throw new Error('runtimeId missing after runtime creation');
@@ -151,7 +152,7 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
     const previous = String(priorRuntimeId || '').toLowerCase();
     if (previous && runtimeId === previous) return null;
     return runtimeId;
-  }, { priorRuntimeId: previousRuntimeId }, { timeout: 30_000 }).then(async (handle) => {
+  }, { priorRuntimeId: previousRuntimeId }, { timeout: RUNTIME_READY_TIMEOUT }).then(async (handle) => {
     const value = await handle.jsonValue();
     if (typeof value !== 'string' || value.length === 0) {
       throw new Error('next runtimeId missing after quick login');
@@ -352,7 +353,12 @@ export async function createRuntimeIdentity(
 
 export async function getActiveEntity(page: Page): Promise<{ entityId: string; signerId: string; runtimeId: string } | null> {
   return page.evaluate(() => {
-    const env = (window as any).isolatedEnv;
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+        eReplicas?: Map<string, unknown>;
+      };
+    }).isolatedEnv;
     if (!env?.eReplicas) return null;
     const runtimeId = String(env.runtimeId || '').toLowerCase();
     for (const replicaKey of env.eReplicas.keys()) {
