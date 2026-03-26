@@ -213,7 +213,7 @@ export const BPS_BASE = 10000;
  */
 export interface SpreadDistribution {
   makerBps: number;         // Price improvement to maker
-  takerBps: number;         // Rebate to taker
+  takerBps: number;         // Quote-side spread share to taker
   hubBps: number;           // Hub revenue
   makerReferrerBps: number; // Reward to maker's referrer
   takerReferrerBps: number; // Reward to taker's referrer

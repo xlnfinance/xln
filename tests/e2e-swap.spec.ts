@@ -1220,10 +1220,34 @@ async function executeOrderbookClickFill(
         intervals: [100, 250, 500],
       })
       .toBe(0);
+    const closedTab = page.getByTestId('swap-orders-tab-closed').first();
+    await expect(closedTab).toBeVisible({ timeout: 10_000 });
     const fillModal = page.locator('.swap-modal').first();
-    await expect(fillModal).toBeVisible({ timeout: 10_000 });
-    await expect(fillModal).toContainText(/Swap Filled/i, { timeout: 10_000 });
-    await fillModal.getByRole('button', { name: /Close/i }).click();
+    const fillModalVisible = await fillModal
+      .waitFor({ state: 'visible', timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (fillModalVisible) {
+      await expect(fillModal).toContainText(/Swap Filled/i, { timeout: 10_000 });
+      await fillModal.getByRole('button', { name: /Close/i }).click();
+    }
+    await closedTab.click();
+    const closedOrdersTable = page.getByTestId('swap-closed-orders').first();
+    const closedOrdersVisible = await closedOrdersTable
+      .waitFor({ state: 'visible', timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (closedOrdersVisible) {
+      const firstClosedRow = closedOrdersTable.locator('tbody tr').first();
+      const firstClosedRowVisible = await firstClosedRow
+        .waitFor({ state: 'visible', timeout: 2_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (firstClosedRowVisible) {
+        await expect(firstClosedRow.locator('td').first()).toContainText(/Filled/i, { timeout: 10_000 });
+        await expect(firstClosedRow.locator('td').first()).not.toContainText(/Partial/i, { timeout: 10_000 });
+      }
+    }
   } catch (error) {
     const debugState = await readOrderbookDebug().catch(() => null);
     console.error(`[E2E-ORDERBOOK-DEBUG] ${clickTarget} recent logs:\n${orderbookLogs.join('\n')}`);

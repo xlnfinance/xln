@@ -19,20 +19,20 @@ export type {
   InitialDisputeProofStructOutput,
   FinalDisputeProofStruct,
   FinalDisputeProofStructOutput,
-} from './typechain/Depository.js';
+} from './typechain/Depository.ts';
 
 export type {
   DeltaTransformer,
-} from './typechain/DeltaTransformer.js';
+} from './typechain/DeltaTransformer.ts';
 
 // Import for internal use
 import type {
   ProofBodyStruct,
   TransformerClauseStruct,
   AllowanceStruct,
-} from './typechain/Depository.js';
+} from './typechain/Depository.ts';
 
-import type { DeltaTransformer } from './typechain/DeltaTransformer.js';
+import type { DeltaTransformer } from './typechain/DeltaTransformer.ts';
 
 /**
  * Runtime-friendly ProofBody (uses native types, not BigNumberish)

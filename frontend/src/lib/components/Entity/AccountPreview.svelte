@@ -1017,7 +1017,7 @@
 
     .status-col {
       width: 100%;
-      justify-content: flex-start;
+      justify-content: flex-end;
       gap: 6px;
     }
 
@@ -1026,8 +1026,8 @@
     }
 
     .consensus-popover {
-      left: 0;
-      right: auto;
+      left: auto;
+      right: 0;
       width: min(320px, calc(100vw - 32px));
     }
 

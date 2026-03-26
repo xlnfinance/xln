@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store';
-import type { Settings, ThemeName, BarColorMode, BarLayoutMode, AccountDeltaViewMode } from '$lib/types/ui';
+import type { Settings, ThemeName, BarColorMode, BarLayoutMode, AccountDeltaViewMode, UIStyleSettings } from '$lib/types/ui';
 import { applyThemeToDocument } from '../utils/themes';
+import { DEFAULT_UI_STYLE, applyUiStyleToDocument, exportUiSettings, normalizeImportedUiSettings, normalizeUiStyle } from '../utils/ui-style';
 import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 
 const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token'] as const;
@@ -28,6 +29,7 @@ const resolveDefaultRelayUrl = (): string => {
 // Default settings
 const defaultSettings: Settings = {
   theme: 'dark',
+  uiStyle: DEFAULT_UI_STYLE,
   barColorMode: 'rgy',
   barLayout: 'center',
   accountBarUsdPerPx: ACCOUNT_BAR_USD_PER_100PX_DEFAULT / 100,
@@ -88,6 +90,7 @@ const settingsOperations = {
         if (!VALID_ACCOUNT_DELTA_VIEW_MODES.includes(parsed.accountDeltaViewMode)) {
           parsed.accountDeltaViewMode = defaultSettings.accountDeltaViewMode;
         }
+        parsed.uiStyle = normalizeUiStyle(parsed.uiStyle);
         settings.update(current => ({ ...current, ...parsed }));
       }
       
@@ -132,6 +135,16 @@ const settingsOperations = {
     settings.update(current => ({ ...current, theme }));
     this.saveToStorage();
     applyThemeToDocument(theme);
+    applyUiStyleToDocument(get(settings).uiStyle);
+  },
+
+  setUiStyle(partial: Partial<UIStyleSettings>) {
+    settings.update(current => ({
+      ...current,
+      uiStyle: normalizeUiStyle({ ...current.uiStyle, ...partial }),
+    }));
+    this.saveToStorage();
+    applyUiStyleToDocument(get(settings).uiStyle);
   },
 
   // Update bar color mode
@@ -271,12 +284,39 @@ const settingsOperations = {
       localStorage.removeItem(SETTINGS_KEY);
       localStorage.removeItem(COMPONENT_STATES_KEY);
     }
+    applyThemeToDocument(defaultSettings.theme);
+    applyUiStyleToDocument(defaultSettings.uiStyle);
   },
 
   // Generic partial update + persist
   update(partial: Partial<Settings>) {
-    settings.update(current => ({ ...current, ...partial }));
+    settings.update(current => ({
+      ...current,
+      ...partial,
+      ...(partial.uiStyle ? { uiStyle: normalizeUiStyle({ ...current.uiStyle, ...partial.uiStyle }) } : {}),
+    }));
     this.saveToStorage();
+    const current = get(settings);
+    if (partial.theme) applyThemeToDocument(current.theme);
+    if (partial.uiStyle) applyUiStyleToDocument(current.uiStyle);
+  },
+
+  exportUiSettingsJson(): string {
+    return JSON.stringify(exportUiSettings(get(settings)), null, 2);
+  },
+
+  importUiSettingsJson(raw: string) {
+    const parsed = JSON.parse(raw);
+    const next = normalizeImportedUiSettings(parsed);
+    settings.update(current => ({
+      ...current,
+      ...next,
+      uiStyle: normalizeUiStyle(next.uiStyle ?? current.uiStyle),
+    }));
+    this.saveToStorage();
+    const current = get(settings);
+    applyThemeToDocument(current.theme);
+    applyUiStyleToDocument(current.uiStyle);
   },
 
   // Initialize settings
@@ -286,6 +326,7 @@ const settingsOperations = {
     // Apply initial theme
     const current = get(settings);
     applyThemeToDocument(current.theme);
+    applyUiStyleToDocument(current.uiStyle);
   }
 };
 

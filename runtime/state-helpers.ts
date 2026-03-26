@@ -10,6 +10,7 @@ import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { cloneJBatch, type CompletedBatch } from './j-batch';
 import type { CrontabState } from './crontab-types';
+import type { BookState } from './orderbook';
 
 // Message size limit for snapshot efficiency
 const MESSAGE_LIMIT = 10;
@@ -193,7 +194,7 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
     // For snapshots, remove clonedForValidation from all accounts to avoid cycles
     if (forSnapshot) {
       for (const account of cloned.accounts.values()) {
-        delete (account as any).clonedForValidation;
+        delete account.clonedForValidation;
       }
     }
 
@@ -361,27 +362,27 @@ function cloneOrderbookExt(ext: EntityState['orderbookExt']): EntityState['order
 /**
  * Clone a BookState with TypedArrays properly copied
  */
-function cloneBookState(book: any): any {
+function cloneBookState(book: BookState): BookState {
   return {
     ...book,
     // Clone TypedArrays via slice() which creates new underlying ArrayBuffer
-    orderPriceIdx: book.orderPriceIdx?.slice?.() ?? book.orderPriceIdx,
-    orderQtyLots: book.orderQtyLots?.slice?.() ?? book.orderQtyLots,
-    orderOwnerIdx: book.orderOwnerIdx?.slice?.() ?? book.orderOwnerIdx,
-    orderSide: book.orderSide?.slice?.() ?? book.orderSide,
-    orderPrev: book.orderPrev?.slice?.() ?? book.orderPrev,
-    orderNext: book.orderNext?.slice?.() ?? book.orderNext,
-    orderActive: book.orderActive?.slice?.() ?? book.orderActive,
-    levelHeadBid: book.levelHeadBid?.slice?.() ?? book.levelHeadBid,
-    levelTailBid: book.levelTailBid?.slice?.() ?? book.levelTailBid,
-    levelHeadAsk: book.levelHeadAsk?.slice?.() ?? book.levelHeadAsk,
-    levelTailAsk: book.levelTailAsk?.slice?.() ?? book.levelTailAsk,
-    bitmapBid: book.bitmapBid?.slice?.() ?? book.bitmapBid,
-    bitmapAsk: book.bitmapAsk?.slice?.() ?? book.bitmapAsk,
+    orderPriceIdx: book.orderPriceIdx.slice(),
+    orderQtyLots: book.orderQtyLots.slice(),
+    orderOwnerIdx: book.orderOwnerIdx.slice(),
+    orderSide: book.orderSide.slice(),
+    orderPrev: book.orderPrev.slice(),
+    orderNext: book.orderNext.slice(),
+    orderActive: book.orderActive.slice(),
+    levelHeadBid: book.levelHeadBid.slice(),
+    levelTailBid: book.levelTailBid.slice(),
+    levelHeadAsk: book.levelHeadAsk.slice(),
+    levelTailAsk: book.levelTailAsk.slice(),
+    bitmapBid: book.bitmapBid.slice(),
+    bitmapAsk: book.bitmapAsk.slice(),
     // Clone mutable reference types
-    owners: [...(book.owners || [])],
-    orderIds: [...(book.orderIds || [])],
-    orderIdToIdx: new Map(book.orderIdToIdx || []),
+    owners: [...book.owners],
+    orderIds: [...book.orderIds],
+    orderIdToIdx: new Map(book.orderIdToIdx),
   };
 }
 
@@ -437,7 +438,8 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
 export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolean = false): AccountMachine {
   // For snapshots, exclude clonedForValidation to avoid cycles
   if (forSnapshot) {
-    const { clonedForValidation, ...accountWithoutCloned } = account as any;
+    const { clonedForValidation, ...accountWithoutCloned } = account;
+    void clonedForValidation;
     try {
       return structuredClone(accountWithoutCloned) as AccountMachine;
     } catch {

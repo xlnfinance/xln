@@ -20,24 +20,7 @@ import { handleSwapCancelRequest } from './handlers/swap-cancel';
 import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 import { handleJEventClaim } from './handlers/j-event-claim';
 
-/**
- * Process single AccountTx through bilateral consensus
- * @param accountMachine - The account machine state
- * @param accountTx - The transaction to process
- * @param byLeft - Frame-level: is the proposer the LEFT entity? (Channel.ts block.isLeft pattern)
- * @param currentTimestamp - Current timestamp (for HTLC timelock validation)
- * @param currentHeight - Current J-block height (for HTLC revealBeforeHeight validation)
- * @returns Result with success, events, and optional error (may include secret/hashlock for HTLC routing)
- */
-export async function processAccountTx(
-  accountMachine: AccountMachine,
-  accountTx: AccountTx,
-  byLeft: boolean,
-  currentTimestamp: number = 0,
-  currentHeight: number = 0,
-  isValidation: boolean = false,
-  env?: Env,
-): Promise<{
+type ProcessAccountTxResult = {
   success: boolean;
   events: string[];
   error?: string;
@@ -63,15 +46,46 @@ export async function processAccountTx(
   };
   swapOfferCancelRequested?: { offerId: string };
   swapOfferCancelled?: { offerId: string; accountId: string; makerId?: string };
-}> {
+};
+
+type DebugEventEmitter = {
+  sendDebugEvent(payload: Record<string, unknown>): void;
+};
+
+type RequestCollateralTx = Extract<AccountTx, { type: 'request_collateral' }>;
+
+const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
+  typeof value === 'object' &&
+  value !== null &&
+  'sendDebugEvent' in value &&
+  typeof value.sendDebugEvent === 'function';
+
+/**
+ * Process single AccountTx through bilateral consensus
+ * @param accountMachine - The account machine state
+ * @param accountTx - The transaction to process
+ * @param byLeft - Frame-level: is the proposer the LEFT entity? (Channel.ts block.isLeft pattern)
+ * @param currentTimestamp - Current timestamp (for HTLC timelock validation)
+ * @param currentHeight - Current J-block height (for HTLC revealBeforeHeight validation)
+ * @returns Result with success, events, and optional error (may include secret/hashlock for HTLC routing)
+ */
+export async function processAccountTx(
+  accountMachine: AccountMachine,
+  accountTx: AccountTx,
+  byLeft: boolean,
+  currentTimestamp: number = 0,
+  currentHeight: number = 0,
+  isValidation: boolean = false,
+  env?: Env,
+): Promise<ProcessAccountTxResult> {
   // Derive counterparty from canonical left/right using proofHeader's fromEntity as "me"
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
   console.log(`🔄 Processing ${accountTx.type} for ${counterparty.slice(-4)} (byLeft: ${byLeft})`);
 
   const emitRebalanceDebug = (payload: Record<string, unknown>) => {
-    const p2p = (env as any)?.runtimeState?.p2p;
-    if (p2p && typeof p2p.sendDebugEvent === 'function') {
+    const p2p = env?.runtimeState?.p2p;
+    if (isDebugEventEmitter(p2p)) {
       p2p.sendDebugEvent({
         level: 'info',
         code: 'REB_STEP',
@@ -118,14 +132,15 @@ export async function processAccountTx(
 
     case 'request_collateral':
       {
+      const requestCollateralTx = accountTx as RequestCollateralTx;
       const result = handleRequestCollateral(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'request_collateral' }>,
+        requestCollateralTx,
         byLeft,
         currentTimestamp,
       );
+      const tokenId = Number(requestCollateralTx.data.tokenId);
       if (result.success) {
-        const tokenId = Number((accountTx as any)?.data?.tokenId ?? 0);
         const requested = accountMachine.requestedRebalance.get(tokenId) ?? 0n;
         const feeState = accountMachine.requestedRebalanceFeeState?.get(tokenId);
         if (env && !isValidation) {
@@ -153,7 +168,7 @@ export async function processAccountTx(
           status: 'error',
           event: 'request_collateral_rejected',
           reason: result.error || 'unknown',
-          tokenId: Number((accountTx as any)?.data?.tokenId ?? 0),
+          tokenId,
         });
       }
       return result;
@@ -199,7 +214,7 @@ export async function processAccountTx(
         currentHeight,
         currentTimestamp,
       );
-      const ret: typeof processAccountTx extends (...args: any[]) => Promise<infer R> ? R : never = {
+      const ret: ProcessAccountTxResult = {
         success: resolveResult.success,
         events: resolveResult.events,
       };

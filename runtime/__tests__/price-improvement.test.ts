@@ -334,7 +334,7 @@ describe('price improvement', () => {
       console.log(`BUY taker saves: ${saved} wei (${Number(saved * 10000n / current.filledGive) / 100}%)`);
     });
 
-    test('handleSwapResolve settles BUY at limit price + rebate', async () => {
+    test('handleSwapResolve settles BUY at exact execution amounts', async () => {
       let book = makeBook(10, 0, 200);
       let r;
       r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'a1', side: 1, tif: 0, postOnly: false, priceTicks: 100n, qtyLots: 1 }); book = r.state;
@@ -348,8 +348,7 @@ describe('price improvement', () => {
       const executionBaseAmount = totalQty * LOT_SCALE;
       const executionQuoteAmount = ticksLotsToWei(totalCost);
       const limitQuoteAmount = ticksLotsToWei(360n);
-      const spread = limitQuoteAmount - executionQuoteAmount;
-      const rebateAmount = spread;
+      const savedQuoteAmount = limitQuoteAmount - executionQuoteAmount;
       const offerId = 'buy-offer';
 
       const offer: SwapOffer = {
@@ -373,22 +372,17 @@ describe('price improvement', () => {
           cancelRemainder: true,
           executionGiveAmount: executionQuoteAmount,
           executionWantAmount: executionBaseAmount,
-          rebateAmount,
-          rebateTokenId: 1, // quote token (USDC)
         },
       };
 
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
       expect(resolveResult.success).toBe(true);
       expect(accountMachine.swapOffers.has(offerId)).toBe(false);
-      // Settlement at exact execution on give side plus rebate on quote side
-      expect(accountMachine.deltas.get(1)?.offdelta).toBe(-executionQuoteAmount + rebateAmount);
+      // Settlement uses exact quote spent, not limit quote plus bonus leg.
+      expect(accountMachine.deltas.get(1)?.offdelta).toBe(-executionQuoteAmount);
       expect(accountMachine.deltas.get(2)?.offdelta).toBe(executionBaseAmount);
-      // Net cost = limitQuote - rebate < limitQuote
-      expect(-limitQuoteAmount + rebateAmount).toBeGreaterThan(-limitQuoteAmount);
-      // Rebate tracked
-      expect(accountMachine.totalRebates?.get(1)).toBe(rebateAmount);
-      console.log(`BUY rebate: ${rebateAmount} of ${spread} spread (100%)`);
+      expect(savedQuoteAmount).toBeGreaterThan(0n);
+      console.log(`BUY price improvement: ${savedQuoteAmount}`);
     });
 
     test('SELL taker gets price improvement with exact settlement', () => {
@@ -423,7 +417,7 @@ describe('price improvement', () => {
       console.log(`SELL taker gains: ${gained} wei (${Number(gained * 10000n / proposed.filledWant) / 100}%)`);
     });
 
-    test('handleSwapResolve settles SELL at limit price + rebate', async () => {
+    test('handleSwapResolve settles SELL at exact execution amounts', async () => {
       let book = makeBook(100, 2000, 4000);
       let r;
       r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 3100n, qtyLots: 1 }); book = r.state;
@@ -437,8 +431,7 @@ describe('price improvement', () => {
       const executionBaseAmount = totalQty * LOT_SCALE;
       const executionQuoteAmount = ticksLotsToWei(totalCost);
       const limitQuoteAmount = ticksLotsToWei(8700n);
-      const spread = executionQuoteAmount - limitQuoteAmount; // seller got more
-      const rebateAmount = spread;
+      const gainedQuoteAmount = executionQuoteAmount - limitQuoteAmount;
       const offerId = 'sell-offer';
 
       const offer: SwapOffer = {
@@ -462,29 +455,22 @@ describe('price improvement', () => {
           cancelRemainder: true,
           executionGiveAmount: executionBaseAmount,
           executionWantAmount: executionQuoteAmount,
-          rebateAmount,
-          rebateTokenId: 1, // quote token (USDC) — seller gets more proceeds
         },
       };
 
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
       expect(resolveResult.success).toBe(true);
       expect(accountMachine.swapOffers.has(offerId)).toBe(false);
-      // Settlement at limit price for give side
+      // Settlement uses exact execution proceeds, not proceeds plus bonus leg.
       expect(accountMachine.deltas.get(2)?.offdelta).toBe(-executionBaseAmount);
-      // Settlement at exact execution proceeds plus rebate
-      expect(accountMachine.deltas.get(1)?.offdelta).toBe(executionQuoteAmount + rebateAmount);
-      // Net proceeds > limit proceeds
-      expect(limitQuoteAmount + rebateAmount).toBeGreaterThan(limitQuoteAmount);
-      // Rebate tracked
-      expect(accountMachine.totalRebates?.get(1)).toBe(rebateAmount);
-      console.log(`SELL rebate: ${rebateAmount} of ${spread} spread (100%)`);
+      expect(accountMachine.deltas.get(1)?.offdelta).toBe(executionQuoteAmount);
+      expect(gainedQuoteAmount).toBeGreaterThan(0n);
+      console.log(`SELL price improvement: ${gainedQuoteAmount}`);
     });
 
-    test('handleSwapResolve rejects rebate when counterparty cannot fund fill plus rebate', async () => {
+    test('handleSwapResolve rejects exact execution when counterparty cannot fund it', async () => {
       const executionBaseAmount = 3n * LOT_SCALE;
-      const limitQuoteAmount = ticksLotsToWei(8700n);
-      const rebateAmount = ticksLotsToWei(300n);
+      const executionQuoteAmount = ticksLotsToWei(9000n);
       const offerId = 'sell-capacity-offer';
 
       const offer: SwapOffer = {
@@ -492,15 +478,15 @@ describe('price improvement', () => {
         giveTokenId: 2,
         giveAmount: executionBaseAmount,
         wantTokenId: 1,
-        wantAmount: limitQuoteAmount,
+        wantAmount: ticksLotsToWei(8700n),
         makerIsLeft: true,
         minFillRatio: 0,
         createdHeight: 0,
         quantizedGive: executionBaseAmount,
-        quantizedWant: limitQuoteAmount,
+        quantizedWant: ticksLotsToWei(8700n),
       };
       const accountMachine = makeAccountMachine(offer);
-      accountMachine.deltas.get(1)!.rightCreditLimit = limitQuoteAmount;
+      accountMachine.deltas.get(1)!.rightCreditLimit = executionQuoteAmount - 1n;
       const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
         type: 'swap_resolve',
         data: {
@@ -508,9 +494,7 @@ describe('price improvement', () => {
           fillRatio: 65535,
           cancelRemainder: true,
           executionGiveAmount: executionBaseAmount,
-          executionWantAmount: limitQuoteAmount,
-          rebateAmount,
-          rebateTokenId: 1,
+          executionWantAmount: executionQuoteAmount,
         },
       };
 

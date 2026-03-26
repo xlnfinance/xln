@@ -94,6 +94,11 @@
           <span class="token-symbol">{symbol}</span>
           <span class="token-name">{compactName}</span>
         </div>
+        {#if actionLabel}
+          <button class="summary-action-inline compact-token-action" on:click={emitAction} disabled={actionDisabled}>
+            {actionLabel}
+          </button>
+        {/if}
       </div>
       <div class="compact-metrics compact-metrics-wide">
         <div class="compact-metric compact-out" aria-label="Out capacity">
@@ -105,11 +110,6 @@
               <span class="delta-flash" class:positive={deltaFlashPositive} class:negative={!deltaFlashPositive}>{deltaFlashText}</span>
             {/if}
           </span>
-          {#if actionLabel}
-            <button class="summary-action-inline" on:click={emitAction} disabled={actionDisabled}>
-              {actionLabel}
-            </button>
-          {/if}
         </div>
         <div class="compact-metric compact-in" aria-label="In capacity">
           {#if showMetricLabels}<span class="metric-label">In</span>{/if}
@@ -327,6 +327,7 @@
   .compact-token-action {
     flex: 0 0 auto;
     justify-self: end;
+    margin-left: auto;
   }
 
   .summary-action:hover:not(:disabled) {
@@ -386,6 +387,7 @@
     flex: 0 1 auto;
     gap: 10px;
     align-items: center;
+    width: 100%;
   }
 
   .compact-metrics {
@@ -560,7 +562,7 @@
     }
 
     .compact-token-action {
-      justify-self: start;
+      justify-self: end;
     }
 
     .compact-out-value,
@@ -571,29 +573,40 @@
 
   @media (max-width: 640px) {
     .compact-metrics {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 6px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 10px;
     }
 
     .compact-out,
     .compact-in {
-      width: 100%;
       margin: 0;
-      justify-content: space-between;
-      text-align: left;
+      width: auto;
+      min-width: 0;
+      align-items: baseline;
     }
 
     .compact-in {
-      justify-content: flex-start;
+      justify-content: flex-end;
+      text-align: right;
     }
 
     .compact-out-value,
     .compact-in-value {
       font-size: 15px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       gap: 4px;
+      min-width: 0;
+    }
+
+    .compact-out-value {
       justify-content: flex-start;
+    }
+
+    .compact-in-value {
+      justify-content: flex-end;
+      text-align: right;
     }
 
     .inbound-label {

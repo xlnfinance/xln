@@ -52,9 +52,55 @@ export type { ThemeColors } from '$lib/utils/themes';
 export type BarColorMode = 'rgy' | 'theme' | 'token';
 export type BarLayoutMode = 'center' | 'sides';
 export type AccountDeltaViewMode = 'per-token' | 'aggregated';
+export type UIDensityMode = 'compact' | 'comfortable' | 'roomy';
+export type UIRadiusMode = 'sharp' | 'soft' | 'pill';
+export type UIBorderMode = 'minimal' | 'subtle' | 'strong';
+export type UIShadowMode = 'flat' | 'soft' | 'float';
+export type UITabStyle = 'underline' | 'pill' | 'segmented';
+export type UIButtonStyle = 'minimal' | 'soft' | 'solid';
+export type UICardStyle = 'flat' | 'filled' | 'striped';
+export type UIInputStyle = 'minimal' | 'outlined' | 'filled';
+export type UIAccentIntensity = 'quiet' | 'normal' | 'bold';
+export type UITypographyScale = 'sm' | 'md' | 'lg';
+
+export interface UIStyleSettings {
+  density: UIDensityMode;
+  radius: UIRadiusMode;
+  borders: UIBorderMode;
+  shadows: UIShadowMode;
+  tabs: UITabStyle;
+  buttons: UIButtonStyle;
+  cards: UICardStyle;
+  inputs: UIInputStyle;
+  accent: UIAccentIntensity;
+  typography: UITypographyScale;
+}
+
+export interface UiSettingsExport {
+  version: 1;
+  theme: ThemeName;
+  uiStyle: UIStyleSettings;
+  compactNumbers: boolean;
+  showTokenIcons: boolean;
+  showTimeMachine: boolean;
+  tokenPrecision: number;
+  accountDeltaViewMode: AccountDeltaViewMode;
+  portfolioScale: number;
+  barColorMode: BarColorMode;
+  barLayout: BarLayoutMode;
+  accountBarUsdPerPx: number;
+  verboseLogging: boolean;
+  barCreditGradient: boolean;
+  barAnimTransition: boolean;
+  barAnimSweep: boolean;
+  barAnimGlow: boolean;
+  barAnimDeltaFlash: boolean;
+  barAnimRipple: boolean;
+}
 
 export interface Settings {
   theme: ThemeName;
+  uiStyle: UIStyleSettings;
   barColorMode: BarColorMode;
   barLayout: BarLayoutMode;
   // Internal normalized bar scale. UI presents this as "100px = $N".

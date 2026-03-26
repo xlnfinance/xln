@@ -13,7 +13,7 @@
 
 import type { AccountMachine, AccountTx, HtlcLock, Delta } from '../../types';
 import { deriveDelta, getDefaultCreditLimit } from '../../account-utils';
-import { FINANCIAL } from '../../constants';
+import { FINANCIAL, LIMITS } from '../../constants';
 import { HTLC } from '../../constants';
 
 export async function handleHtlcLock(
@@ -37,6 +37,13 @@ export async function handleHtlcLock(
   // 1. Validate lockId uniqueness
   if (accountMachine.locks.has(lockId)) {
     return { success: false, error: `Lock ${lockId} already exists`, events };
+  }
+  if (accountMachine.locks.size >= LIMITS.MAX_ACCOUNT_HTLC_LOCKS) {
+    return {
+      success: false,
+      error: `Too many active HTLC locks: max ${LIMITS.MAX_ACCOUNT_HTLC_LOCKS}`,
+      events,
+    };
   }
 
   // 2. Validate expiry is in future - BOTH timelock AND revealBeforeHeight

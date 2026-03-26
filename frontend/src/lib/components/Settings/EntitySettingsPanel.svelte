@@ -2,7 +2,7 @@
   import { createEventDispatcher, onDestroy, onMount, type ComponentType } from 'svelte';
   import { ethers } from 'ethers';
   import type { Env, EntityTx } from '@xln/runtime/xln-api';
-  import type { BarColorMode, EntityReplica, Tab, ThemeName } from '$lib/types/ui';
+  import type { BarColorMode, EntityReplica, Tab, ThemeName, UIStyleSettings } from '$lib/types/ui';
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
   import {
     jmachineConfigs,
@@ -16,9 +16,10 @@
   import { toasts } from '$lib/stores/toastStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { THEME_DEFINITIONS, getAvailableThemes } from '$lib/utils/themes';
+  import { DEFAULT_UI_STYLE } from '$lib/utils/ui-style';
   import { getBarColors } from '$lib/utils/bar-colors';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
-  import { Check, ChevronDown, ChevronUp, Copy, Trash2, X } from 'lucide-svelte';
+  import { Check, ChevronDown, ChevronUp, Copy, Download, Trash2, Upload, X } from 'lucide-svelte';
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
   import FormationPanel from '$lib/components/Entity/FormationPanel.svelte';
   import GossipPanel from '$lib/components/Entity/GossipPanel.svelte';
@@ -40,9 +41,117 @@
     { id: 'wallet', label: 'Wallet' },
     { id: 'display', label: 'Display' },
     { id: 'network', label: 'Network' },
-    { id: 'data', label: 'Data' },
+    { id: 'data', label: 'Advanced' },
     { id: 'log', label: 'Log' },
     { id: 'entity', label: 'Entity' },
+  ];
+
+  const UI_STYLE_OPTIONS: Array<{
+    key: keyof UIStyleSettings;
+    label: string;
+    description: string;
+    options: Array<{ value: UIStyleSettings[keyof UIStyleSettings]; label: string }>;
+  }> = [
+    {
+      key: 'density',
+      label: 'Density',
+      description: 'Overall spacing and control height.',
+      options: [
+        { value: 'compact', label: 'Compact' },
+        { value: 'comfortable', label: 'Comfortable' },
+        { value: 'roomy', label: 'Roomy' },
+      ],
+    },
+    {
+      key: 'radius',
+      label: 'Radius',
+      description: 'How sharp or rounded controls should feel.',
+      options: [
+        { value: 'sharp', label: 'Sharp' },
+        { value: 'soft', label: 'Soft' },
+        { value: 'pill', label: 'Pill' },
+      ],
+    },
+    {
+      key: 'borders',
+      label: 'Borders',
+      description: 'Visible framing around cards and controls.',
+      options: [
+        { value: 'minimal', label: 'Minimal' },
+        { value: 'subtle', label: 'Subtle' },
+        { value: 'strong', label: 'Strong' },
+      ],
+    },
+    {
+      key: 'shadows',
+      label: 'Shadows',
+      description: 'Surface lift and depth.',
+      options: [
+        { value: 'flat', label: 'Flat' },
+        { value: 'soft', label: 'Soft' },
+        { value: 'float', label: 'Float' },
+      ],
+    },
+    {
+      key: 'tabs',
+      label: 'Tabs',
+      description: 'Tab rail treatment.',
+      options: [
+        { value: 'underline', label: 'Underline' },
+        { value: 'pill', label: 'Pill' },
+        { value: 'segmented', label: 'Segmented' },
+      ],
+    },
+    {
+      key: 'buttons',
+      label: 'Buttons',
+      description: 'Primary and secondary action style.',
+      options: [
+        { value: 'minimal', label: 'Minimal' },
+        { value: 'soft', label: 'Soft' },
+        { value: 'solid', label: 'Solid' },
+      ],
+    },
+    {
+      key: 'cards',
+      label: 'Cards',
+      description: 'Surface density and striping.',
+      options: [
+        { value: 'flat', label: 'Flat' },
+        { value: 'filled', label: 'Filled' },
+        { value: 'striped', label: 'Striped' },
+      ],
+    },
+    {
+      key: 'inputs',
+      label: 'Inputs',
+      description: 'Field framing style.',
+      options: [
+        { value: 'minimal', label: 'Minimal' },
+        { value: 'outlined', label: 'Outlined' },
+        { value: 'filled', label: 'Filled' },
+      ],
+    },
+    {
+      key: 'accent',
+      label: 'Accent',
+      description: 'How strongly accent color appears.',
+      options: [
+        { value: 'quiet', label: 'Quiet' },
+        { value: 'normal', label: 'Normal' },
+        { value: 'bold', label: 'Bold' },
+      ],
+    },
+    {
+      key: 'typography',
+      label: 'Type Scale',
+      description: 'Global text density.',
+      options: [
+        { value: 'sm', label: 'Small' },
+        { value: 'md', label: 'Normal' },
+        { value: 'lg', label: 'Large' },
+      ],
+    },
   ];
 
   const ACCOUNT_BAR_USD_PER_100PX_MIN = 10;
@@ -66,6 +175,9 @@
 
   let selectedTheme: ThemeName = 'dark';
   let entityCreationOpen = false;
+  let uiSettingsJsonDraft = '';
+  let uiSettingsMessage = '';
+  let uiSettingsMessageTone: 'neutral' | 'error' = 'neutral';
 
   let governanceName = '';
   let governanceBio = '';
@@ -119,6 +231,9 @@
   }
 
   $: selectedTheme = $settings.theme;
+  $: if (activeTab === 'display' && !uiSettingsJsonDraft) {
+    uiSettingsJsonDraft = settingsOperations.exportUiSettingsJson();
+  }
   $: currentEntityId = String(replica?.state?.entityId || tab?.entityId || '').trim();
   $: currentSignerId = String(tab?.signerId || '').trim();
   $: currentJurisdictionLabel = jurisdictionLabel
@@ -227,6 +342,66 @@
       navigator.clipboard.writeText($activeVault.mnemonic12);
       mnemonic12Copied = true;
       setTimeout(() => mnemonic12Copied = false, 2000);
+    }
+  }
+
+  function setUiStyleValue<K extends keyof UIStyleSettings>(key: K, value: UIStyleSettings[K]) {
+    settingsOperations.setUiStyle({ [key]: value } as Pick<UIStyleSettings, K>);
+  }
+
+  function resetUiStyleTokens() {
+    settingsOperations.setUiStyle(DEFAULT_UI_STYLE);
+  }
+
+  function refreshUiSettingsDraft() {
+    uiSettingsJsonDraft = settingsOperations.exportUiSettingsJson();
+    uiSettingsMessage = '';
+    uiSettingsMessageTone = 'neutral';
+  }
+
+  async function copyUiSettingsJson() {
+    const json = settingsOperations.exportUiSettingsJson();
+    await navigator.clipboard.writeText(json);
+    uiSettingsJsonDraft = json;
+    uiSettingsMessage = 'UI settings JSON copied.';
+    uiSettingsMessageTone = 'neutral';
+  }
+
+  function downloadUiSettingsJson() {
+    const json = settingsOperations.exportUiSettingsJson();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `xln-ui-settings-${Date.now()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    uiSettingsJsonDraft = json;
+    uiSettingsMessage = 'UI settings JSON downloaded.';
+    uiSettingsMessageTone = 'neutral';
+  }
+
+  function importUiSettingsDraft() {
+    try {
+      settingsOperations.importUiSettingsJson(uiSettingsJsonDraft);
+      uiSettingsJsonDraft = settingsOperations.exportUiSettingsJson();
+      uiSettingsMessage = 'UI settings imported.';
+      uiSettingsMessageTone = 'neutral';
+    } catch (error) {
+      uiSettingsMessage = error instanceof Error ? error.message : String(error);
+      uiSettingsMessageTone = 'error';
+    }
+  }
+
+  async function handleUiSettingsFileImport(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      uiSettingsJsonDraft = await file.text();
+      importUiSettingsDraft();
+    } finally {
+      input.value = '';
     }
   }
 
@@ -797,6 +972,43 @@
       <section class="section-card">
         <div class="section-head">
           <div>
+            <h3>Build Your UI</h3>
+            <p class="section-desc">Testnet-only design controls for gathering user feedback without changing the default test path.</p>
+          </div>
+          <button class="compact-btn" on:click={resetUiStyleTokens}>Reset Style</button>
+        </div>
+
+        <div class="style-grid">
+          {#each UI_STYLE_OPTIONS as group}
+            <div class="style-group">
+              <div class="style-group-head">
+                <span class="setting-title">{group.label}</span>
+                <span class="helper-note">{group.description}</span>
+              </div>
+              <div class="pill-group" role="tablist" aria-label={group.label}>
+                {#each group.options as option}
+                  <button
+                    type="button"
+                    class="pill"
+                    class:active={$settings.uiStyle[group.key] === option.value}
+                    aria-pressed={$settings.uiStyle[group.key] === option.value}
+                    on:click={() => setUiStyleValue(group.key, option.value)}
+                  >
+                    {option.label}
+                  </button>
+                {/each}
+              </div>
+              <span class="style-current">
+                Current: {group.options.find((option) => option.value === $settings.uiStyle[group.key])?.label ?? 'Default'}
+              </span>
+            </div>
+          {/each}
+        </div>
+      </section>
+
+      <section class="section-card">
+        <div class="section-head">
+          <div>
             <h3>Account Bars</h3>
             <p class="section-desc">Layout, scale, and animation effects.</p>
           </div>
@@ -805,8 +1017,8 @@
         <div class="appearance-block">
           <span class="setting-title">Layout</span>
           <div class="pill-group" role="tablist" aria-label="Account bar layout">
-            <button class="pill" class:active={$settings.barLayout === 'center'} on:click={() => settingsOperations.setBarLayout('center')}>Center</button>
-            <button class="pill" class:active={$settings.barLayout === 'sides'} on:click={() => settingsOperations.setBarLayout('sides')}>Sides</button>
+            <button type="button" class="pill" class:active={$settings.barLayout === 'center'} aria-pressed={$settings.barLayout === 'center'} on:click={() => settingsOperations.setBarLayout('center')}>Center</button>
+            <button type="button" class="pill" class:active={$settings.barLayout === 'sides'} aria-pressed={$settings.barLayout === 'sides'} on:click={() => settingsOperations.setBarLayout('sides')}>Sides</button>
           </div>
         </div>
 
@@ -847,6 +1059,47 @@
           <span class="setting-title">Ripple</span>
           <input type="checkbox" checked={$settings.barAnimRipple} on:change={(event) => settingsOperations.update({ barAnimRipple: (event.currentTarget as HTMLInputElement).checked })} />
         </label>
+      </section>
+
+      <section class="section-card">
+        <div class="section-head">
+          <div>
+            <h3>UI Settings JSON</h3>
+            <p class="section-desc">Copy, share, import, or download the current visual settings.</p>
+          </div>
+        </div>
+
+        <div class="editor-actions">
+          <button class="compact-btn" on:click={refreshUiSettingsDraft}>
+            <ChevronDown size={14} />
+            <span>Refresh JSON</span>
+          </button>
+          <button class="compact-btn" on:click={copyUiSettingsJson}>
+            <Copy size={14} />
+            <span>Copy JSON</span>
+          </button>
+          <button class="compact-btn" on:click={downloadUiSettingsJson}>
+            <Download size={14} />
+            <span>Download</span>
+          </button>
+          <label class="compact-btn file-btn">
+            <Upload size={14} />
+            <span>Import File</span>
+            <input type="file" accept="application/json" on:change={handleUiSettingsFileImport} />
+          </label>
+        </div>
+
+        <textarea bind:value={uiSettingsJsonDraft} rows="14" class="ui-json-editor" data-testid="settings-ui-json"></textarea>
+
+        <div class="editor-actions">
+          <button class="primary-btn" on:click={importUiSettingsDraft}>Apply JSON</button>
+        </div>
+
+        {#if uiSettingsMessage}
+          <p class:helper-note={uiSettingsMessageTone === 'neutral'} class:error-text={uiSettingsMessageTone === 'error'}>
+            {uiSettingsMessage}
+          </p>
+        {/if}
       </section>
 
     {:else if activeTab === 'network'}
@@ -1322,11 +1575,13 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.1));
-    border-radius: 8px;
-    background: var(--theme-surface, rgba(255, 255, 255, 0.03));
-    color: var(--theme-text-secondary, rgba(255, 255, 255, 0.7));
+    border: 1px solid color-mix(in srgb, var(--theme-border, rgba(255, 255, 255, 0.1)) var(--ui-border-mix, 56%), transparent) !important;
+    border-radius: var(--ui-radius-base, 12px) !important;
+    background: color-mix(in srgb, var(--theme-surface, rgba(255, 255, 255, 0.03)) var(--ui-card-fill-mix, 94%), transparent) !important;
+    color: var(--theme-text-secondary, rgba(255, 255, 255, 0.7)) !important;
     cursor: pointer;
+    box-sizing: border-box;
+    transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease, transform 0.16s ease;
   }
 
   .close-btn,
@@ -1341,13 +1596,22 @@
   }
 
   .compact-btn {
-    min-height: 34px;
+    min-height: calc(var(--ui-control-height, 44px) - 8px);
     padding: 0 12px;
-    font-size: 12px;
+    font-size: calc(12px * var(--ui-font-scale, 1));
   }
 
   .danger-icon {
     color: #fca5a5;
+  }
+
+  .close-btn:hover,
+  .icon-btn:hover,
+  .compact-btn:hover,
+  .danger-icon:hover {
+    color: var(--theme-text-primary, #e4e4e7) !important;
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 20%, transparent) !important;
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 88%, transparent) !important;
   }
 
   .settings-tabs {
@@ -1356,7 +1620,7 @@
     margin: 0;
     padding: 6px 0 2px;
     border: none;
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 56%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 56%), transparent);
     border-radius: 0;
     background: transparent;
     overflow-x: auto;
@@ -1370,13 +1634,13 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 44px;
+    min-height: var(--ui-control-height, 44px);
     padding: 10px 16px;
-    border: 1px solid transparent;
-    border-radius: 12px 12px 0 0;
-    background: transparent;
-    color: var(--theme-text-secondary, #a1a1aa);
-    font-size: 12px;
+    border: 1px solid transparent !important;
+    border-radius: var(--ui-radius-base, 12px) var(--ui-radius-base, 12px) 0 0 !important;
+    background: transparent !important;
+    color: var(--theme-text-secondary, #a1a1aa) !important;
+    font-size: calc(12px * var(--ui-font-scale, 1));
     font-weight: 650;
     white-space: nowrap;
     cursor: pointer;
@@ -1385,15 +1649,15 @@
   }
 
   .settings-tab:hover {
-    color: var(--theme-text-primary, #e4e4e7);
-    border-color: transparent;
-    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 66%, transparent);
+    color: var(--theme-text-primary, #e4e4e7) !important;
+    border-color: transparent !important;
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 66%, transparent) !important;
   }
 
   .settings-tab.active {
-    color: var(--theme-text-primary, #e4e4e7);
-    border-color: color-mix(in srgb, var(--theme-border, #27272a) 48%, transparent);
-    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 10%, transparent);
+    color: var(--theme-text-primary, #e4e4e7) !important;
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 24%, transparent) !important;
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 16%, transparent) !important;
     box-shadow: inset 0 2px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 78%, transparent);
   }
 
@@ -1404,9 +1668,9 @@
 
   .section-card {
     padding: 16px;
-    border: 1px solid color-mix(in srgb, var(--theme-border, rgba(255, 255, 255, 0.08)) 58%, transparent);
-    border-radius: 16px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 90%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, rgba(255, 255, 255, 0.08)) var(--ui-border-mix, 58%), transparent);
+    border-radius: var(--ui-radius-large, 16px);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) var(--ui-card-fill-mix, 90%), transparent);
   }
 
   .danger-card {
@@ -1424,7 +1688,7 @@
 
   .section-head h3 {
     margin: 0;
-    font-size: 14px;
+    font-size: calc(14px * var(--ui-font-scale, 1));
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
@@ -1433,7 +1697,7 @@
   .helper-note {
     margin: 4px 0 0;
     color: var(--theme-text-muted, rgba(255, 255, 255, 0.5));
-    font-size: 12px;
+    font-size: calc(12px * var(--ui-font-scale, 1));
     line-height: 1.45;
   }
 
@@ -1456,9 +1720,9 @@
     display: grid;
     gap: 10px;
     padding: 14px;
-    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.08));
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, rgba(255, 255, 255, 0.08)) var(--ui-border-mix, 56%), transparent);
+    border-radius: var(--ui-radius-base, 12px);
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) var(--ui-card-fill-mix, 70%), transparent);
   }
 
   .info-row {
@@ -1524,7 +1788,7 @@
 
   .seed-warning {
     padding: 10px 12px;
-    border-radius: 10px;
+    border-radius: var(--ui-radius-base, 12px);
     background: rgba(127, 29, 29, 0.18);
     border: 1px solid rgba(248, 113, 113, 0.2);
     color: #fecaca;
@@ -1551,7 +1815,7 @@
   .seed-code {
     display: block;
     padding: 12px;
-    border-radius: 10px;
+    border-radius: var(--ui-radius-base, 12px);
     background: color-mix(in srgb, var(--theme-background, #09090b) 70%, transparent);
     color: var(--theme-accent, #fbbf24);
     font-size: 12px;
@@ -1579,25 +1843,25 @@
   }
 
   .setting-title {
-    font-size: 13px;
+    font-size: calc(13px * var(--ui-font-scale, 1));
     font-weight: 600;
   }
 
   .toggle {
     min-width: 58px;
-    min-height: 32px;
+    min-height: calc(var(--ui-control-height, 44px) - 12px);
     padding: 0 12px;
-    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.12));
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 85%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, rgba(255, 255, 255, 0.12)) var(--ui-border-mix, 56%), transparent);
+    border-radius: var(--ui-radius-pill, 999px);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) var(--ui-input-fill-mix, 85%), transparent);
     color: var(--theme-text-secondary, rgba(255, 255, 255, 0.7));
     cursor: pointer;
   }
 
   .toggle.on {
     color: var(--theme-accent, #fbbf24);
-    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 60%, transparent);
-    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 12%, transparent);
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-border-mix, 22%), transparent);
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-soft-mix, 10%), transparent);
   }
 
   input:not([type="range"]),
@@ -1605,11 +1869,12 @@
   textarea {
     width: 100%;
     padding: 10px 12px;
-    border: 1px solid var(--theme-input-border, rgba(255, 255, 255, 0.12));
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent);
-    color: var(--theme-text-primary, #e4e4e7);
-    font-size: 13px;
+    min-height: var(--ui-control-height, 44px);
+    border: 1px solid color-mix(in srgb, var(--theme-input-border, rgba(255, 255, 255, 0.12)) var(--ui-border-mix, 56%), transparent) !important;
+    border-radius: var(--ui-radius-base, 12px) !important;
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) var(--ui-input-fill-mix, 82%), transparent) !important;
+    color: var(--theme-text-primary, #e4e4e7) !important;
+    font-size: calc(13px * var(--ui-font-scale, 1));
     box-sizing: border-box;
   }
 
@@ -1617,7 +1882,8 @@
   select:focus,
   textarea:focus {
     outline: none;
-    border-color: var(--theme-input-focus, #fbbf24);
+    border-color: var(--theme-input-focus, #fbbf24) !important;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-accent, #fbbf24) 12%, transparent) !important;
   }
 
   textarea {
@@ -1665,10 +1931,10 @@
     flex-direction: column;
     align-items: center;
     gap: 6px;
-    padding: 0;
-    background: none;
-    border: 2px solid transparent;
-    border-radius: 12px;
+    padding: 0 !important;
+    background: none !important;
+    border: 2px solid transparent !important;
+    border-radius: var(--ui-radius-base, 12px) !important;
     cursor: pointer;
     transition: transform 0.15s ease, border-color 0.15s ease;
   }
@@ -1678,13 +1944,14 @@
   }
 
   .theme-swatch.active {
-    border-color: var(--theme-accent, #fbbf24);
+    border-color: var(--theme-accent, #fbbf24) !important;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-accent, #fbbf24) 18%, transparent);
   }
 
   .swatch-preview {
     width: 100%;
     aspect-ratio: 1.35;
-    border-radius: 10px;
+    border-radius: var(--ui-radius-base, 12px);
     border: 1px solid;
     padding: 8px;
     display: flex;
@@ -1762,19 +2029,56 @@
   }
 
   .pill {
-    min-height: 36px;
+    min-height: calc(var(--ui-control-height, 44px) - 8px);
     padding: 0 14px;
-    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.12));
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 85%, transparent);
-    color: var(--theme-text-secondary, rgba(255, 255, 255, 0.75));
+    border: 1px solid color-mix(in srgb, var(--theme-border, rgba(255, 255, 255, 0.12)) var(--ui-border-mix, 56%), transparent) !important;
+    border-radius: var(--ui-radius-pill, 999px) !important;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) var(--ui-input-fill-mix, 85%), transparent) !important;
+    color: var(--theme-text-secondary, rgba(255, 255, 255, 0.75)) !important;
     cursor: pointer;
+    font-size: calc(12px * var(--ui-font-scale, 1));
+    box-sizing: border-box;
+    transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+  }
+
+  .pill:hover {
+    color: var(--theme-text-primary, #e4e4e7) !important;
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 16%, transparent) !important;
+    transform: translateY(-1px);
   }
 
   .pill.active {
+    color: var(--theme-accent, #fbbf24) !important;
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 28%, transparent) !important;
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 16%, transparent) !important;
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--theme-accent, #fbbf24) 18%, transparent),
+      0 8px 18px color-mix(in srgb, var(--theme-accent, #fbbf24) 10%, transparent);
+    transform: translateY(-1px);
+    font-weight: 700;
+  }
+
+  .style-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 16px;
+  }
+
+  .style-group {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .style-group-head {
+    display: grid;
+    gap: 4px;
+  }
+
+  .style-current {
+    font-size: 11px;
     color: var(--theme-accent, #fbbf24);
-    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 60%, transparent);
-    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 12%, transparent);
+    letter-spacing: 0.03em;
   }
 
   .scale-head {
@@ -1786,9 +2090,9 @@
 
   .helper-details {
     margin-bottom: 12px;
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 60%, transparent);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 55%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 60%), transparent);
+    border-radius: var(--ui-radius-base, 12px);
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) var(--ui-card-fill-mix, 55%), transparent);
     padding: 12px;
   }
 
@@ -1819,9 +2123,9 @@
     justify-content: space-between;
     gap: 12px;
     padding: 12px;
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 60%, transparent);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 55%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 60%), transparent);
+    border-radius: var(--ui-radius-base, 12px);
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) var(--ui-card-fill-mix, 55%), transparent);
   }
 
   .network-info {
@@ -1863,9 +2167,9 @@
   .expand-panel {
     margin-top: 12px;
     padding: 14px;
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 60%, transparent);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 55%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 60%), transparent);
+    border-radius: var(--ui-radius-base, 12px);
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) var(--ui-card-fill-mix, 55%), transparent);
   }
 
   .editor-grid {
@@ -1884,9 +2188,9 @@
   .expand-btn,
   .primary-btn,
   .danger-btn {
-    min-height: 40px;
+    min-height: var(--ui-control-height, 44px);
     padding: 0 14px;
-    border-radius: 10px;
+    border-radius: var(--ui-radius-base, 12px);
     cursor: pointer;
   }
 
@@ -1894,14 +2198,14 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    border: 1px solid var(--theme-border, rgba(255, 255, 255, 0.12));
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 85%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border, rgba(255, 255, 255, 0.12)) var(--ui-border-mix, 56%), transparent);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) var(--ui-input-fill-mix, 85%), transparent);
     color: var(--theme-text-primary, #e4e4e7);
   }
 
   .primary-btn {
-    border: 1px solid color-mix(in srgb, var(--theme-accent, #fbbf24) 55%, transparent);
-    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-border-mix, 22%), transparent);
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-soft-mix, 10%), transparent);
     color: var(--theme-accent, #fbbf24);
   }
 
@@ -1921,6 +2225,103 @@
 
   details[open] > .expand-summary {
     margin-bottom: 12px;
+  }
+
+  .file-btn {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .file-btn input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .ui-json-editor {
+    min-height: 260px;
+    resize: vertical;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1.5;
+  }
+
+  :global(html[data-ui-tabs='pill']) .settings-tabs,
+  :global(html[data-ui-tabs='segmented']) .settings-tabs {
+    padding: 0;
+    border-bottom: none;
+    gap: 8px;
+  }
+
+  :global(html[data-ui-tabs='pill']) .settings-tab {
+    border-radius: var(--ui-radius-pill, 999px);
+    border-color: color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 56%), transparent);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 70%, transparent);
+  }
+
+  :global(html[data-ui-tabs='pill']) .settings-tab.active {
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-border-mix, 22%), transparent);
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-soft-mix, 10%), transparent);
+    box-shadow: none;
+  }
+
+  :global(html[data-ui-tabs='segmented']) .settings-tabs {
+    padding: 4px;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 56%), transparent);
+    border-radius: var(--ui-radius-large, 16px);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 68%, transparent);
+  }
+
+  :global(html[data-ui-tabs='segmented']) .settings-tab {
+    flex: 1 1 auto;
+    border-radius: calc(var(--ui-radius-base, 12px) - 2px);
+    border: none;
+    min-width: 0;
+  }
+
+  :global(html[data-ui-tabs='segmented']) .settings-tab.active {
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 96%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-border-mix, 22%), transparent);
+  }
+
+  :global(html[data-ui-buttons='minimal']) .compact-btn,
+  :global(html[data-ui-buttons='minimal']) .expand-btn {
+    background: transparent;
+  }
+
+  :global(html[data-ui-buttons='solid']) .primary-btn {
+    color: color-mix(in srgb, var(--theme-background, #09090b) 15%, white 85%);
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 78%, transparent);
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 86%, transparent);
+  }
+
+  :global(html[data-ui-cards='flat']) .section-card,
+  :global(html[data-ui-cards='flat']) .info-card,
+  :global(html[data-ui-cards='flat']) .seed-card,
+  :global(html[data-ui-cards='flat']) .inline-editor,
+  :global(html[data-ui-cards='flat']) .expand-panel,
+  :global(html[data-ui-cards='flat']) .network-row,
+  :global(html[data-ui-cards='flat']) .helper-details {
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 56%, transparent);
+  }
+
+  :global(html[data-ui-cards='striped']) .section-card {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--theme-accent, #fbbf24) 4%, transparent), transparent 26%),
+      color-mix(in srgb, var(--theme-surface, #18181b) var(--ui-card-fill-mix, 90%), transparent);
+  }
+
+  :global(html[data-ui-inputs='minimal']) input:not([type="range"]),
+  :global(html[data-ui-inputs='minimal']) select,
+  :global(html[data-ui-inputs='minimal']) textarea {
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 54%, transparent);
+    border-color: color-mix(in srgb, var(--theme-input-border, rgba(255, 255, 255, 0.12)) 40%, transparent);
+  }
+
+  :global(html[data-ui-inputs='filled']) input:not([type="range"]),
+  :global(html[data-ui-inputs='filled']) select,
+  :global(html[data-ui-inputs='filled']) textarea {
+    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 96%, transparent);
   }
 
   @media (max-width: 900px) {
@@ -1944,6 +2345,11 @@
 
     .section-card {
       padding: 14px;
+    }
+
+    .style-grid {
+      grid-template-columns: 1fr;
+      gap: 12px;
     }
 
     .info-row,

@@ -1144,8 +1144,6 @@ export const applyEntityTx = async (
         cancelRemainder,
         executionGiveAmount,
         executionWantAmount,
-        rebateAmount,
-        rebateTokenId,
       } = entityTx.data;
 
       // Use canonical key for account lookup
@@ -1164,8 +1162,6 @@ export const applyEntityTx = async (
           cancelRemainder,
           ...(executionGiveAmount !== undefined ? { executionGiveAmount } : {}),
           ...(executionWantAmount !== undefined ? { executionWantAmount } : {}),
-          ...(rebateAmount !== undefined ? { rebateAmount } : {}),
-          ...(rebateTokenId !== undefined ? { rebateTokenId } : {}),
         },
       };
 

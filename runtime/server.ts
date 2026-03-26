@@ -36,6 +36,7 @@ import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from 
 import { resolveEntityProposerId } from './state-helpers';
 import { DEFAULT_SPREAD_DISTRIBUTION, ORDERBOOK_PRICE_SCALE } from './orderbook';
 import { buildDefaultEntitySwapPairs, deriveDelta, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenInfo } from './account-utils';
+import { LIMITS } from './constants';
 import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -57,10 +58,21 @@ import {
 import { relayRoute, type RelayRouterConfig } from './relay-router';
 import { createLocalDeliveryHandler } from './relay-local-delivery';
 import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
+import {
+  RPC_MARKET_DEFAULT_DEPTH,
+  RPC_MARKET_MAX_DEPTH,
+  RPC_MARKET_PUBLISH_MS,
+  buildMarketSnapshotForReplica,
+  normalizeMarketEntityId,
+  normalizeMarketPairId,
+  type MarketSnapshotPayload,
+} from './market-snapshot';
 import { ethers } from 'ethers';
+import type { ContractRunner } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
+import type { ServerWebSocket } from 'bun';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -79,6 +91,8 @@ let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
 let processGuardsInstalled = false;
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
+type RelaySocketData = { type: 'relay' | 'rpc' };
+type RelaySocket = ServerWebSocket<RelaySocketData>;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
 const JSON_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -433,6 +447,7 @@ const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
   900n * 10n ** 18n,
   1_000n * 10n ** 18n,
 ] as const;
+const MARKET_MAKER_MIN_READY_OFFERS_PER_PAIR = 2;
 type MarketMakerLevelProfile = {
   offsetsBps: readonly number[];
   baseSizes: readonly bigint[];
@@ -452,7 +467,10 @@ const getMarketMakerLevelProfile = (baseTokenId: number, quoteTokenId: number): 
 };
 
 const getExpectedMarketMakerOffersForPair = (baseTokenId: number, quoteTokenId: number): number => {
-  return getMarketMakerLevelProfile(baseTokenId, quoteTokenId).offsetsBps.length * 2;
+  return Math.min(
+    MARKET_MAKER_MIN_READY_OFFERS_PER_PAIR,
+    getMarketMakerLevelProfile(baseTokenId, quoteTokenId).offsetsBps.length * 2,
+  );
 };
 
 let marketMakerLoopTimer: ReturnType<typeof setInterval> | null = null;
@@ -1213,23 +1231,30 @@ const buildMarketMakerOfferSpecs = (
   };
   for (const hubEntityId of hubEntityIds) {
     const hubSuffix = hubEntityId.slice(-6).toLowerCase();
-    for (let pairIndex = 0; pairIndex < pairs.length; pairIndex++) {
-      const pair = pairs[pairIndex]!;
+    const pairContexts = pairs.map((pair, pairIndex) => {
       const pairPolicy = getSwapPairPolicyByBaseQuote(pair.baseTokenId, pair.quoteTokenId);
       const levelProfile = getMarketMakerLevelProfile(pair.baseTokenId, pair.quoteTokenId);
       const skewBps = hubSkewBps(hubEntityId, pairIndex);
-      const midPriceTicks = (pairPolicy.mmMidPriceTicks * BigInt(10_000 + skewBps)) / 10_000n;
-      const stepTicks = Math.max(1, pairPolicy.priceStepTicks);
-      const stepTicksBig = BigInt(stepTicks);
-      for (let level = 0; level < levelProfile.offsetsBps.length; level++) {
-        const offsetBps = levelProfile.offsetsBps[level]!;
-        const baseSize = levelProfile.baseSizes[level]!;
-        const askRaw = (midPriceTicks * BigInt(10_000 + offsetBps)) / 10_000n;
-        const bidRaw = (midPriceTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
-        const askPriceTicks = snapPriceTicks(askRaw, stepTicks, 'up');
-        let bidPriceTicks = snapPriceTicks(bidRaw, stepTicks, 'down');
+      return {
+        pair,
+        levelProfile,
+        midPriceTicks: (pairPolicy.mmMidPriceTicks * BigInt(10_000 + skewBps)) / 10_000n,
+        stepTicksBig: BigInt(Math.max(1, pairPolicy.priceStepTicks)),
+        stepTicks: Math.max(1, pairPolicy.priceStepTicks),
+      };
+    });
+    const maxLevels = pairContexts.reduce((max, entry) => Math.max(max, entry.levelProfile.offsetsBps.length), 0);
+    for (let level = 0; level < maxLevels; level++) {
+      for (const entry of pairContexts) {
+        if (level >= entry.levelProfile.offsetsBps.length) continue;
+        const offsetBps = entry.levelProfile.offsetsBps[level]!;
+        const baseSize = entry.levelProfile.baseSizes[level]!;
+        const askRaw = (entry.midPriceTicks * BigInt(10_000 + offsetBps)) / 10_000n;
+        const bidRaw = (entry.midPriceTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
+        const askPriceTicks = snapPriceTicks(askRaw, entry.stepTicks, 'up');
+        let bidPriceTicks = snapPriceTicks(bidRaw, entry.stepTicks, 'down');
         if (bidPriceTicks >= askPriceTicks) {
-          bidPriceTicks = askPriceTicks > stepTicksBig ? askPriceTicks - stepTicksBig : 1n;
+          bidPriceTicks = askPriceTicks > entry.stepTicksBig ? askPriceTicks - entry.stepTicksBig : 1n;
         }
         const askWantAmount = (baseSize * askPriceTicks) / ORDERBOOK_PRICE_SCALE;
         const bidGiveAmount = (baseSize * bidPriceTicks) / ORDERBOOK_PRICE_SCALE;
@@ -1237,11 +1262,11 @@ const buildMarketMakerOfferSpecs = (
 
         if (askWantAmount > 0n) {
           specs.push({
-            offerId: `mm-${hubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-ask-${levelId}`,
+            offerId: `mm-${hubSuffix}-${entry.pair.baseTokenId}-${entry.pair.quoteTokenId}-ask-${levelId}`,
             hubEntityId,
-            giveTokenId: pair.baseTokenId,
+            giveTokenId: entry.pair.baseTokenId,
             giveAmount: baseSize,
-            wantTokenId: pair.quoteTokenId,
+            wantTokenId: entry.pair.quoteTokenId,
             wantAmount: askWantAmount,
             minFillRatio: 1,
           });
@@ -1249,11 +1274,11 @@ const buildMarketMakerOfferSpecs = (
 
         if (bidGiveAmount > 0n) {
           specs.push({
-            offerId: `mm-${hubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-bid-${levelId}`,
+            offerId: `mm-${hubSuffix}-${entry.pair.baseTokenId}-${entry.pair.quoteTokenId}-bid-${levelId}`,
             hubEntityId,
-            giveTokenId: pair.quoteTokenId,
+            giveTokenId: entry.pair.quoteTokenId,
             giveAmount: bidGiveAmount,
-            wantTokenId: pair.baseTokenId,
+            wantTokenId: entry.pair.baseTokenId,
             wantAmount: baseSize,
             minFillRatio: 1,
           });
@@ -1401,9 +1426,15 @@ const maintainMarketMakerQuotes = async (
     if (Number(account.mempool?.length || 0) > 0 || account.pendingFrame) continue;
 
     const existingOfferIds = collectOfferIdsForAccount(account);
+    const remainingOpenSlots = Math.max(0, LIMITS.MAX_ACCOUNT_SWAP_OFFERS - existingOfferIds.size);
+    const allowedNewOffers = Math.min(
+      Math.max(1, Math.floor(maxOffersPerAccount)),
+      remainingOpenSlots,
+    );
+    if (allowedNewOffers <= 0) continue;
     const missing = specs
       .filter(spec => !existingOfferIds.has(spec.offerId))
-      .slice(0, Math.max(1, Math.floor(maxOffersPerAccount)));
+      .slice(0, allowedNewOffers);
     if (missing.length === 0) continue;
 
     entityTxs.push(...missing.map(spec => ({
@@ -1854,7 +1885,7 @@ const deployDefaultTokensOnRpc = async (): Promise<void> => {
   }
 
   console.log('[XLN] Deploying default ERC20 tokens to RPC...');
-  const erc20Factory = new ERC20Mock__factory(signer as any);
+  const erc20Factory = new ERC20Mock__factory(signer as ContractRunner);
 
   for (const token of DEFAULT_TOKEN_CATALOG) {
     if (existingSymbols.has(String(token.symbol || '').trim().toUpperCase())) {
@@ -1868,7 +1899,7 @@ const deployDefaultTokensOnRpc = async (): Promise<void> => {
     const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
     await approveTx.wait();
 
-    const registerTx = await (depository.connect(signer as any) as any).adminRegisterExternalToken({
+    const registerTx = await depository.connect(signer).adminRegisterExternalToken({
       entity: ethers.ZeroHash,
       contractAddress: tokenAddress,
       externalTokenId: 0,
@@ -2009,7 +2040,7 @@ const updateJurisdictionsJson = async (
     const publicRpc = toPublicRpcUrl(String(process.env.PUBLIC_RPC || rpcUrl || '/rpc'));
     await fs.mkdir(path.dirname(canonicalPath), { recursive: true });
 
-    let data: any = {};
+    let data: Record<string, unknown> = {};
     try {
       data = JSON.parse(await fs.readFile(canonicalPath, 'utf-8'));
     } catch {
@@ -2202,22 +2233,6 @@ let serverBootError: string | null = null;
 let serverBootStartedAt = 0;
 let serverBootCompletedAt: number | null = null;
 
-type MarketSideLevel = { price: number; size: number; total: number };
-type MarketSnapshotPayload = {
-  hubEntityId: string;
-  pairId: string;
-  depth: number;
-  bids: MarketSideLevel[];
-  asks: MarketSideLevel[];
-  spread: number | null;
-  spreadPercent: string;
-  source: 'orderbookExt';
-  entityHeight: number;
-  entityStateHash: string | null;
-  hubUpdatedAt: number;
-  updatedAt: number;
-};
-
 type RpcMarketSubscription = {
   hubIds: Set<string>;
   pairIds: Set<string>;
@@ -2225,11 +2240,8 @@ type RpcMarketSubscription = {
   seq: number;
 };
 
-const rpcMarketSubscriptions = new Map<any, RpcMarketSubscription>();
+const rpcMarketSubscriptions = new Map<RelaySocket, RpcMarketSubscription>();
 let rpcMarketPublisherTimer: ReturnType<typeof setInterval> | null = null;
-const RPC_MARKET_PUBLISH_MS = 1000;
-const RPC_MARKET_MAX_DEPTH = 100;
-const RPC_MARKET_DEFAULT_DEPTH = 20;
 
 const sendEntityInputDirectViaRelaySocket = (
   env: Env,
@@ -2745,93 +2757,6 @@ const serveRuntimeBundle = async (): Promise<Response | null> => {
 // RPC PROTOCOL (for remote UI)
 // ============================================================================
 
-const normalizeMarketEntityId = (value: unknown): string | null => {
-  if (typeof value !== 'string') return null;
-  const normalized = value.trim().toLowerCase();
-  return /^0x[0-9a-f]{64}$/.test(normalized) ? normalized : null;
-};
-
-const normalizeMarketPairId = (value: unknown): string | null => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  const match = trimmed.match(/^(\d+)\/(\d+)$/);
-  if (!match) return null;
-  const a = Number(match[1]);
-  const b = Number(match[2]);
-  if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0 || a === b) return null;
-  const left = Math.min(a, b);
-  const right = Math.max(a, b);
-  return `${left}/${right}`;
-};
-
-const findPrevBookLevel = (bitmap: Uint32Array | number[], start: number): number => {
-  for (let i = start; i >= 0; i--) {
-    const w = Math.floor(i / 32);
-    const b = i & 31;
-    if (bitmap[w] && (bitmap[w] & (1 << b))) return i;
-  }
-  return -1;
-};
-
-const findNextBookLevel = (bitmap: Uint32Array | number[], levels: number, start: number): number => {
-  for (let i = start; i < levels; i++) {
-    const w = Math.floor(i / 32);
-    const b = i & 31;
-    if (bitmap[w] && (bitmap[w] & (1 << b))) return i;
-  }
-  return -1;
-};
-
-const extractMarketSideLevels = (
-  book: any,
-  side: 'bid' | 'ask',
-  depth: number,
-): MarketSideLevel[] => {
-  const { orderQtyLots, orderNext, orderActive, params } = book || {};
-  const pmin = Number(params?.pmin || 0);
-  const tick = Number(params?.tick || 1);
-  const levelHead = side === 'bid' ? (book?.levelHeadBid || []) : (book?.levelHeadAsk || []);
-  const bitmap = side === 'bid' ? (book?.bitmapBid || []) : (book?.bitmapAsk || []);
-  const levels = Number(book?.levels || 0);
-  const capDepth = Math.max(1, Math.min(depth, RPC_MARKET_MAX_DEPTH));
-  const maxLevelsPerBook = Math.max(capDepth * 6, capDepth);
-
-  let idx = side === 'bid' ? Number(book?.bestBidIdx ?? -1) : Number(book?.bestAskIdx ?? -1);
-  let visitedLevels = 0;
-  const out: Array<{ price: number; size: number }> = [];
-
-  while (idx !== -1 && visitedLevels < maxLevelsPerBook && out.length < capDepth) {
-    visitedLevels += 1;
-    let headIdx = levelHead[idx];
-    let levelSize = 0;
-    while (headIdx !== -1) {
-      if (orderActive?.[headIdx]) {
-        levelSize += Number(orderQtyLots?.[headIdx] || 0);
-      }
-      headIdx = orderNext?.[headIdx];
-    }
-    if (levelSize > 0) {
-      out.push({
-        price: pmin + idx * tick,
-        size: levelSize,
-      });
-    }
-    idx = side === 'bid'
-      ? findPrevBookLevel(bitmap, idx - 1)
-      : findNextBookLevel(bitmap, levels, idx + 1);
-  }
-
-  let running = 0;
-  return out.map(level => {
-    running += level.size;
-    return {
-      price: level.price,
-      size: level.size,
-      total: running,
-    };
-  });
-};
-
 const buildMarketSnapshot = (
   env: Env,
   hubEntityId: string,
@@ -2839,42 +2764,11 @@ const buildMarketSnapshot = (
   depth: number,
 ): MarketSnapshotPayload => {
   const hubReplica = getEntityReplicaById(env, hubEntityId);
-  const books = hubReplica?.state?.orderbookExt?.books;
-  const book = books instanceof Map ? books.get(pairId) : null;
-  const bids = book ? extractMarketSideLevels(book, 'bid', depth) : [];
-  const asks = book ? extractMarketSideLevels(book, 'ask', depth) : [];
-  const bestBid = bids[0];
-  const bestAsk = asks[0];
-  const spread = bestBid && bestAsk ? bestAsk.price - bestBid.price : null;
-  const spreadPercent = bestBid && bestAsk && bestAsk.price > 0
-    ? ((spread! / bestAsk.price) * 100).toFixed(3)
-    : '-';
-  const entityHeight =
-    Number(hubReplica?.state?.height || 0)
-    || Number(hubReplica?.state?.currentHeight || 0)
-    || 0;
-  const entityStateHash = typeof hubReplica?.state?.stateHash === 'string'
-    ? hubReplica.state.stateHash
-    : null;
-  const hubUpdatedAt = Number(hubReplica?.state?.timestamp || 0);
-  return {
-    hubEntityId,
-    pairId,
-    depth,
-    bids,
-    asks,
-    spread,
-    spreadPercent,
-    source: 'orderbookExt',
-    entityHeight,
-    entityStateHash,
-    hubUpdatedAt,
-    updatedAt: Date.now(),
-  };
+  return buildMarketSnapshotForReplica(hubReplica, hubEntityId, pairId, depth);
 };
 
 const sendRpcMarketSnapshot = (
-  ws: any,
+  ws: RelaySocket,
   subscription: RpcMarketSubscription,
   env: Env,
 ): boolean => {
@@ -2924,7 +2818,7 @@ const stopRpcMarketPublisherIfIdle = (): void => {
   rpcMarketPublisherTimer = null;
 };
 
-const cleanupRpcMarketSubscription = (ws: any): void => {
+const cleanupRpcMarketSubscription = (ws: RelaySocket): void => {
   rpcMarketSubscriptions.delete(ws);
   stopRpcMarketPublisherIfIdle();
 };
@@ -2932,7 +2826,7 @@ const cleanupRpcMarketSubscription = (ws: any): void => {
 const isMarketMessageType = (type: unknown): type is 'market_subscribe' | 'market_unsubscribe' | 'market_snapshot_request' =>
   type === 'market_subscribe' || type === 'market_unsubscribe' || type === 'market_snapshot_request';
 
-const handleMarketMessage = (ws: any, msg: any, env: Env | null): void => {
+const handleMarketMessage = (ws: RelaySocket, msg: Record<string, unknown>, env: Env | null): void => {
   const { type, id } = msg;
   if (!isMarketMessageType(type)) return;
 
@@ -3219,7 +3113,7 @@ const listLocalControlEntities = (env: Env): ControlEntitySummary[] => {
   return entities;
 };
 
-const handleRpcMessage = async (ws: any, msg: any, env: Env | null) => {
+const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, env: Env | null) => {
   const { type, id } = msg;
 
   if (isMarketMessageType(type)) {
@@ -3667,7 +3561,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           'Content-Type': rpcRes.headers.get('content-type') || 'application/json',
         },
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       pushDebugEvent(relayStore, {
         event: 'error',
         reason: 'RPC_PROXY_FETCH_FAILED',
@@ -3864,7 +3758,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           'Cache-Control': 'no-store, no-cache, must-revalidate',
         },
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       return new Response(
         JSON.stringify({ error: error?.message || 'Failed to read jurisdictions.json' }),
         { status: 500, headers },
@@ -4408,9 +4302,9 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
       hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
       if (hubReplica?.state?.jBatchState?.batch) {
-        const batch = hubReplica.state.jBatchState.batch as any;
+        const batch = hubReplica.state.jBatchState.batch;
         console.log(
-          `[${logPrefix}] Hub jBatch: r2r=${batch.reserveToReserve?.length || 0}, r2c=${batch.reserveToCollateral?.length || 0}, c2r=${batch.collateralToReserve?.length || 0}, settlements=${batch.settlements?.length || 0}, sentPending=${hubReplica.state.jBatchState.sentBatch ? 'yes' : 'no'}`,
+          `[${logPrefix}] Hub jBatch: r2r=${batch.reserveToReserve.length}, r2c=${batch.reserveToCollateral.length}, c2r=${batch.collateralToReserve.length}, settlements=${batch.settlements.length}, sentPending=${hubReplica.state.jBatchState.sentBatch ? 'yes' : 'no'}`,
         );
       }
       if (env.jReplicas) {
@@ -4503,7 +4397,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         }),
         { headers },
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       faucetLock.release();
       console.error('[FAUCET/RESERVE] Error:', error);
       return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
@@ -4558,7 +4452,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       if (!normalizedUserRuntimeId) {
         const allProfiles = env.gossip?.getProfiles() || [];
         const userProfile = allProfiles.find(
-          (p: any) => String(p?.entityId || '').toLowerCase() === normalizedUserEntityId,
+          (p: Profile) => String(p?.entityId || '').toLowerCase() === normalizedUserEntityId,
         );
         const profileRuntimeId = normalizeRuntimeKey(userProfile?.runtimeId);
         if (profileRuntimeId) {
@@ -4829,7 +4723,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         }),
         { headers },
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('[FAUCET/OFFCHAIN] Error:', error);
       const message = error?.message || 'Unknown faucet error';
       const status =
@@ -5000,7 +4894,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         const wsType = pathname === '/relay' ? 'relay' : pathname === '/rpc' ? 'rpc' : null;
         if (wsType) {
           const upgraded = server.upgrade(req, { data: { type: wsType } });
-          if (upgraded) return undefined as any;
+          if (upgraded) return;
         }
         return new Response('WebSocket upgrade failed', { status: 400 });
       }
@@ -5049,8 +4943,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     },
 
     websocket: {
-      open(ws) {
-        const data = (ws as any).data;
+      open(ws: RelaySocket) {
+        const data = ws.data;
         console.log(`[WS] New ${data.type} connection`);
         pushDebugEvent(relayStore, {
           event: 'ws_open',
@@ -5058,8 +4952,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         });
       },
 
-      message(ws, message) {
-        const data = (ws as any).data;
+      message(ws: RelaySocket, message) {
+        const data = ws.data;
         const msgStr = message.toString();
         try {
           const msg = JSON.parse(msgStr);
@@ -5131,9 +5025,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         }
       },
 
-      close(ws, code, reason) {
+      close(ws: RelaySocket, code, reason) {
         cleanupRpcMarketSubscription(ws);
         const removedId = removeClient(relayStore, ws);
+        const wsType = ws.data.type;
         const reasonText =
           typeof reason === 'string'
             ? reason
@@ -5141,7 +5036,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
               ? String(reason)
               : '';
         console.warn(
-          `[WS] CLOSE wsType=${((ws as any).data || {}).type || 'unknown'} runtime=${removedId?.slice(0, 10) || 'unknown'} ` +
+          `[WS] CLOSE wsType=${wsType} runtime=${removedId?.slice(0, 10) || 'unknown'} ` +
           `code=${Number(code || 0)} reason="${reasonText || 'n/a'}"`,
         );
         if (removedId) {
@@ -5150,7 +5045,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             runtimeId: removedId,
             from: removedId,
             details: {
-              wsType: ((ws as any).data || {}).type || 'unknown',
+              wsType,
               code: Number(code || 0),
               reason: reasonText || null,
             },
@@ -5210,7 +5105,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             entityProviderAddress: arrakisConfig.contracts.entityProvider,
             contracts: arrakisConfig.contracts,
             chainId: arrakisConfig.chainId ?? 31337,
-          } as any;
+          };
           console.log('[XLN] Loaded predeployed contract addresses from jurisdictions.json');
         }
       } catch (err) {
@@ -5251,7 +5146,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       console.warn(
         `[XLN] fromReplica chainId (${fromReplica.chainId}) does not match RPC chainId (${detectedChainId}) - overriding`,
       );
-      fromReplica.chainId = detectedChainId as any;
+      fromReplica.chainId = detectedChainId;
     }
 
     if (fromReplica?.depositoryAddress && fromReplica?.entityProviderAddress) {

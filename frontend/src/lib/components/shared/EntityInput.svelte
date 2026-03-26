@@ -292,7 +292,7 @@
   $: selectedIsPreferred = selectedOption ? normalizeEntityId(selectedOption.id) === preferredNorm : false;
 </script>
 
-<div class="entity-input" class:disabled class:move-variant={variant === 'move'} data-testid={testId || undefined}>
+<div class="entity-input" class:disabled class:move-variant={variant === 'move'} class:open={showDropdown} data-testid={testId || undefined}>
   {#if label}
     <div class="input-label">{label}</div>
   {/if}
@@ -441,6 +441,11 @@
     position: relative;
     width: 100%;
     min-width: 0;
+    z-index: 0;
+  }
+
+  .entity-input.open {
+    z-index: 120;
   }
 
   .entity-input.move-variant {

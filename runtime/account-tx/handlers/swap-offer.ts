@@ -16,7 +16,7 @@ import { createDefaultDelta } from '../../validation-utils';
 import { formatEntityId } from '../../utils';
 import { canonicalAccountKey } from '../../state-helpers';
 import { deriveSide, SWAP_LOT_SCALE, ORDERBOOK_PRICE_SCALE, prepareSwapOrder } from '../../orderbook';
-import { FINANCIAL } from '../../constants';
+import { FINANCIAL, LIMITS } from '../../constants';
 
 export async function handleSwapOffer(
   accountMachine: AccountMachine,
@@ -41,6 +41,13 @@ export async function handleSwapOffer(
   }
   if (accountMachine.swapOffers.has(offerId)) {
     return { success: false, error: `Offer ${offerId} already exists`, events };
+  }
+  if (accountMachine.swapOffers.size >= LIMITS.MAX_ACCOUNT_SWAP_OFFERS) {
+    return {
+      success: false,
+      error: `Too many open swap offers: max ${LIMITS.MAX_ACCOUNT_SWAP_OFFERS}`,
+      events,
+    };
   }
 
   // 2. Validate amounts (network-wide bounds)

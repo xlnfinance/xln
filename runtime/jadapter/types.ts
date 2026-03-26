@@ -195,16 +195,16 @@ export interface JBatchReceipt {
 
 // Forward declare BrowserVMProvider (avoid circular import)
 export interface BrowserVMProvider {
-  processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<any[]>;
+  processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<unknown[]>;
   enforceDebts(entityId: string, tokenId: number): Promise<void>;
   setBlockTimestamp(timestamp: number): void;
   getDepositoryAddress(): string;
   getEntityProviderAddress(): string;
   getAccountAddress(): string;
-  debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<any[]>;
-  serializeState(): Promise<any>;
-  restoreState(state: any): Promise<void>;
-  onAny(callback: (events: any[]) => void): () => void;
+  debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<unknown[]>;
+  serializeState(): Promise<BrowserVMState>;
+  restoreState(state: BrowserVMState): Promise<void>;
+  onAny(callback: (events: unknown[]) => void): () => void;
   getCollateral(entityId: string, counterpartyId: string, tokenId: number): Promise<{ collateral: bigint; ondelta: bigint }>;
   getReserves(entityId: string, tokenId: number): Promise<bigint>;
   getAccountInfo?(

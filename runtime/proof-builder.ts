@@ -21,10 +21,11 @@ import type {
   RuntimeAllowance,
   ProofBodyResult,
   DisputeConfig,
-} from './proof-body-types.js';
-import type { ProofBodyStruct, TransformerClauseStruct } from './typechain/Depository.js';
-import type { DeltaTransformer } from './typechain/DeltaTransformer.js';
-import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body-types.js';
+} from './proof-body-types.ts';
+import type { ProofBodyStruct, TransformerClauseStruct } from './typechain/Depository.ts';
+import type { DeltaTransformer } from './typechain/DeltaTransformer.ts';
+import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body-types.ts';
+import { sortTransformerEntries } from './transformer-ordering.ts';
 
 type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader'>;
 
@@ -99,8 +100,7 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
 
   // Convert HTLC locks to Payment structs
   // DETERMINISTIC: Sort by lockId for consistent ordering
-  const sortedLocks = Array.from(accountMachine.locks.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]));
+  const sortedLocks = sortTransformerEntries(accountMachine.locks.entries());
 
   for (const [lockId, lock] of sortedLocks) {
     const deltaIndex = tokenIds.indexOf(lock.tokenId);
@@ -124,8 +124,7 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
 
   // Convert SwapOffers to Swap structs
   // DETERMINISTIC: Sort by offerId for consistent ordering
-  const sortedSwaps = Array.from(accountMachine.swapOffers.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]));
+  const sortedSwaps = sortTransformerEntries(accountMachine.swapOffers.entries());
 
   for (const [offerId, offer] of sortedSwaps) {
     const addDeltaIndex = tokenIds.indexOf(offer.giveTokenId);

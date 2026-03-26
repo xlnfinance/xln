@@ -501,6 +501,23 @@ export async function clearAllPersistentClientState(): Promise<void> {
   }
 }
 
+async function verifyPersistentClientStateCleared(): Promise<void> {
+  if (typeof localStorage !== 'undefined' && localStorage.length > 0) {
+    const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index) || '').filter(Boolean);
+    throw new Error(`localStorage wipe incomplete; remaining keys: ${keys.join(', ')}`);
+  }
+
+  if (typeof sessionStorage !== 'undefined' && sessionStorage.length > 0) {
+    const keys = Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.key(index) || '').filter(Boolean);
+    throw new Error(`sessionStorage wipe incomplete; remaining keys: ${keys.join(', ')}`);
+  }
+
+  const remainingDbNames = await listIndexedDbNames();
+  if (remainingDbNames.length > 0) {
+    throw new Error(`IndexedDB verification failed; remaining databases: ${remainingDbNames.join(', ')}`);
+  }
+}
+
 async function collectRuntimeEnvs(): Promise<unknown[]> {
   const envs: unknown[] = [];
   const seenKeys = new Set<string>();
@@ -606,6 +623,7 @@ async function performReset(
 
     await stopRuntimeBeforeReset();
     await clearAllPersistentClientState();
+    await verifyPersistentClientStateCleared();
 
     try {
       if (resetChannel) resetChannel.close();

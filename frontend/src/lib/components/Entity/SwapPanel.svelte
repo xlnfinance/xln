@@ -2054,16 +2054,18 @@
   }
 
   .swap-toolbar {
-    display: flex;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
     align-items: center;
-    margin-bottom: 4px;
+    margin-bottom: 8px;
   }
 
   .toolbar-select {
     position: relative;
+    min-width: 0;
     border: 1px solid #2d313b;
-    border-radius: 6px;
+    border-radius: 10px;
     background: linear-gradient(180deg, rgba(34, 35, 42, 0.96), rgba(24, 25, 31, 0.96));
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   }
@@ -2083,22 +2085,26 @@
   }
 
   .scope-text-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font-size: 11px;
-    color: #9ca3af;
+    font-weight: 600;
+    color: #c2c8d3;
     cursor: pointer;
     user-select: none;
     white-space: nowrap;
-    height: 28px;
-    line-height: 26px;
-    padding: 0 8px;
-    border: 1px solid #3f3f46;
-    border-radius: 4px;
-    background: #111217;
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(17, 18, 23, 0.9);
+    box-sizing: border-box;
   }
 
   .scope-text-toggle:hover {
     color: #fbbf24;
-    border-color: #fbbf24;
+    border-color: rgba(251, 191, 36, 0.65);
   }
 
   .toolbar-select-account {
@@ -2118,82 +2124,124 @@
 
   .toolbar-select select {
     width: 100%;
-    height: 28px;
+    min-width: 0;
+    height: 32px;
     border: 0;
     background: transparent;
-    padding: 0 8px;
+    padding: 0 10px;
     font-size: 12px;
     font-weight: 600;
     color: #e5e7eb;
+    color-scheme: dark;
+    outline: none;
+    box-sizing: border-box;
   }
 
   .order-form-header {
-    display: flex;
+    display: grid;
+    grid-template-columns: max-content max-content minmax(0, 1fr);
     align-items: center;
-    justify-content: space-between;
-    margin-bottom: 10px;
+    gap: 12px;
+    margin-bottom: 12px;
   }
 
   .order-type-toggle {
     display: flex;
-    gap: 12px;
+    gap: 4px;
+    align-items: center;
   }
 
   .type-tab-text {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.02);
     font-size: 12px;
     font-weight: 600;
-    color: #4b5563;
+    color: #8c95a4;
     cursor: pointer;
     user-select: none;
-    transition: color 100ms;
+    transition: color 100ms, border-color 100ms, background 100ms;
   }
 
   .type-tab-text.active {
+    border-color: rgba(251, 191, 36, 0.3);
+    background: rgba(251, 191, 36, 0.08);
     color: #fbbf24;
   }
 
   .type-tab-text:hover {
-    color: #9ca3af;
+    color: #d1d5db;
   }
 
   .hub-select-inline {
     background: #111217;
-    border: 1px solid #3f3f46;
-    border-radius: 4px;
-    color: #9ca3af;
-    font-size: 11px;
-    height: 26px;
-    padding: 0 6px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    color: #e5e7eb;
+    font-size: 12px;
+    font-weight: 600;
+    height: 34px;
+    padding: 0 10px;
     cursor: pointer;
-    max-width: 140px;
+    justify-self: end;
+    width: min(100%, 220px);
+    max-width: 220px;
+    min-width: 0;
+    color-scheme: dark;
+    box-sizing: border-box;
   }
 
   .side-toggle-row {
     display: flex;
-    gap: 16px;
-    margin-bottom: 10px;
+    gap: 4px;
+    align-items: center;
+    margin-bottom: 0;
   }
 
   .side-tab {
-    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.02);
+    font-size: 12px;
     font-weight: 600;
-    color: #4b5563;
+    color: #8c95a4;
     cursor: pointer;
-    padding: 4px 0;
-    transition: color 100ms;
+    transition: color 100ms, border-color 100ms, background 100ms;
     user-select: none;
   }
 
   .side-tab.active {
-    color: #16a34a;
+    border-color: rgba(22, 163, 74, 0.28);
+    background: rgba(22, 163, 74, 0.1);
+    color: #86efac;
   }
 
   .side-tab:last-child.active {
-    color: #dc2626;
+    border-color: rgba(220, 38, 38, 0.24);
+    background: rgba(220, 38, 38, 0.1);
+    color: #fda4af;
   }
 
   .side-tab:hover {
-    color: #9ca3af;
+    color: #d1d5db;
+  }
+
+  .toolbar-select select option,
+  .toolbar-select select optgroup,
+  .hub-select-inline option,
+  .hub-select-inline optgroup {
+    background: #0f1117;
+    color: #f3f4f6;
   }
 
   .order-input-row {
@@ -2493,6 +2541,16 @@
     color: #f3f4f6;
     font-size: 13px;
     font-family: 'JetBrains Mono', monospace;
+  }
+
+  select {
+    color-scheme: dark;
+  }
+
+  select option,
+  select optgroup {
+    background: #0f1117;
+    color: #f3f4f6;
   }
 
   select:focus, input:not([type="range"]):focus {
@@ -2847,5 +2905,36 @@
       grid-column: auto;
     }
 
+    .order-form-header {
+      grid-template-columns: 1fr;
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .side-toggle-row,
+    .order-type-toggle {
+      width: 100%;
+    }
+
+    .side-tab,
+    .type-tab-text {
+      flex: 1 1 0;
+    }
+
+    .hub-select-inline {
+      justify-self: stretch;
+      width: 100%;
+      max-width: none;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .swap-toolbar {
+      grid-template-columns: 1fr;
+    }
+
+    .scope-text-toggle {
+      width: 100%;
+    }
   }
 </style>

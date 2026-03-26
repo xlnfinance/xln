@@ -11,7 +11,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { Provider, Signer } from 'ethers';
+import type { ContractRunner, ContractTransactionResponse, Provider, Signer, TransactionReceipt } from 'ethers';
 
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types/index.ts';
 import type { TypedContractMethod } from '../../jurisdictions/typechain-types/common.ts';
@@ -132,6 +132,7 @@ export async function createRpcAdapter(
   const MAX_FEE_PER_GAS_WEI = ethers.parseUnits(String(MAX_FEE_PER_GAS_GWEI), 'gwei');
   const DEFAULT_PROCESS_BATCH_GAS = 5_000_000n;
   const DEFAULT_SETTLE_GAS = 2_000_000n;
+  type RpcReceipt = TransactionReceipt;
 
   trace('provider.getNetwork:start');
   const rpcChainId = Number((await provider.getNetwork()).chainId);
@@ -169,7 +170,7 @@ export async function createRpcAdapter(
     );
   };
 
-  const waitForReceipt = async (tx: { wait: (confirms?: number, timeout?: number) => Promise<any>; hash: string }, label: string) => {
+  const waitForReceipt = async (tx: ContractTransactionResponse, label: string): Promise<RpcReceipt> => {
     const receipt = await tx.wait(TX_WAIT_CONFIRMS, TX_WAIT_TIMEOUT_MS);
     if (!receipt) {
       throw new Error(`${label} transaction not mined (hash=${tx.hash})`);
@@ -192,44 +193,46 @@ export async function createRpcAdapter(
     txSigner?: Signer,
     batchSignerPrivateKey?: string,
   ): Promise<JBatchReceipt> => {
-    const chainId = BigInt(config.chainId);
-    const depositoryAddress = await depository.getAddress();
-    const currentNonce = await depository.entityNonces(normalizeEntityId(entityId));
-    const { encodedBatch, hankoData, nextNonce } = prepareSignedBatch(
-      batch,
-      entityId,
-      batchSignerPrivateKey ?? getBatchSignerPrivateKey(),
-      chainId,
-      depositoryAddress,
-      currentNonce,
-    );
-
     const activeSigner = txSigner ?? signer;
-    const depositoryWithSigner = txSigner ? depository.connect(txSigner as any) as Depository : depository;
-    const feeOverrides = await buildFeeOverrides();
-    const signerAddress = await activeSigner.getAddress();
-    const txNonce = Math.max(
-      await provider.getTransactionCount(signerAddress, 'latest'),
-      await provider.getTransactionCount(signerAddress, 'pending'),
-    );
-    const gasLimit = await estimateGasWithHeadroom(
-      () => depositoryWithSigner.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
-      DEFAULT_PROCESS_BATCH_GAS,
-    );
+    return runSerializedBatchFor(activeSigner, async () => {
+      try {
+        const chainId = BigInt(config.chainId);
+        const depositoryAddress = await depository.getAddress();
+        const currentNonce = await depository.entityNonces(normalizeEntityId(entityId));
+        const { encodedBatch, hankoData, nextNonce } = prepareSignedBatch(
+          batch,
+          entityId,
+          batchSignerPrivateKey ?? getBatchSignerPrivateKey(),
+          chainId,
+          depositoryAddress,
+          currentNonce,
+        );
 
-    const tx = await depositoryWithSigner.processBatch(encodedBatch, hankoData, nextNonce, {
-      gasLimit,
-      nonce: txNonce,
-      ...feeOverrides,
+        const depositoryWithSigner = txSigner ? depository.connect(txSigner) : depository;
+        const feeOverrides = await buildFeeOverrides();
+        const gasLimit = await estimateGasWithHeadroom(
+          () => depositoryWithSigner.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
+          DEFAULT_PROCESS_BATCH_GAS,
+        );
+
+        const tx = await depositoryWithSigner.processBatch(encodedBatch, hankoData, nextNonce, {
+          gasLimit,
+          nonce: await allocateSerializedSignerNonceFor(activeSigner),
+          ...feeOverrides,
+        });
+        const receipt = await waitForReceipt(tx, 'processBatch');
+        const events = parseReceiptLogsToJEvents(receipt, [depository, entityProvider]);
+
+        return {
+          txHash: receipt.hash,
+          blockNumber: receipt.blockNumber,
+          events,
+        };
+      } catch (error) {
+        await resetSerializedSignerNonceFor(activeSigner);
+        throw error;
+      }
     });
-    const receipt = await waitForReceipt(tx as any, 'processBatch');
-    const events = parseReceiptLogsToJEvents(receipt, [depository, entityProvider]);
-
-    return {
-      txHash: receipt.hash,
-      blockNumber: receipt.blockNumber,
-      events,
-    };
   };
 
   const estimateGasWithHeadroom = async (estimate: () => Promise<bigint>, fallback: bigint): Promise<bigint> => {
@@ -240,14 +243,14 @@ export async function createRpcAdapter(
     }
   };
 
-  type NonPayableMethod<TArgs extends Array<any>, TResult> = TypedContractMethod<TArgs, [TResult], 'nonpayable'>;
+  type NonPayableMethod<TArgs extends unknown[], TResult> = TypedContractMethod<TArgs, [TResult], 'nonpayable'>;
   type SendTxOptions = {
     gasFallback: bigint;
     txNonce: number | null;
     resetSignerNonce: boolean;
   };
 
-  const sendTypedTx = async <TArgs extends Array<any>, TResult>(
+  const sendTypedTx = async <TArgs extends unknown[], TResult>(
     label: string,
     method: NonPayableMethod<TArgs, TResult>,
     args: [...TArgs],
@@ -265,7 +268,7 @@ export async function createRpcAdapter(
       ? { gasLimit, ...feeOverrides }
       : { gasLimit, nonce: options.txNonce, ...feeOverrides };
     const tx = await method(...args, overrides);
-    return waitForReceipt(tx as any, label);
+    return waitForReceipt(tx, label);
   };
 
   const readSignerTxNonce = async (): Promise<number> => {
@@ -295,28 +298,37 @@ export async function createRpcAdapter(
     return 2;
   };
 
-  // One signer submits all on-chain txs for this adapter, so queue must be global,
-  // not per-entity, to avoid EOA nonce races across concurrent entity batches.
-  let batchSubmitQueue: Promise<unknown> = Promise.resolve();
-  let nextSerializedSignerNonce: number | null = null;
-  const runSerializedBatch = async <T>(work: () => Promise<T>): Promise<T> => {
-    const previous = batchSubmitQueue;
+  // Serialize batch submissions per signer EOA to avoid nonce races across concurrent entity batches.
+  const batchSubmitQueues = new Map<string, Promise<unknown>>();
+  const nextSerializedSignerNonces = new Map<string, number>();
+  const getSerializedSignerKey = async (activeSigner: Signer): Promise<string> => {
+    return (await activeSigner.getAddress()).toLowerCase();
+  };
+  const runSerializedBatchFor = async <T>(activeSigner: Signer, work: () => Promise<T>): Promise<T> => {
+    const signerKey = await getSerializedSignerKey(activeSigner);
+    const previous = batchSubmitQueues.get(signerKey) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
       .then(work);
-    batchSubmitQueue = next.finally(() => {
-      if (batchSubmitQueue === next) {
-        batchSubmitQueue = Promise.resolve();
-      }
-    });
+    batchSubmitQueues.set(
+      signerKey,
+      next.finally(() => {
+        if (batchSubmitQueues.get(signerKey) === next) {
+          batchSubmitQueues.delete(signerKey);
+        }
+      }),
+    );
     return next;
+  };
+  const runSerializedBatch = async <T>(work: () => Promise<T>): Promise<T> => {
+    return runSerializedBatchFor(signer, work);
   };
 
   type NonceResettableSigner = {
     resetNonce(): void;
   };
-  const maybeResetSignerNonce = (): void => {
-    const candidate = signer as unknown as Partial<NonceResettableSigner>;
+  const maybeResetSignerNonceFor = (activeSigner: Signer): void => {
+    const candidate = activeSigner as unknown as Partial<NonceResettableSigner>;
     if (typeof candidate.resetNonce === 'function') {
       try {
         candidate.resetNonce();
@@ -325,19 +337,42 @@ export async function createRpcAdapter(
       }
     }
   };
-
-  const resetSerializedSignerNonce = (): void => {
-    nextSerializedSignerNonce = null;
-    maybeResetSignerNonce();
+  const maybeResetSignerNonce = (): void => {
+    maybeResetSignerNonceFor(signer);
   };
 
-  const allocateSerializedSignerNonce = async (): Promise<number> => {
-    if (nextSerializedSignerNonce === null) {
-      nextSerializedSignerNonce = await readSignerTxNonce();
+  const resetSerializedSignerNonceFor = async (activeSigner: Signer): Promise<void> => {
+    const signerKey = await getSerializedSignerKey(activeSigner);
+    nextSerializedSignerNonces.delete(signerKey);
+    maybeResetSignerNonceFor(activeSigner);
+  };
+  const resetSerializedSignerNonce = async (): Promise<void> => {
+    await resetSerializedSignerNonceFor(signer);
+  };
+
+  const readSignerTxNonceFor = async (activeSigner: Signer): Promise<number> => {
+    const signerAddress = await activeSigner.getAddress();
+    return Math.max(
+      await provider.getTransactionCount(signerAddress, 'latest'),
+      await provider.getTransactionCount(signerAddress, 'pending'),
+    );
+  };
+  const allocateSerializedSignerNonceFor = async (activeSigner: Signer): Promise<number> => {
+    const signerKey = await getSerializedSignerKey(activeSigner);
+    const chainNonce = await readSignerTxNonceFor(activeSigner);
+    const cachedNonce = nextSerializedSignerNonces.has(signerKey)
+      ? nextSerializedSignerNonces.get(signerKey) ?? null
+      : null;
+    let nextNonce = cachedNonce;
+    if (nextNonce === null || chainNonce > nextNonce) {
+      nextNonce = chainNonce;
     }
-    const nonce = nextSerializedSignerNonce;
-    nextSerializedSignerNonce += 1;
+    const nonce = nextNonce;
+    nextSerializedSignerNonces.set(signerKey, nonce + 1);
     return nonce;
+  };
+  const allocateSerializedSignerNonce = async (): Promise<number> => {
+    return allocateSerializedSignerNonceFor(signer);
   };
 
   type ErrorWithMessage = {
@@ -434,10 +469,10 @@ export async function createRpcAdapter(
     } else {
       trace('fromReplica.connect:start');
       // Use any cast to handle ethers version mismatch between root and jurisdictions
-      account = Account__factory.connect(addresses.account, signer as any);
-      depository = Depository__factory.connect(addresses.depository, signer as any);
-      entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer as any);
-      deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer as any);
+      account = Account__factory.connect(addresses.account, signer);
+      depository = Depository__factory.connect(addresses.depository, signer);
+      entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer);
+      deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer);
       trace('fromReplica.connect:done');
       trace('fromReplica.getAddress:start');
       addresses.account = await account.getAddress();
@@ -503,7 +538,7 @@ export async function createRpcAdapter(
 
       // Deploy Account library
       // Use any cast to handle ethers version mismatch between root and jurisdictions
-      const accountFactory = new Account__factory(signer as any);
+      const accountFactory = new Account__factory(signer);
       const accountContract = await accountFactory.deploy();
       await accountContract.waitForDeployment();
       addresses.account = await accountContract.getAddress();
@@ -511,7 +546,7 @@ export async function createRpcAdapter(
       console.log(`  Account: ${addresses.account}`);
 
       // Deploy EntityProvider
-      const entityProviderFactory = new EntityProvider__factory(signer as any);
+      const entityProviderFactory = new EntityProvider__factory(signer);
       const entityProviderContract = await entityProviderFactory.deploy();
       await entityProviderContract.waitForDeployment();
       addresses.entityProvider = await entityProviderContract.getAddress();
@@ -526,7 +561,7 @@ export async function createRpcAdapter(
       const depositoryFactory = new ethers.ContractFactory(
         Depository__factory.abi,
         linkedDepositoryBytecode,
-        signer as any,
+        signer as ContractRunner,
       );
       // Fresh dev-chain deployments can exceed 30M after linking + viaIR.
       let deployGasLimit = DEV_CHAIN_IDS.has(config.chainId)
@@ -548,11 +583,11 @@ export async function createRpcAdapter(
       });
       await depositoryContract.waitForDeployment();
       addresses.depository = await depositoryContract.getAddress();
-      depository = Depository__factory.connect(addresses.depository, signer as any);
+      depository = Depository__factory.connect(addresses.depository, signer);
       console.log(`  Depository: ${addresses.depository}`);
 
       // Deploy DeltaTransformer
-      const deltaTransformerFactory = new DeltaTransformer__factory(signer as any);
+      const deltaTransformerFactory = new DeltaTransformer__factory(signer);
       const deltaTransformerContract = await deltaTransformerFactory.deploy();
       await deltaTransformerContract.waitForDeployment();
       addresses.deltaTransformer = await deltaTransformerContract.getAddress();
@@ -561,7 +596,7 @@ export async function createRpcAdapter(
       console.log(`  DeltaTransformer: ${addresses.deltaTransformer}`);
 
       // Deploy bootstrap ERC20 test token (5th contract in local anvil stack)
-      const erc20Factory = new ERC20Mock__factory(signer as any);
+      const erc20Factory = new ERC20Mock__factory(signer);
       const erc20Contract = await erc20Factory.deploy('USD Coin', 'USDC', ethers.parseUnits('10000000000', 18));
       await erc20Contract.waitForDeployment();
       const erc20Address = await erc20Contract.getAddress();
@@ -571,14 +606,14 @@ export async function createRpcAdapter(
       // mintToReserve only updates internal accounting — the Depository needs real ERC20 balance.
       const prefundAmount = ethers.parseUnits('1000000000000', 18); // 1T tokens
       const prefundTx = await erc20Contract.mint(addresses.depository, prefundAmount, await buildFeeOverrides());
-      await waitForReceipt(prefundTx as any, 'erc20.mint-to-depository');
+      await waitForReceipt(prefundTx, 'erc20.mint-to-depository');
       console.log(`  Depository pre-funded: ${ethers.formatUnits(prefundAmount, 18)} USDC`);
 
       // Register token in Depository token registry (tokenId > 0)
       const tokenRegistrationAmount = 1_000_000n;
       const approveTx = await erc20Contract.approve(addresses.depository, tokenRegistrationAmount, await buildFeeOverrides());
-      await waitForReceipt(approveTx as any, 'erc20.approve');
-      const registerTx = await (depository as any).adminRegisterExternalToken({
+      await waitForReceipt(approveTx, 'erc20.approve');
+      const registerTx = await depository.adminRegisterExternalToken({
         entity: ethers.ZeroHash,
         contractAddress: erc20Address,
         externalTokenId: 0,
@@ -586,7 +621,7 @@ export async function createRpcAdapter(
         internalTokenId: 0,
         amount: tokenRegistrationAmount,
       }, await buildFeeOverrides());
-      await waitForReceipt(registerTx as any, 'depository.externalTokenToReserve');
+      await waitForReceipt(registerTx, 'depository.externalTokenToReserve');
       const packed = await depository.packTokenReference(0, erc20Address, 0);
       const tokenId = await depository.tokenToId(packed);
       if (tokenId === 0n) {
@@ -799,28 +834,30 @@ export async function createRpcAdapter(
     // === WRITE METHODS ===
 
     async processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt> {
-      const signerAddress = await signer.getAddress();
-      const txNonce = Math.max(
-        await provider.getTransactionCount(signerAddress, 'latest'),
-        await provider.getTransactionCount(signerAddress, 'pending'),
-      );
-      const receipt = await sendTypedTx(
-        'processBatch',
-        depository.processBatch,
-        [encodedBatch, hankoData, nonce],
-        {
-          gasFallback: DEFAULT_PROCESS_BATCH_GAS,
-          txNonce,
-          resetSignerNonce: true,
-        },
-      );
-      const events = parseReceiptLogsToJEvents(receipt, [depository, entityProvider]);
+      return runSerializedBatch(async () => {
+        try {
+          const receipt = await sendTypedTx(
+            'processBatch',
+            depository.processBatch,
+            [encodedBatch, hankoData, nonce],
+            {
+              gasFallback: DEFAULT_PROCESS_BATCH_GAS,
+              txNonce: await allocateSerializedSignerNonce(),
+              resetSignerNonce: true,
+            },
+          );
+          const events = parseReceiptLogsToJEvents(receipt, [depository, entityProvider]);
 
-      return {
-        txHash: receipt.hash,
-        blockNumber: receipt.blockNumber,
-        events,
-      };
+          return {
+            txHash: receipt.hash,
+            blockNumber: receipt.blockNumber,
+            events,
+          };
+        } catch (error) {
+          await resetSerializedSignerNonce();
+          throw error;
+        }
+      });
     },
 
     async enforceDebts(entityId: string, tokenId: number): Promise<void> {
@@ -837,7 +874,7 @@ export async function createRpcAdapter(
             },
           );
         } catch (error) {
-          resetSerializedSignerNonce();
+          await resetSerializedSignerNonce();
           throw error;
         }
       });
@@ -860,7 +897,7 @@ export async function createRpcAdapter(
             );
             return parseReceiptLogsToJEvents(receipt, [depository]);
           } catch (error) {
-            resetSerializedSignerNonce();
+            await resetSerializedSignerNonce();
             throw error;
           }
         });
@@ -922,7 +959,7 @@ export async function createRpcAdapter(
           );
           return parseReceiptLogsToJEvents(receipt, [depository]);
         } catch (error) {
-          resetSerializedSignerNonce();
+          await resetSerializedSignerNonce();
           throw error;
         }
       });
@@ -992,14 +1029,14 @@ export async function createRpcAdapter(
             nonce: nextNonce,
           });
           nextNonce += 1;
-          await waitForReceipt(clearTx as any, 'erc20ApproveReset');
+          await waitForReceipt(clearTx, 'erc20ApproveReset');
         }
         const approveTx = await approveFn(liveDepositoryAddress, amount, {
           ...(await buildFeeOverrides()),
           nonce: nextNonce,
         });
         nextNonce += 1;
-        await waitForReceipt(approveTx as any, 'erc20ApproveExact');
+        await waitForReceipt(approveTx, 'erc20ApproveExact');
         console.log(`[JAdapter:rpc] Approved exact allowance=${amount} for Depository`);
       }
 
@@ -1011,7 +1048,7 @@ export async function createRpcAdapter(
         externalTokenId,
         internalTokenId,
       });
-      const receipt = await processSignedBatch(entityId, batch, signerWallet as any, signerWallet.privateKey);
+      const receipt = await processSignedBatch(entityId, batch, signerWallet, signerWallet.privateKey);
       const normalizedEntityId = normalizeEntityId(entityId);
       const batchProcessed = receipt.events.find((event) =>
         event.name === 'HankoBatchProcessed' &&
@@ -1062,7 +1099,7 @@ export async function createRpcAdapter(
         overrides?: Record<string, bigint>
       ) => Promise<{ hash: string }>;
       const tx = await approveFn(spender, amount, await buildFeeOverrides());
-      await waitForReceipt(tx as any, 'approveErc20');
+      await waitForReceipt(tx, 'approveErc20');
       return tx.hash;
     },
 
@@ -1085,7 +1122,7 @@ export async function createRpcAdapter(
         overrides?: Record<string, bigint>
       ) => Promise<{ hash: string }>;
       const tx = await transferFn(to, amount, await buildFeeOverrides());
-      await waitForReceipt(tx as any, 'transferErc20');
+      await waitForReceipt(tx, 'transferErc20');
       return tx.hash;
     },
 
@@ -1103,7 +1140,7 @@ export async function createRpcAdapter(
         value: amount,
         ...(await buildFeeOverrides()),
       });
-      await waitForReceipt(tx as any, 'transferNative');
+      await waitForReceipt(tx, 'transferNative');
       return tx.hash;
     },
 
@@ -1265,9 +1302,19 @@ export async function createRpcAdapter(
               await depository.processBatch.staticCall(encodedBatch, hankoData, nextNonce, {
                 gasLimit,
               });
-            } catch (simErr: any) {
+            } catch (simErr: unknown) {
               // Decode revert data using contract ABI (typechain-connected interface).
-              const revertData = simErr?.data ?? simErr?.error?.data ?? simErr?.info?.error?.data;
+              const revertSource =
+                typeof simErr === 'object' && simErr !== null
+                  ? simErr as {
+                      data?: unknown;
+                      error?: { data?: unknown };
+                      info?: { error?: { data?: unknown } };
+                      reason?: unknown;
+                      message?: unknown;
+                    }
+                  : null;
+              const revertData = revertSource?.data ?? revertSource?.error?.data ?? revertSource?.info?.error?.data;
               let errDetail = '';
               if (revertData && revertData !== '0x') {
                 const sig = typeof revertData === 'string' ? revertData.slice(0, 10) : '';
@@ -1301,7 +1348,7 @@ export async function createRpcAdapter(
                 errDetail = `${errName}${decoded}`;
                 console.error(`🔍 [JAdapter:rpc] staticCall revert: ${errDetail} data=${typeof revertData === 'string' ? revertData.slice(0, 40) : revertData}...`);
               } else {
-                errDetail = simErr?.reason ?? simErr?.message ?? String(simErr);
+                errDetail = String(revertSource?.reason ?? revertSource?.message ?? simErr);
                 console.error(`🔍 [JAdapter:rpc] staticCall revert: ${errDetail}`);
               }
               if (disputeStartDebug.length > 0) {
@@ -1314,23 +1361,15 @@ export async function createRpcAdapter(
             for (let attempt = 1; attempt <= 2; attempt++) {
               try {
                 if (attempt > 1) {
-                  maybeResetSignerNonce();
+                  await resetSerializedSignerNonce();
                   console.warn(`⚠️ [JAdapter:rpc] retrying processBatch after nonce sync (attempt ${attempt}/2)`);
                 }
-                const signerAddress = await signer.getAddress();
-                const txNonce = Math.max(
-                  await provider.getTransactionCount(signerAddress, 'latest'),
-                  await provider.getTransactionCount(signerAddress, 'pending'),
-                );
-                // Local Anvil can briefly report a stale cached nonce to the nonce-tracking signer after
-                // rapid same-signer batch submits. We serialize submissions globally, so an explicit fresh
-                // EOA nonce here is the simplest deterministic guard against reusing an already-mined nonce.
                 const tx = await depository.processBatch(encodedBatch, hankoData, nextNonce, {
                   gasLimit,
-                  nonce: txNonce,
+                  nonce: await allocateSerializedSignerNonce(),
                   ...resolvedFeeOverrides,
                 });
-                const receipt = await waitForReceipt(tx as any, 'submitTx:processBatch');
+                const receipt = await waitForReceipt(tx, 'submitTx:processBatch');
                 const txHash = receipt.hash ?? tx.hash;
                 const blockNum = receipt.blockNumber ?? 0;
                 console.log(`✅ [JAdapter:rpc] Batch executed: block=${blockNum} gas=${receipt.gasUsed}`);
@@ -1339,6 +1378,7 @@ export async function createRpcAdapter(
                 if (attempt < 2 && isNonceSyncError(error)) {
                   continue;
                 }
+                await resetSerializedSignerNonce();
                 const msg = error instanceof Error ? error.message : String(error);
                 console.error(`❌ [JAdapter:rpc] processBatch failed: ${msg}`);
                 return { success: false, error: msg };
