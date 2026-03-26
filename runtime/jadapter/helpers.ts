@@ -35,8 +35,8 @@ export function entityIdToAddress(entityId: string): string {
   return ethers.getAddress('0x' + normalized.slice(-40));
 }
 
-const buildParsedLogArgs = (parsed: any): Record<string, unknown> => Object.fromEntries(
-  parsed.fragment.inputs.map((input: { name: string }, index: number) => [input.name, parsed.args[index]]),
+const buildParsedLogArgs = (parsed: ethers.LogDescription): Record<string, unknown> => Object.fromEntries(
+  parsed.fragment.inputs.map((input, index) => [input.name || String(index), parsed.args[index]]),
 );
 
 export const toJEvent = (name: string, args: Record<string, unknown> | undefined, meta?: { blockNumber?: number; blockHash?: string; transactionHash?: string }): JEvent => ({
@@ -257,7 +257,7 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
       return normalize(args.entity) === normalizedEntity;
 
     case 'SecretRevealed':
-      return true; // Global: any entity with matching hashlock should observe
+      return true; // Global: all entities with matching hashlock should observe
 
     case 'AccountSettled': {
       const settled = args.settled ?? args[''] ?? args[0] ?? [];
