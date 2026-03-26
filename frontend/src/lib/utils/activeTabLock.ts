@@ -3,7 +3,6 @@ import { writable } from 'svelte/store';
 const ACTIVE_TAB_LOCK_KEY = 'xln-active-tab-lock';
 const ACTIVE_TAB_CHANNEL_NAME = 'xln-active-tab-lock';
 const INACTIVE_TAB_STANDBY_KEY = 'xln-inactive-tab-standby';
-const TAKEOVER_APPROVAL_TIMEOUT_MS = 3000;
 
 type ActiveTabLockRecord = {
   tabId: string;
@@ -56,8 +55,7 @@ let releaseCallback: (() => void) | null = null;
 let installed = false;
 let onLoseLockHandler: (() => void | Promise<void>) | null = null;
 let lockLost = false;
-const approvalWaiters = new Map<string, Set<() => void>>();
-
+let lockMonitorTimer: ReturnType<typeof setInterval> | null = null;
 export function isInactiveTabStandby(): boolean {
   if (typeof window === 'undefined') return false;
   try {
@@ -118,15 +116,6 @@ function readLockRecord(): ActiveTabLockRecord | null {
     };
   } catch {
     return null;
-  }
-}
-
-function resolveApprovalWaiters(tabId: string): void {
-  const waiters = approvalWaiters.get(tabId);
-  if (!waiters) return;
-  approvalWaiters.delete(tabId);
-  for (const resolve of waiters) {
-    resolve();
   }
 }
 
@@ -198,32 +187,6 @@ function maybeReleaseLock(): void {
   }
 }
 
-function waitForTakeoverApproval(tabId: string, timeoutMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      const waiters = approvalWaiters.get(tabId);
-      if (waiters) {
-        waiters.delete(onApproved);
-        if (waiters.size === 0) {
-          approvalWaiters.delete(tabId);
-        }
-      }
-      clearTimeout(timeoutId);
-      resolve();
-    };
-    const onApproved = () => {
-      finish();
-    };
-    const timeoutId = window.setTimeout(finish, timeoutMs);
-    const waiters = approvalWaiters.get(tabId) ?? new Set<() => void>();
-    waiters.add(onApproved);
-    approvalWaiters.set(tabId, waiters);
-  });
-}
-
 export async function initializeActiveTabLock(onLoseLock: () => void | Promise<void>): Promise<() => void> {
   if (typeof window === 'undefined') return () => {};
 
@@ -256,7 +219,6 @@ export async function initializeActiveTabLock(onLoseLock: () => void | Promise<v
             typeof message.requesterTabId === 'string' &&
             message.requesterTabId === tabId
           ) {
-            resolveApprovalWaiters(tabId);
             return;
           }
           if (message.type === 'claim') {
@@ -284,14 +246,25 @@ export async function initializeActiveTabLock(onLoseLock: () => void | Promise<v
       maybeReleaseLock();
     };
 
+    const checkCurrentOwner = () => {
+      const current = readLockRecord();
+      if (!current?.tabId) return;
+      void handleExternalOwner(current.tabId);
+    };
+
     window.addEventListener('storage', onStorage);
     window.addEventListener('pagehide', onUnload);
     window.addEventListener('beforeunload', onUnload);
+    lockMonitorTimer = window.setInterval(checkCurrentOwner, 500);
 
     releaseCallback = () => {
       window.removeEventListener('storage', onStorage);
       window.removeEventListener('pagehide', onUnload);
       window.removeEventListener('beforeunload', onUnload);
+      if (lockMonitorTimer) {
+        clearInterval(lockMonitorTimer);
+        lockMonitorTimer = null;
+      }
       try {
         activeChannel?.close();
       } catch {
@@ -300,17 +273,6 @@ export async function initializeActiveTabLock(onLoseLock: () => void | Promise<v
       activeChannel = null;
       installed = false;
     };
-  }
-
-  if (previousOwnerTabId) {
-    postChannelMessage({
-      type: 'takeover-request',
-      tabId,
-      targetOwnerTabId: previousOwnerTabId,
-      timestamp: Date.now(),
-      pathname: typeof window !== 'undefined' ? window.location.pathname : '/app',
-    });
-    await waitForTakeoverApproval(tabId, TAKEOVER_APPROVAL_TIMEOUT_MS);
   }
 
   writeLockRecord(tabId, previousOwnerTabId);
