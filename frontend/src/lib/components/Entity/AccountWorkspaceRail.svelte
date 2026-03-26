@@ -121,6 +121,59 @@
     min-width: 0;
   }
 
+  .account-workspace-tabs {
+    display: flex;
+    gap: 4px;
+    margin-top: var(--space-3, 12px);
+    padding: 0 0 2px;
+    border: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 56%, transparent);
+    border-radius: 0;
+    background: transparent;
+    overflow-x: auto;
+  }
+
+  .account-workspace-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .account-workspace-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 40px;
+    padding: 8px 12px;
+    border: 1px solid transparent;
+    border-radius: 10px 10px 0 0;
+    background: transparent;
+    color: var(--theme-text-secondary, #a1a1aa);
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    touch-action: manipulation;
+  }
+
+  .account-workspace-tab:hover {
+    color: var(--theme-text-primary, #e4e4e7);
+    border-color: transparent;
+    background: color-mix(in srgb, var(--theme-surface-hover, var(--theme-card-bg, #1c1c20)) 58%, transparent);
+  }
+
+  .account-workspace-tab.active {
+    color: var(--theme-text-primary, #e4e4e7);
+    border-color: color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 50%, transparent);
+    border-bottom-color: transparent;
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--theme-accent, #fbbf24) 8%, transparent), transparent),
+      color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 94%, transparent);
+    box-shadow: inset 0 2px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 78%, transparent);
+  }
+
   .mobile-rail {
     display: none;
   }

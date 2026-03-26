@@ -12,6 +12,7 @@ import { timedStep } from './utils/e2e-timing';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
 const ROUTE_TIMEOUT_MS = LONG_E2E ? 90_000 : 60_000;
+const EXTERNAL_BATCH_TIMEOUT_MS = LONG_E2E ? 150_000 : 90_000;
 
 type ApiTokenEntry = {
   address?: string;
@@ -129,6 +130,117 @@ async function openMoveTab(page: Page): Promise<void> {
   await expect(page.getByTestId('move-committed-line').first()).toBeVisible({ timeout: 20_000 });
 }
 
+type LocalEntityRef = {
+  entityId: string;
+  signerId: string;
+};
+
+type MoveBatchSnapshot = {
+  pendingExternalToReserve: number;
+  pendingReserveToCollateral: number;
+  pendingCollateralToReserve: number;
+  pendingReserveToReserve: number;
+  pendingReserveToExternal: number;
+  sentExternalToReserve: number;
+  sentReserveToCollateral: number;
+  sentCollateralToReserve: number;
+  sentReserveToReserve: number;
+  sentReserveToExternal: number;
+  sentExists: boolean;
+  batchHistoryCount: number;
+  recentMessages: string[];
+};
+
+async function getLocalEntity(page: Page): Promise<LocalEntityRef> {
+  const entity = await page.evaluate(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        eReplicas?: Map<string, unknown>;
+      };
+    }).isolatedEnv;
+    if (!env?.eReplicas) return null;
+    for (const [replicaKey] of env.eReplicas.entries()) {
+      const [entityId, signerId] = String(replicaKey).split(':');
+      if (!entityId || !signerId) continue;
+      return { entityId, signerId };
+    }
+    return null;
+  });
+  if (!entity) throw new Error('No local entity in isolatedEnv');
+  return entity;
+}
+
+async function readMoveBatchSnapshot(
+  page: Page,
+  entityId: string,
+  signerId: string,
+): Promise<MoveBatchSnapshot> {
+  return page.evaluate(({ entityId, signerId }) => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        eReplicas?: Map<string, unknown>;
+      };
+    }).isolatedEnv;
+    if (!env?.eReplicas) {
+      return {
+        pendingExternalToReserve: 0,
+        pendingReserveToCollateral: 0,
+        pendingCollateralToReserve: 0,
+        pendingReserveToReserve: 0,
+        pendingReserveToExternal: 0,
+        sentExternalToReserve: 0,
+        sentReserveToCollateral: 0,
+        sentCollateralToReserve: 0,
+        sentReserveToReserve: 0,
+        sentReserveToExternal: 0,
+        sentExists: false,
+        batchHistoryCount: 0,
+        recentMessages: [],
+      };
+    }
+    const key = Array.from(env.eReplicas.keys()).find((candidateKey: string) => {
+      const [candidateEntityId, candidateSignerId] = String(candidateKey).split(':');
+      return String(candidateEntityId || '').toLowerCase() === String(entityId).toLowerCase()
+        && String(candidateSignerId || '').toLowerCase() === String(signerId).toLowerCase();
+    });
+    const replica = key ? env.eReplicas.get(key) as {
+      state?: {
+        jBatchState?: {
+          batch?: Record<string, unknown>;
+          sentBatch?: { batch?: Record<string, unknown> };
+        };
+        batchHistory?: unknown[];
+        messages?: unknown[];
+      };
+    } | undefined : undefined;
+    const pending = replica?.state?.jBatchState?.batch as Record<string, unknown> | undefined;
+    const sent = replica?.state?.jBatchState?.sentBatch?.batch as Record<string, unknown> | undefined;
+    const history = Array.isArray(replica?.state?.batchHistory) ? replica.state.batchHistory : [];
+    const recentMessages = Array.isArray(replica?.state?.messages)
+      ? replica.state.messages.slice(-8).map((message) => String(message || ''))
+      : [];
+    const count = (batch: Record<string, unknown> | undefined, key: string): number => {
+      const value = batch?.[key];
+      return Array.isArray(value) ? value.length : 0;
+    };
+    return {
+      pendingExternalToReserve: count(pending, 'externalTokenToReserve'),
+      pendingReserveToCollateral: count(pending, 'reserveToCollateral'),
+      pendingCollateralToReserve: count(pending, 'collateralToReserve'),
+      pendingReserveToReserve: count(pending, 'reserveToReserve'),
+      pendingReserveToExternal: count(pending, 'reserveToExternalToken'),
+      sentExternalToReserve: count(sent, 'externalTokenToReserve'),
+      sentReserveToCollateral: count(sent, 'reserveToCollateral'),
+      sentCollateralToReserve: count(sent, 'collateralToReserve'),
+      sentReserveToReserve: count(sent, 'reserveToReserve'),
+      sentReserveToExternal: count(sent, 'reserveToExternalToken'),
+      sentExists: Boolean(replica?.state?.jBatchState?.sentBatch),
+      batchHistoryCount: Number(history.length || 0),
+      recentMessages,
+    };
+  }, { entityId, signerId });
+}
+
 async function waitForMoveReady(page: Page): Promise<void> {
   const confirm = page.getByTestId('move-confirm').first();
   await expect
@@ -141,11 +253,31 @@ async function waitForMoveReady(page: Page): Promise<void> {
     .toBe('enabled');
 }
 
-async function broadcastDraftBatch(page: Page): Promise<void> {
+async function broadcastDraftBatch(page: Page, entity?: LocalEntityRef): Promise<void> {
   const broadcast = page.getByTestId('settle-sign-broadcast').first();
   await expect(broadcast).toBeVisible({ timeout: 20_000 });
   await expect(broadcast).toBeEnabled({ timeout: 20_000 });
+  const localEntity = entity ?? await getLocalEntity(page);
+  const before = await readMoveBatchSnapshot(page, localEntity.entityId, localEntity.signerId);
   await broadcast.click();
+  const deadline = Date.now() + 20_000;
+  let lastSnapshot = before;
+
+  while (Date.now() < deadline) {
+    lastSnapshot = await readMoveBatchSnapshot(page, localEntity.entityId, localEntity.signerId);
+    const recentMessageText = lastSnapshot.recentMessages.join(' | ');
+    if (recentMessageText.includes('submit_failed:') || recentMessageText.includes('🛑 Aborted sentBatch')) {
+      throw new Error(`Batch broadcast failed: ${recentMessageText}`);
+    }
+    if (lastSnapshot.sentExists || lastSnapshot.batchHistoryCount > before.batchHistoryCount) {
+      return;
+    }
+    await page.waitForTimeout(250);
+  }
+
+  throw new Error(
+    `Batch broadcast did not advance within 20s: ${JSON.stringify(lastSnapshot)}`,
+  );
 }
 
 async function chooseMoveRoute(
@@ -388,7 +520,7 @@ test('asset faucet exposes correct modes and funds every supported token', async
 });
 
 test('move tab covers all routed paths on isolated runtimes', async ({ page, browser }) => {
-  test.setTimeout(LONG_E2E ? 360_000 : 240_000);
+  test.setTimeout(LONG_E2E ? 420_000 : 300_000);
 
   await timedStep('move.baseline', async () => {
     await ensureE2EBaseline(page, {
@@ -450,15 +582,18 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       await timedMillis('move.e2r', async () => {
         await openMoveTab(page);
         await page.getByTestId('move-asset-symbol').selectOption(symbol);
-        await page.getByTestId('move-amount').fill('20');
         await chooseMoveRoute(page, 'external', 'reserve');
+        await page.getByTestId('move-amount').fill('20');
         await waitForMoveReady(page);
         await expect(page.getByTestId('move-route-summary')).toContainText('1 external-signer batch');
         await expect(page.getByTestId('move-route-summary')).toContainText('Submit external deposit batch into your reserve');
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await page.getByTestId('move-confirm').first().click();
         await broadcastDraftBatch(page);
-        await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeReserve);
+        await expect.poll(
+          async () => refreshReserveBalance(page, symbol),
+          { timeout: EXTERNAL_BATCH_TIMEOUT_MS },
+        ).toBeGreaterThan(beforeReserve);
       });
       const afterReserve = await refreshReserveBalance(page, symbol);
       logBalanceDelta('move.e2r', { beforeRecipient: beforeReserve, afterRecipient: afterReserve });
@@ -469,8 +604,8 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       await timedMillis('move.r2a-self', async () => {
         await openMoveTab(page);
         await page.getByTestId('move-asset-symbol').selectOption(symbol);
-        await page.getByTestId('move-amount').fill('8');
         await chooseMoveRoute(page, 'reserve', 'account');
+        await page.getByTestId('move-amount').fill('8');
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
         await broadcastDraftBatch(page);
@@ -486,8 +621,8 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       await timedMillis('move.a2r-self', async () => {
         await openMoveTab(page);
         await page.getByTestId('move-asset-symbol').selectOption(symbol);
-        await page.getByTestId('move-amount').fill('3');
         await chooseMoveRoute(page, 'account', 'reserve');
+        await page.getByTestId('move-amount').fill('3');
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
         await broadcastDraftBatch(page);
@@ -505,8 +640,8 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       await timedMillis('move.r2e', async () => {
         await openMoveTab(page);
         await page.getByTestId('move-asset-symbol').selectOption(symbol);
-        await page.getByTestId('move-amount').fill('2');
         await chooseMoveRoute(page, 'reserve', 'external');
+        await page.getByTestId('move-amount').fill('2');
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
         await expect(page.getByTestId('move-route-summary')).toContainText('1 reserve batch');
@@ -528,8 +663,8 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       await timedMillis('move.r2r-remote', async () => {
         await openMoveTab(page);
         await page.getByTestId('move-asset-symbol').selectOption(symbol);
-        await page.getByTestId('move-amount').fill('4');
         await chooseMoveRoute(page, 'reserve', 'reserve');
+        await page.getByTestId('move-amount').fill('4');
         await selectMoveEntityField(page, 'move-reserve-recipient-field', bob!.entityId);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
@@ -547,15 +682,18 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       await timedMillis('move.e2a-remote', async () => {
         await openMoveTab(page);
         await page.getByTestId('move-asset-symbol').selectOption(symbol);
-        await page.getByTestId('move-amount').fill('5');
         await chooseMoveRoute(page, 'external', 'account');
+        await page.getByTestId('move-amount').fill('5');
         await selectMoveEntityField(page, 'move-target-entity-field', bob!.entityId);
         await selectMoveEntityField(page, 'move-target-counterparty-field', hubs.h2);
         await waitForMoveReady(page);
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await page.getByTestId('move-confirm').first().click();
         await broadcastDraftBatch(page);
-        await expect.poll(async () => refreshAccountSpendableBalance(bobPage, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeBobAccount);
+        await expect.poll(
+          async () => refreshAccountSpendableBalance(bobPage, symbol),
+          { timeout: EXTERNAL_BATCH_TIMEOUT_MS },
+        ).toBeGreaterThan(beforeBobAccount);
       });
       const afterBobAccount = await refreshAccountSpendableBalance(bobPage, symbol);
       logBalanceDelta('move.e2a-remote', { beforeRecipient: beforeBobAccount, afterRecipient: afterBobAccount });
@@ -567,8 +705,8 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       await timedMillis('move.a2e', async () => {
         await openMoveTab(page);
         await page.getByTestId('move-asset-symbol').selectOption(symbol);
-        await page.getByTestId('move-amount').fill('1');
         await chooseMoveRoute(page, 'account', 'external');
+        await page.getByTestId('move-amount').fill('1');
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
@@ -587,8 +725,8 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       await timedMillis('move.a2a-remote', async () => {
         await openMoveTab(page);
         await page.getByTestId('move-asset-symbol').selectOption(symbol);
-        await page.getByTestId('move-amount').fill('2');
         await chooseMoveRoute(page, 'account', 'account');
+        await page.getByTestId('move-amount').fill('2');
         await selectMoveEntityField(page, 'move-target-entity-field', bob!.entityId);
         await selectMoveEntityField(page, 'move-target-counterparty-field', hubs.h2);
         await waitForMoveReady(page);
@@ -610,8 +748,8 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       await timedMillis('move.roundtrip.a2e-self', async () => {
         await openMoveTab(page);
         await page.getByTestId('move-asset-symbol').selectOption(symbol);
-        await page.getByTestId('move-amount').fill('0.5');
         await chooseMoveRoute(page, 'account', 'external', 'target-first');
+        await page.getByTestId('move-amount').fill('0.5');
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
@@ -626,8 +764,8 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       await timedMillis('move.roundtrip.e2a-remote', async () => {
         await openMoveTab(page);
         await page.getByTestId('move-asset-symbol').selectOption(symbol);
-        await page.getByTestId('move-amount').fill('1.25');
         await chooseMoveRoute(page, 'external', 'account', 'target-first');
+        await page.getByTestId('move-amount').fill('1.25');
         await selectMoveEntityField(page, 'move-target-entity-field', bob!.entityId);
         await selectMoveEntityField(page, 'move-target-counterparty-field', hubs.h2);
         await waitForMoveReady(page);

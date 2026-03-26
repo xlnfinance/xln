@@ -32,13 +32,42 @@
   let resettingEverything = $state(false);
   let bootGeneration = $state(0);
   let lockTestMode = $state(false);
+  let currentHash = $state('');
   const pageSearch = $derived(browser ? $page.url.search : '');
 
+  type HashRouteState = {
+    route: string;
+    params: URLSearchParams;
+  };
+
+  function readCurrentHash(): string {
+    if (!browser) return '';
+    return window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+  }
+
+  function parseHashRouteState(rawHash: string): HashRouteState {
+    const hash = String(rawHash || '').trim();
+    const queryIndex = hash.indexOf('?');
+    const route = queryIndex >= 0 ? hash.slice(0, queryIndex).trim().toLowerCase() : hash.trim().toLowerCase();
+    const params = new URLSearchParams(queryIndex >= 0 ? hash.slice(queryIndex + 1) : hash);
+    return { route, params };
+  }
+
+  function hasLegacyEmbedQuery(search: string): boolean {
+    const params = new URLSearchParams(search);
+    return params.get('embed') === '1' || params.has('e');
+  }
+
+  function isEmbeddedPayRoute(state: HashRouteState, search: string): boolean {
+    if (state.route !== 'pay') return false;
+    return hasLegacyEmbedQuery(search)
+      || state.params.get('mode') === 'embed'
+      || state.params.get('embed') === '1'
+      || state.params.get('embed') === 'true';
+  }
+
   function isResetHashActive(): boolean {
-    if (!browser) return false;
-    const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-    const route = rawHash.split('?')[0]?.trim().toLowerCase() || '';
-    return route === 'reset';
+    return parseHashRouteState(currentHash).route === 'reset';
   }
 
   async function maybeHandleResetHash(): Promise<boolean> {
@@ -73,29 +102,21 @@
     return hostname === 'localhost' || hostname === '127.0.0.1';
   }
 
-  function syncEmbeddedPayMode(): void {
+  function syncHashLocation(): void {
     if (!browser) return;
-    const params = new URLSearchParams(window.location.search);
-    const hasEmbedQuery = params.get('embed') === '1' || params.has('e');
-    const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-    const qIndex = rawHash.indexOf('?');
-    const hashRoute = qIndex >= 0 ? rawHash.slice(0, qIndex).trim().toLowerCase() : rawHash.trim().toLowerCase();
-    const hashParams = new URLSearchParams(qIndex >= 0 ? rawHash.slice(qIndex + 1) : rawHash);
-
-    embeddedPayMode =
-      hashRoute === 'pay' &&
-      (
-        hasEmbedQuery ||
-        hashParams.get('mode') === 'embed' ||
-        hashParams.get('embed') === '1' ||
-        hashParams.get('embed') === 'true'
-      );
+    currentHash = readCurrentHash();
   }
 
   $effect(() => {
     if (!browser) return;
     const params = new URLSearchParams(pageSearch);
     lockTestMode = params.get('locktest') === '1' && canUseLockTestMode();
+  });
+
+  $effect(() => {
+    if (!browser) return;
+    const hashState = parseHashRouteState(currentHash);
+    embeddedPayMode = isEmbeddedPayRoute(hashState, pageSearch);
   });
 
   async function deactivateThisTab(): Promise<void> {
@@ -148,11 +169,11 @@
     let releaseLock: (() => void) | null = null;
 
     const handleLocationChange = () => {
-      syncEmbeddedPayMode();
+      syncHashLocation();
       void maybeHandleResetHash();
     };
 
-    syncEmbeddedPayMode();
+    syncHashLocation();
     window.addEventListener('hashchange', handleLocationChange);
 
     void (async () => {
