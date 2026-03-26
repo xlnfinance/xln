@@ -821,26 +821,22 @@
 </script>
 
 <div class="orderbook-panel" class:compact-header={compactHeader}>
-  <div class="header">
-    {#if !compactHeader}
+  {#if !compactHeader}
+    <div class="header">
       <span class="title">Order Book</span>
-    {/if}
-    <div class="header-controls">
-      {#if !compactHeader}
+      <div class="header-controls">
         <span class="pair">{pairLabel || pairId.replace('/', ' / ')}</span>
-      {/if}
-      <label class="price-step">
-        {#if !compactHeader}
+        <label class="price-step">
           <span class="price-step-label">Step</span>
-        {/if}
-        <select bind:value={selectedPriceStep} on:change={handlePriceStepChange}>
-          {#each PRICE_STEP_OPTIONS as step}
-            <option value={step}>{step === 'auto' ? `Auto · ${autoResolvedPriceStep}` : step}</option>
-          {/each}
-        </select>
-      </label>
+          <select bind:value={selectedPriceStep} on:change={handlePriceStepChange}>
+            {#each PRICE_STEP_OPTIONS as step}
+              <option value={step}>{step === 'auto' ? `Auto · ${autoResolvedPriceStep}` : step}</option>
+            {/each}
+          </select>
+        </label>
+      </div>
     </div>
-  </div>
+  {/if}
 
   <div class="spread-row">
     <span class="spread-label">Spread</span>
@@ -991,7 +987,16 @@
     <span class="ratio-sell-label">{sellRatioPct.toFixed(2)}% S</span>
   </div>
 
-  <div class="footer">
+  <div class="footer" class:compact-footer={compactHeader}>
+    {#if compactHeader}
+      <label class="price-step compact-step">
+        <select bind:value={selectedPriceStep} on:change={handlePriceStepChange} aria-label="Orderbook aggregation step">
+          {#each PRICE_STEP_OPTIONS as step}
+            <option value={step}>{step === 'auto' ? `Auto · ${autoResolvedPriceStep}` : step}</option>
+          {/each}
+        </select>
+      </label>
+    {/if}
     <span
       class="update-label"
       on:click={refreshOrderbookNow}
@@ -1041,11 +1046,6 @@
     align-items: center;
     gap: 8px;
     margin-left: auto;
-  }
-
-  .orderbook-panel.compact-header .header {
-    margin-bottom: 6px;
-    padding-bottom: 6px;
   }
 
   .price-step {
@@ -1335,6 +1335,16 @@
     border-top: 1px solid var(--border-color, #333);
     font-size: 10px;
     color: var(--text-tertiary, #555);
+  }
+
+  .footer.compact-footer {
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .compact-step {
+    margin-right: auto;
   }
 
   .update-label {

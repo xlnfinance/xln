@@ -902,7 +902,7 @@
     }
 
     try {
-      const maxAmount = moveSourceAvailableBalance;
+      const maxAmount = getCurrentMoveSourceAvailableBalance();
       parsePositiveAssetAmount(moveAmount, moveFromEndpoint === 'external' && moveToEndpoint === 'external'
         ? (externalToken as { decimals: number })
         : (reserveToken as { decimals: number }), maxAmount ?? undefined);
@@ -933,6 +933,7 @@
     moveLedgerRow ? moveLedgerRow.externalBalance.toString() : '0',
     moveLedgerRow ? moveLedgerRow.reserveBalance.toString() : '0',
     moveLedgerRow ? moveLedgerRow.accountBalance.toString() : '0',
+    moveSourceAvailableBalance.toString(),
   ].join('|');
   $: {
     void moveValidationSignature;
@@ -1080,24 +1081,22 @@
   }
 
   function getMoveDisplayDecimals(): number {
+    const liveExternalToken = findExternalTokenBySymbol(moveAssetSymbol);
+    const liveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
     const row = moveLedgerRow;
+    if (liveExternalToken && typeof liveExternalToken.decimals === 'number') return liveExternalToken.decimals;
+    if (liveTransferToken && typeof liveTransferToken.decimals === 'number') return liveTransferToken.decimals;
     if (row && typeof row.decimals === 'number' && row.decimals >= 0) return row.decimals;
-    if (selectedMoveExternalToken && typeof selectedMoveExternalToken.decimals === 'number') return selectedMoveExternalToken.decimals;
-    if (selectedMoveTransferToken && typeof selectedMoveTransferToken.decimals === 'number') return selectedMoveTransferToken.decimals;
     return 18;
   }
 
   function getCurrentMoveSourceAvailableBalance(): bigint {
-    if (moveFromEndpoint === 'external') {
-      return moveLedgerRow ? moveLedgerRow.externalBalance : 0n;
-    }
-    if (moveFromEndpoint === 'reserve') {
-      return moveLedgerRow ? moveLedgerRow.reserveBalance : 0n;
-    }
+    const liveExternalToken = findExternalTokenBySymbol(moveAssetSymbol);
+    const liveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
     return getMoveMaxAmount(
       moveFromEndpoint,
-      selectedMoveTransferToken,
-      selectedMoveExternalToken,
+      liveTransferToken,
+      liveExternalToken,
       getCurrentMoveSourceAccountId(),
     ) ?? 0n;
   }
@@ -1628,10 +1627,25 @@
     return externalTokens.find((token) => token.symbol.toUpperCase() === normalized) ?? null;
   }
 
+  function findAssetLedgerRowBySymbol(symbol: string): AssetLedgerRow | null {
+    const normalized = String(symbol || '').trim().toUpperCase();
+    if (!normalized) return null;
+    return assetLedgerRows.find((row) => String(row.symbol || '').trim().toUpperCase() === normalized) ?? null;
+  }
+
   function findReserveTransferTokenBySymbol(symbol: string): (ExternalToken & { tokenId: number }) | null {
     const token = findExternalTokenBySymbol(symbol);
     if (!token || !isReserveTransferToken(token)) return null;
     return token;
+  }
+
+  function getFaucetReserveTokenMeta(symbol: string): { tokenId: number; symbol: string } | null {
+    const row = findAssetLedgerRowBySymbol(symbol);
+    if (!row || row.isNative || typeof row.tokenId !== 'number' || row.tokenId <= 0) return null;
+    return {
+      tokenId: row.tokenId,
+      symbol: row.symbol,
+    };
   }
 
   function requireExternalTokenBySymbol(symbol: string): ExternalToken {
@@ -2220,10 +2234,13 @@
     return assetLedgerRows.find((row) => String(row.symbol || '').trim().toUpperCase() === symbol) ?? null;
   })();
   $: {
+    const liveExternalToken = findExternalTokenBySymbol(moveAssetSymbol);
+    const liveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
+    const moveTokenId = liveTransferToken?.tokenId;
     moveDisplayBalances = {
-      external: moveLedgerRow ? moveLedgerRow.externalBalance : 0n,
-      reserve: moveLedgerRow ? moveLedgerRow.reserveBalance : 0n,
-      account: moveLedgerRow ? moveLedgerRow.accountBalance : 0n,
+      external: liveExternalToken?.balance ?? 0n,
+      reserve: typeof moveTokenId === 'number' ? (onchainReserves.get(moveTokenId) ?? 0n) : 0n,
+      account: typeof moveTokenId === 'number' ? (accountSpendableByToken.get(moveTokenId) ?? 0n) : 0n,
     };
     moveDisplayDecimals = getMoveDisplayDecimals();
     moveSourceAvailableBalance = getCurrentMoveSourceAvailableBalance();
@@ -2231,7 +2248,10 @@
 
   $: {
     const preferred = choosePreferredAssetSymbol(externalTokens);
-    if (!findExternalTokenBySymbol(faucetAssetSymbol)) faucetAssetSymbol = preferred;
+    const preferredFaucetSymbol =
+      assetLedgerRows.find((row) => !row.isNative && typeof row.tokenId === 'number' && row.tokenId > 0)?.symbol
+      ?? preferred;
+    if (!findAssetLedgerRowBySymbol(faucetAssetSymbol)) faucetAssetSymbol = preferredFaucetSymbol;
     if (!findExternalTokenBySymbol(sendAssetSymbol)) sendAssetSymbol = preferred;
     if (!findReserveTransferTokenBySymbol(externalToReserveSymbol)) externalToReserveSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
     if (!findReserveTransferTokenBySymbol(reserveToCollateralSymbol)) reserveToCollateralSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
@@ -3342,7 +3362,7 @@
       await faucetExternalTokens(faucetAssetSymbol);
       return;
     }
-    const token = findReserveTransferTokenBySymbol(faucetAssetSymbol);
+    const token = getFaucetReserveTokenMeta(faucetAssetSymbol);
     if (!token) {
       toasts.error('Reserve faucet supports ERC20 assets only');
       return;
@@ -4201,7 +4221,7 @@
     { id: 'appearance', icon: SlidersHorizontal, label: 'Appearance' },
   ];
   $: hasWorkspaceAccounts = workspaceAccountIds.length > 0;
-  $: faucetSupportsReserve = !!findReserveTransferTokenBySymbol(faucetAssetSymbol);
+  $: faucetSupportsReserve = !!getFaucetReserveTokenMeta(faucetAssetSymbol);
   $: canShowAccountFaucet = faucetSupportsReserve && hasWorkspaceAccounts;
   $: visibleAccountWorkspaceTabs = hasWorkspaceAccounts
     ? accountWorkspaceTabs
@@ -5915,9 +5935,6 @@
 
   .appearance-checkbox {
     flex: 0 0 auto;
-    width: 16px;
-    height: 16px;
-    accent-color: #fbbf24;
     cursor: pointer;
   }
 
@@ -6212,7 +6229,7 @@
     overflow: visible !important;
   }
 
-  .content :global(input:not([type="range"]):not(.entity-input-field):not(.move-amount-input):not(.move-external-input)),
+  .content :global(input:not([type="range"]):not([type="checkbox"]):not(.entity-input-field):not(.move-amount-input):not(.move-external-input)),
   .content :global(select:not(.move-token-select)) {
     background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent) !important;
     border: 1px solid color-mix(in srgb, var(--theme-input-border, #27272a) 82%, transparent) !important;
@@ -6222,7 +6239,7 @@
     font-size: 13px !important;
   }
 
-  .content :global(input:not([type="range"]):focus),
+  .content :global(input:not([type="range"]):not([type="checkbox"]):focus),
   .content :global(select:focus) {
     outline: none !important;
     border-color: var(--theme-input-focus, #fbbf24) !important;
