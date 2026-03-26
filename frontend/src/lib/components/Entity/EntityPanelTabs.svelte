@@ -52,6 +52,7 @@
   import AccountDropdown from './AccountDropdown.svelte';
   import AccountPanel from './AccountPanel.svelte';
   import AccountList from './AccountList.svelte';
+  import AccountWorkspaceRail from './AccountWorkspaceRail.svelte';
   import PaymentPanel from './PaymentPanel.svelte';
   import ReceivePanel from './ReceivePanel.svelte';
   import SwapPanel from './SwapPanel.svelte';
@@ -4203,6 +4204,7 @@
     { id: 'activity', icon: Activity, label: 'Activity' },
     { id: 'appearance', icon: SlidersHorizontal, label: 'Appearance' },
   ];
+  const accountWorkspacePrimaryTabIds: AccountWorkspaceTab[] = ['open', 'send', 'receive', 'swap', 'move'];
   $: hasWorkspaceAccounts = workspaceAccountIds.length > 0;
   $: faucetSupportsReserve = !!getFaucetReserveTokenMeta(faucetAssetSymbol);
   $: canShowAccountFaucet = faucetSupportsReserve && hasWorkspaceAccounts;
@@ -4211,6 +4213,19 @@
     : accountWorkspaceTabs.filter((tabConfig) => tabConfig.id === 'open');
   $: if (!hasWorkspaceAccounts && accountWorkspaceTab !== 'open') {
     accountWorkspaceTab = 'open';
+  }
+
+  function selectAccountWorkspaceTab(next: string): void {
+    const target = next as AccountWorkspaceTab;
+    if (target === 'move') {
+      openAccountMoveWorkspace();
+      return;
+    }
+    if (target === 'history') {
+      openAccountHistoryWorkspace();
+      return;
+    }
+    accountWorkspaceTab = target;
   }
   let lastDeepLinkWorkspaceSignature = '';
   $: {
@@ -4672,22 +4687,13 @@
             </div>
           {/if}
 
-          <nav class="account-workspace-tabs" aria-label="Account workspace">
-            {#each visibleAccountWorkspaceTabs as t}
-              <button
-                class="account-workspace-tab"
-                class:active={accountWorkspaceTab === t.id}
-                on:click={() => {
-                  if (t.id === 'move') openAccountMoveWorkspace();
-                  else if (t.id === 'history') openAccountHistoryWorkspace();
-                  else accountWorkspaceTab = t.id;
-                }}
-              >
-                <svelte:component this={t.icon} size={14} />
-                <span>{t.label}</span>
-              </button>
-            {/each}
-          </nav>
+          <AccountWorkspaceRail
+            tabs={visibleAccountWorkspaceTabs}
+            activeTab={accountWorkspaceTab}
+            primaryTabIds={accountWorkspacePrimaryTabIds}
+            ariaLabel="Account workspace"
+            on:select={(event) => selectAccountWorkspaceTab(event.detail)}
+          />
 
           <section class="account-workspace-content">
             {#if accountWorkspaceTab === 'send'}
@@ -6593,25 +6599,25 @@
   }
 
   .open-section {
-    padding: 16px 18px;
+    padding: 15px 16px;
     border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 56%, transparent);
     border-radius: 14px;
     background:
-      linear-gradient(180deg, color-mix(in srgb, var(--theme-accent, #fbbf24) 3%, transparent), transparent 28%),
+      linear-gradient(180deg, color-mix(in srgb, var(--theme-accent, #fbbf24) 2%, transparent), transparent 24%),
       linear-gradient(
         180deg,
         color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent),
         color-mix(in srgb, var(--theme-input-bg, #09090b) 100%, transparent)
       );
-    box-shadow: 0 8px 20px color-mix(in srgb, var(--theme-background, #09090b) 4%, transparent);
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--theme-background, #09090b) 4%, transparent);
     min-width: 0;
   }
 
   .open-section-head {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin-bottom: 14px;
+    gap: 4px;
+    margin-bottom: 12px;
   }
 
   .open-section-head.compact {
@@ -6621,22 +6627,22 @@
   .open-section-copy {
     display: flex;
     align-items: baseline;
-    gap: 10px;
+    gap: 8px;
     flex-wrap: wrap;
   }
 
   .open-section-kicker {
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 700;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--theme-accent, #fbbf24);
   }
 
   .open-section-note {
     margin: 0;
-    font-size: 12px;
-    line-height: 1.45;
+    font-size: 11px;
+    line-height: 1.4;
     color: var(--theme-text-muted, #71717a);
   }
 
@@ -6838,23 +6844,25 @@
     }
 
     .tabs {
-      padding: 8px var(--panel-gutter-x) 0;
-      gap: 6px;
-      flex-wrap: wrap;
+      padding: 4px var(--panel-gutter-x) 0;
+      gap: 4px;
+      flex-wrap: nowrap;
       overflow: visible;
       border-bottom: none;
+      box-sizing: border-box;
     }
 
     .tab {
-      flex: 1 1 calc(33.333% - 6px);
+      flex: 1 1 0;
       justify-content: center;
       min-width: 0;
-      min-height: 36px;
-      padding: 8px 10px;
-      font-size: 10px;
-      border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 48%, transparent);
-      border-radius: 12px;
-      background: color-mix(in srgb, var(--theme-surface, var(--theme-card-bg, #18181b)) 72%, transparent);
+      min-height: 34px;
+      padding: 7px 9px;
+      font-size: 9.5px;
+      border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 40%, transparent);
+      border-radius: 11px;
+      background: color-mix(in srgb, var(--theme-surface, var(--theme-card-bg, #18181b)) 66%, transparent);
+      box-shadow: none;
     }
 
     .badge {
@@ -6985,30 +6993,30 @@
     }
 
     .account-open-sections {
-      gap: 10px;
+      gap: 8px;
     }
 
     .open-section,
     .disputed-section {
-      padding: 14px;
+      padding: 12px;
     }
 
-    .account-workspace-tabs {
+    .open-section-head,
+    .open-section-head.compact {
+      margin-bottom: 10px;
+      gap: 4px;
+    }
+
+    .open-section-copy {
       gap: 6px;
-      overflow: visible;
-      flex-wrap: wrap;
-      padding-bottom: 0;
-      border-bottom: none;
     }
 
-    .account-workspace-tab {
-      flex: 1 1 calc(50% - 6px);
-      min-width: 0;
-      min-height: 38px;
-      padding: 8px 10px;
-      border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 48%, transparent);
-      border-radius: 12px;
-      background: color-mix(in srgb, var(--theme-surface, var(--theme-card-bg, #18181b)) 72%, transparent);
+    .open-section-kicker {
+      font-size: 8.5px;
+    }
+
+    .open-section-note {
+      font-size: 10.5px;
     }
   }
 
@@ -7022,15 +7030,12 @@
     }
 
     .tab {
-      padding: 8px 9px;
-    }
-
-    .account-workspace-tab {
-      flex-basis: 100%;
+      min-height: 32px;
+      padding: 6px 8px;
     }
 
     .hero-networth {
-      font-size: 22px;
+      font-size: 20px;
     }
   }
 </style>

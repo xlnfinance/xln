@@ -969,6 +969,7 @@
 
     .hub-card-top {
       grid-template-columns: 1fr;
+      gap: 10px;
     }
 
     .hub-actions {
@@ -983,19 +984,61 @@
   }
 
   @media (max-width: 520px) {
+    .hub-panel {
+      gap: 10px;
+    }
+
     .panel-header,
     .hub-card-top {
-      gap: 12px;
+      gap: 10px;
     }
 
     .hub-subline {
-      gap: 6px;
+      gap: 5px 6px;
     }
 
     .hub-card-top,
     .row-details {
-      padding-left: 16px;
-      padding-right: 16px;
+      padding-left: 14px;
+      padding-right: 14px;
+    }
+
+    .panel-header {
+      align-items: start;
+    }
+
+    .panel-kicker {
+      font-size: 9px;
+      letter-spacing: 0.08em;
+    }
+
+    .panel-note {
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .refresh-btn {
+      min-height: 34px;
+      padding: 0 12px !important;
+      font-size: 11px !important;
+    }
+
+    .hub-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 9px;
+    }
+
+    .hub-name {
+      font-size: 14px;
+    }
+
+    .hub-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, max-content));
+      justify-content: start;
+      align-items: center;
+      gap: 6px;
     }
 
     .detail-grid {

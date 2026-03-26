@@ -992,37 +992,39 @@
 
   @media (max-width: 720px) {
     .account-preview {
-      padding: 10px 11px;
+      padding: 10px;
       border-radius: 12px;
     }
 
     .row-header {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 8px;
-      margin-bottom: 8px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+      gap: 8px 10px;
+      margin-bottom: 6px;
     }
 
     .entity-col :global(.entity-identity) {
-      gap: 9px;
+      gap: 8px;
     }
 
     .entity-col :global(.name) {
-      font-size: 15px;
+      font-size: 14px;
     }
 
     .entity-col :global(.address) {
-      font-size: 11px;
+      font-size: 10px;
     }
 
     .status-col {
-      width: 100%;
+      width: auto;
       justify-content: flex-end;
-      gap: 6px;
+      gap: 4px;
+      align-self: start;
     }
 
     .status-indicator {
-      padding: 1px 2px;
+      padding: 1px 0;
     }
 
     .consensus-popover {
@@ -1033,6 +1035,7 @@
 
     .locks-row {
       grid-template-columns: 1fr;
+      gap: 6px;
     }
 
     .flow-chip-head {
@@ -1050,13 +1053,80 @@
     }
 
     .account-preview :global(.delta-summary.compact) {
-      gap: 6px;
+      gap: 5px;
+    }
+
+    .account-preview :global(.delta-summary.compact .summary-head) {
+      gap: 8px;
+    }
+
+    .account-preview :global(.delta-summary.compact .token-symbol) {
+      font-size: 12px;
+    }
+
+    .account-preview :global(.delta-summary.compact .token-name) {
+      font-size: 10px;
+    }
+
+    .account-preview :global(.delta-summary.compact .compact-out-value),
+    .account-preview :global(.delta-summary.compact .compact-in-value) {
+      font-size: 10px;
     }
 
     .account-preview :global(.summary-action-inline) {
-      font-size: 6px;
+      font-size: 7px;
+      padding: 1px 4px;
+      margin-left: 6px;
+      align-self: center;
+    }
+
+    .account-preview :global(.delta-capacity-bar) {
+      margin-top: 1px;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .account-preview {
+      padding: 9px;
+    }
+
+    .row-header {
+      gap: 6px 8px;
+    }
+
+    .entity-col :global(.entity-identity) {
+      gap: 7px;
+    }
+
+    .entity-col :global(.avatar) {
+      width: 24px;
+      height: 24px;
+    }
+
+    .status-frame {
+      font-size: 9px;
+    }
+
+    .status-coverage {
+      font-size: 8px;
       padding: 1px 3px;
-      margin-left: 4px;
+    }
+
+    .account-preview :global(.delta-summary.compact .summary-head) {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
+    }
+
+    .account-preview :global(.delta-summary.compact .token-meta) {
+      min-width: 0;
+    }
+
+    .account-preview :global(.delta-summary.compact .compact-metrics-wide) {
+      width: 100%;
+    }
+
+    .account-preview :global(.delta-summary.compact .compact-in-value .inbound-label) {
+      letter-spacing: 0.06em;
     }
   }
 </style>
