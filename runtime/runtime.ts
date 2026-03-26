@@ -3806,24 +3806,6 @@ export function getActiveJAdapter(env: Env): JAdapter | null {
   return jReplica?.jadapter || null;
 }
 
-export async function submitExternalTokenToReserve(
-  env: Env,
-  signerId: string,
-  entityId: string,
-  tokenAddress: string,
-  amount: bigint,
-): Promise<void> {
-  const jAdapter = getActiveJAdapter(env);
-  if (!jAdapter) {
-    throw new Error('ACTIVE_JADAPTER_UNAVAILABLE');
-  }
-  const privateKey = getCachedSignerPrivateKey(signerId);
-  if (!privateKey) {
-    throw new Error(`MISSING_SIGNER_KEY:${signerId}`);
-  }
-  await jAdapter.externalTokenToReserve(privateKey, entityId, tokenAddress, amount);
-}
-
 export async function submitDebtEnforcement(
   env: Env,
   entityId: string,

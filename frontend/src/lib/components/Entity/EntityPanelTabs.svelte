@@ -2408,49 +2408,6 @@
     }
   }
 
-  // Deposit ERC20 token to entity reserve
-  async function depositToReserve(token: ExternalToken, amountOverride?: bigint) {
-    const entityId = replica?.state?.entityId || tab.entityId;
-    const signerId = tab.signerId;
-    const amount = amountOverride ?? token.balance;
-    if (!entityId || !signerId || amount <= 0n) return;
-    if (!activeIsLive) {
-      toasts.error('Deposit requires LIVE mode');
-      return;
-    }
-
-    depositingToken = token.symbol;
-    try {
-      const xln = await getXLN();
-      await xln.submitExternalTokenToReserve(
-        requireRuntimeEnv(activeEnv, 'external-token-to-reserve'),
-        signerId,
-        entityId,
-        token.address,
-        amount,
-      );
-      if (typeof token.tokenId === 'number' && token.tokenId > 0) {
-        pendingAssetBridgeSync = {
-          tokenId: token.tokenId,
-          symbol: token.symbol,
-          direction: 'deposit',
-          baselineReserve: onchainReserves.get(token.tokenId) ?? 0n,
-        };
-      } else {
-        depositingToken = null;
-        await fetchExternalTokens();
-      }
-    } catch (err) {
-      console.error('[EntityPanel] Deposit failed:', err);
-      const message = err instanceof Error ? err.message : String(err);
-      toasts.error(`Deposit failed: ${message}`);
-      depositingToken = null;
-      void fetchExternalTokens();
-      throw err instanceof Error ? err : new Error(message);
-    } finally {
-    }
-  }
-
   async function getActiveSignerPrivateKey(): Promise<Uint8Array> {
     const signerId = String(tab.signerId || '').trim();
     if (!signerId) throw new Error('No active signer selected');
@@ -2501,37 +2458,6 @@
       toasts.success(`Approved ${token.symbol}`);
     } finally {
       approvingExternalToken = null;
-    }
-  }
-
-  async function submitExternalToReserve(): Promise<void> {
-    const token = findReserveTransferTokenBySymbol(externalToReserveSymbol);
-    if (!token) {
-      toasts.error('Select ERC20 asset first');
-      return;
-    }
-    try {
-      const amount = parsePositiveAssetAmount(externalToReserveAmount, token, token.balance);
-      await depositToReserve(token, amount);
-      externalToReserveAmount = '';
-    } catch (err) {
-      toasts.error(`Deposit failed: ${toErrorMessage(err, 'Unknown error')}`);
-    }
-  }
-
-  async function submitReserveToExternal(): Promise<void> {
-    const token = findReserveTransferTokenBySymbol(reserveToExternalSymbol);
-    if (!token) {
-      toasts.error('Select reserve asset first');
-      return;
-    }
-    try {
-      const reserveAmount = onchainReserves.get(token.tokenId) ?? 0n;
-      const amount = parsePositiveAssetAmount(reserveToExternalAmount, token, reserveAmount);
-      await withdrawReserveToExternal(token.tokenId, amount);
-      reserveToExternalAmount = '';
-    } catch (err) {
-      toasts.error(`Withdraw failed: ${toErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -2605,22 +2531,6 @@
     } catch (err) {
       console.error('[EntityPanel] Collateral → Reserve failed:', err);
       toasts.error(`Collateral → Reserve failed: ${(err as Error).message}`);
-    }
-  }
-
-  async function submitCollateralToReserve(): Promise<void> {
-    const token = findReserveTransferTokenBySymbol(collateralToReserveSymbol);
-    if (!token) {
-      toasts.error('Select collateral asset first');
-      return;
-    }
-    try {
-      const withdrawable = getWorkspaceWithdrawableCollateral(token.tokenId);
-      const amount = parsePositiveAssetAmount(collateralToReserveAmount, token, withdrawable);
-      await collateralToReserve(token.tokenId, amount);
-      collateralToReserveAmount = '';
-    } catch (err) {
-      toasts.error(`Collateral → Reserve failed: ${toErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -3023,18 +2933,6 @@
       const reserveRecipientIsSelf = !moveReserveRecipient || moveReserveRecipient === selfEntityId;
 
       switch (routeKey) {
-        case 'external->reserve':
-          setMoveProgress('Depositing from external into your reserve');
-          await depositToReserve(token, amount);
-          if (!reserveRecipientIsSelf) {
-            await waitForMoveCondition(
-              () => (onchainReserves.get(token.tokenId) ?? 0n) >= reserveBefore + amount,
-              'Waiting for reserve balance update',
-            );
-            setMoveProgress(`Transferring reserve balance to ${formatAddress(moveReserveRecipient)}`);
-            await reserveToReserve(token.tokenId, amount, moveReserveRecipient);
-          }
-          break;
         case 'reserve->reserve':
           setMoveProgress(`Transferring reserve balance to ${formatAddress(moveReserveRecipient)}`);
           await reserveToReserve(token.tokenId, amount, moveReserveRecipient);
@@ -3057,16 +2955,6 @@
         case 'reserve->external':
           setMoveProgress('Withdrawing from your reserve to recipient EOA');
           await withdrawReserveToExternal(token.tokenId, amount, moveExternalRecipient.trim());
-          break;
-        case 'external->account':
-          setMoveProgress('Depositing from external into your reserve');
-          await depositToReserve(token, amount);
-          await waitForMoveCondition(
-            () => (onchainReserves.get(token.tokenId) ?? 0n) >= reserveBefore + amount,
-            'Waiting for reserve balance update',
-          );
-          setMoveProgress(`Funding ${formatAddress(moveTargetEntity)} via hub ${formatAddress(moveTargetAccount)}`);
-          await reserveToCollateral(token.tokenId, amount, moveTargetAccount, moveTargetEntity);
           break;
         case 'account->external':
           setMoveProgress('Requesting hub proof and settling account back to your reserve');

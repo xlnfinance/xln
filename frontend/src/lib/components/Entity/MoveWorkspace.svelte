@@ -110,7 +110,7 @@
   }
 
   $: moveRouteKey = `${moveFromEndpoint}->${moveToEndpoint}`;
-  $: moveRouteDirect = moveFromEndpoint === 'external' || moveRouteKey === 'external->external';
+  $: moveRouteDirect = moveRouteKey === 'external->external';
   $: moveRouteRequiresDetails = moveFromEndpoint === 'account'
     || moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint)
     || moveToEndpoint === 'account'
