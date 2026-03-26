@@ -5,6 +5,7 @@ import {
   enqueueRuntimeInput,
   process as processRuntime,
   loadEnvFromDB,
+  verifyRuntimeChain,
   getRuntimeDb,
   tryOpenDb,
   closeRuntimeDb,
@@ -141,6 +142,18 @@ async function main() {
   assert(!!replicaA, 'replica A present after reload');
   assert(!!replicaB, 'replica B present after reload');
   assert(restored.height === env.height, `runtime height preserved (${restored.height} == ${env.height})`);
+  await closeRuntimeDb(restored);
+
+  const verifyFromGenesis = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: 1 });
+  assert(verifyFromGenesis.ok, 'genesis replay verification passed');
+  assert(
+    verifyFromGenesis.restoredHeight === latestHeight,
+    `genesis replay restored latest frame (${verifyFromGenesis.restoredHeight} == ${latestHeight})`,
+  );
+  assert(
+    verifyFromGenesis.expectedStateHash === verifyFromGenesis.actualStateHash,
+    'genesis replay state hash matches latest persisted frame',
+  );
 
   console.log('✅ persistence-wal-smoke passed');
   console.log(JSON.stringify({
@@ -149,6 +162,7 @@ async function main() {
     checkpointHeight,
     envHeight: env.height,
     restoredHeight: restored.height,
+    verifyFromGenesis,
     replicasBefore: env.eReplicas.size,
     replicasAfter: restored.eReplicas.size,
   }, null, 2));

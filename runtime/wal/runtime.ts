@@ -363,22 +363,12 @@ export const verifyRuntimeChainFromWal = async (
     throw new Error('REPLAY_INVARIANT_FAILED: no persisted runtime state');
   }
 
-  const tempEnv = options.createEmptyEnv(options.runtimeSeed ?? null);
-  if (options.runtimeId) {
-    tempEnv.runtimeId = options.runtimeId;
-    tempEnv.dbNamespace = options.runtimeId;
-  }
-  const dbReady = await options.tryOpenDb(tempEnv);
-  if (!dbReady) {
-    throw new Error('REPLAY_INVARIANT_FAILED: runtime DB unavailable');
-  }
-
   const dbNamespace = options.resolveDbNamespace({
     runtimeId: options.runtimeId,
     runtimeSeed: options.runtimeSeed,
-    env: tempEnv,
+    env,
   });
-  const db = options.getRuntimeDb(tempEnv);
+  const db = options.getRuntimeDb(env);
   const latestHeight = await readPersistedLatestHeight(db, dbNamespace);
   const checkpointHeight = await readPersistedCheckpointHeight(db, dbNamespace);
   const latestFrame = await readPersistedFrameJournalFromDb(db, dbNamespace, latestHeight, options.isDbNotFound);
