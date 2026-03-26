@@ -7,6 +7,8 @@
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { amountToUsd } from '$lib/utils/assetPricing';
   import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
+  import SwapOrderModeRail from './SwapOrderModeRail.svelte';
+  import SwapPairToolbar from './SwapPairToolbar.svelte';
   import { resolveEntityName } from '$lib/utils/entityNaming';
   import { formatEntityId } from '$lib/utils/format';
 
@@ -809,8 +811,7 @@
     selectedOrderLevel = null;
   }
 
-  function handleSelectedHubChange(event: Event): void {
-    const nextValue = String((event.currentTarget as HTMLSelectElement | null)?.value || '');
+  function handleSelectedHubChange(nextValue: string): void {
     if (orderbookScopeMode === 'aggregated') {
       createOrderAccountId = nextValue;
     } else {
@@ -1627,28 +1628,18 @@
 <div class="swap-panel">
   <div class="trade-grid">
     <div class="section section-market">
-      <div class="swap-toolbar">
-        <div class="toolbar-select toolbar-select-pair">
-          <select
-            bind:value={selectedPairValue}
-            data-testid="swap-pair-select"
-            aria-label="Swap pair"
-            on:change={handlePairChange}
-          >
-            {#each pairOptions as pair (pair.value)}
-              <option value={pair.value}>{pair.label}</option>
-            {/each}
-          </select>
-        </div>
-        <span
-          class="scope-text-toggle"
-          data-testid="swap-scope-toggle"
-          on:click={toggleOrderbookScope}
-          on:keydown={(e) => e.key === 'Enter' && toggleOrderbookScope()}
-          role="button"
-          tabindex="0"
-        >{orderbookScopeMode === 'aggregated' ? 'Aggregated' : 'Selected'}</span>
-      </div>
+      <SwapPairToolbar
+        pairOptions={pairOptions}
+        selectedPairValue={selectedPairValue}
+        baseTokenSymbol={baseTokenSymbol}
+        quoteTokenSymbol={quoteTokenSymbol}
+        orderbookScopeMode={orderbookScopeMode}
+        on:pairchange={(event) => {
+          selectedPairValue = event.detail;
+          handlePairChange();
+        }}
+        on:togglescope={toggleOrderbookScope}
+      />
       {#if orderbookHubIds.length > 0}
         <div class="orderbook-wrap" data-testid="swap-orderbook">
           {#key orderbookViewKey}
@@ -1675,58 +1666,18 @@
       {/if}
     </div>
     <div class="section section-order">
-      <div class="order-form-header">
-        <div class="side-toggle-row">
-          <span
-            class="side-tab"
-            class:active={tradeSide === 'buy-base'}
-            data-testid="swap-side-buy"
-            on:click={() => setTradeSide('buy-base')}
-            on:keydown={(e) => e.key === 'Enter' && setTradeSide('buy-base')}
-            role="button"
-            tabindex="0"
-          >Buy</span>
-          <span
-            class="side-tab"
-            class:active={tradeSide === 'sell-base'}
-            data-testid="swap-side-sell"
-            on:click={() => setTradeSide('sell-base')}
-            on:keydown={(e) => e.key === 'Enter' && setTradeSide('sell-base')}
-            role="button"
-            tabindex="0"
-          >Sell</span>
-        </div>
-        <div class="order-type-toggle">
-          <span
-            class="type-tab-text"
-            class:active={orderType === 'limit'}
-            on:click={() => { orderType = 'limit'; slippagePct = 0; }}
-            on:keydown={(e) => e.key === 'Enter' && (orderType = 'limit')}
-            role="button"
-            tabindex="0"
-          >Limit</span>
-          <span
-            class="type-tab-text"
-            class:active={orderType === 'market'}
-            on:click={() => { orderType = 'market'; slippagePct = 0; }}
-            on:keydown={(e) => e.key === 'Enter' && (orderType = 'market')}
-            role="button"
-            tabindex="0"
-          >Market</span>
-        </div>
-        {#if selectedHubOptions.length > 0}
-          <select
-            class="hub-select-inline"
-            value={createOrderAccountId}
-            on:change={handleSelectedHubChange}
-            data-testid="swap-account-select"
-          >
-            {#each selectedHubOptions as hub (hub.value)}
-              <option value={hub.value}>{hub.label}</option>
-            {/each}
-          </select>
-        {/if}
-      </div>
+      <SwapOrderModeRail
+        tradeSide={tradeSide}
+        orderType={orderType}
+        selectedHubOptions={selectedHubOptions}
+        selectedHubValue={createOrderAccountId}
+        on:tradesidechange={(event) => setTradeSide(event.detail)}
+        on:ordertypechange={(event) => {
+          orderType = event.detail;
+          slippagePct = 0;
+        }}
+        on:hubchange={(event) => handleSelectedHubChange(event.detail)}
+      />
 
       <div class="order-input-row">
         <span class="input-label">Price</span>
@@ -2024,17 +1975,12 @@
     align-items: start;
   }
 
-  .trade-grid.with-depth {
-    grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.9fr) minmax(340px, 1fr);
-  }
-
   .trade-grid > .section {
     margin-bottom: 0;
     min-width: 0;
   }
 
-  .section-market,
-  .section-depth {
+  .section-market {
     height: 100%;
     min-width: 0;
     max-width: 100%;
@@ -2051,197 +1997,6 @@
 
   .section-orders {
     margin-top: 14px;
-  }
-
-  .swap-toolbar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-
-  .toolbar-select {
-    position: relative;
-    min-width: 0;
-    border: 1px solid #2d313b;
-    border-radius: 10px;
-    background: linear-gradient(180deg, rgba(34, 35, 42, 0.96), rgba(24, 25, 31, 0.96));
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  }
-
-  .toolbar-select::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.04);
-  }
-
-  .toolbar-select-pair {
-    flex: 0 1 auto;
-    min-width: 120px;
-  }
-
-  .scope-text-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    font-weight: 600;
-    color: #c2c8d3;
-    cursor: pointer;
-    user-select: none;
-    white-space: nowrap;
-    min-height: 32px;
-    padding: 0 12px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    background: rgba(17, 18, 23, 0.9);
-    box-sizing: border-box;
-  }
-
-  .scope-text-toggle:hover {
-    color: #fbbf24;
-    border-color: rgba(251, 191, 36, 0.65);
-  }
-
-  .toolbar-select-account {
-    flex: 0 0 170px;
-  }
-
-  .toolbar-select-create-account {
-    flex: 0 0 160px;
-    max-width: 160px;
-    transition: opacity 120ms ease;
-  }
-
-  .toolbar-select-create-account.is-hidden {
-    visibility: hidden;
-    pointer-events: none;
-  }
-
-  .toolbar-select select {
-    width: 100%;
-    min-width: 0;
-    height: 32px;
-    border: 0;
-    background: transparent;
-    padding: 0 10px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #e5e7eb;
-    color-scheme: dark;
-    outline: none;
-    box-sizing: border-box;
-  }
-
-  .order-form-header {
-    display: grid;
-    grid-template-columns: max-content max-content minmax(0, 1fr);
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
-  }
-
-  .order-type-toggle {
-    display: flex;
-    gap: 4px;
-    align-items: center;
-  }
-
-  .type-tab-text {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 34px;
-    padding: 0 12px;
-    border-radius: 10px;
-    border: 1px solid transparent;
-    background: rgba(255, 255, 255, 0.02);
-    font-size: 12px;
-    font-weight: 600;
-    color: #8c95a4;
-    cursor: pointer;
-    user-select: none;
-    transition: color 100ms, border-color 100ms, background 100ms;
-  }
-
-  .type-tab-text.active {
-    border-color: rgba(251, 191, 36, 0.3);
-    background: rgba(251, 191, 36, 0.08);
-    color: #fbbf24;
-  }
-
-  .type-tab-text:hover {
-    color: #d1d5db;
-  }
-
-  .hub-select-inline {
-    background: #111217;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    color: #e5e7eb;
-    font-size: 12px;
-    font-weight: 600;
-    height: 34px;
-    padding: 0 10px;
-    cursor: pointer;
-    justify-self: end;
-    width: min(100%, 220px);
-    max-width: 220px;
-    min-width: 0;
-    color-scheme: dark;
-    box-sizing: border-box;
-  }
-
-  .side-toggle-row {
-    display: flex;
-    gap: 4px;
-    align-items: center;
-    margin-bottom: 0;
-  }
-
-  .side-tab {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 34px;
-    padding: 0 12px;
-    border-radius: 10px;
-    border: 1px solid transparent;
-    background: rgba(255, 255, 255, 0.02);
-    font-size: 12px;
-    font-weight: 600;
-    color: #8c95a4;
-    cursor: pointer;
-    transition: color 100ms, border-color 100ms, background 100ms;
-    user-select: none;
-  }
-
-  .side-tab.active {
-    border-color: rgba(22, 163, 74, 0.28);
-    background: rgba(22, 163, 74, 0.1);
-    color: #86efac;
-  }
-
-  .side-tab:last-child.active {
-    border-color: rgba(220, 38, 38, 0.24);
-    background: rgba(220, 38, 38, 0.1);
-    color: #fda4af;
-  }
-
-  .side-tab:hover {
-    color: #d1d5db;
-  }
-
-  .toolbar-select select option,
-  .toolbar-select select optgroup,
-  .hub-select-inline option,
-  .hub-select-inline optgroup {
-    background: #0f1117;
-    color: #f3f4f6;
   }
 
   .order-input-row {
@@ -2365,7 +2120,7 @@
     justify-content: space-between;
     margin-top: 4px;
     pointer-events: none;
-    padding: 0;
+    padding: 0 calc(var(--xln-slider-thumb-size, 14px) / 2);
     min-width: 0;
     max-width: 100%;
     box-sizing: border-box;
@@ -2433,11 +2188,6 @@
     cursor: pointer;
   }
 
-  .scope-mode-btn {
-    height: 48px;
-    min-width: 110px;
-  }
-
   .scope-btn.active {
     color: #fbbf24;
     border-color: #fbbf24;
@@ -2457,79 +2207,6 @@
     font-size: 12px;
   }
 
-  .depth-chart {
-    border: 1px solid #2f343f;
-    border-radius: 10px;
-    background: #0f1015;
-    padding: 10px;
-  }
-
-  .depth-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    color: #9ca3af;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 6px;
-  }
-
-  .depth-chart svg {
-    width: 100%;
-    height: 160px;
-    display: block;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
-    border-radius: 8px;
-  }
-
-  .depth-line {
-    fill: none;
-    stroke-width: 1.6;
-  }
-
-  .depth-line.bid {
-    stroke: #22c55e;
-  }
-
-  .depth-line.ask {
-    stroke: #ef4444;
-  }
-
-  .depth-empty {
-    color: #9ca3af;
-    font-size: 12px;
-    padding: 12px;
-    text-align: center;
-  }
-
-  .form-row {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 12px;
-    flex-wrap: wrap;
-  }
-
-  .form-row.compact {
-    align-items: flex-end;
-  }
-
-  .form-row.compact .scope-btn {
-    height: 36px;
-    white-space: nowrap;
-    flex: 0 0 auto;
-  }
-
-  .form-row label {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 12px;
-    color: #9ca3af;
-  }
-
   select, input:not([type="range"]) {
     padding: 8px;
     width: 100%;
@@ -2547,8 +2224,7 @@
     color-scheme: dark;
   }
 
-  select option,
-  select optgroup {
+  select option {
     background: #0f1117;
     color: #f3f4f6;
   }
@@ -2862,19 +2538,8 @@
     justify-content: flex-end;
   }
 
-  @media (max-width: 1480px) {
-    .trade-grid.with-depth {
-      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
-    }
-
-    .section-depth {
-      grid-column: 1 / -1;
-    }
-  }
-
   @media (max-width: 1100px) {
-    .trade-grid,
-    .trade-grid.with-depth {
+    .trade-grid {
       grid-template-columns: 1fr;
       gap: 12px;
     }
@@ -2884,57 +2549,4 @@
     }
   }
 
-  @media (max-width: 900px) {
-    .toolbar-select-pair,
-    .toolbar-select-account {
-      flex: 1 1 0;
-      min-width: 0;
-    }
-
-    .form-row {
-      flex-direction: column;
-    }
-
-    .order-entry-row {
-      grid-template-columns: 1fr;
-    }
-
-    .order-field-amount,
-    .order-field-price,
-    .order-field-receive {
-      grid-column: auto;
-    }
-
-    .order-form-header {
-      grid-template-columns: 1fr;
-      align-items: stretch;
-      gap: 8px;
-    }
-
-    .side-toggle-row,
-    .order-type-toggle {
-      width: 100%;
-    }
-
-    .side-tab,
-    .type-tab-text {
-      flex: 1 1 0;
-    }
-
-    .hub-select-inline {
-      justify-self: stretch;
-      width: 100%;
-      max-width: none;
-    }
-  }
-
-  @media (max-width: 640px) {
-    .swap-toolbar {
-      grid-template-columns: 1fr;
-    }
-
-    .scope-text-toggle {
-      width: 100%;
-    }
-  }
 </style>
