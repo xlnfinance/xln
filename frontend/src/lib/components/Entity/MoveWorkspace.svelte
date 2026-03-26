@@ -116,6 +116,8 @@
     || moveToEndpoint === 'account'
     || moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint);
   $: movePrimaryActionDisabled = canAddMoveToExistingBatch() ? !!moveDraftError : !!moveBroadcastError;
+  $: moveUsesDraftAction = canAddMoveToExistingBatch();
+  $: moveVisibleActionError = moveUsesDraftAction ? moveDraftError : moveBroadcastError;
   $: moveSourceBalanceLabel = formatAmount(moveSourceAvailableBalance, moveDisplayDecimals);
   $: moveAmountPreview = moveAmount.trim() || '0.00';
   $: moveStepList = moveRouteSteps(moveFromEndpoint, moveToEndpoint);
@@ -144,10 +146,10 @@
           type="button"
           class="move-max-chip"
           on:click={fillMoveMax}
-          disabled={getDisplayBalance(moveFromEndpoint) <= 0n}
+          disabled={moveSourceAvailableBalance <= 0n}
         >
           <span class="move-max-label">Max</span>
-          <span class="move-max-value">{formatInlineFillAmount(getDisplayBalance(moveFromEndpoint), moveDisplayDecimals)}</span>
+          <span class="move-max-value">{formatInlineFillAmount(moveSourceAvailableBalance, moveDisplayDecimals)}</span>
         </button>
 
         <div class="asset-inline-controls">
@@ -371,19 +373,23 @@
       </div>
     </div>
 
-    {#if moveProgressLabel || moveDraftError || moveBroadcastError || canAddMoveToExistingBatch()}
+    {#if moveProgressLabel || moveVisibleActionError || moveUsesDraftAction}
       <div class="move-summary-statuses">
         {#if moveProgressLabel}
           <div class="move-summary-status accent" data-testid="move-status">{moveProgressLabel}</div>
         {/if}
-        {#if canAddMoveToExistingBatch() && !moveDraftError}
+        {#if moveUsesDraftAction && !moveVisibleActionError}
           <div class="move-summary-status neutral" data-testid="move-status">Uses existing draft batch</div>
         {/if}
-        {#if moveDraftError}
-          <div class="move-summary-status warning" data-testid="move-status">{moveDraftError}</div>
-        {/if}
-        {#if moveBroadcastError}
-          <div class="move-summary-status error" data-testid="move-status">{moveBroadcastError}</div>
+        {#if moveVisibleActionError}
+          <div
+            class="move-summary-status"
+            class:warning={moveUsesDraftAction}
+            class:error={!moveUsesDraftAction}
+            data-testid="move-status"
+          >
+            {moveVisibleActionError}
+          </div>
         {/if}
       </div>
     {/if}
@@ -1030,8 +1036,9 @@
   }
 
   .asset-amount-shell {
-    display: flex;
-    align-items: center;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: stretch;
     gap: 8px;
     min-height: var(--move-control-height);
     width: 100%;
@@ -1057,9 +1064,9 @@
   }
 
   .move-amount-input {
-    flex: 1;
     min-width: 0;
     width: 100%;
+    height: 100%;
     padding: 0;
     border: none;
     background: transparent;
@@ -1089,8 +1096,9 @@
   .move-max-chip {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
-    min-height: 40px;
+    min-height: 42px;
     padding: 0 12px !important;
     border-radius: 999px !important;
     border: 1px solid color-mix(in srgb, var(--move-border) 44%, transparent) !important;
@@ -1126,14 +1134,14 @@
   }
 
   .asset-token-select-inline {
-    min-height: 40px;
+    min-height: 42px;
     min-width: 110px;
     width: 110px;
     max-width: 100%;
   }
 
   .asset-token-select-inline.compact {
-    min-height: 40px;
+    min-height: 42px;
     padding: 0 30px 0 14px !important;
     border-radius: 10px !important;
     background: color-mix(in srgb, var(--move-surface) 78%, transparent) !important;
@@ -1290,8 +1298,7 @@
     }
 
     .move-amount-shell {
-      flex-wrap: wrap;
-      align-items: stretch;
+      grid-template-columns: 1fr;
       gap: 10px;
       min-height: 0;
       padding: 12px;

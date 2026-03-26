@@ -265,10 +265,10 @@ EOF
       pm2 install pm2-logrotate || true
     fi
     pm2 set pm2-logrotate:max_size 20M >/dev/null || true
-    pm2 set pm2-logrotate:retain 5 >/dev/null || true
+    pm2 set pm2-logrotate:retain 2 >/dev/null || true
     pm2 set pm2-logrotate:compress true >/dev/null || true
-    pm2 set pm2-logrotate:workerInterval 3600 >/dev/null || true
-    pm2 set pm2-logrotate:rotateInterval '0 * * * *' >/dev/null || true
+    pm2 set pm2-logrotate:workerInterval 1800 >/dev/null || true
+    pm2 set pm2-logrotate:rotateInterval '0 0 * * *' >/dev/null || true
     pm2 set pm2-logrotate:rotateModule true >/dev/null || true
   fi
 
@@ -277,6 +277,13 @@ EOF
 #!/bin/sh
 find /root/.pm2/logs -type f -name '*.log' -size +20M -exec truncate -s 0 {} \; 2>/dev/null || true
 find /root/xln/logs -type f -name '*.log' -size +20M -exec truncate -s 0 {} \; 2>/dev/null || true
+find /root/.pm2/logs -type f -mtime +1 -delete 2>/dev/null || true
+find /root/xln/logs -type f -mtime +1 -delete 2>/dev/null || true
+find /root/xln/.logs -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+find /root/xln/playwright-report -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+find /root/xln/test-results -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+find /root/xln/e2e/test-results -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+find /root/xln/tests/test-results -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
 journalctl --vacuum-size=200M >/dev/null 2>&1 || true
 EOF
   chmod +x /etc/cron.hourly/xln-log-hygiene
@@ -284,7 +291,7 @@ EOF
   cat > /etc/logrotate.d/xln-runtime-logs <<'EOF'
 /root/xln/logs/*.log {
   daily
-  rotate 7
+  rotate 2
   compress
   missingok
   notifempty

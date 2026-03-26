@@ -447,7 +447,7 @@ const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
   900n * 10n ** 18n,
   1_000n * 10n ** 18n,
 ] as const;
-const MARKET_MAKER_MIN_READY_OFFERS_PER_PAIR = 2;
+const MARKET_MAKER_MIN_READY_OFFERS_PER_PAIR = 30;
 type MarketMakerLevelProfile = {
   offsetsBps: readonly number[];
   baseSizes: readonly bigint[];

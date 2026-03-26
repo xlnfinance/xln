@@ -949,18 +949,8 @@
     return '';
   }
 
-  function fillMoveSelfEoa(): void {
-    const own = resolveSelfEoaAddress();
-    if (own) moveExternalRecipient = own;
-  }
-
   function resolveSelfEntityId(): string {
     return String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
-  }
-
-  function fillMoveSelfEntityId(): void {
-    const own = resolveSelfEntityId();
-    if (own) moveReserveRecipientEntityId = own;
   }
 
   function handleMoveReserveRecipientChange(event: CustomEvent<{ value?: string }>) {
@@ -1061,44 +1051,37 @@
     return preferred;
   }
 
-  function getMoveLedgerRow(): AssetLedgerRow | null {
-    return moveLedgerRow;
-  }
-
-  function getMoveDisplayBalance(endpoint: MoveEndpoint): bigint {
-    const row = moveLedgerRow;
-    if (!row) return 0n;
-    switch (endpoint) {
-      case 'external':
-        return row.externalBalance;
-      case 'reserve':
-        return row.reserveBalance;
-      case 'account':
-        return row.accountBalance;
-      default:
-        return 0n;
-    }
-  }
-
   function getMoveDisplayDecimals(): number {
+    const row = moveLedgerRow;
+    if (row && typeof row.decimals === 'number' && row.decimals >= 0) return row.decimals;
     const liveExternalToken = findExternalTokenBySymbol(moveAssetSymbol);
     const liveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
-    const row = moveLedgerRow;
     if (liveExternalToken && typeof liveExternalToken.decimals === 'number') return liveExternalToken.decimals;
     if (liveTransferToken && typeof liveTransferToken.decimals === 'number') return liveTransferToken.decimals;
-    if (row && typeof row.decimals === 'number' && row.decimals >= 0) return row.decimals;
     return 18;
   }
 
   function getCurrentMoveSourceAvailableBalance(): bigint {
-    const liveExternalToken = findExternalTokenBySymbol(moveAssetSymbol);
+    const row = moveLedgerRow;
     const liveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
-    return getMoveMaxAmount(
-      moveFromEndpoint,
-      liveTransferToken,
-      liveExternalToken,
-      getCurrentMoveSourceAccountId(),
-    ) ?? 0n;
+    switch (moveFromEndpoint) {
+      case 'external':
+        return row?.externalBalance ?? findExternalTokenBySymbol(moveAssetSymbol)?.balance ?? 0n;
+      case 'reserve':
+        if (!liveTransferToken) return row?.reserveBalance ?? 0n;
+        return (() => {
+          const baseReserve = row?.reserveBalance ?? (onchainReserves.get(liveTransferToken.tokenId) ?? 0n);
+          const effective = baseReserve + getMoveDraftReserveDelta(liveTransferToken.tokenId);
+          const outgoingDebt = getOpenOutgoingDebtForToken(liveTransferToken.tokenId);
+          return effective > outgoingDebt ? effective - outgoingDebt : 0n;
+        })();
+      case 'account':
+        return liveTransferToken && getCurrentMoveSourceAccountId()
+          ? getAccountSpendableCapacity(getCurrentMoveSourceAccountId(), liveTransferToken.tokenId)
+          : row?.accountBalance ?? 0n;
+      default:
+        return 0n;
+    }
   }
 
   function choosePreferredMoveAssetSymbol(): string {
@@ -2095,7 +2078,7 @@
             collateralToReserveAmount = '';
             toasts.info(
               pending.broadcast
-                ? `Collateral → Reserve submitted for ${pending.symbol}. Waiting for on-chain update...`
+                ? `Collateral → Reserve pending on-chain confirmation for ${pending.symbol}.`
                 : `Collateral → Reserve added to draft batch for ${pending.symbol}.`,
             );
           } catch (err) {
@@ -2234,15 +2217,15 @@
     return assetLedgerRows.find((row) => String(row.symbol || '').trim().toUpperCase() === symbol) ?? null;
   })();
   $: {
-    const liveExternalToken = findExternalTokenBySymbol(moveAssetSymbol);
-    const liveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
-    const moveTokenId = liveTransferToken?.tokenId;
-    moveDisplayBalances = {
-      external: liveExternalToken?.balance ?? 0n,
-      reserve: typeof moveTokenId === 'number' ? (onchainReserves.get(moveTokenId) ?? 0n) : 0n,
-      account: typeof moveTokenId === 'number' ? (accountSpendableByToken.get(moveTokenId) ?? 0n) : 0n,
-    };
-    moveDisplayDecimals = getMoveDisplayDecimals();
+    const row = moveLedgerRow;
+    moveDisplayBalances = row
+      ? {
+          external: row.externalBalance,
+          reserve: row.reserveBalance,
+          account: row.accountBalance,
+        }
+      : { external: 0n, reserve: 0n, account: 0n };
+    moveDisplayDecimals = row?.decimals ?? getMoveDisplayDecimals();
     moveSourceAvailableBalance = getCurrentMoveSourceAvailableBalance();
   }
 
@@ -3129,7 +3112,7 @@
           },
         ])]);
 
-      toasts.info(`R→C queued for ${info.symbol}. Waiting for on-chain update...`);
+      toasts.info(`R→C pending on-chain confirmation for ${info.symbol}.`);
     } catch (err) {
       console.error('[EntityPanel] Reserve → Collateral failed:', err);
       toasts.error(`Reserve → Collateral failed: ${(err as Error).message}`);
