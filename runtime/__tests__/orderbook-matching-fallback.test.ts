@@ -370,6 +370,7 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
+    const rejectedOfferId = `offer-${String(LIMITS.MAX_ORDERBOOK_ORDERS_PER_PAIR + 1).padStart(2, '0')}`;
     const offers = Array.from({ length: LIMITS.MAX_ORDERBOOK_ORDERS_PER_PAIR + 1 }, (_, index) => ({
       offerId: `offer-${String(index + 1).padStart(2, '0')}`,
       makerIsLeft: false,
@@ -380,10 +381,10 @@ describe('orderbook matching fallback execution mapping', () => {
       giveTokenId: 4,
       giveAmount: SWAP_LOT_SCALE,
       wantTokenId: 6,
-      wantAmount: (1000n + BigInt(index)) * SWAP_LOT_SCALE / 10_000n,
+      wantAmount: 1000n * SWAP_LOT_SCALE / 10_000n,
       minFillRatio: 0,
       timeInForce: 0,
-      priceTicks: 1000n + BigInt(index),
+      priceTicks: 1000n,
     }));
 
     const result = processOrderbookSwaps(entityState, offers as any);
@@ -392,7 +393,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(finalBook!.orderIdToIdx.size).toBe(LIMITS.MAX_ORDERBOOK_ORDERS_PER_PAIR);
 
     const cancelOp = result.mempoolOps.find(
-      (item) => item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'offer-11',
+      (item) => item.tx.type === 'swap_resolve' && item.tx.data.offerId === rejectedOfferId,
     );
     expect(cancelOp).toBeDefined();
     expect(cancelOp!.tx.data.cancelRemainder).toBe(true);

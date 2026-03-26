@@ -319,7 +319,7 @@
       return 'Awaiting signature';
     }
     if (status === 'ready_to_submit') return 'Counterparty signed';
-    if (status === 'submitted') return 'Submitted on-chain';
+    if (status === 'submitted') return 'Pending on-chain confirmation';
     if (status === 'draft') return 'Draft';
     return status.replace(/_/g, ' ');
   })();
@@ -388,7 +388,7 @@
             {#if uiStatus === 'ready' && connState === 'connected'}
               <span class="popover-dot green"></span> Active — Online
             {:else if uiStatus === 'sent'}
-              <span class="popover-dot yellow"></span> Pending — Awaiting ACK
+              <span class="popover-dot yellow"></span> Pending — On-chain confirmation
             {:else if connState === 'disconnected' || connState === 'queued'}
               <span class="popover-dot yellow"></span> Active — Offline
             {:else if uiStatus === 'disputed' || uiStatus === 'finalized_disputed'}
