@@ -1,8 +1,7 @@
-import { deriveSide } from './orderbook';
+import { asOfferId, compareCanonicalText, swapKey, type OfferId, type SwapKey } from './swap-keys.ts';
+import { deriveSide } from './orderbook/types.ts';
 
 export const MAX_SWAP_FILL_RATIO = 65535;
-
-export type SwapKey = `${string}:${string}`;
 
 export interface SwapOfferLike {
   giveTokenId: number;
@@ -24,17 +23,7 @@ export interface NormalizedOrderbookOffer extends SwapOfferLike {
   createdHeight: number;
 }
 
-export function swapKey(accountId: string, offerId: string): SwapKey {
-  return `${String(accountId)}:${String(offerId)}`;
-}
-
-export function compareCanonicalText(left: string, right: string): number {
-  const a = String(left || '');
-  const b = String(right || '');
-  if (a < b) return -1;
-  if (a > b) return 1;
-  return 0;
-}
+export { asOfferId, compareCanonicalText, swapKey, type OfferId, type SwapKey };
 
 export function deriveCanonicalSwapFillRatio(effectiveGive: bigint, filledGive: bigint): number {
   if (effectiveGive <= 0n || filledGive <= 0n) return 0;

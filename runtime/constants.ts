@@ -30,6 +30,15 @@ export const LIMITS = {
 
   /** Maximum validators per entity (BFT performance limit) */
   MAX_VALIDATORS: 100,
+
+  /** Maximum active HTLC locks per bilateral account */
+  MAX_ACCOUNT_HTLC_LOCKS: 10,
+
+  /** Maximum active swap offers per bilateral account */
+  MAX_ACCOUNT_SWAP_OFFERS: 10,
+
+  /** Maximum resting orders per pair book */
+  MAX_ORDERBOOK_ORDERS_PER_PAIR: 10,
 } as const;
 
 // ═══════════════════════════════════════════════════════════════

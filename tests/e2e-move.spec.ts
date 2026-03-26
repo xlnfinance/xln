@@ -509,7 +509,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await waitForMoveReady(page);
         await expect(page.getByTestId('move-route-summary')).toContainText('1 reserve batch');
         await expect(page.getByTestId('move-route-summary')).toContainText('Broadcast reserve withdrawal batch to recipient EOA');
-        await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
+        await expect(page.getByTestId('move-confirm').first()).toHaveText(/Submit External Batch/i);
         await page.getByTestId('move-confirm').first().click();
         await broadcastDraftBatch(page);
         await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(beforeReserve);

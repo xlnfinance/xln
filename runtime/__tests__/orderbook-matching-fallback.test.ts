@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createBook, applyCommand } from '../orderbook/core';
 import { SWAP_LOT_SCALE } from '../orderbook/types';
+import { LIMITS } from '../constants';
 import { processOrderbookSwaps } from '../entity-tx/handlers/account';
 import { deriveCanonicalSwapFillRatio } from '../swap-execution';
 
@@ -341,5 +342,60 @@ describe('orderbook matching fallback execution mapping', () => {
 
     expect(finalBook!.orderIdToIdx.has('alice:offer-b')).toBe(true);
     expect(finalBook!.orderIdToIdx.has('alice:offer-c')).toBe(true);
+  });
+
+  test('queues cancelRemainder instead of throwing when a pair book reaches its order cap', () => {
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['alice', { swapOffers: new Map() }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 2,
+          supportedPairs: ['4/6'],
+        },
+        books: new Map(),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const offers = Array.from({ length: LIMITS.MAX_ORDERBOOK_ORDERS_PER_PAIR + 1 }, (_, index) => ({
+      offerId: `offer-${String(index + 1).padStart(2, '0')}`,
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'alice',
+      accountId: 'alice',
+      createdHeight: index + 1,
+      giveTokenId: 4,
+      giveAmount: SWAP_LOT_SCALE,
+      wantTokenId: 6,
+      wantAmount: (1000n + BigInt(index)) * SWAP_LOT_SCALE / 10_000n,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1000n + BigInt(index),
+    }));
+
+    const result = processOrderbookSwaps(entityState, offers as any);
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    expect(finalBook).toBeDefined();
+    expect(finalBook!.orderIdToIdx.size).toBe(LIMITS.MAX_ORDERBOOK_ORDERS_PER_PAIR);
+
+    const cancelOp = result.mempoolOps.find(
+      (item) => item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'offer-11',
+    );
+    expect(cancelOp).toBeDefined();
+    expect(cancelOp!.tx.data.cancelRemainder).toBe(true);
+    expect(cancelOp!.tx.data.fillRatio).toBe(0);
   });
 });

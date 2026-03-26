@@ -1045,9 +1045,10 @@
   }
 
   .header-controls {
-    display: flex;
+    display: grid;
+    grid-auto-flow: column;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     margin-left: auto;
   }
 
@@ -1072,15 +1073,17 @@
 
   .price-step select {
     min-width: 80px;
-    height: 26px;
-    border-radius: 4px;
-    border: 1px solid #3f3f46;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     background: #111217;
     color: #e5e7eb;
     font-family: inherit;
     font-size: 12px;
     padding: 0 8px;
     outline: none;
+    color-scheme: dark;
+    box-sizing: border-box;
   }
 
   .price-step select:focus-visible {
@@ -1089,9 +1092,9 @@
   }
 
   .step-auto-btn {
-    height: 26px;
-    border-radius: 4px;
-    border: 1px solid #3f3f46;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     background: #111217;
     color: #a1a1aa;
     font-family: inherit;
@@ -1113,16 +1116,36 @@
   }
 
   .spread-row {
-    display: flex;
-    justify-content: center;
-    gap: 8px;
-    padding: 4px 0;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0 8px;
     color: var(--text-secondary, #888);
-    font-size: 11px;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  }
+
+  .spread-label {
+    justify-self: start;
   }
 
   .spread-value {
     color: var(--text-primary, #fff);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    justify-self: center;
+  }
+
+  .spread-percent {
+    justify-self: end;
+    color: var(--text-primary, #fff);
+    letter-spacing: 0.02em;
+    text-transform: none;
   }
 
   .book-container {
@@ -1161,12 +1184,12 @@
   }
 
   .spread-indicator {
-    display: flex;
-    justify-content: center;
-    padding: 3px 0;
-    border-top: 1px solid var(--border-color, #333);
-    border-bottom: 1px solid var(--border-color, #333);
-    margin: 3px 0;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    margin: 4px 0;
   }
 
   .spread-indicator.clickable {
@@ -1180,6 +1203,24 @@
   .mid-price {
     color: var(--text-primary, #fff);
     font-weight: 600;
+    padding: 0 8px;
+  }
+
+  .spread-indicator::before,
+  .spread-indicator::after {
+    content: '';
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12));
+  }
+
+  .spread-indicator::after {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.12), transparent);
+  }
+
+  .price-step select option,
+  .price-step select optgroup {
+    background: #0f1117;
+    color: #f3f4f6;
   }
 
   .row {
@@ -1382,18 +1423,24 @@
     }
 
     .header-controls {
-      flex-direction: column;
+      grid-auto-flow: row;
       align-items: flex-end;
       gap: 4px;
     }
 
     .price-step select {
       min-width: 64px;
-      height: 26px;
+      height: 28px;
     }
 
     .step-auto-btn {
-      height: 26px;
+      height: 28px;
+    }
+
+    .spread-row {
+      grid-template-columns: auto auto auto;
+      gap: 6px;
+      font-size: 9px;
     }
   }
 </style>

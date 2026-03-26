@@ -842,7 +842,7 @@
         })();
       case 'account':
         return reserveToken && sourceAccountId
-          ? getAccountWithdrawableCollateral(sourceAccountId, reserveToken.tokenId)
+          ? getAccountSpendableCapacity(sourceAccountId, reserveToken.tokenId)
           : 0n;
       default:
         return null;
@@ -902,7 +902,7 @@
     }
 
     try {
-      const maxAmount = getMoveMaxAmount(moveFromEndpoint, reserveToken, externalToken, sourceAccountId);
+      const maxAmount = moveSourceAvailableBalance;
       parsePositiveAssetAmount(moveAmount, moveFromEndpoint === 'external' && moveToEndpoint === 'external'
         ? (externalToken as { decimals: number })
         : (reserveToken as { decimals: number }), maxAmount ?? undefined);
@@ -928,8 +928,11 @@
     resolvingAssetAutoC2R ? '1' : '0',
     workspaceAccountId,
     selectedAccountId || '',
-    selectedMoveTransferToken?.tokenId ?? '',
-    selectedMoveExternalToken?.address ?? '',
+    selectedMoveTransferToken ? String(selectedMoveTransferToken.tokenId) : '',
+    selectedMoveExternalToken ? selectedMoveExternalToken.address : '',
+    moveLedgerRow ? moveLedgerRow.externalBalance.toString() : '0',
+    moveLedgerRow ? moveLedgerRow.reserveBalance.toString() : '0',
+    moveLedgerRow ? moveLedgerRow.accountBalance.toString() : '0',
   ].join('|');
   $: {
     void moveValidationSignature;
@@ -1003,7 +1006,11 @@
   }
 
   function getCurrentMoveSourceAccountId(): string {
-    return String(moveSourceAccountId || workspaceAccountId || selectedAccountId || '').trim();
+    const current = String(moveSourceAccountId || workspaceAccountId || selectedAccountId || '').trim();
+    if (moveFromEndpoint !== 'account') return current;
+    const token = selectedMoveTransferToken;
+    if (!token) return current;
+    return getPreferredMoveSourceAccountId(token.tokenId, getRequestedMoveAmount(token));
   }
 
   function getCurrentMoveTargetEntityId(): string {
@@ -1016,44 +1023,99 @@
 
   function getMoveAccountBalance(counterpartyEntityId: string): bigint {
     if (!selectedMoveTransferToken || !counterpartyEntityId) return 0n;
-    return getAccountWithdrawableCollateral(counterpartyEntityId, selectedMoveTransferToken.tokenId);
+    return getAccountSpendableCapacity(counterpartyEntityId, selectedMoveTransferToken.tokenId);
   }
 
   function getMoveAggregateAccountBalance(): bigint {
     const tokenId = selectedMoveTransferToken?.tokenId;
     if (!tokenId) return 0n;
     return workspaceAccountIds.reduce((total, accountId) => (
-      total + getAccountWithdrawableCollateral(accountId, tokenId)
+      total + getAccountSpendableCapacity(accountId, tokenId)
     ), 0n);
   }
 
+  function getRequestedMoveAmount(token: { decimals: number }): bigint {
+    try {
+      return moveAmount.trim() ? parsePositiveAssetAmount(moveAmount, token) : 0n;
+    } catch {
+      return 0n;
+    }
+  }
+
+  function getPreferredMoveSourceAccountId(tokenId: number, requestedAmount: bigint): string {
+    const current = String(moveSourceAccountId || workspaceAccountId || selectedAccountId || '').trim();
+    const currentAvailable = current ? getAccountSpendableCapacity(current, tokenId) : 0n;
+    if (current && workspaceAccountIds.includes(current)) {
+      if (requestedAmount > 0n && currentAvailable >= requestedAmount) return current;
+      if (requestedAmount <= 0n && currentAvailable > 0n) return current;
+    }
+    const preferred =
+      (requestedAmount > 0n
+        ? workspaceAccountIds.find((id) => getAccountSpendableCapacity(id, tokenId) >= requestedAmount)
+        : '')
+      || workspaceAccountIds.find((id) => getAccountSpendableCapacity(id, tokenId) > 0n)
+      || current
+      || workspaceAccountIds[0]
+      || '';
+    return preferred;
+  }
+
   function getMoveLedgerRow(): AssetLedgerRow | null {
-    const symbol = String(moveAssetSymbol || '').trim().toUpperCase();
-    if (!symbol) return null;
-    return assetLedgerRows.find((row) => String(row.symbol || '').trim().toUpperCase() === symbol) ?? null;
+    return moveLedgerRow;
   }
 
   function getMoveDisplayBalance(endpoint: MoveEndpoint): bigint {
-    const row = getMoveLedgerRow();
+    const row = moveLedgerRow;
     if (!row) return 0n;
     switch (endpoint) {
       case 'external':
-        return row.externalBalance ?? 0n;
+        return row.externalBalance;
       case 'reserve':
-        return row.reserveBalance ?? 0n;
+        return row.reserveBalance;
       case 'account':
-        return row.accountBalance ?? 0n;
+        return row.accountBalance;
       default:
         return 0n;
     }
   }
 
   function getMoveDisplayDecimals(): number {
-    const row = getMoveLedgerRow();
-    if (typeof row?.decimals === 'number' && row.decimals >= 0) return row.decimals;
-    if (typeof selectedMoveExternalToken?.decimals === 'number') return selectedMoveExternalToken.decimals;
-    if (typeof selectedMoveTransferToken?.decimals === 'number') return selectedMoveTransferToken.decimals;
+    const row = moveLedgerRow;
+    if (row && typeof row.decimals === 'number' && row.decimals >= 0) return row.decimals;
+    if (selectedMoveExternalToken && typeof selectedMoveExternalToken.decimals === 'number') return selectedMoveExternalToken.decimals;
+    if (selectedMoveTransferToken && typeof selectedMoveTransferToken.decimals === 'number') return selectedMoveTransferToken.decimals;
     return 18;
+  }
+
+  function getCurrentMoveSourceAvailableBalance(): bigint {
+    if (moveFromEndpoint === 'external') {
+      return moveLedgerRow ? moveLedgerRow.externalBalance : 0n;
+    }
+    if (moveFromEndpoint === 'reserve') {
+      return moveLedgerRow ? moveLedgerRow.reserveBalance : 0n;
+    }
+    return getMoveMaxAmount(
+      moveFromEndpoint,
+      selectedMoveTransferToken,
+      selectedMoveExternalToken,
+      getCurrentMoveSourceAccountId(),
+    ) ?? 0n;
+  }
+
+  function choosePreferredMoveAssetSymbol(): string {
+    const candidates = moveFromEndpoint === 'external' && moveToEndpoint === 'external'
+      ? externalTokens
+      : transferableAssetOptions;
+    const sourceAccountId = getCurrentMoveSourceAccountId();
+    const preferredWithBalance = candidates.find((token) => (
+      getMoveMaxAmount(
+        moveFromEndpoint,
+        isReserveTransferToken(token) ? token : null,
+        token,
+        sourceAccountId,
+      ) ?? 0n
+    ) > 0n);
+    return preferredWithBalance?.symbol ?? choosePreferredAssetSymbol(candidates);
   }
 
   function getP2PRelayUrls(env: Env | EnvSnapshot | null | undefined): string[] {
@@ -1198,31 +1260,12 @@
     workspaceAccountId = workspaceAccountIds[0] || '';
   }
   $: if (assetWorkspaceTab === 'move' && workspaceAccountIds.length > 0) {
-    const tokenId = selectedMoveTransferToken?.tokenId;
-    const requestedAmount = tokenId ? (() => {
-      try {
-        return moveAmount.trim() ? parsePositiveAssetAmount(moveAmount, selectedMoveTransferToken!) : 0n;
-      } catch {
-        return 0n;
+    const token = selectedMoveTransferToken;
+    if (moveFromEndpoint === 'account' && token) {
+      const preferred = getPreferredMoveSourceAccountId(token.tokenId, getRequestedMoveAmount(token));
+      if (preferred && moveSourceAccountId !== preferred) {
+        moveSourceAccountId = preferred;
       }
-    })() : 0n;
-    const currentSourceOk = moveSourceAccountId && workspaceAccountIds.includes(moveSourceAccountId)
-      ? (
-          moveFromEndpoint !== 'account'
-          || !tokenId
-          || getAccountWithdrawableCollateral(moveSourceAccountId, tokenId) >= requestedAmount
-          || (requestedAmount <= 0n && getAccountWithdrawableCollateral(moveSourceAccountId, tokenId) > 0n)
-        )
-      : false;
-    if (moveFromEndpoint === 'account' && !currentSourceOk) {
-      const preferred = tokenId
-        ? (
-            workspaceAccountIds.find((id) => getAccountWithdrawableCollateral(id, tokenId) >= requestedAmount && requestedAmount > 0n)
-            || workspaceAccountIds.find((id) => getAccountWithdrawableCollateral(id, tokenId) > 0n)
-            || workspaceAccountIds[0]
-          )
-        : workspaceAccountIds[0];
-      moveSourceAccountId = preferred || '';
     }
   }
   $: if (assetWorkspaceTab === 'move' && moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !moveExternalRecipient.trim()) {
@@ -1445,8 +1488,11 @@
   let approvingExternalToken: string | null = null;
   let transferableAssetOptions: Array<ExternalToken & { tokenId: number }> = [];
   let assetLedgerRows: AssetLedgerRow[] = [];
+  let moveLedgerRow: AssetLedgerRow | null = null;
   let moveDisplayBalances: Record<MoveEndpoint, bigint> = { external: 0n, reserve: 0n, account: 0n };
   let moveDisplayDecimals = 18;
+  let moveSourceAvailableBalance = 0n;
+  let lastMoveAmountContextKey = '';
   let accountSpendableByToken = new Map<number, bigint>();
   let pendingAssetBridgeSync: {
     tokenId: number;
@@ -1630,6 +1676,12 @@
     if (!derived) return 0n;
     const hold = derived.outTotalHold ?? 0n;
     return derived.outCollateral > hold ? derived.outCollateral - hold : 0n;
+  }
+
+  function getAccountSpendableCapacity(counterpartyEntityId: string, tokenId: number): bigint {
+    const derived = getDerivedDeltaForAccount(counterpartyEntityId, tokenId);
+    if (!derived) return 0n;
+    return derived.outCapacity;
   }
 
   function isLocalExecutorForWorkspace(counterpartyEntityId: string, account: AccountMachine | null): boolean {
@@ -2162,14 +2214,19 @@
     { externalUsd: 0, reserveUsd: 0, accountUsd: 0 },
   );
   $: assetLedgerGrandTotal = assetLedgerTotals.externalUsd + assetLedgerTotals.reserveUsd + assetLedgerTotals.accountUsd;
+  $: moveLedgerRow = (() => {
+    const symbol = String(moveAssetSymbol || '').trim().toUpperCase();
+    if (!symbol) return null;
+    return assetLedgerRows.find((row) => String(row.symbol || '').trim().toUpperCase() === symbol) ?? null;
+  })();
   $: {
-    const row = getMoveLedgerRow();
     moveDisplayBalances = {
-      external: row?.externalBalance ?? 0n,
-      reserve: row?.reserveBalance ?? 0n,
-      account: row?.accountBalance ?? 0n,
+      external: moveLedgerRow ? moveLedgerRow.externalBalance : 0n,
+      reserve: moveLedgerRow ? moveLedgerRow.reserveBalance : 0n,
+      account: moveLedgerRow ? moveLedgerRow.accountBalance : 0n,
     };
     moveDisplayDecimals = getMoveDisplayDecimals();
+    moveSourceAvailableBalance = getCurrentMoveSourceAvailableBalance();
   }
 
   $: {
@@ -2184,13 +2241,25 @@
       ?? transferableAssetOptions[0]?.symbol
       ?? preferred;
     if (!findReserveTransferTokenBySymbol(allowAssetSymbol)) allowAssetSymbol = approvePreferred;
-    const movePreferred = moveFromEndpoint === 'external' && moveToEndpoint === 'external'
-      ? choosePreferredAssetSymbol(externalTokens)
-      : choosePreferredAssetSymbol(transferableAssetOptions);
+    const movePreferred = choosePreferredMoveAssetSymbol();
     if (
       !moveAssetOptions.some((token) => token.symbol.toUpperCase() === String(moveAssetSymbol || '').trim().toUpperCase())
     ) {
       moveAssetSymbol = movePreferred;
+    }
+  }
+
+  $: {
+    const moveAmountContextKey = [
+      assetWorkspaceTab,
+      accountWorkspaceTab,
+      moveFromEndpoint,
+      moveToEndpoint,
+      moveAssetSymbol,
+      getCurrentMoveSourceAccountId(),
+    ].join('|');
+    if (moveAmountContextKey !== lastMoveAmountContextKey) {
+      lastMoveAmountContextKey = moveAmountContextKey;
     }
   }
 
@@ -2553,7 +2622,7 @@
 
   function fillMoveMax(): void {
     const decimals = getMoveDisplayDecimals();
-    moveAmount = formatTokenInputAmount(getMoveDisplayBalance(moveFromEndpoint), decimals);
+    moveAmount = formatTokenInputAmount(getCurrentMoveSourceAvailableBalance(), decimals);
   }
 
   function clearMoveComposer(): void {
@@ -2566,6 +2635,7 @@
     moveToEndpoint = 'reserve';
     if (!moveExternalRecipient.trim()) moveExternalRecipient = resolveSelfEoaAddress();
     if (!moveReserveRecipientEntityId.trim()) moveReserveRecipientEntityId = resolveSelfEntityId();
+    moveAssetSymbol = choosePreferredMoveAssetSymbol();
     resetMoveLineMeasurement();
     bumpMoveNodeLayout();
   }
@@ -2581,6 +2651,7 @@
     if (!moveTargetCounterpartyManualOverride || !moveTargetHubEntityId.trim()) {
       moveTargetHubEntityId = workspaceAccountId || moveHubEntityOptions[0] || '';
     }
+    moveAssetSymbol = choosePreferredMoveAssetSymbol();
     resetMoveLineMeasurement();
     bumpMoveNodeLayout();
   }
@@ -2796,16 +2867,16 @@
       return;
     }
     if (routeKey === 'account->reserve') {
-      const withdrawable = getAccountWithdrawableCollateral(moveSourceAccount, token.tokenId);
-      const amount = parsePositiveAssetAmount(moveAmount, token, withdrawable);
+      const spendable = getAccountSpendableCapacity(moveSourceAccount, token.tokenId);
+      const amount = parsePositiveAssetAmount(moveAmount, token, spendable);
       await collateralToReserve(token.tokenId, amount, moveSourceAccount, { type: 'none' }, false);
       moveAmount = '';
       toasts.info('Queued for counterparty signature, then added to draft batch');
       return;
     }
     if (routeKey === 'account->external') {
-      const withdrawable = getAccountWithdrawableCollateral(moveSourceAccount, token.tokenId);
-      const amount = parsePositiveAssetAmount(moveAmount, token, withdrawable);
+      const spendable = getAccountSpendableCapacity(moveSourceAccount, token.tokenId);
+      const amount = parsePositiveAssetAmount(moveAmount, token, spendable);
       const recipient = moveExternalRecipient.trim();
       if (!isAddress(recipient)) throw new Error('Recipient must be a valid EOA address');
       await collateralToReserve(
@@ -2820,8 +2891,8 @@
       return;
     }
     if (routeKey === 'account->account') {
-      const withdrawable = getAccountWithdrawableCollateral(moveSourceAccount, token.tokenId);
-      const amount = parsePositiveAssetAmount(moveAmount, token, withdrawable);
+      const spendable = getAccountSpendableCapacity(moveSourceAccount, token.tokenId);
+      const amount = parsePositiveAssetAmount(moveAmount, token, spendable);
       await collateralToReserve(
         token.tokenId,
         amount,
@@ -2893,7 +2964,7 @@
       if (!token) {
         throw new Error('Select reserve-compatible asset first');
       }
-      const maxAmount = getMoveMaxAmount(moveFromEndpoint, token, findExternalTokenBySymbol(moveAssetSymbol), moveSourceAccount);
+      const maxAmount = moveSourceAvailableBalance;
       const amount = parsePositiveAssetAmount(moveAmount, token, maxAmount ?? undefined);
       const reserveBefore = onchainReserves.get(token.tokenId) ?? 0n;
       const selfEntityId = resolveSelfEntityId();
@@ -4485,6 +4556,7 @@
                 {isMoveRouteSupported}
                 {moveDisplayBalances}
                 {moveDisplayDecimals}
+                {moveSourceAvailableBalance}
                 {fillMoveMax}
                 {setMoveSource}
                 {setMoveTarget}
@@ -4655,6 +4727,7 @@
                 {isMoveRouteSupported}
                 {moveDisplayBalances}
                 {moveDisplayDecimals}
+                {moveSourceAvailableBalance}
                 {fillMoveMax}
                 {setMoveSource}
                 {setMoveTarget}
@@ -6159,7 +6232,7 @@
     color: var(--theme-text-muted, #71717a) !important;
   }
 
-  .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete):not(.account-workspace-tab):not(.configure-tab):not(.btn-add-token):not(.scope-btn):not(.primary-btn):not(.cancel-btn):not(.summary-action):not(.summary-action-inline):not(.delta-faucet):not(.delta-expand):not(.step-btn):not(.step-auto-btn):not(.move-node):not(.move-primary-cta):not(.move-max-chip):not(.refresh-btn):not(.hub-primary):not(.btn-connect):not(.expand-toggle):not(.closed-trigger):not(.dropdown-toggle):not(.dropdown-item)) {
+  .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete):not(.account-workspace-tab):not(.configure-tab):not(.btn-add-token):not(.scope-btn):not(.primary-btn):not(.cancel-btn):not(.summary-action):not(.summary-action-inline):not(.delta-faucet):not(.delta-expand):not(.step-btn):not(.step-auto-btn):not(.move-node):not(.move-primary-cta):not(.move-max-chip):not(.refresh-btn):not(.hub-primary):not(.btn-connect):not(.expand-toggle):not(.closed-trigger):not(.dropdown-toggle):not(.dropdown-item):not(.settings-tab):not(.compact-btn):not(.pill):not(.theme-swatch):not(.icon-btn):not(.danger-icon):not(.close-btn):not(.file-btn):not(.danger-btn)) {
     background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent) !important;
     border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent) !important;
     border-radius: 6px !important;

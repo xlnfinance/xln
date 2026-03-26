@@ -28,13 +28,14 @@ import {
   buildInitialDisputeProof,
 } from '../../proof-builder';
 import { inspectHankoForHash, verifyHankoForHash } from '../../hanko/signing';
-import { compareCanonicalText, swapKey } from '../../swap-execution';
+import { asOfferId, swapKey, type OfferId } from '../../swap-keys';
+import { buildPositionalSwapFillRatioBuckets } from '../../transformer-ordering';
 
 // === Delta Transformer Arguments (inlined from transformer-args.ts) ===
 const MAX_FILL_RATIO = 0xffff;
 
 type BuildArgsOptions = {
-  fillRatiosByOfferId?: Map<string, number>;
+  fillRatiosByOfferId: ReadonlyMap<OfferId, number>;
   leftSecrets?: string[];
   rightSecrets?: string[];
 };
@@ -140,7 +141,7 @@ function wrapTransformerArgs(args: string): string {
 
 function buildDeltaTransformerArguments(
   accountMachine: AccountMachine,
-  options: BuildArgsOptions = {}
+  options: BuildArgsOptions,
 ): { leftArguments: string; rightArguments: string } {
   const hasLocks = accountMachine.locks?.size ? accountMachine.locks.size > 0 : false;
   const hasSwaps = accountMachine.swapOffers?.size ? accountMachine.swapOffers.size > 0 : false;
@@ -148,19 +149,10 @@ function buildDeltaTransformerArguments(
     return { leftArguments: '0x', rightArguments: '0x' };
   }
 
-  const leftFillRatios: number[] = [];
-  const rightFillRatios: number[] = [];
-  const sortedSwaps = Array.from(accountMachine.swapOffers.entries())
-    .sort((a, b) => compareCanonicalText(a[0], b[0]));
-
-  for (const [offerId, offer] of sortedSwaps) {
-    const ratio = options.fillRatiosByOfferId?.get(offerId) ?? 0;
-    if (offer.makerIsLeft) {
-      rightFillRatios.push(ratio);
-    } else {
-      leftFillRatios.push(ratio);
-    }
-  }
+  const { leftFillRatios, rightFillRatios } = buildPositionalSwapFillRatioBuckets(
+    accountMachine.swapOffers.entries(),
+    options.fillRatiosByOfferId,
+  );
 
   const leftSecrets = options.leftSecrets ?? [];
   const rightSecrets = options.rightSecrets ?? [];
@@ -181,17 +173,12 @@ function buildPendingSwapFillRatios(
   entityState: EntityState,
   counterpartyEntityId: string,
   account: AccountMachine
-): Map<string, number> {
+) : Map<OfferId, number> {
   const pending = entityState.pendingSwapFillRatios;
-  if (!pending || pending.size === 0) return new Map();
-
-  const ratios = new Map<string, number>();
+  const ratios = new Map<OfferId, number>();
   for (const offerId of account.swapOffers.keys()) {
     const key = swapKey(counterpartyEntityId, offerId);
-    const ratio = pending.get(key);
-    if (ratio !== undefined) {
-      ratios.set(offerId, ratio);
-    }
+    ratios.set(asOfferId(offerId), pending?.get(key) ?? 0);
   }
   return ratios;
 }

@@ -36,6 +36,7 @@
   export let isMoveRouteSupported: (from: MoveEndpoint, to: MoveEndpoint) => boolean;
   export let moveDisplayBalances: MoveDisplayBalances = { external: 0n, reserve: 0n, account: 0n };
   export let moveDisplayDecimals = 18;
+  export let moveSourceAvailableBalance = 0n;
   export let fillMoveMax: () => void;
   export let setMoveSource: (endpoint: MoveEndpoint) => void;
   export let setMoveTarget: (endpoint: MoveEndpoint) => void;
@@ -76,6 +77,13 @@
     return moveDisplayBalances[endpoint] ?? 0n;
   }
 
+  function getSourceNodeBalance(endpoint: MoveEndpoint): bigint {
+    if (endpoint === moveFromEndpoint) {
+      return moveSourceAvailableBalance;
+    }
+    return getDisplayBalance(endpoint);
+  }
+
   function getEndpointDescriptor(endpoint: MoveEndpoint): string {
     switch (endpoint) {
       case 'external':
@@ -107,7 +115,8 @@
     || moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint)
     || moveToEndpoint === 'account'
     || moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint);
-  $: moveSourceBalanceLabel = formatAmount(getDisplayBalance(moveFromEndpoint), moveDisplayDecimals);
+  $: movePrimaryActionDisabled = canAddMoveToExistingBatch() ? !!moveDraftError : !!moveBroadcastError;
+  $: moveSourceBalanceLabel = formatAmount(moveSourceAvailableBalance, moveDisplayDecimals);
   $: moveAmountPreview = moveAmount.trim() || '0.00';
   $: moveStepList = moveRouteSteps(moveFromEndpoint, moveToEndpoint);
   $: onMoveVisualRoot(moveVisualRoot);
@@ -181,7 +190,7 @@
               <span class="move-node-badge">Source</span>
             {/if}
           </span>
-          <span class="move-node-balance">{formatAmount(getDisplayBalance(endpoint), moveDisplayDecimals)}</span>
+          <span class="move-node-balance">{formatAmount(getSourceNodeBalance(endpoint), moveDisplayDecimals)}</span>
           <span class="move-node-subline">{getEndpointDescriptor(endpoint)}</span>
         </button>
       {/each}
@@ -241,7 +250,7 @@
 
         <div class="move-detail-grid">
           {#if moveFromEndpoint === 'account'}
-            <div class="move-account-slot" data-testid="move-source-account-field">
+            <div class="move-account-slot source-detail" data-testid="move-source-account-field">
               <EntityInput
                 variant="move"
                 testId="move-source-account-picker"
@@ -257,7 +266,7 @@
           {/if}
 
           {#if moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint)}
-            <div class="move-account-slot" data-testid="move-reserve-recipient-field">
+            <div class="move-account-slot target-detail" data-testid="move-reserve-recipient-field">
               <EntityInput
                 variant="move"
                 testId="move-reserve-recipient-picker"
@@ -272,7 +281,7 @@
           {/if}
 
           {#if moveToEndpoint === 'account'}
-            <div class="move-account-slot" data-testid="move-target-entity-field">
+            <div class="move-account-slot target-detail" data-testid="move-target-entity-field">
               <EntityInput
                 variant="move"
                 testId="move-target-entity-picker"
@@ -285,7 +294,7 @@
               />
             </div>
 
-            <div class="move-account-slot" data-testid="move-target-counterparty-field">
+            <div class="move-account-slot target-detail" data-testid="move-target-counterparty-field">
               <EntityInput
                 variant="move"
                 testId="move-target-counterparty-picker"
@@ -299,7 +308,7 @@
           {/if}
 
           {#if moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint)}
-            <label class="asset-field move-account-slot move-detail-field" data-testid="move-external-recipient-field">
+            <label class="asset-field move-account-slot move-detail-field target-detail" data-testid="move-external-recipient-field">
               <span class="asset-field-head">
                 <span>Recipient EOA</span>
               </span>
@@ -400,7 +409,7 @@
           toastMoveError(err);
         }
       }}
-      disabled={!!moveBroadcastError}
+      disabled={movePrimaryActionDisabled}
     >
       {moveExecuting ? 'Working...' : movePrimaryActionLabel}
     </button>
@@ -426,6 +435,13 @@
     width: 100%;
     min-width: 0;
     max-width: 100%;
+    box-sizing: border-box;
+    isolation: isolate;
+  }
+
+  .move-route-builder,
+  .move-route-builder * {
+    box-sizing: border-box;
   }
 
   .move-topline {
@@ -443,6 +459,7 @@
     border: none;
     background: transparent;
     box-shadow: none;
+    min-width: 0;
   }
 
   .move-hero-copy {
@@ -481,6 +498,7 @@
     min-height: 56px;
     padding-right: 8px;
     border-radius: 16px;
+    overflow: hidden;
   }
 
   .move-visual {
@@ -494,8 +512,12 @@
     background:
       linear-gradient(180deg, color-mix(in srgb, var(--move-surface) 88%, transparent), color-mix(in srgb, var(--move-input-bg) 78%, transparent)),
       radial-gradient(circle at top, color-mix(in srgb, var(--move-accent) 4%, transparent), transparent 56%);
-    overflow: hidden;
+    overflow: visible;
     box-shadow: none;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    z-index: 3;
   }
 
   .move-column {
@@ -534,6 +556,16 @@
 
   .move-account-slot {
     min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .move-account-slot.source-detail {
+    grid-column: 1;
+  }
+
+  .move-account-slot.target-detail {
+    grid-column: 2;
   }
 
   .move-route-details {
@@ -546,6 +578,9 @@
     z-index: 1;
     padding-top: 10px;
     border-top: 1px solid color-mix(in srgb, var(--move-border) 40%, transparent);
+    width: 100%;
+    max-width: 100%;
+    overflow: visible;
   }
 
   .move-route-details-head {
@@ -566,10 +601,16 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
     min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    align-items: start;
+    overflow: visible;
   }
 
   .move-detail-field {
     min-width: 0;
+    width: 100%;
+    max-width: 100%;
   }
 
   .move-drag-layer {
@@ -694,6 +735,7 @@
     gap: 12px;
     width: 100%;
     min-width: 0;
+    overflow: hidden;
   }
 
   .move-node-label {
@@ -701,6 +743,8 @@
     font-weight: 700;
     color: var(--move-text);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     letter-spacing: -0.01em;
   }
 
@@ -732,6 +776,8 @@
     font-weight: 600;
     color: var(--move-accent);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .move-node-target-hint {
@@ -739,6 +785,8 @@
     font-weight: 600;
     color: var(--move-text-secondary);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .move-node-subline {
@@ -759,6 +807,9 @@
     min-width: 0;
     max-width: 100%;
     box-shadow: none;
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
   }
 
   .move-summary-top {
@@ -767,6 +818,7 @@
     justify-content: space-between;
     gap: 16px;
     flex-wrap: wrap;
+    min-width: 0;
   }
 
   .move-summary-copy {
@@ -808,6 +860,7 @@
     border-radius: 10px;
     background: color-mix(in srgb, var(--move-input-bg) 76%, transparent);
     border: 1px solid color-mix(in srgb, var(--move-border) 40%, transparent);
+    max-width: 100%;
   }
 
   .move-summary-hero-label {
@@ -823,6 +876,7 @@
     font-size: 17px;
     line-height: 1.1;
     color: var(--move-text);
+    overflow-wrap: anywhere;
   }
 
   .move-summary-grid {
@@ -831,6 +885,7 @@
     gap: 10px 16px;
     padding-top: 8px;
     border-top: 1px solid color-mix(in srgb, var(--move-border) 34%, transparent);
+    min-width: 0;
   }
 
   .move-summary-metric {
@@ -868,6 +923,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+    min-width: 0;
   }
 
   .move-summary-status {
@@ -877,6 +933,7 @@
     background: color-mix(in srgb, var(--move-input-bg) 78%, transparent);
     font-size: 11px;
     color: var(--move-text-secondary);
+    overflow-wrap: anywhere;
   }
 
   .move-summary-status.accent {
@@ -919,6 +976,7 @@
     border: none;
     border-top: 1px solid color-mix(in srgb, var(--move-border) 24%, transparent);
     background: transparent;
+    min-width: 0;
   }
 
   .move-step-row:first-child {
@@ -945,12 +1003,15 @@
     color: var(--move-text-secondary);
     font-size: 11.5px;
     line-height: 1.45;
+    overflow-wrap: anywhere;
   }
 
   .asset-field {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    min-width: 0;
+    width: 100%;
   }
 
   .asset-field-head {
@@ -958,6 +1019,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    min-width: 0;
   }
 
   .asset-field span {
@@ -984,6 +1046,7 @@
       color-mix(in srgb, var(--move-input-bg) 100%, transparent)
     );
     box-sizing: border-box;
+    overflow: hidden;
   }
 
   .asset-amount-shell:focus-within {
@@ -996,6 +1059,7 @@
   .move-amount-input {
     flex: 1;
     min-width: 0;
+    width: 100%;
     padding: 0;
     border: none;
     background: transparent;
@@ -1013,19 +1077,20 @@
 
   .asset-inline-controls {
     display: inline-flex;
-    align-items: center;
+    align-items: stretch;
     gap: 8px;
     margin-left: auto;
     min-width: 0;
     flex: 0 0 auto;
     align-self: stretch;
+    max-width: 100%;
   }
 
   .move-max-chip {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    min-height: 34px;
+    min-height: 40px;
     padding: 0 12px !important;
     border-radius: 999px !important;
     border: 1px solid color-mix(in srgb, var(--move-border) 44%, transparent) !important;
@@ -1063,6 +1128,8 @@
   .asset-token-select-inline {
     min-height: 40px;
     min-width: 110px;
+    width: 110px;
+    max-width: 100%;
   }
 
   .asset-token-select-inline.compact {
@@ -1078,11 +1145,15 @@
 
   .move-token-select {
     min-width: 110px;
+    width: 110px;
+    max-width: 100%;
   }
 
   .move-external-input {
     min-height: 54px;
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
     box-sizing: border-box;
     padding: 14px 15px !important;
     border-radius: 12px !important;
@@ -1109,6 +1180,8 @@
     justify-content: flex-end;
     margin-top: 0;
     min-width: 0;
+    width: 100%;
+    max-width: 100%;
   }
 
   .btn-table-action {
@@ -1135,6 +1208,7 @@
   .move-primary-cta {
     min-height: 44px;
     min-width: 220px;
+    max-width: 100%;
     padding: 0 20px;
     border-radius: 12px;
     font-size: 12px;
@@ -1159,6 +1233,11 @@
     .move-detail-grid,
     .move-summary-grid {
       grid-template-columns: 1fr;
+    }
+
+    .move-account-slot.source-detail,
+    .move-account-slot.target-detail {
+      grid-column: 1;
     }
   }
 
@@ -1276,6 +1355,10 @@
       padding: 14px;
     }
 
+    .move-summary-hero {
+      width: 100%;
+    }
+
     .move-step-row {
       grid-template-columns: 22px minmax(0, 1fr);
       gap: 8px;
@@ -1302,7 +1385,13 @@
 
     .asset-token-select-inline,
     .move-token-select {
-      min-width: 92px;
+      width: 100%;
+      min-width: 0;
+    }
+
+    .move-primary-cta {
+      width: 100%;
+      min-width: 0;
     }
   }
 </style>

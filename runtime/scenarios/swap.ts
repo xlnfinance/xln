@@ -27,6 +27,7 @@ import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime, formatEntity } from '../runtime-ascii';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
+import { swapKey } from '../swap-execution';
 
 // Lazy-loaded runtime functions
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -1049,7 +1050,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   }]);
 
   // Process until orderbook match produces pending fill ratio (but before swap_resolve commits)
-  const pendingKey = `${alice.id}:${disputeOfferId}`;
+  const pendingKey = swapKey(alice.id, disputeOfferId);
   let pendingRatio = 0;
   for (let i = 0; i < 8; i++) {
     await process(env);

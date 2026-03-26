@@ -64,6 +64,13 @@ async function openWorkspaceTab(page: Page, label: RegExp): Promise<void> {
   await tab.click();
 }
 
+async function openAssetsTab(page: Page): Promise<void> {
+  const tab = page.getByTestId('tab-assets').first();
+  await expect(tab).toBeVisible({ timeout: 20_000 });
+  await tab.click();
+  await expect(page.getByTestId('asset-ledger-refresh').first()).toBeVisible({ timeout: 20_000 });
+}
+
 async function readAccountProgress(
   page: Page,
   entityId: string,
@@ -612,7 +619,7 @@ async function waitForDebtSnapshot(
 }
 
 async function faucetReserve(page: Page, entityId: string, symbol = 'USDC'): Promise<void> {
-  await page.getByTestId('tab-assets').first().click();
+  await openAssetsTab(page);
   const response = await page.request.post(`${APP_BASE_URL}/api/faucet/reserve`, {
     data: {
       userEntityId: entityId,
@@ -626,14 +633,73 @@ async function faucetReserve(page: Page, entityId: string, symbol = 'USDC'): Pro
   expect(body.success, body.error || 'reserve faucet api failed').toBe(true);
 }
 
+async function enforceDebtDirect(page: Page, entityId: string, tokenId: number): Promise<void> {
+  const result = await page.evaluate(async ({ entityId, tokenId }) => {
+    const view = window as typeof window & {
+      isolatedEnv?: unknown;
+      __xln_env?: unknown;
+      XLN?: {
+        submitDebtEnforcement?: (env: unknown, entityIdValue: string, tokenIdValue: number) => Promise<void>;
+      };
+      __xln_instance?: {
+        submitDebtEnforcement?: (env: unknown, entityIdValue: string, tokenIdValue: number) => Promise<void>;
+      };
+    };
+    const env = view.isolatedEnv ?? view.__xln_env;
+    const XLN = view.XLN
+      ?? view.__xln_instance
+      ?? await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+    if (!env || !XLN?.submitDebtEnforcement) {
+      return { ok: false, error: 'isolatedEnv/XLN missing' };
+    }
+    await XLN.submitDebtEnforcement(env, entityId, tokenId);
+    return { ok: true };
+  }, { entityId, tokenId });
+  expect(result.ok, result.error || 'failed to enforce debt').toBe(true);
+}
+
+async function enforceDebtUntilSettled(
+  page: Page,
+  entityId: string,
+  debtorEntityId: string,
+  debtorSignerId: string,
+  creditorEntityId: string,
+  tokenId: number,
+  expectedSnapshot: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await enforceDebtDirect(page, entityId, tokenId);
+    const settled = await expect
+      .poll(async () => {
+        const value = await readDebtSnapshot(page, debtorEntityId, debtorSignerId, creditorEntityId, 'out');
+        return `${value?.status || 'missing'}:${value?.remainingAmount || 'missing'}:${value?.paidAmount || 'missing'}`;
+      }, {
+        timeout: 15_000,
+        intervals: [500, 1000, 1500],
+      })
+      .toBe(expectedSnapshot)
+      .then(() => true)
+      .catch(() => false);
+    if (settled) return;
+  }
+  const value = await readDebtSnapshot(page, debtorEntityId, debtorSignerId, creditorEntityId, 'out');
+  throw new Error(
+    `debt enforce did not settle as expected: got=${value?.status || 'missing'}:${value?.remainingAmount || 'missing'}:${value?.paidAmount || 'missing'} expected=${expectedSnapshot}`,
+  );
+}
+
 async function openReserveToExternalMove(page: Page, amount: string, recipient: string): Promise<void> {
-  const assetsTab = page.getByTestId('tab-assets').first();
-  await assetsTab.click();
-  await page.getByTestId('asset-tab-move').first().click();
-  await page.getByTestId('move-source-reserve').first().click();
-  await page.getByTestId('move-target-external').first().click();
-  await page.getByTestId('move-external-recipient').first().fill(recipient);
-  await page.getByTestId('move-amount').first().fill(amount);
+  await openAssetsTab(page);
+  const moveTab = page.getByTestId('asset-tab-move').first();
+  await expect(moveTab).toBeVisible({ timeout: 20_000 });
+  await moveTab.click();
+  const workspace = page.getByTestId('move-workspace-assets').first();
+  await expect(workspace).toBeVisible({ timeout: 20_000 });
+  await workspace.getByTestId('move-asset-symbol').first().selectOption('USDC');
+  await workspace.getByTestId('move-source-reserve').first().click();
+  await workspace.getByTestId('move-target-external').first().click();
+  await workspace.getByTestId('move-external-recipient').first().fill(recipient);
+  await workspace.getByTestId('move-amount').first().fill(amount);
 }
 
 async function openOutstandingDebtToken(page: Page, symbol = 'USDC'): Promise<void> {
@@ -751,7 +817,9 @@ test.describe('debt ledger', () => {
     }).toBeGreaterThanOrEqual(100);
 
     await openReserveToExternalMove(bobPage, '10', bob.signerId);
-    await expect(bobPage.getByTestId('move-confirm').first()).toBeDisabled({ timeout: 10_000 });
+    await expect(
+      bobPage.getByTestId('move-workspace-assets').first().getByTestId('move-confirm').first(),
+    ).toBeDisabled({ timeout: 10_000 });
 
     step('partial-enforce');
     await openOutstandingDebtToken(bobPage, 'USDC');
@@ -778,24 +846,21 @@ test.describe('debt ledger', () => {
       timeout: 20_000,
       intervals: [500, 1000],
     }).toBeGreaterThanOrEqual(50);
-    await openOutstandingDebtToken(bobPage, 'USDC');
-    await bobPage.getByTestId(`debt-enforce-${TOKEN_ID_USDC}`).first().click();
-
-    await expect
-      .poll(async () => {
-        const value = await readDebtSnapshot(bobPage, bob.entityId, bob.signerId, alice.entityId, 'out');
-        return `${value?.status || 'missing'}:${value?.remainingAmount || 'missing'}:${value?.paidAmount || 'missing'}`;
-      }, {
-        timeout: 45_000,
-        intervals: [500, 1000, 1500],
-      })
-      .toBe(`paid:0:${USD_150}`);
+    await enforceDebtUntilSettled(
+      bobPage,
+      bob.entityId,
+      bob.entityId,
+      bob.signerId,
+      alice.entityId,
+      TOKEN_ID_USDC,
+      `paid:0:${USD_150}`,
+    );
 
     step('overfunded-r2e');
     await faucetReserve(bobPage, bob.entityId, 'USDC');
     const externalBefore = await getRenderedExternalBalance(bobPage, 'USDC');
     await openReserveToExternalMove(bobPage, '20', bob.signerId);
-    const moveConfirm = bobPage.getByTestId('move-confirm').first();
+    const moveConfirm = bobPage.getByTestId('move-workspace-assets').first().getByTestId('move-confirm').first();
     await expect(moveConfirm).toBeEnabled({ timeout: 20_000 });
     await moveConfirm.click();
     await broadcastDraftBatch(bobPage, bob.entityId, bob.signerId);

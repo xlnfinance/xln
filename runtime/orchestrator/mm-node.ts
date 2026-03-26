@@ -37,6 +37,7 @@ import {
   sleep,
 } from './mesh-common';
 import { buildDefaultEntitySwapPairs, getSwapPairPolicyByBaseQuote } from '../account-utils';
+import { LIMITS } from '../constants';
 import { ORDERBOOK_PRICE_SCALE } from '../orderbook';
 
 type Args = {
@@ -167,6 +168,7 @@ const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
   900n * 10n ** 18n,
   1_000n * 10n ** 18n,
 ] as const;
+const MARKET_MAKER_MIN_READY_OFFERS_PER_PAIR = 2;
 
 const argsRaw = process.argv.slice(2);
 
@@ -304,7 +306,10 @@ const getMarketMakerLevelProfile = (baseTokenId: number, quoteTokenId: number): 
 };
 
 const getExpectedMarketMakerOffersForPair = (baseTokenId: number, quoteTokenId: number): number =>
-  getMarketMakerLevelProfile(baseTokenId, quoteTokenId).offsetsBps.length * 2;
+  Math.min(
+    MARKET_MAKER_MIN_READY_OFFERS_PER_PAIR,
+    getMarketMakerLevelProfile(baseTokenId, quoteTokenId).offsetsBps.length * 2,
+  );
 
 const snapPriceTicks = (ticks: bigint, stepTicks: number, mode: 'up' | 'down'): bigint => {
   const step = BigInt(Math.max(1, stepTicks));
@@ -353,23 +358,30 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
   };
   for (const hubEntityId of hubEntityIds) {
     const hubSuffix = hubEntityId.slice(-6).toLowerCase();
-    for (let pairIndex = 0; pairIndex < defaultPairs.length; pairIndex += 1) {
-      const pair = defaultPairs[pairIndex]!;
+    const pairContexts = defaultPairs.map((pair, pairIndex) => {
       const pairPolicy = getSwapPairPolicyByBaseQuote(pair.baseTokenId, pair.quoteTokenId);
       const levelProfile = getMarketMakerLevelProfile(pair.baseTokenId, pair.quoteTokenId);
       const skewBps = hubSkewBps(hubEntityId, pairIndex);
-      const midPriceTicks = (pairPolicy.mmMidPriceTicks * BigInt(10_000 + skewBps)) / 10_000n;
-      const stepTicks = Math.max(1, pairPolicy.priceStepTicks);
-      const stepTicksBig = BigInt(stepTicks);
-      for (let level = 0; level < levelProfile.offsetsBps.length; level += 1) {
-        const offsetBps = levelProfile.offsetsBps[level]!;
-        const baseSize = levelProfile.baseSizes[level]!;
-        const askRaw = (midPriceTicks * BigInt(10_000 + offsetBps)) / 10_000n;
-        const bidRaw = (midPriceTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
-        const askPriceTicks = snapPriceTicks(askRaw, stepTicks, 'up');
-        let bidPriceTicks = snapPriceTicks(bidRaw, stepTicks, 'down');
+      return {
+        pair,
+        levelProfile,
+        midPriceTicks: (pairPolicy.mmMidPriceTicks * BigInt(10_000 + skewBps)) / 10_000n,
+        stepTicksBig: BigInt(Math.max(1, pairPolicy.priceStepTicks)),
+        stepTicks: Math.max(1, pairPolicy.priceStepTicks),
+      };
+    });
+    const maxLevels = pairContexts.reduce((max, entry) => Math.max(max, entry.levelProfile.offsetsBps.length), 0);
+    for (let level = 0; level < maxLevels; level += 1) {
+      for (const entry of pairContexts) {
+        if (level >= entry.levelProfile.offsetsBps.length) continue;
+        const offsetBps = entry.levelProfile.offsetsBps[level]!;
+        const baseSize = entry.levelProfile.baseSizes[level]!;
+        const askRaw = (entry.midPriceTicks * BigInt(10_000 + offsetBps)) / 10_000n;
+        const bidRaw = (entry.midPriceTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
+        const askPriceTicks = snapPriceTicks(askRaw, entry.stepTicks, 'up');
+        let bidPriceTicks = snapPriceTicks(bidRaw, entry.stepTicks, 'down');
         if (bidPriceTicks >= askPriceTicks) {
-          bidPriceTicks = askPriceTicks > stepTicksBig ? askPriceTicks - stepTicksBig : 1n;
+          bidPriceTicks = askPriceTicks > entry.stepTicksBig ? askPriceTicks - entry.stepTicksBig : 1n;
         }
         const askWantAmount = (baseSize * askPriceTicks) / ORDERBOOK_PRICE_SCALE;
         const bidGiveAmount = (baseSize * bidPriceTicks) / ORDERBOOK_PRICE_SCALE;
@@ -377,22 +389,22 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
 
         if (askWantAmount > 0n) {
           specs.push({
-            offerId: `mm-${hubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-ask-${levelId}`,
+            offerId: `mm-${hubSuffix}-${entry.pair.baseTokenId}-${entry.pair.quoteTokenId}-ask-${levelId}`,
             hubEntityId,
-            giveTokenId: pair.baseTokenId,
+            giveTokenId: entry.pair.baseTokenId,
             giveAmount: baseSize,
-            wantTokenId: pair.quoteTokenId,
+            wantTokenId: entry.pair.quoteTokenId,
             wantAmount: askWantAmount,
             minFillRatio: 1,
           });
         }
         if (bidGiveAmount > 0n) {
           specs.push({
-            offerId: `mm-${hubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-bid-${levelId}`,
+            offerId: `mm-${hubSuffix}-${entry.pair.baseTokenId}-${entry.pair.quoteTokenId}-bid-${levelId}`,
             hubEntityId,
-            giveTokenId: pair.quoteTokenId,
+            giveTokenId: entry.pair.quoteTokenId,
             giveAmount: bidGiveAmount,
-            wantTokenId: pair.baseTokenId,
+            wantTokenId: entry.pair.baseTokenId,
             wantAmount: baseSize,
             minFillRatio: 1,
           });
@@ -569,13 +581,19 @@ const maintainMarketMakerQuotes = async (
     if (!isAccountConsensusReady(account)) continue;
 
     const existingOfferIds = collectOfferIdsForAccount(account);
+    const remainingOpenSlots = Math.max(0, LIMITS.MAX_ACCOUNT_SWAP_OFFERS - existingOfferIds.size);
+    const allowedNewOffers = Math.min(
+      Math.max(1, Math.floor(maxOffersPerAccount)),
+      remainingOpenSlots,
+    );
+    if (allowedNewOffers <= 0) continue;
     const missing = specs
       .filter(spec => !existingOfferIds.has(spec.offerId))
       .filter(spec =>
         hasPairMutualCredit(env, mmEntityId, hubEntityId, spec.giveTokenId, spec.giveAmount)
         && hasPairMutualCredit(env, mmEntityId, hubEntityId, spec.wantTokenId, spec.wantAmount),
       )
-      .slice(0, Math.max(1, Math.floor(maxOffersPerAccount)));
+      .slice(0, allowedNewOffers);
     if (missing.length === 0) continue;
     entityTxs.push(...missing.map(spec => ({
       type: 'placeSwapOffer' as const,

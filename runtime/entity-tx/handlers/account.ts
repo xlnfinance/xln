@@ -15,7 +15,7 @@ import {
   type BookState,
   type OrderbookExtState,
 } from '../../orderbook';
-import { HTLC, SWAP as SWAP_CONSTANTS } from '../../constants';
+import { HTLC, LIMITS, SWAP as SWAP_CONSTANTS } from '../../constants';
 import { getSwapPairPolicyByBaseQuote } from '../../account-utils';
 import { formatEntityId, HEAVY_LOGS } from '../../utils';
 import { isLeftEntity } from '../../entity-id-utils';
@@ -1252,7 +1252,7 @@ export function processOrderbookSwaps(
         tick: priceTick,
         pmin,
         pmax,
-        maxOrders: 10000,
+        maxOrders: LIMITS.MAX_ORDERBOOK_ORDERS_PER_PAIR,
         stpPolicy: 1, // STP cancel taker: never execute self-trades
       });
     }
@@ -1344,17 +1344,45 @@ export function processOrderbookSwaps(
     const namespacedOrderId = `${accountId}:${offer.offerId}`;
     console.log(`📊 ORDERBOOK ADD: maker=${formatEntityId(makerId)}, orderId=${namespacedOrderId.slice(-20)}, side=${side}, price=${priceTicks}, qty=${qtyLots}`);
 
-    const result = applyCommand(book, {
-      kind: 0,
-      ownerId: makerId,
-      orderId: namespacedOrderId,
-      side,
-      tif: offer.timeInForce,
-      postOnly: rehydrateOnly,
-      priceTicks,
-      qtyLots: Number(qtyLots),
-      minFillRatio: offer.minFillRatio,
-    });
+    let result: ReturnType<typeof applyCommand>;
+    try {
+      result = applyCommand(book, {
+        kind: 0,
+        ownerId: makerId,
+        orderId: namespacedOrderId,
+        side,
+        tif: offer.timeInForce,
+        postOnly: rehydrateOnly,
+        priceTicks,
+        qtyLots: Number(qtyLots),
+        minFillRatio: offer.minFillRatio,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === 'Out of order slots') {
+        console.warn(
+          `⚠️ ORDERBOOK FULL: pair=${bookKey} maxOrders=${book.params.maxOrders} offer=${offer.offerId} account=${accountId.slice(-8)}`,
+        );
+        if (rehydrateOnly) {
+          quarantineOffer(accountId, offer.offerId, `book-full:${book.params.maxOrders}`);
+          continue;
+        }
+        mempoolOps.push({
+          accountId,
+          tx: {
+            type: 'swap_resolve',
+            data: {
+              offerId: offer.offerId,
+              fillRatio: 0,
+              cancelRemainder: true,
+            },
+          },
+        });
+        console.log(`📤 ORDERBOOK: Queued swap_resolve(cancelRemainder) for full book offer ${offer.offerId.slice(-8)}`);
+        continue;
+      }
+      throw error;
+    }
 
     book = result.state;
     // AUDIT FIX (CRITICAL-5): Cache updated book for next offer in same batch

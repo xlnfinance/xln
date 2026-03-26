@@ -4,7 +4,7 @@
  *
  * Settlement:
  * - non-zero fills MUST carry exact execution amounts from matcher/manual caller
- * - rebate remains a separate quote-side adjustment on top of exact execution
+ * - better prices are represented directly in those execution amounts
  * - cancel-only path is still fillRatio=0 with no execution amounts
  *
  * Flow:
@@ -13,13 +13,12 @@
  * 3. Validate fillRatio >= offer.minFillRatio (unless cancelling all)
  * 4. Validate exact execution amounts for fills
  * 5. Update deltas atomically (both tokens)
- * 6. Apply rebate if present (price improvement refund to offer creator)
- * 7. Release proportional hold
- * 8. If cancelRemainder: remove offer; else: update remaining amount
+ * 6. Release proportional hold
+ * 7. If cancelRemainder: remove offer; else: update remaining amount
  *
  * Delta rules (same as HTLC):
- * - Left gives → offdelta decreases (negative)
- * - Right gives → offdelta increases (positive)
+ * - Left gives -> offdelta decreases (negative)
+ * - Right gives -> offdelta increases (positive)
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
@@ -28,7 +27,6 @@ import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL } from '../../constants';
 import { deriveCanonicalSwapFillRatio, MAX_SWAP_FILL_RATIO } from '../../swap-execution';
 import {
-  canonicalPair,
   requantizeRemainingSwapAtPrice,
   SWAP_LOT_SCALE,
 } from '../../orderbook/types';
@@ -46,8 +44,6 @@ export async function handleSwapResolve(
     cancelRemainder,
     executionGiveAmount,
     executionWantAmount,
-    rebateAmount,
-    rebateTokenId,
   } = accountTx.data;
   const events: string[] = [];
 
@@ -164,21 +160,6 @@ export async function handleSwapResolve(
     }
   }
 
-  // Validate rebate
-  const hasRebate = rebateAmount !== undefined && rebateAmount > 0n && rebateTokenId !== undefined;
-  if (hasRebate) {
-    if (rebateTokenId !== offer.giveTokenId && rebateTokenId !== offer.wantTokenId) {
-      return { success: false, error: `Rebate token ${rebateTokenId} not in swap pair`, events };
-    }
-    const { quote } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
-    if (rebateTokenId !== quote) {
-      return { success: false, error: `Rebate token ${rebateTokenId} must be quote token ${quote}`, events };
-    }
-    if (rebateAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
-      return { success: false, error: `Rebate amount out of bounds: ${rebateAmount}`, events };
-    }
-  }
-
   // 5. Get or create deltas for both tokens
   let giveDelta = accountMachine.deltas.get(offer.giveTokenId);
   if (!giveDelta) {
@@ -201,15 +182,10 @@ export async function handleSwapResolve(
   // 5b. Check counterparty capacity for the full outgoing bundle.
   // swap_resolve is proposed by the counterparty/hub, so they must be able to fund:
   // - the canonical fill on offer.wantTokenId
-  // - any quote-side rebate
   const counterpartyIsLeft = !offer.makerIsLeft;
   const counterpartyOutgoing = new Map<number, bigint>();
   if (filledWant > 0n) {
     counterpartyOutgoing.set(offer.wantTokenId, filledWant);
-  }
-  if (hasRebate) {
-    const current = counterpartyOutgoing.get(rebateTokenId!) ?? 0n;
-    counterpartyOutgoing.set(rebateTokenId!, current + rebateAmount!);
   }
   for (const [tokenId, requiredAmount] of counterpartyOutgoing) {
     if (requiredAmount <= 0n) continue;
@@ -257,37 +233,7 @@ export async function handleSwapResolve(
     events.push(`💱 Swap filled: ${filledGive} token${offer.giveTokenId} for ${filledWant} token${offer.wantTokenId}`);
   }
 
-  // 6b. Apply rebate (price improvement refund to the offer creator / aggressive taker)
-  // The hub matched against a better resting book price and returns the full spread improvement.
-  if (hasRebate) {
-    let rebateDelta = accountMachine.deltas.get(rebateTokenId!);
-    if (!rebateDelta) {
-      rebateDelta = createDefaultDelta(rebateTokenId!);
-      accountMachine.deltas.set(rebateTokenId!, rebateDelta);
-    }
-    rebateDelta.leftHold ??= 0n;
-    rebateDelta.rightHold ??= 0n;
-
-    // Rebate = hub pays the offer creator. Hub is counterparty (opposite of makerIsLeft).
-    if (offer.makerIsLeft) {
-      // Hub (right) pays maker (left) → offdelta INCREASES
-      rebateDelta.offdelta += rebateAmount!;
-    } else {
-      // Hub (left) pays maker (right) → offdelta DECREASES
-      rebateDelta.offdelta -= rebateAmount!;
-    }
-
-    // Track cumulative rebates
-    if (!accountMachine.totalRebates) {
-      accountMachine.totalRebates = new Map();
-    }
-    const prevRebate = accountMachine.totalRebates.get(rebateTokenId!) ?? 0n;
-    accountMachine.totalRebates.set(rebateTokenId!, prevRebate + rebateAmount!);
-
-    events.push(`💰 Rebate: ${rebateAmount} token${rebateTokenId} (price improvement)`);
-  }
-
-  // 7. Release hold proportionally
+  // 6. Release hold proportionally
   const holdRelease = filledGive;
   if (offer.makerIsLeft) {
     const currentHold = giveDelta.leftHold || 0n;
@@ -297,7 +243,7 @@ export async function handleSwapResolve(
     giveDelta.rightHold = currentHold - holdRelease;
   }
 
-  // 8. Handle remainder
+  // 7. Handle remainder
   const makerId = offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity;
   let swapOfferCancelled: { offerId: string; accountId: string } | undefined;
 

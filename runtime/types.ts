@@ -1,4 +1,5 @@
 import type { OrderbookExtState } from './orderbook';
+import type { SwapKey } from './swap-keys';
 
 /**
  * XLN Type Definitions
@@ -215,6 +216,23 @@ import type { GossipLayer, Profile } from './networking/gossip';
 import type { JAdapter } from './jadapter/types';
 import type { CompletedBatch, JBatch, JBatchState } from './j-batch';
 import type { CrontabState } from './crontab-types';
+
+export type RuntimeP2PConfigLike = {
+  relayUrls?: string[];
+  wsUrl?: string | null;
+  seedRuntimeIds?: string[];
+  runtimeId?: string;
+  signerId?: string;
+  advertiseEntityIds?: string[];
+  isHub?: boolean;
+  gossipPollMs?: number;
+};
+
+export type RuntimeP2PSurface = {
+  sendDebugEvent(payload: unknown): boolean;
+  syncProfiles(): Promise<boolean>;
+  announceProfilesForEntities(entityIds: string[], reason?: string): void;
+};
 
 export interface JurisdictionConfig {
   address: string;
@@ -497,7 +515,7 @@ export type EntityTx =
           frameAge?: number;
           tokenId?: number;
           rebalanceAmount?: string;
-          [key: string]: any; // Allow additional rebalance metadata
+          [key: string]: unknown; // Allow additional rebalance metadata
         };
       };
     }
@@ -760,8 +778,6 @@ export type EntityTx =
         cancelRemainder: boolean;
         executionGiveAmount?: bigint;
         executionWantAmount?: bigint;
-        rebateAmount?: bigint;
-        rebateTokenId?: number;
       };
     }
   | {
@@ -1043,7 +1059,6 @@ export interface AccountMachine {
 
   // Swap offers (limit orders)
   swapOffers: Map<string, SwapOffer>; // offerId → offer details
-  totalRebates?: Map<number, bigint>; // tokenId → cumulative price improvement rebates received
 
   // Global credit limits (in reference currency - USDC)
   globalCreditLimits: {
@@ -1115,7 +1130,7 @@ export interface AccountMachine {
   counterpartyDisputeHash?: string;                    // Exact dispute hash signed in counterpartyDisputeProofHanko
   counterpartySettlementHanko?: HankoString;           // Their hanko on settlement operations
   disputeProofNoncesByHash?: Record<string, number>;   // ProofBodyHash → nonce (local + counterparty)
-  disputeProofBodiesByHash?: Record<string, any>;      // ProofBodyHash → ProofBodyStruct (for dispute finalize)
+  disputeProofBodiesByHash?: Record<string, unknown>;      // ProofBodyHash → ProofBodyStruct (for dispute finalize)
 
   // ON-CHAIN NONCE: Tracks the nonce stored on-chain
   // Starts at 0, set to signedNonce when settlement/dispute succeeds
@@ -1467,12 +1482,10 @@ export type AccountTx =
         offerId: string;
         fillRatio: number;        // 0-65535 (uint16)
         cancelRemainder: boolean; // true = fill + cancel, false = fill + keep open
-        // Optional exact execution amounts from orderbook fills. If present,
-        // settlement uses these amounts directly (before any rebate).
+        // Optional exact execution amounts from orderbook fills.
+        // Settlement uses these amounts directly.
         executionGiveAmount?: bigint;
         executionWantAmount?: bigint;
-        rebateAmount?: bigint;    // Price improvement rebate (quote token, after SpreadDistribution)
-        rebateTokenId?: number;   // Token for rebate (always quote side)
       };
     }
   // === SETTLEMENT HOLD TYPES (ring-fencing via bilateral consensus) ===
@@ -1634,7 +1647,7 @@ export interface EntityState {
   swapTradingPairs?: EntitySwapPair[];
 
   // 📈 Pending swap fill ratios (orderbook → dispute arguments)
-  pendingSwapFillRatios?: Map<string, number>; // key = "accountId:offerId"
+  pendingSwapFillRatios?: Map<SwapKey, number>; // key = "accountId:offerId"
 
   // 🔄 Rebalance Configuration - Hub-level matching strategy
   hubRebalanceConfig?: HubRebalanceConfig;
@@ -1878,13 +1891,13 @@ export interface Env {
     persistencePaused?: boolean;
     lastFrameAt?: number; // Wall-clock timestamp of the most recent processed runtime cycle
     processingPromise?: Promise<void> | null;
-    p2p?: any;
-    pendingP2PConfig?: any;
-    lastP2PConfig?: any;
+    p2p?: RuntimeP2PSurface | null;
+    pendingP2PConfig?: RuntimeP2PConfigLike | null;
+    lastP2PConfig?: RuntimeP2PConfigLike | null;
     envChangeCallbacks?: Set<(env: Env) => void>;
-    db?: any;
+    db?: unknown;
     dbOpenPromise?: Promise<boolean> | null;
-    infraDb?: any;
+    infraDb?: unknown;
     infraDbOpenPromise?: Promise<boolean> | null;
     logState?: {
       nextId: number;
@@ -1911,7 +1924,7 @@ export interface Env {
   gossip: GossipLayer;
 
   // Isolated BrowserVM instance per runtime (prevents cross-runtime state leakage)
-  browserVM?: any; // BrowserVMProvider instance for this runtime (DEPRECATED: use jAdapter)
+  browserVM?: import('./jadapter/types').BrowserVMProvider | null; // BrowserVMProvider instance for this runtime (DEPRECATED: use jAdapter)
   browserVMState?: BrowserVMState; // Serialized BrowserVM state for time travel
 
   // Unified J-Machine adapter (preferred over browserVM or evms)
@@ -1919,7 +1932,7 @@ export interface Env {
   jAdapter?: import('./jadapter/types').JAdapter;
 
   // EVM instances - DEPRECATED, use env.jAdapter or createJAdapter() from jadapter
-  evms: Map<string, any>;
+  evms: Map<string, unknown>;
 
   // Active jurisdiction
   activeJurisdiction?: string; // Currently active J-replica name
@@ -2250,7 +2263,7 @@ export interface Xlnomy {
     position: { x: number; y: number; z: number }; // Visual position (0, 100, 0)
     capacity: number; // Broadcast threshold (default: 3)
     jHeight: number; // Current block height in jurisdiction
-    mempool: any[]; // Pending transactions in J-Machine queue
+    mempool: unknown[]; // Pending transactions in J-Machine queue
   };
 
   // Deployed contracts
@@ -2279,7 +2292,7 @@ export interface JurisdictionEVM {
   type: 'browservm' | 'reth' | 'erigon' | 'monad';
 
   // Contract deployment
-  deployContract(bytecode: string, args?: any[]): Promise<string>;
+  deployContract(bytecode: string, args?: unknown[]): Promise<string>;
 
   // Contract calls
   call(to: string, data: string, from?: string): Promise<string>;
@@ -2330,7 +2343,7 @@ export interface XlnomySnapshot {
   // EVM-specific state
   evmState: {
     rpcUrl?: string; // If RPC EVM (Reth/Erigon/Monad)
-    vmState?: any; // If BrowserVM - serialized @ethereumjs/vm state
+    vmState?: unknown; // If BrowserVM - serialized @ethereumjs/vm state
   };
 
   // Entity registry
@@ -2338,7 +2351,7 @@ export interface XlnomySnapshot {
 
   // Runtime state (replicas + history)
   runtimeState?: {
-    replicas: any; // Serialized Map<string, EntityReplica>
+    replicas: unknown; // Serialized Map<string, EntityReplica>
     history: EnvSnapshot[];
   };
 }
