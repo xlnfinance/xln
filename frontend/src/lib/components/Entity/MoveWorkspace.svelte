@@ -374,16 +374,16 @@
     {#if moveProgressLabel || moveDraftError || moveBroadcastError || canAddMoveToExistingBatch()}
       <div class="move-summary-statuses">
         {#if moveProgressLabel}
-          <div class="move-summary-status accent">{moveProgressLabel}</div>
+          <div class="move-summary-status accent" data-testid="move-status">{moveProgressLabel}</div>
         {/if}
         {#if canAddMoveToExistingBatch() && !moveDraftError}
-          <div class="move-summary-status neutral">Uses existing draft batch</div>
+          <div class="move-summary-status neutral" data-testid="move-status">Uses existing draft batch</div>
         {/if}
         {#if moveDraftError}
-          <div class="move-summary-status warning">{moveDraftError}</div>
+          <div class="move-summary-status warning" data-testid="move-status">{moveDraftError}</div>
         {/if}
         {#if moveBroadcastError}
-          <div class="move-summary-status error">{moveBroadcastError}</div>
+          <div class="move-summary-status error" data-testid="move-status">{moveBroadcastError}</div>
         {/if}
       </div>
     {/if}
