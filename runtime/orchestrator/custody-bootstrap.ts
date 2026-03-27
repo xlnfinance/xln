@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { deserializeTaggedJson } from '../serialization-utils';
@@ -14,6 +15,44 @@ const resolveCustodyJurisdictionsJsonPath = (): string => {
   return overridePath.length > 0
     ? resolve(overridePath)
     : join(process.cwd(), 'jurisdictions', 'jurisdictions.json');
+};
+
+const resolveCustodyServiceHttps = (): boolean => {
+  const candidates = [
+    { key: join(process.cwd(), 'frontend', 'localhost+3-key.pem'), cert: join(process.cwd(), 'frontend', 'localhost+3.pem') },
+    { key: join(process.cwd(), 'frontend', 'localhost+2-key.pem'), cert: join(process.cwd(), 'frontend', 'localhost+2.pem') },
+  ];
+  return candidates.some((candidate) => existsSync(candidate.key) && existsSync(candidate.cert));
+};
+
+const waitForCustodyServiceReady = async (
+  port: number,
+  child: ManagedChild,
+  useHttps: boolean,
+  timeoutMs = DEFAULT_CHILD_READY_TIMEOUT_MS,
+): Promise<string> => {
+  const urls = useHttps
+    ? [`https://127.0.0.1:${port}/api/me`, `http://127.0.0.1:${port}/api/me`]
+    : [`http://127.0.0.1:${port}/api/me`, `https://127.0.0.1:${port}/api/me`];
+  const perAttemptTimeoutMs = 4_000;
+  const deadline = Date.now() + timeoutMs;
+  let lastError = 'not-started';
+
+  while (Date.now() < deadline) {
+    for (const url of urls) {
+      try {
+        await waitForHttpReady(url, child, perAttemptTimeoutMs);
+        return url;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    if (child.proc.exitCode !== null) {
+      break;
+    }
+  }
+
+  throw new Error(`custody-service did not become ready on http/https for port ${port}: ${lastError}`);
 };
 
 export type DebugEntitySummary = {
@@ -417,6 +456,7 @@ export const startCustodySupport = async (
   }
 
   const identity = controlResult.result;
+  const custodyHttps = resolveCustodyServiceHttps();
 
   const custodyChild = spawnBunChild(
     'custody-service',
@@ -424,7 +464,7 @@ export const startCustodySupport = async (
     {
       CUSTODY_HOST: '127.0.0.1',
       CUSTODY_PORT: String(options.custodyPort),
-      CUSTODY_HTTPS: '1',
+      CUSTODY_HTTPS: custodyHttps ? '1' : '0',
       CUSTODY_DAEMON_WS: `ws://127.0.0.1:${options.daemonPort}/rpc`,
       CUSTODY_WALLET_URL: options.walletUrl,
       CUSTODY_ENTITY_ID: identity.entityId,
@@ -433,7 +473,7 @@ export const startCustodySupport = async (
       CUSTODY_DB_PATH: `${options.dbRoot}/custody.sqlite`,
     },
   );
-  await waitForHttpReady(`https://127.0.0.1:${options.custodyPort}/api/me`, custodyChild);
+  await waitForCustodyServiceReady(options.custodyPort, custodyChild, custodyHttps);
 
   return {
     daemonChild,
