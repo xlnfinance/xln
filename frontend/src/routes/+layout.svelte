@@ -68,6 +68,7 @@
 
 	main {
 		min-height: 100dvh;
+		overflow: visible;
 		background: var(--theme-bg-gradient, var(--theme-background, #000));
 		color: inherit;
 	}

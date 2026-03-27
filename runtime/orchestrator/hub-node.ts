@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { ethers, HDNodeWallet, Mnemonic } from 'ethers';
+import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
@@ -220,7 +220,7 @@ const resolveHubSignerIndex = (name: string): number => {
 
 const deriveAnvilDevPrivateKey = (index: number): string => {
   const mnemonic = Mnemonic.fromPhrase(process.env.ANVIL_MNEMONIC || DEFAULT_ANVIL_MNEMONIC);
-  const wallet = HDNodeWallet.fromMnemonic(mnemonic, `m/44'/60'/0'/0/${index}`);
+  const wallet = HDNodeWallet.fromMnemonic(mnemonic, getIndexedAccountPath(index));
   return wallet.privateKey;
 };
 

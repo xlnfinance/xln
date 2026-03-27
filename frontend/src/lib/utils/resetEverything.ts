@@ -375,17 +375,6 @@ function hardNavigateAfterReset(): void {
     return;
   }
   window.location.replace(targetPath);
-  setTimeout(() => {
-    try {
-      if (window.location.pathname === targetPath) {
-        window.location.reload();
-      } else {
-        window.location.assign(targetPath);
-      }
-    } catch {
-      window.location.href = targetPath;
-    }
-  }, 80);
 }
 
 async function clearCacheStorage(): Promise<void> {

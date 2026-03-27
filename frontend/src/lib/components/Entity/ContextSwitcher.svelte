@@ -43,9 +43,9 @@
   $: currentAvatar = currentEntity?.avatar || currentGroup?.avatar || '';
   $: currentTitle = resolveCurrentTitle();
   $: currentSubtitle = currentEntity?.entityId
-    ? truncateMiddle(currentEntity.entityId)
+    ? currentEntity.entityId
     : currentGroup?.selfEntity?.entityId
-      ? truncateMiddle(currentGroup.selfEntity.entityId)
+      ? currentGroup.selfEntity.entityId
     : 'No runtime selected';
 
   function buildRuntimeGroups(): RuntimeSummary[] {
@@ -150,13 +150,13 @@
   function resolveCurrentTitle(): string {
     if (currentEntity?.name && !isOpaqueIdLabel(currentEntity.name)) return currentEntity.name;
     if (currentGroup?.runtimeLabel) return currentGroup.runtimeLabel;
-    if (currentEntity?.entityId) return truncateMiddle(currentEntity.entityId);
-    if (currentGroup?.runtimeId) return truncateMiddle(currentGroup.runtimeId);
+    if (currentEntity?.entityId) return currentEntity.entityId;
+    if (currentGroup?.runtimeId) return currentGroup.runtimeId;
     return 'Select Runtime';
   }
 
   function resolveRuntimeMeta(group: RuntimeSummary): string {
-    return truncateMiddle(group.selfEntity?.entityId || group.runtimeId);
+    return group.selfEntity?.entityId || group.runtimeId;
   }
 
   async function selectRuntimeEntity(runtimeId: string, signerId: string, entityId: string) {

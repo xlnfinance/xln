@@ -1,7 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
-import { Interface, Wallet, formatUnits, parseUnits } from 'ethers';
+import { Interface, formatUnits, parseUnits } from 'ethers';
 import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL } from './utils/e2e-baseline';
-import { createRuntimeIdentity, gotoApp, selectDemoMnemonic, switchToRuntimeId } from './utils/e2e-demo-users';
+import {
+  createRuntimeIdentity,
+  deriveSignerAddressFromMnemonic,
+  gotoApp,
+  selectDemoMnemonic,
+  switchToRuntimeId,
+} from './utils/e2e-demo-users';
 import { getRenderedExternalBalance } from './utils/e2e-account-ui';
 import { timedStep } from './utils/e2e-timing';
 
@@ -191,7 +197,7 @@ test('move external to external sends directly from signer wallet', async ({ pag
 
   const symbol = 'USDC';
   const aliceEoa = String(alice!.signerId || '').trim();
-  const bobSignerId = Wallet.fromPhrase(selectDemoMnemonic('bob')).address.toLowerCase();
+  const bobSignerId = deriveSignerAddressFromMnemonic(selectDemoMnemonic('bob'));
   await seedExternalWallet(page, aliceEoa, symbol, '20');
   await expect.poll(async () => refreshExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(0);
 

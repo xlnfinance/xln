@@ -386,12 +386,6 @@
     padding: 4px 0;
     max-height: 50vh;
     overflow-y: auto;
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE/Edge */
-  }
-
-  .entity-list::-webkit-scrollbar {
-    display: none; /* Chrome/Safari/Opera */
   }
 
   .jmachine-list {

@@ -59,12 +59,16 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{ entityId: string; 
   const response = await page.request.get(`${apiBase}/api/debug/entities`);
   expect(response.ok(), 'debug entities endpoint must be available').toBe(true);
   const body = await response.json() as {
-    entities?: Array<{ entityId?: string; isHub?: boolean }>;
+    entities?: Array<{ entityId?: string; isHub?: boolean; name?: string; metadata?: { name?: string } }>;
   };
-  const hubId = (Array.isArray(body.entities) ? body.entities : [])
-    .find((entity) => entity.isHub === true && typeof entity.entityId === 'string')
-    ?.entityId;
-  expect(typeof hubId === 'string' && hubId.length > 0, 'at least one hub must be available').toBe(true);
+  const hubs = (Array.isArray(body.entities) ? body.entities : [])
+    .filter((entity) => entity.isHub === true && typeof entity.entityId === 'string');
+  const preferredHub = hubs.find((entity) => {
+    const name = String(entity.name || entity.metadata?.name || '').trim().toUpperCase();
+    return name !== 'H2';
+  }) ?? hubs[0];
+  const hubId = preferredHub?.entityId;
+  expect(typeof hubId === 'string' && hubId.length > 0, 'at least one auto-finalizing hub must be available').toBe(true);
 
   await connectHub(page, hubId!);
 

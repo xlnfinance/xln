@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { Interface } from 'ethers';
 
 import { ensureE2EBaseline, APP_BASE_URL } from './utils/e2e-baseline';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
@@ -10,6 +11,7 @@ const TOKEN_SCALE = 10n ** 18n;
 const USD_150 = (150n * TOKEN_SCALE).toString();
 const USD_100 = (100n * TOKEN_SCALE).toString();
 const USD_50 = (50n * TOKEN_SCALE).toString();
+const ERC20_BALANCE_OF = new Interface(['function balanceOf(address) view returns (uint256)']);
 
 type RuntimeRef = {
   entityId: string;
@@ -20,10 +22,10 @@ type RuntimeRef = {
 type DebtSnapshot = {
   debtId: string;
   status: string;
-  createdAmount: string;
-  paidAmount: string;
-  remainingAmount: string;
-  forgivenAmount: string;
+  createdAmount: bigint;
+  paidAmount: bigint;
+  remainingAmount: bigint;
+  forgivenAmount: bigint;
   updates: string[];
 };
 
@@ -40,6 +42,53 @@ async function readFirstHubId(page: Page): Promise<string> {
   const hubId = health.hubMesh?.hubIds?.[0];
   expect(typeof hubId === 'string' && hubId.length > 0, 'hub id must exist').toBe(true);
   return hubId!;
+}
+
+async function getApiToken(page: Page, symbol: string): Promise<{ address: string; tokenId: number }> {
+  const response = await page.request.get(`${APP_BASE_URL}/api/tokens`);
+  expect(response.ok(), 'token catalog request must succeed').toBe(true);
+  const body = await response.json().catch(() => ({})) as {
+    tokens?: Array<{ symbol?: string; address?: string; tokenId?: number }>;
+  };
+  const match = Array.isArray(body.tokens)
+    ? body.tokens.find((entry) => String(entry.symbol || '').toUpperCase() === symbol.toUpperCase())
+    : null;
+  expect(match?.address, `token ${symbol} must exist`).toBeTruthy();
+  expect(typeof match?.tokenId === 'number', `token ${symbol} must have tokenId`).toBe(true);
+  return { address: String(match!.address), tokenId: Number(match!.tokenId) };
+}
+
+async function rpcCall<T>(page: Page, method: string, params: unknown[]): Promise<T> {
+  const response = await page.request.post(`${APP_BASE_URL}/api/rpc`, {
+    data: { jsonrpc: '2.0', id: 1, method, params },
+  });
+  expect(response.ok(), `${method} RPC must succeed`).toBe(true);
+  const body = await response.json().catch(() => ({})) as { error?: unknown; result?: T };
+  expect(body.error, `${method} RPC must not return error: ${JSON.stringify(body.error || null)}`).toBeUndefined();
+  return body.result as T;
+}
+
+async function getRpcExternalBalanceRaw(page: Page, symbol: string, holder: string): Promise<bigint> {
+  const token = await getApiToken(page, symbol);
+  const raw = await rpcCall<string>(page, 'eth_call', [
+    {
+      to: token.address,
+      data: ERC20_BALANCE_OF.encodeFunctionData('balanceOf', [holder]),
+    },
+    'latest',
+  ]);
+  return BigInt(raw || '0x0');
+}
+
+async function readOnchainReserveBalanceRaw(page: Page, entityId: string, symbol: string): Promise<bigint> {
+  const token = await getApiToken(page, symbol);
+  const response = await page.request.get(
+    `${APP_BASE_URL}/api/debug/reserve?entityId=${encodeURIComponent(entityId)}&tokenId=${encodeURIComponent(String(token.tokenId))}`,
+  );
+  expect(response.ok(), `debug reserve request must succeed for ${symbol}`).toBe(true);
+  const body = await response.json().catch(() => ({})) as { reserve?: string };
+  expect(typeof body.reserve === 'string', `debug reserve body must include reserve for ${symbol}`).toBe(true);
+  return BigInt(body.reserve || '0');
 }
 
 async function openAccountsWorkspace(page: Page): Promise<void> {
@@ -69,6 +118,28 @@ async function openAssetsTab(page: Page): Promise<void> {
   await expect(tab).toBeVisible({ timeout: 20_000 });
   await tab.click();
   await expect(page.getByTestId('asset-ledger-refresh').first()).toBeVisible({ timeout: 20_000 });
+}
+
+async function ensureSelfEntitySelected(page: Page, entityId: string): Promise<void> {
+  const headerEntity = page.locator('.wallet-meta-value').first();
+  const current = String((await headerEntity.textContent().catch(() => '')) || '').trim().toLowerCase();
+  if (current === entityId.toLowerCase()) return;
+
+  const trigger = page.locator('.context-switcher .dropdown-trigger, .context-switcher .pill-trigger').first();
+  await expect(trigger).toBeVisible({ timeout: 15_000 });
+  await trigger.click();
+
+  const runtimeMain = page.locator('.context-switcher .runtime-main').first();
+  await expect(runtimeMain).toBeVisible({ timeout: 10_000 });
+  await runtimeMain.click();
+
+  await expect
+    .poll(async () => String((await headerEntity.textContent().catch(() => '')) || '').trim().toLowerCase(), {
+      timeout: 15_000,
+      intervals: [200, 400, 800],
+      message: 'self entity must be active before move flow',
+    })
+    .toBe(entityId.toLowerCase());
 }
 
 async function readAccountProgress(
@@ -245,8 +316,18 @@ async function readJBatchSnapshot(
     const messages = Array.isArray(rep?.state?.messages) ? rep.state.messages.slice(-6) : [];
     const mempool = Array.isArray(rep?.mempool) ? rep.mempool : [];
     return {
+      pendingExternalToReserve: Number(pending?.externalTokenToReserve?.length || 0),
+      pendingReserveToCollateral: Number(pending?.reserveToCollateral?.length || 0),
+      pendingCollateralToReserve: Number(pending?.collateralToReserve?.length || 0),
+      pendingReserveToReserve: Number(pending?.reserveToReserve?.length || 0),
+      pendingReserveToExternal: Number(pending?.reserveToExternalToken?.length || 0),
       pendingDisputeStarts: Number(pending?.disputeStarts?.length || 0),
       pendingDisputeFinalizations: Number(pending?.disputeFinalizations?.length || 0),
+      sentExternalToReserve: Number(sent?.externalTokenToReserve?.length || 0),
+      sentReserveToCollateral: Number(sent?.reserveToCollateral?.length || 0),
+      sentCollateralToReserve: Number(sent?.collateralToReserve?.length || 0),
+      sentReserveToReserve: Number(sent?.reserveToReserve?.length || 0),
+      sentReserveToExternal: Number(sent?.reserveToExternalToken?.length || 0),
       sentDisputeStarts: Number(sent?.disputeStarts?.length || 0),
       sentDisputeFinalizations: Number(sent?.disputeFinalizations?.length || 0),
       sentExists: !!rep?.state?.jBatchState?.sentBatch,
@@ -257,6 +338,92 @@ async function readJBatchSnapshot(
       recentMessages: messages.map((message: unknown) => String(message || '')),
     };
   }, { entityId, signerId });
+}
+
+async function readAllBatchSnapshots(page: Page): Promise<Array<{
+  key: string;
+  pendingCount: number;
+  sentCount: number;
+  historyCount: number;
+}>> {
+  return page.evaluate(() => {
+    const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) return [];
+    const rows: Array<{ key: string; pendingCount: number; sentCount: number; historyCount: number }> = [];
+    for (const [key, replica] of env.eReplicas.entries()) {
+      const batch = replica?.state?.jBatchState?.batch;
+      const sent = replica?.state?.jBatchState?.sentBatch?.batch;
+      const history = Array.isArray(replica?.state?.batchHistory) ? replica.state.batchHistory : [];
+      const pendingCount =
+        Number(batch?.externalTokenToReserve?.length || 0) +
+        Number(batch?.reserveToCollateral?.length || 0) +
+        Number(batch?.collateralToReserve?.length || 0) +
+        Number(batch?.reserveToReserve?.length || 0) +
+        Number(batch?.reserveToExternalToken?.length || 0) +
+        Number(batch?.disputeStarts?.length || 0) +
+        Number(batch?.disputeFinalizations?.length || 0);
+      const sentCount =
+        Number(sent?.externalTokenToReserve?.length || 0) +
+        Number(sent?.reserveToCollateral?.length || 0) +
+        Number(sent?.collateralToReserve?.length || 0) +
+        Number(sent?.reserveToReserve?.length || 0) +
+        Number(sent?.reserveToExternalToken?.length || 0) +
+        Number(sent?.disputeStarts?.length || 0) +
+        Number(sent?.disputeFinalizations?.length || 0);
+      rows.push({
+        key: String(key),
+        pendingCount,
+        sentCount,
+        historyCount: Number(history.length || 0),
+      });
+    }
+    return rows;
+  });
+}
+
+async function readMoveUiDebug(page: Page): Promise<{
+  amount: string;
+  confirmDisabled: boolean | null;
+  status: string;
+  sourceReserveRaw: string;
+  sourceExternalRaw: string;
+  sourceAccountRaw: string;
+  headerEntityId: string;
+  href: string;
+  readyState: string;
+  hasIsolatedEnv: boolean;
+  replicaCount: number;
+}> {
+  return page.evaluate(() => {
+    const amountInput = document.querySelector('[data-testid="move-amount"]') as HTMLInputElement | null;
+    const confirm = document.querySelector('[data-testid="move-confirm"]') as HTMLButtonElement | null;
+    const status = Array.from(document.querySelectorAll('[data-testid="move-status"]'))
+      .map((node) => String(node.textContent || '').trim())
+      .filter(Boolean)
+      .join(' | ');
+    const sourceReserve = document.querySelector('[data-testid="move-source-balance-reserve"]');
+    const sourceExternal = document.querySelector('[data-testid="move-source-balance-external"]');
+    const sourceAccount = document.querySelector('[data-testid="move-source-balance-account"]');
+    const headerEntity = document.querySelector('.wallet-meta-value');
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        eReplicas?: Map<string, unknown>;
+      };
+    }).isolatedEnv;
+    return {
+      amount: String(amountInput?.value || '').trim(),
+      confirmDisabled: confirm ? !!confirm.disabled : null,
+      status,
+      sourceReserveRaw: String(sourceReserve?.getAttribute('data-raw-amount') || ''),
+      sourceExternalRaw: String(sourceExternal?.getAttribute('data-raw-amount') || ''),
+      sourceAccountRaw: String(sourceAccount?.getAttribute('data-raw-amount') || ''),
+      headerEntityId: String(headerEntity?.textContent || '').trim(),
+      href: String(window.location.href || ''),
+      readyState: String(document.readyState || ''),
+      hasIsolatedEnv: !!env,
+      replicaCount: env?.eReplicas instanceof Map ? env.eReplicas.size : 0,
+    };
+  });
 }
 
 async function extendCreditDirect(
@@ -329,8 +496,112 @@ async function broadcastDraftBatch(
   page: Page,
   entityId: string,
   signerId: string,
+  expectedPendingKinds: Array<
+    | 'externalToReserve'
+    | 'reserveToCollateral'
+    | 'collateralToReserve'
+    | 'reserveToReserve'
+    | 'reserveToExternal'
+    | 'disputeStarts'
+    | 'disputeFinalizations'
+  > = [],
+  debugStepLabel = '',
 ): Promise<{ consoleMessages: string[]; afterClickSnapshot: Awaited<ReturnType<typeof readJBatchSnapshot>> }> {
-  const broadcast = page.locator('.workspace-pending-banner').getByTestId('settle-sign-broadcast').first();
+  const readExpectedPendingCount = (snapshot: Awaited<ReturnType<typeof readJBatchSnapshot>>): number => {
+    if (expectedPendingKinds.length === 0) {
+      return (
+        snapshot.pendingExternalToReserve +
+        snapshot.pendingReserveToCollateral +
+        snapshot.pendingCollateralToReserve +
+        snapshot.pendingReserveToReserve +
+        snapshot.pendingReserveToExternal +
+        snapshot.pendingDisputeStarts +
+        snapshot.pendingDisputeFinalizations
+      );
+    }
+    return expectedPendingKinds.reduce((total, kind) => {
+      switch (kind) {
+        case 'externalToReserve':
+          return total + snapshot.pendingExternalToReserve;
+        case 'reserveToCollateral':
+          return total + snapshot.pendingReserveToCollateral;
+        case 'collateralToReserve':
+          return total + snapshot.pendingCollateralToReserve;
+        case 'reserveToReserve':
+          return total + snapshot.pendingReserveToReserve;
+        case 'reserveToExternal':
+          return total + snapshot.pendingReserveToExternal;
+        case 'disputeStarts':
+          return total + snapshot.pendingDisputeStarts;
+        case 'disputeFinalizations':
+          return total + snapshot.pendingDisputeFinalizations;
+      }
+    }, 0);
+  };
+  try {
+    await expect
+      .poll(async () => {
+        const snapshot = await readJBatchSnapshot(page, entityId, signerId);
+        return readExpectedPendingCount(snapshot);
+      }, {
+        timeout: 30_000,
+        intervals: [250, 500, 1000],
+      })
+      .toBeGreaterThan(0);
+    if (debugStepLabel) console.log(`[debt-e2e] ${debugStepLabel}-draft-observed`);
+  } catch {
+    const snapshot = await readJBatchSnapshot(page, entityId, signerId).catch(() => null);
+    const toastMessage = await page.locator('.toast.error .message').last().textContent().catch(() => '');
+    const moveStatus = (await page.getByTestId('move-status').allTextContents().catch(() => []))
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+      .join(' | ');
+    const moveUi = await readMoveUiDebug(page).catch(() => ({
+      amount: '',
+      confirmDisabled: null,
+      status: '',
+      sourceReserveRaw: '',
+      sourceExternalRaw: '',
+      sourceAccountRaw: '',
+      headerEntityId: '',
+      href: '',
+      readyState: '',
+      hasIsolatedEnv: false,
+      replicaCount: 0,
+    }));
+    const allBatches = await readAllBatchSnapshots(page).catch(() => []);
+    const foreignPending = allBatches.filter((entry) => entry.pendingCount > 0 && !entry.key.toLowerCase().startsWith(`${entityId.toLowerCase()}:`));
+    const activeRoot = await page.evaluate(() => ({
+      assetsVisible: !!document.querySelector('[data-testid="move-workspace-assets"]'),
+      accountsVisible: !!document.querySelector('nav[aria-label="Account workspace"]'),
+      activeAssetTab: document.querySelector('[data-testid="asset-tab-move"].active, [data-testid="asset-tab-history"].active')?.textContent?.trim() || '',
+      activeAccountTab: document.querySelector('.account-workspace-tab.active')?.textContent?.trim() || '',
+    })).catch(() => ({
+      assetsVisible: false,
+      accountsVisible: false,
+      activeAssetTab: '',
+      activeAccountTab: '',
+    }));
+    throw new Error(
+      `batch draft did not appear within 30s:` +
+      ` expectedKinds=${expectedPendingKinds.join(',') || 'any'}` +
+      ` toast=${String(toastMessage || '').trim()}` +
+      ` snapshot=${JSON.stringify(snapshot)}` +
+      ` moveStatus=${moveStatus}` +
+      ` moveUi=${JSON.stringify(moveUi)}` +
+      ` activeRoot=${JSON.stringify(activeRoot)}` +
+      ` foreignPending=${JSON.stringify(foreignPending)}` +
+      ` allBatches=${JSON.stringify(allBatches)}`,
+    );
+  }
+
+  await openAssetsTab(page);
+  const moveTab = page.getByTestId('asset-tab-move').first();
+  if (await moveTab.isVisible().catch(() => false)) {
+    await moveTab.click();
+  }
+
+  const broadcast = page.getByTestId('settle-sign-broadcast').first();
   await expect(broadcast).toBeVisible({ timeout: 30_000 });
   await expect(broadcast).toBeEnabled({ timeout: 120_000 });
   let dialogMessage = '';
@@ -347,6 +618,7 @@ async function broadcastDraftBatch(
   page.on('console', onConsole);
   try {
     await broadcast.click();
+    if (debugStepLabel) console.log(`[debt-e2e] ${debugStepLabel}-broadcast-clicked`);
   } finally {
     page.off('dialog', onDialog);
     page.off('console', onConsole);
@@ -365,6 +637,7 @@ async function broadcastDraftBatch(
       ` console=${JSON.stringify(consoleMessages)}`,
     );
   }
+  if (debugStepLabel) console.log(`[debt-e2e] ${debugStepLabel}-broadcasted`);
   return { consoleMessages, afterClickSnapshot };
 }
 
@@ -386,7 +659,7 @@ async function queueAndBroadcastDisputeStartDirect(
     })
     .toBeGreaterThan(before.pendingDisputeStarts);
   await openWorkspaceTab(page, /History/i);
-  const broadcastDebug = await broadcastDraftBatch(page, entityId, signerId);
+  const broadcastDebug = await broadcastDraftBatch(page, entityId, signerId, ['disputeStarts']);
   try {
     await expect
       .poll(async () => {
@@ -440,7 +713,7 @@ async function queueAndBroadcastDisputeFinalizeDirect(
   ) {
     return;
   }
-  const broadcastDebug = await broadcastDraftBatch(page, entityId, signerId);
+  const broadcastDebug = await broadcastDraftBatch(page, entityId, signerId, ['disputeFinalizations']);
   try {
     await expect
       .poll(async () => {
@@ -562,10 +835,10 @@ async function readDebtSnapshot(
     return {
       debtId: String(match.debtId || ''),
       status: String(match.status || ''),
-      createdAmount: String(match.createdAmount || '0'),
-      paidAmount: String(match.paidAmount || '0'),
-      remainingAmount: String(match.remainingAmount || '0'),
-      forgivenAmount: String(match.forgivenAmount || '0'),
+      createdAmount: BigInt(match.createdAmount || 0n),
+      paidAmount: BigInt(match.paidAmount || 0n),
+      remainingAmount: BigInt(match.remainingAmount || 0n),
+      forgivenAmount: BigInt(match.forgivenAmount || 0n),
       updates: Array.isArray(match.updates) ? match.updates.map((update: any) => String(update?.eventType || '')) : [],
     };
   }, { entityId, signerId, counterpartyId, direction, tokenId });
@@ -613,7 +886,7 @@ async function waitForDebtSnapshot(
   await expect.poll(async () => {
     latest = await readDebtSnapshot(page, entityId, signerId, counterpartyId, direction);
     if (!latest) return 'missing';
-    return `${latest.status}:${latest.remainingAmount}:${latest.paidAmount}`;
+    return `${latest.status}:${latest.remainingAmount.toString()}:${latest.paidAmount.toString()}`;
   }, { timeout: 45_000, intervals: [500, 1000, 1500] }).toBe(`open:${expectedRemaining}:${expectedPaid}`);
   return latest!;
 }
@@ -672,7 +945,9 @@ async function enforceDebtUntilSettled(
     const settled = await expect
       .poll(async () => {
         const value = await readDebtSnapshot(page, debtorEntityId, debtorSignerId, creditorEntityId, 'out');
-        return `${value?.status || 'missing'}:${value?.remainingAmount || 'missing'}:${value?.paidAmount || 'missing'}`;
+        return value
+          ? `${value.status}:${value.remainingAmount.toString()}:${value.paidAmount.toString()}`
+          : 'missing';
       }, {
         timeout: 15_000,
         intervals: [500, 1000, 1500],
@@ -684,22 +959,63 @@ async function enforceDebtUntilSettled(
   }
   const value = await readDebtSnapshot(page, debtorEntityId, debtorSignerId, creditorEntityId, 'out');
   throw new Error(
-    `debt enforce did not settle as expected: got=${value?.status || 'missing'}:${value?.remainingAmount || 'missing'}:${value?.paidAmount || 'missing'} expected=${expectedSnapshot}`,
+    `debt enforce did not settle as expected: got=${
+      value ? `${value.status}:${value.remainingAmount.toString()}:${value.paidAmount.toString()}` : 'missing'
+    } expected=${expectedSnapshot}`,
   );
 }
 
-async function openReserveToExternalMove(page: Page, amount: string, recipient: string): Promise<void> {
+async function openReserveToExternalMove(
+  page: Page,
+  entityId: string,
+  amount: string,
+  recipient: string,
+  expectedState: 'ready' | 'blocked' = 'ready',
+): Promise<void> {
+  await ensureSelfEntitySelected(page, entityId);
   await openAssetsTab(page);
   const moveTab = page.getByTestId('asset-tab-move').first();
   await expect(moveTab).toBeVisible({ timeout: 20_000 });
   await moveTab.click();
   const workspace = page.getByTestId('move-workspace-assets').first();
   await expect(workspace).toBeVisible({ timeout: 20_000 });
+  await expect(workspace.getByTestId('move-route-summary').first()).toBeVisible({ timeout: 20_000 });
   await workspace.getByTestId('move-asset-symbol').first().selectOption('USDC');
   await workspace.getByTestId('move-source-reserve').first().click();
   await workspace.getByTestId('move-target-external').first().click();
   await workspace.getByTestId('move-external-recipient').first().fill(recipient);
-  await workspace.getByTestId('move-amount').first().fill(amount);
+  const amountInput = workspace.getByTestId('move-amount').first();
+  await amountInput.fill(amount);
+  await expect
+    .poll(async () => (await amountInput.inputValue()).trim(), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: 'move amount input must retain the typed value',
+    })
+    .toBe(amount);
+  const confirm = workspace.getByTestId('move-confirm').first();
+  await expect(workspace.getByTestId('move-route-summary').first()).toContainText('Withdraw to wallet');
+  await expect(workspace.getByTestId('move-route-summary').first()).toContainText('Withdraw reserve to recipient wallet');
+  if (expectedState === 'blocked') {
+    await expect
+      .poll(async () => {
+        if (!(await confirm.isDisabled())) return 'enabled';
+        const statuses = await page.getByTestId('move-status').allTextContents().catch(() => []);
+        const text = statuses.map((entry) => String(entry || '').trim()).filter(Boolean).join(' | ');
+        return text || 'disabled';
+      }, { timeout: 10_000, intervals: [200, 400, 800] })
+      .toBe('Amount exceeds available balance');
+    return;
+  }
+  await expect
+    .poll(async () => {
+      if (!(await confirm.isDisabled())) return 'enabled';
+      const statuses = await page.getByTestId('move-status').allTextContents().catch(() => []);
+      const text = statuses.map((entry) => String(entry || '').trim()).filter(Boolean).join(' | ');
+      return text || 'disabled';
+    }, { timeout: 10_000, intervals: [200, 400, 800] })
+    .toBe('enabled');
+  await expect(confirm).toHaveText(/Add to Batch/i);
 }
 
 async function openOutstandingDebtToken(page: Page, symbol = 'USDC'): Promise<void> {
@@ -804,9 +1120,13 @@ test.describe('debt ledger', () => {
     const aliceIncoming = await waitForDebtSnapshot(alicePage, alice.entityId, alice.signerId, bob.entityId, 'in', USD_150, '0');
     const bobOutgoing = await waitForDebtSnapshot(bobPage, bob.entityId, bob.signerId, alice.entityId, 'out', USD_150, '0');
 
-    expect(aliceIncoming.createdAmount).toBe(USD_150);
+    expect(aliceIncoming.createdAmount).toBe(BigInt(USD_150));
+    expect(aliceIncoming.remainingAmount).toBe(BigInt(USD_150));
+    expect(aliceIncoming.paidAmount).toBe(0n);
     expect(aliceIncoming.updates).toEqual(['DebtCreated']);
-    expect(bobOutgoing.createdAmount).toBe(USD_150);
+    expect(bobOutgoing.createdAmount).toBe(BigInt(USD_150));
+    expect(bobOutgoing.remainingAmount).toBe(BigInt(USD_150));
+    expect(bobOutgoing.paidAmount).toBe(0n);
     expect(bobOutgoing.updates).toEqual(['DebtCreated']);
 
     step('underfunded-r2e-block');
@@ -816,7 +1136,7 @@ test.describe('debt ledger', () => {
       intervals: [500, 1000],
     }).toBeGreaterThanOrEqual(100);
 
-    await openReserveToExternalMove(bobPage, '10', bob.signerId);
+    await openReserveToExternalMove(bobPage, bob.entityId, '10', bob.signerId, 'blocked');
     await expect(
       bobPage.getByTestId('move-workspace-assets').first().getByTestId('move-confirm').first(),
     ).toBeDisabled({ timeout: 10_000 });
@@ -830,7 +1150,9 @@ test.describe('debt ledger', () => {
     await expect
       .poll(async () => {
         const value = await readDebtSnapshot(bobPage, bob.entityId, bob.signerId, alice.entityId, 'out');
-        return `${value?.remainingAmount || 'missing'}:${value?.paidAmount || 'missing'}`;
+        return value
+          ? `${value.remainingAmount.toString()}:${value.paidAmount.toString()}`
+          : 'missing';
       }, {
         timeout: 45_000,
         intervals: [500, 1000, 1500],
@@ -857,14 +1179,47 @@ test.describe('debt ledger', () => {
     );
 
     step('overfunded-r2e');
+    const cleanBatchSnapshot = await readJBatchSnapshot(bobPage, bob.entityId, bob.signerId);
+    const cleanPendingCount =
+      cleanBatchSnapshot.pendingExternalToReserve +
+      cleanBatchSnapshot.pendingReserveToCollateral +
+      cleanBatchSnapshot.pendingCollateralToReserve +
+      cleanBatchSnapshot.pendingReserveToReserve +
+      cleanBatchSnapshot.pendingReserveToExternal +
+      cleanBatchSnapshot.pendingDisputeStarts +
+      cleanBatchSnapshot.pendingDisputeFinalizations;
+    expect(
+      {
+        pendingCount: cleanPendingCount,
+        sentExists: cleanBatchSnapshot.sentExists,
+        recentMessages: cleanBatchSnapshot.recentMessages,
+      },
+      'debt flow must leave a clean batch state before overfunded reserve->external move',
+    ).toMatchObject({
+      pendingCount: 0,
+      sentExists: false,
+    });
     await faucetReserve(bobPage, bob.entityId, 'USDC');
     const externalBefore = await getRenderedExternalBalance(bobPage, 'USDC');
-    await openReserveToExternalMove(bobPage, '20', bob.signerId);
+    const externalBeforeRaw = await getRpcExternalBalanceRaw(bobPage, 'USDC', bob.signerId);
+    const reserveBeforeRaw = await readOnchainReserveBalanceRaw(bobPage, bob.entityId, 'USDC');
+    await openReserveToExternalMove(bobPage, bob.entityId, '20', bob.signerId, 'ready');
     const moveConfirm = bobPage.getByTestId('move-workspace-assets').first().getByTestId('move-confirm').first();
     await expect(moveConfirm).toBeEnabled({ timeout: 20_000 });
     await moveConfirm.click();
-    await broadcastDraftBatch(bobPage, bob.entityId, bob.signerId);
+    step('overfunded-r2e-draft-clicked');
+    await broadcastDraftBatch(bobPage, bob.entityId, bob.signerId, ['reserveToExternal'], 'overfunded-r2e');
+    step('overfunded-r2e-broadcasted');
 
+    await expect.poll(async () => await getRpcExternalBalanceRaw(bobPage, 'USDC', bob.signerId), {
+      timeout: 45_000,
+      intervals: [500, 1000, 1500],
+    }).toBe(externalBeforeRaw + (20n * TOKEN_SCALE));
+    await expect.poll(async () => await readOnchainReserveBalanceRaw(bobPage, bob.entityId, 'USDC'), {
+      timeout: 45_000,
+      intervals: [500, 1000, 1500],
+    }).toBe(reserveBeforeRaw - (20n * TOKEN_SCALE));
+    step('overfunded-r2e-raw-deltas');
     await expect.poll(async () => await getRenderedExternalBalance(bobPage, 'USDC'), {
       timeout: 45_000,
       intervals: [500, 1000, 1500],
