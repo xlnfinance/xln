@@ -59,6 +59,7 @@
     class:is-selected={orderbookScopeMode === 'selected'}
     aria-pressed={orderbookScopeMode === 'selected'}
     data-testid="swap-scope-toggle"
+    data-scope-mode={orderbookScopeMode}
     on:click={toggleScope}
   >
     {orderbookScopeMode === 'aggregated' ? 'Aggregated' : 'Selected'}

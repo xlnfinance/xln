@@ -855,10 +855,13 @@
     </div>
 
     <!-- Asks (sells) - shown in reverse order, lowest ask at bottom -->
-    <div class="asks-section">
+    <div class="asks-section" data-testid="orderbook-asks">
       {#each [...asks].reverse() as ask, i}
         <div
           class="row ask-row clickable"
+          data-testid="orderbook-ask-row"
+          data-price={ask.price.toString()}
+          data-size={String(ask.size)}
           class:with-sources={showSources}
           class:cumulative-highlight={hoverAskDisplayIdx >= 0 && i >= hoverAskDisplayIdx}
           class:cumulative-first={hoverAskDisplayIdx >= 0 && i === hoverAskDisplayIdx}
@@ -909,6 +912,7 @@
     <!-- Spread indicator -->
     <div
       class="spread-indicator"
+      data-testid="orderbook-mid-row"
       class:clickable={Boolean((preferredClickSide === 'bid' ? bids[0] : asks[0]))}
       role="button"
       tabindex="0"
@@ -926,10 +930,13 @@
     </div>
 
     <!-- Bids (buys) -->
-    <div class="bids-section">
+    <div class="bids-section" data-testid="orderbook-bids">
       {#each bids as bid, i}
         <div
           class="row bid-row clickable"
+          data-testid="orderbook-bid-row"
+          data-price={bid.price.toString()}
+          data-size={String(bid.size)}
           class:with-sources={showSources}
           class:cumulative-highlight={hoverBidIdx >= 0 && i <= hoverBidIdx}
           class:cumulative-first={hoverBidIdx >= 0 && i === 0}
