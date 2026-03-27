@@ -4,7 +4,7 @@
  * These tests verify that swap offers can auto-prepare missing token capacity, place and cancel
  * cleanly through the UI, and that the scenario runners still produce partial fills after reload-safe setup.
  */
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth } from './utils/e2e-baseline';
@@ -15,6 +15,7 @@ import {
 } from './utils/e2e-demo-users';
 import { getRenderedOutboundForAccount } from './utils/e2e-account-ui';
 import { buildDefaultEntitySwapPairs, getTokenInfo } from '../runtime/account-utils';
+import { capturePageScreenshot } from './utils/e2e-screenshots';
 
 const INIT_TIMEOUT = 30_000;
 const CANONICAL_SWAP_PAIRS = buildDefaultEntitySwapPairs().map((pair) => ({
@@ -1874,7 +1875,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     });
   });
 
-  test('swap keeps a within-band wide limit as a resting order instead of filling immediately', async ({ page }) => {
+test('swap keeps a within-band wide limit as a resting order instead of filling immediately', async ({ page }, testInfo) => {
     const accountRef = await prepareOrderbookClickTest(page);
     const pairSelect = page.getByTestId('swap-pair-select').first();
     const buySideButton = page.getByTestId('swap-side-buy').first();
@@ -1908,9 +1909,11 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     await priceInput.fill(String((bestAsk * 0.85).toFixed(4)));
     await expect(page.getByTestId('swap-size-hint')).toHaveCount(0);
     await expect(placeButton).toBeEnabled({ timeout: 10_000 });
+    await capturePageScreenshot(page, testInfo, 'swap-form-filled-resting-limit-desktop.png');
     await placeButton.click();
 
     await expect(page.getByTestId('swap-open-order-row').first()).toBeVisible({ timeout: 30_000 });
+    await capturePageScreenshot(page, testInfo, 'swap-resting-order-open-desktop.png');
     await expect
       .poll(async () => await readPositiveSwapResolveCount(
         page,
