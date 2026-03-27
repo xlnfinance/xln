@@ -115,7 +115,7 @@ export async function runProcessBatchScenario(_existingEnv?: Env): Promise<Env> 
     entityId: hub.id,
     signerId: hub.signer,
     entityTxs: spenders.map((spender) => ({
-      type: 'deposit_collateral' as const,
+      type: 'r2c' as const,
       data: { counterpartyId: spender.id, tokenId: USDC, amount: INITIAL_COLLATERAL },
     })),
   }]);
@@ -174,11 +174,11 @@ export async function runProcessBatchScenario(_existingEnv?: Env): Promise<Env> 
     signerId: hub.signer,
     entityTxs: [
       {
-        type: 'deposit_collateral',
+        type: 'r2c',
         data: { counterpartyId: receiverA.id, tokenId: USDC, amount: R2C_A },
       },
       {
-        type: 'deposit_collateral',
+        type: 'r2c',
         data: { counterpartyId: receiverB.id, tokenId: USDC, amount: R2C_B },
       },
     ],

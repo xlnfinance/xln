@@ -254,6 +254,7 @@ export async function gotoApp(
   }, apiBaseUrl);
 
   const waitForAppReady = async (): Promise<boolean> => {
+    if (page.isClosed()) return false;
     const unlock = page.locator('button:has-text("Unlock")');
     if (await unlock.isVisible({ timeout: 1500 }).catch(() => false)) {
       await page.locator('input').first().fill('mml');
@@ -262,12 +263,32 @@ export async function gotoApp(
     }
     try {
       await page.waitForFunction(() => {
-        const loadingVisible = Boolean(document.querySelector('.loading-screen'));
-        const errorVisible = Boolean(document.querySelector('.error-screen'));
-        const viewVisible = Boolean(document.querySelector('.view-wrapper'));
-        return !loadingVisible &&
-          !errorVisible &&
-          viewVisible;
+        const isVisible = (selector: string): boolean => {
+          const element = document.querySelector(selector) as HTMLElement | null;
+          if (!element) return false;
+          const style = window.getComputedStyle(element);
+          if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+            return false;
+          }
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        };
+        const errorVisible = isVisible('.error-screen');
+        const inactiveVisible = isVisible('[data-testid="inactive-tab-screen"]');
+        const viewVisible =
+          isVisible('.view-wrapper') ||
+          isVisible('nav[aria-label="Account workspace"]') ||
+          isVisible('[data-testid="app-runtime-ready"]');
+        const runtimeCreationVisible =
+          isVisible('#runtime-creation') ||
+          isVisible('.quick-login-grid') ||
+          Boolean(Array.from(document.querySelectorAll('button')).find((button) => {
+            const label = (button.textContent || '').trim().toLowerCase();
+            return label === 'alice' || label === 'bob' || label === 'carol' || label === 'dave';
+          }));
+        return !errorVisible &&
+          !inactiveVisible &&
+          (viewVisible || runtimeCreationVisible);
       }, { timeout: initTimeoutMs });
       return true;
     } catch {
@@ -275,13 +296,26 @@ export async function gotoApp(
     }
   };
 
+  const currentUrl = page.url();
+  if (currentUrl.includes('/app') && await waitForAppReady()) {
+    if (settleMs > 0) await page.waitForTimeout(settleMs);
+    return;
+  }
+
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    await page.goto(`${appBaseUrl}/app`, { waitUntil: 'domcontentloaded' });
+    if (page.isClosed()) {
+      throw new Error('gotoApp aborted because page is already closed');
+    }
+    const attemptUrl = page.url();
+    if (attemptUrl.includes('/app')) {
+      await page.reload({ waitUntil: 'domcontentloaded' });
+    } else {
+      await page.goto(`${appBaseUrl}/app`, { waitUntil: 'domcontentloaded' });
+    }
     if (await waitForAppReady()) {
       if (settleMs > 0) await page.waitForTimeout(settleMs);
       return;
     }
-    await page.reload({ waitUntil: 'domcontentloaded' });
   }
 
   const appDiagnostics = await page.evaluate(() => ({
@@ -291,6 +325,7 @@ export async function gotoApp(
     hasLoading: Boolean(document.querySelector('.loading-screen')),
     hasError: Boolean(document.querySelector('.error-screen')),
     hasView: Boolean(document.querySelector('.view-wrapper')),
+    hasRuntimeCreation: Boolean(document.querySelector('#runtime-creation')),
   })).catch(() => null);
   throw new Error(`gotoApp failed to reach ready view: ${JSON.stringify(appDiagnostics)}`);
 }

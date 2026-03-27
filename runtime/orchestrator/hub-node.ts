@@ -961,7 +961,7 @@ const run = async (): Promise<void> => {
               signerId: bootstrap.signerId,
               entityTxs: [
                 {
-                  type: 'reserve_to_reserve',
+                  type: 'r2r',
                   data: { toEntityId: userEntityId, tokenId, amount: amountWei },
                 },
               ],

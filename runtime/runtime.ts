@@ -811,7 +811,7 @@ const buildRouteOutputKey = (output: RoutedEntityInput): string => {
       const from = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
       const to = typeof data?.toEntityId === 'string' ? data.toEntityId : '';
       // Handles both field names: settle_propose uses counterpartyEntityId,
-      // deposit_collateral uses counterpartyId — both must produce unique keys.
+      // r2c uses counterpartyId — both must produce unique keys.
       const cp =
         typeof data?.counterpartyEntityId === 'string'
           ? data.counterpartyEntityId
@@ -867,20 +867,6 @@ const hubNeedsPeriodicWake = (replica: EntityReplica): boolean => {
     if ((accountMachine.requestedRebalanceFeeState?.size ?? 0) > 0) return true;
   }
 
-  return false;
-};
-
-const hasUnsafePendingAccountStateForCheckpoint = (env: Env): boolean => {
-  if (!env.eReplicas || env.eReplicas.size === 0) return false;
-  for (const replica of env.eReplicas.values()) {
-    const accounts = replica.state?.accounts;
-    if (!accounts || accounts.size === 0) continue;
-    for (const accountMachine of accounts.values()) {
-      if (accountMachine.pendingFrame || accountMachine.pendingAccountInput) {
-        return true;
-      }
-    }
-  }
   return false;
 };
 
@@ -3525,7 +3511,6 @@ export const saveEnvToDB = async (env: Env, currentFrameInput?: RuntimeInput): P
     resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
     ensureRuntimeState,
     ensureRuntimeConfig,
-    hasUnsafePendingAccountStateForCheckpoint,
     assertPersistedContractConfigReady,
     isDbUnavailableError,
     getPerfMs,

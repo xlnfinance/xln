@@ -214,7 +214,7 @@
           ? (hasPendingBatch ? 'settling' : 'pending')
           : 'none',
         visualScale: buildTokenVisualScale(String(info.symbol || ''), Number(info.decimals ?? 18), derived),
-        actionLabel: 'Faucet',
+        actionLabel: faucetLabel,
       });
     }
     return rows.sort((a, b) => {
@@ -240,6 +240,7 @@
     return false;
   })();
   $: faucetLabel = isDevnet ? 'Faucet' : '';
+  $: liteMode = !!$settings.liteMode;
   $: uiStatus = getAccountUiStatus(account);
   $: isPending = uiStatus === 'sent';
   $: hasActiveDispute = uiStatus === 'disputed';
@@ -378,8 +379,10 @@
           title="Account status"
         >
           <span class="status-dot-inner"></span>
-          <span class="status-frame">#{accountHeight}</span>
-          {#if coveragePct !== null}
+          {#if !liteMode}
+            <span class="status-frame">#{accountHeight}</span>
+          {/if}
+          {#if !liteMode && coveragePct !== null}
             <span class="status-coverage" class:cov-warn={coveragePct < 40} class:cov-caution={coveragePct >= 40 && coveragePct < 75} class:cov-good={coveragePct >= 75}>{coveragePct.toFixed(0)}%</span>
           {/if}
         </button>
@@ -459,7 +462,7 @@
     </div>
   </div>
 
-  {#if activeFlows.length > 0 || lockSummary.incomingCount > 0 || lockSummary.outgoingCount > 0}
+  {#if !liteMode && (activeFlows.length > 0 || lockSummary.incomingCount > 0 || lockSummary.outgoingCount > 0)}
     <div class="locks-row">
       {#if activeFlows.length > 0}
         {#each activeFlows as flow (flow.id)}
@@ -518,7 +521,8 @@
         decimals={Number(primaryTokenInfo.decimals ?? 18)}
         barHeight={6}
         visualScale={aggregateVisualScale}
-        actionLabel="Faucet"
+        showBar={!liteMode}
+        actionLabel={liteMode ? '' : faucetLabel}
         actionTokenId={agg.primaryTokenId}
         on:action={() => handleTokenFaucet(agg.primaryTokenId)}
       />
@@ -528,6 +532,7 @@
         barLayout={$settings.barLayout ?? 'center'}
         barHeight={6}
         showMetricLabels={false}
+        showBars={!liteMode}
         showHeader={false}
         mode="plain"
         on:action={(event) => handleTokenFaucet(event.detail.tokenId)}

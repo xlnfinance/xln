@@ -4,9 +4,9 @@ import type { EntityInput, EntityState, EntityTx } from '../../types';
 import { initJBatch, batchAddExternalTokenToReserve } from '../../j-batch';
 import { addMessage, cloneEntityState } from '../../state-helpers';
 
-export async function handleExternalToReserve(
+export async function handleE2R(
   entityState: EntityState,
-  entityTx: Extract<EntityTx, { type: 'external_to_reserve' }>,
+  entityTx: Extract<EntityTx, { type: 'e2r' }>,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   const { contractAddress, amount } = entityTx.data;
   const tokenType = typeof entityTx.data.tokenType === 'number' ? entityTx.data.tokenType : 0;

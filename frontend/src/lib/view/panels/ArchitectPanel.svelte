@@ -276,14 +276,14 @@
         throw new Error(`Missing signer for ${shortAddress(r2rFromEntity)}`);
       }
 
-      console.log(`[Architect] Queueing reserve_to_reserve: ${r2rFromEntity} → ${r2rToEntity}, amount=${amount}`);
+      console.log(`[Architect] Queueing r2r: ${r2rFromEntity} → ${r2rToEntity}, amount=${amount}`);
       XLN.enqueueRuntimeInput($isolatedEnv, {
         runtimeTxs: [],
         entityInputs: [{
           entityId: r2rFromEntity,
           signerId,
           entityTxs: [{
-            type: 'reserve_to_reserve',
+            type: 'r2r',
             data: {
               toEntityId: r2rToEntity,
               tokenId: 1,

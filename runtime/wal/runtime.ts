@@ -29,7 +29,6 @@ export type SaveRuntimeFrameToWalOptions = {
   resolveDbNamespace: (options: { env: Env }) => string;
   ensureRuntimeState: (env: Env) => { persistencePaused?: boolean; db?: unknown };
   ensureRuntimeConfig: (env: Env) => { snapshotIntervalFrames?: number };
-  hasUnsafePendingAccountStateForCheckpoint: (env: Env) => boolean;
   assertPersistedContractConfigReady: (env: Env, label: string) => void;
   isDbUnavailableError: (error: unknown) => boolean;
   getPerfMs: () => number;
@@ -47,7 +46,6 @@ export const saveRuntimeFrameToWal = async (options: SaveRuntimeFrameToWalOption
     resolveDbNamespace,
     ensureRuntimeState,
     ensureRuntimeConfig,
-    hasUnsafePendingAccountStateForCheckpoint,
     assertPersistedContractConfigReady,
     isDbUnavailableError,
     getPerfMs,
@@ -91,8 +89,7 @@ export const saveRuntimeFrameToWal = async (options: SaveRuntimeFrameToWalOption
 
     const checkpointInterval = ensureRuntimeConfig(env).snapshotIntervalFrames ?? defaultSnapshotIntervalFrames;
     const checkpointDue = env.height <= 1 || env.height % checkpointInterval === 0;
-    const checkpointBlockedByPendingAccountState = checkpointDue && hasUnsafePendingAccountStateForCheckpoint(env);
-    const shouldCheckpoint = checkpointDue && !checkpointBlockedByPendingAccountState;
+    const shouldCheckpoint = checkpointDue;
     const checkpointBuildStartedAt = getPerfMs();
     const persistedSnapshot = buildRuntimeCheckpointSnapshot(env);
     checkpointBuildMs = getPerfMs() - checkpointBuildStartedAt;
@@ -123,10 +120,6 @@ export const saveRuntimeFrameToWal = async (options: SaveRuntimeFrameToWalOption
       });
       snapshotSerializeMs = getPerfMs() - snapshotSerializeStartedAt;
       snapshotBytes = Buffer.byteLength(checkpointSnapshot);
-    } else if (checkpointBlockedByPendingAccountState) {
-      console.warn(
-        `[PERSIST] checkpoint skipped at frame=${env.height} due to pending bilateral account state; keeping previous safe checkpoint`,
-      );
     }
 
     const opsBuildStartedAt = getPerfMs();

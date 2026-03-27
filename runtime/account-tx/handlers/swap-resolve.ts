@@ -44,6 +44,11 @@ export async function handleSwapResolve(
     cancelRemainder,
     executionGiveAmount,
     executionWantAmount,
+    restingPriceTicks,
+    restingGiveAmount,
+    restingWantAmount,
+    restingQuantizedGive,
+    restingQuantizedWant,
   } = accountTx.data;
   const events: string[] = [];
 
@@ -54,6 +59,22 @@ export async function handleSwapResolve(
   const offer = accountMachine.swapOffers.get(offerId);
   if (!offer) {
     return { success: false, error: `Offer ${offerId} not found`, events };
+  }
+
+  const canonicalGiveAmount = restingGiveAmount ?? offer.giveAmount;
+  const canonicalWantAmount = restingWantAmount ?? offer.wantAmount;
+  const canonicalQuantizedGive = restingQuantizedGive ?? offer.quantizedGive ?? canonicalGiveAmount;
+  const canonicalQuantizedWant = restingQuantizedWant ?? offer.quantizedWant ?? canonicalWantAmount;
+  const canonicalPriceTicks = restingPriceTicks ?? offer.priceTicks;
+
+  if (canonicalGiveAmount <= 0n || canonicalWantAmount <= 0n) {
+    return { success: false, error: `Canonical resting offer amounts must be positive`, events };
+  }
+  if (canonicalQuantizedGive <= 0n || canonicalQuantizedWant <= 0n) {
+    return { success: false, error: `Canonical resting quantized amounts must be positive`, events };
+  }
+  if (canonicalQuantizedGive > canonicalGiveAmount || canonicalQuantizedWant > canonicalWantAmount) {
+    return { success: false, error: `Canonical resting quantized amounts exceed offer amounts`, events };
   }
 
   // 2. Validate caller is the counterparty (Channel.ts: byLeft = frame proposer = caller)
@@ -70,8 +91,8 @@ export async function handleSwapResolve(
   }
 
   // 4. Calculate fill amounts
-  const effectiveGive = offer.quantizedGive ?? offer.giveAmount;
-  const effectiveWant = offer.quantizedWant ?? offer.wantAmount;
+  const effectiveGive = canonicalQuantizedGive;
+  const effectiveWant = canonicalQuantizedWant;
   const executionProvided = executionGiveAmount !== undefined || executionWantAmount !== undefined;
   if (executionProvided && (executionGiveAmount === undefined || executionWantAmount === undefined)) {
     return {
@@ -287,7 +308,7 @@ export async function handleSwapResolve(
   } else {
     // Partial fill - requantize remainder so subsequent fills stay lot-aligned.
     const remainingGiveRaw = effectiveGive - filledGive;
-    const offerPriceTicks = offer.priceTicks ?? computeSwapPriceTicks(
+    const offerPriceTicks = canonicalPriceTicks ?? computeSwapPriceTicks(
       offer.giveTokenId,
       offer.wantTokenId,
       effectiveGive,

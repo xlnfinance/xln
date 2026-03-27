@@ -51,6 +51,14 @@
   const ACCOUNT_BAR_USD_PER_100PX_MIN = 10;
   const ACCOUNT_BAR_USD_PER_100PX_MAX = 10_000;
   const BUILD_UI_OPTIONS = UI_STYLE_OPTIONS.filter((group) => group.key !== 'tabs');
+  const BALANCE_REFRESH_OPTIONS = [
+    { label: 'Off', value: 0 },
+    { label: '1s', value: 1000 },
+    { label: '5s', value: 5000 },
+    { label: '15s', value: 15000 },
+    { label: '30s', value: 30000 },
+    { label: '60s', value: 60000 },
+  ];
 
   let activeTab: SettingsTab = requestedTab ?? 'wallet';
   let lastRequestedTab: SettingsTab | null = requestedTab;
@@ -60,6 +68,7 @@
 
   let seedCopied = false;
   let mnemonic12Copied = false;
+  let recoveryPhraseRevealed = false;
 
   let showAddJMachine = false;
   let editingJMachineName: string | null = null;
@@ -125,12 +134,15 @@
     lastRequestedTab = requestedTab;
   }
 
+  $: if (activeTab !== 'wallet' && recoveryPhraseRevealed) {
+    recoveryPhraseRevealed = false;
+  }
+
   $: selectedTheme = $settings.theme;
   $: if (activeTab === 'display' && !uiSettingsJsonDraft) {
     uiSettingsJsonDraft = settingsOperations.exportUiSettingsJson();
   }
   $: currentEntityId = String(replica?.state?.entityId || tab?.entityId || '').trim();
-  $: currentSignerId = String(tab?.signerId || '').trim();
   $: currentJurisdictionLabel = jurisdictionLabel
     || String(replica?.state?.config?.jurisdiction?.name || tab?.jurisdiction || '').trim()
     || 'None';
@@ -693,8 +705,8 @@
       <section class="section-card">
         <div class="section-head">
           <div>
-            <h3>Signer Information</h3>
-            <p class="section-desc">Active wallet and recovery data.</p>
+            <h3>Wallet</h3>
+            <p class="section-desc">Wallet label and recovery access.</p>
           </div>
         </div>
 
@@ -703,14 +715,6 @@
             <div class="info-row">
               <span class="label">Label</span>
               <span class="value">{$activeVault.label}</span>
-            </div>
-            <div class="info-row">
-              <span class="label">Address</span>
-              <code class="value mono">{$activeVault.signers[0]?.address || 'N/A'}</code>
-            </div>
-            <div class="info-row">
-              <span class="label">Signers</span>
-              <span class="value">{$activeVault.signers.length}</span>
             </div>
             <div class="info-row">
               <span class="label">Created</span>
@@ -723,35 +727,51 @@
               Never share your recovery phrase. Anyone with it can access your funds.
             </div>
 
-            {#if $activeVault.mnemonic12}
+            <div class="seed-gate">
+              <div class="seed-gate-copy">
+                <strong>Recovery phrase</strong>
+                <span>Hidden by default. Reveal only when you are alone and ready to back it up.</span>
+              </div>
+              <button
+                class="btn-secondary seed-gate-btn"
+                type="button"
+                on:click={() => recoveryPhraseRevealed = !recoveryPhraseRevealed}
+              >
+                {recoveryPhraseRevealed ? 'Hide phrase' : 'Reveal phrase'}
+              </button>
+            </div>
+
+            {#if recoveryPhraseRevealed}
+              {#if $activeVault.mnemonic12}
+                <div class="seed-row">
+                  <div class="seed-row-head">
+                    <span>12 words</span>
+                    <button class="icon-btn" on:click={copyMnemonic12}>
+                      {#if mnemonic12Copied}
+                        <Check size={14} />
+                      {:else}
+                        <Copy size={14} />
+                      {/if}
+                    </button>
+                  </div>
+                  <code class="seed-code">{$activeVault.mnemonic12}</code>
+                </div>
+              {/if}
+
               <div class="seed-row">
                 <div class="seed-row-head">
-                  <span>12 words</span>
-                  <button class="icon-btn" on:click={copyMnemonic12}>
-                    {#if mnemonic12Copied}
+                  <span>24 words</span>
+                  <button class="icon-btn" on:click={copySeed}>
+                    {#if seedCopied}
                       <Check size={14} />
                     {:else}
                       <Copy size={14} />
                     {/if}
                   </button>
                 </div>
-                <code class="seed-code">{$activeVault.mnemonic12}</code>
+                <code class="seed-code">{$activeVault.seed}</code>
               </div>
             {/if}
-
-            <div class="seed-row">
-              <div class="seed-row-head">
-                <span>24 words</span>
-                <button class="icon-btn" on:click={copySeed}>
-                  {#if seedCopied}
-                    <Check size={14} />
-                  {:else}
-                    <Copy size={14} />
-                  {/if}
-                </button>
-              </div>
-              <code class="seed-code">{$activeVault.seed}</code>
-            </div>
           </div>
         {:else}
           <div class="empty-card">No wallet connected. Create or import a wallet first.</div>
@@ -810,6 +830,16 @@
           <span class="setting-title">Compact Numbers</span>
           <button class="toggle" class:on={$settings.compactNumbers} on:click={() => settingsOperations.setCompactNumbers(!$settings.compactNumbers)}>
             {$settings.compactNumbers ? 'On' : 'Off'}
+          </button>
+        </label>
+
+        <label class="setting-row">
+          <div class="setting-copy">
+            <span class="setting-title">Lite Mode</span>
+            <span class="setting-help">Hide bars, extra telemetry, and dense infrastructure details on wallet surfaces.</span>
+          </div>
+          <button class="toggle" class:on={$settings.liteMode} on:click={() => settingsOperations.setLiteMode(!$settings.liteMode)}>
+            {$settings.liteMode ? 'On' : 'Off'}
           </button>
         </label>
 
@@ -1035,6 +1065,20 @@
             </div>
           {/if}
         </div>
+
+        <label class="setting-row stacked">
+          <span class="setting-title">Balance Refresh</span>
+          <span class="setting-desc">How often wallet balances poll RPC. Hard-capped to once per second.</span>
+          <select
+            value={$settings.balanceRefreshMs ?? 15000}
+            on:change={(event) => settingsOperations.setBalanceRefreshMs(Number((event.currentTarget as HTMLSelectElement).value))}
+            data-testid="settings-network-balance-refresh"
+          >
+            {#each BALANCE_REFRESH_OPTIONS as option}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </label>
       </section>
 
       <section class="section-card">
@@ -1417,14 +1461,6 @@
 
         <div class="info-card">
           <div class="info-row">
-            <span class="label">Entity ID</span>
-            <code class="value mono">{currentEntityId || 'None selected'}</code>
-          </div>
-          <div class="info-row">
-            <span class="label">Signer ID</span>
-            <code class="value mono">{currentSignerId || 'None selected'}</code>
-          </div>
-          <div class="info-row">
             <span class="label">Jurisdiction</span>
             <span class="value">{currentJurisdictionLabel}</span>
           </div>
@@ -1707,6 +1743,35 @@
     gap: 8px;
   }
 
+  .seed-gate {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 4px 0 2px;
+  }
+
+  .seed-gate-copy {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .seed-gate-copy strong {
+    font-size: calc(13px * var(--ui-font-scale, 1));
+    color: var(--theme-text-primary, #e4e4e7);
+  }
+
+  .seed-gate-copy span {
+    color: var(--theme-text-secondary, rgba(255, 255, 255, 0.7));
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .seed-gate-btn {
+    flex-shrink: 0;
+  }
+
   .seed-row-head {
     display: flex;
     align-items: center;
@@ -1752,6 +1817,18 @@
   .setting-title {
     font-size: calc(13px * var(--ui-font-scale, 1));
     font-weight: 600;
+  }
+
+  .setting-copy {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .setting-help {
+    color: var(--theme-text-secondary, rgba(255, 255, 255, 0.7));
+    font-size: 11px;
+    line-height: 1.4;
   }
 
   .toggle {

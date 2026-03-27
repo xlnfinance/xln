@@ -813,64 +813,64 @@
   });
 </script>
 
-<div class="view-wrapper" class:embed-mode={embedMode} class:user-mode={userMode}>
-  <CommandPalette bind:isOpen={commandPaletteOpen} on:command={handlePaletteCommand} on:close={() => commandPaletteOpen = false} />
-  <PaymentSpotlight />
-  {#if userMode}
-    <UserModePanel
-      isolatedEnv={localEnvStore}
-      isolatedHistory={localHistoryStore}
-      isolatedTimeIndex={localTimeIndex}
-      isolatedIsLive={localIsLive}
-    />
-  {/if}
+<CommandPalette bind:isOpen={commandPaletteOpen} on:command={handlePaletteCommand} on:close={() => commandPaletteOpen = false} />
+<PaymentSpotlight />
 
-  <div
-    class="view-container"
-    class:hidden={userMode}
-    class:with-timemachine={$settings.showTimeMachine && !collapsed && !userMode}
-    bind:this={container}
-  ></div>
+{#if userMode}
+  <UserModePanel
+    isolatedEnv={localEnvStore}
+    isolatedHistory={localHistoryStore}
+    isolatedTimeIndex={localTimeIndex}
+    isolatedIsLive={localIsLive}
+  />
+{:else}
+  <div class="view-wrapper" class:embed-mode={embedMode}>
+    <div
+      class="view-container"
+      class:with-timemachine={$settings.showTimeMachine && !collapsed}
+      bind:this={container}
+    ></div>
 
-  <!-- TimeMachine - Visible in both modes for time-travel debugging -->
-  {#if $settings.showTimeMachine && !userMode}
-    <div class="time-machine-bar" class:collapsed class:embed={embedMode} data-position={timeMachinePosition}>
-      {#if !embedMode}
-        <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
-      {/if}
-      <TimeMachine
-        history={localHistoryStore}
-        timeIndex={localTimeIndex}
-        isLive={localIsLive}
-        env={localEnvStore}
-      />
-      {#if !embedMode}
-        <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
-          {collapsed ? '▲' : '▼'}
-        </button>
-        <button
-          class="position-toggle-btn"
-          on:click={() => timeMachinePosition = timeMachinePosition === 'bottom' ? 'top' : 'bottom'}
-          title="Move to {timeMachinePosition === 'bottom' ? 'top' : 'bottom'}"
-        >
-          {timeMachinePosition === 'bottom' ? '⬆️' : '⬇️'}
-        </button>
-      {/if}
-    </div>
-  {/if}
+    <!-- TimeMachine - Visible in both modes for time-travel debugging -->
+    {#if $settings.showTimeMachine}
+      <div class="time-machine-bar" class:collapsed class:embed={embedMode} data-position={timeMachinePosition}>
+        {#if !embedMode}
+          <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
+        {/if}
+        <TimeMachine
+          history={localHistoryStore}
+          timeIndex={localTimeIndex}
+          isLive={localIsLive}
+          env={localEnvStore}
+        />
+        {#if !embedMode}
+          <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
+            {collapsed ? '▲' : '▼'}
+          </button>
+          <button
+            class="position-toggle-btn"
+            on:click={() => timeMachinePosition = timeMachinePosition === 'bottom' ? 'top' : 'bottom'}
+            title="Move to {timeMachinePosition === 'bottom' ? 'top' : 'bottom'}"
+          >
+            {timeMachinePosition === 'bottom' ? '⬆️' : '⬇️'}
+          </button>
+        {/if}
+      </div>
+    {/if}
 
-  {#if embedMode}
-    <!-- Embed mode: Toggle button for sidebar -->
-    <button
-      class="embed-sidebar-toggle"
-      class:sidebar-visible={showSidebarInEmbed}
-      on:click={toggleEmbedSidebar}
-      title={showSidebarInEmbed ? 'Hide panels' : 'Show panels'}
-    >
-      {showSidebarInEmbed ? '»' : '«'}
-    </button>
-  {/if}
-</div>
+    {#if embedMode}
+      <!-- Embed mode: Toggle button for sidebar -->
+      <button
+        class="embed-sidebar-toggle"
+        class:sidebar-visible={showSidebarInEmbed}
+        on:click={toggleEmbedSidebar}
+        title={showSidebarInEmbed ? 'Hide panels' : 'Show panels'}
+      >
+        {showSidebarInEmbed ? '»' : '«'}
+      </button>
+    {/if}
+  </div>
+{/if}
 
 <style>
   .view-wrapper {
@@ -889,10 +889,6 @@
     min-height: 0; /* Allow flex shrink */
   }
 
-  .view-container.hidden {
-    display: none;
-  }
-
   .view-container.with-timemachine {
     height: calc(100dvh - 48px);
   }
@@ -909,13 +905,6 @@
 
   .view-wrapper.embed-mode .view-container.with-timemachine {
     height: calc(100dvh - 48px);
-  }
-
-  .view-wrapper.user-mode {
-    display: block;
-    height: auto;
-    min-height: 0;
-    overflow: visible;
   }
 
   .view-wrapper.embed-mode :global(.dockview-tabs-container),

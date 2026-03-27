@@ -397,7 +397,7 @@
   <header class="panel-header">
     <div class="panel-copy">
       <span class="panel-kicker">Counterparty discovery</span>
-      <span class="panel-note">Verified and scored hubs, ranked for fast account opening.</span>
+      <span class="panel-note">Choose a counterparty and open an account when you are ready.</span>
     </div>
     <div class="header-controls">
       <button class="refresh-btn" on:click={() => discoverHubs(true)} disabled={loading}>
@@ -438,22 +438,11 @@
               <img src={hub.avatar} alt="" class="hub-avatar" />
               <div class="hub-title">
                 <span class="hub-name">{hub.name}</span>
-                <div class="hub-subline">
-                  <span class="hub-id mono">{hub.entityId.slice(0, 10)}...{hub.entityId.slice(-6)}</span>
-                  <span class="hub-dot"></span>
-                  <span class="hub-inline-meta">{formatFee(hub.metadata.fee)} fee</span>
-                  <span class="hub-dot"></span>
-                  <span class="hub-inline-meta">{hub.metadata.peerCount} peers</span>
-                </div>
               </div>
             </button>
             <div class="hub-actions">
-              {#if hub.verified}
-                <span class="badge verified">Verified</span>
-              {/if}
-              <span class="badge score">Score {hub.creditScore}</span>
               {#if hub.isConnected}
-                <span class="badge open"><Check size={12} /> Open</span>
+                <span class="connection-state"><Check size={12} /> Open</span>
               {:else if entityId}
                 <button
                   class="btn-connect"
@@ -481,6 +470,14 @@
           {#if expandedHub === hub.entityId}
             <div class="row-details">
               <div class="detail-grid">
+                <div class="detail">
+                  <span class="label">Verified</span>
+                  <span class="value">{hub.verified ? 'Yes' : 'No'}</span>
+                </div>
+                <div class="detail">
+                  <span class="label">Score</span>
+                  <span class="value">{hub.creditScore}</span>
+                </div>
                 <div class="detail">
                   <span class="label">Fee</span>
                   <span class="value">{formatFee(hub.metadata.fee)}</span>
@@ -749,6 +746,21 @@
     font-size: 15px;
     letter-spacing: 0.01em;
     transition: color 0.15s ease;
+  }
+
+  .connection-state {
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--theme-credit, #22c55e) 18%, transparent);
+    padding: 4px 9px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--theme-credit, #22c55e) 72%, white 28%);
+    background: color-mix(in srgb, var(--theme-credit, #22c55e) 10%, transparent);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 700;
   }
 
   .hub-subline {

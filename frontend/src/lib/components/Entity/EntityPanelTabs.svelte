@@ -264,14 +264,7 @@
     }
   }
 
-  const REFRESH_OPTIONS = [
-    { label: 'Off', value: 0 },
-    { label: '1s', value: 1000 },
-    { label: '5s', value: 5000 },
-    { label: '15s', value: 15000 },
-    { label: '30s', value: 30000 },
-    { label: '60s', value: 60000 },
-  ];
+  const BALANCE_REFRESH_THROTTLE_MS = 1000;
 
   const ACCOUNT_BAR_USD_PER_100PX_MIN = 10;
   const ACCOUNT_BAR_USD_PER_100PX_MAX = 10_000;
@@ -290,11 +283,6 @@
   function setAccountBarScale(event: Event): void {
     const target = event.currentTarget as HTMLInputElement;
     settingsOperations.setAccountBarUsdPer100Px(clampAccountBarUsdPer100Px(target.value));
-  }
-
-  function updateBalanceRefresh(event: Event) {
-    const target = event.target as HTMLSelectElement;
-    settingsOperations.setBalanceRefreshMs(Math.max(1000, Number(target.value)));
   }
 
   function isRuntimeEnv(value: unknown): value is Env {
@@ -704,39 +692,39 @@
       case 'external->reserve':
         return moveReserveRecipientEntityId && moveReserveRecipientEntityId !== resolveSelfEntityId()
           ? [
-            '1. Submit external deposit batch into your reserve',
-            `2. Broadcast reserve batch to ${reserveRecipientLabel}`,
+            '1. Deposit from your wallet into reserve',
+            `2. Forward reserve to ${reserveRecipientLabel}`,
           ]
-          : ['1. Submit external deposit batch into your reserve'];
+          : ['1. Deposit from your wallet into reserve'];
       case 'reserve->reserve':
-        return [`1. Broadcast reserve batch to ${reserveRecipientLabel}`];
+        return [`1. Send reserve batch to ${reserveRecipientLabel}`];
       case 'reserve->account':
-        return [`1. Broadcast reserve batch into ${targetEntityLabel} via hub ${targetHubLabel}`];
+        return [`1. Fund ${targetEntityLabel} through ${targetHubLabel}`];
       case 'account->reserve':
         return moveReserveRecipientEntityId && moveReserveRecipientEntityId !== resolveSelfEntityId()
           ? [
-            '1. Get hub proof and settle collateral back into your reserve',
-            `2. Broadcast reserve batch to ${reserveRecipientLabel}`,
+            '1. Settle funds back into your reserve',
+            `2. Forward reserve to ${reserveRecipientLabel}`,
           ]
-          : ['1. Get hub proof and settle collateral back into your reserve'];
+          : ['1. Settle funds back into your reserve'];
       case 'reserve->external':
-        return ['1. Broadcast reserve withdrawal batch to recipient EOA'];
+        return ['1. Withdraw reserve to recipient wallet'];
       case 'external->external':
-        return ['1. Send token directly from external to recipient EOA'];
+        return ['1. Send directly from wallet to wallet'];
       case 'external->account':
         return [
-          '1. Submit external deposit batch into your reserve',
-          `2. Broadcast reserve batch into ${targetEntityLabel} via hub ${targetHubLabel}`,
+          '1. Deposit from your wallet into reserve',
+          `2. Fund ${targetEntityLabel} through ${targetHubLabel}`,
         ];
       case 'account->external':
         return [
-          '1. Get hub proof and settle collateral back into your reserve',
-          '2. Withdraw from your reserve to recipient EOA',
+          '1. Settle funds back into your reserve',
+          '2. Withdraw reserve to recipient wallet',
         ];
       case 'account->account':
         return [
-          '1. Get hub proof and settle collateral back into your reserve',
-          `2. Deposit from your reserve into ${targetEntityLabel} via hub ${targetHubLabel}`,
+          '1. Settle funds back into your reserve',
+          `2. Fund ${targetEntityLabel} through ${targetHubLabel}`,
         ];
       default:
         return ['Route not available'];
@@ -746,19 +734,23 @@
   function moveRouteExecutionLabel(from: MoveEndpoint, to: MoveEndpoint): string {
     switch (getMoveRouteKey(from, to)) {
       case 'external->reserve':
-        return '1 external-signer batch';
+        return 'Deposit into reserve';
       case 'reserve->external':
+        return 'Withdraw to wallet';
       case 'reserve->account':
-        return '1 reserve batch';
+        return 'Fund account';
       case 'external->external':
-        return '1 external transfer';
+        return 'Send to wallet';
       case 'external->account':
-        return '1 external-signer batch + 1 reserve batch';
+        return 'Deposit and fund account';
       case 'reserve->reserve':
+        return 'Move between reserves';
       case 'account->reserve':
+        return 'Return funds to reserve';
       case 'account->external':
+        return 'Withdraw from account';
       case 'account->account':
-        return '2-step route';
+        return 'Move between accounts';
       default:
         return 'Unavailable';
     }
@@ -768,23 +760,23 @@
     const reserveRemote = moveNeedsReserveRecipient(from, to) && moveReserveRecipientEntityId.trim() && moveReserveRecipientEntityId !== resolveSelfEntityId();
     switch (getMoveRouteKey(from, to)) {
       case 'external->reserve':
-        return reserveRemote ? '1 external-signer batch + 1 reserve batch • ~300k gas' : '1 external-signer batch • ~140k gas';
+        return reserveRemote ? '2 steps • ~300k gas' : 'On-chain batch • ~140k gas';
       case 'reserve->reserve':
-        return '1 reserve batch • ~160k gas';
+        return '1 batch • ~160k gas';
       case 'reserve->account':
-        return '1 reserve batch • ~180k gas';
+        return '1 batch • ~180k gas';
       case 'account->reserve':
-        return reserveRemote ? 'hub proof + 1 reserve batch • ~200k gas' : 'hub proof + 1 reserve batch • ~120k gas';
+        return reserveRemote ? '2 steps • ~200k gas' : '2 steps • ~120k gas';
       case 'reserve->external':
-        return '1 reserve batch • ~140k gas';
+        return '1 batch • ~140k gas';
       case 'external->external':
-        return '1 external tx';
+        return '1 wallet transfer';
       case 'external->account':
-        return '1 external-signer batch + 1 reserve batch • ~320k gas';
+        return '2 steps • ~320k gas';
       case 'account->external':
-        return 'hub proof + 1 reserve batch • ~260k gas';
+        return '2 steps • ~260k gas';
       case 'account->account':
-        return 'hub proof + 1 reserve batch • ~300k gas';
+        return '2 steps • ~300k gas';
       default:
         return '';
     }
@@ -1153,7 +1145,7 @@
   $: heroDisplayName = (() => {
     const fallbackId = replica?.state?.entityId || tab.entityId || '';
     const gossip = (gossipName ?? '').trim();
-    return gossip && !isPlaceholderName(gossip) ? gossip : fallbackId;
+    return gossip && !isPlaceholderName(gossip) ? gossip : formatAddress(fallbackId);
   })();
 
   // Format short address for display
@@ -1486,8 +1478,8 @@
   let resolvingAssetBridgeSync = false;
   type MovePostSettleOp =
     | { type: 'none' }
-    | { type: 'reserve_to_reserve'; recipientEntityId: string }
-    | { type: 'reserve_to_external'; recipientEoa: string }
+    | { type: 'r2r'; recipientEntityId: string }
+    | { type: 'r2e'; recipientEoa: string }
     | { type: 'reserve_to_collateral'; targetEntityId: string; counterpartyEntityId: string };
   type PendingAssetAutoC2R = {
     counterpartyEntityId: string;
@@ -1764,7 +1756,7 @@
         signerId,
         entityTxs: [
           {
-            type: 'reserve_to_external',
+            type: 'r2e',
             data: {
               receivingEntity,
               tokenId,
@@ -1807,7 +1799,7 @@
       signerId,
       entityTxs: [
         {
-          type: 'reserve_to_reserve',
+          type: 'r2r',
           data: {
             toEntityId: recipientEntityId,
             tokenId,
@@ -2608,9 +2600,9 @@
         data: { counterpartyEntityId: pending.counterpartyEntityId },
       },
     ];
-    if (pending.postSettleOp.type === 'reserve_to_reserve') {
+    if (pending.postSettleOp.type === 'r2r') {
       entityTxs.push({
-        type: 'reserve_to_reserve' as const,
+        type: 'r2r' as const,
         data: {
           toEntityId: pending.postSettleOp.recipientEntityId,
           tokenId: pending.tokenId,
@@ -2618,9 +2610,9 @@
         },
       });
     }
-    if (pending.postSettleOp.type === 'reserve_to_external') {
+    if (pending.postSettleOp.type === 'r2e') {
       entityTxs.push({
-        type: 'reserve_to_external' as const,
+        type: 'r2e' as const,
         data: {
           receivingEntity: zeroPadValue(pending.postSettleOp.recipientEoa, 32).toLowerCase(),
           tokenId: pending.tokenId,
@@ -2630,7 +2622,7 @@
     }
     if (pending.postSettleOp.type === 'reserve_to_collateral') {
       entityTxs.push({
-        type: 'deposit_collateral' as const,
+        type: 'r2c' as const,
         data: {
           counterpartyId: pending.postSettleOp.counterpartyEntityId,
           ...(pending.postSettleOp.targetEntityId !== String(entityId).trim().toLowerCase()
@@ -2679,7 +2671,7 @@
       entityId,
       signerId,
       entityTxs: [{
-        type: 'reserve_to_reserve' as const,
+        type: 'r2r' as const,
         data: {
           toEntityId: recipientEntityId,
           tokenId,
@@ -2706,7 +2698,7 @@
       entityId,
       signerId,
       entityTxs: [{
-        type: 'reserve_to_external' as const,
+        type: 'r2e' as const,
         data: {
           receivingEntity,
           tokenId,
@@ -2737,7 +2729,7 @@
 
     const env = requireRuntimeEnv(activeEnv, 'move-reserve-to-account-draft');
     await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
-      type: 'deposit_collateral' as const,
+      type: 'r2c' as const,
       data: {
         counterpartyId: counterpartyEntityId,
         ...(receivingEntityId !== String(entityId).trim().toLowerCase() ? { receivingEntityId } : {}),
@@ -2750,6 +2742,7 @@
   async function queueExternalToReserveDraft(
     tokenAddress: string,
     amount: bigint,
+    internalTokenId?: number,
   ): Promise<void> {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
     if (!entityId) return;
@@ -2763,10 +2756,11 @@
       entityId,
       signerId,
       entityTxs: [{
-        type: 'external_to_reserve' as const,
+        type: 'e2r' as const,
         data: {
           contractAddress: tokenAddress,
           amount,
+          ...(typeof internalTokenId === 'number' ? { internalTokenId } : {}),
         },
       }],
     }]);
@@ -2786,7 +2780,7 @@
         throw new Error('Select ERC20 asset first');
       }
       const amount = parsePositiveAssetAmount(moveAmount, externalToken, externalToken.balance);
-      await queueExternalToReserveDraft(externalToken.address, amount);
+      await queueExternalToReserveDraft(externalToken.address, amount, externalToken.tokenId);
       moveAmount = '';
       toasts.success('Added to existing draft batch');
       return;
@@ -2797,7 +2791,7 @@
       }
       if (!reserveToken) throw new Error('Select reserve-compatible asset first');
       const amount = parsePositiveAssetAmount(moveAmount, externalToken, externalToken.balance);
-      await queueExternalToReserveDraft(externalToken.address, amount);
+      await queueExternalToReserveDraft(externalToken.address, amount, reserveToken.tokenId);
       await queueReserveToCollateralDraft(reserveToken.tokenId, amount, moveTargetAccount, moveTargetEntity);
       moveAmount = '';
       toasts.success('Added to existing draft batch');
@@ -2848,7 +2842,7 @@
         token.tokenId,
         amount,
         moveSourceAccount,
-        { type: 'reserve_to_external', recipientEoa: recipient },
+        { type: 'r2e', recipientEoa: recipient },
         false,
       );
       moveAmount = '';
@@ -2949,7 +2943,7 @@
             moveSourceAccount,
             reserveRecipientIsSelf
               ? { type: 'none' }
-              : { type: 'reserve_to_reserve', recipientEntityId: moveReserveRecipient },
+              : { type: 'r2r', recipientEntityId: moveReserveRecipient },
           );
           break;
         case 'reserve->external':
@@ -2962,7 +2956,7 @@
             token.tokenId,
             amount,
             moveSourceAccount,
-            { type: 'reserve_to_external', recipientEoa: moveExternalRecipient.trim() },
+            { type: 'r2e', recipientEoa: moveExternalRecipient.trim() },
           );
           break;
         case 'account->account':
@@ -3035,7 +3029,7 @@
 
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
           {
-            type: 'deposit_collateral' as const,
+            type: 'r2c' as const,
             data: {
               counterpartyId: counterpartyEntityId,
               ...(receivingEntityId !== String(entityId).trim().toLowerCase() ? { receivingEntityId } : {}),
@@ -3299,8 +3293,27 @@
     await faucetReserves(token.tokenId, token.symbol);
   }
 
-  function refreshBalances() {
-    fetchExternalTokens();
+  let lastBalanceRefreshAt = 0;
+  let pendingBalanceRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function refreshBalances(force = false) {
+    const now = Date.now();
+    const elapsed = now - lastBalanceRefreshAt;
+    if (force || elapsed >= BALANCE_REFRESH_THROTTLE_MS) {
+      if (pendingBalanceRefreshTimer) {
+        clearTimeout(pendingBalanceRefreshTimer);
+        pendingBalanceRefreshTimer = null;
+      }
+      lastBalanceRefreshAt = now;
+      void fetchExternalTokens();
+      return;
+    }
+    if (pendingBalanceRefreshTimer) return;
+    pendingBalanceRefreshTimer = setTimeout(() => {
+      pendingBalanceRefreshTimer = null;
+      lastBalanceRefreshAt = Date.now();
+      void fetchExternalTokens();
+    }, BALANCE_REFRESH_THROTTLE_MS - elapsed);
   }
 
   async function handleResetEverything(): Promise<void> {
@@ -3342,13 +3355,14 @@
 
   onDestroy(() => {
     if (refreshTimer) clearInterval(refreshTimer);
+    if (pendingBalanceRefreshTimer) clearTimeout(pendingBalanceRefreshTimer);
     resetMoveLineMeasurement();
     moveVisualResizeObserver?.disconnect();
   });
 
   onMount(() => {
     // Fetch reserves and external tokens on mount
-    refreshBalances();
+    refreshBalances(true);
     applyDeepLinkViewFromUrl();
 
     const handleMovePointer = (event: PointerEvent | MouseEvent) => {
@@ -3574,7 +3588,7 @@
       extendCredit: 'Extend Credit',
       requestCollateral: 'Request Collateral',
       set_rebalance_policy: 'Set Rebalance Policy',
-      deposit_collateral: 'Deposit Collateral',
+      r2c: 'Deposit Collateral',
       settle_approve: 'Settle Approve',
       settle_finalize: 'Settle Finalize',
       disputeStart: 'Dispute Start',
@@ -4262,14 +4276,14 @@
                 title="Copy entity id"
                 on:click={() => copyMetaValue(currentEntityValue, 'entity')}
               >
-                <span class="wallet-meta-value">{currentEntityValue}</span>
+                <span class="wallet-meta-value">{formatAddress(currentEntityValue)}</span>
                 {#if copiedMetaField === 'entity'}
                   <Check size={12} />
                 {:else}
                   <Copy size={12} />
                 {/if}
               </button>
-              <p class="muted wallet-meta-help">XLN identity for reserves, accounts, and consensus.</p>
+              <p class="muted wallet-meta-help">Identity for accounts, reserves, and settlement.</p>
             </div>
           </div>
         </div>
@@ -4306,12 +4320,7 @@
               <p class="muted asset-ledger-note">External, reserve, and account balances.</p>
             </div>
             <div class="header-actions">
-              <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 15000} on:change={updateBalanceRefresh}>
-                {#each REFRESH_OPTIONS as opt}
-                  <option value={opt.value}>{opt.label}</option>
-                {/each}
-              </select>
-              <button class="btn-refresh-small" data-testid="asset-ledger-refresh" on:click={() => refreshBalances()} disabled={externalTokensLoading}>
+              <button class="btn-refresh-small" data-testid="asset-ledger-refresh" on:click={() => refreshBalances(true)} disabled={externalTokensLoading}>
                 {externalTokensLoading ? '...' : 'Refresh'}
               </button>
             </div>
@@ -5094,6 +5103,7 @@
     min-height: 0;
     height: auto;
     margin: 0 auto;
+    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
     background: transparent;
     color: var(--theme-text-primary, #e4e4e7);
     font-family: 'Inter', -apple-system, sans-serif;
@@ -5315,22 +5325,7 @@
 
   /* Main content - NO own scrollbar, parent .panel-content scrolls */
   .main-scroll {
-    flex: 1;
-    overflow: visible;
-    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
-  }
-
-  .main-scroll::-webkit-scrollbar {
-    width: 5px;
-  }
-
-  .main-scroll::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .main-scroll::-webkit-scrollbar-thumb {
-    background: var(--theme-scrollbar, #27272a);
-    border-radius: 3px;
+    display: contents;
   }
 
   /* Empty State */
@@ -5451,11 +5446,11 @@
   }
 
   .hero-name {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--theme-text-primary, #e4e4e7);
     letter-spacing: -0.01em;
-    word-break: break-all;
+    word-break: break-word;
   }
 
   .hero-right {
@@ -5465,19 +5460,19 @@
 
   .hero-networth {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 30px;
+    font-size: 24px;
     font-weight: 700;
     color: var(--theme-text-primary, #e4e4e7);
-    letter-spacing: -0.5px;
+    letter-spacing: -0.3px;
     line-height: 1;
   }
 
   .hero-label {
-    font-size: 10px;
+    font-size: 9px;
     color: var(--theme-text-muted, #71717a);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    margin-top: 4px;
+    margin-top: 3px;
     font-weight: 500;
   }
 
@@ -6219,22 +6214,6 @@
     gap: 8px;
   }
 
-  .auto-refresh-select {
-    padding: 5px 8px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
-    border-radius: 6px;
-    color: var(--theme-text-secondary, #a1a1aa);
-    font-size: 10px;
-    cursor: pointer;
-    transition: border-color 0.15s;
-  }
-
-  .auto-refresh-select:focus {
-    border-color: var(--theme-input-focus, #fbbf24);
-    outline: none;
-  }
-
   .btn-refresh-small {
     padding: 5px 10px;
     background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
@@ -6830,7 +6809,6 @@
       width: 100%;
     }
 
-    .auto-refresh-select,
     .btn-refresh-small {
       width: 100%;
       min-height: 38px;

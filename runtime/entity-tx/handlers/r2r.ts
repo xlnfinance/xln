@@ -15,9 +15,9 @@ import type { EntityState, EntityTx, EntityInput } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddReserveToReserve, getEffectiveDraftReserveBalance } from '../../j-batch';
 
-export async function handleReserveToReserve(
+export async function handleR2R(
   entityState: EntityState,
-  entityTx: Extract<EntityTx, { type: 'reserve_to_reserve' }>
+  entityTx: Extract<EntityTx, { type: 'r2r' }>
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   const { toEntityId, tokenId, amount } = entityTx.data;
   const newState = cloneEntityState(entityState);
@@ -54,7 +54,7 @@ export async function handleReserveToReserve(
     `📦 Queued R→R: ${amount} token ${tokenId} to ${toEntityId.slice(-4)} (use jBroadcast to commit)`
   );
 
-  console.log(`✅ reserve_to_reserve: Added to jBatch for ${entityState.entityId.slice(-4)}`);
+  console.log(`✅ r2r: Added to jBatch for ${entityState.entityId.slice(-4)}`);
   console.log(`   To: ${toEntityId.slice(-4)}, Token: ${tokenId}, Amount: ${amount}`);
 
   return { newState, outputs };

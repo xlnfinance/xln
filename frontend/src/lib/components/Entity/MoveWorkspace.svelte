@@ -364,8 +364,10 @@
         <span class="move-summary-metric-value mono">{moveSourceBalanceLabel}</span>
       </div>
       <div class="move-summary-metric">
-        <span class="move-summary-metric-label">Execution mode</span>
-        <span class="move-summary-metric-value">{moveRouteDirect ? 'Immediate submission' : 'Draft batch / settlement flow'}</span>
+        <span class="move-summary-metric-label">How it runs</span>
+        <span class="move-summary-metric-value">
+          {moveRouteDirect ? 'Direct wallet submission' : (moveUsesDraftAction ? 'Queued on-chain batch' : 'Queued settlement flow')}
+        </span>
       </div>
       <div class="move-summary-metric">
         <span class="move-summary-metric-label">Destination</span>
@@ -379,7 +381,7 @@
           <div class="move-summary-status accent" data-testid="move-status">{moveProgressLabel}</div>
         {/if}
         {#if moveUsesDraftAction && !moveVisibleActionError}
-          <div class="move-summary-status neutral" data-testid="move-status">Uses existing draft batch</div>
+          <div class="move-summary-status neutral" data-testid="move-status">Queued in draft batch</div>
         {/if}
         {#if moveVisibleActionError}
           <div

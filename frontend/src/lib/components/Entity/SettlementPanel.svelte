@@ -29,7 +29,7 @@
   type ActiveDispute = NonNullable<AccountMachine['activeDispute']>;
   type FeeOverrides = { gasBumpBps?: number; maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string };
   type RuntimeJReplica = RuntimeEnv['jReplicas'] extends Map<string, infer Replica> ? Replica : never;
-  type PendingSettleEntityTx = Extract<EntityTx, { type: 'reserve_to_reserve' }>;
+  type PendingSettleEntityTx = Extract<EntityTx, { type: 'r2r' }>;
   type SettlementLike = {
     leftEntity?: unknown;
     rightEntity?: unknown;
@@ -825,7 +825,7 @@
       if (!recipient) throw new Error('Select a recipient');
       if (recipient.toLowerCase() === entityId.toLowerCase()) throw new Error('Cannot transfer to yourself');
       const entityTx: PendingSettleEntityTx = {
-        type: 'reserve_to_reserve' as const,
+        type: 'r2r' as const,
         data: {
           toEntityId: recipient,
           tokenId,
@@ -870,7 +870,7 @@
       entityId,
       signerId,
       entityTxs: [{
-        type: 'deposit_collateral',
+        type: 'r2c',
         data: {
           counterpartyId: counterpartyEntityId,
           tokenId,
