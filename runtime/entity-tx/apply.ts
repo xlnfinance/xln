@@ -38,7 +38,7 @@ import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-help
 import { logError } from '../logger';
 import { FINANCIAL } from '../constants';
 import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
-import { handleReserveToExternal } from './handlers/reserve-to-external';
+import { handleR2E } from './handlers/r2e';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -800,19 +800,19 @@ export const applyEntityTx = async (
       return { newState, outputs, mempoolOps };
     }
 
-    if (entityTx.type === 'deposit_collateral') {
-      const { handleDepositCollateral } = await import('./handlers/deposit-collateral');
-      return await handleDepositCollateral(entityState, entityTx, env.timestamp);
+    if (entityTx.type === 'r2c') {
+      const { handleR2C } = await import('./handlers/r2c');
+      return await handleR2C(entityState, entityTx, env.timestamp);
     }
 
-    if (entityTx.type === 'external_to_reserve') {
-      const { handleExternalToReserve } = await import('./handlers/external-to-reserve');
-      return await handleExternalToReserve(entityState, entityTx);
+    if (entityTx.type === 'e2r') {
+      const { handleE2R } = await import('./handlers/e2r');
+      return await handleE2R(entityState, entityTx);
     }
 
-    if (entityTx.type === 'reserve_to_reserve') {
-      const { handleReserveToReserve } = await import('./handlers/reserve-to-reserve');
-      return await handleReserveToReserve(entityState, entityTx);
+    if (entityTx.type === 'r2r') {
+      const { handleR2R } = await import('./handlers/r2r');
+      return await handleR2R(entityState, entityTx);
     }
 
     if (entityTx.type === 'j_broadcast') {
@@ -1217,8 +1217,8 @@ export const applyEntityTx = async (
       return { newState, outputs, mempoolOps };
     }
 
-    if (entityTx.type === 'reserve_to_external') {
-      return handleReserveToExternal(entityState, entityTx);
+    if (entityTx.type === 'r2e') {
+      return handleR2E(entityState, entityTx);
     }
 
     if (entityTx.type === 'settleDiffs') {

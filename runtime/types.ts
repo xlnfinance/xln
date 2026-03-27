@@ -648,7 +648,7 @@ export type EntityTx =
   | {
       // External-token-to-reserve: queue ERC20 deposit into entity jBatch.
       // On broadcast, the batch must be submitted by the entity signer EOA.
-      type: 'external_to_reserve';
+      type: 'e2r';
       data: {
         contractAddress: string;
         tokenType?: number;
@@ -658,7 +658,7 @@ export type EntityTx =
       };
     }
   | {
-      type: 'deposit_collateral';
+      type: 'r2c';
       data: {
         counterpartyId: string; // Which account to add collateral to
         receivingEntityId?: string; // Optional target entity for remote reserve->account funding
@@ -671,8 +671,7 @@ export type EntityTx =
       };
     }
   | {
-      // Reserve-to-reserve: Entity moves reserves to another entity (accumulates in jBatch)
-      type: 'reserve_to_reserve';
+      type: 'r2r';
       data: {
         toEntityId: string; // Recipient entity
         tokenId: number;
@@ -680,9 +679,9 @@ export type EntityTx =
       };
     }
   | {
-      // Reserve-to-external: Entity withdraws reserve balance to an external EOA address encoded as bytes32.
-      // This stays declarative at the entity layer; J-batch execution handles the actual token transfer.
-      type: 'reserve_to_external';
+      // r2e: Entity withdraws reserve balance to an external EOA address encoded as bytes32.
+      // Declarative at entity layer; J-batch execution handles the actual token transfer.
+      type: 'r2e';
       data: {
         receivingEntity: string; // bytes32-encoded external EOA destination
         tokenId: number;
@@ -1498,6 +1497,13 @@ export type AccountTx =
         // Settlement uses these amounts directly.
         executionGiveAmount?: bigint;
         executionWantAmount?: bigint;
+        // Canonical resting offer state from the matcher/book.
+        // Used to keep partial-fill remainder math identical to the book view.
+        restingPriceTicks?: bigint;
+        restingGiveAmount?: bigint;
+        restingWantAmount?: bigint;
+        restingQuantizedGive?: bigint;
+        restingQuantizedWant?: bigint;
       };
     }
   // === SETTLEMENT HOLD TYPES (ring-fencing via bilateral consensus) ===

@@ -1141,6 +1141,74 @@ export function processOrderbookSwaps(
   const orderbookOfferMeta = new Map<string, NormalizedOrderbookOffer>();
   const MAX_BOOK_LEVELS = 40_000;
 
+  const materializeCanonicalRestingOffer = (
+    giveTokenId: number,
+    wantTokenId: number,
+    priceTicks: bigint,
+    qtyLots: number,
+  ): {
+    giveTokenId: number;
+    wantTokenId: number;
+    giveAmount: bigint;
+    wantAmount: bigint;
+    quantizedGive: bigint;
+    quantizedWant: bigint;
+    priceTicks: bigint;
+  } => {
+    const baseAmount = BigInt(qtyLots) * SWAP_LOT_SCALE;
+    const side = deriveSide(giveTokenId, wantTokenId);
+    const quoteAmount = (baseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+    if (side === 1) {
+      return {
+        giveTokenId,
+        wantTokenId,
+        giveAmount: baseAmount,
+        wantAmount: quoteAmount,
+        quantizedGive: baseAmount,
+        quantizedWant: quoteAmount,
+        priceTicks,
+      };
+    }
+    return {
+      giveTokenId,
+      wantTokenId,
+      giveAmount: quoteAmount,
+      wantAmount: baseAmount,
+      quantizedGive: quoteAmount,
+      quantizedWant: baseAmount,
+      priceTicks,
+    };
+  };
+
+  const buildLiveOfferMeta = (
+    namespacedOrderId: string,
+  ): NormalizedOrderbookOffer | null => {
+    const lastColon = namespacedOrderId.lastIndexOf(':');
+    if (lastColon === -1) return null;
+    const accountId = namespacedOrderId.slice(0, lastColon);
+    const offerId = namespacedOrderId.slice(lastColon + 1);
+    const account = hubState.accounts.get(accountId);
+    const liveOffer = account?.swapOffers?.get(offerId);
+    if (!account || !liveOffer) return null;
+    return normalizeSwapOfferForOrderbook(
+      {
+        offerId,
+        makerIsLeft: liveOffer.makerIsLeft,
+        fromEntity: account.leftEntity,
+        toEntity: account.rightEntity,
+        createdHeight: liveOffer.createdHeight,
+        giveTokenId: liveOffer.giveTokenId,
+        giveAmount: liveOffer.giveAmount,
+        wantTokenId: liveOffer.wantTokenId,
+        wantAmount: liveOffer.wantAmount,
+        priceTicks: liveOffer.priceTicks,
+        timeInForce: liveOffer.timeInForce,
+        minFillRatio: liveOffer.minFillRatio,
+      },
+      accountId,
+    );
+  };
+
   const synthesizeOfferFromMissingBookLookup = (
     takerSide: 0 | 1,
     baseTokenId: number,
@@ -1148,7 +1216,15 @@ export function processOrderbookSwaps(
     originalLots: number,
     filledLots: number,
     weightedCost: bigint,
-  ): { giveTokenId: number; wantTokenId: number; giveAmount: bigint; quantizedGive: bigint } => {
+  ): {
+    giveTokenId: number;
+    wantTokenId: number;
+    giveAmount: bigint;
+    wantAmount: bigint;
+    quantizedGive: bigint;
+    quantizedWant: bigint;
+    priceTicks: bigint;
+  } => {
     const originalLotsBig = BigInt(Math.max(0, originalLots));
     const filledLotsBig = BigInt(Math.max(0, filledLots));
     if (originalLotsBig <= 0n || filledLotsBig <= 0n) {
@@ -1163,29 +1239,18 @@ export function processOrderbookSwaps(
 
     const makerSide = takerSide === 0 ? 1 : 0;
     const priceTicks = weightedCost / filledLotsBig;
-    const baseAmount = originalLotsBig * SWAP_LOT_SCALE;
-    const quoteAmount = (baseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
-    if (baseAmount <= 0n || quoteAmount <= 0n) {
+    const canonicalOffer = materializeCanonicalRestingOffer(
+      makerSide === 1 ? baseTokenId : quoteTokenId,
+      makerSide === 1 ? quoteTokenId : baseTokenId,
+      priceTicks,
+      Number(originalLotsBig),
+    );
+    if (canonicalOffer.giveAmount <= 0n || canonicalOffer.wantAmount <= 0n) {
       throw new Error(
-        `ORDERBOOK_FILL_LOOKUP_FAILED: synthesized maker offer is zero base=${baseAmount.toString()} quote=${quoteAmount.toString()}`,
+        `ORDERBOOK_FILL_LOOKUP_FAILED: synthesized maker offer is zero give=${canonicalOffer.giveAmount.toString()} want=${canonicalOffer.wantAmount.toString()}`,
       );
     }
-
-    if (makerSide === 1) {
-      return {
-        giveTokenId: baseTokenId,
-        wantTokenId: quoteTokenId,
-        giveAmount: baseAmount,
-        quantizedGive: baseAmount,
-      };
-    }
-
-    return {
-      giveTokenId: quoteTokenId,
-      wantTokenId: baseTokenId,
-      giveAmount: quoteAmount,
-      quantizedGive: quoteAmount,
-      };
+    return canonicalOffer;
   };
 
   const resolveOrderbookBandAnchor = (
@@ -1289,10 +1354,11 @@ export function processOrderbookSwaps(
     if (previousBook) {
       for (const [orderId, orderIdx] of previousBook.orderIdToIdx.entries()) {
         if (!previousBook.orderActive[orderIdx]) continue;
-        const meta = orderbookOfferMeta.get(orderId);
+        const meta = orderbookOfferMeta.get(orderId) ?? buildLiveOfferMeta(orderId);
         if (!meta) {
           throw new Error(`ORDERBOOK_REBUILD_FAILED: missing offer meta for ${orderId}`);
         }
+        orderbookOfferMeta.set(orderId, meta);
         const levelIdx = previousBook.orderPriceIdx[orderIdx];
         if (levelIdx < 0) continue;
         const price = previousBook.params.pmin + (BigInt(levelIdx) * previousBook.params.tick);
@@ -1448,12 +1514,6 @@ export function processOrderbookSwaps(
       });
     }
 
-    const bookTickBig = book.params.tick > 0n ? book.params.tick : 1n;
-    const bookPmin = book.params.pmin > 0n ? book.params.pmin : 1n;
-    const snappedPriceTicks = priceTicks <= bookPmin
-      ? bookPmin
-      : bookPmin + (((priceTicks - bookPmin) / bookTickBig) * bookTickBig);
-    priceTicks = snappedPriceTicks;
     if (priceTicks < book.params.pmin || priceTicks > book.params.pmax) {
       console.log(
         `📚 ORDERBOOK REBUILD: pair=${bookKey} price=${priceTicks.toString()} outside ` +
@@ -1463,6 +1523,12 @@ export function processOrderbookSwaps(
       bookCache.set(bookKey, book);
       bookUpdates.push({ pairId: bookKey, book });
     }
+    const bookTickBig = book.params.tick > 0n ? book.params.tick : 1n;
+    const bookPmin = book.params.pmin > 0n ? book.params.pmin : 1n;
+    const snappedPriceTicks = priceTicks <= bookPmin
+      ? bookPmin
+      : bookPmin + (((priceTicks - bookPmin) / bookTickBig) * bookTickBig);
+    priceTicks = snappedPriceTicks;
     if (priceTicks <= 0n) {
       console.warn(`⚠️ ORDERBOOK: book-tick rounding produced zero price — skipping offer=${offer.offerId}`);
       if (rehydrateOnly && quarantineOffer(currentAccountId, offer.offerId, 'book-tick-zero-price')) continue;
@@ -1783,21 +1849,41 @@ export function processOrderbookSwaps(
       console.log(`✅ ORDERBOOK-LOOKUP: Found account for ${accountId.slice(-8)}, generating swap_resolve`);
 
       const filledBig = BigInt(filledLots);
+      if (filledBig <= 0n || weightedCost <= 0n || weightedCost % filledBig !== 0n) {
+        throw new Error(
+          `ORDERBOOK_FILL_LOOKUP_FAILED: non-integral resting price weightedCost=${weightedCost.toString()} filledLots=${filledBig.toString()}`,
+        );
+      }
       const executionBaseWei = filledBig * SWAP_LOT_SCALE;
       const executionQuoteWei = (weightedCost * SWAP_LOT_SCALE) / ORDERBOOK_PRICE_SCALE;
 
       const account = hubState.accounts.get(accountId);
       const swapOffer = account?.swapOffers?.get(offerId);
-      const offerForExecution = swapOffer
-        ?? (namespacedOrderId === currentNamespacedOrderId
-          ? offer
-          : synthesizeOfferFromMissingBookLookup(side, base, quote, originalLots, filledLots, weightedCost));
+      const restingPriceTicks = weightedCost / filledBig;
+      const offerForExecution = namespacedOrderId === currentNamespacedOrderId
+        ? {
+            giveTokenId: offer.giveTokenId,
+            wantTokenId: offer.wantTokenId,
+            giveAmount: offer.giveAmount,
+            wantAmount: offer.wantAmount,
+            quantizedGive: offer.giveAmount,
+            quantizedWant: offer.wantAmount,
+            priceTicks: offer.priceTicks,
+          }
+        : swapOffer
+          ? materializeCanonicalRestingOffer(
+              swapOffer.giveTokenId,
+              swapOffer.wantTokenId,
+              restingPriceTicks,
+              originalLots,
+            )
+          : synthesizeOfferFromMissingBookLookup(side, base, quote, originalLots, filledLots, weightedCost);
       const orderStillInBook = book.orderIdToIdx.has(namespacedOrderId) &&
         book.orderActive[book.orderIdToIdx.get(namespacedOrderId)!];
-      const offerSource = swapOffer
-        ? 'live-account-offer'
-        : namespacedOrderId === currentNamespacedOrderId
-          ? 'current-taker-offer'
+      const offerSource = namespacedOrderId === currentNamespacedOrderId
+        ? 'current-taker-offer'
+        : swapOffer
+          ? 'canonical-book-state'
           : 'synthesized-from-book-fill';
       const resolveData = buildSwapResolveDataFromOrderbookFill(
         offerForExecution,
@@ -1813,6 +1899,11 @@ export function processOrderbookSwaps(
           data: {
             offerId,
             ...resolveData,
+            ...(offerForExecution.priceTicks !== undefined ? { restingPriceTicks: offerForExecution.priceTicks } : {}),
+            restingGiveAmount: offerForExecution.giveAmount,
+            restingWantAmount: offerForExecution.wantAmount,
+            ...(offerForExecution.quantizedGive !== undefined ? { restingQuantizedGive: offerForExecution.quantizedGive } : {}),
+            ...(offerForExecution.quantizedWant !== undefined ? { restingQuantizedWant: offerForExecution.quantizedWant } : {}),
           },
         },
       });

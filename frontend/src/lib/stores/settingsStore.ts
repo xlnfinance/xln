@@ -30,6 +30,7 @@ const resolveDefaultRelayUrl = (): string => {
 const defaultSettings: Settings = {
   theme: 'dark',
   uiStyle: DEFAULT_UI_STYLE,
+  liteMode: false,
   barColorMode: 'rgy',
   barLayout: 'center',
   accountBarUsdPerPx: ACCOUNT_BAR_USD_PER_100PX_DEFAULT / 100,
@@ -85,6 +86,9 @@ const settingsOperations = {
         }
         if (typeof parsed.showTimeMachine !== 'boolean') {
           parsed.showTimeMachine = defaultSettings.showTimeMachine;
+        }
+        if (typeof parsed.liteMode !== 'boolean') {
+          parsed.liteMode = defaultSettings.liteMode;
         }
         parsed.accountBarUsdPerPx = clampAccountBarUsdPerPx(parsed.accountBarUsdPerPx);
         if (!VALID_ACCOUNT_DELTA_VIEW_MODES.includes(parsed.accountDeltaViewMode)) {
@@ -227,6 +231,11 @@ const settingsOperations = {
 
   setShowTimeMachine(show: boolean) {
     settings.update(current => ({ ...current, showTimeMachine: !!show }));
+    this.saveToStorage();
+  },
+
+  setLiteMode(enabled: boolean) {
+    settings.update(current => ({ ...current, liteMode: !!enabled }));
     this.saveToStorage();
   },
 

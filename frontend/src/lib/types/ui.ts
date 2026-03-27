@@ -80,6 +80,7 @@ export interface UiSettingsExport {
   version: 1;
   theme: ThemeName;
   uiStyle: UIStyleSettings;
+  liteMode: boolean;
   compactNumbers: boolean;
   showTokenIcons: boolean;
   showTimeMachine: boolean;
@@ -101,6 +102,7 @@ export interface UiSettingsExport {
 export interface Settings {
   theme: ThemeName;
   uiStyle: UIStyleSettings;
+  liteMode: boolean;
   barColorMode: BarColorMode;
   barLayout: BarLayoutMode;
   // Internal normalized bar scale. UI presents this as "100px = $N".

@@ -586,8 +586,8 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await chooseMoveRoute(page, 'external', 'reserve');
         await page.getByTestId('move-amount').fill('20');
         await waitForMoveReady(page);
-        await expect(page.getByTestId('move-route-summary')).toContainText('1 external-signer batch');
-        await expect(page.getByTestId('move-route-summary')).toContainText('Submit external deposit batch into your reserve');
+        await expect(page.getByTestId('move-route-summary')).toContainText('Deposit into reserve');
+        await expect(page.getByTestId('move-route-summary')).toContainText('Deposit from your wallet into reserve');
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await capturePageScreenshot(page, testInfo, 'move-batch-route-summary-desktop.png');
         await page.getByTestId('move-confirm').first().click();
@@ -647,8 +647,8 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-amount').fill('2');
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
-        await expect(page.getByTestId('move-route-summary')).toContainText('1 reserve batch');
-        await expect(page.getByTestId('move-route-summary')).toContainText('Broadcast reserve withdrawal batch to recipient EOA');
+        await expect(page.getByTestId('move-route-summary')).toContainText('Withdraw to wallet');
+        await expect(page.getByTestId('move-route-summary')).toContainText('Withdraw reserve to recipient wallet');
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await page.getByTestId('move-confirm').first().click();
         await broadcastDraftBatch(page);

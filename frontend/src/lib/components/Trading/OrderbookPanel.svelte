@@ -1,8 +1,8 @@
 <!--
   OrderbookPanel.svelte
 
-  Displays a real-time orderbook from hub's orderbookExt state.
-  Reads directly from env.eReplicas (side-channel pattern - no consensus needed for view data).
+  Displays a real-time orderbook from hub snapshots served via relay/aggregator.
+  Falls back to local env.eReplicas only when a fresh relay snapshot is not available.
 
   Usage:
     <OrderbookPanel hubId="0x..." pairId="1/2" />
@@ -28,6 +28,8 @@
   export let priceScale: number = 1;
   export let sizeDisplayScale: number = 1;
   export let preferredClickSide: BookSide = 'ask';
+  export let disablePriceAggregation: boolean = false;
+  export let showPriceStepControl: boolean = true;
   type RuntimeEnv = Env | EnvSnapshot;
   export let envStore: Readable<RuntimeEnv | null> = xlnEnvironment;
 
@@ -101,8 +103,8 @@
   const NUMERIC_PRICE_STEP_OPTIONS = ['0.0001', '0.001', '0.01', '0.1', '1', '10', '50', '100'] as const;
   const PRICE_STEP_OPTIONS = ['auto', ...NUMERIC_PRICE_STEP_OPTIONS] as const;
   const PRICE_STEP_STORAGE_KEY = 'xln.orderbook.price-step-overrides.v1';
-  let selectedPriceStep: (typeof PRICE_STEP_OPTIONS)[number] = 'auto';
-  let autoResolvedPriceStep: (typeof NUMERIC_PRICE_STEP_OPTIONS)[number] = '1';
+  export let selectedPriceStep: (typeof PRICE_STEP_OPTIONS)[number] = 'auto';
+  export let autoResolvedPriceStep: (typeof NUMERIC_PRICE_STEP_OPTIONS)[number] = '1';
   let priceStepOverrides: Record<string, string> = {};
 
   function normalizePairId(value: string): string | null {
@@ -403,6 +405,9 @@
     sideSources: Map<bigint, Set<string>>,
     side: 'bid' | 'ask',
   ): { sizes: Map<bigint, number>; owners: Map<bigint, Set<string>>; sources: Map<bigint, Set<string>> } {
+    if (disablePriceAggregation) {
+      return { sizes: sideSizes, owners: sideOwners, sources: sideSources };
+    }
     const stepTicks = getSelectedPriceStepTicks();
     if (stepTicks <= 1) {
       return { sizes: sideSizes, owners: sideOwners, sources: sideSources };
@@ -826,14 +831,16 @@
       <span class="title">Order Book</span>
       <div class="header-controls">
         <span class="pair">{pairLabel || pairId.replace('/', ' / ')}</span>
-        <label class="price-step">
-          <span class="price-step-label">Step</span>
-          <select bind:value={selectedPriceStep} on:change={handlePriceStepChange}>
-            {#each PRICE_STEP_OPTIONS as step}
-              <option value={step}>{step === 'auto' ? `Auto · ${autoResolvedPriceStep}` : step}</option>
-            {/each}
-          </select>
-        </label>
+        {#if showPriceStepControl}
+          <label class="price-step">
+            <span class="price-step-label">Step</span>
+            <select bind:value={selectedPriceStep} on:change={handlePriceStepChange} disabled={disablePriceAggregation}>
+              {#each PRICE_STEP_OPTIONS as step}
+                <option value={step}>{step === 'auto' ? `Auto · ${autoResolvedPriceStep}` : step}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
       </div>
     </div>
   {/if}
@@ -995,9 +1002,9 @@
   </div>
 
   <div class="footer" class:compact-footer={compactHeader}>
-    {#if compactHeader}
+    {#if compactHeader && showPriceStepControl}
       <label class="price-step compact-step">
-        <select bind:value={selectedPriceStep} on:change={handlePriceStepChange} aria-label="Orderbook aggregation step">
+        <select bind:value={selectedPriceStep} on:change={handlePriceStepChange} aria-label="Orderbook aggregation step" disabled={disablePriceAggregation}>
           {#each PRICE_STEP_OPTIONS as step}
             <option value={step}>{step === 'auto' ? `Auto · ${autoResolvedPriceStep}` : step}</option>
           {/each}

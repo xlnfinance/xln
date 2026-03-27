@@ -93,7 +93,7 @@ async function main() {
       entityId,
       signerId,
       entityTxs: [{
-        type: 'reserve_to_reserve',
+        type: 'r2r',
         data: {
           toEntityId: otherEntityId,
           tokenId: 1,

@@ -3,7 +3,67 @@ import { createBook, applyCommand } from '../orderbook/core';
 import { SWAP_LOT_SCALE } from '../orderbook/types';
 import { LIMITS } from '../constants';
 import { processOrderbookSwaps } from '../entity-tx/handlers/account';
+import { handleSwapResolve } from '../account-tx/handlers/swap-resolve';
 import { deriveCanonicalSwapFillRatio } from '../swap-execution';
+import type { AccountMachine, AccountTx, SwapOffer } from '../types';
+import { createDefaultDelta } from '../validation-utils';
+
+function makeAccountMachine(offer: SwapOffer): AccountMachine {
+  const heldGiveAmount = offer.quantizedGive ?? offer.giveAmount;
+  const giveDelta = createDefaultDelta(offer.giveTokenId);
+  giveDelta.leftCreditLimit = 10n ** 30n;
+  giveDelta.rightCreditLimit = 10n ** 30n;
+  if (offer.makerIsLeft) {
+    giveDelta.leftHold = heldGiveAmount;
+  } else {
+    giveDelta.rightHold = heldGiveAmount;
+  }
+
+  const wantDelta = createDefaultDelta(offer.wantTokenId);
+  wantDelta.leftCreditLimit = 10n ** 30n;
+  wantDelta.rightCreditLimit = 10n ** 30n;
+
+  return {
+    leftEntity: 'maker',
+    rightEntity: 'hub',
+    status: 'active',
+    mempool: [],
+    currentFrame: {
+      height: 0,
+      timestamp: 0,
+      jHeight: 0,
+      accountTxs: [],
+      prevFrameHash: '',
+      tokenIds: [],
+      deltas: [],
+      stateHash: '',
+      byLeft: true,
+    },
+    deltas: new Map([
+      [offer.giveTokenId, giveDelta],
+      [offer.wantTokenId, wantDelta],
+    ]),
+    locks: new Map(),
+    swapOffers: new Map([[offer.offerId, offer]]),
+    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+    currentHeight: 0,
+    pendingSignatures: [],
+    rollbackCount: 0,
+    proofHeader: { fromEntity: 'maker', toEntity: 'hub', nonce: 0 },
+    proofBody: { tokenIds: [], deltas: [] },
+    frameHistory: [],
+    pendingWithdrawals: new Map(),
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
+    rebalancePolicy: new Map(),
+    leftJObservations: [],
+    rightJObservations: [],
+    jEventChain: [],
+    lastFinalizedJHeight: 0,
+    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+    onChainSettlementNonce: 0,
+  };
+}
 
 describe('orderbook matching fallback execution mapping', () => {
   test('generates execution amounts even when account state does not contain the offer yet', () => {
@@ -262,6 +322,81 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(finalBook!.orderActive[takerOrderIdx!]).toBe(1);
   });
 
+  test('preserves exact resting bid price when a lower-priced buy order expands the current book window', () => {
+    const lot = SWAP_LOT_SCALE;
+    const makerAskPriceTicks = 26_000_000n;
+    const makerBidPriceTicks = 24_000_000n;
+    const makerAsk = {
+      offerId: 'maker-ask',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'ask-maker',
+      accountId: 'ask-maker-account',
+      giveTokenId: 4,
+      giveAmount: 3n * lot,
+      wantTokenId: 6,
+      wantAmount: (3n * lot * makerAskPriceTicks) / 10_000n,
+      createdHeight: 1,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: makerAskPriceTicks,
+    };
+
+    const restingBid = {
+      offerId: 'resting-bid',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'bid-maker',
+      accountId: 'bid-maker-account',
+      giveTokenId: 6,
+      giveAmount: (2n * lot * makerBidPriceTicks) / 10_000n,
+      wantTokenId: 4,
+      wantAmount: 2n * lot,
+      createdHeight: 2,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: makerBidPriceTicks,
+    };
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['ask-maker-account', { swapOffers: new Map() }],
+        ['bid-maker-account', { swapOffers: new Map() }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 2,
+          supportedPairs: ['4/6'],
+        },
+        books: new Map(),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processOrderbookSwaps(entityState, [makerAsk, restingBid]);
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    expect(finalBook).toBeDefined();
+
+    const restingBidIdx = finalBook!.orderIdToIdx.get('bid-maker-account:resting-bid');
+    expect(typeof restingBidIdx).toBe('number');
+    expect(finalBook!.orderActive[restingBidIdx!]).toBe(1);
+
+    const levelIdx = finalBook!.orderPriceIdx[restingBidIdx!];
+    const bookPriceTicks = finalBook!.params.pmin + (BigInt(levelIdx) * finalBook!.params.tick);
+    expect(bookPriceTicks).toBe(makerBidPriceTicks);
+  });
+
   test('anchors buy-side price band to best ask when both sides of the book exist', () => {
     const lot = SWAP_LOT_SCALE;
     const makerBid = {
@@ -351,6 +486,232 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(finalBook).toBeDefined();
     expect(typeof takerOrderIdx).toBe('number');
     expect(finalBook!.orderActive[takerOrderIdx!]).toBe(1);
+  });
+
+  test('anchors sell-side price band to best bid when both sides of the book exist', () => {
+    const lot = SWAP_LOT_SCALE;
+    const makerBid = {
+      offerId: 'maker-bid',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'bid-maker',
+      accountId: 'bid-maker-account',
+      giveTokenId: 6,
+      giveAmount: 1000n * lot / 10_000n,
+      wantTokenId: 4,
+      wantAmount: lot,
+      createdHeight: 1,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1000n,
+    };
+
+    const makerAsk = {
+      offerId: 'maker-ask',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'ask-maker',
+      accountId: 'ask-maker-account',
+      giveTokenId: 4,
+      giveAmount: lot,
+      wantTokenId: 6,
+      wantAmount: 1200n * lot / 10_000n,
+      createdHeight: 2,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1200n,
+    };
+
+    const takerSell = {
+      offerId: 'taker-sell-between-sides',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'taker',
+      accountId: 'taker-account',
+      giveTokenId: 4,
+      giveAmount: 2n * lot,
+      wantTokenId: 6,
+      wantAmount: (700n * 2n * lot) / 10_000n,
+      createdHeight: 3,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 700n,
+    };
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['bid-maker-account', { swapOffers: new Map() }],
+        ['ask-maker-account', { swapOffers: new Map() }],
+        ['taker-account', { swapOffers: new Map() }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 2,
+          supportedPairs: ['4/6'],
+        },
+        books: new Map(),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processOrderbookSwaps(entityState, [makerBid, makerAsk, takerSell]);
+    const takerResolve = result.mempoolOps.find(
+      (item) => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'taker-sell-between-sides',
+    );
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    const takerOrderIdx = finalBook?.orderIdToIdx.get('taker-account:taker-sell-between-sides');
+
+    expect(takerResolve).toBeDefined();
+    expect(takerResolve!.tx.data.cancelRemainder).toBe(false);
+    expect(finalBook).toBeDefined();
+    expect(typeof takerOrderIdx).toBe('number');
+    expect(finalBook!.orderActive[takerOrderIdx!]).toBe(1);
+  });
+
+  test('rebuilds around price using persisted live account offers for historical resting orders', () => {
+    const lot = SWAP_LOT_SCALE;
+    let historicalBook = createBook({
+      tick: 50n,
+      pmin: 950n,
+      pmax: 1050n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+
+    historicalBook = applyCommand(historicalBook, {
+      kind: 0,
+      ownerId: 'maker',
+      orderId: 'maker-account:maker-ask-historical',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 1000n,
+      qtyLots: 1,
+    }).state;
+
+    const takerOffer = {
+      offerId: 'taker-buy-rebuild',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'taker',
+      accountId: 'taker-account',
+      giveTokenId: 6,
+      giveAmount: (1250n * 2n * lot) / 10_000n,
+      wantTokenId: 4,
+      wantAmount: 2n * lot,
+      createdHeight: 3,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1250n,
+    };
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['maker-account', {
+          leftEntity: 'hub-entity',
+          rightEntity: 'maker',
+          swapOffers: new Map([[
+            'maker-ask-historical',
+            {
+              offerId: 'maker-ask-historical',
+              giveTokenId: 4,
+              giveAmount: lot,
+              wantTokenId: 6,
+              wantAmount: 1000n * lot / 10_000n,
+              makerIsLeft: false,
+              minFillRatio: 0,
+              createdHeight: 1,
+              priceTicks: 1000n,
+              quantizedGive: lot,
+              quantizedWant: 1000n * lot / 10_000n,
+            },
+          ]]),
+        }],
+        ['taker-account', { swapOffers: new Map() }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 2,
+          supportedPairs: ['4/6'],
+        },
+        books: new Map([['4/6', historicalBook]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processOrderbookSwaps(entityState, [takerOffer]);
+    const makerResolve = result.mempoolOps.find(
+      (item) => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'maker-ask-historical',
+    );
+
+    expect(makerResolve).toBeDefined();
+    expect(makerResolve!.tx.data.executionGiveAmount).toBe(lot);
+    expect(makerResolve!.tx.data.executionWantAmount).toBe(1000n * lot / 10_000n);
+  });
+
+  test('passes canonical resting offer state into swap_resolve for snapped resting makers', async () => {
+    const lot = SWAP_LOT_SCALE;
+    const makerOffer = {
+      offerId: 'maker-snapped',
+      makerIsLeft: true,
+      giveTokenId: 4,
+      giveAmount: 2n * lot,
+      wantTokenId: 6,
+      wantAmount: (2006n * lot) / 10_000n,
+      minFillRatio: 0,
+      createdHeight: 1,
+      priceTicks: 1003n,
+      quantizedGive: 2n * lot,
+      quantizedWant: (2006n * lot) / 10_000n,
+    } satisfies SwapOffer;
+    const accountMachine = makeAccountMachine({ ...makerOffer });
+    const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
+      type: 'swap_resolve',
+      data: {
+        offerId: 'maker-snapped',
+        fillRatio: 32768,
+        cancelRemainder: false,
+        executionGiveAmount: lot,
+        executionWantAmount: 1000n * lot / 10_000n,
+        restingPriceTicks: 1000n,
+        restingGiveAmount: 2n * lot,
+        restingWantAmount: (2000n * lot) / 10_000n,
+        restingQuantizedGive: 2n * lot,
+        restingQuantizedWant: (2000n * lot) / 10_000n,
+      },
+    };
+
+    const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
+    expect(resolveResult.success).toBe(true);
+    const remaining = accountMachine.swapOffers.get('maker-snapped');
+    expect(remaining).toBeDefined();
+    expect(remaining!.priceTicks).toBe(1000n);
+    expect(remaining!.giveAmount).toBe(lot);
+    expect(remaining!.wantAmount).toBe(1000n * lot / 10_000n);
+    expect(remaining!.quantizedGive).toBe(lot);
+    expect(remaining!.quantizedWant).toBe(1000n * lot / 10_000n);
   });
 
   test('auto-cancels prices outside the 30% anchor band instead of resting them', () => {

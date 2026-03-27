@@ -126,6 +126,9 @@
   };
   let orderbookPairId = '1/2';
   let orderbookViewKey = '';
+  let orderbookRefreshNonce = 0;
+  let orderbookPriceStep: 'auto' | '0.0001' | '0.001' | '0.01' | '0.1' | '1' | '10' | '50' | '100' = 'auto';
+  let orderbookAutoResolvedPriceStep: '0.0001' | '0.001' | '0.01' | '0.1' | '1' | '10' | '50' | '100' = '1';
   let orderPercent = 100;
   let slippagePct = 0; // 0 = strict limit, 0.1-10 = market order with cap
   let orderType: 'market' | 'limit' = 'limit';
@@ -192,7 +195,7 @@
   $: orderbookDepth = orderbookScopeMode === 'aggregated'
     ? AGGREGATED_ORDERBOOK_DEPTH
     : SELECTED_ORDERBOOK_DEPTH;
-  $: orderbookViewKey = `${orderbookPairId}|${orderbookScopeMode}|${selectedBookAccountId}|${orderbookHubIds.join(',')}`;
+  $: orderbookViewKey = `${orderbookPairId}|${orderbookScopeMode}|${selectedBookAccountId}|${orderbookHubIds.join(',')}|${orderbookRefreshNonce}`;
 
   function resolveCounterpartyId(input: string): string {
     const normalized = String(input || '').trim().toLowerCase();
@@ -1503,6 +1506,7 @@
         entityTxs,
       }]);
 
+      orderbookRefreshNonce += 1;
       pendingSwapFeedbackOfferId = offerId;
       toasts.success('Swap offer submitted');
 
@@ -1540,6 +1544,7 @@
         }]
       }]);
 
+      orderbookRefreshNonce += 1;
       toasts.info('Cancel request sent');
     } catch (error) {
       console.error('Failed to cancel swap:', error);
@@ -1639,11 +1644,16 @@
         baseTokenSymbol={baseTokenSymbol}
         quoteTokenSymbol={quoteTokenSymbol}
         orderbookScopeMode={orderbookScopeMode}
+        selectedPriceStep={orderbookPriceStep}
+        autoResolvedPriceStep={orderbookAutoResolvedPriceStep}
         on:pairchange={(event) => {
           selectedPairValue = event.detail;
           handlePairChange();
         }}
         on:togglescope={toggleOrderbookScope}
+        on:pricestepchange={(event) => {
+          orderbookPriceStep = event.detail;
+        }}
       />
       {#if orderbookHubIds.length > 0}
         <div class="orderbook-wrap" data-testid="swap-orderbook">
@@ -1658,8 +1668,12 @@
               sourceLabels={orderbookSourceLabels}
               sourceAvatars={orderbookSourceAvatars}
               compactHeader={true}
+              showPriceStepControl={false}
               priceScale={Number(ORDERBOOK_PRICE_SCALE)}
               sizeDisplayScale={orderbookSizeDisplayScale}
+              disablePriceAggregation={orderbookScopeMode === 'selected'}
+              bind:selectedPriceStep={orderbookPriceStep}
+              bind:autoResolvedPriceStep={orderbookAutoResolvedPriceStep}
               preferredClickSide={tradeSide === 'buy-base' ? 'ask' : 'bid'}
               on:levelclick={handleOrderbookLevelClick}
               on:snapshot={handleOrderbookSnapshot}

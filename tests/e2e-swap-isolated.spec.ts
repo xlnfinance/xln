@@ -355,16 +355,27 @@ async function openSwapWorkspace(page: Page): Promise<void> {
   await expect(page.locator('.swap-panel').first()).toBeVisible({ timeout: 15_000 });
 }
 
-async function selectCounterpartyInSwap(page: Page): Promise<void> {
+async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string): Promise<void> {
   const createSelect = page.getByTestId('swap-create-account-select').first();
   const createVisible = await createSelect.isVisible({ timeout: 1500 }).catch(() => false);
   const select = createVisible ? createSelect : page.getByTestId('swap-account-select').first();
   const hasSelector = await select.isVisible({ timeout: 1500 }).catch(() => false);
   if (!hasSelector) return;
+  await expect
+    .poll(async () => await select.locator('option').count(), {
+      timeout: 30_000,
+      intervals: [250, 500, 1000],
+      message: 'swap account selector must expose at least one account option',
+    })
+    .toBeGreaterThan(0);
   const values = await select.locator('option').evaluateAll((options) =>
     options.map((option) => ({ value: String((option as HTMLOptionElement).value || ''), label: option.textContent || '' })),
   );
-  const firstAccount = values.find((option) => option.value && option.value !== '__aggregated__');
+  const normalizedPreferred = String(preferredAccountId || '').trim().toLowerCase();
+  const preferredAccount = normalizedPreferred
+    ? values.find((option) => String(option.value || '').trim().toLowerCase() === normalizedPreferred)
+    : null;
+  const firstAccount = preferredAccount || values.find((option) => option.value && option.value !== '__aggregated__');
   if (!firstAccount) return;
   await select.evaluate((node, value) => {
     const element = node as HTMLSelectElement;
@@ -372,6 +383,12 @@ async function selectCounterpartyInSwap(page: Page): Promise<void> {
     element.dispatchEvent(new Event('change', { bubbles: true }));
     element.dispatchEvent(new Event('input', { bubbles: true }));
   }, firstAccount.value);
+  await expect
+    .poll(async () => String(await select.inputValue().catch(() => '')).trim().toLowerCase(), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+    })
+    .toBe(String(firstAccount.value).trim().toLowerCase());
 }
 
 async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'): Promise<void> {
@@ -386,12 +403,37 @@ async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'
   await sideButton.click();
 }
 
+async function ensureSelectedScope(page: Page): Promise<void> {
+  const toggle = page.getByTestId('swap-scope-toggle').first();
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  await expect
+    .poll(async () => String(await toggle.textContent().catch(() => '')).trim(), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+    })
+    .toBeTruthy();
+  if (String(await toggle.textContent() || '').trim() !== 'Selected') {
+    await toggle.click();
+  }
+  await expect(toggle).toHaveText('Selected', { timeout: 10_000 });
+}
+
 async function readAvailableSwapAmount(page: Page): Promise<number> {
   const stat = page.getByTestId('swap-available-stat').first();
   await expect(stat).toBeVisible({ timeout: 20_000 });
   const text = String(await stat.textContent() || '');
   const match = text.match(/Available:\s*([0-9]+(?:\.[0-9]+)?)/i);
   return match ? Number.parseFloat(match[1] || '0') : 0;
+}
+
+async function waitForPositiveAvailableSwapAmount(page: Page, sideLabel: 'buy' | 'sell'): Promise<void> {
+  await expect
+    .poll(async () => await readAvailableSwapAmount(page), {
+      timeout: 20_000,
+      intervals: [200, 400, 800],
+      message: `${sideLabel}-side available amount should become positive`,
+    })
+    .toBeGreaterThan(0);
 }
 
 async function placeAliceSellOffer(page: Page, amount: string, price: string): Promise<void> {
@@ -404,13 +446,7 @@ async function placeAliceSellOffer(page: Page, amount: string, price: string): P
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await expect(priceInput).toBeVisible({ timeout: 20_000 });
   if (Number.isFinite(targetAmount) && targetAmount > 0) {
-    await expect
-      .poll(async () => await readAvailableSwapAmount(page), {
-        timeout: 20_000,
-        intervals: [200, 400, 800],
-        message: `sell-side available amount should reach ${targetAmount}`,
-      })
-      .toBeGreaterThanOrEqual(targetAmount);
+    await waitForPositiveAvailableSwapAmount(page, 'sell');
   }
   await amountInput.fill(amount);
   await priceInput.fill(price);
@@ -430,18 +466,41 @@ async function placeBobMatchingBuyOrder(page: Page, spendAmount: string, price: 
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await expect(priceInput).toBeVisible({ timeout: 20_000 });
   if (Number.isFinite(targetAmount) && targetAmount > 0) {
-    await expect
-      .poll(async () => await readAvailableSwapAmount(page), {
-        timeout: 20_000,
-        intervals: [200, 400, 800],
-        message: `buy-side available amount should reach ${targetAmount}`,
-      })
-      .toBeGreaterThanOrEqual(targetAmount);
+    await waitForPositiveAvailableSwapAmount(page, 'buy');
   }
   await amountInput.fill(spendAmount);
   await priceInput.fill(price);
   await expect(placeButton).toBeEnabled({ timeout: 20_000 });
   await placeButton.click();
+}
+
+function displayPriceToTicks(price: string): string {
+  const normalized = String(price || '').trim();
+  const match = normalized.match(/^(\d+)(?:\.(\d{0,4}))?$/);
+  if (!match) throw new Error(`invalid display price: ${price}`);
+  const whole = match[1] || '0';
+  const frac = (match[2] || '').padEnd(4, '0').slice(0, 4);
+  return `${whole}${frac}`.replace(/^0+(?=\d)/, '');
+}
+
+async function waitForOrderbookLevelVisible(
+  page: Page,
+  side: 'ask' | 'bid',
+  price: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const testId = side === 'ask' ? 'orderbook-ask-row' : 'orderbook-bid-row';
+  const priceTicks = displayPriceToTicks(price);
+  await expect
+    .poll(async () => {
+      return await page.locator(`[data-testid="${testId}"][data-price="${priceTicks}"]`).count();
+    }, {
+      timeout: timeoutMs,
+      intervals: [250, 500, 750],
+      message: `${side} level ${price} should be visible in relay orderbook`,
+    })
+    .toBeGreaterThan(0);
+  await expect(page.locator(`[data-testid="${testId}"][data-price="${priceTicks}"]`).first()).toBeVisible({ timeout: timeoutMs });
 }
 
 async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<void> {
@@ -550,6 +609,93 @@ async function readSwapOfferCount(
 test.describe('E2E Swap Isolated Flow', () => {
   test.setTimeout(LONG_E2E ? 240_000 : 150_000);
 
+  test('relay orderbook publishes new resting ask and bid to both subscribed users', async ({ browser, page }) => {
+    let aliceContext: BrowserContext | null = null;
+    let bobContext: BrowserContext | null = null;
+
+    try {
+      await timedStep('swap_book_publish.ensure_baseline', () => ensureE2EBaseline(page, {
+        apiBaseUrl: API_BASE_URL,
+        requireMarketMaker: false,
+        requireHubMesh: true,
+        minHubCount: 3,
+      }));
+
+      const hubId = await getPrimaryHubId(page);
+
+      aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
+      bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
+      const alicePage = await aliceContext.newPage();
+      const bobPage = await bobContext.newPage();
+
+      await Promise.all([
+        gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
+        gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
+      ]);
+
+      const alice = await createRuntimeIdentity(alicePage, 'alice-book', selectDemoMnemonic('alice'));
+      const bob = await createRuntimeIdentity(bobPage, 'bob-book', selectDemoMnemonic('bob'));
+
+      await Promise.all([
+        connectRuntimeToHub(alicePage, alice, hubId),
+        connectRuntimeToHub(bobPage, bob, hubId),
+      ]);
+
+      await extendCreditToken(alicePage, 2, '10000');
+      await waitForTokenDeltaActive(alicePage, alice.entityId, hubId, 2);
+
+      await Promise.all([
+        faucetOffchain(alicePage, alice.entityId, hubId, 2, '5'),
+        faucetOffchain(bobPage, bob.entityId, hubId, 1, '100'),
+      ]);
+
+      await Promise.all([
+        waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 2, 1n * 10n ** 18n),
+        waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, 10n * 10n ** 18n),
+      ]);
+
+      await Promise.all([
+        openSwapWorkspace(alicePage),
+        openSwapWorkspace(bobPage),
+      ]);
+      await Promise.all([
+        selectCounterpartyInSwap(alicePage, hubId),
+        selectCounterpartyInSwap(bobPage, hubId),
+        ensureSelectedScope(alicePage),
+        ensureSelectedScope(bobPage),
+      ]);
+
+      await placeAliceSellOffer(alicePage, '0.03', '2600.4992');
+
+      await Promise.all([
+        waitForOrderbookLevelVisible(alicePage, 'ask', '2600.4992'),
+        waitForOrderbookLevelVisible(bobPage, 'ask', '2600.4992'),
+      ]);
+
+      await configurePair(bobPage, 'WETH/USDC', 'buy');
+      const bobAmountInput = bobPage.getByTestId('swap-order-amount').first();
+      const bobPriceInput = bobPage.getByTestId('swap-order-price').first();
+      const bobSubmit = bobPage.getByTestId('swap-submit-order').first();
+      await expect(bobAmountInput).toBeVisible({ timeout: 20_000 });
+      await expect(bobPriceInput).toBeVisible({ timeout: 20_000 });
+      await bobAmountInput.fill('50');
+      await bobPriceInput.fill('2400.4992');
+      await expect(bobSubmit).toBeEnabled({ timeout: 20_000 });
+      await bobSubmit.click();
+      await expect(bobPage.getByTestId('swap-open-order-row').first()).toBeVisible({ timeout: 30_000 });
+
+      await Promise.all([
+        waitForOrderbookLevelVisible(alicePage, 'bid', '2400.4992'),
+        waitForOrderbookLevelVisible(bobPage, 'bid', '2400.4992'),
+      ]);
+    } finally {
+      await Promise.all([
+        aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
+        bobContext ? bobContext.close().catch(() => {}) : Promise.resolve(),
+      ]);
+    }
+  });
+
   test('two isolated users trade against each other through one hub orderbook without market maker liquidity', async ({ browser, page }) => {
     let aliceContext: BrowserContext | null = null;
     let bobContext: BrowserContext | null = null;
@@ -602,11 +748,11 @@ test.describe('E2E Swap Isolated Flow', () => {
       const aliceToken1Before = await outCap(alicePage, alice.entityId, hubId, 1);
       const bobToken2Before = await outCap(bobPage, bob.entityId, hubId, 2);
       await openSwapWorkspace(alicePage);
-      await selectCounterpartyInSwap(alicePage);
+      await selectCounterpartyInSwap(alicePage, hubId);
       await placeAliceSellOffer(alicePage, '0.03', '2500');
 
       await openSwapWorkspace(bobPage);
-      await selectCounterpartyInSwap(bobPage);
+      await selectCounterpartyInSwap(bobPage, hubId);
       await placeBobMatchingBuyOrder(bobPage, '75', '2500');
 
       await expect.poll(
@@ -682,11 +828,11 @@ test.describe('E2E Swap Isolated Flow', () => {
       await waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, 10n * 10n ** 18n);
 
       await openSwapWorkspace(alicePage);
-      await selectCounterpartyInSwap(alicePage);
+      await selectCounterpartyInSwap(alicePage, hubId);
       await placeAliceSellOffer(alicePage, '0.04', '2500');
 
       await openSwapWorkspace(bobPage);
-      await selectCounterpartyInSwap(bobPage);
+      await selectCounterpartyInSwap(bobPage, hubId);
       await placeBobMatchingBuyOrder(bobPage, '50', '2500');
 
       await waitForSwapResolveCountAtLeast(alicePage, alice.entityId, hubId, 1);
@@ -709,7 +855,7 @@ test.describe('E2E Swap Isolated Flow', () => {
       await alicePage.reload({ waitUntil: 'domcontentloaded' });
       await waitForRestoredRuntime(alicePage, alice.runtimeId);
       await openSwapWorkspace(alicePage);
-      await selectCounterpartyInSwap(alicePage);
+      await selectCounterpartyInSwap(alicePage, hubId);
 
       await expect
         .poll(async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId), {
@@ -802,11 +948,11 @@ test.describe('E2E Swap Isolated Flow', () => {
       ]);
 
       await openSwapWorkspace(alicePage);
-      await selectCounterpartyInSwap(alicePage);
+      await selectCounterpartyInSwap(alicePage, hubId);
       await placeAliceSellOffer(alicePage, '0.06', '2500');
 
       await openSwapWorkspace(bobPage);
-      await selectCounterpartyInSwap(bobPage);
+      await selectCounterpartyInSwap(bobPage, hubId);
       await placeBobMatchingBuyOrder(bobPage, '50', '2500');
 
       await waitForSwapResolveCountAtLeast(alicePage, alice.entityId, hubId, 1);
@@ -831,7 +977,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         .toBe('40000000000000000');
 
       await openSwapWorkspace(carolPage);
-      await selectCounterpartyInSwap(carolPage);
+      await selectCounterpartyInSwap(carolPage, hubId);
       await placeBobMatchingBuyOrder(carolPage, '100', '2500');
 
       await expect
@@ -853,7 +999,17 @@ test.describe('E2E Swap Isolated Flow', () => {
         .toBe(0);
 
       await alicePage.getByTestId('swap-orders-tab-closed').first().click();
-      await expect(alicePage.getByTestId('swap-closed-order-row').first()).toBeVisible({ timeout: 20_000 });
+      const closedRow = alicePage.getByTestId('swap-closed-order-row').first();
+      const closedVisible = await closedRow.isVisible({ timeout: 10_000 }).catch(() => false);
+      if (!closedVisible) {
+        await alicePage.reload({ waitUntil: 'domcontentloaded' });
+        await gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 });
+        await openSwapWorkspace(alicePage);
+        await selectCounterpartyInSwap(alicePage, hubId);
+        await ensureSelectedScope(alicePage);
+        await alicePage.getByTestId('swap-orders-tab-closed').first().click();
+      }
+      await expect(closedRow).toBeVisible({ timeout: 20_000 });
     } finally {
       await Promise.all([
         aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),

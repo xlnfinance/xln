@@ -131,6 +131,7 @@ export function exportUiSettings(settings: Settings): UiSettingsExport {
     version: 1,
     theme: settings.theme,
     uiStyle: normalizeUiStyle(settings.uiStyle),
+    liteMode: !!settings.liteMode,
     compactNumbers: !!settings.compactNumbers,
     showTokenIcons: !!settings.showTokenIcons,
     showTimeMachine: !!settings.showTimeMachine,
@@ -163,6 +164,7 @@ export function normalizeImportedUiSettings(input: unknown): Partial<Settings> {
   return {
     theme: pickOption(value.theme, VALID_THEME, 'dark'),
     uiStyle: normalizeUiStyle(value.uiStyle),
+    liteMode: !!value.liteMode,
     compactNumbers: !!value.compactNumbers,
     showTokenIcons: !!value.showTokenIcons,
     showTimeMachine: !!value.showTimeMachine,

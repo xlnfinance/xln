@@ -22,6 +22,7 @@
   export let barHeight = 10;
   export let showMetricLabels = false;
   export let showHeader = true;
+  export let showBars = true;
   export let mode: 'plain' | 'sheet' = 'plain';
 
   const dispatch = createEventDispatcher<{ action: { tokenId: number } }>();
@@ -52,6 +53,7 @@
         pendingOutDebtMode={row.pendingOutDebtMode || 'none'}
         visualScale={row.visualScale ?? null}
         {showMetricLabels}
+        showBar={showBars}
         actionLabel={row.actionLabel || ''}
         actionTokenId={row.tokenId}
         actionDisabled={row.actionDisabled || false}

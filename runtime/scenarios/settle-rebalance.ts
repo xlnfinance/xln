@@ -155,7 +155,7 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
 
   // Initial R→C deposit: Hub deposits $5K collateral per account
   const r2cTxs = users.map(user => ({
-    type: 'deposit_collateral' as const,
+    type: 'r2c' as const,
     data: { counterpartyId: user.id, tokenId: USDC, amount: usd(5_000) },
   }));
   await process(env, [{ entityId: hub.id, signerId: hub.signer, entityTxs: r2cTxs }]);

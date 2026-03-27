@@ -1,15 +1,20 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
 
+  const PRICE_STEP_OPTIONS = ['auto', '0.0001', '0.001', '0.01', '0.1', '1', '10', '50', '100'] as const;
+
   export let pairOptions: Array<{ value: string; label: string }> = [];
   export let selectedPairValue = '';
   export let baseTokenSymbol = '';
   export let quoteTokenSymbol = '';
   export let orderbookScopeMode: 'aggregated' | 'selected' = 'aggregated';
+  export let selectedPriceStep: (typeof PRICE_STEP_OPTIONS)[number] = 'auto';
+  export let autoResolvedPriceStep: (typeof PRICE_STEP_OPTIONS)[number] = '1';
 
   const dispatch = createEventDispatcher<{
     pairchange: string;
     togglescope: void;
+    pricestepchange: string;
   }>();
 
   function handlePairChange(event: Event): void {
@@ -18,6 +23,10 @@
 
   function toggleScope(): void {
     dispatch('togglescope');
+  }
+
+  function handlePriceStepChange(event: Event): void {
+    dispatch('pricestepchange', (event.currentTarget as HTMLSelectElement).value);
   }
 </script>
 
@@ -64,19 +73,40 @@
   >
     {orderbookScopeMode === 'aggregated' ? 'Aggregated' : 'Selected'}
   </button>
+
+  <label class="toolbar-select toolbar-select-step">
+    <span class="toolbar-field-label">Precision</span>
+    <select
+      value={orderbookScopeMode === 'selected' ? 'exact' : selectedPriceStep}
+      aria-label="Orderbook precision"
+      data-testid="swap-orderbook-step-select"
+      disabled={orderbookScopeMode === 'selected'}
+      on:change={handlePriceStepChange}
+    >
+      {#if orderbookScopeMode === 'selected'}
+        <option value="exact">Exact relay</option>
+      {:else}
+        {#each PRICE_STEP_OPTIONS as step}
+          <option value={step}>{step === 'auto' ? `Auto · ${autoResolvedPriceStep}` : step}</option>
+        {/each}
+      {/if}
+    </select>
+  </label>
 </div>
 
 <style>
   .swap-toolbar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1.8fr) minmax(112px, 0.7fr) minmax(132px, 0.8fr);
     gap: 10px;
-    align-items: center;
+    align-items: stretch;
     margin-bottom: 8px;
   }
 
   .toolbar-select {
     position: relative;
+    display: flex;
+    align-items: center;
     min-width: 0;
     border: 1px solid #2d313b;
     border-radius: 10px;
@@ -95,6 +125,20 @@
 
   .toolbar-select-pair {
     min-width: 120px;
+  }
+
+  .toolbar-select-step {
+    padding-left: 10px;
+    gap: 8px;
+  }
+
+  .toolbar-field-label {
+    flex: 0 0 auto;
+    color: #8f96a3;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .pair-select-preview {
@@ -159,6 +203,10 @@
     color: #f3f4f6;
   }
 
+  .toolbar-select-step select {
+    padding-left: 0;
+  }
+
   .scope-toggle {
     display: inline-flex;
     align-items: center;
@@ -188,8 +236,12 @@
   }
 
   @media (max-width: 900px) {
-    .toolbar-select-pair {
-      min-width: 0;
+    .swap-toolbar {
+      grid-template-columns: minmax(0, 1fr) minmax(108px, 0.8fr) minmax(116px, 0.9fr);
+    }
+
+    .scope-toggle {
+      width: auto;
     }
   }
 

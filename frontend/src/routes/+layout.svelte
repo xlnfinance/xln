@@ -43,9 +43,13 @@
 	<Topbar variant={isLandingPage ? 'transparent' : 'default'} />
 {/if}
 
-<main class:with-topbar={showTopbar}>
+{#if chromeMode === 'site'}
+	<main class:with-topbar={showTopbar}>
+		{@render children?.()}
+	</main>
+{:else}
 	{@render children?.()}
-</main>
+{/if}
 
 <Toast />
 

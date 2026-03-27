@@ -356,7 +356,7 @@ export async function runRebalanceScenario(): Promise<void> {
   console.log('\n🏦 Depositing initial collateral ($20K per account)...');
 
   const r2cTxs = [alice, bob, charlie, dave].map(user => ({
-    type: 'deposit_collateral' as const,
+    type: 'r2c' as const,
     data: {
       counterpartyId: user.id,
       tokenId: USDC_TOKEN_ID,
@@ -364,7 +364,7 @@ export async function runRebalanceScenario(): Promise<void> {
     }
   }));
 
-  // Step 1: deposit_collateral for all 4 accounts
+  // Step 1: r2c for all 4 accounts
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,

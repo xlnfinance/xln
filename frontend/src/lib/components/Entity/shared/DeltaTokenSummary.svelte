@@ -17,6 +17,7 @@
   export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
   export let showMetricLabels: boolean = true;
   export let visualScale: DeltaVisualScale | null = null;
+  export let showBar = true;
   export let actionLabel = '';
   export let actionTokenId: number | null = null;
   export let actionDisabled = false;
@@ -159,13 +160,15 @@
     {/if}
   </div>
 
-  <DeltaCapacityBar
-    {derived}
-    layout={barLayout}
-    {pendingOutDebtMode}
-    heightPx={barHeight}
-    visualScale={resolvedVisualScale}
-  />
+  {#if showBar}
+    <DeltaCapacityBar
+      {derived}
+      layout={barLayout}
+      {pendingOutDebtMode}
+      heightPx={barHeight}
+      visualScale={resolvedVisualScale}
+    />
+  {/if}
 </div>
 
 <style>

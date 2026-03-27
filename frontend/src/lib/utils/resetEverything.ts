@@ -23,7 +23,6 @@ const RESET_PREPARATION_DELAY_MS = 180;
 const RESET_DB_DELETE_RETRIES = 8;
 const RESET_DB_DELETE_RETRY_DELAY_MS = 250;
 const VAULT_STORAGE_KEY = 'xln-vaults';
-const FALLBACK_DB_NAMES = ['db', 'level-js-db', 'level-db', 'xln-db', '_pouch_db'];
 
 type ResetSignal = {
   type: 'begin-reset';
@@ -309,90 +308,59 @@ async function collectAndShipDebugDump(triggerError?: unknown): Promise<void> {
   await shipDebugDump(dump);
 }
 
-async function listIndexedDbNames(): Promise<string[]> {
-  if (typeof indexedDB === 'undefined') return [];
-  try {
-    const idb = indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> };
-    if (typeof idb.databases !== 'function') return [];
-    const dbs = await idb.databases();
-    const names = new Set<string>();
-    for (const entry of dbs) {
-      const name = String(entry && typeof entry.name === 'string' ? entry.name : '').trim();
-      if (!name) continue;
-      names.add(name);
-    }
-    return Array.from(names.values()).sort((left, right) => left.localeCompare(right));
-  } catch {
-    return [];
+function getIndexedDbFactory(): IDBFactory & { databases: () => Promise<Array<{ name?: string }>> } {
+  if (typeof indexedDB === 'undefined') {
+    throw new Error('IndexedDB unavailable during reset');
   }
+  const idb = indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> };
+  if (typeof idb.databases !== 'function') {
+    throw new Error('indexedDB.databases() unavailable during reset');
+  }
+  return idb as IDBFactory & { databases: () => Promise<Array<{ name?: string }>> };
 }
 
-/** Clear all IndexedDB databases (best-effort) */
-async function clearAllIndexedDB(): Promise<string[]> {
-  if (typeof indexedDB === 'undefined') return [];
+async function listIndexedDbNames(): Promise<string[]> {
+  const dbs = await getIndexedDbFactory().databases();
+  const names = new Set<string>();
+  for (const entry of dbs) {
+    const name = String(entry && typeof entry.name === 'string' ? entry.name : '').trim();
+    if (!name) continue;
+    names.add(name);
+  }
+  return Array.from(names.values()).sort((left, right) => left.localeCompare(right));
+}
 
-  const attemptedNames = new Set<string>();
+async function deleteIndexedDb(name: string): Promise<'success' | 'error' | 'blocked'> {
+  return new Promise((resolve) => {
+    const req = indexedDB.deleteDatabase(name);
+    req.onsuccess = () => resolve('success');
+    req.onerror = () => resolve('error');
+    req.onblocked = () => resolve('blocked');
+  });
+}
+
+async function clearAllIndexedDB(): Promise<void> {
   for (let pass = 0; pass < RESET_DB_DELETE_RETRIES; pass += 1) {
-    let dbNames = await listIndexedDbNames();
-    if (dbNames.length === 0 && attemptedNames.size === 0) {
-      dbNames = [...FALLBACK_DB_NAMES];
-    }
+    const dbNames = await listIndexedDbNames();
     if (dbNames.length === 0) {
-      return Array.from(attemptedNames.values());
+      return;
     }
 
-    for (const name of dbNames) {
-      attemptedNames.add(name);
-      try {
-        let deleted = false;
-        for (let attempt = 0; attempt < RESET_DB_DELETE_RETRIES; attempt += 1) {
-          const status = await new Promise<'success' | 'error' | 'blocked'>((resolve) => {
-            const req = indexedDB.deleteDatabase(name);
-            req.onsuccess = () => resolve('success');
-            req.onerror = () => resolve('error');
-            req.onblocked = () => resolve('blocked');
-          });
-          if (status === 'success' || status === 'error') {
-            deleted = true;
-            break;
-          }
-          await sleep(RESET_DB_DELETE_RETRY_DELAY_MS * (attempt + 1));
-        }
-        if (!deleted) {
-          console.warn(`[RESET] IndexedDB delete remained blocked: ${name}`);
-        }
-      } catch {
-        // best effort
-      }
+    const statuses = await Promise.all(dbNames.map((name) => deleteIndexedDb(name)));
+    if (statuses.includes('blocked')) {
+      await sleep(RESET_DB_DELETE_RETRY_DELAY_MS * (pass + 1));
+      continue;
     }
 
     const remaining = await listIndexedDbNames();
     if (remaining.length === 0) {
-      return Array.from(attemptedNames.values());
+      return;
     }
     await sleep(RESET_DB_DELETE_RETRY_DELAY_MS * (pass + 1));
   }
 
-  return Array.from(attemptedNames.values());
-}
-
-async function waitForIndexedDbDeletion(dbNames: string[]): Promise<void> {
-  if (typeof indexedDB === 'undefined') return;
-  if (!dbNames.length) return;
-  const idb = indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> };
-  if (typeof idb.databases !== 'function') return;
-
-  const normalizedTargets = new Set(dbNames.map((name) => String(name || '').trim()).filter(Boolean));
-  for (let attempt = 0; attempt < RESET_DB_DELETE_RETRIES; attempt += 1) {
-    const remaining = await idb.databases().catch(() => []);
-    const stillPresent = remaining.some((entry) => {
-      const name = String(entry?.name || '').trim();
-      return !!name && normalizedTargets.has(name);
-    });
-    if (!stillPresent) return;
-    await sleep(RESET_DB_DELETE_RETRY_DELAY_MS * (attempt + 1));
-  }
-  throw new Error(`IndexedDB wipe incomplete for: ${Array.from(normalizedTargets).join(', ')}`);
+  const remaining = await listIndexedDbNames();
+  throw new Error(`IndexedDB wipe incomplete; remaining databases: ${remaining.join(', ')}`);
 }
 
 function hardNavigateAfterReset(): void {
@@ -422,42 +390,56 @@ function hardNavigateAfterReset(): void {
 
 async function clearCacheStorage(): Promise<void> {
   if (typeof caches === 'undefined') return;
-  try {
-    const names = await caches.keys();
-    await Promise.all(names.map((name) => caches.delete(name).catch(() => false)));
-  } catch {
-    // best effort
+  const names = await caches.keys();
+  const deleted = await Promise.all(names.map((name) => caches.delete(name).catch(() => false)));
+  if (deleted.some((result) => result !== true)) {
+    throw new Error(`CacheStorage wipe incomplete; failed deletions: ${names.join(', ')}`);
+  }
+  const remaining = await caches.keys();
+  if (remaining.length > 0) {
+    throw new Error(`CacheStorage wipe incomplete; remaining caches: ${remaining.join(', ')}`);
   }
 }
 
 async function unregisterServiceWorkers(): Promise<void> {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-  try {
-    const registrations = await navigator.serviceWorker.getRegistrations();
-    await Promise.all(registrations.map((registration) => registration.unregister().catch(() => false)));
-  } catch {
-    // best effort
+  const registrations = await navigator.serviceWorker.getRegistrations();
+  const unregistered = await Promise.all(registrations.map((registration) => registration.unregister().catch(() => false)));
+  if (unregistered.some((result) => result !== true)) {
+    throw new Error('Service worker wipe incomplete; unregister returned false');
+  }
+  const remaining = await navigator.serviceWorker.getRegistrations();
+  if (remaining.length > 0) {
+    throw new Error(`Service worker wipe incomplete; remaining registrations: ${remaining.length}`);
   }
 }
 
 async function clearOriginPrivateFileSystem(): Promise<void> {
-  try {
-    const storageWithDirectory = navigator.storage as StorageManager & {
-      getDirectory?: () => Promise<FileSystemDirectoryHandle>;
-    };
-    if (typeof storageWithDirectory?.getDirectory !== 'function') return;
-    const root = await storageWithDirectory.getDirectory();
-    // TS DOM typing for FileSystemDirectoryHandle iteration is still spotty across toolchains.
-    // @ts-ignore
-    for await (const [name] of root.entries()) {
-      try {
-        await root.removeEntry(name, { recursive: true });
-      } catch {
-        // best effort
-      }
+  const storageWithDirectory = navigator.storage as StorageManager & {
+    getDirectory?: () => Promise<FileSystemDirectoryHandle>;
+  };
+  if (typeof storageWithDirectory?.getDirectory !== 'function') return;
+  const root = await storageWithDirectory.getDirectory();
+  const failedEntries: string[] = [];
+  // TS DOM typing for FileSystemDirectoryHandle iteration is still spotty across toolchains.
+  // @ts-ignore
+  for await (const [name] of root.entries()) {
+    try {
+      await root.removeEntry(name, { recursive: true });
+    } catch {
+      failedEntries.push(String(name));
     }
-  } catch {
-    // best effort
+  }
+  if (failedEntries.length > 0) {
+    throw new Error(`OPFS wipe incomplete; failed entries: ${failedEntries.join(', ')}`);
+  }
+  const remainingEntries: string[] = [];
+  // @ts-ignore
+  for await (const [name] of root.entries()) {
+    remainingEntries.push(String(name));
+  }
+  if (remainingEntries.length > 0) {
+    throw new Error(`OPFS wipe incomplete; remaining entries: ${remainingEntries.join(', ')}`);
   }
 }
 
@@ -485,7 +467,6 @@ function clearAllCookies(): void {
 }
 
 export async function clearAllPersistentClientState(): Promise<void> {
-  let deletedDbNames: string[] = [];
   try { window.name = ''; } catch { /* */ }
   try { localStorage.clear(); } catch { /* */ }
   try { sessionStorage.clear(); } catch { /* */ }
@@ -493,12 +474,7 @@ export async function clearAllPersistentClientState(): Promise<void> {
   await unregisterServiceWorkers();
   await clearCacheStorage();
   await clearOriginPrivateFileSystem();
-  deletedDbNames = await clearAllIndexedDB();
-  await waitForIndexedDbDeletion(deletedDbNames);
-  const remainingDbNames = await listIndexedDbNames();
-  if (remainingDbNames.length > 0) {
-    throw new Error(`IndexedDB wipe incomplete; remaining databases: ${remainingDbNames.join(', ')}`);
-  }
+  await clearAllIndexedDB();
 }
 
 async function verifyPersistentClientStateCleared(): Promise<void> {

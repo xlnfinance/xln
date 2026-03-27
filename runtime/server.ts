@@ -4271,7 +4271,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
               signerId: hubSignerId,
               entityTxs: [
                 {
-                  type: 'reserve_to_reserve',
+                  type: 'r2r',
                   data: {
                     toEntityId: userEntityId,
                     tokenId,

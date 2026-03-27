@@ -3329,7 +3329,7 @@ let vrHammer: VRHammer | null = null;
 
                 triggerEntityActivity(fromEntityId);
                 triggerEntityActivity(toEntityId);
-              } else if (['deposit_collateral', 'reserve_to_collateral', 'deposit_reserve', 'withdraw_reserve'].includes(tx.type)) {
+              } else if (['r2c', 'reserve_to_collateral', 'deposit_reserve', 'withdraw_reserve'].includes(tx.type)) {
                 createBroadcastRipple(processingEntityId, tx.type);
               } else if (tx.type === 'payFromReserve' || tx.kind === 'payFromReserve') {
                 // R2R (Reserve-to-Reserve) transaction visualization during time-machine playback
@@ -3381,7 +3381,7 @@ let vrHammer: VRHammer | null = null;
 
               triggerEntityActivity(fromEntityId);
               triggerEntityActivity(toEntityId);
-            } else if (['deposit_collateral', 'reserve_to_collateral', 'deposit_reserve', 'withdraw_reserve'].includes(tx.type)) {
+            } else if (['r2c', 'reserve_to_collateral', 'deposit_reserve', 'withdraw_reserve'].includes(tx.type)) {
               createBroadcastRipple(processingEntityId, tx.type);
             } else if (tx.type === 'payFromReserve' || tx.kind === 'payFromReserve') {
               // R2R (Reserve-to-Reserve) transaction visualization in live mode
@@ -3514,7 +3514,7 @@ let vrHammer: VRHammer | null = null;
     // Ring color based on tx type
     let color = 0x00ffff; // Cyan default
     switch (txType) {
-      case 'deposit_collateral':
+      case 'r2c':
       case 'reserve_to_collateral':
         color = 0x00ff88; // Bright green - entity growing (reserve → collateral)
         break;

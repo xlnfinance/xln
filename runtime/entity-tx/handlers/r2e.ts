@@ -10,9 +10,9 @@ import type { EntityInput, EntityState, EntityTx } from '../../types';
 import { addMessage, cloneEntityState } from '../../state-helpers';
 import { batchAddReserveToExternal, getEffectiveDraftReserveBalance, initJBatch } from '../../j-batch';
 
-export async function handleReserveToExternal(
+export async function handleR2E(
   entityState: EntityState,
-  entityTx: Extract<EntityTx, { type: 'reserve_to_external' }>,
+  entityTx: Extract<EntityTx, { type: 'r2e' }>,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   const { receivingEntity, tokenId, amount } = entityTx.data;
   const newState = cloneEntityState(entityState);

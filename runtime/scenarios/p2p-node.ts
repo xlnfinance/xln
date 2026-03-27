@@ -962,7 +962,7 @@ const run = async () => {
           signerId,
           entityTxs: [
             {
-              type: 'reserve_to_reserve',
+              type: 'r2r',
               data: {
                 toEntityId: bobProfile.entityId,
                 tokenId: USDC,

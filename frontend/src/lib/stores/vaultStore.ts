@@ -2106,7 +2106,7 @@ export const vaultOperations = {
       if (!env) return { success: false, error: 'Runtime env unavailable' };
 
       await xln.queueEntityInput(env, signer.entityId, signer.address, {
-        type: 'reserve_to_reserve',
+        type: 'r2r',
         toEntityId,
         tokenId,
         amount,

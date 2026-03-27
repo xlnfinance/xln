@@ -562,8 +562,8 @@
 
 </script>
 
-<main class="panel-content">
-  {#if activeInlinePanel === 'formation'}
+{#if activeInlinePanel === 'formation'}
+  <main class="panel-content">
     <!-- Inline: Entity Formation -->
     <div class="inline-panel">
       <div class="inline-panel-header">
@@ -572,57 +572,65 @@
       </div>
       <FormationPanel onCreated={() => { activeInlinePanel = 'none'; }} />
     </div>
-  {:else if activeInlinePanel === 'add-jmachine'}
+  </main>
+{:else if activeInlinePanel === 'add-jmachine'}
+  <main class="panel-content">
     <!-- Inline: Add Jurisdiction -->
     <div class="inline-panel">
       <div class="inline-panel-header">
         <button class="back-btn" onclick={() => activeInlinePanel = 'none'}>← Back</button>
         <h3>Add Jurisdiction</h3>
       </div>
-        <AddJMachine
-          on:create={(event) => void handleJMachineCreate(event)}
-          on:cancel={() => activeInlinePanel = 'none'}
-        />
+      <AddJMachine
+        on:create={(event) => void handleJMachineCreate(event)}
+        on:cancel={() => activeInlinePanel = 'none'}
+      />
     </div>
-  {:else if showVaultPanelVisible}
+  </main>
+{:else if showVaultPanelVisible}
+  <main class="panel-content">
     <RuntimeCreation embedded={true} />
-  {:else if viewMode === 'entity' && selectedEntityId && selectedSignerId && !onboardingComplete}
+  </main>
+{:else if viewMode === 'entity' && selectedEntityId && selectedSignerId && !onboardingComplete}
+  <main class="panel-content">
     <OnboardingPanel
       entityId={selectedEntityId}
       signerId={selectedSignerId}
       on:complete={handleOnboardingComplete}
     />
-  {:else if viewMode === 'entity'}
-    <EntityPanelTabs
-      tab={entityTab}
-      userModeHeader={true}
-      showJurisdiction={false}
-      selectedJurisdiction={selectedJurisdictionName}
-      allowHeaderAddRuntime={true}
-      allowHeaderDeleteRuntime={true}
-      headerRuntimeAddLabel="+ Add Runtime"
-      replicasOverride={currentFrame?.eReplicas instanceof Map ? currentFrame.eReplicas : null}
-      envOverride={$isolatedEnv}
-      historyOverride={$isolatedHistory}
-      timeIndexOverride={$isolatedTimeIndex}
-      isLiveOverride={$isolatedIsLive}
-      on:signerSelect={handleSignerSelect}
-      on:addSigner={handleAddSigner}
-      on:entitySelect={handleEntitySelect}
-      on:jurisdictionSelect={handleJurisdictionSelect}
-      on:addJurisdiction={handleAddJurisdiction}
-      on:addEntity={handleAddEntity}
-      on:addRuntime={handleAddRuntime}
-      on:deleteRuntime={handleRemoveRuntime}
-    />
-  {:else if viewMode === 'jurisdiction'}
+  </main>
+{:else if viewMode === 'entity'}
+  <EntityPanelTabs
+    tab={entityTab}
+    userModeHeader={true}
+    showJurisdiction={false}
+    selectedJurisdiction={selectedJurisdictionName}
+    allowHeaderAddRuntime={true}
+    allowHeaderDeleteRuntime={true}
+    headerRuntimeAddLabel="+ Add Runtime"
+    replicasOverride={currentFrame?.eReplicas instanceof Map ? currentFrame.eReplicas : null}
+    envOverride={$isolatedEnv}
+    historyOverride={$isolatedHistory}
+    timeIndexOverride={$isolatedTimeIndex}
+    isLiveOverride={$isolatedIsLive}
+    on:signerSelect={handleSignerSelect}
+    on:addSigner={handleAddSigner}
+    on:entitySelect={handleEntitySelect}
+    on:jurisdictionSelect={handleJurisdictionSelect}
+    on:addJurisdiction={handleAddJurisdiction}
+    on:addEntity={handleAddEntity}
+    on:addRuntime={handleAddRuntime}
+    on:deleteRuntime={handleRemoveRuntime}
+  />
+{:else if viewMode === 'jurisdiction'}
+  <main class="panel-content">
     <JurisdictionPanel
       {isolatedEnv}
       {isolatedHistory}
       {isolatedTimeIndex}
     />
-  {/if}
-</main>
+  </main>
+{/if}
 
 <style>
   .panel-content {
@@ -665,17 +673,6 @@
     font-size: 1rem;
     font-weight: 600;
     color: var(--theme-text-primary, #e6edf3);
-  }
-
-  .panel-content :global(.entity-panel) {
-    min-height: 0;
-    height: auto;
-  }
-
-  .panel-content :global(.main-scroll) {
-    flex: 0 0 auto;
-    overflow: visible;
-    min-height: 0;
   }
 
   .back-btn {

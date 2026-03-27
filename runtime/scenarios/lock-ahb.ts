@@ -344,7 +344,7 @@ export async function lockAhb(env: Env): Promise<void> {
       entityTxs: [
         // R2R #1: Hub → Alice $3M
         {
-          type: 'reserve_to_reserve',
+          type: 'r2r',
           data: {
             toEntityId: alice.id,
             tokenId: USDC_TOKEN_ID,
@@ -353,7 +353,7 @@ export async function lockAhb(env: Env): Promise<void> {
         },
         // R2R #2: Hub → Bob $2M
         {
-          type: 'reserve_to_reserve',
+          type: 'r2r',
           data: {
             toEntityId: bob.id,
             tokenId: USDC_TOKEN_ID,
@@ -451,7 +451,7 @@ export async function lockAhb(env: Env): Promise<void> {
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [{
-        type: 'reserve_to_reserve',
+        type: 'r2r',
         data: {
           toEntityId: bob.id,
           tokenId: USDC_TOKEN_ID,
@@ -607,12 +607,12 @@ export async function lockAhb(env: Env): Promise<void> {
     const aliceCollateralAmount = usd(500_000);
 
     // PROPER R→E→A FLOW for R2C:
-    // Step 1: Entity creates deposit_collateral EntityTx → adds to jBatch
+    // Step 1: Entity creates r2c EntityTx → adds to jBatch
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [{
-        type: 'deposit_collateral',
+        type: 'r2c',
         data: {
           counterpartyId: hub.id,
           tokenId: USDC_TOKEN_ID,
@@ -621,7 +621,7 @@ export async function lockAhb(env: Env): Promise<void> {
       }]
     }]);
 
-    console.log('✅ Alice deposit_collateral added to jBatch');
+    console.log('✅ Alice r2c added to jBatch');
 
     await pushSnapshot(env, 'Alice R2C: jBatch created', {
       title: 'R2C Batch Ready',
@@ -1136,7 +1136,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     const rebalanceAmount = usd(200_000);
     // NOTE:
-    // Keep this phase manual on purpose (deposit_collateral + j_broadcast) to isolate
+    // Keep this phase manual on purpose (r2c + j_broadcast) to isolate
     // lock/HTLC settlement behavior from hub crontab auto-rebalance side effects.
 
     // ✅ Store pre-rebalance state for assertions
@@ -1188,14 +1188,14 @@ export async function lockAhb(env: Env): Promise<void> {
       ]
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
-    // STEP 23: Hub executes deposit_collateral
+    // STEP 23: Hub executes r2c
     console.log('\n🏦 FRAME 23: Hub deposits collateral (R→C)');
 
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
       entityTxs: [{
-        type: 'deposit_collateral',
+        type: 'r2c',
         data: {
           counterpartyId: bob.id,
           tokenId: USDC_TOKEN_ID,
@@ -1204,7 +1204,7 @@ export async function lockAhb(env: Env): Promise<void> {
       }]
     }]);
     await converge(env);
-    console.log(`✅ deposit_collateral queued in jBatch (R→C $200K)`);
+    console.log(`✅ r2c queued in jBatch (R→C $200K)`);
 
     // STEP 24: Hub broadcasts jBatch via j_broadcast
     console.log('\n🏦 FRAME 24: Hub broadcasts jBatch to J-Machine');
@@ -1308,7 +1308,7 @@ export async function lockAhb(env: Env): Promise<void> {
       entityId: charlie.id,
       signerId: charlie.signer,
       entityTxs: [{
-        type: 'deposit_collateral',
+        type: 'r2c',
         data: {
           jurisdictionId: 'AHB Demo',
           tokenId: USDC_TOKEN_ID,
@@ -1508,7 +1508,7 @@ export async function lockAhb(env: Env): Promise<void> {
       entityId: hub2.id,
       signerId: hub2.signer,
       entityTxs: [{
-        type: 'deposit_collateral',
+        type: 'r2c',
         data: {
           jurisdictionId: 'AHB Demo',
           tokenId: USDC_TOKEN_ID,

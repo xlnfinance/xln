@@ -757,13 +757,13 @@ export async function ahb(env: Env): Promise<void> {
     // ============================================================================
     console.log('\n🔄 FRAME 2: Hub → Alice R2R - QUEUED IN BATCH (PENDING)');
 
-    // Hub creates reserve_to_reserve tx (adds to jBatch)
+    // Hub creates r2r tx (adds to jBatch)
     const r2rTx1: EntityInput = {
       entityId: hub.id,
       signerId: hub.signer,
       entityTxs: [
         {
-          type: 'reserve_to_reserve',
+          type: 'r2r',
           data: {
             toEntityId: alice.id,
             tokenId: USDC_TOKEN_ID,
@@ -806,7 +806,7 @@ export async function ahb(env: Env): Promise<void> {
       signerId: hub.signer,
       entityTxs: [
         {
-          type: 'reserve_to_reserve',
+          type: 'r2r',
           data: {
             toEntityId: bob.id,
             tokenId: USDC_TOKEN_ID,
@@ -884,13 +884,13 @@ export async function ahb(env: Env): Promise<void> {
     // ============================================================================
     console.log('\n🔄 FRAME 5: Alice → Bob R2R - TX ENTERS MEMPOOL (PENDING)');
 
-    // Alice creates reserve_to_reserve tx → generates jOutput → process() auto-queues to J-Machine
+    // Alice creates r2r tx → generates jOutput → process() auto-queues to J-Machine
     const r2rTx3: EntityInput = {
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [
         {
-          type: 'reserve_to_reserve',
+          type: 'r2r',
           data: {
             toEntityId: bob.id,
             tokenId: USDC_TOKEN_ID,
@@ -1054,14 +1054,14 @@ export async function ahb(env: Env): Promise<void> {
     const aliceCollateralAmount = usd(500_000);
 
     // PROPER R→E→A FLOW for R2C:
-    // Step 1: Entity creates deposit_collateral EntityTx → adds to jBatch
+    // Step 1: Entity creates r2c EntityTx → adds to jBatch
     // Step 2: Entity broadcasts via j_broadcast → generates jOutput → routes to J-mempool
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [
         {
-          type: 'deposit_collateral',
+          type: 'r2c',
           data: {
             counterpartyId: hub.id,
             tokenId: USDC_TOKEN_ID,
@@ -2877,7 +2877,7 @@ export async function ahb(env: Env): Promise<void> {
       signerId: alice.signer,
       entityTxs: [
         {
-          type: 'reserve_to_reserve',
+          type: 'r2r',
           data: {
             toEntityId: carol.id,
             tokenId: USDC_TOKEN_ID,
@@ -2910,7 +2910,7 @@ export async function ahb(env: Env): Promise<void> {
       signerId: carol.signer,
       entityTxs: [
         {
-          type: 'deposit_collateral',
+          type: 'r2c',
           data: {
             counterpartyId: hub.id,
             tokenId: USDC_TOKEN_ID,
@@ -2991,7 +2991,7 @@ export async function ahb(env: Env): Promise<void> {
         entityId: alice.id,
         signerId: alice.signer,
         entityTxs: [
-          { type: 'reserve_to_reserve', data: { toEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: hubReplenish } },
+          { type: 'r2r', data: { toEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: hubReplenish } },
           { type: 'j_broadcast', data: {} }
         ]
       }]);
