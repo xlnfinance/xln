@@ -247,6 +247,8 @@ EOF
 ensure_production_host_hygiene() {
   echo "[deploy] enforcing production log and memory hygiene"
 
+  install -d /root/xln/data /root/xln/data/anvil-tmp
+
   mkdir -p /etc/systemd/journald.conf.d
   cat > /etc/systemd/journald.conf.d/xln-limits.conf <<'EOF'
 [Journal]
@@ -284,10 +286,28 @@ find /root/xln/playwright-report -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/
 find /root/xln/test-results -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
 find /root/xln/e2e/test-results -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
 find /root/xln/tests/test-results -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
-find /root/.foundry/anvil/tmp -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+find /root/.foundry/anvil/tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
+find /root/xln/data/anvil-tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
 journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+curl -fsS http://127.0.0.1:8080/api/health >/dev/null 2>&1 || true
 EOF
   chmod +x /etc/cron.hourly/xln-log-hygiene
+
+  cat > /etc/cron.hourly/xln-storage-guard <<'EOF'
+#!/bin/sh
+free_kb="$(df -Pk / | awk 'NR==2 { print $4 }')"
+if [ "${free_kb:-0}" -lt $((10 * 1024 * 1024)) ]; then
+  logger -t xln-storage-guard "low disk free: ${free_kb}KB"
+fi
+
+anvil_tmp_bytes="$(du -sk /root/xln/data/anvil-tmp /root/.foundry/anvil/tmp 2>/dev/null | awk '{sum+=$1} END {print sum+0}')"
+if [ "${anvil_tmp_bytes:-0}" -gt $((8 * 1024 * 1024)) ]; then
+  logger -t xln-storage-guard "anvil tmp high-water mark: ${anvil_tmp_bytes}KB"
+fi
+
+journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+EOF
+  chmod +x /etc/cron.hourly/xln-storage-guard
 
   cat > /etc/logrotate.d/xln-runtime-logs <<'EOF'
 /root/xln/logs/*.log {
@@ -302,7 +322,8 @@ EOF
 
   find /root/.pm2/logs -type f -name '*.log' -exec truncate -s 0 {} \; 2>/dev/null || true
   find /root/xln/logs -type f -name '*.log' -exec truncate -s 0 {} \; 2>/dev/null || true
-  find /root/.foundry/anvil/tmp -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+  find /root/.foundry/anvil/tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
+  find /root/xln/data/anvil-tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
 }
 
 run_local_deploy() {

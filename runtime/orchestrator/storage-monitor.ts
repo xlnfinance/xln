@@ -47,6 +47,7 @@ const STORAGE_HEALTH_CACHE_MS = Math.max(5_000, Number(process.env.XLN_STORAGE_H
 const STORAGE_HISTORY_WINDOW_MS = 26 * 60 * 60 * 1000;
 const STORAGE_ONE_HOUR_MS = 60 * 60 * 1000;
 const STORAGE_HISTORY_PATH = join(process.cwd(), 'data', 'storage-health-history.json');
+const FOUNDRY_ANVIL_TMP_PATH = process.env.ANVIL_TMPDIR || join(homedir(), '.foundry', 'anvil', 'tmp');
 const TRACKED_STORAGE_PATHS: TrackedStoragePath[] = [
   { name: 'pm2Logs', kind: 'log', path: '/root/.pm2/logs' },
   { name: 'runtimeLogs', kind: 'log', path: join(process.cwd(), 'logs') },
@@ -55,7 +56,7 @@ const TRACKED_STORAGE_PATHS: TrackedStoragePath[] = [
   { name: 'testResults', kind: 'log', path: join(process.cwd(), 'test-results') },
   { name: 'runtimeDb', kind: 'db', path: join(process.cwd(), 'db', 'runtime') },
   { name: 'custodyDb', kind: 'db', path: join(process.cwd(), 'db', 'custody') },
-  { name: 'foundryAnvilTmp', kind: 'temp', path: join(homedir(), '.foundry', 'anvil', 'tmp') },
+  { name: 'foundryAnvilTmp', kind: 'temp', path: FOUNDRY_ANVIL_TMP_PATH },
 ];
 
 let cachedStorageHealth: StorageHealth | null = null;
