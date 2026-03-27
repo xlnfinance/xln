@@ -30,11 +30,13 @@ export XLN_MESH_API_PORT_BASE=${XLN_MESH_API_PORT_BASE:-18090}
 export XLN_MESH_PUBLIC_PORT_BASE=${XLN_MESH_PUBLIC_PORT_BASE:-8090}
 export XLN_MESH_CUSTODY_PORT=${XLN_MESH_CUSTODY_PORT:-$(xln_custody_port)}
 export XLN_MESH_CUSTODY_DAEMON_PORT=${XLN_MESH_CUSTODY_DAEMON_PORT:-$(xln_custody_daemon_port)}
+export ANVIL_TMPDIR=${ANVIL_TMPDIR:-$REPO_ROOT/data/anvil-tmp}
 export PATH="${HOME}/.bun/bin:$PATH"
 export XLN_MIN_DISK_FREE_BYTES=${XLN_MIN_DISK_FREE_BYTES:-$((5 * 1024 * 1024 * 1024))}
 
 mkdir -p "$XLN_DB_PATH"
 mkdir -p "$XLN_MESH_DB_ROOT"
+mkdir -p "$ANVIL_TMPDIR"
 xln_ensure_jurisdictions_path "$XLN_JURISDICTIONS_PATH"
 
 available_kb="$(df -Pk / | awk 'NR==2 { print $4 }')"
