@@ -288,6 +288,9 @@ find /root/xln/e2e/test-results -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/n
 find /root/xln/tests/test-results -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
 find /root/.foundry/anvil/tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
 find /root/xln/data/anvil-tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
+if [ -d /root/.foundry/anvil/tmp ]; then
+  find /root/.foundry/anvil/tmp -mindepth 1 -exec rm -rf {} + 2>/dev/null || true
+fi
 journalctl --vacuum-size=200M >/dev/null 2>&1 || true
 curl -fsS http://127.0.0.1:8080/api/health >/dev/null 2>&1 || true
 EOF
@@ -320,10 +323,13 @@ EOF
 }
 EOF
 
-  find /root/.pm2/logs -type f -name '*.log' -exec truncate -s 0 {} \; 2>/dev/null || true
-  find /root/xln/logs -type f -name '*.log' -exec truncate -s 0 {} \; 2>/dev/null || true
-  find /root/.foundry/anvil/tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
-  find /root/xln/data/anvil-tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
+find /root/.pm2/logs -type f -name '*.log' -exec truncate -s 0 {} \; 2>/dev/null || true
+find /root/xln/logs -type f -name '*.log' -exec truncate -s 0 {} \; 2>/dev/null || true
+find /root/.foundry/anvil/tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
+find /root/xln/data/anvil-tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
+if [ -d /root/.foundry/anvil/tmp ]; then
+  find /root/.foundry/anvil/tmp -mindepth 1 -exec rm -rf {} + 2>/dev/null || true
+fi
 }
 
 run_local_deploy() {

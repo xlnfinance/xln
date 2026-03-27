@@ -490,7 +490,16 @@ const fetchJson = async <T>(url: string, timeoutMs = 2_000): Promise<T | null> =
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const insecureLocalHttps = url.startsWith('https://localhost:') || url.startsWith('https://127.0.0.1:');
+    const prevTlsReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    if (insecureLocalHttps) {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    }
     const response = await fetch(url, { signal: controller.signal });
+    if (insecureLocalHttps) {
+      if (prevTlsReject === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTlsReject;
+    }
     if (!response.ok) return null;
     return await response.json() as T;
   } catch {
@@ -1105,6 +1114,34 @@ const computeAggregatedHealth = (): AggregatedHealth => {
   };
 };
 
+type CustodyMePayload = {
+  custody?: {
+    entityId?: string | null;
+  };
+};
+
+const buildAggregatedHealthResponse = async (): Promise<AggregatedHealth> => {
+  const health = computeAggregatedHealth();
+  if (!health.custody.enabled || health.custody.ok || !health.custody.servicePort) {
+    return health;
+  }
+
+  const liveCustody = await fetchJson<CustodyMePayload>(`https://127.0.0.1:${health.custody.servicePort}/api/me`, 1_500);
+  const liveEntityId = String(liveCustody?.custody?.entityId || '').trim();
+  if (!liveEntityId) {
+    return health;
+  }
+
+  return {
+    ...health,
+    custody: {
+      ...health.custody,
+      ok: true,
+      entityId: liveEntityId,
+    },
+  };
+};
+
 const buildPublicHubDiscoveryPayload = (): {
   ok: true;
   count: number;
@@ -1688,7 +1725,7 @@ const server = Bun.serve({
       await getStorageHealth();
       await pollAllHubHealth();
       await pollMarketMakerHealth();
-      return new Response(safeStringify(computeAggregatedHealth()), { headers });
+      return new Response(safeStringify(await buildAggregatedHealthResponse()), { headers });
     }
 
     if (pathname === '/api/hubs') {
