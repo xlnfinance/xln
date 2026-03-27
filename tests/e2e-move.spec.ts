@@ -9,6 +9,7 @@ import {
   getRenderedReserveBalance,
 } from './utils/e2e-account-ui';
 import { timedStep } from './utils/e2e-timing';
+import { capturePageScreenshot } from './utils/e2e-screenshots';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
 const ROUTE_TIMEOUT_MS = LONG_E2E ? 90_000 : 60_000;
@@ -519,7 +520,7 @@ test('asset faucet exposes correct modes and funds every supported token', async
   }
 });
 
-test('move tab covers all routed paths on isolated runtimes', async ({ page, browser }) => {
+test('move tab covers all routed paths on isolated runtimes', async ({ page, browser }, testInfo) => {
   test.setTimeout(LONG_E2E ? 420_000 : 300_000);
 
   await timedStep('move.baseline', async () => {
@@ -588,7 +589,9 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await expect(page.getByTestId('move-route-summary')).toContainText('1 external-signer batch');
         await expect(page.getByTestId('move-route-summary')).toContainText('Submit external deposit batch into your reserve');
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
+        await capturePageScreenshot(page, testInfo, 'move-batch-route-summary-desktop.png');
         await page.getByTestId('move-confirm').first().click();
+        await capturePageScreenshot(page, testInfo, 'move-batch-queued-desktop.png');
         await broadcastDraftBatch(page);
         await expect.poll(
           async () => refreshReserveBalance(page, symbol),
