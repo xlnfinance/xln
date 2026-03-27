@@ -26,7 +26,6 @@
 <style>
   :global(body) {
     margin: 0;
-    overflow: hidden;
   }
 
   /* Hide mode toggle in embed */

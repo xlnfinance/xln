@@ -56,6 +56,7 @@ exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts \
   --node-public-port-base "$XLN_MESH_PUBLIC_PORT_BASE" \
   --rpc-url "$ANVIL_RPC" \
   --db-root "$XLN_MESH_DB_ROOT" \
+  --allow-reset \
   --mm \
   --custody \
   --custody-port "$XLN_MESH_CUSTODY_PORT" \

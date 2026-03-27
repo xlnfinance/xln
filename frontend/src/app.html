@@ -59,11 +59,22 @@
 			window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
 			plausible.init()
 		</script>
+		<script>
+			(function() {
+				var isAppRoute = window.location.pathname === '/app' || window.location.pathname.startsWith('/app/');
+				if (isAppRoute) {
+					document.documentElement.classList.add('xln-user-mode');
+					document.documentElement.setAttribute('data-xln-route-mode', 'app');
+				} else {
+					document.documentElement.setAttribute('data-xln-route-mode', 'default');
+				}
+			})();
+		</script>
 
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
-		%sveltekit.body%
+		<div style="display: contents">%sveltekit.body%</div>
 		<style>
 			:root {
 				--theme-background: #09090b;
@@ -96,44 +107,28 @@
 				padding: 0;
 				min-height: 100%;
 				-webkit-overflow-scrolling: touch;
-				background: var(--theme-bg-gradient, #0a0a0c);
-				color: var(--theme-text-primary, #e4e4e7);
-				transition: background 140ms ease, color 140ms ease;
-			}
-			html:not(.xln-user-mode),
-			body:not(.xln-user-mode) {
-				height: 100%;
-				overflow: hidden;
-				overscroll-behavior: none;
-			}
-			/* Prevent iOS elastic bounce / white flash on overscroll in dock/dev mode only */
-			body:not(.xln-user-mode) {
-				position: fixed;
-				width: 100%;
-			}
-			html.xln-user-mode {
-				height: auto;
-				min-height: 100dvh;
 				overflow-x: hidden;
 				overflow-y: auto;
 				overscroll-behavior-y: auto;
-				background: var(--theme-bg-gradient, #0a0a0c);
+				background-color: var(--theme-background, #0a0a0c);
+				background-image: var(--theme-bg-gradient, linear-gradient(135deg, #09090b 0%, #18181b 50%, #0c0c0e 100%));
+				color: var(--theme-text-primary, #e4e4e7);
+				transition: background 140ms ease, color 140ms ease;
 			}
-			body.xln-user-mode {
+			html.xln-user-mode,
+			html[data-xln-route-mode='app'] {
+				height: auto;
 				min-height: 100dvh;
-				overflow: visible;
+				background-color: var(--theme-background, #0a0a0c);
+				background-image: var(--theme-bg-gradient, linear-gradient(135deg, #09090b 0%, #18181b 50%, #0c0c0e 100%));
+			}
+			body.xln-user-mode,
+			html[data-xln-route-mode='app'] body {
+				min-height: 100dvh;
 				position: static;
 				width: auto;
-				background: transparent;
-				isolation: isolate;
-			}
-			body.xln-user-mode::before {
-				content: '';
-				position: fixed;
-				inset: 0;
-				background: var(--theme-bg-gradient, #0a0a0c);
-				pointer-events: none;
-				z-index: -1;
+				background-color: var(--theme-background, #0a0a0c);
+				background-image: var(--theme-bg-gradient, linear-gradient(135deg, #09090b 0%, #18181b 50%, #0c0c0e 100%));
 			}
 		</style>
 	</body>

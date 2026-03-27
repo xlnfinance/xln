@@ -1479,7 +1479,7 @@
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .brainvault-wrapper.embedded {
@@ -1490,7 +1490,6 @@
 
   .brainvault-container {
     flex: 1;
-    overflow-y: auto;
     width: 100%;
     padding: 20px;
     background: #000;

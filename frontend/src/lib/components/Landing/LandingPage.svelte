@@ -882,8 +882,8 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 2rem;
+    justify-content: flex-start;
+    padding: calc(56px + 2rem) 2rem 4rem;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     font-size: 16px;
     line-height: 1.6;

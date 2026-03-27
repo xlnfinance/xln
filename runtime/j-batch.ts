@@ -387,6 +387,17 @@ export function getDraftBatchReserveDelta(
     }
   }
 
+  for (const settlement of batch.settlements) {
+    for (const diff of settlement.diffs) {
+      if (diff.tokenId !== tokenId) continue;
+      if (normalizeEntityId(settlement.leftEntity) === normalizedEntityId) {
+        delta += diff.leftDiff;
+      } else if (normalizeEntityId(settlement.rightEntity) === normalizedEntityId) {
+        delta += diff.rightDiff;
+      }
+    }
+  }
+
   for (const op of batch.reserveToReserve) {
     if (op.tokenId !== tokenId) continue;
     delta -= op.amount;

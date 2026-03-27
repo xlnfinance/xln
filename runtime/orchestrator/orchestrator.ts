@@ -1335,7 +1335,7 @@ const waitForMarketMakerReady = async (): Promise<void> => {
 };
 
 const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
-  const deadline = Date.now() + 45_000;
+  const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     await pollHubHealth(child);
     if (

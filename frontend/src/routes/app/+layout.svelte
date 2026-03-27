@@ -273,12 +273,6 @@
 {/if}
 
 <style>
-  :global(body:not(.xln-user-mode)) {
-    margin: 0;
-    overflow: hidden;
-    height: 100vh;
-  }
-
   .loading-screen,
   .error-screen,
   .inactive-tab-screen,

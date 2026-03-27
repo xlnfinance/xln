@@ -34,18 +34,10 @@
   function toggleFullscreen(id: string) {
     if (fullscreenId === id) {
       fullscreenId = null;
-      document.body.style.overflow = '';
     } else {
       fullscreenId = id;
-      document.body.style.overflow = 'hidden';
     }
   }
-
-  onMount(() => {
-    return () => {
-      document.body.style.overflow = '';
-    };
-  });
 </script>
 
 <svelte:head>
@@ -99,11 +91,6 @@
     padding: 2rem;
     padding-top: 4rem; /* Account for fixed topbar */
     font-family: 'Inter', -apple-system, sans-serif;
-    overflow-y: auto;
-  }
-
-  .scenarios-page.has-fullscreen {
-    overflow: hidden;
   }
 
   .header {

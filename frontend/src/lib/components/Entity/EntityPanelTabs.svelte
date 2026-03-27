@@ -9,7 +9,7 @@
   import { onDestroy, onMount } from 'svelte';
   import type { ComponentType } from 'svelte';
   import { get } from 'svelte/store';
-  import { Wallet as EthersWallet, hexlify, isAddress, ZeroAddress, zeroPadValue } from 'ethers';
+  import { MaxUint256, Wallet as EthersWallet, hexlify, isAddress, ZeroAddress, zeroPadValue } from 'ethers';
   import type {
     AccountMachine,
     Env,
@@ -120,6 +120,34 @@
   let openAccountEntityId = '';
   let currentEntityValue = '';
   let currentExternalEoaValue = '';
+
+  function materializeReplicaView(candidate: EntityReplica | null | undefined): EntityReplica | null {
+    if (!candidate) return null;
+    return {
+      ...candidate,
+      state: candidate.state ? { ...candidate.state } : candidate.state,
+      position: candidate.position ? { ...candidate.position } : candidate.position,
+    };
+  }
+
+  function materializeAccountView(candidate: AccountMachine | null | undefined): AccountMachine | null {
+    if (!candidate) return null;
+    return {
+      ...candidate,
+      deltas: candidate.deltas instanceof Map ? new Map(candidate.deltas) : candidate.deltas,
+      settlementWorkspace: candidate.settlementWorkspace
+        ? { ...candidate.settlementWorkspace }
+        : candidate.settlementWorkspace,
+      activeDispute: candidate.activeDispute ? { ...candidate.activeDispute } : candidate.activeDispute,
+    };
+  }
+
+  function materializeReplicaMap(
+    source: Map<string, EntityReplica> | null | undefined,
+  ): Map<string, EntityReplica> | null {
+    if (!(source instanceof Map)) return null;
+    return new Map(source);
+  }
 
   $: if (userModeHeader) {
     selectedJurisdictionName = selectedJurisdiction;
@@ -692,10 +720,14 @@
       case 'external->reserve':
         return moveReserveRecipientEntityId && moveReserveRecipientEntityId !== resolveSelfEntityId()
           ? [
-            '1. Deposit from your wallet into reserve',
-            `2. Forward reserve to ${reserveRecipientLabel}`,
+            '1. Approve Depository from your wallet if needed',
+            '2. Deposit from your wallet into reserve',
+            `3. Forward reserve to ${reserveRecipientLabel}`,
           ]
-          : ['1. Deposit from your wallet into reserve'];
+          : [
+            '1. Approve Depository from your wallet if needed',
+            '2. Deposit from your wallet into reserve',
+          ];
       case 'reserve->reserve':
         return [`1. Send reserve batch to ${reserveRecipientLabel}`];
       case 'reserve->account':
@@ -713,8 +745,9 @@
         return ['1. Send directly from wallet to wallet'];
       case 'external->account':
         return [
-          '1. Deposit from your wallet into reserve',
-          `2. Fund ${targetEntityLabel} through ${targetHubLabel}`,
+          '1. Approve Depository from your wallet if needed',
+          '2. Deposit from your wallet into reserve',
+          `3. Fund ${targetEntityLabel} through ${targetHubLabel}`,
         ];
       case 'account->external':
         return [
@@ -843,14 +876,23 @@
   }
 
   function getMoveValidationError(mode: 'draft' | 'broadcast'): string | null {
+    const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
     if (!isMoveRouteSupported(moveFromEndpoint, moveToEndpoint)) {
       return 'Selected route is not available';
     }
     if (moveExecuting) return 'Move already in progress';
+    if (!activeIsLive && routeKey !== 'external->external') {
+      return mode === 'draft'
+        ? 'Switch to LIVE mode to add this route to batch'
+        : 'Switch to LIVE mode to submit this route';
+    }
     if ((moveFromEndpoint === 'account' || moveToEndpoint === 'account') && isMoveAwaitingCounterparty()) {
       return 'Wait for the current account settlement to finish';
     }
     if (!moveAmount.trim()) return 'Enter amount first';
+    if (mode === 'draft' && hasSentBatch) {
+      return 'Wait for current batch confirmation or clear it before adding a new move';
+    }
     if (mode === 'draft' && !canAddMoveToExistingBatch()) {
       return 'Add to batch is not available for this route';
     }
@@ -935,7 +977,7 @@
   }
 
   function resolveSelfEoaAddress(): string {
-    const signerId = String(tab.signerId || '').trim();
+    const signerId = String(currentSignerId || '').trim();
     if (isAddress(signerId)) return signerId;
     const vaultId = String($activeVault?.id || '').trim();
     if (isAddress(vaultId)) return vaultId;
@@ -1054,9 +1096,10 @@
     return 18;
   }
 
-  function getCurrentMoveSourceAvailableBalance(): bigint {
-    const row = moveLedgerRow;
-    const liveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
+  function computeMoveSourceAvailableBalance(
+    row: AssetLedgerRow | null,
+    liveTransferToken: (ExternalToken & { tokenId: number }) | null,
+  ): bigint {
     switch (moveFromEndpoint) {
       case 'external':
         return row?.externalBalance ?? findExternalTokenBySymbol(moveAssetSymbol)?.balance ?? 0n;
@@ -1075,6 +1118,10 @@
       default:
         return 0n;
     }
+  }
+
+  function getCurrentMoveSourceAvailableBalance(): bigint {
+    return computeMoveSourceAvailableBalance(moveLedgerRow, selectedMoveTransferToken);
   }
 
   function choosePreferredMoveAssetSymbol(): string {
@@ -1106,6 +1153,11 @@
     return fallback;
   }
 
+  function notifyUserActionError(context: string, message: string): void {
+    console.error(`[EntityPanel] ${context}: ${message}`);
+    toasts.error(message);
+  }
+
   async function copyMetaValue(value: string, field: 'entity' | 'external'): Promise<void> {
     const normalizedValue = String(value || '').trim();
     if (!normalizedValue) return;
@@ -1123,7 +1175,14 @@
   // Get avatar URL without tripping early boot fail-fast guards.
   $: avatar = resolveEntityAvatar(activeXlnFunctions, tab.entityId);
   $: currentEntityValue = String(replica && replica.state ? (replica.state.entityId || tab.entityId || '') : (tab.entityId || '')).trim();
-  $: currentExternalEoaValue = String(tab.signerId || '').trim();
+  $: currentSignerId = (() => {
+    const entityId = String(replica && replica.state ? (replica.state.entityId || '') : (tab.entityId || '')).trim().toLowerCase();
+    if (!entityId) return String(tab.signerId || '').trim();
+    const env = getRuntimeEnv(activeEnv);
+    if (!env) return String(tab.signerId || '').trim();
+    return requireSignerIdForEntity(env, entityId, 'entity-panel-current-signer');
+  })();
+  $: currentExternalEoaValue = String(currentSignerId || '').trim();
 
   // Resolve entity name from gossip profiles
   $: gossipName = (() => {
@@ -1145,7 +1204,7 @@
   $: heroDisplayName = (() => {
     const fallbackId = replica?.state?.entityId || tab.entityId || '';
     const gossip = (gossipName ?? '').trim();
-    return gossip && !isPlaceholderName(gossip) ? gossip : formatAddress(fallbackId);
+    return gossip && !isPlaceholderName(gossip) ? gossip : fallbackId;
   })();
 
   // Format short address for display
@@ -1155,9 +1214,9 @@
     return `${addr.slice(0, 10)}...${addr.slice(-6)}`;
   }
 
-  $: activeReplicas = replicasOverride
-    || (isRuntimeEnv(activeEnv) && activeEnv.eReplicas instanceof Map ? activeEnv.eReplicas as Map<string, EntityReplica> : null)
-    || $visibleReplicas;
+  $: activeReplicas = materializeReplicaMap(replicasOverride)
+    || materializeReplicaMap(isRuntimeEnv(activeEnv) && activeEnv.eReplicas instanceof Map ? activeEnv.eReplicas as Map<string, EntityReplica> : null)
+    || materializeReplicaMap($visibleReplicas);
   $: activeXlnFunctions = $xlnFunctions;
   $: activeHistory = historyOverride ?? $history;
   $: activeTimeIndex = timeIndexOverride ?? $currentTimeIndex;
@@ -1180,18 +1239,27 @@
     if (!replicas || !entityId) return null;
 
     const exactKey = signerId ? `${entityId}:${signerId}` : '';
-    const exact = exactKey ? replicas.get(exactKey) ?? null : null;
+    const exact = exactKey ? materializeReplicaView(replicas.get(exactKey) ?? null) : null;
     if (exact) return exact;
 
     const normalizedEntityId = String(entityId || '').trim().toLowerCase();
     for (const [replicaKey, candidate] of replicas.entries()) {
       const [replicaEntityId] = String(replicaKey).split(':');
       if (String(replicaEntityId || '').trim().toLowerCase() === normalizedEntityId) {
-        return candidate;
+        return materializeReplicaView(candidate);
       }
     }
 
     return null;
+  }
+
+  function findLiveReplicaForEntity(entityId: string, signerId: string): EntityReplica | null {
+    const env = getRuntimeEnv(activeEnv);
+    if (!env?.eReplicas) return null;
+    const replicas = env.eReplicas instanceof Map
+      ? materializeReplicaMap(env.eReplicas as Map<string, EntityReplica>)
+      : materializeReplicaMap(null);
+    return findReplicaForTab(replicas, entityId, signerId);
   }
 
   // Get replica
@@ -1206,7 +1274,7 @@
   // Navigation
   $: isAccountFocused = selectedAccountId !== null;
   $: selectedAccount = isAccountFocused && replica?.state?.accounts && selectedAccountId
-    ? replica.state.accounts.get(selectedAccountId) : null;
+    ? materializeAccountView(replica.state.accounts.get(selectedAccountId)) : null;
   $: accountIds = replica?.state?.accounts
     ? Array.from(replica.state.accounts.keys()).map((id) => String(id))
     : [];
@@ -1488,6 +1556,7 @@
     amount: bigint;
     postSettleOp: MovePostSettleOp;
     broadcast: boolean;
+    phase: 'awaiting_settlement_execute' | 'awaiting_follow_up';
   };
   let pendingAssetAutoC2Rs: PendingAssetAutoC2R[] = [];
   let resolvingAssetAutoC2R = false;
@@ -1546,6 +1615,13 @@
     reserveUsd: number;
     accountUsd: number;
     totalUsd: number;
+  };
+
+  type MoveUiState = {
+    ledgerRow: AssetLedgerRow | null;
+    displayBalances: Record<MoveEndpoint, bigint>;
+    displayDecimals: number;
+    sourceAvailableBalance: bigint;
   };
 
   function isReserveTransferToken(token: ExternalToken): token is ExternalToken & { tokenId: number } {
@@ -1721,18 +1797,23 @@
   }
 
   async function resolveCurrentExternalAddress(): Promise<string> {
-    const signerId = String(tab.signerId || '').trim();
+    const signerId = String(currentSignerId || '').trim();
     if (isAddress(signerId)) return signerId;
 
     const xln = await getXLN();
-    const privKey = xln.getCachedSignerPrivateKey?.(signerId);
+    const getCachedSignerPrivateKey = xln.getCachedSignerPrivateKey;
+    if (!getCachedSignerPrivateKey) throw new Error('Cached signer key reader unavailable');
+    const privKey = getCachedSignerPrivateKey(signerId);
     if (!privKey) throw new Error(`No registered signer key for ${signerId}`);
     return new EthersWallet(hexlify(privKey)).address;
   }
 
   async function withdrawReserveToExternal(tokenId: number, amountOverride?: bigint, recipientEoaOverride?: string): Promise<void> {
     const entityId = replica?.state?.entityId || tab.entityId;
-    if (!entityId) return;
+    if (!entityId) {
+      notifyUserActionError('reserve-to-external', 'Active entity missing for reserve withdrawal');
+      return;
+    }
     if (!activeIsLive) {
       toasts.error('Withdraw requires LIVE mode');
       return;
@@ -1787,7 +1868,7 @@
 
   async function reserveToReserve(tokenId: number, amount: bigint, recipientEntityIdOverride?: string): Promise<void> {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
-    if (!entityId) return;
+    if (!entityId) throw new Error('Active entity missing for reserve transfer');
     if (!activeIsLive) throw new Error('Reserve transfer requires LIVE mode');
     const recipientEntityId = String(recipientEntityIdOverride || moveReserveRecipientEntityId || '').trim().toLowerCase();
     if (!recipientEntityId) throw new Error('Select recipient entity');
@@ -1816,7 +1897,10 @@
 
   async function faucetReserves(tokenId: number = 1, symbolHint?: string) {
     const entityId = replica?.state?.entityId || tab.entityId;
-    if (!entityId) return;
+    if (!entityId) {
+      notifyUserActionError('reserve-faucet', 'Active entity missing for reserve faucet');
+      return;
+    }
     try {
       const requestApiBase = resolveApiBase();
       const tokenMeta = resolveReserveTokenMeta(tokenId, symbolHint);
@@ -1862,7 +1946,10 @@
 
   async function faucetOffchain(hubEntityId: string, tokenId: number = 1) {
     const entityId = replica?.state?.entityId || tab.entityId;
-    if (!entityId) return;
+    if (!entityId) {
+      notifyUserActionError('offchain-faucet', 'Active entity missing for offchain faucet');
+      return;
+    }
     try {
       const requestApiBase = resolveApiBase();
       const tokenMeta = resolveReserveTokenMeta(tokenId);
@@ -1944,7 +2031,10 @@
 
   async function handleQuickSettleApprove(event: CustomEvent<{ counterpartyId: string }>) {
     const entityId = replica?.state?.entityId || tab.entityId;
-    if (!entityId) return;
+    if (!entityId) {
+      notifyUserActionError('quick-settle-approve', 'Active entity missing for settlement approval');
+      return;
+    }
     if (!activeIsLive) {
       toasts.error('Settlement signature requires LIVE mode');
       return;
@@ -2204,22 +2294,30 @@
     { externalUsd: 0, reserveUsd: 0, accountUsd: 0 },
   );
   $: assetLedgerGrandTotal = assetLedgerTotals.externalUsd + assetLedgerTotals.reserveUsd + assetLedgerTotals.accountUsd;
-  $: moveLedgerRow = (() => {
-    const symbol = String(moveAssetSymbol || '').trim().toUpperCase();
-    if (!symbol) return null;
-    return assetLedgerRows.find((row) => String(row.symbol || '').trim().toUpperCase() === symbol) ?? null;
-  })();
   $: {
-    const row = moveLedgerRow;
-    moveDisplayBalances = row
-      ? {
-          external: row.externalBalance,
-          reserve: row.reserveBalance,
-          account: row.accountBalance,
-        }
-      : { external: 0n, reserve: 0n, account: 0n };
-    moveDisplayDecimals = row?.decimals ?? getMoveDisplayDecimals();
-    moveSourceAvailableBalance = getCurrentMoveSourceAvailableBalance();
+    const symbol = String(moveAssetSymbol || '').trim().toUpperCase();
+    const row = symbol
+      ? assetLedgerRows.find((candidate) => String(candidate.symbol || '').trim().toUpperCase() === symbol) ?? null
+      : null;
+    const nextState: MoveUiState = {
+      ledgerRow: row,
+      displayBalances: row
+        ? {
+            external: row.externalBalance,
+            reserve: row.reserveBalance,
+            account: row.accountBalance,
+          }
+        : { external: 0n, reserve: 0n, account: 0n },
+      displayDecimals: row?.decimals
+        ?? selectedMoveExternalToken?.decimals
+        ?? selectedMoveTransferToken?.decimals
+        ?? 18,
+      sourceAvailableBalance: computeMoveSourceAvailableBalance(row, selectedMoveTransferToken),
+    };
+    moveLedgerRow = nextState.ledgerRow;
+    moveDisplayBalances = nextState.displayBalances;
+    moveDisplayDecimals = nextState.displayDecimals;
+    moveSourceAvailableBalance = nextState.sourceAvailableBalance;
   }
 
   $: {
@@ -2299,12 +2397,12 @@
   }
 
   // Fetch external tokens (ERC20 balances for signer) - works for both BrowserVM and RPC modes
-  async function fetchExternalTokens() {
+  async function fetchExternalTokens(forceChainPoll = false) {
     const waitMs = Math.max(0, 100 - (Date.now() - externalFetchStartedAt));
     externalFetchInFlight = (async () => {
       if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
       externalFetchStartedAt = Date.now();
-      const signerId = String(tab.signerId || '').trim();
+      const signerId = String(currentSignerId || '').trim();
       const runtimeId = getRuntimeId(activeEnv);
       const jurisdiction = String(getActiveJurisdictionName(activeEnv) || '');
       const fetchKey = `${signerId}|${runtimeId}|${jurisdiction}`;
@@ -2322,6 +2420,13 @@
         // Never derive them from cached UI state; the wallet EOA is the source of truth.
         const envAtStart = getRuntimeEnv(activeEnv);
         const jadapter = xln.getActiveJAdapter?.(envAtStart ?? null);
+        if (forceChainPoll && typeof jadapter?.pollNow === 'function') {
+          try {
+            await jadapter.pollNow();
+          } catch (err) {
+            console.warn('[EntityPanel] Forced J-event poll failed:', err);
+          }
+        }
 
         const tokenList = await getTokenList(jadapter);
         let nativeToken: ExternalToken | null = null;
@@ -2375,7 +2480,7 @@
 
         const runtimeIdNow = getRuntimeId(activeEnv);
         const jurisdictionNow = String(getActiveJurisdictionName(activeEnv) || '');
-        const currentKey = `${String(tab.signerId || '').trim()}|${runtimeIdNow}|${jurisdictionNow}`;
+        const currentKey = `${String(currentSignerId || '').trim()}|${runtimeIdNow}|${jurisdictionNow}`;
         if (fetchSeq === externalFetchSeq && currentKey === fetchKey && lastExternalFetchKey === fetchKey) {
           externalTokens = sortExternalTokens(nativeToken ? [nativeToken, ...tokenList] : tokenList);
           externalTokensLoading = false;
@@ -2393,7 +2498,7 @@
       externalFetchInFlight = null;
       const runtimeIdNow = getRuntimeId(activeEnv);
       const jurisdictionNow = String(getActiveJurisdictionName(activeEnv) || '');
-      const desiredKey = `${String(tab.signerId || '').trim()}|${runtimeIdNow}|${jurisdictionNow}`;
+      const desiredKey = `${String(currentSignerId || '').trim()}|${runtimeIdNow}|${jurisdictionNow}`;
       if (desiredKey && desiredKey !== lastExternalFetchKey) {
         void fetchExternalTokens();
       }
@@ -2401,10 +2506,12 @@
   }
 
   async function getActiveSignerPrivateKey(): Promise<Uint8Array> {
-    const signerId = String(tab.signerId || '').trim();
+    const signerId = String(currentSignerId || '').trim();
     if (!signerId) throw new Error('No active signer selected');
     const xln = await getXLN();
-    const privKey = xln.getCachedSignerPrivateKey?.(signerId);
+    const getCachedSignerPrivateKey = xln.getCachedSignerPrivateKey;
+    if (!getCachedSignerPrivateKey) throw new Error('Cached signer key reader unavailable');
+    const privKey = getCachedSignerPrivateKey(signerId);
     if (!privKey) throw new Error(`No registered signer key for ${signerId}`);
     return privKey;
   }
@@ -2453,6 +2560,64 @@
     }
   }
 
+  async function ensureInfiniteDepositoryAllowancesForExternalTokens(): Promise<void> {
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    if (!entityId) {
+      throw new Error('External deposit requires an active entity');
+    }
+    setMoveProgress('Approving Depository for wallet assets');
+    const env = requireRuntimeEnv(activeEnv, 'ensure-external-depository-allowance');
+    const canonicalSignerId = requireSignerIdForEntity(env, entityId, 'ensure-external-depository-allowance');
+    const signerId = String(currentSignerId || '').trim();
+    if (!signerId) {
+      throw new Error('External deposit requires an active entity signer');
+    }
+    if (signerId.toLowerCase() !== canonicalSignerId.toLowerCase()) {
+      throw new Error(
+        `External deposit requires entity signer ${canonicalSignerId}, got ${signerId}`,
+      );
+    }
+    const xln = await getXLN();
+    const jadapter = xln.getActiveJAdapter?.(env);
+    if (!jadapter) {
+      throw new Error('J-adapter not available for external deposit approval');
+    }
+    const depositoryAddress = String(jadapter.addresses?.depository || '').trim();
+    if (!isAddress(depositoryAddress)) {
+      throw new Error('Depository address unavailable for external deposit approval');
+    }
+    const registry = await jadapter.getTokenRegistry();
+    const requiredSymbols = ['USDC', 'USDT', 'WETH'] as const;
+    const requiredTokens = requiredSymbols.map((symbol) => {
+      const token = registry.find((entry) => String(entry.symbol || '').trim().toUpperCase() === symbol);
+      if (!token) {
+        throw new Error(`Missing required external token ${symbol} in Testnet token registry`);
+      }
+      if (!isAddress(token.address) || token.address === ZeroAddress) {
+        throw new Error(`Token ${symbol} has invalid ERC20 address ${String(token.address || '')}`);
+      }
+      return { symbol, address: token.address };
+    });
+    const privKey = await getActiveSignerPrivateKey();
+    approvingExternalToken = 'ALL';
+    try {
+      for (const [index, token] of requiredTokens.entries()) {
+        setMoveProgress(`Approving Depository for ${token.symbol} (${index + 1}/${requiredTokens.length})`);
+        const currentAllowance = await jadapter.getErc20Allowance(token.address, signerId, depositoryAddress);
+        if (currentAllowance === MaxUint256) continue;
+        await jadapter.approveErc20(privKey, token.address, depositoryAddress, MaxUint256);
+        const updatedAllowance = await jadapter.getErc20Allowance(token.address, signerId, depositoryAddress);
+        if (updatedAllowance !== MaxUint256) {
+          throw new Error(
+            `Depository infinite allowance setup failed for ${token.symbol}: allowance=${updatedAllowance.toString()}`,
+          );
+        }
+      }
+    } finally {
+      approvingExternalToken = null;
+    }
+  }
+
   async function submitReserveToCollateral(): Promise<void> {
     const token = findReserveTransferTokenBySymbol(reserveToCollateralSymbol);
     if (!token) {
@@ -2478,7 +2643,10 @@
   ): Promise<void> {
     const entityId = replica?.state?.entityId || tab.entityId;
     const counterpartyEntityId = String(counterpartyEntityIdOverride || workspaceAccountId || '').trim();
-    if (!entityId) return;
+    if (!entityId) {
+      notifyUserActionError('collateral-to-reserve', 'Active entity missing for account withdrawal');
+      return;
+    }
     if (!counterpartyEntityId) {
       toasts.error('Select an account first');
       return;
@@ -2517,6 +2685,7 @@
         amount,
         postSettleOp,
         broadcast,
+        phase: 'awaiting_settlement_execute',
       }];
       refreshPendingCollateralFundingToken();
       toasts.info(`Collateral → Reserve proposed for ${info.symbol}. Waiting for counterparty signature...`);
@@ -2660,7 +2829,7 @@
     recipientEntityIdOverride?: string,
   ): Promise<void> {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
-    if (!entityId) return;
+    if (!entityId) throw new Error('Active entity missing for reserve batch');
     if (!activeIsLive) throw new Error('Add to batch requires LIVE mode');
     const recipientEntityId = String(recipientEntityIdOverride || moveReserveRecipientEntityId || '').trim().toLowerCase();
     if (!recipientEntityId) throw new Error('Select recipient entity');
@@ -2686,8 +2855,8 @@
     amount: bigint,
     recipientEoaOverride?: string,
   ): Promise<void> {
-    const entityId = replica?.state?.entityId || tab.entityId;
-    if (!entityId) return;
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    if (!entityId) throw new Error('Active entity missing for reserve withdrawal');
     if (!activeIsLive) throw new Error('Add to batch requires LIVE mode');
     const env = requireRuntimeEnv(activeEnv, 'move-reserve-to-external-draft');
     const signerId = requireSignerIdForEntity(env, entityId, 'move-reserve-to-external-draft');
@@ -2706,6 +2875,18 @@
         },
       }],
     }]);
+    await waitForMoveCondition(
+      () => {
+        const batch = findLiveReplicaForEntity(entityId, signerId)?.state?.jBatchState?.batch;
+        return Array.isArray(batch?.reserveToExternalToken)
+          && batch.reserveToExternalToken.some((op) =>
+            Number(op?.tokenId) === tokenId
+            && BigInt(op?.amount || 0n) === amount
+            && String(op?.receivingEntity || '').toLowerCase() === receivingEntity,
+          );
+      },
+      'Waiting for reserve withdrawal to appear in draft batch',
+    );
   }
 
   async function queueReserveToCollateralDraft(
@@ -2714,11 +2895,12 @@
     counterpartyEntityIdOverride?: string,
     receivingEntityIdOverride?: string,
   ): Promise<void> {
-    const entityId = replica?.state?.entityId || tab.entityId;
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
     const signerId = resolveEntitySigner(entityId, 'move-reserve-to-account-draft');
     const counterpartyEntityId = String(counterpartyEntityIdOverride || getCurrentMoveTargetHubId() || workspaceAccountId || selectedAccountId || '').trim();
     const receivingEntityId = String(receivingEntityIdOverride || entityId || '').trim().toLowerCase();
-    if (!entityId || !signerId) return;
+    if (!entityId) throw new Error('Active entity missing for account funding');
+    if (!signerId) throw new Error('Active signer missing for account funding');
     if (!counterpartyEntityId) throw new Error('Select account first');
     if (!activeIsLive) throw new Error('Add to batch requires LIVE mode');
 
@@ -2745,11 +2927,13 @@
     internalTokenId?: number,
   ): Promise<void> {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
-    if (!entityId) return;
+    if (!entityId) throw new Error('Active entity missing for external deposit');
     if (!activeIsLive) throw new Error('Add to batch requires LIVE mode');
     if (!isAddress(tokenAddress) || tokenAddress === ZeroAddress) {
       throw new Error('Select ERC20 asset first');
     }
+    await ensureInfiniteDepositoryAllowancesForExternalTokens();
+    setMoveProgress('Queuing external deposit into draft batch');
     const env = requireRuntimeEnv(activeEnv, 'move-external-to-reserve-draft');
     const signerId = requireSignerIdForEntity(env, entityId, 'move-external-to-reserve-draft');
     await enqueueEntityInputs(env, [{
@@ -2766,20 +2950,26 @@
     }]);
   }
 
-  async function addMoveToExistingBatch(): Promise<void> {
-    const validationError = getMoveValidationError('draft');
-    if (validationError) throw new Error(validationError);
+  async function addMoveToExistingBatch(skipValidation = false): Promise<void> {
+    if (!skipValidation) {
+      const validationError = getMoveValidationError('draft');
+      if (validationError) throw new Error(validationError);
+    }
+    if (hasSentBatch) {
+      throw new Error('Wait for current batch confirmation or clear it before adding a new move');
+    }
     const moveSourceAccount = getCurrentMoveSourceAccountId();
     const moveTargetAccount = getCurrentMoveTargetHubId();
     const moveTargetEntity = getCurrentMoveTargetEntityId();
     const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
     const externalToken = findExternalTokenBySymbol(moveAssetSymbol);
     const reserveToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
+    const maxSourceAmount = getCurrentMoveSourceAvailableBalance();
     if (routeKey === 'external->reserve') {
       if (!externalToken || !isAddress(externalToken.address) || externalToken.address === ZeroAddress) {
         throw new Error('Select ERC20 asset first');
       }
-      const amount = parsePositiveAssetAmount(moveAmount, externalToken, externalToken.balance);
+      const amount = parsePositiveAssetAmount(moveAmount, externalToken, maxSourceAmount);
       await queueExternalToReserveDraft(externalToken.address, amount, externalToken.tokenId);
       moveAmount = '';
       toasts.success('Added to existing draft batch');
@@ -2790,7 +2980,7 @@
         throw new Error('Select ERC20 asset first');
       }
       if (!reserveToken) throw new Error('Select reserve-compatible asset first');
-      const amount = parsePositiveAssetAmount(moveAmount, externalToken, externalToken.balance);
+      const amount = parsePositiveAssetAmount(moveAmount, externalToken, maxSourceAmount);
       await queueExternalToReserveDraft(externalToken.address, amount, reserveToken.tokenId);
       await queueReserveToCollateralDraft(reserveToken.tokenId, amount, moveTargetAccount, moveTargetEntity);
       moveAmount = '';
@@ -2800,16 +2990,14 @@
     const token = reserveToken;
     if (!token) throw new Error('Select reserve-compatible asset first');
     if (routeKey === 'reserve->reserve') {
-      const reserveAmount = onchainReserves.get(token.tokenId) ?? 0n;
-      const amount = parsePositiveAssetAmount(moveAmount, token, reserveAmount);
+      const amount = parsePositiveAssetAmount(moveAmount, token, maxSourceAmount);
       await queueReserveToReserveDraft(token.tokenId, amount, moveReserveRecipientEntityId);
       moveAmount = '';
       toasts.success('Added to existing draft batch');
       return;
     }
     if (routeKey === 'reserve->external') {
-      const reserveAmount = onchainReserves.get(token.tokenId) ?? 0n;
-      const amount = parsePositiveAssetAmount(moveAmount, token, reserveAmount);
+      const amount = parsePositiveAssetAmount(moveAmount, token, maxSourceAmount);
       const recipient = moveExternalRecipient.trim();
       if (!isAddress(recipient)) throw new Error('Recipient must be a valid EOA address');
       await queueReserveToExternalDraft(token.tokenId, amount, recipient);
@@ -2818,24 +3006,21 @@
       return;
     }
     if (routeKey === 'reserve->account') {
-      const reserveAmount = onchainReserves.get(token.tokenId) ?? 0n;
-      const amount = parsePositiveAssetAmount(moveAmount, token, reserveAmount);
+      const amount = parsePositiveAssetAmount(moveAmount, token, maxSourceAmount);
       await queueReserveToCollateralDraft(token.tokenId, amount, moveTargetAccount, moveTargetEntity);
       moveAmount = '';
       toasts.success('Added to existing draft batch');
       return;
     }
     if (routeKey === 'account->reserve') {
-      const spendable = getAccountSpendableCapacity(moveSourceAccount, token.tokenId);
-      const amount = parsePositiveAssetAmount(moveAmount, token, spendable);
+      const amount = parsePositiveAssetAmount(moveAmount, token, maxSourceAmount);
       await collateralToReserve(token.tokenId, amount, moveSourceAccount, { type: 'none' }, false);
       moveAmount = '';
       toasts.info('Queued for counterparty signature, then added to draft batch');
       return;
     }
     if (routeKey === 'account->external') {
-      const spendable = getAccountSpendableCapacity(moveSourceAccount, token.tokenId);
-      const amount = parsePositiveAssetAmount(moveAmount, token, spendable);
+      const amount = parsePositiveAssetAmount(moveAmount, token, maxSourceAmount);
       const recipient = moveExternalRecipient.trim();
       if (!isAddress(recipient)) throw new Error('Recipient must be a valid EOA address');
       await collateralToReserve(
@@ -2850,8 +3035,7 @@
       return;
     }
     if (routeKey === 'account->account') {
-      const spendable = getAccountSpendableCapacity(moveSourceAccount, token.tokenId);
-      const amount = parsePositiveAssetAmount(moveAmount, token, spendable);
+      const amount = parsePositiveAssetAmount(moveAmount, token, maxSourceAmount);
       await collateralToReserve(
         token.tokenId,
         amount,
@@ -2887,7 +3071,19 @@
       await executeMovePlan();
       return;
     }
-    await addMoveToExistingBatch();
+    const validationError = getMoveValidationError('draft');
+    if (validationError) throw new Error(validationError);
+    moveExecuting = true;
+    moveProgressLabel = '';
+    try {
+      await addMoveToExistingBatch(true);
+      moveProgressLabel = '';
+    } catch (err) {
+      moveProgressLabel = '';
+      throw err;
+    } finally {
+      moveExecuting = false;
+    }
   }
 
   async function executeMovePlan(): Promise<void> {
@@ -2998,7 +3194,14 @@
     const signerId = resolveEntitySigner(entityId, 'reserve-to-collateral');
     const counterpartyEntityId = String(counterpartyEntityIdOverride || workspaceAccountId || selectedAccountId || '').trim();
     const receivingEntityId = String(receivingEntityIdOverride || entityId || '').trim().toLowerCase();
-    if (!entityId || !signerId) return;
+    if (!entityId) {
+      notifyUserActionError('reserve-to-collateral', 'Active entity missing for account funding');
+      return;
+    }
+    if (!signerId) {
+      notifyUserActionError('reserve-to-collateral', 'Active signer missing for account funding');
+      return;
+    }
 
     if (!counterpartyEntityId) {
       toasts.error('Select an account to deposit collateral');
@@ -3056,7 +3259,14 @@
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'open-account');
     const trimmed = targetEntityId.trim().toLowerCase();
-    if (!entityId || !signerId) return;
+    if (!entityId) {
+      notifyUserActionError('open-account', 'Active entity missing for open-account');
+      return;
+    }
+    if (!signerId) {
+      notifyUserActionError('open-account', 'Active signer missing for open-account');
+      return;
+    }
     if (!isFullEntityId(trimmed)) {
       toasts.error('Full entity ID required (0x + 64 hex chars)');
       return;
@@ -3123,7 +3333,14 @@
   async function queueDisputeStart(counterpartyEntityId: string, description = 'dispute-from-configure') {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'dispute-start');
-    if (!entityId || !signerId) return;
+    if (!entityId) {
+      notifyUserActionError('dispute-start', 'Active entity missing for dispute start');
+      return;
+    }
+    if (!signerId) {
+      notifyUserActionError('dispute-start', 'Active signer missing for dispute start');
+      return;
+    }
     if (!activeIsLive) { toasts.error('Dispute requires LIVE mode'); return; }
     try {
       const env = requireRuntimeEnv(activeEnv, 'dispute-start');
@@ -3141,7 +3358,14 @@
   async function queueDisputeFinalize(counterpartyEntityId: string, description = 'dispute-finalize-from-configure') {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'dispute-finalize');
-    if (!entityId || !signerId) return;
+    if (!entityId) {
+      notifyUserActionError('dispute-finalize', 'Active entity missing for dispute finalize');
+      return;
+    }
+    if (!signerId) {
+      notifyUserActionError('dispute-finalize', 'Active signer missing for dispute finalize');
+      return;
+    }
     if (!activeIsLive) {
       toasts.error('Dispute finalize requires LIVE mode');
       return;
@@ -3162,7 +3386,14 @@
   async function reopenDisputedAccount(counterpartyEntityId: string) {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'reopen-disputed-account');
-    if (!entityId || !signerId) return;
+    if (!entityId) {
+      notifyUserActionError('reopen-disputed-account', 'Active entity missing for reopen');
+      return;
+    }
+    if (!signerId) {
+      notifyUserActionError('reopen-disputed-account', 'Active signer missing for reopen');
+      return;
+    }
     if (!activeIsLive) {
       toasts.error('Reopen account requires LIVE mode');
       return;
@@ -3182,7 +3413,10 @@
 
   async function enforceOutstandingDebt(tokenId: number): Promise<void> {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
-    if (!entityId) return;
+    if (!entityId) {
+      notifyUserActionError('debt-enforcement', 'Active entity missing for debt enforcement');
+      return;
+    }
     if (!activeIsLive) {
       toasts.error('Debt enforcement requires LIVE mode');
       return;
@@ -3205,7 +3439,14 @@
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'add-token-to-account');
     const counterpartyEntityId = String(workspaceAccountId || '').trim();
-    if (!entityId || !signerId) return;
+    if (!entityId) {
+      notifyUserActionError('add-token-to-account', 'Active entity missing for add-token');
+      return;
+    }
+    if (!signerId) {
+      notifyUserActionError('add-token-to-account', 'Active signer missing for add-token');
+      return;
+    }
     if (!counterpartyEntityId) {
       toasts.error('Select account first');
       return;
@@ -3238,7 +3479,7 @@
 
   // Faucet external tokens (ERC20 to signer EOA)
   async function faucetExternalTokens(tokenSymbol: string = 'USDC') {
-    const signerId = tab.signerId;
+    const signerId = currentSignerId;
     if (!signerId) return;
 
     try {
@@ -3305,14 +3546,14 @@
         pendingBalanceRefreshTimer = null;
       }
       lastBalanceRefreshAt = now;
-      void fetchExternalTokens();
+      void fetchExternalTokens(force);
       return;
     }
     if (pendingBalanceRefreshTimer) return;
     pendingBalanceRefreshTimer = setTimeout(() => {
       pendingBalanceRefreshTimer = null;
       lastBalanceRefreshAt = Date.now();
-      void fetchExternalTokens();
+      void fetchExternalTokens(force);
     }, BALANCE_REFRESH_THROTTLE_MS - elapsed);
   }
 
@@ -4276,7 +4517,7 @@
                 title="Copy entity id"
                 on:click={() => copyMetaValue(currentEntityValue, 'entity')}
               >
-                <span class="wallet-meta-value">{formatAddress(currentEntityValue)}</span>
+                <span class="wallet-meta-value">{currentEntityValue}</span>
                 {#if copiedMetaField === 'entity'}
                   <Check size={12} />
                 {:else}
@@ -4396,19 +4637,34 @@
                   </div>
                 </div>
                 <div class="col-balance asset-balance-block">
-                  <span class="balance-text" class:zero={row.externalBalance === 0n} data-testid={`external-balance-${row.symbol}`}>
+                  <span
+                    class="balance-text"
+                    class:zero={row.externalBalance === 0n}
+                    data-testid={`external-balance-${row.symbol}`}
+                    data-raw-amount={row.externalBalance.toString()}
+                  >
                     {formatAmount(row.externalBalance, row.decimals)}
                   </span>
                   <span class="value-text subtle">{formatApproxUsd(row.externalUsd)}</span>
                 </div>
                 <div class="col-balance asset-balance-block">
-                  <span class="balance-text" class:zero={row.reserveBalance === 0n} data-testid={`reserve-balance-${row.symbol}`}>
+                  <span
+                    class="balance-text"
+                    class:zero={row.reserveBalance === 0n}
+                    data-testid={`reserve-balance-${row.symbol}`}
+                    data-raw-amount={row.reserveBalance.toString()}
+                  >
                     {row.tokenId && row.tokenId > 0 ? formatAmount(row.reserveBalance, row.decimals) : '—'}
                   </span>
                   <span class="value-text subtle">{row.tokenId && row.tokenId > 0 ? formatApproxUsd(row.reserveUsd) : '—'}</span>
                 </div>
                 <div class="col-balance asset-balance-block">
-                  <span class="balance-text" class:zero={row.accountBalance === 0n} data-testid={`account-spendable-${row.symbol}`}>
+                  <span
+                    class="balance-text"
+                    class:zero={row.accountBalance === 0n}
+                    data-testid={`account-spendable-${row.symbol}`}
+                    data-raw-amount={row.accountBalance.toString()}
+                  >
                     {row.tokenId && row.tokenId > 0 ? formatAmount(row.accountBalance, row.decimals) : '—'}
                   </span>
                   <span class="value-text subtle">{row.tokenId && row.tokenId > 0 ? formatApproxUsd(row.accountUsd) : '—'}</span>
@@ -4448,7 +4704,11 @@
             {/if}
 
             {#if pendingBatchCount > 0}
-              <div class="workspace-pending-banner" data-testid="workspace-pending-banner">
+              <div
+                class="workspace-pending-banner"
+                data-testid="workspace-pending-banner"
+                data-pending-count={pendingBatchCount}
+              >
                 <div class="workspace-pending-copy">
                   <div class="workspace-pending-head">
                     <span class="workspace-pending-kicker">{pendingBatchMode === 'sent' ? 'Sent Batch' : 'Draft Batch'}</span>
@@ -4598,7 +4858,11 @@
           {/if}
 
           {#if pendingBatchCount > 0}
-            <div class="workspace-pending-banner" data-testid="workspace-pending-banner">
+            <div
+              class="workspace-pending-banner"
+              data-testid="workspace-pending-banner"
+              data-pending-count={pendingBatchCount}
+            >
               <div class="workspace-pending-copy">
                 <div class="workspace-pending-head">
                   <span class="workspace-pending-kicker">{pendingBatchMode === 'sent' ? 'Sent Batch' : 'Draft Batch'}</span>

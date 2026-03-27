@@ -45,6 +45,7 @@ import { preflightBatchForE2 } from '../j-batch';
 import { firstUsableContractAddress, requireUsableContractAddress } from '../contract-address';
 import { setDeltaTransformerAddress } from '../proof-builder';
 import { prepareSignedBatch } from '../hanko/batch';
+import { resolveEntityProposerId } from '../state-helpers';
 
 type DebugEventEmitter = {
   sendDebugEvent(payload: Record<string, unknown>): void;
@@ -981,7 +982,6 @@ export async function createRpcAdapter(
         provider
       );
       const signerAddress = signerWallet.address;
-      let nextNonce = await provider.getTransactionCount(signerAddress, 'pending');
 
       const tokenType = options?.tokenType ?? 0;
       const externalTokenIdRaw = options?.externalTokenId ?? 0n;
@@ -994,7 +994,6 @@ export async function createRpcAdapter(
 
       const erc20 = new ethers.Contract(tokenAddress, [
         'function balanceOf(address owner) view returns (uint256)',
-        'function approve(address spender, uint256 amount) returns (bool)',
         'function allowance(address owner, address spender) view returns (uint256)',
       ], signerWallet);
 
@@ -1011,33 +1010,13 @@ export async function createRpcAdapter(
         );
       }
 
-      // Step 1: Approve Depository to spend tokens (max allowance for smoother UX)
       const allowanceFn = erc20.getFunction('allowance') as (owner: string, spender: string) => Promise<bigint>;
-      const approveFn = erc20.getFunction('approve') as (
-        spender: string,
-        amount: bigint,
-        overrides?: Record<string, bigint>
-      ) => Promise<{ wait: (confirms?: number, timeout?: number) => Promise<unknown>; hash: string }>;
       const liveDepositoryAddress = await getLiveDepositoryAddress();
       const allowance: bigint = await allowanceFn(signerAddress, liveDepositoryAddress);
-      if (allowance < amount) {
-        // Safer approval model: approve exact amount needed.
-        // For USDT-like tokens, clear to 0 before raising allowance.
-        if (allowance > 0n) {
-          const clearTx = await approveFn(liveDepositoryAddress, 0n, {
-            ...(await buildFeeOverrides()),
-            nonce: nextNonce,
-          });
-          nextNonce += 1;
-          await waitForReceipt(clearTx, 'erc20ApproveReset');
-        }
-        const approveTx = await approveFn(liveDepositoryAddress, amount, {
-          ...(await buildFeeOverrides()),
-          nonce: nextNonce,
-        });
-        nextNonce += 1;
-        await waitForReceipt(approveTx, 'erc20ApproveExact');
-        console.log(`[JAdapter:rpc] Approved exact allowance=${amount} for Depository`);
+      if (allowance !== ethers.MaxUint256) {
+        throw new Error(
+          `DEPOSITORY_ALLOWANCE_NOT_INFINITE:${signerAddress}:${tokenAddress}:allowance=${allowance.toString()}:spender=${liveDepositoryAddress}`,
+        );
       }
 
       const batch = buildExternalTokenToReserveBatch({
@@ -1091,13 +1070,24 @@ export async function createRpcAdapter(
         provider,
       );
       const erc20 = new ethers.Contract(tokenAddress, [
+        'function allowance(address owner, address spender) view returns (uint256)',
         'function approve(address spender, uint256 amount) returns (bool)',
       ], signerWallet);
+      const allowanceFn = erc20.getFunction('allowance') as (
+        ownerAddress: string,
+        spenderAddress: string,
+      ) => Promise<bigint>;
       const approveFn = erc20.getFunction('approve') as (
         spenderAddress: string,
         approvalAmount: bigint,
         overrides?: Record<string, bigint>
       ) => Promise<{ hash: string }>;
+      const currentAllowance = await allowanceFn(signerWallet.address, spender);
+      if (currentAllowance === amount) return 'already-approved';
+      if (currentAllowance > 0n && currentAllowance !== amount) {
+        const clearTx = await approveFn(spender, 0n, await buildFeeOverrides());
+        await waitForReceipt(clearTx, 'approveErc20Reset');
+      }
       const tx = await approveFn(spender, amount, await buildFeeOverrides());
       await waitForReceipt(tx, 'approveErc20');
       return tx.hash;
@@ -1188,12 +1178,42 @@ export async function createRpcAdapter(
           const entityProviderAddr = await getLiveEntityProviderAddress();
           const depositoryAddr = await getLiveDepositoryAddress();
           const batchRequiresExternalSubmitter = batch.externalTokenToReserve.length > 0;
+          const expectedExternalSignerId = batchRequiresExternalSubmitter
+            ? resolveEntityProposerId(env, normalizedId, 'jadapter.rpc.submitTx.external-batch')
+            : '';
+          const effectiveExternalSignerId = batchRequiresExternalSubmitter
+            ? String(signerId || batchData.signerId || '').trim()
+            : '';
+          if (batchRequiresExternalSubmitter && !effectiveExternalSignerId) {
+            return {
+              success: false,
+              error: `EXTERNAL_BATCH_SIGNER_MISSING:${normalizedId}`,
+            };
+          }
+          if (
+            batchRequiresExternalSubmitter &&
+            expectedExternalSignerId.toLowerCase() !== effectiveExternalSignerId.toLowerCase()
+          ) {
+            return {
+              success: false,
+              error:
+                `EXTERNAL_BATCH_SIGNER_MISMATCH:${normalizedId}` +
+                `:expected=${expectedExternalSignerId}` +
+                `:got=${effectiveExternalSignerId}`,
+            };
+          }
           const externalSubmitterWallet = batchRequiresExternalSubmitter
             ? (() => {
                 if (!signerPrivateKey) {
                   throw new Error(`Missing signer private key for externalTokenToReserve batch from ${jTx.entityId.slice(-4)}`);
                 }
-                return new ethers.Wallet(`0x${Buffer.from(signerPrivateKey).toString('hex')}`, provider);
+                const wallet = new ethers.Wallet(`0x${Buffer.from(signerPrivateKey).toString('hex')}`, provider);
+                if (wallet.address.toLowerCase() !== expectedExternalSignerId.toLowerCase()) {
+                  throw new Error(
+                    `EXTERNAL_BATCH_EOA_MISMATCH:${normalizedId}:expected=${expectedExternalSignerId}:wallet=${wallet.address}`,
+                  );
+                }
+                return wallet;
               })()
             : null;
           const submitterDepository = externalSubmitterWallet ? depository.connect(externalSubmitterWallet) : depository;
@@ -1294,31 +1314,19 @@ export async function createRpcAdapter(
               for (const op of batch.externalTokenToReserve) {
                 const tokenContract = new ethers.Contract(op.contractAddress, [
                   'function allowance(address owner, address spender) view returns (uint256)',
-                  'function approve(address spender, uint256 amount) returns (bool)',
                 ], externalSubmitterWallet);
                 const tokenOwner = externalSubmitterWallet.address;
                 const allowanceFn = tokenContract.getFunction('allowance') as (owner: string, spender: string) => Promise<bigint>;
-                const approveFn = tokenContract.getFunction('approve') as (
-                  spender: string,
-                  amount: bigint,
-                  overrides?: Record<string, bigint | number>
-                ) => Promise<{ wait: (confirms?: number, timeout?: number) => Promise<unknown>; hash: string }>;
                 const currentAllowance = await allowanceFn(tokenOwner, depositoryAddr);
-                if (currentAllowance >= op.amount) continue;
-                let nextExternalNonce = await provider.getTransactionCount(tokenOwner, 'pending');
-                if (currentAllowance > 0n) {
-                  const clearTx = await approveFn(depositoryAddr, 0n, {
-                    ...(await buildFeeOverrides()),
-                    nonce: nextExternalNonce,
-                  });
-                  nextExternalNonce += 1;
-                  await waitForReceipt(clearTx, 'erc20ApproveReset');
-                }
-                const approveTx = await approveFn(depositoryAddr, op.amount, {
-                  ...(await buildFeeOverrides()),
-                  nonce: nextExternalNonce,
-                });
-                await waitForReceipt(approveTx, 'erc20ApproveExact');
+                if (currentAllowance === ethers.MaxUint256) continue;
+                return {
+                  success: false,
+                  error:
+                    `DEPOSITORY_ALLOWANCE_NOT_INFINITE:${tokenOwner}` +
+                    `:${op.contractAddress}` +
+                    `:allowance=${currentAllowance.toString()}` +
+                    `:spender=${depositoryAddr}`,
+                };
               }
             }
             const gasLimit = await estimateGasWithHeadroom(

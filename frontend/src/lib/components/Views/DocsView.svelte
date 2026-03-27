@@ -176,8 +176,8 @@
   .docs-view {
     display: grid;
     grid-template-columns: 280px 1fr;
-    height: calc(100vh - 56px);
-    overflow: hidden;
+    min-height: calc(100vh - 56px);
+    overflow: visible;
     background: #0a0a0a;
     color: #e0e0e0;
   }

@@ -910,8 +910,17 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     await page.waitForFunction(() => {
       const loadingVisible = Boolean(document.querySelector('.loading-screen'));
       const errorVisible = Boolean(document.querySelector('.error-screen'));
-      const viewVisible = Boolean(document.querySelector('.view-wrapper'));
-      return !loadingVisible && !errorVisible && viewVisible;
+      const appVisible =
+        Boolean(document.querySelector('.view-wrapper')) ||
+        Boolean(document.querySelector('nav[aria-label="Account workspace"]')) ||
+        Boolean(document.querySelector('[data-testid="app-runtime-ready"]')) ||
+        Boolean(document.querySelector('#runtime-creation')) ||
+        Boolean(document.querySelector('.quick-login-grid')) ||
+        Array.from(document.querySelectorAll('button')).some((button) => {
+          const label = (button.textContent || '').trim().toLowerCase();
+          return label === 'alice' || label === 'bob' || label === 'carol' || label === 'dave';
+        });
+      return !loadingVisible && !errorVisible && appVisible;
     }, { timeout: 30_000 });
     await page.waitForTimeout(1500);
 

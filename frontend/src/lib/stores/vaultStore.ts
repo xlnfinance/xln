@@ -1,5 +1,5 @@
 import { writable, get, derived } from 'svelte/store';
-import { HDNodeWallet, Mnemonic, getAddress } from 'ethers';
+import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath } from 'ethers';
 import type { Env, JurisdictionConfig, PersistedFrameJournal, RoutedEntityInput, RuntimeInput, XLNModule } from '@xln/runtime/xln-api';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
 import { xlnEnvironment, setXlnEnvironment, isFinancialRestoreFailure } from './xlnStore';
@@ -69,9 +69,6 @@ export interface RuntimesState {
   runtimes: Record<string, Runtime>;
   activeRuntimeId: string | null;
 }
-
-// BIP44 derivation path for Ethereum: m/44'/60'/0'/0/index
-const ETH_PATH_PREFIX = "m/44'/60'/0'/0/";
 
 // Default state
 const defaultState: RuntimesState = {
@@ -162,13 +159,13 @@ const getReplayMeta = (env: Env): unknown | null => {
 // HD derivation helper
 function deriveAddress(seed: string, index: number): string {
   const mnemonic = Mnemonic.fromPhrase(seed);
-  const hdNode = HDNodeWallet.fromMnemonic(mnemonic, ETH_PATH_PREFIX + index);
+  const hdNode = HDNodeWallet.fromMnemonic(mnemonic, getIndexedAccountPath(index));
   return hdNode.address;
 }
 
 function derivePrivateKey(seed: string, index: number): string {
   const mnemonic = Mnemonic.fromPhrase(seed);
-  const hdNode = HDNodeWallet.fromMnemonic(mnemonic, ETH_PATH_PREFIX + index);
+  const hdNode = HDNodeWallet.fromMnemonic(mnemonic, getIndexedAccountPath(index));
   return hdNode.privateKey;
 }
 
@@ -1588,10 +1585,10 @@ export const vaultOperations = {
       }
     };
 
-    // CRITICAL: Register HD-derived private key with runtime BEFORE importing entity
-    // Why: Runtime's deriveSignerKeySync uses different derivation than BIP44 HD
-    // The vault uses BIP44 (m/44'/60'/0'/0/index), runtime uses keccak256(seed+signerId)
-    // Without this, hanko verification fails (signature from wrong key)
+    // CRITICAL: Register the canonical signer key with runtime BEFORE importing entity.
+    // The wallet/runtime signer for index 0 is the BIP44 account-path key derived above;
+    // the entity uses the resulting EOA address as signerId, so consensus/J-batch signing
+    // must reuse this exact private key instead of deriving a second one from other labels.
     const signerPrivateKey = derivePrivateKey(seed, 0);
     const privateKeyBytes = new Uint8Array(
       signerPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))

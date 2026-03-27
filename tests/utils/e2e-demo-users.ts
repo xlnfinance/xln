@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { Wallet } from 'ethers';
+import { getIndexedAccountPath, HDNodeWallet, Mnemonic, Wallet } from 'ethers';
 import { requireAppBaseUrl } from './e2e-base-url';
 
 export const APP_BASE_URL = requireAppBaseUrl();
@@ -34,8 +34,14 @@ const runtimeIdsByLabel = new Map<string, string>();
 
 const normalizeMnemonic = (mnemonic: string): string => mnemonic.trim().split(/\s+/).join(' ');
 
+export const deriveSignerAddressFromMnemonic = (mnemonic: string, index = 0): string => {
+  const normalized = normalizeMnemonic(mnemonic);
+  const hdNode = HDNodeWallet.fromMnemonic(Mnemonic.fromPhrase(normalized), getIndexedAccountPath(index));
+  return hdNode.address.toLowerCase();
+};
+
 const deriveRuntimeIdFromMnemonic = (mnemonic: string): string =>
-  Wallet.fromPhrase(normalizeMnemonic(mnemonic)).address.toLowerCase();
+  deriveSignerAddressFromMnemonic(mnemonic, 0);
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 

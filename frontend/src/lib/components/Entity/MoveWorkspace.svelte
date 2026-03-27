@@ -145,11 +145,17 @@
         <button
           type="button"
           class="move-max-chip"
+          data-testid="move-max-chip"
+          data-raw-amount={moveSourceAvailableBalance.toString()}
           on:click={fillMoveMax}
           disabled={moveSourceAvailableBalance <= 0n}
         >
           <span class="move-max-label">Max</span>
-          <span class="move-max-value">{formatInlineFillAmount(moveSourceAvailableBalance, moveDisplayDecimals)}</span>
+          <span
+            class="move-max-value"
+            data-testid="move-max-value"
+            data-raw-amount={moveSourceAvailableBalance.toString()}
+          >{formatInlineFillAmount(moveSourceAvailableBalance, moveDisplayDecimals)}</span>
         </button>
 
         <div class="asset-inline-controls">
@@ -192,7 +198,11 @@
               <span class="move-node-badge">Source</span>
             {/if}
           </span>
-          <span class="move-node-balance">{formatAmount(getSourceNodeBalance(endpoint), moveDisplayDecimals)}</span>
+          <span
+            class="move-node-balance"
+            data-testid={`move-source-balance-${endpoint}`}
+            data-raw-amount={getSourceNodeBalance(endpoint).toString()}
+          >{formatAmount(getSourceNodeBalance(endpoint), moveDisplayDecimals)}</span>
           <span class="move-node-subline">{getEndpointDescriptor(endpoint)}</span>
         </button>
       {/each}
@@ -237,7 +247,11 @@
               <span class="move-node-badge target">Destination</span>
             {/if}
           </span>
-          <span class="move-node-target-hint">{getTargetHint(endpoint)}</span>
+          <span
+            class="move-node-target-hint"
+            data-testid={`move-target-balance-${endpoint}`}
+            data-raw-amount={getDisplayBalance(endpoint).toString()}
+          >{getTargetHint(endpoint)}</span>
           <span class="move-node-subline">{getEndpointDescriptor(endpoint)}</span>
         </button>
       {/each}
@@ -375,13 +389,10 @@
       </div>
     </div>
 
-    {#if moveProgressLabel || moveVisibleActionError || moveUsesDraftAction}
+    {#if moveProgressLabel || moveVisibleActionError}
       <div class="move-summary-statuses">
         {#if moveProgressLabel}
           <div class="move-summary-status accent" data-testid="move-status">{moveProgressLabel}</div>
-        {/if}
-        {#if moveUsesDraftAction && !moveVisibleActionError}
-          <div class="move-summary-status neutral" data-testid="move-status">Queued in draft batch</div>
         {/if}
         {#if moveVisibleActionError}
           <div
@@ -669,7 +680,7 @@
     box-sizing: border-box;
     transition: border-color 0.14s ease, background 0.14s ease;
     user-select: none;
-    touch-action: none;
+    touch-action: manipulation;
     position: relative;
     overflow: hidden;
   }
