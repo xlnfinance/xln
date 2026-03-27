@@ -38,6 +38,7 @@
       <button
         type="button"
         class="account-workspace-tab"
+        data-testid={`account-workspace-tab-${tab.id}`}
         class:active={activeTab === tab.id}
         on:click={() => select(tab.id)}
       >
@@ -52,6 +53,7 @@
       <button
         type="button"
         class="account-workspace-tab mobile-tab mobile-open-tab"
+        data-testid={`account-workspace-tab-${openTab.id}`}
         class:active={activeTab === openTab.id}
         on:click={() => select(openTab.id)}
       >
@@ -66,6 +68,7 @@
           <button
             type="button"
             class="account-workspace-tab mobile-tab"
+            data-testid={`account-workspace-tab-${tab.id}`}
             class:active={activeTab === tab.id}
             on:click={() => select(tab.id)}
           >
@@ -103,6 +106,7 @@
             <button
               type="button"
               class="account-workspace-tab mobile-tab secondary-tab"
+              data-testid={`account-workspace-tab-${tab.id}`}
               class:active={activeTab === tab.id}
               on:click={() => select(tab.id)}
             >

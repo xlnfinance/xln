@@ -17,7 +17,7 @@
 
   // Props
   export let counterpartyId: string = '';
-  let orderbookScopeMode: 'aggregated' | 'selected' = 'aggregated';
+  let orderbookScopeMode: 'aggregated' | 'selected' = 'selected';
   let createOrderAccountId = '';
   let selectedBookAccountId = '';
   let activeOrderAccountId = '';
@@ -1749,7 +1749,7 @@
       </label>
 
       <div class="avbl-row size-stats">
-        <span>Available: <strong>{formattedAvailableGive}</strong></span>
+        <span data-testid="swap-available-stat">Available: <strong>{formattedAvailableGive}</strong></span>
         {#if capacityWarning}
           <span class="capacity-warn">{capacityWarning}</span>
         {/if}
@@ -1760,7 +1760,7 @@
       {/if}
 
       {#if selectedOrderLevel}
-        <p class="size-hint">
+        <p class="size-hint" data-testid="swap-size-hint">
           Filled from book level at {formatPriceTicks(selectedOrderLevel.inputPriceTicks > 0n
             ? selectedOrderLevel.inputPriceTicks
             : selectedOrderLevel.priceTicks)}
@@ -1779,7 +1779,7 @@
         {tradeSide === 'buy-base' ? `Buy ${baseTokenSymbol.replace(/^W/, '')}` : `Sell ${baseTokenSymbol.replace(/^W/, '')}`}
       </button>
       {#if swapActionDisabledReason || submitError}
-        <p class="form-error">{submitError || swapActionDisabledReason}</p>
+        <p class="form-error" data-testid="swap-form-error">{submitError || swapActionDisabledReason}</p>
       {/if}
     </div>
   </div>
@@ -1847,7 +1847,7 @@
                 {@const isDust = isDustOpenOffer(offer)}
                 {@const remainingUsd = remainingOfferUsd(offer)}
                 {@const offerImprovement = offerPriceImprovementByKey.get(offerLifecycleKey(String(offer.accountId || ''), String(offer.offerId || ''))) || { amount: 0n, tokenId: null }}
-                <tr>
+                <tr data-testid="swap-open-order-row">
                   <td>
                     <span class:side-ask={side === 'Ask'} class:side-bid={side === 'Bid'} class="side-badge">{side}</span>
                   </td>
@@ -1871,7 +1871,7 @@
                   <td>{formatPriceImprovement(offerImprovement.amount, offerImprovement.tokenId)}</td>
                   <td>{String(offer.accountId || '').slice(0, 10)}...</td>
                   <td>
-                    <button class="cancel-btn" on:click={() => cancelSwapOffer(String(offer.offerId || ''), String(offer.accountId || ''))}>
+                    <button class="cancel-btn" data-testid="swap-open-order-cancel" on:click={() => cancelSwapOffer(String(offer.offerId || ''), String(offer.accountId || ''))}>
                       Request Cancel
                     </button>
                   </td>
@@ -1901,7 +1901,7 @@
             <tbody>
               {#each filteredClosedOrderViews as order (offerLifecycleKey(order.accountId, order.offerId))}
                 {@const pairView = resolvePairOrientation(order.giveTokenId, order.wantTokenId)}
-                <tr>
+                <tr data-testid="swap-closed-order-row">
                   <td>
                     <span class:side-ask={closedOrderStatusTone(order.status) === 'ask'} class:side-bid={closedOrderStatusTone(order.status) === 'bid'} class="side-badge">
                       {closedOrderStatusLabel(order.status)}
