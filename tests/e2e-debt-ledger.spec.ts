@@ -994,8 +994,8 @@ async function openReserveToExternalMove(
     })
     .toBe(amount);
   const confirm = workspace.getByTestId('move-confirm').first();
-  await expect(workspace.getByTestId('move-route-summary').first()).toContainText('Withdraw to wallet');
-  await expect(workspace.getByTestId('move-route-summary').first()).toContainText('Withdraw reserve to recipient wallet');
+  await expect(workspace.getByTestId('move-route-summary').first()).toContainText('Reserve → External');
+  await expect(workspace.getByTestId('move-route-summary').first()).toContainText(`${amount} USDC`);
   if (expectedState === 'blocked') {
     await expect
       .poll(async () => {

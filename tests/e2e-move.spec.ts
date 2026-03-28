@@ -290,7 +290,7 @@ async function broadcastDraftBatch(
   await expect(broadcast).toBeEnabled({ timeout: 20_000 });
   const before = await readMoveBatchSnapshot(page, localEntity.entityId, localEntity.signerId);
   await broadcast.click();
-  const deadline = Date.now() + 20_000;
+  const deadline = Date.now() + timeoutMs;
   let lastSnapshot = before;
 
   while (Date.now() < deadline) {
@@ -299,7 +299,7 @@ async function broadcastDraftBatch(
     if (recentMessageText.includes('submit_failed:') || recentMessageText.includes('🛑 Aborted sentBatch')) {
       throw new Error(`Batch broadcast failed: ${recentMessageText}`);
     }
-    if (lastSnapshot.sentExists || lastSnapshot.batchHistoryCount > before.batchHistoryCount) {
+    if (lastSnapshot.batchHistoryCount > before.batchHistoryCount) {
       return;
     }
     await page.waitForTimeout(250);
@@ -783,8 +783,8 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await chooseMoveRoute(page, 'external', 'reserve');
         await page.getByTestId('move-amount').fill('20');
         await waitForMoveReady(page);
-        await expect(page.getByTestId('move-route-summary')).toContainText('Deposit into reserve');
-        await expect(page.getByTestId('move-route-summary')).toContainText('Deposit from your wallet into reserve');
+        await expect(page.getByTestId('move-route-summary')).toContainText('External → Reserve');
+        await expect(page.getByTestId('move-route-summary')).toContainText('20 USDC');
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await capturePageScreenshot(page, testInfo, 'move-batch-route-summary-desktop.png');
         await page.getByTestId('move-confirm').first().click();
@@ -869,8 +869,8 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-amount').fill('2');
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
-        await expect(page.getByTestId('move-route-summary')).toContainText('Withdraw to wallet');
-        await expect(page.getByTestId('move-route-summary')).toContainText('Withdraw reserve to recipient wallet');
+        await expect(page.getByTestId('move-route-summary')).toContainText('Reserve → External');
+        await expect(page.getByTestId('move-route-summary')).toContainText('2 USDC');
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await page.getByTestId('move-confirm').first().click();
         await broadcastDraftBatch(page, asLocalEntityRef(alice!));
