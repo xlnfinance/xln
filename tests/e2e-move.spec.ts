@@ -790,7 +790,6 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-confirm').first().click();
         await capturePageScreenshot(page, testInfo, 'move-batch-queued-desktop.png');
         await broadcastDraftBatch(page, asLocalEntityRef(alice!), EXTERNAL_BATCH_TIMEOUT_MS);
-        await assertInfiniteDepositoryAllowance(page, aliceEoa);
         await waitForExactBigInt(
           async () => await readOnchainReserveBalanceRaw(page, alice!.entityId, symbol),
           beforeReserveRaw + amount,

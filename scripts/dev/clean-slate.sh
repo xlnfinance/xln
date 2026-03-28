@@ -41,8 +41,10 @@ wait_for_port_clear() {
 }
 
 echo "🛑 Killing known XLN/anvil/dev processes..."
-pm2 delete anvil xln-server xln-custody 2>/dev/null || true
-pm2 stop anvil xln-server xln-custody 2>/dev/null || true
+for pm2_app in anvil xln-server xln-custody; do
+  pm2 delete "$pm2_app" 2>/dev/null || true
+  pm2 stop "$pm2_app" 2>/dev/null || true
+done
 pkill -9 -f "anvil" 2>/dev/null || true
 pkill -9 -f "bash .*scripts/start-anvil.sh" 2>/dev/null || true
 pkill -9 -f "scripts/start-anvil.sh" 2>/dev/null || true
