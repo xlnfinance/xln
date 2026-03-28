@@ -965,10 +965,10 @@
     selectedAccountId || '',
     selectedMoveTransferToken ? String(selectedMoveTransferToken.tokenId) : '',
     selectedMoveExternalToken ? selectedMoveExternalToken.address : '',
-    moveLedgerRow ? moveLedgerRow.externalBalance.toString() : '0',
-    moveLedgerRow ? moveLedgerRow.reserveBalance.toString() : '0',
-    moveLedgerRow ? moveLedgerRow.accountBalance.toString() : '0',
-    moveSourceAvailableBalance.toString(),
+    moveUiState.ledgerRow ? moveUiState.ledgerRow.externalBalance.toString() : '0',
+    moveUiState.ledgerRow ? moveUiState.ledgerRow.reserveBalance.toString() : '0',
+    moveUiState.ledgerRow ? moveUiState.ledgerRow.accountBalance.toString() : '0',
+    moveUiState.sourceAvailableBalance.toString(),
   ].join('|');
   $: {
     void moveValidationSignature;
@@ -1087,7 +1087,7 @@
   }
 
   function getMoveDisplayDecimals(): number {
-    const row = moveLedgerRow;
+    const row = moveUiState.ledgerRow;
     if (row && typeof row.decimals === 'number' && row.decimals >= 0) return row.decimals;
     const liveExternalToken = findExternalTokenBySymbol(moveAssetSymbol);
     const liveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
@@ -1121,7 +1121,7 @@
   }
 
   function getCurrentMoveSourceAvailableBalance(): bigint {
-    return computeMoveSourceAvailableBalance(moveLedgerRow, selectedMoveTransferToken);
+    return computeMoveSourceAvailableBalance(moveUiState.ledgerRow, selectedMoveTransferToken);
   }
 
   function choosePreferredMoveAssetSymbol(): string {
@@ -1531,10 +1531,12 @@
   let approvingExternalToken: string | null = null;
   let transferableAssetOptions: Array<ExternalToken & { tokenId: number }> = [];
   let assetLedgerRows: AssetLedgerRow[] = [];
-  let moveLedgerRow: AssetLedgerRow | null = null;
-  let moveDisplayBalances: Record<MoveEndpoint, bigint> = { external: 0n, reserve: 0n, account: 0n };
-  let moveDisplayDecimals = 18;
-  let moveSourceAvailableBalance = 0n;
+  let moveUiState: MoveUiState = {
+    ledgerRow: null,
+    displayBalances: { external: 0n, reserve: 0n, account: 0n },
+    displayDecimals: 18,
+    sourceAvailableBalance: 0n,
+  };
   let lastMoveAmountContextKey = '';
   let accountSpendableByToken = new Map<number, bigint>();
   let pendingAssetBridgeSync: {
@@ -2314,10 +2316,7 @@
         ?? 18,
       sourceAvailableBalance: computeMoveSourceAvailableBalance(row, selectedMoveTransferToken),
     };
-    moveLedgerRow = nextState.ledgerRow;
-    moveDisplayBalances = nextState.displayBalances;
-    moveDisplayDecimals = nextState.displayDecimals;
-    moveSourceAvailableBalance = nextState.sourceAvailableBalance;
+    moveUiState = nextState;
   }
 
   $: {
@@ -3115,7 +3114,7 @@
       if (!token) {
         throw new Error('Select reserve-compatible asset first');
       }
-      const maxAmount = moveSourceAvailableBalance;
+      const maxAmount = moveUiState.sourceAvailableBalance;
       const amount = parsePositiveAssetAmount(moveAmount, token, maxAmount ?? undefined);
       const reserveBefore = onchainReserves.get(token.tokenId) ?? 0n;
       const selfEntityId = resolveSelfEntityId();
@@ -4796,9 +4795,9 @@
                 {moveNeedsReserveRecipient}
                 {moveNeedsExternalRecipient}
                 {isMoveRouteSupported}
-                {moveDisplayBalances}
-                {moveDisplayDecimals}
-                {moveSourceAvailableBalance}
+                moveDisplayBalances={moveUiState.displayBalances}
+                moveDisplayDecimals={moveUiState.displayDecimals}
+                moveSourceAvailableBalance={moveUiState.sourceAvailableBalance}
                 {fillMoveMax}
                 {setMoveSource}
                 {setMoveTarget}
@@ -4962,9 +4961,9 @@
                 {moveNeedsReserveRecipient}
                 {moveNeedsExternalRecipient}
                 {isMoveRouteSupported}
-                {moveDisplayBalances}
-                {moveDisplayDecimals}
-                {moveSourceAvailableBalance}
+                moveDisplayBalances={moveUiState.displayBalances}
+                moveDisplayDecimals={moveUiState.displayDecimals}
+                moveSourceAvailableBalance={moveUiState.sourceAvailableBalance}
                 {fillMoveMax}
                 {setMoveSource}
                 {setMoveTarget}
