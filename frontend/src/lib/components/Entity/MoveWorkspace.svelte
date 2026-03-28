@@ -132,10 +132,9 @@
   <div class="move-topline">
     <div class="move-hero-card">
       <div class="move-hero-copy">
-        <span class="move-kicker">Move amount</span>
-        <div class="move-hero-title">Choose amount and funding token</div>
+        <span class="move-kicker">Amount</span>
         <div class="move-hero-caption">
-          Available from {moveEndpointLabels[moveFromEndpoint]}: {moveSourceBalanceLabel}
+          Available: {moveSourceBalanceLabel}
         </div>
       </div>
 
@@ -173,7 +172,6 @@
     <div class="move-column">
       <div class="move-column-head">
         <span>From</span>
-        <span class="move-column-copy">Pick the balance you want to spend</span>
       </div>
 
       {#each moveEndpoints as endpoint}
@@ -194,16 +192,12 @@
         >
           <span class="move-node-top">
             <span class="move-node-label">{moveEndpointLabels[endpoint]}</span>
-            {#if moveFromEndpoint === endpoint}
-              <span class="move-node-badge">Source</span>
-            {/if}
           </span>
           <span
             class="move-node-balance"
             data-testid={`move-source-balance-${endpoint}`}
             data-raw-amount={getSourceNodeBalance(endpoint).toString()}
           >{formatAmount(getSourceNodeBalance(endpoint), moveDisplayDecimals)}</span>
-          <span class="move-node-subline">{getEndpointDescriptor(endpoint)}</span>
         </button>
       {/each}
     </div>
@@ -211,7 +205,6 @@
     <div class="move-column">
       <div class="move-column-head">
         <span>To</span>
-        <span class="move-column-copy">Choose where the value should land</span>
       </div>
 
       {#each moveEndpoints as endpoint}
@@ -243,16 +236,7 @@
         >
           <span class="move-node-top">
             <span class="move-node-label">{moveEndpointLabels[endpoint]}</span>
-            {#if moveToEndpoint === endpoint}
-              <span class="move-node-badge target">Destination</span>
-            {/if}
           </span>
-          <span
-            class="move-node-target-hint"
-            data-testid={`move-target-balance-${endpoint}`}
-            data-raw-amount={getDisplayBalance(endpoint).toString()}
-          >{getTargetHint(endpoint)}</span>
-          <span class="move-node-subline">{getEndpointDescriptor(endpoint)}</span>
         </button>
       {/each}
     </div>
@@ -260,8 +244,7 @@
     {#if moveRouteRequiresDetails}
       <section class="move-route-details" data-testid="move-route-details">
         <div class="move-route-details-head">
-          <span class="move-column-head details-head">Route details</span>
-          <span class="move-route-details-copy">Only the extra fields required for this route are shown.</span>
+          <span class="move-column-head details-head">Details</span>
         </div>
 
         <div class="move-detail-grid">
@@ -362,30 +345,11 @@
         <div class="move-summary-pill">
           {moveEndpointLabels[moveFromEndpoint]} → {moveEndpointLabels[moveToEndpoint]}
         </div>
-        <div class="move-summary-title">{moveRouteExecutionLabel(moveFromEndpoint, moveToEndpoint)}</div>
-        <div class="move-summary-meta">{moveRouteMeta(moveFromEndpoint, moveToEndpoint)}</div>
       </div>
 
       <div class="move-summary-hero">
         <span class="move-summary-hero-label">Amount</span>
         <strong class="move-summary-hero-value">{moveAmountPreview} {moveAssetSymbol}</strong>
-      </div>
-    </div>
-
-    <div class="move-summary-grid">
-      <div class="move-summary-metric">
-        <span class="move-summary-metric-label">Source balance</span>
-        <span class="move-summary-metric-value mono">{moveSourceBalanceLabel}</span>
-      </div>
-      <div class="move-summary-metric">
-        <span class="move-summary-metric-label">How it runs</span>
-        <span class="move-summary-metric-value">
-          {moveRouteDirect ? 'Direct wallet submission' : (moveUsesDraftAction ? 'Queued on-chain batch' : 'Queued settlement flow')}
-        </span>
-      </div>
-      <div class="move-summary-metric">
-        <span class="move-summary-metric-label">Destination</span>
-        <span class="move-summary-metric-value">{moveEndpointLabels[moveToEndpoint]}</span>
       </div>
     </div>
 
@@ -407,14 +371,6 @@
       </div>
     {/if}
 
-    <div class="move-steps">
-      {#each moveStepList as step, index}
-        <div class="move-step-row">
-          <span class="move-step-index">{index + 1}</span>
-          <span class="move-step-copy">{stripStepPrefix(step)}</span>
-        </div>
-      {/each}
-    </div>
   </div>
 
   <div class="asset-action-row">
@@ -550,23 +506,14 @@
 
   .move-column-head {
     display: flex;
-    flex-direction: column;
-    gap: 3px;
+    align-items: center;
     min-width: 0;
-    font-size: 9px;
+    font-size: 10px;
+    font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--move-text-muted);
     padding: 0 2px;
-  }
-
-  .move-column-copy {
-    font-size: 10px;
-    font-weight: 500;
-    line-height: 1.25;
-    letter-spacing: 0;
-    text-transform: none;
-    color: color-mix(in srgb, var(--move-text-muted) 84%, transparent);
   }
 
   .details-head {
@@ -604,15 +551,8 @@
 
   .move-route-details-head {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
+    align-items: center;
     gap: 12px;
-    flex-wrap: wrap;
-  }
-
-  .move-route-details-copy {
-    font-size: 10px;
-    color: color-mix(in srgb, var(--move-text-muted) 82%, transparent);
   }
 
   .move-detail-grid {
@@ -666,8 +606,9 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 4px;
-    min-height: 60px;
+    justify-content: center;
+    gap: 6px;
+    min-height: 74px;
     width: 100%;
     min-width: 0;
     padding: 11px 12px 11px 14px;
@@ -750,8 +691,8 @@
   .move-node-top {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    justify-content: flex-start;
+    gap: 8px;
     width: 100%;
     min-width: 0;
     overflow: hidden;
@@ -767,28 +708,6 @@
     letter-spacing: -0.01em;
   }
 
-  .move-node-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2px 7px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--move-accent) 9%, transparent);
-    border: 1px solid color-mix(in srgb, var(--move-accent) 12%, transparent);
-    color: var(--move-accent);
-    font-size: 8px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-
-  .move-node-badge.target {
-    color: color-mix(in srgb, var(--theme-credit, #4ade80) 70%, white 30%);
-    background: color-mix(in srgb, var(--theme-credit, #4ade80) 10%, transparent);
-    border-color: color-mix(in srgb, var(--theme-credit, #4ade80) 18%, transparent);
-  }
-
   .move-node-balance {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 15px;
@@ -797,21 +716,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .move-node-target-hint {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--move-text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .move-node-subline {
-    font-size: 10px;
-    color: var(--move-text-muted);
-    white-space: nowrap;
   }
 
   .move-summary {
@@ -842,8 +746,8 @@
 
   .move-summary-copy {
     display: flex;
-    flex-direction: column;
-    gap: 6px;
+    align-items: center;
+    min-height: 44px;
     min-width: 0;
   }
 
@@ -857,17 +761,6 @@
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-  }
-
-  .move-summary-title {
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--move-text);
-  }
-
-  .move-summary-meta {
-    font-size: 11px;
-    color: var(--move-text-secondary);
   }
 
   .move-summary-hero {
@@ -896,46 +789,6 @@
     line-height: 1.1;
     color: var(--move-text);
     overflow-wrap: anywhere;
-  }
-
-  .move-summary-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px 16px;
-    padding-top: 8px;
-    border-top: 1px solid color-mix(in srgb, var(--move-border) 34%, transparent);
-    min-width: 0;
-  }
-
-  .move-summary-metric {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-    padding: 0;
-    border: none;
-    background: transparent;
-  }
-
-  .move-summary-metric-label {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--move-text-muted);
-  }
-
-  .move-summary-metric-value {
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.35;
-    color: var(--move-text-secondary);
-    overflow-wrap: anywhere;
-  }
-
-  .move-summary-metric-value.mono {
-    font-family: 'IBM Plex Mono', monospace;
-    color: var(--move-text);
   }
 
   .move-summary-statuses {
@@ -975,54 +828,6 @@
     color: color-mix(in srgb, var(--theme-debit, #f43f5e) 68%, white 32%);
     border-color: color-mix(in srgb, var(--theme-debit, #f43f5e) 22%, transparent);
     background: color-mix(in srgb, var(--theme-debit, #f43f5e) 8%, transparent);
-  }
-
-  .move-steps {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    padding-top: 8px;
-    border-top: 1px solid color-mix(in srgb, var(--move-border) 34%, transparent);
-  }
-
-  .move-step-row {
-    display: grid;
-    grid-template-columns: 26px minmax(0, 1fr);
-    gap: 10px;
-    align-items: flex-start;
-    padding: 10px 0;
-    border-radius: 0;
-    border: none;
-    border-top: 1px solid color-mix(in srgb, var(--move-border) 24%, transparent);
-    background: transparent;
-    min-width: 0;
-  }
-
-  .move-step-row:first-child {
-    border-top: none;
-  }
-
-  .move-step-index {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--move-accent) 12%, transparent);
-    color: var(--move-accent);
-    font-size: 10px;
-    font-weight: 700;
-    font-family: 'IBM Plex Mono', monospace;
-  }
-
-  .move-step-copy {
-    display: block;
-    padding-top: 1px;
-    color: var(--move-text-secondary);
-    font-size: 11.5px;
-    line-height: 1.45;
-    overflow-wrap: anywhere;
   }
 
   .asset-field {
@@ -1107,6 +912,7 @@
   }
 
   .move-max-chip {
+    min-height: var(--move-control-height);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1168,6 +974,7 @@
     min-width: 110px;
     width: 110px;
     max-width: 100%;
+    min-height: var(--move-control-height);
   }
 
   .move-external-input {
@@ -1206,7 +1013,8 @@
   }
 
   .btn-table-action {
-    padding: 5px 10px;
+    min-height: 44px;
+    padding: 10px 14px;
     border: none;
     border-radius: 4px;
     font-size: 11px;
