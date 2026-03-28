@@ -36,6 +36,7 @@ let resetChannel: BroadcastChannel | null = null;
 let activeResetPromise: Promise<void> | null = null;
 let lastFatalDumpFingerprint = '';
 let lastFatalDumpPromise: Promise<void> | null = null;
+let lastDismissedFatalFingerprint = '';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -681,7 +682,11 @@ export function installFatalErrorInterceptor(): void {
   };
 
   const handleFatal = (error: unknown) => {
-    if (prompted || !isFatalRuntimeError(error)) return;
+    if (!isFatalRuntimeError(error)) return;
+    const fingerprint = error instanceof Error
+      ? `${error.name}:${error.message}:${error.stack || ''}`
+      : String(error ?? '');
+    if (prompted || (fingerprint && fingerprint === lastDismissedFatalFingerprint)) return;
     prompted = true;
 
     const msg = error instanceof Error ? error.message : String(error);
@@ -696,10 +701,12 @@ export function installFatalErrorInterceptor(): void {
         // best effort only
       }
       if (confirm(`Runtime error: ${shortMsg}\n\nReset everything to recover?`)) {
+        lastDismissedFatalFingerprint = '';
         const signal = createResetSignal(error);
         await performReset(error, signal, true, { skipDebugDump: true });
       } else {
-        prompted = false; // allow re-prompting if user declines
+        lastDismissedFatalFingerprint = fingerprint;
+        prompted = false;
       }
     }, 0);
   };

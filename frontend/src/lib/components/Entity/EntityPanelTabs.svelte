@@ -2932,7 +2932,6 @@
     if (!isAddress(tokenAddress) || tokenAddress === ZeroAddress) {
       throw new Error('Select ERC20 asset first');
     }
-    await ensureInfiniteDepositoryAllowancesForExternalTokens();
     setMoveProgress('Queuing external deposit into draft batch');
     const env = requireRuntimeEnv(activeEnv, 'move-external-to-reserve-draft');
     const signerId = requireSignerIdForEntity(env, entityId, 'move-external-to-reserve-draft');
@@ -4295,6 +4294,19 @@
   $: pendingBatchReserveIssueText = formatBatchReserveIssue(pendingBatchReserveIssue);
   $: canBroadcastPendingBatch = hasDraftBatch && !hasSentBatch && !pendingBatchReserveIssue;
 
+  async function waitForBatchStateTransition(
+    predicate: () => boolean,
+    timeoutMs = 4_000,
+    pollMs = 50,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate()) return;
+      await sleep(pollMs);
+    }
+    throw new Error('Batch state did not update in time after broadcast');
+  }
+
   async function clearPendingBatch(): Promise<void> {
     if (!pendingBatchCount || pendingBatchSubmitting) return;
     if (!confirm('Clear current draft and any sent batch state?')) return;
@@ -4332,7 +4344,14 @@
         type: 'j_broadcast',
         data: {},
       }])]);
-      toasts.success('Batch queued for broadcast');
+      await waitForBatchStateTransition(() => {
+        const batchState = replica?.state?.jBatchState;
+        const sent = countBatchOps(batchState?.sentBatch?.batch);
+        const draft = countBatchOps(batchState?.batch);
+        return sent > 0 || draft === 0;
+      });
+      const sentCount = countBatchOps(replica?.state?.jBatchState?.sentBatch?.batch);
+      toasts.success(sentCount > 0 ? 'Broadcast started' : 'Batch broadcast completed');
     } catch (error) {
       toasts.error(`Batch broadcast failed: ${toErrorMessage(error, 'Unknown error')}`);
     } finally {

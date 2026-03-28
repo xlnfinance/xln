@@ -994,6 +994,7 @@ export async function createRpcAdapter(
 
       const erc20 = new ethers.Contract(tokenAddress, [
         'function balanceOf(address owner) view returns (uint256)',
+        'function approve(address spender, uint256 amount) returns (bool)',
         'function allowance(address owner, address spender) view returns (uint256)',
       ], signerWallet);
 
@@ -1013,10 +1014,27 @@ export async function createRpcAdapter(
       const allowanceFn = erc20.getFunction('allowance') as (owner: string, spender: string) => Promise<bigint>;
       const liveDepositoryAddress = await getLiveDepositoryAddress();
       const allowance: bigint = await allowanceFn(signerAddress, liveDepositoryAddress);
-      if (allowance !== ethers.MaxUint256) {
-        throw new Error(
-          `DEPOSITORY_ALLOWANCE_NOT_INFINITE:${signerAddress}:${tokenAddress}:allowance=${allowance.toString()}:spender=${liveDepositoryAddress}`,
-        );
+      if (allowance < amount) {
+        const approveFn = erc20.getFunction('approve') as (
+          spender: string,
+          amount: bigint,
+          overrides?: Record<string, bigint>
+        ) => Promise<{ wait: (confirms?: number, timeout?: number) => Promise<unknown>; hash: string }>;
+        if (allowance > 0n) {
+          const clearTx = await approveFn(liveDepositoryAddress, 0n, {
+            ...(await buildFeeOverrides()),
+            nonce: nextNonce,
+          });
+          nextNonce += 1;
+          await waitForReceipt(clearTx, 'erc20ApproveReset');
+        }
+        const approveTx = await approveFn(liveDepositoryAddress, ethers.MaxUint256, {
+          ...(await buildFeeOverrides()),
+          nonce: nextNonce,
+        });
+        nextNonce += 1;
+        await waitForReceipt(approveTx, 'erc20ApproveMax');
+        console.log(`[JAdapter:rpc] Approved max allowance for current token at Depository`);
       }
 
       const batch = buildExternalTokenToReserveBatch({
@@ -1311,22 +1329,39 @@ export async function createRpcAdapter(
           try {
             console.log(`📦 [JAdapter:rpc] processBatch (${getBatchSize(batch)} ops) nonce=${nextNonce}`);
             if (externalSubmitterWallet) {
-              for (const op of batch.externalTokenToReserve) {
-                const tokenContract = new ethers.Contract(op.contractAddress, [
+              const tokenOwner = externalSubmitterWallet.address;
+              const uniqueExternalTokenAddresses = [...new Set(batch.externalTokenToReserve.map((op) => op.contractAddress.toLowerCase()))];
+              for (const tokenAddressLower of uniqueExternalTokenAddresses) {
+                const originalAddress = batch.externalTokenToReserve.find(
+                  (op) => op.contractAddress.toLowerCase() === tokenAddressLower,
+                )?.contractAddress;
+                if (!originalAddress) continue;
+                const tokenContract = new ethers.Contract(originalAddress, [
                   'function allowance(address owner, address spender) view returns (uint256)',
+                  'function approve(address spender, uint256 amount) returns (bool)',
                 ], externalSubmitterWallet);
-                const tokenOwner = externalSubmitterWallet.address;
                 const allowanceFn = tokenContract.getFunction('allowance') as (owner: string, spender: string) => Promise<bigint>;
+                const approveFn = tokenContract.getFunction('approve') as (
+                  spender: string,
+                  amount: bigint,
+                  overrides?: Record<string, bigint | number>
+                ) => Promise<{ wait: (confirms?: number, timeout?: number) => Promise<unknown>; hash: string }>;
                 const currentAllowance = await allowanceFn(tokenOwner, depositoryAddr);
-                if (currentAllowance === ethers.MaxUint256) continue;
-                return {
-                  success: false,
-                  error:
-                    `DEPOSITORY_ALLOWANCE_NOT_INFINITE:${tokenOwner}` +
-                    `:${op.contractAddress}` +
-                    `:allowance=${currentAllowance.toString()}` +
-                    `:spender=${depositoryAddr}`,
-                };
+                if (currentAllowance >= ethers.MaxUint256 / 2n) continue;
+                let nextExternalNonce = await provider.getTransactionCount(tokenOwner, 'pending');
+                if (currentAllowance > 0n) {
+                  const clearTx = await approveFn(depositoryAddr, 0n, {
+                    ...(await buildFeeOverrides()),
+                    nonce: nextExternalNonce,
+                  });
+                  nextExternalNonce += 1;
+                  await waitForReceipt(clearTx, 'erc20ApproveReset');
+                }
+                const approveTx = await approveFn(depositoryAddr, ethers.MaxUint256, {
+                  ...(await buildFeeOverrides()),
+                  nonce: nextExternalNonce,
+                });
+                await waitForReceipt(approveTx, 'erc20ApproveMax');
               }
             }
             const gasLimit = await estimateGasWithHeadroom(
