@@ -1512,13 +1512,9 @@ export function processOrderbookSwaps(
     let book = bookCache.get(bookKey) || ext.books.get(bookKey);
     if (!book) {
       book = createExactBookForObservedPrices([priceTicks], policyTick);
-      book.maxOrders = LIMITS.MAX_ORDERBOOK_ORDERS_PER_PAIR;
-      book.stpPolicy = 1; // STP cancel taker: never execute self-trades
     } else if (bookRequiresCanonicalRebuild(bookKey, book)) {
       const rebuiltFromCanonical = rebuildPairBookFromCanonicalOffers(bookKey, policyTick, priceTicks);
       book = rebuiltFromCanonical ?? createExactBookForObservedPrices([priceTicks], policyTick);
-      book.maxOrders = LIMITS.MAX_ORDERBOOK_ORDERS_PER_PAIR;
-      book.stpPolicy = 1;
       pairRepairCount += 1;
       bookCache.set(bookKey, book);
       bookUpdates.push({ pairId: bookKey, book });

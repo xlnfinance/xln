@@ -151,9 +151,9 @@
     // Partial hex (less than 64 chars)
     if (/^0x[0-9a-fA-F]+$/.test(trimmed) && trimmed.length >= 6) {
       return {
-        entityId: trimmed.toLowerCase().padEnd(66, '0'),
+        entityId: trimmed.toLowerCase(),
         shortId: trimmed.slice(2, 6).toUpperCase(),
-        resolved: true
+        resolved: false
       };
     }
 

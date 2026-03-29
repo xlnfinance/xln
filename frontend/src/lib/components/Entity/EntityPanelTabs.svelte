@@ -9,7 +9,7 @@
   import { onDestroy, onMount } from 'svelte';
   import type { ComponentType } from 'svelte';
   import { get } from 'svelte/store';
-  import { MaxUint256, Wallet as EthersWallet, hexlify, isAddress, ZeroAddress, zeroPadValue } from 'ethers';
+  import { Wallet as EthersWallet, hexlify, isAddress, ZeroAddress, zeroPadValue } from 'ethers';
   import type {
     AccountMachine,
     Env,
@@ -1605,9 +1605,6 @@
   let sendAssetSymbol = 'USDC';
   let sendAssetAmount = '';
   let sendAssetRecipient = '';
-  let allowAssetSymbol = 'USDC';
-  let allowAssetAmount = '';
-  let allowAssetSpender = '';
   type MoveEndpoint = 'external' | 'reserve' | 'account';
   let moveFromEndpoint: MoveEndpoint = 'external';
   let moveToEndpoint: MoveEndpoint = 'reserve';
@@ -1636,7 +1633,6 @@
   let collateralToReserveAmount = '';
   let reserveToExternalAmount = '';
   let sendingExternalToken: string | null = null;
-  let approvingExternalToken: string | null = null;
   let transferableAssetOptions: Array<ExternalToken & { tokenId: number }> = [];
   let assetLedgerRows: AssetLedgerRow[] = [];
   let moveUiState: MoveUiState = {
@@ -1679,7 +1675,6 @@
   let selectedCollateralToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedReserveToExternalToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedSendAssetToken: ExternalToken | null = null;
-  let selectedAllowAssetToken: ExternalToken | null = null;
   let moveAssetOptions: ExternalToken[] = [];
   let selectedMoveExternalToken: ExternalToken | null = null;
   let selectedMoveTransferToken: (ExternalToken & { tokenId: number }) | null = null;
@@ -2293,7 +2288,6 @@
   $: selectedCollateralToReserveToken = findReserveTransferTokenBySymbol(collateralToReserveSymbol);
   $: selectedReserveToExternalToken = findReserveTransferTokenBySymbol(reserveToExternalSymbol);
   $: selectedSendAssetToken = findExternalTokenBySymbol(sendAssetSymbol);
-  $: selectedAllowAssetToken = findExternalTokenBySymbol(allowAssetSymbol);
   $: moveAssetOptions = moveFromEndpoint === 'external' && moveToEndpoint === 'external'
     ? externalTokens
     : transferableAssetOptions;
@@ -2438,10 +2432,6 @@
     if (!findReserveTransferTokenBySymbol(reserveToCollateralSymbol)) reserveToCollateralSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
     if (!findReserveTransferTokenBySymbol(collateralToReserveSymbol)) collateralToReserveSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
     if (!findReserveTransferTokenBySymbol(reserveToExternalSymbol)) reserveToExternalSymbol = choosePreferredAssetSymbol(transferableAssetOptions);
-    const approvePreferred = transferableAssetOptions.find((token) => token.symbol === 'USDC')?.symbol
-      ?? transferableAssetOptions[0]?.symbol
-      ?? preferred;
-    if (!findReserveTransferTokenBySymbol(allowAssetSymbol)) allowAssetSymbol = approvePreferred;
     const movePreferred = choosePreferredMoveAssetSymbol();
     if (
       !moveAssetOptions.some((token) => token.symbol.toUpperCase() === String(moveAssetSymbol || '').trim().toUpperCase())
@@ -2644,84 +2634,6 @@
       await fetchExternalTokens();
     } finally {
       sendingExternalToken = null;
-    }
-  }
-
-  async function approveExternalAsset(): Promise<void> {
-    const token = requireExternalTokenBySymbol(allowAssetSymbol);
-    if (token.address === ZeroAddress) throw new Error('Native ETH cannot be approved');
-    const spender = allowAssetSpender.trim();
-    if (!isAddress(spender)) throw new Error('Spender must be a valid address');
-    const amount = parsePositiveAssetAmount(allowAssetAmount, token);
-    const xln = await getXLN();
-    const jadapter = xln.getActiveJAdapter?.(requireRuntimeEnv(activeEnv, 'approve-external-asset'));
-    if (!jadapter) throw new Error('J-adapter not available');
-    const privKey = await getActiveSignerPrivateKey();
-    approvingExternalToken = token.symbol;
-    try {
-      await jadapter.approveErc20(privKey, token.address, spender, amount);
-      allowAssetAmount = '';
-      toasts.success(`Approved ${token.symbol}`);
-    } finally {
-      approvingExternalToken = null;
-    }
-  }
-
-  async function ensureInfiniteDepositoryAllowancesForExternalTokens(): Promise<void> {
-    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
-    if (!entityId) {
-      throw new Error('External deposit requires an active entity');
-    }
-    setMoveProgress('Approving Depository for wallet assets');
-    const env = requireRuntimeEnv(activeEnv, 'ensure-external-depository-allowance');
-    const canonicalSignerId = requireSignerIdForEntity(env, entityId, 'ensure-external-depository-allowance');
-    const signerId = String(currentSignerId || '').trim();
-    if (!signerId) {
-      throw new Error('External deposit requires an active entity signer');
-    }
-    if (signerId.toLowerCase() !== canonicalSignerId.toLowerCase()) {
-      throw new Error(
-        `External deposit requires entity signer ${canonicalSignerId}, got ${signerId}`,
-      );
-    }
-    const xln = await getXLN();
-    const jadapter = xln.getActiveJAdapter?.(env);
-    if (!jadapter) {
-      throw new Error('J-adapter not available for external deposit approval');
-    }
-    const depositoryAddress = String(jadapter.addresses?.depository || '').trim();
-    if (!isAddress(depositoryAddress)) {
-      throw new Error('Depository address unavailable for external deposit approval');
-    }
-    const registry = await jadapter.getTokenRegistry();
-    const requiredSymbols = ['USDC', 'USDT', 'WETH'] as const;
-    const requiredTokens = requiredSymbols.map((symbol) => {
-      const token = registry.find((entry) => String(entry.symbol || '').trim().toUpperCase() === symbol);
-      if (!token) {
-        throw new Error(`Missing required external token ${symbol} in Testnet token registry`);
-      }
-      if (!isAddress(token.address) || token.address === ZeroAddress) {
-        throw new Error(`Token ${symbol} has invalid ERC20 address ${String(token.address || '')}`);
-      }
-      return { symbol, address: token.address };
-    });
-    const privKey = await getActiveSignerPrivateKey();
-    approvingExternalToken = 'ALL';
-    try {
-      for (const [index, token] of requiredTokens.entries()) {
-        setMoveProgress(`Approving Depository for ${token.symbol} (${index + 1}/${requiredTokens.length})`);
-        const currentAllowance = await jadapter.getErc20Allowance(token.address, signerId, depositoryAddress);
-        if (currentAllowance === MaxUint256) continue;
-        await jadapter.approveErc20(privKey, token.address, depositoryAddress, MaxUint256);
-        const updatedAllowance = await jadapter.getErc20Allowance(token.address, signerId, depositoryAddress);
-        if (updatedAllowance !== MaxUint256) {
-          throw new Error(
-            `Depository infinite allowance setup failed for ${token.symbol}: allowance=${updatedAllowance.toString()}`,
-          );
-        }
-      }
-    } finally {
-      approvingExternalToken = null;
     }
   }
 
@@ -3810,11 +3722,6 @@
   function fillSendAssetMax(): void {
     if (!selectedSendAssetToken) return;
     sendAssetAmount = formatTokenInputAmount(selectedSendAssetToken.balance, selectedSendAssetToken.decimals);
-  }
-
-  function fillAllowAssetMax(): void {
-    if (!selectedAllowAssetToken) return;
-    allowAssetAmount = formatTokenInputAmount(selectedAllowAssetToken.balance, selectedAllowAssetToken.decimals);
   }
 
   function getAssetPrice(symbol: string): number {

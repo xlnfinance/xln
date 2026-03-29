@@ -1814,7 +1814,11 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
       minSources: 3,
     });
 
+    const buySideButton = page.getByTestId('swap-side-buy').first();
+    const amountInput = page.getByTestId('swap-order-amount').first();
+    const priceInput = page.getByTestId('swap-order-price').first();
     const placeButton = page.getByTestId('swap-submit-order').first();
+    await expect(buySideButton).toBeVisible({ timeout: 20_000 });
     await buySideButton.click();
 
     const asks = page.getByTestId('orderbook-ask-row');

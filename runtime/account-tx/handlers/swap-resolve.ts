@@ -27,6 +27,7 @@ import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL } from '../../constants';
 import { deriveCanonicalSwapFillRatio, MAX_SWAP_FILL_RATIO } from '../../swap-execution';
 import {
+  computeSwapPriceTicks,
   requantizeRemainingSwapAtPrice,
   SWAP_LOT_SCALE,
 } from '../../orderbook/types';

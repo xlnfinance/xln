@@ -123,4 +123,75 @@ describe('j-batch draft reserve availability', () => {
     expect(simulation.reservesByToken.get(1)).toBe(5n);
     expect(simulation.outgoingDebtByToken.get(1) ?? 0n).toBe(0n);
   });
+
+  test('does not let same-batch settlement fund an earlier reserve transfer', () => {
+    const entityId = `0x${'dd'.repeat(32)}`;
+    const counterparty = `0x${'ee'.repeat(32)}`;
+    const batch = createEmptyBatch();
+
+    batch.reserveToReserve.push({
+      receivingEntity: `0x${'ff'.repeat(32)}`,
+      tokenId: 1,
+      amount: 10n,
+    });
+    batch.settlements.push({
+      leftEntity: entityId,
+      rightEntity: counterparty,
+      diffs: [{
+        tokenId: 1,
+        leftDiff: 10n,
+        rightDiff: -10n,
+        collateralDiff: 0n,
+        ondeltaDiff: 0n,
+      }],
+      forgiveDebtsInTokenIds: [],
+      sig: '0x1234',
+      entityProvider: `0x${'ab'.repeat(20)}`,
+      hankoData: '0x',
+      nonce: 1,
+    });
+
+    const simulation = simulateDraftBatchReserveAvailability(entityId, new Map([[1, 0n]]), batch, new Map());
+
+    expect(simulation.issues).toHaveLength(1);
+    expect(simulation.issues[0]).toMatchObject({
+      tokenId: 1,
+      opType: 'reserveToReserve',
+      requiredAmount: 10n,
+      availableAfterDebt: 0n,
+    });
+  });
+
+  test('allows settlement proceeds to fund later reserve withdrawal', () => {
+    const entityId = `0x${'12'.repeat(32)}`;
+    const counterparty = `0x${'34'.repeat(32)}`;
+    const batch = createEmptyBatch();
+
+    batch.settlements.push({
+      leftEntity: entityId,
+      rightEntity: counterparty,
+      diffs: [{
+        tokenId: 1,
+        leftDiff: 10n,
+        rightDiff: -10n,
+        collateralDiff: 0n,
+        ondeltaDiff: 0n,
+      }],
+      forgiveDebtsInTokenIds: [],
+      sig: '0x1234',
+      entityProvider: `0x${'56'.repeat(20)}`,
+      hankoData: '0x',
+      nonce: 1,
+    });
+    batch.reserveToExternalToken.push({
+      receivingEntity: `0x${'78'.repeat(32)}`,
+      tokenId: 1,
+      amount: 10n,
+    });
+
+    const simulation = simulateDraftBatchReserveAvailability(entityId, new Map([[1, 0n]]), batch, new Map());
+
+    expect(simulation.issues).toHaveLength(0);
+    expect(simulation.reservesByToken.get(1) ?? 0n).toBe(0n);
+  });
 });
