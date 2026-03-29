@@ -78,11 +78,27 @@ wait_for_main_stack() {
         payload?.system?.relay === true &&
         payload?.hubMesh?.ok === true &&
         payload?.marketMaker?.ok === true &&
+        payload?.bootstrapReserves?.ok === true &&
         payload?.custody?.ok === true &&
         Array.isArray(payload?.hubs) &&
         payload.hubs.length >= 3;
       process.exit(ok ? 0 : 1);
     ' "$body"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_for_http_status() {
+  local url="$1"
+  local expected_status="$2"
+  local deadline="$3"
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local status
+    status="$(curl -ksS -o /dev/null -w '%{http_code}' "$url" || true)"
+    if [ "$status" = "$expected_status" ]; then
       return 0
     fi
     sleep 1
@@ -136,6 +152,18 @@ wait_for_public_direct_mesh() {
   return 0
 }
 
+wait_for_public_production_stack() {
+  local deadline=$((SECONDS + 120))
+  wait_for_http_json_field \
+    "https://xln.finance/api/health" \
+    "return payload?.system?.runtime === true && payload?.system?.relay === true && payload?.hubMesh?.ok === true && payload?.marketMaker?.ok === true && payload?.bootstrapReserves?.ok === true && payload?.custody?.ok === true && Array.isArray(payload?.hubs) && payload.hubs.length >= 3;" \
+    "$deadline" \
+    || return 1
+
+  wait_for_http_status "https://xln.finance/" "200" "$deadline" || return 1
+  wait_for_http_status "https://xln.finance/app" "200" "$deadline"
+}
+
 wait_for_http_json_field() {
   local url="$1"
   local js_expr="$2"
@@ -167,6 +195,120 @@ wait_for_custody() {
     "http://127.0.0.1:8087/api/me" \
     "return typeof payload?.custody?.entityId === 'string' && payload.custody.entityId.length > 0;" \
     "$deadline"
+}
+
+pretty_print_json() {
+  node -e '
+    const raw = process.argv[1] || "";
+    try {
+      console.log(JSON.stringify(JSON.parse(raw), null, 2));
+    } catch {
+      console.log(raw);
+    }
+  ' "${1:-}"
+}
+
+debug_dump_http_json() {
+  local label="$1"
+  local url="$2"
+  local body
+
+  echo "[deploy][debug] ${label}: ${url}"
+  body="$(curl -ksS --max-time 10 "$url" || true)"
+  if [ -z "$body" ]; then
+    echo "[deploy][debug] ${label} unavailable"
+    return 0
+  fi
+  pretty_print_json "$body"
+}
+
+debug_dump_http_head() {
+  local label="$1"
+  local url="$2"
+
+  echo "[deploy][debug] ${label}: ${url}"
+  curl -ksSI --max-time 10 "$url" || echo "[deploy][debug] ${label} unavailable"
+}
+
+debug_dump_ports() {
+  echo "[deploy][debug] listening ports"
+  lsof -nP \
+    -iTCP:8545 \
+    -iTCP:8080 \
+    -iTCP:8087 \
+    -iTCP:8088 \
+    -iTCP:18090 \
+    -iTCP:18091 \
+    -iTCP:18092 \
+    -iTCP:18093 \
+    -sTCP:LISTEN 2>/dev/null || true
+}
+
+debug_dump_pm2() {
+  if ! command -v pm2 >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "[deploy][debug] pm2 list"
+  pm2 ls || true
+  echo "[deploy][debug] pm2 describe xln-server"
+  pm2 describe xln-server || true
+  echo "[deploy][debug] pm2 describe anvil"
+  pm2 describe anvil || true
+}
+
+debug_dump_runtime_logs() {
+  if ! command -v pm2 >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "[deploy][debug] pm2 logs xln-server"
+  pm2 logs xln-server --lines 200 --nostream || true
+  echo "[deploy][debug] pm2 logs anvil"
+  pm2 logs anvil --lines 120 --nostream || true
+}
+
+debug_dump_nginx() {
+  if command -v nginx >/dev/null 2>&1; then
+    echo "[deploy][debug] nginx -t"
+    nginx -t || true
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    echo "[deploy][debug] systemctl status nginx"
+    systemctl status nginx --no-pager --lines 60 || true
+  fi
+}
+
+dump_production_debug_snapshot() {
+  echo "[deploy][debug] ===== production debug snapshot ====="
+  debug_dump_http_json "local main health" "http://127.0.0.1:8080/api/health"
+  debug_dump_http_json "local main info" "http://127.0.0.1:8080/api/info"
+  debug_dump_http_json "local custody daemon health" "http://127.0.0.1:8088/api/health"
+  debug_dump_http_json "local custody me" "http://127.0.0.1:8087/api/me"
+  debug_dump_http_json "public health" "https://xln.finance/api/health"
+  debug_dump_http_head "public root" "https://xln.finance/"
+  debug_dump_http_head "public app" "https://xln.finance/app"
+  debug_dump_ports
+  debug_dump_pm2
+  debug_dump_runtime_logs
+  debug_dump_nginx
+  echo "[deploy][debug] ===== end production debug snapshot ====="
+}
+
+fail_deploy_with_debug() {
+  local reason="$1"
+  echo "[deploy] ${reason}" >&2
+  dump_production_debug_snapshot >&2
+  exit 1
+}
+
+run_or_fail_deploy() {
+  local reason="$1"
+  shift
+  if ! "$@"; then
+    fail_deploy_with_debug "$reason"
+  fi
 }
 
 ensure_production_direct_hub_ports() {
@@ -364,8 +506,8 @@ run_local_deploy() {
   if command -v pm2 >/dev/null 2>&1; then
     echo "[deploy] restarting pm2 service"
     if [ "$PRODUCTION" = "1" ]; then
-      ensure_production_host_hygiene
-      ensure_production_direct_hub_ports
+      run_or_fail_deploy "failed to enforce production host hygiene" ensure_production_host_hygiene
+      run_or_fail_deploy "failed to configure production direct hub ports" ensure_production_direct_hub_ports
       echo "[deploy] resetting production anvil + runtime state"
       mkdir -p db/runtime db/custody data logs
       rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody
@@ -376,24 +518,24 @@ run_local_deploy() {
       pm2 delete xln-custody >/dev/null 2>&1 || true
       pm2 delete anvil >/dev/null 2>&1 || true
 
-      pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
+      run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
       if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
-        echo "[deploy] anvil did not become ready on :8545" >&2
-        pm2 logs anvil --lines 120 --nostream || true
-        exit 1
+        fail_deploy_with_debug "anvil did not become ready on :8545"
       fi
 
       pm2 delete xln-server >/dev/null 2>&1 || true
-      pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
+      run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
       if ! wait_for_main_stack; then
-        echo "[deploy] main XLN stack did not become healthy" >&2
-        pm2 logs xln-server --lines 160 --nostream || true
-        exit 1
+        fail_deploy_with_debug "main XLN stack did not become healthy"
+      fi
+      if ! wait_for_custody; then
+        fail_deploy_with_debug "custody endpoints did not become healthy"
       fi
       if ! wait_for_public_direct_mesh; then
-        echo "[deploy] public direct ws mesh did not become reachable" >&2
-        pm2 logs xln-server --lines 200 --nostream || true
-        exit 1
+        fail_deploy_with_debug "public direct ws mesh did not become reachable"
+      fi
+      if ! wait_for_public_production_stack; then
+        fail_deploy_with_debug "public production stack did not become healthy"
       fi
     else
       pm2 describe xln-server >/dev/null 2>&1 \
