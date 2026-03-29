@@ -132,6 +132,9 @@ const run = async (): Promise<void> => {
       ...(parseOptionalBigInt(getArg('--base-fee', '')) !== undefined
         ? { baseFee: parseOptionalBigInt(getArg('--base-fee', '')) }
         : {}),
+      ...(parseOptionalNumber(getArg('--swap-taker-fee-bps', '')) !== undefined
+        ? { swapTakerFeeBps: parseOptionalNumber(getArg('--swap-taker-fee-bps', '')) }
+        : {}),
       initOrderbook: !hasFlag('--no-orderbook'),
     };
     const result = command === 'become-hub'
@@ -162,6 +165,9 @@ const run = async (): Promise<void> => {
         : {}),
       ...(parseOptionalBigInt(getArg('--base-fee', '')) !== undefined
         ? { baseFee: parseOptionalBigInt(getArg('--base-fee', '')) }
+        : {}),
+      ...(parseOptionalNumber(getArg('--swap-taker-fee-bps', '')) !== undefined
+        ? { swapTakerFeeBps: parseOptionalNumber(getArg('--swap-taker-fee-bps', '')) }
         : {}),
     };
     const result = await setupCustody(client, config);

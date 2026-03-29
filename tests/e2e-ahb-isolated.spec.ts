@@ -387,11 +387,37 @@ async function openPayWorkspace(page: Page): Promise<void> {
   const accountsTab = page.getByTestId('tab-accounts').first();
   await expect(accountsTab).toBeVisible({ timeout: 20_000 });
   await accountsTab.click();
-  const workspaceTabs = page.locator('.account-workspace-tabs').first();
-  await expect(workspaceTabs).toBeVisible({ timeout: 20_000 });
-  const payTab = workspaceTabs.locator('.account-workspace-tab').filter({ hasText: /Pay/i }).first();
-  await expect(payTab).toBeVisible({ timeout: 20_000 });
-  await payTab.click();
+  const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
+  if (await mobileToggle.isVisible().catch(() => false)) {
+    await mobileToggle.click();
+  }
+  const candidateLocators = [
+    page.getByTestId('account-workspace-tab-pay'),
+    page.locator('.workspace-rail').getByRole('button', { name: /^Pay$/i }),
+  ];
+  for (const locator of candidateLocators) {
+    const count = await locator.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      const payTab = locator.nth(index);
+      if (await payTab.isVisible().catch(() => false)) {
+        await payTab.click();
+        return;
+      }
+    }
+  }
+  throw new Error('visible Pay workspace tab not found');
+}
+
+async function reloadAppForProject(
+  page: Page,
+  appBaseUrl: string,
+  projectName: string,
+): Promise<void> {
+  if (projectName === 'webkit-mobile') {
+    await page.goto(`${appBaseUrl}/app`, { waitUntil: 'domcontentloaded' });
+    return;
+  }
+  await page.reload({ waitUntil: 'domcontentloaded' });
 }
 
 async function fillPayIntent(page: Page, targetEntityId: string): Promise<void> {
@@ -500,7 +526,10 @@ async function waitForRuntimeInputDrain(page: Page, label: string, timeoutMs = 1
 test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
   test.setTimeout(LONG_E2E ? 240_000 : 120_000);
 
-  test('bidirectional payments survive across two isolated browser contexts', async ({ browser, page }) => {
+test('bidirectional payments survive across two isolated browser contexts', async ({ browser, page }, testInfo) => {
+    if (testInfo.project.name === 'webkit-mobile') {
+      testInfo.setTimeout(LONG_E2E ? 300_000 : 180_000);
+    }
     let aliceContext: BrowserContext | null = null;
     let bobContext: BrowserContext | null = null;
 
@@ -639,10 +668,15 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
       expect(aliceDbBefore.hasLatestFrame, 'alice latest WAL frame must exist').toBe(true);
       expect(bobDbBefore.hasLatestFrame, 'bob latest WAL frame must exist').toBe(true);
 
-      await Promise.all([
-        alicePage.reload({ waitUntil: 'domcontentloaded' }),
-        bobPage.reload({ waitUntil: 'domcontentloaded' }),
-      ]);
+      if (testInfo.project.name === 'webkit-mobile') {
+        await reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name);
+        await reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name);
+      } else {
+        await Promise.all([
+          reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name),
+          reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name),
+        ]);
+      }
       await Promise.all([
         gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
         gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),

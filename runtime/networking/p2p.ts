@@ -42,6 +42,7 @@ import {
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion (DoS protection)
 const MIN_GOSSIP_POLL_MS = 1000;
+const SLOW_BROWSER_TIMER_MS = 32;
 
 export type P2PConfig = {
   relayUrls?: string[];
@@ -131,6 +132,25 @@ const sameWsUrl = (left: string | null, right: string | null): boolean => {
   if (!left && !right) return true;
   if (!left || !right) return false;
   return getWsUrlKey(left) === getWsUrlKey(right);
+};
+
+const logSlowBrowserTimer = (label: string, startedAt: number, extra = ''): void => {
+  if (typeof window === 'undefined' || typeof performance === 'undefined') return;
+  const elapsedMs = performance.now() - startedAt;
+  if (elapsedMs < SLOW_BROWSER_TIMER_MS) return;
+  const suffix = extra ? ` ${extra}` : '';
+  console.warn(`[perf] slow timer ${label} ${elapsedMs.toFixed(1)}ms${suffix}`);
+};
+
+const isBrowserDirectWsEndpointAllowed = (endpoint: string): boolean => {
+  if (typeof window === 'undefined') return true;
+  const pageProtocol = String(window.location?.protocol || '').toLowerCase();
+  if (pageProtocol !== 'https:') return true;
+  try {
+    return new URL(endpoint).protocol === 'wss:';
+  } catch {
+    return false;
+  }
 };
 
 const isSameList = (a: string[], b: string[]): boolean => {
@@ -374,12 +394,16 @@ export class RuntimeP2P {
     console.log(`[P2P] startPolling: Starting polling every ${this.gossipPollMs}ms`);
     // Request immediately, then periodically
     setTimeout(() => {
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
       this.requestSeedGossip('incremental');
       void this.maybeHeartbeatAnnounce();
+      logSlowBrowserTimer('p2p.seed-poll.bootstrap', startedAt);
     }, 100);
     this.pollInterval = setInterval(() => {
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
       this.requestSeedGossip('incremental');
       void this.maybeHeartbeatAnnounce();
+      logSlowBrowserTimer('p2p.seed-poll.interval', startedAt, `queue=${this.pendingByRuntime.size}`);
     }, this.gossipPollMs);
   }
 
@@ -443,9 +467,11 @@ export class RuntimeP2P {
   private startRetryLoop() {
     if (this.retryInterval) return;
     this.retryInterval = setInterval(() => {
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
       if (this.pendingByRuntime.size > 0) {
         this.flushPending();
       }
+      logSlowBrowserTimer('p2p.retry-interval', startedAt, `queue=${this.pendingByRuntime.size}`);
     }, 10_000);
   }
 
@@ -876,12 +902,14 @@ export class RuntimeP2P {
     }
     if (this.announceTimer) return;
     this.announceTimer = setTimeout(() => {
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
       const targets = Array.from(this.pendingAnnounceEntities);
       this.pendingAnnounceEntities.clear();
       this.announceTimer = null;
       this.announceProfilesNow(targets, reason).catch(error => {
         console.warn(`P2P_ANNOUNCE_FAILED (${reason}): ${(error as Error).message}`);
       });
+      logSlowBrowserTimer('p2p.announce-debounce', startedAt, `targets=${targets.length} reason=${reason}`);
     }, PROFILE_ANNOUNCE_DEBOUNCE_MS);
   }
 
@@ -1115,7 +1143,7 @@ export class RuntimeP2P {
     for (const profile of profiles) {
       if (normalizeRuntimeId(profile.runtimeId || '') !== normalizedTargetRuntimeId) continue;
       const endpoint = normalizeOptionalWsUrl(profile.wsUrl);
-      if (endpoint) return endpoint;
+      if (endpoint && isBrowserDirectWsEndpointAllowed(endpoint)) return endpoint;
     }
     return null;
   }

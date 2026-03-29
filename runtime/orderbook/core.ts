@@ -31,7 +31,7 @@ export type OrderCmd =
 
 export type BookEvent =
   | { type: 'ACK'; orderId: string; ownerId: string }
-  | { type: 'REJECT'; orderId: string; ownerId: string; reason: string }
+  | { type: 'REJECT'; orderId: string; ownerId: string; reason: string; blockingOrderId?: string }
   | { type: 'TRADE'; price: bigint; qty: number; makerOwnerId: string; takerOwnerId: string; makerOrderId: string; takerOrderId: string; makerQtyBefore: number; takerQtyTotal: number }
   | { type: 'REDUCED'; orderId: string; ownerId: string; delta: number; remain: number }
   | { type: 'CANCELED'; orderId: string; ownerId: string };
@@ -378,7 +378,13 @@ export function applyCommand(
         if (stpPolicy === 1) {
           // Cancel taker: return 0 to break outer matching loop
           // (returning remaining would cause infinite loop since maker isn't modified)
-          events.push({ type: 'REJECT', orderId: takerOrderId, ownerId: takerOwnerId, reason: 'STP cancel taker' });
+          events.push({
+            type: 'REJECT',
+            orderId: takerOrderId,
+            ownerId: takerOwnerId,
+            reason: 'STP cancel taker',
+            blockingOrderId: makerOrderId,
+          });
           return 0;
         }
         if (stpPolicy === 2) {

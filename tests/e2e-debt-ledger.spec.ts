@@ -5,6 +5,7 @@ import { ensureE2EBaseline, APP_BASE_URL } from './utils/e2e-baseline';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { connectHub } from './utils/e2e-connect';
 import { getRenderedExternalBalance, getRenderedReserveBalance } from './utils/e2e-account-ui';
+import { deriveDelta } from '../runtime/account-utils';
 
 const TOKEN_ID_USDC = 1;
 const TOKEN_SCALE = 10n ** 18n;
@@ -851,7 +852,7 @@ async function readAccountDeltaSnapshot(
   counterpartyId: string,
   tokenId = TOKEN_ID_USDC,
 ): Promise<{ ondelta: string; offdelta: string; total: string } | null> {
-  return page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
+  const raw = await page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
     const env = (window as any).isolatedEnv;
     if (!env?.eReplicas) return null;
     const key = Array.from(env.eReplicas.keys()).find((k: string) => {
@@ -863,14 +864,38 @@ async function readAccountDeltaSnapshot(
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     const delta = account?.deltas?.get?.(tokenId);
     if (!delta) return null;
-    const ondelta = BigInt(delta.ondelta || 0n);
-    const offdelta = BigInt(delta.offdelta || 0n);
     return {
-      ondelta: ondelta.toString(),
-      offdelta: offdelta.toString(),
-      total: (ondelta + offdelta).toString(),
+      ondelta: String(delta.ondelta || 0n),
+      offdelta: String(delta.offdelta || 0n),
+      collateral: String(delta.collateral || 0n),
+      leftCreditLimit: String(delta.leftCreditLimit || 0n),
+      rightCreditLimit: String(delta.rightCreditLimit || 0n),
+      leftAllowance: String(delta.leftAllowance || 0n),
+      rightAllowance: String(delta.rightAllowance || 0n),
+      leftHold: String(delta.leftHold || 0n),
+      rightHold: String(delta.rightHold || 0n),
     };
   }, { entityId, signerId, counterpartyId, tokenId });
+
+  if (!raw) return null;
+  const derived = deriveDelta({
+    tokenId,
+    ondelta: BigInt(raw.ondelta),
+    offdelta: BigInt(raw.offdelta),
+    collateral: BigInt(raw.collateral),
+    leftCreditLimit: BigInt(raw.leftCreditLimit),
+    rightCreditLimit: BigInt(raw.rightCreditLimit),
+    leftAllowance: BigInt(raw.leftAllowance),
+    rightAllowance: BigInt(raw.rightAllowance),
+    leftHold: BigInt(raw.leftHold),
+    rightHold: BigInt(raw.rightHold),
+  }, String(entityId).toLowerCase() < String(counterpartyId).toLowerCase());
+
+  return {
+    ondelta: raw.ondelta,
+    offdelta: raw.offdelta,
+    total: derived.delta.toString(),
+  };
 }
 
 async function waitForDebtSnapshot(

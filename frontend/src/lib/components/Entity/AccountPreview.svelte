@@ -52,6 +52,7 @@
 
   $: counterpartyProfile = getProfile(counterpartyId);
   $: counterpartyName = resolveEntityName(counterpartyId, activeEnv);
+  $: tokenDetails = buildAccountTokenDetails(account, entityId, activeXlnFunctions);
 
   $: isHub = (() => {
     const profile = counterpartyProfile;
@@ -71,14 +72,13 @@
 
   // Aggregate across all deltas
   $: agg = (() => {
-    if (!account.deltas || account.deltas.size === 0 || !activeXlnFunctions) {
+    if (tokenDetails.length === 0) {
       return { outCap: 0n, inCap: 0n, outCredit: 0n, outColl: 0n, outDebt: 0n,
                inCredit: 0n, inColl: 0n, inDebt: 0n, outTotal: 0n, inTotal: 0n,
                outHold: 0n, inHold: 0n, tokenCount: 0, primaryTokenId: 1, primarySymbol: '?',
                totalCollateralUsdMicros: 0n, totalDebtUsdMicros: 0n };
     }
 
-    const isLeft = isAccountLeftPerspective(entityId, account);
     let outCap = 0n, inCap = 0n;
     let outCredit = 0n, outColl = 0n, outDebt = 0n;
     let inCredit = 0n, inColl = 0n, inDebt = 0n;
@@ -90,8 +90,8 @@
     let bestPrimaryOut = -1n;
     let bestPrimaryIn = -1n;
 
-    for (const [tokenId, delta] of account.deltas.entries()) {
-      const d = activeXlnFunctions.deriveDelta(delta, isLeft);
+    for (const detail of tokenDetails) {
+      const { tokenId, tokenInfo, derived: d } = detail;
       outCap += d.outCapacity;
       inCap += d.inCapacity;
       outCredit += d.outOwnCredit;
@@ -102,19 +102,18 @@
       inCredit += d.inPeerCredit;
       outHold += (typeof d.outTotalHold === 'bigint' ? d.outTotalHold : 0n);
       inHold += (typeof d.inTotalHold === 'bigint' ? d.inTotalHold : 0n);
-      const info = activeXlnFunctions.getTokenInfo(tokenId);
-      const symbol = String(info?.symbol || `T${tokenId}`);
-      const decimals = Number(info?.decimals ?? 18);
+      const symbol = String(tokenInfo.symbol || `T${tokenId}`);
+      const decimals = Number(tokenInfo.decimals ?? 18);
       totalCollateralUsdMicros += amountToUsdMicros(d.outCollateral, decimals, symbol);
       totalDebtUsdMicros += amountToUsdMicros(d.outPeerCredit, decimals, symbol);
       if (
-        info?.symbol &&
+        tokenInfo.symbol &&
         (d.outCapacity > bestPrimaryOut || (d.outCapacity === bestPrimaryOut && d.inCapacity > bestPrimaryIn))
       ) {
         bestPrimaryOut = d.outCapacity;
         bestPrimaryIn = d.inCapacity;
         primaryTokenId = tokenId;
-        primarySymbol = info.symbol;
+        primarySymbol = tokenInfo.symbol;
       }
     }
 
@@ -166,7 +165,7 @@
   };
   $: accountDeltaViewMode = $settings.accountDeltaViewMode ?? 'per-token';
   $: tokenSummaries = (() => {
-    if (!account.deltas || account.deltas.size === 0 || !activeXlnFunctions) return [];
+    if (tokenDetails.length === 0 || !activeXlnFunctions) return [];
     const isLeft = isAccountLeftPerspective(entityId, account);
     const rows: Array<{
       tokenId: number;
@@ -182,13 +181,10 @@
       visualScale: ReturnType<typeof buildTokenVisualScale>;
       actionLabel?: string;
     }> = [];
-    for (const [tokenId, delta] of account.deltas.entries()) {
-      const derived = activeXlnFunctions.deriveDelta(delta, isLeft);
-      const info = activeXlnFunctions.getTokenInfo(tokenId) || {
-        symbol: `T${tokenId}`,
-        name: `Token ${tokenId}`,
-        decimals: 18,
-      };
+    for (const detail of tokenDetails) {
+      const tokenId = detail.tokenId;
+      const derived = detail.derived;
+      const info = detail.tokenInfo;
       const outTotal = derived.outCapacity;
       const inTotal = derived.inCapacity;
       const tokenRequested = pendingRequestedByToken.get(tokenId) || 0n;
@@ -224,7 +220,6 @@
   $: hasAnyDeltas = tokenSummaries.length > 0;
   $: hasCommittedFrame = Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
   $: showDeltaRows = hasCommittedFrame && hasAnyDeltas;
-  $: tokenDetails = buildAccountTokenDetails(account, entityId, activeXlnFunctions);
   $: tokenDetailById = new Map(tokenDetails.map((detail) => [detail.tokenId, detail] as const));
 
   $: isDevnet = (() => {

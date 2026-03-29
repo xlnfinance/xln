@@ -43,6 +43,8 @@ export async function handleSwapResolve(
     offerId,
     fillRatio,
     cancelRemainder,
+    feeTokenId,
+    feeAmount = 0n,
     executionGiveAmount,
     executionWantAmount,
     restingPriceTicks,
@@ -120,6 +122,28 @@ export async function handleSwapResolve(
   const canonicalFillRatio = executionProvided
     ? deriveCanonicalSwapFillRatio(effectiveGive, filledGive)
     : fillRatio;
+  const effectiveFeeTokenId = feeTokenId ?? offer.wantTokenId;
+
+  if (feeAmount < 0n) {
+    return { success: false, error: `Swap taker fee must be >= 0`, events };
+  }
+  if (feeAmount > 0n && filledGive <= 0n) {
+    return { success: false, error: `Swap taker fee requires a non-zero fill`, events };
+  }
+  if (feeAmount > 0n && effectiveFeeTokenId !== offer.wantTokenId) {
+    return {
+      success: false,
+      error: `Swap taker fee token mismatch: expected ${offer.wantTokenId}, got ${effectiveFeeTokenId}`,
+      events,
+    };
+  }
+  if (feeAmount >= filledWant && filledWant > 0n) {
+    return {
+      success: false,
+      error: `Swap taker fee ${feeAmount} exceeds or equals filled receive amount ${filledWant}`,
+      events,
+    };
+  }
 
   if (executionProvided) {
     const hasExecutionFill = filledGive > 0n || filledWant > 0n;
@@ -275,6 +299,15 @@ export async function handleSwapResolve(
     }
 
     events.push(`💱 Swap filled: ${filledGive} token${offer.giveTokenId} for ${filledWant} token${offer.wantTokenId}`);
+  }
+
+  if (feeAmount > 0n) {
+    if (offer.makerIsLeft) {
+      wantDelta.offdelta -= feeAmount;
+    } else {
+      wantDelta.offdelta += feeAmount;
+    }
+    events.push(`💸 Swap taker fee: ${feeAmount} token${effectiveFeeTokenId}`);
   }
 
   // 6. Release hold proportionally

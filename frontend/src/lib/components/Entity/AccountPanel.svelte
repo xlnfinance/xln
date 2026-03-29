@@ -21,6 +21,7 @@
 
   let expandedTokenIds = new Set<number>();
   let nowMs = Date.now();
+  let mounted = false;
   let nowTimer: ReturnType<typeof setInterval> | null = null;
   let liveJHeightTimer: ReturnType<typeof setInterval> | null = null;
   let liveJHeight = 0;
@@ -437,6 +438,20 @@
     dispatch('faucet', { counterpartyId, tokenId });
   }
 
+  function clearNowTimer(): void {
+    if (nowTimer) {
+      clearInterval(nowTimer);
+      nowTimer = null;
+    }
+  }
+
+  function clearLiveJHeightTimer(): void {
+    if (liveJHeightTimer) {
+      clearInterval(liveJHeightTimer);
+      liveJHeightTimer = null;
+    }
+  }
+
   async function refreshLiveJHeight(): Promise<void> {
     if (!activeDispute) return;
     const jReplicas = activeEnv?.jReplicas;
@@ -456,20 +471,45 @@
     void refreshLiveJHeight();
   }
 
-  onMount(() => {
-    nowTimer = setInterval(() => {
-      nowMs = Date.now();
-    }, 1000);
-    liveJHeightTimer = setInterval(() => {
-      if (!activeDispute) return;
+  function syncLiveTimers(): void {
+    const needNowTimer = Boolean(activeDispute || pendingSecretAckInfo || $p2pState.reconnect);
+    if (needNowTimer) {
+      if (!nowTimer) {
+        nowMs = Date.now();
+        nowTimer = setInterval(() => {
+          nowMs = Date.now();
+        }, 1000);
+      }
+    } else {
+      clearNowTimer();
+    }
+
+    if (activeDispute) {
+      if (!liveJHeightTimer) {
+        liveJHeightTimer = setInterval(() => {
+          if (!activeDispute) return;
+          void refreshLiveJHeight();
+        }, 1000);
+      }
       void refreshLiveJHeight();
-    }, 1000);
-    void refreshLiveJHeight();
+    } else {
+      clearLiveJHeightTimer();
+    }
+  }
+
+  $: if (mounted) {
+    syncLiveTimers();
+  }
+
+  onMount(() => {
+    mounted = true;
+    syncLiveTimers();
   });
 
   onDestroy(() => {
-    if (nowTimer) clearInterval(nowTimer);
-    if (liveJHeightTimer) clearInterval(liveJHeightTimer);
+    mounted = false;
+    clearNowTimer();
+    clearLiveJHeightTimer();
   });
 </script>
 
