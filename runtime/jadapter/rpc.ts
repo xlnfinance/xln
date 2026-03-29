@@ -61,6 +61,61 @@ const firstAddress = (...values: Array<unknown>): string => {
   return firstUsableContractAddress(...values) ?? '';
 };
 
+const RPC_CODE_PROBE_TIMEOUT_MS = 10_000;
+
+const fetchRpcCode = async (rpcUrl: string, address: string, timeoutMs = RPC_CODE_PROBE_TIMEOUT_MS): Promise<string> => {
+  if (!ethers.isAddress(address)) {
+    throw new Error(`INVALID_CONTRACT_ADDRESS:${String(address)}`);
+  }
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_getCode',
+        params: [address, 'latest'],
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`ETH_GET_CODE_HTTP_${response.status}`);
+    }
+
+    const body = await response.json() as { result?: unknown; error?: { message?: string } };
+    if (body.error) {
+      throw new Error(`ETH_GET_CODE_RPC:${body.error.message || 'unknown'}`);
+    }
+    if (typeof body.result !== 'string') {
+      throw new Error('ETH_GET_CODE_INVALID_RESULT');
+    }
+    return body.result;
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') {
+      throw new Error(`ETH_GET_CODE_TIMEOUT:${address}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+};
+
+const readContractCode = async (provider: Provider, rpcUrl: string | undefined, address: string): Promise<string> => {
+  const normalizedRpcUrl = String(rpcUrl || '').trim();
+  if (normalizedRpcUrl) {
+    try {
+      return await fetchRpcCode(normalizedRpcUrl, address);
+    } catch (error) {
+      console.warn(`[JAdapter:rpc] eth_getCode probe failed for ${address}: ${(error as Error).message}`);
+    }
+  }
+  return provider.getCode(address);
+};
+
 const linkArtifactBytecode = (
   bytecode: string,
   libraries: Record<string, string>,
@@ -446,12 +501,10 @@ export async function createRpcAdapter(
     }
 
     trace('fromReplica.getCode:start');
-    const [accountCode, depCode, epCode, transformerCode] = await Promise.all([
-      provider.getCode(addresses.account),
-      provider.getCode(addresses.depository),
-      provider.getCode(addresses.entityProvider),
-      provider.getCode(addresses.deltaTransformer),
-    ]);
+    const accountCode = await readContractCode(provider, config.rpcUrl, addresses.account);
+    const depCode = await readContractCode(provider, config.rpcUrl, addresses.depository);
+    const epCode = await readContractCode(provider, config.rpcUrl, addresses.entityProvider);
+    const transformerCode = await readContractCode(provider, config.rpcUrl, addresses.deltaTransformer);
     trace('fromReplica.getCode:done', {
       accountLen: accountCode.length,
       depLen: depCode.length,
