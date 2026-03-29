@@ -183,6 +183,25 @@ wait_for_http_json_field() {
   return 1
 }
 
+wait_for_http_json_field_insecure() {
+  local url="$1"
+  local js_expr="$2"
+  local deadline="$3"
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local body
+    body="$(curl -kfsS "$url" || true)"
+    if [ -n "$body" ] && node -e "
+      const payload = JSON.parse(process.argv[1]);
+      const ok = (() => { ${js_expr} })();
+      process.exit(ok ? 0 : 1);
+    " "$body"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 wait_for_custody() {
   local deadline=$((SECONDS + 240))
   wait_for_http_json_field \
@@ -191,8 +210,8 @@ wait_for_custody() {
     "$deadline" \
     || return 1
 
-  wait_for_http_json_field \
-    "http://127.0.0.1:8087/api/me" \
+  wait_for_http_json_field_insecure \
+    "https://127.0.0.1:8087/api/me" \
     "return typeof payload?.custody?.entityId === 'string' && payload.custody.entityId.length > 0;" \
     "$deadline"
 }
@@ -285,7 +304,7 @@ dump_production_debug_snapshot() {
   debug_dump_http_json "local main health" "http://127.0.0.1:8080/api/health"
   debug_dump_http_json "local main info" "http://127.0.0.1:8080/api/info"
   debug_dump_http_json "local custody daemon health" "http://127.0.0.1:8088/api/health"
-  debug_dump_http_json "local custody me" "http://127.0.0.1:8087/api/me"
+  debug_dump_http_json "local custody me" "https://127.0.0.1:8087/api/me"
   debug_dump_http_json "public health" "https://xln.finance/api/health"
   debug_dump_http_head "public root" "https://xln.finance/"
   debug_dump_http_head "public app" "https://xln.finance/app"
