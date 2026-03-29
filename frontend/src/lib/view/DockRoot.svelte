@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, mount } from 'svelte';
+  import { onMount, onDestroy, mount, unmount } from 'svelte';
   import { writable, get, type Writable } from 'svelte/store';
   import { DockviewComponent } from 'dockview';
   import type { Env } from '@xln/runtime/xln-api';
@@ -40,7 +40,7 @@
   type DockviewInitParams = { api: { id: string; close?: () => void } };
   type DockviewWindow = Window & { __dockview_instance?: DockviewComponent };
   type ActivePanelRef = { id?: string; api?: { id?: string } } | undefined;
-  type MountedComponent = Record<string, unknown> | null;
+  type MountedComponent = ReturnType<typeof mount> | null;
 
   const graphInitSignal = writable<boolean>(embedMode);
   const pendingEntityData = new Map<string, EntityPanelSeed>();
@@ -169,7 +169,11 @@
               });
             }
           },
-          dispose: () => {},
+          dispose: () => {
+            if (!component) return;
+            void unmount(component);
+            component = null;
+          },
         };
       },
     });
@@ -253,6 +257,7 @@
           if (config.dockview) dockview.fromJSON(config.dockview);
         } catch (err) {
           console.warn('[DockRoot] Layout restore failed, clearing:', err);
+          localStorage.removeItem('xln-workspace-layout');
           localStorage.removeItem('xln-dockview-layout');
           localStorage.removeItem('dockview-layout');
         }

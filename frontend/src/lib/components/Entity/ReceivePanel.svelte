@@ -16,11 +16,6 @@
   let qrError = '';
   let qrJob = 0;
 
-  const getWalletBaseUrl = (): string => {
-    if (typeof window === 'undefined') return 'https://xln.finance';
-    return window.location.origin;
-  };
-
   const copyText = async (text: string, kind: 'id' | 'invoice'): Promise<void> => {
     if (!text) return;
     await navigator.clipboard.writeText(text);
@@ -40,7 +35,7 @@
     description,
   });
   $: invoicePreview = amount.trim() || description.trim() ? fullInvoice : entityId;
-  $: walletHref = buildWalletPayHref(getWalletBaseUrl(), {
+  $: walletHref = buildWalletPayHref({
     targetEntityId: entityId,
     tokenId,
     amount,

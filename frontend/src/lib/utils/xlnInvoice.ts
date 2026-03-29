@@ -131,8 +131,7 @@ export function buildXlnInvoiceUri(intent: Partial<XlnInvoiceIntent> & { targetE
   return params.size > 0 ? `${targetEntityId}?${params.toString()}` : targetEntityId;
 }
 
-export function buildWalletPayHref(baseUrl: string | URL, intent: Partial<XlnInvoiceIntent> & { targetEntityId: string }): string {
-  void baseUrl;
+export function buildWalletPayHref(intent: Partial<XlnInvoiceIntent> & { targetEntityId: string }): string {
   const url = new URL('/app', CANONICAL_WALLET_ORIGIN);
   url.hash = `pay/${encodeURIComponent(buildXlnInvoiceUri(intent))}`;
   return url.toString();

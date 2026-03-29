@@ -60,16 +60,11 @@
 			plausible.init()
 		</script>
 		<script>
-			(function() {
-				var isAppRoute = window.location.pathname === '/app' || window.location.pathname.startsWith('/app/');
-				if (isAppRoute) {
-					document.documentElement.classList.add('xln-user-mode');
-					document.documentElement.setAttribute('data-xln-route-mode', 'app');
-				} else {
-					document.documentElement.setAttribute('data-xln-route-mode', 'default');
-				}
-			})();
-		</script>
+				(function() {
+					var isAppRoute = window.location.pathname === '/app' || window.location.pathname.startsWith('/app/');
+					document.documentElement.setAttribute('data-xln-route-mode', isAppRoute ? 'app' : 'default');
+				})();
+			</script>
 
 		%sveltekit.head%
 	</head>

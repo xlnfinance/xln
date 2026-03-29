@@ -714,6 +714,43 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(remaining!.quantizedWant).toBe(1000n * lot / 10_000n);
   });
 
+  test('recomputes canonical priceTicks for partial fills when legacy offer price is missing', async () => {
+    const lot = SWAP_LOT_SCALE;
+    const accountMachine = makeAccountMachine({
+      offerId: 'maker-legacy-no-price',
+      makerIsLeft: true,
+      giveTokenId: 4,
+      giveAmount: 2n * lot,
+      wantTokenId: 6,
+      wantAmount: (2000n * lot) / 10_000n,
+      minFillRatio: 0,
+      createdHeight: 1,
+      quantizedGive: 2n * lot,
+      quantizedWant: (2000n * lot) / 10_000n,
+    } satisfies SwapOffer);
+    const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
+      type: 'swap_resolve',
+      data: {
+        offerId: 'maker-legacy-no-price',
+        fillRatio: 32768,
+        cancelRemainder: false,
+        executionGiveAmount: lot,
+        executionWantAmount: (1000n * lot) / 10_000n,
+      },
+    };
+
+    const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
+    expect(resolveResult.success).toBe(true);
+
+    const remaining = accountMachine.swapOffers.get('maker-legacy-no-price');
+    expect(remaining).toBeDefined();
+    expect(remaining!.priceTicks).toBe(1000n);
+    expect(remaining!.giveAmount).toBe(lot);
+    expect(remaining!.wantAmount).toBe((1000n * lot) / 10_000n);
+    expect(remaining!.quantizedGive).toBe(lot);
+    expect(remaining!.quantizedWant).toBe((1000n * lot) / 10_000n);
+  });
+
   test('auto-cancels prices outside the 30% anchor band instead of resting them', () => {
     const lot = SWAP_LOT_SCALE;
     const makerBaseQty = lot;

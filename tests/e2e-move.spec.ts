@@ -266,6 +266,13 @@ async function waitForMoveReady(page: Page): Promise<void> {
     .toBe('enabled');
 }
 
+async function waitForMoveActionToSettle(page: Page): Promise<void> {
+  const confirm = page.getByTestId('move-confirm').first();
+  await expect
+    .poll(async () => String(await confirm.textContent() || '').trim(), { timeout: ROUTE_TIMEOUT_MS })
+    .not.toBe('Working...');
+}
+
 async function broadcastDraftBatch(
   page: Page,
   entity?: LocalEntityRef,
@@ -1052,6 +1059,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await waitForMoveActionToSettle(page);
         await broadcastDraftBatch(page, asLocalEntityRef(alice!));
         await waitForExactBigInt(
           async () => await readOnchainReserveBalanceRaw(page, alice!.entityId, symbol),

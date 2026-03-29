@@ -703,4 +703,3 @@ export async function handleDisputeFinalize(
 
   return { newState, outputs };
 }
-import { swapKey } from '../../swap-execution';

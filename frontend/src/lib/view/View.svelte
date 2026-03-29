@@ -167,6 +167,8 @@
   let dockRootPromise: Promise<typeof import('./DockRoot.svelte')> | null = null;
 
   $: if (typeof document !== 'undefined') {
+    const isAppRoute = window.location.pathname === '/app' || window.location.pathname.startsWith('/app/');
+    document.documentElement.setAttribute('data-xln-route-mode', isAppRoute ? 'app' : 'default');
     document.documentElement.classList.toggle('xln-user-mode', userMode);
     document.body.classList.toggle('xln-user-mode', userMode);
   }
@@ -240,6 +242,7 @@
 
   onDestroy(() => {
     if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-xln-route-mode', 'default');
       document.documentElement.classList.remove('xln-user-mode');
       document.body.classList.remove('xln-user-mode');
     }

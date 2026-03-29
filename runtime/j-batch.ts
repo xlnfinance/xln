@@ -532,16 +532,6 @@ export function simulateDraftBatchReserveAvailability(
     if (target === normalizedEntityId) addReserve(op.internalTokenId, op.amount);
   }
 
-  for (const settlement of batch.settlements) {
-    for (const diff of settlement.diffs) {
-      if (normalizeEntityId(settlement.leftEntity) === normalizedEntityId) {
-        addReserve(diff.tokenId, diff.leftDiff);
-      } else if (normalizeEntityId(settlement.rightEntity) === normalizedEntityId) {
-        addReserve(diff.tokenId, diff.rightDiff);
-      }
-    }
-  }
-
   for (const [index, op] of batch.reserveToReserve.entries()) {
     if (!spendReserve(op.tokenId, op.amount, 'reserveToReserve', index)) {
       return { issues, reservesByToken, outgoingDebtByToken };
@@ -553,6 +543,16 @@ export function simulateDraftBatchReserveAvailability(
 
   for (const op of batch.collateralToReserve) {
     addReserve(op.tokenId, op.amount);
+  }
+
+  for (const settlement of batch.settlements) {
+    for (const diff of settlement.diffs) {
+      if (normalizeEntityId(settlement.leftEntity) === normalizedEntityId) {
+        addReserve(diff.tokenId, diff.leftDiff);
+      } else if (normalizeEntityId(settlement.rightEntity) === normalizedEntityId) {
+        addReserve(diff.tokenId, diff.rightDiff);
+      }
+    }
   }
 
   for (const [index, op] of batch.reserveToCollateral.entries()) {
