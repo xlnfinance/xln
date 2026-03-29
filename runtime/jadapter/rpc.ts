@@ -1348,18 +1348,16 @@ export async function createRpcAdapter(
                 ) => Promise<{ wait: (confirms?: number, timeout?: number) => Promise<unknown>; hash: string }>;
                 const currentAllowance = await allowanceFn(tokenOwner, depositoryAddr);
                 if (currentAllowance >= ethers.MaxUint256 / 2n) continue;
-                let nextExternalNonce = await provider.getTransactionCount(tokenOwner, 'pending');
                 if (currentAllowance > 0n) {
                   const clearTx = await approveFn(depositoryAddr, 0n, {
                     ...(await buildFeeOverrides()),
-                    nonce: nextExternalNonce,
+                    nonce: await allocateSerializedSignerNonceFor(externalSubmitterWallet),
                   });
-                  nextExternalNonce += 1;
                   await waitForReceipt(clearTx, 'erc20ApproveReset');
                 }
                 const approveTx = await approveFn(depositoryAddr, ethers.MaxUint256, {
                   ...(await buildFeeOverrides()),
-                  nonce: nextExternalNonce,
+                  nonce: await allocateSerializedSignerNonceFor(externalSubmitterWallet),
                 });
                 await waitForReceipt(approveTx, 'erc20ApproveMax');
               }
@@ -1452,13 +1450,17 @@ export async function createRpcAdapter(
             for (let attempt = 1; attempt <= 2; attempt++) {
               try {
                 if (attempt > 1) {
-                  await resetSerializedSignerNonce();
+                  if (externalSubmitterWallet) {
+                    await resetSerializedSignerNonceFor(externalSubmitterWallet);
+                  } else {
+                    await resetSerializedSignerNonce();
+                  }
                   console.warn(`⚠️ [JAdapter:rpc] retrying processBatch after nonce sync (attempt ${attempt}/2)`);
                 }
                 const tx = externalSubmitterWallet
                   ? await submitterDepository.processBatch(encodedBatch, hankoData, nextNonce, {
                       gasLimit,
-                      nonce: await provider.getTransactionCount(externalSubmitterWallet.address, 'pending'),
+                      nonce: await allocateSerializedSignerNonceFor(externalSubmitterWallet),
                       ...resolvedFeeOverrides,
                     })
                   : await depository.processBatch(encodedBatch, hankoData, nextNonce, {

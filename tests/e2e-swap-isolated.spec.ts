@@ -483,6 +483,81 @@ function displayPriceToTicks(price: string): string {
   return `${whole}${frac}`.replace(/^0+(?=\d)/, '');
 }
 
+function normalizeDisplayedPriceText(value: string): string {
+  return String(value || '').replace(/,/g, '').trim();
+}
+
+function ticksToDisplayPrice(priceTicks: number): string {
+  return (priceTicks / 10_000).toFixed(4);
+}
+
+function priceTicksTextToDisplay(priceTicks: string): string {
+  const normalized = String(priceTicks || '').trim();
+  if (!/^-?\d+$/.test(normalized)) {
+    throw new Error(`invalid priceTicks: ${priceTicks}`);
+  }
+  return ticksToDisplayPrice(Number.parseInt(normalized, 10));
+}
+
+async function readVisibleOrderbookPriceTicks(page: Page, side: 'ask' | 'bid'): Promise<number[]> {
+  const rows = page.getByTestId(side === 'ask' ? 'orderbook-ask-row' : 'orderbook-bid-row');
+  const count = await rows.count();
+  const out: number[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const text = normalizeDisplayedPriceText(String(await rows.nth(index).locator('.price').textContent() || ''));
+    const value = Number.parseFloat(text);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    out.push(Math.round(value * 10_000));
+  }
+  return out;
+}
+
+async function chooseVisibleRestingPrices(page: Page): Promise<{ ask: string; bid: string }> {
+  const askTicks = await readVisibleOrderbookPriceTicks(page, 'ask');
+  const bidTicks = await readVisibleOrderbookPriceTicks(page, 'bid');
+  if (askTicks.length === 0 && bidTicks.length === 0) {
+    return {
+      ask: '2500.0002',
+      bid: '2499.9998',
+    };
+  }
+  if (askTicks.length === 0) {
+    const bestBidTicks = bidTicks[0]!;
+    return {
+      ask: ticksToDisplayPrice(bestBidTicks + 4),
+      bid: ticksToDisplayPrice(bestBidTicks - 1),
+    };
+  }
+  if (bidTicks.length === 0) {
+    const bestAskTicks = askTicks[askTicks.length - 1]!;
+    return {
+      ask: ticksToDisplayPrice(bestAskTicks + 1),
+      bid: ticksToDisplayPrice(bestAskTicks - 4),
+    };
+  }
+
+  const bestAskTicks = askTicks[askTicks.length - 1]!;
+  const bestBidTicks = bidTicks[0]!;
+  if (bestAskTicks <= bestBidTicks) {
+    throw new Error(`invalid orderbook spread: bestAsk=${bestAskTicks} bestBid=${bestBidTicks}`);
+  }
+
+  const occupied = new Set<number>([...askTicks, ...bidTicks]);
+  let restingAskTicks = bestAskTicks + 1;
+  while (occupied.has(restingAskTicks) && restingAskTicks < bestAskTicks + 64) restingAskTicks += 1;
+  let restingBidTicks = bestBidTicks - 1;
+  while (occupied.has(restingBidTicks) && restingBidTicks > bestBidTicks - 64) restingBidTicks -= 1;
+
+  if (restingAskTicks <= bestBidTicks || restingBidTicks >= bestAskTicks || restingAskTicks <= restingBidTicks) {
+    throw new Error(`unable to choose visible resting prices near mid: ask=${restingAskTicks} bid=${restingBidTicks}`);
+  }
+
+  return {
+    ask: ticksToDisplayPrice(restingAskTicks),
+    bid: ticksToDisplayPrice(restingBidTicks),
+  };
+}
+
 async function waitForOrderbookLevelVisible(
   page: Page,
   side: 'ask' | 'bid',
@@ -501,6 +576,16 @@ async function waitForOrderbookLevelVisible(
     })
     .toBeGreaterThan(0);
   await expect(page.locator(`[data-testid="${testId}"][data-price="${priceTicks}"]`).first()).toBeVisible({ timeout: timeoutMs });
+}
+
+async function waitForOrderbookLevelsVisible(
+  page: Page,
+  levels: Array<{ side: 'ask' | 'bid'; price: string }>,
+  timeoutMs = 30_000,
+): Promise<void> {
+  for (const level of levels) {
+    await waitForOrderbookLevelVisible(page, level.side, level.price, timeoutMs);
+  }
 }
 
 async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<void> {
@@ -665,11 +750,28 @@ test.describe('E2E Swap Isolated Flow', () => {
         ensureSelectedScope(bobPage),
       ]);
 
-      await placeAliceSellOffer(alicePage, '0.03', '2600.4992');
+      const visibleRestingPrices = await chooseVisibleRestingPrices(alicePage);
+
+      await placeAliceSellOffer(alicePage, '0.03', visibleRestingPrices.ask);
+
+      await expect
+        .poll(async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId), {
+          timeout: 30_000,
+          intervals: [250, 500, 750],
+          message: 'alice resting ask should exist in swap offers',
+        })
+        .toBeGreaterThan(0);
+      const [aliceOffer] = await readSwapOfferSnapshot(alicePage, alice.entityId, alice.signerId, hubId);
+      expect(aliceOffer?.priceTicks, 'alice resting ask snapshot missing').toBeTruthy();
+      expect(
+        aliceOffer!.priceTicks,
+        'alice resting ask price must remain exactly the user-entered limit price',
+      ).toBe(String(displayPriceToTicks(visibleRestingPrices.ask)));
+      const restingAskPrice = priceTicksTextToDisplay(aliceOffer!.priceTicks);
 
       await Promise.all([
-        waitForOrderbookLevelVisible(alicePage, 'ask', '2600.4992'),
-        waitForOrderbookLevelVisible(bobPage, 'ask', '2600.4992'),
+        waitForOrderbookLevelVisible(alicePage, 'ask', restingAskPrice),
+        waitForOrderbookLevelVisible(bobPage, 'ask', restingAskPrice),
       ]);
 
       await configurePair(bobPage, 'WETH/USDC', 'buy');
@@ -679,14 +781,55 @@ test.describe('E2E Swap Isolated Flow', () => {
       await expect(bobAmountInput).toBeVisible({ timeout: 20_000 });
       await expect(bobPriceInput).toBeVisible({ timeout: 20_000 });
       await bobAmountInput.fill('50');
-      await bobPriceInput.fill('2400.4992');
+      await bobPriceInput.fill(visibleRestingPrices.bid);
       await expect(bobSubmit).toBeEnabled({ timeout: 20_000 });
       await bobSubmit.click();
       await expect(bobPage.getByTestId('swap-open-order-row').first()).toBeVisible({ timeout: 30_000 });
+      await expect
+        .poll(async () => await readSwapOfferCount(bobPage, bob.entityId, bob.signerId, hubId), {
+          timeout: 30_000,
+          intervals: [250, 500, 750],
+          message: 'bob resting bid should exist in swap offers',
+        })
+        .toBeGreaterThan(0);
+      const [bobOffer] = await readSwapOfferSnapshot(bobPage, bob.entityId, bob.signerId, hubId);
+      expect(bobOffer?.priceTicks, 'bob resting bid snapshot missing').toBeTruthy();
+      expect(
+        bobOffer!.priceTicks,
+        'bob resting bid price must remain exactly the user-entered limit price',
+      ).toBe(String(displayPriceToTicks(visibleRestingPrices.bid)));
+      const restingBidPrice = priceTicksTextToDisplay(bobOffer!.priceTicks);
 
       await Promise.all([
-        waitForOrderbookLevelVisible(alicePage, 'bid', '2400.4992'),
-        waitForOrderbookLevelVisible(bobPage, 'bid', '2400.4992'),
+        waitForOrderbookLevelVisible(alicePage, 'bid', restingBidPrice),
+        waitForOrderbookLevelVisible(bobPage, 'bid', restingBidPrice),
+      ]);
+
+      await Promise.all([
+        waitForOrderbookLevelsVisible(alicePage, [
+          { side: 'ask', price: restingAskPrice },
+          { side: 'bid', price: restingBidPrice },
+        ]),
+        waitForOrderbookLevelsVisible(bobPage, [
+          { side: 'ask', price: restingAskPrice },
+          { side: 'bid', price: restingBidPrice },
+        ]),
+      ]);
+
+      await Promise.all([
+        alicePage.waitForTimeout(1200),
+        bobPage.waitForTimeout(1200),
+      ]);
+
+      await Promise.all([
+        waitForOrderbookLevelsVisible(alicePage, [
+          { side: 'ask', price: restingAskPrice },
+          { side: 'bid', price: restingBidPrice },
+        ]),
+        waitForOrderbookLevelsVisible(bobPage, [
+          { side: 'ask', price: restingAskPrice },
+          { side: 'bid', price: restingBidPrice },
+        ]),
       ]);
     } finally {
       await Promise.all([

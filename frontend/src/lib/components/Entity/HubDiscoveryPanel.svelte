@@ -396,8 +396,7 @@
 <div class="hub-panel">
   <header class="panel-header">
     <div class="panel-copy">
-      <span class="panel-kicker">Counterparty discovery</span>
-      <span class="panel-note">Choose a counterparty and open an account when you are ready.</span>
+      <span class="panel-kicker">Counterparties</span>
     </div>
     <div class="header-controls">
       <button class="refresh-btn" on:click={() => discoverHubs(true)} disabled={loading}>
@@ -554,11 +553,11 @@
   }
 
   .panel-kicker {
-    font-size: 10px;
+    font-size: 13px;
     font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--hub-accent);
+    letter-spacing: 0.01em;
+    text-transform: none;
+    color: var(--hub-text);
   }
 
   .panel-note {

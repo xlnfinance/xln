@@ -38,6 +38,30 @@ const compareNumericKey = (
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
+function accountTxFingerprint(tx: EntityState['accounts'] extends Map<string, infer T>
+  ? T extends { mempool: Array<infer A> } ? A : never
+  : never,
+): string {
+  return `${tx.type}:${safeStringify(tx.data)}`;
+}
+
+function queueUniqueAccountMempoolTx(
+  account: EntityState['accounts'] extends Map<string, infer T> ? T : never,
+  tx: EntityState['accounts'] extends Map<string, infer T>
+    ? T extends { mempool: Array<infer A> } ? A : never
+    : never,
+): boolean {
+  const fp = accountTxFingerprint(tx);
+  for (const existing of account.mempool) {
+    if (accountTxFingerprint(existing) === fp) return false;
+  }
+  for (const pendingTx of account.pendingFrame?.accountTxs ?? []) {
+    if (accountTxFingerprint(pendingTx) === fp) return false;
+  }
+  account.mempool.push(tx);
+  return true;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ENTITY FRAME HASH - Cryptographic commitment to entity state
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1315,7 +1339,9 @@ export const applyEntityFrame = async (
       for (const { accountId, tx } of mempoolOps) {
         const account = currentEntityState.accounts.get(accountId);
         if (account) {
-          account.mempool.push(tx);
+          if (!queueUniqueAccountMempoolTx(account, tx)) {
+            continue;
+          }
           proposableAccounts.add(accountId);
           console.log(`📦   → ${accountId.slice(-8)}: ${tx.type} (mempool now: ${account.mempool.length} txs, pendingFrame=${!!account.pendingFrame ? 'h'+account.pendingFrame.height : 'none'})`);
 
@@ -1471,7 +1497,9 @@ export const applyEntityFrame = async (
     for (const { accountId, tx } of matchResult.mempoolOps) {
       const account = currentEntityState.accounts.get(accountId);
       if (account) {
-        account.mempool.push(tx);
+        if (!queueUniqueAccountMempoolTx(account, tx)) {
+          continue;
+        }
         proposableAccounts.add(accountId);
         console.log(`📊   → ${accountId.slice(-8)}: ${tx.type}`);
       }
@@ -1501,7 +1529,9 @@ export const applyEntityFrame = async (
       for (const { accountId, tx } of cancelResult.mempoolOps) {
         const account = currentEntityState.accounts.get(accountId);
         if (!account) continue;
-        account.mempool.push(tx);
+        if (!queueUniqueAccountMempoolTx(account, tx)) {
+          continue;
+        }
         proposableAccounts.add(accountId);
         console.log(`📊   → ${accountId.slice(-8)}: ${tx.type} (cancel-request resolution)`);
       }
@@ -1518,10 +1548,12 @@ export const applyEntityFrame = async (
         // Fallback cancel resolution is synthesized by the orchestrator itself.
         // It must land in the same working-state mempool so the later account
         // proposal step sees it in this frame.
-        account.mempool.push({
+        if (!queueUniqueAccountMempoolTx(account, {
           type: 'swap_resolve',
           data: { offerId, fillRatio: 0, cancelRemainder: true },
-        });
+        })) {
+          continue;
+        }
         proposableAccounts.add(accountId);
         console.log(`📊   → ${accountId.slice(-8)}: swap_resolve (fallback cancel-request resolution)`);
       }

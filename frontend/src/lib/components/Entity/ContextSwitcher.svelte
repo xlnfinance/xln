@@ -43,9 +43,9 @@
   $: currentAvatar = currentEntity?.avatar || currentGroup?.avatar || '';
   $: currentTitle = resolveCurrentTitle();
   $: currentSubtitle = currentEntity?.entityId
-    ? currentEntity.entityId
+    ? formatEntityMeta(currentEntity.entityId)
     : currentGroup?.selfEntity?.entityId
-      ? currentGroup.selfEntity.entityId
+      ? formatEntityMeta(currentGroup.selfEntity.entityId)
     : 'No runtime selected';
 
   function buildRuntimeGroups(): RuntimeSummary[] {
@@ -142,6 +142,13 @@
     return `${text.slice(0, head)}...${text.slice(-tail)}`;
   }
 
+  function formatEntityMeta(value: string | null | undefined): string {
+    const entityId = String(value || '').trim();
+    if (!entityId) return '';
+    const short = activeXlnFunctions?.formatShortEntityId?.(entityId);
+    return String(short || truncateMiddle(entityId, 10, 6)).trim();
+  }
+
   function isOpaqueIdLabel(value: string | null | undefined): boolean {
     const text = String(value || '').trim();
     return /^0x[a-f0-9]{16,}$/i.test(text);
@@ -156,7 +163,7 @@
   }
 
   function resolveRuntimeMeta(group: RuntimeSummary): string {
-    return group.selfEntity?.entityId || group.runtimeId;
+    return formatEntityMeta(group.selfEntity?.entityId || group.runtimeId);
   }
 
   async function selectRuntimeEntity(runtimeId: string, signerId: string, entityId: string) {
@@ -257,7 +264,7 @@
                   {/if}
                   <span class="entity-copy">
                     <span class="entity-name">{isOpaqueIdLabel(entity.name) ? truncateMiddle(entity.entityId) : entity.name}</span>
-                    <span class="entity-meta">{truncateMiddle(entity.entityId)}</span>
+                    <span class="entity-meta">{formatEntityMeta(entity.entityId)}</span>
                   </span>
                 </button>
               {/each}

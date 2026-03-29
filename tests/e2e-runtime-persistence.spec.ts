@@ -810,10 +810,12 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     await setSnapshotInterval(page, 5);
     await connectHub(page, alice.entityId, alice.signerId, hubId);
     const aliceOutBeforeFaucet = await outCap(page, alice.entityId, hubId);
+    let aliceExpectedOut = aliceOutBeforeFaucet;
     for (let i = 0; i < 5; i++) {
       await faucet(page, alice.entityId, hubId);
+      aliceExpectedOut += 100n * 10n ** 18n;
+      await waitForOutCapAtLeast(page, alice.entityId, hubId, aliceExpectedOut, 60_000);
     }
-    await waitForOutCapAtLeast(page, alice.entityId, hubId, aliceOutBeforeFaucet + (500n * 10n ** 18n));
     const aliceOutAfterFaucet = await outCap(page, alice.entityId, hubId);
     expect(aliceOutAfterFaucet - aliceOutBeforeFaucet).toBe(500n * 10n ** 18n);
 
@@ -821,10 +823,12 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     await setSnapshotInterval(page, 5);
     await connectHub(page, bob.entityId, bob.signerId, hubId);
     const bobOutBeforeFaucet = await outCap(page, bob.entityId, hubId);
+    let bobExpectedOut = bobOutBeforeFaucet;
     for (let i = 0; i < 5; i++) {
       await faucet(page, bob.entityId, hubId);
+      bobExpectedOut += 100n * 10n ** 18n;
+      await waitForOutCapAtLeast(page, bob.entityId, hubId, bobExpectedOut, 60_000);
     }
-    await waitForOutCapAtLeast(page, bob.entityId, hubId, bobOutBeforeFaucet + (500n * 10n ** 18n));
     const bobOutAfterFaucet = await outCap(page, bob.entityId, hubId);
     expect(bobOutAfterFaucet - bobOutBeforeFaucet).toBe(500n * 10n ** 18n);
 

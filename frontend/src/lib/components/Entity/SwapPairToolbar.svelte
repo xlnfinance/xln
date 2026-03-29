@@ -1,14 +1,14 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
 
-  const PRICE_STEP_OPTIONS = ['auto', '0.0001', '0.001', '0.01', '0.1', '1', '10', '50', '100'] as const;
+  const PRICE_STEP_OPTIONS = ['0.0001', '0.001', '0.01', '0.1', '1', '10', '50', '100'] as const;
 
   export let pairOptions: Array<{ value: string; label: string }> = [];
   export let selectedPairValue = '';
   export let baseTokenSymbol = '';
   export let quoteTokenSymbol = '';
   export let orderbookScopeMode: 'aggregated' | 'selected' = 'aggregated';
-  export let selectedPriceStep: (typeof PRICE_STEP_OPTIONS)[number] = 'auto';
+  export let selectedPriceStep: (typeof PRICE_STEP_OPTIONS)[number] = '0.0001';
   export let autoResolvedPriceStep: (typeof PRICE_STEP_OPTIONS)[number] = '1';
 
   const dispatch = createEventDispatcher<{
@@ -32,24 +32,6 @@
 
 <div class="swap-toolbar">
   <div class="toolbar-select toolbar-select-pair">
-    <div class="pair-select-preview" aria-hidden="true">
-      <span
-        class="pair-token-badge"
-        class:usdc={baseTokenSymbol === 'USDC'}
-        class:usdt={baseTokenSymbol === 'USDT'}
-        class:weth={baseTokenSymbol === 'WETH' || baseTokenSymbol === 'ETH'}
-      >
-        {baseTokenSymbol.slice(0, 1)}
-      </span>
-      <span
-        class="pair-token-badge overlap"
-        class:usdc={quoteTokenSymbol === 'USDC'}
-        class:usdt={quoteTokenSymbol === 'USDT'}
-        class:weth={quoteTokenSymbol === 'WETH' || quoteTokenSymbol === 'ETH'}
-      >
-        {quoteTokenSymbol.slice(0, 1)}
-      </span>
-    </div>
     <select
       value={selectedPairValue}
       data-testid="swap-pair-select"
@@ -75,21 +57,15 @@
   </button>
 
   <label class="toolbar-select toolbar-select-step">
-    <span class="toolbar-field-label">Precision</span>
     <select
-      value={orderbookScopeMode === 'selected' ? 'exact' : selectedPriceStep}
+      value={selectedPriceStep}
       aria-label="Orderbook precision"
       data-testid="swap-orderbook-step-select"
-      disabled={orderbookScopeMode === 'selected'}
       on:change={handlePriceStepChange}
     >
-      {#if orderbookScopeMode === 'selected'}
-        <option value="exact">Exact relay</option>
-      {:else}
-        {#each PRICE_STEP_OPTIONS as step}
-          <option value={step}>{step === 'auto' ? `Auto · ${autoResolvedPriceStep}` : step}</option>
-        {/each}
-      {/if}
+      {#each PRICE_STEP_OPTIONS as step}
+        <option value={step}>{step}</option>
+      {/each}
     </select>
   </label>
 </div>
@@ -128,59 +104,7 @@
   }
 
   .toolbar-select-step {
-    padding-left: 10px;
-    gap: 8px;
-  }
-
-  .toolbar-field-label {
-    flex: 0 0 auto;
-    color: #8f96a3;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .pair-select-preview {
-    position: absolute;
-    top: 50%;
-    left: 10px;
-    display: inline-flex;
-    align-items: center;
-    transform: translateY(-50%);
-    pointer-events: none;
-    z-index: 1;
-  }
-
-  .pair-token-badge {
-    width: 18px;
-    height: 18px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: #1f2937;
-    color: #f3f4f6;
-    font-size: 9px;
-    font-weight: 700;
-    box-shadow: 0 0 0 1px rgba(9, 9, 11, 0.65);
-  }
-
-  .pair-token-badge.overlap {
-    margin-left: -4px;
-  }
-
-  .pair-token-badge.usdc {
-    background: #2563eb;
-  }
-
-  .pair-token-badge.usdt {
-    background: #059669;
-  }
-
-  .pair-token-badge.weth {
-    background: #7c3aed;
+    padding-left: 0;
   }
 
   select {
@@ -189,7 +113,7 @@
     height: 32px;
     border: 0;
     background: transparent;
-    padding: 0 10px 0 40px;
+    padding: 0 12px;
     font-size: 12px;
     font-weight: 600;
     color: #e5e7eb;
@@ -202,11 +126,6 @@
     background: #0f1117;
     color: #f3f4f6;
   }
-
-  .toolbar-select-step select {
-    padding-left: 0;
-  }
-
   .scope-toggle {
     display: inline-flex;
     align-items: center;

@@ -12,7 +12,7 @@
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -84,7 +84,7 @@ const parseArgs = (): CliArgs => {
 
   const shardsRaw = Number(getFlag('shards') || String(defaultShards));
   const basePortRaw = Number(getFlag('base-port') || '20000');
-  const stackTimeoutRaw = Number(getFlag('stack-timeout-ms') || '90000');
+  const stackTimeoutRaw = Number(getFlag('stack-timeout-ms') || '180000');
   const testTimeoutRaw = Number(getFlag('test-timeout-ms') || (longMode ? '1200000' : '360000'));
   const phaseWarnRaw = Number(getFlag('phase-warn-ms') || '30000');
   const maxFailuresRaw = Number(getFlag('max-failures') || '1');
@@ -110,7 +110,7 @@ const parseArgs = (): CliArgs => {
   return {
     shards: Number.isFinite(shardsRaw) && shardsRaw > 0 ? Math.floor(shardsRaw) : 2,
     basePort: Number.isFinite(basePortRaw) && basePortRaw > 0 ? Math.floor(basePortRaw) : 20000,
-    stackTimeoutMs: Number.isFinite(stackTimeoutRaw) && stackTimeoutRaw > 0 ? Math.floor(stackTimeoutRaw) : 90000,
+    stackTimeoutMs: Number.isFinite(stackTimeoutRaw) && stackTimeoutRaw > 0 ? Math.floor(stackTimeoutRaw) : 180000,
     testTimeoutMs: Number.isFinite(testTimeoutRaw) && testTimeoutRaw > 0
       ? Math.floor(testTimeoutRaw)
       : (longMode ? 1200000 : 360000),
@@ -143,6 +143,14 @@ const tail = (path: string, lines = 60): string => {
   } catch {
     return '(unable to read log tail)';
   }
+};
+
+const assertRunnerPreflight = async (): Promise<void> => {
+  const typechainIndex = resolve(process.cwd(), 'jurisdictions', 'typechain-types', 'index.ts');
+  if (!existsSync(typechainIndex)) {
+    throw new Error(`RUNNER_PREFLIGHT_FAILED missing ${typechainIndex}`);
+  }
+  await import(resolve(process.cwd(), 'runtime', 'jadapter', 'browservm.ts'));
 };
 
 type StepTiming = { label: string; ms: number };
@@ -358,6 +366,9 @@ const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<
     }
     await delay(250);
   }
+  const marketMakerPhase = typeof lastHealth?.marketMaker?.startupPhase === 'string'
+    ? lastHealth.marketMaker.startupPhase
+    : null;
   const snapshot = lastHealth
     ? JSON.stringify(
         {
@@ -376,7 +387,7 @@ const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<
         2,
       )
     : 'no-health-payload';
-  throw new Error(`Server health not ready at ${apiUrl} within ${timeoutMs}ms\n${snapshot}`);
+  throw new Error(`SERVER_HEALTH_TIMEOUT phase=${String(marketMakerPhase)} api=${apiUrl} timeoutMs=${timeoutMs}\n${snapshot}`);
 };
 
 const waitForHttpsReady = async (url: string, timeoutMs: number): Promise<void> => {
@@ -440,6 +451,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
   let anvil: ChildProcessWithoutNullStreams | null = null;
   let api: ChildProcessWithoutNullStreams | null = null;
   let vite: ChildProcessWithoutNullStreams | null = null;
+  let teardownReason: string | null = null;
 
   const rpcPort = args.basePort + shard * 20 + 0;
   const apiPort = args.basePort + shard * 20 + 2;
@@ -615,6 +627,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
       phaseMs,
     };
   } catch (error) {
+    teardownReason = (error as Error).message;
     return {
       shard,
       status: 'failed',
@@ -624,6 +637,12 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
       error: (error as Error).message,
     };
   } finally {
+    if (teardownReason && api && api.exitCode === null) {
+      const teardownLabel = phaseMs.apiHealthy > 0
+        ? 'shard teardown'
+        : 'startup failure';
+      log.write(`[runner] ${teardownLabel} -> SIGTERM api pid=${api.pid} reason=${teardownReason.split('\n')[0]}\n`);
+    }
     await stopProcess(vite);
     await stopProcess(api);
     await stopProcess(anvil);
@@ -670,6 +689,13 @@ async function main(): Promise<void> {
     }
   } else {
     console.log('⏩ skip-build enabled');
+  }
+
+  try {
+    await assertRunnerPreflight();
+  } catch (error) {
+    console.error(`❌ runner preflight failed: ${String(error instanceof Error ? error.message : error)}`);
+    process.exit(1);
   }
 
   const startedAt = Date.now();

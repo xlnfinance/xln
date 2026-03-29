@@ -81,7 +81,7 @@ test.describe('Active tab lock handoff', () => {
       await waitUntilOwnsActiveLock(first);
       await openApp(
         second,
-        `/app?locktest=1&e#pay?id=${encodeURIComponent(targetEntityId)}&token=1&amt=1&mode=embed`,
+        `/app?locktest=1&e&mode=embed#pay/${encodeURIComponent(`${targetEntityId}?token=1&amount=1`)}`,
       );
       await waitUntilOwnsActiveLock(second);
 

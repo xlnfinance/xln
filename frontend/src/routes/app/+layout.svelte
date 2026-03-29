@@ -8,7 +8,6 @@
     initializeXLN,
     isLoading,
     error,
-    prepareDevSession,
     suspendClientActivity,
     xlnFunctions
   } from '$lib/stores/xlnStore';
@@ -59,8 +58,12 @@
   }
 
   function isEmbeddedPayRoute(state: HashRouteState, search: string): boolean {
-    if (state.route !== 'pay') return false;
+    if (!(state.route === 'pay' || state.route.startsWith('pay/'))) return false;
+    const searchParams = new URLSearchParams(search);
     return hasLegacyEmbedQuery(search)
+      || searchParams.get('mode') === 'embed'
+      || searchParams.get('embed') === '1'
+      || searchParams.get('embed') === 'true'
       || state.params.get('mode') === 'embed'
       || state.params.get('embed') === '1'
       || state.params.get('embed') === 'true';
@@ -138,7 +141,6 @@
     const generation = ++bootGeneration;
     embedBootReady = false;
     try {
-      await prepareDevSession();
       if (generation !== bootGeneration || !hasActiveTabLock) return;
       settingsOperations.initialize();
       tabOperations.loadFromStorage();

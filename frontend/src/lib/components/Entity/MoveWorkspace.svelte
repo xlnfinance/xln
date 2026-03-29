@@ -84,27 +84,6 @@
     return getDisplayBalance(endpoint);
   }
 
-  function getEndpointDescriptor(endpoint: MoveEndpoint): string {
-    switch (endpoint) {
-      case 'external':
-        return 'Wallet / EOA balance';
-      case 'reserve':
-        return 'Reserve ledger balance';
-      case 'account':
-        return 'Counterparty credit balance';
-      default:
-        return '';
-    }
-  }
-
-  function getTargetHint(endpoint: MoveEndpoint): string {
-    const activeSource = moveSelectedSource || moveFromEndpoint;
-    if (!isMoveRouteSupported(activeSource, endpoint)) return 'Unavailable';
-    if (moveToEndpoint === endpoint) return 'Destination selected';
-    if (moveDragSource) return 'Drop here';
-    return 'Set destination';
-  }
-
   function stripStepPrefix(step: string): string {
     return step.replace(/^\d+\.\s*/, '').trim();
   }
@@ -190,11 +169,9 @@
           on:mousedown={(event) => beginMoveDrag(endpoint, event)}
           on:click={() => setMoveSource(endpoint)}
         >
-          <span class="move-node-top">
-            <span class="move-node-label">{moveEndpointLabels[endpoint]}</span>
-          </span>
+          <span class="move-node-label">{moveEndpointLabels[endpoint]}</span>
           <span
-            class="move-node-balance"
+            class="move-node-balance sr-only"
             data-testid={`move-source-balance-${endpoint}`}
             data-raw-amount={getSourceNodeBalance(endpoint).toString()}
           >{formatAmount(getSourceNodeBalance(endpoint), moveDisplayDecimals)}</span>
@@ -234,9 +211,7 @@
           }}
           on:click={() => setMoveTarget(endpoint)}
         >
-          <span class="move-node-top">
-            <span class="move-node-label">{moveEndpointLabels[endpoint]}</span>
-          </span>
+          <span class="move-node-label">{moveEndpointLabels[endpoint]}</span>
         </button>
       {/each}
     </div>
@@ -604,19 +579,18 @@
 
   .move-node {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     justify-content: center;
-    gap: 6px;
-    min-height: 74px;
+    gap: 0;
+    min-height: 72px;
     width: 100%;
     min-width: 0;
-    padding: 11px 12px 11px 14px;
+    padding: 10px;
     border-radius: 10px;
     border: 1px solid color-mix(in srgb, var(--move-border) 46%, transparent);
     background: color-mix(in srgb, var(--move-input-bg) 86%, transparent);
     color: var(--move-text);
-    text-align: left;
+    text-align: center;
     cursor: grab;
     box-sizing: border-box;
     transition: border-color 0.14s ease, background 0.14s ease;
@@ -688,34 +662,26 @@
     opacity: 0.45;
   }
 
-  .move-node-top {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 8px;
-    width: 100%;
-    min-width: 0;
-    overflow: hidden;
-  }
-
   .move-node-label {
     font-size: 12px;
     font-weight: 700;
+    letter-spacing: 0;
     color: var(--move-text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    letter-spacing: -0.01em;
   }
 
-  .move-node-balance {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--move-accent);
-    white-space: nowrap;
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
     overflow: hidden;
-    text-overflow: ellipsis;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .move-summary {
@@ -1058,7 +1024,6 @@
       align-items: stretch;
     }
 
-    .move-visual,
     .move-detail-grid,
     .move-summary-grid {
       grid-template-columns: 1fr;
@@ -1072,26 +1037,20 @@
 
   @media (max-width: 760px) {
     .move-visual {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
       padding: 14px;
     }
 
     .move-column {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      display: flex;
+      flex-direction: column;
       gap: 8px;
-      align-items: stretch;
-    }
-
-    .move-column-head,
-    .move-route-details,
-    .move-account-slot {
-      grid-column: 1 / -1;
     }
 
     .move-node {
-      min-height: 74px;
-      padding: 10px;
+      min-height: 70px;
+      padding: 8px;
       border-radius: 10px;
     }
 
@@ -1099,15 +1058,6 @@
       flex-direction: column;
       align-items: stretch;
     }
-
-    .move-node-label,
-    .move-node-balance,
-    .move-node-target-hint,
-    .move-node-subline {
-      white-space: normal;
-      line-height: 1.12;
-    }
-
     .move-drag-layer {
       display: none;
     }
@@ -1150,33 +1100,6 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
-    }
-
-    .move-node {
-      min-height: 0;
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 4px 10px;
-      align-items: center;
-      padding: 10px 12px;
-    }
-
-    .move-node-top {
-      grid-column: 1 / 2;
-      justify-content: flex-start;
-      gap: 8px;
-    }
-
-    .move-node-balance,
-    .move-node-target-hint {
-      grid-column: 2 / 3;
-      justify-self: end;
-      text-align: right;
-    }
-
-    .move-node-subline {
-      grid-column: 1 / -1;
-      white-space: normal;
     }
 
     .move-summary {

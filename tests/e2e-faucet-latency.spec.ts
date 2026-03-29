@@ -145,7 +145,7 @@ async function readRenderedAccountTokenOut(page: Page, hubId: string, symbol: st
   return page.evaluate(({ hubId, symbol }) => {
     const preview = document.querySelector(`.account-preview[data-counterparty-id="${hubId}"]`);
     if (!preview) return NaN;
-    const rows = Array.from(preview.querySelectorAll('.delta-row'));
+    const rows = Array.from(preview.querySelectorAll('.delta-row, .delta-row-stack, .delta-summary'));
     for (const row of rows) {
       const symbolEl = row.querySelector('.token-symbol');
       if (String(symbolEl?.textContent || '').trim().toUpperCase() !== String(symbol || '').trim().toUpperCase()) {
@@ -209,7 +209,7 @@ async function measureAccountStateToDomLatency(
       const readRenderedOut = (): number => {
         const preview = document.querySelector(`.account-preview[data-counterparty-id="${hubId}"]`);
         if (!preview) return Number.NaN;
-        const rows = Array.from(preview.querySelectorAll('.delta-row'));
+        const rows = Array.from(preview.querySelectorAll('.delta-row, .delta-row-stack, .delta-summary'));
         for (const row of rows) {
           const symbolEl = row.querySelector('.token-symbol');
           if (String(symbolEl?.textContent || '').trim().toUpperCase() !== String(symbol || '').trim().toUpperCase()) {
@@ -285,7 +285,7 @@ test.describe('E2E Faucet Latency', () => {
     await page.getByTestId('tab-accounts').first().click();
     const preview = page.locator(`.account-preview[data-counterparty-id="${hubId}"]`).first();
     await expect(preview).toBeVisible({ timeout: 20_000 });
-    const usdtRow = preview.locator('.delta-row', { hasText: 'USDT' }).first();
+    const usdtRow = preview.locator('.delta-row-stack', { hasText: 'USDT' }).first();
     await expect(usdtRow).toBeVisible({ timeout: 20_000 });
     const faucetButton = usdtRow.getByRole('button', { name: /^Faucet$/ });
     await expect(faucetButton).toBeEnabled({ timeout: 20_000 });

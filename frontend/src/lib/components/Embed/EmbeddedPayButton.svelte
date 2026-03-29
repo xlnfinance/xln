@@ -7,6 +7,7 @@
   import { error, isLoading, xlnEnvironment, xlnFunctions } from '$lib/stores/xlnStore';
   import { activeTabId, tabs } from '$lib/stores/tabStore';
   import { createSelfEntity } from '$lib/utils/entityFactory';
+  import { buildXlnInvoiceUri, parseXlnInvoice } from '$lib/utils/xlnInvoice';
 
   let checkoutEntityId = '';
   let ensuringEntity = false;
@@ -137,16 +138,22 @@
 
   function rebuildEmbeddedHash(nextParams: Record<string, string>): void {
     if (typeof window === 'undefined') return;
-    const currentParams = getHashParams();
-    for (const [key, value] of Object.entries(nextParams)) {
-      if (value) currentParams.set(key, value);
-      else currentParams.delete(key);
-    }
-    currentParams.set('mode', 'embed');
-    currentParams.set('segment', 'left');
+    const invoice = buildXlnInvoiceUri({
+      targetEntityId: String(nextParams.entityId || '').trim(),
+      tokenId: Number(nextParams.token || 0) || null,
+      amount: String(nextParams.amount || '').trim(),
+      recipientUserId: String(nextParams.userId || '').trim(),
+      jurisdictionId: String(nextParams.jurisdictionId || '').trim(),
+      description: String(nextParams.description || '').trim(),
+      noteLocked: Boolean(nextParams.userId),
+    });
+    const params = new URLSearchParams();
+    params.set('mode', 'embed');
+    params.set('segment', 'left');
     const parentOrigin = getParentOrigin();
-    if (parentOrigin) currentParams.set('parentOrigin', parentOrigin);
-    const nextHash = `#pay?${currentParams.toString()}`;
+    if (parentOrigin) params.set('parentOrigin', parentOrigin);
+    const suffix = params.size > 0 ? `?${params.toString()}` : '';
+    const nextHash = `#pay/${encodeURIComponent(invoice)}${suffix}`;
     if (window.location.hash === nextHash) return;
     history.replaceState(null, '', nextHash);
     window.dispatchEvent(new HashChangeEvent('hashchange'));
@@ -172,8 +179,13 @@
 
   function hasValidPaymentParams(): boolean {
     const route = getHashRoute();
-    const params = getHashParams();
-    return route === 'pay' && Boolean(params.get('id') && params.get('amt') && params.get('token'));
+    if (!route.startsWith('pay/')) return false;
+    try {
+      parseXlnInvoice(window.location.href);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function getEmbeddedAction(): 'pay' {
@@ -391,13 +403,18 @@
   }
 
   function getPrepareKey(): string {
-    const params = getHashParams();
+    let parsed = null;
+    try {
+      parsed = parseXlnInvoice(window.location.href);
+    } catch {
+      parsed = null;
+    }
     return [
       checkoutEntityId,
-      String(params.get('id') || ''),
-      String(params.get('token') || ''),
-      String(params.get('amt') || ''),
-      String(params.get('desc') || ''),
+      String(parsed?.targetEntityId || ''),
+      String(parsed?.tokenId || ''),
+      String(parsed?.amount || ''),
+      String(parsed?.description || ''),
     ].join('|');
   }
 
@@ -466,12 +483,12 @@
     }
     if (payload.command === 'update-intent') {
       rebuildEmbeddedHash({
-        id: String(payload.entityId ?? '').trim(),
-        amt: String(payload.amount ?? '').trim(),
+        entityId: String(payload.entityId ?? '').trim(),
+        amount: String(payload.amount ?? '').trim(),
         token: String(payload.tokenId ?? '').trim(),
-        u: String(payload.userId ?? '').trim(),
-        jId: String(payload.jurisdictionId ?? '').trim(),
-        desc: String(payload.description ?? '').trim(),
+        userId: String(payload.userId ?? '').trim(),
+        jurisdictionId: String(payload.jurisdictionId ?? '').trim(),
+        description: String(payload.description ?? '').trim(),
       });
       resetPreparedRouteState();
     }

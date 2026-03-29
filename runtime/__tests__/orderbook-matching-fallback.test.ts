@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createBook, applyCommand } from '../orderbook/core';
 import { SWAP_LOT_SCALE } from '../orderbook/types';
 import { LIMITS } from '../constants';
-import { processOrderbookSwaps } from '../entity-tx/handlers/account';
+import { processOrderbookCancels, processOrderbookSwaps } from '../entity-tx/handlers/account';
 import { handleSwapResolve } from '../account-tx/handlers/swap-resolve';
 import { deriveCanonicalSwapFillRatio } from '../swap-execution';
 import type { AccountMachine, AccountTx, SwapOffer } from '../types';
@@ -579,7 +579,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(finalBook!.orderActive[takerOrderIdx!]).toBe(1);
   });
 
-  test('rebuilds around price using persisted live account offers for historical resting orders', () => {
+  test('rebuilds a cached pair from canonical live offers before matching historical resting orders', () => {
     const lot = SWAP_LOT_SCALE;
     let historicalBook = createBook({
       tick: 50n,
@@ -795,6 +795,102 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(finalBook!.orderIdToIdx.has('taker-account:taker-buy-too-high')).toBe(false);
   });
 
+  test('does not enqueue duplicate fail-closed cancel when the same offer is already pending in mempool or pendingFrame', () => {
+    const makerOffer = {
+      offerId: 'maker-ask',
+      makerIsLeft: true,
+      fromEntity: 'maker-entity',
+      toEntity: 'hub-entity',
+      accountId: 'maker-account',
+      giveTokenId: 4,
+      giveAmount: SWAP_LOT_SCALE,
+      wantTokenId: 6,
+      wantAmount: 1000n * SWAP_LOT_SCALE / 10_000n,
+      createdHeight: 1,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1000n,
+      quantizedGive: SWAP_LOT_SCALE,
+      quantizedWant: 1000n * SWAP_LOT_SCALE / 10_000n,
+    } satisfies SwapOffer;
+
+    const takerOffer = {
+      offerId: 'taker-buy-too-high',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'taker-entity',
+      accountId: 'taker-account',
+      giveTokenId: 6,
+      giveAmount: 1400n * SWAP_LOT_SCALE / 10_000n,
+      wantTokenId: 4,
+      wantAmount: SWAP_LOT_SCALE,
+      createdHeight: 2,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1400n,
+      quantizedGive: 1400n * SWAP_LOT_SCALE / 10_000n,
+      quantizedWant: SWAP_LOT_SCALE,
+    } satisfies SwapOffer;
+
+    const takerAccount = makeAccountMachine(takerOffer);
+    takerAccount.leftEntity = 'taker-entity';
+    takerAccount.rightEntity = 'hub-entity';
+    takerAccount.proofHeader = { fromEntity: 'taker-entity', toEntity: 'hub-entity', nonce: 0 };
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['maker-account', makeAccountMachine(makerOffer)],
+        ['taker-account', takerAccount],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 2,
+          supportedPairs: ['4/6'],
+        },
+        books: new Map(),
+        pairConfig: new Map(),
+      },
+      pendingSwapFillRatios: new Map(),
+    } as any;
+
+    const firstPass = processOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
+    expect(firstPass.mempoolOps).toHaveLength(1);
+    expect(firstPass.mempoolOps[0]?.accountId).toBe('taker-account');
+    expect(firstPass.mempoolOps[0]?.tx.type).toBe('swap_resolve');
+    expect(firstPass.mempoolOps[0]?.tx.data.offerId).toBe('taker-buy-too-high');
+    expect(firstPass.mempoolOps[0]?.tx.data.cancelRemainder).toBe(true);
+
+    takerAccount.mempool.push(firstPass.mempoolOps[0]!.tx as AccountTx);
+    const secondPass = processOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
+    expect(secondPass.mempoolOps).toHaveLength(0);
+
+    takerAccount.mempool = [];
+    takerAccount.pendingFrame = {
+      height: 1,
+      timestamp: 1,
+      jHeight: 0,
+      accountTxs: [firstPass.mempoolOps[0]!.tx as AccountTx],
+      prevFrameHash: '',
+      tokenIds: [],
+      deltas: [],
+      stateHash: '',
+      byLeft: true,
+    };
+    const thirdPass = processOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
+    expect(thirdPass.mempoolOps).toHaveLength(0);
+  });
+
   test('sorts live offers canonically before inserting into the book', () => {
     const entityState = {
       entityId: 'hub-entity',
@@ -864,7 +960,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(finalBook!.orderIds[headOrderIdx]).toBe('alice:offer-a');
   });
 
-  test('rehydrate rebuild inserts open offers without emitting swap_resolve side effects', () => {
+  test('rehydrate inserts open offers into an exact pair book without emitting swap_resolve side effects', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
@@ -929,7 +1025,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(result.bookUpdates.length).toBeGreaterThan(0);
   });
 
-  test('preserves exact aligned price when creating a bounded book window', () => {
+  test('preserves exact aligned price when creating an exact book', () => {
     const priceTicks = 24_999_992n;
     const entityState = {
       entityId: 'hub-entity',
@@ -983,7 +1079,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(storedPrice).toBe(priceTicks);
   });
 
-  test('accepts wide volatile pair levels by widening the first book tick around the anchor price', () => {
+  test('rejects wide exact price spans instead of widening the first book tick', () => {
     const anchorPriceTicks = 25_015_002n;
     const entityState = {
       entityId: 'hub-entity',
@@ -1031,13 +1127,16 @@ describe('orderbook matching fallback execution mapping', () => {
       makeOffer('offer-b', 25_137_562n, 600n * SWAP_LOT_SCALE),
       makeOffer('offer-c', 25_262_625n, 960n * SWAP_LOT_SCALE),
     ];
+    entityState.accounts.get('alice')!.swapOffers = new Map(offers.map((offer) => [offer.offerId, offer]));
 
     const result = processOrderbookSwaps(entityState, offers as any);
-    expect(result.mempoolOps).toHaveLength(0);
+    const cancelOps = result.mempoolOps.filter((item) => item.tx.type === 'swap_resolve');
+    expect(cancelOps).toHaveLength(2);
+    expect(cancelOps.map((item) => item.tx.data.offerId).sort()).toEqual(['offer-b', 'offer-c']);
 
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(finalBook).toBeDefined();
-    expect(finalBook!.params.tick).toBeGreaterThan(1n);
+    expect(finalBook!.params.tick).toBe(1n);
 
     const anchorOrderIdx = finalBook!.orderIdToIdx.get('alice:offer-a');
     expect(typeof anchorOrderIdx).toBe('number');
@@ -1045,8 +1144,387 @@ describe('orderbook matching fallback execution mapping', () => {
     const storedAnchorPrice = finalBook!.params.pmin + (BigInt(anchorLevelIdx) * finalBook!.params.tick);
     expect(storedAnchorPrice).toBe(anchorPriceTicks);
 
-    expect(finalBook!.orderIdToIdx.has('alice:offer-b')).toBe(true);
-    expect(finalBook!.orderIdToIdx.has('alice:offer-c')).toBe(true);
+    expect(finalBook!.orderIdToIdx.has('alice:offer-b')).toBe(false);
+    expect(finalBook!.orderIdToIdx.has('alice:offer-c')).toBe(false);
+  });
+
+  test('rebuilds stale persisted pair books from canonical live offers before matching', () => {
+    const askPriceTicks = 25_000_002n;
+    const bidPriceTicks = 24_999_998n;
+    const lot = SWAP_LOT_SCALE;
+    let staleBook = createBook({
+      tick: 2n,
+      pmin: 24_999_998n,
+      pmax: 25_000_020n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+    staleBook = applyCommand(staleBook, {
+      kind: 0,
+      ownerId: 'maker-entity',
+      orderId: 'maker-account:maker-ask',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 24_999_998n,
+      qtyLots: 1,
+    }).state;
+
+    const makerOffer = {
+      offerId: 'maker-ask',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'maker-entity',
+      accountId: 'maker-account',
+      createdHeight: 1,
+      giveTokenId: 2,
+      giveAmount: lot,
+      wantTokenId: 1,
+      wantAmount: (lot * askPriceTicks) / 10_000n,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: askPriceTicks,
+    };
+    const takerOffer = {
+      offerId: 'taker-bid',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'taker-entity',
+      accountId: 'taker-account',
+      createdHeight: 2,
+      giveTokenId: 1,
+      giveAmount: (lot * bidPriceTicks) / 10_000n,
+      wantTokenId: 2,
+      wantAmount: lot,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: bidPriceTicks,
+    };
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['maker-account', { swapOffers: new Map([['maker-ask', makerOffer]]) }],
+        ['taker-account', { swapOffers: new Map() }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: ['1/2'],
+        },
+        books: new Map([['1/2', staleBook]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
+    expect(result.mempoolOps).toHaveLength(0);
+
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    expect(finalBook).toBeDefined();
+    const bestAskIdx = finalBook!.bestAskIdx;
+    const bestBidIdx = finalBook!.bestBidIdx;
+    expect(bestAskIdx).toBeGreaterThanOrEqual(0);
+    expect(bestBidIdx).toBeGreaterThanOrEqual(0);
+    expect(finalBook!.params.pmin + (BigInt(bestAskIdx) * finalBook!.params.tick)).toBe(askPriceTicks);
+    expect(finalBook!.params.pmin + (BigInt(bestBidIdx) * finalBook!.params.tick)).toBe(bidPriceTicks);
+    expect(finalBook!.orderIdToIdx.has('maker-account:maker-ask')).toBe(true);
+    expect(finalBook!.orderIdToIdx.has('taker-account:taker-bid')).toBe(true);
+  });
+
+  test('repairs only the mismatched cached pair price while preserving other canonical resting orders', () => {
+    const firstAskPriceTicks = 25_000_002n;
+    const secondAskPriceTicks = 25_000_006n;
+    const bidPriceTicks = 24_999_998n;
+    const lot = SWAP_LOT_SCALE;
+
+    let staleBook = createBook({
+      tick: 2n,
+      pmin: 24_999_998n,
+      pmax: 25_000_020n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+    staleBook = applyCommand(staleBook, {
+      kind: 0,
+      ownerId: 'maker-a',
+      orderId: 'maker-account:maker-ask-a',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 24_999_998n,
+      qtyLots: 1,
+    }).state;
+    staleBook = applyCommand(staleBook, {
+      kind: 0,
+      ownerId: 'maker-b',
+      orderId: 'maker-account:maker-ask-b',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: secondAskPriceTicks,
+      qtyLots: 1,
+    }).state;
+
+    const makeAskOffer = (offerId: string, makerEntity: string, priceTicks: bigint) => ({
+      offerId,
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: makerEntity,
+      accountId: 'maker-account',
+      createdHeight: 1,
+      giveTokenId: 2,
+      giveAmount: lot,
+      wantTokenId: 1,
+      wantAmount: (lot * priceTicks) / 10_000n,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks,
+    });
+    const makerOfferA = makeAskOffer('maker-ask-a', 'maker-a', firstAskPriceTicks);
+    const makerOfferB = makeAskOffer('maker-ask-b', 'maker-b', secondAskPriceTicks);
+    const takerOffer = {
+      offerId: 'taker-bid',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'taker-entity',
+      accountId: 'taker-account',
+      createdHeight: 2,
+      giveTokenId: 1,
+      giveAmount: (lot * bidPriceTicks) / 10_000n,
+      wantTokenId: 2,
+      wantAmount: lot,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: bidPriceTicks,
+    };
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['maker-account', { swapOffers: new Map([['maker-ask-a', makerOfferA], ['maker-ask-b', makerOfferB]]) }],
+        ['taker-account', { swapOffers: new Map() }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: ['1/2'],
+        },
+        books: new Map([['1/2', staleBook]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
+    expect(result.mempoolOps).toHaveLength(0);
+
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    expect(finalBook).toBeDefined();
+    const bestAskIdx = finalBook!.bestAskIdx;
+    const bestBidIdx = finalBook!.bestBidIdx;
+    expect(bestAskIdx).toBeGreaterThanOrEqual(0);
+    expect(bestBidIdx).toBeGreaterThanOrEqual(0);
+    expect(finalBook!.params.pmin + (BigInt(bestAskIdx) * finalBook!.params.tick)).toBe(firstAskPriceTicks);
+    expect(finalBook!.params.pmin + (BigInt(bestBidIdx) * finalBook!.params.tick)).toBe(bidPriceTicks);
+
+    const repairedAskIdx = finalBook!.orderIdToIdx.get('maker-account:maker-ask-a');
+    const preservedAskIdx = finalBook!.orderIdToIdx.get('maker-account:maker-ask-b');
+    expect(typeof repairedAskIdx).toBe('number');
+    expect(typeof preservedAskIdx).toBe('number');
+    expect(finalBook!.params.pmin + (BigInt(finalBook!.orderPriceIdx[repairedAskIdx!]) * finalBook!.params.tick)).toBe(firstAskPriceTicks);
+    expect(finalBook!.params.pmin + (BigInt(finalBook!.orderPriceIdx[preservedAskIdx!]) * finalBook!.params.tick)).toBe(secondAskPriceTicks);
+  });
+
+  test('repairs a cached pair by dropping offers that already have pending swap resolution', () => {
+    const askPriceTicks = 25_000_000n;
+    const bidPriceTicks = 25_000_000n;
+    const lot = SWAP_LOT_SCALE;
+
+    let staleBook = createBook({
+      tick: 1n,
+      pmin: 24_999_980n,
+      pmax: 25_000_020n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+    staleBook = applyCommand(staleBook, {
+      kind: 0,
+      ownerId: 'maker-entity',
+      orderId: 'maker-account:maker-ask',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: askPriceTicks,
+      qtyLots: 1,
+    }).state;
+
+    const makerOffer = {
+      offerId: 'maker-ask',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'maker-entity',
+      accountId: 'maker-account',
+      createdHeight: 1,
+      giveTokenId: 2,
+      giveAmount: lot,
+      wantTokenId: 1,
+      wantAmount: (lot * askPriceTicks) / 10_000n,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: askPriceTicks,
+    };
+    const takerOffer = {
+      offerId: 'taker-bid',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'taker-entity',
+      accountId: 'taker-account',
+      createdHeight: 2,
+      giveTokenId: 1,
+      giveAmount: (lot * bidPriceTicks) / 10_000n,
+      wantTokenId: 2,
+      wantAmount: lot,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: bidPriceTicks,
+    };
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['maker-account', { swapOffers: new Map([['maker-ask', makerOffer]]) }],
+        ['taker-account', { swapOffers: new Map() }],
+      ]),
+      pendingSwapFillRatios: new Map([['maker-account:maker-ask', 500_000]]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: ['1/2'],
+        },
+        books: new Map([['1/2', staleBook]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
+    expect(result.mempoolOps).toHaveLength(0);
+
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    expect(finalBook).toBeDefined();
+    expect(finalBook!.orderIdToIdx.has('maker-account:maker-ask')).toBe(false);
+    expect(finalBook!.orderIdToIdx.has('taker-account:taker-bid')).toBe(true);
+  });
+
+  test('fails closed on exact-span overflow without mutating the existing resting pair book', () => {
+    const anchorPriceTicks = 25_015_002n;
+    const overflowPriceTicks = 25_262_625n;
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['alice', { swapOffers: new Map() }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: ['1/2'],
+        },
+        books: new Map(),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const anchorOffer = {
+      offerId: 'offer-a',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'alice',
+      accountId: 'alice',
+      createdHeight: 1,
+      giveTokenId: 2,
+      giveAmount: 210n * SWAP_LOT_SCALE,
+      wantTokenId: 1,
+      wantAmount: (210n * SWAP_LOT_SCALE * anchorPriceTicks) / 10_000n,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: anchorPriceTicks,
+    };
+
+    entityState.accounts.get('alice')!.swapOffers = new Map([['offer-a', anchorOffer]]);
+    const firstPass = processOrderbookSwaps(entityState, [anchorOffer] as any);
+    const initialBook = firstPass.bookUpdates.at(-1)?.book;
+    expect(initialBook).toBeDefined();
+    expect(initialBook!.orderIdToIdx.has('alice:offer-a')).toBe(true);
+
+    entityState.orderbookExt.books = new Map([['1/2', initialBook]]);
+
+    const overflowOffer = {
+      offerId: 'offer-b',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'alice',
+      accountId: 'alice',
+      createdHeight: 2,
+      giveTokenId: 2,
+      giveAmount: 960n * SWAP_LOT_SCALE,
+      wantTokenId: 1,
+      wantAmount: (960n * SWAP_LOT_SCALE * overflowPriceTicks) / 10_000n,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: overflowPriceTicks,
+    };
+
+    const overflowPass = processOrderbookSwaps(entityState, [overflowOffer] as any);
+    const cancelOps = overflowPass.mempoolOps.filter((item) => item.tx.type === 'swap_resolve');
+    expect(cancelOps).toHaveLength(1);
+    expect(cancelOps[0]!.tx.data.offerId).toBe('offer-b');
+
+    const finalBook = overflowPass.bookUpdates.at(-1)?.book ?? entityState.orderbookExt.books.get('1/2');
+    expect(finalBook).toBeDefined();
+    expect(finalBook!.orderIdToIdx.has('alice:offer-a')).toBe(true);
+    expect(finalBook!.orderIdToIdx.has('alice:offer-b')).toBe(false);
+    const anchorOrderIdx = finalBook!.orderIdToIdx.get('alice:offer-a');
+    expect(typeof anchorOrderIdx).toBe('number');
+    expect(finalBook!.params.pmin + (BigInt(finalBook!.orderPriceIdx[anchorOrderIdx!]) * finalBook!.params.tick)).toBe(anchorPriceTicks);
   });
 
   test('queues cancelRemainder instead of throwing when a pair book reaches its order cap', () => {
@@ -1103,5 +1581,151 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(cancelOp).toBeDefined();
     expect(cancelOp!.tx.data.cancelRemainder).toBe(true);
     expect(cancelOp!.tx.data.fillRatio).toBe(0);
+  });
+
+  test('processOrderbookCancels queues account-level cancel once for an active orderbook order', () => {
+    const lot = SWAP_LOT_SCALE;
+    const offer = {
+      offerId: 'offer-cancel',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'alice',
+      accountId: 'alice',
+      createdHeight: 1,
+      giveTokenId: 2,
+      giveAmount: lot,
+      wantTokenId: 1,
+      wantAmount: 1000n * lot / 10_000n,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1000n,
+    };
+
+    const aliceAccount = makeAccountMachine(offer as any);
+    let book = createBook({
+      tick: 1n,
+      pmin: 900n,
+      pmax: 1100n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'alice',
+      orderId: 'alice:offer-cancel',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 1000n,
+      qtyLots: 1,
+    }).state;
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([['alice', aliceAccount]]),
+      pendingSwapFillRatios: new Map(),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: ['1/2'],
+        },
+        books: new Map([['1/2', book]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processOrderbookCancels(entityState, [{ accountId: 'alice', offerId: 'offer-cancel' }]);
+    expect(result.mempoolOps).toHaveLength(1);
+    expect(result.mempoolOps[0]!.accountId).toBe('alice');
+    expect(result.mempoolOps[0]!.tx.type).toBe('swap_resolve');
+    expect(result.mempoolOps[0]!.tx.data.offerId).toBe('offer-cancel');
+    expect(result.mempoolOps[0]!.tx.data.cancelRemainder).toBe(true);
+  });
+
+  test('processOrderbookCancels does not duplicate account-level cancel already pending in frame', () => {
+    const lot = SWAP_LOT_SCALE;
+    const offer = {
+      offerId: 'offer-cancel-pending',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'alice',
+      accountId: 'alice',
+      createdHeight: 1,
+      giveTokenId: 2,
+      giveAmount: lot,
+      wantTokenId: 1,
+      wantAmount: 1000n * lot / 10_000n,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1000n,
+    };
+
+    const aliceAccount = makeAccountMachine(offer as any);
+    aliceAccount.pendingFrame = {
+      height: 1,
+      timestamp: 1,
+      jHeight: 0,
+      accountTxs: [{ type: 'swap_resolve', data: { offerId: 'offer-cancel-pending', fillRatio: 0, cancelRemainder: true } }],
+      prevFrameHash: '',
+      tokenIds: [],
+      deltas: [],
+      stateHash: '',
+      byLeft: true,
+    };
+
+    let book = createBook({
+      tick: 1n,
+      pmin: 900n,
+      pmax: 1100n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'alice',
+      orderId: 'alice:offer-cancel-pending',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 1000n,
+      qtyLots: 1,
+    }).state;
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([['alice', aliceAccount]]),
+      pendingSwapFillRatios: new Map(),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: ['1/2'],
+        },
+        books: new Map([['1/2', book]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processOrderbookCancels(entityState, [{ accountId: 'alice', offerId: 'offer-cancel-pending' }]);
+    expect(result.mempoolOps).toHaveLength(0);
   });
 });

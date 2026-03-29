@@ -25,6 +25,44 @@ async function openSettingsTab(page: Page): Promise<void> {
   await expect(page.getByRole('button', { name: 'Display' }).first()).toBeVisible({ timeout: 20_000 });
 }
 
+async function openAccountWorkspaceTab(page: Page, tabId: string): Promise<void> {
+  const testId = `account-workspace-tab-${tabId}`;
+  const visibleTab = page.locator(`[data-testid="${testId}"]:visible`).first();
+  if (!(await visibleTab.isVisible().catch(() => false))) {
+    const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
+    if (await mobileToggle.isVisible().catch(() => false)) {
+      await mobileToggle.click();
+    }
+  }
+  const tab = page.locator(`[data-testid="${testId}"]:visible`).first();
+  await expect(tab).toBeVisible({ timeout: 20_000 });
+  await tab.click();
+}
+
+async function captureAccountWorkspaces(
+  page: Page,
+  prefix: string,
+  output: Parameters<typeof capturePageScreenshot>[1],
+): Promise<void> {
+  await openAccountsTab(page);
+
+  await openAccountWorkspaceTab(page, 'send');
+  await expect(page.getByTestId('payment-amount-input').first()).toBeVisible({ timeout: 20_000 });
+  await capturePageScreenshot(page, output, `${prefix}-accounts-pay.png`);
+
+  await openAccountWorkspaceTab(page, 'receive');
+  await expect(page.getByTestId('receive-invoice-amount').first()).toBeVisible({ timeout: 20_000 });
+  await capturePageScreenshot(page, output, `${prefix}-accounts-receive.png`);
+
+  await openAccountWorkspaceTab(page, 'swap');
+  await expect(page.getByTestId('swap-order-amount').first()).toBeVisible({ timeout: 20_000 });
+  await capturePageScreenshot(page, output, `${prefix}-accounts-swap.png`);
+
+  await openAccountWorkspaceTab(page, 'move');
+  await expect(page.getByTestId('move-confirm').first()).toBeVisible({ timeout: 20_000 });
+  await capturePageScreenshot(page, output, `${prefix}-accounts-move.png`);
+}
+
 async function captureMainTabs(
   page: Page,
   prefix: string,
@@ -34,6 +72,15 @@ async function captureMainTabs(
   await capturePageScreenshot(page, output, `${prefix}-assets.png`);
   await openAccountsTab(page);
   await capturePageScreenshot(page, output, `${prefix}-accounts.png`);
+  const firstDeltaToggle = page.locator('[data-counterparty-id] .delta-capacity-bar[role="button"]').first();
+  if (await firstDeltaToggle.isVisible().catch(() => false)) {
+    await firstDeltaToggle.click();
+    await expect(
+      page.locator('[data-counterparty-id] .inline-detail-row, [data-counterparty-id] .inline-details-stack').first(),
+    ).toBeVisible({ timeout: 20_000 });
+    await capturePageScreenshot(page, output, `${prefix}-accounts-expanded.png`);
+  }
+  await captureAccountWorkspaces(page, prefix, output);
   await openSettingsTab(page);
   await capturePageScreenshot(page, output, `${prefix}-settings.png`);
 }

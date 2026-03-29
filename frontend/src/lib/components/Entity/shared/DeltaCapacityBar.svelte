@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createEventDispatcher } from 'svelte';
   import { settings } from '$lib/stores/settingsStore';
   import type { DeltaParts, DeltaVisualScale } from './delta-types';
 
@@ -7,6 +8,10 @@
   export let layout: 'center' | 'sides' = 'center';
   export let pendingOutDebtMode: 'none' | 'pending' | 'settling' = 'none';
   export let visualScale: DeltaVisualScale | null = null;
+  export let interactive = false;
+  export let expanded = false;
+
+  const dispatch = createEventDispatcher<{ activate: void }>();
 
   const CENTER_GAP_PX = 10;
   const SIDES_GAP_PX = 10;
@@ -116,14 +121,32 @@
       setTimeout(() => { rippleActive = false; }, 800);
     }
   }
+
+  function activate(event?: MouseEvent | KeyboardEvent): void {
+    if (!interactive) return;
+    event?.stopPropagation();
+    dispatch('activate');
+  }
 </script>
 
 <div
   class="delta-capacity-bar"
   class:visual-center={hasVisualScale && layout === 'center'}
   class:visual-sides={hasVisualScale && layout === 'sides'}
+  class:interactive={interactive}
   class:anim-transition={animTransition}
   class:anim-glow={glowActive}
+  role={interactive ? 'button' : undefined}
+  tabindex={interactive ? 0 : undefined}
+  aria-expanded={interactive ? expanded : undefined}
+  on:click={activate}
+  on:keydown={(event) => {
+    if (!interactive) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      activate(event);
+    }
+  }}
   style={`--bar-h:${heightPx}px; --center-gap:${CENTER_GAP_PX}px; --sides-gap:${SIDES_GAP_PX}px;`}
 >
   {#if hasVisualScale}
@@ -237,6 +260,16 @@
   .delta-capacity-bar {
     width: 100%;
     position: relative;
+  }
+
+  .delta-capacity-bar.interactive {
+    cursor: pointer;
+  }
+
+  .delta-capacity-bar.interactive:focus-visible {
+    outline: 2px solid rgba(251, 191, 36, 0.78);
+    outline-offset: 4px;
+    border-radius: 6px;
   }
 
   .track {

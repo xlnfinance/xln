@@ -848,19 +848,17 @@ async function chooseVisibleRoute(page: Page, route: string[]): Promise<void> {
 }
 
 function parseRouteFeeText(rawText: string): bigint {
-  const match = rawText.match(/Fee:\s*([0-9][0-9,]*(?:\.[0-9]+)?)/i);
+  const match = rawText.match(/Fee:?\s*([0-9][0-9,]*(?:\.[0-9]+)?)/i);
   if (!match?.[1]) return 0n;
   const normalized = match[1].replace(/,/g, '').trim();
   return ethers.parseUnits(normalized, 18);
 }
 
-async function selectPayRecipient(page: Page, targetEntityId: string): Promise<void> {
-  const recipientPicker = page.locator('button.closed-trigger').first();
-  await expect(recipientPicker).toBeVisible({ timeout: 10_000 });
-  await recipientPicker.click();
-  const recipientOption = page.locator('.dropdown-item').filter({ hasText: targetEntityId }).first();
-  await expect(recipientOption).toBeVisible({ timeout: 10_000 });
-  await recipientOption.click();
+async function fillPayIntent(page: Page, targetEntityId: string): Promise<void> {
+  const invoiceInput = page.locator('#payment-invoice-input').first();
+  await expect(invoiceInput).toBeVisible({ timeout: 10_000 });
+  await invoiceInput.click();
+  await invoiceInput.fill(targetEntityId);
 }
 
 async function pay(page: Page, from: string, signerId: string, to: string, route: string[], amount: bigint): Promise<bigint> {
@@ -869,14 +867,14 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
 
   await openPayWorkspace(page);
 
-  await selectPayRecipient(page, to);
+  await fillPayIntent(page, to);
 
   const amountInput = page.locator('#payment-amount-input');
   await expect(amountInput).toBeVisible({ timeout: 10_000 });
   await amountInput.click();
   await amountInput.fill(ethers.formatUnits(amount, 18));
 
-  const findRoutesBtn = page.getByRole('button', { name: 'Find Routes' }).first();
+  const findRoutesBtn = page.getByRole('button', { name: 'Find route' }).first();
   await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
   await findRoutesBtn.click();
 
@@ -887,7 +885,7 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
   const selectedRouteText = (await selectedRoute.textContent().catch(() => '')) || '';
   const quotedSenderSpend = amount + parseRouteFeeText(selectedRouteText);
 
-  const sendPaymentBtn = page.getByRole('button', { name: /Send Hashlock Payment|Pay Now/i }).first();
+  const sendPaymentBtn = page.getByRole('button', { name: /Pay now/i }).first();
   await expect(sendPaymentBtn).toBeEnabled({ timeout: 10_000 });
   await sendPaymentBtn.click();
   await page.waitForTimeout(200);
@@ -897,19 +895,19 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
 async function attemptOverspend(page: Page, to: string, route: string[], amount: bigint): Promise<void> {
   await openPayWorkspace(page);
 
-  await selectPayRecipient(page, to);
+  await fillPayIntent(page, to);
 
   const amountInput = page.locator('#payment-amount-input');
   await amountInput.click();
   await amountInput.fill(ethers.formatUnits(amount, 18));
 
-  const findRoutesBtn = page.getByRole('button', { name: 'Find Routes' }).first();
+  const findRoutesBtn = page.getByRole('button', { name: 'Find route' }).first();
   await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
   await findRoutesBtn.click();
   await page.waitForTimeout(500);
   await chooseVisibleRoute(page, route);
 
-  const sendPaymentBtn = page.getByRole('button', { name: /Send Hashlock Payment|Pay Now/i }).first();
+  const sendPaymentBtn = page.getByRole('button', { name: /Pay now/i }).first();
   if (await sendPaymentBtn.isEnabled().catch(() => false)) {
     await sendPaymentBtn.click();
     await page.waitForTimeout(300);

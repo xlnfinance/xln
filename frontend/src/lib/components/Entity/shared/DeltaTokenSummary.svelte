@@ -21,8 +21,9 @@
   export let actionLabel = '';
   export let actionTokenId: number | null = null;
   export let actionDisabled = false;
+  export let expanded = false;
 
-  const dispatch = createEventDispatcher<{ action: { tokenId: number | null } }>();
+  const dispatch = createEventDispatcher<{ action: { tokenId: number | null }; bartoggle: void }>();
 
   function iconForSymbol(rawSymbol: string): { text: string; cls: string } {
     const s = String(rawSymbol || '').toUpperCase();
@@ -64,6 +65,10 @@
 
   function emitAction(): void {
     dispatch('action', { tokenId: actionTokenId });
+  }
+
+  function emitBarToggle(): void {
+    dispatch('bartoggle');
   }
 
   // Delta flash: show "+100" / "-50" on capacity change
@@ -167,6 +172,9 @@
       {pendingOutDebtMode}
       heightPx={barHeight}
       visualScale={resolvedVisualScale}
+      interactive={true}
+      {expanded}
+      on:activate={emitBarToggle}
     />
   {/if}
 </div>
@@ -277,8 +285,8 @@
 
   .cap-label {
     font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: none;
+    letter-spacing: 0.02em;
     color: #9ca3af;
     font-weight: 700;
     line-height: 1;
@@ -445,9 +453,9 @@
 
   .metric-label {
     font-size: 11px;
-    letter-spacing: 0.07em;
+    letter-spacing: 0.02em;
     line-height: 1;
-    text-transform: uppercase;
+    text-transform: none;
     color: #9ca3af;
     font-weight: 700;
     flex: 0 0 auto;
@@ -503,8 +511,8 @@
     color: #52525b;
     font-size: 10px;
     font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    text-transform: none;
+    letter-spacing: 0.01em;
     line-height: 1;
   }
 

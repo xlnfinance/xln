@@ -24,6 +24,7 @@
   const AGGREGATED_ORDERBOOK_DEPTH = 10;
   const SELECTED_ORDERBOOK_DEPTH = 10;
   const ORDERBOOK_PRICE_SCALE = 10_000n;
+  const ORDERBOOK_MAX_LEVELS = 40_000;
   const ORDERBOOK_LOT_SCALE = 10n ** 12n;
   type PreparedSwapOrderLike = {
     side: 0 | 1;
@@ -127,12 +128,9 @@
   let orderbookPairId = '1/2';
   let orderbookViewKey = '';
   let orderbookRefreshNonce = 0;
-  let orderbookPriceStep: 'auto' | '0.0001' | '0.001' | '0.01' | '0.1' | '1' | '10' | '50' | '100' = 'auto';
+  let orderbookPriceStep: '0.0001' | '0.001' | '0.01' | '0.1' | '1' | '10' | '50' | '100' = '0.0001';
   let orderbookAutoResolvedPriceStep: '0.0001' | '0.001' | '0.01' | '0.1' | '1' | '10' | '50' | '100' = '1';
   let orderPercent = 100;
-  let slippagePct = 0; // 0 = strict limit, 0.1-10 = market order with cap
-  let orderType: 'market' | 'limit' = 'limit';
-  const MARKET_SLIPPAGE_PCT = 5; // Market orders use ±5% from best price
   let submitError = '';
   let pendingSwapFeedbackOfferId = '';
   let swapCompletionModal: SwapCompletionModal | null = null;
@@ -597,6 +595,68 @@
     return readCurrentHubBestPriceTicks(bookSide, activeOrderAccountId);
   }
 
+  function readCurrentHubPairBook(hubEntityId: string): any | null {
+    if (!activeEnv?.eReplicas || !hubEntityId) return null;
+    const normalizedHubId = String(hubEntityId).trim().toLowerCase();
+    if (!normalizedHubId) return null;
+    for (const [key, replica] of activeEnv.eReplicas.entries()) {
+      const entityId = String(key || '').split(':')[0]?.trim().toLowerCase();
+      if (entityId !== normalizedHubId) continue;
+      return replica?.state?.orderbookExt?.books?.get?.(orderbookPairId) || null;
+    }
+    return null;
+  }
+
+  function readBookOccupiedPriceBounds(book: any): { minPrice: bigint; maxPrice: bigint; tick: bigint } | null {
+    const pmin = toBigIntSafe(book?.params?.pmin);
+    const tick = toBigIntSafe(book?.params?.tick);
+    const levels = Number(book?.levels ?? 0);
+    const levelHeadBid = book?.levelHeadBid;
+    const levelHeadAsk = book?.levelHeadAsk;
+    if (pmin === null || tick === null || tick <= 0n || !Number.isFinite(levels) || levels <= 0) return null;
+    if (!(levelHeadBid instanceof Int32Array) || !(levelHeadAsk instanceof Int32Array)) return null;
+
+    let minIdx = -1;
+    for (let idx = 0; idx < levels; idx += 1) {
+      if (levelHeadBid[idx] !== -1 || levelHeadAsk[idx] !== -1) {
+        minIdx = idx;
+        break;
+      }
+    }
+    if (minIdx < 0) return null;
+
+    let maxIdx = -1;
+    for (let idx = levels - 1; idx >= 0; idx -= 1) {
+      if (levelHeadBid[idx] !== -1 || levelHeadAsk[idx] !== -1) {
+        maxIdx = idx;
+        break;
+      }
+    }
+    if (maxIdx < minIdx) return null;
+
+    return {
+      minPrice: pmin + (BigInt(minIdx) * tick),
+      maxPrice: pmin + (BigInt(maxIdx) * tick),
+      tick,
+    };
+  }
+
+  function computeExactSpanValidationError(counterpartyEntityId: string, candidatePriceTicks: bigint | null): string {
+    if (!counterpartyEntityId || !candidatePriceTicks || candidatePriceTicks <= 0n) return '';
+    const book = readCurrentHubPairBook(counterpartyEntityId);
+    if (!book) return '';
+    const bounds = readBookOccupiedPriceBounds(book);
+    if (!bounds) return '';
+
+    const minObserved = candidatePriceTicks < bounds.minPrice ? candidatePriceTicks : bounds.minPrice;
+    const maxObserved = candidatePriceTicks > bounds.maxPrice ? candidatePriceTicks : bounds.maxPrice;
+    const requiredLevels = ((maxObserved - minObserved) / bounds.tick) + 1n;
+    if (requiredLevels > BigInt(ORDERBOOK_MAX_LEVELS)) {
+      return 'Price is too far from the current exact orderbook for this hub.';
+    }
+    return '';
+  }
+
   function computePriceDeviationBps(limitTicks: bigint, referenceTicks: bigint): bigint {
     if (limitTicks <= 0n || referenceTicks <= 0n) return 0n;
     const delta = limitTicks > referenceTicks ? limitTicks - referenceTicks : referenceTicks - limitTicks;
@@ -623,6 +683,8 @@
         return 'Price must stay within 30% of the current orderbook.';
       }
     }
+    const exactSpanValidationError = computeExactSpanValidationError(input.counterpartyId, input.limitPriceTicks);
+    if (exactSpanValidationError) return exactSpanValidationError;
     if (input.wantAmount <= 0n) return 'Amount to receive is too small for selected price.';
     if (input.notionalUsd < MIN_ORDER_NOTIONAL_USD) {
       return `Minimum order size is ~$${MIN_ORDER_NOTIONAL_USD}.`;
@@ -788,25 +850,16 @@
   }
 
   function readCurrentHubBestPriceTicks(side: BookSide, hubEntityId: string): bigint | null {
-    if (!activeEnv?.eReplicas || !hubEntityId) return null;
-    const normalizedHubId = String(hubEntityId).trim().toLowerCase();
-    if (!normalizedHubId) return null;
-    for (const [key, replica] of activeEnv.eReplicas.entries()) {
-      const entityId = String(key || '').split(':')[0]?.trim().toLowerCase();
-      if (entityId !== normalizedHubId) continue;
-      const book = replica?.state?.orderbookExt?.books?.get?.(orderbookPairId);
-      if (!book) return null;
-      const params = book.params || {};
-      const idx = side === 'ask'
-        ? Number(book.bestAskIdx ?? -1)
-        : Number(book.bestBidIdx ?? -1);
-      if (!Number.isFinite(idx) || idx < 0) return null;
-      const pmin = toBigIntSafe(params.pmin) ?? 0n;
-      const tick = toBigIntSafe(params.tick) ?? 1n;
-      const price = pmin + (BigInt(idx) * tick);
-      return price > 0n ? price : null;
-    }
-    return null;
+    const book = readCurrentHubPairBook(hubEntityId);
+    if (!book) return null;
+    const idx = side === 'ask'
+      ? Number(book.bestAskIdx ?? -1)
+      : Number(book.bestBidIdx ?? -1);
+    if (!Number.isFinite(idx) || idx < 0) return null;
+    const pmin = toBigIntSafe(book.params?.pmin) ?? 0n;
+    const tick = toBigIntSafe(book.params?.tick) ?? 1n;
+    const price = pmin + (BigInt(idx) * tick);
+    return price > 0n ? price : null;
   }
 
   function toggleOrderbookScope(): void {
@@ -911,19 +964,6 @@
     if (suggestedTicks && suggestedTicks > 0n) {
       priceRatioInput = formatPriceTicks(suggestedTicks);
       hasAutoSuggestedInitialPrice = true;
-    }
-  }
-
-  // Market mode: auto-set price to bestAsk+5% (buy) or bestBid-5% (sell)
-  // Price already includes the buffer — slippagePct stays 0, IOC is forced via orderType.
-  $: if (orderType === 'market') {
-    const refTicks = resolveReferencePriceTicks();
-    if (refTicks && refTicks > 0n) {
-      const adjustment = (refTicks * BigInt(MARKET_SLIPPAGE_PCT * 100)) / 10000n;
-      const marketTicks = tradeSide === 'buy-base'
-        ? refTicks + adjustment
-        : (refTicks > adjustment ? refTicks - adjustment : 1n);
-      priceRatioInput = formatPriceTicks(marketTicks);
     }
   }
 
@@ -1409,32 +1449,7 @@
       );
       let canonicalPriceTicks = explicitSubmitPriceTicks;
 
-      // Apply slippage: if > 0%, adjust price to guarantee crossing
-      // BUY: price UP by slippage% (willing to pay more)
-      // SELL: price DOWN by slippage% (willing to receive less)
-      if (slippagePct > 0 && canonicalPriceTicks > 0n) {
-        const slipBps = BigInt(Math.round(slippagePct * 100)); // 1% = 100bps
-        if (tradeSide === 'buy-base') {
-          canonicalPriceTicks = canonicalPriceTicks + (canonicalPriceTicks * slipBps) / 10000n;
-        } else {
-          const reduction = (canonicalPriceTicks * slipBps) / 10000n;
-          canonicalPriceTicks = canonicalPriceTicks > reduction ? canonicalPriceTicks - reduction : 1n;
-        }
-        // Recompute amounts at slippage-adjusted price
-        const LOT_SCALE = 10n ** 12n;
-        const rawBase = tradeSide === 'sell-base' ? giveAmount : wantAmount;
-        const quantizedBase = (rawBase / LOT_SCALE) * LOT_SCALE;
-        if (quantizedBase > 0n) {
-          const adjustedQuote = (quantizedBase * canonicalPriceTicks) / ORDERBOOK_PRICE_SCALE;
-          if (adjustedQuote > 0n) {
-            effectiveGiveAmount = tradeSide === 'sell-base' ? quantizedBase : adjustedQuote;
-            effectiveWantAmount = tradeSide === 'sell-base' ? adjustedQuote : quantizedBase;
-          }
-        }
-      }
-
-      // IOC when using slippage (market order behavior)
-      const useIOC = orderType === 'market' || slippagePct > 0 || !!selectedOrderLevel;
+      const useIOC = !!selectedOrderLevel;
 
       if (effectiveGiveAmount <= 0n || effectiveWantAmount <= 0n) {
         throw new Error('Quantized order too small');
@@ -1616,7 +1631,6 @@
   }
 
   function stepPrice(direction: 1 | -1): void {
-    if (orderType === 'market') return;
     const current = parseDecimalAmountToBigInt(priceRatioInput || '0', ORDERBOOK_PRICE_DECIMALS);
     const step = 1n; // 1 tick = 0.0001
     const next = current + BigInt(direction) * step;
@@ -1687,38 +1701,27 @@
     <div class="section section-order">
       <SwapOrderModeRail
         tradeSide={tradeSide}
-        orderType={orderType}
         selectedHubOptions={selectedHubOptions}
         selectedHubValue={createOrderAccountId}
         on:tradesidechange={(event) => setTradeSide(event.detail)}
-        on:ordertypechange={(event) => {
-          orderType = event.detail;
-          slippagePct = 0;
-        }}
         on:hubchange={(event) => handleSelectedHubChange(event.detail)}
       />
 
       <div class="order-input-row">
         <span class="input-label">Price</span>
-        {#if orderType === 'market'}
-          <input type="text" readonly value="{priceRatioInput || '—'}" class="readonly-input market-price-input" data-testid="swap-order-price" title="Best {tradeSide === 'buy-base' ? 'ask' : 'bid'} ±{MARKET_SLIPPAGE_PCT}%" />
-        {:else}
-          <input
-            type="text"
-            bind:value={priceRatioInput}
-            inputmode="decimal"
-            data-testid="swap-order-price"
-            aria-label="Swap order price"
-            on:input={handlePriceRatioInput}
-          />
-        {/if}
-        <span class="input-suffix">{orderType === 'market' ? `±${MARKET_SLIPPAGE_PCT}%` : quoteTokenSymbol}</span>
-        {#if orderType === 'limit'}
-          <div class="input-steppers">
-            <button type="button" class="step-btn" on:click={() => stepPrice(1)}>▲</button>
-            <button type="button" class="step-btn" on:click={() => stepPrice(-1)}>▼</button>
-          </div>
-        {/if}
+        <input
+          type="text"
+          bind:value={priceRatioInput}
+          inputmode="decimal"
+          data-testid="swap-order-price"
+          aria-label="Swap order price"
+          on:input={handlePriceRatioInput}
+        />
+        <span class="input-suffix">{quoteTokenSymbol}</span>
+        <div class="input-steppers">
+          <button type="button" class="step-btn" on:click={() => stepPrice(1)}>▲</button>
+          <button type="button" class="step-btn" on:click={() => stepPrice(-1)}>▼</button>
+        </div>
       </div>
 
       <div class="order-input-row">
@@ -1758,7 +1761,7 @@
 
       <label class="order-input-row">
         <span class="input-label">Total</span>
-        <input type="text" readonly value={orderType === 'market' ? `~ ${formatAmount(wantAmount, wantToken)}` : formatAmount(wantAmount, wantToken)} class="readonly-input" />
+        <input type="text" readonly value={formatAmount(wantAmount, wantToken)} class="readonly-input" />
         <span class="input-suffix">{wantTokenSymbol}</span>
       </label>
 
@@ -2109,12 +2112,6 @@
 
   .step-btn:active {
     background: #353842 !important;
-  }
-
-  .market-price-input {
-    color: #9ca3af;
-    font-style: normal;
-    font-size: 13px;
   }
 
   .size-slider-row {

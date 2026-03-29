@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { ComponentType } from 'svelte';
   import { createEventDispatcher } from 'svelte';
-  import { ChevronDown, ChevronUp } from 'lucide-svelte';
+  import { ChevronDown, Menu } from 'lucide-svelte';
 
   type RailTab = {
     id: string;
@@ -23,12 +23,20 @@
   $: openTab = primaryTabs.find((tab) => tab.id === 'open') ?? null;
   $: primaryGridTabs = primaryTabs.filter((tab) => tab.id !== 'open');
   $: activeSecondaryTab = secondaryTabs.find((tab) => tab.id === activeTab) ?? null;
-  $: if (activeSecondaryTab) {
-    mobileFoldOpen = true;
-  }
+  $: activeMobileTab = tabs.find((tab) => tab.id === activeTab)
+    ?? activeSecondaryTab
+    ?? openTab
+    ?? primaryGridTabs[0]
+    ?? tabs[0]
+    ?? null;
 
   function select(id: string): void {
     dispatch('select', id);
+  }
+
+  function selectMobile(id: string): void {
+    mobileFoldOpen = false;
+    select(id);
   }
 </script>
 
@@ -49,66 +57,31 @@
   </nav>
 
   <div class="mobile-rail" aria-label={ariaLabel}>
-    {#if openTab}
-      <button
-        type="button"
-        class="account-workspace-tab mobile-tab mobile-open-tab"
-        data-testid={`account-workspace-tab-${openTab.id}`}
-        class:active={activeTab === openTab.id}
-        on:click={() => select(openTab.id)}
-      >
-        <svelte:component this={openTab.icon} size={14} />
-        <span>{openTab.label}</span>
-      </button>
-    {/if}
-
-    {#if primaryGridTabs.length > 0}
-      <div class="mobile-tab-grid">
-        {#each primaryGridTabs as tab}
-          <button
-            type="button"
-            class="account-workspace-tab mobile-tab"
-            data-testid={`account-workspace-tab-${tab.id}`}
-            class:active={activeTab === tab.id}
-            on:click={() => select(tab.id)}
-          >
-            <svelte:component this={tab.icon} size={14} />
-            <span>{tab.label}</span>
-          </button>
-        {/each}
-      </div>
-    {/if}
-
-    {#if secondaryTabs.length > 0}
-      <details class="mobile-fold" bind:open={mobileFoldOpen}>
-        <summary class="mobile-fold-summary">
-          <span class="mobile-fold-copy">
-            <span class="mobile-fold-label">More</span>
-            <span class="mobile-fold-meta">
-              {#if activeSecondaryTab}
-                Active: {activeSecondaryTab.label}
-              {:else}
-                {secondaryTabs.length} tools
-              {/if}
-            </span>
+    {#if activeMobileTab}
+      <details class="mobile-fold mobile-select" bind:open={mobileFoldOpen}>
+        <summary class="mobile-fold-summary mobile-select-summary" data-testid="account-workspace-mobile-toggle">
+          <span class="mobile-select-current">
+            <svelte:component this={activeMobileTab.icon} size={15} />
+            <span>{activeMobileTab.label}</span>
           </span>
-          <span class="mobile-fold-icon">
-            {#if mobileFoldOpen}
-              <ChevronUp size={15} />
-            {:else}
+          <span class="mobile-select-actions">
+            <span class="mobile-select-menu-icon">
+              <Menu size={15} />
+            </span>
+            <span class="mobile-fold-icon">
               <ChevronDown size={15} />
-            {/if}
+            </span>
           </span>
         </summary>
 
-        <div class="mobile-tab-grid secondary-grid">
-          {#each secondaryTabs as tab}
+        <div class="mobile-tab-grid secondary-grid mobile-select-grid">
+          {#each tabs as tab}
             <button
               type="button"
               class="account-workspace-tab mobile-tab secondary-tab"
               data-testid={`account-workspace-tab-${tab.id}`}
               class:active={activeTab === tab.id}
-              on:click={() => select(tab.id)}
+              on:click={() => selectMobile(tab.id)}
             >
               <svelte:component this={tab.icon} size={14} />
               <span>{tab.label}</span>
@@ -152,10 +125,10 @@
     border-radius: 10px 10px 0 0;
     background: transparent;
     color: var(--theme-text-secondary, #a1a1aa);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 650;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
+    letter-spacing: 0.01em;
+    text-transform: none;
     white-space: nowrap;
     cursor: pointer;
     transition: all 0.15s ease;
@@ -188,17 +161,9 @@
     }
 
     .mobile-rail {
-      display: grid;
-      gap: 8px;
+      display: block;
       margin-top: var(--space-3, 12px);
-    }
-
-    .mobile-open-tab {
-      width: 100%;
-      justify-content: center;
-      min-height: 42px;
-      padding: 0 14px;
-      border-radius: 14px;
+      min-width: 0;
     }
 
     .mobile-tab-grid {
@@ -237,26 +202,45 @@
       box-sizing: border-box;
     }
 
+    .mobile-select-summary {
+      min-width: 0;
+    }
+
     .mobile-fold-summary::-webkit-details-marker {
       display: none;
     }
 
-    .mobile-fold-copy {
-      display: grid;
-      gap: 2px;
+    .mobile-select-current {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
       min-width: 0;
-    }
-
-    .mobile-fold-label {
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 700;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
+      letter-spacing: 0.01em;
+      text-transform: none;
+      color: var(--theme-text-primary, #e4e4e7);
     }
 
-    .mobile-fold-meta {
-      font-size: 10px;
-      color: var(--theme-text-muted, #71717a);
+    .mobile-select-current span:last-child {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .mobile-select-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .mobile-select-menu-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--theme-text-secondary, #a1a1aa);
     }
 
     .mobile-fold-icon {
@@ -265,14 +249,24 @@
       justify-content: center;
       color: var(--theme-text-secondary, #a1a1aa);
       flex-shrink: 0;
+      transition: transform 0.15s ease;
+    }
+
+    .mobile-select[open] .mobile-fold-icon {
+      transform: rotate(180deg);
     }
 
     .secondary-grid {
       padding: 0 8px 8px;
     }
 
+    .mobile-select-grid {
+      padding-top: 8px;
+    }
+
     .secondary-tab {
       background: color-mix(in srgb, var(--theme-input-bg, #09090b) 58%, transparent);
+      border-radius: 12px;
     }
   }
 

@@ -53,21 +53,20 @@ test.describe('Canonical /app#pay deep link', () => {
       await aliceSetupPage.close();
 
       const payPage = await aliceContext.newPage();
-      const payUrl =
-        `${APP_BASE_URL}/app#pay?` +
-        `id=${encodeURIComponent(bob.entityId)}` +
-        `&token=1` +
-        `&amt=5` +
-        `&desc=${encodeURIComponent('E2E direct pay deep link')}` +
-        `&locked=1` +
-        `&jId=arrakis`;
+      const invoiceParams = new URLSearchParams({
+        token: '1',
+        amount: '5',
+        desc: 'E2E direct pay deep link',
+        jId: 'arrakis',
+      });
+      const payUrl = `${APP_BASE_URL}/app#pay/${encodeURIComponent(`${bob.entityId}?${invoiceParams.toString()}`)}`;
       await payPage.goto(payUrl, { waitUntil: 'domcontentloaded' });
 
       await expect(payPage.locator('.payment-panel')).toBeVisible({ timeout: 60_000 });
       await expect(payPage.locator('#payment-amount-input')).toHaveValue('5');
 
       const paymentCursor = await getPersistedReceiptCursor(bobPage);
-      const findRoutesBtn = payPage.getByRole('button', { name: /^Find Routes$/i });
+      const findRoutesBtn = payPage.getByRole('button', { name: /^Find route$/i });
       await expect(findRoutesBtn).toBeVisible({ timeout: 30_000 });
       await findRoutesBtn.click();
       await expect(payPage.locator('.route-option').first()).toBeVisible({ timeout: 30_000 });

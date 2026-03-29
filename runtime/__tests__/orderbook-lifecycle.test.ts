@@ -91,4 +91,53 @@ describe('orderbook lifecycle cleanup', () => {
     expect(activeCount).toBe(book.orderIdToIdx.size);
     expect(book.freeHead).toBeGreaterThanOrEqual(0);
   });
+
+  test('replace rejects off-grid and out-of-range prices', () => {
+    let book = createBook({
+      tick: 5n,
+      pmin: 100n,
+      pmax: 200n,
+      maxOrders: 16,
+      stpPolicy: 0,
+    });
+
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'maker-a',
+      orderId: 'bid-1',
+      side: 0,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 120n,
+      qtyLots: 10,
+    }).state;
+
+    const offGridReplace = applyCommand(book, {
+      kind: 2,
+      ownerId: 'maker-a',
+      orderId: 'bid-1',
+      newPriceTicks: 123n,
+      qtyDeltaLots: 0,
+    });
+    expect(offGridReplace.events).toContainEqual({
+      type: 'REJECT',
+      orderId: 'bid-1',
+      ownerId: 'maker-a',
+      reason: 'new price off grid',
+    });
+
+    const outOfRangeReplace = applyCommand(book, {
+      kind: 2,
+      ownerId: 'maker-a',
+      orderId: 'bid-1',
+      newPriceTicks: 205n,
+      qtyDeltaLots: 0,
+    });
+    expect(outOfRangeReplace.events).toContainEqual({
+      type: 'REJECT',
+      orderId: 'bid-1',
+      ownerId: 'maker-a',
+      reason: 'new price out of range',
+    });
+  });
 });

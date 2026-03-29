@@ -5,9 +5,10 @@
   import { settings } from '$lib/stores/settingsStore';
   import { p2pState } from '../../stores/xlnStore';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
-  import DeltaTokenList from './shared/DeltaTokenList.svelte';
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
+  import AccountTokenDetails from './shared/AccountTokenDetails.svelte';
   import { buildTokenVisualScale, sumVisualScales } from './shared/delta-visual';
+  import { buildAccountTokenDetails, isAccountLeftPerspective } from './shared/account-token-details';
   import { amountToUsdMicros } from '$lib/utils/assetPricing';
   import { getGossipProfile, resolveEntityName } from '$lib/utils/entityNaming';
   import { getAccountUiStatus, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
@@ -40,21 +41,13 @@
   export let activeFlowOverflowCount = 0;
 
   const dispatch = createEventDispatcher();
+  let expandedDetailTokenId: number | 'all' | null = null;
 
   $: activeXlnFunctions = $xlnFunctions;
   $: activeEnv = $xlnEnvironment;
 
   function getProfile(id: string): ReturnType<typeof getGossipProfile> {
     return getGossipProfile(id, activeEnv);
-  }
-
-  function isAccountLeftPerspective(ownerEntityId: string, currentAccount: AccountMachine): boolean {
-    const owner = String(ownerEntityId || '').trim().toLowerCase();
-    const left = String(currentAccount.leftEntity || '').trim().toLowerCase();
-    const right = String(currentAccount.rightEntity || '').trim().toLowerCase();
-    if (owner === left) return true;
-    if (owner === right) return false;
-    throw new Error(`Account perspective mismatch: owner=${ownerEntityId} left=${currentAccount.leftEntity} right=${currentAccount.rightEntity}`);
   }
 
   $: counterpartyProfile = getProfile(counterpartyId);
@@ -231,6 +224,8 @@
   $: hasAnyDeltas = tokenSummaries.length > 0;
   $: hasCommittedFrame = Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
   $: showDeltaRows = hasCommittedFrame && hasAnyDeltas;
+  $: tokenDetails = buildAccountTokenDetails(account, entityId, activeXlnFunctions);
+  $: tokenDetailById = new Map(tokenDetails.map((detail) => [detail.tokenId, detail] as const));
 
   $: isDevnet = (() => {
     if (!activeEnv?.jReplicas) return false;
@@ -327,6 +322,11 @@
 
   function handleClick() {
     dispatch('select', { accountId: counterpartyId });
+  }
+
+  function toggleInlineDetails(tokenId: number | 'all', event?: MouseEvent | KeyboardEvent): void {
+    event?.stopPropagation();
+    expandedDetailTokenId = expandedDetailTokenId === tokenId ? null : tokenId;
   }
 
   function handleFaucet(e: MouseEvent) {
@@ -509,35 +509,79 @@
 
   <!-- Row 2: Aggregate bar -->
   {#if showDeltaRows}
-    {#if accountDeltaViewMode === 'aggregated'}
-      <DeltaTokenSummary
-        compact={true}
-        barLayout={$settings.barLayout ?? 'center'}
-        symbol={primaryTokenInfo.symbol}
-        name={primaryTokenInfo.name}
-        outAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCap) || '0'}
-        inAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}
-        derived={aggDerived}
-        decimals={Number(primaryTokenInfo.decimals ?? 18)}
-        barHeight={6}
-        visualScale={aggregateVisualScale}
-        showBar={!liteMode}
-        actionLabel={liteMode ? '' : faucetLabel}
-        actionTokenId={agg.primaryTokenId}
-        on:action={() => handleTokenFaucet(agg.primaryTokenId)}
-      />
-    {:else}
-      <DeltaTokenList
-        rows={tokenSummaries}
-        barLayout={$settings.barLayout ?? 'center'}
-        barHeight={6}
-        showMetricLabels={false}
-        showBars={!liteMode}
-        showHeader={false}
-        mode="plain"
-        on:action={(event) => handleTokenFaucet(event.detail.tokenId)}
-      />
-    {/if}
+    <div class="delta-preview-list">
+      {#if accountDeltaViewMode === 'aggregated'}
+        <div class="delta-preview-toggle">
+          <DeltaTokenSummary
+            compact={true}
+            barLayout={$settings.barLayout ?? 'center'}
+            symbol={primaryTokenInfo.symbol}
+            name={primaryTokenInfo.name}
+            outAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCap) || '0'}
+            inAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}
+            derived={aggDerived}
+            decimals={Number(primaryTokenInfo.decimals ?? 18)}
+            barHeight={6}
+            visualScale={aggregateVisualScale}
+            showBar={!liteMode}
+            expanded={expandedDetailTokenId === 'all'}
+            actionLabel={liteMode ? '' : faucetLabel}
+            actionTokenId={agg.primaryTokenId}
+            on:action={(event) => {
+              event.stopPropagation();
+              handleTokenFaucet(agg.primaryTokenId);
+            }}
+            on:bartoggle={(event) => toggleInlineDetails('all', event)}
+          />
+        </div>
+        {#if expandedDetailTokenId === 'all'}
+          <div class="inline-details-stack">
+            {#each tokenDetails as detail (detail.tokenId)}
+              <AccountTokenDetails detail={detail} formatTokenAmount={activeXlnFunctions?.formatTokenAmount ?? null} />
+            {/each}
+          </div>
+        {/if}
+      {:else}
+        {#each tokenSummaries as row (row.tokenId)}
+          <div class="delta-row-stack">
+            <div class="delta-preview-toggle">
+              <DeltaTokenSummary
+                compact={true}
+                barLayout={$settings.barLayout ?? 'center'}
+                symbol={row.symbol}
+                name={row.name}
+                outAmount={row.outAmount}
+                inAmount={row.inAmount}
+                derived={row.derived}
+                decimals={row.decimals}
+                barHeight={6}
+                pendingOutDebtMode={row.pendingOutDebtMode}
+                visualScale={row.visualScale}
+                showMetricLabels={false}
+                showBar={!liteMode}
+                expanded={expandedDetailTokenId === row.tokenId}
+                actionLabel={liteMode ? '' : (row.actionLabel || '')}
+                actionTokenId={row.tokenId}
+                actionDisabled={row.actionDisabled || false}
+                on:action={(event) => {
+                  event.stopPropagation();
+                  handleTokenFaucet(event.detail.tokenId);
+                }}
+                on:bartoggle={(event) => toggleInlineDetails(row.tokenId, event)}
+              />
+            </div>
+            {#if expandedDetailTokenId === row.tokenId}
+              {@const detail = tokenDetailById.get(row.tokenId)}
+              {#if detail}
+                <div class="inline-detail-row">
+                  <AccountTokenDetails detail={detail} formatTokenAmount={activeXlnFunctions?.formatTokenAmount ?? null} />
+                </div>
+              {/if}
+            {/if}
+          </div>
+        {/each}
+      {/if}
+    </div>
   {:else}
     <div class="empty">{hasCommittedFrame ? 'No capacity' : 'Awaiting first frame'}</div>
   {/if}
@@ -583,6 +627,39 @@
   .account-preview.selected {
     border-color: var(--account-preview-border-strong);
     background: var(--account-preview-bg-hover);
+  }
+
+  .delta-preview-toggle {
+    border-radius: 12px;
+    cursor: pointer;
+  }
+
+  .delta-preview-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .delta-row-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .delta-preview-toggle:focus-visible {
+    outline: 1px solid color-mix(in srgb, var(--account-preview-accent) 70%, white 30%);
+    outline-offset: 3px;
+  }
+
+  .inline-details-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .inline-detail-row {
+    margin-top: 0;
   }
 
   /* ── Header ───────────────────────────────────── */

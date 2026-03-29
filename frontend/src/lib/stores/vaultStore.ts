@@ -412,35 +412,7 @@ const summarizeHealth = (payload: HealthPayload | null): Record<string, unknown>
   };
 };
 
-const waitForServerRuntimeReady = async (baseOrigin: string, timeoutMs = 30_000): Promise<void> => {
-  const healthUrl = new URL('/api/health', baseOrigin).toString();
-  const started = Date.now();
-  let lastHealth: Record<string, unknown> | null = null;
-  let lastStatus = 0;
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const response = await fetch(healthUrl);
-      lastStatus = response.status;
-      if (response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as HealthPayload;
-        lastHealth = summarizeHealth(payload);
-        const ready =
-          typeof payload?.timestamp === 'number'
-          && payload?.reset?.inProgress !== true
-          && payload?.system?.runtime === true;
-        if (ready) return;
-      }
-    } catch {
-      // retry
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(
-    `SERVER_RUNTIME_NOT_READY: status=${lastStatus} health=${JSON.stringify(lastHealth ?? {})}`,
-  );
-};
-
-const detectRpcChainId = async (rpcUrl: string, baseOrigin?: string): Promise<number> => {
+const detectRpcChainId = async (rpcUrl: string): Promise<number> => {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timeout = controller ? setTimeout(() => controller.abort(), 5000) : null;
   try {
@@ -457,17 +429,7 @@ const detectRpcChainId = async (rpcUrl: string, baseOrigin?: string): Promise<nu
     });
     if (!response.ok) {
       const body = (await response.text().catch(() => '')).slice(0, 300);
-      let health: Record<string, unknown> | null = null;
-      if (baseOrigin) {
-        try {
-          const healthRes = await fetch(new URL('/api/health', baseOrigin).toString());
-          const healthPayload = healthRes.ok ? await healthRes.json().catch(() => ({})) : { status: healthRes.status };
-          health = summarizeHealth(healthPayload);
-        } catch {
-          health = null;
-        }
-      }
-      logRpcFatal('RPC_CHAINID_HTTP_ERROR', { rpcUrl, status: response.status, body, health });
+      logRpcFatal('RPC_CHAINID_HTTP_ERROR', { rpcUrl, status: response.status, body });
       throw new Error(`RPC_CHAINID_HTTP_${response.status}:${body || 'empty'}`);
     }
     const payload = await response.json();
@@ -879,7 +841,6 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   }
 
   const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
-  await waitForServerRuntimeReady(baseOrigin);
   const jurisdictions = await fetchJurisdictions(baseOrigin);
   const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
   const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
@@ -890,7 +851,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   xln.setDeltaTransformerAddress?.(canonicalDeltaTransformerAddress);
   let chainId: number;
   try {
-    chainId = await detectRpcChainId(rpcUrl, baseOrigin);
+    chainId = await detectRpcChainId(rpcUrl);
     assertAnvilChain(chainId, rpcUrl, 'VaultStore.restore');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1466,7 +1427,6 @@ export const vaultOperations = {
     // Fetch pre-deployed contract addresses from prod
     console.log('[VaultStore.createRuntime] Fetching /api/jurisdictions...');
     const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
-    await waitForServerRuntimeReady(baseOrigin);
     markPerf('wait_server_runtime_ready');
     const jurisdictions = await fetchJurisdictions(baseOrigin);
     markPerf('fetch_jurisdictions');
@@ -1475,7 +1435,7 @@ export const vaultOperations = {
     const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
     let chainId: number;
     try {
-      chainId = await detectRpcChainId(rpcUrl, baseOrigin);
+      chainId = await detectRpcChainId(rpcUrl);
       markPerf('detect_rpc_chain_id');
       assertAnvilChain(chainId, rpcUrl, 'VaultStore.createRuntime');
     } catch (error) {

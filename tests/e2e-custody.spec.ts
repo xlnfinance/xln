@@ -192,7 +192,7 @@ async function ensureRuntimeProfileDownloaded(page: Page, entityId: string): Pro
 }
 
 async function waitForPopupRoutesAndSubmit(popup: Page, targetEntityId: string): Promise<void> {
-  const findRoutesButton = popup.getByRole('button', { name: /^Find Routes$/i });
+  const findRoutesButton = popup.getByRole('button', { name: /^Find route$/i });
   const firstRoute = popup.locator('.route-option').first();
   const routeError = popup.locator('.profile-preflight-error');
   await expect(findRoutesButton).toBeVisible({ timeout: 60_000 });
@@ -217,7 +217,7 @@ async function waitForPopupRoutesAndSubmit(popup: Page, targetEntityId: string):
   if (!await firstRoute.isVisible().catch(() => false)) {
     const currentUrl = popup.url();
     const currentError = (await routeError.textContent().catch(() => '') || '').trim();
-    const invoiceValue = await popup.getByLabel('Invoice').inputValue().catch(() => '');
+    const invoiceValue = await popup.locator('#payment-invoice-input').inputValue().catch(() => '');
     throw new Error(
       `Route not visible in wallet popup url=${currentUrl} error=${currentError || 'none'} invoice=${invoiceValue.slice(0, 96)}`,
     );
@@ -236,7 +236,7 @@ async function openWalletPayWorkspace(page: Page): Promise<void> {
   await expect(payTab).toBeVisible({ timeout: 20_000 });
   await payTab.click();
   console.log(`[custody:wallet] opened pay workspace url=${page.url()}`);
-  await expect(page.getByLabel('Invoice')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#payment-invoice-input')).toBeVisible({ timeout: 20_000 });
 }
 
 async function faucetOffchain(
@@ -687,6 +687,7 @@ async function waitForNewActivity(
   knownIds: Set<string>,
   kind: 'deposit' | 'withdrawal',
   status?: string,
+  timeoutMs = 30_000,
 ): Promise<Required<NonNullable<CustodyDashboardPayload['activity']>[number]>> {
   let found: Required<NonNullable<CustodyDashboardPayload['activity']>[number]> | null = null;
   await expect.poll(
@@ -717,11 +718,50 @@ async function waitForNewActivity(
       return found !== null;
     },
     {
-      timeout: 30_000,
+      timeout: timeoutMs,
       intervals: [500, 750, 1000],
       message: `custody must record a new ${kind} activity`,
     },
   ).toBe(true);
+  return found!;
+}
+
+async function waitForActivityStatus(
+  page: Page,
+  custodyBaseUrl: string,
+  activityId: string,
+  status: string,
+  timeoutMs = 60_000,
+): Promise<Required<NonNullable<CustodyDashboardPayload['activity']>[number]>> {
+  let found: Required<NonNullable<CustodyDashboardPayload['activity']>[number]> | null = null;
+  await expect.poll(
+    async () => {
+      const dashboard = await readCustodyDashboard(page, custodyBaseUrl);
+      const activity = Array.isArray(dashboard.activity) ? dashboard.activity : [];
+      const item = activity.find((entry) => String(entry.id || '') === activityId);
+      found = item
+        ? {
+            id: String(item.id || ''),
+            kind: String(item.kind || ''),
+            tokenId: Number(item.tokenId || 0),
+            amountMinor: String(item.amountMinor || '0'),
+            amountDisplay: String(item.amountDisplay || ''),
+            requestedAmountMinor: String(item.requestedAmountMinor || '0'),
+            requestedAmountDisplay: String(item.requestedAmountDisplay || ''),
+            feeMinor: String(item.feeMinor || '0'),
+            feeDisplay: String(item.feeDisplay || ''),
+            status: String(item.status || ''),
+            description: String(item.description || ''),
+          }
+        : null;
+      return found?.status || '';
+    },
+    {
+      timeout: timeoutMs,
+      intervals: [500, 750, 1000],
+      message: `custody activity ${activityId} must reach ${status}`,
+    },
+  ).toBe(status);
   return found!;
 }
 
@@ -849,8 +889,8 @@ test.describe('E2E Custody Flow', () => {
           await custodyPage.locator('input[name="depositAmount"]').fill(cycle.whole.toString());
           const invoice = (await custodyPage.locator('.deposit-invoice-string').first().textContent())?.trim() || '';
           const walletHref = (await custodyPage.locator('[data-open-wallet-href]').first().getAttribute('data-open-wallet-href'))?.trim() || '';
-          expect(invoice.startsWith('xln:?')).toBe(true);
-          expect(walletHref.includes('/app#pay?')).toBe(true);
+          expect(invoice).toMatch(/^0x[0-9a-f]{64}(?:\?|$)/i);
+          expect(walletHref).toContain('/app#pay/');
           if (cycleIndex === 1) {
             const copyButton = custodyPage.locator('[data-copy-invoice]').first();
             await copyButton.click();
@@ -862,15 +902,15 @@ test.describe('E2E Custody Flow', () => {
           if (await clearInvoiceButton.isVisible().catch(() => false)) {
             await clearInvoiceButton.click();
           }
-          await walletPage.getByLabel('Invoice').fill(invoice);
+          await walletPage.locator('#payment-invoice-input').fill(invoice);
           console.log(`[custody:wallet] invoice-filled cycle=${cycleIndex + 1} url=${walletPage.url()} invoice=${invoice.slice(0, 120)}`);
           await expect
             .poll(async () => {
-              const current = await walletPage.getByLabel('Invoice').inputValue();
+              const current = await walletPage.locator('#payment-invoice-input').inputValue();
               return {
-                hasId: current.includes(`id=${custodyIdentity.entityId}`),
+                hasId: current.startsWith(custodyIdentity.entityId),
                 hasToken: current.includes(`token=${cycle.tokenId}`),
-                hasAmount: current.includes(`amt=${cycle.whole.toString()}`),
+                hasAmount: current.includes(`amount=${cycle.whole.toString()}`),
               };
             }, { timeout: 5_000 })
             .toEqual({ hasId: true, hasToken: true, hasAmount: true });
@@ -914,21 +954,25 @@ test.describe('E2E Custody Flow', () => {
 
         const withdrawalActivity = await timedStep(`custody.withdraw_cycle_${cycleIndex + 1}`, async () => {
           await custodyPage.getByRole('button', { name: /^Withdraw$/i }).click();
-          await expect(custodyPage.getByText(/Queued withdrawal/i)).toBeVisible({ timeout: 15_000 });
           await custodyPage.bringToFront();
           return waitForNewActivity(
             custodyPage,
             custodyBaseUrl,
             knownBeforeWithdraw,
             'withdrawal',
-            'finalized',
+            undefined,
+            20_000,
           );
         });
-        expect(BigInt(withdrawalActivity.requestedAmountMinor)).toBe(cycle.whole * TOKEN_SCALE);
-        expect(Number(withdrawalActivity.tokenId)).toBe(cycle.tokenId);
-        expect(BigInt(withdrawalActivity.feeMinor)).toBeGreaterThan(0n);
+        const finalizedWithdrawal = await timedStep(
+          `custody.withdraw_cycle_${cycleIndex + 1}.wait_finalized`,
+          () => waitForActivityStatus(custodyPage, custodyBaseUrl, withdrawalActivity.id, 'finalized', 90_000),
+        );
+        expect(BigInt(finalizedWithdrawal.requestedAmountMinor)).toBe(cycle.whole * TOKEN_SCALE);
+        expect(Number(finalizedWithdrawal.tokenId)).toBe(cycle.tokenId);
+        expect(BigInt(finalizedWithdrawal.feeMinor)).toBeGreaterThan(0n);
 
-        const senderSpentMinor = BigInt(withdrawalActivity.amountMinor);
+        const senderSpentMinor = BigInt(finalizedWithdrawal.amountMinor);
         custodyBalances.set(cycle.tokenId, (custodyBalances.get(cycle.tokenId) ?? 0n) - senderSpentMinor);
         dashboard = await timedStep(
           `custody.withdraw_cycle_${cycleIndex + 1}.wait_debit`,
