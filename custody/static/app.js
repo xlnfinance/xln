@@ -92,6 +92,12 @@ const WALLET_WINDOW_NAME = 'xln-wallet';
 const ACTIVE_RELOAD_MS = 1000;
 const IDLE_RELOAD_MS = 5000;
 const MAX_RELOAD_BACKOFF_MS = 5000;
+const CANONICAL_WALLET_ORIGIN = 'https://xln.finance';
+const ALLOWED_WALLET_ORIGINS = new Set([
+  CANONICAL_WALLET_ORIGIN,
+  'https://localhost:8084',
+  'https://127.0.0.1:8084',
+]);
 
 const isHexChar = (char) => {
   if (typeof char !== 'string' || char.length !== 1) return false;
@@ -185,62 +191,61 @@ const createInvoiceId = () => {
 };
 
 const buildWalletPayHref = (sourceState, tokenId, amount, invoiceId) => {
-  if (!sourceState?.custody?.walletUrl) return '';
-  const base = new URL(sourceState.custody.walletUrl);
-  const url = new URL('/app', base.origin);
+  const url = new URL('/app', CANONICAL_WALLET_ORIGIN);
   const params = new URLSearchParams();
-  params.set('id', sourceState.custody.entityId);
   params.set('token', String(tokenId));
-  params.set('amt', String(amount).trim());
+  params.set('amount', String(amount).trim());
   params.set('u', sourceState.session.userId);
   params.set('desc', `Custody invoice:${invoiceId}`);
-  params.set('locked', '1');
-  params.set('mode', 'htlc');
   if (sourceState.custody.jurisdictionId) {
     params.set('jId', sourceState.custody.jurisdictionId);
   }
-  url.hash = `pay?${params.toString()}`;
+  url.hash = `pay/${encodeURIComponent(`${sourceState.custody.entityId}?${params.toString()}`)}`;
   return url.toString();
 };
 
 const buildInvoiceUri = (sourceState, tokenId, amount, invoiceId) => {
   const params = new URLSearchParams();
-  params.set('id', sourceState.custody.entityId);
   params.set('token', String(tokenId));
-  params.set('amt', String(amount).trim());
+  params.set('amount', String(amount).trim());
   params.set('u', sourceState.session.userId);
   params.set('desc', `Custody invoice:${invoiceId}`);
-  params.set('locked', '1');
-  params.set('mode', 'htlc');
   if (sourceState.custody.jurisdictionId) {
     params.set('jId', sourceState.custody.jurisdictionId);
   }
-  return `xln:?${params.toString()}`;
+  return `${sourceState.custody.entityId}?${params.toString()}`;
 };
 
 const parsePaymentIntent = (value) => {
   const raw = String(value || '').trim();
   if (!raw) return null;
 
-  const parseParams = (params) => {
-    const entityId = String(params.get('id') || '').trim().toLowerCase();
+  const parseParams = (entityIdRaw, params) => {
+    const entityId = String(entityIdRaw || '').trim().toLowerCase();
     if (!isEntityId(entityId)) return null;
-    const tokenIdValue = Number(params.get('token') || '1');
-    const amount = String(params.get('amt') || '').trim();
+    const tokenRaw = params.get('token');
+    const amountRaw = params.get('amount');
+    const tokenIdValue = tokenRaw === null ? null : Number(tokenRaw);
+    const amount = amountRaw === null ? '' : String(amountRaw).trim();
     return {
       entityId,
-      tokenId: Number.isFinite(tokenIdValue) && tokenIdValue > 0 ? tokenIdValue : 1,
+      tokenId: tokenIdValue !== null && Number.isFinite(tokenIdValue) && tokenIdValue > 0 ? tokenIdValue : null,
       amount,
     };
   };
 
   try {
-    if (raw.startsWith('xln:?')) {
-      return parseParams(new URLSearchParams(raw.slice('xln:?'.length)));
+    if (raw.startsWith('0x')) {
+      const [entityIdPart, queryPart = ''] = raw.split('?', 2);
+      return parseParams(entityIdPart, new URLSearchParams(queryPart));
     }
     const url = new URL(raw);
-    if (url.hash.startsWith('#pay?')) {
-      return parseParams(new URLSearchParams(url.hash.slice('#pay?'.length)));
+    if (!ALLOWED_WALLET_ORIGINS.has(url.origin)) return null;
+    if (url.hash.startsWith('#pay/')) {
+      const encoded = url.hash.slice('#pay/'.length);
+      const decoded = decodeURIComponent(encoded);
+      const [entityIdPart, queryPart = ''] = decoded.split('?', 2);
+      return parseParams(entityIdPart, new URLSearchParams(queryPart));
     }
   } catch {
     // fall through to raw entity id
@@ -249,7 +254,7 @@ const parsePaymentIntent = (value) => {
   if (isEntityId(raw)) {
     return {
       entityId: raw.toLowerCase(),
-      tokenId: selectedTokenId,
+      tokenId: null,
       amount: '',
     };
   }
@@ -301,7 +306,7 @@ const syncDepositTargets = (tokenId, amount, sourceState = state, options = {}) 
     pendingDepositInvoiceId = createInvoiceId();
     pendingInvoice = buildInvoiceUri(sourceState, tokenId, amount, pendingDepositInvoiceId);
     pendingWalletHref = buildWalletPayHref(sourceState, tokenId, amount, pendingDepositInvoiceId);
-    pendingQrSrc = `/api/qr?data=${encodeURIComponent(pendingInvoice)}`;
+    pendingQrSrc = `/api/qr?data=${encodeURIComponent(pendingWalletHref)}`;
   }
 };
 
@@ -365,7 +370,7 @@ bun custody/server.ts</pre>
         </div>
         <div class="integration-step">
           <div class="step-title">3. Deposit flow</div>
-          <div class="activity-sub">Custody generates a signed XLN invoice. User scans the QR, copies the invoice, or opens the wallet directly on the prefilled pay screen.</div>
+          <div class="activity-sub">Custody generates an XLN invoice. User scans the QR, copies the invoice, or opens the wallet directly on the prefilled pay screen.</div>
         </div>
         <div class="integration-step">
           <div class="step-title">4. Crediting</div>

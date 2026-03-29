@@ -197,6 +197,17 @@ server {
 
 ## Key Features
 
+### Custody upstream protocol
+
+- `custody/server.ts` serves HTTPS when `CUSTODY_HOST=localhost` and `CUSTODY_HTTPS` is unset/true.
+- In that mode nginx must proxy to the custody dashboard with:
+  - `proxy_pass https://127.0.0.1:8087;`
+  - `proxy_set_header Host localhost:8087;`
+  - `proxy_ssl_verify off;`
+  - `proxy_ssl_server_name on;`
+  - `proxy_ssl_name localhost;`
+- If custody is started with `CUSTODY_HOST=127.0.0.1` and `CUSTODY_HTTPS=0`, then plain `http://127.0.0.1:8087` is correct instead.
+
 ### Context File Serving (/c and /c.txt)
 
 - `/c`: Plain text display (for LLMs, curl, quick reads) - no download prompt

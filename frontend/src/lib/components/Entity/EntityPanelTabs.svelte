@@ -197,69 +197,161 @@
     return null;
   }
 
+  function canonicalizeHashRoute(routeRaw: string | null): string | null {
+    const route = String(routeRaw || '').trim().toLowerCase().replace(/^\/+|\/+$/g, '');
+    if (!route) return null;
+    if (route.startsWith('pay/')) return 'accounts/send';
+    switch (route) {
+      case 'assets':
+      case 'assets/move':
+      case 'external':
+      case 'reserves':
+        return 'assets';
+      case 'assets/history':
+        return 'assets/history';
+      case 'accounts':
+      case 'accounts/open':
+      case 'open':
+        return 'accounts/open';
+      case 'accounts/send':
+      case 'pay':
+      case 'send':
+        return 'accounts/send';
+      case 'accounts/receive':
+      case 'receive':
+        return 'accounts/receive';
+      case 'accounts/swap':
+      case 'swap':
+        return 'accounts/swap';
+      case 'accounts/move':
+      case 'move':
+        return 'accounts/move';
+      case 'accounts/history':
+      case 'history':
+        return 'accounts/history';
+      case 'accounts/configure':
+      case 'configure':
+        return 'accounts/configure';
+      case 'accounts/activity':
+      case 'activity':
+        return 'accounts/activity';
+      case 'accounts/appearance':
+      case 'appearance':
+        return 'accounts/appearance';
+      case 'settings':
+      case 'settings/wallet':
+      case 'wallet':
+        return 'settings';
+      case 'settings/display':
+      case 'display':
+        return 'settings/display';
+      case 'settings/network':
+      case 'network':
+      case 'gossip':
+        return 'settings/network';
+      case 'settings/data':
+      case 'data':
+        return 'settings/data';
+      case 'settings/log':
+      case 'log':
+      case 'chat':
+        return 'settings/log';
+      case 'settings/entity':
+      case 'entity':
+      case 'governance':
+      case 'create':
+        return 'settings/entity';
+      default:
+        return null;
+    }
+  }
+
+  function buildHashRouteFromState(): string {
+    if (activeTab === 'assets') {
+      return assetWorkspaceTab === 'history' ? 'assets/history' : 'assets';
+    }
+    if (activeTab === 'settings') {
+      return settingsSubview === 'wallet' ? 'settings' : `settings/${settingsSubview}`;
+    }
+    if (accountWorkspaceTab === 'open') return 'accounts';
+    return `accounts/${accountWorkspaceTab}`;
+  }
+
   function applyDeepLinkViewFromUrl(): void {
     if (typeof window === 'undefined') return;
 
-    const view = String(getUrlParamValue(['view']) || getUrlHashRoute() || '').trim().toLowerCase();
+    const hashRoute = canonicalizeHashRoute(getUrlHashRoute());
+    const view = String(getUrlParamValue(['view']) || hashRoute || '').trim().toLowerCase();
     const subview = String(getUrlParamValue(['subview', 'sub']) || '').trim().toLowerCase();
     const jurisdiction = String(getUrlParamValue(['jId', 'jurisdiction', 'j']) || '').trim();
 
     switch (view) {
       case 'assets':
-      case 'external':
-      case 'reserves':
+        activeTab = 'assets';
+        assetWorkspaceTab = 'move';
+        break;
+      case 'assets/history':
+        activeTab = 'assets';
+        assetWorkspaceTab = 'history';
+        break;
       case 'accounts':
-      case 'settings':
-        activeTab = (view === 'external' || view === 'reserves') ? 'assets' : view;
-        break;
-      case 'pay':
-      case 'send':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'send';
-        break;
-      case 'receive':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'receive';
-        break;
-      case 'swap':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'swap';
-        break;
-      case 'open':
+      case 'accounts/open':
         activeTab = 'accounts';
         accountWorkspaceTab = 'open';
         break;
-      case 'activity':
+      case 'accounts/send':
         activeTab = 'accounts';
-        accountWorkspaceTab = 'activity';
+        accountWorkspaceTab = 'send';
         break;
-      case 'configure':
+      case 'accounts/receive':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'receive';
+        break;
+      case 'accounts/swap':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'swap';
+        break;
+      case 'accounts/move':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'move';
+        break;
+      case 'accounts/history':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'history';
+        break;
+      case 'accounts/configure':
         activeTab = 'accounts';
         accountWorkspaceTab = 'configure';
         break;
-      case 'appearance':
+      case 'accounts/activity':
+        activeTab = 'accounts';
+        accountWorkspaceTab = 'activity';
+        break;
+      case 'accounts/appearance':
         activeTab = 'accounts';
         accountWorkspaceTab = 'appearance';
         break;
-      case 'wallet':
-      case 'display':
-      case 'network':
-      case 'data':
-      case 'log':
-      case 'entity':
+      case 'settings':
         activeTab = 'settings';
-        settingsSubview = view as SettingsSubview;
+        settingsSubview = 'wallet';
         break;
-      case 'chat':
+      case 'settings/display':
         activeTab = 'settings';
-        settingsSubview = 'log';
+        settingsSubview = 'display';
         break;
-      case 'gossip':
+      case 'settings/network':
         activeTab = 'settings';
         settingsSubview = 'network';
         break;
-      case 'governance':
-      case 'create':
+      case 'settings/data':
+        activeTab = 'settings';
+        settingsSubview = 'data';
+        break;
+      case 'settings/log':
+        activeTab = 'settings';
+        settingsSubview = 'log';
+        break;
+      case 'settings/entity':
         activeTab = 'settings';
         settingsSubview = 'entity';
         break;
@@ -290,6 +382,22 @@
       );
       selectedJurisdictionName = matched?.name ?? jurisdiction;
     }
+  }
+
+  function syncHashToCurrentView(): void {
+    if (typeof window === 'undefined') return;
+    const nextRoute = buildHashRouteFromState();
+    const currentRoute = getUrlHashRoute();
+    const currentCanonical = canonicalizeHashRoute(currentRoute);
+    if (typeof currentRoute === 'string' && currentRoute.toLowerCase().startsWith('pay/') && nextRoute === 'accounts/send') {
+      return;
+    }
+    const params = getUrlHashParams();
+    const preserveParams = currentCanonical === nextRoute && params && params.toString().length > 0;
+    const nextHash = preserveParams ? `${nextRoute}?${params.toString()}` : nextRoute;
+    const currentHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    if (currentHash === nextHash) return;
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#${nextHash}`);
   }
 
   const BALANCE_REFRESH_THROTTLE_MS = 1000;
@@ -4444,6 +4552,9 @@
       applyDeepLinkViewFromUrl();
     }
   }
+  $: if (typeof window !== 'undefined') {
+    syncHashToCurrentView();
+  }
 </script>
 
 <div class="entity-panel" data-panel-id={tab.id}>
@@ -4542,7 +4653,6 @@
                   <Copy size={12} />
                 {/if}
               </button>
-              <p class="muted wallet-meta-help">Identity for accounts, reserves, and settlement.</p>
             </div>
           </div>
         </div>
@@ -5249,7 +5359,6 @@
                       <span class="open-section-kicker">Network</span>
                       <h4 class="section-head">Open Account</h4>
                     </div>
-                    <p class="open-section-note">Discover verified counterparties and open bilateral credit lines.</p>
                   </div>
                   <HubDiscoveryPanel
                     entityId={replica?.state?.entityId || tab.entityId}
@@ -5260,18 +5369,17 @@
                   <div class="open-section-head compact">
                     <div class="open-section-copy">
                       <span class="open-section-kicker">Direct</span>
-                      <h4 class="section-head">Enter Entity ID</h4>
+                      <h4 class="section-head">Open by ID</h4>
                     </div>
-                    <p class="open-section-note">Paste a known entity ID to open directly without discovery.</p>
                   </div>
                   <div class="open-private-form">
                     <EntityInput
                       variant="move"
-                      label="Entity"
+                      label="Recipient"
                       value={openAccountEntityId}
                       entities={openAccountEntityOptions}
                       excludeId={replica?.state?.entityId || tab.entityId}
-                      placeholder="Select entity or paste full ID..."
+                      placeholder="Select or paste entity ID"
                       disabled={!activeIsLive}
                       on:change={handleOpenAccountTargetChange}
                     />
@@ -5284,7 +5392,7 @@
                 {#if disputedAccounts.length > 0}
                   <div class="open-section disputed-section">
                     <h4 class="section-head">Disputed Accounts</h4>
-                    <p class="muted" style="margin-top: 0;">Disputed accounts are hidden from the main list. Reopen here after finalize.</p>
+                    <p class="muted" style="margin-top: 0;">Hidden from the main list. Reopen after finalize.</p>
                     <div class="disputed-list">
                       {#each disputedAccounts as item (item.counterpartyId)}
                         <div class="disputed-row">
@@ -5390,6 +5498,7 @@
     color: var(--theme-text-primary, #e4e4e7);
     font-family: 'Inter', -apple-system, sans-serif;
     font-size: 13px;
+    box-sizing: border-box;
   }
 
   /* Header */
@@ -6202,11 +6311,11 @@
   }
 
   .section-head {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
     color: #71717a;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: none;
+    letter-spacing: 0.01em;
     margin: 18px 0 10px;
   }
 
@@ -6582,11 +6691,11 @@
     background: #1c1917;
     border-radius: 6px 6px 0 0;
     border-bottom: 1px solid #292524;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
     color: #57534e;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    text-transform: none;
+    letter-spacing: 0.01em;
   }
 
   /* Table Body */
@@ -6673,8 +6782,8 @@
   .asset-kind {
     font-size: 10px;
     color: #57534e;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    text-transform: none;
+    letter-spacing: 0.01em;
   }
 
   .asset-balance-block {
@@ -6829,10 +6938,10 @@
   }
 
   .open-section-kicker {
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0.01em;
+    text-transform: none;
     color: var(--theme-accent, #fbbf24);
   }
 
@@ -6988,6 +7097,8 @@
       --space-2: 8px;
       --space-3: 12px;
       --space-4: 16px;
+      max-width: 100%;
+      overflow-x: clip;
     }
 
     .header {
@@ -7069,6 +7180,31 @@
 
     .content {
       padding: 12px var(--panel-gutter-x);
+      max-width: 100%;
+      overflow-x: clip;
+    }
+
+    .header,
+    .hero,
+    .tabs,
+    .content,
+    .content > *,
+    .asset-ledger-meta,
+    .wallet-meta-block,
+    .accounts-selector-row,
+    .asset-action-card,
+    .account-workspace-content,
+    .workspace-pending-banner,
+    .workspace-pending-copy,
+    .workspace-pending-list,
+    .workspace-pending-actions,
+    .workspace-pending-chip,
+    .asset-ledger-table,
+    .asset-ledger-row {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
     }
 
     .tab-header-row,
@@ -7127,6 +7263,7 @@
       gap: 10px;
       overflow: visible;
       background: transparent;
+      align-self: stretch;
     }
 
     .asset-ledger-row {
@@ -7136,6 +7273,7 @@
       border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 72%, transparent);
       border-radius: 14px;
       background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent);
+      overflow: hidden;
     }
 
     .asset-ledger-row:last-child {
@@ -7151,9 +7289,11 @@
       align-items: flex-start;
       text-align: left;
       min-width: 0;
+      width: 100%;
       padding: 8px 10px;
       border-radius: 10px;
       background: color-mix(in srgb, var(--theme-input-bg, #09090b) 62%, transparent);
+      box-sizing: border-box;
     }
 
     .asset-ledger-row .asset-balance-block::before {

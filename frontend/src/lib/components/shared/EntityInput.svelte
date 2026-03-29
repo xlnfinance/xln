@@ -23,6 +23,11 @@
   export let preferredId: string = '';
   export let testId: string = '';
   export let variant: 'default' | 'move' = 'default';
+  export let inputId: string = '';
+  export let rawTextOverride: string = '';
+  export let alwaysShowInput: boolean = false;
+  export let hideDropdownHint: boolean = false;
+  export let strictValueInput: boolean = false;
 
   const dispatch = createEventDispatcher();
   $: activeFunctions = $xlnFunctions;
@@ -80,6 +85,17 @@
     const trimmed = input.trim();
     if (!trimmed) return { entityId: '', shortId: '', resolved: false };
 
+    const invoiceMatch = trimmed.match(/^(0x[0-9a-fA-F]{64})\?.+$/);
+    if (invoiceMatch?.[1]) {
+      const entityId = invoiceMatch[1].toLowerCase();
+      scheduleGossipProfileFetch([entityId]);
+      return {
+        entityId,
+        shortId: getShortIdFromHex(entityId),
+        resolved: true,
+      };
+    }
+
     // Full 32-byte hex
     if (/^0x[0-9a-fA-F]{64}$/.test(trimmed)) {
       scheduleGossipProfileFetch([trimmed.toLowerCase()]);
@@ -88,6 +104,10 @@
         shortId: getShortIdFromHex(trimmed),
         resolved: true
       };
+    }
+
+    if (strictValueInput) {
+      return { entityId: trimmed, shortId: '', resolved: false };
     }
 
     // Short hex (4 chars) with optional #
@@ -153,6 +173,15 @@
     return clean.slice(0, 4).toUpperCase();
   }
 
+  function getCompactEntityId(id: string): string {
+    const canonical = String(id || '').trim();
+    if (!canonical) return '';
+    if (/^0x[0-9a-fA-F]{64}$/.test(canonical)) {
+      return `${canonical.slice(0, 10)}...${canonical.slice(-6)}`;
+    }
+    return canonical;
+  }
+
   // Track unresolved input for display
   let unresolvedInput = '';
 
@@ -176,7 +205,7 @@
 
   // Filtered options
   $: filteredEntities = entities
-    .filter(id => id !== excludeId)
+    .filter(id => normalizeEntityId(id) !== normalizeEntityId(excludeId))
     .map(id => ({
       id,
       displayName: getKnownEntityName(id) || formatShortId(id),
@@ -224,19 +253,30 @@
     ? visibleOptions.filter((opt) => normalizeEntityId(opt.id) !== preferredNorm)
     : visibleOptions;
   $: selectedOption = allOptions.find((opt) => normalizeEntityId(opt.id) === normalizeEntityId(value)) ?? null;
+  $: normalizedRawText = String(rawTextOverride || '').trim();
+  $: rawTextLooksComplex = normalizedRawText.includes('?') || normalizedRawText.startsWith('http://') || normalizedRawText.startsWith('https://');
+  $: shouldPreferRawText = Boolean(
+    normalizedRawText
+    && (
+      rawTextLooksComplex
+      || !selectedOption
+      || normalizeEntityId(normalizedRawText) !== normalizeEntityId(value)
+    )
+  );
 
   // Handle selection
   function selectEntity(id: string) {
     value = id;
     inputValue = '';
     showDropdown = false;
-    dispatch('change', { value: id });
+    dispatch('change', { value: id, resolved: true, selected: true });
   }
 
   // Handle custom input with universal parsing
   function handleInputChange(e: Event) {
     const target = e.target as HTMLInputElement;
     inputValue = target.value;
+    dispatch('textinput', { value: inputValue });
 
     // Use universal parser
     const parsed = parseEntityInput(inputValue);
@@ -287,8 +327,13 @@
   }
 
   // Display value
-  $: closedSelectionVisible = Boolean(value && !showDropdown && selectedOption);
-  $: displayValue = value ? (selectedOption?.displayName || getDisplayName(value)) : '';
+  $: if (!showDropdown && normalizedRawText !== inputValue && (shouldPreferRawText || !value)) {
+    inputValue = normalizedRawText;
+  }
+  $: closedSelectionVisible = Boolean(value && !showDropdown && selectedOption && !shouldPreferRawText && !alwaysShowInput);
+  $: displayValue = shouldPreferRawText
+    ? normalizedRawText
+    : (value ? (selectedOption?.displayName || getDisplayName(value)) : normalizedRawText);
   $: selectedIsPreferred = selectedOption ? normalizeEntityId(selectedOption.id) === preferredNorm : false;
 </script>
 
@@ -317,7 +362,7 @@
               <span class="item-badge">Self</span>
             {/if}
           </span>
-          <span class="item-id">{selectedOption.id}</span>
+          <span class="item-id">{getCompactEntityId(selectedOption.id)}</span>
         </span>
         <span class="closed-trigger-arrow" aria-hidden="true">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -327,6 +372,7 @@
       </button>
     {:else}
       <input
+        id={inputId || undefined}
         class="entity-input-field"
         bind:this={inputRef}
         type="text"
@@ -378,7 +424,7 @@
               <span class="item-name">{pinnedOption.displayName}</span>
               <span class="item-badge">Self</span>
             </span>
-            <span class="item-id">{pinnedOption.id}</span>
+            <span class="item-id">{getCompactEntityId(pinnedOption.id)}</span>
           </span>
         </button>
         {#if remainingOptions.length > 0}
@@ -408,17 +454,19 @@
             {:else}
               <span class="item-avatar placeholder">?</span>
             {/if}
-            <span class="item-meta">
+            <span class="dropdown-item-main">
               <span class="item-name">{opt.displayName}</span>
-              <span class="item-id">{opt.id}</span>
+              <span class="item-id">{getCompactEntityId(opt.id)}</span>
             </span>
           </button>
         {/each}
       {/if}
 
-      <div class="dropdown-hint">
-        #5 (numbered) · #ABCD (short) · @name · 0x... (full)
-      </div>
+      {#if !hideDropdownHint}
+        <div class="dropdown-hint">
+          #5 (numbered) · #ABCD (short) · @name · 0x... (full)
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -463,12 +511,12 @@
 
   .input-label {
     display: block;
-    font-size: 11px;
-    font-weight: 700;
+    font-size: 12px;
+    font-weight: 600;
     color: var(--entity-text-muted) !important;
     margin-bottom: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    text-transform: none;
+    letter-spacing: 0.01em;
   }
 
   .input-wrapper {
@@ -631,10 +679,10 @@
   .dropdown-item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     width: 100%;
     min-width: 0;
-    padding: 11px 14px !important;
+    padding: 12px 14px !important;
     background: transparent !important;
     border: none !important;
     border-radius: 0 !important;
@@ -673,7 +721,7 @@
 
   .item-id {
     color: var(--entity-text-muted);
-    font-size: 10px;
+    font-size: 11px;
     font-family: 'JetBrains Mono', monospace;
     white-space: nowrap;
     overflow: hidden;
@@ -705,6 +753,15 @@
     flex: 1;
   }
 
+  .dropdown-item-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-width: 0;
+    width: 100%;
+  }
+
   .item-badge {
     display: inline-flex;
     align-items: center;
@@ -723,10 +780,10 @@
   .dropdown-section-label {
     padding: 8px 14px 6px;
     color: var(--entity-text-muted);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    text-transform: none;
   }
 
   .dropdown-divider {

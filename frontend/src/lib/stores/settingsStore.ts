@@ -1,7 +1,13 @@
 import { writable, get } from 'svelte/store';
 import type { Settings, ThemeName, BarColorMode, BarLayoutMode, AccountDeltaViewMode, UIStyleSettings } from '$lib/types/ui';
 import { applyThemeToDocument } from '../utils/themes';
-import { DEFAULT_UI_STYLE, applyUiStyleToDocument, exportUiSettings, normalizeImportedUiSettings, normalizeUiStyle } from '../utils/ui-style';
+import {
+  DEFAULT_UI_STYLE,
+  applyUiStyleToDocument,
+  exportUiSettings,
+  normalizeImportedUiSettings,
+  normalizeUiStyle,
+} from '../utils/ui-style';
 import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 
 const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token'] as const;

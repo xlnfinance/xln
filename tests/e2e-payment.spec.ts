@@ -151,13 +151,10 @@ test.describe('E2E HTLC Payment Flow', () => {
     await sendTab.click();
     process.stdout.write('  HTLC mode: default\n');
 
-    // The shared recipient picker now defaults to self. Open it and choose the connected hub.
-    const recipientPicker = page.locator('button.closed-trigger').first();
-    await expect(recipientPicker).toBeVisible({ timeout: 10_000 });
-    await recipientPicker.click();
-    const recipientOption = page.locator('.dropdown-item').filter({ hasText: connectedHubId! }).first();
-    await expect(recipientOption).toBeVisible({ timeout: 10_000 });
-    await recipientOption.click();
+    const invoiceInput = page.locator('#payment-invoice-input').first();
+    await expect(invoiceInput).toBeVisible({ timeout: 10_000 });
+    await invoiceInput.click();
+    await invoiceInput.fill(connectedHubId!);
 
     // Fill amount
     const amountInput = page.locator('#payment-amount-input');
@@ -166,7 +163,7 @@ test.describe('E2E HTLC Payment Flow', () => {
 
     // Find Routes
     await timedStep('payment.find_routes', async () => {
-      const findRoutesBtn = page.getByRole('button', { name: 'Find Routes' });
+      const findRoutesBtn = page.getByRole('button', { name: 'Find route' });
       await expect(findRoutesBtn).toBeEnabled({ timeout: 5000 });
       await findRoutesBtn.click();
       await expect(page.locator('text=/1 hop|route/i').first()).toBeVisible({ timeout: 10_000 });
@@ -176,7 +173,7 @@ test.describe('E2E HTLC Payment Flow', () => {
     const paymentCursor = await getPersistedReceiptCursor(page);
     const htlcSecretP = console.waitFor(/\[Send\] Hashlock secret=/);
     const finalizedEvent = await timedStep('payment.send_to_finalize', async () => {
-      const sendPaymentBtn = page.getByRole('button', { name: 'Pay Now' });
+      const sendPaymentBtn = page.getByRole('button', { name: 'Pay now' });
       await expect(sendPaymentBtn).toBeEnabled({ timeout: 5000 });
       await sendPaymentBtn.click();
 

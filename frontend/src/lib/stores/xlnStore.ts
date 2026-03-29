@@ -25,10 +25,7 @@ let XLN: XLNModule | null = null;
 let xlnLoadPromise: Promise<XLNModule> | null = null;
 export const xlnInstance = writable<XLNModule | null>(null);
 let unregisterEnvChange: (() => void) | null = null;
-const DEV_SESSION_STORAGE_KEY = 'xln-dev-session-id';
 const RESET_NOTICE_STORAGE_KEY = 'xln-reset-notice';
-const LOCAL_DEV_HOSTS = new Set(['localhost']);
-let devSessionMonitor: ReturnType<typeof setInterval> | null = null;
 
 type FrontendEntitySummary = {
   id: string;
@@ -195,76 +192,6 @@ export function resolveRelayUrls(): string[] {
   return [relay];
 }
 
-const isLocalDevOrigin = (): boolean =>
-  typeof window !== 'undefined' && LOCAL_DEV_HOSTS.has(window.location.hostname);
-
-type HealthResponse = {
-  devSessionId?: string | null;
-  system?: {
-    runtime?: boolean;
-  };
-};
-
-const fetchHealthResponse = async (): Promise<HealthResponse | null> => {
-  if (typeof window === 'undefined') return null;
-  const baseOrigin = window.location.origin;
-  const url = new URL('/api/health', resolveConfiguredApiBase(baseOrigin)).toString();
-  try {
-    const response = await fetch(url, { cache: 'no-store' });
-    if (!response.ok) return null;
-    return (await response.json()) as HealthResponse;
-  } catch {
-    return null;
-  }
-};
-
-const startDevSessionMonitor = (initialSessionId: string): void => {
-  if (!isLocalDevOrigin() || !initialSessionId || devSessionMonitor) return;
-  let knownSessionId = initialSessionId;
-  devSessionMonitor = setInterval(() => {
-    void (async () => {
-      const health = await fetchHealthResponse();
-      const nextSessionId = String(health?.devSessionId || '').trim();
-      if (!nextSessionId || nextSessionId === knownSessionId) return;
-      knownSessionId = nextSessionId;
-      try {
-        localStorage.setItem(DEV_SESSION_STORAGE_KEY, nextSessionId);
-      } catch {
-        // ignore storage errors
-      }
-      console.warn('[xlnStore] Dev session changed; preserving local runtimes and refreshing only');
-    })();
-  }, 1500);
-};
-
-export async function prepareDevSession(): Promise<void> {
-  if (!isLocalDevOrigin()) return;
-  const health = await fetchHealthResponse();
-  const sessionId = String(health?.devSessionId || '').trim();
-  if (!sessionId) return;
-  const storedSessionId = (() => {
-    try {
-      return localStorage.getItem(DEV_SESSION_STORAGE_KEY) || '';
-    } catch {
-      return '';
-    }
-  })();
-  if (storedSessionId && storedSessionId !== sessionId) {
-    try {
-      localStorage.setItem(DEV_SESSION_STORAGE_KEY, sessionId);
-    } catch {
-      // ignore storage errors
-    }
-  } else if (!storedSessionId) {
-    try {
-      localStorage.setItem(DEV_SESSION_STORAGE_KEY, sessionId);
-    } catch {
-      // ignore storage errors
-    }
-  }
-  startDevSessionMonitor(sessionId);
-}
-
 // Derived stores for convenience
 export const replicas = derived(xlnEnvironment, $env => $env?.eReplicas || new Map());
 
@@ -340,10 +267,6 @@ function stopP2PPoll() {
   if (p2pPollTimer) {
     clearInterval(p2pPollTimer);
     p2pPollTimer = null;
-  }
-  if (devSessionMonitor) {
-    clearInterval(devSessionMonitor);
-    devSessionMonitor = null;
   }
 }
 

@@ -15,6 +15,7 @@ import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote } from '../account
 // Price tick precision used for ratio encoding in orderbook flows.
 // 10000 = 4 decimals (e.g. 1.2345)
 export const ORDERBOOK_PRICE_SCALE = 10_000n;
+export const ORDERBOOK_MAX_LEVELS = 40_000;
 
 /** Canonical pair normalization */
 export function canonicalPair(tokenA: number, tokenB: number): { base: number; quote: number; pairId: string } {

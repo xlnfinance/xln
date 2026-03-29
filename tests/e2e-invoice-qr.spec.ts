@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { APP_BASE_URL, ensureE2EBaseline, waitForNamedHubs } from './utils/e2e-baseline';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
-import { waitForPersistedFrameEvent, getPersistedReceiptCursor } from './utils/e2e-runtime-receipts';
+import { getPersistedReceiptCursor, waitForPersistedFrameMessageMatch } from './utils/e2e-runtime-receipts';
 
 const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 240_000 : 150_000;
 
@@ -61,10 +61,10 @@ test.describe('Invoice QR flow', () => {
 
       const paymentCursor = await getPersistedReceiptCursor(bobPage);
       await alicePage.getByRole('button', { name: /^Pay$/i }).click();
-      await alicePage.getByRole('button', { name: /Scan QR/i }).click();
+      await alicePage.getByRole('button', { name: /^QR$/i }).click();
       await alicePage.locator('.scanner-file-input').setInputFiles(qrPath);
 
-      await expect(alicePage.locator('#payment-invoice-input')).toHaveValue(/xln:\?/i, { timeout: 30_000 });
+      await expect(alicePage.locator('#payment-invoice-input')).toHaveValue(/^0x[0-9a-f]{64}(?:\?|$)/i, { timeout: 30_000 });
       await expect(alicePage.locator('#payment-amount-input')).toHaveValue('7', { timeout: 30_000 });
       await expect(alicePage.locator('.route-option').first()).toBeVisible({ timeout: 60_000 });
       await alicePage.locator('.route-option').first().click();
@@ -72,14 +72,15 @@ test.describe('Invoice QR flow', () => {
       if (await sendOnSelectedRoute.isVisible().catch(() => false)) {
         await sendOnSelectedRoute.click();
       } else {
-        await alicePage.getByRole('button', { name: /^Pay Now$/i }).click();
+        await alicePage.getByRole('button', { name: /^Pay now$/i }).click();
       }
 
-      await waitForPersistedFrameEvent(bobPage, {
+      await waitForPersistedFrameMessageMatch(bobPage, {
         cursor: paymentCursor,
-        eventName: 'HtlcReceived',
         entityId: bob.entityId,
         timeoutMs: 45_000,
+        predicate: (event) =>
+          event.message === 'HtlcReceived' || event.message === 'account_settled_finalized_bilateral',
       });
     } finally {
       await aliceContext.close();

@@ -30,16 +30,13 @@ test.describe('Embedded Pay Button', () => {
     try {
       emptyContext = await browser.newContext({ ignoreHTTPSErrors: true });
       const emptyPage = await emptyContext.newPage();
-      const emptyUrl =
-        `${APP_BASE_URL}/app#pay?` +
-        `id=${encodeURIComponent(missingEntityId)}` +
-        `&token=1` +
-        `&amt=10` +
-        `&desc=${encodeURIComponent('E2E empty state')}` +
-        `&locked=1` +
-        `&jId=arrakis` +
-        `&mode=embed` +
-        `&segment=left`;
+      const emptyInvoice = `${missingEntityId}?${new URLSearchParams({
+        token: '1',
+        amount: '10',
+        desc: 'E2E empty state',
+        jId: 'arrakis',
+      }).toString()}`;
+      const emptyUrl = `${APP_BASE_URL}/app?mode=embed&segment=left#pay/${encodeURIComponent(emptyInvoice)}`;
       await emptyPage.goto(emptyUrl, { waitUntil: 'domcontentloaded' });
       const emptyButton = emptyPage.locator('button.paybutton').first();
       await expect(emptyButton).toBeVisible({ timeout: 30_000 });
@@ -72,16 +69,13 @@ test.describe('Embedded Pay Button', () => {
       await connectRuntimeToHub(alicePage, alice, hubId);
       await faucetOffchain(alicePage, alice.entityId, hubId);
 
-      const noRouteUrl =
-        `${APP_BASE_URL}/app#pay?` +
-        `id=${encodeURIComponent(missingEntityId)}` +
-        `&token=1` +
-        `&amt=5` +
-        `&desc=${encodeURIComponent('E2E no route')}` +
-        `&locked=1` +
-        `&jId=arrakis` +
-        `&mode=embed` +
-        `&segment=left`;
+      const noRouteInvoice = `${missingEntityId}?${new URLSearchParams({
+        token: '1',
+        amount: '5',
+        desc: 'E2E no route',
+        jId: 'arrakis',
+      }).toString()}`;
+      const noRouteUrl = `${APP_BASE_URL}/app?mode=embed&segment=left#pay/${encodeURIComponent(noRouteInvoice)}`;
       await alicePage.goto(noRouteUrl, { waitUntil: 'domcontentloaded' });
       const payButton = alicePage.locator('button.paybutton').first();
       await expect(payButton).toBeVisible({ timeout: 60_000 });
@@ -93,16 +87,13 @@ test.describe('Embedded Pay Button', () => {
         })
         .toBe('No route found');
 
-      const noOutboundUrl =
-        `${APP_BASE_URL}/app#pay?` +
-        `id=${encodeURIComponent(hubId)}` +
-        `&token=1` +
-        `&amt=100000` +
-        `&desc=${encodeURIComponent('E2E no outbound')}` +
-        `&locked=1` +
-        `&jId=arrakis` +
-        `&mode=embed` +
-        `&segment=left`;
+      const noOutboundInvoice = `${hubId}?${new URLSearchParams({
+        token: '1',
+        amount: '100000',
+        desc: 'E2E no outbound',
+        jId: 'arrakis',
+      }).toString()}`;
+      const noOutboundUrl = `${APP_BASE_URL}/app?mode=embed&segment=left#pay/${encodeURIComponent(noOutboundInvoice)}`;
       await alicePage.goto(noOutboundUrl, { waitUntil: 'domcontentloaded' });
       await expect
         .poll(async () => (await payButton.textContent())?.trim() || '', {

@@ -95,12 +95,12 @@
 
   .select-label {
     display: block;
-    font-size: 11px;
-    font-weight: 500;
+    font-size: 12px;
+    font-weight: 600;
     color: #78716c;
     margin-bottom: 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    text-transform: none;
+    letter-spacing: 0.01em;
   }
 
   .select-trigger {

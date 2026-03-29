@@ -394,13 +394,11 @@ async function openPayWorkspace(page: Page): Promise<void> {
   await payTab.click();
 }
 
-async function selectPayRecipient(page: Page, targetEntityId: string): Promise<void> {
-  const recipientPicker = page.locator('button.closed-trigger').first();
-  await expect(recipientPicker).toBeVisible({ timeout: 10_000 });
-  await recipientPicker.click();
-  const recipientOption = page.locator('.dropdown-item').filter({ hasText: targetEntityId }).first();
-  await expect(recipientOption).toBeVisible({ timeout: 10_000 });
-  await recipientOption.click();
+async function fillPayIntent(page: Page, targetEntityId: string): Promise<void> {
+  const invoiceInput = page.locator('#payment-invoice-input').first();
+  await expect(invoiceInput).toBeVisible({ timeout: 10_000 });
+  await invoiceInput.click();
+  await invoiceInput.fill(targetEntityId);
 }
 
 async function pay(
@@ -417,19 +415,19 @@ async function pay(
 
   await openPayWorkspace(page);
 
-  await selectPayRecipient(page, to);
+  await fillPayIntent(page, to);
 
   const amountInput = page.locator('#payment-amount-input');
   await expect(amountInput).toBeVisible({ timeout: 10_000 });
   await amountInput.click();
   await amountInput.fill(ethers.formatUnits(amount, 18));
 
-  const findRoutesBtn = page.getByRole('button', { name: 'Find Routes' }).first();
+  const findRoutesBtn = page.getByRole('button', { name: 'Find route' }).first();
   await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
   await findRoutesBtn.click();
   await expect(page.locator('text=/1 hop|route/i').first()).toBeVisible({ timeout: 15_000 });
 
-  const payNowBtn = page.getByRole('button', { name: 'Pay Now' }).first();
+  const payNowBtn = page.getByRole('button', { name: 'Pay now' }).first();
   await expect(payNowBtn).toBeEnabled({ timeout: 10_000 });
   await payNowBtn.click();
   await page.waitForTimeout(200);

@@ -153,6 +153,7 @@ type HubInfoPayload = {
   runtimeId?: string;
   apiUrl?: string;
   relayUrl?: string;
+  startupPhase?: string;
 };
 
 type MarketMakerHealthPayload = {
@@ -163,6 +164,7 @@ type MarketMakerHealthPayload = {
   relayUrl?: string;
   apiUrl?: string;
   directWsUrl?: string;
+  startupPhase?: string;
   p2p?: {
     directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
   };
@@ -274,10 +276,12 @@ type MarketMakerChild = {
   startedAt: number | null;
   exitedAt: number | null;
   exitCode: number | null;
+  exitSignal: NodeJS.Signals | null;
   restartTimer: ReturnType<typeof setTimeout> | null;
   restartCount: number;
   lastHealth: MarketMakerHealthPayload | null;
   lastInfo: MarketMakerInfoPayload | null;
+  lastStartupPhase: string | null;
 };
 
 type CustodySupportState = {
@@ -417,10 +421,12 @@ const marketMakerChild: MarketMakerChild = {
   startedAt: null,
   exitedAt: null,
   exitCode: null,
+  exitSignal: null,
   restartTimer: null,
   restartCount: 0,
   lastHealth: null,
   lastInfo: null,
+  lastStartupPhase: null,
 };
 
 const buildPublicDirectWsUrl = (publicPort: number): string => {
@@ -765,14 +771,17 @@ const pollAllHubHealth = async (): Promise<void> => {
 };
 
 const pollMarketMakerHealth = async (): Promise<void> => {
-  if (marketMakerChild.proc?.exitCode !== null || !marketMakerChild.proc) {
-    marketMakerChild.lastInfo = null;
-    marketMakerChild.lastHealth = null;
+  if (!marketMakerChild.proc || marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null) {
     return;
   }
   const apiBase = `http://${args.host}:${marketMakerChild.apiPort}`;
   marketMakerChild.lastInfo = await fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, 1_500);
   marketMakerChild.lastHealth = await fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, 1_500);
+  marketMakerChild.lastStartupPhase = String(
+    marketMakerChild.lastHealth?.startupPhase ||
+    marketMakerChild.lastInfo?.startupPhase ||
+    '',
+  ).trim() || null;
 };
 
 const getHubSpecsArg = (): string => HUB_NAMES.join(',');
@@ -909,9 +918,11 @@ const spawnMarketMaker = (): void => {
   marketMakerChild.startedAt = Date.now();
   marketMakerChild.exitedAt = null;
   marketMakerChild.exitCode = null;
+  marketMakerChild.exitSignal = null;
   marketMakerChild.restartCount += 1;
   marketMakerChild.lastHealth = null;
   marketMakerChild.lastInfo = null;
+  marketMakerChild.lastStartupPhase = null;
   marketMakerChild.proc = spawn('bun', cmd, {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -929,11 +940,14 @@ const spawnMarketMaker = (): void => {
   marketMakerChild.proc.stderr.on('data', chunk => {
     process.stderr.write(`[MM:err] ${chunk.toString()}`);
   });
-  marketMakerChild.proc.once('exit', code => {
+  marketMakerChild.proc.once('exit', (code, signal) => {
     marketMakerChild.exitedAt = Date.now();
-    marketMakerChild.exitCode = code;
+    marketMakerChild.exitCode = code ?? null;
+    marketMakerChild.exitSignal = signal ?? null;
     if (!resetState.inProgress && code !== 0) {
-      console.error(`[MESH] MM exited unexpectedly with code=${String(code)}`);
+      console.error(
+        `[MESH] MM exited unexpectedly code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)}`,
+      );
       scheduleMarketMakerRestart();
     }
   });
@@ -1089,6 +1103,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       enabled: resetState.requestedMarketMaker,
       ok: mmOk,
       entityId: mmEntityId,
+      startupPhase: marketMakerChild.lastStartupPhase,
       expectedOffersPerHub: mmExpectedOffersPerHub,
       hubs: mmHubs,
     },
@@ -1323,15 +1338,22 @@ const waitForMarketMakerReady = async (): Promise<void> => {
   while (Date.now() < deadline) {
     await pollMarketMakerHealth();
     const health = computeAggregatedHealth();
-    if (!resetState.requestedMarketMaker || health.marketMaker.ok) {
+    if (
+      !resetState.requestedMarketMaker ||
+      (health.marketMaker.ok && marketMakerChild.lastStartupPhase === 'offers-ready')
+    ) {
       return;
     }
-    if (marketMakerChild.proc?.exitCode !== null) {
-      throw new Error(`MM_EXITED_EARLY code=${String(marketMakerChild.proc?.exitCode)}`);
+    if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null) {
+      throw new Error(
+        `MM_EXITED_EARLY code=${String(marketMakerChild.exitCode)} signal=${String(marketMakerChild.exitSignal)} phase=${String(marketMakerChild.lastStartupPhase)} marketMaker=${safeStringify(health.marketMaker)}`,
+      );
     }
     await delay(250);
   }
-  throw new Error(`MM_READY_TIMEOUT ${safeStringify(computeAggregatedHealth().marketMaker)}`);
+  throw new Error(
+    `MM_READY_TIMEOUT phase=${String(marketMakerChild.lastStartupPhase)} marketMaker=${safeStringify(computeAggregatedHealth().marketMaker)}`,
+  );
 };
 
 const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
@@ -1999,7 +2021,12 @@ const shutdown = async (): Promise<void> => {
   process.exit(0);
 };
 
-process.on('SIGTERM', () => { void shutdown(); });
+process.on('SIGTERM', () => {
+  if (resetState.inProgress) {
+    console.warn('[MESH] received SIGTERM from parent during reset');
+  }
+  void shutdown();
+});
 process.on('SIGINT', () => { void shutdown(); });
 
 console.log(

@@ -96,8 +96,8 @@
   .delta-list-header-in {
     color: #9ca3af;
     font-size: 10px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    text-transform: none;
     font-weight: 700;
     font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
     text-align: right;

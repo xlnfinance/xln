@@ -445,6 +445,14 @@ export function applyCommand(
       return { state, events };
     }
 
+    if (priceTicks < pmin || priceTicks > pmax) {
+      events.push({ type: 'REJECT', orderId, ownerId, reason: 'price out of range' });
+      return { state, events };
+    }
+    if (((priceTicks - pmin) % tick) !== 0n) {
+      events.push({ type: 'REJECT', orderId, ownerId, reason: 'price off grid' });
+      return { state, events };
+    }
     const levelIdx = Number((priceTicks - pmin) / tick);
     if (levelIdx < 0 || levelIdx >= levels) {
       events.push({ type: 'REJECT', orderId, ownerId, reason: 'price out of range' });
@@ -630,6 +638,14 @@ export function applyCommand(
       events.push({ type: 'CANCELED', orderId, ownerId });
     } else if (newPriceTicks !== null) {
       // Price change - CANCEL old, then match+post new order (proper replace semantics)
+      if (newPriceTicks < pmin || newPriceTicks > pmax) {
+        events.push({ type: 'REJECT', orderId, ownerId, reason: 'new price out of range' });
+        return { state, events };
+      }
+      if (((newPriceTicks - pmin) % tick) !== 0n) {
+        events.push({ type: 'REJECT', orderId, ownerId, reason: 'new price off grid' });
+        return { state, events };
+      }
       const newLevelIdx = Number((newPriceTicks - pmin) / tick);
       if (newLevelIdx < 0 || newLevelIdx >= levels) {
         events.push({ type: 'REJECT', orderId, ownerId, reason: 'new price out of range' });

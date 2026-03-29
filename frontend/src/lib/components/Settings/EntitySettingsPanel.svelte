@@ -16,7 +16,7 @@
   import { toasts } from '$lib/stores/toastStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { THEME_DEFINITIONS, getAvailableThemes } from '$lib/utils/themes';
-  import { DEFAULT_UI_STYLE } from '$lib/utils/ui-style';
+  import { DEFAULT_UI_STYLE, LEGACY_UI_STYLE, isUiStyleEqual } from '$lib/utils/ui-style';
   import { getBarColors } from '$lib/utils/bar-colors';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { Check, ChevronDown, ChevronUp, Copy, Download, Trash2, Upload, X } from 'lucide-svelte';
@@ -51,6 +51,10 @@
   const ACCOUNT_BAR_USD_PER_100PX_MIN = 10;
   const ACCOUNT_BAR_USD_PER_100PX_MAX = 10_000;
   const BUILD_UI_OPTIONS = UI_STYLE_OPTIONS.filter((group) => group.key !== 'tabs');
+  const UI_PRESETS: Array<{ id: 'fintech' | 'classic'; label: string; style: UIStyleSettings }> = [
+    { id: 'fintech', label: 'Fintech', style: DEFAULT_UI_STYLE },
+    { id: 'classic', label: 'Classic', style: LEGACY_UI_STYLE },
+  ];
   const BALANCE_REFRESH_OPTIONS = [
     { label: 'Off', value: 0 },
     { label: '1s', value: 1000 },
@@ -78,6 +82,7 @@
   let rpcTestStatus = new Map<string, string>();
 
   let selectedTheme: ThemeName = 'dark';
+  let selectedUiPreset: 'fintech' | 'classic' | 'custom' = 'fintech';
   let entityCreationOpen = false;
   let uiSettingsJsonDraft = '';
   let uiSettingsMessage = '';
@@ -139,6 +144,11 @@
   }
 
   $: selectedTheme = $settings.theme;
+  $: selectedUiPreset = isUiStyleEqual($settings.uiStyle, DEFAULT_UI_STYLE)
+    ? 'fintech'
+    : isUiStyleEqual($settings.uiStyle, LEGACY_UI_STYLE)
+      ? 'classic'
+      : 'custom';
   $: if (activeTab === 'display' && !uiSettingsJsonDraft) {
     uiSettingsJsonDraft = settingsOperations.exportUiSettingsJson();
   }
@@ -258,6 +268,12 @@
 
   function resetUiStyleTokens() {
     settingsOperations.setUiStyle(DEFAULT_UI_STYLE);
+  }
+
+  function applyUiPreset(presetId: 'fintech' | 'classic') {
+    const preset = UI_PRESETS.find((option) => option.id === presetId);
+    if (!preset) return;
+    settingsOperations.setUiStyle(preset.style);
   }
 
   function refreshUiSettingsDraft() {
@@ -816,6 +832,31 @@
             </button>
           {/each}
         </div>
+
+        <div class="appearance-block">
+          <div class="style-group-head">
+            <span class="setting-title">Interface preset</span>
+            <span class="helper-note">Persistent default style for tabs, cards, corners, and shadows.</span>
+          </div>
+          <div class="pill-group" role="tablist" aria-label="Interface preset">
+            {#each UI_PRESETS as preset}
+              <button
+                type="button"
+                class="pill"
+                class:active={selectedUiPreset === preset.id}
+                aria-pressed={selectedUiPreset === preset.id}
+                on:click={() => applyUiPreset(preset.id)}
+              >
+                {preset.label}
+              </button>
+            {/each}
+            {#if selectedUiPreset === 'custom'}
+              <button type="button" class="pill active" aria-pressed={true} disabled>
+                Custom
+              </button>
+            {/if}
+          </div>
+        </div>
       </section>
 
       <section class="section-card">
@@ -910,9 +951,9 @@
         <div class="section-head">
           <div>
             <h3>Build Your UI</h3>
-            <p class="section-desc">Testnet-only design controls for gathering user feedback without changing the default test path.</p>
+            <p class="section-desc">Minimal fintech defaults with optional tuning.</p>
           </div>
-          <button class="compact-btn" on:click={resetUiStyleTokens}>Reset Style</button>
+          <button class="compact-btn" type="button" on:click={resetUiStyleTokens}>Reset Style</button>
         </div>
 
         <div class="style-grid">

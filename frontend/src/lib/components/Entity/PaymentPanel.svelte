@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
-  import { RefreshCw, ScanLine, X } from 'lucide-svelte';
+  import { ScanLine, X } from 'lucide-svelte';
   import jsQR from 'jsqr';
   import type {
     AccountMachine,
@@ -19,8 +19,7 @@
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
-  import { amountToUsd } from '$lib/utils/assetPricing';
-  import { buildXlnInvoiceUri, parseXlnInvoice, type ParsedXlnInvoice } from '$lib/utils/xlnInvoice';
+  import { parseXlnInvoice, type ParsedXlnInvoice } from '$lib/utils/xlnInvoice';
   import {
     extractEntityEncPubKey,
     findProfileByEntityId,
@@ -41,6 +40,8 @@
   let invoiceValue = '';
   let invoiceError = '';
   let invoiceLocked = false;
+  let importedInvoiceIntent: ParsedXlnInvoice | null = null;
+  let preInvoiceState: { amount: string; tokenId: number; description: string; showNoteField: boolean } | null = null;
   let pendingAutoRouteKey = '';
   let completedAutoRouteKey = '';
   let autoRouteRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -70,10 +71,7 @@
   let repeatTimer: ReturnType<typeof setInterval> | null = null;
   let repeatStoppedReason = '';
   let payMaxAmount = 0n;
-  let payMaxUsd = 0;
-  let serverEntityNames = new Map<string, string>();
-  let refreshingRecipientOptions = false;
-  let seededDefaultTarget = false;
+  let showNoteField = false;
   let canPayNow = false;
   const REPEAT_OPTIONS = [
     { value: 0, label: 'No repeat' },
@@ -116,6 +114,11 @@
 
   const getGossipProfiles = (): GossipProfile[] => currentEnv?.gossip?.getProfiles?.() || [];
 
+  $: knownRecipientEntities = getGossipProfiles()
+    .map((profile) => normalizeEntityId(profile.entityId))
+    .filter((option) => option && option !== normalizeEntityId(entityId))
+    .sort();
+
   function hasPendingOutgoingLock(from: string, to: string, token: number): boolean {
     if (!currentReplicas) return false;
     const fromNorm = normalizeEntityId(from);
@@ -136,30 +139,6 @@
     return false;
   }
 
-  const sanitizePrefillText = (raw: string | null | undefined, maxLen = 180): string => {
-    const source = String(raw || '').trim();
-    if (!source) return '';
-    let value = '';
-    let lastWasSpace = false;
-    for (const char of source) {
-      const isWhitespace = char === ' ' || char === '\n' || char === '\r' || char === '\t';
-      if (isWhitespace) {
-        if (!lastWasSpace) value += ' ';
-        lastWasSpace = true;
-        continue;
-      }
-      value += char;
-      lastWasSpace = false;
-      if (value.length >= maxLen) break;
-    }
-    return value.trim();
-  };
-
-  const parseBooleanParam = (raw: string | null | undefined): boolean => {
-    const value = String(raw || '').trim().toLowerCase();
-    return value === '1' || value === 'true' || value === 'yes' || value === 'on';
-  };
-
   function getURLHashRoute(): string | null {
     if (typeof window === 'undefined') return null;
     const hashRaw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
@@ -170,86 +149,24 @@
     return routePart.trim().toLowerCase() || null;
   }
 
-  function getURLHashParams(): URLSearchParams | null {
-    if (typeof window === 'undefined') return null;
-    const hashRaw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-    if (!hashRaw) return null;
-    const qIndex = hashRaw.indexOf('?');
-    if (qIndex >= 0) {
-      const routePart = hashRaw.slice(0, qIndex);
-      if (!routePart.includes('=')) {
-        return new URLSearchParams(hashRaw.slice(qIndex + 1));
-      }
-    }
-    return hashRaw.includes('=') ? new URLSearchParams(hashRaw) : null;
-  }
-
-  function getURLParamValue(keys: string[]): string | null {
-    if (typeof window === 'undefined') return null;
-    const searchParams = new URLSearchParams(window.location.search);
-    const hashParams = getURLHashParams();
-    for (const key of keys) {
-      const hashValue = hashParams ? hashParams.get(key) : null;
-      if (hashValue !== null && hashValue !== '') return hashValue;
-      const queryValue = searchParams.get(key);
-      if (queryValue !== null && queryValue !== '') return queryValue;
-    }
-    return null;
-  }
-
   function applyPaymentPrefillFromURL() {
     const hashRoute = getURLHashRoute();
-    const targetParam = sanitizePrefillText(getURLParamValue(['id', 'target', 'targetEntityId', 'recipient', 'entity']), 120);
-    const amountParam = sanitizePrefillText(getURLParamValue(['amt', 'amount']), 64);
-    const tokenParam = sanitizePrefillText(getURLParamValue(['t', 'tokenId', 'token']), 12);
-    const noteParam = sanitizePrefillText(getURLParamValue(['desc', 'note', 'description', 'memo']), 200);
-    const recipientUserId = sanitizePrefillText(getURLParamValue(['u', 'uid', 'recipient_user_id', 'userId', 'recipientId']), 96);
-    const modeParam = sanitizePrefillText(getURLParamValue(['mode']), 16).toLowerCase();
-    const noteLockedParam = getURLParamValue(['locked', 'note_locked', 'description_locked', 'memo_locked', 'lock_note']);
-    if (targetParam) targetEntityId = targetParam;
-    if (amountParam) amount = amountParam;
-    if (tokenParam) {
-      const parsedTokenId = Number(tokenParam);
-      if (Number.isFinite(parsedTokenId) && parsedTokenId > 0) {
-        tokenId = Math.floor(parsedTokenId);
-      }
-    }
-
-    const noteParts: string[] = [];
-    if (noteParam) noteParts.push(noteParam);
-    if (recipientUserId) noteParts.push(`uid:${recipientUserId}`);
-    if (noteParts.length > 0) {
-      description = noteParts.join(' | ');
-    }
-
-    if (modeParam === 'direct' || modeParam === 'unsafe' || modeParam === 'hashlock' || modeParam === 'htlc') {
+    if (hashRoute === 'pay' || hashRoute === 'send' || hashRoute === 'accounts/send' || hashRoute?.startsWith('pay/')) {
       useHtlc = true;
     }
-    if (hashRoute === 'pay') useHtlc = true;
-    console.info('[PaymentPanel.prefill]', {
-      hashRoute,
-      useHtlc,
-      targetEntityId: targetParam || targetEntityId,
-      amount: amountParam || amount,
-      tokenId,
-    });
-    if (!targetParam && entityId) targetEntityId = entityId;
-
-    const explicitLock = parseBooleanParam(noteLockedParam);
-    descriptionLocked = explicitLock || Boolean(recipientUserId);
-    if (targetParam) {
-      invoiceLocked = true;
-      invoiceError = '';
-      invoiceValue = buildXlnInvoiceUri({
-        targetEntityId: targetParam,
-        tokenId,
-        amount: amountParam,
-        description: noteParam,
-        recipientUserId,
-        jurisdictionId: sanitizePrefillText(getURLParamValue(['jId', 'jurisdiction', 'j']), 64),
-        noteLocked: explicitLock || Boolean(recipientUserId),
+    if (!hashRoute?.startsWith('pay/')) return;
+    try {
+      const parsed = parseXlnInvoice(window.location.href);
+      applyInvoiceIntent(parsed);
+      showNoteField = Boolean(parsed.description);
+      console.info('[PaymentPanel.prefill]', {
+        hashRoute,
+        targetEntityId: parsed.targetEntityId,
+        amount: parsed.amount,
+        tokenId: parsed.tokenId,
       });
-      requestAutoFindRoutes();
+    } catch (error) {
+      invoiceError = error instanceof Error ? error.message : String(error);
     }
   }
 
@@ -283,13 +200,33 @@
   }
 
   function clearInvoiceIntent(): void {
+    if (importedInvoiceIntent && preInvoiceState) {
+      amount = preInvoiceState.amount;
+      tokenId = preInvoiceState.tokenId;
+      description = preInvoiceState.description;
+      showNoteField = preInvoiceState.showNoteField;
+    }
+    importedInvoiceIntent = null;
+    preInvoiceState = null;
     invoiceLocked = false;
     invoiceError = '';
     invoiceValue = '';
     descriptionLocked = false;
+    targetEntityId = '';
+    preflightError = null;
+    resetQuotedRoutes();
   }
 
   function applyInvoiceIntent(parsed: ParsedXlnInvoice): void {
+    if (!importedInvoiceIntent) {
+      preInvoiceState = {
+        amount,
+        tokenId,
+        description,
+        showNoteField,
+      };
+    }
+    importedInvoiceIntent = parsed;
     invoiceValue = parsed.canonicalUri;
     invoiceError = '';
     invoiceLocked = Boolean(parsed.amount);
@@ -305,52 +242,42 @@
     requestAutoFindRoutes();
   }
 
-  function handleInvoiceInput(): void {
+  function discardImportedInvoiceIntent(): void {
+    if (importedInvoiceIntent && preInvoiceState) {
+      amount = preInvoiceState.amount;
+      tokenId = preInvoiceState.tokenId;
+      description = preInvoiceState.description;
+      showNoteField = preInvoiceState.showNoteField;
+    }
+    importedInvoiceIntent = null;
+    preInvoiceState = null;
+    invoiceLocked = false;
+    descriptionLocked = false;
+  }
+
+  function handleIntentInput(): void {
     const trimmed = invoiceValue.trim();
     if (!trimmed) {
       clearInvoiceIntent();
       return;
     }
-    const normalized = trimmed.toLowerCase();
-    if (!normalized.startsWith('xln:') && !normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+    if (/^0x[0-9a-fA-F]{64}$/.test(trimmed)) {
+      discardImportedInvoiceIntent();
+      invoiceValue = trimmed.toLowerCase();
+      targetEntityId = trimmed.toLowerCase();
       invoiceError = '';
+      preflightError = null;
+      requestAutoFindRoutes();
       return;
     }
     try {
       const parsed = parseXlnInvoice(trimmed);
       applyInvoiceIntent(parsed);
     } catch (error) {
-      invoiceLocked = false;
+      discardImportedInvoiceIntent();
       invoiceError = error instanceof Error ? error.message : String(error);
+      targetEntityId = '';
     }
-  }
-
-  // All entities for dropdown (local + gossip network)
-  $: allEntities = (() => {
-    const ids = new Map<string, string>();
-    const add = (raw: string | null | undefined) => {
-      const canonical = String(raw || '').trim();
-      const norm = normalizeEntityId(canonical);
-      if (!norm) return;
-      if (!ids.has(norm)) ids.set(norm, canonical);
-    };
-    add(entityId);
-    if (currentReplicas) {
-      for (const key of currentReplicas.keys() as IterableIterator<string>) {
-        const localEntityId = key.split(':')[0];
-        add(localEntityId);
-      }
-    }
-    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
-    for (const profile of profiles) {
-      add(profile.entityId);
-    }
-    return Array.from(ids.values()).sort();
-  })();
-
-  $: if (!seededDefaultTarget && entityId) {
-    if (!targetEntityId) targetEntityId = entityId;
-    seededDefaultTarget = true;
   }
 
   const clearRepeatTimer = () => {
@@ -405,8 +332,6 @@
     if (!id) return 'Unknown';
     const norm = normalizeEntityId(id);
     if (norm === normalizeEntityId(entityId)) return 'Self';
-    const serverName = serverEntityNames.get(norm);
-    if (serverName) return serverName;
     const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === norm);
     const name = profile?.name;
     return typeof name === 'string' && name.trim() ? name.trim() : id;
@@ -427,14 +352,6 @@
 
   function getTokenSymbol(tokenIdValue: number): string {
     return String(activeXlnFunctions?.getTokenInfo?.(tokenIdValue)?.symbol || 'token').trim() || 'token';
-  }
-
-  function formatUsdHint(valueUsd: number): string {
-    if (!Number.isFinite(valueUsd) || valueUsd <= 0) return '$0.00';
-    if (valueUsd >= 1000) {
-      return '~$' + valueUsd.toLocaleString('en-US', { maximumFractionDigits: 0 });
-    }
-    return '~$' + valueUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   function computeLocalPayMax(tokenIdValue: number): bigint {
@@ -463,7 +380,6 @@
   }
 
   $: payMaxAmount = computeLocalPayMax(tokenId);
-  $: payMaxUsd = amountToUsd(payMaxAmount, getTokenDecimals(tokenId), getTokenSymbol(tokenId));
 
   function isRouteableIntermediary(entity: string): boolean {
     // Routeability is a transport/security property, not a display-metadata property.
@@ -966,28 +882,6 @@
         missingEntities: missing,
       });
       throw new Error(msg);
-    }
-  }
-
-  async function refreshServerEntityNames() {
-    if (typeof fetch === 'undefined') return;
-    try {
-      const response = await fetch('/api/health');
-      if (!response.ok) return;
-      const payload = await response.json();
-      const hubs = Array.isArray(payload?.hubs) ? payload.hubs : [];
-      const next = new Map<string, string>();
-      for (const hub of hubs) {
-        const id = String(hub?.entityId || '').trim();
-        const name = String(hub?.name || '').trim();
-        if (!id || !name) continue;
-        next.set(normalizeEntityId(id), name);
-      }
-      if (next.size > 0) {
-        serverEntityNames = next;
-      }
-    } catch {
-      // best effort only
     }
   }
 
@@ -1518,37 +1412,30 @@
     }
   }
 
-  function handleTargetChange(e: CustomEvent) {
-    targetEntityId = e.detail.value;
+  function handleRecipientTextInput(event: CustomEvent<{ value?: string }>): void {
+    const nextValue = String(event.detail?.value || '');
+    if (importedInvoiceIntent && nextValue.trim() !== importedInvoiceIntent.canonicalUri) {
+      discardImportedInvoiceIntent();
+    }
+    invoiceValue = nextValue;
     preflightError = null;
     resetQuotedRoutes();
+    handleIntentInput();
   }
 
-  function handleRecipientPickerOpen() {
-    void refreshGossipOnDemand(
-      'recipient-picker-open',
-      targetEntityId ? [targetEntityId] : [],
-    );
-    void refreshServerEntityNames();
-  }
-
-  async function refreshRecipientPickerOptions(): Promise<void> {
-    if (refreshingRecipientOptions) return;
-    refreshingRecipientOptions = true;
+  function handleRecipientChange(event: CustomEvent<{ value?: string; selected?: boolean }>): void {
+    const nextEntityId = normalizeEntityId(String(event.detail?.value || ''));
+    if (!nextEntityId) return;
+    const rawInput = invoiceValue.trim();
+    const isExactEntityInput = /^0x[0-9a-fA-F]{64}$/.test(rawInput) && normalizeEntityId(rawInput) === nextEntityId;
+    if (!event.detail?.selected && !isExactEntityInput) return;
+    discardImportedInvoiceIntent();
+    invoiceValue = '';
+    invoiceError = '';
+    targetEntityId = nextEntityId;
     preflightError = null;
-    try {
-      await refreshGossipOnDemand(
-        'recipient-picker-manual-refresh',
-        targetEntityId ? [targetEntityId] : [],
-      );
-      await refreshServerEntityNames();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      preflightError = message;
-      toasts.error(`Recipient refresh failed: ${message}`);
-    } finally {
-      refreshingRecipientOptions = false;
-    }
+    resetQuotedRoutes();
+    requestAutoFindRoutes();
   }
 
   function handleTokenChange(e: CustomEvent) {
@@ -1560,6 +1447,10 @@
   function handleAmountInput() {
     preflightError = null;
     resetQuotedRoutes();
+  }
+
+  function revealNoteField(): void {
+    showNoteField = true;
   }
 
   function handleRepeatChange(event: Event) {
@@ -1584,7 +1475,6 @@
 
   onMount(() => {
     applyPaymentPrefillFromURL();
-    void refreshServerEntityNames();
     const handleLocationChange = () => {
       applyPaymentPrefillFromURL();
     };
@@ -1599,28 +1489,33 @@
 </script>
 
 <div class="payment-panel">
-  <div class="invoice-entry">
-    <div class="invoice-label-row">
-      <label for="payment-invoice-input">Invoice</label>
-      <span class="invoice-helper">Paste invoice or enter details manually below</span>
-    </div>
-    <div class="invoice-entry-shell">
-      <input
-        id="payment-invoice-input"
-        type="text"
-        bind:value={invoiceValue}
-        aria-label="Invoice"
+  <div class="recipient-picker-row">
+    <div class="recipient-picker-input">
+      <EntityInput
+        inputId="payment-invoice-input"
+        value={targetEntityId}
+        rawTextOverride={invoiceValue}
+        entities={knownRecipientEntities}
+        excludeId={entityId}
+        preferredId=""
+        testId="payment-invoice"
+        placeholder="Recipient, invoice, or entity ID"
         disabled={findingRoutes || sendingPayment}
-        on:input={handleInvoiceInput}
+        hideDropdownHint={true}
+        strictValueInput={true}
+        on:textinput={handleRecipientTextInput}
+        on:change={handleRecipientChange}
       />
+    </div>
+    <div class="recipient-picker-actions">
       <button
         type="button"
-        class="invoice-tool-btn"
+        class="invoice-tool-btn qr-btn"
         on:click={startInvoiceScanner}
         disabled={findingRoutes || sendingPayment}
       >
         <ScanLine size={14} />
-        <span>Scan QR</span>
+        <span>QR</span>
       </button>
       {#if invoiceLocked}
         <button
@@ -1634,35 +1529,11 @@
         </button>
       {/if}
     </div>
-    {#if invoiceError}
-      <div class="profile-preflight-error">{invoiceError}</div>
-    {/if}
   </div>
 
-  <div class="recipient-picker-row">
-    <div class="recipient-picker-input">
-      <EntityInput
-        label="Entity"
-        value={targetEntityId}
-        entities={allEntities}
-        preferredId={entityId}
-        disabled={invoiceLocked || findingRoutes || sendingPayment}
-        on:change={handleTargetChange}
-        on:open={handleRecipientPickerOpen}
-      />
-    </div>
-    <button
-      type="button"
-      class="recipient-refresh-btn"
-      on:click={() => void refreshRecipientPickerOptions()}
-      disabled={findingRoutes || sendingPayment || refreshingRecipientOptions}
-      title="Refresh available entities from gossip"
-      aria-label="Refresh entities"
-    >
-      <RefreshCw size={14} />
-      <span>{refreshingRecipientOptions ? 'Refreshing' : 'Refresh'}</span>
-    </button>
-  </div>
+  {#if invoiceError}
+    <div class="profile-preflight-error">{invoiceError}</div>
+  {/if}
 
   {#if preflightError}
     <div class="profile-preflight-error">{preflightError}</div>
@@ -1670,9 +1541,7 @@
 
   <div class="amount-token-row">
     <div class="amount-field">
-      <label for="payment-amount-input">
-        <span>Amount</span>
-      </label>
+      <label for="payment-amount-input">Amount</label>
       <div class="amount-input-shell">
         <input
           id="payment-amount-input"
@@ -1682,16 +1551,9 @@
           aria-label="Payment amount"
           disabled={invoiceLocked || findingRoutes || sendingPayment}
           on:input={handleAmountInput}
+          placeholder="0.00"
         />
         <div class="amount-inline-tools">
-          <button
-            type="button"
-            class="inline-max-link amount-max-link"
-            on:click={fillMaxPaymentAmount}
-            disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
-          >
-            {formatTokenInputValue(tokenId, payMaxAmount)} {getTokenSymbol(tokenId)} ({formatUsdHint(payMaxUsd)})
-          </button>
           <div class="inline-token-select">
             <TokenSelect
               value={tokenId}
@@ -1702,28 +1564,37 @@
           </div>
         </div>
       </div>
+      <button
+        type="button"
+        class="available-link"
+        on:click={fillMaxPaymentAmount}
+        disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
+      >
+        Available {formatTokenInputValue(tokenId, payMaxAmount)} {getTokenSymbol(tokenId)}
+      </button>
     </div>
   </div>
 
-  <div class="field">
-    <label>Description {descriptionLocked ? '(locked)' : '(optional)'}</label>
-    <input
-      id="payment-description-input"
-      type="text"
-      bind:value={description}
-      aria-label="Payment description"
-      readonly={descriptionLocked || invoiceLocked}
-      aria-readonly={descriptionLocked || invoiceLocked}
-      disabled={findingRoutes || sendingPayment}
-    />
-    {#if descriptionLocked}
-      <small class="description-lock-hint">Recipient user id is locked into this payment note.</small>
-    {/if}
-  </div>
+  {#if showNoteField || descriptionLocked}
+    <div class="field">
+      <input
+        id="payment-description-input"
+        type="text"
+        bind:value={description}
+        aria-label="Payment note"
+        placeholder="Note"
+        readonly={descriptionLocked || invoiceLocked}
+        aria-readonly={descriptionLocked || invoiceLocked}
+        disabled={findingRoutes || sendingPayment}
+      />
+    </div>
+  {:else}
+    <button type="button" class="add-note-btn" on:click={revealNoteField} disabled={findingRoutes || sendingPayment}>Add note</button>
+  {/if}
 
   {#if isSelfRecipient}
     <div class="payment-note">
-      Self-payment needs an explicit route. Use <strong>Find Routes</strong> first instead of auto-pay.
+      Self-pay needs an explicit route.
     </div>
   {/if}
 
@@ -1774,18 +1645,19 @@
   <div class="payment-actions">
     <div class="send-controls">
       <button
+        class="btn-find"
+        class:prominent={!canPayNow && !sendingPayment}
+        on:click={() => void findRoutes(false)}
+        disabled={!targetEntityId || !amount || findingRoutes || sendingPayment}
+      >
+        {findingRoutes ? 'Finding routes...' : 'Find route'}
+      </button>
+      <button
         class="btn-pay-now"
         on:click={() => void payUsingCurrentIntent()}
         disabled={!canPayNow}
       >
-        {sendingPayment ? 'Sending...' : (findingRoutes ? 'Finding Routes...' : 'Pay Now')}
-      </button>
-      <button
-        class="btn-find"
-        on:click={() => void findRoutes(false)}
-        disabled={!targetEntityId || !amount || findingRoutes || sendingPayment}
-      >
-        {findingRoutes ? 'Finding Routes...' : 'Find Routes'}
+        {sendingPayment ? 'Sending...' : (findingRoutes ? 'Finding routes...' : 'Pay now')}
       </button>
     </div>
     <!-- Repeat controls intentionally hidden for now. Keep timer wiring for later re-enable. -->
@@ -1830,128 +1702,61 @@
 
 <style>
   .payment-panel {
-    --pay-field-h: 48px;
-    --pay-field-radius: 12px;
+    --pay-field-h: 56px;
+    --pay-field-radius: 14px;
     display: flex;
     flex-direction: column;
     gap: 18px;
     width: 100%;
-    max-width: 1120px;
-  }
-
-  .invoice-entry {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 14px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 14px;
-  }
-
-  .invoice-label-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    align-items: baseline;
-  }
-
-  .invoice-helper {
-    color: #8d857d;
-    font-size: 12px;
-  }
-
-  .invoice-entry-shell {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    gap: 10px;
-    align-items: center;
-  }
-
-  .invoice-entry-shell input {
-    min-height: var(--pay-field-h);
-    border-radius: var(--pay-field-radius);
+    max-width: 860px;
   }
 
   .invoice-tool-btn {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
-    height: var(--pay-field-h);
-    padding: 0 14px;
+    min-height: var(--pay-field-h);
+    padding: 0 18px;
     border-radius: var(--pay-field-radius);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background:
+      linear-gradient(180deg, rgba(28, 25, 23, 0.98), rgba(15, 14, 13, 0.98));
     color: #f5efe6;
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+  }
+
+  .invoice-tool-btn:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.14);
+    background: linear-gradient(180deg, rgba(36, 33, 30, 0.98), rgba(18, 17, 15, 0.98));
+  }
+
+  .invoice-tool-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
   }
 
   .invoice-clear-btn {
     color: #e7b6a5;
   }
 
-  .recipient-picker-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-    align-items: end;
-  }
-
-  .recipient-picker-input {
-    min-width: 0;
-  }
-
-  .recipient-refresh-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    height: var(--pay-field-h);
-    min-width: 116px;
-    padding: 0 14px;
-    border-radius: var(--pay-field-radius);
-    border: none;
-    background: rgba(255, 255, 255, 0.04);
-    color: #cfc7bd;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-  }
-
-  .recipient-refresh-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.07);
-    color: #f5efe6;
-  }
-
-  .recipient-refresh-btn:disabled {
-    cursor: not-allowed;
-    opacity: 0.55;
-  }
-
   .amount-token-row {
     display: block;
-  }
-
-  .amount-field label,
-  .field label {
-    display: flex;
-    align-items: center;
-    gap: 12px;
   }
 
   .amount-inline-tools {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    margin-left: auto;
+    gap: 8px;
     min-width: 0;
   }
 
   .inline-token-select {
-    width: 132px;
+    width: 188px;
     flex-shrink: 0;
   }
 
@@ -1960,79 +1765,84 @@
   }
 
   .inline-token-select :global(.select-trigger) {
-    min-height: calc(var(--pay-field-h) - 8px);
-    padding: 7px 9px;
+    min-height: calc(var(--pay-field-h) - 10px);
+    padding: 8px 11px;
+    border-radius: calc(var(--pay-field-radius) - 4px);
   }
 
   .amount-input-shell {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 8px;
-    min-height: var(--pay-field-h);
-    padding: 4px 6px 4px 12px;
-    background: #1c1917;
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    gap: 10px;
+    min-height: calc(var(--pay-field-h) + 10px);
+    padding: 6px;
+    background: linear-gradient(180deg, rgba(28, 25, 23, 0.98), rgba(15, 14, 13, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: var(--pay-field-radius);
+    box-sizing: border-box;
   }
 
   .amount-input-shell:focus-within {
-    border-color: #fbbf24;
+    border-color: rgba(251, 191, 36, 0.9);
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.14);
   }
 
   .amount-input-shell input {
-    flex: 1;
     min-width: 0;
-    padding: 0;
+    min-height: var(--pay-field-h);
+    padding: 0 18px;
     border: none;
-    background: transparent;
+    border-radius: calc(var(--pay-field-radius) - 4px);
+    background: #0f0e0d;
+    font-size: 34px;
+    font-weight: 650;
+    line-height: 1;
   }
 
   .field, .amount-field {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 10px;
   }
 
-  .inline-max-link {
+  .available-link {
     border: none;
     background: transparent;
     padding: 0;
-    color: #8d857d;
-    font-size: 11px;
-    font-weight: 600;
+    color: #a8a29e;
+    font-size: 14px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
     cursor: pointer;
-    white-space: nowrap;
+    align-self: flex-start;
   }
 
-  .amount-max-link {
-    line-height: 1.2;
+  .available-link:hover:not(:disabled) {
+    color: #f5efe6;
   }
 
-  .inline-max-link:hover:not(:disabled) {
-    color: #f8fafc;
-  }
-
-  .inline-max-link:disabled {
-    color: #64748b;
+  .available-link:disabled {
     cursor: default;
+    opacity: 0.55;
   }
 
   label {
-    font-size: 11px;
-    font-weight: 500;
-    color: #78716c;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    font-size: 14px;
+    font-weight: 600;
+    color: #d6d3d1;
+    text-transform: none;
+    letter-spacing: 0.01em;
   }
 
   input {
     min-height: var(--pay-field-h);
-    padding: 0 14px;
-    background: #1c1917;
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 0 16px;
+    background: #141312;
+    border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: var(--pay-field-radius);
     color: #e7e5e4;
-    font-size: 14px;
+    font-size: 16px;
     font-family: inherit;
     width: 100%;
     box-sizing: border-box;
@@ -2051,36 +1861,20 @@
     opacity: 0.5;
   }
 
-  @media (max-width: 900px) {
-    .invoice-entry-shell {
-      grid-template-columns: 1fr;
-    }
-
-    .amount-inline-tools {
-      width: 100%;
-      justify-content: space-between;
-      flex-wrap: wrap;
-    }
-
-    .inline-token-select {
-      width: 148px;
-    }
-  }
-
   .btn-find, .btn-send, .btn-pay-now {
-    padding: 14px;
-    border: none;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 500;
+    min-height: 52px;
+    padding: 0 20px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    font-size: 15px;
+    font-weight: 600;
     cursor: pointer;
     transition: all 0.15s;
   }
 
   .payment-actions {
     display: flex;
-    flex-direction: column;
-    gap: 12px;
+    justify-content: flex-end;
   }
 
   .btn-pay-now {
@@ -2101,9 +1895,20 @@
   }
 
   .btn-find {
-    background: rgba(255, 255, 255, 0.04);
-    border: none;
-    color: #a8a29e;
+    background: rgba(255, 255, 255, 0.03);
+    color: #d6d3d1;
+  }
+
+  .btn-find.prominent {
+    background: linear-gradient(180deg, #7c4a1e, #8f551f);
+    border: 1px solid #a16207;
+    color: #fff7ed;
+  }
+
+  .btn-find.prominent:hover:not(:disabled) {
+    background: linear-gradient(180deg, #8d5421, #a16207);
+    border-color: #ca8a04;
+    color: #fff7ed;
   }
 
   .btn-find:hover:not(:disabled) {
@@ -2196,10 +2001,11 @@
   }
 
   .send-controls {
-    display: grid;
-    grid-template-columns: 1fr auto;
+    display: inline-grid;
+    grid-template-columns: auto auto;
     gap: 12px;
     align-items: end;
+    justify-content: end;
   }
 
   .send-controls-secondary {
@@ -2392,14 +2198,13 @@
   }
 
   @media (max-width: 900px) {
-    .recipient-picker-row,
     .payment-actions,
     .send-controls {
       grid-template-columns: 1fr;
     }
 
-    .recipient-refresh-btn {
-      width: 100%;
+    .payment-actions {
+      display: flex;
     }
   }
 
@@ -2419,16 +2224,93 @@
     font-size: 12px;
   }
 
-  .description-lock-hint {
-    margin-top: 4px;
-    color: #a3a3a3;
-    font-size: 11px;
-    letter-spacing: 0.02em;
+  .add-note-btn {
+    align-self: flex-start;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: #a8a29e;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 0 0 2px;
+    min-height: 0;
+    border-radius: 0;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.22);
+    cursor: pointer;
+  }
+
+  .add-note-btn:hover:not(:disabled) {
+    color: #f5efe6;
+    border-bottom-color: rgba(255, 255, 255, 0.45);
   }
 
   input[readonly] {
     border-color: #3f3f46;
     background: #161514;
     color: #d4d4d8;
+  }
+
+  .payment-panel :global(.entity-input-field),
+  .payment-panel :global(.closed-trigger) {
+    min-height: var(--pay-field-h) !important;
+    border-radius: var(--pay-field-radius) !important;
+  }
+
+  .payment-panel :global(.closed-trigger) {
+    background: linear-gradient(180deg, rgba(28, 25, 23, 0.98), rgba(15, 14, 13, 0.98)) !important;
+  }
+
+  .payment-panel :global(.item-id) {
+    color: #8d857d;
+  }
+
+  .recipient-picker-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .recipient-picker-input {
+    min-width: 0;
+  }
+
+  .recipient-picker-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  @media (max-width: 900px) {
+    .payment-panel {
+      max-width: 100%;
+      gap: 16px;
+    }
+
+    .recipient-picker-row,
+    .amount-input-shell,
+    .send-controls {
+      grid-template-columns: 1fr;
+    }
+
+    .recipient-picker-actions {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .invoice-tool-btn,
+    .btn-find,
+    .btn-pay-now {
+      width: 100%;
+    }
+
+    .inline-token-select {
+      width: 100%;
+    }
+
+    .amount-input-shell input {
+      font-size: 28px;
+    }
   }
 </style>

@@ -86,6 +86,14 @@ let coldResetGate: Promise<void> = Promise.resolve();
 let coldResetRebuildError: string | null = null;
 let coldResetStartedAt = 0;
 let coldResetCompletedAt = 0;
+const HEALTH_CACHE_TTL_MS = 10_000;
+let cachedHealthResponse:
+  | {
+      body: string;
+      expiresAt: number;
+    }
+  | null = null;
+let cachedHealthInFlight: Promise<string> | null = null;
 
 let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
@@ -125,6 +133,11 @@ const buildDebugDumpFileName = (reason: string | undefined, runtimeId: string | 
     .slice(0, 48) || 'dump';
   const runtimePart = String(runtimeId || 'runtime').replace(/[^a-zA-Z0-9_-]+/g, '').slice(-16) || 'runtime';
   return `${iso}-${reasonPart}-${runtimePart}.json`;
+};
+
+const invalidateHealthCache = (): void => {
+  cachedHealthResponse = null;
+  cachedHealthInFlight = null;
 };
 
 const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: boolean; reason: string }> => {
@@ -3573,93 +3586,117 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   // Health check
   if (pathname === '/api/health') {
-    const { getHealthStatus } = await import('./health.ts');
-    const health = await getHealthStatus(env);
-    const activeClientRuntimeIds = Array.from(relayStore.clients.keys());
-    const activeClientsDetailed = Array.from(relayStore.clients.entries()).map(([runtimeId, client]) => ({
-      runtimeId,
-      lastSeen: client.lastSeen,
-      ageMs: Math.max(0, Date.now() - client.lastSeen),
-      topics: Array.from(client.topics || []),
-    }));
-    // Ensure hubs are visible even when env.gossip is stale by merging relay cache profiles.
-    const relayHubProfiles = getAllGossipProfiles(relayStore).filter((profile: Profile) =>
-      profile.metadata.isHub === true,
-    );
-    const existing = new Set((health.hubs || []).map((hub) => String(hub.entityId).toLowerCase()));
-    for (const profile of relayHubProfiles) {
-      const entityId = profile.entityId;
-      if (existing.has(entityId.toLowerCase())) continue;
-      health.hubs.push({
-        entityId,
-        name: profile.name,
-        status: 'healthy',
-        reserves: env ? getReplicaReserveSnapshot(env, entityId) : undefined,
-        accounts: env ? getReplicaAccountCount(env, entityId) : undefined,
+    const now = Date.now();
+    if (cachedHealthResponse && cachedHealthResponse.expiresAt > now) {
+      return new Response(cachedHealthResponse.body, {
+        headers: {
+          ...headers,
+          'Cache-Control': 'private, max-age=10',
+        },
       });
-      existing.add(entityId.toLowerCase());
     }
 
-    const relayHubsByEntity = new Map<string, Profile>();
-    for (const profile of relayHubProfiles) {
-      relayHubsByEntity.set(profile.entityId.toLowerCase(), profile);
+    if (!cachedHealthInFlight) {
+      cachedHealthInFlight = (async () => {
+        const { getHealthStatus } = await import('./health.ts');
+        const health = await getHealthStatus(env);
+        const activeClientRuntimeIds = Array.from(relayStore.clients.keys());
+        const activeClientsDetailed = Array.from(relayStore.clients.entries()).map(([runtimeId, client]) => ({
+          runtimeId,
+          lastSeen: client.lastSeen,
+          ageMs: Math.max(0, Date.now() - client.lastSeen),
+          topics: Array.from(client.topics || []),
+        }));
+        const relayHubProfiles = getAllGossipProfiles(relayStore).filter((profile: Profile) =>
+          profile.metadata.isHub === true,
+        );
+        const existing = new Set((health.hubs || []).map((hub) => String(hub.entityId).toLowerCase()));
+        for (const profile of relayHubProfiles) {
+          const entityId = profile.entityId;
+          if (existing.has(entityId.toLowerCase())) continue;
+          health.hubs.push({
+            entityId,
+            name: profile.name,
+            status: 'healthy',
+            reserves: env ? getReplicaReserveSnapshot(env, entityId) : undefined,
+            accounts: env ? getReplicaAccountCount(env, entityId) : undefined,
+          });
+          existing.add(entityId.toLowerCase());
+        }
+
+        const relayHubsByEntity = new Map<string, Profile>();
+        for (const profile of relayHubProfiles) {
+          relayHubsByEntity.set(profile.entityId.toLowerCase(), profile);
+        }
+        const relayProfiles = getAllGossipProfiles(relayStore);
+        const relayProfileSummaries = relayProfiles
+          .map((profile: Profile) => ({
+            entityId: profile.entityId,
+            runtimeId: profile.runtimeId || null,
+            name: profile.name,
+            isHub: profile.metadata.isHub === true,
+            lastUpdated: profile.lastUpdated,
+          }))
+          .sort((left, right) => right.lastUpdated - left.lastUpdated);
+        health.hubs = (health.hubs || []).map((hub: HubHealth) => {
+          const entityId = String(hub.entityId || '');
+          const profile = relayHubsByEntity.get(entityId.toLowerCase());
+          const runtimeId = profile?.runtimeId;
+          const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
+          const activeClients =
+            normalizedRuntimeId && relayStore.clients.has(normalizedRuntimeId) ? [normalizedRuntimeId] : [];
+          return {
+            ...hub,
+            runtimeId: normalizedRuntimeId || runtimeId,
+            online: activeClients.length > 0,
+            activeClients,
+            reserves: env ? getReplicaReserveSnapshot(env, entityId) ?? hub.reserves : hub.reserves,
+            accounts: env ? getReplicaAccountCount(env, entityId) ?? hub.accounts : hub.accounts,
+          };
+        });
+        const bootstrapReserves = await getBootstrapReserveHealth(env);
+        const body = JSON.stringify({
+          ...health,
+          boot: {
+            phase: serverBootPhase,
+            startedAt: serverBootStartedAt || null,
+            completedAt: serverBootCompletedAt,
+            error: serverBootError,
+          },
+          hubMesh: getHubMeshHealth(env),
+          marketMaker: getMarketMakerHealth(env),
+          bootstrapReserves,
+          reset: {
+            inProgress: !!coldResetRebuildInFlight,
+            lastError: coldResetRebuildError,
+            startedAt: coldResetStartedAt || null,
+            completedAt: coldResetCompletedAt || null,
+          },
+          relay: {
+            activeClients: activeClientRuntimeIds,
+            activeClientCount: activeClientRuntimeIds.length,
+            clientsDetailed: activeClientsDetailed,
+            profileCount: relayProfiles.length,
+            profiles: relayProfileSummaries,
+          },
+        });
+        cachedHealthResponse = {
+          body,
+          expiresAt: Date.now() + HEALTH_CACHE_TTL_MS,
+        };
+        return body;
+      })().finally(() => {
+        cachedHealthInFlight = null;
+      });
     }
-    const relayProfiles = getAllGossipProfiles(relayStore);
-    const relayProfileSummaries = relayProfiles
-      .map((profile: Profile) => ({
-        entityId: profile.entityId,
-        runtimeId: profile.runtimeId || null,
-        name: profile.name,
-        isHub: profile.metadata.isHub === true,
-        lastUpdated: profile.lastUpdated,
-      }))
-      .sort((left, right) => right.lastUpdated - left.lastUpdated);
-    health.hubs = (health.hubs || []).map((hub: HubHealth) => {
-      const entityId = String(hub.entityId || '');
-      const profile = relayHubsByEntity.get(entityId.toLowerCase());
-      const runtimeId = profile?.runtimeId;
-      const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-      const activeClients =
-        normalizedRuntimeId && relayStore.clients.has(normalizedRuntimeId) ? [normalizedRuntimeId] : [];
-      return {
-        ...hub,
-        runtimeId: normalizedRuntimeId || runtimeId,
-        online: activeClients.length > 0,
-        activeClients,
-        reserves: env ? getReplicaReserveSnapshot(env, entityId) ?? hub.reserves : hub.reserves,
-        accounts: env ? getReplicaAccountCount(env, entityId) ?? hub.accounts : hub.accounts,
-      };
+
+    const body = await cachedHealthInFlight;
+    return new Response(body, {
+      headers: {
+        ...headers,
+        'Cache-Control': 'private, max-age=10',
+      },
     });
-    const bootstrapReserves = await getBootstrapReserveHealth(env);
-
-    return new Response(
-      JSON.stringify({
-        ...health,
-        boot: {
-          phase: serverBootPhase,
-          startedAt: serverBootStartedAt || null,
-          completedAt: serverBootCompletedAt,
-          error: serverBootError,
-        },
-        hubMesh: getHubMeshHealth(env),
-        marketMaker: getMarketMakerHealth(env),
-        bootstrapReserves,
-        reset: {
-          inProgress: !!coldResetRebuildInFlight,
-          lastError: coldResetRebuildError,
-          startedAt: coldResetStartedAt || null,
-          completedAt: coldResetCompletedAt || null,
-        },
-        relay: {
-          activeClients: activeClientRuntimeIds,
-          activeClientCount: activeClientRuntimeIds.length,
-          clientsDetailed: activeClientsDetailed,
-          profileCount: relayProfiles.length,
-          profiles: relayProfileSummaries,
-        },
-      }),
-      { headers },
-    );
   }
 
   if (pathname === '/api/hubs') {
@@ -3983,6 +4020,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     }
 
     const stats = resetServerDebugState(env, preserveHubs);
+    invalidateHealthCache();
     pushDebugEvent(relayStore, {
       event: 'reset',
       status: 'ok',
@@ -4045,6 +4083,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       syncRebuild,
       includeMarketMaker,
     });
+    invalidateHealthCache();
     pushDebugEvent(relayStore, {
       event: 'reset',
       status: 'ok',

@@ -38,7 +38,7 @@ import {
 } from './mesh-common';
 import { buildDefaultEntitySwapPairs, getSwapPairPolicyByBaseQuote } from '../account-utils';
 import { LIMITS } from '../constants';
-import { ORDERBOOK_PRICE_SCALE } from '../orderbook';
+import { ORDERBOOK_MAX_LEVELS, ORDERBOOK_PRICE_SCALE } from '../orderbook';
 
 type Args = {
   name: string;
@@ -79,6 +79,7 @@ type HubProfile = {
 
 type MarketMakerOfferSpec = {
   offerId: string;
+  pairId: string;
   hubEntityId: string;
   giveTokenId: number;
   giveAmount: bigint;
@@ -132,6 +133,10 @@ const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
   Number(process.env.MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK || '30'),
 );
+const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
+  4,
+  Number(process.env.MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK || '12'),
+);
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
   120n * 10n ** 18n,
@@ -168,8 +173,6 @@ const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
   900n * 10n ** 18n,
   1_000n * 10n ** 18n,
 ] as const;
-const MARKET_MAKER_MIN_READY_OFFERS_PER_PAIR = 30;
-
 const argsRaw = process.argv.slice(2);
 
 const getArg = (name: string, fallback = ''): string => {
@@ -322,11 +325,26 @@ const getMarketMakerLevelProfile = (baseTokenId: number, quoteTokenId: number): 
   };
 };
 
-const getExpectedMarketMakerOffersForPair = (baseTokenId: number, quoteTokenId: number): number =>
-  Math.min(
-    MARKET_MAKER_MIN_READY_OFFERS_PER_PAIR,
-    getMarketMakerLevelProfile(baseTokenId, quoteTokenId).offsetsBps.length * 2,
-  );
+const getReachableMarketMakerLevelCount = (
+  midPriceTicks: bigint,
+  stepTicks: number,
+  offsetsBps: readonly number[],
+): number => {
+  const maxExactSpanTicks = BigInt(Math.max(1, ORDERBOOK_MAX_LEVELS - 1)) * BigInt(Math.max(1, stepTicks));
+  let reachable = 0;
+  for (const offsetBps of offsetsBps) {
+    const askRaw = (midPriceTicks * BigInt(10_000 + offsetBps)) / 10_000n;
+    const bidRaw = (midPriceTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
+    const askPriceTicks = snapPriceTicks(askRaw, stepTicks, 'up');
+    let bidPriceTicks = snapPriceTicks(bidRaw, stepTicks, 'down');
+    if (bidPriceTicks >= askPriceTicks) {
+      bidPriceTicks = askPriceTicks > BigInt(stepTicks) ? askPriceTicks - BigInt(stepTicks) : 1n;
+    }
+    if ((askPriceTicks - bidPriceTicks) > maxExactSpanTicks) break;
+    reachable += 1;
+  }
+  return reachable;
+};
 
 const snapPriceTicks = (ticks: bigint, stepTicks: number, mode: 'up' | 'down'): bigint => {
   const step = BigInt(Math.max(1, stepTicks));
@@ -383,17 +401,24 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
       const pairPolicy = getSwapPairPolicyByBaseQuote(pair.baseTokenId, pair.quoteTokenId);
       const levelProfile = getMarketMakerLevelProfile(pair.baseTokenId, pair.quoteTokenId);
       const skewBps = hubSkewBps(hubEntityId, pairIndex);
+      const midPriceTicks = (pairPolicy.mmMidPriceTicks * BigInt(10_000 + skewBps)) / 10_000n;
       return {
         pair,
         levelProfile,
-        midPriceTicks: (pairPolicy.mmMidPriceTicks * BigInt(10_000 + skewBps)) / 10_000n,
+        midPriceTicks,
         stepTicksBig: BigInt(Math.max(1, pairPolicy.priceStepTicks)),
         stepTicks: Math.max(1, pairPolicy.priceStepTicks),
+        reachableLevelCount: getReachableMarketMakerLevelCount(
+          midPriceTicks,
+          Math.max(1, pairPolicy.priceStepTicks),
+          levelProfile.offsetsBps,
+        ),
       };
     });
     const maxLevels = pairContexts.reduce((max, entry) => Math.max(max, entry.levelProfile.offsetsBps.length), 0);
     for (let level = 0; level < maxLevels; level += 1) {
       for (const entry of pairContexts) {
+        if (level >= entry.reachableLevelCount) continue;
         if (level >= entry.levelProfile.offsetsBps.length) continue;
         const offsetBps = entry.levelProfile.offsetsBps[level]!;
         const baseSize = entry.levelProfile.baseSizes[level]!;
@@ -411,6 +436,7 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
         if (askWantAmount > 0n) {
           specs.push({
             offerId: `mm-${hubSuffix}-${entry.pair.baseTokenId}-${entry.pair.quoteTokenId}-ask-${levelId}`,
+            pairId: entry.pair.pairId,
             hubEntityId,
             giveTokenId: entry.pair.baseTokenId,
             giveAmount: baseSize,
@@ -422,6 +448,7 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
         if (bidGiveAmount > 0n) {
           specs.push({
             offerId: `mm-${hubSuffix}-${entry.pair.baseTokenId}-${entry.pair.quoteTokenId}-bid-${levelId}`,
+            pairId: entry.pair.pairId,
             hubEntityId,
             giveTokenId: entry.pair.quoteTokenId,
             giveAmount: bidGiveAmount,
@@ -580,6 +607,7 @@ const maintainMarketMakerQuotes = async (
   hubSignerIdsByEntityId: ReadonlyMap<string, string>,
   tokenIds: number[],
   maxOffersPerAccount = MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
+  maxNewOffersTotal = MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
 ): Promise<void> => {
   if (hubEntityIds.length === 0 || tokenIds.length < 3) return;
   await ensureMarketMakerHubConnectivity(env, mmEntityId, mmSignerId, hubEntityIds, hubSignerIdsByEntityId, tokenIds);
@@ -595,7 +623,9 @@ const maintainMarketMakerQuotes = async (
   }
 
   const entityTxs: EntityInput['entityTxs'] = [];
+  let remainingNewOffers = Math.max(1, Math.floor(maxNewOffersTotal));
   for (const [hubEntityId, specs] of grouped.entries()) {
+    if (remainingNewOffers <= 0) break;
     const account = getAccountMachine(env, mmEntityId, hubEntityId);
     if (!account) continue;
     if (String(account.status || 'active') !== 'active') continue;
@@ -606,6 +636,7 @@ const maintainMarketMakerQuotes = async (
     const allowedNewOffers = Math.min(
       Math.max(1, Math.floor(maxOffersPerAccount)),
       remainingOpenSlots,
+      remainingNewOffers,
     );
     if (allowedNewOffers <= 0) continue;
     const missing = specs
@@ -628,6 +659,7 @@ const maintainMarketMakerQuotes = async (
         minFillRatio: spec.minFillRatio,
       },
     })));
+    remainingNewOffers -= missing.length;
   }
 
   if (entityTxs.length > 0) {
@@ -649,8 +681,22 @@ const getMarketMakerHealth = (
   tokenIds: number[],
 ): MarketMakerHealth => {
   const pairs = buildDefaultEntitySwapPairs(tokenIds);
-  const expectedOffersPerHub = pairs.reduce(
-    (sum, pair) => sum + getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId),
+  const desiredSpecs = buildMarketMakerOfferSpecs(hubEntityIds, tokenIds);
+  const expectedOffersByHub = new Map<string, number>();
+  const expectedOffersByHubPair = new Map<string, number>();
+  for (const spec of desiredSpecs) {
+    expectedOffersByHub.set(spec.hubEntityId, (expectedOffersByHub.get(spec.hubEntityId) || 0) + 1);
+    const pairKey = `${spec.hubEntityId}:${spec.pairId}`;
+    expectedOffersByHubPair.set(pairKey, (expectedOffersByHubPair.get(pairKey) || 0) + 1);
+  }
+  const expectedOffersPerHub = hubEntityIds.reduce(
+    (max, hubEntityId) => Math.max(max, expectedOffersByHub.get(hubEntityId) || 0),
+    0,
+  );
+  const expectedOffersPerPair = Math.max(
+    ...pairs.map((pair) =>
+      Math.max(...hubEntityIds.map((hubEntityId) => expectedOffersByHubPair.get(`${hubEntityId}:${pair.pairId}`) || 0), 0),
+    ),
     0,
   );
   if (!mmEntityId || hubEntityIds.length === 0 || expectedOffersPerHub <= 0) {
@@ -659,16 +705,17 @@ const getMarketMakerHealth = (
       ok: false,
       entityId: mmEntityId,
       expectedOffersPerHub: Math.max(0, expectedOffersPerHub),
-      expectedOffersPerPair: Math.max(...pairs.map((pair) => getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId)), 0),
+      expectedOffersPerPair,
       hubs: [],
     };
   }
 
   const hubs = hubEntityIds.map((hubEntityId) => {
     const offers = countMarketMakerOffersForHub(env, mmEntityId, hubEntityId);
+    const expectedHubOffers = expectedOffersByHub.get(hubEntityId) || 0;
     const pairHealth = pairs.map((pair) => {
       const pairOffers = countMarketMakerOffersForHubPair(env, mmEntityId, hubEntityId, pair);
-      const expectedPairOffers = getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId);
+      const expectedPairOffers = expectedOffersByHubPair.get(`${hubEntityId}:${pair.pairId}`) || 0;
       return {
         pairId: pair.pairId,
         offers: pairOffers,
@@ -678,7 +725,7 @@ const getMarketMakerHealth = (
     return {
       hubEntityId,
       offers,
-      ready: offers >= expectedOffersPerHub && pairHealth.every((pair) => pair.ready),
+      ready: offers >= expectedHubOffers && pairHealth.every((pair) => pair.ready),
       pairs: pairHealth,
     };
   });
@@ -710,7 +757,7 @@ const getMarketMakerHealth = (
     entityId: mmEntityId,
     connectivity,
     expectedOffersPerHub,
-    expectedOffersPerPair: Math.max(...pairs.map((pair) => getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId)), 0),
+    expectedOffersPerPair,
     hubs,
   };
 };
@@ -910,24 +957,29 @@ const run = async (): Promise<void> => {
     );
   };
 
-  const loop = setInterval(() => {
+  let loop: ReturnType<typeof setInterval> | null = null;
+  startupPhase = 'runtime-ready';
+  console.log(
+    `[MESH-MM] RUNTIME_READY entityId=${mmEntityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
+  );
+
+  startupPhase = 'bootstrap-offers';
+  await waitForBootstrapOffers();
+  startupPhase = 'offers-ready';
+  console.log(
+    `[MESH-MM] OFFERS_READY entityId=${mmEntityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
+  );
+  loop = setInterval(() => {
     if (shuttingDown) return;
     void driveQuotes().catch(error => {
       if (shuttingDown) return;
       console.error(`[MM] quote loop failed:`, (error as Error).message);
     });
   }, MARKET_MAKER_QUOTE_LOOP_MS);
-  void driveQuotes();
-  startupPhase = 'ready';
-  console.log(
-    `[MESH-MM] READY entityId=${mmEntityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
-  );
-
-  await waitForBootstrapOffers();
 
   const shutdown = async (): Promise<void> => {
     shuttingDown = true;
-    clearInterval(loop);
+    if (loop) clearInterval(loop);
     stopP2P(env);
     server.stop(true);
     process.exit(0);

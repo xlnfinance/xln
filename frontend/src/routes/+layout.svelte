@@ -270,11 +270,11 @@
 	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .appearance-pill-group),
 	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .side-toggle-row),
 	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .order-type-toggle) {
-		padding: 4px !important;
-		gap: 4px !important;
+		padding: 3px !important;
+		gap: 3px !important;
 		border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 56%), transparent) !important;
-		border-radius: var(--ui-radius-large, 16px) !important;
-		background: color-mix(in srgb, var(--theme-surface, #18181b) 68%, transparent) !important;
+		border-radius: var(--ui-radius-large, 10px) !important;
+		background: color-mix(in srgb, var(--theme-surface, #18181b) 58%, transparent) !important;
 	}
 
 	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .account-workspace-tab),
@@ -284,7 +284,10 @@
 	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .side-tab),
 	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .type-tab-text) {
 		flex: 1 1 auto;
-		border-radius: calc(var(--ui-radius-base, 12px) - 2px) !important;
+		border: 1px solid transparent !important;
+		border-radius: calc(var(--ui-radius-base, 6px) - 1px) !important;
+		background: transparent !important;
+		box-shadow: none !important;
 	}
 
 	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .account-workspace-tab.active),
@@ -293,8 +296,9 @@
 	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .appearance-pill.active),
 	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .side-tab.active),
 	:global(html[data-ui-tabs='segmented'] body.xln-user-mode .type-tab-text.active) {
-		background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 96%, transparent) !important;
-		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-border-mix, 22%), transparent) !important;
+		border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) var(--ui-accent-border-mix, 22%), transparent) !important;
+		background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 92%, transparent) !important;
+		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-accent, #fbbf24) 18%, transparent) !important;
 	}
 
 	:global(html[data-ui-tabs='floating'] body.xln-user-mode .account-workspace-tabs),

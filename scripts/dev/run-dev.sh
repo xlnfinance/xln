@@ -13,7 +13,6 @@ CUSTODY_PORT="$(xln_custody_port)"
 CUSTODY_DAEMON_PORT="$(xln_custody_daemon_port)"
 ANVIL_BLOCK_TIME="${XLN_ANVIL_BLOCK_TIME:-1}"
 
-export XLN_DEV_SESSION_ID="${XLN_DEV_SESSION_ID:-$(uuidgen)}"
 export XLN_JURISDICTIONS_PATH="${XLN_JURISDICTIONS_PATH:-./db/dev/jurisdictions.json}"
 
 cd "$REPO_ROOT"

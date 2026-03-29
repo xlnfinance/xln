@@ -31,6 +31,19 @@ const VALID_TYPOGRAPHY: readonly UITypographyScale[] = ['sm', 'md', 'lg'] as con
 
 export const DEFAULT_UI_STYLE: UIStyleSettings = {
   density: 'comfortable',
+  radius: 'sharp',
+  borders: 'subtle',
+  shadows: 'flat',
+  tabs: 'segmented',
+  buttons: 'soft',
+  cards: 'flat',
+  inputs: 'outlined',
+  accent: 'normal',
+  typography: 'md',
+};
+
+export const LEGACY_UI_STYLE: UIStyleSettings = {
+  density: 'comfortable',
   radius: 'soft',
   borders: 'subtle',
   shadows: 'soft',
@@ -72,6 +85,19 @@ export function normalizeUiStyle(input: Partial<UIStyleSettings> | null | undefi
   };
 }
 
+export function isUiStyleEqual(left: UIStyleSettings, right: UIStyleSettings): boolean {
+  return left.density === right.density
+    && left.radius === right.radius
+    && left.borders === right.borders
+    && left.shadows === right.shadows
+    && left.tabs === right.tabs
+    && left.buttons === right.buttons
+    && left.cards === right.cards
+    && left.inputs === right.inputs
+    && left.accent === right.accent
+    && left.typography === right.typography;
+}
+
 export function applyUiStyleToDocument(uiStyleInput: Partial<UIStyleSettings> | null | undefined): void {
   if (typeof document === 'undefined') return;
 
@@ -80,9 +106,9 @@ export function applyUiStyleToDocument(uiStyleInput: Partial<UIStyleSettings> | 
 
   const densityScale = uiStyle.density === 'compact' ? 0.92 : uiStyle.density === 'roomy' ? 1.08 : 1;
   const controlHeight = uiStyle.density === 'compact' ? 40 : uiStyle.density === 'roomy' ? 48 : 44;
-  const radiusBase = uiStyle.radius === 'sharp' ? 8 : uiStyle.radius === 'pill' ? 18 : 12;
-  const radiusLarge = uiStyle.radius === 'sharp' ? 12 : uiStyle.radius === 'pill' ? 24 : 16;
-  const radiusPill = uiStyle.radius === 'sharp' ? 12 : 999;
+  const radiusBase = uiStyle.radius === 'sharp' ? 6 : uiStyle.radius === 'pill' ? 18 : 12;
+  const radiusLarge = uiStyle.radius === 'sharp' ? 10 : uiStyle.radius === 'pill' ? 24 : 16;
+  const radiusPill = uiStyle.radius === 'sharp' ? 8 : 999;
   const borderAlpha = uiStyle.borders === 'minimal' ? 0.34 : uiStyle.borders === 'strong' ? 0.82 : 0.56;
   const borderStrongAlpha = uiStyle.borders === 'minimal' ? 0.48 : uiStyle.borders === 'strong' ? 0.96 : 0.72;
   const shadowOpacity = uiStyle.shadows === 'flat' ? 0 : uiStyle.shadows === 'float' ? 0.14 : 0.07;

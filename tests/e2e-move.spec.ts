@@ -333,6 +333,17 @@ async function selectMoveEntityField(page: Page, testId: string, optionText: str
   const picker = field.locator('[data-testid$="-picker"], .entity-input').first();
   const trigger = picker.locator('.closed-trigger, input').first();
   await trigger.click();
+  const exactHex = /^0x[0-9a-fA-F]{64}$/.test(optionText);
+  const candidateTexts = exactHex
+    ? [optionText, `${optionText.slice(0, 10)}...${optionText.slice(-6)}`]
+    : [optionText];
+  for (const candidateText of candidateTexts) {
+    const option = picker.getByTestId(/-option-/).filter({ hasText: candidateText }).first();
+    if (await option.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await option.dispatchEvent('mousedown');
+      return;
+    }
+  }
   const option = picker.getByTestId(/-option-/).filter({ hasText: optionText }).first();
   await expect(option).toBeVisible({ timeout: 20_000 });
   await option.dispatchEvent('mousedown');
@@ -1041,7 +1052,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
-        await broadcastDraftBatch(page, asLocalEntityRef(bob!));
+        await broadcastDraftBatch(page, asLocalEntityRef(alice!));
         await waitForExactBigInt(
           async () => await readOnchainReserveBalanceRaw(page, alice!.entityId, symbol),
           reserveBefore - amount,

@@ -5,6 +5,8 @@
   import { settings } from '../../stores/settingsStore';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
+  import AccountTokenDetails from './shared/AccountTokenDetails.svelte';
+  import { buildAccountTokenDetails, isAccountLeftPerspective } from './shared/account-token-details';
   import { resolveEntityName } from '$lib/utils/entityNaming';
 
   export let account: AccountMachine;
@@ -40,15 +42,6 @@
     value: string;
     tone?: 'default' | 'good' | 'warn' | 'danger';
   };
-
-  function isAccountLeftPerspective(ownerEntityId: string, currentAccount: AccountMachine): boolean {
-    const owner = String(ownerEntityId || '').trim().toLowerCase();
-    const left = String(currentAccount.leftEntity || '').trim().toLowerCase();
-    const right = String(currentAccount.rightEntity || '').trim().toLowerCase();
-    if (owner === left) return true;
-    if (owner === right) return false;
-    throw new Error(`Account perspective mismatch: owner=${ownerEntityId} left=${currentAccount.leftEntity} right=${currentAccount.rightEntity}`);
-  }
 
   $: iAmLeft = isAccountLeftPerspective(entityId, account);
   $: activeDispute = account.activeDispute ?? null;
@@ -90,28 +83,7 @@
 
   $: counterpartyName = resolveEntityName(counterpartyId, activeEnv);
 
-  $: tokenDetails = (() => {
-    if (!activeXlnFunctions?.deriveDelta) return [];
-    return Array.from(account.deltas?.entries() || []).map(([tokenId, delta]) => {
-      const derived = activeXlnFunctions.deriveDelta(delta, iAmLeft);
-      const peerDerived = activeXlnFunctions.deriveDelta(delta, !iAmLeft);
-      const tokenInfo = activeXlnFunctions.getTokenInfo(tokenId) || {
-        symbol: `TKN${tokenId}`,
-        color: '#999',
-        name: `Token ${tokenId}`,
-        decimals: 18,
-      };
-      return {
-        tokenId,
-        tokenInfo,
-        delta,
-        derived,
-        peerDerived,
-        ourCreditLimit: iAmLeft ? delta.leftCreditLimit : delta.rightCreditLimit,
-        theirCreditLimit: iAmLeft ? delta.rightCreditLimit : delta.leftCreditLimit,
-      };
-    });
-  })();
+  $: tokenDetails = buildAccountTokenDetails(account, entityId, activeXlnFunctions);
   $: hasCommittedFrame = Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
   $: showTokenDetails = hasCommittedFrame && tokenDetails.length > 0;
   $: activityRows = (() => {
@@ -453,18 +425,6 @@
       : value.toString();
   }
 
-  function stripTrailingSymbol(rawAmount: string, rawSymbol: string): string {
-    const amount = String(rawAmount || '').replace(/\s+/g, ' ').trim();
-    const symbol = String(rawSymbol || '').trim();
-    if (!amount || !symbol) return amount;
-    const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return amount.replace(new RegExp(`\\s+${escaped}\\s*$`, 'i'), '').trim();
-  }
-
-  function formatTokenNumberOnly(tokenId: number, value: bigint, symbol: string): string {
-    return stripTrailingSymbol(formatTokenAmountSafe(tokenId, value), symbol);
-  }
-
   function handleBackToEntity(): void {
     dispatch('back');
   }
@@ -538,87 +498,29 @@
       {#each tokenDetails as td (td.tokenId)}
         {@const isExpanded = expandedTokenIds.has(td.tokenId)}
         <div class="delta-card">
-          <DeltaTokenSummary
-            compact={true}
-            barLayout={$settings.barLayout ?? 'center'}
-            symbol={td.tokenInfo.symbol}
-            name={td.tokenInfo.name || ''}
-            outAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity) || '0'}
-            inAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity) || '0'}
-            derived={td.derived}
-            decimals={Number(td.tokenInfo.decimals ?? 18)}
-            barHeight={12}
-            showMetricLabels={true}
-          >
-            <svelte:fragment slot="actions">
-              <button class="delta-expand" on:click={() => toggleTokenDetails(td.tokenId)}>
-                {isExpanded ? 'Hide' : 'Details'}
-              </button>
-              <button class="delta-faucet" on:click={() => handleFaucet(td.tokenId)}>Faucet</button>
-            </svelte:fragment>
-          </DeltaTokenSummary>
+          <div class="delta-card-toggle">
+            <DeltaTokenSummary
+              compact={true}
+              barLayout={$settings.barLayout ?? 'center'}
+              symbol={td.tokenInfo.symbol}
+              name={td.tokenInfo.name || ''}
+              outAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity) || '0'}
+              inAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity) || '0'}
+              derived={td.derived}
+              decimals={Number(td.tokenInfo.decimals ?? 18)}
+              barHeight={12}
+              showMetricLabels={true}
+              expanded={isExpanded}
+              on:bartoggle={() => toggleTokenDetails(td.tokenId)}
+            >
+              <svelte:fragment slot="actions">
+                <button class="delta-faucet" on:click|stopPropagation={() => handleFaucet(td.tokenId)}>Faucet</button>
+              </svelte:fragment>
+            </DeltaTokenSummary>
+          </div>
 
           {#if isExpanded}
-            <div class="delta-details">
-              <div class="detail-section">
-                <h5 class="detail-section-title">Perspective Parameters</h5>
-                <div class="detail-table">
-                  <div class="detail-grid-three detail-head">
-                    <span class="detail-header">Parameter</span>
-                    <span class="detail-header detail-header-right">Out</span>
-                    <span class="detail-header detail-header-right">In</span>
-                  </div>
-                  <div class="detail-grid-three">
-                    <span class="detail-label-cell">Capacity</span>
-                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.outCapacity, td.tokenInfo.symbol)}</span>
-                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.inCapacity, td.tokenInfo.symbol)}</span>
-                  </div>
-                  <div class="detail-grid-three">
-                    <span class="detail-label-cell">Credit limit</span>
-                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.ownCreditLimit, td.tokenInfo.symbol)}</span>
-                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.peerCreditLimit, td.tokenInfo.symbol)}</span>
-                  </div>
-                  <div class="detail-grid-three">
-                    <span class="detail-label-cell">Own credit component</span>
-                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.outOwnCredit, td.tokenInfo.symbol)}</span>
-                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.inOwnCredit, td.tokenInfo.symbol)}</span>
-                  </div>
-                  <div class="detail-grid-three">
-                    <span class="detail-label-cell">Peer credit component</span>
-                    <span class="detail-value-cell debt">{formatTokenNumberOnly(td.tokenId, td.derived.outPeerCredit, td.tokenInfo.symbol)}</span>
-                    <span class="detail-value-cell">{formatTokenNumberOnly(td.tokenId, td.derived.inPeerCredit, td.tokenInfo.symbol)}</span>
-                  </div>
-                  <div class="detail-grid-three">
-                    <span class="detail-label-cell">Collateral component</span>
-                    <span class="detail-value-cell coll">{formatTokenNumberOnly(td.tokenId, td.derived.outCollateral, td.tokenInfo.symbol)}</span>
-                    <span class="detail-value-cell coll">{formatTokenNumberOnly(td.tokenId, td.derived.inCollateral, td.tokenInfo.symbol)}</span>
-                  </div>
-                  <div class="detail-grid-three">
-                    <span class="detail-label-cell">Hold deduction</span>
-                    <span class="detail-value-cell debt">{formatTokenNumberOnly(td.tokenId, td.derived.outTotalHold ?? 0n, td.tokenInfo.symbol)}</span>
-                    <span class="detail-value-cell debt">{formatTokenNumberOnly(td.tokenId, td.derived.inTotalHold ?? 0n, td.tokenInfo.symbol)}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="detail-section canonical">
-                <h5 class="detail-section-title">Canonical State (Side-Neutral)</h5>
-                <div class="detail-list">
-                  <div class="detail-line">
-                    <span class="detail-label">delta</span>
-                    <span class="detail-value">{formatTokenNumberOnly(td.tokenId, (td.delta?.offdelta ?? 0n) + (td.delta?.ondelta ?? 0n), td.tokenInfo.symbol)}</span>
-                  </div>
-                  <div class="detail-line">
-                    <span class="detail-label">offdelta</span>
-                    <span class="detail-value">{formatTokenNumberOnly(td.tokenId, td.delta?.offdelta ?? 0n, td.tokenInfo.symbol)}</span>
-                  </div>
-                  <div class="detail-line">
-                    <span class="detail-label">ondelta</span>
-                    <span class="detail-value">{formatTokenNumberOnly(td.tokenId, td.delta?.ondelta ?? 0n, td.tokenInfo.symbol)}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <AccountTokenDetails detail={td} formatTokenAmount={activeXlnFunctions?.formatTokenAmount ?? null} />
           {/if}
         </div>
       {/each}
@@ -832,7 +734,16 @@
     font-style: italic;
   }
 
-  .delta-expand,
+  .delta-card-toggle {
+    border-radius: 10px;
+    cursor: pointer;
+  }
+
+  .delta-card-toggle:focus-visible {
+    outline: 1px solid color-mix(in srgb, var(--account-panel-accent) 70%, white 30%);
+    outline-offset: 3px;
+  }
+
   .delta-faucet {
     border: 1px solid var(--account-panel-border);
     background: transparent;
@@ -868,9 +779,9 @@
   .detail-section-title {
     margin: 0 0 8px;
     color: var(--account-panel-text-secondary);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: 12px;
+    text-transform: none;
+    letter-spacing: 0.01em;
     font-weight: 700;
   }
 
@@ -900,8 +811,8 @@
   .detail-header {
     color: var(--account-panel-text-secondary);
     font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    text-transform: none;
+    letter-spacing: 0.01em;
     line-height: 1;
     font-weight: 700;
   }
@@ -913,9 +824,9 @@
   .detail-label,
   .detail-label-cell {
     color: var(--account-panel-text-secondary);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: 0.01em;
     line-height: 1;
   }
 
@@ -1144,9 +1055,9 @@
   .section h3 {
     margin: 4px 0 8px;
     color: var(--account-panel-text-secondary);
-    font-size: 0.8em;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: 0.95em;
+    text-transform: none;
+    letter-spacing: 0.01em;
   }
 
   .activity-filters {
@@ -1162,8 +1073,8 @@
     gap: 4px;
     color: var(--account-panel-text-secondary);
     font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    text-transform: none;
+    letter-spacing: 0.01em;
   }
 
   .activity-filters select {

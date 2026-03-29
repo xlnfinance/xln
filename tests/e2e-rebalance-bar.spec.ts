@@ -841,7 +841,7 @@ async function sendDirectPaymentToHub(
   await expect(directModeBtn).toBeVisible({ timeout: 10_000 });
   await directModeBtn.click();
 
-  const recipientPicker = page.locator('button.closed-trigger').first();
+  const recipientPicker = page.locator('.entity-input .dropdown-toggle').first();
   await expect(recipientPicker).toBeVisible({ timeout: 10_000 });
   await recipientPicker.click();
   const recipientOption = page.locator('.dropdown-item').filter({ hasText: hubId }).first();
@@ -852,7 +852,7 @@ async function sendDirectPaymentToHub(
   await expect(amountInput).toBeVisible({ timeout: 10_000 });
   await amountInput.fill(amountUsd.toString());
 
-  const findRoutesBtn = page.getByRole('button', { name: 'Find Routes' }).first();
+  const findRoutesBtn = page.getByRole('button', { name: 'Find route' }).first();
   await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
   await findRoutesBtn.click();
 

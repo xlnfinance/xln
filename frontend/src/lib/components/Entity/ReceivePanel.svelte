@@ -3,7 +3,7 @@
   import QRCode from 'qrcode';
   import { Check, Copy, Download, QrCode } from 'lucide-svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
-  import { buildXlnInvoiceUri } from '$lib/utils/xlnInvoice';
+  import { buildWalletPayHref, buildXlnInvoiceUri } from '$lib/utils/xlnInvoice';
 
   export let entityId: string;
 
@@ -15,6 +15,11 @@
   let qrDataUrl = '';
   let qrError = '';
   let qrJob = 0;
+
+  const getWalletBaseUrl = (): string => {
+    if (typeof window === 'undefined') return 'https://xln.finance';
+    return window.location.origin;
+  };
 
   const copyText = async (text: string, kind: 'id' | 'invoice'): Promise<void> => {
     if (!text) return;
@@ -34,12 +39,18 @@
     amount,
     description,
   });
-  $: invoicePreview = amount.trim() || description.trim() ? fullInvoice : `xln:?id=${entityId}`;
+  $: invoicePreview = amount.trim() || description.trim() ? fullInvoice : entityId;
+  $: walletHref = buildWalletPayHref(getWalletBaseUrl(), {
+    targetEntityId: entityId,
+    tokenId,
+    amount,
+    description,
+  });
 
   $: {
     const nextJob = ++qrJob;
     qrError = '';
-    QRCode.toDataURL(invoicePreview, {
+    QRCode.toDataURL(walletHref, {
       errorCorrectionLevel: 'M',
       margin: 1,
       width: 320,
