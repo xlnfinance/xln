@@ -941,6 +941,7 @@ export const applyEntityTx = async (
         policyVersion: policyVersionRaw,
         routingFeePPM = 1,
         baseFee = 0n,
+        swapTakerFeeBps = 0,
         disputeAutoFinalizeMode = 'auto',
         minCollateralThreshold = 0n,
         c2rWithdrawSoftLimit = DEFAULT_SOFT_LIMIT,
@@ -977,12 +978,14 @@ export const applyEntityTx = async (
       }
       const effectiveC2RWithdrawSoftLimit =
         c2rWithdrawSoftLimit < DEFAULT_SOFT_LIMIT ? DEFAULT_SOFT_LIMIT : c2rWithdrawSoftLimit;
+      const normalizedSwapTakerFeeBps = Math.max(0, Math.min(10_000, Math.floor(Number(swapTakerFeeBps) || 0)));
 
       newState.hubRebalanceConfig = {
         matchingStrategy,
         policyVersion,
         routingFeePPM,
         baseFee,
+        swapTakerFeeBps: normalizedSwapTakerFeeBps,
         disputeAutoFinalizeMode,
         minCollateralThreshold,
         c2rWithdrawSoftLimit: effectiveC2RWithdrawSoftLimit,
@@ -998,6 +1001,7 @@ export const applyEntityTx = async (
       };
       console.log(
         `🏦 Hub config set: strategy=${matchingStrategy}, policyVersion=${policyVersion}, routingFee=${routingFeePPM}ppm, ` +
+        `swapTakerFee=${normalizedSwapTakerFeeBps}bps, ` +
         `rebalance(base=${rebalanceBaseFee},liqBps=${rebalanceLiquidityFeeBps},gas=${rebalanceGasFee},timeoutMs=${rebalanceTimeoutMs},c2rWithdrawSoftLimit=${effectiveC2RWithdrawSoftLimit})` +
         `${feePolicyChanged ? ' [fee-policy-updated]' : ''}`,
       );
@@ -1011,6 +1015,7 @@ export const applyEntityTx = async (
       addMessage(
         newState,
         `🏦 Hub config activated: ${matchingStrategy} strategy v${policyVersion}, ${routingFeePPM}ppm routing fee, ` +
+        `swapTakerFee=${normalizedSwapTakerFeeBps}bps, ` +
         `rebalance(base=${rebalanceBaseFee}, liqBps=${rebalanceLiquidityFeeBps}, gas=${rebalanceGasFee}, c2rWithdrawSoftLimit=${effectiveC2RWithdrawSoftLimit})`,
       );
       return { newState, outputs: [] };
@@ -1147,6 +1152,9 @@ export const applyEntityTx = async (
         offerId,
         fillRatio,
         cancelRemainder,
+        comment,
+        feeTokenId,
+        feeAmount,
         executionGiveAmount,
         executionWantAmount,
       } = entityTx.data;
@@ -1165,6 +1173,9 @@ export const applyEntityTx = async (
           offerId,
           fillRatio,
           cancelRemainder,
+          ...(comment !== undefined ? { comment } : {}),
+          ...(feeTokenId !== undefined ? { feeTokenId } : {}),
+          ...(feeAmount !== undefined ? { feeAmount } : {}),
           ...(executionGiveAmount !== undefined ? { executionGiveAmount } : {}),
           ...(executionWantAmount !== undefined ? { executionWantAmount } : {}),
         },

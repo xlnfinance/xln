@@ -231,8 +231,37 @@ async function waitForPopupRoutesAndSubmit(popup: Page, targetEntityId: string):
   await popup.getByRole('button', { name: /^Pay Now$/i }).click();
 }
 
-async function openWalletPayWorkspace(page: Page): Promise<void> {
-  const payTab = page.getByRole('button', { name: /^Pay$/i }).first();
+async function ensureWalletAccountWorkspace(page: Page, counterpartyId?: string): Promise<void> {
+  const workspaceNav = page.locator('nav[aria-label="Account workspace"]').first();
+  if (await workspaceNav.isVisible().catch(() => false)) return;
+
+  const accountCard = counterpartyId
+    ? page.locator(`.account-preview[data-counterparty-id="${counterpartyId}"]`).first()
+    : page.locator('.account-preview').first();
+  await expect(accountCard).toBeVisible({ timeout: 20_000 });
+
+  const exploreButton = accountCard.locator('.popover-explore-btn').first();
+  if (!(await exploreButton.isVisible().catch(() => false))) {
+    const statusButton = accountCard.locator('.status-indicator').first();
+    await expect(statusButton).toBeVisible({ timeout: 20_000 });
+    await statusButton.click();
+  }
+
+  await expect(exploreButton).toBeVisible({ timeout: 20_000 });
+  await exploreButton.click();
+  await expect(workspaceNav).toBeVisible({ timeout: 20_000 });
+}
+
+async function openWalletPayWorkspace(page: Page, counterpartyId?: string): Promise<void> {
+  await ensureWalletAccountWorkspace(page, counterpartyId);
+  const visiblePayTab = page.locator('[data-testid="account-workspace-tab-pay"]:visible').first();
+  if (!(await visiblePayTab.isVisible().catch(() => false))) {
+    const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
+    if (await mobileToggle.isVisible().catch(() => false)) {
+      await mobileToggle.click();
+    }
+  }
+  const payTab = page.locator('[data-testid="account-workspace-tab-pay"]:visible').first();
   await expect(payTab).toBeVisible({ timeout: 20_000 });
   await payTab.click();
   console.log(`[custody:wallet] opened pay workspace url=${page.url()}`);
@@ -897,7 +926,7 @@ test.describe('E2E Custody Flow', () => {
             await expect(copyButton).toHaveText(/^Copied$/i, { timeout: 5_000 });
           }
           await walletPage.bringToFront();
-          await openWalletPayWorkspace(walletPage);
+          await openWalletPayWorkspace(walletPage, fundingHubId);
           const clearInvoiceButton = walletPage.getByRole('button', { name: /^Clear$/i }).first();
           if (await clearInvoiceButton.isVisible().catch(() => false)) {
             await clearInvoiceButton.click();

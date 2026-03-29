@@ -21,6 +21,7 @@ import { formatEntityId, HEAVY_LOGS } from '../../utils';
 import { isLeftEntity } from '../../entity-id-utils';
 import {
   buildSwapResolveDataFromOrderbookFill,
+  calculateSwapTakerFeeAmount,
   compareCanonicalText,
   MAX_SWAP_FILL_RATIO,
   type NormalizedOrderbookOffer,
@@ -148,6 +149,11 @@ type SwapResolveEnqueueData = {
   offerId: string;
   fillRatio: number;
   cancelRemainder: boolean;
+  comment?: string;
+  feeTokenId?: number;
+  feeAmount?: bigint;
+  executionGiveAmount?: bigint;
+  executionWantAmount?: bigint;
   restingPriceTicks?: bigint;
   restingGiveAmount?: bigint;
   restingWantAmount?: bigint;
@@ -1178,6 +1184,10 @@ export function processOrderbookSwaps(
   if (!ext) return { mempoolOps, bookUpdates, quarantinedOffers };
   const rehydrateOnly = options.rehydrateOnly === true;
   const minTradeSize = ext.hubProfile?.minTradeSize ?? 0n;
+  const swapTakerFeeBpsRaw = hubState.hubRebalanceConfig?.swapTakerFeeBps;
+  const swapTakerFeeBps = Number.isFinite(Number(swapTakerFeeBpsRaw))
+    ? Math.max(0, Math.min(10_000, Math.floor(Number(swapTakerFeeBpsRaw))))
+    : 0;
   const quarantineOffer = (accountId: string, offerId: string, reason: string): true => {
     quarantinedOffers.push({ accountId, offerId, reason });
     return true;
@@ -1703,9 +1713,17 @@ export function processOrderbookSwaps(
     bookUpdates.push({ pairId: bookKey, book });
 
     const rejectEvents = result.events.filter(
-      (event) => event.type === 'REJECT' && event.orderId === currentNamespacedOrderId,
+      (event): event is Extract<typeof result.events[number], { type: 'REJECT' }> =>
+        event.type === 'REJECT' && event.orderId === currentNamespacedOrderId,
     );
-    const offerRejectedWithoutFill = rejectEvents.length > 0;
+    const tradeEvents = result.events.filter(
+      (event): event is Extract<typeof result.events[number], { type: 'TRADE' }> => event.type === 'TRADE',
+    );
+    const stpRejectEvent = rejectEvents.find((event) => event.reason === 'STP cancel taker');
+    const resolveComment = stpRejectEvent
+      ? `STP:${String(stpRejectEvent.blockingOrderId || '')}`
+      : undefined;
+    const offerRejectedWithoutFill = rejectEvents.length > 0 && tradeEvents.length === 0;
     if (offerRejectedWithoutFill) {
       const rejectReasons = rejectEvents.map((event) => event.reason).filter(Boolean).join(', ');
       console.warn(
@@ -1719,6 +1737,7 @@ export function processOrderbookSwaps(
         offerId: offer.offerId,
         fillRatio: 0,
         cancelRemainder: true,
+        ...(resolveComment ? { comment: resolveComment } : {}),
       })) {
         console.log(`📤 ORDERBOOK: Queued swap_resolve(cancelRemainder) for rejected offer ${offer.offerId.slice(-8)}`);
       }
@@ -1736,40 +1755,38 @@ export function processOrderbookSwaps(
       weightedCost: bigint;
     }>();
 
-    for (const event of result.events) {
-      if (event.type === 'TRADE') {
-        const extractOfferId = (namespacedId: string) => {
-          const lastColon = namespacedId.lastIndexOf(':');
-          return lastColon >= 0 ? namespacedId.slice(lastColon + 1) : namespacedId;
-        };
-        const tradeCost = event.price * BigInt(event.qty);
+    for (const event of tradeEvents) {
+      const extractOfferId = (namespacedId: string) => {
+        const lastColon = namespacedId.lastIndexOf(':');
+        return lastColon >= 0 ? namespacedId.slice(lastColon + 1) : namespacedId;
+      };
+      const tradeCost = event.price * BigInt(event.qty);
 
-        const makerEntry = fillsPerOrder.get(event.makerOrderId);
-        if (!makerEntry) {
-          fillsPerOrder.set(event.makerOrderId, {
-            filledLots: event.qty,
-            originalLots: event.makerQtyBefore,
-            weightedCost: tradeCost,
-          });
-        } else {
-          makerEntry.filledLots += event.qty;
-          makerEntry.weightedCost += tradeCost;
-        }
-
-        const takerEntry = fillsPerOrder.get(event.takerOrderId);
-        if (!takerEntry) {
-          fillsPerOrder.set(event.takerOrderId, {
-            filledLots: event.qty,
-            originalLots: event.takerQtyTotal,
-            weightedCost: tradeCost,
-          });
-        } else {
-          takerEntry.filledLots += event.qty;
-          takerEntry.weightedCost += tradeCost;
-        }
-
-        console.log(`📊 ORDERBOOK TRADE: ${extractOfferId(event.makerOrderId)} ↔ ${extractOfferId(event.takerOrderId)} @ ${event.price}, qty=${event.qty}`);
+      const makerEntry = fillsPerOrder.get(event.makerOrderId);
+      if (!makerEntry) {
+        fillsPerOrder.set(event.makerOrderId, {
+          filledLots: event.qty,
+          originalLots: event.makerQtyBefore,
+          weightedCost: tradeCost,
+        });
+      } else {
+        makerEntry.filledLots += event.qty;
+        makerEntry.weightedCost += tradeCost;
       }
+
+      const takerEntry = fillsPerOrder.get(event.takerOrderId);
+      if (!takerEntry) {
+        fillsPerOrder.set(event.takerOrderId, {
+          filledLots: event.qty,
+          originalLots: event.takerQtyTotal,
+          weightedCost: tradeCost,
+        });
+      } else {
+        takerEntry.filledLots += event.qty;
+        takerEntry.weightedCost += tradeCost;
+      }
+
+      console.log(`📊 ORDERBOOK TRADE: ${extractOfferId(event.makerOrderId)} ↔ ${extractOfferId(event.takerOrderId)} @ ${event.price}, qty=${event.qty}`);
     }
 
     // Emit swap_resolve for each filled order
@@ -1840,7 +1857,7 @@ export function processOrderbookSwaps(
         !orderStillInBook,
       );
 
-      if (queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, accountId, {
+      const resolveEnqueueData: SwapResolveEnqueueData = {
         offerId,
         ...resolveData,
         ...(offerForExecution.priceTicks !== undefined ? { restingPriceTicks: offerForExecution.priceTicks } : {}),
@@ -1848,7 +1865,16 @@ export function processOrderbookSwaps(
         restingWantAmount: offerForExecution.wantAmount,
         ...(offerForExecution.quantizedGive !== undefined ? { restingQuantizedGive: offerForExecution.quantizedGive } : {}),
         ...(offerForExecution.quantizedWant !== undefined ? { restingQuantizedWant: offerForExecution.quantizedWant } : {}),
-      })) {
+        ...(namespacedOrderId === currentNamespacedOrderId && resolveComment ? { comment: resolveComment } : {}),
+      };
+      if (namespacedOrderId === currentNamespacedOrderId) {
+        const takerFeeAmount = calculateSwapTakerFeeAmount(resolveData.executionWantAmount ?? 0n, swapTakerFeeBps);
+        if (takerFeeAmount > 0n) {
+          resolveEnqueueData.feeTokenId = offerForExecution.wantTokenId;
+          resolveEnqueueData.feeAmount = takerFeeAmount;
+        }
+      }
+      if (queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, accountId, resolveEnqueueData)) {
         console.log(
           `📤 ORDERBOOK: Queued swap_resolve for ${offerId.slice(-8)}, fill=${(resolveData.fillRatio / MAX_SWAP_FILL_RATIO * 100).toFixed(1)}%, cancel=${!orderStillInBook}, source=${offerSource}`,
         );

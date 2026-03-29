@@ -155,6 +155,7 @@ export function buildEntityProfile(
       isHub,
       routingFeePPM: hubConfig?.routingFeePPM ?? 1,
       baseFee: hubConfig?.baseFee ?? 0n,
+      ...(hubConfig?.swapTakerFeeBps !== undefined ? { swapTakerFeeBps: hubConfig.swapTakerFeeBps } : {}),
       ...(isHub && hubConfig
         ? {
             policyVersion: hubConfig.policyVersion,
@@ -288,6 +289,7 @@ export function buildEntityAdvertisedStateFingerprint(
       isHub: metadata.isHub,
       routingFeePPM: metadata.routingFeePPM,
       baseFee: String(metadata.baseFee),
+      swapTakerFeeBps: Number(metadata.swapTakerFeeBps ?? 0),
       policyVersion: Number(metadata.policyVersion ?? 0),
       rebalanceBaseFee: String(metadata.rebalanceBaseFee ?? ''),
       rebalanceLiquidityFeeBps: String(metadata.rebalanceLiquidityFeeBps ?? ''),

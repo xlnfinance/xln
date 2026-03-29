@@ -69,6 +69,9 @@
     timestamp: number;
     executionGiveAmount: bigint | null;
     executionWantAmount: bigint | null;
+    feeTokenId: number | null;
+    feeAmount: bigint | null;
+    comment: string;
   };
   type OfferLifecycle = {
     key: string;
@@ -100,7 +103,10 @@
     filledPercent: number;
     priceImprovementAmount: bigint;
     priceImprovementTokenId: number | null;
+    feeAmount: bigint;
+    feeTokenId: number | null;
     status: ClosedOrderStatus;
+    closeComment: string;
     createdAt: number;
     closedAt: number;
   };
@@ -114,6 +120,8 @@
     wantTokenId: number;
     priceImprovementAmount: bigint;
     priceImprovementTokenId: number | null;
+    feeAmount: bigint;
+    feeTokenId: number | null;
   };
   let selectedOrderLevel: ClickedOrderLevel | null = null;
   let orderbookSnapshot: OrderbookSnapshot = {
@@ -581,6 +589,11 @@
   };
 
   function formatPriceImprovement(amount: bigint, tokenIdValue: number | null): string {
+    if (!tokenIdValue || amount <= 0n) return '—';
+    return `${formatAmount(amount, tokenIdValue)} ${tokenSymbol(tokenIdValue)}`;
+  }
+
+  function formatSwapFee(amount: bigint, tokenIdValue: number | null): string {
     if (!tokenIdValue || amount <= 0n) return '—';
     return `${formatAmount(amount, tokenIdValue)} ${tokenSymbol(tokenIdValue)}`;
   }
@@ -1144,6 +1157,8 @@
     filledPpm: bigint;
     priceImprovementAmount: bigint;
     priceImprovementTokenId: number | null;
+    feeAmount: bigint;
+    feeTokenId: number | null;
   } {
     const pair = resolvePairOrientation(lifecycle.giveTokenId, lifecycle.wantTokenId);
     const isBuy = isBuyLifecycle(lifecycle);
@@ -1154,6 +1169,8 @@
     let filledWantAmount = 0n;
     let filledBaseAmount = 0n;
     let priceImprovementAmount = 0n;
+    let feeAmount = 0n;
+    let feeTokenId: number | null = null;
     let sawExactExecution = false;
 
     for (const resolve of lifecycle.resolves) {
@@ -1183,6 +1200,11 @@
         const gained = actualQuoteThisStep - limitQuoteThisStep;
         if (gained > 0n) priceImprovementAmount += gained;
       }
+
+      if ((resolve.feeAmount ?? 0n) > 0n) {
+        feeAmount += resolve.feeAmount ?? 0n;
+        feeTokenId = resolve.feeTokenId ?? lifecycle.wantTokenId;
+      }
     }
 
     if (!sawExactExecution) {
@@ -1195,6 +1217,8 @@
         filledPpm,
         priceImprovementAmount: 0n,
         priceImprovementTokenId: null,
+        feeAmount: 0n,
+        feeTokenId: null,
       };
     }
 
@@ -1211,6 +1235,8 @@
       filledPpm: filledPpm > 1_000_000n ? 1_000_000n : filledPpm,
       priceImprovementAmount,
       priceImprovementTokenId: priceImprovementAmount > 0n ? pair.quoteTokenId : null,
+      feeAmount,
+      feeTokenId,
     };
   }
 
@@ -1260,6 +1286,9 @@
             const cancelRemainder = Boolean(data.cancelRemainder);
             const executionGiveAmount = toBigIntSafe(data.executionGiveAmount);
             const executionWantAmount = toBigIntSafe(data.executionWantAmount);
+            const feeTokenId = Number.isFinite(Number(data.feeTokenId)) ? Number(data.feeTokenId) : null;
+            const feeAmount = toBigIntSafe(data.feeAmount);
+            const comment = typeof data.comment === 'string' ? data.comment : '';
             const prev = lifecycles.get(key);
             if (!prev) continue;
             prev.resolves.push({
@@ -1268,6 +1297,9 @@
               timestamp: frameTs,
               executionGiveAmount,
               executionWantAmount,
+              feeTokenId,
+              feeAmount,
+              comment,
             });
             continue;
           }
@@ -1295,6 +1327,24 @@
     if (hasCancelResolve || lifecycle.cancelRequested) return 'canceled';
     if (hasFill) return 'filled';
     return 'closed';
+  }
+
+  function latestResolveComment(lifecycle: OfferLifecycle): string {
+    for (let i = lifecycle.resolves.length - 1; i >= 0; i -= 1) {
+      const comment = String(lifecycle.resolves[i]?.comment || '').trim();
+      if (comment) return comment;
+    }
+    return '';
+  }
+
+  function extractStpBlockingOrderId(comment: string): string {
+    return comment.startsWith('STP:') ? comment.slice(4).trim() : '';
+  }
+
+  function formatCloseComment(comment: string): string {
+    const blockingOrderId = extractStpBlockingOrderId(comment);
+    if (!blockingOrderId) return comment;
+    return `STP:${blockingOrderId.slice(-8)}`;
   }
 
   function formatOrderTime(ms: number): string {
@@ -1334,6 +1384,7 @@
         ? 100
         : Number((filledPpm * 10_000n) / 1_000_000n) / 100;
       const latestResolveTs = offer.resolves.length > 0 ? offer.resolves[offer.resolves.length - 1]!.timestamp : offer.createdAt;
+      const closeComment = latestResolveComment(offer);
       return {
         offerId: offer.offerId,
         accountId: offer.accountId,
@@ -1351,7 +1402,10 @@
         filledPercent,
         priceImprovementAmount: summary.priceImprovementAmount,
         priceImprovementTokenId: summary.priceImprovementTokenId,
+        feeAmount: summary.feeAmount,
+        feeTokenId: summary.feeTokenId,
         status: classifyClosedStatus(offer),
+        closeComment,
         createdAt: offer.createdAt,
         closedAt: latestResolveTs,
       } satisfies ClosedOrderView;
@@ -1388,6 +1442,7 @@
   $: if (pendingSwapFeedbackOfferId) {
     const closed = closedOrderViews.find((order) => order.offerId === pendingSwapFeedbackOfferId);
     if (closed) {
+      const stpBlockingOrderId = extractStpBlockingOrderId(closed.closeComment);
       if (closed.status === 'filled' && closed.filledPercent >= 99.99) {
         swapCompletionModal = {
           offerId: closed.offerId,
@@ -1399,18 +1454,37 @@
           wantTokenId: closed.wantTokenId,
           priceImprovementAmount: closed.priceImprovementAmount,
           priceImprovementTokenId: closed.priceImprovementTokenId,
+          feeAmount: closed.feeAmount,
+          feeTokenId: closed.feeTokenId,
         };
         const improvementNote = closed.priceImprovementAmount > 0n
           ? ` with ${formatPriceImprovement(closed.priceImprovementAmount, closed.priceImprovementTokenId)} price improvement`
           : '';
-        toasts.success(`Swap fully filled${improvementNote}`);
-      } else if (closed.status === 'partial') {
-        const improvementNote = closed.priceImprovementAmount > 0n
-          ? ` Price improvement: ${formatPriceImprovement(closed.priceImprovementAmount, closed.priceImprovementTokenId)}.`
+        const feeNote = closed.feeAmount > 0n
+          ? `. Fee: ${formatSwapFee(closed.feeAmount, closed.feeTokenId)}`
           : '';
-        toasts.info(`Swap partially filled (${closed.filledPercent.toFixed(2)}%) and closed the remainder.${improvementNote}`);
+        toasts.success(`Swap fully filled${improvementNote}${feeNote}`);
+      } else if (closed.status === 'partial') {
+        if (stpBlockingOrderId) {
+          const feeNote = closed.feeAmount > 0n
+            ? ` Fee: ${formatSwapFee(closed.feeAmount, closed.feeTokenId)}.`
+            : '';
+          toasts.info(`Swap partially filled (${closed.filledPercent.toFixed(2)}%). Remaining quantity was canceled to avoid matching your own order ${stpBlockingOrderId.slice(-8)}.${feeNote}`);
+        } else {
+          const improvementNote = closed.priceImprovementAmount > 0n
+            ? ` Price improvement: ${formatPriceImprovement(closed.priceImprovementAmount, closed.priceImprovementTokenId)}.`
+            : '';
+          const feeNote = closed.feeAmount > 0n
+            ? ` Fee: ${formatSwapFee(closed.feeAmount, closed.feeTokenId)}.`
+            : '';
+          toasts.info(`Swap partially filled (${closed.filledPercent.toFixed(2)}%) and closed the remainder.${improvementNote}${feeNote}`);
+        }
       } else if (closed.status === 'canceled') {
-        toasts.info('Swap was canceled without a fill.');
+        if (stpBlockingOrderId) {
+          toasts.info(`Swap was canceled to avoid matching your own order ${stpBlockingOrderId.slice(-8)}.`);
+        } else {
+          toasts.info('Swap was canceled without a fill.');
+        }
       }
       pendingSwapFeedbackOfferId = '';
     }
@@ -1923,6 +1997,9 @@
                     <span class:side-ask={closedOrderStatusTone(order.status) === 'ask'} class:side-bid={closedOrderStatusTone(order.status) === 'bid'} class="side-badge">
                       {closedOrderStatusLabel(order.status)}
                     </span>
+                    {#if order.closeComment}
+                      <div class="close-comment">{formatCloseComment(order.closeComment)}</div>
+                    {/if}
                   </td>
                   <td>{order.pairLabel}</td>
                   <td>{formatPriceTicks(order.priceTicks)}</td>
@@ -1954,6 +2031,11 @@
         {#if swapCompletionModal.priceImprovementAmount > 0n}
           <p class="swap-modal-improvement">
             Price Improvement: <strong>{formatPriceImprovement(swapCompletionModal.priceImprovementAmount, swapCompletionModal.priceImprovementTokenId)}</strong>
+          </p>
+        {/if}
+        {#if swapCompletionModal.feeAmount > 0n}
+          <p class="swap-modal-improvement">
+            Fee: <strong>{formatSwapFee(swapCompletionModal.feeAmount, swapCompletionModal.feeTokenId)}</strong>
           </p>
         {/if}
         <div class="swap-modal-actions">
@@ -2020,6 +2102,13 @@
 
   .section-orders {
     margin-top: 14px;
+  }
+
+  .close-comment {
+    margin-top: 4px;
+    color: #7c8597;
+    font-size: 11px;
+    line-height: 1.2;
   }
 
   .order-input-row {

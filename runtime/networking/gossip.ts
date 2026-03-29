@@ -27,6 +27,7 @@ export type ProfileMetadata = {
   isHub: boolean;
   routingFeePPM: number;
   baseFee: bigint;
+  swapTakerFeeBps?: number;
   board: BoardMetadata;
   profileHanko?: string;
   policyVersion?: number;
@@ -136,6 +137,7 @@ const ALLOWED_PROFILE_METADATA_KEYS = [
   'isHub',
   'routingFeePPM',
   'baseFee',
+  'swapTakerFeeBps',
   'board',
   'profileHanko',
   'policyVersion',
@@ -424,6 +426,9 @@ export const parseProfile = (raw: unknown): Profile => {
       Number.isFinite(Number(metadataRaw.routingFeePPM)) ? Math.floor(Number(metadataRaw.routingFeePPM)) : 1,
     ),
     baseFee: parseBigIntValue(metadataRaw.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
+    ...(metadataRaw.swapTakerFeeBps !== undefined
+      ? { swapTakerFeeBps: parseUint16(metadataRaw.swapTakerFeeBps, 'GOSSIP_PROFILE_SWAP_TAKER_FEE_BPS_INVALID', entityId) }
+      : {}),
     board,
     ...(typeof metadataRaw.profileHanko === 'string' && metadataRaw.profileHanko.trim().length > 0
       ? { profileHanko: metadataRaw.profileHanko.trim() }
@@ -513,6 +518,9 @@ export const canonicalizeProfile = (
   getBoardPrimaryPublicKey(board, entityId);
   const routingFeePPM = Math.max(0, Number.isFinite(Number(metadata.routingFeePPM)) ? Math.floor(Number(metadata.routingFeePPM)) : 1);
   const baseFee = parseBigIntValue(metadata.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId);
+  const swapTakerFeeBps = metadata.swapTakerFeeBps !== undefined
+    ? parseUint16(metadata.swapTakerFeeBps, 'GOSSIP_PROFILE_SWAP_TAKER_FEE_BPS_INVALID', entityId)
+    : undefined;
   return {
     ...profile,
     entityId,
@@ -535,6 +543,7 @@ export const canonicalizeProfile = (
       board,
       routingFeePPM,
       baseFee,
+      ...(swapTakerFeeBps !== undefined ? { swapTakerFeeBps } : {}),
       ...(typeof metadata.policyVersion === 'number' && Number.isFinite(metadata.policyVersion)
         ? { policyVersion: Math.floor(metadata.policyVersion) }
         : {}),

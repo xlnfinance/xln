@@ -5,6 +5,7 @@ const PW_WORKERS_RAW = Number(process.env['PW_WORKERS'] || '1');
 const PW_WORKERS = Number.isFinite(PW_WORKERS_RAW) && PW_WORKERS_RAW > 0 ? Math.floor(PW_WORKERS_RAW) : 1;
 const PW_SKIP_WEBSERVER = process.env['PW_SKIP_WEBSERVER'] === '1';
 const PW_ONLY_CHROMIUM = process.env['PW_ONLY_CHROMIUM'] === '1';
+const PW_PROFILE = process.env['PW_PROFILE'] || '';
 const PW_SIMPLE_REPORTER = process.env['PW_SIMPLE_REPORTER'] === '1';
 const PW_OUTPUT_DIR = process.env['PW_OUTPUT_DIR'] || './tests/test-results';
 const PW_FAST = process.env['PW_FAST'] === '1';
@@ -12,6 +13,35 @@ const PW_TRACE = process.env['PW_TRACE'] || (PW_FAST ? 'off' : 'on-first-retry')
 const PW_SCREENSHOT = process.env['PW_SCREENSHOT'] || (PW_FAST ? 'off' : 'only-on-failure');
 const PW_VIDEO = process.env['PW_VIDEO'] || 'on';
 const PW_REPORTER = process.env['PW_REPORTER'];
+
+const desktopChromiumProject = {
+  name: 'chromium',
+  // Force full Chromium instead of chromium_headless_shell (regressed WebGL in 1.58+)
+  use: { ...devices['Desktop Chrome'], channel: 'chromium' },
+};
+
+const webkitMobileProject = {
+  name: 'webkit-mobile',
+  use: {
+    ...devices['iPhone 15 Pro'],
+    browserName: 'webkit' as const,
+  },
+};
+
+const projects = PW_PROFILE === 'webkit-mobile'
+  ? [webkitMobileProject]
+  : PW_PROFILE === 'cross-mobile'
+    ? [desktopChromiumProject, webkitMobileProject]
+    : PW_ONLY_CHROMIUM
+      ? [desktopChromiumProject]
+      : [
+          desktopChromiumProject,
+          {
+            name: 'brainvault',
+            testDir: './frontend/tests',
+            use: { ...devices['Desktop Chrome'] },
+          },
+        ];
 
 export default defineConfig({
   // testDir is relative to this config file's directory
@@ -50,23 +80,7 @@ export default defineConfig({
       ],
     },
   },
-  projects: PW_ONLY_CHROMIUM ? [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'], channel: 'chromium' },
-    },
-  ] : [
-    {
-      name: 'chromium',
-      // Force full Chromium instead of chromium_headless_shell (regressed WebGL in 1.58+)
-      use: { ...devices['Desktop Chrome'], channel: 'chromium' },
-    },
-    {
-      name: 'brainvault',
-      testDir: './frontend/tests',
-      use: { ...devices['Desktop Chrome'] },
-    },
-  ],
+  projects,
 
   // Run dev server before tests
   ...(PW_SKIP_WEBSERVER ? {} : {

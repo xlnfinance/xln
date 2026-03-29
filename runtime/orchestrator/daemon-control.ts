@@ -9,6 +9,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_MS = 100;
 const DEFAULT_ROUTING_FEE_PPM = 1;
 const DEFAULT_ROUTING_BASE_FEE = 0n;
+const DEFAULT_SWAP_TAKER_FEE_BPS = 1;
 const DEFAULT_REBALANCE_BASE_FEE = 10n ** 17n;
 const DEFAULT_REBALANCE_LIQUIDITY_FEE_BPS = 1n;
 const DEFAULT_REBALANCE_GAS_FEE = 0n;
@@ -49,6 +50,7 @@ export type EnableRoutingConfig = ManagedEntityConfig & {
   relayUrl?: string;
   routingFeePPM?: number;
   baseFee?: bigint;
+  swapTakerFeeBps?: number;
   gossipPollMs?: number;
   initOrderbook?: boolean;
 };
@@ -62,6 +64,7 @@ export type SetupCustodyConfig = ManagedEntityConfig & {
   routingEnabled?: boolean;
   routingFeePPM?: number;
   baseFee?: bigint;
+  swapTakerFeeBps?: number;
 };
 
 export type ManagedEntityIdentity = {
@@ -254,6 +257,7 @@ const buildEnableRoutingEntityInput = (
         policyVersion: 1,
         routingFeePPM: config.routingFeePPM ?? DEFAULT_ROUTING_FEE_PPM,
         baseFee: config.baseFee ?? DEFAULT_ROUTING_BASE_FEE,
+        swapTakerFeeBps: config.swapTakerFeeBps ?? DEFAULT_SWAP_TAKER_FEE_BPS,
         rebalanceBaseFee: DEFAULT_REBALANCE_BASE_FEE,
         rebalanceLiquidityFeeBps: DEFAULT_REBALANCE_LIQUIDITY_FEE_BPS,
         rebalanceGasFee: DEFAULT_REBALANCE_GAS_FEE,
@@ -395,6 +399,7 @@ export const setupCustody = async (
       ...config,
       routingFeePPM: config.routingFeePPM,
       baseFee: config.baseFee,
+      swapTakerFeeBps: config.swapTakerFeeBps,
     });
   } else {
     await client.configureP2P({

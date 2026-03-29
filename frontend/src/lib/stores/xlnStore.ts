@@ -244,6 +244,7 @@ const areP2PStatesEqual = (left: P2PState, right: P2PState): boolean => {
 function startP2PPoll() {
   if (p2pPollTimer) return;
   const poll = () => {
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
     if (!XLN) return;
     const env = get(xlnEnvironment);
     if (!env) return;
@@ -257,6 +258,12 @@ function startP2PPoll() {
       }
     } catch {
       /* ignore if not available */
+    }
+    if (typeof window !== 'undefined' && typeof performance !== 'undefined') {
+      const elapsedMs = performance.now() - startedAt;
+      if (elapsedMs >= 32) {
+        console.warn(`[perf] slow timer xlnStore.p2pStatePoll ${elapsedMs.toFixed(1)}ms`);
+      }
     }
   };
   poll();

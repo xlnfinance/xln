@@ -72,3 +72,15 @@ export function buildSwapResolveDataFromOrderbookFill(
       : {}),
   };
 }
+
+export function calculateSwapTakerFeeAmount(
+  filledWantAmount: bigint,
+  takerFeeBps: number,
+): bigint {
+  if (filledWantAmount <= 0n) return 0n;
+  const normalizedBps = Number.isFinite(takerFeeBps)
+    ? Math.max(0, Math.min(10_000, Math.floor(takerFeeBps)))
+    : 0;
+  if (normalizedBps <= 0) return 0n;
+  return (filledWantAmount * BigInt(normalizedBps)) / 10_000n;
+}

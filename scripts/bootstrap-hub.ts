@@ -31,6 +31,7 @@ export type HubConfig = {
   policyVersion?: number;
   routingFeePPM?: number;
   baseFee?: bigint;
+  swapTakerFeeBps?: number;
   disputeAutoFinalizeMode?: 'auto' | 'ignore';
   minCollateralThreshold?: bigint;
   c2rWithdrawSoftLimit?: bigint;
@@ -53,6 +54,7 @@ const DEFAULT_CONFIG: HubConfig = {
   signerId: getArg('--signer', 'hub-validator'),
   seed: getArg('--seed', 'xln-main-hub-2026'),
   routingFeePPM: parseInt(getArg('--fee', '100')),
+  swapTakerFeeBps: parseInt(getArg('--swap-taker-fee-bps', '1')),
   relayUrl: getArg('--relay', 'wss://xln.finance/relay'),
   rpcUrl: getArg('--rpc', process.env.PUBLIC_RPC ?? ''),
   httpUrl: getArg('--http', process.env.PUBLIC_HTTP ?? ''),
@@ -159,6 +161,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
           ...(hubConfig.policyVersion !== undefined ? { policyVersion: hubConfig.policyVersion } : {}),
           routingFeePPM: hubConfig.routingFeePPM ?? 100,
           baseFee: hubConfig.baseFee ?? 0n,
+          swapTakerFeeBps: hubConfig.swapTakerFeeBps ?? 1,
           disputeAutoFinalizeMode: hubConfig.disputeAutoFinalizeMode ?? 'auto',
           ...(hubConfig.minCollateralThreshold !== undefined ? { minCollateralThreshold: hubConfig.minCollateralThreshold } : {}),
           ...(hubConfig.c2rWithdrawSoftLimit !== undefined ? { c2rWithdrawSoftLimit: hubConfig.c2rWithdrawSoftLimit } : {}),
@@ -183,6 +186,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
   console.log(`[BOOTSTRAP]    EntityId: ${entityId.slice(0, 16)}...`);
   console.log(`[BOOTSTRAP]    Region: ${hubConfig.region || 'global'}`);
   console.log(`[BOOTSTRAP]    Fee: ${(hubConfig.routingFeePPM ?? 100) / 10000}%`);
+  console.log(`[BOOTSTRAP]    Swap taker fee: ${(hubConfig.swapTakerFeeBps ?? 1) / 100}%`);
   console.log(`[BOOTSTRAP]    Relay: ${hubConfig.relayUrl}`);
 
   return { entityId, signerId: signerAddress };

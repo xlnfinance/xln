@@ -740,6 +740,7 @@ export type EntityTx =
         policyVersion?: number;             // Fee-policy version (auto-incremented if omitted)
         routingFeePPM?: number;             // Default: 1 (0.0001%)
         baseFee?: bigint;                   // Default: 0n
+        swapTakerFeeBps?: number;           // Default: 0 (testnet hubs may set 1)
         disputeAutoFinalizeMode?: 'auto' | 'ignore';
         minCollateralThreshold?: bigint;    // Reserved for future policy gates
         c2rWithdrawSoftLimit?: bigint;              // Hub-owned collateral keep-buffer before C→R pullback
@@ -787,6 +788,9 @@ export type EntityTx =
         offerId: string;
         fillRatio: number; // 0-65535
         cancelRemainder: boolean;
+        comment?: string;
+        feeTokenId?: number;
+        feeAmount?: bigint;
         executionGiveAmount?: bigint;
         executionWantAmount?: bigint;
       };
@@ -1493,6 +1497,9 @@ export type AccountTx =
         offerId: string;
         fillRatio: number;        // 0-65535 (uint16)
         cancelRemainder: boolean; // true = fill + cancel, false = fill + keep open
+        comment?: string;
+        feeTokenId?: number;
+        feeAmount?: bigint;
         // Optional exact execution amounts from orderbook fills.
         // Settlement uses these amounts directly.
         executionGiveAmount?: bigint;
@@ -1711,6 +1718,7 @@ export interface HubRebalanceConfig {
   policyVersion: number;            // Monotonic version for rebalance fee policy
   routingFeePPM: number;             // Routing fee in parts per million (0-10000 = 0%-1%)
   baseFee: bigint;                   // Fixed fee per routed payment (smallest unit)
+  swapTakerFeeBps?: number;          // Explicit taker swap fee in bps
   disputeAutoFinalizeMode?: 'auto' | 'ignore'; // Hub auto-dispute-finalize policy
   minCollateralThreshold?: bigint;   // Reserved for future policy gates
   c2rWithdrawSoftLimit?: bigint;             // Keep-buffer of hub-owned collateral before C→R pullback

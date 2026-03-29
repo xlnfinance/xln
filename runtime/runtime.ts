@@ -498,6 +498,8 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   if (!env.runtimeState.entityRuntimeHints) {
     env.runtimeState.entityRuntimeHints = new Map();
   }
+  trackedRuntimeEnvs.add(env);
+  ensureRuntimeWakeWatchdogStarted();
   return env.runtimeState;
 };
 
@@ -520,6 +522,30 @@ const requestRuntimeLoopWake = (env: Env): void => {
     return;
   }
   state.wakeRequested = true;
+};
+
+const waitForRuntimeLoopWake = async (env: Env): Promise<void> => {
+  const state = ensureRuntimeState(env);
+  if (state.wakeRequested) {
+    state.wakeRequested = false;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (state.wakeLoop === wake) {
+        state.wakeLoop = null;
+      }
+      resolve();
+    };
+    const wake = () => {
+      state.wakeRequested = false;
+      finish();
+    };
+    state.wakeLoop = wake;
+  });
 };
 
 const waitForRuntimeLoopWakeOrTimeout = async (env: Env, timeoutMs: number): Promise<void> => {
@@ -905,11 +931,24 @@ const hasDueEntityHooks = (env: Env): boolean => {
 };
 
 const getEarliestWallClockDueTimestamp = (env: Env): number | null => {
-  if (!env.eReplicas || env.eReplicas.size === 0) return null;
   if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return null;
   const logicalNow = getRuntimeNowMs(env);
   const wallClockNow = getWallClockMs();
   let earliestDue = Infinity;
+
+  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
+    const deferredMeta = ensureRuntimeState(env).deferredNetworkMeta;
+    for (const output of env.pendingNetworkOutputs) {
+      const retryAt = deferredMeta?.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
+      if (retryAt > logicalNow && retryAt <= wallClockNow) {
+        earliestDue = Math.min(earliestDue, retryAt);
+      }
+    }
+  }
+
+  if (!env.eReplicas || env.eReplicas.size === 0) {
+    return Number.isFinite(earliestDue) ? earliestDue : null;
+  }
 
   for (const [, replica] of env.eReplicas) {
     const crontab = replica.state?.crontabState;
@@ -938,6 +977,44 @@ const getEarliestWallClockDueTimestamp = (env: Env): number | null => {
   }
 
   return Number.isFinite(earliestDue) ? earliestDue : null;
+};
+
+const RUNTIME_WAKE_WATCHDOG_MS = 250;
+const trackedRuntimeEnvs = new Set<Env>();
+let runtimeWakeWatchdog: ReturnType<typeof setInterval> | null = null;
+const logSlowBrowserTimer = (label: string, startedAt: number, extra = ''): void => {
+  if (typeof window === 'undefined' || typeof performance === 'undefined') return;
+  const elapsedMs = performance.now() - startedAt;
+  if (elapsedMs < 32) return;
+  const suffix = extra ? ` ${extra}` : '';
+  console.warn(`[perf] slow timer ${label} ${elapsedMs.toFixed(1)}ms${suffix}`);
+};
+
+const ensureRuntimeWakeWatchdogStarted = (): void => {
+  if (runtimeWakeWatchdog) return;
+  runtimeWakeWatchdog = setInterval(() => {
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
+    const wallClockNow = getWallClockMs();
+    for (const env of trackedRuntimeEnvs) {
+      if (env.scenarioMode) continue;
+      const dueTimestamp = getEarliestWallClockDueTimestamp(env);
+      if (dueTimestamp === null || dueTimestamp > wallClockNow) continue;
+      const state = ensureRuntimeState(env);
+      const mempool = ensureRuntimeMempool(env);
+      mempool.queuedAt =
+        mempool.queuedAt === undefined
+          ? dueTimestamp
+          : Math.max(mempool.queuedAt, dueTimestamp);
+      state.clockPrimed = true;
+      generateHookPings(env, dueTimestamp, dueTimestamp);
+      if (state.loopActive) {
+        requestRuntimeLoopWake(env);
+      } else {
+        startRuntimeLoop(env);
+      }
+    }
+    logSlowBrowserTimer('runtime.wake-watchdog', startedAt, `envs=${trackedRuntimeEnvs.size}`);
+  }, RUNTIME_WAKE_WATCHDOG_MS);
 };
 
 /**
@@ -1052,10 +1129,7 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
   if (env.scenarioMode) return () => {};
   const state = ensureRuntimeState(env);
   if (state.loopActive) return state.stopLoop ?? (() => {});
-
-  const tickDelayMs = config?.tickDelayMs
-    ?? ensureRuntimeConfig(env).loopIntervalMs
-    ?? (isProductionRuntime ? 25 : 0);
+  void config;
   let running = true;
   state.loopActive = true;
 
@@ -1067,7 +1141,7 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
           if (hasRuntimeWork(env)) {
             const remainingDelayMs = getRemainingRuntimeFrameDelayMs(env);
             if (remainingDelayMs > 0) {
-              await waitForRuntimeLoopWakeOrTimeout(env, remainingDelayMs);
+              await sleep(remainingDelayMs);
               continue;
             }
             await process(env);
@@ -1092,22 +1166,14 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
         if (hasRuntimeWork(env)) {
           const remainingDelayMs = getRemainingRuntimeFrameDelayMs(env);
           if (remainingDelayMs > 0) {
-            await waitForRuntimeLoopWakeOrTimeout(env, remainingDelayMs);
+            await sleep(remainingDelayMs);
           } else {
-            // Drain chained outputs/ACKs immediately instead of paying the production idle
-            // poll delay after every intermediate hop.
+            // Drain chained outputs/ACKs immediately.
             await sleep(0);
           }
           continue;
         }
-        await waitForRuntimeLoopWakeOrTimeout(env, tickDelayMs);
-        if (!running) break;
-        if (!hasRuntimeWork(env)) {
-          const dueTimestamp = getEarliestWallClockDueTimestamp(env);
-          if (dueTimestamp !== null) {
-            generateHookPings(env, dueTimestamp, dueTimestamp);
-          }
-        }
+        await waitForRuntimeLoopWake(env);
       }
     } finally {
       if (haltedMessage) {
@@ -3385,7 +3451,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       const localEntityIds = getLocallySignableEntityIds();
       const changedLocalEntityIds = [...changedEntityIds].filter(entityId => localEntityIds.has(entityId));
       if (changedLocalEntityIds.length > 0) {
-        p2p.announceProfilesForEntities(changedLocalEntityIds, 'major-entity-change');
+        p2p.announceProfilesForEntities(changedLocalEntityIds, 'routing-profile-refresh');
       }
     }
 

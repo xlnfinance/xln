@@ -1110,6 +1110,7 @@ const run = async (): Promise<void> => {
     seed: resolvedArgs.seed,
     routingFeePPM: 1,
     baseFee: 0n,
+    swapTakerFeeBps: 1,
     disputeAutoFinalizeMode: resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
     rebalanceBaseFee: 10n ** 17n,
     rebalanceLiquidityFeeBps: 1n,

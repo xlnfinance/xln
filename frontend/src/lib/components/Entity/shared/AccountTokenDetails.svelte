@@ -65,7 +65,7 @@
     <div class="detail-list">
       <div class="detail-line">
         <span class="detail-label">delta</span>
-        <span class="detail-value">{formatTokenNumberOnly((detail.delta?.offdelta ?? 0n) + (detail.delta?.ondelta ?? 0n))}</span>
+        <span class="detail-value">{formatTokenNumberOnly(detail.derived.delta)}</span>
       </div>
       <div class="detail-line">
         <span class="detail-label">offdelta</span>

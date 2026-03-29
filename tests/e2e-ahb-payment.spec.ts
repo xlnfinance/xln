@@ -823,11 +823,25 @@ async function openPayWorkspace(page: Page): Promise<void> {
   const accountsTab = page.getByTestId('tab-accounts').first();
   await expect(accountsTab).toBeVisible({ timeout: 20_000 });
   await accountsTab.click();
-  const workspaceTabs = page.locator('nav[aria-label="Account workspace"]').first();
-  await expect(workspaceTabs).toBeVisible({ timeout: 20_000 });
-  const payTab = workspaceTabs.getByRole('button', { name: /Pay/i }).first();
-  await expect(payTab).toBeVisible({ timeout: 20_000 });
-  await payTab.click();
+  const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
+  if (await mobileToggle.isVisible().catch(() => false)) {
+    await mobileToggle.click();
+  }
+  const candidateLocators = [
+    page.getByTestId('account-workspace-tab-pay'),
+    page.locator('.workspace-rail').getByRole('button', { name: /^Pay$/i }),
+  ];
+  for (const locator of candidateLocators) {
+    const count = await locator.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      const payTab = locator.nth(index);
+      if (await payTab.isVisible().catch(() => false)) {
+        await payTab.click();
+        return;
+      }
+    }
+  }
+  throw new Error('visible Pay workspace tab not found');
 }
 
 async function chooseVisibleRoute(page: Page, route: string[]): Promise<void> {
