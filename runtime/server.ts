@@ -231,6 +231,51 @@ const withStartupStepTimeout = async <T>(label: string, work: Promise<T>, timeou
   }
 };
 
+const fetchRpcCode = async (
+  rpcUrl: string,
+  address: string,
+  timeoutMs = Math.min(STARTUP_STEP_TIMEOUT_MS, 10_000),
+): Promise<string> => {
+  if (!ethers.isAddress(address)) {
+    throw new Error(`INVALID_PREDEPLOYED_ADDRESS:${String(address)}`);
+  }
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_getCode',
+        params: [address, 'latest'],
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`ETH_GET_CODE_HTTP_${response.status}`);
+    }
+
+    const body = await response.json() as { result?: unknown; error?: { message?: string } };
+    if (body.error) {
+      throw new Error(`ETH_GET_CODE_RPC:${body.error.message || 'unknown'}`);
+    }
+    if (typeof body.result !== 'string') {
+      throw new Error('ETH_GET_CODE_INVALID_RESULT');
+    }
+    return body.result;
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') {
+      throw new Error(`ETH_GET_CODE_TIMEOUT:${address}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+};
+
 const isServerBootInProgress = (): boolean =>
   serverBootPhase === 'starting' || serverBootPhase === 'runtime' || serverBootPhase === 'bootstrap';
 
@@ -5190,13 +5235,13 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
     if (fromReplica?.depositoryAddress && fromReplica?.entityProviderAddress) {
       console.log('[XLN] Pre-checking predeployed contract code...');
-      const probeProvider = new ethers.JsonRpcProvider(anvilRpc);
       const [depositoryCode, entityProviderCode] = await withStartupStepTimeout(
         'precheckPredeployedCode',
-        Promise.all([
-          probeProvider.getCode(fromReplica.depositoryAddress),
-          probeProvider.getCode(fromReplica.entityProviderAddress),
-        ]),
+        (async () => {
+          const depCode = await fetchRpcCode(anvilRpc, fromReplica.depositoryAddress);
+          const entityProviderCode = await fetchRpcCode(anvilRpc, fromReplica.entityProviderAddress);
+          return [depCode, entityProviderCode] as const;
+        })(),
       );
       console.log('[XLN] Predeployed contract code pre-check complete');
       if (depositoryCode === '0x' || entityProviderCode === '0x') {
